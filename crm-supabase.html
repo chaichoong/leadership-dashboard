@@ -42,6 +42,20 @@
     .pill.company{background:#E7EDF6;color:#3560A8;}
     .pill.active{background:var(--success-bg);color:var(--success);}
     .pill.suspended{background:var(--warning-bg);color:var(--warning);}
+    .pill.cancelled{background:var(--danger-bg);color:var(--danger);}
+    /* Client record detail */
+    .cl-sec{margin-top:16px;padding-top:14px;border-top:1px solid var(--border-subtle);}
+    .cl-h{font-size:11px;letter-spacing:.05em;text-transform:uppercase;color:var(--text-muted);font-weight:700;margin-bottom:8px;}
+    .cl-plan{font-size:14px;font-weight:600;color:var(--text-primary);}
+    .modal .cl-toggle{display:flex;align-items:center;gap:9px;padding:9px 11px;border:1px solid var(--border-subtle);
+               border-radius:var(--radius-md);margin:0 0 7px;font-size:14px;font-weight:500;cursor:pointer;
+               background:var(--bg-surface);color:var(--text-primary);}
+    .modal .cl-toggle:hover{background:var(--bg-surface-2);}
+    .modal .cl-toggle input{width:16px;height:16px;min-width:16px;flex:0 0 16px;padding:0;border-radius:3px;
+               cursor:pointer;accent-color:var(--accent);}
+    .modal .cl-toggle .price{margin-left:auto;font-size:12px;color:var(--text-muted);font-weight:400;}
+    .cl-link{color:var(--accent);font-weight:600;font-size:14px;text-decoration:none;}
+    .cl-link:hover{text-decoration:underline;}
     .btn.sm{padding:5px 11px;font-size:12.5px;}
     .btn.warn{background:var(--warning,#B8933A);}
     tr.clickable:hover td{background:var(--bg-surface-2);cursor:pointer;}
@@ -505,16 +519,62 @@
       el.querySelectorAll('button[data-act]').forEach(b => b.onclick = e => { e.stopPropagation(); clientAction(b.dataset.act, b.dataset.id, b.dataset.name); });
       el.querySelectorAll('tr[data-client]').forEach(r => r.onclick = () => openClientDetail(state.clients.find(c=>c.id===r.dataset.client)));
     }
-    function openClientDetail(c){
+    // Bolt-on packs (pricing page) → org_modules add-on keys.
+    const ADDON_PACKS = [
+      { key:'finance',         label:'Finance & Cash Flow' },
+      { key:'inbound_comms',   label:'Inbound Comms' },
+      { key:'content_machine', label:'Content Machine' },
+      { key:'personal_wealth', label:'Personal Wealth' },
+      { key:'property',        label:'Property Management' },
+    ];
+    let _clientDetail = null;
+    async function openClientDetail(c){
       if(!c) return;
+      _clientDetail = c;
       document.getElementById('clTitle').textContent = c.name;
-      const suspended = c.status === 'suspended';
+      const st = c.status || 'active';
+      const label = st==='suspended'?'Suspended':st==='cancelled'?'Cancelled':'Active';
+      const signed = c.created_at ? new Date(c.created_at).toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric'}) : '—';
       document.getElementById('clSub').innerHTML =
-        `${esc(c.owner_email||'—')} · <span class="pill ${suspended?'suspended':'active'}">${suspended?'Suspended':'Active'}</span> · ${esc(c.plan||'base')} plan`;
-      document.getElementById('clBody').innerHTML =
-        '<div class="ans-title" style="font-size:13px;font-weight:700;margin-bottom:8px">📋 Onboarding answers</div>'
-        + answersHtml(submissionForEmail(c.owner_email));
+        `<span class="pill ${esc(st)}">${label}</span> · Signed up ${esc(signed)}`;
+      const contact = (state.contacts||[]).find(x => (x.email||'').trim().toLowerCase() === (c.owner_email||'').trim().toLowerCase());
+      document.getElementById('clBody').innerHTML = `
+        <div class="cl-sec" style="border-top:0;padding-top:0">
+          <div class="cl-h">Service</div>
+          <div class="cl-plan">✓ Operations Director Base <span class="muted" style="font-weight:400">— £350/mo</span></div>
+        </div>
+        <div class="cl-sec">
+          <div class="cl-h">Bolt-on packs <span class="muted" style="font-weight:400;text-transform:none;letter-spacing:0">— tick to add, £100/mo each</span></div>
+          <div id="clModules"><div class="ans-empty">Loading packs…</div></div>
+        </div>
+        <div class="cl-sec">
+          ${contact ? '<a href="#" id="clContactLink" class="cl-link">View contact record →</a>'
+                    : '<span class="muted" style="font-size:13px">No linked contact record.</span>'}
+        </div>`;
+      if(contact) document.getElementById('clContactLink').onclick = e => { e.preventDefault(); closeModal('clientOverlay'); openContact(contact); };
       openModal('clientOverlay');
+      try {
+        const out = await callManage({ action:'get_modules', org_id:c.id });
+        renderClientModules(out.modules || []);
+      } catch(e){
+        const el = document.getElementById('clModules');
+        if(el) el.innerHTML = '<div class="ans-empty">Couldn\'t load packs: '+esc(e.message)+'</div>';
+      }
+    }
+    function renderClientModules(mods){
+      const on = {}; (mods||[]).forEach(m => on[m.module_key] = m.enabled);
+      const el = document.getElementById('clModules'); if(!el) return;
+      el.innerHTML = ADDON_PACKS.map(p =>
+        `<label class="cl-toggle"><input type="checkbox" data-mod="${p.key}" ${on[p.key]?'checked':''}>
+           <span>${esc(p.label)}</span><span class="price">£100/mo</span></label>`).join('');
+      el.querySelectorAll('input[data-mod]').forEach(inp => inp.onchange = async () => {
+        inp.disabled = true;
+        try {
+          await callManage({ action:'set_module', org_id:_clientDetail.id, module_key:inp.dataset.mod, enabled:inp.checked });
+          toast(inp.checked ? 'Pack added' : 'Pack removed');
+        } catch(e){ toast('Error: '+e.message); inp.checked = !inp.checked; }
+        inp.disabled = false;
+      });
     }
     async function clientAction(act, id, name){
       if(act === 'delete'){ openDeleteModal(id, name); return; }
