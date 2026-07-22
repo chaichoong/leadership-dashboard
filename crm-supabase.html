@@ -44,6 +44,19 @@
     .pill.suspended{background:var(--warning-bg);color:var(--warning);}
     .btn.sm{padding:5px 11px;font-size:12.5px;}
     .btn.warn{background:var(--warning,#B8933A);}
+    tr.clickable:hover td{background:var(--bg-surface-2);cursor:pointer;}
+    /* Onboarding answers panel */
+    .ans-wrap{margin-top:6px;}
+    .ans-meta{font-size:11px;color:var(--text-muted);margin-bottom:10px;}
+    .ans-sec{margin-bottom:14px;}
+    .ans-h{font-size:11px;letter-spacing:.05em;text-transform:uppercase;color:var(--text-muted);
+           font-weight:700;margin-bottom:6px;border-bottom:1px solid var(--border-subtle);padding-bottom:4px;}
+    .ans-row{display:flex;gap:12px;padding:3px 0;font-size:13px;align-items:baseline;}
+    .ans-l{flex:0 0 132px;color:var(--text-secondary);font-weight:600;}
+    .ans-v{flex:1;color:var(--text-primary);word-break:break-word;white-space:pre-wrap;}
+    .ans-empty{padding:10px 0;color:var(--text-muted);font-size:13px;}
+    .ans-block{border-top:1px solid var(--border-subtle);margin-top:16px;padding-top:12px;}
+    .ans-block>.ans-title{font-size:13px;font-weight:700;margin-bottom:8px;display:flex;align-items:center;gap:6px;}
     .muted{color:var(--text-muted);}
     .empty{padding:48px;text-align:center;color:var(--text-muted);background:var(--bg-surface);
            border:1px dashed var(--border-default);border-radius:12px;}
@@ -124,6 +137,10 @@
         <div><label>Phone</label><input id="cPhone"></div>
       </div>
       <label>Notes</label><textarea id="cNotes"></textarea>
+      <div id="cAnswers" class="ans-block" style="display:none">
+        <div class="ans-title">📋 Onboarding answers</div>
+        <div id="cAnswersBody"></div>
+      </div>
       <div class="modal-actions">
         <button class="btn" id="cSave">Save</button>
         <button class="btn ghost" onclick="closeModal('contactOverlay')">Cancel</button>
@@ -200,6 +217,18 @@
     </div>
   </div>
 
+  <!-- Client detail modal (profile + onboarding answers) -->
+  <div class="overlay" id="clientOverlay">
+    <div class="modal">
+      <h2 id="clTitle" style="margin-bottom:2px"></h2>
+      <div id="clSub" class="muted" style="font-size:13px;margin-bottom:14px"></div>
+      <div id="clBody"></div>
+      <div class="modal-actions">
+        <button class="btn ghost" onclick="closeModal('clientOverlay')">Close</button>
+      </div>
+    </div>
+  </div>
+
   <div class="toast" id="toast"></div>
 
   <script>
@@ -211,20 +240,50 @@
     const gbp = n => (n==null||n==='')?'':'£'+Number(n).toLocaleString('en-GB',{minimumFractionDigits:0,maximumFractionDigits:2});
     let _sess=null;
     function toast(m){const t=document.getElementById('toast');t.textContent=m;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),2200);}
+
+    // ── Onboarding answers (from onboarding_submissions, matched by email) ──────
+    function submissionForEmail(email){
+      if(!email) return null;
+      const e = String(email).trim().toLowerCase();
+      return (state.submissions||[]).find(s => (s.email||'').trim().toLowerCase() === e) || null;
+    }
+    function answersHtml(sub){
+      if(!sub) return '<div class="ans-empty">No onboarding form on file for this record.</div>';
+      const a = sub.answers || {};
+      const g = o => (o && typeof o === 'object') ? o : {};
+      const money = v => (v==null||v==='') ? '' : '£'+Number(v).toLocaleString('en-GB');
+      const row = (l,v) => v ? `<div class="ans-row"><span class="ans-l">${esc(l)}</span><span class="ans-v">${esc(v)}</span></div>` : '';
+      const sec = (title,inner) => inner.trim() ? `<div class="ans-sec"><div class="ans-h">${esc(title)}</div>${inner}</div>` : '';
+      const id=g(a.identity), biz=g(a.business), loc=g(a.location), team=g(a.team), mon=g(a.money), tg=g(a.targets), con=g(a.contact);
+      const members = Array.isArray(team.members) ? team.members : [];
+      const teamHtml = members.map(m => row(m.name||'(unnamed)', [m.role,m.type,m.email].filter(Boolean).join(' · '))).join('');
+      const submitted = sub.created_at ? new Date(sub.created_at).toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric'}) : '';
+      return `<div class="ans-wrap">
+        <div class="ans-meta">Submitted ${esc(submitted)}${sub.email?' · '+esc(sub.email):''}</div>
+        ${sec('You & business', row('Your name', id.your_name)+row('Role', id.role)+row('Business', biz.name)+row('What they do', biz.pitch)+row('Other businesses', biz.other_businesses))}
+        ${sec('Location', row('Country', loc.country)+row('Currency', loc.currency))}
+        ${sec('Team', (team.right_hand?row('Right-hand', team.right_hand):'')+teamHtml)}
+        ${sec('Money', row('Bank accounts', mon.bank_accounts)+row('Biggest costs', mon.biggest_costs)+row('Income shape', mon.income_shape))}
+        ${sec('Targets & guardrails', row('Revenue target', money(tg.revenue_target))+row('Profit target', money(tg.profit_target))+row('Owner pay (min)', money(tg.owner_pay_min))+row('Account floor', money(tg.account_floor))+row('Act below', money(tg.act_below))+row('Ask above', money(tg.ask_above)))}
+        ${sec('Contact', row('Email', con.email||sub.email)+row('Phone', con.phone||sub.phone))}
+      </div>`;
+    }
     async function ensureSession(){ if(_sess===null){ const {data}=await sb.auth.getSession(); _sess=data.session||false; } return _sess; }
 
-    const state = { pipeline:null, stages:[], deals:[], contacts:[], clients:null };
+    const state = { pipeline:null, stages:[], deals:[], contacts:[], clients:null, submissions:[] };
 
     async function loadAll(){
       const sess = await ensureSession();
       if(!sess){ document.getElementById('loginNote').style.display='block'; return; }
-      // pipeline (first), stages, deals, contacts — RLS scopes to the caller's workspace
-      const [{data:pipes}, {data:contacts}] = await Promise.all([
+      // pipeline (first), stages, deals, contacts, onboarding submissions — RLS scopes to the caller's workspace
+      const [{data:pipes}, {data:contacts}, {data:subs}] = await Promise.all([
         sb.from('crm_pipelines').select('*').order('sort_order').limit(1),
-        sb.from('crm_contacts').select('*').order('name')
+        sb.from('crm_contacts').select('*').order('name'),
+        sb.from('onboarding_submissions').select('*').order('created_at',{ascending:false})
       ]);
       state.pipeline = (pipes&&pipes[0])||null;
       state.contacts = contacts||[];
+      state.submissions = subs||[];
       if(state.pipeline){
         const [{data:stages},{data:deals}] = await Promise.all([
           sb.from('crm_stages').select('*').eq('pipeline_id',state.pipeline.id).order('sort_order'),
@@ -264,6 +323,11 @@
       document.getElementById('cPhone').value = c?(c.phone||''):'';
       document.getElementById('cNotes').value = c?(c.notes||''):'';
       document.getElementById('cDelete').style.display = c?'inline-block':'none';
+      // Onboarding answers (read-only) if this contact submitted the form
+      const sub = c ? submissionForEmail(c.email) : null;
+      const ansWrap = document.getElementById('cAnswers');
+      if(sub){ document.getElementById('cAnswersBody').innerHTML = answersHtml(sub); ansWrap.style.display=''; }
+      else { ansWrap.style.display='none'; }
       openModal('contactOverlay');
     }
     document.getElementById('cSave').onclick = async () => {
@@ -429,7 +493,7 @@
             ? `<button class="btn ghost sm" data-act="restore" data-id="${c.id}">Restore</button>
                <button class="btn danger sm" data-act="delete" data-id="${c.id}" data-name="${esc(c.name)}">Delete permanently</button>`
             : `<button class="btn warn sm" data-act="suspend" data-id="${c.id}" data-name="${esc(c.name)}">Suspend</button>`;
-          return `<tr>
+          return `<tr class="clickable" data-client="${c.id}">
             <td><b>${esc(c.name)}</b></td>
             <td>${esc(c.owner_email)||'<span class="muted">—</span>'}</td>
             <td><span class="pill">${esc(c.plan||'base')}</span></td>
@@ -437,7 +501,20 @@
             <td class="muted">${fmtDate(c.created_at)}</td>
             <td style="white-space:nowrap">${actions}</td></tr>`; }).join('')
         + '</tbody></table>';
-      el.querySelectorAll('button[data-act]').forEach(b => b.onclick = () => clientAction(b.dataset.act, b.dataset.id, b.dataset.name));
+      // action buttons (stop the row click), and row click → detail
+      el.querySelectorAll('button[data-act]').forEach(b => b.onclick = e => { e.stopPropagation(); clientAction(b.dataset.act, b.dataset.id, b.dataset.name); });
+      el.querySelectorAll('tr[data-client]').forEach(r => r.onclick = () => openClientDetail(state.clients.find(c=>c.id===r.dataset.client)));
+    }
+    function openClientDetail(c){
+      if(!c) return;
+      document.getElementById('clTitle').textContent = c.name;
+      const suspended = c.status === 'suspended';
+      document.getElementById('clSub').innerHTML =
+        `${esc(c.owner_email||'—')} · <span class="pill ${suspended?'suspended':'active'}">${suspended?'Suspended':'Active'}</span> · ${esc(c.plan||'base')} plan`;
+      document.getElementById('clBody').innerHTML =
+        '<div class="ans-title" style="font-size:13px;font-weight:700;margin-bottom:8px">📋 Onboarding answers</div>'
+        + answersHtml(submissionForEmail(c.owner_email));
+      openModal('clientOverlay');
     }
     async function clientAction(act, id, name){
       if(act === 'delete'){ openDeleteModal(id, name); return; }
