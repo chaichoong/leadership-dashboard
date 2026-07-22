@@ -5,13 +5,18 @@
 // see/act across client workspaces that RLS would otherwise hide from the caller.
 //
 // Actions (body.action):
-//   list     → every client workspace (all orgs except the caller's own) + status,
-//              owner email, member count.
-//   suspend  → suspend_workspace() (access off, data kept) AND mark the client's
-//              CRM deal "Lost — Cancelled" + archive the contact.
-//   restore  → restore_workspace() AND re-open the CRM deal (Won) + un-archive.
-//   delete   → PERMANENT: only if the workspace is already suspended, calls
-//              delete_workspace(). The CRM deal stays Lost/Cancelled (history).
+//   list        → every client workspace (all orgs except the caller's own) +
+//                 status, owner email, member count.
+//   suspend     → suspend_workspace() — TEMPORARY hold (login off, data kept).
+//                 No CRM change: they are a live client on pause.
+//   cancel      → cancel_workspace() — CHURNED (login off, data kept) AND mark the
+//                 client's CRM deal "Lost — Cancelled" + archive the contact.
+//   restore     → restore_workspace() — reactivate (from suspended OR cancelled),
+//                 lift the login ban, re-open the CRM deal (Won) + un-archive.
+//   delete      → PERMANENT: only if suspended OR cancelled; calls
+//                 delete_workspace(). The CRM deal stays Lost/Cancelled (history).
+//   get_modules → the client's bolt-on pack entitlements (org_modules).
+//   set_module  → turn a £100/mo bolt-on pack on/off for the client.
 //
 // The CRM writes target the CALLER'S own workspace (their sales pipeline), matched
 // to the client by the workspace owner's email. Never echoes another workspace's
@@ -89,12 +94,18 @@ Deno.serve(async (req) => {
       return { pipelineId: pipe.id, id: s?.id ?? null }
     }
 
-    // ── suspend ───────────────────────────────────────────────────────────────
+    // ── suspend — TEMPORARY hold. Login off, data kept, NO CRM change ──────────
     if (action === 'suspend') {
       const { error } = await admin.rpc('suspend_workspace', { p_org: orgId })
       if (error) return json({ error: error.message }, 500)
+      return json({ ok: true })
+    }
 
-      // CRM: mark the client's deal "Lost — Cancelled", archive the contact.
+    // ── cancel — CHURNED. Login off, data kept, deal → Lost — Cancelled ─────────
+    if (action === 'cancel') {
+      const { error } = await admin.rpc('cancel_workspace', { p_org: orgId })
+      if (error) return json({ error: error.message }, 500)
+
       const email = await ownerEmailOf()
       if (email) {
         const { data: contacts } = await admin.from('crm_contacts')
@@ -122,7 +133,7 @@ Deno.serve(async (req) => {
       return json({ ok: true })
     }
 
-    // ── restore ────────────────────────────────────────────────────────────────
+    // ── restore / reactivate — back to active, lift ban, re-open the deal ───────
     if (action === 'restore') {
       const { error } = await admin.rpc('restore_workspace', { p_org: orgId })
       if (error) return json({ error: error.message }, 500)
@@ -159,8 +170,8 @@ Deno.serve(async (req) => {
       const { data: org } = await admin.from('organizations')
         .select('status').eq('id', orgId).maybeSingle()
       if (!org) return json({ error: 'Workspace not found.' }, 404)
-      if (org.status !== 'suspended') {
-        return json({ error: 'Suspend the client first — only a suspended workspace can be permanently deleted.' }, 400)
+      if (org.status !== 'suspended' && org.status !== 'cancelled') {
+        return json({ error: 'Suspend or cancel the client first — an active workspace cannot be permanently deleted.' }, 400)
       }
       const { error } = await admin.rpc('delete_workspace', { p_org: orgId, p_delete_users: true })
       if (error) return json({ error: error.message }, 500)
