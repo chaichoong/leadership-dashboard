@@ -385,7 +385,7 @@
     document.getElementById('addBtn').onclick = () => currentTab==='contacts' ? openContact(null) : openDeal(null);
     // Copy the public onboarding form link (send it to a client who just signed up).
     document.getElementById('copyOnboarding').onclick = async () => {
-      const link = new URL('onboarding.html', location.href).href;
+      const link = 'https://app.operationsdirector.co.uk/onboarding';  // clean Vercel route
       try { await navigator.clipboard.writeText(link); toast('Onboarding link copied'); }
       catch(_e){ window.prompt('Copy the onboarding form link:', link); }
     };
