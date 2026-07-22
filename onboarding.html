@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="robots" content="noindex, nofollow">
+  <title>Welcome — set up your Operations Director account</title>
+  <link rel="stylesheet" href="css/tokens.css?v=1">
+  <style>
+    *{box-sizing:border-box;}
+    body{margin:0;background:var(--bg-app);color:var(--text-primary);
+         font-family:var(--font-family-base,'DM Sans',system-ui,sans-serif);line-height:1.5;}
+    .page{max-width:720px;margin:0 auto;padding:var(--space-6) var(--space-5) 64px;}
+    .head{text-align:center;padding:var(--space-8) 0 var(--space-6);}
+    .head .mark{font-size:13px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;
+                color:var(--accent);}
+    .head h1{font-size:28px;margin:var(--space-3) 0 var(--space-2);font-weight:700;}
+    .head p{color:var(--text-secondary);font-size:15px;margin:0 auto;max-width:520px;}
+    .card{background:var(--bg-surface);border:1px solid var(--border-default);
+          border-radius:var(--radius-lg);padding:var(--space-5) var(--space-5) var(--space-4);
+          margin-bottom:var(--space-4);box-shadow:var(--shadow-sm,0 1px 2px rgba(0,0,0,.04));}
+    .card h2{font-size:16px;margin:0 0 4px;font-weight:700;display:flex;align-items:center;gap:8px;}
+    .card .desc{color:var(--text-muted);font-size:13px;margin:0 0 var(--space-4);}
+    .field{margin-bottom:var(--space-4);}
+    .field:last-child{margin-bottom:0;}
+    label{display:block;font-size:13px;font-weight:600;margin-bottom:6px;color:var(--text-secondary);}
+    label .req{color:var(--danger);}
+    .hint{font-weight:400;color:var(--text-muted);font-size:12px;margin-left:4px;}
+    input,select,textarea{width:100%;padding:10px 12px;border:1px solid var(--border-default);
+      border-radius:var(--radius-md);font-size:14px;font-family:inherit;background:var(--bg-app);
+      color:var(--text-primary);transition:border-color .12s,box-shadow .12s;}
+    input:focus,select:focus,textarea:focus{outline:none;border-color:var(--accent);
+      box-shadow:0 0 0 3px var(--accent-soft);}
+    input.err,select.err,textarea.err{border-color:var(--danger);background:var(--danger-bg);}
+    textarea{resize:vertical;min-height:64px;}
+    .err-msg{color:var(--danger);font-size:12px;margin-top:5px;display:none;}
+    .err-msg.show{display:block;}
+    .row{display:flex;gap:var(--space-4);flex-wrap:wrap;}
+    .row>.field{flex:1;min-width:180px;margin-bottom:var(--space-4);}
+    .prefix{position:relative;}
+    .prefix input{padding-left:26px;}
+    .prefix .sym{position:absolute;left:11px;top:50%;transform:translateY(-50%);
+                 color:var(--text-muted);font-size:14px;pointer-events:none;}
+    /* team rows */
+    .team-row{border:1px solid var(--border-subtle);border-radius:var(--radius-md);
+              padding:var(--space-3);margin-bottom:var(--space-3);background:var(--bg-surface-2);position:relative;}
+    .team-row .rm{position:absolute;top:8px;right:8px;background:none;border:0;cursor:pointer;
+                  color:var(--text-muted);font-size:18px;line-height:1;padding:2px 6px;border-radius:6px;}
+    .team-row .rm:hover{background:var(--danger-bg);color:var(--danger);}
+    .btn{background:var(--accent);color:#fff;border:0;padding:11px 18px;border-radius:var(--radius-md);
+         font-weight:600;font-size:14px;cursor:pointer;font-family:inherit;}
+    .btn:hover{background:var(--accent-hover);}
+    .btn:disabled{opacity:.6;cursor:default;}
+    .btn.ghost{background:var(--bg-surface);color:var(--text-primary);border:1px solid var(--border-default);
+               padding:8px 14px;font-size:13px;}
+    .btn.ghost:hover{background:var(--bg-surface-2);}
+    .submit-row{margin-top:var(--space-5);display:flex;align-items:center;gap:var(--space-4);}
+    .submit-note{color:var(--text-muted);font-size:12px;}
+    .form-error{background:var(--danger-bg);border:1px solid var(--danger);color:var(--danger);
+                border-radius:var(--radius-md);padding:11px 14px;font-size:13px;margin-top:var(--space-4);
+                display:none;}
+    .form-error.show{display:block;}
+    /* honeypot — hidden from humans, present for bots */
+    .hp{position:absolute;left:-9999px;width:1px;height:1px;overflow:hidden;}
+    /* success */
+    .done{display:none;text-align:center;background:var(--bg-surface);border:1px solid var(--accent);
+          border-radius:var(--radius-lg);padding:48px var(--space-5);box-shadow:var(--shadow-md);}
+    .done.show{display:block;}
+    .done .tick{width:56px;height:56px;border-radius:50%;background:var(--success-bg);color:var(--success);
+                display:flex;align-items:center;justify-content:center;font-size:28px;margin:0 auto var(--space-4);}
+    .done h2{margin:0 0 8px;font-size:22px;}
+    .done p{color:var(--text-secondary);max-width:440px;margin:0 auto;font-size:15px;}
+    @media (max-width:560px){ .page{padding:var(--space-4) var(--space-3) 56px;} .head h1{font-size:23px;} }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <div class="head">
+      <div class="mark">Operations Director</div>
+      <h1>Let's set up your account</h1>
+      <p>A few questions so we can build your workspace around your business. Takes about 10 minutes — there are no wrong answers, and we'll refine the detail together later.</p>
+    </div>
+
+    <form id="obForm" novalidate>
+      <!-- honeypot -->
+      <div class="hp" aria-hidden="true"><label>Leave this empty<input type="text" id="website" name="website" tabindex="-1" autocomplete="off"></label></div>
+
+      <!-- 1. You & your business -->
+      <div class="card">
+        <h2>👤 You &amp; your business</h2>
+        <p class="desc">The basics we'll use across your dashboard and AI assistant.</p>
+        <div class="row">
+          <div class="field"><label>Your name <span class="req">*</span></label>
+            <input id="yourName" required><div class="err-msg" data-for="yourName">Please tell us your name.</div></div>
+          <div class="field"><label>Your role / title</label>
+            <input id="role" placeholder="e.g. Founder, MD"></div>
+        </div>
+        <div class="field"><label>Business name <span class="req">*</span></label>
+          <input id="bizName" required placeholder="Your main business"><div class="err-msg" data-for="bizName">Please tell us your business name.</div></div>
+        <div class="field"><label>What does the business do? <span class="hint">one sentence — what you sell and who to</span></label>
+          <textarea id="pitch" placeholder="e.g. We manage residential rental property for private landlords across the North West."></textarea></div>
+        <div class="field"><label>Other businesses you run <span class="hint">one per line: name — what it does — rough turnover</span></label>
+          <textarea id="otherBiz" placeholder="e.g. Runpreneur — coaching for founders — ~£60k/yr"></textarea></div>
+      </div>
+
+      <!-- 2. Where you're based -->
+      <div class="card">
+        <h2>🌍 Where you're based</h2>
+        <p class="desc">Sets your dates, number and currency formatting everywhere.</p>
+        <div class="row">
+          <div class="field"><label>Country / base</label><input id="country" value="United Kingdom"></div>
+          <div class="field"><label>Currency</label>
+            <select id="currency">
+              <option value="GBP" selected>GBP — £ (British Pound)</option>
+              <option value="EUR">EUR — € (Euro)</option>
+              <option value="USD">USD — $ (US Dollar)</option>
+              <option value="AUD">AUD — $ (Australian Dollar)</option>
+              <option value="CAD">CAD — $ (Canadian Dollar)</option>
+            </select></div>
+        </div>
+      </div>
+
+      <!-- 3. Your team -->
+      <div class="card">
+        <h2>👥 Your team</h2>
+        <p class="desc">Anyone who works in or on the business. We'll set up their access and task assignments. Leave blank if it's just you.</p>
+        <div id="teamRows"></div>
+        <button type="button" class="btn ghost" id="addTeam">+ Add a team member</button>
+        <div class="field" style="margin-top:var(--space-4)"><label>Who's your right-hand person? <span class="hint">kept in the loop on everything</span></label>
+          <input id="rightHand" placeholder="Name (or leave blank if it's just you)"></div>
+      </div>
+
+      <!-- 4. Money basics -->
+      <div class="card">
+        <h2>💷 Money basics</h2>
+        <p class="desc">Just enough to stand up your cash view — the bank feed fills in the rest.</p>
+        <div class="field"><label>Which bank account(s) do you run the business from day to day? <span class="hint">names only, no numbers</span></label>
+          <input id="banks" placeholder="e.g. Santander Business, Zempler"></div>
+        <div class="field"><label>Your three biggest costs</label>
+          <input id="bigCosts" placeholder="e.g. wages, rent, subcontractors"></div>
+        <div class="field"><label>What income repeats every month vs varies? <span class="hint">retainers/rent vs one-off jobs</span></label>
+          <textarea id="incomeShape" placeholder="e.g. £8k rent comes in monthly; project fees vary £2–10k."></textarea></div>
+      </div>
+
+      <!-- 5. Targets & guardrails -->
+      <div class="card">
+        <h2>🎯 Targets &amp; guardrails</h2>
+        <p class="desc">Powers your KPIs and the "safe to spend" traffic light. Rough figures are fine.</p>
+        <div class="row">
+          <div class="field"><label>Monthly revenue target</label>
+            <div class="prefix"><span class="sym">£</span><input id="revTarget" type="number" min="0" step="100" placeholder="35000"></div></div>
+          <div class="field"><label>Monthly profit target</label>
+            <div class="prefix"><span class="sym">£</span><input id="profitTarget" type="number" min="0" step="100" placeholder="5000"></div></div>
+        </div>
+        <div class="row">
+          <div class="field"><label>Minimum you pay yourself / month</label>
+            <div class="prefix"><span class="sym">£</span><input id="ownerPay" type="number" min="0" step="50" placeholder="1500"></div></div>
+          <div class="field"><label>Lowest your main account should ever go</label>
+            <div class="prefix"><span class="sym">£</span><input id="floor" type="number" min="0" step="50" placeholder="500"></div></div>
+        </div>
+        <div class="row">
+          <div class="field"><label>Just act on spends below <span class="hint">no need to ask you</span></label>
+            <div class="prefix"><span class="sym">£</span><input id="actBelow" type="number" min="0" step="10" placeholder="50"></div></div>
+          <div class="field"><label>Always ask you above</label>
+            <div class="prefix"><span class="sym">£</span><input id="askAbove" type="number" min="0" step="10" placeholder="250"></div></div>
+        </div>
+      </div>
+
+      <!-- 6. How we reach you -->
+      <div class="card">
+        <h2>✉️ How we reach you</h2>
+        <p class="desc">We'll send your secure login link here and use this to set up your account.</p>
+        <div class="row">
+          <div class="field"><label>Best email <span class="req">*</span></label>
+            <input id="email" type="email" required placeholder="you@yourcompany.com"><div class="err-msg" data-for="email">Please enter a valid email address.</div></div>
+          <div class="field"><label>Phone</label><input id="phone" type="tel" placeholder="Optional"></div>
+        </div>
+      </div>
+
+      <div class="form-error" id="formError"></div>
+      <div class="submit-row">
+        <button type="submit" class="btn" id="submitBtn">Submit &amp; set up my account</button>
+        <span class="submit-note">We'll never share your details.</span>
+      </div>
+    </form>
+
+    <!-- success -->
+    <div class="done" id="done">
+      <div class="tick">✓</div>
+      <h2>Thank you — we've got everything we need</h2>
+      <p>Your Operations Director account is being set up. Keep an eye on your inbox for a secure link to sign in and see your workspace. Welcome aboard.</p>
+    </div>
+  </div>
+
+  <script>
+    // Public project URL + anon key (same public values shipped in crm-supabase.html).
+    const SB_URL = 'https://ptkyhzlsvijcwyovgrgv.supabase.co';
+    const SB_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InB0a3loemxzdmlqY3d5b3Zncmd2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzYzMzIxNzgsImV4cCI6MjA5MTkwODE3OH0.U5ZdIjw--_UgJlYi75JTjpb2doBTjO4W8LUZPnZzkFU';
+    const FN_URL = SB_URL + '/functions/v1/onboarding-submit';
+
+    const $ = id => document.getElementById(id);
+    const val = id => ($(id) ? $(id).value.trim() : '');
+    const numOrNull = id => { const v = val(id); return v === '' ? null : Number(v); };
+
+    // ── Team rows (repeatable) ──────────────────────────────────────────────
+    const teamRows = $('teamRows');
+    function addTeamRow(){
+      const row = document.createElement('div');
+      row.className = 'team-row';
+      row.innerHTML =
+        '<button type="button" class="rm" title="Remove" aria-label="Remove team member">×</button>'
+        + '<div class="row">'
+        + '  <div class="field"><label>Name</label><input class="tm-name"></div>'
+        + '  <div class="field"><label>Email</label><input class="tm-email" type="email"></div>'
+        + '</div>'
+        + '<div class="row">'
+        + '  <div class="field"><label>What they do</label><input class="tm-role" placeholder="e.g. bookkeeping"></div>'
+        + '  <div class="field"><label>Type</label><select class="tm-type">'
+        + '     <option value="staff">Staff</option><option value="va">VA</option>'
+        + '     <option value="contractor">Contractor</option></select></div>'
+        + '</div>';
+      row.querySelector('.rm').onclick = () => row.remove();
+      teamRows.appendChild(row);
+    }
+    $('addTeam').onclick = addTeamRow;
+
+    function collectTeam(){
+      return Array.from(teamRows.querySelectorAll('.team-row')).map(r => ({
+        name: r.querySelector('.tm-name').value.trim(),
+        email: r.querySelector('.tm-email').value.trim(),
+        role: r.querySelector('.tm-role').value.trim(),
+        type: r.querySelector('.tm-type').value,
+      })).filter(m => m.name || m.email || m.role);
+    }
+
+    // ── Validation ──────────────────────────────────────────────────────────
+    const emailRe = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    function setErr(id, on){
+      const f = $(id); if(!f) return;
+      f.classList.toggle('err', on);
+      const m = document.querySelector('.err-msg[data-for="'+id+'"]');
+      if(m) m.classList.toggle('show', on);
+    }
+    function validate(){
+      let ok = true;
+      if(!val('yourName')){ setErr('yourName', true); ok = false; } else setErr('yourName', false);
+      if(!val('bizName')){ setErr('bizName', true); ok = false; } else setErr('bizName', false);
+      const email = val('email');
+      if(!email || !emailRe.test(email)){ setErr('email', true); ok = false; } else setErr('email', false);
+      return ok;
+    }
+    ['yourName','bizName','email'].forEach(id => {
+      const f = $(id);
+      if(f) f.addEventListener('input', () => f.classList.contains('err') && validate());
+    });
+
+    // ── Submit ──────────────────────────────────────────────────────────────
+    $('obForm').addEventListener('submit', async e => {
+      e.preventDefault();
+      const formError = $('formError');
+      formError.classList.remove('show');
+      if(!validate()){
+        formError.textContent = 'Please fix the highlighted fields and try again.';
+        formError.classList.add('show');
+        const firstErr = document.querySelector('.err'); if(firstErr) firstErr.focus();
+        return;
+      }
+
+      const answers = {
+        identity: { your_name: val('yourName'), role: val('role') },
+        business: { name: val('bizName'), pitch: val('pitch'), other_businesses: val('otherBiz') },
+        location: { country: val('country'), currency: val('currency') },
+        team: { members: collectTeam(), right_hand: val('rightHand') },
+        money: { bank_accounts: val('banks'), biggest_costs: val('bigCosts'), income_shape: val('incomeShape') },
+        targets: {
+          revenue_target: numOrNull('revTarget'), profit_target: numOrNull('profitTarget'),
+          owner_pay_min: numOrNull('ownerPay'), account_floor: numOrNull('floor'),
+          act_below: numOrNull('actBelow'), ask_above: numOrNull('askAbove'),
+        },
+        contact: { email: val('email'), phone: val('phone') },
+      };
+      const payload = {
+        website: val('website'),           // honeypot (should be empty)
+        email: val('email'),
+        phone: val('phone'),
+        business_name: val('bizName'),
+        contact_name: val('yourName'),
+        answers,
+      };
+
+      const btn = $('submitBtn');
+      btn.disabled = true; btn.textContent = 'Sending…';
+      try {
+        const res = await fetch(FN_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'apikey': SB_ANON, 'Authorization': 'Bearer ' + SB_ANON },
+          body: JSON.stringify(payload),
+        });
+        const out = await res.json().catch(() => ({ error: 'Unexpected response' }));
+        if(!res.ok || out.error){
+          formError.textContent = (out.error || ('Something went wrong (' + res.status + '). Please try again, or email us and we\'ll sort it.'));
+          formError.classList.add('show');
+          btn.disabled = false; btn.textContent = 'Submit & set up my account';
+          return;
+        }
+        // success — swap the form for the thank-you panel
+        $('obForm').style.display = 'none';
+        $('done').classList.add('show');
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      } catch(err){
+        formError.textContent = 'We couldn\'t reach the server. Please check your connection and try again.';
+        formError.classList.add('show');
+        btn.disabled = false; btn.textContent = 'Submit & set up my account';
+      }
+    });
+
+    // start with one team row for convenience
+    addTeamRow();
+  </script>
+</body>
+</html>

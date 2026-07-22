@@ -1,3 +1,4 @@
 User-agent: *
 Allow: /
+Disallow: /onboarding.html
 Sitemap: https://chaichoong.github.io/leadership-dashboard/sitemap.xml
