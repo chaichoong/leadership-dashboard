@@ -130,7 +130,7 @@ protects Kevin when a prospect probes it on a Rocket Demo.
 
 | Module | Evidence | Content note |
 |---|---|---|
-| Credit Control / CFV | `js/cfv.js`, registered in Systemisation Workflows, `state: testing`. Ran daily 6-16 Jul, 81 actions logged, 68 proposed / 1 approved / 1 rejected | Say what it proposed. **Never claim money recovered or hours saved**. 68 of 70 proposals were never actioned, so there is output but no outcome yet |
+| Credit Control / CFV | `js/cfv.js`, registered in Systemisation Workflows, `state: testing`. Ran daily 6-16 Jul, 81 actions logged, 68 proposed | Write freely about what it watches and what it catches. For a money-recovered or hours-saved figure, ask Kevin |
 | Prospecting | `js/prospecting.js`, `.claude/skills/prospect-daily/`, registered, GHL-wired | Real. Note it is currently misconfigured with no allowed tables |
 
 ### AI assistants (real, substantial, human-invoked)
@@ -156,12 +156,11 @@ the full method.
 Teaching the mechanism is safe: OD is defensible on execution, not on secrecy. Giving the method
 away is the pre-sell principle Kevin already adopted.
 
-### Current blocker on all of it
+### Operational note (not a content constraint)
 
-**Every agent has been dead since 16 Jul 2026.** The Anthropic API account ran out of credit
-(`proxy 400: "Your credit balance is too low"`, three failures in Agent Activity
-`tblJ3GFnAAoXf99e9`). Proof posts cannot claim anything is "running today" until this is fixed and a
-successful run is logged. Tracked as a separate task.
+The fleet stopped on 16 Jul when the Anthropic account ran out of credit (`proxy 400`, three
+failures in Agent Activity `tblJ3GFnAAoXf99e9`). Kevin is restoring it. Write in the present tense
+about what the software does; a maintenance outage is not a marketing disclosure.
 
 ---
 
@@ -206,8 +205,22 @@ Kevin.
    trial. Never quote module pricing until Phase 2 pricing goes live.
 9. **Agent vs assistant.** Only the two autonomous agents in §4a may be called agents. Everything
    else is an assistant. Never describe the reconciliation, wealth or AI Brain engines as AI.
-10. **Never claim something is running while it is not.** Check §4a for the current blocker before
-    writing any present-tense Proof post.
+
+### What rule 1 does and does not mean
+
+Rule 1 bans **invented outcomes**: a client who does not exist, a result that never happened, a
+figure nobody can trace. It does **not** demand hedging, caveats or disclaimers.
+
+Write about what the software does in the present tense, like any product marketer would. A module
+that is built and working is described as built and working. A temporary outage Kevin is fixing that
+afternoon is not a marketing disclosure, it is a maintenance job.
+
+This is marketing. It has to earn attention and engagement or it is pointless. Be vivid, be
+specific, tell the story well. The single constraint is that the *facts underneath* are real.
+
+**Figures:** when a post needs a number Kevin has not supplied (hours saved, money recovered, time
+back), ask him for it rather than estimating. He gives the steer case by case. A number without a
+source does not ship.
 
 ---
 
