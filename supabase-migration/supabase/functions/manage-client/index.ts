@@ -15,8 +15,9 @@
 //                 lift the login ban, re-open the CRM deal (Won) + un-archive.
 //   delete      → PERMANENT: only if suspended OR cancelled; calls
 //                 delete_workspace(). The CRM deal stays Lost/Cancelled (history).
-//   get_modules → the client's bolt-on pack entitlements (org_modules).
-//   set_module  → turn a £100/mo bolt-on pack on/off for the client.
+//   get_modules → the client's module entitlements (org_modules).
+//   set_module  → turn a £100/mo bolt-on pack, or an opt-out base feature
+//                 (e.g. plan_builder), on/off for the client.
 //
 // The CRM writes target the CALLER'S own workspace (their sales pipeline), matched
 // to the client by the workspace owner's email. Never echoes another workspace's
@@ -30,6 +31,11 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 const CANCELLED_TAG = 'Cancelled'
 // The £100/mo bolt-on packs (pricing page) — map 1:1 to org_modules add-on keys.
 const ADDON_MODULES = ['finance', 'inbound_comms', 'content_machine', 'personal_wealth', 'property']
+// Base features that ship ON with every plan but can be switched OFF per client
+// (opt-out). Stored as an org_modules row with enabled=false; no row = on.
+const OPTOUT_MODULES = ['plan_builder']
+// Everything the CRM client screen is allowed to toggle.
+const TOGGLEABLE_MODULES = new Set([...ADDON_MODULES, ...OPTOUT_MODULES])
 
 const cors = {
   'Access-Control-Allow-Origin': '*',
@@ -187,11 +193,11 @@ Deno.serve(async (req) => {
       return json({ ok: true, modules: data || [] })
     }
 
-    // ── set_module — turn a bolt-on pack on/off for the client ────────────────
+    // ── set_module — turn a bolt-on pack or opt-out base feature on/off ────────
     if (action === 'set_module') {
       const moduleKey = String(body.module_key || '')
       const enabled = body.enabled === true
-      if (!ADDON_MODULES.includes(moduleKey)) return json({ error: 'Unknown bolt-on pack.' }, 400)
+      if (!TOGGLEABLE_MODULES.has(moduleKey)) return json({ error: 'Unknown module.' }, 400)
       const { error } = await admin.from('org_modules')
         .upsert({ org_id: orgId, module_key: moduleKey, enabled }, { onConflict: 'org_id,module_key' })
       if (error) return json({ error: error.message }, 500)
