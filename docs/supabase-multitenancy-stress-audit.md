@@ -16,7 +16,7 @@ This is a critical, exploitable cross-tenant breach. It is not in the RLS polici
 
 | # | Severity | Finding | Effect |
 |---|----------|---------|--------|
-| 1 | 🔴 **Critical** | `manage-client` / `create-client` authorize any workspace owner/admin | Any client can delete/suspend/list **all** other tenants |
+| 1 | 🔴 **Critical** | `manage-client` / `create-client` authorize any workspace owner/admin | Any client can delete/suspend/list **all** other tenants — **fixed in code (0038 + both fns), pending deploy** |
 | 2 | 🟠 **High** | `app_settings` primary key is `(key)` not `(org_id, key)` | Second tenant's settings write collides/fails; per-tenant settings broken |
 | 3 | 🟡 **Medium** | `onboarding-submit` resolves the home workspace by a name the code disagrees on | Public onboarding intake may silently 500 for every client |
 | 4 | 🟢 Note | Sync bridges stamp all mirrored rows with the home org | Not a leak; but client finance/AI-brain modules would receive no synced data |
@@ -117,7 +117,12 @@ Keep the `callerOrgIds.has(orgId)` guard as a nicety, but it is no longer the bo
 
 Either way: the `list` action must be behind the same operator check (it currently leaks all tenants to any owner).
 
-**This fix touches security-critical, service-role code and cannot be verified from this environment (no network).** It is written up here for review, not yet applied. Recommend applying it as the next migration + Edge-Function redeploy, then running the harness to confirm.
+### ✅ Resolution — implemented in code 2026-07-22 (Option A), pending deploy
+
+- **`0038_platform_admin_gate.sql`** adds `is_platform_admin(uuid)` (SECURITY DEFINER, gated on owner/admin of the earliest-created / home org), revoked from `public, anon, authenticated` and granted to `service_role` — the same lock-down pattern as the lifecycle functions. Predicate verified on Postgres: home-org owner **and** admin → `true`; a client (owner of a later org) → `false`.
+- **`manage-client/index.ts`** and **`create-client/index.ts`** now authorize via `admin.rpc('is_platform_admin', { p_user: user.id })` instead of the old "owner/admin of any workspace" test. `list` is behind the same gate, so it no longer leaks tenants to a client.
+
+**Not yet live.** Applying SQL to the hosted project and redeploying Edge Functions is Mica's step (this environment can't do either). Deploy steps are in the migration header. **After deploy, re-run the probe — P6 must flip from ❌ to a 403 (`operator gate is in place`).** Until then the live vulnerability stands.
 
 ---
 

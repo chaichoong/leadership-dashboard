@@ -1,6 +1,7 @@
 // create-client — Edge Function
 // ─────────────────────────────────────────────────────────────────────────────
-// Onboards a new CLIENT from the CRM. Admin-only (caller must be owner/admin).
+// Onboards a new CLIENT from the CRM. Platform-admin only (owner/admin of the home
+// org, via is_platform_admin() — see migration 0038).
 //   1. Creates the client's account via generateLink(type:'invite') — this fires
 //      the on_auth_user_created trigger that provisions their base-plan workspace,
 //      and returns a secure set-password link WITHOUT Supabase sending any email.
@@ -32,14 +33,17 @@ Deno.serve(async (req) => {
     const jwt = (req.headers.get('Authorization') || '').replace('Bearer ', '').trim()
     if (!jwt) return json({ error: 'Not authenticated' }, 401)
 
-    // Authorize the caller.
+    // Identify the caller.
     const asCaller = createClient(url, anon, { global: { headers: { Authorization: `Bearer ${jwt}` } } })
     const { data: { user }, error: uErr } = await asCaller.auth.getUser()
     if (uErr || !user) return json({ error: 'Not authenticated' }, 401)
     const admin = createClient(url, service)
-    const { data: mem } = await admin.from('memberships')
-      .select('role').eq('user_id', user.id).in('role', ['owner', 'admin']).limit(1)
-    if (!mem || !mem.length) return json({ error: 'You are not allowed to create client accounts.' }, 403)
+    // Authorize: PLATFORM ADMIN only (owner/admin of the home org). The old check
+    // ("owner/admin of any workspace") passed for every client, since each client
+    // owns their own workspace — Finding 1. See migration 0038.
+    const { data: isAdmin, error: aErr } = await admin.rpc('is_platform_admin', { p_user: user.id })
+    if (aErr) return json({ error: aErr.message }, 500)
+    if (!isAdmin) return json({ error: 'You are not allowed to create client accounts.' }, 403)
 
     const body = await req.json().catch(() => ({}))
     const email = String(body.email || '').trim().toLowerCase()
