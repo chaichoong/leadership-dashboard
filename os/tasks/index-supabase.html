@@ -737,7 +737,9 @@ function _sbClaims(){
   return { email:'', meta:{} };
 }
 function loggedInEmail(){ return (_sbClaims().email||'').toLowerCase(); }
-function loggedInName(){ const c=_sbClaims(); return c.meta.org_name||c.meta.full_name||c.meta.name||((c.email||'').split('@')[0])||'You'; }
+// The pill shows the PERSON (full_name/name), not the company (org_name — that's
+// the sidebar/workspace label). Fall back to org_name, then the email handle.
+function loggedInName(){ const c=_sbClaims(); return c.meta.full_name||c.meta.name||c.meta.org_name||((c.email||'').split('@')[0])||'You'; }
 const IS_OWNER = loggedInEmail()===OWNER_LOGIN;
 
 // The owner's home workspace uses this hard-coded team (his people). ANY other

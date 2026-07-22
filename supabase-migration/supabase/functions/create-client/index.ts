@@ -49,8 +49,15 @@ Deno.serve(async (req) => {
     if (!email) return json({ error: 'A client email is required.' }, 400)
 
     // 1. Create the account + get the secure set-password link (no email sent).
+    // Store BOTH the company (org_name — used for the sidebar/workspace label) and
+    // the person's name (full_name — used for the "who am I" pill and the client's
+    // own team-member row) so each surface can show the right one.
     const { data: link, error: lErr } = await admin.auth.admin.generateLink({
-      type: 'invite', email, options: { data: orgName ? { org_name: orgName } : {}, redirectTo },
+      type: 'invite', email,
+      options: {
+        data: { ...(orgName ? { org_name: orgName } : {}), ...(name ? { full_name: name } : {}) },
+        redirectTo,
+      },
     })
     if (lErr) {
       const msg = /already|registered|exists/i.test(lErr.message) ? 'That email already has an account.' : lErr.message
