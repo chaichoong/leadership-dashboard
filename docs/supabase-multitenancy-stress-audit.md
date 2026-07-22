@@ -2,7 +2,7 @@
 
 **Date:** 2026-07-22
 **Scope:** Isolation of client-facing accounts in the Supabase project `ptkyhzlsvijcwyovgrgv.supabase.co` — i.e. can one client account see, change, or destroy another client's data?
-**Method:** Static isolation audit of every migration (`0015`–`0037`), the three Edge Functions, and the client-side call sites. **The live two-tenant probe could not run** — this Claude Code web environment has no outbound network (the egress proxy denies all HTTPS, including Supabase, with `403`). A runnable harness that performs the live probe was written and committed (`supabase-migration/stress-test/`); run it from a machine with network access to confirm these findings against the live database.
+**Method:** Static isolation audit of every migration (`0015`–`0037`), the three Edge Functions, and the client-side call sites, **plus a live two-tenant probe run against the project on 2026-07-22** (see [Live run](#live-run-2026-07-22) below). The earlier note that the probe "could not run" (no outbound network) no longer applies: a later session had egress to Supabase and ran `supabase-migration/stress-test/multitenancy-stress-test.mjs` in report-only mode. **It confirmed Finding 1's cross-tenant disclosure live** and confirmed the RLS data layer holds.
 
 > ⚠️ **Why static isn't the whole story.** The schema spec (`docs/supabase-schema-spec.md`, Q1) records that migrations `0001`–`0014` were applied *outside* the repo (SQL editor). A table created directly in the dashboard would be invisible to this audit. The live harness is the only way to be certain. Treat this report as "confirmed from the code we can see," not "the live database is clean."
 
@@ -22,6 +22,43 @@ This is a critical, exploitable cross-tenant breach. It is not in the RLS polici
 | 4 | 🟢 Note | Sync bridges stamp all mirrored rows with the home org | Not a leak; but client finance/AI-brain modules would receive no synced data |
 
 The RLS foundation itself (findings below the line) **passed**: every repo-visible data table has `org_id`, `enable`+`force row level security`, an `org_isolation` policy (not `using (true)`), and all views are `security_invoker = on`.
+
+---
+
+## Live run (2026-07-22)
+
+Ran `supabase-migration/stress-test/multitenancy-stress-test.mjs` against
+`ptkyhzlsvijcwyovgrgv.supabase.co` in **report-only** mode with a service-role key
+(used only to create two pre-confirmed throwaway tenants and to auto-delete them
+afterwards — both throwaway orgs + users were removed; verified 0 residue, 1 real
+org remains). The escalation half of P6 (suspend→delete) was **not** exercised, by
+choice — it is still confirmed only by static reading, not live.
+
+**Result: 20 passed, 1 FAILED.** The failure is Finding 1, reproduced live.
+
+| Probe | Result | Detail |
+|-------|--------|--------|
+| Provisioning | ✅ | Two signups landed in distinct orgs (`6baff93d…`, `c315786a…`). |
+| P1 baseline (11 tables) | ✅ | A fresh tenant saw **0** foreign rows across `transactions, tasks, crm_contacts, crm_deals, sops, team_members, tenancies, costs, properties, objectives_strategy, onboarding_submissions` (only its own 10 seeded SOPs + 1 team_member). |
+| P2 cross-read | ✅ | B could not read A's seeded `crm_contacts` marker. |
+| P3 cross-update / delete | ✅ | B's PATCH and DELETE of A's row affected **0 rows**. |
+| P4 forged insert | ✅ | B inserting a row stamped with A's `org_id` was **rejected (403)** by the RLS `with check`. |
+| P5 org enumeration | ✅ | B saw only its own workspace in `organizations`. |
+| **P6 `manage-client` list** | ❌ | **Plain client B received the full workspace list — 2 tenants including owner emails. Cross-tenant disclosure confirmed live.** |
+| Cleanup | ✅ | Both throwaway orgs + users deleted via `delete_workspace`. |
+
+So on the live database: **the RLS row-isolation layer holds under direct attack
+(P1–P5), and the `manage-client` Edge Function leaks every tenant's name + owner
+email to any logged-in client (P6)** — exactly the authorization gap Finding 1
+describes. The suspend/cancel/delete escalation on top of that same `list` gate
+was not run live but shares the identical (missing) check.
+
+> **Harness note:** `makeTenant()` was updated this run to create pre-confirmed
+> users via the Auth **admin API** when a service-role key is present (the public
+> signup path rejects the reserved `@example.com` domain with
+> `email_address_invalid`, and would also stall if "Confirm email" were on). The
+> `on_auth_user_created` trigger fires identically either way, so provisioning is
+> unchanged.
 
 ---
 

@@ -95,32 +95,55 @@ async function invoke(fnName, token, body) {
   return { status: res.status, json: await res.json().catch(() => ({})) }
 }
 
+// Admin create a pre-confirmed user (service-role only). Bypasses both email
+// confirmation AND the public-signup domain block (some projects reject
+// @example.com). The on_auth_user_created trigger still fires, so the tenant is
+// provisioned identically to a real signup.
+async function adminCreateUser(email, password, orgName) {
+  const res = await fetch(`${URL}/auth/v1/admin/users`, {
+    method: 'POST',
+    headers: { apikey: SERVICE, Authorization: `Bearer ${SERVICE}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email, password, email_confirm: true, user_metadata: { org_name: orgName } }),
+  })
+  return { status: res.status, json: await res.json().catch(() => ({})) }
+}
+
 // ── sign up (or log in) a throwaway tenant ────────────────────────────────────
 async function makeTenant(label) {
-  const email = `mt-stress-${label}-${stamp}@example.com`
+  // Real signups reject the reserved @example.com domain on some projects; use a
+  // domain the admin path accepts and that still looks obviously throwaway.
+  const email = `mt-stress-${label}-${stamp}@mt-stress.dev`
   const password = `Stress!${stamp}${label}`
   const orgName = `MT Stress ${label} ${stamp}`
 
-  let { status, json } = await authFetch('signup', { email, password, data: { org_name: orgName } })
-  if (status >= 400) throw new Error(`signup for ${label} failed (${status}): ${JSON.stringify(json)}`)
-
-  let token = json.access_token
-  if (!token) {
-    // Email confirmation likely required — try password grant (works if already confirmed).
-    const login = await authFetch('token?grant_type=password', { email, password })
-    token = login.json.access_token
+  let userId
+  if (SERVICE) {
+    // Preferred path: admin-create a confirmed user, then password-grant a session.
+    const created = await adminCreateUser(email, password, orgName)
+    if (created.status >= 400) throw new Error(`admin create for ${label} failed (${created.status}): ${JSON.stringify(created.json)}`)
+    userId = created.json?.id
+  } else {
+    const { status, json } = await authFetch('signup', { email, password, data: { org_name: orgName } })
+    if (status >= 400) throw new Error(`signup for ${label} failed (${status}): ${JSON.stringify(json)}`)
+    userId = json.user?.id || json.id
   }
+
+  // Log in for a client (anon-scoped) session token to probe with.
+  let token
+  const login = await authFetch('token?grant_type=password', { email, password })
+  token = login.json.access_token
   if (!token) {
     throw new Error(
       `No session for ${label}. Email confirmation is probably ON. Either disable ` +
       `"Confirm email" in Supabase Auth for the test, or provide a service-role key ` +
-      `so the harness can confirm the users. (user id: ${json.user?.id || json.id || 'unknown'})`)
+      `(--service-key / SB_SERVICE_KEY) so the harness can create confirmed users. ` +
+      `(user id: ${userId || 'unknown'})`)
   }
 
   // Discover the org this tenant was provisioned into.
   const mem = await rest('memberships?select=org_id,role', { token })
   const orgId = mem.json?.[0]?.org_id
-  return { label, email, password, token, orgId, userId: json.user?.id || json.id }
+  return { label, email, password, token, orgId, userId }
 }
 
 // ── the org-scoped tables we assert isolation on ──────────────────────────────
