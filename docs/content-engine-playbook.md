@@ -115,6 +115,56 @@ proof replaces dogfooding proof, with permission in writing.
 
 ---
 
+## 4a. Evidence inventory — what content may draw on
+
+Verified against the code and Airtable on 2026-07-21. **This is the only approved source list for
+Product and Proof posts.** If something is not here, it does not go in a post until it is verified
+and added.
+
+**Language rule (Kevin, 21 Jul): call them what they are.** An *agent* runs itself on a schedule. An
+*assistant* acts when a human asks it to. Ten of the twelve are assistants today. Saying so costs
+nothing and makes the 90% north star a journey the audience watches, which beats a claim. It also
+protects Kevin when a prospect probes it on a Rocket Demo.
+
+### Autonomous agents (run themselves)
+
+| Module | Evidence | Content note |
+|---|---|---|
+| Credit Control / CFV | `js/cfv.js`, registered in Systemisation Workflows, `state: testing`. Ran daily 6-16 Jul, 81 actions logged, 68 proposed / 1 approved / 1 rejected | Say what it proposed. **Never claim money recovered or hours saved** — 68 of 70 proposals were never actioned, so there is output but no outcome yet |
+| Prospecting | `js/prospecting.js`, `.claude/skills/prospect-daily/`, registered, GHL-wired | Real. Note it is currently misconfigured with no allowed tables |
+
+### AI assistants (real, substantial, human-invoked)
+
+Systemisation, Inbound Comms, Tasks & Projects team comms, Objective & Strategy planning,
+Leadership Dashboard, Finance, Content Machine. Verified by AI call sites in
+`os/systemisation/index.html` (25), `follow-up.html` (13), `os/tasks/index.html`,
+`os/strategy/strategy.js`, `js/ai-assistant.js`, `js/pnl.js`, and the `content-machine` repo.
+
+### Engines that are not AI, and must never be described as AI
+
+Reconciliation (`js/reconciliation.js`, 2,151 lines, matching + knowledge base + accuracy tracking,
+zero AI calls), Wealth (`js/wealth.js`, 2,932 lines of calculation), AI Brain (`ai-brain.html`, 419
+lines, still the data bridge with stages 2 and 3 pending).
+
+### The hero: Systemisation
+
+**The Method slot is built on the process-to-agent pipeline** (Kevin, 21 Jul). It turns a documented
+process into a working agent, it is genuinely built, it is the most AI-heavy module in the platform,
+and nobody else has it. Every Tuesday post teaches one step of it. The monthly long-form piece is
+the full method.
+
+Teaching the mechanism is safe: OD is defensible on execution, not on secrecy. Giving the method
+away is the pre-sell principle Kevin already adopted.
+
+### Current blocker on all of it
+
+**Every agent has been dead since 16 Jul 2026** — the Anthropic API account ran out of credit
+(`proxy 400: "Your credit balance is too low"`, three failures in Agent Activity
+`tblJ3GFnAAoXf99e9`). Proof posts cannot claim anything is "running today" until this is fixed and a
+successful run is logged. Tracked as a separate task.
+
+---
+
 ## 5. Weekly template
 
 Five posts, one per weekday, each slot a fixed job. Fixed slots are what make the agent reliable: it
@@ -123,8 +173,8 @@ fills a known shape rather than inventing a format each time.
 | Day | Slot | Pillar | Source material |
 |---|---|---|---|
 | Mon | Pain | Pain | Prospecting queue, GHL conversation threads, the 5 hot-buttons |
-| Tue | Method | Product | `docs/`, Systemisation module, Frameworks Library |
-| Wed | Proof | Proof | Kevin's own dashboard, the agents shipped that week |
+| Tue | Method | Product | **Process-to-agent, one step a week** (§4a hero), plus `docs/` and the Frameworks Library |
+| Wed | Proof | Proof | §4a evidence inventory only. Build-in-public until real client results exist |
 | Thu | Contrarian | Philosophy | Objection crib sheet from real historic calls |
 | Fri | Offer | any | The week's only overt CTA, into the gated magnet |
 
@@ -154,6 +204,10 @@ Kevin.
 7. **Kevin approves every post before it publishes** until the autonomy gate in §9 is met.
 8. **Pricing stated anywhere must match the locked launch pricing:** £1,500 setup, £350/mo, 30-day
    trial. Never quote module pricing until Phase 2 pricing goes live.
+9. **Agent vs assistant.** Only the two autonomous agents in §4a may be called agents. Everything
+   else is an assistant. Never describe the reconciliation, wealth or AI Brain engines as AI.
+10. **Never claim something is running while it is not.** Check §4a for the current blocker before
+    writing any present-tense Proof post.
 
 ---
 
