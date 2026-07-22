@@ -40,6 +40,10 @@
           background:var(--bg-subtle);color:var(--text-secondary);}
     .pill.person{background:var(--accent-soft);color:var(--accent-hover);}
     .pill.company{background:#E7EDF6;color:#3560A8;}
+    .pill.active{background:var(--success-bg);color:var(--success);}
+    .pill.suspended{background:var(--warning-bg);color:var(--warning);}
+    .btn.sm{padding:5px 11px;font-size:12.5px;}
+    .btn.warn{background:var(--warning,#B8933A);}
     .muted{color:var(--text-muted);}
     .empty{padding:48px;text-align:center;color:var(--text-muted);background:var(--bg-surface);
            border:1px dashed var(--border-default);border-radius:12px;}
@@ -88,6 +92,7 @@
     <div class="tabs">
       <div class="tab active" data-tab="contacts">Contacts</div>
       <div class="tab" data-tab="pipeline">Pipeline</div>
+      <div class="tab" data-tab="clients">Clients</div>
     </div>
     <div class="spacer"></div>
     <input class="search" id="search" placeholder="Search contacts…" style="display:none">
@@ -100,6 +105,7 @@
     <div id="loginNote" style="display:none">Sign in from the main app to load your CRM.</div>
     <div id="contactsView"></div>
     <div id="pipelineView" style="display:none"></div>
+    <div id="clientsView" style="display:none"></div>
   </div>
 
   <!-- Contact modal -->
@@ -178,6 +184,22 @@
     </div>
   </div>
 
+  <!-- Permanent-delete confirmation modal (type-to-confirm) -->
+  <div class="overlay" id="delOverlay">
+    <div class="modal">
+      <h2 style="color:var(--danger)">Delete client permanently</h2>
+      <p class="muted" style="font-size:13px;margin:-8px 0 12px">
+        This erases <b id="delName"></b> for good — their login, their workspace, and all of their data.
+        <b>This cannot be undone.</b> Their CRM record stays as history.</p>
+      <label>Type the workspace name to confirm</label>
+      <input id="delConfirm" autocomplete="off" placeholder="">
+      <div class="modal-actions">
+        <button class="btn danger" id="delGo" disabled>Delete permanently</button>
+        <button class="btn ghost" onclick="closeModal('delOverlay')">Cancel</button>
+      </div>
+    </div>
+  </div>
+
   <div class="toast" id="toast"></div>
 
   <script>
@@ -191,7 +213,7 @@
     function toast(m){const t=document.getElementById('toast');t.textContent=m;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),2200);}
     async function ensureSession(){ if(_sess===null){ const {data}=await sb.auth.getSession(); _sess=data.session||false; } return _sess; }
 
-    const state = { pipeline:null, stages:[], deals:[], contacts:[] };
+    const state = { pipeline:null, stages:[], deals:[], contacts:[], clients:null };
 
     async function loadAll(){
       const sess = await ensureSession();
@@ -373,6 +395,80 @@
       btn.disabled = false; btn.textContent = 'Send invitation';
     };
 
+    // ── Clients (workspace offboarding) ─────────────────────────────────────────
+    const FN_MANAGE = SB_URL + '/functions/v1/manage-client';
+    async function callManage(payload){
+      const { data:{ session } } = await sb.auth.getSession();
+      const res = await fetch(FN_MANAGE, { method:'POST',
+        headers:{ 'Content-Type':'application/json', 'Authorization':'Bearer '+(session?.access_token||''), 'apikey':SB_ANON },
+        body: JSON.stringify(payload) });
+      const out = await res.json().catch(()=>({error:'Unexpected response'}));
+      if(!res.ok || out.error) throw new Error(out.error || ('HTTP '+res.status));
+      return out;
+    }
+    async function loadClients(){
+      const el = document.getElementById('clientsView');
+      el.innerHTML = '<div class="empty">Loading clients…</div>';
+      try {
+        const out = await callManage({ action:'list' });
+        state.clients = out.clients || [];
+        renderClients();
+      } catch(e){
+        el.innerHTML = '<div class="empty">Couldn\'t load clients: '+esc(e.message)+'</div>';
+      }
+    }
+    function renderClients(){
+      const el = document.getElementById('clientsView');
+      const rows = state.clients || [];
+      if(!rows.length){ el.innerHTML = '<div class="empty">No client workspaces yet. Won deals become clients once you create their account.</div>'; return; }
+      const fmtDate = d => d ? new Date(d).toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric'}) : '—';
+      el.innerHTML = '<table><thead><tr><th>Client</th><th>Owner</th><th>Plan</th><th>Status</th><th>Created</th><th>Actions</th></tr></thead><tbody>'
+        + rows.map(c => {
+          const suspended = c.status === 'suspended';
+          const actions = suspended
+            ? `<button class="btn ghost sm" data-act="restore" data-id="${c.id}">Restore</button>
+               <button class="btn danger sm" data-act="delete" data-id="${c.id}" data-name="${esc(c.name)}">Delete permanently</button>`
+            : `<button class="btn warn sm" data-act="suspend" data-id="${c.id}" data-name="${esc(c.name)}">Suspend</button>`;
+          return `<tr>
+            <td><b>${esc(c.name)}</b></td>
+            <td>${esc(c.owner_email)||'<span class="muted">—</span>'}</td>
+            <td><span class="pill">${esc(c.plan||'base')}</span></td>
+            <td><span class="pill ${suspended?'suspended':'active'}">${suspended?'Suspended':'Active'}</span></td>
+            <td class="muted">${fmtDate(c.created_at)}</td>
+            <td style="white-space:nowrap">${actions}</td></tr>`; }).join('')
+        + '</tbody></table>';
+      el.querySelectorAll('button[data-act]').forEach(b => b.onclick = () => clientAction(b.dataset.act, b.dataset.id, b.dataset.name));
+    }
+    async function clientAction(act, id, name){
+      if(act === 'delete'){ openDeleteModal(id, name); return; }
+      if(act === 'suspend' && !confirm(`Suspend ${name}? Their login is switched off and their deal is marked Lost — Cancelled. Their data is kept and you can Restore them.`)) return;
+      try {
+        await callManage({ action:act, org_id:id });
+        toast(act==='suspend' ? 'Client suspended' : 'Client restored');
+        await loadClients(); await loadAll();   // refresh clients + the CRM deal/contact
+      } catch(e){ toast('Error: '+e.message); }
+    }
+    // type-to-confirm permanent delete
+    let _delId = null;
+    function openDeleteModal(id, name){
+      _delId = id;
+      document.getElementById('delName').textContent = name;
+      const inp = document.getElementById('delConfirm'); inp.value = ''; inp.placeholder = name;
+      const go = document.getElementById('delGo'); go.disabled = true;
+      inp.oninput = () => { go.disabled = inp.value.trim() !== name; };
+      openModal('delOverlay');
+    }
+    document.getElementById('delGo').onclick = async () => {
+      if(!_delId) return;
+      const go = document.getElementById('delGo'); go.disabled = true; go.textContent = 'Deleting…';
+      try {
+        await callManage({ action:'delete', org_id:_delId });
+        closeModal('delOverlay'); toast('Client deleted permanently');
+        await loadClients();
+      } catch(e){ toast('Error: '+e.message); }
+      go.textContent = 'Delete permanently';
+    };
+
     // ── Tabs / modal plumbing ──────────────────────────────────────────────────
     let currentTab = 'contacts';
     document.querySelectorAll('.tab').forEach(t => t.onclick = () => {
@@ -380,7 +476,10 @@
       document.querySelectorAll('.tab').forEach(x=>x.classList.toggle('active',x===t));
       document.getElementById('contactsView').style.display = currentTab==='contacts'?'':'none';
       document.getElementById('pipelineView').style.display = currentTab==='pipeline'?'':'none';
+      document.getElementById('clientsView').style.display = currentTab==='clients'?'':'none';
       document.getElementById('search').style.display = currentTab==='contacts'?'':'none';
+      document.getElementById('addBtn').style.display = currentTab==='clients'?'none':'';
+      if(currentTab==='clients' && state.clients===null) loadClients();
     });
     document.getElementById('addBtn').onclick = () => currentTab==='contacts' ? openContact(null) : openDeal(null);
     // Copy the public onboarding form link (send it to a client who just signed up).
