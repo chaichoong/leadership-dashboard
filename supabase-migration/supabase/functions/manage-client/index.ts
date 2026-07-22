@@ -23,6 +23,8 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 
 const CANCELLED_TAG = 'Cancelled'
+// The £100/mo bolt-on packs (pricing page) — map 1:1 to org_modules add-on keys.
+const ADDON_MODULES = ['finance', 'inbound_comms', 'content_machine', 'personal_wealth', 'property']
 
 const cors = {
   'Access-Control-Allow-Origin': '*',
@@ -163,6 +165,25 @@ Deno.serve(async (req) => {
       const { error } = await admin.rpc('delete_workspace', { p_org: orgId, p_delete_users: true })
       if (error) return json({ error: error.message }, 500)
       // CRM deal stays Lost/Cancelled as history — intentionally not deleted.
+      return json({ ok: true })
+    }
+
+    // ── get_modules — the client's bolt-on pack entitlements ──────────────────
+    if (action === 'get_modules') {
+      const { data, error } = await admin.from('org_modules')
+        .select('module_key, enabled').eq('org_id', orgId)
+      if (error) return json({ error: error.message }, 500)
+      return json({ ok: true, modules: data || [] })
+    }
+
+    // ── set_module — turn a bolt-on pack on/off for the client ────────────────
+    if (action === 'set_module') {
+      const moduleKey = String(body.module_key || '')
+      const enabled = body.enabled === true
+      if (!ADDON_MODULES.includes(moduleKey)) return json({ error: 'Unknown bolt-on pack.' }, 400)
+      const { error } = await admin.from('org_modules')
+        .upsert({ org_id: orgId, module_key: moduleKey, enabled }, { onConflict: 'org_id,module_key' })
+      if (error) return json({ error: error.message }, 500)
       return json({ ok: true })
     }
 
