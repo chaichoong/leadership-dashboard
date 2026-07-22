@@ -20,7 +20,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 
-const ORG_NAME = 'Runpreneur'   // the service provider's own CRM workspace
+const ORG_NAME = 'Operations Director Main'   // the service provider's own CRM workspace
 const WON_STAGE = 'Won'
 
 const cors = {
