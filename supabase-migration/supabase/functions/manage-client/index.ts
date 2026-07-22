@@ -89,12 +89,18 @@ Deno.serve(async (req) => {
       return { pipelineId: pipe.id, id: s?.id ?? null }
     }
 
-    // ── suspend ───────────────────────────────────────────────────────────────
+    // ── suspend — TEMPORARY hold. Login off, data kept, NO CRM change ──────────
     if (action === 'suspend') {
       const { error } = await admin.rpc('suspend_workspace', { p_org: orgId })
       if (error) return json({ error: error.message }, 500)
+      return json({ ok: true })
+    }
 
-      // CRM: mark the client's deal "Lost — Cancelled", archive the contact.
+    // ── cancel — CHURNED. Login off, data kept, deal → Lost — Cancelled ─────────
+    if (action === 'cancel') {
+      const { error } = await admin.rpc('cancel_workspace', { p_org: orgId })
+      if (error) return json({ error: error.message }, 500)
+
       const email = await ownerEmailOf()
       if (email) {
         const { data: contacts } = await admin.from('crm_contacts')
@@ -122,7 +128,7 @@ Deno.serve(async (req) => {
       return json({ ok: true })
     }
 
-    // ── restore ────────────────────────────────────────────────────────────────
+    // ── restore / reactivate — back to active, lift ban, re-open the deal ───────
     if (action === 'restore') {
       const { error } = await admin.rpc('restore_workspace', { p_org: orgId })
       if (error) return json({ error: error.message }, 500)
@@ -159,8 +165,8 @@ Deno.serve(async (req) => {
       const { data: org } = await admin.from('organizations')
         .select('status').eq('id', orgId).maybeSingle()
       if (!org) return json({ error: 'Workspace not found.' }, 404)
-      if (org.status !== 'suspended') {
-        return json({ error: 'Suspend the client first — only a suspended workspace can be permanently deleted.' }, 400)
+      if (org.status !== 'suspended' && org.status !== 'cancelled') {
+        return json({ error: 'Suspend or cancel the client first — an active workspace cannot be permanently deleted.' }, 400)
       }
       const { error } = await admin.rpc('delete_workspace', { p_org: orgId, p_delete_users: true })
       if (error) return json({ error: error.message }, 500)
