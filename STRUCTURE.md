@@ -14,6 +14,7 @@ Single source of truth for file locations across the Operations Director Platfor
 | `js/` | One file per feature tab (see CLAUDE.md table). `config.js` = constants, `shared.js` = helpers | New feature tab logic |
 | `js/prompts/` | AI prompt sources (`boardroom-mentor.js`) | New AI prompt used by the app |
 | `css/` | `tokens.css` (design tokens, single source of truth) + `styles.css` | Never add per-feature stylesheets without checking tokens first |
+| `assets/` | Brand/image assets (`od-logo.svg` — the Operations Director mark) | New brand image or icon asset |
 | `os/` | Operating System pages, one folder per OS, loaded via iframe. Each OS folder may carry its own `index-supabase.html` migration variant, `supabase-boot.js`/`supabase-shim.js`, `sop.html`, `workflow.html`, and support files (`os/operations/ops-schema.json`, `os/tasks/gcal-proxy.gs`, `os/business-plan-builder/serve.py`) | New OS page |
 | `workers/` | Cloudflare Workers, one folder per worker | New server-side endpoint |
 | `cloudflare-worker/` | Legacy worker folder. Do not add to it; new workers go in `workers/` | Never |
