@@ -502,16 +502,19 @@
       const fmtDate = d => d ? new Date(d).toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric'}) : '—';
       el.innerHTML = '<table><thead><tr><th>Client</th><th>Owner</th><th>Plan</th><th>Status</th><th>Created</th><th>Actions</th></tr></thead><tbody>'
         + rows.map(c => {
-          const suspended = c.status === 'suspended';
-          const actions = suspended
-            ? `<button class="btn ghost sm" data-act="restore" data-id="${c.id}">Restore</button>
-               <button class="btn danger sm" data-act="delete" data-id="${c.id}" data-name="${esc(c.name)}">Delete permanently</button>`
-            : `<button class="btn warn sm" data-act="suspend" data-id="${c.id}" data-name="${esc(c.name)}">Suspend</button>`;
+          const st = c.status || 'active';
+          const b = (act,cls,txt) => `<button class="btn ${cls} sm" data-act="${act}" data-id="${c.id}" data-name="${esc(c.name)}">${txt}</button>`;
+          const actions = st==='active'
+            ? b('suspend','ghost','Suspend') + b('cancel','warn','Cancel service')
+            : st==='suspended'
+            ? b('restore','ghost','Reactivate') + b('cancel','warn','Cancel service') + b('delete','danger','Delete')
+            : /* cancelled */ b('restore','ghost','Reactivate') + b('delete','danger','Delete');
+          const stLabel = st==='suspended'?'Suspended':st==='cancelled'?'Cancelled':'Active';
           return `<tr class="clickable" data-client="${c.id}">
             <td><b>${esc(c.name)}</b></td>
             <td>${esc(c.owner_email)||'<span class="muted">—</span>'}</td>
             <td><span class="pill">${esc(c.plan||'base')}</span></td>
-            <td><span class="pill ${suspended?'suspended':'active'}">${suspended?'Suspended':'Active'}</span></td>
+            <td><span class="pill ${st}">${stLabel}</span></td>
             <td class="muted">${fmtDate(c.created_at)}</td>
             <td style="white-space:nowrap">${actions}</td></tr>`; }).join('')
         + '</tbody></table>';
@@ -578,10 +581,16 @@
     }
     async function clientAction(act, id, name){
       if(act === 'delete'){ openDeleteModal(id, name); return; }
-      if(act === 'suspend' && !confirm(`Suspend ${name}? Their login is switched off and their deal is marked Lost — Cancelled. Their data is kept and you can Restore them.`)) return;
+      const prompts = {
+        suspend: `Suspend ${name}? Temporary hold — their login is switched off but all their data is kept. Reactivate any time. (No change to their CRM deal.)`,
+        cancel:  `Cancel ${name}'s service? Marks them churned — login off, data kept, and their CRM deal moves to Lost — Cancelled. You can reactivate or delete later.`,
+        restore: `Reactivate ${name}? Their login is switched back on and any cancellation on their CRM deal is undone.`,
+      };
+      if(prompts[act] && !confirm(prompts[act])) return;
+      const done = { suspend:'Client suspended', cancel:'Service cancelled', restore:'Client reactivated' };
       try {
         await callManage({ action:act, org_id:id });
-        toast(act==='suspend' ? 'Client suspended' : 'Client restored');
+        toast(done[act] || 'Done');
         await loadClients(); await loadAll();   // refresh clients + the CRM deal/contact
       } catch(e){ toast('Error: '+e.message); }
     }
