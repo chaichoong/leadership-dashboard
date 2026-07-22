@@ -530,6 +530,11 @@
       { key:'personal_wealth', label:'Personal Wealth' },
       { key:'property',        label:'Property Management' },
     ];
+    // Base features that ship ON with every plan but can be switched OFF per
+    // client (opt-out). A plan_builder row with enabled=false hides it; no row = on.
+    const BASE_TOGGLES = [
+      { key:'plan_builder', label:'Plan Builder' },
+    ];
     let _clientDetail = null;
     async function openClientDetail(c){
       if(!c) return;
@@ -551,6 +556,10 @@
           <div id="clModules"><div class="ans-empty">Loading packs…</div></div>
         </div>
         <div class="cl-sec">
+          <div class="cl-h">Base features <span class="muted" style="font-weight:400;text-transform:none;letter-spacing:0">— included; untick to switch off for this client</span></div>
+          <div id="clBaseFeatures"><div class="ans-empty">Loading…</div></div>
+        </div>
+        <div class="cl-sec">
           ${contact ? '<a href="#" id="clContactLink" class="cl-link">View contact record →</a>'
                     : '<span class="muted" style="font-size:13px">No linked contact record.</span>'}
         </div>`;
@@ -566,15 +575,27 @@
     }
     function renderClientModules(mods){
       const on = {}; (mods||[]).forEach(m => on[m.module_key] = m.enabled);
-      const el = document.getElementById('clModules'); if(!el) return;
-      el.innerHTML = ADDON_PACKS.map(p =>
-        `<label class="cl-toggle"><input type="checkbox" data-mod="${p.key}" ${on[p.key]?'checked':''}>
-           <span>${esc(p.label)}</span><span class="price">£100/mo</span></label>`).join('');
-      el.querySelectorAll('input[data-mod]').forEach(inp => inp.onchange = async () => {
+      // Add-on packs: OFF unless an enabled row exists.
+      const el = document.getElementById('clModules');
+      if(el){
+        el.innerHTML = ADDON_PACKS.map(p =>
+          `<label class="cl-toggle"><input type="checkbox" data-mod="${p.key}" data-kind="pack" ${on[p.key]===true?'checked':''}>
+             <span>${esc(p.label)}</span><span class="price">£100/mo</span></label>`).join('');
+      }
+      // Base features: ON by default; only OFF when a row explicitly disables it.
+      const bel = document.getElementById('clBaseFeatures');
+      if(bel){
+        bel.innerHTML = BASE_TOGGLES.map(p =>
+          `<label class="cl-toggle"><input type="checkbox" data-mod="${p.key}" data-kind="base" ${on[p.key]===false?'':'checked'}>
+             <span>${esc(p.label)}</span></label>`).join('');
+      }
+      document.querySelectorAll('#clModules input[data-mod], #clBaseFeatures input[data-mod]').forEach(inp => inp.onchange = async () => {
         inp.disabled = true;
+        const isBase = inp.dataset.kind === 'base';
         try {
           await callManage({ action:'set_module', org_id:_clientDetail.id, module_key:inp.dataset.mod, enabled:inp.checked });
-          toast(inp.checked ? 'Pack added' : 'Pack removed');
+          toast(isBase ? (inp.checked ? 'Feature switched on' : 'Feature switched off')
+                       : (inp.checked ? 'Pack added' : 'Pack removed'));
         } catch(e){ toast('Error: '+e.message); inp.checked = !inp.checked; }
         inp.disabled = false;
       });

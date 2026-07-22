@@ -69,6 +69,7 @@
         <div class="section">Leadership</div>
         <div class="navitem" data-page="dashboard" data-module="command_centre"><span class="ico">📊</span> Leadership Dashboard <span class="dot"></span></div>
         <div class="navitem" data-page="os-strategy" data-module="strategy"><span class="ico">🎯</span> Objective &amp; Strategy <span class="dot"></span></div>
+        <div class="navitem" data-page="os-bplan" data-module="plan_builder"><span class="ico">📋</span> Plan Builder <span class="dot"></span></div>
 
         <div class="section">Operations</div>
         <div class="navitem" data-page="tasks" data-module="tasks"><span class="ico">✅</span> Tasks &amp; Projects <span class="dot"></span></div>
@@ -109,6 +110,7 @@
     const PAGES = {
       dashboard: 'index-supabase.html?v=6',
       'os-strategy': 'os/strategy/index-supabase.html',
+      'os-bplan': 'os/business-plan-builder/index.html',
       'ai-brain': 'ai-brain-supabase.html',
       tasks: 'os/tasks/index-supabase.html?v=5',
       crm: 'crm-supabase.html?v=4',
@@ -133,15 +135,22 @@
     document.querySelectorAll('.navitem[data-page]').forEach(n => n.addEventListener('click', () => navTo(n.dataset.page)));
 
     // Base modules always show (they're included in every plan); add-ons only if
-    // the workspace's org_modules row is enabled. Fails safe: if the fetch fails,
-    // base stays visible and add-ons stay hidden.
+    // the workspace's org_modules row is enabled. Opt-out modules show by default
+    // like base, but can be switched OFF per workspace (an org_modules row with
+    // enabled=false hides them; no row = on) from the CRM client screen. Fails
+    // safe: if the fetch fails, base + opt-out features stay visible and add-ons
+    // stay hidden.
     const BASE_MODULES = ['command_centre','strategy','tasks','team','systemisation','ai_assistant','dod_queue','crm'];
+    const OPT_OUT_MODULES = ['plan_builder'];
     async function applyEntitlements() {
-      const enabled = new Set(BASE_MODULES);
+      const enabled = new Set([...BASE_MODULES, ...OPT_OUT_MODULES]);
       try {
-        const { data, error } = await sb.from('org_modules').select('module_key').eq('enabled', true);
-        if (!error && data) data.forEach(r => enabled.add(r.module_key));
-      } catch (e) { /* fail safe — base only */ }
+        const { data, error } = await sb.from('org_modules').select('module_key, enabled');
+        if (!error && data) data.forEach(r => {
+          if (r.enabled) enabled.add(r.module_key);
+          else if (OPT_OUT_MODULES.includes(r.module_key)) enabled.delete(r.module_key);
+        });
+      } catch (e) { /* fail safe — base + opt-out features stay visible, add-ons hidden */ }
       document.querySelectorAll('.navitem[data-module]').forEach(n => {
         n.style.display = enabled.has(n.dataset.module) ? '' : 'none';
       });
