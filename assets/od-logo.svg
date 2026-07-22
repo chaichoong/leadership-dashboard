@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" fill="none" role="img" aria-label="Operations Director">
+  <path d="M55 15 H26 A8 8 0 0 0 18 23 V79 A8 8 0 0 0 26 87 H72 A8 8 0 0 0 80 79 V45" stroke="currentColor" stroke-width="6.5" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M84 52 V20" stroke="currentColor" stroke-width="6.5" stroke-linecap="round"/>
+  <path d="M73 26 L84 9 L95 26 Z" fill="currentColor"/>
+  <path d="M 45.00 44.00 L 48.90 39.38 L 56.11 42.37 L 55.61 48.39 L 61.63 47.89 L 64.62 55.10 L 60.00 59.00 L 64.62 62.90 L 61.63 70.11 L 55.61 69.61 L 56.11 75.63 L 48.90 78.62 L 45.00 74.00 L 41.10 78.62 L 33.89 75.63 L 34.39 69.61 L 28.37 70.11 L 25.38 62.90 L 30.00 59.00 L 25.38 55.10 L 28.37 47.89 L 34.39 48.39 L 33.89 42.37 L 41.10 39.38 Z M 53.40 59.00 A 8.4 8.4 0 1 0 36.60 59.00 A 8.4 8.4 0 1 0 53.40 59.00 Z" fill="currentColor" fill-rule="evenodd"/>
+</svg>
