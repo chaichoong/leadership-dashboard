@@ -1,4 +1,9 @@
 {
+  "permissions": {
+    "allow": [
+      "mcp__Claude_Browser__javascript_tool"
+    ]
+  },
   "hooks": {
     "PostToolUse": [{
       "matcher": "Edit|Write",
