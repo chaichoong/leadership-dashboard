@@ -5,6 +5,7 @@
     { "source": "/index.html", "destination": "/login", "permanent": false }
   ],
   "rewrites": [
-    { "source": "/login", "destination": "/supabase-app.html" }
+    { "source": "/login", "destination": "/supabase-app.html" },
+    { "source": "/onboarding", "destination": "/onboarding.html" }
   ]
 }
