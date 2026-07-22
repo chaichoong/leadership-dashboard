@@ -115,7 +115,7 @@ proof replaces dogfooding proof, with permission in writing.
 
 ---
 
-## 4a. Evidence inventory — what content may draw on
+## 4a. Evidence inventory: what content may draw on
 
 Verified against the code and Airtable on 2026-07-21. **This is the only approved source list for
 Product and Proof posts.** If something is not here, it does not go in a post until it is verified
@@ -130,7 +130,7 @@ protects Kevin when a prospect probes it on a Rocket Demo.
 
 | Module | Evidence | Content note |
 |---|---|---|
-| Credit Control / CFV | `js/cfv.js`, registered in Systemisation Workflows, `state: testing`. Ran daily 6-16 Jul, 81 actions logged, 68 proposed / 1 approved / 1 rejected | Say what it proposed. **Never claim money recovered or hours saved** — 68 of 70 proposals were never actioned, so there is output but no outcome yet |
+| Credit Control / CFV | `js/cfv.js`, registered in Systemisation Workflows, `state: testing`. Ran daily 6-16 Jul, 81 actions logged, 68 proposed / 1 approved / 1 rejected | Say what it proposed. **Never claim money recovered or hours saved**. 68 of 70 proposals were never actioned, so there is output but no outcome yet |
 | Prospecting | `js/prospecting.js`, `.claude/skills/prospect-daily/`, registered, GHL-wired | Real. Note it is currently misconfigured with no allowed tables |
 
 ### AI assistants (real, substantial, human-invoked)
@@ -158,7 +158,7 @@ away is the pre-sell principle Kevin already adopted.
 
 ### Current blocker on all of it
 
-**Every agent has been dead since 16 Jul 2026** — the Anthropic API account ran out of credit
+**Every agent has been dead since 16 Jul 2026.** The Anthropic API account ran out of credit
 (`proxy 400: "Your credit balance is too low"`, three failures in Agent Activity
 `tblJ3GFnAAoXf99e9`). Proof posts cannot claim anything is "running today" until this is fixed and a
 successful run is logged. Tracked as a separate task.
