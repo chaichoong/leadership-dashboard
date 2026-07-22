@@ -5,13 +5,18 @@
 // see/act across client workspaces that RLS would otherwise hide from the caller.
 //
 // Actions (body.action):
-//   list     → every client workspace (all orgs except the caller's own) + status,
-//              owner email, member count.
-//   suspend  → suspend_workspace() (access off, data kept) AND mark the client's
-//              CRM deal "Lost — Cancelled" + archive the contact.
-//   restore  → restore_workspace() AND re-open the CRM deal (Won) + un-archive.
-//   delete   → PERMANENT: only if the workspace is already suspended, calls
-//              delete_workspace(). The CRM deal stays Lost/Cancelled (history).
+//   list        → every client workspace (all orgs except the caller's own) +
+//                 status, owner email, member count.
+//   suspend     → suspend_workspace() — TEMPORARY hold (login off, data kept).
+//                 No CRM change: they are a live client on pause.
+//   cancel      → cancel_workspace() — CHURNED (login off, data kept) AND mark the
+//                 client's CRM deal "Lost — Cancelled" + archive the contact.
+//   restore     → restore_workspace() — reactivate (from suspended OR cancelled),
+//                 lift the login ban, re-open the CRM deal (Won) + un-archive.
+//   delete      → PERMANENT: only if suspended OR cancelled; calls
+//                 delete_workspace(). The CRM deal stays Lost/Cancelled (history).
+//   get_modules → the client's bolt-on pack entitlements (org_modules).
+//   set_module  → turn a £100/mo bolt-on pack on/off for the client.
 //
 // The CRM writes target the CALLER'S own workspace (their sales pipeline), matched
 // to the client by the workspace owner's email. Never echoes another workspace's
