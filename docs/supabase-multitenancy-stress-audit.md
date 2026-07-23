@@ -17,8 +17,8 @@ This is a critical, exploitable cross-tenant breach. It is not in the RLS polici
 | # | Severity | Finding | Effect |
 |---|----------|---------|--------|
 | 1 | ✅ ~~🔴 Critical~~ **FIXED** | `manage-client` / `create-client` authorize any workspace owner/admin | Any client could delete/suspend/list **all** other tenants — **fixed & verified live 2026-07-22** (0038 + both fns deployed; probe P6 now 403) |
-| 2 | 🟠 **High** | `app_settings` primary key is `(key)` not `(org_id, key)` | Second tenant's settings write collides/fails; per-tenant settings broken |
-| 3 | 🟡 **Medium** | `onboarding-submit` resolves the home workspace by a name the code disagrees on | Public onboarding intake may silently 500 for every client |
+| 2 | ✅ ~~🟠 High~~ **FIXED (code)** | `app_settings` primary key is `(key)` not `(org_id, key)` | Second tenant's settings write collides/fails; per-tenant settings broken — **0039 + skills-shim onConflict; pending SQL run** |
+| 3 | ✅ ~~🟡 Medium~~ **FIXED (code)** | `onboarding-submit` resolves the home workspace by a name the code disagrees on | Public onboarding intake may silently 500 for every client — **now resolves home org by earliest-created; pending fn redeploy** |
 | 4 | 🟢 Note | Sync bridges stamp all mirrored rows with the home org | Not a leak; but client finance/AI-brain modules would receive no synced data |
 
 The RLS foundation itself (findings below the line) **passed**: every repo-visible data table has `org_id`, `enable`+`force row level security`, an `org_isolation` policy (not `using (true)`), and all views are `security_invoker = on`.
@@ -149,6 +149,12 @@ alter table public.app_settings add primary key (org_id, key);
 ```
 …and update the Skills shim's upsert `onConflict` target from `'key'` to `'org_id,key'` (`skills-shim.js`). Confirm no other writer relies on `key` being globally unique.
 
+### ✅ Resolution — implemented in code 2026-07-22, pending SQL run
+
+- **`0039_app_settings_per_tenant_pk.sql`**: backfills any NULL `org_id` to the home org, sets `org_id NOT NULL`, and swaps the global PK for `(org_id, key)`. Applied to a Postgres copy of the table: PK becomes `PRIMARY KEY (org_id, key)` and two orgs can then both hold `active_skill_ids` (the exact collision) — verified.
+- **`skills-shim.js`**: the only `app_settings` writer; its upsert `onConflict` is now `'org_id,key'` (`org_id` fills from the column default). Cache-bust bumped to `?v=2` in `skills-supabase.html`. The existing sync-invariant test covers the Airtable settings path, not this Supabase upsert, so it is unaffected.
+- **Deploy:** run `0039` in the SQL editor; the JS ships with the web app on merge to `main`. No Edge Function redeploy needed.
+
 ---
 
 ## Finding 3 — 🟡 Medium: onboarding intake may fail for every client (home-org name mismatch)
@@ -168,6 +174,12 @@ But the home org is created as **`'Runpreneur'`** (`0022` line 113), and `0023`/
 
 ### Fix
 Stop resolving the home org by a hardcoded name. Use the same convention as `bridge_default_org_id()` — the earliest-created org — or a single shared constant sourced in one place. Then verify the live org's actual name and reconcile the two spellings across the codebase.
+
+### ✅ Resolution — implemented in code 2026-07-22, pending fn redeploy
+
+`onboarding-submit/index.ts` now resolves the home org as the **earliest-created org** (`order('created_at', { ascending: true }).limit(1)`), the same convention as `bridge_default_org_id()` / `is_platform_admin()` — no hardcoded name, so a rename can't 500 the intake. The `ORG_NAME` constant is removed.
+
+**Note (not blocking):** the historical *migrations* still disagree on the home org's spelling (`Runpreneur` in 0022–0026 vs `Operations Director Main` in 0028) — those are already-applied files that don't re-run, so they're left as-is; only live code paths mattered. **Deploy:** `supabase functions deploy onboarding-submit --no-verify-jwt`.
 
 ---
 
