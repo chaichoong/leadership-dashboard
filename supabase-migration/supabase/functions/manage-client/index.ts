@@ -1,8 +1,10 @@
 // manage-client — Edge Function
 // ─────────────────────────────────────────────────────────────────────────────
-// Admin-only client offboarding for the CRM "Clients" tab. The caller must be an
-// owner/admin (same check as create-client). Uses the service-role key so it can
-// see/act across client workspaces that RLS would otherwise hide from the caller.
+// Admin-only client offboarding for the CRM "Clients" tab. The caller must be a
+// PLATFORM ADMIN — owner/admin of the home/provider org, checked via
+// is_platform_admin() (same gate as create-client; see migration 0038). Uses the
+// service-role key so it can see/act across client workspaces that RLS would
+// otherwise hide from the caller.
 //
 // Actions (body.action):
 //   list        → every client workspace (all orgs except the caller's own) +
@@ -57,18 +59,23 @@ Deno.serve(async (req) => {
     const jwt = (req.headers.get('Authorization') || '').replace('Bearer ', '').trim()
     if (!jwt) return json({ error: 'Not authenticated' }, 401)
 
-    // Authorize the caller — must be an owner/admin somewhere.
+    // Identify the caller.
     const asCaller = createClient(url, anon, { global: { headers: { Authorization: `Bearer ${jwt}` } } })
     const { data: { user }, error: uErr } = await asCaller.auth.getUser()
     if (uErr || !user) return json({ error: 'Not authenticated' }, 401)
 
     const admin = createClient(url, service)
+    // Authorize: the caller must be a PLATFORM ADMIN (owner/admin of the home org),
+    // NOT merely an owner/admin of some workspace — every client owns their own, so
+    // the old check let any client manage every other tenant (Finding 1). See 0038.
+    const { data: isAdmin, error: aErr } = await admin.rpc('is_platform_admin', { p_user: user.id })
+    if (aErr) return json({ error: aErr.message }, 500)
+    if (!isAdmin) return json({ error: 'You are not allowed to manage client accounts.' }, 403)
     const { data: mems } = await admin.from('memberships')
       .select('org_id, role').eq('user_id', user.id)
     const adminMems = (mems || []).filter(m => m.role === 'owner' || m.role === 'admin')
-    if (!adminMems.length) return json({ error: 'You are not allowed to manage client accounts.' }, 403)
     const callerOrgIds = new Set((mems || []).map(m => m.org_id))
-    const adminOrgId = adminMems[0].org_id   // the caller's sales-CRM workspace
+    const adminOrgId = adminMems[0]?.org_id   // the caller's sales-CRM (home) workspace
 
     const body = await req.json().catch(() => ({} as Record<string, unknown>))
     const action = String(body.action || '')
