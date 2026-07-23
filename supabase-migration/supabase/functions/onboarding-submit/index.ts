@@ -2,8 +2,8 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // PUBLIC intake endpoint for the client onboarding form (onboarding.html).
 // A newly signed-up client (NO login yet) POSTs their account-setup answers. This
-// function, using the service-role key (bypasses RLS), does three things in Kevin's
-// Runpreneur workspace:
+// function, using the service-role key (bypasses RLS), does three things in the
+// home/provider workspace (resolved as the earliest-created org, not by name):
 //   1. crm_contacts  — a person record for the client
 //   2. crm_deals     — a deal at the "Won" stage, linked to that contact
 //   3. onboarding_submissions — the full answers, linked to both, for provisioning
@@ -20,7 +20,6 @@
 // ─────────────────────────────────────────────────────────────────────────────
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 
-const ORG_NAME = 'Operations Director Main'   // the service provider's own CRM workspace
 const WON_STAGE = 'Won'
 
 const cors = {
@@ -58,9 +57,14 @@ Deno.serve(async (req) => {
 
     const admin = createClient(url, service)
 
-    // Resolve the Runpreneur workspace (same lookup as 0025_crm.sql).
+    // Resolve the home/provider workspace by CONVENTION, not by a hardcoded name:
+    // the earliest-created org — the same rule bridge_default_org_id() (0029) and
+    // is_platform_admin() (0038) use. The old code matched name = 'Operations
+    // Director Main', but the home org is created as 'Runpreneur' (0022) and other
+    // call sites disagree on the spelling, so a rename would 500 every submission
+    // (Finding 3). Earliest-created is stable across renames.
     const { data: org, error: orgErr } = await admin
-      .from('organizations').select('id').eq('name', ORG_NAME).order('created_at').limit(1).maybeSingle()
+      .from('organizations').select('id').order('created_at', { ascending: true }).limit(1).maybeSingle()
     if (orgErr) return json({ error: orgErr.message }, 500)
     if (!org) return json({ error: 'Onboarding workspace is not set up yet.' }, 500)
     const orgId = org.id

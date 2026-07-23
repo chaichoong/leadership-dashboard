@@ -29,7 +29,9 @@
   }
   async function saveActivePresets(fields) {
     const value = fields['Active Skill IDs'];
-    const { error } = await sbc().from('app_settings').upsert({ key: ACTIVE_KEY, value: value == null ? '' : String(value) }, { onConflict: 'key' });
+    // onConflict must match app_settings' per-tenant PK (org_id, key) — see migration
+    // 0039. org_id is filled by the column default (current_org_id()) for the caller.
+    const { error } = await sbc().from('app_settings').upsert({ key: ACTIVE_KEY, value: value == null ? '' : String(value) }, { onConflict: 'org_id,key' });
     if (error) return json({ error: { message: error.message } }, 422);
     return json({ id: SETTINGS_REC, fields });
   }
