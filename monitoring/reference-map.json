@@ -437,16 +437,15 @@
   "tblHiFrzekohQk2lt": "UNNAMED_IN_CONFIG",
   "tbloIBoYzlF3URiYK": "UNNAMED_IN_CONFIG",
   "tblB5tZrXNaKFe02j": "prospectKeywords",
-  "tbljHVGJoKJf8acy3": "prospects"
+  "tbljHVGJoKJf8acy3": "prospects",
+  "tblWtiyQikO2hOzeW": "(comment-only warning ref: ZZ LEGACY Net Worth Statement \u2014 never read)"
  },
  "records": {
   "recF1C2ZXBfNeYlGT": "id",
   "rec7uCvNlKGlieZMS": "id",
   "recism4LGdEx0Nh9Q": "id",
   "rec6b96i917M64Nof": "id",
-  "recEvGF5Sr8R9p6tC": "id",
   "rec4fuKSWoK8ftkLJ": "id",
-  "recS1AiGq8oDEzmZD": "id",
   "recPA5FxzccOfWvQd": "id",
   "rec2yAlBoqSZrXtHW": "id",
   "rec1KfO2hixb1DA2e": "id",
@@ -459,7 +458,8 @@
   "recI8yCstyDP1Nd4b": "subRentalInc",
   "recWomXYQ3XTgMdrr": "subMaint",
   "rec7EdEwWXk2cQ0PG": "subOpexLabour",
-  "rec8ArDC6YbfOJydg": "subCOGSLabour"
+  "rec8ArDC6YbfOJydg": "subCOGSLabour",
+  "recl1UbR0LhffjWbg": "moneyGroup: Insurance (Needs)"
  },
  "selectChoices": {
   "sel4I99slfpd7Vc1t": "tenInPayment",
@@ -475,12 +475,12 @@
   "sel43EzvHZXeLZbwC": "costNewInactive"
  },
  "summary": {
-  "fields": 401,
-  "tables": 33,
-  "records": 20,
+  "fields": 403,
+  "tables": 34,
+  "records": 19,
   "selectChoices": 11,
-  "generated": "2026-07-21",
+  "generated": "2026-07-23",
   "source": "js/config.js",
-  "note": "Added Chart of Accounts - Sub Categories name + moneyGroup field IDs (drift monitor 2026-07-21). CAT_NAME_FIELD fldii4oUzSfmplihO omitted: uncommitted working-tree edit at time of run."
+  "note": "Refreshed by drift monitor 2026-07-23: +tblWtiyQikO2hOzeW (comment-only), +recl1UbR0LhffjWbg (Insurance sub-cat), dropped 2 record IDs no longer in config.js."
  }
 }
