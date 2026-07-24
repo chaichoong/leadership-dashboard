@@ -200,7 +200,9 @@
     }
 
     function getField(rec, fieldId) {
-        return rec.fields?.[fieldId];
+        // rec can be undefined when a lookup misses (e.g. accounts.find(...) on an
+        // empty table for a fresh Supabase client) — guard it, don't throw.
+        return rec?.fields?.[fieldId];
     }
     window.getField = getField;
 
