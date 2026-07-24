@@ -533,7 +533,8 @@
     // Base features that ship ON with every plan but can be switched OFF per
     // client (opt-out). A plan_builder row with enabled=false hides it; no row = on.
     const BASE_TOGGLES = [
-      { key:'plan_builder', label:'Plan Builder' },
+      { key:'command_centre', label:'Leadership Dashboard' },
+      { key:'plan_builder',   label:'Plan Builder' },
     ];
     let _clientDetail = null;
     async function openClientDetail(c){
