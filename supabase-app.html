@@ -138,12 +138,50 @@
       'content-machine': 'content-machine-supabase.html?v=1',
     };
     const frame = document.getElementById('frame');
-    function navTo(page) {
+    let _intended = null;  // where a logged-out visitor was headed (restored after login)
+
+    // Clean URL slug per page (the segment shown in the address bar, e.g. /crm).
+    const SLUG = {
+      dashboard: 'dashboard', 'os-strategy': 'strategy', 'os-bplan': 'plan-builder',
+      'ai-brain': 'ai-brain', tasks: 'tasks', crm: 'crm', operations: 'operations',
+      comms: 'comms', systemisation: 'systemisation', money: 'money', accounts: 'accounts',
+      pnl: 'pnl', wealth: 'wealth', 'os-team': 'team', sitemap: 'sitemap', skills: 'skills',
+      'content-machine': 'content-machine',
+    };
+    const PAGE_BY_SLUG = Object.fromEntries(Object.entries(SLUG).map(([p, s]) => [s, p]));
+
+    // Which page does the current URL point at? Path slug first, then a legacy
+    // #hash (back-compat with old /login#crm links). Null if none (e.g. /login).
+    function pageFromUrl() {
+      const seg = (location.pathname.split('/').filter(Boolean)[0] || '').toLowerCase();
+      if (PAGE_BY_SLUG[seg]) return PAGE_BY_SLUG[seg];
+      const h = (location.hash || '').replace(/^#/, '');
+      return PAGES[h] ? h : null;
+    }
+    function firstVisiblePage() {
+      const el = [...document.querySelectorAll('.navitem[data-page]')].find(n => n.style.display !== 'none');
+      return el ? el.dataset.page : 'dashboard';
+    }
+    // A valid, currently-visible page — falls back to the first visible one.
+    function resolveVisible(page) {
+      if (!page || !PAGES[page]) return firstVisiblePage();
+      const navEl = document.querySelector(`.navitem[data-page="${page}"]`);
+      return (navEl && navEl.style.display === 'none') ? firstVisiblePage() : page;
+    }
+    // Paint the sidebar + iframe for a page (no URL change).
+    function renderPage(page) {
       document.querySelectorAll('.navitem[data-page]').forEach(n => n.classList.toggle('active', n.dataset.page === page));
       frame.src = PAGES[page];
-      location.hash = page;
+    }
+    // Navigate: render the page and reflect it in the address bar as a clean path.
+    function navTo(page, replace) {
+      renderPage(page);
+      const path = '/' + (SLUG[page] || page);
+      history[replace ? 'replaceState' : 'pushState']({ page }, '', path);
     }
     document.querySelectorAll('.navitem[data-page]').forEach(n => n.addEventListener('click', () => navTo(n.dataset.page)));
+    // Back/forward buttons → render whatever the new URL points at (no new history entry).
+    window.addEventListener('popstate', () => renderPage(resolveVisible(pageFromUrl())));
 
     // Base modules always show (they're included in every plan); add-ons only if
     // the workspace's org_modules row is enabled. Opt-out modules show by default
@@ -176,7 +214,7 @@
       return enabled;
     }
 
-    async function doLogout(){ await sb.auth.signOut(); localStorage.removeItem('_dlr_last_uid'); location.reload(); }
+    async function doLogout(){ await sb.auth.signOut(); localStorage.removeItem('_dlr_last_uid'); location.replace('/login'); }
 
     // Show the signed-in workspace/user — never a hard-coded name. Reads the
     // CURRENT name from the server (getUser) so a rename shows immediately,
@@ -226,14 +264,12 @@
       document.getElementById('app').style.display = 'block';
       if (session) await setIdentity();
       await applyEntitlements();
-      let page = (location.hash || '#tasks').slice(1);
-      const navEl = document.querySelector(`.navitem[data-page="${page}"]`);
-      // Fall back to the first visible module if the requested page is unknown or gated off.
-      if (!PAGES[page] || (navEl && navEl.style.display === 'none')) {
-        const firstVisible = [...document.querySelectorAll('.navitem[data-page]')].find(n => n.style.display !== 'none');
-        page = firstVisible ? firstVisible.dataset.page : 'dashboard';
-      }
-      navTo(page);
+      // Land on the page the URL asks for (deep-link / refresh), or where the
+      // visitor was headed before logging in; else the first visible page.
+      // `replace` so /login (or /) becomes the clean page path with no extra history.
+      const page = resolveVisible(_intended || pageFromUrl());
+      _intended = null;
+      navTo(page, true);
     }
 
     document.getElementById('go').addEventListener('click', signIn);
@@ -248,8 +284,13 @@
     }
     document.getElementById('logout').addEventListener('click', doLogout);
 
-    // Auto-enter if already signed in.
-    sb.auth.getSession().then(({ data }) => { if (data.session) showApp(); });
+    // On load: enter the app if signed in; otherwise show the login page URL and
+    // remember where the visitor was headed so we can send them there after login.
+    sb.auth.getSession().then(({ data }) => {
+      if (data.session) { showApp(); return; }
+      _intended = pageFromUrl();
+      if (location.pathname !== '/login') history.replaceState({}, '', '/login');
+    });
   </script>
 </body>
 </html>
