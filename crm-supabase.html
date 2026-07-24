@@ -441,7 +441,7 @@
 
     // ── Invite client (calls the create-client Edge Function) ───────────────────
     const FN_URL = SB_URL + '/functions/v1/create-client';
-    const SETPW_URL = 'https://chaichoong.github.io/leadership-dashboard/set-password.html';
+    const SETPW_URL = 'https://app.operationsdirector.co.uk/set-password';
     let _inviteName = '';
     document.getElementById('dCreateClient').onclick = () => {
       const d = state.deals.find(x => x.id === document.getElementById('dId').value) || null;
