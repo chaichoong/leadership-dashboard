@@ -189,8 +189,8 @@
     // enabled=false hides them; no row = on) from the CRM client screen. Fails
     // safe: if the fetch fails, base + opt-out features stay visible and add-ons
     // stay hidden.
-    const BASE_MODULES = ['command_centre','strategy','tasks','team','systemisation','ai_assistant','dod_queue','crm'];
-    const OPT_OUT_MODULES = ['plan_builder'];
+    const BASE_MODULES = ['strategy','tasks','team','systemisation','ai_assistant','dod_queue','crm'];
+    const OPT_OUT_MODULES = ['plan_builder','command_centre'];
     async function applyEntitlements() {
       const enabled = new Set([...BASE_MODULES, ...OPT_OUT_MODULES]);
       try {
