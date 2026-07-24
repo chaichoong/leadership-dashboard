@@ -43,6 +43,11 @@
     .od-logo { width: 1.15em; height: 1.15em; flex-shrink: 0; }
     .brand .title .od-logo { color: #E8ECE6; }
     .card h1 .od-logo { color: var(--accent, #2C6E49); }
+    /* Boot cover: hides the login card AND the app until we know who is signed in
+       and which modules they have — otherwise a refresh flashes the full sidebar
+       and the previous name for a split second before gating resolves. */
+    #boot { position: fixed; inset: 0; z-index: 200; background: var(--bg-app, #F1F3EF); display: flex; align-items: center; justify-content: center; }
+    #boot .od-logo { width: 56px; height: 56px; color: var(--accent, #2C6E49); }
   </style>
 </head>
 <body>
@@ -54,6 +59,8 @@
       <path d="M 46.00 40.40 L 47.45 40.49 L 49.62 36.93 L 54.10 38.78 L 53.11 42.83 L 54.20 43.80 L 55.17 44.89 L 59.22 43.90 L 61.07 48.38 L 57.51 50.55 L 57.60 52.00 L 57.51 53.45 L 61.07 55.62 L 59.22 60.10 L 55.17 59.11 L 54.20 60.20 L 53.11 61.17 L 54.10 65.22 L 49.62 67.07 L 47.45 63.51 L 46.00 63.60 L 44.55 63.51 L 42.38 67.07 L 37.90 65.22 L 38.89 61.17 L 37.80 60.20 L 36.83 59.11 L 32.78 60.10 L 30.93 55.62 L 34.49 53.45 L 34.40 52.00 L 34.49 50.55 L 30.93 48.38 L 32.78 43.90 L 36.83 44.89 L 37.80 43.80 L 38.89 42.83 L 37.90 38.78 L 42.38 36.93 L 44.55 40.49 Z M 52.60 52.00 A 6.6 6.6 0 1 0 39.40 52.00 A 6.6 6.6 0 1 0 52.60 52.00 Z" fill="currentColor" fill-rule="evenodd"/>
     </symbol>
   </svg>
+  <!-- Boot cover — removed once identity + entitlements resolve (see hideBoot). -->
+  <div id="boot"><svg class="od-logo" aria-hidden="true"><use href="#odLogo"/></svg></div>
   <!-- Login (shown until a Supabase session exists; shared with both inner pages) -->
   <div id="login">
     <div class="card">
@@ -74,7 +81,7 @@
       <aside class="sidebar">
         <div class="brand">
           <div class="title"><svg class="od-logo" aria-hidden="true"><use href="#odLogo"/></svg> Operations Director</div>
-          <div class="sub">Kevin Brittain • Founder <a id="logout">Logout</a></div>
+          <div class="sub"><a id="logout">Logout</a></div>
         </div>
 
         <div class="section">Leadership</div>
@@ -260,17 +267,23 @@
         location.reload();
         return;
       }
-      document.getElementById('login').style.display = 'none';
-      document.getElementById('app').style.display = 'block';
-      if (session) await setIdentity();
-      await applyEntitlements();
+      // Resolve identity + module gating BEFORE revealing the app, so the client
+      // never sees the full sidebar or the previous user's name for a split second.
+      try {
+        if (session) await setIdentity();
+        await applyEntitlements();
+      } catch (e) { console.warn('[showApp] init failed', e); }
       // Land on the page the URL asks for (deep-link / refresh), or where the
       // visitor was headed before logging in; else the first visible page.
       // `replace` so /login (or /) becomes the clean page path with no extra history.
       const page = resolveVisible(_intended || pageFromUrl());
       _intended = null;
+      document.getElementById('login').style.display = 'none';
+      document.getElementById('app').style.display = 'block';
       navTo(page, true);
+      hideBoot();
     }
+    function hideBoot(){ const b = document.getElementById('boot'); if (b) b.style.display = 'none'; }
 
     document.getElementById('go').addEventListener('click', signIn);
     document.getElementById('password').addEventListener('keydown', e => { if (e.key === 'Enter') signIn(); });
@@ -290,7 +303,10 @@
       if (data.session) { showApp(); return; }
       _intended = pageFromUrl();
       if (location.pathname !== '/login') history.replaceState({}, '', '/login');
-    });
+      hideBoot();  // no session → reveal the login card
+    }).catch(hideBoot);
+    // Safety net: never leave the boot cover stuck if auth hangs.
+    setTimeout(hideBoot, 8000);
   </script>
 </body>
 </html>
