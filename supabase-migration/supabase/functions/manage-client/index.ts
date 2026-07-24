@@ -31,6 +31,10 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 
 const CANCELLED_TAG = 'Cancelled'
+// Branded set-password landing page + GHL webhook (same as create-client) for
+// re-sending a client's sign-in link.
+const SETPW_URL = 'https://app.operationsdirector.co.uk/set-password'
+const GHL_WEBHOOK = 'https://services.leadconnectorhq.com/hooks/dgsHwbYbp6xrhRGZr9ik/webhook-trigger/35dced58-d0b6-4b97-8f8f-71a97693407b'
 // The £100/mo bolt-on packs (pricing page) — map 1:1 to org_modules add-on keys.
 const ADDON_MODULES = ['finance', 'inbound_comms', 'content_machine', 'personal_wealth', 'property']
 // Base features that ship ON with every plan but can be switched OFF per client
@@ -209,6 +213,32 @@ Deno.serve(async (req) => {
         .upsert({ org_id: orgId, module_key: moduleKey, enabled }, { onConflict: 'org_id,module_key' })
       if (error) return json({ error: error.message }, 500)
       return json({ ok: true })
+    }
+
+    // ── resend_invite — new sign-in link for an EXISTING client ───────────────
+    // The account already exists, so type:'invite' would fail. A 'recovery' link
+    // works for existing users and lands on the same set-password page. Emails it
+    // via GHL (best-effort) AND returns the link so the admin can send it directly.
+    if (action === 'resend_invite') {
+      const email = String(body.email || '').trim().toLowerCase() || await ownerEmailOf()
+      if (!email) return json({ error: 'No email on file for this client.' }, 400)
+      const redirectTo = String(body.redirect_to || SETPW_URL)
+      const { data: link, error: lErr } = await admin.auth.admin.generateLink({
+        type: 'recovery', email, options: { redirectTo },
+      })
+      if (lErr) return json({ error: lErr.message }, 400)
+      const setPasswordLink = link?.properties?.action_link || ''
+
+      let emailed = false
+      try {
+        const r = await fetch(GHL_WEBHOOK, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, set_password_link: setPasswordLink, resend: true }),
+        })
+        emailed = r.ok
+      } catch (_e) { emailed = false }
+
+      return json({ ok: true, emailed, link: setPasswordLink })
     }
 
     return json({ error: 'Unknown action.' }, 400)

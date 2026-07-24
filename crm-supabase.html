@@ -536,6 +536,30 @@
       { key:'plan_builder', label:'Plan Builder' },
     ];
     let _clientDetail = null;
+    async function resendInvite(c){
+      const btn = document.getElementById('clResend');
+      const res = document.getElementById('clResendResult');
+      btn.disabled = true; btn.textContent = 'Sending…';
+      try {
+        const out = await callManage({ action:'resend_invite', org_id:c.id });
+        const msg = out.emailed ? 'We\'ve emailed them a fresh sign-in link.'
+                                : 'Copy the link below and send it to them directly.';
+        res.innerHTML = `<div style="background:var(--success-bg);border:1px solid var(--accent);border-radius:8px;padding:10px 12px;font-size:13px">
+            <b>✓ New sign-in link created.</b> ${esc(msg)}
+            ${out.link ? '<div style="margin-top:8px"><button class="btn sm" id="clCopyLink">📋 Copy link to send</button></div>' : ''}
+          </div>`;
+        if(out.link){
+          document.getElementById('clCopyLink').onclick = async () => {
+            try { await navigator.clipboard.writeText(out.link); toast('Link copied'); }
+            catch(_e){ window.prompt('Copy the sign-in link:', out.link); }
+          };
+        }
+        toast('Invite link re-sent');
+      } catch(e){
+        res.innerHTML = `<div style="color:var(--danger);font-size:13px">Couldn't send: ${esc(e.message)}</div>`;
+      }
+      btn.disabled = false; btn.textContent = '✉️ Resend invite link';
+    }
     async function openClientDetail(c){
       if(!c) return;
       _clientDetail = c;
@@ -560,10 +584,16 @@
           <div id="clBaseFeatures"><div class="ans-empty">Loading…</div></div>
         </div>
         <div class="cl-sec">
+          <div class="cl-h">Sign-in link <span class="muted" style="font-weight:400;text-transform:none;letter-spacing:0">— didn't arrive? send a fresh one</span></div>
+          <button class="btn ghost sm" id="clResend">✉️ Resend invite link</button>
+          <div id="clResendResult" style="margin-top:10px"></div>
+        </div>
+        <div class="cl-sec">
           ${contact ? '<a href="#" id="clContactLink" class="cl-link">View contact record →</a>'
                     : '<span class="muted" style="font-size:13px">No linked contact record.</span>'}
         </div>`;
       if(contact) document.getElementById('clContactLink').onclick = e => { e.preventDefault(); closeModal('clientOverlay'); openContact(contact); };
+      document.getElementById('clResend').onclick = () => resendInvite(c);
       openModal('clientOverlay');
       try {
         const out = await callManage({ action:'get_modules', org_id:c.id });
