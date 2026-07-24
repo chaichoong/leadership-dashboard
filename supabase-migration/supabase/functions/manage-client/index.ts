@@ -39,7 +39,7 @@ const GHL_WEBHOOK = 'https://services.leadconnectorhq.com/hooks/dgsHwbYbp6xrhRGZ
 const ADDON_MODULES = ['finance', 'inbound_comms', 'content_machine', 'personal_wealth', 'property']
 // Base features that ship ON with every plan but can be switched OFF per client
 // (opt-out). Stored as an org_modules row with enabled=false; no row = on.
-const OPTOUT_MODULES = ['plan_builder']
+const OPTOUT_MODULES = ['plan_builder', 'command_centre']
 // Everything the CRM client screen is allowed to toggle.
 const TOGGLEABLE_MODULES = new Set([...ADDON_MODULES, ...OPTOUT_MODULES])
 

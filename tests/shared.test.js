@@ -10,7 +10,7 @@ function escJs(str) {
 }
 
 function getField(rec, fieldId) {
-  return rec.fields?.[fieldId];
+  return rec?.fields?.[fieldId];
 }
 
 describe('escJs', () => {
@@ -64,10 +64,16 @@ describe('getField', () => {
   });
 
   it('returns undefined for null record', () => {
-    // Production getField uses rec.fields?. which throws on null rec.
-    // This test documents that behaviour. If getField is hardened to
-    // rec?.fields?.[fieldId], this test should be updated.
-    expect(() => getField(null, 'Name')).toThrow();
+    expect(getField(null, 'Name')).toBeUndefined();
+  });
+
+  it('returns undefined for undefined record (missed lookup)', () => {
+    // The crash behind "Couldn't load your dashboard" on a fresh Supabase
+    // client: accounts is empty, so accounts.find(...) is undefined and the
+    // dashboard calls getField(undefined, F.accGBP). Must not throw.
+    const accounts = [];
+    const santanderRec = accounts.find(r => r.id === 'recSantander'); // undefined
+    expect(getField(santanderRec, 'GBP')).toBeUndefined();
   });
 
   it('handles array field values', () => {
