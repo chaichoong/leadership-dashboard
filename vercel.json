@@ -7,6 +7,7 @@
   "rewrites": [
     { "source": "/login", "destination": "/supabase-app.html" },
     { "source": "/onboarding", "destination": "/onboarding.html" },
+    { "source": "/set-password", "destination": "/set-password.html" },
     { "source": "/(dashboard|strategy|plan-builder|ai-brain|tasks|crm|operations|comms|systemisation|money|accounts|pnl|wealth|team|sitemap|skills|content-machine)", "destination": "/supabase-app.html" }
   ]
 }

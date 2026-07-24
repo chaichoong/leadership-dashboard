@@ -49,7 +49,7 @@ Deno.serve(async (req) => {
     const email = String(body.email || '').trim().toLowerCase()
     const orgName = String(body.org_name || '').trim()
     const name = String(body.name || '').trim()
-    const redirectTo = String(body.redirect_to || 'https://chaichoong.github.io/leadership-dashboard/set-password.html')
+    const redirectTo = String(body.redirect_to || 'https://app.operationsdirector.co.uk/set-password')
     if (!email) return json({ error: 'A client email is required.' }, 400)
 
     // 1. Create the account + get the secure set-password link (no email sent).
