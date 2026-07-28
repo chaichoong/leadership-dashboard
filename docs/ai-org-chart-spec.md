@@ -92,6 +92,11 @@ two-flag daily cap and can send any plan back as scattered.
 - **Weekly:** full board meeting, contrasting views on the table, CEO synthesises, Kevin decides.
 - **Always:** the founder decides. The board advises, the CEO orchestrates, no persona acts
   alone, autonomy is granted gear by gear by Kevin only.
+- **GOLDEN RULE 2 (Kevin, 28 Jul 2026): Kevin does as little as possible.** The CEO and every
+  agent exhaust their own tools (files, Airtable, scripts, Slack, driving Kevin's logged-in
+  browser) before handing Kevin a step. Kevin's only jobs: founder decisions, approvals,
+  passwords/payments/legal signatures (never automated), and physical-world actions. Any step
+  handed to Kevin states in one line why it cannot be done for him.
 
 ## Deliberate design notes
 
