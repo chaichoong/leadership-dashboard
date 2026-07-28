@@ -121,6 +121,26 @@ two-flag daily cap and can send any plan back as scattered.
   Felix Dennis (How to Get Rich), John Doerr (Measure What Matters — OKRs if the scorecard
   needs it), Walker Deibel (Buy Then Build), Daniel Priestley alternates, Dominic Monkhouse.
 
+## v2.1 requirements (Kevin, 28 Jul 2026 — supersede where they conflict)
+
+- **Slack brief at 09:00 London** (not 09:30), weekdays; merged with the Money Confidence DM.
+- **Calendar is REQUIRED**, not deferred: the brief checks Kevin's calendar.
+- **Conversational in Slack:** Kevin must be able to reply and have a back-and-forth with the
+  CEO in Slack — including strategy sessions when he has concerns or fears. The support
+  network IS the product; a one-way broadcast fails the design.
+- **Brief shape (support-first):** ONE thing + the tiny first step (a ~10-minute action) +
+  what to ignore + max two board flags. Never an undifferentiated list. (Fuller founder
+  support context is recorded privately in memory/brain, not in this public file.)
+- **Quarterly check:** the CEO verifies a current-quarter objectives + strategy plan exists
+  for each domain, and raises it when missing or stale (found stale the day this was
+  written: priorities doc still said Q2 in late July).
+- **Interview-first:** before/alongside the build, an intensive founder interview (CRIT
+  style, one question at a time) fills every knowledge gap, writing each answer straight
+  into the brain + memory, so the CEO never asks what it should already know.
+- **KAIZEN DUTY:** the CEO/board continuously improve the system — usage drop, drift, or
+  friction is a failure signal the CEO must surface and fix. Kevin's history: tools that
+  stop serving him get abandoned; preventing that is part of the CEO's job description.
+
 ## Build phasing (unchanged from MASTER-PLAN §13)
 
 1. **Phase 1 (pre-launch):** CEO daily brief, Slack + dashboard tab. The board exists as the
