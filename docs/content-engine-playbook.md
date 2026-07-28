@@ -192,18 +192,28 @@ Kevin.
    source cannot be named, the figure comes out. This rule exists because the first draft of the
    calendar invented eight customers with specific numbers, which breaks accuracy-over-hype,
    breaches UK advertising rules, and would destroy the credibility the content is meant to build.
-2. **One CTA a week.** Only the Friday post carries an overt ask and a link. The other four carry
+2. **AI-generated visuals are illustration, never proof.** Rule 1 covers what a post claims in
+   words. This covers what it shows. An AI-made image or clip may be used as decoration, as an
+   abstract or conceptual illustration, or as a clearly stylised graphic. It may never depict, or
+   be capable of being mistaken for, a real thing: a product screenshot, a dashboard, a client, a
+   person, a testimonial, a result, a place Kevin has been, or footage of an event that happened.
+   If a viewer could reasonably read the visual as a photograph or a recording of something real,
+   it does not ship. Two extra conditions: (a) nothing AI-generated goes anywhere near Runpreneur
+   or the philanthropy mission, where accuracy-over-hype is a red line and invented imagery of the
+   mission or of children would be indefensible; (b) where a platform offers an AI-content label,
+   use it. Source of truth for real assets is Kevin's own footage via the Content Machine.
+3. **One CTA a week.** Only the Friday post carries an overt ask and a link. The other four carry
    none. Volume of asks is what kills a small page's reach fastest.
-3. **No Runpreneur on OD channels, no OD on the personal feed.**
-4. **UK English throughout.** No em dashes. No motivational padding, no AI clichés, no hype
+4. **No Runpreneur on OD channels, no OD on the personal feed.**
+5. **UK English throughout.** No em dashes. No motivational padding, no AI clichés, no hype
    adjectives. Short sentences, active voice, "you" and "your".
-5. **13-year-old rule.** If a sentence needs jargon explained, rewrite the sentence.
-6. **PECR and consent.** Only people who ask for the magnet get emailed it. Comment requests and
+6. **13-year-old rule.** If a sentence needs jargon explained, rewrite the sentence.
+7. **PECR and consent.** Only people who ask for the magnet get emailed it. Comment requests and
    form fills are solicited and documented. Nobody is added to a sequence for engaging with a post.
-7. **Kevin approves every post before it publishes** until the autonomy gate in §9 is met.
-8. **Pricing stated anywhere must match the locked launch pricing:** £1,500 setup, £350/mo, 30-day
+8. **Kevin approves every post before it publishes** until the autonomy gate in §9 is met.
+9. **Pricing stated anywhere must match the locked launch pricing:** £1,500 setup, £350/mo, 30-day
    trial. Never quote module pricing until Phase 2 pricing goes live.
-9. **Agent vs assistant.** Only the two autonomous agents in §4a may be called agents. Everything
+10. **Agent vs assistant.** Only the two autonomous agents in §4a may be called agents. Everything
    else is an assistant. Never describe the reconciliation, wealth or AI Brain engines as AI.
 
 ### What rule 1 does and does not mean
