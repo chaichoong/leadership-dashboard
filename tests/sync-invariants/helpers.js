@@ -195,6 +195,7 @@ const BYNAME_FETCH_ALLOWLIST = [
   { table: 'tblZ75JgE1wzDP0ps', label: 'AI Brain Today badge — read-only display feed (shared.js updateAiBrainBadge)' },
   { table: 'tblJ3GFnAAoXf99e9', label: 'Agent Activity KPI — read-only card (dashboard.js loadAgentKpi)' },
   { table: 'tbl1nr0EcX2T62KME', label: 'Fintable accounts sync — filterByFormula/sort on {**Last Successful Update}', match: 'Last+Successful+Update' },
+  { table: 'tblIxbzDSOCI5hqJn', label: 'CEO Briefs — read-only display tab; the worker writes this table by field name (ceo-brief.js)' },
 ];
 
 // Pull the Airtable table ID (tbl...) out of a v0 API URL.
@@ -236,6 +237,7 @@ const TABLE_MAP = {
   'tbl065D58MBEJhjlp': 'mainMethods',
   'tblHrpTMd5LNYn8v1': 'projects',
   'tblbfuxYxu4uMMWwT': 'reconAudit',
+  'tblIxbzDSOCI5hqJn': 'ceoBriefs',
 };
 
 // The app pulls two things off the public internet on every page load: Chart.js from
