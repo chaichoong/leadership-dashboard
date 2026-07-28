@@ -6,7 +6,7 @@
 //       (Split Count, record arrays), not from parsed display strings or stale local state.
 
 const { test, expect } = require('@playwright/test');
-const { loadDashboard, loadDashboardWithFixtures, FIELDS, makeFixtures } = require('./helpers');
+const { loadDashboard, loadDashboardWithFixtures, FIELDS, makeFixtures, assertByNameFetchesAllowed } = require('./helpers');
 
 test.describe('Stale Data Protection', () => {
 
@@ -52,7 +52,7 @@ test.describe('Stale Data Protection', () => {
           requests.withFieldId++;
         } else {
           requests.without++;
-          requests.exceptions.push(url.split('?')[0]);
+          requests.exceptions.push(url); // full URL — allowlist may match on query params
         }
       }
       await route.fulfill({ status: 200, contentType: 'application/json', body: '{"records":[]}' });
@@ -76,9 +76,9 @@ test.describe('Stale Data Protection', () => {
     }
 
     // The main data fetches must use returnFieldsByFieldId.
-    // A small number of specialized queries (e.g. Fintable sync) may use field names.
     expect(requests.withFieldId).toBeGreaterThan(0);
-    // At most 2 exceptions allowed (Fintable accounts sync uses field names)
-    expect(requests.without).toBeLessThanOrEqual(2);
+    // Every by-name exception must be a known read-only feature fetch (see helpers.js).
+    // A new by-name fetch on any other table fails here, naming the URL.
+    assertByNameFetchesAllowed(requests.exceptions, expect);
   });
 });

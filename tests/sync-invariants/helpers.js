@@ -176,6 +176,47 @@ function makeFixtures() {
   };
 }
 
+// Allowlist of on-load GET fetches that may legitimately SKIP returnFieldsByFieldId.
+// The invariant (two-way-sync + stale-data specs) is that main data reads use field IDs,
+// so read and write paths can never drift on a field name (the Quarter End/QuarterEnd bug).
+// A few read-only feature fetches read the response by field NAME on purpose and have no
+// matching write path, so the mismatch bug cannot bite them. Each is named here with WHY.
+//
+// This replaced a bare "at most 2 exceptions" count on 2026-07-27. The count let ANY new
+// by-name fetch pass as long as the total stayed under the cap, and silently went red once
+// a third legitimate feature fetch was added — protecting nothing while blocking pushes.
+// An allowlist keeps the invariant sharp: a by-name fetch on any table NOT listed here (or
+// an accounts fetch that is not the Fintable sync) fails the test and names the offending URL.
+//
+// `match` (optional): a substring that MUST appear in the URL for the exception to apply.
+// Used to pin the accounts exception to the Fintable sync specifically, so a plain by-name
+// read of the (writable) Accounts table is still caught.
+const BYNAME_FETCH_ALLOWLIST = [
+  { table: 'tblZ75JgE1wzDP0ps', label: 'AI Brain Today badge — read-only display feed (shared.js updateAiBrainBadge)' },
+  { table: 'tblJ3GFnAAoXf99e9', label: 'Agent Activity KPI — read-only card (dashboard.js loadAgentKpi)' },
+  { table: 'tbl1nr0EcX2T62KME', label: 'Fintable accounts sync — filterByFormula/sort on {**Last Successful Update}', match: 'Last+Successful+Update' },
+];
+
+// Pull the Airtable table ID (tbl...) out of a v0 API URL.
+function tableIdFromUrl(url) {
+  const m = url.match(/\/v0\/[^/]+\/(tbl[A-Za-z0-9]+)/);
+  return m ? m[1] : null;
+}
+
+// Assert every by-name (no returnFieldsByFieldId) on-load fetch is a known allowed exception.
+// `urls` = the full URLs that skipped returnFieldsByFieldId. `expect` is passed in because
+// helpers.js is required from the spec files. Fails loudly, naming each disallowed URL, so a
+// new main-data by-name fetch cannot slip through.
+function assertByNameFetchesAllowed(urls, expect) {
+  const disallowed = urls.filter((url) => {
+    const tid = tableIdFromUrl(url);
+    return !BYNAME_FETCH_ALLOWLIST.some(
+      (e) => e.table === tid && (!e.match || url.includes(e.match))
+    );
+  });
+  expect(disallowed, `Unlisted by-name fetch(es) — add to BYNAME_FETCH_ALLOWLIST or use returnFieldsByFieldId=true:\n${disallowed.join('\n')}`).toEqual([]);
+}
+
 // Table ID → fixture key mapping
 const TABLE_MAP = {
   'tblpqkvWJJo8Uu25q': 'businesses',
@@ -320,4 +361,4 @@ async function loadDashboardWithFixtures(page, fixtureOverrides, hash = '') {
   await page.waitForTimeout(1500);
 }
 
-module.exports = { MOCK_PAT, FIELDS, TABLE_MAP, makeFixtures, stubExternalHosts, setupMockAirtable, loadDashboard, loadDashboardWithFixtures };
+module.exports = { MOCK_PAT, FIELDS, TABLE_MAP, BYNAME_FETCH_ALLOWLIST, tableIdFromUrl, assertByNameFetchesAllowed, makeFixtures, stubExternalHosts, setupMockAirtable, loadDashboard, loadDashboardWithFixtures };

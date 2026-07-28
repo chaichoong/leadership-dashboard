@@ -5,7 +5,7 @@
 //       With returnFieldsByFieldId=true this is enforced by design (IDs are unambiguous).
 
 const { test, expect } = require('@playwright/test');
-const { loadDashboard, FIELDS } = require('./helpers');
+const { loadDashboard, FIELDS, assertByNameFetchesAllowed } = require('./helpers');
 
 test.describe('Two-Way Sync Consistency', () => {
 
@@ -34,8 +34,9 @@ test.describe('Two-Way Sync Consistency', () => {
 
     // The vast majority of requests must use returnFieldsByFieldId
     expect(withFieldId.length).toBeGreaterThan(0);
-    // Only specialized queries (Fintable sync) may skip it — max 2 exceptions
-    expect(withoutFieldId.length).toBeLessThanOrEqual(2);
+    // Any request that skips it must be a known read-only feature fetch (see helpers.js).
+    // A new by-name fetch on any other table fails here, naming the URL.
+    assertByNameFetchesAllowed(withoutFieldId, expect);
   });
 
   test('PATCH requests reference valid field IDs not names', async ({ page }) => {
