@@ -92,6 +92,11 @@ two-flag daily cap and can send any plan back as scattered.
 - **Weekly:** full board meeting, contrasting views on the table, CEO synthesises, Kevin decides.
 - **Always:** the founder decides. The board advises, the CEO orchestrates, no persona acts
   alone, autonomy is granted gear by gear by Kevin only.
+- **THE KNOWLEDGE LOOP (Kevin, 28 Jul 2026):** every ruling, correction, or piece of context
+  Kevin gives in conversation is STORED as private knowledge (Claude memory + the private
+  brain — never this public repo) and applied forever after. The measure of maturity: the
+  CEO arrives with "here is what I did / here is what needs your yes" — approvals, not
+  questions. If Kevin has to explain the same thing twice, the loop failed.
 - **GOLDEN RULE 2 (Kevin, 28 Jul 2026): Kevin does as little as possible.** The CEO and every
   agent exhaust their own tools (files, Airtable, scripts, Slack, driving Kevin's logged-in
   browser) before handing Kevin a step. Kevin's only jobs: founder decisions, approvals,
