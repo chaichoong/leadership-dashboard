@@ -682,6 +682,10 @@ if (tabId === 'comms') {
         if (tabId === 'transactions') {
             if (typeof renderTransactionsTab === 'function') renderTransactionsTab();
         }
+        // Render CEO Brief on switch
+        if (tabId === 'ceo-brief') {
+            if (typeof renderCeoBriefTab === 'function') renderCeoBriefTab();
+        }
         // Render Money Confidence on switch
         if (tabId === 'money') {
             if (typeof renderMoneyTab === 'function') renderMoneyTab();
