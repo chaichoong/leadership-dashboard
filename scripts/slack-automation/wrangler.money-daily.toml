@@ -2,16 +2,34 @@ name = "money-confidence-daily"
 main = "money-daily-worker.js"
 compatibility_date = "2024-12-01"
 
-# Two UTC crons cover 09:30 Europe/London year-round:
-#   "30 8 * * 1-5" hits 09:30 London during BST (summer)
-#   "30 9 * * 1-5" hits 09:30 London during GMT (winter)
+# Two UTC crons cover 09:00 Europe/London year-round:
+#   "0 8 * * 1-5" hits 09:00 London during BST (summer)
+#   "0 9 * * 1-5" hits 09:00 London during GMT (winter)
 # The worker's isLondonSendTime() gate lets exactly one through per weekday.
+# (Was 09:30 money-only; promoted to the 09:00 AI CEO brief on 28 Jul 2026.)
 [triggers]
-crons = ["30 8 * * 1-5", "30 9 * * 1-5"]
+crons = ["0 8 * * 1-5", "0 9 * * 1-5"]
+
+# Same-zone workers cannot call each other via public URLs (Cloudflare error
+# 1042) — AI calls go through a direct service binding to claude-proxy.
+[[services]]
+binding = "PROXY"
+service = "claude-proxy"
+
+# ── AI models — the ONE place this deployable names a model ──
+# Mirrors js/ai-models.js (the browser single source). Plain vars, not secrets.
+[vars]
+AI_MODEL_DEFAULT = "claude-sonnet-4-6"
+AI_MODEL_LIGHT = "claude-haiku-4-5-20251001"
 
 # Secrets are managed via `wrangler secret put` and persist across deploys —
 # not listed here so a deploy never drops them:
-#   SLACK_BOT_TOKEN   xoxb-… (chat:write, users:read, users:read.email)
-#   AIRTABLE_PAT      pat_…  (read: Accounts, Tenancies, Costs, Transactions)
-#   RECIPIENT_EMAIL   (optional) defaults to kevin@runpreneur.org.uk in code
-#   TRIGGER_KEY       (optional) guards the manual /?mode=… test endpoint
+#   SLACK_BOT_TOKEN    xoxb-… (chat:write, users:read, users:read.email)
+#   AIRTABLE_PAT       pat_…  (read: Accounts, Tenancies, Costs, Transactions,
+#                              Tasks; write: CEO Briefs)
+#   PROXY_TOKEN        bearer for claude-proxy service calls (PROXY_SERVICE_TOKEN_2)
+#   QUARTER_CONTEXT    current-quarter goals paragraph (update each quarter —
+#                      NEVER in this file, the repo is public)
+#   CALENDAR_ICS_URL   (optional) Google Calendar private ICS address
+#   RECIPIENT_EMAIL    (optional) defaults to kevin@runpreneur.org.uk in code
+#   TRIGGER_KEY        guards the manual /?mode=… test endpoints
