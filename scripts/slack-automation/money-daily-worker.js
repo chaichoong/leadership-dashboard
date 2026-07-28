@@ -1,8 +1,12 @@
-// money-confidence-daily — Slack DM of the "Safe to act today" figure.
+// money-confidence-daily — now the AI CEO morning brief (28 Jul 2026).
 //
-// Cron: Mon–Fri 09:30 Europe/London. Recomputes the figure LIVE from Airtable
-// at send time (never a cached value), then DMs Kevin so he has it on his phone
-// before he opens the laptop.
+// Cron: Mon–Fri 09:00 Europe/London. Recomputes the money figure LIVE from
+// Airtable, gathers open tasks + calendar + quarter context, has the AI CEO
+// (Integrator voice, ONE-thing rule) write the daily direction, DMs Kevin,
+// and stores the brief in the CEO Briefs table for the dashboard tab.
+// If the CEO layer fails for ANY reason, the original money-only DM still
+// sends — the working feed is never sacrificed to the new feature.
+// Design: docs/ai-org-chart-spec.md + the AI brain (00 AI Context).
 //
 // ── SOURCE OF TRUTH ──────────────────────────────────────────────────────────
 // This is a faithful PORT of the browser engine. Keep it in sync:
@@ -50,6 +54,11 @@ const REC = {
     tntZempler:   'recsR9QhRKYwgV8oP',
     subRentalInc: 'recI8yCstyDP1Nd4b',
 };
+
+// CEO-brief tables (fetched by FIELD NAME, not field id — see airtableFetch byName)
+const TBL_TASKS  = 'tblqB8b22hKBL4PF1';
+const TBL_BRIEFS = 'tblIxbzDSOCI5hqJn';
+const CLAUDE_PROXY = 'https://claude-proxy.kevinbrittain.workers.dev';
 
 // ── Ported helpers ───────────────────────────────────────────────────────────
 const getField = (rec, id) => rec.fields?.[id];
@@ -217,12 +226,12 @@ function computeSafeToAct({ accounts, tenancies, costs, transactions }) {
 }
 
 // ── Airtable ─────────────────────────────────────────────────────────────────
-async function airtableFetch(pat, tableId, params = {}) {
+async function airtableFetch(pat, tableId, params = {}, byName = false) {
     const records = [];
     let offset = null;
     do {
         const url = new URL(`https://api.airtable.com/v0/${BASE_ID}/${tableId}`);
-        url.searchParams.set('returnFieldsByFieldId', 'true');
+        if (!byName) url.searchParams.set('returnFieldsByFieldId', 'true');
         Object.entries(params).forEach(([k, v]) => {
             if (Array.isArray(v)) v.forEach(val => url.searchParams.append(k, val));
             else url.searchParams.append(k, v);
@@ -266,6 +275,144 @@ async function loadAndCompute(pat) {
         }),
     ]);
     return computeSafeToAct({ accounts, tenancies, costs, transactions });
+}
+
+// ── CEO brief: gather → think → store ────────────────────────────────────────
+
+function todayLondonISO() {
+    return new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/London' }).format(new Date());
+}
+
+// Open tasks, compressed to what a CEO needs for triage. Field NAMES on purpose.
+async function gatherTasks(pat) {
+    const rows = await airtableFetch(pat, TBL_TASKS, {
+        filterByFormula: `AND({Task Name}!='',NOT({Status}='Completed'),NOT({Status}='Cancelled'))`,
+        'fields[]': ['Task Name', 'Assignee', 'Due Date', 'Status', 'Priority'],
+    }, true);
+    const today = todayLondonISO();
+    const t = rows.map(r => ({
+        name: String(r.fields['Task Name'] || '').slice(0, 90),
+        who: (r.fields['Assignee'] && r.fields['Assignee'].name) || 'unassigned',
+        due: (r.fields['Due Date'] || '').slice(0, 10),
+        status: String(r.fields['Status'] || ''),
+        priority: String(r.fields['Priority'] || ''),
+    }));
+    const overdue = t.filter(x => x.due && x.due < today);
+    const dueToday = t.filter(x => x.due === today);
+    const kevins = t.filter(x => /kevin/i.test(x.who));
+    const line = x => `- ${x.name} | ${x.who} | due ${x.due || 'none'} | ${x.priority || x.status}`;
+    return {
+        counts: { open: t.length, overdue: overdue.length, dueToday: dueToday.length, kevins: kevins.length },
+        overdueList: overdue.slice(0, 20).map(line).join('\n'),
+        dueTodayList: dueToday.slice(0, 15).map(line).join('\n'),
+        kevinList: kevins.slice(0, 25).map(line).join('\n'),
+    };
+}
+
+// Today's calendar from a private ICS feed (no OAuth needed). Optional: when the
+// CALENDAR_ICS_URL secret is unset the brief simply says so.
+async function gatherCalendar(env) {
+    if (!env.CALENDAR_ICS_URL) return { connected: false, today: '' };
+    try {
+        const resp = await fetch(env.CALENDAR_ICS_URL);
+        if (!resp.ok) throw new Error('ICS fetch ' + resp.status);
+        const ics = await resp.text();
+        const today = todayLondonISO().replace(/-/g, '');
+        const events = [];
+        for (const block of ics.split('BEGIN:VEVENT').slice(1)) {
+            const dt = (block.match(/DTSTART[^:]*:(\d{8}(T\d{6})?)/) || [])[1] || '';
+            if (!dt.startsWith(today)) continue;
+            const summary = ((block.match(/SUMMARY:(.*)/) || [])[1] || '').trim();
+            const time = dt.includes('T') ? `${dt.slice(9, 11)}:${dt.slice(11, 13)}` : 'all day';
+            if (summary) events.push(`${time} — ${summary}`);
+        }
+        return { connected: true, today: events.sort().join('\n') || '(no events today)' };
+    } catch (err) {
+        return { connected: true, today: '(calendar could not be read today: ' + String(err.message).slice(0, 80) + ')' };
+    }
+}
+
+function buildCeoPrompt(m, tasks, calendar, env) {
+    const system = `You are Kevin Brittain's AI CEO — his right hand, running his day so he does not have to.
+Voice: Gino Wickman's Integrator running Gary Keller's ONE-thing rule. Direct, warm, spartan, UK English.
+HARD RULES:
+- Write for a 13-year-old reader. No jargon, no acronyms without explanation, no em dashes.
+- Kevin has ADHD and stalls on admin. Give ONE thing, with a tiny FIRST STEP of about 10 minutes, so starting is easy.
+- Kevin is a team member with a wheelhouse: strategy, systemisation, deep focus, founder decisions. NEVER give him admin, chasing, paperwork or phone calls — those route to the team (Mica: operations; Ericamae: marketing) or are named as delegations.
+- Triage doctrine: genuine urgency first (a real deadline WITH a real consequence — most "urgent" labels fail this test); otherwise project work that advances the QUARTER goals; everything else is ignored, batched or delegated.
+- Max TWO board flags, one line each, only when a lane genuinely triggers: Crabtree (cash/labour), Michalowicz (Profit First discipline), Hormozi (offer/leads), Jenyns (should be a system/agent), Martell (AI should do this, not Kevin), Peters (overwhelm/energy — may pause the plan), Keller (this is scatter, refocus).
+- The money traffic light is provided — respect it. Red or amber changes what today's one thing can be.
+Respond ONLY with JSON: {"one_thing":"...","first_step":"...","why":"...","ignore":["...","..."],"flags":["Persona: ..."],"headline":"one short sentence for the top of the message"}`;
+    const user = `TODAY: ${todayLondonISO()} (${londonDateLabel()})
+
+MONEY (live, from the Money Confidence engine):
+Safe to act today: ${fmt(m.safeToActToday)} — light ${m.light.toUpperCase()}. ${m.headline}
+
+QUARTER CONTEXT (the goals today must serve):
+${env.QUARTER_CONTEXT || 'Q3 2026 ends 30 September. Theme: revenue for Operations Director. First paying client by 31 Aug; 3 clients by 30 Sep. Critical path: finish Supabase migration, test every page, test onboarding end to end, then open outreach. Property: protect cash flow; year-end target £14,000/month operating cushion.'}
+
+CALENDAR TODAY: ${calendar.connected ? '\n' + calendar.today : 'not connected yet'}
+
+TASKS (live): ${tasks.counts.open} open, ${tasks.counts.overdue} overdue, ${tasks.counts.dueToday} due today, ${tasks.counts.kevins} carrying Kevin's name.
+OVERDUE (top):
+${tasks.overdueList || '(none)'}
+DUE TODAY:
+${tasks.dueTodayList || '(none)'}
+KEVIN'S OPEN TASKS (top):
+${tasks.kevinList || '(none)'}
+
+Write today's brief.`;
+    return { system, user };
+}
+
+async function callCeo(env, prompt) {
+    const res = await env.PROXY.fetch(CLAUDE_PROXY, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${env.PROXY_TOKEN}`,
+        },
+        body: JSON.stringify({
+            model: env.AI_MODEL_DEFAULT,
+            max_tokens: 900,
+            system: prompt.system,
+            messages: [{ role: 'user', content: prompt.user }],
+        }),
+    });
+    if (!res.ok) throw new Error('CEO proxy error ' + res.status + ': ' + (await res.text()).slice(0, 120));
+    const data = await res.json();
+    const text = data.content?.[0]?.text || '';
+    const json = text.match(/\{[\s\S]*\}/);
+    if (!json) throw new Error('CEO returned no JSON');
+    const b = JSON.parse(json[0]);
+    if (!b.one_thing || !b.first_step) throw new Error('CEO JSON missing required fields');
+    b.ignore = Array.isArray(b.ignore) ? b.ignore.slice(0, 4) : [];
+    b.flags = Array.isArray(b.flags) ? b.flags.slice(0, 2) : [];
+    return b;
+}
+
+async function storeBrief(pat, brief, m, tasks) {
+    const body = {
+        records: [{ fields: {
+            'Date': todayLondonISO(),
+            'One Thing': brief.one_thing.slice(0, 250),
+            'First Step': brief.first_step.slice(0, 250),
+            'Why': brief.why || '',
+            'Ignore Today': brief.ignore.join('\n'),
+            'Board Flags': brief.flags.join('\n'),
+            'Money Light': m.light,
+            'Safe To Act': Number(m.safeToActToday.toFixed(2)),
+            'Full Brief': JSON.stringify(brief),
+            'Source Stats': JSON.stringify(tasks.counts),
+        } }],
+        typecast: true,
+    };
+    const r = await fetch(`https://api.airtable.com/v0/${BASE_ID}/${TBL_BRIEFS}`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${pat}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+    });
+    if (!r.ok) throw new Error('Brief store failed ' + r.status);
 }
 
 // ── Slack ────────────────────────────────────────────────────────────────────
@@ -314,6 +461,25 @@ async function slackPost(token, channel, text, blocks) {
     return d;
 }
 
+// The 09:00 CEO brief blocks. Money line included so ONE message covers the morning.
+function buildBriefBlocks(m, brief) {
+    const blocks = [
+        { type: 'header', text: { type: 'plain_text', text: `☀️ ${brief.headline || 'Your day, decided.'}`, emoji: true } },
+        { type: 'section', text: { type: 'mrkdwn', text: `*THE ONE THING*\n${brief.one_thing}\n\n*Start here (10 min):* ${brief.first_step}` } },
+        { type: 'section', text: { type: 'mrkdwn', text: `*Why this wins today:* ${brief.why || ''}` } },
+        { type: 'section', text: { type: 'mrkdwn', text: `${LIGHT_EMOJI[m.light]} *Safe to act today: ${fmt(m.safeToActToday)}* (${LIGHT_LABEL[m.light]})` } },
+    ];
+    if (brief.ignore.length) {
+        blocks.push({ type: 'section', text: { type: 'mrkdwn', text: `*Ignore today:* ${brief.ignore.join(' · ')}` } });
+    }
+    for (const f of brief.flags) {
+        blocks.push({ type: 'section', text: { type: 'mrkdwn', text: `⚑ ${f}` } });
+    }
+    blocks.push({ type: 'context', elements: [{ type: 'mrkdwn',
+        text: `${londonDateLabel()} · 09:00 CEO brief · reply here to talk it through · history on the CEO Brief tab` }] });
+    return blocks;
+}
+
 async function sendDailyDM(env) {
     const token = env.SLACK_BOT_TOKEN;
     const pat = env.AIRTABLE_PAT;
@@ -323,9 +489,22 @@ async function sendDailyDM(env) {
 
     const userId = await slackLookup(token, recipient);
     const m = await loadAndCompute(pat);
-    const fallback = `Safe to act today: ${fmt(m.safeToActToday)} (${LIGHT_LABEL[m.light]})`;
-    await slackPost(token, userId, fallback, buildBlocks(m));
-    return m;
+
+    // CEO layer — any failure here falls back to the proven money-only DM.
+    try {
+        const [tasks, calendar] = await Promise.all([gatherTasks(pat), gatherCalendar(env)]);
+        const brief = await callCeo(env, buildCeoPrompt(m, tasks, calendar, env));
+        const fallbackText = `ONE thing: ${brief.one_thing} | Safe to act: ${fmt(m.safeToActToday)} (${LIGHT_LABEL[m.light]})`;
+        await slackPost(token, userId, fallbackText, buildBriefBlocks(m, brief));
+        try { await storeBrief(pat, brief, m, tasks); }
+        catch (e) { await alertFailure(env, new Error('Brief sent but NOT stored: ' + e.message)); }
+        return m;
+    } catch (ceoErr) {
+        const fallback = `Safe to act today: ${fmt(m.safeToActToday)} (${LIGHT_LABEL[m.light]})`;
+        await slackPost(token, userId, fallback, buildBlocks(m));
+        await alertFailure(env, new Error('CEO brief failed (money DM sent as fallback): ' + ceoErr.message));
+        return m;
+    }
 }
 
 // Best-effort failure alert so a broken feed never fails silently.
@@ -340,8 +519,8 @@ async function alertFailure(env, err) {
     } catch (_) { /* nothing more we can do */ }
 }
 
-// True only at the 09:30 Europe/London firing, whichever UTC cron fired it.
-// Two UTC crons (08:30 + 09:30) cover BST and GMT; this gate lets exactly one
+// True only at the 09:00 Europe/London firing, whichever UTC cron fired it.
+// Two UTC crons (08:00 + 09:00) cover BST and GMT; this gate lets exactly one
 // through per day.
 function isLondonSendTime(now = new Date()) {
     const parts = new Intl.DateTimeFormat('en-GB', {
@@ -349,7 +528,7 @@ function isLondonSendTime(now = new Date()) {
     }).formatToParts(now);
     const hour = Number(parts.find(p => p.type === 'hour').value);
     const minute = Number(parts.find(p => p.type === 'minute').value);
-    return hour === 9 && minute >= 25 && minute <= 35;
+    return hour === 9 && minute <= 10;
 }
 
 export default {
@@ -374,6 +553,13 @@ export default {
             if (url.searchParams.get('mode') === 'send') {
                 const m = await sendDailyDM(env);
                 return Response.json({ ok: true, sent: true, safeToActToday: m.safeToActToday, light: m.light });
+            }
+            // mode=brief → compute the full CEO brief WITHOUT sending or storing.
+            if (url.searchParams.get('mode') === 'brief') {
+                const m = await loadAndCompute(env.AIRTABLE_PAT);
+                const [tasks, calendar] = await Promise.all([gatherTasks(env.AIRTABLE_PAT), gatherCalendar(env)]);
+                const brief = await callCeo(env, buildCeoPrompt(m, tasks, calendar, env));
+                return Response.json({ ok: true, brief, money: { safeToActToday: m.safeToActToday, light: m.light }, taskCounts: tasks.counts, calendarConnected: calendar.connected });
             }
             const m = await loadAndCompute(env.AIRTABLE_PAT);
             return Response.json({ ok: true, ...m });
