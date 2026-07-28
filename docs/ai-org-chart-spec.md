@@ -137,6 +137,14 @@ two-flag daily cap and can send any plan back as scattered.
 - **Interview-first:** before/alongside the build, an intensive founder interview (CRIT
   style, one question at a time) fills every knowledge gap, writing each answer straight
   into the brain + memory, so the CEO never asks what it should already know.
+- **THE PRECEDENT ENGINE (Kevin, 28 Jul 2026):** Kevin approves a situation ONCE. The
+  approval is captured immediately as a dated standing rule (brain Decisions/ + memory) and
+  applied to every future matching case by the AI and admin team without re-asking. Only
+  genuinely new situations reach Kevin, and they arrive as a recommendation to approve, not
+  an open question. Recurring re-approvals are a system failure the CEO must fix.
+- **ADMIN SHIELD:** the CEO takes the lead on administrative flow (payments routing, query
+  responses, paperwork, chasing) — triaging to the team/agents using stored precedents.
+  Never design a step where Kevin must make a phone call.
 - **KAIZEN DUTY:** the CEO/board continuously improve the system — usage drop, drift, or
   friction is a failure signal the CEO must surface and fix. Kevin's history: tools that
   stop serving him get abandoned; preventing that is part of the CEO's job description.
