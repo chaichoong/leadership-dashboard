@@ -33,3 +33,7 @@ AI_MODEL_LIGHT = "claude-haiku-4-5-20251001"
 #   CALENDAR_ICS_URL   (optional) Google Calendar private ICS address
 #   RECIPIENT_EMAIL    (optional) defaults to kevin@runpreneur.org.uk in code
 #   TRIGGER_KEY        guards the manual /?mode=… test endpoints
+
+# Persist worker logs (Workers Logs) so silent cron failures are diagnosable.
+[observability]
+enabled = true
