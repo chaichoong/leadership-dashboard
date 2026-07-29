@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Skills Library — Guide</title>
+  <link rel="stylesheet" href="../css/tokens.css?v=1">
+  <style>
+    body { background: var(--bg-app); color: var(--text-primary); margin: 0; line-height: 1.6; }
+    .wrap { max-width: 760px; margin: 0 auto; padding: 32px 22px 80px; }
+    .g-head { display: flex; align-items: center; gap: 14px; margin-bottom: 6px; }
+    .g-head .ico { font-size: 34px; }
+    .g-head h1 { font-size: var(--fs-2xl); margin: 0; }
+    .g-sub { color: var(--text-secondary); font-size: var(--fs-md); margin: 0 0 26px; }
+    .big { background: var(--accent-soft); border: 1px solid var(--border-default); border-radius: var(--radius-lg);
+           padding: 18px 20px; font-size: var(--fs-lg); font-weight: var(--fw-semibold); color: var(--text-primary); margin-bottom: 28px; }
+    h2 { font-size: var(--fs-xl); margin: 30px 0 10px; }
+    ul, ol { margin: 0 0 6px; padding-left: 22px; }
+    li { margin-bottom: 8px; }
+    ol.steps { counter-reset: step; list-style: none; padding-left: 0; }
+    ol.steps > li { counter-increment: step; position: relative; padding: 0 0 12px 44px; }
+    ol.steps > li::before { content: counter(step); position: absolute; left: 0; top: 0; width: 30px; height: 30px;
+      background: var(--accent); color: #fff; border-radius: 50%; display: flex; align-items: center; justify-content: center;
+      font-weight: var(--fw-bold); font-size: var(--fs-sm); }
+    .tip { background: var(--bg-surface); border-left: 4px solid var(--accent-gold); border-radius: var(--radius-md);
+           padding: 12px 16px; margin: 16px 0; color: var(--text-secondary); }
+    .tip strong { color: var(--text-primary); }
+    .card { background: var(--bg-surface); border: 1px solid var(--border-subtle); border-radius: var(--radius-lg); padding: 20px 22px; }
+    b, strong { color: var(--text-primary); }
+    figure.shot { margin: 12px 0 4px; }
+    figure.shot img { width: 100%; border: 1px solid var(--border-default); border-radius: var(--radius-md); display: block; }
+    figcaption { font-size: var(--fs-xs, 12px); color: var(--text-muted); margin-top: 6px; text-align: center; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="g-head"><span class="ico">🧠</span><h1>Skills Library</h1></div>
+    <p class="g-sub">Your guide to this page</p>
+
+    <div class="big">A shelf of ready-made AI helpers. Each one does a job for you — find the one you need and press go.</div>
+
+    <h2>What this page is for</h2>
+    <div class="card">
+      <p>It's a library of AI <strong>skills</strong> — little helpers that each carry out a task for you, such as onboarding a customer or drafting a document. Browse what's available and run whichever one you need.</p>
+    </div>
+
+    <h2>What you can do here</h2>
+    <ul>
+      <li>Browse all the skills available to you, grouped by type.</li>
+      <li>Search for one by name or keyword.</li>
+      <li>See exactly what each skill does before you run it.</li>
+      <li>Run a skill with one click.</li>
+    </ul>
+
+    <h2>How to find and run a skill</h2>
+    <ol class="steps">
+      <li>Use the <strong>search box</strong>, or tap a <strong>category</strong> (like Operations or Legal) or a <strong>filter</strong> (My Skills, Active, Presets, All) to narrow the list down.
+        <figure class="shot"><img src="img/skills-top.png" alt="The Skills Library search box, filter buttons and category chips"><figcaption>Search, or filter by type, to find what you need.</figcaption></figure>
+      </li>
+      <li>Each skill is a card that explains what it does. Read it to check it's the right one.
+        <figure class="shot"><img src="img/skills-cards.png" alt="Skill cards, each with a description and a Run Skill button"><figcaption>Every card says what the skill does.</figcaption></figure>
+      </li>
+      <li>When you've found the right one, click <strong>▶ Run Skill</strong>.</li>
+    </ol>
+
+    <div class="tip"><strong>Tip:</strong> <strong>Presets</strong> are ready-made skills that come with the platform; <strong>My Skills</strong> are the ones set up specially for you.</div>
+  </div>
+</body>
+</html>

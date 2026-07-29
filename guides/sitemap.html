@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Site Map &amp; Guides — Guide</title>
+  <link rel="stylesheet" href="../css/tokens.css?v=1">
+  <style>
+    body { background: var(--bg-app); color: var(--text-primary); margin: 0; line-height: 1.6; }
+    .wrap { max-width: 760px; margin: 0 auto; padding: 32px 22px 80px; }
+    .g-head { display: flex; align-items: center; gap: 14px; margin-bottom: 6px; }
+    .g-head .ico { font-size: 34px; }
+    .g-head h1 { font-size: var(--fs-2xl); margin: 0; }
+    .g-sub { color: var(--text-secondary); font-size: var(--fs-md); margin: 0 0 26px; }
+    .big { background: var(--accent-soft); border: 1px solid var(--border-default); border-radius: var(--radius-lg);
+           padding: 18px 20px; font-size: var(--fs-lg); font-weight: var(--fw-semibold); color: var(--text-primary); margin-bottom: 28px; }
+    h2 { font-size: var(--fs-xl); margin: 30px 0 10px; }
+    ul, ol { margin: 0 0 6px; padding-left: 22px; }
+    li { margin-bottom: 8px; }
+    ol.steps { counter-reset: step; list-style: none; padding-left: 0; }
+    ol.steps > li { counter-increment: step; position: relative; padding: 0 0 12px 44px; }
+    ol.steps > li::before { content: counter(step); position: absolute; left: 0; top: 0; width: 30px; height: 30px;
+      background: var(--accent); color: #fff; border-radius: 50%; display: flex; align-items: center; justify-content: center;
+      font-weight: var(--fw-bold); font-size: var(--fs-sm); }
+    .tip { background: var(--bg-surface); border-left: 4px solid var(--accent-gold); border-radius: var(--radius-md);
+           padding: 12px 16px; margin: 16px 0; color: var(--text-secondary); }
+    .tip strong { color: var(--text-primary); }
+    .card { background: var(--bg-surface); border: 1px solid var(--border-subtle); border-radius: var(--radius-lg); padding: 20px 22px; }
+    b, strong { color: var(--text-primary); }
+    figure.shot { margin: 12px 0 4px; }
+    figure.shot img { width: 100%; border: 1px solid var(--border-default); border-radius: var(--radius-md); display: block; }
+    figcaption { font-size: var(--fs-xs, 12px); color: var(--text-muted); margin-top: 6px; text-align: center; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="g-head"><span class="ico">🔗</span><h1>Site Map &amp; Guides</h1></div>
+    <p class="g-sub">Your guide to this page</p>
+
+    <div class="big">Your map of the whole platform. Every page you have, in one list — with a plain-English guide for each.</div>
+
+    <h2>What this page is for</h2>
+    <div class="card">
+      <p>It's a single list of every page in your workspace. From here you can jump straight to any page, and open a short how-to <strong>guide</strong> for it — just like the one you're reading now.</p>
+    </div>
+
+    <h2>What you can do here</h2>
+    <ul>
+      <li>See all your pages in one place.</li>
+      <li>Open any page with one click.</li>
+      <li>Open its guide — a plain-English how-to.</li>
+      <li>Copy a guide's link to share with your team.</li>
+    </ul>
+
+    <h2>How to use it</h2>
+    <ol class="steps">
+      <li>Find the page you want in the list.
+        <figure class="shot"><img src="img/sitemap-table.png" alt="The Site Map table listing each page with an Open link and an Open guide link"><figcaption>Every page, with a link to open it and a link to its guide.</figcaption></figure>
+      </li>
+      <li>Click <strong>Open</strong> to go straight to that page.</li>
+      <li>Click <strong>Open guide</strong> to read how to use it. <strong>Copy</strong> grabs the guide's link so you can share it with your team.</li>
+    </ol>
+
+    <div class="tip"><strong>Tip:</strong> New here? This is the best place to start — open each page's guide to learn your way around the platform.</div>
+  </div>
+</body>
+</html>

@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CRM — Guide</title>
+  <link rel="stylesheet" href="../css/tokens.css?v=1">
+  <style>
+    body { background: var(--bg-app); color: var(--text-primary); margin: 0; line-height: 1.6; }
+    .wrap { max-width: 760px; margin: 0 auto; padding: 32px 22px 80px; }
+    .g-head { display: flex; align-items: center; gap: 14px; margin-bottom: 6px; }
+    .g-head .ico { font-size: 34px; }
+    .g-head h1 { font-size: var(--fs-2xl); margin: 0; }
+    .g-sub { color: var(--text-secondary); font-size: var(--fs-md); margin: 0 0 26px; }
+    .big { background: var(--accent-soft); border: 1px solid var(--border-default); border-radius: var(--radius-lg);
+           padding: 18px 20px; font-size: var(--fs-lg); font-weight: var(--fw-semibold); color: var(--text-primary); margin-bottom: 28px; }
+    h2 { font-size: var(--fs-xl); margin: 30px 0 10px; }
+    ul, ol { margin: 0 0 6px; padding-left: 22px; }
+    li { margin-bottom: 8px; }
+    ol.steps { counter-reset: step; list-style: none; padding-left: 0; }
+    ol.steps > li { counter-increment: step; position: relative; padding: 0 0 12px 44px; }
+    ol.steps > li::before { content: counter(step); position: absolute; left: 0; top: 0; width: 30px; height: 30px;
+      background: var(--accent); color: #fff; border-radius: 50%; display: flex; align-items: center; justify-content: center;
+      font-weight: var(--fw-bold); font-size: var(--fs-sm); }
+    .tip { background: var(--bg-surface); border-left: 4px solid var(--accent-gold); border-radius: var(--radius-md);
+           padding: 12px 16px; margin: 16px 0; color: var(--text-secondary); }
+    .tip strong { color: var(--text-primary); }
+    .card { background: var(--bg-surface); border: 1px solid var(--border-subtle); border-radius: var(--radius-lg); padding: 20px 22px; }
+    b, strong { color: var(--text-primary); }
+    figure.shot { margin: 12px 0 4px; }
+    figure.shot img { width: 100%; border: 1px solid var(--border-default); border-radius: var(--radius-md); display: block; }
+    figcaption { font-size: var(--fs-xs, 12px); color: var(--text-muted); margin-top: 6px; text-align: center; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="g-head"><span class="ico">👥</span><h1>CRM</h1></div>
+    <p class="g-sub">Your guide to this page</p>
+
+    <div class="big">Your address book and deal tracker in one place. Keep everyone you deal with on file, and follow each opportunity from the first hello to a win.</div>
+
+    <h2>What this page is for</h2>
+    <div class="card">
+      <p>CRM is short for <strong>Customer Relationship Manager</strong> — a simple way to keep track of the people and companies you deal with, and the deals you're working on. It has two tabs: <strong>Contacts</strong> (your address book) and <strong>Pipeline</strong> (your deals).</p>
+    </div>
+
+    <h2>What you can do here</h2>
+    <ul>
+      <li>Keep all your <strong>contacts</strong> — people and companies — in one tidy list.</li>
+      <li>Save each one's company, email, phone and notes.</li>
+      <li>Track <strong>deals</strong> as they move from a first chat to a win.</li>
+      <li>See how much money is sitting in each stage of your pipeline.</li>
+    </ul>
+
+    <h2>How to add a contact</h2>
+    <ol class="steps">
+      <li>On the <strong>Contacts</strong> tab, click <strong>+ Add</strong> (top right).
+        <figure class="shot"><img src="img/crm-tabs.png" alt="The CRM top bar with the Contacts and Pipeline tabs and the + Add button"><figcaption>Contacts and Pipeline live at the top; + Add is on the right.</figcaption></figure>
+      </li>
+      <li>Type their name and choose <strong>Person</strong> or <strong>Company</strong>. Add their company, email and phone if you have them.
+        <figure class="shot"><img src="img/crm-contact-form.png" alt="The New contact form with name, type, company, email and phone"><figcaption>Only the name is required — the rest is up to you.</figcaption></figure>
+      </li>
+      <li>Click <strong>Save</strong>. They're now in your contacts list.
+        <figure class="shot"><img src="img/crm-contacts.png" alt="The contacts list showing several saved people and companies"><figcaption>All your people and companies in one place.</figcaption></figure>
+      </li>
+    </ol>
+
+    <div class="tip"><strong>Tip:</strong> Use the <strong>Status</strong> to tell a warm <em>lead</em> from an <em>active</em> customer, so your list stays easy to scan.</div>
+
+    <h2>How to track a deal</h2>
+    <ol class="steps">
+      <li>Click the <strong>Pipeline</strong> tab. Your deals show as cards in columns — one column per stage. Drag a card to the next column as the deal moves forward. To add a new one, click <strong>+ Add</strong>.
+        <figure class="shot"><img src="img/crm-pipeline.png" alt="The pipeline board with deal cards in Lead, Contacted, Qualified and Proposal columns"><figcaption>Each column is a stage; each card is a deal, with its contact and value.</figcaption></figure>
+      </li>
+      <li>Give the deal a <strong>title</strong>, a <strong>value</strong>, which <strong>stage</strong> it's at, and the <strong>contact</strong> it's with. Click <strong>Save</strong>.
+        <figure class="shot"><img src="img/crm-deal-form.png" alt="The New deal form with title, value, stage and contact"><figcaption>Link it to a contact so you always know who it's with.</figcaption></figure>
+      </li>
+      <li>When you win the work, open the deal and set its <strong>Status</strong> to <strong>Won</strong>.
+        <figure class="shot"><img src="img/crm-won.png" alt="A deal opened with its status set to Won"><figcaption>Mark it Won when it's in the bag.</figcaption></figure>
+      </li>
+    </ol>
+
+    <h2>The two tabs</h2>
+    <div class="card">
+      <p><strong>Contacts</strong> — your address book: everyone and every company you deal with.<br>
+      <strong>Pipeline</strong> — your deals as a board, so you can see at a glance what's coming and what it's worth.</p>
+    </div>
+  </div>
+</body>
+</html>

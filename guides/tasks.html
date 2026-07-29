@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Tasks &amp; Projects — Guide</title>
+  <link rel="stylesheet" href="../css/tokens.css?v=1">
+  <style>
+    body { background: var(--bg-app); color: var(--text-primary); margin: 0; line-height: 1.6; }
+    .wrap { max-width: 760px; margin: 0 auto; padding: 32px 22px 80px; }
+    .g-head { display: flex; align-items: center; gap: 14px; margin-bottom: 6px; }
+    .g-head .ico { font-size: 34px; }
+    .g-head h1 { font-size: var(--fs-2xl); margin: 0; }
+    .g-sub { color: var(--text-secondary); font-size: var(--fs-md); margin: 0 0 26px; }
+    .big { background: var(--accent-soft); border: 1px solid var(--border-default); border-radius: var(--radius-lg);
+           padding: 18px 20px; font-size: var(--fs-lg); font-weight: var(--fw-semibold); color: var(--text-primary); margin-bottom: 28px; }
+    h2 { font-size: var(--fs-xl); margin: 30px 0 10px; }
+    ul, ol { margin: 0 0 6px; padding-left: 22px; }
+    li { margin-bottom: 8px; }
+    ol.steps { counter-reset: step; list-style: none; padding-left: 0; }
+    ol.steps > li { counter-increment: step; position: relative; padding: 0 0 12px 44px; }
+    ol.steps > li::before { content: counter(step); position: absolute; left: 0; top: 0; width: 30px; height: 30px;
+      background: var(--accent); color: #fff; border-radius: 50%; display: flex; align-items: center; justify-content: center;
+      font-weight: var(--fw-bold); font-size: var(--fs-sm); }
+    .tip { background: var(--bg-surface); border-left: 4px solid var(--accent-gold); border-radius: var(--radius-md);
+           padding: 12px 16px; margin: 16px 0; color: var(--text-secondary); }
+    .tip strong { color: var(--text-primary); }
+    .card { background: var(--bg-surface); border: 1px solid var(--border-subtle); border-radius: var(--radius-lg); padding: 20px 22px; }
+    b, strong { color: var(--text-primary); }
+    figure.shot { margin: 12px 0 4px; }
+    figure.shot img { width: 100%; border: 1px solid var(--border-default); border-radius: var(--radius-md); display: block; }
+    .shot-ph { border: 2px dashed var(--border-default); border-radius: var(--radius-md); background: var(--bg-surface-2, #F4F6F1);
+               color: var(--text-muted); padding: 26px 16px; font-size: var(--fs-sm); text-align: center; }
+    .shot-ph b { color: var(--text-secondary); font-weight: var(--fw-semibold); }
+    figcaption { font-size: var(--fs-xs, 12px); color: var(--text-muted); margin-top: 6px; text-align: center; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="g-head"><span class="ico">✅</span><h1>Tasks &amp; Projects</h1></div>
+    <p class="g-sub">Your guide to this page</p>
+
+    <div class="big">This is your team's to-do list. Every job that needs doing lives here, so nothing gets forgotten and everyone knows what they're working on.</div>
+
+    <h2>What this page is for</h2>
+    <div class="card">
+      <p>It keeps all your work in one place. Each <strong>task</strong> is one job to do. Tasks can be grouped under a bigger <strong>project</strong>, given to a team member, and given a due date. You can see it as a simple list, as a plan for just today, or spread across the weeks ahead.</p>
+    </div>
+
+    <h2>What you can do here</h2>
+    <ul>
+      <li>Add jobs that need doing and give each one a <strong>due date</strong>.</li>
+      <li>Hand a job to a <strong>team member</strong> so they know it's theirs.</li>
+      <li>Group related jobs under a <strong>project</strong>.</li>
+      <li>See what's due <em>today</em> and what's coming up in the <em>weeks ahead</em>.</li>
+      <li>Watch your plan turn into action — projects from your Strategy page show up here.</li>
+    </ul>
+
+    <h2>How to add a task</h2>
+    <ol class="steps">
+      <li>Click the green <strong>+ Add Task</strong> button (top right).
+        <figure class="shot"><img src="img/task-add.png" alt="The Tasks and Projects page with the green + Add Task button at the top"><figcaption>Start a new job here.</figcaption></figure>
+      </li>
+      <li>Type what needs doing in a few words.
+        <figure class="shot"><img src="img/task-name.png" alt="The task panel with the name Call the plumber typed in"><figcaption>A short, clear title is all you need.</figcaption></figure>
+      </li>
+      <li>Choose who it's for and when it's due.
+        <figure class="shot"><img src="img/task-who.png" alt="The Assignee and Due Date fields on the task panel"><figcaption>Pick a team member and a date.</figcaption></figure>
+      </li>
+      <li>That's it — the panel saves as you go. Close it, and your task is on the list.
+        <figure class="shot"><img src="img/task-list.png" alt="The new task Call the plumber showing in the task list"><figcaption>Done — it's now on the list for everyone to see.</figcaption></figure>
+      </li>
+    </ol>
+
+    <h2>How to update a task</h2>
+    <ol class="steps">
+      <li>Click a task in the list to open it.
+        <figure class="shot"><img src="img/task-open.png" alt="A task opened as a panel showing all its details"><figcaption>Everything about the task is here — change any field and it saves as you type.</figcaption></figure>
+      </li>
+      <li>When the job is finished, click <strong>Complete</strong>.
+        <figure class="shot"><img src="img/task-done.png" alt="The Cancel, Delete and Complete buttons at the bottom of the task panel"><figcaption>Mark it done when it's finished.</figcaption></figure>
+      </li>
+    </ol>
+
+    <div class="tip"><strong>Tip:</strong> Keep task names short and clear — start with a doing word, like "Call the plumber" or "Send the invoice". Future-you will thank you.</div>
+
+    <h2>Ways to see your work</h2>
+    <div class="card">
+      <p><strong>My Day</strong> — today's jobs and how many hours they add up to.<br>
+      <strong>Task List</strong> — every task in a table; best for a quick scan or ticking things off.<br>
+      <strong>Weeks ahead</strong> — your tasks laid out across the coming weeks, so nothing sneaks up on you.</p>
+    </div>
+    <figure class="shot"><img src="img/task-board.png" alt="The weekly view showing tasks spread across the coming weeks"><figcaption>The &ldquo;weeks ahead&rdquo; view.</figcaption></figure>
+
+    <h2>Where tasks come from</h2>
+    <div class="card">
+      <p>You can add tasks yourself here, and they also arrive automatically from your <strong>Objective &amp; Strategy</strong> page — when you set your projects for the quarter, the monthly steps drop straight in here as tasks. Tick one off and your plan shows it as done too.</p>
+    </div>
+  </div>
+</body>
+</html>
