@@ -479,8 +479,8 @@
   "tables": 34,
   "records": 19,
   "selectChoices": 11,
-  "generated": "2026-07-28",
+  "generated": "2026-07-29",
   "source": "js/config.js",
-  "note": "Verified by drift monitor 2026-07-28: all four ID sets match js/config.js exactly (403/34/19/11), no additions or removals needed. All 403 field IDs and 34 table IDs resolve to live fields/tables in the 2026-07-28 Airtable schema snapshot."
+  "note": "Verified by drift monitor 2026-07-29: all four ID sets match js/config.js exactly (403/34/19/11), no additions or removals needed. All 403 field IDs and 34 table IDs resolve to live fields/tables in the 2026-07-29 Airtable schema snapshot. NOT covered: the new CEO Briefs table (tblIxbzDSOCI5hqJn, 10 fields) is used by field NAME in money-daily-worker.js and in js/ceo-brief.js on branch feature/ceo-brief, so none of its IDs are in config.js and this map cannot watch it (task recFRKKSiR5IwsRJa)."
  }
 }
