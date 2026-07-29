@@ -241,6 +241,8 @@ const TABLE_MAP = {
   'tblHrpTMd5LNYn8v1': 'projects',
   'tblbfuxYxu4uMMWwT': 'reconAudit',
   'tblIxbzDSOCI5hqJn': 'ceoBriefs',
+  'tbldMPjXTu7ho5f0T': 'incomeBuckets',
+  'tblvtDXCBJCHu9hnK': 'netWorthByMonth',
 };
 
 // The app pulls two things off the public internet on every page load: Chart.js from

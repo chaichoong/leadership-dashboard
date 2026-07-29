@@ -1134,7 +1134,13 @@ function wealthCompletedIdx(keys) {
 // payments in a week are not collapsed into one.
 //
 // Amounts are SIGNED, so a bounced direct debit returning cancels the payment it
-// reverses. Returns { byMonth: {monthKey: amount}, txns: {monthKey: [tx]} }.
+// reverses. Returns { byMonth: {monthKey: amount}, txns: {monthKey: [{t, amt}]} }.
+//
+// txns carries each record with the amount IT contributed, not its raw Report Amount:
+// the card leg contributes its amount as-is (money into the card is a paydown) while
+// the cash leg contributes the negation (money out of the current account). A drill-down
+// that read Report Amount instead would show the two legs cancelling — £1,000 in and
+// £25 out totalling £975 against a figure of £1,025.
 const CARD_PAYMENT_SUBCAT = 'Personal Credit Card Transfer';
 
 function cardPaymentsByMonth(monthKeys) {
@@ -1154,7 +1160,7 @@ function cardPaymentsByMonth(monthKeys) {
     const subOf = t => subNames[linkId(getField(t, F.txSubCategory))] || '';
     const dateOf = t => { const s = getField(t, F.txDate); const d = s ? new Date(s) : null; return (d && !isNaN(d)) ? d : null; };
     const keyOf = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-    const add = (t, d, amt) => { const k = keyOf(d); if (!keySet.has(k)) return; byMonth[k] += amt; txnsBy[k].push(t); };
+    const add = (t, d, amt) => { const k = keyOf(d); if (!keySet.has(k)) return; byMonth[k] += amt; txnsBy[k].push({ t, amt }); };
 
     const cardLeg = txns.filter(t => cardAliases.has(aliasOf(t)) && subOf(t) === 'Transfer');
     cardLeg.forEach(t => { const d = dateOf(t); if (d) add(t, d, Number(getField(t, F.txReportAmount)) || 0); });
@@ -1196,7 +1202,13 @@ let _cfTxIndex = {};
 
 function buildMonthlyCashflow(monthKeys) {
     const txns = (typeof allTransactions !== 'undefined' && allTransactions) ? allTransactions : [];
-    _cfTxIndex = {};
+    // Clear only the months THIS call recomputes. Wiping the whole index broke the
+    // matrix drill-down for every month but one: the KPI strip (wealth.js) and the
+    // ratios (wealth-ratios.js) both call this with short windows AFTER the 12-month
+    // matrix has rendered, so clicking any older figure opened an empty list while the
+    // figure itself was right. Per-month clearing keeps each month's entries owned by
+    // the last run that covered it, so the list still cannot disagree with the number.
+    Object.keys(_cfTxIndex).forEach(sub => monthKeys.forEach(k => { delete _cfTxIndex[sub][k]; }));
     const subNames = {};
     ((typeof allSubCategories !== 'undefined' && allSubCategories) ? allSubCategories : []).forEach(r => {
         const n = getField(r, SUBCAT.name); if (n) subNames[r.id] = String(n);
@@ -1276,15 +1288,28 @@ function buildMonthlyCashflow(monthKeys) {
 //
 // Reads _cfTxIndex, populated by the same pass that produced the totals, so the
 // list can never disagree with the number that was clicked.
-function wealthDrill(subs, monthKey, label) {
+//
+// `src` selects the index: the default cash-flow one (keys = sub-category names) or
+// 'bucket' (keys = bucket names), populated by buildBucketBalances in the same pass
+// that produced the Spent figures — so a bucket drill lists exactly what was counted,
+// including credit-card payments, which the cash-flow index groups differently.
+function wealthDrill(subs, monthKey, label, src) {
     if (!Array.isArray(subs) || !subs.length) return;
 
+    // An index entry is either a raw record or {t, amt} where amt is the amount that
+    // record CONTRIBUTED to the figure. Credit-card payments are the case that needs it:
+    // the two legs of one payment carry opposite Report Amounts, so listing raw amounts
+    // makes them cancel instead of add. Every matrix row shows spend as a positive
+    // magnitude, so the drill displays −contribution: money out reads as a minus.
+    const index = src === 'bucket' ? _bucketTxIndex : _cfTxIndex;
     const txs = [];
     subs.forEach(sub => {
-        const byMonth = _cfTxIndex[sub] || {};
-        (monthKey ? [monthKey] : Object.keys(byMonth)).forEach(k => (byMonth[k] || []).forEach(t => txs.push(t)));
+        const byMonth = index[sub] || {};
+        (monthKey ? [monthKey] : Object.keys(byMonth)).forEach(k => (byMonth[k] || []).forEach(e => {
+            txs.push((e && e.t) ? { t: e.t, amt: -e.amt } : { t: e, amt: null });
+        }));
     });
-    txs.sort((a, b) => new Date(getField(b, F.txDate)) - new Date(getField(a, F.txDate)));
+    txs.sort((a, b) => new Date(getField(b.t, F.txDate)) - new Date(getField(a.t, F.txDate)));
 
     const subNames = {};
     ((typeof allSubCategories !== 'undefined' && allSubCategories) ? allSubCategories : [])
@@ -1309,8 +1334,8 @@ function wealthDrill(subs, monthKey, label) {
 
     let total = 0;
     const money = v => `${v < 0 ? '−' : ''}£${Math.abs(v).toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-    const rowsHtml = txs.map(t => {
-        const amt = Number(getField(t, F.txReportAmount)) || 0;
+    const rowsHtml = txs.map(({ t, amt: contributed }) => {
+        const amt = contributed != null ? contributed : (Number(getField(t, F.txReportAmount)) || 0);
         total += amt;
         const d = getField(t, F.txDate) || '';
         const desc = String(getField(t, F.txDescription) || getField(t, F.txVendor) || '(no description)');
@@ -1457,10 +1482,12 @@ function wealthMatrixCard(title, note, months, sections, opts) {
     // escapes for the JS context; the entity pass then escapes for the attribute.
     const jsArg = v => JSON.stringify(v == null ? null : v)
         .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    // `drillSrc` picks which index the keys are looked up in: the default cash-flow
+    // index (keys = sub-category names) or the buckets index (keys = bucket names).
     const drillAttr = (row, monthKey) => {
         if (!row || !row.drill || !row.drill.length) return { attr: '', style: '' };
         return {
-            attr: ` onclick="wealthDrill(${jsArg(row.drill)},${jsArg(monthKey || null)},${jsArg(String(row.label || ''))})" title="Show the transactions behind this"`,
+            attr: ` onclick="wealthDrill(${jsArg(row.drill)},${jsArg(monthKey || null)},${jsArg(String(row.drillLabel || row.label || ''))},${jsArg(row.drillSrc || null)})" title="Show the transactions behind this"`,
             style: 'cursor:pointer;',
         };
     };
@@ -2775,7 +2802,11 @@ function renderBuckets(el, override) {
             lead: bb.balance[last],
             values: bb.appor,
             items: [
-                { label: 'Spent', goodUp: false, values: bb.spent },
+                // Only Spent is transaction-backed. Money in is a % share of net cash
+                // flow and Running balance is the cumulative of the two, so neither has
+                // a transaction list that would total to the figure shown — drill those
+                // from the Net cash flow row in the Monthly cash flow table above.
+                { label: 'Spent', goodUp: false, values: bb.spent, drill: [b.name], drillSrc: 'bucket', drillLabel: `${b.name} — spent` },
                 { label: 'Running balance', goodUp: true, values: bb.balance },
             ],
         };
@@ -2784,9 +2815,15 @@ function renderBuckets(el, override) {
     const totPot = bal.reduce((s, b) => s + (b.balance[last] || 0), 0);
     rows.push({ label: 'Total allocated', goodUp: true, bold: true, border: '1px solid var(--border-default)', lead: totPot, values: totApr });
 
-    const note = `Each row is a bucket and its share (%) of net cash flow. The highlighted "In the pot" column is what's in each bucket right now — apportioned in, less spent, never below £0. The monthly columns show what went in that month (£0 in any month with no surplus). Click a bucket to see what's been spent and its running balance. A <em>negative</em> figure on the Spent row is money coming back — a refund, or a direct debit that bounced and was returned — and it cancels the payment it reverses. If you spend more than a pot holds, the overspend carries forward, so the pot stays at £0 until later months have made it back. The current month (●) is still in progress; the Δ trend uses the last completed month.${totalPct !== 100 ? ` Percentages total ${totalPct}% (aim for 100%).` : ''}`;
+    const note = `Each row is a bucket and its share (%) of net cash flow. The highlighted "In the pot" column is what's in each bucket right now — apportioned in, less spent, never below £0. The monthly columns show what went in that month (£0 in any month with no surplus). Click a bucket <em>name</em> to see what's been spent and its running balance, then click any figure on the <strong>Spent</strong> row to see the transactions behind it. The money-in and running-balance figures are calculated from your net cash flow, not from a list of transactions, so those are not clickable — drill the Net cash flow row in the table above instead. A <em>negative</em> figure on the Spent row is money coming back — a refund, or a direct debit that bounced and was returned — and it cancels the payment it reverses. If you spend more than a pot holds, the overspend carries forward, so the pot stays at £0 until later months have made it back. The current month (●) is still in progress; the Δ trend uses the last completed month.${totalPct !== 100 ? ` Percentages total ${totalPct}% (aim for 100%).` : ''}`;
     el.innerHTML = wealthMatrixCard('Income buckets — rolling 12 months', note, months, [{ header: '', rows }], { leadHeader: 'In the pot', anchor: 'completed' });
 }
+
+// Transactions behind the last buildBucketBalances run, indexed bucket name → month
+// key → [tx]. Populated as a side-effect of the same pass that totals each bucket's
+// spend, so the Spent drill-down lists exactly the rows that produced the figure on
+// screen, never a re-query that could filter differently.
+let _bucketTxIndex = {};
 
 // Per-bucket cumulative balance: running (apportioned − spent). Apportioned = % of
 // that month's net cash flow; spent = outflows reconciled to the bucket's mapped
@@ -2826,6 +2863,11 @@ function buildBucketBalances(buckets, months) {
     const keys = months.map(m => m.key);
     const keyIdx = {}; keys.forEach((k, i) => keyIdx[k] = i);
     const spent = {}; buckets.forEach(b => spent[b.name] = keys.map(() => 0));
+    _bucketTxIndex = {};
+    const indexTx = (bucket, key, tx) => {
+        if (!_bucketTxIndex[bucket]) _bucketTxIndex[bucket] = {};
+        (_bucketTxIndex[bucket][key] = _bucketTxIndex[bucket][key] || []).push(tx);
+    };
     const txns = (typeof allTransactions !== 'undefined' && allTransactions) ? allTransactions : [];
     // SIGNED, not outflows-only. A bounced direct debit to a credit card comes back
     // into the cash account as an inflow on the same sub-category, so summing signed
@@ -2842,7 +2884,7 @@ function buildBucketBalances(buckets, months) {
         const sub = subNames[linkId(getField(tx, F.txSubCategory))] || '';
         if (sub === CARD_PAYMENT_SUBCAT) return; // handled by cardPaymentsByMonth below
         const bucket = subToBucket[sub];
-        if (bucket && spent[bucket]) spent[bucket][idx] += -amt;
+        if (bucket && spent[bucket]) { spent[bucket][idx] += -amt; indexTx(bucket, keys[idx], tx); }
     });
 
     // Credit-card payments come from the shared cardPaymentsByMonth(), the same source
@@ -2851,7 +2893,10 @@ function buildBucketBalances(buckets, months) {
     const cardBucket = subToBucket[CARD_PAYMENT_SUBCAT];
     if (cardBucket && spent[cardBucket]) {
         const cp = cardPaymentsByMonth(keys);
-        keys.forEach((k, i) => { spent[cardBucket][i] += cp.byMonth[k] || 0; });
+        keys.forEach((k, i) => {
+            spent[cardBucket][i] += cp.byMonth[k] || 0;
+            (cp.txns[k] || []).forEach(e => indexTx(cardBucket, k, e));
+        });
     }
 
     const net = buildMonthlyCashflow(keys).map(m => m.net);
