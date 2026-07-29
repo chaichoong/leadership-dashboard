@@ -212,6 +212,31 @@ export default {
             return serveR2File(key, env);
         }
 
+        // GET /ceo-transcript?key=…&oldest=<unix ts> — the nightly memory sweep
+        // pulls the day's CEO DM conversation through here (the Slack bot token
+        // lives only in this worker). Guarded by CEO_TRANSCRIPT_KEY. Returns
+        // plain message JSON: [{ts, from, text}]. Added 29 Jul 2026.
+        if (request.method === 'GET' && url.pathname === '/ceo-transcript') {
+            const key = url.searchParams.get('key');
+            if (!env.CEO_TRANSCRIPT_KEY || key !== env.CEO_TRANSCRIPT_KEY) {
+                return new Response('Forbidden', { status: 403 });
+            }
+            const oldest = url.searchParams.get('oldest') || String(Math.floor(Date.now() / 1000) - 86400);
+            const channel = url.searchParams.get('channel') || 'D0B08L64Y3E'; // Kevin ↔ Operations Director DM
+            const res = await fetch(
+                `https://slack.com/api/conversations.history?channel=${encodeURIComponent(channel)}&oldest=${encodeURIComponent(oldest)}&limit=200`,
+                { headers: { Authorization: 'Bearer ' + env.SLACK_BOT_TOKEN } }
+            );
+            const data = await res.json();
+            if (!data.ok) return Response.json({ ok: false, error: data.error }, { status: 500 });
+            const msgs = (data.messages || []).slice().reverse().map(m => ({
+                ts: m.ts,
+                from: m.bot_id ? 'ceo' : 'kevin',
+                text: cleanSlackText(m.text || (m.blocks || []).map(b => b?.text?.text || '').join('\n')).slice(0, 3000),
+            })).filter(m => m.text);
+            return Response.json({ ok: true, channel, count: msgs.length, messages: msgs });
+        }
+
         if (request.method !== 'POST') {
             return new Response('Method not allowed', { status: 405 });
         }
