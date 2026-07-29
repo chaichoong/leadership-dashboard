@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Tasks &amp; Projects — Guide</title>
+  <link rel="stylesheet" href="../css/tokens.css?v=1">
+  <style>
+    body { background: var(--bg-app); color: var(--text-primary); margin: 0; line-height: 1.6; }
+    .wrap { max-width: 760px; margin: 0 auto; padding: 32px 22px 80px; }
+    .g-head { display: flex; align-items: center; gap: 14px; margin-bottom: 6px; }
+    .g-head .ico { font-size: 34px; }
+    .g-head h1 { font-size: var(--fs-2xl); margin: 0; }
+    .g-sub { color: var(--text-secondary); font-size: var(--fs-md); margin: 0 0 26px; }
+    .big { background: var(--accent-soft); border: 1px solid var(--border-default); border-radius: var(--radius-lg);
+           padding: 18px 20px; font-size: var(--fs-lg); font-weight: var(--fw-semibold); color: var(--text-primary); margin-bottom: 28px; }
+    h2 { font-size: var(--fs-xl); margin: 30px 0 10px; }
+    ul, ol { margin: 0 0 6px; padding-left: 22px; }
+    li { margin-bottom: 8px; }
+    ol.steps { counter-reset: step; list-style: none; padding-left: 0; }
+    ol.steps > li { counter-increment: step; position: relative; padding: 0 0 12px 44px; }
+    ol.steps > li::before { content: counter(step); position: absolute; left: 0; top: 0; width: 30px; height: 30px;
+      background: var(--accent); color: #fff; border-radius: 50%; display: flex; align-items: center; justify-content: center;
+      font-weight: var(--fw-bold); font-size: var(--fs-sm); }
+    .tip { background: var(--bg-surface); border-left: 4px solid var(--accent-gold); border-radius: var(--radius-md);
+           padding: 12px 16px; margin: 16px 0; color: var(--text-secondary); }
+    .tip strong { color: var(--text-primary); }
+    .card { background: var(--bg-surface); border: 1px solid var(--border-subtle); border-radius: var(--radius-lg); padding: 20px 22px; }
+    b, strong { color: var(--text-primary); }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="g-head"><span class="ico">✅</span><h1>Tasks &amp; Projects</h1></div>
+    <p class="g-sub">Your guide to this page</p>
+
+    <div class="big">This is your team's to-do list. Every job that needs doing lives here, so nothing gets forgotten and everyone knows what they're working on.</div>
+
+    <h2>What this page is for</h2>
+    <div class="card">
+      <p>It keeps all your work in one place. Each <strong>task</strong> is one job to do. Tasks can be grouped under a bigger <strong>project</strong>, given to a team member, and given a due date. You can see everything as a simple list, or as a board where jobs move from left to right as they get done.</p>
+    </div>
+
+    <h2>What you can do here</h2>
+    <ul>
+      <li>Add jobs that need doing and give each one a <strong>due date</strong>.</li>
+      <li>Hand a job to a <strong>team member</strong> so they know it's theirs.</li>
+      <li>Group related jobs under a <strong>project</strong>.</li>
+      <li>See what's <em>to do</em>, <em>in progress</em> and <em>done</em> at a glance.</li>
+      <li>Watch your plan turn into action — projects from your Strategy page show up here.</li>
+    </ul>
+
+    <h2>How to add a task</h2>
+    <ol class="steps">
+      <li>Click the green <strong>+ Add Task</strong> button (top right).</li>
+      <li>Type what needs doing in a few words.</li>
+      <li>Choose who it's for and when it's due.</li>
+      <li>Save. It now appears in your list and on the board.</li>
+    </ol>
+
+    <h2>How to update a task</h2>
+    <ol class="steps">
+      <li>Click a task to open it.</li>
+      <li>Change anything — who's doing it, the due date, or mark it <strong>done</strong>.</li>
+      <li>On the board, you can also drag a task from one column to the next as it moves along.</li>
+    </ol>
+
+    <div class="tip"><strong>Tip:</strong> Keep task names short and clear — start with a doing word, like "Call the plumber" or "Send the invoice". Future-you will thank you.</div>
+
+    <h2>The two views</h2>
+    <div class="card">
+      <p><strong>List</strong> — every task in a row, best for a quick scan or ticking things off.<br>
+      <strong>Board</strong> — columns like <em>To do → Doing → Done</em>. Drag a card across as work moves forward. Great for seeing where everything stands.</p>
+    </div>
+
+    <h2>Where tasks come from</h2>
+    <div class="card">
+      <p>You can add tasks yourself here, and they also arrive automatically from your <strong>Objective &amp; Strategy</strong> page — when you set your projects for the quarter, the monthly steps drop straight in here as tasks. Tick one off and your plan shows it as done too.</p>
+    </div>
+  </div>
+</body>
+</html>
