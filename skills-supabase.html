@@ -60,6 +60,9 @@
   // untouched. Fail-safe: any error leaves the catalogue filtered (client view).
   (function () {
     const OWNER_ONLY = ['custom', 'project', 'scheduled'];
+    // Preset skills that still reference the provider's Airtable base and so don't
+    // belong in the Supabase client product until they're rebuilt against Supabase.
+    const OWNER_ONLY_IDS = ['cash-flow-forecast'];
     const CATEGORY_FEATURE = {          // skill category → the feature it requires
       'Property Management': 'property',
       'Finance':             'finance',
@@ -91,6 +94,7 @@
         const feats = await features(sb);
         SKILLS_LIBRARY = SKILLS_LIBRARY.filter(s => {
           if (OWNER_ONLY.includes(s.source)) return false;               // provider's own skills
+          if (OWNER_ONLY_IDS.includes(s.id)) return false;               // still Airtable-linked
           const need = CATEGORY_FEATURE[s.category];
           if (need && !feats.has(need)) return false;                    // feature the client doesn't have
           return true;
