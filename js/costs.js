@@ -366,12 +366,16 @@
         const lastPaymentDrift = computeLastPaymentDrift(lastReconDate, dueDay);
 
         // Variance against expected — respects sticky dismissal until next reconciliation.
+        // Compare the reconciled charge against the per-occurrence expected, NOT the
+        // raw monthly-equivalent Expected Cost, or non-monthly bills read as false
+        // four-figure variances (see expectedChargePerOccurrence).
+        const expectedCharge = expectedChargePerOccurrence(expected, frequency);
         let varianceFlag = 'unknown';
         let varianceAmount = 0;
         let variancePct = 0;
-        if (lastReconAmountNum != null && expected > 0) {
-            varianceAmount = lastReconAmountNum - expected;
-            variancePct = Math.abs(varianceAmount) / expected;
+        if (lastReconAmountNum != null && expectedCharge > 0) {
+            varianceAmount = lastReconAmountNum - expectedCharge;
+            variancePct = Math.abs(varianceAmount) / expectedCharge;
             const absVar = Math.abs(varianceAmount);
             if (absVar <= VAR_TOL_ABS && variancePct <= VAR_TOL_PCT) varianceFlag = 'match';
             else if (variancePct > VAR_HARD_PCT) varianceFlag = 'hard';
@@ -390,6 +394,7 @@
             lastReconDate, lastReconAmount: lastReconAmountNum,
             lastReconAccountIds, lastReconSubCatIds, accountName, subCatName,
             status, inactive,
+            expectedCharge,
             expectedNext: expectedThisPeriod,
             daysOverdue,
             paidThisPeriod,
@@ -554,7 +559,10 @@
         return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
     }
 
-    // Convert any frequency to monthly equivalent (£/month)
+    // Convert any frequency to monthly equivalent (£/month).
+    // Input is the real per-occurrence charge; output is the monthly-equivalent
+    // figure that Expected Cost stores. Used when copying an actual charge back
+    // into Expected Cost (see amendExpectedCost).
     function monthlyEquivalent(amount, frequency) {
         if (!amount) return 0;
         switch (frequency) {
@@ -566,6 +574,29 @@
             case 'Quarterly':   return amount / 3;
             case 'Annually':    return amount / 12;
             default:            return amount;
+        }
+    }
+
+    // Inverse of monthlyEquivalent: turn a MONTHLY-equivalent Expected Cost into
+    // the real charge that lands per billing occurrence for this frequency.
+    //
+    // Expected Cost is stored as a monthly-equivalent for every cost (the
+    // Leadership Dashboard and cash flow forecast both sum it as a monthly figure).
+    // A reconciled payment, by contrast, is the actual charge that cleared — a full
+    // annual, quarterly or weekly lump. Comparing the two directly makes every
+    // non-monthly bill read as a huge false variance (an annual bill showed 1580%:
+    // a yearly charge measured against a monthly figure). Convert first, then compare.
+    function expectedChargePerOccurrence(monthlyEquiv, frequency) {
+        if (!monthlyEquiv) return 0;
+        switch (frequency) {
+            case 'Daily':       return monthlyEquiv / 30;
+            case 'Weekly':      return monthlyEquiv * (12 / 52);
+            case 'Fortnightly': return monthlyEquiv * (12 / 26);
+            case '4-Weekly':    return monthlyEquiv * (12 / 13);
+            case 'Monthly':     return monthlyEquiv;
+            case 'Quarterly':   return monthlyEquiv * 3;
+            case 'Annually':    return monthlyEquiv * 12;
+            default:            return monthlyEquiv;
         }
     }
 
@@ -1429,9 +1460,9 @@
         menu.innerHTML = `
             <div style="padding:6px 8px;font-size:11px;color:var(--text-secondary);border-bottom:1px solid var(--border-subtle);margin-bottom:4px">
                 <strong>${escHtml(e.name)}</strong><br>
-                Expected ${fmt(e.expected)} · Last paid ${fmt(e.lastReconAmount)} · Diff ${e.varianceAmount >= 0 ? '+' : '−'}${fmt(Math.abs(e.varianceAmount))} (${(e.variancePct*100).toFixed(1)}%)
+                Expected ${fmt(e.expectedCharge)} · Last paid ${fmt(e.lastReconAmount)} · Diff ${e.varianceAmount >= 0 ? '+' : '−'}${fmt(Math.abs(e.varianceAmount))} (${(e.variancePct*100).toFixed(1)}%)${e.frequency && e.frequency !== 'Monthly' ? ` <span style="color:var(--text-muted)">per ${escHtml(e.frequency.toLowerCase())} charge</span>` : ''}
             </div>
-            <button class="var-menu-btn od-btn" onclick="amendExpectedCost('${costId}')" style="display:block;width:100%;text-align:left;padding:8px;background:none">📝 Amend Expected to ${fmt(e.lastReconAmount)} <span style="color:var(--text-muted);font-size:10px">— rate has actually changed</span></button>
+            <button class="var-menu-btn od-btn" onclick="amendExpectedCost('${costId}')" style="display:block;width:100%;text-align:left;padding:8px;background:none">📝 Amend Expected to ${fmt(monthlyEquivalent(Number(e.lastReconAmount) || 0, e.frequency))}/mo <span style="color:var(--text-muted);font-size:10px">— rate has actually changed</span></button>
             <button class="var-menu-btn od-btn" onclick="dismissCostVariance('${costId}')" style="display:block;width:100%;text-align:left;padding:8px;background:none">🚫 Dismiss this variance <span style="color:var(--text-muted);font-size:10px">— bulk payment / one-off explained</span></button>
             <button class="var-menu-btn od-btn" onclick="this.parentElement.remove()" style="display:block;width:100%;text-align:left;padding:8px;background:none;color:var(--text-secondary)">Cancel</button>
         `;
@@ -1457,8 +1488,13 @@
         document.querySelectorAll('.cost-variance-menu').forEach(m => m.remove());
         const cost = (allCosts || []).find(c => c.id === costId);
         if (!cost) return;
-        const newAmount = Number(getField(cost, F.costLastReconAmount));
-        if (!newAmount) { alert('No reconciled amount to copy from'); return; }
+        const reconCharge = Number(getField(cost, F.costLastReconAmount));
+        if (!reconCharge) { alert('No reconciled amount to copy from'); return; }
+        // Expected Cost is a MONTHLY-equivalent. The reconciled charge is the real
+        // per-occurrence amount (a full annual/quarterly/weekly lump), so convert it
+        // back to a monthly figure before storing — writing the raw lump would inflate
+        // the dashboard monthly total, the forecast and the P&L for every non-monthly bill.
+        const newAmount = Number(monthlyEquivalent(reconCharge, getCostFrequency(cost)).toFixed(2));
         const oldExpected = Number(getField(cost, F.costExpected)) || 0;
         try {
             const resp = await fetch(`https://api.airtable.com/v0/${BASE_ID}/${TABLES.costs}/${costId}`, {
@@ -1665,7 +1701,7 @@
 
         panel.innerHTML = `
             <div style="font-weight:600;font-size:15px;margin-bottom:4px">Generate Cost Statement</div>
-            <div style="font-size:12px;color:var(--text-secondary);margin-bottom:16px">${escHtml(e.name)} · ${escHtml(e.frequency)} · Expected: ${fmt(e.expected)}</div>
+            <div style="font-size:12px;color:var(--text-secondary);margin-bottom:16px">${escHtml(e.name)} · ${escHtml(e.frequency)} · Expected: ${fmt(e.expectedCharge)}</div>
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px">
                 <div>
                     <label style="font-size:11px;font-weight:600;color:var(--text-secondary);display:block;margin-bottom:4px">Start date</label>
@@ -1723,15 +1759,21 @@
         const paymentCount = txs.length;
 
         const monthsBetween = ((endDate.getFullYear() - startDate.getFullYear()) * 12) + (endDate.getMonth() - startDate.getMonth()) + 1;
+        // Expected Cost is a MONTHLY-equivalent, so the per-occurrence charge (what a
+        // payment actually is) is expectedCharge. Multiply that by the number of
+        // billing occurrences in the window to get the expected total, else a non-
+        // monthly cost's "Total expected" reads on a monthly basis while "Total paid"
+        // is the real lumps (the same units bug the variance badge had).
         let totalExpected = 0;
         const freq = (e.frequency || '').toLowerCase();
-        if (freq === 'monthly') totalExpected = e.expected * monthsBetween;
-        else if (freq === 'quarterly') totalExpected = e.expected * Math.ceil(monthsBetween / 3);
-        else if (freq === 'annually' || freq === 'annual') totalExpected = e.expected * Math.ceil(monthsBetween / 12);
-        else if (freq === 'weekly') totalExpected = e.expected * Math.round(monthsBetween * 4.33);
-        else if (freq === 'fortnightly') totalExpected = e.expected * Math.round(monthsBetween * 2.17);
-        else if (freq === '4-weekly') totalExpected = e.expected * Math.round(monthsBetween * (13 / 12));
-        else totalExpected = e.expected * monthsBetween;
+        const perOccurrence = e.expectedCharge;
+        if (freq === 'monthly') totalExpected = perOccurrence * monthsBetween;
+        else if (freq === 'quarterly') totalExpected = perOccurrence * Math.ceil(monthsBetween / 3);
+        else if (freq === 'annually' || freq === 'annual') totalExpected = perOccurrence * Math.ceil(monthsBetween / 12);
+        else if (freq === 'weekly') totalExpected = perOccurrence * Math.round(monthsBetween * 4.33);
+        else if (freq === 'fortnightly') totalExpected = perOccurrence * Math.round(monthsBetween * 2.17);
+        else if (freq === '4-weekly') totalExpected = perOccurrence * Math.round(monthsBetween * (13 / 12));
+        else totalExpected = perOccurrence * monthsBetween;
 
         const variance = totalPaid - totalExpected;
 
@@ -1777,7 +1819,7 @@
         <div class="summary-grid">
             <div class="summary-box"><div class="label">Cost Name</div><div class="value">${escHtml(e.name)}</div></div>
             <div class="summary-box"><div class="label">Status</div><div class="value">${escHtml(statusLabel)}</div></div>
-            <div class="summary-box"><div class="label">Expected per payment</div><div class="value">${fmt(e.expected)}</div></div>
+            <div class="summary-box"><div class="label">Expected per payment</div><div class="value">${fmt(e.expectedCharge)}</div></div>
             <div class="summary-box"><div class="label">Frequency</div><div class="value">${escHtml(e.frequency || 'Unknown')}</div></div>
             <div class="summary-box"><div class="label">Due Day</div><div class="value">${escHtml(dueDayLabel)}</div></div>
             <div class="summary-box"><div class="label">Payments in period</div><div class="value">${paymentCount}</div></div>
@@ -1800,7 +1842,7 @@
         </table>
         <div class="footer">
             Generated ${new Date().toLocaleDateString('en-GB', { day:'numeric',month:'long',year:'numeric' })} at ${new Date().toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'})}.
-            ${escHtml(e.name)}: ${escHtml(e.frequency || '')} cost, expected ${fmt(e.expected)} per payment.
+            ${escHtml(e.name)}: ${escHtml(e.frequency || '')} cost, expected ${fmt(e.expectedCharge)} per payment.
             ${paymentCount} payment${paymentCount !== 1 ? 's' : ''} totalling ${fmt(totalPaid)} in this period.
         </div>
         </body></html>`);
