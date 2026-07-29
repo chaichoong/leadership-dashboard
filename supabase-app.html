@@ -39,7 +39,14 @@
     .card input { width: 100%; padding: 11px 12px; border: 1px solid var(--border-default, #DDE1D9); border-radius: 9px; font-size: 14px; }
     .card button { width: 100%; margin-top: 16px; background: var(--accent, #2C6E49); color: #fff; border: 0; padding: 11px; border-radius: 9px; font-weight: 600; font-size: 15px; cursor: pointer; }
     .card button:hover { background: var(--accent-hover, #1B4A30); }
+    .card button:disabled { opacity: .6; cursor: default; }
     .card .err { color: var(--danger, #B42318); font-size: 12px; margin-top: 10px; display: none; }
+    .card .link { display: inline-block; margin-top: 14px; font-size: 13px; font-weight: 600; color: var(--accent, #2C6E49); text-decoration: none; cursor: pointer; }
+    .card .link:hover { text-decoration: underline; }
+    .card .note { font-size: 13px; margin-top: 12px; line-height: 1.45; display: none; }
+    .card .note.ok { color: var(--accent-hover, #1B4A30); display: block; }
+    .card .note.err { color: var(--danger, #B42318); display: block; }
+    .hide { display: none !important; }
     .od-logo { width: 1.15em; height: 1.15em; flex-shrink: 0; }
     .brand .title .od-logo { color: #E8ECE6; }
     .card h1 .od-logo { color: var(--accent, #2C6E49); }
@@ -65,13 +72,28 @@
   <div id="login">
     <div class="card">
       <h1><svg class="od-logo" aria-hidden="true"><use href="#odLogo"/></svg> Operations Director</h1>
-      <p>Sign in once — Tasks and Operations load from Supabase.</p>
-      <label>Email</label>
-      <input id="email" type="email" placeholder="you@company.com" autocomplete="username">
-      <label>Password</label>
-      <input id="password" type="password" autocomplete="current-password">
-      <button id="go">Sign in</button>
-      <div class="err" id="err"></div>
+
+      <!-- Sign in -->
+      <div id="signin-view">
+        <p>Sign in once — Tasks and Operations load from Supabase.</p>
+        <label>Email</label>
+        <input id="email" type="email" placeholder="you@company.com" autocomplete="username">
+        <label>Password</label>
+        <input id="password" type="password" autocomplete="current-password">
+        <button id="go">Sign in</button>
+        <div class="err" id="err"></div>
+        <a id="forgot" class="link">Forgot your password?</a>
+      </div>
+
+      <!-- Reset password -->
+      <div id="reset-view" class="hide">
+        <p>Enter your email and we'll send you a link to choose a new password.</p>
+        <label>Email</label>
+        <input id="reset-email" type="email" placeholder="you@company.com" autocomplete="username">
+        <button id="send-reset">Send reset link</button>
+        <div class="note" id="reset-note"></div>
+        <a id="back-to-signin" class="link">&larr; Back to sign in</a>
+      </div>
     </div>
   </div>
 
@@ -296,6 +318,35 @@
       showApp();
     }
     document.getElementById('logout').addEventListener('click', doLogout);
+
+    // Forgot password: swap the card to a "reset" view, email a recovery link.
+    // The link lands on /set-password, where supabase-js turns the recovery token
+    // into a session and updateUser({ password }) sets the new password.
+    const signinView = document.getElementById('signin-view');
+    const resetView = document.getElementById('reset-view');
+    const resetNote = document.getElementById('reset-note');
+    document.getElementById('forgot').addEventListener('click', () => {
+      document.getElementById('reset-email').value = document.getElementById('email').value.trim();
+      resetNote.className = 'note'; resetNote.textContent = '';
+      signinView.classList.add('hide'); resetView.classList.remove('hide');
+      document.getElementById('reset-email').focus();
+    });
+    document.getElementById('back-to-signin').addEventListener('click', () => {
+      resetView.classList.add('hide'); signinView.classList.remove('hide');
+    });
+    document.getElementById('reset-email').addEventListener('keydown', e => { if (e.key === 'Enter') sendReset(); });
+    document.getElementById('send-reset').addEventListener('click', sendReset);
+    async function sendReset() {
+      const email = document.getElementById('reset-email').value.trim();
+      resetNote.className = 'note';
+      if (!email) { resetNote.textContent = 'Please enter your email address.'; resetNote.className = 'note err'; return; }
+      const btn = document.getElementById('send-reset'); btn.disabled = true; btn.textContent = 'Sending…';
+      const { error } = await sb.auth.resetPasswordForEmail(email, { redirectTo: location.origin + '/set-password' });
+      btn.disabled = false; btn.textContent = 'Send reset link';
+      if (error) { resetNote.textContent = error.message; resetNote.className = 'note err'; return; }
+      resetNote.textContent = 'Done — if that email has an account, a reset link is on its way. Check your inbox (and spam). The link opens a page where you can choose a new password.';
+      resetNote.className = 'note ok';
+    }
 
     // On load: enter the app if signed in; otherwise show the login page URL and
     // remember where the visitor was headed so we can send them there after login.
