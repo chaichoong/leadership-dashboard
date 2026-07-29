@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AI Brain — Guide</title>
+  <link rel="stylesheet" href="../css/tokens.css?v=1">
+  <style>
+    body { background: var(--bg-app); color: var(--text-primary); margin: 0; line-height: 1.6; }
+    .wrap { max-width: 760px; margin: 0 auto; padding: 32px 22px 80px; }
+    .g-head { display: flex; align-items: center; gap: 14px; margin-bottom: 6px; }
+    .g-head .ico { font-size: 34px; }
+    .g-head h1 { font-size: var(--fs-2xl); margin: 0; }
+    .g-sub { color: var(--text-secondary); font-size: var(--fs-md); margin: 0 0 26px; }
+    .big { background: var(--accent-soft); border: 1px solid var(--border-default); border-radius: var(--radius-lg);
+           padding: 18px 20px; font-size: var(--fs-lg); font-weight: var(--fw-semibold); color: var(--text-primary); margin-bottom: 28px; }
+    h2 { font-size: var(--fs-xl); margin: 30px 0 10px; }
+    ul, ol { margin: 0 0 6px; padding-left: 22px; }
+    li { margin-bottom: 8px; }
+    ol.steps { counter-reset: step; list-style: none; padding-left: 0; }
+    ol.steps > li { counter-increment: step; position: relative; padding: 0 0 12px 44px; }
+    ol.steps > li::before { content: counter(step); position: absolute; left: 0; top: 0; width: 30px; height: 30px;
+      background: var(--accent); color: #fff; border-radius: 50%; display: flex; align-items: center; justify-content: center;
+      font-weight: var(--fw-bold); font-size: var(--fs-sm); }
+    .tip { background: var(--bg-surface); border-left: 4px solid var(--accent-gold); border-radius: var(--radius-md);
+           padding: 12px 16px; margin: 16px 0; color: var(--text-secondary); }
+    .tip strong { color: var(--text-primary); }
+    .card { background: var(--bg-surface); border: 1px solid var(--border-subtle); border-radius: var(--radius-lg); padding: 20px 22px; }
+    b, strong { color: var(--text-primary); }
+    figure.shot { margin: 12px 0 4px; }
+    figure.shot img { width: 100%; border: 1px solid var(--border-default); border-radius: var(--radius-md); display: block; }
+    figcaption { font-size: var(--fs-xs, 12px); color: var(--text-muted); margin-top: 6px; text-align: center; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="g-head"><span class="ico">💭</span><h1>AI Brain</h1></div>
+    <p class="g-sub">Your guide to this page</p>
+
+    <div class="big">A memory for your business. Feed it your files, notes and meetings once, and every AI answer across the platform gets sharper.</div>
+
+    <h2>What this page is for</h2>
+    <div class="card">
+      <p>The AI Brain quietly remembers everything about you and your business — your files, notes, meetings, and a short profile of how you work. That way, the AI helpers everywhere else on the platform give you better, more personal answers. You set it up once, then it runs in the background.</p>
+    </div>
+
+    <h2>What you can do here</h2>
+    <ul>
+      <li>Connect where your information lives — your files, notes and meetings.</li>
+      <li>Fill in a short profile about you and your business.</li>
+      <li>Drop in new notes or videos any time to top it up.</li>
+      <li>See what it's captured, and answer the odd question when it's unsure.</li>
+    </ul>
+    <p style="color:var(--text-secondary)">There are two tabs: <strong>Setup</strong> (do this once) and <strong>Today</strong> (the day-to-day).</p>
+
+    <h2>Setting it up (once)</h2>
+    <ol class="steps">
+      <li>On the <strong>Setup</strong> tab, connect your sources — your storage, notes and meetings — so the brain can read them.
+        <figure class="shot"><img src="img/brain-setup.png" alt="The Set up your brain panel showing storage, notes, meetings and AI engine connections"><figcaption>Connect once; a green tick means it's linked.</figcaption></figure>
+      </li>
+      <li>Fill in your <strong>profile</strong>. Click <strong>Continue</strong> for a quick interview — the more complete it is, the sharper every answer.
+        <figure class="shot"><img src="img/brain-profile.png" alt="The context profile section showing sections complete and a Continue button"><figcaption>A few minutes here makes every AI answer better.</figcaption></figure>
+      </li>
+    </ol>
+
+    <h2>Day to day</h2>
+    <ol class="steps">
+      <li>The <strong>Today</strong> tab shows what's been captured, flags anything the brain is unsure about, and lets you feed in a quick note or a video whenever you like.
+        <figure class="shot"><img src="img/brain-today.png" alt="The Today tab showing recently filed items, questions to answer, and a box to add a note or video"><figcaption>Check in here, and drop in anything worth remembering.</figcaption></figure>
+      </li>
+    </ol>
+
+    <div class="tip"><strong>Tip:</strong> The more you feed it, the better every AI answer becomes — a few minutes now pays off everywhere else on the platform.</div>
+  </div>
+</body>
+</html>

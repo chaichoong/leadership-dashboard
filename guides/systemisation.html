@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Systemisation — Guide</title>
+  <link rel="stylesheet" href="../css/tokens.css?v=1">
+  <style>
+    body { background: var(--bg-app); color: var(--text-primary); margin: 0; line-height: 1.6; }
+    .wrap { max-width: 760px; margin: 0 auto; padding: 32px 22px 80px; }
+    .g-head { display: flex; align-items: center; gap: 14px; margin-bottom: 6px; }
+    .g-head .ico { font-size: 34px; }
+    .g-head h1 { font-size: var(--fs-2xl); margin: 0; }
+    .g-sub { color: var(--text-secondary); font-size: var(--fs-md); margin: 0 0 26px; }
+    .big { background: var(--accent-soft); border: 1px solid var(--border-default); border-radius: var(--radius-lg);
+           padding: 18px 20px; font-size: var(--fs-lg); font-weight: var(--fw-semibold); color: var(--text-primary); margin-bottom: 28px; }
+    h2 { font-size: var(--fs-xl); margin: 30px 0 10px; }
+    ul, ol { margin: 0 0 6px; padding-left: 22px; }
+    li { margin-bottom: 8px; }
+    ol.steps { counter-reset: step; list-style: none; padding-left: 0; }
+    ol.steps > li { counter-increment: step; position: relative; padding: 0 0 12px 44px; }
+    ol.steps > li::before { content: counter(step); position: absolute; left: 0; top: 0; width: 30px; height: 30px;
+      background: var(--accent); color: #fff; border-radius: 50%; display: flex; align-items: center; justify-content: center;
+      font-weight: var(--fw-bold); font-size: var(--fs-sm); }
+    .tip { background: var(--bg-surface); border-left: 4px solid var(--accent-gold); border-radius: var(--radius-md);
+           padding: 12px 16px; margin: 16px 0; color: var(--text-secondary); }
+    .tip strong { color: var(--text-primary); }
+    .card { background: var(--bg-surface); border: 1px solid var(--border-subtle); border-radius: var(--radius-lg); padding: 20px 22px; }
+    b, strong { color: var(--text-primary); }
+    figure.shot { margin: 12px 0 4px; }
+    figure.shot img { width: 100%; border: 1px solid var(--border-default); border-radius: var(--radius-md); display: block; }
+    figcaption { font-size: var(--fs-xs, 12px); color: var(--text-muted); margin-top: 6px; text-align: center; }
+    ol.journey { counter-reset: j; list-style: none; padding-left: 0; }
+    ol.journey > li { counter-increment: j; position: relative; padding: 0 0 8px 40px; }
+    ol.journey > li::before { content: counter(j); position: absolute; left: 0; top: 1px; width: 26px; height: 26px;
+      background: var(--bg-subtle); color: var(--text-secondary); border-radius: 50%; display: flex; align-items: center; justify-content: center;
+      font-weight: var(--fw-bold); font-size: var(--fs-xs, 12px); }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="g-head"><span class="ico">⚙️</span><h1>Systemisation</h1></div>
+    <p class="g-sub">Your guide to this page</p>
+
+    <div class="big">Write down how your business actually runs — step by step — so it can keep running smoothly even when you're not there.</div>
+
+    <h2>What this page is for</h2>
+    <div class="card">
+      <p>It's a place to map out every process in your business, laid out along the <strong>journey a customer takes with you</strong> — from first hearing about you all the way to becoming a loyal regular. Once it's written down, anyone on your team can follow it.</p>
+    </div>
+
+    <h2>What you can do here</h2>
+    <ul>
+      <li>See your whole business as one clear map, following the customer journey.</li>
+      <li>Break each stage into <strong>workflows</strong> — the actual steps you follow.</li>
+      <li>Write simple how-to notes so anyone can do the job.</li>
+      <li>Track how much of each stage you've written down.</li>
+    </ul>
+
+    <h2>The customer journey</h2>
+    <div class="card">
+      <p>The map is built around seven stages (they spell <strong>FULFILL</strong>):</p>
+      <ol class="journey">
+        <li><strong>Find &amp; Grab Attention</strong> — get noticed by the right people.</li>
+        <li><strong>Understand &amp; Enquire</strong> — handle enquiries and check they're a good fit.</li>
+        <li><strong>Lead to Sales Process</strong> — win the work.</li>
+        <li><strong>Finance Received</strong> — take payment.</li>
+        <li><strong>Initiate Onboarding</strong> — welcome the new customer in.</li>
+        <li><strong>Launch Delivery</strong> — do the work you were paid for.</li>
+        <li><strong>Loyalty Programme</strong> — keep them coming back.</li>
+      </ol>
+      <figure class="shot"><img src="img/sys-journey.png" alt="The customer-journey map with the seven FULFILL stages as cards"><figcaption>Your whole business, laid out as one journey.</figcaption></figure>
+    </div>
+
+    <h2>How to use it</h2>
+    <ol class="steps">
+      <li>Pick the tab that suits you. <strong>Customer Journey</strong> is the simplest place to start; the other tabs group your processes in different ways.
+        <figure class="shot"><img src="img/sys-tabs.png" alt="The Systemisation tabs: Customer Journey, Main Method, Departmental, All Workflows, SOPs, Automation"><figcaption>Different ways to look at the same processes.</figcaption></figure>
+      </li>
+      <li>Click any <strong>stage</strong> to open it, then add the <strong>workflows</strong> — the steps you follow for that part of the business.</li>
+      <li>As you fill each stage in, the little bar shows how complete it is, so you can see what still needs writing down.</li>
+    </ol>
+
+    <div class="tip"><strong>Tip:</strong> Start with the stage that causes the most headaches. Writing it down once saves you explaining it over and over.</div>
+  </div>
+</body>
+</html>

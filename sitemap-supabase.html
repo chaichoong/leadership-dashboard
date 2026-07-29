@@ -896,6 +896,10 @@
         'os-strategy': 'guides/strategy.html',
         tasks: 'guides/tasks.html',
         crm: 'guides/crm.html',
+        systemisation: 'guides/systemisation.html',
+        skills: 'guides/skills.html',
+        'ai-brain': 'guides/ai-brain.html',
+        sitemap: 'guides/sitemap.html',
       };
       // The "Open" cell renders an in-app switchTab link that does nothing in the
       // client iframe — repoint it at the Supabase route (navigating the whole app).
@@ -906,6 +910,11 @@
           const route = m && REG_ROUTE[m[1]];
           if (route) { a.setAttribute('href', route); a.setAttribute('target', '_top'); a.removeAttribute('onclick'); }
         });
+      }
+      // Clients get plain-English guide labels, not the developer "SOP" wording.
+      function swapGuideLabels(){
+        document.querySelectorAll('#sitemapTableBody a').forEach(a => { if (a.textContent.trim() === 'Open SOP') a.textContent = 'Open guide'; });
+        document.querySelectorAll('#sitemapTableBody span').forEach(s => { if (s.textContent.trim() === 'no SOP') s.textContent = 'no guide yet'; });
       }
       async function enabledModules(){
         const en = new Set([...BASE, ...OPTOUT]);
@@ -950,7 +959,7 @@
           // Keep the "Open" links repointed even after git-sync re-renders the table.
           if (typeof renderSiteMap === 'function' && !window.__sbRenderWrapped) {
             const _render = renderSiteMap;
-            window.renderSiteMap = function(){ const out = _render.apply(this, arguments); rewriteOpenLinks(); return out; };
+            window.renderSiteMap = function(){ const out = _render.apply(this, arguments); rewriteOpenLinks(); if (!owner) swapGuideLabels(); return out; };
             window.__sbRenderWrapped = true;
           }
           if (typeof renderSiteMap === 'function') renderSiteMap();
