@@ -16,6 +16,13 @@
       "cwd": "."
     },
     {
+      "name": "ops-director-buckets",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": ["-m", "http.server", "8961"],
+      "port": 8961,
+      "cwd": "."
+    },
+    {
       "name": "ops-director-brain",
       "runtimeExecutable": "python3",
       "runtimeArgs": ["-m", "http.server", "8957"],

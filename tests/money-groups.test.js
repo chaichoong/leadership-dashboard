@@ -196,9 +196,45 @@ describe('Cash-flow drill-down', () => {
     const idx = s.getCfTxIndex();
     // The index must reproduce the figure on screen, or the drill-down disagrees
     // with the number that was clicked.
-    const sum = list => list.reduce((t, r) => t + Math.abs(r.fields[s.F.txReportAmount]), 0);
+    // An index entry is either a raw record, or {t, amt} where amt is what that record
+    // CONTRIBUTED. Credit-card payments use the second shape because the two legs of one
+    // payment carry opposite Report Amounts and would otherwise cancel in the drill list.
+    const sum = list => list.reduce((t, r) => t + Math.abs(r.t ? r.amt : r.fields[s.F.txReportAmount]), 0);
     expect(sum(idx['Personal Household Essentials']['2026-06'])).toBeCloseTo(m.perItems['Personal Household Essentials'], 2);
     expect(sum(idx['Personal Credit Card Transfer']['2026-06'])).toBeCloseTo(m.bucketItems['Personal Credit Card Transfer'], 2);
+  });
+
+  it('a short-window recompute does not wipe the months it did not cover', () => {
+    // The matrix renders 12 months, then the KPI strip (wealth.js) and the ratios
+    // (wealth-ratios.js) call buildMonthlyCashflow again with SHORT windows. When the
+    // index was cleared wholesale, those later calls left one month behind: every
+    // older figure stayed correct on screen but opened "No transactions behind this
+    // figure". Each call now clears only the months it recomputes.
+    const s = loadEngine();
+    const N = s.SUBCAT.name, G = s.SUBCAT.moneyGroup;
+    s.__setData([
+      tx(s, { date: '2026-03-10', amount: -400, subId: 'recEss' }),
+      tx(s, { date: '2026-06-10', amount: -180, subId: 'recEss' }),
+    ], [{ id: 'recEss', fields: { [N]: 'Personal Household Essentials', [G]: 'Needs' } }]);
+
+    s.buildMonthlyCashflow(['2026-03', '2026-04', '2026-05', '2026-06']);
+    s.buildMonthlyCashflow(['2026-06']);                       // the ratios / KPI call
+
+    const idx = s.getCfTxIndex()['Personal Household Essentials'];
+    expect(Object.keys(idx).sort()).toEqual(['2026-03', '2026-06']);
+    expect(idx['2026-03']).toHaveLength(1);
+  });
+
+  it('a recomputed month is replaced, not appended to', () => {
+    // The other half of per-month clearing: recomputing a month must not leave the
+    // previous run's rows behind, or a drill-down would double-count.
+    const s = loadEngine();
+    const N = s.SUBCAT.name, G = s.SUBCAT.moneyGroup;
+    s.__setData([tx(s, { date: '2026-06-10', amount: -180, subId: 'recEss' })],
+      [{ id: 'recEss', fields: { [N]: 'Personal Household Essentials', [G]: 'Needs' } }]);
+    s.buildMonthlyCashflow(['2026-06']);
+    s.buildMonthlyCashflow(['2026-06']);
+    expect(s.getCfTxIndex()['Personal Household Essentials']['2026-06']).toHaveLength(1);
   });
 
   it('an uncounted transaction is not indexed either', () => {
