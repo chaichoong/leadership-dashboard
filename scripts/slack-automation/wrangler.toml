@@ -25,3 +25,7 @@ bucket_name = "contractor-bot-attachments"
 [vars]
 AI_MODEL_DEFAULT = "claude-sonnet-4-6"
 AI_MODEL_LIGHT = "claude-haiku-4-5-20251001"
+
+# Persist worker logs (Workers Logs) so silent failures are diagnosable.
+[observability]
+enabled = true

@@ -329,6 +329,10 @@ function shouldHandle(evt) {
     // the parent was actually a comment-DM (Task ID embedded in context
     // block) before doing anything.
     if (evt.channel_type === 'im' && evt.thread_ts && evt.text) return true;
+    // BRANCH 1b — CEO conversation: ANY direct message from Kevin (top-level,
+    // not just thread replies). Kevin talks to the AI CEO in this DM — daily
+    // brief follow-ups, strategy sessions, anything. Added 28 Jul 2026.
+    if (evt.channel_type === 'im' && !evt.thread_ts && evt.text && TEAM_MEMBERS[evt.user] && TEAM_MEMBERS[evt.user].firstName === 'Kevin') return true;
     // BRANCH 2 — contractor channel message (legacy / primary flow).
     if (evt.channel !== PROPERTY_CHANNEL_ID) return false;
     // Accept messages from BOTH contractors and team members. Contractors
@@ -356,6 +360,12 @@ async function routeMessage(evt, env) {
     // contractor-channel logic below stays untouched.
     if (evt.channel_type === 'im' && evt.thread_ts) {
         return handleDmThreadReply(evt, env);
+    }
+    // CEO conversation — top-level DM from Kevin (28 Jul 2026).
+    if (evt.channel_type === 'im' && !evt.thread_ts) {
+        const tm = TEAM_MEMBERS[evt.user];
+        if (tm && tm.firstName === 'Kevin') return handleCeoConversation(evt, env);
+        return;
     }
     const sender = senderFor(evt.user);
     if (!sender) return;
@@ -635,6 +645,104 @@ function commentTeamBySlackEmail(slackEmail) {
     ) || null;
 }
 
+// ─── CEO CONVERSATION (Kevin ↔ the AI CEO, in the Slack DM) ──────────────────
+// Any DM from Kevin that is not a task-comment reply lands here: follow-ups on
+// the morning brief, strategy sessions, worries, decisions. Context = recent
+// DM history + the latest stored briefs + secret founder/quarter context.
+// Design: docs/ai-org-chart-spec.md. Sensitive founder context lives ONLY in
+// the PERSONA_CONTEXT secret — never in this public file.
+
+const TBL_CEO_BRIEFS = 'tblIxbzDSOCI5hqJn';
+const CEO_F = { date: 'fldzLwBd3Mjg7rDxM', oneThing: 'fldQDCAcd74Bb6mpY', firstStep: 'fld4O4EuxHzMWARV7', why: 'fldqooUbDCQ4yNlWQ', ignore: 'fldmC5AYRaJdfyFGx', flags: 'fldS7ZoGAS7sAJfJq', light: 'fldBIbjpHlA2QmVbO', safe: 'fldQ4JEWYpHpI2KDs' };
+
+async function ceoRecentDialogue(evt, env) {
+    // Thread reply → pull the thread; top-level → pull recent DM history.
+    const api = evt.thread_ts
+        ? `https://slack.com/api/conversations.replies?channel=${encodeURIComponent(evt.channel)}&ts=${encodeURIComponent(evt.thread_ts)}&limit=15`
+        : `https://slack.com/api/conversations.history?channel=${encodeURIComponent(evt.channel)}&limit=12`;
+    const res = await fetch(api, { headers: { Authorization: 'Bearer ' + env.SLACK_BOT_TOKEN } });
+    const data = await res.json();
+    if (!data.ok || !data.messages) return [];
+    const msgs = evt.thread_ts ? data.messages : data.messages.slice().reverse();
+    const dialogue = [];
+    for (const m of msgs) {
+        const text = cleanSlackText(m.text || (m.blocks || []).map(b => b?.text?.text || '').join('\n'));
+        if (!text) continue;
+        dialogue.push({ role: m.bot_id ? 'assistant' : 'user', content: text.slice(0, 1500) });
+    }
+    // Anthropic requires the last message to be the user's; ensure evt.text is last.
+    if (!dialogue.length || dialogue[dialogue.length - 1].role !== 'user') {
+        dialogue.push({ role: 'user', content: cleanSlackText(evt.text).slice(0, 1500) });
+    }
+    // Merge consecutive same-role turns (Slack often has runs of bot messages).
+    const merged = [];
+    for (const d of dialogue) {
+        if (merged.length && merged[merged.length - 1].role === d.role) merged[merged.length - 1].content += '\n' + d.content;
+        else merged.push(d);
+    }
+    // Must START with a user turn too.
+    while (merged.length && merged[0].role !== 'user') merged.shift();
+    return merged.slice(-10);
+}
+
+async function ceoLatestBriefs(env) {
+    const url = new URL(`https://api.airtable.com/v0/${AIRTABLE_BASE}/${TBL_CEO_BRIEFS}`);
+    url.searchParams.set('pageSize', '2');
+    url.searchParams.set('returnFieldsByFieldId', 'true');
+    url.searchParams.append('sort[0][field]', CEO_F.date);
+    url.searchParams.append('sort[0][direction]', 'desc');
+    const res = await fetch(url, { headers: { Authorization: 'Bearer ' + env.AIRTABLE_PAT } });
+    if (!res.ok) return '(briefs unavailable)';
+    const data = await res.json();
+    return (data.records || []).map(r => {
+        const f = r.fields || {};
+        return `${f[CEO_F.date]}: ONE THING: ${f[CEO_F.oneThing]} | first step: ${f[CEO_F.firstStep]} | money ${f[CEO_F.light]} £${f[CEO_F.safe]} | ignore: ${String(f[CEO_F.ignore] || '').replace(/\n/g, '; ')} | flags: ${String(f[CEO_F.flags] || '').replace(/\n/g, '; ')}`;
+    }).join('\n') || '(no briefs stored yet)';
+}
+
+async function handleCeoConversation(evt, env) {
+    const [dialogue, briefs] = await Promise.all([ceoRecentDialogue(evt, env), ceoLatestBriefs(env)]);
+    if (!dialogue.length) return;
+
+    const system = `You are Kevin Brittain's AI CEO — his right hand, talking with him in a private Slack DM.
+Voice: Gino Wickman's Integrator running Gary Keller's ONE-thing rule. Direct, warm, spartan, UK English. Short Slack-sized replies (usually under 150 words) unless a strategy session needs more.
+HARD RULES:
+- Write for a 13-year-old reader. No jargon, no unexplained acronyms, no em dashes.
+- Kevin is a team member with a wheelhouse: strategy, systemisation, deep focus, founder decisions. Route admin, chasing, paperwork to the team (Mica: operations; Ericamae: marketing). Never suggest Kevin makes a phone call.
+- Suggestions before questions: always arrive with a recommendation he can approve or tweak, never a bare open question.
+- If Kevin voices worry, fear, or overwhelm: switch to a strategy session — steady, structured, ONE question at a time, opportunity → controllables → plan → emotion out. Peters guards energy; the plan can pause.
+- If Kevin gives a ruling or decision, acknowledge it as a standing rule you will remember (the precedent rule) and apply it from now on.
+- Board personas may be invoked when their lane triggers (Keller focus, Hormozi offers/leads, Crabtree numbers, Michalowicz cash, Jenyns systems, Martell AI-leverage, Housel wealth temperament, Lamerton lifestyle reality, Peters mind/energy) — one line each, sparingly.
+- Never state a fact about his data you have not been given below; say what you'd need to check rather than guessing.
+${env.PERSONA_CONTEXT ? '\nFOUNDER CONTEXT (private):\n' + env.PERSONA_CONTEXT : ''}
+${env.QUARTER_CONTEXT ? '\nQUARTER CONTEXT:\n' + env.QUARTER_CONTEXT : ''}
+
+RECENT BRIEFS:
+${briefs}`;
+
+    const res = await fetch(ANTHROPIC_API_URL, {
+        method: 'POST',
+        headers: { 'x-api-key': env.ANTHROPIC_API_KEY, 'anthropic-version': ANTHROPIC_VERSION, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model: env.AI_MODEL_DEFAULT, max_tokens: 1200, system, messages: dialogue }),
+    });
+    if (!res.ok) {
+        console.error('[ceo-dm] Anthropic error', res.status, (await res.text()).slice(0, 200));
+        await fetch(SLACK_POST_URL, {
+            method: 'POST',
+            headers: { Authorization: 'Bearer ' + env.SLACK_BOT_TOKEN, 'Content-Type': 'application/json; charset=utf-8' },
+            body: JSON.stringify({ channel: evt.channel, thread_ts: evt.thread_ts, text: 'Sorry — I could not think that one through just now. Try me again in a minute.' }),
+        });
+        return;
+    }
+    const data = await res.json();
+    const answer = data.content?.[0]?.text || 'Sorry, I have no answer for that one.';
+    await fetch(SLACK_POST_URL, {
+        method: 'POST',
+        headers: { Authorization: 'Bearer ' + env.SLACK_BOT_TOKEN, 'Content-Type': 'application/json; charset=utf-8' },
+        body: JSON.stringify({ channel: evt.channel, thread_ts: evt.thread_ts, text: answer }),
+    });
+}
+
 async function handleDmThreadReply(evt, env) {
     // 1. Look up the parent DM — find the embedded Task ID.
     const parentRes = await fetch(
@@ -648,6 +756,10 @@ async function handleDmThreadReply(evt, env) {
     }
     const taskId = extractTaskIdFromMessage(parent.messages[0]);
     if (!taskId) {
+        // Not a task-comment thread. If it's Kevin, this is a CEO-brief (or any
+        // other) thread — hand the whole thing to the CEO conversation handler.
+        const tm = TEAM_MEMBERS[evt.user];
+        if (tm && tm.firstName === 'Kevin') return handleCeoConversation(evt, env);
         console.warn('[dm-thread] no Task ID in parent — ignoring', parent.messages[0].ts);
         return;
     }
