@@ -52,10 +52,63 @@
 <script src="js/skills-data.js?v=3"></script>
 <script src="js/skills.js?v=6"></script>
 <script>
-  // Wait for a real Supabase session (shell login already covers this in the app),
-  // then render. renderSkillsTab pulls active presets + SOP skills via the shim.
+  // ── Client entitlement filter for the static skills catalogue ──────────────
+  // The home org ("Operations Director Main") sees every skill. For a CLIENT:
+  //   • hide the provider's bespoke skills (source custom / project / scheduled),
+  //   • gate feature-specific categories to the modules the client actually has.
+  // The client's OWN skills (sys_workflows, already org-scoped by RLS) are left
+  // untouched. Fail-safe: any error leaves the catalogue filtered (client view).
+  (function () {
+    const OWNER_ONLY = ['custom', 'project', 'scheduled'];
+    const CATEGORY_FEATURE = {          // skill category → the feature it requires
+      'Property Management': 'property',
+      'Finance':             'finance',
+      'Marketing':           'content_machine',
+      'Customer Support':    'inbound_comms',
+    };
+    const BASE   = ['strategy', 'tasks', 'team', 'systemisation', 'ai_assistant', 'dod_queue', 'crm'];
+    const OPTOUT = ['plan_builder', 'command_centre'];
+    async function isOwner(sb) {
+      try {
+        const { data, error } = await sb.from('organizations').select('id').eq('name', 'Operations Director Main').limit(1);
+        return !error && !!(data && data.length);
+      } catch (e) { return false; }
+    }
+    async function features(sb) {
+      const en = new Set([...BASE, ...OPTOUT]);
+      try {
+        const { data } = await sb.from('org_modules').select('module_key, enabled');
+        (data || []).forEach(r => { if (r.enabled) en.add(r.module_key); else if (OPTOUT.includes(r.module_key)) en.delete(r.module_key); });
+      } catch (e) { /* base + opt-out features stay */ }
+      return en;
+    }
+    window.__applySkillEntitlements = async function () {
+      try {
+        const sb = window.sbSkills && window.sbSkills();
+        if (!sb || typeof SKILLS_LIBRARY === 'undefined') return;
+        if (await isOwner(sb)) return;                    // provider sees everything
+        window.__skillsClientView = true;                 // client → default to the full list below
+        const feats = await features(sb);
+        SKILLS_LIBRARY = SKILLS_LIBRARY.filter(s => {
+          if (OWNER_ONLY.includes(s.source)) return false;               // provider's own skills
+          const need = CATEGORY_FEATURE[s.category];
+          if (need && !feats.has(need)) return false;                    // feature the client doesn't have
+          return true;
+        });
+      } catch (e) { console.warn('[skills] entitlement filter failed', e); }
+    };
+  })();
+
+  // Wait for a real Supabase session, apply the client entitlement filter, then render.
   (window.ensureSbSession ? window.ensureSbSession() : Promise.resolve())
-    .then(function () { if (typeof renderSkillsTab === 'function') renderSkillsTab(); });
+    .then(function () { return window.__applySkillEntitlements ? window.__applySkillEntitlements() : null; })
+    .then(function () { if (typeof renderSkillsTab === 'function') return renderSkillsTab(); })
+    .then(function () {
+      // A client's "My Skills" is normally empty, so land them on the full list.
+      if (!window.__skillsClientView) return;
+      const pills = document.querySelectorAll('#skillsSourceBar .skills-source-pill');
+      for (const p of pills) { if (/^All\b/.test((p.textContent || '').trim())) { p.click(); break; } }
+    });
 </script>
 </body>
 </html>
