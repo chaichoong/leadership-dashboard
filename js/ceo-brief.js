@@ -8,16 +8,21 @@
 // only READS. Discussion happens in Slack by design (Kevin, 28 Jul 2026) — the
 // tab is the record, Slack is the conversation.
 //
-// ISOLATION: additive tab. Own fetch (small table, field NAMES on purpose —
-// the worker writes by name); no shared globals modified.
+// ISOLATION: additive tab. Own fetch (small table); no shared globals modified.
+//
+// Field IDs, not names. This tab and the worker both used field names until
+// 2026-07-29; the nightly drift monitor only watches the IDs in config.js, so a
+// rename in Airtable would have broken the 09:00 brief silently with nothing to
+// catch it. Both sides now go through TABLES.ceoBriefs / F.ceo* and the read asks
+// for returnFieldsByFieldId=true, matching every other fetch in the platform.
 
-const CEO_BRIEFS_TABLE = 'tblIxbzDSOCI5hqJn';
 let ceoBriefRecords = null; // session cache; Refresh re-fetches
 
 async function fetchCeoBriefs() {
-    const url = new URL(`https://api.airtable.com/v0/${BASE_ID}/${CEO_BRIEFS_TABLE}`);
+    const url = new URL(`https://api.airtable.com/v0/${BASE_ID}/${TABLES.ceoBriefs}`);
+    url.searchParams.set('returnFieldsByFieldId', 'true');
     url.searchParams.set('pageSize', '30');
-    url.searchParams.append('sort[0][field]', 'Date');
+    url.searchParams.append('sort[0][field]', F.ceoDate);
     url.searchParams.append('sort[0][direction]', 'desc');
     const resp = await fetch(url, { headers: { Authorization: `Bearer ${PAT}` } });
     if (!resp.ok) throw new Error(`CEO Briefs fetch failed (${resp.status})`);
@@ -41,19 +46,19 @@ function ceoLightBadge(light) {
 
 function renderCeoBriefCard(rec, isToday) {
     const f = rec.fields || {};
-    const flags = String(f['Board Flags'] || '').split('\n').filter(Boolean);
-    const ignore = String(f['Ignore Today'] || '').split('\n').filter(Boolean);
-    const money = f['Safe To Act'] != null
-        ? `£${Number(f['Safe To Act']).toLocaleString('en-GB', { minimumFractionDigits: 2 })}` : '—';
+    const flags = String(f[F.ceoBoardFlags] || '').split('\n').filter(Boolean);
+    const ignore = String(f[F.ceoIgnoreToday] || '').split('\n').filter(Boolean);
+    const money = f[F.ceoSafeToAct] != null
+        ? `£${Number(f[F.ceoSafeToAct]).toLocaleString('en-GB', { minimumFractionDigits: 2 })}` : '—';
     return `
     <div style="background:var(--bg-surface);border:1px solid ${isToday ? 'var(--accent)' : 'var(--border-default)'};border-radius:var(--radius-lg);padding:var(--space-5);margin-bottom:var(--space-4);box-shadow:var(--shadow-sm)">
         <div style="display:flex;justify-content:space-between;align-items:center;gap:var(--space-3);flex-wrap:wrap">
-            <div style="font-size:var(--fs-xs);color:var(--text-muted);font-weight:var(--fw-medium)">${escHtml(f['Date'] || '')}${isToday ? ' · TODAY' : ''}</div>
-            <div style="display:flex;align-items:center;gap:var(--space-2)">${ceoLightBadge(f['Money Light'])}<span style="font-size:var(--fs-xs);color:var(--text-secondary)">Safe to act: <strong>${escHtml(money)}</strong></span></div>
+            <div style="font-size:var(--fs-xs);color:var(--text-muted);font-weight:var(--fw-medium)">${escHtml(f[F.ceoDate] || '')}${isToday ? ' · TODAY' : ''}</div>
+            <div style="display:flex;align-items:center;gap:var(--space-2)">${ceoLightBadge(f[F.ceoMoneyLight])}<span style="font-size:var(--fs-xs);color:var(--text-secondary)">Safe to act: <strong>${escHtml(money)}</strong></span></div>
         </div>
-        <div style="margin-top:var(--space-3);font-size:var(--fs-lg);font-weight:var(--fw-bold);color:var(--text-primary)">${escHtml(f['One Thing'] || '')}</div>
-        <div style="margin-top:var(--space-2);padding:var(--space-3);background:var(--accent-soft);border-radius:var(--radius-md);font-size:var(--fs-sm);color:var(--text-primary)"><strong>Start here (10 min):</strong> ${escHtml(f['First Step'] || '')}</div>
-        ${f['Why'] ? `<div style="margin-top:var(--space-3);font-size:var(--fs-sm);color:var(--text-secondary)"><strong>Why this wins:</strong> ${escHtml(f['Why'])}</div>` : ''}
+        <div style="margin-top:var(--space-3);font-size:var(--fs-lg);font-weight:var(--fw-bold);color:var(--text-primary)">${escHtml(f[F.ceoOneThing] || '')}</div>
+        <div style="margin-top:var(--space-2);padding:var(--space-3);background:var(--accent-soft);border-radius:var(--radius-md);font-size:var(--fs-sm);color:var(--text-primary)"><strong>Start here (10 min):</strong> ${escHtml(f[F.ceoFirstStep] || '')}</div>
+        ${f[F.ceoWhy] ? `<div style="margin-top:var(--space-3);font-size:var(--fs-sm);color:var(--text-secondary)"><strong>Why this wins:</strong> ${escHtml(f[F.ceoWhy])}</div>` : ''}
         ${ignore.length ? `<div style="margin-top:var(--space-3);font-size:var(--fs-sm);color:var(--text-muted)"><strong>Ignore today:</strong><ul style="margin:var(--space-1) 0 0 var(--space-5);padding:0">${ignore.map(i => `<li>${escHtml(i)}</li>`).join('')}</ul></div>` : ''}
         ${flags.map(fl => `<div style="margin-top:var(--space-2);font-size:var(--fs-sm);color:var(--warning);background:var(--warning-bg);padding:var(--space-2) var(--space-3);border-radius:var(--radius-md)">⚑ ${escHtml(fl)}</div>`).join('')}
     </div>`;
@@ -62,7 +67,7 @@ function renderCeoBriefCard(rec, isToday) {
 function renderCeoBriefContent(el) {
     const recs = ceoBriefRecords || [];
     const today = ceoBriefTodayISO();
-    const todayRec = recs.find(r => (r.fields || {})['Date'] === today);
+    const todayRec = recs.find(r => (r.fields || {})[F.ceoDate] === today);
     const history = recs.filter(r => r !== todayRec);
     const isWeekend = [0, 6].includes(new Date().getDay());
 
@@ -134,7 +139,7 @@ function registerCeoBriefSyncBar() {
                     if ([0, 6].includes(now.getDay())) return { status: 'pass', detail: 'Weekend — no brief expected' };
                     const londonHour = Number(new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/London', hour: 'numeric', hour12: false }).format(now));
                     if (londonHour < 10) return { status: 'pass', detail: 'Before 10am — the brief may still be on its way' };
-                    const ok = (ceoBriefRecords || []).some(r => (r.fields || {})['Date'] === ceoBriefTodayISO());
+                    const ok = (ceoBriefRecords || []).some(r => (r.fields || {})[F.ceoDate] === ceoBriefTodayISO());
                     if (!ok) return { status: 'fail', detail: 'Missing — check the Slack DM; if that is missing too, the morning robot needs attention' };
                     return { status: 'pass', detail: 'Arrived and stored' };
                 }
@@ -144,7 +149,8 @@ function registerCeoBriefSyncBar() {
                     const recs = ceoBriefRecords || [];
                     if (!recs.length) return { status: 'warn', detail: 'No briefs stored yet — first one lands next weekday 9am' };
                     const f = recs[0].fields || {};
-                    const missing = ['One Thing', 'First Step', 'Money Light'].filter(k => !f[k]);
+                    const missing = [['One Thing', F.ceoOneThing], ['First Step', F.ceoFirstStep], ['Money Light', F.ceoMoneyLight]]
+                        .filter(([, id]) => !f[id]).map(([label]) => label);
                     if (missing.length) return { status: 'fail', detail: 'Latest brief missing: ' + missing.join(', ') };
                     return { status: 'pass', detail: 'One thing, first step and money light all present' };
                 }
@@ -153,7 +159,7 @@ function registerCeoBriefSyncBar() {
                 name: 'Morning robot ran within the last week', kind: 'automation', run: () => {
                     const recs = ceoBriefRecords || [];
                     if (!recs.length) return { status: 'warn', detail: 'No briefs yet — new install' };
-                    const latest = (recs[0].fields || {})['Date'] || '';
+                    const latest = (recs[0].fields || {})[F.ceoDate] || '';
                     const age = Math.round((new Date(ceoBriefTodayISO()) - new Date(latest)) / 86400000);
                     if (age > 6) return { status: 'fail', detail: `Latest brief is ${age} days old — the 9am robot has stopped` };
                     return { status: 'pass', detail: `Latest brief: ${latest}` };

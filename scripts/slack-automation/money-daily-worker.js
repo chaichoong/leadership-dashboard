@@ -48,6 +48,20 @@ const F = {
     txSubCategory: 'fldMRjSVzZVYeHb0A',
     txTenancy:     'fldPmAMmxwqs4SdPa',
     txDate:        'fldoyQ6Rr9cHp3bgQ',
+    // CEO Briefs (written below by storeBrief). IDs, not names: a rename in
+    // Airtable would drop the field from the write silently, and the nightly drift
+    // monitor only watches IDs. Mirrors F.ceo* in js/config.js, which js/ceo-brief.js
+    // reads — keep the two in step.
+    ceoDate:        'fldzLwBd3Mjg7rDxM',
+    ceoOneThing:    'fldQDCAcd74Bb6mpY',
+    ceoFirstStep:   'fld4O4EuxHzMWARV7',
+    ceoWhy:         'fldqooUbDCQ4yNlWQ',
+    ceoIgnoreToday: 'fldmC5AYRaJdfyFGx',
+    ceoBoardFlags:  'fldS7ZoGAS7sAJfJq',
+    ceoMoneyLight:  'fldBIbjpHlA2QmVbO',
+    ceoSafeToAct:   'fldQ4JEWYpHpI2KDs',
+    ceoFullBrief:   'fldPkiaWvmYAoyHEl',
+    ceoSourceStats: 'fldVgR25q8bqdub4c',
 };
 const REC = {
     santander:    'rec3LiEiifomEHlvy',
@@ -392,20 +406,24 @@ async function callCeo(env, prompt) {
 }
 
 async function storeBrief(pat, brief, m, tasks) {
+    // Field IDs, not names — see the F.ceo* block. typecast is deliberately OFF:
+    // with it on, a Money Light value that stopped matching the three choices
+    // (green | amber | red) would quietly create a NEW choice instead of failing.
+    // Off, Airtable rejects it, the caller's catch fires alertFailure, and the
+    // Slack DM has already gone out — so a loud failure costs nothing.
     const body = {
         records: [{ fields: {
-            'Date': todayLondonISO(),
-            'One Thing': brief.one_thing.slice(0, 250),
-            'First Step': brief.first_step.slice(0, 250),
-            'Why': brief.why || '',
-            'Ignore Today': brief.ignore.join('\n'),
-            'Board Flags': brief.flags.join('\n'),
-            'Money Light': m.light,
-            'Safe To Act': Number(m.safeToActToday.toFixed(2)),
-            'Full Brief': JSON.stringify(brief),
-            'Source Stats': JSON.stringify(tasks.counts),
+            [F.ceoDate]:        todayLondonISO(),
+            [F.ceoOneThing]:    brief.one_thing.slice(0, 250),
+            [F.ceoFirstStep]:   brief.first_step.slice(0, 250),
+            [F.ceoWhy]:         brief.why || '',
+            [F.ceoIgnoreToday]: brief.ignore.join('\n'),
+            [F.ceoBoardFlags]:  brief.flags.join('\n'),
+            [F.ceoMoneyLight]:  m.light,
+            [F.ceoSafeToAct]:   Number(m.safeToActToday.toFixed(2)),
+            [F.ceoFullBrief]:   JSON.stringify(brief),
+            [F.ceoSourceStats]: JSON.stringify(tasks.counts),
         } }],
-        typecast: true,
     };
     const r = await fetch(`https://api.airtable.com/v0/${BASE_ID}/${TBL_BRIEFS}`, {
         method: 'POST',
