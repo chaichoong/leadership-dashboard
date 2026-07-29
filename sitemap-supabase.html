@@ -889,6 +889,13 @@
         pnl:'/pnl', wealth:'/wealth', 'os-team':'/team', sitemap:'/sitemap',
         'content-machine':'/content-machine',
       };
+      // PAGE_REGISTRY id → the client-facing guide (plain-language, 13-yr-old
+      // reading level). Clients see these instead of the Airtable-oriented SOPs;
+      // ids not listed show no guide yet. The owner keeps the original SOPs.
+      const REG_SOP = {
+        'os-strategy': 'guides/strategy.html',
+        tasks: 'guides/tasks.html',
+      };
       // The "Open" cell renders an in-app switchTab link that does nothing in the
       // client iframe — repoint it at the Supabase route (navigating the whole app).
       // Re-applied after every render (git-sync refresh re-renders the table).
@@ -928,11 +935,16 @@
       async function apply(){
         try {
           if (typeof PAGE_REGISTRY === 'undefined') return;
-          if (await isHomeOrg()) document.documentElement.classList.remove('sbmap-client');
+          const owner = await isHomeOrg();
+          if (owner) document.documentElement.classList.remove('sbmap-client');
           const en = await enabledModules();
           const keep = PAGE_REGISTRY.filter(p => { const m = REG_MODULE[p.id]; return m && en.has(m); });
-          // Point the "Standalone URL" column at the Supabase page, not Airtable.
-          keep.forEach(p => { const r = REG_ROUTE[p.id]; if (r) p.standalone = location.origin + r; });
+          keep.forEach(p => {
+            // Point the "Standalone URL" column at the Supabase page, not Airtable.
+            const r = REG_ROUTE[p.id]; if (r) p.standalone = location.origin + r;
+            // Clients see the plain-language guides (or none yet); owner keeps the SOPs.
+            if (!owner) p.sopFile = REG_SOP[p.id] || '';
+          });
           PAGE_REGISTRY.length = 0; Array.prototype.push.apply(PAGE_REGISTRY, keep);
           // Keep the "Open" links repointed even after git-sync re-renders the table.
           if (typeof renderSiteMap === 'function' && !window.__sbRenderWrapped) {
