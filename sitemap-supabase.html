@@ -4,6 +4,11 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Site Map & Guides — Supabase</title>
+    <!-- Hide the sitemap table until it's filtered to this client's own pages
+         (see the entitlements filter before </body>), so a client never sees the
+         full platform page list flash first. -->
+    <style>html.sbmap-gate #tab-sitemap{visibility:hidden}</style>
+    <script>document.documentElement.classList.add('sbmap-gate');</script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -834,5 +839,56 @@
     <script defer src="js/ai-assistant.js?v=16"></script>
     <script defer src="js/quick-task.js?v=4"></script>
     <script defer src="js/admin-repair-splits.js?v=5"></script>
+    <!-- Client Site Map: show ONLY the pages this workspace's plan includes.
+         The registry (PAGE_REGISTRY, shared with the live site) lists every
+         platform page; here we trim it to the client's entitled pages, mirroring
+         the sidebar gating. Mutating PAGE_REGISTRY once keeps every later render
+         (git-sync re-renders, health checks) filtered too. -->
+    <script>
+    (function(){
+      const ungate = () => document.documentElement.classList.remove('sbmap-gate');
+      if (!window.__SB_CLONE__) { ungate(); return; }
+      // Base modules ship with every plan; opt-out features are on unless a row
+      // disables them; everything else (add-ons) is on only when a row enables it.
+      const BASE   = ['strategy','tasks','team','systemisation','ai_assistant','dod_queue','crm'];
+      const OPTOUT = ['plan_builder','command_centre'];
+      // PAGE_REGISTRY id → the sidebar module that unlocks it. Ids not listed are
+      // internal (never client-facing) and are always hidden for a client.
+      const REG_MODULE = {
+        overview:'command_centre', 'os-strategy':'strategy', 'os-bplan':'plan_builder',
+        'ai-brain':'ai_assistant', tasks:'tasks', operations:'property', comms:'inbound_comms',
+        systemisation:'systemisation', skills:'systemisation', money:'finance', fintable:'finance',
+        pnl:'finance', wealth:'personal_wealth', 'os-team':'team', sitemap:'dod_queue',
+        'content-machine':'content_machine',
+      };
+      async function enabledModules(){
+        const en = new Set([...BASE, ...OPTOUT]);
+        try {
+          const sb = window.sbDash && window.sbDash();
+          if (sb) {
+            const { data, error } = await sb.from('org_modules').select('module_key, enabled');
+            if (!error && data) data.forEach(r => {
+              if (r.enabled) en.add(r.module_key);
+              else if (OPTOUT.includes(r.module_key)) en.delete(r.module_key);
+            });
+          }
+        } catch (e) { /* fail safe — base + opt-out features stay visible */ }
+        return en;
+      }
+      async function apply(){
+        try {
+          if (typeof PAGE_REGISTRY === 'undefined') return;
+          const en = await enabledModules();
+          const keep = PAGE_REGISTRY.filter(p => { const m = REG_MODULE[p.id]; return m && en.has(m); });
+          PAGE_REGISTRY.length = 0; Array.prototype.push.apply(PAGE_REGISTRY, keep);
+          if (typeof renderSiteMap === 'function') renderSiteMap();
+        } catch (e) { console.warn('[sitemap-entitlements] filter failed', e); }
+        finally { ungate(); }
+      }
+      if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', apply);
+      else apply();
+      setTimeout(ungate, 6000);  // safety: never leave the sitemap hidden
+    })();
+    </script>
 </body>
 </html>
