@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Objective &amp; Strategy — Guide</title>
+  <link rel="stylesheet" href="../css/tokens.css?v=1">
+  <style>
+    body { background: var(--bg-app); color: var(--text-primary); margin: 0; line-height: 1.6; }
+    .wrap { max-width: 760px; margin: 0 auto; padding: 32px 22px 80px; }
+    .g-head { display: flex; align-items: center; gap: 14px; margin-bottom: 6px; }
+    .g-head .ico { font-size: 34px; }
+    .g-head h1 { font-size: var(--fs-2xl); margin: 0; }
+    .g-sub { color: var(--text-secondary); font-size: var(--fs-md); margin: 0 0 26px; }
+    .big { background: var(--accent-soft); border: 1px solid var(--border-default); border-radius: var(--radius-lg);
+           padding: 18px 20px; font-size: var(--fs-lg); font-weight: var(--fw-semibold); color: var(--text-primary); margin-bottom: 28px; }
+    h2 { font-size: var(--fs-xl); margin: 30px 0 10px; }
+    ul, ol { margin: 0 0 6px; padding-left: 22px; }
+    li { margin-bottom: 8px; }
+    ol.steps { counter-reset: step; list-style: none; padding-left: 0; }
+    ol.steps > li { counter-increment: step; position: relative; padding: 0 0 12px 44px; }
+    ol.steps > li::before { content: counter(step); position: absolute; left: 0; top: 0; width: 30px; height: 30px;
+      background: var(--accent); color: #fff; border-radius: 50%; display: flex; align-items: center; justify-content: center;
+      font-weight: var(--fw-bold); font-size: var(--fs-sm); }
+    .tip { background: var(--bg-surface); border-left: 4px solid var(--accent-gold); border-radius: var(--radius-md);
+           padding: 12px 16px; margin: 16px 0; color: var(--text-secondary); }
+    .tip strong { color: var(--text-primary); }
+    .card { background: var(--bg-surface); border: 1px solid var(--border-subtle); border-radius: var(--radius-lg); padding: 20px 22px; }
+    b, strong { color: var(--text-primary); }
+    figure.shot { margin: 12px 0 4px; }
+    figure.shot img { width: 100%; border: 1px solid var(--border-default); border-radius: var(--radius-md); display: block; }
+    .shot-ph { border: 2px dashed var(--border-default); border-radius: var(--radius-md); background: var(--bg-surface-2, #F4F6F1);
+               color: var(--text-muted); padding: 26px 16px; font-size: var(--fs-sm); text-align: center; }
+    .shot-ph b { color: var(--text-secondary); font-weight: var(--fw-semibold); }
+    figcaption { font-size: var(--fs-xs, 12px); color: var(--text-muted); margin-top: 6px; text-align: center; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="g-head"><span class="ico">🎯</span><h1>Objective &amp; Strategy</h1></div>
+    <p class="g-sub">Your guide to this page</p>
+
+    <div class="big">This is your business plan on one page: where you want to be in the future, and the few things to focus on right now. A friendly AI coach asks you questions and writes the plan for you.</div>
+
+    <h2>What this page is for</h2>
+    <div class="card">
+      <p>It holds your goals for <strong>9 years, 3 years and 1 year ahead</strong>, plus the <strong>3 most important projects</strong> for the next three months and the small monthly steps to get them done. Think of it as your map: where you're headed, and the next few turns to take.</p>
+    </div>
+
+    <h2>What you can do here</h2>
+    <ul>
+      <li>Write down your long-term goals (9-year, 3-year, 1-year).</li>
+      <li>Choose the <strong>3 big projects</strong> to focus on this quarter.</li>
+      <li>Break each project into 3 simple monthly steps.</li>
+      <li>Let the <strong>AI coach</strong> interview you and fill it all in.</li>
+      <li>Send your projects straight to your Tasks page so the work gets done.</li>
+    </ul>
+
+    <h2>How to fill in your plan</h2>
+    <ol class="steps">
+      <li>At the top, pick your <strong>business</strong>, the <strong>quarter</strong> (which 3 months) and the <strong>year</strong>.
+        <figure class="shot"><img src="img/strat-pick.png" alt="The Business, Quarter and Year picker at the top of the Objective and Strategy page"><figcaption>Choose which plan you're working on.</figcaption></figure>
+      </li>
+      <li>Click <strong>AI Wizard</strong>. A chat opens on the right.
+        <figure class="shot"><img src="img/strat-wizard.png" alt="The AI Wizard open as a Boardroom Mentor chat panel on the right"><figcaption>The coach opens in a panel on the right.</figcaption></figure>
+      </li>
+      <li>Answer its questions in your own words. It may ask you to be more specific — that's normal. It just wants real numbers, dates and names so the plan is clear.
+        <figure class="shot"><img src="img/strat-answer.png" alt="The coach's question with an answer typed into the reply box"><figcaption>Reply in plain words; the coach may ask you to sharpen it up.</figcaption></figure>
+      </li>
+      <li>When it's finished it fills in the whole plan. Read it through and change anything you like.
+        <figure class="shot"><img src="img/strat-plan.png" alt="The filled-in Objective and Target sections of the plan"><figcaption>Every box is filled in for you — tweak anything.</figcaption></figure>
+      </li>
+      <li>Click <strong>Save changes</strong>. Done.
+        <figure class="shot"><img src="img/strat-save.png" alt="The Save changes button in the top bar"><figcaption>Your plan is saved.</figcaption></figure>
+      </li>
+    </ol>
+
+    <div class="tip"><strong>Tip:</strong> A good answer is clear enough that anyone could tell when it's finished — for example "get 10 new customers by 31 March", not "get more customers".</div>
+
+    <h2>Every three months</h2>
+    <div class="card">
+      <p>At the start of each new quarter, pick the new quarter at the top and run the <strong>AI Wizard</strong> again. It remembers last time and starts by asking how things went — what worked and what didn't. Your old plans are always kept, so you can look back and compare what you planned with what you did.</p>
+    </div>
+
+    <h2>Turning plans into action</h2>
+    <div class="card">
+      <p>After you save, the page can send your 3 projects to your <strong>Tasks &amp; Projects</strong> page, and each monthly step becomes a task with a due date. When you tick a task off as done, it shows as complete here too — so your plan and your to-do list always match.</p>
+    </div>
+  </div>
+</body>
+</html>

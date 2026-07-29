@@ -877,7 +877,7 @@
         'ai-brain':'ai_assistant', tasks:'tasks', operations:'property', comms:'inbound_comms',
         systemisation:'systemisation', skills:'systemisation', money:'finance', fintable:'finance',
         pnl:'finance', wealth:'personal_wealth', 'os-team':'team', sitemap:'dod_queue',
-        'content-machine':'content_machine',
+        'content-machine':'content_machine', crm:'crm',
       };
       // PAGE_REGISTRY id → the Supabase app route (clean path). The registry's own
       // `standalone` URLs point at the Airtable version (index.html#…, follow-up.html);
@@ -887,7 +887,19 @@
         'ai-brain':'/ai-brain', tasks:'/tasks', operations:'/operations', comms:'/comms',
         systemisation:'/systemisation', skills:'/skills', money:'/money', fintable:'/accounts',
         pnl:'/pnl', wealth:'/wealth', 'os-team':'/team', sitemap:'/sitemap',
-        'content-machine':'/content-machine',
+        'content-machine':'/content-machine', crm:'/crm',
+      };
+      // PAGE_REGISTRY id → the client-facing guide (plain-language, 13-yr-old
+      // reading level). Clients see these instead of the Airtable-oriented SOPs;
+      // ids not listed show no guide yet. The owner keeps the original SOPs.
+      const REG_SOP = {
+        'os-strategy': 'guides/strategy.html',
+        tasks: 'guides/tasks.html',
+        crm: 'guides/crm.html',
+        systemisation: 'guides/systemisation.html',
+        skills: 'guides/skills.html',
+        'ai-brain': 'guides/ai-brain.html',
+        sitemap: 'guides/sitemap.html',
       };
       // The "Open" cell renders an in-app switchTab link that does nothing in the
       // client iframe — repoint it at the Supabase route (navigating the whole app).
@@ -898,6 +910,11 @@
           const route = m && REG_ROUTE[m[1]];
           if (route) { a.setAttribute('href', route); a.setAttribute('target', '_top'); a.removeAttribute('onclick'); }
         });
+      }
+      // Clients get plain-English guide labels, not the developer "SOP" wording.
+      function swapGuideLabels(){
+        document.querySelectorAll('#sitemapTableBody a').forEach(a => { if (a.textContent.trim() === 'Open SOP') a.textContent = 'Open guide'; });
+        document.querySelectorAll('#sitemapTableBody span').forEach(s => { if (s.textContent.trim() === 'no SOP') s.textContent = 'no guide yet'; });
       }
       async function enabledModules(){
         const en = new Set([...BASE, ...OPTOUT]);
@@ -928,16 +945,21 @@
       async function apply(){
         try {
           if (typeof PAGE_REGISTRY === 'undefined') return;
-          if (await isHomeOrg()) document.documentElement.classList.remove('sbmap-client');
+          const owner = await isHomeOrg();
+          if (owner) document.documentElement.classList.remove('sbmap-client');
           const en = await enabledModules();
           const keep = PAGE_REGISTRY.filter(p => { const m = REG_MODULE[p.id]; return m && en.has(m); });
-          // Point the "Standalone URL" column at the Supabase page, not Airtable.
-          keep.forEach(p => { const r = REG_ROUTE[p.id]; if (r) p.standalone = location.origin + r; });
+          keep.forEach(p => {
+            // Point the "Standalone URL" column at the Supabase page, not Airtable.
+            const r = REG_ROUTE[p.id]; if (r) p.standalone = location.origin + r;
+            // Clients see the plain-language guides (or none yet); owner keeps the SOPs.
+            if (!owner) p.sopFile = REG_SOP[p.id] || '';
+          });
           PAGE_REGISTRY.length = 0; Array.prototype.push.apply(PAGE_REGISTRY, keep);
           // Keep the "Open" links repointed even after git-sync re-renders the table.
           if (typeof renderSiteMap === 'function' && !window.__sbRenderWrapped) {
             const _render = renderSiteMap;
-            window.renderSiteMap = function(){ const out = _render.apply(this, arguments); rewriteOpenLinks(); return out; };
+            window.renderSiteMap = function(){ const out = _render.apply(this, arguments); rewriteOpenLinks(); if (!owner) swapGuideLabels(); return out; };
             window.__sbRenderWrapped = true;
           }
           if (typeof renderSiteMap === 'function') renderSiteMap();
