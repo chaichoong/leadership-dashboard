@@ -195,7 +195,10 @@ const BYNAME_FETCH_ALLOWLIST = [
   { table: 'tblZ75JgE1wzDP0ps', label: 'AI Brain Today badge — read-only display feed (shared.js updateAiBrainBadge)' },
   { table: 'tblJ3GFnAAoXf99e9', label: 'Agent Activity KPI — read-only card (dashboard.js loadAgentKpi)' },
   { table: 'tbl1nr0EcX2T62KME', label: 'Fintable accounts sync — filterByFormula/sort on {**Last Successful Update}', match: 'Last+Successful+Update' },
-  { table: 'tblIxbzDSOCI5hqJn', label: 'CEO Briefs — read-only display tab; the worker writes this table by field name (ceo-brief.js)' },
+  // CEO Briefs (tblIxbzDSOCI5hqJn) was listed here until 2026-07-29. Both sides moved to
+  // field IDs, so the tab now sends returnFieldsByFieldId=true like everything else and
+  // needs no exception. Removing it keeps the invariant sharp: if the tab ever regresses
+  // to a by-name read, this test fails and names the URL.
 ];
 
 // Pull the Airtable table ID (tbl...) out of a v0 API URL.

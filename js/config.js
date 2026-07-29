@@ -87,6 +87,7 @@
         workflowSteps: 'tblTadoyWXFHbmYxm', // Workflow Steps (within Systemisation Workflows)
         prospects:     'tbljHVGJoKJf8acy3', // Prospects — cold outbound pipeline (Prospecting tab)
         prospectKeywords: 'tblB5tZrXNaKFe02j', // Prospect Keywords — LinkedIn search strings the daily agent runs
+        ceoBriefs:     'tblIxbzDSOCI5hqJn', // CEO Briefs — one row per weekday, written by the 09:00 money-daily worker
     };
 
     // ── Prospects field IDs (Airtable table: Prospects / tbljHVGJoKJf8acy3) ──
@@ -537,6 +538,19 @@
         txCost:           'fldGkpkVqSeiGvUGL',  // Costs (linked)
         txAccountLink:    'fld9hm24JQUPOCoWj',  // **Account (linked → Accounts) — actual account record link on tx
         txBusiness:       'fldX1aFlJyzpXGhbF',  // Business (For Reports) (linked)
+        // CEO Briefs — written by scripts/slack-automation/money-daily-worker.js at 09:00
+        // weekdays, read by js/ceo-brief.js. IDs, not names: a rename in Airtable would
+        // break the brief silently, and the nightly drift monitor only watches IDs.
+        ceoDate:          'fldzLwBd3Mjg7rDxM',  // Date (date)
+        ceoOneThing:      'fldQDCAcd74Bb6mpY',  // One Thing (singleLineText)
+        ceoFirstStep:     'fld4O4EuxHzMWARV7',  // First Step (singleLineText)
+        ceoWhy:           'fldqooUbDCQ4yNlWQ',  // Why (multilineText)
+        ceoIgnoreToday:   'fldmC5AYRaJdfyFGx',  // Ignore Today (multilineText, newline-separated)
+        ceoBoardFlags:    'fldS7ZoGAS7sAJfJq',  // Board Flags (multilineText, newline-separated)
+        ceoMoneyLight:    'fldBIbjpHlA2QmVbO',  // Money Light (singleSelect: green | amber | red)
+        ceoSafeToAct:     'fldQ4JEWYpHpI2KDs',  // Safe To Act (currency)
+        ceoFullBrief:     'fldPkiaWvmYAoyHEl',  // Full Brief (multilineText, raw JSON)
+        ceoSourceStats:   'fldVgR25q8bqdub4c',  // Source Stats (multilineText, raw JSON)
     };
 
     // Objective & Strategy OS field IDs — maps the Airtable form fields shown in the
