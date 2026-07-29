@@ -169,3 +169,63 @@ two-flag daily cap and can send any plan back as scattered.
   Clear leads Productivity & Habits; Lamerton seated for UK lifestyle grounding; Byrne folded
   into Legacy as belief fuel; Housel demoted to influence.
 - v1 28 Jul 2026 — drafted from the Woods episode + library export.
+
+---
+
+# v3 (29 Jul 2026) — Kevin's department structure. SUPERSEDES v2 where they conflict.
+
+Kevin restructured the board in the 29 Jul CEO session. v2's seat list is history; this is the
+live chart. Shape: **CEO → heads of department → a board of directors within each department →
+sub-agents (workers) under any director, including the CEO.**
+
+| Department | Head | Directors within |
+|---|---|---|
+| **CEO** | **Dan Martell** | orchestrates all heads; runs the daily huddle |
+| Strategy | **Gary Keller** | Brian Moran (12 Week Year), Keith Cunningham |
+| Marketing | **Alex Hormozi** | Russell Brunson, Dan Martell, John Lamerton |
+| Sales | **Jordan Belfort** | Alex Hormozi |
+| Operations | **Gino Wickman** (EOS) | Verne Harnish, John Lamerton |
+| ↳ Systemisation (within Operations) | **Dave Jenyns** | Michael Gerber, Sam Carpenter |
+| Finance | **Greg Crabtree** | Mike Michalowicz, Jack Stack |
+| Legal & Compliance | **Keith Cunningham** | (department, not a solo seat) |
+| HR | **Patrick Lencioni** | Gino Wickman, Mark Horstman, Dan Sullivan, Geoff Smart & Randy Street, Cameron Herold |
+| Wealth Creation | **Robert Kiyosaki** | MJ DeMarco, Ramit Sethi |
+| Productivity | **Chris Bailey** | Ali Abdaal, James Clear, David Allen |
+| Mindset | **John F. DeMartini** (The Values Factor) | Steve Peters, Rhonda Byrne, David Goggins |
+
+**Changes from v2, all Kevin's call:** Martell moves from Deputy Chair to CEO. Wickman moves
+from CEO chassis to Operations head. Belfort promoted from influence to Sales head. Bailey
+promoted from influence to Productivity head. Keller moves from focus chair to Strategy head.
+Priestley and Housel drop off. DeMartini is new (The Values Factor verified **Finished** in
+Kevin's Audible library, 29 Jul 2026). People overlap seats deliberately: Hormozi heads
+Marketing and sits on Sales; Wickman heads Operations and sits on HR; Lamerton sits on
+Marketing and Operations; Martell is CEO and sits on Marketing.
+
+**Legal & Compliance is a normal department (Kevin, 29 Jul).** v2 called it
+"private-discussion-only". Wrong. It is discussed openly like any other department. The only
+rule: **nothing legal or compliance related is ever PUBLISHED**. The restriction is on output
+leaving Kevin, not on the conversation.
+
+## The daily huddle (new in v3)
+
+The CEO runs a daily huddle with the heads of department. Each head answers three questions:
+what did you complete yesterday, what are you working on today, what is blocking you. The CEO
+returns ONE digest, never eleven reports. The huddle output feeds the 09:00 daily brief.
+
+## Powers and guardrails (Kevin, 29 Jul)
+
+**Directors advise. Workers execute.** Every director can spin up sub-agents (workers) that
+carry that director's frameworks and do the actual work.
+
+**Guardrails are ON for everything by default.** No worker writes anything without Kevin's
+approval. Kevin lifts the guardrail per WORK TYPE, not per task, and each lift is recorded with
+its date in the guardrail register so it never needs re-asking. Same trust ramp as client
+agents: the owner moves the gears, nothing auto-promotes.
+
+## Productised end state (design for it, do not build it yet)
+
+After this is proven on Kevin's own business it becomes an Operations Director module: clients
+set up their own AI CEO, board and sub-agent teams from their own director personas. Agent
+definitions must therefore stay data-shaped and portable to the in-app runtime
+(`workers/agent-runner`, `workers/skill-runner`, Systemisation Workflows). No client-facing
+build in this pass.
