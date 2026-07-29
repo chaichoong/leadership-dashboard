@@ -40,7 +40,7 @@
         { id: 'fintable',  name: 'Accounts',                       icon: '🏦', pageVer: '1.8', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#fintable' },
         { id: 'systemisation', name: 'Systemisation',              icon: '⚙️', pageVer: '1.6', sopFile: '',                            sopVer: '1.0', standalone: 'os/systemisation/index.html' },
         { id: 'os-team',    name: 'Team Members',                  icon: '👥', pageVer: '1.3', sopFile: '',                            sopVer: '1.0', standalone: 'os/team/index.html' },
-        { id: 'crm',        name: 'CRM',                           icon: '👥', pageVer: '1.0', sopFile: 'crm-guide.html',              sopVer: '1.0', standalone: 'crm-supabase.html' },
+        { id: 'crm',        name: 'CRM',                           icon: '👥', pageVer: '1.0', sopFile: 'guides/crm.html',             sopVer: '1.0', standalone: 'crm-supabase.html' },
         { id: 'content-machine', name: 'Content Machine',           icon: '🎬', pageVer: '1.0', sopFile: '',                            sopVer: '1.0', standalone: 'https://chaichoong.github.io/content-machine/' },
         { id: 'prospecting', name: 'Prospecting',                   icon: '🧲', pageVer: '1.4', sopFile: 'sop-prospecting.html',        sopVer: '1.3', standalone: 'index.html#prospecting' },
         { id: 'sitemap',    name: 'Site Map & Guides',             icon: '🔗', pageVer: '1.17', sopFile: 'sop-sitemap.html',            sopVer: '1.2', standalone: 'index.html#sitemap' },
