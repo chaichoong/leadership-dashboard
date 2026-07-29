@@ -1,0 +1,1062 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="robots" content="noindex, nofollow">
+<title>Journey Viewer — Operations Director</title>
+<link rel="stylesheet" href="css/tokens.css?v=1">
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg-app);color:var(--text-primary);font-family:var(--font-family-base);line-height:1.55}
+
+/* ── Header ─────────────────────────────────────────────────────────── */
+.top{background:var(--bg-sidebar);color:#E8ECE6;padding:var(--space-5) var(--space-6) var(--space-4)}
+.top .wrap{max-width:1280px;margin:0 auto}
+.top .mark{font-size:12px;font-weight:700;letter-spacing:.09em;text-transform:uppercase;color:#9DB3A5}
+.top h1{font-size:26px;font-weight:700;margin:6px 0 4px;color:#fff}
+.top p{font-size:14px;color:#B9C6BC;max-width:760px}
+.top .stamp{font-size:12px;color:#8FA396;margin-top:10px}
+
+/* ── Track tabs ─────────────────────────────────────────────────────── */
+.tracks{background:var(--bg-surface);border-bottom:1px solid var(--border-default);position:sticky;top:0;z-index:20}
+.tracks .wrap{max-width:1280px;margin:0 auto;display:flex;gap:2px;padding:0 var(--space-6);overflow-x:auto}
+.track{padding:14px 18px;font-size:14px;font-weight:600;color:var(--text-secondary);cursor:pointer;
+       border-bottom:3px solid transparent;white-space:nowrap;background:none;border-left:0;border-right:0;border-top:0;
+       font-family:inherit}
+.track:hover{color:var(--text-primary);background:var(--bg-surface-2)}
+.track.on{color:var(--accent);border-bottom-color:var(--accent)}
+
+/* ── Layout ─────────────────────────────────────────────────────────── */
+.shell{max-width:1280px;margin:0 auto;padding:var(--space-5) var(--space-6) 80px;
+       display:grid;grid-template-columns:320px 1fr;gap:var(--space-6);align-items:start}
+.rail{position:sticky;top:70px}
+.rail .blurb{font-size:13px;color:var(--text-secondary);background:var(--bg-surface);
+             border:1px solid var(--border-subtle);border-radius:var(--radius-md);
+             padding:12px 14px;margin-bottom:var(--space-4)}
+
+/* ── Step list ──────────────────────────────────────────────────────── */
+.step{display:flex;gap:11px;padding:11px 12px;border-radius:var(--radius-md);cursor:pointer;
+      border:1px solid transparent;margin-bottom:3px;align-items:flex-start}
+.step:hover{background:var(--bg-surface-2)}
+.step.on{background:var(--bg-surface);border-color:var(--accent);box-shadow:var(--shadow-sm)}
+.step .num{flex:0 0 24px;height:24px;border-radius:50%;background:var(--bg-subtle);color:var(--text-secondary);
+           font-size:12px;font-weight:700;display:flex;align-items:center;justify-content:center;margin-top:1px}
+.step.on .num{background:var(--accent);color:#fff}
+.step .txt{min-width:0;flex:1}
+.step .t{font-size:13.5px;font-weight:600;line-height:1.35}
+.step .m{font-size:11.5px;color:var(--text-muted);margin-top:3px;display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+
+/* ── Status pills ───────────────────────────────────────────────────── */
+.pill{display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:600;
+      padding:2px 8px;border-radius:var(--radius-full);white-space:nowrap;line-height:1.7}
+.pill::before{content:"";width:6px;height:6px;border-radius:50%;background:currentColor;flex:0 0 6px}
+.pill.live{background:var(--success-bg);color:var(--success)}
+.pill.built{background:var(--accent-soft);color:var(--accent-hover)}
+.pill.pending{background:var(--warning-bg);color:var(--warning)}
+.pill.missing{background:var(--danger-bg);color:var(--danger)}
+.pill.decision{background:var(--info-bg);color:var(--info)}
+
+/* ── Stage pane ─────────────────────────────────────────────────────── */
+.stage{min-width:0}
+.head{margin-bottom:var(--space-4)}
+.head .kicker{font-size:12px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--text-muted)}
+.head h2{font-size:23px;font-weight:700;margin:5px 0 8px}
+.head .plain{font-size:15px;color:var(--text-secondary);max-width:70ch}
+.head .pills{margin-top:11px;display:flex;gap:8px;flex-wrap:wrap}
+
+/* ── Device frames ──────────────────────────────────────────────────── */
+.frame{background:var(--bg-surface);border:1px solid var(--border-default);border-radius:var(--radius-lg);
+       overflow:hidden;box-shadow:var(--shadow-md);margin-bottom:var(--space-4)}
+.chrome{background:var(--bg-subtle);border-bottom:1px solid var(--border-default);
+        padding:9px 13px;display:flex;align-items:center;gap:9px}
+.chrome .dots{display:flex;gap:5px}
+.chrome .dots i{width:9px;height:9px;border-radius:50%;background:var(--border-default);display:block}
+.chrome .url{flex:1;background:var(--bg-surface);border:1px solid var(--border-subtle);border-radius:var(--radius-full);
+             padding:4px 12px;font-size:11.5px;color:var(--text-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.body{padding:var(--space-5)}
+
+/* email */
+.mail-head{border-bottom:1px solid var(--border-subtle);padding-bottom:13px;margin-bottom:15px}
+.mail-head .subj{font-size:17px;font-weight:700;margin-bottom:9px}
+.mail-head .meta{font-size:12.5px;color:var(--text-secondary);display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+.mail-head .av{width:30px;height:30px;border-radius:50%;background:var(--accent);color:#fff;font-size:12px;
+               font-weight:700;display:flex;align-items:center;justify-content:center;margin-right:4px}
+.mail-body p{font-size:14.5px;margin-bottom:13px;max-width:64ch}
+.mail-body p:last-child{margin-bottom:0}
+.mail-body a{color:var(--accent);word-break:break-all}
+.mail-foot{margin-top:20px;padding-top:13px;border-top:1px solid var(--border-subtle);
+           font-size:11.5px;color:var(--text-muted);line-height:1.6}
+.timing{background:var(--bg-surface-2);border-left:3px solid var(--accent-gold);padding:8px 13px;
+        font-size:12.5px;color:var(--text-secondary);margin-bottom:15px;border-radius:0 var(--radius-sm) var(--radius-sm) 0}
+
+/* replica app screens */
+.mini{display:grid;grid-template-columns:190px 1fr;min-height:330px}
+.mini .side{background:var(--bg-sidebar);color:#E8ECE6;padding:14px 0;font-size:12px}
+.mini .side .brand{padding:0 14px 13px;font-weight:700;font-size:12.5px;border-bottom:1px solid rgba(255,255,255,.08);margin-bottom:10px}
+.mini .side .sec{padding:11px 14px 5px;font-size:9.5px;letter-spacing:.09em;text-transform:uppercase;color:#7E9184}
+.mini .side .nav{padding:6px 14px;display:flex;align-items:center;gap:7px;color:#DCE4DC}
+.mini .side .nav.off{color:#5C6E63;text-decoration:line-through}
+.mini .side .nav.first{background:rgba(255,255,255,.09);border-left:3px solid var(--accent-gold);padding-left:11px}
+.mini .main{padding:var(--space-4);background:var(--bg-app)}
+.legend-off{font-size:11.5px;color:var(--text-muted);padding:12px 14px 0;line-height:1.5}
+
+/* form replica */
+.rep-card{background:var(--bg-surface);border:1px solid var(--border-default);border-radius:var(--radius-md);
+          padding:14px;margin-bottom:11px}
+.rep-card h4{font-size:13.5px;font-weight:700;margin-bottom:3px}
+.rep-card .d{font-size:11.5px;color:var(--text-muted);margin-bottom:11px}
+.rep-f{margin-bottom:9px}
+.rep-f label{display:block;font-size:11.5px;font-weight:600;color:var(--text-secondary);margin-bottom:4px}
+.rep-f .box{border:1px solid var(--border-default);border-radius:var(--radius-sm);padding:8px 10px;
+            font-size:12.5px;color:var(--text-muted);background:var(--bg-app)}
+.rep-row{display:flex;gap:11px;flex-wrap:wrap}
+.rep-row>.rep-f{flex:1;min-width:150px}
+.rep-btn{background:var(--accent);color:#fff;border-radius:var(--radius-md);padding:10px 17px;
+         font-size:13px;font-weight:600;display:inline-block}
+
+/* login/password card replica */
+.auth{max-width:355px;margin:22px auto;background:var(--bg-surface);border:1px solid var(--border-default);
+      border-radius:16px;padding:28px;box-shadow:var(--shadow-lg)}
+.auth h3{font-size:18px;margin-bottom:4px}
+.auth .sub{font-size:13px;color:var(--text-secondary);margin-bottom:17px}
+.auth .link{font-size:12px;color:var(--accent);display:block;margin-top:13px;text-align:center}
+
+/* grid of modules */
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(228px,1fr));gap:11px}
+.gcard{background:var(--bg-surface);border:1px solid var(--border-default);border-radius:var(--radius-md);padding:13px}
+.gcard .gt{font-size:13.5px;font-weight:700;display:flex;align-items:center;gap:7px;margin-bottom:5px}
+.gcard .gd{font-size:11.5px;color:var(--text-muted);line-height:1.5}
+.gcard code{font-size:10.5px;background:var(--bg-subtle);padding:1px 5px;border-radius:3px;color:var(--text-secondary)}
+
+/* under the bonnet */
+.bonnet{background:var(--bg-surface);border:1px solid var(--border-subtle);border-radius:var(--radius-md);
+        margin-bottom:var(--space-4);overflow:hidden}
+.bonnet summary{padding:12px 15px;font-size:13px;font-weight:600;cursor:pointer;color:var(--text-secondary);
+                list-style:none;display:flex;align-items:center;gap:8px}
+.bonnet summary::-webkit-details-marker{display:none}
+.bonnet summary::before{content:"▸";color:var(--text-muted);transition:transform .15s}
+.bonnet[open] summary::before{transform:rotate(90deg)}
+.bonnet .inner{padding:0 15px 15px;font-size:13px;color:var(--text-secondary);line-height:1.65}
+.bonnet .inner p{margin-bottom:9px}
+.bonnet .inner ul{margin:0 0 9px 18px}
+.bonnet .inner li{margin-bottom:4px}
+.src{font-size:11.5px;color:var(--text-muted);border-top:1px solid var(--border-subtle);padding-top:10px;margin-top:11px}
+.src code{background:var(--bg-subtle);padding:1px 5px;border-radius:3px;font-size:11px}
+
+/* flag box */
+.flag{border-radius:var(--radius-md);padding:13px 15px;font-size:13.5px;margin-bottom:var(--space-4);line-height:1.6}
+.flag.warn{background:var(--warning-bg);border:1px solid var(--warning);color:var(--text-primary)}
+.flag.bad{background:var(--danger-bg);border:1px solid var(--danger);color:var(--text-primary)}
+.flag.info{background:var(--info-bg);border:1px solid var(--info);color:var(--text-primary)}
+.flag b{display:block;margin-bottom:4px}
+
+/* nav buttons */
+.pager{display:flex;gap:11px;justify-content:space-between;margin-top:var(--space-5)}
+.pbtn{background:var(--bg-surface);border:1px solid var(--border-default);border-radius:var(--radius-md);
+      padding:11px 17px;font-size:13.5px;font-weight:600;cursor:pointer;color:var(--text-primary);
+      font-family:inherit;max-width:47%;text-align:left}
+.pbtn:hover:not(:disabled){border-color:var(--accent);color:var(--accent)}
+.pbtn:disabled{opacity:.4;cursor:default}
+.pbtn span{display:block;font-size:11px;color:var(--text-muted);font-weight:500}
+
+/* key legend */
+.keys{max-width:1280px;margin:0 auto;padding:0 var(--space-6) var(--space-4);display:flex;gap:9px;flex-wrap:wrap;align-items:center}
+.keys .lbl{font-size:12px;color:var(--text-muted);font-weight:600}
+
+@media (max-width:900px){
+  .shell{grid-template-columns:1fr;padding:var(--space-4) var(--space-4) 60px}
+  .rail{position:static}
+  .mini{grid-template-columns:1fr}
+  .mini .side{display:none}
+  .top{padding:var(--space-4)}
+  .tracks .wrap,.keys{padding-left:var(--space-4);padding-right:var(--space-4)}
+}
+</style>
+</head>
+<body>
+
+<header class="top">
+  <div class="wrap">
+    <div class="mark">Operations Director</div>
+    <h1>Journey Viewer</h1>
+    <p>Click through every step a prospect and a client goes through, without touching the live site. Each step shows the real email or the real screen, plus an honest status: built, waiting, or not written yet.</p>
+    <div class="stamp" id="stamp"></div>
+  </div>
+</header>
+
+<nav class="tracks"><div class="wrap" id="trackTabs"></div></nav>
+
+<div class="keys">
+  <span class="lbl">Status key:</span>
+  <span class="pill live">Live now</span>
+  <span class="pill built">Built, not proven live</span>
+  <span class="pill pending">Waiting on a deploy or switch-on</span>
+  <span class="pill missing">Not written yet</span>
+  <span class="pill decision">Needs your decision</span>
+</div>
+
+<div class="shell">
+  <aside class="rail">
+    <div class="blurb" id="railBlurb"></div>
+    <div id="stepList"></div>
+  </aside>
+  <main class="stage" id="stage"></main>
+</div>
+
+<script>
+/* ─────────────────────────────────────────────────────────────────────────
+   Journey Viewer — a clickable, non-live walkthrough of the Operations
+   Director prospect journey, client onboarding, and product state.
+
+   EVERY step carries a `src` line naming where the content came from, so
+   nothing here is invented. Email copy is reproduced verbatim from
+   docs/ghl-sequence-copy-pack.md. Screens are static replicas built from the
+   real page source — they make no network calls and touch no live data.
+
+   All content below is authored in this file. No external or user-supplied
+   data is injected, so there is nothing to escape.
+   ───────────────────────────────────────────────────────────────────────── */
+
+const VERIFIED = '29 July 2026';
+
+const FOOT = 'Kevin Brittain, Operations Director — 61 Bridge Street, Kington, HR5 3DJ<br>Prefer not to hear from me? [unsubscribe]';
+const BOOK = 'https://api.leadconnectorhq.com/widget/booking/BcVVhAg1zLaPVEXj5ih0';
+
+/* helpers ------------------------------------------------------------- */
+function mail(o){
+  return `
+  <div class="frame">
+    <div class="chrome"><div class="dots"><i></i><i></i><i></i></div>
+      <div class="url">Inbox — ${o.to || 'the prospect'}</div></div>
+    <div class="body">
+      ${o.when ? `<div class="timing">⏱ ${o.when}</div>` : ''}
+      <div class="mail-head">
+        <div class="subj">${o.subject}</div>
+        <div class="meta"><span class="av">KB</span>
+          <b>Kevin Brittain</b> &lt;kevin@operationsdirector.co.uk&gt;
+          <span style="color:var(--text-muted)">to ${o.to || 'the prospect'}</span></div>
+      </div>
+      <div class="mail-body">${o.body}</div>
+      <div class="mail-foot">${o.foot === false ? '' : FOOT}</div>
+    </div>
+  </div>`;
+}
+function screen(url, inner){
+  return `
+  <div class="frame">
+    <div class="chrome"><div class="dots"><i></i><i></i><i></i></div><div class="url">${url}</div></div>
+    ${inner}
+  </div>`;
+}
+const link = u => `<a href="#" onclick="return false">${u}</a>`;
+
+/* the client's sidebar exactly as a NEW workspace is provisioned -------- */
+function newClientSidebar(){
+  const on  = (i,t) => `<div class="nav"><span>${i}</span> ${t}</div>`;
+  const off = (i,t) => `<div class="nav off"><span>${i}</span> ${t}</div>`;
+  return `
+  <div class="mini">
+    <div class="side">
+      <div class="brand">⚙️ Operations Director</div>
+      <div class="sec">Leadership</div>
+      ${off('📊','Leadership Dashboard')}
+      ${on('🎯','Objective &amp; Strategy')}
+      ${off('📋','Plan Builder')}
+      <div class="sec">Operations</div>
+      ${on('✅','Tasks &amp; Projects')}
+      ${on('👥','CRM')}
+      ${off('🏢','Operations')}
+      ${off('📨','Inbound Comms')}
+      ${on('⚙️','Systemisation')}
+      ${on('🧠','Skills Library')}
+      ${on('💭','AI Brain')}
+      <div class="sec">Finance</div>
+      ${off('🧭','Money Confidence')}
+      ${off('🏦','Accounts')}
+      ${off('💰','Profit &amp; Loss')}
+      ${off('📈','Wealth')}
+      <div class="sec">Team</div>
+      ${on('👥','Team Members')}
+      <div class="sec">Marketing</div>
+      ${off('⚙️','Content Machine')}
+      <div class="sec">System</div>
+      ${on('🔗','Site Map &amp; Guides')}
+    </div>
+    <div class="main">
+      <div class="rep-card">
+        <h4>👋 Welcome to your workspace</h4>
+        <div class="d">This is what a brand-new client account contains on day one.</div>
+        <div style="font-size:12.5px;color:var(--text-secondary);line-height:1.7">
+          <b>8 sections switched on.</b> Objective &amp; Strategy, Tasks &amp; Projects, CRM,
+          Systemisation, Skills Library, AI Brain, Team Members, Site Map &amp; Guides.<br>
+          <b>10 starter guides</b> already sitting in Site Map &amp; Guides.<br>
+          <b>One team member: them.</b> Added automatically so tasks can be assigned.<br>
+          <b>A CRM pipeline</b> seeded with default stages.<br>
+          <b>No data yet.</b> Every list is empty until their information is imported.
+        </div>
+      </div>
+      <div class="legend-off" style="padding-left:0">
+        Struck-through items are hidden from this client. They appear only when an
+        admin ticks the module on from the CRM client screen.
+      </div>
+    </div>
+  </div>`;
+}
+
+/* ─────────────────────────────── TRACK 1 ─────────────────────────────── */
+const PROSPECT = [
+{
+  n:1, title:'The agent finds them', kind:'⚙️ Behind the scenes', status:'pending',
+  plain:'A daily agent looks through LinkedIn for UK founders posting about being overwhelmed, buried in admin, or blind on their numbers. It checks they are a Limited Company, finds their website and email, and drops them into a review queue for you to approve. Nothing is sent without your yes.',
+  art:`<div class="frame"><div class="chrome"><div class="dots"><i></i><i></i><i></i></div>
+        <div class="url">Prospecting tab — review queue</div></div>
+        <div class="body">
+          <div class="rep-card"><h4>Review queue</h4>
+            <div class="d">Each prospect waits here until approved.</div>
+            <div style="font-size:12.5px;color:var(--text-secondary);line-height:1.8">
+              <b>Pain signal</b> — the post or phrase that flagged them<br>
+              <b>Company check</b> — Companies House, Limited Companies only (PECR rule)<br>
+              <b>Contact</b> — website and business email<br>
+              <b>Your call</b> — Approve or reject. Approved rows sync to GoHighLevel.
+            </div>
+          </div>
+          <div class="flag warn" style="margin-bottom:0"><b>Stuck here right now</b>
+            Two things block this step: the GoHighLevel API token has not been saved,
+            so approved prospects cannot sync, and the first supervised run has not happened.
+            Both were due 15 July.</div>
+        </div></div>`,
+  bonnet:`<p>Built by the <code>/prospect-daily</code> skill with a Prospecting tab in the app
+          (review queue, funnel, keyword manager) and Airtable tables for Prospects and
+          Prospect Keywords. It browses LinkedIn through your own logged-in Chrome, so it
+          behaves like you rather than a scraper.</p>
+          <p>The Limited-Company gate exists for legal reasons. Under PECR you may cold-email
+          a registered company, not a sole trader or a private individual.</p>`,
+  src:'<code>.claude/skills/prospect-daily/SKILL.md</code>, <code>js/prospecting.js</code>, MASTER-PLAN §7 (built 13 Jul; two open blockers dated 15 Jul)'
+},
+{
+  n:2, title:'Nurture email 1 of 3', kind:'✉️ Email', status:'pending',
+  plain:'Only sent after seven days of silence following the first personal approach. It asks them to work out what their own hour is worth, then points out how much of it goes on £10-an-hour admin.',
+  art: mail({ when:'Sent immediately when the tag od-prospect-nurture is applied, which happens after 7 silent days',
+    subject:'What is your hour actually worth?',
+    body:`<p>Hi [first name],</p>
+      <p>I emailed you last week about [company name] — no reply needed, founders are busy. That is rather the point.</p>
+      <p>A founder said to me recently: "my business is me. It's only myself doing everything." Sound familiar?</p>
+      <p>Quick sum. Take what the business pays you, divide by your working hours. That is your hourly rate. Now look at yesterday: how many of those hours went on chasing, filing, scheduling and follow-ups — £10-an-hour work?</p>
+      <p>You do not fix that by working harder. You buy those hours back.</p>
+      <p>Operations Director is an AI-run operations department for founder-led firms. It takes the £10 work, and the thirty tasks behind it, off your plate.</p>
+      <p>Thirty minutes to see your map: ${link(BOOK)}</p>
+      <p>Kevin</p>`}),
+  bonnet:`<p>Hits hot-buttons 1 and 2 from your real sales calls: "you ARE the business" and
+          "you're drowning". Three emails maximum in this sequence, your rule, no exceptions.</p>
+          <p>The sequence must never fire on the tags <code>od-prospect</code> or
+          <code>od-prospect-manual</code>. Only <code>od-prospect-nurture</code>.</p>`,
+  src:'Verbatim from <code>docs/ghl-sequence-copy-pack.md</code> Workflow 3. Copy written 13 Jul; the GoHighLevel workflow needs your sign-off before publish.'
+},
+{
+  n:3, title:'Nurture email 2 of 3', kind:'✉️ Email', status:'pending',
+  plain:'Four days later. This one answers the "show me" objection by proving you run your own property business on the product.',
+  art: mail({ when:'4 days after email 1', subject:'What I run on it',
+    body:`<p>Hi [first name],</p>
+      <p>Most founder-led businesses run out of one place: the founder's head. Which works, right up until you want a holiday, a hire, or a buyer.</p>
+      <p>Fair question to ask any software founder: do you use your own product?</p>
+      <p>I run a 27-property portfolio on Operations Director. Rent reconciliation, compliance deadlines, contractor jobs, tenant comms — the system does the work, I approve decisions from one screen in about 20 minutes a day. Nothing lives in my head.</p>
+      <p>On the call I show you that live dashboard, running my real business, then map yours.</p>
+      <p>Worth a look: ${link(BOOK)}</p>
+      <p>Kevin</p>`}),
+  bonnet:`<p>This email makes a promise the call has to keep: showing a live dashboard running
+          your real business. That is the same promise the demo tenant task covers.</p>`,
+  src:'Verbatim from <code>docs/ghl-sequence-copy-pack.md</code> Workflow 3, email 2.'
+},
+{
+  n:4, title:'Nurture email 3 of 3', kind:'✉️ Email', status:'decision',
+  plain:'Five days later, the last one. It names the price and the guarantee, then stops. No fourth email.',
+  art: mail({ when:'5 days after email 2. Ends the sequence and tags them od-sequence-done',
+    subject:'Closing the loop',
+    body:`<p>Hi [first name],</p>
+      <p>Last one from me. If the timing is wrong, no hard feelings — you know where I am when the admin pile wins.</p>
+      <p>One thing worth knowing before I go: this is £350 a month with a 30-day money-back guarantee, and we are onboarding founding clients this quarter at the founding rate — those terms retire when the places fill. Founders who join now shape what the product becomes.</p>
+      <p>The call costs you 30 minutes and nothing else: ${link(BOOK)}</p>
+      <p>Either way, good luck with the business. Genuinely.</p>
+      <p>Kevin</p>`}),
+  flag:{k:'bad', t:'Your decision needed: the money-back promise contradicts your terms',
+        b:'This email promises a 30-day money-back guarantee. Your website FAQ and Terms say the £1,500 setup fee is non-refundable once the build starts. A prospect who reads both sees a contradiction, and a live Stripe checkout is attached to the page making the promise. Pick one position and make every surface say the same thing before outreach drives traffic.'},
+  bonnet:`<p>Two separate pricing problems are live at the same time:</p>
+          <ul>
+            <li>The guarantee wording above versus the non-refundable setup fee in the Terms.</li>
+            <li>The page /all-in-one-price omits the £400 per-pack setup fee that /pricing and the FAQ both state.</li>
+          </ul>
+          <p>Both were found in the 13 July website review and neither is fixed.</p>`,
+  src:'Copy from <code>docs/ghl-sequence-copy-pack.md</code>. Contradiction from the 13 Jul operationsdirector.co.uk review (blockers 1 and 2).'
+},
+{
+  n:5, title:'They book the call', kind:'🖥️ Screen', status:'live',
+  plain:'They click the link and pick a slot on your Teardown calendar. This part genuinely works today, tested end to end.',
+  art: screen('launch.operationsdirector.co.uk — Teardown booking', `
+    <div class="body">
+      <div class="rep-card"><h4>📅 Operations Director — Teardown Call</h4>
+        <div class="d">30 minutes, no slides, no pitch deck.</div>
+        <div class="rep-row">
+          <div class="rep-f"><label>Pick a day</label><div class="box">Mon 4 Aug</div></div>
+          <div class="rep-f"><label>Pick a time</label><div class="box">10:00 — 10:30</div></div>
+        </div>
+        <div class="rep-f"><label>Name</label><div class="box">Their name</div></div>
+        <div class="rep-f"><label>Email</label><div class="box">them@theircompany.co.uk</div></div>
+        <div class="rep-btn">Confirm booking</div>
+      </div>
+      <div class="flag info" style="margin-bottom:0"><b>Confirmed working</b>
+        The booking path was tested end to end on 13 July on calendar
+        <code>BcVVhAg1zLaPVEXj5ih0</code>, embedded in the GoHighLevel funnel.</div>
+    </div>`),
+  bonnet:`<p>The funnel sits on launch.operationsdirector.co.uk and the main site is
+          WordPress on Hostinger behind Cloudflare.</p>
+          <p>One thing missing everywhere: there is no analytics on any page. No GA4, no
+          pixel, no conversion events. You currently cannot tell which step loses people.</p>`,
+  src:'13 Jul operationsdirector.co.uk review: booking path verified; analytics blocker 4.'
+},
+{
+  n:6, title:'Booking confirmation', kind:'✉️ Email', status:'pending',
+  plain:'Lands the moment they book. It tells them what they walk away with whether or not they ever buy, and gives them one thing to prepare.',
+  art: mail({ when:'Immediately on booking', to:'them@theircompany.co.uk',
+    subject:'Confirmed: your call with Operations Director',
+    body:`<p>Hi [first name],</p>
+      <p>Your call is booked: [appointment time].</p>
+      <p>Here is what you leave with, whether or not we ever work together: a teardown of how your week actually runs, and a map of the first three processes you could hand to an AI operations department tomorrow.</p>
+      <p>One thing to prepare: jot down the three tasks that ate most of your week. That is where we start.</p>
+      <p>Need to move it? Use the reschedule link in this email rather than cancelling.</p>
+      <p>Speak soon,<br>Kevin</p>`}),
+  bonnet:`<p>Workflow 1 in the copy pack, marked "build FIRST". Triggered by Appointment Booked,
+          filtered to the Teardown calendar. Needs re-entry allowed in settings so one contact
+          can book more than once.</p>`,
+  src:'Verbatim from <code>docs/ghl-sequence-copy-pack.md</code> Workflow 1, step 1.'
+},
+{
+  n:7, title:'Reminder, day before', kind:'✉️ Email', status:'pending',
+  plain:'Reduces no-shows by setting expectations. No slides, no pitch deck.',
+  art: mail({ when:'24 hours before the call', to:'them@theircompany.co.uk',
+    subject:'Tomorrow: your Operations Director call',
+    body:`<p>Hi [first name],</p>
+      <p>Quick reminder about our call tomorrow at [appointment time].</p>
+      <p>It is 30 minutes, no slides, no pitch deck. You talk me through how your week actually runs; I show you which parts an AI operations department would take off your plate first.</p>
+      <p>Kevin</p>`}),
+  bonnet:`<p>Second step of the same workflow as the confirmation email.</p>`,
+  src:'Verbatim from <code>docs/ghl-sequence-copy-pack.md</code> Workflow 1, step 2.'
+},
+{
+  n:8, title:'Reminder, one hour before', kind:'✉️ Email', status:'pending',
+  plain:'The last nudge. Short.',
+  art: mail({ when:'1 hour before the call', to:'them@theircompany.co.uk',
+    subject:'Speaking in an hour',
+    body:`<p>Hi [first name],</p>
+      <p>We are on in an hour. The joining link is in your calendar invite.</p>
+      <p>Grab a coffee, bring the three tasks, and I will bring the plan.</p>
+      <p>Kevin</p>`}),
+  bonnet:`<p>Third and final step of Workflow 1.</p>`,
+  src:'Verbatim from <code>docs/ghl-sequence-copy-pack.md</code> Workflow 1, step 3.'
+},
+{
+  n:9, title:'If they do not turn up', kind:'✉️ Email', status:'pending',
+  plain:'Two emails. The first reframes the no-show as proof of the problem. The second gives them an easy way out if the timing is genuinely wrong.',
+  art: mail({ when:'1 hour after the missed call', to:'them@theircompany.co.uk',
+    subject:'We missed each other',
+    body:`<p>Hi [first name],</p>
+      <p>Looks like today ran away with you — which, honestly, is the exact problem we were going to talk about.</p>
+      <p>No lecture. Grab another slot here and we will pick it up: ${link(BOOK)}</p>
+      <p>Kevin</p>`})
+    + mail({ when:'2 days later, only if they still have not booked', to:'them@theircompany.co.uk',
+    subject:'Second attempt (I get it)',
+    body:`<p>Hi [first name],</p>
+      <p>When a founder cannot find 30 minutes to talk about getting time back, that is usually the strongest sign they need it.</p>
+      <p>One click, pick any slot: ${link(BOOK)}</p>
+      <p>If now is genuinely not the time, reply "later" and I will leave you alone until next quarter.</p>
+      <p>Kevin</p>`}),
+  bonnet:`<p>Workflow 2. Triggered by Appointment Status = No-show on the Teardown calendar.
+          The second email carries a condition: it only sends if no new appointment exists.</p>`,
+  src:'Verbatim from <code>docs/ghl-sequence-copy-pack.md</code> Workflow 2.'
+},
+{
+  n:10, title:'The Teardown call', kind:'📞 Live conversation', status:'missing',
+  plain:'Thirty minutes. They describe how their week runs. You show the live dashboard running your property business, then map theirs and name the first three processes to hand over.',
+  art:`<div class="frame"><div class="chrome"><div class="dots"><i></i><i></i><i></i></div>
+        <div class="url">Teardown call — 30 minutes</div></div>
+        <div class="body">
+          <div class="rep-card"><h4>What happens on the call</h4>
+            <div style="font-size:13px;color:var(--text-secondary);line-height:1.8">
+              1. They walk you through their week and the three tasks that ate it.<br>
+              2. You show the live dashboard running your real portfolio.<br>
+              3. You map their processes and name the first three to hand over.<br>
+              4. They leave with the map whether or not they buy.
+            </div>
+          </div>
+          <div class="flag bad" style="margin-bottom:0"><b>Four supporting pieces are missing</b>
+            The Rocket Demo flow one-pager, the objection crib sheet, the Founder Dependency
+            Score sheet, and the demo tenant with believable sample data. All were due between
+            10 and 22 July. The demo tenant is the one that matters most: email 2 promises a
+            live dashboard, so you are currently showing your own real financial data to strangers.</div>
+        </div></div>`,
+  bonnet:`<p>The demo tenant would be a fake client account inside the real product, filled
+          with believable sample data. Same code, same screens, no real numbers. It solves
+          the sales demo and lets you see the product the way a client sees it.</p>
+          <p>No dry run has been held either, despite being due 14 July.</p>`,
+  src:'MASTER-PLAN §8: 4 open tasks (recIUH5bvRdFZWeqa demo tenant, rece60QJYytAQxsiL one-pager, recgbVSeU22pHeOwV objections, recFNqmzmeSmOfgJw dependency score).'
+},
+{
+  n:11, title:'After the call', kind:'✉️ Email', status:'missing',
+  plain:'Two follow-ups: one at two days asking if they have questions on the plan, one at five days offering to hold their onboarding slot.',
+  art:`<div class="frame"><div class="chrome"><div class="dots"><i></i><i></i><i></i></div>
+        <div class="url">Post-call proposal follow-up</div></div>
+        <div class="body">
+          <div class="rep-card"><h4>Planned, not written</h4>
+            <div style="font-size:13px;color:var(--text-secondary);line-height:1.8">
+              <b>+2 days</b> — "Any questions on the plan?"<br>
+              <b>+5 days</b> — "Shall I hold your onboarding slot?"
+            </div>
+          </div>
+          <div class="flag warn" style="margin-bottom:0"><b>A draft already exists in GoHighLevel</b>
+            The instruction is to finish that draft rather than rebuild it, and you review the
+            content first. Nobody has done that yet, so the email bodies do not exist to show here.</div>
+        </div></div>`,
+  bonnet:`<p>Workflow 4. Trigger is a manual add or the tag <code>od-proposal-sent</code>.</p>
+          <p>There is also a Workflow 5 for prospects who replied but never booked, one email
+          three days after the tag <code>od-replied-no-booking</code>, and a Workflow 6 for
+          90-day reactivation with no copy written yet.</p>`,
+  src:'<code>docs/ghl-sequence-copy-pack.md</code> Workflows 4, 5 and 6.'
+},
+{
+  n:12, title:'They pay', kind:'💳 Checkout', status:'decision',
+  plain:'Here the journey forks, and that fork is a problem. Two different sales models are live on your website at the same time, and both are indexable by Google.',
+  art:`<div class="frame"><div class="chrome"><div class="dots"><i></i><i></i><i></i></div>
+        <div class="url">operationsdirector.co.uk — two live paths</div></div>
+        <div class="body">
+          <div class="rep-row">
+            <div class="rep-card" style="flex:1;min-width:230px">
+              <h4>Path A: call first</h4>
+              <div class="d">The main site</div>
+              <div style="font-size:12.5px;color:var(--text-secondary);line-height:1.7">
+                Book a Teardown, talk to Kevin, then buy. Matches the pre-sell principle
+                you adopted and matches every email above.</div>
+            </div>
+            <div class="rep-card" style="flex:1;min-width:230px">
+              <h4>Path B: self-serve</h4>
+              <div class="d">/launch and /all-in-one-price</div>
+              <div style="font-size:12.5px;color:var(--text-secondary);line-height:1.7">
+                Orphan pages with live Stripe checkout attached. Someone can buy without ever
+                speaking to you, on terms that contradict the main site.</div>
+            </div>
+          </div>
+          <div class="flag bad" style="margin-bottom:0"><b>Pick one before outreach drives traffic</b>
+            The billing worker is live and taking real Stripe sessions, so this is not theoretical.
+            Every email in this journey assumes Path A.</div>
+        </div></div>`,
+  bonnet:`<p>Locked pricing per the plan snapshot: £1,500 setup plus £350 a month with a 30-day
+          trial, and £100 a month per add-on module with a £400 setup fee each. Modular pricing
+          was marked Phase 2.</p>
+          <p>The billing worker <code>od-billing-bridge</code> is live and processing real
+          Stripe sessions. Stripe webhook delivery failures were fixed on 14 July.</p>`,
+  src:'MASTER-PLAN §2 snapshot and §8; 13 Jul website review blocker 3.'
+}
+];
+
+/* ─────────────────────────────── TRACK 2 ─────────────────────────────── */
+const CLIENT = [
+{
+  n:1, title:'They fill in the intake form', kind:'🖥️ Screen', status:'pending',
+  plain:'A public page, no login needed. Six short sections, about ten minutes. It collects everything needed to stand their workspace up: who they are, where they are based, their team, their money basics, their targets, and how to reach them.',
+  art: screen('operationsdirector.co.uk/onboarding.html', `
+    <div class="body">
+      <div style="text-align:center;margin-bottom:15px">
+        <div style="font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--accent)">Operations Director</div>
+        <div style="font-size:20px;font-weight:700;margin:5px 0 4px">Let's set up your account</div>
+        <div style="font-size:12.5px;color:var(--text-secondary)">A few questions so we can build your workspace around your business. Takes about 10 minutes.</div>
+      </div>
+      <div class="rep-card"><h4>👤 You &amp; your business</h4><div class="d">The basics we'll use across your dashboard and AI assistant.</div>
+        <div class="rep-row">
+          <div class="rep-f"><label>Your name *</label><div class="box">&nbsp;</div></div>
+          <div class="rep-f"><label>Your role / title</label><div class="box">e.g. Founder, MD</div></div>
+        </div>
+        <div class="rep-f"><label>Business name *</label><div class="box">Your main business</div></div>
+        <div class="rep-f"><label>What does the business do?</label><div class="box">e.g. We manage residential rental property for private landlords.</div></div>
+      </div>
+      <div class="rep-card"><h4>🌍 Where you're based</h4><div class="d">Sets your dates, number and currency formatting everywhere.</div>
+        <div class="rep-row">
+          <div class="rep-f"><label>Country / base</label><div class="box">United Kingdom</div></div>
+          <div class="rep-f"><label>Currency</label><div class="box">GBP — £ (British Pound)</div></div>
+        </div>
+      </div>
+      <div class="rep-card"><h4>👥 Your team</h4><div class="d">Anyone who works in or on the business. Leave blank if it's just you.</div>
+        <div class="rep-row">
+          <div class="rep-f"><label>Name</label><div class="box">&nbsp;</div></div>
+          <div class="rep-f"><label>Email</label><div class="box">&nbsp;</div></div>
+        </div>
+        <div class="rep-f"><label>Who's your right-hand person?</label><div class="box">Name (or leave blank if it's just you)</div></div>
+      </div>
+      <div class="rep-card"><h4>💷 Money basics</h4><div class="d">Just enough to stand up your cash view — the bank feed fills in the rest.</div>
+        <div class="rep-f"><label>Which bank account(s) do you run the business from?</label><div class="box">names only, no numbers</div></div>
+        <div class="rep-f"><label>Your three biggest costs</label><div class="box">e.g. wages, rent, subcontractors</div></div>
+      </div>
+      <div class="rep-card"><h4>🎯 Targets &amp; guardrails</h4><div class="d">Powers your KPIs and the "safe to spend" traffic light.</div>
+        <div class="rep-row">
+          <div class="rep-f"><label>Monthly revenue target</label><div class="box">£ 35000</div></div>
+          <div class="rep-f"><label>Monthly profit target</label><div class="box">£ 5000</div></div>
+        </div>
+        <div class="rep-row">
+          <div class="rep-f"><label>Just act on spends below</label><div class="box">£ 50</div></div>
+          <div class="rep-f"><label>Always ask you above</label><div class="box">£ 250</div></div>
+        </div>
+      </div>
+      <div class="rep-card"><h4>✉️ How we reach you</h4><div class="d">We'll send your secure login link here.</div>
+        <div class="rep-row">
+          <div class="rep-f"><label>Best email *</label><div class="box">you@yourcompany.com</div></div>
+          <div class="rep-f"><label>Phone</label><div class="box">Optional</div></div>
+        </div>
+      </div>
+      <div class="rep-btn">Submit &amp; set up my account</div>
+    </div>`),
+  flag:{k:'warn', t:'Built but not proven',
+        b:'The page and its server function were built on 22 July. Per the plan they still await deployment by Mica, one real test submission, and the explainer Loom that was meant to go with them. Nothing in this session verified them running live.'},
+  bonnet:`<p>Three fields are compulsory: name, business name, email. Everything else is optional,
+          so a nervous client can get through it quickly.</p>
+          <p>The spend guardrails matter more than they look. "Act below £50, always ask above £250"
+          becomes the rule the AI follows before it does anything that costs money.</p>
+          <p>There is a hidden honeypot field to catch bots, and the form never touches the
+          database directly.</p>`,
+  src:'<code>onboarding.html</code> (real field list reproduced above). Status from MASTER-PLAN §6, task recukdbjiqU5UejBo.'
+},
+{
+  n:2, title:'What their answers do', kind:'⚙️ Behind the scenes', status:'pending',
+  plain:'The moment they submit, three records are created for you automatically: a contact, a deal already marked as Won, and the full set of answers stored against both. It lands in your CRM ready for the next click.',
+  art:`<div class="frame"><div class="chrome"><div class="dots"><i></i><i></i><i></i></div>
+        <div class="url">onboarding-submit — server function</div></div>
+        <div class="body">
+          <div class="rep-card"><h4>Three records, created for you</h4>
+            <div style="font-size:12.5px;color:var(--text-secondary);line-height:1.9">
+              <b>1. A CRM contact</b> — the person, with their email and phone<br>
+              <b>2. A deal at the Won stage</b> — linked to that contact, in your pipeline<br>
+              <b>3. Their full answers</b> — stored as a submission linked to both, marked "new"
+            </div>
+          </div>
+          <div class="flag info" style="margin-bottom:0"><b>Why it goes straight to Won</b>
+            They only reach this form after they have paid, so the deal is already closed.
+            It lands in the CRM so the "Create client account" button has something to work from.</div>
+        </div></div>`,
+  bonnet:`<p>The form posts to a server function running with elevated rights, which is what lets
+          an anonymous visitor create records without ever having direct database access. The
+          table has no public policy at all.</p>
+          <p>The submission status moves new → reviewed → provisioned as you work through it.</p>`,
+  src:'<code>supabase-migration/supabase/migrations/0032_onboarding.sql</code> and <code>supabase/functions/onboarding-submit/index.ts</code>.'
+},
+{
+  n:3, title:'You create their account', kind:'🖥️ Screen', status:'built',
+  plain:'From the CRM client screen you click one button. It creates their login, generates a secure set-password link, and hands that link to GoHighLevel to email them. Only a platform admin can do this.',
+  art: screen('app.operationsdirector.co.uk — CRM, client screen', `
+    <div class="body">
+      <div class="rep-card"><h4>Acme Plumbing Ltd</h4>
+        <div class="d">Deal: Won · Onboarding answers received</div>
+        <div class="rep-row">
+          <div class="rep-f"><label>Client email</label><div class="box">them@acmeplumbing.co.uk</div></div>
+          <div class="rep-f"><label>Company</label><div class="box">Acme Plumbing Ltd</div></div>
+        </div>
+        <div class="rep-btn">Create client account</div>
+      </div>
+      <div class="rep-card"><h4>What that one click does</h4>
+        <div style="font-size:12.5px;color:var(--text-secondary);line-height:1.9">
+          1. Checks you are a platform admin, not merely an account owner<br>
+          2. Creates their login and builds their whole workspace<br>
+          3. Generates a secure set-password link without sending any email itself<br>
+          4. Passes that link to GoHighLevel so the branded welcome email goes out and is tracked
+        </div>
+      </div>
+    </div>`),
+  bonnet:`<p>The permission check is stricter than it first looks, and deliberately so. An earlier
+          version allowed any workspace owner to do this, which meant every client passed the
+          check because each client owns their own workspace. That was found in a security audit
+          and tightened to platform admin only.</p>
+          <p>The set-password link is generated rather than emailed by the database, so the
+          welcome email stays on your brand and stays trackable.</p>`,
+  src:'<code>supabase/functions/create-client/index.ts</code>; permission fix in migration <code>0038_platform_admin_gate.sql</code>.'
+},
+{
+  n:4, title:'The welcome email', kind:'✉️ Email', status:'missing',
+  plain:'This is the first thing a paying client receives from you, and it does not exist yet. The plumbing that sends it is built and working. The words are not written.',
+  art:`<div class="frame"><div class="chrome"><div class="dots"><i></i><i></i><i></i></div>
+        <div class="url">Inbox — them@acmeplumbing.co.uk</div></div>
+        <div class="body">
+          <div class="mail-head">
+            <div class="subj" style="color:var(--text-muted);font-style:italic">[ no subject line written ]</div>
+            <div class="meta"><span class="av" style="background:var(--border-default);color:var(--text-muted)">?</span>
+              <b>Kevin Brittain</b> &lt;kevin@operationsdirector.co.uk&gt;</div>
+          </div>
+          <div style="border:2px dashed var(--border-default);border-radius:var(--radius-md);padding:22px;text-align:center;color:var(--text-muted);font-size:13px">
+            The welcome email body has not been written.<br>
+            GoHighLevel receives their name, company and set-password link, and sends whatever
+            template is configured there.
+          </div>
+          <div class="rep-card" style="margin-top:15px"><h4>What it has to carry</h4>
+            <div style="font-size:12.5px;color:var(--text-secondary);line-height:1.9">
+              <b>The set-password link</b> — without it they cannot get in<br>
+              <b>What happens next</b> — the one-pager promised in the plan<br>
+              <b>How to invite their team</b> — instructions, also still to be written
+            </div>
+          </div>
+        </div></div>`,
+  flag:{k:'bad', t:'The highest-risk gap in this whole journey',
+        b:'A client has paid, filled in a ten-minute form, and the very next thing they get is an email nobody has approved. The welcome pack task (welcome email, what-happens-next one-pager, team-invite instructions) was due 18 July and is still open. Everything either side of it is built.'},
+  bonnet:`<p>The server function POSTs the client email, name, company and the set-password link
+          to a GoHighLevel inbound webhook. GoHighLevel then sends whatever template is wired
+          to that webhook. That template is where the missing copy belongs.</p>
+          <p>The link expires. If they leave it too long the set-password page tells them to ask
+          for a fresh invitation, which means you get the request rather than losing them silently.</p>`,
+  src:'Webhook confirmed in <code>supabase/functions/create-client/index.ts</code>. Missing copy: MASTER-PLAN §6, task recr5sYAXWJahEuBA, due 18 Jul, open.'
+},
+{
+  n:5, title:'They choose a password', kind:'🖥️ Screen', status:'built',
+  plain:'They click the link in the welcome email and land here. Choose a password, confirm it, and they go straight into their workspace. No extra login step.',
+  art: screen('app.operationsdirector.co.uk/set-password', `
+    <div class="body" style="background:var(--bg-app)">
+      <div class="auth">
+        <h3>⚙️ Operations Director</h3>
+        <div class="sub">Welcome! Choose a password to finish setting up your account.</div>
+        <div class="rep-f"><label>New password</label><div class="box">At least 8 characters</div></div>
+        <div class="rep-f"><label>Confirm password</label><div class="box">&nbsp;</div></div>
+        <div class="rep-btn" style="width:100%;text-align:center;margin-top:9px">Set password &amp; sign in</div>
+      </div>
+      <div class="legend-off" style="text-align:center;padding-top:4px">
+        The same page handles a forgotten-password reset. It detects which kind of link was used
+        and rewords itself, so a reset never reads as an "invitation".
+      </div>
+    </div>`),
+  bonnet:`<p>Minimum eight characters, and the two entries must match. On success they are taken
+          into the app after a short pause, already signed in.</p>
+          <p>If the link has expired or been used already, the page says so plainly and tells them
+          to ask whoever set up the account for a fresh invitation.</p>`,
+  src:'<code>set-password.html</code>, reproduced from the real page.'
+},
+{
+  n:6, title:'Their workspace builds itself', kind:'⚙️ Behind the scenes', status:'built',
+  plain:'Nobody sets anything up by hand. The moment their account is created, the system builds a complete, separated workspace and fills it with starter content.',
+  art:`<div class="frame"><div class="chrome"><div class="dots"><i></i><i></i><i></i></div>
+        <div class="url">provision_new_workspace — runs automatically</div></div>
+        <div class="body">
+          <div class="rep-card"><h4>Created automatically, in order</h4>
+            <div style="font-size:12.5px;color:var(--text-secondary);line-height:1.9">
+              <b>1.</b> Their organisation, on the base plan<br>
+              <b>2.</b> Them as the owner of it<br>
+              <b>3.</b> Seven base modules switched on<br>
+              <b>4.</b> Five paid add-ons switched off<br>
+              <b>5.</b> Two base features switched off by default (Leadership Dashboard, Plan Builder)<br>
+              <b>6.</b> Ten starter guides written into their guides library<br>
+              <b>7.</b> Them added as their own first team member, so tasks can be assigned<br>
+              <b>8.</b> A CRM pipeline with default stages
+            </div>
+          </div>
+          <div class="rep-card"><h4>The ten starter guides they find waiting</h4>
+            <div style="font-size:12.5px;color:var(--text-secondary);line-height:1.85">
+              Welcome — set up your Business profile<br>
+              Getting Started — the Command Centre (your dashboard &amp; KPIs)<br>
+              How to use Objective &amp; Strategy<br>
+              How to plan &amp; run Tasks &amp; Projects<br>
+              Build your Team directory<br>
+              Systemisation — build AI skills &amp; recurring tasks<br>
+              Using the AI Assistant<br>
+              Request an improvement — the DOD queue (one request at a time)<br>
+              Add-ons — turn on Finance, Comms, Content or Property<br>
+              How to use the CRM
+            </div>
+          </div>
+          <div class="flag warn" style="margin-bottom:0"><b>Worth checking</b>
+            Guide two is called "Getting Started — the Command Centre (your dashboard &amp; KPIs)",
+            but the Leadership Dashboard is switched off for new clients. A new client reads a
+            guide to a screen they cannot see.</div>
+        </div></div>`,
+  bonnet:`<p>Base modules on: Objective &amp; Strategy, Tasks &amp; Projects, Team, Systemisation,
+          AI Assistant, DOD queue, CRM.</p>
+          <p>Add-ons off until bought: Finance, Inbound Comms, Content Machine, Personal Wealth,
+          Property.</p>
+          <p>Off by default but toggleable per client: Leadership Dashboard and Plan Builder. The
+          switch is a deliberate design: a missing setting means "on", so existing clients were
+          never affected when these two moved out of the base plan.</p>`,
+  src:'<code>migrations/0040_new_clients_leadership_dashboard_off.sql</code> (current version of the provisioning function), building on 0036 and 0023.'
+},
+{
+  n:7, title:'First login: what they actually see', kind:'🖥️ Screen', status:'built',
+  plain:'This is the screen that matters most, and it is probably not the one you picture. A brand-new client does not land on the Leadership Dashboard. It is switched off for new accounts.',
+  art: newClientSidebar(),
+  flag:{k:'warn', t:'Check this is what you intended',
+        b:'A new client sees eight sections, and the Leadership Dashboard is not one of them. It became an opt-out feature on the same pattern as Plan Builder, so every new signup starts without it until an admin ticks it on from the CRM client screen. Existing accounts, including yours, keep it.'},
+  bonnet:`<p>The sidebar is gated on the module switches from the previous step. Sections with no
+          visible items hide themselves, so a base client sees no Finance or Marketing heading at all.</p>
+          <p>The app covers the whole screen with a plain panel until it knows who the user is and
+          which modules they have. Without that, a refresh would flash the full sidebar and the
+          previous user's name for a split second.</p>`,
+  src:'<code>supabase-app.html</code> sidebar markup plus the module switches from migration 0040.'
+},
+{
+  n:8, title:'Their first fortnight', kind:'📋 Plan', status:'missing',
+  plain:'What should happen between signing up and the client getting real value. This is designed on paper but almost none of it is built.',
+  art:`<div class="frame"><div class="chrome"><div class="dots"><i></i><i></i><i></i></div>
+        <div class="url">First 14 days — activation</div></div>
+        <div class="body">
+          <div class="rep-card"><h4>The intended path</h4>
+            <div style="font-size:12.5px;color:var(--text-secondary);line-height:1.9">
+              <b>Dashboard populated</b> — their real numbers flowing in<br>
+              <b>Team using Tasks</b> — adoption beyond the founder<br>
+              <b>First agent live</b> — the moment the product proves itself
+            </div>
+          </div>
+          <div class="flag bad" style="margin-bottom:0"><b>Eight open pieces</b>
+            The 14-day activation checklist, the provisioning runbook, the per-module data-import
+            checklist, the client-facing how-it-works guide, the client profile interview, the
+            "three hated jobs" first-agent question, the team-adoption playbook, and the automated
+            nudges. Due dates ran from 18 to 28 July. All still open.</div>
+        </div></div>`,
+  bonnet:`<p>The delivery method itself is designed: point the AI at a real task and its written
+          process, dry run it, split the work 80/20 with the usual owner reviewing, iterate two or
+          three times, then schedule it recurring with a human handling exceptions. Before any of
+          that, a process-clarity gate: the client answers who they serve, what the value is, how
+          it is delivered, and what the tasks are. Measure twice, cut once.</p>
+          <p>The runbook that turns this into a repeatable delivery has not been written.</p>`,
+  src:'MASTER-PLAN §6, 8 open tasks including recb6s1akOehVzLC9 (14-day checklist) and recULNUD5SN7lDy4o (provisioning runbook).'
+}
+];
+
+/* ─────────────────────────────── TRACK 3 ─────────────────────────────── */
+const PRODUCT = [
+{
+  n:1, title:'How the product is put together', kind:'⚙️ Architecture', status:'built',
+  plain:'One shell holds everything. The sidebar and the login live in the shell, and each section loads inside it as its own page. That is why two people can work on different sections at once without treading on each other.',
+  art:`<div class="frame"><div class="chrome"><div class="dots"><i></i><i></i><i></i></div>
+        <div class="url">app.operationsdirector.co.uk</div></div>
+        <div class="mini">
+          <div class="side">
+            <div class="brand">⚙️ Operations Director</div>
+            <div class="sec">The shell owns</div>
+            <div class="nav">🔑 Login</div>
+            <div class="nav">🧭 Sidebar</div>
+            <div class="nav">🔒 Module switches</div>
+            <div class="nav">👤 Who am I</div>
+          </div>
+          <div class="main">
+            <div class="rep-card"><h4>Each section loads in here</h4>
+              <div class="d">A separate page per section, framed by the shell.</div>
+              <div style="font-size:12.5px;color:var(--text-secondary);line-height:1.7">
+                Sign in once. The shell works out who you are and which modules you have,
+                then paints only those sections and loads the page you pick.
+              </div>
+            </div>
+            <div class="flag info" style="margin-bottom:0"><b>Why it is built this way</b>
+              Separate files mean separate work. Your migration person and your marketing person
+              never edit the same file, so neither overwrites the other.</div>
+          </div>
+        </div></div>`,
+  bonnet:`<p>A cover panel sits over the app until identity and entitlements resolve, so nobody
+          ever glimpses another user's name or a section they do not own.</p>`,
+  src:'<code>supabase-app.html</code>.'
+},
+{
+  n:2, title:'What has moved to the new database', kind:'📊 Status', status:'built',
+  plain:'Sixteen pages now have a version running on the new Supabase backend. They exist alongside the old versions rather than replacing them, so nothing breaks while the move happens.',
+  art:`<div class="frame"><div class="chrome"><div class="dots"><i></i><i></i><i></i></div>
+        <div class="url">Pages rebuilt on Supabase</div></div>
+        <div class="body">
+          <div class="grid">
+            <div class="gcard"><div class="gt">📊 Leadership Dashboard</div><div class="gd"><code>index-supabase.html</code></div></div>
+            <div class="gcard"><div class="gt">🎯 Objective &amp; Strategy</div><div class="gd"><code>os/strategy/index-supabase.html</code></div></div>
+            <div class="gcard"><div class="gt">✅ Tasks &amp; Projects</div><div class="gd"><code>os/tasks/index-supabase.html</code></div></div>
+            <div class="gcard"><div class="gt">👥 CRM</div><div class="gd"><code>crm-supabase.html</code></div></div>
+            <div class="gcard"><div class="gt">🏢 Operations</div><div class="gd"><code>os/operations/index-supabase.html</code></div></div>
+            <div class="gcard"><div class="gt">📨 Inbound Comms</div><div class="gd"><code>follow-up-supabase.html</code></div></div>
+            <div class="gcard"><div class="gt">⚙️ Systemisation</div><div class="gd"><code>os/systemisation/index-supabase.html</code></div></div>
+            <div class="gcard"><div class="gt">🧠 Skills Library</div><div class="gd"><code>skills-supabase.html</code></div></div>
+            <div class="gcard"><div class="gt">💭 AI Brain</div><div class="gd"><code>ai-brain-supabase.html</code></div></div>
+            <div class="gcard"><div class="gt">🧭 Money Confidence</div><div class="gd"><code>money-supabase.html</code></div></div>
+            <div class="gcard"><div class="gt">🏦 Accounts</div><div class="gd"><code>accounts-supabase.html</code></div></div>
+            <div class="gcard"><div class="gt">💰 Profit &amp; Loss</div><div class="gd"><code>pnl-supabase.html</code></div></div>
+            <div class="gcard"><div class="gt">📈 Wealth</div><div class="gd"><code>wealth-supabase.html</code></div></div>
+            <div class="gcard"><div class="gt">👥 Team Members</div><div class="gd"><code>os/team/index-supabase.html</code></div></div>
+            <div class="gcard"><div class="gt">⚙️ Content Machine</div><div class="gd"><code>content-machine-supabase.html</code></div></div>
+            <div class="gcard"><div class="gt">🔗 Site Map &amp; Guides</div><div class="gd"><code>sitemap-supabase.html</code></div></div>
+          </div>
+        </div></div>`,
+  bonnet:`<p>Forty database migrations have been written, covering the tenant separation, the module
+          switches, signup provisioning, the CRM, meetings, onboarding, offboarding and the admin
+          permission gate.</p>
+          <p>These are files in the repository. This session did not check which of them have been
+          applied to the live database, so treat this as "written", not "running".</p>`,
+  src:'Counted directly from the repository: 16 files matching <code>*-supabase.html</code>, 40 migration files.'
+},
+{
+  n:3, title:'How a client gets what they paid for', kind:'🔒 Entitlements', status:'built',
+  plain:'Every workspace carries a list of switches, one per module. The sidebar only shows what is switched on. That is the mechanism that lets you sell a base plan and turn on paid add-ons per client.',
+  art:`<div class="frame"><div class="chrome"><div class="dots"><i></i><i></i><i></i></div>
+        <div class="url">Module switches per workspace</div></div>
+        <div class="body">
+          <div class="rep-card"><h4>Base plan — on for everyone</h4>
+            <div class="gd" style="font-size:12.5px;line-height:1.8;color:var(--text-secondary)">
+              Objective &amp; Strategy · Tasks &amp; Projects · Team · Systemisation ·
+              Skills Library · AI Assistant · DOD improvement queue · CRM</div>
+          </div>
+          <div class="rep-card"><h4>Paid add-ons — off until bought</h4>
+            <div class="gd" style="font-size:12.5px;line-height:1.8;color:var(--text-secondary)">
+              Finance (Money Confidence, Accounts, Profit &amp; Loss) · Inbound Comms ·
+              Content Machine · Personal Wealth · Property Operations</div>
+          </div>
+          <div class="rep-card"><h4>Off for new clients, toggleable per client</h4>
+            <div class="gd" style="font-size:12.5px;line-height:1.8;color:var(--text-secondary)">
+              Leadership Dashboard · Plan Builder</div>
+          </div>
+          <div class="flag warn" style="margin-bottom:0"><b>What this switch does and does not do</b>
+            It hides sections from the sidebar. The separation of one client's data from another's
+            is a different, deeper mechanism enforced in the database itself. A base-only client
+            simply has no rows in the add-on tables.</div>
+        </div></div>`,
+  bonnet:`<p>The switch reads "on unless a row says off". That choice is what let the Leadership
+          Dashboard and Plan Builder move out of the base plan without disturbing a single
+          existing account: no row means on, and existing accounts have no row.</p>`,
+  src:'<code>migrations/0023_module_entitlements.sql</code>, <code>0036</code>, <code>0040</code>.'
+},
+{
+  n:4, title:'Keeping clients apart', kind:'🔐 Isolation', status:'built',
+  plain:'Every client sees only their own data, enforced by the database rather than by the app. This is the part that has to be right before a second client exists.',
+  art:`<div class="frame"><div class="chrome"><div class="dots"><i></i><i></i><i></i></div>
+        <div class="url">Tenant separation</div></div>
+        <div class="body">
+          <div class="rep-card"><h4>How it works in plain terms</h4>
+            <div style="font-size:12.5px;color:var(--text-secondary);line-height:1.9">
+              Every row of data carries the organisation it belongs to.<br>
+              The database refuses to return a row unless you are a member of that organisation.<br>
+              The rule is applied at the database, so a bug in a page cannot leak another client's data.<br>
+              It applies even to the account that owns the database.
+            </div>
+          </div>
+          <div class="flag info" style="margin-bottom:0"><b>It has been stress-tested</b>
+            A dedicated isolation test harness exists, and its findings are written up. One real
+            finding it produced: the "create client account" permission was too loose and has been
+            tightened.</div>
+        </div></div>`,
+  bonnet:`<p>Two documents cover this: the schema specification and a multi-tenancy stress audit,
+          alongside a live test harness kept in the repository.</p>
+          <p>The audit found the admin permission problem described in the onboarding track. That
+          is the value of the harness: it caught a real hole before a real client did.</p>`,
+  src:'<code>docs/supabase-multitenancy-stress-audit.md</code>, <code>supabase-migration/stress-test/</code>, migration <code>0022</code>.'
+},
+{
+  n:5, title:'What has not moved yet', kind:'⚠️ Honest gap', status:'pending',
+  plain:'Airtable is still where your real business data lives. The Supabase build runs alongside it, not instead of it, until each section is switched over one at a time.',
+  art:`<div class="frame"><div class="chrome"><div class="dots"><i></i><i></i><i></i></div>
+        <div class="url">Migration reality check</div></div>
+        <div class="body">
+          <div class="rep-row">
+            <div class="rep-card" style="flex:1;min-width:230px"><h4>Airtable</h4>
+              <div class="d">Still the system of record</div>
+              <div style="font-size:12.5px;color:var(--text-secondary);line-height:1.7">
+                Your tenants, transactions, invoices, costs and tasks. The live business runs here.</div>
+            </div>
+            <div class="rep-card" style="flex:1;min-width:230px"><h4>Supabase</h4>
+              <div class="d">The shadow build</div>
+              <div style="font-size:12.5px;color:var(--text-secondary);line-height:1.7">
+                Sixteen rebuilt pages, forty migrations, tenant separation. Where clients will live.</div>
+            </div>
+          </div>
+          <div class="flag warn" style="margin-bottom:0"><b>What this means for you</b>
+            Until a section is formally cut over, changing it means changing it in two places.
+            That is the cost of the parallel build, and it is why the cutover order matters.</div>
+        </div></div>`,
+  bonnet:`<p>The rule in the build instructions is explicit: Airtable remains the system of record
+          until each module is individually cut over.</p>
+          <p>The last full snapshot in the plan, dated 7 July, put the product at 78 per cent and
+          the go-to-market side at 40 per cent. That snapshot is three weeks old and is due an
+          update at the next review.</p>`,
+  src:'<code>CLAUDE.md</code> stack section, MASTER-PLAN §2 snapshot dated 7 Jul 2026.'
+}
+];
+
+const TRACKS = [
+  { id:'prospect', label:'1. How a prospect reaches you',
+    blurb:'From the moment an agent spots them on LinkedIn to the moment they pay. Twelve steps, mostly email.',
+    steps:PROSPECT },
+  { id:'client', label:'2. What a new client goes through',
+    blurb:'From the intake form to their first fortnight in the product. Eight steps.',
+    steps:CLIENT },
+  { id:'product', label:'3. Inside the product',
+    blurb:'How the thing is built, what has moved to the new database, and what has not.',
+    steps:PRODUCT }
+];
+
+const LABEL = { live:'Live now', built:'Built, not proven live', pending:'Waiting on a deploy or switch-on',
+                missing:'Not written yet', decision:'Needs your decision' };
+
+/* ── state + render ──────────────────────────────────────────────────── */
+let ti = 0, si = 0;
+
+function renderTabs(){
+  document.getElementById('trackTabs').innerHTML =
+    TRACKS.map((t,i) => `<button class="track${i===ti?' on':''}" data-t="${i}">${t.label}</button>`).join('');
+  document.querySelectorAll('.track').forEach(b =>
+    b.onclick = () => { ti = +b.dataset.t; si = 0; renderAll(); window.scrollTo({top:0,behavior:'smooth'}); });
+}
+
+function renderRail(){
+  const tr = TRACKS[ti];
+  document.getElementById('railBlurb').textContent = tr.blurb;
+  document.getElementById('stepList').innerHTML = tr.steps.map((s,i) => `
+    <div class="step${i===si?' on':''}" data-s="${i}">
+      <div class="num">${s.n}</div>
+      <div class="txt">
+        <div class="t">${s.title}</div>
+        <div class="m">${s.kind}<span class="pill ${s.status}">${LABEL[s.status]}</span></div>
+      </div>
+    </div>`).join('');
+  document.querySelectorAll('.step').forEach(el =>
+    el.onclick = () => { si = +el.dataset.s; renderStage(); renderRail();
+                         if(window.innerWidth <= 900) document.getElementById('stage').scrollIntoView({behavior:'smooth'}); });
+}
+
+function renderStage(){
+  const tr = TRACKS[ti], s = tr.steps[si];
+  const prev = tr.steps[si-1], next = tr.steps[si+1];
+  document.getElementById('stage').innerHTML = `
+    <div class="head">
+      <div class="kicker">Step ${s.n} of ${tr.steps.length} · ${s.kind}</div>
+      <h2>${s.title}</h2>
+      <div class="plain">${s.plain}</div>
+      <div class="pills"><span class="pill ${s.status}">${LABEL[s.status]}</span></div>
+    </div>
+    ${s.flag ? `<div class="flag ${s.flag.k}"><b>${s.flag.t}</b>${s.flag.b}</div>` : ''}
+    ${s.art}
+    <details class="bonnet"><summary>Under the bonnet</summary>
+      <div class="inner">${s.bonnet}<div class="src"><b>Source:</b> ${s.src}</div></div>
+    </details>
+    <div class="pager">
+      <button class="pbtn" id="pPrev" ${prev?'':'disabled'}>
+        <span>← Previous</span>${prev ? prev.title : 'Start of this journey'}</button>
+      <button class="pbtn" id="pNext" ${next?'':'disabled'} style="text-align:right">
+        <span>Next →</span>${next ? next.title : 'End of this journey'}</button>
+    </div>`;
+  const p = document.getElementById('pPrev'), n = document.getElementById('pNext');
+  if(prev) p.onclick = () => go(-1);
+  if(next) n.onclick = () => go(1);
+}
+
+function go(d){
+  const max = TRACKS[ti].steps.length - 1;
+  si = Math.min(max, Math.max(0, si + d));
+  renderStage(); renderRail();
+  window.scrollTo({top:0,behavior:'smooth'});
+}
+
+function renderAll(){ renderTabs(); renderRail(); renderStage(); }
+
+document.addEventListener('keydown', e => {
+  if(e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+  if(e.key === 'ArrowRight') go(1);
+  if(e.key === 'ArrowLeft') go(-1);
+});
+
+document.getElementById('stamp').textContent =
+  'Every step below was read from the repository on ' + VERIFIED +
+  '. Nothing here is live: no data is loaded and no email is sent.';
+
+renderAll();
+</script>
+</body>
+</html>
