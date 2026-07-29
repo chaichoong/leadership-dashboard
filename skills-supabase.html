@@ -60,9 +60,21 @@
   // untouched. Fail-safe: any error leaves the catalogue filtered (client view).
   (function () {
     const OWNER_ONLY = ['custom', 'project', 'scheduled'];
-    // Preset skills that still reference the provider's Airtable base and so don't
-    // belong in the Supabase client product until they're rebuilt against Supabase.
-    const OWNER_ONLY_IDS = ['cash-flow-forecast'];
+    // Whole categories a base-plan business client never needs. "Development" is
+    // software-engineering + Claude Code power-user tooling (PR review, security
+    // review, API building, harness config) — no base module maps to it.
+    const CLIENT_HIDE_CATEGORIES = ['Development'];
+    // Individual preset skills hidden from clients:
+    //  • cash-flow-forecast — still reads the provider's Airtable base (rebuild for Supabase first).
+    //  • data-* — duplicate / analyst-grade data skills; base clients keep Data Analysis,
+    //    Dashboard Builder and Data Visualisation only.
+    //  • prod-* — internal productivity/memory plumbing, not a client "run a skill" action.
+    const OWNER_ONLY_IDS = [
+      'cash-flow-forecast',
+      'data-write-query', 'data-sql-queries', 'data-explore',
+      'data-validate', 'data-statistical', 'data-context-extractor', 'data-create-viz',
+      'prod-memory', 'prod-start', 'prod-update',
+    ];
     const CATEGORY_FEATURE = {          // skill category → the feature it requires
       'Property Management': 'property',
       'Finance':             'finance',
@@ -94,7 +106,8 @@
         const feats = await features(sb);
         SKILLS_LIBRARY = SKILLS_LIBRARY.filter(s => {
           if (OWNER_ONLY.includes(s.source)) return false;               // provider's own skills
-          if (OWNER_ONLY_IDS.includes(s.id)) return false;               // still Airtable-linked
+          if (CLIENT_HIDE_CATEGORIES.includes(s.category)) return false; // dev / power-user tooling
+          if (OWNER_ONLY_IDS.includes(s.id)) return false;               // Airtable-linked / dupes / plumbing
           const need = CATEGORY_FEATURE[s.category];
           if (need && !feats.has(need)) return false;                    // feature the client doesn't have
           return true;
