@@ -861,6 +861,26 @@
         pnl:'finance', wealth:'personal_wealth', 'os-team':'team', sitemap:'dod_queue',
         'content-machine':'content_machine',
       };
+      // PAGE_REGISTRY id → the Supabase app route (clean path). The registry's own
+      // `standalone` URLs point at the Airtable version (index.html#…, follow-up.html);
+      // in the client app the links must open the Supabase pages instead.
+      const REG_ROUTE = {
+        overview:'/dashboard', 'os-strategy':'/strategy', 'os-bplan':'/plan-builder',
+        'ai-brain':'/ai-brain', tasks:'/tasks', operations:'/operations', comms:'/comms',
+        systemisation:'/systemisation', skills:'/skills', money:'/money', fintable:'/accounts',
+        pnl:'/pnl', wealth:'/wealth', 'os-team':'/team', sitemap:'/sitemap',
+        'content-machine':'/content-machine',
+      };
+      // The "Open" cell renders an in-app switchTab link that does nothing in the
+      // client iframe — repoint it at the Supabase route (navigating the whole app).
+      // Re-applied after every render (git-sync refresh re-renders the table).
+      function rewriteOpenLinks(){
+        document.querySelectorAll('#sitemapTableBody a[onclick^="switchTab("]').forEach(a => {
+          const m = /switchTab\('([^']+)'\)/.exec(a.getAttribute('onclick') || '');
+          const route = m && REG_ROUTE[m[1]];
+          if (route) { a.setAttribute('href', route); a.setAttribute('target', '_top'); a.removeAttribute('onclick'); }
+        });
+      }
       async function enabledModules(){
         const en = new Set([...BASE, ...OPTOUT]);
         try {
@@ -880,7 +900,15 @@
           if (typeof PAGE_REGISTRY === 'undefined') return;
           const en = await enabledModules();
           const keep = PAGE_REGISTRY.filter(p => { const m = REG_MODULE[p.id]; return m && en.has(m); });
+          // Point the "Standalone URL" column at the Supabase page, not Airtable.
+          keep.forEach(p => { const r = REG_ROUTE[p.id]; if (r) p.standalone = location.origin + r; });
           PAGE_REGISTRY.length = 0; Array.prototype.push.apply(PAGE_REGISTRY, keep);
+          // Keep the "Open" links repointed even after git-sync re-renders the table.
+          if (typeof renderSiteMap === 'function' && !window.__sbRenderWrapped) {
+            const _render = renderSiteMap;
+            window.renderSiteMap = function(){ const out = _render.apply(this, arguments); rewriteOpenLinks(); return out; };
+            window.__sbRenderWrapped = true;
+          }
           if (typeof renderSiteMap === 'function') renderSiteMap();
         } catch (e) { console.warn('[sitemap-entitlements] filter failed', e); }
         finally { ungate(); }
