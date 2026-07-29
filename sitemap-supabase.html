@@ -9,20 +9,24 @@
          full platform page list flash first. -->
     <style>
       html.sbmap-gate #tab-sitemap{visibility:hidden}
-      /* Client view: a clean "your pages & guides" list — strip the internal
-         dev columns (version numbers, git-sync status) and the maintenance
-         summary/architecture link. Keeps Page, Open and Guide. */
-      #tab-sitemap #sitemapIntegrity,
-      #tab-sitemap .sbmap-dev,
-      #tab-sitemap table thead th:nth-child(1), #tab-sitemap table tbody td:nth-child(1),
-      #tab-sitemap table thead th:nth-child(3), #tab-sitemap table tbody td:nth-child(3),
-      #tab-sitemap table thead th:nth-child(5), #tab-sitemap table tbody td:nth-child(5),
-      #tab-sitemap table thead th:nth-child(7), #tab-sitemap table tbody td:nth-child(7),
-      #tab-sitemap table thead th:nth-child(8), #tab-sitemap table tbody td:nth-child(8),
-      #tab-sitemap table thead th:nth-child(9), #tab-sitemap table tbody td:nth-child(9){display:none}
-      #tab-sitemap table{min-width:0!important}
+      /* Client view (html.sbmap-client): a clean "your pages & guides" list —
+         strip the internal dev columns (version numbers, git-sync status) and the
+         maintenance summary/architecture link. Keeps Page, Open and Guide.
+         The owner (home org) has this class removed and keeps the full view. */
+      html.sbmap-client #tab-sitemap #sitemapIntegrity,
+      html.sbmap-client #tab-sitemap .sbmap-dev,
+      html.sbmap-client #tab-sitemap table thead th:nth-child(1), html.sbmap-client #tab-sitemap table tbody td:nth-child(1),
+      html.sbmap-client #tab-sitemap table thead th:nth-child(3), html.sbmap-client #tab-sitemap table tbody td:nth-child(3),
+      html.sbmap-client #tab-sitemap table thead th:nth-child(5), html.sbmap-client #tab-sitemap table tbody td:nth-child(5),
+      html.sbmap-client #tab-sitemap table thead th:nth-child(7), html.sbmap-client #tab-sitemap table tbody td:nth-child(7),
+      html.sbmap-client #tab-sitemap table thead th:nth-child(8), html.sbmap-client #tab-sitemap table tbody td:nth-child(8),
+      html.sbmap-client #tab-sitemap table thead th:nth-child(9), html.sbmap-client #tab-sitemap table tbody td:nth-child(9){display:none}
+      html.sbmap-client #tab-sitemap table{min-width:0!important}
     </style>
-    <script>document.documentElement.classList.add('sbmap-gate');</script>
+    <!-- Strip by default (client view); the owner (home org) is un-stripped once
+         identity resolves. Both classes are cleared before the panel is revealed,
+         so neither the columns nor the wrong view ever flash. -->
+    <script>document.documentElement.classList.add('sbmap-gate','sbmap-client');</script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -909,9 +913,22 @@
         } catch (e) { /* fail safe — base + opt-out features stay visible */ }
         return en;
       }
+      // The provider/home workspace keeps the full maintenance view (versions,
+      // git-sync). RLS only lets a user read orgs they belong to, so a hit on the
+      // home org name means this is the owner. Fail-safe: on any error stay in the
+      // stripped client view (never leak the dev columns to a client).
+      async function isHomeOrg(){
+        try {
+          const sb = window.sbDash && window.sbDash();
+          if (!sb) return false;
+          const { data, error } = await sb.from('organizations').select('id').eq('name', 'Operations Director Main').limit(1);
+          return !error && !!(data && data.length);
+        } catch (e) { return false; }
+      }
       async function apply(){
         try {
           if (typeof PAGE_REGISTRY === 'undefined') return;
+          if (await isHomeOrg()) document.documentElement.classList.remove('sbmap-client');
           const en = await enabledModules();
           const keep = PAGE_REGISTRY.filter(p => { const m = REG_MODULE[p.id]; return m && en.has(m); });
           // Point the "Standalone URL" column at the Supabase page, not Airtable.
