@@ -27,6 +27,12 @@
     .tip strong { color: var(--text-primary); }
     .card { background: var(--bg-surface); border: 1px solid var(--border-subtle); border-radius: var(--radius-lg); padding: 20px 22px; }
     b, strong { color: var(--text-primary); }
+    figure.shot { margin: 12px 0 4px; }
+    figure.shot img { width: 100%; border: 1px solid var(--border-default); border-radius: var(--radius-md); display: block; }
+    .shot-ph { border: 2px dashed var(--border-default); border-radius: var(--radius-md); background: var(--bg-surface-2, #F4F6F1);
+               color: var(--text-muted); padding: 26px 16px; font-size: var(--fs-sm); text-align: center; }
+    .shot-ph b { color: var(--text-secondary); font-weight: var(--fw-semibold); }
+    figcaption { font-size: var(--fs-xs, 12px); color: var(--text-muted); margin-top: 6px; text-align: center; }
   </style>
 </head>
 <body>
@@ -52,11 +58,21 @@
 
     <h2>How to fill in your plan</h2>
     <ol class="steps">
-      <li>At the top, pick your <strong>business</strong>, the <strong>quarter</strong> (which 3 months) and the <strong>year</strong>.</li>
-      <li>Click <strong>AI Wizard</strong>. A chat opens on the right.</li>
-      <li>Answer its questions in your own words. It may ask you to be more specific — that's normal. It just wants real numbers, dates and names so the plan is clear.</li>
-      <li>When it's finished it fills in the whole plan. Read it through and change anything you like.</li>
-      <li>Click <strong>Save changes</strong>. Done.</li>
+      <li>At the top, pick your <strong>business</strong>, the <strong>quarter</strong> (which 3 months) and the <strong>year</strong>.
+        <figure class="shot"><div class="shot-ph">📷 <b>Screenshot:</b> the Business / Quarter / Year picker across the top of the page</div><figcaption>Choose which plan you're working on.</figcaption></figure>
+      </li>
+      <li>Click <strong>AI Wizard</strong>. A chat opens on the right.
+        <figure class="shot"><div class="shot-ph">📷 <b>Screenshot:</b> the AI Wizard button, top-right of the form</div><figcaption>The coach opens in a panel on the right.</figcaption></figure>
+      </li>
+      <li>Answer its questions in your own words. It may ask you to be more specific — that's normal. It just wants real numbers, dates and names so the plan is clear.
+        <figure class="shot"><div class="shot-ph">📷 <b>Screenshot:</b> the chat panel with a question and a typed answer</div><figcaption>Reply in plain words; the coach may ask you to sharpen it up.</figcaption></figure>
+      </li>
+      <li>When it's finished it fills in the whole plan. Read it through and change anything you like.
+        <figure class="shot"><div class="shot-ph">📷 <b>Screenshot:</b> the filled-in plan form after the wizard finishes</div><figcaption>Every box is filled in for you — tweak anything.</figcaption></figure>
+      </li>
+      <li>Click <strong>Save changes</strong>. Done.
+        <figure class="shot"><div class="shot-ph">📷 <b>Screenshot:</b> the green Save changes button at the bottom</div><figcaption>Your plan is saved.</figcaption></figure>
+      </li>
     </ol>
 
     <div class="tip"><strong>Tip:</strong> A good answer is clear enough that anyone could tell when it's finished — for example "get 10 new customers by 31 March", not "get more customers".</div>
