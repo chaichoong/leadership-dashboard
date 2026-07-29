@@ -50,7 +50,7 @@ Live, taking money, generating leads, and delivering what we sell:
 - [ ] OPUS — Inventory every consumer of the current Airtable PAT (repo, workers, GitHub secrets, HR app chaichoong.github.io/HR, scripts, ~/.config/od) (done when: written list; due 9 Jul) [AT:recO3x3yw9KAcrLjH]
 - [x] KEVIN — Generate a new Airtable PAT + revoke the exposed one (done when: old token dead; due 10 Jul) [AT:recDz1ljafVN1CB45] *(ticked 2026-07-14, synced from Airtable)*
 - [ ] OPUS — Update every PAT consumer + verify each works (done when: all green; due 10 Jul) [AT:rec8BVrJIDAjp6QY7]
-- [ ] ERICAMAE — Change the affiliate admin password + store it outside Slack (done when: new password works; due 9 Jul) [AT:rec0JrMvCKgmsi3lP]
+- [x] ERICAMAE — Change the affiliate admin password + store it outside Slack (done when: new password works; due 9 Jul) [AT:rec0JrMvCKgmsi3lP] *(ticked 2026-07-29, synced from Airtable)*
 - [x] KEVIN — Agree the no-secrets-in-Slack rule + alternative channel at the team meeting (done when: agreed; due 8 Jul) [AT:rec0j7ZPQl91sGRQx] *(ticked 2026-07-07, synced from Airtable)*
 - [x] KEVIN — Rotate PROXY_SERVICE_TOKEN and add it as a GitHub Actions secret (done when: secret exists AND the Worker holds the same new value; due 9 Jul) [AT:recNhmqjkkrJQYGRM] *(done 2026-07-17: rotated to a fresh value, set on the Worker + as a GitHub secret; proven by a dry run — 25 valued, 0 skipped)*
 - [x] KEVIN — Add the env line to .github/workflows/monthly-valuations.yml via GitHub web UI (done when: line merged; due 9 Jul) [AT:recd4w48QR3HLhJp6] *(done 2026-07-17, commit 54fdc44)*
@@ -72,14 +72,14 @@ Live, taking money, generating leads, and delivering what we sell:
 - [ ] OPUS — Retrofit tenant_id + RLS to every existing table (done when: all tables pass policy audit; due 18 Jul) [AT:reccaeDbqNH68lEE5]
 - [ ] OPUS — entities table per D1 (done when: migration applied; due 18 Jul) [AT:recu5PBEpdGlC07M0]
 - [~] MICA — Finance page set onto the shell (Accounts + P&L landed 7 Jul; transactions + cashflow remain) [AT:recFxlJnVTFLIJV8C] (done when: pages load real data on Vercel; due 15 Jul)
-- [ ] MICA — Tasks & Projects write-path cutover behind a flag (done when: task created on Vercel persists in Supabase; due 21 Jul) [AT:recu6haLe3QZNbQ70]
+- [x] MICA — Tasks & Projects write-path cutover behind a flag (done when: task created on Vercel persists in Supabase; due 21 Jul) [AT:recu6haLe3QZNbQ70] *(ticked 2026-07-29, synced from Airtable)*
 - [ ] OPUS — Parity check script: row counts + spot fields per migrated table (done when: first green run; due 21 Jul) [AT:recG8ubbnVjfLLOID]
-- [ ] MICA — Full client's-shoes test pass of the migrated app [AT:recAuoApJczmHgXTG] (done when: bug list or clean report; due 24 Jul)
+- [x] MICA — Full client's-shoes test pass of the migrated app [AT:recAuoApJczmHgXTG] (done when: bug list or clean report; due 24 Jul) *(ticked 2026-07-29, synced from Airtable)*
 - [ ] OPUS — Replace Airtable automations that migrated pages rely on [AT:recXh2jvXq59eGkQM] (done when: no migrated page depends on one; due 24 Jul)
 
 ### De-Kevining (per PRODUCTISATION.md §4)
-- [ ] OPUS — Identity/branding → tenant_config (done when: no Kevin hardcodes in migrated pages; due 22 Jul) [AT:recZyJQRT2I2MCcaV]
-- [ ] OPUS — Team hardcodes → team_members table (done when: 6 arrays → one helper; due 22 Jul) [AT:reczyLcCLX61vkH9i]
+- [x] OPUS — Identity/branding → tenant_config (done when: no Kevin hardcodes in migrated pages; due 22 Jul) [AT:recZyJQRT2I2MCcaV] *(ticked 2026-07-29, synced from Airtable)*
+- [x] OPUS — Team hardcodes → team_members table (done when: 6 arrays → one helper; due 22 Jul) [AT:reczyLcCLX61vkH9i] *(ticked 2026-07-29, synced from Airtable)*
 - [ ] OPUS — Thresholds/targets → tenant_config (done when: budget targets from config; due 22 Jul) [AT:recek4wnLWICG0DFu]
 - [ ] OPUS — Infrastructure URLs → tenant_config (done when: worker/proxy URLs configurable; due 22 Jul) [AT:rec4SPv4gphwEYCjo]
 - [ ] OPUS — Per-tenant mentor prompt per D2 (done when: AI reads tenant prompt; due 23 Jul) [AT:rec8lZPeQ9V1VItBw]
@@ -174,7 +174,7 @@ personal profile keeps Runpreneur in the feed and carries OD in its static secti
 - [ ] KEVIN — (NEW 21 Jul) Register the remaining assistants in Systemisation so the fleet is visible and countable: Reconciliation, Leadership Dashboard, Objective & Strategy, Tasks & Projects, Inbound Comms, Systemisation, AI Brain, Finance, Wealth, Content Machine (10 of 12; CFV and Prospecting are already registered) — feeds the §5 "10 demo agents" goal (done when: each appears in Systemisation with a disposition and state; due 31 Jul) [AT:-]
 - [ ] KEVIN — (NEW 21 Jul) 90-day content evidence gate: fewer than 3 attended calls from content means dropping to 2 posts a week on maintenance and returning the effort to outbound (done when: decision recorded in the Changelog; due 3 Nov) [AT:-]
 
-- [ ] ERICAMAE — Comparison pages (vs DIY / VA / agency) [AT:reckGG3pb7U5qJYQV] (done when: pages live; due 12 Aug)
+- [x] ERICAMAE — Comparison pages (vs DIY / VA / agency) [AT:reckGG3pb7U5qJYQV] (done when: pages live; due 12 Aug) *(ticked 2026-07-29, synced from Airtable)*
 - [ ] ERICAMAE — Retargeting across the funnel [AT:recQnZxHECFiumZwn] (done when: pixels + audiences live; due 12 Aug)
 
 ## 8. Sales & conversion (Ch5 Rocket Demo)
@@ -288,3 +288,4 @@ personal profile keeps Runpreneur in the feed and carries OD in its static secti
 | 2026-07-21 | Kevin, in-session (same session, agent inventory) | **The agent fleet was audited for content evidence, and found DEAD.** Kevin supplied his list of 12 assistants; each was verified against the code. Result recorded in `docs/content-engine-playbook.md` §4a as the only approved source list for Product and Proof posts: **2 autonomous agents** (CFV credit control, `state: testing`, 81 actions logged 6-16 Jul; Prospecting), **7 real AI assistants** (Systemisation is the most AI-heavy module in the platform at 25 call sites, then Inbound Comms at 13, Tasks & Projects, Objective & Strategy, Leadership Dashboard, Finance, Content Machine), and **3 engines that are not AI at all** and must never be described as such (Reconciliation, Wealth, AI Brain). Two Kevin decisions: content calls them what they are, agents vs assistants, because ten of twelve only act when invoked and saying so makes the 90% north star a journey rather than a claim; and the **process-to-agent pipeline becomes the spine of the weekly Method slot** as the real differentiator. **Blocker found: every agent has been dead since 16 Jul because the Anthropic API account ran out of credit** (`proxy 400: "Your credit balance is too low"`, 3 failures in Agent Activity). Also found: the prospecting agent is registered with no allowed tables so its 16 Jul run did nothing, and 68 of 70 CFV proposals were never actioned, meaning there is agent output but no outcome to report. 4 tasks added. |
 | 2026-07-23 | Nightly sync (scripts/sync-master-plan.py) | ticked 1 from Airtable completions. |
 | 2026-07-25 | Nightly sync (scripts/sync-master-plan.py) | ticked 1 from Airtable completions. |
+| 2026-07-29 | Nightly sync (scripts/sync-master-plan.py) | ticked 6 from Airtable completions. |
