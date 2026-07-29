@@ -877,7 +877,7 @@
         'ai-brain':'ai_assistant', tasks:'tasks', operations:'property', comms:'inbound_comms',
         systemisation:'systemisation', skills:'systemisation', money:'finance', fintable:'finance',
         pnl:'finance', wealth:'personal_wealth', 'os-team':'team', sitemap:'dod_queue',
-        'content-machine':'content_machine',
+        'content-machine':'content_machine', crm:'crm',
       };
       // PAGE_REGISTRY id → the Supabase app route (clean path). The registry's own
       // `standalone` URLs point at the Airtable version (index.html#…, follow-up.html);
@@ -887,7 +887,7 @@
         'ai-brain':'/ai-brain', tasks:'/tasks', operations:'/operations', comms:'/comms',
         systemisation:'/systemisation', skills:'/skills', money:'/money', fintable:'/accounts',
         pnl:'/pnl', wealth:'/wealth', 'os-team':'/team', sitemap:'/sitemap',
-        'content-machine':'/content-machine',
+        'content-machine':'/content-machine', crm:'/crm',
       };
       // PAGE_REGISTRY id → the client-facing guide (plain-language, 13-yr-old
       // reading level). Clients see these instead of the Airtable-oriented SOPs;
@@ -895,6 +895,7 @@
       const REG_SOP = {
         'os-strategy': 'guides/strategy.html',
         tasks: 'guides/tasks.html',
+        crm: 'crm-guide.html',
       };
       // The "Open" cell renders an in-app switchTab link that does nothing in the
       // client iframe — repoint it at the Supabase route (navigating the whole app).
