@@ -1,0 +1,64 @@
+# Branch snapshot before tidy-up, 2026-07-29
+# Restore any branch with: git branch <name> <sha>
+claude/angry-hamilton-bef0a7 c3f096912ecf0d2b91037eb2f8fb5269ee1eb9c6 2026-07-02
+feature/agentic-extraction 7ec5ca2ecce3ca78806bfc20d2d11df2983bc39e 2026-06-24
+feature/ai-brain-module 64cb1ecc22e5b7dd8f16521a1ac91e20d9213010 2026-06-30
+feature/ceo-brief 014640160bee387847adcfe0f0016e4e0968b8d8 2026-07-28
+feature/disposition-fork 99ad16020e449ca6df5cda447222e52bf99e9770 2026-06-30
+feature/inbound-comms-task-sync 3db615d51408157b6c74a5c3e72e24f84386e846 2026-05-27
+feature/marketing-content-machine 3f0d10c2eebdb83ef926736d1206e384e5891a60 2026-06-22
+feature/meetings 00614658c321319be5ca68ace8f7130d5964db4e 2026-06-17
+feature/money-confidence-system 8a8ebd54e89c59795faf4303642fb566e4767b9a 2026-06-25
+feature/money-groups a71cbd6a5cebeb21e78e56b974466398b8eeadae 2026-07-20
+feature/platform-blueprint d6b5da0e3da83a94393146a7db7aa90404908ab9 2026-06-29
+feature/rent-chase-queue 4e12bc10578436f029dc8f72931fb6768b58ef6e 2026-07-01
+feature/wealth-cashflow-reorder 8ecf4397f5e2396e3ac76f861f758da0e3ed3371 2026-06-30
+fix/ai-model-single-source 358a0775a89dc56f1ab96a295075d7aa18a9c454 2026-07-16
+fix/app-respect-tenancy-end-date 6483b96d0d936d9d8d0f3bb3a16bfd47f48e4b33 2026-07-09
+fix/bucket-ux fe3146e3682289e4263be3673cb90402b5f65b05 2026-06-30
+fix/launch-readiness-audit 346ea36fb995225d46684594fd3dc2ea2ead64d4 2026-07-02
+fix/strategy-new-quarter-start ef7ca9caa7d9f9fb28280aee5c72eb4c1d0bb533 2026-07-16
+fix/systemisation-batch 8f50b8a0e5e7c2cf946606864858aae6a2a5c89a 2026-07-07
+main e22ca4fae4adab951551dd775827ed48047b91f9 2026-07-29
+# --- remotes ---
+origin f19dfc69b1a9d7fa3ed58a05400f9324778cb304
+origin/claude/angry-hamilton-bef0a7 c3f096912ecf0d2b91037eb2f8fb5269ee1eb9c6
+origin/claude/charming-cartwright-53d269 afc6cbc20bbe47b76366284e84b3cfdd8f93d21b
+origin/claude/condescending-shtern-5e7fb1 1f481d88b02097d3084648a06078ebe154ad3cec
+origin/claude/cool-herschel-250810 03394db48c0baa0973606cc960537bc1006f9cb3
+origin/claude/epic-beaver-5f3282 393e4cc82dfa19b7b8b07dc47fdc185ccfdf8b56
+origin/claude/hardcore-franklin-948574 1d791c61feb601f49e136c8cf9b1d63669d0633e
+origin/claude/login-reset-password-74llx6 a481c66a13e1b37bb08c2711d42a9e3c2968740a
+origin/claude/mystifying-bhaskara-c4071a 78b514ade4ab55b3438ace7efd521cb9ffddd505
+origin/claude/reverent-driscoll-4e65eb 3934d0d029b60fcef91a3d156af0838dc66d3957
+origin/claude/supabase-client-template-update-bwdbir 16d2109160ce18f45f4501f673970820fe8df701
+origin/claude/supabase-multi-tenancy-stress-lapohb d9c3fd8a1ee43bc0f879e3a831fc3e8c989a23ec
+origin/claude/wonderful-engelbart-3a64e9 d0f68385337b82bd2dc41095634073d80ece7f2a
+origin/claude/wonderful-fermat-c33b93 6298880a35ec14bf798c46d61be1618555d24d3c
+origin/claude/wonderful-mcclintock-49271c e1f2c77eb0aa4f2c38aa5254f4e99a6c5748092a
+origin/feature/ai-brain-module 64cb1ecc22e5b7dd8f16521a1ac91e20d9213010
+origin/feature/ceo-brief 014640160bee387847adcfe0f0016e4e0968b8d8
+origin/feature/client-offboarding 87e6e63fcaa12f55c20da01b3a221ee80f6b33cb
+origin/feature/dev-blueprint 284182df6ac255af7fce2bc5b39c6e1887d46965
+origin/feature/inbound-comms-task-sync 3db615d51408157b6c74a5c3e72e24f84386e846
+origin/feature/meetings 4d82f8f005ebd5bd63a4d964111055eb14f5df80
+origin/feature/money-confidence-system 8a8ebd54e89c59795faf4303642fb566e4767b9a
+origin/feature/onboarding-answers-view 0faefa31d7b46e3e091391ec399c148379c89754
+origin/feature/onboarding-form c26c374ac4d5c3d5b89a6979b4a9e5e8b8d82db4
+origin/feature/platform-blueprint d6b5da0e3da83a94393146a7db7aa90404908ab9
+origin/feature/rent-chase-queue 71b48de12b93f4c3478fa010e5a2d6376560c3fa
+origin/feature/resend-invite 4aff4a2ff9a285f3c9d56d3306a742f4d420c427
+origin/feature/sync-invariant-tests a75a09ef98666aafd60eb9a332669d39ea0aa8fd
+origin/feature/team-polish 2607d80aad6f538b9a2ad783f4bb03f74afacaf5
+origin/feature/wealth-cashflow-reorder 8ecf4397f5e2396e3ac76f861f758da0e3ed3371
+origin/fix/ai-model-single-source 358a0775a89dc56f1ab96a295075d7aa18a9c454
+origin/fix/app-respect-tenancy-end-date 6483b96d0d936d9d8d0f3bb3a16bfd47f48e4b33
+origin/fix/branded-auth-url e1e2c7044f6589cc1fd280c9e40ef7c849a68fae
+origin/fix/bucket-ux fe3146e3682289e4263be3673cb90402b5f65b05
+origin/fix/delete-workspace-no-superuser 066ed497a15c687447c7e377443a5358f34d057d
+origin/fix/launch-readiness-audit 346ea36fb995225d46684594fd3dc2ea2ead64d4
+origin/fix/login-email-prefill f06319e252b18222b996a166545d3eb743e321f1
+origin/fix/maintenance-budget-1000 55f59b94faffba1593769d66658a82d6369ac2ba
+origin/fix/strategy-new-quarter-start ef7ca9caa7d9f9fb28280aee5c72eb4c1d0bb533
+origin/fix/systemisation-batch 8f50b8a0e5e7c2cf946606864858aae6a2a5c89a
+origin/main f19dfc69b1a9d7fa3ed58a05400f9324778cb304
