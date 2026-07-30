@@ -103,8 +103,10 @@
   // Returns { cols, hr } — cols are real columns, hr is the hr_fields sub-object (may be empty/null).
   function fieldsToColumns(tableId, fields) {
     const cfg = M[tableId], out = {}, hr = {};
-    if (cfg.blob) { out.fields = fields || {};
-      if (cfg.memberField && fields && Array.isArray(fields[cfg.memberField])) out.team_member_id = fields[cfg.memberField][0] ?? null;
+    if (cfg.blob) {
+      const clean = {}; for (const k in (fields || {})) if (!DROP.has(k)) clean[k] = fields[k];
+      out.fields = clean;
+      if (cfg.memberField && Array.isArray(clean[cfg.memberField])) out.team_member_id = clean[cfg.memberField][0] ?? null;
       return { cols: out, hr: null }; }
     for (const fid in fields) {
       if (DROP.has(fid)) continue;               // sensitive → never persisted
@@ -155,6 +157,19 @@
     const merged = { ...((data && data.hr_fields) || {}), ...hr };
     await sbc().from('team_members').update({ hr_fields: merged }).eq('id', id);
   }
+  // Blob tables (PR/DOD): a PATCH sends only the changed fields — MERGE into the
+  // existing jsonb (e.g. marking trained sends only DOD.trained; must not wipe the
+  // SOP title/status/video). Returns the row-shaped record for the response.
+  async function patchBlob(tableId, id, partial) {
+    const cfg = M[tableId];
+    const { data } = await sbc().from(cfg.source).select('fields').eq('id', id).single();
+    const merged = { ...((data && data.fields) || {}), ...(partial || {}) };
+    const upd = { fields: merged };
+    if (cfg.memberField && Array.isArray(merged[cfg.memberField])) upd.team_member_id = merged[cfg.memberField][0] ?? null;
+    const { error } = await sbc().from(cfg.write).update(upd).eq('id', id);
+    if (error) throw new Error(error.message);
+    return { id, fields: merged, cellValuesByFieldId: merged };
+  }
 
   const realFetch = window.fetch.bind(window);
   const AT_RE = new RegExp(`https://api\\.airtable\\.com/v0/${BASE}/([^/?]+)(?:/([^/?]+))?`);
@@ -189,6 +204,7 @@
           const b = JSON.parse(init.body || '{}');
           const list = Array.isArray(b.records) ? b.records : [{ id: recId, fields: b.fields || {} }];
           for (const r of list) {
+            if (cfg.blob) { try { await patchBlob(tableId, r.id, r.fields || {}); } catch (e) { return json({ error: { message: e.message } }, 422); } continue; }
             const { cols, hr } = fieldsToColumns(tableId, r.fields || {});
             if (Object.keys(cols).length) { const { error } = await sbc().from(cfg.write).update(cols).eq('id', r.id); if (error) return json({ error: { message: error.message } }, 422); }
             if (hr && Object.keys(hr).length) await mergeHr(r.id, hr);
