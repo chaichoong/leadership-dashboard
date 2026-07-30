@@ -490,8 +490,8 @@
   "tables": 35,
   "records": 19,
   "selectChoices": 11,
-  "generated": "2026-07-29",
+  "generated": "2026-07-30",
   "source": "js/config.js",
-  "note": "Regenerated 2026-07-29 after the CEO Briefs ID migration. All four ID sets match js/config.js exactly and every field/table ID resolves in the 2026-07-29 Airtable schema snapshot. The CEO Briefs table (tblIxbzDSOCI5hqJn) and its 10 fields are now in config.js as TABLES.ceoBriefs / F.ceo*, so the nightly drift monitor covers them; js/ceo-brief.js and money-daily-worker.js both use those IDs."
+  "note": "Verified 2026-07-30: all four ID sets still match js/config.js exactly (413 fields, 35 tables, 19 records, 11 select choices) and every field/table ID resolves in the 2026-07-30 Airtable schema snapshot. No ID content changed since 2026-07-29. CEO Briefs (tblIxbzDSOCI5hqJn) and its 10 fields are covered via TABLES.ceoBriefs / F.ceo*; js/ceo-brief.js and money-daily-worker.js both use those IDs, confirmed this run. Not covered by this map: 106 unique field IDs hardcoded in 12 js/ files outside config.js (all resolve; chronic, see the drift report's rogue-reference section)."
  }
 }
