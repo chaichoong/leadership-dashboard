@@ -24,6 +24,7 @@ const CEO = {
   why:         'fldqooUbDCQ4yNlWQ',
   ignoreToday: 'fldmC5AYRaJdfyFGx',
   boardFlags:  'fldS7ZoGAS7sAJfJq',
+  handedOff:   'fld9PQ10p8V4N8Y0U',
   moneyLight:  'fldBIbjpHlA2QmVbO',
   safeToAct:   'fldQ4JEWYpHpI2KDs',
 };
@@ -39,6 +40,7 @@ const BRIEF_FIXTURES = {
         [CEO.why]: 'First client by 31 August depends on onboarding working.',
         [CEO.ignoreToday]: 'Old invoice filing\nNon-urgent email',
         [CEO.boardFlags]: 'Keller: two of today’s tasks are scatter — refocus.',
+        [CEO.handedOff]: 'worker-writer — draft the warm-20 re-engagement message\nMica — chase the UC verification',
         [CEO.moneyLight]: 'green',
         [CEO.safeToAct]: 1234.56,
       },
@@ -73,6 +75,30 @@ test.describe('CEO Brief tab', () => {
     await expect(panel).toContainText('Yesterday thing');
     // board flag renders escaped
     await expect(panel).toContainText('Keller:');
+  });
+
+  test('shows what was handed off, and to which agent or person', async ({ page }) => {
+    // Added 2026-07-29. The brief's whole job is keeping work OFF Kevin: it routes to a named
+    // AI agent first, then Mica or Ericamae. If the tab silently drops that list, delegated work
+    // looks like it vanished, and the next brief gets trusted a little less.
+    await loadDashboardWithFixtures(page, BRIEF_FIXTURES, 'ceo-brief');
+    await page.evaluate(() => switchTab('ceo-brief'));
+    await page.waitForTimeout(1200);
+
+    const panel = page.locator('#tab-ceo-brief');
+    await expect(panel).toContainText('Not yours today, handed off:');
+    await expect(panel).toContainText('worker-writer — draft the warm-20 re-engagement message');
+    await expect(panel).toContainText('Mica — chase the UC verification');
+    // one line per destination, not one run-on blob
+    await expect(panel.locator('li', { hasText: 'worker-writer' })).toHaveCount(1);
+  });
+
+  test('a brief with nothing handed off omits the section entirely', async ({ page }) => {
+    const noneHanded = { ceoBriefs: [{ ...BRIEF_FIXTURES.ceoBriefs[0], fields: { ...BRIEF_FIXTURES.ceoBriefs[0].fields, [CEO.handedOff]: '' } }] };
+    await loadDashboardWithFixtures(page, noneHanded, 'ceo-brief');
+    await page.evaluate(() => switchTab('ceo-brief'));
+    await page.waitForTimeout(1200);
+    await expect(page.locator('#tab-ceo-brief')).not.toContainText('handed off');
   });
 
   test('empty table shows a friendly state, never a blank tab', async ({ page }) => {

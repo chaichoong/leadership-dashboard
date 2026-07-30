@@ -548,6 +548,7 @@
         ceoWhy:           'fldqooUbDCQ4yNlWQ',  // Why (multilineText)
         ceoIgnoreToday:   'fldmC5AYRaJdfyFGx',  // Ignore Today (multilineText, newline-separated)
         ceoBoardFlags:    'fldS7ZoGAS7sAJfJq',  // Board Flags (multilineText, newline-separated)
+        ceoHandedOff:     'fld9PQ10p8V4N8Y0U',  // Handed Off (multilineText, newline-separated) — work routed off Kevin and to whom
         ceoMoneyLight:    'fldBIbjpHlA2QmVbO',  // Money Light (singleSelect: green | amber | red)
         ceoSafeToAct:     'fldQ4JEWYpHpI2KDs',  // Safe To Act (currency)
         ceoFullBrief:     'fldPkiaWvmYAoyHEl',  // Full Brief (multilineText, raw JSON)

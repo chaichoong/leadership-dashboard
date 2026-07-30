@@ -58,6 +58,7 @@ const F = {
     ceoWhy:         'fldqooUbDCQ4yNlWQ',
     ceoIgnoreToday: 'fldmC5AYRaJdfyFGx',
     ceoBoardFlags:  'fldS7ZoGAS7sAJfJq',
+    ceoHandedOff:   'fld9PQ10p8V4N8Y0U',
     ceoMoneyLight:  'fldBIbjpHlA2QmVbO',
     ceoSafeToAct:   'fldQ4JEWYpHpI2KDs',
     ceoFullBrief:   'fldPkiaWvmYAoyHEl',
@@ -316,7 +317,10 @@ async function gatherHuddle(pat) {
         const oneThing = getField(rec, F.ceoOneThing) || '';
         const flags    = getField(rec, F.ceoBoardFlags) || '';
         if (!oneThing && !flags) return null;
-        return { recordId: rec.id, oneThing, firstStep: getField(rec, F.ceoFirstStep) || '', flags };
+        // What the departments already dispatched at 07:30. Carried through so the 09:00 store
+        // does not overwrite it with the CEO's own shorter list — merged inside callCeo().
+        const handedOff = String(getField(rec, F.ceoHandedOff) || '').split('\n').filter(Boolean);
+        return { recordId: rec.id, oneThing, firstStep: getField(rec, F.ceoFirstStep) || '', flags, handedOff };
     } catch { return null; }
 }
 
@@ -381,7 +385,7 @@ ${huddle.flags}
 Use their ONE THING as today's one thing, unless the money light or a hard deadline makes it
 plainly wrong. If you override them, say so in one line and give the reason. Keep at most two of
 their flags: the two that change what Kevin actually does today.
-` : `
+${huddle.handedOff && huddle.handedOff.length ? `The departments ALREADY dispatched these this morning, and they are added to handed_off automatically. Do NOT list them again:\n${huddle.handedOff.join('\n')}\n` : ''}` : `
 No huddle ran today, so decide the day yourself from the data below.
 `;
     const system = `You are Kevin Brittain's AI CEO — his right hand, running his day so he does not have to.
@@ -389,14 +393,19 @@ Voice: Gino Wickman's Integrator running Gary Keller's ONE-thing rule. Direct, w
 HARD RULES:
 - Write for a 13-year-old reader. No jargon, no acronyms without explanation, no em dashes.
 - Give ONE thing, with a tiny FIRST STEP of about 10 minutes, so starting is easy. Never a list.
-- Kevin is a team member with a wheelhouse: strategy, systemisation, deep focus, founder decisions. NEVER give him admin, chasing, paperwork or phone calls — those route to the team (Mica: operations; Ericamae: marketing) or are named as delegations.
+- Kevin is a team member with a wheelhouse: strategy, systemisation, deep focus, founder decisions. NEVER give him admin, chasing, paperwork or phone calls.
+- DELEGATION, and AI COMES FIRST. Kevin's north star is that AI does up to 90% of repeatable work, so before you hand anything to a person, ask whether AI can do it. Three destinations, in this order:
+  1. AI — a named agent. Real agents that exist today: worker-builder (code, pages, features), worker-writer (copy, outreach, posts, client documents), worker-researcher (finding and verifying facts, prospect and company checks), worker-analyst (numbers, Airtable queries, conversion rates, scorecards), worker-auditor (sweeps, security and compliance checks, page tests, regression checks). Anything repeatable, rule-following, research-shaped or drafting-shaped goes here. Name the agent; never say "AI" or "an agent" vaguely.
+  2. Mica — operations work that genuinely needs a human: suppliers, contractors, tenants, anything physical or relationship-based.
+  3. Ericamae — marketing and outreach work that genuinely needs a human.
+- A job only reaches Kevin if it needs the founder: a decision, an approval, a password or payment or signature, or something physical. If it does not, hand it off and say where it went. Never quietly drop a job: anything you take off him appears in handed_off, written as "destination — the job in plain words".
 - Triage doctrine: genuine urgency first (a real deadline WITH a real consequence — most "urgent" labels fail this test); otherwise project work that advances the QUARTER goals; everything else is ignored, batched or delegated.
 - Max TWO board flags, one line each, only when a lane genuinely triggers: Crabtree (cash/labour), Michalowicz (Profit First discipline), Hormozi (offer/leads), Jenyns (should be a system/agent), Martell (AI should do this, not Kevin), Peters (overwhelm/energy — may pause the plan), Keller (this is scatter, refocus).
 - The money traffic light is provided — respect it. Red or amber changes what today's one thing can be.
 - NEVER treat a marketing email as a deadline. Tasks named "INBOUND: ..." are auto-created from Kevin's inbox and INCLUDE NEWSLETTERS AND PROMOTIONS. A scary subject line ("31st July S21 Deadline", "Action required", a warning emoji) from a newsletter, no-reply, marketing or notifications sender is CONTENT, not a commitment. Before calling anything urgent, ask: is there a named counterparty who is owed something by a date, with a real consequence if it is missed? A supplier chasing money, a court date, a compliance certificate expiring, a client promise: those are real. An industry newsletter warning the whole market about a rule change is not, and never becomes Kevin's one thing. If the task body shows the sender is a newsletter or no-reply address, put it in the ignore list and say it is marketing.
 ${env.PERSONA_CONTEXT ? '\nFOUNDER CONTEXT (private, never echo verbatim). Background on Kevin only. It may contain OLD goals, dates or priorities from when it was written:\n' + env.PERSONA_CONTEXT + '\n' : ''}
 - PRECEDENCE, this overrides everything else: the QUARTER CONTEXT block in the user message is the ONLY authority on targets, priorities and what the critical path is. Where founder context and quarter context disagree about a goal, a date or what Kevin should be working on, quarter context wins and founder context is treated as history. Never quote a critical path or a target that is not in the quarter context block.
-Respond ONLY with JSON: {"one_thing":"...","first_step":"...","why":"...","ignore":["...","..."],"flags":["Persona: ..."],"headline":"one short sentence for the top of the message"}`;
+Respond ONLY with JSON: {"one_thing":"...","first_step":"...","why":"...","ignore":["...","..."],"handed_off":["worker-writer — draft the follow-up email to X"],"flags":["Persona: ..."],"headline":"one short sentence for the top of the message"}`;
     const user = `TODAY: ${todayLondonISO()} (${londonDateLabel()})
 
 MONEY (live, from the Money Confidence engine):
@@ -420,7 +429,7 @@ Write today's brief.`;
     return { system, user };
 }
 
-async function callCeo(env, prompt) {
+async function callCeo(env, prompt, huddle) {
     const res = await env.PROXY.fetch(CLAUDE_PROXY, {
         method: 'POST',
         headers: {
@@ -429,7 +438,9 @@ async function callCeo(env, prompt) {
         },
         body: JSON.stringify({
             model: env.AI_MODEL_DEFAULT,
-            max_tokens: 900,
+            // 900 truncated the JSON once handed_off was added (29 Jul: "CEO returned no JSON"
+            // on every run — the closing brace never arrived). Headroom, not a tight fit.
+            max_tokens: 1500,
             system: prompt.system,
             messages: [{ role: 'user', content: prompt.user }],
         }),
@@ -438,11 +449,16 @@ async function callCeo(env, prompt) {
     const data = await res.json();
     const text = data.content?.[0]?.text || '';
     const json = text.match(/\{[\s\S]*\}/);
-    if (!json) throw new Error('CEO returned no JSON');
+    if (!json) throw new Error('CEO returned no JSON (stop=' + (data.stop_reason || '?') + ', ' + text.length + ' chars): ' + text.slice(-120));
     const b = JSON.parse(json[0]);
     if (!b.one_thing || !b.first_step) throw new Error('CEO JSON missing required fields');
     b.ignore = Array.isArray(b.ignore) ? b.ignore.slice(0, 4) : [];
     b.flags = Array.isArray(b.flags) ? b.flags.slice(0, 2) : [];
+    // handed_off is optional: an older brief, or a genuinely quiet day, has nothing to route.
+    b.handed_off = Array.isArray(b.handed_off) ? b.handed_off.slice(0, 5) : [];
+    // The 07:30 huddle's dispatches lead, then the CEO's own. Deduped, one list, so the Slack
+    // message and the stored record can never disagree about what was taken off Kevin.
+    b.handed_off = [...new Set([...(huddle && huddle.handedOff || []), ...b.handed_off])].slice(0, 8);
     return b;
 }
 
@@ -460,6 +476,7 @@ async function storeBrief(pat, brief, m, tasks, huddle) {
             [F.ceoWhy]:         brief.why || '',
             [F.ceoIgnoreToday]: brief.ignore.join('\n'),
             [F.ceoBoardFlags]:  brief.flags.join('\n'),
+            [F.ceoHandedOff]:   brief.handed_off.join('\n'),
             [F.ceoMoneyLight]:  m.light,
             [F.ceoSafeToAct]:   Number(m.safeToActToday.toFixed(2)),
             [F.ceoFullBrief]:   JSON.stringify(brief),
@@ -536,6 +553,10 @@ function buildBriefBlocks(m, brief) {
     if (brief.ignore.length) {
         blocks.push({ type: 'section', text: { type: 'mrkdwn', text: `*Ignore today:* ${brief.ignore.join(' · ')}` } });
     }
+    if (brief.handed_off.length) {
+        blocks.push({ type: 'section', text: { type: 'mrkdwn',
+            text: `*Not yours today, handed off:*\n${brief.handed_off.map(h => `• ${h}`).join('\n')}` } });
+    }
     for (const f of brief.flags) {
         blocks.push({ type: 'section', text: { type: 'mrkdwn', text: `⚑ ${f}` } });
     }
@@ -557,7 +578,7 @@ async function sendDailyDM(env) {
     // CEO layer — any failure here falls back to the proven money-only DM.
     try {
         const [tasks, calendar, huddle] = await Promise.all([gatherTasks(pat), gatherCalendar(env), gatherHuddle(pat)]);
-        const brief = await callCeo(env, buildCeoPrompt(m, tasks, calendar, env, huddle));
+        const brief = await callCeo(env, buildCeoPrompt(m, tasks, calendar, env, huddle), huddle);
         const fallbackText = `ONE thing: ${brief.one_thing} | Safe to act: ${fmt(m.safeToActToday)} (${LIGHT_LABEL[m.light]})`;
         await slackPost(token, userId, fallbackText, buildBriefBlocks(m, brief));
         try { await storeBrief(pat, brief, m, tasks, huddle); }
@@ -623,7 +644,7 @@ export default {
                 const m = await loadAndCompute(env.AIRTABLE_PAT);
                 const [tasks, calendar] = await Promise.all([gatherTasks(env.AIRTABLE_PAT), gatherCalendar(env)]);
                 const huddle = await gatherHuddle(env.AIRTABLE_PAT);
-                const brief = await callCeo(env, buildCeoPrompt(m, tasks, calendar, env, huddle));
+                const brief = await callCeo(env, buildCeoPrompt(m, tasks, calendar, env, huddle), huddle);
                 return Response.json({ ok: true, brief, money: { safeToActToday: m.safeToActToday, light: m.light }, taskCounts: tasks.counts, calendarConnected: calendar.connected });
             }
             const m = await loadAndCompute(env.AIRTABLE_PAT);
