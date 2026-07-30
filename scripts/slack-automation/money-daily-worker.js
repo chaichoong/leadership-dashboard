@@ -298,6 +298,28 @@ function todayLondonISO() {
 }
 
 // Open tasks, compressed to what a CEO needs for triage. Field NAMES on purpose.
+// Today's huddle digest, written by the LOCAL `ceo-huddle` scheduled task (~07:30 London).
+// A Cloudflare Worker cannot dispatch the department agents, so the huddle runs in Claude Code
+// and hands its result over through Airtable. Returns null when the huddle did not run (Mac
+// asleep, agent error): the brief then generates exactly as it always did, so the 09:00 message
+// never fails to arrive because of this.
+async function gatherHuddle(pat) {
+    try {
+        const today = todayLondonISO();
+        const url = `https://api.airtable.com/v0/${BASE_ID}/${TBL_BRIEFS}`
+            + `?maxRecords=1&filterByFormula=${encodeURIComponent(`DATESTR({Date})='${today}'`)}`;
+        const r = await fetch(url, { headers: { Authorization: `Bearer ${pat}` } });
+        if (!r.ok) return null;
+        const rec = (await r.json()).records?.[0];
+        if (!rec) return null;
+        if (getField(rec, F.ceoFullBrief)) return null;   // worker already ran today
+        const oneThing = getField(rec, F.ceoOneThing) || '';
+        const flags    = getField(rec, F.ceoBoardFlags) || '';
+        if (!oneThing && !flags) return null;
+        return { recordId: rec.id, oneThing, firstStep: getField(rec, F.ceoFirstStep) || '', flags };
+    } catch { return null; }
+}
+
 async function gatherTasks(pat) {
     const rows = await airtableFetch(pat, TBL_TASKS, {
         filterByFormula: `AND({Task Name}!='',NOT({Status}='Completed'),NOT({Status}='Cancelled'))`,
@@ -346,7 +368,22 @@ async function gatherCalendar(env) {
     }
 }
 
-function buildCeoPrompt(m, tasks, calendar, env) {
+function buildCeoPrompt(m, tasks, calendar, env, huddle) {
+    // When the departments have already huddled, their conclusion LEADS. The CEO synthesises and
+    // formats it. It does not re-decide the day from scratch and quietly overrule eleven heads.
+    const huddleBlock = huddle ? `
+DEPARTMENT HUDDLE, HELD 07:30 TODAY — your board's own conclusion. Lead with it.
+Their ONE THING: ${huddle.oneThing}
+Their first step: ${huddle.firstStep}
+Their flags:
+${huddle.flags}
+
+Use their ONE THING as today's one thing, unless the money light or a hard deadline makes it
+plainly wrong. If you override them, say so in one line and give the reason. Keep at most two of
+their flags: the two that change what Kevin actually does today.
+` : `
+No huddle ran today, so decide the day yourself from the data below.
+`;
     const system = `You are Kevin Brittain's AI CEO — his right hand, running his day so he does not have to.
 Voice: Gino Wickman's Integrator running Gary Keller's ONE-thing rule. Direct, warm, spartan, UK English.
 HARD RULES:
@@ -364,7 +401,7 @@ MONEY (live, from the Money Confidence engine):
 Safe to act today: ${fmt(m.safeToActToday)} — light ${m.light.toUpperCase()}. ${m.headline}
 
 QUARTER CONTEXT (the goals today must serve):
-${env.QUARTER_CONTEXT || 'Q3 2026 ends 30 September. Theme: revenue for Operations Director. First paying client by 31 Aug; 3 clients by 30 Sep. Critical path: finish Supabase migration, test every page, test onboarding end to end, then open outreach. Property: protect cash flow; year-end target £14,000/month operating cushion.'}
+${env.QUARTER_CONTEXT || 'Q3 2026 ends 30 September. Theme: revenue for Operations Director. Targets reset 29 Jul 2026: 1 paying client by 30 Sep; 5 clients and about GBP2,000/month recurring by 31 Dec; GBP5,000/month by 30 Jun 2027. NOTHING gates outreach — build work runs in parallel and never blocks a prospect contact. The plan is 11 chunky tasks. Property: protect cash flow; year-end target £14,000/month operating cushion.'}
 
 CALENDAR TODAY: ${calendar.connected ? '\n' + calendar.today : 'not connected yet'}
 
@@ -376,6 +413,7 @@ ${tasks.dueTodayList || '(none)'}
 KEVIN'S OPEN TASKS (top):
 ${tasks.kevinList || '(none)'}
 
+${huddleBlock}
 Write today's brief.`;
     return { system, user };
 }
@@ -406,7 +444,7 @@ async function callCeo(env, prompt) {
     return b;
 }
 
-async function storeBrief(pat, brief, m, tasks) {
+async function storeBrief(pat, brief, m, tasks, huddle) {
     // Field IDs, not names — see the F.ceo* block. typecast is deliberately OFF:
     // with it on, a Money Light value that stopped matching the three choices
     // (green | amber | red) would quietly create a NEW choice instead of failing.
@@ -426,10 +464,15 @@ async function storeBrief(pat, brief, m, tasks) {
             [F.ceoSourceStats]: JSON.stringify(tasks.counts),
         } }],
     };
+    // Upsert. The 07:30 huddle already created today's record; a second POST would give Kevin
+    // two briefs for one day and break the CEO Brief tab's read of the latest record.
+    const usePatch = Boolean(huddle && huddle.recordId);
     const r = await fetch(`https://api.airtable.com/v0/${BASE_ID}/${TBL_BRIEFS}`, {
-        method: 'POST',
+        method: usePatch ? 'PATCH' : 'POST',
         headers: { Authorization: `Bearer ${pat}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
+        body: usePatch
+            ? JSON.stringify({ records: [{ id: huddle.recordId, fields: body.records[0].fields }] })
+            : JSON.stringify(body),
     });
     if (!r.ok) throw new Error('Brief store failed ' + r.status);
 }
@@ -511,11 +554,11 @@ async function sendDailyDM(env) {
 
     // CEO layer — any failure here falls back to the proven money-only DM.
     try {
-        const [tasks, calendar] = await Promise.all([gatherTasks(pat), gatherCalendar(env)]);
-        const brief = await callCeo(env, buildCeoPrompt(m, tasks, calendar, env));
+        const [tasks, calendar, huddle] = await Promise.all([gatherTasks(pat), gatherCalendar(env), gatherHuddle(pat)]);
+        const brief = await callCeo(env, buildCeoPrompt(m, tasks, calendar, env, huddle));
         const fallbackText = `ONE thing: ${brief.one_thing} | Safe to act: ${fmt(m.safeToActToday)} (${LIGHT_LABEL[m.light]})`;
         await slackPost(token, userId, fallbackText, buildBriefBlocks(m, brief));
-        try { await storeBrief(pat, brief, m, tasks); }
+        try { await storeBrief(pat, brief, m, tasks, huddle); }
         catch (e) { await alertFailure(env, new Error('Brief sent but NOT stored: ' + e.message)); }
         return m;
     } catch (ceoErr) {
@@ -577,7 +620,8 @@ export default {
             if (url.searchParams.get('mode') === 'brief') {
                 const m = await loadAndCompute(env.AIRTABLE_PAT);
                 const [tasks, calendar] = await Promise.all([gatherTasks(env.AIRTABLE_PAT), gatherCalendar(env)]);
-                const brief = await callCeo(env, buildCeoPrompt(m, tasks, calendar, env));
+                const huddle = await gatherHuddle(env.AIRTABLE_PAT);
+                const brief = await callCeo(env, buildCeoPrompt(m, tasks, calendar, env, huddle));
                 return Response.json({ ok: true, brief, money: { safeToActToday: m.safeToActToday, light: m.light }, taskCounts: tasks.counts, calendarConnected: calendar.connected });
             }
             const m = await loadAndCompute(env.AIRTABLE_PAT);
