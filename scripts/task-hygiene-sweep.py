@@ -266,10 +266,17 @@ def cmd_audit(args):
     businesses, projects = reference_data(token)
 
     items, counts = [], {}
+    non_compliant = 0
     for rec in open_tasks:
         gaps = assess(rec)
         for gap in gaps:
             counts[gap] = counts.get(gap, 0) + 1
+        # 'project' is advisory. Kevin's rule is "IF it is project-based it needs a
+        # project", and most tasks are ordinary operations that belong to none. There is
+        # no field recording "judged, not project-based", so counting it as mandatory
+        # would peg compliance at zero forever. It is still reported and still proposed.
+        if [g for g in gaps if g != "project"]:
+            non_compliant += 1
         if not gaps:
             continue
         items.append({
@@ -293,12 +300,13 @@ def cmd_audit(args):
             },
         })
 
-    clean = len(open_tasks) - len(items)
+    clean = len(open_tasks) - non_compliant
     out = {
         "generatedAt": datetime.now().isoformat(timespec="seconds"),
         "openTasks": len(open_tasks),
         "compliant": clean,
         "compliancePct": round(100 * clean / len(open_tasks), 1),
+        "complianceNote": "'project' is advisory and does not count against the score",
         "gapCounts": counts,
         "reference": {
             "businesses": businesses,
