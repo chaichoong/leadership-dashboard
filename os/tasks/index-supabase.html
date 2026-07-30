@@ -2496,7 +2496,7 @@ function openTaskDrawer(taskId){
       <div class="field-row" style="flex-direction:column;align-items:stretch"><label style="display:flex;align-items:center;gap:8px">Description <button class="btn" style="padding:1px 8px;font-size:10px;text-transform:none;letter-spacing:0;font-weight:500" onclick="toggleDescExpand(this)">Expand</button></label><div class="field-val"><textarea id="drwDescTA" oninput="drwSaveText('${t.id}','description',this.value);updateDescLinks(this.value)" onblur="drwSaveText('${t.id}','description',this.value,true)" placeholder="Describe the task or the end result...">${escHtml(t.description)}</textarea></div>${extractDescLinks(t.description)}</div>
       <div class="field-row" style="flex-direction:column;align-items:stretch"><label>Collaborators</label><div class="field-val" id="drwCollabWrap">${renderCollaboratorsDrawer(t)}</div></div>
       <div class="field-row" style="flex-direction:column;align-items:stretch"><label>Attachments</label><div class="field-val" id="drwAttachWrap">${renderAttachmentsMarkup(t)}</div></div>
-      <div class="field-row"><label>Comments <span id="drwCommentCount-${t.id}" style="display:inline-block;margin-left:6px;padding:1px 8px;border-radius:10px;background:var(--bg-subtle);color:var(--text-secondary);font-size:11px;font-weight:600;font-variant-numeric:tabular-nums">…</span></label><div class="field-val"><button class="btn" onclick="openCommentsModal('${t.id}')" style="padding:4px 12px;font-size:var(--fs-sm);background:var(--accent);color:#fff;border-color:var(--accent)">Add &amp; view comments</button></div></div>
+      <div class="field-row" style="flex-direction:column;align-items:stretch"><label>Comments <span id="drwCommentCount-${t.id}" style="display:inline-block;margin-left:6px;padding:1px 8px;border-radius:10px;background:var(--bg-subtle);color:var(--text-secondary);font-size:11px;font-weight:600;font-variant-numeric:tabular-nums">…</span></label><div class="field-val" id="drwCommentsWrap" data-task-id="${t.id}"><div style="color:var(--text-secondary);font-size:var(--fs-sm);padding:8px 0">Loading comments…</div></div></div>
     </div>
     <div class="drawer-footer">
       <button class="btn" onclick="cancelDrawerEdit('${t.id}')" title="${(typeof window!=='undefined'&&window._draftTaskId===t.id)?'Discard this draft task and close the drawer':'Close the drawer without making changes'}">Cancel</button>
@@ -2505,8 +2505,9 @@ function openTaskDrawer(taskId){
     </div>
   </div>`;
   document.body.appendChild(overlay);
-  // Load the live comment count for the badge next to "Comments"
-  loadCommentCountForDrawer(t.id);
+  // Comments render inline and open expanded — this one fetch fills both
+  // the list and the count badge.
+  loadCommentsIntoDrawer(t.id);
 }
 // Fetch comment count and write it into the drawer's badge. Called on
 // drawer open and after every post / delete so the number stays in
@@ -3058,15 +3059,29 @@ function relTime(iso){
   if(s<86400*7)return Math.floor(s/86400)+'d ago';
   return d.toLocaleDateString('en-GB',{day:'2-digit',month:'short'})+' '+d.toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'});
 }
+// The drawer's comments wrap, but only when it belongs to THIS task.
+// Gating on the element (plus its data-task-id) rather than the
+// drawerTaskId global matters: openTaskDrawer calls closeDrawer(), which
+// nulls drawerTaskId, so that global is not a reliable "is this drawer
+// open" signal. The data-task-id check stops an in-flight fetch for task A
+// rendering into a drawer the user has since reopened on task B.
+function _drawerCommentsWrap(taskId){
+  const w=document.getElementById('drwCommentsWrap');
+  return (w&&w.dataset.taskId===taskId)?w:null;
+}
 async function loadCommentsIntoDrawer(taskId){
+  if(!_drawerCommentsWrap(taskId))return;
   try{
     const list=await fetchComments(taskId);
     _drawerComments[taskId]=list;
-    if(drawerTaskId===taskId)renderCommentsInDrawer(taskId);
+    renderCommentsInDrawer(taskId);
   }catch(e){
     console.warn('load comments failed',e);
-    const w=document.getElementById('drwCommentsWrap');
-    if(w&&drawerTaskId===taskId)w.innerHTML='<div style="color:var(--danger);font-size:var(--fs-sm)">Failed to load comments</div>'+commentComposerHtml(taskId);
+    const w=_drawerCommentsWrap(taskId);
+    if(w)w.innerHTML='<div style="color:var(--danger);font-size:var(--fs-sm)">Failed to load comments</div>'+commentComposerHtml(taskId);
+    // Don't leave the badge stuck on the "…" placeholder when the fetch died.
+    const badge=document.getElementById('drwCommentCount-'+taskId);
+    if(badge){badge.textContent='?';badge.title='Couldn\'t load comment count'}
   }
 }
 function commentComposerHtml(taskId){
@@ -3076,8 +3091,14 @@ function commentComposerHtml(taskId){
   </div>`;
 }
 function renderCommentsInDrawer(taskId){
-  const w=document.getElementById('drwCommentsWrap');if(!w)return;
+  const w=_drawerCommentsWrap(taskId);if(!w)return;
   const list=(_drawerComments[taskId]||[]).slice().sort((a,b)=>new Date(b.createdTime)-new Date(a.createdTime));
+  // The composer is always on screen now, so a re-render must not eat
+  // whatever the user is halfway through typing.
+  const prevInput=document.getElementById('drwCommentInput');
+  const draft=prevInput?prevInput.value:'';
+  const badge=document.getElementById('drwCommentCount-'+taskId);
+  if(badge)_renderCommentCountBadge(badge,list.length);
   const meEmail=currentUser?currentUser.email:'';
   const items=list.map(c=>{
     const parsed=_parseAuthor(c);
@@ -3095,6 +3116,7 @@ function renderCommentsInDrawer(taskId){
     </div>`;
   }).join('')||'<div style="color:var(--text-secondary);font-size:var(--fs-sm);padding:8px 0">No comments yet.</div>';
   w.innerHTML=`<div style="max-height:280px;overflow-y:auto">${items}</div>${commentComposerHtml(taskId)}`;
+  if(draft){const ta=document.getElementById('drwCommentInput');if(ta)ta.value=draft}
 }
 async function submitDrawerComment(taskId){
   const ta=document.getElementById('drwCommentInput');if(!ta)return;
@@ -3104,7 +3126,10 @@ async function submitDrawerComment(taskId){
     const c=await postComment(taskId,text);
     _drawerComments[taskId]=[c,...(_drawerComments[taskId]||[])];
     pushUndo({type:'comment-add',taskId,commentId:c.id,label:'Posted comment'});
-    if(drawerTaskId===taskId)renderCommentsInDrawer(taskId);
+    // Clear before the re-render so the draft-preserving restore in
+    // renderCommentsInDrawer doesn't put the posted text back in the box.
+    ta.value='';
+    renderCommentsInDrawer(taskId); // self-gates on the drawer being open for this task
     // Always refresh the count badge — loadCommentCountForDrawer is a
     // no-op when the badge element isn't present, so dropping the gate
     // closes a class of timing bugs (e.g. a Promise resolving after the
@@ -3131,7 +3156,7 @@ async function doDeleteComment(taskId,commentId){
     await deleteCommentApi(taskId,commentId);
     _drawerComments[taskId]=list.filter(x=>x.id!==commentId);
     pushUndo({type:'comment-delete',taskId,text,label:'Deleted comment'});
-    if(drawerTaskId===taskId)renderCommentsInDrawer(taskId);
+    renderCommentsInDrawer(taskId); // self-gates on the drawer being open for this task
     loadCommentCountForDrawer(taskId);
     toast('Comment deleted');
   }catch(e){
@@ -3492,12 +3517,12 @@ async function doUndo(){
       // Undo = delete the comment we just posted
       await deleteCommentApi(entry.taskId,entry.commentId);
       if(_drawerComments[entry.taskId])_drawerComments[entry.taskId]=_drawerComments[entry.taskId].filter(c=>c.id!==entry.commentId);
-      if(drawerTaskId===entry.taskId)renderCommentsInDrawer(entry.taskId);
+      renderCommentsInDrawer(entry.taskId); // self-gates on the drawer being open for this task
     } else if(entry.type==='comment-delete'){
       // Undo = re-post (new ID, lose original author/timestamp)
       const c=await postComment(entry.taskId,entry.text||'');
       _drawerComments[entry.taskId]=[c,...(_drawerComments[entry.taskId]||[])];
-      if(drawerTaskId===entry.taskId)renderCommentsInDrawer(entry.taskId);
+      renderCommentsInDrawer(entry.taskId); // self-gates on the drawer being open for this task
       toast('Re-posted (new timestamp/author)');
     } else if(entry.type==='multi-patch'){
       const task=allTasks.find(t=>t.id===entry.taskId);
