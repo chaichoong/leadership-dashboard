@@ -1454,7 +1454,7 @@ function closeAllOverlays(){
   try{
     const drawer=document.getElementById('drawerOverlay');if(drawer)drawer.remove();
     drawerTaskId=null;
-    ['autoModal','drillModal','commentsModal','createTaskModal','createProjModal','deleteConfirmModal'].forEach(id=>{
+    ['autoModal','drillModal','createTaskModal','createProjModal','deleteConfirmModal'].forEach(id=>{
       const el=document.getElementById(id);if(el)el.remove();
     });
   }catch(e){console.warn('closeAllOverlays failed',e)}
@@ -2402,13 +2402,15 @@ function openDrillDownTaskDetail(taskId){
     <div class="field-row"><label>Status</label><div class="field-val"><select onchange="updateTaskField('${t.id}','status',this.value);renderAll()">${STATUS_OPTIONS.map(s=>`<option value="${s}" ${t.status===s?'selected':''}>${s}</option>`).join('')}</select></div></div>
     <div class="field-row"><label>Business</label><div class="field-val"><select id="drwBusinessSel" onchange="updateTaskField('${t.id}','business',this.value);renderAll()"><option value="">-</option>${BUSINESS_OPTIONS.map(b=>`<option value="${b}" ${t.business===b?'selected':''}>${b}</option>`).join('')}</select></div></div>
     <div class="field-row"><label>Project</label><div class="field-val" id="drwProjectWrap">${renderProjectPicker(t)}</div></div>
-    <div class="field-row"><label>Comments</label><div class="field-val"><button class="btn" onclick="openCommentsModal('${t.id}')" style="padding:4px 12px;font-size:var(--fs-sm);background:var(--accent);color:#fff;border-color:var(--accent)">Add &amp; view comments</button></div></div>
+    <div class="field-row" style="flex-direction:column;align-items:stretch"><label>Comments</label><div class="field-val drw-comments-wrap" data-task-id="${t.id}"><div style="color:var(--text-secondary);font-size:var(--fs-sm);padding:8px 0">Loading comments…</div></div></div>
     <div class="modal-actions" style="margin-top:12px;justify-content:flex-start;gap:8px">
       <button class="btn btn-success" onclick="completeTaskFromDrillModal('${t.id}')">Complete</button>
       <button class="btn btn-danger" onclick="deleteTaskFromDrillModal('${t.id}')">Delete</button>
       <button class="btn" style="margin-left:auto" onclick="flushPendingSaves('${t.id}');document.getElementById('drillModal').remove();drawerTaskId=null">Close</button>
     </div>`;
   inner.innerHTML=drawerInnerHtml;
+  // Comments render inline here too, same as the main drawer.
+  loadCommentsIntoDrawer(taskId);
 }
 async function completeTaskFromDrillModal(taskId){
   await updateTaskField(taskId,'status','Completed');
@@ -2496,7 +2498,7 @@ function openTaskDrawer(taskId){
       <div class="field-row" style="flex-direction:column;align-items:stretch"><label style="display:flex;align-items:center;gap:8px">Description <button class="btn" style="padding:1px 8px;font-size:10px;text-transform:none;letter-spacing:0;font-weight:500" onclick="toggleDescExpand(this)">Expand</button></label><div class="field-val"><textarea id="drwDescTA" oninput="drwSaveText('${t.id}','description',this.value);updateDescLinks(this.value)" onblur="drwSaveText('${t.id}','description',this.value,true)" placeholder="Describe the task or the end result...">${escHtml(t.description)}</textarea></div>${extractDescLinks(t.description)}</div>
       <div class="field-row" style="flex-direction:column;align-items:stretch"><label>Collaborators</label><div class="field-val" id="drwCollabWrap">${renderCollaboratorsDrawer(t)}</div></div>
       <div class="field-row" style="flex-direction:column;align-items:stretch"><label>Attachments</label><div class="field-val" id="drwAttachWrap">${renderAttachmentsMarkup(t)}</div></div>
-      <div class="field-row" style="flex-direction:column;align-items:stretch"><label>Comments <span id="drwCommentCount-${t.id}" style="display:inline-block;margin-left:6px;padding:1px 8px;border-radius:10px;background:var(--bg-subtle);color:var(--text-secondary);font-size:11px;font-weight:600;font-variant-numeric:tabular-nums">…</span></label><div class="field-val" id="drwCommentsWrap" data-task-id="${t.id}"><div style="color:var(--text-secondary);font-size:var(--fs-sm);padding:8px 0">Loading comments…</div></div></div>
+      <div class="field-row" style="flex-direction:column;align-items:stretch"><label>Comments <span id="drwCommentCount-${t.id}" style="display:inline-block;margin-left:6px;padding:1px 8px;border-radius:10px;background:var(--bg-subtle);color:var(--text-secondary);font-size:11px;font-weight:600;font-variant-numeric:tabular-nums">…</span></label><div class="field-val drw-comments-wrap" data-task-id="${t.id}"><div style="color:var(--text-secondary);font-size:var(--fs-sm);padding:8px 0">Loading comments…</div></div></div>
     </div>
     <div class="drawer-footer">
       <button class="btn" onclick="cancelDrawerEdit('${t.id}')" title="${(typeof window!=='undefined'&&window._draftTaskId===t.id)?'Discard this draft task and close the drawer':'Close the drawer without making changes'}">Cancel</button>
@@ -2515,7 +2517,7 @@ function openTaskDrawer(taskId){
 // Update the comment-count badge in the drawer. Optimistic-first:
 // reads from the local _drawerComments cache for an instant render,
 // then kicks off a background fetch to reconcile if Airtable disagrees.
-// "Optimistic" because submitDrawerComment / submitModalComment have
+// "Optimistic" because submitDrawerComment has
 // already pushed the new comment into _drawerComments before calling
 // us, so the local count is the truth at the user's screen.
 function _renderCommentCountBadge(badge,n){
@@ -3059,15 +3061,18 @@ function relTime(iso){
   if(s<86400*7)return Math.floor(s/86400)+'d ago';
   return d.toLocaleDateString('en-GB',{day:'2-digit',month:'short'})+' '+d.toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'});
 }
-// The drawer's comments wrap, but only when it belongs to THIS task.
+// The comments wrap for THIS task, on whichever surface is showing it:
+// the task drawer, or the drill-down detail inside the drill modal.
 // Gating on the element (plus its data-task-id) rather than the
 // drawerTaskId global matters: openTaskDrawer calls closeDrawer(), which
-// nulls drawerTaskId, so that global is not a reliable "is this drawer
-// open" signal. The data-task-id check stops an in-flight fetch for task A
-// rendering into a drawer the user has since reopened on task B.
+// nulls drawerTaskId, so that global is not a reliable "is this view open"
+// signal. The data-task-id check stops an in-flight fetch for task A
+// rendering into a view the user has since reopened on task B. If both
+// surfaces show the same task, the last one in the document is the one on
+// top, so that is the one we render into.
 function _drawerCommentsWrap(taskId){
-  const w=document.getElementById('drwCommentsWrap');
-  return (w&&w.dataset.taskId===taskId)?w:null;
+  const all=Array.from(document.querySelectorAll('.drw-comments-wrap')).filter(el=>el.dataset.taskId===taskId);
+  return all.length?all[all.length-1]:null;
 }
 async function loadCommentsIntoDrawer(taskId){
   if(!_drawerCommentsWrap(taskId))return;
@@ -3078,7 +3083,17 @@ async function loadCommentsIntoDrawer(taskId){
   }catch(e){
     console.warn('load comments failed',e);
     const w=_drawerCommentsWrap(taskId);
-    if(w)w.innerHTML='<div style="color:var(--danger);font-size:var(--fs-sm)">Failed to load comments</div>'+commentComposerHtml(taskId);
+    if(w){
+      // Say WHY it failed and offer a retry — a bare "failed" leaves a
+      // non-technical user with nowhere to go.
+      const status=(e&&e.status)?e.status:'?';
+      let hint='Try again in a moment.';
+      if(status===401)hint='Your Airtable token is missing or invalid. Reconnect and try again.';
+      else if(status===403)hint='Your Airtable token lacks the comments permission. Re-create it with comment access.';
+      else if(status===404)hint='This task no longer exists — it may have been deleted.';
+      else if(status>=500)hint='Airtable is having trouble. Try again in a moment.';
+      w.innerHTML=`<div style="color:var(--danger);font-size:var(--fs-sm);padding:8px 0">Couldn't load comments (${escHtml(String(status))}). ${escHtml(hint)} <button class="btn" onclick="loadCommentsIntoDrawer('${taskId}')" style="padding:2px 8px;font-size:11px;margin-left:6px">Retry</button></div>`+commentComposerHtml(taskId);
+    }
     // Don't leave the badge stuck on the "…" placeholder when the fetch died.
     const badge=document.getElementById('drwCommentCount-'+taskId);
     if(badge){badge.textContent='?';badge.title='Couldn\'t load comment count'}
@@ -3086,7 +3101,7 @@ async function loadCommentsIntoDrawer(taskId){
 }
 function commentComposerHtml(taskId){
   return `<div style="margin-top:8px;display:flex;flex-direction:column;gap:6px">
-    <textarea id="drwCommentInput" placeholder="Add a comment..." style="min-height:60px"></textarea>
+    <textarea class="drw-comment-input" placeholder="Add a comment..." style="min-height:60px"></textarea>
     <div style="display:flex;justify-content:flex-end"><button class="btn btn-accent" onclick="submitDrawerComment('${taskId}')" style="padding:4px 12px;font-size:var(--fs-sm)">Post</button></div>
   </div>`;
 }
@@ -3095,7 +3110,7 @@ function renderCommentsInDrawer(taskId){
   const list=(_drawerComments[taskId]||[]).slice().sort((a,b)=>new Date(b.createdTime)-new Date(a.createdTime));
   // The composer is always on screen now, so a re-render must not eat
   // whatever the user is halfway through typing.
-  const prevInput=document.getElementById('drwCommentInput');
+  const prevInput=w.querySelector('.drw-comment-input');
   const draft=prevInput?prevInput.value:'';
   const badge=document.getElementById('drwCommentCount-'+taskId);
   if(badge)_renderCommentCountBadge(badge,list.length);
@@ -3116,10 +3131,11 @@ function renderCommentsInDrawer(taskId){
     </div>`;
   }).join('')||'<div style="color:var(--text-secondary);font-size:var(--fs-sm);padding:8px 0">No comments yet.</div>';
   w.innerHTML=`<div style="max-height:280px;overflow-y:auto">${items}</div>${commentComposerHtml(taskId)}`;
-  if(draft){const ta=document.getElementById('drwCommentInput');if(ta)ta.value=draft}
+  if(draft){const ta=w.querySelector('.drw-comment-input');if(ta)ta.value=draft}
 }
 async function submitDrawerComment(taskId){
-  const ta=document.getElementById('drwCommentInput');if(!ta)return;
+  const wrap=_drawerCommentsWrap(taskId);if(!wrap)return;
+  const ta=wrap.querySelector('.drw-comment-input');if(!ta)return;
   const text=(ta.value||'').trim();if(!text)return;
   ta.disabled=true;
   try{
@@ -3137,6 +3153,7 @@ async function submitDrawerComment(taskId){
     loadCommentCountForDrawer(taskId);
     // Fan-out Slack DM to every collaborator + assignee, skipping the commenter.
     const task=allTasks.find(x=>x.id===taskId);
+    updateCommentCount(taskId,1); // keep the task-list row badges in step
     if(task)notifyCollabsOnComment(task,text);
     toast('Comment posted');
   }catch(e){
@@ -3158,6 +3175,7 @@ async function doDeleteComment(taskId,commentId){
     pushUndo({type:'comment-delete',taskId,text,label:'Deleted comment'});
     renderCommentsInDrawer(taskId); // self-gates on the drawer being open for this task
     loadCommentCountForDrawer(taskId);
+    updateCommentCount(taskId,-1); // keep the task-list row badges in step
     toast('Comment deleted');
   }catch(e){
     console.warn(e);toast('Failed to delete comment',true);
@@ -3248,105 +3266,6 @@ function adjustProjectTaskCounts(oldProjectIds,newProjectIds){
   old.forEach(pid=>{if(!nu.has(pid)){const p=allProjects.find(x=>x.id===pid);if(p)p.totalTasks=Math.max(0,(p.totalTasks||0)-1)}});
   // Projects gaining the task
   nu.forEach(pid=>{if(!old.has(pid)){const p=allProjects.find(x=>x.id===pid);if(p)p.totalTasks=(p.totalTasks||0)+1}});
-}
-
-// ===== COMMENTS MODAL (CFV-style) =====
-let _commentsModalTaskId=null;
-function openCommentsModal(taskId){
-  _commentsModalTaskId=taskId;
-  const task=allTasks.find(t=>t.id===taskId);
-  // Remove other overlays but keep the drawer (comments opens from drawer)
-  ['autoModal','drillModal','commentsModal','createTaskModal','createProjModal','deleteConfirmModal'].forEach(id=>{const el=document.getElementById(id);if(el)el.remove()});
-  const overlay=document.createElement('div');
-  overlay.className='modal-overlay';overlay.id='commentsModal';
-  overlay.onclick=(e)=>{if(e.target===overlay)overlay.remove()};
-  overlay.innerHTML=`<div class="modal" style="max-width:600px">
-    <h2 style="margin-top:0">${escHtml(task?task.name:'Task')} &mdash; Comments</h2>
-    <div id="commentsModalBody" style="max-height:60vh;overflow-y:auto"><div style="color:var(--text-secondary);font-size:var(--fs-sm);padding:12px 0">Loading comments&hellip;</div></div>
-    <div class="modal-actions"><button class="btn" onclick="document.getElementById('commentsModal').remove()">Close</button></div>
-  </div>`;
-  document.body.appendChild(overlay);
-  loadCommentsIntoModal(taskId);
-}
-async function loadCommentsIntoModal(taskId){
-  try{
-    const list=await fetchComments(taskId);
-    _drawerComments[taskId]=list;
-    renderCommentsInModal(taskId);
-  }catch(e){
-    console.error('[Comments] fetch failed',e);
-    const body=document.getElementById('commentsModalBody');
-    if(body){
-      const status=e&&e.status?e.status:'?';
-      let hint='';
-      if(status===403)hint='Your Airtable PAT likely lacks the <code>data.records:read</code> or comments scope. Re-create the token with those scopes.';
-      else if(status===401)hint='PAT is missing or invalid. Re-authenticate.';
-      else if(status===404)hint='Task record not found — it may have been deleted.';
-      else if(status>=500)hint='Airtable is having trouble — try again in a moment.';
-      else hint='Check the console for details.';
-      body.innerHTML=`<div style="color:var(--danger);font-size:var(--fs-base);padding:12px 0">Failed to load comments &mdash; HTTP ${escHtml(String(status))}. ${hint} <button class="btn" onclick="loadCommentsIntoModal('${taskId}')" style="padding:2px 8px;font-size:11px;margin-left:8px">Retry</button></div>`;
-    }
-  }
-}
-function renderCommentsInModal(taskId){
-  const body=document.getElementById('commentsModalBody');if(!body)return;
-  const list=(_drawerComments[taskId]||[]).slice().sort((a,b)=>new Date(b.createdTime)-new Date(a.createdTime));
-  const meEmail=currentUser?currentUser.email:'';
-  const composer=`<div style="margin-bottom:12px;display:flex;flex-direction:column;gap:6px">
-    <textarea id="cmtModalInput" placeholder="Add a comment..." style="min-height:60px"></textarea>
-    <div style="display:flex;justify-content:flex-end"><button class="btn btn-accent" onclick="submitModalComment('${taskId}')" style="padding:4px 12px;font-size:var(--fs-sm)">Post</button></div>
-  </div>`;
-  const items=list.map(c=>{
-    const email=(c.author&&c.author.email)||'';
-    const name=(c.author&&c.author.name)||email||'Unknown';
-    const k=collabKeyForEmail(email);
-    const init=name.split(' ').map(w=>w[0]).join('').slice(0,2);
-    const mine=email&&meEmail&&email.toLowerCase()===meEmail.toLowerCase();
-    return `<div style="display:flex;gap:8px;padding:8px 0;border-bottom:1px solid var(--border-subtle)">
-      <span class="avatar avatar-${k}" style="width:24px;height:24px;font-size:10px;flex-shrink:0">${escHtml(init)}</span>
-      <div style="flex:1;min-width:0">
-        <div style="font-size:11px;color:var(--text-secondary);display:flex;justify-content:space-between;gap:6px"><span><strong style="color:var(--text-primary)">${escHtml(name)}</strong> &middot; ${escHtml(relTime(c.createdTime))}</span>${mine?`<button onclick="confirmDeleteCommentModal('${taskId}','${c.id}')" style="background:none;border:none;color:var(--text-secondary);cursor:pointer;font-size:var(--fs-base);padding:0">&times;</button>`:''}</div>
-        <div style="font-size:var(--fs-base);color:var(--text-primary);white-space:pre-wrap;word-wrap:break-word">${escHtml(c.text||'')}</div>
-      </div>
-    </div>`;
-  }).join('')||'<div style="color:var(--text-secondary);font-size:var(--fs-sm);padding:8px 0">No comments yet.</div>';
-  body.innerHTML=composer+items;
-}
-async function submitModalComment(taskId){
-  const ta=document.getElementById('cmtModalInput');if(!ta)return;
-  const text=(ta.value||'').trim();if(!text)return;
-  ta.disabled=true;
-  try{
-    const c=await postComment(taskId,text);
-    _drawerComments[taskId]=[c,...(_drawerComments[taskId]||[])];
-    pushUndo({type:'comment-add',taskId,commentId:c.id,label:'Posted comment'});
-    renderCommentsInModal(taskId);
-    loadCommentCountForDrawer(taskId);
-    updateCommentCount(taskId,1);
-    // Fan-out Slack DM (modal path uses the same task store as the drawer).
-    const task=allTasks.find(x=>x.id===taskId);
-    if(task)notifyCollabsOnComment(task,text);
-    toast('Comment posted');
-  }catch(e){
-    console.error('[Comments] post failed',e);toast('Failed to post comment',true);
-    ta.disabled=false;
-  }
-}
-function confirmDeleteCommentModal(taskId,commentId){
-  if(!confirm('Delete this comment?'))return;
-  (async()=>{
-    const list=_drawerComments[taskId]||[];
-    const c=list.find(x=>x.id===commentId);const text=c?c.text:'';
-    try{
-      await deleteCommentApi(taskId,commentId);
-      _drawerComments[taskId]=list.filter(x=>x.id!==commentId);
-      pushUndo({type:'comment-delete',taskId,text,label:'Deleted comment'});
-      renderCommentsInModal(taskId);
-      loadCommentCountForDrawer(taskId);
-      updateCommentCount(taskId,-1);
-      toast('Comment deleted');
-    }catch(e){console.error(e);toast('Failed to delete',true)}
-  })();
 }
 
 async function completeTaskFromDrawer(taskId){
