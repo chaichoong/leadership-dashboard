@@ -9,7 +9,7 @@
      before the page script runs; boot seeds _dlr_pat (if empty) + gates on session.
      The "ask your brain" postMessage to the parent shell is untouched. -->
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<script src="ai-brain-shim.js?v=1"></script>
+<script src="ai-brain-shim.js?v=2"></script>
 <script src="ai-brain-boot.js?v=1"></script>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -94,41 +94,35 @@
   </div>
 
   <div class="tabs">
-    <button class="tab active" data-view="setup">Setup</button>
-    <button class="tab" data-view="today">Today</button>
+    <button class="tab active" data-view="today">Today</button>
+    <button class="tab" data-view="setup">Setup</button>
   </div>
 
   <div class="wrap">
 
-    <div id="setup">
+    <div id="setup" class="hidden">
       <div class="card">
-        <h2>Set up your brain</h2>
-        <p class="hint">Do this once. After that it runs quietly in the background and every AI answer gets better.</p>
-        <div class="step"><span class="ic done" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M5 13l4 4L19 7"/></svg></span><div class="body"><div class="t">Connect your storage</div><div class="d">Google Drive, where your files live</div></div><span class="act">Connected</span></div>
-        <div class="step"><span class="ic done" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M5 13l4 4L19 7"/></svg></span><div class="body"><div class="t">Connect your notes</div><div class="d">Apple Notes, dictate into the Brain folder</div></div><span class="act">Connected</span></div>
-        <div class="step"><span class="ic done" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M5 13l4 4L19 7"/></svg></span><div class="body"><div class="t">Connect your meetings</div><div class="d">Zoom, summaries captured after each call</div></div><span class="act">Connected</span></div>
-        <div class="step"><span class="ic todo" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="9"/></svg></span><div class="body"><div class="t">Connect your AI engine</div><div class="d">Your own AI account powers the heavy work</div></div><button class="btn">Connect</button></div>
+        <h2>Your connections</h2>
+        <p class="hint">What your brain is plugged into, checked from last night's runs.</p>
+        <div id="setupConnections"><p class="hint">Loading…</p></div>
       </div>
 
       <div class="card">
         <h2>Your context profile</h2>
         <p class="hint">What the brain knows about you and the business. The more complete, the sharper every answer.</p>
-        <div class="step"><span class="ic done" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M5 13l4 4L19 7"/></svg></span><div class="body"><div class="t">Founder and businesses</div><div class="d">Who you are, what you run</div></div><span class="act">Done</span></div>
-        <div class="step"><span class="ic done" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M5 13l4 4L19 7"/></svg></span><div class="body"><div class="t">People and preferences</div><div class="d">Your team, how you like to work</div></div><span class="act">Done</span></div>
-        <div class="step"><span class="ic todo" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="9"/></svg></span><div class="body"><div class="t">A few details to confirm</div><div class="d">Quick interview, 5 minutes</div></div><button class="btn primary">Continue</button></div>
-        <div class="bar"><span style="width:75%"></span></div>
-        <p class="foot">9 of 12 sections complete.</p>
+        <div class="bar"><span id="profileBar" style="width:0%"></span></div>
+        <p class="foot" id="profileText">Loading…</p>
+        <button class="btn primary" id="profileGo" style="display:none;margin-top:10px;">Finish it on the Today tab</button>
       </div>
 
       <div class="card">
         <h2>Capture lanes and schedule</h2>
-        <p class="hint">How things get in, and when the brain tidies itself.</p>
-        <div class="step"><span class="ic done" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M5 13l4 4L19 7"/></svg></span><div class="body"><div class="t">Capture lanes set</div><div class="d">Notes, documents, post, meetings</div></div><span class="act">On</span></div>
-        <div class="step"><span class="ic done" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M5 13l4 4L19 7"/></svg></span><div class="body"><div class="t">Daily tidy and review</div><div class="d">Runs every night, files and links on its own</div></div><span class="act">On</span></div>
+        <p class="hint">When each part of the brain runs, and whether it ran on time.</p>
+        <div id="setupSchedule"><p class="hint">Loading…</p></div>
       </div>
     </div>
 
-    <div id="today" class="hidden">
+    <div id="today">
       <div class="synbar">
         <span class="sdot" id="syncDot" aria-hidden="true"></span>
         <span id="syncStatus">Loading…</span>
@@ -152,10 +146,11 @@
 
       <div class="card">
         <h2>Feed your brain</h2>
-        <p class="hint">Drop it in. The brain files it and links it to the rest.</p>
-        <div class="row" style="margin-bottom:10px;"><input class="fld" id="note" placeholder="Type or dictate a quick note"><button class="btn primary" onclick="toast('Coming next: drops into your brain inbox for tonight')">Add note</button></div>
-        <div class="row" style="margin-bottom:10px;"><input class="fld" id="yt" placeholder="Paste a YouTube link or transcript"><button class="btn" onclick="toast('Coming next: runs the transcript skill, actions go to Tasks')">Add video</button></div>
-        <div class="row"><input class="fld" id="doc" placeholder="Scan a document into your Drive inbox"><button class="btn" onclick="toast('Coming next: OCR and file into the right cabinet')">Add document</button></div>
+        <p class="hint">Drop it in. The brain files it tonight and links it to the rest.</p>
+        <div class="row" style="margin-bottom:10px;"><input class="fld" id="note" placeholder="Type or dictate a quick note"><button class="btn primary" id="noteBtn">Add note</button></div>
+        <div class="row" style="margin-bottom:10px;"><input class="fld" id="yt" placeholder="Paste a YouTube link"><button class="btn" id="ytBtn">Add video</button></div>
+        <p class="foot" style="margin-top:2px;">Videos are watched and filed overnight. For the full implementation session on one, ask Claude directly.</p>
+        <p class="foot">Documents: scan with the Google Drive app on your phone. They land in your inbox and file themselves at 09:00.</p>
       </div>
 
       <div class="card">
@@ -183,6 +178,15 @@
       .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
       .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
   }
+  // Tell the dashboard shell to recount the sidebar badge. Fired after every
+  // answered question, resolved sensitive item, and data refresh, so the badge
+  // drops in real time instead of waiting for a tab switch or the 15-min timer.
+  function notifyParentBadge(){
+    if (window.parent !== window){
+      window.parent.postMessage({ type: 'od-brain-badge' }, window.location.origin);
+    }
+  }
+
   function fmtDate(iso){
     if (!iso) return '';
     var p = iso.split('-'); if (p.length !== 3) return iso;
@@ -209,12 +213,16 @@
       document.getElementById('captured').innerHTML = '<p class="hint">Your data stays private, behind your login.</p>';
       document.getElementById('queries').innerHTML = '';
       document.getElementById('sensitive').innerHTML = '';
+      var signIn = '<p class="hint">Sign in to the dashboard to see your setup.</p>';
+      document.getElementById('setupConnections').innerHTML = signIn;
+      document.getElementById('setupSchedule').innerHTML = signIn;
+      document.getElementById('profileText').textContent = 'Sign in to the dashboard to see your profile.';
       return;
     }
     var url = 'https://api.airtable.com/v0/' + BASE + '/' + TABLE + '?pageSize=100&cb=' + Date.now();
     fetch(url, { headers: { Authorization: 'Bearer ' + PAT } })
       .then(function(r){ if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
-      .then(function(data){ render(data.records || []); loaded = true; })
+      .then(function(data){ render(data.records || []); loaded = true; notifyParentBadge(); })
       .catch(function(err){
         setSync('Could not sync (' + esc(err.message) + ')', true);
         document.getElementById('captured').innerHTML = '<p class="hint">Your brain refreshes each night. Try Refresh in a moment.</p>';
@@ -247,14 +255,71 @@
         }).join('')
       : '<p class="hint">Nothing filed yet. As you feed your brain, captures show here.</p>';
 
-    // Needs your call — filing questions
+    // Needs your call — filing questions with tap-answers. A tap (or typed
+    // answer) writes back to the feed; the brain applies it tonight.
     var queries = rows.filter(function(f){ return f.Kind === 'query'; });
-    document.getElementById('queries').innerHTML = queries.length
+    var qEl = document.getElementById('queries');
+    qEl.innerHTML = queries.length
       ? queries.map(function(f){
           var link = f.DocLink ? '<a class="btn" href="' + esc(f.DocLink) + '" target="_blank" rel="noopener">Open document</a>' : '';
-          return '<div class="query"><div class="q"><span class="tag">' + esc(f.Category || 'Question') + '</span>' + esc(f.Text) + '</div><div class="answers">' + link + '</div></div>';
+          if (f.Status === 'answered' || f.Answer){
+            return '<div class="query"><div class="q"><span class="tag">' + esc(f.Category || 'Question') + '</span>' + esc(f.Text) + '</div><span class="resolved">Answered: ' + esc(f.Answer || '') + '. Applies tonight.</span></div>';
+          }
+          var opts = (f.Options || '').split('|').map(function(o){ return o.trim(); }).filter(Boolean);
+          var btns = opts.map(function(o){
+            return '<button class="btn" data-answer="' + esc(f._id) + '" data-val="' + esc(o) + '">' + esc(o) + '</button>';
+          }).join('');
+          var free = '<input class="fld" data-free="' + esc(f._id) + '" placeholder="Or tell it in your own words" style="min-width:180px;">' +
+                     '<button class="btn" data-answer="' + esc(f._id) + '" data-from="free">Send</button>';
+          return '<div class="query" data-qid="' + esc(f._id) + '"><div class="q"><span class="tag">' + esc(f.Category || 'Question') + '</span>' + esc(f.Text) + '</div>' +
+                 '<div class="answers">' + btns + link + '</div>' +
+                 '<div class="answers" style="margin-top:8px;">' + free + '</div></div>';
         }).join('')
       : '<p class="hint">Nothing to sort right now. Everything is filed. Questions appear here when the brain is unsure.</p>';
+    qEl.querySelectorAll('[data-answer]').forEach(function(btn){
+      btn.addEventListener('click', function(){
+        var id = btn.getAttribute('data-answer');
+        var val = btn.getAttribute('data-from') === 'free'
+          ? (qEl.querySelector('[data-free="' + id + '"]') || {value:''}).value.trim()
+          : btn.getAttribute('data-val');
+        if (!val) return;
+        var box = qEl.querySelector('.query[data-qid="' + id + '"]');
+        fetch('https://api.airtable.com/v0/' + BASE + '/' + TABLE + '/' + id, {
+          method: 'PATCH',
+          headers: { Authorization: 'Bearer ' + PAT, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ fields: { Answer: val, Status: 'answered' }, typecast: true })
+        }).then(function(r){
+          if (r.ok){
+            box.innerHTML = '<span class="resolved">Answered: ' + esc(val) + '. Your brain learns and applies it tonight.</span>';
+            notifyParentBadge();
+          } else { toast('Could not save just now, try again'); }
+        }).catch(function(){ toast('Could not save just now, try again'); });
+      });
+    });
+
+    // Setup tab — real connection health, schedule last-runs, profile completeness
+    var setupRows = rows.filter(function(f){ return f.Kind === 'setup'; });
+    function stepRow(f){
+      var ok = (f.Value || 0) > 0;
+      var icon = ok
+        ? '<span class="ic done" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M5 13l4 4L19 7"/></svg></span>'
+        : '<span class="ic todo" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="9"/></svg></span>';
+      return '<div class="step">' + icon + '<div class="body"><div class="t">' + esc(f.Item) + '</div><div class="d">' + esc(f.Text || '') + '</div></div><span class="act">' + (ok ? 'Working' : 'Needs attention') + '</span></div>';
+    }
+    var conns = setupRows.filter(function(f){ return f.Category === 'connection'; });
+    var sched = setupRows.filter(function(f){ return f.Category === 'schedule'; });
+    var prof = setupRows.filter(function(f){ return f.Category === 'profile'; })[0];
+    document.getElementById('setupConnections').innerHTML = conns.length
+      ? conns.map(stepRow).join('') : '<p class="hint">No connection data yet. It publishes with tonight’s run.</p>';
+    document.getElementById('setupSchedule').innerHTML = sched.length
+      ? sched.map(stepRow).join('') : '<p class="hint">No schedule data yet. It publishes with tonight’s run.</p>';
+    if (prof){
+      document.getElementById('profileBar').style.width = (prof.Value || 0) + '%';
+      document.getElementById('profileText').textContent = prof.Text || '';
+      document.getElementById('profileGo').style.display = (prof.Value || 0) < 100 ? 'inline-block' : 'none';
+    } else {
+      document.getElementById('profileText').textContent = 'No profile data yet. It publishes with tonight’s run.';
+    }
 
     // Sensitive — pointer + link only. You can view it; the brain never acts on it or shares it.
     var sensitive = rows.filter(function(f){ return f.Kind === 'sensitive' && f.Status !== 'resolved'; });
@@ -276,12 +341,21 @@
           body: JSON.stringify({ fields: { Status: 'resolved' } })
         }).then(function(r){
           box.innerHTML = r.ok ? '<span class="resolved">Acknowledged. Left private, no action taken.</span>' : 'Could not save just now.';
+          if (r.ok) notifyParentBadge();
         }).catch(function(){ box.innerHTML = 'Could not save just now.'; });
       });
     });
   }
 
   document.getElementById('refreshBtn').addEventListener('click', function(){ loadToday(true); });
+
+  // "Finish it on the Today tab" — the pending profile sections sit in the
+  // question queue there; jump straight to it.
+  document.getElementById('profileGo').addEventListener('click', function(){
+    document.querySelector('.tab[data-view="today"]').click();
+    var q = document.getElementById('queries');
+    if (q) q.scrollIntoView({ behavior: 'smooth' });
+  });
 
   // Ask your brain — hand the question to the dashboard's AI assistant, which
   // loads the brain index (published nightly) as context and answers with links.
@@ -300,6 +374,33 @@
   document.getElementById('askBtn').addEventListener('click', askBrain);
   document.getElementById('ask').addEventListener('keydown', function(e){ if (e.key === 'Enter') askBrain(); });
 
+  // Feed your brain — capture to the private inbox table; the nightly pull
+  // moves notes into the brain inbox and queues videos for transcript filing.
+  var INBOX_TABLE = 'tbliR8KkOV4SKNiIZ';
+  function capture(kind, inputId, okMsg){
+    var input = document.getElementById(inputId);
+    var text = input.value.trim();
+    if (!text) return;
+    if (!PAT){ toast('Sign in to the dashboard first'); return; }
+    if (kind === 'video' && !/^https?:\/\/(www\.)?(youtube\.com|youtu\.be)\//.test(text)){
+      toast('Paste a YouTube link'); return;
+    }
+    fetch('https://api.airtable.com/v0/' + BASE + '/' + INBOX_TABLE, {
+      method: 'POST',
+      headers: { Authorization: 'Bearer ' + PAT, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ records: [{ fields: {
+        Text: text, Kind: kind, Submitted: new Date().toISOString(), Status: 'new'
+      } }], typecast: true })
+    }).then(function(r){
+      if (r.ok){ input.value = ''; toast(okMsg); }
+      else { toast('Could not save just now, try again'); }
+    }).catch(function(){ toast('Could not save just now, try again'); });
+  }
+  document.getElementById('noteBtn').addEventListener('click', function(){ capture('note', 'note', 'Captured. Your brain files it tonight.'); });
+  document.getElementById('note').addEventListener('keydown', function(e){ if (e.key === 'Enter') document.getElementById('noteBtn').click(); });
+  document.getElementById('ytBtn').addEventListener('click', function(){ capture('video', 'yt', 'Queued. It watches and files it tonight.'); });
+  document.getElementById('yt').addEventListener('keydown', function(e){ if (e.key === 'Enter') document.getElementById('ytBtn').click(); });
+
   document.querySelectorAll('.tab').forEach(function(t){
     t.addEventListener('click', function(){
       document.querySelectorAll('.tab').forEach(function(x){ x.classList.remove('active'); });
@@ -310,6 +411,9 @@
       if (v === 'today') loadToday(false);
     });
   });
+
+  // Setup is the landing view, so load the feed straight away (renders both tabs).
+  loadToday(false);
 
   var tEl = document.getElementById('toast'); var tT;
   window.toast = function(msg){
