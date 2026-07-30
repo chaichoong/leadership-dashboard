@@ -12,6 +12,12 @@
   const SB_ANON = window.SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InB0a3loemxzdmlqY3d5b3Zncmd2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzYzMzIxNzgsImV4cCI6MjA5MTkwODE3OH0.U5ZdIjw--_UgJlYi75JTjpb2doBTjO4W8LUZPnZzkFU';
   const BASE = 'appnqjDpqDniH3IRl';
   const TABLE = 'tblZ75JgE1wzDP0ps';
+  // The "Feed your brain" capture lanes (Add note / video / document) POST to a
+  // second Airtable table. Route those writes to Supabase so the buttons save
+  // instead of hitting Airtable with the dummy token. Stored name-keyed like the
+  // feed. (Requires migration 0041_ai_brain_inbox.sql; until it runs, the insert
+  // errors and the page shows a friendly "couldn't save" — never a crash.)
+  const INBOX = 'tbliR8KkOV4SKNiIZ';
   let _sb = null;
   function sbc() { if (!_sb) _sb = window.supabase.createClient(SB_URL, SB_ANON, { auth: { persistSession: true, storageKey: '_dlr_sb_app' } }); return _sb; }
   window.sbBrain = sbc;
@@ -37,6 +43,15 @@
     if (error) return json({ error: { message: error.message } }, 422);
     return json({ id, fields: merged });
   }
+  // Airtable batch-create shape: { records: [{ fields: {...} }] } → insert each
+  // row's name-keyed fields blob into ai_brain_inbox. org_id is stamped by the
+  // table's column default (RLS), so the client only sends the fields.
+  async function insertInbox(records) {
+    const rows = (records || []).map(r => ({ fields: r.fields || {} }));
+    const { data, error } = await sbc().from('ai_brain_inbox').insert(rows).select('id, fields');
+    if (error) return json({ error: { message: error.message } }, 422);
+    return json({ records: (data || []).map(r => ({ id: r.id, fields: r.fields || {} })) });
+  }
 
   const realFetch = window.fetch.bind(window);
   const AT_RE = new RegExp(`https://api\\.airtable\\.com/v0/${BASE}/([^/?]+)(?:/([^/?]+))?`);
@@ -51,6 +66,10 @@
         if (method === 'GET')   return json(await readAll());
         if (method === 'PATCH') { const b = JSON.parse(init.body || '{}'); return await patchOne(recId, b.fields || {}); }
         if (method === 'DELETE'){ await sbc().from('ai_brain_today').delete().eq('id', recId); return json({ id: recId, deleted: true }); }
+      }
+      if (m && m[1] === INBOX) {
+        const method = (init.method || 'GET').toUpperCase();
+        if (method === 'POST') { const b = JSON.parse(init.body || '{}'); return await insertInbox(b.records || []); }
       }
     } catch (e) {
       console.error('[brain-shim] error for', urlStr, e);
