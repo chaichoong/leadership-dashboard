@@ -65,8 +65,9 @@ the info@ inbox) and carries the Cunningham and Wickman flags through.
   `recqGluSOjxClVeNB` (empty) — bug 2 above, still deployed at that moment.
 - The stub was then PATCHed with the identical content, so both rows for 31 Jul are complete
   and the CEO Brief tab shows a finished brief whichever row it reads first.
-- **Left for Kevin:** there are two rows dated 2026-07-31 in the CEO Briefs table. Delete
-  `recwW8ZNPB5NHU0pP` when convenient. Nothing is lost — the other row is identical.
+- The spare row `recwW8ZNPB5NHU0pP` was deleted on Kevin's instruction, after confirming all
+  11 fields were byte-identical to the row that survives (`recqGluSOjxClVeNB`). One row per
+  date again, and `ceo-brief-complete` passes.
 
 The huddle's own ONE THING for 31 Jul, overwritten by the patch so the tab matches the Slack
 DM Kevin actually received, is preserved here:
@@ -100,5 +101,13 @@ Back-tested read-only against the real broken state, no bad data written:
 - control population is 3 live weekday rows, so the check is asserting something; an empty
   population reports CONTROL FAILED rather than a silent pass
 
-**Note:** the duplicate row above is still there, so this invariant WILL go red on tomorrow's
-sweep until `recwW8ZNPB5NHU0pP` is deleted. That is the check doing its job, not a fault.
+Passing on live data now that the duplicate is gone, against a control of 3 weekday rows.
+
+## Not chased — worth a look
+
+`recqGluSOjxClVeNB` is dated 2026-07-31 but its Airtable `createdTime` is
+**2026-07-30T12:42Z**, not 07:30 this morning. So the huddle stub for a given day may be
+written the previous lunchtime rather than at 07:30 on the day. That does not affect either
+bug above, and the new invariant does not care, but if the huddle is dating its row a day
+ahead then "today's huddle" and "today's brief" could drift apart. Left alone deliberately:
+it needs the `ceo-huddle` task read, not the worker.
