@@ -228,6 +228,7 @@
   "fldQ4JEWYpHpI2KDs": "ceoSafeToAct",
   "fldPkiaWvmYAoyHEl": "ceoFullBrief",
   "fldVgR25q8bqdub4c": "ceoSourceStats",
+  "fld9PQ10p8V4N8Y0U": "ceoHandedOff",
   "fldLt6uDJ2xKCMlj2": "business",
   "fldzd28sBEghgt0mN": "businessName",
   "fldQl2h3gCxYacE1k": "quarter",
@@ -446,7 +447,7 @@
   "tblIxbzDSOCI5hqJn": "ceoBriefs",
   "tblHiFrzekohQk2lt": "UNNAMED_IN_CONFIG",
   "tblF3tSfEajPQJHoI": "UNNAMED_IN_CONFIG",
-  "tblWtiyQikO2hOzeW": "(comment-only warning ref: ZZ LEGACY Net Worth Statement \u2014 never read)",
+  "tblWtiyQikO2hOzeW": "(comment-only warning ref: ZZ LEGACY Net Worth Statement — never read)",
   "tblco0p2OnlLQVAX7": "UNNAMED_IN_CONFIG",
   "tblHtx8o3zt1Rd8fF": "UNNAMED_IN_CONFIG",
   "tbloIBoYzlF3URiYK": "UNNAMED_IN_CONFIG"
@@ -486,12 +487,12 @@
   "sel43EzvHZXeLZbwC": "costNewInactive"
  },
  "summary": {
-  "fields": 413,
+  "fields": 414,
   "tables": 35,
   "records": 19,
   "selectChoices": 11,
-  "generated": "2026-07-30",
+  "generated": "2026-07-31",
   "source": "js/config.js",
-  "note": "Verified 2026-07-30: all four ID sets still match js/config.js exactly (413 fields, 35 tables, 19 records, 11 select choices) and every field/table ID resolves in the 2026-07-30 Airtable schema snapshot. No ID content changed since 2026-07-29. CEO Briefs (tblIxbzDSOCI5hqJn) and its 10 fields are covered via TABLES.ceoBriefs / F.ceo*; js/ceo-brief.js and money-daily-worker.js both use those IDs, confirmed this run. Not covered by this map: 106 unique field IDs hardcoded in 12 js/ files outside config.js (all resolve; chronic, see the drift report's rogue-reference section)."
+  "note": "Verified 2026-07-31: all four ID sets match js/config.js exactly (414 fields, 35 tables, 19 records, 11 select choices) and every field/table ID resolves in the 2026-07-31 Airtable schema snapshot. Added this run: fld9PQ10p8V4N8Y0U (F.ceoHandedOff, CEO Briefs 'Handed Off', multilineText) — the only schema change since 2026-07-30. It is written by scripts/slack-automation/money-daily-worker.js and read by js/ceo-brief.js, both by ID. Not covered by this map: 106 unique field IDs hardcoded in 12 js/ files outside config.js (all resolve; chronic, see the drift report's rogue-reference section)."
  }
 }
