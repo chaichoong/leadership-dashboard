@@ -34,6 +34,23 @@ function ceoBriefTodayISO() {
     return new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/London' }).format(new Date());
 }
 
+// A brief is written in TWO stages, so "a record exists for today" does not mean
+// "today's brief is ready". The 07:30 department huddle writes the record first
+// with only One Thing, First Step and Board Flags; the 09:00 worker then PATCHes
+// in the money light, safe-to-act figure, why, ignore-today and handed-off.
+//
+// Full Brief is the marker for stage two, and the worker already uses exactly
+// this test on the write side (gatherHuddle: "if (getField(rec, F.ceoFullBrief))
+// return null; // worker already ran today"). The read side uses it too, so both
+// halves of the pipeline agree on what "finished" means.
+//
+// Without this, the 07:30 stub rendered as a finished brief every weekday
+// morning: a dash for the money light, a dash for safe-to-act, no reasoning, and
+// no warning that anything was missing. Found by the drift monitor 2026-07-31.
+function ceoBriefIsComplete(rec) {
+    return Boolean((rec && rec.fields || {})[F.ceoFullBrief]);
+}
+
 function ceoLightBadge(light) {
     const map = {
         green: ['var(--success)', 'var(--success-bg)', 'GREEN'],
@@ -51,14 +68,21 @@ function renderCeoBriefCard(rec, isToday) {
     const handed = String(f[F.ceoHandedOff] || '').split('\n').filter(Boolean);
     const money = f[F.ceoSafeToAct] != null
         ? `£${Number(f[F.ceoSafeToAct]).toLocaleString('en-GB', { minimumFractionDigits: 2 })}` : '—';
+    // Stage one only: show what the 07:30 huddle decided and say plainly that the
+    // money light and the reasoning land at 9am, rather than printing two dashes
+    // and letting the card read as finished.
+    const provisional = !ceoBriefIsComplete(rec);
+    const statusHtml = provisional
+        ? `<span style="font-size:var(--fs-xs);color:var(--text-secondary);background:var(--bg-subtle);padding:2px 10px;border-radius:var(--radius-full)">7:30 huddle · money light and reasoning land at 9am</span>`
+        : `${ceoLightBadge(f[F.ceoMoneyLight])}<span style="font-size:var(--fs-xs);color:var(--text-secondary)">Safe to act: <strong>${escHtml(money)}</strong></span>`;
     return `
     <div style="background:var(--bg-surface);border:1px solid ${isToday ? 'var(--accent)' : 'var(--border-default)'};border-radius:var(--radius-lg);padding:var(--space-5);margin-bottom:var(--space-4);box-shadow:var(--shadow-sm)">
         <div style="display:flex;justify-content:space-between;align-items:center;gap:var(--space-3);flex-wrap:wrap">
-            <div style="font-size:var(--fs-xs);color:var(--text-muted);font-weight:var(--fw-medium)">${escHtml(f[F.ceoDate] || '')}${isToday ? ' · TODAY' : ''}</div>
-            <div style="display:flex;align-items:center;gap:var(--space-2)">${ceoLightBadge(f[F.ceoMoneyLight])}<span style="font-size:var(--fs-xs);color:var(--text-secondary)">Safe to act: <strong>${escHtml(money)}</strong></span></div>
+            <div style="font-size:var(--fs-xs);color:var(--text-muted);font-weight:var(--fw-medium)">${escHtml(f[F.ceoDate] || '')}${isToday ? ' · TODAY' : ''}${provisional ? ' · NOT FINISHED' : ''}</div>
+            <div style="display:flex;align-items:center;gap:var(--space-2)">${statusHtml}</div>
         </div>
         <div style="margin-top:var(--space-3);font-size:var(--fs-lg);font-weight:var(--fw-bold);color:var(--text-primary)">${escHtml(f[F.ceoOneThing] || '')}</div>
-        <div style="margin-top:var(--space-2);padding:var(--space-3);background:var(--accent-soft);border-radius:var(--radius-md);font-size:var(--fs-sm);color:var(--text-primary)"><strong>Start here (10 min):</strong> ${escHtml(f[F.ceoFirstStep] || '')}</div>
+        ${f[F.ceoFirstStep] ? `<div style="margin-top:var(--space-2);padding:var(--space-3);background:var(--accent-soft);border-radius:var(--radius-md);font-size:var(--fs-sm);color:var(--text-primary)"><strong>Start here (10 min):</strong> ${escHtml(f[F.ceoFirstStep])}</div>` : ''}
         ${f[F.ceoWhy] ? `<div style="margin-top:var(--space-3);font-size:var(--fs-sm);color:var(--text-secondary)"><strong>Why this wins:</strong> ${escHtml(f[F.ceoWhy])}</div>` : ''}
         ${handed.length ? `<div style="margin-top:var(--space-3);padding:var(--space-3);background:var(--bg-surface-2);border-radius:var(--radius-md);font-size:var(--fs-sm);color:var(--text-secondary)"><strong style="color:var(--text-primary)">Not yours today, handed off:</strong><ul style="margin:var(--space-1) 0 0 var(--space-5);padding:0">${handed.map(h => `<li>${escHtml(h)}</li>`).join('')}</ul></div>` : ''}
         ${ignore.length ? `<div style="margin-top:var(--space-3);font-size:var(--fs-sm);color:var(--text-muted)"><strong>Ignore today:</strong><ul style="margin:var(--space-1) 0 0 var(--space-5);padding:0">${ignore.map(i => `<li>${escHtml(i)}</li>`).join('')}</ul></div>` : ''}
@@ -75,7 +99,11 @@ function renderCeoBriefContent(el) {
 
     let todayHtml;
     if (todayRec) {
-        todayHtml = renderCeoBriefCard(todayRec, true);
+        // A stage-one record still gets shown — the one thing and the first step are
+        // the most useful part of the brief and hiding them until 9am wastes them —
+        // but it is labelled, and the note below says what is still coming.
+        todayHtml = (ceoBriefIsComplete(todayRec) ? '' : `<div style="background:var(--bg-subtle);border-radius:var(--radius-md);padding:var(--space-3);margin-bottom:var(--space-3);font-size:var(--fs-sm);color:var(--text-secondary)">This is the 7:30 huddle's call, not the finished brief. The money light, the safe-to-act figure and the reasoning arrive at 9am with the Slack DM.</div>`)
+            + renderCeoBriefCard(todayRec, true);
     } else if (isWeekend) {
         todayHtml = `<div style="background:var(--bg-surface);border:1px solid var(--border-default);border-radius:var(--radius-lg);padding:var(--space-5);color:var(--text-secondary);font-size:var(--fs-sm)">No brief today — the CEO writes briefs on weekday mornings at 9am. Enjoy the weekend.</div>`;
     } else {
@@ -141,8 +169,11 @@ function registerCeoBriefSyncBar() {
                     if ([0, 6].includes(now.getDay())) return { status: 'pass', detail: 'Weekend — no brief expected' };
                     const londonHour = Number(new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/London', hour: 'numeric', hour12: false }).format(now));
                     if (londonHour < 10) return { status: 'pass', detail: 'Before 10am — the brief may still be on its way' };
-                    const ok = (ceoBriefRecords || []).some(r => (r.fields || {})[F.ceoDate] === ceoBriefTodayISO());
-                    if (!ok) return { status: 'fail', detail: 'Missing — check the Slack DM; if that is missing too, the morning robot needs attention' };
+                    // The 07:30 huddle leaves a record behind, so "a record exists" is not
+                    // proof the 9am robot ran. Only a finished brief counts as arrived.
+                    const rec = (ceoBriefRecords || []).find(r => (r.fields || {})[F.ceoDate] === ceoBriefTodayISO());
+                    if (!rec) return { status: 'fail', detail: 'Missing — check the Slack DM; if that is missing too, the morning robot needs attention' };
+                    if (!ceoBriefIsComplete(rec)) return { status: 'fail', detail: 'Only the 7:30 huddle landed — the 9am robot did not finish the brief' };
                     return { status: 'pass', detail: 'Arrived and stored' };
                 }
             },
@@ -150,7 +181,12 @@ function registerCeoBriefSyncBar() {
                 name: 'Latest brief is complete', kind: 'sync', run: () => {
                     const recs = ceoBriefRecords || [];
                     if (!recs.length) return { status: 'warn', detail: 'No briefs stored yet — first one lands next weekday 9am' };
-                    const f = recs[0].fields || {};
+                    // Judge the latest FINISHED brief. Checking recs[0] blindly turned this
+                    // red every weekday between 7:30 and 9am, when today's record is a
+                    // huddle stub by design — a check that cries wolf gets ignored.
+                    const latest = recs.find(ceoBriefIsComplete);
+                    if (!latest) return { status: 'warn', detail: 'Only the 7:30 huddle so far — the 9am brief has not landed yet' };
+                    const f = latest.fields || {};
                     const missing = [['One Thing', F.ceoOneThing], ['First Step', F.ceoFirstStep], ['Money Light', F.ceoMoneyLight]]
                         .filter(([, id]) => !f[id]).map(([label]) => label);
                     if (missing.length) return { status: 'fail', detail: 'Latest brief missing: ' + missing.join(', ') };
@@ -161,7 +197,11 @@ function registerCeoBriefSyncBar() {
                 name: 'Morning robot ran within the last week', kind: 'automation', run: () => {
                     const recs = ceoBriefRecords || [];
                     if (!recs.length) return { status: 'warn', detail: 'No briefs yet — new install' };
-                    const latest = (recs[0].fields || {})[F.ceoDate] || '';
+                    // Finished briefs only. A run of 7:30 huddle stubs would otherwise keep
+                    // this green through a week-long outage of the 9am robot.
+                    const newest = recs.find(ceoBriefIsComplete);
+                    if (!newest) return { status: 'fail', detail: 'No finished brief stored — the 9am robot has not completed a run' };
+                    const latest = (newest.fields || {})[F.ceoDate] || '';
                     const age = Math.round((new Date(ceoBriefTodayISO()) - new Date(latest)) / 86400000);
                     if (age > 6) return { status: 'fail', detail: `Latest brief is ${age} days old — the 9am robot has stopped` };
                     return { status: 'pass', detail: `Latest brief: ${latest}` };
