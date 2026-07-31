@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Team Members — Guide</title>
+  <link rel="stylesheet" href="../css/tokens.css?v=1">
+  <style>
+    body { background: var(--bg-app); color: var(--text-primary); margin: 0; line-height: 1.6; }
+    .wrap { max-width: 760px; margin: 0 auto; padding: 32px 22px 80px; }
+    .g-head { display: flex; align-items: center; gap: 14px; margin-bottom: 6px; }
+    .g-head .ico { font-size: 34px; }
+    .g-head h1 { font-size: var(--fs-2xl); margin: 0; }
+    .g-sub { color: var(--text-secondary); font-size: var(--fs-md); margin: 0 0 26px; }
+    .big { background: var(--accent-soft); border: 1px solid var(--border-default); border-radius: var(--radius-lg);
+           padding: 18px 20px; font-size: var(--fs-lg); font-weight: var(--fw-semibold); color: var(--text-primary); margin-bottom: 28px; }
+    h2 { font-size: var(--fs-xl); margin: 30px 0 10px; }
+    ul, ol { margin: 0 0 6px; padding-left: 22px; }
+    li { margin-bottom: 8px; }
+    ol.steps { counter-reset: step; list-style: none; padding-left: 0; }
+    ol.steps > li { counter-increment: step; position: relative; padding: 0 0 12px 44px; }
+    ol.steps > li::before { content: counter(step); position: absolute; left: 0; top: 0; width: 30px; height: 30px;
+      background: var(--accent); color: #fff; border-radius: 50%; display: flex; align-items: center; justify-content: center;
+      font-weight: var(--fw-bold); font-size: var(--fs-sm); }
+    .tip { background: var(--bg-surface); border-left: 4px solid var(--accent-gold); border-radius: var(--radius-md);
+           padding: 12px 16px; margin: 16px 0; color: var(--text-secondary); }
+    .tip strong { color: var(--text-primary); }
+    .card { background: var(--bg-surface); border: 1px solid var(--border-subtle); border-radius: var(--radius-lg); padding: 20px 22px; }
+    b, strong { color: var(--text-primary); }
+    .tabs { list-style: none; padding-left: 0; margin: 0; }
+    .tabs > li { position: relative; padding: 12px 0 12px 40px; border-bottom: 1px solid var(--border-subtle); }
+    .tabs > li:last-child { border-bottom: 0; }
+    .tabs > li .t-ico { position: absolute; left: 4px; top: 12px; font-size: 20px; }
+    .tabs > li b { display: block; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="g-head"><span class="ico">👥</span><h1>Team Members</h1></div>
+    <p class="g-sub">Your guide to this page</p>
+
+    <div class="big">One home for everyone who works with you — their details, roles, training and reviews — so your team stays organised even as it grows.</div>
+
+    <h2>What this page is for</h2>
+    <div class="card">
+      <p>It's your staff record book. Instead of details scattered across notes, phones and spreadsheets, every team member has one tidy profile here: how to reach them, what they do, when they're available, and how they're getting on. It also helps you welcome new starters, keep training up to date, and remember the good work people do.</p>
+    </div>
+
+    <h2>The tabs across the top</h2>
+    <div class="card">
+      <ul class="tabs">
+        <li><span class="t-ico">📇</span><b>Directory</b>A card for every team member. Search by name, role or email, and filter by status (Active, Onboarding, and so on) or by department. Click any card to open that person's full profile.</li>
+        <li><span class="t-ico">🛫</span><b>Onboarding</b>A tracker for people joining (or leaving). It shows where each new starter is up to, so nothing gets missed when someone comes on board.</li>
+        <li><span class="t-ico">🏗️</span><b>Org Chart</b>A picture of who reports to whom. It builds itself from the "manager" set on each person's profile, so you can see the shape of your team at a glance.</li>
+        <li><span class="t-ico">📚</span><b>Training</b>A grid showing who has done which training. Filter by department to spot any gaps at a glance.</li>
+        <li><span class="t-ico">📊</span><b>Reviews</b>Keeps track of performance reviews — who has had one, and who is due. Filter to see just the people who still need one.</li>
+        <li><span class="t-ico">📖</span><b>Handbook</b>A simple team handbook — your shared "how we do things here" in one place everyone can read.</li>
+        <li><span class="t-ico">🏆</span><b>Achievements</b>A log of the good stuff. Record what someone achieved so wins don't get forgotten, and add new ones with the <b>+ Add Achievement</b> button.</li>
+      </ul>
+    </div>
+
+    <h2>What's in a person's profile</h2>
+    <div class="card">
+      <p>Click anyone in the Directory to open their profile. It's organised into clear sections:</p>
+      <ul>
+        <li><strong>Contact</strong> — email, phone and how to reach them.</li>
+        <li><strong>Role &amp; Organisation</strong> — their job title, department and who they report to.</li>
+        <li><strong>HR Details</strong> — the employment basics you need on record.</li>
+        <li><strong>Availability</strong> — the days or hours they usually work.</li>
+        <li><strong>Emergency Contact</strong> — who to call if something happens.</li>
+        <li><strong>Documents</strong> — any files kept for that person.</li>
+        <li><strong>Achievements</strong> — their wins, pulled from the Achievements log.</li>
+        <li><strong>SOPs Assigned</strong> — the step-by-step guides they're responsible for.</li>
+      </ul>
+    </div>
+
+    <h2>How to use it</h2>
+    <ol class="steps">
+      <li>Start in the <strong>Directory</strong>. Use the search box or the filters to find who you're after.</li>
+      <li>Click a person's card to open their <strong>profile</strong>, then fill in or update their details.</li>
+      <li>Set each person's <strong>manager</strong> in their profile — that's what draws the <strong>Org Chart</strong> for you.</li>
+      <li>Use <strong>Onboarding</strong> for new starters, <strong>Training</strong> and <strong>Reviews</strong> to keep everyone on track, and <strong>Achievements</strong> to record the wins.</li>
+    </ol>
+
+    <div class="tip"><strong>Tip:</strong> Fill in a new person's profile properly on day one — especially their role, manager and emergency contact. It takes a couple of minutes and saves a lot of chasing later.</div>
+  </div>
+</body>
+</html>
