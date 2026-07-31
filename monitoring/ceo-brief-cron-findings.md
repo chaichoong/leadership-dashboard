@@ -80,11 +80,25 @@ DM Kevin actually received, is preserved here:
 - `74b0394d-dda5-4966-b140-4661775fa831` — token ceiling + length caps + retry
 - `53a65107-65cf-4159-bc82-024b32b3e45c` — huddle lookup by field ID
 
-## Still worth doing
+## The regression check
 
-- There is no test covering `gatherHuddle`. It returned `null` for two days and nothing
-  noticed, because `null` is also the legitimate "no huddle ran" answer. A silent failure
-  that looks exactly like a normal quiet day is the worst shape a bug can take. A live
-  invariant in `scripts/check-data-invariants.py` — "a weekday CEO Briefs row must have both
-  a One Thing from 07:30 AND a Full Brief by 09:15, and there must be exactly one row per
-  date" — would have caught both bugs on 30 Jul.
+Both bugs returned the shape of a normal morning: `gatherHuddle` returning `null` is also
+what a genuinely quiet day looks like, and an empty `Full Brief` is normal until 09:00. A
+fixture test cannot see either, because both live in the shape of real Airtable data. So the
+check went in as a live invariant, `ceo-brief-complete` in
+`scripts/check-data-invariants.py`, run by the daily `prod-e2e-sweep` at STEP 4.5:
+
+> a past weekday has exactly ONE CEO Briefs row, and that row's `Full Brief` is populated
+
+Only dates strictly before today are asserted on, so a sweep running before 09:00 is not a
+false red, and weekends are skipped because the cron is Mon-Fri.
+
+Back-tested read-only against the real broken state, no bad data written:
+- duplicate branch fires on the two live 31 Jul rows: `('2026-07-31', 'DUPLICATE', 2)`
+- empty-brief branch fires when this morning's stub is replayed in memory with `Full Brief`
+  removed: `('2026-07-31', 'EMPTY FULL BRIEF', 'recqGluSOjxClVeNB')`
+- control population is 3 live weekday rows, so the check is asserting something; an empty
+  population reports CONTROL FAILED rather than a silent pass
+
+**Note:** the duplicate row above is still there, so this invariant WILL go red on tomorrow's
+sweep until `recwW8ZNPB5NHU0pP` is deleted. That is the check doing its job, not a fault.

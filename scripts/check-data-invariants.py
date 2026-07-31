@@ -53,6 +53,7 @@ import urllib.request
 
 BASE_ID = "appnqjDpqDniH3IRl"
 TX = "tbln0gzhCAorFc3zB"  # Transactions
+BRIEFS = "tblIxbzDSOCI5hqJn"  # CEO Briefs
 
 INVARIANTS = [
     {
@@ -155,7 +156,69 @@ def check_reimport_duplicates(pat):
     return violations, control
 
 
+def check_ceo_brief_complete(pat):
+    """Every past weekday CEO brief is finished, and each date appears exactly once.
+
+    Found 2026-07-31. Two bugs hid behind the same shape. `gatherHuddle` in the worker read
+    an Airtable response by field ID without asking for field IDs, so it silently returned
+    "no huddle today" on EVERY run: the 07:30 department huddle's conclusion was binned, and
+    the missing record id sent storeBrief down its POST branch, writing a duplicate row for
+    the day instead of filling in the 07:30 stub. Separately the brief blew past max_tokens
+    and the JSON never closed, so `Full Brief` stayed empty and Kevin got a money-only DM.
+
+    Neither bug raised anything. "No huddle ran" is also what a genuinely quiet day looks
+    like, and an empty `Full Brief` on today's row is normal until 09:00. A failure shaped
+    exactly like a normal morning is why this needs a live check rather than a fixture.
+
+    Only dates STRICTLY BEFORE today are asserted on, so a run before 09:00 is not a false
+    red. Weekends are skipped: the cron is Mon-Fri.
+
+    Returns (violations, control_population).
+    """
+    import datetime
+
+    rows = query(pat, BRIEFS, "IS_AFTER({Date}, DATEADD(TODAY(), -21, 'days'))",
+                 fields=["Date", "One Thing", "Full Brief"], page_size=100)
+    today = datetime.datetime.now(datetime.timezone.utc).date().isoformat()
+
+    by_date = {}
+    control = 0
+    for r in rows:
+        date = str(r["fields"].get("Date") or "")
+        if not date:
+            continue
+        # A weekday in the past is the only population either bug could corrupt.
+        if date >= today or datetime.date.fromisoformat(date).weekday() >= 5:
+            continue
+        control += 1
+        by_date.setdefault(date, []).append(r)
+
+    violations = []
+    for date, recs in sorted(by_date.items()):
+        if len(recs) > 1:
+            violations.append({
+                "date": date,
+                "problem": f"{len(recs)} rows for one date — the 09:00 store POSTed instead of PATCHing the 07:30 stub",
+                "ids": [r["id"] for r in recs],
+            })
+        for r in recs:
+            if not r["fields"].get("Full Brief"):
+                violations.append({
+                    "date": date,
+                    "problem": "Full Brief empty on a past weekday — the 09:00 brief never landed",
+                    "ids": [r["id"]],
+                })
+    return violations, control
+
+
 SCANS = [
+    {
+        "name": "ceo-brief-complete",
+        "asserts": "past weekday => exactly one CEO Briefs row, and its Full Brief is populated",
+        "incident": "Jul 2026 — huddle silently binned for 2 days + duplicate rows + a truncated brief; Kevin got a money-only DM",
+        "control_means": "CEO Briefs rows on past weekdays (the population both bugs corrupt)",
+        "run": check_ceo_brief_complete,
+    },
     {
         "name": "no-reimport-duplicates",
         "asserts": "one bank transaction => one record (not re-imported under a second Plaid account id)",
