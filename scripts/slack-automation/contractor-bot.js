@@ -62,6 +62,17 @@
 //   ATTACHMENTS  — R2 bucket binding (e.g. bucket name "contractor-bot-attachments")
 //   STATE        — KV namespace binding (e.g. namespace "contractor-bot-state")
 
+// AI AGENT APPROVALS (added 31 Jul 2026)
+// ─────────────────────────────────────
+// The approval loop rides in this Worker rather than a new one because the
+// Slack bot token and the Airtable PAT already live here as secrets — a
+// separate deployable would have meant Kevin pasting a credential. The logic
+// is in its own module so the two features stay separable.
+//   Cron  : every minute (wrangler.toml [triggers]) → runApprovalSweep
+//   Manual: POST /approvals/run?key=…   GET /approvals/diag?key=…
+//           guarded by APPROVALS_ADMIN_KEY
+import { runApprovalSweep, approvalsDiag } from './approvals.js';
+
 // ─── CONFIGURATION ────────────────────────────────────────────────────
 
 const PROPERTY_CHANNEL_ID = 'C09EMKREPJL';
@@ -202,8 +213,38 @@ const PENDING_TTL_SECONDS = 600;
 // ─── ENTRY ────────────────────────────────────────────────────────────
 
 export default {
+    // Every minute: post new approvals, read Kevin's reactions, close threads
+    // for anything he decided in the dashboard instead.
+    async scheduled(event, env, ctx) {
+        ctx.waitUntil(
+            runApprovalSweep(env)
+                .then(r => console.log('[approvals]', JSON.stringify(r)))
+                .catch(err => console.error('[approvals] sweep failed:', err && err.stack || err))
+        );
+    },
+
     async fetch(request, env, ctx) {
         const url = new URL(request.url);
+
+        // Approvals admin endpoints. Read-only diag + a manual sweep trigger,
+        // so the loop can be verified without waiting on the cron.
+        if (url.pathname.startsWith('/approvals/')) {
+            const key = url.searchParams.get('key');
+            if (!env.APPROVALS_ADMIN_KEY || key !== env.APPROVALS_ADMIN_KEY) {
+                return new Response('Forbidden', { status: 403 });
+            }
+            if (url.pathname === '/approvals/diag') {
+                return Response.json(await approvalsDiag(env));
+            }
+            if (url.pathname === '/approvals/run') {
+                try {
+                    return Response.json(await runApprovalSweep(env));
+                } catch (err) {
+                    return Response.json({ ok: false, error: String(err && err.message || err) }, { status: 500 });
+                }
+            }
+            return new Response('Not found', { status: 404 });
+        }
 
         // GET /files/<key> → serve attachment from R2 (public; Airtable
         // downloads from this URL when ingesting the attachment).

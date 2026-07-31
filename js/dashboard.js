@@ -1025,6 +1025,69 @@
         } catch (e) { console.warn('Agent KPI load failed:', e); }
     }
 
+    // ── AI workforce approvals ──────────────────────────────────────────
+    // Separate from loadAgentKpi above, which reports the Systemisation
+    // agent runtime. This card is the AI WORKFORCE: how much agent work is
+    // sitting waiting for Kevin, and how accurate each agent has been at
+    // each kind of work. Crossing the bar produces a recommendation only —
+    // the owner moves the gears, accuracy only advises.
+    // The scoring maths and the threshold come from js/agent-accuracy.js — the
+    // same module the Task OS uses, so the card and the AI Agents tab can never
+    // disagree about whether an agent has cleared the bar.
+    async function loadAgentApprovalKpi() {
+        const slot = document.getElementById('agentApprovalCard');
+        if (!slot || !PAT) return;
+        const url = (params) => `https://api.airtable.com/v0/${BASE_ID}/${TABLES.tasks}?returnFieldsByFieldId=true&pageSize=100&${params}`;
+        const flds = [TASK_FIELDS.name, TASK_FIELDS.approvalOutcome, TASK_FIELDS.approvedAt,
+                      TASK_FIELDS.taskType, TASK_FIELDS.sentForApprovalBy, TASK_FIELDS.teamMember]
+            .map(f => `fields%5B%5D=${f}`).join('&');
+        try {
+            const [waitRes, histRes, teamRes] = await Promise.all([
+                fetch(url(`${flds}&filterByFormula=${encodeURIComponent(`{Status}='Approval'`)}`), { headers: { Authorization: `Bearer ${PAT}` } }),
+                // LEN(field&'') rather than != '' — a blank Airtable field is not
+                // reliably unequal to an empty string, and that trap has emptied
+                // a whole query in this base before.
+                fetch(url(`${flds}&filterByFormula=${encodeURIComponent(`LEN({Approval Outcome}&'')>0`)}`), { headers: { Authorization: `Bearer ${PAT}` } }),
+                fetch(`https://api.airtable.com/v0/${BASE_ID}/${TABLES.teamMembers}?returnFieldsByFieldId=true&pageSize=100&fields%5B%5D=${TEAM_MEMBER_FIELDS.name}&filterByFormula=${encodeURIComponent(`{Active}=TRUE()`)}`, { headers: { Authorization: `Bearer ${PAT}` } }),
+            ]);
+            if (!waitRes.ok || !histRes.ok) return;
+            const waiting = (await waitRes.json()).records || [];
+            const history = (await histRes.json()).records || [];
+            const names = {};
+            if (teamRes.ok) ((await teamRes.json()).records || []).forEach(r => { names[r.id] = (r.fields || {})[TEAM_MEMBER_FIELDS.name] || r.id; });
+
+            const linkId = (v) => Array.isArray(v) && v.length ? (typeof v[0] === 'object' ? (v[0].id || '') : String(v[0])) : '';
+            const selName = (v) => !v ? '' : (typeof v === 'string' ? v : (v.name || ''));
+            const decisions = history.map(r => {
+                const f = r.fields || {};
+                return {
+                    agentId: linkId(f[TASK_FIELDS.sentForApprovalBy]) || linkId(f[TASK_FIELDS.teamMember]),
+                    outcome: selName(f[TASK_FIELDS.approvalOutcome]),
+                    taskType: selName(f[TASK_FIELDS.taskType]) || 'Unclassified',
+                    at: f[TASK_FIELDS.approvedAt] || '',
+                };
+            });
+            const rows = AgentAccuracy.computeAgentAccuracy(decisions, names)
+                .map(r => ({ agent: r.agentName, type: r.taskType, total: r.total, accurate: r.accurate, rate: r.rate, ready: r.ready }))
+                .sort((a, c) => c.total - a.total);
+            const recs = rows.filter(r => r.ready);
+
+            const detail = `
+                <div class="od-breakdown-row"><span>Waiting on you now</span><span>${waiting.length}</span></div>
+                <div class="od-breakdown-row"><span>Decisions recorded</span><span>${history.length}</span></div>
+                ${rows.length ? rows.slice(0, 8).map(r => `<div class="od-breakdown-row"><span>${escHtml(r.agent)} · ${escHtml(r.type)}</span><span>${Math.round(r.rate * 100)}% of ${r.total}${r.ready ? ' · <span class="text-green">ready</span>' : ''}</span></div>`).join('')
+                    : '<div class="od-breakdown-row"><span>No decisions recorded yet — scores appear after your first approval.</span></div>'}
+                ${recs.length ? `<div class="od-breakdown-row" style="border-top:1px solid var(--border-default);margin-top:4px;padding-top:4px"><span>${escHtml(recs.map(r => r.agent + ' on ' + r.type).join('; '))} cleared the bar. Your call — nothing has changed.</span></div>` : ''}
+                <div style="margin-top:8px"><button class="od-btn-secondary od-btn-sm" onclick="event.stopPropagation();switchTab('tasks')">Open Tasks &rarr; AI Agents</button></div>`;
+
+            const card = document.getElementById('agentApprovalCard');
+            if (!card) return;
+            card.outerHTML = expandableCard('Agent Approvals', `${waiting.length} waiting`,
+                `${history.length} decided${recs.length ? ` | <span class="text-green">${recs.length} ready for your call</span>` : ''}`,
+                detail, waiting.length > 0 ? 'text-amber' : 'text-green');
+        } catch (e) { console.warn('Agent approval KPI load failed:', e); }
+    }
+
     function renderDashboard(accounts, costs, tenancies, transactions, rentalUnits, tenants) {
         const now = new Date();
         const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
@@ -1456,8 +1519,10 @@
                 </div>
             </div>
             <div id="agentKpiCard"></div>
+            <div id="agentApprovalCard"></div>
         `;
         loadAgentKpi();
+        loadAgentApprovalKpi();
 
         // ── SECTION 5: 31-Day Cash Flow Forecast ──
         // Build UC tenant map: tenant record ID → true if Universal Credit

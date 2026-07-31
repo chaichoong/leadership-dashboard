@@ -21,7 +21,7 @@
     const PAGE_REGISTRY = [
         { id: 'overview',    name: 'Leadership Dashboard',           icon: '📊', pageVer: '2.45', sopFile: 'sop.html',                   sopVer: '2.9', standalone: 'index.html#overview' },
         { id: 'os-strategy', name: 'Objective & Strategy',           icon: '🎯', pageVer: '1.18', sopFile: 'os/strategy/sop.html',       sopVer: '1.0', standalone: 'os/strategy/index.html' },
-        { id: 'tasks',       name: 'Tasks & Projects',   icon: '✅', pageVer: '1.114', sopFile: 'os/tasks/sop.html',             sopVer: '1.1', standalone: 'os/tasks/index.html' },
+        { id: 'tasks',       name: 'Tasks & Projects',   icon: '✅', pageVer: '1.114', sopFile: 'os/tasks/sop.html',             sopVer: '1.2', standalone: 'os/tasks/index.html' },
         { id: 'cfv',        name: 'CFVs',                          icon: '🚨', pageVer: '1.30', sopFile: 'sop-cfvs.html',               sopVer: '1.6', standalone: 'index.html#cfv' },
         { id: 'ceo-brief',  name: 'CEO Brief',                     icon: '☀️', pageVer: '1.0', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#ceo-brief' },
         { id: 'money',      name: 'Money Confidence',              icon: '🧭', pageVer: '1.1', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#money' },
@@ -64,6 +64,7 @@
         tenants:       'tblX4elTuu01gwBYh',
         properties:    'tbl6f0OkAmTC2jbuG',
         tasks:         'tblqB8b22hKBL4PF1',
+        teamMembers:   'tblco0p2OnlLQVAX7', // people AND the 17 AI agents (agents have no Airtable login)
         categories:    'tbleWb8ioptnEwPR8',
         subCategories: 'tblOTdRcPf8AgRz25',
         businesses:    'tblpqkvWJJo8Uu25q',
@@ -128,6 +129,13 @@
         notes:   'fldj3FXk0zPUINO2U',  // Notes (singleLineText)
     };
 
+    // ── Team Member field IDs (Airtable table: Team Members / tblco0p2OnlLQVAX7) ──
+    // The table holds people AND the 17 AI agents. Agents have no Airtable
+    // login, so they carry no Member/email — only this formula name.
+    const TEAM_MEMBER_FIELDS = {
+        name: 'flds7xoRFQhcRTnbB', // formula primary
+    };
+
     // ── Task field IDs (Airtable table: Tasks / tblqB8b22hKBL4PF1) ──
     const TASK_FIELDS = {
         name:        'fldgFjGBw6bTKJFCD',
@@ -145,6 +153,13 @@
         project:      'fldBg0rQy0FrOAkRN',
         business:     'fldLu1Y4GzyWcDoxr',
         recurring:    'fldNhDWBX5gQm2p6b',
+        // ── AI agent approval loop (31 Jul 2026) ──
+        // Agents propose; Kevin decides; the agent then carries the action out.
+        teamMember:      'flduCtmQGpOA4eWaj', // link → Team Members (holds the AI agent)
+        sentForApprovalBy:'fld30Yw8SWYVp049g',// link → Team Members (which agent raised it)
+        approvalOutcome: 'fldrHBSr6qoUfaKuZ', // singleSelect verdict — the input to accuracy scoring
+        approvedAt:      'fldr4Mvf2RzKvhZhi', // dateTime
+        taskType:        'fldZ2moDV2041Sobc', // singleSelect — accuracy is scored per agent PER TASK TYPE
     };
 
     const TASK_TEAM = [

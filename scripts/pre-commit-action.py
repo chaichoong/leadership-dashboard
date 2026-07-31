@@ -31,6 +31,9 @@ FILE_TO_PAGE = {
     'follow-up.html':       'comms',
     'compliance.html':      'compliance',
     'os/tasks/index.html':  'tasks',
+    # Agent accuracy scoring is shared by the Task OS (AI Agents tab) and the
+    # Leadership Dashboard (Agent Approvals card), so a change bumps both.
+    'js/agent-accuracy.js': ['tasks', 'overview'],
     'os/business-plan-builder/index.html': 'os-bplan',
     'os/strategy/index.html': 'os-strategy',
     'os/strategy/strategy.js': 'os-strategy',
@@ -110,7 +113,11 @@ def main():
     pages_to_bump = set()
     for f in changed:
         if f in FILE_TO_PAGE:
-            pages_to_bump.add(FILE_TO_PAGE[f])
+            # A value may be a single page or a list — a shared module (e.g.
+            # js/agent-accuracy.js) feeds more than one page, and a set.add()
+            # on a list would raise "unhashable type" and kill the whole hook.
+            target = FILE_TO_PAGE[f]
+            pages_to_bump.update(target if isinstance(target, list) else [target])
 
     if not pages_to_bump:
         print("No page files changed — nothing to bump.")

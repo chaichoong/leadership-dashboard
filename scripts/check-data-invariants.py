@@ -54,6 +54,7 @@ import urllib.request
 BASE_ID = "appnqjDpqDniH3IRl"
 TX = "tbln0gzhCAorFc3zB"  # Transactions
 BRIEFS = "tblIxbzDSOCI5hqJn"  # CEO Briefs
+TASKS = "tblqB8b22hKBL4PF1"  # Tasks
 
 INVARIANTS = [
     {
@@ -79,6 +80,42 @@ INVARIANTS = [
         "control": "AND(ABS({Split Override Amount}) > 0, {Split Override Amount} < 0)",
         "control_means": "negatively-signed overrides (expense splits — the ones the bug flips)",
         "fields": ["Report Amount", "**GBP", "Split Override Amount"],
+    },
+    {
+        # The browser guard (approvalGateBlocks) and the Slack worker both refuse
+        # this move, but neither can stop a write made straight to the Airtable
+        # API — by an automation, a script, or an agent. A completed piece of
+        # agent work with no recorded verdict means something shipped without
+        # Kevin seeing it, which is the whole failure the gate exists to prevent.
+        "name": "agent-work-completed-without-approval",
+        "table": TASKS,
+        "incident": "Jul 2026 — 157 of 315 open tasks moved to AI agents with no approval mechanism at all",
+        "asserts": "agent-worked AND completed => an approval outcome is recorded",
+        "violation": (
+            "AND({Processed by AI Agent} = 1, {Status} = 'Completed', "
+            "LEN({Approval Outcome} & '') = 0, "
+            "LEN(ARRAYJOIN({Sent For Approval By}) & '') > 0)"
+        ),
+        "control": "LEN(ARRAYJOIN({Sent For Approval By}) & '') > 0",
+        "control_means": "tasks an agent has ever raised for approval (the population this can corrupt)",
+        "fields": ["Task Name", "Status", "Approval Outcome", "Processed by AI Agent"],
+    },
+    {
+        # An approval that cannot be handed back to anyone dead-ends: Kevin says
+        # yes and nothing carries the action out. Cheap to catch, invisible
+        # otherwise, because the task simply sits there looking fine.
+        "name": "waiting-approval-has-an-agent",
+        "table": TASKS,
+        "incident": "Jul 2026 — approval returns work to 'Sent For Approval By'; with that empty there is nobody to return it to",
+        "asserts": "Status = Approval AND agent-worked => an agent is recorded",
+        "violation": (
+            "AND({Status} = 'Approval', {Processed by AI Agent} = 1, "
+            "LEN(ARRAYJOIN({Sent For Approval By}) & '') = 0, "
+            "LEN(ARRAYJOIN({Team Member}) & '') = 0)"
+        ),
+        "control": "{Status} = 'Approval'",
+        "control_means": "tasks currently waiting for Kevin's approval",
+        "fields": ["Task Name", "Status", "Processed by AI Agent"],
     },
 ]
 

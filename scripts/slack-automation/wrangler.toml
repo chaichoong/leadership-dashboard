@@ -14,8 +14,15 @@ binding = "ATTACHMENTS"
 bucket_name = "contractor-bot-attachments"
 
 # Secrets (AIRTABLE_PAT, SLACK_SIGNING_SECRET, SLACK_BOT_TOKEN,
-# ANTHROPIC_API_KEY, INTERNAL_BEARER) are NOT listed here — they're
-# managed via `wrangler secret put` and persist across deploys.
+# ANTHROPIC_API_KEY, INTERNAL_BEARER, APPROVALS_ADMIN_KEY) are NOT listed
+# here — they're managed via `wrangler secret put` and persist across deploys.
+
+# AI agent approval loop (31 Jul 2026). Every minute: post tasks entering
+# Approval to the approvals channel, read Kevin's emoji back, and close threads
+# for anything he decided in the dashboard instead. A minute of latency on an
+# approval is invisible to him; an hour is not.
+[triggers]
+crons = ["* * * * *"]
 
 # ── AI models — the ONE place this deployable names a model ──
 # Mirrors js/ai-models.js (the browser single source). Workers cannot read that
@@ -25,6 +32,18 @@ bucket_name = "contractor-bot-attachments"
 [vars]
 AI_MODEL_DEFAULT = "claude-sonnet-4-6"
 AI_MODEL_LIGHT = "claude-haiku-4-5-20251001"
+# Dedicated approvals channel: #agent-approvals, private, Kevin + this bot.
+# Private on purpose — the posts carry drafted correspondence, and the
+# workspace has other members.
+#
+# The ID is pinned because the bot token has chat:write, channels:history,
+# groups:history and reactions:write but NOT channels:read / channels:manage,
+# so it can post in and read a channel it belongs to, yet cannot look one up
+# by name. Pinning the ID removes the need for that scope entirely. If the
+# channel is ever recreated, put the new ID here. (Verified 31 Jul 2026 via
+# /approvals/diag — do not assume a scope, read it back.)
+APPROVALS_CHANNEL = "C0BN3BV6HC0"
+APPROVALS_CHANNEL_NAME = "agent-approvals"
 
 # Persist worker logs (Workers Logs) so silent failures are diagnosable.
 [observability]

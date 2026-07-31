@@ -115,3 +115,63 @@ describe('no duplicate global declarations across js/ files', () => {
     expect(error).toBeNull();
   });
 });
+
+// ── Agent autonomy threshold: browser vs the CEO huddle's report script ──────
+//
+// The bar that decides whether an agent gets RECOMMENDED for autonomy exists in
+// two places, because a Python script cannot import a browser file:
+//   js/agent-accuracy.js         — what the dashboard and the Task OS score with
+//   scripts/agent-accuracy-report.py — what the 07:40 CEO huddle reads out
+//
+// If those drift, Kevin gets told in the huddle that an agent has earned its
+// autonomy while the app still says it has not — or worse, the reverse. The
+// numbers are small and easy to "tidy" in one file without touching the other,
+// which is exactly how the AI-model constant drifted before.
+describe('agent autonomy threshold does not drift between the app and the huddle', () => {
+  const JS = read('js/agent-accuracy.js');
+  const PY = read('scripts/agent-accuracy-report.py');
+
+  const jsThreshold = (key) => {
+    const m = JS.match(new RegExp(`${key}\\s*:\\s*([0-9.]+)`));
+    return m ? Number(m[1]) : undefined;
+  };
+  const pyConst = (name) => {
+    const m = PY.match(new RegExp(`^${name}\\s*=\\s*([0-9.]+)`, 'm'));
+    return m ? Number(m[1]) : undefined;
+  };
+
+  // CONTROL — if either parse returns undefined, every comparison below would be
+  // undefined === undefined and pass while testing nothing.
+  it('parses both sources (control — guards against a vacuous pass)', () => {
+    expect(jsThreshold('minSample')).toBeTypeOf('number');
+    expect(jsThreshold('minRate')).toBeTypeOf('number');
+    expect(jsThreshold('recentN')).toBeTypeOf('number');
+    expect(pyConst('MIN_SAMPLE')).toBeTypeOf('number');
+    expect(pyConst('MIN_RATE')).toBeTypeOf('number');
+    expect(pyConst('RECENT_N')).toBeTypeOf('number');
+  });
+
+  it('minimum sample matches', () => {
+    expect(pyConst('MIN_SAMPLE')).toBe(jsThreshold('minSample'));
+  });
+
+  it('minimum accuracy rate matches', () => {
+    expect(pyConst('MIN_RATE')).toBe(jsThreshold('minRate'));
+  });
+
+  it('recent-rejections window matches', () => {
+    expect(pyConst('RECENT_N')).toBe(jsThreshold('recentN'));
+  });
+
+  it('both count the same two outcomes as accurate', () => {
+    const jsAccurate = JS.match(/APPROVAL_ACCURATE\s*=\s*\[([^\]]+)\]/)[1];
+    const pyAccurate = PY.match(/ACCURATE\s*=\s*\(([^)]+)\)/)[1];
+    ['Approved as-is', 'Approved with minor edits'].forEach((outcome) => {
+      expect(jsAccurate).toContain(outcome);
+      expect(pyAccurate).toContain(outcome);
+    });
+    // And neither may quietly count a rejection as accurate.
+    expect(jsAccurate).not.toContain('Rejected');
+    expect(pyAccurate).not.toContain('Rejected');
+  });
+});

@@ -200,6 +200,30 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 .drawer-footer{position:sticky;bottom:0;background:var(--bg-surface);border-top:1px solid var(--border-default);padding:12px 80px 12px 24px;display:flex;gap:8px;justify-content:flex-start;z-index:2}
 .drawer h2{font-size:var(--fs-xl)}
 .drawer-close{background:none;border:none;color:var(--text-secondary);cursor:pointer;font-size:var(--fs-2xl);line-height:1;padding:0 4px}
+/* Agent approval block — shown in the drawer when a task is waiting on Kevin */
+.approval-box{border:1px solid var(--info);background:var(--info-bg);border-radius:var(--radius-md);padding:14px 16px;margin-bottom:16px}
+.approval-box h3{margin:0 0 4px 0;font-size:var(--fs-md);color:var(--text-primary)}
+.approval-box .apv-sub{font-size:var(--fs-sm);color:var(--text-secondary);margin-bottom:10px}
+.approval-box .apv-raiser{font-size:var(--fs-sm);color:var(--text-primary);font-weight:var(--fw-semibold)}
+.approval-box textarea{width:100%;min-height:60px;background:var(--bg-surface);border:1px solid var(--border-default);color:var(--text-primary);border-radius:4px;padding:6px 8px;font-family:inherit;font-size:var(--fs-base)}
+.approval-box .apv-actions{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
+.approval-box .apv-actions .btn{font-size:11px;padding:5px 10px}
+.approval-decided{border:1px solid var(--border-default);background:var(--bg-surface-2);border-radius:var(--radius-md);padding:12px 16px;margin-bottom:16px;font-size:var(--fs-sm);color:var(--text-secondary)}
+/* Agent accuracy view */
+.acc-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:12px;margin-top:12px}
+.acc-card{background:var(--bg-surface);border:1px solid var(--border-default);border-radius:var(--radius-lg);padding:14px 16px}
+.acc-card h4{margin:0 0 2px 0;font-size:var(--fs-md);color:var(--text-primary)}
+.acc-card .acc-dept{font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px}
+/* The badge is the widest thing in the row, so the task-type label must be
+   given a floor or it collapses to "Au…" and the row stops being readable. */
+.acc-row{display:flex;align-items:center;gap:8px;padding:6px 0;border-top:1px solid var(--border-subtle);font-size:var(--fs-sm);flex-wrap:wrap}
+.acc-row .acc-type{flex:1 1 100px;min-width:100px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text-primary)}
+.acc-row .acc-rate{font-variant-numeric:tabular-nums;font-weight:var(--fw-semibold);min-width:48px;text-align:right;flex-shrink:0}
+.acc-row .acc-n{color:var(--text-muted);font-size:11px;min-width:64px;text-align:right;font-variant-numeric:tabular-nums;flex-shrink:0}
+.acc-badge{font-size:10px;font-weight:var(--fw-bold);text-transform:uppercase;letter-spacing:.5px;padding:2px 7px;border-radius:var(--radius-full);white-space:nowrap;flex-shrink:0}
+.acc-badge.ready{background:var(--success-bg);color:var(--success)}
+.acc-badge.building{background:var(--bg-subtle);color:var(--text-secondary)}
+.acc-badge.watch{background:var(--danger-bg);color:var(--danger)}
 .btn-success{background:var(--success);border-color:var(--success);color:#fff}
 .btn-success:hover{background:var(--success);color:#fff;opacity:.9}
 .row-actions{display:inline-flex;gap:6px;opacity:1}
@@ -470,7 +494,10 @@ body.app-busy,body.app-busy *{cursor:progress!important}
     <button class="view-tab" data-view="recurring" onclick="switchView('recurring')">Recurring</button>
     <button class="view-tab" data-view="jobs" onclick="switchView('jobs')">Contractor Tasks</button>
     <button class="view-tab" data-view="meetings" onclick="switchView('meetings')">Meetings</button>
+    <button class="view-tab" data-view="agents" onclick="switchView('agents')" title="What the AI agents are waiting on you for, and how accurate each one has been">AI Agents</button>
   </div>
+
+  <div id="view-agents" style="display:none"></div>
 
   <div id="view-myday"></div>
 
@@ -633,6 +660,9 @@ body.app-busy,body.app-busy *{cursor:progress!important}
 
 <!-- Model IDs live once in js/ai-models.js. Never hardcode a model ID below. -->
 <script src="../../js/ai-models.js?v=1"></script>
+<!-- Agent accuracy scoring + the autonomy threshold. Shared with the
+     Leadership Dashboard so both surfaces score identically. -->
+<script src="../../js/agent-accuracy.js?v=1"></script>
 <script>
 // CONFIG
 const BASE_ID = 'appnqjDpqDniH3IRl';
@@ -711,6 +741,17 @@ const F = {
   priorityLvl: 'fldSsspLUGqzDqJYz',  // singleSelect: High Priority / Low Priority
   property:    'fldZKFvEpJ6NZeFKz',  // multipleRecordLinks to Rental Units
   createdDate: 'fldRpwiBGqEVaN20H',  // date
+  // ── AI agent approval loop (built 31 Jul 2026) ────────────────────────
+  // An agent PREPARES work and proposes it. It sends, files and executes
+  // nothing. The gate sits BEFORE the action: Status goes to Approval,
+  // Kevin decides, and only then does the agent carry the action out.
+  teamMember:  'flduCtmQGpOA4eWaj',  // multipleRecordLinks → Team Members. Holds the AI agent (Assignee is a singleCollaborator and cannot)
+  processedByAI:'fldyVtrxVurMDUOVb', // checkbox — this task was worked by an agent
+  sentForApprovalBy:'fld30Yw8SWYVp049g', // multipleRecordLinks → Team Members. WHICH agent raised it, so approval returns to the right one
+  approvalOutcome:'fldrHBSr6qoUfaKuZ',   // singleSelect — Kevin's verdict, and the input to accuracy scoring
+  approvedBy:  'fldNntfwSzU5DlYS4',  // singleCollaborator — who decided
+  approvedAt:  'fldr4Mvf2RzKvhZhi',  // dateTime — when
+  taskType:    'fldZ2moDV2041Sobc',  // singleSelect — work class; accuracy is scored per agent PER TASK TYPE
 };
 const TASK_FIELD_IDS = Object.values(F);
 
@@ -786,6 +827,24 @@ const TIME_OPTIONS = ['15 min','30 min','45 min','1 hr','2 hr','3 hr','4 hr','8 
 const RECUR_OPTIONS = ['','Daily','Weekly','Fortnightly','Monthly','Quarterly','Bi-Annually','Annually'];
 const BUSINESS_OPTIONS = ['Real Estate','Operations Director','Personal'];
 const KPI_UNIT_OPTIONS = ['£','%','count','days','items','hours'];
+
+// ── Agent approval loop ───────────────────────────────────────────────
+// Outcomes Kevin can record. The first two count as accurate work; a
+// rejection counts against the agent. The outcome list and the autonomy
+// threshold come from js/agent-accuracy.js so this page and the Leadership
+// Dashboard score identically.
+const APPROVAL_OUTCOMES = AgentAccuracy.APPROVAL_OUTCOMES;
+const APPROVAL_ACCURATE = AgentAccuracy.APPROVAL_ACCURATE;
+const TASK_TYPE_OPTIONS = ['Drafting','Research','Analysis','Build','Audit','Admin','Correspondence'];
+const ACCURACY_MIN_SAMPLE = AgentAccuracy.THRESHOLD.minSample;
+const ACCURACY_MIN_RATE   = AgentAccuracy.THRESHOLD.minRate;
+const ACCURACY_RECENT_N   = AgentAccuracy.THRESHOLD.recentN;
+const KEVIN_EMAIL = 'kevin@runpreneur.org.uk';
+// id → name for the AI agents in the Team Members table (records whose name
+// starts with "AI "). Built in loadAllData. Agents have no Airtable login, so
+// they never appear in allTeamMembers, which is filtered to members with an email.
+let AGENT_MAP = {};
+function isAgentName(n){ return /^AI\s/.test(String(n||'')) }
 
 const STATUS_ORDER = { Overdue:0, Today:1, Approval:2, Upcoming:3, Completed:4 };
 const PRIORITY_ORDER = { Project:0, Urgent:1, 'Not Urgent':2, High:1 };
@@ -1685,6 +1744,15 @@ function selectName(v){
   return '';
 }
 
+// Normalise a multipleRecordLinks value to an array of record IDs.
+// returnFieldsByFieldId strips names and returns bare ID strings, but the
+// same field arrives as {id,name} objects from other read paths — handle both
+// rather than letting one shape silently yield an empty array.
+function linkIds(v){
+  if(!Array.isArray(v))return [];
+  return v.map(x=>(x&&typeof x==='object')?(x.id||''):String(x||'')).filter(Boolean);
+}
+
 // Derive the correct status from a task's due date.
 // Completed and Approval are override states — user has deliberately
 // set them and they trump the due-date rule. Everything else is
@@ -1784,6 +1852,17 @@ function parseTask(rec){
     property:(()=>{const p=gf(rec,F.property)||[];return Array.isArray(p)?p.map(x=>{const id=typeof x==='object'?(x.id||''):x;const inlineName=typeof x==='object'?(x.name||''):'';return inlineName||PROPERTY_ID_TO_NAME[id]||id}).filter(Boolean):[]})(),
     createdDate:gf(rec,F.createdDate)||gf(rec,F.created)||'',
     collaborators,
+    // ── Agent approval loop ──
+    // Linked-record fields come back as bare ID strings under
+    // returnFieldsByFieldId, so map defensively for both shapes.
+    teamMemberIds:linkIds(gf(rec,F.teamMember)),
+    raisedByIds:linkIds(gf(rec,F.sentForApprovalBy)),
+    approvalOutcome:selectName(gf(rec,F.approvalOutcome)),
+    approvedByEmail:(gf(rec,F.approvedBy)||{}).email||'',
+    approvedByName:(gf(rec,F.approvedBy)||{}).name||'',
+    approvedAt:gf(rec,F.approvedAt)||'',
+    taskType:selectName(gf(rec,F.taskType)),
+    processedByAI:!!gf(rec,F.processedByAI),
     _startMin:null, // scheduled start minute of day (for My Day timeline)
   };
 }
@@ -1896,9 +1975,28 @@ function fmtRaw(fieldKey,rawValue){
   return String(rawValue);
 }
 
+// THE APPROVAL GATE.
+// A task sitting in Approval is a proposal an agent has NOT carried out.
+// Nothing may jump from Approval straight to Completed, because that would
+// mark work done that was never approved and never actually performed.
+// The only route out is: Kevin records an outcome → the task returns to the
+// agent → the agent carries out the approved action → the agent completes it.
+// Returns a reason string when the move is blocked, or '' when it is allowed.
+function approvalGateBlocks(task,newStatus){
+  if(!task||newStatus!=='Completed')return '';
+  const inApproval=(task.status==='Approval'||task.storedStatus==='Approval');
+  if(!inApproval)return '';
+  if(task.approvalOutcome)return '';
+  return 'This task is waiting for approval. Approve, request changes or reject it first — it cannot go straight to Completed.';
+}
+
 // Update one task field; updates local state; toasts.
 async function updateTaskField(taskId,fieldKey,rawValue){
   const task=findTaskAnywhere(taskId);if(!task)return;
+  if(fieldKey==='status'){
+    const blocked=approvalGateBlocks(task,rawValue);
+    if(blocked){toast(blocked,true);renderAll();return}
+  }
   const prev={...task};
   const oldRaw=captureOldRaw(task,fieldKey);
   let payload={};
@@ -1913,7 +2011,7 @@ async function updateTaskField(taskId,fieldKey,rawValue){
     } else if(fieldKey==='contractor'){
       payload[F.contractor]=rawValue||null;
       task.contractor=rawValue;
-    } else if(fieldKey==='status'||fieldKey==='priority'||fieldKey==='timeEst'||fieldKey==='recurring'){
+    } else if(fieldKey==='status'||fieldKey==='priority'||fieldKey==='timeEst'||fieldKey==='recurring'||fieldKey==='taskType'){
       // Airtable singleSelect with typecast=true expects plain string,
       // not {name: ...} — that format is rejected with INVALID_VALUE_FOR_COLUMN.
       // "None" is a legacy recurring value — normalise to empty so both the
@@ -2549,6 +2647,7 @@ function openTaskDrawer(taskId){
     </div>
     <div class="drawer-body">
       <div style="font-size:11px;color:var(--text-secondary);margin-bottom:12px">Click any field to edit. Changes auto-save.</div>
+      ${renderApprovalBlock(t)}
 
       <div class="field-row"><label>Assignee</label><div class="field-val" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><select onchange="updateTaskField('${t.id}','assignee',this.value);renderAll()" style="flex:1;min-width:140px"><option value="__unassigned" ${!t.assigneeEmail?'selected':''}>Unassigned</option>${TEAM.map(m=>`<option value="${m.key}" ${t.assigneeEmail===m.email?'selected':''}>${m.name}</option>`).join('')}</select><button class="btn btn-sm" onclick="resendAssigneeNotification('${t.id}')" title="Re-send the Slack DM that fires on assignment — useful if the original notification didn't land" style="font-size:11px;padding:3px 10px">📨 Resend Slack</button></div></div>
       ${t.createdByEmail?`<div class="field-row"><label>Created by</label><div class="field-val" style="font-size:var(--fs-sm);color:var(--text-secondary)"><span title="Set automatically when the task was created via the web app">${escHtml((TEAM.find(m=>m.email===t.createdByEmail)||{}).name||t.createdByEmail)}</span>${t.created?` <span style="color:var(--text-muted);margin-left:6px">on ${new Date(t.created).toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric'})}</span>`:''}</div></div>`:''}
@@ -2562,6 +2661,8 @@ function openTaskDrawer(taskId){
       <div class="field-row"><label>Priority</label><div class="field-val"><select id="drwPrioritySel" onchange="updateTaskField('${t.id}','priority',this.value);renderAll()"><option value="">-</option>${PRIORITY_OPTIONS.map(p=>`<option value="${p}" ${t.priority===p?'selected':''}>${p}</option>`).join('')}${t.priority==='High'?'<option value="High" selected>High (legacy)</option>':''}</select></div></div>
       <div class="field-row"><label>Project</label><div class="field-val" id="drwProjectWrap">${renderProjectPicker(t)}</div></div>
       <div class="field-row"><label>Status</label><div class="field-val"><select onchange="updateTaskField('${t.id}','status',this.value);renderAll()">${STATUS_OPTIONS.map(s=>`<option value="${s}" ${t.status===s?'selected':''}>${s}</option>`).join('')}</select></div></div>
+      <div class="field-row"><label title="Used to score agent accuracy per task type">Task Type</label><div class="field-val"><select onchange="updateTaskField('${t.id}','taskType',this.value);renderAll()"><option value="">-</option>${TASK_TYPE_OPTIONS.map(o=>`<option value="${o}" ${t.taskType===o?'selected':''}>${o}</option>`).join('')}</select></div></div>
+      ${(t.raisedByIds&&t.raisedByIds.length)||(t.teamMemberIds&&t.teamMemberIds.length)?`<div class="field-row"><label>AI agent</label><div class="field-val" style="font-size:var(--fs-sm);color:var(--text-secondary)">${escHtml(agentNamesFor(t))||'—'}</div></div>`:''}
       <div class="field-row"><label>Business</label><div class="field-val"><select id="drwBusinessSel" onchange="updateTaskField('${t.id}','business',this.value);renderAll()"><option value="">-</option>${BUSINESS_OPTIONS.map(b=>`<option value="${b}" ${t.business===b?'selected':''}>${b}</option>`).join('')}</select></div></div>
       <div class="field-row"><label>Recurring</label><div class="field-val"><select onchange="updateTaskField('${t.id}','recurring',this.value);renderAll()">${RECUR_OPTIONS.map(r=>`<option value="${r}" ${t.recurring===r?'selected':''}>${r||'-'}</option>`).join('')}</select></div></div>
       <div class="field-row" style="flex-direction:column;align-items:stretch"><label style="display:flex;align-items:center;gap:8px">Description <button class="btn" style="padding:1px 8px;font-size:10px;text-transform:none;letter-spacing:0;font-weight:500" onclick="toggleDescExpand(this)">Expand</button></label><div class="field-val"><textarea id="drwDescTA" oninput="drwSaveText('${t.id}','description',this.value);updateDescLinks(this.value)" onblur="drwSaveText('${t.id}','description',this.value,true)" placeholder="Describe the task or the end result...">${escHtml(t.description)}</textarea></div>${extractDescLinks(t.description)}</div>
@@ -3363,6 +3464,143 @@ function adjustProjectTaskCounts(oldProjectIds,newProjectIds){
   // Projects gaining the task
   nu.forEach(pid=>{if(!old.has(pid)){const p=allProjects.find(x=>x.id===pid);if(p)p.totalTasks=(p.totalTasks||0)+1}});
 }
+
+// ======================================================
+// AGENT APPROVAL LOOP
+// ======================================================
+// The gate sits BEFORE the action. An agent prepares work and proposes it;
+// it has sent, filed and executed nothing. Kevin approves, asks for changes,
+// or rejects. On approval the task goes BACK to the agent, the agent carries
+// the approved action out, and only then marks it Completed. Approving is not
+// completing, and Kevin never marks anything Completed himself.
+
+// Display name(s) of the AI agent(s) attached to a task — the raiser first,
+// then the working agent. Falls back to the human team-member list so a task
+// linked to a person still shows a name rather than a record ID.
+function agentNamesFor(t){
+  const ids=[...((t&&t.raisedByIds)||[]),...((t&&t.teamMemberIds)||[])];
+  const seen=new Set();const names=[];
+  ids.forEach(id=>{
+    if(seen.has(id))return;seen.add(id);
+    const n=AGENT_MAP[id]||((allTeamMembers||[]).find(m=>m.id===id)||{}).name||'';
+    if(n)names.push(n);
+  });
+  return names.join(', ');
+}
+
+// Which agent a decision should hand the task back to.
+function approvalRaiserId(t){
+  return ((t&&t.raisedByIds)||[])[0]||((t&&t.teamMemberIds)||[])[0]||'';
+}
+
+function renderApprovalBlock(t){
+  if(!t)return '';
+  if(t.status!=='Approval'){
+    if(!t.approvalOutcome)return '';
+    const when=t.approvedAt?new Date(t.approvedAt).toLocaleString('en-GB',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'}):'';
+    return `<div class="approval-decided">Approval outcome: <strong>${escHtml(t.approvalOutcome)}</strong>${t.approvedByName?' by '+escHtml(t.approvedByName):''}${when?' on '+escHtml(when):''}.</div>`;
+  }
+  const raiser=agentNamesFor(t);
+  const mine=!t.assigneeEmail||(t.assigneeEmail||'').toLowerCase()===KEVIN_EMAIL;
+  if(!mine){
+    return `<div class="approval-decided">Waiting for approval from ${escHtml(t.assignee||t.assigneeEmail)}. Reassign it to yourself to decide it here.</div>`;
+  }
+  return `<div class="approval-box">
+    <h3>Waiting for your approval</h3>
+    <div class="apv-sub">Nothing has been sent, filed or actioned. ${raiser?`Prepared by <span class="apv-raiser">${escHtml(raiser)}</span>.`:'No agent recorded on this task.'} Approving hands it back so the agent can carry it out.</div>
+    <div style="margin-bottom:8px"><label style="font-size:11px;color:var(--text-secondary);font-weight:600;text-transform:uppercase;letter-spacing:.5px;display:block;margin-bottom:4px">Kind of work (scores the agent)</label>
+      <select id="apvType" style="width:100%;background:var(--bg-surface);border:1px solid var(--border-default);color:var(--text-primary);padding:6px 8px;border-radius:4px;font-family:inherit;font-size:var(--fs-base)">
+        <option value="">Not set</option>
+        ${TASK_TYPE_OPTIONS.map(o=>`<option value="${o}" ${t.taskType===o?'selected':''}>${o}</option>`).join('')}
+      </select></div>
+    <textarea id="apvNote" placeholder="What to change, or why you are rejecting. Required for Request changes and Reject."></textarea>
+    <div class="apv-actions">
+      <button class="btn btn-success" data-apv-btn onclick="apvDecide('${t.id}','Approved as-is')">Approve</button>
+      <button class="btn" data-apv-btn onclick="apvDecide('${t.id}','Approved with minor edits')" title="Approved, but you tidied it first — still counts as accurate">Approve with minor edits</button>
+      <button class="btn" data-apv-btn onclick="apvDecide('${t.id}','Changes requested')" title="Goes back to the agent to redo. Needs a comment.">Request changes</button>
+      <button class="btn btn-danger" data-apv-btn onclick="apvDecide('${t.id}','Rejected')" title="Closed. Counts against the agent. Needs a reason.">Reject</button>
+    </div>
+  </div>`;
+}
+
+// Record Kevin's verdict, hand the task back to the agent that raised it, and
+// leave an Airtable comment so the reason is on the record permanently.
+// Deliberately PATCHes directly rather than going through updateTaskField:
+// a rejection closes the task WITHOUT logging a productive completion or
+// rolling a recurrence, and the approval gate must not fire on our own write.
+async function apvDecide(taskId,outcome){
+  const t=findTaskAnywhere(taskId);if(!t)return;
+  if(APPROVAL_OUTCOMES.indexOf(outcome)===-1)return;
+  const noteEl=document.getElementById('apvNote');
+  const note=(noteEl&&noteEl.value||'').trim();
+  const needsNote=(outcome==='Changes requested'||outcome==='Rejected');
+  if(needsNote&&!note){
+    toast(outcome==='Rejected'?'Add a reason before rejecting.':'Say what needs changing before sending it back.',true);
+    if(noteEl)noteEl.focus();
+    return;
+  }
+  const typeEl=document.getElementById('apvType');
+  const chosenType=(typeEl&&typeEl.value)||'';
+  const btns=Array.from(document.querySelectorAll('[data-apv-btn]'));
+  btns.forEach(b=>{b.disabled=true;b.style.opacity='0.6'});
+  const agentId=approvalRaiserId(t);
+  const nowIso=new Date().toISOString();
+  const payload={};
+  payload[F.approvalOutcome]=outcome;
+  payload[F.approvedAt]=nowIso;
+  if(currentUser&&currentUser.email)payload[F.approvedBy]={email:currentUser.email};
+  if(chosenType&&chosenType!==t.taskType)payload[F.taskType]=chosenType;
+  if(outcome==='Rejected'){
+    // Closed with a reason. Counts against the agent's accuracy.
+    payload[F.status]='Completed';
+    payload[F.completion]=nowIso;
+  }else{
+    // Back to the agent, due today, so the approved action gets carried out.
+    payload[F.status]='Today';
+    payload[F.dueDate]=todayStr();
+  }
+  if(agentId){
+    payload[F.teamMember]=[agentId];
+    payload[F.sentForApprovalBy]=[agentId];
+    // The agent owns it now — Assignee is a human field and cannot hold one.
+    payload[F.assignee]=null;
+  }
+  try{
+    const res=await patchTask(taskId,payload);
+    if(!res.ok){
+      let body='';try{body=await res.text()}catch(e){}
+      throw new Error(res.status+' '+body.slice(0,140));
+    }
+    // Local state, so the grid is right without waiting for a refresh.
+    t.approvalOutcome=outcome;
+    t.approvedAt=nowIso;
+    t.approvedByEmail=(currentUser&&currentUser.email)||'';
+    t.approvedByName=(currentUser&&currentUser.name)||'';
+    if(chosenType)t.taskType=chosenType;
+    if(outcome==='Rejected'){t.status='Completed';t.storedStatus='Completed';t.completion=nowIso}
+    else{t.status='Today';t.storedStatus='Today';t.dueDate=todayStr()}
+    if(agentId){
+      t.teamMemberIds=[agentId];t.raisedByIds=[agentId];
+      t.assignee='';t.assigneeEmail='';t.assigneeId='';
+    }
+    const agentLabel=agentNamesFor(t)||'the agent';
+    const line=outcome==='Rejected'
+      ? `Rejected. Reason: ${note}`
+      : outcome==='Changes requested'
+        ? `Changes requested. ${note}`
+        : `${outcome}. Back to ${agentLabel} to carry out.${note?' Note: '+note:''}`;
+    try{await postComment(taskId,line)}catch(e){console.warn('approval comment failed',e)}
+    if(!agentId)toast('Recorded, but no agent was linked to this task, so it could not be handed back.',true);
+    else toast(outcome==='Rejected'?'Rejected and closed.':`${outcome} — back to ${agentLabel}.`);
+    closeDrawer();
+    renderAll();
+  }catch(e){
+    console.error('approval decision failed',e);
+    toast('Could not save the decision: '+(e&&e.message||e),true);
+    btns.forEach(b=>{b.disabled=false;b.style.opacity=''});
+  }
+}
+window.apvDecide=apvDecide;
 
 async function completeTaskFromDrawer(taskId){
   await updateTaskField(taskId,'status','Completed');
@@ -8495,10 +8733,127 @@ async function renderMeetings(){
 // ======================================================
 // VIEW SWITCH
 // ======================================================
+// ======================================================
+// AGENT ACCURACY — scored per agent PER TASK TYPE
+// ======================================================
+// An agent can be excellent at drafting and poor at analysis, so a blended
+// score hides the thing you need to know. Crossing the threshold produces a
+// RECOMMENDATION for Kevin, never a promotion: the owner moves the gears,
+// accuracy only advises.
+//
+// One known limit, stated rather than hidden: the outcome lives in a single
+// field on the task, so a task that went round twice keeps only its FINAL
+// verdict. Rounds that ended in "changes requested" and were later approved
+// count once, as the approval.
+let agentApprovalHistory=[];
+let agentHistoryLoaded=false;
+let agentHistoryError='';
+
+async function loadAgentApprovalHistory(force){
+  if(agentHistoryLoaded&&!force)return agentApprovalHistory;
+  try{
+    // LEN(field&'') rather than != '' — the blank-vs-empty-string trap has
+    // silently emptied a whole query in this base before.
+    const recs=await fetchTable(TASKS_TABLE,
+      [F.name,F.approvalOutcome,F.approvedAt,F.taskType,F.sentForApprovalBy,F.teamMember,F.status],
+      `LEN({Approval Outcome}&'')>0`);
+    agentApprovalHistory=(recs||[]).map(r=>({
+      id:r.id,
+      name:gf(r,F.name)||'(Untitled)',
+      outcome:selectName(gf(r,F.approvalOutcome)),
+      at:gf(r,F.approvedAt)||'',
+      taskType:selectName(gf(r,F.taskType))||'Unclassified',
+      agentId:(linkIds(gf(r,F.sentForApprovalBy))[0]||linkIds(gf(r,F.teamMember))[0]||''),
+    })).filter(x=>x.outcome&&x.agentId);
+    agentHistoryError='';
+    agentHistoryLoaded=true;
+  }catch(e){
+    console.warn('agent approval history fetch failed',e);
+    agentHistoryError=(e&&e.message)||'fetch failed';
+  }
+  return agentApprovalHistory;
+}
+
+// The scoring maths itself lives in js/agent-accuracy.js — one copy, shared
+// with the Leadership Dashboard, so the two surfaces can never disagree about
+// whether an agent has cleared the bar.
+function agentDisplayNames(){
+  const names={};
+  Object.keys(AGENT_MAP||{}).forEach(id=>{names[id]=AGENT_MAP[id]});
+  (allTeamMembers||[]).forEach(m=>{if(!names[m.id])names[m.id]=m.name});
+  return names;
+}
+function computeAgentAccuracy(history){
+  return AgentAccuracy.computeAgentAccuracy(history,agentDisplayNames());
+}
+function agentAutonomyRecommendations(rows){
+  return AgentAccuracy.agentAutonomyRecommendations(rows);
+}
+
+async function renderAgents(){
+  const el=document.getElementById('view-agents');if(!el)return;
+  if(!agentHistoryLoaded&&!agentHistoryError){
+    el.innerHTML=`<div style="padding:24px;color:var(--text-secondary);font-size:var(--fs-sm)">Loading agent history…</div>`;
+    await loadAgentApprovalHistory();
+  }
+  const rows=computeAgentAccuracy(agentApprovalHistory);
+  const recs=agentAutonomyRecommendations(rows);
+  const waiting=(allTasks||[]).filter(t=>t.status==='Approval');
+
+  const waitingHtml=waiting.length
+    ? waiting.map(t=>`<div class="acc-row"><span class="acc-type">${escHtml(t.name)}</span><span class="acc-n">${escHtml(agentNamesFor(t)||'no agent')}</span><button class="btn btn-sm" onclick="openTaskDrawer('${t.id}')">Review</button></div>`).join('')
+    : `<div style="padding:10px 0;color:var(--text-secondary);font-size:var(--fs-sm)">Nothing is waiting on you.</div>`;
+
+  const byAgent={};
+  rows.forEach(r=>{(byAgent[r.agentId]=byAgent[r.agentId]||{name:r.agentName,rows:[]}).rows.push(r)});
+  const cards=Object.keys(byAgent).map(id=>{
+    const a=byAgent[id];
+    return `<div class="acc-card">
+      <h4>${escHtml(a.name)}</h4>
+      <div class="acc-dept">${a.rows.reduce((s,r)=>s+r.total,0)} decisions recorded</div>
+      ${a.rows.map(r=>{
+        const badge=r.ready?'<span class="acc-badge ready">Ready — your call</span>'
+          :r.recentRejections>0?`<span class="acc-badge watch">${r.recentRejections} rejected recently</span>`
+          :`<span class="acc-badge building">${r.total}/${ACCURACY_MIN_SAMPLE} to the bar</span>`;
+        return `<div class="acc-row">
+          <span class="acc-type">${escHtml(r.taskType)}</span>
+          ${badge}
+          <span class="acc-rate" style="color:${r.rate>=ACCURACY_MIN_RATE?'var(--success)':'var(--text-primary)'}">${Math.round(r.rate*100)}%</span>
+          <span class="acc-n">${r.accurate}/${r.total}</span>
+        </div>`;
+      }).join('')}
+    </div>`;
+  }).join('');
+
+  el.innerHTML=`
+    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:12px">
+      <h3 style="margin:0;font-size:var(--fs-lg)">Waiting for your approval <span style="color:var(--text-muted);font-weight:400">(${waiting.length})</span></h3>
+      <button class="btn btn-sm" onclick="refreshAgentAccuracy()" title="Re-read every recorded approval outcome from Airtable">Refresh scores</button>
+    </div>
+    <div class="acc-card" style="margin-top:8px" aria-live="polite">${waitingHtml}</div>
+    ${recs.length?`<div class="acc-card" style="margin-top:12px;border-color:var(--success)">
+      <h4 style="color:var(--success)">Recommendation${recs.length>1?'s':''} — nothing has changed</h4>
+      ${recs.map(r=>`<div class="acc-row"><span class="acc-type" style="white-space:normal">${escHtml(r)}</span></div>`).join('')}
+    </div>`:''}
+    <h3 style="margin:20px 0 0 0;font-size:var(--fs-lg)">Accuracy by agent and kind of work</h3>
+    <div style="font-size:var(--fs-sm);color:var(--text-secondary);margin-top:4px">Counts approved as-is and approved with minor edits as accurate. The bar is ${ACCURACY_MIN_SAMPLE} decisions at ${Math.round(ACCURACY_MIN_RATE*100)}% with no rejections in the last ${ACCURACY_RECENT_N}. Crossing it is a recommendation to you, never an automatic change.</div>
+    ${agentHistoryError?`<div class="acc-card" style="margin-top:12px;border-color:var(--danger)"><span style="color:var(--danger)">Could not load the approval history: ${escHtml(agentHistoryError)}</span></div>`:''}
+    ${rows.length?`<div class="acc-grid">${cards}</div>`
+      :`<div class="acc-card" style="margin-top:12px;color:var(--text-secondary);font-size:var(--fs-sm)">No approval decisions recorded yet. Scores appear here as soon as you approve or reject your first piece of agent work.</div>`}
+  `;
+}
+async function refreshAgentAccuracy(){
+  agentHistoryLoaded=false;agentHistoryError='';
+  await loadAgentApprovalHistory(true);
+  await renderAgents();
+  toast('Agent scores refreshed');
+}
+window.refreshAgentAccuracy=refreshAgentAccuracy;
+
 function switchView(view){
   currentView=view;
   document.querySelectorAll('.view-tab').forEach(b=>b.classList.toggle('active',b.dataset.view===view));
-  ['myday','list','kanban','projects','capacity','recurring','jobs','meetings'].forEach(v=>{
+  ['myday','list','kanban','projects','capacity','recurring','jobs','meetings','agents'].forEach(v=>{
     const el=document.getElementById('view-'+v);if(el)el.style.display=v===view?'':'none';
   });
   window.scrollTo(0, 0);
@@ -8510,6 +8865,7 @@ function switchView(view){
   if(view==='recurring')renderRecurring();
   if(view==='jobs')renderJobs();
   if(view==='meetings')renderMeetings();
+  if(view==='agents')renderAgents();
 }
 function setTeam(key){activeTeam=key;currentPage=1;expandedTask=null;selectedTasks.clear();renderAll()}
 function renderAll(){
@@ -8522,6 +8878,7 @@ function renderAll(){
   if(currentView==='recurring')renderRecurring();
   if(currentView==='jobs')renderJobs();
   if(currentView==='meetings')renderMeetings();
+  if(currentView==='agents')renderAgents();
 }
 
 // ======================================================
@@ -8562,6 +8919,14 @@ async function loadAllData(){
         ||'(Unknown)';
       return{id:r.id,name:displayName,email:m?.email||''};
     }).filter(m=>m.email);
+    // The 17 AI agents are Team Member records with no Airtable login, so the
+    // email filter above drops them. Keep a separate id → name map so a task
+    // linked to an agent shows the agent's name, not a record ID.
+    AGENT_MAP={};
+    (rawTeam||[]).forEach(r=>{
+      const nm=(r.fields?.[TM.preferredName]||'').trim()||(r.fields?.[TM.fullLegalName]||'').trim()||(r.fields?.[TM.name]||'').trim();
+      if(nm&&isAgentName(nm))AGENT_MAP[r.id]=nm;
+    });
     try{populateProjectFilterOptions()}catch(e){}
 
     const pm={};allProjects.forEach(p=>pm[p.id]=p.name);
@@ -8626,6 +8991,24 @@ async function loadAllData(){
             name:'Tasks fetched from Airtable', kind:'sync', run:()=>{
               if(!Array.isArray(allTasks)||allTasks.length===0) return {status:'fail',detail:'No tasks loaded — Airtable fetch may have failed'};
               return {status:'pass',detail:`${allTasks.length} non-completed tasks loaded`};
+            }
+          },
+          {
+            name:'Approval gate intact', kind:'automation', run:()=>{
+              const waiting=(allTasks||[]).filter(t=>t.status==='Approval');
+              if(!waiting.length) return {status:'pass',detail:'Nothing waiting for approval'};
+              // A task in Approval with no agent linked cannot be handed back
+              // to anyone when Kevin approves it — it would dead-end.
+              const orphans=waiting.filter(t=>!approvalRaiserId(t));
+              if(orphans.length) return {status:'warn',detail:`${orphans.length} of ${waiting.length} waiting tasks have no agent recorded, so approval cannot hand them back`};
+              return {status:'pass',detail:`${waiting.length} waiting for approval, every one traceable to an agent`};
+            }
+          },
+          {
+            name:'AI agent roster loaded', kind:'sync', run:()=>{
+              const n=Object.keys(AGENT_MAP||{}).length;
+              if(!n) return {status:'warn',detail:'No AI agent Team Member records found — agent names will show as record IDs'};
+              return {status:'pass',detail:`${n} AI agents available to receive work`};
             }
           },
           {

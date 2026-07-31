@@ -178,8 +178,9 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
         <a href="#buttons"><span class="toc-num">9</span> Action Buttons Reference</a>
         <a href="#filters"><span class="toc-num">10</span> Filtering, Sorting &amp; Search</a>
         <a href="#fields"><span class="toc-num">11</span> Airtable Fields Reference</a>
-        <a href="#troubleshooting"><span class="toc-num">12</span> Troubleshooting</a>
-        <a href="#changelog"><span class="toc-num">13</span> Changelog</a>
+        <a href="#approvals"><span class="toc-num">12</span> AI Agents &amp; the Approval Gate</a>
+        <a href="#troubleshooting"><span class="toc-num">13</span> Troubleshooting</a>
+        <a href="#changelog"><span class="toc-num">14</span> Changelog</a>
       </div>
     </div>
   </div>
@@ -969,8 +970,35 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
   </div>
 
   <!-- 12. Troubleshooting -->
+  <!-- 12. AI Agents & the Approval Gate -->
+  <div class="section" id="approvals">
+    <div class="section-title"><span class="icon">&#x1F916;</span> 12. AI Agents &amp; the Approval Gate</div>
+    <div class="card">
+      <p><strong>The short version.</strong> AI agents do the work and then stop. They send nothing, file nothing and change nothing until you say yes. You say yes either in the task drawer or with an emoji in the <code>#agent-approvals</code> Slack channel. Saying yes hands the task back to the agent, and the agent then does the thing and marks it done. Approving is not the same as the work being finished.</p>
+
+      <h4 style="margin-top:1rem;font-size:0.95rem;font-weight:700;">What you see, and what to click</h4>
+      <ul>
+        <li><strong>Approve</strong> &mdash; the work is right as it stands. It goes back to the agent to carry out.</li>
+        <li><strong>Approve with minor edits</strong> &mdash; you tidied it, but it was basically right. Still counts as accurate for that agent.</li>
+        <li><strong>Request changes</strong> &mdash; back to the agent to redo. You have to say what needs changing; the button will not submit without it. Nothing has gone out, so nothing needs undoing.</li>
+        <li><strong>Reject</strong> &mdash; closed with a reason. Counts against that agent.</li>
+      </ul>
+
+      <h4 style="margin-top:1rem;font-size:0.95rem;font-weight:700;">Approving from Slack while you are away</h4>
+      <p>Every task entering Approval is posted to <code>#agent-approvals</code> within a minute. React on the message: &#x2705; approve, &#x270F;&#xFE0F; request changes, &#x274C; reject. Only your reactions count.</p>
+      <p><strong>If the task changed after the message was posted, your reaction is refused.</strong> The bot replies in the thread to say so and posts the task again as it now stands. This exists so an emoji can never approve something you did not actually read.</p>
+
+      <h4 style="margin-top:1rem;font-size:0.95rem;font-weight:700;">The AI Agents tab</h4>
+      <p>Shows what is waiting on you, and how accurate each agent has been at each kind of work &mdash; scored separately, because an agent can be excellent at drafting and poor at analysis.</p>
+      <p>An agent that reaches <strong>20 decisions of one kind of work at 90% or better, with no rejections in its last 10</strong>, appears as a recommendation, and the same line comes up in the 09:00 huddle. <strong>It is only ever a recommendation.</strong> Nothing is promoted automatically, and no agent ever escapes the gate unless you decide it should.</p>
+
+      <h4 style="margin-top:1rem;font-size:0.95rem;font-weight:700;">What agents are never allowed to touch</h4>
+      <p>The restraint order, Operation Lily, the criminal investigation, the liquidations, and money owed to you personally by parties in that matter. Creditor and debt correspondence is Mica's, including high value. If one of these reaches the approval queue anyway, the Slack post carries a red warning &mdash; treat that as a fault to investigate, not a task to approve.</p>
+    </div>
+  </div>
+
   <div class="section" id="troubleshooting">
-    <div class="section-title"><span class="icon">&#x1F527;</span> 12. Troubleshooting</div>
+    <div class="section-title"><span class="icon">&#x1F527;</span> 13. Troubleshooting</div>
     <div class="card">
       <div class="ts-item">
         <div class="ts-problem">Page shows "Failed to load data" or "Invalid token. Please re-enter your PAT"</div>
@@ -1017,7 +1045,7 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
 
   <!-- 13. Changelog -->
   <div class="section" id="changelog">
-    <div class="section-title"><span class="icon">&#x1F4DC;</span> 13. Changelog</div>
+    <div class="section-title"><span class="icon">&#x1F4DC;</span> 14. Changelog</div>
     <div class="card">
       <table class="label-table">
         <thead>
@@ -1028,6 +1056,11 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
           </tr>
         </thead>
         <tbody>
+          <tr>
+            <td><strong>1.2</strong></td>
+            <td>31 Jul 2026</td>
+            <td>Added section 12, AI Agents &amp; the Approval Gate: the approval block in the task drawer, approving by emoji in <code>#agent-approvals</code>, the staleness guard that refuses a reaction on a task that changed after posting, the AI Agents tab with per-agent per-task-type accuracy, the 20-decisions-at-90%-with-no-recent-rejections bar (a recommendation, never an automatic promotion), and the work agents are never allowed to touch.</td>
+          </tr>
           <tr>
             <td><strong>1.1</strong></td>
             <td>17 Apr 2026</td>

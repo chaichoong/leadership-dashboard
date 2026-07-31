@@ -850,6 +850,9 @@
     <!-- defer: non-blocking download, executed in order before DOMContentLoaded — lets HTML paint the loading overlay immediately -->
     <!-- ai-models.js MUST load before config.js — config reads window.AI_MODELS -->
     <script defer src="js/ai-models.js?v=1"></script>
+    <!-- Agent accuracy scoring + the autonomy threshold. Shared with the
+         Task OS so both surfaces score identically. -->
+    <script defer src="js/agent-accuracy.js?v=1"></script>
     <script defer src="js/config.js?v=50"></script>
     <script defer src="js/prompts/boardroom-mentor.js?v=3"></script>
     <script defer src="js/shared.js?v=36"></script>
