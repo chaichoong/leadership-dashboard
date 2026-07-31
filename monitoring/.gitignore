@@ -2,3 +2,11 @@
 # (they accumulate fast — the scheduled task commits them to main directly)
 schema-2*.json
 drift-2*.md
+
+# Task hygiene sweep working files. NEVER commit these — this repo is public and
+# the work-list carries full inbound email bodies, tenant names, rent figures and
+# phone numbers. Only the redacted task-sweep-{date}.md report is tracked.
+task-sweep-worklist-*.json
+task-sweep-decisions-*.json
+task-sweep-applied-*.json
+task-sweep-pending.json
