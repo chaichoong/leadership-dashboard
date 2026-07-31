@@ -128,6 +128,7 @@
         kpiDetailJson:   'fldeGDKEg6HEXCUh4',
         totalTasks:      'fldtw6NQZ8CSF3RXi',
         completedTasks:  'fld7IDjY0xB4JGBfn',
+        closedOn:        'fldzGI0ywBTpOK2dy',  // quarter-close date — set = project is history
     };
     const STRAT_TEAM_KEYS = {
         'kevin@runpreneur.org.uk':'kevin',
@@ -235,6 +236,7 @@
                     kpiLastUpdatedBy:getField(r,STRAT_PF.kpiLastUpdatedBy)||'',
                     totalTasks:Number(getField(r,STRAT_PF.totalTasks))||0,
                     completedTasks:Number(getField(r,STRAT_PF.completedTasks))||0,
+                    closedOn:getField(r,STRAT_PF.closedOn)||'',
                 };
             });
             // Render immediately with the values already on each project so
@@ -441,6 +443,9 @@
     async function runAutomatedKpis(projectRecords){
         if(!Array.isArray(projectRecords))return;
         const withCode=projectRecords.filter(r=>{
+            // Skip closed quarters. Recomputing them burns time and lets a closed
+            // project's KPI Current drift away from the KPI at Close snapshot.
+            if(getField(r,STRAT_PF.closedOn))return false;
             const code=getField(r,STRAT_PF.kpiComputeCode);
             return code && String(code).trim();
         });
@@ -557,7 +562,11 @@
                 if(id&&_strategicBusinessIdToName[id])p.business=_strategicBusinessIdToName[id];
             });
         }
-        const active=_strategicKpiProjects.filter(p=>p.kpiName&&!p.completed&&p.status!=='Completed');
+        // A project that closed having MISSED its target is still "Off-Track", not "Completed",
+        // so status alone never retires it and it sits here as a live KPI forever. `Closed On`
+        // is written by the quarter-close routine and is the only reliable "this is history"
+        // signal — see Decisions/2026-07-31 Q3 planning, rule 8.
+        const active=_strategicKpiProjects.filter(p=>p.kpiName&&!p.completed&&p.status!=='Completed'&&!p.closedOn);
         if(!active.length){section.style.display='none';return}
         section.style.display='block';
 
