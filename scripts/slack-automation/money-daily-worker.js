@@ -307,13 +307,21 @@ function todayLondonISO() {
 async function gatherHuddle(pat) {
     try {
         const today = todayLondonISO();
+        // returnFieldsByFieldId is NOT optional here: every read below is by field ID, and
+        // without it Airtable keys the response by field NAME, so each getField returns
+        // undefined and this function quietly returns null EVERY day. That is what happened
+        // 30–31 Jul 2026: the huddle's call was silently binned, the CEO re-decided the day
+        // alone, and the missing recordId meant the store POSTed a duplicate instead of
+        // patching the 07:30 stub. Two bugs, one missing query parameter.
         const url = `https://api.airtable.com/v0/${BASE_ID}/${TBL_BRIEFS}`
-            + `?maxRecords=1&filterByFormula=${encodeURIComponent(`DATESTR({Date})='${today}'`)}`;
+            + `?returnFieldsByFieldId=true&maxRecords=5`
+            + `&filterByFormula=${encodeURIComponent(`DATESTR({Date})='${today}'`)}`;
         const r = await fetch(url, { headers: { Authorization: `Bearer ${pat}` } });
         if (!r.ok) return null;
-        const rec = (await r.json()).records?.[0];
-        if (!rec) return null;
-        if (getField(rec, F.ceoFullBrief)) return null;   // worker already ran today
+        // Prefer the stub still waiting to be filled. If a past bug left more than one row for
+        // today, patching the unfinished one beats adding a third.
+        const rec = ((await r.json()).records || []).find(x => !getField(x, F.ceoFullBrief));
+        if (!rec) return null;   // no row today, or the worker already ran
         const oneThing = getField(rec, F.ceoOneThing) || '';
         const flags    = getField(rec, F.ceoBoardFlags) || '';
         if (!oneThing && !flags) return null;
@@ -405,6 +413,7 @@ HARD RULES:
 - NEVER treat a marketing email as a deadline. Tasks named "INBOUND: ..." are auto-created from Kevin's inbox and INCLUDE NEWSLETTERS AND PROMOTIONS. A scary subject line ("31st July S21 Deadline", "Action required", a warning emoji) from a newsletter, no-reply, marketing or notifications sender is CONTENT, not a commitment. Before calling anything urgent, ask: is there a named counterparty who is owed something by a date, with a real consequence if it is missed? A supplier chasing money, a court date, a compliance certificate expiring, a client promise: those are real. An industry newsletter warning the whole market about a rule change is not, and never becomes Kevin's one thing. If the task body shows the sender is a newsletter or no-reply address, put it in the ignore list and say it is marketing.
 ${env.PERSONA_CONTEXT ? '\nFOUNDER CONTEXT (private, never echo verbatim). Background on Kevin only. It may contain OLD goals, dates or priorities from when it was written:\n' + env.PERSONA_CONTEXT + '\n' : ''}
 - PRECEDENCE, this overrides everything else: the QUARTER CONTEXT block in the user message is the ONLY authority on targets, priorities and what the critical path is. Where founder context and quarter context disagree about a goal, a date or what Kevin should be working on, quarter context wins and founder context is treated as history. Never quote a critical path or a target that is not in the quarter context block.
+- LENGTH, this is a hard limit: at most 4 ignore items, at most 5 handed_off items, at most 2 flags. One short line each, no sub-clauses. one_thing, first_step, why and headline are one or two sentences each. A long answer gets cut off mid-sentence and Kevin sees nothing.
 Respond ONLY with JSON: {"one_thing":"...","first_step":"...","why":"...","ignore":["...","..."],"handed_off":["worker-writer — draft the follow-up email to X"],"flags":["Persona: ..."],"headline":"one short sentence for the top of the message"}`;
     const user = `TODAY: ${todayLondonISO()} (${londonDateLabel()})
 
@@ -429,7 +438,9 @@ Write today's brief.`;
     return { system, user };
 }
 
-async function callCeo(env, prompt, huddle) {
+// One attempt at the CEO call. Returns the raw parsed brief, or throws with the stop reason
+// so the caller can tell "the model rambled past the ceiling" from "the proxy is down".
+async function callCeoOnce(env, prompt) {
     const res = await env.PROXY.fetch(CLAUDE_PROXY, {
         method: 'POST',
         headers: {
@@ -439,8 +450,11 @@ async function callCeo(env, prompt, huddle) {
         body: JSON.stringify({
             model: env.AI_MODEL_DEFAULT,
             // 900 truncated the JSON once handed_off was added (29 Jul: "CEO returned no JSON"
-            // on every run — the closing brace never arrived). Headroom, not a tight fit.
-            max_tokens: 1500,
+            // on every run — the closing brace never arrived). 1500 truncated it AGAIN on
+            // 31 Jul at 4,869 chars. The ceiling is not the real fix on its own: the prompt
+            // now caps list lengths too. This is headroom so a wordy day cannot silence the
+            // brief, and a truncated reply is retried once below rather than lost.
+            max_tokens: 3000,
             system: prompt.system,
             messages: [{ role: 'user', content: prompt.user }],
         }),
@@ -450,7 +464,23 @@ async function callCeo(env, prompt, huddle) {
     const text = data.content?.[0]?.text || '';
     const json = text.match(/\{[\s\S]*\}/);
     if (!json) throw new Error('CEO returned no JSON (stop=' + (data.stop_reason || '?') + ', ' + text.length + ' chars): ' + text.slice(-120));
-    const b = JSON.parse(json[0]);
+    return JSON.parse(json[0]);
+}
+
+async function callCeo(env, prompt, huddle) {
+    let b;
+    try {
+        b = await callCeoOnce(env, prompt);
+    } catch (err) {
+        // A truncated or unparseable reply is recoverable: ask again, much shorter. A proxy
+        // error (down, auth, rate limit) fails the same way twice, so do not burn a second call.
+        if (String(err.message).startsWith('CEO proxy error')) throw err;
+        const terse = {
+            system: prompt.system,
+            user: prompt.user + '\n\nYOUR LAST REPLY WAS CUT OFF BEFORE THE JSON CLOSED. Answer again, much shorter: one sentence per field, at most 2 ignore items, at most 3 handed_off items, at most 1 flag. Close the JSON.',
+        };
+        b = await callCeoOnce(env, terse);
+    }
     if (!b.one_thing || !b.first_step) throw new Error('CEO JSON missing required fields');
     b.ignore = Array.isArray(b.ignore) ? b.ignore.slice(0, 4) : [];
     b.flags = Array.isArray(b.flags) ? b.flags.slice(0, 2) : [];
