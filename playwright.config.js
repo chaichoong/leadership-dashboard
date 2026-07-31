@@ -23,7 +23,18 @@ module.exports = defineConfig({
   use: {
     baseURL: LIVE_URL,
     screenshot: 'only-on-failure',
-    trace: 'on-first-retry',
+    // 'retain-on-failure', NOT 'on-first-retry'. Those two settings and retries:0 above
+    // cancel each other out: 'on-first-retry' only records when a test is retried, and
+    // nothing is ever retried, so no trace was ever written. Verified 2026-07-31 by
+    // failing a test on purpose — the run left a screenshot and an error-context.md and
+    // no trace.zip at all.
+    //
+    // That mattered on 31 Jul: task-drawer-comments.spec.js dropped a test three times
+    // under a full-suite run, a different test each time, and every one of those runs was
+    // unexplainable afterwards. It has since passed six full runs, including at load
+    // average 13.5 and back-to-back with another run, so it cannot be reproduced on
+    // demand — which is exactly the case a trace exists for. Next red run leaves one.
+    trace: 'retain-on-failure',
   },
   webServer: {
     // ThreadingHTTPServer, not `python3 -m http.server` (single-threaded). A single dashboard
