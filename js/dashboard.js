@@ -1167,9 +1167,9 @@
                 'text-red'
             )}
             <div class="kpi-card">
-                <div class="kpi-card-label">Monthly Operating Cushion</div>
+                <div class="kpi-card-label">Monthly Operating Cushion (plan)</div>
                 <div class="kpi-card-value"><span style="color:var(--warning)">£${Math.floor(operatingCushionLow).toLocaleString('en-GB')}</span><span style="color:var(--text-muted);font-size:20px;margin:0 4px">–</span><span style="color:var(--success)">£${Math.floor(operatingCushionHigh).toLocaleString('en-GB')}</span></div>
-                <div class="kpi-card-sub">Monthly income minus monthly fixed costs — In Payment only → incl. CFV Actioned</div>
+                <div class="kpi-card-sub">Contracted rent minus expected fixed costs — In Payment only → incl. CFV Actioned. This is the PLAN figure; the cash figure is the project KPI "Monthly operating cushion (cash)" and runs about £3,400 lower.</div>
             </div>
             <div class="kpi-card">
                 <div class="kpi-card-label">Operating Cushion Margin</div>
@@ -1438,7 +1438,7 @@
                 targetProgressBarGBP(cfvNum, CFV_TARGET_GBP)
             )}
             <div class="kpi-card clickable" onclick="toggleCard(this)">
-                <div class="kpi-card-label">Target Operating Cushion <span class="chevron">▸</span></div>
+                <div class="kpi-card-label">Target Operating Cushion (plan) <span class="chevron">▸</span></div>
                 <div class="kpi-card-value"><span class="${ocOnTrack ? 'text-green' : 'text-amber'}">£${Math.floor(operatingCushionHigh).toLocaleString('en-GB')}</span><span style="color:var(--text-muted);font-size:20px;margin:0 4px">/</span><span style="color:var(--text-primary)">£${Math.floor(requiredOperatingCushion).toLocaleString('en-GB')}</span></div>
                 <div class="kpi-card-sub">${ocProgressPct}% of target | ${ocOnTrack ? `<span class="text-green">On track — ${fmt(CLEAR_PROFIT_TARGET)} clear profit</span>` : `<span class="text-red">Shortfall: ${fmt(requiredOperatingCushion - operatingCushionHigh)}</span>`}</div>
                 <div class="progress-bar" style="position:relative">
