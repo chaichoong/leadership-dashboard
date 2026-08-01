@@ -503,3 +503,38 @@ details.section[open] .section-chevron { transform: rotate(180deg); }
     .wizard-panel { position: fixed; inset: 0; height: 100vh; z-index: 200; border-radius: 0; }
     .grid-cols-2, .grid-cols-3 { grid-template-columns: 1fr; }
 }
+
+/* ── Main Method link slots (picker under each step card) ─────────── */
+.mm-link-row { margin-top: 8px; border-top: 1px dashed var(--border-subtle); padding-top: 8px; }
+.mm-link-line { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.mm-link-warnline { margin-top: 6px; }
+.mm-link-label { font-size: 10px; font-weight: var(--fw-semibold); color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.04em; flex-shrink: 0; }
+.mm-pick { flex: 1; min-width: 120px; font-size: var(--fs-xs); padding: 4px 6px; border: 1px solid var(--border-default); border-radius: var(--radius-sm); background: var(--bg-surface); color: var(--text-primary); font-family: var(--font-family-base); }
+.mm-pick:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.mm-move { display: inline-flex; gap: 2px; flex-shrink: 0; }
+.mm-mini-btn { font-size: var(--fs-xs); padding: 3px 8px; border: 1px solid var(--border-default); border-radius: var(--radius-sm); background: var(--bg-surface); color: var(--text-secondary); cursor: pointer; font-family: var(--font-family-base); }
+.mm-mini-btn:hover:not(:disabled) { background: var(--bg-surface-2); color: var(--text-primary); }
+.mm-mini-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.mm-mini-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.mm-warn { font-size: var(--fs-xs); color: var(--warning); background: var(--warning-bg); border-radius: var(--radius-sm); padding: 2px 8px; }
+.mm-bulk-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-top: 12px; }
+.mm-bulk-hint { font-size: var(--fs-sm); color: var(--text-muted); }
+.mm-bulk-hint.mm-hint-warn { color: var(--warning); }
+
+/* ── Quarter close modal (extends the push-modal pattern) ─────────── */
+.qc-modal { max-width: 860px; }
+.qc-warn-banner { font-size: var(--fs-sm); color: var(--warning); background: var(--warning-bg); border: 1px solid var(--warning-bg); border-radius: var(--radius-md); padding: 10px 14px; margin-bottom: 14px; }
+.qc-include { margin-left: auto; font-size: var(--fs-xs); color: var(--text-secondary); display: inline-flex; align-items: center; gap: 5px; cursor: pointer; }
+.qc-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 10px; margin: 10px 0; }
+.qc-grid label, .qc-note-label { display: flex; flex-direction: column; gap: 4px; font-size: var(--fs-xs); font-weight: var(--fw-semibold); color: var(--text-secondary); }
+.qc-sub { font-weight: var(--fw-regular); color: var(--text-muted); }
+.qc-grid input, .qc-grid select, .qc-note { font-size: var(--fs-sm); padding: 6px 8px; border: 1px solid var(--border-default); border-radius: var(--radius-sm); background: var(--bg-surface); color: var(--text-primary); font-family: var(--font-family-base); }
+.qc-grid input[readonly] { background: var(--bg-subtle); color: var(--text-secondary); }
+.qc-note { width: 100%; resize: vertical; line-height: 1.45; }
+.qc-note-label { margin: 6px 0 10px; }
+.qc-tasks-head { font-size: var(--fs-xs); font-weight: var(--fw-semibold); color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.04em; margin: 8px 0 6px; }
+.qc-task-row { display: flex; align-items: center; gap: 10px; padding: 5px 0; border-bottom: 1px solid var(--border-subtle); }
+.qc-task-row:last-child { border-bottom: 0; }
+.qc-task-name { flex: 1; font-size: var(--fs-sm); color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.qc-carry-sel { max-width: 320px; font-size: var(--fs-xs); padding: 4px 6px; border: 1px solid var(--border-default); border-radius: var(--radius-sm); background: var(--bg-surface); color: var(--text-primary); }
+.qc-no-tasks { font-size: var(--fs-sm); color: var(--text-muted); font-style: italic; padding: 4px 0; }

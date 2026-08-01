@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Objective &amp; Strategy OS — Workflow Map</title>
+<link rel="stylesheet" href="../../css/tokens.css?v=1">
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; }
+body { line-height: 1.55; color: var(--text-primary); background: var(--bg-app); }
+
+/* Hero */
+.hero {
+  background: linear-gradient(135deg, var(--accent) 0%, var(--accent-hover) 100%);
+  color: #fff; padding: 3rem 2rem 4rem; position: relative; overflow: hidden;
+}
+.hero::after {
+  content: ''; position: absolute; top: -50%; right: -10%;
+  width: 600px; height: 600px;
+  background: radial-gradient(circle, rgba(255,255,255,0.1) 0%, transparent 70%);
+  border-radius: 50%;
+}
+.hero-inner { max-width: 1200px; margin: 0 auto; position: relative; z-index: 1; }
+.hero-back { display: inline-flex; align-items: center; gap: 0.4rem; font-size: 0.85rem; opacity: 0.8; text-decoration: none; color: #fff; margin-bottom: 1.25rem; transition: opacity 0.15s; }
+.hero-back:hover { opacity: 1; }
+.hero h1 { font-size: 2.5rem; font-weight: 700; letter-spacing: -0.5px; margin-bottom: 0.5rem; }
+.hero p.lede { font-size: 1.1rem; opacity: 0.92; max-width: 720px; }
+
+/* Layout */
+.layout { max-width: 1200px; margin: -2rem auto 4rem; padding: 0 1.5rem; display: grid; grid-template-columns: 220px 1fr; gap: 2rem; align-items: start; }
+@media (max-width: 900px) { .layout { grid-template-columns: 1fr; } .nav { position: static !important; } }
+
+/* Side nav */
+.nav {
+  position: sticky; top: 1rem;
+  background: var(--bg-surface); border: 1px solid var(--border-default);
+  border-radius: var(--radius-xl); padding: 1rem; box-shadow: var(--shadow-sm);
+}
+.nav h3 { font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); margin-bottom: 0.5rem; }
+.nav a { display: block; padding: 0.4rem 0.6rem; font-size: 0.88rem; color: var(--text-secondary); text-decoration: none; border-radius: var(--radius-md); margin-bottom: 0.15rem; }
+.nav a:hover { background: var(--bg-surface-2); color: var(--accent); }
+
+/* Main content */
+.main { background: var(--bg-surface); border: 1px solid var(--border-default); border-radius: var(--radius-xl); box-shadow: var(--shadow-md); padding: 2rem 2.25rem; }
+.section { margin-top: 2.75rem; }
+.section:first-child { margin-top: 0; }
+.section > h2 {
+  font-size: 1.6rem; font-weight: 700; color: var(--accent);
+  padding-bottom: 0.5rem; border-bottom: 3px solid var(--accent-soft);
+  margin-bottom: 1.25rem; display: flex; align-items: center; gap: 0.5rem;
+}
+.section > h2 .num { font-size: 0.9rem; padding: 0.15rem 0.6rem; border-radius: var(--radius-full); background: var(--accent-soft); color: var(--accent); font-weight: 700; }
+.section p { margin-bottom: 0.8rem; font-size: 0.95rem; color: var(--text-primary); }
+.subsection { margin-top: 1.5rem; }
+.subsection h3 { font-size: 1.15rem; color: var(--text-primary); margin-bottom: 0.6rem; }
+
+/* Cards */
+.card { background: var(--bg-surface); border: 1px solid var(--border-default); border-radius: var(--radius-lg); padding: 1.25rem; margin-bottom: 1rem; }
+.card.hilite { border-left: 4px solid var(--accent); background: var(--bg-surface-2); }
+.card h4 { font-size: 1rem; font-weight: 600; margin-bottom: 0.5rem; }
+.card p { font-size: 0.9rem; color: var(--text-secondary); margin-bottom: 0.4rem; }
+
+/* Color tags */
+.tag { display: inline-block; font-size: 0.7rem; font-weight: 700; padding: 0.15rem 0.55rem; border-radius: var(--radius-full); margin-right: 0.3rem; letter-spacing: 0.03em; text-transform: uppercase; }
+.tag-user { background: var(--info-bg); color: var(--info); }
+.tag-auto { background: var(--accent-soft); color: var(--accent); }
+.tag-rule { background: var(--warning-bg); color: var(--warning); }
+.tag-ai { background: var(--bg-subtle); color: var(--tone-plum); }
+.tag-data { background: var(--bg-subtle); color: var(--text-secondary); }
+
+/* Step list */
+.steps { counter-reset: step; padding-left: 0; list-style: none; margin-bottom: 1rem; }
+.steps li { counter-increment: step; position: relative; padding: 0.45rem 0 0.45rem 2rem; font-size: 0.92rem; color: var(--text-primary); }
+.steps li::before { content: counter(step); position: absolute; left: 0; top: 0.45rem; width: 1.4rem; height: 1.4rem; border-radius: 50%; background: var(--accent); color: #fff; font-weight: 700; font-size: 0.75rem; display: inline-flex; align-items: center; justify-content: center; }
+
+/* Tables */
+.tbl-wrap { overflow-x: auto; }
+.tbl { width: 100%; border-collapse: collapse; margin: 0.5rem 0 1rem; font-size: 0.88rem; }
+.tbl th { text-align: left; padding: 0.6rem 0.8rem; background: var(--bg-subtle); font-weight: 600; color: var(--text-primary); border-bottom: 2px solid var(--border-default); }
+.tbl td { padding: 0.55rem 0.8rem; border-bottom: 1px solid var(--border-subtle); vertical-align: top; }
+.tbl tr:last-child td { border-bottom: 0; }
+
+/* Flow boxes */
+.flowline { display: flex; align-items: stretch; gap: 1.5rem; margin: 1.25rem 0; flex-wrap: wrap; }
+.flowbox {
+  flex: 1 1 140px; min-width: 130px; padding: 0.85rem 0.8rem;
+  background: var(--bg-surface); border: 2px solid var(--border-default); border-radius: var(--radius-lg);
+  text-align: center; position: relative;
+}
+.flowbox h5 { font-size: 0.85rem; font-weight: 700; color: var(--accent); margin-bottom: 0.25rem; }
+.flowbox p { font-size: 0.75rem; color: var(--text-secondary); }
+.flowbox.freeze { border-color: var(--info); }
+.flowbox.freeze h5 { color: var(--info); }
+.flowbox.carry { border-color: var(--accent-gold); }
+.flowbox.carry h5 { color: var(--accent-gold); }
+.flowbox + .flowbox::before {
+  content: '→'; position: absolute; left: -1.25rem; top: 50%; transform: translateY(-50%);
+  font-size: 1.4rem; color: var(--accent); font-weight: 700;
+}
+@media (max-width: 600px) {
+  .flowbox + .flowbox::before { content: '↓'; left: 50%; top: -1.35rem; transform: translateX(-50%); }
+}
+
+/* Callouts */
+.callout {
+  background: var(--info-bg); border-left: 4px solid var(--info); color: var(--text-primary);
+  padding: 0.85rem 1rem; border-radius: var(--radius-md); font-size: 0.9rem; margin: 1rem 0;
+}
+.callout.warn { background: var(--warning-bg); border-color: var(--warning); }
+.callout.good { background: var(--success-bg); border-color: var(--success); }
+
+.footer-note { max-width: 1200px; margin: 0 auto 3rem; padding: 0 1.5rem; font-size: 0.8rem; color: var(--text-muted); text-align: center; }
+</style>
+</head>
+<body>
+
+<div class="hero">
+  <div class="hero-inner">
+    <a class="hero-back" href="index.html">← Back to Objective &amp; Strategy</a>
+    <h1>🎯 Objective &amp; Strategy — how it works</h1>
+    <p class="lede">Write the plan → turn it into real work → share the work out → watch one number → close the quarter. Every 90 days. This page walks through each step in plain words.</p>
+  </div>
+</div>
+
+<div class="layout">
+  <nav class="nav">
+    <h3>Jump to</h3>
+    <a href="#overview">1 · The five steps</a>
+    <a href="#step1">2 · Writing the plan</a>
+    <a href="#step2">3 · The push</a>
+    <a href="#step3">4 · Who does each job</a>
+    <a href="#step3b">5 · The approval gate</a>
+    <a href="#step4">6 · The number &amp; the sync check</a>
+    <a href="#step5">7 · Closing the quarter</a>
+  </nav>
+
+  <main class="main">
+
+    <!-- ═══════════ 1 · OVERVIEW ═══════════ -->
+    <section class="section" id="overview">
+      <h2><span class="num">1</span> The five steps</h2>
+      <p>One plan per business, per quarter. It lives on one page and follows the same loop every 90 days.</p>
+      <div class="flowline">
+        <div class="flowbox"><h5>1 · Write the plan</h5><p>The AI wizard interviews you and fills the form</p></div>
+        <div class="flowbox"><h5>2 · Push it</h5><p>The three projects become real projects and tasks</p></div>
+        <div class="flowbox"><h5>3 · Share the work</h5><p>AI agent first, team second, founder last</p></div>
+        <div class="flowbox"><h5>4 · Watch one number</h5><p>Each project's KPI shows on the dashboard</p></div>
+        <div class="flowbox"><h5>5 · Close the quarter</h5><p>Freeze the result, carry the leftovers</p></div>
+      </div>
+      <p style="font-size:0.9rem;color:var(--text-secondary)">A "KPI" is a Key Performance Indicator — the one number that tells you whether a project worked, like "£249 monthly income" or "40 prospects contacted".</p>
+      <p>
+        <span class="tag tag-user">You</span> = a person clicks something&nbsp;&nbsp;
+        <span class="tag tag-auto">Auto</span> = the app does it for you&nbsp;&nbsp;
+        <span class="tag tag-ai">AI</span> = an AI model is asked&nbsp;&nbsp;
+        <span class="tag tag-data">Data</span> = saved to Airtable (the database)
+      </p>
+    </section>
+
+    <!-- ═══════════ 2 · STEP 1 ═══════════ -->
+    <section class="section" id="step1">
+      <h2><span class="num">2</span> Step 1 — Writing the plan</h2>
+      <div class="flowline">
+        <div class="flowbox"><h5>Pick the context</h5><p>Business + quarter + year</p></div>
+        <div class="flowbox"><h5>AI wizard</h5><p>One question at a time, in plain words</p></div>
+        <div class="flowbox"><h5>The two halves</h5><p>Objective Plan + Strategy Plan, one record</p></div>
+        <div class="flowbox"><h5>Save</h5><p>Everything goes to the database</p></div>
+      </div>
+      <div class="card">
+        <h4>The two halves share one record</h4>
+        <p><strong>Objective Plan</strong> — why the business exists. Reviewed once a year, tweaked quarterly: the objective; what you do, who for and how; the customer profile; up to 20 team rules; up to 5 things that make you different; the main method step by step; the offer people can't refuse.</p>
+        <p><strong>Strategy Plan</strong> — how you win the next 90 days: the nine-year picture, three-year and one-year targets with measurable numbers, and three quarterly projects. Each project gets one KPI, an owner, a way to track it, a definition of done, and three monthly stepping stones.</p>
+      </div>
+      <div class="card hilite">
+        <h4>The Main Method section — text AND a linked record <span class="tag tag-user">You</span><span class="tag tag-data">Data</span></h4>
+        <p>Each of the ten method steps has two parts: the words you type, and a picker that links the step to a record in the Main Methods library. The Systemisation page reads the <strong>linked records</strong> — it takes the first letter of each one, in step order, and spells out your framework (like OPTIMISED). Text alone is invisible to it.</p>
+        <p>So under every step there is a "Linked record" picker. If a step has text but no linked record, the page shows a warning — it never blocks you, it just tells you. One click on <strong>"Create the missing Main Method records from my step text"</strong> makes the records for you: the words up to the first dash or full stop become the record's name, the rest becomes its description.</p>
+        <p>The ↑ and ↓ buttons move a step up or down. Text and linked record always move <strong>together</strong>, so reordering steps can never scramble the letters of your framework.</p>
+      </div>
+    </section>
+
+    <!-- ═══════════ 3 · STEP 2 ═══════════ -->
+    <section class="section" id="step2">
+      <h2><span class="num">3</span> Step 2 — The push</h2>
+      <p>The "Push Projects →" button turns the three written projects into real, trackable work.</p>
+      <div class="flowline">
+        <div class="flowbox"><h5>Reads the screen</h5><p>Uses what you just typed, not what was last saved</p></div>
+        <div class="flowbox"><h5>AI splits the stones</h5><p>Each monthly stepping stone becomes one or more jobs</p></div>
+        <div class="flowbox"><h5>Preview</h5><p>You see every project and every job before anything is written</p></div>
+        <div class="flowbox"><h5>Create</h5><p>Projects + tasks made in the database, linked back to the plan</p></div>
+      </div>
+      <ol class="steps">
+        <li><span class="tag tag-ai">AI</span> Each stepping stone is split into separate jobs. "Do X and Y" becomes two jobs; one deliverable stays one job. Words like "skip" and "n/a" are ignored. If the AI call fails, the stone stays whole as a single job rather than being lost.</li>
+        <li><span class="tag tag-user">You</span> A preview shows everything that would be created. Walk away here and nothing has changed.</li>
+        <li><span class="tag tag-auto">Auto</span> On approval, each project is created carrying its KPI, owner, tracking method, definition of done and the quarter's dates. The new project's ID is written back onto the plan — that back-link stops duplicates and makes renaming safe.</li>
+        <li><span class="tag tag-auto">Auto</span> Each job is due at the end of its month, attached to the project and the business. The app re-sets each due date straight after creating it, because a database automation would otherwise reset new tasks to today.</li>
+        <li><span class="tag tag-rule">Rule</span> A project that already exists is left completely alone — no new copy, no new jobs.</li>
+      </ol>
+    </section>
+
+    <!-- ═══════════ 4 · STEP 3 ═══════════ -->
+    <section class="section" id="step3">
+      <h2><span class="num">4</span> Step 3 — Who does each job</h2>
+      <p>Three questions, always in this order. The aim is that AI does up to 90% of repeatable work.</p>
+      <div class="flowline">
+        <div class="flowbox"><h5>1 · Can an AI agent do it?</h5><p>Research, drafting, building, checking, computing. 17 agents exist as team members.</p></div>
+        <div class="flowbox"><h5>2 · If not, can the team?</h5><p>Hands-on and on-site work goes to the human team</p></div>
+        <div class="flowbox"><h5>3 · Only then, the founder</h5><p>Decisions, approvals, credentials, signatures, being somewhere in person</p></div>
+      </div>
+      <div class="callout">The AI CEO routes each job to the right worker agent under the right department, and every agent reports back in the 09:00 daily huddle.</div>
+    </section>
+
+    <!-- ═══════════ 5 · STEP 3b ═══════════ -->
+    <section class="section" id="step3b">
+      <h2><span class="num">5</span> Step 3b — The approval gate</h2>
+      <p>The gate sits <strong>before</strong> the action, not after it. Nothing an agent produces reaches a tenant, a creditor, a prospect or a bank until the owner has said yes to that exact thing.</p>
+      <div class="flowline">
+        <div class="flowbox"><h5>Prepare</h5><p>The agent drafts the work. It sends and files nothing.</p></div>
+        <div class="flowbox"><h5>Ask</h5><p>The task moves to "Approval" — it shows in the app and as a Slack message with the actual work attached</p></div>
+        <div class="flowbox freeze"><h5>Decide</h5><p>Approve ✅, reply with changes, or reject ❌</p></div>
+        <div class="flowbox"><h5>Carry out</h5><p>Only after a yes does the agent actually do it</p></div>
+        <div class="flowbox"><h5>Complete</h5><p>The agent marks it done itself — approving is not the same as done</p></div>
+      </div>
+      <div class="callout good">Asking for a change is just a plain reply in the Slack thread — those words go back to the agent as the instruction. Because nothing was ever sent, a change costs nothing: it simply goes round again.</div>
+      <p style="font-size:0.9rem;color:var(--text-secondary)">Agents earn trust per type of work: 20 approved jobs of that type at 90% or better, with no rejections in the last 10, produces a <em>recommendation</em> to skip the gate. Nothing ever promotes itself — the owner moves the gears, accuracy only advises.</p>
+    </section>
+
+    <!-- ═══════════ 6 · STEP 4 ═══════════ -->
+    <section class="section" id="step4">
+      <h2><span class="num">6</span> Step 4 — How the number reaches the dashboard</h2>
+      <p>Every project carries exactly one number: its name, its unit and the target. The Leadership Dashboard shows one row per live project — current value against target, and when it last moved.</p>
+      <div class="flowline">
+        <div class="flowbox"><h5>Automatic route</h5><p>Compute code on the project runs when the dashboard loads and writes the current value</p></div>
+        <div class="flowbox"><h5>Manual route</h5><p>Someone types the number in — shown with an amber warning, never as a confident figure</p></div>
+        <div class="flowbox"><h5>Dashboard row</h5><p>Name · owner · current vs target · last updated</p></div>
+      </div>
+      <div class="callout warn">Closed quarters drop off the dashboard on their own — anything with a "Closed On" date is excluded and its frozen value is never recomputed. And a stale number shows as STALE rather than pretending to be current.</div>
+      <div class="subsection">
+        <h3>Step 4b — The sync check (run it whenever a KPI is added or changed)</h3>
+        <p>A new KPI can quietly collide with a number already on the dashboard, and the collision stays invisible until someone acts on the wrong figure. Eight mechanical checks:</p>
+        <ol class="steps">
+          <li>No two live projects share the same KPI name.</li>
+          <li>No KPI shares a name with the dashboard's own cards (this one bit: two different numbers were both called "monthly operating cushion" for a whole quarter, about £3,400 apart).</li>
+          <li>A business is linked — otherwise the KPI never shows under a business filter.</li>
+          <li>An owner is set.</li>
+          <li>A target is set, in the right unit.</li>
+          <li>A tracking method is written down, naming exactly which figure it measures.</li>
+          <li>The definition of done describes an outside result (money cleared, prospects contacted) — never "all tasks complete", which can be satisfied by simply having too few tasks.</li>
+          <li>The number updates itself. Every live KPI carries compute code or a recorded reason why not.</li>
+        </ol>
+      </div>
+    </section>
+
+    <!-- ═══════════ 7 · STEP 5 ═══════════ -->
+    <section class="section" id="step5">
+      <h2><span class="num">7</span> Step 5 — Closing the quarter</h2>
+      <p><strong>Freeze first. Carry second. Never the other way round.</strong> The "Close the quarter" button on the plan page runs the whole protocol, and shows you a preview before a single thing is written.</p>
+      <div class="flowline">
+        <div class="flowbox freeze"><h5>1 · True outcome</h5><p>Completed or Off-Track — marked honestly</p></div>
+        <div class="flowbox freeze"><h5>2 · KPI at Close</h5><p>The number it actually reached, frozen</p></div>
+        <div class="flowbox freeze"><h5>3 · Progress at Close</h5><p>How much of the work got done, frozen</p></div>
+        <div class="flowbox freeze"><h5>4 · Closed On</h5><p>Stamped with the quarter's end date</p></div>
+        <div class="flowbox freeze"><h5>5 · Closing note</h5><p>Target, actual, why the gap, where the leftovers went</p></div>
+        <div class="flowbox freeze"><h5>6 · Record comment</h5><p>Same summary — timestamped, attributed, can't be overwritten</p></div>
+        <div class="flowbox carry"><h5>7 · THEN carry</h5><p>Each open task is ADDED to the new quarter's project. The old link stays.</p></div>
+      </div>
+      <div class="card hilite">
+        <h4>What the preview shows <span class="tag tag-user">You</span></h4>
+        <p>One panel per project: the suggested outcome (Completed if the KPI or the task list got there, Off-Track otherwise — you can change it), the KPI value to freeze (pre-filled from the current number, editable because the definition of done sometimes measures something slightly different), the frozen progress percentage, the close date, and a pre-written closing note you can edit.</p>
+        <p>Under each project, every open task with a dropdown: carry it into one of next quarter's projects, or <strong>Park</strong> it (it stays in this quarter only). If next quarter's projects don't exist yet, everything defaults to Park and the page tells you to write and push next quarter's plan first.</p>
+        <p>At the end it reports three counts: <strong>carried · closed · parked</strong>.</p>
+      </div>
+      <div class="callout warn"><strong>Why the order can never change.</strong> A carried task belongs to both quarters. Finish it in September and, if the old quarter had not been frozen first, its completion percentage would rise — a quarter you missed would slowly start reading as a win months later. The app writes the full snapshot and the record comment <em>before</em> it re-links a single task, and if a project's snapshot fails to save, its tasks are not carried at all.</div>
+      <div class="callout good">Nothing is ever moved, copied or deleted in a close. The old quarter keeps every task and its true result, forever.</div>
+    </section>
+
+  </main>
+</div>
+
+<div class="footer-note">Objective &amp; Strategy OS workflow map · updated 1 Aug 2026 · reflects the live build, including the Main Method picker and the in-app quarter close.</div>
+
+</body>
+</html>
