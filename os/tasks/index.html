@@ -188,6 +188,9 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 .avatar-erica{background:var(--tone-gold)}.avatar-may{background:var(--tone-olive)}
 .avatar-gary{background:var(--tone-blue)}.avatar-rob{background:var(--accent-hover)}.avatar-roy{background:var(--accent-gold)}
 .avatar-other{background:var(--text-muted)}
+/* The AI workforce. Distinct from every person colour on purpose — at a glance
+   you should be able to tell agent work from human work. */
+.avatar-agent{background:var(--tone-blue);font-size:9px;letter-spacing:.5px}
 .assignee-cell{display:flex;align-items:center;gap:6px;white-space:nowrap}
 
 /* Task detail drawer (modal) */
@@ -206,6 +209,10 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 .approval-box .apv-sub{font-size:var(--fs-sm);color:var(--text-secondary);margin-bottom:10px}
 .approval-box .apv-raiser{font-size:var(--fs-sm);color:var(--text-primary);font-weight:var(--fw-semibold)}
 .approval-box textarea{width:100%;min-height:60px;background:var(--bg-surface);border:1px solid var(--border-default);color:var(--text-primary);border-radius:4px;padding:6px 8px;font-family:inherit;font-size:var(--fs-base)}
+.approval-box .apv-work{background:var(--bg-surface);border:1px solid var(--border-default);border-radius:var(--radius-sm);padding:8px 10px;margin-bottom:10px}
+.approval-box .apv-work-label{font-size:10px;font-weight:var(--fw-bold);text-transform:uppercase;letter-spacing:.5px;color:var(--text-secondary);margin-bottom:4px}
+.approval-box .apv-work-body{font-size:var(--fs-sm);color:var(--text-primary);white-space:pre-wrap;word-break:break-word;max-height:260px;overflow-y:auto}
+.approval-box .apv-work-empty{border-color:var(--warning);background:var(--warning-bg)}
 .approval-box .apv-actions{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
 .approval-box .apv-actions .btn{font-size:11px;padding:5px 10px}
 .approval-decided{border:1px solid var(--border-default);background:var(--bg-surface-2);border-radius:var(--radius-md);padding:12px 16px;margin-bottom:16px;font-size:var(--fs-sm);color:var(--text-secondary)}
@@ -752,6 +759,8 @@ const F = {
   approvedBy:  'fldNntfwSzU5DlYS4',  // singleCollaborator — who decided
   approvedAt:  'fldr4Mvf2RzKvhZhi',  // dateTime — when
   taskType:    'fldZ2moDV2041Sobc',  // singleSelect — work class; accuracy is scored per agent PER TASK TYPE
+  agentOutput: 'fldzswp8fx6PqpLQ5',  // what the agent PRODUCED (separate from Description, which is the brief)
+  approvalFeedback:'fldtI7SJI4gEohHD1', // Kevin's words back to the agent on a change or a rejection
 };
 const TASK_FIELD_IDS = Object.values(F);
 
@@ -1863,6 +1872,8 @@ function parseTask(rec){
     approvedAt:gf(rec,F.approvedAt)||'',
     taskType:selectName(gf(rec,F.taskType)),
     processedByAI:!!gf(rec,F.processedByAI),
+    agentOutput:gf(rec,F.agentOutput)||'',
+    approvalFeedback:gf(rec,F.approvalFeedback)||'',
     _startMin:null, // scheduled start minute of day (for My Day timeline)
   };
 }
@@ -2042,15 +2053,30 @@ async function updateTaskField(taskId,fieldKey,rawValue){
     } else if(fieldKey==='dueDate'||fieldKey==='origDueDate'){
       payload[fid]=rawValue||null;task[fieldKey]=rawValue||'';
     } else if(fieldKey==='assignee'){
-      // rawValue = team key, or '' / '__unassigned' to clear the assignee
-      // (e.g. a maintenance job sitting unallocated until someone is chosen).
-      if(!rawValue||rawValue==='__unassigned'){
+      // rawValue = team key, 'agent:<recId>' for an AI agent, or ''/'__unassigned'
+      // to clear it (e.g. a maintenance job sitting unallocated).
+      if(String(rawValue||'').indexOf('agent:')===0){
+        // Assignee is a singleCollaborator and cannot hold an agent, so agent
+        // work goes on the Team Member link and the human Assignee is cleared.
+        const agentId=String(rawValue).slice(6);
+        payload[F.teamMember]=[agentId];
         payload[fid]=null;
+        task.teamMemberIds=[agentId];
+        task.assignee='';task.assigneeEmail='';task.assigneeId='';
+      } else if(!rawValue||rawValue==='__unassigned'){
+        payload[fid]=null;
+        // Clearing the assignee also lets go of the agent, otherwise a task
+        // reads as unassigned in one place and agent-held in another.
+        if(taskAgentId(task)){payload[F.teamMember]=[];task.teamMemberIds=[]}
         task.assignee='';task.assigneeEmail='';task.assigneeId='';
       } else {
       const member=TEAM.find(m=>m.key===rawValue);
       if(member){
         payload[fid]={email:member.email};task.assignee=member.name;task.assigneeEmail=member.email;
+        // Handing agent work to a person takes it off the agent, or the task
+        // shows up under both. Only cleared when the link holds an AGENT —
+        // real team members legitimately sit on Team Member too.
+        if(taskAgentId(task)){payload[F.teamMember]=[];task.teamMemberIds=[]}
         // Auto-add collaborators on reassignment:
         // 1. The actor (whoever clicked Reassign) stays in the loop
         // 2. The previous assignee stays in the loop
@@ -2547,7 +2573,7 @@ function openDrillDownTaskDetail(taskId){
     </div>
     <h2 contenteditable="true" id="drwName" onblur="drwSaveText('${t.id}','name',this.innerText,true)" style="margin-top:0">${escHtml(t.name)}</h2>
     <div style="font-size:11px;color:var(--text-secondary);margin-bottom:12px">Click any field to edit. Changes auto-save.</div>
-    <div class="field-row"><label>Assignee</label><div class="field-val"><select onchange="updateTaskField('${t.id}','assignee',this.value);renderAll()">${TEAM.map(m=>`<option value="${m.key}" ${t.assigneeEmail===m.email?'selected':''}>${m.name}</option>`).join('')}</select></div></div>
+    <div class="field-row"><label>Assignee</label><div class="field-val"><select onchange="updateTaskField('${t.id}','assignee',this.value);renderAll()">${assigneeOptionsHtml(t,false)}</select></div></div>
     <div class="field-row"><label>Due Date</label><div class="field-val" style="display:flex;align-items:center;gap:10px">
       <input type="date" style="flex:1" value="${t.dueDate||''}" onchange="updateTaskField('${t.id}','dueDate',this.value);renderAll()">
       <label style="display:flex;align-items:center;gap:4px;font-size:11px;color:var(--danger);font-weight:600;min-width:auto;text-transform:none;letter-spacing:0"><input type="checkbox" ${t.hardDeadline?'checked':''} onchange="updateTaskField('${t.id}','hardDeadline',this.checked)">Hard Deadline</label>
@@ -2584,23 +2610,82 @@ function deleteTaskFromDrillModal(taskId){
 // Single source of truth for the team-bar filter, including the special
 // 'all' (no filter) and 'unassigned' (no assignee) selections. Used by every
 // view so the selected person/unassigned tab filters consistently.
+// ── Who is actually doing this task ───────────────────────────────────
+// `Assignee` is an Airtable singleCollaborator and CANNOT hold an AI agent —
+// agents have no Airtable login. Agent work is carried on the `Team Member`
+// link instead. Until this existed the page only read Assignee, so 160 open
+// agent tasks all showed as "Unassigned" and the workforce was invisible.
+function taskAgentId(t){
+  return ((t&&t.teamMemberIds)||[]).find(id=>AGENT_MAP[id])
+      || ((t&&t.raisedByIds)||[]).find(id=>AGENT_MAP[id])
+      || '';
+}
+function taskAgentName(t){ const id=taskAgentId(t); return id?(AGENT_MAP[id]||''):'' }
+// Short label for a grid cell: "AI Worker — Writer" → "Writer",
+// "AI Operations (Gino Wickman)" → "Operations".
+function shortAgentName(name){
+  return String(name||'').replace(/^AI\s+/,'').replace(/^Worker\s*[—-]\s*/,'').replace(/\s*\(.*\)$/,'').trim();
+}
+function taskIsTrulyUnassigned(t){ return !t.assigneeEmail && !taskAgentId(t) }
+
+// One option list for every assignee picker on the page: people first, then
+// the AI agents that hold work. Agent values are prefixed "agent:" and are
+// written to Team Member, not Assignee — see updateTaskField.
+function assigneeOptionsHtml(t,short){
+  // A task can be agent work AND currently parked with a person — that is
+  // exactly what a task waiting for Kevin's approval is. The picker shows who
+  // holds it RIGHT NOW, so a human assignee wins; the agent link still shows
+  // in the AI avatar and keeps the task under the AI Agents filter.
+  const agentId=t.assigneeEmail?'':taskAgentId(t);
+  const people=TEAM.map(m=>`<option value="${m.key}" ${t.assigneeEmail===m.email?'selected':''}>${escHtml(short?m.name.split(' ')[0]:m.name)}</option>`).join('');
+  const ids=Object.keys(AGENT_MAP||{}).sort((a,b)=>AGENT_MAP[a].localeCompare(AGENT_MAP[b]));
+  const agents=ids.map(id=>`<option value="agent:${id}" ${agentId===id?'selected':''}>${escHtml(short?shortAgentName(AGENT_MAP[id]):AGENT_MAP[id])}</option>`).join('');
+  return `<option value="__unassigned" ${taskIsTrulyUnassigned(t)?'selected':''}>Unassigned</option>${people}`
+    + (agents?`<optgroup label="AI agents">${agents}</optgroup>`:'');
+}
+
 function applyTeamFilter(list){
   if(activeTeam==='all')return list;
-  if(activeTeam==='unassigned')return list.filter(t=>!t.assigneeEmail);
+  // "Unassigned" now means nobody at all, human or agent. Before this it
+  // swept up every agent task and read as a backlog that did not exist.
+  if(activeTeam==='unassigned')return list.filter(t=>taskIsTrulyUnassigned(t));
+  if(activeTeam==='agents'){
+    const pick=(typeof window!=='undefined'&&window._agentFilterId)||'';
+    return list.filter(t=>{const id=taskAgentId(t);return pick?id===pick:!!id});
+  }
   const m=TEAM.find(x=>x.key===activeTeam);
   return m?list.filter(t=>t.assigneeEmail===m.email):list;
 }
 function renderTeamBar(){
-  const counts={all:0,unassigned:0};TEAM.forEach(m=>counts[m.key]=0);
+  const counts={all:0,unassigned:0,agents:0};TEAM.forEach(m=>counts[m.key]=0);
   const active=allTasks.filter(t=>t.status!=='Completed'&&!t.someDay);
-  active.forEach(t=>{counts.all++;const k=teamKey(t.assigneeEmail);if(counts[k]!==undefined)counts[k]++;if(!t.assigneeEmail)counts.unassigned++});
+  const perAgent={};
+  active.forEach(t=>{
+    counts.all++;
+    const k=teamKey(t.assigneeEmail);if(counts[k]!==undefined)counts[k]++;
+    const aid=taskAgentId(t);
+    if(aid){counts.agents++;perAgent[aid]=(perAgent[aid]||0)+1}
+    if(taskIsTrulyUnassigned(t))counts.unassigned++;
+  });
   let h=`<button class="team-btn ${activeTeam==='all'?'active':''}" onclick="setTeam('all')">All<span class="count">${counts.all}</span></button>`;
   TEAM.forEach(m=>{const f=m.name.split(' ')[0];
     h+=`<button class="team-btn ${activeTeam===m.key?'active':''}" onclick="setTeam('${m.key}')"><span class="avatar avatar-${m.key}">${f[0]}</span> ${f}<span class="count">${counts[m.key]}</span></button>`;
   });
-  h+=`<button class="team-btn ${activeTeam==='unassigned'?'active':''}" onclick="setTeam('unassigned')" title="Tasks with no assignee — e.g. maintenance jobs awaiting allocation">Unassigned<span class="count">${counts.unassigned}</span></button>`;
+  h+=`<button class="team-btn ${activeTeam==='agents'?'active':''}" onclick="setTeam('agents')" title="Work held by the AI workforce. Assignee cannot hold an agent, so these sit on the Team Member link."><span class="avatar avatar-agent">AI</span> AI Agents<span class="count">${counts.agents}</span></button>`;
+  h+=`<button class="team-btn ${activeTeam==='unassigned'?'active':''}" onclick="setTeam('unassigned')" title="Nobody at all — no person and no agent">Unassigned<span class="count">${counts.unassigned}</span></button>`;
+  // Which agent, once the AI filter is on. Only agents holding work are listed.
+  if(activeTeam==='agents'){
+    const ids=Object.keys(perAgent).sort((a,b)=>perAgent[b]-perAgent[a]);
+    const pick=(typeof window!=='undefined'&&window._agentFilterId)||'';
+    h+=`<select class="filter-select" style="margin-left:8px" onchange="setAgentFilter(this.value)" title="Narrow to one agent">
+      <option value="">Every agent (${counts.agents})</option>
+      ${ids.map(id=>`<option value="${id}" ${pick===id?'selected':''}>${escHtml(AGENT_MAP[id]||id)} (${perAgent[id]})</option>`).join('')}
+    </select>`;
+  }
   document.getElementById('teamBar').innerHTML=h;
 }
+function setAgentFilter(id){window._agentFilterId=id||'';currentPage=1;renderAll()}
+window.setAgentFilter=setAgentFilter;
 
 // ===== KPIs =====
 function renderKPIs(){
@@ -2649,7 +2734,7 @@ function openTaskDrawer(taskId){
       <div style="font-size:11px;color:var(--text-secondary);margin-bottom:12px">Click any field to edit. Changes auto-save.</div>
       ${renderApprovalBlock(t)}
 
-      <div class="field-row"><label>Assignee</label><div class="field-val" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><select onchange="updateTaskField('${t.id}','assignee',this.value);renderAll()" style="flex:1;min-width:140px"><option value="__unassigned" ${!t.assigneeEmail?'selected':''}>Unassigned</option>${TEAM.map(m=>`<option value="${m.key}" ${t.assigneeEmail===m.email?'selected':''}>${m.name}</option>`).join('')}</select><button class="btn btn-sm" onclick="resendAssigneeNotification('${t.id}')" title="Re-send the Slack DM that fires on assignment — useful if the original notification didn't land" style="font-size:11px;padding:3px 10px">📨 Resend Slack</button></div></div>
+      <div class="field-row"><label>Assignee</label><div class="field-val" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><select onchange="updateTaskField('${t.id}','assignee',this.value);renderAll()" style="flex:1;min-width:140px">${assigneeOptionsHtml(t,false)}</select><button class="btn btn-sm" onclick="resendAssigneeNotification('${t.id}')" title="Re-send the Slack DM that fires on assignment — useful if the original notification didn't land" style="font-size:11px;padding:3px 10px">📨 Resend Slack</button></div></div>
       ${t.createdByEmail?`<div class="field-row"><label>Created by</label><div class="field-val" style="font-size:var(--fs-sm);color:var(--text-secondary)"><span title="Set automatically when the task was created via the web app">${escHtml((TEAM.find(m=>m.email===t.createdByEmail)||{}).name||t.createdByEmail)}</span>${t.created?` <span style="color:var(--text-muted);margin-left:6px">on ${new Date(t.created).toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric'})}</span>`:''}</div></div>`:''}
       <div class="field-row"><label>Maintenance</label><div class="field-val"><label style="display:inline-flex;align-items:center;gap:6px;font-size:var(--fs-sm);color:${t.maintenance?'var(--accent)':'var(--text-secondary)'};font-weight:600;cursor:pointer"><input type="checkbox" ${t.maintenance?'checked':''} onchange="updateTaskField('${t.id}','maintenance',this.checked);renderAll()" style="width:16px;height:16px;accent-color:var(--accent)">Maintenance task</label></div></div>
       ${(t.maintenance||t.contractor)
@@ -3505,15 +3590,19 @@ function renderApprovalBlock(t){
   if(!mine){
     return `<div class="approval-decided">Waiting for approval from ${escHtml(t.assignee||t.assigneeEmail)}. Reassign it to yourself to decide it here.</div>`;
   }
+  const work=t.agentOutput
+    ? `<div class="apv-work"><div class="apv-work-label">What the agent has done</div><div class="apv-work-body">${linkifyUrls(t.agentOutput)}</div></div>`
+    : `<div class="apv-work apv-work-empty"><div class="apv-work-label">What the agent has done</div><div class="apv-work-body">The agent left its work empty, so there is nothing here to judge. Do not approve it blind — ask it to show its work.</div></div>`;
   return `<div class="approval-box">
     <h3>Waiting for your approval</h3>
     <div class="apv-sub">Nothing has been sent, filed or actioned. ${raiser?`Prepared by <span class="apv-raiser">${escHtml(raiser)}</span>.`:'No agent recorded on this task.'} Approving hands it back so the agent can carry it out.</div>
+    ${work}
     <div style="margin-bottom:8px"><label style="font-size:11px;color:var(--text-secondary);font-weight:600;text-transform:uppercase;letter-spacing:.5px;display:block;margin-bottom:4px">Kind of work (scores the agent)</label>
       <select id="apvType" style="width:100%;background:var(--bg-surface);border:1px solid var(--border-default);color:var(--text-primary);padding:6px 8px;border-radius:4px;font-family:inherit;font-size:var(--fs-base)">
         <option value="">Not set</option>
         ${TASK_TYPE_OPTIONS.map(o=>`<option value="${o}" ${t.taskType===o?'selected':''}>${o}</option>`).join('')}
       </select></div>
-    <textarea id="apvNote" placeholder="What to change, or why you are rejecting. Required for Request changes and Reject."></textarea>
+    <textarea id="apvNote" placeholder="What to change, or why you are rejecting. Required for Request changes and Reject. (In Slack you just reply in the thread — same thing.)"></textarea>
     <div class="apv-actions">
       <button class="btn btn-success" data-apv-btn onclick="apvDecide('${t.id}','Approved as-is')">Approve</button>
       <button class="btn" data-apv-btn onclick="apvDecide('${t.id}','Approved with minor edits')" title="Approved, but you tidied it first — still counts as accurate">Approve with minor edits</button>
@@ -3550,6 +3639,10 @@ async function apvDecide(taskId,outcome){
   payload[F.approvedAt]=nowIso;
   if(currentUser&&currentUser.email)payload[F.approvedBy]={email:currentUser.email};
   if(chosenType&&chosenType!==t.taskType)payload[F.taskType]=chosenType;
+  // The agent reads this field to find out what to change. A record comment
+  // alone is not enough: the Slack worker's Airtable token cannot read comments
+  // (403), so the field is the only place both sides can see.
+  if(note)payload[F.approvalFeedback]=note;
   if(outcome==='Rejected'){
     // Closed with a reason. Counts against the agent's accuracy.
     payload[F.status]='Completed';
@@ -3577,6 +3670,7 @@ async function apvDecide(taskId,outcome){
     t.approvedByEmail=(currentUser&&currentUser.email)||'';
     t.approvedByName=(currentUser&&currentUser.name)||'';
     if(chosenType)t.taskType=chosenType;
+    if(note)t.approvalFeedback=note;
     if(outcome==='Rejected'){t.status='Completed';t.storedStatus='Completed';t.completion=nowIso}
     else{t.status='Today';t.storedStatus='Today';t.dueDate=todayStr()}
     if(agentId){
@@ -5267,7 +5361,7 @@ function renderTasks(){
       <td class="cb-cell" onclick="event.stopPropagation()"><input type="checkbox" ${checked?'checked':''} onchange="toggleTaskSelect('${t.id}',this.checked)"></td>
       <td style="color:var(--text-secondary)">${idx}</td>
       <td class="task-name-cell"><div class="task-name" contenteditable="true" spellcheck="false" title="Click to edit · Enter to save · Shift+Enter to open full details" onblur="drwSaveText('${t.id}','name',this.innerText.trim(),true)" onkeydown="taskNameKeydown(event,'${t.id}')" onclick="event.stopPropagation()">${escHtml(t.name)}</div>${t.hardDeadline?'<span class="hard-deadline-flag" title="Hard deadline">!</span>':''}${commentBadgeHtml(t.id)}${t.description?`<div class="task-desc">${escHtml(t.description)}</div>`:'<div class="task-open-link" style="font-size:10px;color:var(--text-muted);margin-top:2px">Click row to open details ›</div>'}</td>
-      <td onclick="event.stopPropagation()"><div class="assignee-inline">${t.assignee?`<span class="avatar avatar-${k}">${initials}</span>`:''}<select class="inline-select" style="width:auto;min-width:70px;border:none;background:transparent;padding:2px 4px" onchange="updateTaskField('${t.id}','assignee',this.value).then(()=>{renderTeamBar();renderKPIs();renderTasks()})"><option value="__unassigned" ${!t.assigneeEmail?'selected':''}>Unassigned</option>${TEAM.map(m=>`<option value="${m.key}" ${t.assigneeEmail===m.email?'selected':''}>${m.name.split(' ')[0]}</option>`).join('')}</select></div></td>
+      <td onclick="event.stopPropagation()"><div class="assignee-inline">${t.assignee?`<span class="avatar avatar-${k}">${initials}</span>`:(taskAgentId(t)?`<span class="avatar avatar-agent" title="${escHtml(taskAgentName(t))}">AI</span>`:'')}<select class="inline-select" style="width:auto;min-width:70px;border:none;background:transparent;padding:2px 4px" onchange="updateTaskField('${t.id}','assignee',this.value).then(()=>{renderTeamBar();renderKPIs();renderTasks()})">${assigneeOptionsHtml(t,true)}</select></div></td>
       <td class="${dueCls}" onclick="event.stopPropagation()" style="white-space:nowrap"><input type="date" class="inline-input" style="width:130px;background:transparent;border-color:transparent;color:inherit;font-weight:inherit" value="${t.dueDate||''}" onchange="updateTaskField('${t.id}','dueDate',this.value)"></td>
       <td class="hard-cell" onclick="event.stopPropagation()"><input type="checkbox" title="Hard deadline — never auto-rescheduled" ${t.hardDeadline?'checked':''} onchange="updateTaskField('${t.id}','hardDeadline',this.checked)" style="width:16px;height:16px;cursor:pointer"></td>
       <td onclick="event.stopPropagation()">${inlineSelectCell(t.id,'timeEst',t.timeEst,['',...TIME_OPTIONS])}</td>
@@ -5322,7 +5416,7 @@ function updateBulkBar(){
     // Populate assignee dropdown (HTML-side template was literal text — inject TEAM list here)
     const asg=document.getElementById('bulkAsgSel');
     if(asg&&typeof TEAM!=='undefined'&&!asg.dataset.filled){
-      asg.innerHTML=`<option value="">Change assignee…</option>`+TEAM.map(m=>`<option value="${m.key}">${escHtml(m.name.split(' ')[0])}</option>`).join('');
+      asg.innerHTML=`<option value="">Change assignee…</option>`+TEAM.map(m=>`<option value="${m.key}">${escHtml(m.name.split(' ')[0])}</option>`).join('')+(Object.keys(AGENT_MAP||{}).length?`<optgroup label="AI agents">`+Object.keys(AGENT_MAP).sort((a,b)=>AGENT_MAP[a].localeCompare(AGENT_MAP[b])).map(id=>`<option value="agent:${id}">${escHtml(shortAgentName(AGENT_MAP[id]))}</option>`).join('')+`</optgroup>`:'');
       asg.dataset.filled='1';
     }
     // Populate project dropdown each open (projects may have changed)

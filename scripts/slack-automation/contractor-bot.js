@@ -70,8 +70,9 @@
 // is in its own module so the two features stay separable.
 //   Cron  : every minute (wrangler.toml [triggers]) → runApprovalSweep
 //   Manual: POST /approvals/run?key=…   GET /approvals/diag?key=…
+//           POST /approvals/purge?key=…&match=… (deletes the bot's own posts)
 //           guarded by APPROVALS_ADMIN_KEY
-import { runApprovalSweep, approvalsDiag } from './approvals.js';
+import { runApprovalSweep, approvalsDiag, purgeApprovalPosts } from './approvals.js';
 
 // ─── CONFIGURATION ────────────────────────────────────────────────────
 
@@ -235,6 +236,15 @@ export default {
             }
             if (url.pathname === '/approvals/diag') {
                 return Response.json(await approvalsDiag(env));
+            }
+            // Remove the bot's own test posts from the approvals channel.
+            // Requires ?match=… so it can never wipe the channel wholesale.
+            if (url.pathname === '/approvals/purge') {
+                try {
+                    return Response.json(await purgeApprovalPosts(env, url.searchParams.get('match')));
+                } catch (err) {
+                    return Response.json({ ok: false, error: String(err && err.message || err) }, { status: 500 });
+                }
             }
             if (url.pathname === '/approvals/run') {
                 try {

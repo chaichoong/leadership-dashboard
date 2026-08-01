@@ -31,6 +31,8 @@ const F = {
   teamMember: 'flduCtmQGpOA4eWaj',
   sentForApprovalBy: 'fld30Yw8SWYVp049g',
   approvalOutcome: 'fldrHBSr6qoUfaKuZ',
+  agentOutput: 'fldzswp8fx6PqpLQ5',
+  approvalFeedback: 'fldtI7SJI4gEohHD1',
   approvedBy: 'fldNntfwSzU5DlYS4',
   approvedAt: 'fldr4Mvf2RzKvhZhi',
   taskType: 'fldZ2moDV2041Sobc',
@@ -56,6 +58,7 @@ function taskRecords() {
       [F.status]: 'Approval',
       [F.dueDate]: today,
       [F.description]: 'Proposed draft, not sent.',
+      [F.agentOutput]: 'Subject: Welcome\n\nHi there, thanks for coming on board.',
       [F.assignee]: { id: 'usrKevin', email: KEVIN, name: 'Kevin Brittain' },
       [F.teamMember]: [AGENT_ID],
       [F.sentForApprovalBy]: [AGENT_ID],
@@ -142,6 +145,8 @@ test.describe('Agent approval loop', () => {
     await page.evaluate((id) => openTaskDrawer(id), WAITING_ID);
     await expect(page.locator('.approval-box')).toBeVisible();
     await expect(page.locator('.approval-box')).toContainText('AI Worker — Writer');
+    // The thing he is actually judging has to be on screen, not just the title.
+    await expect(page.locator('.approval-box .apv-work-body')).toContainText('thanks for coming on board');
 
     await page.getByRole('button', { name: 'Approve', exact: true }).click();
     await page.waitForFunction(() => !document.getElementById('drawerOverlay'), null, { timeout: 10000 });
@@ -193,6 +198,76 @@ test.describe('Agent approval loop', () => {
     expect(patch.fields[F.status]).toBe('Completed');
   });
 
+  // Agent-held work was invisible before 1 Aug 2026: the page only read
+  // `Assignee`, which cannot hold an agent, so 160 open agent tasks all showed
+  // as "Unassigned" and read as a backlog nobody owned.
+  test('agent-held tasks show as the agent, not as Unassigned', async ({ page }) => {
+    await mockAirtable(page);
+    await page.goto(PAGE);
+    await waitForTasks(page);
+
+    const counts = await page.evaluate((waitingId) => {
+      const active = allTasks.filter(t => t.status !== 'Completed' && !t.someDay);
+      return {
+        agentHeld: active.filter(t => taskAgentId(t)).length,
+        trulyUnassigned: active.filter(t => taskIsTrulyUnassigned(t)).length,
+        agentName: taskAgentName(allTasks.find(t => t.id === waitingId)),
+      };
+    }, WAITING_ID);
+
+    expect(counts.agentHeld, 'both fixtures are agent-held').toBe(2);
+    expect(counts.trulyUnassigned, 'an agent task is NOT unassigned').toBe(0);
+    expect(counts.agentName).toBe('AI Worker — Writer');
+
+    // And the team bar offers the filter, showing the agent count.
+    const bar = page.locator('#teamBar');
+    await expect(bar).toContainText('AI Agents');
+    await expect(bar.locator('button', { hasText: 'Unassigned' })).toContainText('0');
+  });
+
+  test('the AI Agents filter selects exactly the agent-held work', async ({ page }) => {
+    await mockAirtable(page);
+    await page.goto(PAGE);
+    await waitForTasks(page);
+
+    const shown = await page.evaluate(() => {
+      setTeam('agents');
+      return applyTeamFilter(allTasks).map(t => t.id).sort();
+    });
+    expect(shown).toEqual([DECIDED_ID, WAITING_ID].sort());
+
+    const none = await page.evaluate(() => {
+      setTeam('unassigned');
+      return applyTeamFilter(allTasks).length;
+    });
+    expect(none, 'nothing is truly unassigned in the fixture').toBe(0);
+  });
+
+  test('assigning to an agent writes the Team Member link and clears Assignee', async ({ page }) => {
+    const patches = await mockAirtable(page);
+    await page.goto(PAGE);
+    await waitForTasks(page);
+
+    // Assign it to an agent, the way the picker does.
+    await page.evaluate((args) => updateTaskField(args.id, 'assignee', 'agent:' + args.agent), { id: WAITING_ID, agent: AGENT_ID });
+    await page.waitForTimeout(500);
+
+    const patch = [...patches].reverse().find(p => p.id === WAITING_ID && F.teamMember in p.fields);
+    expect(patch).toBeTruthy();
+    expect(patch.fields[F.teamMember]).toEqual([AGENT_ID]);
+    expect(patch.fields[F.assignee], 'Assignee cannot hold an agent').toBeNull();
+
+    // Handing it back to a person releases the agent, or it shows under both.
+    await page.evaluate((id) => updateTaskField(id, 'assignee', 'mica'), WAITING_ID);
+    await page.waitForTimeout(500);
+    // Pick the patch that actually carries Assignee. A status/due-date patch
+    // can land afterwards on the same task, so "the last one" is the wrong
+    // thing to assert against.
+    const handover = [...patches].reverse().find(p => p.id === WAITING_ID && F.assignee in p.fields);
+    expect(handover.fields[F.assignee]).toEqual({ email: 'micaa.work@gmail.com' });
+    expect(handover.fields[F.teamMember], 'the agent lets go').toEqual([]);
+  });
+
   test('request changes will not submit without a comment', async ({ page }) => {
     const patches = await mockAirtable(page);
     await page.goto(PAGE);
@@ -216,5 +291,8 @@ test.describe('Agent approval loop', () => {
     expect(patch.fields[F.approvalOutcome]).toBe('Changes requested');
     expect(patch.fields[F.teamMember]).toEqual([AGENT_ID]);
     expect(patch.fields[F.status]).not.toBe('Completed');
+    // The agent has to be able to READ what to change. The Slack worker's
+    // Airtable token cannot read record comments, so the field is the contract.
+    expect(patch.fields[F.approvalFeedback]).toBe('Tone is too formal. Redo it warmer.');
   });
 });

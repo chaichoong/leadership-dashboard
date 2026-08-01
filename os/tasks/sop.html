@@ -985,8 +985,22 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
       </ul>
 
       <h4 style="margin-top:1rem;font-size:0.95rem;font-weight:700;">Approving from Slack while you are away</h4>
-      <p>Every task entering Approval is posted to <code>#agent-approvals</code> within a minute. React on the message: &#x2705; approve, &#x270F;&#xFE0F; request changes, &#x274C; reject. Only your reactions count.</p>
-      <p><strong>If the task changed after the message was posted, your reaction is refused.</strong> The bot replies in the thread to say so and posts the task again as it now stands. This exists so an emoji can never approve something you did not actually read.</p>
+      <p>Every task entering Approval is posted to <code>#agent-approvals</code> within a minute. The post carries what the agent actually produced, so you can judge it from your phone without opening Airtable.</p>
+      <ul>
+        <li>&#x2705; <strong>approve</strong> &mdash; the agent goes and does it, then closes the task.</li>
+        <li>&#x274C; <strong>reject</strong> &mdash; kill this piece of work entirely. Use it when the task should not happen at all, not when it needs redoing. It counts against the agent.</li>
+        <li><strong>changes: just reply in the thread.</strong> No emoji. Type what you want different and that goes straight back to the agent as the instruction. Replying is the amendment.</li>
+      </ul>
+      <p>Only your reactions and your replies count. If you tap the pencil out of habit, the bot asks you what to change rather than guessing.</p>
+      <p><strong>If the task changed after the message was posted, an approve or a reject is refused.</strong> The bot says so in the thread and posts the task again as it then stood, so an emoji can never release something you did not actually read. A reply asking for changes is never refused, because sending feedback back to an agent puts nothing out into the world.</p>
+
+      <h4 style="margin-top:1rem;font-size:0.95rem;font-weight:700;">Where the agent's work lives</h4>
+      <p>Two different things, kept in two different fields. <strong>Description</strong> is the brief the agent was given. <strong>Agent Output</strong> is what it produced and is proposing &mdash; the drafted email, the findings, the change it intends to make. Agent Output is what you see in Slack and at the top of the approval block. An agent that leaves it empty gets a warning on the post rather than a quiet approval, because there would be nothing to judge.</p>
+      <p>When you ask for changes, your words are saved to <strong>Approval Feedback</strong> on the task. That is what the agent reads before its next attempt.</p>
+
+      <h4 style="margin-top:1rem;font-size:0.95rem;font-weight:700;">Seeing what the agents are doing</h4>
+      <p>An AI agent cannot be an Airtable Assignee &mdash; that field only holds real logins. Agent work sits on the <strong>Team Member</strong> link instead. The team bar has an <strong>AI Agents</strong> button showing everything the workforce holds, with a dropdown to narrow to one agent, and agent tasks show an <span style="font-weight:700">AI</span> badge in the Assignee column. You can hand a task to an agent from the same dropdown you use for people.</p>
+      <p><strong>Unassigned now means nobody at all</strong>, human or agent. Before this, agent work counted as unassigned and looked like a backlog nobody owned.</p>
 
       <h4 style="margin-top:1rem;font-size:0.95rem;font-weight:700;">The AI Agents tab</h4>
       <p>Shows what is waiting on you, and how accurate each agent has been at each kind of work &mdash; scored separately, because an agent can be excellent at drafting and poor at analysis.</p>
@@ -1056,6 +1070,11 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
           </tr>
         </thead>
         <tbody>
+          <tr>
+            <td><strong>1.3</strong></td>
+            <td>1 Aug 2026</td>
+            <td>Amendments in Slack are now a plain thread reply, no emoji. Approval posts carry the agent's actual output (new Agent Output field) so the work can be judged from a phone; your words are saved to Approval Feedback for the agent to act on. Added the AI Agents team filter, the AI badge in the Assignee column, and the ability to assign a task to an agent; Unassigned now means nobody at all.</td>
+          </tr>
           <tr>
             <td><strong>1.2</strong></td>
             <td>31 Jul 2026</td>

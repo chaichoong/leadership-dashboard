@@ -11,7 +11,14 @@
 //      NOTHING. It sets Status = Approval and records itself in
 //      "Sent For Approval By".
 //   2. This sweep posts that task to the approvals channel.
-//   3. Kevin reacts: ✅ approve · ✏️ changes · ❌ reject.
+//   3. Kevin answers. Two emoji and a sentence:
+//        ✅ approve — release it
+//        ❌ reject  — kill this piece of work entirely; counts against the agent
+//        a plain REPLY IN THE THREAD — the amendment. His words go back to the
+//        agent as the instruction. No emoji to remember, and no separate step:
+//        the reply IS the request for changes.
+//      This is why the message carries what the agent actually produced, not
+//      just the task title: he has to be able to judge it from his phone.
 //   4. Approve hands the task BACK to the agent, due today, so the agent can
 //      carry the approved action out and only THEN mark it Completed.
 //      Approving is not completing. Kevin never marks anything Completed.
@@ -21,8 +28,11 @@
 // A reaction approves whatever the message said when it was POSTED. If the
 // task changed after that, the emoji would approve something Kevin never
 // read. So every post stamps "Approval Slack Baseline" with the moment it
-// went out, and a reaction on a task whose LMT has moved past that baseline
-// is REJECTED: the sweep says so in thread and re-posts the task fresh.
+// went out, and an approve or reject on a task whose LMT has moved past that
+// baseline is REFUSED: the sweep says so in thread and re-posts the task fresh.
+// An AMENDMENT is deliberately exempt — feedback going back to an agent puts
+// nothing out into the world, and refusing Kevin's words would be the wrong
+// trade. The agent is told the task moved instead.
 //
 // STATE — held entirely in Airtable, no KV, so nothing can drift:
 //   "Approval Slack TS" set          → a live message is awaiting a reaction
@@ -33,6 +43,8 @@
 const SLACK = {
     post:     'https://slack.com/api/chat.postMessage',
     history:  'https://slack.com/api/conversations.history',
+    replies:  'https://slack.com/api/conversations.replies',
+    delete:   'https://slack.com/api/chat.delete',
     list:     'https://slack.com/api/conversations.list',
     create:   'https://slack.com/api/conversations.create',
     join:     'https://slack.com/api/conversations.join',
@@ -53,6 +65,9 @@ const DEFAULT_CHANNEL_NAME = 'agent-approvals';
 const AF = {
     name:            'fldgFjGBw6bTKJFCD',
     description:     'fldRGhBQViKZKtkQ6',
+    notes:           'fldR7apBzSp3oxFxz',
+    agentOutput:     'fldzswp8fx6PqpLQ5', // what the agent PRODUCED — the thing Kevin judges
+    approvalFeedback:'fldtI7SJI4gEohHD1', // Kevin's words back to the agent
     status:          'fldx4qCw17UfrKpaN',
     assignee:        'fldELMncVJYPDRJNc',
     dueDate:         'fld7XP8w8kbxfETV4',
@@ -79,6 +94,9 @@ const REACTION_OUTCOMES = {
     heavy_check_mark: 'Approved as-is',
     heavy_tick:       'Approved as-is',
     ballot_box_with_check: 'Approved as-is',
+    // Not advertised on the message any more — replying in the thread is the
+    // amendment path. Still mapped, so a pencil out of habit prompts for the
+    // detail instead of being silently swallowed.
     pencil2:          'Changes requested',
     pencil:           'Changes requested',
     memo:             'Changes requested',
@@ -210,6 +228,9 @@ function taskView(rec) {
         id: rec.id,
         name: f[AF.name] || '(Untitled)',
         description: f[AF.description] || '',
+        notes: f[AF.notes] || '',
+        agentOutput: f[AF.agentOutput] || '',
+        dueDate: f[AF.dueDate] || '',
         status: selName(f[AF.status]),
         taskType: selName(f[AF.taskType]),
         lmt: f[AF.lmt] || '',
@@ -232,28 +253,100 @@ async function agentName(env, id) {
     } catch (e) { return id; }
 }
 
+// What the agent has PRODUCED lives in the `Agent Output` field, not in record
+// comments. This worker's Airtable PAT cannot read comments — it returns 403
+// INVALID_PERMISSIONS — so a comment-based design would have posted "no
+// write-up" on every task and had Kevin approving work he could not see. A
+// field needs no extra token scope and is readable by everything.
+
+// Slack hard-limits a text object to 3000 characters and silently rejects the
+// whole message if one goes over, so every block this builds is capped.
+function truncate(s, n) {
+    const clean = String(s || '').trim();
+    return clean.length > n ? clean.slice(0, n - 1) + '…' : clean;
+}
+
 // ─── POST PHASE ───────────────────────────────────────────────────────
 
+// The message has to carry enough for Kevin to judge the work from his phone,
+// without opening Airtable. Four parts, in the order he needs them:
+//   what it is · what the agent produced · what he was asked for · how to answer
 function buildApprovalBlocks(t, agent, warn) {
-    const desc = String(t.description || '').replace(/\s+/g, ' ').trim().slice(0, 600);
-    const lines = [
-        `*${esc(t.name)}*`,
-        agent ? `Prepared by *${esc(agent)}*${t.taskType ? ` · ${esc(t.taskType)}` : ''}` : 'No agent recorded on this task.',
-        desc ? `\n${esc(desc)}${t.description.length > 600 ? '…' : ''}` : '',
-        warn ? `\n:rotating_light: *This looks like a Kevin-only matter.* An agent should not be preparing this. Check before you approve.` : '',
-        `\nNothing has been sent, filed or actioned. Approving hands it back so the agent can carry it out.`,
-        `:white_check_mark: approve · :pencil2: request changes · :x: reject`,
-    ].filter(Boolean);
-    return [
-        { type: 'section', text: { type: 'mrkdwn', text: lines.join('\n') } },
-        {
-            type: 'context',
-            elements: [{
-                type: 'mrkdwn',
-                text: `Task \`${esc(t.id)}\` · as it stood ${esc(new Date().toISOString().replace('T', ' ').slice(0, 16))} UTC. If it changes after this, your reaction is rejected and it is posted again.`,
-            }],
+    const blocks = [];
+
+    blocks.push({
+        type: 'section',
+        text: {
+            type: 'mrkdwn',
+            text: truncate(
+                `*${esc(t.name)}*\n`
+                + (agent ? `Prepared by *${esc(agent)}*` : '*No agent recorded on this task.*')
+                + (t.taskType ? ` · ${esc(t.taskType)}` : '')
+                + (t.dueDate ? ` · due ${esc(t.dueDate)}` : ''), 2900),
         },
-    ];
+    });
+
+    if (warn) {
+        blocks.push({
+            type: 'section',
+            text: {
+                type: 'mrkdwn',
+                text: ':rotating_light: *This looks like a Kevin-only matter* (restraint order, Operation Lily, the '
+                    + 'investigation, or a liquidation). An agent should not be preparing this at all. Treat it as a '
+                    + 'fault to look into, not a task to approve.',
+            },
+        });
+    }
+
+    // What the agent has actually done. This is the part he is judging, so it
+    // gets the most room and sits above the brief.
+    if (t.agentOutput) {
+        const quoted = esc(truncate(t.agentOutput, 2400)).replace(/\n/g, '\n>');
+        blocks.push({ type: 'section', text: { type: 'mrkdwn', text: truncate(`*What the agent has done*\n>${quoted}`, 2900) } });
+    } else {
+        blocks.push({
+            type: 'section',
+            text: {
+                type: 'mrkdwn',
+                text: '*What the agent has done*\n:warning: _The agent left its work empty._ '
+                    + 'There is nothing here to judge, so do not approve it blind — '
+                    + 'reply in this thread and tell it to show its work.',
+            },
+        });
+    }
+
+    // The brief it was working to, so he can tell whether it answered the question.
+    const brief = truncate(String(t.description || '').replace(/\r/g, ''), 900);
+    if (brief) blocks.push({ type: 'section', text: { type: 'mrkdwn', text: truncate(`*The task it was given*\n${esc(brief)}`, 2900) } });
+    const notes = truncate(t.notes, 400);
+    if (notes) blocks.push({ type: 'section', text: { type: 'mrkdwn', text: truncate(`*Notes*\n${esc(notes)}`, 2900) } });
+
+    blocks.push({ type: 'divider' });
+
+    // How to answer. Amendments are a plain thread reply — no emoji to remember.
+    blocks.push({
+        type: 'section',
+        text: {
+            type: 'mrkdwn',
+            text: 'Nothing has been sent, filed or actioned yet.\n'
+                + ':white_check_mark:  *approve* — the agent goes and does it, then closes the task\n'
+                + ':x:  *reject* — kill this piece of work entirely, it should not happen. Counts against the agent\n'
+                + ':speech_balloon:  *changes* — just reply in this thread with what to change. No emoji needed. '
+                + 'It goes back to the agent with your words and nothing goes out',
+        },
+    });
+
+    blocks.push({
+        type: 'context',
+        elements: [{
+            type: 'mrkdwn',
+            text: `<https://airtable.com/${AIRTABLE_BASE}/${TABLE_TASKS}/${esc(t.id)}|Open in Airtable> · `
+                + `as it stood ${esc(new Date().toISOString().replace('T', ' ').slice(0, 16))} UTC. `
+                + `If it changes after this, an approve or reject is refused and it is posted again.`,
+        }],
+    });
+
+    return blocks;
 }
 
 async function postPending(env, channel, log) {
@@ -321,7 +414,7 @@ async function threadReply(env, channel, ts, text) {
 // task BACK to the agent (due today) to carry the action out; reject closes it.
 // Nothing here ever marks approved work Completed — that is the agent's job,
 // after it has actually done the thing.
-async function applyDecision(env, t, outcome, decidedVia) {
+async function applyDecision(env, t, outcome, decidedVia, note) {
     const now = new Date().toISOString();
     const fields = {
         [AF.approvalOutcome]: outcome,
@@ -342,44 +435,113 @@ async function applyDecision(env, t, outcome, decidedVia) {
         fields[AF.sentForApprovalBy] = [t.agentId];
         fields[AF.assignee] = null; // the agent owns it now; Assignee cannot hold one
     }
+    // Kevin's words go in a FIELD, because this worker's PAT cannot write record
+    // comments either. Without this the whole point of an amendment — telling
+    // the agent what to change — would be lost.
+    if (note) fields[AF.approvalFeedback] = note;
     await airtable(env, 'PATCH', `/${TABLE_TASKS}/${t.id}`, { fields, typecast: true });
     const agent = await agentName(env, t.agentId);
     const line = outcome === 'Rejected'
         ? `Rejected by Kevin ${decidedVia}. Closed, and counted against ${agent || 'the agent'}.`
+              + (note ? `\n\nReason: ${note}` : '')
         : outcome === 'Changes requested'
             ? `Changes requested by Kevin ${decidedVia}. Back to ${agent || 'the agent'}. Nothing has gone out.`
-            : `${outcome} by Kevin ${decidedVia}. Back to ${agent || 'the agent'} to carry out, then it completes itself.`;
-    try { await airtable(env, 'POST', `/${TABLE_TASKS}/${t.id}/comments`, { text: line }); } catch (e) { /* comment is a nicety, not the record */ }
+                  + (note ? `\n\nWhat to change: ${note}` : '')
+            : `${outcome} by Kevin ${decidedVia}. Back to ${agent || 'the agent'} to carry out, then it completes itself.`
+                  + (note ? `\n\nNote: ${note}` : '');
     return line;
 }
 
-async function processReactions(env, channel, log) {
+// Slack clients decorate messages. A trailing "*Sent using* <@Uxxxx>" footer
+// and raw <@U…>/<#C…> markup are noise in an instruction the agent has to
+// follow, so they are stripped before the words are stored.
+function cleanReply(text) {
+    return String(text || '')
+        .replace(/\*?_?Sent using_?\*?\s*<@[^>]+>\s*$/i, '')
+        .replace(/<@([A-Z0-9]+)\|([^>]+)>/g, '$2')
+        .replace(/<@[A-Z0-9]+>/g, '')
+        .replace(/<#[A-Z0-9]+\|([^>]+)>/g, '#$1')
+        .replace(/<(https?:[^|>]+)\|([^>]+)>/g, '$2 ($1)')
+        .replace(/<(https?:[^>]+)>/g, '$1')
+        .replace(/[ \t]+\n/g, '\n')
+        .trim();
+}
+
+// Kevin's own replies in the thread, oldest first, ignoring the bot's.
+async function kevinsReplies(env, channel, ts) {
+    const url = `${SLACK.replies}?channel=${encodeURIComponent(channel)}&ts=${encodeURIComponent(ts)}&limit=50`;
+    const data = await slackGet(env, url);
+    if (!data.ok) return [];
+    return (data.messages || [])
+        .filter(m => m.ts !== ts && !m.bot_id && m.user === KEVIN_SLACK_ID && String(m.text || '').trim())
+        .map(m => cleanReply(m.text))
+        .filter(Boolean);
+}
+
+// Read everything Kevin has said about a posted task and act on it.
+//
+// A written reply IS the amendment — there is no emoji to remember for changes.
+// Reply "make it warmer and drop the deadline" and that goes back to the agent
+// as the instruction. The emoji are only for the two verdicts a sentence cannot
+// express as safely: release the work, or kill it.
+//
+//   reply only              → changes requested, his words are the instruction
+//   ✅ (with or without a reply) → approved, any reply attached as a note
+//   ❌ (with or without a reply) → rejected, any reply attached as the reason
+//   ✏️ alone                → he means "changes" but has not said what yet; ask
+async function processResponses(env, channel, log) {
     const recs = await queryTasks(env, `AND({Status}='Approval', LEN({Approval Slack TS}&'')>0)`, MAX_REACTION_CHECKS_PER_RUN);
     for (const rec of recs) {
         const t = taskView(rec);
         const msg = await fetchMessage(env, channel, t.ts);
         if (!msg) { log.push(`no message for ${t.id}`); continue; }
         const reaction = kevinsReaction(msg);
-        if (!reaction) continue;
+        const replies = await kevinsReplies(env, channel, t.ts);
+        const note = replies.join('\n\n');
+        if (!reaction && !replies.length) continue;
 
-        // THE STALENESS GUARD. Without this an emoji approves a task that has
-        // changed since Kevin read it.
-        if (isStale(t)) {
+        // A pencil on its own is a half-finished instruction. Asking beats
+        // guessing, and it costs him one line.
+        if (reaction && reaction.outcome === 'Changes requested' && !replies.length) {
             await threadReply(env, channel, t.ts,
-                `:warning: Not applying that. This task changed after I posted it, so your ${reaction.emoji === 'x' ? 'rejection' : 'reaction'} would be approving something you have not read. ` +
-                `Posted with the task as at ${t.baseline.replace('T', ' ').slice(0, 16)} UTC, last changed ${String(t.lmt).replace('T', ' ').slice(0, 16)} UTC. I am posting it again as it now stands.`);
+                'Tell me what to change and I will send it back to the agent with your words. '
+                + 'Just reply here — you do not need the emoji.');
+            log.push(`asked for detail on ${t.id}`);
+            continue;
+        }
+
+        const outcome = reaction && reaction.outcome !== 'Changes requested'
+            ? reaction.outcome          // approve or reject
+            : 'Changes requested';      // a written reply, or pencil plus words
+
+        // THE STALENESS GUARD. It applies to APPROVE and REJECT, which release
+        // or kill real work on the strength of what the message said. It does
+        // NOT block an amendment: sending feedback back to an agent puts nothing
+        // out into the world, and refusing Kevin's words would be the wrong
+        // trade. The agent is told the task moved instead.
+        if (isStale(t) && outcome !== 'Changes requested') {
+            await threadReply(env, channel, t.ts,
+                `:warning: Not applying that. This task changed after I posted it, so your ${outcome === 'Rejected' ? 'rejection' : 'approval'} `
+                + `would be acting on something you have not read. Posted as at ${t.baseline.replace('T', ' ').slice(0, 16)} UTC, `
+                + `last changed ${String(t.lmt).replace('T', ' ').slice(0, 16)} UTC. I am posting it again as it now stands.`);
             // Clearing the timestamp is what makes the post phase pick it up
             // again on the next sweep, with a fresh baseline.
             await airtable(env, 'PATCH', `/${TABLE_TASKS}/${t.id}`, {
                 fields: { [AF.slackTs]: '', [AF.slackBaseline]: '' }, typecast: true,
             });
-            log.push(`STALE ${t.id} — reaction rejected, re-queued`);
+            log.push(`STALE ${t.id} — ${outcome} refused, re-queued`);
             continue;
         }
 
-        const line = await applyDecision(env, t, reaction.outcome, 'in Slack');
-        await threadReply(env, channel, t.ts, `:heavy_check_mark: ${line}`);
-        log.push(`applied ${reaction.outcome} to ${t.id}`);
+        const staleNote = (isStale(t) && outcome === 'Changes requested')
+            ? '\n\n(The task had changed since I posted it, so read the current version before redoing it.)'
+            : '';
+        const line = await applyDecision(env, t, outcome, 'in Slack', note ? note + staleNote : staleNote.trim());
+        await threadReply(env, channel, t.ts,
+            outcome === 'Changes requested'
+                ? `:writing_hand: Sent back with your notes. ${esc(line.split('\n')[0])}`
+                : `:heavy_check_mark: ${esc(line.split('\n')[0])}`);
+        log.push(`applied ${outcome} to ${t.id}${replies.length ? ' (from a thread reply)' : ''}`);
     }
     return recs.length;
 }
@@ -414,9 +576,42 @@ export async function runApprovalSweep(env) {
     const ch = await resolveChannel(env);
     log.push(`channel ${ch.id} (${ch.how})`);
     const posted = await postPending(env, ch.id, log);
-    const checked = await processReactions(env, ch.id, log);
+    const checked = await processResponses(env, ch.id, log);
     const closed = await reconcileDecidedElsewhere(env, ch.id, log);
     return { ok: true, channel: ch.id, posted, checked, closed, log };
+}
+
+// Delete the bot's OWN posts in the approvals channel whose text contains
+// `match`, plus their thread replies. Exists because a build or a rehearsal
+// leaves test posts in a channel Kevin has to trust at a glance, and a channel
+// full of "TEST —" noise is a channel he stops reading.
+//
+// Deliberately narrow: admin-key gated, this channel only, the bot's own
+// messages only, and `match` is REQUIRED — there is no "delete everything".
+export async function purgeApprovalPosts(env, match) {
+    const needle = String(match || '').trim();
+    if (!needle) return { ok: false, error: 'a match string is required — refusing to delete indiscriminately' };
+    const ch = await resolveChannel(env);
+    const hist = await slackGet(env, `${SLACK.history}?channel=${encodeURIComponent(ch.id)}&limit=200`);
+    if (!hist.ok) return { ok: false, error: hist.error };
+
+    const targets = (hist.messages || []).filter(m =>
+        (m.bot_id || m.app_id) && String(m.text || JSON.stringify(m.blocks || '')).includes(needle));
+
+    const deleted = [];
+    for (const m of targets) {
+        // Thread replies first — deleting a parent orphans them otherwise.
+        if (m.thread_ts || m.reply_count) {
+            const thread = await slackGet(env, `${SLACK.replies}?channel=${encodeURIComponent(ch.id)}&ts=${encodeURIComponent(m.ts)}&limit=100`);
+            for (const r of ((thread.messages || []).filter(x => x.ts !== m.ts && (x.bot_id || x.app_id)))) {
+                const d = await slack(env, SLACK.delete, { method: 'POST', body: JSON.stringify({ channel: ch.id, ts: r.ts }) });
+                if (d.ok) deleted.push(r.ts);
+            }
+        }
+        const d = await slack(env, SLACK.delete, { method: 'POST', body: JSON.stringify({ channel: ch.id, ts: m.ts }) });
+        if (d.ok) deleted.push(m.ts); else return { ok: false, error: d.error, deletedSoFar: deleted.length };
+    }
+    return { ok: true, channel: ch.id, matched: targets.length, deleted: deleted.length };
 }
 
 // Read-only diagnostics for wiring this up: which bot, which scopes, which
@@ -470,5 +665,12 @@ export async function approvalsDiag(env) {
         channel,
         channelError,
         hasAirtablePat: !!env.AIRTABLE_PAT,
+        // The agent's work must be READABLE or every post says "nothing to judge".
+        agentOutputRead: await (async () => {
+            const pending = await queryTasks(env, `{Status}='Approval'`, 1);
+            if (!pending.length) return 'no pending task to test against';
+            const t = taskView(pending[0]);
+            return t.agentOutput ? `ok — ${t.agentOutput.length} chars readable` : 'that task has an empty Agent Output';
+        })(),
     };
 }

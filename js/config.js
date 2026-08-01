@@ -21,7 +21,7 @@
     const PAGE_REGISTRY = [
         { id: 'overview',    name: 'Leadership Dashboard',           icon: '📊', pageVer: '2.47', sopFile: 'sop.html',                   sopVer: '2.9', standalone: 'index.html#overview' },
         { id: 'os-strategy', name: 'Objective & Strategy',           icon: '🎯', pageVer: '1.19', sopFile: 'os/strategy/sop.html',       sopVer: '1.0', standalone: 'os/strategy/index.html' },
-        { id: 'tasks',       name: 'Tasks & Projects',   icon: '✅', pageVer: '1.116', sopFile: 'os/tasks/sop.html',             sopVer: '1.2', standalone: 'os/tasks/index.html' },
+        { id: 'tasks',       name: 'Tasks & Projects',   icon: '✅', pageVer: '1.116', sopFile: 'os/tasks/sop.html',             sopVer: '1.3', standalone: 'os/tasks/index.html' },
         { id: 'cfv',        name: 'CFVs',                          icon: '🚨', pageVer: '1.30', sopFile: 'sop-cfvs.html',               sopVer: '1.6', standalone: 'index.html#cfv' },
         { id: 'ceo-brief',  name: 'CEO Brief',                     icon: '☀️', pageVer: '1.0', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#ceo-brief' },
         { id: 'money',      name: 'Money Confidence',              icon: '🧭', pageVer: '1.1', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#money' },
@@ -160,6 +160,8 @@
         approvalOutcome: 'fldrHBSr6qoUfaKuZ', // singleSelect verdict — the input to accuracy scoring
         approvedAt:      'fldr4Mvf2RzKvhZhi', // dateTime
         taskType:        'fldZ2moDV2041Sobc', // singleSelect — accuracy is scored per agent PER TASK TYPE
+        agentOutput:     'fldzswp8fx6PqpLQ5', // what the agent PRODUCED (Description is the brief it was given)
+        approvalFeedback:'fldtI7SJI4gEohHD1', // Kevin's words back to the agent
     };
 
     const TASK_TEAM = [
