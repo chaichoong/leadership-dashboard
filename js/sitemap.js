@@ -479,12 +479,22 @@
                 }
                 return lines;
             })();
+            // Three registered pages (Property Compliance, CRM, How It Works) have no
+            // in-app panel — they exist only as standalone files. switchTab routes them
+            // to a new tab, but the row used to render the same plain "Open" as every
+            // other page, so the new tab read as a dead click when a popup blocker ate
+            // it. Say where the click goes BEFORE it is clicked, and use a real href so
+            // the browser can open it even if the script route is blocked.
+            const inAppPanel = !!document.getElementById('tab-' + p.id);
+            const openCell = inAppPanel
+                ? `<a href="#${escHtml(p.id)}" data-open-page="${escHtml(p.id)}" onclick="switchTab('${escJs(p.id)}')" style="font-size:12px">Open</a>`
+                : `<a href="${escHtml(p.standalone)}" target="_blank" rel="noopener" data-open-page="${escHtml(p.id)}" title="No tab inside the app — opens the page in a new tab" style="font-size:12px">Open &#x2197;</a>`;
 
             return `<tr>
                 <td style="text-align:center;color:var(--text-muted);font-weight:600">${i + 1}</td>
                 <td style="font-weight:600">${p.icon} ${escHtml(p.name)}</td>
                 <td style="text-align:center">${pageVerCell}</td>
-                <td><a href="#${escHtml(p.id)}" onclick="switchTab('${escJs(p.id)}')" style="font-size:12px">Open</a></td>
+                <td>${openCell}</td>
                 <td style="font-size:11px"><a href="${escHtml(p.standalone)}" target="_blank">${escHtml(p.standalone)}</a> <button class="sitemap-copy" onclick="event.stopPropagation();copyLink('${escJs(p.standalone)}')">Copy</button></td>
                 <td>${p.sopFile ? `<a href="${escHtml(p.sopFile)}" target="_blank" style="font-size:12px">Open SOP</a> <button class="sitemap-copy" onclick="event.stopPropagation();copyLink('${escJs(p.sopFile)}')">Copy</button>` : '<span class="od-text-muted-sm">no SOP</span>'}</td>
                 <td style="text-align:center">${sopVerCell}</td>

@@ -55,7 +55,15 @@ FILE_TO_PAGE = {
     'js/cashflow.js':       'overview',
     'js/arrears.js':        'cfv',
     'js/reconciliation.js': 'overview',
+    # CRM ships as a Supabase-only page. Unmapped until 2026-08-01, so its
+    # pageVer sat at 1.0 while the file changed — and every staleness signal
+    # built on pageVer quietly read CRM as up to date.
+    'crm-supabase.html':    'crm',
 }
+
+# DELIBERATELY UNMAPPED: 'content-machine' is registered as a page but its source
+# lives in the separate chaichoong/content-machine repo, so no file in THIS repo
+# can bump it. Its pageVer moves by hand. Do not "fix" this by inventing a path.
 
 CONFIG_FILE = 'js/config.js'
 
