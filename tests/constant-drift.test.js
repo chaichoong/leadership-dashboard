@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'fs';
+import { readFileSync, readdirSync } from 'fs';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 
@@ -173,5 +173,77 @@ describe('agent autonomy threshold does not drift between the app and the huddle
     // And neither may quietly count a rejection as accurate.
     expect(jsAccurate).not.toContain('Rejected');
     expect(pyAccurate).not.toContain('Rejected');
+  });
+});
+
+// ── Cache-bust drift across pages ────────────────────────────────────────────
+// Shared assets are versioned by hand with a `?v=N` query string, and NOTHING
+// automates it — not scripts/pre-commit-action.py, not the auto-bump workflow
+// (those manage PAGE_REGISTRY pageVer, which is a different thing entirely).
+//
+// So a commit that edits a shared asset bumps only the page its author had open
+// and strands every other consumer on the old string. Found by the E2E sweep on
+// 2026-08-01: commit 1a60a56 (21 Jul) changed css/sync-bar.css and js/sync-bar.js
+// and bumped only index.html. Sixteen pages were left asking for sync-bar.css?v=2
+// — including the OS pages the shell loads in iframes, compliance.html and
+// follow-up.html — so any returning browser with a cache warmed before 21 Jul kept
+// serving the pre-21-Jul stylesheet inside those frames. Four other assets had
+// drifted the same way and nobody had noticed: quick-task.js, sync-bar.js,
+// skills-data.js and skills.js.
+//
+// It is invisible in every other check we run. The file on disk is correct, the
+// markup is valid, the console is clean, and it only misbehaves for a visitor
+// whose cache predates the change — never on a fresh browser, which is exactly
+// what CI and a first-time load use. That is what makes it worth a test.
+//
+// The rule: one asset, one version, everywhere. Bump every reference or none.
+describe('no cache-bust drift across pages', () => {
+  const walk = (dir) =>
+    readdirSync(resolve(ROOT, dir), { withFileTypes: true }).flatMap((e) => {
+      const rel = `${dir}/${e.name}`;
+      if (e.isDirectory()) return e.name === 'node_modules' || e.name === '.git' ? [] : walk(rel);
+      return e.isFile() && e.name.endsWith('.html') ? [rel.replace(/^\.\//, '')] : [];
+    });
+
+  // asset path (relative-prefix stripped) -> version -> the pages asking for it
+  const refs = new Map();
+  for (const page of walk('.')) {
+    const src = read(page);
+    // Charset is deliberately permissive: a name this misses is a file that never
+    // gets checked, and the miss is silent.
+    for (const m of src.matchAll(/(?:\.\.\/)*((?:css|js)\/[\w.-]+\.(?:css|js))\?v=(\d+)/g)) {
+      const [, asset, version] = m;
+      if (!refs.has(asset)) refs.set(asset, new Map());
+      const byVersion = refs.get(asset);
+      if (!byVersion.has(version)) byVersion.set(version, []);
+      byVersion.get(version).push(page);
+    }
+  }
+
+  // CONTROL — a typo in the walker or the regex yields an empty map, and "no asset
+  // has two versions" is then trivially true forever. Same trap the money-worker
+  // block above documents: assert the haystack before searching it.
+  it('finds the versioned references (control — guards against a vacuous pass)', () => {
+    expect(walk('.').length, 'no HTML pages scanned').toBeGreaterThan(15);
+    expect(refs.size, 'no versioned assets found').toBeGreaterThan(20);
+    // sync-bar.css is the asset that drifted; if it stops matching, this block is blind.
+    expect([...refs.keys()]).toContain('css/sync-bar.css');
+  });
+
+  it('every shared asset is referenced at exactly one version', () => {
+    const drifted = [...refs.entries()]
+      .filter(([, byVersion]) => byVersion.size > 1)
+      .map(([asset, byVersion]) => {
+        const detail = [...byVersion.entries()]
+          .sort((a, b) => Number(a[0]) - Number(b[0]))
+          .map(([v, pages]) => `    v=${v}: ${pages.sort().join(', ')}`)
+          .join('\n');
+        return `  ${asset} is referenced at ${byVersion.size} versions:\n${detail}`;
+      });
+
+    expect(
+      drifted,
+      `Cache-bust drift — bump every page that loads the asset, not just the one you edited:\n${drifted.join('\n')}`,
+    ).toEqual([]);
   });
 });
