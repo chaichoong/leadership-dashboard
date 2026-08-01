@@ -402,6 +402,7 @@ PAGE_REGISTRY in `js/config.js` tracks page and SOP versions.
 
 ## Airtable Conventions
 
+- **New KPI compute code ships with its KPI Library entry in the same commit** — add the template to `KPI_LIBRARY` in `js/kpi-library.js` (canonical) and the rationale to `docs/kpi-library-spec.md`. The daily `kpi-library-coverage` invariant in `scripts/check-data-invariants.py` fails the sweep whenever a live automated KPI has no library template, so forgetting is loud, not silent
 - Only show ACTIVE businesses in dropdowns (filter by Active field)
 - Use exact field names consistently between read and write paths (e.g., 'Quarter End' vs 'QuarterEnd' caused a sync bug)
 - When filtering linked record fields, filter by record ID, not ARRAYJOIN display names

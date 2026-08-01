@@ -1,5 +1,10 @@
 # KPI Library — seed specification
 
+> **Canonical entries live in `js/kpi-library.js`** (the admin page renders and
+> health-checks them; the daily `kpi-library-coverage` invariant parses them).
+> This document holds the design rationale, the harvest provenance and the
+> de-Kevining detail. When adding a KPI: library entry + this doc, same commit.
+
 Written 1 Aug 2026 on Kevin's direction, from a full harvest of every metric the platform
 already computes: all dashboard tabs, all OS pages, all reports, the scheduled scripts and
 the Cloudflare workers (~300 distinct displayed metrics), plus the 8 live automated KPIs

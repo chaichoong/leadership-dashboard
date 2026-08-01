@@ -10,6 +10,15 @@
 // the whole GitHub Pages build is Kevin's private admin build, so hiding is
 // inherent; the `adminOnly: true` flag on the PAGE_REGISTRY entry is the
 // contract the Supabase migration must honour when real client shells exist.
+//
+// KPI_LIBRARY below is THE CANONICAL LIBRARY (the spec doc holds rationale).
+// Three things keep it honest: the health check on this page flags any live
+// KPI without a template on every open; the daily kpi-library-coverage
+// invariant (scripts/check-data-invariants.py, run by the prod sweep) does
+// the same without needing a browser and PARSES THIS ARRAY — keep the
+// `name:`/`how:` single-quoted literal format or its parser fails loudly;
+// and the CLAUDE.md rule requires new KPI compute code to ship its library
+// entry in the same commit.
 
 // ── The ten computation shapes ──────────────────────────────────────────
 const KPI_SHAPES = [

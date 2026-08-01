@@ -56,6 +56,7 @@ Auth:   ~/.config/od/airtable_pat (never printed).
 
 import json
 import os
+import re
 import sys
 import urllib.parse
 import urllib.request
@@ -208,6 +209,83 @@ def check_reimport_duplicates(pat):
     return violations, control
 
 
+PROJECTS = "tblHrpTMd5LNYn8v1"  # Projects
+KPI_LIBRARY_JS = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "js", "kpi-library.js")
+
+
+def _kpi_stems(text):
+    """Significant-word stems (5-char prefixes) — mirrors the matcher in js/kpi-library.js."""
+    return {w[:5] for w in re.split(r"[^a-z]+", str(text).lower()) if len(w) >= 5}
+
+
+def _load_kpi_library_entries():
+    """Parse the KPI_LIBRARY entries out of js/kpi-library.js.
+
+    The page's data array is the CANONICAL library (docs/kpi-library-spec.md
+    holds the rationale). A parse yielding suspiciously few entries means the
+    file moved or the format changed — that is a broken check, so it raises
+    rather than quietly asserting against an empty library.
+    """
+    try:
+        with open(KPI_LIBRARY_JS, encoding="utf-8") as fh:
+            src = fh.read()
+        start = src.index("const KPI_LIBRARY = [")
+        end = src.index("];", start)
+    except (OSError, ValueError) as e:
+        # Raise RuntimeError so the runner marks THIS check ERROR instead of
+        # the whole sweep crashing (bit on 1 Aug 2026: a stale checkout without
+        # js/kpi-library.js took down every other invariant with it).
+        raise RuntimeError(f"cannot read the KPI library from {KPI_LIBRARY_JS}: {e}")
+    block = src[start:end]
+    entries = []
+    for m in re.finditer(r"name: '((?:[^'\\]|\\.)*)'[\s\S]*?how: '((?:[^'\\]|\\.)*)'", block):
+        entries.append((m.group(1).replace("\\'", "'"), m.group(2).replace("\\'", "'")))
+    if len(entries) < 10:
+        raise RuntimeError(
+            f"parsed only {len(entries)} entries from {KPI_LIBRARY_JS} — the library data moved or "
+            "changed format; fix this parser before trusting the check again"
+        )
+    return entries
+
+
+def check_kpi_library_coverage(pat, library_entries=None):
+    """Every live automated project KPI has a KPI Library counterpart.
+
+    Added 2026-08-01, the day the library shipped. The library seeds client
+    dashboards; a KPI that goes live on a project without a library template
+    means the library has silently fallen behind Kevin's own build — exactly
+    the drift the standing "write every KPI generically" rule exists to
+    prevent. The page's health bar runs this same test, but only when the tab
+    is opened; this is the scheduled version that fires without a browser.
+
+    Matching is stem overlap on significant words (5-char prefixes), the same
+    matcher the page uses, so word order and -ed/-ing endings don't false-flag.
+
+    Returns (violations, control_population). Control = open projects carrying
+    KPI compute code; Kevin always has at least one, so zero means the query
+    or field names broke, not that measurement stopped.
+    """
+    entries = library_entries if library_entries is not None else _load_kpi_library_entries()
+    entry_stems = [(name, _kpi_stems(name + " " + how)) for name, how in entries]
+    formula = (
+        'AND(LEN({KPI Name} & "") > 0, {Closed On} = BLANK(), '
+        'LEN({KPI Compute Code} & "") > 0)'
+    )
+    live = query(pat, PROJECTS, formula, ["Project Name", "KPI Name"])
+    violations = []
+    for r in live:
+        kpi = str(r["fields"].get("KPI Name") or "")
+        ks = _kpi_stems(kpi)
+        if not any(ks & stems for _, stems in entry_stems):
+            violations.append({
+                "project": r["fields"].get("Project Name"),
+                "kpi": kpi,
+                "fix": "add the template to KPI_LIBRARY in js/kpi-library.js (and the rationale to docs/kpi-library-spec.md) in the same change that added the KPI",
+                "id": r["id"],
+            })
+    return violations, len(live)
+
+
 def check_ceo_brief_complete(pat):
     """Every past weekday CEO brief is finished, and each date appears exactly once.
 
@@ -270,6 +348,13 @@ SCANS = [
         "incident": "Jul 2026 — huddle silently binned for 2 days + duplicate rows + a truncated brief; Kevin got a money-only DM",
         "control_means": "CEO Briefs rows on past weekdays (the population both bugs corrupt)",
         "run": check_ceo_brief_complete,
+    },
+    {
+        "name": "kpi-library-coverage",
+        "asserts": "live automated project KPI => a KPI Library template exists for it",
+        "incident": "Aug 2026 — the library seeds client dashboards; a live KPI with no template means the library fell behind the build",
+        "control_means": "open projects carrying KPI compute code (the population the library must cover)",
+        "run": check_kpi_library_coverage,
     },
     {
         "name": "no-reimport-duplicates",
