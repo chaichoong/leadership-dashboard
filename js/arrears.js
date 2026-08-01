@@ -449,17 +449,50 @@
         const existingTasks = await ucFetchExistingTasks(candidates.map(c => c.tenancyId));
 
         let created = 0;
+        let updated = 0;
         for (const c of candidates) {
             const candidateName = ucTaskNameForTenancy(c.tenantName, c.rent, c.nextDue);
+
+            // Exact name already present (any status): this rent period is covered,
+            // including one Mica has already completed. Nothing to do.
             const already = existingTasks.some(t => {
                 const name = t.fields?.['fldgFjGBw6bTKJFCD'] || '';
                 return name === candidateName;
             });
-
             if (already) continue;
 
+            // No exact match, but an OPEN task may already cover this tenancy for
+            // this same rent month under an out-of-date name. That happens whenever
+            // the tenancy's Due Day of Month or rent changes after the task was
+            // created: the computed name changes, the old exact-match test misses,
+            // and a second task appears for a rent date that no longer exists.
+            // Ryan Lambert ended up with "due 5 August" and "due 6 August" tasks
+            // this way (1 Aug 2026). Reconcile the existing one instead of adding
+            // to the pile. A task for a DIFFERENT month is a genuinely different
+            // period and is left alone.
+            const supersedable = existingTasks.find(t => {
+                if (!ucTaskIsOpen(t)) return false;
+                if (!ucTaskLinksTenancy(t, c.tenancyId)) return false;
+                const existingDue = ucRentDueFromTaskName(t.fields?.['fldgFjGBw6bTKJFCD'] || '');
+                return !!existingDue && ucSameRentMonth(existingDue, c.nextDue);
+            });
+
+            if (supersedable) {
+                try {
+                    if (created + updated > 0) await new Promise(r => setTimeout(r, 500));
+                    await ucUpdateTask(supersedable.id, c);
+                    // Keep the in-memory copy in step so a second candidate for the
+                    // same tenancy in this pass cannot claim the same record.
+                    supersedable.fields['fldgFjGBw6bTKJFCD'] = candidateName;
+                    updated++;
+                } catch (err) {
+                    console.warn('UC task update failed for', c.tenantName, err);
+                }
+                continue;
+            }
+
             try {
-                if (created > 0) await new Promise(r => setTimeout(r, 500));
+                if (created + updated > 0) await new Promise(r => setTimeout(r, 500));
                 await ucCreateTask(c);
                 created++;
             } catch (err) {
@@ -467,9 +500,36 @@
             }
         }
 
-        if (created > 0) {
-            if (typeof showToast === 'function') showToast(`Created ${created} UC verification ${created === 1 ? 'task' : 'tasks'}`, { type: 'info' });
+        if (created > 0 || updated > 0) {
+            const parts = [];
+            if (created) parts.push(`Created ${created} UC verification ${created === 1 ? 'task' : 'tasks'}`);
+            if (updated) parts.push(`updated ${updated} to a revised rent date`);
+            if (typeof showToast === 'function') showToast(parts.join(', '), { type: 'info' });
         }
+    }
+
+    function ucTaskIsOpen(t) {
+        const statusRaw = t.fields?.['fldx4qCw17UfrKpaN'];
+        const status = typeof statusRaw === 'object' && statusRaw ? statusRaw.name : statusRaw;
+        return status !== 'Completed';
+    }
+
+    function ucTaskLinksTenancy(t, tenancyId) {
+        const linked = t.fields?.['fldmne4RYJU22ICub'];
+        if (!Array.isArray(linked)) return false;
+        return linked.some(l => (typeof l === 'string' ? l : l?.id) === tenancyId);
+    }
+
+    // "UC verification: Ryan Lambert, £524.90 due 6 August 2026" → Date(2026-08-06)
+    function ucRentDueFromTaskName(name) {
+        const m = /\bdue\s+(\d{1,2})\s+([A-Za-z]+)\s+(\d{4})\s*$/.exec(name || '');
+        if (!m) return null;
+        const d = new Date(`${m[2]} ${m[1]}, ${m[3]}`);
+        return isNaN(d.getTime()) ? null : d;
+    }
+
+    function ucSameRentMonth(a, b) {
+        return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth();
     }
 
     async function ucFetchExistingTasks(tenancyIds) {
@@ -501,19 +561,13 @@
         });
     }
 
-    async function ucCreateTask(c) {
-        const taskName = ucTaskNameForTenancy(c.tenantName, c.rent, c.nextDue);
-        const description = ucTaskDescription(c.tenantName, c.rent, c.nextDue, c.unitName, c.propertyName);
-        const dueDateStr = ucTaskDateKey(c.taskDue);
-
-        const url = `https://api.airtable.com/v0/${BASE_ID}/${TABLES.tasks}`;
-
+    function ucTaskFields(c) {
         const fields = {
-            'fldgFjGBw6bTKJFCD': taskName,
+            'fldgFjGBw6bTKJFCD': ucTaskNameForTenancy(c.tenantName, c.rent, c.nextDue),
             'fldELMncVJYPDRJNc': { email: UC_TASK.assigneeEmail },
-            'fldRGhBQViKZKtkQ6': description,
+            'fldRGhBQViKZKtkQ6': ucTaskDescription(c.tenantName, c.rent, c.nextDue, c.unitName, c.propertyName),
             'fld10VzzbiNNgRmIi': UC_TASK.timeEstimate,
-            'fld7XP8w8kbxfETV4': dueDateStr,
+            'fld7XP8w8kbxfETV4': ucTaskDateKey(c.taskDue),
             'fldx4qCw17UfrKpaN': UC_TASK.status,
             'fldS21RwmwOqt71LI': UC_TASK.priority,
             'fldZKzIxgyrQ8CG8a': UC_TASK.hardDeadline,
@@ -534,19 +588,35 @@
             }
         }
 
-        const createResp = await fetch(url, {
-            method: 'POST',
+        return fields;
+    }
+
+    async function ucWriteTask(method, url, fields) {
+        const resp = await fetch(url, {
+            method,
             headers: { 'Authorization': `Bearer ${PAT}`, 'Content-Type': 'application/json' },
             body: JSON.stringify({ fields, typecast: true }),
         });
 
-        if (!createResp.ok) {
-            const err = await createResp.json();
-            throw new Error(err.error?.message || createResp.statusText);
+        if (!resp.ok) {
+            const err = await resp.json();
+            throw new Error(err.error?.message || resp.statusText);
         }
 
-        const created = await createResp.json();
-        return created.id;
+        return (await resp.json()).id;
+    }
+
+    async function ucCreateTask(c) {
+        return ucWriteTask('POST', `https://api.airtable.com/v0/${BASE_ID}/${TABLES.tasks}`, ucTaskFields(c));
+    }
+
+    // Re-point an existing open task at the tenancy's current rent date instead of
+    // creating a second one. Status is deliberately NOT rewritten: if Mica has
+    // already moved it to Today or Overdue, that is her working state, not ours.
+    async function ucUpdateTask(taskId, c) {
+        const fields = ucTaskFields(c);
+        delete fields['fldx4qCw17UfrKpaN'];
+        return ucWriteTask('PATCH', `https://api.airtable.com/v0/${BASE_ID}/${TABLES.tasks}/${taskId}`, fields);
     }
 
     async function runArrearsEngine() {
