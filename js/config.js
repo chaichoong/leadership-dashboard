@@ -133,7 +133,8 @@
     // The table holds people AND the 17 AI agents. Agents have no Airtable
     // login, so they carry no Member/email — only this formula name.
     const TEAM_MEMBER_FIELDS = {
-        name: 'flds7xoRFQhcRTnbB', // formula primary
+        name: 'flds7xoRFQhcRTnbB',    // formula primary
+        isAgent: 'fldKGsz9kTpFypeOr', // checkbox — tick it and the record IS an AI agent
     };
 
     // ── Task field IDs (Airtable table: Tasks / tblqB8b22hKBL4PF1) ──

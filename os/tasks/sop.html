@@ -988,7 +988,7 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
       <p>Every task entering Approval is posted to <code>#agent-approvals</code> within a minute. The post carries what the agent actually produced, so you can judge it from your phone without opening Airtable.</p>
       <ul>
         <li>&#x2705; <strong>approve</strong> &mdash; the agent goes and does it, then closes the task.</li>
-        <li>&#x274C; <strong>reject</strong> &mdash; kill this piece of work entirely. Use it when the task should not happen at all, not when it needs redoing. It counts against the agent.</li>
+        <li>&#x274C; <strong>reject</strong> &mdash; kill this piece of work entirely. Use it when the task should not happen at all, not when it needs redoing. The task is <strong>closed as Completed with the outcome recorded as Rejected</strong>, so it leaves your board and nothing is carried out. It counts against that agent's accuracy. Note that a rejected task still counts as a completed task in the Team Member rollups; the accuracy score is the number that reflects the rejection.</li>
         <li><strong>changes: just reply in the thread.</strong> No emoji. Type what you want different and that goes straight back to the agent as the instruction. Replying is the amendment.</li>
       </ul>
       <p>Only your reactions and your replies count. If you tap the pencil out of habit, the bot asks you what to change rather than guessing.</p>
@@ -997,6 +997,10 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
       <h4 style="margin-top:1rem;font-size:0.95rem;font-weight:700;">Where the agent's work lives</h4>
       <p>Two different things, kept in two different fields. <strong>Description</strong> is the brief the agent was given. <strong>Agent Output</strong> is what it produced and is proposing &mdash; the drafted email, the findings, the change it intends to make. Agent Output is what you see in Slack and at the top of the approval block. An agent that leaves it empty gets a warning on the post rather than a quiet approval, because there would be nothing to judge.</p>
       <p>When you ask for changes, your words are saved to <strong>Approval Feedback</strong> on the task. That is what the agent reads before its next attempt.</p>
+
+      <h4 style="margin-top:1rem;font-size:0.95rem;font-weight:700;">Adding a new AI agent</h4>
+      <p>Three ticks, no developer. In the <strong>Team Members</strong> table: add a row, give it a name, tick <strong>Is AI Agent</strong>, tick <strong>Active</strong>. It then appears in the AI Agents filter and in every assignee picker, and you can hand work to it straight away.</p>
+      <p>Agents need <strong>no Airtable login and no paid seat</strong> &mdash; logins are managed separately. The name does not matter; the tick box is what makes it an agent.</p>
 
       <h4 style="margin-top:1rem;font-size:0.95rem;font-weight:700;">Seeing what the agents are doing</h4>
       <p>An AI agent cannot be an Airtable Assignee &mdash; that field only holds real logins. Agent work sits on the <strong>Team Member</strong> link instead. The team bar has an <strong>AI Agents</strong> button showing everything the workforce holds, with a dropdown to narrow to one agent, and agent tasks show an <span style="font-weight:700">AI</span> badge in the Assignee column. You can hand a task to an agent from the same dropdown you use for people.</p>
@@ -1073,7 +1077,7 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
           <tr>
             <td><strong>1.3</strong></td>
             <td>1 Aug 2026</td>
-            <td>Amendments in Slack are now a plain thread reply, no emoji. Approval posts carry the agent's actual output (new Agent Output field) so the work can be judged from a phone; your words are saved to Approval Feedback for the agent to act on. Added the AI Agents team filter, the AI badge in the Assignee column, and the ability to assign a task to an agent; Unassigned now means nobody at all.</td>
+            <td>Added: adding an AI agent is now a tick box on the Team Members row (Is AI Agent), no naming convention and no code change. Spelled out exactly what reject does. Amendments in Slack are now a plain thread reply, no emoji. Approval posts carry the agent's actual output (new Agent Output field) so the work can be judged from a phone; your words are saved to Approval Feedback for the agent to act on. Added the AI Agents team filter, the AI badge in the Assignee column, and the ability to assign a task to an agent; Unassigned now means nobody at all.</td>
           </tr>
           <tr>
             <td><strong>1.2</strong></td>

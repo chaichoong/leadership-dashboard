@@ -814,6 +814,7 @@ const TM = {
   active:        'fld2YLfcPqSe6b60u', // checkbox — only Active members appear in the UI
   preferredName: 'fldFyTZu3vu1a7X3a', // singleLineText — friendly name override
   fullLegalName: 'fld1DYEbtyVsO2GVP', // singleLineText — fallback when preferred is blank
+  isAgent:       'fldKGsz9kTpFypeOr', // checkbox — THE way a record becomes an AI agent
 };
 let allTeamMembers = [];
 
@@ -849,10 +850,21 @@ const ACCURACY_MIN_SAMPLE = AgentAccuracy.THRESHOLD.minSample;
 const ACCURACY_MIN_RATE   = AgentAccuracy.THRESHOLD.minRate;
 const ACCURACY_RECENT_N   = AgentAccuracy.THRESHOLD.recentN;
 const KEVIN_EMAIL = 'kevin@runpreneur.org.uk';
-// id → name for the AI agents in the Team Members table (records whose name
-// starts with "AI "). Built in loadAllData. Agents have no Airtable login, so
-// they never appear in allTeamMembers, which is filtered to members with an email.
+// id → name for the AI agents in the Team Members table. Built in loadAllData.
+// Agents have no Airtable login, so they never appear in allTeamMembers, which
+// is filtered to members with an email.
+//
+// ADDING AN AGENT is deliberately a one-step job with no code change: add a row
+// to Team Members, tick "Is AI Agent", tick Active. It then appears in the AI
+// Agents filter and in every assignee picker. No Airtable login and no paid
+// seat — logins are managed separately.
 let AGENT_MAP = {};
+// The checkbox is the truth. The name prefix is only a fallback so the original
+// 17 keep working if someone adds an agent and forgets to tick the box.
+function isAgentRecord(rec){
+  if(rec&&rec.fields&&rec.fields[TM.isAgent])return true;
+  return isAgentName((rec&&rec.name)||'');
+}
 function isAgentName(n){ return /^AI\s/.test(String(n||'')) }
 
 const STATUS_ORDER = { Overdue:0, Today:1, Approval:2, Upcoming:3, Completed:4 };
@@ -8996,7 +9008,7 @@ async function loadAllData(){
       fetchCalendarEvents(),
       // Only fetch team members flagged Active — keeps retired / legacy
       // collaborators out of the picker without deleting historical records.
-      fetchTable(TEAM_MEMBERS_TABLE,[TM.name,TM.member,TM.active,TM.preferredName,TM.fullLegalName],'{Active}=TRUE()').catch(e=>{console.warn('Team Members fetch failed',e);return[]}),
+      fetchTable(TEAM_MEMBERS_TABLE,[TM.name,TM.member,TM.active,TM.preferredName,TM.fullLegalName,TM.isAgent],'{Active}=TRUE()').catch(e=>{console.warn('Team Members fetch failed',e);return[]}),
     ]);
     allTasks=rawTasks.map(parseTask);
     if(MAINTENANCE_ONLY)allTasks=allTasks.filter(t=>t.maintenance);
@@ -9019,7 +9031,7 @@ async function loadAllData(){
     AGENT_MAP={};
     (rawTeam||[]).forEach(r=>{
       const nm=(r.fields?.[TM.preferredName]||'').trim()||(r.fields?.[TM.fullLegalName]||'').trim()||(r.fields?.[TM.name]||'').trim();
-      if(nm&&isAgentName(nm))AGENT_MAP[r.id]=nm;
+      if(nm&&isAgentRecord({fields:r.fields,name:nm}))AGENT_MAP[r.id]=nm;
     });
     try{populateProjectFilterOptions()}catch(e){}
 

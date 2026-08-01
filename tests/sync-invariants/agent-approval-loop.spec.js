@@ -42,6 +42,7 @@ const TM = {
   member: 'fldh16yvEgBy8uLKQ',
   active: 'fld2YLfcPqSe6b60u',
   fullLegalName: 'fld1DYEbtyVsO2GVP',
+  isAgent: 'fldKGsz9kTpFypeOr',
 };
 
 const AGENT_ID = 'recAgentWriter1';
@@ -91,6 +92,15 @@ function teamRecords() {
     { id: 'recMica', createdTime: new Date().toISOString(), fields: {
       [TM.name]: 'Mica Albovias',
       [TM.member]: { id: 'usrMica', email: 'micaa.work@gmail.com', name: 'Mica Albovias' },
+      [TM.active]: true,
+    } },
+    // An agent whose name does NOT start with "AI". Adding an agent must be one
+    // step — add the row, tick the box — with no naming convention to remember
+    // and no code change.
+    { id: 'recZeta', createdTime: new Date().toISOString(), fields: {
+      [TM.name]: 'Zeta Ops Bot',
+      [TM.fullLegalName]: 'Zeta Ops Bot',
+      [TM.isAgent]: true,
       [TM.active]: true,
     } },
   ] };
@@ -266,6 +276,26 @@ test.describe('Agent approval loop', () => {
     const handover = [...patches].reverse().find(p => p.id === WAITING_ID && F.assignee in p.fields);
     expect(handover.fields[F.assignee]).toEqual({ email: 'micaa.work@gmail.com' });
     expect(handover.fields[F.teamMember], 'the agent lets go').toEqual([]);
+  });
+
+  test('ticking "Is AI Agent" is all it takes — no naming convention, no code change', async ({ page }) => {
+    await mockAirtable(page);
+    await page.goto(PAGE);
+    await waitForTasks(page);
+
+    const res = await page.evaluate(() => ({
+      pickedUp: !!AGENT_MAP.recZeta,
+      name: AGENT_MAP.recZeta || null,
+      // Offered in the picker, i.e. work can actually be handed to it.
+      offered: assigneeOptionsHtml(allTasks[0], false).includes('agent:recZeta'),
+      // A real person with no box ticked must NOT become an agent.
+      micaIsNotAnAgent: !AGENT_MAP.recMica,
+    }));
+
+    expect(res.pickedUp, 'the checkbox alone must make it an agent').toBe(true);
+    expect(res.name).toBe('Zeta Ops Bot');
+    expect(res.offered, 'it must be assignable').toBe(true);
+    expect(res.micaIsNotAnAgent).toBe(true);
   });
 
   test('request changes will not submit without a comment', async ({ page }) => {
