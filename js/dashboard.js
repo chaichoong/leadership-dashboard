@@ -411,6 +411,37 @@
     }
 
     // Fetch a slim view of every task — just the fields we need for
+    // Slim view of every prospect, for funnel KPIs. Same lazy pattern as the task
+    // fetch: only pulled when automated KPIs actually run. Status is the whole
+    // funnel — Found → Ready for Review → Approved → Synced to GHL → In Sequence →
+    // Replied → Call Booked — so a compute function can count any stage it wants.
+    async function fetchProspectsForKpi(){
+        try{
+            const url=`https://api.airtable.com/v0/${BASE_ID}/${TABLES.prospects}?returnFieldsByFieldId=true&pageSize=100&fields[]=fldNFSZrPsUF1NAd1&fields[]=fldSoTbvGYRI2R0bq&fields[]=fld2cltR75W6DYQuB&fields[]=fld18VDzR2Iu1m2qt`;
+            let all=[],offset=null;
+            do{
+                const r=await fetch(url+(offset?'&offset='+offset:''),{headers:{Authorization:`Bearer ${PAT}`}});
+                if(!r.ok)throw new Error('prospects fetch '+r.status);
+                const j=await r.json();
+                all=all.concat(j.records||[]);
+                offset=j.offset;
+            }while(offset);
+            return all.map(p=>{
+                const c=p.fields||{};
+                const s=c['fldNFSZrPsUF1NAd1'];
+                const status=typeof s==='string'?s:(s&&s.name)||'';
+                const route=c['fld18VDzR2Iu1m2qt'];
+                return {
+                    id:p.id,
+                    status,
+                    dateFound:c['fldSoTbvGYRI2R0bq']||'',
+                    ghlContactId:c['fld2cltR75W6DYQuB']||'',
+                    contactRoute:typeof route==='string'?route:(route&&route.name)||'',
+                };
+            });
+        }catch(e){console.warn('[fetchProspectsForKpi] failed',e);return []}
+    }
+
     // task-completion style KPIs. Only called when the dashboard runs
     // automated KPIs, so it doesn't add load to unrelated refreshes.
     async function fetchTasksForKpi(){
@@ -457,6 +488,7 @@
         await _mainDataReadyPromise;
         // Fetch the task list once for any project KPI that needs it.
         const tasksForKpi=await fetchTasksForKpi();
+        const prospectsForKpi=await fetchProspectsForKpi();
         // Run all computes synchronously, updating local state per project so the
         // caller can renderStrategicKpis() with fresh values right away. PATCHes
         // to Airtable fire in the background (fire-and-forget) — they used to be
@@ -476,6 +508,7 @@
                 };
                 const ctx=buildAutomatedKpiContext(local);
                 ctx.tasks=tasksForKpi;
+                ctx.prospects=prospectsForKpi;
                 let value=runKpiComputeCode(code,ctx);
                 if(value==null)continue;
                 // The compute code already handles DD reversals correctly
