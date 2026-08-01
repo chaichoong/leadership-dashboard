@@ -103,11 +103,29 @@ Back-tested read-only against the real broken state, no bad data written:
 
 Passing on live data now that the duplicate is gone, against a control of 3 weekday rows.
 
-## Not chased — worth a look
+## The day-ahead stub — checked, and it is not a bug
 
-`recqGluSOjxClVeNB` is dated 2026-07-31 but its Airtable `createdTime` is
-**2026-07-30T12:42Z**, not 07:30 this morning. So the huddle stub for a given day may be
-written the previous lunchtime rather than at 07:30 on the day. That does not affect either
-bug above, and the new invariant does not care, but if the huddle is dating its row a day
-ahead then "today's huddle" and "today's brief" could drift apart. Left alone deliberately:
-it needs the `ceo-huddle` task read, not the worker.
+`recqGluSOjxClVeNB` is dated 2026-07-31 but was created **2026-07-30T12:42Z**. Chased it
+down: the `ceo-huddle` task computes `Date` as today's Europe/London date and cannot produce
+a future date on its own. Its cron is `0 6 * * 1-5` and it did not fire at 13:42 on 30 Jul.
+
+The record was seeded by hand. The `ceo-huddle` task was CREATED on the afternoon of 30 Jul
+(session "Pre-launch task prioritization"), and Kevin asked for a first run right there:
+
+> run the huddle now so tomorrow's brief has it
+
+The 30 Jul brief had already gone out at 09:00, so that first run correctly wrote the next
+weekday. The scheduled 06:31 run on 31 Jul then found a record for today and PATCHed it, per
+step 4 of the skill. `createdTime` 30 Jul with 31 Jul content is exactly what that sequence
+looks like. Nothing to fix.
+
+The one real consequence is already guarded. Content written the afternoon before goes stale
+overnight, and on 31 Jul the pre-written flag claimed the contract was still at old terms
+after that had been disproved the same morning. Line 48 of the `ceo-huddle` SKILL.md now
+tells the run to check any pre-existing One Thing, First Step or Board Flags against the
+tasks before keeping them.
+
+No future-dated row exists now — the newest is 31 Jul. Deliberately did NOT add an invariant
+for future-dated rows: seeding one is a legitimate thing Kevin can ask for, so the check
+would be a red light on a correct action, and the staleness risk it points at is a judgement
+call the SKILL.md guard already covers.
