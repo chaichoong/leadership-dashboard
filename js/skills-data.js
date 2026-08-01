@@ -5360,7 +5360,7 @@ API calls may fail mid-execution due to credit depletion. **Always save all retr
         id: 'uc-check-slack-notifier',
         name: 'UC Check Slack Notifier',
         command: 'scheduled:uc-check-slack-notifier',
-        description: 'Sends a Slack DM to Mica when new UC Check tasks are created from the Leadership Dashboard — ensures timely follow-up.',
+        description: 'Runs daily at 08:00 and sends Mica one Slack DM listing every Universal Credit check that is due, so she rings UC before the rent falls due. Silent when nothing is due.',
         category: 'Automation',
         source: 'scheduled',
         tags: ['Slack', 'notification', 'UC check', 'automation']
