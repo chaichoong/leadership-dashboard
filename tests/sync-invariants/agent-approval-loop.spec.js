@@ -117,7 +117,13 @@ async function mockAirtable(page) {
       if (method === 'POST') return json({ id: 'comMock1', text: 'ok', createdTime: new Date().toISOString() });
       return json({ comments: [] });
     }
-    if (url.includes(TEAM_TABLE)) return json(teamRecords());
+    if (url.includes(TEAM_TABLE)) {
+      if (method === 'POST') {
+        const body = JSON.parse(route.request().postData() || '{}');
+        return json({ records: [{ id: 'recNewAgent', fields: body.records[0].fields }] });
+      }
+      return json(teamRecords());
+    }
     if (url.includes(TASKS_TABLE)) {
       if (method === 'PATCH') {
         const body = JSON.parse(route.request().postData() || '{}');
@@ -296,6 +302,50 @@ test.describe('Agent approval loop', () => {
     expect(res.name).toBe('Zeta Ops Bot');
     expect(res.offered, 'it must be assignable').toBe(true);
     expect(res.micaIsNotAnAgent).toBe(true);
+  });
+
+  test('the Task List filter separates robot work from human work', async ({ page }) => {
+    await mockAirtable(page);
+    await page.goto(PAGE);
+    await waitForTasks(page);
+    // The page defaults to the signed-in user's own tasks, so widen to All
+    // before testing a filter that is about everyone's work.
+    await page.evaluate(() => { setTeam('all'); switchView('list'); });
+
+    // An empty result renders a single "No tasks found." row, so count real
+    // task rows rather than every <tr>.
+    const count = async (value) => page.evaluate((v) => {
+      document.getElementById('filterOwnerType').value = v;
+      renderTasks();
+      const body = document.querySelector('.task-table tbody');
+      if (!body || /No tasks found/.test(body.innerText)) return 0;
+      return body.querySelectorAll('tr').length;
+    }, value);
+
+    expect(await count('ai'), 'both fixtures are agent-held').toBe(2);
+    expect(await count('people'), 'neither is held by a person alone').toBe(0);
+    expect(await count('nobody'), 'nothing is truly unassigned').toBe(0);
+    expect(await count(''), 'no filter shows everything').toBe(2);
+  });
+
+  test('an agent can be added from the app, without touching Airtable', async ({ page }) => {
+    await mockAirtable(page);
+    await page.goto(PAGE);
+    await waitForTasks(page);
+    await page.evaluate(() => switchView('agents'));
+    await page.waitForSelector('#newAgentName');
+
+    await page.locator('#newAgentName').fill('AI Worker — Bookkeeper');
+    await page.getByRole('button', { name: 'Add agent' }).click();
+    await page.waitForFunction(
+      () => Object.values(AGENT_MAP).includes('AI Worker — Bookkeeper'), null, { timeout: 10000 });
+
+    // Usable immediately — the point of doing it here rather than in Airtable.
+    const offered = await page.evaluate(() => {
+      const id = Object.keys(AGENT_MAP).find(k => AGENT_MAP[k] === 'AI Worker — Bookkeeper');
+      return assigneeOptionsHtml(allTasks[0], false).includes('agent:' + id);
+    });
+    expect(offered).toBe(true);
   });
 
   test('request changes will not submit without a comment', async ({ page }) => {

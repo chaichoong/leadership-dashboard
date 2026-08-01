@@ -571,6 +571,15 @@ body.app-busy,body.app-busy *{cursor:progress!important}
         <option value="">All Projects</option>
         <option value="__none">No project</option>
       </select>
+      <!-- Who is doing it. Duplicates the team bar's AI Agents button on
+           purpose: this is the row people actually look at when scanning the
+           list, and "is a robot or a person doing this" is the first question. -->
+      <select class="filter-select" id="filterOwnerType" onchange="renderTasks()" title="Show only work held by AI agents, or only work held by people">
+        <option value="">Anyone (people + AI)</option>
+        <option value="ai">AI agents only</option>
+        <option value="people">People only</option>
+        <option value="nobody">Nobody (unassigned)</option>
+      </select>
       <select class="filter-select" id="filterStatus" onchange="onStatusFilterChange()">
         <option value="">All Statuses (active)</option>
         <option value="Today">Today</option>
@@ -5301,6 +5310,11 @@ function getFilteredTasks(){
   const teEl=document.getElementById('filterTimeEst');const tef=teEl?teEl.value:'';
   if(tef==='none')tasks=tasks.filter(t=>!t.timeEst||(!t.minutes||t.minutes===0));
   else if(tef==='any')tasks=tasks.filter(t=>!!t.timeEst&&t.minutes>0);
+  // Robot or person. The first question when scanning the list.
+  const otEl=document.getElementById('filterOwnerType');const otf=otEl?otEl.value:'';
+  if(otf==='ai')tasks=tasks.filter(t=>!!taskAgentId(t));
+  else if(otf==='people')tasks=tasks.filter(t=>!!t.assigneeEmail&&!taskAgentId(t));
+  else if(otf==='nobody')tasks=tasks.filter(t=>taskIsTrulyUnassigned(t));
   const q=document.getElementById('searchBox').value.toLowerCase().trim();
   if(q)tasks=tasks.filter(t=>t.name.toLowerCase().includes(q)||(t.assignee||'').toLowerCase().includes(q)||(t.description||'').toLowerCase().includes(q)||(t.business||'').toLowerCase().includes(q));
   // Completed view: most-recently completed first (fall back to due date).
@@ -5403,7 +5417,7 @@ function renderTasks(){
 function changePage(d){currentPage+=d;renderTasks();document.querySelector('.task-table-wrap').scrollTop=0}
 // Reset every filter + search back to default
 function clearAllFilters(){
-  const ids=['filterStatus','filterPriority','filterBusiness','filterProject','filterRecurring','filterHard','filterTimeEst'];
+  const ids=['filterStatus','filterPriority','filterBusiness','filterProject','filterRecurring','filterHard','filterTimeEst','filterOwnerType'];
   ids.forEach(id=>{const el=document.getElementById(id);if(el)el.value=''});
   const sb=document.getElementById('searchBox');if(sb)sb.value='';
   // Reset the completed date-range search and hide its inputs (status is now blank).
@@ -8941,6 +8955,8 @@ async function renderAgents(){
       <h4 style="color:var(--success)">Recommendation${recs.length>1?'s':''} — nothing has changed</h4>
       ${recs.map(r=>`<div class="acc-row"><span class="acc-type" style="white-space:normal">${escHtml(r)}</span></div>`).join('')}
     </div>`:''}
+    <h3 style="margin:20px 0 0 0;font-size:var(--fs-lg)">Your AI workforce <span style="color:var(--text-muted);font-weight:400">(${Object.keys(AGENT_MAP||{}).length})</span></h3>
+    ${renderAgentRoster()}
     <h3 style="margin:20px 0 0 0;font-size:var(--fs-lg)">Accuracy by agent and kind of work</h3>
     <div style="font-size:var(--fs-sm);color:var(--text-secondary);margin-top:4px">Counts approved as-is and approved with minor edits as accurate. The bar is ${ACCURACY_MIN_SAMPLE} decisions at ${Math.round(ACCURACY_MIN_RATE*100)}% with no rejections in the last ${ACCURACY_RECENT_N}. Crossing it is a recommendation to you, never an automatic change.</div>
     ${agentHistoryError?`<div class="acc-card" style="margin-top:12px;border-color:var(--danger)"><span style="color:var(--danger)">Could not load the approval history: ${escHtml(agentHistoryError)}</span></div>`:''}
@@ -8948,6 +8964,63 @@ async function renderAgents(){
       :`<div class="acc-card" style="margin-top:12px;color:var(--text-secondary);font-size:var(--fs-sm)">No approval decisions recorded yet. Scores appear here as soon as you approve or reject your first piece of agent work.</div>`}
   `;
 }
+// ── The workforce roster ──────────────────────────────────────────────
+// Adding an agent is a tick box on a Team Members row, but that table has ~195
+// fields and the box is impossible to find in the Airtable UI. So it is done
+// from here instead: type a name, press Add, and the record is created with
+// "Is AI Agent" and "Active" already ticked. No Airtable login, no paid seat.
+function renderAgentRoster(){
+  const active=(allTasks||[]).filter(t=>t.status!=='Completed'&&!t.someDay);
+  const load={};
+  active.forEach(t=>{const id=taskAgentId(t);if(id)load[id]=(load[id]||0)+1});
+  const ids=Object.keys(AGENT_MAP||{}).sort((a,b)=>(load[b]||0)-(load[a]||0)||AGENT_MAP[a].localeCompare(AGENT_MAP[b]));
+  const rows=ids.length
+    ? ids.map(id=>`<div class="acc-row">
+        <span class="acc-type">${escHtml(AGENT_MAP[id])}</span>
+        <span class="acc-n">${load[id]||0} open</span>
+        <button class="btn btn-sm" onclick="setTeam('agents');setAgentFilter('${id}');switchView('list')" title="Show this agent's work">View work</button>
+      </div>`).join('')
+    : `<div style="padding:10px 0;color:var(--text-secondary);font-size:var(--fs-sm)">No agents yet.</div>`;
+  return `<div class="acc-card" style="margin-top:8px">
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:6px">
+      <input id="newAgentName" type="text" placeholder="New agent name, e.g. AI Worker — Bookkeeper"
+        style="flex:1;min-width:220px;background:var(--bg-surface-2);border:1px solid var(--border-default);color:var(--text-primary);padding:6px 8px;border-radius:4px;font-family:inherit;font-size:var(--fs-base)"
+        onkeydown="if(event.key==='Enter')addAgent()">
+      <button class="btn btn-primary btn-sm" onclick="addAgent()">Add agent</button>
+    </div>
+    <div style="font-size:11px;color:var(--text-muted);margin-bottom:4px">Creates a Team Members record with "Is AI Agent" and "Active" ticked. No Airtable login and no paid seat — it can hold work straight away.</div>
+    ${rows}
+  </div>`;
+}
+
+async function addAgent(){
+  const inp=document.getElementById('newAgentName');
+  const name=(inp&&inp.value||'').trim();
+  if(!name){toast('Give the agent a name first.',true);if(inp)inp.focus();return}
+  if(Object.values(AGENT_MAP||{}).some(n=>n.toLowerCase()===name.toLowerCase())){
+    toast('There is already an agent with that name.',true);return;
+  }
+  const btns=document.querySelectorAll('#newAgentName ~ .btn');
+  btns.forEach(b=>b.disabled=true);
+  try{
+    const res=await fetch(`https://api.airtable.com/v0/${BASE_ID}/${TEAM_MEMBERS_TABLE}`,{
+      method:'POST',
+      headers:{Authorization:`Bearer ${PAT}`,'Content-Type':'application/json'},
+      body:JSON.stringify({records:[{fields:{[TM.fullLegalName]:name,[TM.isAgent]:true,[TM.active]:true}}],typecast:true}),
+    });
+    if(!res.ok){let b='';try{b=await res.text()}catch(e){}throw new Error(res.status+' '+b.slice(0,140))}
+    const rec=(await res.json()).records[0];
+    AGENT_MAP[rec.id]=name;           // usable immediately, no refresh needed
+    if(inp)inp.value='';
+    toast(`${name} added. You can assign work to it now.`);
+    renderAll();
+  }catch(e){
+    console.error('add agent failed',e);
+    toast('Could not add the agent: '+(e&&e.message||e),true);
+  }finally{ btns.forEach(b=>b.disabled=false) }
+}
+window.addAgent=addAgent;
+
 async function refreshAgentAccuracy(){
   agentHistoryLoaded=false;agentHistoryError='';
   await loadAgentApprovalHistory(true);

@@ -576,6 +576,27 @@
     const DASHBOARD_GROUP = ['overview', 'cfv'];
     const ACCOUNTS_GROUP = ['income', 'ar-variable', 'costs', 'invoices', 'transactions', 'fintable'];
 
+    // How long an embedded page may sit unreloaded before the next visit
+    // re-fetches it. Long enough that normal tab-hopping does not throw away
+    // filters and scroll position; short enough that a deploy reaches a tab
+    // left open all day.
+    const IFRAME_MAX_AGE_MS = 20 * 60 * 1000;
+
+    // Load an embedded page, cache-busted, and reload it if the copy on screen
+    // predates IFRAME_MAX_AGE_MS. `marker` is a string that appears in the src
+    // once loaded, used to tell "never loaded" from "loaded already".
+    function lazyLoadFrame(frameId, marker) {
+        const frame = document.getElementById(frameId);
+        if (!frame) return;
+        const src = frame.getAttribute('src') || '';
+        const loadedAt = Number(frame.dataset.loadedAt || 0);
+        const stale = loadedAt && (Date.now() - loadedAt) > IFRAME_MAX_AGE_MS;
+        if (src && src.includes(marker) && !stale) return;
+        const base = frame.dataset.src;
+        frame.dataset.loadedAt = String(Date.now());
+        frame.src = base + (base.includes('?') ? '&' : '?') + 'cb=' + Date.now();
+    }
+
     async function switchTab(tabId) {
         // Leaving the AI Brain tab: refresh its sidebar badge so answers Kevin
         // just tapped drop the waiting count straight away.
@@ -654,10 +675,14 @@
             }
         });
         // Lazy-load iframes on first switch
-if (tabId === 'comms') {
-            const frame = document.getElementById('commsFrame');
-            if (!frame.getAttribute('src') || !frame.getAttribute('src').includes('follow-up')) frame.src = frame.dataset.src;
-        }
+        //
+        // STALENESS: the old guard was "load it once, never again", so a browser
+        // tab left open across a deploy served the OLD embedded page for the rest
+        // of the session with no way for the user to know. On 1 Aug 2026 that had
+        // Kevin looking at a Tasks page from before a deploy and reporting a
+        // shipped feature as missing. A reload after IFRAME_MAX_AGE_MS means a
+        // long-lived tab picks deploys up on its own.
+if (tabId === 'comms') lazyLoadFrame('commsFrame', 'follow-up');
         // Render income tab on switch
         if (tabId === 'income') {
             if (typeof renderIncomeTab === 'function') renderIncomeTab();
@@ -715,63 +740,23 @@ if (tabId === 'comms') {
             if (typeof renderSkillsTab === 'function') renderSkillsTab();
         }
         // Task Manager lazy-load
-        if (tabId === 'tasks') {
-            const frame = document.getElementById('tasksFrame');
-            if (!frame.getAttribute('src') || !frame.getAttribute('src').includes('tasks')) {
-                // Cache-bust so Pages deploys of os/tasks/index.html are picked up
-                // without the user having to clear their browser cache.
-                frame.src = frame.dataset.src + (frame.dataset.src.includes('?') ? '&' : '?') + 'cb=' + Date.now();
-            }
-        }
+        if (tabId === 'tasks') lazyLoadFrame('tasksFrame', 'tasks');
         // (Launch Plan tab removed — content was duplicating Strategy OS.)
         // Systemisation OS lazy-load (cache-busted so Pages deploys are picked up)
-        if (tabId === 'systemisation') {
-            const frame = document.getElementById('systemisationFrame');
-            if (!frame.getAttribute('src') || !frame.getAttribute('src').includes('systemisation')) {
-                frame.src = frame.dataset.src + (frame.dataset.src.includes('?') ? '&' : '?') + 'cb=' + Date.now();
-            }
-        }
+        if (tabId === 'systemisation') lazyLoadFrame('systemisationFrame', 'systemisation');
         // Operations OS lazy-load (cache-busted so Pages deploys are picked up)
-        if (tabId === 'operations') {
-            const frame = document.getElementById('operationsFrame');
-            if (!frame.getAttribute('src') || !frame.getAttribute('src').includes('operations')) {
-                frame.src = frame.dataset.src + (frame.dataset.src.includes('?') ? '&' : '?') + 'cb=' + Date.now();
-            }
-        }
+        if (tabId === 'operations') lazyLoadFrame('operationsFrame', 'operations');
         // Plan Builder + Strategy iframe lazy-load (Operating Systems Hub
         // removed in Phase 3 sidebar restructure).
-        if (tabId === 'os-bplan') {
-            const frame = document.getElementById('osBplanFrame');
-            if (!frame.getAttribute('src') || !frame.getAttribute('src').includes('business-plan')) frame.src = frame.dataset.src;
-        }
-        if (tabId === 'os-strategy') {
-            const frame = document.getElementById('osStrategyFrame');
-            if (!frame.getAttribute('src') || !frame.getAttribute('src').includes('strategy')) {
-                frame.src = frame.dataset.src + '?cb=' + Date.now();
-            }
-        }
-        if (tabId === 'os-team') {
-            const frame = document.getElementById('osTeamFrame');
-            if (!frame.getAttribute('src') || !frame.getAttribute('src').includes('team')) {
-                frame.src = frame.dataset.src + (frame.dataset.src.includes('?') ? '&' : '?') + 'cb=' + Date.now();
-            }
-        }
+        if (tabId === 'os-bplan') lazyLoadFrame('osBplanFrame', 'business-plan');
+        if (tabId === 'os-strategy') lazyLoadFrame('osStrategyFrame', 'strategy');
+        if (tabId === 'os-team') lazyLoadFrame('osTeamFrame', 'team');
         // Content Machine (Marketing) lazy-load — standalone app loaded via iframe,
         // cache-busted so its Pages deploys are picked up without a hard refresh.
-        if (tabId === 'content-machine') {
-            const frame = document.getElementById('contentMachineFrame');
-            if (!frame.getAttribute('src') || !frame.getAttribute('src').includes('content-machine')) {
-                frame.src = frame.dataset.src + (frame.dataset.src.includes('?') ? '&' : '?') + 'cb=' + Date.now();
-            }
-        }
+        if (tabId === 'content-machine') lazyLoadFrame('contentMachineFrame', 'content');
         // AI Brain (Operations) lazy-load — standalone module page via iframe,
         // cache-busted so Pages deploys are picked up without a hard refresh.
-        if (tabId === 'ai-brain') {
-            const frame = document.getElementById('aiBrainFrame');
-            if (!frame.getAttribute('src') || !frame.getAttribute('src').includes('ai-brain')) {
-                frame.src = frame.dataset.src + (frame.dataset.src.includes('?') ? '&' : '?') + 'cb=' + Date.now();
-            }
-        }
+        if (tabId === 'ai-brain') lazyLoadFrame('aiBrainFrame', 'ai-brain');
 
         // Refresh data on tab switch — but only if cache is stale.
         // Re-fetching on every tab switch was hammering Airtable and causing the
