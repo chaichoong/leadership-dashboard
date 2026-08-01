@@ -116,7 +116,7 @@ os/                 ← Operating Systems (separate pages loaded via iframe)
 - `follow-up.html` — Inbound Comms (standalone, loaded via iframe)
 - `compliance.html` — Property Compliance (standalone, loaded via iframe)
 - `sop*.html` — SOPs for each page
-- `os/business-plan-builder/` — Business Launch Plan Builder
+- `os/business-plan-builder/` — retired from the shell 1 Aug 2026 (no sidebar entry); files kept for the Supabase client product, where Plan Builder remains a toggleable module
 - `os/tasks/`, `os/operations/`, `os/strategy/`, `os/systemisation/`, `os/team/` — Operating Systems pages (loaded via iframe; the old os/index.html hub and os/launch-plan.html were removed in the sidebar restructure)
 - `sitemap.xml` / `robots.txt` — SEO files (update when adding new pages)
 
@@ -210,7 +210,7 @@ These files are used by ALL features. Only ONE session should edit them at a tim
 
 When editing `index.html`, preserve the Operating Systems integration points (the old `<!-- OS-INTEGRATION -->` comment markers were removed in the sidebar restructure; the structures themselves remain protected):
 1. **Sidebar** — OS menu items and their health dots
-2. **Tab panels** — OS iframe containers (`tab-tasks`, `tab-operations`, `tab-systemisation`, `tab-os-strategy`, `tab-os-team`, `tab-os-bplan`)
+2. **Tab panels** — OS iframe containers (`tab-tasks`, `tab-operations`, `tab-systemisation`, `tab-os-strategy`, `tab-os-team`)
 3. **PAGE_REGISTRY** in `js/config.js` — OS entries
 
 Never remove or overwrite these when restructuring the shell.

@@ -35,9 +35,11 @@
         { id: 'comms',      name: 'Inbound Comms',                 icon: '📨', pageVer: '2.54', sopFile: 'inbound-comms-sop.html',      sopVer: '2.4', standalone: 'follow-up.html' },
         { id: 'compliance', name: 'Property Compliance',            icon: '✅', pageVer: '1.12', sopFile: 'sop-compliance.html',         sopVer: '1.1', standalone: 'compliance.html' },
         { id: 'operations',  name: 'Operations',                    icon: '🏢', pageVer: '1.44', sopFile: '',                            sopVer: '1.0', standalone: 'os/operations/index.html' },
-        // Plan Builder lives under the Leadership section in the sidebar.
-        // (Operating Systems Hub + Launch Plan removed during sidebar restructure.)
-        { id: 'os-bplan',  name: 'Business Launch Plan Builder',   icon: '📋', pageVer: '1.16', sopFile: 'os/business-plan-builder/sop.html', sopVer: '1.3', standalone: 'os/business-plan-builder/index.html' },
+        // KPI Library (Leadership section) — ADMIN ONLY. Never rendered in a
+        // client tenant's shell; the adminOnly flag is the contract the Supabase
+        // migration must honour. Replaced the Plan Builder entry 1 Aug 2026 on
+        // Kevin's direction (os/business-plan-builder/ files remain on disk).
+        { id: 'kpi-library', name: 'KPI Library', icon: '📚', pageVer: '1.0', sopFile: '', sopVer: '1.0', standalone: 'index.html#kpi-library', adminOnly: true },
         { id: 'fintable',  name: 'Accounts',                       icon: '🏦', pageVer: '1.8', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#fintable' },
         { id: 'systemisation', name: 'Systemisation',              icon: '⚙️', pageVer: '1.6', sopFile: 'guides/systemisation.html',    sopVer: '1.0', standalone: 'os/systemisation/index.html' },
         { id: 'os-team',    name: 'Team Members',                  icon: '👥', pageVer: '1.4', sopFile: '',                            sopVer: '1.0', standalone: 'os/team/index.html' },

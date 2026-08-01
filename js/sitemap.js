@@ -12,7 +12,7 @@
         'pnl':         ['js/pnl.js'],
         'comms':       ['follow-up.html'],
         'compliance':  ['compliance.html'],
-        'os-bplan':    ['os/business-plan-builder/index.html'],
+        'kpi-library': ['js/kpi-library.js'],
         'fintable':    ['js/fintable.js'],
         'sitemap':     ['js/sitemap.js'],
     };

@@ -209,7 +209,7 @@
                     <tr><td>AI assistant panel</td><td><code>js/ai-assistant.js</code></td><td>Context blocks per tab live here</td></tr>
                     <tr><td>Skills / KPI sources / quick task</td><td><code>js/skills.js</code> · <code>js/skills-data.js</code> · <code>js/kpi-sources.js</code> · <code>js/quick-task.js</code></td><td></td></tr>
                     <tr><td>Health bars</td><td><code>js/sync-bar.js</code></td><td>registerSyncBar engine — shared, treat like shared.js</td></tr>
-                    <tr><td>Operating Systems pages</td><td><code>os/*/index.html</code></td><td>tasks, operations, strategy, systemisation, team, business-plan-builder — loaded via iframe</td></tr>
+                    <tr><td>Operating Systems pages</td><td><code>os/*/index.html</code></td><td>tasks, operations, strategy, systemisation, team — loaded via iframe (business-plan-builder retired from the shell 1 Aug 2026, files remain)</td></tr>
                     <tr><td>Standalone iframe pages</td><td><code>follow-up.html</code> · <code>compliance.html</code> · <code>ai-brain.html</code></td><td>Each self-contained</td></tr>
                     <tr><td>Styling</td><td><code>css/styles.css</code> (consumes <code>css/tokens.css</code>)</td><td>Whole-app look changes: tokens.css ONLY</td></tr>
                     <tr><td>Sidebar / tab shell</td><td><code>index.html</code></td><td>Protected: OS sidebar items, OS iframe tab panels</td></tr>
@@ -252,7 +252,7 @@
                     Never remove when restructuring the shell:
                     <ul>
                         <li>Sidebar OS menu items and their health dots</li>
-                        <li>OS iframe tab panels: <code>tab-tasks</code>, <code>tab-operations</code>, <code>tab-systemisation</code>, <code>tab-os-strategy</code>, <code>tab-os-team</code>, <code>tab-os-bplan</code></li>
+                        <li>OS iframe tab panels: <code>tab-tasks</code>, <code>tab-operations</code>, <code>tab-systemisation</code>, <code>tab-os-strategy</code>, <code>tab-os-team</code></li>
                         <li>PAGE_REGISTRY OS entries in <code>js/config.js</code></li>
                     </ul>
                 </div>

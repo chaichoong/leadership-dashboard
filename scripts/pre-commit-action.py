@@ -34,7 +34,7 @@ FILE_TO_PAGE = {
     # Agent accuracy scoring is shared by the Task OS (AI Agents tab) and the
     # Leadership Dashboard (Agent Approvals card), so a change bumps both.
     'js/agent-accuracy.js': ['tasks', 'overview'],
-    'os/business-plan-builder/index.html': 'os-bplan',
+    'js/kpi-library.js': 'kpi-library',
     'os/strategy/index.html': 'os-strategy',
     'os/strategy/strategy.js': 'os-strategy',
     'os/strategy/strategy.css': 'os-strategy',

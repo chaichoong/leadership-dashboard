@@ -54,7 +54,7 @@
              ────────────────────────────────────────────────────────────────── -->
         <nav class="sidebar-nav" id="sidebarNav">
 
-            <div class="sidebar-section" data-section="leadership" data-tabs="ceo-brief,overview,cfv,os-strategy,os-bplan">
+            <div class="sidebar-section" data-section="leadership" data-tabs="ceo-brief,overview,cfv,os-strategy,kpi-library">
                 <div class="sidebar-section-header" role="button" tabindex="0" aria-expanded="true" onclick="toggleSidebarSection('leadership')" onkeydown="if(event.key==='Enter'||event.key===' ')toggleSidebarSection('leadership')">
                     <span class="sidebar-section-chevron">&#x25BE;</span>
                     <span class="sidebar-section-name">Leadership</span>
@@ -64,7 +64,8 @@
                     <div class="sidebar-item" role="menuitem" tabindex="0" onclick="switchTab('ceo-brief')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();switchTab('ceo-brief')}"><span class="sidebar-icon">&#x2600;&#xFE0F;</span><span class="sidebar-label">CEO Brief</span><span class="sidebar-health-dot unknown" data-sidebar-health="ceo-brief" title="No checks run yet"></span></div>
                     <div class="sidebar-item active" role="menuitem" tabindex="0" data-tab-group="dashboard" onclick="switchTab('overview')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();switchTab('overview')}"><span class="sidebar-icon">&#x1F4CA;</span><span class="sidebar-label">Leadership Dashboard</span><span class="sidebar-health-dot unknown" data-sidebar-health="overview" title="No checks run yet"></span><span id="cfvSidebarBadges" style="margin-left:6px;display:flex;gap:4px"></span></div>
                     <div class="sidebar-item" role="menuitem" tabindex="0" onclick="switchTab('os-strategy')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();switchTab('os-strategy')}"><span class="sidebar-icon">&#x1F3AF;</span><span class="sidebar-label">Objective &amp; Strategy</span><span class="sidebar-health-dot unknown" data-sidebar-health="os-strategy" title="No checks run yet"></span></div>
-                    <div class="sidebar-item" role="menuitem" tabindex="0" onclick="switchTab('os-bplan')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();switchTab('os-bplan')}"><span class="sidebar-icon">&#x1F4CB;</span><span class="sidebar-label">Plan Builder</span><span class="sidebar-health-dot unknown" data-sidebar-health="os-bplan" title="No checks run yet"></span></div>
+                    <!-- Admin-only page: never appears in a client tenant's shell. Kevin's build IS the admin build today; the adminOnly flag in PAGE_REGISTRY carries the rule into the Supabase migration. -->
+                    <div class="sidebar-item" role="menuitem" tabindex="0" onclick="switchTab('kpi-library')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();switchTab('kpi-library')}" title="Admin only — hidden from clients"><span class="sidebar-icon">&#x1F4DA;</span><span class="sidebar-label">KPI Library</span><span class="sidebar-health-dot unknown" data-sidebar-health="kpi-library" title="No checks run yet"></span></div>
                 </div>
             </div>
 
@@ -671,10 +672,10 @@
             <iframe class="tab-panel-iframe" id="osTeamFrame" src="" data-src="os/team/index.html" loading="lazy" allowfullscreen style="border:none"></iframe>
         </div>
 
-        <!-- Plan Builder + Strategy iframe panels (Operating Systems Hub removed in Phase 3 sidebar restructure) -->
-        <div class="tab-panel" id="tab-os-bplan">
-            <iframe class="tab-panel-iframe" id="osBplanFrame" src="" data-src="os/business-plan-builder/index.html" loading="lazy" allowfullscreen style="border:none"></iframe>
-        </div>
+        <!-- Tab: KPI Library (admin only — Plan Builder removed from the shell 1 Aug 2026 on Kevin's direction; its files remain at os/business-plan-builder/) -->
+        <div class="tab-panel" id="tab-kpi-library"></div>
+
+        <!-- Strategy iframe panel (Operating Systems Hub removed in Phase 3 sidebar restructure) -->
         <div class="tab-panel" id="tab-os-strategy">
             <iframe class="tab-panel-iframe" id="osStrategyFrame" src="" data-src="os/strategy/index.html" loading="lazy" allowfullscreen style="border:none"></iframe>
         </div>
@@ -860,6 +861,7 @@
     <script defer src="js/dashboard.js?v=22"></script>
     <script defer src="js/cashflow.js?v=21"></script>
     <script defer src="js/money.js?v=4"></script>
+    <script defer src="js/kpi-library.js?v=1"></script>
     <script defer src="js/ceo-brief.js?v=4"></script>
     <script defer src="js/wealth.js?v=61"></script>
     <script defer src="js/wealth-ratios.js?v=10"></script>

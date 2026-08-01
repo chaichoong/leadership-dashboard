@@ -78,7 +78,7 @@
         'comms': 'Inbound Comms — email triage with AI label suggestions, follow-up tracking, priority scoring.',
         'compliance': 'Property Compliance — certificate tracking (gas, EICR, EPC, legionella, fire, PAT), expiry monitoring, renewal actions.',
         'airtable': 'Contractor Job List — active maintenance jobs, contractor assignment, status.',
-        'os-bplan': 'Business Launch Plan Builder — AI-guided wizard that produces a complete launch plan for a new business.',
+        'kpi-library': 'KPI Library (admin only) — the catalogue of ready-made KPI templates clients pick from when their leadership dashboard is built; ten computation shapes, generic core plus property pack, seeded from the platform\'s own live metrics.',
         'os-strategy': 'Objective & Strategy — quarterly strategy plan per business with Boardroom Mentor wizard support.',
         'fintable': 'Fintable Sync Monitor — health of bank-account sync across all connected accounts; flags stale or disconnected feeds.',
         'sitemap': 'Site Map & Guides — registry of every page, current version, matching SOP/user-guide version, and sync status.',

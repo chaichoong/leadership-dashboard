@@ -36,7 +36,7 @@
         // Launch Plan, etc.) — a dashboard reload blows through the loading
         // overlay and drops any in-flight wizard/form state.
         const activeTab = (window.location.hash || '#overview').slice(1);
-        const iframeTabs = ['os-strategy', 'os-bplan', 'tasks', 'comms', 'operations', 'systemisation', 'os-team', 'ai-brain'];
+        const iframeTabs = ['os-strategy', 'tasks', 'comms', 'operations', 'systemisation', 'os-team', 'ai-brain'];
         if (iframeTabs.includes(activeTab)) {
             refreshPending = true;
             scheduleIdleRefresh();
@@ -746,10 +746,13 @@ if (tabId === 'comms') lazyLoadFrame('commsFrame', 'follow-up');
         if (tabId === 'systemisation') lazyLoadFrame('systemisationFrame', 'systemisation');
         // Operations OS lazy-load (cache-busted so Pages deploys are picked up)
         if (tabId === 'operations') lazyLoadFrame('operationsFrame', 'operations');
-        // Plan Builder + Strategy iframe lazy-load (Operating Systems Hub
-        // removed in Phase 3 sidebar restructure).
-        if (tabId === 'os-bplan') lazyLoadFrame('osBplanFrame', 'business-plan');
+        // Strategy iframe lazy-load (Plan Builder removed from the shell
+        // 1 Aug 2026; Operating Systems Hub removed in Phase 3 restructure).
         if (tabId === 'os-strategy') lazyLoadFrame('osStrategyFrame', 'strategy');
+        // Render KPI Library (admin only) on switch
+        if (tabId === 'kpi-library') {
+            if (typeof renderKpiLibraryTab === 'function') renderKpiLibraryTab();
+        }
         if (tabId === 'os-team') lazyLoadFrame('osTeamFrame', 'team');
         // Content Machine (Marketing) lazy-load — standalone app loaded via iframe,
         // cache-busted so its Pages deploys are picked up without a hard refresh.
