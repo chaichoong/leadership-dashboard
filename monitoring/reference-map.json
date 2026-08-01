@@ -413,7 +413,12 @@
   "flduKuWhOs7zlomms": "UNNAMED_IN_CONFIG",
   "fldqQIH0bU4hDSiL5": "UNNAMED_IN_CONFIG",
   "fldAUbgvtC5lNXTdS": "UNNAMED_IN_CONFIG",
-  "flddkmWwi3d2Fbc26": "UNNAMED_IN_CONFIG"
+  "flddkmWwi3d2Fbc26": "UNNAMED_IN_CONFIG",
+  "fld30Yw8SWYVp049g": "sentForApprovalBy",
+  "fldZ2moDV2041Sobc": "taskType",
+  "fldr4Mvf2RzKvhZhi": "approvedAt",
+  "fldrHBSr6qoUfaKuZ": "approvalOutcome",
+  "flduCtmQGpOA4eWaj": "teamMember"
  },
  "tables": {
   "tbl1nr0EcX2T62KME": "accounts",
@@ -447,7 +452,7 @@
   "tblIxbzDSOCI5hqJn": "ceoBriefs",
   "tblHiFrzekohQk2lt": "UNNAMED_IN_CONFIG",
   "tblF3tSfEajPQJHoI": "UNNAMED_IN_CONFIG",
-  "tblWtiyQikO2hOzeW": "(comment-only warning ref: ZZ LEGACY Net Worth Statement — never read)",
+  "tblWtiyQikO2hOzeW": "(comment-only warning ref: ZZ LEGACY Net Worth Statement \u2014 never read)",
   "tblco0p2OnlLQVAX7": "UNNAMED_IN_CONFIG",
   "tblHtx8o3zt1Rd8fF": "UNNAMED_IN_CONFIG",
   "tbloIBoYzlF3URiYK": "UNNAMED_IN_CONFIG"
@@ -487,12 +492,12 @@
   "sel43EzvHZXeLZbwC": "costNewInactive"
  },
  "summary": {
-  "fields": 414,
+  "fields": 419,
   "tables": 35,
   "records": 19,
   "selectChoices": 11,
-  "generated": "2026-07-31",
+  "generated": "2026-08-01",
   "source": "js/config.js",
-  "note": "Verified 2026-07-31: all four ID sets match js/config.js exactly (414 fields, 35 tables, 19 records, 11 select choices) and every field/table ID resolves in the 2026-07-31 Airtable schema snapshot. Added this run: fld9PQ10p8V4N8Y0U (F.ceoHandedOff, CEO Briefs 'Handed Off', multilineText) — the only schema change since 2026-07-30. It is written by scripts/slack-automation/money-daily-worker.js and read by js/ceo-brief.js, both by ID. Not covered by this map: 106 unique field IDs hardcoded in 12 js/ files outside config.js (all resolve; chronic, see the drift report's rogue-reference section)."
+  "note": "Verified 2026-07-31: all four ID sets match js/config.js exactly (414 fields, 35 tables, 19 records, 11 select choices) and every field/table ID resolves in the 2026-07-31 Airtable schema snapshot. Added this run: fld9PQ10p8V4N8Y0U (F.ceoHandedOff, CEO Briefs 'Handed Off', multilineText) \u2014 the only schema change since 2026-07-30. It is written by scripts/slack-automation/money-daily-worker.js and read by js/ceo-brief.js, both by ID. Not covered by this map: 106 unique field IDs hardcoded in 12 js/ files outside config.js (all resolve; chronic, see the drift report's rogue-reference section)."
  }
 }

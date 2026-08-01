@@ -168,12 +168,15 @@ test.describe('CEO Brief tab', () => {
       return { arrived: run("Today's brief arrived"), complete: run('Latest brief is complete') };
     });
 
-    // Before 10am "arrived" is allowed to pass on time-of-day alone; after 10am a
-    // stub must read as a failure. Assert on whichever branch this run took.
+    // "arrived" is allowed to pass on the calendar alone in two cases — a weekend,
+    // when no brief is due at all, and before 10am on a weekday, when one may still
+    // be on its way. After 10am on a weekday a stub must read as a failure. Assert
+    // on whichever branch this run took, or the gate goes red every Saturday and
+    // Sunday for a reason that has nothing to do with the code under test.
     if (results.arrived.status === 'fail') {
       expect(results.arrived.detail).toContain('7:30 huddle');
     } else {
-      expect(results.arrived.detail).toContain('Before 10am');
+      expect(results.arrived.detail).toMatch(/Weekend|Before 10am/);
     }
     // The completeness check must judge the newest FINISHED brief, not the stub.
     expect(results.complete.status).toBe('pass');
