@@ -1,11 +1,21 @@
 #!/usr/bin/env bash
-# Pre-push hook — runs sync-invariant tests before pushing to main.
+# Pre-push hook — runs the test suites before pushing to main.
 # Install: ln -sf ../../scripts/pre-push .git/hooks/pre-push
+#
+# Two suites, cheapest first:
+#   1. vitest  (tests/*.test.js)            — ~1s, pure Node, no browser
+#   2. playwright (tests/sync-invariants/)  — ~1-2min, boots a server and Chromium
+#
+# vitest was added to this gate on 2026-08-01. Until then NOTHING ran it — not this
+# hook, not any workflow in .github/workflows/ — so every guard in it was dormant
+# unless somebody happened to type `npm test`. That included the money-daily-worker
+# drift check, which protects the "Safe to act today" figure Kevin spends against.
+# A test nobody runs is a comment.
 #
 # Skips if:
 #   - Not pushing to main
-#   - Playwright is not installed
-#   - SKIP_SYNC_TESTS=1 is set (escape hatch)
+#   - The relevant runner is not installed
+#   - SKIP_SYNC_TESTS=1 is set (escape hatch — skips BOTH suites)
 
 set -e
 
@@ -21,6 +31,23 @@ while read local_ref local_sha remote_ref remote_sha; do
         if ! command -v npx >/dev/null 2>&1; then
             echo "⚠️  npx not found — skipping sync-invariant tests"
             exit 0
+        fi
+
+        # ── Unit tests first: they take about a second, so a failure here costs
+        # nothing, whereas letting Playwright run first burns ~2 minutes before
+        # reporting a break that vitest would have caught immediately.
+        if [ ! -d "node_modules/vitest" ]; then
+            echo "⚠️  vitest not installed — run 'npm install' to enable unit tests in this gate"
+        else
+            echo "🧪 Running unit tests (vitest) before push to main..."
+            if npx vitest run --reporter=dot; then
+                echo "✅ Unit tests passed"
+            else
+                echo ""
+                echo "❌ Unit tests (vitest) FAILED — push to main blocked."
+                echo "   Fix the failing tests or use SKIP_SYNC_TESTS=1 git push to bypass."
+                exit 1
+            fi
         fi
 
         if [ ! -d "node_modules/@playwright" ]; then

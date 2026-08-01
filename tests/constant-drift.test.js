@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { readFileSync, readdirSync } from 'fs';
+import { readFileSync } from 'fs';
+import { execFileSync } from 'child_process';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 
@@ -198,16 +199,20 @@ describe('agent autonomy threshold does not drift between the app and the huddle
 //
 // The rule: one asset, one version, everywhere. Bump every reference or none.
 describe('no cache-bust drift across pages', () => {
-  const walk = (dir) =>
-    readdirSync(resolve(ROOT, dir), { withFileTypes: true }).flatMap((e) => {
-      const rel = `${dir}/${e.name}`;
-      if (e.isDirectory()) return e.name === 'node_modules' || e.name === '.git' ? [] : walk(rel);
-      return e.isFile() && e.name.endsWith('.html') ? [rel.replace(/^\.\//, '')] : [];
-    });
+  // Enumerate via git rather than walking the tree. A plain walk also picks up
+  // generated output — test-results/.playwright-artifacts-*/traces/resources/*.html
+  // are saved copies of pages captured mid-run, so they carry whatever version was
+  // live when the trace was taken and show up as permanent phantom drift against
+  // whatever is on disk now. Tracked files are exactly the ones that ship, which is
+  // what this guard is about, and the list stays correct as .gitignore changes.
+  const pages = execFileSync('git', ['ls-files', '-z', '*.html'], { cwd: ROOT })
+    .toString()
+    .split('\0')
+    .filter(Boolean);
 
   // asset path (relative-prefix stripped) -> version -> the pages asking for it
   const refs = new Map();
-  for (const page of walk('.')) {
+  for (const page of pages) {
     const src = read(page);
     // Charset is deliberately permissive: a name this misses is a file that never
     // gets checked, and the miss is silent.
@@ -224,7 +229,7 @@ describe('no cache-bust drift across pages', () => {
   // has two versions" is then trivially true forever. Same trap the money-worker
   // block above documents: assert the haystack before searching it.
   it('finds the versioned references (control — guards against a vacuous pass)', () => {
-    expect(walk('.').length, 'no HTML pages scanned').toBeGreaterThan(15);
+    expect(pages.length, 'no HTML pages scanned').toBeGreaterThan(15);
     expect(refs.size, 'no versioned assets found').toBeGreaterThan(20);
     // sync-bar.css is the asset that drifted; if it stops matching, this block is blind.
     expect([...refs.keys()]).toContain('css/sync-bar.css');
