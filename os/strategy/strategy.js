@@ -10,6 +10,8 @@ let currentRecord = null;   // Airtable record currently loaded (null if new)
 let isDirty = false;
 let wizardState = null;     // see wizard.js section below
 const QUARTERS = ['Q1', 'Q2', 'Q3', 'Q4'];
+let allMainMethods = null;  // Main Methods table cache: [{ id, name, description }]
+let methodLinkSel = [];     // 10 slots — Main Method record ID linked to each step (null = none)
 
 function goToDashboard() {
     try {
@@ -179,8 +181,14 @@ async function loadRecord() {
         if (data.records.length) {
             currentRecord = data.records[0];
             renderForm(currentRecord.fields);
-            setStatus('success', `Loaded ${quarter} ${year}.`);
-            setTimeout(() => setStatus('', ''), 2000);
+            const loadedMsg = `Loaded ${quarter} ${year}.`;
+            setStatus('success', loadedMsg);
+            // Only clear our own message — a later caller (e.g. the quarter
+            // close summary) may have replaced it before this timer fires.
+            setTimeout(() => {
+                const el = document.getElementById('statusBar');
+                if (el && el.textContent === loadedMsg) setStatus('', '');
+            }, 2000);
         } else {
             currentRecord = null;
             renderEmptyState(`No plan yet for ${quarter} ${year}. Start the AI Wizard to build one — it will pull the previous quarter as a starting point.`);
@@ -238,6 +246,25 @@ async function loadRecord() {
                     }
                 },
                 {
+                    name: 'Main Method steps linked', kind: 'sync', run: () => {
+                        if (!currentRecord) return { status: 'pass', detail: 'No plan loaded yet' };
+                        const f = currentRecord.fields || {};
+                        const unlinked = OBJSTRAT.methodSteps.filter((fid, i) => {
+                            const hasText = (f[fid] || '').trim();
+                            const link = f[OBJSTRAT.mainMethodLinks[i]];
+                            return hasText && !(Array.isArray(link) && link.length);
+                        });
+                        if (unlinked.length) return { status: 'warn', detail: `${unlinked.length} step(s) have text but no linked Main Method record — the Systemisation page can't see them. Use the picker or "Create from text" in the Main Method section.` };
+                        return { status: 'pass', detail: 'Every step with text is linked to a Main Method record — Systemisation sees the full method' };
+                    }
+                },
+                {
+                    name: 'Quarter close available', kind: 'automation', run: () => {
+                        if (typeof openQuarterClose !== 'function') return { status: 'fail', detail: 'openQuarterClose() not loaded — the quarter can\'t be closed from the app' };
+                        return { status: 'pass', detail: 'Close the quarter wired — freezes the snapshot before carrying open tasks' };
+                    }
+                },
+                {
                     name: 'PDF export available', kind: 'automation', run: () => {
                         if (typeof html2pdf === 'undefined') return { status: 'warn', detail: 'html2pdf.js library not loaded' };
                         return { status: 'pass', detail: 'PDF export available via the Download button' };
@@ -281,6 +308,29 @@ function renderForm(fields) {
             if (currentRecord && currentRecord.fields) renderForm(currentRecord.fields);
         }).catch(() => {});
     }
+
+    // Main Methods cache for the step-link pickers. Kick off the load; when
+    // it lands, fill the pickers in. If the founder has already started
+    // editing, only the link rows are refreshed — a full re-render here
+    // would silently revert their unsaved text.
+    if (!allMainMethods) {
+        ensureMainMethodsLoaded().then(() => {
+            if (currentRecord && currentRecord.fields && !isDirty) {
+                renderForm(currentRecord.fields);
+            } else {
+                // Mid-edit, or a brand-new quarter the wizard is prefilling
+                // (no record yet) — fill the pickers in without a full
+                // re-render, which would revert unsaved text.
+                OBJSTRAT.methodSteps.forEach((fid, i) => renderMethodLinkRow(i));
+                updateMethodBulkRow();
+            }
+        }).catch(() => {});
+    }
+
+    // Seed the per-slot link selections from the record. Slot order IS the
+    // acronym order on the Systemisation page — nothing below reorders slots
+    // on its own.
+    initMethodLinkSelections(fields);
 
     // Sticky top navigator — anchor links to every section divider/section.
     const nav = document.createElement('div');
@@ -539,11 +589,247 @@ function uspsGrid(fields) {
 }
 
 function methodStepsGrid(fields) {
-    // 10 method steps.
-    return cardGrid(OBJSTRAT.methodSteps.map((fid, i) => numberedCard({
-        number: i + 1, fieldId: fid, value: fields[fid] || '',
+    // 10 method steps. Each card carries the free-text step AND a picker for
+    // the Main Methods record linked in that slot (OBJSTRAT.mainMethodLinks).
+    // The Systemisation page reads the LINKS, not the text — a step with text
+    // but no link is invisible there, so the row warns when they diverge.
+    const wrap = document.createElement('div');
+    const grid = cardGrid(OBJSTRAT.methodSteps.map((fid, i) => methodStepCard(i, fields)), { minColWidth: 280 });
+    wrap.appendChild(grid);
+
+    const foot = document.createElement('div');
+    foot.className = 'mm-bulk-row';
+    foot.innerHTML = `
+        <span class="mm-bulk-hint" id="mmBulkHint"></span>
+        <button type="button" class="btn btn-ghost" id="mmBulkCreateBtn" onclick="createMissingMainMethods()">Create the missing Main Method records from my step text</button>`;
+    wrap.appendChild(foot);
+    // The grid is built detached from the document, so getElementById-based
+    // row rendering must wait until renderForm has attached it.
+    setTimeout(() => {
+        OBJSTRAT.methodSteps.forEach((fid, i) => renderMethodLinkRow(i));
+        updateMethodBulkRow();
+    }, 0);
+    return wrap;
+}
+
+// ─── Main Method link slots ──────────────────────────────────────────
+// Two representations live on the record: free text per step
+// (OBJSTRAT.methodSteps) and a linked Main Methods record per slot
+// (OBJSTRAT.mainMethodLinks). Slot 1 is the first letter of the acronym the
+// Systemisation page prints, slot 2 the second, and so on — so the swap
+// buttons move text AND link together, and nothing else changes slot order.
+
+function initMethodLinkSelections(fields) {
+    methodLinkSel = OBJSTRAT.mainMethodLinks.map(fid => {
+        const v = fields[fid];
+        if (Array.isArray(v) && v[0]) return typeof v[0] === 'object' ? v[0].id : v[0];
+        return null;
+    });
+}
+
+let mainMethodsPromise = null; // in-flight guard — renderForm can re-enter before the first fetch resolves
+
+async function ensureMainMethodsLoaded() {
+    if (allMainMethods) return allMainMethods;
+    if (mainMethodsPromise) return mainMethodsPromise;
+    mainMethodsPromise = fetchAllMainMethods();
+    try { return await mainMethodsPromise; } finally { mainMethodsPromise = null; }
+}
+
+async function fetchAllMainMethods() {
+    const out = [];
+    let offset = '';
+    do {
+        const params = new URLSearchParams({ returnFieldsByFieldId: 'true', pageSize: '100' });
+        if (offset) params.set('offset', offset);
+        const data = await airtableFetch(`${TABLES.mainMethods}?${params.toString()}`);
+        (data.records || []).forEach(r => out.push({
+            id: r.id,
+            name: r.fields?.[MAIN_METHOD.name] || '(unnamed)',
+            description: r.fields?.[MAIN_METHOD.description] || '',
+        }));
+        offset = data.offset || '';
+    } while (offset);
+    out.sort((a, b) => a.name.localeCompare(b.name));
+    allMainMethods = out;
+    return out;
+}
+
+function methodStepCard(i, fields) {
+    const card = numberedCard({
+        number: i + 1, fieldId: OBJSTRAT.methodSteps[i], value: fields[OBJSTRAT.methodSteps[i]] || '',
         placeholder: 'Step text…',
-    })), { minColWidth: 280 });
+    });
+    card.classList.add('mm-step-card');
+    card.dataset.mmSlot = String(i);
+    const row = document.createElement('div');
+    row.className = 'mm-link-row';
+    row.id = `mmLinkRow-${i}`;
+    card.appendChild(row);
+    // Keep the warning + bulk button live while the founder types.
+    card.querySelector('textarea').addEventListener('input', () => {
+        renderMethodLinkRow(i);
+        updateMethodBulkRow();
+    });
+    return card;
+}
+
+function methodStepText(i) {
+    const ta = document.querySelector(`textarea[data-field-id="${OBJSTRAT.methodSteps[i]}"]`);
+    return (ta ? ta.value : '').trim();
+}
+
+function renderMethodLinkRow(i) {
+    const row = document.getElementById(`mmLinkRow-${i}`);
+    if (!row) return;
+    const selId = methodLinkSel[i];
+    const text = methodStepText(i);
+    const loaded = Array.isArray(allMainMethods);
+    const options = loaded
+        ? allMainMethods.map(m =>
+            `<option value="${m.id}"${m.id === selId ? ' selected' : ''}>${escapeHtml(m.name)}</option>`).join('')
+        : (selId ? `<option value="${selId}" selected>Loading…</option>` : '');
+    const warn = text && !selId
+        ? `<span class="mm-warn" title="The Systemisation page builds its method strip from the LINKED records, not this text. Pick a record or create one from the text.">⚠ Text but no linked record</span>`
+        : '';
+    const createBtn = text && !selId
+        ? `<button type="button" class="mm-mini-btn" onclick="createMainMethodFromStep(${i})" title="Create a Main Method record named from this step's text and link it here">+ Create from text</button>`
+        : '';
+    row.innerHTML = `
+        <div class="mm-link-line">
+            <label class="mm-link-label" for="mmPick-${i}">Linked record</label>
+            <select id="mmPick-${i}" class="mm-pick" ${loaded ? '' : 'disabled'} aria-label="Main Method record for step ${i + 1}">
+                <option value="">— none —</option>${options}
+            </select>
+            <span class="mm-move" role="group" aria-label="Move step ${i + 1}">
+                <button type="button" class="mm-mini-btn" onclick="swapMethodSteps(${i},${i - 1})" ${i === 0 ? 'disabled' : ''} title="Move this step up — text and linked record move together" aria-label="Move step ${i + 1} up">↑</button>
+                <button type="button" class="mm-mini-btn" onclick="swapMethodSteps(${i},${i + 1})" ${i === OBJSTRAT.methodSteps.length - 1 ? 'disabled' : ''} title="Move this step down — text and linked record move together" aria-label="Move step ${i + 1} down">↓</button>
+            </span>
+        </div>
+        ${warn || createBtn ? `<div class="mm-link-line mm-link-warnline">${warn}${createBtn}</div>` : ''}`;
+    const pick = row.querySelector(`#mmPick-${i}`);
+    pick.addEventListener('change', () => {
+        methodLinkSel[i] = pick.value || null;
+        markDirty();
+        renderMethodLinkRow(i);
+        updateMethodBulkRow();
+    });
+}
+
+function updateMethodBulkRow() {
+    const hint = document.getElementById('mmBulkHint');
+    const btn = document.getElementById('mmBulkCreateBtn');
+    if (!hint || !btn) return;
+    const missing = OBJSTRAT.methodSteps
+        .map((fid, i) => i)
+        .filter(i => methodStepText(i) && !methodLinkSel[i]);
+    btn.disabled = missing.length === 0;
+    hint.textContent = missing.length
+        ? `${missing.length} step${missing.length === 1 ? ' has' : 's have'} text but no linked Main Method record — the Systemisation page can't see ${missing.length === 1 ? 'it' : 'them'}.`
+        : 'Every step with text is linked to a Main Method record. ✓';
+    hint.classList.toggle('mm-hint-warn', missing.length > 0);
+}
+
+// Name = the step text up to the first dash or full stop; Description = the rest.
+function splitStepText(text) {
+    const t = String(text || '').trim();
+    const idx = t.search(/[-–—.]/);
+    if (idx === -1) return { name: t, description: '' };
+    return { name: t.slice(0, idx).trim(), description: t.slice(idx + 1).trim() };
+}
+
+// Create one Main Method record from a step's text and link it into the slot.
+// If the plan record exists the link is written to Airtable immediately, so
+// the Systemisation page sees it without a separate Save.
+// Returns true on success — createMissingMainMethods counts on it.
+let mmCreateBusy = false; // double-click guard — a second click would create a duplicate record
+
+async function createMainMethodFromStep(i) {
+    if (mmCreateBusy) return false;
+    const text = methodStepText(i);
+    if (!text) { setStatus('warn', `Step ${i + 1} has no text to create a record from.`); return false; }
+    const { name, description } = splitStepText(text);
+    if (!name) { setStatus('warn', `Step ${i + 1}'s text starts with punctuation — type the step name first.`); return false; }
+    mmCreateBusy = true;
+    setStatus('info', `Creating Main Method "${name}"…`);
+    try {
+        const body = { fields: { [MAIN_METHOD.name]: name }, typecast: true };
+        if (description) body.fields[MAIN_METHOD.description] = description;
+        const created = await airtableFetch(TABLES.mainMethods, { method: 'POST', body: JSON.stringify(body) });
+        if (allMainMethods) {
+            allMainMethods.push({ id: created.id, name, description });
+            allMainMethods.sort((a, b) => a.name.localeCompare(b.name));
+        }
+        methodLinkSel[i] = created.id;
+        if (currentRecord && currentRecord.id) {
+            await airtableFetch(`${TABLES.objStrat}/${currentRecord.id}?returnFieldsByFieldId=true`, {
+                method: 'PATCH',
+                body: JSON.stringify({ fields: { [OBJSTRAT.mainMethodLinks[i]]: [created.id] }, typecast: true }),
+            });
+            if (currentRecord.fields) currentRecord.fields[OBJSTRAT.mainMethodLinks[i]] = [created.id];
+            setStatus('success', `Created and linked "${name}" to step ${i + 1}.`);
+        } else {
+            markDirty();
+            setStatus('success', `Created "${name}" — click Save changes to link it.`);
+        }
+        setTimeout(() => setStatus('', ''), 3000);
+        renderMethodLinkRow(i);
+        updateMethodBulkRow();
+        return true;
+    } catch (e) {
+        setStatus('error', `Couldn't create the Main Method record: ${e.message || e}`);
+        return false;
+    } finally {
+        mmCreateBusy = false;
+    }
+}
+
+// One click for a new client's day one: create a Main Method record for every
+// step that has text but no linked record, then link them all in slot order.
+async function createMissingMainMethods() {
+    const missing = OBJSTRAT.methodSteps
+        .map((fid, i) => i)
+        .filter(i => methodStepText(i) && !methodLinkSel[i]);
+    if (!missing.length) return;
+    const names = missing.map(i => splitStepText(methodStepText(i)).name).filter(Boolean);
+    if (!confirm(`Create ${names.length} Main Method record${names.length === 1 ? '' : 's'}?\n\n${names.map(n => '• ' + n).join('\n')}\n\nEach step's linked record slot will be filled in the same order as the steps.`)) return;
+    const btn = document.getElementById('mmBulkCreateBtn');
+    if (btn) btn.disabled = true;
+    let done = 0;
+    const failedSteps = [];
+    for (const i of missing) {
+        const okCreated = await createMainMethodFromStep(i);
+        if (okCreated) done++; else failedSteps.push(i + 1);
+        // Airtable rate limit — 5 req/s; pause between create+link pairs.
+        await new Promise(r => setTimeout(r, 300));
+    }
+    if (failedSteps.length) {
+        setStatus('error', `Created and linked ${done} of ${missing.length} — step${failedSteps.length === 1 ? '' : 's'} ${failedSteps.join(', ')} failed. Fix the step text and try again.`);
+    } else {
+        setStatus('success', `Created and linked ${done} Main Method record${done === 1 ? '' : 's'}.`);
+        setTimeout(() => setStatus('', ''), 4000);
+    }
+    updateMethodBulkRow();
+}
+
+// Swap two adjacent steps — text and linked record move together, so the
+// acronym letter travels with its step instead of being renamed.
+function swapMethodSteps(i, j) {
+    if (j < 0 || j >= OBJSTRAT.methodSteps.length) return;
+    const taI = document.querySelector(`textarea[data-field-id="${OBJSTRAT.methodSteps[i]}"]`);
+    const taJ = document.querySelector(`textarea[data-field-id="${OBJSTRAT.methodSteps[j]}"]`);
+    if (!taI || !taJ) return;
+    const t = taI.value; taI.value = taJ.value; taJ.value = t;
+    const s = methodLinkSel[i]; methodLinkSel[i] = methodLinkSel[j]; methodLinkSel[j] = s;
+    [taI, taJ].forEach(ta => {
+        autosize(ta);
+        const card = ta.closest('.num-card');
+        if (card) card.classList.toggle('is-empty', !ta.value.trim());
+    });
+    markDirty();
+    renderMethodLinkRow(i);
+    renderMethodLinkRow(j);
+    updateMethodBulkRow();
 }
 
 // Build a responsive card grid. CSS Grid auto-fills columns; all items in the
@@ -930,6 +1216,16 @@ async function saveRecord() {
     Object.keys(fields).forEach(fid => {
         if (typeof fields[fid] === 'string') fields[fid] = fields[fid].trim();
     });
+
+    // Main Method link slots — the pickers aren't [data-field-id] inputs, so
+    // readAllFormFields can't see them. Write every slot so swaps and clears
+    // persist. Selections were seeded from the record at render, so untouched
+    // slots write back exactly what was already there.
+    if (methodLinkSel.length === OBJSTRAT.mainMethodLinks.length) {
+        OBJSTRAT.mainMethodLinks.forEach((fid, i) => {
+            fields[fid] = methodLinkSel[i] ? [methodLinkSel[i]] : [];
+        });
+    }
 
     // Quarter/year/business are always required
     fields[OBJSTRAT.quarter] = quarter;
@@ -1749,6 +2045,481 @@ function deriveProjectName(text) {
     // cards with word-wrapping now, so there's no UI reason to truncate here.
     // (Previous 100-char cap was silently truncating real quarterly project names.)
     return stripped || firstLine;
+}
+
+// ═════════════════════════════════════════════════════════════════════
+// QUARTER CLOSE — freeze first, carry second. Never the other way round.
+//
+// A carried task belongs to both quarters. If the old quarter isn't frozen
+// before the carry, a task finished months later raises the old quarter's
+// completion percentage and a missed quarter starts reading as a win.
+// executeQuarterClose therefore writes the snapshot (Status Override, KPI at
+// Close, Progress at Close, Closed On, Closing Note) and the record comment
+// BEFORE any task is re-linked. Tasks are ADDED to the next quarter's
+// project — the old quarter's link is never removed.
+// ═════════════════════════════════════════════════════════════════════
+
+// Projects table close-protocol field IDs (verified against the live schema
+// and the 31 Jul 2026 worked closes on Launch & First Revenue, Complete all
+// modules, and £12,000 Cushion).
+const PROJ_CLOSE_F = {
+    statusOverride:  'fldgA0nMgLx5jijyG',  // singleSelect: Completed | On-Track | Off-Track | Not Started | On-Target
+    closedOn:        'fldzGI0ywBTpOK2dy',  // date
+    kpiAtClose:      'fld59dgl4EoQmrXT6',  // number
+    progressAtClose: 'fldHZWpvuYF1xsnfs',  // number (percent, 2dp)
+    closingNote:     'fldEx9EOsPeqpJ2gy',  // multilineText
+    kpiCurrent:      'fldB1QJDUsukxKzjQ',  // number — pre-fills KPI at Close
+    kpiName:         'fldABYFMf2yBKWdlD',
+    kpiTarget:       'fldaI0voHia91SYZz',
+    kpiUnit:         'fldrYZEghROXYf6w0',
+    totalTasks:      'fldtw6NQZ8CSF3RXi',  // rollup
+    completedTasks:  'fld7IDjY0xB4JGBfn',  // rollup
+    progress:        'fldoBqdm5Jb97h7yl',  // formula 0..1 — fallback when rollups are absent
+    linkedTasks:     'fldbXYUzJXqrRjfyn',  // 'Linked Tasks' — the LIVE inverse of Task.Projects.
+                                           // ('Tasks' fldYgeWwDMwJ8CDvH is a dead twin: empty on live records.)
+};
+
+const QC_PAUSE_MS = 200;  // between Airtable writes — stays under 5 req/s
+
+function quarterEndISO(quarter, year) {
+    const qIdx = QUARTERS.indexOf(quarter);
+    const ends = [[3, 31], [6, 30], [9, 30], [12, 31]];
+    const pad = n => String(n).padStart(2, '0');
+    return `${year}-${pad(ends[qIdx][0])}-${pad(ends[qIdx][1])}`;
+}
+
+function quarterStartISO(quarter, year) {
+    const qIdx = QUARTERS.indexOf(quarter);
+    const starts = [1, 4, 7, 10];
+    return `${year}-${String(starts[qIdx]).padStart(2, '0')}-01`;
+}
+
+function linkIdsOf(v) {
+    if (!Array.isArray(v)) return [];
+    return v.map(x => (typeof x === 'object' && x ? x.id : x)).filter(Boolean);
+}
+
+async function fetchProjectRecordsByIds(ids) {
+    if (!ids.length) return [];
+    const out = [];
+    for (let i = 0; i < ids.length; i += 50) {
+        const chunk = ids.slice(i, i + 50);
+        const filter = chunk.length === 1
+            ? `RECORD_ID()="${chunk[0]}"`
+            : `OR(${chunk.map(id => `RECORD_ID()="${id}"`).join(',')})`;
+        const params = new URLSearchParams({ filterByFormula: filter, returnFieldsByFieldId: 'true', pageSize: '100' });
+        const data = await airtableFetch(`${TABLES.projects}?${params.toString()}`);
+        out.push(...(data.records || []));
+    }
+    // Preserve the caller's slot order — it mirrors QP order on the plan.
+    return ids.map(id => out.find(r => r.id === id)).filter(Boolean);
+}
+
+// Open = any status except Completed. Task IDs come from the project's
+// Linked Tasks inverse field: filtering the Tasks table with
+// FIND(recId, ARRAYJOIN({Projects})) silently matches nothing, because
+// ARRAYJOIN on a link field joins primary-field NAMES, not record IDs
+// (verified live 1 Aug 2026 — the filter returned 0 rows on a project
+// with 172 linked tasks).
+async function fetchOpenTasksForProject(projectRecord) {
+    const taskIds = linkIdsOf(projectRecord.fields?.[PROJ_CLOSE_F.linkedTasks]);
+    if (!taskIds.length) return [];
+    const open = [];
+    for (let i = 0; i < taskIds.length; i += 50) {
+        const chunk = taskIds.slice(i, i + 50);
+        const idClause = chunk.length === 1
+            ? `RECORD_ID()="${chunk[0]}"`
+            : `OR(${chunk.map(id => `RECORD_ID()="${id}"`).join(',')})`;
+        const params = new URLSearchParams({
+            filterByFormula: `AND(${idClause}, {Status}!="Completed")`,
+            returnFieldsByFieldId: 'true',
+            pageSize: '100',
+        });
+        params.append('fields[]', TASK_F.name);
+        params.append('fields[]', TASK_F.status);
+        params.append('fields[]', TASK_F.projects);
+        const data = await airtableFetch(`${TABLES.tasks}?${params.toString()}`);
+        open.push(...(data.records || []));
+    }
+    return open;
+}
+
+// The next quarter's projects — carry targets. Read from the next quarter's
+// plan record for the same business, via its QP → Project links. Each entry
+// keeps its QP slot index so a closing project's tasks default to the SAME
+// slot next quarter (old QP2 → new QP2), not to whichever project came first.
+async function loadNextQuarterProjects(businessId, nextQuarter, nextYear) {
+    const business = allBusinessesLocal.find(b => b.id === businessId);
+    const businessName = (business?.name || '').replace(/"/g, '\\"');
+    const params = new URLSearchParams({
+        filterByFormula: `AND({Business Name} = "${businessName}", {Quarter} = "${nextQuarter}", {Year} = "${nextYear}")`,
+        maxRecords: '1',
+        returnFieldsByFieldId: 'true',
+    });
+    const data = await airtableFetch(`${TABLES.objStrat}?${params.toString()}`);
+    const rec = (data.records || [])[0];
+    if (!rec) return [];
+    const slots = OBJSTRAT.qpDetails
+        .map((det, i) => ({ slot: i, id: linkIdsOf(rec.fields?.[det.linkedProject])[0] || null }))
+        .filter(s => s.id);
+    const projs = await fetchProjectRecordsByIds(slots.map(s => s.id));
+    return projs.map(p => ({
+        id: p.id,
+        name: p.fields?.[PROJ_F.name] || '(unnamed project)',
+        slot: (slots.find(s => s.id === p.id) || {}).slot ?? 0,
+    }));
+}
+
+function projectProgressPct(fields) {
+    const total = Number(fields?.[PROJ_CLOSE_F.totalTasks]);
+    const done = Number(fields?.[PROJ_CLOSE_F.completedTasks]);
+    if (total > 0 && !isNaN(done)) return Math.round((done / total) * 10000) / 100;
+    const p = Number(fields?.[PROJ_CLOSE_F.progress]);
+    if (!isNaN(p)) return Math.round(p * 10000) / 100;
+    return 0;
+}
+
+function buildClosingNoteDraft(p, ctx) {
+    const f = p.fields || {};
+    const kpiName = f[PROJ_CLOSE_F.kpiName] || 'KPI';
+    const kpiUnit = extractSelectName(f[PROJ_CLOSE_F.kpiUnit]) || '';
+    const kpiTarget = f[PROJ_CLOSE_F.kpiTarget];
+    const kpiCurrent = f[PROJ_CLOSE_F.kpiCurrent];
+    const total = Number(f[PROJ_CLOSE_F.totalTasks]) || 0;
+    const done = Number(f[PROJ_CLOSE_F.completedTasks]) || 0;
+    const pct = projectProgressPct(f);
+    const met = kpiTarget != null && kpiCurrent != null && Number(kpiCurrent) >= Number(kpiTarget);
+    const fmtVal = v => (v == null || v === '') ? '—' : (kpiUnit === '£' ? `£${Number(v).toLocaleString('en-GB')}` : `${v}${kpiUnit === '%' ? '%' : kpiUnit ? ' ' + kpiUnit : ''}`);
+    const today = new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+    return [
+        `CLOSED ${today} for ${ctx.quarter} (${ctx.qStartISO} - ${ctx.qEndISO}). ${met ? 'MET.' : 'MISSED.'}`,
+        ``,
+        `Target: ${kpiName} ${fmtVal(kpiTarget)}. Actual at close: ${fmtVal(kpiCurrent)}.`,
+        `Tasks: ${done} of ${total} complete (${pct}%).`,
+        ``,
+        `Why the gap: [say why — what stopped it, in one or two sentences]`,
+        ``,
+        `Carried into ${ctx.nextQuarter} ${ctx.nextYear}: [filled in automatically below]`,
+        `Snapshot taken before the carry, so later completions on carried tasks cannot rewrite this quarter's result.`,
+    ].join('\n');
+}
+
+// Entry point — the "Close the quarter" button.
+async function openQuarterClose() {
+    if (!currentRecord) {
+        setStatus('warn', 'Load a plan first — pick the business, quarter and year you want to close.');
+        return;
+    }
+    if (isDirty) {
+        setStatus('warn', 'Save your changes first, then close the quarter.');
+        return;
+    }
+    const { businessId, quarter, year } = getSelection();
+    const btn = document.getElementById('closeQtrBtn');
+    if (btn) btn.disabled = true;
+    const overlay = showProgressOverlay('Preparing the quarter close…');
+    try {
+        // Fresh record — the linked-project fields must be current.
+        const fresh = await airtableFetch(`${TABLES.objStrat}/${currentRecord.id}?returnFieldsByFieldId=true`);
+        currentRecord = fresh;
+        const projSlots = OBJSTRAT.qpDetails
+            .map((det, i) => ({ slot: i, id: linkIdsOf(fresh.fields?.[det.linkedProject])[0] || null }))
+            .filter(p => p.id);
+        if (!projSlots.length) {
+            overlay.close();
+            setStatus('warn', 'No projects are linked to this plan yet — use "Push Projects →" first, then close.');
+            if (btn) btn.disabled = false;
+            return;
+        }
+        overlay.update('Reading the quarter’s projects…');
+        const projects = await fetchProjectRecordsByIds(projSlots.map(p => p.id));
+        const slotById = {};
+        projSlots.forEach(p => { slotById[p.id] = p.slot; });
+
+        const qIdx = QUARTERS.indexOf(quarter);
+        const yearNum = parseInt(year, 10);
+        const nextQuarter = QUARTERS[(qIdx + 1) % 4];
+        const nextYear = qIdx === 3 ? yearNum + 1 : yearNum;
+        overlay.update(`Finding ${nextQuarter} ${nextYear} projects to carry into…`);
+        let nextProjects = [];
+        try {
+            nextProjects = await loadNextQuarterProjects(businessId, nextQuarter, String(nextYear));
+        } catch (e) { /* no next plan yet — everything defaults to Park */ }
+
+        const openTasksByProj = {};
+        for (const p of projects) {
+            const name = p.fields?.[PROJ_F.name] || p.id;
+            overlay.update(`Listing open tasks on "${String(name).slice(0, 40)}"…`);
+            openTasksByProj[p.id] = await fetchOpenTasksForProject(p);
+        }
+        overlay.close();
+        showQuarterCloseModal({
+            quarter, year, qStartISO: quarterStartISO(quarter, yearNum), qEndISO: quarterEndISO(quarter, yearNum),
+            nextQuarter, nextYear, projects, nextProjects, openTasksByProj, slotById,
+        });
+    } catch (e) {
+        overlay.close();
+        setStatus('error', `Couldn't prepare the quarter close: ${e.message || e}`);
+    }
+    if (btn) btn.disabled = false;
+}
+
+// Preview modal — nothing is written until Approve. Same pattern as the
+// project push: see everything, edit the judgement calls, then one click.
+function showQuarterCloseModal(ctx) {
+    document.getElementById('qcModal')?.remove();
+    const overlay = document.createElement('div');
+    overlay.id = 'qcModal';
+    overlay.className = 'push-modal-overlay';
+
+    const statusChoices = ['Completed', 'Off-Track', 'On-Track', 'On-Target', 'Not Started'];
+
+    // Carry dropdown per closing project: default to the SAME QP slot next
+    // quarter (old P2's tasks → new P2), Park when that slot has no project.
+    const carryOptionsFor = (slot) => {
+        const match = ctx.nextProjects.find(np => np.slot === slot);
+        return ctx.nextProjects.map(np =>
+            `<option value="${np.id}"${match && np.id === match.id ? ' selected' : ''}>${escapeHtml(np.name)}</option>`).join('')
+            + `<option value=""${match ? '' : ' selected'}>Park — stays in this quarter only</option>`;
+    };
+    const taskRowsHtml = (openTasks, slot) => openTasks.length
+        ? openTasks.map(t => `
+            <div class="qc-task-row" data-task-id="${t.id}">
+                <span class="qc-task-name">${escapeHtml(t.fields?.[TASK_F.name] || '(untitled task)')}</span>
+                <select class="qc-carry-sel" data-task-id="${t.id}" aria-label="Where this open task carries to">
+                    ${carryOptionsFor(slot)}
+                </select>
+            </div>`).join('')
+        : `<div class="qc-no-tasks">No open tasks — nothing to carry.</div>`;
+
+    const projectsHtml = ctx.projects.map((p, idx) => {
+        const f = p.fields || {};
+        const name = f[PROJ_F.name] || '(unnamed project)';
+        const slot = ctx.slotById?.[p.id] ?? idx;
+        const openTasks = ctx.openTasksByProj[p.id] || [];
+        const alreadyClosed = !!f[PROJ_CLOSE_F.closedOn];
+        if (alreadyClosed) {
+            // The snapshot is frozen and stays frozen. But a previous close
+            // whose carry partly failed can leave open tasks stranded here —
+            // offer the carry (and only the carry) again.
+            return `<div class="push-project push-project-existing qc-project" data-project-id="${p.id}" data-carry-only="1">
+                <div class="push-project-head">
+                    <span class="push-project-num">P${idx + 1}</span>
+                    <span class="push-project-name">${escapeHtml(name)}</span>
+                    <span class="push-exists-badge">Already closed on ${escapeHtml(f[PROJ_CLOSE_F.closedOn])} · snapshot untouched</span>
+                </div>
+                ${openTasks.length
+                    ? `<div class="qc-tasks-head">Open tasks still on this closed project — carry them into ${escapeHtml(ctx.nextQuarter)} ${ctx.nextYear}</div>${taskRowsHtml(openTasks, slot)}`
+                    : `<div class="qc-no-tasks">No open tasks left behind.</div>`}
+            </div>`;
+        }
+        const pct = projectProgressPct(f);
+        const kpiCurrent = f[PROJ_CLOSE_F.kpiCurrent];
+        const kpiTarget = f[PROJ_CLOSE_F.kpiTarget];
+        const met = kpiTarget != null && kpiCurrent != null && Number(kpiCurrent) >= Number(kpiTarget);
+        const defaultStatus = (met || pct >= 100) ? 'Completed' : 'Off-Track';
+        return `<div class="push-project qc-project" data-project-id="${p.id}" data-idx="${idx}">
+            <div class="push-project-head">
+                <span class="push-project-num">P${idx + 1}</span>
+                <span class="push-project-name">${escapeHtml(name)}</span>
+                <label class="qc-include"><input type="checkbox" class="qc-include-cb" checked> Close this project</label>
+            </div>
+            <div class="qc-grid">
+                <label>True outcome
+                    <select class="qc-status">${statusChoices.map(s => `<option${s === defaultStatus ? ' selected' : ''}>${s}</option>`).join('')}</select>
+                </label>
+                <label>KPI at Close <span class="qc-sub">(pre-filled from the current KPI value — change it if the definition of done measures something else)</span>
+                    <input type="number" step="any" class="qc-kpi" value="${kpiCurrent != null ? escapeHtml(String(kpiCurrent)) : '0'}">
+                </label>
+                <label>Progress at Close <span class="qc-sub">(frozen from task completion — read-only)</span>
+                    <input type="number" class="qc-progress" value="${pct}" readonly>
+                </label>
+                <label>Closed On <span class="qc-sub">(the quarter's end date)</span>
+                    <input type="date" class="qc-closedon" value="${ctx.qEndISO}" readonly>
+                </label>
+            </div>
+            <label class="qc-note-label">Closing note <span class="qc-sub">(pre-filled — edit before approving; the same text becomes a permanent record comment)</span>
+                <textarea class="qc-note" rows="8">${escapeHtml(buildClosingNoteDraft(p, ctx))}</textarea>
+            </label>
+            <div class="qc-tasks-head">Open tasks to carry into ${escapeHtml(ctx.nextQuarter)} ${ctx.nextYear} <span class="qc-sub">(ADDED to the new project — the ${escapeHtml(ctx.quarter)} link stays in place)</span></div>
+            ${taskRowsHtml(openTasks, slot)}
+        </div>`;
+    }).join('');
+
+    const noNextWarn = ctx.nextProjects.length ? '' : `
+        <div class="qc-warn-banner">No ${escapeHtml(ctx.nextQuarter)} ${ctx.nextYear} projects exist yet for this business, so every open task defaults to Park.
+        To carry tasks forward, close this modal, write the ${escapeHtml(ctx.nextQuarter)} plan and push its projects first.</div>`;
+
+    overlay.innerHTML = `<div class="push-modal qc-modal" role="dialog" aria-modal="true" aria-label="Close the quarter">
+        <div class="push-modal-head">
+            <div>
+                <div class="push-modal-title">Close ${escapeHtml(ctx.quarter)} ${escapeHtml(ctx.year)}</div>
+                <div class="push-modal-sub">Freeze first, carry second. The snapshot is written before any task is re-linked, so later completions can't rewrite this quarter's result.</div>
+            </div>
+            <button class="push-modal-close" type="button">&times;</button>
+        </div>
+        <div class="push-modal-body">
+            ${noNextWarn}
+            ${projectsHtml}
+        </div>
+        <div class="push-modal-foot">
+            <button class="btn btn-ghost" type="button" id="qcCancelBtn">Cancel</button>
+            <button class="btn btn-primary" type="button" id="qcApproveBtn">Approve · close the quarter</button>
+        </div>
+    </div>`;
+    document.body.appendChild(overlay);
+    // Focusable so Escape works the moment the modal opens.
+    overlay.setAttribute('tabindex', '-1');
+    overlay.focus();
+
+    const close = () => overlay.remove();
+    overlay.querySelector('.push-modal-close').onclick = close;
+    overlay.querySelector('#qcCancelBtn').onclick = close;
+    overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
+    overlay.addEventListener('keydown', e => { if (e.key === 'Escape') close(); });
+
+    overlay.querySelector('#qcApproveBtn').onclick = () => {
+        // Read the user's judgement calls out of the modal before closing it.
+        const plan = [];
+        overlay.querySelectorAll('.qc-project').forEach(el => {
+            const carryOnly = el.dataset.carryOnly === '1';
+            const projectId = el.dataset.projectId;
+            const tasks = [];
+            el.querySelectorAll('.qc-carry-sel').forEach(sel => {
+                tasks.push({ taskId: sel.dataset.taskId, targetProjectId: sel.value || null });
+            });
+            if (carryOnly) {
+                // Already-closed project: its frozen snapshot is never touched
+                // again — this pass can only carry (or park) stranded open tasks.
+                if (tasks.length) plan.push({ projectId, carryOnly: true, tasks });
+                return;
+            }
+            if (!el.querySelector('.qc-include-cb').checked) return;
+            plan.push({
+                projectId,
+                carryOnly: false,
+                statusOverride: el.querySelector('.qc-status').value,
+                kpiAtClose: Number(el.querySelector('.qc-kpi').value || 0),
+                progressAtClose: Number(el.querySelector('.qc-progress').value || 0),
+                closedOn: el.querySelector('.qc-closedon').value,
+                closingNote: el.querySelector('.qc-note').value,
+                tasks,
+            });
+        });
+        if (!plan.length) { close(); setStatus('warn', 'Nothing selected to close.'); return; }
+        close();
+        executeQuarterClose(plan, ctx);
+    };
+}
+
+// The write path. THE ORDER IS THE PROTOCOL:
+// per project — snapshot PATCH (Status Override, KPI at Close, Progress at
+// Close, Closed On, Closing Note in one atomic write), then the record
+// comment, and only THEN the task carry. No task is re-linked before its
+// project's snapshot is frozen.
+async function executeQuarterClose(plan, ctx) {
+    const overlay = showProgressOverlay('Freezing the quarter…');
+    const results = { closed: 0, carried: 0, parked: 0, failed: 0, errors: [], commentFailures: 0 };
+    const pause = () => new Promise(r => setTimeout(r, QC_PAUSE_MS));
+
+    for (const p of plan) {
+        // Carry-only passes (a project closed in an earlier run whose carry
+        // partly failed) skip straight to step 7 — the frozen snapshot is
+        // never written twice.
+        if (!p.carryOnly) {
+            const carriedCount = p.tasks.filter(t => t.targetProjectId).length;
+            const parkedCount = p.tasks.filter(t => !t.targetProjectId).length;
+            // Fill the carry line of the note with what is actually happening.
+            const carryLine = `Carried into ${ctx.nextQuarter} ${ctx.nextYear}: ${carriedCount} open task${carriedCount === 1 ? '' : 's'} re-linked (not moved). Parked: ${parkedCount}.`;
+            const note = p.closingNote.replace(/^Carried into .*\[filled in automatically below\]$/m, carryLine);
+
+            // 1-5. THE SNAPSHOT — one atomic PATCH, fields in protocol order.
+            overlay.update('Writing the snapshot…');
+            try {
+                await airtableFetch(`${TABLES.projects}/${p.projectId}`, {
+                    method: 'PATCH',
+                    body: JSON.stringify({
+                        fields: {
+                            [PROJ_CLOSE_F.statusOverride]: p.statusOverride,
+                            [PROJ_CLOSE_F.kpiAtClose]: Number(p.kpiAtClose),
+                            [PROJ_CLOSE_F.progressAtClose]: Number(p.progressAtClose),
+                            [PROJ_CLOSE_F.closedOn]: p.closedOn,
+                            [PROJ_CLOSE_F.closingNote]: note,
+                        },
+                        typecast: true,
+                    }),
+                });
+                results.closed++;
+            } catch (e) {
+                // Snapshot failed → do NOT carry this project's tasks. Carrying
+                // without the freeze is the exact bug this protocol exists to stop.
+                results.failed++;
+                results.errors.push(`Snapshot failed for project ${p.projectId}: ${e.message || e} — its tasks were NOT carried.`);
+                continue;
+            }
+            await pause();
+
+            // 6. The record comment — timestamped, attributed, can't be overwritten.
+            overlay.update('Adding the permanent record comment…');
+            try {
+                await airtableFetch(`${TABLES.projects}/${p.projectId}/comments`, {
+                    method: 'POST',
+                    body: JSON.stringify({ text: note }),
+                });
+            } catch (e) {
+                // Non-fatal: the snapshot fields are already frozen. Say so.
+                results.commentFailures++;
+            }
+            await pause();
+        }
+
+        // 7. THE CARRY — only after the snapshot is frozen. ADD the next
+        // quarter's project to each task's Projects field; never remove the old.
+        for (const t of p.tasks) {
+            if (!t.targetProjectId) { results.parked++; continue; }
+            overlay.update(`Carrying ${results.carried + 1} of ${plan.reduce((n, pp) => n + pp.tasks.filter(x => x.targetProjectId).length, 0)} tasks…`);
+            try {
+                const taskRec = await airtableFetch(`${TABLES.tasks}/${t.taskId}?returnFieldsByFieldId=true`);
+                const existing = linkIdsOf(taskRec.fields?.[TASK_F.projects]);
+                if (!existing.includes(t.targetProjectId)) {
+                    await airtableFetch(`${TABLES.tasks}/${t.taskId}`, {
+                        method: 'PATCH',
+                        body: JSON.stringify({ fields: { [TASK_F.projects]: [...existing, t.targetProjectId] }, typecast: true }),
+                    });
+                }
+                results.carried++;
+            } catch (e) {
+                results.failed++;
+                results.errors.push(`Carry failed for task ${t.taskId}: ${e.message || e}`);
+            }
+            await pause();
+        }
+    }
+    overlay.close();
+
+    // Full re-render from fresh data FIRST — its transient "Loaded…" status
+    // would otherwise overwrite the summary written below.
+    try { await loadRecord(); } catch (e) { /* summary still shows below */ }
+
+    const counts = `${results.carried} carried · ${results.closed} closed · ${results.parked} parked`;
+    if (results.failed === 0) {
+        const commentNote = results.commentFailures
+            ? ` (${results.commentFailures} record comment${results.commentFailures === 1 ? '' : 's'} couldn't be added — the snapshot itself is safely written)`
+            : '';
+        setStatus('success', `✓ Quarter closed: ${counts}.${commentNote}`);
+        setTimeout(() => setStatus('', ''), 8000);
+    } else {
+        const bar = document.getElementById('statusBar');
+        bar.className = 'status-bar error';
+        bar.style.display = 'block';
+        bar.innerHTML = `<div style="display:flex;align-items:flex-start;gap:12px;flex-wrap:wrap;justify-content:space-between">
+            <div>
+                <div style="font-weight:600;margin-bottom:4px">Quarter close finished with problems: ${counts} · ${results.failed} failed.</div>
+                <div style="font-size:12px;opacity:0.9;font-family:monospace;max-height:200px;overflow-y:auto">${results.errors.map(escapeHtml).join('<br>')}</div>
+            </div>
+            <button class="btn btn-ghost" onclick="setStatus('', '')" style="flex-shrink:0">Dismiss</button>
+        </div>`;
+    }
 }
 
 // ═════════════════════════════════════════════════════════════════════

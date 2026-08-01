@@ -14,7 +14,7 @@
     <script src="../../js/prompts/boardroom-mentor.js?v=3"></script>
     <script src="../../js/sync-bar.js?v=6"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
-    <link rel="stylesheet" href="strategy.css?v=12">
+    <link rel="stylesheet" href="strategy.css?v=13">
 </head>
 <body>
 <div class="container">
@@ -45,6 +45,7 @@
             <div class="header-right">
                 <span class="refresh-dot"></span>
                 <span>Live · linked to Airtable</span>
+                <a class="btn" href="workflow.html" target="_blank">📖 Workflow</a>
                 <a href="#" onclick="loadRecord(); return false;">Refresh</a>
                 <a href="#" onclick="goToDashboard(); return false;">Back to Dashboard</a>
             </div>
@@ -71,6 +72,7 @@
                 <button id="saveBtn" class="btn btn-ghost" onclick="saveRecord()" disabled>Save changes</button>
                 <button id="pushProjBtn" class="btn btn-ghost" onclick="pushProjectsManually()" title="Create one Project record per non-empty Quarterly Project in the Projects table">Push Projects →</button>
                 <button id="exportPdfBtn" class="btn btn-ghost" onclick="exportPlanToPDF()" title="Download the plan as a presentable PDF">Export PDF</button>
+                <button id="closeQtrBtn" class="btn btn-ghost" onclick="openQuarterClose()" title="Freeze this quarter's projects (status, KPI, progress, closing note) and carry open tasks into the next quarter">Close the quarter</button>
                 <button id="wizardBtn" class="btn btn-primary" onclick="openWizard()">AI Wizard ▸</button>
             </div>
         </div>
@@ -104,6 +106,6 @@
     </div>
 </div>
 
-<script src="strategy.js?v=48"></script>
+<script src="strategy.js?v=49"></script>
 </body>
 </html>
