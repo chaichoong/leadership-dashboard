@@ -146,14 +146,31 @@ following, and not one of them is a file collision:
 - B's dev server held the Playwright port, so A's pre-push test gate failed for a reason that
   had nothing to do with A's code — a false red that invites a `SKIP_SYNC_TESTS=1` bypass.
 
-**Run concurrent sessions in separate git worktrees.** A single checkout cannot be shared:
+**Run concurrent sessions in separate git worktrees.** A single checkout cannot be shared.
+Do not hand-roll the `git worktree` command — use the script, which also assigns a preview
+port and refuses to delete work:
 
 ```bash
-git worktree add ../od-<feature> -b feature/<name>
+./scripts/worktree.sh new <topic> [fix|feature|chore]
 ```
 
-Each worktree has its own HEAD, index and stash; only the remote is shared. Give each session
-its own dev-server port in `.claude/launch.json` too, or the test gate collides.
+That creates `.claude/worktrees/<topic>` on `<kind>/<topic>`, branched from **origin/main**
+(not local main, which in a shared checkout is whatever the last session left behind) and
+with **no upstream** until you push — so a bare `git push` can never fire at main.
+
+- `./scripts/worktree.sh list` — every workspace, its preview config, and whether it holds
+  unpushed or uncommitted work
+- `./scripts/worktree.sh done <topic>` — removes the workspace and branch, but refuses while
+  anything would be lost: uncommitted files, commits that exist nowhere else, or a branch not
+  yet merged into origin/main. `--force` overrides, and means you accept the loss.
+
+Preview ports come from the existing named configs in `.claude/launch.json`; the script hands
+out a different one per workspace and **reserves the first for the main checkout**, so two
+servers never share a port. Never edit `launch.json` per session — it is tracked and shared,
+so the edit shows up in every worktree.
+
+**The main checkout stays on `main`** for quick fixes, the daily sweep and deploy verification.
+Reach for a workspace when the work is multi-file or will run for a while.
 
 If a checkout genuinely must be shared: commit before EVERY context switch, never `git stash`
 work you did not write (leave it and say so), and run `git status -sb` before assuming which
