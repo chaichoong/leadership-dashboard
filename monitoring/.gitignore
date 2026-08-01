@@ -10,3 +10,4 @@ task-sweep-worklist-*.json
 task-sweep-decisions-*.json
 task-sweep-applied-*.json
 task-sweep-pending.json
+task-sweep-pending-*.json
