@@ -1837,6 +1837,7 @@ function showPushApprovalModal(proposal, fields) {
                 <span class="push-project-num">QP${p.qp.i + 1}</span>
                 <span class="push-project-name">${escapeHtml(p.projectName)}</span>
             </div>
+            <div class="push-project-meta"><strong>Tasks assigned to:</strong> ${escapeHtml(pushAssigneeLabel(p.ownerEmail))}</div>
             ${p.kpiName ? `<div class="push-project-meta"><strong>KPI:</strong> ${escapeHtml(p.kpiName)}${p.kpiUnit ? ' (' + escapeHtml(p.kpiUnit) + ')' : ''}</div>` : ''}
             ${p.dod ? `<div class="push-project-meta"><strong>Definition of Done:</strong> ${escapeHtml(p.dod)}</div>` : ''}
             <div class="push-project-tasks">
@@ -1868,7 +1869,7 @@ function showPushApprovalModal(proposal, fields) {
         </div>
         <div class="push-modal-body">
             ${dedupNote}
-            <div style="font-size:12px;color:var(--text-muted);margin-bottom:12px">Each task will be assigned to Kevin, priority <strong>Project</strong>, duration <strong>15 min</strong>, linked to the project + business, due by end of its month. Review and approve.</div>
+            <div style="font-size:12px;color:var(--text-muted);margin-bottom:12px">Each task is assigned to its project's owner (shown per project below), priority <strong>Project</strong>, duration <strong>15 min</strong>, linked to the project + business, due by end of its month. Review and approve.</div>
             ${projectsHtml}
         </div>
         <div class="push-modal-foot">
@@ -1968,7 +1969,12 @@ async function executePush(proposal, fields, opts) {
                 taskBody.fields[TASK_F.dueDate] = t.dueISO;
                 taskBody.fields[TASK_F.status] = 'Upcoming';
                 taskBody.fields[TASK_F.priority] = 'Project';
-                taskBody.fields[TASK_F.assignee] = { email: KEVIN_EMAIL };
+                // Assign to the project's owner (the KPI owner captured on the
+                // plan). Kevin is the FALLBACK, not the default — pushing a
+                // client's plan must never assign their tasks to Kevin. Fixed
+                // 1 Aug 2026; was hardcoded to KEVIN_EMAIL since the push
+                // shipped (known defect raised 31 Jul).
+                taskBody.fields[TASK_F.assignee] = { email: p.ownerEmail || KEVIN_EMAIL };
                 taskBody.fields[TASK_F.timeEst] = DEFAULT_TASK_TIME_EST;
                 taskBody.fields[TASK_F.timeDur] = DEFAULT_TASK_DURATION_SECONDS;
                 taskBody.fields[TASK_F.business] = [businessId];
@@ -2032,6 +2038,16 @@ async function executePush(proposal, fields, opts) {
             <button class="btn btn-ghost" onclick="setStatus('', '')" style="flex-shrink:0">Dismiss</button>
         </div>`;
     }
+}
+
+// Who the push will assign a project's tasks to, as a human-readable label
+// for the approval preview. Resolves the owner email to a team-member name
+// where the cache has one; falls back to the email, then to Kevin.
+function pushAssigneeLabel(ownerEmail) {
+    const email = ownerEmail || KEVIN_EMAIL;
+    const member = Object.values(teamMembersCache || {}).find(m => m.email === email);
+    const name = member && member.name ? member.name : email;
+    return ownerEmail ? name : `${name} (no owner set on this project — add one in the KPI box to change this)`;
 }
 
 // Derive a short project name from the QP textarea — first line, or first
