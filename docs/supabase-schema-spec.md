@@ -52,7 +52,7 @@ Computed values = Postgres views (e.g. `v_costs_with_totals`), never write-back 
 ### 2.5 Module gating
 `tenant_config` key `modules` = jsonb {finance: bool, comms: bool, content: bool, wealth: bool, property: bool}. Shell router reads it to show/hide pages. Phase-2 pricing turns these on per Stripe webhook.
 
-### 2.6 Memory and permission scoping (added 1 Aug 2026)
+### 2.6 Memory and permission scoping (added 2 Aug 2026)
 
 **Rule: memory does not inherit permission, so it must be scoped and revoked explicitly.**
 
@@ -61,7 +61,7 @@ The moment an agent stores what it learned from a record, a second copy of that 
 protect the memory written from the row. Revoking a user's access to the source does not
 revoke what was already remembered, and every retrieval after that point is an authorised
 read of unauthorised content. Source: [[Three Layer Team AI Stack]] / [[Permission Does Not
-Survive Memory]] (`Learning & Reference/Transcripts/2026-08-01 Shared Claude Memory for Teams.md`),
+Survive Memory]] (`Learning & Reference/Transcripts/2026-08-02 Shared Claude Memory for Teams.md`),
 where the demonstrated setup has exactly this hole and the presenter admits it.
 
 Applies to any table holding agent memory, session summaries, retrieved context, embeddings,
@@ -102,7 +102,7 @@ S7. Agent runner reads Supabase (Phase C pairing) — memory tables ship with §
 D1 entities table = as specced (§2.1). D6 computed views = as specced (§2.4). D2 mentor prompt → tenant_config key `mentor_prompt`. D9 CHANGED from the fair-use assumption: clients pay their own AI — add `tenant_config` key `anthropic_key` (encrypted at rest; Supabase Vault or pgsodium) + claude-proxy per-tenant key routing; `ai_usage_log` stays for visibility. D3 companion: manual-KPI standard → `tenant_config` key `manual_kpis` (jsonb: kpi id, value, updated_at) + onboarding seeds recurring update tasks.
 
 **Client tool connections (Gmail/Slack/accounts) are NOT part of this schema.** Recommendation
-(1 Aug 2026, awaiting Kevin's ruling): keep the per-client Apps Script pattern, store no client
+(2 Aug 2026, awaiting Kevin's ruling): keep the per-client Apps Script pattern, store no client
 OAuth tokens in Supabase, revisit at ~10 clients. See `docs/client-tool-connections.md`. Do not
 add a `tenant_credentials` or connected-accounts table without reading it first. Note this is
 separate from D9's `anthropic_key`, which stays as specced above.

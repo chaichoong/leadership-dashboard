@@ -1,7 +1,7 @@
 # How a client connects their own tools
 
-Status: **recommendation, awaiting Kevin's ruling.** Written 1 Aug 2026. Prompted by
-`Learning & Reference/Transcripts/2026-08-01 Shared Claude Memory for Teams.md`, which proposes
+Status: **recommendation, awaiting Kevin's ruling.** Written 2 Aug 2026. Prompted by
+`Learning & Reference/Transcripts/2026-08-02 Shared Claude Memory for Teams.md`, which proposes
 buying a broker (Composio) for exactly this problem. Companion to
 `docs/supabase-schema-spec.md` §2.6 and the D9 decision in its Addendum.
 
