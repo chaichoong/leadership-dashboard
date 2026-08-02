@@ -133,6 +133,33 @@ INVARIANTS = [
                         "LEN(ARRAYJOIN({Team Member}) & '') >= 0)"),
         "fields": ["Task Name", "Status", "Processed by AI Agent"],
     },
+    {
+        # `Completion Date` is a dateTime and `Due Date` is a plain date, which
+        # Airtable reads as midnight. So the original formula
+        # (`{Completion Date} <= {Due Date}`) scored EVERY task finished on its
+        # own due date as late — only work finished a full day early ever passed.
+        # It reported Mica at 11% and Ericamae at 4% when the honest by-day
+        # figures were 40% and 63%. A fixture test cannot see this: it is a
+        # formula over real data shapes, so it has to be checked live.
+        # Any comparison of a dateTime against a date needs this treatment.
+        "name": "on-time-counts-the-due-date-itself",
+        "table": TASKS,
+        "incident": "Aug 2026 — 'Completed On Time' compared a dateTime to a date, marking 105 of Mica's and 137 of Ericamae's on-the-day completions late",
+        "asserts": "completed ON the due date => Completed On Time = 1",
+        "violation": (
+            "AND({Is Complete} = 1, {Completion Date}, {Due Date}, "
+            "IS_SAME({Completion Date}, {Due Date}, 'day'), "
+            "{Completed On Time} != 1)"
+        ),
+        "control": ("AND({Is Complete} = 1, {Completion Date}, {Due Date}, "
+                    "IS_SAME({Completion Date}, {Due Date}, 'day'))"),
+        "control_means": "tasks finished on the exact day they were due (the only population this bug can corrupt)",
+        # TRUE for every record and touches all three fields, so a renamed or
+        # typo'd field still fails loudly rather than returning a quiet zero.
+        "field_probe": ("OR({Completed On Time} >= 0, {Is Complete} >= 0, "
+                        "LEN({Completion Date} & '') >= 0, LEN({Due Date} & '') >= 0)"),
+        "fields": ["Task Name", "Due Date", "Completion Date", "Completed On Time"],
+    },
 ]
 
 
