@@ -177,6 +177,68 @@ describe('agent autonomy threshold does not drift between the app and the huddle
   });
 });
 
+// ── Agent dispatch engine: field IDs vs config.js and the Slack worker ──────
+//
+// scripts/agent-dispatch.py is stage 2 of the approval loop (the scheduled task
+// `agent-dispatch` on Kevin's Mac). Python cannot import js/config.js, so it
+// re-declares the Tasks field IDs — the same stranded-copy shape as the money
+// worker above. If its `submit` writes Agent Output or Status through a drifted
+// field ID, agents' work lands in the wrong field and every Slack approval post
+// says "the agent left its work empty".
+describe('agent-dispatch.py does not drift from config.js or approvals.js', () => {
+  const PY = read('scripts/agent-dispatch.py');
+  const APPROVALS = read('scripts/slack-automation/approvals.js');
+
+  // Python dict literal: "key": "fldXXX",
+  const pyAF = Object.fromEntries(
+    [...(PY.match(/AF = \{(.*?)\n\}/s)?.[1] ?? '').matchAll(/"(\w+)":\s*"(fld\w+)"/g)]
+      .map((m) => [m[1], m[2]]),
+  );
+  const cfTasks = objectLiteral(CONFIG, 'TASK_FIELDS');
+  const jsAF = objectLiteral(APPROVALS, 'AF');
+
+  it('parses all three sources (control — guards against a vacuous pass)', () => {
+    expect(Object.keys(pyAF).length).toBeGreaterThan(10);
+    expect(Object.keys(cfTasks).length).toBeGreaterThan(10);
+    expect(Object.keys(jsAF).length).toBeGreaterThan(10);
+  });
+
+  it('every shared field ID matches config.js TASK_FIELDS', () => {
+    let overlap = 0;
+    for (const [key, id] of Object.entries(pyAF)) {
+      if (!(key in cfTasks)) continue;
+      overlap += 1;
+      expect(id, `agent-dispatch.py AF.${key} drifted from config.js`).toBe(cfTasks[key]);
+    }
+    expect(overlap, 'too little overlap — a renamed key would hide drift').toBeGreaterThan(10);
+  });
+
+  it('every shared field ID matches the Slack worker (approvals.js)', () => {
+    let overlap = 0;
+    for (const [key, id] of Object.entries(pyAF)) {
+      if (!(key in jsAF)) continue;
+      overlap += 1;
+      expect(id, `agent-dispatch.py AF.${key} drifted from approvals.js`).toBe(jsAF[key]);
+    }
+    expect(overlap).toBeGreaterThan(10);
+  });
+
+  it('counts the same approved outcomes and hands back to the same Kevin', () => {
+    const pyApproved = PY.match(/APPROVED = \(([^)]+)\)/)[1];
+    // Read the approved-outcome strings out of the worker's own reaction map
+    // rather than hardcoding them — if the worker renames an outcome, a
+    // literal here would stay green while the two sources drift.
+    const workerApproved = [
+      ...new Set([...APPROVALS.matchAll(/:\s*'(Approved [^']+)'/g)].map((m) => m[1])),
+    ];
+    expect(workerApproved.length, 'worker approved-outcome parse went blind').toBeGreaterThan(0);
+    workerApproved.forEach((o) => expect(pyApproved).toContain(o));
+    expect(pyApproved).not.toContain('Rejected');
+    const workerEmail = APPROVALS.match(/KEVIN_AIRTABLE_EMAIL = '([^']+)'/)[1];
+    expect(PY).toContain(`KEVIN_AIRTABLE_EMAIL = "${workerEmail}"`);
+  });
+});
+
 // ── Cache-bust drift across pages ────────────────────────────────────────────
 // Shared assets are versioned by hand with a `?v=N` query string, and NOTHING
 // automates it — not scripts/pre-commit-action.py, not the auto-bump workflow
