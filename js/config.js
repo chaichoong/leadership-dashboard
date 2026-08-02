@@ -789,11 +789,18 @@
         tenInPayment:    'sel4I99slfpd7Vc1t',
         tenCFVActioned:  'selmhFXah5Bodgg9x',
         tenCFV:          'sel2mWzsvOd8d8de0',
+        // Costs > Payment Status (the LEGACY field costs are actually filtered on).
+        // Live choices, confirmed against the Airtable schema 2026-08-02:
+        //   In Payment (81 costs) · Overdue (9) · Paused (28) · Inactive (62)
         costInPayment:   'selGrWUm5NkfcY607',
-        costActive:      'selwuotKAoizHJl6z',
         costOverdue:     'selGB3gE7Bg7jKoIS',
-        costDueToday:    'selZazCz6gUJJ8Pl8',
-        costUpcoming:    'selypOeFtsBePQG1E',
+        costPaused:      'selzQhQoQQXe3DXMK',
+        costInactive:    'sel5UTLLcZTdRVq6m',
+        // DRIFT: removed from Airtable — detected 2026-08-02, no record holds them.
+        // Left commented rather than deleted so a future run can see they were real.
+        // costActive:      'selwuotKAoizHJl6z',
+        // costDueToday:    'selZazCz6gUJJ8Pl8',
+        // costUpcoming:    'selypOeFtsBePQG1E',
         // Cost Status (New) — clean status field used by the AP Fixed dashboard
         costNewInPayment: 'sel9bem92hq9d0926',
         costNewOverdue:   'selc7o2vZ0szCzzBB',

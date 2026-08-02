@@ -1251,7 +1251,7 @@ See \`references/field-ids.md\` for complete field mappings.
    - **Alternative approach:** Fetch all costs, paginate, then filter client-side by checking \`fldX2QMLkSYzDEpIF\` for "Santander" or "TNT Mgt Zempler".
 2. Fields needed: Cost Name (\`fldS6FYfpkhu6tJG0\`), Expected Cost (\`fld9JibXkMpTeMcxw\`), Due Day of Month (\`fld7IsfiGvKpxEwSs\`), Frequency (\`fldvozTHvs5VH3lNi\`), Payment Status (\`fldXZNI96v8HgjuSh\`), Account Alias (\`fldX2QMLkSYzDEpIF\`), Paid This Period? (\`fldcfmqSaWYfWBQ56\`), Inactive (\`fldQJPGLFMbwVelsW\`), Due Date Next (\`fldQZBF4JzBsmWU87\`), Due Date This Period (\`fld0NPreZFBMPKb6C\`), Days Until Due This Period (\`fldOomc6d9Jlx1lWU\`).
 3. **Filter criteria** — include costs where:
-   - Payment Status is one of: \`In Payment\` (selGrWUm5NkfcY607), \`Active\` (selwuotKAoizHJl6z), \`Overdue\` (selGB3gE7Bg7jKoIS), \`Due Today\` (selZazCz6gUJJ8Pl8), \`Upcoming\` (selypOeFtsBePQG1E).
+   - Payment Status is one of: \`In Payment\` (selGrWUm5NkfcY607), \`Overdue\` (selGB3gE7Bg7jKoIS). Those are the only two live "money still going out" choices — \`Active\`, \`Due Today\` and \`Upcoming\` were removed from the field and no cost holds them (checked 2026-08-02).
    - Inactive checkbox (\`fldQJPGLFMbwVelsW\`) is NOT ticked.
    - Exclude: \`Paused\` (selzQhQoQQXe3DXMK), \`Inactive\` (sel5UTLLcZTdRVq6m).
 
