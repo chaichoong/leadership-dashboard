@@ -52,7 +52,39 @@ Computed values = Postgres views (e.g. `v_costs_with_totals`), never write-back 
 ### 2.5 Module gating
 `tenant_config` key `modules` = jsonb {finance: bool, comms: bool, content: bool, wealth: bool, property: bool}. Shell router reads it to show/hide pages. Phase-2 pricing turns these on per Stripe webhook.
 
-### 2.6 What does NOT change now
+### 2.6 Memory and permission scoping (added 1 Aug 2026)
+
+**Rule: memory does not inherit permission, so it must be scoped and revoked explicitly.**
+
+The moment an agent stores what it learned from a record, a second copy of that content exists
+*outside* the permission model that governed the record. RLS protects the row. It does not
+protect the memory written from the row. Revoking a user's access to the source does not
+revoke what was already remembered, and every retrieval after that point is an authorised
+read of unauthorised content. Source: [[Three Layer Team AI Stack]] / [[Permission Does Not
+Survive Memory]] (`Learning & Reference/Transcripts/2026-08-01 Shared Claude Memory for Teams.md`),
+where the demonstrated setup has exactly this hole and the presenter admits it.
+
+Applies to any table holding agent memory, session summaries, retrieved context, embeddings,
+or brain content — `ai_brain_*`, `agent_activity`, and anything added for the agent runner.
+
+1. **Scope at WRITE, not only at read.** Every memory row carries `tenant_id` AND the
+   `user_id` whose access produced it. Same RLS predicate as §2.2, applied to the write path.
+   A memory written from a record the writer could see is still tenant data, never global.
+2. **Revocation cascades.** Removing a `tenant_users` row, or churning a tenant, deletes or
+   quarantines that party's memory rows in the same transaction. Deleting the user without
+   deleting the memory leaves readable content behind, so this is a foreign key with
+   `on delete cascade`, not a scheduled cleanup job.
+3. **No automatic capture into a shared store.** Nothing writes to a cross-user memory store
+   by default. Shared memory is an explicit, per-item promotion. A capture-everything default
+   puts one client's sensitive material into a pool the next reader was never cleared for.
+4. **Never cross tenants.** No embedding index, cache or summary spans tenants, regardless of
+   how much cheaper one shared index would be.
+
+Kevin's own brain is subject to the same rule: the sensitive-item guardrail in
+`constraints-and-red-lines.md` fails if a memory written from a sensitive note is later
+retrievable by someone who cannot open the note.
+
+### 2.7 What does NOT change now
 - No normalisation of mirror tables pre-launch.
 - Airtable stays system of record until a module's page is verified on Supabase AND its write path lands (shims currently read-through; write path per-module cutover, tasks first — Mica's Tasks & Projects clone is furthest along).
 - GitHub Pages app remains the live product until cutover; Vercel build is the staging/dogfood target.
@@ -64,7 +96,13 @@ S3. Tenancy spine tables (2.1) + retrofit (2.2).
 S4. D1 entities + D2 mentor-prompt config + wizard write target.
 S5. Page-at-a-time: finish shell coverage (Finance set next) — Mica continues.
 S6. Write-path cutover per module (tasks first) + parity checks.
-S7. Agent runner reads Supabase (Phase C pairing).
+S7. Agent runner reads Supabase (Phase C pairing) — memory tables ship with §2.6 scoping and cascade from day one, not retrofitted.
 
 ## Addendum — D-decisions locked (Kevin, 7 Jul 2026)
 D1 entities table = as specced (§2.1). D6 computed views = as specced (§2.4). D2 mentor prompt → tenant_config key `mentor_prompt`. D9 CHANGED from the fair-use assumption: clients pay their own AI — add `tenant_config` key `anthropic_key` (encrypted at rest; Supabase Vault or pgsodium) + claude-proxy per-tenant key routing; `ai_usage_log` stays for visibility. D3 companion: manual-KPI standard → `tenant_config` key `manual_kpis` (jsonb: kpi id, value, updated_at) + onboarding seeds recurring update tasks.
+
+**Client tool connections (Gmail/Slack/accounts) are NOT part of this schema.** Recommendation
+(1 Aug 2026, awaiting Kevin's ruling): keep the per-client Apps Script pattern, store no client
+OAuth tokens in Supabase, revisit at ~10 clients. See `docs/client-tool-connections.md`. Do not
+add a `tenant_credentials` or connected-accounts table without reading it first. Note this is
+separate from D9's `anthropic_key`, which stays as specced above.
