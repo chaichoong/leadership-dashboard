@@ -69,11 +69,16 @@ body {
     text-transform: uppercase; letter-spacing: 0.04em;
 }
 .ctx-group select {
-    padding: 8px 12px; border: 1px solid var(--border-default);
+    /* extra right padding so the native dropdown arrow never sits on top of a
+       long business name */
+    padding: 8px 30px 8px 12px; border: 1px solid var(--border-default);
     border-radius: 6px; background: var(--bg-surface); font-size: var(--fs-base);
     font-family: inherit; color: var(--text-primary);
+    text-overflow: ellipsis;
 }
-.ctx-actions { display: flex; gap: 8px; margin-left: auto; }
+/* wrap: five buttons in one unwrappable row measured 350px, which overflowed a
+   375px phone and made the whole page scroll sideways. Never wraps on desktop. */
+.ctx-actions { display: flex; gap: 8px; margin-left: auto; flex-wrap: wrap; }
 
 /* Buttons */
 .btn {
@@ -515,6 +520,19 @@ details.section[open] .section-chevron { transform: rotate(180deg); }
     .layout.with-wizard { grid-template-columns: 1fr; }
     .wizard-panel { position: fixed; inset: 0; height: 100vh; z-index: 200; border-radius: 0; }
     .grid-cols-2, .grid-cols-3 { grid-template-columns: 1fr; }
+}
+
+/* Phones. The page used to scroll sideways: the five action buttons sat in one
+   unwrappable 350px row, and behind them the title and the header links could
+   not share a line either. Both now wrap, and the pickers lose their 140px
+   floor so they can sit side by side. */
+@media (max-width: 640px) {
+    body { padding: 12px; }
+    .header { flex-wrap: wrap; gap: 8px; }
+    .header-right { flex-wrap: wrap; row-gap: 6px; }
+    .ctx-group { min-width: 0; flex: 1 1 120px; }
+    .ctx-actions { margin-left: 0; width: 100%; }
+    .ctx-actions .btn { flex: 1 1 auto; }
 }
 
 /* ── Main Method link slots (picker under each step card) ─────────── */

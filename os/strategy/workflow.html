@@ -142,7 +142,7 @@ body { line-height: 1.55; color: var(--text-primary); background: var(--bg-app);
       <h2><span class="num">1</span> The five steps</h2>
       <p>One plan per business, per quarter. It lives on one page and follows the same loop every 90 days.</p>
       <div class="flowline">
-        <div class="flowbox"><h5>1 · Write the plan</h5><p>The AI wizard interviews you and fills the form</p></div>
+        <div class="flowbox"><h5>1 · Write the plan</h5><p>The AI wizard interviews you, or you fill the form in yourself</p></div>
         <div class="flowbox"><h5>2 · Push it</h5><p>The three projects become real projects and tasks</p></div>
         <div class="flowbox"><h5>3 · Share the work</h5><p>AI agent first, team second, founder last</p></div>
         <div class="flowbox"><h5>4 · Watch one number</h5><p>Each project's KPI shows on the dashboard</p></div>
@@ -161,11 +161,22 @@ body { line-height: 1.55; color: var(--text-primary); background: var(--bg-app);
     <section class="section" id="step1">
       <h2><span class="num">2</span> Step 1 — Writing the plan</h2>
       <div class="flowline">
-        <div class="flowbox"><h5>Pick the context</h5><p>Business + quarter + year</p></div>
-        <div class="flowbox"><h5>AI wizard</h5><p>One question at a time, in plain words</p></div>
+        <div class="flowbox"><h5>Pick the context</h5><p>Business + the quarter you are planning + year</p></div>
+        <div class="flowbox"><h5>Pick a route</h5><p>AI wizard, or fill it in yourself</p></div>
         <div class="flowbox"><h5>The two halves</h5><p>Objective Plan + Strategy Plan, one record</p></div>
         <div class="flowbox"><h5>Save</h5><p>Everything goes to the database</p></div>
       </div>
+      <div class="card hilite">
+        <h4>Starting a new quarter — pick the NEW quarter <span class="tag tag-user">You</span></h4>
+        <p>Select the quarter you are <em>about to plan</em>, not the one just finished. There is no plan there yet, so the page says <strong>"Plan Q3 2026"</strong> and asks how you want to start. That is the right place to be.</p>
+        <p>You do not need to open last quarter first. Whichever route you pick, the page fetches the previous quarter itself: the wizard opens by asking what hit and what missed, and the form is pre-filled with last quarter's answers so you are editing rather than starting from a blank page.</p>
+        <p><strong>Two ways in, same form:</strong></p>
+        <ul>
+          <li><strong>Start AI Wizard</strong> — 34 questions, one at a time. Rough answers are fine; it writes the polished version into the field. It challenges a weak answer once, then accepts it.</li>
+          <li><strong>Fill in manually</strong> — the same form, blank, with every section open and a hint under each heading. Type as much or as little as you like. The wizard is never compulsory.</li>
+        </ul>
+      </div>
+      <div class="callout warn">Three things stop a quarter being lost by accident. Opening the wizard on a <strong>past</strong> quarter that already has a plan warns you first, because the wizard writes into whatever quarter is loaded and would otherwise overwrite finished history. <strong>Save changes</strong> stays greyed out until you actually answer, edit, or finish the wizard, so last quarter's pre-filled text can never be saved as this quarter's plan in one click. And a completely empty plan is refused rather than written.</div>
       <div class="card">
         <h4>The two halves share one record</h4>
         <p><strong>Objective Plan</strong> — why the business exists. Reviewed once a year, tweaked quarterly: the objective; what you do, who for and how; the customer profile; up to 20 team rules; up to 5 things that make you different; the main method step by step; the offer people can't refuse.</p>
