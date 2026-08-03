@@ -669,13 +669,28 @@
                     },
                     {
                         name: 'Sidebar CFV badges in sync with detection', kind: 'automation', run: () => {
+                            // This check used to compute its own numbers and then report
+                            // "sidebar badges match" unconditionally — it could never fail,
+                            // and its dismissal filter disagreed with the one the badge
+                            // actually uses (it treated confirmed CFVs as dismissable; the
+                            // render path only ever dismisses 'potential'). Now it reads the
+                            // rendered badges and fails on a real mismatch.
                             const visible = hcCfvList.filter(e => {
-                                if (e.status === 'cfv' || e.status === 'potential') return !localStorage.getItem('cfv_dismissed_' + e.tenancyId);
+                                if (e.status === 'potential') return !localStorage.getItem('cfv_dismissed_' + e.tenancyId);
                                 return true;
                             });
                             const cfvCount = visible.filter(e => e.status === 'cfv' || e.status === 'potential').length;
                             const actionedCount = visible.filter(e => e.status === 'cfv actioned').length;
-                            return { status: 'pass', detail: `${cfvCount} unactioned · ${actionedCount} actioned · sidebar badges match` };
+                            const readBadge = cls => {
+                                const el = document.querySelector('.cfv-sidebar-badge.' + cls);
+                                return el ? Number(el.textContent.trim()) : 0;   // absent badge means zero
+                            };
+                            const shownCfv = readBadge('cfv-red');
+                            const shownActioned = readBadge('cfv-orange');
+                            if (shownCfv !== cfvCount || shownActioned !== actionedCount) {
+                                return { status: 'fail', detail: `Sidebar shows ${shownCfv} unactioned · ${shownActioned} actioned, detection says ${cfvCount} · ${actionedCount} — badge is stale` };
+                            }
+                            return { status: 'pass', detail: `${cfvCount} unactioned · ${actionedCount} actioned · verified against the rendered badges` };
                         }
                     },
                     {
