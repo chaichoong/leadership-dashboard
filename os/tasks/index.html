@@ -671,6 +671,7 @@ body.app-busy,body.app-busy *{cursor:progress!important}
 <div id="syncPopover" style="display:none;position:fixed;top:60px;right:24px;z-index:9997;width:360px;max-height:60vh;overflow-y:auto;background:var(--bg-surface);border:1px solid var(--border-default);border-radius:10px;padding:14px;font-size:var(--fs-sm);box-shadow:var(--shadow-lg)"></div>
 
 <!-- KPI Source Registry: template library for project KPIs (loaded before the main inline script so window.KPI_SOURCES is ready) -->
+<script src="../../js/project-health.js?v=1"></script>
 <script src="../../js/kpi-sources.js?v=1"></script>
 <script src="../../js/sync-bar.js?v=6"></script>
 
@@ -1610,29 +1611,12 @@ function formatMins(m){if(!m)return'-';if(m<60)return m+'m';const h=Math.floor(m
 function minutesToTimeEst(mins){let best=TIME_OPTIONS[0],bd=Infinity;TIME_OPTIONS.forEach(o=>{const d=Math.abs(TIME_MINUTES[o]-mins);if(d<bd){bd=d;best=o}});return best}
 function isOverdue(t){if(!t.dueDate||t.status==='Completed')return false;return t.dueDate<todayStr()}
 function dateToMs(dateStr){const p=dateStr.split('-').map(Number);return new Date(p[0],p[1]-1,p[2]).getTime()}
-function computeProjectHealth(p){
-  if(p.completed||p.status==='Completed')return'Completed';
-  if(p.status==='Not Started')return'Not Started';
-  if(!p.start||!p.end)return p.status||null;
-  const today=todayStr();
-  const startT=dateToMs(p.start);
-  const endT=dateToMs(p.end);
-  const nowT=dateToMs(today);
-  if(endT<startT)return p.status||null;
-  if(endT<nowT)return'Off-Track';
-  const total=endT-startT;
-  const elapsed=Math.max(0,nowT-startT);
-  const timePct=total>0?(elapsed/total)*100:0;
-  let progPct=null;
-  if(p.kpiTarget>0&&p.kpiCurrent>=0){progPct=(p.kpiCurrent/p.kpiTarget)*100}
-  else if(p.totalTasks>0){progPct=((p.completedTasks||0)/p.totalTasks)*100}
-  if(progPct===null)return p.status||null;
-  if(timePct<5)return'Not Started';
-  const ratio=timePct>0?(progPct/timePct)*100:100;
-  if(ratio>=100)return'On-Target';
-  if(ratio>=85)return'On-Track';
-  return'Off-Track';
-}
+// computeProjectHealth is defined in ../../js/project-health.js — one rule
+// shared with the Leadership Dashboard and the daily sync job, so the three
+// can never disagree about whether a project is on track. It used to be
+// duplicated here, and both copies returned early on a stored status of
+// "Not Started" — which is Airtable's default and never got cleared, so
+// projects showed as unstarted all quarter. Health is derived now.
 function isWeekend(dateStr){const p=dateStr.split('-').map(Number);const d=new Date(p[0],p[1]-1,p[2]).getDay();return d===0||d===6}
 function addDays(dateStr,n){const p=dateStr.split('-').map(Number);const d=new Date(p[0],p[1]-1,p[2]);d.setDate(d.getDate()+n);const y=d.getFullYear();const m=String(d.getMonth()+1).padStart(2,'0');const dd=String(d.getDate()).padStart(2,'0');return `${y}-${m}-${dd}`}
 
