@@ -266,6 +266,55 @@ function truncate(s, n) {
     return clean.length > n ? clean.slice(0, n - 1) + '…' : clean;
 }
 
+// Split long text into pieces that each fit one Slack block, breaking on a
+// paragraph, then a line, then a word — never mid-sentence unless there is no
+// break at all in the whole window.
+function chunkText(text, size) {
+    const out = [];
+    let rest = String(text || '').trim();
+    while (rest.length) {
+        if (rest.length <= size) { out.push(rest); break; }
+        let cut = rest.lastIndexOf('\n\n', size);
+        if (cut < size * 0.5) cut = rest.lastIndexOf('\n', size);
+        if (cut < size * 0.5) cut = rest.lastIndexOf(' ', size);
+        if (cut < size * 0.5) cut = size;
+        out.push(rest.slice(0, cut));
+        rest = rest.slice(cut).replace(/^\s+/, '');
+    }
+    return out;
+}
+
+// Long content arrives WHOLE, spread across as many blocks as it needs. A
+// single block caps at 3000 characters but a message allows 50 blocks, so
+// splitting — not cutting — is the right response to a long draft. (The
+// original 2,400-character cap meant Kevin could not read the bottom of a long
+// draft from Slack, and an approval you cannot read to the end is not an
+// approval.) maxBlocks keeps one message inside Slack's 50-block ceiling; only
+// genuinely enormous content (tens of thousands of characters) overflows, and
+// then it says so and points at the task rather than trailing off silently.
+function pushLongText(blocks, heading, raw, style, maxBlocks) {
+    const text = String(raw || '').replace(/\r/g, '').trim();
+    if (!text) return;
+    const chunks = chunkText(text, 2600);
+    chunks.slice(0, maxBlocks).forEach((chunk, i) => {
+        const body = style === 'quote'
+            ? '>' + esc(chunk).replace(/\n/g, '\n>')
+            : esc(chunk);
+        let block = (i === 0 ? `*${heading}*\n` : '') + body;
+        if (block.length > 2990) block = block.slice(0, 2989) + '…';
+        blocks.push({ type: 'section', text: { type: 'mrkdwn', text: block } });
+    });
+    if (chunks.length > maxBlocks) {
+        blocks.push({
+            type: 'section',
+            text: {
+                type: 'mrkdwn',
+                text: `_…too long even for a split message (${text.length} characters). The rest is on the task — use the Open in Airtable link below._`,
+            },
+        });
+    }
+}
+
 // ─── POST PHASE ───────────────────────────────────────────────────────
 
 // The message has to carry enough for Kevin to judge the work from his phone,
@@ -299,10 +348,13 @@ function buildApprovalBlocks(t, agent, warn) {
     }
 
     // What the agent has actually done. This is the part he is judging, so it
-    // gets the most room and sits above the brief.
-    if (t.agentOutput) {
-        const quoted = esc(truncate(t.agentOutput, 2400)).replace(/\n/g, '\n>');
-        blocks.push({ type: 'section', text: { type: 'mrkdwn', text: truncate(`*What the agent has done*\n>${quoted}`, 2900) } });
+    // gets the most room, sits above the brief, and is NEVER cut — a decision
+    // made on half a draft is not a decision. Block budget: 28 + 6 + 2 content
+    // blocks plus ~6 fixed ones stays under Slack's 50-block ceiling.
+    // Trimmed check, or an output of pure whitespace would skip BOTH branches:
+    // no work shown and no warning either, which is the worst of all worlds.
+    if (String(t.agentOutput || '').trim()) {
+        pushLongText(blocks, 'What the agent has done', t.agentOutput, 'quote', 28);
     } else {
         blocks.push({
             type: 'section',
@@ -316,10 +368,8 @@ function buildApprovalBlocks(t, agent, warn) {
     }
 
     // The brief it was working to, so he can tell whether it answered the question.
-    const brief = truncate(String(t.description || '').replace(/\r/g, ''), 900);
-    if (brief) blocks.push({ type: 'section', text: { type: 'mrkdwn', text: truncate(`*The task it was given*\n${esc(brief)}`, 2900) } });
-    const notes = truncate(t.notes, 400);
-    if (notes) blocks.push({ type: 'section', text: { type: 'mrkdwn', text: truncate(`*Notes*\n${esc(notes)}`, 2900) } });
+    pushLongText(blocks, 'The task it was given', t.description, 'plain', 6);
+    pushLongText(blocks, 'Notes', t.notes, 'plain', 2);
 
     blocks.push({ type: 'divider' });
 
