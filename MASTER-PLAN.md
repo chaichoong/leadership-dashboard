@@ -21,15 +21,51 @@
 6. **Airtable is the team's working copy; this file is canonical.** New tasks flow plan → Airtable; status flows back nightly (sync job, §3) and at the Monday review.
 7. **Weekly review** at the Monday team check-in: tick, re-sequence, log.
 
-## 1. The goal line
+## 1. The goal line (rewritten 3 Aug 2026 from the Q3 sessions — supersedes the 7 Jul targets)
 
-Live, taking money, generating leads, and delivering what we sell:
-- Launch: **1 August 2026**. 2 design partners signed by 31 July.
-- 9 clients / £5k MRR by end-2026. 50 clients is the multi-year cap, not the year-one goal.
-- Deliver = client's first AI agent live inside a month of signup.
-- Demo evidence = **10 AI agents running Kevin's own businesses** (§5).
+Sources, all Kevin-approved: `Decisions/2026-07-29 Launch reset — targets, sequencing and who
+builds.md` (rule 6), `Decisions/2026-07-31 Q3 planning — rulings from the strategy session.md`,
+and `current-priorities.md`. **Q3's theme is REVENUE for Operations Director.**
 
-## 2. Where we are (snapshot 7 Jul 2026 — update each review)
+**The targets:**
+- **30 Sep 2026: 1 paying client.** The numbers that actually steer this quarter are the LEADING
+  ones, because there is zero conversion data to forecast from: **about 300 prospects contacted
+  and 10 calls attended.**
+- **31 Dec 2026: 5 clients live, about £2,000/month recurring.**
+- **30 Jun 2027: £5,000/month recurring.**
+- 50 clients remains the multi-year cap, not a year-one goal.
+
+**How it gets delivered and sold:**
+- Deliver = the client's first AI agent live within **30 days of the kick-off call** (the guarantee
+  clock starts at kick-off, not at payment — see the guarantee section in the launch reset).
+- **Nothing gates outreach, ever.** Build runs in parallel and never blocks a prospect contact.
+  Prospecting went live **4 Aug at 5 a day**; ramp only once real conversion data exists.
+- **Kevin's own hours go to three things only:** the warm 20, the contract, and holding sales
+  calls. He has about **142 working hours** for Operations Director to 31 December.
+- Positioning is a **ROLE, not software and not consultancy** (Q3 ruling 5). No sector or turnover
+  limit (ruling 6); the admin/bookkeeping job-advert focus is a targeting choice for the outbound
+  engine, not a market definition.
+
+**Where the leading numbers actually stand (verified in Airtable 3 Aug 2026):**
+119 prospects found, **all 119 still at "Ready for Review" — zero approved, zero synced to
+GoHighLevel, zero contacted.** Against ~300 contacted by 30 Sep, the contacted count is 0. This
+line is the honest baseline, not a criticism; update it at each review.
+
+**Dead targets, kept so they are not quietly reinstated:**
+- ~~Launch 1 August 2026; 2 design partners signed by 31 July.~~ That date passed with zero
+  partners signed. Launch is no longer a date; outreach starting is the event.
+- ~~9 clients / £5k MRR by end-2026.~~ It never added up: £5,000 recurring needs 15 clients at the
+  £350 base, or 12 at base plus one add-on.
+- ~~Demo evidence = 10 AI agents running Kevin's own businesses.~~ Amended 8 Jul to "minimum 3 LIVE
+  with demo recordings by 31 Jul" (§5). **That gate's status is unverified as of 3 Aug** — confirm
+  live agent count at the next review rather than assuming it from ticked tasks.
+
+## 2. Where we are (snapshot 7 Jul 2026 — STALE, not refreshed since; update each review)
+
+> **Flagged 3 Aug 2026.** The percentages and migration status below are a 7 Jul reading and have
+> not been re-measured. Only the prospect count in §1 is verified current. Do not quote these
+> figures as today's position; re-audit them at the next review.
+
 
 - Product 78% / GTM 40% (2 Jul audit). Funnel pages built and Stripe-tested at locked pricing (£1,500 setup + £350/mo + 30-day trial; modular pricing = Phase 2).
 - Migration: 12+ pages on the Supabase shell (Vercel), Mica shipping daily. Airtable still system of record.
@@ -276,6 +312,7 @@ personal profile keeps Runpreneur in the feed and carries OD in its static secti
 
 | Date | Source | Change |
 |---|---|---|
+| 2026-08-03 | Kevin, in-session ("update the plan targets with what we've set in the Q3 objective and strategy sessions") | **§1 goal line rewritten from the Q3 sessions.** Old targets (launch 1 Aug, 2 design partners by 31 Jul, 9 clients / £5k MRR by end-2026) were still sitting at the top of the plan a month after the 29 Jul launch reset replaced them. New targets: 1 paying client by 30 Sep with leading indicators of ~300 contacted and 10 calls attended; 5 clients and ~£2,000/mo by 31 Dec; £5,000/mo by 30 Jun 2027. Added the delivery promise (first agent live within 30 days of KICK-OFF, not payment), the nothing-gates-outreach rule, Kevin's 142 remaining OD hours and the three things they go to, and the role-not-software positioning from the 31 Jul rulings. Dead targets struck through rather than deleted, with the arithmetic that killed the £5k/9-client pairing. **Baseline verified in Airtable the same day: 119 prospects found, all still "Ready for Review", zero contacted.** §2 marked STALE (7 Jul figures never re-measured). §5's "3 agents live by 31 Jul" gate flagged as unverified rather than assumed from ticked tasks. **Not changed, needs Kevin:** the Real Estate cushion target conflicts between sources — `current-priorities.md` says £14,000/mo by year end (Kevin, 28 Jul), the formal Q3 Objective in Airtable (`reccjozo4gPfXdeKl`) says £19,750/mo (£15,750 clear after a £4,000 reserve). Property is not in this plan, so nothing was written either way. |
 | 2026-08-02 | Kevin, in-session (approved: "crack on with all four") | **Risks register added (§2a) and the public-repo data leak closed.** Four items actioned. **(1) History scrubbed:** `git-filter-repo` removed four `monitoring/task-sweep-*.json` files (46 third-party email addresses, 4 mobile numbers, 20 street addresses) and the unredacted `task-sweep-2026-08-02.md` (six property addresses with lapsed certificate dates, plus the accountant's £15,120.83 claim) from every ref; force-pushed `main` and `fix/strategy-quarter-start`; verified absent against a fresh mirror clone. Repo bundled to `~/Backups/leadership-dashboard-prescrub-2026-08-02.bundle` first. Investigating it surfaced **R1b**: the same class of data is in CURRENT source (contractors' personal emails across 7 files, property addresses in 2), which a history scrub cannot touch — registered as open, deliberately not fixed in the same pass because it touches live contractor routing. **(2) `Completed On Time` fixed:** the formula compared a dateTime (`Completion Date`) against a date (`Due Date`, read as midnight), so every task finished ON its due date scored late — **1,752 tasks affected all-time**. Mica read 11% (really 38%), Ericamae 4% (really 60%). Fixed to compare by day and return BLANK for incomplete tasks. New live invariant `on-time-counts-the-due-date-itself` in `scripts/check-data-invariants.py`, back-tested read-only against the broken expression (1,752 hits, so the check demonstrably fires) with a 1,752-record control; full suite green. **(3) §2a Risks register** created from §13. **(4) Agent trial pass mark set** in `docs/agent-runtime-spec.md`: 10 real items, all 10 correct, obstacle in at least one, fabrication an instant fail at every gear. |
 | 2026-08-01 | Kevin, in-session (approved) | **KPI Library admin page shipped; Plan Builder removed from the shell.** New `kpi-library` tab in the Leadership section (js/kpi-library.js) renders the seed library from `docs/kpi-library-spec.md` — the ten shapes, Tier 1/Tier 2 entries with status chips, the de-Kevining blocker list — and enriches it live with every open project KPI from Airtable. Marked `adminOnly: true` in PAGE_REGISTRY: the page must NEVER appear in a client tenant's shell; the flag is the contract the Supabase migration honours. Plan Builder removed from the live shell on Kevin's call (sidebar, tab panel, registry, sitemap, doc pages all cleaned; `os/business-plan-builder/` files kept — the client product's Plan Builder module toggle in the Supabase shell is untouched, since removing it from the PRODUCT would be a pricing decision not taken here). |
 | 2026-07-28 | Board Session 1 (AI org chart, Kevin-approved batches) | **Task-base cleanse executed.** Open tasks 499 → ~370: 90 nameless ghost rows closed (all created daily 06:00 UTC by the "SOP → Create Recurring Task (Initial)" automation firing with ZERO flagged SOPs since late Apr — verified empty, closed with audit comments; Kevin to toggle the automation off in the Airtable UI, wflSDq62dxfZFrlOq); 26 stale maintenance tickets → Mica (verify with contractor); 8 stale property/admin items → Mica; 5 content items → Ericamae; 7 founder decisions → Kevin (incl. Sefton licence £150 call); 13 debt tasks (~£13k owed to KB/SHG) consolidated → "Monies Owed ledger" decision-session task (reckPoVJf9ml8YdTw, due 31 Jul); 5 closed as fixed/stale/duplicate (2 pre-push-gate warnings verified green, 61/61 tests). FLAGGED TO KEVIN, untouched: 5-item HMRC cluster (corp tax Aug-25 post, SA restraint-order notice, BW Legal debt chase, café overdue, MHH confirmation statements Jun-25) — needs Kevin + accountant this week. REMAINING: 63 finance-in-task items (need bank reconciliation before closure, 22 of them Apr-dated nameless suspected same leak), ~9 unassigned leftovers, Keller 20% cut on Kevin's 147. |
