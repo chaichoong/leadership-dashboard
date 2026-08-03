@@ -65,6 +65,7 @@ BASE_ID = "appnqjDpqDniH3IRl"
 TX = "tbln0gzhCAorFc3zB"  # Transactions
 BRIEFS = "tblIxbzDSOCI5hqJn"  # CEO Briefs
 TASKS = "tblqB8b22hKBL4PF1"  # Tasks
+PROJECTS = "tblHrpTMd5LNYn8v1"  # Projects (quarterly projects from the Strategy push)
 
 INVARIANTS = [
     {
@@ -160,6 +161,38 @@ INVARIANTS = [
                         "LEN({Completion Date} & '') >= 0, LEN({Due Date} & '') >= 0)"),
         "fields": ["Task Name", "Due Date", "Completion Date", "Completed On Time"],
     },
+    {
+        # Airtable stamps "Not Started" on every project the Strategy push
+        # creates, and for a year nothing ever cleared it. Both display copies
+        # of the health rule then returned early on that value, so the quarter's
+        # real position was never calculated. It is invisible by construction:
+        # the dashboard looked calm, the projects looked new, and the only
+        # symptom was a number that never moved.
+        #
+        # scripts/sync-project-status.mjs writes the derived status daily. This
+        # is the control on that job — a job that stops running, or runs and
+        # writes nothing, is indistinguishable from a healthy one otherwise.
+        #
+        # 7 days, not 0: inside the first 5% of a quarter "Not Started" is the
+        # correct derived answer (see js/project-health.js), and 5% of a 91-day
+        # quarter is ~4.5 days.
+        "name": "started-projects-are-not-still-not-started",
+        "table": PROJECTS,
+        "incident": "Aug 2026 — 5 Q3 projects read 'Not Started' from 1 Jul to 3 Aug while sitting at 0 of 48 tasks and £0 of an £1,850 target",
+        "asserts": "started more than 7 days ago AND not closed => status is no longer 'Not Started'",
+        "violation": (
+            "AND({Project Status} = 'Not Started', "
+            "{Days from Start Date} > 7, "
+            "LEN({Closed On} & '') = 0)"
+        ),
+        "control": "AND({Days from Start Date} > 7, LEN({Closed On} & '') = 0)",
+        "control_means": "open projects whose start date has passed (the only population that can go stale)",
+        # TRUE for every record and touches all three fields, so a renamed field
+        # fails loudly instead of returning a quiet zero.
+        "field_probe": ("OR(LEN({Project Status} & '') >= 0, {Days from Start Date} >= 0, "
+                        "LEN({Closed On} & '') >= 0)"),
+        "fields": ["Project Name", "Project Status", "Days from Start Date"],
+    },
 ]
 
 
@@ -236,7 +269,6 @@ def check_reimport_duplicates(pat):
     return violations, control
 
 
-PROJECTS = "tblHrpTMd5LNYn8v1"  # Projects
 KPI_LIBRARY_JS = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "js", "kpi-library.js")
 
 

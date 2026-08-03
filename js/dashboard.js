@@ -162,25 +162,17 @@
 
     function _stratSelName(v){if(!v)return '';if(typeof v==='string')return v;if(typeof v==='object'&&v.name)return v.name;return ''}
     function _stratDaysAgo(iso){if(!iso)return null;const ms=Date.now()-new Date(iso).getTime();return Math.floor(ms/86400000)}
+    // Health is DERIVED (js/project-health.js), never read from the stored
+    // Project Status. That field is left at Airtable's "Not Started" default
+    // when the Strategy push creates a project, and this function used to
+    // return early on it — so five Q3 2026 projects showed "Not Started" for
+    // 33 days while sitting at 0 of 48 tasks. Deriving it cannot go stale.
     function _stratComputeHealth(p){
-        if(p.completed||p.status==='Completed')return'Completed';
-        if(p.status==='Not Started')return'Not Started';
-        if(!p.start||!p.end)return p.status||'Unknown';
-        const today=new Date();today.setHours(0,0,0,0);
-        const s=new Date(p.start+'T00:00:00'),e=new Date(p.end+'T00:00:00');
-        if(e<s)return p.status||'Unknown';
-        if(e<today)return'Off-Track';
-        const total=e-s,elapsed=Math.max(0,today-s);
-        const timePct=total>0?(elapsed/total)*100:0;
-        let progPct=null;
-        if(p.kpiTarget>0&&p.kpiCurrent>=0)progPct=(p.kpiCurrent/p.kpiTarget)*100;
-        else if(p.totalTasks>0)progPct=((p.completedTasks||0)/p.totalTasks)*100;
-        if(progPct===null)return p.status||'Unknown';
-        if(timePct<5)return'Not Started';
-        const ratio=timePct>0?(progPct/timePct)*100:100;
-        if(ratio>=100)return'On-Target';
-        if(ratio>=85)return'On-Track';
-        return'Off-Track';
+        if(typeof computeProjectHealth!=='function'){
+            console.error('[dashboard] js/project-health.js not loaded — cannot compute project health');
+            return 'Unknown';
+        }
+        return computeProjectHealth(p);
     }
     // Returns a CSS value — uses design tokens so the colour set always stays on-brand.
     function _stratHealthColour(h){

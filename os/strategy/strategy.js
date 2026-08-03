@@ -2042,6 +2042,24 @@ async function executePush(proposal, fields, opts) {
             if (p.kpiTarget != null) projBody.fields[PROJ_F.kpiTarget] = p.kpiTarget;
             if (p.tracking) projBody.fields[PROJ_F.kpiTracking] = p.tracking;
             if (p.ownerEmail) projBody.fields[PROJ_F.owner] = { email: p.ownerEmail };
+            // Stamp the status from the shared rule rather than letting
+            // Airtable's "Not Started" default stick. Pushing next quarter's
+            // plan early correctly yields "Not Started"; pushing mid-quarter
+            // yields the real health. Left unset, the default never cleared —
+            // five Q3 2026 projects read "Not Started" 33 days in.
+            if (typeof computeProjectHealth === 'function') {
+                const health = computeProjectHealth({
+                    start: proposal.qStartISO,
+                    end: proposal.qEndISO,
+                    kpiTarget: p.kpiTarget,
+                    kpiCurrent: 0,
+                    totalTasks: 0,
+                    completedTasks: 0,
+                });
+                if (typeof isWritableStatus === 'function' && isWritableStatus(health)) {
+                    projBody.fields[PROJ_F.status] = health;
+                }
+            }
             try {
                 const created = await airtableFetch(TABLES.projects, { method: 'POST', body: JSON.stringify(projBody) });
                 projectId = created.id;
