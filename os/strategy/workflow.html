@@ -246,6 +246,20 @@ body { line-height: 1.55; color: var(--text-primary); background: var(--bg-app);
         <div class="flowbox"><h5>Dashboard row</h5><p>Name · owner · current vs target · last updated</p></div>
       </div>
       <div class="callout warn">Closed quarters drop off the dashboard on their own — anything with a "Closed On" date is excluded and its frozen value is never recomputed. And a stale number shows as STALE rather than pretending to be current.</div>
+      <div class="card hilite">
+        <h4>Step 4a — On-track or off-track decides itself <span class="tag tag-auto">Auto</span></h4>
+        <p>Nobody sets a project's status by hand, and nothing sits still. It is worked out fresh every time from two things: <strong>how far through the quarter you are</strong>, and <strong>how far through the target you are</strong>. Being at 30% of the target 30% of the way through is on target. Being at 5% is not.</p>
+        <div class="tbl-wrap"><table class="tbl">
+          <tr><th>What the dashboard shows</th><th>What it means</th></tr>
+          <tr><td><strong>Not Started</strong></td><td>The quarter has not begun, or is in its first few days. Nothing is late yet.</td></tr>
+          <tr><td><strong>On-Target</strong></td><td>Keeping pace with the quarter, or ahead of it.</td></tr>
+          <tr><td><strong>On-Track</strong></td><td>Slightly behind pace, still recoverable.</td></tr>
+          <tr><td><strong>Off-Track</strong></td><td>Behind where the calendar says you should be.</td></tr>
+          <tr><td><strong>Completed</strong></td><td>Set by you, or frozen when the quarter closes.</td></tr>
+        </table></div>
+        <p>A project pushed for next quarter reads Not Started until that quarter actually starts, then moves on its own — no click, no reminder. A daily job writes the same answer into the database so the Airtable grid agrees with the screen.</p>
+      </div>
+      <div class="callout">Until August 2026 this did not happen. Projects were created saying "Not Started" and nothing ever changed it, so five Q3 projects read as though they had not begun for 33 days — while sitting at nothing done against a third of the quarter gone. The status is now derived rather than remembered, and a daily check fails loudly if any live project is more than a week past its start date and still says Not Started.</div>
       <div class="subsection">
         <h3>Step 4b — The sync check (run it whenever a KPI is added or changed)</h3>
         <p>A new KPI can quietly collide with a number already on the dashboard, and the collision stays invisible until someone acts on the wrong figure. Eight mechanical checks:</p>
