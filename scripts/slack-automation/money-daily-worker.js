@@ -634,16 +634,31 @@ async function alertFailure(env, err) {
     } catch (_) { /* nothing more we can do */ }
 }
 
-// True only at the 09:00 Europe/London firing, whichever UTC cron fired it.
-// Two UTC crons (08:00 + 09:00) cover BST and GMT; this gate lets exactly one
-// through per day.
+// True only at the 09:00 Europe/London firing on a WEEKDAY, whichever UTC cron
+// fired it. Two UTC crons (08:00 + 09:00) cover BST and GMT; this gate lets
+// exactly one through per weekday, and none at the weekend.
+//
+// The weekday half was missing until 3 Aug 2026. The header said Mon–Fri but the
+// code only checked the hour, so Sunday 2 Aug 2026 produced a brief.
+//
+// Both the day AND the hour must be read in Europe/London, never from the
+// runtime's own clock: at 09:00 London on a Monday in GMT it is still Sunday
+// 09:00 UTC nowhere, but a naive getDay() on a UTC Date is one timezone away
+// from being wrong on every boundary. Deriving the day from the en-CA date
+// string keeps it locale-independent too — no reliance on how a runtime spells
+// "Sat".
 function isLondonSendTime(now = new Date()) {
     const parts = new Intl.DateTimeFormat('en-GB', {
         timeZone: 'Europe/London', hour: 'numeric', minute: 'numeric', hour12: false,
     }).formatToParts(now);
     const hour = Number(parts.find(p => p.type === 'hour').value);
     const minute = Number(parts.find(p => p.type === 'minute').value);
-    return hour === 9 && minute <= 10;
+
+    const londonYMD = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/London' }).format(now);
+    const londonDay = new Date(`${londonYMD}T00:00:00Z`).getUTCDay(); // 0 = Sun … 6 = Sat
+    const isWeekday = londonDay >= 1 && londonDay <= 5;
+
+    return isWeekday && hour === 9 && minute <= 10;
 }
 
 export default {

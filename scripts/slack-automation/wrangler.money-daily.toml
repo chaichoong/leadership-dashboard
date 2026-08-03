@@ -3,12 +3,25 @@ main = "money-daily-worker.js"
 compatibility_date = "2024-12-01"
 
 # Two UTC crons cover 09:00 Europe/London year-round:
-#   "0 8 * * 1-5" hits 09:00 London during BST (summer)
-#   "0 9 * * 1-5" hits 09:00 London during GMT (winter)
-# The worker's isLondonSendTime() gate lets exactly one through per weekday.
+#   "0 8 * * *" hits 09:00 London during BST (summer)
+#   "0 9 * * *" hits 09:00 London during GMT (winter)
+# The worker's isLondonSendTime() gate picks the right one AND enforces Mon–Fri,
+# so exactly one brief goes out per weekday and none at the weekend.
 # (Was 09:30 money-only; promoted to the 09:00 AI CEO brief on 28 Jul 2026.)
+#
+# WHY THE DAY IS FILTERED IN CODE, NOT IN THE CRON (fixed 3 Aug 2026):
+# these were "0 8 * * 1-5" / "0 9 * * 1-5", read as Mon–Fri. Cloudflare ran them
+# Sun–Thu. Measured, not guessed — workersInvocationsAdaptive for 27 Jul–3 Aug
+# 2026 shows ZERO invocations on Sat 1 Aug, a full pair on Sun 2 Aug, and no
+# 08:00 firing on Fri 31 Jul. So this scheduler's day-of-week field starts the
+# week at Sunday=1, making 1-5 mean Sun–Thu. Kevin silently lost every Friday
+# brief and gained a Sunday one.
+# The day-of-week field is now unused. The day is decided by isLondonSendTime(),
+# in Europe/London, covered by tests/ceo-brief-schedule.test.js. Two throwaway
+# weekend invocations a day that return in microseconds is the price, and it is
+# worth paying to never re-litigate whose week starts where.
 [triggers]
-crons = ["0 8 * * 1-5", "0 9 * * 1-5"]
+crons = ["0 8 * * *", "0 9 * * *"]
 
 # Same-zone workers cannot call each other via public URLs (Cloudflare error
 # 1042) — AI calls go through a direct service binding to claude-proxy.
