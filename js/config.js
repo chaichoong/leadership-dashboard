@@ -104,7 +104,12 @@
         company:         'fldvP8ljYvuGI4Jif',  // Company (singleLineText)
         website:         'fldXVOVAZ4l32O2up',  // Company Website (url)
         email:           'fldAn2mzI9RoQCVSm',  // Contact Email (email)
-        emailSource:     'fldk9HsMY5pf9D0U8',  // Email Source (singleSelect)
+        emailSource:     'fldk9HsMY5pf9D0U8',  // Email Source (multilineText — was a singleSelect
+                                               // until 2026-08-04. The prospecting agent writes a
+                                               // sentence naming where the address was found, so
+                                               // every run minted a new single-use choice; it had
+                                               // reached 61. Free text, never a category: do not
+                                               // put this field in a filter or group-by.
         emailConfidence: 'fld9h6F4K4jo2cD5d',  // Email Confidence (singleSelect: High/Medium/Low)
         entityType:      'fld4eYVzxfQU74Mew',  // Entity Type (singleSelect: Limited Company / Sole Trader / Unknown)
         chNo:            'fldQAvkn0p8KDj70h',  // Companies House No (singleLineText)

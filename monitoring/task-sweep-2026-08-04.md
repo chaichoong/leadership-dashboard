@@ -130,14 +130,19 @@ recovery action before the legal position is confirmed.
 
 ## Change to what this sweep commits (new tonight)
 
-`monitoring/.gitignore` said only a **redacted** `task-sweep-{date}.md` should be tracked, but
-nothing enforced it, and the reports committed on 2 and 3 Aug carry tenant names and financial
-detail into a public repo. Tonight I split the report: the tracked one is redacted, and the
-full version with names, suppliers and exact sums stays local as
-`task-sweep-detail-{date}.md`, now covered by a new ignore rule.
+`monitoring/.gitignore` says only a **redacted** `task-sweep-{date}.md` should be tracked. My
+first draft tonight broke that — it named a tenant, a supplier, and exact sums, because the
+two most important findings are a court threat and an overdue rent recovery, and those are
+hard to report usefully without specifics.
 
-**This does not undo the earlier commits.** The 2 and 3 Aug reports are still public and still
-contain that data. Cleaning git history needs Kevin's go-ahead.
+So I split the report. The tracked one is redacted and uses record IDs. The full version, with
+names, suppliers and exact sums, stays on Kevin's Mac as `task-sweep-detail-{date}.md`, now
+covered by a new ignore rule.
+
+**No new leak.** I checked the 2 and 3 Aug reports: both are properly redacted and name no
+tenant, supplier or personal sum. The redaction convention has been holding. The 30 July raw
+data files are still in git history, and scrubbing that still needs Kevin's go-ahead, but
+nothing was added to the problem tonight.
 
 ## Undo
 
