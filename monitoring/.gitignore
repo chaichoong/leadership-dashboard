@@ -11,3 +11,6 @@ task-sweep-decisions-*.json
 task-sweep-applied-*.json
 task-sweep-pending.json
 task-sweep-pending-*.json
+# Unredacted companion to the nightly report: names people, suppliers and exact
+# sums so Kevin can act. Local only — the tracked .md report stays redacted.
+task-sweep-detail-*.md
