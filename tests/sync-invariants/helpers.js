@@ -252,6 +252,14 @@ const TABLE_MAP = {
 // random when they were not — proven 2026-07-17 by delaying fonts past the 20s wait
 // below, which reproduced the exact "row should render" null failure. Stub them so the
 // suite is hermetic. hermetic-no-external-requests.spec.js fails if a new one appears.
+//
+// THIS IS THE ONE PLACE THAT STUBS THIRD-PARTY HOSTS. Call it from every spec, including
+// specs that roll their own Airtable mock instead of using setupMockAirtable() — that gap
+// is what let the same 17 Jul flake come back on 2026-08-04 in
+// task-drawer-comments.spec.js, which stubbed only api.airtable.com and so let Google
+// Fonts and the Apps Script endpoint out to the real internet on every run. Reproduced on
+// demand by delaying those two hosts to 25s: waitForTask timed out at 20,011ms, matching
+// the 20.4s failure seen in the gate.
 async function stubExternalHosts(page) {
   // Chart.js: the app only ever does `new Chart(ctx, cfg)` and `.destroy()`, and pnl.js
   // guards on `typeof Chart === 'undefined'` — so a no-op class keeps every caller happy.
@@ -267,6 +275,15 @@ async function stubExternalHosts(page) {
     await route.fulfill({ status: 200, contentType: 'text/css', body: '' });
   });
   await page.route('**fonts.gstatic.com/**', async (route) => route.abort());
+  // Apps Script (Gmail invoice count, GCal and Meetings sync in os/tasks/index.html) and
+  // the Cloudflare workers (slack-notify, claude-proxy). Both are fire-and-forget on load,
+  // so a slow response delays page init without ever failing loudly.
+  await page.route('**/script.google.com/**', async (route) => {
+    await route.fulfill({ status: 200, contentType: 'application/json', body: '{"status":"ok","count":0}' });
+  });
+  await page.route('**/*.workers.dev/**', async (route) => {
+    await route.fulfill({ status: 200, contentType: 'application/json', body: '{}' });
+  });
 }
 
 /**
@@ -276,12 +293,8 @@ async function stubExternalHosts(page) {
 async function setupMockAirtable(page, customFixtures = null) {
   const fixtures = customFixtures || makeFixtures();
 
+  // Covers cdnjs, fonts, Apps Script and the workers — see stubExternalHosts().
   await stubExternalHosts(page);
-
-  // Block Gmail script calls
-  await page.route('**/script.google.com/**', async (route) => {
-    await route.fulfill({ status: 200, contentType: 'application/json', body: '{"status":"ok","count":0}' });
-  });
 
   await page.route('**/api.airtable.com/v0/**', async (route) => {
     const url = route.request().url();

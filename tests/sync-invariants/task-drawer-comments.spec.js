@@ -9,9 +9,14 @@
 // have stayed blank forever. The gate is now the wrap element plus its
 // data-task-id. If someone reintroduces a drawerTaskId gate, these fail.
 //
-// Airtable is mocked (page.route on api.airtable.com) so this runs without a PAT.
+// Airtable is mocked (page.route on api.airtable.com) so this runs without a PAT, and
+// stubExternalHosts() blocks the public internet. Both matter: until 2026-08-04 this spec
+// stubbed Airtable alone, so every run really fetched Google Fonts and the Apps Script
+// endpoint, and under parallel load that pushed page init past waitForTask's 20s budget.
+// The gate went red with a DIFFERENT test failing each run while all 5 passed in isolation.
 
 const { test, expect } = require('@playwright/test');
+const { stubExternalHosts } = require('./helpers');
 
 const PAGE = '/os/tasks/index.html';
 const TASKS_TABLE = 'tblqB8b22hKBL4PF1';
@@ -48,8 +53,14 @@ const SEEDED_COMMENT = {
   author: { name: 'Mica', email: 'mica@example.com' },
 };
 
-async function mockAirtable(page) {
+// opts.commentsGetFails — a predicate read on every comments GET, so a test can flip the
+// endpoint from failing to healthy mid-run (the retry case) without registering a second,
+// competing route for the same URL.
+async function mockAirtable(page, opts = {}) {
   const posted = [];
+  // Without this the page fetches Google Fonts and the Apps Script endpoint for real on
+  // every run. See stubExternalHosts() in helpers.js for why that made this spec flaky.
+  await stubExternalHosts(page);
   await page.route('**/api.airtable.com/**', async (route) => {
     const url = route.request().url();
     const method = route.request().method();
@@ -62,13 +73,13 @@ async function mockAirtable(page) {
         posted.push(c);
         return json(c);
       }
+      if (opts.commentsGetFails && opts.commentsGetFails()) return json({ error: 'forbidden' }, 403);
       return json({ comments: [...posted].reverse().concat([SEEDED_COMMENT]) });
     }
     if (url.includes(ACTIVITY_TABLE)) return json(activityRecords());
     if (url.includes(TASKS_TABLE)) return method === 'GET' ? json(taskRecords()) : json({ id: TASK_ID, fields: {} });
     return json({ records: [] });
   });
-  await page.route('**/*.workers.dev/**', r => r.fulfill({ status: 200, contentType: 'application/json', body: '{}' }));
   await page.addInitScript(() => {
     localStorage.setItem('_dlr_pat', 'pat_test_mock_token_for_playwright');
     localStorage.setItem('_task_user', JSON.stringify({ key: 'kevin', name: 'Kevin Brittain', email: 'kevinbrittain@gmail.com' }));
@@ -155,21 +166,7 @@ test.describe('Task drawer comments', () => {
 
   test('a failed comments fetch explains why and offers a retry', async ({ page }) => {
     let blocked = true;
-    await page.route('**/api.airtable.com/**', async (route) => {
-      const url = route.request().url();
-      const method = route.request().method();
-      const json = (body, status = 200) => route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
-      if (url.includes('/comments') && method === 'GET') {
-        return blocked ? json({ error: 'forbidden' }, 403) : json({ comments: [SEEDED_COMMENT] });
-      }
-      if (url.includes(ACTIVITY_TABLE)) return json({ records: [] });
-      if (url.includes(TASKS_TABLE) && method === 'GET') return json(taskRecords());
-      return json({ records: [] });
-    });
-    await page.addInitScript(() => {
-      localStorage.setItem('_dlr_pat', 'pat_test_mock_token_for_playwright');
-      localStorage.setItem('_task_user', JSON.stringify({ key: 'kevin', name: 'Kevin Brittain', email: 'kevinbrittain@gmail.com' }));
-    });
+    await mockAirtable(page, { commentsGetFails: () => blocked });
     await page.goto(PAGE);
     await waitForTask(page);
     await page.evaluate((id) => openTaskDrawer(id), TASK_ID);
