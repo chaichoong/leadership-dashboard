@@ -15,8 +15,19 @@
 //   - Everything else: 403.
 //
 // Secrets: GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_REFRESH_TOKEN,
-//          DRIVE_PARENT_FOLDER_ID, DRIVE_UPLOAD_TOKEN
+//          DRIVE_PARENT_FOLDER_ID, DRIVE_UPLOAD_TOKEN, GMAIL_SEND_KEY
 // Optional vars: ALLOWED_ORIGINS_EXTRA (comma-separated extra origins)
+// KV: GMAIL_AUTH — holds the gmail.send refresh token, written by /auth/callback
+//     (state=gmail) so granting consent needs no terminal step.
+//
+// GMAIL SEND (added 6 Aug 2026, Kevin's ruling: approved agent work sends
+// email itself rather than handing Kevin a draft):
+//   GET  /auth/gmail  — one-time consent for the gmail.send scope (reuses this
+//                       worker's registered /auth/callback redirect URI)
+//   POST /send-email  — { to, subject, text, cc? }; script-only, gated by
+//                       Authorization: Bearer <GMAIL_SEND_KEY>. Sends as the
+//                       granting Google account via the Gmail API.
+//   GET  /send-email/test — token health without sending anything.
 
 const ALLOWED_ORIGINS = [
     'https://chaichoong.github.io',
@@ -64,6 +75,11 @@ export default {
             return Response.redirect(authUrl, 302);
         }
 
+        if (url.pathname === '/auth/gmail') {
+            const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${env.GOOGLE_CLIENT_ID}&redirect_uri=${encodeURIComponent(url.origin + '/auth/callback')}&response_type=code&scope=${encodeURIComponent('https://www.googleapis.com/auth/gmail.send')}&access_type=offline&prompt=consent&state=gmail`;
+            return Response.redirect(authUrl, 302);
+        }
+
         if (url.pathname === '/auth/callback') {
             const code = url.searchParams.get('code');
             if (!code) return new Response('No code provided', { status: 400 });
@@ -74,6 +90,22 @@ export default {
                 body: `code=${code}&client_id=${env.GOOGLE_CLIENT_ID}&client_secret=${env.GOOGLE_CLIENT_SECRET}&redirect_uri=${encodeURIComponent(url.origin + '/auth/callback')}&grant_type=authorization_code`,
             });
             const tokenData = await tokenRes.json();
+
+            // Gmail consent: store the token ourselves so the human step is
+            // one click, not a terminal command.
+            if (url.searchParams.get('state') === 'gmail') {
+                if (!tokenData.refresh_token) {
+                    return new Response('Error: no refresh token returned. ' + JSON.stringify(tokenData), { status: 400 });
+                }
+                await env.GMAIL_AUTH.put('gmail_refresh_token', tokenData.refresh_token);
+                return new Response(
+                    `<html><body style="font-family:sans-serif;max-width:600px;margin:40px auto;padding:20px">
+                    <h2>Email sending is connected</h2>
+                    <p>The agents can now send email from this Google account once work is approved. Nothing else to do — you can close this tab.</p>
+                    </body></html>`,
+                    { status: 200, headers: { 'Content-Type': 'text/html' } }
+                );
+            }
 
             if (tokenData.refresh_token) {
                 return new Response(
@@ -89,6 +121,49 @@ export default {
                 );
             }
             return new Response('Error: ' + JSON.stringify(tokenData), { status: 400 });
+        }
+
+        // ------------------------------------------------------------------
+        // Gmail send — script-only, never browser-origin. High consequence:
+        // this sends real email as Kevin, so the bearer key is REQUIRED and
+        // there is no origin-based path.
+        // ------------------------------------------------------------------
+        if (url.pathname === '/send-email' || url.pathname === '/send-email/test') {
+            const auth = request.headers.get('Authorization') || '';
+            if (!env.GMAIL_SEND_KEY || auth !== `Bearer ${env.GMAIL_SEND_KEY}`) {
+                return jsonResponse({ error: 'Forbidden' }, 403);
+            }
+            try {
+                const refreshToken = await env.GMAIL_AUTH.get('gmail_refresh_token');
+                if (!refreshToken) {
+                    return jsonResponse({ error: 'Gmail not connected: visit /auth/gmail once to grant the gmail.send scope' }, 409);
+                }
+                const accessToken = await getGmailAccessToken(env, refreshToken);
+
+                if (url.pathname === '/send-email/test') {
+                    const info = await fetch(`https://oauth2.googleapis.com/tokeninfo?access_token=${encodeURIComponent(accessToken)}`);
+                    const data = await info.json();
+                    return jsonResponse({ status: 'ok', scope: data.scope || null, expires_in: data.expires_in || null });
+                }
+
+                if (request.method !== 'POST') return jsonResponse({ error: 'POST required' }, 405);
+                const { to, subject, text, cc } = await request.json();
+                if (!to || !subject || !text) {
+                    return jsonResponse({ error: 'to, subject and text are required' }, 400);
+                }
+
+                const raw = buildRawEmail({ to, subject, text, cc });
+                const sendRes = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', {
+                    method: 'POST',
+                    headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ raw }),
+                });
+                if (!sendRes.ok) throw new Error('Gmail send failed: ' + await sendRes.text());
+                const sent = await sendRes.json();
+                return jsonResponse({ status: 'sent', id: sent.id, threadId: sent.threadId });
+            } catch (e) {
+                return jsonResponse({ error: e.message }, 500);
+            }
         }
 
         const allowOrigin = matchBrowserOrigin(request, env);
@@ -170,6 +245,41 @@ function jsonResponse(data, status = 200, allowOrigin = null) {
         status,
         headers: { 'Content-Type': 'application/json', ...corsHeaders(allowOrigin) },
     });
+}
+
+async function getGmailAccessToken(env, refreshToken) {
+    const res = await fetch('https://oauth2.googleapis.com/token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: `client_id=${env.GOOGLE_CLIENT_ID}&client_secret=${env.GOOGLE_CLIENT_SECRET}&refresh_token=${encodeURIComponent(refreshToken)}&grant_type=refresh_token`,
+    });
+    if (!res.ok) throw new Error('Gmail auth failed: ' + await res.text());
+    const data = await res.json();
+    return data.access_token;
+}
+
+// Base64url for the Gmail API, unicode-safe (subjects and bodies carry £).
+function b64url(bytes) {
+    let bin = '';
+    for (const b of bytes) bin += String.fromCharCode(b);
+    return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+function buildRawEmail({ to, subject, text, cc }) {
+    const enc = new TextEncoder();
+    const encodedSubject = `=?UTF-8?B?${btoa(String.fromCharCode(...enc.encode(subject)))}?=`;
+    const bodyB64 = btoa(String.fromCharCode(...enc.encode(text)));
+    const lines = [
+        `To: ${to}`,
+        ...(cc ? [`Cc: ${cc}`] : []),
+        `Subject: ${encodedSubject}`,
+        'MIME-Version: 1.0',
+        'Content-Type: text/plain; charset=UTF-8',
+        'Content-Transfer-Encoding: base64',
+        '',
+        bodyB64,
+    ];
+    return b64url(enc.encode(lines.join('\r\n')));
 }
 
 async function getAccessToken(env) {

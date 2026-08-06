@@ -129,3 +129,91 @@ No future-dated row exists now — the newest is 31 Jul. Deliberately did NOT ad
 for future-dated rows: seeding one is a legitimate thing Kevin can ask for, so the check
 would be a red light on a correct action, and the staleness risk it points at is a judgement
 call the SKILL.md guard already covers.
+
+---
+
+# 4 Aug 2026 — check passed, and why the watchdog STAYS ON
+
+Checked by `ceo-brief-morning-check` at 09:27 London.
+
+## Result: the brief fired correctly
+
+- CEO Briefs record `rec1YY1ws8s5n7IeC`, Date 2026-08-04, `Full Brief` populated (2,047 chars).
+- Cloudflare `workersInvocationsAdaptive`: one invocation at `2026-08-04T08:00:00Z`
+  (= 09:00 London, BST), `requests=1 errors=0`. So the cron path did the work, not a
+  manual send. No message sent to Kevin — no news is good news.
+- The record was CREATED at 04:15Z by the huddle stub, then PATCHed by the worker at
+  08:00Z. Creation time is not evidence either way; the invocation record is.
+
+## Do NOT disable this task yet — the 5-weekday rule is NOT met
+
+The rule reads "unbroken run of weekday records". Taken literally the table passes
+(28–31 Jul, 3–4 Aug). Taken as intended — *the cron ran correctly* for 5 weekdays — it
+fails, and the literal reading is the exact trap this task was rewritten to avoid on
+30 Jul. A record proves nothing about who wrote it.
+
+Counting only runs the fixed config actually produced:
+
+| Weekday | Record | Who really produced it |
+|---|---|---|
+| Fri 31 Jul | yes | **manual send by this watchdog at 10:55** — cron never fired |
+| Mon 3 Aug | yes | cron, but on the OLD `1-5` config (Cloudflare Sun–Thu still covers Monday) |
+| Tue 4 Aug | yes | **cron, fixed config** — first genuine one |
+
+Worker version 23 (the weekday-gate fix) deployed `2026-08-03T09:28:49Z`, i.e. 10:28
+London — an hour AFTER Monday's 08:00Z brief had already gone. So the corrected
+configuration has exactly **one** verified weekday run: today.
+
+**The decisive day is Friday 7 Aug.** Friday is the day the old `1-5` cron silently
+dropped, and no Friday has yet run under the fix. Disabling now would switch the
+watchdog off immediately before the only test that matters.
+
+Earliest safe disable: after **Mon 10 Aug 2026**, giving 4/5/6/7/10 Aug — five
+consecutive weekdays including a Friday, each confirmed by a Cloudflare invocation
+rather than by a record existing.
+
+## Sunday 2 Aug record — explained, not a live bug
+
+`recNKx0obyNFTdiCl` was created 2026-08-02T08:00:26Z, a Sunday. That is the old
+`1-5`-means-Sun–Thu bug, one day before the fix deployed. `isLondonSendTime()` now
+blocks weekends in code. Expect no Saturday or Sunday records from 8 Aug onwards; if
+one appears, the gate has regressed and `tests/ceo-brief-schedule.test.js` should have
+caught it.
+
+---
+
+# 6 Aug 2026 — check passed (and 5 Aug backfilled)
+
+Checked by `ceo-brief-morning-check` at 09:25 London. No message sent to Kevin.
+
+## Result: the cron fired, both days
+
+| Weekday | Record | `Full Brief` | Cloudflare invocation | Verdict |
+|---|---|---|---|---|
+| Wed 5 Aug | `reckSSGmUCcPM8MNU` | 1,955 chars | `2026-08-05T08:00:00Z` success, errors=0 | cron did the work |
+| Thu 6 Aug | `recBWBf5afFNWexnV` | 2,117 chars | `2026-08-06T08:01:00Z` success, errors=0 | cron did the work |
+
+Both are 09:00 London (BST = UTC+1). One row per date, no duplicates. The 5 Aug run left
+no entry in this file, so it is recorded here from the invocation data rather than being
+assumed.
+
+The second daily invocation (`09:00:00Z` = 10:00 London) also shows on 4 and 5 Aug with
+errors=0. That is the two-cron design working: the second one runs and
+`isLondonSendTime()` declines to send. Today's has not fired yet at time of check.
+
+## Still do NOT disable — Friday is tomorrow
+
+Verified weekday runs under the fixed config (worker v23, deployed 2026-08-03T09:28:49Z):
+**4, 5, 6 Aug — three.** The 30 Jul rule needs five, and the one that matters,
+**Friday 7 Aug**, has not happened. Friday is the exact day the old `1-5` cron silently
+dropped. Earliest safe disable is unchanged: after **Mon 10 Aug 2026** (4/5/6/7/10 Aug),
+each confirmed by an invocation, not by a record existing.
+
+## Query that produced the evidence
+
+`workersInvocationsAdaptive` rejects a bare `datetime` field. The working shape:
+
+```
+dimensions { datetimeMinute scriptName status } sum { requests errors }
+orderBy: [datetimeMinute_ASC]
+```
