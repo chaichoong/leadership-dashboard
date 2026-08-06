@@ -51,26 +51,51 @@ The reason Airtable allowed it: when a job writes a value that is not on the lis
 can quietly add it as a brand new option rather than refusing. So a typo becomes permanent
 schema.
 
-## What I need from you
+## Fixed since this report was first written (Kevin approved, 6 Aug)
 
-Three things, in this order. I have not done any of them, because the sweep's rules say to
-stop and report when the table has changed shape, and because deleting options from a live
-table is your call, not mine.
+**1. The Drift Monitor can no longer invent options.** DONE. Its instructions at
+`~/.claude/scheduled-tasks/drift-monitor/SKILL.md` said to set status to `"To Do" or
+similar` and said nothing at all about Time Estimate. "Or similar" was the licence to guess.
+Replaced with a character-exact table of the only permitted values for Status, Time
+Estimate, Priority and Recurring, read from the live schema, plus the reason it matters. It
+also now says never to set Recurring, including the literal "None".
 
-**1. Fix the Drift Monitor so it stops inventing options.** This is the real fix. Its
-instructions at `~/.claude/scheduled-tasks/drift-monitor/SKILL.md` (around line 147) tell it
-to look up field IDs but never tell it that Time Estimate has a fixed list. Say the word and
-I will add that list to its instructions.
+Worth noting: the real Status option is `To do` with a lower-case d. The job had been
+getting that right by luck.
 
-**2. Point the two tasks at the right option.** Change `recdQvsB0WXEUgIIi` from "15 mins" to
-"15 min", and `recQgPMVY9e6bRP1z` from "30 mins" to "30 min".
+**2. The two tasks are repointed.** DONE.
 
-**3. Delete the two empty options.** Once step 2 is done, "15 mins" and "30 mins" have no
-records left. Delete them in the Airtable field editor. Airtable does not allow deleting
-options through the API, so this one is a click job in the browser.
+| Record | Was | Now |
+|---|---|---|
+| `recdQvsB0WXEUgIIi` | 15 mins | 15 min |
+| `recQgPMVY9e6bRP1z` | 30 mins | 30 min |
 
-Once those are done the sweep runs normally again with no code change. The list it checks
-against is correct; the table drifted away from it, not the other way round.
+Counted again afterwards to prove it: "15 min" went 5,639 to 5,640, "30 min" went 313 to
+314, and both typo options are now on **0 records**.
+
+The sweep's own `apply` could not do this. It is a gap-filler: it deliberately skips any
+field that already holds a value, so it will fill a blank but never correct a wrong one. I
+used a targeted one-off with the same safeguards — checked the target against the live
+option list, wrote with `typecast:false` so Airtable would reject an unknown option instead
+of creating one, and logged the previous values to
+`monitoring/task-sweep-applied-2026-08-06.json` in the sweep's own format.
+
+Undo: `python3 scripts/task-hygiene-sweep.py undo --applied monitoring/task-sweep-applied-2026-08-06.json`
+
+## Still needs you: one click
+
+**3. Delete the two empty options.** "15 mins" and "30 mins" now have no records behind
+them, but they are still in the field. **The sweep stays blocked until they are gone** — I
+re-ran the audit after the repoint and it still stops on the same drift. Airtable does not
+allow deleting select options through the API, so this one is a browser job:
+
+Tasks table, open the "Time Estimate" field editor, delete "15 mins" and "30 mins".
+
+Once those two are gone the sweep runs normally again with no code change. The list it
+checks against is correct; the table drifted away from it, not the other way round.
+
+I did not do this one because deleting from a live table's schema is your call, and you
+asked for the drift monitor and the repoint.
 
 ## Second thing I noticed
 
@@ -92,7 +117,8 @@ situation that breaks an automatic pull. I left those files alone.
 
 ## Fixed tonight
 
-Nothing. No Airtable writes were made.
+The sweep itself made no writes. Two corrective writes were made afterwards on Kevin's
+instruction, both listed above and both reversible with the undo command.
 
 ## Waiting on you
 
@@ -106,4 +132,4 @@ Skipped. There were no decisions to review.
 
 ## Undo
 
-Nothing to undo. No writes were made.
+python3 scripts/task-hygiene-sweep.py undo --applied monitoring/task-sweep-applied-2026-08-06.json
