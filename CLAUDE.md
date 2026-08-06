@@ -425,6 +425,16 @@ PAGE_REGISTRY in `js/config.js` tracks page and SOP versions.
 - **New features, multi-file changes, anything touching shared files (config.js, shared.js, index.html, styles.css):** work on a branch, push, create a PR. This protects against concurrent session conflicts
 - Branch naming: `feature/short-description` or `fix/short-description`
 
+**Decide branch-or-main BEFORE you commit, never after.** Committing to local `main` and
+*then* branching off it to open a PR leaves a stale twin of every commit on local `main`
+forever: `gh pr merge --squash` creates a NEW commit on origin, so the original never
+becomes an ancestor of `origin/main` and nothing ever cleans it up. If you are going to
+open a PR, create the branch first — `./scripts/worktree.sh new <topic>` — so nothing
+lands on `main` at all.
+
+**Never do both for one piece of work.** One change = one route. A commit on `main` AND a
+PR for the same change is always a bug, not belt-and-braces.
+
 ### Creating the PR
 
 **`gh` IS installed and authenticated** (3 Aug 2026). Binary at `~/tools/bin/gh`, v2.97.0, on PATH via `~/.zshrc`. Logged in as `chaichoong` with scopes `repo`, `workflow`, `read:org`, `gist`. There is no Homebrew on this Mac; it was installed as the official release binary into a user directory, so no admin password is involved. Claude creates and merges PRs itself — do not send Kevin a compare URL to click any more.
@@ -444,3 +454,30 @@ Kevin cannot click a terminal link: always `open` the deployed page and any deli
 Do NOT quietly merge to main locally as a fallback when a branch was created for review — that discards the review step the branch existed for.
 
 **If the pre-push gate blocks a push to main on a test that is unrelated to your change:** do not reach for `SKIP_SYNC_TESTS=1`. Only `main` is gated (see `scripts/pre-push`), so push a branch and merge it with `gh` instead. Verify the failure really is unrelated first — run the failing test in isolation, and re-run the suite to see whether a *different* test fails, which indicates flakiness rather than a regression.
+
+⚠️ **This fallback is the one that has actually caused duplicates.** You have already
+committed to `main`, the gate blocks the push, so you branch off that commit and PR it.
+The squash merge then puts a different SHA on origin and your original commit is stranded
+on local `main`. On 6 Aug 2026 this happened three times in twenty minutes (PRs #36, #37,
+#38), leaving local `main` seven commits ahead of origin while being 379 lines *behind* it.
+
+So when the gate sends you down the branch route, finish the job:
+
+```bash
+gh pr merge --squash --delete-branch
+git reset --keep origin/main   # MANDATORY — drops the stranded local commit
+```
+
+`--keep` is the safe variant: it refuses rather than destroying uncommitted work, which
+matters because another session's edits are usually sitting in this checkout. If it
+refuses, that other session has unsaved work — leave it and say so, do not use
+`--hard`.
+
+**Before any push to `main`, check you are not about to ship a twin:**
+
+```bash
+git diff origin/main HEAD --stat   # net deletions = local main is BEHIND; do not push
+```
+
+An empty diff means local `main` adds nothing. Net deletions mean your local commits are
+stale copies of work already merged, and pushing them would revert origin.
