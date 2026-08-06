@@ -1558,6 +1558,20 @@
         const totalRaw = Math.abs(Number(getField(tx, F.txAmount)) || 0);
         if (totalRaw <= 0) { alert('Cannot split a £0 transaction.'); return; }
 
+        // DISPLAY ONLY — read this before touching anything below.
+        //
+        // Every amount in this modal (totalRaw, the portions, the validation,
+        // the writes) stays a POSITIVE MAGNITUDE on purpose. performReconSplit
+        // applies the sign itself at write time via `amountSign`, because
+        // Airtable's Report Amount returns a Split Override verbatim: a
+        // positive override on an expense flips an outflow into revenue across
+        // every report. That is the documented split sign-flip incident.
+        //
+        // `isOutflow` is a LABEL. It decides what the user reads, nothing else.
+        // Never feed it, or any string built from it, back into a calculation
+        // or an Airtable payload.
+        const isOutflow = (Number(getField(tx, F.txAmount)) || 0) < 0;
+
         const existing = document.getElementById('reconSplitModal');
         if (existing) existing.remove();
 
@@ -1575,7 +1589,8 @@
                             <strong>${escHtml(r.txDate)}</strong> &middot;
                             <strong>${escHtml(r.txVendor || '—')}</strong> &middot;
                             <strong>${escHtml(r.txAccount || '—')}</strong> &middot;
-                            Original: <strong style="color:var(--text-primary)">${fmt(totalRaw)}</strong>
+                            Original: <strong style="color:${isOutflow ? 'var(--danger)' : 'var(--success)'};white-space:nowrap">${isOutflow ? '-' : '+'}${fmt(totalRaw)}</strong>
+                            <span style="color:var(--text-muted)">(${isOutflow ? 'money out' : 'money in'})</span>
                         </div>
                     </div>
                     <button onclick="document.getElementById('reconSplitModal').remove()" style="background:none;border:none;font-size:22px;line-height:1;color:var(--text-muted);cursor:pointer;padding:0 4px">&times;</button>
@@ -1597,6 +1612,7 @@
             txIdx: idx,
             txId: r.txId,
             totalRaw,
+            isOutflow, // label only — see the note where it is derived
             mode: 'equal',
             equalCount: 2,
             customRows: [
@@ -1624,6 +1640,17 @@
     }
     window.setSplitMode = setSplitMode;
 
+    // ── Split modal display helpers ──
+    // These render a positive magnitude as the user should READ it, carrying
+    // the source transaction's direction. Output is for the screen only: it
+    // must never be parsed back into a number or sent to Airtable. The stored
+    // magnitudes stay unsigned so performReconSplit can apply the sign itself.
+    function splitSign() { const st = window._splitState; return (st && st.isOutflow) ? '-' : '+'; }
+    function splitColour() { const st = window._splitState; return (st && st.isOutflow) ? 'var(--danger)' : 'var(--success)'; }
+    // Zero carries no direction, so it takes no sign — an empty Custom tab
+    // showing "Total: -£0.00" reads as a debt that is not there.
+    function splitFmt(n) { return (Math.abs(Number(n) || 0) < 0.005 ? '' : splitSign()) + fmt(n); }
+
     function renderSplitModalBody() {
         const st = window._splitState; if (!st) return;
         const body = document.getElementById('splitModalBody'); if (!body) return;
@@ -1633,7 +1660,7 @@
                 <p style="margin:0 0 14px 0;font-size:12px;color:var(--text-secondary);line-height:1.5">
                     Sets <code>Split Count = N</code> on this transaction. The Airtable
                     <strong>"Split Transactions"</strong> automation creates <code>N − 1</code> child records
-                    each with <code>Report Amount = ${fmt(each)}</code>.
+                    each with <code>Report Amount = ${splitFmt(each)}</code>.
                     <br><br>
                     <strong style="color:var(--accent-gold)">⚠ Tenancy, Unit and Tenant are cleared on every portion.</strong>
                     You must assign a tenancy to each row before approving — silent inheritance was causing every
@@ -1644,7 +1671,7 @@
                         <input id="splitEqualCount" type="number" min="2" max="50" value="${st.equalCount}" oninput="splitOnEqualCountChange(this.value)"
                             style="margin-left:8px;width:70px;padding:6px 8px;font-size:13px;border:1px solid var(--border-default);border-radius:4px">
                     </label>
-                    <span style="font-size:12px;color:var(--text-secondary)">Each portion: <strong style="color:var(--text-primary)" id="splitEachLabel">${fmt(each)}</strong></span>
+                    <span style="font-size:12px;color:var(--text-secondary)">Each portion: <strong style="color:${splitColour()};white-space:nowrap" id="splitEachLabel">${splitFmt(each)}</strong></span>
                 </div>
                 <p style="margin:14px 0 0 0;font-size:11px;color:var(--text-muted);line-height:1.4">
                     <strong>JS does not duplicate records</strong> — only the Airtable automation does. This prevents the double-creation issue from the previous version.
@@ -1655,7 +1682,12 @@
             const rowsHtml = st.customRows.map((row, i) => `
                 <tr id="splitCustomRow-${i}">
                     <td style="padding:4px 6px;font-size:11px;color:var(--text-muted);width:24px">${i + 1}</td>
-                    <td style="padding:4px 6px"><input type="number" step="0.01" value="${row.amount === '' ? '' : row.amount}" oninput="splitOnCustomAmountChange(${i}, this.value)" placeholder="0.00" class="od-inline-input" style="text-align:right"></td>
+                    <td style="padding:4px 6px">
+                        <div style="display:flex;align-items:center;gap:4px">
+                            <span title="${st.isOutflow ? 'Money out' : 'Money in'}" style="color:${splitColour()};font-weight:600;flex:0 0 auto">${splitSign()}£</span>
+                            <input type="number" step="0.01" value="${row.amount === '' ? '' : row.amount}" oninput="splitOnCustomAmountChange(${i}, this.value)" placeholder="0.00" class="od-inline-input" style="text-align:right;min-width:0">
+                        </div>
+                    </td>
                     <td style="padding:4px 6px">${buildSubCatDropdown('split-subcat-' + i, row.subCatId)}</td>
                     <td style="padding:4px 6px">${buildBusinessDropdown('split-business-' + i, row.businessId)}</td>
                     <td style="padding:4px 6px">${buildTenancyDropdown('split-tenancy-' + i, row.tenancyId)}</td>
@@ -1666,17 +1698,31 @@
             `).join('');
             const total = st.customRows.reduce((s, r) => s + (Number(r.amount) || 0), 0);
             const remaining = st.totalRaw - total;
-            const remColor = Math.abs(remaining) < 0.005 ? 'var(--success)' : (remaining < 0 ? 'var(--danger)' : 'var(--text-secondary)');
+            // `remaining` is an allocation GAP, not a direction of money, so it
+            // deliberately does NOT take the transaction's sign — "-£100
+            // remaining" on an expense that is £100 UNDER-allocated reads as
+            // the opposite of what it means. The word carries the direction and
+            // fmt() supplies the magnitude. It also fixes a quieter fault: over-
+            // allocating used to read "Remaining: £100.00", identical to being
+            // £100 short, with only the colour to tell them apart.
+            const balanced = Math.abs(remaining) < 0.005;
+            const overAllocated = remaining < -0.005;
+            const remLabel = balanced ? 'Balanced' : overAllocated ? 'Over by' : 'Left to allocate';
+            const remColor = balanced ? 'var(--success)' : overAllocated ? 'var(--danger)' : 'var(--text-secondary)';
             body.innerHTML = `
                 <p style="margin:0 0 14px 0;font-size:12px;color:var(--text-secondary);line-height:1.5">
                     Enter each portion's amount and pre-categorise. The original record gets the first portion's amount + categories;
-                    each remaining portion becomes a new record. Sum of all portions must equal <strong>${fmt(st.totalRaw)}</strong>.
+                    each remaining portion becomes a new record. Sum of all portions must equal
+                    <strong style="color:${splitColour()};white-space:nowrap">${splitFmt(st.totalRaw)}</strong>.
+                    <br>
+                    Type each portion as a plain positive number. Every portion is
+                    <strong style="color:${splitColour()}">${st.isOutflow ? 'money out' : 'money in'}</strong>, the same direction as the original.
                 </p>
                 <table class="od-table">
                     <thead>
                         <tr>
                             <th>#</th>
-                            <th style="text-align:right;min-width:90px">Amount (£)</th>
+                            <th style="min-width:110px">Amount</th>
                             <th>Sub-Category</th>
                             <th>Business</th>
                             <th>Tenancy</th>
@@ -1688,9 +1734,9 @@
                 <div style="margin-top:12px;display:flex;justify-content:space-between;align-items:center;gap:8px">
                     <button onclick="splitAddCustomRow()" class="od-btn od-btn-outline">+ Add Portion</button>
                     <div style="font-size:12px">
-                        <span style="color:var(--text-muted)">Total: <strong style="color:var(--text-primary)">${fmt(total)}</strong></span>
+                        <span style="color:var(--text-muted)">Total: <strong style="color:${splitColour()};white-space:nowrap">${splitFmt(total)}</strong></span>
                         &nbsp;·&nbsp;
-                        <span style="color:${remColor}">Remaining: <strong>${fmt(remaining)}</strong></span>
+                        <span style="color:${remColor};white-space:nowrap">${remLabel}${balanced ? '' : `: <strong>${fmt(remaining)}</strong>`}</span>
                     </div>
                 </div>
             `;
@@ -1734,7 +1780,7 @@
         st.equalCount = n;
         const each = st.totalRaw / n;
         const lab = document.getElementById('splitEachLabel');
-        if (lab) lab.textContent = fmt(each);
+        if (lab) lab.textContent = splitFmt(each);
         updateSplitSaveButton();
     }
     window.splitOnEqualCountChange = splitOnEqualCountChange;
@@ -1792,7 +1838,7 @@
             // Custom: validate sum equals original within float tolerance
             const total = st.customRows.reduce((s, row) => s + (Number(row.amount) || 0), 0);
             if (Math.abs(st.totalRaw - total) > 0.005 || st.customRows.some(row => !(Number(row.amount) > 0))) {
-                alert(`Custom amounts must sum exactly to ${fmt(st.totalRaw)}. Currently: ${fmt(total)}.`);
+                alert(`Custom amounts must sum exactly to ${splitFmt(st.totalRaw)}. Currently: ${splitFmt(total)}.`);
                 return;
             }
             portionAmounts = st.customRows.map(row => Number(row.amount));
