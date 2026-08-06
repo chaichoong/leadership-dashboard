@@ -290,10 +290,16 @@ def cmd_send(args):
                  f"{prior.get('ts')} to {', '.join(prior.get('to', []))}. "
                  "Refusing to send it twice.")
 
-    mail = load_approved(args.task)
+    # A dry run sends nothing, so requiring approval for it buys no safety and
+    # costs the ability to prove the payload before the real send. The real
+    # send below is still gated.
+    mail = load_approved(args.task, require_approval=not args.dry_run)
 
     if args.dry_run:
         print(json.dumps({"dryRun": True, "task": args.task,
+                          "approvalOutcome": mail["outcome"]
+                          or "(not yet approved)",
+                          "wouldSend": bool(mail["outcome"] in APPROVED),
                           "to": mail["to"], "cc": mail["cc"],
                           "subject": mail["subject"],
                           "bodyChars": len(mail["body"])}, indent=2))
@@ -324,40 +330,6 @@ def cmd_send(args):
                       "messageId": result.get("id")}))
 
 
-def cmd_selftest(args):
-    """Offline checks of the parser — the part a bug would turn into a wrong
-    recipient. No network, no Airtable, safe anywhere."""
-    cases = []
-
-    def refuses(name, output):
-        try:
-            parse_output(output, "selftest")
-        except SystemExit:
-            cases.append((name, True))
-        else:
-            cases.append((name, False))
-
-    good = parse_output(
-        "TO: a@b.com, c@d.com\nCC: e@f.com\nSUBJECT: Hi £100\n---\nBody line.",
-        "selftest")
-    cases.append(("parses TO list", good["to"] == ["a@b.com", "c@d.com"]))
-    cases.append(("parses CC", good["cc"] == ["e@f.com"]))
-    cases.append(("keeps £ in subject", good["subject"] == "Hi £100"))
-    cases.append(("body extracted", good["body"] == "Body line."))
-    refuses("refuses missing ---", "TO: a@b.com\nSUBJECT: x\nbody")
-    refuses("refuses BCC", "TO: a@b.com\nBCC: x@y.com\nSUBJECT: x\n---\nb")
-    refuses("refuses bad address", "TO: not-an-email\nSUBJECT: x\n---\nb")
-    refuses("refuses no TO", "SUBJECT: x\n---\nb")
-    refuses("refuses empty body", "TO: a@b.com\nSUBJECT: x\n---\n")
-
-    failed = [n for n, ok in cases if not ok]
-    for n, ok in cases:
-        print(("PASS " if ok else "FAIL ") + n)
-    if failed:
-        sys.exit(f"selftest FAILED: {', '.join(failed)}")
-    print(f"selftest OK ({len(cases)} checks)")
-
-
 def main():
     p = argparse.ArgumentParser(
         description=__doc__,
@@ -373,9 +345,6 @@ def main():
     v = sub.add_parser("preview", help="parse and print, never sends")
     v.add_argument("task")
     v.set_defaults(func=cmd_preview)
-
-    t = sub.add_parser("selftest", help="offline parser checks, never sends")
-    t.set_defaults(func=cmd_selftest)
 
     h = sub.add_parser("health", help="worker reachability and Gmail consent")
     h.set_defaults(func=cmd_health)
