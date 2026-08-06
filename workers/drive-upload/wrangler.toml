@@ -8,3 +8,9 @@ compatibility_date = "2024-01-01"
 # Secrets (set via `wrangler secret put <NAME>`):
 #   GOOGLE_SERVICE_ACCOUNT_JSON  - Full JSON key file content for the Google service account
 #   DRIVE_PARENT_FOLDER_ID       - ID of the shared Google Drive folder where SOP folders are created
+#   GMAIL_SEND_KEY               - Bearer key for POST /send-email (one copy lives at ~/.config/od/gmail_send_key)
+
+# Gmail send: holds the gmail.send refresh token, written by /auth/callback (state=gmail)
+[[kv_namespaces]]
+binding = "GMAIL_AUTH"
+id = "43c501bacb5f4950869a540a4ad8bab7"
