@@ -19,8 +19,8 @@
 
     // ── Page & SOP Version Registry ──
     const PAGE_REGISTRY = [
-        { id: 'overview',    name: 'Leadership Dashboard',           icon: '📊', pageVer: '2.51', sopFile: 'sop.html',                   sopVer: '2.9', standalone: 'index.html#overview' },
-        { id: 'os-strategy', name: 'Objective & Strategy',           icon: '🎯', pageVer: '1.27', sopFile: 'os/strategy/sop.html',       sopVer: '1.0', standalone: 'os/strategy/index.html' },
+        { id: 'overview',    name: 'Leadership Dashboard',           icon: '📊', pageVer: '2.52', sopFile: 'sop.html',                   sopVer: '2.9', standalone: 'index.html#overview' },
+        { id: 'os-strategy', name: 'Objective & Strategy',           icon: '🎯', pageVer: '1.28', sopFile: 'os/strategy/sop.html',       sopVer: '1.0', standalone: 'os/strategy/index.html' },
         { id: 'tasks',       name: 'Tasks & Projects',   icon: '✅', pageVer: '1.120', sopFile: 'os/tasks/sop.html',             sopVer: '1.3', standalone: 'os/tasks/index.html' },
         { id: 'cfv',        name: 'CFVs',                          icon: '🚨', pageVer: '1.31', sopFile: 'sop-cfvs.html',               sopVer: '1.6', standalone: 'index.html#cfv' },
         { id: 'ceo-brief',  name: 'CEO Brief',                     icon: '☀️', pageVer: '1.0', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#ceo-brief' },
@@ -42,7 +42,7 @@
         { id: 'kpi-library', name: 'KPI Library', icon: '📚', pageVer: '1.1', sopFile: '', sopVer: '1.0', standalone: 'index.html#kpi-library', adminOnly: true },
         { id: 'fintable',  name: 'Accounts',                       icon: '🏦', pageVer: '1.8', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#fintable' },
         { id: 'systemisation', name: 'Systemisation',              icon: '⚙️', pageVer: '1.6', sopFile: 'guides/systemisation.html',    sopVer: '1.0', standalone: 'os/systemisation/index.html' },
-        { id: 'os-team',    name: 'Team Members',                  icon: '👥', pageVer: '1.5', sopFile: '',                            sopVer: '1.0', standalone: 'os/team/index.html' },
+        { id: 'os-team',    name: 'Team Members',                  icon: '👥', pageVer: '1.6', sopFile: '',                            sopVer: '1.0', standalone: 'os/team/index.html' },
         // pageVer corrected by hand 2026-08-06: the auto-bump never fired for this page
         // (crm-supabase.html was missing from the workflow `paths:` filter), so 1.0 was
         // stale — the CRM gained a 14-step interactive walkthrough on 2026-08-04 (319b438).
@@ -90,6 +90,7 @@
         mainMethods:   'tbl065D58MBEJhjlp', // Main Methods (reusable steps linked from Objective)
         projects:      'tblHrpTMd5LNYn8v1', // Projects (quarterly projects from Strategy push here)
         reconAudit:    'tblbfuxYxu4uMMWwT', // AI Recon Audit — accuracy log (auto-pruned to last 35 days)
+        reconRules:    'tblQ9sFD7Fs5CaVwG', // AI Recon Rules — knowledge base learned from corrections
         arrears:       'tblzG0B9oRRpszcgC', // Arrears Records — 7-stage credit control pipeline
         arrearsLog:    'tblik5VI5Jy6tO2yc', // Arrears Contact Log — audit trail per contact event
         sysWorkflows:  'tblLPoRHFBl0vqR24', // Systemisation Workflows
@@ -255,6 +256,34 @@
         mismatched:  'fldm4i2tYHhi4jFJb',  // singleLineText — CSV of fields that differed; '' when accurate
         matchType:   'fld2Vv0QJ2dNq5iVv',  // singleLineText — Knowledge Base | Composite | Vendor | …
         ruleConf:    'fldJ3tDV60HsOsJJ7',  // number — confidence of the rule that produced the suggestion
+    };
+
+    // AI Recon Rules field IDs — the knowledge base learned from Kevin's corrections.
+    // Lived in localStorage until 6 Aug 2026, which meant one browser, one device, and one
+    // cache clear away from losing every rule (the accuracy log was moved to Airtable in
+    // Apr 2026 for exactly that reason after browser storage was wiped).
+    const RECRULE = {
+        vendorKey:   'fldihhYBKnmL2y8qx',  // singleLineText (primary) — normalised vendor key
+        categoryId:  'fldHqfpAZwKT0bq7z',
+        categoryName:'fldQ4hSMAKSxvR7ft',
+        subCatId:    'fldqquIn11Z0sVSxT',
+        subCatName:  'fldUV6zdgwTiYuCfS',
+        businessId:  'fldTdqAPPTPcWzaqC',
+        businessName:'fld07ZzuTCTxdcCtC',
+        costId:      'fldAAB4YDBfmqhBLr',
+        costLabel:   'fld6xTuCzg7LqKf36',
+        tenantName:  'flddWiY46b0HGSwfY',
+        tenancyId:   'fldyUTRhlIBZEGotT',
+        tenancyLabel:'fldZ2sEnGUyhacUMa',
+        unitId:      'fldSZiDDvTowbvqgR',
+        unitName:    'fldRa2jU8URALBGOf',
+        propertyId:  'fldZMuKhHAX85X1sr',
+        // Raw bank descriptor this rule was learned from. The old key format destroyed token
+        // boundaries (punctuation was deleted, not spaced), so stored keys could not be
+        // re-derived. Keeping the source text means a future key-format change is migratable.
+        vendorSample:'flday8VIbWFZJvakK',
+        confidence:  'fldgVeiG1OOkaTepr',  // number — times this rule has been confirmed (cap 10)
+        updated:     'fld77kbxfK39HMek1',  // date (ISO)
     };
 
     // Accounts Receivable Variable field IDs (Airtable table: Outbound Invoices / tblmKRKZMJvUxN4h1)

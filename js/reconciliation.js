@@ -4,26 +4,257 @@
     // RECONCILIATION ENGINE v2
     // ══════════════════════════════════════════
 
-    // Knowledge base — learns from corrections
-    function getReconRules() {
-        try { return JSON.parse(localStorage.getItem('recon_rules') || '[]'); } catch { return []; }
+    // ══════════════════════════════════════════
+    // Knowledge base — learns from Kevin's corrections
+    // ══════════════════════════════════════════
+    // Rules live in Airtable (TABLES.reconRules) and are mirrored to localStorage so the
+    // first paint is instant. Until 6 Aug 2026 they lived ONLY in localStorage, which meant
+    // one browser, one device, and one cache clear away from losing every rule — the same
+    // failure that wiped the accuracy log in Apr 2026 and forced it into Airtable.
+
+    const RECON_RULES_CACHE = 'recon_rules';       // localStorage mirror (legacy key, reused)
+    const RECON_RULES_MIGRATED = '_recon_rules_migrated';
+    let _reconRules = null;                         // in-memory array, source of truth at runtime
+
+    // Turn a bank descriptor into a stable key.
+    //
+    // The old key was the first three words with punctuation deleted and digits kept, which
+    // baked per-transaction references into the rule's identity. Five separate rules existed
+    // for one £2 recurring charge — "british a1252236611488" through "…492" — and not one of
+    // them could ever match again, because the next payment carries a different reference.
+    // 131 of 238 stored rules (55%) had fired exactly once.
+    //
+    // So: drop tokens that are pure digits (store and card numbers — "one stop 1036",
+    // "american exp 3773") and tokens that mix letters with 3+ digits (references —
+    // "a1252236611489", "503fa4"). Two digits in a token is a brand, not a reference, which
+    // keeps "v12 retail finance" and "57a west street" intact. Calibrated against all 238
+    // live rules and 5,704 real vendor strings on 6 Aug 2026: 23 duplicate rules collapse
+    // and nothing legitimate is lost.
+    //
+    // Punctuation becomes a space rather than being deleted, so "AMAZON.CO.UK" reads as
+    // three tokens instead of the single blob "amazoncouk".
+    function reconVendorKey(text) {
+        const raw = String(text || '').toLowerCase().replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter(Boolean);
+        const kept = raw.filter(tok => {
+            if (/^\d+$/.test(tok)) return false;                     // pure digits
+            return (tok.match(/\d/g) || []).length < 3;              // reference-looking
+        });
+        const key = kept.slice(0, 3).join(' ');
+        // Guard: a descriptor that is nothing but references (e.g. "AMZNMKTPLACE 3E0S44DZ5")
+        // would normalise to empty and silently stop being learnable. Fall back to the
+        // unfiltered tokens so a rule is still keyed on something.
+        if (key.length >= 3) return key;
+        return raw.slice(0, 3).join(' ');
     }
-    function saveReconRule(vendorKey, data) {
+
+    // Synchronous — returns the in-memory rules, seeding from the localStorage mirror on
+    // first call so a cold page still matches before Airtable responds.
+    function getReconRules() {
+        if (_reconRules) return _reconRules;
+        try { _reconRules = JSON.parse(localStorage.getItem(RECON_RULES_CACHE) || '[]'); }
+        catch { _reconRules = []; }
+        return _reconRules;
+    }
+
+    function mirrorReconRules() {
+        try { localStorage.setItem(RECON_RULES_CACHE, JSON.stringify(_reconRules || [])); } catch {}
+    }
+
+    function ruleToFields(rule) {
+        return {
+            [RECRULE.vendorKey]:    rule.vendorKey || '',
+            [RECRULE.categoryId]:   rule.categoryId || '',
+            [RECRULE.categoryName]: rule.categoryName || '',
+            [RECRULE.subCatId]:     rule.subCatId || '',
+            [RECRULE.subCatName]:   rule.subCatName || '',
+            [RECRULE.businessId]:   rule.businessId || '',
+            [RECRULE.businessName]: rule.businessName || '',
+            [RECRULE.costId]:       rule.costId || '',
+            [RECRULE.costLabel]:    rule.costLabel || '',
+            [RECRULE.tenantName]:   rule.tenantName || '',
+            [RECRULE.tenancyId]:    rule.tenancyId || '',
+            [RECRULE.tenancyLabel]: rule.tenancyLabel || '',
+            [RECRULE.unitId]:       rule.unitId || '',
+            [RECRULE.unitName]:     rule.unitName || '',
+            [RECRULE.propertyId]:   rule.propertyId || '',
+            [RECRULE.vendorSample]: rule.vendorSample || '',
+            // Airtable number fields must receive a Number, never a string.
+            [RECRULE.confidence]:   Number(rule.confidence) || 1,
+            [RECRULE.updated]:      new Date().toISOString().slice(0, 10),
+        };
+    }
+
+    function fieldsToRule(rec) {
+        const f = rec.fields || {};
+        return {
+            recId:        rec.id,
+            vendorKey:    f[RECRULE.vendorKey] || '',
+            categoryId:   f[RECRULE.categoryId] || '',
+            categoryName: f[RECRULE.categoryName] || '',
+            subCatId:     f[RECRULE.subCatId] || '',
+            subCatName:   f[RECRULE.subCatName] || '',
+            businessId:   f[RECRULE.businessId] || '',
+            businessName: f[RECRULE.businessName] || '',
+            costId:       f[RECRULE.costId] || '',
+            costLabel:    f[RECRULE.costLabel] || '',
+            tenantName:   f[RECRULE.tenantName] || '',
+            tenancyId:    f[RECRULE.tenancyId] || '',
+            tenancyLabel: f[RECRULE.tenancyLabel] || '',
+            unitId:       f[RECRULE.unitId] || '',
+            unitName:     f[RECRULE.unitName] || '',
+            propertyId:   f[RECRULE.propertyId] || '',
+            vendorSample: f[RECRULE.vendorSample] || '',
+            confidence:   Number(f[RECRULE.confidence]) || 1,
+        };
+    }
+
+    // Pull the whole knowledge base from Airtable. Paginates — a partial read would make the
+    // matcher silently forget rules, and would make saveReconRule create duplicates.
+    async function loadReconRules() {
+        if (typeof PAT === 'undefined' || !PAT) return getReconRules();
+        try {
+            const records = [];
+            let offset = '';
+            do {
+                const url = `https://api.airtable.com/v0/${BASE_ID}/${TABLES.reconRules}`
+                    + `?pageSize=100&returnFieldsByFieldId=true`
+                    + (offset ? `&offset=${encodeURIComponent(offset)}` : '');
+                const resp = await fetch(url, { headers: { 'Authorization': 'Bearer ' + PAT } });
+                if (!resp.ok) return getReconRules();   // keep the mirror rather than blanking
+                const data = await resp.json();
+                records.push(...(data.records || []));
+                offset = data.offset || '';
+            } while (offset);
+            _reconRules = records.map(fieldsToRule).filter(r => r.vendorKey);
+            mirrorReconRules();
+            return _reconRules;
+        } catch (e) {
+            console.warn('loadReconRules failed, using cached rules:', e);
+            return getReconRules();
+        }
+    }
+
+    // Update locally first so the UI never waits on the network, then persist.
+    function saveReconRule(vendorKey, data, vendorSample) {
+        if (!vendorKey) return;
         const rules = getReconRules();
         const existing = rules.find(r => r.vendorKey === vendorKey);
+        let rule;
         if (existing) {
             Object.assign(existing, data);
             existing.confidence = Math.min((existing.confidence || 0) + 1, 10);
+            if (vendorSample && !existing.vendorSample) existing.vendorSample = vendorSample;
+            rule = existing;
         } else {
-            rules.push({ vendorKey, ...data, confidence: 1 });
+            rule = { vendorKey, ...data, vendorSample: vendorSample || '', confidence: 1 };
+            rules.push(rule);
         }
-        localStorage.setItem('recon_rules', JSON.stringify(rules));
+        mirrorReconRules();
+        persistReconRule(rule).catch(() => {});
     }
+
+    // Fire-and-forget write. PATCHes when the rule already has an Airtable row so a
+    // confirmed rule updates in place instead of creating a duplicate every time.
+    async function persistReconRule(rule) {
+        if (typeof PAT === 'undefined' || !PAT) return;
+        try {
+            const base = `https://api.airtable.com/v0/${BASE_ID}/${TABLES.reconRules}`;
+            const body = JSON.stringify({ fields: ruleToFields(rule), typecast: false });
+            let resp;
+            if (rule.recId) {
+                resp = await fetch(`${base}/${rule.recId}`, {
+                    method: 'PATCH',
+                    headers: { 'Authorization': 'Bearer ' + PAT, 'Content-Type': 'application/json' },
+                    body,
+                });
+            } else {
+                resp = await fetch(base, {
+                    method: 'POST',
+                    headers: { 'Authorization': 'Bearer ' + PAT, 'Content-Type': 'application/json' },
+                    body,
+                });
+            }
+            if (!resp.ok) { console.warn('persistReconRule failed:', resp.status); return; }
+            const saved = await resp.json();
+            if (saved && saved.id && !rule.recId) { rule.recId = saved.id; mirrorReconRules(); }
+        } catch (e) {
+            console.warn('persistReconRule exception:', e);
+        }
+    }
+
+    // Longest match wins, NOT first match.
+    //
+    // Stripping references makes keys shorter, which makes them overlap: 15 of the live keys
+    // are substrings of another ("aldi" inside a longer key, "tesco", "coop", "google"). With
+    // first-match-wins the answer depended on insertion order, so a generic rule could
+    // hijack a specific one. Preferring the longest key makes the most specific rule win and
+    // makes the result deterministic.
     function findReconRule(vendorText) {
         const rules = getReconRules();
-        const vLower = vendorText.toLowerCase();
-        return rules.find(r => vLower.includes(r.vendorKey)) || null;
+        const hay = reconVendorKey(vendorText);
+        if (!hay) return null;
+        let best = null;
+        for (const r of rules) {
+            if (!r.vendorKey || !hay.includes(r.vendorKey)) continue;
+            if (!best || r.vendorKey.length > best.vendorKey.length) best = r;
+        }
+        return best;
     }
+
+    // One-shot lift of the localStorage rules into Airtable. Runs once per browser, then
+    // flips a flag. Duplicate keys produced by the new normalisation are merged, keeping the
+    // highest confidence — the five "british …" rules collapse into one.
+    async function migrateReconRulesToAirtable() {
+        if (typeof PAT === 'undefined' || !PAT) return;
+        if (localStorage.getItem(RECON_RULES_MIGRATED) === '1') return;
+        try {
+            let local = [];
+            try { local = JSON.parse(localStorage.getItem(RECON_RULES_CACHE) || '[]'); } catch { local = []; }
+            // Rules already carrying a recId came from Airtable, so there is nothing to lift.
+            local = local.filter(r => r && r.vendorKey && !r.recId);
+            if (local.length === 0) { localStorage.setItem(RECON_RULES_MIGRATED, '1'); return; }
+
+            const remote = await loadReconRules();
+            const seen = new Map(remote.map(r => [r.vendorKey, r]));
+
+            const merged = new Map();
+            for (const r of local) {
+                // Re-key through the new normaliser. Old keys had punctuation deleted rather
+                // than spaced, so a few cannot be re-derived cleanly; those keep their old key
+                // and still match, they just stay single-use.
+                const key = reconVendorKey(r.vendorKey) || r.vendorKey;
+                if (seen.has(key)) continue;                 // already in Airtable
+                const prev = merged.get(key);
+                if (!prev || (r.confidence || 0) > (prev.confidence || 0)) {
+                    merged.set(key, { ...r, vendorKey: key });
+                }
+            }
+            const toCreate = [...merged.values()];
+            if (toCreate.length === 0) { localStorage.setItem(RECON_RULES_MIGRATED, '1'); return; }
+
+            // Airtable accepts at most 10 records per create.
+            for (let i = 0; i < toCreate.length; i += 10) {
+                const batch = toCreate.slice(i, i + 10).map(r => ({ fields: ruleToFields(r) }));
+                const resp = await fetch(`https://api.airtable.com/v0/${BASE_ID}/${TABLES.reconRules}`, {
+                    method: 'POST',
+                    headers: { 'Authorization': 'Bearer ' + PAT, 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ records: batch }),
+                });
+                if (!resp.ok) { console.warn('migrateReconRules batch failed:', resp.status); return; }
+            }
+            localStorage.setItem(RECON_RULES_MIGRATED, '1');
+            await loadReconRules();
+            console.info(`[recon] migrated ${toCreate.length} knowledge-base rules to Airtable`);
+        } catch (e) {
+            console.warn('migrateReconRulesToAirtable failed:', e);
+        }
+    }
+
+    window.reconVendorKey = reconVendorKey;
+    window.loadReconRules = loadReconRules;
+    window.getReconRules = getReconRules;
+    window.findReconRule = findReconRule;
+    window.migrateReconRulesToAirtable = migrateReconRulesToAirtable;
 
     // Helper: get sub-category name by record ID
     function getSubCatName(recId) {
@@ -385,14 +616,14 @@
             }
 
             // ── Priority 1: Knowledge base (user corrections — highest priority) ──
+            // findReconRule now normalises the descriptor itself and returns the LONGEST
+            // matching rule, so looping over progressively shorter candidate keys (which
+            // returned whichever rule happened to be found first) is no longer needed.
             let matched = false;
-            for (const key of vendorKeys) {
-                const rule = findReconRule(key);
-                if (rule && (rule.subCatId || rule.costId || rule.tenancyId)) {
-                    applyRuleToResult(result, rule, 'Knowledge Base', rule.confidence || 5);
-                    matched = true;
-                    break;
-                }
+            const kbRule = findReconRule(vendor);
+            if (kbRule && (kbRule.subCatId || kbRule.costId || kbRule.tenancyId)) {
+                applyRuleToResult(result, kbRule, 'Knowledge Base', kbRule.confidence || 5);
+                matched = true;
             }
 
             // ── Priority 2: Composite match (vendor+description → all fields inc. tenancy/unit/property) ──
@@ -1277,7 +1508,7 @@
         }
 
         const getInputVal = (id) => { const el = document.getElementById(id); return el ? el.value : ''; };
-        const vendorKey = r.txVendor.toLowerCase().replace(/[^a-z0-9\s]/g, '').trim().split(/\s+/).slice(0, 3).join(' ');
+        const vendorKey = reconVendorKey(r.txVendor);
         if (vendorKey.length >= 3) {
             saveReconRule(vendorKey, {
                 subCatId, subCatName: getInputVal('recon-subcat-' + idx),
@@ -1288,7 +1519,7 @@
                 tenancyLabel: getInputVal('recon-tenancy-' + idx), tenancyId,
                 unitName: getInputVal('recon-unit-' + idx), unitId,
                 propertyId: resolveDropdownId('recon-property-' + idx),
-            });
+            }, r.txVendor);
         }
 
         if (btn) { btn.textContent = '✓'; btn.style.background = 'var(--success-bg)'; btn.style.color = 'var(--success)'; }
@@ -1318,8 +1549,11 @@
     }
 
     // The vendor "fingerprint" used by the knowledge base — first 1-3 words, normalised.
+    // Same key rule as the knowledge base. If the suppression list and the rules disagreed on
+    // how a vendor is named, an "never auto-approve this again" entry would stop matching the
+    // rule it was meant to suppress.
     function autoVendorKey(vendor) {
-        return (vendor || '').toLowerCase().replace(/[^a-z0-9\s]/g, '').trim().split(/\s+/).slice(0, 3).join(' ');
+        return reconVendorKey(vendor);
     }
 
     // Suppression list — the checking mechanism. When Kevin undoes an auto-reconciliation,
@@ -1400,14 +1634,14 @@
             } catch (e) { console.warn('Auto cost sync failed (non-fatal):', e); }
         }
         // Reinforce the knowledge-base rule for this vendor
-        const vendorKey = (r.txVendor || '').toLowerCase().replace(/[^a-z0-9\s]/g, '').trim().split(/\s+/).slice(0, 3).join(' ');
+        const vendorKey = reconVendorKey(r.txVendor);
         if (vendorKey.length >= 3) {
             saveReconRule(vendorKey, {
                 subCatId: r.subCatId, subCatName: r.subCatName,
                 categoryId: r.categoryId, categoryName: r.categoryName,
                 businessId: r.businessId, businessName: r.businessName,
                 costLabel: r.costLabel, costId: r.costId,
-            });
+            }, r.txVendor);
         }
         return {
             txId: r.txId, vendor: r.txVendor, account: r.txAccount, amount: r.txAmount, date: r.txDate,
