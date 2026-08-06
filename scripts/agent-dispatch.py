@@ -4,7 +4,7 @@
 The scheduled task `agent-dispatch` (this Mac, like ceo-huddle) is the brain:
 it dispatches the Claude Code agents in ~/.claude/agents/ to do the work.
 This script is everything that must NOT vary run to run: which tasks are
-eligible, the tier-1 exclusions, the cap, and the exact Airtable writes.
+eligible, the tier-1 labelling, the cap, and the exact Airtable writes.
 
 THE LOOP (do not redesign — memory project_agent_accuracy_and_approval):
   submit   = the gate. Status Approval, Assignee Kevin, due today. The agent
@@ -21,7 +21,15 @@ approvals.js AF. tests/constant-drift.test.js fails if they ever disagree.
 Subcommands:
   queue                       read-only. JSON of eligible work, capped.
   route    TASKID --to RECID  CEO reassigns Team Member.
-  submit   TASKID --agent RECID --type TYPE --output-file PATH
+  escalate TASKID             hand a task OFF the AI agents to Kevin. Team
+                              Member and Assignee become Kevin, so the queue
+                              stops seeing it as agent work. NOT the tier-1
+                              exit any more — tier 1 is prepared and labelled
+                              like anything else. This is for the rarer case
+                              where no agent can usefully prepare anything.
+  submit   TASKID --agent RECID --type TYPE --output-file PATH [--tier1]
+                              --tier1 stamps the banner on the Agent Output so
+                              the label travels with the work, not in a log.
   annotate TASKID --note STR  append a dated agent note to the task's Notes.
   intent   TASKID             record BEFORE dispatching a carry-out, so a
                               crash mid-action can never re-execute it blind.
@@ -50,6 +58,9 @@ TASKS = "tblqB8b22hKBL4PF1"
 
 LONDON = ZoneInfo("Europe/London")
 KEVIN_AIRTABLE_EMAIL = "kevin@runpreneur.org.uk"
+# Kevin's own Team Members row. Not an agent, so a task pointed here drops out
+# of the agent-linked population the queue works from — that is the point.
+KEVIN_REC_ID = "recHEt2VPYothaqTd"
 
 # Field IDs — single source is js/config.js; drift-tested, never guess.
 AF = {
@@ -103,7 +114,18 @@ AGENTS = {
 }
 CEO_REC_ID = "reciHUAEcEkbctnZ6"
 
-# Tier 1: Kevin ONLY, never an agent, whatever an accuracy score says.
+# Tier 1: Kevin's private legal and financial matter. Agents PREPARE these and
+# they go to him for approval like anything else — his call, 6 Aug 2026. They
+# are not skipped any more, because the guardrail that matters sits before the
+# action, not before the reading: nothing is sent, filed, paid or executed
+# until he approves it, and the never-automated list (payments, credentials,
+# signatures, phone calls) still applies afterwards.
+#
+# What the classification is FOR now: labelling. A tier-1 task carries a banner
+# into its Agent Output and a red banner onto the Slack post, so he always
+# knows what he is looking at before he taps. Keep the mechanism. When agents
+# go autonomous, this is the line that still stops at him.
+#
 # Same six patterns as approvals.js KEVIN_ONLY_PATTERNS — one mechanism.
 TIER1_PATTERNS = [
     re.compile(p, re.I) for p in (
@@ -119,6 +141,19 @@ TIER2_PATTERNS = [
         r"letter of claim", r"statutory demand", r"bounce ?back loan",
     )
 ]
+
+
+# Stamped on top of a tier-1 task's Agent Output by `submit --tier1`, so the
+# label travels WITH the work into Airtable and Slack instead of living only in
+# a run log. verify re-reads the live field and fails if it is missing: that is
+# the control that stops tier-1 work being prepared silently. Two ways a task
+# earns it — the keyword match, or the dispatcher finding the connection while
+# working (today's Utilita bill had no keyword in its name at all).
+TIER1_BANNER = (
+    ":rotating_light: TIER 1. This touches your private legal and financial "
+    "matter. An AI agent prepared it. Nothing has been sent, filed, paid or "
+    "changed anywhere. Read it before you approve."
+)
 
 
 def pat():
@@ -277,14 +312,18 @@ def cmd_queue(args):
               "the queue empty.", file=sys.stderr)
         sys.exit(1)
 
-    skipped_tier1, skipped_tier2, unmapped, unclassified = [], [], [], []
+    tier1, skipped_tier2, unmapped, unclassified = [], [], [], []
     approved_hb, changes_hb, new_work, routing = [], [], [], []
 
     for t in agent_linked:
+        # Tier 1 no longer drops out of the worklist. It is MARKED and worked,
+        # and the mark rides all the way to the Slack post. Removing this line
+        # so tier-1 work is prepared silently is the regression to fear.
         hit1 = tier_match(TIER1_PATTERNS, t["name"], t["description"], t["notes"])
+        t["tier1"] = bool(hit1)
+        t["matchedPattern"] = hit1 or ""
         if hit1:
-            skipped_tier1.append({**t, "matchedPattern": hit1})
-            continue
+            tier1.append(t)
         hit2 = tier_match(TIER2_PATTERNS, t["name"], t["description"], t["notes"])
         if hit2:
             skipped_tier2.append({**t, "matchedPattern": hit2})
@@ -339,7 +378,9 @@ def cmd_queue(args):
         "worklist": worklist,
         "reserve": reserve,
         "routingNeeded": routing,      # CEO tasks; routing is free, work is not
-        "skippedTier1": skipped_tier1,
+        # Worked like anything else, but every one of these must be submitted
+        # with --tier1 so the banner reaches Kevin. Not a skip list.
+        "tier1Tasks": tier1,
         "skippedTier2": skipped_tier2,
         "unmappedAgent": unmapped,
         "unclassified": unclassified,  # states the buckets cannot place — eyes, not silence
@@ -352,6 +393,8 @@ def cmd_queue(args):
             "newWork": len(new_work),
             "routingNeeded": len(routing),
             "unclassified": len(unclassified),
+            "tier1Open": len(tier1),
+            "tier1InWorklist": len([t for t in worklist if t.get("tier1")]),
             "worklist": len(worklist),
         },
     }
@@ -370,6 +413,17 @@ def cmd_route(args):
                       "agent": AGENTS[args.to]["name"]}))
 
 
+def cmd_escalate(args):
+    # The tier-1 exit. A keyword skip only lasts one run: the task stays linked
+    # to an agent and comes back round every time. This moves it off the agents
+    # for good, without touching Status, due date or anything Kevin decides.
+    patch_task(args.task, {
+        AF["teamMember"]: [KEVIN_REC_ID],
+        AF["assignee"]: {"email": KEVIN_AIRTABLE_EMAIL},
+    })
+    print(json.dumps({"escalated": args.task, "to": "Kevin Brittain"}))
+
+
 def cmd_submit(args):
     if args.agent not in AGENTS:
         sys.exit(f"ERROR: {args.agent} is not one of the 17 AI agent records")
@@ -380,6 +434,8 @@ def cmd_submit(args):
     if not output:
         # An empty Agent Output makes the Slack post say "nothing to judge".
         sys.exit("ERROR: refusing to submit an empty Agent Output")
+    if args.tier1 and TIER1_BANNER not in output:
+        output = TIER1_BANNER + "\n\n" + output
     # The gate: prepared, proposed, and NOTHING sent, filed or executed.
     patch_task(args.task, {
         AF["agentOutput"]: output[:95000],
@@ -392,7 +448,8 @@ def cmd_submit(args):
     })
     print(json.dumps({"submitted": args.task,
                       "agent": AGENTS[args.agent]["name"],
-                      "type": args.type, "chars": len(output)}))
+                      "type": args.type, "tier1": bool(args.tier1),
+                      "chars": len(output)}))
 
 
 def cmd_annotate(args):
@@ -462,20 +519,24 @@ def cmd_verify(args):
         problems.append(f"action failed: {a.get('kind')} {a.get('task')} — "
                         f"{str(a.get('error'))[:120]}")
 
-    # A tier-1 matter sitting on an agent is a fault, not a queue item. Same
-    # for a parked task (approved, but carrying it out would need a payment,
-    # credential or signature — never automated at any trust level).
-    # Both alarm ONCE per task: a known flag re-alarming twice a day until
-    # someone moves the task would train Kevin to ignore the alarm channel.
+    # A tier-1 task on an agent is no longer a fault — Kevin's call, 6 Aug 2026.
+    # Agents prepare it and it reaches him through the same gate as everything
+    # else. So the alarm here is not "an agent touched it", it is "an agent
+    # touched it and he could not TELL". That check lives with the re-read
+    # below, against the live Agent Output.
+    #
+    # A parked task still alarms: approved, but carrying it out would need a
+    # payment, credential, signature or phone call, which nothing automates at
+    # any trust level. It alarms ONCE per task, because a known flag
+    # re-alarming twice a day would train him to ignore the alarm channel.
     state_path = os.path.join(STATE_DIR, "tier1-alerted.json")
     try:
         with open(state_path) as fh:
             alerted = set(json.load(fh))
     except Exception:
         alerted = set()
-    flags = ([("TIER-1 task on an agent", t) for t in report.get("tier1Flags", [])]
-             + [("approved task PARKED — its carry-out needs a never-automated "
-                 "action", t) for t in report.get("parkedFlags", [])])
+    flags = [("approved task PARKED — its carry-out needs a never-automated "
+              "action", t) for t in report.get("parkedFlags", [])]
     for label, t in flags:
         if t.get("id") not in alerted:
             problems.append(f"{label}: {t.get('id')} "
@@ -509,6 +570,14 @@ def cmd_verify(args):
                                 "no outcome)")
             if not live["agentOutput"]:
                 problems.append(f"{a['task']} submitted with empty Agent Output")
+            # The tier-1 control. Preparing this work is allowed; preparing it
+            # UNLABELLED is not, because then it reads to Kevin like ordinary
+            # admin. Checked against the live field, not against what the run
+            # claimed it wrote.
+            elif a.get("tier1") and TIER1_BANNER not in live["agentOutput"]:
+                problems.append(
+                    f"{a['task']} is tier 1 but its Agent Output carries no "
+                    "tier-1 banner. It would read to Kevin as ordinary work.")
         elif kind == "route":
             to = a.get("to", "")
             if to and to not in live["teamMemberIds"]:
@@ -536,11 +605,17 @@ def main():
     r.add_argument("task")
     r.add_argument("--to", required=True)
 
+    e = sub.add_parser("escalate")
+    e.add_argument("task")
+
     s = sub.add_parser("submit")
     s.add_argument("task")
     s.add_argument("--agent", required=True)
     s.add_argument("--type", required=True)
     s.add_argument("--output-file", required=True)
+    s.add_argument("--tier1", action="store_true",
+                   help="task touches the private legal/financial matter: "
+                        "stamp the tier-1 banner on top of the Agent Output")
 
     an = sub.add_parser("annotate")
     an.add_argument("task")
@@ -556,8 +631,8 @@ def main():
     v.add_argument("--report", required=True)
 
     args = p.parse_args()
-    {"queue": cmd_queue, "route": cmd_route, "submit": cmd_submit,
-     "annotate": cmd_annotate, "intent": cmd_intent,
+    {"queue": cmd_queue, "route": cmd_route, "escalate": cmd_escalate,
+     "submit": cmd_submit, "annotate": cmd_annotate, "intent": cmd_intent,
      "complete": cmd_complete, "verify": cmd_verify}[args.cmd](args)
 
 

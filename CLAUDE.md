@@ -61,6 +61,8 @@ These have caused production bugs in this codebase. Check for them during every 
 - **localStorage quota issues** — Safari has a 5MB localStorage limit. Large cached datasets (100+ transaction records with all fields) can exceed this. Use IndexedDB for large caches (follow the `dashboard.js` pattern), keep localStorage for small UI state only
 - **Airtable blank fields pass `!= 0` but fail `> 0`** — in an Airtable formula an empty number/currency field is NOT equal to 0, so `{blank} != 0` is TRUE while `{blank} > 0` is FALSE. Swapping `> 0` for `!= 0` to allow negatives makes every blank-field record take the wrong branch. This blanked `Report Amount` on 8,667 of 8,690 transactions in Jul 2026, taking out the P&L, dashboard, wealth and cashflow at once. To test "is this signed value set and non-zero" while keeping the blank fall-through, use **`ABS({field}) > 0`**. Whenever you change a formula condition, check it against a blank record, not just a populated one
 - **Split Override Amount must carry the sign of `**GBP`** — the split modal collects positive magnitudes (`totalRaw` uses `Math.abs`, validation requires every portion `> 0`), but Airtable's `Report Amount` returns the override verbatim. Writing a positive override on an expense flips an outflow into revenue across every report. Always multiply the portion by the sign of `**GBP` before writing (see `performReconSplit` in `js/reconciliation.js`). Inflow splits hid this for years because their sign is already positive — the first expense split would have posted £1,742.60 of costs as income
+- **A hand-rolled Airtable read must paginate, and a metric graded all-or-nothing must say which part failed** — `refreshReconAccuracyStats()` fetched the AI Recon Audit table with `pageSize=100` and never followed the `offset` token, so the AI Reconciliation Accuracy card measured the FIRST 100 rows and presented that as the score. On 6 Aug 2026 there were 259 rows in the window: the card read "66/100" while the truth was 167/259 = 64%. Nothing errored, and the number looked plausible for a month. The shared `airtableFetch()` helper paginates correctly; this code bypassed it with its own `fetch`, which is exactly how it escaped the existing `pagination-dedup` guard. **Any hand-rolled Airtable read is vulnerable the same way — grep for `fetch(` against `api.airtable.com` before trusting a number.** The same metric was also graded all-or-nothing across seven fields (category, sub-category, business, tenancy, unit, property, cost), so one habitually blank link dragged the headline down while the other six were fine, and the audit row recorded only a yes/no — never which field missed. A score you cannot attribute cannot be acted on. Guarded by `tests/sync-invariants/recon-accuracy-stats.spec.js` (back-tested: reverting the loop makes it report exactly 100)
+
 - **Never express the day of the week in a Cloudflare cron** — `"0 8 * * 1-5"` reads as Mon–Fri to every human and to standard cron, where Sunday is 0. Cloudflare starts the week at **Sunday = 1**, so `1-5` runs **Sun–Thu**. The CEO brief lost every Friday and gained a Sunday for a week before anyone noticed, because a brief still arrived most mornings and no error was ever raised. Measured via `workersInvocationsAdaptive` for 27 Jul – 3 Aug 2026: zero invocations Sat 1 Aug, a full pair Sun 2 Aug, no 08:00 firing Fri 31 Jul. Set the cron to `* * *` (every day) and decide the day **in the worker**, in the target timezone, with a test. See `isLondonSendTime()` in `scripts/slack-automation/money-daily-worker.js` and `tests/ceo-brief-schedule.test.js`, which also fails if a day-of-week filter reappears in the cron. Applies to the hour too: a scheduled job that must land at a UK local time needs two UTC crons plus a code gate, never one cron and an assumption about BST
 
 ## Regression Tests (no bug is fixed until it is caught)
@@ -406,7 +408,10 @@ PAGE_REGISTRY in `js/config.js` tracks page and SOP versions.
 - **New KPI compute code ships with its KPI Library entry in the same commit** — add the template to `KPI_LIBRARY` in `js/kpi-library.js` (canonical) and the rationale to `docs/kpi-library-spec.md`. The daily `kpi-library-coverage` invariant in `scripts/check-data-invariants.py` fails the sweep whenever a live automated KPI has no library template, so forgetting is loud, not silent
 - Only show ACTIVE businesses in dropdowns (filter by Active field)
 - Use exact field names consistently between read and write paths (e.g., 'Quarter End' vs 'QuarterEnd' caused a sync bug)
-- When filtering linked record fields, filter by record ID, not ARRAYJOIN display names
+- **Filter linked records by record ID — but only a LOOKUP of record IDs, never the link field itself.** `ARRAYJOIN()` over a *link* field yields the linked record's **primary field (its display name)**, never its ID, so `FIND("recXXX", ARRAYJOIN({LinkField}))` matches nothing and returns `200 OK` with an empty list. Verified on Tasks `tblqB8b22hKBL4PF1`, 6 Aug 2026: `FIND("reca9ofzhuw13ZzGE", ARRAYJOIN({Business}))` → **0 rows**, while `ARRAYJOIN({Business})="Operations Director"` and `FIND("rec4b5MDoaxEC7WRE", ARRAYJOIN({Record ID (Used for Automation) (from Team Members)}))` both match. So:
+  - **Preferred:** add or use a lookup field that surfaces the linked record's `RECORD_ID()`, then `FIND()` against that. Stable across renames. This is what the rule has always meant
+  - **Acceptable when no such lookup exists:** match the display name (`{Business}="Operations Director"`). Works today, but breaks silently the day someone renames the record, so pair it with a control
+- **Every filterByFormula that counts something needs an expected count.** A wrong field name, a link-field ID match, or a bare date comparison all return `200 OK` and `{"records":[]}` — a broken query and a genuinely empty result are indistinguishable. State the number you expect and fail loudly on a miss. Date fields are the sharpest edge: `{Date}="2026-08-06"` returns zero even when the record exists; use `DATESTR({Date})="2026-08-06"` or `IS_SAME({Date},DATETIME_PARSE(...),'day')`. A silent zero on an existence check that gates a create writes the duplicate the check exists to prevent
 - Watch for pagination when bulk-creating records to avoid duplicates
 - Bulk operations on invoices/transactions: never mark legitimate unpaid items as paid without explicit reconcile logic
 
@@ -421,6 +426,16 @@ PAGE_REGISTRY in `js/config.js` tracks page and SOP versions.
 - **Small fixes, bug fixes, single-file tweaks:** push directly to main
 - **New features, multi-file changes, anything touching shared files (config.js, shared.js, index.html, styles.css):** work on a branch, push, create a PR. This protects against concurrent session conflicts
 - Branch naming: `feature/short-description` or `fix/short-description`
+
+**Decide branch-or-main BEFORE you commit, never after.** Committing to local `main` and
+*then* branching off it to open a PR leaves a stale twin of every commit on local `main`
+forever: `gh pr merge --squash` creates a NEW commit on origin, so the original never
+becomes an ancestor of `origin/main` and nothing ever cleans it up. If you are going to
+open a PR, create the branch first — `./scripts/worktree.sh new <topic>` — so nothing
+lands on `main` at all.
+
+**Never do both for one piece of work.** One change = one route. A commit on `main` AND a
+PR for the same change is always a bug, not belt-and-braces.
 
 ### Creating the PR
 
@@ -441,3 +456,30 @@ Kevin cannot click a terminal link: always `open` the deployed page and any deli
 Do NOT quietly merge to main locally as a fallback when a branch was created for review — that discards the review step the branch existed for.
 
 **If the pre-push gate blocks a push to main on a test that is unrelated to your change:** do not reach for `SKIP_SYNC_TESTS=1`. Only `main` is gated (see `scripts/pre-push`), so push a branch and merge it with `gh` instead. Verify the failure really is unrelated first — run the failing test in isolation, and re-run the suite to see whether a *different* test fails, which indicates flakiness rather than a regression.
+
+⚠️ **This fallback is the one that has actually caused duplicates.** You have already
+committed to `main`, the gate blocks the push, so you branch off that commit and PR it.
+The squash merge then puts a different SHA on origin and your original commit is stranded
+on local `main`. On 6 Aug 2026 this happened three times in twenty minutes (PRs #36, #37,
+#38), leaving local `main` seven commits ahead of origin while being 379 lines *behind* it.
+
+So when the gate sends you down the branch route, finish the job:
+
+```bash
+gh pr merge --squash --delete-branch
+git reset --keep origin/main   # MANDATORY — drops the stranded local commit
+```
+
+`--keep` is the safe variant: it refuses rather than destroying uncommitted work, which
+matters because another session's edits are usually sitting in this checkout. If it
+refuses, that other session has unsaved work — leave it and say so, do not use
+`--hard`.
+
+**Before any push to `main`, check you are not about to ship a twin:**
+
+```bash
+git diff origin/main HEAD --stat   # net deletions = local main is BEHIND; do not push
+```
+
+An empty diff means local `main` adds nothing. Net deletions mean your local commits are
+stale copies of work already merged, and pushing them would revert origin.

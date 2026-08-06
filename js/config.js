@@ -19,7 +19,7 @@
 
     // ── Page & SOP Version Registry ──
     const PAGE_REGISTRY = [
-        { id: 'overview',    name: 'Leadership Dashboard',           icon: '📊', pageVer: '2.50', sopFile: 'sop.html',                   sopVer: '2.9', standalone: 'index.html#overview' },
+        { id: 'overview',    name: 'Leadership Dashboard',           icon: '📊', pageVer: '2.51', sopFile: 'sop.html',                   sopVer: '2.9', standalone: 'index.html#overview' },
         { id: 'os-strategy', name: 'Objective & Strategy',           icon: '🎯', pageVer: '1.27', sopFile: 'os/strategy/sop.html',       sopVer: '1.0', standalone: 'os/strategy/index.html' },
         { id: 'tasks',       name: 'Tasks & Projects',   icon: '✅', pageVer: '1.120', sopFile: 'os/tasks/sop.html',             sopVer: '1.3', standalone: 'os/tasks/index.html' },
         { id: 'cfv',        name: 'CFVs',                          icon: '🚨', pageVer: '1.31', sopFile: 'sop-cfvs.html',               sopVer: '1.6', standalone: 'index.html#cfv' },
@@ -248,6 +248,13 @@
         txId:        'fld1n4hxZ0XD5FaR9',  // singleLineText — Airtable record ID of reconciled tx
         date:        'fldJC9UcHCaXAaxKV',  // date (ISO) — when logged
         wasAccurate: 'fld9n62GxQijQWqSA',  // checkbox — AI suggestion matched final values
+        // Diagnostics (added 6 Aug 2026). "Was Accurate" alone said the score was 64% for a
+        // month without ever saying WHICH of the seven graded fields missed, so the number
+        // could not be acted on. These three make a miss attributable and let us prove
+        // whether the knowledge base actually compounds.
+        mismatched:  'fldm4i2tYHhi4jFJb',  // singleLineText — CSV of fields that differed; '' when accurate
+        matchType:   'fld2Vv0QJ2dNq5iVv',  // singleLineText — Knowledge Base | Composite | Vendor | …
+        ruleConf:    'fldJ3tDV60HsOsJJ7',  // number — confidence of the rule that produced the suggestion
     };
 
     // Accounts Receivable Variable field IDs (Airtable table: Outbound Invoices / tblmKRKZMJvUxN4h1)

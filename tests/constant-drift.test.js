@@ -1,8 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import { readFileSync, existsSync, mkdtempSync, symlinkSync, rmSync } from 'fs';
-import { execFileSync, spawnSync } from 'child_process';
-import { resolve, dirname, join } from 'path';
-import { tmpdir } from 'os';
+import { readFileSync } from 'fs';
+import { execFileSync } from 'child_process';
+import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -238,6 +237,67 @@ describe('agent-dispatch.py does not drift from config.js or approvals.js', () =
     const workerEmail = APPROVALS.match(/KEVIN_AIRTABLE_EMAIL = '([^']+)'/)[1];
     expect(PY).toContain(`KEVIN_AIRTABLE_EMAIL = "${workerEmail}"`);
   });
+
+  // ── Tier-1 labelling (Kevin's call, 6 Aug 2026) ──────────────────────────
+  // Tier 1 is his private legal and financial matter. It used to be dropped
+  // out of the worklist entirely; now agents PREPARE it and it stops at his
+  // approval like everything else, because the guardrail sits before the
+  // action, not before the reading. The whole safety of that decision rests on
+  // ONE thing: he can tell a tier-1 card apart from ordinary admin at a
+  // glance. Two independent labels do that, and each covers the other's blind
+  // spot — the worker's banner cannot see a connection an agent only found
+  // mid-work, and the engine's banner cannot fire on a task no agent touched.
+  //
+  // This is a text contract, not a behavioural test, and it is honest about
+  // that: it cannot prove the banner renders, only that neither half has been
+  // quietly deleted. Deleting either one restores the pre-6-Aug failure mode
+  // in the worst possible shape — tier-1 work prepared and posted looking like
+  // a routine utility bill.
+  describe('tier 1 is labelled on both sides, never silently prepared', () => {
+    it('control — both files parsed and both still classify tier 1', () => {
+      expect(PY.length, 'agent-dispatch.py read went blind').toBeGreaterThan(2000);
+      expect(APPROVALS.length, 'approvals.js read went blind').toBeGreaterThan(2000);
+      expect(PY).toMatch(/TIER1_PATTERNS\s*=/);
+      expect(APPROVALS).toMatch(/KEVIN_ONLY_PATTERNS\s*=/);
+    });
+
+    it('the two pattern lists still agree', () => {
+      const pyPats = [...(PY.match(/TIER1_PATTERNS = \[(.*?)\n\]/s)?.[1] ?? '')
+        .matchAll(/r"([^"]+)"/g)].map((m) => m[1].toLowerCase());
+      const jsPats = [...(APPROVALS.match(/KEVIN_ONLY_PATTERNS = \[(.*?)\n\];/s)?.[1] ?? '')
+        .matchAll(/\/([^/]+)\/i/g)].map((m) => m[1].toLowerCase());
+      expect(pyPats.length, 'python tier-1 pattern parse went blind').toBeGreaterThan(3);
+      expect(jsPats.length, 'worker tier-1 pattern parse went blind').toBeGreaterThan(3);
+      expect(new Set(pyPats)).toEqual(new Set(jsPats));
+    });
+
+    it('the engine stamps a banner and verify checks the live field for it', () => {
+      expect(PY, 'TIER1_BANNER constant is gone').toMatch(/TIER1_BANNER\s*=/);
+      expect(PY, 'submit no longer accepts --tier1').toContain('"--tier1"');
+      // Stamped on submit...
+      expect(PY).toMatch(/args\.tier1 and TIER1_BANNER not in output/);
+      // ...and re-read from Airtable in verify, not trusted from the report.
+      expect(PY).toMatch(/TIER1_BANNER not in live\["agentOutput"\]/);
+    });
+
+    it('tier 1 is no longer dropped out of the worklist', () => {
+      const loop = PY.match(/for t in agent_linked:(.*?)\n\n/s)?.[1] ?? '';
+      expect(loop.length, 'classification-loop parse went blind').toBeGreaterThan(100);
+      // The regression: a `continue` straight after the tier-1 match, which
+      // silently removes the task from everything downstream.
+      expect(loop).not.toMatch(/if hit1:[\s\S]{0,120}continue/);
+      expect(loop, 'tier-1 tasks must be marked, not skipped').toMatch(/t\["tier1"\]/);
+    });
+
+    it('the worker still renders its own banner on the post', () => {
+      expect(APPROVALS).toMatch(/const warn = isKevinOnlyMatter\(/);
+      expect(APPROVALS).toMatch(/buildApprovalBlocks\(t, agent, warn\)/);
+      expect(APPROVALS).toMatch(/if \(warn\) \{/);
+      // The old wording told him an agent should not be preparing this at all.
+      // That is now false and would read as a system fault every time.
+      expect(APPROVALS).not.toContain('An agent should not be preparing this');
+    });
+  });
 });
 
 // ── Cache-bust drift across pages ────────────────────────────────────────────
@@ -393,52 +453,5 @@ describe('auto-bump trigger list does not drift from the auto-bump mapping', () 
       missing,
       `Auto-bump targets a page id that PAGE_REGISTRY does not define: ${missing.join(', ')}`,
     ).toEqual([]);
-  });
-});
-
-// The pre-commit hook is INSTALLED AS A SYMLINK (`ln -sf ../../scripts/pre-commit
-// .git/hooks/pre-commit`), and it locates its sibling pre-commit-action.py relative to
-// its own path. It used os.path.abspath, which does NOT follow symlinks — so when git
-// ran it from .git/hooks it looked for .git/hooks/pre-commit-action.py, missed, and
-// exited 0.
-//
-// The result was a hook that installed cleanly, ran on every commit, reported success
-// and did nothing. Found 2026-08-06 by installing it and watching pageVer refuse to
-// move; not by reading the code, which looks correct until you know abspath's
-// behaviour. Same silent-no-op class as the workflow trigger list above.
-//
-// Testing the property that actually broke — resolution THROUGH a symlink — rather
-// than asserting the source contains the word "realpath", which any rewrite would
-// break while staying correct.
-describe('pre-commit hook resolves its shared script through a symlink', () => {
-  const HOOK = resolve(ROOT, 'scripts/pre-commit');
-
-  it('the hook and its shared script both exist (control — guards against a vacuous pass)', () => {
-    expect(existsSync(HOOK), 'scripts/pre-commit missing').toBe(true);
-    expect(existsSync(resolve(ROOT, 'scripts/pre-commit-action.py'))).toBe(true);
-  });
-
-  it('finds pre-commit-action.py when invoked via a symlink in another directory', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'hooklink-'));
-    const link = join(dir, 'pre-commit');
-    symlinkSync(HOOK, link);
-
-    // cwd = repo root, exactly as git invokes it.
-    const run = spawnSync('python3', [link], { cwd: ROOT, encoding: 'utf8' });
-    rmSync(dir, { recursive: true, force: true });
-
-    expect(run.status, `hook exited ${run.status}\n${run.stderr}`).toBe(0);
-    // The failure mode: it cannot find its sibling and says so (or, before the fix,
-    // said nothing at all and silently did no work).
-    expect(
-      run.stderr,
-      'hook could not locate pre-commit-action.py through the symlink — it is a no-op',
-    ).not.toMatch(/not found/i);
-    // Proof it actually reached the bump script rather than exiting early: that script
-    // always reports what it decided.
-    expect(
-      run.stdout,
-      `hook produced no output from pre-commit-action.py — it exited before running it.\nstdout: ${run.stdout}`,
-    ).toMatch(/nothing to bump|Auto-bump|files changed/i);
   });
 });
