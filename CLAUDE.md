@@ -181,6 +181,28 @@ If a checkout genuinely must be shared: commit before EVERY context switch, neve
 work you did not write (leave it and say so), and run `git status -sb` before assuming which
 branch you are on — especially before reading a quiet "Everything up-to-date" as success.
 
+### Session hygiene — this Mac has 16 GB and 8 cores
+
+Worktrees fix *correctness* under concurrency. They do nothing for *capacity*, and capacity
+is a real limit here. On 2026-08-06 six sessions ran at once in one checkout and the machine
+became unusable: 25.5 GB of demand squashed into 16 GB of RAM (a 3.9x compression ratio),
+9.2 GB of swap, 0.1 GB genuinely free, and a load average of 105 on 8 cores. Nothing had
+leaked and nothing was broken. It was simply oversubscribed, which is why no error was ever
+raised and why it went unexplained for days.
+
+- **Three concurrent sessions maximum.** Close one before opening a fourth. Each session
+  carries its own MCP servers and helper processes on top of its own memory.
+- **Kill any preview server you start.** They are parented to the Claude desktop app, not to
+  your session, so they outlive it and hold the port for ever. `com.kevinbrittain.mac-guard`
+  reaps them hourly, but only once they are 4 hours old with nothing connected.
+- **Never assume you are the only test run.** `playwright.config.js` counts concurrent runs
+  and divides its 4 workers between them, so a second run drops to 2 and a fourth to 1. Do
+  not replace that with a lock: a gate stuck waiting on a dead session's lock is exactly what
+  teaches people to reach for `SKIP_SYNC_TESTS=1`.
+- **When the Mac feels slow, measure before guessing.** `./scripts/mac-status.sh` prints the
+  three numbers that decide it — genuinely free memory, compression ratio, swap. Activity
+  Monitor's "memory used" answers none of them, which is why this went undiagnosed.
+
 ### Never pass secrets as command-line arguments
 
 MCP servers and CLI tools configured with `--api-key <token>` put that token in the process
