@@ -44,7 +44,49 @@ function resolvePort() {
     return port;
 }
 
+// Workers are capped per RUN, but nothing capped them across CONCURRENT runs, and this
+// checkout regularly has several sessions in it. On 6 Aug 2026 that showed up as a machine
+// nobody could use: six sessions open, 16-20 headless browsers alive at once, 25.5 GB of
+// demand squashed into 16 GB of RAM, 9.2 GB of swap and a load average of 105 on 8 cores.
+// Four workers is right for one run and ruinous for three.
+//
+// So: count the other runs and divide. Degrade, never block. A lock would be the obvious
+// alternative and is the wrong tool here — the pre-push gate would sit waiting on a lock held
+// by a session that has since been killed, and the documented escape from a stuck gate is
+// SKIP_SYNC_TESTS=1. A slower run is recoverable; teaching people to skip the gate is not.
+//
+// Pinned into the environment for the same reason as PORT above: this file is evaluated once
+// in the main process and again in every worker, and an unpinned count would differ between
+// them.
+function resolveWorkers() {
+    const pinned = Number(process.env.PLAYWRIGHT_WORKERS);
+    if (Number.isInteger(pinned) && pinned > 0) return pinned;
+
+    const MAX = 4;
+    let others = 0;
+    try {
+        // pgrep matches this process too, so discount self. Anything unexpected means we
+        // cannot prove we are alone, and the safe assumption is that we are not.
+        const out = execFileSync('pgrep', ['-f', 'playwright test'], { timeout: 5000 })
+            .toString().trim();
+        const pids = out ? out.split('\n').map(Number).filter(Number.isInteger) : [];
+        others = Math.max(0, pids.filter((p) => p !== process.pid).length);
+    } catch (err) {
+        // pgrep exits 1 with no output when nothing matches. That is "no other runs",
+        // not a failure. Any other error and we stay conservative.
+        others = err && err.status === 1 ? 0 : 1;
+    }
+
+    const workers = Math.max(1, Math.floor(MAX / (others + 1)));
+    if (others > 0) {
+        console.log(`[playwright] ${others} other test run(s) active — using ${workers} worker(s) instead of ${MAX}`);
+    }
+    process.env.PLAYWRIGHT_WORKERS = String(workers);   // workers inherit this
+    return workers;
+}
+
 const PORT = resolvePort();
+const WORKERS = resolveWorkers();
 const LIVE_URL = process.env.DASHBOARD_URL || `http://localhost:${PORT}`;
 
 module.exports = defineConfig({
@@ -66,8 +108,9 @@ module.exports = defineConfig({
   retries: 0,
   // Cap workers. The bottleneck was the single-threaded dev server (now threaded, below) and
   // too many browser contexts tearing down at once. 4 keeps the suite fast while letting each
-  // context start and tear down cleanly under load.
-  workers: 4,
+  // context start and tear down cleanly under load — and resolveWorkers() above divides that
+  // down further when another session is already running the suite.
+  workers: WORKERS,
   use: {
     baseURL: LIVE_URL,
     screenshot: 'only-on-failure',
