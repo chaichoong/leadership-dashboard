@@ -3,24 +3,59 @@ name: Auto-bump pageVer
 on:
   push:
     branches: [main]
-    # Keep this list in sync with FILE_TO_PAGE in scripts/pre-commit-action.py.
+    # This list MUST equal the keys of FILE_TO_PAGE in scripts/pre-commit-action.py.
+    # A file mapped there but missing here never bumps, because this filter decides
+    # whether the workflow runs at all — the script never gets to see the push.
+    #
+    # That is not hypothetical. On 2026-08-04 the CRM page gained a 14-step
+    # interactive walkthrough (319b438); crm-supabase.html was mapped in the script
+    # but absent from this list, so pageVer sat at 1.0 and the registry reported the
+    # page "in sync" with its guide. 21 of 34 mapped files were in that state.
+    #
+    # Two hand-maintained lists drift, so a comment is not the control:
+    # tests/constant-drift.test.js asserts this list equals FILE_TO_PAGE exactly and
+    # fails the build if they diverge. Add a file to BOTH, or the test goes red.
+    #
     # (os/index.html removed — Operating Systems Hub deleted Apr 2026.
-    #  os/launch-plan.html removed — duplicated Strategy OS, deleted Apr 2026.)
+    #  os/launch-plan.html removed — duplicated Strategy OS, deleted Apr 2026.
+    #  os/business-plan-builder/index.html removed 2026-08-06 — retired from the
+    #  shell 1 Aug 2026, has no PAGE_REGISTRY entry, so it triggered a no-op run.)
     paths:
-      - 'js/dashboard.js'
-      - 'js/cfv.js'
-      - 'js/invoices.js'
-      - 'js/pnl.js'
-      - 'js/fintable.js'
-      - 'js/sitemap.js'
-      - 'follow-up.html'
+      - 'ai-brain.html'
       - 'compliance.html'
-      - 'os/tasks/index.html'
-      - 'os/business-plan-builder/index.html'
-      - 'os/strategy/index.html'
-      - 'os/strategy/strategy.js'
-      - 'os/strategy/strategy.css'
+      - 'crm-supabase.html'
+      - 'follow-up.html'
+      - 'how-it-works.html'
+      - 'js/agent-accuracy.js'
+      - 'js/ar-variable.js'
+      - 'js/arrears.js'
+      - 'js/cashflow.js'
+      - 'js/ceo-brief.js'
+      - 'js/cfv.js'
+      - 'js/costs.js'
+      - 'js/crm-walkthrough.js'
+      - 'js/dashboard.js'
+      - 'js/fintable.js'
+      - 'js/income.js'
+      - 'js/invoices.js'
+      - 'js/kpi-library.js'
+      - 'js/money.js'
+      - 'js/pnl.js'
+      - 'js/prospecting.js'
+      - 'js/reconciliation.js'
+      - 'js/sitemap.js'
+      - 'js/skills-data.js'
+      - 'js/skills.js'
+      - 'js/transactions.js'
+      - 'js/wealth-ratios.js'
+      - 'js/wealth.js'
       - 'os/operations/index.html'
+      - 'os/strategy/index.html'
+      - 'os/strategy/strategy.css'
+      - 'os/strategy/strategy.js'
+      - 'os/systemisation/index.html'
+      - 'os/tasks/index.html'
+      - 'os/team/index.html'
 
 permissions:
   contents: write  # needed so the job can push its auto-bump commit back to main

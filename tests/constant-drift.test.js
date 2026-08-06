@@ -314,3 +314,83 @@ describe('no cache-bust drift across pages', () => {
     ).toEqual([]);
   });
 });
+
+// The auto-bump trigger list and the auto-bump mapping are two hand-maintained copies
+// of the same set, in two different file formats, and both carried a "keep in sync"
+// comment. They were not in sync: 21 of 34 mapped files were missing from the workflow
+// filter, so a push touching any of them never started the workflow and pageVer never
+// moved.
+//
+// It fails silently in the worst direction. Nothing errors — the workflow simply does
+// not run, so the page keeps whatever pageVer it last had and every staleness signal
+// built on pageVer reads it as current. The CRM page gained a 14-step interactive
+// walkthrough on 2026-08-04 (319b438) and the drift monitor reported it two days later
+// as "in sync" with its guide, because 1.0 == 1.0.
+//
+// Note the trap in the earlier attempt: CRM was added to FILE_TO_PAGE on 2026-08-01 to
+// fix exactly this, and it changed nothing, because the missing half was the `paths:`
+// filter. Adding a file to one list looks like a fix and is not one.
+describe('auto-bump trigger list does not drift from the auto-bump mapping', () => {
+  const SCRIPT = read('scripts/pre-commit-action.py');
+  const WORKFLOW = read('.github/workflows/auto-bump-pagever.yml');
+
+  // FILE_TO_PAGE keys: the files the bump script knows how to attribute to a page.
+  const mappedBlock = SCRIPT.match(/FILE_TO_PAGE = \{(.*?)\n\}/s);
+  const mapped = mappedBlock
+    ? [...mappedBlock[1].matchAll(/^\s*'([^']+)':/gm)].map((m) => m[1])
+    : [];
+
+  // `paths:` entries: the files that actually start the workflow. Read only the
+  // trigger block — `permissions:` ends it, and the job body below contains other
+  // quoted paths that would otherwise be scooped up as phantom triggers.
+  const triggerBlock = WORKFLOW.split('permissions:')[0];
+  const triggers = [...triggerBlock.matchAll(/^\s*-\s*'([^']+)'/gm)].map((m) => m[1]);
+
+  // CONTROL — a regex that matches nothing makes both lists empty, and "the two lists
+  // are equal" then passes forever while the real lists diverge. Assert the haystack.
+  it('parses both lists (control — guards against a vacuous pass)', () => {
+    expect(mapped.length, 'FILE_TO_PAGE parsed empty').toBeGreaterThan(25);
+    expect(triggers.length, 'workflow paths parsed empty').toBeGreaterThan(25);
+    // The file whose absence caused the CRM miss. If this stops matching, the block is blind.
+    expect(mapped).toContain('crm-supabase.html');
+    expect(triggers).toContain('crm-supabase.html');
+  });
+
+  it('every mapped file is in the workflow paths filter', () => {
+    const notTriggered = mapped.filter((f) => !triggers.includes(f)).sort();
+    expect(
+      notTriggered,
+      'Mapped in scripts/pre-commit-action.py but missing from the workflow `paths:` filter.\n' +
+        'These files never auto-bump — the workflow does not run at all for them:\n' +
+        notTriggered.map((f) => `  ${f}`).join('\n'),
+    ).toEqual([]);
+  });
+
+  it('every workflow path is mapped to a page', () => {
+    const unmapped = triggers.filter((f) => !mapped.includes(f)).sort();
+    expect(
+      unmapped,
+      'Listed in the workflow `paths:` filter but absent from FILE_TO_PAGE.\n' +
+        'These start a workflow run that can do nothing:\n' +
+        unmapped.map((f) => `  ${f}`).join('\n'),
+    ).toEqual([]);
+  });
+
+  it('every mapped page id exists in PAGE_REGISTRY', () => {
+    const registryIds = new Set(
+      [...CONFIG.matchAll(/\{\s*id:\s*'([^']+)'[^}]*pageVer:/g)].map((m) => m[1]),
+    );
+    expect(registryIds.size, 'PAGE_REGISTRY parsed empty').toBeGreaterThan(20);
+
+    const targets = mappedBlock
+      ? [...mappedBlock[1].matchAll(/^\s*'[^']+':\s*(\[[^\]]*\]|'[^']*')/gm)].flatMap((m) =>
+          [...m[1].matchAll(/'([^']+)'/g)].map((x) => x[1]),
+        )
+      : [];
+    const missing = [...new Set(targets.filter((id) => !registryIds.has(id)))].sort();
+    expect(
+      missing,
+      `Auto-bump targets a page id that PAGE_REGISTRY does not define: ${missing.join(', ')}`,
+    ).toEqual([]);
+  });
+});
