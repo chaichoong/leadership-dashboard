@@ -541,3 +541,86 @@ describe('digest noise control', () => {
     expect(r.out).toMatch(/long-ago/);   // outside the grace window, still flagged
   });
 });
+
+// ---------------------------------------------------------------------------
+// Some jobs run outside the queue on purpose (the digest, the process reaper).
+// They must still be watched: a job left out of the schedule entirely is a job
+// nobody notices has stopped.
+// ---------------------------------------------------------------------------
+describe('the real job-schedule.json', () => {
+  const REAL = JSON.parse(readFileSync(resolve(__dirname, '../scripts/job-schedule.json'), 'utf8'));
+  const jobs = Object.entries(REAL).filter(([k]) => !k.startsWith('_'));
+
+  it('gives every job a parseable cron and a lateness limit', () => {
+    for (const [name, cfg] of jobs) {
+      expect(cfg.cron, `${name} has no cron`).toBeTruthy();
+      expect(cfg.cron.split(' ')).toHaveLength(5);
+      expect(typeof cfg.maxLateMinutes, `${name} has no maxLateMinutes`).toBe('number');
+    }
+  });
+
+  it('resolves a last-scheduled time for every cron', () => {
+    const crons = jobs.map(([, c]) => c.cron);
+    const resolved = py(`[m.last_scheduled(c) is not None for c in ${JSON.stringify(crons)}]`);
+    expect(resolved.every(Boolean)).toBe(true);
+  });
+
+  it('watches the jobs that deliberately bypass the queue', () => {
+    // Both exist to report on or clean up after everything else, so they run
+    // unqueued. Being unqueued must not mean being unwatched.
+    const unqueued = jobs.filter(([, c]) => c.queued === false).map(([n]) => n);
+    expect(unqueued).toContain('job-digest');
+    expect(unqueued).toContain('mac-guard');
+  });
+
+  it('gives obligations more slack than sweeps', () => {
+    // A nightly sweep landing mid-morning is noise. A Universal Credit check
+    // Mica needs is worth sending late.
+    expect(REAL['drift-monitor'].maxLateMinutes)
+      .toBeLessThan(REAL['uc-check-slack-notifier'].maxLateMinutes);
+    expect(REAL['monthly-rent-due-date'].maxLateMinutes).toBeGreaterThanOrEqual(1440);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// last_scheduled originally stepped back a minute at a time over 96 hours, so
+// it returned None for anything rarer than every four days. That made the
+// staleness guard inert for the monthly rent job and the quarterly review, and
+// hid both from the digest, which only watches jobs it can date.
+// ---------------------------------------------------------------------------
+describe('last_scheduled reaches back far enough', () => {
+  it('dates a monthly cron from mid-month', () => {
+    expect(py(`m.last_scheduled('0 6 1 * *', datetime.datetime(2026, 8, 20, 9, 0)).isoformat()`))
+      .toBe('2026-08-01T06:00:00');
+  });
+
+  it('dates a quarterly cron from months later', () => {
+    expect(py(`m.last_scheduled('7 9 1 1,4,7,10 *', datetime.datetime(2026, 9, 30, 9, 0)).isoformat()`))
+      .toBe('2026-07-01T09:07:00');
+  });
+
+  it('crosses a year boundary', () => {
+    expect(py(`m.last_scheduled('7 9 1 1,4,7,10 *', datetime.datetime(2026, 2, 3, 0, 0)).isoformat()`))
+      .toBe('2026-01-01T09:07:00');
+  });
+
+  it('picks the latest occurrence on the day, not the earliest', () => {
+    // Twice-daily dispatch at 07:30 and 14:30, asked at 20:00.
+    expect(py(`m.last_scheduled('30 7,14 * * *', datetime.datetime(2026, 8, 6, 20, 0)).isoformat()`))
+      .toBe('2026-08-06T14:30:00');
+    // ...and the morning one when asked at noon.
+    expect(py(`m.last_scheduled('30 7,14 * * *', datetime.datetime(2026, 8, 6, 12, 0)).isoformat()`))
+      .toBe('2026-08-06T07:30:00');
+  });
+
+  it('rolls back to the previous day before the first firing', () => {
+    expect(py(`m.last_scheduled('0 2 * * *', datetime.datetime(2026, 8, 6, 1, 0)).isoformat()`))
+      .toBe('2026-08-05T02:00:00');
+  });
+
+  it('still honours day-of-week when walking days', () => {
+    // Sunday, looking back at a Mon-Fri job: must land on Friday, not Saturday.
+    expect(py(`m.last_scheduled('0 5 * * 1-5', datetime.datetime(2026, 8, 9, 9, 0)).isoformat()`))
+      .toBe('2026-08-07T05:00:00');
+  });
+});

@@ -129,7 +129,10 @@ def build(now_dt=None):
             else:
                 ran.append(job)
         elif st is not None:
-            # Ran without ever touching the queue: a wiring gap, but it did run.
+            # Ran without touching the queue. Expected for the jobs marked
+            # queued:false (they report on or clean up after the queue); a
+            # wiring gap for anything else. Either way it ran, so grade it on
+            # what run-job.sh recorded.
             if st.get("ok"):
                 ran.append(job)
             else:

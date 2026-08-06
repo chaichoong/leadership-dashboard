@@ -13,7 +13,11 @@
     "from their SKILL.md, where only the lease can free a crashed session.",
     "",
     "Crons are standard five-field, LOCAL time, Sunday = 0.",
-    "job-digest is deliberately absent: it reports on the queue and must never wait behind it."
+    "",
+    "queued:false means the job runs OUTSIDE the queue on purpose. Both such jobs exist to",
+    "report on or clean up after the others, so waiting behind a stuck routine would stop them",
+    "doing the one thing they are for. They are still listed here so the morning digest watches",
+    "them: a job left out of this file entirely is a job nobody notices has stopped."
   ],
 
   "drift-monitor":                  { "cron": "0 2 * * *",         "maxLateMinutes": 180,  "mode": "cooperative", "note": "nightly sweep, worthless once the day has started" },
@@ -41,5 +45,8 @@
   "feed-brain":                     { "cron": "45 22 * * *",       "maxLateMinutes": 300,  "mode": "wrapped" },
   "compound-brain":                 { "cron": "0 23 * * *",        "maxLateMinutes": 300,  "mode": "wrapped" },
   "publish-brain":                  { "cron": "20 23 * * *",       "maxLateMinutes": 300,  "mode": "wrapped" },
-  "audiobook-backfill":             { "cron": "0 0 * * *",         "maxLateMinutes": 300,  "mode": "wrapped" }
+  "audiobook-backfill":             { "cron": "0 0 * * *",         "maxLateMinutes": 300,  "mode": "wrapped" },
+
+  "mac-guard":                      { "cron": "0 * * * *",         "maxLateMinutes": 120,  "mode": "wrapped", "queued": false, "note": "reaps preview servers and test browsers that outlived their session. Must run even while a routine holds the queue, since a stuck routine is exactly when strays pile up" },
+  "job-digest":                     { "cron": "0 11 * * *",        "maxLateMinutes": 240,  "mode": "wrapped", "queued": false, "note": "reports on the queue, so it must never wait behind it" }
 }
