@@ -1713,7 +1713,8 @@ async function buildPushProposal(qps, fields, onProgress) {
                 const collaboratorIds = Array.isArray(collabLinks)
                     ? collabLinks.map(c => typeof c === 'object' ? c.id : c).filter(Boolean)
                     : [];
-                linkedProjectsById[r.id] = { id: r.id, collaboratorIds };
+                const taskCount = linkIdsOf(r.fields?.[PROJ_CLOSE_F.linkedTasks]).length;
+                linkedProjectsById[r.id] = { id: r.id, collaboratorIds, taskCount };
             });
         } catch (e) { console.warn('[buildPushProposal] linked project fetch failed', e); }
     }
@@ -1741,7 +1742,8 @@ async function buildPushProposal(qps, fields, onProgress) {
             const collaboratorIds = Array.isArray(collabLinks)
                 ? collabLinks.map(c => typeof c === 'object' ? c.id : c).filter(Boolean)
                 : [];
-            existingByName.set(String(n).trim().toLowerCase(), { id: r.id, collaboratorIds });
+            const taskCount = linkIdsOf(r.fields?.[PROJ_CLOSE_F.linkedTasks]).length;
+            existingByName.set(String(n).trim().toLowerCase(), { id: r.id, collaboratorIds, taskCount });
         });
     } catch (e) {
         console.warn('[buildPushProposal] project dedup check failed — will still allow push', e);
@@ -1775,23 +1777,17 @@ async function buildPushProposal(qps, fields, onProgress) {
 
         // For existing projects, just count the tasks already linked for the
         // modal's "N tasks already linked" summary. We don't re-extract.
-        let existingTaskCount = 0;
-        if (alreadyExists && existingProjectId) {
-            report(`Counting tasks on "${projectName.slice(0, 40)}…"`);
-            try {
-                const tFilter = `FIND("${existingProjectId}", ARRAYJOIN({Projects}))>0`;
-                const tParams = new URLSearchParams({
-                    filterByFormula: tFilter,
-                    returnFieldsByFieldId: 'true',
-                    pageSize: '200',
-                    'fields[]': TASK_F.name,
-                });
-                const tData = await airtableFetch(`${TABLES.tasks}?${tParams.toString()}`);
-                existingTaskCount = (tData.records || []).length;
-            } catch (e) {
-                console.warn('[buildPushProposal] task count failed for', projectName, e);
-            }
-        }
+        //
+        // Counted from the project's own 'Linked Tasks' field, captured when the
+        // project records were fetched above — no second request. The previous
+        // version queried the Tasks table with
+        //   FIND(projectId, ARRAYJOIN({Projects}))
+        // and always reported 0, for two independent reasons: ARRAYJOIN on a link
+        // field joins primary-field NAMES not record IDs (same trap already
+        // documented on fetchOpenTasksForProject below), and it sent pageSize=200
+        // when Airtable's maximum is 100, so the request 422'd and the count fell
+        // into the catch. Verified 6 Aug 2026.
+        const existingTaskCount = alreadyExists ? (existingInfo.taskCount || 0) : 0;
         const existingTaskNames = new Set(); // kept for backwards-compat in the loop
 
         const stones = OBJSTRAT.monthlyStones[qp.i].map(sFid => (fields[sFid] || '').trim());
