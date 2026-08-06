@@ -187,14 +187,57 @@ def cron_matches(expr, dt):
     return True
 
 
-def last_scheduled(expr, ref=None, lookback_hours=96):
-    """Most recent moment this cron should have fired, at or before ref."""
-    ref = ref or datetime.now()
-    cur = ref.replace(second=0, microsecond=0)
-    for _ in range(lookback_hours * 60 + 1):
-        if cron_matches(expr, cur):
-            return cur
-        cur -= timedelta(minutes=1)
+def day_matches(expr, dt):
+    """Does the DATE part of this cron match, ignoring hour and minute?"""
+    _, _, dom, month, dow = expr.split()
+    if dt.month not in _expand(month, 1, 12):
+        return False
+
+    dow_set = _expand(dow, 0, 7)
+    if 7 in dow_set:
+        dow_set.add(0)
+    cron_dow = (dt.weekday() + 1) % 7  # Mon=0..Sun=6  ->  Sun=0..Sat=6
+
+    dom_restricted = dom.strip() != "*"
+    dow_restricted = dow.strip() != "*"
+    dom_hit = dt.day in _expand(dom, 1, 31)
+    dow_hit = cron_dow in dow_set
+
+    if dom_restricted and dow_restricted:
+        return dom_hit or dow_hit
+    if dom_restricted:
+        return dom_hit
+    if dow_restricted:
+        return dow_hit
+    return True
+
+
+def last_scheduled(expr, ref=None, lookback_days=400):
+    """Most recent moment this cron should have fired, at or before ref.
+
+    Walks whole days and only then the matching hours and minutes. The obvious
+    version steps back one minute at a time, which needs a lookback measured in
+    minutes; at the 96 hours that was practical it returned None for anything
+    rarer than every four days. That made the staleness guard silently inert for
+    the monthly rent job and the quarterly review, and hid both from the morning
+    digest, which only watches jobs it can date. 400 days covers monthly,
+    quarterly and annual crons in at most 400 cheap iterations.
+    """
+    ref = (ref or datetime.now()).replace(second=0, microsecond=0)
+    minutes = sorted(_expand(expr.split()[0], 0, 59), reverse=True)
+    hours = sorted(_expand(expr.split()[1], 0, 23), reverse=True)
+    if not minutes or not hours:
+        return None
+
+    day = ref
+    for _ in range(lookback_days + 1):
+        if day_matches(expr, day):
+            for h in hours:
+                for m in minutes:
+                    candidate = day.replace(hour=h, minute=m)
+                    if candidate <= ref:
+                        return candidate
+        day = (day - timedelta(days=1)).replace(hour=23, minute=59)
     return None
 
 
