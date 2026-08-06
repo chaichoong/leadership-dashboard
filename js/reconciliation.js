@@ -706,7 +706,15 @@
     }
 
     function reconRowHtml(r, i) {
-        const amtClass = r.txAmount >= 0 ? 'text-green' : 'text-red';
+        // Direction of the money must be readable from the TEXT, not only the
+        // colour: `.od-table td { color: var(--text-primary) }` outranks
+        // `.text-green`/`.text-red` on specificity, so a colour-only signal is
+        // silently swallowed (and colour alone fails accessibility anyway).
+        // The sign prefix is the signal; the colour is reinforcement.
+        const amtNum = Number(r.txAmount) || 0;
+        const amtClass = amtNum > 0 ? 'text-green' : amtNum < 0 ? 'text-red' : '';
+        const amtSign = amtNum > 0 ? '+' : amtNum < 0 ? '-' : '';
+        const amtTitle = amtNum > 0 ? 'Money in' : amtNum < 0 ? 'Money out' : 'Zero amount';
         const cc = 'od-cell'; // base cell class (padding, font-size, v-align)
         const dimClass = 'od-text-muted-sm';
         const catSelect = buildCatDropdown('recon-cat-' + i, r.categoryId);
@@ -741,7 +749,7 @@
             <td class="${cc}" style="white-space:nowrap">${escHtml(r.txDate)}</td>
             <td class="${cc} muted-cell" style="white-space:nowrap">${escHtml(r.txAccount || '—')}</td>
             <td class="${cc}" style="max-width:260px"><strong style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:block">${escHtml(r.txVendor)}</strong><span class="${dimClass}" style="display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;line-height:1.4;word-break:break-word">${escHtml(r.txDesc)}</span>${matchBadge?'<br>'+matchBadge:''}</td>
-            <td class="${cc} num-cell ${amtClass}" style="font-weight:600">${fmt(Math.abs(r.txAmount))}</td>
+            <td class="${cc} num-cell ${amtClass}" style="font-weight:600;white-space:nowrap" title="${amtTitle}">${amtSign}${fmt(amtNum)}</td>
             <td class="${cc}">${catSelect}</td>
             <td class="${cc}">${subCatSelect}</td>
             <td class="${cc}">${buildBusinessDropdown('recon-business-' + i, r.businessId || '')}</td>

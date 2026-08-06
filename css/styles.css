@@ -1229,6 +1229,17 @@ tr.expand-row:hover td {
 .text-red    { color: var(--danger); }
 .text-blue   { color: var(--info); }
 
+/* Inside a table these utilities lose: `.od-table td` sets --text-primary at
+ * specificity (0,1,1) and beats a bare `.text-red` (0,1,0), so a cell asking
+ * for a colour renders in plain body text with no warning. That is how the
+ * reconciliation Amount column lost its in/out colour. Re-assert the utility
+ * at cell level so opting in actually works. Never rely on colour alone —
+ * carry the meaning in the text too (see reconRowHtml's +/- prefix). */
+.od-table td.text-green { color: var(--success); }
+.od-table td.text-amber { color: var(--warning); }
+.od-table td.text-red   { color: var(--danger); }
+.od-table td.text-blue  { color: var(--info); }
+
 /* ── Modal container ── */
 .od-modal {
     background: var(--bg-surface);
