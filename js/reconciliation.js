@@ -701,6 +701,8 @@
             categoryId: r.categoryId, subCatId: r.subCatId,
             businessId: r.businessId, tenancyId: r.tenancyId,
             unitId: r.unitId, propertyId: r.propertyId, costId: r.costId,
+            // Carried so the audit row can record which matcher produced this suggestion.
+            matchType: r.matchType, score: r.score,
             status: r.status
         }));
     }
@@ -944,6 +946,24 @@
     // source of truth so the two paths can never drift.
     function buildAccuracyKPIHtml(stats) {
         if (!stats) return '';
+        // Plain-English field names — the audit stores internal keys, which mean nothing on a dashboard.
+        const FIELD_LABELS = {
+            categoryId: 'Category', subCatId: 'Sub-category', businessId: 'Business',
+            tenancyId: 'Tenancy', unitId: 'Unit', propertyId: 'Property', costId: 'Cost',
+        };
+        // The score is all-or-nothing across seven fields, so the headline alone never says
+        // what to fix. Name the biggest offender.
+        const worst = Object.entries(stats.byField || {}).sort((a, b) => b[1] - a[1])[0];
+        const worstHtml = worst
+            ? `<div class="od-text-muted-sm" style="margin-top:6px">Biggest miss: ${escHtml(FIELD_LABELS[worst[0]] || worst[0])} (${worst[1]} of ${stats.total})</div>`
+            : '';
+        // Does correcting it make it better? Knowledge Base rows come from Kevin's own past
+        // corrections; Vendor rows are cold guesses. If KB does not beat cold, it is not learning.
+        const kb = (stats.byMatchType || {})['Knowledge Base'];
+        const cold = (stats.byMatchType || {})['Vendor'];
+        const learnHtml = (kb && kb.total)
+            ? `<div class="od-text-muted-sm" style="margin-top:2px">From your corrections: ${kb.pct}% (${kb.total})${cold && cold.total ? ` · cold guess: ${cold.pct}% (${cold.total})` : ''}</div>`
+            : '';
         return `
             <div class="kpi-card">
                 <div class="kpi-card-label">AI Reconciliation Accuracy</div>
@@ -953,6 +973,8 @@
                     <div class="od-progress-fill" style="width:${stats.pct}%;background:${stats.colour}"></div>
                 </div>
                 <div class="od-text-muted-sm" style="margin-top:6px">Target: ≥90% <span style="color:var(--success)">●</span> 75–89% <span style="color:var(--warning)">●</span> &lt;75% <span style="color:var(--danger)">●</span></div>
+                ${worstHtml}
+                ${learnHtml}
             </div>`;
     }
 
@@ -979,11 +1001,23 @@
         try {
             // Server-side: only rows where Date is within the last 31 days. Payload stays tiny.
             const formula = encodeURIComponent(`IS_AFTER({Date}, DATEADD(TODAY(), -31, 'days'))`);
-            const url = `https://api.airtable.com/v0/${BASE_ID}/${TABLES.reconAudit}?pageSize=100&filterByFormula=${formula}&returnFieldsByFieldId=true`;
-            const resp = await fetch(url, { headers: { 'Authorization': 'Bearer ' + PAT } });
-            if (!resp.ok) return _reconStatsCache;
-            const data = await resp.json();
-            const records = data.records || [];
+            // Airtable caps a page at 100 rows and returns an `offset` when more remain.
+            // This loop used to be a single un-paged fetch, so the card measured the FIRST
+            // 100 rows and reported that as the accuracy. On 6 Aug 2026 there were 259 rows
+            // in the window: the card read "66/100" while the true figure was 167/259 = 64%.
+            // Any number the card showed was a sample, not the population. Page through.
+            const records = [];
+            let offset = '';
+            do {
+                const url = `https://api.airtable.com/v0/${BASE_ID}/${TABLES.reconAudit}`
+                    + `?pageSize=100&filterByFormula=${formula}&returnFieldsByFieldId=true`
+                    + (offset ? `&offset=${encodeURIComponent(offset)}` : '');
+                const resp = await fetch(url, { headers: { 'Authorization': 'Bearer ' + PAT } });
+                if (!resp.ok) return _reconStatsCache;
+                const data = await resp.json();
+                records.push(...(data.records || []));
+                offset = data.offset || '';
+            } while (offset);
             if (records.length === 0) {
                 _reconStatsCache = null;
                 localStorage.removeItem(RECON_CACHE_KEY);
@@ -994,7 +1028,31 @@
             const pct = Math.round((accurate / total) * 100);
             const colour = pct >= 90 ? 'var(--success)' : pct >= 75 ? 'var(--warning)' : 'var(--danger)';
             const label = pct >= 90 ? 'green' : pct >= 75 ? 'amber' : 'red';
-            const stats = { total, accurate, pct, colour, label };
+
+            // Which field actually misses. "Was Accurate" is all-or-nothing across seven
+            // fields, so a single habitually-blank link (property, say) drags the headline
+            // down while the other six are fine. Counting misses per field turns one
+            // unactionable number into a ranked list of what to fix.
+            const byField = {};
+            // Does the knowledge base compound? Group by the source that produced the
+            // suggestion: if Knowledge Base rows do not beat cold Vendor rows, the
+            // corrections are not being learned from and the loop is decorative.
+            const byMatchType = {};
+            for (const r of records) {
+                const f = r.fields || {};
+                const ok = !!f[RECAUDIT.wasAccurate];
+                for (const name of String(f[RECAUDIT.mismatched] || '').split(',').map(s => s.trim()).filter(Boolean)) {
+                    byField[name] = (byField[name] || 0) + 1;
+                }
+                const mt = f[RECAUDIT.matchType] || 'Unrecorded';
+                const bucket = byMatchType[mt] || (byMatchType[mt] = { total: 0, accurate: 0 });
+                bucket.total++;
+                if (ok) bucket.accurate++;
+            }
+            for (const b of Object.values(byMatchType)) {
+                b.pct = b.total ? Math.round((b.accurate / b.total) * 100) : 0;
+            }
+            const stats = { total, accurate, pct, colour, label, byField, byMatchType };
             _reconStatsCache = stats;
             try { localStorage.setItem(RECON_CACHE_KEY, JSON.stringify({ ts: Date.now(), stats })); } catch {}
             return stats;
@@ -1006,17 +1064,28 @@
 
     // Write one audit row. Fire-and-forget from the caller — errors are logged but don't block
     // the approval flow. Also kicks off a prune of rows older than 35 days so the table self-cleans.
-    async function logReconAccuracy(txId, wasAccurate) {
+    // `mismatched` is the array of field names that differed from the AI's suggestion (empty
+    // when accurate). `matchType`/`ruleConf` record WHICH matcher produced the suggestion and
+    // how confident its rule was, so accuracy can be split by source and the knowledge base
+    // can be shown to compound (or not) instead of being assumed to.
+    async function logReconAccuracy(txId, wasAccurate, mismatched, matchType, ruleConf) {
         if (typeof PAT === 'undefined' || !PAT) return;
         try {
+            const fields = {
+                [RECAUDIT.txId]: txId,
+                [RECAUDIT.date]: new Date().toISOString().slice(0, 10),
+                [RECAUDIT.wasAccurate]: !!wasAccurate,
+                [RECAUDIT.mismatched]: (mismatched || []).join(','),
+                [RECAUDIT.matchType]: matchType || '',
+            };
+            // Airtable number fields must receive a Number, never a string.
+            if (ruleConf !== undefined && ruleConf !== null && ruleConf !== '') {
+                fields[RECAUDIT.ruleConf] = Number(ruleConf) || 0;
+            }
             const resp = await fetch(`https://api.airtable.com/v0/${BASE_ID}/${TABLES.reconAudit}`, {
                 method: 'POST',
                 headers: { 'Authorization': 'Bearer ' + PAT, 'Content-Type': 'application/json' },
-                body: JSON.stringify({ fields: {
-                    [RECAUDIT.txId]: txId,
-                    [RECAUDIT.date]: new Date().toISOString().slice(0, 10),
-                    [RECAUDIT.wasAccurate]: !!wasAccurate,
-                }}),
+                body: JSON.stringify({ fields }),
             });
             if (!resp.ok) {
                 console.warn('logReconAccuracy write failed:', resp.status);
@@ -1200,9 +1269,11 @@
         const orig = (window._reconOriginals || [])[idx];
         if (orig && orig.status === 'suggestion') {
             const final = { categoryId: catId, subCatId, businessId, tenancyId, unitId, propertyId, costId };
-            const wasAccurate = ['categoryId', 'subCatId', 'businessId', 'tenancyId', 'unitId', 'propertyId', 'costId']
-                .every(f => (final[f] || '') === (orig[f] || ''));
-            logReconAccuracy(r.txId, wasAccurate);
+            // Collect the fields that differed, not just whether any did. The score stays
+            // all-or-nothing (unchanged), but a miss is now attributable to a named field.
+            const mismatched = ['categoryId', 'subCatId', 'businessId', 'tenancyId', 'unitId', 'propertyId', 'costId']
+                .filter(f => (final[f] || '') !== (orig[f] || ''));
+            logReconAccuracy(r.txId, mismatched.length === 0, mismatched, orig.matchType, orig.score);
         }
 
         const getInputVal = (id) => { const el = document.getElementById(id); return el ? el.value : ''; };
@@ -2041,7 +2112,10 @@
             originals.splice(idx, 1, ...newResults.map(nr => ({
                 categoryId: nr.categoryId, subCatId: nr.subCatId,
                 businessId: nr.businessId, tenancyId: nr.tenancyId,
-                unitId: nr.unitId, costId: nr.costId,
+                // propertyId was omitted here while the other snapshot carried it, so a split
+                // row compared final propertyId against undefined and logged a phantom miss.
+                unitId: nr.unitId, propertyId: nr.propertyId, costId: nr.costId,
+                matchType: nr.matchType, score: nr.score,
                 status: nr.status,
             })));
 
