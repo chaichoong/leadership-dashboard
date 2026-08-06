@@ -114,9 +114,17 @@ const BASELINE_GRACE_MS = 60 * 1000;
 const MAX_POSTS_PER_RUN = 10;
 const MAX_REACTION_CHECKS_PER_RUN = 25;
 
-// Tier 1 of the delegation rules: Kevin ONLY, never an agent, whatever an
-// accuracy score says. If one of these reaches the approval queue from an
-// agent, the post says so loudly rather than reading like ordinary work.
+// Tier 1 of the delegation rules: Kevin's private legal and financial matter.
+// Agents PREPARE these and he approves them like anything else (his call,
+// 6 Aug 2026) — the guardrail is that nothing is sent, filed, paid or executed
+// until he says yes. So the banner's job is no longer "this should not be
+// here". It is "know what you are looking at before you tap".
+//
+// Matched on name + description here, and the dispatch engine ALSO stamps its
+// own banner into Agent Output (TIER1_BANNER in scripts/agent-dispatch.py).
+// Two labels on purpose: this one cannot see a tier-1 connection an agent only
+// discovered while working, and that one cannot fire if the task never reached
+// an agent. Keep both.
 const KEVIN_ONLY_PATTERNS = [
     /restraint order/i,
     /operation lily/i,
@@ -340,9 +348,10 @@ function buildApprovalBlocks(t, agent, warn) {
             type: 'section',
             text: {
                 type: 'mrkdwn',
-                text: ':rotating_light: *This looks like a Kevin-only matter* (restraint order, Operation Lily, the '
-                    + 'investigation, or a liquidation). An agent should not be preparing this at all. Treat it as a '
-                    + 'fault to look into, not a task to approve.',
+                text: ':rotating_light: *Tier 1. Your private legal and financial matter* (restraint order, '
+                    + 'Operation Lily, the investigation, or a liquidation). An AI agent prepared this. Nothing has '
+                    + 'been sent, filed, paid or changed anywhere. Read it properly before you approve, and remember '
+                    + 'that approving it means the action then happens.',
             },
         });
     }
