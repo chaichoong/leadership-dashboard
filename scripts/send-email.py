@@ -1,18 +1,18 @@
 #!/usr/bin/env python3
-"""Send an approved email on Kevin's behalf — the missing carry-out.
+"""Send an approved email on Kevin's behalf — the gate for the Gmail worker.
 
 WHY THIS EXISTS
-The agent dispatch engine (scripts/agent-dispatch.py) could prepare
-Correspondence and put it in front of Kevin, but nothing in the platform could
-actually SEND it. Every "email X" task therefore died as a Gmail draft that
-Kevin had to open and press send on himself. That is the handoff the whole
-approval loop exists to remove.
+`POST /send-email` on the drive-upload worker is the TRANSPORT: it sends as
+kevinbrittain@gmail.com via the Gmail API (see memory reference_gmail_send_worker).
+It is gated only by a bearer key, so anything holding that key can send anything
+to anyone. "Only call it for approved work" is a rule written in a memory file,
+and a rule in prose is not a control.
 
-THE GATE IS IN THIS CODE, NOT IN A COMMENT
-This script refuses to send unless Airtable says Kevin approved the task, and
-it sends the approved words verbatim. There is no --force, no --yes and no way
-to pass a recipient or a body on the command line. The only source of the
-email is the Agent Output field of an approved task. That means:
+This script is the CONTROL. It is how agents send email, and it refuses to send
+unless Airtable shows Kevin approved the task, sending the approved words
+verbatim. There is no --force, no --yes, and no way to pass a recipient or a
+body on the command line. The ONLY source of the email is the Agent Output of an
+approved Correspondence task. So:
 
   * an agent cannot send anything Kevin has not read;
   * if Kevin edits the copy in Airtable before approving, the edited copy is
@@ -30,40 +30,39 @@ AGENT OUTPUT FORMAT (a Correspondence task must use exactly this)
     The body of the email, as many lines as needed.
 
 Everything above the `---` is headers, everything below is the body, sent as
-plain text UTF-8 (so £ and en dashes survive). BCC is deliberately not
-supported: a hidden recipient is not something Kevin can approve by reading.
+plain text (so £ and en dashes survive). BCC is deliberately not supported: a
+hidden recipient is not something Kevin can approve by reading.
 
 AUTH
-Gmail SMTP over TLS with an app password at ~/.config/od/gmail_app_password
-(never printed, never passed as an argument — see the CLAUDE.md rule on
-secrets in the process table). The sending account defaults to
-kevinbrittain@gmail.com and can be overridden by ~/.config/od/gmail_account.
+Bearer key at ~/.config/od/gmail_send_key — the one copy, never printed and
+never passed as an argument (see the CLAUDE.md rule on secrets in the process
+table). Airtable PAT at ~/.config/od/airtable_pat.
 
-An app password needs 2-Step Verification on the Google account. It is the
-only part of this that Kevin has to do himself, once:
-https://myaccount.google.com/apppasswords
+A 409 from the worker means the one-time Gmail consent has not been granted:
+Kevin opens https://drive-upload.kevinbrittain.workers.dev/auth/gmail once and
+clicks Allow. The refresh token stores itself in the worker's KV. No terminal
+step, and nothing for him to copy or paste.
 
 IDEMPOTENCY
 Every send appends to ~/knowledge-os/logs/agent-dispatch/sent-email.jsonl.
-A task that already appears there is refused. A crash between the SMTP send
-and the ledger write is the one case that could double-send, so the ledger is
-written from a pre-send intent marker first, exactly like the carry-out ledger.
+A task already in there is refused. The intent row is written BEFORE the send,
+so a crash between the worker accepting the message and the result landing can
+never send Intus a second copy.
 
 Usage:
   python3 scripts/send-email.py send TASKID [--dry-run]
   python3 scripts/send-email.py preview TASKID     # parse only, never sends
+  python3 scripts/send-email.py health             # worker + consent check
 """
 
 import argparse
 import json
 import os
 import re
-import smtplib
 import sys
 import urllib.error
 import urllib.request
 from datetime import datetime, timezone
-from email.message import EmailMessage
 
 BASE_ID = "appnqjDpqDniH3IRl"
 TASKS = "tblqB8b22hKBL4PF1"
@@ -84,12 +83,12 @@ STATE_DIR = os.path.expanduser("~/knowledge-os/logs/agent-dispatch")
 SENT_LEDGER = os.path.join(STATE_DIR, "sent-email.jsonl")
 
 PAT_PATH = os.path.expanduser("~/.config/od/airtable_pat")
-APP_PW_PATH = os.path.expanduser("~/.config/od/gmail_app_password")
-ACCOUNT_PATH = os.path.expanduser("~/.config/od/gmail_account")
-DEFAULT_ACCOUNT = "kevinbrittain@gmail.com"
+SEND_KEY_PATH = os.path.expanduser("~/.config/od/gmail_send_key")
 
-SMTP_HOST = "smtp.gmail.com"
-SMTP_PORT = 587
+WORKER = "https://drive-upload.kevinbrittain.workers.dev"
+SEND_URL = f"{WORKER}/send-email"
+HEALTH_URL = f"{WORKER}/send-email/test"
+CONSENT_URL = f"{WORKER}/auth/gmail"
 
 EMAIL_RE = re.compile(r"^[^@\s,]+@[^@\s,]+\.[^@\s,]+$")
 
@@ -100,17 +99,9 @@ def now_iso():
 
 def read_secret(path, what):
     if not os.path.exists(path):
-        sys.exit(
-            f"ERROR: no {what} at {path}.\n"
-            "       Kevin creates this once at "
-            "https://myaccount.google.com/apppasswords\n"
-            "       then: printf '%s' '<the 16 characters>' > "
-            f"{path} && chmod 600 {path}"
-        )
+        sys.exit(f"ERROR: no {what} at {path}")
     with open(path) as fh:
-        # Gmail shows app passwords in four blocks of four. Spaces are display
-        # only; sending them verbatim fails auth with a misleading error.
-        return fh.read().strip().replace(" ", "")
+        return fh.read().strip()
 
 
 def api(method, url, payload=None):
@@ -139,6 +130,39 @@ def get_task(task_id):
 
 def sel(v):
     return v.get("name", "") if isinstance(v, dict) else (v or "")
+
+
+def worker_call(url, payload=None):
+    key = read_secret(SEND_KEY_PATH, "Gmail send key")
+    data = json.dumps(payload).encode() if payload is not None else None
+    req = urllib.request.Request(url, data=data,
+                                 method="POST" if payload else "GET")
+    req.add_header("Authorization", f"Bearer {key}")
+    # Cloudflare blocks the default Python-urllib agent with error 1010 before
+    # the worker ever runs, which reads as a 403 and looks exactly like a bad
+    # key. Send a real User-Agent or every call fails for the wrong reason.
+    req.add_header("User-Agent", "od-agent-dispatch/1.0")
+    if payload is not None:
+        req.add_header("Content-Type", "application/json")
+    try:
+        with urllib.request.urlopen(req, timeout=45) as r:
+            return json.loads(r.read())
+    except urllib.error.HTTPError as e:
+        detail = e.read().decode()[:400]
+        if e.code == 409:
+            sys.exit(
+                "REFUSED: the worker has no Gmail consent yet.\n"
+                f"         Kevin opens {CONSENT_URL} once and clicks Allow.\n"
+                "         Nothing to copy or paste; the token stores itself."
+            )
+        if e.code == 403:
+            if "1010" in detail:
+                sys.exit("ERROR: Cloudflare blocked this client (error 1010) "
+                         "before the worker ran. This is NOT a key problem.")
+            sys.exit(f"ERROR: the worker rejected the key in {SEND_KEY_PATH}")
+        sys.exit(f"ERROR: worker {e.code}: {detail}")
+    except Exception as e:  # noqa: BLE001 — surface the real reason, loudly
+        sys.exit(f"ERROR: worker call failed: {type(e).__name__}: {e}")
 
 
 def already_sent(task_id):
@@ -244,22 +268,15 @@ def load_approved(task_id, require_approval=True):
     return parsed
 
 
-def build_message(mail, account):
-    msg = EmailMessage()
-    msg["From"] = account
-    msg["To"] = ", ".join(mail["to"])
-    if mail["cc"]:
-        msg["Cc"] = mail["cc"] and ", ".join(mail["cc"])
-    msg["Subject"] = mail["subject"]
-    msg.set_content(mail["body"], charset="utf-8")
-    return msg
+def cmd_health(args):
+    print(json.dumps(worker_call(HEALTH_URL), indent=2))
 
 
 def cmd_preview(args):
     mail = load_approved(args.task, require_approval=False)
     print(json.dumps({
         "task": args.task, "taskName": mail["taskName"],
-        "approvalOutcome": mail["outcome"],
+        "approvalOutcome": mail["outcome"] or "(not yet approved)",
         "to": mail["to"], "cc": mail["cc"], "subject": mail["subject"],
         "bodyChars": len(mail["body"]),
     }, indent=2))
@@ -274,53 +291,43 @@ def cmd_send(args):
                  "Refusing to send it twice.")
 
     mail = load_approved(args.task)
-    account = DEFAULT_ACCOUNT
-    if os.path.exists(ACCOUNT_PATH):
-        with open(ACCOUNT_PATH) as fh:
-            account = fh.read().strip() or DEFAULT_ACCOUNT
-
-    msg = build_message(mail, account)
-    recipients = mail["to"] + mail["cc"]
 
     if args.dry_run:
         print(json.dumps({"dryRun": True, "task": args.task,
-                          "from": account, "to": mail["to"], "cc": mail["cc"],
+                          "to": mail["to"], "cc": mail["cc"],
                           "subject": mail["subject"],
                           "bodyChars": len(mail["body"])}, indent=2))
         return
 
-    password = read_secret(APP_PW_PATH, "Gmail app password")
+    payload = {"to": ", ".join(mail["to"]),
+               "subject": mail["subject"],
+               "text": mail["body"]}
+    if mail["cc"]:
+        payload["cc"] = ", ".join(mail["cc"])
 
-    # Intent first. If the process dies after SMTP accepts the message but
-    # before the sent row lands, the next run still sees this task in the
-    # ledger and refuses, rather than sending Intus a second copy.
+    # Intent first. If this process dies after the worker accepts the message
+    # but before the sent row lands, the next run still sees the task in the
+    # ledger and refuses, rather than sending a second copy.
     ledger_append({"task": args.task, "ts": now_iso(), "event": "intent",
                    "to": mail["to"], "cc": mail["cc"],
                    "subject": mail["subject"]})
 
-    try:
-        with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=30) as s:
-            s.starttls()
-            s.login(account, password)
-            s.send_message(msg, from_addr=account, to_addrs=recipients)
-    except smtplib.SMTPAuthenticationError:
-        sys.exit("ERROR: Gmail rejected the app password. Check that 2-Step "
-                 "Verification is on and the password in "
-                 f"{APP_PW_PATH} is current.")
-    except Exception as e:  # noqa: BLE001 — surface the real reason, loudly
-        sys.exit(f"ERROR: SMTP send failed: {type(e).__name__}: {e}")
+    result = worker_call(SEND_URL, payload)
 
     ledger_append({"task": args.task, "ts": now_iso(), "event": "sent",
-                   "from": account, "to": mail["to"], "cc": mail["cc"],
-                   "subject": mail["subject"],
-                   "taskName": mail["taskName"]})
+                   "to": mail["to"], "cc": mail["cc"],
+                   "subject": mail["subject"], "taskName": mail["taskName"],
+                   "messageId": result.get("id"),
+                   "threadId": result.get("threadId")})
     print(json.dumps({"sent": args.task, "to": mail["to"], "cc": mail["cc"],
-                      "subject": mail["subject"]}))
+                      "subject": mail["subject"],
+                      "messageId": result.get("id")}))
 
 
 def main():
-    p = argparse.ArgumentParser(description=__doc__,
-                                formatter_class=argparse.RawDescriptionHelpFormatter)
+    p = argparse.ArgumentParser(
+        description=__doc__,
+        formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = p.add_subparsers(dest="cmd", required=True)
 
     s = sub.add_parser("send", help="send an approved Correspondence task")
@@ -332,6 +339,9 @@ def main():
     v = sub.add_parser("preview", help="parse and print, never sends")
     v.add_argument("task")
     v.set_defaults(func=cmd_preview)
+
+    h = sub.add_parser("health", help="worker reachability and Gmail consent")
+    h.set_defaults(func=cmd_health)
 
     args = p.parse_args()
     args.func(args)
