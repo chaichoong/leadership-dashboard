@@ -23,11 +23,21 @@
 // GMAIL SEND (added 6 Aug 2026, Kevin's ruling: approved agent work sends
 // email itself rather than handing Kevin a draft):
 //   GET  /auth/gmail  — one-time consent for the gmail.send scope (reuses this
-//                       worker's registered /auth/callback redirect URI)
-//   POST /send-email  — { to, subject, text, cc? }; script-only, gated by
-//                       Authorization: Bearer <GMAIL_SEND_KEY>. Sends as the
-//                       granting Google account via the Gmail API.
-//   GET  /send-email/test — token health without sending anything.
+//                       worker's registered /auth/callback redirect URI).
+//                       Optional ?account=x@y.com preselects the Google account.
+//                       Tokens are stored PER ACCOUNT (openid email scope tells
+//                       the callback which account granted), so several senders
+//                       can be connected side by side.
+//   POST /send-email  — { to, subject, text, cc?, from? }; script-only, gated by
+//                       Authorization: Bearer <GMAIL_SEND_KEY>. Sends as `from`
+//                       if that account is connected; defaults to DEFAULT_SENDER
+//                       (Kevin's ruling, 6 Aug 2026: kevinbrittain@gmail.com
+//                       unless the task says otherwise).
+//   GET  /send-email/test — token health + which senders are connected.
+
+// Kevin's ruling, 6 Aug 2026: emails go from this account unless the task
+// specifies another connected sender.
+const DEFAULT_SENDER = 'kevinbrittain@gmail.com';
 
 const ALLOWED_ORIGINS = [
     'https://chaichoong.github.io',
@@ -76,7 +86,10 @@ export default {
         }
 
         if (url.pathname === '/auth/gmail') {
-            const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${env.GOOGLE_CLIENT_ID}&redirect_uri=${encodeURIComponent(url.origin + '/auth/callback')}&response_type=code&scope=${encodeURIComponent('https://www.googleapis.com/auth/gmail.send')}&access_type=offline&prompt=consent&state=gmail`;
+            // openid email is included so the callback can prove WHICH account
+            // granted, and file the token under that account.
+            const hint = url.searchParams.get('account');
+            const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${env.GOOGLE_CLIENT_ID}&redirect_uri=${encodeURIComponent(url.origin + '/auth/callback')}&response_type=code&scope=${encodeURIComponent('openid email https://www.googleapis.com/auth/gmail.send')}&access_type=offline&prompt=consent&state=gmail${hint ? `&login_hint=${encodeURIComponent(hint)}` : ''}`;
             return Response.redirect(authUrl, 302);
         }
 
@@ -97,11 +110,15 @@ export default {
                 if (!tokenData.refresh_token) {
                     return new Response('Error: no refresh token returned. ' + JSON.stringify(tokenData), { status: 400 });
                 }
-                await env.GMAIL_AUTH.put('gmail_refresh_token', tokenData.refresh_token);
+                const email = emailFromIdToken(tokenData.id_token);
+                if (!email) {
+                    return new Response('Error: could not read the granting account from Google\'s response. Nothing was stored.', { status: 400 });
+                }
+                await env.GMAIL_AUTH.put(`gmail_refresh_token:${email.toLowerCase()}`, tokenData.refresh_token);
                 return new Response(
                     `<html><body style="font-family:sans-serif;max-width:600px;margin:40px auto;padding:20px">
-                    <h2>Email sending is connected</h2>
-                    <p>The agents can now send email from this Google account once work is approved. Nothing else to do — you can close this tab.</p>
+                    <h2>Email sending is connected for ${email}</h2>
+                    <p>The agents can now send email from this account once work is approved. Nothing else to do — you can close this tab.</p>
                     </body></html>`,
                     { status: 200, headers: { 'Content-Type': 'text/html' } }
                 );
@@ -134,23 +151,36 @@ export default {
                 return jsonResponse({ error: 'Forbidden' }, 403);
             }
             try {
-                const refreshToken = await env.GMAIL_AUTH.get('gmail_refresh_token');
-                if (!refreshToken) {
-                    return jsonResponse({ error: 'Gmail not connected: visit /auth/gmail once to grant the gmail.send scope' }, 409);
-                }
-                const accessToken = await getGmailAccessToken(env, refreshToken);
-
                 if (url.pathname === '/send-email/test') {
-                    const info = await fetch(`https://oauth2.googleapis.com/tokeninfo?access_token=${encodeURIComponent(accessToken)}`);
-                    const data = await info.json();
-                    return jsonResponse({ status: 'ok', scope: data.scope || null, expires_in: data.expires_in || null });
+                    const listed = await env.GMAIL_AUTH.list({ prefix: 'gmail_refresh_token:' });
+                    const connected = listed.keys.map(k => k.name.slice('gmail_refresh_token:'.length));
+                    let scope = null, expires_in = null;
+                    const probe = connected[0] && await env.GMAIL_AUTH.get(`gmail_refresh_token:${connected[0]}`);
+                    if (probe) {
+                        const accessToken = await getGmailAccessToken(env, probe);
+                        const info = await fetch(`https://oauth2.googleapis.com/tokeninfo?access_token=${encodeURIComponent(accessToken)}`);
+                        const data = await info.json();
+                        scope = data.scope || null; expires_in = data.expires_in || null;
+                    }
+                    return jsonResponse({ status: connected.length ? 'ok' : 'not-connected',
+                                          defaultSender: DEFAULT_SENDER, connected, scope, expires_in },
+                                        connected.length ? 200 : 409);
                 }
 
                 if (request.method !== 'POST') return jsonResponse({ error: 'POST required' }, 405);
-                const { to, subject, text, cc } = await request.json();
+                const { to, subject, text, cc, from } = await request.json();
                 if (!to || !subject || !text) {
                     return jsonResponse({ error: 'to, subject and text are required' }, 400);
                 }
+
+                const sender = (from || DEFAULT_SENDER).toLowerCase().trim();
+                const refreshToken = await env.GMAIL_AUTH.get(`gmail_refresh_token:${sender}`);
+                if (!refreshToken) {
+                    const listed = await env.GMAIL_AUTH.list({ prefix: 'gmail_refresh_token:' });
+                    const connected = listed.keys.map(k => k.name.slice('gmail_refresh_token:'.length));
+                    return jsonResponse({ error: `Gmail not connected for ${sender}. Connected senders: ${connected.join(', ') || 'none'}. Grant once at /auth/gmail?account=${sender}`, connected }, 409);
+                }
+                const accessToken = await getGmailAccessToken(env, refreshToken);
 
                 const raw = buildRawEmail({ to, subject, text, cc });
                 const sendRes = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', {
@@ -245,6 +275,19 @@ function jsonResponse(data, status = 200, allowOrigin = null) {
         status,
         headers: { 'Content-Type': 'application/json', ...corsHeaders(allowOrigin) },
     });
+}
+
+// The middle segment of a Google id_token is base64url JSON carrying the
+// granting account's email (scope openid email). No signature check needed:
+// the token came straight from Google's token endpoint over TLS.
+function emailFromIdToken(idToken) {
+    try {
+        const payload = (idToken || '').split('.')[1];
+        const b64 = payload.replace(/-/g, '+').replace(/_/g, '/');
+        return JSON.parse(atob(b64 + '='.repeat((4 - b64.length % 4) % 4))).email || null;
+    } catch (e) {
+        return null;
+    }
 }
 
 async function getGmailAccessToken(env, refreshToken) {

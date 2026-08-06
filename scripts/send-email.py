@@ -25,9 +25,15 @@ AGENT OUTPUT FORMAT (a Correspondence task must use exactly this)
 
     TO: someone@example.com, other@example.com
     CC: optional@example.com
+    FROM: optional-sender@example.com
     SUBJECT: The subject line
     ---
     The body of the email, as many lines as needed.
+
+FROM is optional and names which of Kevin's connected accounts sends. Kevin's
+ruling, 6 Aug 2026: the default is kevinbrittain@gmail.com unless the task
+says otherwise. The worker refuses a FROM that has not been connected via its
+one-time /auth/gmail consent, listing which senders are available.
 
 Everything above the `---` is headers, everything below is the body, sent as
 plain text (so £ and en dashes survive). BCC is deliberately not supported: a
@@ -219,15 +225,19 @@ def parse_output(output, task_id):
                      f"{line.strip()!r}")
         headers[key.strip().upper()] = val.strip()
 
-    unknown = set(headers) - {"TO", "CC", "SUBJECT"}
+    unknown = set(headers) - {"TO", "CC", "SUBJECT", "FROM"}
     if unknown:
         # BCC lands here deliberately: a recipient Kevin cannot see in the
         # approval is a recipient he did not approve.
         sys.exit(f"ERROR: task {task_id} has unsupported header(s): "
-                 f"{', '.join(sorted(unknown))}. Only TO, CC and SUBJECT.")
+                 f"{', '.join(sorted(unknown))}. Only TO, CC, FROM and SUBJECT.")
 
     to = parse_addresses(headers.get("TO", ""), "TO")
     cc = parse_addresses(headers.get("CC", ""), "CC")
+    senders = parse_addresses(headers.get("FROM", ""), "FROM")
+    if len(senders) > 1:
+        sys.exit(f"ERROR: task {task_id} has more than one FROM address")
+    sender = senders[0] if senders else None
     subject = headers.get("SUBJECT", "").strip()
     body = body.strip()
 
@@ -237,7 +247,8 @@ def parse_output(output, task_id):
         sys.exit(f"ERROR: task {task_id} has no SUBJECT")
     if not body:
         sys.exit(f"ERROR: task {task_id} has an empty body")
-    return {"to": to, "cc": cc, "subject": subject, "body": body}
+    return {"to": to, "cc": cc, "from": sender, "subject": subject,
+            "body": body}
 
 
 def load_approved(task_id, require_approval=True):
@@ -300,6 +311,7 @@ def cmd_send(args):
                           "approvalOutcome": mail["outcome"]
                           or "(not yet approved)",
                           "wouldSend": bool(mail["outcome"] in APPROVED),
+                          "from": mail["from"] or "(worker default: kevinbrittain@gmail.com)",
                           "to": mail["to"], "cc": mail["cc"],
                           "subject": mail["subject"],
                           "bodyChars": len(mail["body"])}, indent=2))
@@ -310,6 +322,8 @@ def cmd_send(args):
                "text": mail["body"]}
     if mail["cc"]:
         payload["cc"] = ", ".join(mail["cc"])
+    if mail["from"]:
+        payload["from"] = mail["from"]
 
     # Intent first. If this process dies after the worker accepts the message
     # but before the sent row lands, the next run still sees the task in the
@@ -321,6 +335,7 @@ def cmd_send(args):
     result = worker_call(SEND_URL, payload)
 
     ledger_append({"task": args.task, "ts": now_iso(), "event": "sent",
+                   "from": mail["from"] or "(default)",
                    "to": mail["to"], "cc": mail["cc"],
                    "subject": mail["subject"], "taskName": mail["taskName"],
                    "messageId": result.get("id"),
@@ -328,6 +343,47 @@ def cmd_send(args):
     print(json.dumps({"sent": args.task, "to": mail["to"], "cc": mail["cc"],
                       "subject": mail["subject"],
                       "messageId": result.get("id")}))
+
+
+def cmd_selftest(args):
+    """Offline checks of the parser — the part a bug would turn into a wrong
+    recipient. No network, no Airtable, safe anywhere."""
+    cases = []
+
+    def refuses(name, output):
+        try:
+            parse_output(output, "selftest")
+        except SystemExit:
+            cases.append((name, True))
+        else:
+            cases.append((name, False))
+
+    good = parse_output(
+        "TO: a@b.com, c@d.com\nCC: e@f.com\nSUBJECT: Hi £100\n---\nBody line.",
+        "selftest")
+    cases.append(("parses TO list", good["to"] == ["a@b.com", "c@d.com"]))
+    cases.append(("parses CC", good["cc"] == ["e@f.com"]))
+    cases.append(("keeps £ in subject", good["subject"] == "Hi £100"))
+    cases.append(("body extracted", good["body"] == "Body line."))
+    refuses("refuses missing ---", "TO: a@b.com\nSUBJECT: x\nbody")
+    refuses("refuses BCC", "TO: a@b.com\nBCC: x@y.com\nSUBJECT: x\n---\nb")
+    refuses("refuses bad address", "TO: not-an-email\nSUBJECT: x\n---\nb")
+    refuses("refuses no TO", "SUBJECT: x\n---\nb")
+    refuses("refuses empty body", "TO: a@b.com\nSUBJECT: x\n---\n")
+    withfrom = parse_output(
+        "TO: a@b.com\nFROM: me@mine.com\nSUBJECT: x\n---\nb", "selftest")
+    cases.append(("parses FROM", withfrom["from"] == "me@mine.com"))
+    cases.append(("FROM defaults to None", good["from"] is None))
+    refuses("refuses bad FROM", "TO: a@b.com\nFROM: nonsense\nSUBJECT: x\n---\nb")
+    refuses("refuses two FROMs",
+            "TO: a@b.com\nFROM: a@a.com, b@b.com\nSUBJECT: x\n---\nb")
+
+    failed = [n for n, ok in cases if not ok]
+    for n, ok in cases:
+        print(("PASS " if ok else "FAIL ") + n)
+    if failed:
+        sys.exit(f"selftest FAILED: {', '.join(failed)}")
+    print(f"selftest OK ({len(cases)} checks)")
 
 
 def main():
@@ -345,6 +401,9 @@ def main():
     v = sub.add_parser("preview", help="parse and print, never sends")
     v.add_argument("task")
     v.set_defaults(func=cmd_preview)
+
+    t = sub.add_parser("selftest", help="offline parser checks, never sends")
+    t.set_defaults(func=cmd_selftest)
 
     h = sub.add_parser("health", help="worker reachability and Gmail consent")
     h.set_defaults(func=cmd_health)
