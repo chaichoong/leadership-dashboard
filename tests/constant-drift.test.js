@@ -1,7 +1,8 @@
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'fs';
-import { execFileSync } from 'child_process';
-import { resolve, dirname } from 'path';
+import { readFileSync, existsSync, mkdtempSync, symlinkSync, rmSync } from 'fs';
+import { execFileSync, spawnSync } from 'child_process';
+import { resolve, dirname, join } from 'path';
+import { tmpdir } from 'os';
 import { fileURLToPath } from 'url';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -392,5 +393,52 @@ describe('auto-bump trigger list does not drift from the auto-bump mapping', () 
       missing,
       `Auto-bump targets a page id that PAGE_REGISTRY does not define: ${missing.join(', ')}`,
     ).toEqual([]);
+  });
+});
+
+// The pre-commit hook is INSTALLED AS A SYMLINK (`ln -sf ../../scripts/pre-commit
+// .git/hooks/pre-commit`), and it locates its sibling pre-commit-action.py relative to
+// its own path. It used os.path.abspath, which does NOT follow symlinks — so when git
+// ran it from .git/hooks it looked for .git/hooks/pre-commit-action.py, missed, and
+// exited 0.
+//
+// The result was a hook that installed cleanly, ran on every commit, reported success
+// and did nothing. Found 2026-08-06 by installing it and watching pageVer refuse to
+// move; not by reading the code, which looks correct until you know abspath's
+// behaviour. Same silent-no-op class as the workflow trigger list above.
+//
+// Testing the property that actually broke — resolution THROUGH a symlink — rather
+// than asserting the source contains the word "realpath", which any rewrite would
+// break while staying correct.
+describe('pre-commit hook resolves its shared script through a symlink', () => {
+  const HOOK = resolve(ROOT, 'scripts/pre-commit');
+
+  it('the hook and its shared script both exist (control — guards against a vacuous pass)', () => {
+    expect(existsSync(HOOK), 'scripts/pre-commit missing').toBe(true);
+    expect(existsSync(resolve(ROOT, 'scripts/pre-commit-action.py'))).toBe(true);
+  });
+
+  it('finds pre-commit-action.py when invoked via a symlink in another directory', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'hooklink-'));
+    const link = join(dir, 'pre-commit');
+    symlinkSync(HOOK, link);
+
+    // cwd = repo root, exactly as git invokes it.
+    const run = spawnSync('python3', [link], { cwd: ROOT, encoding: 'utf8' });
+    rmSync(dir, { recursive: true, force: true });
+
+    expect(run.status, `hook exited ${run.status}\n${run.stderr}`).toBe(0);
+    // The failure mode: it cannot find its sibling and says so (or, before the fix,
+    // said nothing at all and silently did no work).
+    expect(
+      run.stderr,
+      'hook could not locate pre-commit-action.py through the symlink — it is a no-op',
+    ).not.toMatch(/not found/i);
+    // Proof it actually reached the bump script rather than exiting early: that script
+    // always reports what it decided.
+    expect(
+      run.stdout,
+      `hook produced no output from pre-commit-action.py — it exited before running it.\nstdout: ${run.stdout}`,
+    ).toMatch(/nothing to bump|Auto-bump|files changed/i);
   });
 });
