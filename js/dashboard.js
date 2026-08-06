@@ -1214,6 +1214,12 @@
         // then refresh from Airtable and swap in the up-to-date card.
         (async () => {
             try { await migrateLocalReconLog(); } catch (e) { console.warn('[renderDashboard] recon log migration failed:', e); }
+            // Same one-shot treatment for the knowledge base: lift the localStorage rules into
+            // Airtable, then load the authoritative set so this device matches every other one.
+            try {
+                await migrateReconRulesToAirtable();
+                await loadReconRules();
+            } catch (e) { console.warn('[renderDashboard] recon rules load failed:', e); }
             try {
                 const fresh = await refreshReconAccuracyStats();
                 const host = document.getElementById('accuracyKpiCard');
