@@ -19,7 +19,7 @@
 
     // ── Page & SOP Version Registry ──
     const PAGE_REGISTRY = [
-        { id: 'overview',    name: 'Leadership Dashboard',           icon: '📊', pageVer: '2.48', sopFile: 'sop.html',                   sopVer: '2.9', standalone: 'index.html#overview' },
+        { id: 'overview',    name: 'Leadership Dashboard',           icon: '📊', pageVer: '2.49', sopFile: 'sop.html',                   sopVer: '2.9', standalone: 'index.html#overview' },
         { id: 'os-strategy', name: 'Objective & Strategy',           icon: '🎯', pageVer: '1.27', sopFile: 'os/strategy/sop.html',       sopVer: '1.0', standalone: 'os/strategy/index.html' },
         { id: 'tasks',       name: 'Tasks & Projects',   icon: '✅', pageVer: '1.120', sopFile: 'os/tasks/sop.html',             sopVer: '1.3', standalone: 'os/tasks/index.html' },
         { id: 'cfv',        name: 'CFVs',                          icon: '🚨', pageVer: '1.31', sopFile: 'sop-cfvs.html',               sopVer: '1.6', standalone: 'index.html#cfv' },
@@ -43,7 +43,12 @@
         { id: 'fintable',  name: 'Accounts',                       icon: '🏦', pageVer: '1.8', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#fintable' },
         { id: 'systemisation', name: 'Systemisation',              icon: '⚙️', pageVer: '1.6', sopFile: 'guides/systemisation.html',    sopVer: '1.0', standalone: 'os/systemisation/index.html' },
         { id: 'os-team',    name: 'Team Members',                  icon: '👥', pageVer: '1.5', sopFile: '',                            sopVer: '1.0', standalone: 'os/team/index.html' },
-        { id: 'crm',        name: 'CRM',                           icon: '👥', pageVer: '1.0', sopFile: 'guides/crm.html',             sopVer: '1.0', standalone: 'crm-supabase.html' },
+        // pageVer corrected by hand 2026-08-06: the auto-bump never fired for this page
+        // (crm-supabase.html was missing from the workflow `paths:` filter), so 1.0 was
+        // stale — the CRM gained a 14-step interactive walkthrough on 2026-08-04 (319b438).
+        // guides/crm.html still describes the page without it, so sopVer stays at 1.0 and
+        // this now reads as the version gap it always was.
+        { id: 'crm',        name: 'CRM',                           icon: '👥', pageVer: '1.1', sopFile: 'guides/crm.html',             sopVer: '1.0', standalone: 'crm-supabase.html' },
         { id: 'content-machine', name: 'Content Machine',           icon: '🎬', pageVer: '1.0', sopFile: '',                            sopVer: '1.0', standalone: 'https://chaichoong.github.io/content-machine/' },
         { id: 'prospecting', name: 'Prospecting',                   icon: '🧲', pageVer: '1.4', sopFile: 'sop-prospecting.html',        sopVer: '1.3', standalone: 'index.html#prospecting' },
         { id: 'sitemap',    name: 'Site Map & Guides',             icon: '🔗', pageVer: '1.19', sopFile: 'sop-sitemap.html',            sopVer: '1.2', standalone: 'index.html#sitemap' },
@@ -184,6 +189,16 @@
     // ── Arrears Records field IDs (Airtable table: Arrears Records / tblzG0B9oRRpszcgC) ──
     // 7-stage credit control pipeline. One record per arrears journey (per missed payment).
     // Branches by tenant type (read from tenantPayType on linked Tenant): Working / Universal Credit / Agent-Managed.
+    //
+    // DRIFT 2026-08-06: SUPERSEDED — no code reads ARREARS or ARREARSLOG. `js/arrears.js`
+    // replaced this design with Rent Statements (a live rent balance per tenancy, computed
+    // from transactions); its own header says so. The chase process was deferred, not
+    // cancelled, so the maps are kept rather than deleted.
+    //   - Arrears Records (tblzG0B9oRRpszcgC) still holds 53 rows from the old pipeline.
+    //     Nothing writes or reads them; they are stale, not live state.
+    //   - Arrears Contact Log (tblik5VI5Jy6tO2yc) is empty and was never used.
+    // Do not wire new code to these without deciding the chase process first. Deleting the
+    // 53 rows is Kevin's call — raised for review, not actioned here.
     const ARREARS = {
         ref:              'fldYvuHyhYplblMJr',  // Reference (singleLineText, primary) — e.g. "AR-2026-0001"
         stage:            'fldV7xA2UZJHmbCHj',  // Stage (singleSelect)
