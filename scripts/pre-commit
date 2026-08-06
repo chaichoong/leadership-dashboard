@@ -7,11 +7,21 @@ import os
 import subprocess
 import sys
 
-script_dir = os.path.dirname(os.path.abspath(__file__))
+# realpath, NOT abspath. This file is INSTALLED AS A SYMLINK at
+# .git/hooks/pre-commit, and abspath does not follow symlinks — it resolved to
+# .git/hooks, the lookup below missed, the `else` branch exited 0, and the hook
+# did nothing on every commit while looking perfectly installed.
+# Found 2026-08-06 by installing it and watching pageVer refuse to move.
+script_dir = os.path.dirname(os.path.realpath(__file__))
 shared_script = os.path.join(script_dir, 'pre-commit-action.py')
 
-if os.path.exists(shared_script):
-    result = subprocess.run([sys.executable, shared_script], cwd=os.getcwd())
-    sys.exit(result.returncode)
-else:
+if not os.path.exists(shared_script):
+    # Do not exit 0 quietly. A missing sibling means a broken install, and a
+    # silent success is exactly what hid the bug above. Warn loudly, but do not
+    # block: a version bump is never worth losing someone's commit over.
+    print(f"⚠️  pre-commit hook: {shared_script} not found — pageVer NOT bumped.",
+          file=sys.stderr)
     sys.exit(0)
+
+result = subprocess.run([sys.executable, shared_script], cwd=os.getcwd())
+sys.exit(result.returncode)
