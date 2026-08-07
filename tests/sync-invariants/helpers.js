@@ -173,6 +173,55 @@ function makeFixtures() {
     ],
     tasks: [],
     arrears: [],
+    // js/prospecting.js reads these by field NAME (see fetchProspectingTable),
+    // so the fixture is keyed by name, not by field ID like the tables above.
+    // Body text is a real approved draft, so the preview spec exercises the
+    // wording that actually goes out.
+    prospects: [
+      {
+        id: 'recProsLtd', fields: {
+          'Name': 'Jane Whitehouse',
+          'Company': 'IS Group Signs Limited',
+          'Contact Email': 'enquiries@is-group.co.uk',
+          'Email Confidence': 'High',
+          'Entity Type': 'Limited Company',
+          'Contact Route': 'Email sequence (Ltd)',
+          'Pain Signal': 'Advertising a part-time Bookkeeper.',
+          'Email Subject': 'your part-time bookkeeper ad',
+          'Draft Message': 'Hi Jane, I saw your part-time bookkeeper ad for isGroup. Worth a quick call? https://operationsdirector.co.uk/book-a-demo/',
+          'Status': 'Ready for Review',
+          'Date Found': '2026-08-06',
+        }
+      },
+      {
+        // Non-email route: must NOT gain a subject line or a signature.
+        id: 'recProsLinkedIn', fields: {
+          'Name': 'Sophie Hackett',
+          'Company': 'Sophie Hackett Design',
+          'Entity Type': 'Sole Trader / Partnership',
+          'Contact Route': 'LinkedIn connect',
+          'Draft Message': 'Saw your post about being buried in admin. Worth a chat?',
+          'Status': 'Ready for Review',
+          'Date Found': '2026-08-06',
+        }
+      },
+      {
+        // Carries the retired raw CRM widget URL, so the stale-link warning renders.
+        id: 'recProsStale', fields: {
+          'Name': 'Old Draft',
+          'Company': 'Legacy Ltd',
+          'Contact Email': 'hello@legacy.co.uk',
+          'Entity Type': 'Limited Company',
+          'Contact Route': 'Email sequence (Ltd)',
+          'Draft Message': 'Worth a quick call? https://api.leadconnectorhq.com/widget/booking/BcVVhAg1zLaPVEXj5ih0',
+          'Status': 'Ready for Review',
+          'Date Found': '2026-08-06',
+        }
+      },
+    ],
+    prospectKeywords: [
+      { id: 'recKw1', fields: { 'Keyword': 'drowning in admin', 'Type': 'Pain Phrase', 'Active': true } },
+    ],
   };
 }
 
@@ -243,6 +292,8 @@ const TABLE_MAP = {
   'tblIxbzDSOCI5hqJn': 'ceoBriefs',
   'tbldMPjXTu7ho5f0T': 'incomeBuckets',
   'tblvtDXCBJCHu9hnK': 'netWorthByMonth',
+  'tbljHVGJoKJf8acy3': 'prospects',
+  'tblB5tZrXNaKFe02j': 'prospectKeywords',
 };
 
 // The app pulls two things off the public internet on every page load: Chart.js from

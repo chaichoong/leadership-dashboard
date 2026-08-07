@@ -10,7 +10,7 @@ Grounded in the **2026-06-17 Sales & Marketing Team Brief** (Software as a Scien
 
 Top objection from real calls = PRICE: lead with £350/month and the 30-day money-back guarantee. Second = "show me": offer the live dashboard on the call.
 Sub-account: **Operations Director** (`dgsHwbYbp6xrhRGZr9ik`).
-Send from: **kevin@operationsdirector.co.uk**. Booking link: `https://api.leadconnectorhq.com/widget/booking/BcVVhAg1zLaPVEXj5ih0`.
+Send from: **kevin@operationsdirector.co.uk**. Booking link: `https://operationsdirector.co.uk/book-a-demo/`.
 Every email footer (PECR): sender identity + postal address + unsubscribe link (use GHL's unsubscribe merge tag).
 
 Footer block for ALL emails:
@@ -64,7 +64,7 @@ Footer block for ALL emails:
 >
 > Looks like today ran away with you — which, honestly, is the exact problem we were going to talk about.
 >
-> No lecture. Grab another slot here and we will pick it up: https://api.leadconnectorhq.com/widget/booking/BcVVhAg1zLaPVEXj5ih0
+> No lecture. Grab another slot here and we will pick it up: https://operationsdirector.co.uk/book-a-demo/
 >
 > Kevin
 
@@ -73,7 +73,7 @@ Footer block for ALL emails:
 >
 > When a founder cannot find 30 minutes to talk about getting time back, that is usually the strongest sign they need it.
 >
-> One click, pick any slot: https://api.leadconnectorhq.com/widget/booking/BcVVhAg1zLaPVEXj5ih0
+> One click, pick any slot: https://operationsdirector.co.uk/book-a-demo/
 >
 > If now is genuinely not the time, reply "later" and I will leave you alone until next quarter.
 >
@@ -96,7 +96,7 @@ Footer block for ALL emails:
 >
 > Operations Director is an AI-run operations department for founder-led firms. It takes the £10 work, and the thirty tasks behind it, off your plate.
 >
-> Thirty minutes to see your map: https://api.leadconnectorhq.com/widget/booking/BcVVhAg1zLaPVEXj5ih0
+> Thirty minutes to see your map: https://operationsdirector.co.uk/book-a-demo/
 >
 > Kevin
 
@@ -111,7 +111,7 @@ Footer block for ALL emails:
 >
 > On the call I show you that live dashboard, running my real business, then map yours.
 >
-> Worth a look: https://api.leadconnectorhq.com/widget/booking/BcVVhAg1zLaPVEXj5ih0
+> Worth a look: https://operationsdirector.co.uk/book-a-demo/
 >
 > Kevin
 
@@ -122,7 +122,7 @@ Footer block for ALL emails:
 >
 > One thing worth knowing before I go: this is £350 a month with a 30-day money-back guarantee, and we are onboarding founding clients this quarter at the founding rate — those terms retire when the places fill. Founders who join now shape what the product becomes.
 >
-> The call costs you 30 minutes and nothing else: https://api.leadconnectorhq.com/widget/booking/BcVVhAg1zLaPVEXj5ih0
+> The call costs you 30 minutes and nothing else: https://operationsdirector.co.uk/book-a-demo/
 >
 > Either way, good luck with the business. Genuinely.
 >
@@ -141,7 +141,7 @@ Footer block for ALL emails:
 >
 > Enjoyed the exchange — did not want it to fizzle out in both our inboxes.
 >
-> Easiest next step is 30 minutes on a call: https://api.leadconnectorhq.com/widget/booking/BcVVhAg1zLaPVEXj5ih0
+> Easiest next step is 30 minutes on a call: https://operationsdirector.co.uk/book-a-demo/
 >
 > Kevin
 

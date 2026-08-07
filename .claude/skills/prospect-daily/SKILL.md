@@ -132,12 +132,18 @@ Set **Contact Route** by this decision tree:
 4. Website form only → "Website contact form".
 5. Otherwise → "No route yet".
 
-Write a **Draft Message** tailored to the person and route. Voice = Kevin's: direct, spartan, UK English, no hype words, no em dashes. Shape: (1) reference exactly what they posted, (2) one sentence on what Operations Director does for someone in their position (an AI-run operations department, not another VA), (3) soft CTA to a call with the booking link `https://api.leadconnectorhq.com/widget/booking/BcVVhAg1zLaPVEXj5ih0` (Kevin-confirmed calendar, 13 Jul — say "a quick call"). Under 90 words for email replies, under 40 for LinkedIn connect notes (no link in connect notes; the link goes in the post-accept message). Never fake familiarity; say where we saw their post.
+Write a **Draft Message** tailored to the person and route. Voice = Kevin's: direct, spartan, UK English, no hype words, no em dashes. Shape: (1) reference exactly what they posted, (2) one sentence on what Operations Director does for someone in their position (an AI-run operations department, not another VA), (3) soft CTA to a call with the booking link `https://operationsdirector.co.uk/book-a-demo/`. Under 90 words for email replies, under 40 for LinkedIn connect notes (no link in connect notes; the link goes in the post-accept message). Never fake familiarity; say where we saw their post.
+
+**The booking link is `https://operationsdirector.co.uk/book-a-demo/` and nothing else.** That page embeds the same GoHighLevel calendar (`BcVVhAg1zLaPVEXj5ih0`, Kevin-confirmed 13 Jul) in an iframe, so the booking outcome is identical, but the raw `api.leadconnectorhq.com/widget/booking/...` widget URL reads as spam in a cold email and names the CRM vendor. The canonical copy lives in `OD_BOOKING_URL` in `js/config.js`. Never paste the widget URL into a draft; `tests/prospect-email.test.js` fails the build if it reappears in source.
+
+**Do NOT write a sign-off or signature into the Draft Message.** The Prospecting tab appends Kevin's signature (name, title, website, email) at send time, from `OD_SENDER` in `js/config.js`. A signature in the draft ships twice.
+
+For the two email routes ("Email reply (they asked)", "Email sequence (Ltd)") also write an **Email Subject**: lower case where natural, 4-8 words, specific to their post or business, no colons-and-buzzwords, never a generic "Quick question". Kevin sees and can edit it in the review card before approving. Leave it blank on non-email routes.
 
 ### 5. Write to Airtable
 
 - Create one Prospects record per candidate via curl (Number()-cast any numerics, 500ms between writes, `"typecast": true`):
-  - Status = "Ready for Review", Date Found = today (ISO), Contact Route, Draft Message, plus every captured field.
+  - Status = "Ready for Review", Date Found = today (ISO), Contact Route, Draft Message, Email Subject (email routes only), plus every captured field.
 - Update each keyword used: Last Used = today, Prospects Found += number of new prospects it produced.
 
 ### 6. First-contact pass (conversation-first — Kevin's design, 13 Jul)

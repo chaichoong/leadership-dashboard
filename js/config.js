@@ -20,7 +20,7 @@
     // ── Page & SOP Version Registry ──
     const PAGE_REGISTRY = [
         { id: 'overview',    name: 'Leadership Dashboard',           icon: '📊', pageVer: '2.54', sopFile: 'sop.html',                   sopVer: '2.9', standalone: 'index.html#overview' },
-        { id: 'os-strategy', name: 'Objective & Strategy',           icon: '🎯', pageVer: '1.31', sopFile: 'os/strategy/sop.html',       sopVer: '1.0', standalone: 'os/strategy/index.html' },
+        { id: 'os-strategy', name: 'Objective & Strategy',           icon: '🎯', pageVer: '1.32', sopFile: 'os/strategy/sop.html',       sopVer: '1.0', standalone: 'os/strategy/index.html' },
         { id: 'tasks',       name: 'Tasks & Projects',   icon: '✅', pageVer: '1.120', sopFile: 'os/tasks/sop.html',             sopVer: '1.3', standalone: 'os/tasks/index.html' },
         { id: 'cfv',        name: 'CFVs',                          icon: '🚨', pageVer: '1.31', sopFile: 'sop-cfvs.html',               sopVer: '1.6', standalone: 'index.html#cfv' },
         { id: 'ceo-brief',  name: 'CEO Brief',                     icon: '☀️', pageVer: '1.0', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#ceo-brief' },
@@ -42,7 +42,7 @@
         { id: 'kpi-library', name: 'KPI Library', icon: '📚', pageVer: '1.1', sopFile: '', sopVer: '1.0', standalone: 'index.html#kpi-library', adminOnly: true },
         { id: 'fintable',  name: 'Accounts',                       icon: '🏦', pageVer: '1.8', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#fintable' },
         { id: 'systemisation', name: 'Systemisation',              icon: '⚙️', pageVer: '1.6', sopFile: 'guides/systemisation.html',    sopVer: '1.0', standalone: 'os/systemisation/index.html' },
-        { id: 'os-team',    name: 'Team Members',                  icon: '👥', pageVer: '1.7', sopFile: '',                            sopVer: '1.0', standalone: 'os/team/index.html' },
+        { id: 'os-team',    name: 'Team Members',                  icon: '👥', pageVer: '1.8', sopFile: '',                            sopVer: '1.0', standalone: 'os/team/index.html' },
         // pageVer corrected by hand 2026-08-06: the auto-bump never fired for this page
         // (crm-supabase.html was missing from the workflow `paths:` filter), so 1.0 was
         // stale — the CRM gained a 14-step interactive walkthrough on 2026-08-04 (319b438).
@@ -50,7 +50,7 @@
         // this now reads as the version gap it always was.
         { id: 'crm',        name: 'CRM',                           icon: '👥', pageVer: '1.1', sopFile: 'guides/crm.html',             sopVer: '1.0', standalone: 'crm-supabase.html' },
         { id: 'content-machine', name: 'Content Machine',           icon: '🎬', pageVer: '1.0', sopFile: '',                            sopVer: '1.0', standalone: 'https://chaichoong.github.io/content-machine/' },
-        { id: 'prospecting', name: 'Prospecting',                   icon: '🧲', pageVer: '1.4', sopFile: 'sop-prospecting.html',        sopVer: '1.3', standalone: 'index.html#prospecting' },
+        { id: 'prospecting', name: 'Prospecting',                   icon: '🧲', pageVer: '1.5', sopFile: 'sop-prospecting.html',        sopVer: '1.3', standalone: 'index.html#prospecting' },
         { id: 'sitemap',    name: 'Site Map & Guides',             icon: '🔗', pageVer: '1.19', sopFile: 'sop-sitemap.html',            sopVer: '1.2', standalone: 'index.html#sitemap' },
         { id: 'skills',     name: 'Skills Library',                icon: '🧠', pageVer: '1.4', sopFile: 'guides/skills.html',           sopVer: '1.0', standalone: 'index.html#skills' },
         { id: 'ai-brain',  name: 'AI Brain',                       icon: '💭', pageVer: '1.0', sopFile: 'guides/ai-brain.html',         sopVer: '1.0', standalone: 'ai-brain.html' },
@@ -129,7 +129,31 @@
         notes:           'fld4yWgjxOoZT9NIV',  // Notes (multilineText)
         contactRoute:    'fld18VDzR2Iu1m2qt',  // Contact Route (singleSelect: Email reply / Email sequence / LinkedIn connect / Contact form / No route yet)
         draftMessage:    'fldafL2q6G5g1TpT7',  // Draft Message (multilineText) — agent-drafted opener, Kevin edits before send
+        emailSubject:    'fldKcQIXhHE2r0PnP',  // Email Subject (singleLineText) — added 2026-08-07. Kevin sees and edits
+                                               // it in the Prospecting preview before approving; blank falls back to
+                                               // prospectDefaultSubject() so an un-backfilled record still sends.
         nextFollowUp:    'fldYGbMRJmvSZqJu1',  // Next Follow-up (date) — agent checks for replies on this date; silence → Ltd to sequence, manual-track stops
+    };
+
+    // ── Outbound prospecting identity ──────────────────────────────────────
+    // ONE definition of who the cold emails come from and where the call is
+    // booked. Never hardcode either in a feature file: the drafts, the GHL
+    // send, the preview Kevin approves and the /prospect-daily skill must all
+    // agree, or he approves one thing and the prospect receives another.
+    //
+    // OD_BOOKING_URL is the PUBLIC page, not the calendar widget behind it.
+    // operationsdirector.co.uk/book-a-demo/ embeds the same GoHighLevel
+    // calendar (BcVVhAg1zLaPVEXj5ih0) in an iframe, so the booking outcome is
+    // identical — but the raw api.leadconnectorhq.com widget URL reads as spam
+    // in an email and exposes the CRM vendor. Verified 7 Aug 2026 by reading
+    // the live page's iframe src. If the site's booking page ever moves, change
+    // it HERE and nowhere else.
+    const OD_BOOKING_URL = 'https://operationsdirector.co.uk/book-a-demo/';
+    const OD_SENDER = {
+        name:    'Kevin Brittain',
+        email:   'kevin@operationsdirector.co.uk',
+        title:   'Founder, Operations Director',
+        website: 'operationsdirector.co.uk',
     };
 
     // ── Prospect Keywords field IDs (Airtable table: Prospect Keywords / tblB5tZrXNaKFe02j) ──
