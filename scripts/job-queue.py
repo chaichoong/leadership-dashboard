@@ -65,10 +65,12 @@ EVENTS = os.path.join(STATE_DIR, "queue-events.jsonl")
 EX_OK = 0
 EX_SKIPPED = 3
 EX_BUSY = 75
+EX_NOTREADY = 69   # EX_UNAVAILABLE: the machine is not ready for this job yet
 EX_USAGE = 64
 
 DEFAULT_LEASE_MIN = 45
 DEFAULT_TIMEOUT_MIN = 30
+DEFAULT_READY_WAIT_MIN = 10
 POLL_SECONDS = float(os.environ.get("JOB_QUEUE_POLL", "2"))
 
 
@@ -262,6 +264,128 @@ def staleness(job, schedule, ref=None):
 
 
 # --------------------------------------------------------------------------
+# preconditions — is this Mac actually ready to run the job?
+# --------------------------------------------------------------------------
+
+def network_ready(host="api.airtable.com", port=443, timeout=4):
+    """Can we resolve AND reach the internet right now?
+
+    Resolution alone is not enough: a Mac that has just woken often answers DNS
+    from cache while the interface is still coming up. So we open a socket.
+    """
+    import socket
+    try:
+        infos = socket.getaddrinfo(host, port, proto=socket.IPPROTO_TCP)
+    except OSError:
+        return False, "DNS cannot resolve %s" % host
+    for family, socktype, proto, _, addr in infos:
+        s = socket.socket(family, socktype, proto)
+        s.settimeout(timeout)
+        try:
+            s.connect(addr)
+            return True, "reachable"
+        except OSError:
+            continue
+        finally:
+            s.close()
+    return False, "cannot reach %s:%s" % (host, port)
+
+
+def drive_ready(path, timeout=4):
+    """Is this Google Drive folder actually readable?
+
+    The brain vault lives under ~/Library/CloudStorage. When Drive has not
+    reconnected the folder still EXISTS and still LISTS, and only fails when you
+    open a file inside it, with `OSError: [Errno 11] Resource deadlock avoided`.
+    That is what took out publish-brain and compound-brain, and it is why this
+    probe reads a byte rather than just stat-ing the directory.
+
+    EPERM is deliberately NOT treated as "not ready". A process without the macOS
+    privacy grant for CloudStorage gets Operation not permitted no matter how
+    long it waits, so deferring on it would convert a loud daily failure into a
+    job that silently never runs again. Waiting is only correct for conditions
+    that actually pass with time.
+    """
+    if not os.path.isdir(path):
+        return False, "%s does not exist" % path
+    try:
+        names = [n for n in os.listdir(path) if not n.startswith(".")]
+    except PermissionError as e:
+        return True, "cannot probe (%s); letting the job run and report for itself" % e
+    except OSError as e:
+        if e.errno == errno.EPERM:
+            return True, "cannot probe (%s); letting the job run" % e
+        return False, "cannot list: %s" % e
+    if not names:
+        return False, "folder is empty, Drive has not populated it"
+    for name in names[:25]:
+        full = os.path.join(path, name)
+        if not os.path.isfile(full):
+            continue
+        try:
+            with open(full, "rb") as f:
+                f.read(1)
+            return True, "readable"
+        except PermissionError as e:
+            return True, "cannot probe (%s); letting the job run" % e
+        except OSError as e:
+            if e.errno == errno.EPERM:
+                return True, "cannot probe (%s); letting the job run" % e
+            # EDEADLK (errno 11) lands here: Drive is mounted but not serving.
+            return False, "cannot read %s: %s" % (name, e)
+    return True, "folder lists, no plain file to probe"
+
+
+def preconditions_met(cfg):
+    """(ok, reason). Declared per job as `needs` in job-schedule.json."""
+    for need in cfg.get("needs", []) or []:
+        if need == "network":
+            ok, why = network_ready()
+            if not ok:
+                return False, "network: %s" % why
+        elif isinstance(need, dict) and need.get("drive"):
+            ok, why = drive_ready(os.path.expanduser(need["drive"]))
+            if not ok:
+                return False, "google drive: %s" % why
+        else:
+            return False, "unknown precondition %r" % (need,)
+    return True, "ready"
+
+
+def wait_for_preconditions(job, cfg, wait_minutes, quiet=False):
+    """Wait, briefly, for the machine to be ready.
+
+    Five of the seven jobs that had been failing daily were not broken at all.
+    They fired the moment the Mac woke, before the network and Google Drive were
+    up, and reported a hard failure. Waiting a few minutes fixes them; failing
+    after the wait is a real problem worth shouting about.
+    """
+    needs = cfg.get("needs") or []
+    if not needs:
+        return True
+    deadline = now() + wait_minutes * 60
+    first = True
+    while True:
+        ok, why = preconditions_met(cfg)
+        if ok:
+            if not first:
+                event(job, "ready", note=why)
+            return True
+        if now() >= deadline:
+            event(job, "deferred-not-ready", reason=why,
+                  waited_minutes=round(wait_minutes, 1))
+            if not quiet:
+                print("NOT READY %s: %s (waited %s min)" % (job, why, wait_minutes))
+            return False
+        if first:
+            event(job, "waiting-for-ready", reason=why)
+            if not quiet:
+                print("WAITING %s: %s" % (job, why))
+            first = False
+        time.sleep(min(15, max(POLL_SECONDS, 1)))
+
+
+# --------------------------------------------------------------------------
 # lock
 # --------------------------------------------------------------------------
 
@@ -400,9 +524,11 @@ def prune_dead_tickets():
 
 
 def acquire(job, mode="cooperative", lease_minutes=DEFAULT_LEASE_MIN,
-            timeout_minutes=DEFAULT_TIMEOUT_MIN, check_stale=True, quiet=False):
+            timeout_minutes=DEFAULT_TIMEOUT_MIN, check_stale=True, quiet=False,
+            ready_wait_minutes=None):
     ensure_dirs()
     schedule = load_schedule()
+    cfg = schedule.get(job) or {}
 
     if check_stale:
         stale, late, reason = staleness(job, schedule)
@@ -411,6 +537,13 @@ def acquire(job, mode="cooperative", lease_minutes=DEFAULT_LEASE_MIN,
             if not quiet:
                 print("SKIPPED %s: %s" % (job, reason))
             return EX_SKIPPED
+
+    # Deliberately BEFORE the lock: a job waiting for the network must not hold
+    # the queue shut while it waits.
+    if ready_wait_minutes is None:
+        ready_wait_minutes = cfg.get("readyWaitMinutes", DEFAULT_READY_WAIT_MIN)
+    if not wait_for_preconditions(job, cfg, ready_wait_minutes, quiet=quiet):
+        return EX_NOTREADY
 
     # Fixed-width timestamp so plain lexical sort is true arrival order.
     ticket_name = "%017.6f-%d" % (now(), os.getpid())
@@ -505,10 +638,12 @@ def heartbeat(job, lease_minutes=DEFAULT_LEASE_MIN):
     return EX_OK
 
 
-def run(job, cmd, lease_minutes, timeout_minutes, check_stale):
+def run(job, cmd, lease_minutes, timeout_minutes, check_stale,
+        ready_wait_minutes=None):
     """Wrapped mode: take the lock, run the command, always release."""
     code = acquire(job, mode="wrapped", lease_minutes=lease_minutes,
-                   timeout_minutes=timeout_minutes, check_stale=check_stale)
+                   timeout_minutes=timeout_minutes, check_stale=check_stale,
+                   ready_wait_minutes=ready_wait_minutes)
     if code != EX_OK:
         return code
 
@@ -562,6 +697,8 @@ def main(argv=None):
         sp.add_argument("--timeout", type=float, default=DEFAULT_TIMEOUT_MIN,
                         help="minutes to wait for the queue before giving up")
         sp.add_argument("--no-stale-check", action="store_true")
+        sp.add_argument("--ready-wait", type=float, default=None,
+                        help="minutes to wait for network/Drive before deferring")
         sp.add_argument("--quiet", action="store_true")
 
     common(sub.add_parser("acquire"))
@@ -583,6 +720,9 @@ def main(argv=None):
 
     sub.add_parser("status")
 
+    sp = sub.add_parser("ready")
+    sp.add_argument("job")
+
     sp = sub.add_parser("due")
     sp.add_argument("job")
 
@@ -597,19 +737,26 @@ def main(argv=None):
     if a.cmd == "acquire":
         return acquire(a.job, mode="cooperative", lease_minutes=a.lease,
                        timeout_minutes=a.timeout,
-                       check_stale=not a.no_stale_check, quiet=a.quiet)
+                       check_stale=not a.no_stale_check, quiet=a.quiet,
+                       ready_wait_minutes=a.ready_wait)
     if a.cmd == "run":
         cmd = a.cmd_args + trailing
         if not cmd:
             print("ERROR: no command given for job %s" % a.job, file=sys.stderr)
             return EX_USAGE
-        return run(a.job, cmd, a.lease, a.timeout, not a.no_stale_check)
+        return run(a.job, cmd, a.lease, a.timeout, not a.no_stale_check,
+                   ready_wait_minutes=a.ready_wait)
     if a.cmd == "release":
         return release(a.job, quiet=a.quiet)
     if a.cmd == "heartbeat":
         return heartbeat(a.job, a.lease)
     if a.cmd == "status":
         return status()
+    if a.cmd == "ready":
+        cfg = load_schedule().get(a.job) or {}
+        ok, why = preconditions_met(cfg)
+        print("%s: %s (%s)" % (a.job, "ready" if ok else "NOT READY", why))
+        return EX_OK if ok else EX_NOTREADY
     if a.cmd == "due":
         stale, late, reason = staleness(a.job, load_schedule())
         print("%s: %s (%s)" % (a.job, "STALE" if stale else "fresh", reason))
