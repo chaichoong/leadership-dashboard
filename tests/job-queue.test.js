@@ -11,7 +11,7 @@
 
 import { describe, it, expect, beforeEach, afterAll, vi } from 'vitest';
 import { execFile, execFileSync } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync, readdirSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync, readdirSync, mkdirSync, chmodSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
@@ -622,5 +622,136 @@ describe('last_scheduled reaches back far enough', () => {
     // Sunday, looking back at a Mon-Fri job: must land on Friday, not Saturday.
     expect(py(`m.last_scheduled('0 5 * * 1-5', datetime.datetime(2026, 8, 9, 9, 0)).isoformat()`))
       .toBe('2026-08-07T05:00:00');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Readiness. Five of the seven jobs that failed every morning were not broken:
+// they fired the instant the Mac woke, before the network and Google Drive were
+// up. Waiting fixes them. But waiting on a condition that never clears would
+// turn a loud daily failure into a job that silently never runs, so the two
+// cases have to be told apart.
+// ---------------------------------------------------------------------------
+describe('readiness preconditions', () => {
+  const VAULT = () => join(stateDir, 'vault');
+
+  function pyq(expr) {
+    const src = `
+import importlib.util, json, os, errno
+spec = importlib.util.spec_from_file_location('jq', ${JSON.stringify(QUEUE)})
+m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+print(json.dumps(${expr}))
+`;
+    return JSON.parse(execFileSync('python3', ['-c', src], { encoding: 'utf8', env: env() }).trim());
+  }
+
+  it('reports an unresolvable host as not ready', () => {
+    const [ok] = pyq(`list(m.network_ready('no-such-host.invalid', 443, 2))`);
+    expect(ok).toBe(false);
+  });
+
+  it('treats a missing or empty Drive folder as not ready', () => {
+    expect(pyq(`m.drive_ready(${JSON.stringify(join(stateDir, 'nope'))})[0]`)).toBe(false);
+    mkdirSync(VAULT(), { recursive: true });
+    expect(pyq(`m.drive_ready(${JSON.stringify(VAULT())})[0]`)).toBe(false);
+  });
+
+  it('treats a populated readable folder as ready', () => {
+    mkdirSync(VAULT(), { recursive: true });
+    writeFileSync(join(VAULT(), 'note.md'), 'hello');
+    expect(pyq(`m.drive_ready(${JSON.stringify(VAULT())})[0]`)).toBe(true);
+  });
+
+  it('treats Errno 11 "Resource deadlock avoided" as NOT ready', () => {
+    // The exact error Google Drive raises when mounted but not serving. It is
+    // what took out publish-brain and compound-brain.
+    mkdirSync(VAULT(), { recursive: true });
+    writeFileSync(join(VAULT(), 'note.md'), 'hello');
+    const src = `
+import importlib.util, json, builtins, errno
+spec = importlib.util.spec_from_file_location('jq', ${JSON.stringify(QUEUE)})
+m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+real = builtins.open
+def boom(path, *a, **k):
+    if str(path).endswith('note.md'):
+        raise OSError(errno.EDEADLK, 'Resource deadlock avoided')
+    return real(path, *a, **k)
+builtins.open = boom
+print(json.dumps(list(m.drive_ready(${JSON.stringify(VAULT())}))))
+`;
+    const [ok, why] = JSON.parse(execFileSync('python3', ['-c', src], { encoding: 'utf8', env: env() }).trim());
+    expect(ok).toBe(false);
+    expect(why).toMatch(/deadlock/i);
+  });
+
+  it('does NOT defer on a permission error, which waiting never fixes', () => {
+    // A process without the macOS privacy grant for CloudStorage gets EPERM no
+    // matter how long it waits. Deferring would turn a loud failure silent.
+    mkdirSync(VAULT(), { recursive: true });
+    const f = join(VAULT(), 'locked.md');
+    writeFileSync(f, 'x');
+    chmodSync(f, 0o000);
+    const [ok, why] = pyq(`list(m.drive_ready(${JSON.stringify(VAULT())}))`);
+    chmodSync(f, 0o644);
+    expect(ok).toBe(true);
+    expect(why).toMatch(/cannot probe/i);
+  });
+
+  it('rejects an unknown precondition rather than ignoring it', () => {
+    expect(pyq(`list(m.preconditions_met({'needs': ['telepathy']}))`)[0]).toBe(false);
+  });
+
+  it('defers with exit 69 and never takes the lock when not ready', () => {
+    writeFileSync(schedulePath, JSON.stringify({
+      'needs-net': {
+        cron: '* * * * *', maxLateMinutes: 600,
+        needs: [{ drive: join(stateDir, 'missing-vault') }],
+      },
+    }));
+    const r = run(['acquire', 'needs-net', '--ready-wait', '0']);
+    expect(r.code).toBe(69);
+    expect(run(['status']).stdout).toMatch(/FREE/);
+    const ev = events().at(-1);
+    expect(ev.state).toBe('deferred-not-ready');
+    expect(events().some((e) => e.state === 'acquired')).toBe(false);
+  });
+
+  it('runs normally when the job declares no preconditions', () => {
+    expect(run(['acquire', 'plain-job', '--no-stale-check']).code).toBe(0);
+    run(['release', 'plain-job']);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Queue capacity. A job that waits less time than a routine takes to run does
+// not get serialised, it gets dropped.
+// ---------------------------------------------------------------------------
+describe('waiting longer than the work takes', () => {
+  it('waits at least two hours by default', () => {
+    // Observed 7 Aug 2026: queue-fixer held the lock 30+ minutes on its first
+    // run and three jobs behind it gave up without ever running.
+    const src = readFileSync(QUEUE, 'utf8');
+    const m = src.match(/^DEFAULT_TIMEOUT_MIN\s*=\s*(\d+)/m);
+    expect(m, 'DEFAULT_TIMEOUT_MIN not found').toBeTruthy();
+    expect(Number(m[1])).toBeGreaterThanOrEqual(120);
+  });
+
+  it('still waits longer than the default lease, so a holder cannot outlast the queue', () => {
+    const src = readFileSync(QUEUE, 'utf8');
+    const timeout = Number(src.match(/^DEFAULT_TIMEOUT_MIN\s*=\s*(\d+)/m)[1]);
+    const lease = Number(src.match(/^DEFAULT_LEASE_MIN\s*=\s*(\d+)/m)[1]);
+    // If the wait were shorter than the lease, a single stuck holder would
+    // time out everything behind it before its own lock even expired.
+    expect(timeout).toBeGreaterThan(lease);
+  });
+
+  it('records a timeout as a timeout, never as a success', () => {
+    expect(run(['acquire', 'holder', '--no-stale-check', '--lease', '10']).code).toBe(0);
+    const r = run(['acquire', 'loser', '--no-stale-check', '--timeout', '0.02']);
+    expect(r.code).toBe(75);
+    const ev = events().filter((e) => e.job === 'loser');
+    expect(ev.some((e) => e.state === 'queue-timeout')).toBe(true);
+    expect(ev.some((e) => e.state === 'acquired')).toBe(false);
+    run(['release', 'holder']);
   });
 });

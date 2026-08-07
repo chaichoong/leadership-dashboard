@@ -17,36 +17,249 @@
     "queued:false means the job runs OUTSIDE the queue on purpose. Both such jobs exist to",
     "report on or clean up after the others, so waiting behind a stuck routine would stop them",
     "doing the one thing they are for. They are still listed here so the morning digest watches",
+    "",
+    "needs: what must be true before the job may start. Five of the seven jobs that",
+    "failed every day were not broken. They fired the instant the Mac woke, before the",
+    "network and Google Drive were up, and reported a hard failure. The queue now waits",
+    "up to readyWaitMinutes (default 10) and DEFERS rather than failing if still not",
+    "ready. A drive probe READS A BYTE: an unmounted Drive folder still exists and still",
+    "lists, and only fails on open with 'Resource deadlock avoided'.",
     "them: a job left out of this file entirely is a job nobody notices has stopped."
   ],
-
-  "drift-monitor":                  { "cron": "0 2 * * *",         "maxLateMinutes": 180,  "mode": "cooperative", "note": "nightly sweep, worthless once the day has started" },
-  "task-hygiene-sweep":             { "cron": "30 2 * * *",        "maxLateMinutes": 180,  "mode": "cooperative", "note": "nightly sweep" },
-  "ceo-huddle":                     { "cron": "0 5 * * 1-5",       "maxLateMinutes": 180,  "mode": "cooperative", "note": "must land before the 09:00 brief reads it" },
-  "prod-e2e-sweep":                 { "cron": "40 6 * * *",        "maxLateMinutes": 180,  "mode": "cooperative", "note": "morning sweep" },
-  "drive-auth-health-check":        { "cron": "11 7 * * *",        "maxLateMinutes": 240,  "mode": "cooperative", "note": "health check, still useful late" },
-  "agent-dispatch":                 { "cron": "30 7,14 * * *",     "maxLateMinutes": 240,  "mode": "cooperative", "note": "real work for agents; twice daily so a miss is recoverable" },
-  "uc-check-slack-notifier":        { "cron": "0 8 * * *",         "maxLateMinutes": 600,  "mode": "cooperative", "note": "Mica depends on this; late beats never" },
-  "prospect-daily-run":             { "cron": "0 9 * * *",         "maxLateMinutes": 480,  "mode": "cooperative", "note": "revenue work; late beats never" },
-  "ceo-brief-morning-check":        { "cron": "20 9 * * 1-5",      "maxLateMinutes": 120,  "mode": "cooperative", "note": "verifies the 09:00 brief; pointless by afternoon" },
-  "ceo-memory-sweep":               { "cron": "30 21 * * *",       "maxLateMinutes": 240,  "mode": "cooperative", "note": "nightly distillation" },
-  "post-manager-weekly":            { "cron": "30 8 * * 1",        "maxLateMinutes": 480,  "mode": "cooperative", "note": "weekly, same day still fine" },
-  "monthly-rent-due-date":          { "cron": "0 6 1 * *",         "maxLateMinutes": 1440, "mode": "cooperative", "note": "monthly obligation; must happen on the day" },
-  "update-master-prompt-quarterly": { "cron": "7 9 1 1,4,7,10 *",  "maxLateMinutes": 1440, "mode": "cooperative", "note": "quarterly, propose-only" },
-  "sop-update-processor":           { "cron": "0 9 * * *",         "maxLateMinutes": 180,  "mode": "cooperative", "enabled": false, "note": "paused 30 Jul 2026. Listed so re-enabling needs no config edit; enabled:false keeps the digest from reporting it as a missed run every day" },
-  "queue-fixer":                    { "cron": "15 10 * * *",       "maxLateMinutes": 300,  "mode": "cooperative", "note": "the only scheduled writer of code" },
-
-  "project-status-sync":            { "cron": "45 6 * * *",        "maxLateMinutes": 240,  "mode": "wrapped" },
-  "masterplan-sync":                { "cron": "0 7 * * *",         "maxLateMinutes": 240,  "mode": "wrapped" },
-  "audiobook-morning-report":       { "cron": "0 8 * * *",         "maxLateMinutes": 240,  "mode": "wrapped" },
-  "knowledge-os-sort":              { "cron": "0 9 * * *",         "maxLateMinutes": 480,  "mode": "wrapped" },
-  "uc-notifier-watchdog":           { "cron": "0 9 * * *",         "maxLateMinutes": 600,  "mode": "wrapped", "note": "proves uc-check sent; must not skip before the job it watches" },
-  "apple-notes-bridge":             { "cron": "40 22 * * *",       "maxLateMinutes": 300,  "mode": "wrapped" },
-  "feed-brain":                     { "cron": "45 22 * * *",       "maxLateMinutes": 300,  "mode": "wrapped" },
-  "compound-brain":                 { "cron": "0 23 * * *",        "maxLateMinutes": 300,  "mode": "wrapped" },
-  "publish-brain":                  { "cron": "20 23 * * *",       "maxLateMinutes": 300,  "mode": "wrapped" },
-  "audiobook-backfill":             { "cron": "0 0 * * *",         "maxLateMinutes": 300,  "mode": "wrapped" },
-
-  "mac-guard":                      { "cron": "0 * * * *",         "maxLateMinutes": 120,  "mode": "wrapped", "queued": false, "note": "reaps preview servers and test browsers that outlived their session. Must run even while a routine holds the queue, since a stuck routine is exactly when strays pile up" },
-  "job-digest":                     { "cron": "0 11 * * *",        "maxLateMinutes": 240,  "mode": "wrapped", "queued": false, "note": "reports on the queue, so it must never wait behind it" }
+  "drift-monitor": {
+    "cron": "0 2 * * *",
+    "maxLateMinutes": 180,
+    "mode": "cooperative",
+    "note": "nightly sweep, worthless once the day has started",
+    "needs": [
+      "network"
+    ]
+  },
+  "task-hygiene-sweep": {
+    "cron": "30 2 * * *",
+    "maxLateMinutes": 180,
+    "mode": "cooperative",
+    "note": "nightly sweep",
+    "needs": [
+      "network"
+    ]
+  },
+  "ceo-huddle": {
+    "cron": "0 5 * * 1-5",
+    "maxLateMinutes": 180,
+    "mode": "cooperative",
+    "note": "must land before the 09:00 brief reads it",
+    "needs": [
+      "network"
+    ]
+  },
+  "prod-e2e-sweep": {
+    "cron": "40 6 * * *",
+    "maxLateMinutes": 180,
+    "mode": "cooperative",
+    "note": "morning sweep",
+    "needs": [
+      "network"
+    ]
+  },
+  "drive-auth-health-check": {
+    "cron": "11 7 * * *",
+    "maxLateMinutes": 240,
+    "mode": "cooperative",
+    "note": "health check, still useful late",
+    "needs": [
+      "network"
+    ]
+  },
+  "agent-dispatch": {
+    "cron": "30 7,14 * * *",
+    "maxLateMinutes": 240,
+    "mode": "cooperative",
+    "note": "real work for agents; twice daily so a miss is recoverable",
+    "needs": [
+      "network"
+    ]
+  },
+  "uc-check-slack-notifier": {
+    "cron": "0 8 * * *",
+    "maxLateMinutes": 600,
+    "mode": "cooperative",
+    "note": "Mica depends on this; late beats never",
+    "needs": [
+      "network"
+    ]
+  },
+  "prospect-daily-run": {
+    "cron": "0 9 * * *",
+    "maxLateMinutes": 480,
+    "mode": "cooperative",
+    "note": "revenue work; late beats never",
+    "needs": [
+      "network"
+    ]
+  },
+  "ceo-brief-morning-check": {
+    "cron": "20 9 * * 1-5",
+    "maxLateMinutes": 120,
+    "mode": "cooperative",
+    "note": "verifies the 09:00 brief; pointless by afternoon",
+    "needs": [
+      "network"
+    ]
+  },
+  "ceo-memory-sweep": {
+    "cron": "30 21 * * *",
+    "maxLateMinutes": 240,
+    "mode": "cooperative",
+    "note": "nightly distillation",
+    "needs": [
+      "network"
+    ]
+  },
+  "post-manager-weekly": {
+    "cron": "30 8 * * 1",
+    "maxLateMinutes": 480,
+    "mode": "cooperative",
+    "note": "weekly, same day still fine",
+    "needs": [
+      "network"
+    ]
+  },
+  "monthly-rent-due-date": {
+    "cron": "0 6 1 * *",
+    "maxLateMinutes": 1440,
+    "mode": "cooperative",
+    "note": "monthly obligation; must happen on the day",
+    "needs": [
+      "network"
+    ]
+  },
+  "update-master-prompt-quarterly": {
+    "cron": "7 9 1 1,4,7,10 *",
+    "maxLateMinutes": 1440,
+    "mode": "cooperative",
+    "note": "quarterly, propose-only"
+  },
+  "sop-update-processor": {
+    "cron": "0 9 * * *",
+    "maxLateMinutes": 180,
+    "mode": "cooperative",
+    "enabled": false,
+    "note": "paused 30 Jul 2026. Listed so re-enabling needs no config edit; enabled:false keeps the digest from reporting it as a missed run every day"
+  },
+  "queue-fixer": {
+    "cron": "15 10 * * *",
+    "maxLateMinutes": 300,
+    "mode": "cooperative",
+    "note": "the only scheduled writer of code",
+    "needs": [
+      "network"
+    ]
+  },
+  "project-status-sync": {
+    "cron": "45 6 * * *",
+    "maxLateMinutes": 240,
+    "mode": "wrapped",
+    "needs": [
+      "network"
+    ]
+  },
+  "masterplan-sync": {
+    "cron": "0 7 * * *",
+    "maxLateMinutes": 240,
+    "mode": "wrapped",
+    "needs": [
+      "network"
+    ]
+  },
+  "audiobook-morning-report": {
+    "cron": "0 8 * * *",
+    "maxLateMinutes": 240,
+    "mode": "wrapped",
+    "needs": [
+      "network"
+    ]
+  },
+  "knowledge-os-sort": {
+    "cron": "0 9 * * *",
+    "maxLateMinutes": 480,
+    "mode": "wrapped",
+    "needs": [
+      {
+        "drive": "~/Library/CloudStorage/GoogleDrive-kevin@runpreneur.org.uk/My Drive/00 AI Context"
+      }
+    ]
+  },
+  "uc-notifier-watchdog": {
+    "cron": "0 9 * * *",
+    "maxLateMinutes": 600,
+    "mode": "wrapped",
+    "note": "proves uc-check sent; must not skip before the job it watches",
+    "needs": [
+      "network"
+    ]
+  },
+  "apple-notes-bridge": {
+    "cron": "40 22 * * *",
+    "maxLateMinutes": 300,
+    "mode": "wrapped",
+    "needs": [
+      "network"
+    ]
+  },
+  "feed-brain": {
+    "cron": "45 22 * * *",
+    "maxLateMinutes": 300,
+    "mode": "wrapped",
+    "needs": [
+      "network",
+      {
+        "drive": "~/Library/CloudStorage/GoogleDrive-kevin@runpreneur.org.uk/My Drive/00 AI Context"
+      }
+    ]
+  },
+  "compound-brain": {
+    "cron": "0 23 * * *",
+    "maxLateMinutes": 300,
+    "mode": "wrapped",
+    "needs": [
+      "network",
+      {
+        "drive": "~/Library/CloudStorage/GoogleDrive-kevin@runpreneur.org.uk/My Drive/00 AI Context"
+      }
+    ]
+  },
+  "publish-brain": {
+    "cron": "20 23 * * *",
+    "maxLateMinutes": 300,
+    "mode": "wrapped",
+    "needs": [
+      "network",
+      {
+        "drive": "~/Library/CloudStorage/GoogleDrive-kevin@runpreneur.org.uk/My Drive/00 AI Context"
+      }
+    ]
+  },
+  "audiobook-backfill": {
+    "cron": "0 0 * * *",
+    "maxLateMinutes": 300,
+    "mode": "wrapped",
+    "needs": [
+      "network"
+    ]
+  },
+  "mac-guard": {
+    "cron": "0 * * * *",
+    "maxLateMinutes": 120,
+    "mode": "wrapped",
+    "queued": false,
+    "note": "reaps preview servers and test browsers that outlived their session. Must run even while a routine holds the queue, since a stuck routine is exactly when strays pile up"
+  },
+  "job-digest": {
+    "cron": "0 11 * * *",
+    "maxLateMinutes": 240,
+    "mode": "wrapped",
+    "queued": false,
+    "note": "reports on the queue, so it must never wait behind it"
+  }
 }
