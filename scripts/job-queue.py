@@ -69,7 +69,18 @@ EX_NOTREADY = 69   # EX_UNAVAILABLE: the machine is not ready for this job yet
 EX_USAGE = 64
 
 DEFAULT_LEASE_MIN = 45
-DEFAULT_TIMEOUT_MIN = 30
+# How long a job waits for its turn before giving up.
+#
+# Was 30 minutes, which sounded generous and was not. On 7 Aug 2026 queue-fixer
+# held the lock for over half an hour on its first run and squeezed out
+# masterplan-sync, project-status-sync and uc-notifier-watchdog, all of which
+# gave up at exactly 09:11:18 without running. A Claude routine doing real work
+# routinely holds the lock for 10-40 minutes, so the wait has to be longer than
+# the work, not longer than a guess.
+#
+# The lock cannot be held for ever regardless: every holder carries a lease, so
+# waiting longer risks a slower morning, never a permanent stall.
+DEFAULT_TIMEOUT_MIN = 120
 DEFAULT_READY_WAIT_MIN = 10
 POLL_SECONDS = float(os.environ.get("JOB_QUEUE_POLL", "2"))
 
