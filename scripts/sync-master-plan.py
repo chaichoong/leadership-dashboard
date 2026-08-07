@@ -13,7 +13,7 @@ Revenue" is the team's working copy. This script keeps them aligned:
 Usage: python3 scripts/sync-master-plan.py [map|sync] [--dry-run]
 Requires: ~/.config/od/airtable_pat. Log: ~/Library/Logs/od-masterplan-sync.log
 """
-import json, os, re, subprocess, sys, time, urllib.request, urllib.parse
+import json, os, re, shutil, subprocess, sys, tempfile, time, urllib.request, urllib.parse
 from datetime import date
 from difflib import SequenceMatcher
 
@@ -78,8 +78,8 @@ def score(a, b):
     tok = len(ta & tb) / min(len(ta), len(tb)) if ta and tb else 0.0
     return max(SequenceMatcher(None, a, b).ratio(), tok)
 
-def parse_plan():
-    lines = open(PLAN).read().splitlines()
+def parse_plan(plan_path=None):
+    lines = open(plan_path or PLAN).read().splitlines()
     tasks = []
     for i, l in enumerate(lines):
         m = TASK_RE.match(l)
@@ -133,16 +133,65 @@ def append_changelog(lines, summary):
             return
     lines.append(row)
 
-def git(*args, check=True):
-    return subprocess.run(["git", "-C", REPO] + list(args),
+def git(*args, check=True, cwd=None):
+    return subprocess.run(["git", "-C", cwd or REPO] + list(args),
                           capture_output=True, text=True, check=check)
 
+
+class PlanWorktree:
+    """A private, disposable checkout of origin/main to do the commit in.
+
+    This job used to run `git pull --rebase --autostash origin main` straight in
+    the shared checkout. Three things went wrong with that, and the third broke
+    it every night from 4 Aug 2026:
+
+      1. --autostash stashes and reapplies work belonging to whatever Claude
+         session happens to be mid-task. That is the 16 Jul 2026 incident.
+      2. It moves HEAD in a checkout somebody else is using.
+      3. It ABORTS outright when the checkout holds untracked files that also
+         exist upstream, which is exactly the state a squash-merged PR leaves
+         behind. `error: The following untracked working tree files would be
+         overwritten by checkout: scripts/mac-guard.sh ...`
+
+    A detached worktree at origin/main has none of those problems: it is ours,
+    it is clean by construction, and it is deleted afterwards.
+    """
+
+    def __init__(self):
+        self.path = None
+
+    def __enter__(self):
+        git("fetch", "origin", "main")
+        self.path = tempfile.mkdtemp(prefix="masterplan-sync-")
+        # Remove first: mkdtemp already made the directory and `worktree add`
+        # insists on creating it itself.
+        os.rmdir(self.path)
+        git("worktree", "add", "--detach", self.path, "origin/main")
+        return self.path
+
+    def __exit__(self, *exc):
+        if not self.path:
+            return False
+        # --force because we may have left a commit here; prune tidies the
+        # admin files either way, so a failure never accumulates worktrees.
+        git("worktree", "remove", "--force", self.path, check=False)
+        git("worktree", "prune", check=False)
+        shutil.rmtree(self.path, ignore_errors=True)
+        return False
+
 def cmd_sync():
+    # Still worth checking the shared checkout: if a human is mid-edit on the
+    # plan, syncing origin/main over the top would strand their work.
     if git("status", "--porcelain", "--", "MASTER-PLAN.md").stdout.strip():
         print("ABORT: MASTER-PLAN.md has uncommitted local edits; not syncing over them.")
         return 1
-    git("pull", "--rebase", "--autostash", "origin", "main")
-    lines, ptasks = parse_plan()
+    with PlanWorktree() as wt:
+        return _sync_in(wt)
+
+
+def _sync_in(wt):
+    plan_path = os.path.join(wt, "MASTER-PLAN.md")
+    lines, ptasks = parse_plan(plan_path)
     at = fetch_tasks()
     by_id = {r["id"]: r for r in at}
     ticked, created, flags = [], [], []
@@ -204,10 +253,11 @@ def cmd_sync():
     if ticked: parts.append(f"ticked {len(ticked)} from Airtable completions")
     if created: parts.append(f"pushed {len(created)} new plan tasks to Airtable")
     append_changelog(lines, "; ".join(parts) + ".")
-    open(PLAN, "w").write("\n".join(lines) + "\n")
-    git("add", "MASTER-PLAN.md")
-    git("commit", "-m", "chore: nightly master-plan sync\n\n" + "; ".join(parts))
-    git("push", "--no-verify", "origin", "main")  # plan-only commit; test gate not needed
+    open(plan_path, "w").write("\n".join(lines) + "\n")
+    git("add", "MASTER-PLAN.md", cwd=wt)
+    git("commit", "-m", "chore: nightly master-plan sync\n\n" + "; ".join(parts), cwd=wt)
+    # HEAD is detached at origin/main in here, so name both ends of the push.
+    git("push", "--no-verify", "origin", "HEAD:main", cwd=wt)
     print("committed + pushed")
     return 0
 
