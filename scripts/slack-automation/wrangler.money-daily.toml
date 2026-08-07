@@ -2,11 +2,19 @@ name = "money-confidence-daily"
 main = "money-daily-worker.js"
 compatibility_date = "2024-12-01"
 
-# Two UTC crons cover 09:00 Europe/London year-round:
-#   "0 8 * * *" hits 09:00 London during BST (summer)
-#   "0 9 * * *" hits 09:00 London during GMT (winter)
-# The worker's isLondonSendTime() gate picks the right one AND enforces Mon–Fri,
-# so exactly one brief goes out per weekday and none at the weekend.
+# Hourly across the London morning. "0 8-11 * * *" fires at 08:00–11:00 UTC, which
+# is 09:00–12:00 London in BST and 08:00–11:00 London in GMT. Either way THREE of
+# those firings land inside the worker's 09:00–11:59 London window, so the brief
+# gets three chances a day in both halves of the year.
+#
+# WHY NOT ONE CRON (fixed 7 Aug 2026): this was "0 8 * * *" + "0 9 * * *", one for
+# BST and one for GMT, and the gate accepted only 09:00–09:10 London. So exactly
+# ONE firing per day could ever pass, and a cron that was missed or ran more than
+# ten minutes late produced NO brief and NO alarm — an early return throws nothing,
+# so alertFailure never sees it. That is what happened on Fri 7 Aug 2026.
+# Redundancy alone would mean duplicate briefs, so the worker is now idempotent:
+# alreadyBriefedToday() checks whether today's `Full Brief` is populated and the
+# later firings return early. Widening the cron without that check would spam Kevin.
 # (Was 09:30 money-only; promoted to the 09:00 AI CEO brief on 28 Jul 2026.)
 #
 # WHY THE DAY IS FILTERED IN CODE, NOT IN THE CRON (fixed 3 Aug 2026):
@@ -17,11 +25,11 @@ compatibility_date = "2024-12-01"
 # week at Sunday=1, making 1-5 mean Sun–Thu. Kevin silently lost every Friday
 # brief and gained a Sunday one.
 # The day-of-week field is now unused. The day is decided by isLondonSendTime(),
-# in Europe/London, covered by tests/ceo-brief-schedule.test.js. Two throwaway
-# weekend invocations a day that return in microseconds is the price, and it is
-# worth paying to never re-litigate whose week starts where.
+# in Europe/London, covered by tests/ceo-brief-schedule.test.js. A handful of
+# throwaway weekend invocations a day that return in microseconds is the price,
+# and it is worth paying to never re-litigate whose week starts where.
 [triggers]
-crons = ["0 8 * * *", "0 9 * * *"]
+crons = ["0 8-11 * * *"]
 
 # Same-zone workers cannot call each other via public URLs (Cloudflare error
 # 1042) — AI calls go through a direct service binding to claude-proxy.

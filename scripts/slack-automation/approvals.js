@@ -125,6 +125,19 @@ const MAX_REACTION_CHECKS_PER_RUN = 25;
 // Two labels on purpose: this one cannot see a tier-1 connection an agent only
 // discovered while working, and that one cannot fire if the task never reached
 // an agent. Keep both.
+// MUST stay identical to TIER1_PATTERNS in scripts/agent-dispatch.py — the two
+// are independent labels for the same thing (this one stamps the red banner on
+// the Slack card, that one stamps it on the Agent Output), and each covers the
+// other's blind spot. tests/constant-drift.test.js fails if they diverge.
+//
+// Widened 7 Aug 2026 alongside the Python list: SKILL.md step 2 enumerates the
+// tier-1 categories and six of them matched nothing here either, so enforcement
+// notices, settlement offers, disclosure forms and solicitor correspondence
+// reached Kevin's phone looking like routine admin.
+//
+// Bare "financial statement" is deliberately absent: his accountants produce
+// company "financial statements" every year and it would put the legal-matter
+// banner on routine accounting. The disclosure form is caught by its full name.
 const KEVIN_ONLY_PATTERNS = [
     /restraint order/i,
     /operation lily/i,
@@ -132,6 +145,20 @@ const KEVIN_ONLY_PATTERNS = [
     /social housing holdings/i,
     /ach investments/i,
     /liquidat/i,
+    // Enforcement — the vocabulary a bailiff/HCEO notice actually uses.
+    /notice of enforcement/i,
+    /enforcement agent/i,
+    /bailiff/i,
+    /writ of control/i,
+    /taking control of goods/i,
+    // Debt settlement and financial disclosure.
+    /standard financial statement/i,
+    /income and expenditure/i,
+    /settlement offer/i,
+    /full and final/i,
+    // Legal correspondence, including law-firm senders and invoices.
+    /solicitor/i,
+    /litigation/i,
 ];
 
 // ─── SMALL HELPERS ────────────────────────────────────────────────────

@@ -126,11 +126,43 @@ CEO_REC_ID = "reciHUAEcEkbctnZ6"
 # knows what he is looking at before he taps. Keep the mechanism. When agents
 # go autonomous, this is the line that still stops at him.
 #
-# Same six patterns as approvals.js KEVIN_ONLY_PATTERNS — one mechanism.
+# MUST stay identical to KEVIN_ONLY_PATTERNS in scripts/slack-automation/
+# approvals.js. Both are LABELS for the same thing and neither is routing: this
+# list stamps the banner on the Agent Output, that one stamps the red banner on
+# the Slack card, and each covers the other's blind spot (the worker cannot see
+# a connection an agent found mid-work; the engine cannot fire on a task no
+# agent touched). tests/constant-drift.test.js fails if they diverge — change
+# both together or not at all.
+#
+# Over-labelling costs Kevin three seconds of reading; under-labelling costs him
+# a surprise. So the list errs wide, per SKILL.md step 2's "when unsure, treat
+# it AS tier 1".
+#
+# Widened 7 Aug 2026: SKILL.md step 2 enumerates the tier-1 categories the
+# dispatcher must label, and six of them had no pattern at all — enforcement and
+# bailiff notices, debt settlement offers, financial-disclosure forms, solicitor
+# and litigation correspondence. The script silently matched none of them and
+# the whole burden fell on the dispatcher's own judgement pass. The test in
+# tests/agent-dispatch-tier1.test.js reads the categories out of SKILL.md and
+# fails if the two ever drift apart again.
+#
+# Bare "financial statement" is deliberately NOT here even though it appears in
+# SKILL.md's prose: Kevin's accountants produce company "financial statements"
+# every year and matching it would stamp the legal-matter banner on routine
+# accounting. The debt-disclosure form is caught by its full name and by the
+# "income and expenditure" wording those forms actually use.
 TIER1_PATTERNS = [
     re.compile(p, re.I) for p in (
         r"restraint order", r"operation lily", r"criminal investigation",
         r"social housing holdings", r"ach investments", r"liquidat",
+        # Enforcement — the vocabulary a bailiff/HCEO notice actually uses.
+        r"notice of enforcement", r"enforcement agent", r"bailiff",
+        r"writ of control", r"taking control of goods",
+        # Debt settlement and financial disclosure.
+        r"standard financial statement", r"income and expenditure",
+        r"settlement offer", r"full and final",
+        # Legal correspondence, including law-firm senders and invoices.
+        r"solicitor", r"litigation",
     )
 ]
 # Tier 2: creditor correspondence is Mica's lane, never an agent's. Kept
@@ -141,6 +173,42 @@ TIER2_PATTERNS = [
         r"letter of claim", r"statutory demand", r"bounce ?back loan",
     )
 ]
+
+# "Changes requested" where Kevin's feedback is actually "not yet".
+#
+# A hand-back sorts to the HEAD of the worklist, ahead of new work, because
+# hand-backs are what he is waiting on. But a redo whose feedback says "leave
+# this until next month" is not something he is waiting on — and with no
+# deferred state anywhere it came back to the front of the queue on EVERY run,
+# burning one of the five cap slots each time and pushing real work past the cap.
+# The agent redoes it, he asks for the delay again, and it repeats twice a day.
+#
+# The proper fix is a Deferred Until date on Tasks so the queue can exclude it
+# until the date passes; that needs a schema change and is filed separately.
+# Until then these are DEMOTED to the back of the combined list, so they fall
+# into reserve whenever there is other work and are only picked up on a quiet
+# run. Demoted, never dropped — and counted in the queue JSON so a task sitting
+# here for weeks is visible rather than silently parked.
+DELAY_PATTERNS = [
+    re.compile(p, re.I) for p in (
+        r"\bdelay(ed|ing)?\b", r"\bdefer(red|ring)?\b", r"\bpostpone",
+        r"\bhold off\b", r"\bon hold\b", r"\bpark (this|it)\b",
+        r"\bnot (yet|now)\b", r"\bleave (this|it) (until|for|till)\b",
+        r"\bcome back to (this|it)\b", r"\brevisit\b",
+        r"\bwait until\b", r"\bnext (week|month|quarter)\b",
+    )
+]
+
+
+def is_delay_feedback(text):
+    """Does this Approval Feedback ask for the work to wait rather than change?
+
+    Only ever applied to the feedback on a Changes-requested hand-back, which is
+    Kevin's own instruction to the agent — not to a task name or description,
+    where "delayed delivery" would false-positive constantly.
+    """
+    hay = str(text or "")
+    return any(p.search(hay) for p in DELAY_PATTERNS)
 
 
 # Stamped on top of a tier-1 task's Agent Output by `submit --tier1`, so the
@@ -356,8 +424,15 @@ def cmd_queue(args):
     for bucket in (approved_hb, changes_hb, new_work, routing):
         bucket.sort(key=sort_key)
 
+    # A redo whose feedback asks for a DELAY is not work Kevin is waiting on, so
+    # it loses its hand-back priority and goes to the back — see DELAY_PATTERNS.
+    deferred_hb = [t for t in changes_hb if is_delay_feedback(t["feedback"])]
+    if deferred_hb:
+        deferred_ids = {t["id"] for t in deferred_hb}
+        changes_hb = [t for t in changes_hb if t["id"] not in deferred_ids]
+
     # Hand-backs first — approved work Kevin is waiting on beats new work.
-    combined = approved_hb + changes_hb + new_work
+    combined = approved_hb + changes_hb + new_work + deferred_hb
     intents = open_intents()
     for t in combined:
         t["kind"] = ("carry_out" if t["outcome"] in APPROVED
@@ -390,6 +465,9 @@ def cmd_queue(args):
             "agentLinkedOpen": len(agent_linked),
             "approvedHandbacks": len(approved_hb),
             "changesRequested": len(changes_hb),
+            # Redos Kevin asked to delay. Demoted behind new work rather than
+            # dropped, and counted here so one sitting for weeks stays visible.
+            "deferredRedos": len(deferred_hb),
             "newWork": len(new_work),
             "routingNeeded": len(routing),
             "unclassified": len(unclassified),

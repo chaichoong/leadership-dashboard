@@ -193,6 +193,52 @@ INVARIANTS = [
                         "LEN({Closed On} & '') >= 0)"),
         "fields": ["Project Name", "Project Status", "Days from Start Date"],
     },
+    {
+        # An OPEN task carrying a Completion Date. Found 7 Aug 2026 by the
+        # agent-dispatch routine; measured the same day at 143 open tasks, every
+        # one of which also carries a Completed Month.
+        #
+        # It is not one bad bulk edit. The dates spread across late Apr and early
+        # May 2026 and the statuses are mixed (56 Upcoming, 41 Today, 27
+        # Approval, 16 blank, 3 Overdue), which is the shape of tasks that were
+        # completed, had the date stamped by the "Change Status to Completed"
+        # automation (see os/tasks/workflow.html), and were later REOPENED
+        # without anything clearing the stamp. Reopening is the uncovered path.
+        #
+        # Why it matters beyond tidiness: `Completed Month` is what monthly
+        # throughput is grouped by, so an open task counts toward a month it was
+        # never finished in, and it inflates April/May for ever. A fixture test
+        # cannot see this — it is the shape of real data, not of the code.
+        #
+        # NOTE ON FIRST RUN: this invariant fails immediately, because the 143
+        # are still there. That is deliberate and correct — the alternative is
+        # knowing about them and staying quiet. Clearing them is a bulk write on
+        # Kevin's own data and is his call, not the sweep's.
+        "name": "open-tasks-carry-no-completion-date",
+        "table": TASKS,
+        "incident": "Aug 2026 — 143 open tasks carried a Completion Date and Completed Month from Apr/May, inflating monthly throughput with work that was never finished",
+        "asserts": "not completed => no Completion Date",
+        "violation": "AND({Is Completed} = 0, {Completion Date})",
+        # Every open task: the exact population a stale stamp can corrupt. If
+        # this ever matches nothing the run FAILS rather than reading as clean.
+        "control": "{Is Completed} = 0",
+        "control_means": "open tasks (the only population that can carry a stale completion stamp)",
+        # TRUE for every record and touches all three fields, so a rename or a
+        # typo 422s loudly instead of returning a quiet zero. Note the base has
+        # BOTH {Is Complete} and {Is Completed}; this uses {Is Completed}, which
+        # is the one the 143 figure was measured against.
+        #
+        # Every term is LEN(x & '') >= 0, never a bare `{x} >= 0`. Measured here
+        # 7 Aug 2026: `{Is Completed} >= 0` alone matches 6,864 of 7,023+ records,
+        # i.e. it is FALSE for the ~159 whose value is blank — the CLAUDE.md trap
+        # that blanked 8,667 transactions. Inside this OR the LEN terms happen to
+        # rescue it, so the probe was not broken; it was one edit away from being
+        # broken, and the day someone drops the other two terms it silently stops
+        # covering blanks. Coercing to text is true for blank and populated alike.
+        "field_probe": ("OR(LEN({Is Completed} & '') >= 0, LEN({Completion Date} & '') >= 0, "
+                        "LEN({Completed Month (YYYY-MM)} & '') >= 0)"),
+        "fields": ["Task Name", "Status", "Completion Date", "Completed Month (YYYY-MM)"],
+    },
 ]
 
 
