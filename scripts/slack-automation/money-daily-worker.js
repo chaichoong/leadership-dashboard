@@ -634,9 +634,21 @@ async function alertFailure(env, err) {
     } catch (_) { /* nothing more we can do */ }
 }
 
-// True only at the 09:00 Europe/London firing on a WEEKDAY, whichever UTC cron
-// fired it. Two UTC crons (08:00 + 09:00) cover BST and GMT; this gate lets
-// exactly one through per weekday, and none at the weekend.
+// True during the WEEKDAY morning window in which a CEO brief may be sent,
+// 09:00–11:59 Europe/London, whichever UTC cron fired it.
+//
+// This used to be `hour === 9 && minute <= 10` — a single ten-minute slot. That
+// made the trigger TIME-shaped, and it had no redundancy: exactly one of the two
+// crons can pass on any given day (BST: the 08:00 UTC one; GMT: the 09:00 UTC
+// one), so ONE missed or >10-minutes-late firing meant no brief at all, silently.
+// `alertFailure` only fires on a thrown error, and an early return throws nothing.
+// That is exactly what happened on Fri 7 Aug 2026: no brief, no alarm, caught only
+// because the separate ceo-brief-morning-check routine went looking.
+//
+// The window is now wide and the DEDUPLICATION lives in alreadyBriefedToday()
+// below — the question that matters is not "is it 09:00 now?" but "does today's
+// brief exist yet?". A late cron is harmless and a missed one is recovered by the
+// next firing.
 //
 // The weekday half was missing until 3 Aug 2026. The header said Mon–Fri but the
 // code only checked the hour, so Sunday 2 Aug 2026 produced a brief.
@@ -649,23 +661,59 @@ async function alertFailure(env, err) {
 // "Sat".
 function isLondonSendTime(now = new Date()) {
     const parts = new Intl.DateTimeFormat('en-GB', {
-        timeZone: 'Europe/London', hour: 'numeric', minute: 'numeric', hour12: false,
+        timeZone: 'Europe/London', hour: 'numeric', hour12: false,
     }).formatToParts(now);
     const hour = Number(parts.find(p => p.type === 'hour').value);
-    const minute = Number(parts.find(p => p.type === 'minute').value);
 
     const londonYMD = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/London' }).format(now);
     const londonDay = new Date(`${londonYMD}T00:00:00Z`).getUTCDay(); // 0 = Sun … 6 = Sat
     const isWeekday = londonDay >= 1 && londonDay <= 5;
 
-    return isWeekday && hour === 9 && minute <= 10;
+    return isWeekday && hour >= 9 && hour <= 11;
+}
+
+// Has today's brief already gone out? This is the idempotency half of the fix
+// above: the window lets several firings through, and this is what stops Kevin
+// getting three briefs a morning.
+//
+// Reads today's CEO Briefs row and treats a populated `Full Brief` as "sent" —
+// the same field the CEO Brief tab reads, and the last thing storeBrief writes.
+// The 07:30 huddle creates a STUB row with no Full Brief, so "a row exists" is
+// deliberately NOT the test; it would suppress the brief every single day.
+//
+// On any read failure this returns FALSE, i.e. "go ahead and send". That
+// direction is chosen on purpose: if Airtable is unreachable we cannot know, and
+// a duplicate brief is a minor annoyance whereas a missing one is the entire bug
+// this change exists to fix. Never flip this to fail-closed.
+async function alreadyBriefedToday(pat) {
+    try {
+        const today = todayLondonISO();
+        // returnFieldsByFieldId is NOT optional — see the note in gatherHuddle().
+        // Without it the response is keyed by field NAME, getField returns
+        // undefined for every row, and this would report "not sent" every day,
+        // silently restoring the duplicate-brief behaviour.
+        const url = `https://api.airtable.com/v0/${BASE_ID}/${TBL_BRIEFS}`
+            + `?returnFieldsByFieldId=true&maxRecords=5`
+            + `&filterByFormula=${encodeURIComponent(`DATESTR({Date})='${today}'`)}`;
+        const r = await fetch(url, { headers: { Authorization: `Bearer ${pat}` } });
+        if (!r.ok) return false;
+        const records = (await r.json()).records || [];
+        return records.some(x => String(getField(x, F.ceoFullBrief) || '').trim() !== '');
+    } catch { return false; }
 }
 
 export default {
     async scheduled(event, env, ctx) {
-        if (!isLondonSendTime(new Date(event.scheduledTime))) return; // wrong DST firing
+        if (!isLondonSendTime(new Date(event.scheduledTime))) return; // outside the London weekday window
         ctx.waitUntil((async () => {
-            try { await sendDailyDM(env); }
+            try {
+                // State-shaped, not time-shaped: several firings land inside the
+                // window and the FIRST one that finds today's brief missing sends
+                // it. Checked inside waitUntil so a slow Airtable read cannot make
+                // the handler itself time out.
+                if (await alreadyBriefedToday(env.AIRTABLE_PAT)) return;
+                await sendDailyDM(env);
+            }
             catch (err) { await alertFailure(env, err); throw err; }
         })());
     },
