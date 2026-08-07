@@ -82,6 +82,86 @@
 
     function prosStatus(rec) { return prosField(rec, 'Status') || 'Found'; }
 
+    // ── Outbound email model ───────────────────────────────────
+    // ONE builder feeds BOTH the preview Kevin approves and the email GHL
+    // actually sends. Two code paths would drift, and a drifting preview is
+    // worse than no preview: he would sign off on something the prospect
+    // never receives. Every change to what goes out belongs in here.
+
+    const PROS_EMAIL_ROUTES = ['Email reply (they asked)', 'Email sequence (Ltd)'];
+    const PROS_LEGACY_BOOKING = 'api.leadconnectorhq.com/widget/booking';
+
+    function prosIsEmailRoute(route) { return PROS_EMAIL_ROUTES.includes(route); }
+
+    // Fallback when the agent has not written an Email Subject (records created
+    // before the field existed on 7 Aug 2026). Kevin overrides it in the card.
+    function prospectDefaultSubject(rec) {
+        return prosField(rec, 'Contact Route') === 'Email reply (they asked)'
+            ? 'Your post about finding some help'
+            : `A thought for ${prosField(rec, 'Company') || 'your business'}`;
+    }
+
+    // The sign-off line is part of the signature, never part of the draft, so
+    // every email ends the same way whoever wrote the body.
+    function prospectSignatureText() {
+        return `Kevin\n\n${OD_SENDER.name}\n${OD_SENDER.title}\n${OD_SENDER.website}\n${OD_SENDER.email}`;
+    }
+
+    // 20 of the 131 drafts on 7 Aug 2026 already ended with a bare "Kevin", and
+    // the agent may write one again. Strip a trailing first-name line so the
+    // sign-off appears once, not twice. Requires its own line: a body ending
+    // "...a quick call with Kevin" is left alone.
+    function prosStripSignOff(text) {
+        return text.replace(/\s+$/, '').replace(/\n+[ \t]*Kevin[.,!]?[ \t]*$/i, '');
+    }
+
+    // Hex, not design tokens, on purpose: this HTML leaves the app and is
+    // rendered by Gmail/Outlook, which do not resolve CSS custom properties.
+    // Values mirror tokens.css (--text-secondary, --text-primary, --accent).
+    function prospectSignatureHtml() {
+        return '<div style="margin-top:16px;font-size:14px;color:#1C2422">Kevin</div>'
+            + '<div style="margin-top:16px;font-size:13px;line-height:1.5;color:#5A6660">'
+            + `<div style="font-weight:600;color:#1C2422">${escHtml(OD_SENDER.name)}</div>`
+            + `<div>${escHtml(OD_SENDER.title)}</div>`
+            + `<div><a href="https://${escHtml(OD_SENDER.website)}" style="color:#2C6E49">${escHtml(OD_SENDER.website)}</a></div>`
+            + `<div><a href="mailto:${escHtml(OD_SENDER.email)}" style="color:#2C6E49">${escHtml(OD_SENDER.email)}</a></div>`
+            + '</div>';
+    }
+
+    // Turns bare URLs in ALREADY-ESCAPED text into anchors. A plain-text link
+    // is not guaranteed to be clickable in every mail client, and the booking
+    // link is the only action the email asks for.
+    function prosLinkify(escaped) {
+        return escaped.replace(/https?:\/\/[^\s<]+/g, m => {
+            const trail = (m.match(/[.,;:!?)\]]+$/) || [''])[0];
+            const url = trail ? m.slice(0, -trail.length) : m;
+            return `<a href="${url}" target="_blank" rel="noopener noreferrer" style="color:#2C6E49">${url}</a>${trail}`;
+        });
+    }
+
+    // Escape FIRST, then linkify: escaping afterwards would destroy the anchors.
+    function prosBodyHtml(text) {
+        return prosLinkify(escHtml(text)).replace(/\n/g, '<br>');
+    }
+
+    // overrides lets the live preview use the unsaved textarea/input values.
+    function buildProspectEmail(rec, overrides) {
+        const o = overrides || {};
+        const draft = String(o.draft !== undefined ? o.draft : prosField(rec, 'Draft Message') || '');
+        const subject = String(o.subject !== undefined ? o.subject : prosField(rec, 'Email Subject') || '').trim()
+            || prospectDefaultSubject(rec);
+        const body = prosStripSignOff(draft);
+        return {
+            fromName: OD_SENDER.name,
+            from: OD_SENDER.email,
+            to: prosField(rec, 'Contact Email'),
+            toName: prosField(rec, 'Name'),
+            subject,
+            text: body + '\n\n' + prospectSignatureText(),
+            html: prosBodyHtml(body) + prospectSignatureHtml(),
+        };
+    }
+
     // ── Render ─────────────────────────────────────────────────
 
     function renderProspectingTab() {
@@ -142,12 +222,16 @@
     }
 
     // Plain-English "what happens after Approve" line per contact route.
-    function prosRouteProcess(route, isLtd) {
+    // The [BOOKING-LINK] caveat only appears when the placeholder is genuinely
+    // still there — as standing text it told Kevin to fix something that was
+    // already fine on every one of the 131 drafts.
+    function prosRouteProcess(route, isLtd, hasPlaceholder) {
+        const fix = hasPlaceholder ? ' (replace [BOOKING-LINK] first)' : '';
         switch (route) {
             case 'Email reply (they asked)':
-                return `Approve → this reply is SENT via GoHighLevel (replace [BOOKING-LINK] first) → replies land in GHL, Claude drafts responses → 7 days silent → ${isLtd ? 'nurture sequence' : 'one follow-up then stop (never sequenced)'}`;
+                return `Approve → this reply is SENT via GoHighLevel${fix} → replies land in GHL, Claude drafts responses → 7 days silent → ${isLtd ? 'nurture sequence' : 'one follow-up then stop (never sequenced)'}`;
             case 'Email sequence (Ltd)':
-                return 'Approve → this intro is SENT via GoHighLevel (replace [BOOKING-LINK] first) → 7 days silent → 3-email nurture sequence';
+                return `Approve → this intro is SENT via GoHighLevel${fix} → 7 days silent → 3-email nurture sequence`;
             case 'LinkedIn connect':
                 return 'Approve → Copy the message above → send the connect from your LinkedIn → message on accept → Claude drafts replies';
             case 'Website contact form':
@@ -211,17 +295,91 @@
                     ${email ? `<span style="font-size:var(--fs-xs);color:var(--text-secondary)">${escHtml(email)} <span style="color:${confColor};font-weight:var(--fw-medium)">(${escHtml(emailConf || '?')} confidence)</span></span>` : '<span style="font-size:var(--fs-xs);color:var(--danger)">No email found</span>'}
                     ${keyword ? `<span style="font-size:var(--fs-xs);color:var(--text-muted)">matched: ${escHtml(keyword)}</span>` : ''}
                 </div>
-                ${draft || route ? `
-                <div style="margin-top:10px">
-                    <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:4px">
-                        <span style="font-size:var(--fs-xs);font-weight:var(--fw-semibold);color:var(--text-secondary)">Opening message (edit before approving)</span>
-                        <button class="od-btn-secondary" style="padding:2px 10px;font-size:var(--fs-xs)" onclick="copyProspectDraft('${escHtml(id)}', this)">Copy</button>
-                    </div>
-                    <textarea data-draft-for="${escHtml(id)}" rows="4" aria-label="Draft message for ${escHtml(name)}" style="width:100%;padding:8px 10px;border:1px solid var(--border-default);border-radius:var(--radius-md);font-size:var(--fs-sm);font-family:var(--font-family-base);background:var(--bg-surface-2);color:var(--text-primary);resize:vertical">${escHtml(draft)}</textarea>
-                </div>` : ''}
-                ${route ? `<div style="margin-top:8px;font-size:var(--fs-xs);color:var(--text-secondary);background:var(--bg-subtle);border-radius:var(--radius-sm);padding:6px 10px"><span style="font-weight:var(--fw-semibold);color:var(--text-primary)">Process:</span> ${escHtml(prosRouteProcess(route, isLtd))}</div>` : ''}
+                ${draft || route ? renderProspectComposer(r, id, name, draft, route) : ''}
+                ${route ? `<div style="margin-top:8px;font-size:var(--fs-xs);color:var(--text-secondary);background:var(--bg-subtle);border-radius:var(--radius-sm);padding:6px 10px"><span style="font-weight:var(--fw-semibold);color:var(--text-primary)">Process:</span> ${escHtml(prosRouteProcess(route, isLtd, draft.includes('[BOOKING-LINK]')))}</div>` : ''}
             </div>`;
         }).join('');
+    }
+
+    // ── Composer: what Kevin approves is what the prospect receives ────
+
+    // Email routes get the full envelope (From / To / Subject / signed-off
+    // body). Every other route is NOT an email — no subject line and no
+    // signature is added by the send path, so showing one here would lie.
+    function renderProspectComposer(rec, id, name, draft, route) {
+        const isEmail = prosIsEmailRoute(route);
+        const stale = draft.includes(PROS_LEGACY_BOOKING);
+        const placeholder = draft.includes('[BOOKING-LINK]');
+        const warn = stale
+            ? `<div data-link-warning="${escHtml(id)}" style="margin-top:8px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;background:var(--warning-bg);color:var(--warning);border-radius:var(--radius-sm);padding:6px 10px;font-size:var(--fs-xs)">
+                    <span>This message still has the old raw booking link, which looks like spam.</span>
+                    <button class="od-btn-secondary" style="padding:2px 10px;font-size:var(--fs-xs)" onclick="fixProspectBookingLink('${escHtml(id)}')">Use the website link</button>
+               </div>`
+            : placeholder
+            ? `<div style="margin-top:8px;background:var(--warning-bg);color:var(--warning);border-radius:var(--radius-sm);padding:6px 10px;font-size:var(--fs-xs)">This message still says [BOOKING-LINK]. Replace it before approving or nothing will send.</div>`
+            : '';
+
+        const editor = `
+            <div style="margin-top:12px">
+                <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:4px">
+                    <span style="font-size:var(--fs-xs);font-weight:var(--fw-semibold);color:var(--text-secondary)">${isEmail ? 'Edit the wording' : 'Message to send (edit before approving)'}</span>
+                    <button class="od-btn-secondary" style="padding:2px 10px;font-size:var(--fs-xs)" onclick="copyProspectDraft('${escHtml(id)}', this)">Copy</button>
+                </div>
+                <textarea data-draft-for="${escHtml(id)}" rows="5" oninput="refreshProspectPreview('${escHtml(id)}')" aria-label="Message for ${escHtml(name)}" style="width:100%;padding:8px 10px;border:1px solid var(--border-default);border-radius:var(--radius-md);font-size:var(--fs-sm);font-family:var(--font-family-base);background:var(--bg-surface-2);color:var(--text-primary);resize:vertical">${escHtml(draft)}</textarea>
+            </div>`;
+
+        if (!isEmail) return warn + editor;
+
+        const email = buildProspectEmail(rec);
+        const to = email.to
+            ? `${escHtml(email.toName || 'Unknown')} &lt;${escHtml(email.to)}&gt;`
+            : `<span style="color:var(--danger)">no email address found — this cannot send</span>`;
+        const label = 'font-size:var(--fs-xs);color:var(--text-muted);font-weight:var(--fw-medium)';
+        const value = 'font-size:var(--fs-xs);color:var(--text-primary);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap';
+
+        return `
+            <div style="margin-top:12px">
+                <div style="font-size:var(--fs-xs);font-weight:var(--fw-semibold);color:var(--text-secondary);margin-bottom:4px">Exactly what lands in their inbox</div>
+                <div style="border:1px solid var(--border-default);border-radius:var(--radius-lg);overflow:hidden">
+                    <div style="background:var(--bg-subtle);padding:10px 12px;display:grid;grid-template-columns:auto minmax(0,1fr);gap:6px 10px;align-items:center">
+                        <span style="${label}">From</span><span style="${value}">${escHtml(email.fromName)} &lt;${escHtml(email.from)}&gt;</span>
+                        <span style="${label}">To</span><span style="${value}">${to}</span>
+                        <span style="${label}">Subject</span>
+                        <input type="text" data-subject-for="${escHtml(id)}" value="${escHtml(prosField(rec, 'Email Subject'))}" placeholder="${escHtml(prospectDefaultSubject(rec))}" oninput="refreshProspectPreview('${escHtml(id)}')" aria-label="Email subject for ${escHtml(name)}" style="width:100%;padding:4px 8px;border:1px solid var(--border-default);border-radius:var(--radius-sm);font-size:var(--fs-xs);font-family:var(--font-family-base);background:var(--bg-surface);color:var(--text-primary)">
+                    </div>
+                    <div data-email-preview="${escHtml(id)}" style="background:var(--bg-surface);padding:16px;font-size:var(--fs-sm);line-height:1.6;color:var(--text-primary);word-break:break-word">${email.html}</div>
+                </div>
+            </div>
+            ${warn}
+            ${editor}`;
+    }
+
+    // Re-renders the preview from the UNSAVED field values as Kevin types, so
+    // the envelope never lags behind the wording he is looking at.
+    function refreshProspectPreview(recordId) {
+        const ta = document.querySelector(`textarea[data-draft-for="${recordId}"]`);
+        // The stale-link warning exists on every route, the envelope only on
+        // email routes, so clear the warning before the email-only early exit.
+        const warning = document.querySelector(`[data-link-warning="${recordId}"]`);
+        if (warning && ta && !ta.value.includes(PROS_LEGACY_BOOKING)) warning.remove();
+        const host = document.querySelector(`[data-email-preview="${recordId}"]`);
+        const rec = (prospectsCache || []).find(r => r.id === recordId);
+        if (!host || !rec) return;
+        const si = document.querySelector(`input[data-subject-for="${recordId}"]`);
+        host.innerHTML = buildProspectEmail(rec, {
+            draft: ta ? ta.value : undefined,
+            subject: si ? si.value : undefined,
+        }).html;
+    }
+
+    // Swaps the raw CRM widget URL for the public booking page. Same calendar,
+    // so the prospect's experience is unchanged; only the link they see differs.
+    function fixProspectBookingLink(recordId) {
+        const ta = document.querySelector(`textarea[data-draft-for="${recordId}"]`);
+        if (!ta) return;
+        ta.value = ta.value.replace(/https?:\/\/api\.leadconnectorhq\.com\/widget\/booking\/\S+/g, OD_BOOKING_URL);
+        refreshProspectPreview(recordId);
+        if (typeof showToast === 'function') showToast('Link swapped. It saves when you approve.', { type: 'info', duration: 4000 });
     }
 
     // ── Approve / Reject with undo ─────────────────────────────
@@ -253,14 +411,23 @@
     }
 
     async function approveProspect(recordId) {
-        // Persist any edited draft first so what sends is exactly what Kevin saw
-        const ta = document.querySelector(`textarea[data-draft-for="${recordId}"]`);
+        // Persist edits FIRST so what sends is exactly what Kevin saw. Subject
+        // and body are saved together: sending an edited body under the old
+        // subject is the same drift the single builder exists to prevent.
         const rec = (prospectsCache || []).find(r => r.id === recordId);
-        if (ta && rec && ta.value !== (rec.fields['Draft Message'] || '')) {
-            try {
-                await patchProspectingRecord(TABLES.prospects, recordId, { [PROSPECT.draftMessage]: ta.value });
-                rec.fields['Draft Message'] = ta.value;
-            } catch (e) { console.warn('Draft save failed (continuing with approval):', e); }
+        const ta = document.querySelector(`textarea[data-draft-for="${recordId}"]`);
+        const si = document.querySelector(`input[data-subject-for="${recordId}"]`);
+        if (rec) {
+            const fields = {};
+            if (ta && ta.value !== (rec.fields['Draft Message'] || '')) fields[PROSPECT.draftMessage] = ta.value;
+            if (si && si.value.trim() !== (rec.fields['Email Subject'] || '')) fields[PROSPECT.emailSubject] = si.value.trim();
+            if (Object.keys(fields).length) {
+                try {
+                    await patchProspectingRecord(TABLES.prospects, recordId, fields);
+                    if (fields[PROSPECT.draftMessage] !== undefined) rec.fields['Draft Message'] = ta.value;
+                    if (fields[PROSPECT.emailSubject] !== undefined) rec.fields['Email Subject'] = si.value.trim();
+                } catch (e) { console.warn('Edit save failed (continuing with approval):', e); }
+            }
         }
         await _prosChangeStatus(recordId, 'Approved', 'approved');
         attemptGHLSync(recordId);
@@ -330,16 +497,15 @@
     // [BOOKING-LINK] placeholder is still in the text.
     async function sendProspectEmailViaGHL(rec, contactId, ghlKey, ghlLoc) {
         const route = prosField(rec, 'Contact Route');
-        if (!['Email reply (they asked)', 'Email sequence (Ltd)'].includes(route)) return;
+        if (!prosIsEmailRoute(route)) return;
         const draft = prosField(rec, 'Draft Message');
         if (!draft) return;
         if (draft.includes('[BOOKING-LINK]')) {
             if (typeof showToast === 'function') showToast('Not sent yet: replace [BOOKING-LINK] in the message with your booking URL, then approve again', { type: 'warning', duration: 8000 });
             return;
         }
-        const subject = route === 'Email reply (they asked)'
-            ? 'Your post about finding some help'
-            : `A thought for ${prosField(rec, 'Company') || 'your business'}`;
+        // Same builder that produced the preview Kevin just approved.
+        const email = buildProspectEmail(rec);
         try {
             const resp = await fetch('https://services.leadconnectorhq.com/conversations/messages', {
                 method: 'POST',
@@ -347,10 +513,10 @@
                 body: JSON.stringify({
                     type: 'Email',
                     contactId,
-                    subject,
-                    html: escHtml(draft).replace(/\n/g, '<br>'),
+                    subject: email.subject,
+                    html: email.html,
                     // Required: without an explicit from, the OD location returns a 500
-                    emailFrom: 'kevin@operationsdirector.co.uk',
+                    emailFrom: email.from,
                 }),
             });
             if (!resp.ok) throw new Error('GHL send HTTP ' + resp.status);
@@ -369,9 +535,25 @@
     function copyProspectDraft(recordId, btn) {
         const ta = document.querySelector(`textarea[data-draft-for="${recordId}"]`);
         if (!ta || !ta.value) { if (typeof showToast === 'function') showToast('No draft to copy yet', { type: 'warning' }); return; }
-        navigator.clipboard.writeText(ta.value).then(() => {
+        // Email routes copy the signed-off version; LinkedIn/contact-form
+        // routes copy the raw text, because no signature is added to those.
+        const rec = (prospectsCache || []).find(r => r.id === recordId);
+        const text = rec && prosIsEmailRoute(prosField(rec, 'Contact Route'))
+            ? buildProspectEmail(rec, { draft: ta.value }).text
+            : ta.value;
+        navigator.clipboard.writeText(text).then(() => {
             if (btn) { const t = btn.textContent; btn.textContent = 'Copied ✓'; setTimeout(() => { btn.textContent = t; }, 2000); }
-        }).catch(() => { ta.select(); document.execCommand('copy'); });
+        }).catch(() => {
+            // Fallback copies the SAME text, not the raw textarea — otherwise a
+            // clipboard-permission failure silently yields an unsigned message.
+            const tmp = document.createElement('textarea');
+            tmp.value = text;
+            tmp.style.cssText = 'position:fixed;opacity:0';
+            document.body.appendChild(tmp);
+            tmp.select();
+            document.execCommand('copy');
+            tmp.remove();
+        });
     }
 
     function _prosShowUndoToast(message, recordId, prevStatus) {
