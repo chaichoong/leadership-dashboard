@@ -721,3 +721,37 @@ print(json.dumps(list(m.drive_ready(${JSON.stringify(VAULT())}))))
     run(['release', 'plain-job']);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Queue capacity. A job that waits less time than a routine takes to run does
+// not get serialised, it gets dropped.
+// ---------------------------------------------------------------------------
+describe('waiting longer than the work takes', () => {
+  it('waits at least two hours by default', () => {
+    // Observed 7 Aug 2026: queue-fixer held the lock 30+ minutes on its first
+    // run and three jobs behind it gave up without ever running.
+    const src = readFileSync(QUEUE, 'utf8');
+    const m = src.match(/^DEFAULT_TIMEOUT_MIN\s*=\s*(\d+)/m);
+    expect(m, 'DEFAULT_TIMEOUT_MIN not found').toBeTruthy();
+    expect(Number(m[1])).toBeGreaterThanOrEqual(120);
+  });
+
+  it('still waits longer than the default lease, so a holder cannot outlast the queue', () => {
+    const src = readFileSync(QUEUE, 'utf8');
+    const timeout = Number(src.match(/^DEFAULT_TIMEOUT_MIN\s*=\s*(\d+)/m)[1]);
+    const lease = Number(src.match(/^DEFAULT_LEASE_MIN\s*=\s*(\d+)/m)[1]);
+    // If the wait were shorter than the lease, a single stuck holder would
+    // time out everything behind it before its own lock even expired.
+    expect(timeout).toBeGreaterThan(lease);
+  });
+
+  it('records a timeout as a timeout, never as a success', () => {
+    expect(run(['acquire', 'holder', '--no-stale-check', '--lease', '10']).code).toBe(0);
+    const r = run(['acquire', 'loser', '--no-stale-check', '--timeout', '0.02']);
+    expect(r.code).toBe(75);
+    const ev = events().filter((e) => e.job === 'loser');
+    expect(ev.some((e) => e.state === 'queue-timeout')).toBe(true);
+    expect(ev.some((e) => e.state === 'acquired')).toBe(false);
+    run(['release', 'holder']);
+  });
+});
