@@ -151,8 +151,29 @@ def build(now_dt=None):
         open_findings = [r for r in fnd.current_state().values()
                          if r["status"] in ("open", "claimed")]
 
+    # Routine stacking check. Deliberately duplicated here as well as in the
+    # routine's own phase 1: if daily-ops does not run at all, its self-check
+    # does not run either, and a second routine quietly firing every morning is
+    # exactly the situation where that happens.
+    stacking = None
+    try:
+        spec = importlib.util.spec_from_file_location(
+            "cr", os.path.join(_here, "check-routines.py"))
+        cr = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(cr)
+        code, res = cr.check()
+        if code != 0:
+            stacking = res.get("reason")
+    except Exception as e:            # never let the check take the digest down
+        stacking = "could not verify the routine list: %s" % e
+
     lines = []
     alarm = False
+
+    if stacking:
+        alarm = True
+        lines.append(":rotating_light: *Routine stacking* — %s" % stacking)
+        lines.append("")
 
     # The control fires first and loudest.
     if not events:

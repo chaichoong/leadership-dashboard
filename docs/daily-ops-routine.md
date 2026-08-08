@@ -57,6 +57,42 @@ the reason mornings stopped needing untangling.
 
 ---
 
+## Adding new work — the rule
+
+**Never create a second scheduled Claude routine.** That is what stacked up
+before, and it will stack up again. New work becomes a phase of this one.
+
+Decide with a single question: *does the work need Claude's judgement?*
+
+| The work | Where it goes |
+|---|---|
+| Needs judgement, runs **daily** | A new phase in the main sequence. Put it where its dependencies sit — anything the 09:00 CEO brief reads must land before phase 2 finishes. |
+| Needs judgement, runs **weekly / monthly / quarterly / annually** | **Phase 6b**, behind a date check. Say plainly when it is due and SKIP with a note on other days. A skip you announce is fine; a silent one is how a monthly job stops running for a quarter. |
+| Is a **script**, no judgement needed | A launchd job wrapped by `job-queue.py run`, plus an entry in `scripts/job-schedule.json`. These are seconds long, they queue safely, and they heartbeat so a sleeping one frees the lock in minutes. |
+| Needs a **specific time of day** and judgement | Still a phase. If the time genuinely cannot move, that is a conversation with Kevin, not a second routine. A second routine reintroduces the exact failure this design removes. |
+
+Whatever the frequency, three things hold:
+
+1. **One writer.** Only phase 8 changes code, through one PR Kevin reviews.
+   Everything else files findings.
+2. **Register it in `scripts/job-schedule.json`.** A job missing from that file
+   is a job the morning digest cannot notice has stopped.
+3. **Never delete a retired routine's entry** — set `enabled: false`. Deleting it
+   makes it invisible rather than retired.
+
+### The guard
+
+`scripts/check-routines.py` asserts exactly one enabled Claude routine, reading
+the **scheduler's own store** rather than our config, because a routine created
+through the app never touches our config. It runs twice: phase 1 of this routine,
+and the 11:00 morning digest — the second one matters because if this routine
+stops running, its own self-check stops with it.
+
+A store it cannot find, or one holding zero tasks, **fails**. Those are precisely
+the states that would otherwise read as "no extra routines, all clear" for ever.
+
+---
+
 # THE ROUTINE (this section is the live SKILL.md body, verbatim)
 
 You are Daily Ops for Operations Director, at /Users/kevinbrittain/Projects/leadership-dashboard.
@@ -86,6 +122,15 @@ python3 scripts/job-queue.py ready daily-ops
 ```
 
 If it reports NOT READY, wait 60 seconds and try again, up to 15 times. If it is still not ready after that, note it and continue anyway: a wrong probe must not cost the whole day's run. Record what you saw either way.
+
+
+Then check nothing has started stacking up behind your back:
+
+```
+python3 scripts/check-routines.py
+```
+
+Exit 0 means you are still the only enabled routine. **Anything else goes at the TOP of your report to Kevin**, because a second routine will overlap with you and that is the whole failure this run exists to prevent. Do not disable it yourself: somebody added it to solve a real problem, and the right answer is to fold that work in as a phase, which is Kevin's call. Say which routine, and say that daily work belongs in the main sequence while anything weekly, monthly or quarterly belongs in phase 6b behind a date check.
 
 ## Phase 2 — CEO huddle
 
