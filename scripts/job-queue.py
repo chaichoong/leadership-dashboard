@@ -81,7 +81,22 @@ DEFAULT_LEASE_MIN = 45
 # The lock cannot be held for ever regardless: every holder carries a lease, so
 # waiting longer risks a slower morning, never a permanent stall.
 DEFAULT_TIMEOUT_MIN = 120
-DEFAULT_READY_WAIT_MIN = 10
+# How long a job waits for the network/Drive before giving up on the whole run.
+#
+# Was 10 minutes. On 8 Aug 2026 task-hygiene-sweep fired at 01:10, found DNS could
+# not resolve api.airtable.com on a Mac that had just woken, waited its ten minutes,
+# gave up at 01:20 and the run was DROPPED — not retried, not requeued. By the time
+# the machine was properly awake the job was 456 minutes late and the staleness
+# guard skipped it too. One transient DNS blip cost the entire day.
+#
+# This wait happens BEFORE the lock is taken, so a job waiting here blocks nothing
+# and costs nothing when the network is fine (the first check passes instantly).
+# 45 minutes still lands inside the 180-minute staleness limit, so a rescued run is
+# a run that actually happens rather than one that gets skipped for lateness.
+DEFAULT_READY_WAIT_MIN = 45
+# Poll gently rather than hammering a half-awake interface every 15s for 45 minutes.
+READY_POLL_START = 5
+READY_POLL_MAX = 60
 POLL_SECONDS = float(os.environ.get("JOB_QUEUE_POLL", "2"))
 
 
@@ -374,26 +389,32 @@ def wait_for_preconditions(job, cfg, wait_minutes, quiet=False):
     needs = cfg.get("needs") or []
     if not needs:
         return True
-    deadline = now() + wait_minutes * 60
+    started = now()
+    deadline = started + wait_minutes * 60
     first = True
+    backoff = READY_POLL_START
     while True:
         ok, why = preconditions_met(cfg)
         if ok:
             if not first:
-                event(job, "ready", note=why)
+                event(job, "ready", note=why,
+                      waited_seconds=round(now() - started, 1))
             return True
         if now() >= deadline:
             event(job, "deferred-not-ready", reason=why,
-                  waited_minutes=round(wait_minutes, 1))
+                  waited_minutes=round((now() - started) / 60.0, 1))
             if not quiet:
-                print("NOT READY %s: %s (waited %s min)" % (job, why, wait_minutes))
+                print("NOT READY %s: %s (waited %s min)" %
+                      (job, why, round((now() - started) / 60.0, 1)))
             return False
         if first:
-            event(job, "waiting-for-ready", reason=why)
+            event(job, "waiting-for-ready", reason=why,
+                  will_wait_minutes=round(wait_minutes, 1))
             if not quiet:
-                print("WAITING %s: %s" % (job, why))
+                print("WAITING %s: %s (up to %s min)" % (job, why, wait_minutes))
             first = False
-        time.sleep(min(15, max(POLL_SECONDS, 1)))
+        time.sleep(max(min(backoff, deadline - now()), POLL_SECONDS))
+        backoff = min(backoff * 2, READY_POLL_MAX)
 
 
 # --------------------------------------------------------------------------
@@ -609,12 +630,25 @@ def acquire(job, mode="cooperative", lease_minutes=DEFAULT_LEASE_MIN,
             pass
 
 
-def release(job, quiet=False):
+# Taking the lock is not the same as doing the work.
+#
+# On 8 Aug 2026 task-hygiene-sweep acquired the lock, found the Tasks schema had
+# drifted, halted before touching anything (correctly), wrote a report saying "Did
+# not run", and released. The morning digest counted it under "Worked", because
+# `acquired` was the only signal it had. That was the fourth consecutive day the
+# sweep did no work and nobody knew.
+#
+# So release carries an outcome. Absent means "completed", which keeps every
+# existing caller honest by default; a routine that bailed says so.
+OUTCOMES = ("completed", "halted", "partial")
+
+
+def release(job, quiet=False, outcome="completed", reason=None):
     holder = read_holder()
     if holder is None:
         if os.path.isdir(LOCK_DIR):
             drop_lock()
-            event(job, "released", note="no holder file")
+            event(job, "released", note="no holder file", outcome=outcome)
             return EX_OK
         event(job, "release-noop", note="lock was not held")
         if not quiet:
@@ -631,9 +665,12 @@ def release(job, quiet=False):
 
     held = round(now() - holder.get("acquired_at", now()), 1)
     drop_lock()
-    event(job, "released", held_seconds=held)
+    extra = {"outcome": outcome}
+    if reason:
+        extra["reason"] = reason
+    event(job, "released", held_seconds=held, **extra)
     if not quiet:
-        print("RELEASED %s (held %ss)" % (job, held))
+        print("RELEASED %s (held %ss, %s)" % (job, held, outcome))
     return EX_OK
 
 
@@ -724,6 +761,10 @@ def main(argv=None):
     sp = sub.add_parser("release")
     sp.add_argument("job")
     sp.add_argument("--quiet", action="store_true")
+    sp.add_argument("--outcome", choices=OUTCOMES, default="completed",
+                    help="did the job actually do its work? halted/partial keep it "
+                         "out of the digest's 'Worked' list")
+    sp.add_argument("--reason", help="one line, required in spirit when not completed")
 
     sp = sub.add_parser("heartbeat")
     sp.add_argument("job")
@@ -758,7 +799,7 @@ def main(argv=None):
         return run(a.job, cmd, a.lease, a.timeout, not a.no_stale_check,
                    ready_wait_minutes=a.ready_wait)
     if a.cmd == "release":
-        return release(a.job, quiet=a.quiet)
+        return release(a.job, quiet=a.quiet, outcome=a.outcome, reason=a.reason)
     if a.cmd == "heartbeat":
         return heartbeat(a.job, a.lease)
     if a.cmd == "status":
