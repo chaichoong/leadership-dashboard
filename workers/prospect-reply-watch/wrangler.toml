@@ -1,0 +1,14 @@
+name = "prospect-reply-watch"
+main = "worker.js"
+compatibility_date = "2026-08-01"
+
+# Every 2 minutes. No day-of-week component — see the Cloudflare cron
+# anti-pattern in CLAUDE.md (Sunday=1 there; never encode days in a cron).
+[triggers]
+crons = ["*/2 * * * *"]
+
+# Secrets (set via `wrangler secret put`, values live in ~/.config/od/):
+#   GHL_API_KEY       — pit-… token ("SMS to Email Bridge" integration, OD sub-account)
+#   GHL_LOCATION_ID   — dgsHwbYbp6xrhRGZr9ik (Operations Director; NEVER Runpreneur)
+#   AIRTABLE_PAT      — Prospects read/write + Tasks write
+#   ADMIN_KEY         — gates the manual POST /run trigger
