@@ -50,7 +50,7 @@
         // this now reads as the version gap it always was.
         { id: 'crm',        name: 'CRM',                           icon: '👥', pageVer: '1.1', sopFile: 'guides/crm.html',             sopVer: '1.0', standalone: 'crm-supabase.html' },
         { id: 'content-machine', name: 'Content Machine',           icon: '🎬', pageVer: '1.0', sopFile: '',                            sopVer: '1.0', standalone: 'https://chaichoong.github.io/content-machine/' },
-        { id: 'prospecting', name: 'Prospecting',                   icon: '🧲', pageVer: '1.7', sopFile: 'sop-prospecting.html',        sopVer: '1.3', standalone: 'index.html#prospecting' },
+        { id: 'prospecting', name: 'Prospecting',                   icon: '🧲', pageVer: '1.8', sopFile: 'sop-prospecting.html',        sopVer: '1.3', standalone: 'index.html#prospecting' },
         { id: 'sitemap',    name: 'Site Map & Guides',             icon: '🔗', pageVer: '1.19', sopFile: 'sop-sitemap.html',            sopVer: '1.2', standalone: 'index.html#sitemap' },
         { id: 'skills',     name: 'Skills Library',                icon: '🧠', pageVer: '1.4', sopFile: 'guides/skills.html',           sopVer: '1.0', standalone: 'index.html#skills' },
         { id: 'ai-brain',  name: 'AI Brain',                       icon: '💭', pageVer: '1.0', sopFile: 'guides/ai-brain.html',         sopVer: '1.0', standalone: 'ai-brain.html' },
