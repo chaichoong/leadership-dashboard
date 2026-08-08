@@ -229,13 +229,15 @@
         const fix = hasPlaceholder ? ' (replace [BOOKING-LINK] first)' : '';
         switch (route) {
             case 'Email reply (they asked)':
-                return `Approve → this reply is SENT via GoHighLevel${fix} → replies land in GHL, Claude drafts responses → 7 days silent → ${isLtd ? 'nurture sequence' : 'one follow-up then stop (never sequenced)'}`;
+                return `Approve → this reply is SENT via GoHighLevel${fix} → replies land in GHL, Claude drafts responses → 7 days silent → ${isLtd ? 'two personal follow-ups (days 7 and 14), then stop' : 'one follow-up then stop (never sequenced)'}`;
             case 'Email sequence (Ltd)':
-                return `Approve → this intro is SENT via GoHighLevel${fix} → 7 days silent → 3-email nurture sequence`;
+                // Personalised follow-ups, not a generic sequence — Kevin's ruling 8 Aug 2026,
+                // written by the agent from this exact draft + the pain signal (skill §6b)
+                return `Approve → this intro is SENT via GoHighLevel${fix} → 7 days silent → two personal follow-ups (days 7 and 14), then stop`;
             case 'LinkedIn connect':
                 return 'Approve → Copy the message above → send the connect from your LinkedIn → message on accept → Claude drafts replies';
             case 'Website contact form':
-                return `Approve → this message goes via their contact form → replies move to email → 7 days silent → ${isLtd ? 'nurture sequence' : 'stop (never sequenced)'}`;
+                return `Approve → this message goes via their contact form → replies move to email → 7 days silent → ${isLtd ? 'two personal follow-ups (days 7 and 14), then stop' : 'stop (never sequenced)'}`;
             case 'No route yet':
                 return 'Approve → you choose the personal route (e.g. a Facebook message from your account) — nothing automated';
             default:
