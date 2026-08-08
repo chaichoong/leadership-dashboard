@@ -166,10 +166,15 @@ For each prospect with Status = "Contacted (1:1)" and Next Follow-up ≤ today:
   2. NEVER label based on a message merely coming from or mentioning GoHighLevel/LeadConnector — GHL system notifications, tenant SMS-bridge emails, and workflow alerts must never receive this label.
   3. When unsure, do not label; note it in the report instead. A missed label is recoverable; a tenant thread pulled out of the team's flow is not.
 - **Reply found** → Status = "Replied", flag it prominently in the report, and draft a suggested response (send via GHL after Kevin approves it, or leave as a pending draft in the record Notes). Track what wording gets replies vs silence and feed it back into future drafts.
-- **No reply + Limited Company** → add tag `od-prospect-nurture` to their GHL contact (PUT the contact's tags), Status = "In Sequence". The 3-email sequence takes over.
+- **No reply + Limited Company → PERSONALISED follow-ups, not the generic tag (Kevin's ruling, 8 Aug 2026).** Kevin's requirement: every follow-up must FOLLOW ON from the personalised opener he approved, never read as a template blast. So the agent writes and sends touch 2 and touch 3 itself, personalised per prospect from the approved Draft Message + Pain Signal:
+  - **Touch 2 (first due date, day 7):** subject `re: <their Email Subject>`. Shape: (1) one line picking up the opener's specific hook ("a week back I mentioned your bookkeeper ad…"), (2) ONE new angle not in the opener — usually the cost comparison (the salary in their ad vs one monthly fee) or one concrete job an agent would take over, (3) the booking link. Under 60 words. Write "FU2 sent YYYY-MM-DD" into Notes, Next Follow-up = +7 days, Status stays "Contacted (1:1)".
+  - **Touch 3 (next due date, day 14, the close-out):** subject unchanged. Shape: "Last note from me. If [their specific load] is sorted, ignore this. If not, the door is open: <link>. Either way, good luck with [something real from their post]." Under 45 words. Write "FU3 sent YYYY-MM-DD" into Notes, Next Follow-up = +7 days.
+  - **7 days after FU3, still silent** → Status = "No Response", stop. Three touches total, then out — never more.
+  - Sends go through the same GHL conversations endpoint as the opener (same emailFrom, signature appended by the same rules — no signature in the drafted body). **curl needs a browser User-Agent header on this endpoint — the default curl UA gets a Cloudflare 403 (error 1010), proven 8 Aug 2026.**
+  - The `od-prospect-nurture` tag is RETIRED for now: do not apply it. Six GHL workflows were reportedly built 7-8 Aug (Ericamae); until someone confirms in the GHL UI what trigger they subscribe to, tagging risks double-sending on top of the agent's personalised touches. Booking-confirmation/reminder workflows (appointment-triggered) are unaffected and welcome.
 - **No reply + manual track** → send ONE polite follow-up via GHL the first time (note it in the record), and after a second silent week set Status = "No Response" and stop. NEVER add manual-track contacts to any email workflow.
 
-**Sequence timeout (Status = "In Sequence"):** 14 days after enrolment (the 3 emails span ~10 days), check for any reply. Reply → "Replied". Nothing → Status = "No Response". No prospect ever sits in a stage forever.
+**Send ramp (deliverability — applies to APPROVALS feeding sends):** the domain is cold. Cap NEW first-contact sends at 15 per day for the first week, 25/day the second, then review. If Kevin approves more cards than the day's cap, the surplus stays at "Approved" and the agent's catch-up pass sends them on following days, oldest first. Follow-ups (FU2/FU3) do not count against the cap.
 
 **"No route yet" prospects:** these wait for Kevin's one personal action (e.g. a Facebook message from his account). When he confirms he has made contact, set Status = "Contacted (1:1)" + Next Follow-up +7 days so the conversation is tracked like any other.
 
@@ -201,6 +206,8 @@ Send Kevin a short Slack DM (slack connector) and end with the same summary:
 `Prospecting run <date>: <n> found → review queue | <m> synced to GHL | keywords used: <list> | <any warnings: LinkedIn friction, GHL skipped, 0 results>`
 
 Keep it honest — a zero-result run says so plainly, with the likely reason. Include the full funnel (found → contacted → replied → booked → ATTENDED), the current bottleneck, and any self-changes made by the learning loop.
+
+**The steering number (added 8 Aug 2026): reply rate per 100 first emails sent.** Report it in every run once sends begin: `replies ÷ first-contact emails sent × 100`, cumulative and trailing-7-days. Calls attended stays the north star, but it is too far downstream to steer copy and targeting by; reply rate is the weekly dial. Under 2% after 100 sends = change ONE thing (subject style, first line, or the ask) and measure again — never several at once.
 
 ---
 
