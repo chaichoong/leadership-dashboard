@@ -24,137 +24,160 @@
     "up to readyWaitMinutes (default 10) and DEFERS rather than failing if still not",
     "ready. A drive probe READS A BYTE: an unmounted Drive folder still exists and still",
     "lists, and only fails on open with 'Resource deadlock avoided'.",
+    "",
+    "8 Aug 2026: the fourteen Claude routines were absorbed into one, `daily-ops`.",
+    "Serialising them behind a lock stopped them overwriting each other, then created a",
+    "worse failure: a routine suspended by the Mac sleeping keeps HOLDING the lock.",
+    "drift-monitor held it 4h54m while asleep, so everything behind it waited and was then",
+    "skipped for lateness. A lock cannot fix a machine that sleeps, because the lock sleeps",
+    "too. One routine running in sequence has nothing to overlap with and nothing to skip.",
+    "The lock now only guards the short shell jobs, and they heartbeat so a sleeping one",
+    "frees it in minutes.",
     "them: a job left out of this file entirely is a job nobody notices has stopped."
   ],
   "drift-monitor": {
     "cron": "0 2 * * *",
     "maxLateMinutes": 180,
     "mode": "cooperative",
-    "note": "nightly sweep, worthless once the day has started",
+    "note": "ABSORBED into daily-ops 8 Aug 2026; no longer scheduled separately. Kept here so the digest does not report it as a missing run.",
     "needs": [
       "network"
-    ]
+    ],
+    "enabled": false
   },
   "task-hygiene-sweep": {
     "cron": "30 2 * * *",
     "maxLateMinutes": 180,
     "mode": "cooperative",
-    "note": "nightly sweep",
+    "note": "ABSORBED into daily-ops 8 Aug 2026; no longer scheduled separately. Kept here so the digest does not report it as a missing run.",
     "needs": [
       "network"
-    ]
+    ],
+    "enabled": false
   },
   "ceo-huddle": {
     "cron": "0 5 * * 1-5",
     "maxLateMinutes": 180,
     "mode": "cooperative",
-    "note": "must land before the 09:00 brief reads it",
+    "note": "ABSORBED into daily-ops 8 Aug 2026; no longer scheduled separately. Kept here so the digest does not report it as a missing run.",
     "needs": [
       "network"
-    ]
+    ],
+    "enabled": false
   },
   "prod-e2e-sweep": {
     "cron": "40 6 * * *",
     "maxLateMinutes": 180,
     "mode": "cooperative",
-    "note": "morning sweep",
+    "note": "ABSORBED into daily-ops 8 Aug 2026; no longer scheduled separately. Kept here so the digest does not report it as a missing run.",
     "needs": [
       "network"
-    ]
+    ],
+    "enabled": false
   },
   "drive-auth-health-check": {
     "cron": "11 7 * * *",
     "maxLateMinutes": 240,
     "mode": "cooperative",
-    "note": "health check, still useful late",
+    "note": "ABSORBED into daily-ops 8 Aug 2026; no longer scheduled separately. Kept here so the digest does not report it as a missing run.",
     "needs": [
       "network"
-    ]
+    ],
+    "enabled": false
   },
   "agent-dispatch": {
     "cron": "30 7,14 * * *",
     "maxLateMinutes": 240,
     "mode": "cooperative",
-    "note": "real work for agents; twice daily so a miss is recoverable",
+    "note": "ABSORBED into daily-ops 8 Aug 2026; no longer scheduled separately. Kept here so the digest does not report it as a missing run.",
     "needs": [
       "network"
-    ]
+    ],
+    "enabled": false
   },
   "uc-check-slack-notifier": {
     "cron": "0 8 * * *",
     "maxLateMinutes": 600,
     "mode": "cooperative",
-    "note": "Mica depends on this; late beats never",
+    "note": "ABSORBED into daily-ops 8 Aug 2026; no longer scheduled separately. Kept here so the digest does not report it as a missing run.",
     "needs": [
       "network"
-    ]
+    ],
+    "enabled": false
   },
   "prospect-daily-run": {
     "cron": "0 9 * * *",
     "maxLateMinutes": 480,
     "mode": "cooperative",
-    "note": "revenue work; late beats never",
+    "note": "ABSORBED into daily-ops 8 Aug 2026; no longer scheduled separately. Kept here so the digest does not report it as a missing run.",
     "needs": [
       "network"
-    ]
+    ],
+    "enabled": false
   },
   "ceo-brief-morning-check": {
     "cron": "20 9 * * 1-5",
     "maxLateMinutes": 120,
     "mode": "cooperative",
-    "note": "verifies the 09:00 brief; pointless by afternoon",
+    "note": "ABSORBED into daily-ops 8 Aug 2026; no longer scheduled separately. Kept here so the digest does not report it as a missing run.",
     "needs": [
       "network"
-    ]
+    ],
+    "enabled": false
   },
   "ceo-memory-sweep": {
     "cron": "30 21 * * *",
     "maxLateMinutes": 240,
     "mode": "cooperative",
-    "note": "nightly distillation",
+    "note": "ABSORBED into daily-ops 8 Aug 2026; no longer scheduled separately. Kept here so the digest does not report it as a missing run.",
     "needs": [
       "network"
-    ]
+    ],
+    "enabled": false
   },
   "post-manager-weekly": {
     "cron": "30 8 * * 1",
     "maxLateMinutes": 480,
     "mode": "cooperative",
-    "note": "weekly, same day still fine",
+    "note": "ABSORBED into daily-ops 8 Aug 2026; no longer scheduled separately. Kept here so the digest does not report it as a missing run.",
     "needs": [
       "network"
-    ]
+    ],
+    "enabled": false
   },
   "monthly-rent-due-date": {
     "cron": "0 6 1 * *",
     "maxLateMinutes": 1440,
     "mode": "cooperative",
-    "note": "monthly obligation; must happen on the day",
+    "note": "ABSORBED into daily-ops 8 Aug 2026; no longer scheduled separately. Kept here so the digest does not report it as a missing run.",
     "needs": [
       "network"
-    ]
+    ],
+    "enabled": false
   },
   "update-master-prompt-quarterly": {
     "cron": "7 9 1 1,4,7,10 *",
     "maxLateMinutes": 1440,
     "mode": "cooperative",
-    "note": "quarterly, propose-only"
+    "note": "ABSORBED into daily-ops 8 Aug 2026; no longer scheduled separately. Kept here so the digest does not report it as a missing run.",
+    "enabled": false
   },
   "sop-update-processor": {
     "cron": "0 9 * * *",
     "maxLateMinutes": 180,
     "mode": "cooperative",
     "enabled": false,
-    "note": "paused 30 Jul 2026. Listed so re-enabling needs no config edit; enabled:false keeps the digest from reporting it as a missed run every day"
+    "note": "ABSORBED into daily-ops 8 Aug 2026; no longer scheduled separately. Kept here so the digest does not report it as a missing run."
   },
   "queue-fixer": {
     "cron": "15 10 * * *",
     "maxLateMinutes": 300,
     "mode": "cooperative",
-    "note": "the only scheduled writer of code",
+    "note": "ABSORBED into daily-ops 8 Aug 2026; no longer scheduled separately. Kept here so the digest does not report it as a missing run.",
     "needs": [
       "network"
-    ]
+    ],
+    "enabled": false
   },
   "project-status-sync": {
     "cron": "45 6 * * *",
@@ -261,5 +284,19 @@
     "mode": "wrapped",
     "queued": false,
     "note": "reports on the queue, so it must never wait behind it"
+  },
+  "daily-ops": {
+    "cron": "0 7 * * *",
+    "maxLateMinutes": 1440,
+    "mode": "cooperative",
+    "queued": false,
+    "needs": [
+      "network",
+      {
+        "drive": "~/Library/CloudStorage/GoogleDrive-kevin@runpreneur.org.uk/My Drive/00 AI Context"
+      }
+    ],
+    "readyWaitMinutes": 15,
+    "note": "THE one Claude routine. Never skipped for lateness (maxLate 1440) \u2014 it IS the daily run, and skipping it means nothing happens at all. Unqueued: it runs for an hour or more and must not hold the lock the short shell jobs need."
   }
 }

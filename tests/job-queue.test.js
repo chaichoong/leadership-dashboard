@@ -755,3 +755,103 @@ describe('waiting longer than the work takes', () => {
     run(['release', 'holder']);
   });
 });
+
+// ---------------------------------------------------------------------------
+// The Mac sleeping mid-job is the failure that broke the queue. A suspended
+// process is still ALIVE, so kill -0 passes and the lock stays held for the
+// whole lease. drift-monitor held it 4h54m asleep on 8 Aug 2026 and everything
+// behind it was skipped for lateness. The fix is a heartbeat, which a suspended
+// process cannot fake.
+// ---------------------------------------------------------------------------
+describe('a sleeping job cannot hold the lock', () => {
+  const src = () => readFileSync(QUEUE, 'utf8');
+
+  it('gives wrapped jobs a short lease, not the long cooperative one', () => {
+    const wrapped = Number(src().match(/^WRAPPED_LEASE_MIN\s*=\s*(\d+)/m)[1]);
+    const coop = Number(src().match(/^DEFAULT_LEASE_MIN\s*=\s*(\d+)/m)[1]);
+    expect(wrapped).toBeLessThan(coop);
+    expect(wrapped).toBeLessThanOrEqual(10);
+  });
+
+  it('beats more often than the lease expires, or the lock drops mid-run', () => {
+    // The interval is env-overridable for tests, so read the DEFAULT out of the
+    // fallback rather than the literal.
+    const m = src().match(/^HEARTBEAT_SECONDS\s*=.*?"(\d+(?:\.\d+)?)"\s*\)/m)
+           || src().match(/^HEARTBEAT_SECONDS\s*=\s*(\d+)/m);
+    expect(m, 'HEARTBEAT_SECONDS default not found').toBeTruthy();
+    const beat = Number(m[1]);
+    const lease = Number(src().match(/^WRAPPED_LEASE_MIN\s*=\s*(\d+)/m)[1]) * 60;
+    // Needs real headroom: one missed beat must not free a live job's lock.
+    expect(beat * 2).toBeLessThan(lease);
+  });
+
+  it('keeps the lease alive across a job that runs LONGER than its lease', async () => {
+    // The job must outlive the lease or this proves nothing. 3s lease, 6s job,
+    // beating every 0.5s: without the heartbeat the lease lapses at 3s and a
+    // waiting job steals the lock mid-run.
+    const slow = runAsync(['run', 'slow', '--no-stale-check', '--lease', '0.05',
+      '--', 'python3', '-c', 'import time; time.sleep(6)'],
+      { env: { JOB_QUEUE_HEARTBEAT: '0.5' } });
+    await new Promise((r) => setTimeout(r, 4000));   // past the un-beaten expiry
+    const stolen = run(['acquire', 'thief', '--no-stale-check', '--timeout', '0.02']);
+    expect(stolen.code, 'the lease lapsed mid-run — heartbeat is not working').toBe(75);
+    expect((await slow).code).toBe(0);
+    expect(events().some((e) => e.state === 'lock-broken' && e.job === 'slow')).toBe(false);
+  });
+
+  it('lets the lease lapse when the heartbeat stops, which is what sleep does', async () => {
+    // Same setup, heartbeat disabled: the lock MUST become stealable. This is
+    // the back-test — without it the case above could pass for the wrong reason.
+    const slow = runAsync(['run', 'frozen', '--no-stale-check', '--lease', '0.05',
+      '--', 'python3', '-c', 'import time; time.sleep(6)'],
+      { env: { JOB_QUEUE_HEARTBEAT: '600' } });
+    await new Promise((r) => setTimeout(r, 4000));
+    const stolen = run(['acquire', 'nextday', '--no-stale-check', '--timeout', '0.05']);
+    expect(stolen.code, 'a dead holder still blocked the queue').toBe(0);
+    run(['release', 'nextday']);
+    await slow;
+  });
+
+  it('stops beating when the job ends, so the lock does not linger', () => {
+    run(['run', 'quick', '--no-stale-check', '--', 'python3', '-c', 'pass']);
+    expect(run(['status']).stdout).toMatch(/FREE/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// One routine, not fourteen.
+// ---------------------------------------------------------------------------
+describe('the consolidated schedule', () => {
+  const REAL = JSON.parse(readFileSync(resolve(__dirname, '../scripts/job-schedule.json'), 'utf8'));
+
+  it('has daily-ops, unqueued and never skipped for lateness', () => {
+    const d = REAL['daily-ops'];
+    expect(d, 'daily-ops missing from the schedule').toBeTruthy();
+    // It IS the daily run. Skipping it means nothing happens at all.
+    expect(d.maxLateMinutes).toBeGreaterThanOrEqual(1440);
+    // It runs for an hour or more; holding the lock would block the shell jobs.
+    expect(d.queued).toBe(false);
+  });
+
+  it('leaves exactly one Claude routine enabled', () => {
+    const claude = Object.entries(REAL)
+      .filter(([k, v]) => !k.startsWith('_') && v.mode === 'cooperative' && v.enabled !== false)
+      .map(([k]) => k);
+    expect(claude).toEqual(['daily-ops']);
+  });
+
+  it('keeps the absorbed routines listed, so the digest does not cry wolf', () => {
+    // A job deleted from this file is a job nobody notices has stopped. They
+    // stay listed with enabled:false instead.
+    for (const j of ['drift-monitor', 'prod-e2e-sweep', 'ceo-huddle', 'queue-fixer']) {
+      expect(REAL[j], `${j} dropped from the schedule`).toBeTruthy();
+      expect(REAL[j].enabled).toBe(false);
+    }
+  });
+
+  it('still queues the short shell jobs', () => {
+    const wrapped = Object.entries(REAL)
+      .filter(([k, v]) => !k.startsWith('_') && v.mode === 'wrapped' && v.queued !== false);
+    expect(wrapped.length).toBeGreaterThan(5);
+  });
+});

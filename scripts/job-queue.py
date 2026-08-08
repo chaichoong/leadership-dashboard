@@ -82,6 +82,13 @@ DEFAULT_LEASE_MIN = 45
 # waiting longer risks a slower morning, never a permanent stall.
 DEFAULT_TIMEOUT_MIN = 120
 DEFAULT_READY_WAIT_MIN = 10
+
+# Wrapped jobs hold a SHORT lease kept alive by a heartbeat. The Mac sleeping
+# mid-job is the failure that matters: the process stays alive, so PID checks
+# pass, but nothing progresses. A heartbeat stops with the process, so the lock
+# frees in minutes rather than hours.
+WRAPPED_LEASE_MIN = 5
+HEARTBEAT_SECONDS = float(os.environ.get("JOB_QUEUE_HEARTBEAT", "60"))
 POLL_SECONDS = float(os.environ.get("JOB_QUEUE_POLL", "2"))
 
 
@@ -651,7 +658,21 @@ def heartbeat(job, lease_minutes=DEFAULT_LEASE_MIN):
 
 def run(job, cmd, lease_minutes, timeout_minutes, check_stale,
         ready_wait_minutes=None):
-    """Wrapped mode: take the lock, run the command, always release."""
+    """Wrapped mode: take the lock, run the command, always release.
+
+    The lease is short and kept alive by a heartbeat thread, because the real
+    enemy here is the Mac going to sleep. A suspended process is still ALIVE, so
+    `kill -0` says it is fine and the lock stays held for the whole lease. On
+    8 Aug 2026 drift-monitor held it for 4 hours 54 minutes while asleep and
+    everything behind it was skipped for lateness.
+
+    A heartbeat cannot be faked by a sleeping process: the thread is suspended
+    too, the lease lapses within a couple of minutes, and the queue moves on.
+    Long-running jobs stay safe because a job that is genuinely running keeps
+    beating.
+    """
+    if lease_minutes == DEFAULT_LEASE_MIN:
+        lease_minutes = WRAPPED_LEASE_MIN
     code = acquire(job, mode="wrapped", lease_minutes=lease_minutes,
                    timeout_minutes=timeout_minutes, check_stale=check_stale,
                    ready_wait_minutes=ready_wait_minutes)
@@ -668,11 +689,31 @@ def run(job, cmd, lease_minutes, timeout_minutes, check_stale,
         except (ValueError, OSError):
             pass
 
+    import threading
+    stop = threading.Event()
+
+    def beat():
+        # Re-arm well inside the lease so an ordinary scheduling hiccup does not
+        # drop the lock, but a genuine suspend does.
+        while not stop.wait(HEARTBEAT_SECONDS):
+            holder = read_holder()
+            if not holder or holder.get("job") != job:
+                return          # somebody broke our lock; stop pretending we hold it
+            holder["lease_until"] = now() + WRAPPED_LEASE_MIN * 60
+            try:
+                with open(HOLDER_FILE, "w") as f:
+                    json.dump(holder, f)
+            except OSError:
+                return
+
+    ticker = threading.Thread(target=beat, daemon=True)
+    ticker.start()
     try:
         proc = subprocess.run(cmd)
         event(job, "finished", exit=proc.returncode)
         return proc.returncode
     finally:
+        stop.set()
         release(job, quiet=True)
 
 
