@@ -139,17 +139,19 @@ describe('cron day-of-week', () => {
 // ---------------------------------------------------------------------------
 describe('staleness cut-off', () => {
   it('skips a nightly sweep that would run in the morning', () => {
-    const r = run(['acquire', 'nightly-sweep'], {});
-    // 02:00 job with a 180 minute limit. Stale unless the clock is before 05:00.
-    const hour = new Date().getHours();
-    if (hour >= 5) {
-      expect(r.code).toBe(3);
-      expect(r.stdout).toMatch(/SKIPPED/);
-      expect(events().at(-1).state).toBe('skipped-stale');
-    } else {
-      expect(r.code).toBe(0);
-    }
-    run(['release', 'nightly-sweep']);
+    // Time-independent on purpose. The old version branched on the clock and
+    // assumed "before 05:00" meant fresh — but before 02:00 the last firing was
+    // YESTERDAY, so it failed for two hours every night. A test that is red
+    // between midnight and 02:00 is how a gate loses its authority.
+    //
+    // Fixed window instead: a 02:00 job asked about at 09:00 the same day is
+    // seven hours late against a 180 minute limit.
+    const late = py(`m.staleness('nightly-sweep', m.load_schedule(),
+                       ref=datetime.datetime(2026, 8, 6, 9, 0))[0]`);
+    expect(late).toBe(true);
+    const onTime = py(`m.staleness('nightly-sweep', m.load_schedule(),
+                       ref=datetime.datetime(2026, 8, 6, 3, 0))[0]`);
+    expect(onTime).toBe(false);
   });
 
   it('does not skip a job whose limit is generous', () => {
