@@ -144,7 +144,15 @@ Daily order of operations: work §2b to 5 qualified first; only drop to FB group
 
 For each qualified candidate, using WebSearch/WebFetch (not the browser):
 - Find the company website: from their LinkedIn profile/company page if visible, else search `"<company>" <name> UK`.
-- Find a contact email on the site. **Check ALL of these before concluding "no email" (two real misses on 13 Jul):** the contact page, the homepage INCLUDING footer, the about page, and `/privacy-policy` (privacy policies nearly always contain a contact address). WebFetch truncates long pages — ask it specifically for email addresses, and try the privacy page even when other pages look empty.
+- Find a contact email on the site. **All FOUR of these are required before you may write "no published email". Tick them off one at a time; a prospect marked no-email without all four is a defect, not a dead end.**
+  1. The contact page
+  2. The homepage, INCLUDING the footer
+  3. The about page
+  4. **The privacy policy — the single highest-yield page, and the one that keeps getting skipped.** Try `/privacy-policy` AND the Shopify path `/policies/privacy-policy`; on Shopify stores the bare `/privacy-policy` 404s while the `/policies/` one carries the address. A privacy policy has to name a data controller, so it publishes an address even when the contact page is a form.
+
+  **Check each one in Chrome, not WebFetch alone.** WebFetch truncates long pages, does not run JavaScript, and returns nothing useful on plenty of small-business sites. A page that looks empty in WebFetch is not evidence of no email; the 17 Jul and 23 Jul lessons below are both this same mistake.
+
+  Audited 7 Aug 2026: **4 of the 7 prospects recorded as "no published email" had one published all along**, because this was one bullet in a list rather than a checklist, and the privacy policy was the item that got skipped.
 - **Booking-platform sites count as the website.** If the main domain is dead or absent, check their Treatwell/Fresha/Squarespace-booking presence — the contact section usually publishes an email (Dr Raghda's was on her mytreatwell page after her main domain failed DNS). If WebFetch cannot resolve a domain, retry it through Kevin's Chrome before declaring it dead.
 - Confidence: High = a named/direct address; Medium = generic (info@/hello@/contact@); Low = found off-site or uncertain. No email found is acceptable — still queue the prospect (Kevin may connect on LinkedIn instead).
 
