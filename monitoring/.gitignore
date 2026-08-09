@@ -3,9 +3,21 @@
 schema-2*.json
 drift-2*.md
 
-# Task hygiene sweep working files. NEVER commit these — this repo is public and
-# the work-list carries full inbound email bodies, tenant names, rent figures and
-# phone numbers. Only the redacted task-sweep-{date}.md report is tracked.
+# never-commit:begin
+#
+# Everything between these two markers is a PRIVACY rule, not housekeeping. This
+# repo is PUBLIC. .gitignore alone cannot enforce it: once a path is tracked, git
+# ignores the ignore rule for ever and prints no warning. That is how
+# task-sweep-applied-2026-08-06.json came to sit in a public repo under a comment
+# saying NEVER commit these. tests/never-commit-paths.test.js reads the patterns
+# between these markers and fails if any of them is tracked.
+#
+# Add a pattern here only if the file must never be public. Housekeeping ignores
+# (things that are merely noisy) belong above the marker.
+#
+# Task hygiene sweep working files: the work-list carries full inbound email
+# bodies, tenant names, rent figures and phone numbers. Only the redacted
+# task-sweep-{date}.md report is tracked.
 task-sweep-worklist-*.json
 task-sweep-decisions-*.json
 task-sweep-applied-*.json
@@ -14,3 +26,4 @@ task-sweep-pending-*.json
 # Unredacted companion to the nightly report: names people, suppliers and exact
 # sums so Kevin can act. Local only — the tracked .md report stays redacted.
 task-sweep-detail-*.md
+# never-commit:end

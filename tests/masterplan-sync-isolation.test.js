@@ -99,4 +99,78 @@ describe('master-plan sync isolation', () => {
   it('still refuses to sync over a human mid-edit on the plan', () => {
     expect(syncBody).toContain('ABORT: MASTER-PLAN.md has uncommitted local edits');
   });
+
+  it('prunes stale worktrees on ENTRY, not only on exit', () => {
+    // The whole point is that it runs on the next run rather than depending on
+    // this one surviving to reach __exit__. Cleanup wired only into __exit__ is
+    // the bug, so assert the call site as well as the behaviour.
+    const start = SRC.indexOf('def __enter__');
+    expect(start).toBeGreaterThan(-1);
+    const rest = SRC.slice(start + 1);
+    const next = rest.search(/\n    (?:def |@)/);
+    const enter = next === -1 ? rest : rest.slice(0, next);
+    expect(enter).toContain('prune_stale()');
+  });
+});
+
+// ── Stale worktrees left by a KILLED run ────────────────────────────────────
+//
+// __exit__ tidies up only when the process survives to run it. The Mac sleeping
+// mid-run kills it, and every abandoned masterplan-sync-* worktree then stays
+// registered for ever, so `git worktree list` fills with dead entries and a
+// genuinely stuck run becomes impossible to spot.
+//
+// Cleaning up at the START is what fixes it: it runs on the NEXT run rather than
+// depending on this one surviving. Behavioural, against a real throwaway repo —
+// a source-text assertion would pass on a prune that removes nothing.
+describe('master-plan sync prunes stale worktrees on entry', () => {
+  const py = (repo) => `
+import importlib.util, os, subprocess, sys
+spec = importlib.util.spec_from_file_location("smp", ${JSON.stringify(resolve(__dirname, '../scripts/sync-master-plan.py'))})
+m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+m.REPO = ${JSON.stringify(repo)}
+m.PlanWorktree.prune_stale()
+out = subprocess.run(["git","-C",${JSON.stringify(repo)},"worktree","list","--porcelain"],
+                     capture_output=True, text=True).stdout
+print("REMAINING:" + str(out.count("masterplan-sync-")))
+`;
+
+  it('removes an abandoned masterplan-sync-* worktree and leaves others alone', async () => {
+    const { execFile } = await import('node:child_process');
+    const { promisify } = await import('node:util');
+    const { mkdtempSync, writeFileSync, rmSync } = await import('node:fs');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const run = promisify(execFile);
+
+    const repo = mkdtempSync(join(tmpdir(), 'smp-repo-'));
+    const sh = (...args) => run('git', ['-C', repo, ...args]);
+    await sh('init', '-q', '-b', 'main');
+    await sh('config', 'user.email', 't@t');
+    await sh('config', 'user.name', 't');
+    writeFileSync(join(repo, 'f.txt'), 'x');
+    await sh('add', '.');
+    await sh('commit', '-qm', 'init');
+
+    // One abandoned temp worktree, and one real workspace that must survive.
+    const stale = join(tmpdir(), `masterplan-sync-${Date.now()}`);
+    const keeper = join(tmpdir(), `keep-me-${Date.now()}`);
+    await sh('worktree', 'add', '--detach', stale, 'HEAD');
+    await sh('worktree', 'add', '--detach', keeper, 'HEAD');
+
+    const before = (await sh('worktree', 'list', '--porcelain')).stdout;
+    expect(before).toContain('masterplan-sync-');
+    expect(before).toContain('keep-me-');
+
+    const { stdout } = await run('python3', ['-c', py(repo)], { encoding: 'utf8', timeout: 30000 });
+    expect(stdout).toContain('REMAINING:0');
+
+    const after = (await sh('worktree', 'list', '--porcelain')).stdout;
+    expect(after).toContain('keep-me-'); // never touches a workspace it did not create
+
+    rmSync(repo, { recursive: true, force: true });
+    rmSync(stale, { recursive: true, force: true });
+    await sh('worktree', 'remove', '--force', keeper).catch(() => {});
+    rmSync(keeper, { recursive: true, force: true });
+  }, 60000);
 });
