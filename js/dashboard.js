@@ -1113,6 +1113,118 @@
         } catch (e) { console.warn('Agent approval KPI load failed:', e); }
     }
 
+    // ── AI share of work ────────────────────────────────────────────────
+    // The north star is AI doing up to 90% of repeatable operational work.
+    // This is the number that says how far along that is, and it is measured
+    // in TIME, not task count: fifty 15-minute email triages is not the same
+    // contribution as one 8-hour build.
+    //
+    // Numerator   estimated minutes on tasks COMPLETED in the window whose
+    //             Team Member link holds an AI agent (Is AI Agent ticked).
+    // Denominator estimated minutes on every task completed in the window.
+    //
+    // Ownership is read from Team Member, NEVER from Assignee. Assignee is a
+    // human collaborator field and agents cannot hold one — approvals.js
+    // actively clears it when an agent takes a task. Reading Assignee here
+    // would score every agent task as unowned.
+    //
+    // Coverage is published alongside the headline because a task with no
+    // Time Estimate contributes nothing to either side. At 91% coverage the
+    // number is sound; if that falls, the caveat appears on the card rather
+    // than the number quietly drifting.
+    // Renders into the slot AND keeps the id on the rendered card, so a refresh
+    // re-renders instead of silently doing nothing. The older agent cards replace
+    // their slot with an id-less card and can only ever render once.
+    function renderAiShareCard(value, sub, detail, valueClass = '') {
+        const host = document.getElementById('aiShareCard');
+        if (!host) return;
+        const tmp = document.createElement('div');
+        tmp.innerHTML = expandableCard('Work Done by AI', value, sub, detail, valueClass);
+        const card = tmp.firstElementChild;
+        if (!card) return;
+        card.id = 'aiShareCard';
+        host.replaceWith(card);
+    }
+
+    async function loadAiShareKpi() {
+        if (!document.getElementById('aiShareCard') || !PAT) return;
+        try {
+            const [tasks, team] = await Promise.all([
+                airtableFetch(TABLES.tasks, {
+                    pageSize: 100,
+                    'fields[]': [TASK_FIELDS.name, TASK_FIELDS.completionDate,
+                                 TASK_FIELDS.estimatedMinutes, TASK_FIELDS.teamMember],
+                    filterByFormula: `AND({Status}='Completed', IS_AFTER({Completion Date}, DATEADD(TODAY(),-90,'days')))`,
+                }),
+                airtableFetch(TABLES.teamMembers, {
+                    pageSize: 100,
+                    'fields[]': [TEAM_MEMBER_FIELDS.name, TEAM_MEMBER_FIELDS.isAgent],
+                }),
+            ]);
+
+            // Control check. An empty result here is indistinguishable from a
+            // broken filter (a renamed field returns 200 OK with no records),
+            // and "0% of nothing" would read as a real score of zero.
+            if (!tasks.length || !team.length) {
+                renderAiShareCard('no data',
+                    'nothing completed in the last 90 days, or the query is broken',
+                    '<div class="od-breakdown-row"><span>No completed tasks came back. This card shows a number only when there is work to measure.</span></div>');
+                return;
+            }
+
+            const agentIds = new Set(team.filter(r => (r.fields || {})[TEAM_MEMBER_FIELDS.isAgent]).map(r => r.id));
+            const linkIds = (v) => Array.isArray(v) ? v.map(x => (x && typeof x === 'object') ? x.id : x) : [];
+            const cutoff = (days) => {
+                const d = new Date(); d.setDate(d.getDate() - days);
+                return d.toISOString().slice(0, 10);
+            };
+
+            const window_ = (days) => {
+                const from = cutoff(days);
+                let aiMin = 0, humanMin = 0, aiCount = 0, total = 0, withEstimate = 0;
+                tasks.forEach(r => {
+                    const f = r.fields || {};
+                    const done = String(f[TASK_FIELDS.completionDate] || '').slice(0, 10);
+                    if (!done || done < from) return;
+                    total++;
+                    const isAi = linkIds(f[TASK_FIELDS.teamMember]).some(id => agentIds.has(id));
+                    if (isAi) aiCount++;
+                    const mins = Number(f[TASK_FIELDS.estimatedMinutes]) || 0;
+                    if (!mins) return;
+                    withEstimate++;
+                    if (isAi) aiMin += mins; else humanMin += mins;
+                });
+                const measured = aiMin + humanMin;
+                return {
+                    total, withEstimate, aiCount, aiMin, humanMin, measured,
+                    share: measured ? (aiMin / measured) * 100 : 0,
+                    coverage: total ? (withEstimate / total) * 100 : 0,
+                };
+            };
+
+            const m30 = window_(30), m90 = window_(90);
+            const hrs = (m) => (m / 60).toFixed(1);
+            const trend = m90.measured
+                ? (m30.share >= m90.share ? 'text-green' : 'text-amber')
+                : '';
+            const lowCoverage = m30.coverage < 80;
+
+            const detail = `
+                <div class="od-breakdown-row"><span>AI hours (30 days)</span><span>${hrs(m30.aiMin)}</span></div>
+                <div class="od-breakdown-row"><span>Human hours (30 days)</span><span>${hrs(m30.humanMin)}</span></div>
+                <div class="od-breakdown-row" style="border-top:1px solid var(--border-default);margin-top:4px;padding-top:4px"><span>Tasks completed by AI</span><span>${m30.aiCount} of ${m30.total}</span></div>
+                <div class="od-breakdown-row"><span>Last 90 days</span><span>${m90.share.toFixed(1)}% of ${hrs(m90.measured)} hrs</span></div>
+                <div class="od-breakdown-row"><span>Tasks carrying a time estimate</span><span>${Math.round(m30.coverage)}%</span></div>
+                ${lowCoverage ? `<div class="od-breakdown-row"><span class="text-amber">Under 80% of completed tasks have a time estimate, so this number is shakier than usual. The nightly task sweep fills estimates in.</span></div>` : ''}
+                <div class="od-breakdown-row"><span>Target</span><span>90% of repeatable operational work</span></div>
+                <div style="margin-top:8px"><button class="od-btn-secondary od-btn-sm" onclick="event.stopPropagation();switchTab('tasks')">Open Tasks &rarr; AI Agents</button></div>`;
+
+            renderAiShareCard(`${m30.share.toFixed(1)}%`,
+                `last 30 days, by time | ${hrs(m30.aiMin)} of ${hrs(m30.measured)} hrs`,
+                detail, trend);
+        } catch (e) { console.warn('AI share KPI load failed:', e); }
+    }
+
     function renderDashboard(accounts, costs, tenancies, transactions, rentalUnits, tenants) {
         const now = new Date();
         const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
@@ -1551,9 +1663,11 @@
             </div>
             <div id="agentKpiCard"></div>
             <div id="agentApprovalCard"></div>
+            <div id="aiShareCard"></div>
         `;
         loadAgentKpi();
         loadAgentApprovalKpi();
+        loadAiShareKpi();
 
         // ── SECTION 5: 31-Day Cash Flow Forecast ──
         // Build UC tenant map: tenant record ID → true if Universal Credit
