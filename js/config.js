@@ -19,7 +19,7 @@
 
     // ── Page & SOP Version Registry ──
     const PAGE_REGISTRY = [
-        { id: 'overview',    name: 'Leadership Dashboard',           icon: '📊', pageVer: '2.55', sopFile: 'sop.html',                   sopVer: '2.9', standalone: 'index.html#overview' },
+        { id: 'overview',    name: 'Leadership Dashboard',           icon: '📊', pageVer: '2.56', sopFile: 'sop.html',                   sopVer: '2.9', standalone: 'index.html#overview' },
         { id: 'os-strategy', name: 'Objective & Strategy',           icon: '🎯', pageVer: '1.33', sopFile: 'os/strategy/sop.html',       sopVer: '1.0', standalone: 'os/strategy/index.html' },
         { id: 'tasks',       name: 'Tasks & Projects',   icon: '✅', pageVer: '1.120', sopFile: 'os/tasks/sop.html',             sopVer: '1.3', standalone: 'os/tasks/index.html' },
         { id: 'cfv',        name: 'CFVs',                          icon: '🚨', pageVer: '1.31', sopFile: 'sop-cfvs.html',               sopVer: '1.6', standalone: 'index.html#cfv' },
@@ -39,7 +39,7 @@
         // client tenant's shell; the adminOnly flag is the contract the Supabase
         // migration must honour. Replaced the Plan Builder entry 1 Aug 2026 on
         // Kevin's direction (os/business-plan-builder/ files remain on disk).
-        { id: 'kpi-library', name: 'KPI Library', icon: '📚', pageVer: '1.2', sopFile: '', sopVer: '1.0', standalone: 'index.html#kpi-library', adminOnly: true },
+        { id: 'kpi-library', name: 'KPI Library', icon: '📚', pageVer: '1.3', sopFile: '', sopVer: '1.0', standalone: 'index.html#kpi-library', adminOnly: true },
         { id: 'fintable',  name: 'Accounts',                       icon: '🏦', pageVer: '1.8', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#fintable' },
         { id: 'systemisation', name: 'Systemisation',              icon: '⚙️', pageVer: '1.6', sopFile: 'guides/systemisation.html',    sopVer: '1.0', standalone: 'os/systemisation/index.html' },
         { id: 'os-team',    name: 'Team Members',                  icon: '👥', pageVer: '1.9', sopFile: '',                            sopVer: '1.0', standalone: 'os/team/index.html' },
