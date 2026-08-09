@@ -77,6 +77,130 @@ def read_jsonl(path, since_ts):
 # to run while something was still waiting its turn.
 GRACE_MINUTES = float(os.environ.get("DIGEST_GRACE_MINUTES", "45"))
 
+# How many scheduled days a job may miss in a row before the digest shouts.
+#
+# WHY THIS EXISTS (8 Aug 2026)
+# ----------------------------
+# task-hygiene-sweep did no work for four days straight and every morning read as
+# normal. Each single day had an innocent explanation the digest reported quietly:
+# 6 Aug halted on schema drift, 7 Aug skipped-stale after the Mac woke late, 8 Aug
+# deferred on a wake-up DNS drop, then skipped-stale, then acquired the lock and
+# halted on the same schema drift again. A skip is a shrug; four skips is an
+# outage. Only the RUN of days makes it visible, and nothing was counting the run.
+MISS_ALARM_DAYS = int(os.environ.get("DIGEST_MISS_ALARM_DAYS", "3"))
+MISS_LOOKBACK_DAYS = 21
+
+
+def read_jsonl_all(path):
+    """Whole file, no window. The consecutive-miss count needs history the 26-hour
+    window deliberately throws away."""
+    out = []
+    if not os.path.exists(path):
+        return out
+    with open(path) as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                out.append(json.loads(line))
+            except json.JSONDecodeError:
+                continue
+    return out
+
+
+def _local_day(rec):
+    """The local calendar day a log line belongs to, or None if unparseable.
+
+    Both logs stamp UTC. The crons fire in local time, so comparing a UTC day
+    against a cron day would misfile every job either side of midnight.
+    """
+    try:
+        stamp = rec["ts"].replace("Z", "").split(".")[0]
+        t = time.mktime(time.strptime(stamp, "%Y-%m-%dT%H:%M:%S")) - time.timezone
+    except (KeyError, ValueError):
+        return None
+    return datetime.fromtimestamp(t).date()
+
+
+def good_days(job, all_events, all_statuses):
+    """Local days on which this job actually finished its work.
+
+    Taking the lock is NOT finishing the work. `released` now carries an outcome;
+    a line without one predates the change and is read as completed, so old history
+    stays honest rather than retroactively alarming.
+    """
+    days = set()
+    for rec in all_events:
+        if rec.get("job") != job or rec.get("state") != "released":
+            continue
+        if rec.get("outcome", "completed") != "completed":
+            continue
+        d = _local_day(rec)
+        if d:
+            days.add(d)
+    for rec in all_statuses:
+        if rec.get("job") != job or not rec.get("ok"):
+            continue
+        d = _local_day(rec)
+        if d:
+            days.add(d)
+    return days
+
+
+def first_seen(job, all_events, all_statuses):
+    """The earliest day either log mentions this job at all.
+
+    Before that day we have NO EVIDENCE, and no evidence is not evidence of
+    failure. The queue log only begins 2026-08-06; without this floor a job with a
+    two-day history was reported as having missed 21 straight days, which is the
+    silent-zero trap running backwards — a wrong number that reads as an emergency.
+    """
+    days = []
+    for rec in list(all_events) + list(all_statuses):
+        if rec.get("job") != job:
+            continue
+        d = _local_day(rec)
+        if d:
+            days.append(d)
+    return min(days) if days else None
+
+
+def consecutive_misses(cfg, done, now_dt, floor=None):
+    """How many scheduled days in a row this job was due and did not complete.
+
+    Counting starts YESTERDAY. Today's occurrence may still be queued behind
+    another job, and a digest that cries wolf gets muted, which costs more than
+    the day of latency.
+
+    Returns 0 when the logs do not reach back far enough to prove a run of misses.
+    An unprovable alarm is worse than a late one: it trains Kevin to ignore the line.
+    """
+    cron = cfg.get("cron")
+    if not cron:
+        return 0
+    if floor is None:
+        # Neither log has ever mentioned this job. That may be a wiring gap, which
+        # the "was due, no run recorded" line already reports; it is not a run of
+        # failures, and claiming 21 missed days would be inventing history.
+        return 0
+    if now_dt.date() in done:
+        # It completed today. Whatever happened before, the run is broken and the
+        # alarm would be stale noise.
+        return 0
+    misses = 0
+    for back in range(1, MISS_LOOKBACK_DAYS + 1):
+        day = now_dt - timedelta(days=back)
+        if day.date() < floor:
+            # Ran out of history before reaching the alarm threshold. Say nothing.
+            return 0
+        if not jq.day_matches(cron, day):
+            continue
+        if day.date() in done:
+            break
+        misses += 1
+    return misses
+
 
 def expected_in_window(schedule, now_dt):
     """Jobs whose cron should have fired in the last WINDOW_HOURS."""
@@ -112,12 +236,62 @@ def build(now_dt=None):
         last_status[s["job"]] = s
 
     ran, failed, skipped, timed_out, never = [], [], [], [], []
+    halted = []
+
+    # Run-of-days check, over the whole log rather than the 26-hour window. This is
+    # the part that turns four innocent-looking mornings into one alarm.
+    all_events = read_jsonl_all(EVENTS)
+    all_statuses = read_jsonl_all(STATUS)
+    stalled = []
+    for job, cfg in schedule.items():
+        if job.startswith("_") or not isinstance(cfg, dict) or not cfg.get("cron"):
+            continue
+        if cfg.get("enabled") is False:
+            continue
+        misses = consecutive_misses(
+            cfg,
+            good_days(job, all_events, all_statuses),
+            now_dt,
+            floor=first_seen(job, all_events, all_statuses),
+        )
+        if misses >= MISS_ALARM_DAYS:
+            stalled.append((job, misses))
+    stalled.sort(key=lambda x: -x[1])
 
     for job, due in expected_in_window(schedule, now_dt):
         states = [e["state"] for e in by_job.get(job, [])]
         st = last_status.get(job)
 
-        if "skipped-stale" in states and "acquired" not in states:
+        # Held the lock but did not finish. Neither of these may read as a success.
+        #
+        #   released with outcome != completed  the routine itself said it bailed
+        #   acquired, then lock-broken          the lease expired and it never
+        #                                       released — it died mid-run
+        #
+        # On 8 Aug 2026 masterplan-sync and drift-monitor both had their locks
+        # broken on lease expiry and both appeared under "Worked", because
+        # `acquired` was the only thing being checked.
+        lifecycle = [e for e in by_job.get(job, [])
+                     if e["state"] in ("acquired", "released", "lock-broken")]
+        last_life = lifecycle[-1] if lifecycle else None
+        bailed = None
+        if last_life and last_life["state"] == "released":
+            if last_life.get("outcome", "completed") != "completed":
+                bailed = last_life.get("reason") or last_life["outcome"]
+        elif last_life and last_life["state"] in ("lock-broken", "acquired"):
+            # A wrapped job that ran long has its lock broken by the next waiter,
+            # then finds its own release refused — so lock-broken is its last
+            # lifecycle event even though it finished fine. run-job.sh recorded the
+            # truth in job-status.jsonl, so believe that over the lock when it exists.
+            # Without this, compound-brain (exit 0 at 07:51) was reported as having
+            # done no work.
+            if not (st and st.get("ok")):
+                bailed = (last_life.get("reason")
+                          or "took the lock and never released it")
+
+        if bailed:
+            halted.append((job, bailed))
+        elif "skipped-stale" in states and "acquired" not in states:
             ev = [e for e in by_job[job] if e["state"] == "skipped-stale"][-1]
             skipped.append((job, ev.get("reason", "too late")))
         elif "queue-timeout" in states and "acquired" not in states:
@@ -183,12 +357,28 @@ def build(now_dt=None):
         lines.append("Nothing below can be trusted. Check job-queue.py and launchd.")
     else:
         headline = "%d ran" % len(ran)
-        for label, group in (("failed", failed), ("skipped", skipped),
+        for label, group in (("failed", failed), ("halted", halted),
+                             ("skipped", skipped),
                              ("queued out", timed_out), ("no record", never)):
             if group:
                 headline += ", %d %s" % (len(group), label)
-        icon = ":white_check_mark:" if not (failed or never or timed_out) else ":warning:"
+        icon = (":white_check_mark:"
+                if not (failed or never or timed_out or halted or stalled)
+                else ":warning:")
         lines.append("%s Scheduled jobs: %s." % (icon, headline))
+
+    # Loudest after the queue-silence control: a job that has been quietly failing
+    # to do its work for days. Each individual morning had an innocent reason.
+    for job, misses in stalled:
+        alarm = True
+        lines.append(":no_entry: *%s* — no completed run in %d scheduled days. "
+                     "Each day looked like a normal skip; the run is the problem."
+                     % (job, misses))
+
+    for job, reason in halted:
+        alarm = True
+        lines.append(":octagonal_sign: *%s* — took the lock but did not complete (%s)."
+                     % (job, reason))
 
     for job, reason in failed:
         alarm = True

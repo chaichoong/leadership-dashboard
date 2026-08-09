@@ -25,6 +25,7 @@ Single source of truth for file locations across the Operations Director Platfor
 | `tests/` | Vitest unit tests plus Playwright sync-invariant suite (`tests/sync-invariants/`). `test-results/` is generated output, never committed intentionally | New tests |
 | `docs/` | Internal docs not served as part of the product, including `daily-ops-routine.md` — the version-controlled original of THE one scheduled Claude routine, whose live copy is `~/.claude/scheduled-tasks/daily-ops/SKILL.md`. Routine instructions kept only outside git skip review entirely, so the repo copy is the one to edit | New internal documentation |
 | `.claude/skills/` | Project workflow skills (`build-feature`, `fix`, `audit`, `test`, `verify`, `pre-deploy`, `test-gaps`, `health-bar`, `prospect-daily`) | New project-specific skill |
+| `.claude/scheduled-tasks/` | **Reviewed mirror** of the scheduled routines' instructions (`<name>/SKILL.md`). The files the Claude app actually runs live at `~/.claude/scheduled-tasks/`; this copy exists so a change to what a routine may read, write or touch goes through a PR like any other code. Sync with `scripts/sync-scheduled-tasks.py --pull` (adopt a live edit) or `--push` (restore the reviewed version); `--check` runs in `npm test` and fails on drift. Only `SKILL.md` is mirrored — routine runtime state (`state.json`, `notified.json`) stays local | Editing a routine's behaviour |
 | `.claude/worktrees/` | Isolated workspaces for parallel sessions, one subfolder per topic. Gitignored. Created and removed ONLY via `./scripts/worktree.sh` (`new` / `list` / `done`) — never by hand, and never left to accumulate. `done` refuses while the workspace holds uncommitted, unpushed or unmerged work | Created by tooling only |
 
 ## 3. AI context layer (what Claude reads, in order)
@@ -41,6 +42,8 @@ Single source of truth for file locations across the Operations Director Platfor
    - Cowork plugin skills: managed by the Claude desktop app (Airtable automations, document tools)
 
 Do not move skills between tiers without reason: project skills travel with the repo, personal skills apply everywhere, plugin skills are managed by the app.
+
+6. **Scheduled routines** — `~/.claude/scheduled-tasks/<name>/SKILL.md` is what the app runs; `.claude/scheduled-tasks/` in this repo is the reviewed mirror of the same files. Edit the live one, then `scripts/sync-scheduled-tasks.py --pull` and commit, so the change is reviewed. They are not symlinked on purpose: the app's handling of a symlinked task directory is unverified, and getting it wrong stops all eighteen routines at once.
 
 ## 4. Google Drive (`My Drive/Claude/`)
 
