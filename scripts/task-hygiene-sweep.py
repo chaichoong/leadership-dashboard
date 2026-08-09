@@ -88,6 +88,7 @@ FIELDS = {
     # is what made this sweep report the entire live agent queue as unowned for five
     # nights running (140 of 146 on 4 Aug 2026).
     "teamMember": ("Team Member", "flduCtmQGpOA4eWaj"),
+    "completionDate": ("Completion Date", "fldFOi1SwEKuJRmdN"),
 }
 
 TEAM_MEMBERS_TBL = "tblco0p2OnlLQVAX7"
@@ -101,6 +102,21 @@ NOT_LIVE_WORK = {"Completed", "Approval", None, ""}
 # A task this far past its due date with nobody having moved it is a relevance
 # question, not a field gap. Flagged for review, never auto-closed.
 STALE_DAYS = 90
+
+# Recently COMPLETED tasks are swept too, for the auto-safe fields only.
+#
+# Why: the "Work Done by AI %" KPI is estimated minutes by AI over estimated
+# minutes by everyone, so a completed task with no Time Estimate contributes to
+# neither side and is invisible to the metric. Sweeping open tasks alone cannot
+# fix that — a task completed before the sweep reached it keeps a blank estimate
+# for ever, because nothing ever revisits completed work. On 9 Aug 2026 that was
+# 20 of the 118 tasks completed in the previous 30 days, 17% of the measured
+# period, and only ONE of them was created and completed the same day.
+#
+# Only Time Estimate and Business are filled here. A due date or an owner on
+# finished work would be fiction, and assignee writes fire Slack DMs.
+COMPLETED_WINDOW_DAYS = 30
+COMPLETED_FIELDS = ("timeEstimate", "business")
 
 # Writable fields, by tier. Nothing outside this map can ever be written by the sweep.
 WRITABLE = {
@@ -365,6 +381,35 @@ def cmd_audit(args):
             },
         })
 
+    # ── Recently completed work, auto-safe fields only ──────────────────
+    # This is what keeps the AI-share KPI honest. See COMPLETED_WINDOW_DAYS.
+    completed = []
+    for rec in records:
+        if get(rec, "status") != "Completed":
+            continue
+        done = str(get(rec, "completionDate") or "")[:10]
+        if not done:
+            continue
+        try:
+            if (today - date.fromisoformat(done)).days > COMPLETED_WINDOW_DAYS:
+                continue
+        except ValueError:
+            continue
+        missing = [f for f in COMPLETED_FIELDS if not get(rec, f)]
+        if not missing:
+            continue
+        completed.append({
+            "recordId": rec["id"],
+            "name": get(rec, "name") or "(no name)",
+            "gaps": missing,
+            "completedOn": done,
+            "owner": owner_kind(rec),
+            "context": {
+                "description": strip_html(get(rec, "description"))[:400],
+                "maintenanceTicket": bool(get(rec, "maintenance")),
+            },
+        })
+
     clean = len(open_tasks) - non_compliant
     out = {
         "generatedAt": datetime.now().isoformat(timespec="seconds"),
@@ -377,6 +422,13 @@ def cmd_audit(args):
         "aiSharePct": round(100 * owners["ai"] / len(open_tasks), 1),
         "excluded": {"waitingApproval": len(waiting), "noStatus": len(untriaged)},
         "stale": sorted(stale, key=lambda s: -s["daysOverdue"]),
+        "recentlyCompleted": completed,
+        "metricCoverage": {
+            "windowDays": COMPLETED_WINDOW_DAYS,
+            "missingFields": len(completed),
+            "note": "completed tasks with no Time Estimate are invisible to the "
+                    "Work Done by AI KPI — they count on neither side",
+        },
         "reference": {
             "businesses": businesses,
             "projects": projects,
@@ -399,6 +451,8 @@ def cmd_audit(args):
     for gap, n in sorted(counts.items(), key=lambda kv: -kv[1]):
         print(f"  missing {gap}: {n}")
     print(f"  stale (over {STALE_DAYS} days past due): {len(stale)}")
+    print(f"  completed in {COMPLETED_WINDOW_DAYS}d still missing a time estimate or business: {len(completed)}"
+          f"  <- these are invisible to the AI-share KPI")
     print(f"Work-list: {path}")
     return 0
 
