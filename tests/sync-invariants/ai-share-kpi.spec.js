@@ -35,6 +35,8 @@ const F_TM = 'flduCtmQGpOA4eWaj';     // Team Member (link)
 const F_ASSIGNEE = 'fldELMncVJYPDRJNc';
 const F_TM_NAME = 'flds7xoRFQhcRTnbB';
 const F_IS_AGENT = 'fldKGsz9kTpFypeOr';
+const F_OUTCOME = 'fldrHBSr6qoUfaKuZ';   // Approval Outcome
+const F_RAISED_BY = 'fld30Yw8SWYVp049g'; // Sent For Approval By
 
 const AGENT = 'recAgent1';
 const HUMAN = 'recHuman1';
@@ -147,6 +149,39 @@ test.describe('Work Done by AI KPI', () => {
     const { head } = await cardText(page);
     expect(head).toBe('no data');
     expect(head).not.toBe('0.0%');
+  });
+
+  // Kevin's ruling, 9 Aug 2026: work an agent prepared and he approved FIRST TIME is
+  // AI work — he only spent an approval on it. The inverse is the half that keeps the
+  // number honest, and it is the one that would quietly rot: work he sent back is his,
+  // not the agent's, even though the agent's name is still on Team Member.
+  test('work approved first time counts as AI even without a Team Member link', async ({ page }) => {
+    await page.addInitScript((pat) => localStorage.setItem('_dlr_pat', pat), MOCK_PAT);
+    await loadDashboard(page);
+    const approved = task('recApproved', 60, null, 2);   // no Team Member at all
+    approved.fields[F_OUTCOME] = 'Approved as-is';
+    approved.fields[F_RAISED_BY] = [AGENT];
+    await routeAiShare(page, { tasks: [approved, task('recH1', 60, HUMAN, 2)] });
+    await page.evaluate(async () => await loadAiShareKpi());
+
+    const { head } = await cardText(page);
+    expect(head).toBe('50.0%');
+    expect(head).not.toBe('0.0%');   // what ignoring the approval record would print
+  });
+
+  test('work sent back to the agent is NOT AI work, even with an agent on Team Member', async ({ page }) => {
+    await page.addInitScript((pat) => localStorage.setItem('_dlr_pat', pat), MOCK_PAT);
+    await loadDashboard(page);
+    const rejected = task('recSentBack', 60, AGENT, 2);  // agent IS on Team Member
+    rejected.fields[F_OUTCOME] = 'Changes requested';
+    rejected.fields[F_RAISED_BY] = [AGENT];
+    await routeAiShare(page, { tasks: [rejected, task('recH1', 60, HUMAN, 2)] });
+    await page.evaluate(async () => await loadAiShareKpi());
+
+    const { head, all } = await cardText(page);
+    expect(head).toBe('0.0%');       // Kevin redid it, so it is his hour, not the agent's
+    expect(head).not.toBe('50.0%');  // what counting Team Member alone would print
+    expect(all).toMatch(/Sent back to the agent[\s\S]*?1/);
   });
 
   test('tasks with no time estimate move coverage, not the share', async ({ page }) => {
