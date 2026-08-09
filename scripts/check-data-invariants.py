@@ -62,6 +62,10 @@ import urllib.parse
 import urllib.request
 
 BASE_ID = "appnqjDpqDniH3IRl"
+
+# Overridable so the regression test can point the same code at a local stub server.
+# Nothing else may set this — it defaults to the real API on every real run.
+API_BASE = os.environ.get("AIRTABLE_API_BASE", "https://api.airtable.com").rstrip("/")
 TX = "tbln0gzhCAorFc3zB"  # Transactions
 BRIEFS = "tblIxbzDSOCI5hqJn"  # CEO Briefs
 TASKS = "tblqB8b22hKBL4PF1"  # Tasks
@@ -293,7 +297,7 @@ def scan_all(pat, table, fields):
             qs += "&" + urllib.parse.urlencode({"fields[]": f})
         if offset:
             qs += "&" + urllib.parse.urlencode({"offset": offset})
-        url = f"https://api.airtable.com/v0/{BASE_ID}/{table}?{qs}"
+        url = f"{API_BASE}/v0/{BASE_ID}/{table}?{qs}"
         req = urllib.request.Request(url, headers={"Authorization": f"Bearer {pat}"})
         try:
             with urllib.request.urlopen(req, timeout=60) as resp:
@@ -525,26 +529,49 @@ def load_pat():
     return pat
 
 
-def query(pat, table, formula, fields=None, page_size=100):
-    """Return records matching formula. Raises on API error rather than reporting a
-    false pass — an auth failure must never look like 'zero violations'."""
-    params = {"filterByFormula": formula, "pageSize": str(page_size)}
-    qs = urllib.parse.urlencode(params)
-    for f in fields or []:
-        qs += "&" + urllib.parse.urlencode({"fields[]": f})
-    url = f"https://api.airtable.com/v0/{BASE_ID}/{table}?{qs}"
-    req = urllib.request.Request(url, headers={"Authorization": f"Bearer {pat}"})
-    try:
-        with urllib.request.urlopen(req, timeout=30) as resp:
-            body = json.load(resp)
-    except urllib.error.HTTPError as e:
-        detail = e.read().decode("utf-8", "replace")[:200]
-        raise RuntimeError(f"HTTP {e.code}: {detail}") from None
-    except Exception as e:
-        raise RuntimeError(f"request failed: {e}") from None
-    if "error" in body:
-        raise RuntimeError(f"Airtable error: {body['error']}")
-    return body.get("records", [])
+def query(pat, table, formula, fields=None, page_size=100, limit=None):
+    """Return ALL records matching formula, following Airtable's offset token.
+
+    Raises on API error rather than reporting a false pass — an auth failure must
+    never look like 'zero violations'.
+
+    The pagination is the point. Until 9 Aug 2026 this function read one page and
+    stopped, so any violation population larger than a page was reported at exactly
+    the page size. On 9 Aug the open-tasks-carry-no-completion-date invariant printed
+    "100 VIOLATION(S)" when the truth was 143 — a round number that reads as a real
+    count and never errors. This is the same anti-pattern that made the AI
+    Reconciliation Accuracy card report 66/100 against a 259-row window, and it was
+    living inside the script written to catch that class of bug.
+
+    `limit` stops early for existence-only reads (the field probe wants one row, not
+    the whole table). It caps the result; it never causes a silent under-count,
+    because every caller that reports a NUMBER leaves it unset.
+    """
+    records = []
+    offset = None
+    while True:
+        params = {"filterByFormula": formula, "pageSize": str(page_size)}
+        qs = urllib.parse.urlencode(params)
+        for f in fields or []:
+            qs += "&" + urllib.parse.urlencode({"fields[]": f})
+        if offset:
+            qs += "&" + urllib.parse.urlencode({"offset": offset})
+        url = f"{API_BASE}/v0/{BASE_ID}/{table}?{qs}"
+        req = urllib.request.Request(url, headers={"Authorization": f"Bearer {pat}"})
+        try:
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                body = json.load(resp)
+        except urllib.error.HTTPError as e:
+            detail = e.read().decode("utf-8", "replace")[:200]
+            raise RuntimeError(f"HTTP {e.code}: {detail}") from None
+        except Exception as e:
+            raise RuntimeError(f"request failed: {e}") from None
+        if "error" in body:
+            raise RuntimeError(f"Airtable error: {body['error']}")
+        records += body.get("records", [])
+        offset = body.get("offset")
+        if not offset or (limit is not None and len(records) >= limit):
+            return records[:limit] if limit is not None else records
 
 
 def main():
@@ -558,7 +585,9 @@ def main():
         try:
             # Control first: prove the filter can actually fire. Without this, a typo'd
             # field name returns zero rows and reads as a pass forever.
-            control = query(pat, inv["table"], inv["control"], page_size=100)
+            # Existence check, not a count — `limit` keeps it to one page. The
+            # report says "N+ live records" for exactly this reason.
+            control = query(pat, inv["table"], inv["control"], page_size=100, limit=100)
             if not control:
                 # An empty control is normally a typo'd field name, which would
                 # read as a pass forever — so it fails hard. But a brand-new
@@ -574,7 +603,8 @@ def main():
                 probe_err = ""
                 if inv.get("field_probe"):
                     try:
-                        probe_ok = bool(query(pat, inv["table"], inv["field_probe"], page_size=1))
+                        probe_ok = bool(query(pat, inv["table"], inv["field_probe"],
+                                              page_size=1, limit=1))
                     except RuntimeError as e:
                         probe_err = str(e)
                 if probe_ok:

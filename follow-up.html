@@ -1106,23 +1106,44 @@
         document.getElementById('mainApp').style.display = 'none';
     }
 
+    // Fire-and-forget an async startup job WITHOUT losing its failure.
+    //
+    // These were called bare — `fetchLabels();` — so a rejected promise became an
+    // unhandled rejection: no toast, no console entry the user would ever see, and
+    // a page that silently renders with no labels, no aliases or a stale accuracy
+    // figure. CLAUDE.md forbids a catch block that swallows an error; a missing
+    // catch is the same defect with no message at all.
+    //
+    // The label names the job so the message says which part of the page is
+    // degraded, rather than a bare "something failed".
+    function bg(label, run) {
+        try {
+            const p = run();
+            if (p && typeof p.catch === 'function') {
+                p.catch((err) => showError(`${label} failed: ${err?.message || err}`));
+            }
+        } catch (err) {
+            showError(`${label} failed: ${err?.message || err}`);
+        }
+    }
+
     function showApp() {
         document.getElementById('authScreen').style.display = 'none';
         document.getElementById('mainApp').style.display = 'block';
         // Load GHL credentials before fetchLabels so SMS option appears in dropdown
         ghlApiKey = localStorage.getItem('ghl_api_key') || '';
         ghlLocationId = localStorage.getItem('ghl_location_id') || '';
-        fetchLabels();
-        fetchSendAsAliases();
+        bg('Loading labels', fetchLabels);
+        bg('Loading send-as addresses', fetchSendAsAliases);
         updateKbStatusDisplay();
         const todayKey = 'applied_today_' + new Date().toISOString().slice(0, 10);
         appliedTodayCount = parseInt(localStorage.getItem(todayKey) || '0');
         startAutoRefresh();
         updateBackupIndicator();
         checkAutoBackup();
-        syncFromCloud();
-        refreshAccuracyFromCloud();
-        purgeOldAccuracyRecords();
+        bg('Cloud sync', syncFromCloud);
+        bg('Loading accuracy stats', refreshAccuracyFromCloud);
+        bg('Purging old accuracy records', purgeOldAccuracyRecords);
         startCompletionSweep();
     }
 
@@ -1235,7 +1256,9 @@
         // Debounce: wait 1s after last action before refreshing counts
         if (labelCountRefreshTimer) clearTimeout(labelCountRefreshTimer);
         labelCountRefreshTimer = setTimeout(() => {
-            refreshLabelCounts();
+            // Inside a setTimeout there is no caller to await this, so a rejection
+            // here has nowhere to go but the unhandled-rejection handler.
+            bg('Refreshing label counts', refreshLabelCounts);
         }, 1000);
     }
 

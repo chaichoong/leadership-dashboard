@@ -160,7 +160,35 @@ class PlanWorktree:
     def __init__(self):
         self.path = None
 
+    @staticmethod
+    def prune_stale():
+        """Clear out worktrees a KILLED earlier run could not clean up.
+
+        __exit__ never runs when the process is killed (the Mac sleeping mid-run
+        is the usual cause), so its own tidy-up cannot be relied on. Every
+        abandoned worktree then stays registered for ever, and `git worktree
+        list` fills with dead masterplan-sync-* entries that make a genuinely
+        stuck run impossible to spot.
+
+        Doing it at the START is what makes it work: it runs on the NEXT run
+        rather than depending on this one surviving. Cheap and idempotent —
+        `prune` only removes admin entries whose directory is already gone, and
+        the explicit remove only touches paths this class created.
+        """
+        git("worktree", "prune", check=False)
+        listing = git("worktree", "list", "--porcelain", check=False).stdout or ""
+        for line in listing.splitlines():
+            if not line.startswith("worktree "):
+                continue
+            path = line[len("worktree "):].strip()
+            # Only ever our own temp checkouts. Never a real workspace.
+            if os.path.basename(path).startswith("masterplan-sync-"):
+                git("worktree", "remove", "--force", path, check=False)
+                shutil.rmtree(path, ignore_errors=True)
+        git("worktree", "prune", check=False)
+
     def __enter__(self):
+        self.prune_stale()
         git("fetch", "origin", "main")
         self.path = tempfile.mkdtemp(prefix="masterplan-sync-")
         # Remove first: mkdtemp already made the directory and `worktree add`

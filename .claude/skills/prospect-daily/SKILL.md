@@ -45,7 +45,38 @@ When genuinely unsure whether someone is a founder-buyer or a seller, lean towar
 ### 1. Load state from Airtable
 
 - Fetch all Prospect Keywords where Active is true. Sort by Last Used ascending (never-used first). Pick the top 2-3 for this run.
-- Fetch all existing Prospects (paginate). Build a dedupe set of LinkedIn URLs (lowercased, path only), emails, **normalised company names (lowercased, with Ltd/Limited/(Midlands)/trading-name suffixes stripped) and Companies House numbers**, plus a suppression set from Status = Suppressed records. The name and CH-number keys are not optional: job-ad prospects usually have no LinkedIn URL and sometimes no email, and matching on those two alone let three duplicates through on 27 Jul. Check the company name against the set BEFORE opening an employer's website or running Companies House.
+- **Build the dedupe set with the script, never by hand:**
+
+  ```
+  python3 scripts/prospect-dedupe.py build
+  ```
+
+  That returns `{companyKeys, emails, linkedin, chNumbers, suppressed, recordCount}`
+  read live from the Prospects table (paginated), and it exits non-zero if the table
+  returns zero records — a dedupe set built from nothing waves every duplicate through.
+
+  For a single candidate, get its key the same way so both sides of the comparison
+  are built by the same code:
+
+  ```
+  python3 scripts/prospect-dedupe.py key "Q.E.D. Industrial Controls Ltd"   # -> qed industrial controls
+  python3 scripts/prospect-dedupe.py ch  "Spoke to owner, co no 09876543"   # -> 09876543
+  ```
+
+  Do NOT re-derive the normalisation from this paragraph. It has drifted twice —
+  `Smith & Sons Ltd` vs `Smith and Sons Limited` (8 Aug) and `Q.E.D.` vs `QED`
+  (9 Aug) — and each drift cold-emailed the same founder twice. The rule lives in
+  `scripts/prospect-dedupe.py`, guarded by `tests/prospect-dedupe.test.js`.
+
+- The name and CH-number keys are not optional: job-ad prospects usually have no
+  LinkedIn URL and sometimes no email, and matching on those two alone let three
+  duplicates through on 27 Jul. The CH set is built from the `Companies House No`
+  field **and** a regex over Notes, because 36 records carry the number only in
+  Notes. Check the company key against the set BEFORE opening an employer's website
+  or running Companies House.
+- When you create a prospect, always populate `Companies House No` as a field (not
+  just in Notes) and keep the raw company string in `Company`, so the key can be
+  re-derived if the rule changes again.
 
 ### 2. Pain-signal search (assisted browsing, Kevin's Chrome)
 
