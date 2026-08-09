@@ -1,6 +1,6 @@
 ---
 name: task-hygiene-sweep
-description: Nightly sweep of every open Airtable task against Kevin's seven field rules — auto-fills the safe fields, parks judgement calls for approval, reports what it did.
+description: ABSORBED into daily-ops (8 Aug 2026) as phase 5. Do not re-enable separately.
 ---
 
 ## QUEUE AND WRITE POLICY (added 6 Aug 2026 — do this before anything else)
@@ -10,38 +10,26 @@ On 6 Aug 2026 ten routines woke together after the Mac slept and all ran between
 working tree dirty across four unrelated features. Two rules came out of it, and
 they override anything below that contradicts them.
 
-### Rule 1 — take the queue lock first
+### Rule 1 — you are a PHASE of `daily-ops`, not a routine
 
-```
-python3 /Users/kevinbrittain/Projects/leadership-dashboard/scripts/job-queue.py acquire task-hygiene-sweep --lease 90
-```
+This no longer runs on its own schedule. Since 8 Aug 2026 it is one phase of the
+single `daily-ops` routine, which runs everything in sequence once a day.
 
-- exit **0** — you hold the machine. Carry on.
-- exit **3** — you are too late for this work to be useful. STOP. Do nothing else.
-- exit **75** — another routine holds the machine. STOP. Do nothing else.
+**Do NOT take the queue lock.** `daily-ops` already holds the machine, and the
+short shell jobs still use that lock. Taking it here would block them for the
+length of this phase.
 
-Never continue past a non-zero exit code. Running anyway is precisely the
-behaviour this replaces. Release it as your last step, success or failure:
+Why the change: serialising fourteen routines behind a lock worked until the Mac
+slept mid-run. A suspended routine keeps holding the lock — on 8 Aug 2026
+`drift-monitor` held it for **4 hours 54 minutes** while asleep — so everything
+behind it waited and was then skipped for being too late. A lock cannot fix a
+machine that sleeps, because the lock sleeps too. One routine running in sequence
+has nothing to overlap with and nothing to skip.
 
-```
-python3 /Users/kevinbrittain/Projects/leadership-dashboard/scripts/job-queue.py release task-hygiene-sweep --outcome completed
-```
-
-**If you stopped early and judged or changed nothing** — schema drift, zero open tasks, any
-halt — release with the truth instead:
-
-```
-python3 /Users/kevinbrittain/Projects/leadership-dashboard/scripts/job-queue.py release task-hygiene-sweep \
-  --outcome halted --reason "Tasks schema drift: two new Time Estimate options"
-```
-
-Taking the lock is not doing the work. Between 5 and 8 Aug 2026 this sweep did nothing for
-four days straight and every morning's digest listed it under "Worked", because `acquired`
-was the only signal the digest had. `--outcome halted` is what makes a halt visible, and
-three halts in a row now raise an alarm on their own.
-
-If your run will take longer than 90 minutes, extend the lease as you go:
-`python3 /Users/kevinbrittain/Projects/leadership-dashboard/scripts/job-queue.py heartbeat task-hygiene-sweep --lease 90`.
+**Report honestly what you actually did.** Taking a turn is not doing the work.
+Between 5 and 8 Aug 2026 the task-hygiene sweep did nothing for four days running
+while every morning's digest listed it under "Worked". If you halt early, say you
+halted and why. `daily-ops` reports what you tell it.
 
 ### Rule 2 — you are read-only with respect to code
 
@@ -51,8 +39,8 @@ under `monitoring/`.
 
 You MAY NOT, for any reason: edit a file in the repo, `git add`, `git commit`,
 `git push`, create a branch, or open a pull request. Even a one-line change. Even
-an obvious one. Even a report you have always committed. `queue-fixer` is the only
-scheduled routine permitted to write code, and it runs at 10:15 daily.
+an obvious one. Even a report you have always committed. Phase 8 of `daily-ops` is the only
+thing permitted to write code, and it opens one PR for Kevin to review.
 
 When you find something needing a code change, file it and move on:
 
@@ -131,17 +119,35 @@ a licence with a deadline, a certificate expiry. Failing that, set it by urgency
 Urgent is 2 working days out, High is 5, Not Urgent is 15. Never a past date, never more
 than 90 days out — the script rejects both.
 
-**Assignee** (pending) — Kevin Brittain, Mica Albovias or Ericamae Atenta. Operations,
-tenants, suppliers, chasing and admin go to Mica. Marketing, content and outreach go to
-Ericamae. Decisions, approvals, money and anything client-facing go to Kevin. Maintenance
-tickets already carry a contractor and are exempt. Bear in mind Karlo Teves left on
-28 Jul 2026 — never assign to him.
+**Owner (pending) — AI FIRST. This is the whole point of the sweep.**
 
-Do NOT assume every build task is Kevin's. Mica is running the Supabase migration
-(confirmed by Kevin, 30 Jul 2026). When a task belongs to a live workstream, check who is
-actually on it — the task's own history, the project record, sibling tasks — before you
-route it. If that does not tell you, leave the assignee out. A blank assignee gets picked
-up tomorrow; a wrong one Slack-DMs the wrong person and moves work onto their plate.
+Kevin's objective, in his words on 9 Aug 2026: as much of the list delegated to AI as
+possible, and the least possible landing on him, Mica or Ericamae. The guard rails are
+already built — an agent prepares the work and nothing happens until Kevin approves it —
+so handing a task to an agent costs him an approval, not a risk.
+
+So for every unowned task, the question is **"which agent does this?"**, and only if there
+is no honest answer does a human get named.
+
+Route to an **AI agent via Team Member** (`flduCtmQGpOA4eWaj`, the Team Members table,
+records with `Is AI Agent` ticked) whenever the work is: reading and triaging an email,
+drafting correspondence, chasing a supplier or a council, filling a form, researching,
+producing a document, checking a certificate or a record, reconciling, or writing code.
+The 17 agents are the 11 department heads, the CEO and 5 workers — writer, researcher,
+analyst, auditor, builder. Pick the one whose remit fits.
+
+Name a **human on Assignee** only when the task genuinely cannot be done without one:
+a signature, a phone call, a physical visit to a property, a credential only they hold,
+or a decision that is Kevin's to make. Operations and tenant admin that survives that test
+goes to Mica; outreach and content to Ericamae; decisions, money and anything client-facing
+to Kevin. Karlo Teves left on 28 Jul 2026 — never name him.
+
+If neither fits, write nothing. A blank owner is re-derived tomorrow. A wrong human owner
+fires a Slack DM and moves work onto a real person's plate.
+
+**Never treat a blank Assignee as a gap on its own.** Ownership lives in Team Member, and
+the script now checks both. Reading Assignee alone is what made this sweep report the
+entire live agent queue as unowned for five nights running.
 
 **Project** (pending) — link only when the task genuinely belongs to one of the open
 projects in the reference block. Most tasks are ordinary operations and belong to no
@@ -188,6 +194,55 @@ whether to keep the guard rail on.
 
 Leave a field out entirely when you cannot make a confident call. A blank field is honest;
 a wrong value is a job someone has to undo.
+
+## STEP 2a: Keep the AI metric honest — backfill completed work
+
+The Leadership Dashboard KPI "Work Done by AI %" is estimated minutes done by agents over
+estimated minutes done by everyone. **A completed task with no Time Estimate is invisible
+to it** — it counts on neither side, so the percentage is computed over whatever happens to
+carry an estimate.
+
+Sweeping open tasks alone cannot fix this. Nothing ever revisits completed work, so a task
+finished before the sweep reached it keeps a blank estimate for ever. On 9 Aug 2026 that was
+20 of the 118 tasks completed in the previous 30 days: 17% of the measured period, invisible.
+Backfilling them moved coverage from 83% to 100% and the headline from 2.9% to 1.5%, because
+the hidden hours were all human. **The number got worse because it got true. That is the
+point — never protect the number at the cost of the measurement.**
+
+The work-list carries `recentlyCompleted`: tasks completed in the last 30 days still missing
+a Time Estimate or a Business. Fill both, same rules as for open tasks, judging the work as
+it was actually done. These are auto-tier and need no approval.
+
+Fill ONLY Time Estimate and Business on completed work. A due date or an owner on finished
+work is fiction, and an assignee write fires a Slack DM about a job that is already done.
+
+Report coverage every night: "N of M completed tasks carry a time estimate". If it is ever
+below 100%, say which ones you could not judge and why.
+
+## STEP 2b: Relevance — is this task still real?
+
+Kevin's concern on 9 Aug 2026: the list is diluted by duplicates and by work that is old
+or outdated, and an inaccurate list cannot be delegated to anyone, agent or human.
+
+The work-list now carries a `stale` array: every live task more than 90 days past its due
+date, worst first. On 9 Aug that was 65 tasks, the oldest due June 2025.
+
+Read them. For each, decide which of three it is, and put the answer in the report under
+**"Still real?"** — never act on it yourself, this is a proposal:
+
+- **Done already** — the thing happened and nobody closed the record. Propose completing it.
+- **Dead** — superseded, the property sold, the supplier gone, the deadline moot. Propose
+  closing it with the reason.
+- **Still live** — real work that has simply slipped. Propose a new due date and, if it has
+  no owner, an agent to take it.
+
+Do not attempt duplicate detection by name similarity alone. Tested 9 Aug 2026: of 30 pairs
+scoring 86%+ similar, all but one were genuinely different records — different invoice
+numbers, different properties, different months. Only flag a duplicate when the name, the
+business AND the due date all match, or when reading both descriptions makes it obvious.
+
+Cap this at the 20 worst per night so the report stays readable. Say how many you did not
+reach.
 
 ## STEP 3: CEO review
 

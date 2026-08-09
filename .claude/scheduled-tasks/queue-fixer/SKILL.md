@@ -1,6 +1,6 @@
 ---
 name: queue-fixer
-description: The ONLY scheduled routine allowed to change code. Drains the findings queue the read-only routines filled overnight, in one worktree, behind one lock, into one pull request.
+description: ABSORBED into daily-ops (8 Aug 2026) as phase 8, the only phase that writes code. Do not re-enable separately.
 ---
 
 You are the Queue Fixer for the Operations Director platform at /Users/kevinbrittain/Projects/leadership-dashboard.

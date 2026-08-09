@@ -1,6 +1,6 @@
 ---
 name: drive-auth-health-check
-description: Daily check that the Google Drive upload worker still works; Slack-DMs Kevin only when it is genuinely broken or the check itself has gone blind.
+description: ABSORBED into daily-ops (8 Aug 2026) as phase 7.1. Do not re-enable separately.
 ---
 
 ## QUEUE AND WRITE POLICY (added 6 Aug 2026 — do this before anything else)
@@ -10,25 +10,26 @@ On 6 Aug 2026 ten routines woke together after the Mac slept and all ran between
 working tree dirty across four unrelated features. Two rules came out of it, and
 they override anything below that contradicts them.
 
-### Rule 1 — take the queue lock first
+### Rule 1 — you are a PHASE of `daily-ops`, not a routine
 
-```
-python3 /Users/kevinbrittain/Projects/leadership-dashboard/scripts/job-queue.py acquire drive-auth-health-check --lease 45
-```
+This no longer runs on its own schedule. Since 8 Aug 2026 it is one phase of the
+single `daily-ops` routine, which runs everything in sequence once a day.
 
-- exit **0** — you hold the machine. Carry on.
-- exit **3** — you are too late for this work to be useful. STOP. Do nothing else.
-- exit **75** — another routine holds the machine. STOP. Do nothing else.
+**Do NOT take the queue lock.** `daily-ops` already holds the machine, and the
+short shell jobs still use that lock. Taking it here would block them for the
+length of this phase.
 
-Never continue past a non-zero exit code. Running anyway is precisely the
-behaviour this replaces. Release it as your last step, success or failure:
+Why the change: serialising fourteen routines behind a lock worked until the Mac
+slept mid-run. A suspended routine keeps holding the lock — on 8 Aug 2026
+`drift-monitor` held it for **4 hours 54 minutes** while asleep — so everything
+behind it waited and was then skipped for being too late. A lock cannot fix a
+machine that sleeps, because the lock sleeps too. One routine running in sequence
+has nothing to overlap with and nothing to skip.
 
-```
-python3 /Users/kevinbrittain/Projects/leadership-dashboard/scripts/job-queue.py release drive-auth-health-check
-```
-
-If your run will take longer than 45 minutes, extend the lease as you go:
-`python3 /Users/kevinbrittain/Projects/leadership-dashboard/scripts/job-queue.py heartbeat drive-auth-health-check --lease 45`.
+**Report honestly what you actually did.** Taking a turn is not doing the work.
+Between 5 and 8 Aug 2026 the task-hygiene sweep did nothing for four days running
+while every morning's digest listed it under "Worked". If you halt early, say you
+halted and why. `daily-ops` reports what you tell it.
 
 ### Rule 2 — you are read-only with respect to code
 
@@ -38,8 +39,8 @@ under `monitoring/`.
 
 You MAY NOT, for any reason: edit a file in the repo, `git add`, `git commit`,
 `git push`, create a branch, or open a pull request. Even a one-line change. Even
-an obvious one. Even a report you have always committed. `queue-fixer` is the only
-scheduled routine permitted to write code, and it runs at 10:15 daily.
+an obvious one. Even a report you have always committed. Phase 8 of `daily-ops` is the only
+thing permitted to write code, and it opens one PR for Kevin to review.
 
 When you find something needing a code change, file it and move on:
 
