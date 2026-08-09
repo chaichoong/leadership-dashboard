@@ -67,6 +67,8 @@ const KPI_LIBRARY = [
       how: 'Counts completed tasks whose name matches a phrase — "rehearsal", "pack". Moves on its own when the team completes real work.' },
     { tier: 1, group: 'Work', name: 'Active / overdue task counts', shape: 'T3', status: 'ready',
       how: 'Open tasks, optionally overdue-only, for a project or the whole business.' },
+    { tier: 1, group: 'Work', name: 'Work done by AI %', shape: 'T4', status: 'live',
+      how: 'Estimated minutes on tasks completed in the window where Team Member holds an AI agent, over estimated minutes on all tasks completed in the window. Time-weighted, never task counts: fifty 15-minute triages is not one 8-hour build. Ownership reads Team Member ONLY — agents cannot hold the Assignee collaborator field. Publish coverage (share of completed tasks carrying a time estimate) beside it; the number is only as good as that.' },
     { tier: 1, group: 'Work', name: 'Team utilisation %', shape: 'T4', status: 'setting',
       how: 'Allocated hours over capacity. BLOCKED on moving capacity out of localStorage into a tenant settings table.' },
     { tier: 1, group: 'Sales & growth', name: 'Prospects contacted', shape: 'T6', status: 'live',

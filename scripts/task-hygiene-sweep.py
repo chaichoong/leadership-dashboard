@@ -82,7 +82,25 @@ FIELDS = {
     "maintenance": ("Maintenance Ticket", "fldSEUvVA98as1HW6"),
     "contractor": ("Contractor", "fldgmzcr3jHALsdYD"),
     "createdTime": ("Created Time", "fldlhVrnsE0cAbm7T"),
+    # Ownership lives HERE, not in Assignee. Team Members holds people AND the 17 AI
+    # agent records; agents cannot hold the Assignee collaborator field at all, and
+    # approvals.js clears Assignee when an agent takes a task. Reading only Assignee
+    # is what made this sweep report the entire live agent queue as unowned for five
+    # nights running (140 of 146 on 4 Aug 2026).
+    "teamMember": ("Team Member", "flduCtmQGpOA4eWaj"),
 }
+
+TEAM_MEMBERS_TBL = "tblco0p2OnlLQVAX7"
+TM_IS_AGENT = "Is AI Agent"
+
+# Statuses that are not live work. 'Approval' is waiting on Kevin, not being worked,
+# and a blank status is an un-triaged record. Counting either in the denominator
+# understates compliance against work anyone is actually doing.
+NOT_LIVE_WORK = {"Completed", "Approval", None, ""}
+
+# A task this far past its due date with nobody having moved it is a relevance
+# question, not a field gap. Flagged for review, never auto-closed.
+STALE_DAYS = 90
 
 # Writable fields, by tier. Nothing outside this map can ever be written by the sweep.
 WRITABLE = {
@@ -226,7 +244,8 @@ def assess(rec):
     some_day = bool(get(rec, "someDay"))
     maintenance = bool(get(rec, "maintenance"))
 
-    if not get(rec, "assignee") and not (maintenance and get(rec, "contractor")):
+    owned = bool(get(rec, "assignee")) or bool(get(rec, "teamMember"))
+    if not owned and not (maintenance and get(rec, "contractor")):
         gaps.append("assignee")
     if not get(rec, "dueDate") and not some_day:
         gaps.append("dueDate")
@@ -241,9 +260,30 @@ def assess(rec):
     # script only reports which tasks carry no project link for it to judge.
     if not get(rec, "project") and not maintenance:
         gaps.append("project")
-    if not get(rec, "recurring"):
-        gaps.append("recurring")
+    # Recurring is NOT checked. Verified against the live schema 9 Aug 2026:
+    #   Is Recurring            = {Recurring} != ""       -> "None" reads as recurring
+    #   30 Day Occurrences      SWITCH default is 1       -> "None" takes the recurring branch
+    #   Recurring Next Due Date SWITCH has no "None" arm  -> returns the due date itself
+    # So writing "None" to close the gap would push one-off tasks into Mica's and
+    # Ericamae's recurring performance figures and arm them to clone. The correct
+    # value for a task that happens once is an EMPTY field, which means "missing
+    # recurring" is not a gap at all. Counting it alone capped the achievable score
+    # near 3% and dragged the headline to 1.8% for four nights running.
     return gaps
+
+
+def is_stale(rec, today):
+    """A task long past its due date that nobody has moved. A relevance question."""
+    if get(rec, "someDay"):
+        return None
+    due = str(get(rec, "dueDate") or "")[:10]
+    if not due:
+        return None
+    try:
+        days = (today - date.fromisoformat(due)).days
+    except ValueError:
+        return None
+    return days if days > STALE_DAYS else None
 
 
 def cmd_audit(args):
@@ -252,7 +292,24 @@ def cmd_audit(args):
 
     wanted = [fname(k) for k in FIELDS]
     records = fetch_all(token, TASKS, fields=wanted)
-    open_tasks = [r for r in records if get(r, "status") != "Completed"]
+    open_tasks = [r for r in records if get(r, "status") not in NOT_LIVE_WORK]
+    waiting = [r for r in records if get(r, "status") == "Approval"]
+    untriaged = [r for r in records if get(r, "status") in (None, "")
+                 and get(r, "name")]
+
+    # Which Team Member records are AI agents, so the report can say how much of
+    # the list an agent already holds — the number Kevin actually steers by.
+    agent_ids = {r["id"] for r in fetch_all(token, TEAM_MEMBERS_TBL, fields=["Name", TM_IS_AGENT])
+                 if r["fields"].get(TM_IS_AGENT)}
+
+    def owner_kind(rec):
+        links = get(rec, "teamMember") or []
+        ids = [l.get("id") if isinstance(l, dict) else l for l in links]
+        if any(i in agent_ids for i in ids):
+            return "ai"
+        if ids or get(rec, "assignee"):
+            return "human"
+        return "unowned"
 
     # CONTROL CHECK — a broken filter or field rename must fail, never read as all-clean.
     if not records:
@@ -267,7 +324,15 @@ def cmd_audit(args):
 
     items, counts = [], {}
     non_compliant = 0
+    today = date.today()
+    stale, owners = [], {"ai": 0, "human": 0, "unowned": 0}
     for rec in open_tasks:
+        owners[owner_kind(rec)] += 1
+        overdue_by = is_stale(rec, today)
+        if overdue_by:
+            stale.append({"recordId": rec["id"], "name": get(rec, "name"),
+                          "dueDate": str(get(rec, "dueDate"))[:10],
+                          "daysOverdue": overdue_by, "owner": owner_kind(rec)})
         gaps = assess(rec)
         for gap in gaps:
             counts[gap] = counts.get(gap, 0) + 1
@@ -308,6 +373,10 @@ def cmd_audit(args):
         "compliancePct": round(100 * clean / len(open_tasks), 1),
         "complianceNote": "'project' is advisory and does not count against the score",
         "gapCounts": counts,
+        "ownership": owners,
+        "aiSharePct": round(100 * owners["ai"] / len(open_tasks), 1),
+        "excluded": {"waitingApproval": len(waiting), "noStatus": len(untriaged)},
+        "stale": sorted(stale, key=lambda s: -s["daysOverdue"]),
         "reference": {
             "businesses": businesses,
             "projects": projects,
@@ -324,9 +393,12 @@ def cmd_audit(args):
     with open(path, "w") as fh:
         json.dump(out, fh, indent=2)
 
-    print(f"Open tasks: {len(open_tasks)}   compliant: {clean} ({out['compliancePct']}%)")
+    print(f"Live work: {len(open_tasks)} tasks   compliant: {clean} ({out['compliancePct']}%)")
+    print(f"  excluded: {len(waiting)} waiting on approval, {len(untriaged)} with no status")
+    print(f"  owned by AI: {owners['ai']} ({out['aiSharePct']}%)   human: {owners['human']}   nobody: {owners['unowned']}")
     for gap, n in sorted(counts.items(), key=lambda kv: -kv[1]):
         print(f"  missing {gap}: {n}")
+    print(f"  stale (over {STALE_DAYS} days past due): {len(stale)}")
     print(f"Work-list: {path}")
     return 0
 
