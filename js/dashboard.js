@@ -1215,7 +1215,8 @@
                 airtableFetch(TABLES.tasks, {
                     pageSize: 100,
                     'fields[]': [TASK_FIELDS.name, TASK_FIELDS.completionDate,
-                                 TASK_FIELDS.estimatedMinutes, TASK_FIELDS.teamMember],
+                                 TASK_FIELDS.estimatedMinutes, TASK_FIELDS.teamMember,
+                                 TASK_FIELDS.approvalOutcome, TASK_FIELDS.sentForApprovalBy],
                     filterByFormula: `AND({Status}='Completed', IS_AFTER({Completion Date}, DATEADD(TODAY(),-90,'days')))`,
                 }),
                 airtableFetch(TABLES.teamMembers, {
@@ -1241,15 +1242,37 @@
                 return d.toISOString().slice(0, 10);
             };
 
+            // Kevin's ruling, 9 Aug 2026: work an agent prepared and he approved
+            // FIRST TIME is AI work — he only spent an approval on it. The rule cuts
+            // both ways, and the second half is the one that keeps the number honest:
+            // work he sent back is NOT AI work, because he had to redo it. Without
+            // that, a task the agent got wrong still scores as AI purely because the
+            // agent's name is on Team Member. Three tasks were doing exactly that.
+            const selName = (v) => !v ? '' : (typeof v === 'string' ? v : (v.name || ''));
+            const REDONE_BY_KEVIN = ['Changes requested', 'Rejected'];
+
+            const isAiWork = (f) => {
+                const outcome = selName(f[TASK_FIELDS.approvalOutcome]);
+                if (REDONE_BY_KEVIN.includes(outcome)) return false;
+                if (outcome === 'Approved as-is'
+                    && linkIds(f[TASK_FIELDS.sentForApprovalBy]).some(id => agentIds.has(id))) return true;
+                return linkIds(f[TASK_FIELDS.teamMember]).some(id => agentIds.has(id));
+            };
+
             const window_ = (days) => {
                 const from = cutoff(days);
                 let aiMin = 0, humanMin = 0, aiCount = 0, total = 0, withEstimate = 0;
+                let approvedFirstTime = 0, sentBack = 0, minorEdits = 0;
                 tasks.forEach(r => {
                     const f = r.fields || {};
                     const done = String(f[TASK_FIELDS.completionDate] || '').slice(0, 10);
                     if (!done || done < from) return;
                     total++;
-                    const isAi = linkIds(f[TASK_FIELDS.teamMember]).some(id => agentIds.has(id));
+                    const outcome = selName(f[TASK_FIELDS.approvalOutcome]);
+                    if (outcome === 'Approved as-is') approvedFirstTime++;
+                    else if (outcome === 'Approved with minor edits') minorEdits++;
+                    else if (REDONE_BY_KEVIN.includes(outcome)) sentBack++;
+                    const isAi = isAiWork(f);
                     if (isAi) aiCount++;
                     const mins = Number(f[TASK_FIELDS.estimatedMinutes]) || 0;
                     if (!mins) return;
@@ -1259,6 +1282,7 @@
                 const measured = aiMin + humanMin;
                 return {
                     total, withEstimate, aiCount, aiMin, humanMin, measured,
+                    approvedFirstTime, minorEdits, sentBack,
                     share: measured ? (aiMin / measured) * 100 : 0,
                     coverage: total ? (withEstimate / total) * 100 : 0,
                 };
@@ -1275,6 +1299,9 @@
                 <div class="od-breakdown-row"><span>AI hours (30 days)</span><span>${hrs(m30.aiMin)}</span></div>
                 <div class="od-breakdown-row"><span>Human hours (30 days)</span><span>${hrs(m30.humanMin)}</span></div>
                 <div class="od-breakdown-row" style="border-top:1px solid var(--border-default);margin-top:4px;padding-top:4px"><span>Tasks completed by AI</span><span>${m30.aiCount} of ${m30.total}</span></div>
+                <div class="od-breakdown-row"><span>Approved first time (counts as AI)</span><span>${m30.approvedFirstTime}</span></div>
+                ${m30.minorEdits ? `<div class="od-breakdown-row"><span>Approved with minor edits (not counted — say if you want these in)</span><span>${m30.minorEdits}</span></div>` : ''}
+                ${m30.sentBack ? `<div class="od-breakdown-row"><span class="text-amber">Sent back to the agent (counted as your work, not AI's)</span><span>${m30.sentBack}</span></div>` : ''}
                 <div class="od-breakdown-row"><span>Last 90 days</span><span>${m90.share.toFixed(1)}% of ${hrs(m90.measured)} hrs</span></div>
                 <div class="od-breakdown-row"><span>Tasks carrying a time estimate</span><span>${Math.round(m30.coverage)}%</span></div>
                 ${lowCoverage ? `<div class="od-breakdown-row"><span class="text-amber">Under 80% of completed tasks have a time estimate, so this number is shakier than usual. The nightly task sweep fills estimates in.</span></div>` : ''}
