@@ -239,6 +239,46 @@ INVARIANTS = [
                         "LEN({Completed Month (YYYY-MM)} & '') >= 0)"),
         "fields": ["Task Name", "Status", "Completion Date", "Completed Month (YYYY-MM)"],
     },
+    {
+        # A KPI marked automated carries a green "Auto" badge on the dashboard,
+        # which reads as "this number maintains itself". When the compute code
+        # cannot run, the badge stays and the value stays blank — the one state
+        # that looks like "no data yet" rather than "broken".
+        #
+        # That is exactly what happened: the 6 May 2026 hardening banned the
+        # backtick character outright, silently blocking five compute scripts,
+        # one of them on a backtick inside a COMMENT. Two live KPIs never
+        # produced a number between 6 May and 9 Aug and nothing said so.
+        #
+        # If a KPI claims to be automated and carries code, it must have run.
+        "name": "automated-kpis-have-actually-run",
+        "table": PROJECTS,
+        "incident": "Aug 2026 — the compute denylist blocked 5 KPI scripts on a backtick; 2 live KPIs sat blank behind an 'Auto' badge for 3 months",
+        # "Never ran" is not enough on its own. Written that way, this check
+        # would NOT have caught the incident it was written for: had those two
+        # KPIs computed even once before 6 May, the stamp would have sat there
+        # for ever and the check would have been green through the entire
+        # three-month outage. It has to catch "stopped running" too, so a KPI
+        # whose stamp has not moved in 14 days counts as broken.
+        #
+        # The compute runs in the browser, so a fortnight of nobody opening the
+        # dashboard also trips it. That is the correct answer, not noise: the
+        # numbers really are that old.
+        "asserts": "automated AND has compute code AND project open => KPI Last Updated is set AND fresher than 14 days",
+        "violation": (
+            "AND({KPI Automated} = 1, "
+            "LEN({KPI Compute Code} & '') > 0, "
+            "LEN({Closed On} & '') = 0, "
+            "OR(LEN({KPI Last Updated} & '') = 0, "
+            "IS_BEFORE({KPI Last Updated}, DATEADD(TODAY(), -14, 'days'))))"
+        ),
+        "control": ("AND({KPI Automated} = 1, LEN({KPI Compute Code} & '') > 0, "
+                    "LEN({Closed On} & '') = 0)"),
+        "control_means": "open projects with automated KPI compute code (the only population this can silently kill)",
+        "field_probe": ("OR({KPI Automated} >= 0, LEN({KPI Compute Code} & '') >= 0, "
+                        "LEN({KPI Last Updated} & '') >= 0)"),
+        "fields": ["Project Name", "KPI Name", "KPI Automated", "KPI Last Updated"],
+    },
 ]
 
 

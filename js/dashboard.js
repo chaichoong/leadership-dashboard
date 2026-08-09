@@ -371,13 +371,53 @@
         };
     }
 
-    // Denylist: network/DOM/storage escape hatches, `constructor` (prototype-walk
-    // escapes), backticks (template-literal string building), and a string literal
-    // immediately followed by `[` (bracket-access evasion like ""["constructor"]).
-    const _KPI_BLOCKED = /\b(fetch|XMLHttpRequest|WebSocket|EventSource|importScripts|import|require|eval|Function|constructor|document|window|self|globalThis|top|parent|frames|opener|localStorage|sessionStorage|navigator|location|cookie|postMessage|Worker|ServiceWorker)\b|`|["']\s*\[/;
+    // Compute-code denylist. Defence in depth — the real containment is that
+    // every dangerous global is shadowed as an undefined parameter below.
+    //
+    // A bare backtick used to be banned outright. That silently killed every
+    // KPI whose code used an ordinary template literal, including one whose
+    // only backtick was inside a COMMENT ("`total` is returned so..."). Five
+    // compute scripts were blocked this way from 6 May to 9 Aug 2026 and
+    // nobody saw it, because a blocked script failed without saying so.
+    //
+    // Banning backticks never closed the hole it looked aimed at either:
+    // identifiers assembled from ordinary quotes — obj["cons"+"tructor"] —
+    // sailed straight through. So the backtick rule is replaced by one that
+    // targets the actual escape: a computed member access whose key is BUILT
+    // rather than written literally. tx["date"] and arr[i+1] still pass;
+    // obj["cons"+"tructor"] and obj[`${x}`] do not.
+    //
+    // The runs are BOUNDED ({0,120}, no newlines) for two reasons. Unbounded
+    // [^\]]* nests into roughly O(n^3): 5,000 brackets against 5,000 quotes
+    // measured at 90 SECONDS on the main thread, which hangs the tab rather
+    // than just the KPI. And [^\]] matches newlines, so a stray "[" in a
+    // comment poisoned every line after it — the same shape as the backtick-in-
+    // a-comment fault this replaces.
+    //
+    // KNOWN FALSE POSITIVE: a key concatenated inline — m[y+'-'+mm] — is
+    // blocked, and month bucketing is common here. Build the key on its own
+    // line (const k = y+'-'+mm; m[k]) and it passes. It now fails LOUDLY with
+    // a "Compute failed" badge, which is the difference that matters.
+    //
+    // Honest limit: this is a speed bump, not a wall. An identifier assembled
+    // from ordinary quotes on a preceding line defeats it, and always did —
+    // Function, eval and constructor are not among the shadowed parameters.
+    // The SECURITY note below still stands: server-side execution is required
+    // before any multi-tenant rollout.
+    const _KPI_BLOCKED = /\b(fetch|XMLHttpRequest|WebSocket|EventSource|importScripts|import|require|eval|Function|constructor|document|window|self|globalThis|top|parent|frames|opener|localStorage|sessionStorage|navigator|location|cookie|postMessage|Worker|ServiceWorker)\b|["'`]\s*\[|\[[^\]\n]{0,120}["'`][^\]\n]{0,120}(?:\+|\$\{)/;
+    // Records WHY a compute failed on the ctx, so the caller can show it.
+    // Returning a bare null told nobody anything: a blocked or broken KPI was
+    // indistinguishable from one that had simply never run, and stayed blank
+    // on the dashboard for three months.
     function runKpiComputeCode(code, ctx){
+        if(ctx)ctx._kpiError=null;
         if(!code||!String(code).trim())return null;
-        if(_KPI_BLOCKED.test(code)){console.warn('[runKpiComputeCode] blocked unsafe token in code');return null}
+        if(_KPI_BLOCKED.test(code)){
+            const msg='Compute code rejected by the safety check — it contains a blocked pattern.';
+            console.error('[runKpiComputeCode] '+msg);
+            if(ctx)ctx._kpiError=msg;
+            return null;
+        }
         try{
             // SECURITY: this executes founder-authored compute code from the
             // Projects table (ctx-only maths over the loaded finance data).
@@ -398,8 +438,16 @@
                 const primary=v.value??v.primary??v.rolling??v.current??null;
                 if(typeof primary==='number'&&isFinite(primary))return primary;
             }
+            const msg='Compute code ran but did not return a number.';
+            console.error('[runKpiComputeCode] '+msg);
+            if(ctx)ctx._kpiError=msg;
             return null;
-        }catch(e){console.warn('[runKpiComputeCode] error',e);return null}
+        }catch(e){
+            const msg='Compute code failed: '+(e&&e.message?e.message:String(e));
+            console.error('[runKpiComputeCode] '+msg,e);
+            if(ctx)ctx._kpiError=msg;
+            return null;
+        }
     }
 
     // Fetch a slim view of every task — just the fields we need for
@@ -502,7 +550,15 @@
                 ctx.tasks=tasksForKpi;
                 ctx.prospects=prospectsForKpi;
                 let value=runKpiComputeCode(code,ctx);
-                if(value==null)continue;
+                if(value==null){
+                    // Carry the reason onto the project so the row can show a
+                    // fault instead of an empty cell that looks like "no data
+                    // yet". A KPI that cannot compute is a broken KPI, and the
+                    // founder is acting on these numbers.
+                    local.kpiComputeError=ctx._kpiError||'Compute code produced no value.';
+                    continue;
+                }
+                local.kpiComputeError=null;
                 // The compute code already handles DD reversals correctly
                 // in its totals (costs += -amt). No recalculation needed.
                 const rounded=Math.round(value*100)/100;
@@ -645,7 +701,13 @@
                 : `<span style="display:inline-block;font-size:var(--fs-xs);color:var(--text-muted);font-style:italic">No business</span>`;
             // Staleness / auto indicator — now uses success/danger/text tokens.
             let stamp='';
-            if(p.kpiAutomated){
+            if(p.kpiComputeError){
+                // A green "Auto" badge on a KPI whose compute is dead is worse
+                // than no badge — it says the number is maintaining itself when
+                // it is not. Two of these sat blank behind an "Auto" badge for
+                // three months.
+                stamp=`<span title="${escHtml(p.kpiComputeError)}" style="font-size:10px;font-weight:var(--fw-semibold);color:var(--danger);background:var(--danger-bg);padding:2px 6px;border-radius:var(--radius-sm)">Compute failed</span>`;
+            }else if(p.kpiAutomated){
                 stamp=`<span style="font-size:10px;font-weight:var(--fw-semibold);color:var(--accent);background:var(--accent-soft);padding:2px 6px;border-radius:var(--radius-sm)">Auto</span>`;
             }else{
                 const days=_stratDaysAgo(p.kpiLastUpdated);
