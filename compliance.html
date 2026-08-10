@@ -373,22 +373,22 @@ function daysUntil(d) {
     return Math.ceil((dt - n) / 86400000);
 }
 
+// One place decides what a certificate's status is, so the cell, the KPI tiles and the
+// block-insurance cell can never disagree about the same certificate.
+function certStatus(cert) {
+    const days = daysUntil(cert.d);
+    if (cert.s === 'Expired' || (days !== null && days < 0)) return { tag: 'tag-expired', cls: 'bad', label: 'Expired' };
+    if (days === null) return { tag: 'tag-none', cls: '', label: 'No date' };
+    if (days <= 30) return { tag: 'tag-expiring', cls: 'warn', label: 'Expiring' };
+    return { tag: 'tag-active', cls: '', label: 'Active' };
+}
+
 function cell(cert, na) {
     if (na) return '<td class="cert-cell"><span class="tag tag-na">N/A</span></td>';
     if (!cert) return '<td class="cert-cell"><span class="tag tag-none">&mdash;</span></td>';
 
     const days = daysUntil(cert.d);
-    let tag, cls = '', label;
-
-    if (cert.s === 'Expired' || (days !== null && days < 0)) {
-        tag = 'tag-expired'; cls = 'bad'; label = 'Expired';
-    } else if (days !== null && days <= 30) {
-        tag = 'tag-expiring'; cls = 'warn'; label = 'Expiring';
-    } else if (days !== null) {
-        tag = 'tag-active'; label = 'Active';
-    } else {
-        tag = 'tag-none'; label = 'No date';
-    }
+    const { tag, cls, label } = certStatus(cert);
 
     const dateStr = fmtDate(cert.d);
     let extra = '';
@@ -400,6 +400,20 @@ function cell(cert, na) {
     const close = url ? '</a>' : '';
 
     return `<td class="cert-cell">${open}<span class="tag ${tag}">${label}</span><span class="cert-date ${cls}">${dateStr}</span>${extra}${close}</td>`;
+}
+
+// Apartment rows in a block carry the BUILDING insurance certificate, and that
+// certificate is part of the row's colour. The cell used to say only "See building",
+// so an expired building policy turned the row red with nothing on screen explaining
+// why. Show the status here, and the colour always has a visible cause.
+function buildingInsCell(ins) {
+    if (!ins) return '<td class="cert-cell"><span class="tag tag-na">See building</span></td>';
+    const { tag, cls, label } = certStatus(ins);
+    const url = ins.recId ? `https://airtable.com/${BASE_ID}/${T.certs}/${ins.recId}` : '';
+    const open = url ? `<a href="${url}" target="_blank" title="View in Airtable">` : '';
+    const close = url ? '</a>' : '';
+    const dateStr = fmtDate(ins.d);
+    return `<td class="cert-cell">${open}<span class="tag ${tag}">See building &middot; ${label}</span><span class="cert-date ${cls}">${dateStr}</span>${close}</td>`;
 }
 
 function rowClass(gsc, eicr, ins) {
@@ -528,12 +542,19 @@ async function loadData() {
         }
 
         // Stats — self-managed only
-        let expired = 0, expiring = 0, active = 0, missing = 0;
+        let expired = 0, expiring = 0, active = 0, missing = 0, noDate = 0;
+        // A certificate with no Renewal Date used to fall through to active++, so the
+        // green KPI counted certificates the grid itself labels grey "No date". Unknown
+        // is not the same as in date, and a KPI that disagrees with the cell beside it
+        // cannot be acted on. Counted separately, and shown as its own tile.
+        // Routed through certStatus so the tile and the cell can never disagree
+        // about the same certificate. One function decides, everything else counts.
         const countCert = (c) => {
             if (!c) { missing++; return; }
-            const days = daysUntil(c.d);
-            if (c.s === 'Expired' || (days !== null && days < 0)) expired++;
-            else if (days !== null && days <= 30) expiring++;
+            const label = certStatus(c).label;
+            if (label === 'Expired') expired++;
+            else if (label === 'No date') noDate++;
+            else if (label === 'Expiring') expiring++;
             else active++;
         };
         for (const row of selfStd) { countCert(row.gsc); countCert(row.eicr); countCert(row.ins); }
@@ -545,6 +566,7 @@ async function loadData() {
             <div class="summary-item si-red"><div class="num">${expired}</div><div class="label">Expired</div></div>
             <div class="summary-item si-amber"><div class="num">${expiring}</div><div class="label">Expiring (30d)</div></div>
             <div class="summary-item si-green"><div class="num">${active}</div><div class="label">Active</div></div>
+            <div class="summary-item si-grey"><div class="num">${noDate}</div><div class="label">No Date</div></div>
             <div class="summary-item si-grey"><div class="num">${missing}</div><div class="label">No Cert</div></div>
         `;
 
@@ -567,7 +589,7 @@ async function loadData() {
                         <td class="prop-name">${escHtml(row.unitName)}<span class="unit-label">${escHtml(pName)}</span></td>
                         <td class="cert-cell"><span class="tag tag-na">N/A</span></td>
                         ${cell(row.eicr)}
-                        <td class="cert-cell"><span class="tag tag-na">See building</span></td>
+                        ${buildingInsCell(row.ins)}
                     </tr>`;
                 }
             }

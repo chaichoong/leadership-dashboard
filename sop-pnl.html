@@ -134,7 +134,7 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
     </div>
     <div class="qr-item">
       <div class="qr-label">Business Options</div>
-      <div class="qr-value">Real Estate &middot; Operations Director</div>
+      <div class="qr-value">Every business ticked <strong>Active</strong> in Airtable</div>
     </div>
     <div class="qr-item">
       <div class="qr-label">Period Options</div>
@@ -180,7 +180,11 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
 <div class="section" id="overview">
   <h2 class="section-title"><span class="icon">&#x1F3AF;</span> 1. Overview &amp; Purpose</h2>
   <div class="card">
-    <p>The Profit &amp; Loss page provides a real-time financial performance view for the business, built directly from reconciled transactions stored in Airtable. It renders a multi-section P&amp;L grid, nine KPI cards, four interactive charts, and an AI-powered analysis panel — all from the same underlying dataset.</p>
+    <p>The Profit &amp; Loss page provides a real-time financial performance view for the business, built from <strong>every categorised transaction</strong> stored in Airtable, whether or not it has been reconciled. A transaction is included when it has a business, a date inside the reporting window, and a sub-category on the P&amp;L allow-list. Reconciliation status is not part of that test. The page renders a multi-section P&amp;L grid, nine KPI cards, four interactive charts, and an AI-powered analysis panel, all from the same underlying dataset.</p>
+    <div class="info-box info">
+      <span class="ib-icon">&#x2139;&#xFE0F;</span>
+      <div><strong>How much of it is reconciled:</strong> the sync bar at the top of the page reports the percentage of loaded transactions that are reconciled, next to the total count. That figure is context only. Reducing it does not remove anything from the P&amp;L, and an unreconciled transaction still counts in full.</div>
+    </div>
     <div class="info-box info">
       <span class="ib-icon">&#x2139;&#xFE0F;</span>
       <div><strong>Scope:</strong> Covers Revenue, Cost of Goods Sold (COGS), and Operating Expenses (OpEx) for the <strong>Real Estate</strong> and <strong>Operations Director</strong> businesses. Capital expenditure, loans, transfers, balance-sheet items, and personal transactions are explicitly excluded — they carry sub-categories not in the allow-list and are silently skipped.</div>
@@ -702,7 +706,7 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
         <tr>
           <td><strong>Business</strong></td>
           <td><code>pnlBizSelect</code></td>
-          <td>Real Estate &middot; Operations Director</td>
+          <td>Every business with <strong>Active</strong> ticked on the Businesses table</td>
           <td>Real Estate</td>
           <td><code>pnlBusinessName</code></td>
         </tr>
@@ -721,7 +725,11 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
     </div>
     <div class="info-box info">
       <span class="ib-icon">&#x2139;&#xFE0F;</span>
-      <div><strong>Business filtering:</strong> The <code>buildPnL()</code> function resolves each transaction's <code>Business (For Reports)</code> linked field and includes only transactions where the resolved name matches the selected business exactly. The available businesses are hard-coded to <code>['Real Estate', 'Operations Director']</code> in the constant <code>PNL_TOP_BUSINESSES</code>.</div>
+      <div><strong>Business filtering:</strong> The <code>buildPnL()</code> function resolves each transaction's <code>Business (For Reports)</code> linked field and includes only transactions where the resolved name matches the selected business exactly. The dropdown is <strong>not</strong> a fixed list. It is built at render time from every business with the <strong>Active</strong> checkbox ticked on the Businesses table, so ticking or unticking Active adds or removes an option. The old hard-coded pair in <code>PNL_TOP_BUSINESSES</code> is now only a fallback, used if the Active flag has not been set on any business.</div>
+    </div>
+    <div class="info-box warn">
+      <span class="ib-icon">&#x26A0;&#xFE0F;</span>
+      <div><strong>If the business you are looking at is deactivated:</strong> the page keeps showing that company's figures and puts an amber notice under the page heading saying it is no longer Active. Its name stays in the dropdown, marked <code>(not active)</code>. The page never quietly swaps you onto a different company's books, which is what it used to do.</div>
     </div>
   </div>
 </div>

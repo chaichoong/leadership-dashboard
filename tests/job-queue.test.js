@@ -818,6 +818,66 @@ describe('a sleeping job cannot hold the lock', () => {
     run(['run', 'quick', '--no-stale-check', '--', 'python3', '-c', 'pass']);
     expect(run(['status']).stdout).toMatch(/FREE/);
   });
+
+  // -------------------------------------------------------------------------
+  // Losing the lease was ADVISORY, which is the same as not having one.
+  //
+  // Finding 20260809-drift-028: the heartbeat thread noticed the lock was gone
+  // and simply returned. The job carried on to completion, writing alongside
+  // whoever now held the queue, and `heartbeat` reported the loss as exit 64 —
+  // a usage error, indistinguishable from a typo in the arguments. Nothing
+  // failed, nothing alarmed, and two writers is precisely what the queue exists
+  // to prevent.
+  // -------------------------------------------------------------------------
+
+  it('kills a wrapped job whose lock was broken mid-run', async () => {
+    const marker = join(stateDir, 'completed.txt');
+    const body = `import time; time.sleep(8); open(${JSON.stringify(marker)}, 'w').write('done')`;
+    const job = runAsync(['run', 'evicted', '--no-stale-check', '--lease', '5',
+      '--', 'python3', '-c', body], { env: { JOB_QUEUE_HEARTBEAT: '0.3' } });
+
+    // Somebody else takes the lock out from under it. Writing the holder file
+    // directly is what a broken lock looks like from this process's side.
+    await new Promise((r) => setTimeout(r, 1200));
+    writeFileSync(join(stateDir, 'lock', 'holder.json'), JSON.stringify({
+      job: 'thief', mode: 'wrapped', acquired_at: Date.now() / 1000,
+      lease_until: Date.now() / 1000 + 3600,
+    }));
+
+    const r = await job;
+    expect(r.code, 'a job that lost its lock still reported success').toBe(70);
+    expect(existsSync(marker), 'the evicted job ran to completion anyway').toBe(false);
+    expect(events().some((e) => e.state === 'lease-lost' && e.job === 'evicted'),
+      'losing the lock was never recorded').toBe(true);
+  });
+
+  it('heartbeat reports a lost lock with its own exit code, not a usage error', () => {
+    run(['acquire', 'holder-a', '--no-stale-check', '--lease', '30']);
+    // 70, never 64: a caller that reads 64 as "I passed bad arguments" carries on.
+    expect(run(['heartbeat', 'holder-b']).code).toBe(70);
+    expect(run(['release', 'holder-a']).code).toBe(0);
+  });
+
+  it('assert-held passes while held and fails once the lock has gone', () => {
+    run(['acquire', 'phased', '--no-stale-check', '--lease', '30']);
+    expect(run(['assert-held', 'phased']).code).toBe(0);
+    run(['release', 'phased']);
+    const r = run(['assert-held', 'phased']);
+    expect(r.code).toBe(70);
+    expect(r.stdout).toMatch(/LOST LOCK/);
+  });
+
+  it('assert-held fails on an expired lease even while the lock still sits there', () => {
+    // The lease is the promise. A holder that outlived it must not be told it is
+    // fine merely because nothing has come along to reclaim the lock yet.
+    run(['acquire', 'overrun', '--no-stale-check', '--lease', '30']);
+    const holderFile = join(stateDir, 'lock', 'holder.json');
+    const h = JSON.parse(readFileSync(holderFile, 'utf8'));
+    h.lease_until = Date.now() / 1000 - 60;
+    writeFileSync(holderFile, JSON.stringify(h));
+    expect(run(['assert-held', 'overrun']).code).toBe(70);
+    run(['release', 'overrun']);
+  });
 });
 
 // ---------------------------------------------------------------------------

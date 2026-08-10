@@ -293,6 +293,13 @@
         const catList = pnlNameList(allCategories, PNL_NAME_FIELDS.category);
         const subList = pnlNameList(allSubCategories, PNL_NAME_FIELDS.subCategory);
         const bizList = pnlNameList(getActiveBusinesses(), PNL_NAME_FIELDS.business);
+        // The picker only offers ACTIVE businesses, but a transaction may already be
+        // linked to one that has since been deactivated. Resolving the displayed value
+        // against the active-only list returned '', so a set link read as unset and
+        // looked like missing data. Display resolves against every business; the
+        // datalist still offers only active ones.
+        const bizAllList = pnlNameList(typeof allBusinesses !== 'undefined' ? allBusinesses : [],
+            PNL_NAME_FIELDS.business);
         const datalistHtml = `
             <datalist id="pnl-dl-category">${pnlDatalistOptions(catList)}</datalist>
             <datalist id="pnl-dl-subCategory">${pnlDatalistOptions(subList)}</datalist>
@@ -315,7 +322,7 @@
                 <td style="padding:8px 10px;text-align:right;font-variant-numeric:tabular-nums;${amtCls};font-weight:600;vertical-align:top">${amt < 0 ? '-' : ''}£${Math.abs(amt).toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
                 <td style="padding:6px 8px;vertical-align:top">${editInput(tx.id, 'category', nameById(catList, catId), 'pnl-dl-category')}</td>
                 <td style="padding:6px 8px;vertical-align:top">${editInput(tx.id, 'subCategory', nameById(subList, subCatId), 'pnl-dl-subCategory')}</td>
-                <td style="padding:6px 8px;vertical-align:top">${editInput(tx.id, 'business', nameById(bizList, bizId), 'pnl-dl-business')}</td>
+                <td style="padding:6px 8px;vertical-align:top">${editInput(tx.id, 'business', nameById(bizAllList, bizId), 'pnl-dl-business')}</td>
             </tr>`;
         }).join('');
 
@@ -649,7 +656,24 @@ RULES:
             .filter(Boolean)
             .sort((a, b) => a.localeCompare(b));
         const businessNames = activeNames.length ? activeNames : PNL_TOP_BUSINESSES.slice();
-        if (!businessNames.includes(pnlBusinessName)) pnlBusinessName = businessNames[0];
+        // Deactivating a business used to repoint this page SILENTLY at whichever company
+        // sorted first, so the same screen showed a different set of books with no notice.
+        // Keep the selection, keep it in the picker, and say plainly that it is no longer
+        // Active. Only fall back to the first name when the selection is not a business we
+        // know about at all (first load, or a renamed record).
+        let pnlInactiveSelection = '';
+        if (!businessNames.includes(pnlBusinessName)) {
+            const knownNames = (typeof allBusinesses !== 'undefined' ? allBusinesses : [])
+                .map(b => String(getField(b, BIZ_NAME_FIELD) || ''))
+                .filter(Boolean);
+            if (pnlBusinessName && knownNames.includes(pnlBusinessName)) {
+                pnlInactiveSelection = pnlBusinessName;
+                businessNames.push(pnlBusinessName);
+                businessNames.sort((a, b) => a.localeCompare(b));
+            } else {
+                pnlBusinessName = businessNames[0];
+            }
+        }
 
         const keys = pnlMonthKeys(pnlMonths);
         const pnl = buildPnL(allTransactions, pnlBusinessName, keys);
@@ -699,7 +723,12 @@ RULES:
             return `<tr style="color:#fff"><td class="pnl-first" style="padding:8px 10px;font-weight:700;text-transform:uppercase;font-size:11px;letter-spacing:1px;background:var(--bg-sidebar)">${escHtml(name)}</td><td colspan="${keys.length + 1}" style="background:var(--bg-sidebar)"></td></tr>`;
         }
 
-        const bizOptions = businessNames.map(n => `<option value="${escHtml(n)}" ${n === pnlBusinessName ? 'selected' : ''}>${escHtml(n)}</option>`).join('');
+        const bizOptions = businessNames.map(n => `<option value="${escHtml(n)}" ${n === pnlBusinessName ? 'selected' : ''}>${escHtml(n)}${n === pnlInactiveSelection ? ' (not active)' : ''}</option>`).join('');
+        const inactiveNotice = pnlInactiveSelection ? `
+            <div id="pnlInactiveBizNotice" style="margin-bottom:12px;padding:10px 14px;border:1px solid var(--warning);background:var(--warning-bg);color:var(--text-primary);border-radius:8px;font-size:12px">
+                <strong>${escHtml(pnlInactiveSelection)} is no longer marked Active in Airtable.</strong>
+                These figures are still that company's. Pick another business above to move off it.
+            </div>` : '';
         const monthOptions = [1, 3, 6, 12].map(m => `<option value="${m}" ${m === pnlMonths ? 'selected' : ''}>${m} month${m === 1 ? '' : 's'}</option>`).join('');
 
         host.innerHTML = `
@@ -719,6 +748,7 @@ RULES:
                         </label>
                     </div>
                 </div>
+                ${inactiveNotice}
 
                 <!-- AI Analysis -->
                 <div style="background:linear-gradient(135deg,var(--bg-surface) 0%,var(--accent-soft) 100%);border:1px solid var(--border-default);border-radius:10px;padding:16px 20px;margin-bottom:16px">

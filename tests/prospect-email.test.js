@@ -100,7 +100,9 @@ describe('buildProspectEmail — the preview IS the sent email', () => {
 describe('prosStripSignOff — no double sign-off', () => {
   it('drops a trailing bare Kevin so the sign-off appears once', () => {
     const e = buildProspectEmail(rec({ ...ltd.fields, 'Draft Message': 'Worth a quick call?\n\nKevin' }));
-    expect(e.text).toBe(`Worth a quick call?\n\nKevin\n\n${OD_SENDER.name}\nFounder, Operations Director\noperationsdirector.co.uk\nkevin@operationsdirector.co.uk`);
+    expect(e.text).toBe(`Worth a quick call?\n\nKevin\n\n${OD_SENDER.name}\nFounder, Operations Director\noperationsdirector.co.uk\nkevin@operationsdirector.co.uk`
+      + `\n\n${OD_SENDER.postal}`
+      + `\nPrefer not to hear from me? Reply "unsubscribe" or email ${OD_SENDER.email} with Unsubscribe in the subject.`);
     expect(e.text.match(/^Kevin$/gm)).toHaveLength(1);
   });
 
@@ -202,7 +204,39 @@ describe('sender identity is defined once', () => {
       email: 'kevin@operationsdirector.co.uk',
       title: 'Founder, Operations Director',
       website: 'operationsdirector.co.uk',
+      postal: 'Operations Director, 61 Bridge Street, Kington, HR5 3DJ',
+      unsubscribeMailto: 'mailto:kevin@operationsdirector.co.uk?subject=Unsubscribe',
     });
+  });
+
+  // ---------------------------------------------------------------------
+  // Finding 20260808-agent-dispatch-019: the three cold touches went out with
+  // no postal address and no way to opt out. UK PECR requires both in every
+  // marketing email, and this is unsolicited mail to people who have never
+  // heard of Kevin. Every touch is built by buildProspectEmail, so the footer
+  // belongs in the shared signature and cannot be omitted from one of them.
+  // ---------------------------------------------------------------------
+
+  it('every cold email carries a postal address, in both plain text and HTML', () => {
+    const e = buildProspectEmail(ltd);
+    expect(e.text).toContain(OD_SENDER.postal);
+    expect(e.html).toContain('61 Bridge Street');
+  });
+
+  it('every cold email offers a working way to opt out', () => {
+    const e = buildProspectEmail(ltd);
+    expect(e.text.toLowerCase()).toContain('unsubscribe');
+    expect(e.html).toContain(`href="${OD_SENDER.unsubscribeMailto}"`);
+  });
+
+  it('the opt-out is a real link, never an unrendered merge tag', () => {
+    // These sends go through the GHL conversations endpoint, not a GHL workflow.
+    // A {{unsubscribe_link}} tag that nothing expands would ship literal braces
+    // to a stranger and leave them with no way out at all.
+    const e = buildProspectEmail(ltd);
+    expect(e.html).not.toMatch(/\{\{\s*unsubscribe/i);
+    expect(e.text).not.toMatch(/\{\{\s*unsubscribe/i);
+    expect(e.html).toMatch(/href="mailto:[^"]+"/);
   });
 
   // The send path must read the address from OD_SENDER, not repeat it inline.

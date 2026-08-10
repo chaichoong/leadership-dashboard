@@ -165,12 +165,37 @@ TIER1_PATTERNS = [
         r"solicitor", r"litigation",
     )
 ]
-# Tier 2: creditor correspondence is Mica's lane, never an agent's. Kept
+# Tier 2: creditor CORRESPONDENCE is Mica's lane, never an agent's. Kept
 # NARROW on purpose — a broad keyword list (e.g. "Companies House") would
 # false-positive on legitimate agent research. Parked, not worked.
+#
+# The subject alone is not enough. Matching on subject only, an Urgent
+# READ-ONLY task ("verify the current position on the statutory demand") was
+# parked for ever: nothing works a parked task, and skippedTier2 raised no
+# alarm, so it sat in the report silently. The lane is defined by the ACTION,
+# not the topic — writing to a creditor is Mica's, reading the file is not.
+#
+# So a task is parked only when BOTH hold: a tier-2 subject AND an outbound
+# intent. Miss the intent and the task flows on to be worked normally, still
+# carrying its tier-1 banner if the subject earned one.
 TIER2_PATTERNS = [
     re.compile(p, re.I) for p in (
         r"letter of claim", r"statutory demand", r"bounce ?back loan",
+    )
+]
+
+# Outbound intent: the task asks somebody to be contacted, answered or dealt
+# with. Deliberately about the verb, so "reply to the statutory demand" parks
+# and "read the statutory demand and tell me where we stand" does not.
+TIER2_OUTBOUND_PATTERNS = [
+    re.compile(p, re.I) for p in (
+        r"\brepl(y|ies|ying)\b", r"\brespond(ing)?\b", r"\bresponse\b",
+        r"\bwrite (to|back)\b", r"\bdraft (a |an |the )?(letter|email|reply|response)",
+        r"\bsend\b", r"\bcall\b", r"\bphone\b", r"\bring\b",
+        r"\bcontact\b", r"\bchase\b", r"\bnegotiat", r"\bsettl(e|es|ing)\b",
+        r"\bagree (a |an |the )?(payment|plan|terms|settlement)",
+        r"\backnowledge\b", r"\bdispute\b", r"\bfile (a |an |the )",
+        r"\bsubmit\b",
     )
 ]
 
@@ -393,8 +418,11 @@ def cmd_queue(args):
         if hit1:
             tier1.append(t)
         hit2 = tier_match(TIER2_PATTERNS, t["name"], t["description"], t["notes"])
-        if hit2:
-            skipped_tier2.append({**t, "matchedPattern": hit2})
+        out2 = tier_match(TIER2_OUTBOUND_PATTERNS, t["name"], t["description"],
+                          t["notes"]) if hit2 else ""
+        if hit2 and out2:
+            skipped_tier2.append({**t, "matchedPattern": hit2,
+                                  "outboundPattern": out2})
             continue
         if not t["localAgent"]:
             unmapped.append(t)
@@ -615,6 +643,12 @@ def cmd_verify(args):
         alerted = set()
     flags = [("approved task PARKED — its carry-out needs a never-automated "
               "action", t) for t in report.get("parkedFlags", [])]
+    # A tier-2 park means NOBODY works the task: the agent skips it and no
+    # human is told. It sat in the report and nothing read the report. Alarm
+    # once per task, the same way parkedFlags does, so a task parked by mistake
+    # surfaces on the first run instead of never.
+    flags += [("task PARKED as creditor correspondence — Mica's lane, no agent "
+               "will work it", t) for t in report.get("skippedTier2", [])]
     for label, t in flags:
         if t.get("id") not in alerted:
             problems.append(f"{label}: {t.get('id')} "

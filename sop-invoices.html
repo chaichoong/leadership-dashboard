@@ -91,6 +91,8 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
   .toc-grid { grid-template-columns:1fr; } .grid-2 { grid-template-columns:1fr; }
   .flow { flex-direction:column; } .flow-arrow { transform:rotate(90deg); }
   .container { padding:0 1rem 3rem; }
+  /* Wide reference tables scroll inside their own card rather than pushing the page sideways */
+  .label-table { display:block; overflow-x:auto; -webkit-overflow-scrolling:touch; }
 }
 </style>
 </head>
@@ -102,7 +104,7 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
     <a href="index.html#sitemap" class="header-back">&#x2190; Back to Site Map</a>
     <h1>&#x1F9FE; Accounts Payable Variable</h1>
     <div class="subtitle">Standard Operating Procedure &mdash; Invoice ingestion, AI matching, approval workflow, and payment tracking</div>
-    <div class="version">Version 2.2 &bull; 30 Apr 2026 &bull; Owner: Kevin Brittain</div>
+    <div class="version">Version 2.18 &bull; 10 Aug 2026 &bull; Owner: Kevin Brittain</div>
   </div>
 </div>
 
@@ -123,7 +125,7 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
       </div>
       <div class="qr-item">
         <div class="qr-label">Gmail Label (Unpaid)</div>
-        <div class="qr-value"><strong>3. to pay</strong> &mdash; synced every 15 min via Apps Script</div>
+        <div class="qr-value"><strong>3: to pay</strong> &mdash; synced every 15 min via Apps Script. The script finds it by its leading "3", so "3. to pay" and "3: to pay" both work.</div>
       </div>
       <div class="qr-item">
         <div class="qr-label">Gmail Label (Paid)</div>
@@ -158,11 +160,13 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
         <a href="#listing"><span class="toc-num">3</span> Invoice List &amp; Filtering</a>
         <a href="#lifecycle"><span class="toc-num">4</span> Invoice Status Lifecycle</a>
         <a href="#buttons"><span class="toc-num">5</span> Action Buttons Reference</a>
-        <a href="#matching"><span class="toc-num">6</span> Matching &amp; Approval Workflow</a>
-        <a href="#payment"><span class="toc-num">7</span> Payment Processing</a>
-        <a href="#fields"><span class="toc-num">8</span> Airtable Fields Reference</a>
-        <a href="#troubleshooting"><span class="toc-num">9</span> Troubleshooting</a>
-        <a href="#changelog"><span class="toc-num">10</span> Changelog</a>
+        <a href="#reconcile"><span class="toc-num">6</span> Reconcile with Gmail</a>
+        <a href="#bulk"><span class="toc-num">7</span> Bulk Actions (tick boxes)</a>
+        <a href="#matching"><span class="toc-num">8</span> Matching &amp; Approval Workflow</a>
+        <a href="#payment"><span class="toc-num">9</span> Payment Processing</a>
+        <a href="#fields"><span class="toc-num">10</span> Airtable Fields Reference</a>
+        <a href="#troubleshooting"><span class="toc-num">11</span> Troubleshooting</a>
+        <a href="#changelog"><span class="toc-num">12</span> Changelog</a>
       </div>
     </div>
   </div>
@@ -234,7 +238,7 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
   <div class="section" id="listing">
     <h2 class="section-title"><span class="icon">&#128203;</span> 3. Invoice List &amp; Filtering</h2>
     <div class="card">
-      <p>The Invoices tab shows all records from Airtable's <strong>Dashboard Invoices</strong> table where <code>Status != 'Paid'</code>. The list is fetched with invoices sorted by Email Date ascending. Above the table are four KPI summary cards, then filter/sort controls, and then the invoice rows.</p>
+      <p>The Invoices tab shows the records from Airtable's <strong>Dashboard Invoices</strong> table where <code>{Status}='Unpaid'</code>. The list is fetched with invoices sorted by Email Date ascending. Anything with another status, including <strong>Paid</strong> and <strong>Estimate</strong>, is left out of the fetch and never reaches the table. Above the table are four KPI summary cards, then filter/sort controls, and then the invoice rows.</p>
       <div class="card-header">KPI Summary Cards</div>
       <p>The four cards are always calculated from <em>all</em> unpaid invoices, regardless of any active filter.</p>
       <div class="grid-2">
@@ -292,19 +296,20 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
       <table class="label-table">
         <thead><tr><th>#</th><th>Column header</th><th>Description</th></tr></thead>
         <tbody>
-          <tr><td>1</td><td>#</td><td>Row index (1-based). Grey, small. Click the row to open the email in Gmail.</td></tr>
-          <tr><td>2</td><td>Due / Date</td><td>Effective date in bold (DD Mon YYYY format). Status badge beneath it (see badge table below).</td></tr>
-          <tr><td>3</td><td>Payee</td><td>Supplier name. Blank cells show "Enter payee ✏️" as a clickable prompt to edit inline.</td></tr>
-          <tr><td>4</td><td>Description</td><td>Invoice description/subject. Blank cells show "Enter description ✏️".</td></tr>
-          <tr><td>5</td><td>Ref</td><td>Payment reference in monospace font. Blank cells show "Add ref ✏️".</td></tr>
-          <tr><td>6</td><td>Amount</td><td>Invoice amount formatted as £X,XXX.XX. Blank cells show "Enter £ ✏️" as a clickable prompt. Click any populated value to correct it.</td></tr>
-          <tr><td>7</td><td>Business</td><td>Which business the invoice relates to. Click to open a dropdown listing all businesses and assign one. Stored as a linked record on the Dashboard Invoices Airtable table.</td></tr>
-          <tr><td>8</td><td>(Actions)</td><td>Contains the "Mark Paid" button. Clicking this column does not open Gmail.</td></tr>
+          <tr><td>1</td><td>(tick box)</td><td>Selects the row for a bulk action. The tick box in the header row selects or clears every row currently visible. See section 7.</td></tr>
+          <tr><td>2</td><td>#</td><td>Row index (1-based). Grey, small.</td></tr>
+          <tr><td>3</td><td>Due / Date</td><td>Effective date in bold (DD Mon YYYY format), a &#128231; link that opens the original email in Gmail in a new tab, and the status badge beneath (see badge table below).</td></tr>
+          <tr><td>4</td><td>Payee</td><td>Supplier name in an always-on text box. Empty boxes show the placeholder "Payee&hellip;".</td></tr>
+          <tr><td>5</td><td>Description</td><td>Invoice description or email subject, always-on text box. Placeholder "Description&hellip;".</td></tr>
+          <tr><td>6</td><td>Ref</td><td>Payment reference, always-on text box in monospace. Placeholder "Ref&hellip;".</td></tr>
+          <tr><td>7</td><td>Amount</td><td>Invoice amount, always-on box, right-aligned, shown to two decimal places. Placeholder "0.00".</td></tr>
+          <tr><td>8</td><td>Business</td><td>Which business the invoice relates to. An always-on dropdown listing the ACTIVE businesses only, plus a "None" option. Stored as a linked record on the Dashboard Invoices table. If the invoice already points at a business that has been switched off, that option is still shown so the value is not lost.</td></tr>
+          <tr><td>9</td><td>(Actions)</td><td>Contains the "Mark Paid" button.</td></tr>
         </tbody>
       </table>
       <div class="info-box tip">
         <span class="ib-icon">&#128161;</span>
-        <span>Clicking anywhere on an invoice row (except the Actions column) opens the original email in Gmail in a new tab. This is useful for reviewing the invoice PDF before paying.</span>
+        <span>To read the original email, click the small &#128231; envelope next to the date. It opens the Gmail thread in a new tab, which is useful for checking the invoice PDF before paying. Clicking elsewhere on the row does not open Gmail, because every cell is now an editable box.</span>
       </div>
     </div>
 
@@ -334,8 +339,24 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
     </div>
 
     <div class="card">
-      <div class="card-header">"Refresh from Gmail" Link</div>
-      <p>Appears inline in the "Last refreshed" bar. Clicking it calls <code>triggerGmailInvoiceSync()</code>, which fires a fire-and-forget request to the Apps Script URL with <code>?action=sync</code>. After 3 seconds, <code>fetchInvoicesFromAirtable()</code> is called to pick up any newly created records. The link text changes to "Syncing&hellip;" during the 4-second wait.</p>
+      <div class="card-header">The two links in the "Last refreshed" bar</div>
+      <p>The bar above the table holds two links that do very different jobs. Read this before clicking either.</p>
+      <table class="label-table">
+        <thead><tr><th>Link</th><th>What it does</th><th>Can it change an invoice?</th></tr></thead>
+        <tbody>
+          <tr>
+            <td><strong>Refresh from Gmail</strong></td>
+            <td>Calls <code>triggerGmailInvoiceSync()</code>, which asks the Apps Script to read the "3: to pay" label and create a record for any invoice email it has not seen. After 3 seconds the dashboard re-reads Airtable. The link text shows "Syncing&hellip;" for 4 seconds.</td>
+            <td>It only ADDS new invoices. It never changes the status of an invoice you already have.</td>
+          </tr>
+          <tr>
+            <td><strong>Reconcile with Gmail</strong></td>
+            <td>Calls <code>triggerGmailInvoiceReconcile()</code>, which re-points every invoice status at what the Gmail label says right now.</td>
+            <td><strong>Yes.</strong> It can flip invoices to Paid AND flip Paid invoices back to Unpaid, in the same run. Read section 6 first.</td>
+          </tr>
+        </tbody>
+      </table>
+      <p>Next to the two links is the sync health text described above.</p>
     </div>
   </div>
 
@@ -359,17 +380,22 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
 
     <div class="card">
       <div class="card-header">Status Values</div>
-      <p>The <code>Status</code> field (<code>fldJ5InUPlY4t7MgP</code>) in Airtable uses two values:</p>
+      <p>The <code>Status</code> field (<code>fldJ5InUPlY4t7MgP</code>) in Airtable drives what you see:</p>
       <table class="label-table">
         <thead><tr><th>Status</th><th>Meaning</th><th>Visible on dashboard?</th></tr></thead>
         <tbody>
-          <tr><td><span class="label-badge lb-amber">Unpaid</span></td><td>Default state when created by Apps Script. Invoice needs attention.</td><td>Yes &mdash; appears in the invoice list</td></tr>
-          <tr><td><span class="label-badge lb-green">Paid</span></td><td>Set when "Mark Paid" is actioned. Paid Date field is also set.</td><td>No &mdash; filtered out by <code>NOT({Status}='Paid')</code></td></tr>
+          <tr><td><span class="label-badge lb-amber">Unpaid</span></td><td>Default state when created by Apps Script. Invoice needs attention.</td><td>Yes, this is the only status the table shows</td></tr>
+          <tr><td><span class="label-badge lb-green">Paid</span></td><td>Set when "Mark Paid" is actioned, on its own or in bulk. Paid Date is set at the same time.</td><td>No, the fetch asks for <code>{Status}='Unpaid'</code> only</td></tr>
+          <tr><td><span class="label-badge lb-purple">Estimate</span></td><td>Set by hand in Airtable for a quote you do not want treated as a bill. Reconcile with Gmail ignores these records completely.</td><td>No, same reason as Paid</td></tr>
         </tbody>
       </table>
       <div class="info-box info">
         <span class="ib-icon">&#8505;&#65039;</span>
         <span>Paid invoices remain in Airtable permanently. They are only hidden from the dashboard view by the Airtable filter formula. You can view them directly in Airtable at any time for audit or reporting purposes.</span>
+      </div>
+      <div class="info-box warn">
+        <span class="ib-icon">&#9888;&#65039;</span>
+        <span><strong>Paid is not a one-way door.</strong> "Reconcile with Gmail" can move an invoice from Paid back to Unpaid and clear its Paid Date, if the email is still sitting in the "3: to pay" Gmail label. Section 6 explains exactly when that happens.</span>
       </div>
     </div>
   </div>
@@ -430,25 +456,28 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
     <div class="wf-card">
       <div class="wf-header">
         <div class="wf-num" style="background:var(--accent)">4</div>
-        <h3>Inline Edit (click empty field)</h3>
-        <span class="wf-tag">Amount, Payee, Description, Ref</span>
+        <h3>Inline Edit (type straight into the table)</h3>
+        <span class="wf-tag">Amount, Payee, Description, Ref, Business</span>
       </div>
       <div class="wf-body">
-        <p>Not a button &mdash; clicking on an empty or "Enter&hellip;" placeholder in the Payee, Description, Ref, or Amount columns opens an inline input via <code>editInvField(el, recordId, fieldId, inputType)</code>.</p>
-        <h4>Input widths</h4>
+        <p>Not a button. The table works like a spreadsheet: every Payee, Description, Ref, Amount and Business cell is already an input box, whether it holds a value or not. There is no "click to edit" step. Saving is handled by <code>saveCellInput()</code>, which sends one PATCH per cell to Airtable.</p>
+        <h4>When each cell saves</h4>
         <ul>
-          <li>Amount: 80 px, number input, step 0.01, right-aligned</li>
-          <li>Reference: 90 px, text</li>
-          <li>Payee / Description: 150 px, text</li>
+          <li><strong>Amount and Business</strong> save as soon as the value changes.</li>
+          <li><strong>Payee, Description and Ref</strong> save when you click away, so you can keep typing without a save on every keystroke.</li>
+          <li><strong>Enter</strong> saves the box you are in.</li>
+          <li><strong>Escape</strong> puts the last saved value back and leaves the box.</li>
         </ul>
-        <h4>Keyboard shortcuts in the inline input</h4>
+        <h4>Rules the save applies</h4>
         <ul>
-          <li><strong>Enter</strong> &mdash; saves the value to Airtable and re-renders the row</li>
-          <li><strong>Escape</strong> &mdash; cancels without saving and re-renders</li>
-          <li><strong>Click away (blur)</strong> &mdash; also triggers save</li>
+          <li>A cell you have not actually changed is skipped, so no pointless writes hit Airtable.</li>
+          <li>An amount that is not a number, or is below zero, is rejected and the box is cleared.</li>
+          <li>An empty amount box clears the Amount field in Airtable rather than writing zero.</li>
+          <li>A saved amount is redisplayed to two decimal places, so 40 becomes 40.00.</li>
+          <li>After a save the four KPI cards at the top recalculate on their own. The table is not rebuilt, so you do not lose your place.</li>
         </ul>
         <h4>Visual feedback after save</h4>
-        <p>After saving, the cell flashes <strong>green</strong> (<code>inv-flash-ok</code>) if the Airtable PATCH succeeded, or <strong>red</strong> (<code>inv-flash-fail</code>) if it failed. The flash lasts 1.5 seconds.</p>
+        <p>The cell flashes <strong>green</strong> (<code>inv-flash-ok</code>) if the Airtable PATCH succeeded, or <strong>red</strong> (<code>inv-flash-fail</code>) if it failed. The flash lasts 1.5 seconds.</p>
       </div>
     </div>
 
@@ -461,13 +490,165 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
       <div class="wf-body">
         <p>A text link in the "Last refreshed" bar that triggers <code>triggerGmailInvoiceSync()</code>. It fires a no-cors request to the Apps Script web app with <code>?action=sync</code>, then waits 3 seconds before calling <code>fetchInvoicesFromAirtable()</code> to pull in any newly synced records.</p>
         <p>Link text changes to "Syncing&hellip;" during the wait, then reverts to "Refresh from Gmail" after 4 seconds.</p>
+        <p>This is the safe link. It adds invoices and nothing else.</p>
+      </div>
+    </div>
+
+    <div class="wf-card">
+      <div class="wf-header">
+        <div class="wf-num" style="background:var(--tone-plum)">6</div>
+        <h3>Reconcile with Gmail</h3>
+        <span class="wf-tag">Header link, changes many records at once</span>
+      </div>
+      <div class="wf-body">
+        <p>The second text link in the "Last refreshed" bar, triggering <code>triggerGmailInvoiceReconcile()</code>. It rewrites the status of every invoice in the table to agree with the Gmail label, in both directions.</p>
+        <div class="info-box warn">
+          <span class="ib-icon">&#9888;&#65039;</span>
+          <span>This is the only control on the page that can undo a payment record. Read section 6 in full before using it.</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="wf-card">
+      <div class="wf-header">
+        <div class="wf-num" style="background:var(--accent)">7</div>
+        <h3>Row tick boxes and the bulk bar</h3>
+        <span class="wf-tag">Acts on several invoices at once</span>
+      </div>
+      <div class="wf-body">
+        <p>Ticking one or more rows opens a green bar above the table with three controls: set the Business on all of them, mark all of them Paid, or clear the selection. Section 7 covers what each one writes.</p>
       </div>
     </div>
   </div>
 
-  <!-- 6. Matching & Approval Workflow -->
+  <!-- 6. Reconcile with Gmail -->
+  <div class="section" id="reconcile">
+    <h2 class="section-title"><span class="icon">&#128260;</span> 6. Reconcile with Gmail</h2>
+
+    <div class="card">
+      <p>"Reconcile with Gmail" treats the <strong>Gmail label as the truth</strong> and rewrites Airtable to agree with it. That is the whole idea, and it is also why it needs care: if the Gmail label is wrong, reconcile makes Airtable wrong to match.</p>
+      <div class="info-box warn">
+        <span class="ib-icon">&#9888;&#65039;</span>
+        <span><strong>It moves invoices in BOTH directions, and it can touch every invoice in one click.</strong> An invoice you marked Paid goes back to <strong>Unpaid</strong> with its Paid Date wiped if its email is still in "3: to pay". An invoice sitting as Unpaid is set to <strong>Paid</strong>, with today's date as the Paid Date, if its email is no longer in that label. Nothing asks you to confirm each record. There is no undo button.</span>
+      </div>
+      <p>Before you click it, a confirm box lists what is about to happen. Click Cancel if you are not sure. When the run finishes an alert shows four numbers: how many emails were in the label, how many invoices were marked Paid, how many were restored to Unpaid, and how many were skipped. The table then reloads from Airtable.</p>
+    </div>
+
+    <div class="card">
+      <div class="card-header">Exactly what it writes</div>
+      <table class="label-table">
+        <thead><tr><th>Email in "3: to pay"?</th><th>Status in Airtable</th><th>What reconcile does</th></tr></thead>
+        <tbody>
+          <tr><td>Yes</td><td>Anything other than Unpaid, including Paid</td><td>Sets Status to <strong>Unpaid</strong> and clears the Paid Date. The invoice reappears in the table.</td></tr>
+          <tr><td>No</td><td>Unpaid</td><td>Sets Status to <strong>Paid</strong> and sets the Paid Date to today. The invoice drops out of the table.</td></tr>
+          <tr><td>Either</td><td>Estimate</td><td>Skipped and left alone.</td></tr>
+          <tr><td>Either</td><td>Any record with no Gmail Thread ID</td><td>Skipped and left alone.</td></tr>
+          <tr><td>Yes</td><td>Already Unpaid</td><td>Nothing. It is already correct.</td></tr>
+          <tr><td>No</td><td>Already Paid</td><td>Nothing. It is already correct.</td></tr>
+        </tbody>
+      </table>
+      <div class="info-box info">
+        <span class="ib-icon">&#8505;&#65039;</span>
+        <span>Reconcile never writes to the Matched Transaction field and never moves a Gmail label. It only changes the invoice Status and the Paid Date. A payment you approved from an AI match keeps its transaction link even if reconcile pushes it back to Unpaid.</span>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-header">When to use it, and when not to</div>
+      <div class="grid-2">
+        <div style="background:var(--bg-surface-2);border-radius:var(--radius-lg);padding:1rem;border-left:4px solid var(--success)">
+          <strong>Use Reconcile when</strong>
+          <ul style="font-size:0.85rem;color:var(--text-secondary);margin-top:0.4rem">
+            <li>The sync health text has said <strong>Mismatch</strong> for a while and "Refresh from Gmail" has not cleared it.</li>
+            <li>You paid several invoices straight from Gmail, moved the emails to "4: paid" yourself, and the dashboard still lists them.</li>
+            <li>An invoice was marked Paid by mistake and you have already put its email back in "3: to pay".</li>
+          </ul>
+        </div>
+        <div style="background:var(--bg-surface-2);border-radius:var(--radius-lg);padding:1rem;border-left:4px solid var(--danger)">
+          <strong>Do NOT use Reconcile when</strong>
+          <ul style="font-size:0.85rem;color:var(--text-secondary);margin-top:0.4rem">
+            <li>You only want new invoices pulled in. Use "Refresh from Gmail" instead.</li>
+            <li>You have just clicked Mark Paid. Give the Gmail label move about 5 seconds first, or reconcile may read the old label and pull the invoice back to Unpaid.</li>
+            <li>Your Gmail labels are known to be untidy. Sort the labels first, because reconcile copies whatever they say.</li>
+          </ul>
+        </div>
+      </div>
+      <div class="info-box danger">
+        <span class="ib-icon">&#128721;</span>
+        <span><strong>Known limit.</strong> Reconcile reads only the first <strong>100</strong> threads in the "3: to pay" label. If that label ever holds more than 100 emails, everything past the first 100 looks to the script like it has left the label, and those invoices are marked Paid when they are not. Keep the label under 100 emails, and check the "Gmail 3: to pay" number in the result alert against what Gmail shows before trusting the run.</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- 7. Bulk Actions -->
+  <div class="section" id="bulk">
+    <h2 class="section-title"><span class="icon">&#9989;</span> 7. Bulk Actions (tick boxes)</h2>
+
+    <div class="card">
+      <p>Every row has a tick box in the first column, and the table header has one that selects or clears all the rows you can currently see. Tick at least one row and a green bulk bar appears above the table showing how many are selected.</p>
+      <div class="info-box info">
+        <span class="ib-icon">&#8505;&#65039;</span>
+        <span>"Select all" only covers the rows visible under the current search and sort. If you have typed something in the Filter box, the hidden rows are not selected. Your selection survives sorting and filtering, so clear it deliberately rather than assuming a filter change dropped it.</span>
+      </div>
+    </div>
+
+    <div class="wf-card">
+      <div class="wf-header">
+        <div class="wf-num">1</div>
+        <h3>Set business</h3>
+        <span class="wf-tag">Dropdown plus Apply</span>
+      </div>
+      <div class="wf-body">
+        <p>Pick a business, click <strong>Apply</strong>, and <code>applyBulkBusiness()</code> writes that business onto every selected invoice. A confirm box names the business and the number of invoices first.</p>
+        <ul>
+          <li>Only ACTIVE businesses appear in the dropdown, the same as the per-row dropdowns.</li>
+          <li>Picking the "None" option clears the Business field on all selected invoices.</li>
+          <li>Records go up in batches of 10, which is the Airtable limit for one write. If a batch fails you get a message saying how many of the total went through.</li>
+          <li>The selection clears and the table redraws once it finishes.</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="wf-card">
+      <div class="wf-header">
+        <div class="wf-num" style="background:var(--success)">2</div>
+        <h3>Mark as Paid (bulk)</h3>
+        <span class="wf-tag">Green button in the bulk bar</span>
+      </div>
+      <div class="wf-body">
+        <p><code>applyBulkMarkPaid()</code> does the same job as the per-row Mark Paid button, for every selected invoice at once. A confirm box shows the count and the <strong>total amount</strong> before anything is written.</p>
+        <h4>What it writes, in order</h4>
+        <ol class="steps">
+          <li>Airtable: Status to <strong>Paid</strong> and Paid Date to today, in batches of 10 records.</li>
+          <li>Gmail: for each invoice that saved successfully, the thread is moved from "3: to pay" to "4: paid", one request per invoice.</li>
+          <li>The paid invoices are dropped from the on-screen list, the selection clears, and the sidebar badge updates.</li>
+        </ol>
+        <div class="info-box warn">
+          <span class="ib-icon">&#9888;&#65039;</span>
+          <span>Bulk Mark as Paid does <em>not</em> link a bank transaction, even where an AI match is showing on screen. If you want the transaction linked, use the &#10003; Approve button on that invoice instead. Also check the total in the confirm box: an invoice with a blank Amount counts as zero towards it, so a low total can mean missing amounts rather than a cheap batch.</span>
+        </div>
+        <div class="info-box info">
+          <span class="ib-icon">&#8505;&#65039;</span>
+          <span>If some records fail, you get a message saying how many of the total went through. Only the ones that saved have their Gmail label moved, so a failed invoice stays Unpaid in both places rather than going out of step.</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="wf-card">
+      <div class="wf-header">
+        <div class="wf-num" style="background:var(--text-muted)">3</div>
+        <h3>Clear selection</h3>
+        <span class="wf-tag">Right of the bulk bar</span>
+      </div>
+      <div class="wf-body">
+        <p>Unticks everything and hides the bulk bar. It writes nothing to Airtable.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- 8. Matching & Approval Workflow -->
   <div class="section" id="matching">
-    <h2 class="section-title"><span class="icon">&#129302;</span> 6. Matching &amp; Approval Workflow</h2>
+    <h2 class="section-title"><span class="icon">&#129302;</span> 8. Matching &amp; Approval Workflow</h2>
     <div class="card">
       <p>Every time <code>renderInvoiceTab()</code> runs, it calls <code>matchInvoicesToTransactions(sourceData, allTransactions)</code> to compare each unpaid invoice against all bank transactions loaded in memory. If a match is found, a blue suggestion row appears directly beneath the invoice row in the table.</p>
       <div class="info-box warn">
@@ -502,7 +683,7 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
 
     <div class="card">
       <div class="card-header">Suggestion Row Anatomy</div>
-      <p>When a match is found, a blue-highlighted row (<code>inv-match-suggestion</code>) is inserted immediately after the invoice row. It spans all 7 columns and contains:</p>
+      <p>When a match is found, a blue-highlighted row (<code>inv-match-suggestion</code>) is inserted immediately after the invoice row. It spans all 9 columns and contains:</p>
       <ul>
         <li>Label: <strong>"&#129302; AI Match Found:"</strong> in blue</li>
         <li>Transaction details: date &bull; vendor/label &bull; amount (in bold)</li>
@@ -514,7 +695,7 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
 
   <!-- 7. Payment Processing -->
   <div class="section" id="payment">
-    <h2 class="section-title"><span class="icon">&#128181;</span> 7. Payment Processing</h2>
+    <h2 class="section-title"><span class="icon">&#128181;</span> 9. Payment Processing</h2>
     <div class="card">
       <p>Clicking <strong>Mark Paid</strong> or <strong>&#10003; Approve</strong> triggers <code>markInvoicePaid(recordId, threadId, txRecordId, gmailUrl, btn)</code>. This function performs <strong>three sequential API calls</strong>:</p>
     </div>
@@ -531,7 +712,7 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
         <ul>
           <li><code>fldJ5InUPlY4t7MgP</code> (Status) &rarr; <code>"Paid"</code></li>
           <li><code>fld9GqL9RlLWPAymx</code> (Paid Date) &rarr; today's date in <code>YYYY-MM-DD</code> format</li>
-          <li><code>fldpHf5vYCIgj3Scz</code> (Matched Transaction) &rarr; <code>[{ id: txRecordId }]</code> &mdash; only written if a transaction was matched</li>
+          <li><code>fldpHf5vYCIgj3Scz</code> (Matched Transaction) &rarr; <code>[txRecordId]</code>, an array holding the transaction's record ID. Only written if a transaction was matched, so the bulk Mark as Paid never sets it.</li>
         </ul>
       </div>
     </div>
@@ -581,7 +762,7 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
 
   <!-- 8. Airtable Fields Reference -->
   <div class="section" id="fields">
-    <h2 class="section-title"><span class="icon">&#128451;</span> 8. Airtable Fields Reference</h2>
+    <h2 class="section-title"><span class="icon">&#128451;</span> 10. Airtable Fields Reference</h2>
 
     <div class="card">
       <div class="card-header">Dashboard Invoices Table (<code>tblkOTKIG2Tyiy9aM</code>) &mdash; INV constants</div>
@@ -631,16 +812,17 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
       <div class="card-header">Airtable Fetch Query</div>
       <p>The initial fetch in <code>fetchInvoicesFromAirtable()</code> uses these Airtable API parameters:</p>
       <ul>
-        <li><strong>filterByFormula:</strong> <code>NOT({Status}='Paid')</code> &mdash; only unpaid records are fetched</li>
+        <li><strong>filterByFormula:</strong> <code>{Status}='Unpaid'</code>, so only unpaid records are fetched. Paid and Estimate records stay behind in Airtable.</li>
         <li><strong>sort:</strong> Email Date ascending</li>
         <li><strong>returnFieldsByFieldId:</strong> <code>true</code> &mdash; fields are keyed by ID, not name</li>
+        <li><strong>Paging:</strong> the fetch follows Airtable's <code>offset</code> until every page is read, so a long list is never cut off at 100 records.</li>
       </ul>
     </div>
   </div>
 
   <!-- 9. Troubleshooting -->
   <div class="section" id="troubleshooting">
-    <h2 class="section-title"><span class="icon">&#128295;</span> 9. Troubleshooting</h2>
+    <h2 class="section-title"><span class="icon">&#128295;</span> 11. Troubleshooting</h2>
     <div class="card">
 
       <div class="ts-item">
@@ -660,7 +842,7 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
       <div class="ts-item">
         <div class="ts-problem">No AI match suggestions appearing for an invoice</div>
         <div class="ts-solution">
-          Matching requires: (1) an <strong>Amount</strong> entered on the invoice &mdash; enter it by clicking the "Enter £ ✏️" prompt; (2) at least one bank transaction in the Transactions table with an amount within &#177;&#163;0.02 and a date on or after the invoice date; (3) sufficient keyword overlap between the invoice and the transaction vendor/description. If you previously rejected a suggestion for this invoice, the <code>matchRejected</code> field in Airtable is set to <code>true</code> &mdash; clear it in Airtable to allow suggestions again.
+          Matching requires: (1) an <strong>Amount</strong> entered on the invoice, typed straight into the Amount box on the row; (2) at least one bank transaction in the Transactions table with an amount within &#177;&#163;0.02 and a date on or after the invoice date; (3) sufficient keyword overlap between the invoice and the transaction vendor/description. If you previously rejected a suggestion for this invoice, the <code>matchRejected</code> field in Airtable is set to <code>true</code> &mdash; clear it in Airtable to allow suggestions again.
         </div>
       </div>
 
@@ -674,7 +856,34 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
       <div class="ts-item">
         <div class="ts-problem">Sync health shows "Mismatch" between dashboard and Gmail counts</div>
         <div class="ts-solution">
-          A mismatch means the number of unpaid invoices in Airtable differs from the number of emails with the "3. to pay" Gmail label. This is usually temporary &mdash; click "Refresh from Gmail" and wait 5 seconds for the sync to complete and the count to update. If the mismatch persists, check the Apps Script execution logs for sync errors. You may also have emails labelled "3. to pay" that failed to create Airtable records (check for duplicate detection issues in the logs).
+          A mismatch means the number of unpaid invoices in Airtable differs from the number of emails carrying the "3: to pay" Gmail label. Work through it in this order.
+          <ol style="margin-top:0.4rem">
+            <li>Click <strong>"Refresh from Gmail"</strong> and wait about 5 seconds. This is usually all it takes, and it can only add invoices.</li>
+            <li>If the numbers still differ, look at Gmail and decide which side is right. Gmail is the side reconcile will copy.</li>
+            <li>Once the Gmail labels are correct, click <strong>"Reconcile with Gmail"</strong>. This is the tool that clears a stubborn mismatch, because it rewrites the Airtable status to agree with the label in both directions. Read section 6 first: it can move invoices back from Paid to Unpaid, and it reads only the first 100 emails in the label.</li>
+            <li>If it still will not settle, check the Apps Script execution logs for sync errors, and look for emails labelled "3: to pay" that never created an Airtable record.</li>
+          </ol>
+        </div>
+      </div>
+
+      <div class="ts-item">
+        <div class="ts-problem">Invoices I had marked Paid have come back as Unpaid</div>
+        <div class="ts-solution">
+          That is "Reconcile with Gmail" doing its job. It puts an invoice back to Unpaid and clears its Paid Date whenever the email is still sitting in the "3: to pay" label. Either the Gmail label move failed when you marked it paid, or someone re-labelled the email. Fix the Gmail label first (move the thread to "4: paid"), then mark the invoice paid again, or run reconcile once more now the label is right. The Matched Transaction link is untouched by reconcile, so an approved AI match does not need redoing.
+        </div>
+      </div>
+
+      <div class="ts-item">
+        <div class="ts-problem">Reconcile marked invoices as Paid that I have not paid</div>
+        <div class="ts-solution">
+          Reconcile marks an Unpaid invoice as Paid whenever its email is no longer in "3: to pay". Two things cause a false positive. First, the email was moved or archived out of the label by hand. Second, the label holds more than 100 emails: reconcile reads only the first 100 threads, so anything beyond that looks to it like the email has gone. Compare the "Gmail 3: to pay" figure in the result alert against the count Gmail shows on the label. To put an invoice back, re-apply the "3: to pay" label to its email and run reconcile again, or edit the Status and Paid Date directly in Airtable.
+        </div>
+      </div>
+
+      <div class="ts-item">
+        <div class="ts-problem">A bulk action only updated some of the invoices I selected</div>
+        <div class="ts-solution">
+          Both bulk actions send records to Airtable in batches of 10, and each batch can fail on its own. The message at the end tells you how many of the total went through. Re-select the rows that did not change and run it again. For bulk Mark as Paid, only the invoices that saved to Airtable get their Gmail label moved, so a failed one stays Unpaid in both places rather than going out of step. Check the browser console for the failing batch if it keeps happening.
         </div>
       </div>
 
@@ -704,13 +913,20 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
 
   <!-- 10. Changelog -->
   <div class="section" id="changelog">
-    <h2 class="section-title"><span class="icon">&#128218;</span> 10. Changelog</h2>
+    <h2 class="section-title"><span class="icon">&#128218;</span> 12. Changelog</h2>
     <div class="card">
       <table class="label-table">
         <thead>
           <tr><th>Version</th><th>Date</th><th>Changes</th></tr>
         </thead>
         <tbody>
+          <tr>
+            <td><strong>2.18</strong></td>
+            <td>10 Aug 2026</td>
+            <td>
+              Brought back in line with the live code after a drift check. Added: section 6 <strong>Reconcile with Gmail</strong>, covering that it rewrites invoice status in BOTH directions, exactly what it writes, when to use it instead of Refresh, and the 100-email label limit; section 7 <strong>Bulk Actions</strong>, covering row tick boxes, select all, bulk Set Business, bulk Mark as Paid and Clear selection. Corrected: the inline-edit card, which described a click-to-edit function that no longer exists, replaced with the always-on spreadsheet cells and their save rules; the table now has 9 columns including the tick box; the row-click-opens-Gmail behaviour is gone and replaced by the &#128231; link; the fetch filter is <code>{Status}='Unpaid'</code>, not <code>NOT({Status}='Paid')</code>; Matched Transaction is written as <code>[txRecordId]</code>; Estimate added to the status table. Troubleshooting: the Mismatch entry now points at Reconcile, and three entries added for reconcile flipping invoices and for partial bulk failures.
+            </td>
+          </tr>
           <tr>
             <td><strong>2.1</strong></td>
             <td>17 Apr 2026</td>

@@ -29,11 +29,11 @@
         { id: 'income',     name: 'Accounts Receivable Fixed',     icon: '💷', pageVer: '1.2', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#income' },
         { id: 'ar-variable', name: 'Accounts Receivable Variable', icon: '📤', pageVer: '1.1', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#ar-variable' },
         { id: 'costs',      name: 'Accounts Payable Fixed',        icon: '📋', pageVer: '1.8', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#costs' },
-        { id: 'invoices',   name: 'Accounts Payable Variable',     icon: '🧾', pageVer: '2.18', sopFile: 'sop-invoices.html',           sopVer: '2.2', standalone: 'index.html#invoices' },
-        { id: 'pnl',        name: 'Profit & Loss',                 icon: '💰', pageVer: '2.25', sopFile: 'sop-pnl.html',               sopVer: '2.12', standalone: 'index.html#pnl' },
+        { id: 'invoices',   name: 'Accounts Payable Variable',     icon: '🧾', pageVer: '2.18', sopFile: 'sop-invoices.html',           sopVer: '2.18', standalone: 'index.html#invoices' },
+        { id: 'pnl',        name: 'Profit & Loss',                 icon: '💰', pageVer: '2.26', sopFile: 'sop-pnl.html',               sopVer: '2.25', standalone: 'index.html#pnl' },
         { id: 'transactions', name: 'Transactions',                icon: '🔍', pageVer: '1.1', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#transactions' },
-        { id: 'comms',      name: 'Inbound Comms',                 icon: '📨', pageVer: '2.56', sopFile: 'inbound-comms-sop.html',      sopVer: '2.4', standalone: 'follow-up.html' },
-        { id: 'compliance', name: 'Property Compliance',            icon: '✅', pageVer: '1.12', sopFile: 'sop-compliance.html',         sopVer: '1.1', standalone: 'compliance.html' },
+        { id: 'comms',      name: 'Inbound Comms',                 icon: '📨', pageVer: '2.56', sopFile: 'inbound-comms-sop.html',      sopVer: '2.56', standalone: 'follow-up.html' },
+        { id: 'compliance', name: 'Property Compliance',            icon: '✅', pageVer: '1.13', sopFile: 'sop-compliance.html',         sopVer: '1.12', standalone: 'compliance.html' },
         { id: 'operations',  name: 'Operations',                    icon: '🏢', pageVer: '1.44', sopFile: '',                            sopVer: '1.0', standalone: 'os/operations/index.html' },
         // KPI Library (Leadership section) — ADMIN ONLY. Never rendered in a
         // client tenant's shell; the adminOnly flag is the contract the Supabase
@@ -50,7 +50,7 @@
         // this now reads as the version gap it always was.
         { id: 'crm',        name: 'CRM',                           icon: '👥', pageVer: '1.1', sopFile: 'guides/crm.html',             sopVer: '1.0', standalone: 'crm-supabase.html' },
         { id: 'content-machine', name: 'Content Machine',           icon: '🎬', pageVer: '1.0', sopFile: '',                            sopVer: '1.0', standalone: 'https://chaichoong.github.io/content-machine/' },
-        { id: 'prospecting', name: 'Prospecting',                   icon: '🧲', pageVer: '1.8', sopFile: 'sop-prospecting.html',        sopVer: '1.3', standalone: 'index.html#prospecting' },
+        { id: 'prospecting', name: 'Prospecting',                   icon: '🧲', pageVer: '1.9', sopFile: 'sop-prospecting.html',        sopVer: '1.3', standalone: 'index.html#prospecting' },
         { id: 'sitemap',    name: 'Site Map & Guides',             icon: '🔗', pageVer: '1.19', sopFile: 'sop-sitemap.html',            sopVer: '1.2', standalone: 'index.html#sitemap' },
         { id: 'skills',     name: 'Skills Library',                icon: '🧠', pageVer: '1.4', sopFile: 'guides/skills.html',           sopVer: '1.0', standalone: 'index.html#skills' },
         { id: 'ai-brain',  name: 'AI Brain',                       icon: '💭', pageVer: '1.0', sopFile: 'guides/ai-brain.html',         sopVer: '1.0', standalone: 'ai-brain.html' },
@@ -149,11 +149,24 @@
     // the live page's iframe src. If the site's booking page ever moves, change
     // it HERE and nowhere else.
     const OD_BOOKING_URL = 'https://operationsdirector.co.uk/book-a-demo/';
+    // postal and unsubscribe are NOT optional on a cold email. UK PECR requires a
+    // sender identity, a postal address and a simple way to refuse further mail in
+    // every marketing message, and the first three touches of the prospecting
+    // engine carried none of them. The address is the one already used in the
+    // GoHighLevel workflow footers (docs/ghl-sequence-copy-pack.md), so both
+    // channels say the same thing.
+    //
+    // Unsubscribe is a mailto, deliberately, not GHL's {{unsubscribe_link}} merge
+    // tag: these sends go out through the conversations endpoint and an unrendered
+    // merge tag would ship the literal braces to a stranger. A mailto works with no
+    // infrastructure at all and cannot fail to render.
     const OD_SENDER = {
         name:    'Kevin Brittain',
         email:   'kevin@operationsdirector.co.uk',
         title:   'Founder, Operations Director',
         website: 'operationsdirector.co.uk',
+        postal:  'Operations Director, 61 Bridge Street, Kington, HR5 3DJ',
+        unsubscribeMailto: 'mailto:kevin@operationsdirector.co.uk?subject=Unsubscribe',
     };
 
     // ── Prospect Keywords field IDs (Airtable table: Prospect Keywords / tblB5tZrXNaKFe02j) ──
