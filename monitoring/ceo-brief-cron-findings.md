@@ -302,3 +302,72 @@ not "is it 09:00 now?" but "does today's brief exist yet?".
 The SKILL.md says to disable after 5 consecutive clean weekdays. The run is **broken today**,
 so the counter resets. Current weekday record since the 3 Aug fix: 3, 4, 5, 6 Aug clean;
 7 Aug failed. Keep running.
+
+---
+
+# 10 Aug 2026 — check passed, and the retry fix is confirmed live
+
+## Run: 2026-08-10 (Monday), checked 09:54 London
+
+**Verdict: the 09:00 brief fired on the cron. Nothing sent to Kevin. No news is good news.**
+
+| Check | Result |
+|---|---|
+| CEO Briefs record for 2026-08-10 | `rec8Yxal8aA9X6qIq`, `Full Brief` populated, **1,971 chars** |
+| Cloudflare invocation | `2026-08-10T08:00:00Z` = 09:00 London BST, status success, requests 1, **errors 0** |
+| Manual intervention this morning | **None.** Not a backfill — the record and the invocation match |
+
+Evidence standard held to the 6 Aug rule: verified by an invocation, not by a record existing.
+
+## The 7 Aug retry recommendation is now DEPLOYED and working
+
+Finding `20260807-ceo-brief-morning-check-003` asked for a state-shaped trigger and a wider
+cron window. Both are live in `scripts/slack-automation/money-daily-worker.js`:
+
+- `isLondonSendTime()` (line 672) now returns `isWeekday && hour >= 9 && hour <= 11` — a
+  three-hour window instead of the old `hour === 9 && minute <= 10` knife-edge that hypothesis
+  B on 7 Aug turned on.
+- `alreadyBriefedToday()` (line ~714, inside `ctx.waitUntil`) reads today's row and treats a
+  populated `Full Brief` as "sent", so the extra firings deduplicate instead of triple-sending.
+  It fails OPEN on an Airtable read error, which is the correct direction and is documented in
+  the source comment. Do not flip it.
+- Crons are now hourly across the window. Invocations confirm 08:00, 09:00, 10:00 and 11:00 UTC
+  on 8, 9 and 10 Aug.
+
+Finding closed as `fixed` on 10 Aug 2026.
+
+## Invocation history (workersInvocationsAdaptive, 8–10 Aug)
+
+```
+2026-08-08 Sat  08:00, 09:00, 10:00, 11:00   all success, errors=0, correctly sent nothing
+2026-08-09 Sun  08:00, 09:00, 10:00, 11:00   all success, errors=0, correctly sent nothing
+2026-08-10 Mon  08:00                        success, errors=0  <-- TODAY, the brief
+```
+
+The weekend rows are the useful part: four firings a day, zero briefs, zero errors. That is
+`isLondonSendTime()`'s weekday gate doing its job under the widened window. Compare 2 Aug,
+when a Sunday firing produced a real brief under the old `1-5` day-of-week cron bug.
+
+## New issue found: this check has no weekend guard
+
+`rece4zSbOj9cA48m4` dated Sunday 9 Aug exists with One Thing, First Step and Board Flags and
+an **empty `Full Brief`** — a `ceo-huddle` stub. The worker was right not to fill it.
+
+But this skill's only test is "is `Full Brief` populated on today's record?", with no
+day-of-week condition anywhere in steps 1–4. `daily-ops` runs every day. On a Saturday or
+Sunday this phase would read that empty field, conclude at step 3 that the brief did not fire,
+and at step 4 fire `mode=send` and DM Kevin that his brief was late — sending a weekday brief
+on a day the system is designed to be silent.
+
+It did **not** happen on 9 Aug: that row is still empty and no manual send occurred. So this is
+a latent path, not an incident. Filed as `20260810-ceo-brief-check-064` (low).
+
+## Disable rule: still NOT met, and now moot anyway
+
+The 30 Jul rule needs five consecutive clean weekday **cron** runs. 7 Aug failed and was sent
+by hand, which reset the counter. Since then: 10 Aug is **one**. Earliest possible disable is
+after Fri 14 Aug.
+
+Moot regardless — since 8 Aug this is phase 7.2 of `daily-ops`, not a standalone routine, and
+its own frontmatter says do not re-enable it separately. There is no separate schedule left to
+disable. The frontmatter was left unedited: this run is read-only on files outside `monitoring/`.

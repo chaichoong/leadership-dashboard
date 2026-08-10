@@ -104,7 +104,9 @@
     // The sign-off line is part of the signature, never part of the draft, so
     // every email ends the same way whoever wrote the body.
     function prospectSignatureText() {
-        return `Kevin\n\n${OD_SENDER.name}\n${OD_SENDER.title}\n${OD_SENDER.website}\n${OD_SENDER.email}`;
+        return `Kevin\n\n${OD_SENDER.name}\n${OD_SENDER.title}\n${OD_SENDER.website}\n${OD_SENDER.email}`
+            + `\n\n${OD_SENDER.postal}`
+            + `\nPrefer not to hear from me? Reply "unsubscribe" or email ${OD_SENDER.email} with Unsubscribe in the subject.`;
     }
 
     // 20 of the 131 drafts on 7 Aug 2026 already ended with a bare "Kevin", and
@@ -125,6 +127,12 @@
             + `<div>${escHtml(OD_SENDER.title)}</div>`
             + `<div><a href="https://${escHtml(OD_SENDER.website)}" style="color:#2C6E49">${escHtml(OD_SENDER.website)}</a></div>`
             + `<div><a href="mailto:${escHtml(OD_SENDER.email)}" style="color:#2C6E49">${escHtml(OD_SENDER.email)}</a></div>`
+            + '</div>'
+            // PECR footer. Kept visually quiet but always present and always a real
+            // link, never a merge tag that might not render at the other end.
+            + '<div style="margin-top:16px;padding-top:12px;border-top:1px solid #DDE1D9;font-size:11px;line-height:1.5;color:#8A928C">'
+            + `<div>${escHtml(OD_SENDER.postal)}</div>`
+            + `<div>Prefer not to hear from me? <a href="${escHtml(OD_SENDER.unsubscribeMailto)}" style="color:#8A928C">Unsubscribe</a>, or just reply "unsubscribe".</div>`
             + '</div>';
     }
 

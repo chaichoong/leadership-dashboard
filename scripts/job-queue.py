@@ -67,6 +67,12 @@ EX_SKIPPED = 3
 EX_BUSY = 75
 EX_NOTREADY = 69   # EX_UNAVAILABLE: the machine is not ready for this job yet
 EX_USAGE = 64
+# 70 (EX_SOFTWARE): we THOUGHT we held the lock and we do not any more. Distinct
+# from EX_USAGE on purpose. Losing a lease is not a caller mistake, it is a job
+# that must stop: whatever broke or stole the lock is free to be writing right
+# now, and a second writer is the exact collision the queue exists to prevent.
+# A caller that treats 64 as "bad arguments" would shrug this off.
+EX_LOSTLOCK = 70
 
 DEFAULT_LEASE_MIN = 45
 # How long a job waits for its turn before giving up.
@@ -685,11 +691,52 @@ def release(job, quiet=False, outcome="completed", reason=None):
     return EX_OK
 
 
+def holds(job):
+    """Do we still hold the lock? Returns (True, "") or (False, reason).
+
+    The lease was advisory: nothing ever ASKED whether the lock was still ours.
+    A job whose lease lapsed while the Mac slept, or whose lock was broken by a
+    contender, carried on writing with no idea it had been replaced.
+    """
+    holder = read_holder()
+    if holder is None:
+        return False, "lock is not held by anyone"
+    if holder.get("job") != job:
+        return False, "lock is held by %s" % holder.get("job")
+    if now() > holder.get("lease_until", 0):
+        return False, "lease expired %.1f min ago" % (
+            (now() - holder.get("lease_until", now())) / 60)
+    return True, ""
+
+
+def assert_held(job, quiet=False):
+    """Fail loudly when a long-running step no longer holds the lock.
+
+    Call this between phases. A lost lease must END the phase, not be noted in
+    passing: the queue has already given the machine to somebody else.
+    """
+    ok, why = holds(job)
+    if ok:
+        if not quiet:
+            print("OK %s: still holds the lock" % job)
+        return EX_OK
+    event(job, "lease-lost", reason=why)
+    print("LOST LOCK: %s no longer holds the queue (%s). Stop this phase."
+          % (job, why), file=sys.stderr)
+    return EX_LOSTLOCK
+
+
 def heartbeat(job, lease_minutes=DEFAULT_LEASE_MIN):
     holder = read_holder()
     if holder is None or holder.get("job") != job:
-        print("NOTE: %s does not hold the lock" % job, file=sys.stderr)
-        return EX_USAGE
+        # Not a usage error. Somebody else has the machine, and the caller is
+        # mid-run believing otherwise, so give it the distinct code it must act on.
+        event(job, "lease-lost", reason=(
+            "lock is not held by anyone" if holder is None
+            else "lock is held by %s" % holder.get("job")))
+        print("LOST LOCK: %s no longer holds the queue. Stop this phase." % job,
+              file=sys.stderr)
+        return EX_LOSTLOCK
     holder["lease_until"] = now() + lease_minutes * 60
     with open(HOLDER_FILE, "w") as f:
         json.dump(holder, f)
@@ -732,6 +779,7 @@ def run(job, cmd, lease_minutes, timeout_minutes, check_stale,
 
     import threading
     stop = threading.Event()
+    running = {"proc": None, "lost": ""}
 
     def beat():
         # Re-arm well inside the lease so an ordinary scheduling hiccup does not
@@ -739,7 +787,20 @@ def run(job, cmd, lease_minutes, timeout_minutes, check_stale,
         while not stop.wait(HEARTBEAT_SECONDS):
             holder = read_holder()
             if not holder or holder.get("job") != job:
-                return          # somebody broke our lock; stop pretending we hold it
+                # Losing the lock used to be advisory: the thread returned and
+                # the job carried on writing, alongside whoever now holds the
+                # queue. Two writers is the collision this whole file exists to
+                # prevent, so a lost lock now KILLS the run.
+                running["lost"] = ("lock is not held by anyone" if not holder
+                                   else "lock is held by %s" % holder.get("job"))
+                event(job, "lease-lost", reason=running["lost"])
+                proc = running["proc"]
+                if proc is not None:
+                    try:
+                        proc.kill()
+                    except OSError:
+                        pass
+                return
             holder["lease_until"] = now() + WRAPPED_LEASE_MIN * 60
             try:
                 with open(HOLDER_FILE, "w") as f:
@@ -750,12 +811,20 @@ def run(job, cmd, lease_minutes, timeout_minutes, check_stale,
     ticker = threading.Thread(target=beat, daemon=True)
     ticker.start()
     try:
-        proc = subprocess.run(cmd)
-        event(job, "finished", exit=proc.returncode)
-        return proc.returncode
+        proc = subprocess.Popen(cmd)
+        running["proc"] = proc
+        code = proc.wait()
+        if running["lost"]:
+            print("LOST LOCK: %s was stopped mid-run (%s)"
+                  % (job, running["lost"]), file=sys.stderr)
+            event(job, "finished", exit=EX_LOSTLOCK, reason=running["lost"])
+            return EX_LOSTLOCK
+        event(job, "finished", exit=code)
+        return code
     finally:
         stop.set()
-        release(job, quiet=True)
+        if not running["lost"]:
+            release(job, quiet=True)
 
 
 def status():
@@ -815,6 +884,12 @@ def main(argv=None):
     sp.add_argument("job")
     sp.add_argument("--lease", type=float, default=DEFAULT_LEASE_MIN)
 
+    # Long phases call this between steps. Exit 70 means the lock is gone and
+    # the phase must stop; 0 means carry on.
+    sp = sub.add_parser("assert-held")
+    sp.add_argument("job")
+    sp.add_argument("--quiet", action="store_true")
+
     sub.add_parser("status")
 
     sp = sub.add_parser("ready")
@@ -847,6 +922,8 @@ def main(argv=None):
         return release(a.job, quiet=a.quiet, outcome=a.outcome, reason=a.reason)
     if a.cmd == "heartbeat":
         return heartbeat(a.job, a.lease)
+    if a.cmd == "assert-held":
+        return assert_held(a.job, quiet=a.quiet)
     if a.cmd == "status":
         return status()
     if a.cmd == "ready":

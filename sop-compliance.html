@@ -246,12 +246,17 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
 
   <div class="card">
     <div class="card-header">&#x1F4CA; Summary Bar</div>
-    <p>Four KPI cards shown at the top of the dashboard. <strong>These counts include only self-managed properties</strong> &mdash; agent-managed properties are excluded from the totals.</p>
+    <p>Five KPI cards shown at the top of the dashboard. <strong>These counts include only self-managed properties</strong> &mdash; agent-managed properties are excluded from the totals.</p>
     <div class="metrics-bar" style="margin-top:0.75rem">
       <div class="metric-chip" style="background:var(--danger-bg);color:var(--danger)"><span class="dot red"></span> <strong>Expired</strong> &mdash; cert has expired (renewal date in the past)</div>
       <div class="metric-chip mc-amber"><span class="dot amber"></span> <strong>Expiring (30d)</strong> &mdash; expires within 30 days</div>
       <div class="metric-chip mc-green"><span class="dot green"></span> <strong>Active</strong> &mdash; valid, more than 30 days remaining</div>
+      <div class="metric-chip mc-grey"><span class="dot"></span> <strong>No Date</strong> &mdash; a cert record exists but has no renewal date, so nobody knows if it is in date</div>
       <div class="metric-chip mc-grey"><span class="dot"></span> <strong>No Cert</strong> &mdash; no cert record found for this property/type</div>
+    </div>
+    <div class="info-box info" style="margin-top:0.75rem">
+      <span class="ib-icon">&#x2139;&#xFE0F;</span>
+      <div><strong>No Date is counted separately, on purpose.</strong> A certificate with a blank renewal date used to be counted as Active on this bar while its cell in the grid showed grey &ldquo;No date&rdquo;. The KPI and the grid now agree: unknown is reported as unknown, never as in date.</div>
     </div>
     <p style="margin-top:0.75rem">Each property&rsquo;s GSC, EICR, and Insurance cert contributes one count to the summary bar. For block properties, only the EICR count is included (per unit).</p>
   </div>
@@ -341,9 +346,9 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
           <td>N/A (transparent/grey)</td>
         </tr>
         <tr>
-          <td><span class="label-badge lb-grey">See building</span></td>
+          <td><span class="label-badge lb-grey">See building &middot; Active</span></td>
           <td>Insurance for block apartment units (covered at property level)</td>
-          <td>Shown as &ldquo;See building&rdquo;</td>
+          <td>Shows &ldquo;See building&rdquo; followed by the building policy&rsquo;s own status (Active, Expiring, Expired or No date) and its renewal date, and links to the cert record</td>
         </tr>
         <tr>
           <td><span class="label-badge">No date</span></td>
@@ -377,6 +382,10 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
         </tr>
       </tbody>
     </table>
+    <div class="info-box info" style="margin-top:0.75rem">
+      <span class="ib-icon">&#x2139;&#xFE0F;</span>
+      <div><strong>Block apartment rows include the building insurance in their colour.</strong> The building policy is recorded once at property level and applied to every unit in that block, so an expired building policy turns every apartment row red. The Insurance cell on those rows now shows that policy&rsquo;s status next to &ldquo;See building&rdquo;, so the reason for the colour is always on screen.</div>
+    </div>
     <div class="info-box info">
       <span class="ib-icon">&#x2139;&#xFE0F;</span>
       <div>Row colours are evaluated left-to-right: <code>row-expired</code> takes priority over <code>row-expiring</code>. Only the first matching condition is applied.</div>

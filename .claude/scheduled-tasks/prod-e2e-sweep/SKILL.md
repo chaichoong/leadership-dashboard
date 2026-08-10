@@ -272,7 +272,46 @@ Then:
 - If EVERYTHING passed (prod up, zero FAILs): stay quiet. Do NOT Slack Kevin. Just commit the report so there is a daily record.
 - If there is ANY FAIL: 
   1. Send ONE Slack direct message to Kevin (search Slack users for "Kevin Brittain" / kevinbrittain@gmail.com for the user id). Keep it short and specific: which tab(s) failed and the one-line symptom for each, plus "prod is DOWN" if the live URL check failed. Never include the PAT or any secret.
-  2. Create ONE task in the Tasks table (tblqB8b22hKBL4PF1) in base appnqjDpqDniH3IRl via the Airtable MCP. Task name: "E2E Sweep [SEVERITY]: {short summary}" where SEVERITY is [CRITICAL] if prod is down, a core financial tab (dashboard, cashflow, reconciliation, invoices) failed, or a data invariant broke (STEP 4.5), else [WARNING]. Look up the correct field ids from the table schema for status (set to a "To Do"/open value), due date (today), and notes/description; put the failing tabs and symptoms in the notes. Owner: Kevin.
+  2. Raise ONE task in the Tasks table (tblqB8b22hKBL4PF1) in base appnqjDpqDniH3IRl via the Airtable MCP — but **update the existing task if this finding is already open**. See "Never raise the same finding twice" below. Task name: "E2E Sweep [SEVERITY]: {short summary}" where SEVERITY is [CRITICAL] if prod is down, a core financial tab (dashboard, cashflow, reconciliation, invoices) failed, or a data invariant broke (STEP 4.5), else [WARNING]. Look up the correct field ids from the table schema for status (set to a "To Do"/open value), due date (today), and notes/description; put the failing tabs and symptoms in the notes. Owner: Kevin.
+
+### Never raise the same finding twice
+
+The sweep runs every morning and a real fault is still there tomorrow, so the same
+finding arrives again. With no dedupe it became a second task. On 8 and 9 Aug 2026
+that produced two live tasks for one fault (`recaFnWr9MNOeP86P` and
+`reccDufqthhguDE1v`), and Kevin has to read both to learn they are one thing.
+
+Titles cannot be the match: yours is a written summary and it changes wording run
+to run. Use a **stable finding key** instead, derived from WHAT broke, never from
+today's date, counts or wording.
+
+1. Build the key: `e2e-{area}-{fault}`, lower case, hyphens only. The area is the
+   tab or check (`dashboard`, `cashflow`, `invariant-open-tasks-completion-date`,
+   `prod-down`); the fault is the symptom in two or three words
+   (`render-fail`, `console-error`, `zero-rows`). Same fault tomorrow must produce
+   exactly the same key. If today's date, a record count or an error message with
+   numbers in it changes the key, the key is wrong.
+2. Put it in the task notes on its own line, exactly: `FINDING-KEY: e2e-...`.
+   That line is the identity. Never edit or remove it.
+3. **Search before you create.** Look for an open task carrying the key:
+
+   ```
+   filterByFormula=AND({Is Completed}=0, FIND("FINDING-KEY: e2e-dashboard-render-fail", {Notes}))
+   ```
+
+   - **One or more matches** → do NOT create a task. Update the FIRST match: append a
+     dated line to its notes saying the fault recurred today and what changed, and
+     refresh the due date. Say in the Slack DM that this is a recurrence, with how
+     many mornings running.
+   - **Zero matches** → create the task, with the `FINDING-KEY:` line in its notes.
+4. **A zero result must be proved, not assumed.** A wrong field name, a typo in the
+   key or an unquoted formula all return `200 OK` with `{"records":[]}`, which is
+   indistinguishable from "no duplicate exists" — and this check GATES a create, so
+   a silent zero writes the very duplicate it exists to prevent. Before trusting a
+   zero, run the same query with the `FINDING-KEY:` prefix alone
+   (`FIND("FINDING-KEY:", {Notes})`) as a control. That must return rows once any
+   keyed task exists. If the control returns zero too, the query is broken: say so
+   in the report and create nothing.
 
 ## STEP 6 — Leave the record, do not commit it
 Write the report to `monitoring/` and stop there. Do NOT `git add`, commit, pull,

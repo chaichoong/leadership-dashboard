@@ -177,6 +177,8 @@ Write a **Draft Message** tailored to the person and route. Voice = Kevin's: dir
 
 **Do NOT write a sign-off or signature into the Draft Message.** The Prospecting tab appends Kevin's signature (name, title, website, email) at send time, from `OD_SENDER` in `js/config.js`. A signature in the draft ships twice.
 
+**Do NOT write a postal address or an unsubscribe line into the draft either, and never send a touch that bypasses `buildProspectEmail`.** UK PECR requires a sender identity, a postal address and a simple way to refuse further mail in every marketing email, and these are unsolicited. All three now come from `OD_SENDER` and are appended once, to every touch, in both the plain-text and HTML versions. Guarded by `tests/prospect-email.test.js`. If a follow-up is ever sent by some other path, that path must add the same footer or it must not send.
+
 For the two email routes ("Email reply (they asked)", "Email sequence (Ltd)") also write an **Email Subject**: lower case where natural, 4-8 words, specific to their post or business, no colons-and-buzzwords, never a generic "Quick question". Kevin sees and can edit it in the review card before approving. Leave it blank on non-email routes.
 
 ### 5. Write to Airtable
@@ -211,6 +213,15 @@ For each prospect with Status = "Contacted (1:1)" and Next Follow-up ≤ today:
   - **Touch 3 (next due date, day 14, the close-out):** subject unchanged. Shape: "Last note from me. If [their specific load] is sorted, ignore this. If not, the door is open: <link>. Either way, good luck with [something real from their post]." Under 45 words. Write "FU3 sent YYYY-MM-DD" into Notes, Next Follow-up = +7 days.
   - **7 days after FU3, still silent** → Status = "No Response", stop. Three touches total, then out — never more.
   - Sends go through the same GHL conversations endpoint as the opener (same emailFrom, signature appended by the same rules — no signature in the drafted body). **curl needs a browser User-Agent header on this endpoint — the default curl UA gets a Cloudflare 403 (error 1010), proven 8 Aug 2026.**
+  - **The PECR footer is your job on FU2 and FU3.** The opener is built by `buildProspectEmail` in `js/prospecting.js`, which appends the signature, the postal address and the opt-out automatically. Your curl send does NOT go through that function, so nothing appends it for you. Every follow-up body you post to the conversations endpoint must end with the signature followed by, on their own lines, the `postal` and opt-out wording from `OD_SENDER` in `js/config.js`:
+
+    ```
+    Operations Director, 61 Bridge Street, Kington, HR5 3DJ
+    Prefer not to hear from me? Reply "unsubscribe" or email kevin@operationsdirector.co.uk with Unsubscribe in the subject.
+    ```
+
+    Read the current values out of `js/config.js` at run time rather than copying them from here, so the two cannot drift. Never send a touch without it: these are unsolicited marketing emails and the address and opt-out are legally required in every one, not only the first.
+  - **Honour an opt-out the moment it arrives.** If a prospect replies asking to be removed, or the word "unsubscribe" appears in their reply, set Status = "No Response", write "OPTED OUT YYYY-MM-DD" into Notes, cancel any pending follow-up, and never contact them again on any channel. Do not send a confirmation email. Report it, and treat a missed opt-out as a serious defect, not a slip.
   - The `od-prospect-nurture` tag stays RETIRED: do not apply it. **Triggers confirmed 8 Aug 2026 from Ericamae's Customer Journey Map v6 (https://chaichoong.github.io/Email-Copy/):** W1 = booking confirmation + reminders (fires on Appointment Booked — unaffected, welcome); W2 = no-show rebooking, four emails over five days (appointment outcome — welcome); W3 = 3-email nurture, fires ONLY on the `od-prospect-nurture` tag, so while the tag is unapplied W3 is parked and cannot double-send on the agent's personalised touches; W4 = post-call follow-up (attended outcome); W5 = replied-but-not-booked, fires on `od-replied-no-booking`, which only the agent applies — apply it ONLY where the conversation has genuinely stalled after a reply, and never alongside FU2/FU3 in the same window. PUBLISHED state verified by API 8 Aug 2026 (all six live: W1 v28, W2 v19, W3 v6, W4 v24, W5 v5, W6 v6; built May-Jul, finished 29-31 Jul). The token now carries `workflows.readonly`, `calendars.readonly` and `calendars/events.readonly` (Kevin added them 8 Aug) — verify workflows by API (`GET /workflows/?locationId=…`, browser UA required), never by driving the GHL UI.
 - **No reply + manual track** → send ONE polite follow-up via GHL the first time (note it in the record), and after a second silent week set Status = "No Response" and stop. NEVER add manual-track contacts to any email workflow.
 

@@ -101,7 +101,7 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
     <a href="index.html#sitemap" class="header-back">&#x2190; Back to Site Map</a>
     <h1>&#x1F4E8; Inbound Comms</h1>
     <div class="subtitle">Standard Operating Procedure &mdash; Gmail label management, AI drafting, task automation and compliance processing</div>
-    <div class="version">Version 2.4 &bull; 2 Jul 2026 &bull; Owner: Kevin Brittain</div>
+    <div class="version">Version 2.56 &bull; 10 Aug 2026 &bull; Owner: Kevin Brittain</div>
   </div>
 </div>
 
@@ -143,6 +143,14 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
       <div class="qr-label">Attachment Limit</div>
       <div class="qr-value">20 MB total per email (Gmail limit)</div>
     </div>
+    <div class="qr-item" style="border-left-color:var(--danger);">
+      <div class="qr-label">Labels that create tasks</div>
+      <div class="qr-value">8 &rarr; Mica &bull; 12 &rarr; Kevin &bull; 13 &rarr; unassigned maintenance</div>
+    </div>
+    <div class="qr-item" style="border-left-color:var(--danger);">
+      <div class="qr-label">Labels that close tasks</div>
+      <div class="qr-value">4, 5, 6, 7, 9, 14. Moving off 8/12/13 onto any of these completes the Airtable task</div>
+    </div>
   </div>
 </div>
 
@@ -166,7 +174,8 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
       <a href="#fields-ref"><span class="toc-num">13</span> Airtable Fields Reference</a>
       <a href="#localstorage"><span class="toc-num">14</span> localStorage Keys Reference</a>
       <a href="#troubleshooting"><span class="toc-num">15</span> Troubleshooting</a>
-      <a href="#changelog"><span class="toc-num">16</span> Changelog</a>
+      <a href="#post-management"><span class="toc-num">16</span> Post Management</a>
+      <a href="#changelog"><span class="toc-num">17</span> Changelog</a>
     </div>
   </div>
 </div>
@@ -179,11 +188,12 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
     <p>Inbound Comms is a Gmail-integrated email management tool embedded as a standalone page (<code>follow-up.html</code>) inside the Leadership Dashboard. It connects directly to Gmail via Google OAuth 2.0, reads emails by label, and provides a structured workflow for ensuring every inbound communication is actioned, responded to, or filed.</p>
     <p>Key capabilities:</p>
     <ul>
-      <li><strong>Label-based triage</strong> — view emails sorted into 9 numbered Gmail labels (plus a Property Compliance label 10)</li>
+      <li><strong>Label-based triage</strong> — view emails sorted into 14 numbered Gmail labels (1 to 14). See section 5 for the full list</li>
       <li><strong>AI drafting</strong> — Claude Sonnet drafts responses; Claude Haiku drafts unsubscribe requests and classifies inbox emails</li>
       <li><strong>Inbox triage</strong> — unlabelled emails are shown with AI-suggested labels; apply individually or all at once</li>
       <li><strong>Auto label management</strong> — when someone replies to a Follow Up email, the label is automatically removed</li>
-      <li><strong>Airtable integration</strong> — moving an email to label 8 auto-creates a task; label 9 is set when Airtable marks that task Completed</li>
+      <li><strong>Airtable integration</strong> — labels 8, 12 and 13 each auto-create a task; labels 4, 5, 6, 7, 9 and 14 auto-complete it. See section 10 before you file anything</li>
+      <li><strong>Tenancy document filing</strong> — label 11 asks AI which tenancy an email belongs to and files the link on that tenancy record</li>
       <li><strong>Property compliance</strong> — emails on the Compliance label are parsed by AI to create certificate records in Airtable</li>
       <li><strong>Cloud sync</strong> — knowledge base and AI corrections sync between devices via Cloudflare KV</li>
     </ul>
@@ -257,7 +267,7 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
 <!-- 3. COMMUNICATION VIEWS -->
 <div class="section" id="views">
   <h2 class="section-title"><span class="icon">&#x1F4C2;</span> 3. Communication Views / Tabs</h2>
-  <p>Use the <strong>label dropdown</strong> in the header to switch between views. The dropdown also shows live email counts for key labels (1, 2, 3, 8). Each view has a custom column layout.</p>
+  <p>Use the <strong>label dropdown</strong> in the header to switch between views. The dropdown also shows live thread counts for the labels that carry work: 1, 2, 3, 8, 12, 13 and Property Compliance (10). Each view has a custom column layout.</p>
 
   <div class="card">
     <div class="card-header">Available views</div>
@@ -310,22 +320,46 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
             <td>"Unsub All" in header; supports link, mailto, and manual unsubscribe methods</td>
           </tr>
           <tr>
-            <td><strong>8: Task created</strong></td>
+            <td><strong>8: task created</strong></td>
             <td>Oldest first</td>
-            <td>#, Subject/From, Last Activity, Days Old, Action (<em>Follow up</em>), Move Label</td>
+            <td>#, Subject/From, Last Activity, Days Old, Action (<em>Respond</em>), Move Label</td>
             <td>On load, auto-checks Airtable for completed tasks and moves them to label 9; critical &#8805;14d</td>
           </tr>
           <tr>
-            <td><strong>9: Task completed</strong></td>
-            <td>Newest first</td>
-            <td>#, Subject/From, Last Activity, Days Old, Move Label</td>
+            <td><strong>9: task completed</strong></td>
+            <td>Oldest first</td>
+            <td>#, Subject/From, Last Activity, Days Old, Action (<em>Follow up</em>), Move Label</td>
             <td>Shows completion time bands (7d, 7–14d, 14–30d)</td>
           </tr>
           <tr>
-            <td><strong>10: Property Compliance</strong></td>
-            <td>Newest first</td>
+            <td><strong>10: property compliance</strong></td>
+            <td>Oldest first</td>
             <td>#, Subject/From, Date, Status badge, Move Label</td>
             <td>Compliance banner shows processed/pending counts; "Process All Pending" button; links to compliance.html</td>
+          </tr>
+          <tr>
+            <td><strong>11: tenancy docs</strong></td>
+            <td>Oldest first</td>
+            <td>#, Subject/From, Last Activity, Days Old, Action (<em>Follow up</em>), Move Label</td>
+            <td>A background sweep runs every 5 minutes and tries to auto-link any email here that has not been linked yet. Linked emails are starred</td>
+          </tr>
+          <tr>
+            <td><strong>12: kevin to respond</strong></td>
+            <td>Oldest first</td>
+            <td>#, Subject/From, Last Activity, Days Old, Action (<em>Respond</em>), Move Label</td>
+            <td>On load, auto-checks Airtable for completed tasks and moves them to label 9; critical &#8805;14d</td>
+          </tr>
+          <tr>
+            <td><strong>13: maintenance</strong></td>
+            <td>Oldest first</td>
+            <td>#, Subject/From, Last Activity, Days Old, Action (<em>Follow up</em>), Move Label</td>
+            <td>On load, auto-checks Airtable for completed tickets and moves them to label 14 (not 9)</td>
+          </tr>
+          <tr>
+            <td><strong>14: maintenance completed</strong></td>
+            <td>Oldest first</td>
+            <td>#, Subject/From, Last Activity, Days Old, Action (<em>Follow up</em>), Move Label</td>
+            <td>Archive for finished maintenance jobs</td>
           </tr>
         </tbody>
       </table>
@@ -420,15 +454,27 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
           <tr><td><span class="label-badge lb-blue">2: Follow Up</span></td><td>Recipient replies (auto-detected)</td><td>Label removed, thread returns to inbox</td></tr>
           <tr><td><span class="label-badge lb-blue">2: Follow Up</span></td><td>Send follow-up, move to Responded</td><td><span class="label-badge lb-green">5: Responded</span></td></tr>
           <tr><td><span class="label-badge lb-red">3: To Pay</span></td><td>Send delay payment, stay in label</td><td>Stays in <span class="label-badge lb-red">3: To Pay</span></td></tr>
-          <tr><td><span class="label-badge lb-red">3: To Pay</span></td><td>Move via dropdown</td><td><span class="label-badge lb-green">4: Paid</span> (or any label)</td></tr>
-          <tr><td><span class="label-badge lb-purple">8: Task created</span></td><td>Airtable task marked Completed</td><td><span class="label-badge lb-green">9: Task completed</span> (auto)</td></tr>
+          <tr><td><span class="label-badge lb-red">3: to pay</span></td><td>Move via dropdown</td><td><span class="label-badge lb-green">4: paid</span> (or any label)</td></tr>
+          <tr><td>Inbox or any label</td><td>Move to <span class="label-badge lb-purple">8: task created</span></td><td>Airtable task created for <strong>Mica</strong></td></tr>
+          <tr><td>Inbox or any label</td><td>Move to <span class="label-badge lb-purple">12: kevin to respond</span></td><td>Airtable task created for <strong>Kevin</strong></td></tr>
+          <tr><td>Inbox or any label</td><td>Move to <span class="label-badge lb-purple">13: maintenance</span></td><td>Airtable maintenance ticket created, <strong>no assignee</strong></td></tr>
+          <tr><td><span class="label-badge lb-purple">8: task created</span> / <span class="label-badge lb-purple">12: kevin to respond</span></td><td>Airtable task marked Completed</td><td><span class="label-badge lb-green">9: task completed</span> (automatic)</td></tr>
+          <tr><td><span class="label-badge lb-purple">13: maintenance</span></td><td>Airtable ticket marked Completed</td><td><span class="label-badge lb-green">14: maintenance completed</span> (automatic)</td></tr>
+          <tr><td><span class="label-badge lb-purple">8</span> / <span class="label-badge lb-purple">12</span> / <span class="label-badge lb-purple">13</span></td><td>Move to 4, 5, 6, 7, 9 or 14</td><td><strong>Airtable task marked Completed</strong> (see warning below)</td></tr>
+          <tr><td><span class="label-badge lb-purple">8: task created</span></td><td>Task reassigned to Kevin in Airtable</td><td><span class="label-badge lb-purple">12: kevin to respond</span> (automatic, within 5 minutes)</td></tr>
+          <tr><td><span class="label-badge lb-purple">12: kevin to respond</span></td><td>Task reassigned to Mica in Airtable</td><td><span class="label-badge lb-purple">8: task created</span> (automatic, within 5 minutes)</td></tr>
+          <tr><td><span class="label-badge lb-green">9</span> / <span class="label-badge lb-green">14</span></td><td>Move back to 8, 12 or 13</td><td>Completed task <strong>reopened</strong> and set back to Today</td></tr>
           <tr><td>Any action label</td><td>Use "Move to..." dropdown</td><td>Any other label</td></tr>
         </tbody>
       </table>
     </div>
+    <div class="info-box warn">
+      <span class="ib-icon">&#x26A0;</span>
+      <div><strong>Filing an email can close a job.</strong> Labels <strong>4: paid</strong>, <strong>5: responded</strong>, <strong>6: newsletter</strong>, <strong>7: delete</strong>, <strong>9: task completed</strong> and <strong>14: maintenance completed</strong> all count as "work finished". Moving an email onto any of them from label 8, 12 or 13 marks the linked Airtable task <strong>Completed</strong> immediately, with no confirmation. Undo puts the Gmail label back but does <em>not</em> reopen the Airtable task. To reopen it, move the email back onto 8, 12 or 13.</div>
+    </div>
     <div class="info-box info">
       <span class="ib-icon">&#x1F504;</span>
-      <div>When an email is moved from any label to another, the old label is <strong>removed</strong> and the new label is <strong>added</strong> on <em>every message</em> in the thread. Moves are rate-limited with 300ms delays between messages to avoid Gmail API errors.</div>
+      <div>When an email is moved from any label to another, the old label is <strong>removed</strong> and the new label is <strong>added</strong> on <em>every message</em> in the thread. Moves are rate-limited with 300ms delays between messages to avoid Gmail API errors. Applying one of the completion labels straight from the inbox does <strong>not</strong> complete anything, because there is no task-linked label to move off.</div>
     </div>
   </div>
 
@@ -442,26 +488,38 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
 <div class="section" id="gmail-labels">
   <h2 class="section-title"><span class="icon">&#x1F3F7;</span> 5. Gmail Label System</h2>
   <div class="card">
-    <p>The app detects labels by matching the pattern <code>/^[1-9]\d?[.:]\s/</code> — i.e. labels that start with a number, then a colon or period, then a space. Labels must be created in Gmail with exact names including the number prefix.</p>
-    <p>Labels displayed in the dropdown, sorted numerically. Live counts are shown for labels <strong>1, 2, 3, and 8</strong>. The inbox count shows unlabelled threads.</p>
+    <p>The app detects labels by matching the pattern <code>/^[1-9]\d?[.:]\s/</code> — i.e. labels that start with a number, then a colon or full stop, then a space. Labels must be created in Gmail with exact names including the number prefix.</p>
+    <p>Labels are shown in the dropdown sorted numerically. Live thread counts are shown for labels <strong>1, 2, 3, 8, 12, 13</strong> and any label starting with <code>10</code>. The inbox count shows unlabelled threads.</p>
     <div style="overflow-x:auto; margin-top:1rem;">
       <table class="label-table">
         <thead>
-          <tr><th>Label</th><th>Purpose</th><th>Sort Order</th><th>Days Threshold</th></tr>
+          <tr><th>Label (exact Gmail name)</th><th>Purpose</th><th>What the app does automatically</th><th>Sort order</th><th>Days threshold</th></tr>
         </thead>
         <tbody>
-          <tr><td><code>1: To Respond</code></td><td>Emails requiring a reply from you</td><td>Oldest first</td><td>Critical 14+d, Warning 7–13d</td></tr>
-          <tr><td><code>2: Follow Up</code></td><td>Emails you have sent and are waiting for a reply on</td><td>Oldest first</td><td>Critical 14+d, Warning 7–13d</td></tr>
-          <tr><td><code>3: To Pay</code></td><td>Invoices and payment requests</td><td>Oldest first</td><td>Critical 14+d, Warning 7–13d</td></tr>
-          <tr><td><code>4: Paid</code></td><td>Archive of paid invoices</td><td>Newest first</td><td>Critical 90+d, Warning 30+d</td></tr>
-          <tr><td><code>5: Responded</code></td><td>Archive of responded emails</td><td>Newest first</td><td>Critical 90+d, Warning 30+d</td></tr>
-          <tr><td><code>6: Newsletter</code></td><td>Marketing and newsletter emails</td><td>Newest first</td><td>Standard (30/14d)</td></tr>
-          <tr><td><code>7: Delete &amp; Unsubscribe</code></td><td>Emails to unsubscribe from</td><td>Newest first</td><td>Standard (30/14d)</td></tr>
-          <tr><td><code>8: Task created</code></td><td>Emails where an Airtable task has been created</td><td>Oldest first</td><td>Critical 14+d, Warning 7–13d</td></tr>
-          <tr><td><code>9: Task completed</code></td><td>Archive of completed inbound tasks</td><td>Newest first</td><td>Custom (14–30d / 7–14d / &lt;7d)</td></tr>
-          <tr><td><code>10: Property Compliance</code> (or <code>10.</code>)</td><td>Compliance certificate emails (GSC, EICR, Insurance, Fire Alarm)</td><td>Newest first</td><td>Standard</td></tr>
+          <tr><td><code>1: to respond</code></td><td>Emails needing a reply from you</td><td>Nothing automatic</td><td>Oldest first</td><td>Critical 14+d, Warning 7–13d</td></tr>
+          <tr><td><code>2: to follow-up</code></td><td>Emails you have sent and are waiting on a reply for</td><td>Label is removed automatically once the other person replies, so the thread returns to the inbox</td><td>Oldest first</td><td>Critical 14+d, Warning 7–13d</td></tr>
+          <tr><td><code>3: to pay</code></td><td>Invoices and payment requests</td><td>Triggers the Gmail to Airtable invoice sync</td><td>Oldest first</td><td>Critical 14+d, Warning 7–13d</td></tr>
+          <tr><td><code>4: paid</code></td><td>Archive of paid invoices</td><td><strong>Completes the linked Airtable task</strong> if the email came off label 8, 12 or 13</td><td>Newest first</td><td>Critical 90+d, Warning 30+d</td></tr>
+          <tr><td><code>5: responded</code></td><td>Archive of emails you have answered</td><td><strong>Completes the linked Airtable task</strong> if the email came off label 8, 12 or 13</td><td>Newest first</td><td>Critical 90+d, Warning 30+d</td></tr>
+          <tr><td><code>6: newsletter</code></td><td>Marketing and newsletter emails</td><td><strong>Completes the linked Airtable task</strong> if the email came off label 8, 12 or 13</td><td>Newest first</td><td>Standard (30/14d)</td></tr>
+          <tr><td><code>7: delete</code></td><td>Emails to unsubscribe from and bin</td><td><strong>Completes the linked Airtable task</strong> if the email came off label 8, 12 or 13</td><td>Newest first</td><td>Standard (30/14d)</td></tr>
+          <tr><td><code>8: task created</code></td><td>Work for Mica</td><td><strong>Creates an Airtable task assigned to Mica</strong> and sends her a Slack message</td><td>Oldest first</td><td>Critical 14+d, Warning 7–13d</td></tr>
+          <tr><td><code>9: task completed</code></td><td>Archive of finished inbound tasks (from labels 8 and 12)</td><td><strong>Completes the linked Airtable task.</strong> The app also moves emails here on its own once the task is marked Completed in Airtable</td><td>Oldest first</td><td>Standard (30/14d)</td></tr>
+          <tr><td><code>10: property compliance</code></td><td>Compliance certificate emails</td><td>AI reads the email and creates a certificate record in Airtable (GSC, EICR, Landlord Insurance, Fire Alarm). See section 11</td><td>Oldest first</td><td>Standard (30/14d)</td></tr>
+          <tr><td><code>11: tenancy docs</code></td><td>Signed tenancy paperwork and tenant documents</td><td>AI matches the email to an active tenancy, appends the Gmail link to that tenancy's <code>Document Links</code> field, and stars the email. If it cannot match, it creates a task for Mica instead. No task is created on a successful match</td><td>Oldest first</td><td>Standard (30/14d)</td></tr>
+          <tr><td><code>12: kevin to respond</code></td><td>Work only Kevin can do</td><td><strong>Creates an Airtable task assigned to Kevin</strong> and sends him a Slack message</td><td>Oldest first</td><td>Critical 14+d, Warning 7–13d</td></tr>
+          <tr><td><code>13: maintenance</code></td><td>Property repairs and contractor jobs</td><td><strong>Creates an unassigned Airtable maintenance ticket</strong> and tries to match it to a property. No Slack message, because there is no assignee yet</td><td>Oldest first</td><td>Standard (30/14d)</td></tr>
+          <tr><td><code>14: maintenance completed</code></td><td>Archive of finished maintenance jobs (from label 13)</td><td><strong>Completes the linked Airtable task.</strong> The app also moves emails here on its own once the maintenance ticket is marked Completed in Airtable</td><td>Oldest first</td><td>Standard (30/14d)</td></tr>
         </tbody>
       </table>
+    </div>
+    <div class="info-box warn">
+      <span class="ib-icon">&#x26A0;</span>
+      <div><strong>Labels 4, 5, 6 and 7 are not just filing.</strong> If the email is sitting on label 8, 12 or 13, moving it to any of those four marks the linked Airtable task <strong>Completed</strong> straight away, with no confirmation prompt. Filing a thread as a newsletter or for deletion closes the job attached to it. If you only meant to tidy the inbox, move the email to a label that is not 4, 5, 6, 7, 9 or 14 first.</div>
+    </div>
+    <div class="info-box info">
+      <span class="ib-icon">&#x2139;</span>
+      <div>Other numbered labels exist in the Gmail account (for example <code>15: meeting summary</code>, <code>16: onboarding contract signed</code>, <code>17: OD Prospects</code>, <code>18: creditor</code>). They appear in the dropdown because they match the number pattern, but Inbound Comms has no special handling for them. They are driven by other systems.</div>
     </div>
   </div>
 </div>
@@ -500,12 +558,12 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
         <tbody>
           <tr>
             <td><strong>Respond</strong></td>
-            <td>Label 1: To Respond</td>
+            <td>Labels 1, 8 and 12</td>
             <td>Opens the Draft modal. Claude Sonnet drafts a response. You can edit, add attachments, revise with feedback, then send. Sends with "Send &rarr; Responded" (moves to label 5) or "Send &rarr; Follow Up" (moves to label 2).</td>
           </tr>
           <tr>
             <td><strong>Follow up</strong></td>
-            <td>Labels 2, 8, and any unlisted label</td>
+            <td>Label 2, and any label without its own action button (9, 11, 13, 14)</td>
             <td>Opens the Draft modal. Claude Sonnet drafts a follow-up message. Same send options as Respond.</td>
           </tr>
           <tr>
@@ -516,7 +574,7 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
           <tr>
             <td><strong>Apply</strong></td>
             <td>Inbox (Unlabelled)</td>
-            <td>Applies the selected label from the adjacent dropdown to the email, removes it from the inbox, and records AI accuracy. If label 8 is selected, auto-creates an Airtable task.</td>
+            <td>Applies the selected label from the adjacent dropdown to the email, removes it from the inbox, and records AI accuracy. If label 8, 12 or 13 is selected, auto-creates an Airtable task. Applying a completion label from the inbox does not close anything, because the email was not on a task label.</td>
           </tr>
           <tr>
             <td><strong>Read</strong></td>
@@ -738,25 +796,108 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
 <div class="section" id="task-automation">
   <h2 class="section-title"><span class="icon">&#x1F4CA;</span> 10. Airtable Task Automation</h2>
 
+  <div class="info-box danger">
+    <span class="ib-icon">&#x26A0;</span>
+    <div><strong>Read this before you file anything.</strong> Three labels create Airtable tasks (8, 12, 13) and six labels close them (4, 5, 6, 7, 9, 14). Moving an email off 8, 12 or 13 onto any of the six marks the linked task <strong>Completed</strong> with no confirmation and no way to undo it from this page. "Just tidying the inbox" is how open work gets closed by accident.</div>
+  </div>
+
   <div class="card">
-    <div class="card-header">How it works</div>
-    <p>When an email is moved to <strong>label 8: Task created</strong> (via the label dropdown or the inbox Apply button), the app automatically:</p>
+    <div class="card-header">The three labels that create tasks</div>
+    <p>Moving an email onto <strong>8</strong>, <strong>12</strong> or <strong>13</strong> creates one Airtable task, whether you use the "Move to..." dropdown on a label view or the Apply button in the inbox. Which label you pick decides who gets the work and how urgent it is.</p>
+    <div style="overflow-x:auto;">
+      <table class="label-table">
+        <thead>
+          <tr><th>Label</th><th>Assigned to</th><th>Status</th><th>Priority</th><th>Due date</th><th>Other fields</th><th>Slack message</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>8: task created</code></td>
+            <td><strong>Mica Albovias</strong><br><code>usrP7K5pmPSdVVgTN</code></td>
+            <td>Today</td>
+            <td>Urgent</td>
+            <td>Today's date</td>
+            <td>Time Estimate 15 min</td>
+            <td>Yes, to <code>micaa.work@gmail.com</code></td>
+          </tr>
+          <tr>
+            <td><code>12: kevin to respond</code></td>
+            <td><strong>Kevin Brittain</strong><br><code>usrKkopUJSGsBhWMD</code></td>
+            <td>Today</td>
+            <td>Urgent</td>
+            <td>Today's date</td>
+            <td>Time Estimate 15 min</td>
+            <td>Yes, to <code>kevin@runpreneur.org.uk</code></td>
+          </tr>
+          <tr>
+            <td><code>13: maintenance</code></td>
+            <td><strong>Nobody.</strong> Left unassigned on purpose so the job can be triaged to a contractor</td>
+            <td>Upcoming</td>
+            <td>Not Urgent</td>
+            <td>None</td>
+            <td>Maintenance Ticket ticked, Created Date set, property matched automatically where possible</td>
+            <td>No, because there is no assignee to message</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <p style="margin-top:0.75rem;">Every task, whichever label made it, is created like this:</p>
     <ol class="steps">
-      <li>Checks if a task already exists for this thread (by searching the <code>Inbound Note URL Link</code> field for the Gmail thread ID).</li>
-      <li>Calls Claude Haiku to generate a task title and description.</li>
-      <li>Creates a new record in the Airtable Operations Director base with Status = <strong>Today</strong>, Priority = <strong>Urgent</strong>, Time Estimate = <strong>15 min</strong>.</li>
-      <li>Sets the Gmail thread URL as the <code>Inbound Note URL Link</code> so the task can be traced back.</li>
+      <li>Checks whether a task already exists for this thread, by searching the <code>Inbound Note URL Link</code> field for the Gmail thread ID. If one exists, no second task is created.</li>
+      <li>Calls Claude Haiku to write the task title and description.</li>
+      <li>Creates the record in the Airtable Operations Director base with the values in the table above, plus the sender, the date received and the full message body.</li>
+      <li>Sets the Gmail thread URL as the <code>Inbound Note URL Link</code> so the task can be traced back to the email.</li>
+      <li>Adds the other two team members as collaborators, so everyone can see it but only one person owns it.</li>
+      <li>Uploads any real attachments from the email to the task in the background. Inline images such as logos and signatures are skipped.</li>
     </ol>
+    <div class="info-box info">
+      <span class="ib-icon">&#x1F504;</span>
+      <div>If a task already exists for the thread, moving between 8, 12 and 13 <strong>reassigns</strong> it rather than creating a second one. If the existing task was already Completed, the move <strong>reopens</strong> it and sets it back to Today.</div>
+    </div>
     <div class="info-box warn">
       <span class="ib-icon">&#x26A0;</span>
-      <div>Airtable integration requires a Personal Access Token configured in Settings. Without it, moving to label 8 will show an error and no task will be created. The email moves to the label regardless.</div>
+      <div>Airtable integration needs a Personal Access Token set in Settings. Without it, moving to 8, 12 or 13 shows an error and no task is created. The email still moves to the label, so the work looks filed when nothing has been logged.</div>
     </div>
   </div>
 
   <div class="card">
-    <div class="card-header">Auto-completion detection (label 8 &rarr; 9)</div>
-    <p>Every time you load <strong>label 8</strong>, the app queries Airtable for inbound tasks (<code>Inbound Communication Task = true</code>) with Status = <strong>Completed</strong> and a Gmail URL in the <code>Inbound Note URL Link</code> field.</p>
-    <p>Any loaded emails that match are automatically moved from label 8 to <strong>label 9: Task completed</strong> in Gmail, and removed from the current list. A success banner shows how many were moved.</p>
+    <div class="card-header">The six labels that complete tasks</div>
+    <p>The app treats these six labels as "the work is finished": <strong>4: paid</strong>, <strong>5: responded</strong>, <strong>6: newsletter</strong>, <strong>7: delete</strong>, <strong>9: task completed</strong> and <strong>14: maintenance completed</strong>.</p>
+    <p>Moving an email <em>from</em> label 8, 12 or 13 <em>onto</em> any of those six sets the linked Airtable task to <strong>Completed</strong> straight away. A banner confirms it after the fact. There is no "are you sure?" prompt.</p>
+    <div class="info-box danger">
+      <span class="ib-icon">&#x1F6A8;</span>
+      <div>Labels 6 and 7 are the dangerous pair. They read as housekeeping, so it is natural to use them to clear a thread you have finished reading. If that thread is on 8, 12 or 13, you have just closed the job. Marking it as a newsletter or for deletion completes the task exactly as "responded" would.</div>
+    </div>
+    <p><strong>What does not complete a task:</strong></p>
+    <ul>
+      <li>Applying 4, 5, 6 or 7 to an email straight from the inbox. There is no task-linked label to move off, so nothing is closed.</li>
+      <li>Moving from 8, 12 or 13 to labels 1, 2, 3, 10 or 11. The task is left alone, on the assumption you are re-triaging.</li>
+      <li>Clicking <strong>Undo</strong> on the toast. Undo only puts the Gmail labels back. It does <strong>not</strong> reopen the Airtable task. To reopen it, move the email back onto 8, 12 or 13.</li>
+    </ul>
+  </div>
+
+  <div class="card">
+    <div class="card-header">Automatic moves in the other direction</div>
+    <p>The app also moves emails on its own, based on what happens in Airtable. A background sweep runs on page load, every 5 minutes, and whenever you come back to the tab. It runs no matter which view you have open.</p>
+    <ul>
+      <li><strong>Task completed in Airtable</strong> &rarr; the email moves from 8 or 12 to <strong>9: task completed</strong>. From 13 it moves to <strong>14: maintenance completed</strong> instead.</li>
+      <li><strong>Task reassigned to Kevin in Airtable</strong> &rarr; the email moves from 8 to <strong>12</strong>.</li>
+      <li><strong>Task reassigned to Mica in Airtable</strong> &rarr; the email moves from 12 to <strong>8</strong>.</li>
+      <li><strong>Maintenance tickets never move on reassignment.</strong> A thread on 13 stays on 13 whoever picks it up.</li>
+    </ul>
+    <p>The same completion check also runs in the foreground each time you open label 8, 12 or 13, so the list you are looking at is current. A success banner shows how many emails were moved.</p>
+    <p>The app finds these tasks by querying Airtable for records with <code>Inbound Communication Task = true</code>, Status = <strong>Completed</strong>, and a Gmail URL in the <code>Inbound Note URL Link</code> field.</p>
+  </div>
+
+  <div class="card">
+    <div class="card-header">Label 11: tenancy docs (links a document, does not create a task)</div>
+    <p>Label 11 is the odd one out. It does not create a task when it works properly.</p>
+    <ol class="steps">
+      <li>Pulls the list of active tenancies (those with no end date) from Airtable.</li>
+      <li>Asks Claude Haiku which tenancy the email belongs to, using the tenant surname or the property address in the thread.</li>
+      <li>On a confident match: appends the Gmail thread link to that tenancy's <code>Document Links</code> field (append-only, nothing is overwritten) and stars the email in Gmail so you can see it worked.</li>
+      <li>Only if it cannot match: creates an Airtable task for <strong>Mica</strong> asking her to link it by hand.</li>
+    </ol>
+    <p>A background sweep re-tries unlinked tenancy-doc emails every 5 minutes. It skips starred threads and checks for an existing task first, so it cannot flood Mica with duplicates.</p>
   </div>
 
   <div class="card">
@@ -767,7 +908,11 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
         <tbody>
           <tr><td>Base ID</td><td><code>appnqjDpqDniH3IRl</code></td></tr>
           <tr><td>Table ID (Tasks)</td><td><code>tblqB8b22hKBL4PF1</code></td></tr>
-          <tr><td>Default Assignee</td><td><code>usrP7K5pmPSdVVgTN</code> (Mica Albovias)</td></tr>
+          <tr><td>Table ID (Tenancies, used by label 11)</td><td><code>tblN51a88qTDB6iMH</code></td></tr>
+          <tr><td>Default assignee (label 8 and the label 11 fallback)</td><td><code>usrP7K5pmPSdVVgTN</code> (Mica Albovias)</td></tr>
+          <tr><td>Label 12 assignee</td><td><code>usrKkopUJSGsBhWMD</code> (Kevin Brittain)</td></tr>
+          <tr><td>Label 13 assignee</td><td>None. Maintenance tickets are created unassigned</td></tr>
+          <tr><td>Third team member (added as collaborator)</td><td><code>usrejWz04hiXxxgVa</code> (Ericamae Atenta)</td></tr>
           <tr><td>Completed status option ID</td><td><code>selI6Otekm3JyaBSJ</code></td></tr>
         </tbody>
       </table>
@@ -978,8 +1123,16 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
       <div class="ts-solution">The label name in the dropdown does not match a label in your Gmail account. This can happen if a label was renamed or deleted. Click Refresh to reload labels.</div>
     </div>
     <div class="ts-item">
-      <div class="ts-problem">Airtable task not created when moving to label 8</div>
-      <div class="ts-solution">Check Settings — your Airtable PAT must be set. The error message "Airtable token not configured" confirms this. Also check that the base ID and table ID are correct (defaults: <code>appnqjDpqDniH3IRl</code> / <code>tblqB8b22hKBL4PF1</code>).</div>
+      <div class="ts-problem">Airtable task not created when moving to label 8, 12 or 13</div>
+      <div class="ts-solution">Check Settings — your Airtable PAT must be set. The error message "Airtable token not configured" confirms this. Also check that the base ID and table ID are correct (defaults: <code>appnqjDpqDniH3IRl</code> / <code>tblqB8b22hKBL4PF1</code>). Remember the email moves to the label even when the task fails, so re-check Airtable rather than assuming the move logged the work.</div>
+    </div>
+    <div class="ts-item">
+      <div class="ts-problem">An Airtable task went Completed and nobody completed it</div>
+      <div class="ts-solution">Someone filed the email. Moving a thread off label 8, 12 or 13 onto 4, 5, 6, 7, 9 or 14 completes the linked task automatically. To reopen it, move the email back onto 8, 12 or 13. That sets the task to Today and reassigns it. The Audit Log in Settings records every one of these moves, so you can see which label change did it.</div>
+    </div>
+    <div class="ts-item">
+      <div class="ts-problem">An email keeps jumping between label 8 and label 12 on its own</div>
+      <div class="ts-solution">That is the reassignment sweep, and it is working as designed. It runs every 5 minutes and follows the Airtable assignee: a task assigned to Kevin pulls the email to label 12, a task assigned to Mica pulls it to label 8. Change the assignee in Airtable rather than fighting the label in Gmail.</div>
     </div>
     <div class="ts-item">
       <div class="ts-problem">Compliance processing shows "No Match" or "Failed"</div>
@@ -1036,6 +1189,11 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
       <table class="label-table">
         <thead><tr><th>Version</th><th>Date</th><th>Changes</th></tr></thead>
         <tbody>
+          <tr>
+            <td><strong>2.56</strong></td>
+            <td>10 Aug 2026</td>
+            <td>Documented labels 11 to 14, which had been live but missing from this SOP. Added the two task-creating labels the SOP never mentioned (12: kevin to respond, 13: maintenance) with their assignees and field defaults, and the label 11 tenancy-doc auto-link. Added explicit warnings that labels 4, 5, 6, 7, 9 and 14 complete the linked Airtable task when an email is moved off 8, 12 or 13, and that Undo does not reopen it. Corrected label names to the exact Gmail spellings, corrected the sort order for labels 9 and 10 (oldest first, not newest), corrected which labels show live counts (1, 2, 3, 8, 12, 13 and 10), and documented the 5-minute background completion and reassignment sweeps.</td>
+          </tr>
           <tr>
             <td><strong>2.4</strong></td>
             <td>8 May 2026</td>
