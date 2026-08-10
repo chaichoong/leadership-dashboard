@@ -451,8 +451,16 @@ def cmd_audit(args):
     for gap, n in sorted(counts.items(), key=lambda kv: -kv[1]):
         print(f"  missing {gap}: {n}")
     print(f"  stale (over {STALE_DAYS} days past due): {len(stale)}")
-    print(f"  completed in {COMPLETED_WINDOW_DAYS}d still missing a time estimate or business: {len(completed)}"
+    # Split these two. Only a missing TIME ESTIMATE makes completed work invisible to
+    # the AI-share KPI — it drops out of both numerator and denominator. A missing
+    # business only weakens attribution. Reporting them as one number implied the
+    # metric was degraded when its input was actually at 100%.
+    no_est = sum(1 for c in completed if "timeEstimate" in c["gaps"])
+    no_biz = sum(1 for c in completed if "business" in c["gaps"])
+    print(f"  completed in {COMPLETED_WINDOW_DAYS}d missing a TIME ESTIMATE: {no_est}"
           f"  <- these are invisible to the AI-share KPI")
+    print(f"  completed in {COMPLETED_WINDOW_DAYS}d missing a business: {no_biz}"
+          f"  (attribution only; the KPI is unaffected)")
     print(f"Work-list: {path}")
     return 0
 
