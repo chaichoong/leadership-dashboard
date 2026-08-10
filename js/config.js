@@ -30,10 +30,10 @@
         { id: 'ar-variable', name: 'Accounts Receivable Variable', icon: '📤', pageVer: '1.1', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#ar-variable' },
         { id: 'costs',      name: 'Accounts Payable Fixed',        icon: '📋', pageVer: '1.8', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#costs' },
         { id: 'invoices',   name: 'Accounts Payable Variable',     icon: '🧾', pageVer: '2.18', sopFile: 'sop-invoices.html',           sopVer: '2.18', standalone: 'index.html#invoices' },
-        { id: 'pnl',        name: 'Profit & Loss',                 icon: '💰', pageVer: '2.26', sopFile: 'sop-pnl.html',               sopVer: '2.26', standalone: 'index.html#pnl' },
+        { id: 'pnl',        name: 'Profit & Loss',                 icon: '💰', pageVer: '2.27', sopFile: 'sop-pnl.html',               sopVer: '2.26', standalone: 'index.html#pnl' },
         { id: 'transactions', name: 'Transactions',                icon: '🔍', pageVer: '1.1', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#transactions' },
         { id: 'comms',      name: 'Inbound Comms',                 icon: '📨', pageVer: '2.56', sopFile: 'inbound-comms-sop.html',      sopVer: '2.56', standalone: 'follow-up.html' },
-        { id: 'compliance', name: 'Property Compliance',            icon: '✅', pageVer: '1.13', sopFile: 'sop-compliance.html',         sopVer: '1.13', standalone: 'compliance.html' },
+        { id: 'compliance', name: 'Property Compliance',            icon: '✅', pageVer: '1.14', sopFile: 'sop-compliance.html',         sopVer: '1.13', standalone: 'compliance.html' },
         { id: 'operations',  name: 'Operations',                    icon: '🏢', pageVer: '1.44', sopFile: '',                            sopVer: '1.0', standalone: 'os/operations/index.html' },
         // KPI Library (Leadership section) — ADMIN ONLY. Never rendered in a
         // client tenant's shell; the adminOnly flag is the contract the Supabase
@@ -50,7 +50,7 @@
         // this now reads as the version gap it always was.
         { id: 'crm',        name: 'CRM',                           icon: '👥', pageVer: '1.1', sopFile: 'guides/crm.html',             sopVer: '1.0', standalone: 'crm-supabase.html' },
         { id: 'content-machine', name: 'Content Machine',           icon: '🎬', pageVer: '1.0', sopFile: '',                            sopVer: '1.0', standalone: 'https://chaichoong.github.io/content-machine/' },
-        { id: 'prospecting', name: 'Prospecting',                   icon: '🧲', pageVer: '1.9', sopFile: 'sop-prospecting.html',        sopVer: '1.3', standalone: 'index.html#prospecting' },
+        { id: 'prospecting', name: 'Prospecting',                   icon: '🧲', pageVer: '1.10', sopFile: 'sop-prospecting.html',        sopVer: '1.3', standalone: 'index.html#prospecting' },
         { id: 'sitemap',    name: 'Site Map & Guides',             icon: '🔗', pageVer: '1.19', sopFile: 'sop-sitemap.html',            sopVer: '1.2', standalone: 'index.html#sitemap' },
         { id: 'skills',     name: 'Skills Library',                icon: '🧠', pageVer: '1.4', sopFile: 'guides/skills.html',           sopVer: '1.0', standalone: 'index.html#skills' },
         { id: 'ai-brain',  name: 'AI Brain',                       icon: '💭', pageVer: '1.0', sopFile: 'guides/ai-brain.html',         sopVer: '1.0', standalone: 'ai-brain.html' },
