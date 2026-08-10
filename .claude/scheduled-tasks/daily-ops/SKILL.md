@@ -31,6 +31,11 @@ python3 scripts/job-queue.py ready daily-ops
 
 If it reports NOT READY, wait 60 seconds and try again, up to 15 times. If it is still not ready after that, note it and continue anyway: a wrong probe must not cost the whole day's run. Record what you saw either way.
 
+Then leave proof you ran. You deliberately do not take the queue lock, so without this line there is no evidence you started, and the guard cannot tell "nothing else ran" from "nothing ran at all":
+
+```
+python3 scripts/job-queue.py mark daily-ops
+```
 
 Then check nothing has started stacking up behind your back:
 
@@ -38,7 +43,7 @@ Then check nothing has started stacking up behind your back:
 python3 scripts/check-routines.py
 ```
 
-Exit 0 means you are still the only enabled routine. **Anything else goes at the TOP of your report to Kevin**, because a second routine will overlap with you and that is the whole failure this run exists to prevent. Do not disable it yourself: somebody added it to solve a real problem, and the right answer is to fold that work in as a phase, which is Kevin's call. Say which routine, and say that daily work belongs in the main sequence while anything weekly, monthly or quarterly belongs in phase 6b behind a date check.
+Exit 0 means you are still the only routine that actually ran. **Anything else goes at the TOP of your report to Kevin**, because a second routine will overlap with you and that is the whole failure this run exists to prevent. Do not disable it yourself: somebody added it to solve a real problem, and the right answer is to fold that work in as a phase, which is Kevin's call. Say which routine, and say that daily work belongs in the main sequence while anything weekly, monthly or quarterly belongs in phase 6b behind a date check.
 
 ## Phase 2 — CEO huddle
 

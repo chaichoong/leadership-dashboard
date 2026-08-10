@@ -898,6 +898,15 @@ def main(argv=None):
     sp = sub.add_parser("due")
     sp.add_argument("job")
 
+    # For a job that must leave PROOF IT RAN without taking the lock. daily-ops
+    # is the case: it holds the machine for an hour or two, so taking the lock
+    # would block every short shell job behind it — but check-routines.py needs
+    # evidence it ran, and "no evidence" is indistinguishable from "never
+    # started". Writes one event, touches no lock state.
+    sp = sub.add_parser("mark")
+    sp.add_argument("job")
+    sp.add_argument("--note", default="")
+
     argv = list(sys.argv[1:] if argv is None else argv)
     trailing = []
     if "--" in argv:
@@ -935,6 +944,10 @@ def main(argv=None):
         stale, late, reason = staleness(a.job, load_schedule())
         print("%s: %s (%s)" % (a.job, "STALE" if stale else "fresh", reason))
         return EX_SKIPPED if stale else EX_OK
+    if a.cmd == "mark":
+        rec = event(a.job, "mark", note=a.note)
+        print("%s: marked as running at %s" % (a.job, rec["ts"]))
+        return EX_OK
     return EX_USAGE
 
 

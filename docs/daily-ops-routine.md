@@ -82,14 +82,37 @@ Whatever the frequency, three things hold:
 
 ### The guard
 
-`scripts/check-routines.py` asserts exactly one enabled Claude routine, reading
-the **scheduler's own store** rather than our config, because a routine created
-through the app never touches our config. It runs twice: phase 1 of this routine,
-and the 11:00 morning digest — the second one matters because if this routine
-stops running, its own self-check stops with it.
+`scripts/check-routines.py` asserts that only `daily-ops` actually RUNS. It runs
+twice: phase 1 of this routine, and the 11:00 morning digest — the second one
+matters because if this routine stops running, its own self-check stops with it.
 
-A store it cannot find, or one holding zero tasks, **fails**. Those are precisely
-the states that would otherwise read as "no extra routines, all clear" for ever.
+**It reads behaviour, not config, and that is a deliberate correction.** Until
+10 Aug 2026 it read the scheduler's own `scheduled-tasks.json`. That turned out
+to be a file the app no longer writes: calling the scheduler API to disable a
+routine and to change its description both reported success while the file's
+mtime never moved, and its `description` fields sit empty while the scheduler
+reports full ones. So the guard cried stacking over `uc-check-slack-notifier`,
+which was already disabled and had not fired since 8 Aug, and that false alarm
+reddened the pre-push gate for `main`. The mirror image was worse: a routine
+genuinely enabled tomorrow would not have appeared in that file either.
+
+Config that nothing writes cannot fail loudly. So the guard now reads
+`queue-events.jsonl`, which every job writes for itself as it runs, and asks a
+different question: **did any routine other than `daily-ops` actually run in the
+last 26 hours?** A routine sitting enabled but never firing harms nobody; two
+routines writing at once is the whole injury.
+
+A routine is a folder under `~/.claude/scheduled-tasks/` with a `SKILL.md` in it.
+That is what separates one from the registered shell jobs, which take the same
+lock perfectly legitimately several times a day.
+
+Four states **fail** rather than passing, because each would otherwise read as
+"no extra routines, all clear" for ever: the event log missing, the window
+holding zero events of any kind, the routine folder unreadable or empty, and
+`daily-ops` itself leaving no mark.
+
+**Known limit, stated rather than hidden:** this sees a routine that takes the
+queue lock. One re-enabled and then edited to skip the lock would run unseen.
 
 ---
 
@@ -123,6 +146,11 @@ python3 scripts/job-queue.py ready daily-ops
 
 If it reports NOT READY, wait 60 seconds and try again, up to 15 times. If it is still not ready after that, note it and continue anyway: a wrong probe must not cost the whole day's run. Record what you saw either way.
 
+Then leave proof you ran. You deliberately do not take the queue lock, so without this line there is no evidence you started, and the guard cannot tell "nothing else ran" from "nothing ran at all":
+
+```
+python3 scripts/job-queue.py mark daily-ops
+```
 
 Then check nothing has started stacking up behind your back:
 
@@ -130,7 +158,7 @@ Then check nothing has started stacking up behind your back:
 python3 scripts/check-routines.py
 ```
 
-Exit 0 means you are still the only enabled routine. **Anything else goes at the TOP of your report to Kevin**, because a second routine will overlap with you and that is the whole failure this run exists to prevent. Do not disable it yourself: somebody added it to solve a real problem, and the right answer is to fold that work in as a phase, which is Kevin's call. Say which routine, and say that daily work belongs in the main sequence while anything weekly, monthly or quarterly belongs in phase 6b behind a date check.
+Exit 0 means you are still the only routine that actually ran. **Anything else goes at the TOP of your report to Kevin**, because a second routine will overlap with you and that is the whole failure this run exists to prevent. Do not disable it yourself: somebody added it to solve a real problem, and the right answer is to fold that work in as a phase, which is Kevin's call. Say which routine, and say that daily work belongs in the main sequence while anything weekly, monthly or quarterly belongs in phase 6b behind a date check.
 
 ## Phase 2 — CEO huddle
 

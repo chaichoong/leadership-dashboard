@@ -1,6 +1,6 @@
 ---
 name: uc-check-slack-notifier
-description: ABSORBED into daily-ops (8 Aug 2026) as phase 6.1. Do not re-enable separately.
+description: ABSORBED into daily-ops (8 Aug 2026) as phase 6.1. Do not re-enable separately. Disable reconfirmed 10 Aug 2026.
 ---
 
 ## QUEUE AND WRITE POLICY (added 6 Aug 2026 — do this before anything else)
