@@ -3595,13 +3595,15 @@ function renderApprovalBlock(t){
   if(!mine){
     return `<div class="approval-decided">Waiting for approval from ${escHtml(t.assignee||t.assigneeEmail)}. Reassign it to yourself to decide it here.</div>`;
   }
+  // The agent's proposed work leads the box (Kevin's request, 11 Aug 2026):
+  // the decision is made on the work itself, so it sits first for fast triage.
   const work=t.agentOutput
-    ? `<div class="apv-work"><div class="apv-work-label">What the agent has done</div><div class="apv-work-body">${linkifyUrls(t.agentOutput)}</div></div>`
-    : `<div class="apv-work apv-work-empty"><div class="apv-work-label">What the agent has done</div><div class="apv-work-body">The agent left its work empty, so there is nothing here to judge. Do not approve it blind — ask it to show its work.</div></div>`;
+    ? `<div class="apv-work"><div class="apv-work-label">What the agent wants to do</div><div class="apv-work-body">${linkifyUrls(t.agentOutput)}</div></div>`
+    : `<div class="apv-work apv-work-empty"><div class="apv-work-label">What the agent wants to do</div><div class="apv-work-body">The agent left its work empty, so there is nothing here to judge. Do not approve it blind — ask it to show its work.</div></div>`;
   return `<div class="approval-box">
+    ${work}
     <h3>Waiting for your approval</h3>
     <div class="apv-sub">Nothing has been sent, filed or actioned. ${raiser?`Prepared by <span class="apv-raiser">${escHtml(raiser)}</span>.`:'No agent recorded on this task.'} Approving hands it back so the agent can carry it out.</div>
-    ${work}
     <div style="margin-bottom:8px"><label style="font-size:11px;color:var(--text-secondary);font-weight:600;text-transform:uppercase;letter-spacing:.5px;display:block;margin-bottom:4px">Kind of work (scores the agent)</label>
       <select id="apvType" style="width:100%;background:var(--bg-surface);border:1px solid var(--border-default);color:var(--text-primary);padding:6px 8px;border-radius:4px;font-family:inherit;font-size:var(--fs-base)">
         <option value="">Not set</option>
