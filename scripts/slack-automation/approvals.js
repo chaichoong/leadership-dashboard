@@ -42,6 +42,7 @@
 
 const SLACK = {
     post:     'https://slack.com/api/chat.postMessage',
+    update:   'https://slack.com/api/chat.update',
     history:  'https://slack.com/api/conversations.history',
     replies:  'https://slack.com/api/conversations.replies',
     delete:   'https://slack.com/api/chat.delete',
@@ -110,9 +111,16 @@ const REACTION_OUTCOMES = {
 // real edit after that window is caught.
 const BASELINE_GRACE_MS = 60 * 1000;
 
-// Work caps per run, so one bad day cannot turn into a Slack flood.
+// Work caps per run, so one bad day cannot turn into a Slack flood — and so
+// one run stays inside Cloudflare's ~50-subrequest budget. A reaction check
+// costs up to 2 Slack reads, a reconcile costs 2 writes, a post costs 2. At 25
+// reaction checks the sweep died mid-run on "Too many subrequests" every
+// minute once the queue hit 46 (seen live 11 Aug 2026), and the reconcile
+// phase — which ran last — never executed: 18 tasks Kevin had decided in the
+// dashboard sat showing "waiting" in Slack for over five hours.
 const MAX_POSTS_PER_RUN = 10;
-const MAX_REACTION_CHECKS_PER_RUN = 25;
+const MAX_REACTION_CHECKS_PER_RUN = 12;
+const MAX_RECONCILES_PER_RUN = 10;
 
 // Tier 1 of the delegation rules: Kevin's private legal and financial matter.
 // Agents PREPARE these and he approves them like anything else (his call,
@@ -580,13 +588,22 @@ async function kevinsReplies(env, channel, ts) {
 //   ❌ (with or without a reply) → rejected, any reply attached as the reason
 //   ✏️ alone                → he means "changes" but has not said what yet; ask
 async function processResponses(env, channel, log) {
-    const recs = await queryTasks(env, `AND({Status}='Approval', LEN({Approval Slack TS}&'')>0)`, MAX_REACTION_CHECKS_PER_RUN);
+    // Read the WHOLE queue (one subrequest), then check only this minute's
+    // rotation window. Capping the QUERY at the check limit — the old design —
+    // meant tasks past the cap were never checked at all: a reaction on the
+    // 30th of 46 pending messages would sit unapplied for ever, silently.
+    const all = await queryTasks(env, `AND({Status}='Approval', LEN({Approval Slack TS}&'')>0)`, 100);
+    const win = rotationWindow(all.length, MAX_REACTION_CHECKS_PER_RUN, Math.floor(Date.now() / 60000));
+    const recs = all.slice(win.start, win.end);
+    if (all.length > recs.length) log.push(`reactions: window ${win.start}-${win.end - 1} of ${all.length}, full cycle every ${Math.ceil(all.length / MAX_REACTION_CHECKS_PER_RUN)} min`);
     for (const rec of recs) {
         const t = taskView(rec);
         const msg = await fetchMessage(env, channel, t.ts);
         if (!msg) { log.push(`no message for ${t.id}`); continue; }
         const reaction = kevinsReaction(msg);
-        const replies = await kevinsReplies(env, channel, t.ts);
+        // The replies fetch is a second subrequest per task — skip it when the
+        // parent message says there is no thread to read.
+        const replies = msg.reply_count ? await kevinsReplies(env, channel, t.ts) : [];
         const note = replies.join('\n\n');
         if (!reaction && !replies.length) continue;
 
@@ -642,7 +659,7 @@ async function processResponses(env, channel, log) {
 // the thread so the channel never shows a stale "waiting" post, and clear the
 // timestamp — which is also what stops this running twice on the same task.
 async function reconcileDecidedElsewhere(env, channel, log) {
-    const recs = await queryTasks(env, `AND({Status}!='Approval', LEN({Approval Slack TS}&'')>0)`, 25);
+    const recs = await queryTasks(env, `AND({Status}!='Approval', LEN({Approval Slack TS}&'')>0)`, MAX_RECONCILES_PER_RUN);
     for (const rec of recs) {
         const t = taskView(rec);
         await threadReply(env, channel, t.ts,
@@ -658,6 +675,24 @@ async function reconcileDecidedElsewhere(env, channel, log) {
 
 // ─── ENTRY ────────────────────────────────────────────────────────────
 
+// Pure, exported for tests. Which slice of an n-deep queue this minute's run
+// checks: page (minuteIndex mod pages) of size cap, so every pending task is
+// reached within ceil(n/cap) minutes instead of everything past the cap being
+// reached never.
+export function rotationWindow(total, cap, minuteIndex) {
+    if (total <= cap) return { start: 0, end: total };
+    const pages = Math.ceil(total / cap);
+    const page = ((minuteIndex % pages) + pages) % pages;
+    const start = page * cap;
+    return { start, end: Math.min(start + cap, total) };
+}
+
+// Each phase is isolated: the reactions phase is the expensive one and used to
+// take the whole sweep down with it when it blew the subrequest budget, which
+// starved the phases queued behind it. A failed phase logs and returns -1;
+// the others still run. Phase order is deliberate: post first (a new approval
+// reaching Kevin beats everything), then reconcile (cheap, bounded, and what
+// keeps the channel honest about what is still waiting), then reactions.
 export async function runApprovalSweep(env) {
     const log = [];
     if (!env.SLACK_BOT_TOKEN || !env.AIRTABLE_PAT) {
@@ -665,9 +700,13 @@ export async function runApprovalSweep(env) {
     }
     const ch = await resolveChannel(env);
     log.push(`channel ${ch.id} (${ch.how})`);
-    const posted = await postPending(env, ch.id, log);
-    const checked = await processResponses(env, ch.id, log);
-    const closed = await reconcileDecidedElsewhere(env, ch.id, log);
+    const phase = async (name, fn) => {
+        try { return await fn(); }
+        catch (err) { log.push(`${name} FAILED: ${String(err && err.message || err).slice(0, 200)}`); return -1; }
+    };
+    const posted = await phase('post', () => postPending(env, ch.id, log));
+    const closed = await phase('reconcile', () => reconcileDecidedElsewhere(env, ch.id, log));
+    const checked = await phase('reactions', () => processResponses(env, ch.id, log));
     return { ok: true, channel: ch.id, posted, checked, closed, log };
 }
 
@@ -702,6 +741,42 @@ export async function purgeApprovalPosts(env, match) {
         if (d.ok) deleted.push(m.ts); else return { ok: false, error: d.error, deletedSoFar: deleted.length };
     }
     return { ok: true, channel: ch.id, matched: targets.length, deleted: deleted.length };
+}
+
+// Rewrite ONE live approval message in place to the current block layout
+// (chat.update keeps the ts, the thread and any reactions). One task per call
+// on purpose: a bulk rewrite of a 46-deep queue would blow the Worker's
+// per-invocation subrequest limit — the same limit that failed a manual
+// /approvals/run on 11 Aug 2026 — so the caller loops over record ids instead.
+//
+// The baseline is re-stamped in the SAME pattern as postPending: the edited
+// message shows the task as it stands NOW, so the staleness guard must measure
+// from now, not from the original post. Without this, any task edited since
+// its first post would refuse an approve of content Kevin can actually read.
+export async function rewriteApprovalPost(env, taskId) {
+    const id = String(taskId || '').trim();
+    if (!/^rec[a-zA-Z0-9]{14}$/.test(id)) return { ok: false, error: 'a task record id (?task=recXXXXXXXXXXXXXX) is required' };
+    const ch = await resolveChannel(env);
+    const recs = await queryTasks(env, `RECORD_ID()='${id}'`, 1);
+    if (!recs.length) return { ok: false, error: `task ${id} not found` };
+    const t = taskView(recs[0]);
+    if (t.status !== 'Approval' || !t.ts) return { ok: false, error: `task ${id} has no live approval message (status ${t.status || 'unknown'}, ts ${t.ts ? 'set' : 'empty'})` };
+    const agent = await agentName(env, t.agentId);
+    const warn = isKevinOnlyMatter(`${t.name} ${t.description}`);
+    const res = await slack(env, SLACK.update, {
+        method: 'POST',
+        body: JSON.stringify({
+            channel: ch.id,
+            ts: t.ts,
+            text: `Approval needed: ${t.name}`,
+            blocks: buildApprovalBlocks(t, agent, warn),
+        }),
+    });
+    if (!res.ok) return { ok: false, error: res.error, task: id };
+    await airtable(env, 'PATCH', `/${TABLE_TASKS}/${t.id}`, {
+        fields: { [AF.slackBaseline]: new Date().toISOString() }, typecast: true,
+    });
+    return { ok: true, task: t.id, ts: t.ts };
 }
 
 // Read-only diagnostics for wiring this up: which bot, which scopes, which
