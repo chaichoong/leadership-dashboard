@@ -527,6 +527,10 @@ async function applyDecision(env, t, outcome, decidedVia, note) {
     } else {
         fields[AF.status] = 'Today';
         fields[AF.dueDate] = now.slice(0, 10);
+        // Reopening MUST clear the completion stamp, or a task completed once
+        // and later approved keeps counting as finished work in every
+        // throughput and Completed Month figure. Same rule as the Tasks page.
+        fields[AF.completion] = null;
     }
     if (t.agentId) {
         fields[AF.teamMember] = [t.agentId];
