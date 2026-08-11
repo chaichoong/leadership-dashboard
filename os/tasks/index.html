@@ -3658,6 +3658,11 @@ async function apvDecide(taskId,outcome){
     // Back to the agent, due today, so the approved action gets carried out.
     payload[F.status]='Today';
     payload[F.dueDate]=todayStr();
+    // Reopening MUST clear the completion stamp. A task that was completed,
+    // then sent for approval and approved, kept its old stamp for ever and
+    // counted as finished work in every throughput and Completed Month figure
+    // (88 open tasks were carrying one on 11 Aug 2026).
+    payload[F.completion]=null;
   }
   if(agentId){
     payload[F.teamMember]=[agentId];

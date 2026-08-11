@@ -589,6 +589,10 @@ def cmd_submit(args):
         AF["approvalOutcome"]: None,
         AF["approvalFeedback"]: None,
         AF["approvedAt"]: None,
+        # Submitting reopens the task, so the completion stamp goes too. A task
+        # completed once and later resubmitted kept its old stamp and stayed in
+        # every throughput and Completed Month figure as finished work.
+        AF["completion"]: None,
     })
     print(json.dumps({"submitted": args.task,
                       "agent": AGENTS[args.agent]["name"],

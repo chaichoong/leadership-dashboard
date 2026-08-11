@@ -184,7 +184,12 @@ test.describe('Agent approval loop', () => {
     // Approving is NOT completing. The agent still has to carry the action out.
     expect(f[F.status]).toBe('Today');
     expect(f[F.status]).not.toBe('Completed');
-    expect(f[F.completion]).toBeUndefined();
+    // Stronger than the original `toBeUndefined()`. Leaving the field alone was
+    // the bug (20260811-daily-ops-091): a task completed once and later approved
+    // kept its old stamp and stayed in every throughput and Completed Month
+    // figure as finished work — 88 open tasks were carrying one on 11 Aug 2026.
+    // Approving must actively clear it, and must still never stamp one.
+    expect(f[F.completion], 'approving must clear any stale completion stamp').toBeNull();
   });
 
   test('an agent cannot move a task from Approval straight to Completed', async ({ page }) => {
