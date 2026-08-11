@@ -277,6 +277,20 @@ Write the full report to `monitoring/drift-{date}.md` with this structure:
 - Do NOT make destructive changes. Auto-fixes should only add comments, update config.js references, or fix simple naming.
 - If a field was deleted from Airtable, do NOT delete it from code — comment it out with `// DRIFT: removed from Airtable {date}` so Kevin can review.
 - If CHECK 4 fails because no browser is available, that's fine — note it and continue.
-- Always commit the drift report and schema snapshot even if no issues found.
+- Always WRITE the drift report and schema snapshot to `monitoring/`, even if no issues found.
 - Update monitoring/reference-map.json if new fields were added to config.js since last run.
-- git add monitoring/ and commit: "chore: drift report {date}" — push to main.
+
+## Leave the record, do not commit it
+
+Write the report to `monitoring/` and stop there. Do NOT `git add`, commit, pull,
+rebase or push. This step used to push straight to main every morning, alongside
+two other routines doing the same thing, which is how the tree ended up dirty
+across four unrelated features on 6 Aug 2026.
+
+Phase 8 of `daily-ops` (queue-fixer) commits every report, in one worktree, in one
+PR. The audit trail still lands daily; it just lands once, from one writer.
+
+This file carried the read-only rule at the top AND a "push to main" line at the
+bottom for two days after the single-writer rule was adopted (finding
+20260808-queue-fixer-016). A rule contradicted later in the same document is not
+a rule.

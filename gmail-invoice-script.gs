@@ -318,6 +318,30 @@ function parseThread(thread, cache) {
 // Airtable API Helpers
 // ═══════════════════════════════════════════
 
+// Read EVERY thread in a Gmail label, one page at a time.
+//
+// getThreads(start, max) caps at 100 per call and gives no signal that it
+// truncated. The only way to know you have them all is to keep asking until a
+// page comes back short. PAGE_LIMIT is a safety stop so a pathological label
+// cannot spin this forever; hitting it is reported as a truncated read rather
+// than passed off as a complete one.
+var THREAD_PAGE_SIZE = 100;
+var THREAD_PAGE_LIMIT = 100;   // 10,000 threads
+function readAllThreads(label) {
+  var all = [];
+  for (var page = 0; page < THREAD_PAGE_LIMIT; page++) {
+    var batch = label.getThreads(page * THREAD_PAGE_SIZE, THREAD_PAGE_SIZE);
+    all = all.concat(batch);
+    // A short page is the end of the label. A full page means there may be more.
+    if (batch.length < THREAD_PAGE_SIZE) {
+      all.truncated = false;
+      return all;
+    }
+  }
+  all.truncated = true;
+  return all;
+}
+
 // Reconcile Airtable status against Gmail "3: to pay" label.
 // Source of truth = Gmail. Any Airtable record whose threadId is currently
 // in the label should be Unpaid; any Unpaid Airtable record whose thread is
@@ -329,8 +353,28 @@ function reconcileWithGmail() {
   var label = findLabelByNumber(3, '3: to pay');
   if (!label) return { error: 'Gmail label "3: to pay" not found' };
 
-  // Gmail truth set
-  var gmailThreads = label.getThreads(0, 100);
+  // Gmail truth set — EVERY thread in the label, not the first page of it.
+  //
+  // This read used to be a single getThreads call for the first 100. Gmail
+  // returns at most 100 threads per call, and the function never paged, so once
+  // the label held more than 100
+  // emails every thread past the first 100 was ABSENT from this set — and
+  // absence is exactly how the code below recognises "this has been paid". It
+  // set Status = Paid and stamped a Paid Date on genuinely unpaid invoices.
+  // Nothing errored, and the numbers stayed plausible. Same class as the
+  // recon-accuracy incident (Aug 2026), which measured the first 100 of 259 rows
+  // and read as correct for a month.
+  var gmailThreads = readAllThreads(label);
+  if (gmailThreads.truncated) {
+    // A partial truth set would mark every unread thread as Paid. Refuse rather
+    // than write: a wrong Paid Date is much harder to notice than a failed run.
+    return {
+      error: 'Gmail label "3: to pay" returned more than ' +
+             (THREAD_PAGE_SIZE * THREAD_PAGE_LIMIT) + ' threads. Refusing to ' +
+             'reconcile from a partial read — everything missing from it would ' +
+             'be marked Paid.'
+    };
+  }
   var gmailIds = {};
   for (var g = 0; g < gmailThreads.length; g++) {
     gmailIds[gmailThreads[g].getId()] = true;

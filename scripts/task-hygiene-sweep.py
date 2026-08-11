@@ -119,11 +119,22 @@ COMPLETED_WINDOW_DAYS = 30
 COMPLETED_FIELDS = ("timeEstimate", "business")
 
 # Writable fields, by tier. Nothing outside this map can ever be written by the sweep.
+#
+# teamMember is here because without it the sweep could not express its own rule.
+# SKILL.md says AI FIRST: route unowned work to an agent via Team Member, and name
+# a human only when a person is genuinely required. But Team Member was unwritable,
+# so the ONLY owner the sweep could ever propose was a human — and a human write
+# also fires a Slack DM, so the code gap quietly became a permanent assignment
+# nobody unwinds. On 11 Aug 2026 od-ceo had to overrule two proposals (a tenant leak
+# and a council EICR chase) and leave them unowned rather than write Mica.
+# Compliance improved while the north star got worse. Pending tier: Kevin still
+# approves every one.
 WRITABLE = {
     "timeEstimate": "auto",
     "business": "auto",
     "dueDate": "auto",
     "assignee": "pending",
+    "teamMember": "pending",
     "project": "pending",
     "recurring": "pending",
 }
@@ -236,7 +247,13 @@ def get(rec, key, default=None):
 
 
 def reference_data(token):
-    """Businesses (active only) and projects (not completed) the agent may link to."""
+    """Businesses, projects and AI agents the sweep may link a task to.
+
+    Agents are loaded the same way businesses and projects are, so a proposed
+    Team Member is validated against real record IDs rather than trusted. Only
+    records with 'Is AI Agent' ticked are offered: the sweep proposes AI owners,
+    and a human owner still goes through the Assignee field and its Slack DM.
+    """
     businesses = []
     for rec in fetch_all(token, BUSINESSES, fields=["Business Name", "Active"]):
         if rec["fields"].get("Active"):
@@ -247,7 +264,19 @@ def reference_data(token):
         if status not in ("Completed", "Complete", "Archived"):
             projects.append({"id": rec["id"], "name": rec["fields"].get("Project Name"),
                              "status": status})
-    return businesses, projects
+    agents = []
+    for rec in fetch_all(token, TEAM_MEMBERS_TBL, fields=["Name", TM_IS_AGENT]):
+        if rec["fields"].get(TM_IS_AGENT):
+            agents.append({"id": rec["id"], "name": rec["fields"].get("Name")})
+    # CONTROL — an empty roster means a renamed field or table, not a business
+    # with no agents. Writing nothing would read as "no AI owner was suitable".
+    if not agents:
+        raise SystemExit(
+            f"FAIL: control check — zero AI agents found on {TEAM_MEMBERS_TBL} "
+            f"with '{TM_IS_AGENT}' ticked. Either the field was renamed or the "
+            "read is broken. Refusing to propose owners against an empty roster."
+        )
+    return businesses, projects, agents
 
 
 def strip_html(text):
@@ -313,10 +342,11 @@ def cmd_audit(args):
     untriaged = [r for r in records if get(r, "status") in (None, "")
                  and get(r, "name")]
 
-    # Which Team Member records are AI agents, so the report can say how much of
-    # the list an agent already holds — the number Kevin actually steers by.
-    agent_ids = {r["id"] for r in fetch_all(token, TEAM_MEMBERS_TBL, fields=["Name", TM_IS_AGENT])
-                 if r["fields"].get(TM_IS_AGENT)}
+    # One read of the reference data, used twice: to say how much of the list an
+    # agent already holds (the number Kevin steers by), and to give the deciding
+    # agent the roster it may propose an owner from.
+    businesses, projects, agents = reference_data(token)
+    agent_ids = {a["id"] for a in agents}
 
     def owner_kind(rec):
         links = get(rec, "teamMember") or []
@@ -335,8 +365,6 @@ def cmd_audit(args):
             "FAIL: control check — zero open tasks found. Either every task really is "
             "Completed (verify by hand) or the Status read is broken. Not reporting a pass."
         )
-
-    businesses, projects = reference_data(token)
 
     items, counts = [], {}
     non_compliant = 0
@@ -432,6 +460,9 @@ def cmd_audit(args):
         "reference": {
             "businesses": businesses,
             "projects": projects,
+            # AI FIRST. Propose one of these as `teamMember` before ever proposing
+            # a human `assignee`; a human owner is for work a person must do.
+            "aiAgents": agents,
             "team": [{"email": e, "name": n} for e, n in TEAM.items()],
             "timeEstimateOptions": EXPECTED_CHOICES["timeEstimate"],
             "recurringOptions": EXPECTED_CHOICES["recurring"],
@@ -465,7 +496,7 @@ def cmd_audit(args):
     return 0
 
 
-def validate(decision, ref_business_ids, ref_project_ids):
+def validate(decision, ref_business_ids, ref_project_ids, ref_agent_ids=frozenset()):
     """Reject anything unsafe BEFORE it reaches Airtable. Returns an error string or None."""
     field, value = decision.get("field"), decision.get("value")
     if field not in WRITABLE:
@@ -479,6 +510,15 @@ def validate(decision, ref_business_ids, ref_project_ids):
     if field == "assignee":
         if value not in TEAM:
             return f"'{value}' is not a known team email"
+    if field == "teamMember":
+        # Record IDs only. A name would be written as a new Team Member record,
+        # and an unknown ID is exactly the silent no-op the Assignee check exists
+        # to prevent.
+        ids = value if isinstance(value, list) else [value]
+        bad = [i for i in ids if i not in ref_agent_ids]
+        if bad:
+            return (f"unknown AI agent record(s): {bad} — Team Member takes "
+                    "record IDs from reference.aiAgents, not names")
     if field == "business":
         ids = value if isinstance(value, list) else [value]
         bad = [i for i in ids if i not in ref_business_ids]
@@ -505,7 +545,7 @@ def validate(decision, ref_business_ids, ref_project_ids):
 def to_payload(field, value):
     if field == "assignee":
         return {"email": value}
-    if field in ("business", "project"):
+    if field in ("business", "project", "teamMember"):
         return value if isinstance(value, list) else [value]
     return value
 
@@ -525,13 +565,14 @@ def cmd_apply(args):
         print("Nothing to apply.")
         return 0
 
-    businesses, projects = reference_data(token)
+    businesses, projects, agents = reference_data(token)
     b_ids = {b["id"] for b in businesses}
     p_ids = {p["id"] for p in projects}
+    a_ids = {a["id"] for a in agents}
 
     rejected = []
     for d in decisions:
-        err = validate(d, b_ids, p_ids)
+        err = validate(d, b_ids, p_ids, a_ids)
         if err:
             rejected.append((d, err))
     if rejected:

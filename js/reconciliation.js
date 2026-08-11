@@ -1482,18 +1482,13 @@
             }
         }
 
-        // Re-run CFV sidebar badge count so cleared CFVs disappear immediately
-        if (typeof updateCFVSidebarBadges === 'function' && typeof detectCFVs === 'function') {
+        // Re-run CFV sidebar badge count so cleared CFVs disappear immediately.
+        // Uses the shared rule in js/cfv.js — this used to carry its own copy that
+        // also suppressed CONFIRMED CFVs on a stale dismissal key (drift-080).
+        if (typeof refreshCFVSidebarBadges === 'function') {
             try {
-                const cfvList = detectCFVs();
-                const visible = cfvList.filter(e => {
-                    if (e.status === 'cfv' || e.status === 'potential') return !localStorage.getItem('cfv_dismissed_' + e.tenancyId);
-                    return true;
-                });
-                const cfvCount = visible.filter(e => e.status === 'cfv' || e.status === 'potential').length;
-                const actionedCount = visible.filter(e => e.status === 'cfv actioned').length;
-                updateCFVSidebarBadges(cfvCount, actionedCount);
-            } catch (e) { /* non-critical */ }
+                refreshCFVSidebarBadges();
+            } catch (e) { console.warn('[recon] CFV badge refresh failed:', e); }
         }
 
         // Track AI reconciliation accuracy

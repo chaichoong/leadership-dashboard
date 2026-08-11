@@ -26,6 +26,12 @@ USAGE
     python3 scripts/prospect-dedupe.py key "Q.E.D. Industrial Controls Ltd"
         -> qed industrial controls
 
+    python3 scripts/prospect-dedupe.py keys "Cornerstone Supplies Ltd (t/a Abbeydale Direct)"
+        -> cornerstone supplies abbeydale direct
+           cornerstone supplies
+           abbeydale direct
+        A record matches if ANY of its keys is already in the set.
+
     python3 scripts/prospect-dedupe.py ch "...free text..."
         -> one Companies House number per line
 
@@ -63,6 +69,19 @@ STOPWORDS = {
 # prefix plus 6 digits (SC, NI, OC, SO, NC, ...).
 CH_PATTERN = re.compile(r"\b(?:[A-Z]{2}\d{6}|\d{8})\b", re.IGNORECASE)
 
+# A trading-name marker. "Cornerstone Supplies Limited (Abbeydale Direct)" and
+# "Cornerstone Supplies Limited (t/a Abbeydale Direct)" are the SAME employer,
+# but the 't/a' survived normalisation as the token 'ta' and split the key, so
+# both were queued and mail@abbeydale-direct.co.uk was lined up to be cold-
+# emailed twice (recbZXMmAMOo6Mv07 3 Aug, rec9p6crluEJaTSpa 10 Aug).
+TRADING_AS = re.compile(
+    r"\b(?:t\s*/\s*a|t\.?\s*a\.?|trading\s+as|formerly(?:\s+known\s+as)?|"
+    r"aka|also\s+known\s+as|dba)\b",
+    re.IGNORECASE,
+)
+
+PARENTHETICAL = re.compile(r"[(\[{][^)\]}]*[)\]}]")
+
 
 def company_key(name):
     """Normalised company name for dedupe comparison. Both sides of every
@@ -78,10 +97,19 @@ def company_key(name):
 
     Step 5 must run AFTER step 4, or "J & B Plumbing" keeps an 'and' wedged
     between its initials and never matches "JB Plumbing".
+
+    Trading-name markers ('t/a', 'trading as', 'aka', ...) and the brackets round
+    a trading name are removed BEFORE step 3, so "(Abbeydale Direct)" and
+    "(t/a Abbeydale Direct)" collapse to the same key. Punctuation stripping
+    alone left the marker behind as the token 'ta' and split them.
+
+    This returns ONE key — the whole name including any trading name. Use
+    company_keys() to get the aliases a record should also be indexed under.
     """
     if not name:
         return ""
     text = str(name).lower().replace("&", " and ")
+    text = TRADING_AS.sub(" ", text)
     text = re.sub(r"[^a-z0-9]+", " ", text)
     tokens = [t for t in text.split() if t and t not in STOPWORDS]
 
@@ -97,6 +125,58 @@ def company_key(name):
     if run:
         joined.append("".join(run))
     return " ".join(joined)
+
+
+def company_keys(name):
+    """Every key one company name should be indexed under, best first.
+
+    A record is a duplicate if ANY of its keys matches any stored key. One name
+    can legitimately be written three ways, and each is what the next source
+    hands you:
+
+        "Cornerstone Supplies Limited (t/a Abbeydale Direct)"
+          -> cornerstone supplies abbeydale direct   (whole name)
+          -> cornerstone supplies                    (registered name alone)
+          -> abbeydale direct                        (trading name alone)
+
+    Indexing only the whole name is why 'Abbey Antiques & Furnishings Ltd (The
+    Abbey Group)' did not match an Indeed employer string of 'The Abbey Group'.
+
+    Deliberately NOT split on: a company with no bracket and no marker. Splitting
+    on a bare word would merge "Smith Group" into "Smith", and losing a real
+    prospect is worse than the duplicate it prevents.
+    """
+    if not name:
+        return []
+    raw = str(name)
+    keys = [company_key(raw)]
+
+    # Everything before the first bracket or trading-as marker: the registered
+    # name on its own.
+    stem = PARENTHETICAL.split(raw)[0] if PARENTHETICAL.search(raw) else raw
+    stem = TRADING_AS.split(stem)[0]
+    keys.append(company_key(stem))
+
+    # Each bracketed or post-marker segment: the trading name on its own.
+    for inner in re.findall(r"[(\[{]([^)\]}]*)[)\]}]", raw):
+        keys.append(company_key(TRADING_AS.sub(" ", inner)))
+    parts = TRADING_AS.split(PARENTHETICAL.sub(" ", raw))
+    for part in parts[1:]:
+        keys.append(company_key(part))
+
+    seen, out = set(), []
+    for k in keys:
+        # A single-token alias is too blunt to dedupe on ("Smith" would swallow
+        # every Smith), so it is dropped rather than indexed.
+        if not k or k in seen or len(k.split()) < 2:
+            continue
+        seen.add(k)
+        out.append(k)
+    # If the whole name is itself one token, keep it — there is nothing broader
+    # to confuse it with.
+    if not out and keys and keys[0]:
+        out.append(keys[0])
+    return out
 
 
 def ch_numbers(text):
@@ -157,8 +237,9 @@ def build(pat):
     for rec in records:
         f = rec["fields"]
         suppressed = f.get("Status") == "Suppressed"
-        key = company_key(f.get("Company"))
-        if key:
+        # Every alias, not just the whole name. A record found under any of its
+        # keys is the same employer.
+        for key in company_keys(f.get("Company")):
             out["companyKeys"].setdefault(key, []).append(rec["id"])
         email = (f.get("Contact Email") or "").strip().lower()
         if email:
@@ -187,6 +268,9 @@ def main():
     cmd = sys.argv[1]
     if cmd == "key":
         print(company_key(" ".join(sys.argv[2:])))
+    elif cmd == "keys":
+        for k in company_keys(" ".join(sys.argv[2:])):
+            print(k)
     elif cmd == "ch":
         for n in ch_numbers(" ".join(sys.argv[2:])):
             print(n)

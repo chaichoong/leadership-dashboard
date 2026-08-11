@@ -272,7 +272,16 @@ describe('agent-dispatch.py does not drift from config.js or approvals.js', () =
     });
 
     it('the engine stamps a banner and verify checks the live field for it', () => {
-      expect(PY, 'TIER1_BANNER constant is gone').toMatch(/TIER1_BANNER\s*=/);
+      // The banner is DEFINED once, in the shared email-format module, and
+      // imported here. send-email.py strips exactly what this prepends; when
+      // they were two separate string literals the banner made every tier-1
+      // Correspondence task unsendable (finding 20260811-agent-dispatch-084).
+      const FORMAT = read('scripts/agent_email_format.py');
+      expect(FORMAT, 'TIER1_BANNER constant is gone').toMatch(/TIER1_BANNER\s*=/);
+      expect(PY, 'agent-dispatch no longer imports the shared banner')
+        .toMatch(/from agent_email_format import[\s\S]{0,200}TIER1_BANNER/);
+      expect(PY, 'agent-dispatch redefines the banner instead of importing it')
+        .not.toMatch(/^TIER1_BANNER\s*=/m);
       expect(PY, 'submit no longer accepts --tier1').toContain('"--tier1"');
       // Stamped on submit...
       expect(PY).toMatch(/args\.tier1 and TIER1_BANNER not in output/);
