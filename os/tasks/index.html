@@ -209,6 +209,8 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 .approval-box .apv-sub{font-size:var(--fs-sm);color:var(--text-secondary);margin-bottom:10px}
 .approval-box .apv-raiser{font-size:var(--fs-sm);color:var(--text-primary);font-weight:var(--fw-semibold)}
 .approval-box textarea{width:100%;min-height:60px;background:var(--bg-surface);border:1px solid var(--border-default);color:var(--text-primary);border-radius:4px;padding:6px 8px;font-family:inherit;font-size:var(--fs-base)}
+.approval-box .apv-summary{background:var(--accent-soft);border:1px solid var(--accent);border-radius:var(--radius-sm);padding:10px 12px;margin-bottom:10px}
+.approval-box .apv-summary-body{font-size:var(--fs-md);font-weight:var(--fw-semibold);color:var(--text-primary);white-space:pre-wrap;word-break:break-word}
 .approval-box .apv-work{background:var(--bg-surface);border:1px solid var(--border-default);border-radius:var(--radius-sm);padding:8px 10px;margin-bottom:10px}
 .approval-box .apv-work-label{font-size:10px;font-weight:var(--fw-bold);text-transform:uppercase;letter-spacing:.5px;color:var(--text-secondary);margin-bottom:4px}
 .approval-box .apv-work-body{font-size:var(--fs-sm);color:var(--text-primary);white-space:pre-wrap;word-break:break-word;max-height:260px;overflow-y:auto}
@@ -3583,6 +3585,38 @@ function approvalRaiserId(t){
   return ((t&&t.raisedByIds)||[])[0]||((t&&t.teamMemberIds)||[])[0]||'';
 }
 
+// One-glance summary of what the agent is proposing, derived from Agent
+// Output. Mirrors apvSummary in scripts/slack-automation/approvals.js — keep
+// the two in step. In order of trust:
+//   1. The agent's own closing "carrying this out will involve" line.
+//   2. An email draft's TO/SUBJECT header, said as an action.
+//   3. The first meaningful line (skipping markdown headings, rules, banners).
+// Short outputs (readable in one glance anyway) get no separate summary,
+// because repeating the whole text twice helps nobody.
+function apvSummary(raw){
+  const text=String(raw||'').replace(/\r/g,'').trim();
+  if(!text||text.length<280)return '';
+  const m=text.match(/\*{0,2}carrying this out will involve:?\*{0,2}\s*/i);
+  if(m){
+    const s=text.slice(m.index+m[0].length).trim();
+    if(s)return s.length>400?s.slice(0,399)+'…':s;
+  }
+  const to=text.match(/^TO:\s*(.+)$/im);
+  const subj=text.match(/^SUBJECT:\s*(.+)$/im);
+  if(to&&subj)return `Send an email to ${to[1].trim()}. Subject: ${subj[1].trim()}`;
+  const lines=text.split('\n');
+  for(let i=0;i<lines.length;i++){
+    const l=lines[i].trim();
+    if(!l)continue;
+    if(/^#{1,6}\s/.test(l))continue;            // markdown heading
+    if(/^[-*_=]{3,}$/.test(l))continue;          // horizontal rule
+    if(/^(:rotating_light:|🚨)/.test(l)||/^\W*tier 1\b/i.test(l))continue; // tier-1 banner
+    const s=l.replace(/^[*_>#\s]+/,'').replace(/[*_\s]+$/,'');
+    if(!s)continue;
+    return s.length>300?s.slice(0,299)+'…':s;
+  }
+  return '';
+}
 function renderApprovalBlock(t){
   if(!t)return '';
   if(t.status!=='Approval'){
@@ -3595,12 +3629,17 @@ function renderApprovalBlock(t){
   if(!mine){
     return `<div class="approval-decided">Waiting for approval from ${escHtml(t.assignee||t.assigneeEmail)}. Reassign it to yourself to decide it here.</div>`;
   }
-  // The agent's proposed work leads the box (Kevin's request, 11 Aug 2026):
-  // the decision is made on the work itself, so it sits first for fast triage.
+  // A one-glance SUMMARY of what the agent is proposing leads the box
+  // (Kevin's request, 11 Aug 2026). Putting the full work first was not
+  // enough: a long report opens with headings and method notes, so the ask
+  // itself — conventionally the closing "carrying this out will involve"
+  // line — stayed buried. apvSummary digs it out; the full work follows.
+  const summary=apvSummary(t.agentOutput);
   const work=t.agentOutput
-    ? `<div class="apv-work"><div class="apv-work-label">What the agent wants to do</div><div class="apv-work-body">${linkifyUrls(t.agentOutput)}</div></div>`
+    ? `<div class="apv-work"><div class="apv-work-label">${summary?'The agent’s full work':'What the agent wants to do'}</div><div class="apv-work-body">${linkifyUrls(t.agentOutput)}</div></div>`
     : `<div class="apv-work apv-work-empty"><div class="apv-work-label">What the agent wants to do</div><div class="apv-work-body">The agent left its work empty, so there is nothing here to judge. Do not approve it blind — ask it to show its work.</div></div>`;
   return `<div class="approval-box">
+    ${summary?`<div class="apv-summary"><div class="apv-work-label">What the agent wants to do</div><div class="apv-summary-body">${escHtml(summary)}</div></div>`:''}
     ${work}
     <h3>Waiting for your approval</h3>
     <div class="apv-sub">Nothing has been sent, filed or actioned. ${raiser?`Prepared by <span class="apv-raiser">${escHtml(raiser)}</span>.`:'No agent recorded on this task.'} Approving hands it back so the agent can carry it out.</div>

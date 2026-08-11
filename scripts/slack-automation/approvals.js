@@ -360,22 +360,64 @@ function pushLongText(blocks, heading, raw, style, maxBlocks) {
 
 // ─── POST PHASE ───────────────────────────────────────────────────────
 
+// One-glance summary of what the agent is proposing, derived from Agent
+// Output. Mirrors apvSummary in os/tasks/index.html — keep the two in step.
+// In order of trust:
+//   1. The agent's own closing "carrying this out will involve" line.
+//   2. An email draft's TO/SUBJECT header, said as an action.
+//   3. The first meaningful line (skipping markdown headings, rules, banners).
+// Short outputs (readable in one glance anyway) get no separate summary,
+// because repeating the whole text twice helps nobody.
+export function apvSummary(raw) {
+    const text = String(raw || '').replace(/\r/g, '').trim();
+    if (!text || text.length < 280) return '';
+    const m = text.match(/\*{0,2}carrying this out will involve:?\*{0,2}\s*/i);
+    if (m) {
+        const s = text.slice(m.index + m[0].length).trim();
+        if (s) return s.length > 400 ? s.slice(0, 399) + '…' : s;
+    }
+    const to = text.match(/^TO:\s*(.+)$/im);
+    const subj = text.match(/^SUBJECT:\s*(.+)$/im);
+    if (to && subj) return `Send an email to ${to[1].trim()}. Subject: ${subj[1].trim()}`;
+    for (const line of text.split('\n')) {
+        const l = line.trim();
+        if (!l) continue;
+        if (/^#{1,6}\s/.test(l)) continue;            // markdown heading
+        if (/^[-*_=]{3,}$/.test(l)) continue;          // horizontal rule
+        if (/^(:rotating_light:|🚨)/.test(l) || /^\W*tier 1\b/i.test(l)) continue; // tier-1 banner
+        const s = l.replace(/^[*_>#\s]+/, '').replace(/[*_\s]+$/, '');
+        if (!s) continue;
+        return s.length > 300 ? s.slice(0, 299) + '…' : s;
+    }
+    return '';
+}
+
 // The message has to carry enough for Kevin to judge the work from his phone,
-// without opening Airtable. Four parts, in the order he needs them:
-//   what the agent wants to do · what it is · what he was asked for · how to answer
+// without opening Airtable. Five parts, in the order he needs them:
+//   the ask in one line · the full work · what it is · what he was asked for · how to answer
 function buildApprovalBlocks(t, agent, warn) {
     const blocks = [];
 
-    // The agent's proposed work leads the message (Kevin's request, 11 Aug
-    // 2026, matching the web app's approval box): the decision is made on the
-    // work itself, so it sits first for fast triage. It gets the most room and
-    // is NEVER cut — a decision made on half a draft is not a decision. Block
-    // budget: 28 + 6 + 2 content blocks plus ~6 fixed ones stays under Slack's
-    // 50-block ceiling. Trimmed check, or an output of pure whitespace would
-    // skip BOTH branches: no work shown and no warning either, which is the
-    // worst of all worlds.
+    // The SUMMARY of what the agent is proposing leads the message (Kevin's
+    // request, 11 Aug 2026, matching the web app's approval box). Putting the
+    // full work first was not enough: a long report opens with headings and
+    // method notes, so the ask stayed buried below the fold on his phone.
+    const summary = apvSummary(t.agentOutput);
+    if (summary) {
+        blocks.push({
+            type: 'section',
+            text: { type: 'mrkdwn', text: truncate(`*What the agent wants to do*\n${esc(summary)}`, 2900) },
+        });
+    }
+
+    // The full work follows. It gets the most room and is NEVER cut — a
+    // decision made on half a draft is not a decision. Block budget: 28 + 6 +
+    // 2 content blocks plus ~7 fixed ones stays under Slack's 50-block
+    // ceiling. Trimmed check, or an output of pure whitespace would skip BOTH
+    // branches: no work shown and no warning either, which is the worst of
+    // all worlds.
     if (String(t.agentOutput || '').trim()) {
-        pushLongText(blocks, 'What the agent wants to do', t.agentOutput, 'quote', 28);
+        pushLongText(blocks, summary ? 'The agent’s full work' : 'What the agent wants to do', t.agentOutput, 'quote', 28);
     } else {
         blocks.push({
             type: 'section',
