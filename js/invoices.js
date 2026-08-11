@@ -183,7 +183,12 @@
             try {
                 const data = await resp.json();
                 if (data && data.success) {
-                    summary = `Reconcile complete:\n• Gmail "3: to pay": ${data.gmailThreadCount}\n• Marked Paid: ${data.markedPaid}\n• Restored to Unpaid: ${data.restoredUnpaid}\n• Skipped (Estimates etc): ${data.skipped}`;
+                    // Both counts, every time, so a truncated Gmail read is
+                    // visible as a number that looks wrong rather than as a
+                    // silent pile of invoices marked Paid. The read used to stop
+                    // at the first 100 threads and everything beyond it was
+                    // marked Paid without a word.
+                    summary = `Reconcile complete:\n• Gmail "3: to pay" emails read: ${data.gmailThreadCount}\n• Invoices checked in Airtable: ${data.airtableRecordCount}\n• Marked Paid: ${data.markedPaid}\n• Restored to Unpaid: ${data.restoredUnpaid}\n• Skipped (Estimates etc): ${data.skipped}\n\nIf "emails read" looks far too low for what is in the label, stop and say so — that is how invoices get marked Paid by mistake.`;
                 } else if (data && data.error) {
                     summary = 'Reconcile error: ' + data.error;
                 }

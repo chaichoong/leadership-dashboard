@@ -332,10 +332,24 @@ async function gatherHuddle(pat) {
     } catch { return null; }
 }
 
+// Status 'Approval' is NOT work in progress. It is FINISHED agent work with the
+// words already written, waiting on one tick in Slack — and for a Correspondence
+// task, approving it sends the email.
+//
+// Until 11 Aug 2026 these were mixed into the same pile as everything else, with
+// nothing in the payload saying what they were. The 09:00 brief that day
+// (recbv7w4clndYdztn) made the one thing 'Re-engage Jack Duddy' and the first
+// step 'Spend 10 minutes writing one honest, short re-opener in your own voice',
+// and handed off 'worker-writer — draft a warm re-opener message for Jack Duddy'.
+// All 20 'Warm lane: re-engage <name>' tasks were already in Approval, due
+// 2026-08-08, each with a complete addressed email in Agent Output. The brief
+// invented ten minutes of writing plus a duplicate agent dispatch for work that
+// needed one tap, and never mentioned that 60 tasks were blocked behind Kevin.
+// Same shape as the prospecting engine: the queue IS the gate, and nothing sends.
 async function gatherTasks(pat) {
     const rows = await airtableFetch(pat, TBL_TASKS, {
         filterByFormula: `AND({Task Name}!='',NOT({Status}='Completed'),NOT({Status}='Cancelled'))`,
-        'fields[]': ['Task Name', 'Assignee', 'Due Date', 'Status', 'Priority'],
+        'fields[]': ['Task Name', 'Assignee', 'Due Date', 'Status', 'Priority', 'Task Type'],
     }, true);
     const today = todayLondonISO();
     const t = rows.map(r => ({
@@ -344,16 +358,34 @@ async function gatherTasks(pat) {
         due: (r.fields['Due Date'] || '').slice(0, 10),
         status: String(r.fields['Status'] || ''),
         priority: String(r.fields['Priority'] || ''),
+        type: String(r.fields['Task Type'] || ''),
     }));
-    const overdue = t.filter(x => x.due && x.due < today);
-    const dueToday = t.filter(x => x.due === today);
-    const kevins = t.filter(x => /kevin/i.test(x.who));
+    // Split first. An Approval task counted as overdue reads as work Kevin has not
+    // done, when it is work an agent already did and he has not looked at.
+    const waiting = t.filter(x => x.status === 'Approval');
+    const live = t.filter(x => x.status !== 'Approval');
+    const overdue = live.filter(x => x.due && x.due < today);
+    const dueToday = live.filter(x => x.due === today);
+    const kevins = live.filter(x => /kevin/i.test(x.who));
+    const sends = waiting.filter(x => x.type === 'Correspondence');
     const line = x => `- ${x.name} | ${x.who} | due ${x.due || 'none'} | ${x.priority || x.status}`;
+    const waitLine = x => `- ${x.name}${x.type === 'Correspondence' ? ' | APPROVING SENDS THE EMAIL' : ''} | waiting since ${x.due || 'unknown'}`;
     return {
-        counts: { open: t.length, overdue: overdue.length, dueToday: dueToday.length, kevins: kevins.length },
+        counts: {
+            open: live.length,
+            overdue: overdue.length,
+            dueToday: dueToday.length,
+            kevins: kevins.length,
+            awaitingApproval: waiting.length,
+            awaitingSend: sends.length,
+        },
         overdueList: overdue.slice(0, 20).map(line).join('\n'),
         dueTodayList: dueToday.slice(0, 15).map(line).join('\n'),
         kevinList: kevins.slice(0, 25).map(line).join('\n'),
+        approvalList: waiting.slice(0, 20).map(waitLine).join('\n'),
+        // The names an agent must not be dispatched to redo. Lower-cased for a
+        // cheap containment test in the brief validator.
+        approvalNames: waiting.map(x => x.name.toLowerCase()),
     };
 }
 
@@ -407,6 +439,7 @@ HARD RULES:
   2. Mica — operations work that genuinely needs a human: suppliers, contractors, tenants, anything physical or relationship-based.
   3. Ericamae — marketing and outreach work that genuinely needs a human.
 - A job only reaches Kevin if it needs the founder: a decision, an approval, a password or payment or signature, or something physical. If it does not, hand it off and say where it went. Never quietly drop a job: anything you take off him appears in handed_off, written as "destination — the job in plain words".
+- THE APPROVAL QUEUE COMES FIRST, and it is the one thing Kevin genuinely must do himself. The WAITING ON KEVIN'S TICK block lists work an agent has ALREADY FINISHED, with the words already written. It needs one tap in Slack, not ten minutes of writing. So: never make the first step "write", "draft" or "spend N minutes on" anything that appears in that block — say "approve" and name it. Never put a job in handed_off that dispatches an agent to redo something already sitting there; that produces the same work twice and Kevin approves it twice. If that block is not empty, clearing it is a strong candidate for today's one thing, because until he taps, nothing was actually sent.
 - Triage doctrine: genuine urgency first (a real deadline WITH a real consequence — most "urgent" labels fail this test); otherwise project work that advances the QUARTER goals; everything else is ignored, batched or delegated.
 - Max TWO board flags, one line each, only when a lane genuinely triggers: Crabtree (cash/labour), Michalowicz (Profit First discipline), Hormozi (offer/leads), Jenyns (should be a system/agent), Martell (AI should do this, not Kevin), Peters (overwhelm/energy — may pause the plan), Keller (this is scatter, refocus).
 - The money traffic light is provided — respect it. Red or amber changes what today's one thing can be.
@@ -426,6 +459,8 @@ ${env.QUARTER_CONTEXT || 'Q3 2026 ends 30 September. Theme: revenue for Operatio
 CALENDAR TODAY: ${calendar.connected ? '\n' + calendar.today : 'not connected yet'}
 
 TASKS (live): ${tasks.counts.open} open, ${tasks.counts.overdue} overdue, ${tasks.counts.dueToday} due today, ${tasks.counts.kevins} carrying Kevin's name.
+WAITING ON KEVIN'S TICK: ${tasks.counts.awaitingApproval} finished pieces of agent work sit in Status 'Approval', ${tasks.counts.awaitingSend} of them emails that SEND the moment he approves. This is DONE work, not work to do.
+${tasks.approvalList || '(none)'}
 OVERDUE (top):
 ${tasks.overdueList || '(none)'}
 DUE TODAY:
@@ -467,7 +502,38 @@ async function callCeoOnce(env, prompt) {
     return JSON.parse(json[0]);
 }
 
-async function callCeo(env, prompt, huddle) {
+// Drop any hand-off that would dispatch an agent for a task already sitting in
+// Approval. Matched on the distinctive words of the waiting task's name rather
+// than the whole string: the brief writes "draft a warm re-opener for Jack
+// Duddy" where the task is "Warm lane: re-engage Jack Duddy", so a substring
+// test on the full name never fires. Two or more shared distinctive words is the
+// bar — one ("draft") would strip half the list.
+const HANDOFF_STOPWORDS = new Set([
+    'the', 'a', 'an', 'and', 'or', 'to', 'for', 'of', 'in', 'on', 'with', 'from',
+    'draft', 'drafting', 'write', 'send', 'email', 'message', 'task', 'lane',
+    'worker', 'writer', 'builder', 'researcher', 'analyst', 'auditor', 'agent',
+]);
+function distinctiveWords(text) {
+    return new Set(String(text || '').toLowerCase()
+        .replace(/[^a-z0-9\s]+/g, ' ')
+        .split(/\s+/)
+        .filter(w => w.length > 2 && !HANDOFF_STOPWORDS.has(w)));
+}
+function dropAlreadyWaiting(handedOff, tasks) {
+    const waiting = (tasks && tasks.approvalNames) || [];
+    if (!waiting.length) return handedOff;
+    const waitingWords = waiting.map(distinctiveWords);
+    return handedOff.filter(item => {
+        const words = distinctiveWords(item);
+        return !waitingWords.some(w => {
+            let shared = 0;
+            for (const word of w) if (words.has(word)) shared++;
+            return shared >= 2;
+        });
+    });
+}
+
+async function callCeo(env, prompt, huddle, tasks) {
     let b;
     try {
         b = await callCeoOnce(env, prompt);
@@ -489,6 +555,13 @@ async function callCeo(env, prompt, huddle) {
     // The 07:30 huddle's dispatches lead, then the CEO's own. Deduped, one list, so the Slack
     // message and the stored record can never disagree about what was taken off Kevin.
     b.handed_off = [...new Set([...(huddle && huddle.handedOff || []), ...b.handed_off])].slice(0, 8);
+    // A prompt rule is a request; this is the control. Nothing may dispatch an
+    // agent to redo work that is already finished and waiting on Kevin's tick —
+    // that produces the same email twice and he approves it twice. The prompt
+    // asked for it on 11 Aug and the model handed off 'worker-writer — draft a
+    // warm re-opener message for Jack Duddy' while the finished, addressed email
+    // sat in Approval.
+    b.handed_off = dropAlreadyWaiting(b.handed_off, tasks);
     return b;
 }
 
@@ -608,7 +681,7 @@ async function sendDailyDM(env) {
     // CEO layer — any failure here falls back to the proven money-only DM.
     try {
         const [tasks, calendar, huddle] = await Promise.all([gatherTasks(pat), gatherCalendar(env), gatherHuddle(pat)]);
-        const brief = await callCeo(env, buildCeoPrompt(m, tasks, calendar, env, huddle), huddle);
+        const brief = await callCeo(env, buildCeoPrompt(m, tasks, calendar, env, huddle), huddle, tasks);
         const fallbackText = `ONE thing: ${brief.one_thing} | Safe to act: ${fmt(m.safeToActToday)} (${LIGHT_LABEL[m.light]})`;
         await slackPost(token, userId, fallbackText, buildBriefBlocks(m, brief));
         try { await storeBrief(pat, brief, m, tasks, huddle); }
@@ -737,7 +810,7 @@ export default {
                 const m = await loadAndCompute(env.AIRTABLE_PAT);
                 const [tasks, calendar] = await Promise.all([gatherTasks(env.AIRTABLE_PAT), gatherCalendar(env)]);
                 const huddle = await gatherHuddle(env.AIRTABLE_PAT);
-                const brief = await callCeo(env, buildCeoPrompt(m, tasks, calendar, env, huddle), huddle);
+                const brief = await callCeo(env, buildCeoPrompt(m, tasks, calendar, env, huddle), huddle, tasks);
                 return Response.json({ ok: true, brief, money: { safeToActToday: m.safeToActToday, light: m.light }, taskCounts: tasks.counts, calendarConnected: calendar.connected });
             }
             const m = await loadAndCompute(env.AIRTABLE_PAT);

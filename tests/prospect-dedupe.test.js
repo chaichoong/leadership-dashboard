@@ -97,6 +97,74 @@ describe('company_key', () => {
   });
 });
 
+// 11 Aug 2026 — finding 20260811-prospect-daily-086. Prospects held the SAME
+// employer twice: recbZXMmAMOo6Mv07 'Cornerstone Supplies Limited (Abbeydale
+// Direct)' (3 Aug) and rec9p6crluEJaTSpa 'Cornerstone Supplies Limited (t/a
+// Abbeydale Direct)' (10 Aug), same email mail@abbeydale-direct.co.uk, same
+// Companies House number 01854182, both sitting in Ready for Review. The 't/a'
+// survived punctuation stripping as the token 'ta', so the two keys differed by
+// one word and the name gate waved the second through. The same class of miss
+// hit 'Abbey Antiques & Furnishings Ltd (The Abbey Group)', which an Indeed
+// employer string of 'The Abbey Group' could never match.
+describe('company_keys — trading names and aliases', () => {
+  async function all(names) {
+    const py = `
+import importlib.util, json, sys
+spec = importlib.util.spec_from_file_location("pd", ${JSON.stringify(SCRIPT)})
+m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+print(json.dumps([m.company_keys(n) for n in json.loads(sys.argv[1])]))
+`;
+    const { stdout } = await run('python3', ['-c', py, JSON.stringify(names)],
+      { encoding: 'utf8', timeout: 30000 });
+    return JSON.parse(stdout.trim().split('\n').pop());
+  }
+  const overlaps = (a, b) => a.some((k) => b.includes(k));
+
+  it("'t/a' does not split a key — the Cornerstone pair", async () => {
+    const [plain, ta] = await all([
+      'Cornerstone Supplies Limited (Abbeydale Direct)',
+      'Cornerstone Supplies Limited (t/a Abbeydale Direct)',
+    ]);
+    expect(plain[0], 'the whole-name keys still differ').toBe(ta[0]);
+    expect(overlaps(plain, ta)).toBe(true);
+  });
+
+  it('indexes the registered name and the trading name separately', async () => {
+    const [k] = await all(['Cornerstone Supplies Limited (t/a Abbeydale Direct)']);
+    expect(k).toContain('cornerstone supplies');
+    expect(k).toContain('abbeydale direct');
+  });
+
+  it('a trading name on its own still matches — the Abbey Antiques pair', async () => {
+    const [stored, incoming] = await all([
+      'Abbey Antiques & Furnishings Ltd (The Abbey Group)',
+      'The Abbey Group',
+    ]);
+    expect(overlaps(stored, incoming),
+      'a trading name from a job board matched nothing').toBe(true);
+  });
+
+  it('handles "trading as" and "formerly" spelled out', async () => {
+    const [a, b, c] = await all([
+      'Northwood Facilities Management Ltd trading as Northwood FM',
+      'Northwood FM',
+      'Northwood Facilities Management Limited',
+    ]);
+    expect(overlaps(a, b)).toBe(true);
+    expect(overlaps(a, c)).toBe(true);
+  });
+
+  it('still does NOT merge distinct companies that share one word', async () => {
+    const [group, holdings] = await all(['Smith Group', 'Smith Holdings']);
+    expect(overlaps(group, holdings)).toBe(false);
+  });
+
+  it('never emits a one-word alias that would swallow every namesake', async () => {
+    const [k] = await all(['Smith Brothers Ltd (Smith)']);
+    expect(k).not.toContain('smith');
+  });
+});
+
 describe('ch_numbers', () => {
   it('finds a number stored only in free-text Notes', async () => {
     expect(await chNumbers('Spoke to owner. Co no 09876543, VAT pending.'))

@@ -59,9 +59,17 @@ When genuinely unsure whether someone is a founder-buyer or a seller, lean towar
   are built by the same code:
 
   ```
-  python3 scripts/prospect-dedupe.py key "Q.E.D. Industrial Controls Ltd"   # -> qed industrial controls
-  python3 scripts/prospect-dedupe.py ch  "Spoke to owner, co no 09876543"   # -> 09876543
+  python3 scripts/prospect-dedupe.py keys "Cornerstone Supplies Ltd (t/a Abbeydale Direct)"
+  python3 scripts/prospect-dedupe.py key  "Q.E.D. Industrial Controls Ltd"   # -> qed industrial controls
+  python3 scripts/prospect-dedupe.py ch   "Spoke to owner, co no 09876543"   # -> 09876543
   ```
+
+  Use `keys` (plural), not `key`. One company is legitimately written three ways —
+  the whole name, the registered name alone, and the trading name alone — and the
+  candidate is a duplicate if **any** of its keys is already in `companyKeys`.
+  Matching only the whole name is how `Cornerstone Supplies Limited (Abbeydale
+  Direct)` and `Cornerstone Supplies Limited (t/a Abbeydale Direct)` both reached
+  the review queue (11 Aug).
 
   Do NOT re-derive the normalisation from this paragraph. It has drifted twice —
   `Smith & Sons Ltd` vs `Smith and Sons Limited` (8 Aug) and `Q.E.D.` vs `QED`
@@ -183,6 +191,19 @@ For the two email routes ("Email reply (they asked)", "Email sequence (Ltd)") al
 
 ### 5. Write to Airtable
 
+- **Re-check the dedupe set IMMEDIATELY before each create — on email and Companies
+  House number, not only the company name.** The step-1 check happens before you
+  open the employer's website, so at that point you do not yet know either. On
+  11 Aug both `mail@abbeydale-direct.co.uk` and CH `01854182` were ALREADY in the
+  set when the duplicate was written; nothing looked at them again after the name
+  gate passed. The last thing before the POST:
+
+  ```
+  python3 scripts/prospect-dedupe.py keys "<company as you will store it>"
+  python3 scripts/prospect-dedupe.py ch   "<notes + CH field text>"
+  ```
+  and compare the email (lowercased, trimmed) against `emails`. Any hit on any
+  axis — key, email, CH number, LinkedIn — means skip and say so in the report.
 - Create one Prospects record per candidate via curl (Number()-cast any numerics, 500ms between writes, `"typecast": true`):
   - Status = "Ready for Review", Date Found = today (ISO), Contact Route, Draft Message, Email Subject (email routes only), plus every captured field.
 - Update each keyword used: Last Used = today, Prospects Found += number of new prospects it produced.

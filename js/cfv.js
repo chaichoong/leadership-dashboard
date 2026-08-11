@@ -6,6 +6,59 @@
     // ══════════════════════════════════════════
 
     const CFV_TOLERANCE_DAYS = 2; // days after due date before flagging
+
+    // ── ONE definition of "does this CFV still count" ────────────────────
+    // Three places used to answer this question and two of them got it wrong
+    // (finding 20260811-drift-080, 11 Aug 2026):
+    //   * renderCFVTab (below) dismissed 'potential' only, with an expiry.
+    //   * cfvAutoReturnToPayment dismissed 'potential' only, no expiry.
+    //   * js/dashboard.js dismissed 'potential' OR a CONFIRMED 'cfv', no expiry.
+    // A tenancy dismissed while merely 'potential' keeps its localStorage key
+    // until the next due day passes. If it escalates to a confirmed CFV in the
+    // meantime, the sidebar hid it while the CFV page listed it — the sidebar
+    // under-reported genuinely overdue rent, on the alarm Kevin scans first.
+    // Latent on 11 Aug only because none of the five live CFVs had a key.
+    //
+    // The rule: only a 'potential' entry is dismissable, and only until the next
+    // due day plus the tolerance window. A confirmed CFV or a CFV Actioned item
+    // always counts.
+    function cfvIsVisible(entry) {
+        if (!entry) return false;
+        if (entry.status !== 'potential') return true;
+        const dismissedAt = localStorage.getItem('cfv_dismissed_' + entry.tenancyId);
+        if (!dismissedAt) return true;
+        const dismissDate = new Date(dismissedAt);
+        if (isNaN(dismissDate.getTime())) {
+            localStorage.removeItem('cfv_dismissed_' + entry.tenancyId);
+            return true;
+        }
+        const dueDay = entry.dueDay || 1;
+        // The next due day strictly after the dismissal. If this month's due day
+        // is on or before the dismissal, roll to next month.
+        let nextDueDate = new Date(dismissDate.getFullYear(), dismissDate.getMonth(), dueDay);
+        if (nextDueDate <= dismissDate) {
+            nextDueDate = new Date(dismissDate.getFullYear(), dismissDate.getMonth() + 1, dueDay);
+        }
+        const expiryTime = nextDueDate.getTime() + CFV_TOLERANCE_DAYS * 86400000;
+        if (Date.now() >= expiryTime) {
+            localStorage.removeItem('cfv_dismissed_' + entry.tenancyId);
+            return true;
+        }
+        return false;
+    }
+
+    // The badge, computed the same way everywhere. Safe to call before the CFV
+    // tab has ever been opened: it only needs allTenancies / allTransactions,
+    // which the dashboard cache render populates.
+    function refreshCFVSidebarBadges() {
+        if (typeof updateCFVSidebarBadges !== 'function') return;
+        if (typeof detectCFVs !== 'function') return;
+        const visible = detectCFVs().filter(cfvIsVisible);
+        updateCFVSidebarBadges(
+            visible.filter(e => e.status === 'cfv' || e.status === 'potential').length,
+            visible.filter(e => e.status === 'cfv actioned').length
+        );
+    }
     const CFV_STATUS_IDS = {
         inPayment:   'sel4I99slfpd7Vc1t',
         cfv:         'sel2mWzsvOd8d8de0',
@@ -208,20 +261,7 @@
         // Re-render after all updates
         if (tenancyIds.length > 0) {
             renderCFVTab();
-            if (typeof updateCFVSidebarBadges === 'function') {
-                const cfvList = detectCFVs();
-                // Only 'potential' entries are dismissable (matches the main
-                // render filter). Confirmed CFVs and CFV Actioned items always
-                // count toward the badge.
-                const visible = cfvList.filter(e => {
-                    if (e.status === 'potential') return !localStorage.getItem('cfv_dismissed_' + e.tenancyId);
-                    return true;
-                });
-                updateCFVSidebarBadges(
-                    visible.filter(e => e.status === 'cfv' || e.status === 'potential').length,
-                    visible.filter(e => e.status === 'cfv actioned').length
-                );
-            }
+            refreshCFVSidebarBadges();
         }
     }
 
@@ -407,28 +447,9 @@
         // Filter out dismissed potential CFVs using localStorage (instant, no API).
         // syncDismissalsFromAirtable runs in the background below to restore any
         // localStorage entries lost by cache clears; if it finds any, it re-renders.
-        const filteredList = cfvList.filter(entry => {
-            if (entry.status === 'potential') {
-                const dismissedAt = localStorage.getItem('cfv_dismissed_' + entry.tenancyId);
-                if (!dismissedAt) return true;
-                const dismissDate = new Date(dismissedAt);
-                const dueDay = entry.dueDay || 1;
-                // Find the next due day strictly after the dismissal date.
-                // If this month's due day is on/before the dismissal, roll to next month.
-                let nextDueDate = new Date(dismissDate.getFullYear(), dismissDate.getMonth(), dueDay);
-                if (nextDueDate <= dismissDate) {
-                    nextDueDate = new Date(dismissDate.getFullYear(), dismissDate.getMonth() + 1, dueDay);
-                }
-                // Re-check only once the next due day + tolerance has elapsed
-                const expiryTime = nextDueDate.getTime() + CFV_TOLERANCE_DAYS * 86400000;
-                if (Date.now() >= expiryTime) {
-                    localStorage.removeItem('cfv_dismissed_' + entry.tenancyId);
-                    return true;
-                }
-                return false;
-            }
-            return true;
-        });
+        // The rule itself lives in cfvIsVisible() so the sidebar badge and this
+        // table can never disagree about what counts.
+        const filteredList = cfvList.filter(cfvIsVisible);
 
         // Background: restore dismissals from Airtable comments for potential
         // CFVs where localStorage is empty (e.g. user cleared site data). If any
@@ -675,10 +696,10 @@
                             // actually uses (it treated confirmed CFVs as dismissable; the
                             // render path only ever dismisses 'potential'). Now it reads the
                             // rendered badges and fails on a real mismatch.
-                            const visible = hcCfvList.filter(e => {
-                                if (e.status === 'potential') return !localStorage.getItem('cfv_dismissed_' + e.tenancyId);
-                                return true;
-                            });
+                            // Same rule the badge uses, by calling it — a check
+                            // with its own copy of the rule cannot catch the rule
+                            // being wrong.
+                            const visible = hcCfvList.filter(cfvIsVisible);
                             const cfvCount = visible.filter(e => e.status === 'cfv' || e.status === 'potential').length;
                             const actionedCount = visible.filter(e => e.status === 'cfv actioned').length;
                             const readBadge = cls => {

@@ -881,6 +881,24 @@
     // when a run settles, so the next call — or an explicit
     // loadDashboard({ force: true }) after completion — starts a fresh fetch.
     let _loadDashboardPromise = null;
+
+    // Sidebar badges, for BOTH render paths. This used to live only after the
+    // full 9-table Airtable refresh, so a cache render — which is the normal
+    // experience, and looks completely loaded — showed no CFV count and no
+    // sitemap count for the two minutes the refresh took (drift-079).
+    //
+    // The CFV rule itself is cfvIsVisible() in js/cfv.js. Do not re-derive it
+    // here: a second copy is exactly what let the sidebar hide a confirmed CFV
+    // the CFV page was still listing (drift-080).
+    function updateSidebarBadges() {
+        try {
+            if (typeof updateSitemapBadge === 'function') updateSitemapBadge();
+        } catch (e) { console.warn('[dashboard] sitemap badge update failed:', e); }
+        try {
+            if (typeof refreshCFVSidebarBadges === 'function') refreshCFVSidebarBadges();
+        } catch (e) { console.warn('[dashboard] CFV badge update failed:', e); }
+    }
+
     function loadDashboard(opts) {
         if (_loadDashboardPromise && !(opts && opts.force)) return _loadDashboardPromise;
         const run = _runLoadDashboard().finally(() => {
@@ -933,6 +951,15 @@
                 document.getElementById('dashboard').style.display = 'block';
                 document.getElementById('loadingOverlay').style.display = 'none';
                 setRefreshingIndicator(true, cached.ageMs);
+                // Badges too. Measured on the deployed site 11 Aug 2026 across
+                // three loads: the page was interactive immediately but
+                // #cfvSidebarBadges stayed empty until the full Airtable refresh
+                // landed roughly two minutes later, because the badge update sat
+                // only on the fresh-fetch path below. detectCFVs() returned five
+                // entries the whole time — the data was there from the first
+                // paint. An empty badge is indistinguishable from "no overdue
+                // rent", on the one alarm Kevin scans first (drift-079).
+                updateSidebarBadges();
                 renderedFromCache = true;
             } catch (e) {
                 console.warn('Cache render failed, falling back to full load:', e);
@@ -999,19 +1026,7 @@
             setRefreshingIndicator(false);
 
             // Update sidebar badges on load
-            updateSitemapBadge();
-            // CFV badges: quick count from tenancy data
-            try {
-                const cfvList = detectCFVs();
-                const visible = cfvList.filter(e => {
-                    if (e.status === 'cfv' || e.status === 'potential') return !localStorage.getItem('cfv_dismissed_' + e.tenancyId);
-                    return true;
-                });
-                updateCFVSidebarBadges(
-                    visible.filter(e => e.status === 'cfv' || e.status === 'potential').length,
-                    visible.filter(e => e.status === 'cfv actioned').length
-                );
-            } catch(e) { console.warn('Badge update failed:', e); }
+            updateSidebarBadges();
 
             // Arrears engine: once-per-load sweep that opens / progresses /
             // pauses Arrears Records based on tenant type and days from due.

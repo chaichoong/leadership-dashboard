@@ -53,6 +53,16 @@ import urllib.request
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
+# The Correspondence contract and the tier-1 banner live in one place, shared
+# with scripts/send-email.py. Two copies is how submit came to accept an output
+# the send gate could not parse.
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from agent_email_format import (  # noqa: E402
+    TIER1_BANNER,
+    EmailFormatError,
+    parse_output as parse_email_output,
+)
+
 BASE_ID = "appnqjDpqDniH3IRl"
 TASKS = "tblqB8b22hKBL4PF1"
 
@@ -77,6 +87,7 @@ AF = {
     "sentForApprovalBy": "fld30Yw8SWYVp049g",
     "approvalOutcome":   "fldrHBSr6qoUfaKuZ",
     "approvalFeedback":  "fldtI7SJI4gEohHD1",
+    "approvedAt":        "fldr4Mvf2RzKvhZhi",
     "agentOutput":       "fldzswp8fx6PqpLQ5",
     "taskType":          "fldZ2moDV2041Sobc",
 }
@@ -242,11 +253,11 @@ def is_delay_feedback(text):
 # the control that stops tier-1 work being prepared silently. Two ways a task
 # earns it — the keyword match, or the dispatcher finding the connection while
 # working (today's Utilita bill had no keyword in its name at all).
-TIER1_BANNER = (
-    ":rotating_light: TIER 1. This touches your private legal and financial "
-    "matter. An AI agent prepared it. Nothing has been sent, filed, paid or "
-    "changed anywhere. Read it before you approve."
-)
+#
+# The string itself is imported from scripts/agent_email_format.py, because
+# send-email.py has to strip exactly what this prepends. When the two were
+# separate strings, the banner made every tier-1 Correspondence task unsendable
+# through the only sanctioned path (finding 20260811-agent-dispatch-084).
 
 
 def pat():
@@ -542,7 +553,31 @@ def cmd_submit(args):
         sys.exit("ERROR: refusing to submit an empty Agent Output")
     if args.tier1 and TIER1_BANNER not in output:
         output = TIER1_BANNER + "\n\n" + output
+
+    # A Correspondence submit is a promise that send-email.py can carry the
+    # action out. Validate with the SAME parser the send gate uses, or the
+    # promise is only discovered to be false days later, after Kevin has
+    # approved it (finding 20260811-agent-dispatch-085, task recFdEICxHjYCzDkS).
+    if args.type == "Correspondence":
+        try:
+            parse_email_output(output)
+        except EmailFormatError as exc:
+            sys.exit(
+                f"ERROR: refusing to submit {args.task} as Correspondence — {exc}\n"
+                "       Agent Output must be TO:/CC:/FROM:/SUBJECT: headers, a\n"
+                "       `---` line, then the body. See scripts/send-email.py.\n"
+                "       An approved email that cannot be sent is worse than a\n"
+                "       refused draft: the refusal arrives after the decision."
+            )
+
     # The gate: prepared, proposed, and NOTHING sent, filed or executed.
+    #
+    # Clearing the approval fields is part of the gate, not tidiness. Before
+    # 11 Aug 2026 submit left a previous verdict standing, so a task resubmitted
+    # with brand new words still read 'Approved as-is' — send-email.py and the
+    # queue classifier both gate on that field alone, and would have carried out
+    # text Kevin never saw. The mirror image broke the redo path: a stale
+    # 'Changes requested' re-queued the same task as a redo on every run.
     patch_task(args.task, {
         AF["agentOutput"]: output[:95000],
         AF["taskType"]: args.type,
@@ -551,6 +586,9 @@ def cmd_submit(args):
         AF["teamMember"]: [args.agent],
         AF["assignee"]: {"email": KEVIN_AIRTABLE_EMAIL},
         AF["dueDate"]: today_london(),
+        AF["approvalOutcome"]: None,
+        AF["approvalFeedback"]: None,
+        AF["approvedAt"]: None,
     })
     print(json.dumps({"submitted": args.task,
                       "agent": AGENTS[args.agent]["name"],

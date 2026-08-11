@@ -64,11 +64,16 @@ Usage:
 import argparse
 import json
 import os
-import re
 import sys
 import urllib.error
 import urllib.request
 from datetime import datetime, timezone
+
+# The Correspondence format lives in ONE place, shared with agent-dispatch.py's
+# submit validation. Two copies of this parser is how a tier-1 banner came to be
+# prepended by one script and rejected by the other.
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from agent_email_format import EmailFormatError, parse_output as parse_email_output  # noqa: E402
 
 BASE_ID = "appnqjDpqDniH3IRl"
 TASKS = "tblqB8b22hKBL4PF1"
@@ -95,8 +100,6 @@ WORKER = "https://drive-upload.kevinbrittain.workers.dev"
 SEND_URL = f"{WORKER}/send-email"
 HEALTH_URL = f"{WORKER}/send-email/test"
 CONSENT_URL = f"{WORKER}/auth/gmail"
-
-EMAIL_RE = re.compile(r"^[^@\s,]+@[^@\s,]+\.[^@\s,]+$")
 
 
 def now_iso():
@@ -191,64 +194,23 @@ def ledger_append(row):
         fh.write(json.dumps(row) + "\n")
 
 
-def parse_addresses(raw, field):
-    out = []
-    for part in re.split(r"[,;]", raw):
-        addr = part.strip()
-        if not addr:
-            continue
-        if not EMAIL_RE.match(addr):
-            sys.exit(f"ERROR: {field} contains something that is not an email "
-                     f"address: {addr!r}")
-        out.append(addr)
-    return out
-
-
 def parse_output(output, task_id):
     """Turn an approved Agent Output into headers plus body.
+
+    Thin wrapper over the shared contract in scripts/agent_email_format.py, so
+    the submit path and the send path can never disagree about what a valid
+    Correspondence output is. A leading tier-1 banner is stripped there before
+    header parsing: agent-dispatch.py prepends it, and it is a label for Kevin,
+    not part of the email.
 
     Strict on purpose. A malformed block is a refusal, never a guess, because
     guessing here means guessing a recipient.
     """
-    if "---" not in output:
-        sys.exit(f"ERROR: task {task_id} Agent Output has no `---` line "
-                 "separating headers from body. See the format in this "
-                 "script's docstring.")
-    head, _, body = output.partition("---")
-    headers = {}
-    for line in head.strip().splitlines():
-        if not line.strip():
-            continue
-        key, sep, val = line.partition(":")
-        if not sep:
-            sys.exit(f"ERROR: task {task_id} header line is not `KEY: value`: "
-                     f"{line.strip()!r}")
-        headers[key.strip().upper()] = val.strip()
-
-    unknown = set(headers) - {"TO", "CC", "SUBJECT", "FROM"}
-    if unknown:
-        # BCC lands here deliberately: a recipient Kevin cannot see in the
-        # approval is a recipient he did not approve.
-        sys.exit(f"ERROR: task {task_id} has unsupported header(s): "
-                 f"{', '.join(sorted(unknown))}. Only TO, CC, FROM and SUBJECT.")
-
-    to = parse_addresses(headers.get("TO", ""), "TO")
-    cc = parse_addresses(headers.get("CC", ""), "CC")
-    senders = parse_addresses(headers.get("FROM", ""), "FROM")
-    if len(senders) > 1:
-        sys.exit(f"ERROR: task {task_id} has more than one FROM address")
-    sender = senders[0] if senders else None
-    subject = headers.get("SUBJECT", "").strip()
-    body = body.strip()
-
-    if not to:
-        sys.exit(f"ERROR: task {task_id} has no TO recipient")
-    if not subject:
-        sys.exit(f"ERROR: task {task_id} has no SUBJECT")
-    if not body:
-        sys.exit(f"ERROR: task {task_id} has an empty body")
-    return {"to": to, "cc": cc, "from": sender, "subject": subject,
-            "body": body}
+    try:
+        return parse_email_output(output)
+    except EmailFormatError as exc:
+        sys.exit(f"ERROR: task {task_id} {exc} "
+                 "See the format in this script's docstring.")
 
 
 def load_approved(task_id, require_approval=True):
@@ -377,6 +339,15 @@ def cmd_selftest(args):
     refuses("refuses bad FROM", "TO: a@b.com\nFROM: nonsense\nSUBJECT: x\n---\nb")
     refuses("refuses two FROMs",
             "TO: a@b.com\nFROM: a@a.com, b@b.com\nSUBJECT: x\n---\nb")
+
+    # A tier-1 task carries agent-dispatch.py's banner above the headers. Before
+    # 11 Aug 2026 that banner was read as a header with an empty key, so every
+    # tier-1 Correspondence task failed here AFTER Kevin had approved it.
+    from agent_email_format import TIER1_BANNER
+    plain = "TO: a@b.com\nSUBJECT: x\n---\nBody line."
+    tier1 = parse_output(TIER1_BANNER + "\n\n" + plain, "selftest")
+    cases.append(("tier-1 banner stripped", tier1 == parse_output(plain, "selftest")))
+    cases.append(("banner not left in body", TIER1_BANNER not in tier1["body"]))
 
     failed = [n for n, ok in cases if not ok]
     for n, ok in cases:
