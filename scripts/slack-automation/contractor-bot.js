@@ -72,7 +72,7 @@
 //   Manual: POST /approvals/run?key=…   GET /approvals/diag?key=…
 //           POST /approvals/purge?key=…&match=… (deletes the bot's own posts)
 //           guarded by APPROVALS_ADMIN_KEY
-import { runApprovalSweep, approvalsDiag, purgeApprovalPosts } from './approvals.js';
+import { runApprovalSweep, approvalsDiag, purgeApprovalPosts, rewriteApprovalPost } from './approvals.js';
 
 // ─── CONFIGURATION ────────────────────────────────────────────────────
 
@@ -242,6 +242,15 @@ export default {
             if (url.pathname === '/approvals/purge') {
                 try {
                     return Response.json(await purgeApprovalPosts(env, url.searchParams.get('match')));
+                } catch (err) {
+                    return Response.json({ ok: false, error: String(err && err.message || err) }, { status: 500 });
+                }
+            }
+            // Re-render one live approval message to the current block layout,
+            // in place. ?task=recXXX required; loop from the caller for bulk.
+            if (url.pathname === '/approvals/rewrite') {
+                try {
+                    return Response.json(await rewriteApprovalPost(env, url.searchParams.get('task')));
                 } catch (err) {
                     return Response.json({ ok: false, error: String(err && err.message || err) }, { status: 500 });
                 }
