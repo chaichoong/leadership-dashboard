@@ -354,22 +354,34 @@ function pushLongText(blocks, heading, raw, style, maxBlocks) {
 
 // The message has to carry enough for Kevin to judge the work from his phone,
 // without opening Airtable. Four parts, in the order he needs them:
-//   what it is · what the agent produced · what he was asked for · how to answer
+//   what the agent wants to do · what it is · what he was asked for · how to answer
 function buildApprovalBlocks(t, agent, warn) {
     const blocks = [];
 
-    blocks.push({
-        type: 'section',
-        text: {
-            type: 'mrkdwn',
-            text: truncate(
-                `*${esc(t.name)}*\n`
-                + (agent ? `Prepared by *${esc(agent)}*` : '*No agent recorded on this task.*')
-                + (t.taskType ? ` · ${esc(t.taskType)}` : '')
-                + (t.dueDate ? ` · due ${esc(t.dueDate)}` : ''), 2900),
-        },
-    });
+    // The agent's proposed work leads the message (Kevin's request, 11 Aug
+    // 2026, matching the web app's approval box): the decision is made on the
+    // work itself, so it sits first for fast triage. It gets the most room and
+    // is NEVER cut — a decision made on half a draft is not a decision. Block
+    // budget: 28 + 6 + 2 content blocks plus ~6 fixed ones stays under Slack's
+    // 50-block ceiling. Trimmed check, or an output of pure whitespace would
+    // skip BOTH branches: no work shown and no warning either, which is the
+    // worst of all worlds.
+    if (String(t.agentOutput || '').trim()) {
+        pushLongText(blocks, 'What the agent wants to do', t.agentOutput, 'quote', 28);
+    } else {
+        blocks.push({
+            type: 'section',
+            text: {
+                type: 'mrkdwn',
+                text: '*What the agent wants to do*\n:warning: _The agent left its work empty._ '
+                    + 'There is nothing here to judge, so do not approve it blind — '
+                    + 'reply in this thread and tell it to show its work.',
+            },
+        });
+    }
 
+    // Tier 1 sits directly under the work, before anything else, so it is
+    // read before any decision is made.
     if (warn) {
         blocks.push({
             type: 'section',
@@ -383,25 +395,17 @@ function buildApprovalBlocks(t, agent, warn) {
         });
     }
 
-    // What the agent has actually done. This is the part he is judging, so it
-    // gets the most room, sits above the brief, and is NEVER cut — a decision
-    // made on half a draft is not a decision. Block budget: 28 + 6 + 2 content
-    // blocks plus ~6 fixed ones stays under Slack's 50-block ceiling.
-    // Trimmed check, or an output of pure whitespace would skip BOTH branches:
-    // no work shown and no warning either, which is the worst of all worlds.
-    if (String(t.agentOutput || '').trim()) {
-        pushLongText(blocks, 'What the agent has done', t.agentOutput, 'quote', 28);
-    } else {
-        blocks.push({
-            type: 'section',
-            text: {
-                type: 'mrkdwn',
-                text: '*What the agent has done*\n:warning: _The agent left its work empty._ '
-                    + 'There is nothing here to judge, so do not approve it blind — '
-                    + 'reply in this thread and tell it to show its work.',
-            },
-        });
-    }
+    blocks.push({
+        type: 'section',
+        text: {
+            type: 'mrkdwn',
+            text: truncate(
+                `*${esc(t.name)}*\n`
+                + (agent ? `Prepared by *${esc(agent)}*` : '*No agent recorded on this task.*')
+                + (t.taskType ? ` · ${esc(t.taskType)}` : '')
+                + (t.dueDate ? ` · due ${esc(t.dueDate)}` : ''), 2900),
+        },
+    });
 
     // The brief it was working to, so he can tell whether it answered the question.
     pushLongText(blocks, 'The task it was given', t.description, 'plain', 6);
