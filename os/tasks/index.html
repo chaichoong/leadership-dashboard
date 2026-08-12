@@ -3627,7 +3627,12 @@ function renderApprovalBlock(t){
     return `<div class="approval-decided">Approval outcome: <strong>${escHtml(t.approvalOutcome)}</strong>${t.approvedByName?' by '+escHtml(t.approvedByName):''}${when?' on '+escHtml(when):''}.</div>`;
   }
   const raiser=agentNamesFor(t);
-  const mine=!t.assigneeEmail||(t.assigneeEmail||'').toLowerCase()===KEVIN_EMAIL;
+  // The decision belongs to whoever the approval is ASSIGNED to — Kevin for
+  // label-12 work, Mica for label-8 (12 Aug 2026) — so the gate keys on the
+  // logged-in user, never on a hardcoded person. A blank assignee stays
+  // decidable by whoever is looking, as before.
+  const myEmail=((currentUser&&currentUser.email)||'').toLowerCase();
+  const mine=!t.assigneeEmail||(t.assigneeEmail||'').toLowerCase()===myEmail;
   if(!mine){
     return `<div class="approval-decided">Waiting for approval from ${escHtml(t.assignee||t.assigneeEmail)}. Reassign it to yourself to decide it here.</div>`;
   }

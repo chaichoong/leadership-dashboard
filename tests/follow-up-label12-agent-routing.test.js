@@ -142,6 +142,21 @@ describe('the Supabase shadow twin carries the same routing', () => {
   });
 });
 
+describe('the task drawer approval box works for any approver', () => {
+  // Mica approves label-8 work in the SAME drawer Kevin uses. Before
+  // 12 Aug 2026 the box was gated on assigneeEmail === KEVIN_EMAIL, so Mica
+  // opening her own approval was told to "reassign it to yourself".
+  const TASKS = readFileSync(resolve(__dirname, '../os/tasks/index.html'), 'utf8');
+
+  it('gates the decision on the logged-in user, not a hardcoded person', () => {
+    const start = TASKS.indexOf('function renderApprovalBlock(');
+    expect(start).toBeGreaterThan(-1);
+    const block = TASKS.slice(start, TASKS.indexOf('async function apvDecide('));
+    expect(block).toContain('currentUser');
+    expect(block).not.toContain('KEVIN_EMAIL');
+  });
+});
+
 describe('constant drift vs agent-dispatch.py, approvals.js and config.js', () => {
   it('AI CEO record ID matches CEO_REC_ID in agent-dispatch.py', () => {
     const m = DISPATCH.match(/CEO_REC_ID = "([^"]+)"/);
