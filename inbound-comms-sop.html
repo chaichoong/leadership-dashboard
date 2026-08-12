@@ -101,7 +101,7 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
     <a href="index.html#sitemap" class="header-back">&#x2190; Back to Site Map</a>
     <h1>&#x1F4E8; Inbound Comms</h1>
     <div class="subtitle">Standard Operating Procedure &mdash; Gmail label management, AI drafting, task automation and compliance processing</div>
-    <div class="version">Version 2.57 &bull; 12 Aug 2026 &bull; Owner: Kevin Brittain</div>
+    <div class="version">Version 2.59 &bull; 12 Aug 2026 &bull; Owner: Kevin Brittain</div>
   </div>
 </div>
 
@@ -145,7 +145,7 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
     </div>
     <div class="qr-item" style="border-left-color:var(--danger);">
       <div class="qr-label">Labels that create tasks</div>
-      <div class="qr-value">8 &rarr; Mica &bull; 12 &rarr; AI agents (CEO triage) &bull; 13 &rarr; unassigned maintenance</div>
+      <div class="qr-value">8 &rarr; AI agents (Mica approves) &bull; 12 &rarr; AI agents (Kevin approves) &bull; 13 &rarr; unassigned maintenance</div>
     </div>
     <div class="qr-item" style="border-left-color:var(--danger);">
       <div class="qr-label">Labels that close tasks</div>
@@ -455,13 +455,13 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
           <tr><td><span class="label-badge lb-blue">2: Follow Up</span></td><td>Send follow-up, move to Responded</td><td><span class="label-badge lb-green">5: Responded</span></td></tr>
           <tr><td><span class="label-badge lb-red">3: To Pay</span></td><td>Send delay payment, stay in label</td><td>Stays in <span class="label-badge lb-red">3: To Pay</span></td></tr>
           <tr><td><span class="label-badge lb-red">3: to pay</span></td><td>Move via dropdown</td><td><span class="label-badge lb-green">4: paid</span> (or any label)</td></tr>
-          <tr><td>Inbox or any label</td><td>Move to <span class="label-badge lb-purple">8: task created</span></td><td>Airtable task created for <strong>Mica</strong></td></tr>
-          <tr><td>Inbox or any label</td><td>Move to <span class="label-badge lb-purple">12: kevin to respond</span></td><td>Airtable task created for the <strong>AI agents</strong> (Team Member = AI CEO, no assignee). The CEO triages it to the right agent and Kevin receives the prepared work as a task approval</td></tr>
+          <tr><td>Inbox or any label</td><td>Move to <span class="label-badge lb-purple">8: task created</span></td><td>Airtable task created for the <strong>AI agents</strong> (Team Member = AI CEO, no assignee, Approver = Mica). The CEO triages it, an agent prepares the work, and Mica approves it from a Slack DM</td></tr>
+          <tr><td>Inbox or any label</td><td>Move to <span class="label-badge lb-purple">12: kevin to respond</span></td><td>Airtable task created for the <strong>AI agents</strong> (Team Member = AI CEO, no assignee, Approver = Kevin). The CEO triages it to the right agent and Kevin receives the prepared work as a task approval</td></tr>
           <tr><td>Inbox or any label</td><td>Move to <span class="label-badge lb-purple">13: maintenance</span></td><td>Airtable maintenance ticket created, <strong>no assignee</strong></td></tr>
           <tr><td><span class="label-badge lb-purple">8: task created</span> / <span class="label-badge lb-purple">12: kevin to respond</span></td><td>Airtable task marked Completed</td><td><span class="label-badge lb-green">9: task completed</span> (automatic)</td></tr>
           <tr><td><span class="label-badge lb-purple">13: maintenance</span></td><td>Airtable ticket marked Completed</td><td><span class="label-badge lb-green">14: maintenance completed</span> (automatic)</td></tr>
           <tr><td><span class="label-badge lb-purple">8</span> / <span class="label-badge lb-purple">12</span> / <span class="label-badge lb-purple">13</span></td><td>Move to 4, 5, 6, 7, 9 or 14</td><td><strong>Airtable task marked Completed</strong> (see warning below)</td></tr>
-          <tr><td><span class="label-badge lb-purple">8: task created</span></td><td>Task handed to the AI agents in Airtable (Team Member = an AI agent)</td><td><span class="label-badge lb-purple">12: kevin to respond</span> (automatic, within 5 minutes)</td></tr>
+          <tr><td><span class="label-badge lb-purple">8: task created</span> / <span class="label-badge lb-purple">12: kevin to respond</span></td><td>Approver changed in Airtable (Kevin &harr; Mica)</td><td>Email moves to the approver's label: Kevin &rarr; 12, Mica &rarr; 8 (automatic, within 5 minutes)</td></tr>
           <tr><td><span class="label-badge lb-purple">12: kevin to respond</span></td><td>Task reassigned to Mica in Airtable</td><td><span class="label-badge lb-purple">8: task created</span> (automatic, within 5 minutes)</td></tr>
           <tr><td><span class="label-badge lb-green">9</span> / <span class="label-badge lb-green">14</span></td><td>Move back to 8, 12 or 13</td><td>Completed task <strong>reopened</strong> and set back to Today</td></tr>
           <tr><td>Any action label</td><td>Use "Move to..." dropdown</td><td>Any other label</td></tr>
@@ -880,8 +880,8 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
     <p>The app also moves emails on its own, based on what happens in Airtable. A background sweep runs on page load, every 5 minutes, and whenever you come back to the tab. It runs no matter which view you have open.</p>
     <ul>
       <li><strong>Task completed in Airtable</strong> &rarr; the email moves from 8 or 12 to <strong>9: task completed</strong>. From 13 it moves to <strong>14: maintenance completed</strong> instead.</li>
-      <li><strong>Task handed to the AI agents in Airtable</strong> (Team Member = an AI agent) &rarr; the email moves from 8 to <strong>12</strong>.</li>
-      <li><strong>Task reassigned to Mica in Airtable</strong> &rarr; the email moves from 12 to <strong>8</strong>, and any AI agent links are removed so the agents stop working it.</li>
+      <li><strong>Approver changed in Airtable</strong> &rarr; the email moves to the approver's label: Kevin &rarr; <strong>12</strong>, Mica &rarr; <strong>8</strong>.</li>
+      <li><strong>Task ASSIGNED to Mica in Airtable</strong> &rarr; she has taken it over from the agents: the email moves from 12 to <strong>8</strong> and the AI agent links are removed so the agents stop working it.</li>
       <li><strong>Maintenance tickets never move on reassignment.</strong> A thread on 13 stays on 13 whoever picks it up.</li>
     </ul>
     <p>The same completion check also runs in the foreground each time you open label 8, 12 or 13, so the list you are looking at is current. A success banner shows how many emails were moved.</p>
@@ -909,8 +909,9 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
           <tr><td>Base ID</td><td><code>appnqjDpqDniH3IRl</code></td></tr>
           <tr><td>Table ID (Tasks)</td><td><code>tblqB8b22hKBL4PF1</code></td></tr>
           <tr><td>Table ID (Tenancies, used by label 11)</td><td><code>tblN51a88qTDB6iMH</code></td></tr>
-          <tr><td>Default assignee (label 8 and the label 11 fallback)</td><td><code>usrP7K5pmPSdVVgTN</code> (Mica Albovias)</td></tr>
-          <tr><td>Label 12 owner (Team Member link, no assignee)</td><td><code>reciHUAEcEkbctnZ6</code> (AI CEO, Dan Martell)</td></tr>
+          <tr><td>Default assignee (label 11 fallback) and label 8 approver</td><td><code>usrP7K5pmPSdVVgTN</code> (Mica Albovias)</td></tr>
+          <tr><td>Label 8/12 owner (Team Member link, no assignee)</td><td><code>reciHUAEcEkbctnZ6</code> (AI CEO, Dan Martell)</td></tr>
+          <tr><td>Approver field (who approves the agent's work)</td><td><code>fldLLAG5HQPEFEfE5</code> (label 8 = Mica, label 12 = Kevin, tier 1 always Kevin)</td></tr>
           <tr><td>Label 13 assignee</td><td>None. Maintenance tickets are created unassigned</td></tr>
           <tr><td>Third team member (added as collaborator)</td><td><code>usrejWz04hiXxxgVa</code> (Ericamae Atenta)</td></tr>
           <tr><td>Completed status option ID</td><td><code>selI6Otekm3JyaBSJ</code></td></tr>
@@ -1132,7 +1133,7 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
     </div>
     <div class="ts-item">
       <div class="ts-problem">An email keeps jumping between label 8 and label 12 on its own</div>
-      <div class="ts-solution">That is the reassignment sweep, and it is working as designed. It runs every 5 minutes and follows ownership: a task handed to the AI agents (Team Member = an AI agent) pulls the email to label 12, a task assigned to Mica pulls it to label 8. Change the ownership in Airtable rather than fighting the label in Gmail.</div>
+      <div class="ts-solution">That is the reassignment sweep, and it is working as designed. It runs every 5 minutes and follows the Approver: Kevin's approvals sit on label 12, Mica's on label 8, and a task Mica assigns herself comes off the agents and onto label 8. Change the Approver or assignee in Airtable rather than fighting the label in Gmail.</div>
     </div>
     <div class="ts-item">
       <div class="ts-problem">Compliance processing shows "No Match" or "Failed"</div>

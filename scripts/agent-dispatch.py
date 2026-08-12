@@ -114,6 +114,7 @@ AF = {
     "urgencyScore":      "fldfA3gatzKbwCfUv",
     "teamMember":        "flduCtmQGpOA4eWaj",
     "sentForApprovalBy": "fld30Yw8SWYVp049g",
+    "approver":          "fldLLAG5HQPEFEfE5",
     "approvalOutcome":   "fldrHBSr6qoUfaKuZ",
     "approvalFeedback":  "fldtI7SJI4gEohHD1",
     "approvedAt":        "fldr4Mvf2RzKvhZhi",
@@ -480,6 +481,7 @@ def task_view(rec):
         "taskType": sel(f.get(AF["taskType"])),
         "teamMemberIds": links(f.get(AF["teamMember"])),
         "sentForApprovalByIds": links(f.get(AF["sentForApprovalBy"])),
+        "approverEmail": (f.get(AF["approver"]) or {}).get("email", ""),
         "agentId": agent_id,
         "agentName": AGENTS.get(agent_id, {}).get("name", ""),
         "localAgent": AGENTS.get(agent_id, {}).get("agent", ""),
@@ -686,6 +688,28 @@ def cmd_submit(args):
                 "       refused draft: the refusal arrives after the decision."
             )
 
+    # WHO approves. The task's Approver field decides (set by Inbound Comms at
+    # creation: label 8 = Mica, label 12 = Kevin); empty means Kevin. Tier 1
+    # ALWAYS diverts to Kevin whatever the field says — his private legal and
+    # financial matters never route to the team. The banner check catches a
+    # tier-1 connection the agent only discovered while working, and the
+    # pattern re-check catches a dispatcher that forgot --tier1.
+    approver_email = KEVIN_AIRTABLE_EMAIL
+    is_tier1 = bool(args.tier1) or TIER1_BANNER in output
+    if not is_tier1:
+        t = get_task(args.task)
+        tf = t.get("fields", {}) or {}
+        if tier_match(TIER1_PATTERNS, tf.get(AF["name"]),
+                      tf.get(AF["description"]), tf.get(AF["notes"])):
+            is_tier1 = True
+        else:
+            approver_email = (tf.get(AF["approver"]) or {}).get(
+                "email") or KEVIN_AIRTABLE_EMAIL
+    # A tier-1 detected here (banner or pattern) must carry the banner too —
+    # the label travels with the work, however it was spotted.
+    if is_tier1 and TIER1_BANNER not in output:
+        output = TIER1_BANNER + "\n\n" + output
+
     # The gate: prepared, proposed, and NOTHING sent, filed or executed.
     #
     # Clearing the approval fields is part of the gate, not tidiness. Before
@@ -700,7 +724,7 @@ def cmd_submit(args):
         AF["status"]: "Approval",
         AF["sentForApprovalBy"]: [args.agent],
         AF["teamMember"]: [args.agent],
-        AF["assignee"]: {"email": KEVIN_AIRTABLE_EMAIL},
+        AF["assignee"]: {"email": approver_email},
         AF["dueDate"]: today_london(),
         AF["approvalOutcome"]: None,
         AF["approvalFeedback"]: None,
@@ -712,7 +736,8 @@ def cmd_submit(args):
     })
     print(json.dumps({"submitted": args.task,
                       "agent": AGENTS[args.agent]["name"],
-                      "type": args.type, "tier1": bool(args.tier1),
+                      "type": args.type, "tier1": is_tier1,
+                      "approver": approver_email,
                       "chars": len(output)}))
 
 

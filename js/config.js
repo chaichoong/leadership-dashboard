@@ -32,7 +32,7 @@
         { id: 'invoices',   name: 'Accounts Payable Variable',     icon: '🧾', pageVer: '2.20', sopFile: 'sop-invoices.html',           sopVer: '2.18', standalone: 'index.html#invoices' },
         { id: 'pnl',        name: 'Profit & Loss',                 icon: '💰', pageVer: '2.27', sopFile: 'sop-pnl.html',               sopVer: '2.26', standalone: 'index.html#pnl' },
         { id: 'transactions', name: 'Transactions',                icon: '🔍', pageVer: '1.1', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#transactions' },
-        { id: 'comms',      name: 'Inbound Comms',                 icon: '📨', pageVer: '2.58', sopFile: 'inbound-comms-sop.html',      sopVer: '2.57', standalone: 'follow-up.html' },
+        { id: 'comms',      name: 'Inbound Comms',                 icon: '📨', pageVer: '2.59', sopFile: 'inbound-comms-sop.html',      sopVer: '2.59', standalone: 'follow-up.html' },
         { id: 'compliance', name: 'Property Compliance',            icon: '✅', pageVer: '1.14', sopFile: 'sop-compliance.html',         sopVer: '1.13', standalone: 'compliance.html' },
         { id: 'operations',  name: 'Operations',                    icon: '🏢', pageVer: '1.44', sopFile: '',                            sopVer: '1.0', standalone: 'os/operations/index.html' },
         // KPI Library (Leadership section) — ADMIN ONLY. Never rendered in a
@@ -208,6 +208,7 @@
         // Agents propose; Kevin decides; the agent then carries the action out.
         teamMember:      'flduCtmQGpOA4eWaj', // link → Team Members (holds the AI agent)
         sentForApprovalBy:'fld30Yw8SWYVp049g',// link → Team Members (which agent raised it)
+        approver:        'fldLLAG5HQPEFEfE5', // singleCollaborator — who approves the agent's work (label 8 = Mica, label 12 = Kevin; empty = Kevin; tier 1 always Kevin)
         approvalOutcome: 'fldrHBSr6qoUfaKuZ', // singleSelect verdict — the input to accuracy scoring
         approvedAt:      'fldr4Mvf2RzKvhZhi', // dateTime
         taskType:        'fldZ2moDV2041Sobc', // singleSelect — accuracy is scored per agent PER TASK TYPE

@@ -61,6 +61,23 @@ const TABLE_TASKS   = 'tblqB8b22hKBL4PF1';
 const KEVIN_SLACK_ID = 'U08HW8F1MA8';
 const KEVIN_AIRTABLE_EMAIL = 'kevin@runpreneur.org.uk';
 
+// Who can approve agent work (12 Aug 2026). The task's Approver field decides:
+// label-8 inbound work goes to Mica, label-12 (and empty) to Kevin, and TIER 1
+// ALWAYS diverts to Kevin whatever the field says. Only the routed approver's
+// reactions and replies count for that task. Mica's cards go to a bot DM, not
+// the approvals channel — the channel carries Kevin's tier-1 legal content and
+// she is deliberately not in it.
+const APPROVERS = {
+    kevin: { key: 'kevin', name: 'Kevin', slackId: KEVIN_SLACK_ID, email: KEVIN_AIRTABLE_EMAIL },
+    mica:  { key: 'mica',  name: 'Mica',  slackId: 'U08HW0TAWAE', email: 'micaa.work@gmail.com' },
+};
+
+export function approverFor(t, tier1) {
+    if (tier1) return APPROVERS.kevin;
+    const e = String(t.approverEmail || '').toLowerCase();
+    return e === APPROVERS.mica.email ? APPROVERS.mica : APPROVERS.kevin;
+}
+
 const DEFAULT_CHANNEL_NAME = 'agent-approvals';
 
 const AF = {
@@ -80,6 +97,7 @@ const AF = {
     approvedBy:      'fldNntfwSzU5DlYS4',
     approvedAt:      'fldr4Mvf2RzKvhZhi',
     taskType:        'fldZ2moDV2041Sobc',
+    approver:        'fldLLAG5HQPEFEfE5', // singleCollaborator — who approves (see APPROVERS)
     slackTs:         'fldHTaX3wP9VhD5Oz',
     slackBaseline:   'fldxsqj9JSRBGNyT9',
 };
@@ -255,6 +273,34 @@ async function resolveChannel(env) {
     throw new Error(`No approvals channel: ${created.error || 'unknown'}`);
 }
 
+// The conversation each approver's cards live in. Kevin: the pinned approvals
+// channel. Mica: a bot DM (im:write/im:history verified live 12 Aug 2026 via
+// /approvals/diag). Resolved once per run via `channels` and derived
+// DETERMINISTICALLY from the task each time, so the reaction and reconcile
+// phases look in the same place the post phase wrote to. If Mica's DM cannot
+// be opened, her card goes to Kevin's channel with a loud log line — a
+// misrouted approval beats a silent one.
+async function resolveChannelFor(env, approver, channels, log) {
+    if (channels[approver.key]) return channels[approver.key];
+    let id;
+    if (approver.key === 'kevin') {
+        const ch = await resolveChannel(env);
+        log.push(`channel ${ch.id} (${ch.how})`);
+        id = ch.id;
+    } else {
+        const dm = await slack(env, 'https://slack.com/api/conversations.open', { method: 'POST', body: JSON.stringify({ users: approver.slackId }) });
+        if (dm.ok && dm.channel && dm.channel.id) {
+            id = dm.channel.id;
+            log.push(`${approver.name} DM ${id}`);
+        } else {
+            id = await resolveChannelFor(env, APPROVERS.kevin, channels, log);
+            log.push(`${approver.name} DM FAILED (${dm.error || 'unknown'}) — routing to Kevin's channel`);
+        }
+    }
+    channels[approver.key] = id;
+    return id;
+}
+
 // ─── AIRTABLE READS ───────────────────────────────────────────────────
 
 const TASK_FIELD_LIST = Object.values(AF).map(f => `fields%5B%5D=${f}`).join('&');
@@ -281,6 +327,7 @@ function taskView(rec) {
         baseline: f[AF.slackBaseline] || '',
         outcome: selName(f[AF.approvalOutcome]),
         agentId: linkIds(f[AF.sentForApprovalBy])[0] || linkIds(f[AF.teamMember])[0] || '',
+        approverEmail: ((f[AF.approver] || {}).email) || '',
     };
 }
 
@@ -489,12 +536,14 @@ function buildApprovalBlocks(t, agent, warn) {
     return blocks;
 }
 
-async function postPending(env, channel, log) {
+async function postPending(env, channels, log) {
     const recs = await queryTasks(env, `AND({Status}='Approval', LEN({Approval Slack TS}&'')=0)`, MAX_POSTS_PER_RUN);
     for (const rec of recs) {
         const t = taskView(rec);
         const agent = await agentName(env, t.agentId);
         const warn = isKevinOnlyMatter(`${t.name} ${t.description}`);
+        const approver = approverFor(t, warn);
+        const channel = await resolveChannelFor(env, approver, channels, log);
         const res = await slack(env, SLACK.post, {
             method: 'POST',
             body: JSON.stringify({
@@ -529,12 +578,12 @@ async function fetchMessage(env, channel, ts) {
     return (data.messages || [])[0] || null;
 }
 
-function kevinsReaction(msg) {
+function reactionFrom(msg, slackId) {
     const reactions = (msg && msg.reactions) || [];
     for (const r of reactions) {
         const outcome = REACTION_OUTCOMES[r.name];
         if (!outcome) continue;
-        if ((r.users || []).indexOf(KEVIN_SLACK_ID) !== -1) return { outcome, emoji: r.name };
+        if ((r.users || []).indexOf(slackId) !== -1) return { outcome, emoji: r.name };
     }
     return null;
 }
@@ -550,16 +599,17 @@ async function threadReply(env, channel, ts, text) {
     return slack(env, SLACK.post, { method: 'POST', body: JSON.stringify({ channel, thread_ts: ts, text }) });
 }
 
-// Apply Kevin's verdict. Same semantics as the task drawer: approve hands the
-// task BACK to the agent (due today) to carry the action out; reject closes it.
-// Nothing here ever marks approved work Completed — that is the agent's job,
-// after it has actually done the thing.
-async function applyDecision(env, t, outcome, decidedVia, note) {
+// Apply the approver's verdict. Same semantics as the task drawer: approve
+// hands the task BACK to the agent (due today) to carry the action out; reject
+// closes it. Nothing here ever marks approved work Completed — that is the
+// agent's job, after it has actually done the thing.
+async function applyDecision(env, t, outcome, decidedVia, note, approver) {
+    approver = approver || APPROVERS.kevin;
     const now = new Date().toISOString();
     const fields = {
         [AF.approvalOutcome]: outcome,
         [AF.approvedAt]: now,
-        [AF.approvedBy]: { email: KEVIN_AIRTABLE_EMAIL },
+        [AF.approvedBy]: { email: approver.email },
         [AF.slackTs]: '',
         [AF.slackBaseline]: '',
     };
@@ -586,12 +636,12 @@ async function applyDecision(env, t, outcome, decidedVia, note) {
     await airtable(env, 'PATCH', `/${TABLE_TASKS}/${t.id}`, { fields, typecast: true });
     const agent = await agentName(env, t.agentId);
     const line = outcome === 'Rejected'
-        ? `Rejected by Kevin ${decidedVia}. Closed, and counted against ${agent || 'the agent'}.`
+        ? `Rejected by ${approver.name} ${decidedVia}. Closed, and counted against ${agent || 'the agent'}.`
               + (note ? `\n\nReason: ${note}` : '')
         : outcome === 'Changes requested'
-            ? `Changes requested by Kevin ${decidedVia}. Back to ${agent || 'the agent'}. Nothing has gone out.`
+            ? `Changes requested by ${approver.name} ${decidedVia}. Back to ${agent || 'the agent'}. Nothing has gone out.`
                   + (note ? `\n\nWhat to change: ${note}` : '')
-            : `${outcome} by Kevin ${decidedVia}. Back to ${agent || 'the agent'} to carry out, then it completes itself.`
+            : `${outcome} by ${approver.name} ${decidedVia}. Back to ${agent || 'the agent'} to carry out, then it completes itself.`
                   + (note ? `\n\nNote: ${note}` : '');
     return line;
 }
@@ -611,29 +661,31 @@ function cleanReply(text) {
         .trim();
 }
 
-// Kevin's own replies in the thread, oldest first, ignoring the bot's.
-async function kevinsReplies(env, channel, ts) {
+// The approver's own replies in the thread, oldest first, ignoring the bot's.
+async function repliesFrom(env, channel, ts, slackId) {
     const url = `${SLACK.replies}?channel=${encodeURIComponent(channel)}&ts=${encodeURIComponent(ts)}&limit=50`;
     const data = await slackGet(env, url);
     if (!data.ok) return [];
     return (data.messages || [])
-        .filter(m => m.ts !== ts && !m.bot_id && m.user === KEVIN_SLACK_ID && String(m.text || '').trim())
+        .filter(m => m.ts !== ts && !m.bot_id && m.user === slackId && String(m.text || '').trim())
         .map(m => cleanReply(m.text))
         .filter(Boolean);
 }
 
-// Read everything Kevin has said about a posted task and act on it.
+// Read everything the task's APPROVER has said about a posted task and act on
+// it. Only the routed approver's words and reactions count — Kevin for his
+// queue, Mica for hers.
 //
 // A written reply IS the amendment — there is no emoji to remember for changes.
 // Reply "make it warmer and drop the deadline" and that goes back to the agent
 // as the instruction. The emoji are only for the two verdicts a sentence cannot
 // express as safely: release the work, or kill it.
 //
-//   reply only              → changes requested, his words are the instruction
+//   reply only              → changes requested, their words are the instruction
 //   ✅ (with or without a reply) → approved, any reply attached as a note
 //   ❌ (with or without a reply) → rejected, any reply attached as the reason
-//   ✏️ alone                → he means "changes" but has not said what yet; ask
-async function processResponses(env, channel, log) {
+//   ✏️ alone                → they mean "changes" but have not said what yet; ask
+async function processResponses(env, channels, log) {
     // Read the WHOLE queue (one subrequest), then check only this minute's
     // rotation window. Capping the QUERY at the check limit — the old design —
     // meant tasks past the cap were never checked at all: a reaction on the
@@ -644,12 +696,14 @@ async function processResponses(env, channel, log) {
     if (all.length > recs.length) log.push(`reactions: window ${win.start}-${win.end - 1} of ${all.length}, full cycle every ${Math.ceil(all.length / MAX_REACTION_CHECKS_PER_RUN)} min`);
     for (const rec of recs) {
         const t = taskView(rec);
+        const approver = approverFor(t, isKevinOnlyMatter(`${t.name} ${t.description}`));
+        const channel = await resolveChannelFor(env, approver, channels, log);
         const msg = await fetchMessage(env, channel, t.ts);
         if (!msg) { log.push(`no message for ${t.id}`); continue; }
-        const reaction = kevinsReaction(msg);
+        const reaction = reactionFrom(msg, approver.slackId);
         // The replies fetch is a second subrequest per task — skip it when the
         // parent message says there is no thread to read.
-        const replies = msg.reply_count ? await kevinsReplies(env, channel, t.ts) : [];
+        const replies = msg.reply_count ? await repliesFrom(env, channel, t.ts, approver.slackId) : [];
         const note = replies.join('\n\n');
         if (!reaction && !replies.length) continue;
 
@@ -689,7 +743,7 @@ async function processResponses(env, channel, log) {
         const staleNote = (isStale(t) && outcome === 'Changes requested')
             ? '\n\n(The task had changed since I posted it, so read the current version before redoing it.)'
             : '';
-        const line = await applyDecision(env, t, outcome, 'in Slack', note ? note + staleNote : staleNote.trim());
+        const line = await applyDecision(env, t, outcome, 'in Slack', note ? note + staleNote : staleNote.trim(), approver);
         await threadReply(env, channel, t.ts,
             outcome === 'Changes requested'
                 ? `:writing_hand: Sent back with your notes. ${esc(line.split('\n')[0])}`
@@ -701,13 +755,15 @@ async function processResponses(env, channel, log) {
 
 // ─── RECONCILE PHASE ──────────────────────────────────────────────────
 
-// Kevin decided in the dashboard while a Slack message was still live. Close
-// the thread so the channel never shows a stale "waiting" post, and clear the
-// timestamp — which is also what stops this running twice on the same task.
-async function reconcileDecidedElsewhere(env, channel, log) {
+// The approver decided in the dashboard while a Slack message was still live.
+// Close the thread so the conversation never shows a stale "waiting" post, and
+// clear the timestamp — which is also what stops this running twice on a task.
+async function reconcileDecidedElsewhere(env, channels, log) {
     const recs = await queryTasks(env, `AND({Status}!='Approval', LEN({Approval Slack TS}&'')>0)`, MAX_RECONCILES_PER_RUN);
     for (const rec of recs) {
         const t = taskView(rec);
+        const approver = approverFor(t, isKevinOnlyMatter(`${t.name} ${t.description}`));
+        const channel = await resolveChannelFor(env, approver, channels, log);
         await threadReply(env, channel, t.ts,
             t.outcome ? `:heavy_check_mark: Decided in the dashboard: *${t.outcome}*.`
                       : `:information_source: This task left the approval queue in the dashboard.`);
@@ -744,16 +800,17 @@ export async function runApprovalSweep(env) {
     if (!env.SLACK_BOT_TOKEN || !env.AIRTABLE_PAT) {
         return { ok: false, error: 'missing SLACK_BOT_TOKEN or AIRTABLE_PAT', log };
     }
-    const ch = await resolveChannel(env);
-    log.push(`channel ${ch.id} (${ch.how})`);
+    // Per-run cache of approver → conversation id. Resolved lazily so a run
+    // with no Mica tasks never spends the subrequest opening her DM.
+    const channels = {};
     const phase = async (name, fn) => {
         try { return await fn(); }
         catch (err) { log.push(`${name} FAILED: ${String(err && err.message || err).slice(0, 200)}`); return -1; }
     };
-    const posted = await phase('post', () => postPending(env, ch.id, log));
-    const closed = await phase('reconcile', () => reconcileDecidedElsewhere(env, ch.id, log));
-    const checked = await phase('reactions', () => processResponses(env, ch.id, log));
-    return { ok: true, channel: ch.id, posted, checked, closed, log };
+    const posted = await phase('post', () => postPending(env, channels, log));
+    const closed = await phase('reconcile', () => reconcileDecidedElsewhere(env, channels, log));
+    const checked = await phase('reactions', () => processResponses(env, channels, log));
+    return { ok: true, channel: channels.kevin || null, posted, checked, closed, log };
 }
 
 // Delete the bot's OWN posts in the approvals channel whose text contains
@@ -802,17 +859,17 @@ export async function purgeApprovalPosts(env, match) {
 export async function rewriteApprovalPost(env, taskId) {
     const id = String(taskId || '').trim();
     if (!/^rec[a-zA-Z0-9]{14}$/.test(id)) return { ok: false, error: 'a task record id (?task=recXXXXXXXXXXXXXX) is required' };
-    const ch = await resolveChannel(env);
     const recs = await queryTasks(env, `RECORD_ID()='${id}'`, 1);
     if (!recs.length) return { ok: false, error: `task ${id} not found` };
     const t = taskView(recs[0]);
     if (t.status !== 'Approval' || !t.ts) return { ok: false, error: `task ${id} has no live approval message (status ${t.status || 'unknown'}, ts ${t.ts ? 'set' : 'empty'})` };
     const agent = await agentName(env, t.agentId);
     const warn = isKevinOnlyMatter(`${t.name} ${t.description}`);
+    const chId = await resolveChannelFor(env, approverFor(t, warn), {}, []);
     const res = await slack(env, SLACK.update, {
         method: 'POST',
         body: JSON.stringify({
-            channel: ch.id,
+            channel: chId,
             ts: t.ts,
             text: `Approval needed: ${t.name}`,
             blocks: buildApprovalBlocks(t, agent, warn),
