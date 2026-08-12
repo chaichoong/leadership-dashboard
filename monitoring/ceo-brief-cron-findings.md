@@ -371,3 +371,43 @@ after Fri 14 Aug.
 Moot regardless — since 8 Aug this is phase 7.2 of `daily-ops`, not a standalone routine, and
 its own frontmatter says do not re-enable it separately. There is no separate schedule left to
 disable. The frontmatter was left unedited: this run is read-only on files outside `monitoring/`.
+
+## Run: 2026-08-12 (Wednesday), checked 09:21 London
+
+**Verdict: the brief did NOT arrive, and for the first time the cause is not the cron.**
+The cron fired on time and the worker ran clean. The AI call behind it is out of credit.
+
+Evidence, in order:
+
+- CEO Briefs `recSNmV9t789MokgE` dated 2026-08-12 exists (created 05:10 UTC by `ceo-huddle`)
+  with One Thing, First Step and Board Flags, and `Full Brief` **empty** (length 0). By the
+  30 Jul rule that means the 09:00 brief did not complete.
+- `workersInvocationsAdaptive` for `money-confidence-daily`: one invocation at
+  **2026-08-12T08:00:00Z** (09:00 London), `status: success`, 0 errors. Yesterday's four
+  firings (08:00–11:00Z on 11 Aug) all succeeded too and 11 Aug has a 1,930-char `Full Brief`.
+  So the schedule, the London gate and the deploy are all fine.
+- Workers Logs for that invocation: `outcome: ok`, `eventType: cron`, `wallTimeMs 9162`,
+  `cpuTimeMs 24`. Nine seconds is the CEO path being attempted and failing, not the gate
+  returning early.
+- `GET /?mode=brief` reproduced it on demand:
+  `CEO proxy error 400: {"type":"error","error":{"type":"invalid_request_error","message":"Your credit balance is too low to access the Anthropi…` (truncated at 100 chars by the worker).
+- Slack DM `D0B08L64Y3E` at 09:00:46 London carries exactly what the code says that path
+  sends: the money-only fallback (`Safe to act today: £8,904.19`, GREEN) plus the
+  `could not compute today's figure` warning with the same 400 in it.
+
+So `sendDailyDM` behaved as designed — `callCeo` threw, the money DM went out as fallback,
+`alertFailure` warned Kevin, nothing was stored. The failure is **upstream of this repo**:
+the Anthropic account behind the `claude-proxy` service binding has no credit.
+
+**Not fixable by this routine.** `mode=send` was deliberately NOT run: it would call the same
+proxy, fail the same way, and post Kevin a second money-only DM plus a second warning. Topping
+up credit is a payment action and Kevin's alone.
+
+**Inference, stated as inference:** every other worker AI call routed through `claude-proxy`
+(approvals judgement, agent dispatch, recon assists) shares that key and will be failing the
+same way until it is topped up. Not separately verified in this run.
+
+Filed as a finding for the queue. Kevin DM'd once, in plain English, with the one action.
+
+**Disable rule:** still not met. 10 Aug clean, 11 Aug clean, 12 Aug failed — counter reset to
+zero. Moot anyway; this is phase 7.2 of `daily-ops` with no schedule of its own.
