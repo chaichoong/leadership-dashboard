@@ -508,6 +508,19 @@
     async function sendProspectEmailViaGHL(rec, contactId, ghlKey, ghlLoc) {
         const route = prosField(rec, 'Contact Route');
         if (!prosIsEmailRoute(route)) return;
+        // PECR hard rule, enforced HERE and not only upstream (finding
+        // 20260812-drift-095). Until 12 Aug 2026 Entity Type was read exactly
+        // once in this file — to pick a GHL tag — and the send path never
+        // looked at it. The only abort was a missing email address. So a Sole
+        // Trader or Unknown record that the agent had labelled Contact Route
+        // "Email sequence (Ltd)" got cold-emailed from this page, and the gate
+        // the SOP calls a hard rule was a field the agent wrote about itself.
+        // Contact Route is an opinion; this is the check.
+        const entity = prosField(rec, 'Entity Type');
+        if (entity !== 'Limited Company') {
+            if (typeof showToast === 'function') showToast(`Not emailed: entity type is ${entity || 'unknown'}. An unsolicited email is only lawful to a Limited Company — the contact is synced, so message them personally on LinkedIn instead.`, { type: 'warning', duration: 9000 });
+            return;
+        }
         const draft = prosField(rec, 'Draft Message');
         if (!draft) return;
         if (draft.includes('[BOOKING-LINK]')) {
@@ -776,11 +789,40 @@
                     }
                 },
                 {
-                    name: 'PECR gate: no sole traders in sequence', kind: 'automation', run: () => {
-                        const inSeq = records.filter(r => ['In Sequence', 'Replied'].includes(prosStatus(r)));
-                        const bad = inSeq.filter(r => prosField(r, 'Entity Type') !== 'Limited Company');
-                        if (bad.length) return { status: 'fail', detail: `${bad.length} non-Ltd prospect(s) are in the email sequence — PECR breach risk, pull them out` };
-                        return { status: 'pass', detail: 'Only Limited Companies in the email sequence' };
+                    // Finding 20260812-drift-096. This inspected 'In Sequence'
+                    // and 'Replied' only — and NOTHING in this file has ever
+                    // written 'In Sequence'. The send path writes 'Contacted
+                    // (1:1)'. So a non-Ltd prospect emailed at approve time
+                    // could never be seen, and the red alert the SOP relies on
+                    // passed for the wrong reason, indefinitely.
+                    //
+                    // 'Connect Sent' is deliberately NOT a breach status: it is
+                    // a LinkedIn connection, which PECR does not govern, and
+                    // flagging lawful manual outreach to a sole trader is how a
+                    // check earns a reputation for crying wolf and gets ignored.
+                    // The downstream statuses can follow either channel, so they
+                    // warn rather than fail.
+                    name: 'PECR gate: only Limited Companies emailed', kind: 'automation', run: () => {
+                        const EMAILED = ['Contacted (1:1)', 'In Sequence'];
+                        const DOWNSTREAM = ['Replied', 'No Response', 'Call Booked'];
+                        const PRE_CONTACT = ['Ready for Review', 'Approved', 'Rejected', 'Suppressed'];
+                        const notLtd = r => prosField(r, 'Entity Type') !== 'Limited Company';
+                        const inspected = records.filter(r => EMAILED.concat(DOWNSTREAM, ['Connect Sent']).includes(prosStatus(r)));
+
+                        // Control. A status list that matches nothing reads as a
+                        // clean pass for ever, which is exactly how the old list
+                        // survived. Never report a green gate off zero records.
+                        if (!inspected.length) {
+                            const past = records.filter(r => !PRE_CONTACT.includes(prosStatus(r)));
+                            if (past.length) return { status: 'fail', detail: `${past.length} prospect(s) are past Approved but match none of the statuses this check inspects — the gate is blind, not clean` };
+                            return { status: 'warn', detail: 'Nobody has been contacted yet, so this gate has never been exercised' };
+                        }
+
+                        const breach = records.filter(r => EMAILED.includes(prosStatus(r)) && notLtd(r));
+                        if (breach.length) return { status: 'fail', detail: `${breach.length} non-Ltd prospect(s) have been emailed — PECR breach risk, stop and check them` };
+                        const unclear = records.filter(r => DOWNSTREAM.includes(prosStatus(r)) && notLtd(r));
+                        if (unclear.length) return { status: 'warn', detail: `${unclear.length} non-Ltd prospect(s) sit past first contact — check they were reached on LinkedIn, not by email` };
+                        return { status: 'pass', detail: `All ${inspected.length} contacted prospect(s) are Limited Companies` };
                     }
                 },
                 {

@@ -18,9 +18,19 @@ const DISPATCH = resolve(ROOT, 'scripts/agent-dispatch.py');
 // The rule now: park only when a tier-2 SUBJECT is joined by an OUTBOUND INTENT.
 // The lane is defined by the action, not the topic.
 //
+// The second half (finding 20260812-agent-dispatch-111, 12 Aug 2026): the intent
+// gate shipped as a BARE WORD match, so a PROHIBITION read as an intent. Task
+// recSvXxaEz57i7YQK — "Verify the 5 obligations behind the closed POST letters",
+// Urgent, due that day — was parked again, and the outbound match came from its
+// own description: "Do NOT contact anyone. Read-only evidence only." The words
+// forbidding the action are what triggered the park. Because cmd_queue `continue`s
+// on a park, the task never reached newWork either, so counts.newWork read 0 while
+// an agent-linked, no-outcome, Urgent task sat open.
+//
 // The real compiled regexes are exercised through the actual Python
-// `tier_match()`. Python and JS regex dialects differ, and a test that
-// re-implements the patterns in JS quietly stops guarding the code it names.
+// `outbound_intent()` — the function cmd_queue calls, not a look-alike. Python and
+// JS regex dialects differ, and a test that re-implements the patterns in JS
+// quietly stops guarding the code it names.
 
 function classify(cases) {
   const script = `
@@ -32,7 +42,7 @@ cases = json.loads(sys.argv[1])
 out = {}
 for c in cases:
     subject = m.tier_match(m.TIER2_PATTERNS, c, '', '')
-    outbound = m.tier_match(m.TIER2_OUTBOUND_PATTERNS, c, '', '') if subject else ''
+    outbound = m.outbound_intent(c, '', '') if subject else ''
     out[c] = {'subject': subject, 'outbound': outbound, 'parked': bool(subject and outbound)}
 print(json.dumps(out))
 `;
@@ -58,6 +68,18 @@ const OUTBOUND = [
   'Chase the bounce back loan lender for a payment plan',
 ];
 
+// A FORBIDDEN outbound action on a tier-2 subject. None of these may be parked:
+// being told not to write is a read, and a read is not Mica's lane.
+const NEGATED = [
+  // The exact task that stranded, name and description as they really read.
+  'Verify the 5 obligations behind the closed POST letters. Do NOT contact anyone. '
+    + 'Read-only evidence only. One is a letter of claim.',
+  'Review the statutory demand file. Do not reply to anyone.',
+  "Pull together what we hold on the letter of claim — don't respond yet.",
+  'Summarise the bounce back loan position. No action, report back only.',
+  'Check the letter of claim deadline. Never contact the creditor directly.',
+];
+
 // No tier-2 subject at all. Outbound wording alone must never park anything.
 const NOT_TIER2 = [
   'Reply to the tenant about the boiler',
@@ -81,6 +103,25 @@ describe('agent-dispatch tier-2 parking', () => {
     }
   });
 
+  it('never parks a FORBIDDEN outbound action (111)', () => {
+    const res = classify(NEGATED);
+    for (const name of NEGATED) {
+      // The subject still matches — that is correct, and is why these reached
+      // the intent gate at all. Only the intent decision changed.
+      expect(res[name].subject, `lost the tier-2 subject: ${name}`).not.toBe('');
+      expect(res[name].parked,
+        `parked a task that forbids the outbound action: ${name}`).toBe(false);
+    }
+  });
+
+  it('a prohibition and a real instruction in one task still parks', () => {
+    // The negation strips the clause it belongs to, never the whole text: a
+    // task that says "do not phone" but "write to them" is still Mica's.
+    const s = 'Do not phone the creditor, but write to them about the letter of claim';
+    const res = classify([s]);
+    expect(res[s].parked, 'a real outbound instruction stopped parking').toBe(true);
+  });
+
   it('outbound wording alone parks nothing', () => {
     const res = classify(NOT_TIER2);
     for (const name of NOT_TIER2) {
@@ -94,5 +135,13 @@ describe('agent-dispatch tier-2 parking', () => {
     const src = execFileSync('cat', [DISPATCH], { encoding: 'utf8' });
     const alarmBlock = src.slice(src.indexOf('parkedFlags'));
     expect(alarmBlock).toContain('skippedTier2');
+  });
+
+  it('a park is counted, so it cannot hide the emptiness it causes (111)', () => {
+    // cmd_queue `continue`s on a park, so the task drops out of newWork too.
+    // Without a count, counts.newWork reads 0 and looks like a quiet morning.
+    const src = execFileSync('cat', [DISPATCH], { encoding: 'utf8' });
+    const counts = src.slice(src.indexOf('"counts": {'), src.indexOf('print(json.dumps(out, indent=2))'));
+    expect(counts, 'tier-2 parks are not in the counts object').toContain('tier2Parked');
   });
 });

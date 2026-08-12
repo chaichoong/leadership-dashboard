@@ -88,7 +88,13 @@ STEPS
 
    - redo (Approval Outcome is Changes requested): give the agent the task description, its previous agentOutput, and Kevin's words in the feedback field VERBATIM — his words are the instruction. The agent redoes the work, prepare-only. Then submit as below.
 
-   - new (no outcome yet): give the agent the task name, description and notes. PREPARE ONLY — produce the full deliverable text (the thing Kevin will judge from his phone: the drafted email in full, the analysis itself, the prepared change), plus one line saying what carrying it out will involve, and a Task Type chosen from exactly: Drafting, Research, Analysis, Build, Audit, Admin, Correspondence.
+   - new (no outcome yet): give the agent the task name, description and notes. PREPARE ONLY — produce the full deliverable text (the thing Kevin will judge from his phone: the drafted email in full, the analysis itself, the prepared change), plus the mandatory closing line below, and a Task Type chosen from exactly: Drafting, Research, Analysis, Build, Audit, Admin, Correspondence.
+
+   MANDATORY CLOSING LINE (Kevin's instruction, 11 Aug 2026). Every Agent Output written for approval — new or redo — must END with one line in exactly this form:
+
+       **Carrying this out will involve:** <what happens the moment Kevin approves>
+
+   Nothing may follow it. His approval box, in the task drawer and in #agent-approvals, leads with a one-line summary of what the agent wants to do, and that summary is taken from this line. Without it the summary is guessed from the first line of the report, which on an oddly-shaped deliverable is noise. On 11 Aug 2026 only 9 of 46 waiting tasks carried the line. State the consequence, not the topic: "sends the letter below to Fylde Council and files a copy", not "the council letter". `submit` REFUSES an output of any length that is missing it, so a missing line costs the agent a retry, not Kevin a bad summary.
 
    For redo and new: write the agent's deliverable to "$RUNDIR/TASKID.md", then: python3 scripts/agent-dispatch.py submit TASKID --agent AGENT_REC_ID --type TYPE --output-file "$RUNDIR/TASKID.md" (AGENT_REC_ID = the task's agentId from the queue JSON, or the routed target). Add `--tier1` for any tier-1 item from step 2; it stamps the banner on top of the Agent Output, and verify fails the run if a task you reported as tier 1 reaches Kevin without it. The script sets Status Approval, Sent For Approval By, Assignee Kevin, due today. The Slack worker posts it within a minute — you post nothing to Slack yourself for submissions.
 

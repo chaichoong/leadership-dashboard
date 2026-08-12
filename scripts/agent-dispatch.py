@@ -66,6 +66,35 @@ from agent_email_format import (  # noqa: E402
 BASE_ID = "appnqjDpqDniH3IRl"
 TASKS = "tblqB8b22hKBL4PF1"
 
+# ─── THE MANDATORY CLOSING LINE ──────────────────────────────────────
+#
+# Kevin's approval box — the task drawer and #agent-approvals — leads with one
+# line saying what the agent wants to do. apvSummary() derives it, preferring
+# the agent's own closing "Carrying this out will involve:" line and falling
+# back to TO/SUBJECT, then to the first meaningful line. Both fallbacks are
+# guesses, and on an oddly-shaped report they are noise.
+#
+# On 11 Aug 2026 only 9 of 46 waiting tasks carried the line, so most summaries
+# were guessed. Kevin instructed that it be mandated (finding
+# 20260811-kevin-session-093). Mandated here, not just in the prompt, for the
+# same reason TIER1_BANNER is applied here: a rule that lives only in prose is
+# not a control.
+#
+# CARRY_OUT_RE is the regex the two renderers already parse with. One pattern,
+# so what is REQUIRED and what is READ can never drift apart —
+# tests/approval-summary.test.js holds the renderers to the same shape.
+CARRY_OUT_MARKER = "**Carrying this out will involve:**"
+CARRY_OUT_RE = re.compile(r"\*{0,2}carrying this out will involve:?\*{0,2}", re.I)
+
+# apvSummary shows no separate summary below this length: a short output is
+# readable at a glance and repeating it twice helps nobody. Demanding a closing
+# line there would refuse submits for no gain, so the mandate starts here.
+SUMMARY_MIN_CHARS = 280
+
+# What the approval box will show of the line. More than this and the line is
+# not a closing line — it is the middle of the document.
+SUMMARY_MAX_CHARS = 400
+
 LONDON = ZoneInfo("Europe/London")
 KEVIN_AIRTABLE_EMAIL = "kevin@runpreneur.org.uk"
 # Kevin's own Team Members row. Not an agent, so a task pointed here drops out
@@ -209,6 +238,52 @@ TIER2_OUTBOUND_PATTERNS = [
         r"\bsubmit\b",
     )
 ]
+
+# A PROHIBITION IS NOT AN INTENT (finding 20260812-agent-dispatch-111).
+#
+# The patterns above are bare word matches. On 12 Aug 2026 recSvXxaEz57i7YQK
+# ("Verify the 5 obligations behind the closed POST letters", Urgent, due that
+# day) was parked as creditor correspondence because its own description reads
+# "Do NOT contact anyone. Read-only evidence only." The words FORBIDDING the
+# outbound action are what triggered the park. A parked task is worked by
+# nobody, so an HMO licence revocation on an occupied property, an HMRC balance
+# and a Letter of Claim went unverified — and verify alarms about a park once
+# ever, so after that day it was silent.
+#
+# Two defences, because either alone is thin:
+#   * strip negated verb clauses before matching, so "do not contact" carries
+#     no more intent than the absence of the word;
+#   * an explicit read-only instruction settles it outright, whatever verbs
+#     appear elsewhere in the text.
+NEGATED_OUTBOUND_RE = re.compile(
+    r"\b(?:do\s+not|don'?t|never|no|without|rather\s+than|instead\s+of)\s+"
+    r"(?:\w+\s+){0,2}?"
+    r"(?:repl(?:y|ies|ying)|respond(?:ing)?|response|writ(?:e|ing)|send(?:ing)?|"
+    r"call(?:ing)?|phone|ring|contact(?:ing)?|chase|negotiat\w*|settl\w*|"
+    r"acknowledge|dispute|file|submit)\b",
+    re.I,
+)
+
+# Deliberately narrow: unambiguous INSTRUCTIONS to take no action, not merely
+# informational wording. "For information only" was considered and dropped —
+# it appears inside genuine outbound tasks as a note about an attachment.
+READ_ONLY_RE = re.compile(
+    r"read[\s-]?only|take no action|\bno action\b|report back only|"
+    r"do not act\b|evidence only|no outbound",
+    re.I,
+)
+
+
+def outbound_intent(*texts):
+    """The outbound verb that puts a tier-2 task in Mica's lane, or ''.
+
+    The lane is defined by the ACTION. Writing to a creditor is Mica's; reading
+    the file is not — and being told NOT to write is a read.
+    """
+    hay = " ".join(str(t or "") for t in texts)
+    if READ_ONLY_RE.search(hay):
+        return ""
+    return tier_match(TIER2_OUTBOUND_PATTERNS, NEGATED_OUTBOUND_RE.sub(" ", hay))
 
 # "Changes requested" where Kevin's feedback is actually "not yet".
 #
@@ -357,6 +432,27 @@ def open_intents():
     return {t for t, e in state.items() if e == "intent"}
 
 
+def carry_out_problem(output):
+    """Reason the approval box would have to guess this output's summary.
+
+    Empty string means the output is fine. See CARRY_OUT_MARKER above.
+    """
+    text = (output or "").strip()
+    if len(text) < SUMMARY_MIN_CHARS:
+        return ""
+    m = CARRY_OUT_RE.search(text)
+    if not m:
+        return "it has no '%s' line" % CARRY_OUT_MARKER
+    tail = text[m.end():].strip()
+    if not tail:
+        return "its '%s' line says nothing" % CARRY_OUT_MARKER
+    if len(tail) > SUMMARY_MAX_CHARS:
+        return ("its '%s' line is not the CLOSING line — %d characters follow "
+                "it and the approval box shows only the first %d"
+                % (CARRY_OUT_MARKER, len(tail), SUMMARY_MAX_CHARS))
+    return ""
+
+
 def tier_match(patterns, *texts):
     hay = " ".join(str(t or "") for t in texts)
     for p in patterns:
@@ -429,8 +525,8 @@ def cmd_queue(args):
         if hit1:
             tier1.append(t)
         hit2 = tier_match(TIER2_PATTERNS, t["name"], t["description"], t["notes"])
-        out2 = tier_match(TIER2_OUTBOUND_PATTERNS, t["name"], t["description"],
-                          t["notes"]) if hit2 else ""
+        out2 = outbound_intent(t["name"], t["description"],
+                               t["notes"]) if hit2 else ""
         if hit2 and out2:
             skipped_tier2.append({**t, "matchedPattern": hit2,
                                   "outboundPattern": out2})
@@ -508,6 +604,12 @@ def cmd_queue(args):
             # dropped, and counted here so one sitting for weeks stays visible.
             "deferredRedos": len(deferred_hb),
             "newWork": len(new_work),
+            # A tier-2 park removes a task from every other bucket via
+            # `continue`, so newWork read 0 while an agent-linked, no-outcome,
+            # Urgent task sat open (finding 20260812-agent-dispatch-111). A
+            # count makes the park visible in the same object that reports the
+            # emptiness it causes.
+            "tier2Parked": len(skipped_tier2),
             "routingNeeded": len(routing),
             "unclassified": len(unclassified),
             "tier1Open": len(tier1),
@@ -553,6 +655,20 @@ def cmd_submit(args):
         sys.exit("ERROR: refusing to submit an empty Agent Output")
     if args.tier1 and TIER1_BANNER not in output:
         output = TIER1_BANNER + "\n\n" + output
+
+    # Kevin's mandate. Checked AFTER the banner so a tier-1 submit is judged on
+    # the text that will actually be stored, and refused rather than patched:
+    # a fabricated closing line would be the very guesswork this removes.
+    problem = carry_out_problem(output)
+    if problem:
+        sys.exit(
+            f"ERROR: refusing to submit {args.task} — {problem}.\n"
+            f"       End the Agent Output with, as the LAST line:\n"
+            f"         {CARRY_OUT_MARKER} <what happens the moment Kevin approves>\n"
+            "       Kevin's approval box leads with that line. Without it the\n"
+            "       summary is guessed from the first line of the report, which\n"
+            "       is exactly what he asked to stop (11 Aug 2026)."
+        )
 
     # A Correspondence submit is a promise that send-email.py can carry the
     # action out. Validate with the SAME parser the send gate uses, or the

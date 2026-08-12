@@ -16,8 +16,8 @@ not over whatever happened to carry an estimate.
 
 | Task | Field | Value | Why |
 |---|---|---|---|
-| SMS reply from +447538631747 | Business | Real Estate | Tenant reporting a leaking tap. The phone number matches Anthony Chappell, an active tenant. |
-| SMS reply from +447538631747 | Due date | 11 Aug (today) | The message says water is pouring out of the tap. The task was flagged "Not Urgent" with no date at all. |
+| SMS reply from +4475XXXXX747 | Business | Real Estate | Tenant reporting a leaking tap. The phone number matches Anthony Chappell, an active tenant. |
+| SMS reply from +4475XXXXX747 | Due date | 11 Aug (today) | The message says water is pouring out of the tap. The task was flagged "Not Urgent" with no date at all. |
 | Urgent Update required: 1406 Oldham Road | Business | Real Estate | Manchester Council chasing the electrical safety certificate for one of your properties. |
 | Urgent Update required: 1406 Oldham Road | Due date | 14 Aug | Council marked it urgent but gave no deadline in the email, so three working days. |
 | Agile Estates Ltd, company number 12168161 | Business | Real Estate | Companies House late filing penalty for Agile Estates. |
