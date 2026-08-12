@@ -2610,7 +2610,9 @@ async function completeTaskFromDrillModal(taskId){
 function deleteTaskFromDrillModal(taskId){
   const task=allTasks.find(t=>t.id===taskId);if(!task)return;
   const drillModal=document.getElementById('drillModal');if(drillModal)drillModal.remove();
-  performDeleteTask(taskId);
+  // Same confirmation as everywhere else. A delete that asks in one place and
+  // not another teaches people the click is safe.
+  openDeleteConfirm(task);
 }
 
 // ===== TEAM BAR =====
@@ -3759,18 +3761,17 @@ async function completeTaskInline(taskId,ev){
   renderAll();
 }
 
+// ASK FIRST. Delete fires an immediate DELETE against Airtable and the only
+// recovery is a 5.5-second Undo toast that RE-CREATES the row as a new record.
+// Until 12 Aug 2026 (finding 20260812-drift-102) this went straight to
+// performDeleteTask and openDeleteConfirm below — written for exactly this —
+// was never called from anywhere. Both the drawer button and the small red
+// row-action X land here, and the X sits next to the rest of the row controls.
 function deleteTask(taskId,ev){
   if(ev){ev.stopPropagation();ev.preventDefault()}
   const task=findTaskAnywhere(taskId);
   if(!task)return;
-  // Always close the drawer first, then force-remove the overlay as a
-  // defensive fallback (the overlay can survive closeDrawer if a pending
-  // save flush triggers a re-render mid-removal).
-  const wasDrawer=(drawerTaskId===taskId);
-  if(wasDrawer)closeDrawer();
-  if(wasDrawer){const ov=document.getElementById('drawerOverlay');if(ov)ov.remove()}
-  const existing=document.getElementById('deleteConfirmModal');if(existing)existing.remove();
-  performDeleteTask(taskId);
+  openDeleteConfirm(task);
 }
 
 function openDeleteConfirm(task){
@@ -3791,7 +3792,13 @@ function openDeleteConfirm(task){
   document.body.appendChild(overlay);
   document.getElementById('confirmDeleteBtn').onclick=()=>{
     overlay.remove();
-    if(drawerTaskId===task.id)closeDrawer();
+    // Close the drawer, then force-remove its overlay as a defensive fallback:
+    // the overlay can survive closeDrawer if a pending save flush triggers a
+    // re-render mid-removal, leaving the page unusable behind a dead scrim.
+    if(drawerTaskId===task.id){
+      closeDrawer();
+      const ov=document.getElementById('drawerOverlay');if(ov)ov.remove();
+    }
     performDeleteTask(task.id);
   };
 }

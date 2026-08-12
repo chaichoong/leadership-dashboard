@@ -74,6 +74,12 @@ print(json.dumps(out))
 
 const GOOD_EMAIL = 'TO: someone@example.com\nSUBJECT: A subject\n---\nThe body of the email.';
 
+// A long deliverable — the shape that gets a derived summary in Kevin's approval
+// box. Anything under 280 characters is shown whole, so the mandate below does
+// not apply to it.
+const LONG = 'The invoice was checked against the bank feed line by line. '.repeat(8);
+const CARRY_OUT = '**Carrying this out will involve:** closing Airtable task recXYZ as already done.';
+
 describe('agent-dispatch submit gate', () => {
   it('clears the previous approval verdict in the same patch (083)', () => {
     const r = submit({ type: 'Drafting', output: 'Some drafted work.' });
@@ -130,5 +136,64 @@ describe('agent-dispatch submit gate', () => {
     expect(out).toContain('PASS banner not left in body');
     expect(out).toMatch(/selftest OK/);
     expect(out, 'a parser check regressed').not.toContain('FAIL ');
+  });
+
+  // ── The mandatory closing line (20260811-kevin-session-093) ──────────────
+  //
+  // Kevin's approval box leads with one line saying what the agent wants to do,
+  // derived by apvSummary(). It prefers the agent's own closing "Carrying this
+  // out will involve:" line; both fallbacks are guesses. On 11 Aug 2026 only 9
+  // of 46 waiting tasks carried the line, so most summaries were guessed, and
+  // he instructed that it be mandated at the gate rather than in prose.
+  describe('mandatory "Carrying this out will involve" line', () => {
+    it('refuses a long output that does not carry the line', () => {
+      const r = submit({ type: 'Analysis', output: LONG });
+      expect(r.refused, 'a long output with no closing line was accepted').toBe(true);
+      expect(r.error).toMatch(/Carrying this out will involve/i);
+      expect(r.captured.fields, 'a refused submit still wrote to Airtable').toBeUndefined();
+    });
+
+    it('accepts the same output once the line is there', () => {
+      const r = submit({ type: 'Analysis', output: `${LONG}\n\n${CARRY_OUT}` });
+      expect(r.refused, r.error).toBe(false);
+      expect(r.captured.fields[r.fieldMap.agentOutput]).toContain('Carrying this out will involve');
+    });
+
+    it('refuses an empty line — a marker with nothing after it summarises nothing', () => {
+      const r = submit({ type: 'Analysis', output: `${LONG}\n\n**Carrying this out will involve:**` });
+      expect(r.refused, 'an empty closing line was accepted').toBe(true);
+    });
+
+    it('refuses a marker buried mid-document rather than closing it', () => {
+      const r = submit({ type: 'Analysis', output: `${CARRY_OUT}\n\n${LONG}${LONG}` });
+      expect(r.refused, 'a mid-document marker passed as a closing line').toBe(true);
+      expect(r.error).toMatch(/CLOSING/);
+    });
+
+    it('does not demand it of a short output, which is shown whole anyway', () => {
+      // apvSummary returns '' below 280 characters. Refusing here would cost a
+      // retry per submit and buy no summary at all.
+      const r = submit({ type: 'Admin', output: 'Closed task recABC as a duplicate.' });
+      expect(r.refused, r.error).toBe(false);
+    });
+
+    it('a tier-1 output is judged on the text that gets stored, banner and all', () => {
+      const r = submit({ type: 'Analysis', output: `${LONG}\n\n${CARRY_OUT}`, tier1: true });
+      expect(r.refused, r.error).toBe(false);
+      const written = r.captured.fields[r.fieldMap.agentOutput];
+      expect(written).toContain('TIER 1');
+      expect(written).toContain('Carrying this out will involve');
+    });
+
+    it('requires the SAME marker the two approval renderers parse', () => {
+      // One pattern, so what submit demands and what the box reads cannot drift.
+      // tests/approval-summary.test.js holds the renderers to this shape.
+      const src = execFileSync('cat', [DISPATCH], { encoding: 'utf8' });
+      const approvals = execFileSync('cat', [resolve(ROOT, 'scripts/slack-automation/approvals.js')],
+        { encoding: 'utf8' });
+      const rx = /carrying this out will involve:\?\\\*\{0,2\}|carrying this out will involve/i;
+      expect(src).toMatch(rx);
+      expect(approvals).toMatch(rx);
+    });
   });
 });

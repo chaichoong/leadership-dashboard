@@ -35,6 +35,13 @@ ruling, 6 Aug 2026: the default is kevinbrittain@gmail.com unless the task
 says otherwise. The worker refuses a FROM that has not been connected via its
 one-time /auth/gmail consent, listing which senders are available.
 
+That default is right for a letter Kevin writes as himself and WRONG for copy
+that speaks as Operations Director. Since 12 Aug 2026 `send` REFUSES an email
+whose subject or body names the business while no FROM was chosen, and names
+the sender to use — see business_identity_mismatch below. `preview` and
+`--dry-run` report the same problem without refusing, so it is fixable at draft
+time rather than at carry-out time.
+
 Everything above the `---` is headers, everything below is the body, sent as
 plain text (so £ and en dashes survive). BCC is deliberately not supported: a
 hidden recipient is not something Kevin can approve by reading.
@@ -64,6 +71,7 @@ Usage:
 import argparse
 import json
 import os
+import re
 import sys
 import urllib.error
 import urllib.request
@@ -89,6 +97,48 @@ AF = {
 }
 
 APPROVED = ("Approved as-is", "Approved with minor edits")
+
+# ─── SENDER IDENTITY ─────────────────────────────────────────────────
+#
+# Finding 20260812-ceo-huddle-094. The worker's default sender is Kevin's
+# PERSONAL address (his ruling, 6 Aug 2026), which is right for a letter he
+# writes as himself and wrong for anything that speaks as the business.
+#
+# On 12 Aug ten "Warm lane: re-engage <name>" tasks sat at Status=Approval with
+# a TO and a SUBJECT and no FROM. Their copy says "You booked a call with
+# Operations Director" and links to operationsdirector.co.uk. Approving one
+# would have sent a business re-engagement from a gmail.com address to the
+# highest-intent audience Kevin owns, and yesterday's 09:00 brief told him to
+# send exactly that. Nothing in the send path noticed.
+#
+# So: if the words speak as the business and no FROM was chosen, refuse and name
+# the sender to use. A refusal costs one line in the draft. The alternative is
+# an unrecallable email to a warm prospect from the wrong identity.
+BUSINESS_SENDER = "kevin@operationsdirector.co.uk"
+BUSINESS_BRAND = re.compile(
+    r"operationsdirector\.co\.uk|\bOperations Director\b", re.I
+)
+
+
+def business_identity_mismatch(subject, body, sender):
+    """Reason string when business copy would go out from the personal default.
+
+    Empty string means there is nothing to complain about: either the copy does
+    not speak as the business, or the draft already chose a sender explicitly.
+    Choosing the personal address ON PURPOSE is allowed — write it as a FROM.
+    """
+    if sender:
+        return ""
+    hit = BUSINESS_BRAND.search("%s\n%s" % (subject or "", body or ""))
+    if not hit:
+        return ""
+    return (
+        "the copy speaks as the business (matched %r) but no FROM was set, so "
+        "this would send from the worker default kevinbrittain@gmail.com.\n"
+        "         Add 'FROM: %s' to the Agent Output, or set the personal\n"
+        "         address explicitly if that really is the intent."
+        % (hit.group(0), BUSINESS_SENDER)
+    )
 
 STATE_DIR = os.path.expanduser("~/knowledge-os/logs/agent-dispatch")
 SENT_LEDGER = os.path.join(STATE_DIR, "sent-email.jsonl")
@@ -252,6 +302,10 @@ def cmd_preview(args):
         "approvalOutcome": mail["outcome"] or "(not yet approved)",
         "to": mail["to"], "cc": mail["cc"], "subject": mail["subject"],
         "bodyChars": len(mail["body"]),
+        # Surfaced here so it is fixable at draft time rather than discovered
+        # by `send` after Kevin has already approved the words.
+        "senderProblem": business_identity_mismatch(
+            mail["subject"], mail["body"], mail["from"]) or None,
     }, indent=2))
     print("\n--- body ---\n" + mail["body"])
 
@@ -267,17 +321,25 @@ def cmd_send(args):
     # costs the ability to prove the payload before the real send. The real
     # send below is still gated.
     mail = load_approved(args.task, require_approval=not args.dry_run)
+    sender_problem = business_identity_mismatch(
+        mail["subject"], mail["body"], mail["from"])
 
     if args.dry_run:
         print(json.dumps({"dryRun": True, "task": args.task,
                           "approvalOutcome": mail["outcome"]
                           or "(not yet approved)",
-                          "wouldSend": bool(mail["outcome"] in APPROVED),
+                          "wouldSend": bool(mail["outcome"] in APPROVED)
+                          and not sender_problem,
                           "from": mail["from"] or "(worker default: kevinbrittain@gmail.com)",
+                          "senderProblem": sender_problem or None,
                           "to": mail["to"], "cc": mail["cc"],
                           "subject": mail["subject"],
                           "bodyChars": len(mail["body"])}, indent=2))
         return
+
+    if sender_problem:
+        sys.exit(f"REFUSED: task {args.task} ({mail['taskName']}) — "
+                 f"{sender_problem}")
 
     payload = {"to": ", ".join(mail["to"]),
                "subject": mail["subject"],
@@ -348,6 +410,24 @@ def cmd_selftest(args):
     tier1 = parse_output(TIER1_BANNER + "\n\n" + plain, "selftest")
     cases.append(("tier-1 banner stripped", tier1 == parse_output(plain, "selftest")))
     cases.append(("banner not left in body", TIER1_BANNER not in tier1["body"]))
+
+    # Sender identity (finding 20260812-ceo-huddle-094). The warm-lane copy is
+    # the real text that would have gone out from a personal gmail address.
+    warm = ("Hi Jack,\n\nYou booked a call with Operations Director a while "
+            "back. https://operationsdirector.co.uk/book")
+    cases.append(("business copy with no FROM is refused",
+                  bool(business_identity_mismatch("the call you booked", warm, None))))
+    cases.append(("business copy WITH a FROM is allowed",
+                  not business_identity_mismatch("the call you booked", warm,
+                                                 BUSINESS_SENDER)))
+    cases.append(("personal copy with no FROM is allowed",
+                  not business_identity_mismatch(
+                      "Re: 32 Elmdon Place",
+                      "Thanks for your letter of 4 August. I confirm the "
+                      "payment plan.", None)))
+    cases.append(("the refusal names the sender to use",
+                  BUSINESS_SENDER in business_identity_mismatch(
+                      "x", warm, None)))
 
     failed = [n for n, ok in cases if not ok]
     for n, ok in cases:

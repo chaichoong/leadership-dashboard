@@ -30,6 +30,20 @@ would NOT exclude, so an ignored working file can never be swept in by accident.
 plain `os.listdir()` copy would have shipped tenant data to a public repo the first
 time it ran. The copy is re-checked against `git check-ignore` on the way in, so the
 guard holds even if the two checkouts disagree about the ignore rules.
+
+AND WHY THAT WAS NOT ENOUGH (12 Aug 2026 — finding 20260812-daily-ops-115)
+--------------------------------------------------------------------------
+The ignore rules only decide WHICH files travel. They say nothing about what is
+INSIDE the ones that are meant to travel. `monitoring/task-sweep-2026-08-11.md`
+is a report we want committed, and it carried a tenant's mobile number twice,
+because an INBOUND SMS task is titled with the sender's number. It is public
+now. The same number turned up again on 12 Aug and was masked by hand, which is
+not a control — it lasts exactly as long as somebody is watching a 07:00
+unattended job.
+
+So every collected file is scrubbed on the way in (scripts/report_scrub.py) and
+the scrubber's own selftest runs FIRST: a broken or deleted pattern stops the
+collection instead of quietly reporting a clean sweep.
 """
 
 import argparse
@@ -38,7 +52,15 @@ import shutil
 import subprocess
 import sys
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from report_scrub import scrub, selftest as scrub_selftest  # noqa: E402
+
 REPORT_DIR = "monitoring"
+
+# Only text reports are scrubbed and, by the ignore rules, only text reports
+# should ever be collected. A binary or unknown type arriving here is not
+# something to guess at, so it is refused rather than copied unread.
+SCRUBBABLE = (".md", ".txt", ".json")
 
 
 def run(args, cwd):
@@ -101,6 +123,16 @@ def main():
     )
     args = ap.parse_args()
 
+    # The control on the control. A scrubber whose patterns stopped matching
+    # reports "0 items masked" for ever and reads exactly like a clean day.
+    problems = scrub_selftest()
+    if problems:
+        print("ERROR: report_scrub selftest FAILED — refusing to collect "
+              "anything into a public repo:", file=sys.stderr)
+        for p in problems:
+            print("  %s" % p, file=sys.stderr)
+        return 1
+
     here = repo_root(os.getcwd())
     source = main_checkout(here)
 
@@ -128,15 +160,39 @@ def main():
             print("SKIP (deleted since listing): %s" % rel)
             continue
 
+        if os.path.splitext(rel)[1].lower() not in SCRUBBABLE:
+            print("SKIP (not a text report, cannot be scrubbed): %s" % rel)
+            continue
+
+        with open(src, encoding="utf-8") as fh:
+            original = fh.read()
+        cleaned, hits = scrub(original)
+
         if args.check:
-            print("WOULD COLLECT %s" % rel)
+            print("WOULD COLLECT %s%s"
+                  % (rel, _hit_summary(hits)))
             continue
 
         os.makedirs(os.path.dirname(dst), exist_ok=True)
-        shutil.copy2(src, dst)
-        print("COLLECTED %s" % rel)
+        with open(dst, "w", encoding="utf-8") as fh:
+            fh.write(cleaned)
+        shutil.copystat(src, dst)
+        print("COLLECTED %s%s" % (rel, _hit_summary(hits)))
 
     return 0
+
+
+def _hit_summary(hits):
+    if not hits:
+        return ""
+    kinds = {}
+    for kind, _ in hits:
+        kinds[kind] = kinds.get(kind, 0) + 1
+    # The masked VALUES are deliberately not printed: this output goes into the
+    # daily-ops report, which is itself committed.
+    return "  [masked %s]" % ", ".join(
+        "%d %s" % (n, k) for k, n in sorted(kinds.items())
+    )
 
 
 if __name__ == "__main__":
