@@ -31,7 +31,7 @@ const SEND_EMAIL = resolve(ROOT, 'scripts/send-email.py');
 // no Airtable call happens and the assertions are against the payload the
 // script would really send. Re-implementing the payload in JS would guard
 // nothing.
-function submit({ type, output, tier1 = false }) {
+function submit({ type, output, tier1 = false, approverEmail = '' }) {
   const script = `
 import importlib.util, json, sys, tempfile, os, types
 spec = importlib.util.spec_from_file_location('ad', ${JSON.stringify(DISPATCH)})
@@ -46,6 +46,15 @@ def fake_patch(task, fields):
 m.patch_task = fake_patch
 
 payload = json.loads(sys.argv[1])
+
+# submit reads the task to find its Approver — stub it so no Airtable call
+# happens. An approverEmail in the payload lands in the Approver field.
+def fake_get(task):
+    fields = {}
+    if payload.get('approverEmail'):
+        fields[m.AF['approver']] = {'email': payload['approverEmail']}
+    return {'id': task, 'fields': fields}
+m.get_task = fake_get
 fh = tempfile.NamedTemporaryFile('w', suffix='.md', delete=False)
 fh.write(payload['output'])
 fh.close()
@@ -67,7 +76,7 @@ out['captured'] = captured
 print('---JSON---')
 print(json.dumps(out))
 `;
-  const raw = execFileSync('python3', ['-c', script, JSON.stringify({ type, output, tier1 })],
+  const raw = execFileSync('python3', ['-c', script, JSON.stringify({ type, output, tier1, approverEmail })],
     { encoding: 'utf8' });
   return JSON.parse(raw.split('---JSON---')[1]);
 }
@@ -194,6 +203,31 @@ describe('agent-dispatch submit gate', () => {
       const rx = /carrying this out will involve:\?\\\*\{0,2\}|carrying this out will involve/i;
       expect(src).toMatch(rx);
       expect(approvals).toMatch(rx);
+    });
+  });
+
+  // WHO the approval lands on (12 Aug 2026): the task's Approver field
+  // decides — label-8 inbound work goes to Mica, everything else to Kevin —
+  // and tier 1 ALWAYS diverts to Kevin whatever the field says.
+  describe('approver routing', () => {
+    it('assigns the approval to the task Approver (Mica for label-8 work)', () => {
+      const r = submit({ type: 'Drafting', output: 'Some drafted work.', approverEmail: 'micaa.work@gmail.com' });
+      expect(r.refused, r.error).toBe(false);
+      expect(r.captured.fields[r.fieldMap.assignee]).toEqual({ email: 'micaa.work@gmail.com' });
+    });
+
+    it('defaults to Kevin when no Approver is set', () => {
+      const r = submit({ type: 'Drafting', output: 'Some drafted work.' });
+      expect(r.refused, r.error).toBe(false);
+      expect(r.captured.fields[r.fieldMap.assignee]).toEqual({ email: 'kevin@runpreneur.org.uk' });
+    });
+
+    it('tier 1 diverts to Kevin even when the Approver says Mica', () => {
+      const r = submit({ type: 'Drafting', output: 'Some drafted work.', tier1: true, approverEmail: 'micaa.work@gmail.com' });
+      expect(r.refused, r.error).toBe(false);
+      expect(r.captured.fields[r.fieldMap.assignee]).toEqual({ email: 'kevin@runpreneur.org.uk' });
+      // The label travels with the work, however tier 1 was spotted.
+      expect(r.captured.fields[r.fieldMap.agentOutput]).toContain('TIER 1');
     });
   });
 });

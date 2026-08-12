@@ -88,6 +88,8 @@ captured = {}
 def fake_patch(task, fields):
     captured['task'] = task; captured['fields'] = fields; return {'id': task}
 m.patch_task = fake_patch
+# submit reads the task to find its Approver — stub it so no Airtable call happens.
+m.get_task = lambda task: {'id': task, 'fields': {}}
 fh = tempfile.NamedTemporaryFile('w', suffix='.md', delete=False)
 fh.write('Some drafted work.'); fh.close()
 agent_id = sorted(m.AGENTS)[0]
