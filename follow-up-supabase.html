@@ -1922,10 +1922,10 @@
                             }
                         },
                         {
-                            name: 'Tasks table create+delete (Kevin assignee)', kind: 'automation', active: true,
+                            name: 'Tasks table create+delete (agent-routed, label 12)', kind: 'automation', active: true,
                             run: async () => {
                                 if (!getAirtablePat()) return { status: 'warn', detail: 'Skipped — set the Airtable PAT in Settings to enable this check' };
-                                const r = await healthCheckKevinTask();
+                                const r = await healthCheckAgentRoutedTask();
                                 return { status: r.ok ? 'pass' : 'fail', detail: r.detail };
                             }
                         },
@@ -2635,10 +2635,46 @@
         createdDate: 'fldRpwiBGqEVaN20H'
     };
     const AIRTABLE_ASSIGNEE_DEFAULT = 'usrP7K5pmPSdVVgTN'; // Mica Albovias
-    const AIRTABLE_ASSIGNEE_KEVIN = 'usrKkopUJSGsBhWMD'; // Kevin Brittain — used by label 12
+    const AIRTABLE_ASSIGNEE_KEVIN = 'usrKkopUJSGsBhWMD'; // Kevin Brittain
     const AIRTABLE_ASSIGNEE_ERICAMAE = 'usrejWz04hiXxxgVa'; // Ericamae Atenta
     const AIRTABLE_COMPLETED_STATUS_ID = 'selI6Otekm3JyaBSJ';
     const AIRTABLE_COLLABORATORS_FIELD = 'fldcq3t6uAPgWSOP8'; // multipleCollaborators
+    // Label 12 ("Kevin to respond") routes to the AI agents, not to Kevin
+    // (Kevin's instruction, 12 Aug 2026). The task is created with Team
+    // Member = AI CEO (Dan Martell) and NO Assignee — a blank Assignee is
+    // the agent-owned convention. The agent dispatch engine
+    // (scripts/agent-dispatch.py) then picks it up, the CEO triages it to
+    // the right agent, and the prepared work reaches Kevin as a task
+    // approval.
+    const AIRTABLE_TEAM_MEMBER_FIELD = 'flduCtmQGpOA4eWaj'; // link → Team Members (mirrors config.js TASK_FIELDS.teamMember)
+    const AI_CEO_TEAM_MEMBER_REC = 'reciHUAEcEkbctnZ6'; // AI CEO (Dan Martell) — mirrors CEO_REC_ID in scripts/agent-dispatch.py
+    // Every Team Members record that is an AI agent — mirrors AGENTS in
+    // scripts/agent-dispatch.py (drift-tested in
+    // tests/follow-up-label12-agent-routing.test.js). Needed because the
+    // Team Members table holds humans too (Kevin, Mica, Ericamae), so
+    // "has a Team Member link" is NOT the same as "an AI agent owns it".
+    const AI_AGENT_TEAM_MEMBER_RECS = new Set([
+        'reciHUAEcEkbctnZ6', // AI CEO (Dan Martell)
+        'rec27NaJB7JNLaBB0', // AI HR & People
+        'recCzAdg2rO8bha9A', // AI Wealth
+        'recFZ1ofn0OuoZNEr', // AI Strategy
+        'recGvMnprGf1hr9Z1', // AI Finance
+        'recMKExCwu0ulMBMG', // AI Productivity
+        'recRStFWWEyHgOD6t', // AI Operations
+        'recSvV7a47ze9i5X9', // AI Legal & Compliance
+        'recYD7avVxouIkH5b', // AI Systemisation
+        'recZlgKJZn7xsBfoz', // AI Mindset
+        'reciAJnPnFEbj5FhX', // AI Marketing
+        'recpCz18pCLCUf3oJ', // AI Sales
+        'recFMVmHmqAOVPAeJ', // AI Worker — Writer
+        'recPVA1CgGyyGcBd9', // AI Worker — Auditor
+        'recQkO6BA4w5zqwZ4', // AI Worker — Builder
+        'recbHvWqlQBbunF2F', // AI Worker — Researcher
+        'recqmKBmq8ZGkxVH9', // AI Worker — Analyst
+    ]);
+    function isAgentOwned(teamMemberIds) {
+        return (teamMemberIds || []).some(id => AI_AGENT_TEAM_MEMBER_RECS.has(id));
+    }
 
     // Tenancies table — used by label 11 (tenancy docs) auto-link flow.
     const AIRTABLE_TENANCIES_TABLE_ID = 'tblN51a88qTDB6iMH';
@@ -2718,7 +2754,9 @@ Respond with ONLY the JSON object, no markdown.`;
     }
 
     // Optional opts:
-    //   assigneeId — override the default Mica assignee (e.g. for label 12 → Kevin)
+    //   assigneeId    — override the default Mica assignee (null = leave unassigned)
+    //   teamMemberIds — Team Members record links (label 12 → [AI CEO] so the
+    //                   agent dispatch engine picks the task up for triage)
     async function matchPropertyForMaintenance(taskTitle, taskDescription) {
         const pat = getAirtablePat();
         if (!pat) return null;
@@ -2809,11 +2847,14 @@ Respond with ONLY the JSON object, no markdown.`;
             'Original message:\n' +
             bodyExcerpt;
 
-        // Build collaborators list — everyone except the assignee.
+        // Build collaborators list — everyone except the assignee. On an
+        // agent-routed task Kevin is also left out: the whole point of agent
+        // routing is that he gets the prepared approval, not the raw task.
         const assigneeId = 'assigneeId' in opts ? opts.assigneeId : getAirtableAssignee();
+        const agentRouted = !!(opts.teamMemberIds && opts.teamMemberIds.length);
         const allTeamIds = [AIRTABLE_ASSIGNEE_DEFAULT, AIRTABLE_ASSIGNEE_KEVIN, AIRTABLE_ASSIGNEE_ERICAMAE];
         const collaboratorIds = allTeamIds
-            .filter(id => id !== assigneeId)
+            .filter(id => id !== assigneeId && !(agentRouted && id === AIRTABLE_ASSIGNEE_KEVIN))
             .map(id => ({ id }));
 
         const record = {
@@ -2821,6 +2862,7 @@ Respond with ONLY the JSON object, no markdown.`;
                 [AIRTABLE_FIELDS.taskName]: content.title,
                 [AIRTABLE_FIELDS.status]: opts.maintenance ? 'Upcoming' : 'Today',
                 ...(assigneeId ? { [AIRTABLE_FIELDS.assignee]: { id: assigneeId } } : {}),
+                ...(opts.teamMemberIds && opts.teamMemberIds.length ? { [AIRTABLE_TEAM_MEMBER_FIELD]: opts.teamMemberIds } : {}),
                 [AIRTABLE_FIELDS.priority]: opts.maintenance ? 'Not Urgent' : 'Urgent',
                 [AIRTABLE_FIELDS.timeEstimate]: '15 min',
                 [AIRTABLE_FIELDS.description]: richDescription,
@@ -2911,14 +2953,14 @@ Respond with ONLY the JSON object, no markdown.`;
     // existing Airtable tasks linked to Gmail threads.
 
     // Find an existing Airtable task by Gmail threadId.
-    // Returns { id, assigneeId, status } or null if not found.
+    // Returns { id, assigneeId, teamMemberIds, status } or null if not found.
     async function findExistingAirtableTask(threadId) {
         const pat = getAirtablePat();
         if (!pat) return null;
         try {
             const gmailUrl = 'https://mail.google.com/mail/u/0/#all/' + threadId;
             const formula = encodeURIComponent(`FIND("${threadId}", {${AIRTABLE_FIELDS.noteUrl}})`);
-            const fields = [AIRTABLE_FIELDS.assignee, AIRTABLE_FIELDS.status, AIRTABLE_FIELDS.noteUrl]
+            const fields = [AIRTABLE_FIELDS.assignee, AIRTABLE_FIELDS.status, AIRTABLE_FIELDS.noteUrl, AIRTABLE_TEAM_MEMBER_FIELD]
                 .map(f => 'fields%5B%5D=' + f).join('&');
             const resp = await fetch(
                 `https://api.airtable.com/v0/${getAirtableBaseId()}/${getAirtableTableId()}?returnFieldsByFieldId=true&fieldIdsInFormula=true&${fields}&filterByFormula=${formula}&maxRecords=1`,
@@ -2932,6 +2974,7 @@ Respond with ONLY the JSON object, no markdown.`;
             return {
                 id: rec.id,
                 assigneeId: assigneeField?.id || null,
+                teamMemberIds: rec.fields[AIRTABLE_TEAM_MEMBER_FIELD] || [],
                 status: rec.fields[AIRTABLE_FIELDS.status] || ''
             };
         } catch (err) {
@@ -2940,14 +2983,34 @@ Respond with ONLY the JSON object, no markdown.`;
         }
     }
 
+    // One line for the audit trail: who owns the task after an ownership
+    // write. Shared by updateAirtableTaskAssignee and reopenAirtableTask so
+    // the wording can never drift between them.
+    function ownershipLabel(assigneeId, opts) {
+        if (assigneeId) return assigneeId;
+        if (opts && opts.agentOwned) return 'AI agents';
+        if (opts && opts.teamMemberIds === undefined) return 'owner unchanged';
+        return 'unassigned';
+    }
+
     // Reassign an existing Airtable task to a new assignee.
     // Also updates collaborators so the old assignee becomes a collaborator.
-    async function updateAirtableTaskAssignee(taskRecordId, newAssigneeId) {
+    // newAssigneeId: collaborator user id, or null to clear the Assignee.
+    // opts:
+    //   teamMemberIds — array to overwrite the Team Member links ([] clears),
+    //                   or undefined to leave them untouched.
+    //   agentOwned    — true when an AI agent owns the task after this write;
+    //                   keeps Kevin out of Collaborators so the raw task
+    //                   never reaches him (he gets the approval instead).
+    //   status        — status value to write (e.g. 'Today' so the agent
+    //                   dispatch queue can see the task), or undefined.
+    async function updateAirtableTaskAssignee(taskRecordId, newAssigneeId, opts) {
+        opts = opts || {};
         const pat = getAirtablePat();
         if (!pat) return false;
         const allTeamIds = [AIRTABLE_ASSIGNEE_DEFAULT, AIRTABLE_ASSIGNEE_KEVIN, AIRTABLE_ASSIGNEE_ERICAMAE];
         const collaboratorIds = allTeamIds
-            .filter(id => id !== newAssigneeId)
+            .filter(id => id !== newAssigneeId && !(opts.agentOwned && id === AIRTABLE_ASSIGNEE_KEVIN))
             .map(id => ({ id }));
         try {
             const resp = await fetch(
@@ -2957,8 +3020,10 @@ Respond with ONLY the JSON object, no markdown.`;
                     headers: { 'Authorization': 'Bearer ' + pat, 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                         fields: {
-                            [AIRTABLE_FIELDS.assignee]: { id: newAssigneeId },
-                            [AIRTABLE_COLLABORATORS_FIELD]: collaboratorIds
+                            [AIRTABLE_FIELDS.assignee]: newAssigneeId ? { id: newAssigneeId } : null,
+                            [AIRTABLE_COLLABORATORS_FIELD]: collaboratorIds,
+                            ...(opts.teamMemberIds !== undefined ? { [AIRTABLE_TEAM_MEMBER_FIELD]: opts.teamMemberIds } : {}),
+                            ...(opts.status ? { [AIRTABLE_FIELDS.status]: opts.status } : {})
                         }
                     })
                 }
@@ -2968,7 +3033,7 @@ Respond with ONLY the JSON object, no markdown.`;
                 console.error('[sync] reassign failed:', errData);
                 return false;
             }
-            addAuditEntry('airtable_reassign', `Reassigned Airtable task ${taskRecordId} to ${newAssigneeId}`);
+            addAuditEntry('airtable_reassign', `Reassigned Airtable task ${taskRecordId} to ${ownershipLabel(newAssigneeId, opts)}`);
             return true;
         } catch (err) {
             console.error('[sync] updateAirtableTaskAssignee error:', err);
@@ -3013,7 +3078,7 @@ Respond with ONLY the JSON object, no markdown.`;
         if (!pat) return false;
         const allTeamIds = [AIRTABLE_ASSIGNEE_DEFAULT, AIRTABLE_ASSIGNEE_KEVIN, AIRTABLE_ASSIGNEE_ERICAMAE];
         const collaboratorIds = allTeamIds
-            .filter(id => id !== newAssigneeId)
+            .filter(id => id !== newAssigneeId && !(opts.agentOwned && id === AIRTABLE_ASSIGNEE_KEVIN))
             .map(id => ({ id }));
         try {
             const resp = await fetch(
@@ -3024,8 +3089,9 @@ Respond with ONLY the JSON object, no markdown.`;
                     body: JSON.stringify({
                         fields: {
                             [AIRTABLE_FIELDS.status]: 'Today',
-                            [AIRTABLE_FIELDS.assignee]: { id: newAssigneeId },
+                            [AIRTABLE_FIELDS.assignee]: newAssigneeId ? { id: newAssigneeId } : null,
                             [AIRTABLE_COLLABORATORS_FIELD]: collaboratorIds,
+                            ...(opts.teamMemberIds !== undefined ? { [AIRTABLE_TEAM_MEMBER_FIELD]: opts.teamMemberIds } : {}),
                             ...(opts.maintenance !== undefined ? { [AIRTABLE_FIELDS.maintenance]: opts.maintenance } : {})
                         }
                     })
@@ -3036,7 +3102,7 @@ Respond with ONLY the JSON object, no markdown.`;
                 console.error('[sync] reopen task failed:', errData);
                 return false;
             }
-            addAuditEntry('airtable_reopen', `Reopened Airtable task ${taskRecordId}, assigned to ${newAssigneeId}`);
+            addAuditEntry('airtable_reopen', `Reopened Airtable task ${taskRecordId}, assigned to ${ownershipLabel(newAssigneeId, opts)}`);
             return true;
         } catch (err) {
             console.error('[sync] reopenAirtableTask error:', err);
@@ -3045,10 +3111,21 @@ Respond with ONLY the JSON object, no markdown.`;
     }
 
     // Determine the correct assignee for a destination label.
+    // Label 12 returns null ON PURPOSE: those tasks are owned by the AI
+    // agents via the Team Member link, and a blank Assignee is the
+    // agent-owned convention (see isAgentRoutedLabel below).
     function getAssigneeForLabel(labelName) {
-        if (/^12[.:]\s/.test(labelName)) return AIRTABLE_ASSIGNEE_KEVIN;
+        if (isAgentRoutedLabel(labelName)) return null; // agent-routed, not Kevin
         if (/^13[.:]\s/.test(labelName)) return null; // maintenance: leave unassigned for contractor triage
         return AIRTABLE_ASSIGNEE_DEFAULT;
+    }
+
+    // Label 12 ("Kevin to respond") hands the work to the AI agents: Team
+    // Member = AI CEO (Dan Martell), who triages it to the right agent. The
+    // agent prepares the response and Kevin approves it from the task
+    // approval — he no longer gets the raw task itself.
+    function isAgentRoutedLabel(labelName) {
+        return /^12[.:]\s/.test(labelName);
     }
 
     // Returns true if the destination label is a "task-linked" label (8, 12, 13).
@@ -3082,33 +3159,64 @@ Respond with ONLY the JSON object, no markdown.`;
         // Case 1: Moving TO a task-linked label (8, 12, 13)
         if (movingToTaskLabel) {
             const newAssignee = getAssigneeForLabel(toLabelName);
+            const routeToAgents = isAgentRoutedLabel(toLabelName);
+            const isMaint = /^13[.:]\s/.test(toLabelName);
             const existing = await findExistingAirtableTask(email.threadId);
 
             if (existing) {
                 // Task already exists — reassign or reopen, no new task
-                const isMaint = /^13[.:]\s/.test(toLabelName);
+                const existingLinks = existing.teamMemberIds || [];
+                const agentOwnsIt = isAgentOwned(existingLinks);
+                // Three cases, in the order they matter:
+                //  - to 12 and no AI agent owns it yet → hand it to the AI
+                //    CEO. A HUMAN Team Member link is ownership bookkeeping,
+                //    not agent work, so it is replaced: moving to 12 is an
+                //    explicit "the agents handle this" decision.
+                //  - to 12 and an agent already owns it → leave the links
+                //    alone (the CEO may have routed it on — never restart
+                //    triage).
+                //  - to 8 or 13 and an agent owns it → the humans take it
+                //    back: strip ONLY the agent links, keep any human ones.
+                let teamMemberIds; // undefined = leave the links untouched
+                if (routeToAgents && !agentOwnsIt) {
+                    teamMemberIds = [AI_CEO_TEAM_MEMBER_REC];
+                } else if (!routeToAgents && agentOwnsIt) {
+                    teamMemberIds = existingLinks.filter(id => !AI_AGENT_TEAM_MEMBER_RECS.has(id));
+                }
                 if (existing.status === 'Completed') {
                     // Reopen from completed state (e.g. moving from label 9/14 back to 8/12/13)
-                    const ok = await reopenAirtableTask(existing.id, newAssignee, { maintenance: isMaint });
+                    const ok = await reopenAirtableTask(existing.id, newAssignee, { maintenance: isMaint, teamMemberIds, agentOwned: routeToAgents });
                     if (ok) showSuccess('Reopened and reassigned task for "' + truncate(email.subject, 40) + '"');
-                } else if (existing.assigneeId !== newAssignee) {
-                    // Already open but assigned to someone else — reassign
-                    const ok = await updateAirtableTaskAssignee(existing.id, newAssignee);
-                    if (ok) showSuccess('Reassigned task for "' + truncate(email.subject, 40) + '"');
                 } else {
-                    // Same assignee, task already open — nothing to do
-                    showSuccess('Task already exists for this email.');
+                    // Routing to the agents must also surface the task to the
+                    // dispatch queue, which only reads Today and Overdue.
+                    const needsStatusBump = routeToAgents && existing.status !== 'Today' && existing.status !== 'Overdue';
+                    if (existing.assigneeId !== newAssignee || teamMemberIds !== undefined || needsStatusBump) {
+                        const ok = await updateAirtableTaskAssignee(existing.id, newAssignee, {
+                            teamMemberIds,
+                            agentOwned: routeToAgents,
+                            status: needsStatusBump ? 'Today' : undefined
+                        });
+                        if (ok) showSuccess('Reassigned task for "' + truncate(email.subject, 40) + '"');
+                    } else {
+                        // Same ownership, task already open — nothing to do
+                        showSuccess('Task already exists for this email.');
+                    }
                 }
             } else {
                 // No task exists — create one
-                const isMaint = /^13[.:]\s/.test(toLabelName);
-                const ok = await createAirtableTask(email, { assigneeId: newAssignee, maintenance: isMaint });
+                const ok = await createAirtableTask(email, {
+                    assigneeId: newAssignee,
+                    maintenance: isMaint,
+                    ...(routeToAgents ? { teamMemberIds: [AI_CEO_TEAM_MEMBER_REC] } : {})
+                });
                 if (ok) {
                     if (isMaint) {
                         showSuccess('Maintenance task created: "' + truncate(email.subject, 40) + '"');
+                    } else if (routeToAgents) {
+                        showSuccess('Task routed to the AI agents for "' + truncate(email.subject, 40) + '" — Kevin will get the approval');
                     } else {
-                        const assigneeName = newAssignee === AIRTABLE_ASSIGNEE_KEVIN ? 'Kevin' : 'Mica';
-                        showSuccess('Task created for ' + assigneeName + ': "' + truncate(email.subject, 40) + '"');
+                        showSuccess('Task created for Mica: "' + truncate(email.subject, 40) + '"');
                     }
                 }
             }
@@ -4137,9 +4245,9 @@ Body: ${bodyText}`;
         const airtableResult = await healthCheckAirtable();
         checks.push({ name: 'Tasks — Mica assignee (label 8)', ...airtableResult });
 
-        // Check 2: Airtable Tasks create + delete with Kevin as assignee (label 12)
-        const kevinResult = await healthCheckKevinTask();
-        checks.push({ name: 'Tasks — Kevin assignee (label 12)', ...kevinResult });
+        // Check 2: Airtable Tasks create + delete, agent-routed shape (label 12)
+        const agentRoutedResult = await healthCheckAgentRoutedTask();
+        checks.push({ name: 'Tasks — agent-routed (label 12)', ...agentRoutedResult });
 
         // Check 3: Tenancies table read + Document Links write (label 11)
         const tenancyResult = await healthCheckTenancies();
@@ -4226,17 +4334,21 @@ Body: ${bodyText}`;
         return { ok: true, detail: 'Created + deleted test record' };
     }
 
-    // Same as healthCheckAirtable but uses Kevin's user ID — proves the
-    // label-12 path works.
-    async function healthCheckKevinTask() {
+    // Same as healthCheckAirtable but writes the agent-routed shape (Team
+    // Member = AI CEO, no Assignee) — proves the label-12 path works.
+    async function healthCheckAgentRoutedTask() {
         const pat = getAirtablePat();
         if (!pat) return { ok: false, detail: 'No Airtable PAT' };
 
         const record = {
             fields: {
-                [AIRTABLE_FIELDS.taskName]: `[HEALTHCHECK Kevin] ${new Date().toISOString()}`,
+                [AIRTABLE_FIELDS.taskName]: `[HEALTHCHECK Agent-routed] ${new Date().toISOString()}`,
                 [AIRTABLE_FIELDS.status]: 'Today',
-                [AIRTABLE_FIELDS.assignee]: { id: AIRTABLE_ASSIGNEE_KEVIN },
+                [AIRTABLE_TEAM_MEMBER_FIELD]: [AI_CEO_TEAM_MEMBER_REC],
+                // Kevin as collaborator keeps his user ID validated — it is
+                // still load-bearing in collaborator writes and the Slack
+                // email map, and nothing else health-checks it now.
+                [AIRTABLE_COLLABORATORS_FIELD]: [{ id: AIRTABLE_ASSIGNEE_KEVIN }],
                 [AIRTABLE_FIELDS.priority]: 'Urgent',
                 [AIRTABLE_FIELDS.timeEstimate]: '15 min',
                 [AIRTABLE_FIELDS.description]: 'Health check — safe to delete',
@@ -4254,7 +4366,7 @@ Body: ${bodyText}`;
             const resp = await fetch(`https://api.airtable.com/v0/${getAirtableBaseId()}/${getAirtableTableId()}`, {
                 method: 'POST',
                 headers: { 'Authorization': 'Bearer ' + pat, 'Content-Type': 'application/json' },
-                body: JSON.stringify({ records: [record] })
+                body: JSON.stringify({ records: [record], returnFieldsByFieldId: true })
             });
             if (!resp.ok) {
                 const errData = await resp.json().catch(() => ({}));
@@ -4262,11 +4374,17 @@ Body: ${bodyText}`;
             }
             const data = await resp.json();
             createdId = data.records?.[0]?.id;
-            const assigneeName = data.records?.[0]?.fields?.[AIRTABLE_FIELDS.assignee]?.name || '';
-            // Verify Airtable resolved Kevin's user ID to the correct person
-            if (assigneeName && !assigneeName.toLowerCase().includes('kevin')) {
+            // Verify the Team Member link actually landed — a silent miss here
+            // means label-12 tasks would never reach the agent queue.
+            const tmIds = data.records?.[0]?.fields?.[AIRTABLE_TEAM_MEMBER_FIELD] || [];
+            if (!tmIds.includes(AI_CEO_TEAM_MEMBER_REC)) {
                 if (createdId) await fetch(`https://api.airtable.com/v0/${getAirtableBaseId()}/${getAirtableTableId()}/${createdId}`, { method: 'DELETE', headers: { 'Authorization': 'Bearer ' + pat } });
-                return { ok: false, detail: `Assignee resolved to "${assigneeName}" instead of Kevin — user ID may be wrong` };
+                return { ok: false, detail: 'Team Member link did not land — AI CEO record ID may be wrong' };
+            }
+            const collabs = data.records?.[0]?.fields?.[AIRTABLE_COLLABORATORS_FIELD] || [];
+            if (!collabs.some(c => c && c.id === AIRTABLE_ASSIGNEE_KEVIN)) {
+                if (createdId) await fetch(`https://api.airtable.com/v0/${getAirtableBaseId()}/${getAirtableTableId()}/${createdId}`, { method: 'DELETE', headers: { 'Authorization': 'Bearer ' + pat } });
+                return { ok: false, detail: 'Kevin collaborator did not resolve — his Airtable user ID may be wrong' };
             }
         } catch (err) {
             return { ok: false, detail: 'Create error: ' + err.message };
@@ -4281,7 +4399,7 @@ Body: ${bodyText}`;
         } catch (err) {
             return { ok: true, detail: '(test record could not be auto-deleted — please remove manually)' };
         }
-        return { ok: true, detail: 'Created + deleted Kevin-assigned test record' };
+        return { ok: true, detail: 'Created + deleted agent-routed test record' };
     }
 
     // Reads active tenancies (proves the label-11 list fetch works) and
@@ -4421,9 +4539,10 @@ Body: ${bodyText}`;
         }
     }
 
-    // Fetch all active (non-completed) inbound tasks with their assignees.
-    // Returns Map<threadId, { taskName, assigneeId }>.
-    // Used by the reassignment sweep to detect when the web app changed assignees.
+    // Fetch all active (non-completed) inbound tasks with their ownership.
+    // Returns Map<threadId, { id, taskName, assigneeId, teamMemberIds }>.
+    // Used by the reassignment sweep to detect when ownership changed in the
+    // web app or Airtable (assignee for humans, Team Member for AI agents).
     async function fetchActiveInboundTaskAssignees() {
         const pat = getAirtablePat();
         if (!pat) return new Map();
@@ -4432,7 +4551,7 @@ Body: ${bodyText}`;
             const formula = encodeURIComponent(
                 'AND({' + AIRTABLE_FIELDS.isInbound + '}, {' + AIRTABLE_FIELDS.status + '} != "Completed", {' + AIRTABLE_FIELDS.noteUrl + '} != "")'
             );
-            const fields = [AIRTABLE_FIELDS.taskName, AIRTABLE_FIELDS.assignee, AIRTABLE_FIELDS.noteUrl]
+            const fields = [AIRTABLE_FIELDS.taskName, AIRTABLE_FIELDS.assignee, AIRTABLE_FIELDS.noteUrl, AIRTABLE_TEAM_MEMBER_FIELD]
                 .map(f => 'fields%5B%5D=' + f).join('&');
             const resp = await fetch(
                 `https://api.airtable.com/v0/${getAirtableBaseId()}/${getAirtableTableId()}?returnFieldsByFieldId=true&fieldIdsInFormula=true&${fields}&filterByFormula=${formula}&maxRecords=200`,
@@ -4447,8 +4566,10 @@ Body: ${bodyText}`;
                 if (match) {
                     const assignee = rec.fields[AIRTABLE_FIELDS.assignee];
                     map.set(match[1], {
+                        id: rec.id,
                         taskName: rec.fields[AIRTABLE_FIELDS.taskName] || 'Unknown task',
-                        assigneeId: assignee?.id || null
+                        assigneeId: assignee?.id || null,
+                        teamMemberIds: rec.fields[AIRTABLE_TEAM_MEMBER_FIELD] || []
                     });
                 }
             }
@@ -4525,8 +4646,9 @@ Body: ${bodyText}`;
     // Background sweep — runs regardless of current view.
     // Three jobs:
     //  1. COMPLETION: move completed task emails to label 9 (from 8/12) or 14 (from 13).
-    //  2. REASSIGNMENT: if a task was reassigned in the web app, move the
-    //     Gmail email to match (e.g. Kevin-assigned task on label 8 → label 12).
+    //  2. REASSIGNMENT: if ownership changed in the web app or Airtable, move
+    //     the Gmail email to match (agent-owned task on label 8 → label 12;
+    //     Mica-assigned task on label 12 → label 8).
     //  3. MAINTENANCE COMPLETION: label 13 tasks completed → label 14.
     let sweepInFlight = false;
     async function sweepCompletedInboundTasks() {
@@ -4607,9 +4729,12 @@ Body: ${bodyText}`;
             }
 
             // ── JOB 2: REASSIGNMENT SWEEP ──
-            // Check if active tasks on labels 8/12 have been reassigned in the web app.
-            // If a task on label 8 is now assigned to Kevin → move email to label 12.
-            // If a task on label 12 is now assigned to Mica → move email to label 8.
+            // Label 12 means "the AI agents own it" (Team Member = an agent,
+            // blank Assignee), so the sweep follows OWNERSHIP, not Kevin:
+            // If a task on label 8 is now agent-owned → move email to label 12.
+            // If a task on label 12 is now assigned to Mica → move email to
+            // label 8 AND strip the agent links, so the dispatch engine stops
+            // working a task Mica has taken over.
             // Label 13 tasks stay on label 13 regardless of reassignment.
             let reassignMoved = 0;
             if (label8 && label12) {
@@ -4625,8 +4750,8 @@ Body: ${bodyText}`;
                     const isOnLabel8 = labels.has(label8);
                     const isOnLabel12 = labels.has(label12);
 
-                    // Task assigned to Kevin but email is on label 8 → move to label 12
-                    if (isOnLabel8 && !isOnLabel12 && taskInfo.assigneeId === AIRTABLE_ASSIGNEE_KEVIN) {
+                    // Task handed to the AI agents but email is on label 8 → move to label 12
+                    if (isOnLabel8 && !isOnLabel12 && isAgentOwned(taskInfo.teamMemberIds)) {
                         try {
                             await gapi.client.gmail.users.threads.modify({
                                 userId: 'me',
@@ -4634,7 +4759,7 @@ Body: ${bodyText}`;
                                 resource: { addLabelIds: [label12.id], removeLabelIds: [label8.id] }
                             });
                             reassignMoved++;
-                            addAuditEntry('airtable_reassign_bg', `Background moved thread to Kevin to Respond (reassigned in web app: "${truncate(taskInfo.taskName, 30)}")`);
+                            addAuditEntry('airtable_reassign_bg', `Background moved thread to label 12 (task now agent-owned: "${truncate(taskInfo.taskName, 30)}")`);
                         } catch (err) {
                             console.warn('Background reassign move failed for thread', threadId, err);
                         }
@@ -4649,6 +4774,12 @@ Body: ${bodyText}`;
                                 resource: { addLabelIds: [label8.id], removeLabelIds: [label12.id] }
                             });
                             reassignMoved++;
+                            // Mica took the task over — strip the agent links so
+                            // the dispatch engine stops seeing it as agent work.
+                            if (isAgentOwned(taskInfo.teamMemberIds) && taskInfo.id) {
+                                const humanLinks = taskInfo.teamMemberIds.filter(id => !AI_AGENT_TEAM_MEMBER_RECS.has(id));
+                                await updateAirtableTaskAssignee(taskInfo.id, taskInfo.assigneeId, { teamMemberIds: humanLinks, agentOwned: false });
+                            }
                             addAuditEntry('airtable_reassign_bg', `Background moved thread to Task Created (reassigned in web app: "${truncate(taskInfo.taskName, 30)}")`);
                         } catch (err) {
                             console.warn('Background reassign move failed for thread', threadId, err);
