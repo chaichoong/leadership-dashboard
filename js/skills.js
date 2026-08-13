@@ -521,7 +521,11 @@
     window.clearSkillsFilters = function () {
         _activeCategory = null;
         _searchTerm = '';
-        _sourceFilter = 'mine';
+        // Back to the source this PAGE lands on, not a hardcoded one. A client
+        // tenant has no custom/SOP skills, so skills-supabase.html starts them on
+        // "All"; resetting them to "My Skills" would clear the filters onto an
+        // empty list.
+        _sourceFilter = window.__skillsClientView ? 'all' : 'mine';
         const input = document.getElementById('skillsSearchInput');
         if (input) input.value = '';
         document.querySelectorAll('.skills-filter-pill').forEach(p => p.classList.remove('active'));

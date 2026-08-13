@@ -522,3 +522,17 @@
 
         el.innerHTML = `<div style="font-size:13px;color:var(--text-secondary);line-height:1.7">${lines.map(l => `<p style="margin:0 0 8px">${l}</p>`).join('')}</div>`;
     }
+
+    // ── Clear filters ──
+    // Resets status / business / search back to the defaults the tab loads with.
+    // Sort order is deliberately left alone — it is a view preference, not a filter.
+    function clearIncomeFilters() {
+        const status = document.getElementById('incomeStatusFilter');
+        if (status) status.value = 'in-payment';
+        const biz = document.getElementById('incomeBusinessFilter');
+        if (biz) biz.value = 'all';
+        const text = document.getElementById('incomeFilterText');
+        if (text) text.value = '';
+        renderIncomeTab();
+    }
+    window.clearIncomeFilters = clearIncomeFilters;

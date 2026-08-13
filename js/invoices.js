@@ -966,3 +966,12 @@
 
 
     // ══════════════════════════════════════════
+
+    // ── Clear filters ──
+    // The invoices tab filters on the search box only; sort is a view preference.
+    function clearInvoiceFilters() {
+        const text = document.getElementById('invFilterText');
+        if (text) text.value = '';
+        renderInvoiceTab();
+    }
+    window.clearInvoiceFilters = clearInvoiceFilters;
