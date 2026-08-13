@@ -26,15 +26,15 @@
         { id: 'ceo-brief',  name: 'CEO Brief',                     icon: '☀️', pageVer: '1.0', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#ceo-brief' },
         { id: 'money',      name: 'Money Confidence',              icon: '🧭', pageVer: '1.1', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#money' },
         { id: 'wealth',     name: 'Wealth',                        icon: '📈', pageVer: '1.2', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#wealth' },
-        { id: 'income',     name: 'Accounts Receivable Fixed',     icon: '💷', pageVer: '1.3', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#income' },
-        { id: 'ar-variable', name: 'Accounts Receivable Variable', icon: '📤', pageVer: '1.2', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#ar-variable' },
-        { id: 'costs',      name: 'Accounts Payable Fixed',        icon: '📋', pageVer: '1.9', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#costs' },
-        { id: 'invoices',   name: 'Accounts Payable Variable',     icon: '🧾', pageVer: '2.21', sopFile: 'sop-invoices.html',           sopVer: '2.18', standalone: 'index.html#invoices' },
+        { id: 'income',     name: 'Accounts Receivable Fixed',     icon: '💷', pageVer: '1.4', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#income' },
+        { id: 'ar-variable', name: 'Accounts Receivable Variable', icon: '📤', pageVer: '1.3', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#ar-variable' },
+        { id: 'costs',      name: 'Accounts Payable Fixed',        icon: '📋', pageVer: '1.10', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#costs' },
+        { id: 'invoices',   name: 'Accounts Payable Variable',     icon: '🧾', pageVer: '2.22', sopFile: 'sop-invoices.html',           sopVer: '2.18', standalone: 'index.html#invoices' },
         { id: 'pnl',        name: 'Profit & Loss',                 icon: '💰', pageVer: '2.27', sopFile: 'sop-pnl.html',               sopVer: '2.26', standalone: 'index.html#pnl' },
         { id: 'transactions', name: 'Transactions',                icon: '🔍', pageVer: '1.1', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#transactions' },
         { id: 'comms',      name: 'Inbound Comms',                 icon: '📨', pageVer: '2.60', sopFile: 'inbound-comms-sop.html',      sopVer: '2.59', standalone: 'follow-up.html' },
         { id: 'compliance', name: 'Property Compliance',            icon: '✅', pageVer: '1.14', sopFile: 'sop-compliance.html',         sopVer: '1.13', standalone: 'compliance.html' },
-        { id: 'operations',  name: 'Operations',                    icon: '🏢', pageVer: '1.45', sopFile: '',                            sopVer: '1.0', standalone: 'os/operations/index.html' },
+        { id: 'operations',  name: 'Operations',                    icon: '🏢', pageVer: '1.46', sopFile: '',                            sopVer: '1.0', standalone: 'os/operations/index.html' },
         // KPI Library (Leadership section) — ADMIN ONLY. Never rendered in a
         // client tenant's shell; the adminOnly flag is the contract the Supabase
         // migration must honour. Replaced the Plan Builder entry 1 Aug 2026 on
@@ -42,7 +42,7 @@
         { id: 'kpi-library', name: 'KPI Library', icon: '📚', pageVer: '1.5', sopFile: '', sopVer: '1.0', standalone: 'index.html#kpi-library', adminOnly: true },
         { id: 'fintable',  name: 'Accounts',                       icon: '🏦', pageVer: '1.8', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#fintable' },
         { id: 'systemisation', name: 'Systemisation',              icon: '⚙️', pageVer: '1.6', sopFile: 'guides/systemisation.html',    sopVer: '1.0', standalone: 'os/systemisation/index.html' },
-        { id: 'os-team',    name: 'Team Members',                  icon: '👥', pageVer: '1.10', sopFile: '',                            sopVer: '1.0', standalone: 'os/team/index.html' },
+        { id: 'os-team',    name: 'Team Members',                  icon: '👥', pageVer: '1.11', sopFile: '',                            sopVer: '1.0', standalone: 'os/team/index.html' },
         // pageVer corrected by hand 2026-08-06: the auto-bump never fired for this page
         // (crm-supabase.html was missing from the workflow `paths:` filter), so 1.0 was
         // stale — the CRM gained a 14-step interactive walkthrough on 2026-08-04 (319b438).
@@ -52,7 +52,7 @@
         { id: 'content-machine', name: 'Content Machine',           icon: '🎬', pageVer: '1.0', sopFile: '',                            sopVer: '1.0', standalone: 'https://chaichoong.github.io/content-machine/' },
         { id: 'prospecting', name: 'Prospecting',                   icon: '🧲', pageVer: '1.14', sopFile: 'sop-prospecting.html',        sopVer: '1.4', standalone: 'index.html#prospecting' },
         { id: 'sitemap',    name: 'Site Map & Guides',             icon: '🔗', pageVer: '1.19', sopFile: 'sop-sitemap.html',            sopVer: '1.2', standalone: 'index.html#sitemap' },
-        { id: 'skills',     name: 'Skills Library',                icon: '🧠', pageVer: '1.5', sopFile: 'guides/skills.html',           sopVer: '1.0', standalone: 'index.html#skills' },
+        { id: 'skills',     name: 'Skills Library',                icon: '🧠', pageVer: '1.6', sopFile: 'guides/skills.html',           sopVer: '1.0', standalone: 'index.html#skills' },
         { id: 'ai-brain',  name: 'AI Brain',                       icon: '💭', pageVer: '1.0', sopFile: 'guides/ai-brain.html',         sopVer: '1.0', standalone: 'ai-brain.html' },
         { id: 'how-it-works', name: 'How It Works',               icon: '🗺️', pageVer: '2.2', sopFile: '',                             sopVer: '1.0', standalone: 'how-it-works.html' },
     ];
