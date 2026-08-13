@@ -68,8 +68,9 @@ Subagent prompt: "Follow ~/.claude/scheduled-tasks/task-hygiene-sweep/SKILL.md i
 These touch people and money, so they run even when the sweeps above failed. Run them in this order, each as its own subagent, each told not to take the queue lock and to return at most ten lines:
 
 1. `~/.claude/scheduled-tasks/uc-check-slack-notifier/SKILL.md` — Mica depends on this. If it fails, say so loudly in the report.
-2. `~/.claude/scheduled-tasks/agent-dispatch/SKILL.md`
-3. `~/.claude/scheduled-tasks/prospect-daily-run/SKILL.md`
+2. `~/.claude/scheduled-tasks/inbound-messages-sweep/SKILL.md` — runs BEFORE agent-dispatch on purpose, so the tasks it creates are dispatched in the same run. Its WhatsApp half needs the app open on an unlocked screen and is allowed to skip loudly; its iMessage half has no such excuse.
+3. `~/.claude/scheduled-tasks/agent-dispatch/SKILL.md`
+4. `~/.claude/scheduled-tasks/prospect-daily-run/SKILL.md`
 
 ## Phase 6b — Calendar work (only when due)
 
