@@ -1849,3 +1849,17 @@
         printWin.document.close();
     }
     window.costGeneratePrintStatement = costGeneratePrintStatement;
+
+    // ── Clear filters ──
+    // Resets status / frequency / search back to the defaults the tab loads with.
+    // Sort order is deliberately left alone — it is a view preference, not a filter.
+    function clearCostsFilters() {
+        const status = document.getElementById('costsStatusFilter');
+        if (status) status.value = 'active';
+        const freq = document.getElementById('costsFreqFilter');
+        if (freq) freq.value = 'all';
+        const text = document.getElementById('costsFilterText');
+        if (text) text.value = '';
+        renderCostsTab();
+    }
+    window.clearCostsFilters = clearCostsFilters;

@@ -408,6 +408,7 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
         <select class="filter-select" id="dirDeptFilter" onchange="renderDirectory()">
             <option value="">All Departments</option>
         </select>
+        <button class="btn btn-sm" onclick="clearDirectoryFilters()" title="Reset search and filters back to default">Clear filters</button>
     </div>
     <div id="newStarterForm" style="display:none"></div>
     <div id="directoryGrid" class="card-grid"></div>
@@ -439,6 +440,7 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
         </select>
         <label class="tm-check"><input type="checkbox" id="trainGapsOnly" onchange="renderTraining()"> Gaps only</label>
         <label class="tm-check"><input type="checkbox" id="trainShowAll" onchange="renderTraining()"> Show all SOPs</label>
+        <button class="btn btn-sm" onclick="clearTrainingFilters()" title="Reset search, department and tick-boxes back to default">Clear filters</button>
         <span class="train-legend"><span class="training-badge training-trained">&#x2713;</span> trained <span class="training-badge training-watching">&#x25D4;</span> watching <span class="training-badge tm-gap-badge">+</span> gap</span>
     </div>
     <div id="assignTrainingForm" style="display:none"></div>
@@ -462,6 +464,7 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
             <option value="Client Impact">Client Impact</option>
         </select>
         <input class="filter-select" id="achieveSearch" type="text" placeholder="Search wins..." oninput="renderAchievements()" style="min-width:160px">
+        <button class="btn btn-sm" onclick="clearAchFilters()" title="Reset member, type and search back to default">Clear filters</button>
     </div>
     <div id="addAchievementForm" style="display:none"></div>
     <div id="achievementFeed" class="achievement-feed"></div>
@@ -846,6 +849,19 @@ function updateBadges() {
     }).length;
     const rb = document.getElementById('reviewBadge');
     if (rb) rb.textContent = dueReviews;
+}
+
+// Reset a pane's search + dropdowns to the values it loads with, then re-render.
+// Directory status defaults to "Active", not blank, so defaults are explicit.
+function clearDirectoryFilters() {
+    const d = { dirSearch: '', dirStatusFilter: 'active', dirDeptFilter: '' };
+    Object.keys(d).forEach(id => { const el = document.getElementById(id); if (el) el.value = d[id]; });
+    renderDirectory();
+}
+function clearTrainingFilters() {
+    ['trainSearch', 'trainDeptFilter'].forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
+    ['trainGapsOnly', 'trainShowAll'].forEach(id => { const el = document.getElementById(id); if (el) el.checked = false; });
+    renderTraining();
 }
 
 function renderDirectory() {

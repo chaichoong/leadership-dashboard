@@ -934,6 +934,28 @@ body {
     outline: none;
     box-shadow: 0 0 0 2px var(--accent-soft);
 }
+/* "Clear filters" reset button — sits at the end of every .od-filter-row */
+.od-clear-filters {
+    font-size: var(--fs-xs);
+    font-weight: var(--fw-medium);
+    padding: 5px 12px;
+    border: 1px solid var(--border-default);
+    border-radius: var(--radius-md);
+    background: var(--bg-surface);
+    color: var(--text-secondary);
+    font-family: var(--font-family-base);
+    cursor: pointer;
+    white-space: nowrap;
+}
+.od-clear-filters:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+}
+.od-clear-filters:focus-visible {
+    border-color: var(--border-focus);
+    outline: none;
+    box-shadow: 0 0 0 2px var(--accent-soft);
+}
 
 .od-breakdown {
     background: var(--bg-surface-2);
