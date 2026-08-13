@@ -25,7 +25,11 @@ From the main checkout (`/Users/kevinbrittain/Projects/leadership-dashboard`):
 - The script already applied the hard rules: incoming only, since the last
   sweep, group chats only where Kevin is mentioned. Note the counts
   (`scanned_incoming`, `group_skipped_no_mention`, `candidates`) for your report.
-- Keep the JSON's `max_date_ns` — you need it for Step 6.
+- The scan deliberately re-reads 12 hours BEHIND the watermark (iCloud can
+  sync messages late), so seeing yesterday's already-tasked messages again is
+  normal — the Step 4 dedupe is what stops double-tasking, never skip it.
+- Keep the JSON's `max_date_ns` and each candidate's `date_ns` — Step 6 needs
+  them.
 
 ## Step 2 — WhatsApp (needs the app open on an awake, unlocked Mac)
 
@@ -81,8 +85,7 @@ broken check is how duplicates happen.
 
 One record per surviving candidate in Tasks `tblqB8b22hKBL4PF1`, base
 `appnqjDpqDniH3IRl`, via curl with the PAT at `~/.config/od/airtable_pat`
-(never print the token). Use `"typecast": true` (the `iMessage` source option
-is added by typecast on first use). Fields:
+(never print the token). Use `"typecast": true`. Fields:
 
 - `fldgFjGBw6bTKJFCD` Task Name: "INBOUND: reply to <sender/chat> (iMessage)"
   or "(WhatsApp)". Under 100 chars. No em dashes anywhere in name or description.
@@ -111,15 +114,23 @@ If more than 10 survive triage, create the 10 most important (tier-1 first,
 then oldest) and report how many were left for tomorrow — a silent cap reads
 as "covered everything".
 
-## Step 6 — Advance the watermark (iMessage only, only on success)
+## Step 6 — Advance the watermark (iMessage only, only for what was handled)
 
-Only if Step 5 finished without creation failures for the iMessage tasks:
+    python3 scripts/imessage-sweep.py mark --upto <NS>
 
-    python3 scripts/imessage-sweep.py mark --upto <max_date_ns from Step 1>
+Choose NS so the watermark never passes a message that was not fully handled:
 
-If any iMessage task failed to create, do NOT mark — tomorrow's run retries
-and the dedupe keys stop double-creation. WhatsApp has no watermark; its
-dedupe keys are the only guard, which is why Step 4 must never be skipped.
+- Every iMessage candidate created, found duplicate, or triaged out, and no
+  failures → NS = `max_date_ns` from Step 1.
+- The 10-task cap deferred candidates → NS = the oldest DEFERRED candidate's
+  `date_ns` minus 1, so tomorrow's scan sees them again. Never mark past a
+  deferred message: with no task and no dedupe key it would be lost for good.
+- Any iMessage task failed to create, or its Step 4 dedupe query errored (a
+  query error counts as a creation failure here) → same rule: NS = that
+  candidate's `date_ns` minus 1, or skip marking entirely if it was the oldest.
+
+WhatsApp has no watermark; its dedupe keys are the only guard, which is why
+Step 4 must never be skipped.
 
 ## Step 7 — Report (counts only, never content)
 

@@ -16,9 +16,17 @@ Filter rules (agreed with Kevin, 13 Aug 2026):
   likely_automated, not dropped — the routine makes the final call.
 
 Subcommands:
-  scan            (default) print candidates JSON; does NOT move the watermark
+  scan            (default) print candidates JSON; does NOT move the watermark.
+                  Re-scans OVERLAP_HOURS behind the watermark each run because
+                  iCloud can sync messages late; the routine's Airtable dedupe
+                  key is what stops double-tasking inside the overlap.
   mark --upto NS  advance the watermark to NS (apple-epoch nanoseconds); the
                   routine calls this only AFTER tasks were created successfully
+  sent --handle H --contains TEXT [--since-hours N]
+                  duplicate-send check for carry-outs: reports whether an
+                  OUTGOING message to handle H containing TEXT exists in the
+                  last N hours (default 48). Decodes attributedBody, because
+                  most sent messages have a NULL text column.
   selftest        run built-in unit checks (no database needed)
 
 Control (a running job is not a working job): scan FAILS loudly (exit 2) if the
@@ -42,6 +50,10 @@ STATE_PATH = os.path.join(STATE_DIR, "state.json")
 APPLE_EPOCH_UNIX = 978307200  # 2001-01-01 00:00:00 UTC
 DEFAULT_WINDOW_HOURS = 24
 MAX_WINDOW_HOURS = 7 * 24  # never sweep further back than a week, even after downtime
+# Messages-in-iCloud can sync AFTER the Mac wakes, delivering messages whose
+# send date is older than the newest already seen. Re-scan this far behind the
+# watermark every run; the routine's Airtable dedupe key stops double-tasking.
+OVERLAP_HOURS = 12
 CONTEXT_MESSAGES = 10
 
 # Kevin's own name for the group-mention rule. iMessage confirmed @mentions are
@@ -96,14 +108,11 @@ def message_text(row_text, row_blob):
     return decode_attributed_body(row_blob)
 
 
-def is_mentioned(text, blob):
-    if text and MENTION_PATTERN.search(text):
-        return True
-    # confirmed @mention marker in the attributed body, regardless of the
-    # rendered text (a mention of a contact card renders as the contact name)
-    if blob and b"kIMMention" in blob:
-        return True
-    return False
+def is_mentioned(text, blob=None):
+    # A confirmed @mention renders the contact's name into the message text,
+    # so the name match covers formal mentions too. The typedstream mention
+    # marker is NOT checked: it fires on a mention of anyone, not just Kevin.
+    return bool(text and MENTION_PATTERN.search(text))
 
 
 def likely_automated(sender, text):
@@ -176,7 +185,9 @@ def scan():
     now_ns = now_apple_ns()
     default_since = now_ns - int(DEFAULT_WINDOW_HOURS * 3600 * 1e9)
     floor_since = now_ns - int(MAX_WINDOW_HOURS * 3600 * 1e9)
-    since_ns = max(int(state.get("last_swept_ns", default_since)), floor_since)
+    overlap_ns = int(OVERLAP_HOURS * 3600 * 1e9)
+    watermark = int(state.get("last_swept_ns", default_since + overlap_ns))
+    since_ns = max(watermark - overlap_ns, floor_since)
 
     rows = conn.execute(
         """
@@ -220,6 +231,7 @@ def scan():
             seen_chat_context[chat_key] = chat_context(conn, chat_key, r["date"])
         candidates.append({
             "guid": r["guid"],
+            "date_ns": r["date"],
             "at": apple_ns_to_iso(r["date"]),
             "sender": r["sender"] or "unknown",
             "chat": r["display_name"] or r["chat_identifier"],
@@ -252,6 +264,37 @@ def mark(upto_ns):
     return 0
 
 
+def sent_check(handle, contains, since_hours):
+    """Has an outgoing message containing `contains` gone to `handle` recently?
+
+    Used by the agent-dispatch carry-out's verify-first step after a crash
+    between send and complete. Matches on decoded content because 90%+ of sent
+    messages store their text in attributedBody with a NULL text column.
+    """
+    conn = open_db()
+    since_ns = now_apple_ns() - int(since_hours * 3600 * 1e9)
+    needle = re.sub(r"\s+", " ", contains).strip().lower()[:200]
+    rows = conn.execute(
+        """
+        SELECT m.text, m.attributedBody, m.date
+        FROM message m
+        LEFT JOIN handle h ON h.ROWID = m.handle_id
+        WHERE m.is_from_me = 1 AND m.date > ? AND h.id = ?
+        ORDER BY m.date DESC
+        """,
+        (since_ns, handle),
+    ).fetchall()
+    matches = []
+    for r in rows:
+        text = message_text(r["text"], r["attributedBody"])
+        if text and needle in re.sub(r"\s+", " ", text).strip().lower():
+            matches.append(apple_ns_to_iso(r["date"]))
+    conn.close()
+    print(json.dumps({"found": bool(matches), "count": len(matches),
+                      "outgoing_checked": len(rows), "match_times": matches[:5]}))
+    return 0
+
+
 def selftest():
     failures = []
 
@@ -269,11 +312,11 @@ def selftest():
     check("decode none", decode_attributed_body(None) is None)
     check("decode garbage", decode_attributed_body(b"\x00\x01\x02") is None)
 
-    check("mention name", is_mentioned("are you free Kevin?", None))
-    check("mention case", is_mentioned("KEVIN call me", None))
-    check("mention marker", is_mentioned("hi", b"...__kIMMentionConfirmedMention..."))
-    check("no mention", not is_mentioned("anyone fancy lunch?", b"nothing"))
-    check("no substring mention", not is_mentioned("ask kevinson", None))
+    check("mention name", is_mentioned("are you free Kevin?"))
+    check("mention case", is_mentioned("KEVIN call me"))
+    check("mention at-tag", is_mentioned("@Kevin can you confirm?"))
+    check("no mention", not is_mentioned("anyone fancy lunch?"))
+    check("no substring mention", not is_mentioned("ask kevinson"))
 
     check("shortcode automated", likely_automated("62884", "Your delivery is on its way"))
     check("otp automated", likely_automated("+447900000001", "Your verification code is 482913"))
@@ -290,11 +333,25 @@ def main(argv):
     cmd = argv[1] if len(argv) > 1 else "scan"
     if cmd == "scan":
         return scan()
+    def opt(flag, default=None):
+        if flag in argv:
+            idx = argv.index(flag)
+            if idx + 1 < len(argv):
+                return argv[idx + 1]
+        return default
+
     if cmd == "mark":
-        if "--upto" not in argv:
+        upto = opt("--upto")
+        if upto is None:
             print("mark requires --upto <apple_epoch_ns>", file=sys.stderr)
             return 2
-        return mark(int(argv[argv.index("--upto") + 1]))
+        return mark(int(upto))
+    if cmd == "sent":
+        handle, contains = opt("--handle"), opt("--contains")
+        if not handle or not contains:
+            print("sent requires --handle and --contains", file=sys.stderr)
+            return 2
+        return sent_check(handle, contains, float(opt("--since-hours", "48")))
     if cmd == "selftest":
         return selftest()
     print(f"unknown command {cmd}", file=sys.stderr)
