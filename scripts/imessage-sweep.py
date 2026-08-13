@@ -7,7 +7,10 @@ Judgement (does this actually need a reply, drafting, task creation) belongs to
 the Claude routine that calls this — this script only extracts and filters.
 
 Filter rules (agreed with Kevin, 13 Aug 2026):
-- Incoming only (is_from_me = 0), since the watermark (default: last 24h).
+- Incoming AND UNREAD only (is_from_me = 0, is_read = 0), since the watermark
+  (default: last 24h). Kevin's rule, 13 Aug 2026: a message he has read is his
+  to deal with; the sweep exists for what he has not seen. Read state syncs
+  from his iPhone via iCloud, so "read on the phone" counts as read here.
 - One-to-one chats: always included.
 - Group chats: included ONLY when Kevin is mentioned (an iMessage @mention of
   his handle, or his name appearing in the text). Everything else in a group
@@ -22,11 +25,14 @@ Subcommands:
                   key is what stops double-tasking inside the overlap.
   mark --upto NS  advance the watermark to NS (apple-epoch nanoseconds); the
                   routine calls this only AFTER tasks were created successfully
-  sent --handle H --contains TEXT [--since-hours N]
-                  duplicate-send check for carry-outs: reports whether an
-                  OUTGOING message to handle H containing TEXT exists in the
-                  last N hours (default 48). Decodes attributedBody, because
-                  most sent messages have a NULL text column.
+  sent --handle H [--contains TEXT] [--since-hours N]
+                  reports whether an OUTGOING message to handle H exists in
+                  the last N hours (default 48). With --contains it must
+                  contain TEXT (the carry-out duplicate-send check); without,
+                  ANY real outgoing message counts (the "Kevin replied
+                  himself" check that closes his task). Decodes
+                  attributedBody, because most sent messages have a NULL text
+                  column. Tapbacks and edits never count as replies.
   selftest        run built-in unit checks (no database needed)
 
 Control (a running job is not a working job): scan FAILS loudly (exit 2) if the
@@ -199,7 +205,7 @@ def scan():
         JOIN chat_message_join cmj ON cmj.message_id = m.ROWID
         JOIN chat c ON c.ROWID = cmj.chat_id
         LEFT JOIN handle h ON h.ROWID = m.handle_id
-        WHERE m.is_from_me = 0 AND m.date > ?
+        WHERE m.is_from_me = 0 AND m.is_read = 0 AND m.date > ?
         ORDER BY m.date ASC
         """,
         (since_ns,),
@@ -273,13 +279,14 @@ def sent_check(handle, contains, since_hours):
     """
     conn = open_db()
     since_ns = now_apple_ns() - int(since_hours * 3600 * 1e9)
-    needle = re.sub(r"\s+", " ", contains).strip().lower()[:200]
+    needle = re.sub(r"\s+", " ", contains).strip().lower()[:200] if contains else None
     rows = conn.execute(
         """
         SELECT m.text, m.attributedBody, m.date
         FROM message m
         LEFT JOIN handle h ON h.ROWID = m.handle_id
         WHERE m.is_from_me = 1 AND m.date > ? AND h.id = ?
+          AND m.item_type = 0 AND COALESCE(m.associated_message_type, 0) = 0
         ORDER BY m.date DESC
         """,
         (since_ns, handle),
@@ -287,7 +294,10 @@ def sent_check(handle, contains, since_hours):
     matches = []
     for r in rows:
         text = message_text(r["text"], r["attributedBody"])
-        if text and needle in re.sub(r"\s+", " ", text).strip().lower():
+        if needle is None:
+            if text:
+                matches.append(apple_ns_to_iso(r["date"]))
+        elif text and needle in re.sub(r"\s+", " ", text).strip().lower():
             matches.append(apple_ns_to_iso(r["date"]))
     conn.close()
     print(json.dumps({"found": bool(matches), "count": len(matches),
@@ -347,11 +357,11 @@ def main(argv):
             return 2
         return mark(int(upto))
     if cmd == "sent":
-        handle, contains = opt("--handle"), opt("--contains")
-        if not handle or not contains:
-            print("sent requires --handle and --contains", file=sys.stderr)
+        handle = opt("--handle")
+        if not handle:
+            print("sent requires --handle", file=sys.stderr)
             return 2
-        return sent_check(handle, contains, float(opt("--since-hours", "48")))
+        return sent_check(handle, opt("--contains"), float(opt("--since-hours", "48")))
     if cmd == "selftest":
         return selftest()
     print(f"unknown command {cmd}", file=sys.stderr)
