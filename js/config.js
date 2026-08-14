@@ -20,12 +20,12 @@
     // ── Page & SOP Version Registry ──
     const PAGE_REGISTRY = [
         { id: 'overview',    name: 'Leadership Dashboard',           icon: '📊', pageVer: '2.63', sopFile: 'sop.html',                   sopVer: '2.9', standalone: 'index.html#overview' },
-        { id: 'os-strategy', name: 'Objective & Strategy',           icon: '🎯', pageVer: '1.33', sopFile: 'os/strategy/sop.html',       sopVer: '1.0', standalone: 'os/strategy/index.html' },
+        { id: 'os-strategy', name: 'Objective & Strategy',           icon: '🎯', pageVer: '1.34', sopFile: 'os/strategy/sop.html',       sopVer: '1.0', standalone: 'os/strategy/index.html' },
         { id: 'tasks',       name: 'Tasks & Projects',   icon: '✅', pageVer: '1.131', sopFile: 'os/tasks/sop.html',             sopVer: '1.3', standalone: 'os/tasks/index.html' },
         { id: 'cfv',        name: 'CFVs',                          icon: '🚨', pageVer: '1.33', sopFile: 'sop-cfvs.html',               sopVer: '1.6', standalone: 'index.html#cfv' },
         { id: 'ceo-brief',  name: 'CEO Brief',                     icon: '☀️', pageVer: '1.0', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#ceo-brief' },
         { id: 'money',      name: 'Money Confidence',              icon: '🧭', pageVer: '1.1', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#money' },
-        { id: 'wealth',     name: 'Wealth',                        icon: '📈', pageVer: '1.2', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#wealth' },
+        { id: 'wealth',     name: 'Wealth',                        icon: '📈', pageVer: '1.4', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#wealth' },
         { id: 'income',     name: 'Accounts Receivable Fixed',     icon: '💷', pageVer: '1.4', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#income' },
         { id: 'ar-variable', name: 'Accounts Receivable Variable', icon: '📤', pageVer: '1.3', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#ar-variable' },
         { id: 'costs',      name: 'Accounts Payable Fixed',        icon: '📋', pageVer: '1.10', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#costs' },
@@ -42,7 +42,7 @@
         { id: 'kpi-library', name: 'KPI Library', icon: '📚', pageVer: '1.5', sopFile: '', sopVer: '1.0', standalone: 'index.html#kpi-library', adminOnly: true },
         { id: 'fintable',  name: 'Accounts',                       icon: '🏦', pageVer: '1.8', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#fintable' },
         { id: 'systemisation', name: 'Systemisation',              icon: '⚙️', pageVer: '1.6', sopFile: 'guides/systemisation.html',    sopVer: '1.0', standalone: 'os/systemisation/index.html' },
-        { id: 'os-team',    name: 'Team Members',                  icon: '👥', pageVer: '1.11', sopFile: '',                            sopVer: '1.0', standalone: 'os/team/index.html' },
+        { id: 'os-team',    name: 'Team Members',                  icon: '👥', pageVer: '1.12', sopFile: '',                            sopVer: '1.0', standalone: 'os/team/index.html' },
         // pageVer corrected by hand 2026-08-06: the auto-bump never fired for this page
         // (crm-supabase.html was missing from the workflow `paths:` filter), so 1.0 was
         // stale — the CRM gained a 14-step interactive walkthrough on 2026-08-04 (319b438).
@@ -519,15 +519,31 @@
     };
 
     // ── Income Buckets field IDs (Airtable: Income Buckets / tbldMPjXTu7ho5f0T) ──
-    // Virtual overlay for the Wealth tab. Surplus is split by Allocation % into Balance.
+    // Virtual overlay for the Wealth tab. Net cash flow is split by Allocation % into
+    // each pot, from the bucket's Start Date onwards.
     const BUCKET = {
         name:    'fld58yk6iOatTIIxJ',  // Bucket (singleLineText, primary)
         pct:     'fldJkDpfd9p36ddbC',  // Allocation % (number, 0dp) — e.g. 20 means 20%
-        balance: 'fld50s2fcXr4vEiVy',  // Balance (currency £) — running virtual balance
+        // Opening Balance (currency £) — what was already in the pot on its Start Date.
+        // Renamed from "Balance" 2026-08-14: it used to be a hand-maintained running
+        // total that NOTHING read (the code that wrote it had been orphaned since the
+        // grid replaced the per-row editor), so a stale figure sat there looking live.
+        opening: 'fld50s2fcXr4vEiVy',
+        // Start Date (date, ISO) — the pot goes live from here. Allocation and spend
+        // before it are ignored entirely, so an old deficit is not dragged forward.
+        // Blank = BUCKET_DEFAULT_START.
+        start:   'fldo5P3NSnyKtrx7t',
         sort:    'fldtUTeLjEpPJAcoy',  // Sort Order (number)
         notes:   'fldQR5QoFToiHMTEn',  // Notes (multilineText)
         spendSubs: 'fld6yClkQoMlOkiU4', // Spend Sub-Categories (multipleRecordLinks → subCategories): drives bucket draw-down
     };
+
+    // Fallback start month for a bucket with no Start Date set. Kevin's decision,
+    // 2026-08-14: buckets go live 1 May 2026, and the Sep 2025 – Apr 2026 deficit is
+    // NOT carried forward. Before this, every pot ran a 12-month rolling cumulative
+    // that reset at the left edge of the window, so a pot silently changed value as
+    // the window rolled and four of five pots were pinned at £0 by old overspend.
+    const BUCKET_DEFAULT_START = '2026-05-01';
 
     // Chart of Accounts - Categories: name field (primary). Used by the cash-flow
     // drill-down so a miscoded transaction can be recategorised in place.
