@@ -29,7 +29,7 @@
         { id: 'income',     name: 'Accounts Receivable Fixed',     icon: '💷', pageVer: '1.4', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#income' },
         { id: 'ar-variable', name: 'Accounts Receivable Variable', icon: '📤', pageVer: '1.3', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#ar-variable' },
         { id: 'costs',      name: 'Accounts Payable Fixed',        icon: '📋', pageVer: '1.10', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#costs' },
-        { id: 'invoices',   name: 'Accounts Payable Variable',     icon: '🧾', pageVer: '2.22', sopFile: 'sop-invoices.html',           sopVer: '2.18', standalone: 'index.html#invoices' },
+        { id: 'invoices',   name: 'Accounts Payable Variable',     icon: '🧾', pageVer: '2.22', sopFile: 'sop-invoices.html',           sopVer: '2.19', standalone: 'index.html#invoices' },
         { id: 'pnl',        name: 'Profit & Loss',                 icon: '💰', pageVer: '2.27', sopFile: 'sop-pnl.html',               sopVer: '2.26', standalone: 'index.html#pnl' },
         { id: 'transactions', name: 'Transactions',                icon: '🔍', pageVer: '1.1', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#transactions' },
         { id: 'comms',      name: 'Inbound Comms',                 icon: '📨', pageVer: '2.60', sopFile: 'inbound-comms-sop.html',      sopVer: '2.59', standalone: 'follow-up.html' },
