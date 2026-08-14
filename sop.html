@@ -132,7 +132,7 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
     </div>
     <div class="qr-item">
       <div class="qr-label">Data Source</div>
-      <div class="qr-value">Airtable &mdash; 9 tables<br>Base: <code>appnqjDpqDniH3IRl</code></div>
+      <div class="qr-value">Airtable &mdash; 9 core tables + 7 background<br>Base: <code>appnqjDpqDniH3IRl</code></div>
     </div>
     <div class="qr-item">
       <div class="qr-label">Key Tables</div>
@@ -175,13 +175,14 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
       <a href="#portfolio"><span class="toc-num">7</span> Portfolio &amp; Tenancy Metrics</a>
       <a href="#operational"><span class="toc-num">8</span> 31-Day Operational Metrics</a>
       <a href="#cashflow"><span class="toc-num">9</span> 31-Day Cash Flow Forecast</a>
-      <a href="#ai-commentary"><span class="toc-num">10</span> AI Commentary &amp; Credit Card Plan</a>
+      <a href="#ai-commentary"><span class="toc-num">10</span> AI Commentary &amp; Credit Card Payment Strategy</a>
       <a href="#balance-calc"><span class="toc-num">11</span> Balance Calculator</a>
       <a href="#reconciliation"><span class="toc-num">12</span> Reconciliation Matching Logic</a>
       <a href="#smart-refresh"><span class="toc-num">13</span> Smart Refresh System</a>
-      <a href="#apps-script"><span class="toc-num">14</span> Google Apps Script Setup</a>
-      <a href="#troubleshooting"><span class="toc-num">15</span> Troubleshooting</a>
-      <a href="#changelog"><span class="toc-num">16</span> Changelog</a>
+      <a href="#strategic-kpi"><span class="toc-num">14</span> Strategic KPI Automation</a>
+      <a href="#apps-script"><span class="toc-num">15</span> Google Apps Script Setup</a>
+      <a href="#troubleshooting"><span class="toc-num">16</span> Troubleshooting</a>
+      <a href="#changelog"><span class="toc-num">17</span> Changelog</a>
     </div>
   </div>
 </div>
@@ -196,7 +197,7 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
       <div class="arch-box highlight">
         <div class="arch-icon">&#x1F4CA;</div>
         <div class="arch-title">Airtable</div>
-        <div class="arch-desc">9 tables via REST API + PAT</div>
+        <div class="arch-desc">9 core tables via REST API + PAT<br>(plus 7 more in the background)</div>
       </div>
       <div class="arch-connector">&#x27A1;&#xFE0F;</div>
       <div class="arch-box highlight" style="border-color:var(--accent);background:var(--accent-soft)">
@@ -211,7 +212,25 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
         <div class="arch-desc">Apps Script web app<br>Invoice extraction</div>
       </div>
     </div>
-    <p>On load, the dashboard fetches 9 Airtable tables in parallel: <strong>Accounts</strong>, <strong>Fixed Costs</strong>, <strong>Tenancies</strong>, <strong>Transactions</strong>, <strong>Rental Units</strong>, <strong>Tenants</strong>, <strong>Categories</strong>, <strong>Sub-Categories</strong>, and <strong>Businesses</strong>. It also fires non-blocking fetches for invoices, Gmail sync, and Fintable status.</p>
+    <p>On load, the dashboard fetches 9 core Airtable tables in parallel: <strong>Accounts</strong>, <strong>Fixed Costs</strong>, <strong>Tenancies</strong>, <strong>Transactions</strong>, <strong>Rental Units</strong>, <strong>Tenants</strong>, <strong>Categories</strong>, <strong>Sub-Categories</strong>, and <strong>Businesses</strong>.</p>
+    <p>Those 9 are not the whole story. The same page load also reaches these tables in the background, without you clicking anything:</p>
+    <table class="label-table">
+      <thead><tr><th>Table</th><th>Why it is touched</th><th>Read or write</th></tr></thead>
+      <tbody>
+        <tr><td><strong>Strategic Projects</strong> (<code>tblHrpTMd5LNYn8v1</code>)</td><td>Loads every project and its KPI, then runs the automated KPI compute (see section 14)</td><td>Read <em>and write</em></td></tr>
+        <tr><td><strong>Tasks</strong> (<code>tblqB8b22hKBL4PF1</code>)</td><td>Feeds task counts into any KPI compute that needs them</td><td>Read</td></tr>
+        <tr><td><strong>Prospects</strong> (<code>tbljHVGJoKJf8acy3</code>)</td><td>Feeds the outbound funnel stages into KPI compute</td><td>Read</td></tr>
+        <tr><td><strong>Invoices</strong> (<code>tblkOTKIG2Tyiy9aM</code>)</td><td>Fills the Invoices tab and its sidebar badge</td><td>Read</td></tr>
+        <tr><td><strong>AI Recon Audit</strong> (<code>TABLES.reconAudit</code>)</td><td>Rebuilds the AI Reconciliation Accuracy card from the last 31 days</td><td>Read (plus a one-off migration write)</td></tr>
+        <tr><td><strong>AI Recon Rules</strong> (<code>tblQ9sFD7Fs5CaVwG</code>)</td><td>Loads the reconciliation knowledge base so every device matches</td><td>Read (plus a one-off migration write)</td></tr>
+        <tr><td><strong>Arrears Records</strong> (<code>tblzG0B9oRRpszcgC</code>)</td><td>Once-per-load arrears sweep that opens, progresses or pauses records</td><td>Read <em>and write</em></td></tr>
+      </tbody>
+    </table>
+    <p>It also fires non-blocking calls to Gmail sync and the Fintable status check.</p>
+    <div class="info-box warn">
+      <span class="ib-icon">&#x26A0;&#xFE0F;</span>
+      <div><strong>Opening the dashboard is not a read-only act.</strong> Two of the background jobs write back to Airtable on every load: the strategic KPI compute and the arrears sweep. Section 14 explains exactly what the KPI compute writes.</div>
+    </div>
   </div>
 </div>
 
@@ -515,23 +534,68 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
 
   <div class="card">
     <div class="card-header">&#x1F4CA; Forecast Table Columns</div>
+    <p>The table has <strong>seven</strong> columns. There is no &ldquo;Net&rdquo; column.</p>
     <table class="label-table">
       <thead><tr><th>Column</th><th>Description</th></tr></thead>
       <tbody>
-        <tr><td><strong>Date</strong></td><td>Calendar date for the row</td></tr>
-        <tr><td><strong>Opening</strong></td><td>Balance at start of day (previous day&rsquo;s closing)</td></tr>
-        <tr><td><strong>In</strong></td><td>Total projected inflows (rent payments)</td></tr>
-        <tr><td><strong>Out</strong></td><td>Total projected outflows (fixed costs)</td></tr>
-        <tr><td><strong>Net</strong></td><td>In minus Out for the day</td></tr>
-        <tr><td><strong>Closing</strong></td><td>Opening + Net; carries forward as next day&rsquo;s Opening</td></tr>
+        <tr><td><strong>Date</strong></td><td>Calendar day for the row. Click the row to open the item-by-item detail.</td></tr>
+        <tr><td><strong>Opening</strong></td><td>Balance at the start of the day. Row 1 uses the balance in the <strong>Opening balance</strong> box above the table, which is not always the same as the Opening Balance KPI card (see below).</td></tr>
+        <tr><td><strong>In</strong></td><td>Expected money in for the day. Leaves out anything already reconciled, and anything you have unticked in the detail.</td></tr>
+        <tr><td><strong>Out</strong></td><td>Expected money out for the day. Same exclusions as In, <em>plus</em> your weekly commitments (see the Withdrawal Advisor below).</td></tr>
+        <tr><td><strong>Closing</strong></td><td>Balance at the end of the day, <strong>after</strong> any recommended withdrawal has been taken off. Carries forward as the next day&rsquo;s Opening.</td></tr>
+        <tr><td><strong>Withdraw</strong></td><td>The amount the Withdrawal Advisor says is safe to take out that day. Blank on most days.</td></tr>
+        <tr><td><strong>Last Acct</strong></td><td>Which bank account(s) that day&rsquo;s items belong to.</td></tr>
       </tbody>
     </table>
+    <div class="info-box info">
+      <span class="ib-icon">&#x1F9EE;</span>
+      <div><strong>How each row adds up</strong> (the same sentence the table prints under its Totals row): <code>Opening + In &minus; Out &minus; Withdraw = Closing</code>, and each day&rsquo;s Closing becomes the next day&rsquo;s Opening.</div>
+    </div>
+    <div class="info-box warn">
+      <span class="ib-icon">&#x26A0;&#xFE0F;</span>
+      <div><strong>The KPI cards above the table use a different sum.</strong> Total In, Total Out and Net Change are worked out from the raw forecast: they leave out reconciled items, but they ignore your ticks, your weekly commitments and every recommended withdrawal. The Totals row under the table includes all three. Final Balance and Lowest Balance are the post-withdrawal figures. So the cards and the table can legitimately disagree.</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header">&#x1F4B7; Withdrawal Advisor</div>
+    <p>Below the chart and above the table sits a control box that quietly changes the Closing column. It answers one question: how much can you take out of the business this month without running the balance too low.</p>
+    <h4 style="margin-top:1rem">Weekly commitments</h4>
+    <ol class="steps">
+      <li>Out of the box the forecast adds two weekly costs that exist nowhere in Airtable: <strong>Wages &pound;330</strong> and <strong>Top-up &pound;140</strong>, both every <strong>Friday</strong>. That is <strong>&pound;470 a week</strong> of Out that no fixed-cost record explains.</li>
+      <li>You can edit them in the <strong>Weekly costs</strong> box: label, sub-category, amount, and day of the week. Add or remove rows as you like.</li>
+      <li>They show up in each Friday&rsquo;s detail list marked &ldquo;(weekly)&rdquo;, so the Out column always reconciles to the items listed.</li>
+    </ol>
+    <div class="info-box warn">
+      <span class="ib-icon">&#x1F4BB;</span>
+      <div><strong>These live in your browser, not in Airtable.</strong> They are saved to <code>localStorage</code> under <code>_wa_settings</code>. Open the dashboard on a different computer, in a different browser, or after clearing your storage, and you are back on the &pound;470 default, even if you changed it months ago. Nobody else sees your edits.</div>
+    </div>
+    <h4 style="margin-top:1rem">Safety floor</h4>
+    <ol class="steps">
+      <li>The floor is the balance the advisor refuses to dip below. It is <strong>calculated, not fixed</strong>: the larger of &pound;500, or the biggest single expected payment in &times; 0.3 &times; buffer days &divide; 3. The answer is rounded up to the nearest &pound;50.</li>
+      <li>Buffer days come from a payment-lag analysis of your reconciled rent (<code>analysePaymentLag</code>). With fewer than 10 matched payments it defaults to <strong>3 days</strong>. With 10 or more it uses the 80th percentile lag plus one day, held between 2 and 10 days.</li>
+      <li>You can type your own figure into the <strong>Safety floor</strong> box. That override is also browser-local (<code>_wa_settings.floorOverride</code>) and a Reset link puts it back to the calculated value.</li>
+    </ol>
+    <h4 style="margin-top:1rem">How a withdrawal is chosen</h4>
+    <ol class="steps">
+      <li>Walk the 31 days in order. Withdrawals must be at least <strong>3 days apart</strong>.</li>
+      <li>For the day being tested, look at that day and every day after it, taking the lower of each day&rsquo;s opening and closing balance.</li>
+      <li>Take the lowest of all of those, subtract the safety floor, and round <strong>down</strong> to the nearest &pound;50.</li>
+      <li>If the result is under &pound;50, no withdrawal that day. Otherwise it is recorded, and subtracted from every later day&rsquo;s balance.</li>
+      <li>The total is shown as &ldquo;Safe to withdraw (31-day cycle)&rdquo; at the top right of the control box.</li>
+    </ol>
+    <h4 style="margin-top:1rem">Opening balance box</h4>
+    <p>The box is pre-filled from the live Airtable balance, but once you type over it your figure is used for row 1 and everything downstream. That edit is stored in <code>localStorage</code> under <code>_wa_state</code> and is <strong>wiped at the start of each new day</strong>. If your typed figure differs from the Airtable one by more than &pound;200, an amber &ldquo;Balance mismatch&rdquo; note appears. This is why the Opening Balance KPI card and the first row of the table can show different numbers.</p>
+    <div class="info-box info">
+      <span class="ib-icon">&#x2705;</span>
+      <div><strong>Unticking an item</strong> in a day&rsquo;s detail removes it from that day&rsquo;s In or Out, and from every balance after it. Those ticks are saved in <code>localStorage</code> under <code>_cf_exclusions</code> &mdash; browser-local as well.</div>
+    </div>
   </div>
 </div>
 
-<!-- ============ 10. AI COMMENTARY & CREDIT CARD PLAN ============ -->
+<!-- ============ 10. AI COMMENTARY & CREDIT CARD PAYMENT STRATEGY ============ -->
 <div class="section" id="ai-commentary">
-  <h2 class="section-title"><span class="icon">&#x1F916;</span> 10. AI Commentary &amp; Credit Card Plan</h2>
+  <h2 class="section-title"><span class="icon">&#x1F916;</span> 10. AI Commentary &amp; Credit Card Payment Strategy</h2>
   <div class="card">
     <div class="card-header">&#x1F4AC; AI Commentary Topics</div>
     <p>The AI commentary section (<code>id="aiCommentary"</code>) is generated in <code>renderDashboard()</code> using live KPI data. It covers six titled sections:</p>
@@ -546,29 +610,60 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
   </div>
 
   <div class="card">
-    <div class="card-header">&#x1F4B3; Strategic Credit Card Repayment Plan</div>
-    <p>Below the AI commentary, the dashboard calculates a <strong>weekly Friday-based credit card repayment schedule</strong>. Logic is computed inline in <code>renderDashboard()</code> via the <code>ccRepaymentPlan</code> constant:</p>
+    <div class="card-header">&#x1F4B3; Credit Card Payment Strategy</div>
+    <p>There is <strong>no weekly Friday repayment schedule</strong>. What the dashboard actually shows is a one-month <strong>avalanche</strong> split: cover the minimum on every card, then push whatever is left at the card with the highest estimated interest rate. It is computed inside <code>renderDashboard()</code> in <code>js/dashboard.js</code> and re-run whenever you change the Payment box.</p>
+    <h4 style="margin-top:1rem">What each card owes</h4>
     <table class="label-table">
-      <thead><tr><th>Card</th><th>Balance Logic</th><th>Payment Due Day</th><th>Min Payment</th></tr></thead>
+      <thead><tr><th>Card</th><th>Balance Logic</th><th>Due Day Shown</th></tr></thead>
       <tbody>
-        <tr><td><strong>American Express</strong></td><td>Positive balance = owed to bank</td><td>28th</td><td>2% of balance or &pound;25, whichever is greater</td></tr>
-        <tr><td><strong>Santander Credit Card</strong></td><td>&pound;5,500 limit minus available balance = owed</td><td>14th</td><td>Same formula</td></tr>
-        <tr><td><strong>Lloyds Credit Card</strong></td><td>Absolute value of negative balance = owed</td><td>21st</td><td>Same formula</td></tr>
+        <tr><td><strong>American Express</strong></td><td>The Airtable balance if it is positive, otherwise zero</td><td>28th</td></tr>
+        <tr><td><strong>Santander Credit Card</strong></td><td>The Airtable balance if it is positive, otherwise zero</td><td>14th</td></tr>
+        <tr><td><strong>Lloyds Credit Card</strong></td><td>The Airtable balance ignoring the minus sign</td><td>21st</td></tr>
       </tbody>
     </table>
-    <h4 style="margin-top:1rem">Payment Algorithm</h4>
+    <p>A card owing less than 1p drops out of the list entirely. The due days are display only: they are shown next to each balance and are not used in any calculation.</p>
+    <div class="info-box warn">
+      <span class="ib-icon">&#x26A0;&#xFE0F;</span>
+      <div><strong>The &pound;5,500 Santander credit limit is gone.</strong> Nothing in the code subtracts an available balance from a limit any more. All three cards read straight off the Airtable account balance.</div>
+    </div>
+
+    <h4 style="margin-top:1rem">The APR is a guess, not a fact</h4>
     <ol class="steps">
-      <li>Find all <strong>Fridays</strong> within the 31-day forecast window.</li>
-      <li>For each Friday, estimate account balance using the cash flow forecast rows (<code>cashFlowRows</code>), minus already-committed CC payments (<code>cumulativePaid</code>).</li>
-      <li>Apply a <strong>7-day look-ahead</strong>: find the lowest projected balance in the next 7 days. Use whichever is lower &mdash; today&rsquo;s balance or the look-ahead minimum.</li>
-      <li>Subtract the <strong>&pound;750 safety buffer</strong> (<code>MIN_BUFFER = 750</code>) to get the available payment amount.</li>
-      <li><strong>Priority 1:</strong> Cover minimum payments due before the next Friday (flagged with due date badge).</li>
-      <li><strong>Priority 2:</strong> Allocate remaining surplus to the highest-balance card first.</li>
-      <li>If available funds are &lt;&pound;10, output &ldquo;No payment this week&rdquo; with a plain-English reason.</li>
+      <li>For each card, the dashboard scans the last <strong>3 months</strong> of transactions linked to that account.</li>
+      <li>It keeps any transaction whose description <strong>contains the word &ldquo;INTEREST&rdquo;</strong> and does not contain &ldquo;CREDIT FOR&rdquo;. That is the whole test. It is a text match on the bank&rsquo;s wording.</li>
+      <li>Average monthly interest = the total of those transactions divided by how many there were.</li>
+      <li>Estimated monthly rate = average monthly interest &divide; the balance owed. Estimated APR = that &times; 12.</li>
+      <li>If no transaction matched, the card is shown as <strong>&ldquo;0% (no interest detected)&rdquo;</strong> and sorts to the bottom of the priority order.</li>
     </ol>
-    <div class="info-box info">
-      <span class="ib-icon">&#x1F4A1;</span>
-      <div>Each payment week shows: payment date, per-card amounts, balance on that date, payment amount, balance after payment, and the plain-English reason for the recommended amount. After 31 days, any remaining debt is listed.</div>
+    <div class="info-box warn">
+      <span class="ib-icon">&#x1F50E;</span>
+      <div><strong>Treat every APR on this card as an estimate.</strong> It comes from the bank&rsquo;s description text, never from a rate you or the lender entered. If the bank words its interest line differently, or the charge has not landed yet, the card silently reads <strong>0%</strong> and loses its place in the queue. A 0% badge means &ldquo;we found nothing&rdquo;, not &ldquo;this card is interest free&rdquo;.</div>
+    </div>
+
+    <h4 style="margin-top:1rem">Minimum payment</h4>
+    <p>Two different formulas, depending on whether interest was detected:</p>
+    <table class="label-table">
+      <thead><tr><th>Situation</th><th>Minimum used</th></tr></thead>
+      <tbody>
+        <tr><td>Interest transactions found</td><td>The greater of &pound;25, or 1% of the balance plus the average monthly interest</td></tr>
+        <tr><td>No interest found</td><td>The greater of &pound;25, or 2.5% of the balance</td></tr>
+      </tbody>
+    </table>
+
+    <h4 style="margin-top:1rem">How the money is split</h4>
+    <ol class="steps">
+      <li>The <strong>Payment</strong> box starts at your low-case monthly operating cushion, rounded down to a whole pound. You can type any figure over it.</li>
+      <li>Cards are sorted by estimated APR, highest first.</li>
+      <li>Every card gets its minimum. If your figure is below the total of the minimums, the total of the minimums is used instead and the summary line tells you so.</li>
+      <li>Anything left over goes to the top card until its balance is cleared, then the next, and so on.</li>
+      <li>The summary line estimates next month&rsquo;s interest on whatever is left unpaid, using the same estimated rates.</li>
+    </ol>
+
+    <h4 style="margin-top:1rem">&ldquo;Months to clear&rdquo;</h4>
+    <p>Under the cash flow forecast, each card also shows a clearance projection. It is the balance divided by the <strong>best-case net change over the 31-day forecast</strong>, rounded up.</p>
+    <div class="info-box warn">
+      <span class="ib-icon">&#x23F3;</span>
+      <div><strong>This assumes the next 31 days repeat forever.</strong> It uses the best-case surplus only, before the variable-cost reserve and before anything you withdraw, and it assumes every penny of that surplus goes on the cards. It adds no interest. If the forecast surplus is zero or negative it says &ldquo;No surplus to project&rdquo; instead. Read it as the most optimistic possible answer, not a plan.</div>
     </div>
   </div>
 </div>
@@ -657,9 +752,77 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
   </div>
 </div>
 
-<!-- ============ 14. GOOGLE APPS SCRIPT ============ -->
+<!-- ============ 14. STRATEGIC KPI AUTOMATION ============ -->
+<div class="section" id="strategic-kpi">
+  <h2 class="section-title"><span class="icon">&#x1F9E0;</span> 14. Strategic KPI Automation</h2>
+  <div class="info-box danger">
+    <span class="ib-icon">&#x1F6A8;</span>
+    <div><strong>Opening the dashboard changes data in Airtable.</strong> Every load runs code that is stored <em>inside your Airtable Projects table</em>, in your browser, and writes the answer back to the project record. Nobody presses a button. This section explains it because the rest of this SOP describes the dashboard as a read-only viewer, and for this part it is not.</div>
+  </div>
+
+  <div class="card">
+    <div class="card-header">&#x1F504; When It Runs</div>
+    <ol class="steps">
+      <li><strong>Every page load.</strong> <code>loadStrategicKpis()</code> is the first thing <code>loadDashboard()</code> fires, before the main data fetch even starts.</li>
+      <li><strong>Every smart refresh.</strong> The 15-minute auto-refresh calls <code>loadDashboard()</code> again, so the whole compute-and-write cycle repeats (see section 13 for the idle rules).</li>
+      <li>It waits for the main tables to finish loading, then pulls the <strong>Tasks</strong> and <strong>Prospects</strong> tables so a KPI can count them.</li>
+      <li>Projects with a <strong>Closed On</strong> date are skipped, so a closed quarter cannot drift away from its snapshot. Projects with no compute code are skipped too.</li>
+    </ol>
+  </div>
+
+  <div class="card">
+    <div class="card-header">&#x1F4BB; Where the Code Lives</div>
+    <p>Each project record in the Strategic Projects table (<code>tblHrpTMd5LNYn8v1</code>) can hold a <strong>KPI Compute Code</strong> field. That field holds hand-written JavaScript. The dashboard reads it and runs it in your browser, handing it a bundle of the already-loaded finance data (transactions, costs, categories, businesses, tenancies, tasks, prospects) so the code never has to fetch anything itself.</p>
+    <p>Before running anything, the code is checked against a blocked-pattern list. Anything mentioning <code>fetch</code>, <code>window</code>, <code>document</code>, <code>localStorage</code>, <code>eval</code>, <code>Function</code>, <code>constructor</code> and similar is rejected outright, as is a lookup key glued together from pieces of text. Rejected code does not run and the project shows a fault.</p>
+    <div class="info-box warn">
+      <span class="ib-icon">&#x1F512;</span>
+      <div><strong>This is safe only because one person owns both the Airtable base and the dashboard.</strong> Anyone who can edit that field can run code in your browser. The check is a speed bump, not a wall. This must move to server-side execution before the platform is ever used by more than one customer.</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header">&#x270D;&#xFE0F; What Gets Written Back</div>
+    <p>When a compute returns a number, it is rounded to 2 decimal places and saved to the project record in the background. Four fields are written on every successful run:</p>
+    <table class="label-table">
+      <thead><tr><th>Field</th><th>Field ID</th><th>What it holds</th></tr></thead>
+      <tbody>
+        <tr><td><strong>KPI Current</strong></td><td><code>fldB1QJDUsukxKzjQ</code></td><td>The computed number</td></tr>
+        <tr><td><strong>KPI Last Updated</strong></td><td><code>fldNk2U74jBxZ6esJ</code></td><td>The moment the compute ran</td></tr>
+        <tr><td><strong>KPI Last Updated By</strong></td><td><code>fldIgmO8OqA3a7K5o</code></td><td>The signed-in user&rsquo;s name or email, or &ldquo;Leadership Dashboard&rdquo; if neither is known</td></tr>
+        <tr><td><strong>KPI Detail JSON</strong></td><td><code>fldeGDKEg6HEXCUh4</code></td><td>The full working out (month-by-month figures and the transactions behind them) so Task OS can show the same drilldown without refetching</td></tr>
+      </tbody>
+    </table>
+    <div class="info-box info">
+      <span class="ib-icon">&#x1F4E6;</span>
+      <div>KPI Detail JSON is capped at 95,000 characters to stay inside Airtable&rsquo;s long-text limit. If it is too big, the transaction lists inside it are trimmed to 40, then 25, then 15, then 5 rows. If it is still too big, only the headline figures are kept.</div>
+    </div>
+    <div class="info-box warn">
+      <span class="ib-icon">&#x1F4E1;</span>
+      <div>The save is fire-and-forget. If Airtable rejects it, the dashboard still shows the fresh number on screen and only logs a warning. So the screen can be right while the Airtable record is stale.</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header">&#x1F3F7;&#xFE0F; Badges on Each KPI Row</div>
+    <table class="label-table">
+      <thead><tr><th>Badge</th><th>Meaning</th></tr></thead>
+      <tbody>
+        <tr><td><span class="label-badge lb-red">Compute failed</span></td><td>The code was blocked by the safety check, threw an error, or did not return a number. Hover the badge to read the reason. <strong>The number next to it is old.</strong></td></tr>
+        <tr><td><span class="label-badge lb-green">Auto</span></td><td>The project is flagged as an automated KPI and its last compute worked.</td></tr>
+        <tr><td><span class="label-badge lb-amber">Never updated / Nd stale</span></td><td>A hand-entered KPI with no update date, or one last touched more than 7 days ago.</td></tr>
+        <tr><td><span class="label-badge lb-blue">today / 1d ago / Nd ago</span></td><td>A hand-entered KPI, updated recently.</td></tr>
+      </tbody>
+    </table>
+    <div class="info-box tip">
+      <span class="ib-icon">&#x1F4A1;</span>
+      <div>A red <strong>Compute failed</strong> badge replaces the green <strong>Auto</strong> badge on purpose. An &ldquo;Auto&rdquo; badge on a dead KPI claims the number is looking after itself when it is not. Two KPIs sat blank behind an &ldquo;Auto&rdquo; badge for three months before this was added.</div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ 15. GOOGLE APPS SCRIPT ============ -->
 <div class="section" id="apps-script">
-  <h2 class="section-title"><span class="icon">&#x2699;&#xFE0F;</span> 14. Google Apps Script Setup</h2>
+  <h2 class="section-title"><span class="icon">&#x2699;&#xFE0F;</span> 15. Google Apps Script Setup</h2>
   <div class="card">
     <div class="card-header">&#x1F680; Deployment</div>
     <ol class="steps">
@@ -676,9 +839,9 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
   </div>
 </div>
 
-<!-- ============ 15. TROUBLESHOOTING ============ -->
+<!-- ============ 16. TROUBLESHOOTING ============ -->
 <div class="section" id="troubleshooting">
-  <h2 class="section-title"><span class="icon">&#x1F6E0;&#xFE0F;</span> 15. Troubleshooting</h2>
+  <h2 class="section-title"><span class="icon">&#x1F6E0;&#xFE0F;</span> 16. Troubleshooting</h2>
   <div class="card">
     <div class="card-header">&#x1F527; General Issues</div>
 
@@ -724,13 +887,21 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
   </div>
 </div>
 
-<!-- ============ 16. CHANGELOG ============ -->
+<!-- ============ 17. CHANGELOG ============ -->
 <div class="section" id="changelog">
-  <h2 class="section-title"><span class="icon">&#x1F4DD;</span> 16. Changelog</h2>
+  <h2 class="section-title"><span class="icon">&#x1F4DD;</span> 17. Changelog</h2>
   <div class="card">
     <table class="label-table">
       <thead><tr><th>Version</th><th>Date</th><th>Changes</th></tr></thead>
       <tbody>
+        <!-- VERSION PENDING: sopVer in js/config.js PAGE_REGISTRY is bumped centrally.
+             Replace the "pending" cell below and the header version line (line ~119)
+             with the new number in the same commit as the bump. -->
+        <tr>
+          <td><strong>pending</strong></td>
+          <td>14 Aug 2026</td>
+          <td>Documentation drift fixes. Added section 14 Strategic KPI Automation: the dashboard runs compute code stored in Airtable and writes KPI Current, KPI Last Updated, KPI Last Updated By and KPI Detail JSON back on every load and every 15-minute refresh. Corrected section 1: the load touches 7 more tables beyond the 9 core ones, and two of them are written to. Rewrote the credit card card in section 10 against the avalanche allocator that is actually in the code (the Friday schedule, £750 buffer, £5,500 Santander limit and 2%/£25 minimum never existed in it); the APR is estimated by text-matching &ldquo;INTEREST&rdquo; in descriptions and falls back to 0%. Rewrote section 9: seven real columns (no Net column), the reconciliation identity, and a new Withdrawal Advisor subsection covering the browser-local weekly commitments and the calculated safety floor.</td>
+        </tr>
         <tr>
           <td><strong>2.9</strong></td>
           <td>16 Apr 2026</td>
