@@ -50,6 +50,7 @@ function loadEngine() {
   vm.runInContext(`Object.assign(globalThis, {
     F, SUBCAT, BUCKET, BUCKET_SPEND_SUBCATS, BUCKET_DEFAULT_START,
     buildBucketBalances, bucketStartKey, renderBuckets, wealthCompletedIdx, wealthMonths12,
+    bucketSubsDropdown, personalMoneyGroups,
   })`, sandbox);
   vm.runInContext(`globalThis.__setData = (t, sc, ac, bk) => {
     allTransactions = t; allSubCategories = sc; allAccounts = ac || []; _bucketsRecords = bk || null;
@@ -295,5 +296,73 @@ describe('Income buckets — what the grid shows', () => {
     expect(el.innerHTML).toContain('Spent');
     // "Running balance" was a hidden child row, which is why Kevin could not see it.
     expect(el.innerHTML).not.toContain('Running balance');
+  });
+});
+
+// ── Fixes for the four defects the code review found in the first cut ─────────
+describe('Income buckets — review fixes', () => {
+  it('two buckets sharing a name keep their own balance and their own spend', () => {
+    const s = loadEngine();
+    s.__setData([
+      tx(s, { date: '2026-06-05', amount: 1000, subId: 'recIncome' }),
+      tx(s, { date: '2026-06-20', amount: -300, subId: 'recTravel' }),
+    ], subRecords(s), [], null);
+    const out = s.buildBucketBalances([
+      { name: 'Dreams', pct: 50, start: '2026-01-01', opening: 0 },
+      { name: 'Dreams', pct: 20, start: '2026-01-01', opening: 0 },
+    ], months(['2026-06']));
+    // Each bucket keeps its own allocation.
+    expect(out[0].appor[0]).toBe(500);
+    expect(out[1].appor[0]).toBe(200);
+    // The £300 of travel drains exactly ONE pot. A category maps to a single bucket by
+    // design — charging both would double-count the same spend, which is the thing the
+    // budgets-vs-buckets split exists to prevent.
+    expect(out[0].spent[0] + out[1].spent[0]).toBe(300);
+    expect(out[0].balance[0]).toBe(500);
+    expect(out[1].balance[0]).toBe(-100);
+    // The grid must render two DISTINCT balances. Keyed by name, both rows collapsed
+    // onto the second bucket and showed "£-100" twice against a total of "£100".
+    const el = { innerHTML: '' };
+    s.renderBuckets(el, [
+      { name: 'Dreams', pct: 50, start: '2026-01-01', opening: 0 },
+      { name: 'Dreams', pct: 20, start: '2026-01-01', opening: 0 },
+    ]);
+    const leads = [...el.innerHTML.matchAll(/accent-soft\);font-weight:var\(--fw-semibold\);color:[^"]*">([^<]*)</g)].map(m => m[1]);
+    expect(leads).toEqual(['£500', '£-100', '£400']);
+  });
+
+  it('the FIRST bucket still collects its transactions (position 0 is falsy)', () => {
+    const s = loadEngine();
+    s.__setData([
+      tx(s, { date: '2026-06-05', amount: 1000, subId: 'recIncome' }),
+      tx(s, { date: '2026-06-20', amount: -300, subId: 'recTravel' }),
+    ], subRecords(s), [], null);
+    // Dreams is at index 0. A truthiness check on the bucket index would drop it.
+    const [dreams] = s.buildBucketBalances(
+      [{ name: 'Dreams', pct: 50, start: '2026-01-01', opening: 0 }], months(['2026-06']));
+    expect(dreams.spent[0]).toBe(300);
+  });
+
+  it('a budgeted category that is already linked survives a save', () => {
+    const s = loadEngine();
+    s.__setData([], subRecords(s), [], null);
+    // recEssent is Money Group = Needs, so it renders disabled. If it was linked, the
+    // markup must still carry its id or saving would delete the link from Airtable.
+    const html = s.bucketSubsDropdown(['recTravel', 'recEssent']);
+    expect(html).toContain('be-sub-locked');
+    expect(html).toContain('value="recEssent"');
+    // The count must match what bucketSubsCount() recomputes from .be-sub-cb:checked,
+    // i.e. only the categories that actually draw the pot down.
+    expect(html).toMatch(/be-subs-count">1</);
+    expect((html.match(/class="be-sub-cb"/g) || []).length).toBe(3);
+  });
+
+  it('an empty bucket list does not print "start date ()"', () => {
+    const s = loadEngine();
+    s.__setData([], subRecords(s), [], null);
+    const el = { innerHTML: '' };
+    s.renderBuckets(el, []);
+    expect(el.innerHTML).not.toContain('start date ()');
+    expect(el.innerHTML).toContain('No buckets are set up yet');
   });
 });

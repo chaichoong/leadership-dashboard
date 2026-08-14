@@ -2668,13 +2668,26 @@ function bucketSubsDropdown(linkedIds) {
     const subs = ((typeof allSubCategories !== 'undefined' && allSubCategories) ? allSubCategories : [])
         .map(r => ({ id: r.id, name: getField(r, SUBCAT.name) || '' }))
         .filter(s => s.name).sort((a, b) => a.name.localeCompare(b.name));
+    // A budgeted category that is ALREADY linked keeps a hidden input carrying its id.
+    // Without it the save path (which reads `.be-sub-cb:checked`) could not see the
+    // link and would quietly delete it from Airtable on the next save — the user's
+    // configuration erased by a save they made for an unrelated reason. It stays inert
+    // either way; this only means it survives until they clear the Money Group.
     const checks = subs.map(s => {
         const g = mgroup[s.name];
-        if (g) return `<label title="Budgeted as a ${escHtml(g)}, so it cannot also draw from a bucket" style="display:flex;align-items:center;gap:8px;padding:4px 8px;font-size:var(--fs-sm);white-space:nowrap;border-radius:var(--radius-sm);color:var(--text-muted);cursor:not-allowed"><input type="checkbox" disabled style="cursor:not-allowed">${escHtml(s.name)} <span style="font-size:var(--fs-xs);color:var(--text-muted)">(${escHtml(g)} budget)</span></label>`;
+        if (g) {
+            const keep = sel.has(s.id) ? `<input type="hidden" class="be-sub-locked" value="${escHtml(s.id)}">` : '';
+            const was = sel.has(s.id) ? ' <span style="font-size:var(--fs-xs);color:var(--warning)">· linked, but not drawing</span>' : '';
+            return `<label title="Budgeted as a ${escHtml(g)}, so it cannot also draw from a bucket" style="display:flex;align-items:center;gap:8px;padding:4px 8px;font-size:var(--fs-sm);white-space:nowrap;border-radius:var(--radius-sm);color:var(--text-muted);cursor:not-allowed"><input type="checkbox" disabled${sel.has(s.id) ? ' checked' : ''} style="cursor:not-allowed">${keep}${escHtml(s.name)} <span style="font-size:var(--fs-xs);color:var(--text-muted)">(${escHtml(g)} budget)</span>${was}</label>`;
+        }
         return `<label style="display:flex;align-items:center;gap:8px;padding:4px 8px;font-size:var(--fs-sm);cursor:pointer;white-space:nowrap;border-radius:var(--radius-sm);color:var(--text-primary)"><input type="checkbox" class="be-sub-cb" value="${escHtml(s.id)}"${sel.has(s.id) ? ' checked' : ''} onchange="bucketsLiveUpdate();bucketSubsCount(this)">${escHtml(s.name)}</label>`;
     }).join('');
+    // Count only the categories that actually draw the pot down, so this figure means
+    // the same thing as the one bucketSubsCount() recomputes after any tick. Counting
+    // sel.size here made the badge drop by itself the first time anything was clicked.
+    const drawing = subs.filter(s => !mgroup[s.name] && sel.has(s.id)).length;
     return `<div class="be-subs-wrap" style="position:relative;flex:1;min-width:210px">
-        <button type="button" onclick="bucketSubsToggle(this)" style="width:100%;text-align:left;padding:6px 10px;border:1px solid var(--border-default);border-radius:var(--radius-md);font-size:var(--fs-sm);background:var(--bg-surface);cursor:pointer;color:var(--text-secondary)"><span class="be-subs-count">${sel.size}</span> accounting categor${sel.size === 1 ? 'y' : 'ies'} ▾</button>
+        <button type="button" onclick="bucketSubsToggle(this)" style="width:100%;text-align:left;padding:6px 10px;border:1px solid var(--border-default);border-radius:var(--radius-md);font-size:var(--fs-sm);background:var(--bg-surface);cursor:pointer;color:var(--text-secondary)"><span class="be-subs-count">${drawing}</span> accounting categor${drawing === 1 ? 'y' : 'ies'} ▾</button>
         <div class="be-subs-panel" style="display:none;position:absolute;z-index:20;top:calc(100% + 4px);left:0;background:var(--bg-surface);border:1px solid var(--border-default);border-radius:var(--radius-md);box-shadow:var(--shadow-md);max-height:240px;overflow:auto;min-width:250px;padding:6px">
             <div style="font-size:var(--fs-xs);color:var(--text-muted);padding:2px 8px 6px;line-height:1.5">Tick the chart-of-account sub-categories whose spending draws money out of this bucket. Greyed-out ones are part of your Needs or Wants budget, so they are already counted there and cannot draw from a pot as well.</div>
             ${checks || '<div style="padding:6px 8px;color:var(--text-muted);font-size:var(--fs-sm)">No sub-categories loaded</div>'}
@@ -2768,13 +2781,24 @@ async function saveBucketEditor() {
     const errEl = document.getElementById('beError');
     const fail = m => { if (errEl) { errEl.style.display = 'block'; errEl.textContent = m; } if (btn) { btn.disabled = false; btn.textContent = 'Save buckets'; } };
     const rows = [...document.querySelectorAll('.be-row')];
+    // Two buckets with the same name are ambiguous everywhere downstream: the saved
+    // Spend Sub-Categories links and the BUCKET_SPEND_SUBCATS defaults are both looked
+    // up by name, and the drill-down is indexed by name. The figures survive it now
+    // (everything else is matched by position), but the user would still be looking at
+    // two rows they cannot tell apart. Refuse rather than save something confusing.
+    const names = rows.map(r => r.querySelector('.be-name').value.trim()).filter(Boolean);
+    const dupe = names.find((n, i) => names.findIndex(x => x.toLowerCase() === n.toLowerCase()) !== i);
+    if (dupe) return fail(`Two buckets are both called "${dupe}". Give each one a different name.`);
     const present = new Set();
     const creates = [], updates = [];
     rows.forEach((r, i) => {
         const name = r.querySelector('.be-name').value.trim();
         if (!name) return;
         const pct = Number(r.querySelector('.be-pct').value) || 0;
-        const subs = [...r.querySelectorAll('.be-sub-cb:checked')].map(cb => cb.value);
+        // `.be-sub-locked` carries links to categories that are budgeted right now, so
+        // the picker shows them disabled. They must still be written back or saving
+        // would delete a mapping the user never touched.
+        const subs = [...r.querySelectorAll('.be-sub-cb:checked'), ...r.querySelectorAll('.be-sub-locked')].map(cb => cb.value);
         // Airtable number/currency fields must receive a Number, never a string.
         const fields = {
             [BUCKET.name]: name, [BUCKET.pct]: Number(pct), [BUCKET.sort]: i + 1,
@@ -2836,12 +2860,13 @@ function renderBuckets(el, override) {
 
     // The RUNNING BALANCE is the headline row — that is the question the section
     // exists to answer. Money in and Spent are the workings, one click down.
+    // Matched by POSITION. Keying by name meant two buckets called the same thing both
+    // rendered the second one's balance, and the total agreed with neither row.
     const bal = buildBucketBalances(buckets, months);
-    const byName = {}; bal.forEach(b => byName[b.name] = b);
     const blank = { appor: keys.map(() => null), spent: keys.map(() => null), balance: keys.map(() => null), startKey: '' };
-    const rows = buckets.map(b => {
+    const rows = buckets.map((b, bi) => {
         const pct = Number(b.pct) || 0;
-        const bb = byName[b.name] || blank;
+        const bb = bal[bi] || blank;
         return {
             label: `${b.name} (${pct}%)`,
             goodUp: true,
@@ -2868,10 +2893,11 @@ function renderBuckets(el, override) {
         items: [{ label: 'Money in', goodUp: true, values: keys.map((_, i) => sumAt(b => b.appor, i)) }],
     });
 
-    const starts = [...new Set(bal.map(b => b.startKey))].sort();
-    const startNote = starts.length === 1
-        ? `Every pot runs from <strong>${escHtml(wealthMonthLabel(starts[0]))}</strong>.`
-        : `Each pot runs from its own start date (${escHtml(starts.map(wealthMonthLabel).join(', '))}).`;
+    const starts = [...new Set(bal.map(b => b.startKey))].filter(Boolean).sort();
+    const startNote = !starts.length ? 'No buckets are set up yet.'
+        : starts.length === 1
+            ? `Every pot runs from <strong>${escHtml(wealthMonthLabel(starts[0]))}</strong>.`
+            : `Each pot runs from its own start date (${escHtml(starts.map(k => wealthMonthLabel(k)).join(', '))}).`;
     const note = `Each row is a bucket and what is actually sitting in it, month by month. The highlighted "In the pot" column is the balance at the end of the last completed month. ${startNote} Anything before a pot's start date is ignored on purpose, so an old overspend is not dragged forward, and months before it show "–" rather than £0. Click a bucket <em>name</em> to open its workings: <strong>Money in</strong> (its share of that month's net cash flow) and <strong>Spent</strong> (click any figure to see the transactions behind it). A month with negative cash flow takes money back OUT of every pot by the same share, because the shortfall has to come from somewhere. A <em>negative</em> figure on the Spent row is money coming back, a refund or a bounced direct debit, and it cancels the payment it reverses. A pot can go below £0: that means you have spent more from it than you have set aside, and it carries forward until later months make it back. Money in and the balance are worked out from your net cash flow, not from a list of transactions, so they are not clickable. Drill the Net cash flow row in the table above instead. The current month (●) is still in progress.${totalPct !== 100 ? ` Percentages total ${totalPct}% (aim for 100%).` : ''}`;
     el.innerHTML = wealthMatrixCard('Income buckets — rolling 12 months', note, months, [{ header: '', rows }], { leadHeader: 'In the pot', anchor: 'completed' });
 }
@@ -2932,14 +2958,19 @@ function buildBucketBalances(buckets, months) {
         savedLinks[bname] = (Array.isArray(links) ? links : [])
             .map(l => subNames[(l && typeof l === 'object') ? l.id : l]).filter(Boolean);
     });
+    // Buckets are addressed by their POSITION, not their name. Nothing stops two
+    // buckets sharing a name (the editor is a free-text box), and keying by name made
+    // them share one spend total and one rendered balance: two rows both showing the
+    // second bucket's figure, with their common spend charged twice. Position is
+    // unique by construction.
     const subToBucket = {};
-    buckets.forEach(b => {
+    buckets.forEach((b, bi) => {
         if (!b.name) return;
         let names;
         if (b.subs) names = b.subs.map(id => subNames[id]).filter(Boolean);
         else if (savedLinks[b.name] && savedLinks[b.name].length) names = savedLinks[b.name];
         else names = BUCKET_SPEND_SUBCATS[b.name] || [];
-        names.forEach(nm => { subToBucket[nm] = b.name; });
+        names.forEach(nm => { subToBucket[nm] = bi; });
     });
     Object.keys(subToBucket).forEach(n => { if (budgeted[n]) delete subToBucket[n]; });
     const linkId = f => { if (!f) return null; if (Array.isArray(f)) { const x = f[0]; return x && typeof x === 'object' ? x.id : x; } return typeof f === 'object' ? f.id : f; };
@@ -2949,9 +2980,13 @@ function buildBucketBalances(buckets, months) {
     const keys = bucketMonthSpan(buckets, shown);
     const showIdx = shown.map(k => keys.indexOf(k));
     const keyIdx = {}; keys.forEach((k, i) => keyIdx[k] = i);
-    const spent = {}; buckets.forEach(b => spent[b.name] = keys.map(() => 0));
+    // Totals are per POSITION; the drill-down index stays keyed by NAME because that is
+    // what the grid passes to wealthDrill().
+    const spent = buckets.map(() => keys.map(() => 0));
     _bucketTxIndex = {};
-    const indexTx = (bucket, key, tx) => {
+    const indexTx = (bi, key, tx) => {
+        const bucket = (buckets[bi] || {}).name;
+        if (!bucket) return;
         if (!_bucketTxIndex[bucket]) _bucketTxIndex[bucket] = {};
         (_bucketTxIndex[bucket][key] = _bucketTxIndex[bucket][key] || []).push(tx);
     };
@@ -2970,15 +3005,17 @@ function buildBucketBalances(buckets, months) {
         if (idx === undefined) return;
         const sub = subNames[linkId(getField(tx, F.txSubCategory))] || '';
         if (sub === CARD_PAYMENT_SUBCAT) return; // handled by cardPaymentsByMonth below
+        // Bucket 0 is a valid position, so test for undefined — a truthiness check here
+        // would silently drop every transaction belonging to the first bucket.
         const bucket = subToBucket[sub];
-        if (bucket && spent[bucket]) { spent[bucket][idx] += -amt; indexTx(bucket, keys[idx], tx); }
+        if (bucket !== undefined && spent[bucket]) { spent[bucket][idx] += -amt; indexTx(bucket, keys[idx], tx); }
     });
 
     // Credit-card payments come from the shared cardPaymentsByMonth(), the same source
     // the Monthly cash flow row uses, so the two can never disagree. It reads the card
     // leg (no tagging needed) and falls back to the cash leg for cards with no feed.
     const cardBucket = subToBucket[CARD_PAYMENT_SUBCAT];
-    if (cardBucket && spent[cardBucket]) {
+    if (cardBucket !== undefined && spent[cardBucket]) {
         const cp = cardPaymentsByMonth(keys);
         keys.forEach((k, i) => {
             spent[cardBucket][i] += cp.byMonth[k] || 0;
@@ -2990,7 +3027,7 @@ function buildBucketBalances(buckets, months) {
     // start month with the opening balance. Months before it are returned as null so
     // the grid shows "–" rather than a £0 that reads as "we allocated nothing".
     const net = buildMonthlyCashflow(keys).map(m => m.net);
-    return buckets.map(b => {
+    return buckets.map((b, bi) => {
         const pct = Number(b.pct) || 0;
         const startKey = bucketStartKey(b.start);
         const live = keys.map(k => k >= startKey);           // month keys sort lexically
@@ -3000,7 +3037,7 @@ function buildBucketBalances(buckets, months) {
         // last 12 months added nothing while spending carried on, so the pots read as
         // fuller than they were and then never recovered.
         const appor = net.map((n, i) => live[i] ? Math.round(n * pct / 100) : null);
-        const rawSpent = spent[b.name] || keys.map(() => 0);
+        const rawSpent = spent[bi] || keys.map(() => 0);
         const sp = rawSpent.map((v, i) => live[i] ? Math.round(v) : null);
         // Monthly spend stays SIGNED so a reversal cancels its payment even when the
         // two land in different calendar months — a direct debit taken on the 30th and
