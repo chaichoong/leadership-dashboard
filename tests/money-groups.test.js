@@ -362,11 +362,18 @@ describe('Money Groups — bucket drawdown', () => {
       { id: 'recIncomeOther', fields: { [N]: 'Personal Income Other' } },
     ]);
     const months = [{ key: '2026-06', label: 'Jun' }, { key: '2026-07', label: 'Jul' }];
-    const [dreams] = s.buildBucketBalances([{ name: 'Dreams', pct: 10 }], months);
-    // £200/mo in, £3,000 out. The pot must stay at £0, not bounce back to £200 in
-    // July as if the overspend had been written off at the month boundary.
-    expect(dreams.balance[0]).toBe(0);
-    expect(dreams.balance[1]).toBe(0);
+    const [dreams] = s.buildBucketBalances(
+      [{ name: 'Dreams', pct: 10, start: '2026-06-01', opening: 0 }], months);
+    // £200/mo in, £3,000 out. The overspend must carry, not be written off at the
+    // month boundary — July shows the pot recovering by exactly one month's £200,
+    // never bouncing back to a clean £200 or £0.
+    //
+    // Updated 2026-08-14 (Kevin's ruling): the pot is no longer floored at £0. It
+    // used to read £0 in both months, which made an £2,800 hole look identical to an
+    // empty pot and to four other pots that were merely unfunded. A negative balance
+    // is the information — you have spent more from this pot than you set aside.
+    expect(dreams.balance[0]).toBe(-2800);
+    expect(dreams.balance[1]).toBe(-2600);
   });
 
   it('reads the CARD leg, so an untagged card payment is still counted', () => {
