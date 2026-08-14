@@ -129,11 +129,25 @@ OPEN_STATUSES = ("Today", "Overdue")
 
 # How many pieces of work one run may take on.
 #
+# A CEILING, NOT A TARGET. If eight tasks are eligible, eight run. A high cap
+# costs nothing on a quiet day, which is why it should be set to clear the
+# backlog rather than to feel safe.
+#
 # This was 5, sized so the approval queue stayed reviewable from a phone. Kevin
 # overruled that on 14 Aug 2026: the queue's real home is the Tasks & Projects
 # page, Slack is the on-the-go bonus, and he would rather be bombarded than have
-# work sit unprocessed. Throughput is now the goal.
-CAP_PER_RUN = 25
+# work sit unprocessed. Raised again the same day, to 50, once measurement
+# showed 37 tasks eligible and a cap of 25 leaving 12 of them to wait a day for
+# no reason. The goal is 90% of the work done by agents; a cap below the size of
+# the queue is just a slower version of the starvation this already caused.
+#
+# Dispatch also runs ONCE a day now (daily-ops phase 6.3) where it used to run
+# twice, at 07:30 and 14:30. That halving is why throughput felt slower than
+# before. 50 once a day is 5x the old 5-twice-a-day, not a restoration of it.
+#
+# Raise it further if the eligible count ever approaches it. The real limits are
+# how long the run takes and Airtable's rate limit, neither of which is near.
+CAP_PER_RUN = 50
 
 # Of those slots, how many are HELD BACK for new work that no agent has touched.
 #

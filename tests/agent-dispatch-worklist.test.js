@@ -103,8 +103,24 @@ describe('agent-dispatch worklist selection', () => {
     // The whole point of the change. If someone drops the cap back to 5 the
     // starvation returns, because the floor would exceed the cap.
     const { cap, floor } = select(1, 1, 0);
-    expect(cap).toBeGreaterThanOrEqual(20);
+    expect(cap).toBeGreaterThanOrEqual(50);
     expect(floor).toBeGreaterThan(0);
     expect(floor).toBeLessThan(cap);
+  });
+
+  it('is a ceiling, not a target — a short queue runs in full and no more', () => {
+    // A high cap must cost nothing on a quiet day. If this ever returns padding
+    // or throws, the cap has become something other than an upper bound.
+    const { ids } = select(3, 2, 0);
+    expect(ids).toHaveLength(5);
+    expect(countOf(ids, 'hb')).toBe(3);
+    expect(countOf(ids, 'new')).toBe(2);
+  });
+
+  it('clears the whole eligible queue at the shipped cap', () => {
+    // Measured live on 14 Aug: 37 eligible (25 worklist + 12 reserve) at cap 25,
+    // so 12 waited a day for nothing. At the shipped cap the backlog clears.
+    const { ids } = select(10, 27, 0);
+    expect(ids).toHaveLength(37);
   });
 });
