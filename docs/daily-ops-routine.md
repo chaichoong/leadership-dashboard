@@ -223,7 +223,33 @@ Cap at ten findings, one pull request, and do NOT merge it. Kevin reviews.
 
 ## Phase 9 — Report
 
-One Slack DM to Kevin. Lead with anything that needs him. Then, per phase, one line: ran clean / found N things / failed and why / skipped and why.
+**First, run the approval-loop check.** This is the trust surface: it is the
+only thing in the run that reports what SHOULD have moved and did not.
+
+```
+cd /Users/kevinbrittain/Projects/leadership-dashboard
+python3 scripts/loop-health.py
+```
+
+It exits 1 rather than printing an all-clear if the read failed or no task
+anywhere links to an agent, so a broken query can never read as "nothing is
+stuck". If it exits 1, say so in the DM — do not report the loop as healthy.
+
+Put anything under **NOT MOVING** at the TOP of the message, above the phase
+lines, with the count and the FIRST THREE AS PRINTED. Do not re-sort them by
+age: the list is already ordered by how much each item needs someone, and the
+"agent has drafted nothing" rule deliberately carries no day count, so an age
+sort buries exactly the items that mean nothing has started. Kevin asked for this on
+14 Aug 2026 after losing trust in the loop: an approvals list only shows what
+arrived, and a completions list only shows successes, so neither can show the
+thing that actually went wrong. Same rules as the Approvals tab in Tasks &
+Projects (`computeApprovalLoop`), held together by `tests/loop-health.test.js`.
+
+If NOT MOVING is zero, say that explicitly — "nothing has stalled" is the
+sentence that earns the trust, and a silent omission reads identically to the
+check never having run.
+
+Then one Slack DM to Kevin. Lead with anything that needs him. Then, per phase, one line: ran clean / found N things / failed and why / skipped and why.
 
 State plainly how long the whole run took. If any phase did not run, say which and why. Never present a partial run as a complete one.
 
