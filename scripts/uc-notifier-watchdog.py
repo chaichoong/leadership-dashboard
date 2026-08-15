@@ -15,21 +15,33 @@ there UC work that should have gone out and did not", which is true regardless
 of HOW the routine broke — wrong folder, drifted query, app closed, permission
 prompt, crash.
 
-It runs at 09:00, an hour after the routine, and does two things:
+Since 8 Aug 2026 the UC check is phase 6.1 of the one daily-ops routine, and the
+standalone uc-check-slack-notifier routine is retired. DISABLED IS NOW THE
+CORRECT STATE. This watchdog used to "repair" a disabled routine back to
+enabled; from 3 to 15 Aug that meant it re-armed the retired routine every
+morning, and on 15 Aug the resurrected routine actually fired alongside
+daily-ops — the exact second-routine overlap the one-routine design exists to
+prevent (finding 20260814-daily-ops-141). The repair half is gone. VERIFY is
+the whole job now:
 
-  1. REPAIR  — puts the routine's working folder back if it has drifted again.
-  2. VERIFY  — asks uc-check-notify.py what is outstanding. Anything still due
-               at 09:00 means the 08:00 run did not send it.
+  VERIFY — asks uc-check-notify.py what is outstanding. Anything still due
+           at 09:00 means this morning's daily-ops phase 6.1 did not send it.
+           True regardless of HOW it broke: phase skipped, run never fired,
+           query drifted, app closed.
 
-Silent when healthy. Kevin does not want a daily all-clear; the 09:30 job digest
-already proves this ran.
+It also FAILS if it finds the retired routine ENABLED, because that means
+something switched it back on and two routines will race tomorrow morning.
+
+Silent when healthy. Kevin does not want a daily all-clear; the morning job
+digest already proves this ran.
 
 CONTROL
 -------
-A watchdog that cannot find what it is checking must fail, not pass. Reporting
-"nothing wrong" because a path moved is the exact failure it exists to catch. So
-it FAILS if it cannot find the app's task list, if the routine is not in it, or
-if uc-check-notify.py's own control (UC tasks existing at all) comes back zero.
+A watchdog that cannot find what it is checking must fail, not pass. The check
+that matters is the VERIFY: it FAILS if uc-check-notify.py cannot run, if the
+task-name query has drifted, or if its own control (UC tasks existing at all)
+comes back zero. The retired routine being absent from the app's task list is
+NOT a fault any more — it is retired; only finding it enabled is.
 
 Exit codes
 ----------
@@ -75,33 +87,21 @@ def find_task_file():
     return None, None, None
 
 
-def repair(path, data, task):
-    """Put the working folder and permission mode back. Returns what changed.
+def check_retired(task):
+    """The standalone routine is retired; ENABLED is the fault now.
 
-    This only rewrites the file on disk. If the Claude app is running it holds
-    its own copy in memory and may write over this, which is why VERIFY below
-    is the real safety net and this is only the convenience half.
+    Never writes. The old repair() silently flipped enabled back to True every
+    morning — helpful when the routine was live, and a slow-motion sabotage
+    once daily-ops absorbed it. A watchdog must never hold state the design has
+    moved past; it reports, Kevin decides.
     """
-    fixes = []
-    cwd = task.get('cwd')
-    if cwd != REPO or not os.path.isdir(cwd or ''):
-        task['cwd'] = REPO
-        fixes.append('working folder was %r' % (cwd,))
-    mode = task.get('permissionMode')
-    if mode != 'bypassPermissions':
-        task['permissionMode'] = 'bypassPermissions'
-        task['approvedPermissions'] = [{'toolName': 'Bash'}, {'toolName': 'Read'}]
-        fixes.append('permission mode was %r' % (mode,))
-    if not task.get('enabled'):
-        task['enabled'] = True
-        fixes.append('routine was disabled')
-
-    if fixes:
-        tmp = path + '.tmp'
-        with open(tmp, 'w') as f:
-            json.dump(data, f, indent=2)
-        os.replace(tmp, path)
-    return fixes
+    if task.get('enabled'):
+        return ('the RETIRED standalone routine is switched ON. It will run '
+                'alongside daily-ops phase 6.1 tomorrow morning — two routines, '
+                'the exact overlap the one-routine design prevents. Turn it off '
+                'in the Claude app, and if it comes back on again something is '
+                're-enabling it.')
+    return None
 
 
 def check_outstanding():
@@ -144,23 +144,14 @@ def main():
 
     path, data, task = find_task_file()
     if task is None:
-        # Cannot verify the routine's config at all. Say so rather than pass.
-        problems.append(
-            'could not find the %s routine in the Claude app task list '
-            '(looked in %s)' % (TASK_ID, SESSIONS_GLOB)
-        )
-        fixes = []
+        # The retired routine vanishing from the app's task list is fine — it
+        # is retired. Only its RE-APPEARANCE as enabled matters, and that is
+        # checked below when it is present.
+        pass
     else:
-        fixes = repair(path, data, task)
-
-    # A repair is itself a fault report, never a silent tidy-up. If something
-    # keeps resetting this routine, quietly fixing it every morning would hide
-    # the cause for months — which is precisely how the last two failures ran.
-    if fixes:
-        problems.append(
-            'its settings had been changed again and I put them back (%s)'
-            % '; '.join(fixes)
-        )
+        enabled_fault = check_retired(task)
+        if enabled_fault:
+            problems.append(enabled_fault)
 
     outstanding, summary = check_outstanding()
     if outstanding:
@@ -168,7 +159,6 @@ def main():
 
     report = {
         'task_file': path,
-        'repaired': fixes,
         'due_count': summary.get('due_count'),
         'control_total': summary.get('control_total'),
         'already_notified': summary.get('already_notified'),
@@ -183,9 +173,6 @@ def main():
     print()
     for line in problems:
         print('ERROR: UC notifier — %s' % line)
-    if fixes:
-        print('Repaired on disk: %s. Restart the Claude app to be certain it '
-              'takes effect.' % '; '.join(fixes))
     return 1
 
 
