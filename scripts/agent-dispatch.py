@@ -226,6 +226,21 @@ CEO_REC_ID = "reciHUAEcEkbctnZ6"
 # "income and expenditure" wording those forms actually use.
 TIER1_PATTERNS = [
     re.compile(p, re.I) for p in (
+        # THE EXPLICIT LABEL COMES FIRST. If a human or an agent has already
+        # written "tier 1" on the record, that is the strongest signal there is
+        # and it beat every subject keyword below — yet until 15 Aug 2026 it
+        # matched NOTHING. Task descriptions carrying the literal words
+        # "TIER 1 MATTER" came back tier1: false, so the banner reached Kevin
+        # only because the dispatcher's judgement pass caught them by hand: 16
+        # of 16 tier-1 items in that day's recovery run were labelled by
+        # judgement, zero by this filter. A self-declaration that the machine
+        # ignores is worse than no declaration, because everyone downstream
+        # assumes it was honoured.
+        # \b after the digit or "tier 15 pricing model" reads as tier 1. The
+        # asymmetry is deliberate everywhere else: a false positive routes
+        # something to Kevin with extra caution, a false negative sends a
+        # private legal matter to Mica, so this errs toward matching.
+        r"tier[\s\-_]*1\b", r"tier[\s\-_]*one\b",
         r"restraint order", r"operation lily", r"criminal investigation",
         r"social housing holdings", r"ach investments", r"liquidat",
         # Enforcement — the vocabulary a bailiff/HCEO notice actually uses.
