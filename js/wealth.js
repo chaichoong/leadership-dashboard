@@ -863,12 +863,23 @@ function renderWealthContent(el, records, valRecs, debtRecs) {
             if (Math.round(p) === 0) return `<span style="color:var(--text-muted)">${n}m&nbsp;0%</span>`;
             const up = p > 0, good = goodUp ? up : !up;
             return `<span style="color:${good ? 'var(--success)' : 'var(--danger)'}">${n}m&nbsp;${up ? '▲' : '▼'}${Math.abs(Math.round(p))}%</span>`;
-        }).join('<span style="color:var(--border-default)">&nbsp;·&nbsp;</span>');
+        }).join('<span style="color:var(--border-default)" aria-hidden="true">·</span>');
     };
+    // The label is pinned to two lines' height so every card's big number starts at the
+    // same y. "Net cash flow (last complete month)" wraps to two lines while the other
+    // three fit on one, which used to push its figure a line lower than the rest.
+    // line-height is set explicitly so the reserved height does not drift with the
+    // inherited body token.
+    //
+    // The trend row is a wrapping flex row. It used to be one inline run glued together
+    // by &nbsp; on BOTH sides of every separator, so it could not break anywhere: a card
+    // with big percentages (1m ▲535% · 3m ▲356% · 6m ▲1532% …) simply ran past the card
+    // edge and clipped "12m". The &nbsp; INSIDE each chip stays, so "3m ▲356%" never
+    // splits across lines; only the gaps between chips break.
     const kpiCard = (label, value, valueColour, series, goodUp, anchorIdx) => `<div class="kpi-card" style="margin-bottom:0">
-        <div class="kpi-card-label" style="margin-bottom:6px">${escHtml(label)}</div>
+        <div class="kpi-card-label" style="margin-bottom:6px;align-items:flex-start;line-height:1.3;min-height:2.6em">${escHtml(label)}</div>
         <div style="font-size:var(--fs-2xl);font-weight:var(--fw-bold);color:${valueColour};line-height:1.1">${fmt(value)}</div>
-        <div style="margin-top:8px;font-size:var(--fs-xs);font-weight:var(--fw-semibold);line-height:1.7">${periodChanges(series, goodUp, anchorIdx)}</div>
+        <div style="margin-top:8px;font-size:var(--fs-xs);font-weight:var(--fw-semibold);line-height:1.7;display:flex;flex-wrap:wrap;align-items:center;column-gap:5px;row-gap:0">${periodChanges(series, goodUp, anchorIdx)}</div>
     </div>`;
     // Net worth / assets / liabilities are point-in-time balances → anchor on the
     // current month (kpiLast). Cash flow is a monthly flow distorted by the partial
