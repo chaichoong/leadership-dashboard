@@ -45,7 +45,7 @@ print(json.dumps({"code": code, "sent": sent}))
   return JSON.parse(out.trim().split('\n').pop());
 }
 
-const markAt = (iso) => ({ job: 'daily-ops', event: 'mark', ts: iso });
+const markAt = (iso) => ({ job: 'daily-ops', state: 'mark', ts: iso });
 
 describe('daily-ops guard', () => {
   it('stays silent when the run marked today', () => {
@@ -87,8 +87,8 @@ describe('daily-ops guard', () => {
 
   it('ignores events from other jobs and non-start events', () => {
     const { code } = runGuard([
-      { job: 'uc-check-slack-notifier', event: 'mark', ts: '2026-08-15T06:04:00Z' },
-      { job: 'daily-ops', event: 'released', ts: '2026-08-15T06:04:00Z' },
+      { job: 'uc-check-slack-notifier', state: 'mark', ts: '2026-08-15T06:04:00Z' },
+      { job: 'daily-ops', state: 'released', ts: '2026-08-15T06:04:00Z' },
     ], '2026-08-15T09:30:00');
     expect(code).toBe(1);
   });
@@ -117,26 +117,40 @@ describe('daily-ops guard', () => {
         });
       } catch (err) { return (err.stdout || '') + (err.stderr || ''); }
     };
+    // CONTROL. Two of the three assertions below check for the ABSENCE of the
+    // stacking line, and a digest that crashed prints no such line either — so
+    // they would pass on a traceback. They did, briefly: the first version of
+    // these fixtures used the key "event" where job-queue.py writes "state"
+    // (scripts/job-queue.py:153), the digest died on KeyError, and the test
+    // stayed green. Every run must be proved to have produced a real digest.
+    const assertRealDigest = (out, label) => {
+      expect(out, `${label}: digest crashed instead of reporting`).not.toMatch(/Traceback|KeyError/);
+      expect(out, `${label}: digest produced no job summary`).toMatch(/Scheduled jobs:|recorded nothing/);
+      return out;
+    };
     const nowIso = new Date().toISOString();
 
     // daily-ops in the schedule, no mark in the FIXTURE events → alarms from
     // fixture state alone, regardless of what the production log says.
     const out1 = runDigest(
       { 'daily-ops': { cron: '0 7 * * *', maxLateMinutes: 900, mode: 'cooperative' } },
-      [{ job: 'other-job', event: 'acquired', ts: nowIso }]);
+      [{ job: 'other-job', state: 'acquired', ts: nowIso }]);
+    assertRealDigest(out1, 'out1');
     expect(out1).toMatch(/Routine stacking/);
 
     // Same schedule, fixture mark present → the stacking alarm stays quiet.
     const out2 = runDigest(
       { 'daily-ops': { cron: '0 7 * * *', maxLateMinutes: 900, mode: 'cooperative' } },
-      [{ job: 'daily-ops', event: 'mark', ts: nowIso }]);
+      [{ job: 'daily-ops', state: 'mark', ts: nowIso }]);
+    assertRealDigest(out2, 'out2');
     expect(out2).not.toMatch(/Routine stacking/);
 
     // A fixture world with no daily-ops at all is not asked about it.
     const out3 = runDigest(
       { 'always-due': { cron: '* * * * *', maxLateMinutes: 60, mode: 'wrapped' } },
-      [{ job: 'always-due', event: 'acquired', ts: nowIso },
-       { job: 'always-due', event: 'released', ts: nowIso }]);
+      [{ job: 'always-due', state: 'acquired', ts: nowIso },
+       { job: 'always-due', state: 'released', ts: nowIso }]);
+    assertRealDigest(out3, 'out3');
     expect(out3).not.toMatch(/Routine stacking/);
   });
 

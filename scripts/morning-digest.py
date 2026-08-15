@@ -451,7 +451,13 @@ def guard(now_dt=None):
     for rec in read_jsonl_all(EVENTS):
         if rec.get("job") != "daily-ops":
             continue
-        if rec.get("event") not in ("acquired", "started", "mark"):
+        # "state", not "event" — job-queue.py:153 writes {"ts","job","state"}
+        # and check-routines.py reads the same key. The first cut of this guard
+        # read "event", which matches NOTHING, so it would have alarmed every
+        # single morning including healthy ones. It passed a live dry-run only
+        # because that morning genuinely had no mark: right answer, wrong
+        # reason. Caught when the fixtures were corrected to the real shape.
+        if rec.get("state") not in ("acquired", "started", "mark"):
             continue
         ts = rec.get("ts", "")
         try:
