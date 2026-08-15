@@ -19,6 +19,18 @@
     <priority>0.8</priority>
   </url>
   <url>
+    <loc>https://chaichoong.github.io/leadership-dashboard/index.html#coa</loc>
+    <lastmod>2026-08-15</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.6</priority>
+  </url>
+  <url>
+    <loc>https://chaichoong.github.io/leadership-dashboard/sop-coa.html</loc>
+    <lastmod>2026-08-15</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.5</priority>
+  </url>
+  <url>
     <loc>https://chaichoong.github.io/leadership-dashboard/os/operations/</loc>
     <lastmod>2026-07-02</lastmod>
     <changefreq>weekly</changefreq>

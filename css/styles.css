@@ -1471,3 +1471,114 @@ tr.expand-row:hover td {
 @media print {
     .skills-search-input, .skills-filter-bar, .skills-toolbar-btn { display: none; }
 }
+
+/* ── Chart of Accounts tab (Accounts › Chart of Accounts) ─────────────────── */
+.coa-panes {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(460px, 1fr));
+    gap: var(--space-5);
+    align-items: start;
+}
+.coa-pane {
+    border: 1px solid var(--border-default);
+    border-radius: var(--radius-lg);
+    background: var(--bg-surface);
+    overflow: hidden;
+}
+.coa-pane-head {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: var(--space-3); flex-wrap: wrap;
+    padding: var(--space-3) var(--space-4);
+    border-bottom: 1px solid var(--border-subtle);
+    background: var(--bg-surface-2);
+}
+.coa-pane-title {
+    margin: 0; font-size: var(--fs-base); font-weight: var(--fw-semibold);
+    color: var(--text-primary); display: flex; align-items: center; gap: var(--space-2);
+}
+.coa-count {
+    font-size: var(--fs-xs); font-weight: var(--fw-medium);
+    padding: 2px 8px; border-radius: var(--radius-full);
+    background: var(--bg-subtle); color: var(--text-secondary);
+}
+.coa-add-btn {
+    padding: 6px 12px; font-size: var(--fs-xs); font-weight: var(--fw-semibold);
+    border: none; border-radius: var(--radius-md);
+    background: var(--accent); color: var(--accent-on);
+    cursor: pointer; font-family: var(--font-family-base);
+}
+.coa-add-btn:hover:not(:disabled) { background: var(--accent-hover); }
+.coa-add-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* The table scrolls inside its own pane so the page body never scrolls sideways. */
+.coa-table-wrap { overflow-x: auto; }
+.coa-table { width: 100%; border-collapse: collapse; font-size: var(--fs-sm); }
+.coa-table th {
+    text-align: left; padding: var(--space-2) var(--space-3);
+    font-size: var(--fs-xs); font-weight: var(--fw-semibold);
+    text-transform: uppercase; letter-spacing: 0.03em;
+    color: var(--text-secondary); background: var(--bg-subtle);
+    border-bottom: 1px solid var(--border-default); white-space: nowrap;
+}
+.coa-table td {
+    padding: var(--space-2) var(--space-3);
+    border-bottom: 1px solid var(--border-subtle);
+    color: var(--text-primary); vertical-align: middle;
+}
+.coa-table tbody tr:last-child td { border-bottom: none; }
+.coa-table tbody tr:hover { background: var(--bg-surface-2); }
+
+.coa-name-line { display: flex; align-items: center; gap: var(--space-2); min-width: 0; }
+.coa-name {
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    font-weight: var(--fw-medium);
+}
+.coa-lock { font-size: var(--fs-xs); opacity: 0.55; cursor: help; flex-shrink: 0; }
+
+/* Link counts sit under the name, not in a column of their own: two panes side
+   by side leave no room for a fourth column, and the first thing to overflow was
+   the Delete button disappearing off the edge of the pane. */
+.coa-usage-line { margin-top: 2px; }
+.coa-usage {
+    font-size: var(--fs-xs); color: var(--text-secondary);
+    display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.coa-usage-none { color: var(--text-muted); font-style: italic; }
+.coa-th-sub { font-weight: var(--fw-regular); text-transform: none; letter-spacing: 0; color: var(--text-muted); }
+
+.coa-mg-select {
+    width: 100%; padding: 3px 6px; font-size: var(--fs-xs);
+    border: 1px solid var(--border-default); border-radius: var(--radius-sm);
+    background: var(--bg-surface); color: var(--text-primary);
+    font-family: var(--font-family-base);
+}
+.coa-mg-select:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* The buttons live in a div, not directly on the td: display:flex on a table cell
+   drops it out of table layout and the row divider breaks at that column. */
+.coa-actions > div { display: flex; gap: var(--space-2); white-space: nowrap; }
+.coa-btn {
+    padding: 4px 10px; font-size: var(--fs-xs); font-weight: var(--fw-medium);
+    border: 1px solid var(--border-default); border-radius: var(--radius-sm);
+    background: var(--bg-surface); color: var(--text-primary);
+    cursor: pointer; font-family: var(--font-family-base); white-space: nowrap;
+}
+.coa-btn:hover:not(:disabled) { background: var(--bg-subtle); border-color: var(--text-muted); }
+.coa-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.coa-btn-danger { color: var(--danger); border-color: var(--danger); }
+.coa-btn-danger:hover:not(:disabled) { background: var(--danger-bg); }
+/* Blocked delete still looks pressable — clicking it explains WHY, which is the
+   point. A greyed-out button with no explanation is what sends Kevin to Airtable. */
+.coa-btn-danger[data-coa-blocked] { color: var(--text-muted); border-color: var(--border-default); }
+.coa-btn-danger[data-coa-blocked]:hover:not(:disabled) { background: var(--bg-subtle); }
+
+.coa-btn:focus-visible, .coa-add-btn:focus-visible, .coa-mg-select:focus-visible {
+    outline: 2px solid var(--accent); outline-offset: 2px;
+}
+
+@media (max-width: 900px) {
+    .coa-panes { grid-template-columns: 1fr; }
+}
+@media print {
+    .coa-add-btn, .coa-actions, .coa-pane-head .coa-add-btn { display: none; }
+}
