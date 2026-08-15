@@ -295,6 +295,25 @@
             <button class="accounts-subtab" data-tab="invoices" onclick="switchTab('invoices')">AP Variable</button>
             <button class="accounts-subtab" data-tab="transactions" onclick="switchTab('transactions')">Transactions</button>
             <button class="accounts-subtab" data-tab="fintable" onclick="switchTab('fintable')">Bank Accounts</button>
+            <button class="accounts-subtab" data-tab="coa" onclick="switchTab('coa')">Chart of Accounts</button>
+        </div>
+
+        <!-- Tab: Chart of Accounts (categories + sub-categories admin) -->
+        <div class="tab-panel" id="tab-coa">
+            <div data-sync-bar="coa"></div>
+            <div class="section">
+                <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:8px;flex-wrap:wrap;gap:8px">
+                    <h2 class="section-title" style="margin-bottom:0">Chart of Accounts</h2>
+                    <label style="font-size:var(--fs-xs);color:var(--text-secondary);display:flex;align-items:center;gap:6px;flex:1;min-width:240px;max-width:420px">
+                        Search:
+                        <input id="coaSearch" type="text" placeholder="Filter categories and sub-categories..." style="font-size:var(--fs-xs);padding:4px 8px;border:1px solid var(--border-default);border-radius:var(--radius-sm);flex:1;background:var(--bg-surface);color:var(--text-primary)">
+                    </label>
+                </div>
+                <p style="font-size:var(--fs-xs);color:var(--text-secondary);margin:0 0 16px;max-width:70ch">
+                    The two lists every cost and transaction is coded to. Changes save straight to Airtable and appear in the Costs, Transactions and Reconciliation pickers right away. A name the P&amp;L or Wealth reports depend on is locked, and a record still linked to anything cannot be deleted.
+                </p>
+                <div class="coa-panes" id="coaPanes"></div>
+            </div>
         </div>
 
         <!-- Tab: Accounts Receivable Fixed (Income) -->
@@ -878,6 +897,7 @@
     <script defer src="js/invoices.js?v=15"></script>
     <script defer src="js/pnl.js?v=23"></script>
     <script defer src="js/transactions.js?v=7"></script>
+    <script defer src="js/coa.js?v=1"></script>
     <script defer src="js/reconciliation.js?v=33"></script>
     <script defer src="js/cfv.js?v=29"></script>
     <script defer src="js/arrears.js?v=31"></script>

@@ -32,6 +32,7 @@
         { id: 'invoices',   name: 'Accounts Payable Variable',     icon: '🧾', pageVer: '2.22', sopFile: 'sop-invoices.html',           sopVer: '2.18', standalone: 'index.html#invoices' },
         { id: 'pnl',        name: 'Profit & Loss',                 icon: '💰', pageVer: '2.27', sopFile: 'sop-pnl.html',               sopVer: '2.26', standalone: 'index.html#pnl' },
         { id: 'transactions', name: 'Transactions',                icon: '🔍', pageVer: '1.1', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#transactions' },
+        { id: 'coa',        name: 'Chart of Accounts',             icon: '📒', pageVer: '1.1', sopFile: 'sop-coa.html',                sopVer: '1.1', standalone: 'index.html#coa' },
         { id: 'comms',      name: 'Inbound Comms',                 icon: '📨', pageVer: '2.60', sopFile: 'inbound-comms-sop.html',      sopVer: '2.59', standalone: 'follow-up.html' },
         { id: 'compliance', name: 'Property Compliance',            icon: '✅', pageVer: '1.14', sopFile: 'sop-compliance.html',         sopVer: '1.13', standalone: 'compliance.html' },
         { id: 'operations',  name: 'Operations',                    icon: '🏢', pageVer: '1.46', sopFile: '',                            sopVer: '1.0', standalone: 'os/operations/index.html' },
@@ -548,6 +549,53 @@
     // Chart of Accounts - Categories: name field (primary). Used by the cash-flow
     // drill-down so a miscoded transaction can be recategorised in place.
     const CAT_NAME_FIELD = 'fldii4oUzSfmplihO';
+
+    // ── Chart of Accounts admin (Accounts › Chart of Accounts tab) ──────────────
+    // Every link field on the two Chart of Accounts tables. A record holding a link
+    // in ANY of them is in use, so the tab refuses to delete it: Airtable drops the
+    // link without complaint and orphans every cost and transaction behind it.
+    const COA_LINK_FIELDS = {
+        category: [
+            { id: 'fldiPocGB0YmrmKKp', label: 'Costs' },
+            { id: 'fldOlMnzZo0Cqt2dk', label: 'Transactions' },
+            { id: 'fldCkxSnqsx8gAs7f', label: 'Transaction Patterns' },
+            { id: 'fldAkFZX1OOc8AQws', label: 'Intercompany Adjustments' },
+            { id: 'fldtaEJ0XPE5JOxfK', label: 'Transactions (archive)' },
+        ],
+        subCategory: [
+            { id: 'fldnrhwtAGMqCsWvq', label: 'Costs' },
+            { id: 'fldKKcKrUYbt7U03q', label: 'Costs (reconciled)' },
+            { id: 'fldeaRp53IQ4vKbcP', label: 'Transactions' },
+            { id: 'fldCfcNDrEPQoY3Wg', label: 'Transaction Patterns' },
+            { id: 'fldNXuaPrzE49KUrw', label: 'Intercompany Adjustments' },
+            { id: 'fldTZJLw19uxO5Gef', label: 'Transactions (archive)' },
+            { id: 'fldqjAEH5H3e9cYwx', label: 'Income Buckets' },
+        ],
+    };
+
+    // Names the reporting code matches as STRING LITERALS. Rename one in Airtable
+    // and the report beside it silently drops that row to zero — no error, no clue.
+    // The Chart of Accounts tab reads most of them straight off the live constants
+    // (PNL_SECTIONS, CASHFLOW_*_SUBCATS, PERSONAL_MONEY_GROUPS, BUCKET_SPEND_SUBCATS)
+    // so that list can never drift. These two are the only literals in the codebase
+    // NOT reachable from a constant — verified 2026-08-15 by grepping all 49
+    // sub-category and 10 category names across js/ and scripts/.
+    const COA_EXTRA_PROTECTED = {
+        category: {
+            'Revenue': 'AI reconciliation looks this category up by name (js/reconciliation.js)',
+        },
+        subCategory: {
+            'Transfer': 'Wealth tab spots the credit-card payment leg by this name (js/wealth.js)',
+        },
+    };
+
+    // Sub-categories the code pins by RECORD ID, not name. Renaming these is safe —
+    // the ID never changes — but deleting one breaks the feature named beside it,
+    // so the tab blocks the delete even when the link count is zero. The ID-pinned
+    // sets held in REC and PERSONAL_EXPENSE_SUBCATS are picked up automatically.
+    const COA_ID_PINNED_SUBCATS = {
+        'recY5XDZspRDNjZOO': 'Cash flow excludes this from outflow matching (js/cashflow.js)',
+    };
 
     // Business name field on the Businesses table — used by the Invoices tab dropdown
     const BIZ_NAME_FIELD = 'fldbbRqVxLxUdHwIR';

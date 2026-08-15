@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Chart of Accounts &mdash; Standard Operating Procedure</title>
+<link rel="stylesheet" href="css/tokens.css?v=1">
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; }
+body { line-height: 1.6; color: var(--text-primary); background: var(--bg-app); }
+.header { background: var(--accent); color: #fff; padding: 2.5rem 2rem 2rem; }
+.header-inner { max-width: 1000px; margin: 0 auto; }
+.header-back { display: inline-flex; align-items: center; gap: 0.4rem; font-size: 0.82rem; opacity: 0.75; text-decoration: none; color: #fff; margin-bottom: 1rem; }
+.header-back:hover { opacity: 1; }
+.header h1 { font-size: 2.1rem; font-weight: 700; margin-bottom: 0.3rem; letter-spacing: -0.5px; }
+.header .subtitle { font-size: 1.02rem; opacity: 0.88; }
+.header .version { font-size: 0.85rem; opacity: 0.65; margin-top: 0.5rem; }
+.container { max-width: 1000px; margin: 0 auto; padding: 0 1.5rem 4rem; }
+.section { margin-top: 2.5rem; }
+.section-title { font-size: 1.4rem; font-weight: 700; color: var(--accent); padding-bottom: 0.5rem; border-bottom: 3px solid var(--accent-soft); margin-bottom: 1.25rem; }
+.card { background: var(--bg-surface); border-radius: var(--radius-xl); box-shadow: var(--shadow-sm); padding: 1.5rem; margin-bottom: 1.25rem; border: 1px solid var(--border-default); }
+.card-header { font-size: 1.05rem; font-weight: 600; margin-bottom: 0.75rem; }
+.card p + p, .card ol, .card ul { margin-top: 0.75rem; }
+.card li { margin-left: 1.2rem; margin-bottom: 0.4rem; }
+.quick-ref { background: var(--accent-soft); border: 2px solid var(--accent-soft); border-radius: var(--radius-xl); padding: 1.5rem; margin-top: -1rem; box-shadow: var(--shadow-lg); }
+.quick-ref h2 { font-size: 1.15rem; color: var(--accent); margin-bottom: 1rem; }
+.qr-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 0.75rem; }
+.qr-item { background: var(--bg-surface); border-radius: var(--radius-lg); padding: 0.75rem 1rem; border-left: 4px solid var(--accent); font-size: 0.88rem; }
+.qr-label { font-weight: 600; color: var(--text-secondary); font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.5px; }
+.qr-value { margin-top: 0.15rem; }
+.tbl { width: 100%; border-collapse: collapse; font-size: 0.88rem; margin-top: 0.5rem; }
+.tbl th { background: var(--accent); color: #fff; padding: 0.65rem 0.9rem; text-align: left; font-size: 0.76rem; text-transform: uppercase; letter-spacing: 0.5px; }
+.tbl td { padding: 0.6rem 0.9rem; border-bottom: 1px solid var(--border-default); vertical-align: top; }
+.tbl tr:nth-child(even) td { background: var(--bg-surface-2); }
+.callout { border-left: 4px solid var(--warning); background: var(--warning-bg); padding: 1rem 1.2rem; border-radius: var(--radius-md); margin-top: 1rem; font-size: 0.92rem; }
+.callout.danger { border-left-color: var(--danger); background: var(--danger-bg); }
+.callout.info { border-left-color: var(--info); background: var(--info-bg); }
+.callout strong { display: block; margin-bottom: 0.25rem; }
+code { background: var(--bg-subtle); padding: 0.1rem 0.35rem; border-radius: var(--radius-sm); font-size: 0.86em; }
+@media print { .header-back { display: none; } }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div class="header-inner">
+    <a class="header-back" href="index.html#coa">&larr; Back to the Chart of Accounts</a>
+    <h1>Chart of Accounts</h1>
+    <div class="subtitle">Adding and amending the two lists every cost and transaction is coded to</div>
+    <div class="version">Page v1.1 &middot; SOP v1.1 &middot; Last updated 15 August 2026</div>
+  </div>
+</div>
+
+<div class="container">
+
+  <div class="quick-ref">
+    <h2>Quick reference</h2>
+    <div class="qr-grid">
+      <div class="qr-item"><div class="qr-label">Where</div><div class="qr-value">Accounts &rsaquo; Chart of Accounts</div></div>
+      <div class="qr-item"><div class="qr-label">Airtable tables</div><div class="qr-value">Chart of Accounts - Categories<br>Chart of Accounts - Sub Categories</div></div>
+      <div class="qr-item"><div class="qr-label">Saves</div><div class="qr-value">Straight to Airtable, no separate save step</div></div>
+      <div class="qr-item"><div class="qr-label">Health checks</div><div class="qr-value">6, in the bar at the top of the tab</div></div>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="section-title">1. What this page is for</div>
+    <div class="card">
+      <p>Every cost and every bank transaction gets filed under a <strong>category</strong> and a <strong>sub-category</strong>. Those two lists are the filing cabinet the whole finance side of the platform runs on: the Profit &amp; Loss, the Wealth cash flow, the budgets, the income buckets and the AI reconciliation all read them.</p>
+      <p>Before this page existed, adding or fixing one of those lines meant opening Airtable. Now you do it here, and the change shows up in the Costs, Transactions and Reconciliation dropdowns straight away.</p>
+      <div class="callout info">
+        <strong>The two lists are separate</strong>
+        A sub-category does not sit "inside" a category in Airtable. They are two flat lists, and a transaction gets one of each independently. Adding a sub-category does not require picking a category first.
+      </div>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="section-title">2. What you see on each row</div>
+    <div class="card">
+      <table class="tbl">
+        <tr><th>Column</th><th>What it tells you</th></tr>
+        <tr><td>Name</td><td>The line itself. A padlock beside it means the name is locked (see section 4).</td></tr>
+        <tr><td>Underneath the name</td><td>What is currently filed under it, for example "Costs: 103 &middot; Transactions: 2,839". "Nothing coded to it" means the line is unused.</td></tr>
+        <tr><td>Money Group</td><td>Sub-categories only. Marks a personal spending line as a <strong>Need</strong> or a <strong>Want</strong>, which drives the budget split on the Wealth tab. Leave it blank for anything that is business spending or bucket-funded.</td></tr>
+        <tr><td>Actions</td><td>Rename and Delete. Either may be blocked, and clicking it will tell you why.</td></tr>
+      </table>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="section-title">3. Adding a new line</div>
+    <div class="card">
+      <ol>
+        <li>Click <strong>+ Add category</strong> or <strong>+ Add sub-category</strong> on the pane you want.</li>
+        <li>Type the name. It must be unique &mdash; the box will tell you if it clashes with an existing line, including one that differs only by capitals.</li>
+        <li>For a sub-category, set the Money Group only if this is personal spending you want budgeted. Otherwise leave it on the dash.</li>
+        <li>Click <strong>Create</strong>. The line appears in the list, sorted alphabetically, and a green message confirms it.</li>
+      </ol>
+      <div class="callout">
+        <strong>A new line will not appear in the P&amp;L on its own</strong>
+        The Profit &amp; Loss shows a fixed set of rows, listed in the code. A brand-new sub-category is available for coding transactions immediately, but it will not get its own P&amp;L row until that list is changed. Ask for it to be added if you want it to show there.
+      </div>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="section-title">4. Why a rename is sometimes blocked</div>
+    <div class="card">
+      <p>Parts of the platform find a line by its <strong>exact name</strong>, not by its record. The Profit &amp; Loss builds its rows that way, and so do the Wealth cash flow, the Needs/Wants budget split and the income buckets.</p>
+      <p>So if you renamed "Opex Labour" to "Staff Wages", the P&amp;L would keep looking for "Opex Labour", find nothing, and show <strong>&pound;0</strong> on that row. Nothing would break loudly. The number would just quietly go wrong.</p>
+      <p>That is why those names carry a padlock and refuse to rename. Clicking Rename on one opens a box listing exactly which reports depend on it.</p>
+      <div class="callout danger">
+        <strong>If you genuinely need one renamed</strong>
+        It has to change in the code and in Airtable together, in one release. Ask for it rather than editing the name in Airtable directly, because doing it there bypasses this guard entirely and the reports will silently drop to zero.
+      </div>
+      <p style="margin-top:1rem">Lines with no padlock are not referenced anywhere by name, so they rename freely.</p>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="section-title">5. Why a delete is sometimes blocked</div>
+    <div class="card">
+      <p>Airtable will happily delete a category that 2,839 transactions are filed under. It does not warn you, and every one of those transactions is left with no coding at all. There is no undo.</p>
+      <p>Delete is therefore only available when <strong>both</strong> of these are true:</p>
+      <ul>
+        <li>Nothing is coded to the line &mdash; it reads "Nothing coded to it".</li>
+        <li>No part of the platform depends on it, by name or by record.</li>
+      </ul>
+      <p>Click a blocked Delete and the box tells you which of the two is stopping you, and what is using the line.</p>
+      <div class="callout">
+        <strong>To retire a line that is in use</strong>
+        Recode its costs and transactions onto another line first (the Transactions tab lets you change coding in place). Once it reads "Nothing coded to it", Delete unlocks.
+      </div>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="section-title">6. Changing a Money Group</div>
+    <div class="card">
+      <p>Pick Needs, Wants or the dash from the dropdown. It saves immediately, and an <strong>Undo</strong> button appears at the bottom of the screen for eight seconds if you picked the wrong one.</p>
+      <p>Needs and Wants are the budgeted half of personal money. Bucket-funded lines (Debt, Dreams, Fix, Future, Tax) are deliberately left blank &mdash; they are drawn from a pot rather than budgeted monthly, and giving one a Money Group would double-count it.</p>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="section-title">7. The health checks</div>
+    <div class="card">
+      <table class="tbl">
+        <tr><th>Check</th><th>What a failure means</th></tr>
+        <tr><td>Both lists loaded from Airtable</td><td>An empty list means the fetch failed, not that the table is empty. Hit Refresh.</td></tr>
+        <tr><td>No duplicate names</td><td>Two lines share a name, so anything matching by name picks whichever loaded first. Rename or delete one.</td></tr>
+        <tr><td>Report-critical names still present</td><td>A name the code looks for has gone from Airtable, probably renamed there directly. The matching report is showing zero right now.</td></tr>
+        <tr><td>ID-pinned sub-categories still present</td><td>A line the code points at by record has been deleted. The feature named in the detail is broken.</td></tr>
+        <tr><td>Money Group values valid</td><td>Something other than Needs or Wants is set, so the Wealth budget split ignores that line.</td></tr>
+        <tr><td>No unused lines cluttering the pickers</td><td>Amber, not red. Lists lines with nothing coded to them &mdash; fine if newly added, worth deleting if abandoned.</td></tr>
+      </table>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="section-title">8. If something goes wrong</div>
+    <div class="card">
+      <table class="tbl">
+        <tr><th>What you see</th><th>What to do</th></tr>
+        <tr><td>"Could not create/rename/delete" in red</td><td>The message carries Airtable's own reason. Nothing was saved. Fix the reason and try again.</td></tr>
+        <tr><td>A change does not appear on another tab</td><td>The lists reload automatically after every save. If a dropdown elsewhere still looks old, reload the page.</td></tr>
+        <tr><td>The page loads slowly the first time after a change</td><td>Expected. Saving clears the cached copy of the data on purpose, so the next load comes fresh from Airtable.</td></tr>
+        <tr><td>A P&amp;L or Wealth figure went to zero after someone edited Airtable directly</td><td>Check the "Report-critical names still present" health check &mdash; it names the line and the report.</td></tr>
+      </table>
+    </div>
+  </div>
+
+</div>
+</body>
+</html>

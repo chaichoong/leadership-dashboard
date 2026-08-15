@@ -574,7 +574,7 @@
     }
 
     const DASHBOARD_GROUP = ['overview', 'cfv'];
-    const ACCOUNTS_GROUP = ['income', 'ar-variable', 'costs', 'invoices', 'transactions', 'fintable'];
+    const ACCOUNTS_GROUP = ['income', 'ar-variable', 'costs', 'invoices', 'transactions', 'fintable', 'coa'];
 
     // How long an embedded page may sit unreloaded before the next visit
     // re-fetches it. Long enough that normal tab-hopping does not throw away
@@ -706,6 +706,10 @@ if (tabId === 'comms') lazyLoadFrame('commsFrame', 'follow-up');
         // Render Transactions on switch
         if (tabId === 'transactions') {
             if (typeof renderTransactionsTab === 'function') renderTransactionsTab();
+        }
+        // Render Chart of Accounts on switch
+        if (tabId === 'coa') {
+            if (typeof renderCoaTab === 'function') renderCoaTab();
         }
         // Render CEO Brief on switch
         if (tabId === 'ceo-brief') {
