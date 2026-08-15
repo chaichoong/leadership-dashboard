@@ -167,7 +167,12 @@ test.describe('Income buckets — spend drill-down', () => {
     // Child rows carry class wm-child-<parent row id>, so locate Debt's Spent row via
     // its parent rather than by ordinal — bucket sort order must not decide what we test.
     const rid = await parent.evaluate(tr => tr.nextElementSibling.className.replace('wm-child-', ''));
-    const spentRow = page.locator(`#wealthBuckets tr.wm-child-${rid}`).first();
+    // Locate Spent BY TEXT among the bucket's children, never by ordinal. Until
+    // 15 Aug 2026 this took .first() and assumed Spent led; PR #86 made the pot
+    // an actual balance, which put "Money in" first and left this asserting
+    // against the wrong row. What the test is really about is the card-leg
+    // arithmetic below, so it must not be sensitive to row order.
+    const spentRow = page.locator(`#wealthBuckets tr.wm-child-${rid}`, { hasText: 'Spent' }).first();
     await expect(spentRow).toContainText('Spent');
     const cell = spentRow.locator('td').nth(12);
     await expect(cell).toHaveText(/1,025/);
@@ -180,17 +185,36 @@ test.describe('Income buckets — spend drill-down', () => {
     await expect(overlay).toContainText('−£1,025.00');
   });
 
-  test('derived rows (money in, running balance) are not clickable', async ({ page }) => {
+  // Only Spent is transaction-backed. Money in is a percentage share of net cash
+  // flow and the pot is the cumulative of the two, so neither has a transaction
+  // list that would total to the figure shown — offering a drill on them would
+  // open a modal that cannot reconcile to the number clicked.
+  //
+  // Rewritten 15 Aug 2026. It used to look for a "Running balance" CHILD row;
+  // PR #86 made the pot an actual balance and moved it onto the PARENT row, so
+  // the locator matched nothing and the assertion passed against an empty set
+  // in one direction while failing in the other. The balance is still asserted
+  // here, on the row that now carries it.
+  test('derived rows (money in, the pot balance) are not clickable', async ({ page }) => {
     await loadDashboardWithFixtures(page, bucketFixtures(), 'wealth');
     await page.waitForTimeout(2500);
 
     await spentCell(page); // expands the bucket
 
-    const moneyIn = page.locator('#wealthBuckets tr', { hasText: 'Dreams (100%)' }).first();
+    // The parent row IS the balance now.
+    const potRow = page.locator('#wealthBuckets tr', { hasText: 'Dreams (100%)' }).first();
+    await expect(potRow).toBeVisible();
+    await expect(potRow.locator('td').nth(12)).not.toHaveAttribute('onclick', /wealthDrill/);
+
+    const rid = await potRow.evaluate(tr => tr.nextElementSibling.className.replace('wm-child-', ''));
+    const moneyIn = page.locator(`#wealthBuckets tr.wm-child-${rid}`, { hasText: 'Money in' }).first();
+    await expect(moneyIn).toBeVisible();
     await expect(moneyIn.locator('td').nth(12)).not.toHaveAttribute('onclick', /wealthDrill/);
 
-    const balance = page.locator('#wealthBuckets tr', { hasText: 'Running balance' }).first();
-    await expect(balance.locator('td').nth(12)).not.toHaveAttribute('onclick', /wealthDrill/);
+    // Control: the sibling Spent row IS clickable, so a locator that quietly
+    // matched nothing could not pass this block by default.
+    const spent = page.locator(`#wealthBuckets tr.wm-child-${rid}`, { hasText: 'Spent' }).first();
+    await expect(spent.locator('td').nth(12)).toHaveAttribute('onclick', /wealthDrill/);
   });
 
 });
