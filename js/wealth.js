@@ -146,11 +146,55 @@ function wealthLiveValue(name) {
 // Class" tick (Cash | Credit Card). Balance is live (magnitude — cards store "owed"
 // as a positive). This is the single source for what counts, replacing the old
 // hard-coded name lists. Tick/untick an account and it appears/disappears here.
+// How old is this account's bank feed, and is that old enough to say so? Same thresholds
+// as classifyFintableAccount in js/fintable.js: a feed is fine for a day, and past three
+// days it is not reporting. A never-synced account (blank date) is the worst case, not the
+// best, so it returns Infinity rather than falling through as fresh.
+//
+// This exists because net worth and the sync monitor disagreed about the same accounts.
+// The monitor deliberately ignores some feeds (FINTABLE_EXCLUDED in js/fintable.js), but
+// the Cash line on the Wealth tab counted every account ticked "Cash" regardless — so a
+// balance last updated in February was added to today's net worth with nothing marking it
+// as old. The balance is still the best figure available; it just must not read as live.
+function accountFeedAgeHours(a, now = Date.now()) {
+    const raw = getField(a, F.accLastUpdate);
+    if (!raw) return Infinity;
+    const t = new Date(raw).getTime();
+    if (isNaN(t)) return Infinity;
+    return (now - t) / (1000 * 60 * 60);
+}
+
+function accountStaleNote(hoursAgo) {
+    if (hoursAgo <= 72) return '';
+    if (hoursAgo === Infinity) return ' — no feed';
+    const days = Math.floor(hoursAgo / 24);
+    return days >= 1 ? ` — ${days}d stale` : ' — stale';
+}
+
+// Live cash / credit-card items straight from the Accounts table, by the "Net Worth
+// Class" tick (Cash | Credit Card). Balance is live (magnitude — cards store "owed"
+// as a positive). This is the single source for what counts, replacing the old
+// hard-coded name lists. Tick/untick an account and it appears/disappears here.
 function netWorthAccounts(cls) {
     const accts = (typeof allAccounts !== 'undefined' && allAccounts) ? allAccounts : [];
     return accts
         .filter(a => getField(a, F.accNetWorthClass) === cls)
-        .map(a => ({ name: getField(a, F.accountAlias) || '(account)', amount: Math.abs(Number(getField(a, F.accGBP)) || 0), id: a.id }))
+        .map(a => {
+            const hoursAgo = accountFeedAgeHours(a);
+            const name = getField(a, F.accountAlias) || '(account)';
+            // `name` stays EXACTLY the account alias — creditCardItems() matches it against
+            // Debt Terms names to decide whether a card already has a live account, and a
+            // decorated name would miss that match and count the same card twice. The
+            // staleness goes on a separate displayName used only for rendering. Plain text,
+            // not markup: row labels are rendered in several places, not all escaped.
+            return {
+                name,
+                displayName: name + accountStaleNote(hoursAgo),
+                amount: Math.abs(Number(getField(a, F.accGBP)) || 0),
+                id: a.id,
+                feedHoursAgo: hoursAgo,
+            };
+        })
         .sort((x, y) => y.amount - x.amount);
 }
 
@@ -819,7 +863,7 @@ function renderWealthContent(el, records, valRecs, debtRecs) {
         return null;
     });
     const itemRows = (items, goodUp) => (items && items.length)
-        ? items.slice().sort((a, b) => b.amount - a.amount).map(it => ({ label: it.name, goodUp, values: alKeys.map((k, i) => i === alLast ? it.amount : null) }))
+        ? items.slice().sort((a, b) => b.amount - a.amount).map(it => ({ label: it.displayName || it.name, goodUp, values: alKeys.map((k, i) => i === alLast ? it.amount : null) }))
         : undefined;
     const alRow = (label, cls, items, goodUp) => ({ label, goodUp, values: classVals(cls), items: itemRows(items, goodUp) });
     const totalVals = pick => alKeys.map((k, i) => { if (i === alLast) return pick(view); const p = periodByKey[k]; return p ? pick(p) : null; });

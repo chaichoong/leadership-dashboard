@@ -22,15 +22,19 @@
             'fldIyCsxvjoBqju3y'   // **Fintable User
         ];
 
-        const sixMonthsAgo = new Date();
-        sixMonthsAgo.setDate(sixMonthsAgo.getDate() - 183);
-
+        // NO staleness filter. This fetch used to drop anything whose last successful
+        // update was more than 183 days ago, and anything that had NEVER synced (a blank
+        // date fails a date comparison, so it was excluded rather than flagged as the
+        // worst case). That is precisely backwards for a sync monitor: the
+        // accounts hidden were the ones dead longest, so a feed that died in February
+        // quietly vanished from the page that exists to report dead feeds, and the monitor
+        // read as all-clear. classifyFintableAccount already handles a null lastSync
+        // (hoursAgo = Infinity -> 'critical'), so nothing downstream needs the filter.
         let allRecords = [];
         let offset = null;
         do {
             const url = new URL(`https://api.airtable.com/v0/${BASE_ID}/${ACCOUNTS_TABLE}`);
             fields.forEach(f => url.searchParams.append('fields[]', f));
-            url.searchParams.set('filterByFormula', `IS_AFTER({**Last Successful Update}, '${sixMonthsAgo.toISOString().split('T')[0]}')`);
             url.searchParams.set('sort[0][field]', '**Last Successful Update');
             url.searchParams.set('sort[0][direction]', 'desc');
             if (offset) url.searchParams.set('offset', offset);
@@ -42,6 +46,11 @@
             offset = data.offset || null;
         } while (offset);
 
+        // Control: an unfiltered read of a live table can never be empty. A zero here means
+        // the fetch broke (renamed table, bad field list, auth), which would otherwise
+        // render as a clean monitor with nothing to report — the same silent-zero trap that
+        // hid the dead feeds in the first place.
+        if (allRecords.length === 0) throw new Error('Accounts fetch returned zero rows — the accounts table is never empty, so this is a broken read, not a clean sync');
         return allRecords.filter(r => !FINTABLE_EXCLUDED.includes(r.fields['Account Alias'] || ''));
     }
 

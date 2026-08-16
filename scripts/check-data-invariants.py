@@ -283,6 +283,33 @@ INVARIANTS = [
                         "LEN({KPI Last Updated} & '') >= 0)"),
         "fields": ["Project Name", "KPI Name", "KPI Automated", "KPI Last Updated"],
     },
+    {
+        # The Site Map's "Update All Out-of-Sync SOPs" button writes a Pending row here
+        # and then told Kevin the work was "Processing". Nothing processes it: the SOP
+        # phase was absorbed into daily-ops and never wired back, so a request could sit
+        # Pending indefinitely behind a green tick. The button now says "waiting for a
+        # writer" (js/sitemap.js), and this makes the waiting audible: anything Pending
+        # for more than 48 hours is work that has been forgotten, not work in progress.
+        #
+        # A fixture test cannot see this — it is the age of real rows in a real table.
+        #
+        # NOTE ON THE CONTROL: today (16 Aug 2026) the table holds 19 rows and ZERO are
+        # Pending, so the control is legitimately empty and the run reports WAITING
+        # rather than BROKEN. The field_probe still catches a renamed field. Back-tested
+        # by swapping only the status term to 'Completed' — same fields, same date
+        # clause — which matched 18 of the 19 rows, so the formula fires when a row
+        # qualifies.
+        "name": "sop-queue-not-abandoned",
+        "table": "tbltuZz5Omrpo7t1x",  # SOP Update Queue
+        "incident": "Aug 2026 — the Site Map queued SOP updates nothing consumes and reported them as 'Processing'",
+        "asserts": "SOP request Pending => requested within the last 48 hours",
+        "violation": "AND({Status} = 'Pending', IS_BEFORE({Requested At}, DATEADD(NOW(), -48, 'hours')))",
+        "control": "{Status} = 'Pending'",
+        "control_means": "queued-but-unprocessed SOP requests (the only rows that can be abandoned)",
+        "field_probe": ("OR(LEN({Status} & '') >= 0, LEN({Requested At} & '') >= 0, "
+                        "LEN({Request} & '') >= 0)"),
+        "fields": ["Request", "Status", "Requested At", "Page ID"],
+    },
 ]
 
 
