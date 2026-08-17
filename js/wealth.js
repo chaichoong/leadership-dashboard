@@ -1465,14 +1465,17 @@ function wealthToggleRows(rid, td) {
     const caret = td.querySelector('.wm-caret'); if (caret) caret.textContent = shown ? '▾' : '▸';
 }
 // opts.leadHeader (string) adds a highlighted column right after the labels, fed by
-// each row's `lead` value (e.g. "In the pot" for buckets). opts.anchor controls the
-// % trends: 'completed' anchors on the last completed month (for flow data distorted
-// by the partial current month); otherwise the latest/current column is used.
+// each row's `lead` value (e.g. "In the pot" for buckets). opts.leadHeader2 adds a
+// second one fed by `lead2` — the buckets table uses the pair for "locked at last
+// month-end" vs "live right now". opts.anchor controls the % trends: 'completed'
+// anchors on the last completed month (for flow data distorted by the partial
+// current month); otherwise the latest/current column is used.
 function wealthMatrixCard(title, note, months, sections, opts) {
     opts = opts || {};
     const leadHeader = opts.leadHeader || null;
+    const leadHeader2 = opts.leadHeader2 || null;
     const stick = 'position:sticky;left:0;background:var(--bg-surface);z-index:1';
-    const colCount = months.length + 2 + (leadHeader ? 1 : 0);
+    const colCount = months.length + 2 + (leadHeader ? 1 : 0) + (leadHeader2 ? 1 : 0);
     const lastCol = months.length - 1;
     const refIdx = wealthCompletedIdx(months.map(m => m.key));
     const anchorIdx = opts.anchor === 'completed' ? refIdx : lastCol;
@@ -1482,7 +1485,10 @@ function wealthMatrixCard(title, note, months, sections, opts) {
         const isAnchor = i === anchorIdx;
         return `<th style="text-align:right;padding:6px 8px;font-weight:${isAnchor ? 'var(--fw-semibold)' : 'var(--fw-regular)'};color:${isAnchor ? 'var(--text-primary)' : 'var(--text-muted)'};white-space:nowrap;${colStyle(i)}">${escHtml(m.label)}${i === runningIdx ? ' <span style="font-size:8px;color:var(--text-muted)" title="Current month, still in progress">●</span>' : ''}</th>`;
     }).join('');
-    const leadHead = leadHeader ? `<th style="text-align:right;padding:6px 8px;font-weight:var(--fw-semibold);color:var(--text-primary);white-space:nowrap;background:var(--accent-soft)">${escHtml(leadHeader)}</th>` : '';
+    // Lead columns mirror the month palette: accent-soft = the settled figure (like
+    // the anchor month), bg-subtle = the in-progress one (like the ● current month).
+    const leadHead = (leadHeader ? `<th style="text-align:right;padding:6px 8px;font-weight:var(--fw-semibold);color:var(--text-primary);white-space:nowrap;background:var(--accent-soft)">${escHtml(leadHeader)}</th>` : '')
+        + (leadHeader2 ? `<th style="text-align:right;padding:6px 8px;font-weight:var(--fw-semibold);color:var(--text-primary);white-space:nowrap;background:var(--bg-subtle)">${escHtml(leadHeader2)}</th>` : '');
 
     // A row opts into the drill-down by carrying `drill` (an array of sub-category
     // names). Rows without it — net worth, buckets, ratios — render exactly as before.
@@ -1527,15 +1533,17 @@ function wealthMatrixCard(title, note, months, sections, opts) {
         const up = pct > 0, good = goodUp ? up : !up;
         return `<td style="text-align:right;padding:5px 8px;white-space:nowrap;font-weight:var(--fw-semibold);color:${good ? 'var(--success)' : 'var(--danger)'}">${up ? '▲' : '▼'} ${Math.abs(Math.round(pct))}%</td>`;
     };
-    const leadCell = (row, isChild) => {
-        if (!leadHeader) return '';
-        // A child row deliberately has no lead value. A PARENT with none has nothing to
-        // report yet (a bucket that starts after the anchor month) — show a dash, so it
-        // reads as "not applicable" rather than as a cell that failed to render.
-        if (isChild) return `<td style="background:var(--accent-soft)"></td>`;
-        if (row.lead == null) return `<td style="text-align:right;padding:5px 8px;background:var(--accent-soft);color:var(--text-muted)">–</td>`;
-        return `<td style="text-align:right;padding:5px 8px;white-space:nowrap;background:var(--accent-soft);font-weight:var(--fw-semibold);color:${row.lead < 0 ? 'var(--danger)' : 'var(--text-primary)'}">${fmt0(row.lead)}</td>`;
+    // A child row deliberately has no lead value. A PARENT with none has nothing to
+    // report yet (a bucket that starts after the anchor month) — show a dash, so it
+    // reads as "not applicable" rather than as a cell that failed to render.
+    const oneLead = (v, isChild, bg) => {
+        if (isChild) return `<td style="background:${bg}"></td>`;
+        if (v == null) return `<td style="text-align:right;padding:5px 8px;background:${bg};color:var(--text-muted)">–</td>`;
+        return `<td style="text-align:right;padding:5px 8px;white-space:nowrap;background:${bg};font-weight:var(--fw-semibold);color:${v < 0 ? 'var(--danger)' : 'var(--text-primary)'}">${fmt0(v)}</td>`;
     };
+    const leadCell = (row, isChild) =>
+        (leadHeader ? oneLead(row.lead, isChild, 'var(--accent-soft)') : '')
+        + (leadHeader2 ? oneLead(row.lead2, isChild, 'var(--bg-subtle)') : '');
     const renderRow = (row, isChild, parentRid) => {
         const goodUp = row.goodUp !== false;
         const vals = row.values;
@@ -2861,13 +2869,18 @@ function renderBuckets(el, override) {
     const buckets = list.filter(b => b.name);
     const months = wealthMonths12();
     const keys = months.map(m => m.key);
-    // "In the pot" reads the CURRENT month — the balance as of the last bank-feed
-    // sync, so Kevin can budget day by day (his ruling, 15 Aug 2026). It briefly read
-    // the last completed month instead, which meant the headline froze at month-end
-    // and nothing he spent moved it until the month rolled over — unusable as a daily
-    // budgeting figure. The % trend columns still anchor on the last completed month
-    // (anchor:'completed' below): a part-month distorts trends but IS the live pot.
-    const potIdx = keys.length - 1;
+    // TWO headline figures per pot (Kevin's ruling, 15 Aug 2026):
+    //   · "In the pot"  — the hard figure, locked at the end of the last completed
+    //     month. Stable all month; at each rollover the live figure becomes this one.
+    //   · "Right now"   — the live balance: the locked figure plus this month's share
+    //     of net cash flow SO FAR minus this month's reconciled spend, fluctuating
+    //     with every bank sync. Signed, so a shortfall shows as it happens — which
+    //     also keeps the 14 Aug deficit-drawdown ruling intact with no month-end jump.
+    // One or the other has been tried alone and each failed a real need: locked-only
+    // froze daily budgeting (#91's complaint), live-only left no stable reference and
+    // its early-month dip read as an error (this fix's complaint). Both, labelled.
+    const lockIdx = wealthCompletedIdx(keys);
+    const liveIdx = keys.length - 1;
     const totalPct = buckets.reduce((s, b) => s + (Number(b.pct) || 0), 0);
 
     // The RUNNING BALANCE is the headline row — that is the question the section
@@ -2882,7 +2895,8 @@ function renderBuckets(el, override) {
         return {
             label: `${b.name} (${pct}%)`,
             goodUp: true,
-            lead: bb.balance[potIdx],
+            lead: bb.balance[lockIdx],
+            lead2: bb.balance[liveIdx],
             values: bb.balance,
             items: [
                 { label: 'Money in', goodUp: true, values: bb.appor },
@@ -2900,7 +2914,8 @@ function renderBuckets(el, override) {
     };
     rows.push({
         label: 'All buckets', goodUp: true, bold: true, border: '1px solid var(--border-default)',
-        lead: sumAt(b => b.balance, potIdx),
+        lead: sumAt(b => b.balance, lockIdx),
+        lead2: sumAt(b => b.balance, liveIdx),
         values: keys.map((_, i) => sumAt(b => b.balance, i)),
         items: [{ label: 'Money in', goodUp: true, values: keys.map((_, i) => sumAt(b => b.appor, i)) }],
     });
@@ -2910,8 +2925,8 @@ function renderBuckets(el, override) {
         : starts.length === 1
             ? `Every pot runs from <strong>${escHtml(wealthMonthLabel(starts[0]))}</strong>.`
             : `Each pot runs from its own start date (${escHtml(starts.map(k => wealthMonthLabel(k)).join(', '))}).`;
-    const note = `Each row is a bucket and what is actually sitting in it, month by month. The highlighted "In the pot today" column is the live balance right now — it includes this month's money in and spending so far, and it is as fresh as your last bank sync (see the bar at the top). Early in the month it can dip before your income lands and recover afterwards; that is your true day-by-day position. ${startNote} Anything before a pot's start date is ignored on purpose, so an old overspend is not dragged forward, and months before it show "–" rather than £0. Click a bucket <em>name</em> to open its workings: <strong>Money in</strong> (its share of that month's net cash flow) and <strong>Spent</strong> (click any figure to see the transactions behind it). A month with negative cash flow takes money back OUT of every pot by the same share, because the shortfall has to come from somewhere. A <em>negative</em> figure on the Spent row is money coming back, a refund or a bounced direct debit, and it cancels the payment it reverses. A pot can go below £0: that means you have spent more from it than you have set aside, and it carries forward until later months make it back. Money in and the balance are worked out from your net cash flow, not from a list of transactions, so they are not clickable. Drill the Net cash flow row in the table above instead. The current month (●) is still in progress.${totalPct !== 100 ? ` Percentages total ${totalPct}% (aim for 100%).` : ''}`;
-    el.innerHTML = wealthMatrixCard('Income buckets — rolling 12 months', note, months, [{ header: '', rows }], { leadHeader: 'In the pot today', anchor: 'completed' });
+    const note = `Each row is a bucket with two headline figures. <strong>In the pot</strong> is the hard figure, locked at the end of ${escHtml(wealthMonthLabel(keys[lockIdx]))} — it does not move during the month. <strong>Right now</strong> is the live one: that locked figure plus this month's share of your net cash flow so far, minus this month's spending as it reconciles. It moves day by day from both sides and is as fresh as your last bank sync (see the bar at the top). Early in the month it can sit below "In the pot" while spending lands before income; that is your real position, not an error. At the end of the month the live figure becomes the new locked one and the cycle restarts. ${startNote} Anything before a pot's start date is ignored on purpose, so an old overspend is not dragged forward, and months before it show "–" rather than £0. Click a bucket <em>name</em> to open its workings: <strong>Money in</strong> (its share of that month's net cash flow) and <strong>Spent</strong> (click any figure to see the transactions behind it). A month with negative cash flow takes money back OUT of every pot by the same share, because the shortfall has to come from somewhere. A <em>negative</em> figure on the Spent row is money coming back, a refund or a bounced direct debit, and it cancels the payment it reverses. A pot can go below £0: that means you have spent more from it than you have set aside, and it carries forward until later months make it back. Money in and the balance are worked out from your net cash flow, not from a list of transactions, so they are not clickable. Drill the Net cash flow row in the table above instead. The current month (●) is still in progress.${totalPct !== 100 ? ` Percentages total ${totalPct}% (aim for 100%).` : ''}`;
+    el.innerHTML = wealthMatrixCard('Income buckets — rolling 12 months', note, months, [{ header: '', rows }], { leadHeader: 'In the pot', leadHeader2: 'Right now ●', anchor: 'completed' });
 }
 
 // Transactions behind the last buildBucketBalances run, indexed bucket name → month
