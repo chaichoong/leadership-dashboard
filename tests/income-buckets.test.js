@@ -264,7 +264,10 @@ describe('Income buckets — category mapping', () => {
 });
 
 describe('Income buckets — what the grid shows', () => {
-  it('"In the pot" reads the last COMPLETED month, not the part-finished one', () => {
+  // Kevin's ruling, 15 Aug 2026: the headline is the LIVE balance including the
+  // current part-month, so he can budget day by day. It briefly read the last
+  // completed month instead, which froze the figure between month-ends.
+  it('"In the pot today" reads the CURRENT month, so today\'s spending moves it', () => {
     const s = loadEngine();
     const now = new Date();
     const key = (back) => {
@@ -277,14 +280,22 @@ describe('Income buckets — what the grid shows', () => {
       tx(s, { date: key(0) + '-05', amount: 1000, subId: 'recIncome' }),
     ];
     s.__setData(t, subRecords(s), [], null);
+    const leadOf = (html) => {
+      const m = html.match(/background:var\(--accent-soft\);font-weight:var\(--fw-semibold\);color:[^"]*">([^<]*)</);
+      return m && m[1];
+    };
     const el = { innerHTML: '' };
-    s.renderBuckets(el, [{ name: 'Dreams', pct: 50, start: key(2) + '-01', opening: 0 }]);
-    // Last completed month holds £500; the current month would make it £1,000. The
-    // headline must agree with the column the table highlights.
-    expect(el.innerHTML).toContain('In the pot');
-    // The lead cell carries the highlighted background; it must hold £500, not £1,000.
-    const lead = el.innerHTML.match(/background:var\(--accent-soft\);font-weight:var\(--fw-semibold\);color:[^"]*">([^<]*)</);
-    expect(lead && lead[1]).toBe('£500');
+    const bucket = [{ name: 'Dreams', pct: 50, start: key(2) + '-01', opening: 0 }];
+    s.renderBuckets(el, bucket);
+    expect(el.innerHTML).toContain('In the pot today');
+    // Completed month holds £500; with the current month's £500 in, today = £1,000.
+    expect(leadOf(el.innerHTML)).toBe('£1,000');
+    // THE DAILY GUARD: a spend synced TODAY must move the headline the next render.
+    t.push(tx(s, { date: key(0) + '-15', amount: -300, subId: 'recTravel' }));
+    s.__setData(t, subRecords(s), [], null);
+    const el2 = { innerHTML: '' };
+    s.renderBuckets(el2, bucket);
+    expect(leadOf(el2.innerHTML)).toBe('£700');
   });
 
   it('the balance is the headline row and the workings sit underneath it', () => {

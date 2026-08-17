@@ -2861,12 +2861,13 @@ function renderBuckets(el, override) {
     const buckets = list.filter(b => b.name);
     const months = wealthMonths12();
     const keys = months.map(m => m.key);
-    // "In the pot" reads the last COMPLETED month, the same column the table
-    // highlights and anchors its trends on. It used to read the current month, so the
-    // headline figure silently included a part-month's allocation (August 2026 was
-    // 14 days old and had already credited the Debt pot with £3,814) while the
-    // highlighted column showed July. Two different months in one row.
-    const potIdx = wealthCompletedIdx(keys);
+    // "In the pot" reads the CURRENT month — the balance as of the last bank-feed
+    // sync, so Kevin can budget day by day (his ruling, 15 Aug 2026). It briefly read
+    // the last completed month instead, which meant the headline froze at month-end
+    // and nothing he spent moved it until the month rolled over — unusable as a daily
+    // budgeting figure. The % trend columns still anchor on the last completed month
+    // (anchor:'completed' below): a part-month distorts trends but IS the live pot.
+    const potIdx = keys.length - 1;
     const totalPct = buckets.reduce((s, b) => s + (Number(b.pct) || 0), 0);
 
     // The RUNNING BALANCE is the headline row — that is the question the section
@@ -2909,8 +2910,8 @@ function renderBuckets(el, override) {
         : starts.length === 1
             ? `Every pot runs from <strong>${escHtml(wealthMonthLabel(starts[0]))}</strong>.`
             : `Each pot runs from its own start date (${escHtml(starts.map(k => wealthMonthLabel(k)).join(', '))}).`;
-    const note = `Each row is a bucket and what is actually sitting in it, month by month. The highlighted "In the pot" column is the balance at the end of the last completed month. ${startNote} Anything before a pot's start date is ignored on purpose, so an old overspend is not dragged forward, and months before it show "–" rather than £0. Click a bucket <em>name</em> to open its workings: <strong>Money in</strong> (its share of that month's net cash flow) and <strong>Spent</strong> (click any figure to see the transactions behind it). A month with negative cash flow takes money back OUT of every pot by the same share, because the shortfall has to come from somewhere. A <em>negative</em> figure on the Spent row is money coming back, a refund or a bounced direct debit, and it cancels the payment it reverses. A pot can go below £0: that means you have spent more from it than you have set aside, and it carries forward until later months make it back. Money in and the balance are worked out from your net cash flow, not from a list of transactions, so they are not clickable. Drill the Net cash flow row in the table above instead. The current month (●) is still in progress.${totalPct !== 100 ? ` Percentages total ${totalPct}% (aim for 100%).` : ''}`;
-    el.innerHTML = wealthMatrixCard('Income buckets — rolling 12 months', note, months, [{ header: '', rows }], { leadHeader: 'In the pot', anchor: 'completed' });
+    const note = `Each row is a bucket and what is actually sitting in it, month by month. The highlighted "In the pot today" column is the live balance right now — it includes this month's money in and spending so far, and it is as fresh as your last bank sync (see the bar at the top). Early in the month it can dip before your income lands and recover afterwards; that is your true day-by-day position. ${startNote} Anything before a pot's start date is ignored on purpose, so an old overspend is not dragged forward, and months before it show "–" rather than £0. Click a bucket <em>name</em> to open its workings: <strong>Money in</strong> (its share of that month's net cash flow) and <strong>Spent</strong> (click any figure to see the transactions behind it). A month with negative cash flow takes money back OUT of every pot by the same share, because the shortfall has to come from somewhere. A <em>negative</em> figure on the Spent row is money coming back, a refund or a bounced direct debit, and it cancels the payment it reverses. A pot can go below £0: that means you have spent more from it than you have set aside, and it carries forward until later months make it back. Money in and the balance are worked out from your net cash flow, not from a list of transactions, so they are not clickable. Drill the Net cash flow row in the table above instead. The current month (●) is still in progress.${totalPct !== 100 ? ` Percentages total ${totalPct}% (aim for 100%).` : ''}`;
+    el.innerHTML = wealthMatrixCard('Income buckets — rolling 12 months', note, months, [{ header: '', rows }], { leadHeader: 'In the pot today', anchor: 'completed' });
 }
 
 // Transactions behind the last buildBucketBalances run, indexed bucket name → month
