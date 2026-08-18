@@ -2617,7 +2617,13 @@
         attachments: 'fldEbs9cscRr8elcw',
         maintenance: 'fldSEUvVA98as1HW6',
         property: 'fldZKFvEpJ6NZeFKz',
-        createdDate: 'fldRpwiBGqEVaN20H'
+        createdDate: 'fldRpwiBGqEVaN20H',
+        // Completion Date. reopenAirtableTask below MUST null this in the same
+        // PATCH that sets Status back to Today, or a task that was completed
+        // once keeps counting as completed work for ever (finding
+        // 20260818-prod-e2e-sweep-198 — this was the FIFTH uncovered reopen
+        // path, found by the scan that replaced the hardcoded three-file test).
+        completion: 'fldFOi1SwEKuJRmdN'
     };
     const AIRTABLE_ASSIGNEE_DEFAULT = 'usrP7K5pmPSdVVgTN'; // Mica Albovias
     const AIRTABLE_ASSIGNEE_KEVIN = 'usrKkopUJSGsBhWMD'; // Kevin Brittain
@@ -3082,6 +3088,9 @@ Respond with ONLY the JSON object, no markdown.`;
                     body: JSON.stringify({
                         fields: {
                             [AIRTABLE_FIELDS.status]: 'Today',
+                            // Reopening clears the completion stamp. Same rule
+                            // as the Tasks page and the Slack approvals worker.
+                            [AIRTABLE_FIELDS.completion]: null,
                             [AIRTABLE_FIELDS.assignee]: newAssigneeId ? { id: newAssigneeId } : null,
                             [AIRTABLE_COLLABORATORS_FIELD]: collaboratorIds,
                             ...(opts.teamMemberIds !== undefined ? { [AIRTABLE_TEAM_MEMBER_FIELD]: opts.teamMemberIds } : {}),

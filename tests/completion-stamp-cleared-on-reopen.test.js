@@ -20,7 +20,8 @@
 // Python) and they cannot share code, so it is asserted three times here.
 import { describe, it, expect } from 'vitest';
 import { execFileSync } from 'child_process';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
+import { join } from 'node:path';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 
@@ -39,6 +40,124 @@ function reopenBranch(src, startMarker) {
     const end = tail.indexOf('\n  }');
     return end === -1 ? tail.slice(0, 800) : tail.slice(0, end);
 }
+
+// ── THE SCAN (18 Aug 2026, finding 20260818-prod-e2e-sweep-198) ──────────
+//
+// The three describes below were the whole test, and they named three files.
+// A FOURTH path (scripts/slack-automation/contractor-bot.js) shipped with the
+// bug and this file could not see it, by construction: it was not on the list.
+// Naming the paths is what made the regression invisible.
+//
+// So the list is now DERIVED. Any file that writes the Tasks Status field is
+// found by its field id, and every write that moves a task to a non-Completed
+// status on an EXISTING record must clear the stamp in the same call. A fifth
+// and sixth path fail this automatically — which is exactly what happened when
+// it was first run: follow-up.html's reopenAirtableTask, a function whose own
+// comment says "Reopen a completed Airtable task", was silently leaving the
+// stamp behind.
+//
+// CREATES are exempt and the exemption is stated, not silent: a record that
+// does not exist yet has no stamp to clear. A site counts as an update only
+// when the write carries a record id — a PATCH, updateTask(), patchTask(),
+// patch_task(). Anything else is a create.
+describe('every reopen path clears the completion stamp (derived, not listed)', () => {
+    const STATUS_FIELD = 'fldx4qCw17UfrKpaN';
+    const COMPLETION_FIELD = 'fldFOi1SwEKuJRmdN';
+    // How far either side of the status write the clear may sit. Wide enough
+    // for a multi-line fields object, tight enough that an unrelated mention
+    // elsewhere in a 8,000-line file cannot vouch for it.
+    const WINDOW = 400;
+    const SKIP_DIRS = new Set(['node_modules', '.git', '.claude', 'monitoring', 'tests', 'docs']);
+
+    function sources(dir = ROOT, out = []) {
+        for (const e of readdirSync(dir, { withFileTypes: true })) {
+            if (e.name.startsWith('.') && e.name !== '.claude') {
+                if (SKIP_DIRS.has(e.name) || e.name.startsWith('.')) continue;
+            }
+            if (SKIP_DIRS.has(e.name)) continue;
+            const full = join(dir, e.name);
+            if (e.isDirectory()) sources(full, out);
+            else if (/\.(js|html|py)$/.test(e.name)) out.push(full);
+        }
+        return out;
+    }
+
+    // Which identifier in this file is the Tasks field map? Whichever object
+    // literal the status field id was declared inside. Found, not assumed, so
+    // a new file using a new name for the map is covered on day one.
+    function taskFieldMaps(src) {
+        const maps = new Set();
+        const decl = /(?:const|let|var)?\s*([A-Za-z_$][\w$]*)\s*=\s*\{/g;
+        let at = src.indexOf(STATUS_FIELD);
+        while (at !== -1) {
+            const head = src.slice(0, at);
+            let m, last = null;
+            decl.lastIndex = 0;
+            while ((m = decl.exec(head)) !== null) last = m[1];
+            if (last) maps.add(last);
+            at = src.indexOf(STATUS_FIELD, at + 1);
+        }
+        return [...maps];
+    }
+
+    const UPDATE_HINT = /PATCH|updateTask\s*\(|patchTask\s*\(|patch_task\s*\(|airtablePatch\s*\(/;
+
+    function offenders() {
+        const bad = [];
+        for (const file of sources()) {
+            const src = readFileSync(file, 'utf8');
+            if (!src.includes(STATUS_FIELD)) continue;
+            for (const map of taskFieldMaps(src)) {
+                const write = new RegExp(
+                    map.replace(/[$]/g, '\\$&') + "\\.status\\]\\s*[:=]\\s*['\"]([A-Za-z ]+)['\"]", 'g');
+                let m;
+                while ((m = write.exec(src)) !== null) {
+                    if (m[1] === 'Completed') continue;
+                    const win = src.slice(Math.max(0, m.index - WINDOW), m.index + m[0].length + WINDOW);
+                    if (!UPDATE_HINT.test(win)) continue;   // a create — nothing to clear
+                    // The clear must be a clear. A nearby `completion = now`
+                    // on the SIBLING reject branch sits inside the window and
+                    // would otherwise vouch for a reopen that stamps nothing —
+                    // caught while back-testing this against approvals.js.
+                    const clearRe = new RegExp(
+                        '(?:' + map.replace(/[$]/g, '\\$&') + '\\.completion|' + COMPLETION_FIELD +
+                        ")['\"]?\\]?\\s*[:=]\\s*(?:null|None)", 'i');
+                    const cleared = clearRe.test(win);
+                    if (cleared) continue;
+                    const line = src.slice(0, m.index).split('\n').length;
+                    bad.push(`${file.replace(ROOT + '/', '')}:${line} sets Status='${m[1]}' on an existing record without clearing the completion stamp`);
+                }
+            }
+        }
+        return bad;
+    }
+
+    it('no code path moves a task off Completed and leaves the stamp behind', () => {
+        const bad = offenders();
+        expect(bad, `Reopen paths that keep a stale completion stamp:\n  ${bad.join('\n  ')}\n\n` +
+            'Set the completion field to null in the SAME write as the status change. ' +
+            'If this really is a create, it needs no clear — make that obvious in the code.'
+        ).toEqual([]);
+    });
+
+    it('the scan can actually find something — it is not matching nothing', () => {
+        // THE CONTROL. A regex typo would return zero offenders and read as a
+        // permanent pass, which is the failure mode this whole file is about.
+        // Prove the scan sees the real write sites before trusting an empty list.
+        let seen = 0;
+        for (const file of sources()) {
+            const src = readFileSync(file, 'utf8');
+            if (!src.includes(STATUS_FIELD)) continue;
+            for (const map of taskFieldMaps(src)) {
+                const write = new RegExp(
+                    map.replace(/[$]/g, '\\$&') + "\\.status\\]\\s*[:=]\\s*['\"][A-Za-z ]+['\"]", 'g');
+                seen += (src.match(write) || []).length;
+            }
+        }
+        expect(seen, 'the scan matched no status writes at all — the pattern is broken')
+            .toBeGreaterThan(10);
+    });
+});
 
 describe('Tasks page: approving a task clears its completion stamp', () => {
     const src = read('os/tasks/index.html');

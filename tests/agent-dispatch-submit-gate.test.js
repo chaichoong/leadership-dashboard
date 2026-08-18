@@ -194,7 +194,51 @@ describe('agent-dispatch submit gate', () => {
       expect(written).toContain('Carrying this out will involve');
     });
 
-    it('requires the SAME marker the two approval renderers parse', () => {
+    // ── A PROMISE TO SEND MUST BE Correspondence (20260818-agent-dispatch-203) ──
+  //
+  // Tasks were submitted as `--type Drafting` with a closing line saying the
+  // email would go out from Kevin's Gmail. Kevin read that, approved it, and
+  // send-email.py then refused the carry-out because it only sends
+  // Correspondence. The contract is free to fix at draft time and expensive
+  // after a decision has been made on it.
+  describe('closing line that promises a send', () => {
+    it('refuses a Drafting submit whose closing line says it sends the email', () => {
+      const r = submit({ type: 'Drafting',
+        output: `${LONG}\n\n**Carrying this out will involve:** sending the email to the council from Kevin's Gmail.` });
+      expect(r.refused, 'a Drafting task promised a send and was accepted').toBe(true);
+      expect(r.error).toMatch(/Correspondence/);
+      expect(r.captured.fields, 'a refused submit still wrote to Airtable').toBeUndefined();
+    });
+
+    it('accepts the same words once the type is Correspondence', () => {
+      const email = ['TO: council@example.com', 'SUBJECT: Account 123', '---',
+        'Dear Sir,', '', 'x'.repeat(300), '',
+        "**Carrying this out will involve:** sending the email to the council from Kevin's Gmail."].join('\n');
+      const r = submit({ type: 'Correspondence', output: email });
+      expect(r.refused, r.error).toBe(false);
+    });
+
+    it('does not refuse an analysis that merely DISCUSSES email', () => {
+      // The gate reads the closing line only. Refusing on any mention of email
+      // anywhere would block most analysis work and get itself worked around.
+      const r = submit({ type: 'Analysis',
+        output: `The council sends the email every month, which is why the arrears look odd. ${LONG}\n\n**Carrying this out will involve:** updating the arrears note on the tenancy record.` });
+      expect(r.refused, r.error).toBe(false);
+    });
+
+    it('catches "email it" phrasing too, not just "send the email"', () => {
+      const r = submit({ type: 'Admin',
+        output: `${LONG}\n\n**Carrying this out will involve:** emailing it to the managing agent today.` });
+      expect(r.refused).toBe(true);
+    });
+
+    it('leaves a short output alone, which carries no closing line at all', () => {
+      const r = submit({ type: 'Admin', output: 'Sending the email to the council.' });
+      expect(r.refused, r.error).toBe(false);
+    });
+  });
+
+  it('requires the SAME marker the two approval renderers parse', () => {
       // One pattern, so what submit demands and what the box reads cannot drift.
       // tests/approval-summary.test.js holds the renderers to this shape.
       const src = execFileSync('cat', [DISPATCH], { encoding: 'utf8' });
