@@ -19,8 +19,8 @@
 
     // ── Page & SOP Version Registry ──
     const PAGE_REGISTRY = [
-        { id: 'overview',    name: 'Leadership Dashboard',           icon: '📊', pageVer: '2.63', sopFile: 'sop.html',                   sopVer: '2.9', standalone: 'index.html#overview' },
-        { id: 'os-strategy', name: 'Objective & Strategy',           icon: '🎯', pageVer: '1.35', sopFile: 'os/strategy/sop.html',       sopVer: '1.0', standalone: 'os/strategy/index.html' },
+        { id: 'overview',    name: 'Leadership Dashboard',           icon: '📊', pageVer: '2.64', sopFile: 'sop.html',                   sopVer: '2.9', standalone: 'index.html#overview' },
+        { id: 'os-strategy', name: 'Objective & Strategy',           icon: '🎯', pageVer: '1.36', sopFile: 'os/strategy/sop.html',       sopVer: '1.0', standalone: 'os/strategy/index.html' },
         { id: 'tasks',       name: 'Tasks & Projects',   icon: '✅', pageVer: '1.131', sopFile: 'os/tasks/sop.html',             sopVer: '1.3', standalone: 'os/tasks/index.html' },
         { id: 'cfv',        name: 'CFVs',                          icon: '🚨', pageVer: '1.33', sopFile: 'sop-cfvs.html',               sopVer: '1.6', standalone: 'index.html#cfv' },
         { id: 'ceo-brief',  name: 'CEO Brief',                     icon: '☀️', pageVer: '1.0', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#ceo-brief' },
@@ -43,7 +43,7 @@
         { id: 'kpi-library', name: 'KPI Library', icon: '📚', pageVer: '1.5', sopFile: '', sopVer: '1.0', standalone: 'index.html#kpi-library', adminOnly: true },
         { id: 'fintable',  name: 'Accounts',                       icon: '🏦', pageVer: '1.8', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#fintable' },
         { id: 'systemisation', name: 'Systemisation',              icon: '⚙️', pageVer: '1.6', sopFile: 'guides/systemisation.html',    sopVer: '1.0', standalone: 'os/systemisation/index.html' },
-        { id: 'os-team',    name: 'Team Members',                  icon: '👥', pageVer: '1.13', sopFile: '',                            sopVer: '1.0', standalone: 'os/team/index.html' },
+        { id: 'os-team',    name: 'Team Members',                  icon: '👥', pageVer: '1.14', sopFile: '',                            sopVer: '1.0', standalone: 'os/team/index.html' },
         // pageVer corrected by hand 2026-08-06: the auto-bump never fired for this page
         // (crm-supabase.html was missing from the workflow `paths:` filter), so 1.0 was
         // stale — the CRM gained a 14-step interactive walkthrough on 2026-08-04 (319b438).
@@ -376,6 +376,27 @@
     // The six classes, split into assets vs liabilities.
     const NW_ASSET_CLASSES = ['Cash', 'Real Estate', 'Investments', 'Businesses'];
     const NW_LIABILITY_CLASSES = ['Credit Cards', 'Loans', 'Mortgages'];
+
+    // ── Personal money: identified by the "Personal" name prefix ────────────────
+    // The Chart of Accounts marks personal money with a "Personal" prefix on BOTH
+    // sides: 3 of the 10 categories (Personal Income, Personal Expense Tax
+    // Deductible, Personal Expense Not Deductible) and 17 of the 49 sub-categories.
+    //
+    // The name is the ONLY available signal. Sub-categories carry no link to a
+    // parent category in Airtable (schema read 2026-08-18), so nothing structural
+    // says "this is personal". Verified the same day: no business-side category or
+    // sub-category starts with "Personal", so the prefix identifies personal money
+    // on its own with no false positives.
+    //
+    // Rename a Personal-prefixed entry away from the prefix and the reconciliation
+    // auto-switch below stops firing for it — silently. That is the same name
+    // coupling COA_EXTRA_PROTECTED documents further down this file.
+    //
+    // The word boundary matters: "Personal Health" matches, "Personalisation"
+    // does not.
+    function isPersonalCoaName(name) {
+        return /^personal\b/i.test(String(name || '').trim());
+    }
 
     // ── Budgeted personal sub-categories (Chart of Accounts - Sub Categories) ────
     // The personal-expense sub-categories that carry a MONTHLY BUDGET: Needs and
@@ -943,6 +964,9 @@
         subMaint:     'recWomXYQ3XTgMdrr',
         subOpexLabour:'rec7EdEwWXk2cQ0PG',
         subCOGSLabour:'rec8ArDC6YbfOJydg',
+        // The Personal business entity. Pinned by record ID so the reconciliation
+        // auto-switch survives a rename of the business itself.
+        bizPersonal:  'reclAPC2vMx2Umuzb',
     };
 
     // Payment status choice IDs
