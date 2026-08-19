@@ -58,7 +58,32 @@ Filing a finding IS your fix. Do not apologise for not fixing it, and do not
 describe it as blocked. The queue is the route.
 
 
-Check the Google Drive Post Inbox folder ("/Users/kevinbrittain/Library/CloudStorage/GoogleDrive-kevin@runpreneur.org.uk/My Drive/Post Inbox") for unprocessed PDF files. If none are found, report "No new scanned post to process" and exit.
+## STEP 0 — Is the pipe being fed? (run this FIRST, every time)
+
+```
+cd /Users/kevinbrittain/Projects/leadership-dashboard
+python3 scripts/post-inbox-absence.py
+```
+
+- **exit 0** — post was scanned recently. Carry on below.
+- **exit 1** — nothing has been scanned for two weeks or more. **Put the printed
+  message at the TOP of your report and DM it to Kevin.** This is the finding,
+  not a footnote: an empty inbox is only good news when somebody is feeding it.
+- **exit 2** — the folder is missing or unreadable. Report that you could not
+  tell. Never report "no post" on an exit 2.
+
+Why this comes first (16 Aug 2026, finding 20260818-post-manager-weekly-214):
+this phase fires when a PDF appears in Google Drive, and post arriving in the
+real world does not put one there. From 3 Jul to 16 Aug it ran every week and
+said "No new scanned post to process" every week — true about the folder,
+silent about the post. The scan on 16 Aug held 29 documents dated 26 Jun to
+30 Jul, and by then a 7-day Utilita demand, a 14-day Companies House strike-off
+window, a 14-day charging-order reconsideration window and a 3 Aug BW Legal
+deadline had all closed unread.
+
+## STEP 1 — Process what is there
+
+Check the Google Drive Post Inbox folder ("/Users/kevinbrittain/Library/CloudStorage/GoogleDrive-kevin@runpreneur.org.uk/My Drive/Post Inbox") for unprocessed PDF files. If none are found, report "No new scanned post to process" **together with the STEP 0 result** — never on its own — and exit.
 
 If PDFs are found, process each one through this pipeline:
 

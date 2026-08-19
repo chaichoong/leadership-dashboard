@@ -33,6 +33,14 @@ FORMAT
 A tier-1 banner may sit above the headers. It is stripped before parsing and
 never reaches the email.
 
+agent-dispatch.py also MANDATES a closing "Carrying this out will involve:"
+line on every submit — it is what Kevin's approval box leads with. That line is
+a note to Kevin about the action, not a sentence in the letter, so it is
+stripped from the body here for the same reason the banner is. Before 19 Aug
+2026 it was not, which meant the only route to sending five approved creditor
+and Companies House emails would have posted the marker verbatim to the
+recipient (finding 20260819-agent-dispatch-237).
+
 Errors raise EmailFormatError. Callers decide whether that is a sys.exit (the
 send path) or a refused submit (the dispatch path). Strict on purpose: a
 malformed block is a refusal, never a guess, because guessing here means
@@ -69,6 +77,50 @@ def strip_tier1_banner(output):
     if text.startswith(TIER1_BANNER):
         text = text[len(TIER1_BANNER):]
     return text.lstrip("\n").lstrip()
+
+
+# ─── THE MANDATORY CLOSING LINE ──────────────────────────────────────
+#
+# agent-dispatch.py refuses any submit over SUMMARY_MIN_CHARS that does not end
+# with this line, and the approval renderers read it back out. Defined HERE, in
+# the shared contract, for the same reason TIER1_BANNER is: the string that is
+# required, the string that is read, and the string that is stripped must be one
+# string. agent-dispatch.py imports these rather than declaring its own.
+CARRY_OUT_MARKER = "**Carrying this out will involve:**"
+CARRY_OUT_RE = re.compile(r"\*{0,2}carrying this out will involve:?\*{0,2}", re.I)
+
+# What the approval box shows of the line. agent-dispatch.py refuses a submit
+# where more than this follows the marker, because then it is not a closing
+# line. The same number bounds what may be stripped here, so a body that merely
+# DISCUSSES carrying something out — with paragraphs after it — is left alone.
+SUMMARY_MAX_CHARS = 400
+
+
+def strip_carry_out_line(body):
+    """Remove a trailing 'Carrying this out will involve:' line from a body.
+
+    Only a CLOSING line goes: the LAST match, and only when at most
+    SUMMARY_MAX_CHARS of text follows it. That is the exact shape
+    agent-dispatch.py enforces at submit, so what is mandated is what is
+    removed. A mention earlier in a long body is body text and stays — this
+    function decides what the email is, not what it says.
+    """
+    text = body or ""
+    last = None
+    for m in CARRY_OUT_RE.finditer(text):
+        last = m
+    if not last:
+        return text.strip()
+    if len(text[last.end():].strip()) > SUMMARY_MAX_CHARS:
+        return text.strip()
+    kept = text[:last.start()].rstrip()
+    # A horizontal rule written to fence the note off goes with the note. Only
+    # a line made ENTIRELY of rule characters, so a real sentence never loses
+    # its final dash.
+    lines = kept.split("\n")
+    while lines and re.fullmatch(r"[-_*—–\s]*", lines[-1]) and lines[-1].strip():
+        lines.pop()
+    return "\n".join(lines).strip()
 
 
 def parse_addresses(raw, field):
@@ -125,7 +177,7 @@ def parse_output(output):
         raise EmailFormatError("more than one FROM address")
     sender = senders[0] if senders else None
     subject = headers.get("SUBJECT", "").strip()
-    body = body.strip()
+    body = strip_carry_out_line(body)
 
     if not to:
         raise EmailFormatError("no TO recipient")

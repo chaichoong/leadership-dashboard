@@ -58,6 +58,9 @@ from zoneinfo import ZoneInfo
 # the send gate could not parse.
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from agent_email_format import (  # noqa: E402
+    CARRY_OUT_MARKER,
+    CARRY_OUT_RE,
+    SUMMARY_MAX_CHARS,
     TIER1_BANNER,
     EmailFormatError,
     parse_output as parse_email_output,
@@ -83,23 +86,40 @@ TASKS = "tblqB8b22hKBL4PF1"
 # CARRY_OUT_RE is the regex the two renderers already parse with. One pattern,
 # so what is REQUIRED and what is READ can never drift apart —
 # tests/approval-summary.test.js holds the renderers to the same shape.
-CARRY_OUT_MARKER = "**Carrying this out will involve:**"
-CARRY_OUT_RE = re.compile(r"\*{0,2}carrying this out will involve:?\*{0,2}", re.I)
+#
+# It now lives in scripts/agent_email_format.py alongside TIER1_BANNER, with
+# SUMMARY_MAX_CHARS, because a third party needs them: the email parser strips
+# this line out of a Correspondence body. What is mandated here and what is
+# removed there must be one string and one length, or the marker gets emailed
+# to a creditor (finding 20260819-agent-dispatch-237).
 
 # apvSummary shows no separate summary below this length: a short output is
 # readable at a glance and repeating it twice helps nobody. Demanding a closing
 # line there would refuse submits for no gain, so the mandate starts here.
 SUMMARY_MIN_CHARS = 280
 
-# What the approval box will show of the line. More than this and the line is
-# not a closing line — it is the middle of the document.
-SUMMARY_MAX_CHARS = 400
-
 LONDON = ZoneInfo("Europe/London")
 KEVIN_AIRTABLE_EMAIL = "kevin@runpreneur.org.uk"
 # Kevin's own Team Members row. Not an agent, so a task pointed here drops out
 # of the agent-linked population the queue works from — that is the point.
 KEVIN_REC_ID = "recHEt2VPYothaqTd"
+
+# The humans a task may be handed to, and nobody else.
+#
+# 20260819-agent-dispatch-238: `route` only accepts the 17 agent records and
+# `escalate` only ever points at Kevin, so an APPROVED action of the form
+# "reassign this to Mica" had no command that could carry it out. The task went
+# back round the queue every run with the approval standing and nothing moving.
+#
+# An allow-list rather than a free --to, because this command reassigns work
+# using an email address: an unchecked one silently points a real task at a
+# person who does not exist, and Airtable accepts it. Read live from Team
+# Members tblco0p2OnlLQVAX7 on 19 Aug 2026, not inferred.
+HUMANS = {
+    "kevin@runpreneur.org.uk": {"rec": KEVIN_REC_ID, "name": "Kevin Brittain"},
+    "micaa.work@gmail.com":    {"rec": "rec4b5MDoaxEC7WRE", "name": "Mica Albovias"},
+    "atentaerica@gmail.com":   {"rec": "recEvm9wgsEnoNVZh", "name": "Ericamae Atenta"},
+}
 
 # Field IDs — single source is js/config.js; drift-tested, never guess.
 AF = {
@@ -530,9 +550,11 @@ def carry_out_problem(output):
     if not tail:
         return "its '%s' line says nothing" % CARRY_OUT_MARKER
     if len(tail) > SUMMARY_MAX_CHARS:
-        return ("its '%s' line is not the CLOSING line — %d characters follow "
-                "it and the approval box shows only the first %d"
-                % (CARRY_OUT_MARKER, len(tail), SUMMARY_MAX_CHARS))
+        return ("its '%s' line is not the CLOSING line — keep what follows it "
+                "under %d characters; yours is %d. The approval box shows only "
+                "the first %d, so anything past that is invisible to Kevin"
+                % (CARRY_OUT_MARKER, SUMMARY_MAX_CHARS, len(tail),
+                   SUMMARY_MAX_CHARS))
     return ""
 
 
@@ -729,6 +751,43 @@ def cmd_escalate(args):
         AF["assignee"]: {"email": KEVIN_AIRTABLE_EMAIL},
     })
     print(json.dumps({"escalated": args.task, "to": "Kevin Brittain"}))
+
+
+def cmd_handover(args):
+    """Hand an approved task to a named human on the team.
+
+    The exit `route` and `escalate` did not cover. `route` takes agent records
+    only; `escalate` always means Kevin. An approved "reassign this to Mica"
+    therefore had nothing that could carry it out, so the task kept its standing
+    approval and came back round every run (20260819-agent-dispatch-238).
+
+    Status stays where it is — deliberately. The work is not done, it has just
+    changed hands, and marking it Completed would hide it from the person who
+    now owns it.
+    """
+    who = HUMANS.get((args.to or "").strip().lower())
+    if not who:
+        sys.exit(
+            f"ERROR: {args.to} is not a team member this command may hand work "
+            f"to. Allowed: {', '.join(sorted(HUMANS))}.\n"
+            "       An unchecked address points a real task at nobody and "
+            "Airtable accepts it without complaint."
+        )
+    stamp = datetime.now(LONDON).strftime("%d %b %Y")
+    reason = (args.reason or "").strip() or "approved reassignment"
+    t = get_task(args.task)
+    existing = t.get("fields", {}).get(AF["notes"], "") or ""
+    note = (f"[{stamp} — agent-dispatch] Handed over to {who['name']} "
+            f"({args.to}): {reason}")
+    patch_task(args.task, {
+        # The agent link goes. Leaving it would keep the task in the queue's
+        # agent-linked population and it would be worked again tomorrow.
+        AF["teamMember"]: [who["rec"]],
+        AF["assignee"]: {"email": args.to},
+        AF["notes"]: (existing + "\n\n" + note).strip(),
+    })
+    print(json.dumps({"handedOver": args.task, "to": args.to,
+                      "name": who["name"], "reason": reason}))
 
 
 def cmd_submit(args):
@@ -964,6 +1023,23 @@ def cmd_verify(args):
             if to and to not in live["teamMemberIds"]:
                 problems.append(f"{a['task']} claimed routed to {to} but Team "
                                 f"Member is {live['teamMemberIds']}")
+        elif kind == "handover":
+            # A handover verifies against the HUMAN it named, so handed-over
+            # work reads green instead of alarming as an unfinished carry-out
+            # (20260819-agent-dispatch-238).
+            to = (a.get("to", "") or "").strip().lower()
+            who = HUMANS.get(to)
+            if not who:
+                problems.append(f"{a['task']} claimed handover to '{to}', "
+                                "which is not a team member")
+            elif who["rec"] not in live["teamMemberIds"]:
+                problems.append(f"{a['task']} claimed handed over to "
+                                f"{who['name']} but Team Member is "
+                                f"{live['teamMemberIds']}")
+            elif live["status"] == "Completed":
+                problems.append(f"{a['task']} was handed to {who['name']} but "
+                                "marked Completed — the work is not done, it "
+                                "changed hands")
 
     if problems:
         for p in problems:
@@ -989,6 +1065,13 @@ def main():
     e = sub.add_parser("escalate")
     e.add_argument("task")
 
+    h = sub.add_parser("handover",
+                       help="hand an approved task to a named human team member")
+    h.add_argument("task")
+    h.add_argument("--to", required=True,
+                   help="team email; one of " + ", ".join(sorted(HUMANS)))
+    h.add_argument("--reason", default="")
+
     s = sub.add_parser("submit")
     s.add_argument("task")
     s.add_argument("--agent", required=True)
@@ -1013,8 +1096,9 @@ def main():
 
     args = p.parse_args()
     {"queue": cmd_queue, "route": cmd_route, "escalate": cmd_escalate,
-     "submit": cmd_submit, "annotate": cmd_annotate, "intent": cmd_intent,
-     "complete": cmd_complete, "verify": cmd_verify}[args.cmd](args)
+     "handover": cmd_handover, "submit": cmd_submit, "annotate": cmd_annotate,
+     "intent": cmd_intent, "complete": cmd_complete,
+     "verify": cmd_verify}[args.cmd](args)
 
 
 if __name__ == "__main__":

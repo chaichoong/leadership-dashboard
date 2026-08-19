@@ -15,6 +15,7 @@ Usage
     findings.py list [--status open] [--routine X] [--json]
     findings.py claim <id> --by queue-fixer
     findings.py close <id> --outcome fixed|rejected|deferred --note "..."
+    findings.py reopen <id> | --stale [--lease-hours 12]
     findings.py count [--status open]
 """
 
@@ -23,7 +24,7 @@ import json
 import os
 import sys
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 
 HOME = os.path.expanduser("~")
 FINDINGS = os.environ.get(
@@ -33,9 +34,31 @@ FINDINGS = os.environ.get(
 SEVERITIES = ["critical", "high", "medium", "low"]
 OPEN_STATES = ["open", "claimed"]
 
+# How long a claim may stand before the finding is considered abandoned.
+#
+# A claim used to be permanent. A fixer run that died after claiming took its
+# findings with it: they left 'open', never came back, and no later run could
+# see them. On 19 Aug 2026 nine findings had been held by queue-fixer for 124.9
+# hours (20260819-daily-ops-217). Phase 1 of daily-ops had been calling
+# `findings.py reopen --stale` since 14 Aug against a subcommand that did not
+# exist, so the error scrolled past and the run carried on.
+CLAIM_LEASE_HOURS = 12
+
 
 def iso():
     return datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def parse_ts(raw):
+    """Read a log timestamp. Unreadable means unknown, never 'just now'.
+
+    Returning now() on a bad stamp would make a stale claim look fresh for ever,
+    which is the exact failure this lease exists to end.
+    """
+    try:
+        return datetime.strptime(str(raw), "%Y-%m-%dT%H:%M:%SZ")
+    except (TypeError, ValueError):
+        return None
 
 
 def ensure():
@@ -83,6 +106,11 @@ def current_state():
             if rec.get("op") == "claim":
                 state[fid]["status"] = "claimed"
                 state[fid]["claimed_by"] = rec.get("by")
+                state[fid]["claimed_ts"] = rec.get("ts")
+            elif rec.get("op") == "reopen":
+                state[fid]["status"] = "open"
+                state[fid].pop("claimed_by", None)
+                state[fid].pop("claimed_ts", None)
             elif rec.get("op") == "close":
                 state[fid]["status"] = rec.get("outcome", "closed")
                 state[fid]["close_note"] = rec.get("note")
@@ -154,6 +182,60 @@ def cmd_close(a):
     return 0
 
 
+def cmd_reopen(a):
+    """Return an abandoned claim to the queue.
+
+    `--stale` reopens every finding whose claim is older than the lease.
+    Explicit ids reopen regardless of age, for the case where a fixer run is
+    known to be dead before the lease expires.
+    """
+    state = current_state()
+    if a.id and a.stale:
+        print("ERROR: give an id or --stale, not both", file=sys.stderr)
+        return 1
+    if not a.id and not a.stale:
+        print("ERROR: give an id or --stale", file=sys.stderr)
+        return 1
+
+    if a.id:
+        if a.id not in state:
+            print("ERROR: no finding %s" % a.id, file=sys.stderr)
+            return 1
+        if state[a.id]["status"] != "claimed":
+            print("ERROR: %s is %s, not claimed"
+                  % (a.id, state[a.id]["status"]), file=sys.stderr)
+            return 1
+        targets = [a.id]
+    else:
+        cutoff = datetime.utcnow() - timedelta(hours=a.lease_hours)
+        targets = []
+        unknown = []
+        for fid, r in state.items():
+            if r["status"] != "claimed":
+                continue
+            ts = parse_ts(r.get("claimed_ts"))
+            if ts is None:
+                # A claim we cannot date is a claim we cannot trust to be
+                # fresh. Reopen it and say so, rather than holding it for ever.
+                unknown.append(fid)
+                targets.append(fid)
+            elif ts < cutoff:
+                targets.append(fid)
+        if unknown:
+            print("note: %d claim(s) had no readable timestamp and were "
+                  "reopened anyway: %s" % (len(unknown), ", ".join(sorted(unknown))))
+
+    for fid in sorted(targets):
+        append({"op": "reopen", "id": fid, "ts": iso(),
+                "by": a.by, "reason": a.reason or
+                ("claim older than %dh" % a.lease_hours if a.stale else "explicit")})
+        print("reopened %s" % fid)
+    # Printed every run, including zero, so a dead fixer is visible in the log
+    # rather than inferred from silence.
+    print("reopened %d finding(s)" % len(targets))
+    return 0
+
+
 def cmd_count(a):
     state = current_state()
     if a.status:
@@ -195,6 +277,15 @@ def main(argv=None):
                     choices=["fixed", "rejected", "deferred"])
     sp.add_argument("--note", default="")
     sp.set_defaults(fn=cmd_close)
+
+    sp = sub.add_parser("reopen")
+    sp.add_argument("id", nargs="?")
+    sp.add_argument("--stale", action="store_true",
+                    help="reopen every claim older than --lease-hours")
+    sp.add_argument("--lease-hours", type=int, default=CLAIM_LEASE_HOURS)
+    sp.add_argument("--by", default="queue-fixer")
+    sp.add_argument("--reason", default="")
+    sp.set_defaults(fn=cmd_reopen)
 
     sp = sub.add_parser("count")
     sp.add_argument("--status")
