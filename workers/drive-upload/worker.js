@@ -39,6 +39,17 @@
 // specifies another connected sender.
 const DEFAULT_SENDER = 'kevinbrittain@gmail.com';
 
+// Send-as aliases (Kevin's ruling, 20 Aug 2026: business copy sends from the
+// business address). These are NOT separate Google accounts — they are verified
+// "Send mail as" aliases inside the account they map to, so they cannot grant
+// their own consent at /auth/gmail. The send path uses the mapped account's
+// token and stamps the alias as the From header; Gmail refuses the send if the
+// alias is not verified in that account's settings, so an unverified alias
+// fails loudly rather than sending as the wrong identity.
+const SEND_AS_ALIASES = {
+    'kevin@operationsdirector.co.uk': 'kevinbrittain@gmail.com',
+};
+
 const ALLOWED_ORIGINS = [
     'https://chaichoong.github.io',
     'http://localhost:8765', // local preview
@@ -162,8 +173,12 @@ export default {
                         const data = await info.json();
                         scope = data.scope || null; expires_in = data.expires_in || null;
                     }
+                    // Aliases only count when their parent account is connected.
+                    const aliases = Object.entries(SEND_AS_ALIASES)
+                        .filter(([, acct]) => connected.includes(acct))
+                        .map(([alias, acct]) => `${alias} (via ${acct})`);
                     return jsonResponse({ status: connected.length ? 'ok' : 'not-connected',
-                                          defaultSender: DEFAULT_SENDER, connected, scope, expires_in },
+                                          defaultSender: DEFAULT_SENDER, connected, aliases, scope, expires_in },
                                         connected.length ? 200 : 409);
                 }
 
@@ -174,15 +189,26 @@ export default {
                 }
 
                 const sender = (from || DEFAULT_SENDER).toLowerCase().trim();
-                const refreshToken = await env.GMAIL_AUTH.get(`gmail_refresh_token:${sender}`);
+                // The sender's own consent always wins; the alias map is a
+                // FALLBACK for when it has none. Mapping first would shadow a
+                // real account behind its parent — and Gmail rewrites the From
+                // header to the parent unless the alias is verified there,
+                // which is how 19 warm emails went out as the wrong identity
+                // on 20 Aug 2026.
+                let tokenAccount = sender;
+                let refreshToken = await env.GMAIL_AUTH.get(`gmail_refresh_token:${sender}`);
+                if (!refreshToken && SEND_AS_ALIASES[sender]) {
+                    tokenAccount = SEND_AS_ALIASES[sender];
+                    refreshToken = await env.GMAIL_AUTH.get(`gmail_refresh_token:${tokenAccount}`);
+                }
                 if (!refreshToken) {
                     const listed = await env.GMAIL_AUTH.list({ prefix: 'gmail_refresh_token:' });
                     const connected = listed.keys.map(k => k.name.slice('gmail_refresh_token:'.length));
-                    return jsonResponse({ error: `Gmail not connected for ${sender}. Connected senders: ${connected.join(', ') || 'none'}. Grant once at /auth/gmail?account=${sender}`, connected }, 409);
+                    return jsonResponse({ error: `Gmail not connected for ${tokenAccount}. Connected senders: ${connected.join(', ') || 'none'}. Grant once at /auth/gmail?account=${tokenAccount}`, connected }, 409);
                 }
                 const accessToken = await getGmailAccessToken(env, refreshToken);
 
-                const raw = buildRawEmail({ to, subject, text, cc });
+                const raw = buildRawEmail({ to, subject, text, cc, from: sender });
                 const sendRes = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', {
                     method: 'POST',
                     headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
@@ -308,11 +334,14 @@ function b64url(bytes) {
     return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 }
 
-function buildRawEmail({ to, subject, text, cc }) {
+function buildRawEmail({ to, subject, text, cc, from }) {
     const enc = new TextEncoder();
     const encodedSubject = `=?UTF-8?B?${btoa(String.fromCharCode(...enc.encode(subject)))}?=`;
     const bodyB64 = btoa(String.fromCharCode(...enc.encode(text)));
     const lines = [
+        // From is stamped explicitly so a send-as alias keeps its identity;
+        // Gmail validates it against the account's verified senders.
+        ...(from ? [`From: ${from}`] : []),
         `To: ${to}`,
         ...(cc ? [`Cc: ${cc}`] : []),
         `Subject: ${encodedSubject}`,
