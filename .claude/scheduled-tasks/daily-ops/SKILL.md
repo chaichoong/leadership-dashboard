@@ -22,6 +22,22 @@ The version-controlled original of these instructions is docs/daily-ops-routine.
 
 ## Phase 1 — Readiness
 
+**First, before anything else: has today already finished?**
+
+```
+cd /Users/kevinbrittain/Projects/leadership-dashboard
+python3 scripts/job-queue.py rantoday daily-ops
+```
+
+Exit 3 means today already stamped an end mark. **STOP the whole run**, post one
+line to Kevin saying daily-ops was asked to run twice today and the second run
+was refused, and do nothing else. Exit 0 means carry on.
+
+A START mark alone does NOT block: a run the Mac killed halfway has to be
+resumable, and only a matching END means the day is done. (Regression origin:
+19 Aug 2026 — the first run stamped end at 14:12:19Z and a second full run
+started at 14:22:56Z. Finding 20260819-daily-ops-252.)
+
 The Mac usually wakes into this routine, and the network and Google Drive lag behind the wake by a minute or two.
 
 ```
@@ -36,6 +52,19 @@ Then leave proof you ran. You deliberately do not take the queue lock, so withou
 ```
 python3 scripts/job-queue.py mark daily-ops
 ```
+
+Then recover anything a dead run is still holding:
+
+```
+python3 scripts/findings.py reopen --stale
+```
+
+A fixer run that claims findings and then dies used to keep them for ever:
+`list --status open` could not see them and no later run picked them up, so
+they went quiet without being fixed (finding 20260814-daily-ops-144). A claim
+is a 12-hour lease now, and this line is what collects the expired ones. If it
+reopens anything, say how many in your report — findings coming BACK means a
+run died, which is worth knowing.
 
 Then check nothing has started stacking up behind your back:
 
@@ -138,5 +167,20 @@ check never having run.
 Then one Slack DM to Kevin. Lead with anything that needs him. Then, per phase, one line: ran clean / found N things / failed and why / skipped and why.
 
 State plainly how long the whole run took. If any phase did not run, say which and why. Never present a partial run as a complete one.
+
+**Last, once the DM has actually gone, stamp the end mark:**
+
+```
+cd /Users/kevinbrittain/Projects/leadership-dashboard
+python3 scripts/job-queue.py mark daily-ops --note "end"
+```
+
+This is the LAST line of the run and nothing follows it. Phase 1's mark says
+you started; this one says you finished, and the 11:00 guard alarms when a
+start has no matching end. On 17 Aug 2026 the run marked its start at 06:07,
+died at 07:59 when a huddle subagent stalled, and the guard reported "healthy"
+all day because a start was all it looked for (finding
+20260818-ceo-memory-sweep-215). Do not stamp it early, and never stamp it for a
+run you abandoned: an end mark on a partial run turns the guard back off.
 
 Finally, delete `~/knowledge-os/logs/daily-ops-progress.json` so tomorrow starts fresh.
