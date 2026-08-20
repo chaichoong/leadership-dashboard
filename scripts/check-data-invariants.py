@@ -316,37 +316,58 @@ def scan_all(pat, table, fields):
             return records
 
 
+def _bank_tx_id(record):
+    """The bank's own transaction id, read out of the raw open-banking payload.
+
+    This is the only identifier that survives a feed migration. **Plaid TX ID is
+    "<providerAccountId>--<providerTxId>", and the provider has changed BOTH halves:
+    on 20 Aug 2026 Fintable moved Santander onto a "gocardless_v3_<sha256>" id
+    scheme, so the same payment arrived under a different account id AND a different
+    provider tx id. The bank's own transactionId was byte-identical on both copies.
+    """
+    raw = record["fields"].get("**Raw") or ""
+    match = re.search(r'"transactionId"\s*:\s*"([^"]+)"', raw)
+    return match.group(1) if match else None
+
+
 def check_reimport_duplicates(pat):
-    """Same bank transaction imported twice under two different Plaid account ids.
+    """Same bank transaction imported twice — one real payment, two records.
 
     Found 2026-07-21: three Santander accounts were re-linked, so the feed re-imported
     their history under a NEW Plaid account id. 64 duplicate transactions, £2,316 of
     double-counted money, sitting in the Wealth and P&L figures unnoticed for months.
 
-    The Plaid transaction id is "<plaidAccountId>--<transactionHash>". The hash is
-    stable for a given bank transaction, so the SAME hash appearing under two different
-    account ids means one real payment was imported twice. Matching on date+amount
-    instead would flag genuine same-day same-value pairs (two £56.99 Amazon charges on
-    20 Mar 2026 were real, not duplicates) — the hash does not have that problem.
+    Found AGAIN 2026-08-20 — and the check written for the first incident could not
+    see the second. It keyed on the suffix of **Plaid TX ID, assuming a re-import
+    changes only the account-id prefix. Fintable migrated Santander onto a
+    "gocardless_v3_<sha256>" id scheme, which changed the suffix too, so the two
+    copies landed under two different keys and the check reported 0 violations while
+    201 duplicates sat in the table (£31,443.90 in, £31,650.67 out, re-imported across
+    Feb, Mar, May and Jun 2026). A guard that keys on a value the vendor owns is only
+    as stable as the vendor's schema.
+
+    So key on the bank's own transactionId out of **Raw, which was identical on both
+    copies. Matching on date+amount instead would flag genuine same-day same-value
+    pairs (two £56.99 Amazon charges on 20 Mar 2026 were real, not duplicates) — the
+    bank id does not have that problem.
 
     Returns (violations, control_population).
     """
-    records = scan_all(pat, TX, ["**Plaid TX ID", "Account Alias (from **Account)", "**GBP", "**Date"])
-    by_hash = {}
+    records = scan_all(pat, TX, ["**Raw", "**Plaid TX ID",
+                                 "Account Alias (from **Account)", "**GBP", "**Date"])
+    by_bank_id = {}
     control = 0
     for r in records:
-        pid = str(r["fields"].get("**Plaid TX ID") or "")
-        if "--" not in pid:
+        bank_id = _bank_tx_id(r)
+        if not bank_id:
             continue
         control += 1
-        account_id, tx_hash = pid.split("--", 1)
-        by_hash.setdefault(tx_hash, {}).setdefault(account_id, []).append(r)
+        by_bank_id.setdefault(bank_id, []).append(r)
 
     violations = []
-    for tx_hash, by_account in by_hash.items():
-        if len(by_account) < 2:
+    for bank_id, copies in by_bank_id.items():
+        if len(copies) < 2:
             continue
-        copies = [r for group in by_account.values() for r in group]
         alias = copies[0]["fields"].get("Account Alias (from **Account)")
         alias = (alias[0] if isinstance(alias, list) and alias else alias) or "(unknown account)"
         violations.append({
@@ -354,7 +375,8 @@ def check_reimport_duplicates(pat):
             "date": copies[0]["fields"].get("**Date"),
             "amount": copies[0]["fields"].get("**GBP"),
             "copies": len(copies),
-            "plaid_account_ids": sorted(by_account.keys()),
+            "bank_transaction_id": bank_id,
+            "feed_ids": sorted({str(c["fields"].get("**Plaid TX ID") or "(none)") for c in copies}),
             "ids": [r["id"] for r in copies],
         })
     return violations, control
@@ -554,9 +576,9 @@ SCANS = [
     },
     {
         "name": "no-reimport-duplicates",
-        "asserts": "one bank transaction => one record (not re-imported under a second Plaid account id)",
-        "incident": "Jul 2026 — Santander accounts re-linked; 64 duplicates, £2,316 double-counted across Wealth and P&L",
-        "control_means": "transactions carrying a Plaid id (the population a re-import duplicates)",
+        "asserts": "one bank transaction => one record (matched on the BANK's transaction id, not the feed provider's)",
+        "incident": "Jul 2026 — Santander re-linked; 64 duplicates, £2,316 double-counted across Wealth and P&L. Aug 2026 — Fintable moved Santander onto gocardless_v3 ids; 201 duplicates, and the Jul guard reported 0 because it keyed on the provider id the migration changed",
+        "control_means": "transactions carrying a bank transaction id in their raw feed payload (the population a re-import duplicates)",
         "run": check_reimport_duplicates,
     },
 ]
