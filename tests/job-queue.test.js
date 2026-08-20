@@ -11,7 +11,7 @@
 
 import { describe, it, expect, beforeEach, afterAll, vi } from 'vitest';
 import { execFile, execFileSync } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync, readdirSync, mkdirSync, chmodSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync, readdirSync, mkdirSync, chmodSync, appendFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
@@ -317,6 +317,62 @@ describe('the queue log is evidence', () => {
 });
 
 // ---------------------------------------------------------------------------
+// "Has it already run today?"
+//
+// Regression origin: 19 Aug 2026. daily-ops stamped its end mark at 14:12:19Z
+// and a second FULL run started at 14:22:56Z — ten minutes later — because
+// nothing ever asked the question (finding 20260819-daily-ops-252). Phase 9
+// deletes the progress file on purpose so tomorrow starts clean, so the only
+// durable evidence is the queue log's mark events.
+// ---------------------------------------------------------------------------
+describe('rantoday', () => {
+  function withEvents(events) {
+    writeFileSync(join(stateDir, 'queue-events.jsonl'),
+      events.map((e) => JSON.stringify(e)).join('\n') + '\n');
+  }
+  const mark = (ts, note = '', job = 'daily-ops') => ({ ts, job, state: 'mark', note });
+
+  it('refuses a second run once today has an end mark — the 19 Aug case exactly', () => {
+    withEvents([
+      mark('2026-08-19T11:14:49.535Z'),
+      mark('2026-08-19T14:12:19.316Z', 'end'),
+    ]);
+    const blocked = run(['rantoday', 'daily-ops', '--now', '2026-08-19T14:22:56Z']);
+    expect(blocked.code).toBe(3);
+    expect(blocked.stdout).toMatch(/ALREADY RAN TODAY/);
+
+    // One minute before that end mark the same day was still open.
+    expect(run(['rantoday', 'daily-ops', '--now', '2026-08-19T14:12:00Z']).code).toBe(0);
+  });
+
+  it('a start with no end stays resumable, because a dead run must not lock out the day', () => {
+    withEvents([mark('2026-08-20T06:06:35.274Z')]);
+    expect(run(['rantoday', 'daily-ops', '--now', '2026-08-20T09:00:00Z']).code).toBe(0);
+  });
+
+  it("yesterday's end mark does not close today", () => {
+    withEvents([mark('2026-08-19T14:12:19.316Z', 'end')]);
+    expect(run(['rantoday', 'daily-ops', '--now', '2026-08-20T06:00:00Z']).code).toBe(0);
+  });
+
+  it('counts the London day, not the UTC day', () => {
+    // 23:30 UTC in BST is 00:30 the NEXT London day, so it closes the 20th, not the 19th.
+    withEvents([mark('2026-08-19T23:30:00.000Z', 'end')]);
+    expect(run(['rantoday', 'daily-ops', '--now', '2026-08-20T07:00:00Z']).code).toBe(3);
+    expect(run(['rantoday', 'daily-ops', '--now', '2026-08-19T23:45:00Z']).code).toBe(3);
+  });
+
+  it("another job's end mark never blocks this one", () => {
+    withEvents([mark('2026-08-20T06:00:00.000Z', 'end', 'prod-sweep')]);
+    expect(run(['rantoday', 'daily-ops', '--now', '2026-08-20T09:00:00Z']).code).toBe(0);
+  });
+
+  it('an empty history is a safe start, not an error', () => {
+    expect(run(['rantoday', 'daily-ops', '--now', '2026-08-20T09:00:00Z']).code).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Findings queue
 // ---------------------------------------------------------------------------
 describe('findings queue', () => {
@@ -368,6 +424,70 @@ describe('findings queue', () => {
       expect(fin(['count']).stdout.trim()).toBe('8');
     });
   }, 30000);
+
+  // A claim is a 12-hour LEASE. Before `reopen` existed, a fixer run that died
+  // mid-run kept its findings for ever: `list --status open` cannot see a claimed
+  // finding, so nine high-severity ones sat invisible from 14 to 20 Aug 2026
+  // while every routine reported success (finding 20260820-daily-ops-254).
+  function backdateClaim(id, hoursAgo) {
+    const ts = new Date(Date.now() - hoursAgo * 3600 * 1000)
+      .toISOString().replace(/\.\d+Z$/, 'Z');
+    appendFileSync(findingsFile,
+      JSON.stringify({ op: 'claim', id, ts, by: 'dead-run' }) + '\n');
+  }
+
+  it('reopen --stale hands back an expired claim and leaves a live one alone', () => {
+    const dead = fin(['add', '--routine', 'drift', '--title', 'stale one',
+      '--severity', 'high']).stdout.trim();
+    const live = fin(['add', '--routine', 'drift', '--title', 'live one',
+      '--severity', 'high']).stdout.trim();
+    backdateClaim(dead, 20);
+    fin(['claim', live, '--by', 'queue-fixer']);
+    expect(fin(['count', '--status', 'claimed']).stdout.trim()).toBe('2');
+
+    const out = fin(['reopen', '--stale']);
+    expect(out.code).toBe(0);
+    expect(out.stdout).toContain('reopened 1');
+    expect(out.stdout).toContain(dead);
+    expect(out.stdout).not.toContain('live one');
+
+    expect(fin(['count', '--status', 'claimed']).stdout.trim()).toBe('1');
+    // The whole point: it is visible to the fixer again.
+    expect(fin(['list', '--status', 'open']).stdout).toContain('stale one');
+  });
+
+  it('a reopened finding can be claimed again', () => {
+    const id = fin(['add', '--routine', 'drift', '--title', 'retry me']).stdout.trim();
+    backdateClaim(id, 20);
+    expect(fin(['claim', id, '--by', 'b']).code).not.toBe(0);
+    fin(['reopen', '--stale']);
+    expect(fin(['claim', id, '--by', 'b']).code).toBe(0);
+  });
+
+  it('--dry-run reports without writing, so the count can be back-tested safely', () => {
+    const id = fin(['add', '--routine', 'drift', '--title', 'dry']).stdout.trim();
+    backdateClaim(id, 20);
+    expect(fin(['reopen', '--stale', '--dry-run']).stdout).toContain('reopened 1');
+    expect(fin(['count', '--status', 'claimed']).stdout.trim()).toBe('1');
+    expect(fin(['reopen', '--stale']).stdout).toContain('reopened 1');
+    expect(fin(['count', '--status', 'claimed']).stdout.trim()).toBe('0');
+    expect(id).toBeTruthy();
+  });
+
+  it('reopen --stale exits 0 and says nothing was reopened when nothing is stale', () => {
+    fin(['add', '--routine', 'drift', '--title', 'fresh']);
+    const out = fin(['reopen', '--stale']);
+    expect(out.code).toBe(0);
+    expect(out.stdout.trim()).toBe('reopened 0');
+  });
+
+  it('reopen <id> refuses a finding that is not claimed', () => {
+    const id = fin(['add', '--routine', 'drift', '--title', 'open one']).stdout.trim();
+    expect(fin(['reopen', id]).code).not.toBe(0);
+    fin(['claim', id, '--by', 'x']);
+    expect(fin(['reopen', id]).code).toBe(0);
+    expect(fin(['list', '--status', 'open']).stdout).toContain('open one');
+  });
 
   it('sorts open findings by severity so the fixer works the worst first', () => {
     fin(['add', '--routine', 'a', '--title', 'low one', '--severity', 'low']);

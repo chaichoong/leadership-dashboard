@@ -92,6 +92,7 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
   .flow { flex-direction:column; } .flow-arrow { transform:rotate(90deg); }
   .container { padding:0 1rem 3rem; }
 }
+.card h3 { font-size: 1rem; font-weight: 700; color: var(--text-primary); margin: 1rem 0 0.35rem; }
 </style>
 </head>
 <body>
@@ -102,7 +103,7 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
     <a href="index.html#sitemap" class="header-back">&larr; Back to Site Map</a>
     <h1>Cash Flow Voids (CFVs) &mdash; Standard Operating Procedure</h1>
     <div class="subtitle">Detection, management, chase tracking, auto-return and resolution of missing rent payments</div>
-    <div class="version">Version 1.6 &middot; 16 Apr 2026 &middot; Owner: Kevin Brittain</div>
+    <div class="version">Version 1.33 &middot; 20 August 2026 &middot; Owner: Kevin Brittain</div>
   </div>
 </div>
 
@@ -320,6 +321,28 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
       <div class="info-box tip">
         <span class="ib-icon">&#128161;</span>
         <span>If the Airtable PATCH fails, the local flag is removed so the auto-return will retry on the next page load or tab switch.</span>
+      </div>
+
+      <h3>When this runs</h3>
+      <p><strong>Not only on the CFV tab.</strong> Auto-return is a side effect of CFV detection,
+      and detection runs on four paths &mdash; every one of them can write to Airtable:</p>
+      <ul>
+        <li><strong>Every dashboard load or refresh.</strong> The sidebar badge count runs detection,
+        so opening the dashboard on any tab can auto-return a tenancy without you ever visiting
+        the CFV tab. It happens twice on a cold load: once on the cached render, once when the
+        fresh Airtable data lands.</li>
+        <li><strong>Opening or re-rendering the CFV tab.</strong></li>
+        <li><strong>After a reconciliation.</strong> The badge refresh runs the moment a
+        transaction is reconciled, which is usually what makes the payment findable in the
+        first place.</li>
+        <li><strong>When the AI assistant gathers CFV context</strong> while the CFV tab is open.</li>
+      </ul>
+      <div class="info-box warn">
+        <span class="ib-icon">&#9888;&#65039;</span>
+        <span>This means a status change and an audit comment can appear in Airtable from a
+        page view alone. If a tenancy comes back as In Payment and nobody remembers touching it,
+        this is why. The <code>cfv_{id}_returned</code> flag stops it repeating within one browser,
+        but it is local, so a different browser or a cleared cache can run it again.</span>
       </div>
 
       <div class="flow">
@@ -633,7 +656,7 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
       </div>
       <div class="ts-item">
         <div class="ts-problem">Auto-return didn&rsquo;t clear a CFV after reconciliation</div>
-        <div class="ts-solution">Auto-return only runs when you load or switch to the CFV tab. Reload the page or click the CFV sidebar item to trigger detection. Also verify the transaction date is within the <strong>current calendar month</strong> &mdash; payments from previous months won&rsquo;t trigger auto-return.</div>
+        <div class="ts-solution">Auto-return runs whenever CFV detection runs: every dashboard load or refresh, every CFV tab render, and straight after a reconciliation (see section 6). So a plain page reload is enough, on any tab. Check the transaction is <strong>reconciled</strong>, <strong>linked to the tenancy</strong>, and dated within the <strong>current calendar month</strong> &mdash; payments from previous months will not trigger it.</div>
       </div>
       <div class="ts-item">
         <div class="ts-problem">Status update failed &mdash; alert says &ldquo;Failed to update Airtable&rdquo;</div>

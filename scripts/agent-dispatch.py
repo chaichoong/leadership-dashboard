@@ -58,6 +58,7 @@ from zoneinfo import ZoneInfo
 # the send gate could not parse.
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from agent_email_format import (  # noqa: E402
+    CARRY_OUT_RE,
     TIER1_BANNER,
     EmailFormatError,
     parse_output as parse_email_output,
@@ -84,7 +85,9 @@ TASKS = "tblqB8b22hKBL4PF1"
 # so what is REQUIRED and what is READ can never drift apart —
 # tests/approval-summary.test.js holds the renderers to the same shape.
 CARRY_OUT_MARKER = "**Carrying this out will involve:**"
-CARRY_OUT_RE = re.compile(r"\*{0,2}carrying this out will involve:?\*{0,2}", re.I)
+# CARRY_OUT_RE is imported from agent_email_format above: the send path strips
+# exactly the line the submit path demands, and one pattern cannot drift from
+# itself.
 
 # apvSummary shows no separate summary below this length: a short output is
 # readable at a glance and repeating it twice helps nobody. Demanding a closing

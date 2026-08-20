@@ -31,7 +31,9 @@ FORMAT
     The body of the email, as many lines as needed.
 
 A tier-1 banner may sit above the headers. It is stripped before parsing and
-never reaches the email.
+never reaches the email. So is the closing "Carrying this out will involve:"
+line: it is a note to Kevin about what approving does, not a sentence in the
+letter, and the recipient must never read it.
 
 Errors raise EmailFormatError. Callers decide whether that is a sys.exit (the
 send path) or a refused submit (the dispatch path). Strict on purpose: a
@@ -55,6 +57,15 @@ TIER1_BANNER = (
 )
 
 
+# The closing line every Agent Output must end with (agent-dispatch.py refuses a
+# submit without one). It is written for Kevin's approval box, and on a
+# Correspondence output it lands INSIDE the email body, so the send path has to
+# take it back out. Defined here, once, and imported by agent-dispatch.py: the
+# pattern that is REQUIRED and the pattern that is STRIPPED must never drift
+# apart, which is the same reason TIER1_BANNER lives here.
+CARRY_OUT_RE = re.compile(r"\*{0,2}carrying this out will involve:?\*{0,2}", re.I)
+
+
 class EmailFormatError(Exception):
     """An Agent Output that does not meet the Correspondence contract."""
 
@@ -69,6 +80,23 @@ def strip_tier1_banner(output):
     if text.startswith(TIER1_BANNER):
         text = text[len(TIER1_BANNER):]
     return text.lstrip("\n").lstrip()
+
+
+def strip_carry_out_line(output):
+    """Remove the closing carry-out line and everything after it.
+
+    The LAST occurrence wins. A body that quotes or discusses the phrase keeps
+    its text; only the real closing line goes. Removing from the start of that
+    line also takes any bullet or bold markup wrapping it.
+    """
+    text = output or ""
+    last = None
+    for m in CARRY_OUT_RE.finditer(text):
+        last = m
+    if last is None:
+        return text
+    line_start = text.rfind("\n", 0, last.start())
+    return text[: 0 if line_start == -1 else line_start].rstrip()
 
 
 def parse_addresses(raw, field):
@@ -125,7 +153,11 @@ def parse_output(output):
         raise EmailFormatError("more than one FROM address")
     sender = senders[0] if senders else None
     subject = headers.get("SUBJECT", "").strip()
-    body = body.strip()
+    # Stripped here rather than at the call sites, so every path that renders or
+    # sends this email gets a body with no note-to-Kevin in it. A body that is
+    # nothing BUT the carry-out line now fails the empty-body check below, which
+    # is the right answer: there is no email to send.
+    body = strip_carry_out_line(body).strip()
 
     if not to:
         raise EmailFormatError("no TO recipient")
