@@ -47,7 +47,11 @@ const DEFAULT_SENDER = 'kevinbrittain@gmail.com';
 // alias is not verified in that account's settings, so an unverified alias
 // fails loudly rather than sending as the wrong identity.
 const SEND_AS_ALIASES = {
-    'kevin@operationsdirector.co.uk': 'kevinbrittain@gmail.com',
+    // Kevin, 20 Aug 2026: the OD address is a verified "Send as" alias of the
+    // RUNPRENEUR account (it appears in that account's Compose dropdown), not
+    // of kevinbrittain@gmail.com — mapping it to gmail made Google rewrite the
+    // From header on 19 warm emails.
+    'kevin@operationsdirector.co.uk': 'kevin@runpreneur.org.uk',
 };
 
 const ALLOWED_ORIGINS = [
