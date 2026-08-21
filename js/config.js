@@ -34,7 +34,7 @@
         { id: 'transactions', name: 'Transactions',                icon: '🔍', pageVer: '1.1', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#transactions' },
         { id: 'coa',        name: 'Chart of Accounts',             icon: '📒', pageVer: '1.3', sopFile: 'sop-coa.html',                sopVer: '1.1', standalone: 'index.html#coa' },
         { id: 'comms',      name: 'Inbound Comms',                 icon: '📨', pageVer: '2.64', sopFile: 'inbound-comms-sop.html',      sopVer: '2.60', standalone: 'follow-up.html' },
-        { id: 'compliance', name: 'Property Compliance',            icon: '✅', pageVer: '1.14', sopFile: 'sop-compliance.html',         sopVer: '1.14', standalone: 'compliance.html' },
+        { id: 'compliance', name: 'Property Compliance',            icon: '✅', pageVer: '1.15', sopFile: 'sop-compliance.html',         sopVer: '1.14', standalone: 'compliance.html' },
         { id: 'operations',  name: 'Operations',                    icon: '🏢', pageVer: '1.47', sopFile: '',                            sopVer: '1.0', standalone: 'os/operations/index.html' },
         // KPI Library (Leadership section) — ADMIN ONLY. Never rendered in a
         // client tenant's shell; the adminOnly flag is the contract the Supabase
