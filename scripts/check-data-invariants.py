@@ -71,6 +71,7 @@ BRIEFS = "tblIxbzDSOCI5hqJn"  # CEO Briefs
 TASKS = "tblqB8b22hKBL4PF1"  # Tasks
 PROJECTS = "tblHrpTMd5LNYn8v1"  # Projects (quarterly projects from the Strategy push)
 BMS = "tblyr4h3Dap0EDN6S"  # Business Monthly Summary
+PROSPECTS = "tbljHVGJoKJf8acy3"  # Prospects (cold outbound)
 
 INVARIANTS = [
     {
@@ -361,6 +362,32 @@ INVARIANTS = [
         "field_probe": ("OR(LEN({Status} & '') >= 0, LEN({Requested At} & '') >= 0, "
                         "LEN({Request} & '') >= 0)"),
         "fields": ["Request", "Status", "Requested At", "Page ID"],
+    },
+    {
+        # Kevin's four-line shape, adopted 21 Aug 2026 after 137 cold emails produced
+        # zero replies. The first touch asks a question the reader can answer in one
+        # line; the booking link moves to touch 2 or 3, after they have replied. The
+        # rule lives in .claude/skills/prospect-daily/SKILL.md §4.5, which is a PROMPT.
+        # Nothing mechanical stops the agent drifting back to pasting the link, and
+        # this engine has drifted before: the PECR gate was "a field the agent wrote
+        # about its own work" until Aug 2026. A prompt without a guard is a preference.
+        #
+        # Only UNSENT drafts are checked. The 130 already sent carry the link by design
+        # and are history, not defects.
+        #
+        # Back-tested read-only on 21 Aug 2026: control 137, the same FIND without the
+        # status bound matched 130 historical drafts (so the FIND genuinely fires), and
+        # the violation itself returned 0.
+        "name": "first-touch-carries-no-booking-link",
+        "table": PROSPECTS,
+        "incident": "Aug 2026 — 137 cold emails asked a stranger to book a calendar slot before exchanging a word; zero replies, zero bookings",
+        "asserts": "unsent cold-email draft => no booking link in the first touch",
+        "violation": ("AND({Contact Route} = 'Email sequence (Ltd)', "
+                      "{Status} = 'Ready for Review', {Draft Message} != '', "
+                      "FIND('book-a-demo', {Draft Message}))"),
+        "control": "AND({Contact Route} = 'Email sequence (Ltd)', {Draft Message} != '')",
+        "control_means": "cold-email drafts (the population the first-touch rule governs)",
+        "fields": ["Name", "Company", "Status", "Contact Route", "Draft Message"],
     },
 ]
 

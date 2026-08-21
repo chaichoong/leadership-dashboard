@@ -179,9 +179,47 @@ Set **Contact Route** by this decision tree:
 4. Website form only → "Website contact form".
 5. Otherwise → "No route yet".
 
-Write a **Draft Message** tailored to the person and route. Voice = Kevin's: direct, spartan, UK English, no hype words, no em dashes. Shape: (1) reference exactly what they posted, (2) one sentence on what Operations Director does for someone in their position (an AI-run operations department, not another VA), (3) soft CTA to a call with the booking link `https://operationsdirector.co.uk/book-a-demo/`. Under 90 words for email replies, under 40 for LinkedIn connect notes (no link in connect notes; the link goes in the post-accept message). Never fake familiarity; say where we saw their post.
+Write a **Draft Message** in **Kevin's four-line shape**. This shape is measured from his own
+sent email and from a 32,607-word corpus of him speaking, not invented. Source of truth:
+`00 AI Context/Knowledge/kevin-voice-profile.md`. Adopted 21 Aug 2026 after 137 cold emails
+produced zero replies.
 
-**The booking link is `https://operationsdirector.co.uk/book-a-demo/` and nothing else.** That page embeds the same GoHighLevel calendar (`BcVVhAg1zLaPVEXj5ih0`, Kevin-confirmed 13 Jul) in an iframe, so the booking outcome is identical, but the raw `api.leadconnectorhq.com/widget/booking/...` widget URL reads as spam in a cold email and names the CRM vendor. The canonical copy lives in `OD_BOOKING_URL` in `js/config.js`. Never paste the widget URL into a draft; `tests/prospect-email.test.js` fails the build if it reappears in source.
+```
+Hi <first name>,
+
+Hope you're well. I'm getting in touch about <the exact thing they posted>.
+
+I run a service that <what it does for THIS business>, so <what that means for them>.
+
+<One direct question they can answer in a single line.>
+```
+
+**40 to 55 words for email.** Kevin's own outreach runs to about 38 words of prose. The old spec
+allowed 90 and the 133 drafts sent under it ran to a median of 69.
+
+Six rules, each one measured rather than asserted:
+
+1. **First person. Kevin is the actor.** "I run a service that..." NEVER "Operations Director sets
+   up..." Brand-as-actor is not how he writes, and it appeared in 87% of the 133 emails that
+   produced nothing.
+2. **Never reuse a fixed product phrase.** "AI-run operations department" appeared in **87%** of
+   those drafts. Describe what the service does for THIS business, in their own terms, every time.
+   Test: if your sentence would fit another prospect unchanged, rewrite it.
+3. **No research-display paragraph.** Do not parade what you found out about them. Kevin states
+   his business plainly and stops. One clause of context, never a showcase.
+4. **End with a question that invites a REPLY, not a click. No booking link in the first touch.**
+   137 strangers were asked to book a calendar slot before exchanging a single word, and none did.
+   A question costs them one line. The link belongs in touch 2 or 3, after they have replied.
+5. **Always greet by first name.** Two directors, use the first named one. Never a bare "Hi,".
+6. **Hedge, then commit** ("Would that be worth a look?"), which is his actual pattern in speech.
+   Keep the banned-word list and the no-em-dash rule.
+
+**LinkedIn connect notes:** under 40 words, same shape without the greeting line and without any
+link.
+
+Never fake familiarity; say where we saw their post.
+
+**When a touch DOES carry the link (touch 2 or 3, never touch 1), it is `https://operationsdirector.co.uk/book-a-demo/` and nothing else.** That page embeds the same GoHighLevel calendar (`BcVVhAg1zLaPVEXj5ih0`, Kevin-confirmed 13 Jul) in an iframe, so the booking outcome is identical, but the raw `api.leadconnectorhq.com/widget/booking/...` widget URL reads as spam in a cold email and names the CRM vendor. The canonical copy lives in `OD_BOOKING_URL` in `js/config.js`. Never paste the widget URL into a draft; `tests/prospect-email.test.js` fails the build if it reappears in source.
 
 **Do NOT write a sign-off or signature into the Draft Message.** The Prospecting tab appends Kevin's signature (name, title, website, email) at send time, from `OD_SENDER` in `js/config.js`. A signature in the draft ships twice.
 
