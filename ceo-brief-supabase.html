@@ -1,0 +1,505 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="robots" content="noindex">
+<title>CEO Brief</title>
+<link rel="stylesheet" href="css/tokens.css?v=1">
+<!-- Per-tenant CEO Brief (Supabase shell page). Reads public.ceo_briefs (written by the
+     ceo-brief-tenants worker) and writes its setup to app_settings key 'ceo_brief'.
+     The setup form renders FROM js/ceo-brief-defaults.mjs, the one source of truth shared
+     with the worker and the onboarding document. Self-contained: tokens + supabase-js. -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: var(--font-family-base); background: var(--bg-surface-2); color: var(--text-primary); line-height: var(--lh-normal); }
+
+  .topbar { background: var(--bg-surface); border-bottom: 1px solid var(--border-default); padding: 16px 24px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; position: sticky; top: 0; z-index: 50; }
+  .topbar h1 { font-size: var(--fs-xl); font-weight: var(--fw-semibold); }
+  .topbar h1 span { color: var(--accent); }
+  .topbar .sub { color: var(--text-muted); font-size: var(--fs-base); }
+  .topbar a.how { font-size: var(--fs-sm); color: var(--accent); text-decoration: none; font-weight: var(--fw-medium); }
+  .topbar a.how:hover { text-decoration: underline; }
+  .right { margin-left: auto; display: flex; gap: 8px; align-items: center; }
+
+  .tabs { display: flex; gap: 4px; padding: 12px 24px 0; background: var(--bg-surface); border-bottom: 1px solid var(--border-default); }
+  .tab { padding: 9px 16px; font-size: var(--fs-md); font-weight: var(--fw-medium); color: var(--text-secondary); cursor: pointer; border: none; background: none; border-bottom: 2px solid transparent; font-family: inherit; }
+  .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+  .wrap { max-width: 920px; margin: 0 auto; padding: 24px; }
+  .view { display: none; }
+  .view.active { display: block; }
+  .card { background: var(--bg-surface); border: 1px solid var(--border-default); border-radius: var(--radius-xl); padding: 20px 22px; box-shadow: var(--shadow-sm); margin-bottom: 18px; }
+  .card.today { border-color: var(--accent); }
+  .card h2 { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin-bottom: 4px; }
+  .card .hint { color: var(--text-muted); font-size: var(--fs-base); margin-bottom: 14px; }
+  .muted { color: var(--text-muted); font-size: var(--fs-sm); }
+
+  /* health strip */
+  .health { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 18px; }
+  .hc { background: var(--bg-surface); border: 1px solid var(--border-default); border-radius: var(--radius-lg); padding: 10px 12px; display: flex; gap: 8px; align-items: flex-start; }
+  .hc .d { width: 9px; height: 9px; border-radius: 50%; margin-top: 5px; flex-shrink: 0; background: var(--text-muted); }
+  .hc.ok .d { background: var(--success); }
+  .hc.warn .d { background: var(--warning); }
+  .hc.fail .d { background: var(--danger); }
+  .hc .t { font-size: var(--fs-sm); font-weight: var(--fw-medium); }
+  .hc .s { font-size: var(--fs-xs); color: var(--text-secondary); }
+
+  /* brief card */
+  .brief-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
+  .brief-date { font-size: var(--fs-xs); color: var(--text-muted); font-weight: var(--fw-medium); }
+  .badges { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .badge { font-size: var(--fs-xs); padding: 2px 10px; border-radius: var(--radius-full); font-weight: var(--fw-medium); }
+  .badge.green { background: var(--success-bg); color: var(--success); }
+  .badge.amber { background: var(--warning-bg); color: var(--warning); }
+  .badge.red { background: var(--danger-bg); color: var(--danger); }
+  .badge.grey { background: var(--bg-subtle); color: var(--text-secondary); }
+  .badge.failed { background: var(--warning-bg); color: var(--warning); }
+  .safe { font-size: var(--fs-xs); color: var(--text-secondary); }
+  .one-thing { margin-top: 12px; font-size: var(--fs-lg); font-weight: var(--fw-bold); }
+  .first-step { margin-top: 8px; padding: 12px; background: var(--accent-soft); border-radius: var(--radius-md); font-size: var(--fs-sm); }
+  .why { margin-top: 12px; font-size: var(--fs-sm); color: var(--text-secondary); }
+  .handed { margin-top: 12px; padding: 12px; background: var(--bg-surface-2); border-radius: var(--radius-md); font-size: var(--fs-sm); color: var(--text-secondary); }
+  .handed strong { color: var(--text-primary); }
+  .ignore { margin-top: 12px; font-size: var(--fs-sm); color: var(--text-muted); }
+  .brief ul { margin: 4px 0 0 20px; padding: 0; }
+  .flag { margin-top: 8px; font-size: var(--fs-sm); color: var(--warning); background: var(--warning-bg); padding: 8px 12px; border-radius: var(--radius-md); }
+  .notice { background: var(--warning-bg); border: 1px solid var(--border-default); border-radius: var(--radius-lg); padding: 20px; font-size: var(--fs-sm); margin-bottom: 18px; }
+  .notice.calm { background: var(--bg-surface); }
+  .notice.err { background: var(--danger-bg); color: var(--danger); }
+  .hist-title { font-size: var(--fs-md); font-weight: var(--fw-semibold); margin: 6px 0 12px; }
+
+  /* setup */
+  .stepper { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 18px; }
+  .stepbtn { font-family: inherit; font-size: var(--fs-sm); padding: 6px 12px; border-radius: var(--radius-full); border: 1px solid var(--border-default); background: var(--bg-surface); color: var(--text-secondary); cursor: pointer; }
+  .stepbtn.active { background: var(--accent); color: var(--bg-surface); border-color: var(--accent); }
+  .stepbtn.done { border-color: var(--success-border); }
+  .step-card { display: none; }
+  .step-card.active { display: block; }
+  .q { padding: 14px 0; border-top: 1px solid var(--border-subtle); }
+  .q:first-of-type { border-top: none; }
+  .q label.lbl { display: flex; align-items: center; gap: 8px; font-size: var(--fs-md); font-weight: var(--fw-medium); margin-bottom: 4px; flex-wrap: wrap; }
+  .req { width: 7px; height: 7px; border-radius: 50%; background: var(--danger); display: inline-block; }
+  .who { font-size: var(--fs-xs); font-weight: var(--fw-medium); padding: 1px 8px; border-radius: var(--radius-full); background: var(--bg-subtle); color: var(--text-secondary); }
+  .who.CALL { background: var(--info-bg); color: var(--info); }
+  .who.US { background: var(--accent-soft); color: var(--accent); }
+  .help { font-size: var(--fs-sm); color: var(--text-muted); margin-bottom: 8px; }
+  input[type=text], input[type=password], input[type=date], input[type=number], input[type=email], textarea, select { width: 100%; font-family: inherit; font-size: var(--fs-base); padding: 9px 11px; border: 1px solid var(--border-default); border-radius: var(--radius-md); background: var(--bg-surface); color: var(--text-primary); }
+  textarea { min-height: 76px; resize: vertical; }
+  input:focus, textarea:focus, select:focus { outline: 2px solid var(--accent-soft); border-color: var(--accent); }
+  .row { display: grid; gap: 8px; margin-bottom: 8px; align-items: center; }
+  .row.team { grid-template-columns: 1fr 1fr 2fr auto; }
+  .row.board { grid-template-columns: auto 1fr 1fr; }
+  .row.workers { grid-template-columns: auto 1fr 2fr; }
+  .row .lane { grid-column: 2 / -1; font-size: var(--fs-xs); color: var(--text-muted); margin-top: -4px; margin-bottom: 6px; }
+  .row .ro { font-size: var(--fs-sm); color: var(--text-secondary); }
+  .sub-fields { display: grid; gap: 8px; margin-top: 8px; }
+  .chk { display: flex; align-items: center; gap: 8px; font-size: var(--fs-base); }
+  .chk input { width: 16px; height: 16px; }
+  .saved-dot { display: inline-flex; align-items: center; gap: 5px; font-size: var(--fs-xs); color: var(--success); margin-top: 4px; }
+  .saved-dot::before { content: ''; width: 7px; height: 7px; border-radius: 50%; background: var(--success); }
+  .actions { display: flex; gap: 10px; align-items: center; margin-top: 16px; flex-wrap: wrap; }
+  button.btn { font-family: inherit; padding: 8px 16px; border-radius: var(--radius-md); font-size: var(--fs-sm); font-weight: var(--fw-medium); cursor: pointer; border: 1px solid var(--border-default); background: var(--bg-surface); color: var(--text-primary); }
+  button.btn.primary { background: var(--accent); color: var(--bg-surface); border-color: var(--accent); }
+  button.btn.primary:hover { background: var(--accent-hover); }
+  button.btn:disabled { opacity: .5; cursor: not-allowed; }
+  button.small { padding: 5px 10px; font-size: var(--fs-xs); }
+  .status { font-size: var(--fs-sm); color: var(--text-secondary); }
+  .status.ok { color: var(--success); }
+  .status.err { color: var(--danger); }
+  .ready { border-radius: var(--radius-lg); padding: 14px 16px; margin-bottom: 18px; font-size: var(--fs-sm); border: 1px solid var(--border-default); }
+  .ready.go { background: var(--success-bg); color: var(--success); border-color: var(--success-border); }
+  .ready.missing { background: var(--warning-bg); }
+  .ready ul { margin: 6px 0 0 20px; }
+
+  /* login overlay */
+  #sbLoginOverlay { position: fixed; inset: 0; z-index: 99999; background: var(--bg-app); display: flex; align-items: center; justify-content: center; }
+  #sbLoginOverlay .box { background: var(--bg-surface); border: 1px solid var(--border-default); border-radius: var(--radius-xl); padding: 28px; width: 340px; box-shadow: var(--shadow-lg); }
+  #sbLoginOverlay .t { font-size: var(--fs-xl); font-weight: var(--fw-bold); }
+  #sbLoginOverlay .s { font-size: var(--fs-sm); color: var(--text-secondary); margin: 2px 0 16px; }
+  #sbLoginOverlay input { margin-bottom: 8px; }
+  #sbLoginOverlay #sbErr { color: var(--danger); font-size: var(--fs-xs); margin-top: 8px; display: none; }
+
+  @media (max-width: 720px) {
+    .health { grid-template-columns: 1fr 1fr; }
+    .row.team, .row.board, .row.workers { grid-template-columns: 1fr; }
+    .row .lane { grid-column: 1; }
+  }
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <h1>CEO <span>Brief</span></h1>
+  <span class="sub">One thing a day, from your board</span>
+  <div class="right">
+    <a class="how" href="ceo-brief-workflow.html" target="_blank" rel="noopener">How it works</a>
+    <button class="btn small" id="refreshBtn" type="button">Refresh</button>
+  </div>
+</div>
+
+<div class="tabs">
+  <button class="tab active" data-tab="today" type="button">Today</button>
+  <button class="tab" data-tab="setup" type="button">Setup</button>
+</div>
+
+<div class="wrap">
+  <div id="view-today" class="view active">
+    <div class="health" id="health"></div>
+    <div id="todayBox"></div>
+    <div id="history"></div>
+  </div>
+
+  <div id="view-setup" class="view">
+    <div id="readiness" class="ready"></div>
+    <div class="stepper" id="stepper"></div>
+    <div id="steps"></div>
+  </div>
+</div>
+
+<script type="module">
+import { CONFIG_KEY, SETUP_QUESTIONS, SETUP_STEPS, defaultConfig, mergeConfig, missingForGoLive, getPath, setPath, WORKERS, BOARD_SEATS } from './js/ceo-brief-defaults.mjs';
+
+// Exposed for tests and for the console: the list the form is rendered from.
+window.SETUP_QUESTIONS = SETUP_QUESTIONS;
+window.SETUP_STEPS = SETUP_STEPS;
+window.CEO_BRIEF_CONFIG_KEY = CONFIG_KEY;
+
+const SB_URL  = window.SUPABASE_URL  || 'https://ptkyhzlsvijcwyovgrgv.supabase.co';
+const SB_ANON = window.SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InB0a3loemxzdmlqY3d5b3Zncmd2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzYzMzIxNzgsImV4cCI6MjA5MTkwODE3OH0.U5ZdIjw--_UgJlYi75JTjpb2doBTjO4W8LUZPnZzkFU';
+// storageKey matches the shell so the page shares its login. org_id is never set here:
+// RLS and the column default decide which workspace a row belongs to.
+const sb = window.supabase.createClient(SB_URL, SB_ANON, { auth: { persistSession: true, storageKey: '_dlr_sb_app' } });
+
+function escHtml(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+const $ = (id) => document.getElementById(id);
+const lines = (s) => String(s || '').split('\n').map(x => x.trim()).filter(Boolean);
+
+// ── state ──────────────────────────────────────────────────────────────────
+let savedCfg = null;      // exactly what app_settings holds (or null)
+let cfg = defaultConfig();
+let briefs = [];
+let loadError = null;
+let activeStep = 1;
+
+// ── dates in the tenant's timezone ─────────────────────────────────────────
+function safeTz(tz) { try { new Intl.DateTimeFormat('en-GB', { timeZone: tz }); return tz; } catch (e) { return 'Europe/London'; } }
+function localDateISO(tz) { return new Intl.DateTimeFormat('en-CA', { timeZone: safeTz(tz) }).format(new Date()); }
+function localHour(tz) { return Number(new Intl.DateTimeFormat('en-GB', { timeZone: safeTz(tz), hour: 'numeric', hour12: false }).format(new Date())) % 24; }
+function isWeekendLocal(tz) { const d = new Intl.DateTimeFormat('en-GB', { timeZone: safeTz(tz), weekday: 'short' }).format(new Date()); return d === 'Sat' || d === 'Sun'; }
+function hourLabel(h) { h = Number(h); if (h === 0) return 'midnight'; if (h === 12) return 'midday'; return h < 12 ? `${h}am` : `${h - 12}pm`; }
+function daysBetween(isoA, isoB) { return Math.round((new Date(isoA + 'T00:00:00Z') - new Date(isoB + 'T00:00:00Z')) / 86400000); }
+function fmtDate(iso) {
+  const d = new Date(iso + 'T00:00:00Z'); if (isNaN(d)) return iso;
+  return new Intl.DateTimeFormat('en-GB', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' }).format(d);
+}
+
+// ── data ───────────────────────────────────────────────────────────────────
+async function loadConfig() {
+  const { data, error } = await sb.from('app_settings').select('value').eq('key', CONFIG_KEY).maybeSingle();
+  if (error) throw new Error(error.message);
+  savedCfg = null;
+  if (data && data.value) { try { savedCfg = JSON.parse(data.value); } catch (e) { savedCfg = null; } }
+  cfg = mergeConfig(savedCfg);
+}
+async function loadBriefs() {
+  const { data, error } = await sb.from('ceo_briefs')
+    .select('brief_date, one_thing, first_step, why, ignore_today, board_flags, handed_off, money_light, safe_to_act, fallback')
+    .order('brief_date', { ascending: false }).limit(30);
+  if (error) throw new Error(error.message);
+  briefs = data || [];
+}
+async function loadAll() {
+  loadError = null;
+  $('todayBox').innerHTML = '<div class="muted">Loading your brief...</div>';
+  try { await loadConfig(); await loadBriefs(); }
+  catch (e) { loadError = e.message || String(e); }
+  renderToday(); renderSetup();
+}
+
+// ── Today ──────────────────────────────────────────────────────────────────
+function lightBadge(light) {
+  const l = String(light || '').toLowerCase();
+  if (l === 'green') return '<span class="badge green">Money: green</span>';
+  if (l === 'amber') return '<span class="badge amber">Money: amber</span>';
+  if (l === 'red') return '<span class="badge red">Money: red</span>';
+  return '<span class="badge grey">Money: not connected</span>';
+}
+function briefCard(r, isToday) {
+  const flags = lines(r.board_flags), ignore = lines(r.ignore_today), handed = lines(r.handed_off);
+  const money = r.safe_to_act != null && r.safe_to_act !== ''
+    ? `£${Number(r.safe_to_act).toLocaleString('en-GB', { minimumFractionDigits: 2 })}` : 'n/a';
+  return `
+  <div class="card brief ${isToday ? 'today' : ''}" data-brief="${escHtml(r.brief_date)}" data-fallback="${r.fallback ? '1' : '0'}">
+    <div class="brief-head">
+      <div class="brief-date">${escHtml(fmtDate(r.brief_date))}${isToday ? ' · TODAY' : ''}</div>
+      <div class="badges">
+        ${r.fallback ? '<span class="badge failed">Brief failed · money message sent instead</span>' : ''}
+        ${lightBadge(r.money_light)}
+        <span class="safe">Safe to act: <strong>${escHtml(money)}</strong></span>
+      </div>
+    </div>
+    <div class="one-thing">${escHtml(r.one_thing || (r.fallback ? 'No brief was written today.' : ''))}</div>
+    ${r.first_step ? `<div class="first-step"><strong>Start here (10 min):</strong> ${escHtml(r.first_step)}</div>` : ''}
+    ${r.why ? `<div class="why"><strong>Why this wins:</strong> ${escHtml(r.why)}</div>` : ''}
+    ${handed.length ? `<div class="handed"><strong>Not yours today, handed off:</strong><ul>${handed.map(h => `<li>${escHtml(h)}</li>`).join('')}</ul></div>` : ''}
+    ${ignore.length ? `<div class="ignore"><strong>Ignore today:</strong><ul>${ignore.map(i => `<li>${escHtml(i)}</li>`).join('')}</ul></div>` : ''}
+    ${flags.map(f => `<div class="flag">Flag: ${escHtml(f)}</div>`).join('')}
+  </div>`;
+}
+
+function healthChecks() {
+  const tz = cfg.timezone, today = localDateISO(tz), missing = missingForGoLive(cfg);
+  const todayRow = briefs.find(b => b.brief_date === today);
+  const weekend = isWeekendLocal(tz) && cfg.weekdays_only;
+  const due = localHour(tz) >= Number(cfg.send_hour) + 1;
+  const latest = briefs[0];
+  const age = latest ? daysBetween(today, latest.brief_date) : null;
+  const arrived = !cfg.enabled ? { st: 'warn', s: 'Not switched on' }
+    : weekend ? { st: 'ok', s: 'No brief at weekends' }
+    : todayRow && todayRow.fallback ? { st: 'fail', s: 'Brief failed today' }
+    : todayRow ? { st: 'ok', s: 'Arrived' }
+    : due ? { st: 'fail', s: `Missing after ${hourLabel(cfg.send_hour)}` }
+    : { st: 'warn', s: `Due at ${hourLabel(cfg.send_hour)}` };
+  return [
+    { t: 'Setup complete', st: missing.length ? 'warn' : 'ok', s: missing.length ? `${missing.length} missing` : 'All answered' },
+    { t: 'Switched on', st: cfg.enabled ? 'ok' : 'warn', s: cfg.enabled ? 'Daily brief is on' : 'Off' },
+    { t: "Today's brief", ...arrived },
+    { t: 'Latest brief', st: !latest ? 'warn' : age <= 7 ? 'ok' : 'fail', s: !latest ? 'None yet' : age <= 7 ? `${age === 0 ? 'Today' : age + ' day' + (age === 1 ? '' : 's') + ' ago'}` : `${age} days ago` },
+  ];
+}
+
+function renderToday() {
+  const tz = cfg.timezone, today = localDateISO(tz);
+  $('health').innerHTML = loadError ? '' : healthChecks().map(c => `<div class="hc ${c.st}"><span class="d"></span><div><div class="t">${escHtml(c.t)}</div><div class="s">${escHtml(c.s)}</div></div></div>`).join('');
+
+  if (loadError) {
+    $('todayBox').innerHTML = `<div class="notice err">We could not load your brief. ${escHtml(loadError)}. Press Refresh to try again.</div>`;
+    $('history').innerHTML = ''; return;
+  }
+  const missing = missingForGoLive(cfg);
+  let html = '';
+  if (!cfg.enabled) {
+    html = `<div class="notice calm" id="notOn"><strong>Your CEO Brief is not switched on yet.</strong>
+      ${missing.length ? `<div style="margin-top:8px">Still needed before it goes live:</div><ul style="margin:6px 0 0 20px">${missing.map(m => `<li>${escHtml(m)}</li>`).join('')}</ul>` : '<div style="margin-top:8px">Everything is answered. We switch it on after the dry run reads right.</div>'}
+      <div class="actions"><button class="btn primary" type="button" id="goSetup">Open Setup</button></div></div>`;
+  } else {
+    const todayRow = briefs.find(b => b.brief_date === today);
+    if (todayRow) html = briefCard(todayRow, true);
+    else if (isWeekendLocal(tz) && cfg.weekdays_only) html = '<div class="notice calm">No brief today. Your CEO writes briefs on weekday mornings.</div>';
+    else html = `<div class="notice">Today's brief has not arrived yet. It is written at ${escHtml(hourLabel(cfg.send_hour))} in your timezone.</div>`;
+  }
+  $('todayBox').innerHTML = html;
+  const go = $('goSetup'); if (go) go.addEventListener('click', () => showTab('setup'));
+
+  const hist = briefs.filter(b => b.brief_date !== today || !cfg.enabled);
+  $('history').innerHTML = hist.length
+    ? `<div class="hist-title">Earlier briefs</div>${hist.map(b => briefCard(b, false)).join('')}`
+    : (briefs.length ? '' : '<div class="muted">No earlier briefs yet.</div>');
+}
+
+// ── Setup ──────────────────────────────────────────────────────────────────
+const WHO = { CLIENT: 'You', CALL: 'With us on the call', US: 'We set this' };
+const LIGHTS = [['green', 'Green'], ['amber', 'Amber'], ['red', 'Red']];
+
+function fieldHtml(q) {
+  const v = getPath(cfg, q.path);
+  const id = `q_${q.id}`;
+  const opt = (opts, cur) => opts.map(([val, lbl]) => `<option value="${escHtml(val)}" ${String(val) === String(cur) ? 'selected' : ''}>${escHtml(lbl)}</option>`).join('');
+  switch (q.type) {
+    case 'text': return `<input type="text" id="${id}" value="${escHtml(v)}">`;
+    case 'textarea': return `<textarea id="${id}">${escHtml(v)}</textarea>`;
+    case 'date': return `<input type="date" id="${id}" value="${escHtml(v)}">`;
+    case 'select': return `<select id="${id}">${opt(q.options || [], v)}</select>`;
+    case 'checkbox': return `<label class="chk"><input type="checkbox" id="${id}" ${v ? 'checked' : ''}> <span>Yes</span></label>`;
+    case 'list': return `<textarea id="${id}" placeholder="One per line">${escHtml((v || []).join('\n'))}</textarea>`;
+    case 'secret': return `<input type="password" id="${id}" autocomplete="off" placeholder="${v ? 'Saved. Paste again to replace.' : ''}">${v ? '<div class="saved-dot">saved</div>' : ''}`;
+    case 'team': {
+      const rows = (v && v.length ? v : []);
+      return `<div id="${id}" class="repeater">${rows.map((t, i) => teamRow(t, i)).join('')}</div>
+        <button class="btn small" type="button" data-add-team="${id}">Add a person</button>`;
+    }
+    case 'workers': {
+      const cur = v || [];
+      return `<div id="${id}">${WORKERS.map(w => { const c = cur.find(x => x.id === w.id); return `
+        <div class="row workers" data-worker="${escHtml(w.id)}"><input type="checkbox" ${!c || c.enabled ? 'checked' : ''}><span class="ro"><strong>${escHtml(w.id)}</strong></span><span class="ro">${escHtml(w.does)}</span></div>`; }).join('')}</div>`;
+    }
+    case 'board': {
+      const cur = v || [];
+      return `<div id="${id}">${BOARD_SEATS.map(s => { const c = cur.find(x => x.seat === s.seat); return `
+        <div class="row board" data-seat="${escHtml(s.seat)}"><input type="checkbox" ${!c || c.enabled ? 'checked' : ''}><span class="ro"><strong>${escHtml(s.seat)}</strong></span><input type="text" value="${escHtml(c ? c.head : s.head)}" aria-label="Head for ${escHtml(s.seat)}"><div class="lane">${escHtml(s.lane)}</div></div>`; }).join('')}</div>`;
+    }
+    case 'tasks_source': {
+      const t = v || {};
+      return `<div id="${id}"><select data-sub="kind">${opt([['none', 'The Tasks page in this app'], ['airtable', 'An Airtable base we connect']], t.kind || 'none')}</select>
+        <div class="sub-fields" data-when="airtable" style="display:${t.kind === 'airtable' ? 'grid' : 'none'}">
+          <input type="text" data-sub="airtable_base" placeholder="Airtable base ID (app...)" value="${escHtml(t.airtable_base)}">
+          <input type="text" data-sub="airtable_table" placeholder="Table ID or name" value="${escHtml(t.airtable_table)}">
+          <input type="text" data-sub="airtable_pat_ref" placeholder="Name of the stored token (we set this on the call)" value="${escHtml(t.airtable_pat_ref)}">
+        </div></div>`;
+    }
+    case 'money_source': {
+      const m = v || {};
+      return `<div id="${id}"><select data-sub="kind">${opt([['none', 'No money light'], ['manual', 'A manual figure I keep updated']], m.kind || 'none')}</select>
+        <div class="sub-fields" data-when="manual" style="display:${m.kind === 'manual' ? 'grid' : 'none'}">
+          <select data-sub="manual_light">${opt(LIGHTS, m.manual_light || 'green')}</select>
+          <input type="number" step="0.01" data-sub="manual_safe_to_act" placeholder="Safe to act today, in pounds" value="${m.manual_safe_to_act == null ? '' : escHtml(m.manual_safe_to_act)}">
+        </div></div>`;
+    }
+    default: return `<input type="text" id="${id}" value="${escHtml(v)}">`;
+  }
+}
+function teamRow(t, i) {
+  t = t || {};
+  return `<div class="row team" data-team-row="${i}">
+    <input type="text" data-sub="name" placeholder="Name" value="${escHtml(t.name)}">
+    <input type="text" data-sub="role" placeholder="Role" value="${escHtml(t.role)}">
+    <input type="text" data-sub="may_be_handed" placeholder="May be handed: suppliers, tenants, bookings" value="${escHtml((t.may_be_handed || []).join(', '))}">
+    <button class="btn small" type="button" data-remove-row>Remove</button></div>`;
+}
+
+function readValue(q) {
+  const el = $(`q_${q.id}`);
+  if (!el) return undefined;
+  const sub = (root, k) => root.querySelector(`[data-sub="${k}"]`);
+  switch (q.type) {
+    case 'text': case 'textarea': case 'date': return el.value.trim();
+    case 'select': {
+      const raw = el.value; const match = (q.options || []).find(([val]) => String(val) === raw);
+      return match ? match[0] : raw;   // keeps numbers as numbers (send_hour)
+    }
+    case 'checkbox': return !!el.checked;
+    case 'list': return lines(el.value);
+    case 'secret': return el.value.trim() ? el.value.trim() : undefined;   // blank = keep what is saved
+    case 'team': return [...el.querySelectorAll('[data-team-row]')].map(r => ({
+      name: sub(r, 'name').value.trim(), role: sub(r, 'role').value.trim(),
+      may_be_handed: sub(r, 'may_be_handed').value.split(',').map(s => s.trim()).filter(Boolean),
+    })).filter(t => t.name);
+    case 'workers': return WORKERS.map(w => ({ ...w, enabled: el.querySelector(`[data-worker="${CSS.escape(w.id)}"] input[type=checkbox]`).checked }));
+    case 'board': return BOARD_SEATS.map(s => { const r = el.querySelector(`[data-seat="${CSS.escape(s.seat)}"]`); return { ...s, enabled: r.querySelector('input[type=checkbox]').checked, head: r.querySelector('input[type=text]').value.trim() || s.head }; });
+    case 'tasks_source': return { ...(getPath(cfg, q.path) || {}), kind: sub(el, 'kind').value, airtable_base: sub(el, 'airtable_base').value.trim(), airtable_table: sub(el, 'airtable_table').value.trim(), airtable_pat_ref: sub(el, 'airtable_pat_ref').value.trim() };
+    case 'money_source': { const n = sub(el, 'manual_safe_to_act').value.trim(); return { kind: sub(el, 'kind').value, manual_light: sub(el, 'manual_light').value, manual_safe_to_act: n === '' ? null : Number(n) }; }
+    default: return el.value;
+  }
+}
+
+function renderReadiness() {
+  const missing = missingForGoLive(cfg);
+  const box = $('readiness');
+  box.className = 'ready ' + (missing.length ? 'missing' : 'go');
+  box.innerHTML = missing.length
+    ? `<strong>Not ready to go live yet.</strong> Still missing:<ul>${missing.map(m => `<li>${escHtml(m)}</li>`).join('')}</ul>`
+    : `<strong>Ready to go live.</strong> ${cfg.enabled ? 'The daily brief is switched on.' : 'Tick the switch in the Go live step and save.'}`;
+  // the go-live switch is locked while anything is missing
+  const en = $('q_enabled');
+  if (en) {
+    en.disabled = missing.length > 0;
+    const note = $('enabledNote');
+    if (note) note.textContent = missing.length ? `Locked until these are answered: ${missing.join(', ')}.` : '';
+  }
+}
+
+function renderSetup() {
+  if (loadError) { $('steps').innerHTML = `<div class="notice err">We could not load your setup. ${escHtml(loadError)}.</div>`; $('stepper').innerHTML = ''; $('readiness').innerHTML = ''; return; }
+  $('stepper').innerHTML = SETUP_STEPS.map(s => `<button class="stepbtn ${s.step === activeStep ? 'active' : ''}" type="button" data-step="${s.step}">${s.step}. ${escHtml(s.title)}</button>`).join('');
+  $('steps').innerHTML = SETUP_STEPS.map(s => `
+    <div class="card step-card ${s.step === activeStep ? 'active' : ''}" data-step-card="${s.step}">
+      <h2>Step ${s.step}: ${escHtml(s.title)}</h2>
+      <div class="hint">Step ${s.step} of ${SETUP_STEPS.length}</div>
+      ${SETUP_QUESTIONS.filter(q => q.step === s.step).map(q => `
+        <div class="q" data-q="${escHtml(q.id)}" data-type="${escHtml(q.type)}">
+          <label class="lbl" for="q_${escHtml(q.id)}">${escHtml(q.label)}${q.required ? ' <span class="req" title="Required"></span>' : ''}<span class="who ${escHtml(q.who)}">${escHtml(WHO[q.who] || q.who)}</span></label>
+          ${q.help ? `<div class="help">${escHtml(q.help)}</div>` : ''}
+          ${fieldHtml(q)}
+          ${q.id === 'enabled' ? '<div class="help" id="enabledNote"></div>' : ''}
+        </div>`).join('')}
+      <div class="actions">
+        <button class="btn primary" type="button" data-save="${s.step}">Save this step</button>
+        ${s.step < SETUP_STEPS.length ? `<button class="btn" type="button" data-next="${s.step}">Save and continue</button>` : ''}
+        <span class="status" data-status="${s.step}"></span>
+      </div>
+    </div>`).join('');
+  renderReadiness();
+  wireSetup();
+}
+
+function wireSetup() {
+  document.querySelectorAll('[data-step]').forEach(b => b.addEventListener('click', () => { activeStep = Number(b.dataset.step); renderSetup(); }));
+  document.querySelectorAll('[data-save]').forEach(b => b.addEventListener('click', () => saveStep(Number(b.dataset.save), false)));
+  document.querySelectorAll('[data-next]').forEach(b => b.addEventListener('click', () => saveStep(Number(b.dataset.next), true)));
+  document.querySelectorAll('[data-add-team]').forEach(b => b.addEventListener('click', () => {
+    const rep = $(b.dataset.addTeam); rep.insertAdjacentHTML('beforeend', teamRow({}, rep.children.length)); wireRemove();
+  }));
+  document.querySelectorAll('[data-sub="kind"]').forEach(sel => sel.addEventListener('change', () => {
+    sel.parentElement.querySelectorAll('[data-when]').forEach(d => { d.style.display = d.dataset.when === sel.value ? 'grid' : 'none'; });
+  }));
+  wireRemove();
+}
+function wireRemove() {
+  document.querySelectorAll('[data-remove-row]').forEach(b => { b.onclick = () => b.closest('[data-team-row]').remove(); });
+}
+
+async function saveStep(step, goNext) {
+  const status = document.querySelector(`[data-status="${step}"]`);
+  status.className = 'status'; status.textContent = 'Saving...';
+  const next = mergeConfig(savedCfg);
+  for (const q of SETUP_QUESTIONS.filter(x => x.step === step)) {
+    const v = readValue(q);
+    if (v !== undefined) setPath(next, q.path, v);
+  }
+  // the go-live switch cannot be turned on while anything is missing
+  if (next.enabled && missingForGoLive(next).length) next.enabled = false;
+  try {
+    const { error } = await sb.from('app_settings').upsert({ key: CONFIG_KEY, value: JSON.stringify(next) }, { onConflict: 'org_id,key' });
+    if (error) throw new Error(error.message);
+    savedCfg = next; cfg = mergeConfig(savedCfg);
+    status.className = 'status ok'; status.textContent = 'Saved';
+    if (goNext) activeStep = step + 1;
+    renderSetup(); renderToday();
+    const s2 = document.querySelector(`[data-status="${step}"]`); if (s2 && !goNext) { s2.className = 'status ok'; s2.textContent = 'Saved'; }
+  } catch (e) {
+    status.className = 'status err'; status.textContent = `Could not save: ${e.message || e}`;
+  }
+}
+
+// ── tabs and boot ──────────────────────────────────────────────────────────
+function showTab(name) {
+  document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === name));
+  document.querySelectorAll('.view').forEach(v => v.classList.toggle('active', v.id === `view-${name}`));
+}
+document.querySelectorAll('.tab').forEach(t => t.addEventListener('click', () => showTab(t.dataset.tab)));
+$('refreshBtn').addEventListener('click', loadAll);
+
+function loginOverlay() {
+  const d = document.createElement('div');
+  d.id = 'sbLoginOverlay';
+  d.innerHTML = `<div class="box"><div class="t">CEO Brief</div><div class="s">Sign in to see your brief</div>
+    <input id="sbEmail" type="email" placeholder="Email" autocomplete="username">
+    <input id="sbPass" type="password" placeholder="Password" autocomplete="current-password">
+    <button class="btn primary" id="sbGo" type="button" style="width:100%">Sign in</button>
+    <div id="sbErr"></div></div>`;
+  document.body.appendChild(d);
+  const err = d.querySelector('#sbErr');
+  async function attempt() {
+    err.style.display = 'none';
+    const { error } = await sb.auth.signInWithPassword({ email: d.querySelector('#sbEmail').value.trim(), password: d.querySelector('#sbPass').value });
+    if (error) { err.textContent = error.message; err.style.display = 'block'; return; }
+    d.remove(); loadAll();
+  }
+  d.querySelector('#sbGo').addEventListener('click', attempt);
+  d.querySelector('#sbPass').addEventListener('keydown', e => { if (e.key === 'Enter') attempt(); });
+}
+
+async function boot() {
+  let session = null;
+  try { session = (await sb.auth.getSession()).data.session; } catch (e) { session = null; }
+  if (!session) { loginOverlay(); return; }
+  await loadAll();
+}
+boot();
+</script>
+</body>
+</html>
