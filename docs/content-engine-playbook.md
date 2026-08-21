@@ -215,6 +215,17 @@ Kevin.
    trial. Never quote module pricing until Phase 2 pricing goes live.
 10. **Agent vs assistant.** Only the two autonomous agents in §4a may be called agents. Everything
    else is an assistant. Never describe the reconciliation, wealth or AI Brain engines as AI.
+11. **Train on Kevin's real voice before drafting, do not just obey the style rules.** Rules 5 and
+   6 say what to avoid. They cannot say what Kevin sounds like, and a draft that breaks no rule
+   still reads like anyone's. Load
+   `00 AI Context/Knowledge/kevin-voice-profile.md` first: it holds his actual writing patterns
+   with verbatim samples pulled from his own sent email. Copy the shape, not the punctuation:
+   his real writing uses em dashes and hype words that rules 5 and 6 still ban in output.
+   **The contamination rule is the part that bites:** most text sitting in his accounts since
+   early 2026 was written by his own AI (18 of his 20 most recent Slack messages, and the whole
+   2026 creditor lane). Training on that feeds the AI its own voice back and the loop tightens
+   every round. Only train on text with a known human author. Person-to-person email from 2025
+   and earlier is the safe corpus.
 
 ### What rule 1 does and does not mean
 
