@@ -386,6 +386,9 @@ async function gatherTasks(pat) {
         // The names an agent must not be dispatched to redo. Lower-cased for a
         // cheap containment test in the brief validator.
         approvalNames: waiting.map(x => x.name.toLowerCase()),
+        // The same list as written, for quoting back at Kevin when the brief's
+        // step turns out to be work already waiting on his tick.
+        approvalDisplayNames: waiting.map(x => x.name),
     };
 }
 
@@ -519,18 +522,42 @@ function distinctiveWords(text) {
         .split(/\s+/)
         .filter(w => w.length > 2 && !HANDOFF_STOPWORDS.has(w)));
 }
+// Index of the waiting task a line of the brief is describing, or -1.
+// One test, so the hand-off guard and the step guard can never disagree about
+// what counts as 'the same work'.
+function waitingMatch(text, tasks) {
+    const waiting = (tasks && tasks.approvalNames) || [];
+    if (!waiting.length) return -1;
+    const words = distinctiveWords(text);
+    for (let i = 0; i < waiting.length; i++) {
+        let shared = 0;
+        for (const word of distinctiveWords(waiting[i])) if (words.has(word)) shared++;
+        if (shared >= 2) return i;
+    }
+    return -1;
+}
 function dropAlreadyWaiting(handedOff, tasks) {
     const waiting = (tasks && tasks.approvalNames) || [];
     if (!waiting.length) return handedOff;
-    const waitingWords = waiting.map(distinctiveWords);
-    return handedOff.filter(item => {
-        const words = distinctiveWords(item);
-        return !waitingWords.some(w => {
-            let shared = 0;
-            for (const word of w) if (words.has(word)) shared++;
-            return shared >= 2;
-        });
-    });
+    return handedOff.filter(item => waitingMatch(item, tasks) < 0);
+}
+
+// Rewrite a brief field that re-commissions work already waiting on a tick.
+//
+// Finding 20260819-ceo-huddle-218. dropAlreadyWaiting only ever guarded
+// handed_off, so the SAME brief that refused to dispatch an agent for Jack
+// Duddy still told Kevin to spend ten minutes writing the message himself. The
+// field cannot be stripped — one_thing and first_step are required, and callCeo
+// throws without them — so it is redirected at the thing that is actually
+// waiting. Kevin's action was always one tap; the brief now says so.
+function redirectToWaiting(text, tasks, kind) {
+    const i = waitingMatch(text, tasks);
+    if (i < 0) return text;
+    const names = (tasks && tasks.approvalDisplayNames) || [];
+    const name = names[i] || (tasks.approvalNames || [])[i] || 'the waiting task';
+    return kind === 'one_thing'
+        ? `Clear "${name}" out of the approval queue — the work is done and waiting on your tick.`
+        : `Approve "${name}" in the approval queue — it is already drafted, so this is one tap, not a writing job.`;
 }
 
 async function callCeo(env, prompt, huddle, tasks) {
@@ -562,6 +589,11 @@ async function callCeo(env, prompt, huddle, tasks) {
     // warm re-opener message for Jack Duddy' while the finished, addressed email
     // sat in Approval.
     b.handed_off = dropAlreadyWaiting(b.handed_off, tasks);
+    // Same control, applied to the two fields Kevin actually reads first. On
+    // 11 Aug the hand-off was correctly dropped while one_thing and first_step
+    // still sent him off to write a message that was already written.
+    b.one_thing = redirectToWaiting(b.one_thing, tasks, 'one_thing');
+    b.first_step = redirectToWaiting(b.first_step, tasks, 'first_step');
     return b;
 }
 

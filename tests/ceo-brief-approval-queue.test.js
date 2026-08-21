@@ -36,7 +36,7 @@ function load(names) {
   return new Function(`${src}; return { ${names.join(', ')} };`)();
 }
 
-const { dropAlreadyWaiting } = load(['HANDOFF_STOPWORDS', 'distinctiveWords', 'dropAlreadyWaiting']);
+const { dropAlreadyWaiting } = load(['HANDOFF_STOPWORDS', 'distinctiveWords', 'waitingMatch', 'dropAlreadyWaiting']);
 
 describe('CEO brief and the approval queue', () => {
   it('does not dispatch an agent to redo work already waiting on a tick', () => {
@@ -67,6 +67,74 @@ describe('CEO brief and the approval queue', () => {
     const items = ['worker-writer — draft something'];
     expect(dropAlreadyWaiting(items, { approvalNames: [] })).toEqual(items);
     expect(dropAlreadyWaiting(items, undefined)).toEqual(items);
+  });
+});
+
+// Finding 20260819-ceo-huddle-218.
+//
+// The guard only ever covered handed_off. The SAME 11 Aug brief that correctly
+// refused to dispatch 'worker-writer — draft a warm re-opener for Jack Duddy'
+// still told Kevin, in first_step, to 'spend 10 minutes writing one honest,
+// short re-opener in your own voice' — for an email that was finished, addressed
+// and one tap from sending. The two fields cannot simply be dropped: callCeo
+// throws without them. They are redirected at the waiting item instead.
+describe('the brief does not re-commission work already waiting', () => {
+  const { redirectToWaiting, waitingMatch } = load([
+    'HANDOFF_STOPWORDS', 'distinctiveWords', 'waitingMatch', 'redirectToWaiting']);
+  const tasks = {
+    approvalNames: ['warm lane: re-engage jack duddy'],
+    approvalDisplayNames: ['Warm lane: re-engage Jack Duddy'],
+  };
+
+  it('rewrites a first_step that duplicates a waiting task', () => {
+    const out = redirectToWaiting(
+      'Spend 10 minutes writing one honest, short re-opener to Jack Duddy in your own voice',
+      tasks, 'first_step');
+    expect(out, 'Kevin was sent to write an email that was already written')
+      .not.toMatch(/spend 10 minutes/i);
+    expect(out).toMatch(/approve/i);
+    expect(out).toContain('Warm lane: re-engage Jack Duddy');
+  });
+
+  it('rewrites, never blanks — the field is required', () => {
+    const out = redirectToWaiting('write to Jack Duddy re-engage', tasks, 'first_step');
+    expect(out.trim().length).toBeGreaterThan(0);
+  });
+
+  it('rewrites one_thing differently, so the brief does not say it twice', () => {
+    const step = redirectToWaiting('re-engage Jack Duddy today', tasks, 'first_step');
+    const one = redirectToWaiting('Re-engage Jack Duddy', tasks, 'one_thing');
+    expect(one).not.toBe(step);
+    expect(one).toContain('Warm lane: re-engage Jack Duddy');
+  });
+
+  it('leaves a genuine step alone', () => {
+    const step = 'Call the accountant about the Q3 filing deadline';
+    expect(redirectToWaiting(step, tasks, 'first_step')).toBe(step);
+  });
+
+  it('leaves everything alone when nothing is waiting', () => {
+    const step = 'Re-engage Jack Duddy';
+    expect(redirectToWaiting(step, { approvalNames: [] }, 'first_step')).toBe(step);
+    expect(redirectToWaiting(step, undefined, 'first_step')).toBe(step);
+  });
+
+  it('uses the SAME match as the hand-off guard, so the two cannot disagree', () => {
+    const line = 'draft a warm re-opener message for Jack Duddy';
+    expect(waitingMatch(line, tasks)).toBe(0);
+    expect(dropAlreadyWaiting([line], tasks)).toEqual([]);
+    expect(redirectToWaiting(line, tasks, 'first_step')).not.toBe(line);
+  });
+
+  it('callCeo applies it to both fields before returning the brief', () => {
+    // The functions existing is not the control; being wired in is.
+    const callCeo = WORKER.slice(WORKER.indexOf('async function callCeo('));
+    expect(callCeo).toMatch(/b\.one_thing = redirectToWaiting\(/);
+    expect(callCeo).toMatch(/b\.first_step = redirectToWaiting\(/);
+  });
+
+  it('gatherTasks supplies the display names the rewrite quotes back', () => {
+    expect(WORKER).toMatch(/approvalDisplayNames:/);
   });
 });
 

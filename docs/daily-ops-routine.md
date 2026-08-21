@@ -163,6 +163,22 @@ The version-controlled original of these instructions is docs/daily-ops-routine.
 
 ## Phase 1 — Readiness
 
+**First, before anything else: has today already finished?**
+
+```
+cd /Users/kevinbrittain/Projects/leadership-dashboard
+python3 scripts/job-queue.py rantoday daily-ops
+```
+
+Exit 3 means today already stamped an end mark. **STOP the whole run**, post one
+line to Kevin saying daily-ops was asked to run twice today and the second run
+was refused, and do nothing else. Exit 0 means carry on.
+
+A START mark alone does NOT block: a run the Mac killed halfway has to be
+resumable, and only a matching END means the day is done. (Regression origin:
+19 Aug 2026 — the first run stamped end at 14:12:19Z and a second full run
+started at 14:22:56Z. Finding 20260819-daily-ops-252.)
+
 The Mac usually wakes into this routine, and the network and Google Drive lag behind the wake by a minute or two.
 
 ```

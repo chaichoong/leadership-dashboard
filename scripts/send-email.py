@@ -411,6 +411,33 @@ def cmd_selftest(args):
     cases.append(("tier-1 banner stripped", tier1 == parse_output(plain, "selftest")))
     cases.append(("banner not left in body", TIER1_BANNER not in tier1["body"]))
 
+    # The mandatory closing line agent-dispatch.py requires on every submit is a
+    # note to Kevin about the action, not a sentence in the letter. Until 19 Aug
+    # 2026 it was not stripped, so the only route to sending five approved
+    # creditor and Companies House emails would have posted
+    # '**Carrying this out will involve:** sending the email above ...' to the
+    # recipient (finding 20260819-agent-dispatch-237).
+    from agent_email_format import CARRY_OUT_MARKER
+    closed = parse_output(
+        plain + "\n\n" + CARRY_OUT_MARKER
+        + " sending the email above to Companies House from Kevin's Gmail.",
+        "selftest")
+    cases.append(("closing carry-out line stripped",
+                  "arrying this out" not in closed["body"]))
+    cases.append(("body otherwise unchanged by the strip",
+                  closed["body"] == parse_output(plain, "selftest")["body"]))
+    fenced = parse_output(
+        plain + "\n\n---\n\n" + CARRY_OUT_MARKER + " sending it.", "selftest")
+    cases.append(("rule fencing the note goes with it",
+                  fenced["body"] == parse_output(plain, "selftest")["body"]))
+    mid = parse_output(
+        "TO: a@b.com\nSUBJECT: x\n---\nCarrying this out will involve: "
+        + ("word " * 120) + "\n\nRegards", "selftest")
+    cases.append(("a mid-body mention is left alone",
+                  "arrying this out" in mid["body"]))
+    refuses("refuses a body that is only the closing line",
+            "TO: a@b.com\nSUBJECT: x\n---\n" + CARRY_OUT_MARKER + " sending it.")
+
     # Sender identity (finding 20260812-ceo-huddle-094). The warm-lane copy is
     # the real text that would have gone out from a personal gmail address.
     warm = ("Hi Jack,\n\nYou booked a call with Operations Director a while "

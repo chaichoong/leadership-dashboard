@@ -229,7 +229,7 @@
     function updateSitemapBadge() {
         const badge = document.getElementById('sitemapBadge');
         if (!badge) return;
-        let stale = 0, missing = 0, unknown = 0, declaredOnly = 0;
+        let stale = 0, missing = 0, unknown = 0, declaredOnly = 0, declaredNoSop = 0;
         if (gitSyncData) {
             for (const p of PAGE_REGISTRY) {
                 const gs = getGitStatus(p);
@@ -239,7 +239,15 @@
                 else if (gs.state === 'unknown') unknown++;
             }
         } else {
-            declaredOnly = PAGE_REGISTRY.filter(p => p.pageVer !== p.sopVer).length;
+            // A red count is a promise that there is something to do about it. The
+            // fallback counted every pageVer !== sopVer row, which on 16 Aug 2026 was
+            // 24 of 28 pages — but 11 of those have no SOP file at all, so their
+            // sopVer is a placeholder that will never match and no button on the page
+            // regenerates them. Only the 13 with a real SOP file are actionable; the
+            // rest are counted separately and never turn the badge red.
+            const mismatched = PAGE_REGISTRY.filter(p => p.pageVer !== p.sopVer);
+            declaredOnly = mismatched.filter(p => p.sopFile).length;
+            declaredNoSop = mismatched.length - declaredOnly;
         }
         const total = gitSyncData ? (stale + missing + unknown) : declaredOnly;
         if (total > 0) {
@@ -251,7 +259,7 @@
             badge.style.background = anyAction ? 'var(--danger)' : 'var(--warning)';
             badge.title = gitSyncData
                 ? `${stale} stale · ${missing} missing SOP${unknown ? ' · ' + unknown + ' unknown' : ''}`
-                : `${declaredOnly} page${declaredOnly === 1 ? '' : 's'} with declared-version mismatch — click Check Git Sync for real status`;
+                : `${declaredOnly} SOP${declaredOnly === 1 ? '' : 's'} behind its page${declaredNoSop ? ` · ${declaredNoSop} page${declaredNoSop === 1 ? '' : 's'} with no SOP yet (not counted)` : ''} — click Check Git Sync for real status`;
         } else {
             badge.style.display = 'none';
             badge.title = '';
@@ -524,7 +532,7 @@
             let updateAllBtn = '';
             if (effectiveStalePages.length > 0) {
                 if (sopRequested) {
-                    updateAllBtn = `<button class="cfv-action-btn" style="font-size:11px;padding:8px 16px;margin-top:8px;background:var(--success-bg);color:var(--success);border-color:var(--success);cursor:default" disabled>✓ Update Requested — Processing (${effectiveStalePages.length} SOPs)</button>`
+                    updateAllBtn = `<button class="cfv-action-btn" style="font-size:11px;padding:8px 16px;margin-top:8px;background:var(--warning-bg);color:var(--warning);border-color:var(--warning);cursor:default" disabled title="Requests land in the SOP Update Queue table in Airtable. No routine reads that table — a person has to pick them up.">⏳ ${effectiveStalePages.length} SOP${effectiveStalePages.length === 1 ? '' : 's'} queued — waiting for a writer</button>`
                         + ` <button class="cfv-action-btn" onclick="resetSOPRequestFlag()" style="font-size:11px;padding:8px 16px;margin-top:8px">Reset &amp; Re-enable</button>`;
                 } else {
                     updateAllBtn = `<button class="cfv-action-btn primary" onclick="requestAllSOPUpdates(this)" style="font-size:11px;padding:8px 16px;margin-top:8px">Update All Out-of-Sync SOPs (${effectiveStalePages.length})</button>`;
@@ -731,7 +739,7 @@
                 btn.style.background = 'var(--success-bg)';
                 btn.style.color = 'var(--success)';
                 const toast = document.getElementById('shareToast');
-                toast.textContent = `SOP update queued for ${pageName} — will be processed automatically`;
+                toast.textContent = `SOP update queued for ${pageName} — waiting for someone to write it`;
                 toast.style.display = 'block';
                 setTimeout(() => { toast.style.display = 'none'; }, 4000);
             } else {
@@ -773,12 +781,12 @@
         }
         // Mark as requested in localStorage so it persists across refreshes
         localStorage.setItem('_sop_update_requested', new Date().toISOString());
-        btn.textContent = '✓ Update Requested — Processing';
+        btn.textContent = '✓ Queued — waiting for a writer';
         btn.style.background = 'var(--success-bg)';
         btn.style.color = 'var(--success)';
         btn.style.borderColor = 'var(--success)';
         const toast = document.getElementById('shareToast');
-        toast.textContent = 'All SOP updates queued — will be processed automatically';
+        toast.textContent = 'All SOP updates queued — nothing writes them automatically, so they wait for a person';
         toast.style.display = 'block';
         setTimeout(() => { toast.style.display = 'none'; }, 4000);
     }

@@ -245,6 +245,57 @@ INVARIANTS = [
         "fields": ["Task Name", "Status", "Completion Date", "Completed Month (YYYY-MM)"],
     },
     {
+        # Tasks.Category is a formula with two branches:
+        #
+        #   IF({Amount In (GBP)} > 0,  "AR - Variable",
+        #   IF({Amount Out (GBP)} > 0, "AP - Variable", ""))
+        #
+        # and `Amount Out (GBP)` is itself the formula `0`. A literal zero. So
+        # the AP branch is unreachable BASE-WIDE and every task carrying money is
+        # coded AR, whatever direction the money actually goes. Verified 13 Aug
+        # 2026: "Fwd: Invoice INV-0549 from PPE & Sons Heating & Plumbing Ltd"
+        # (£168, a bill Kevin OWES) reads "AR - Variable", i.e. money owed TO
+        # him. So does "Fwd: Cleaning Invoice".
+        #
+        # This is invisible in every other check. The formula is valid, the field
+        # renders, the value is a plausible string, and nothing is ever blank.
+        # The agents found it the only way it can be found: one proposed an
+        # AR-to-AP correction and the write could not take effect, because
+        # Category is a formula and has no writable side.
+        #
+        # NOTE ON LAYER: this is an Airtable-side bug. A fixture test cannot see
+        # it — it would stub out the formula that is broken. Hence a live
+        # invariant, per the CLAUDE.md table.
+        #
+        # It is expressed through the CONTROL on purpose. There is no per-record
+        # violation to find: every record is equally miscoded, and no formula can
+        # tell an AP task from an AR one while the input that would distinguish
+        # them is hardcoded to zero. What CAN be asserted is that the AP branch
+        # is reachable at all. The control asks for one single task with a
+        # non-zero Amount Out (GBP); while the formula is `0` that matches
+        # nothing and the run FAILS with "asserting nothing", which is the
+        # truthful report. It starts passing the day the formula is repaired.
+        #
+        # THE FIX IS KEVIN'S CALL, NOT THE SWEEP'S. Repairing it means either
+        # rewriting the Amount Out (GBP) formula to reflect the real outflow
+        # (the 'Amount Out (GBP) from Transaction' rollup, fldptiq0PPQ6Qr2J8,
+        # already exists and looks like the intended source) or replacing
+        # Category with a writable single select seeded from the formula so
+        # agents can correct a miscoding. A formula edit is the exact change
+        # class that blanked Report Amount on 8,667 transactions in Jul 2026,
+        # so it does not get made unreviewed. Finding 20260813-agent-dispatch-121.
+        "name": "task-category-ap-branch-is-reachable",
+        "table": TASKS,
+        "incident": "Aug 2026 — Amount Out (GBP) is the literal formula 0, so Tasks.Category can never return AP and every payable is coded as a receivable",
+        "asserts": "the AP branch of Category is reachable: some task has a non-zero Amount Out (GBP)",
+        # No per-record violation exists — see the note above. The assertion is
+        # carried entirely by the control.
+        "violation": "AND(ABS({Amount Out (GBP)}) > 0, {Category} = 'AR - Variable')",
+        "control": "ABS({Amount Out (GBP)}) > 0",
+        "control_means": "tasks with a real money-OUT figure (empty means Amount Out (GBP) is still hardcoded to 0 and no task can ever be coded AP)",
+        "fields": ["Task Name", "Amount", "Category", "Amount Out (GBP)", "Amount In (GBP)"],
+    },
+    {
         # A KPI marked automated carries a green "Auto" badge on the dashboard,
         # which reads as "this number maintains itself". When the compute code
         # cannot run, the badge stays and the value stays blank — the one state
@@ -283,6 +334,33 @@ INVARIANTS = [
         "field_probe": ("OR({KPI Automated} >= 0, LEN({KPI Compute Code} & '') >= 0, "
                         "LEN({KPI Last Updated} & '') >= 0)"),
         "fields": ["Project Name", "KPI Name", "KPI Automated", "KPI Last Updated"],
+    },
+    {
+        # The Site Map's "Update All Out-of-Sync SOPs" button writes a Pending row here
+        # and then told Kevin the work was "Processing". Nothing processes it: the SOP
+        # phase was absorbed into daily-ops and never wired back, so a request could sit
+        # Pending indefinitely behind a green tick. The button now says "waiting for a
+        # writer" (js/sitemap.js), and this makes the waiting audible: anything Pending
+        # for more than 48 hours is work that has been forgotten, not work in progress.
+        #
+        # A fixture test cannot see this — it is the age of real rows in a real table.
+        #
+        # NOTE ON THE CONTROL: today (16 Aug 2026) the table holds 19 rows and ZERO are
+        # Pending, so the control is legitimately empty and the run reports WAITING
+        # rather than BROKEN. The field_probe still catches a renamed field. Back-tested
+        # by swapping only the status term to 'Completed' — same fields, same date
+        # clause — which matched 18 of the 19 rows, so the formula fires when a row
+        # qualifies.
+        "name": "sop-queue-not-abandoned",
+        "table": "tbltuZz5Omrpo7t1x",  # SOP Update Queue
+        "incident": "Aug 2026 — the Site Map queued SOP updates nothing consumes and reported them as 'Processing'",
+        "asserts": "SOP request Pending => requested within the last 48 hours",
+        "violation": "AND({Status} = 'Pending', IS_BEFORE({Requested At}, DATEADD(NOW(), -48, 'hours')))",
+        "control": "{Status} = 'Pending'",
+        "control_means": "queued-but-unprocessed SOP requests (the only rows that can be abandoned)",
+        "field_probe": ("OR(LEN({Status} & '') >= 0, LEN({Requested At} & '') >= 0, "
+                        "LEN({Request} & '') >= 0)"),
+        "fields": ["Request", "Status", "Requested At", "Page ID"],
     },
 ]
 

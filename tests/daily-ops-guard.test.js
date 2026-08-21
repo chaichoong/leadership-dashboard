@@ -21,10 +21,16 @@ const SCRIPT = resolve(ROOT, 'scripts/morning-digest.py');
 
 // Run guard() with a fixture events file and a frozen London clock; capture
 // what it prints, returns, and would post to Slack.
-function runGuard(events, nowLondonIso) {
+function runGuard(events, nowLondonIso, reports = []) {
   const dir = mkdtempSync(join(tmpdir(), 'guard-'));
   const queueDir = join(dir, 'queue');
+  const monitoring = join(dir, 'monitoring');
   mkdirSync(queueDir, { recursive: true });
+  // An EMPTY monitoring dir is the 17 Aug 2026 state. It must exist, so the
+  // artefact check is reading a real directory and not silently passing on a
+  // missing path — a fixture that cannot fail proves nothing.
+  mkdirSync(monitoring, { recursive: true });
+  for (const name of reports) writeFileSync(join(monitoring, name), 'report\n');
   writeFileSync(join(queueDir, 'queue-events.jsonl'),
     events.map(e => JSON.stringify(e)).join('\n') + (events.length ? '\n' : ''));
   const py = `
@@ -33,6 +39,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 os.environ["JOB_LOG_DIR"] = ${JSON.stringify(dir)}
 os.environ["JOB_QUEUE_DIR"] = ${JSON.stringify(queueDir)}
+os.environ["MONITORING_DIR"] = ${JSON.stringify(monitoring)}
 spec = importlib.util.spec_from_file_location("md", ${JSON.stringify(SCRIPT)})
 md = importlib.util.module_from_spec(spec); spec.loader.exec_module(md)
 sent = []
@@ -46,6 +53,7 @@ print(json.dumps({"code": code, "sent": sent}))
 }
 
 const markAt = (iso) => ({ job: 'daily-ops', state: 'mark', ts: iso });
+const endAt = (iso) => ({ job: 'daily-ops', state: 'mark', ts: iso, note: 'end' });
 
 describe('daily-ops guard', () => {
   it('stays silent when the run marked today', () => {
@@ -152,6 +160,85 @@ describe('daily-ops guard', () => {
        { job: 'always-due', state: 'released', ts: nowIso }]);
     assertRealDigest(out3, 'out3');
     expect(out3).not.toMatch(/Routine stacking/);
+  });
+
+  // ── DID IT FINISH? (17 Aug 2026, finding 20260818-ceo-memory-sweep-215) ──
+  //
+  // daily-ops marked at 06:07 and died at 07:59 when a huddle subagent stalled.
+  // Phases 3-9 never ran. The 08:30 guard said "healthy" because a start mark
+  // was all it looked for, and Kevin was told nothing for a whole day.
+  describe('completion check', () => {
+    const REPORTS = ['e2e-sweep-2026-08-17.md', 'task-sweep-2026-08-17.md'];
+
+    it('replays 17 Aug: started, died, no reports — alarms', () => {
+      const { code, sent } = runGuard(
+        [markAt('2026-08-17T05:07:00Z')], '2026-08-17T11:30:00', []);
+      expect(code, 'a dead mid-run morning still read as healthy').toBe(1);
+      expect(sent).toHaveLength(1);
+      expect(sent[0]).toMatch(/started but did not finish/i);
+      expect(sent[0], 'the alarm does not name what is missing')
+        .toMatch(/e2e-sweep-2026-08-17\.md/);
+    });
+
+    it('is silent when phase 9 stamped its end mark', () => {
+      const { code, sent } = runGuard(
+        [markAt('2026-08-17T05:07:00Z'), endAt('2026-08-17T07:40:00Z')],
+        '2026-08-17T11:30:00', []);
+      expect(code).toBe(0);
+      expect(sent).toHaveLength(0);
+    });
+
+    it('accepts a run with no end mark when every report is on disk', () => {
+      // Runs that predate the end mark must not alarm every morning. Evidence
+      // of the work beats the absence of a stamp.
+      const { code, sent } = runGuard(
+        [markAt('2026-08-17T05:07:00Z')], '2026-08-17T11:30:00', REPORTS);
+      expect(code).toBe(0);
+      expect(sent).toHaveLength(0);
+    });
+
+    it('alarms when only SOME of the day\'s reports exist', () => {
+      // 17 Aug died after phase 2. A partial set is a partial run, and the
+      // message must say which half is missing rather than average it away.
+      const { code, sent } = runGuard(
+        [markAt('2026-08-17T05:07:00Z')], '2026-08-17T11:30:00',
+        ['e2e-sweep-2026-08-17.md']);
+      expect(code).toBe(1);
+      expect(sent[0]).toMatch(/task-sweep-2026-08-17\.md/);
+    });
+
+    it('does not cry wolf while the run is still going', () => {
+      // 06:05 start, an hour or two expected. At 09:30 an unfinished run is
+      // normal; alarming there is how a guard gets ignored.
+      const { code, sent } = runGuard(
+        [markAt('2026-08-17T05:07:00Z')], '2026-08-17T09:30:00', []);
+      expect(code).toBe(0);
+      expect(sent).toHaveLength(0);
+    });
+
+    it('ignores yesterday\'s reports', () => {
+      // The artefact check is dated on purpose: a stale file from an earlier
+      // morning is exactly the "looks like it ran" evidence that fooled 17 Aug.
+      const { code } = runGuard(
+        [markAt('2026-08-17T05:07:00Z')], '2026-08-17T11:30:00',
+        ['e2e-sweep-2026-08-16.md', 'task-sweep-2026-08-16.md']);
+      expect(code).toBe(1);
+    });
+
+    it('an end mark from yesterday does not pass today', () => {
+      const { code } = runGuard(
+        [endAt('2026-08-16T07:40:00Z'), markAt('2026-08-17T05:07:00Z')],
+        '2026-08-17T11:30:00', []);
+      expect(code).toBe(1);
+    });
+
+    it('still alarms louder when nothing started at all', () => {
+      // The start check outranks the completion check: no mark is a worse
+      // failure and keeps its own message.
+      const { code, sent } = runGuard([], '2026-08-17T11:30:00', REPORTS);
+      expect(code).toBe(1);
+      expect(sent[0]).toMatch(/has not started today/i);
+    });
   });
 
   it('never reads the scheduler lastRunAt', () => {

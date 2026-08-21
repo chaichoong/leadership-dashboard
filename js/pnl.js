@@ -70,6 +70,20 @@
         return new Date(y, m - 1, 1).toLocaleDateString('en-GB', { month: 'short', year: '2-digit' });
     }
 
+    // The month key for "this month" — the newest column pnlMonthKeys always produces.
+    // It is a PART month: the P&L window ends today, not at month end, so the last
+    // column is never comparable with the ones beside it. Labelled MTD in the header.
+    function pnlCurrentMonthKey(now = new Date()) {
+        return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+    }
+
+    // P&L presentation sign for a section. Revenue reads as Airtable stores it; costs are
+    // shown as positive magnitudes. ONE definition, used by both the grid (buildPnL) and
+    // the drill-down modal, so the two cannot present the same transaction differently.
+    function pnlSectionSign(sectionName) {
+        return sectionName === 'Revenue' ? 1 : -1;
+    }
+
     function pnlBuildLookup(records, nameFieldId) {
         const out = {};
         (records || []).forEach(r => {
@@ -125,7 +139,7 @@
             const sectionName = subToSection[subCat];
             if (!sectionName) return;
             const amt = Number(getField(tx, F.txReportAmount)) || 0;
-            const signed = sectionName === 'Revenue' ? amt : -amt;
+            const signed = pnlSectionSign(sectionName) * amt;
             sections[sectionName][subCat][mKey] = (sections[sectionName][subCat][mKey] || 0) + signed;
             if (!txIndex[sectionName][subCat][mKey]) txIndex[sectionName][subCat][mKey] = [];
             txIndex[sectionName][subCat][mKey].push(tx);
@@ -306,10 +320,16 @@
             <datalist id="pnl-dl-business">${pnlDatalistOptions(bizList)}</datalist>`;
         const nameById = (list, id) => { if (!id) return ''; const h = list.find(o => o.id === id); return h ? h.name : ''; };
 
+        // buildPnL stores costs as POSITIVE (it multiplies by pnlSectionSign), which is
+        // how the grid shows them. The modal read Report Amount raw, so clicking a
+        // maintenance cell reading £2,500 opened a modal whose header said "Sum: -£2,500"
+        // and every row was red. Same numbers, opposite sign, no explanation. Present the
+        // modal in the same P&L signs as the cell that opened it.
+        const sectionSign = pnlSectionSign(section);
         let runningTotal = 0;
         const rowsHtml = txs.map(tx => {
             const date = getField(tx, F.txDate) || '';
-            const amt = Number(getField(tx, F.txReportAmount)) || 0;
+            const amt = sectionSign * (Number(getField(tx, F.txReportAmount)) || 0);
             runningTotal += amt;
             const detail = txLabel(tx);
             const catId = pnlLinkId(getField(tx, F.txCategory));
@@ -565,9 +585,13 @@
 
     async function pnlRunAIAnalysis() {
         if (_pnlAiLoading || !_pnlCache) return;
-        _pnlAiLoading = true;
+        // Look the panel up BEFORE claiming the in-flight flag. The flag used to be set
+        // first, so a missing #pnlAiPanel returned early and left _pnlAiLoading stuck at
+        // true — Generate Analysis then did nothing at all for the life of the page, with
+        // no error and no way back short of a reload.
         const panel = document.getElementById('pnlAiPanel');
         if (!panel) return;
+        _pnlAiLoading = true;
         panel.innerHTML = '<div style="display:flex;align-items:center;gap:8px;color:var(--text-secondary);font-size:13px;padding:16px"><div class="ai-typing-dot" style="animation:blink 1.4s infinite both"></div><div class="ai-typing-dot" style="animation:blink 1.4s infinite both 0.2s"></div><div class="ai-typing-dot" style="animation:blink 1.4s infinite both 0.4s"></div><span style="margin-left:8px">Analysing P&L data…</span></div>';
 
         const keys = _pnlCache.monthKeys;
@@ -609,17 +633,27 @@ RULES:
     // ══════════════════════════════════════════
     // KPI Card with target comparison
     // ══════════════════════════════════════════
+    // The direction word describes WHERE the number sits, not whether that is good news.
+    // Those two came apart on the inverted (budget) cards: `good` is true when a cost
+    // is UNDER budget, and the word was derived from `good`, so an over-budget
+    // maintenance card printed "below budget" in red and an under-budget one printed
+    // "above budget" in green — the opposite of the truth, on the two cards Kevin
+    // actually watches. Word and arrow now come from the sign of diff; only the colour
+    // comes from `good`. Exported for tests via pnlComparisonWording.
+    function pnlComparisonWording(diff, invertComparison) {
+        const good = invertComparison ? diff <= 0 : diff >= 0;
+        const word = invertComparison ? (diff > 0 ? 'over' : 'under') : (diff >= 0 ? 'above' : 'below');
+        return { good, word, arrow: diff > 0 ? '▲' : '▼' };
+    }
+
     function pnlKpiCard(label, value, sub, { target, targetLabel, isMargin = false, invertComparison = false } = {}) {
         let indicatorHtml = '';
         if (target != null) {
-            const actual = isMargin ? value : value;
-            const diff = actual - target;
-            const good = invertComparison ? diff <= 0 : diff >= 0;
-            const pct = target !== 0 ? Math.abs(diff / target * 100).toFixed(0) : 0;
+            const diff = value - target;
+            const { good, word, arrow } = pnlComparisonWording(diff, invertComparison);
             const col = good ? 'var(--success)' : 'var(--danger)';
-            const arrow = good ? '▲' : '▼';
             const diffFmt = isMargin ? `${Math.abs(diff).toFixed(1)}pp` : pnlGBP(Math.abs(diff));
-            indicatorHtml = `<div style="font-size:10px;margin-top:2px;color:${col}">${arrow} ${diffFmt} ${good ? 'above' : 'below'} ${targetLabel || 'target'}</div>`;
+            indicatorHtml = `<div style="font-size:10px;margin-top:2px;color:${col}">${arrow} ${diffFmt} ${word} ${targetLabel || 'target'}</div>`;
         }
         const valFmt = isMargin ? `${value.toFixed(1)}%` : pnlFmt(value);
         const valCls = isMargin
@@ -685,7 +719,16 @@ RULES:
         const avgMaint = (pnl.cogs.rows.find(r => r.subCat === 'COGS Property Reactive Maintenance')?.total || 0) / pnlMonths;
         const avgWages = ((pnl.cogs.rows.find(r => r.subCat === 'COGS Labour')?.total || 0) + (pnl.opex.rows.find(r => r.subCat === 'Opex Labour')?.total || 0)) / pnlMonths;
 
-        const headCells = keys.map(k => `<th style="text-align:right;min-width:88px;background:var(--bg-surface)">${pnlMonthLabel(k)}</th>`).join('') +
+        // The newest column always ends TODAY, not at month end, so it is a part month and
+        // is not comparable with the full months beside it. Nothing said so, and the drop
+        // reads as a collapse in revenue every first week of the month.
+        const currentMonthKey = pnlCurrentMonthKey();
+        const headCells = keys.map(k => {
+            const mtd = k === currentMonthKey
+                ? `<div style="font-size:9px;font-weight:400;color:var(--warning);letter-spacing:0.5px">MTD · part month</div>`
+                : '';
+            return `<th style="text-align:right;min-width:88px;background:var(--bg-surface)" ${k === currentMonthKey ? 'title="Month to date — this column covers only the days so far this month, so it is not comparable with the full months beside it"' : ''}>${pnlMonthLabel(k)}${mtd}</th>`;
+        }).join('') +
             `<th class="pnl-total-col" style="text-align:right;min-width:100px;background:var(--bg-surface-2)">Total</th>`;
 
         function jsAttr(v) { return JSON.stringify(v == null ? null : v).replace(/"/g, '&quot;'); }
@@ -737,7 +780,7 @@ RULES:
                 <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:12px;flex-wrap:wrap;gap:12px">
                     <div>
                         <h2 class="section-title" style="margin-bottom:4px">Profit &amp; Loss</h2>
-                        <span style="font-size:12px;color:var(--text-muted)">Live from all categorised transactions · ${pnlBusinessName}</span>
+                        <span style="font-size:12px;color:var(--text-muted)">Live from all categorised transactions · ${pnlBusinessName}${pnlDataAgeNote()}</span>
                     </div>
                     <div class="od-filter-row">
                         <label class="od-filter-label" style="display:flex;align-items:center;gap:4px">Business:
@@ -948,4 +991,39 @@ RULES:
             });
             markTabSynced('pnl');
         }
+    }
+
+    // ══════════════════════════════════════════
+    // Staying in step with a background refresh
+    // ══════════════════════════════════════════
+    //
+    // renderPnL used to run ONLY on tab switch (js/shared.js) and on a filter change.
+    // loadDashboard replaces allTransactions underneath it — from the IndexedDB cache on
+    // first paint, then again when the fresh Airtable fetch lands, and again every
+    // smart-refresh tick. None of those re-rendered the P&L, so a P&L left open showed
+    // numbers built from data that had since been replaced, with nothing on screen saying
+    // so. Kevin reads these figures; a silently stale P&L is the worst kind of wrong,
+    // because it looks exactly like a correct one.
+    //
+    // Called from _runLoadDashboard on both render paths. Only re-renders when the P&L is
+    // the tab actually on screen, so a background refresh never does the work for a tab
+    // nobody is looking at.
+    function refreshPnLIfActive() {
+        const host = document.getElementById('tab-pnl');
+        if (!host || !host.classList.contains('active')) return false;
+        if (typeof renderPnL !== 'function') return false;
+        renderPnL();
+        return true;
+    }
+
+    // How old is the data the P&L is drawing? dashboard.js stamps window.dashDataAsOf on
+    // every render path (cache hit uses now - ageMs, fresh fetch uses now). Anything older
+    // than five minutes is called out in amber so old data is visibly old.
+    function pnlDataAgeNote(now = Date.now()) {
+        const asOf = typeof window !== 'undefined' ? window.dashDataAsOf : null;
+        if (!asOf) return '';
+        const mins = Math.floor((now - asOf) / 60000);
+        if (mins < 5) return ' · data current';
+        const label = mins < 60 ? `${mins} min` : `${Math.floor(mins / 60)} hr`;
+        return ` · <span style="color:var(--warning)">data ${label} old</span>`;
     }
