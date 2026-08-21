@@ -2733,7 +2733,7 @@ Before recommending, read the knowledge base files:
 If a document matches a known pattern, apply that action.
 
 If it's a new pattern (not in the knowledge base), reason from first principles:
-- Who is the most appropriate person to action this? (Kevin personally, Ciara, accountant, solicitor, property manager, letting agent, etc.)
+- Who is the most appropriate person to action this? (Kevin personally, a family member, accountant, solicitor, property manager, letting agent, etc.)
 - What is the most efficient single action? (Call, pay, file, delegate, respond in writing, add to calendar)
 - What is the consequence of missing the deadline?
 
@@ -2797,10 +2797,10 @@ Send via the \`slack_send_message\` tool to the Executive Assistant Inbox channe
 Read \`knowledge-base/entities.md\` for the full list. Key entities as of March 2026:
 
 - **Kevin Brittain (personal)** — HMRC Self Assessment, personal mortgages, court matters
-- **Ciara Brittain (personal)** — Lex Autolease (DS71LPZ), Lloyds credit card, British Gas (some properties), West Suffolk Council Tax
+- **Family member (personal)** — vehicle finance, a credit card, energy and council tax on some properties. Names, account and vehicle references are in knowledge-base/entities.md, never here.
 - **Tnt Management Limited (LI/LL)** — Utilita Energy bills for Duckworth Building properties, Lytham St Annes
-- **Brittain Holdings Limited** — Companies House filings, HMRC Corporation Tax (UTR 8402124449)
-- **Social Housing Holdings Limited** — Active court case (Clifford Sinclair Ltd, Claim M01CL745)
+- **Brittain Holdings Limited** — Companies House filings, HMRC Corporation Tax (UTR in knowledge-base/entities.md)
+- **Social Housing Holdings Limited** — Active court case (claim reference in knowledge-base/entities.md)
 
 ---
 

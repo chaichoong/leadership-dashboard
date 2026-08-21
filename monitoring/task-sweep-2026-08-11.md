@@ -22,11 +22,11 @@ not over whatever happened to carry an estimate.
 | Urgent Update required: 1406 Oldham Road | Due date | 14 Aug | Council marked it urgent but gave no deadline in the email, so three working days. |
 | Agile Estates Ltd, company number 12168161 | Business | Real Estate | Companies House late filing penalty for Agile Estates. |
 | SMS from Stacey, 14 Wentworth | Business | Real Estate | Tenant reporting a broken window. 14 Wentworth Terrace is one of yours. |
-| British Gas — Ciara Marie Brittain | Business | Personal | Ciara is not a tenant anywhere in the base, so this is family, not property. |
+| British Gas — [family member] | Business | Personal | [family member] is not a tenant anywhere in the base, so this is family, not property. |
 | Council Tax Payment Overdue (ARP) | Business | Real Estate | Account 101287570 is 18 Northfield Park. Matched to the cost record, not guessed. |
 | Companies House appeal 12168161 (done) | Business | Real Estate | Same Agile Estates matter. |
 | FCC Paragon / Legal Protection Group (done) | Business | Real Estate | Landlord legal-expenses cover. |
-| British Gas final bill, Ciara Brittain (done) | Business | Personal | Same matter as the live one above. |
+| British Gas final bill, [family member] (done) | Business | Personal | Same matter as the live one above. |
 
 Undo all of it with:
 `python3 scripts/task-hygiene-sweep.py undo --applied monitoring/task-sweep-applied-2026-08-11.json`
@@ -63,9 +63,9 @@ deliberately. Naming anyone would ping them about work you have decided not to s
 - Reply from Ibrahim Fayed at primemover.com (done). No context in the record.
 - 123 Reg domain renewal (done). You hold domains across all three businesses.
 
-**Two HMRC penalty tasks for CM Brittain (both done) left blank on purpose.** Your history
+**Two HMRC penalty tasks for [family member] (both done) left blank on purpose.** Your history
 splits these — some self-assessment tasks sit under Personal, some under Real Estate. One
-question settles it for good: does Ciara file a self-assessment because of rental income? If
+question settles it for good: does [family member] file a self-assessment because of rental income? If
 yes they are Real Estate, if no they are Personal.
 
 **One dropped after CEO review.** The Fintable "Lifetime Plan" reply was going to Real
@@ -91,7 +91,7 @@ in the transaction history. They have simply been left.
 | Task | Overdue | Verdict |
 |---|---|---|
 | Pay Final Council Tax Adjustment — 32 Elmdon Place | 201 days | Still live. Needs a new date. |
-| Pay tax liability 2023/24 — Ciara Brittain | 179 days | Still live. HMRC and BW Legal are still chasing this in your inbox this week. |
+| Pay tax liability 2023/24 — [family member] | 179 days | Still live. HMRC and BW Legal are still chasing this in your inbox this week. |
 | Invoice INV-0549, PPE & Sons (£168) | 144 days | Still live. Never paid. |
 | DD Fire Alarms — Duckworth estimate | 144 days | Still live, but it is an estimate, not a bill. Likely superseded by the two invoices below — worth closing if so. |
 | Invoice 40859, DD Fire Alarms | 144 days | Still live. Never paid. |

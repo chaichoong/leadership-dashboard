@@ -53,7 +53,7 @@
         { id: 'content-machine', name: 'Content Machine',           icon: '🎬', pageVer: '1.0', sopFile: '',                            sopVer: '1.0', standalone: 'https://chaichoong.github.io/content-machine/' },
         { id: 'prospecting', name: 'Prospecting',                   icon: '🧲', pageVer: '1.15', sopFile: 'sop-prospecting.html',        sopVer: '1.4', standalone: 'index.html#prospecting' },
         { id: 'sitemap',    name: 'Site Map & Guides',             icon: '🔗', pageVer: '1.24', sopFile: 'sop-sitemap.html',            sopVer: '1.19', standalone: 'index.html#sitemap' },
-        { id: 'skills',     name: 'Skills Library',                icon: '🧠', pageVer: '1.7', sopFile: 'guides/skills.html',           sopVer: '1.0', standalone: 'index.html#skills' },
+        { id: 'skills',     name: 'Skills Library',                icon: '🧠', pageVer: '1.9', sopFile: 'guides/skills.html',           sopVer: '1.0', standalone: 'index.html#skills' },
         { id: 'ai-brain',  name: 'AI Brain',                       icon: '💭', pageVer: '1.0', sopFile: 'guides/ai-brain.html',         sopVer: '1.0', standalone: 'ai-brain.html' },
         { id: 'how-it-works', name: 'How It Works',               icon: '🗺️', pageVer: '2.2', sopFile: '',                             sopVer: '1.0', standalone: 'how-it-works.html' },
     ];

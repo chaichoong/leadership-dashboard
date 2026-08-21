@@ -95,7 +95,7 @@ Proposals only. Nothing here was changed.
 | Task | Due | Verdict |
 |---|---|---|
 | Pay Final Council Tax Adjustment – 32 Elmdon Place | 22 Jan | **Still live.** Assigned to Mica, 202 days past due. Confirm it was paid, then close it or set a new date. |
-| Pay tax liability for tax return 2023/24 – Ciara Brittain | 13 Feb | **Still live and urgent.** Same debt BW Legal are chasing on your inbound queue. Should not be drifting. |
+| Pay tax liability for tax return 2023/24 – [family member] | 13 Feb | **Still live and urgent.** Same debt BW Legal are chasing on your inbound queue. Should not be drifting. |
 | Fwd: Invoice INV-0549, PPE & Sons Heating & Plumbing (Roy Lavin) | 20 Mar | **Verify then close.** No matching payment in Transactions, but supplier names on bank lines vary, so that is not proof. |
 | DD Fire Alarms Ltd – Duckworth Buildings (estimate) | 20 Mar | **Probably dead.** It is an estimate, not an invoice, and the two invoices below followed it. |
 | Invoice 40859 from DD Fire Alarms Ltd | 20 Mar | **Verify then close.** No matching payment found. |
@@ -118,7 +118,7 @@ The AI CEO reviewed the full set before anything was written. Verdict: proceed, 
 changes, both of which I made.
 
 1. **Dropped two writes.** I was going to book the HMRC Self Assessment penalty and the BW
-   Legal chase to Personal because they name C M Brittain. The CEO pointed out that Ciara
+   Legal chase to Personal because they name [family member]. The CEO pointed out that [family member]
    co-owns the property portfolio, so a self-assessment liability in her name is at least as
    likely to be rental income tax. Both left blank rather than guessed.
 2. **Tightened a due date.** The window hinge moved from 19 Aug to 15 Aug, because the note

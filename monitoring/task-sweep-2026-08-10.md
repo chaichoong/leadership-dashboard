@@ -57,7 +57,7 @@ Neither is an assignee, so approving them sends nobody a message.
   someone's list. Leave it.
 - **5 completed tasks I would not label**, because the evidence points both ways and a wrong
   entity label is expensive on this class of record: two HMRC self-assessment letters for
-  CM Brittain, a British Gas final bill for Ciara Brittain, a Companies House penalty appeal
+  [family member], a British Gas final bill for [family member], a Companies House penalty appeal
   that never names the company, and a debt-recovery letter from a company with no history in
   the system.
 - **4 more I would not label:** a Virgin Media order, a 123 Reg domain renewal that does not
@@ -97,7 +97,7 @@ transaction records are not linked to these tasks.
 | Task | Overdue | Proposed next step |
 |---|---|---|
 | RE: Duckworth Apartments — Back West Crescent | 159 days | A Section 59 Building Act demand from Fylde Council. Legally serious. Give it to the AI legal and compliance agent to prepare a reply, due 17 Aug |
-| Pay tax liability for 2023/24 — Ciara Brittain | 178 days | Part of the live HMRC matter. Stays with you. New date 24 Aug |
+| Pay tax liability for 2023/24 — [family member] | 178 days | Part of the live HMRC matter. Stays with you. New date 24 Aug |
 | MHH Confirmation statements | 435 days | Check Companies House for what is actually outstanding, then close or file. AI legal and compliance agent, due 24 Aug |
 | Pay Final Council Tax Adjustment — 32 Elmdon Place | 200 days | Council tax is now on standing orders. Confirm the balance, then close. Due 24 Aug |
 | Housing Benefits Overpayments — 41052677 (£15.99) | 161 days | Pay it and close. Due 17 Aug |
@@ -113,7 +113,7 @@ together. There are none. Name-similarity alone is not evidence and I did not us
 The `od-ceo` agent reviewed the set before anything was written and told me to drop four of
 the business labels. It was right, and I checked its evidence rather than taking its word:
 
-- It found that Ciara Brittain's tax letters are labelled **Real Estate** on some existing
+- It found that [family member]'s tax letters are labelled **Real Estate** on some existing
   records and **Personal** on others. My rule said Personal. Mixed evidence is not a rule, so
   those come out.
 - The Companies House penalty appeal never names the company, which is exactly why I had
@@ -121,7 +121,7 @@ the business labels. It was right, and I checked its evidence rather than taking
 - Legal Protection Group has never appeared on any task before, so there was nothing to match
   against. Dropped.
 
-I dropped a fifth on the same reasoning it gave (the second CM Brittain letter), taking the
+I dropped a fifth on the same reasoning it gave (the second [family member] letter), taking the
 auto tier from 56 down to 51. It approved both project links and agreed the parked container
 should stay unowned.
 
