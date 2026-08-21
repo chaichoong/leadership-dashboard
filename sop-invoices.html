@@ -104,7 +104,7 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
     <a href="index.html#sitemap" class="header-back">&#x2190; Back to Site Map</a>
     <h1>&#x1F9FE; Accounts Payable Variable</h1>
     <div class="subtitle">Standard Operating Procedure &mdash; Invoice ingestion, AI matching, approval workflow, and payment tracking</div>
-    <div class="version">Version 2.18 &bull; 10 Aug 2026 &bull; Owner: Kevin Brittain</div>
+    <div class="version">Version 2.19 &bull; 14 Aug 2026 &bull; Owner: Kevin Brittain</div>
   </div>
 </div>
 
@@ -133,7 +133,7 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
       </div>
       <div class="qr-item">
         <div class="qr-label">Dashboard Access</div>
-        <div class="qr-value">Leadership Dashboard &rarr; Accounts Payable Variable (sidebar)</div>
+        <div class="qr-value">Leadership Dashboard &rarr; sidebar <strong>Finance</strong> &rarr; <strong>Accounts</strong> &rarr; the <strong>AP Variable</strong> subtab</div>
       </div>
       <div class="qr-item">
         <div class="qr-label">localStorage Key</div>
@@ -185,7 +185,7 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
       </ul>
       <div class="info-box info">
         <span class="ib-icon">&#8505;&#65039;</span>
-        <span><strong>Airtable is the source of truth.</strong> Nothing is stored in browser localStorage for invoice data. All edits, match decisions, and payment records are written directly to Airtable and persist across browsers and devices. The only localStorage key used is <code>lastSeenInvoiceTime</code>, which controls the "NEW" badge on the sidebar &mdash; this is purely cosmetic.</span>
+        <span><strong>Airtable is the source of truth.</strong> Nothing is stored in browser localStorage for invoice data. All edits, match decisions, and payment records are written directly to Airtable and persist across browsers and devices. The only localStorage key used is <code>lastSeenInvoiceTime</code>, which controls the "NEW" badge on the AP Variable subtab &mdash; this is purely cosmetic.</span>
       </div>
     </div>
 
@@ -211,17 +211,18 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
     <div class="card">
       <ol class="steps">
         <li>Open the Leadership Dashboard at <a href="index.html">index.html</a> and log in with your Airtable Personal Access Token (PAT).</li>
-        <li>Click <strong>Accounts Payable Variable</strong> in the left sidebar (the receipt icon &#x1F9FE;). The tab will become active and <code>renderInvoiceTab()</code> runs immediately to display the current invoice list.</li>
+        <li>In the left sidebar open the <strong>Finance</strong> section and click <strong>Accounts</strong> (the banknote icon &#x1F4B7;). There is no "Accounts Payable Variable" item in the sidebar itself.</li>
+        <li>A row of subtabs appears across the top of the page: AR Fixed, AR Variable, AP Fixed, <strong>AP Variable</strong>, Transactions, Bank Accounts. Click <strong>AP Variable</strong>. The tab becomes active and <code>renderInvoiceTab()</code> runs immediately to display the current invoice list.</li>
         <li>The tab also loads whenever you navigate back to it from another tab &mdash; it always re-renders from the latest in-memory Airtable data. Data is fetched from Airtable every 15 minutes automatically (smart refresh defers if you are actively typing or clicking).</li>
       </ol>
       <div class="info-box tip">
         <span class="ib-icon">&#128161;</span>
-        <span>The sidebar badge next to "Accounts Payable Variable" shows the number of unpaid invoices in grey, and switches to a <strong>red badge</strong> (e.g. <code>5 &bull; 2 new</code>) when invoices have arrived since you last viewed the tab. The badge clears to grey once you open the tab.</span>
+        <span>The badge sits on the <strong>AP Variable subtab button</strong>, not in the sidebar. It shows the number of unpaid invoices in grey, and switches to a <strong>red badge</strong> (e.g. <code>5 &bull; 2 new</code>) when invoices have arrived since you last viewed the tab. The badge clears to grey once you open the tab.</span>
       </div>
     </div>
 
     <div class="card">
-      <div class="card-header">Sidebar Badge Behaviour</div>
+      <div class="card-header">AP Variable Subtab Badge Behaviour</div>
       <p>The badge is controlled by <code>updateInvoicesSidebarBadge()</code> and compares each invoice's Airtable <code>createdTime</code> against the <code>lastSeenInvoiceTime</code> stored in localStorage.</p>
       <table class="label-table">
         <thead><tr><th>Badge appearance</th><th>Meaning</th></tr></thead>
@@ -289,6 +290,7 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
         <li><strong>Reference</strong></li>
       </ul>
       <p>Clearing the search box restores the full (sorted) list. The KPI cards are <em>not</em> affected by the filter &mdash; they always show totals for all unpaid invoices.</p>
+      <p>A <strong>Clear filters</strong> button sits to the right of the search box. It empties the search box only. The <strong>Sort by</strong> dropdown keeps whatever you chose, and any rows you have ticked stay ticked.</p>
     </div>
 
     <div class="card">
@@ -336,6 +338,10 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
         <li><strong style="color:var(--warning)">Mismatch</strong> &mdash; counts differ; may indicate a sync delay or labelling discrepancy</li>
         <li><em>Dashboard only</em> &mdash; Gmail count could not be fetched (Apps Script not reachable)</li>
       </ul>
+      <div class="info-box warn">
+        <span class="ib-icon">&#9888;&#65039;</span>
+        <span><strong>The Gmail figure stops counting at 100.</strong> The count endpoint asks Gmail for at most 100 threads, so a label holding 100 or more always reports exactly <strong>100</strong>. If your unpaid count is above 100 the indicator will read Mismatch permanently, and the number it shows is a floor, not an exact figure. Below 100 the comparison is trustworthy.</span>
+      </div>
     </div>
 
     <div class="card">
@@ -346,7 +352,7 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
         <tbody>
           <tr>
             <td><strong>Refresh from Gmail</strong></td>
-            <td>Calls <code>triggerGmailInvoiceSync()</code>, which asks the Apps Script to read the "3: to pay" label and create a record for any invoice email it has not seen. After 3 seconds the dashboard re-reads Airtable. The link text shows "Syncing&hellip;" for 4 seconds.</td>
+            <td>Calls <code>triggerGmailInvoiceSync()</code>, which asks the Apps Script to read the <strong>newest 50 threads</strong> in the "3: to pay" label and create a record for any invoice email it has not seen. After 3 seconds the dashboard re-reads Airtable. The link text shows "Syncing&hellip;" for 4 seconds.</td>
             <td>It only ADDS new invoices. It never changes the status of an invoice you already have.</td>
           </tr>
           <tr>
@@ -357,6 +363,23 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
         </tbody>
       </table>
       <p>Next to the two links is the sync health text described above.</p>
+      <div class="info-box warn">
+        <span class="ib-icon">&#9888;&#65039;</span>
+        <span><strong>Refresh from Gmail only looks at the newest 50 emails in the label.</strong> An invoice email older than the most recent 50 will never appear, however many times you click it, and nothing tells you it was skipped. To pull in an older one: open the email in Gmail, remove the "3: to pay" label, re-apply it so the email jumps back to the top of the label, then click Refresh from Gmail. Failing that, add the invoice to Airtable by hand.</span>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-header">The sync bar at the top of the tab</div>
+      <p>Above the invoice summary cards sits the standard platform <strong>sync bar</strong>. It is the same bar every page in the platform carries, and it does two things here.</p>
+      <ul>
+        <li><strong>Its Refresh button</strong> does the same job as "Refresh from Gmail" and then re-reads Airtable in one action. Like that link, it can only ADD invoices; it never changes the status of an invoice you already have. It is safe to click at any time.</li>
+        <li><strong>Its checks pill</strong> shows a pass/warn/fail count. Click it to open the drawer and read each check. Seven checks run: invoices fetched from Airtable, the outstanding count, whether every invoice still links back to its Gmail thread, whether the invoice-to-transaction matcher runs, whether the Gmail Apps Script URL is configured, whether the AP Variable badge is wired up, and the result of your last Mark Paid or AI-match approval.</li>
+      </ul>
+      <div class="info-box info">
+        <span class="ib-icon">&#8505;&#65039;</span>
+        <span><strong>This is where a failed Mark Paid is reported.</strong> If a Mark Paid or an AI-match approval fails, the last check turns red and names the time and the error. The row on screen may look unchanged, so the drawer is the place to look before assuming the click worked. See section 5 card 5 for the buttons themselves.</span>
+      </div>
     </div>
   </div>
 
@@ -491,6 +514,8 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
         <p>A text link in the "Last refreshed" bar that triggers <code>triggerGmailInvoiceSync()</code>. It fires a no-cors request to the Apps Script web app with <code>?action=sync</code>, then waits 3 seconds before calling <code>fetchInvoicesFromAirtable()</code> to pull in any newly synced records.</p>
         <p>Link text changes to "Syncing&hellip;" during the wait, then reverts to "Refresh from Gmail" after 4 seconds.</p>
         <p>This is the safe link. It adds invoices and nothing else.</p>
+        <p><strong>It reads the newest 50 threads in the label only.</strong> An older invoice email is skipped without any message. Section 3 explains how to lift one back into range.</p>
+        <p>The <strong>Refresh button on the sync bar</strong> at the top of the tab does this same job plus an Airtable re-read, so either one is fine. If a Mark Paid ever appears to do nothing, open the sync bar's checks drawer &mdash; that is where the failure is reported. Section 3 covers the bar.</p>
       </div>
     </div>
 
@@ -531,7 +556,7 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
         <span class="ib-icon">&#9888;&#65039;</span>
         <span><strong>It moves invoices in BOTH directions, and it can touch every invoice in one click.</strong> An invoice you marked Paid goes back to <strong>Unpaid</strong> with its Paid Date wiped if its email is still in "3: to pay". An invoice sitting as Unpaid is set to <strong>Paid</strong>, with today's date as the Paid Date, if its email is no longer in that label. Nothing asks you to confirm each record. There is no undo button.</span>
       </div>
-      <p>Before you click it, a confirm box lists what is about to happen. Click Cancel if you are not sure. When the run finishes an alert shows four numbers: how many emails were in the label, how many invoices were marked Paid, how many were restored to Unpaid, and how many were skipped. The table then reloads from Airtable.</p>
+      <p>Before you click it, a confirm box lists what is about to happen. Click Cancel if you are not sure. When the run finishes an alert shows five numbers: how many "3: to pay" emails were read, how many invoices were checked in Airtable, how many were marked Paid, how many were restored to Unpaid, and how many were skipped (Estimates and the like). The table then reloads from Airtable.</p>
     </div>
 
     <div class="card">
@@ -573,9 +598,9 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
           </ul>
         </div>
       </div>
-      <div class="info-box danger">
-        <span class="ib-icon">&#128721;</span>
-        <span><strong>Known limit.</strong> Reconcile reads only the first <strong>100</strong> threads in the "3: to pay" label. If that label ever holds more than 100 emails, everything past the first 100 looks to the script like it has left the label, and those invoices are marked Paid when they are not. Keep the label under 100 emails, and check the "Gmail 3: to pay" number in the result alert against what Gmail shows before trusting the run.</span>
+      <div class="info-box info">
+        <span class="ib-icon">&#8505;&#65039;</span>
+        <span><strong>How many emails it reads.</strong> Reconcile reads <strong>every</strong> email in the "3: to pay" label, asking Gmail for them 100 at a time until it has them all. There is one ceiling: <strong>10,000</strong> emails. If the label ever holds more than that, reconcile stops and writes nothing, and you get an error saying it refused to run from a part-read label. That is deliberate. A half-read label would mark every email it missed as Paid, and a wrong Paid Date is far harder to spot than a run that failed. It is still worth checking the "emails read" number in the result against what Gmail shows on the label.</span>
       </div>
     </div>
   </div>
@@ -621,7 +646,7 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
         <ol class="steps">
           <li>Airtable: Status to <strong>Paid</strong> and Paid Date to today, in batches of 10 records.</li>
           <li>Gmail: for each invoice that saved successfully, the thread is moved from "3: to pay" to "4: paid", one request per invoice.</li>
-          <li>The paid invoices are dropped from the on-screen list, the selection clears, and the sidebar badge updates.</li>
+          <li>The paid invoices are dropped from the on-screen list, the selection clears, and the AP Variable subtab badge updates.</li>
         </ol>
         <div class="info-box warn">
           <span class="ib-icon">&#9888;&#65039;</span>
@@ -754,7 +779,7 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
       <p>After all API calls complete:</p>
       <ol class="steps">
         <li>The invoice is removed from the <code>airtableInvoices</code> in-memory array immediately.</li>
-        <li>The sidebar badge is updated via <code>updateInvoicesSidebarBadge()</code>.</li>
+        <li>The AP Variable subtab badge is updated via <code>updateInvoicesSidebarBadge()</code>.</li>
         <li>After a 1.5-second delay (so the "Done" confirmation is visible), <code>renderInvoiceTab()</code> re-renders the full table without the paid invoice.</li>
       </ol>
     </div>
@@ -828,7 +853,7 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
       <div class="ts-item">
         <div class="ts-problem">An invoice email is not appearing in the dashboard</div>
         <div class="ts-solution">
-          Check the email has the <strong>"3. to pay"</strong> Gmail label. Wait up to 15 minutes for the Apps Script sync, or click "Refresh from Gmail" in the dashboard header bar to trigger an immediate sync. If still missing, open the Apps Script project and check the execution logs for errors. Verify the AIRTABLE_PAT script property has not expired.
+          Check the email has the <strong>"3. to pay"</strong> Gmail label. Wait up to 15 minutes for the Apps Script sync, or click "Refresh from Gmail" in the dashboard header bar to trigger an immediate sync. <strong>If the email is an older one, this is the likely cause: the sync reads only the newest 50 threads in the label, and anything below that is skipped silently.</strong> Remove the "3: to pay" label from the email in Gmail and re-apply it, which lifts the thread back to the top of the label, then click Refresh from Gmail again. If still missing, open the Apps Script project and check the execution logs for errors. Verify the AIRTABLE_PAT script property has not expired.
         </div>
       </div>
 
@@ -856,11 +881,11 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
       <div class="ts-item">
         <div class="ts-problem">Sync health shows "Mismatch" between dashboard and Gmail counts</div>
         <div class="ts-solution">
-          A mismatch means the number of unpaid invoices in Airtable differs from the number of emails carrying the "3: to pay" Gmail label. Work through it in this order.
+          A mismatch means the number of unpaid invoices in Airtable differs from the number of emails carrying the "3: to pay" Gmail label. First check the Gmail figure is not stuck at <strong>100</strong>: the count endpoint reads at most 100 threads, so a label at or above 100 always reports 100 and the indicator will say Mismatch for ever. That is a reporting limit, not a sync problem. Otherwise work through it in this order.
           <ol style="margin-top:0.4rem">
             <li>Click <strong>"Refresh from Gmail"</strong> and wait about 5 seconds. This is usually all it takes, and it can only add invoices.</li>
             <li>If the numbers still differ, look at Gmail and decide which side is right. Gmail is the side reconcile will copy.</li>
-            <li>Once the Gmail labels are correct, click <strong>"Reconcile with Gmail"</strong>. This is the tool that clears a stubborn mismatch, because it rewrites the Airtable status to agree with the label in both directions. Read section 6 first: it can move invoices back from Paid to Unpaid, and it reads only the first 100 emails in the label.</li>
+            <li>Once the Gmail labels are correct, click <strong>"Reconcile with Gmail"</strong>. This is the tool that clears a stubborn mismatch, because it rewrites the Airtable status to agree with the label in both directions. Read section 6 first: it can move invoices back from Paid to Unpaid.</li>
             <li>If it still will not settle, check the Apps Script execution logs for sync errors, and look for emails labelled "3: to pay" that never created an Airtable record.</li>
           </ol>
         </div>
@@ -876,7 +901,7 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
       <div class="ts-item">
         <div class="ts-problem">Reconcile marked invoices as Paid that I have not paid</div>
         <div class="ts-solution">
-          Reconcile marks an Unpaid invoice as Paid whenever its email is no longer in "3: to pay". Two things cause a false positive. First, the email was moved or archived out of the label by hand. Second, the label holds more than 100 emails: reconcile reads only the first 100 threads, so anything beyond that looks to it like the email has gone. Compare the "Gmail 3: to pay" figure in the result alert against the count Gmail shows on the label. To put an invoice back, re-apply the "3: to pay" label to its email and run reconcile again, or edit the Status and Paid Date directly in Airtable.
+          Reconcile marks an Unpaid invoice as Paid whenever its email is no longer in "3: to pay". The usual cause is that the email was moved or archived out of the label by hand, so reconcile did exactly what the label told it to. Reconcile reads every email in the label, so a long label is not the cause: if it ever held more than 10,000 emails, reconcile would refuse to run and write nothing at all. Compare the "emails read" figure in the result against the count Gmail shows on the label. To put an invoice back, re-apply the "3: to pay" label to its email and run reconcile again, or edit the Status and Paid Date directly in Airtable.
         </div>
       </div>
 
@@ -920,6 +945,13 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
           <tr><th>Version</th><th>Date</th><th>Changes</th></tr>
         </thead>
         <tbody>
+          <tr>
+            <td><strong>2.19</strong></td>
+            <td>14 Aug 2026</td>
+            <td>
+              Drift check against the live code. Corrected the navigation: there is no "Accounts Payable Variable" item in the sidebar, the page is reached via Finance &rarr; Accounts &rarr; the <strong>AP Variable</strong> subtab, and the unpaid badge sits on that subtab button rather than in the sidebar. Removed the "reconcile reads only the first 100 threads" warning, which is no longer true: reconcile now pages through the whole label and refuses to write anything at all from a part-read label (10,000 ceiling), and its result alert reports five numbers rather than four. Added: a card covering the <strong>sync bar</strong> at the top of the tab, its Refresh button and its seven checks, and the note that a failed Mark Paid is reported in its drawer; the <strong>50-thread limit</strong> on Refresh from Gmail, with the workaround for an older email, in section 3, section 5 and Troubleshooting; the fact that the sync-health Gmail figure <strong>caps at 100</strong>, so a large label reads Mismatch permanently; the <strong>Clear filters</strong> button, which empties the search box only and leaves Sort and ticked rows alone.
+            </td>
+          </tr>
           <tr>
             <td><strong>2.18</strong></td>
             <td>10 Aug 2026</td>
