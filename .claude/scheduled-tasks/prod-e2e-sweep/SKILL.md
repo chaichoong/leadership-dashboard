@@ -244,7 +244,7 @@ Read-only (GET with filterByFormula; writes nothing). Takes a few seconds.
 - Exit 0 → every invariant holds. Note it in the report and move on.
 - Exit 1 → treat as a **[CRITICAL] FAIL**, exactly like a core financial tab failing.
   The `invariants` array names which one broke, the incident it is a regression of, and up
-  to 5 offending record ids. Put that detail in the Slack DM and the Airtable task.
+  to 5 offending record ids. Put that detail in your report and the Airtable task.
   A `CONTROL_FAILED` status means the check itself is broken (its filter matched no
   records, so it was asserting nothing) — that is also a FAIL, not a pass. Never treat a
   check that cannot fire as a check that passed.
@@ -271,7 +271,7 @@ Write the full report to monitoring/e2e-sweep-{date}.md:
 Then:
 - If EVERYTHING passed (prod up, zero FAILs): stay quiet. Do NOT Slack Kevin. Just commit the report so there is a daily record.
 - If there is ANY FAIL: 
-  1. Send ONE Slack direct message to Kevin (search Slack users for "Kevin Brittain" / kevinbrittain@gmail.com for the user id). Keep it short and specific: which tab(s) failed and the one-line symptom for each, plus "prod is DOWN" if the live URL check failed. Never include the PAT or any secret.
+  1. Do NOT DM Kevin (Slack contract, 21 Aug 2026: one Daily Ops message a day, readable by a 13-year-old). Return the failures in your ten lines to daily-ops, in plain words, and phase 9 folds them into the one report. ONE exception: production is DOWN (the live URL check failed). Then send one DM to Kevin (U08HW8F1MA8): "The app is down" plus the one-line symptom. Never include the PAT or any secret.
   2. Raise ONE task in the Tasks table (tblqB8b22hKBL4PF1) in base appnqjDpqDniH3IRl via the Airtable MCP — but **update the existing task if this finding is already open**. See "Never raise the same finding twice" below. Task name: "E2E Sweep [SEVERITY]: {short summary}" where SEVERITY is [CRITICAL] if prod is down, a core financial tab (dashboard, cashflow, reconciliation, invoices) failed, or a data invariant broke (STEP 4.5), else [WARNING]. Look up the correct field ids from the table schema for status (set to a "To Do"/open value), due date (today), and notes/description; put the failing tabs and symptoms in the notes. Owner: Kevin.
 
 ### Never raise the same finding twice
@@ -301,7 +301,7 @@ today's date, counts or wording.
 
    - **One or more matches** → do NOT create a task. Update the FIRST match: append a
      dated line to its notes saying the fault recurred today and what changed, and
-     refresh the due date. Say in the Slack DM that this is a recurrence, with how
+     refresh the due date. Say in your returned lines that this is a recurrence, with how
      many mornings running.
    - **Zero matches** → create the task, with the `FINDING-KEY:` line in its notes.
 4. **A zero result must be proved, not assumed.** A wrong field name, a typo in the

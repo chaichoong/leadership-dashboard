@@ -104,7 +104,7 @@ Run this even when you fixed nothing, and even when a step failed. The lease fre
 
 ## STEP 7 — Report
 
-One Slack DM to Kevin: how many findings you closed, how many you left, the PR link, and anything you rejected as not real. If you fixed nothing, say that plainly. Never claim a fix you did not verify.
+Do NOT DM Kevin (Slack contract, 21 Aug 2026). Return to daily-ops: how many findings you closed, how many you left, the PR link, and anything you rejected as not real. Phase 9 turns the PR into "Fix waiting for your review" on the BROKEN line. If you fixed nothing, say that plainly. Never claim a fix you did not verify.
 
 ## Rules
 
