@@ -83,7 +83,7 @@ h3{font-size:1.05rem;color:var(--text-primary);margin:1rem 0 0.5rem}
   <div class="qr-grid">
     <div class="qr-item"><div class="qr-label">Airtable Table</div><div class="qr-value"><code>Objective and Strategy</code> &middot; <code>tblEBvFw8DonwxzGh</code></div></div>
     <div class="qr-item"><div class="qr-label">Record Grain</div><div class="qr-value">One row per Business &times; Quarter &times; Year</div></div>
-    <div class="qr-item"><div class="qr-label">AI Model</div><div class="qr-value">Claude Haiku 4.5 for wizard critique (cheap, fast, JSON-mode)</div></div>
+    <div class="qr-item"><div class="qr-label">AI Model</div><div class="qr-value">Whatever <code>AI_MODELS.default</code> is set to in <code>js/ai-models.js</code> &mdash; all six AI calls on this page use it. Never name a model here; a retired model ID is an app-wide AI outage.</div></div>
     <div class="qr-item"><div class="qr-label">System Prompt</div><div class="qr-value"><code>js/prompts/boardroom-mentor.js</code></div></div>
     <div class="qr-item"><div class="qr-label">Cadence</div><div class="qr-value">Objective: annual (quarterly tweak). Strategy: every quarter.</div></div>
     <div class="qr-item"><div class="qr-label">Feeds Into</div><div class="qr-value">Projects &middot; Tasks (stepping stones)</div></div>
@@ -185,7 +185,7 @@ h3{font-size:1.05rem;color:var(--text-primary);margin:1rem 0 0.5rem}
       <li>Founder clicks <strong>AI Wizard &#9656;</strong>. The panel opens on the right of the form.</li>
       <li>The wizard looks for the <strong>prior quarter&rsquo;s record</strong> (Q4 previous year if current is Q1). If found, it asks a reflection question first: what hit, what missed, why?</li>
       <li>It then walks through the strategy sections in a fixed order &mdash; 9-year &rarr; 3-year target + 3 measurables &rarr; 1-year target + 3 measurables &rarr; Quarterly Project 1 + 3 stepping stones &rarr; QP2 + stones &rarr; QP3 + stones.</li>
-      <li>For every answer, the wizard calls Claude Haiku with a critique prompt that returns JSON: <code>{accept, pushback?, refined?, note?}</code>.</li>
+      <li>For every answer, the wizard calls the default AI model (<code>AI_MODEL_DEFAULT</code>, from <code>js/ai-models.js</code>) with a critique prompt that returns JSON: <code>{accept, pushback?, refined?, note?}</code>.</li>
       <li>If the critique rejects the answer, the <strong>pushback</strong> is shown as a challenge and the founder is asked again.</li>
       <li>If accepted, the wizard may <strong>refine</strong> the founder&rsquo;s wording, then writes the final text straight into the matching form field.</li>
       <li>At the end, the form is fully populated. Founder reviews, tweaks inline, hits <strong>Save changes</strong>.</li>
@@ -197,7 +197,8 @@ h3{font-size:1.05rem;color:var(--text-primary);margin:1rem 0 0.5rem}
     <div class="card-header">&#x1F511; Controls</div>
     <ul>
       <li><strong>Send</strong> &mdash; submits your answer for critique.</li>
-      <li><strong>Skip</strong> &mdash; leaves the field empty and moves to the next section. Useful for optional slots (e.g. Quarterly Project 3, third measurables).</li>
+      <li><strong>&larr; Back</strong> &mdash; returns to the previous question so you can revise your answer. It steps back over discovery-only questions that were answered for you.</li>
+      <li><strong>Move on &rarr;</strong> &mdash; goes to the next section without answering. It <strong>keeps</strong> whatever is already in the field (a pre-filled value or your last accepted answer) rather than emptying it, so use it to accept what is there as-is. If the field is empty it stays empty. Useful for optional slots (e.g. Quarterly Project 3, third measurables). There is no button called &ldquo;Skip&rdquo;.</li>
       <li><strong>&times;</strong> &mdash; closes the wizard. Answers already accepted are kept in the form; press <strong>Save changes</strong> to persist.</li>
     </ul>
   </div>
@@ -246,7 +247,7 @@ h3{font-size:1.05rem;color:var(--text-primary);margin:1rem 0 0.5rem}
       <thead><tr><th>Symptom</th><th>Cause</th><th>Fix</th></tr></thead>
       <tbody>
         <tr><td>Red banner: &ldquo;Failed to load: &hellip;&rdquo;</td><td>PAT token lacks read access to one of the tables (businesses, objective-and-strategy, projects)</td><td>Regenerate PAT in Airtable with read/write scope to the whole base.</td></tr>
-        <tr><td>Wizard pushes back on every answer</td><td>Answers are genuinely vague &mdash; the critique is doing its job.</td><td>Add numbers, dates, names. If you disagree, click <strong>Skip</strong> to accept as-is.</td></tr>
+        <tr><td>Wizard pushes back on every answer</td><td>Answers are genuinely vague &mdash; the critique is doing its job.</td><td>Add numbers, dates, names. If you disagree, click <strong>Move on &rarr;</strong> to accept what is in the field as-is.</td></tr>
         <tr><td>Wizard never pushes back</td><td>The AI proxy is returning a non-JSON response &mdash; fail-open is accepting everything.</td><td>Check network tab for <code>claude-proxy.kevinbrittain.workers.dev</code> errors.</td></tr>
         <tr><td>Save fails with 422</td><td>Quarter or Year option not in the singleSelect list</td><td>Add the missing option in Airtable &rarr; table configuration.</td></tr>
         <tr><td>Prior quarter not loading</td><td>Business name on the prior record doesn&rsquo;t match current selection</td><td>Check Business link field on the prior record.</td></tr>

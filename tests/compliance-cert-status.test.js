@@ -99,3 +99,67 @@ describe('block apartment rows explain their own colour', () => {
     expect(rowsFn.slice(0, 2000)).toContain('buildingInsCell(row.ins)');
   });
 });
+
+// Finding 20260818-drift-monitor-189: every certificate whose Status was 'Expired'
+// was dropped before it could be attached to a grid row, so no cert object in the
+// grid could ever carry that status. The cell fell through to the grey dash and the
+// KPI counted it as missing++ — a GSC that lapsed in 2018 and six EICRs that lapsed
+// in March 2026 all reported as "no certificate on file" rather than Expired.
+// Nothing errored, and the red tile under-read on a legal-obligation surface.
+// Verified against Property Certificates tbl35rf9qtmq0P87r on 21 Aug 2026: 83 rows,
+// 15 with Status='Expired', every one of them dated in the past or not at all.
+describe('an expired certificate reaches the grid', () => {
+  it('is not dropped before it can be attached to a row', () => {
+    // The skip sat in the loop that attaches certs to rows. Assert on the shipped
+    // source: any re-introduction of a Status-based skip fails here.
+    expect(src).not.toMatch(/c\.s === 'Expired'\)\s*continue/);
+    expect(src).not.toMatch(/skip expired certs/);
+  });
+
+  it('a lapsed certificate never displaces a live one, whatever the dates say', () => {
+    // Keeping expired records means isNewer now has to choose between them. Today
+    // no live record is an Expired-status row with a future date, but the moment one
+    // exists, a naive date comparison would hide a valid certificate behind it and
+    // turn a compliant row red.
+    const isNewer = new Function(
+      `${extract('daysUntil')}; ${extract('certStatus')}; ${extract('isNewer')}; return isNewer;`
+    )();
+    const live = { s: 'Active', d: iso(200) };
+    const lapsed = { s: 'Expired', d: iso(400) };   // later date, still lapsed
+    const older = { s: 'Active', d: iso(30) };
+
+    expect(isNewer(null, lapsed)).toBe(true);        // something beats nothing
+    expect(isNewer(live, lapsed)).toBe(false);       // lapsed must not win on date
+    expect(isNewer(lapsed, live)).toBe(true);        // live displaces lapsed
+    expect(isNewer(older, live)).toBe(true);         // among live certs, latest wins
+    expect(isNewer(live, older)).toBe(false);
+    expect(isNewer(live, { s: 'Active', d: null })).toBe(false);  // a date beats none
+  });
+});
+
+// Finding 20260818-drift-monitor-196: a PAT that Airtable rejected with 401/403 was
+// removed from sessionStorage only. init() reads localStorage FIRST, so reloading the
+// page re-loaded the dead token, failed again, and left the operator on the auth
+// screen with no explanation and no way out except clearing site data by hand.
+describe('a rejected PAT is cleared from every store it was written to', () => {
+  it('clears localStorage as well as sessionStorage on 401/403', () => {
+    const writes = src.slice(src.indexOf('function authenticate('), src.indexOf('(function init('));
+    // Both stores are written on login...
+    expect(writes).toContain("sessionStorage.setItem('_dlr_pat'");
+    expect(writes).toContain("localStorage.setItem('airtable_pat'");
+
+    // ...so both must be cleared on rejection, inside the same branch.
+    const fetchFn = src.slice(src.indexOf('async function airtableFetch('));
+    const branch = fetchFn.slice(fetchFn.indexOf('resp.status === 401'),
+                                 fetchFn.indexOf("throw new Error('Auth failed')"));
+    expect(branch).toContain("sessionStorage.removeItem('_dlr_pat')");
+    expect(branch).toContain("localStorage.removeItem('airtable_pat')");
+  });
+
+  it('still prefers localStorage on load, so the clear is what breaks the loop', () => {
+    // Control: if the read order ever changes, the reasoning above stops applying
+    // and this test should be revisited rather than quietly still passing.
+    const init = src.slice(src.indexOf('(function init('), src.indexOf('async function airtableFetch('));
+    expect(init).toMatch(/localStorage\.getItem\('airtable_pat'\)\s*\|\|\s*sessionStorage\.getItem\('_dlr_pat'\)/);
+  });
+});

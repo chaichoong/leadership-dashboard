@@ -37,7 +37,30 @@ function lastCompletedMonth() {
   d.setMonth(d.getMonth() - 1);
   const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
   const monthName = d.toLocaleDateString('en-GB', { month: 'long' });
-  return { key, date: `${key}-10`, monthName, year: String(d.getFullYear()) };
+  // The matrix header abbreviates: "Jul 26". Built the same way wealthMonths12 does.
+  const colLabel = `${monthName.slice(0, 3)} ${key.slice(2, 4)}`;
+  return { key, date: `${key}-10`, monthName, colLabel, year: String(d.getFullYear()) };
+}
+
+// Which cell holds a given month.
+//
+// This used to be the literal 12: label column, one "In the pot" lead, then twelve
+// months, so the last completed month sat at index 12. On 15 Aug 2026 a SECOND lead
+// column ("Right now ●") was added and shoved every month one place right. Nothing
+// errored — index 12 simply started reading the month before, which held £0, and the
+// drill it clicked carried 2026-06 while the run date was 2026-08. Two of these three
+// tests went red on origin/main and stayed red for days, which is exactly the state
+// that teaches people to reach for SKIP_SYNC_TESTS=1 (finding 20260820-queue-fixer-268).
+//
+// So find the column the way a person does: by its heading. Header <th> and body <td>
+// positions line up one-for-one in wealthMatrixCard, and this survives the next lead
+// column as well as the month rolling over.
+async function monthColIndex(page, label) {
+  const idx = await page.locator('#wealthBuckets thead th').evaluateAll(
+    (ths, want) => ths.findIndex(th => th.textContent.trim().startsWith(want)), label);
+  // A miss returns -1, and nth(-1) would silently select nothing: fail loudly instead.
+  expect(idx, `no "${label}" column in the buckets matrix header`).toBeGreaterThan(0);
+  return idx;
 }
 
 function bucketFixtures() {
@@ -94,9 +117,8 @@ async function spentCell(page) {
   await parent.locator('td').first().click();
   const spentRow = page.locator('#wealthBuckets tr', { hasText: 'Spent' }).first();
   await expect(spentRow).toBeVisible();
-  // Columns: label, "In the pot" lead, then 12 months. The last completed month is the
-  // second-to-last month column, i.e. index 12 of the row's cells.
-  return spentRow.locator('td').nth(12);
+  const col = await monthColIndex(page, lastCompletedMonth().colLabel);
+  return spentRow.locator('td').nth(col);
 }
 
 test.describe('Income buckets — spend drill-down', () => {
@@ -112,6 +134,10 @@ test.describe('Income buckets — spend drill-down', () => {
 
     const cell = await spentCell(page);
     await expect(cell).toHaveAttribute('onclick', /wealthDrill\(/);
+    // Pin the MONTH the drill opens, not just that it opens one. The column drifted
+    // silently once already; an onclick carrying the wrong month would still pass a
+    // bare /wealthDrill\(/ check.
+    await expect(cell).toHaveAttribute('onclick', new RegExp(lastCompletedMonth().key));
     await expect(cell).toHaveText(/300/);
 
     await cell.click();
@@ -174,7 +200,7 @@ test.describe('Income buckets — spend drill-down', () => {
     // arithmetic below, so it must not be sensitive to row order.
     const spentRow = page.locator(`#wealthBuckets tr.wm-child-${rid}`, { hasText: 'Spent' }).first();
     await expect(spentRow).toContainText('Spent');
-    const cell = spentRow.locator('td').nth(12);
+    const cell = spentRow.locator('td').nth(await monthColIndex(page, lastCompletedMonth().colLabel));
     await expect(cell).toHaveText(/1,025/);
 
     await cell.click();
@@ -200,21 +226,22 @@ test.describe('Income buckets — spend drill-down', () => {
     await page.waitForTimeout(2500);
 
     await spentCell(page); // expands the bucket
+    const col = await monthColIndex(page, lastCompletedMonth().colLabel);
 
     // The parent row IS the balance now.
     const potRow = page.locator('#wealthBuckets tr', { hasText: 'Dreams (100%)' }).first();
     await expect(potRow).toBeVisible();
-    await expect(potRow.locator('td').nth(12)).not.toHaveAttribute('onclick', /wealthDrill/);
+    await expect(potRow.locator('td').nth(col)).not.toHaveAttribute('onclick', /wealthDrill/);
 
     const rid = await potRow.evaluate(tr => tr.nextElementSibling.className.replace('wm-child-', ''));
     const moneyIn = page.locator(`#wealthBuckets tr.wm-child-${rid}`, { hasText: 'Money in' }).first();
     await expect(moneyIn).toBeVisible();
-    await expect(moneyIn.locator('td').nth(12)).not.toHaveAttribute('onclick', /wealthDrill/);
+    await expect(moneyIn.locator('td').nth(col)).not.toHaveAttribute('onclick', /wealthDrill/);
 
     // Control: the sibling Spent row IS clickable, so a locator that quietly
     // matched nothing could not pass this block by default.
     const spent = page.locator(`#wealthBuckets tr.wm-child-${rid}`, { hasText: 'Spent' }).first();
-    await expect(spent.locator('td').nth(12)).toHaveAttribute('onclick', /wealthDrill/);
+    await expect(spent.locator('td').nth(col)).toHaveAttribute('onclick', /wealthDrill/);
   });
 
 });
