@@ -202,18 +202,29 @@ def cmd_reopen(a):
     state = current_state()
     now = datetime.utcnow()
 
+    # An id AND --stale is a contradiction: one names a finding, the other says
+    # "whatever is abandoned". Silently honouring one of them hides the mistake.
+    if a.stale and a.id:
+        print("ERROR: give a finding id OR --stale, not both", file=sys.stderr)
+        return 1
+
     if a.stale:
         stale = [r for r in state.values() if is_stale_claim(r, a.stale_hours, now)]
         for r in stale:
             age = age_hours(r.get("claimed_at"), now)
+            why = ("no readable timestamp" if age is None
+                   else "%.1f hours" % age)
             append({"op": "reopen", "id": r["id"], "ts": iso(),
                     "note": a.note or ("claim by %s went stale after %s"
-                                       % (r.get("claimed_by", "?"),
-                                          "an unreadable time" if age is None
-                                          else "%.1f hours" % age))})
-            print("reopened %s (claimed by %s)" % (r["id"], r.get("claimed_by", "?")))
+                                       % (r.get("claimed_by", "?"), why))})
+            print("reopened %s (claimed by %s, %s)"
+                  % (r["id"], r.get("claimed_by", "?"), why))
         if not stale:
             print("No stale claims.")
+            return 0
+        # A count, so a run that reopens work says how much came back. Findings
+        # returning to the queue means an earlier run died holding them.
+        print("reopened %d finding(s)" % len(stale))
         return 0
 
     if not a.id:
@@ -274,7 +285,7 @@ def main(argv=None):
     sp.add_argument("--json", action="store_true")
     sp.add_argument("--stale", action="store_true",
                     help="only claims older than --stale-hours")
-    sp.add_argument("--stale-hours", type=float, default=STALE_CLAIM_HOURS)
+    sp.add_argument("--stale-hours", "--lease-hours", type=float, dest="stale_hours", default=STALE_CLAIM_HOURS)
     sp.set_defaults(fn=cmd_list)
 
     sp = sub.add_parser("claim")
@@ -286,7 +297,7 @@ def main(argv=None):
     sp.add_argument("id", nargs="?")
     sp.add_argument("--stale", action="store_true",
                     help="reopen every claim older than --stale-hours")
-    sp.add_argument("--stale-hours", type=float, default=STALE_CLAIM_HOURS)
+    sp.add_argument("--stale-hours", "--lease-hours", type=float, dest="stale_hours", default=STALE_CLAIM_HOURS)
     sp.add_argument("--force", action="store_true",
                     help="reopen even a closed finding")
     sp.add_argument("--note", default="")

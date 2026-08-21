@@ -248,6 +248,53 @@ describe('agent-dispatch submit gate', () => {
       expect(src).toMatch(rx);
       expect(approvals).toMatch(rx);
     });
+
+    // 20260819-agent-dispatch-240. The 400-char cap was enforced but stated
+    // nowhere, so 5 of 25 submits on 19 Aug failed on it after the whole
+    // deliverable was written. The refusal now names the limit and the overrun.
+    it('the over-long refusal names the limit and the overrun', () => {
+      const r = submit({ type: 'Analysis', output: `${CARRY_OUT} ${'y'.repeat(500)}\n\n${LONG}` });
+      expect(r.refused).toBe(true);
+      expect(r.error).toMatch(/under 400 characters/);
+      expect(r.error).toMatch(/yours is \d+/);
+    });
+
+    // 20260819-agent-dispatch-237 (critical). The mandated closing line is a
+    // note to Kevin about the action, not a sentence in the letter. Until
+    // 19 Aug 2026 parse_output did not strip it, so the only route to sending
+    // five approved creditor and Companies House emails would have posted
+    // '**Carrying this out will involve:** sending the email above ...'
+    // verbatim to the recipient. Back-tested: reverting the strip in
+    // agent_email_format.parse_output makes both of these fail.
+    describe('it never reaches the recipient (20260819-agent-dispatch-237)', () => {
+      const parse = (output) => JSON.parse(execFileSync('python3', ['-c', `
+import json, sys, importlib.util
+spec = importlib.util.spec_from_file_location('fmt', ${JSON.stringify(resolve(ROOT, 'scripts/agent_email_format.py'))})
+m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+print(json.dumps(m.parse_output(sys.stdin.read())))
+`], { encoding: 'utf8', input: output }));
+
+      const EMAIL = 'TO: enquiries@companieshouse.gov.uk\nSUBJECT: Company 12345678\n---\nDear Sir,\n\nPlease find the response attached.\n\nKind regards\nKevin';
+
+      it('strips the closing line from the email body', () => {
+        const body = parse(`${EMAIL}\n\n${CARRY_OUT}`).body;
+        expect(body, 'the internal marker would have been emailed out').not.toMatch(/arrying this out/i);
+        expect(body).toBe(parse(EMAIL).body);
+      });
+
+      it('leaves a mid-body mention alone — it is the letter, not the note', () => {
+        const body = parse(`TO: a@b.com\nSUBJECT: x\n---\nCarrying this out will involve ${'word '.repeat(120)}\n\nRegards`).body;
+        expect(body).toMatch(/arrying this out/i);
+      });
+
+      it('the marker is single-sourced, not re-declared in agent-dispatch.py', () => {
+        // Two copies is how the strip and the mandate drift apart.
+        const dispatchSrc = execFileSync('cat', [DISPATCH], { encoding: 'utf8' });
+        expect(dispatchSrc, 'agent-dispatch.py declares its own copy again')
+          .not.toMatch(/^CARRY_OUT_MARKER\s*=/m);
+        expect(dispatchSrc).toMatch(/from agent_email_format import \([\s\S]*?CARRY_OUT_MARKER/);
+      });
+    });
   });
 
   // WHO the approval lands on (12 Aug 2026): the task's Approver field

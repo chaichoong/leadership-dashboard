@@ -5209,13 +5209,40 @@ async function autoRescheduleOverdue(){
   const member=TEAM.find(m=>m.key==='kevin');if(!member)return{count:0};
   const overdue=allTasks.filter(t=>t.assigneeEmail===member.email&&t.dueDate&&t.dueDate<today&&t.status!=='Completed'&&!t.someDay&&!t.hardDeadline);
   if(overdue.length===0)return{count:0};
-  const patches=overdue.map(t=>{
-    const fields={[F.dueDate]:today};
-    if(!t.origDueDate)fields[F.origDueDate]=t.dueDate;
-    return patchTask(t.id,fields).then(()=>{t.origDueDate=t.origDueDate||t.dueDate;t.dueDate=today}).catch(e=>console.warn('resched fail',t.id,e));
-  });
-  for(let i=0;i<patches.length;i+=10){await Promise.all(patches.slice(i,i+10));if(i+10<patches.length)await new Promise(r=>setTimeout(r,250))}
-  return{count:overdue.length};
+  // Check res.ok before mutating, and count only what actually moved.
+  //
+  // 20260819-drift-monitor-221: this was the ONE patch site in the file that
+  // ignored the response. patchWithRetry RESOLVES with a non-ok Response, it
+  // does not throw, so .then() fired on a 422 as readily as on a 200: the task
+  // was moved to today in the browser, and the caller was told every overdue
+  // task had been rescheduled. The banner said so, the next reload said
+  // otherwise, and nothing was ever logged.
+  //
+  // The requests are also built INSIDE the batch loop now. The old eager .map
+  // fired all of them the moment it ran, so the 10-at-a-time slicing throttled
+  // nothing — it only staggered when the answers were read.
+  let moved=0,failed=0;
+  for(let i=0;i<overdue.length;i+=10){
+    const batch=overdue.slice(i,i+10);
+    await Promise.all(batch.map(async t=>{
+      const fields={[F.dueDate]:today};
+      if(!t.origDueDate)fields[F.origDueDate]=t.dueDate;
+      try{
+        const res=await patchTask(t.id,fields);
+        if(!res||!res.ok){
+          failed++;
+          console.warn('resched fail',t.id,res?res.status:'no response');
+          return;
+        }
+        t.origDueDate=t.origDueDate||t.dueDate;
+        t.dueDate=today;
+        moved++;
+      }catch(e){failed++;console.warn('resched fail',t.id,e)}
+    }));
+    if(i+10<overdue.length)await new Promise(r=>setTimeout(r,250));
+  }
+  if(failed>0)console.warn(`[auto-reschedule] ${failed} of ${overdue.length} tasks could not be moved`);
+  return{count:moved,failed:failed};
 }
 
 // Plan My Day removed — use Auto-Schedule instead.
