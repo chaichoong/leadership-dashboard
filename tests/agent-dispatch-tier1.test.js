@@ -85,6 +85,33 @@ describe('agent-dispatch tier-1 keyword coverage', () => {
     expect(out.patterns).toContain('restraint order');
   });
 
+  // The explicit label, added 15 Aug 2026.
+  //
+  // Until then the filter matched subject keywords only, so a record whose
+  // description literally read "TIER 1 MATTER" came back tier1: false. In that
+  // day's recovery run, 16 of 16 tier-1 items were caught by the dispatcher's
+  // judgement pass and ZERO by this filter. A self-declaration the machine
+  // ignores is worse than none, because everyone downstream assumes it was
+  // honoured — and the failure mode is a private legal matter routed to Mica.
+  describe('an explicit tier-1 label on the record', () => {
+    const labelled = ['TIER 1 MATTER — do not action without Kevin', 'this is a tier 1 matter',
+                      'tier-1 legal', 'TIER1 flagged', 'Tier One matter', 'tier_1'];
+    const notLabelled = ['Multi-tier 15 pricing model', 'tier 2 correspondence',
+                         'Order 1 tier cake for the office'];
+    const res = pyMatch([...labelled, ...notLabelled]);
+
+    it.each(labelled)('matches %s', (c) => {
+      expect(res.results[c], `"${c}" must be tier 1 — it says so on the record`).toBeTruthy();
+    });
+
+    // A false positive only routes something to Kevin with extra caution, so
+    // the bias is deliberately toward matching. "tier 15" is still worth
+    // excluding: a banner that cries wolf stops being read.
+    it.each(notLabelled)('does not match %s', (c) => {
+      expect(res.results[c], `"${c}" is not a tier-1 declaration`).toBeFalsy();
+    });
+  });
+
   // SKILL.md is the specification; the script is the implementation. If the doc
   // stops naming a category, this fails and the pair gets re-decided together
   // rather than one side silently going stale.

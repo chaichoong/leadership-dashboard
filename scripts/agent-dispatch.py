@@ -33,7 +33,14 @@ Subcommands:
   annotate TASKID --note STR  append a dated agent note to the task's Notes.
   intent   TASKID             record BEFORE dispatching a carry-out, so a
                               crash mid-action can never re-execute it blind.
-  complete TASKID             after the approved action has been carried out.
+  complete TASKID [--keep-open [--note STR]]
+                              after the approved action has been carried out.
+                              --keep-open records the carry-out in Notes and
+                              leaves Status alone, for an approval whose text
+                              says the task must stay open (a standing
+                              obligation, a chase, a thing due again). The run
+                              report must set "keepOpen": true on that action so
+                              verify checks the Notes record, not Completed.
   verify   --report PATH      the control. Exits 1, loudly, if there was work
                               and the run did none, if any action failed, or
                               if a claimed write did not actually land.
@@ -127,9 +134,41 @@ TASK_TYPES = ("Drafting", "Research", "Analysis", "Build",
 APPROVED = ("Approved as-is", "Approved with minor edits")
 OPEN_STATUSES = ("Today", "Overdue")
 
-# How many pieces of work one run may take on. Small on purpose: the approval
-# queue has to stay reviewable from a phone. One line to change.
-CAP_PER_RUN = 5
+# How many pieces of work one run may take on.
+#
+# A CEILING, NOT A TARGET. If eight tasks are eligible, eight run. A high cap
+# costs nothing on a quiet day, which is why it should be set to clear the
+# backlog rather than to feel safe.
+#
+# This was 5, sized so the approval queue stayed reviewable from a phone. Kevin
+# overruled that on 14 Aug 2026: the queue's real home is the Tasks & Projects
+# page, Slack is the on-the-go bonus, and he would rather be bombarded than have
+# work sit unprocessed. Raised again the same day, to 50, once measurement
+# showed 37 tasks eligible and a cap of 25 leaving 12 of them to wait a day for
+# no reason. The goal is 90% of the work done by agents; a cap below the size of
+# the queue is just a slower version of the starvation this already caused.
+#
+# Dispatch also runs ONCE a day now (daily-ops phase 6.3) where it used to run
+# twice, at 07:30 and 14:30. That halving is why throughput felt slower than
+# before. 50 once a day is 5x the old 5-twice-a-day, not a restoration of it.
+#
+# Raise it further if the eligible count ever approaches it. The real limits are
+# how long the run takes and Airtable's rate limit, neither of which is near.
+CAP_PER_RUN = 50
+
+# Of those slots, how many are HELD BACK for new work that no agent has touched.
+#
+# Why this exists: the cap applies to the whole worklist and hand-backs sort to
+# the head of it. On 14 Aug all 5 slots went to carrying out already-approved
+# work, so the 8 inbound messages picked up the day before were never drafted —
+# empty Agent Output, never sent for approval — and NOTHING new reached the
+# approval queue between 12 and 14 Aug. It is self-sustaining: while there are
+# CAP_PER_RUN hand-backs waiting, new work is never reached, so no new approvals
+# are produced, so the only thing left to do next run is more hand-backs.
+#
+# A floor breaks that loop. Unused slots are given back to hand-backs, so this
+# costs nothing on a run with little new work.
+NEW_WORK_FLOOR = 10
 
 # The 17 AI agent Team Member records → the local Claude Code agent that does
 # the work. Verified against the live Team Members table on 1 Aug 2026.
@@ -194,6 +233,21 @@ CEO_REC_ID = "reciHUAEcEkbctnZ6"
 # "income and expenditure" wording those forms actually use.
 TIER1_PATTERNS = [
     re.compile(p, re.I) for p in (
+        # THE EXPLICIT LABEL COMES FIRST. If a human or an agent has already
+        # written "tier 1" on the record, that is the strongest signal there is
+        # and it beat every subject keyword below — yet until 15 Aug 2026 it
+        # matched NOTHING. Task descriptions carrying the literal words
+        # "TIER 1 MATTER" came back tier1: false, so the banner reached Kevin
+        # only because the dispatcher's judgement pass caught them by hand: 16
+        # of 16 tier-1 items in that day's recovery run were labelled by
+        # judgement, zero by this filter. A self-declaration that the machine
+        # ignores is worse than no declaration, because everyone downstream
+        # assumes it was honoured.
+        # \b after the digit or "tier 15 pricing model" reads as tier 1. The
+        # asymmetry is deliberate everywhere else: a false positive routes
+        # something to Kevin with extra caution, a false negative sends a
+        # private legal matter to Mica, so this errs toward matching.
+        r"tier[\s\-_]*1\b", r"tier[\s\-_]*one\b",
         r"restraint order", r"operation lily", r"criminal investigation",
         r"social housing holdings", r"ach investments", r"liquidat",
         # Enforcement — the vocabulary a bailiff/HCEO notice actually uses.
@@ -301,6 +355,41 @@ def outbound_intent(*texts):
 # into reserve whenever there is other work and are only picked up on a quiet
 # run. Demoted, never dropped — and counted in the queue JSON so a task sitting
 # here for weeks is visible rather than silently parked.
+def select_worklist(handbacks, new_work, deferred, cap=None, floor=None):
+    """Choose this run's worklist so neither lane can starve the other.
+
+    handbacks  approved carry-outs and redos, in priority order. What Kevin is
+               waiting on, so they take precedence.
+    new_work   tasks no agent has touched yet. Left alone, these NEVER run on a
+               busy day, and then nothing new ever reaches the approval queue.
+    deferred   redos whose feedback said "not yet". Quiet-run work only.
+
+    Rules, in order:
+      1. Hold back up to `floor` slots for new work, but only as many as there
+         actually IS new work. A quiet day costs the hand-backs nothing.
+      2. Fill the rest with hand-backs.
+      3. Give any slot the other lane did not use straight back.
+      4. Deferred items pick up whatever is left, which on a busy run is nothing.
+
+    Returns at most `cap` items.
+    """
+    cap = CAP_PER_RUN if cap is None else cap
+    floor = NEW_WORK_FLOOR if floor is None else floor
+    if cap <= 0:
+        return []
+
+    held_for_new = min(floor, len(new_work), cap)
+    chosen = list(handbacks[:max(0, cap - held_for_new)])
+    chosen += new_work[:cap - len(chosen)]
+    # New work did not use its whole allowance — hand it back rather than idle.
+    if len(chosen) < cap:
+        already = {t["id"] for t in chosen}
+        chosen += [t for t in handbacks if t["id"] not in already][:cap - len(chosen)]
+    if len(chosen) < cap:
+        chosen += deferred[:cap - len(chosen)]
+    return chosen
+
+
 DELAY_PATTERNS = [
     re.compile(p, re.I) for p in (
         r"\bdelay(ed|ing)?\b", r"\bdefer(red|ring)?\b", r"\bpostpone",
@@ -407,6 +496,13 @@ def now_iso():
 
 STATE_DIR = os.path.expanduser("~/knowledge-os/logs/agent-dispatch")
 INTENT_LEDGER = os.path.join(STATE_DIR, "carryout-intent.jsonl")
+
+
+# The machine-readable half of a keep-open carry-out. Written into Notes by
+# `complete --keep-open`, re-read from the LIVE record by verify. A sentence a
+# human could paraphrase would not survive as a control; this string is checked
+# verbatim, so changing it here changes both halves at once.
+CARRIED_OUT_MARK = "CARRIED OUT (task left open):"
 
 
 def ledger_append(task_id, event):
@@ -569,6 +665,9 @@ def cmd_queue(args):
         changes_hb = [t for t in changes_hb if t["id"] not in deferred_ids]
 
     # Hand-backs first — approved work Kevin is waiting on beats new work.
+    # NOTE this ordering is the REPORTING order and the reserve order. It is no
+    # longer what decides the worklist: see select_worklist, which holds slots
+    # back for new work so hand-backs cannot starve it.
     combined = approved_hb + changes_hb + new_work + deferred_hb
     intents = open_intents()
     for t in combined:
@@ -579,10 +678,11 @@ def cmd_queue(args):
         # done: the action MAY already have happened. The dispatcher must make
         # the agent VERIFY (sent items, records) before executing anything.
         t["priorIntent"] = t["kind"] == "carry_out" and t["id"] in intents
-    worklist = combined[:CAP_PER_RUN]
+    worklist = select_worklist(approved_hb + changes_hb, new_work, deferred_hb)
     # If the dispatcher's judgement pass removes a worklist item (a tier-1
     # smell the keywords missed), it backfills from here — never beyond the cap.
-    reserve = combined[CAP_PER_RUN:CAP_PER_RUN * 2]
+    chosen = {t["id"] for t in worklist}
+    reserve = [t for t in combined if t["id"] not in chosen][:CAP_PER_RUN]
 
     out = {
         "generatedAt": now_iso(),
@@ -718,7 +818,7 @@ def cmd_submit(args):
     # queue classifier both gate on that field alone, and would have carried out
     # text Kevin never saw. The mirror image broke the redo path: a stale
     # 'Changes requested' re-queued the same task as a redo on every run.
-    patch_task(args.task, {
+    fields = {
         AF["agentOutput"]: output[:95000],
         AF["taskType"]: args.type,
         AF["status"]: "Approval",
@@ -733,7 +833,17 @@ def cmd_submit(args):
         # completed once and later resubmitted kept its old stamp and stayed in
         # every throughput and Completed Month figure as finished work.
         AF["completion"]: None,
-    })
+    }
+    # Tier 1 moves the APPROVER field too, not just the assignee. The Slack
+    # router reads Approver to decide whose channel the card lands in, so
+    # leaving it on Mica while the engine had already decided "Kevin only" put
+    # the two halves in disagreement — and the half that picks the channel was
+    # the one still saying Mica. Write the decision into the field the router
+    # reads. Never the reverse: a non-tier-1 submit leaves Approver alone,
+    # because Inbound Comms set it at creation and this is not that decision.
+    if is_tier1:
+        fields[AF["approver"]] = {"email": KEVIN_AIRTABLE_EMAIL}
+    patch_task(args.task, fields)
     print(json.dumps({"submitted": args.task,
                       "agent": AGENTS[args.agent]["name"],
                       "type": args.type, "tier1": is_tier1,
@@ -768,6 +878,37 @@ def cmd_complete(args):
         sys.exit(f"ERROR: refusing to complete {args.task} — outcome is "
                  f"'{t['outcome'] or 'empty'}', not an approval. Only "
                  "approved, carried-out work completes.")
+
+    # Carrying the action out and CLOSING the task are two different things.
+    #
+    # Until 13 Aug 2026 they were one. `complete` was the only success state, so
+    # an agent that had done exactly what Kevin approved had no way to say "done,
+    # but this stays open" — and two tasks whose approved text said DO NOT CLOSE
+    # were marked Completed anyway, with an apologetic note attached. The
+    # obligation was real and ongoing; the reminder for it was destroyed.
+    #
+    # --keep-open is that second state. It records the carry-out where Kevin can
+    # see it and leaves Status and Completion Date untouched, so the task stays
+    # in the queue it is meant to stay in. The agent decides from the approved
+    # text, which is the only place the instruction ever appears.
+    #
+    # Notes carries the marker rather than a new Airtable field: Notes already
+    # holds the agent's audit trail (see cmd_annotate) and needs no schema
+    # change, so this cannot be blocked on a base edit. CARRIED_OUT_MARK is the
+    # machine-readable half — verify re-reads the LIVE record for it, never
+    # trusting what the run claimed.
+    if args.keep_open:
+        stamp = datetime.now(LONDON).strftime("%d %b %Y")
+        detail = (args.note or "the approved action").strip()
+        mark = (f"[{stamp} — agent] {CARRIED_OUT_MARK} {detail}. "
+                "Left OPEN deliberately: the approval said so.")
+        existing = t["notes"] or ""
+        patch_task(args.task, {AF["notes"]: (existing + "\n\n" + mark).strip()})
+        ledger_append(args.task, "done")
+        print(json.dumps({"carriedOut": args.task, "keptOpen": True,
+                          "status": t["status"]}))
+        return
+
     patch_task(args.task, {
         AF["status"]: "Completed",
         AF["completion"]: now_iso(),
@@ -851,7 +992,20 @@ def cmd_verify(args):
             continue
         kind = a.get("kind")
         if kind == "carry_out":
-            if live["status"] != "Completed":
+            # Two legitimate end states, and each is verified against the field
+            # that actually proves it. A keep-open carry-out that checked Status
+            # would alarm every time, and one that checked nothing would let a
+            # claimed action through with no evidence at all.
+            if a.get("keepOpen"):
+                if CARRIED_OUT_MARK not in (live["notes"] or ""):
+                    problems.append(
+                        f"{a['task']} claimed carried out and kept open, but "
+                        "its Notes carry no carry-out record — nothing proves "
+                        "the action happened")
+                elif live["status"] == "Completed":
+                    problems.append(
+                        f"{a['task']} was meant to stay open and is Completed")
+            elif live["status"] != "Completed":
                 problems.append(f"{a['task']} claimed carried out but Status "
                                 f"is '{live['status']}', expected 'Completed'")
         elif kind in ("redo", "new"):
@@ -921,6 +1075,12 @@ def main():
 
     c = sub.add_parser("complete")
     c.add_argument("task")
+    # The approved text is the only place "do not close this" ever appears, so
+    # the agent that read it is the one that has to say so here.
+    c.add_argument("--keep-open", action="store_true",
+                   help="record the carry-out but leave Status untouched")
+    c.add_argument("--note", default="",
+                   help="what was carried out (goes into Notes with --keep-open)")
 
     v = sub.add_parser("verify")
     v.add_argument("--report", required=True)

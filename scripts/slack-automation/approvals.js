@@ -165,6 +165,20 @@ const MAX_RECONCILES_PER_RUN = 10;
 // company "financial statements" every year and it would put the legal-matter
 // banner on routine accounting. The disclosure form is caught by its full name.
 const KEVIN_ONLY_PATTERNS = [
+    // THE EXPLICIT LABEL COMES FIRST. If a human or an agent has already written
+    // "tier 1" on the record, that is the strongest signal there is — yet until
+    // 15 Aug 2026 it matched nothing on either side. Descriptions reading
+    // literally "TIER 1 MATTER" scored tier1: false, and in that day's recovery
+    // run 16 of 16 tier-1 items were caught by an agent's judgement and ZERO by
+    // these patterns. A self-declaration the machine ignores is worse than none,
+    // because everyone downstream assumes it was honoured.
+    //
+    // \b after the digit, or "tier 15 pricing model" reads as tier 1. The bias
+    // is otherwise deliberately toward matching: a false positive routes
+    // something to Kevin with extra caution, a false negative sends a private
+    // legal matter to Mica.
+    /tier[\s\-_]*1\b/i,
+    /tier[\s\-_]*one\b/i,
     /restraint order/i,
     /operation lily/i,
     /criminal investigation/i,
@@ -187,6 +201,16 @@ const KEVIN_ONLY_PATTERNS = [
     /litigation/i,
 ];
 
+// The banner the dispatch engine stamps on Agent Output when IT decides a task
+// is tier 1. Defined once in scripts/agent_email_format.py (TIER1_BANNER) and
+// duplicated here because a Cloudflare Worker cannot import Python — the same
+// stranded-copy shape as the money worker's field IDs.
+// tests/constant-drift.test.js fails if the two strings diverge.
+const TIER1_BANNER =
+    ':rotating_light: TIER 1. This touches your private legal and financial '
+    + 'matter. An AI agent prepared it. Nothing has been sent, filed, paid or '
+    + 'changed anywhere. Read it before you approve.';
+
 // ─── SMALL HELPERS ────────────────────────────────────────────────────
 
 function selName(v) {
@@ -207,6 +231,26 @@ function esc(s) {
 function isKevinOnlyMatter(text) {
     const hay = String(text || '');
     return KEVIN_ONLY_PATTERNS.some(re => re.test(hay));
+}
+
+// Tier 1 as the WHOLE system sees it, not just as the task title spells it.
+//
+// Until 13 Aug 2026 every routing decision here read `name + description` only,
+// which is the one part of a task an agent never writes. So a tier-1 connection
+// the agent discovered mid-work — and stamped on Agent Output as TIER1_BANNER —
+// was invisible to the router. A label-8 task with Approver = Mica whose agent
+// found a solicitor's letter behind it would have been DM'd to her, banner and
+// all. Latent when found (6 live Approver = Mica tasks, none tier 1), which is
+// exactly the window to close it in.
+//
+// Three inputs, because each covers the others' blind spot:
+//   agentOutput — a connection only the agent could see
+//   name + description — a task no agent has touched yet
+//   notes — what a human appended after the fact (agent-dispatch already reads
+//           notes at scripts/agent-dispatch.py:702-703; this half did not)
+export function isTier1Task(t) {
+    if (String(t?.agentOutput || '').includes(TIER1_BANNER)) return true;
+    return isKevinOnlyMatter(`${t?.name || ''} ${t?.description || ''} ${t?.notes || ''}`);
 }
 
 async function airtable(env, method, path, body) {
@@ -541,7 +585,7 @@ async function postPending(env, channels, log) {
     for (const rec of recs) {
         const t = taskView(rec);
         const agent = await agentName(env, t.agentId);
-        const warn = isKevinOnlyMatter(`${t.name} ${t.description}`);
+        const warn = isTier1Task(t);
         const approver = approverFor(t, warn);
         const channel = await resolveChannelFor(env, approver, channels, log);
         const res = await slack(env, SLACK.post, {
@@ -696,7 +740,7 @@ async function processResponses(env, channels, log) {
     if (all.length > recs.length) log.push(`reactions: window ${win.start}-${win.end - 1} of ${all.length}, full cycle every ${Math.ceil(all.length / MAX_REACTION_CHECKS_PER_RUN)} min`);
     for (const rec of recs) {
         const t = taskView(rec);
-        const approver = approverFor(t, isKevinOnlyMatter(`${t.name} ${t.description}`));
+        const approver = approverFor(t, isTier1Task(t));
         const channel = await resolveChannelFor(env, approver, channels, log);
         const msg = await fetchMessage(env, channel, t.ts);
         if (!msg) { log.push(`no message for ${t.id}`); continue; }
@@ -762,7 +806,7 @@ async function reconcileDecidedElsewhere(env, channels, log) {
     const recs = await queryTasks(env, `AND({Status}!='Approval', LEN({Approval Slack TS}&'')>0)`, MAX_RECONCILES_PER_RUN);
     for (const rec of recs) {
         const t = taskView(rec);
-        const approver = approverFor(t, isKevinOnlyMatter(`${t.name} ${t.description}`));
+        const approver = approverFor(t, isTier1Task(t));
         const channel = await resolveChannelFor(env, approver, channels, log);
         await threadReply(env, channel, t.ts,
             t.outcome ? `:heavy_check_mark: Decided in the dashboard: *${t.outcome}*.`
@@ -864,7 +908,7 @@ export async function rewriteApprovalPost(env, taskId) {
     const t = taskView(recs[0]);
     if (t.status !== 'Approval' || !t.ts) return { ok: false, error: `task ${id} has no live approval message (status ${t.status || 'unknown'}, ts ${t.ts ? 'set' : 'empty'})` };
     const agent = await agentName(env, t.agentId);
-    const warn = isKevinOnlyMatter(`${t.name} ${t.description}`);
+    const warn = isTier1Task(t);
     const chId = await resolveChannelFor(env, approverFor(t, warn), {}, []);
     const res = await slack(env, SLACK.update, {
         method: 'POST',

@@ -329,17 +329,26 @@ def build(now_dt=None):
     # routine's own phase 1: if daily-ops does not run at all, its self-check
     # does not run either, and a second routine quietly firing every morning is
     # exactly the situation where that happens.
+    #
+    # Gated on daily-ops being IN THE SCHEDULE THIS DIGEST WATCHES, and pointed
+    # at THIS DIGEST'S events file. Before 15 Aug 2026 it read the production
+    # log unconditionally, so every fixture test of the digest was secretly
+    # asserting the health of the real machine: the suite went red the morning
+    # the real daily-ops failed to start, on tests that had nothing to do with
+    # it — pass/fail tracking live state is theatre in both directions.
     stacking = None
-    try:
-        spec = importlib.util.spec_from_file_location(
-            "cr", os.path.join(_here, "check-routines.py"))
-        cr = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(cr)
-        code, res = cr.check()
-        if code != 0:
-            stacking = res.get("reason")
-    except Exception as e:            # never let the check take the digest down
-        stacking = "could not verify the routine list: %s" % e
+    if "daily-ops" in schedule:
+        try:
+            os.environ["JOB_QUEUE_EVENTS"] = EVENTS
+            spec = importlib.util.spec_from_file_location(
+                "cr", os.path.join(_here, "check-routines.py"))
+            cr = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(cr)
+            code, res = cr.check()
+            if code != 0:
+                stacking = res.get("reason")
+        except Exception as e:        # never let the check take the digest down
+            stacking = "could not verify the routine list: %s" % e
 
     lines = []
     alarm = False
@@ -408,6 +417,76 @@ def build(now_dt=None):
     return "\n".join(lines), alarm
 
 
+def guard(now_dt=None):
+    """--guard mode: has daily-ops actually STARTED today? Early and loud.
+
+    Exists because of 15 Aug 2026: the scheduler stamped lastRunAt at 06:20 and
+    delivered the run to no session at all — no transcript, no phase-1 mark, no
+    reports. The full digest caught it, but not until its own run time, and
+    Kevin noticed first. This is the same check pulled forward: silent when the
+    mark exists, one loud message when it does not.
+
+    The scheduler's lastRunAt is deliberately NOT consulted. It was stamped that
+    morning while nothing ran, which makes it an assertion by the component
+    being checked. The phase-1 queue mark is written by the run itself doing
+    work, so its absence is the ground truth.
+
+    Gated on LONDON time in code, not in the launchd hour: the Mac's local
+    timezone moves with Kevin (France now, UK later), and the Cloudflare cron
+    incident already proved schedule-time day/hour maths silently drifts.
+    Returns an exit code.
+    """
+    from zoneinfo import ZoneInfo
+    now_ldn = (now_dt or datetime.now(ZoneInfo("Europe/London")))
+    if now_ldn.tzinfo is None:
+        now_ldn = now_ldn.replace(tzinfo=ZoneInfo("Europe/London"))
+    # The run fires at 06:05 London and marks within minutes. 08:00 leaves room
+    # for a slow wake without letting a dead morning go unreported for hours.
+    if now_ldn.hour < 8:
+        print("guard: before 08:00 London, too early to judge")
+        return 0
+
+    today = now_ldn.strftime("%Y-%m-%d")
+    started = False
+    for rec in read_jsonl_all(EVENTS):
+        if rec.get("job") != "daily-ops":
+            continue
+        # "state", not "event" — job-queue.py:153 writes {"ts","job","state"}
+        # and check-routines.py reads the same key. The first cut of this guard
+        # read "event", which matches NOTHING, so it would have alarmed every
+        # single morning including healthy ones. It passed a live dry-run only
+        # because that morning genuinely had no mark: right answer, wrong
+        # reason. Caught when the fixtures were corrected to the real shape.
+        if rec.get("state") not in ("acquired", "started", "mark"):
+            continue
+        ts = rec.get("ts", "")
+        try:
+            when = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+            local_day = when.astimezone(ZoneInfo("Europe/London")).strftime("%Y-%m-%d")
+        except ValueError:
+            continue
+        if local_day == today:
+            started = True
+            break
+
+    if started:
+        print("guard: daily-ops marked today, healthy")
+        return 0
+
+    msg = (":rotating_light: *daily-ops has not started today* (%s, checked %s London).\n"
+           "The scheduler may claim it ran — its stamp is not evidence, the phase-1 "
+           "mark is, and there is none. Nothing has swept, dispatched or reported "
+           "today. Open Claude Code in the dashboard repo and say *run daily ops*, "
+           "or it next fires tomorrow at 06:05."
+           % (today, now_ldn.strftime("%H:%M")))
+    print(msg)
+    post_to_slack(msg)
+    # run-job.sh shouts lines starting ERROR:, giving a second alert path.
+    print("\nERROR: daily-ops left no mark by %s London on %s"
+          % (now_ldn.strftime("%H:%M"), today))
+    return 1
+
+
 def post_to_slack(msg):
     if not os.path.exists(WEBHOOK_FILE):
         return
@@ -425,6 +504,8 @@ def post_to_slack(msg):
 
 
 def main():
+    if "--guard" in sys.argv:
+        return guard()
     msg, alarm = build()
     print(msg)
     if "--no-post" not in sys.argv:

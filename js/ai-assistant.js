@@ -248,6 +248,21 @@
             if (tab === 'comms') {
                 ctx.commsPage = 'Inbound communications tracker (loaded as iframe)';
             }
+            if (tab === 'coa' && typeof coaLinkBreakdown === 'function') {
+                // Names plus how much is coded to each, so "what is Marketing used
+                // for" and "which lines are dead" are answerable without a fetch.
+                const summarise = (recs, kind) => (recs || []).map(r => ({
+                    name: coaName(r, kind),
+                    linked: coaLinkBreakdown(r, kind).total,
+                    ...(kind === 'subCategory' ? { moneyGroup: coaMoneyGroup(r) || null } : {}),
+                }));
+                ctx.chartOfAccounts = {
+                    categories: summarise(allCategories, 'category'),
+                    subCategories: summarise(allSubCategories, 'subCategory'),
+                    lockedNames: [...coaProtectedNames('subCategory').keys()].length,
+                    note: 'Names the P&L and Wealth code matches on cannot be renamed from this tab; records with links cannot be deleted.',
+                };
+            }
             if (tab === 'sitemap') {
                 ctx.pageRegistry = PAGE_REGISTRY.map(p => ({ name: p.name, pageVer: p.pageVer, sopVer: p.sopVer, inSync: p.pageVer === p.sopVer }));
             }

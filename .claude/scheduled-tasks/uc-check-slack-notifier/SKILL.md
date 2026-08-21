@@ -1,6 +1,6 @@
 ---
 name: uc-check-slack-notifier
-description: ABSORBED into daily-ops (8 Aug 2026) as phase 6.1. Do not re-enable separately. Disable reconfirmed 10 Aug 2026.
+description: ABSORBED into daily-ops (8 Aug 2026) as phase 6.1. Do not re-enable separately. Disabled AGAIN 15 Aug 2026 after the launchd watchdog kept flipping it back on (its repair() predated the absorption and treated disabled as broken) — that repair path is now deleted from scripts/uc-notifier-watchdog.py, which reports ENABLED as the fault instead.
 ---
 
 ## QUEUE AND WRITE POLICY (added 6 Aug 2026 — do this before anything else)
