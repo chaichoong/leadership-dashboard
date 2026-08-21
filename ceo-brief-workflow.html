@@ -1,0 +1,429 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="robots" content="noindex">
+<title>CEO Brief, how it works</title>
+<link rel="stylesheet" href="css/tokens.css?v=1">
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; }
+body { line-height: 1.55; color: var(--text-primary); background: var(--bg-app); }
+
+/* Hero */
+.hero {
+  background: linear-gradient(135deg, var(--accent) 0%, var(--accent-hover) 100%);
+  color: #fff; padding: 3rem 2rem 4rem; position: relative; overflow: hidden;
+}
+.hero::after {
+  content: ''; position: absolute; top: -50%; right: -10%;
+  width: 600px; height: 600px;
+  background: radial-gradient(circle, rgba(255,255,255,0.1) 0%, transparent 70%);
+  border-radius: 50%;
+}
+.hero-inner { max-width: 1200px; margin: 0 auto; position: relative; z-index: 1; }
+.hero-back { display: inline-flex; align-items: center; gap: 0.4rem; font-size: 0.85rem; opacity: 0.8; text-decoration: none; color: #fff; margin-bottom: 1.25rem; transition: opacity 0.15s; }
+.hero-back:hover { opacity: 1; }
+.hero h1 { font-size: 2.5rem; font-weight: 700; letter-spacing: -0.5px; margin-bottom: 0.5rem; }
+.hero p.lede { font-size: 1.1rem; opacity: 0.92; max-width: 720px; }
+
+/* Layout */
+.layout { max-width: 1200px; margin: -2rem auto 4rem; padding: 0 1.5rem; display: grid; grid-template-columns: 220px 1fr; gap: 2rem; align-items: start; }
+@media (max-width: 900px) { .layout { grid-template-columns: 1fr; } .nav { position: static !important; } }
+
+/* Side nav */
+.nav {
+  position: sticky; top: 1rem;
+  background: var(--bg-surface); border: 1px solid var(--border-default);
+  border-radius: var(--radius-xl); padding: 1rem; box-shadow: var(--shadow-sm);
+}
+.nav h3 { font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); margin-bottom: 0.5rem; }
+.nav a { display: block; padding: 0.4rem 0.6rem; font-size: 0.88rem; color: var(--text-secondary); text-decoration: none; border-radius: var(--radius-md); margin-bottom: 0.15rem; }
+.nav a:hover { background: var(--bg-surface-2); color: var(--accent); }
+.nav .nav-grp { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); padding: 0.6rem 0.6rem 0.25rem; }
+
+/* Main content */
+.main { background: var(--bg-surface); border: 1px solid var(--border-default); border-radius: var(--radius-xl); box-shadow: var(--shadow-md); padding: 2rem 2.25rem; }
+.section { margin-top: 2.75rem; }
+.section:first-child { margin-top: 0; }
+.section > h2 {
+  font-size: 1.6rem; font-weight: 700; color: var(--accent);
+  padding-bottom: 0.5rem; border-bottom: 3px solid var(--accent-soft);
+  margin-bottom: 1.25rem; display: flex; align-items: center; gap: 0.5rem;
+}
+.section > h2 .num { font-size: 0.9rem; padding: 0.15rem 0.6rem; border-radius: var(--radius-full); background: var(--accent-soft); color: var(--accent); font-weight: 700; }
+.subsection { margin-top: 1.5rem; }
+.subsection h3 { font-size: 1.15rem; color: var(--text-primary); margin-bottom: 0.6rem; display: flex; align-items: center; gap: 0.5rem; }
+
+/* Cards */
+.card { background: var(--bg-surface); border: 1px solid var(--border-default); border-radius: var(--radius-lg); padding: 1.25rem; margin-bottom: 1rem; }
+.card.hilite { border-left: 4px solid var(--accent); background: var(--bg-surface-2); }
+.card h4 { font-size: 1rem; font-weight: 600; margin-bottom: 0.5rem; }
+
+/* Tab cards grid */
+.tabs-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 0.85rem; margin-top: 1rem; }
+.tab-card { background: var(--bg-surface); border: 2px solid var(--border-default); border-radius: var(--radius-lg); padding: 1rem 1.1rem; transition: border-color 0.15s, transform 0.15s; }
+.tab-card:hover { border-color: var(--accent); transform: translateY(-2px); }
+.tab-card .icon { font-size: 1.6rem; margin-bottom: 0.4rem; display: block; }
+.tab-card h4 { font-size: 1.05rem; font-weight: 600; margin-bottom: 0.3rem; color: var(--accent); }
+.tab-card p { font-size: 0.85rem; color: var(--text-secondary); }
+.tab-card a { display: inline-block; margin-top: 0.5rem; font-size: 0.8rem; color: var(--accent); font-weight: 600; text-decoration: none; }
+
+/* Color tags */
+.tag { display: inline-block; font-size: 0.7rem; font-weight: 700; padding: 0.15rem 0.55rem; border-radius: var(--radius-full); margin-right: 0.3rem; letter-spacing: 0.03em; text-transform: uppercase; }
+.tag-user { background: var(--info-bg); color: var(--info); }
+.tag-auto { background: var(--accent-soft); color: var(--accent); }
+.tag-rule { background: var(--warning-bg); color: var(--warning); }
+.tag-ai { background: #F1ECF7; color: var(--tone-plum); }
+.tag-data { background: var(--bg-subtle); color: var(--text-secondary); }
+.tag-slack { background: #E1ECF4; color: #4A154B; }
+
+/* Step list */
+.steps { counter-reset: step; padding-left: 0; list-style: none; }
+.steps li { counter-increment: step; position: relative; padding: 0.45rem 0 0.45rem 2rem; font-size: 0.92rem; color: var(--text-primary); }
+.steps li::before { content: counter(step); position: absolute; left: 0; top: 0.45rem; width: 1.4rem; height: 1.4rem; border-radius: 50%; background: var(--accent); color: #fff; font-weight: 700; font-size: 0.75rem; display: inline-flex; align-items: center; justify-content: center; }
+
+/* Tables */
+.tbl { width: 100%; border-collapse: collapse; margin: 0.5rem 0 1rem; font-size: 0.88rem; }
+.tbl th { text-align: left; padding: 0.6rem 0.8rem; background: var(--bg-subtle); font-weight: 600; color: var(--text-primary); border-bottom: 2px solid var(--border-default); }
+.tbl td { padding: 0.55rem 0.8rem; border-bottom: 1px solid var(--border-subtle); vertical-align: top; }
+.tbl tr:last-child td { border-bottom: 0; }
+.tbl code { font-family: ui-monospace, Menlo, monospace; background: var(--bg-subtle); padding: 1px 6px; border-radius: 4px; font-size: 0.82rem; color: var(--accent); }
+
+/* Mermaid container */
+.diagram { background: var(--bg-surface-2); border: 1px solid var(--border-default); border-radius: var(--radius-lg); padding: 1.5rem; margin: 1rem 0; overflow-x: auto; }
+.diagram-cap { font-size: 0.85rem; color: var(--text-muted); text-align: center; margin-top: 0.6rem; font-style: italic; }
+
+/* Flow boxes: simple visual lifecycle without Mermaid */
+.flowline { display: flex; align-items: stretch; gap: 0; margin: 1.25rem 0; flex-wrap: wrap; }
+.flowbox {
+  flex: 1 1 140px; min-width: 130px; padding: 0.85rem 0.8rem;
+  background: var(--bg-surface); border: 2px solid var(--border-default); border-radius: var(--radius-lg);
+  text-align: center; position: relative;
+}
+.flowbox h5 { font-size: 0.85rem; font-weight: 700; color: var(--accent); margin-bottom: 0.25rem; }
+.flowbox p { font-size: 0.75rem; color: var(--text-secondary); }
+.flowbox + .flowbox::before {
+  content: '→'; position: absolute; left: -1.25rem; top: 50%; transform: translateY(-50%);
+  font-size: 1.4rem; color: var(--accent); font-weight: 700;
+}
+@media (max-width: 600px) {
+  .flowbox + .flowbox::before { content: '↓'; left: 50%; top: -1.1rem; transform: translateX(-50%); }
+}
+
+/* Highlight callout */
+.callout {
+  background: var(--info-bg); border-left: 4px solid var(--info); color: var(--info);
+  padding: 0.85rem 1rem; border-radius: var(--radius-md); font-size: 0.9rem; margin: 1rem 0;
+}
+.callout strong { color: var(--info); }
+.callout.warn { background: var(--warning-bg); border-color: var(--warning); color: var(--warning); }
+.callout.warn strong { color: var(--warning); }
+.callout.green { background: var(--success-bg); border-color: var(--success); color: var(--success); }
+.callout.green strong { color: var(--success); }
+
+/* Glossary */
+.gloss dt { font-weight: 600; color: var(--accent); margin-top: 0.85rem; }
+.gloss dd { font-size: 0.9rem; color: var(--text-secondary); margin-left: 0; padding-left: 0; }
+
+/* Section anchor offset */
+.section { scroll-margin-top: 1rem; }
+
+/* Mermaid theme override */
+.mermaid svg { max-width: 100%; }
+</style>
+</head>
+<body>
+
+<div class="hero">
+  <div class="hero-inner">
+    <a class="hero-back" href="index.html#ceo-brief">&larr; Back to the CEO Brief</a>
+    <h1>How the CEO Brief works</h1>
+    <p class="lede">Every weekday at 9am your AI CEO tells you the one thing to do today. This page shows every step behind that message, why each step exists, and what catches it when something goes wrong. Written so anyone can follow it.</p>
+  </div>
+</div>
+
+<div class="layout">
+  <nav class="nav">
+    <h3>Sections</h3>
+    <a href="#big-picture">The big picture</a>
+    <a href="#timeline">One morning, start to finish</a>
+    <div class="nav-grp">Zoom in</div>
+    <a href="#huddle">7:30 The huddle</a>
+    <a href="#robot">9:00 The brief robot</a>
+    <a href="#you-see">What you see</a>
+    <a href="#safety">Safety nets</a>
+    <div class="nav-grp">Behind it</div>
+    <a href="#board">The board</a>
+    <a href="#knowledge">Where the knowledge comes from</a>
+    <a href="#why">Why it works this way</a>
+    <a href="#client">Setting it up for a client</a>
+    <a href="#glossary">Glossary</a>
+  </nav>
+
+  <main class="main">
+
+    <!-- ════════════════════════════════════════════════ -->
+    <section class="section" id="big-picture">
+      <h2><span class="num">1</span> The big picture</h2>
+      <p>Five things happen every weekday morning. A board of AI directors meets, an AI CEO writes one message, the message reaches you in Slack, a copy is stored, and a watchdog checks it arrived.</p>
+
+      <div class="flowline">
+        <div class="flowbox"><h5>1. Board meets</h5><p>About 7:30. The department heads answer three questions. One conclusion is written down.</p></div>
+        <div class="flowbox"><h5>2. CEO writes</h5><p>9:00. A robot gathers your money, tasks and calendar, reads the board's conclusion, and writes the brief.</p></div>
+        <div class="flowbox"><h5>3. You get it</h5><p>One Slack message. One thing to do, a ten-minute first step, and what was handed to others.</p></div>
+        <div class="flowbox"><h5>4. Copy stored</h5><p>The same brief is saved, so the CEO Brief tab shows today and every past day.</p></div>
+        <div class="flowbox"><h5>5. Watchdog</h5><p>After 9:20 a checker confirms the brief landed. If not, it sends it by hand and raises a flag.</p></div>
+      </div>
+
+      <div class="callout"><strong>Mental model:</strong> the board decides, the CEO writes, Slack delivers, the tab remembers, the watchdog checks. You only ever read one message.</div>
+
+      <h3 style="margin-top:2rem;font-size:1.1rem;color:var(--text-primary)">Reading the colour codes</h3>
+      <p>
+        <span class="tag tag-ai">AI</span> = a Claude model thinks<br>
+        <span class="tag tag-auto">Automation</span> = a scheduled robot does it<br>
+        <span class="tag tag-rule">Rule</span> = an "if this then that" in the code<br>
+        <span class="tag tag-data">Data</span> = reads from or writes to the briefs table<br>
+        <span class="tag tag-slack">Slack</span> = sends you a message<br>
+        <span class="tag tag-user">You</span> = the only step a person does
+      </p>
+    </section>
+
+    <!-- ════════════════════════════════════════════════ -->
+    <section class="section" id="timeline">
+      <h2><span class="num">2</span> One morning, start to finish</h2>
+      <p>Times are London time. The whole thing runs on weekdays only. At the weekend nothing fires and the tab says so.</p>
+
+      <table class="tbl">
+        <tr><th>When</th><th>Who</th><th>What happens</th></tr>
+        <tr><td>07:00</td><td><span class="tag tag-auto">Automation</span></td><td>The one daily routine on Kevin's Mac wakes up. The huddle is its second job, placed early on purpose: the 9am brief reads what it writes.</td></tr>
+        <tr><td>~07:30</td><td><span class="tag tag-ai">AI</span></td><td>The AI CEO calls the huddle. Only the departments with live work are in the room. Each answers: what did you finish yesterday, what are you on today, what is blocking you.</td></tr>
+        <tr><td>by 08:50</td><td><span class="tag tag-data">Data</span></td><td>The CEO writes a stub row for today: One Thing, First Step, Board Flags, Handed Off. The Full Brief box is deliberately left empty. That empty box is the signal "the 9am robot has not run yet".</td></tr>
+        <tr><td>09:00</td><td><span class="tag tag-auto">Automation</span></td><td>A Cloudflare robot fires. It checks: is it a weekday, is it between 9 and 12 London, is today's Full Brief still empty. All three yes, it carries on.</td></tr>
+        <tr><td>09:00</td><td><span class="tag tag-data">Data</span></td><td>It gathers four things: your money traffic light, your open tasks (split into overdue, due today, yours, and waiting for your tick), your calendar, and the board's stub row.</td></tr>
+        <tr><td>09:00</td><td><span class="tag tag-ai">AI</span></td><td>The CEO model writes the brief as a short structured answer. The board's One Thing leads unless the money light or a hard deadline makes it wrong, and then it says so.</td></tr>
+        <tr><td>09:01</td><td><span class="tag tag-slack">Slack</span></td><td>You get one DM. The money line is inside it, so one message covers the morning.</td></tr>
+        <tr><td>09:01</td><td><span class="tag tag-data">Data</span></td><td>The same brief is written into today's row, filling Full Brief. The row is updated, never duplicated.</td></tr>
+        <tr><td>10:00, 11:00</td><td><span class="tag tag-rule">Rule</span></td><td>The robot fires again, sees Full Brief is filled, and stops in a millisecond. These are the retries if 9:00 was missed.</td></tr>
+        <tr><td>after 09:20</td><td><span class="tag tag-auto">Automation</span></td><td>The watchdog reads today's row. Full Brief filled means all good and it says nothing. Empty means it sends the brief by hand and files a finding.</td></tr>
+        <tr><td>any time</td><td><span class="tag tag-user">You</span></td><td>Reply in the Slack DM to talk it through, or open the CEO Brief tab to see today and the history.</td></tr>
+      </table>
+    </section>
+
+    <!-- ════════════════════════════════════════════════ -->
+    <section class="section" id="huddle">
+      <h2><span class="num">3</span> Zoom in: the 7:30 huddle</h2>
+      <p>The huddle runs on the Mac, not in the cloud, because only the Mac can run the department agents. It hands its answer to the cloud robot through the briefs table.</p>
+
+      <div class="diagram">
+        <pre class="mermaid">
+flowchart TD
+  A[Check the clock]:::rule --> B{How much time<br/>before 8:50?}
+  B -- lots --> C[Full huddle<br/>up to 7 departments]:::ai
+  B -- some --> D[Small huddle<br/>Strategy + 2 others]:::ai
+  B -- almost none --> E[No departments<br/>CEO reads the tasks alone]:::ai
+  C --> F[Read the truth first:<br/>launch targets + the 11 board tasks]:::data
+  D --> F
+  E --> F
+  F --> G[Each head answers 3 questions<br/>in parallel]:::ai
+  G --> H[CEO writes ONE digest:<br/>one thing, first step, max 2 flags]:::ai
+  H --> I[Check the approval queue<br/>and agent accuracy scores]:::data
+  I --> J{Row for today<br/>already exists?}
+  J -- no --> K[Create the stub row]:::data
+  J -- yes, unfinished --> L[Update the stub row]:::data
+  J -- yes, 9am already ran --> M[Late path: DM the huddle<br/>to Kevin directly, touch nothing]:::slack
+  K --> N[Leave Full Brief EMPTY]:::rule
+  L --> N
+  classDef ai fill:#F1ECF7,stroke:#8B6FAE,color:#4a3567
+  classDef rule fill:#F7EFD9,stroke:#B8933A,color:#6b4f12
+  classDef data fill:#E5E8E1,stroke:#5A6660,color:#1C2422
+  classDef slack fill:#E1ECF4,stroke:#4A154B,color:#4A154B
+        </pre>
+        <p class="diagram-cap">The huddle shrinks to fit the time it has. A plain row that lands beats a perfect one that misses 9am.</p>
+      </div>
+
+      <div class="card">
+        <h4>What goes in the stub row</h4>
+        <ul class="steps">
+          <li><strong>One Thing</strong>: the board's single call for the day, under 250 characters.</li>
+          <li><strong>First Step</strong>: about ten minutes of work, so starting is easy.</li>
+          <li><strong>Board Flags</strong>: at most two, written "Surname: one line". More than two means nobody prioritised.</li>
+          <li><strong>Handed Off</strong>: everything the board dispatched to a worker agent, one per line, "destination, the job in plain words". If it is not written here, Kevin never learns it happened.</li>
+        </ul>
+      </div>
+
+      <div class="callout warn"><strong>The rule that matters:</strong> the Mac sleeps mid-run. The clock is read again right before the write, and the huddle is re-sized from that reading. On 3 Aug 2026 three hours passed between two steps and the 9am robot had already been and gone.</div>
+    </section>
+
+    <!-- ════════════════════════════════════════════════ -->
+    <section class="section" id="robot">
+      <h2><span class="num">4</span> Zoom in: the 9:00 brief robot</h2>
+      <p>The robot is a small program on Cloudflare called <code>money-confidence-daily</code>. It started life as the money-only message and was promoted to the CEO brief on 28 Jul 2026.</p>
+
+      <div class="flowline">
+        <div class="flowbox"><h5>Gate</h5><p>Weekday? 9 to 12 London? Full Brief still empty? Any no, stop.</p></div>
+        <div class="flowbox"><h5>Gather</h5><p>Money light. Tasks in four piles. Calendar. The board's stub.</p></div>
+        <div class="flowbox"><h5>Think</h5><p>The CEO model writes a short structured brief. Retried once if cut off.</p></div>
+        <div class="flowbox"><h5>Check</h5><p>Rules fix anything that asks Kevin to redo finished work.</p></div>
+        <div class="flowbox"><h5>Send + store</h5><p>Slack DM first, then the row is filled. Never duplicated.</p></div>
+      </div>
+
+      <h3 style="margin-top:1.5rem;font-size:1.05rem">The four task piles</h3>
+      <table class="tbl">
+        <tr><th>Pile</th><th>What it means</th><th>How the brief treats it</th></tr>
+        <tr><td>Waiting for your tick</td><td>Work an agent already FINISHED, sitting at Status "Approval". For an email, approving sends it.</td><td>This is done work, not work to do. The first step must say "approve", never "write". Clearing it is a strong candidate for the one thing, because nothing sends until you tap.</td></tr>
+        <tr><td>Overdue</td><td>Live tasks past their date.</td><td>Triaged by real consequence, not by the word "urgent".</td></tr>
+        <tr><td>Due today</td><td>Live tasks dated today.</td><td>Same triage.</td></tr>
+        <tr><td>Yours</td><td>Live tasks carrying your name.</td><td>Only founder work stays with you: decisions, approvals, passwords, payments, signatures, physical things. Everything else is handed off and the brief says where.</td></tr>
+      </table>
+
+      <h3 style="margin-top:1.5rem;font-size:1.05rem">The rules the CEO writes under</h3>
+      <ul class="steps">
+        <li>One thing, never a list. A ten-minute first step.</li>
+        <li>AI first, then Mica or Ericamae, then Kevin, and Kevin only for founder work. Every hand-off names a real agent: builder, writer, researcher, analyst, auditor.</li>
+        <li>The board's One Thing leads. Overruling it needs one line of reason.</li>
+        <li>The money light is respected. Red or amber changes what today can be.</li>
+        <li>A scary newsletter subject line is content, not a deadline. Real urgency needs a named counterparty, a date and a consequence.</li>
+        <li>Quarter targets are the only authority on priorities. Older founder context is history.</li>
+        <li>Hard length limits, so the answer never gets cut off mid-sentence.</li>
+      </ul>
+
+      <div class="callout"><strong>Why Slack first, then store:</strong> if storing fails you still got the brief, and a separate alert says "sent but not stored". If the CEO step fails entirely, you still get the plain money message, so the morning never goes silent.</div>
+    </section>
+
+    <!-- ════════════════════════════════════════════════ -->
+    <section class="section" id="you-see">
+      <h2><span class="num">5</span> What you see</h2>
+      <div class="tabs-grid">
+        <div class="tab-card"><span class="icon">💬</span><h4>The Slack DM</h4><p>Headline. The one thing and the first step. Why it wins. Ignore today. Not yours today, handed off. Up to two flags. The money line. Reply here to talk it through; the conversation lives in Slack on purpose.</p></div>
+        <div class="tab-card"><span class="icon">☀️</span><h4>The CEO Brief tab</h4><p>Today's brief at the top, history below. A row that only has the 7:30 huddle is labelled "not finished" and says the money light and reasoning land at 9am. Read-only: the tab is the record, Slack is the conversation.</p></div>
+        <div class="tab-card"><span class="icon">🩺</span><h4>The health bar</h4><p>Four checks: the table is reachable, today's brief arrived (weekdays after 10am), the latest brief is complete, and the robot ran within the last week. They judge only FINISHED briefs, so a week of huddle stubs cannot keep them green.</p></div>
+      </div>
+    </section>
+
+    <!-- ════════════════════════════════════════════════ -->
+    <section class="section" id="safety">
+      <h2><span class="num">6</span> Safety nets, and the bug each one came from</h2>
+      <p>Every net below exists because the brief once failed silently. The date is when it bit.</p>
+      <table class="tbl">
+        <tr><th>Net</th><th>What it stops</th><th>Came from</th></tr>
+        <tr><td>The day is decided in code, not in the cron</td><td>Cloudflare counts Sunday as day 1, so "Mon to Fri" ran Sun to Thu. Every Friday brief was lost and a Sunday one appeared.</td><td>2 Aug 2026</td></tr>
+        <tr><td>Three firings a morning, one send</td><td>One cron and a ten-minute window meant one late firing produced no brief and no alarm. Now the robot fires hourly 9 to 11 and stops itself once Full Brief is filled.</td><td>7 Aug 2026</td></tr>
+        <tr><td>Full Brief is the finished marker</td><td>The 7:30 stub looked like a finished brief: two dashes for money, no reasoning, no warning. Now stub and finished are told apart everywhere.</td><td>31 Jul 2026</td></tr>
+        <tr><td>Field IDs, not names</td><td>A rename in the table would have broken the brief with nothing watching. Both the robot and the tab read by ID.</td><td>29 Jul 2026</td></tr>
+        <tr><td>Ask for IDs in the query too</td><td>Without one query flag the response comes back keyed by name, every read returns nothing, the huddle is binned and a duplicate row is written.</td><td>30 Jul 2026</td></tr>
+        <tr><td>Date filter uses DATESTR</td><td>A plain date comparison returns zero even when the row exists, and a zero here writes the duplicate it was meant to prevent.</td><td>6 Aug 2026</td></tr>
+        <tr><td>Approval pile is its own bucket</td><td>The brief told Kevin to spend ten minutes writing a message that was already written and waiting for one tap, and dispatched an agent to write it again.</td><td>11 Aug 2026</td></tr>
+        <tr><td>Fail open on a read error</td><td>If the table cannot be read, the robot sends anyway. A duplicate is an annoyance; a missing brief is the whole bug.</td><td>7 Aug 2026</td></tr>
+        <tr><td>The watchdog after 9:20</td><td>A missing brief is noticed the same morning, sent by hand, and logged in one running file so patterns across days stay visible.</td><td>29 Jul 2026</td></tr>
+        <tr><td>The huddle's late path</td><td>If the robot already ran, the huddle does not overwrite the brief Kevin has read. It DMs its view directly instead.</td><td>3 Aug 2026</td></tr>
+      </table>
+    </section>
+
+    <!-- ════════════════════════════════════════════════ -->
+    <section class="section" id="board">
+      <h2><span class="num">7</span> The board behind the brief</h2>
+      <p>The AI CEO speaks as Dan Martell. Eleven department heads each speak as a named author, with further authors as lenses they can call on. Five worker agents do the handed-off work. Every worker starts gated: it proposes, Kevin says yes, it acts. Kevin lifts a gate per type of work, and once lifted it stays lifted.</p>
+      <table class="tbl">
+        <tr><th>Department</th><th>Head</th><th>Owns the question</th></tr>
+        <tr><td>Strategy</td><td>Gary Keller</td><td>What is the one thing? Is this the 20%?</td></tr>
+        <tr><td>Marketing</td><td>Alex Hormozi</td><td>Offer strength, leads, positioning</td></tr>
+        <tr><td>Sales</td><td>Jordan Belfort</td><td>The call, the close, pricing and terms</td></tr>
+        <tr><td>Operations</td><td>Gino Wickman</td><td>The operating rhythm, can we deliver what we sell</td></tr>
+        <tr><td>Systemisation</td><td>Dave Jenyns</td><td>Turn every recurring problem into a system plus an agent</td></tr>
+        <tr><td>Finance</td><td>Greg Crabtree</td><td>Real profit, cash discipline, what a target costs</td></tr>
+        <tr><td>Legal and Compliance</td><td>Keith Cunningham</td><td>Contract risk, compliance dates, dumb-tax avoidance</td></tr>
+        <tr><td>HR and People</td><td>Patrick Lencioni</td><td>Role clarity, accountability, the agent workforce</td></tr>
+        <tr><td>Wealth</td><td>Robert Kiyosaki</td><td>Assets versus liabilities, the portfolio</td></tr>
+        <tr><td>Productivity</td><td>Chris Bailey</td><td>Attention, habits, how work is presented to Kevin</td></tr>
+        <tr><td>Mindset</td><td>John DeMartini</td><td>Values alignment, overwhelm, the protected assets</td></tr>
+      </table>
+      <div class="callout"><strong>Lane discipline:</strong> a department may state a consequence in its own lane and veto only what its own definition gives it. An opinion from outside the lane travels to Kevin as input, clearly labelled, never as a veto.</div>
+    </section>
+
+    <!-- ════════════════════════════════════════════════ -->
+    <section class="section" id="knowledge">
+      <h2><span class="num">8</span> Where the knowledge comes from</h2>
+      <p>Each director's voice is grounded in two places: the private brain (founder profile, priorities, decisions, people) and a library of frameworks mined from books. The books arrive through a pipeline that runs overnight.</p>
+      <div class="flowline">
+        <div class="flowbox"><h5>Finish a book</h5><p>Audible marks it finished. A nightly scan notices.</p></div>
+        <div class="flowbox"><h5>Transcribe</h5><p>Downloaded, turned into text on the Mac for free, audio deleted.</p></div>
+        <div class="flowbox"><h5>Inbox</h5><p>The text waits in the brain's audiobook inbox.</p></div>
+        <div class="flowbox"><h5>Mine</h5><p>A model writes a brain document and pulls out every framework.</p></div>
+        <div class="flowbox"><h5>Library</h5><p>Frameworks append to one searchable library the directors read.</p></div>
+      </div>
+      <p style="font-size:0.9rem;color:var(--text-secondary)">The library is the compounding asset. A director quoting a framework is quoting a book Kevin has actually read, not the model's general memory.</p>
+    </section>
+
+    <!-- ════════════════════════════════════════════════ -->
+    <section class="section" id="why">
+      <h2><span class="num">9</span> Why it works this way</h2>
+      <dl class="gloss">
+        <dt>Why one message and not a dashboard?</dt>
+        <dd>The goal is that Kevin works three or four hours a day by choice. One decision handed to him beats twenty things to look at. The tab exists for history, not for the morning.</dd>
+        <dt>Why does the board meet before the CEO writes?</dt>
+        <dd>Contrast is the value. Eleven heads with different lanes catch what one model would miss. The CEO synthesises; it does not re-decide the day alone and quietly overrule them.</dd>
+        <dt>Why does the huddle run on the Mac and the brief in the cloud?</dt>
+        <dd>The cloud robot cannot run the department agents. The Mac can, but it sleeps. So the Mac does the thinking early and the cloud does the reliable delivery at 9am, and the brief still arrives if the Mac never woke up.</dd>
+        <dt>Why is the approval queue first?</dt>
+        <dd>Work sitting at "Approval" is finished. Until Kevin taps, nothing was sent. The brief treating that as "to do" once cost a morning writing an email that already existed.</dd>
+        <dt>Why AI first in every hand-off?</dt>
+        <dd>The north star is AI doing up to 90% of repeatable work. Handing work to Mica that an agent could do is the same failure as handing it to Kevin, one rung down.</dd>
+        <dt>Why does it fail open?</dt>
+        <dd>A duplicate brief is a small annoyance. A silent missing brief is the failure the whole system exists to prevent, and it has happened four times.</dd>
+      </dl>
+    </section>
+
+    <!-- ════════════════════════════════════════════════ -->
+    <section class="section" id="client">
+      <h2><span class="num">10</span> Setting it up for a client</h2>
+      <p>The same five stages work for any founder. What changes is the inputs. The full intake list and build checklist live in <code>docs/ceo-brief-client-onboarding.md</code>. In short, a client supplies:</p>
+      <ul class="steps">
+        <li>Who they are, what they sell, this quarter's targets, and their red lines.</li>
+        <li>Which board seats they want and whose voice sits in each.</li>
+        <li>Their team by name and what each person may be handed.</li>
+        <li>Where their tasks live, their bank feed for the money light, a calendar link, and a Slack workspace with the bot installed.</li>
+        <li>One-time approvals: the bot install, the calendar address, the bank consent.</li>
+      </ul>
+      <div class="callout warn"><strong>Honest state:</strong> today the board and huddle run on Kevin's Mac and the personas live outside the product. A second client needs a hosted runner and per-tenant persona records before this is a module rather than a service we set up by hand.</div>
+    </section>
+
+    <!-- ════════════════════════════════════════════════ -->
+    <section class="section" id="glossary">
+      <h2><span class="num">11</span> Glossary</h2>
+      <dl class="gloss">
+        <dt>Huddle</dt><dd>The 7:30 meeting where each department head answers three questions and the CEO writes one digest.</dd>
+        <dt>Stub row</dt><dd>Today's record in the briefs table before 9am: the board's call, with Full Brief empty.</dd>
+        <dt>Full Brief</dt><dd>The box the 9am robot fills. Filled means sent. Empty means not yet.</dd>
+        <dt>Money light</dt><dd>Green, amber or red, from the Money Confidence engine, with the safe-to-act figure.</dd>
+        <dt>Handed off</dt><dd>Work taken off Kevin and given to a named agent or person, listed in the brief so nothing vanishes.</dd>
+        <dt>Approval queue</dt><dd>Finished agent work waiting for Kevin's tick in Slack. Approving an email sends it.</dd>
+        <dt>Watchdog</dt><dd>The after-9:20 check that today's brief exists, sends it by hand if not, and logs the miss.</dd>
+        <dt>Guardrail</dt><dd>A gate on a type of agent work. Kevin lifts it once per work type; it never lifts itself.</dd>
+      </dl>
+    </section>
+
+  </main>
+</div>
+
+<!-- Mermaid: render diagrams -->
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  mermaid.initialize({
+    startOnLoad: true,
+    theme: 'base',
+    themeVariables: {
+      primaryColor: '#FBFBF9',
+      primaryTextColor: '#1C2422',
+      primaryBorderColor: '#2C6E49',
+      lineColor: '#5A6660',
+      fontFamily: '"DM Sans", system-ui, sans-serif',
+      fontSize: '13px',
+    },
+    flowchart: { curve: 'basis', useMaxWidth: true },
+  });
+</script>
+
+</body>
+</html>

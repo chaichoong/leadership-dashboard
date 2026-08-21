@@ -51,6 +51,28 @@ function ceoBriefIsComplete(rec) {
     return Boolean((rec && rec.fields || {})[F.ceoFullBrief]);
 }
 
+// A brief the worker stored AFTER the CEO layer failed (money message sent
+// instead). Full Brief is populated so the 10:00/11:00 retries stop, but the
+// health bar must not call it a good morning.
+function ceoBriefIsFallback(rec) {
+    try { return Boolean(JSON.parse((rec && rec.fields || {})[F.ceoFullBrief] || '{}').fallback); }
+    catch (_) { return false; }
+}
+
+// Saturday or Sunday for a YYYY-MM-DD string, read as a calendar date rather
+// than through the browser's own timezone.
+function ceoBriefIsWeekendDate(iso) {
+    const d = new Date(`${iso}T00:00:00Z`).getUTCDay();
+    return d === 0 || d === 6;
+}
+
+// Today's record. Prefer a finished row over a stub when a past bug left two
+// rows for one day, so the tab and the health checks agree with the worker.
+function ceoBriefTodayRecord(recs, today) {
+    const rows = (recs || []).filter(r => (r.fields || {})[F.ceoDate] === today);
+    return rows.find(ceoBriefIsComplete) || rows[0] || null;
+}
+
 function ceoLightBadge(light) {
     const map = {
         green: ['var(--success)', 'var(--success-bg)', 'GREEN'],
@@ -72,13 +94,20 @@ function renderCeoBriefCard(rec, isToday) {
     // money light and the reasoning land at 9am, rather than printing two dashes
     // and letting the card read as finished.
     const provisional = !ceoBriefIsComplete(rec);
-    const statusHtml = provisional
-        ? `<span style="font-size:var(--fs-xs);color:var(--text-secondary);background:var(--bg-subtle);padding:2px 10px;border-radius:var(--radius-full)">7:30 huddle · money light and reasoning land at 9am</span>`
-        : `${ceoLightBadge(f[F.ceoMoneyLight])}<span style="font-size:var(--fs-xs);color:var(--text-secondary)">Safe to act: <strong>${escHtml(money)}</strong></span>`;
+    // A weekend stub is final: the huddle ran, the 9am robot never runs at the
+    // weekend by design, so nothing is coming. Say that, rather than promising
+    // a 9am that will not arrive and then filing the row as unfinished forever.
+    const weekendStub = provisional && ceoBriefIsWeekendDate(String(f[F.ceoDate] || ''));
+    const fallback = ceoBriefIsFallback(rec);
+    const statusHtml = weekendStub
+        ? `<span style="font-size:var(--fs-xs);color:var(--text-secondary);background:var(--bg-subtle);padding:2px 10px;border-radius:var(--radius-full)">Weekend huddle · no 9am brief at weekends</span>`
+        : provisional
+        ? `<span style="font-size:var(--fs-xs);color:var(--text-secondary);background:var(--bg-subtle);padding:2px 10px;border-radius:var(--radius-full)">Morning huddle · money light and reasoning land at 9am</span>`
+        : `${fallback ? `<span style="font-size:var(--fs-xs);color:var(--warning);background:var(--warning-bg);padding:2px 10px;border-radius:var(--radius-full)">Brief failed · money message sent instead</span>` : ''}${ceoLightBadge(f[F.ceoMoneyLight])}<span style="font-size:var(--fs-xs);color:var(--text-secondary)">Safe to act: <strong>${escHtml(money)}</strong></span>`;
     return `
     <div style="background:var(--bg-surface);border:1px solid ${isToday ? 'var(--accent)' : 'var(--border-default)'};border-radius:var(--radius-lg);padding:var(--space-5);margin-bottom:var(--space-4);box-shadow:var(--shadow-sm)">
         <div style="display:flex;justify-content:space-between;align-items:center;gap:var(--space-3);flex-wrap:wrap">
-            <div style="font-size:var(--fs-xs);color:var(--text-muted);font-weight:var(--fw-medium)">${escHtml(f[F.ceoDate] || '')}${isToday ? ' · TODAY' : ''}${provisional ? ' · NOT FINISHED' : ''}</div>
+            <div style="font-size:var(--fs-xs);color:var(--text-muted);font-weight:var(--fw-medium)">${escHtml(f[F.ceoDate] || '')}${isToday ? ' · TODAY' : ''}${provisional && !weekendStub ? ' · NOT FINISHED' : ''}</div>
             <div style="display:flex;align-items:center;gap:var(--space-2)">${statusHtml}</div>
         </div>
         <div style="margin-top:var(--space-3);font-size:var(--fs-lg);font-weight:var(--fw-bold);color:var(--text-primary)">${escHtml(f[F.ceoOneThing] || '')}</div>
@@ -93,17 +122,22 @@ function renderCeoBriefCard(rec, isToday) {
 function renderCeoBriefContent(el) {
     const recs = ceoBriefRecords || [];
     const today = ceoBriefTodayISO();
-    const todayRec = recs.find(r => (r.fields || {})[F.ceoDate] === today);
+    const todayRec = ceoBriefTodayRecord(recs, today);
     const history = recs.filter(r => r !== todayRec);
-    const isWeekend = [0, 6].includes(new Date().getDay());
+    // London's weekend, not the viewer's. The rest of the tab already keys on
+    // the London date, and a viewer abroad around midnight saw the wrong branch.
+    const isWeekend = ceoBriefIsWeekendDate(today);
 
     let todayHtml;
     if (todayRec) {
         // A stage-one record still gets shown — the one thing and the first step are
         // the most useful part of the brief and hiding them until 9am wastes them —
         // but it is labelled, and the note below says what is still coming.
-        todayHtml = (ceoBriefIsComplete(todayRec) ? '' : `<div style="background:var(--bg-subtle);border-radius:var(--radius-md);padding:var(--space-3);margin-bottom:var(--space-3);font-size:var(--fs-sm);color:var(--text-secondary)">This is the 7:30 huddle's call, not the finished brief. The money light, the safe-to-act figure and the reasoning arrive at 9am with the Slack DM.</div>`)
-            + renderCeoBriefCard(todayRec, true);
+        const stubNote = ceoBriefIsComplete(todayRec) ? ''
+            : isWeekend
+            ? `<div style="background:var(--bg-subtle);border-radius:var(--radius-md);padding:var(--space-3);margin-bottom:var(--space-3);font-size:var(--fs-sm);color:var(--text-secondary)">The board huddled this morning. There is no 9am brief at the weekend, so this is the whole of today's note.</div>`
+            : `<div style="background:var(--bg-subtle);border-radius:var(--radius-md);padding:var(--space-3);margin-bottom:var(--space-3);font-size:var(--fs-sm);color:var(--text-secondary)">This is the morning huddle's call, not the finished brief. The money light, the safe-to-act figure and the reasoning arrive at 9am with the Slack DM.</div>`;
+        todayHtml = stubNote + renderCeoBriefCard(todayRec, true);
     } else if (isWeekend) {
         todayHtml = `<div style="background:var(--bg-surface);border:1px solid var(--border-default);border-radius:var(--radius-lg);padding:var(--space-5);color:var(--text-secondary);font-size:var(--fs-sm)">No brief today — the CEO writes briefs on weekday mornings at 9am. Enjoy the weekend.</div>`;
     } else {
@@ -114,7 +148,10 @@ function renderCeoBriefContent(el) {
     <div style="max-width:860px">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:var(--space-4);flex-wrap:wrap;gap:var(--space-2)">
             <h2 style="margin:0;font-size:var(--fs-2xl);font-weight:var(--fw-bold);color:var(--text-primary)">☀️ CEO Brief</h2>
-            <div style="font-size:var(--fs-xs);color:var(--text-muted)">Written 9am weekdays · reply in the Slack DM to talk it through</div>
+            <div style="display:flex;align-items:center;gap:var(--space-3);font-size:var(--fs-xs);color:var(--text-muted)">
+                <span>Written 9am weekdays · reply in the Slack DM to talk it through</span>
+                <a href="ceo-brief-workflow.html" target="_blank" rel="noopener" title="Visual map of how the CEO Brief works, step by step" style="display:inline-flex;align-items:center;gap:4px;padding:4px 10px;border:1px solid var(--border-default);border-radius:var(--radius-md);background:var(--bg-surface);color:var(--accent);font-weight:var(--fw-semibold);text-decoration:none">📖 How it works</a>
+            </div>
         </div>
         ${todayHtml}
         ${history.length ? `
@@ -160,20 +197,24 @@ function registerCeoBriefSyncBar() {
             {
                 name: 'Briefs table reachable', kind: 'sync', run: () => {
                     if (!ceoBriefRecords) return { status: 'fail', detail: 'Briefs not loaded yet — press Refresh' };
-                    return { status: 'pass', detail: `${ceoBriefRecords.length} brief(s) stored in the CEO Briefs table` };
+                    // The fetch is capped at the latest 30 rows on purpose; this is
+                    // not a count of the table.
+                    return { status: 'pass', detail: `Latest ${ceoBriefRecords.length} brief(s) loaded from the CEO Briefs table` };
                 }
             },
             {
                 name: "Today's brief arrived (weekdays after 10am)", kind: 'automation', run: () => {
                     const now = new Date();
-                    if ([0, 6].includes(now.getDay())) return { status: 'pass', detail: 'Weekend — no brief expected' };
+                    const today = ceoBriefTodayISO();
+                    if (ceoBriefIsWeekendDate(today)) return { status: 'pass', detail: 'Weekend — no brief expected' };
                     const londonHour = Number(new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/London', hour: 'numeric', hour12: false }).format(now));
                     if (londonHour < 10) return { status: 'pass', detail: 'Before 10am — the brief may still be on its way' };
-                    // The 07:30 huddle leaves a record behind, so "a record exists" is not
+                    // The morning huddle leaves a record behind, so "a record exists" is not
                     // proof the 9am robot ran. Only a finished brief counts as arrived.
-                    const rec = (ceoBriefRecords || []).find(r => (r.fields || {})[F.ceoDate] === ceoBriefTodayISO());
+                    const rec = ceoBriefTodayRecord(ceoBriefRecords, today);
                     if (!rec) return { status: 'fail', detail: 'Missing — check the Slack DM; if that is missing too, the morning robot needs attention' };
-                    if (!ceoBriefIsComplete(rec)) return { status: 'fail', detail: 'Only the 7:30 huddle landed — the 9am robot did not finish the brief' };
+                    if (!ceoBriefIsComplete(rec)) return { status: 'fail', detail: 'Only the morning huddle landed — the 9am robot did not finish the brief' };
+                    if (ceoBriefIsFallback(rec)) return { status: 'fail', detail: 'The CEO brief failed today — only the money message was sent. Check the Slack alert' };
                     return { status: 'pass', detail: 'Arrived and stored' };
                 }
             },
@@ -185,7 +226,8 @@ function registerCeoBriefSyncBar() {
                     // red every weekday between 7:30 and 9am, when today's record is a
                     // huddle stub by design — a check that cries wolf gets ignored.
                     const latest = recs.find(ceoBriefIsComplete);
-                    if (!latest) return { status: 'warn', detail: 'Only the 7:30 huddle so far — the 9am brief has not landed yet' };
+                    if (!latest) return { status: 'warn', detail: 'Only the morning huddle so far — the 9am brief has not landed yet' };
+                    if (ceoBriefIsFallback(latest)) return { status: 'fail', detail: `Latest brief (${(latest.fields || {})[F.ceoDate] || ''}) is a failure marker — the CEO layer did not run` };
                     const f = latest.fields || {};
                     const missing = [['One Thing', F.ceoOneThing], ['First Step', F.ceoFirstStep], ['Money Light', F.ceoMoneyLight]]
                         .filter(([, id]) => !f[id]).map(([label]) => label);

@@ -144,9 +144,17 @@ test.describe('CEO Brief tab', () => {
     await page.waitForTimeout(1200);
 
     const panel = page.locator('#tab-ceo-brief');
-    // says so in plain words, above the card
-    await expect(panel).toContainText('not the finished brief');
-    await expect(panel).toContainText('NOT FINISHED');
+    // says so in plain words, above the card. At the weekend a stub is FINAL
+    // (the 9am robot never runs), so the tab must say that instead of promising
+    // a brief that cannot come.
+    const londonDay = new Date(`${londonTodayISO()}T00:00:00Z`).getUTCDay();
+    if (londonDay === 0 || londonDay === 6) {
+      await expect(panel).toContainText('no 9am brief at the weekend');
+      await expect(panel).not.toContainText('NOT FINISHED');
+    } else {
+      await expect(panel).toContainText('not the finished brief');
+      await expect(panel).toContainText('NOT FINISHED');
+    }
     // the useful half is still shown — hiding it until 9am would waste it
     await expect(panel).toContainText('Work the warm 20 out of GoHighLevel');
     await expect(panel).toContainText('Start here (10 min):');
@@ -174,12 +182,48 @@ test.describe('CEO Brief tab', () => {
     // on whichever branch this run took, or the gate goes red every Saturday and
     // Sunday for a reason that has nothing to do with the code under test.
     if (results.arrived.status === 'fail') {
-      expect(results.arrived.detail).toContain('7:30 huddle');
+      expect(results.arrived.detail).toContain('morning huddle');
     } else {
       expect(results.arrived.detail).toMatch(/Weekend|Before 10am/);
     }
     // The completeness check must judge the newest FINISHED brief, not the stub.
     expect(results.complete.status).toBe('pass');
+  });
+
+  test('a weekend huddle stub in history is labelled as such, not as unfinished', async ({ page }) => {
+    // 9 and 16 Aug 2026 (both Sundays) were huddle stubs with no Full Brief. The
+    // worker correctly refuses weekends, so nothing was ever going to finish
+    // them, yet the tab filed them as "NOT FINISHED" and the card promised the
+    // money light at 9am. The huddle phase now skips weekends; the tab also
+    // labels any weekend stub honestly so the two old rows stop crying wolf.
+    const sundayStub = {
+      id: 'recSundayStub',
+      fields: {
+        [CEO.date]: '2026-08-16',
+        [CEO.oneThing]: 'Sunday board note',
+        [CEO.firstStep]: 'Nothing until Monday',
+        [CEO.boardFlags]: 'Keller: rest is part of the plan.',
+      },
+    };
+    await loadDashboardWithFixtures(page, { ceoBriefs: [BRIEF_FIXTURES.ceoBriefs[0], sundayStub] }, 'ceo-brief');
+    await page.evaluate(() => switchTab('ceo-brief'));
+    await page.waitForTimeout(1200);
+
+    const history = (await page.locator('#tab-ceo-brief').textContent()).split('Previous briefs')[1] || '';
+    expect(history).toContain('Sunday board note');
+    expect(history).toContain('Weekend huddle');
+    expect(history).toContain('no 9am brief at weekends');
+    expect(history).not.toContain('NOT FINISHED');
+    expect(history).not.toContain('land at 9am');
+  });
+
+  test('the header links to the visual workflow page', async ({ page }) => {
+    await loadDashboardWithFixtures(page, BRIEF_FIXTURES, 'ceo-brief');
+    await page.evaluate(() => switchTab('ceo-brief'));
+    await page.waitForTimeout(1200);
+    const link = page.locator('#tab-ceo-brief a[href="ceo-brief-workflow.html"]');
+    await expect(link).toHaveCount(1);
+    await expect(link).toContainText('How it works');
   });
 
   test('empty table shows a friendly state, never a blank tab', async ({ page }) => {

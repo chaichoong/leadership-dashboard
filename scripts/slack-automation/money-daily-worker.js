@@ -1,8 +1,10 @@
 // money-confidence-daily — now the AI CEO morning brief (28 Jul 2026).
 //
-// Cron: Mon–Fri 09:00 Europe/London. Recomputes the money figure LIVE from
-// Airtable, gathers open tasks + calendar + quarter context, has the AI CEO
-// (Integrator voice, ONE-thing rule) write the daily direction, DMs Kevin,
+// Cron: hourly 08–11 UTC, every day; the WEEKDAY 09:00–11:59 London window and
+// the once-a-day send are decided in code (isLondonSendTime + alreadyBriefedToday).
+// Recomputes the money figure LIVE from Airtable, gathers open tasks + calendar +
+// quarter context, has the AI CEO (Dan Martell voice, ONE-thing rule) write the
+// daily direction, DMs Kevin,
 // and stores the brief in the CEO Briefs table for the dashboard tab.
 // If the CEO layer fails for ANY reason, the original money-only DM still
 // sends — the working feed is never sacrificed to the new feature.
@@ -96,8 +98,10 @@ function isTenancyEnded(rec) {
     const m = String(raw).match(/^(\d{4})-(\d{2})-(\d{2})/);
     const end = m ? new Date(+m[1], +m[2] - 1, +m[3]) : new Date(raw);
     if (isNaN(end.getTime())) return false;
-    const now = new Date();
-    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    // London's today, not the Worker's UTC clock: around BST midnight the two
+    // disagree by an hour and a tenancy ending today would flip state early.
+    const [ty, tm, td] = todayLondonISO().split('-').map(Number);
+    const startOfToday = new Date(ty, tm - 1, td);
     return end < startOfToday;
 }
 function isTenantStatusActive(rec) {
@@ -400,20 +404,73 @@ async function gatherCalendar(env) {
         const resp = await fetch(env.CALENDAR_ICS_URL);
         if (!resp.ok) throw new Error('ICS fetch ' + resp.status);
         const ics = await resp.text();
-        const today = todayLondonISO().replace(/-/g, '');
-        const events = [];
-        for (const block of ics.split('BEGIN:VEVENT').slice(1)) {
-            const dt = (block.match(/DTSTART[^:]*:(\d{8}(T\d{6})?)/) || [])[1] || '';
-            if (!dt.startsWith(today)) continue;
-            const summary = ((block.match(/SUMMARY:(.*)/) || [])[1] || '').trim();
-            const time = dt.includes('T') ? `${dt.slice(9, 11)}:${dt.slice(11, 13)}` : 'all day';
-            if (summary) events.push(`${time} — ${summary}`);
-        }
-        return { connected: true, today: events.sort().join('\n') || '(no events today)' };
+        return { connected: true, today: parseIcsToday(ics, todayLondonISO()) || '(no events today)' };
     } catch (err) {
         return { connected: true, today: '(calendar could not be read today: ' + String(err.message).slice(0, 80) + ')' };
     }
 }
+
+// Today's events from an ICS feed, as "HH:MM — title" lines sorted by time.
+// Pure, so it is testable without a fetch. Three traps found in the 21 Aug 2026
+// audit, each of which silently dropped or mislabelled real events:
+//   - ICS folds long lines: a continuation line starts with a space or tab and
+//     must be joined back before any regex runs, or titles truncate.
+//   - SUMMARY may carry parameters (SUMMARY;LANGUAGE=en:Call), so match up to
+//     the first colon, not the literal "SUMMARY:".
+//   - A trailing Z means UTC. 08:00Z is 09:00 London in summer; print London.
+// Known gap, on purpose: recurring events (RRULE with an old DTSTART) and
+// multi-day events that began yesterday are not expanded. They are listed as
+// a follow-up in docs/ceo-brief-client-onboarding.md rather than half-built here.
+function parseIcsToday(ics, todayISO) {
+    const unfolded = String(ics).replace(/\r?\n[ \t]/g, '');
+    const today = todayISO.replace(/-/g, '');
+    const events = [];
+    for (const block of unfolded.split('BEGIN:VEVENT').slice(1)) {
+        const dt = (block.match(/DTSTART[^:]*:(\d{8}(T\d{6}Z?)?)/) || [])[1] || '';
+        if (!dt) continue;
+        let time;
+        if (!dt.includes('T')) {
+            if (dt !== today) continue;
+            time = 'all day';
+        } else if (dt.endsWith('Z')) {
+            const utc = new Date(`${dt.slice(0, 4)}-${dt.slice(4, 6)}-${dt.slice(6, 8)}T${dt.slice(9, 11)}:${dt.slice(11, 13)}:${dt.slice(13, 15)}Z`);
+            const londonDate = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/London' }).format(utc);
+            if (londonDate !== todayISO) continue;
+            time = new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/London', hour: '2-digit', minute: '2-digit', hour12: false }).format(utc);
+        } else {
+            if (!dt.startsWith(today)) continue;
+            time = `${dt.slice(9, 11)}:${dt.slice(11, 13)}`;
+        }
+        const summary = ((block.match(/^SUMMARY[^:\n]*:(.*)$/m) || [])[1] || '').trim();
+        if (summary) events.push(`${time} — ${summary}`);
+    }
+    return events.sort().join('\n');
+}
+
+// The eleven department heads, mirroring ~/.claude/agents/od-ceo.md (the org
+// chart) and docs/ai-org-chart-spec.md. Until 21 Aug 2026 this list was
+// hand-typed inside the prompt as seven names, three of which were not seats
+// (Michalowicz, Peters, and Martell who is the CEO), and it told the CEO to
+// keep only flags matching its own list, so huddle flags from Wickman, Belfort
+// and Cunningham survived by luck. Guarded by tests/ceo-brief-pipeline.test.js.
+// Shown to the CEO when the QUARTER_CONTEXT secret is unbound. It used to fall
+// back to a hard-typed Q3 2026 paragraph, which would have become a confidently
+// wrong authority on 1 Oct with nothing to notice. A visible gap beats a stale fact.
+const QUARTER_CONTEXT_MISSING = '(QUARTER CONTEXT IS MISSING: the QUARTER_CONTEXT secret is not set on this worker. Do not invent targets. Make the first board flag "Jenyns: set the QUARTER_CONTEXT secret, the brief is running without this quarter\'s targets".)';
+
+const BOARD_FLAG_SEATS = [
+    'Keller (Strategy: this is scatter, refocus on the one thing)',
+    'Hormozi (Marketing: offer strength, leads)',
+    'Belfort (Sales: the call, the close, pricing)',
+    'Wickman (Operations: rhythm, can we deliver what we sell)',
+    'Jenyns (Systemisation: this should be a system plus an agent)',
+    'Crabtree (Finance: cash, labour efficiency, what a target costs)',
+    'Cunningham (Legal and Compliance: contract risk, compliance dates, dumb tax)',
+    'Lencioni (HR and People: role clarity, accountability, the agent workforce)',
+    'Kiyosaki (Wealth: assets versus liabilities, the portfolio)',
+    'Bailey (Productivity: attention, habits, how work reaches Kevin)',
+    'DeMartini (Mindset: values alignment, overwhelm, protected assets)',
+];
 
 function buildCeoPrompt(m, tasks, calendar, env, huddle) {
     // When the departments have already huddled, their conclusion LEADS. The CEO synthesises and
@@ -432,7 +489,7 @@ ${huddle.handedOff && huddle.handedOff.length ? `The departments ALREADY dispatc
 No huddle ran today, so decide the day yourself from the data below.
 `;
     const system = `You are Kevin Brittain's AI CEO — his right hand, running his day so he does not have to.
-Voice: Gino Wickman's Integrator running Gary Keller's ONE-thing rule. Direct, warm, spartan, UK English.
+Voice: Dan Martell (Buy Back Your Time) as the lead voice, running Gary Keller's ONE-thing rule with Gino Wickman's Integrator discipline. Direct, warm, spartan, UK English.
 HARD RULES:
 - Write for a 13-year-old reader. No jargon, no acronyms without explanation, no em dashes.
 - Give ONE thing, with a tiny FIRST STEP of about 10 minutes, so starting is easy. Never a list.
@@ -444,7 +501,7 @@ HARD RULES:
 - A job only reaches Kevin if it needs the founder: a decision, an approval, a password or payment or signature, or something physical. If it does not, hand it off and say where it went. Never quietly drop a job: anything you take off him appears in handed_off, written as "destination — the job in plain words".
 - THE APPROVAL QUEUE COMES FIRST, and it is the one thing Kevin genuinely must do himself. The WAITING ON KEVIN'S TICK block lists work an agent has ALREADY FINISHED, with the words already written. It needs one tap in Slack, not ten minutes of writing. So: never make the first step "write", "draft" or "spend N minutes on" anything that appears in that block — say "approve" and name it. Never put a job in handed_off that dispatches an agent to redo something already sitting there; that produces the same work twice and Kevin approves it twice. If that block is not empty, clearing it is a strong candidate for today's one thing, because until he taps, nothing was actually sent.
 - Triage doctrine: genuine urgency first (a real deadline WITH a real consequence — most "urgent" labels fail this test); otherwise project work that advances the QUARTER goals; everything else is ignored, batched or delegated.
-- Max TWO board flags, one line each, only when a lane genuinely triggers: Crabtree (cash/labour), Michalowicz (Profit First discipline), Hormozi (offer/leads), Jenyns (should be a system/agent), Martell (AI should do this, not Kevin), Peters (overwhelm/energy — may pause the plan), Keller (this is scatter, refocus).
+- Max TWO board flags, one line each, only when a lane genuinely triggers. The board seats are: ${BOARD_FLAG_SEATS.join('; ')}. A flag is written "Surname: one line" and must come from one of these seats; keep the huddle's flags when they already name one.
 - The money traffic light is provided — respect it. Red or amber changes what today's one thing can be.
 - NEVER treat a marketing email as a deadline. Tasks named "INBOUND: ..." are auto-created from Kevin's inbox and INCLUDE NEWSLETTERS AND PROMOTIONS. A scary subject line ("31st July S21 Deadline", "Action required", a warning emoji) from a newsletter, no-reply, marketing or notifications sender is CONTENT, not a commitment. Before calling anything urgent, ask: is there a named counterparty who is owed something by a date, with a real consequence if it is missed? A supplier chasing money, a court date, a compliance certificate expiring, a client promise: those are real. An industry newsletter warning the whole market about a rule change is not, and never becomes Kevin's one thing. If the task body shows the sender is a newsletter or no-reply address, put it in the ignore list and say it is marketing.
 ${env.PERSONA_CONTEXT ? '\nFOUNDER CONTEXT (private, never echo verbatim). Background on Kevin only. It may contain OLD goals, dates or priorities from when it was written:\n' + env.PERSONA_CONTEXT + '\n' : ''}
@@ -457,7 +514,7 @@ MONEY (live, from the Money Confidence engine):
 Safe to act today: ${fmt(m.safeToActToday)} — light ${m.light.toUpperCase()}. ${m.headline}
 
 QUARTER CONTEXT (the goals today must serve):
-${env.QUARTER_CONTEXT || 'Q3 2026 ends 30 September. Theme: revenue for Operations Director. Targets reset 29 Jul 2026: 1 paying client by 30 Sep; 5 clients and about GBP2,000/month recurring by 31 Dec; GBP5,000/month by 30 Jun 2027. NOTHING gates outreach — build work runs in parallel and never blocks a prospect contact. The plan is 11 chunky tasks. Property: protect cash flow; year-end target £14,000/month operating cushion.'}
+${env.QUARTER_CONTEXT || QUARTER_CONTEXT_MISSING}
 
 CALENDAR TODAY: ${calendar.connected ? '\n' + calendar.today : 'not connected yet'}
 
@@ -560,6 +617,21 @@ function redirectToWaiting(text, tasks, kind) {
         : `Approve "${name}" in the approval queue — it is already drafted, so this is one tap, not a writing job.`;
 }
 
+// First occurrence wins (the huddle's wording leads), compared case- and
+// whitespace-insensitively so "worker-writer — Draft X" and "worker-writer — draft X"
+// cannot both reach Kevin as two jobs.
+function dedupeHandedOff(list) {
+    const seen = new Set();
+    const out = [];
+    for (const item of list) {
+        const key = String(item).toLowerCase().replace(/\s+/g, ' ').trim();
+        if (!key || seen.has(key)) continue;
+        seen.add(key);
+        out.push(String(item).trim());
+    }
+    return out;
+}
+
 async function callCeo(env, prompt, huddle, tasks) {
     let b;
     try {
@@ -581,7 +653,7 @@ async function callCeo(env, prompt, huddle, tasks) {
     b.handed_off = Array.isArray(b.handed_off) ? b.handed_off.slice(0, 5) : [];
     // The 07:30 huddle's dispatches lead, then the CEO's own. Deduped, one list, so the Slack
     // message and the stored record can never disagree about what was taken off Kevin.
-    b.handed_off = [...new Set([...(huddle && huddle.handedOff || []), ...b.handed_off])].slice(0, 8);
+    b.handed_off = dedupeHandedOff([...(huddle && huddle.handedOff || []), ...b.handed_off]).slice(0, 8);
     // A prompt rule is a request; this is the control. Nothing may dispatch an
     // agent to redo work that is already finished and waiting on Kevin's tick —
     // that produces the same email twice and he approves it twice. The prompt
@@ -652,7 +724,7 @@ function buildBlocks(m) {
             type: 'context',
             elements: [{
                 type: 'mrkdwn',
-                text: `${londonDateLabel()} · 09:30 · cash-in-hand figure, recomputed live · full breakdown on the Money tab`,
+                text: `${londonDateLabel()} · 09:00 · cash-in-hand figure, recomputed live · full breakdown on the Money tab`,
             }],
         },
     ];
@@ -711,31 +783,71 @@ async function sendDailyDM(env) {
     const m = await loadAndCompute(pat);
 
     // CEO layer — any failure here falls back to the proven money-only DM.
+    let huddle = null, tasks = null;
     try {
-        const [tasks, calendar, huddle] = await Promise.all([gatherTasks(pat), gatherCalendar(env), gatherHuddle(pat)]);
+        let calendar;
+        [tasks, calendar, huddle] = await Promise.all([gatherTasks(pat), gatherCalendar(env), gatherHuddle(pat)]);
         const brief = await callCeo(env, buildCeoPrompt(m, tasks, calendar, env, huddle), huddle, tasks);
+        // Keep the board's own call inside the stored JSON. The PATCH below
+        // overwrites One Thing, First Step and Board Flags with the CEO's
+        // version by design, and until 21 Aug 2026 nothing recorded what the
+        // departments had actually said, so an override could not be audited.
+        brief.huddle = huddle ? { one_thing: huddle.oneThing, first_step: huddle.firstStep, flags: huddle.flags } : null;
         const fallbackText = `ONE thing: ${brief.one_thing} | Safe to act: ${fmt(m.safeToActToday)} (${LIGHT_LABEL[m.light]})`;
         await slackPost(token, userId, fallbackText, buildBriefBlocks(m, brief));
         try { await storeBrief(pat, brief, m, tasks, huddle); }
-        catch (e) { await alertFailure(env, new Error('Brief sent but NOT stored: ' + e.message)); }
+        catch (e) {
+            await alertFailure(env, new Error('Brief sent but NOT stored: ' + e.message), 'CEO brief sent but not saved');
+            await storeFallbackMarker(pat, m, tasks, huddle, 'stored after a save error: ' + e.message, brief);
+        }
         return m;
     } catch (ceoErr) {
         const fallback = `Safe to act today: ${fmt(m.safeToActToday)} (${LIGHT_LABEL[m.light]})`;
         await slackPost(token, userId, fallback, buildBlocks(m));
-        await alertFailure(env, new Error('CEO brief failed (money DM sent as fallback): ' + ceoErr.message));
+        await alertFailure(env, new Error('CEO brief failed (money DM sent as fallback): ' + ceoErr.message), 'CEO brief failed, money message sent instead');
+        await storeFallbackMarker(pat, m, tasks, huddle, ceoErr.message, null);
         return m;
     }
 }
 
-// Best-effort failure alert so a broken feed never fails silently.
-async function alertFailure(env, err) {
+// Once a DM has gone out, today's row MUST say so, whichever path sent it.
+// Full Brief is the only "sent" marker alreadyBriefedToday() reads, so before
+// 21 Aug 2026 a CEO-layer failure (or a store failure) left it empty and the
+// 10:00 and 11:00 firings sent the same fallback again: up to three messages
+// plus three alerts on a morning that had already failed once, breaching the
+// two-messages-a-day Slack contract. This writes a minimal, honest brief with
+// `fallback: true` so the repeats stop and the tab shows what happened rather
+// than an unfinished stub. Best-effort: if this write fails too, we have
+// already alerted and there is nothing more to do.
+async function storeFallbackMarker(pat, m, tasks, huddle, reason, sentBrief) {
+    try {
+        const marker = sentBrief ? { ...sentBrief } : {
+            one_thing: 'The CEO brief could not be written today. The money message was sent instead.',
+            first_step: 'Read the alert in Slack, then open the Money tab.',
+            why: '',
+            ignore: [],
+            handed_off: [],
+            flags: [],
+            headline: 'Brief failed today',
+        };
+        marker.fallback = true;
+        marker.fallback_reason = String(reason).slice(0, 300);
+        await storeBrief(pat, marker, m, tasks || { counts: {} }, huddle);
+    } catch (_) { /* alerted already; nothing more we can do */ }
+}
+
+// Best-effort failure alert so a broken feed never fails silently. The title
+// names the failure: until 21 Aug 2026 every alert was headed "could not
+// compute today's figure", so a billing outage or a save error read as a data
+// problem and sent Kevin to the wrong place.
+async function alertFailure(env, err, title) {
     try {
         const token = env.SLACK_BOT_TOKEN;
         if (!token) return;
         const userId = await slackLookup(token, env.RECIPIENT_EMAIL || DEFAULT_RECIPIENT);
-        await slackPost(token, userId,
-            'Money Confidence: could not compute today’s figure',
-            [{ type: 'section', text: { type: 'mrkdwn', text: `⚠️ *Money Confidence* could not compute today’s figure.\nReason: ${String(err && err.message || err).slice(0, 300)}\n\nOpen the Money tab in the app to check manually.` } }]);
+        const head = title || 'Money Confidence: could not compute today’s figure';
+        await slackPost(token, userId, head,
+            [{ type: 'section', text: { type: 'mrkdwn', text: `⚠️ *${head}*\nReason: ${String(err && err.message || err).slice(0, 300)}\n\nOpen the Money tab in the app to check manually.` } }]);
     } catch (_) { /* nothing more we can do */ }
 }
 
