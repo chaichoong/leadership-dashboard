@@ -560,6 +560,9 @@
         // Both pickers gate on costLookup, so filtering here covers reference AND amount.
         const costLookup = {};
         allCosts.filter(r => isCostActive(r)).forEach(r => { costLookup[r.id] = r; });
+        // Direct lookups (tenant name, cost account number, property address) — built
+        // once from the live arrays, applied after the learned layers per transaction.
+        const directIndex = buildDirectIndex();
 
         unrec.forEach(tx => {
             const amt = Number(getField(tx, F.txReportAmount)) || 0;
@@ -623,6 +626,7 @@
             const kbRule = findReconRule(vendor);
             if (kbRule && (kbRule.subCatId || kbRule.costId || kbRule.tenancyId)) {
                 applyRuleToResult(result, kbRule, 'Knowledge Base', kbRule.confidence || 5);
+                result.tenancySource = 'kb';
                 matched = true;
             }
 
@@ -632,6 +636,9 @@
                     const hit = compositePatterns[key];
                     if (hit && hit.count >= 1) {
                         applyHistoricalToResult(result, hit, tenancyLookup, tenantLookup, costLookup, hit.count, true, refIndex);
+                        // The full-description key is the byte-identical descriptor seen
+                        // before; the shorter keys are "bank giro|credit ref" territory.
+                        result.tenancySource = key === compositeKeys[0] ? 'composite-full' : 'composite-short';
                         matched = true;
                         break;
                     }
@@ -650,12 +657,17 @@
                 }
             }
 
+            // ── Priority 4: Direct lookups override the learned guess for the entity they identify ──
+            applyDirectMatches(result, directIndex, refIndex, costLookup, tenancyLookup, tenantLookup, compositePatterns, compositeKeys);
+
             // ── Guard: costs are outgoings only ──
             // Incoming payments (positive amount) must never carry a cost link.
             // The historical matcher can bleed a costId from an outgoing payment
             // onto an incoming one when they share a vendor prefix (e.g. "BANK
             // GIRO CREDIT" matched to Home Protect). Strip it.
-            if (result.txAmount >= 0 && result.costId) {
+            // Exception: a DIRECT DEBIT REVERSAL is money coming back FROM a cost, and
+            // belongs on that cost so the payment history shows the bounce.
+            if (result.txAmount >= 0 && result.costId && !isDirectDebitReversal(result.txDesc)) {
                 result.costId = '';
                 result.costLabel = '';
             }
@@ -665,7 +677,11 @@
             // match that tenancy's rent, check if a sibling tenancy (same tenant,
             // different unit) has a rent that matches. Prevents mislinks when
             // multiple tenancies share a surname (e.g. Peters Unit 1 vs Unit 2).
-            if (result.tenancyId && result.txAmount > 0) {
+            // Skipped when the direct layer identified the tenancy: it has already used
+            // property, unit number and rent to split siblings, and "INTUS LETTINGS
+            // LTDRENT APARTMENT 3" must not be moved to Apartment 9 because £641.20
+            // happens to be Apartment 9's rent.
+            if (result.tenancyId && result.txAmount > 0 && !result.directTenancy) {
                 const suggestedTen = tenancyLookup[result.tenancyId];
                 const suggestedRent = suggestedTen ? (Number(getField(suggestedTen, F.tenRent)) || 0) : 0;
                 const txAbs = Math.abs(result.txAmount);
@@ -878,6 +894,361 @@
         result.status = 'suggestion';
     }
 
+    // ══════════════════════════════════════════
+    // Direct entity lookups — read the identifier in the descriptor, not the history
+    // ══════════════════════════════════════════
+    // Until 21 Aug 2026 every tenancy, cost and property suggestion came from history:
+    // "what was a similar descriptor reconciled to last time". Two things made that
+    // mostly WRONG for these three fields, measured on a chronological replay of the
+    // 1,984 transactions reconciled 1 Mar – 21 Aug 2026 (tenancy proposed 336 times,
+    // right 68, wrong 268):
+    //   1. Knowledge-base rules are keyed by VENDOR but store tenancy/cost/property,
+    //      so "ONESAVINGS BANK" sends all 13 Kent Reliance mortgages to whichever one
+    //      Kevin approved last, "COLLINS S" sends five tenancies to one, and
+    //      "JOELIN LIMITED" puts every job on one property.
+    //   2. The composite fallback key "bank giro|credit ref" matches every tenant's
+    //      rent and proposes whoever paid last.
+    // Meanwhile the identifier is sitting in the descriptor: the surname ("REF WALKER"),
+    // the account number the cost is named after ("REF 70015535" ↔ "Kent Reliance -
+    // 13CP - 70015535"), the property code or street ("28CP-LANDLORD", "5 WOODCOCK").
+    // This layer reads those against the live records and overrides the learned guess
+    // for that field. It never proposes an inactive tenancy or cost — the dropdowns
+    // cannot hold them, so the suggestion would silently drop on Approve.
+
+    const DIRECT_GENERIC_NAME_WORDS = new Set([
+        'LTD', 'LIMITED', 'LLP', 'PLC', 'CO', 'COMPANY', 'MANAGEMENT', 'LETTINGS', 'SERVICES',
+        'PROPERTY', 'PROPERTIES', 'HOLDINGS', 'GROUP', 'UK', 'THE', 'AND', 'MR', 'MRS', 'MS',
+        'MISS', 'DR', 'CLIENT', 'ACCOUNT', 'RENT', 'PAYMENT', 'CREDIT', 'REF', 'FROM',
+    ]);
+    // Street-type words: never an identifier on their own ("PARK", "STREET", "SOUTH").
+    const DIRECT_GENERIC_STREET_WORDS = new Set([
+        'STREET', 'ROAD', 'PLACE', 'COURT', 'CLOSE', 'AVENUE', 'BUILDING', 'GARDENS',
+        'TERRACE', 'PARK', 'LANE', 'DRIVE', 'WAY', 'SQUARE', 'NORTH', 'SOUTH', 'EAST', 'WEST',
+        'UPPER', 'LOWER', 'HOUSE', 'FLAT', 'APARTMENT', 'UNIT',
+    ]);
+
+    function directTokens(text) {
+        return String(text || '').toUpperCase().split(/[^A-Z0-9]+/).filter(Boolean);
+    }
+
+    // "5 Dalham Place" → { number: '5', code: '5DP', words: ['DALHAM'] }
+    // "Duckworth Building" → { number: '', code: '', words: ['DUCKWORTH'] }
+    // The code is the form the cost names and landlord-pay references use (5DP, 28CP,
+    // 1406OR, 282SPAS). Words are the street words minus generic street types.
+    function propertyNameParts(name) {
+        const toks = directTokens(name);
+        if (!toks.length) return { number: '', code: '', words: [] };
+        const number = /^\d+[A-Z]?$/.test(toks[0]) ? toks[0] : '';
+        const rest = number ? toks.slice(1) : toks;
+        const code = number && rest.length ? number + rest.map(w => w[0]).join('') : '';
+        const words = rest.filter(w => w.length >= 5 && !DIRECT_GENERIC_STREET_WORDS.has(w));
+        return { number, code, words };
+    }
+
+    // One index per matching run. Built from the live arrays the dropdowns are built
+    // from, so anything this proposes is something the row can hold.
+    function buildDirectIndex() {
+        const tenantLookup = buildTenantLookup();
+        const unitById = {};
+        (allRentalUnits || []).forEach(u => { unitById[u.id] = u; });
+
+        // ── Properties (via rental units; the Properties table is not loaded) ──
+        const props = {};   // propertyId → { number, code, words, name }
+        Object.values(unitById).forEach(u => {
+            const propId = extractLinkedId(getField(u, F.unitProperty));
+            const nameArr = getField(u, F.unitPropName);
+            const name = Array.isArray(nameArr) ? nameArr[0] : (nameArr || '');
+            if (!propId || !name || props[propId]) return;
+            props[propId] = { name, ...propertyNameParts(name) };
+        });
+        // A street word only identifies a property when no other property shares it
+        // (ELMDON and CHEDBURGH each cover three; those need the number).
+        const wordCount = {};
+        Object.values(props).forEach(p => p.words.forEach(w => { wordCount[w] = (wordCount[w] || 0) + 1; }));
+        Object.values(props).forEach(p => { p.uniqueWords = p.words.filter(w => wordCount[w] === 1); });
+
+        // ── Tenancies (active only) ──
+        const tenancies = [];
+        (allTenancies || []).forEach(t => {
+            if (!isTenancyActive(getField(t, F.tenPayStatus))) return;
+            const tenant = getTenantForTenancy(t, tenantLookup);
+            // The surname is what a bank reference carries ("REF WALKER"), so when the
+            // tenancy has a usable one, only the surname identifies it — a first name
+            // alone ("GARY" in a refund from Gary Marsh) must not. Tenancies whose
+            // surname rollup is generic ("Lettings", "(UK) Limited") fall back to the
+            // distinctive words of the tenant's full name ("INTUS", "SEQUENCE").
+            const nameOk = w => /^[A-Z]+$/.test(w) && w.length >= 3 && !DIRECT_GENERIC_NAME_WORDS.has(w);
+            const surnameTokens = new Set();
+            [].concat(getField(t, F.tenSurname) || []).forEach(s => directTokens(s).forEach(w => { if (nameOk(w)) surnameTokens.add(w); }));
+            const nameTokens = new Set(surnameTokens);
+            if (!nameTokens.size && tenant) directTokens(getField(tenant, F.tenantName) || '').forEach(w => { if (nameOk(w)) nameTokens.add(w); });
+            const unitId = extractLinkedId(getField(t, F.tenUnit)) || '';
+            const unit = unitById[unitId];
+            const propertyId = unit ? (extractLinkedId(getField(unit, F.unitProperty)) || '') : '';
+            tenancies.push({
+                id: t.id, rec: t, tenantId: tenant ? tenant.id : '',
+                tenantName: tenant ? String(getField(tenant, F.tenantName) || '') : '',
+                nameTokens: [...nameTokens],
+                unitId, propertyId,
+                unitNumber: unit ? String(getField(unit, F.unitNumber) ?? '') : '',
+                rent: Number(getField(t, F.tenRent)) || 0,
+            });
+        });
+
+        // ── Costs (active only): reference tokens in the cost NAME ──
+        // "Kent Reliance - 13CP - 70015535" → 70015535 identifies that cost, with no
+        // history needed. A token naming two active costs identifies neither.
+        const costRefs = {};  // token → Set(costId)
+        (allCosts || []).forEach(c => {
+            if (!isCostActive(c)) return;
+            extractRefTokens(getField(c, F.costName)).forEach(tok => {
+                if (!costRefs[tok]) costRefs[tok] = new Set();
+                costRefs[tok].add(c.id);
+            });
+        });
+
+        return { props, tenancies, costRefs, unitById };
+    }
+
+    // Which properties does this descriptor name? Returns an array of propertyIds.
+    // Evidence, strongest first: the short code as a token (28CP), the number followed
+    // by a street word (5 WOODCOCK, 1406 OLDHAM), the number followed by the code
+    // letters (5 WC), or a street word unique to one property (DUCKWORTH, MARLOES).
+    // Returns [{ id, tier }] — tier 'strong' for the code or number+street, 'word' for a
+    // bare street word. A bare word is enough to FILL a blank property, not to override
+    // a learned one: "OLDHAM" also appears in a council's name.
+    function findPropertiesInTextDetailed(text, index) {
+        const toks = directTokens(text);
+        const tokSet = new Set(toks);
+        const hits = {};
+        Object.entries(index.props).forEach(([id, p]) => {
+            if (p.code && tokSet.has(p.code)) { hits[id] = 'strong'; return; }
+            if (p.number) {
+                for (let i = 0; i < toks.length - 1; i++) {
+                    if (toks[i] !== p.number) continue;
+                    const next = toks[i + 1];
+                    if (p.words.includes(next) || (p.code && p.number + next === p.code)) { hits[id] = 'strong'; return; }
+                }
+            }
+            if (p.uniqueWords.some(w => tokSet.has(w))) hits[id] = 'word';
+        });
+        return Object.entries(hits).map(([id, tier]) => ({ id, tier }));
+    }
+    function findPropertiesInText(text, index) {
+        return findPropertiesInTextDetailed(text, index).map(h => h.id);
+    }
+
+    // Unit number named in the descriptor: "APARTMENT 9", "UNIT 4", "FLAT 2", "NO 4".
+    function findUnitNumberInText(text) {
+        const m = String(text || '').toUpperCase().match(/\b(?:APARTMENT|APT|UNIT|FLAT|ROOM|NO)\.?\s*(\d{1,3})\b/);
+        return m ? m[1] : '';
+    }
+
+    // Does this descriptor name the tenant on this tenancy? A whole token match on any
+    // distinctive name token ≥4 chars, two shorter tokens ("ROC IMMO"), or a descriptor
+    // token ≥5 chars that starts a longer name token (banks truncate: "CHEFF ELY CLIENT"
+    // for Cheffins, "BUTTERFIEL" for Butterfield).
+    function tenancyNamedIn(tokSet, ten) {
+        let hits = 0;
+        for (const w of ten.nameTokens) {
+            if (tokSet.has(w)) { if (w.length >= 4) return true; hits++; continue; }
+            if (w.length >= 7) {
+                for (const t of tokSet) { if (t.length >= 5 && w.startsWith(t)) return true; }
+            }
+        }
+        return hits >= 2;
+    }
+
+    // Find the tenancy an INCOMING payment belongs to.
+    // Returns { tenancyId } when exactly one tenancy fits, { candidates: [...] } when
+    // the tenant is identified but not the unit (one landlord paying five units in one
+    // split), or null when no active tenant is named at all.
+    function matchTenancyDirect(desc, vendor, amount, index) {
+        if (!(Number(amount) > 0)) return null;
+        const text = `${vendor || ''} ${desc || ''}`;
+        const tokSet = new Set(directTokens(text));
+        let cands = index.tenancies.filter(t => tenancyNamedIn(tokSet, t));
+        if (!cands.length) return null;
+        if (cands.length > 1) {
+            const propIds = findPropertiesInText(text, index);
+            if (propIds.length) {
+                const narrowed = cands.filter(t => propIds.includes(t.propertyId));
+                if (narrowed.length) cands = narrowed;
+            }
+        }
+        if (cands.length > 1) {
+            const unitNo = findUnitNumberInText(text);
+            if (unitNo) {
+                const narrowed = cands.filter(t => t.unitNumber !== '' && Number(t.unitNumber) === Number(unitNo));
+                if (narrowed.length) cands = narrowed;
+            }
+        }
+        if (cands.length > 1) {
+            // One landlord paying several units in one transfer, split by the Split
+            // feature: "(Split 3 of 5)". Kevin allocates portion N to unit N about three
+            // times in four (measured on 259 ROC IMMO LTD portions, Mar–Aug 2026), so
+            // that is the proposal; he sees it before it is approved.
+            const split = String(text).match(/\(Split (\d+) of (\d+)\)/i);
+            const oneTenant = cands.every(t => t.tenantId && t.tenantId === cands[0].tenantId);
+            if (split && oneTenant) {
+                const narrowed = cands.filter(t => Number(t.unitNumber) === Number(split[1]));
+                if (narrowed.length === 1) return { tenancyId: narrowed[0].id };
+            }
+            const abs = Math.abs(Number(amount) || 0);
+            const exact = cands.filter(t => t.rent > 0 && Math.abs(t.rent - abs) < 0.01);
+            if (exact.length) cands = exact;
+            else {
+                const close = cands.filter(t => t.rent > 0 && Math.abs(t.rent - abs) <= 1);
+                if (close.length === 1) cands = close;
+            }
+        }
+        return cands.length === 1 ? { tenancyId: cands[0].id } : { candidates: cands.map(t => t.id) };
+    }
+
+    // Find the cost an OUTGOING payment belongs to, by the account or policy number the
+    // cost is named after. A token must identify exactly one active cost by name AND
+    // history must not show it serving several (Close Brothers bills two Swinton
+    // policies under one agreement ref — see pickCostByReference). Two tokens that
+    // disagree are not a match.
+    function isDirectDebitReversal(desc) { return /\bREVERSAL\b/i.test(String(desc || '')); }
+    function matchCostDirect(desc, amount, index, refIndex) {
+        if (!(Number(amount) < 0) && !isDirectDebitReversal(desc)) return '';
+        const hits = [];
+        extractRefTokens(desc).forEach(tok => {
+            let ids = index.costRefs[tok];
+            if (!ids) {
+                // Banks pad some account numbers ("6092235458060000" for 60922354580600):
+                // accept a descriptor token that starts with a cost's ≥8-char token.
+                const pref = Object.keys(index.costRefs).filter(k => k.length >= 8 && tok.length > k.length && tok.startsWith(k));
+                if (pref.length === 1) ids = index.costRefs[pref[0]];
+            }
+            if (!ids || ids.size !== 1) return;
+            const id = ids.values().next().value;
+            const seen = refIndex && refIndex[tok];
+            if (seen && (seen.size > 1 || !seen.has(id))) return; // history disagrees → not an identifier
+            if (hits.indexOf(id) === -1) hits.push(id);
+        });
+        return hits.length === 1 ? hits[0] : '';
+    }
+
+    // Apply the direct lookups on top of whatever the learned layers proposed.
+    // Direct evidence beats a learned guess for the field it identifies, and the
+    // dependent fields follow exactly as the manual handlers (reconTenancyChanged,
+    // reconCostChanged) would fill them.
+    function applyDirectMatches(result, index, refIndex, costLookup, tenancyLookup, tenantLookup, compositePatterns, compositeKeys) {
+        const evidence = [];
+
+        // ── Cost by account number ──
+        const costId = matchCostDirect(result.txDesc, result.txAmount, index, refIndex);
+        if (costId && costLookup[costId]) {
+            const cost = costLookup[costId];
+            result.costId = costId;
+            result.costLabel = String(getField(cost, F.costName) || '');
+            const bizId = extractLinkedId(getField(cost, F.costBusiness));
+            const catId = extractLinkedId(getField(cost, F.costCategory));
+            const subId = extractLinkedId(getField(cost, F.costSubCategory));
+            const propId = extractLinkedId(getField(cost, F.costProperty));
+            if (bizId) {
+                result.businessId = bizId;
+                const bizRec = (allBusinesses || []).find(b => b.id === bizId);
+                result.businessName = bizRec ? String(getField(bizRec, 'fldbbRqVxLxUdHwIR') || '') : '';
+            }
+            if (catId) { result.categoryId = catId; result.categoryName = getCatName(catId); }
+            if (subId) { result.subCatId = subId; result.subCatName = getSubCatName(subId); }
+            if (propId) result.propertyId = propId;
+            evidence.push('cost ref');
+        }
+
+        // ── Tenancy by tenant name (+ property / unit / rent to split siblings) ──
+        const tenMatch = matchTenancyDirect(result.txDesc, result.txVendor, result.txAmount, index);
+        if (tenMatch && tenMatch.tenancyId) {
+            setResultTenancy(result, tenMatch.tenancyId, index, tenancyLookup, tenantLookup);
+            evidence.push('tenant name');
+        } else if (tenMatch && tenMatch.candidates) {
+            // Tenant known, unit not. Keep a learned tenancy only if it is one of this
+            // tenant's; otherwise try the full-description history (which knows split
+            // positions), else leave the tenancy blank rather than name a sibling.
+            let keep = tenMatch.candidates.includes(result.tenancyId) ? result.tenancyId : '';
+            if (!keep) {
+                for (const key of compositeKeys || []) {
+                    const hit = compositePatterns && compositePatterns[key];
+                    if (hit && hit.tenancyId && tenMatch.candidates.includes(hit.tenancyId)) { keep = hit.tenancyId; break; }
+                }
+            }
+            if (keep) setResultTenancy(result, keep, index, tenancyLookup, tenantLookup);
+            else {
+                result.tenancyId = ''; result.tenancyLabel = ''; result.tenantId = ''; result.tenantName = '';
+                result.unitId = ''; result.unitName = '';
+                const propIds = [...new Set(tenMatch.candidates.map(id => (index.tenancies.find(t => t.id === id) || {}).propertyId).filter(Boolean))];
+                if (propIds.length === 1) result.propertyId = propIds[0];
+            }
+            evidence.push('tenant name (unit open)');
+        } else if (result.tenancyId && Number(result.txAmount) > 0
+                   && (result.tenancySource === 'composite-short' || result.tenancySource === 'kb')) {
+            // A learned tenancy on an incoming payment whose descriptor names NO active
+            // tenant, from a short history key ("bank giro|credit ref" proposing whoever
+            // paid last) or a vendor-keyed rule. Keep it only if the proposed tenant IS
+            // named; otherwise clear. A full-description hit is left alone: rent paid by
+            // a third party (Universal Credit, a council, a guarantor) never names the
+            // tenant, and 61 of 344 tenancy receipts since Mar 2026 are that shape.
+            const tokSet = new Set(directTokens(`${result.txVendor || ''} ${result.txDesc || ''}`));
+            const ten = index.tenancies.find(t => t.id === result.tenancyId);
+            if (!ten || !tenancyNamedIn(tokSet, ten)) {
+                result.tenancyId = ''; result.tenancyLabel = ''; result.tenantId = ''; result.tenantName = '';
+                result.unitId = ''; result.unitName = '';
+            }
+        }
+
+        // ── Property by address, when nothing more specific has set it ──
+        if (!evidence.length) {
+            const hits = findPropertiesInTextDetailed(`${result.txVendor || ''} ${result.txDesc || ''}`, index);
+            if (hits.length === 1 && hits[0].id !== result.propertyId
+                && (hits[0].tier === 'strong' || !result.propertyId)) {
+                result.propertyId = hits[0].id;
+                evidence.push('address');
+            }
+        }
+
+        if (evidence.length) {
+            // matchType is read by isAutoApprovable (=== 'Knowledge Base') and grouped by
+            // the accuracy stats, so it stays exactly as the learned layer set it. The
+            // direct evidence travels separately and is rendered as its own badge.
+            result.direct = evidence;
+            if (!result.matchType) result.matchType = 'Direct';
+            result.score = Math.max(result.score || 0, 8);
+            result.status = 'suggestion';
+        }
+        return result;
+    }
+
+    function setResultTenancy(result, tenancyId, index, tenancyLookup, tenantLookup) {
+        const ten = tenancyLookup[tenancyId];
+        const meta = index.tenancies.find(t => t.id === tenancyId);
+        if (!ten || !meta) return;
+        result.tenancyId = tenancyId;
+        result.directTenancy = true;
+        result.tenancyLabel = String(getField(ten, F.tenRef) || '');
+        result.tenantId = meta.tenantId;
+        result.tenantName = meta.tenantName;
+        result.unitId = meta.unitId;
+        const unitRef = getField(ten, F.tenUnitRef);
+        result.unitName = Array.isArray(unitRef) ? unitRef[0] : (unitRef || '');
+        result.propertyId = meta.propertyId || getPropertyIdFromUnit(meta.unitId);
+        // Mirrors reconTenancyChanged: Real Estate / Revenue, Rental Income if blank.
+        const reBizId = findBusinessIdByName('Real Estate');
+        if (reBizId) { result.businessId = reBizId; result.businessName = 'Real Estate'; }
+        const revenueCatId = findCategoryIdByName('Revenue');
+        if (revenueCatId) { result.categoryId = revenueCatId; result.categoryName = 'Revenue'; }
+        if (!result.subCatId) { result.subCatId = REC.subRentalInc; result.subCatName = getSubCatName(REC.subRentalInc); }
+    }
+    window.propertyNameParts = propertyNameParts;
+    window.buildDirectIndex = buildDirectIndex;
+    window.findPropertiesInText = findPropertiesInText;
+    window.findPropertiesInTextDetailed = findPropertiesInTextDetailed;
+    window.matchTenancyDirect = matchTenancyDirect;
+    window.matchCostDirect = matchCostDirect;
+    window.applyDirectMatches = applyDirectMatches;
+
     function showReconciliationPanel(results) {
         const existing = document.getElementById('reconPanel');
         if (existing) existing.remove();
@@ -978,7 +1349,8 @@
                   ${splitBtnHtml}
               </div>`;
 
-        const matchBadge = r.matchType ? `<span class="od-status-badge info">${escHtml(r.matchType)}</span>` : '';
+        const matchBadge = (r.matchType ? `<span class="od-status-badge info">${escHtml(r.matchType)}</span>` : '')
+            + (r.direct && r.direct.length ? ` <span class="od-status-badge success" title="Read from the descriptor against the live records">Direct: ${escHtml(r.direct.join(', '))}</span>` : '');
 
         return `<tr id="recon-row-${i}" oninput="persistReconRow(${i})" style="border-bottom:1px solid var(--border-subtle);${r.status === 'approved' ? 'opacity:0.5;' : ''}">
             <td class="${cc}" style="color:var(--text-muted);font-weight:600">${i + 1}</td>
@@ -1547,7 +1919,10 @@
         // If this reconciliation linked a transaction to a cost, write the new
         // "Last Reconciled *" fields back to that cost so the AP Fixed dashboard
         // reflects the latest payment, account, sub-category and amount.
-        if (costId && localTx) {
+        // A positive amount on a cost is a DIRECT DEBIT REVERSAL: money coming back.
+        // Stamping it as the last payment would show a bounced mortgage as paid on the
+        // day it bounced, so the link is kept but the cost's payment fields are not.
+        if (costId && localTx && (Number(getField(localTx, F.txReportAmount)) || 0) < 0) {
             const txDate = getField(localTx, F.txDate);
             const txAmount = Number(getField(localTx, F.txReportAmount)) || 0;
             const txAccountIds = (getField(localTx, F.txAccountLink) || []).map(v => v.id || v).filter(Boolean);
@@ -1700,7 +2075,7 @@
             if (r.costId) localTx.fields[F.txCost] = [r.costId];
         }
         // Cost "Last Reconciled *" sync, same as the manual path
-        if (r.costId && localTx) {
+        if (r.costId && localTx && (Number(getField(localTx, F.txReportAmount)) || 0) < 0) {
             try {
                 const txDate = getField(localTx, F.txDate);
                 const txAmount = Number(getField(localTx, F.txReportAmount)) || 0;
