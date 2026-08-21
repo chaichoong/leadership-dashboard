@@ -32,6 +32,7 @@ on:
       - 'js/cashflow.js'
       - 'js/ceo-brief.js'
       - 'js/cfv.js'
+      - 'js/coa.js'
       - 'js/costs.js'
       - 'js/crm-walkthrough.js'
       - 'js/dashboard.js'

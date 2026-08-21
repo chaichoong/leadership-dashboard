@@ -114,6 +114,32 @@ holding zero events of any kind, the routine folder unreadable or empty, and
 **Known limit, stated rather than hidden:** this sees a routine that takes the
 queue lock. One re-enabled and then edited to skip the lock would run unseen.
 
+### The 09:30 guard — the scheduler's word is not evidence
+
+On 15 Aug 2026 the scheduler stamped daily-ops `lastRunAt` at 06:20 and
+delivered the run to **no session at all**: no transcript received the prompt,
+no phase-1 mark, no reports, no findings. Anything trusting `lastRunAt` saw a
+healthy green run. The same morning, the launchd UC watchdog — written before
+the absorption, still treating "disabled" as a fault — had flipped the retired
+`uc-check-slack-notifier` back on, and it fired at 07:04. The design's exact
+inversion: the one routine that should run did not, and one that should not
+exist did. Kevin noticed before the machine told him.
+
+Two consequences, both now in place:
+
+1. `morning-digest.py --guard` runs at 09:30 local (`com.kevinbrittain.daily-ops-guard`),
+   gated in code on London time ≥ 08:00. It checks for TODAY'S phase-1 mark and
+   DMs Kevin the moment it is missing, with the recovery step ("run daily ops")
+   in the message. It never consults the scheduler's `lastRunAt`, because that
+   is an assertion by the component being checked. `tests/daily-ops-guard.test.js`.
+2. The UC watchdog no longer repairs anything. It verifies UC work went out and
+   reports the retired routine as a fault if it is ever ENABLED — the exact
+   opposite of its original repair. `tests/uc-notifier-watchdog.test.js`.
+
+The general rule both encode: **a component's own status stamp is never proof
+it worked. Only a mark written by the work itself counts.** (Same family as
+"a running job is not a working job" and the Airtable silent-zero traps.)
+
 ---
 
 # THE ROUTINE (this section is the live SKILL.md body, verbatim)
@@ -223,7 +249,33 @@ Cap at ten findings, one pull request, and do NOT merge it. Kevin reviews.
 
 ## Phase 9 — Report
 
-One Slack DM to Kevin. Lead with anything that needs him. Then, per phase, one line: ran clean / found N things / failed and why / skipped and why.
+**First, run the approval-loop check.** This is the trust surface: it is the
+only thing in the run that reports what SHOULD have moved and did not.
+
+```
+cd /Users/kevinbrittain/Projects/leadership-dashboard
+python3 scripts/loop-health.py
+```
+
+It exits 1 rather than printing an all-clear if the read failed or no task
+anywhere links to an agent, so a broken query can never read as "nothing is
+stuck". If it exits 1, say so in the DM — do not report the loop as healthy.
+
+Put anything under **NOT MOVING** at the TOP of the message, above the phase
+lines, with the count and the FIRST THREE AS PRINTED. Do not re-sort them by
+age: the list is already ordered by how much each item needs someone, and the
+"agent has drafted nothing" rule deliberately carries no day count, so an age
+sort buries exactly the items that mean nothing has started. Kevin asked for this on
+14 Aug 2026 after losing trust in the loop: an approvals list only shows what
+arrived, and a completions list only shows successes, so neither can show the
+thing that actually went wrong. Same rules as the Approvals tab in Tasks &
+Projects (`computeApprovalLoop`), held together by `tests/loop-health.test.js`.
+
+If NOT MOVING is zero, say that explicitly — "nothing has stalled" is the
+sentence that earns the trust, and a silent omission reads identically to the
+check never having run.
+
+Then one Slack DM to Kevin. Lead with anything that needs him. Then, per phase, one line: ran clean / found N things / failed and why / skipped and why.
 
 State plainly how long the whole run took. If any phase did not run, say which and why. Never present a partial run as a complete one.
 

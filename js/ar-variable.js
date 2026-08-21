@@ -452,3 +452,17 @@
             <td style="text-align:center">${overdueDisplay}</td>
         </tr>`;
     }
+
+    // ── Clear filters ──
+    // Resets status / business / search back to the defaults the tab loads with.
+    // Sort order is deliberately left alone — it is a view preference, not a filter.
+    function clearARVFilters() {
+        const status = document.getElementById('arvStatusFilter');
+        if (status) status.value = 'unpaid';
+        const biz = document.getElementById('arvBusinessFilter');
+        if (biz) biz.value = 'all';
+        const text = document.getElementById('arvFilterText');
+        if (text) text.value = '';
+        renderARVariableTab();
+    }
+    window.clearARVFilters = clearARVFilters;

@@ -233,6 +233,21 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 .acc-badge.ready{background:var(--success-bg);color:var(--success)}
 .acc-badge.building{background:var(--bg-subtle);color:var(--text-secondary)}
 .acc-badge.watch{background:var(--danger-bg);color:var(--danger)}
+/* Approvals view. .apv-sub already exists but is scoped to .approval-box, so
+   the same look is declared here rather than widening that selector and
+   changing the task drawer by accident. */
+.acc-card .apv-sub{font-size:var(--fs-sm);color:var(--text-secondary)}
+.apv-empty{padding:10px 0;color:var(--text-secondary);font-size:var(--fs-sm)}
+/* The stall reason is a sentence, not a status chip. acc-badge is 10px
+   uppercase nowrap and rendered it as a 374px pill that pushed the Open button
+   off the row on a narrow screen. */
+.apv-why{flex:1 1 180px;min-width:140px;color:var(--danger);font-size:var(--fs-sm);white-space:normal;word-break:break-word}
+/* Count on the Approvals tab. Colour is set in renderApprovalTabCount: accent
+   normally, danger the moment anything has stalled. */
+.tab-count{display:inline-block;min-width:18px;padding:1px 6px;margin-left:4px;border-radius:var(--radius-full);background:var(--accent);color:#fff;font-size:10px;font-weight:var(--fw-bold);font-variant-numeric:tabular-nums;text-align:center}
+/* Author display:inline-block beats the user-agent [hidden] rule, so without
+   this the badge stays visible as an empty coloured pill at zero. */
+.tab-count[hidden]{display:none}
 .btn-success{background:var(--success);border-color:var(--success);color:#fff}
 .btn-success:hover{background:var(--success);color:#fff;opacity:.9}
 .row-actions{display:inline-flex;gap:6px;opacity:1}
@@ -496,6 +511,7 @@ body.app-busy,body.app-busy *{cursor:progress!important}
 
   <div class="view-tabs" id="viewTabs">
     <button class="view-tab active" data-view="myday" onclick="switchView('myday')">My Day</button>
+    <button class="view-tab" data-view="approvals" onclick="switchView('approvals')" title="What needs your decision, what the agents finished after you approved it, and what has stopped moving">Approvals <span id="apvTabCount" class="tab-count" hidden></span></button>
     <button class="view-tab" data-view="list" onclick="switchView('list')">Task List</button>
     <button class="view-tab" data-view="kanban" onclick="switchView('kanban')">Kanban</button>
     <button class="view-tab" data-view="projects" onclick="switchView('projects')">Projects</button>
@@ -507,6 +523,8 @@ body.app-busy,body.app-busy *{cursor:progress!important}
   </div>
 
   <div id="view-agents" style="display:none"></div>
+
+  <div id="view-approvals" style="display:none"></div>
 
   <div id="view-myday"></div>
 
@@ -770,6 +788,11 @@ const F = {
   approvalOutcome:'fldrHBSr6qoUfaKuZ',   // singleSelect — Kevin's verdict, and the input to accuracy scoring
   approvedBy:  'fldNntfwSzU5DlYS4',  // singleCollaborator — who decided
   approvedAt:  'fldr4Mvf2RzKvhZhi',  // dateTime — when
+  // Slack message ts (epoch seconds, as a string) stamped when the approval was
+  // POSTED. This is the only true "sent for approval" timestamp on the record:
+  // Due Date looks like one but is re-stamped to today by the rescheduler, so
+  // 28 of 29 waiting approvals read as due today however long they have sat.
+  approvalSlackTs:'fldHTaX3wP9VhD5Oz',
   taskType:    'fldZ2moDV2041Sobc',  // singleSelect — work class; accuracy is scored per agent PER TASK TYPE
   agentOutput: 'fldzswp8fx6PqpLQ5',  // what the agent PRODUCED (separate from Description, which is the brief)
   approvalFeedback:'fldtI7SJI4gEohHD1', // Kevin's words back to the agent on a change or a rejection
@@ -934,6 +957,9 @@ function findTaskAnywhere(id){
   return (allTasks||[]).find(t=>t.id===id)
     || (completedTasks||[]).find(t=>t.id===id)
     || (completedRangeTasks||[]).find(t=>t.id===id)
+    // The Approvals "Done" panel renders from its own array, so without this
+    // every Open button on it silently resolved to null and did nothing.
+    || (agentCompletions||[]).find(t=>t.id===id)
     || null;
 }
 let allProjects = [];
@@ -1877,6 +1903,7 @@ function parseTask(rec){
     approvedByEmail:(gf(rec,F.approvedBy)||{}).email||'',
     approvedByName:(gf(rec,F.approvedBy)||{}).name||'',
     approvedAt:gf(rec,F.approvedAt)||'',
+    approvalSlackTs:gf(rec,F.approvalSlackTs)||'',
     taskType:selectName(gf(rec,F.taskType)),
     processedByAI:!!gf(rec,F.processedByAI),
     agentOutput:gf(rec,F.agentOutput)||'',
@@ -8970,6 +8997,216 @@ function agentAutonomyRecommendations(rows){
   return AgentAccuracy.agentAutonomyRecommendations(rows);
 }
 
+// ══ THE APPROVAL LOOP ════════════════════════════════════════════════
+//
+// Three questions, one view: what needs Kevin, what the agents finished after
+// he said yes, and what has STOPPED MOVING.
+//
+// The third block is the reason this exists. On 14 Aug 2026 Kevin said he had
+// lost trust in the loop, and every failure behind that was invisible to a
+// plain approvals list:
+//   - 10 amendments sat up to 9 days. Status was "Today", never "Approval".
+//   - 8 inbound messages were never drafted. They never reached approval.
+//   - WhatsApp was never read, so nothing was created to be missing.
+// A list of what ARRIVED cannot show any of those. Neither can a list of what
+// completed. Only "should have moved and did not" catches them, which is why
+// the same rules also run in the morning daily-ops message: a tab only works
+// if you remember to open it.
+//
+// STALL_RULES is the single definition. scripts/loop-health.py mirrors it for
+// the Slack message and tests/loop-health.test.js fails if the two disagree —
+// two copies is how a check ends up quietly measuring different things.
+const STALL_AMEND_HOURS = 48;   // amended, and the agent has not redone it
+const STALL_DRAFT_HOURS = 24;   // agent owns it, it is DUE, and nothing drafted
+const STALL_DECIDE_DAYS = 5;    // sat waiting on a human this long
+// The statuses agent-dispatch.py actually works from (its OPEN_STATUSES). An
+// "Upcoming" task is scheduled, not late, and counting it as stalled buried the
+// real list: the first run of this flagged 156 items, 101 of them merely
+// future-dated. A list that long is noise, and noise is what stops it being read.
+const STALL_DUE_STATUSES = ['Today','Overdue'];
+
+// Completed agent work for the "Done" panel. Held separately because the page's
+// own task fetch excludes Completed records by design.
+let agentCompletions=[];
+let agentCompletionsLoaded=false;
+let agentCompletionsError='';
+
+async function loadAgentCompletions(force){
+  if(agentCompletionsLoaded&&!force)return agentCompletions;
+  agentCompletionsError='';
+  try{
+    const rows=await fetchTable(TASKS_TABLE,TASK_FIELD_IDS,
+      `AND({Status}="Completed",IS_AFTER({Completion Date},DATEADD(TODAY(),-8,'days')))`);
+    agentCompletions=rows.map(parseTask).filter(_isAgentOwned);
+    agentCompletionsError='';
+    agentCompletionsLoaded=true;
+  }catch(e){
+    // An empty panel and a failed fetch look identical, and this panel exists to
+    // be believed. Say which one it is.
+    agentCompletionsError=(e&&e.message)||String(e);
+    console.warn('agent completions fetch failed',e);
+  }
+  return agentCompletions;
+}
+
+function _hoursSince(v){
+  if(!v)return null;
+  const t=new Date(v).getTime();
+  if(!isFinite(t))return null;
+  return (Date.now()-t)/36e5;
+}
+function _isAgentOwned(t){
+  return ((t&&t.teamMemberIds)||[]).some(id=>AGENT_MAP[id]);
+}
+function _isOpen(t){
+  return t && t.status!=='Completed' && t.status!=='Cancelled' && !t.completion;
+}
+
+// Returns {needsYou, done, stalled} — stalled entries carry a plain-English
+// `why` because "something is stuck" is not actionable and this list is meant
+// to be acted on before anything else in the day.
+function computeApprovalLoop(tasks){
+  const all=tasks||[];
+  const myEmail=((currentUser&&currentUser.email)||'').toLowerCase();
+
+  const needsYou=all.filter(t=>t.status==='Approval'&&(!t.assigneeEmail||(t.assigneeEmail||'').toLowerCase()===myEmail));
+
+  // Finished agent work, newest first. Proof the loop closed.
+  //
+  // Sourced from agentCompletions, NOT from `all`: the page fetches tasks with
+  // AND({Status}!="Completed",...), so no completed record is ever in allTasks
+  // and reading it from there made this panel permanently empty — on the one
+  // surface built to show that work gets finished.
+  const done=(agentCompletions||[])
+    .filter(t=>_hoursSince(t.completion)!==null&&_hoursSince(t.completion)<=7*24)
+    .sort((a,b)=>new Date(b.completion)-new Date(a.completion));
+
+  const stalled=[];
+  all.forEach(t=>{
+    if(!_isOpen(t))return;
+    // 1. Kevin asked for changes and nothing came back.
+    if(t.approvalOutcome==='Changes requested'&&t.status!=='Approval'){
+      const h=_hoursSince(t.approvedAt);
+      if(h!==null&&h>STALL_AMEND_HOURS){
+        stalled.push({t,days:Math.floor(h/24),why:`You asked for changes ${Math.floor(h/24)} days ago and it has not come back`,rule:'amend'});
+        return;
+      }
+    }
+    // 2. An agent owns it, it is DUE, and it has produced nothing. Restricted to
+    //    the statuses the dispatcher works from — see STALL_DUE_STATUSES. No day
+    //    count here on purpose: these are usually old tasks routed to an agent
+    //    recently, so "has had this for 499 days" would be measuring the wrong
+    //    thing and would be false.
+    //
+    //    storedStatus, NOT status. `status` is DERIVED from the due date
+    //    (deriveTaskStatus), so a task stored as Upcoming reads as Today the
+    //    moment its due date arrives — and agent-dispatch.py filters on the
+    //    STORED value. Using the derived one flagged 63 tasks the dispatcher was
+    //    never going to pick up, which is the false-positive flood this rule was
+    //    narrowed to avoid in the first place.
+    if(_isAgentOwned(t)&&!t.agentOutput&&STALL_DUE_STATUSES.includes(t.storedStatus)){
+      // `created` is the real createdTime. NOT `createdDate` — that field is
+      // "Due Date for Interface", a due date, and anchoring a staleness rule to
+      // a re-stampable due date is the exact bug rule 3 below exists to avoid.
+      const h=_hoursSince(t.created);
+      if(h!==null&&h>STALL_DRAFT_HOURS){
+        stalled.push({t,days:0,why:t.storedStatus==='Overdue'?'Overdue, and the agent has drafted nothing':'Due, and the agent has drafted nothing',rule:'draft'});
+        return;
+      }
+    }
+    // 3. Sat waiting on a human for too long. Anchored to the Slack post time,
+    //    which is the only true "sent for approval" stamp on the record. Due
+    //    Date looks like one and is not: the rescheduler moves it to today, so
+    //    28 of 29 waiting approvals read as due today no matter how long they
+    //    had actually sat, and this rule silently never fired.
+    if(t.status==='Approval'&&t.approvalSlackTs){
+      const secs=parseFloat(String(t.approvalSlackTs).split('.')[0]);
+      const h=isFinite(secs)?(Date.now()-secs*1000)/36e5:null;
+      if(h!==null&&h>STALL_DECIDE_DAYS*24){
+        stalled.push({t,days:Math.floor(h/24),why:`Waiting on your decision for ${Math.floor(h/24)} days`,rule:'decide'});
+      }
+    }
+  });
+  // Ordered by how much it needs someone, not by raw age: the draft rule
+  // carries no day count (see rule 2), so sorting the whole list by age would
+  // sink every "an agent has drafted nothing" item below every dated one — and
+  // that rule is the one that catches work never being started at all.
+  const RULE_ORDER={amend:0,draft:1,decide:2};
+  stalled.sort((a,b)=>(RULE_ORDER[a.rule]-RULE_ORDER[b.rule])||((b.days||0)-(a.days||0)));
+  return {needsYou,done,stalled};
+}
+
+function renderApprovalTabCount(){
+  const el=document.getElementById('apvTabCount');if(!el)return;
+  const {needsYou,stalled}=computeApprovalLoop(allTasks);
+  const n=needsYou.length+stalled.length;
+  el.textContent=n?String(n):'';
+  el.hidden=!n;
+  // Stalled work is the thing that gets missed, so the badge goes red the
+  // moment anything is stuck, even if there is nothing to approve.
+  el.style.background=stalled.length?'var(--danger)':'var(--accent)';
+}
+
+async function renderApprovals(){
+  const el=document.getElementById('view-approvals');if(!el)return;
+  if(!agentCompletionsLoaded){
+    el.innerHTML=`<div style="padding:24px;color:var(--text-secondary);font-size:var(--fs-sm)">Loading the approval loop…</div>`;
+    await loadAgentCompletions();
+  }
+  const {needsYou,done,stalled}=computeApprovalLoop(allTasks);
+
+  // CONTROL. Every rule here fires on the ABSENCE of something, so if the agent
+  // roster failed to load, nothing is agent-owned, nothing can stall, and this
+  // page cheerfully reports an all-clear it has not earned. The Team Members
+  // fetch swallows its own errors, so this is the only place it surfaces.
+  const rosterBroken=!AGENT_MAP||!Object.keys(AGENT_MAP).length;
+
+  const row=(t,right)=>`<div class="acc-row">
+    <span class="acc-type" style="white-space:normal">${escHtml(t.name)}</span>
+    <span class="acc-n">${escHtml(agentNamesFor(t)||'no agent')}</span>
+    ${right||''}
+    <button class="btn btn-sm" onclick="openTaskDrawer('${t.id}')">Open</button>
+  </div>`;
+
+  const stalledHtml=stalled.length
+    ? stalled.map(s=>row(s.t,`<span class="apv-why">${escHtml(s.why)}</span>`)).join('')
+    : `<div class="apv-empty">Nothing has stalled. Every amendment has come back, every due task has been drafted, and nothing is sitting undecided.</div>`;
+
+  const needsHtml=needsYou.length
+    ? needsYou.map(t=>row(t)).join('')
+    : `<div class="apv-empty">Nothing is waiting on you.</div>`;
+
+  const doneHtml=agentCompletionsError
+    ? `<div class="apv-empty" style="color:var(--danger)">Could not load completed work: ${escHtml(agentCompletionsError)}. This panel is empty because the read failed, not because nothing was done.</div>`
+    : done.length
+    ? done.map(t=>row(t,`<span class="acc-badge ready">Completed ${escHtml(new Date(t.completion).toLocaleDateString('en-GB',{day:'numeric',month:'short'}))}</span>`)).join('')
+    : `<div class="apv-empty">No agent work has been completed in the last 7 days.</div>`;
+
+  el.innerHTML=`
+    ${rosterBroken?`<div class="acc-card" style="margin-top:12px;border-color:var(--danger)">
+      <h4 style="color:var(--danger)">This page cannot check anything right now</h4>
+      <div class="apv-sub">The AI agent list did not load, so nothing can be recognised as agent work and the three panels below would all read clear whether or not they are. Refresh the page. Do not read this as an all-clear.</div>
+    </div>`:''}
+    <div class="acc-card" style="margin-top:12px;${stalled.length?'border-color:var(--danger)':''}">
+      <h4 style="${stalled.length?'color:var(--danger)':''}">Not moving <span style="color:var(--text-muted);font-weight:400">(${stalled.length})</span></h4>
+      <div class="apv-sub" style="margin-bottom:8px">Work that should have progressed and has not. This is the list that catches things before they get missed, so clear it first.</div>
+      ${stalledHtml}
+    </div>
+
+    <div class="acc-card" style="margin-top:12px">
+      <h4>Needs your decision <span style="color:var(--text-muted);font-weight:400">(${needsYou.length})</span></h4>
+      <div class="apv-sub" style="margin-bottom:8px">Nothing here has been sent, filed or actioned. Approving hands it back to the agent to carry out.</div>
+      ${needsHtml}
+    </div>
+
+    <div class="acc-card" style="margin-top:12px">
+      <h4>Done in the last 7 days <span style="color:var(--text-muted);font-weight:400">(${done.length})</span></h4>
+      <div class="apv-sub" style="margin-bottom:8px">Agent work you approved that has since been carried out and closed.</div>
+      ${doneHtml}
+    </div>
+  `;
+}
+
 async function renderAgents(){
   const el=document.getElementById('view-agents');if(!el)return;
   if(!agentHistoryLoaded&&!agentHistoryError){
@@ -9083,6 +9320,7 @@ window.addAgent=addAgent;
 
 async function refreshAgentAccuracy(){
   agentHistoryLoaded=false;agentHistoryError='';
+  agentCompletionsLoaded=false;  // else "Done" stays frozen at first paint
   await loadAgentApprovalHistory(true);
   await renderAgents();
   toast('Agent scores refreshed');
@@ -9092,11 +9330,12 @@ window.refreshAgentAccuracy=refreshAgentAccuracy;
 function switchView(view){
   currentView=view;
   document.querySelectorAll('.view-tab').forEach(b=>b.classList.toggle('active',b.dataset.view===view));
-  ['myday','list','kanban','projects','capacity','recurring','jobs','meetings','agents'].forEach(v=>{
+  ['myday','approvals','list','kanban','projects','capacity','recurring','jobs','meetings','agents'].forEach(v=>{
     const el=document.getElementById('view-'+v);if(el)el.style.display=v===view?'':'none';
   });
   window.scrollTo(0, 0);
   if(view==='myday')renderMyDay();
+  if(view==='approvals')renderApprovals();
   if(view==='list')renderTasks();
   if(view==='kanban')renderKanban();
   if(view==='projects')renderProjects();
@@ -9108,8 +9347,9 @@ function switchView(view){
 }
 function setTeam(key){activeTeam=key;currentPage=1;expandedTask=null;selectedTasks.clear();renderAll()}
 function renderAll(){
-  renderTeamBar();renderKPIs();
+  renderTeamBar();renderKPIs();renderApprovalTabCount();
   if(currentView==='myday')renderMyDay();
+  if(currentView==='approvals')renderApprovals();
   if(currentView==='list')renderTasks();
   if(currentView==='kanban')renderKanban();
   if(currentView==='projects')renderProjects();
@@ -9145,6 +9385,10 @@ async function loadAllData(){
     ]);
     allTasks=rawTasks.map(parseTask);
     if(MAINTENANCE_ONLY)allTasks=allTasks.filter(t=>t.maintenance);
+    // Completed agent work lives in its own array (the fetch above excludes
+    // Completed), so a refresh has to invalidate it too or the Approvals "Done"
+    // panel keeps showing the snapshot it took when the page first opened.
+    agentCompletionsLoaded=false;
     allProjects=rawProjects.map(parseProject);
     calendarEvents=cal;
     allTeamMembers=(rawTeam||[]).map(r=>{

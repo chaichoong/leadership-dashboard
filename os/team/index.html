@@ -210,6 +210,7 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
         <select class="filter-select" id="dirDeptFilter" onchange="renderDirectory()">
             <option value="">All Departments</option>
         </select>
+        <button class="btn btn-sm" onclick="clearDirectoryFilters()" title="Reset search and filters back to default">Clear filters</button>
     </div>
     <div id="directoryGrid" class="card-grid"></div>
 </div>
@@ -246,6 +247,7 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
             <option value="due">Needs review (none on record)</option>
             <option value="onrecord">Has reviews on record</option>
         </select>
+        <button class="btn btn-sm" onclick="clearReviewFilters()" title="Reset search and filters back to default">Clear filters</button>
     </div>
     <div id="reviewsGrid" class="card-grid"></div>
 </div>
@@ -283,7 +285,7 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 
 <!-- ai-models.js MUST load before config.js -->
 <script src="../../js/ai-models.js?v=1"></script>
-<script src="../../js/config.js?v=54"></script>
+<script src="../../js/config.js?v=56"></script>
 <script>
 const BASE = BASE_ID;
 var allMembers = [];
@@ -559,6 +561,15 @@ function updateBadges() {
     }).length;
     document.getElementById('trainBadge').textContent = sopCount;
 }
+
+// Reset a pane's search + dropdowns to the values it loads with, then re-render.
+// Directory defaults to "Active", not blank, so the map holds explicit defaults.
+function clearPaneFilters(defaults, renderFn) {
+    Object.keys(defaults).forEach(id => { const el = document.getElementById(id); if (el) el.value = defaults[id]; });
+    renderFn();
+}
+function clearDirectoryFilters() { clearPaneFilters({ dirSearch: '', dirStatusFilter: 'active', dirDeptFilter: '' }, renderDirectory); }
+function clearReviewFilters() { clearPaneFilters({ reviewSearch: '', reviewDeptFilter: '', reviewStateFilter: '' }, renderReviews); }
 
 function renderDirectory() {
     const grid = document.getElementById('directoryGrid');

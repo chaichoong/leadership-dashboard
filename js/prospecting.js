@@ -35,10 +35,14 @@
     }
 
     async function patchProspectingRecord(tableId, recordId, fields) {
+        // typecast lets Airtable accept select values whose option is missing
+        // from the field. Without it, writing "Contacted (1:1)" 422'd on 12 Aug
+        // 2026: the schema never gained the option, so EVERY post-send status
+        // update failed while the emails themselves went out fine.
         const resp = await fetch(`https://api.airtable.com/v0/${BASE_ID}/${tableId}/${recordId}`, {
             method: 'PATCH',
             headers: { 'Authorization': `Bearer ${PAT}`, 'Content-Type': 'application/json' },
-            body: JSON.stringify({ fields }),
+            body: JSON.stringify({ fields, typecast: true }),
         });
         if (!resp.ok) throw new Error('Airtable update failed: HTTP ' + resp.status);
         return resp.json();
@@ -516,8 +520,12 @@
         // "Email sequence (Ltd)" got cold-emailed from this page, and the gate
         // the SOP calls a hard rule was a field the agent wrote about itself.
         // Contact Route is an opinion; this is the check.
+        // "Email reply (they asked)" is exempt BY DESIGN (skill §4.5, Kevin 14
+        // Jul 2026): those prospects publicly asked for help, so replying is
+        // solicited correspondence, not unsolicited marketing — any entity
+        // type. The Ltd gate below protects the cold route only.
         const entity = prosField(rec, 'Entity Type');
-        if (entity !== 'Limited Company') {
+        if (route !== 'Email reply (they asked)' && entity !== 'Limited Company') {
             if (typeof showToast === 'function') showToast(`Not emailed: entity type is ${entity || 'unknown'}. An unsolicited email is only lawful to a Limited Company — the contact is synced, so message them personally on LinkedIn instead.`, { type: 'warning', duration: 9000 });
             return;
         }
@@ -529,6 +537,15 @@
         }
         // Same builder that produced the preview Kevin just approved.
         const email = buildProspectEmail(rec);
+
+        // The send and the bookkeeping fail for DIFFERENT reasons and need
+        // different messages. On 12 Aug 2026 one catch wrapped both: 18 emails
+        // sent perfectly, then the status write 422'd (missing select option),
+        // and the toast blamed the send — inviting a re-approve and leaving the
+        // records in the exact status the daily agent re-sends. An email that
+        // went out but was recorded as unsent is a DOUBLE-SEND waiting to
+        // happen; an email that failed but was recorded as sent is a lost
+        // prospect. Never let one message describe both.
         try {
             const resp = await fetch('https://services.leadconnectorhq.com/conversations/messages', {
                 method: 'POST',
@@ -543,15 +560,30 @@
                 }),
             });
             if (!resp.ok) throw new Error('GHL send HTTP ' + resp.status);
-            const followUp = new Date(Date.now() + 7 * 86400000).toISOString().split('T')[0];
-            await patchProspectingRecord(TABLES.prospects, rec.id, { [PROSPECT.status]: 'Contacted (1:1)', [PROSPECT.nextFollowUp]: followUp });
+        } catch (e) {
+            console.warn('GHL email send failed (contact is synced; agent will handle the send):', e);
+            if (typeof showToast === 'function') showToast('Contact synced, but the GHL email send failed — the daily agent will send it instead', { type: 'warning', duration: 7000 });
+            return;
+        }
+
+        // The email is now genuinely out. Record it, retrying once, and if the
+        // record still cannot be updated say EXACTLY that — the send worked.
+        const followUp = new Date(Date.now() + 7 * 86400000).toISOString().split('T')[0];
+        const fields = { [PROSPECT.status]: 'Contacted (1:1)', [PROSPECT.nextFollowUp]: followUp };
+        try {
+            try {
+                await patchProspectingRecord(TABLES.prospects, rec.id, fields);
+            } catch (first) {
+                await new Promise(r => setTimeout(r, 800));
+                await patchProspectingRecord(TABLES.prospects, rec.id, fields);
+            }
             rec.fields['Status'] = 'Contacted (1:1)';
             rec.fields['Next Follow-up'] = followUp;
             renderProspectingTab();
             if (typeof showToast === 'function') showToast('Email sent via GoHighLevel — follow-up check in 7 days', { type: 'success', duration: 6000 });
         } catch (e) {
-            console.warn('GHL email send failed (contact is synced; agent will handle the send):', e);
-            if (typeof showToast === 'function') showToast('Contact synced, but the GHL email send failed — the daily agent will send it instead', { type: 'warning', duration: 7000 });
+            console.warn('Email SENT but the status update failed:', e);
+            if (typeof showToast === 'function') showToast(`The email WAS sent. The record could not be marked Contacted (${(e && e.message) || 'unknown error'}) — do not approve this prospect again; the daily agent repairs the status on its next run`, { type: 'warning', duration: 10000 });
         }
     }
 

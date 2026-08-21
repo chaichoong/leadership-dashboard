@@ -694,7 +694,10 @@
                 }
             }
 
-            results.push(result);
+            // Applied here, at the matcher's one output point, so the rendered
+            // row, the accuracy snapshot in _reconOriginals, the headless agent
+            // and the knowledge-base write all read the SAME business.
+            results.push(forcePersonalBusiness(result));
         });
 
         results.sort((a, b) => {
@@ -983,8 +986,8 @@
             <td class="${cc} muted-cell" style="white-space:nowrap">${escHtml(r.txAccount || '—')}</td>
             <td class="${cc}" style="max-width:260px"><strong style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:block">${escHtml(r.txVendor)}</strong><span class="${dimClass}" style="display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;line-height:1.4;word-break:break-word">${escHtml(r.txDesc)}</span>${matchBadge?'<br>'+matchBadge:''}</td>
             <td class="${cc} num-cell ${amtClass}" style="font-weight:600;white-space:nowrap" title="${amtTitle}">${amtSign}${fmt(amtNum)}</td>
-            <td class="${cc}">${catSelect}</td>
-            <td class="${cc}">${subCatSelect}</td>
+            <td class="${cc}" onchange="applyPersonalBusinessRule(${i})">${catSelect}</td>
+            <td class="${cc}" onchange="applyPersonalBusinessRule(${i})">${subCatSelect}</td>
             <td class="${cc}">${buildBusinessDropdown('recon-business-' + i, r.businessId || '')}</td>
             <td class="${cc}">${buildTenantDropdown('recon-tenant-' + i, r.tenantId || '')}</td>
             <td class="${cc}" onchange="reconTenancyChanged(${i})">${buildTenancyDropdown('recon-tenancy-' + i, r.tenancyId || '')}</td>
@@ -1024,6 +1027,74 @@
         r.subCatName   = r.subCatId   ? getSubCatName(r.subCatId) : '';
     }
     window.persistReconRow = persistReconRow;
+
+    // ── Personal category or sub-category forces Business = Personal ──────────
+    // Personal money can only belong to the Personal business. Every other value
+    // in that column is wrong by definition, so the moment either Chart of
+    // Accounts column resolves to a personal entry, the Business column follows.
+    //
+    // It OVERWRITES on purpose. The Business column is almost never empty by the
+    // time a personal category lands: the AI matcher pre-fills it from history,
+    // and reconTenancyChanged() hard-sets it to Real Estate. Only setting it when
+    // blank would therefore do nothing in the case this exists for. Measured in
+    // Airtable on 2026-08-18: of 2,612 transactions on a Personal sub-category,
+    // 58 sat on Real Estate — every single mismatch was that exact collision.
+    //
+    // One-way by design: picking a business category afterwards does NOT move the
+    // business back off Personal. Which business a business cost belongs to is a
+    // real decision, and guessing it would undo Kevin's own edit.
+    //
+    // TWO entry points, because there are two ways a row gets approved:
+    //   - forcePersonalBusiness(result) runs on the match RESULT, so the headless
+    //     auto-reconcile agent (autoApproveRow → PATCH, and the rule it writes
+    //     back via saveReconRule) obeys the same rule as a human. A DOM-only
+    //     version would leave the agent free to file personal spend under Real
+    //     Estate and then LEARN that pairing as a knowledge-base rule.
+    //   - applyPersonalBusinessRule(idx) runs on the rendered row, for the picks
+    //     a person makes after the match.
+    function personalBusinessRecord() {
+        const rec = (allBusinesses || []).find(r => r.id === REC.bizPersonal);
+        return rec ? { id: rec.id, name: getField(rec, 'fldbbRqVxLxUdHwIR') || 'Personal' } : null;
+    }
+
+    function isPersonalResult(result) {
+        if (!result) return false;
+        const catName = result.categoryName || getCatName(result.categoryId);
+        const subName = result.subCatName || getSubCatName(result.subCatId);
+        return isPersonalCoaName(catName) || isPersonalCoaName(subName);
+    }
+
+    // Mutates and returns the result, so it can sit inline on the push.
+    function forcePersonalBusiness(result) {
+        if (!isPersonalResult(result)) return result;
+        const biz = personalBusinessRecord();
+        if (!biz) return result; // Businesses not loaded — never invent a link
+        result.businessId = biz.id;
+        result.businessName = biz.name;
+        return result;
+    }
+    window.forcePersonalBusiness = forcePersonalBusiness;
+
+    function applyPersonalBusinessRule(idx) {
+        const catName = getCatName(resolveDropdownId('recon-cat-' + idx));
+        const subName = getSubCatName(resolveDropdownId('recon-subcat-' + idx));
+        if (!isPersonalCoaName(catName) && !isPersonalCoaName(subName)) return;
+
+        const bizInput = document.getElementById('recon-business-' + idx);
+        if (!bizInput) return;
+
+        // Match the dropdown option by record ID, never by typing the name in.
+        // The input's value must be a value the datalist actually holds or
+        // resolveDropdownId returns "" on Approve and the business silently drops.
+        const dl = document.getElementById(bizInput.getAttribute('list'));
+        const opt = dl ? [...dl.options].find(o => o.getAttribute('data-id') === REC.bizPersonal) : null;
+        if (!opt) return; // Personal missing from the pick list — leave the choice alone
+        if (bizInput.value === opt.value) return; // already Personal, nothing to do
+
+        bizInput.value = opt.value;
+        persistReconRow(idx);
+    }
+    window.applyPersonalBusinessRule = applyPersonalBusinessRule;
     // When tenancy input changes, auto-fill tenant, unit, property.
     // Attached via onchange on the tenancy <td>.
     //
@@ -1111,6 +1182,12 @@
         // (tenant, unit, property, sub-cat) without firing native input
         // events on each, so we explicitly call the persistence helper.
         persistReconRow(idx);
+        // This function hard-sets Business to Real Estate above, but only fills
+        // Sub-Category when it is EMPTY — so a personal sub-category already on
+        // the row survives and gets paired with Real Estate. That pairing is the
+        // 58-record defect. Setting a value in code fires no change event, so
+        // nothing else re-runs the rule: it has to be re-asserted here.
+        applyPersonalBusinessRule(idx);
     }
 
     // When cost input changes, auto-fill business, category, subcategory, property
@@ -1155,6 +1232,10 @@
         if (costPropId) setByRecordId('recon-property-' + idx, costPropId, '');
 
         persistReconRow(idx);
+        // A cost can carry a personal sub-category with a non-Personal business on
+        // its own record. Selecting the cost would otherwise reproduce, by machine,
+        // exactly the mismatch this rule exists to stop.
+        applyPersonalBusinessRule(idx);
     }
     window.reconCostChanged = reconCostChanged;
 
@@ -2050,6 +2131,25 @@
                 wire('split-subcat-' + i, 'subCatId');
                 wire('split-business-' + i, 'businessId');
                 wire('split-tenancy-' + i, 'tenancyId');
+                // Same rule as the main table: a personal sub-category on a portion
+                // means that portion is Personal money. Written straight into
+                // splitState AND the input, because this modal only re-renders on
+                // amount changes — a state-only write would not show on screen.
+                const subEl = document.getElementById('split-subcat-' + i);
+                if (subEl) {
+                    const prev = subEl.onchange;
+                    subEl.onchange = () => {
+                        if (prev) prev();
+                        if (!isPersonalCoaName(getSubCatName(st.customRows[i].subCatId))) return;
+                        const bizEl = document.getElementById('split-business-' + i);
+                        if (!bizEl) return;
+                        const dl = document.getElementById(bizEl.getAttribute('list'));
+                        const opt = dl ? [...dl.options].find(o => o.getAttribute('data-id') === REC.bizPersonal) : null;
+                        if (!opt) return;
+                        bizEl.value = opt.value;
+                        st.customRows[i].businessId = REC.bizPersonal;
+                    };
+                }
             });
         }
         // Save button enabled-state hint

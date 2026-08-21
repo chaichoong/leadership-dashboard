@@ -33,7 +33,7 @@
     <link rel="stylesheet" href="css/tokens.css?v=1">
     <link rel="stylesheet" href="css/sync-bar.css?v=3">
     <link rel="stylesheet" href="css/quick-task.css?v=2">
-    <link rel="stylesheet" href="css/styles.css?v=22">
+    <link rel="stylesheet" href="css/styles.css?v=23">
     <!-- Supabase clone: hide the full-app sidebar/auth-screen in the HEAD so they never
          paint (avoids the split-second double-sidebar flash on load). -->
     <style>
@@ -359,6 +359,7 @@
                         Search:
                         <input id="incomeFilterText" type="text" placeholder="Search tenant, property, amount, status..." oninput="renderIncomeTab()" style="font-size:12px;padding:2px 8px;border:1px solid var(--border-default);border-radius:4px;flex:1;background:var(--bg-surface);color:var(--text-primary)">
                     </label>
+                    <button type="button" class="od-clear-filters" onclick="clearIncomeFilters()" title="Reset status, business and search back to default">Clear filters</button>
                 </div>
                 <div class="invoice-table-wrapper">
                     <table class="invoice-table" id="incomeTable" style="display:none">
@@ -437,6 +438,7 @@
                         Search:
                         <input id="arvFilterText" type="text" placeholder="Search customer, invoice, amount, ref..." oninput="renderARVariableTab()" style="font-size:12px;padding:2px 8px;border:1px solid var(--border-default);border-radius:4px;flex:1;background:var(--bg-surface);color:var(--text-primary)">
                     </label>
+                    <button type="button" class="od-clear-filters" onclick="clearARVFilters()" title="Reset status, business and search back to default">Clear filters</button>
                 </div>
                 <div class="invoice-table-wrapper">
                     <div id="arvLoadingSpinner" style="display:none;flex-direction:column;align-items:center;justify-content:center;padding:48px 0;gap:12px">
@@ -505,10 +507,11 @@
                             <option value="annual">Annual</option>
                         </select>
                     </label>
-                    <label style="font-size:12px;color:var(--text-secondary);display:flex;align-items:center;gap:4px;flex:1;min-width:240px">
+                    <label style="font-size:12px;color:var(--text-secondary);display:flex;align-items:center;gap:4px;flex:1;min-width:160px">
                         Search:
                         <input id="costsFilterText" type="text" placeholder="Search across name, amount, dates, status, account, category…" oninput="renderCostsTab()" style="font-size:12px;padding:2px 8px;border:1px solid var(--border-default);border-radius:4px;flex:1;background:var(--bg-surface);color:var(--text-primary)">
                     </label>
+                    <button type="button" class="od-clear-filters" onclick="clearCostsFilters()" title="Reset status, frequency and search back to default">Clear filters</button>
                 </div>
                 <div class="invoice-table-wrapper">
                     <table class="invoice-table" id="costsTable" style="display:none">
@@ -578,6 +581,7 @@
                         Filter:
                         <input id="invFilterText" type="text" placeholder="Search payee, description, ref…" oninput="renderInvoiceTab()" style="font-size:12px;padding:2px 8px;border:1px solid var(--border-default);border-radius:4px;width:220px;background:var(--bg-surface);color:var(--text-primary)">
                     </label>
+                    <button type="button" class="od-clear-filters" onclick="clearInvoiceFilters()" title="Clear the invoice search">Clear filters</button>
                 </div>
                 <!-- Bulk action toolbar — only visible when 1+ rows selected via checkboxes -->
                 <div id="invBulkBar" style="display:none;align-items:center;gap:12px;padding:8px 12px;margin-bottom:8px;background:var(--accent-soft);border:1px solid var(--accent);border-radius:var(--radius-md)">
@@ -796,8 +800,9 @@
                         <button onclick="collapseAllSkills()" class="skills-toolbar-btn" title="Collapse all">Collapse All</button>
                     </div>
                 </div>
-                <div style="margin-bottom:16px">
+                <div style="margin-bottom:16px;display:flex;gap:8px;align-items:center">
                     <input type="text" id="skillsSearchInput" class="skills-search-input" placeholder="Search skills by name, keyword, or category..." oninput="onSkillsSearch(event)" aria-label="Search skills">
+                    <button type="button" class="od-clear-filters" onclick="clearSkillsFilters()" title="Reset search, source and category filters back to default">Clear filters</button>
                 </div>
                 <div class="skills-source-bar" id="skillsSourceBar" style="display:flex;gap:6px;margin-bottom:12px"></div>
                 <div class="skills-filter-bar" id="skillsFilterBar"></div>
@@ -833,28 +838,28 @@
     <script src="dashboard-boot.js?v=5"></script>
     <!-- ai-models.js MUST load before config.js — config reads window.AI_MODELS -->
     <script defer src="js/ai-models.js?v=1"></script>
-    <script defer src="js/config.js?v=54"></script>
+    <script defer src="js/config.js?v=56"></script>
     <script defer src="js/prompts/boardroom-mentor.js?v=3"></script>
     <script defer src="js/shared.js?v=36"></script>
     <script defer src="js/sync-bar.js?v=6"></script>
     <script defer src="js/project-health.js?v=1"></script>
     <script defer src="js/dashboard.js?v=26"></script>
-    <script defer src="js/cashflow.js?v=21"></script>
+    <script defer src="js/cashflow.js?v=22"></script>
     <script defer src="js/money.js?v=4"></script>
-    <script defer src="js/wealth.js?v=61"></script>
+    <script defer src="js/wealth.js?v=66"></script>
     <script defer src="js/sitemap.js?v=27"></script>
-    <script defer src="js/income.js?v=3"></script>
-    <script defer src="js/costs.js?v=16"></script>
-    <script defer src="js/ar-variable.js?v=2"></script>
-    <script defer src="js/invoices.js?v=14"></script>
+    <script defer src="js/income.js?v=4"></script>
+    <script defer src="js/costs.js?v=17"></script>
+    <script defer src="js/ar-variable.js?v=3"></script>
+    <script defer src="js/invoices.js?v=15"></script>
     <script defer src="js/pnl.js?v=23"></script>
     <script defer src="js/transactions.js?v=7"></script>
-    <script defer src="js/reconciliation.js?v=33"></script>
+    <script defer src="js/reconciliation.js?v=34"></script>
     <script defer src="js/cfv.js?v=29"></script>
     <script defer src="js/arrears.js?v=31"></script>
     <script defer src="js/fintable.js?v=14"></script>
     <script defer src="js/skills-data.js?v=6"></script>
-    <script defer src="js/skills.js?v=10"></script>
+    <script defer src="js/skills.js?v=11"></script>
     <script defer src="js/ai-assistant.js?v=18"></script>
     <script defer src="js/quick-task.js?v=4"></script>
     <script defer src="js/admin-repair-splits.js?v=5"></script>

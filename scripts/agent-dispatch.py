@@ -134,9 +134,41 @@ TASK_TYPES = ("Drafting", "Research", "Analysis", "Build",
 APPROVED = ("Approved as-is", "Approved with minor edits")
 OPEN_STATUSES = ("Today", "Overdue")
 
-# How many pieces of work one run may take on. Small on purpose: the approval
-# queue has to stay reviewable from a phone. One line to change.
-CAP_PER_RUN = 5
+# How many pieces of work one run may take on.
+#
+# A CEILING, NOT A TARGET. If eight tasks are eligible, eight run. A high cap
+# costs nothing on a quiet day, which is why it should be set to clear the
+# backlog rather than to feel safe.
+#
+# This was 5, sized so the approval queue stayed reviewable from a phone. Kevin
+# overruled that on 14 Aug 2026: the queue's real home is the Tasks & Projects
+# page, Slack is the on-the-go bonus, and he would rather be bombarded than have
+# work sit unprocessed. Raised again the same day, to 50, once measurement
+# showed 37 tasks eligible and a cap of 25 leaving 12 of them to wait a day for
+# no reason. The goal is 90% of the work done by agents; a cap below the size of
+# the queue is just a slower version of the starvation this already caused.
+#
+# Dispatch also runs ONCE a day now (daily-ops phase 6.3) where it used to run
+# twice, at 07:30 and 14:30. That halving is why throughput felt slower than
+# before. 50 once a day is 5x the old 5-twice-a-day, not a restoration of it.
+#
+# Raise it further if the eligible count ever approaches it. The real limits are
+# how long the run takes and Airtable's rate limit, neither of which is near.
+CAP_PER_RUN = 50
+
+# Of those slots, how many are HELD BACK for new work that no agent has touched.
+#
+# Why this exists: the cap applies to the whole worklist and hand-backs sort to
+# the head of it. On 14 Aug all 5 slots went to carrying out already-approved
+# work, so the 8 inbound messages picked up the day before were never drafted —
+# empty Agent Output, never sent for approval — and NOTHING new reached the
+# approval queue between 12 and 14 Aug. It is self-sustaining: while there are
+# CAP_PER_RUN hand-backs waiting, new work is never reached, so no new approvals
+# are produced, so the only thing left to do next run is more hand-backs.
+#
+# A floor breaks that loop. Unused slots are given back to hand-backs, so this
+# costs nothing on a run with little new work.
+NEW_WORK_FLOOR = 10
 
 # The 17 AI agent Team Member records → the local Claude Code agent that does
 # the work. Verified against the live Team Members table on 1 Aug 2026.
@@ -201,6 +233,21 @@ CEO_REC_ID = "reciHUAEcEkbctnZ6"
 # "income and expenditure" wording those forms actually use.
 TIER1_PATTERNS = [
     re.compile(p, re.I) for p in (
+        # THE EXPLICIT LABEL COMES FIRST. If a human or an agent has already
+        # written "tier 1" on the record, that is the strongest signal there is
+        # and it beat every subject keyword below — yet until 15 Aug 2026 it
+        # matched NOTHING. Task descriptions carrying the literal words
+        # "TIER 1 MATTER" came back tier1: false, so the banner reached Kevin
+        # only because the dispatcher's judgement pass caught them by hand: 16
+        # of 16 tier-1 items in that day's recovery run were labelled by
+        # judgement, zero by this filter. A self-declaration that the machine
+        # ignores is worse than no declaration, because everyone downstream
+        # assumes it was honoured.
+        # \b after the digit or "tier 15 pricing model" reads as tier 1. The
+        # asymmetry is deliberate everywhere else: a false positive routes
+        # something to Kevin with extra caution, a false negative sends a
+        # private legal matter to Mica, so this errs toward matching.
+        r"tier[\s\-_]*1\b", r"tier[\s\-_]*one\b",
         r"restraint order", r"operation lily", r"criminal investigation",
         r"social housing holdings", r"ach investments", r"liquidat",
         # Enforcement — the vocabulary a bailiff/HCEO notice actually uses.
@@ -308,6 +355,41 @@ def outbound_intent(*texts):
 # into reserve whenever there is other work and are only picked up on a quiet
 # run. Demoted, never dropped — and counted in the queue JSON so a task sitting
 # here for weeks is visible rather than silently parked.
+def select_worklist(handbacks, new_work, deferred, cap=None, floor=None):
+    """Choose this run's worklist so neither lane can starve the other.
+
+    handbacks  approved carry-outs and redos, in priority order. What Kevin is
+               waiting on, so they take precedence.
+    new_work   tasks no agent has touched yet. Left alone, these NEVER run on a
+               busy day, and then nothing new ever reaches the approval queue.
+    deferred   redos whose feedback said "not yet". Quiet-run work only.
+
+    Rules, in order:
+      1. Hold back up to `floor` slots for new work, but only as many as there
+         actually IS new work. A quiet day costs the hand-backs nothing.
+      2. Fill the rest with hand-backs.
+      3. Give any slot the other lane did not use straight back.
+      4. Deferred items pick up whatever is left, which on a busy run is nothing.
+
+    Returns at most `cap` items.
+    """
+    cap = CAP_PER_RUN if cap is None else cap
+    floor = NEW_WORK_FLOOR if floor is None else floor
+    if cap <= 0:
+        return []
+
+    held_for_new = min(floor, len(new_work), cap)
+    chosen = list(handbacks[:max(0, cap - held_for_new)])
+    chosen += new_work[:cap - len(chosen)]
+    # New work did not use its whole allowance — hand it back rather than idle.
+    if len(chosen) < cap:
+        already = {t["id"] for t in chosen}
+        chosen += [t for t in handbacks if t["id"] not in already][:cap - len(chosen)]
+    if len(chosen) < cap:
+        chosen += deferred[:cap - len(chosen)]
+    return chosen
+
+
 DELAY_PATTERNS = [
     re.compile(p, re.I) for p in (
         r"\bdelay(ed|ing)?\b", r"\bdefer(red|ring)?\b", r"\bpostpone",
@@ -583,6 +665,9 @@ def cmd_queue(args):
         changes_hb = [t for t in changes_hb if t["id"] not in deferred_ids]
 
     # Hand-backs first — approved work Kevin is waiting on beats new work.
+    # NOTE this ordering is the REPORTING order and the reserve order. It is no
+    # longer what decides the worklist: see select_worklist, which holds slots
+    # back for new work so hand-backs cannot starve it.
     combined = approved_hb + changes_hb + new_work + deferred_hb
     intents = open_intents()
     for t in combined:
@@ -593,10 +678,11 @@ def cmd_queue(args):
         # done: the action MAY already have happened. The dispatcher must make
         # the agent VERIFY (sent items, records) before executing anything.
         t["priorIntent"] = t["kind"] == "carry_out" and t["id"] in intents
-    worklist = combined[:CAP_PER_RUN]
+    worklist = select_worklist(approved_hb + changes_hb, new_work, deferred_hb)
     # If the dispatcher's judgement pass removes a worklist item (a tier-1
     # smell the keywords missed), it backfills from here — never beyond the cap.
-    reserve = combined[CAP_PER_RUN:CAP_PER_RUN * 2]
+    chosen = {t["id"] for t in worklist}
+    reserve = [t for t in combined if t["id"] not in chosen][:CAP_PER_RUN]
 
     out = {
         "generatedAt": now_iso(),

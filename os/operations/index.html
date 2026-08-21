@@ -307,6 +307,7 @@ tr.expand-row:hover td{background:var(--bg-surface-2)!important}
       <select class="filter-select" id="filterTenantStatus" onchange="renderTenants()">
         <option value="">All statuses</option>
       </select>
+      <button class="btn btn-sm" onclick="clearTenantFilters()" title="Reset search and filters back to default">Clear filters</button>
       <span class="meta" id="metaTenants"></span>
     </div>
     <div id="contentTenants"><div class="loading"><div class="spinner"></div><div>Loading tenants...</div></div></div>
@@ -323,6 +324,7 @@ tr.expand-row:hover td{background:var(--bg-surface-2)!important}
         <option value="active">Active only</option>
         <option value="">Show all</option>
       </select>
+      <button class="btn btn-sm" onclick="clearTenancyFilters()" title="Reset search and filters back to default">Clear filters</button>
       <span class="meta" id="metaTenancies"></span>
     </div>
     <div id="contentTenancies"><div class="loading"><div class="spinner"></div><div>Loading tenancies...</div></div></div>
@@ -338,6 +340,7 @@ tr.expand-row:hover td{background:var(--bg-surface-2)!important}
       <select class="filter-select" id="filterUnitProperty" onchange="renderUnits()">
         <option value="">All properties</option>
       </select>
+      <button class="btn btn-sm" onclick="clearUnitFilters()" title="Reset search and filters back to default">Clear filters</button>
       <span class="meta" id="metaUnits"></span>
     </div>
     <div id="contentUnits"><div class="loading"><div class="spinner"></div><div>Loading rental units...</div></div></div>
@@ -354,6 +357,7 @@ tr.expand-row:hover td{background:var(--bg-surface-2)!important}
       <select class="filter-select" id="filterPropertyOwnership" onchange="renderProperties()">
         <option value="">All ownerships</option>
       </select>
+      <button class="btn btn-sm" onclick="clearPropertyFilters()" title="Reset search and filters back to default">Clear filters</button>
       <span class="meta" id="metaProperties"></span>
     </div>
     <div id="contentProperties"><div class="loading"><div class="spinner"></div><div>Loading properties...</div></div></div>
@@ -371,6 +375,7 @@ tr.expand-row:hover td{background:var(--bg-surface-2)!important}
         <option value="Active">Active</option>
         <option value="Churned">Churned</option>
       </select>
+      <button class="btn btn-sm" onclick="clearCustomerFilters()" title="Reset search and filters back to default">Clear filters</button>
       <span class="meta" id="metaCustomers"></span>
     </div>
     <div id="contentCustomers"><div class="empty"><div class="icon">💼</div><div class="msg">No customers yet. Your first subscriber will appear here.</div></div></div>
@@ -1354,6 +1359,22 @@ function crossNav(entity, recordId){
     }
   }, 80);
 }
+
+// ═══════════════════════════════════════════════════════════════════════
+// Clear filters — resets a pane's search + dropdowns to their defaults
+// ═══════════════════════════════════════════════════════════════════════
+// `defaults` maps a control id to the value it should return to (the value the
+// pane loads with, which is not always the empty string — Tenancies defaults to
+// "Active only").
+function clearPaneFilters(defaults, renderFn){
+  Object.keys(defaults).forEach(id => { const el = document.getElementById(id); if (el) el.value = defaults[id]; });
+  renderFn();
+}
+function clearTenantFilters(){ clearPaneFilters({ searchTenants:'', filterTenantStatus:'' }, renderTenants); }
+function clearTenancyFilters(){ clearPaneFilters({ searchTenancies:'', filterTenancyPayStatus:'', filterTenancyActive:'active' }, renderTenancies); }
+function clearUnitFilters(){ clearPaneFilters({ searchUnits:'', filterUnitStatus:'', filterUnitProperty:'' }, renderUnits); }
+function clearPropertyFilters(){ clearPaneFilters({ searchProperties:'', filterPropertyType:'', filterPropertyOwnership:'' }, renderProperties); }
+function clearCustomerFilters(){ clearPaneFilters({ searchCustomers:'', filterCustomerStage:'' }, renderCustomers); }
 
 // ═══════════════════════════════════════════════════════════════════════
 // Render — Tenants

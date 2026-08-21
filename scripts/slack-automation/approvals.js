@@ -165,6 +165,20 @@ const MAX_RECONCILES_PER_RUN = 10;
 // company "financial statements" every year and it would put the legal-matter
 // banner on routine accounting. The disclosure form is caught by its full name.
 const KEVIN_ONLY_PATTERNS = [
+    // THE EXPLICIT LABEL COMES FIRST. If a human or an agent has already written
+    // "tier 1" on the record, that is the strongest signal there is — yet until
+    // 15 Aug 2026 it matched nothing on either side. Descriptions reading
+    // literally "TIER 1 MATTER" scored tier1: false, and in that day's recovery
+    // run 16 of 16 tier-1 items were caught by an agent's judgement and ZERO by
+    // these patterns. A self-declaration the machine ignores is worse than none,
+    // because everyone downstream assumes it was honoured.
+    //
+    // \b after the digit, or "tier 15 pricing model" reads as tier 1. The bias
+    // is otherwise deliberately toward matching: a false positive routes
+    // something to Kevin with extra caution, a false negative sends a private
+    // legal matter to Mica.
+    /tier[\s\-_]*1\b/i,
+    /tier[\s\-_]*one\b/i,
     /restraint order/i,
     /operation lily/i,
     /criminal investigation/i,

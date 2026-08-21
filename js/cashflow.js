@@ -411,11 +411,23 @@
         // Cash flow KPI cards — range format "£X – £Y" with decimals
         const fmtRangeVal = v => fmt(Math.abs(v));
         const cfLabelStyle = 'min-height:36px;display:flex;align-items:flex-start';
+
+        // Per-account split for the Opening Balance sub-line (same two accounts and the
+        // same read as the dashboard KPI). Only show the figures when they genuinely add
+        // up to the opening balance passed in — if allAccounts has not loaded, the parts
+        // would both read £0.00 under a correct total, which is worse than no split.
+        const cfAccounts = (typeof allAccounts !== 'undefined' && allAccounts) ? allAccounts : [];
+        const cfSantBal = Number(getField(cfAccounts.find(r => r.id === REC.santander), F.accGBP)) || 0;
+        const cfZempBal = Number(getField(cfAccounts.find(r => r.id === REC.tntZempler), F.accGBP)) || 0;
+        const cfSplitOk = Math.abs((cfSantBal + cfZempBal) - openingBalance) < 0.01;
+        const cfOpeningSub = cfSplitOk
+            ? `Santander ${fmt(cfSantBal)} | TNT Zempler ${fmt(cfZempBal)}`
+            : 'Santander + TNT Zempler';
         document.getElementById('cashflowKPIs').innerHTML = `
             <div class="kpi-card">
                 <div class="kpi-card-label" style="${cfLabelStyle}">Opening Balance</div>
                 <div class="kpi-card-value">${fmt(openingBalance)}</div>
-                <div class="kpi-card-sub">Santander + TNT Zempler</div>
+                <div class="kpi-card-sub">${cfOpeningSub}</div>
             </div>
             <div class="kpi-card">
                 <div class="kpi-card-label" style="${cfLabelStyle}">Total In</div>
