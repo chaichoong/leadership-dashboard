@@ -411,6 +411,36 @@ def cmd_selftest(args):
     cases.append(("tier-1 banner stripped", tier1 == parse_output(plain, "selftest")))
     cases.append(("banner not left in body", TIER1_BANNER not in tier1["body"]))
 
+    # The mandatory approval-box closing line (finding 20260818-agent-dispatch-204).
+    # agent-dispatch REQUIRES it on every long Agent Output. It is addressed to
+    # Kevin. Before this, it went out to the recipient at the foot of the email.
+    from agent_email_format import CARRY_OUT_MARKER
+    closing = parse_output(
+        plain + "\n\n" + CARRY_OUT_MARKER
+        + " sending this email to a@b.com from Kevin's Gmail.", "selftest")
+    cases.append(("closing line stripped from body",
+                  "arrying this out" not in closing["body"]))
+    cases.append(("closing line strip leaves the real body intact",
+                  closing["body"] == "Body line."))
+    cases.append(("stripping the closing line does not touch TO/SUBJECT",
+                  closing["to"] == ["a@b.com"] and closing["subject"] == "x"))
+    # Belt and braces on the tier-1 path, which carries BOTH markers at once.
+    both = parse_output(
+        TIER1_BANNER + "\n\n" + plain + "\n\n" + CARRY_OUT_MARKER + " sending it.",
+        "selftest")
+    cases.append(("banner and closing line both stripped",
+                  both == parse_output(plain, "selftest")))
+    # A marker quoted mid-email is body text, not a closing line. Kevin forwards
+    # agent output to people; that quote must survive.
+    quoted = parse_output(
+        "TO: a@b.com\nSUBJECT: x\n---\nAs discussed, the note said "
+        + CARRY_OUT_MARKER + " something.\n\n" + ("Real body text. " * 40),
+        "selftest")
+    cases.append(("a mid-body quote of the marker is kept",
+                  "arrying this out" in quoted["body"]))
+    refuses("refuses an output that is nothing but the closing line",
+            "TO: a@b.com\nSUBJECT: x\n---\n" + CARRY_OUT_MARKER + " sending it.")
+
     # Sender identity (finding 20260812-ceo-huddle-094). The warm-lane copy is
     # the real text that would have gone out from a personal gmail address.
     warm = ("Hi Jack,\n\nYou booked a call with Operations Director a while "

@@ -116,6 +116,50 @@ def read_pat():
         return f.read().strip()
 
 
+def name_already_taken(pat, want, existing):
+    """Is `want` already a Task Name in Airtable RIGHT NOW?
+
+    Returns True (yes, skip), False (no, safe to create) or None (could not
+    tell — do not create).
+
+    THE CONTROL, and why this is not a plain existence query.
+    CLAUDE.md's silent-zero trap: a filterByFormula naming a field wrongly
+    returns 200 OK and `{"records": []}`, which reads as "no duplicate exists"
+    and so writes exactly the duplicate the check was added to prevent. A
+    broken query and a genuinely empty result are indistinguishable.
+
+    So the query asks TWO questions at once: does `want` exist, and does a name
+    we already know exists still come back? If the known-good name does not
+    come back, the query itself is broken and the answer about `want` is worth
+    nothing — that is the None case. One API call, self-checking.
+    """
+    known = None
+    for t in existing:
+        nm = (t.get('fields', {}) or {}).get('Task Name') or ''
+        if nm and nm != want:
+            known = nm
+            break
+    if known is None:
+        # Nothing to control against on a first-ever run. An unverifiable check
+        # must not masquerade as a pass, but refusing every create on an empty
+        # table would be worse, so fall back to the in-memory read and say so.
+        return any((t.get('fields', {}) or {}).get('Task Name') == want
+                   for t in existing)
+
+    def esc(v):
+        return str(v).replace('\\', '\\\\').replace('"', '\\"')
+
+    formula = 'OR({Task Name}="%s",{Task Name}="%s")' % (esc(want), esc(known))
+    try:
+        rows = fetch_all(pat, TASKS_TABLE, fields=['Task Name'], formula=formula)
+    except Exception:
+        return None
+    names = {(r.get('fields', {}) or {}).get('Task Name') for r in rows}
+    if known not in names:
+        return None            # the query is lying; trust nothing it said
+    return want in names
+
+
 def api(pat, method, path, payload=None):
     url = f'https://api.airtable.com/v0/{BASE_ID}/{path}'
     data = json.dumps(payload).encode() if payload is not None else None
@@ -387,6 +431,24 @@ def main():
                 supersedable['fields']['Task Name'] = want
                 updated.append(want)
             else:
+                # LAST LOOK BEFORE THE WRITE (finding 20260818-uc-check-slack-notifier-201).
+                # `existing` was read once, at the top. Two overlapping runs —
+                # the script and js/arrears.js, or the Mac waking a stalled run
+                # beside a fresh one — both read "not there" and both create.
+                # Re-asking narrows the window to one API call.
+                dup = name_already_taken(pat, want, existing)
+                if dup is True:
+                    skipped += 1
+                    notes.append(f'RACE AVOIDED: "{want}" appeared between the '
+                                 f'first read and the create; not duplicated')
+                    continue
+                if dup is None:
+                    # The check could not be trusted. Refusing is the safe way
+                    # round: a missed task is chased tomorrow, a duplicate task
+                    # is chased by Mica today.
+                    notes.append(f'SKIPPED "{want}": the duplicate check could '
+                                 f'not be verified, so nothing was created')
+                    continue
                 new = api(pat, 'POST', TASKS_TABLE,
                           {'fields': task_fields(c), 'typecast': True})
                 existing.append({'id': new['id'], 'fields': {

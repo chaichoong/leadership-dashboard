@@ -65,6 +65,8 @@ from zoneinfo import ZoneInfo
 # the send gate could not parse.
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from agent_email_format import (  # noqa: E402
+    CARRY_OUT_MARKER,
+    CARRY_OUT_RE,
     TIER1_BANNER,
     EmailFormatError,
     parse_output as parse_email_output,
@@ -90,8 +92,12 @@ TASKS = "tblqB8b22hKBL4PF1"
 # CARRY_OUT_RE is the regex the two renderers already parse with. One pattern,
 # so what is REQUIRED and what is READ can never drift apart —
 # tests/approval-summary.test.js holds the renderers to the same shape.
-CARRY_OUT_MARKER = "**Carrying this out will involve:**"
-CARRY_OUT_RE = re.compile(r"\*{0,2}carrying this out will involve:?\*{0,2}", re.I)
+#
+# Both constants are IMPORTED from agent_email_format (see the import block
+# above), not defined here. On 18 Aug 2026 the line this file demands was being
+# emailed to recipients because the send path had no idea it existed
+# (20260818-agent-dispatch-204). Same rule as TIER1_BANNER: the string that
+# gets added lives in the same module as the code that strips it.
 
 # apvSummary shows no separate summary below this length: a short output is
 # readable at a glance and repeating it twice helps nobody. Demanding a closing
@@ -550,6 +556,53 @@ def carry_out_problem(output):
     return ""
 
 
+# ─── AN OUTPUT THAT PROMISES A SEND MUST BE Correspondence ───────────
+#
+# 18 Aug 2026, finding 20260818-agent-dispatch-203. Tasks went in as
+# `--type Drafting` with a closing line saying the email would be sent from
+# Kevin's Gmail. Kevin read that line, approved it, and send-email.py then
+# refused the carry-out: "This script only sends Correspondence."
+#
+# The contract is free to fix at DRAFT time and expensive at carry-out time,
+# because by then Kevin has already made a decision on a promise the machine
+# cannot keep. So it is checked here, at submit, where the fix costs one retry.
+#
+# Deliberately matched on the CLOSING line only, not the whole document: an
+# analysis that discusses emailing somebody is not a promise to send one.
+SEND_LANGUAGE_RE = re.compile(
+    r"\b(?:"
+    r"send(?:s|ing)?\s+(?:the\s+|this\s+|an?\s+)?(?:email|e-mail|letter|reply|message)"
+    r"|email(?:s|ing)?\s+(?:it|the|this|them|him|her)"
+    r"|from\s+Kevin'?s\s+Gmail"
+    r"|sent\s+(?:from|to)\s+[^\s@]+@[^\s@]+"
+    r")\b", re.I)
+
+
+def send_promise_problem(output, task_type):
+    """Reason this output promises a send its Task Type cannot deliver.
+
+    Empty string means fine. Only the closing line is read, and only when the
+    type is not Correspondence — the type that send-email.py will accept.
+    """
+    if task_type == "Correspondence":
+        return ""
+    text = (output or "").strip()
+    m = None
+    for hit in CARRY_OUT_RE.finditer(text):
+        m = hit
+    if m is None:
+        return ""
+    closing = text[m.end():].strip()
+    if not closing or len(closing) > SUMMARY_MAX_CHARS:
+        return ""
+    found = SEND_LANGUAGE_RE.search(closing)
+    if not found:
+        return ""
+    return ("its closing line promises to send something (%r) but the Task Type "
+            "is %s, and scripts/send-email.py only sends Correspondence"
+            % (found.group(0), task_type or "(empty)"))
+
+
 def tier_match(patterns, *texts):
     hay = " ".join(str(t or "") for t in texts)
     for p in patterns:
@@ -770,6 +823,19 @@ def cmd_submit(args):
             "       Kevin's approval box leads with that line. Without it the\n"
             "       summary is guessed from the first line of the report, which\n"
             "       is exactly what he asked to stop (11 Aug 2026)."
+        )
+
+    # Does the closing line promise a send this Task Type cannot deliver?
+    # Refused here, not discovered at carry-out after Kevin has approved it.
+    promise = send_promise_problem(output, args.type)
+    if promise:
+        sys.exit(
+            f"ERROR: refusing to submit {args.task} — {promise}.\n"
+            "       Either resubmit with --type Correspondence and the Agent\n"
+            "       Output in TO:/SUBJECT:/---/body form, or reword the closing\n"
+            "       line so it describes what Kevin's approval actually does.\n"
+            "       An approved action that cannot be carried out is worse than\n"
+            "       a refused one: the refusal arrives after the decision."
         )
 
     # A Correspondence submit is a promise that send-email.py can carry the
