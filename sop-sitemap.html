@@ -171,6 +171,7 @@ body {
   flex-shrink: 0; color: white;
 }
 .wf-header h3 { font-size: 1.1rem; font-weight: 700; color: var(--text-primary); }
+.card h3 { font-size: 1rem; font-weight: 700; color: var(--text-primary); margin: 1rem 0 0.35rem; }
 .wf-header .wf-tag {
   font-size: 0.75rem; padding: 0.15rem 0.5rem; border-radius: 999px;
   background: var(--bg-subtle); color: var(--text-secondary); font-weight: 500;
@@ -295,7 +296,7 @@ hr { border: none; border-top: 1px solid var(--border-default); margin: 1.5rem 0
   <div class="header-inner">
     <h1>Site Map &amp; Links &mdash; Standard Operating Procedure</h1>
     <div class="subtitle">Page registry, version tracking, sharing and integrity checks for the Leadership Dashboard</div>
-    <div class="version">Version 1.2 &middot; 12 April 2026 &middot; Owner: Kevin Brittain</div>
+    <div class="version">Version 1.19 &middot; 20 August 2026 &middot; Owner: Kevin Brittain</div>
     <div style="margin-top:0.75rem"><a href="index.html#sitemap" style="color:rgba(255,255,255,0.8);font-size:0.85rem;text-decoration:none;border:1px solid rgba(255,255,255,0.3);padding:0.3rem 0.8rem;border-radius:6px;">&larr; Back to Dashboard</a></div>
   </div>
 </div>
@@ -313,7 +314,7 @@ hr { border: none; border-top: 1px solid var(--border-default); margin: 1.5rem 0
       </div>
       <div class="qr-item">
         <div class="qr-label">Total Pages</div>
-        <div class="qr-value">12 pages (1 Dashboard + 7 SOPs + 2 Utilities + 2 OS)</div>
+        <div class="qr-value">Whatever the live table says &mdash; see section 2</div>
       </div>
       <div class="qr-item">
         <div class="qr-label">Source</div>
@@ -358,25 +359,19 @@ hr { border: none; border-top: 1px solid var(--border-default); margin: 1.5rem 0
     <h2 class="section-title"><span class="icon">&#128203;</span> 2. Page Registry</h2>
     <div class="card">
       <div class="card-header">All Dashboard Pages</div>
-      <table class="label-table">
-        <thead>
-          <tr><th>Page</th><th>File</th><th>Type</th><th>Version</th></tr>
-        </thead>
-        <tbody>
-          <tr><td><strong>Main Dashboard</strong></td><td><a href="index.html"><code>index.html</code></a></td><td><span class="label-badge lb-1">Dashboard</span></td><td>2.3</td></tr>
-          <tr><td><strong>Leadership Dashboard SOP</strong></td><td><a href="sop.html"><code>sop.html</code></a></td><td><span class="label-badge lb-4">SOP</span></td><td>2.3</td></tr>
-          <tr><td><strong>Inbound Comms SOP</strong></td><td><a href="inbound-comms-sop.html"><code>inbound-comms-sop.html</code></a></td><td><span class="label-badge lb-4">SOP</span></td><td>2.2</td></tr>
-          <tr><td><strong>Invoices SOP</strong></td><td><a href="sop-invoices.html"><code>sop-invoices.html</code></a></td><td><span class="label-badge lb-4">SOP</span></td><td>2.0</td></tr>
-          <tr><td><strong>CFVs SOP</strong></td><td><a href="sop-cfvs.html"><code>sop-cfvs.html</code></a></td><td><span class="label-badge lb-4">SOP</span></td><td>1.4</td></tr>
-          <tr><td><strong>Compliance SOP</strong></td><td><a href="sop-compliance.html"><code>sop-compliance.html</code></a></td><td><span class="label-badge lb-4">SOP</span></td><td>1.0</td></tr>
-          <tr><td><strong>Site Map SOP</strong></td><td><a href="sop-sitemap.html"><code>sop-sitemap.html</code></a></td><td><span class="label-badge lb-4">SOP</span></td><td>1.2</td></tr>
-          <tr><td><strong>Follow-Up Tracker</strong></td><td><a href="follow-up.html"><code>follow-up.html</code></a></td><td><span class="label-badge lb-5">Utility</span></td><td>See file</td></tr>
-          <tr><td><strong>Property Compliance</strong></td><td><a href="compliance.html"><code>compliance.html</code></a></td><td><span class="label-badge lb-5">Utility</span></td><td>See file</td></tr>
-        </tbody>
-      </table>
+      <p>There is <strong>no page list in this SOP</strong>, on purpose. The registry lives in
+      <code>PAGE_REGISTRY</code> in <code>js/config.js</code>, and the Site Map page renders it
+      live: open the dashboard and click <strong>Site Map &amp; Guides</strong> in the sidebar.
+      Every page, its file, its page version, its SOP, its SOP version and its sync status are
+      in that one table.</p>
+      <p>A copy of the table used to sit here. It was written in April 2026 with 12 pages on it
+      and was never updated again. By August the real registry held 28. A stale copy of a list
+      that already exists live is worse than no copy: it reads as authoritative and it is wrong.</p>
       <div class="info-box info">
         <span class="ib-icon">&#8505;&#65039;</span>
-        <span>This registry should be updated whenever a new page is added or an existing page is renamed. Keep filenames lowercase with hyphens, no spaces.</span>
+        <span>Adding a page means adding a row to <code>PAGE_REGISTRY</code> in <code>js/config.js</code>
+        and to the file-to-page map in <code>scripts/pre-commit-action.py</code>. Nothing needs
+        editing here. Keep filenames lowercase with hyphens, no spaces.</span>
       </div>
     </div>
   </div>
@@ -405,7 +400,7 @@ hr { border: none; border-top: 1px solid var(--border-default); margin: 1.5rem 0
       <div class="card-header">How to Share a Dashboard Page</div>
       <ol class="steps">
         <li>Navigate to the Site Map page on the dashboard.</li>
-        <li>Find the page you want to share in the Page Registry table.</li>
+        <li>Find the page you want to share in the live table on the Site Map page.</li>
         <li>Click the page link to open it, then copy the URL from the browser address bar.</li>
         <li>Share the URL via Slack, email, or WhatsApp. The pages are publicly accessible via GitHub Pages (no login required).</li>
       </ol>
@@ -420,18 +415,44 @@ hr { border: none; border-top: 1px solid var(--border-default); margin: 1.5rem 0
   <div class="section" id="integrity">
     <h2 class="section-title"><span class="icon">&#9989;</span> 5. Integrity Check</h2>
     <div class="card">
-      <p>The Site Map page includes a built-in integrity check that verifies all registered pages are loading correctly. The check performs the following:</p>
-      <ul>
-        <li><strong>HTTP Status</strong> &mdash; Fetches each page URL and verifies it returns a 200 OK response.</li>
-        <li><strong>Title Verification</strong> &mdash; Checks that the page title matches the expected title from the registry.</li>
-        <li><strong>Version Match</strong> &mdash; Compares the version in the page header against the version recorded in the Site Map registry.</li>
-      </ul>
-      <p>Results are displayed as a status grid:</p>
+      <p>The Site Map page runs <strong>two</strong> checks, and they answer different questions.
+      Nothing fetches the pages themselves, so there is no HTTP status check and no title check.</p>
+
+      <h3>Version Sync (declared)</h3>
+      <p>Compares each page's <code>pageVer</code> against its <code>sopVer</code> in
+      <code>PAGE_REGISTRY</code>. It runs instantly and needs no network. It is only ever as
+      honest as the two numbers somebody typed: a page can be months out of date with both
+      numbers matching, which is exactly why the second check exists.</p>
+
+      <h3>Git Sync (real)</h3>
+      <p>Asks the GitHub API for the date of the last commit to each page's source file(s) and
+      to its SOP file. If the source has been committed <em>since</em> the SOP was last written,
+      the SOP is behind the page, and the check counts how many source commits have landed since
+      ("improvements behind"). This is real evidence, not a declared number.</p>
+      <p>It does not run on load. Press <strong>Check Git Sync</strong>. Results are cached in
+      the browser and refetched automatically when the cache no longer covers every file.</p>
+
+      <p>Each page ends up in one of four states:</p>
       <div class="metrics-bar">
-        <span class="metric-chip mc-green">Pass &mdash; All checks OK</span>
-        <span class="metric-chip mc-amber">Warning &mdash; Version mismatch</span>
-        <span class="metric-chip mc-red">Fail &mdash; Page not loading</span>
+        <span class="metric-chip mc-green">&#10003; In sync &mdash; SOP committed after the page source</span>
+        <span class="metric-chip mc-red">&#9888; Update needed &mdash; source changed after the SOP</span>
+        <span class="metric-chip mc-red">&#9888; SOP needed &mdash; page has source but no SOP file</span>
+        <span class="metric-chip mc-amber">? Unknown &mdash; GitHub returned no data for a file</span>
       </div>
+
+      <div class="info-box warn">
+        <span class="ib-icon">&#9888;&#65039;</span>
+        <span><strong>Rate limits.</strong> Unauthenticated GitHub allows 60 requests an hour, and one
+        run costs roughly one request per file. When it runs out, the remaining files are skipped
+        and show as <strong>Unknown</strong>, and the card is labelled <strong>rate-limited</strong>.
+        Unknown means "not checked", never "fine". Use the <strong>Set GitHub token</strong> button
+        on the page to raise the limit to 5,000 an hour; a rejected token is cleared automatically
+        and the check falls back to unauthenticated.</span>
+      </div>
+
+      <p><strong>Update All Out-of-Sync SOPs</strong> raises an update request for every page that
+      is stale or missing an SOP. The button reports back as "Update Requested" and re-enables
+      itself once everything is in sync, or after 24 hours.</p>
     </div>
   </div>
 
@@ -444,7 +465,7 @@ hr { border: none; border-top: 1px solid var(--border-default); margin: 1.5rem 0
         <li>Create the HTML file in the Leadership Dashboard directory using the standard CSS template (copy from any existing SOP).</li>
         <li>Include the standard header with title, subtitle, version (start at 1.0), date, and owner.</li>
         <li>Add the file to the GitHub Pages deployment (commit and push to the repository).</li>
-        <li>Update the Page Registry table in this Site Map SOP with the new page details.</li>
+        <li>Add a row to <code>PAGE_REGISTRY</code> in <code>js/config.js</code> and to the file-to-page map in <code>scripts/pre-commit-action.py</code>. Nothing in this SOP needs editing.</li>
         <li>Run the integrity check to verify the new page loads correctly.</li>
       </ol>
       <div class="info-box info">
@@ -465,7 +486,7 @@ hr { border: none; border-top: 1px solid var(--border-default); margin: 1.5rem 0
         <li>Increment the version number in the header (e.g. 1.0 to 1.1 for minor changes).</li>
         <li>Update the date in the header to today's date.</li>
         <li>Commit and push the updated file to GitHub Pages.</li>
-        <li>Update the version in the Site Map Page Registry if it has changed.</li>
+        <li>Bump <code>sopVer</code> for that page in <code>PAGE_REGISTRY</code> to match its <code>pageVer</code>, so both sync checks agree.</li>
       </ol>
       <div class="info-box tip">
         <span class="ib-icon">&#128161;</span>

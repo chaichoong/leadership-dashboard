@@ -214,16 +214,17 @@ def cmd_reopen(a):
             age = age_hours(r.get("claimed_at"), now)
             why = ("no readable timestamp" if age is None
                    else "%.1f hours" % age)
-            append({"op": "reopen", "id": r["id"], "ts": iso(),
-                    "note": a.note or ("claim by %s went stale after %s"
-                                       % (r.get("claimed_by", "?"), why))})
-            print("reopened %s (claimed by %s, %s)"
-                  % (r["id"], r.get("claimed_by", "?"), why))
-        if not stale:
-            print("No stale claims.")
-            return 0
-        # A count, so a run that reopens work says how much came back. Findings
-        # returning to the queue means an earlier run died holding them.
+            if not a.dry_run:
+                append({"op": "reopen", "id": r["id"], "ts": iso(),
+                        "note": a.note or ("claim by %s went stale after %s"
+                                           % (r.get("claimed_by", "?"), why))})
+            print("reopened %s (claimed by %s, %s)%s"
+                  % (r["id"], r.get("claimed_by", "?"), why,
+                     " [dry-run]" if a.dry_run else ""))
+        # Always a count, INCLUDING zero. A prose "No stale claims." reads fine
+        # to a human but a routine cannot act on it, and it makes a genuinely
+        # empty run indistinguishable from a query that returned nothing because
+        # it was broken. Findings coming back means an earlier run died.
         print("reopened %d finding(s)" % len(stale))
         return 0
 
@@ -300,6 +301,8 @@ def main(argv=None):
     sp.add_argument("--stale-hours", "--lease-hours", type=float, dest="stale_hours", default=STALE_CLAIM_HOURS)
     sp.add_argument("--force", action="store_true",
                     help="reopen even a closed finding")
+    sp.add_argument("--dry-run", action="store_true",
+                    help="report what would reopen, write nothing")
     sp.add_argument("--note", default="")
     sp.set_defaults(fn=cmd_reopen)
 

@@ -47,7 +47,8 @@ import signal
 import subprocess
 import sys
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 HOME = os.path.expanduser("~")
 STATE_DIR = os.environ.get("JOB_QUEUE_DIR", os.path.join(HOME, "knowledge-os/logs/queue"))
@@ -60,6 +61,11 @@ LOCK_DIR = os.path.join(STATE_DIR, "lock")
 HOLDER_FILE = os.path.join(LOCK_DIR, "holder.json")
 TICKET_DIR = os.path.join(STATE_DIR, "tickets")
 EVENTS = os.path.join(STATE_DIR, "queue-events.jsonl")
+
+# Every "did it run today" question is asked about Kevin's day, not about UTC.
+# In BST a 23:30 UTC event belongs to the NEXT London day, and a run refused or
+# allowed on the wrong day is exactly the class of bug the CEO brief cron had.
+LONDON = ZoneInfo("Europe/London")
 
 # Exit codes. 0 and 3 are both "nothing went wrong"; 75 is EX_TEMPFAIL.
 EX_OK = 0
@@ -827,6 +833,72 @@ def run(job, cmd, lease_minutes, timeout_minutes, check_stale,
             release(job, quiet=True)
 
 
+def parse_event_ts(value):
+    """Parse a queue-log timestamp into an aware UTC datetime, or None.
+
+    The log carries both second and millisecond resolution (iso vs iso_ms), so
+    this must accept either. An unreadable timestamp returns None and is skipped
+    rather than guessed at.
+    """
+    if not value:
+        return None
+    v = str(value).strip()
+    if v.endswith("Z"):
+        v = v[:-1] + "+00:00"
+    try:
+        dt = datetime.fromisoformat(v)
+    except ValueError:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
+def read_events():
+    """Yield every queue-log record. A missing log is an empty history, not an error."""
+    try:
+        with open(EVENTS) as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    yield json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+    except FileNotFoundError:
+        return
+
+
+def completed_today(job, ref=None):
+    """The London-local time `job` last stamped an END mark today, or None.
+
+    A START mark alone must NOT count. A run that died halfway has to be
+    resumable, and a start-only check cannot tell a dead run from a finished one
+    — which is the distinction that matters. Only a matching end closes the day.
+
+    Regression origin: 19 Aug 2026. daily-ops stamped 'end' at 14:12:19Z and a
+    second full run started at 14:22:56Z, ten minutes later, because nothing
+    asked the question (finding 20260819-daily-ops-252).
+    """
+    ref = ref or datetime.now(timezone.utc)
+    today = ref.astimezone(LONDON).date()
+    last = None
+    for rec in read_events():
+        if rec.get("job") != job or rec.get("state") != "mark":
+            continue
+        if (rec.get("note") or "") != "end":
+            continue
+        ts = parse_event_ts(rec.get("ts"))
+        if ts is None or ts > ref:
+            continue
+        if ts.astimezone(LONDON).date() != today:
+            continue
+        if last is None or ts > last:
+            last = ts
+    return last
+
+
 def status():
     ensure_dirs()
     break_stale_lock()
@@ -907,6 +979,14 @@ def main(argv=None):
     sp.add_argument("job")
     sp.add_argument("--note", default="")
 
+    # The other half of `mark`: refuse a second full run on a day that already
+    # finished one. Exits EX_SKIPPED (3), which the caller reads as "nothing
+    # wrong, do not start", never as a failure.
+    sp = sub.add_parser("rantoday")
+    sp.add_argument("job")
+    sp.add_argument("--now", default=None,
+                    help="ISO timestamp to evaluate against, for back-testing")
+
     argv = list(sys.argv[1:] if argv is None else argv)
     trailing = []
     if "--" in argv:
@@ -944,6 +1024,21 @@ def main(argv=None):
         stale, late, reason = staleness(a.job, load_schedule())
         print("%s: %s (%s)" % (a.job, "STALE" if stale else "fresh", reason))
         return EX_SKIPPED if stale else EX_OK
+    if a.cmd == "rantoday":
+        ref = None
+        if a.now:
+            ref = parse_event_ts(a.now)
+            if ref is None:
+                print("ERROR: --now is not a readable ISO timestamp: %s" % a.now,
+                      file=sys.stderr)
+                return EX_USAGE
+        done = completed_today(a.job, ref)
+        if done:
+            print("%s: ALREADY RAN TODAY (end mark at %s London). Do not start."
+                  % (a.job, done.astimezone(LONDON).strftime("%Y-%m-%d %H:%M")))
+            return EX_SKIPPED
+        print("%s: no end mark today, safe to start" % a.job)
+        return EX_OK
     if a.cmd == "mark":
         rec = event(a.job, "mark", note=a.note)
         print("%s: marked as running at %s" % (a.job, rec["ts"]))

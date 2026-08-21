@@ -82,13 +82,13 @@ describe('findings queue: a dead run does not swallow a finding', () => {
     // A run in progress must not have its work reassigned underneath it. That
     // would produce the double-fix the single-writer design exists to prevent.
     seed([added('f-1'), claimed('f-1', 1)]);
-    expect(fnd(['reopen', '--stale']).out).toMatch(/No stale claims/);
+    expect(fnd(['reopen', '--stale']).out).toMatch(/reopened 0 finding\(s\)/);
     expect(ids(fnd(['list', '--status', 'open']).out)).toEqual([]);
   });
 
   it('honours --stale-hours so the lease can be tightened without a code change', () => {
     seed([added('f-1'), claimed('f-1', 3)]);
-    expect(fnd(['reopen', '--stale']).out).toMatch(/No stale claims/);
+    expect(fnd(['reopen', '--stale']).out).toMatch(/reopened 0 finding\(s\)/);
     expect(fnd(['reopen', '--stale', '--stale-hours', '2']).out).toMatch(/reopened f-1/);
   });
 
@@ -103,7 +103,7 @@ describe('findings queue: a dead run does not swallow a finding', () => {
   it('never touches an open or closed finding', () => {
     seed([added('f-open'), added('f-done'),
           { op: 'close', id: 'f-done', ts: stamp(20), outcome: 'fixed', note: 'n' }]);
-    expect(fnd(['reopen', '--stale']).out).toMatch(/No stale claims/);
+    expect(fnd(['reopen', '--stale']).out).toMatch(/reopened 0 finding\(s\)/);
     expect(fnd(['reopen', 'f-done']).code, 'a closed finding reopened without --force').toBe(1);
     expect(fnd(['reopen', 'f-done', '--force']).code).toBe(0);
   });
