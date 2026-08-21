@@ -1,7 +1,20 @@
-# Keep baseline + reference map; ignore nightly snapshots & reports
-# (they accumulate fast — the scheduled task commits them to main directly)
+# Keep baseline + reference map; ignore the raw nightly schema snapshots.
 schema-2*.json
-drift-2*.md
+
+# drift-2*.md WAS ignored here. It should never have been: 40 drift reports up to
+# 6 Aug 2026 are tracked (git ignores the ignore rule once a path is tracked), so
+# the rule only ever hid the NEW ones. Every report written from 8 Aug onward sat
+# untracked and invisible while the drift routine reported success, and the
+# queue-fixer's `git add -A` silently staged nothing. Seven reports were lost to
+# this before anyone noticed (finding 20260816-drift-181).
+#
+# Drift reports compare shipped code against the SOPs. They name files, functions
+# and line numbers — no tenant names, no rent figures, no email bodies — so they
+# are safe in a public repo, which is why the 40 already there are fine.
+#
+# If these ever need to stop accumulating, prune old ones deliberately. Do not
+# reintroduce an ignore rule: an ignore on a partially-tracked path does not
+# reduce noise, it just makes the newest half of the series disappear silently.
 
 # never-commit:begin
 #
