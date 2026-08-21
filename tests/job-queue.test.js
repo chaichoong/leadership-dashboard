@@ -478,7 +478,7 @@ describe('findings queue', () => {
     fin(['add', '--routine', 'drift', '--title', 'fresh']);
     const out = fin(['reopen', '--stale']);
     expect(out.code).toBe(0);
-    expect(out.stdout.trim()).toBe('reopened 0');
+    expect(out.stdout.trim()).toBe('reopened 0 finding(s)');
   });
 
   it('reopen <id> refuses a finding that is not claimed', () => {
@@ -494,6 +494,83 @@ describe('findings queue', () => {
     fin(['add', '--routine', 'b', '--title', 'critical one', '--severity', 'critical']);
     const out = fin(['list', '--status', 'open']).stdout;
     expect(out.indexOf('critical one')).toBeLessThan(out.indexOf('low one'));
+  });
+
+  // ── The claim lease (20260819-daily-ops-217) ──────────────────────────────
+  //
+  // A claim used to be permanent, so a fixer run that died after claiming took
+  // its findings with it: invisible to `list --status open`, never picked up
+  // again. Nine findings sat that way for 124.9 hours. daily-ops phase 1 had
+  // been calling `findings.py reopen --stale` since 14 Aug against a subcommand
+  // that did not exist — argparse printed 'invalid choice' and the run carried
+  // on, so the repair looked done for five days.
+  describe('stale claims come back to the queue', () => {
+    // Back-dates the claim op in the log, which is what a dead run leaves.
+    function ageClaim(id, hours) {
+      const lines = readFileSync(findingsFile, 'utf8').trim().split('\n').map(JSON.parse);
+      const when = new Date(Date.now() - hours * 3600e3).toISOString().replace(/\.\d+Z$/, 'Z');
+      for (const r of lines) if (r.op === 'claim' && r.id === id) r.ts = when;
+      writeFileSync(findingsFile, lines.map((r) => JSON.stringify(r)).join('\n') + '\n');
+    }
+
+    it('the reopen subcommand exists at all', () => {
+      // The whole failure was argparse rejecting it while the run continued.
+      expect(fin(['reopen', '--stale']).stdout).not.toMatch(/invalid choice/);
+    });
+
+    it('reopens a claim older than the 12-hour lease and leaves a fresh one alone', () => {
+      const stale = fin(['add', '--routine', 'a', '--title', 'abandoned']).stdout.trim();
+      const fresh = fin(['add', '--routine', 'b', '--title', 'in progress']).stdout.trim();
+      fin(['claim', stale, '--by', 'queue-fixer']);
+      fin(['claim', fresh, '--by', 'queue-fixer']);
+      ageClaim(stale, 125);
+      ageClaim(fresh, 1);
+
+      const out = fin(['reopen', '--stale']).stdout;
+      expect(out).toContain(`reopened ${stale}`);
+      expect(out).not.toContain(`reopened ${fresh}`);
+      // Printed every run, zero included, so a dead fixer is visible.
+      expect(out).toMatch(/reopened 1 finding\(s\)/);
+
+      expect(fin(['list', '--status', 'open']).stdout).toContain('abandoned');
+      expect(fin(['list', '--status', 'claimed']).stdout).toContain('in progress');
+    });
+
+    it('a reopened finding can be claimed again', () => {
+      const id = fin(['add', '--routine', 'a', '--title', 'again']).stdout.trim();
+      fin(['claim', id, '--by', 'dead-run']);
+      ageClaim(id, 99);
+      fin(['reopen', '--stale']);
+      expect(fin(['claim', id, '--by', 'next-run']).code).toBe(0);
+    });
+
+    it('reopens an explicit id whatever its age, for a run known to be dead', () => {
+      const id = fin(['add', '--routine', 'a', '--title', 'known dead']).stdout.trim();
+      fin(['claim', id, '--by', 'dead-run']);
+      expect(fin(['reopen', id]).code).toBe(0);
+      expect(fin(['list', '--status', 'open']).stdout).toContain('known dead');
+    });
+
+    it('refuses an id that is not claimed, and refuses id plus --stale', () => {
+      const id = fin(['add', '--routine', 'a', '--title', 'untouched']).stdout.trim();
+      expect(fin(['reopen', id]).code).not.toBe(0);
+      fin(['claim', id, '--by', 'x']);
+      expect(fin(['reopen', id, '--stale']).code).not.toBe(0);
+      expect(fin(['reopen']).code).not.toBe(0);
+    });
+
+    it('an undateable claim is reopened and said so, never held for ever', () => {
+      // parse_ts returning now() on a bad stamp would make a stale claim look
+      // fresh permanently — the exact failure the lease exists to end.
+      const id = fin(['add', '--routine', 'a', '--title', 'bad stamp']).stdout.trim();
+      fin(['claim', id, '--by', 'x']);
+      const lines = readFileSync(findingsFile, 'utf8').trim().split('\n').map(JSON.parse);
+      for (const r of lines) if (r.op === 'claim' && r.id === id) r.ts = 'not a date';
+      writeFileSync(findingsFile, lines.map((r) => JSON.stringify(r)).join('\n') + '\n');
+      const out = fin(['reopen', '--stale']).stdout;
+      expect(out).toContain('no readable timestamp');
+      expect(out).toContain(`reopened ${id}`);
+    });
   });
 });
 

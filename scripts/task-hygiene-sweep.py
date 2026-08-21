@@ -93,6 +93,10 @@ FIELDS = {
 
 TEAM_MEMBERS_TBL = "tblco0p2OnlLQVAX7"
 TM_IS_AGENT = "Is AI Agent"
+TM_STATUS = "Status"
+# The two Status choices that mean "no longer doing the work". The full option
+# list on Team Members is Onboarding / Active / Offboarding / Offboarded.
+TM_DEPARTED = frozenset({"Offboarding", "Offboarded"})
 
 # Statuses that are not live work. 'Approval' is waiting on Kevin, not being worked,
 # and a blank status is an un-triaged record. Counting either in the denominator
@@ -265,9 +269,19 @@ def reference_data(token):
             projects.append({"id": rec["id"], "name": rec["fields"].get("Project Name"),
                              "status": status})
     agents = []
-    for rec in fetch_all(token, TEAM_MEMBERS_TBL, fields=["Name", TM_IS_AGENT]):
+    departed = set()
+    for rec in fetch_all(token, TEAM_MEMBERS_TBL,
+                         fields=["Name", TM_IS_AGENT, TM_STATUS]):
         if rec["fields"].get(TM_IS_AGENT):
             agents.append({"id": rec["id"], "name": rec["fields"].get("Name")})
+            continue
+        # Someone who has left is not an owner. The sweep used to count any
+        # Team Member link as "human owned", so 'Karlo Teves' — offboarded —
+        # kept tasks off the unowned list and out of every proposal. The work
+        # looked assigned and nobody was doing it. Offboarding counts too: the
+        # handover is the moment to re-own, not the day after it finishes.
+        if rec["fields"].get(TM_STATUS) in TM_DEPARTED:
+            departed.add(rec["id"])
     # CONTROL — an empty roster means a renamed field or table, not a business
     # with no agents. Writing nothing would read as "no AI owner was suitable".
     if not agents:
@@ -276,20 +290,42 @@ def reference_data(token):
             f"with '{TM_IS_AGENT}' ticked. Either the field was renamed or the "
             "read is broken. Refusing to propose owners against an empty roster."
         )
-    return businesses, projects, agents
+    # CONTROL — the same trap one field along. If 'Status' is renamed, every
+    # member reads as current and this whole change silently does nothing:
+    # a clean "0 tasks owned by someone who has left" is exactly what a broken
+    # read looks like. There ARE departed members on this base (17 Offboarded,
+    # 1 Offboarding, verified 13 Aug 2026), so zero means the read broke.
+    if not departed:
+        raise SystemExit(
+            f"FAIL: control check — zero departed members found on "
+            f"{TEAM_MEMBERS_TBL} with '{TM_STATUS}' in {sorted(TM_DEPARTED)}. "
+            "Either the field or a choice was renamed, or the read is broken. "
+            "Refusing to report every owner as current."
+        )
+    return businesses, projects, agents, departed
 
 
 def strip_html(text):
     return re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", text or "")).strip()
 
 
-def assess(rec):
-    """Return the list of rule gaps on one open task, with exemptions applied."""
+def assess(rec, owner="human"):
+    """Return the list of rule gaps on one open task, with exemptions applied.
+
+    `owner` is the owner_kind() verdict: ai / human / departed / unowned. It is
+    passed in rather than recomputed because deciding it needs the Team Members
+    roster, which this function does not have. Defaulting to "human" keeps the
+    old behaviour for any caller that does not know the owner.
+    """
     gaps = []
     some_day = bool(get(rec, "someDay"))
     maintenance = bool(get(rec, "maintenance"))
 
-    owned = bool(get(rec, "assignee")) or bool(get(rec, "teamMember"))
+    # "Owned by someone who has left" is a gap, not ownership. Without this the
+    # task carries a Team Member link, passes the check, and is never proposed
+    # to anyone — the most invisible way for work to stop.
+    owned = (bool(get(rec, "assignee")) or bool(get(rec, "teamMember"))) \
+        and owner != "departed"
     if not owned and not (maintenance and get(rec, "contractor")):
         gaps.append("assignee")
     if not get(rec, "dueDate") and not some_day:
@@ -345,7 +381,7 @@ def cmd_audit(args):
     # One read of the reference data, used twice: to say how much of the list an
     # agent already holds (the number Kevin steers by), and to give the deciding
     # agent the roster it may propose an owner from.
-    businesses, projects, agents = reference_data(token)
+    businesses, projects, agents, departed_ids = reference_data(token)
     agent_ids = {a["id"] for a in agents}
 
     def owner_kind(rec):
@@ -353,6 +389,12 @@ def cmd_audit(args):
         ids = [l.get("id") if isinstance(l, dict) else l for l in links]
         if any(i in agent_ids for i in ids):
             return "ai"
+        # A link to someone who has left is NOT ownership. Reported as its own
+        # bucket rather than folded into "unowned" so it cannot hide inside the
+        # compliance score: these tasks need re-owning, and "unowned" and "owned
+        # by someone who left" call for different conversations.
+        if ids and all(i in departed_ids for i in ids) and not get(rec, "assignee"):
+            return "departed"
         if ids or get(rec, "assignee"):
             return "human"
         return "unowned"
@@ -369,15 +411,16 @@ def cmd_audit(args):
     items, counts = [], {}
     non_compliant = 0
     today = date.today()
-    stale, owners = [], {"ai": 0, "human": 0, "unowned": 0}
+    stale, owners = [], {"ai": 0, "human": 0, "departed": 0, "unowned": 0}
     for rec in open_tasks:
-        owners[owner_kind(rec)] += 1
+        kind = owner_kind(rec)
+        owners[kind] += 1
         overdue_by = is_stale(rec, today)
         if overdue_by:
             stale.append({"recordId": rec["id"], "name": get(rec, "name"),
                           "dueDate": str(get(rec, "dueDate"))[:10],
                           "daysOverdue": overdue_by, "owner": owner_kind(rec)})
-        gaps = assess(rec)
+        gaps = assess(rec, kind)
         for gap in gaps:
             counts[gap] = counts.get(gap, 0) + 1
         # 'project' is advisory. Kevin's rule is "IF it is project-based it needs a
@@ -479,6 +522,9 @@ def cmd_audit(args):
     print(f"Live work: {len(open_tasks)} tasks   compliant: {clean} ({out['compliancePct']}%)")
     print(f"  excluded: {len(waiting)} waiting on approval, {len(untriaged)} with no status")
     print(f"  owned by AI: {owners['ai']} ({out['aiSharePct']}%)   human: {owners['human']}   nobody: {owners['unowned']}")
+    # Reported on its own line, never folded into "human" or "nobody": these
+    # tasks LOOK owned and are not being done by anyone.
+    print(f"  owned by someone who has left: {owners['departed']}")
     for gap, n in sorted(counts.items(), key=lambda kv: -kv[1]):
         print(f"  missing {gap}: {n}")
     print(f"  stale (over {STALE_DAYS} days past due): {len(stale)}")
@@ -565,7 +611,7 @@ def cmd_apply(args):
         print("Nothing to apply.")
         return 0
 
-    businesses, projects, agents = reference_data(token)
+    businesses, projects, agents, _departed = reference_data(token)
     b_ids = {b["id"] for b in businesses}
     p_ids = {p["id"] for p in projects}
     a_ids = {a["id"] for a in agents}

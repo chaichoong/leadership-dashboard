@@ -101,7 +101,7 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
     <a href="../../index.html#sitemap" class="header-back">&#x2190; Back to Site Map</a>
     <h1>&#x2705; Tasks &amp; Projects</h1>
     <div class="subtitle">Standard Operating Procedure &mdash; Team task management, smart daily planning, calendar integration, and project tracking synced with Airtable</div>
-    <div class="version">Version 1.1 &bull; 17 Apr 2026 &bull; Owner: Kevin Brittain</div>
+    <div class="version">Version 1.4 &bull; 19 Aug 2026 &bull; Owner: Kevin Brittain</div>
   </div>
 </div>
 
@@ -116,8 +116,8 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
         <div class="qr-value">os/tasks/index.html</div>
       </div>
       <div class="qr-item">
-        <div class="qr-label">Contractor Jobs View</div>
-        <div class="qr-value">os/tasks/jobs.html</div>
+        <div class="qr-label">Contractor Tasks</div>
+        <div class="qr-value">Tab inside <code>os/tasks/index.html</code></div>
       </div>
       <div class="qr-item">
         <div class="qr-label">Airtable Base ID</div>
@@ -157,7 +157,7 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
       </div>
       <div class="qr-item">
         <div class="qr-label">Auto-Reschedule</div>
-        <div class="qr-value">Kevin only &mdash; runs on every load</div>
+        <div class="qr-value">Kevin only &mdash; every load; skips Some Day and Hard Deadline</div>
       </div>
     </div>
   </div>
@@ -174,7 +174,7 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
         <a href="#creating"><span class="toc-num">5</span> Creating &amp; Editing Tasks</a>
         <a href="#planner"><span class="toc-num">6</span> Smart Daily Planner</a>
         <a href="#calendar"><span class="toc-num">7</span> Calendar Integration</a>
-        <a href="#contractor"><span class="toc-num">8</span> Contractor Jobs View</a>
+        <a href="#contractor"><span class="toc-num">8</span> Contractor Tasks Tab</a>
         <a href="#buttons"><span class="toc-num">9</span> Action Buttons Reference</a>
         <a href="#filters"><span class="toc-num">10</span> Filtering, Sorting &amp; Search</a>
         <a href="#fields"><span class="toc-num">11</span> Airtable Fields Reference</a>
@@ -189,18 +189,20 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
   <div class="section" id="overview">
     <div class="section-title"><span class="icon">&#x1F4CB;</span> 1. Overview &amp; Purpose</div>
     <div class="card">
-      <p>Task and Project Management is a self-contained web application that provides the operations team with a unified view of all tasks and projects stored in Airtable. It is designed for daily operational use by Kevin Brittain, Mica Albovias, and Ericamae Atenta, and provides a separate mobile-optimised view for contractors (Gary, Roy, Rob).</p>
-      <p>The system fetches all non-completed, non-someday tasks from Airtable on every load and presents them across six specialist views. Tasks can be updated in real-time &mdash; status changes and due-date adjustments write directly back to Airtable via the REST API. No separate backend is required.</p>
+      <p>Task and Project Management is a self-contained web application that provides the operations team with a unified view of all tasks and projects stored in Airtable. It is designed for daily operational use by Kevin Brittain, Mica Albovias, and Ericamae Atenta, and covers contractor maintenance work (Gary Marsh, Rob Jackson, Roy Lavin) on its own Contractor Tasks tab.</p>
+      <p>The system fetches all non-completed, non-someday tasks from Airtable on every load and presents them across ten specialist views. Tasks can be updated in real-time &mdash; status changes and due-date adjustments write directly back to Airtable via the REST API. No separate backend is required.</p>
+      <p><strong>Start on My Day.</strong> It opens by default and answers the only question most days need: what am I doing now. Every other tab is there when you want a different slice of the same tasks.</p>
       <h4 style="margin-top:1rem;font-size:0.95rem;font-weight:700;">Key capabilities</h4>
       <ul>
-        <li>Six views: My Day, Task List, Kanban (by week), Projects, Capacity, and Recurring</li>
+        <li>Ten views: My Day, Approvals, Task List, Kanban (by week), Projects, Capacity, Recurring, Contractor Tasks, Meetings, and AI Agents</li>
         <li>Smart Daily Planner that slots tasks around calendar events and personal routines</li>
         <li>Google Calendar integration via a Google Apps Script proxy</li>
         <li>Automatic rescheduling of Kevin's overdue tasks to today on every load</li>
         <li>Team and personal identity switcher (each user sees their own tasks by default)</li>
         <li>Bulk operations: mark multiple tasks complete or reschedule them in one action</li>
         <li>Drag-and-drop Kanban board for scheduling project tasks across calendar weeks</li>
-        <li>Separate contractor jobs page (<code>jobs.html</code>) optimised for mobile use</li>
+        <li>Contractor Tasks tab: every open maintenance job, grouped by property, with live reassignment between Gary, Rob and Roy</li>
+        <li>Approvals tab: what the AI agents need a decision on, and what they finished once you gave it</li>
       </ul>
     </div>
   </div>
@@ -353,7 +355,7 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
             <td><span class="label-badge lb-red">Overdue</span></td>
             <td>0 (highest priority)</td>
             <td>Red</td>
-            <td>Past due date and not completed. Auto-rescheduled to today for Kevin on load.</td>
+            <td>Past due date and not completed. Auto-rescheduled to today for Kevin on load, unless it is a Some Day task or carries a Hard Deadline.</td>
           </tr>
           <tr>
             <td><span class="label-badge lb-amber">Today</span></td>
@@ -534,8 +536,10 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
         <li>Due date is before today</li>
         <li>Status is not "Completed"</li>
         <li><code>someDay</code> field is not set</li>
+        <li><strong>Hard Deadline</strong> is not ticked</li>
       </ul>
-      <p style="margin-top:0.5rem;">For each matching task it sets the due date to today. If the task has no <code>origDueDate</code> yet, it also saves the original due date to the <code>fldS2OR7oQKC7T1to</code> field. Patches are sent in batches of 10 with a 250 ms delay between batches to avoid rate limits.</p>
+      <p style="margin-top:0.5rem;">A hard deadline is a fact about the outside world &mdash; a court date, a filing window, a contractor's booked slot. Moving it would hide a missed commitment rather than manage it, so the task stays where it is and shows as overdue until you deal with it.</p>
+      <p style="margin-top:0.5rem;">For each matching task it sets the due date to today. If the task has no <code>origDueDate</code> yet, it also saves the original due date to the <code>fldS2OR7oQKC7T1to</code> field. Patches are sent in batches of 10 with a 250 ms delay between batches to avoid rate limits, and each one is checked: only the tasks Airtable actually accepted are counted or moved on screen.</p>
       <div class="info-box warn">
         <span class="ib-icon">&#x26A0;</span>
         <span>This runs silently on load. The My Day view shows a notice confirming how many tasks were rescheduled. It does not run for Mica or Ericamae.</span>
@@ -567,80 +571,48 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
     </div>
   </div>
 
-  <!-- 8. Contractor Jobs View -->
+  <!-- 8. Contractor Tasks Tab -->
   <div class="section" id="contractor">
-    <div class="section-title"><span class="icon">&#x1F477;</span> 8. Contractor Jobs View</div>
+    <div class="section-title"><span class="icon">&#x1F477;</span> 8. Contractor Tasks Tab</div>
+
+    <div class="info-box warn">
+      <span class="ib-icon">&#x26A0;</span>
+      <span><strong>There is no separate contractor page any more.</strong> <code>os/tasks/jobs.html</code> was deleted on 24 Apr 2026. Contractor work lives on the <strong>Contractor Tasks</strong> tab inside <code>os/tasks/index.html</code>, alongside every other view. Any link or bookmark to <code>jobs.html</code> is dead.</span>
+    </div>
 
     <div class="card">
       <div class="card-header">Purpose and access</div>
-      <p>The file <code>os/tasks/jobs.html</code> is a separate, mobile-optimised page for contractors. It shows each contractor only their own active, non-completed tasks. The interface is minimal and touch-friendly, with large tap targets (minimum 44 px height) and no complex views.</p>
-      <p style="margin-top:0.5rem;">Contractors: <strong>Gary</strong>, <strong>Roy</strong>, <strong>Rob</strong>. The same Airtable base and tasks table are used (<code>appnqjDpqDniH3IRl</code>, <code>tblqB8b22hKBL4PF1</code>). The contractor's name is used as the filter value for the Assignee field in the Airtable formula: <code>AND({Status}!="Completed", {Assignee}="{name}")</code>.</p>
-    </div>
-
-    <div class="wf-card">
-      <div class="wf-header">
-        <div class="wf-num">1</div>
-        <h3>First-time setup (contractor)</h3>
-      </div>
-      <div class="wf-body">
-        <ol class="steps">
-          <li>Open <code>os/tasks/jobs.html</code> on your mobile browser.</li>
-          <li>If the auth overlay appears, enter the Airtable PAT and tap <strong>Connect</strong>. The PAT is saved to <code>localStorage</code> (<code>_dlr_pat</code>).</li>
-          <li>The name picker shows: tap your name (Gary, Roy, or Rob). Your selection is saved to <code>localStorage</code> (<code>_task_contractor</code>).</li>
-          <li>Your active jobs load in priority and status order.</li>
-        </ol>
-      </div>
-    </div>
-
-    <div class="card">
-      <div class="card-header">Job card interactions</div>
-      <p>Each job appears as a card with the task name, due date, status badge, priority badge, and business badge. Tapping a card expands it to show:</p>
-      <ul>
-        <li>Description (if set)</li>
-        <li>Notes (existing notes from Airtable)</li>
-        <li>Time estimate (if set)</li>
-        <li>Attachments as tappable links (images show a thumbnail)</li>
-        <li>Two action buttons: <strong>Mark Complete</strong> and <strong>Add Note</strong></li>
-      </ul>
+      <p>Open <code>os/tasks/index.html</code> and click the <strong>Contractor Tasks</strong> tab in the view bar. It shows every open maintenance job across the portfolio, grouped by the property the job belongs to.</p>
+      <p style="margin-top:0.5rem;">Contractors: <strong>Gary Marsh</strong>, <strong>Rob Jackson</strong>, <strong>Roy Lavin</strong>. Same Airtable base and tasks table as the rest of the page (<code>appnqjDpqDniH3IRl</code>, <code>tblqB8b22hKBL4PF1</code>) &mdash; the tab is a filter over the tasks already loaded, so it needs no extra fetch and no separate login.</p>
       <div class="info-box tip">
         <span class="ib-icon">&#x2714;</span>
-        <span>Only one card can be expanded at a time. Tapping another card collapses the previous one and scrolls the new one into view.</span>
+        <span>Who a job belongs to is decided by the <strong>Assignee email</strong>, matched case-insensitively, not by the legacy Contractor single-select field. Anything assigned to a contractor is contractor work whatever that old field says. Emails are compared in lower case on purpose: Airtable does not guarantee the case of a collaborator email, and a "Gary@" versus "gary@" mismatch would hide jobs from the tab without any error.</span>
       </div>
     </div>
 
     <div class="card">
-      <div class="card-header">Contractor actions</div>
+      <div class="card-header">The sub-tabs across the top</div>
       <table class="label-table">
         <thead>
-          <tr><th>Action</th><th>What it does</th><th>API call</th></tr>
+          <tr><th>Sub-tab</th><th>What it holds</th></tr>
         </thead>
         <tbody>
-          <tr>
-            <td><strong>Mark Complete</strong></td>
-            <td>Sets the task status to "Completed" in Airtable. The card animates off screen (slide right, fade out) and is removed from the list. A success toast appears.</td>
-            <td>PATCH <code>{F.status}: { name: "Completed" }</code></td>
-          </tr>
-          <tr>
-            <td><strong>Add Note</strong></td>
-            <td>Opens a text area below the action buttons. Saving prepends a timestamped prefix <code>[Name - DD/MM/YYYY HH:MM]</code> to the new note text, appends it to any existing notes, and writes back to Airtable. The card re-renders to show the updated notes.</td>
-            <td>PATCH <code>{F.notes}: updatedNotes</code></td>
-          </tr>
-          <tr>
-            <td><strong>Refresh</strong> (header button)</td>
-            <td>Re-fetches all tasks from Airtable. The button shows a spinning icon while loading.</td>
-            <td>GET with same assignee filter</td>
-          </tr>
-          <tr>
-            <td><strong>Switch user</strong> (footer link)</td>
-            <td>Clears the saved contractor from localStorage and shows the name picker again.</td>
-            <td>No API call</td>
-          </tr>
+          <tr><td><strong>All</strong> (opens here)</td><td>Every contractor's open jobs plus the unassigned maintenance ones. A true superset, so its count always equals the other tabs added together.</td></tr>
+          <tr><td><strong>Gary Marsh / Rob Jackson / Roy Lavin</strong></td><td>Open, non-completed tasks assigned to that person. The number in brackets matches the same person's badge in the team bar at the top of the page.</td></tr>
+          <tr><td><strong>Unassigned</strong></td><td>Maintenance-ticket tasks with no contractor on them yet. The tab only appears when there is something in it.</td></tr>
         </tbody>
       </table>
+      <p style="margin-top:0.5rem;">Reassigning a job between contractors is live: the counts on every sub-tab update the moment the write lands.</p>
     </div>
 
     <div class="card">
-      <div class="card-header">Sort order (contractor view)</div>
+      <div class="card-header">What each row shows</div>
+      <p>Rows are grouped by property (the linked Rental Unit) and carry: Task &middot; Description &middot; Property &middot; Created &middot; Age &middot; Priority &middot; Status &middot; Attachments. Priority and Status are editable in place from the row itself.</p>
+      <p style="margin-top:0.5rem;">Where a job has no property linked, the page tries to match one from the task text against the known property names and offers it. Nothing is written until you accept it.</p>
+    </div>
+
+    <div class="card">
+      <div class="card-header">Sort order</div>
       <p>Tasks are sorted by <code>sortTasks()</code>: overdue first (regardless of stated status), then by status order (Overdue 0, Today 1, Approval 2, To do 3, Upcoming 4), then by priority order (Urgent 0, High 1, Project 2, Not Urgent 3), then by due date ascending.</p>
     </div>
   </div>
@@ -672,9 +644,9 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
             <td>Calls <code>setTeam(key)</code>. Filters all views to the selected person. Badge shows count of active non-someday tasks.</td>
           </tr>
           <tr>
-            <td>View tabs (My Day / Task List / Kanban / Projects / Capacity / Recurring)</td>
+            <td>View tabs &mdash; all ten: My Day, Approvals, Task List, Kanban, Projects, Capacity, Recurring, Contractor Tasks, Meetings, AI Agents</td>
             <td>View tab bar</td>
-            <td>Calls <code>switchView(view)</code> to show the selected view and hide all others.</td>
+            <td>Calls <code>switchView(view)</code> to show the selected view and hide all others. <strong>My Day</strong> is the one to start on. <strong>Approvals</strong> carries a count badge when the AI agents are waiting on a decision. <strong>Contractor Tasks</strong> is section 8. <strong>Meetings</strong> lists meetings pulled in from the calendar feed. <strong>AI Agents</strong> shows what each agent is waiting on and how accurate it has been.</td>
           </tr>
         </tbody>
       </table>
@@ -959,13 +931,21 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
           <tr><th>Key</th><th>Set by</th><th>Contents</th></tr>
         </thead>
         <tbody>
-          <tr><td><code>_dlr_pat</code></td><td>Auth flow (both pages)</td><td>Airtable Personal Access Token string.</td></tr>
+          <tr><td><code>_dlr_pat</code></td><td>Auth flow</td><td>Airtable Personal Access Token string.</td></tr>
           <tr><td><code>_task_user</code></td><td><code>selectIdentity()</code></td><td>JSON: <code>{ key, name, email }</code> for the selected team member.</td></tr>
           <tr><td><code>_task_routine</code></td><td><code>saveRoutineBlocks()</code></td><td>JSON array of routine block objects: <code>{ name, duration, preferred, fixed, order, rule? }</code>.</td></tr>
           <tr><td><code>_task_workconfig</code></td><td><code>saveWorkConfig()</code></td><td>JSON: <code>{ startHour, endHour, maxTaskHours }</code>.</td></tr>
-          <tr><td><code>_task_contractor</code></td><td><code>selectContractor()</code> (jobs.html)</td><td>Contractor key string: "gary", "roy", or "rob".</td></tr>
+          <tr><td><code>_task_capacity_&lt;key&gt;</code></td><td><code>setPersonCapacity()</code>, from the cog on the Capacity card</td><td>Weekly hours for ONE person, e.g. <code>_task_capacity_kevin</code>. Per browser, not shared &mdash; see section 3.</td></tr>
+          <tr><td><code>_task_starttimes_&lt;date&gt;</code></td><td>My Day timeline, when you set a block's start time</td><td>Start times for that one day, e.g. <code>_task_starttimes_2026-08-19</code>. Dated, so old ones are dead weight and safe to clear at any time.</td></tr>
+          <tr><td><code>_task_save_log_v1</code></td><td>The inline-edit save path</td><td>Recent write attempts, kept so a failed save can be seen after the toast has gone.</td></tr>
+          <tr><td><code>_slack_notified_tasks</code></td><td><code>runNotificationCatchup()</code></td><td>Task IDs already announced in Slack, so a reload does not re-notify.</td></tr>
+          <tr><td><code>gcal_proxy_key</code></td><td>Set by hand, once, per browser</td><td>Token the Google Calendar proxy requires. Without it the calendar returns nothing &mdash; see section 7.</td></tr>
         </tbody>
       </table>
+      <div class="info-box warn">
+        <span class="ib-icon">&#x26A0;</span>
+        <span><code>_task_contractor</code> is gone. It belonged to the deleted <code>jobs.html</code> page and nothing reads or writes it any more.</span>
+      </div>
     </div>
   </div>
 
@@ -1040,15 +1020,15 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
       </div>
       <div class="ts-item">
         <div class="ts-problem">Auto-reschedule ran but some overdue tasks were not rescheduled</div>
-        <div class="ts-solution">Auto-reschedule only runs for Kevin (key "kevin"). It skips tasks where <code>someDay</code> is true. Check that the signed-in user is Kevin and that the task's <code>someDay</code> field is not checked in Airtable.</div>
+        <div class="ts-solution">Auto-reschedule only runs for Kevin (key "kevin"). It skips two kinds of task: <code>someDay</code> tasks, and anything with <strong>Hard Deadline</strong> ticked &mdash; a hard deadline is a real-world commitment, so moving it would hide a miss rather than manage it. Check the signed-in user is Kevin, and check both of those fields on the task in Airtable. If a task meets every condition and still did not move, Airtable refused the write: the browser console logs which task and which status code, and the count on screen only ever includes the ones that landed.</div>
       </div>
       <div class="ts-item">
         <div class="ts-problem">Status change button does not update; page re-renders but old status shows</div>
         <div class="ts-solution">The PATCH request may have failed silently. Open the browser console and check for errors. Common cause: the PAT lacks write permission on the tasks table. Ensure the PAT has "create records, update records" scope on the base.</div>
       </div>
       <div class="ts-item">
-        <div class="ts-problem">Contractor jobs page (jobs.html) shows "Error loading" with an API error message</div>
-        <div class="ts-solution">The error message is displayed inside the task list area with a Retry button. Common causes: expired PAT, network failure, or invalid contractor name (name must match the Assignee field in Airtable exactly). Tap <strong>Retry</strong> to try again, or <strong>Switch user</strong> to re-select the contractor.</div>
+        <div class="ts-problem">A contractor's jobs are missing from the Contractor Tasks tab</div>
+        <div class="ts-solution">First: if you or the contractor are on a <code>jobs.html</code> link, that page was deleted on 24 Apr 2026 &mdash; use the <strong>Contractor Tasks</strong> tab in <code>os/tasks/index.html</code> instead. If the tab is open and a person's count reads zero, the job is matched on the Assignee <em>email</em>, not on the old Contractor field: check the task's Assignee is the contractor's real address (Gary <code>gkm.property.maintenance@outlook.com</code>, Rob <code>rjm320@hotmail.com</code>, Roy <code>roy.lavin1978@gmail.com</code>). A job with no contractor on it appears under <strong>Unassigned</strong> if it is a maintenance ticket.</div>
       </div>
       <div class="ts-item">
         <div class="ts-problem">Capacity view shows 0 hrs for a team member who has tasks</div>
@@ -1075,6 +1055,11 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
         </thead>
         <tbody>
           <tr>
+            <td><strong>1.4</strong></td>
+            <td>19 Aug 2026</td>
+            <td>Corrected against the live page after the daily drift sweep. Section 8 rewritten around the <strong>Contractor Tasks tab</strong>: the separate <code>jobs.html</code> page was deleted on 24 Apr 2026 and this SOP had been sending contractors to it for four months (finding 20260819-drift-monitor-220). The page has <strong>ten</strong> views, not six &mdash; Approvals, Contractor Tasks and Meetings were undocumented, and the SOP now says to start on My Day (finding 20260819-drift-monitor-222). Auto-reschedule also skips <strong>Hard Deadline</strong> tasks, which neither section 6 nor its troubleshooting entry mentioned (finding 20260819-drift-monitor-229). The localStorage table now lists all nine live keys, including the per-person capacity key, the dated start-times key and <code>gcal_proxy_key</code>, and drops the dead <code>_task_contractor</code> (finding 20260819-drift-monitor-230).</td>
+          </tr>
+          <tr>
             <td><strong>1.3</strong></td>
             <td>1 Aug 2026</td>
             <td>Added: adding an AI agent is now a tick box on the Team Members row (Is AI Agent), no naming convention and no code change. Spelled out exactly what reject does. Amendments in Slack are now a plain thread reply, no emoji. Approval posts carry the agent's actual output (new Agent Output field) so the work can be judged from a phone; your words are saved to Approval Feedback for the agent to act on. Added the AI Agents team filter, the AI badge in the Assignee column, and the ability to assign a task to an agent; Unassigned now means nobody at all.</td>
@@ -1087,7 +1072,7 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
           <tr>
             <td><strong>1.1</strong></td>
             <td>17 Apr 2026</td>
-            <td>Initial SOP created. Documents all six views, Smart Daily Planner, Google Calendar integration, auto-reschedule, contractor jobs view, all action buttons, field IDs, localStorage keys, and troubleshooting guidance.</td>
+            <td>Initial SOP created. Documented the six views of the day, Smart Daily Planner, Google Calendar integration, auto-reschedule, the contractor jobs page, all action buttons, field IDs, localStorage keys, and troubleshooting guidance.</td>
           </tr>
         </tbody>
       </table>

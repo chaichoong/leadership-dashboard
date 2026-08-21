@@ -101,6 +101,13 @@ const FIELD = {
     taskName:        'fldgFjGBw6bTKJFCD', // single line text
     description:     'fldRGhBQViKZKtkQ6', // richText
     status:          'fldx4qCw17UfrKpaN', // singleSelect
+    // Completion Date. Every path that moves a task OFF Completed must set
+    // this to null in the SAME write, and every path that moves it ON must
+    // stamp it. Missing here until 18 Aug 2026 (finding
+    // 20260818-prod-e2e-sweep-198): the PR #76 fix covered three files and
+    // this worker was a fourth, so a contractor saying "still working on it"
+    // left the task counted as completed work in every monthly figure.
+    completion:      'fldFOi1SwEKuJRmdN', // date
     priority:        'fldS21RwmwOqt71LI', // singleSelect — Urgent / Project / Not Urgent
     assignee:        'fldELMncVJYPDRJNc', // singleCollaborator
     properties:      'fldZKFvEpJ6NZeFKz', // multipleRecordLinks → Properties
@@ -1456,7 +1463,12 @@ async function handleStatusUpdate(sender, text, evt, threadTs, env, override) {
 // confirmation prompt. Each performs the actual Airtable write + reply.
 
 async function executeConfirmedComplete(env, plan, threadTs) {
-    await updateTask(env, plan.taskId, { [FIELD.status]: 'Completed' });
+    // Status and stamp move together, always. The Airtable automation that
+    // used to write the date is OFF; app code owns it.
+    await updateTask(env, plan.taskId, {
+        [FIELD.status]: 'Completed',
+        [FIELD.completion]: new Date().toISOString().slice(0, 10),
+    });
     const attachedCount = await maybeAppendAttachments(env, plan.taskId, plan.attachmentPlan);
     const firstName = (plan.actorName || '').split(' ')[0] || 'there';
     const attachLine = attachedCount > 0
@@ -1473,7 +1485,13 @@ async function executeConfirmedComplete(env, plan, threadTs) {
 }
 
 async function executeConfirmedInProgress(env, plan, threadTs) {
-    await updateTask(env, plan.taskId, { [FIELD.status]: 'Today' });
+    // Reopening MUST clear the stamp. A contractor marks a job done, then says
+    // "actually still on it" — without this the task sits open AND counts as
+    // completed work in the month it was first ticked.
+    await updateTask(env, plan.taskId, {
+        [FIELD.status]: 'Today',
+        [FIELD.completion]: null,
+    });
     const attachedCount = await maybeAppendAttachments(env, plan.taskId, plan.attachmentPlan);
     const attachLine = attachedCount > 0
         ? ` (📎 ${attachedCount} attachment${attachedCount > 1 ? 's' : ''} added)`

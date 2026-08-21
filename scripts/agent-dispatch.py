@@ -33,7 +33,14 @@ Subcommands:
   annotate TASKID --note STR  append a dated agent note to the task's Notes.
   intent   TASKID             record BEFORE dispatching a carry-out, so a
                               crash mid-action can never re-execute it blind.
-  complete TASKID             after the approved action has been carried out.
+  complete TASKID [--keep-open [--note STR]]
+                              after the approved action has been carried out.
+                              --keep-open records the carry-out in Notes and
+                              leaves Status alone, for an approval whose text
+                              says the task must stay open (a standing
+                              obligation, a chase, a thing due again). The run
+                              report must set "keepOpen": true on that action so
+                              verify checks the Notes record, not Completed.
   verify   --report PATH      the control. Exits 1, loudly, if there was work
                               and the run did none, if any action failed, or
                               if a claimed write did not actually land.
@@ -58,7 +65,9 @@ from zoneinfo import ZoneInfo
 # the send gate could not parse.
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from agent_email_format import (  # noqa: E402
+    CARRY_OUT_MARKER,
     CARRY_OUT_RE,
+    CARRY_OUT_TAIL_MAX,
     TIER1_BANNER,
     EmailFormatError,
     parse_output as parse_email_output,
@@ -84,25 +93,40 @@ TASKS = "tblqB8b22hKBL4PF1"
 # CARRY_OUT_RE is the regex the two renderers already parse with. One pattern,
 # so what is REQUIRED and what is READ can never drift apart —
 # tests/approval-summary.test.js holds the renderers to the same shape.
-CARRY_OUT_MARKER = "**Carrying this out will involve:**"
-# CARRY_OUT_RE is imported from agent_email_format above: the send path strips
-# exactly the line the submit path demands, and one pattern cannot drift from
-# itself.
+#
+# Both constants are IMPORTED from agent_email_format (see the import block
+# above), not defined here. On 18 Aug 2026 the line this file demands was being
+# emailed to recipients because the send path had no idea it existed
+# (20260818-agent-dispatch-204). Same rule as TIER1_BANNER: the string that
+# gets added lives in the same module as the code that strips it.
 
 # apvSummary shows no separate summary below this length: a short output is
 # readable at a glance and repeating it twice helps nobody. Demanding a closing
 # line there would refuse submits for no gain, so the mandate starts here.
 SUMMARY_MIN_CHARS = 280
 
-# What the approval box will show of the line. More than this and the line is
-# not a closing line — it is the middle of the document.
-SUMMARY_MAX_CHARS = 400
-
 LONDON = ZoneInfo("Europe/London")
 KEVIN_AIRTABLE_EMAIL = "kevin@runpreneur.org.uk"
 # Kevin's own Team Members row. Not an agent, so a task pointed here drops out
 # of the agent-linked population the queue works from — that is the point.
 KEVIN_REC_ID = "recHEt2VPYothaqTd"
+
+# The humans a task may be handed to, and nobody else.
+#
+# 20260819-agent-dispatch-238: `route` only accepts the 17 agent records and
+# `escalate` only ever points at Kevin, so an APPROVED action of the form
+# "reassign this to Mica" had no command that could carry it out. The task went
+# back round the queue every run with the approval standing and nothing moving.
+#
+# An allow-list rather than a free --to, because this command reassigns work
+# using an email address: an unchecked one silently points a real task at a
+# person who does not exist, and Airtable accepts it. Read live from Team
+# Members tblco0p2OnlLQVAX7 on 19 Aug 2026, not inferred.
+HUMANS = {
+    "kevin@runpreneur.org.uk": {"rec": KEVIN_REC_ID, "name": "Kevin Brittain"},
+    "micaa.work@gmail.com":    {"rec": "rec4b5MDoaxEC7WRE", "name": "Mica Albovias"},
+    "atentaerica@gmail.com":   {"rec": "recEvm9wgsEnoNVZh", "name": "Ericamae Atenta"},
+}
 
 # Field IDs — single source is js/config.js; drift-tested, never guess.
 AF = {
@@ -494,6 +518,13 @@ STATE_DIR = os.path.expanduser("~/knowledge-os/logs/agent-dispatch")
 INTENT_LEDGER = os.path.join(STATE_DIR, "carryout-intent.jsonl")
 
 
+# The machine-readable half of a keep-open carry-out. Written into Notes by
+# `complete --keep-open`, re-read from the LIVE record by verify. A sentence a
+# human could paraphrase would not survive as a control; this string is checked
+# verbatim, so changing it here changes both halves at once.
+CARRIED_OUT_MARK = "CARRIED OUT (task left open):"
+
+
 def ledger_append(task_id, event):
     os.makedirs(STATE_DIR, exist_ok=True)
     with open(INTENT_LEDGER, "a") as fh:
@@ -532,11 +563,60 @@ def carry_out_problem(output):
     tail = text[m.end():].strip()
     if not tail:
         return "its '%s' line says nothing" % CARRY_OUT_MARKER
-    if len(tail) > SUMMARY_MAX_CHARS:
-        return ("its '%s' line is not the CLOSING line — %d characters follow "
-                "it and the approval box shows only the first %d"
-                % (CARRY_OUT_MARKER, len(tail), SUMMARY_MAX_CHARS))
+    if len(tail) > CARRY_OUT_TAIL_MAX:
+        return ("its '%s' line is not the CLOSING line — keep what follows it "
+                "under %d characters; yours is %d. The approval box shows only "
+                "the first %d, so anything past that is invisible to Kevin"
+                % (CARRY_OUT_MARKER, CARRY_OUT_TAIL_MAX, len(tail),
+                   CARRY_OUT_TAIL_MAX))
     return ""
+
+
+# ─── AN OUTPUT THAT PROMISES A SEND MUST BE Correspondence ───────────
+#
+# 18 Aug 2026, finding 20260818-agent-dispatch-203. Tasks went in as
+# `--type Drafting` with a closing line saying the email would be sent from
+# Kevin's Gmail. Kevin read that line, approved it, and send-email.py then
+# refused the carry-out: "This script only sends Correspondence."
+#
+# The contract is free to fix at DRAFT time and expensive at carry-out time,
+# because by then Kevin has already made a decision on a promise the machine
+# cannot keep. So it is checked here, at submit, where the fix costs one retry.
+#
+# Deliberately matched on the CLOSING line only, not the whole document: an
+# analysis that discusses emailing somebody is not a promise to send one.
+SEND_LANGUAGE_RE = re.compile(
+    r"\b(?:"
+    r"send(?:s|ing)?\s+(?:the\s+|this\s+|an?\s+)?(?:email|e-mail|letter|reply|message)"
+    r"|email(?:s|ing)?\s+(?:it|the|this|them|him|her)"
+    r"|from\s+Kevin'?s\s+Gmail"
+    r"|sent\s+(?:from|to)\s+[^\s@]+@[^\s@]+"
+    r")\b", re.I)
+
+
+def send_promise_problem(output, task_type):
+    """Reason this output promises a send its Task Type cannot deliver.
+
+    Empty string means fine. Only the closing line is read, and only when the
+    type is not Correspondence — the type that send-email.py will accept.
+    """
+    if task_type == "Correspondence":
+        return ""
+    text = (output or "").strip()
+    m = None
+    for hit in CARRY_OUT_RE.finditer(text):
+        m = hit
+    if m is None:
+        return ""
+    closing = text[m.end():].strip()
+    if not closing or len(closing) > CARRY_OUT_TAIL_MAX:
+        return ""
+    found = SEND_LANGUAGE_RE.search(closing)
+    if not found:
+        return ""
+    return ("its closing line promises to send something (%r) but the Task Type "
+            "is %s, and scripts/send-email.py only sends Correspondence"
+            % (found.group(0), task_type or "(empty)"))
 
 
 def tier_match(patterns, *texts):
@@ -734,6 +814,43 @@ def cmd_escalate(args):
     print(json.dumps({"escalated": args.task, "to": "Kevin Brittain"}))
 
 
+def cmd_handover(args):
+    """Hand an approved task to a named human on the team.
+
+    The exit `route` and `escalate` did not cover. `route` takes agent records
+    only; `escalate` always means Kevin. An approved "reassign this to Mica"
+    therefore had nothing that could carry it out, so the task kept its standing
+    approval and came back round every run (20260819-agent-dispatch-238).
+
+    Status stays where it is — deliberately. The work is not done, it has just
+    changed hands, and marking it Completed would hide it from the person who
+    now owns it.
+    """
+    who = HUMANS.get((args.to or "").strip().lower())
+    if not who:
+        sys.exit(
+            f"ERROR: {args.to} is not a team member this command may hand work "
+            f"to. Allowed: {', '.join(sorted(HUMANS))}.\n"
+            "       An unchecked address points a real task at nobody and "
+            "Airtable accepts it without complaint."
+        )
+    stamp = datetime.now(LONDON).strftime("%d %b %Y")
+    reason = (args.reason or "").strip() or "approved reassignment"
+    t = get_task(args.task)
+    existing = t.get("fields", {}).get(AF["notes"], "") or ""
+    note = (f"[{stamp} — agent-dispatch] Handed over to {who['name']} "
+            f"({args.to}): {reason}")
+    patch_task(args.task, {
+        # The agent link goes. Leaving it would keep the task in the queue's
+        # agent-linked population and it would be worked again tomorrow.
+        AF["teamMember"]: [who["rec"]],
+        AF["assignee"]: {"email": args.to},
+        AF["notes"]: (existing + "\n\n" + note).strip(),
+    })
+    print(json.dumps({"handedOver": args.task, "to": args.to,
+                      "name": who["name"], "reason": reason}))
+
+
 def cmd_submit(args):
     if args.agent not in AGENTS:
         sys.exit(f"ERROR: {args.agent} is not one of the 17 AI agent records")
@@ -759,6 +876,19 @@ def cmd_submit(args):
             "       Kevin's approval box leads with that line. Without it the\n"
             "       summary is guessed from the first line of the report, which\n"
             "       is exactly what he asked to stop (11 Aug 2026)."
+        )
+
+    # Does the closing line promise a send this Task Type cannot deliver?
+    # Refused here, not discovered at carry-out after Kevin has approved it.
+    promise = send_promise_problem(output, args.type)
+    if promise:
+        sys.exit(
+            f"ERROR: refusing to submit {args.task} — {promise}.\n"
+            "       Either resubmit with --type Correspondence and the Agent\n"
+            "       Output in TO:/SUBJECT:/---/body form, or reword the closing\n"
+            "       line so it describes what Kevin's approval actually does.\n"
+            "       An approved action that cannot be carried out is worse than\n"
+            "       a refused one: the refusal arrives after the decision."
         )
 
     # A Correspondence submit is a promise that send-email.py can carry the
@@ -807,7 +937,7 @@ def cmd_submit(args):
     # queue classifier both gate on that field alone, and would have carried out
     # text Kevin never saw. The mirror image broke the redo path: a stale
     # 'Changes requested' re-queued the same task as a redo on every run.
-    patch_task(args.task, {
+    fields = {
         AF["agentOutput"]: output[:95000],
         AF["taskType"]: args.type,
         AF["status"]: "Approval",
@@ -822,7 +952,17 @@ def cmd_submit(args):
         # completed once and later resubmitted kept its old stamp and stayed in
         # every throughput and Completed Month figure as finished work.
         AF["completion"]: None,
-    })
+    }
+    # Tier 1 moves the APPROVER field too, not just the assignee. The Slack
+    # router reads Approver to decide whose channel the card lands in, so
+    # leaving it on Mica while the engine had already decided "Kevin only" put
+    # the two halves in disagreement — and the half that picks the channel was
+    # the one still saying Mica. Write the decision into the field the router
+    # reads. Never the reverse: a non-tier-1 submit leaves Approver alone,
+    # because Inbound Comms set it at creation and this is not that decision.
+    if is_tier1:
+        fields[AF["approver"]] = {"email": KEVIN_AIRTABLE_EMAIL}
+    patch_task(args.task, fields)
     print(json.dumps({"submitted": args.task,
                       "agent": AGENTS[args.agent]["name"],
                       "type": args.type, "tier1": is_tier1,
@@ -857,6 +997,37 @@ def cmd_complete(args):
         sys.exit(f"ERROR: refusing to complete {args.task} — outcome is "
                  f"'{t['outcome'] or 'empty'}', not an approval. Only "
                  "approved, carried-out work completes.")
+
+    # Carrying the action out and CLOSING the task are two different things.
+    #
+    # Until 13 Aug 2026 they were one. `complete` was the only success state, so
+    # an agent that had done exactly what Kevin approved had no way to say "done,
+    # but this stays open" — and two tasks whose approved text said DO NOT CLOSE
+    # were marked Completed anyway, with an apologetic note attached. The
+    # obligation was real and ongoing; the reminder for it was destroyed.
+    #
+    # --keep-open is that second state. It records the carry-out where Kevin can
+    # see it and leaves Status and Completion Date untouched, so the task stays
+    # in the queue it is meant to stay in. The agent decides from the approved
+    # text, which is the only place the instruction ever appears.
+    #
+    # Notes carries the marker rather than a new Airtable field: Notes already
+    # holds the agent's audit trail (see cmd_annotate) and needs no schema
+    # change, so this cannot be blocked on a base edit. CARRIED_OUT_MARK is the
+    # machine-readable half — verify re-reads the LIVE record for it, never
+    # trusting what the run claimed.
+    if args.keep_open:
+        stamp = datetime.now(LONDON).strftime("%d %b %Y")
+        detail = (args.note or "the approved action").strip()
+        mark = (f"[{stamp} — agent] {CARRIED_OUT_MARK} {detail}. "
+                "Left OPEN deliberately: the approval said so.")
+        existing = t["notes"] or ""
+        patch_task(args.task, {AF["notes"]: (existing + "\n\n" + mark).strip()})
+        ledger_append(args.task, "done")
+        print(json.dumps({"carriedOut": args.task, "keptOpen": True,
+                          "status": t["status"]}))
+        return
+
     patch_task(args.task, {
         AF["status"]: "Completed",
         AF["completion"]: now_iso(),
@@ -940,7 +1111,20 @@ def cmd_verify(args):
             continue
         kind = a.get("kind")
         if kind == "carry_out":
-            if live["status"] != "Completed":
+            # Two legitimate end states, and each is verified against the field
+            # that actually proves it. A keep-open carry-out that checked Status
+            # would alarm every time, and one that checked nothing would let a
+            # claimed action through with no evidence at all.
+            if a.get("keepOpen"):
+                if CARRIED_OUT_MARK not in (live["notes"] or ""):
+                    problems.append(
+                        f"{a['task']} claimed carried out and kept open, but "
+                        "its Notes carry no carry-out record — nothing proves "
+                        "the action happened")
+                elif live["status"] == "Completed":
+                    problems.append(
+                        f"{a['task']} was meant to stay open and is Completed")
+            elif live["status"] != "Completed":
                 problems.append(f"{a['task']} claimed carried out but Status "
                                 f"is '{live['status']}', expected 'Completed'")
         elif kind in ("redo", "new"):
@@ -967,6 +1151,23 @@ def cmd_verify(args):
             if to and to not in live["teamMemberIds"]:
                 problems.append(f"{a['task']} claimed routed to {to} but Team "
                                 f"Member is {live['teamMemberIds']}")
+        elif kind == "handover":
+            # A handover verifies against the HUMAN it named, so handed-over
+            # work reads green instead of alarming as an unfinished carry-out
+            # (20260819-agent-dispatch-238).
+            to = (a.get("to", "") or "").strip().lower()
+            who = HUMANS.get(to)
+            if not who:
+                problems.append(f"{a['task']} claimed handover to '{to}', "
+                                "which is not a team member")
+            elif who["rec"] not in live["teamMemberIds"]:
+                problems.append(f"{a['task']} claimed handed over to "
+                                f"{who['name']} but Team Member is "
+                                f"{live['teamMemberIds']}")
+            elif live["status"] == "Completed":
+                problems.append(f"{a['task']} was handed to {who['name']} but "
+                                "marked Completed — the work is not done, it "
+                                "changed hands")
 
     if problems:
         for p in problems:
@@ -992,6 +1193,13 @@ def main():
     e = sub.add_parser("escalate")
     e.add_argument("task")
 
+    h = sub.add_parser("handover",
+                       help="hand an approved task to a named human team member")
+    h.add_argument("task")
+    h.add_argument("--to", required=True,
+                   help="team email; one of " + ", ".join(sorted(HUMANS)))
+    h.add_argument("--reason", default="")
+
     s = sub.add_parser("submit")
     s.add_argument("task")
     s.add_argument("--agent", required=True)
@@ -1010,14 +1218,21 @@ def main():
 
     c = sub.add_parser("complete")
     c.add_argument("task")
+    # The approved text is the only place "do not close this" ever appears, so
+    # the agent that read it is the one that has to say so here.
+    c.add_argument("--keep-open", action="store_true",
+                   help="record the carry-out but leave Status untouched")
+    c.add_argument("--note", default="",
+                   help="what was carried out (goes into Notes with --keep-open)")
 
     v = sub.add_parser("verify")
     v.add_argument("--report", required=True)
 
     args = p.parse_args()
     {"queue": cmd_queue, "route": cmd_route, "escalate": cmd_escalate,
-     "submit": cmd_submit, "annotate": cmd_annotate, "intent": cmd_intent,
-     "complete": cmd_complete, "verify": cmd_verify}[args.cmd](args)
+     "handover": cmd_handover, "submit": cmd_submit, "annotate": cmd_annotate,
+     "intent": cmd_intent, "complete": cmd_complete,
+     "verify": cmd_verify}[args.cmd](args)
 
 
 if __name__ == "__main__":

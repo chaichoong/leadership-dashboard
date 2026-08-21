@@ -39,7 +39,37 @@ WEBHOOK_FILE = os.path.join(HOME, "knowledge-os/slack_webhook.txt")
 
 WINDOW_HOURS = 26
 
+# ─── WHAT "daily-ops FINISHED" LOOKS LIKE ────────────────────────────
+#
+# 17 Aug 2026 (finding 20260818-ceo-memory-sweep-215). daily-ops marked at
+# 06:07, then died at 07:59 when a huddle subagent stalled. Phases 3-9 never
+# ran: no task sweep, no drift file, no agent dispatch, no CEO memory sweep.
+# The 08:30 guard printed "healthy" because a start mark is all it looked for.
+# Kevin was told nothing for a full day.
+#
+# A start is not a run. The guard now asks a second question later in the
+# morning: did it FINISH? Two independent ways to answer yes, because one of
+# them is written by the component being checked and the other is not:
+#
+#   1. the end mark daily-ops phase 9 writes (note "end") — cheap, explicit;
+#   2. today's artefacts on disk — the reports phases 4 and 5 leave behind.
+#      Nothing new writes these. They are the evidence 17 Aug was missing, and
+#      they are what makes this check work on a run that died before it could
+#      possibly have written an end mark.
+#
+# Either one passes. Both absent, after the completion hour, alarms.
+DAILY_OPS_END_NOTE = "end"
+
+# 06:05 start, an hour or two expected. 11:00 London leaves generous room for a
+# slow morning while still beating Kevin to the question. Deliberately NOT the
+# same hour as the start check: a run in progress at 09:00 is normal.
+COMPLETION_HOUR_LONDON = 11
+
 _here = os.path.dirname(os.path.abspath(__file__))
+# Where phases 4 and 5 leave their reports. Env-overridable so the guard's
+# tests can point it at a fixture directory instead of the live repo.
+MONITORING_DIR = os.environ.get(
+    "MONITORING_DIR", os.path.join(os.path.dirname(_here), "monitoring"))
 _spec = importlib.util.spec_from_file_location("jq", os.path.join(_here, "job-queue.py"))
 jq = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(jq)
@@ -426,6 +456,10 @@ def guard(now_dt=None):
     Kevin noticed first. This is the same check pulled forward: silent when the
     mark exists, one loud message when it does not.
 
+    Since 18 Aug 2026 it asks a SECOND question from 11:00 London: did the run
+    finish? See DAILY_OPS_END_NOTE above — a start is not a run, and on 17 Aug
+    a start mark was all it took to report a dead morning as healthy.
+
     The scheduler's lastRunAt is deliberately NOT consulted. It was stamped that
     morning while nothing ran, which makes it an assertion by the component
     being checked. The phase-1 queue mark is written by the run itself doing
@@ -448,6 +482,7 @@ def guard(now_dt=None):
 
     today = now_ldn.strftime("%Y-%m-%d")
     started = False
+    finished = False
     for rec in read_jsonl_all(EVENTS):
         if rec.get("job") != "daily-ops":
             continue
@@ -467,11 +502,13 @@ def guard(now_dt=None):
             continue
         if local_day == today:
             started = True
-            break
+            # Phase 9 stamps a second mark noted "end". Keep scanning past the
+            # start mark rather than breaking, or the end mark is never seen.
+            if (rec.get("note") or "").strip().lower() == DAILY_OPS_END_NOTE:
+                finished = True
 
     if started:
-        print("guard: daily-ops marked today, healthy")
-        return 0
+        return guard_completion(now_ldn, today, finished)
 
     msg = (":rotating_light: *daily-ops has not started today* (%s, checked %s London).\n"
            "The scheduler may claim it ran — its stamp is not evidence, the phase-1 "
@@ -484,6 +521,61 @@ def guard(now_dt=None):
     # run-job.sh shouts lines starting ERROR:, giving a second alert path.
     print("\nERROR: daily-ops left no mark by %s London on %s"
           % (now_ldn.strftime("%H:%M"), today))
+    return 1
+
+
+def daily_ops_artefacts(today):
+    """(present, missing) of the reports a complete daily-ops leaves for today.
+
+    Independent of anything daily-ops asserts about itself: these are files
+    phases 4 and 5 write while doing the work. On 17 Aug 2026 both were absent
+    and the guard still said healthy, which is the whole reason this exists.
+    """
+    expected = ["e2e-sweep-%s.md" % today, "task-sweep-%s.md" % today]
+    present, missing = [], []
+    for name in expected:
+        path = os.path.join(MONITORING_DIR, name)
+        (present if os.path.exists(path) else missing).append(name)
+    return present, missing
+
+
+def guard_completion(now_ldn, today, finished):
+    """daily-ops STARTED today. Did it finish? Returns an exit code.
+
+    Silent before COMPLETION_HOUR_LONDON: a run still going at 09:00 is normal
+    and a guard that cries wolf gets ignored, which costs more than it saves.
+    """
+    if now_ldn.hour < COMPLETION_HOUR_LONDON:
+        print("guard: daily-ops marked today, still within its run window")
+        return 0
+
+    if finished:
+        print("guard: daily-ops marked and finished today, healthy")
+        return 0
+
+    present, missing = daily_ops_artefacts(today)
+    if not missing:
+        # No end mark, but every artefact is on disk. Most likely an older run
+        # that predates the phase-9 end mark. Evidence of work beats the
+        # absence of a stamp, so this is a pass — and it says why.
+        print("guard: daily-ops left no end mark but today's reports are all "
+              "present (%s) — treating as finished" % ", ".join(present))
+        return 0
+
+    msg = (":rotating_light: *daily-ops started but did not finish* (%s, checked "
+           "%s London).\n"
+           "It marked its start, then stopped. No phase-9 end mark, and %d of "
+           "today's reports are missing: %s.%s\n"
+           "Everything after the phase it died in never ran — no sweep, no "
+           "dispatch, no findings, no fix PR. On 17 Aug 2026 this exact failure "
+           "cost a full day and nothing alarmed. Open Claude Code in the "
+           "dashboard repo and say *run daily ops* to finish today."
+           % (today, now_ldn.strftime("%H:%M"), len(missing), ", ".join(missing),
+              (" Present: %s." % ", ".join(present)) if present else ""))
+    print(msg)
+    post_to_slack(msg)
+    print("\nERROR: daily-ops started on %s but left no end mark and no %s"
+          % (today, ", ".join(missing)))
     return 1
 
 

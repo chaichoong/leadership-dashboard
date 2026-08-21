@@ -30,10 +30,9 @@ FORMAT
     ---
     The body of the email, as many lines as needed.
 
-A tier-1 banner may sit above the headers. It is stripped before parsing and
-never reaches the email. So is the closing "Carrying this out will involve:"
-line: it is a note to Kevin about what approving does, not a sentence in the
-letter, and the recipient must never read it.
+A tier-1 banner may sit above the headers, and the mandatory "Carrying this
+out will involve:" closing line may sit below the body. Both are written for
+Kevin's approval box. Both are stripped here and never reach the email.
 
 Errors raise EmailFormatError. Callers decide whether that is a sys.exit (the
 send path) or a refused submit (the dispatch path). Strict on purpose: a
@@ -57,13 +56,28 @@ TIER1_BANNER = (
 )
 
 
-# The closing line every Agent Output must end with (agent-dispatch.py refuses a
-# submit without one). It is written for Kevin's approval box, and on a
-# Correspondence output it lands INSIDE the email body, so the send path has to
-# take it back out. Defined here, once, and imported by agent-dispatch.py: the
-# pattern that is REQUIRED and the pattern that is STRIPPED must never drift
-# apart, which is the same reason TIER1_BANNER lives here.
+# ─── THE MANDATORY CLOSING LINE ──────────────────────────────────────
+#
+# agent-dispatch.py REQUIRES every long Agent Output to close with this line,
+# so Kevin's approval box can lead with what the agent wants to do rather than
+# guessing. It is a label for KEVIN. It is not part of the email.
+#
+# It lives here, next to TIER1_BANNER, for exactly the same reason: on
+# 18 Aug 2026 (finding 20260818-agent-dispatch-204) the line was mandated at
+# submit time and then sent to the RECIPIENT, because the writer added it in
+# one file and nothing stripped it in the other. The string that gets demanded
+# is now the string that gets stripped.
+#
+# Do NOT solve this by exempting Correspondence from the closing line: the
+# approval box needs the summary.
+CARRY_OUT_MARKER = "**Carrying this out will involve:**"
 CARRY_OUT_RE = re.compile(r"\*{0,2}carrying this out will involve:?\*{0,2}", re.I)
+
+# What agent-dispatch.py's gate accepts as a CLOSING line: no more than this
+# many characters may follow the marker. Reused here so the body-strip removes
+# only what the gate would have called a closing line, and a marker quoted in
+# the middle of a long email stays put as body text.
+CARRY_OUT_TAIL_MAX = 400
 
 
 class EmailFormatError(Exception):
@@ -82,21 +96,28 @@ def strip_tier1_banner(output):
     return text.lstrip("\n").lstrip()
 
 
-def strip_carry_out_line(output):
-    """Remove the closing carry-out line and everything after it.
+def strip_carry_out_line(body):
+    """Remove the trailing "Carrying this out will involve:" line from a body.
 
-    The LAST occurrence wins. A body that quotes or discusses the phrase keeps
-    its text; only the real closing line goes. Removing from the start of that
-    line also takes any bullet or bold markup wrapping it.
+    The marker is a note to Kevin from the approval box, never something a
+    council, a solicitor or a prospect should read. Only the LAST occurrence is
+    removed, and only when it genuinely closes the text: if more than
+    CARRY_OUT_TAIL_MAX characters follow it, the marker is mid-document and the
+    text belongs to the email, so it stays. That is the same definition of
+    "closing line" agent-dispatch.py's submit gate enforces.
     """
-    text = output or ""
+    text = body or ""
     last = None
     for m in CARRY_OUT_RE.finditer(text):
         last = m
     if last is None:
-        return text
-    line_start = text.rfind("\n", 0, last.start())
-    return text[: 0 if line_start == -1 else line_start].rstrip()
+        return text.strip()
+    if len(text[last.end():].strip()) > CARRY_OUT_TAIL_MAX:
+        return text.strip()
+    # rstrip twice around the punctuation strip so a "---" or "**" divider left
+    # sitting above the marker goes with it, and .strip() at the end because
+    # this call replaced the plain body.strip() the parser used to do.
+    return text[:last.start()].rstrip().rstrip("*-— \t").strip()
 
 
 def parse_addresses(raw, field):
@@ -153,11 +174,11 @@ def parse_output(output):
         raise EmailFormatError("more than one FROM address")
     sender = senders[0] if senders else None
     subject = headers.get("SUBJECT", "").strip()
-    # Stripped here rather than at the call sites, so every path that renders or
-    # sends this email gets a body with no note-to-Kevin in it. A body that is
-    # nothing BUT the carry-out line now fails the empty-body check below, which
-    # is the right answer: there is no email to send.
-    body = strip_carry_out_line(body).strip()
+    # The approval-box marker is stripped in the SAME place as the tier-1
+    # banner: both are addressed to Kevin, neither is addressed to the
+    # recipient. Stripped before the empty-body check, so an output that is
+    # nothing BUT the marker is refused rather than sent as a blank email.
+    body = strip_carry_out_line(body)
 
     if not to:
         raise EmailFormatError("no TO recipient")

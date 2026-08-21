@@ -14,16 +14,10 @@ Usage
                     --detail "..." --fix "..." [--severity high]
     findings.py list [--status open] [--routine X] [--json]
     findings.py claim <id> --by queue-fixer
+    findings.py reopen <id> [--force] | findings.py reopen --stale
+    findings.py list --stale
     findings.py close <id> --outcome fixed|rejected|deferred --note "..."
-    findings.py reopen --stale [--lease-hours 12] [--dry-run]
-    findings.py reopen <id>
     findings.py count [--status open]
-
-A claim is a LEASE, not a transfer of ownership. A fixer run that claims findings
-and then dies used to keep them for ever: `list --status open` cannot see a
-claimed finding and nothing ever handed it back. Nine high-severity findings sat
-invisible for six days that way after a run died on 2026-08-14 (finding
-20260820-daily-ops-254). `reopen --stale` is what collects the expired leases.
 """
 
 import argparse
@@ -31,7 +25,7 @@ import json
 import os
 import sys
 import time
-from datetime import datetime, timedelta
+from datetime import datetime
 
 HOME = os.path.expanduser("~")
 FINDINGS = os.environ.get(
@@ -41,10 +35,20 @@ FINDINGS = os.environ.get(
 SEVERITIES = ["critical", "high", "medium", "low"]
 OPEN_STATES = ["open", "claimed"]
 
-# How long a claim holds a finding before `reopen --stale` takes it back. A fixer
-# run is capped at ten findings and finishes inside an hour; twelve hours means a
-# lease only ever expires because the run died.
-DEFAULT_LEASE_HOURS = 12
+# ─── A CLAIM THAT OUTLIVES ITS RUN ───────────────────────────────────
+#
+# 14 Aug 2026, finding 20260814-daily-ops-144. A fixer run claims a finding,
+# then dies — the Mac sleeps, an agent stalls, the context runs out. The
+# finding is now "claimed" for ever: `list --status open` cannot see it, no
+# run will ever pick it up again, and the only recovery was hand-editing the
+# append-only log. Findings went quiet without being fixed, which is worse
+# than a long queue because a long queue is visible.
+#
+# A claim is therefore a LEASE, not a transfer of ownership. Past this many
+# hours with no close, the finding goes back in the queue. Comfortably longer
+# than a real run (daily-ops takes an hour or two) and comfortably shorter
+# than a day, so a finding stranded this morning is back before tomorrow's run.
+STALE_CLAIM_HOURS = 12
 
 
 def iso():
@@ -98,12 +102,10 @@ def current_state():
                 state[fid]["claimed_by"] = rec.get("by")
                 state[fid]["claimed_at"] = rec.get("ts")
             elif rec.get("op") == "reopen":
-                # The lease expired. Hand the finding back to the queue and drop
-                # the dead run's ownership, so `claim` accepts it again.
                 state[fid]["status"] = "open"
-                state[fid]["claimed_by"] = None
-                state[fid]["claimed_at"] = None
-                state[fid]["reopened_at"] = rec.get("ts")
+                state[fid].pop("claimed_by", None)
+                state[fid].pop("claimed_at", None)
+                state[fid]["reopen_note"] = rec.get("note")
             elif rec.get("op") == "close":
                 state[fid]["status"] = rec.get("outcome", "closed")
                 state[fid]["close_note"] = rec.get("note")
@@ -113,6 +115,31 @@ def current_state():
 def next_id(routine):
     n = sum(1 for r in read_all() if r.get("op") == "add") + 1
     return "%s-%s-%03d" % (datetime.now().strftime("%Y%m%d"), routine[:24], n)
+
+
+def age_hours(ts, now=None):
+    """Hours since an ISO stamp. None when it cannot be read — never 0, because
+    an unreadable stamp must not silently look fresh."""
+    if not ts:
+        return None
+    try:
+        when = datetime.strptime(ts, "%Y-%m-%dT%H:%M:%SZ")
+    except (ValueError, TypeError):
+        return None
+    now = now or datetime.utcnow()
+    return (now - when).total_seconds() / 3600.0
+
+
+def is_stale_claim(rec, hours=STALE_CLAIM_HOURS, now=None):
+    """Is this finding claimed by a run that is never coming back?
+
+    A claim with no readable timestamp counts as stale. The alternative is to
+    treat it as fresh for ever, which is the exact bug being fixed.
+    """
+    if rec.get("status") != "claimed":
+        return False
+    age = age_hours(rec.get("claimed_at"), now)
+    return age is None or age >= hours
 
 
 def cmd_add(a):
@@ -131,6 +158,8 @@ def cmd_list(a):
     rows = [r for r in state.values()
             if (a.status is None or r["status"] == a.status)
             and (a.routine is None or r["routine"] == a.routine)]
+    if getattr(a, "stale", False):
+        rows = [r for r in rows if is_stale_claim(r, a.stale_hours)]
     rows.sort(key=lambda r: (SEVERITIES.index(r.get("severity", "low"))
                              if r.get("severity") in SEVERITIES else 9, r["ts"]))
     if a.json:
@@ -164,6 +193,58 @@ def cmd_claim(a):
     return 0
 
 
+def cmd_reopen(a):
+    """Put a finding back in the queue. Recovery for a run that died holding it.
+
+    Never rewrites history: like every other op this appends, so the record of
+    who claimed it and when survives the reopen.
+    """
+    state = current_state()
+    now = datetime.utcnow()
+
+    # An id AND --stale is a contradiction: one names a finding, the other says
+    # "whatever is abandoned". Silently honouring one of them hides the mistake.
+    if a.stale and a.id:
+        print("ERROR: give a finding id OR --stale, not both", file=sys.stderr)
+        return 1
+
+    if a.stale:
+        stale = [r for r in state.values() if is_stale_claim(r, a.stale_hours, now)]
+        for r in stale:
+            age = age_hours(r.get("claimed_at"), now)
+            why = ("no readable timestamp" if age is None
+                   else "%.1f hours" % age)
+            if not a.dry_run:
+                append({"op": "reopen", "id": r["id"], "ts": iso(),
+                        "note": a.note or ("claim by %s went stale after %s"
+                                           % (r.get("claimed_by", "?"), why))})
+            print("reopened %s (claimed by %s, %s)%s"
+                  % (r["id"], r.get("claimed_by", "?"), why,
+                     " [dry-run]" if a.dry_run else ""))
+        # Always a count, INCLUDING zero. A prose "No stale claims." reads fine
+        # to a human but a routine cannot act on it, and it makes a genuinely
+        # empty run indistinguishable from a query that returned nothing because
+        # it was broken. Findings coming back means an earlier run died.
+        print("reopened %d finding(s)" % len(stale))
+        return 0
+
+    if not a.id:
+        print("ERROR: give a finding id, or --stale", file=sys.stderr)
+        return 1
+    if a.id not in state:
+        print("ERROR: no finding %s" % a.id, file=sys.stderr)
+        return 1
+    if state[a.id]["status"] not in ("claimed",) and not a.force:
+        # Reopening a CLOSED finding is a real thing to want (a fix that did not
+        # hold) but it is not the accident this exists for, so it needs --force.
+        print("ERROR: %s is %s, not claimed. Use --force to reopen anyway."
+              % (a.id, state[a.id]["status"]), file=sys.stderr)
+        return 1
+    append({"op": "reopen", "id": a.id, "ts": iso(), "note": a.note})
+    print("reopened %s" % a.id)
+    return 0
+
+
 def cmd_close(a):
     state = current_state()
     if a.id not in state:
@@ -172,72 +253,6 @@ def cmd_close(a):
     append({"op": "close", "id": a.id, "ts": iso(),
             "outcome": a.outcome, "note": a.note})
     print("closed %s as %s" % (a.id, a.outcome))
-    return 0
-
-
-def parse_ts(value):
-    """Parse a queue timestamp. Returns None when it is missing or unreadable."""
-    if not value:
-        return None
-    try:
-        return datetime.strptime(value, "%Y-%m-%dT%H:%M:%SZ")
-    except (ValueError, TypeError):
-        return None
-
-
-def stale_claims(state, lease_hours=DEFAULT_LEASE_HOURS, now=None):
-    """Findings still claimed after their lease ran out, oldest claim first.
-
-    A claim with no readable timestamp counts as stale. Every real claim writes
-    one, so an unreadable value means a corrupt write, and leaving it out would
-    put the finding back in the invisible state this command exists to end.
-    """
-    now = now or datetime.utcnow()
-    cutoff = now - timedelta(hours=lease_hours)
-    rows = []
-    for rec in state.values():
-        if rec.get("status") != "claimed":
-            continue
-        ts = parse_ts(rec.get("claimed_at"))
-        if ts is not None and ts > cutoff:
-            continue
-        rows.append(rec)
-    rows.sort(key=lambda r: r.get("claimed_at") or "")
-    return rows
-
-
-def cmd_reopen(a):
-    state = current_state()
-    if a.id:
-        rec = state.get(a.id)
-        if rec is None:
-            print("ERROR: no finding %s" % a.id, file=sys.stderr)
-            return 1
-        if rec["status"] != "claimed":
-            print("ERROR: %s is %s, not claimed" % (a.id, rec["status"]),
-                  file=sys.stderr)
-            return 1
-        rows = [rec]
-        reason = "manual"
-    elif a.stale:
-        rows = stale_claims(state, a.lease_hours)
-        reason = "stale claim (lease %dh expired)" % a.lease_hours
-    else:
-        print("ERROR: pass a finding id or --stale", file=sys.stderr)
-        return 2
-
-    for rec in rows:
-        if not a.dry_run:
-            append({"op": "reopen", "id": rec["id"], "ts": iso(),
-                    "reason": reason, "was_claimed_by": rec.get("claimed_by"),
-                    "was_claimed_at": rec.get("claimed_at")})
-        print("%s%s claimed by %s at %s (%s)" % (
-            "would reopen " if a.dry_run else "reopened ", rec["id"],
-            rec.get("claimed_by") or "?", rec.get("claimed_at") or "?",
-            rec.get("severity", "?")))
-    # Always print the count, including zero: phase 1 reports this number, and
-    # findings coming BACK means a run died, which is worth saying out loud.
-    print("reopened %d" % len(rows))
     return 0
 
 
@@ -269,6 +284,9 @@ def main(argv=None):
     sp.add_argument("--status")
     sp.add_argument("--routine")
     sp.add_argument("--json", action="store_true")
+    sp.add_argument("--stale", action="store_true",
+                    help="only claims older than --stale-hours")
+    sp.add_argument("--stale-hours", "--lease-hours", type=float, dest="stale_hours", default=STALE_CLAIM_HOURS)
     sp.set_defaults(fn=cmd_list)
 
     sp = sub.add_parser("claim")
@@ -276,21 +294,24 @@ def main(argv=None):
     sp.add_argument("--by", required=True)
     sp.set_defaults(fn=cmd_claim)
 
+    sp = sub.add_parser("reopen", help="return a stuck finding to the queue")
+    sp.add_argument("id", nargs="?")
+    sp.add_argument("--stale", action="store_true",
+                    help="reopen every claim older than --stale-hours")
+    sp.add_argument("--stale-hours", "--lease-hours", type=float, dest="stale_hours", default=STALE_CLAIM_HOURS)
+    sp.add_argument("--force", action="store_true",
+                    help="reopen even a closed finding")
+    sp.add_argument("--dry-run", action="store_true",
+                    help="report what would reopen, write nothing")
+    sp.add_argument("--note", default="")
+    sp.set_defaults(fn=cmd_reopen)
+
     sp = sub.add_parser("close")
     sp.add_argument("id")
     sp.add_argument("--outcome", required=True,
                     choices=["fixed", "rejected", "deferred"])
     sp.add_argument("--note", default="")
     sp.set_defaults(fn=cmd_close)
-
-    sp = sub.add_parser("reopen")
-    sp.add_argument("id", nargs="?", help="reopen one claimed finding")
-    sp.add_argument("--stale", action="store_true",
-                    help="reopen every claim whose lease has expired")
-    sp.add_argument("--lease-hours", type=int, default=DEFAULT_LEASE_HOURS)
-    sp.add_argument("--dry-run", action="store_true",
-                    help="report what would be reopened without writing")
-    sp.set_defaults(fn=cmd_reopen)
 
     sp = sub.add_parser("count")
     sp.add_argument("--status")
