@@ -226,6 +226,15 @@ Kevin.
    2026 creditor lane). Training on that feeds the AI its own voice back and the loop tightens
    every round. Only train on text with a known human author. Person-to-person email from 2025
    and earlier is the safe corpus.
+12. **NEVER train on Kevin's LinkedIn history.** Measured 21 Aug 2026 across all 100 posts on
+   `/in/runpreneur`: every one is machine-written, all inside a single 4-to-6-month-old burst
+   followed by four months of silence. Ten posts open with the identical three words "In
+   business and"; 24 open with a "Day 1,9xx" formulation; 52 mention the running streak; the
+   average is 13.4 hashtags and the length sits in a machine-uniform 495 to 1,312 character
+   band. It is the strongest available example of rule 11's failure mode, not a voice source.
+   For contrast, Kevin's own outreach email runs to **four lines**, no hashtags, direct ask.
+   Against 137 prospecting sends and 0 replies, that contrast is worth testing before the copy
+   is rewritten again.
 
 ### What rule 1 does and does not mean
 
