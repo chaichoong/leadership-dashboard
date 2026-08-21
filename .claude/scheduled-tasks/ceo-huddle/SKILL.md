@@ -64,7 +64,7 @@ WHY THIS RUNS LOCALLY. The 09:00 brief is produced by a Cloudflare Worker (money
 
 STEPS
 
-0. CHECK THE CLOCK FIRST, before reading anything else. Run `TZ=Europe/London date`. The write is due by 08:50 London, no exceptions, because the worker reads the record at 09:00. This job is scheduled for 05:00 but it can start late if the Mac was asleep or a longer job ran ahead of it, so size the huddle to the time you actually have:
+0. CHECK THE CLOCK FIRST, before reading anything else. Run `TZ=Europe/London date`. **If it is Saturday or Sunday, stop here and report "weekend, no huddle".** The 09:00 worker never sends at the weekend by design, so a weekend stub row is never finished: on 9 and 16 Aug 2026 two such rows sat in the CEO Brief tab's history as "NOT FINISHED" and promised a 9am brief that could not come. Do not write a row, do not DM Kevin. On a weekday, the write is due by 08:50 London, no exceptions, because the worker reads the record at 09:00. This job is scheduled for 05:00 but it can start late if the Mac was asleep or a longer job ran ahead of it, so size the huddle to the time you actually have:
 
    - Before 07:30: full huddle. Up to seven departments.
    - 07:30 to 08:15: reduced huddle. Three departments only: dept-strategy plus the two whose lane the nearest deadline sits in.
@@ -110,7 +110,8 @@ STEPS
    - fldzLwBd3Mjg7rDxM Date = today's Europe/London date, YYYY-MM-DD
    - fldQDCAcd74Bb6mpY One Thing = max 250 characters
    - fld4O4EuxHzMWARV7 First Step = max 250 characters
-   - fldS7ZoGAS7sAJfJq Board Flags = one flag per line, "Surname: one line"
+   - fldS7ZoGAS7sAJfJq Board Flags = one flag per line, "Surname: one line". The surname must be one of the eleven seats: Keller, Hormozi, Belfort, Wickman, Jenyns, Crabtree, Cunningham, Lencioni, Kiyosaki, Bailey, DeMartini.
+   - fld9PQ10p8V4N8Y0U Handed Off = everything you dispatched to a worker agent, one per line, written `destination — the job in plain words` (for example `worker-writer — draft the follow-up email to the Sefton letting agent`). The 09:00 worker reads this field, merges in its own hand-offs, and shows Kevin the list under "Not yours today, handed off". If you dispatched it and did not write it here, Kevin never learns it happened and the work looks like it vanished. This field was missing from this step until 21 Aug 2026 even though ~/.claude/skills/huddle/SKILL.md has always required it.
    LEAVE Full Brief (fldPkiaWvmYAoyHEl) EMPTY. The worker keys on it: populated means the worker already ran and it will ignore your huddle. It also tells the ceo-brief-morning-check task whether the 09:00 brief actually fired.
    If a record already exists for today, PATCH it. Only POST when there is none. Two records for one day breaks the CEO Brief tab's read of the latest.
 
