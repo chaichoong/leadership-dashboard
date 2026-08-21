@@ -316,10 +316,11 @@ python3 scripts/loop-health.py
 
 It exits 1 rather than printing an all-clear if the read failed or no task
 anywhere links to an agent, so a broken query can never read as "nothing is
-stuck". If it exits 1, say so in the DM — do not report the loop as healthy.
+stuck". If it exits 1, the STUCK line reads "*STUCK: could not check*" plus the
+reason in plain words. Never "nothing has stalled" on a failed read.
 
-Put anything under **NOT MOVING** at the TOP of the message, above the phase
-lines, with the count and the FIRST THREE AS PRINTED. Do not re-sort them by
+Put anything loop-health prints under **NOT MOVING** into the DM's *STUCK*
+block, directly after NEEDS YOU, with the count and the FIRST THREE AS PRINTED. Do not re-sort them by
 age: the list is already ordered by how much each item needs someone, and the
 "agent has drafted nothing" rule deliberately carries no day count, so an age
 sort buries exactly the items that mean nothing has started. Kevin asked for this on
@@ -347,7 +348,8 @@ headings, in this order:
 *NEEDS YOU*            (at most 3; leave the heading out if none)
 1. {What it is, then the one action, in one sentence.}
 
-*STUCK: N*             (or "*STUCK: nothing has stalled*")
+*STUCK: N*             (or "*STUCK: nothing has stalled*", or
+                        "*STUCK: could not check* — {why}" when loop-health exited 1)
 • {task's plain name} — {waiting N days | nothing started}
   (the first three as loop-health printed them, record IDs removed)
 
@@ -365,7 +367,8 @@ Rules for the DM:
   approval, a signature, a payment, a call only he can make. Not things that are
   interesting. Not things an agent or Mica can do.
 - STUCK keeps the order loop-health printed, for the reason given above. Strip the
-  `rec...` IDs and any field names; keep the plain task name and the days.
+  `rec...` IDs and any field names; keep the plain task name and the days. If
+  loop-health exited 1, the heading is "could not check" and nothing is listed.
 - BROKEN is a count and plain names. No finding numbers, no PR numbers, no exit
   codes. The fix PR is "Fix waiting for your review"; the link is in the file.
 - Banned words and tokens: see the contract. If you cannot say it without a
