@@ -299,7 +299,10 @@ describe('agent-dispatch.py does not drift from config.js or approvals.js', () =
     });
 
     it('the worker still renders its own banner on the post', () => {
-      expect(APPROVALS).toMatch(/const warn = isKevinOnlyMatter\(/);
+      // Was `isKevinOnlyMatter(name + description)` until 13 Aug 2026; that
+      // could not see a tier-1 connection the agent found mid-work. See
+      // tests/approvals-tier1-routing.test.js.
+      expect(APPROVALS).toMatch(/const warn = isTier1Task\(t\)/);
       expect(APPROVALS).toMatch(/buildApprovalBlocks\(t, agent, warn\)/);
       expect(APPROVALS).toMatch(/if \(warn\) \{/);
       // The old wording told him an agent should not be preparing this at all.
