@@ -2613,10 +2613,10 @@ function openDrillDownTaskDetail(taskId){
       <label style="display:flex;align-items:center;gap:4px;font-size:11px;color:var(--danger);font-weight:600;min-width:auto;text-transform:none;letter-spacing:0"><input type="checkbox" ${t.hardDeadline?'checked':''} onchange="updateTaskField('${t.id}','hardDeadline',this.checked)">Hard Deadline</label>
     </div></div>
     <div class="field-row"><label>Time Estimate</label><div class="field-val"><select onchange="updateTaskField('${t.id}','timeEst',this.value);renderAll()"><option value="">-</option>${TIME_OPTIONS.map(o=>`<option value="${o}" ${t.timeEst===o?'selected':''}>${o}</option>`).join('')}</select></div></div>
-    <div class="field-row"><label>Priority</label><div class="field-val"><select id="drwPrioritySel" onchange="updateTaskField('${t.id}','priority',this.value);renderAll()"><option value="">-</option>${PRIORITY_OPTIONS.map(p=>`<option value="${p}" ${t.priority===p?'selected':''}>${p}</option>`).join('')}${t.priority==='High'?'<option value="High" selected>High (legacy)</option>':''}</select></div></div>
+    <div class="field-row"><label>Priority</label><div class="field-val"><select id="drwPrioritySel" onchange="updateTaskField('${t.id}','priority',this.value);renderAll()">${buildOptions(t.priority,['',...PRIORITY_OPTIONS])}</select></div></div>
     <div class="field-row"><label>Recurring</label><div class="field-val"><select onchange="updateTaskField('${t.id}','recurring',this.value);renderAll()">${RECUR_OPTIONS.map(r=>`<option value="${r}" ${t.recurring===r?'selected':''}>${r||'-'}</option>`).join('')}</select></div></div>
     <div class="field-row" style="flex-direction:column;align-items:stretch"><label style="display:flex;align-items:center;gap:8px">Description <button class="btn" style="padding:1px 8px;font-size:10px;text-transform:none;letter-spacing:0;font-weight:500" onclick="toggleDescExpand(this)">Expand</button></label><div class="field-val"><textarea id="drwDescTA" oninput="drwSaveText('${t.id}','description',this.value);updateDescLinks(this.value)" onblur="drwSaveText('${t.id}','description',this.value,true)" placeholder="Describe the task or the end result...">${escHtml(t.description)}</textarea></div>${extractDescLinks(t.description)}</div>
-    <div class="field-row"><label>Status</label><div class="field-val"><select onchange="updateTaskField('${t.id}','status',this.value);renderAll()">${STATUS_OPTIONS.map(s=>`<option value="${s}" ${t.status===s?'selected':''}>${s}</option>`).join('')}</select></div></div>
+    <div class="field-row"><label>Status</label><div class="field-val"><select onchange="updateTaskField('${t.id}','status',this.value);renderAll()">${buildOptions(t.status,STATUS_OPTIONS)}</select></div></div>
     <div class="field-row"><label>Business</label><div class="field-val"><select id="drwBusinessSel" onchange="updateTaskField('${t.id}','business',this.value);renderAll()"><option value="">-</option>${BUSINESS_OPTIONS.map(b=>`<option value="${b}" ${t.business===b?'selected':''}>${b}</option>`).join('')}</select></div></div>
     <div class="field-row"><label>Project</label><div class="field-val" id="drwProjectWrap">${renderProjectPicker(t)}</div></div>
     <div class="field-row" style="flex-direction:column;align-items:stretch"><label>Comments</label><div class="field-val drw-comments-wrap" data-task-id="${t.id}"><div style="color:var(--text-secondary);font-size:var(--fs-sm);padding:8px 0">Loading comments…</div></div></div>
@@ -2779,9 +2779,9 @@ function openTaskDrawer(taskId){
       <div class="field-row"><label>Hard Deadline</label><div class="field-val"><label style="display:inline-flex;align-items:center;gap:6px;font-size:var(--fs-sm);color:var(--danger);font-weight:600;cursor:pointer"><input type="checkbox" ${t.hardDeadline?'checked':''} onchange="updateTaskField('${t.id}','hardDeadline',this.checked);renderAll()" style="width:16px;height:16px;accent-color:var(--danger)">Flag as immovable (never auto-rescheduled)</label></div></div>
       <div class="field-row"><label>Time Estimate</label><div class="field-val"><select onchange="updateTaskField('${t.id}','timeEst',this.value);renderAll()"><option value="">-</option>${TIME_OPTIONS.map(o=>`<option value="${o}" ${t.timeEst===o?'selected':''}>${o}</option>`).join('')}</select></div></div>`
       }
-      <div class="field-row"><label>Priority</label><div class="field-val"><select id="drwPrioritySel" onchange="updateTaskField('${t.id}','priority',this.value);renderAll()"><option value="">-</option>${PRIORITY_OPTIONS.map(p=>`<option value="${p}" ${t.priority===p?'selected':''}>${p}</option>`).join('')}${t.priority==='High'?'<option value="High" selected>High (legacy)</option>':''}</select></div></div>
+      <div class="field-row"><label>Priority</label><div class="field-val"><select id="drwPrioritySel" onchange="updateTaskField('${t.id}','priority',this.value);renderAll()">${buildOptions(t.priority,['',...PRIORITY_OPTIONS])}</select></div></div>
       <div class="field-row"><label>Project</label><div class="field-val" id="drwProjectWrap">${renderProjectPicker(t)}</div></div>
-      <div class="field-row"><label>Status</label><div class="field-val"><select onchange="updateTaskField('${t.id}','status',this.value);renderAll()">${STATUS_OPTIONS.map(s=>`<option value="${s}" ${t.status===s?'selected':''}>${s}</option>`).join('')}</select></div></div>
+      <div class="field-row"><label>Status</label><div class="field-val"><select onchange="updateTaskField('${t.id}','status',this.value);renderAll()">${buildOptions(t.status,STATUS_OPTIONS)}</select></div></div>
       <div class="field-row"><label title="Used to score agent accuracy per task type">Task Type</label><div class="field-val"><select onchange="updateTaskField('${t.id}','taskType',this.value);renderAll()"><option value="">-</option>${TASK_TYPE_OPTIONS.map(o=>`<option value="${o}" ${t.taskType===o?'selected':''}>${o}</option>`).join('')}</select></div></div>
       ${(t.raisedByIds&&t.raisedByIds.length)||(t.teamMemberIds&&t.teamMemberIds.length)?`<div class="field-row"><label>AI agent</label><div class="field-val" style="font-size:var(--fs-sm);color:var(--text-secondary)">${escHtml(agentNamesFor(t))||'—'}</div></div>`:''}
       <div class="field-row"><label>Business</label><div class="field-val"><select id="drwBusinessSel" onchange="updateTaskField('${t.id}','business',this.value);renderAll()"><option value="">-</option>${BUSINESS_OPTIONS.map(b=>`<option value="${b}" ${t.business===b?'selected':''}>${b}</option>`).join('')}</select></div></div>
@@ -5407,10 +5407,28 @@ function getFilteredTasks(){
   return tasks;
 }
 
+// Build <option> markup that can never drop the value the record actually holds.
+//
+// Airtable single-selects outlive the arrays in this file. Status has carried
+// 'To do' and 'Current' since before STATUS_OPTIONS was written, and Priority
+// still has 'High'. A plain OPTIONS.map() renders no matching <option>, so the
+// browser falls back to selecting the FIRST one — the drawer showed 11 live
+// tasks as 'Today' when Airtable said 'To do', and one save wrote that wrong
+// value back. Nothing errors; the task just quietly changes status.
+//
+// Any single-select rendered from a hardcoded array goes through here.
+// Finding 20260809-drift-037.
+function buildOptions(current,options,blankLabel){
+  const optList=current&&!options.includes(current)?[...options,`${current}`]:options;
+  return optList.map(o=>{
+    const legacy=o&&!options.includes(o);
+    const label=o?(legacy?`${o} (legacy)`:o):(blankLabel||'-');
+    return `<option value="${escHtml(o)}" ${o===current?'selected':''}>${escHtml(label)}</option>`;
+  }).join('');
+}
 function inlineSelectCell(taskId,fieldKey,current,options,renderFn){
   // Preserve legacy values (e.g. priority="High") that are no longer offered
-  const optList=current&&!options.includes(current)?[...options,current]:options;
-  const opts=optList.map(o=>`<option value="${escHtml(o)}" ${o===current?'selected':''}>${escHtml(o||'-')}</option>`).join('');
+  const opts=buildOptions(current,options);
   // renderAll (not renderTasks) so the team filter counts + KPI tiles +
   // capacity view all update instantly when a row's status / priority /
   // assignee / etc. changes via the grid dropdowns. Otherwise completing

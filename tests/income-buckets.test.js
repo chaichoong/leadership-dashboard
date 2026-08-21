@@ -264,7 +264,13 @@ describe('Income buckets — category mapping', () => {
 });
 
 describe('Income buckets — what the grid shows', () => {
-  it('"In the pot" reads the last COMPLETED month, not the part-finished one', () => {
+  // Kevin's ruling, 15 Aug 2026 (second revision): TWO headline figures per pot.
+  // "In the pot" is locked at the end of the last completed month and does not move
+  // all month; "Right now" is the live balance, fluctuating day by day from both the
+  // money-in side (share of month-to-date net cash flow) and the spend side (as
+  // transactions reconcile). At the rollover the live figure becomes the locked one.
+  // Locked-only froze daily budgeting; live-only had no stable reference. Both.
+  it('locked "In the pot" holds still while live "Right now" moves with today\'s spend', () => {
     const s = loadEngine();
     const now = new Date();
     const key = (back) => {
@@ -277,14 +283,31 @@ describe('Income buckets — what the grid shows', () => {
       tx(s, { date: key(0) + '-05', amount: 1000, subId: 'recIncome' }),
     ];
     s.__setData(t, subRecords(s), [], null);
+    // Locked cell: accent-soft + semibold. Live cell: bg-subtle + semibold (the month
+    // columns also use bg-subtle, but with `color:` following, never `font-weight:`).
+    const lockedOf = (html) => {
+      const m = html.match(/background:var\(--accent-soft\);font-weight:var\(--fw-semibold\);color:[^"]*">([^<]*)</);
+      return m && m[1];
+    };
+    const liveOf = (html) => {
+      const m = html.match(/background:var\(--bg-subtle\);font-weight:var\(--fw-semibold\);color:[^"]*">([^<]*)</);
+      return m && m[1];
+    };
     const el = { innerHTML: '' };
-    s.renderBuckets(el, [{ name: 'Dreams', pct: 50, start: key(2) + '-01', opening: 0 }]);
-    // Last completed month holds £500; the current month would make it £1,000. The
-    // headline must agree with the column the table highlights.
+    const bucket = [{ name: 'Dreams', pct: 50, start: key(2) + '-01', opening: 0 }];
+    s.renderBuckets(el, bucket);
     expect(el.innerHTML).toContain('In the pot');
-    // The lead cell carries the highlighted background; it must hold £500, not £1,000.
-    const lead = el.innerHTML.match(/background:var\(--accent-soft\);font-weight:var\(--fw-semibold\);color:[^"]*">([^<]*)</);
-    expect(lead && lead[1]).toBe('£500');
+    expect(el.innerHTML).toContain('Right now');
+    // Locked = completed month's £500. Live = that plus the current month's £500.
+    expect(lockedOf(el.innerHTML)).toBe('£500');
+    expect(liveOf(el.innerHTML)).toBe('£1,000');
+    // THE GUARD: a spend synced TODAY moves the live figure and ONLY the live figure.
+    t.push(tx(s, { date: key(0) + '-15', amount: -300, subId: 'recTravel' }));
+    s.__setData(t, subRecords(s), [], null);
+    const el2 = { innerHTML: '' };
+    s.renderBuckets(el2, bucket);
+    expect(lockedOf(el2.innerHTML)).toBe('£500');
+    expect(liveOf(el2.innerHTML)).toBe('£700');
   });
 
   it('the balance is the headline row and the workings sit underneath it', () => {
