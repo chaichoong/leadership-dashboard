@@ -30,16 +30,9 @@ FORMAT
     ---
     The body of the email, as many lines as needed.
 
-A tier-1 banner may sit above the headers. It is stripped before parsing and
-never reaches the email.
-
-agent-dispatch.py also MANDATES a closing "Carrying this out will involve:"
-line on every submit — it is what Kevin's approval box leads with. That line is
-a note to Kevin about the action, not a sentence in the letter, so it is
-stripped from the body here for the same reason the banner is. Before 19 Aug
-2026 it was not, which meant the only route to sending five approved creditor
-and Companies House emails would have posted the marker verbatim to the
-recipient (finding 20260819-agent-dispatch-237).
+A tier-1 banner may sit above the headers, and the mandatory "Carrying this
+out will involve:" closing line may sit below the body. Both are written for
+Kevin's approval box. Both are stripped here and never reach the email.
 
 Errors raise EmailFormatError. Callers decide whether that is a sys.exit (the
 send path) or a refused submit (the dispatch path). Strict on purpose: a
@@ -63,6 +56,30 @@ TIER1_BANNER = (
 )
 
 
+# ─── THE MANDATORY CLOSING LINE ──────────────────────────────────────
+#
+# agent-dispatch.py REQUIRES every long Agent Output to close with this line,
+# so Kevin's approval box can lead with what the agent wants to do rather than
+# guessing. It is a label for KEVIN. It is not part of the email.
+#
+# It lives here, next to TIER1_BANNER, for exactly the same reason: on
+# 18 Aug 2026 (finding 20260818-agent-dispatch-204) the line was mandated at
+# submit time and then sent to the RECIPIENT, because the writer added it in
+# one file and nothing stripped it in the other. The string that gets demanded
+# is now the string that gets stripped.
+#
+# Do NOT solve this by exempting Correspondence from the closing line: the
+# approval box needs the summary.
+CARRY_OUT_MARKER = "**Carrying this out will involve:**"
+CARRY_OUT_RE = re.compile(r"\*{0,2}carrying this out will involve:?\*{0,2}", re.I)
+
+# What agent-dispatch.py's gate accepts as a CLOSING line: no more than this
+# many characters may follow the marker. Reused here so the body-strip removes
+# only what the gate would have called a closing line, and a marker quoted in
+# the middle of a long email stays put as body text.
+CARRY_OUT_TAIL_MAX = 400
+
+
 class EmailFormatError(Exception):
     """An Agent Output that does not meet the Correspondence contract."""
 
@@ -79,48 +96,28 @@ def strip_tier1_banner(output):
     return text.lstrip("\n").lstrip()
 
 
-# ─── THE MANDATORY CLOSING LINE ──────────────────────────────────────
-#
-# agent-dispatch.py refuses any submit over SUMMARY_MIN_CHARS that does not end
-# with this line, and the approval renderers read it back out. Defined HERE, in
-# the shared contract, for the same reason TIER1_BANNER is: the string that is
-# required, the string that is read, and the string that is stripped must be one
-# string. agent-dispatch.py imports these rather than declaring its own.
-CARRY_OUT_MARKER = "**Carrying this out will involve:**"
-CARRY_OUT_RE = re.compile(r"\*{0,2}carrying this out will involve:?\*{0,2}", re.I)
-
-# What the approval box shows of the line. agent-dispatch.py refuses a submit
-# where more than this follows the marker, because then it is not a closing
-# line. The same number bounds what may be stripped here, so a body that merely
-# DISCUSSES carrying something out — with paragraphs after it — is left alone.
-SUMMARY_MAX_CHARS = 400
-
-
 def strip_carry_out_line(body):
-    """Remove a trailing 'Carrying this out will involve:' line from a body.
+    """Remove the trailing "Carrying this out will involve:" line from a body.
 
-    Only a CLOSING line goes: the LAST match, and only when at most
-    SUMMARY_MAX_CHARS of text follows it. That is the exact shape
-    agent-dispatch.py enforces at submit, so what is mandated is what is
-    removed. A mention earlier in a long body is body text and stays — this
-    function decides what the email is, not what it says.
+    The marker is a note to Kevin from the approval box, never something a
+    council, a solicitor or a prospect should read. Only the LAST occurrence is
+    removed, and only when it genuinely closes the text: if more than
+    CARRY_OUT_TAIL_MAX characters follow it, the marker is mid-document and the
+    text belongs to the email, so it stays. That is the same definition of
+    "closing line" agent-dispatch.py's submit gate enforces.
     """
     text = body or ""
     last = None
     for m in CARRY_OUT_RE.finditer(text):
         last = m
-    if not last:
+    if last is None:
         return text.strip()
-    if len(text[last.end():].strip()) > SUMMARY_MAX_CHARS:
+    if len(text[last.end():].strip()) > CARRY_OUT_TAIL_MAX:
         return text.strip()
-    kept = text[:last.start()].rstrip()
-    # A horizontal rule written to fence the note off goes with the note. Only
-    # a line made ENTIRELY of rule characters, so a real sentence never loses
-    # its final dash.
-    lines = kept.split("\n")
-    while lines and re.fullmatch(r"[-_*—–\s]*", lines[-1]) and lines[-1].strip():
-        lines.pop()
-    return "\n".join(lines).strip()
+    # rstrip twice around the punctuation strip so a "---" or "**" divider left
+    # sitting above the marker goes with it, and .strip() at the end because
+    # this call replaced the plain body.strip() the parser used to do.
+    return text[:last.start()].rstrip().rstrip("*-— \t").strip()
 
 
 def parse_addresses(raw, field):
@@ -177,6 +174,10 @@ def parse_output(output):
         raise EmailFormatError("more than one FROM address")
     sender = senders[0] if senders else None
     subject = headers.get("SUBJECT", "").strip()
+    # The approval-box marker is stripped in the SAME place as the tier-1
+    # banner: both are addressed to Kevin, neither is addressed to the
+    # recipient. Stripped before the empty-body check, so an output that is
+    # nothing BUT the marker is refused rather than sent as a blank email.
     body = strip_carry_out_line(body)
 
     if not to:

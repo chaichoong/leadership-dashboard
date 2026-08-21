@@ -947,7 +947,14 @@
                 // section in case its first paint raced ahead of them (filter
                 // chips showed only 'All' and rows said 'No business').
                 try { renderStrategicKpis(); } catch (e) { console.warn('[loadDashboard] strategic KPI re-render failed:', e); }
+                // When this data was actually true. The P&L header reads it so cached
+                // data is visibly cached rather than silently old.
+                window.dashDataAsOf = Date.now() - (cached.ageMs || 0);
                 renderDashboard(d.accounts, d.costs, d.tenancies, d.transactions, d.rentalUnits, d.tenants);
+                // The P&L renders off allTransactions but only on tab switch, so a
+                // refresh replaced the data underneath an open P&L and left the old
+                // numbers on screen. No-op unless the P&L is the visible tab.
+                try { if (typeof refreshPnLIfActive === 'function') refreshPnLIfActive(); } catch (e) { console.warn('[loadDashboard] P&L re-render failed:', e); }
                 document.getElementById('dashboard').style.display = 'block';
                 document.getElementById('loadingOverlay').style.display = 'none';
                 setRefreshingIndicator(true, cached.ageMs);
@@ -1016,7 +1023,11 @@
                     localStorage.removeItem('cfv_' + t.id + '_returned');
                 }
             });
+            // Fresh from Airtable: as-of is now.
+            window.dashDataAsOf = Date.now();
             renderDashboard(accounts, costs, tenancies, transactions, rentalUnits, tenants);
+            // Same reason as the cache path above: an open P&L must follow the data.
+            try { if (typeof refreshPnLIfActive === 'function') refreshPnLIfActive(); } catch (e) { console.warn('[loadDashboard] P&L re-render failed:', e); }
 
             // Save fresh data to cache for next instant reload
             saveDashCache({ accounts, costs, tenancies, transactions, rentalUnits, tenants, categories, subCategories, businesses });
