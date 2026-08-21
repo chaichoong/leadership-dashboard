@@ -277,23 +277,51 @@ INVARIANTS = [
         # nothing and the run FAILS with "asserting nothing", which is the
         # truthful report. It starts passing the day the formula is repaired.
         #
-        # THE FIX IS KEVIN'S CALL, NOT THE SWEEP'S. Repairing it means either
-        # rewriting the Amount Out (GBP) formula to reflect the real outflow
-        # (the 'Amount Out (GBP) from Transaction' rollup, fldptiq0PPQ6Qr2J8,
-        # already exists and looks like the intended source) or replacing
-        # Category with a writable single select seeded from the formula so
-        # agents can correct a miscoding. A formula edit is the exact change
-        # class that blanked Report Amount on 8,667 transactions in Jul 2026,
-        # so it does not get made unreviewed. Finding 20260813-agent-dispatch-121.
+        # FIXED 21 Aug 2026 on Kevin's explicit instruction, after this check had
+        # sat red and failed the whole sweep. What was done and why:
+        #
+        #   Amount Out (GBP):  0                        -> IF(ABS({Amount})>0, ABS({Amount}), 0)
+        #   Amount In  (GBP):  IF({Amount},{Amount},0)  -> 0
+        #
+        # BOTH had to change. Fixing only Amount Out would have made this control
+        # pass while every task stayed coded AR, because Category tests Amount In
+        # FIRST and that branch matched everything. The sweep would have gone green
+        # with the bug fully intact -- the exact fake-pass this file exists to stop.
+        #
+        # The rollup the earlier note nominated as 'the intended source'
+        # (fldptiq0PPQ6Qr2J8) was MEASURED before being trusted, and returns 0 on
+        # every task including ones with Reconciled TX Count = 1. Not fit for
+        # purpose; that route was abandoned rather than shipped blind.
+        #
+        # WHY PAYABLES-ONLY. All 263 money-carrying tasks were reviewed. 257 are
+        # unambiguously bills (contractors, HMRC, councils, utilities, bailiffs).
+        # An intermediate attempt keyed direction off a Tenant/Tenancy link and was
+        # WRONG: 43 of the 49 it coded AR were contractor bills at a tenanted
+        # property. No field separates the remaining 6 'Tenant/Tenancy Agreement'
+        # tasks, and name-matching would make a string load-bearing. Those 6 carry a
+        # rent figure as REFERENCE data, and rent income is already counted from
+        # Tenancies (Expected Monthly Rent), so coding them AR would DOUBLE-COUNT
+        # rent. Tasks is a payables ledger. The base's own parallel 'AP *' fields
+        # already said so (AP Category is a literal), which the generic set now matches.
+        #
+        # Verified after the change: 263/263 read AP, 0 have a non-zero Amount In,
+        # and 200 no-Amount tasks were checked to confirm a blank record still yields
+        # no category and no figure. That blank check is mandatory here: this is the
+        # edit class that blanked Report Amount on 8,667 txns in Jul 2026.
+        #
+        # The violation below now uses the EN DASH. Category emits U+2013 and this
+        # formula was written with a plain hyphen, so it could never have matched a
+        # single record: a guard that could not fire, under a control that could not
+        # pass. Finding 20260813-agent-dispatch-121.
         "name": "task-category-ap-branch-is-reachable",
         "table": TASKS,
-        "incident": "Aug 2026 — Amount Out (GBP) is the literal formula 0, so Tasks.Category can never return AP and every payable is coded as a receivable",
-        "asserts": "the AP branch of Category is reachable: some task has a non-zero Amount Out (GBP)",
+        "incident": "Aug 2026 — Amount Out (GBP) was the literal formula 0, so Tasks.Category could never return AP and all 263 payables were coded as receivables",
+        "asserts": "the AP branch of Category is reachable, and no task carrying an outflow is coded AR",
         # No per-record violation exists — see the note above. The assertion is
         # carried entirely by the control.
-        "violation": "AND(ABS({Amount Out (GBP)}) > 0, {Category} = 'AR - Variable')",
+        "violation": "AND(ABS({Amount Out (GBP)}) > 0, {Category} = 'AR – Variable')",
         "control": "ABS({Amount Out (GBP)}) > 0",
-        "control_means": "tasks with a real money-OUT figure (empty means Amount Out (GBP) is still hardcoded to 0 and no task can ever be coded AP)",
+        "control_means": "tasks with a real money-OUT figure (empty means Amount Out (GBP) has been reverted to a constant and no task can be coded AP again)",
         "fields": ["Task Name", "Amount", "Category", "Amount Out (GBP)", "Amount In (GBP)"],
     },
     {
