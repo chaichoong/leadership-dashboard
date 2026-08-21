@@ -95,12 +95,14 @@ same dedupe rule, so neither can duplicate the other. Read the JSON it prints:
 
 - **Exit code 2 (CONTROL FAILED)** — it read the tenancies but not one qualified
   as a UC check, or the table came back empty. A field ID, the pay-type label or
-  the eligible payment statuses have drifted. Slack-DM **Kevin** (U08HW8F1MA8)
-  that UC checks are no longer being booked and why, then stop. Do not continue
-  to the notify step; there is nothing trustworthy to notify about.
+  the eligible payment statuses have drifted. File a finding (severity high,
+  `--touches-code`) and return "UC checks are no longer being booked: <why>" to
+  daily-ops so it lands on the report's BROKEN line, then stop. Do NOT DM Kevin
+  (Slack contract, 21 Aug 2026). Do not continue to the notify step; there is
+  nothing trustworthy to notify about.
 - **`duplicates` is not empty** — two open tasks for one tenancy in one rent
   month. That is what drift between this script and `js/arrears.js` looks like.
-  Include it in the Kevin DM at STEP 3. Never quietly tidy it away.
+  File it as a finding at STEP 3. Never quietly tidy it away.
 - **Otherwise** — note `created` and `updated` and carry on.
 
 ## STEP 1 — Ask the script what is due
@@ -122,9 +124,9 @@ It prints JSON. The fields that matter:
 
 - **Exit code 2 (CONTROL FAILED):** the task naming convention has drifted and
   the query no longer matches anything. Do NOT treat this as "nothing due".
-  Slack-DM **Kevin** (U08HW8F1MA8), not Mica: the UC notifier is blind because
-  the task names in Airtable no longer start with "UC verification", and
-  `js/arrears.js` needs checking. Then stop.
+  File a finding (severity high, `--touches-code`) and return "UC checks are
+  blind: task names no longer start with UC verification, js/arrears.js needs
+  checking" to daily-ops for the BROKEN line. Do not DM Kevin or Mica. Then stop.
 - **`due_count` is 0:** nothing to do. Send no message. End the run quietly.
   Kevin does not want a daily "all clear".
 - **`due_count` is 1 or more:** go to STEP 3.
@@ -139,12 +141,18 @@ lines, not seven pings.
 
 Mica is the only recipient of the working list. Kevin does not get a copy, by his
 own instruction on 1 Aug 2026: chasing UC is her call to make and he does not want
-routine work in his DMs. He hears from this routine in exactly three cases, all of
-them faults — a CONTROL FAILED at STEP 0 or STEP 2, or duplicate tasks.
+routine work in his DMs. This routine NEVER DMs Kevin (Slack contract, 21 Aug
+2026). Its faults, a CONTROL FAILED at STEP 0 or STEP 2 or duplicate tasks, are
+filed as findings and reach him as a count on the Daily Ops BROKEN line.
 
 If `duplicate_tenants` here (or `duplicates` from STEP 0) is not empty, send a
-second, separate one-line DM to **Kevin** (U08HW8F1MA8) naming the tenant and the
-record IDs. Keep it out of Mica's message; it is a build defect, not her job.
+finding instead of a DM. First run `python3 scripts/findings.py list` and look
+for an open finding titled "Duplicate UC verification tasks"; if one exists, do
+nothing more (on 20 and 21 Aug 2026 the same four pairs reached Kevin as two
+fresh DMs). If none, file one: `--routine uc-check-slack-notifier --severity
+medium --title "Duplicate UC verification tasks" --touches-code`, naming the
+tenants and record IDs in `--detail`. Keep it out of Mica's message; it is a
+build defect, not her job. Never DM Kevin about it.
 
 ## STEP 4 — Record what you sent, and only what you sent
 

@@ -161,6 +161,47 @@ The version-controlled original of these instructions is docs/daily-ops-routine.
 - **Never say a phase passed unless you saw it pass.** A phase you skipped is reported as skipped, not as clean.
 - Do NOT take the queue lock anywhere in this run. You are the only Claude routine; the lock exists for the short shell jobs and holding it for two hours would block them.
 
+## What Kevin's Slack receives (the contract, 21 Aug 2026)
+
+Kevin asked for this after a week in which nine different automated message
+types hit his Slack, most of them engineering logs: phase-by-phase run reports
+with record IDs and finding numbers, a separate DM each from the production
+sweep, prospecting, the UC duplicate check and the fixer, a jobs digest full of
+"skipped, 1380 min late, limit 300", raw stack traces, and 26 "assigned to
+you" cards in one second for tasks already sitting in #agent-approvals. His
+words: it needs to be decipherable by a 13-year-old. Every sender follows this.
+If you are about to send a Slack message that is not on this list, do not send
+it. Put it in your report file or file a finding.
+
+**On a normal day, exactly two messages:**
+
+1. The 09:00 CEO brief (`money-daily-worker.js`). Owns "what to do today".
+2. The Daily Ops DM from phase 9. Owns "what needs you, what is stuck, what broke".
+
+**Only when it applies:**
+
+- Approval cards in #agent-approvals (and Mica's DM for her lane). They ARE the work.
+- Mica's Universal Credit list. Mica only, by Kevin's instruction of 1 Aug 2026.
+- Agent-dispatch escalation: a task taken off the agents because preparing it
+  would mean acting for Kevin in the legal matter.
+- The 09:30 guard: "daily-ops has not started" or "started but did not finish".
+- Drive auth BROKEN.
+- The CEO huddle's late-path brief, when the 09:00 brief missed.
+- A correction to an earlier message, only when it changes what Kevin should do.
+- Production DOWN, from the sweep.
+
+**Never a separate DM from:** the production sweep (other than DOWN),
+prospecting, the UC check's defect findings, the fixer, drift, task hygiene,
+the memory sweep, the CEO brief check. Each returns its lines to daily-ops,
+which folds them into the one report. A fault that is not urgent goes to
+`scripts/findings.py` and is counted in the report's BROKEN line.
+
+**Reading level:** a 13-year-old on a phone. Banned from any message to Kevin:
+record IDs (`rec...`), finding numbers, PR numbers, exit codes, phase numbers,
+field names, script names, and the words "invariant", "control", "subagent",
+"dispatch". If a sentence needs one of those to make sense, it belongs in the
+report file, not in Slack.
+
 ## Phase 1 — Readiness
 
 **First, before anything else: has today already finished?**
@@ -291,8 +332,48 @@ If NOT MOVING is zero, say that explicitly — "nothing has stalled" is the
 sentence that earns the trust, and a silent omission reads identically to the
 check never having run.
 
-Then one Slack DM to Kevin. Lead with anything that needs him. Then, per phase, one line: ran clean / found N things / failed and why / skipped and why.
+**Write the full report file first:** `monitoring/daily-ops-{date}.md`. Everything
+that used to go in the DM goes here: run time, one line per phase, counts, record
+IDs, finding numbers, PR links, what each subagent returned. Phase 8 commits it
+tomorrow with the other reports. The file is the record; the DM is the summary.
 
-State plainly how long the whole run took. If any phase did not run, say which and why. Never present a partial run as a complete one.
+Then ONE Slack DM to Kevin, following the contract above. The reader is a
+13-year-old on a phone. **At most 12 lines.** This exact shape, these exact
+headings, in this order:
+
+```
+*Daily Ops, {weekday} {day} {month}.* {Ran fine. | N things broke.}
+
+*NEEDS YOU*            (at most 3; leave the heading out if none)
+1. {What it is, then the one action, in one sentence.}
+
+*STUCK: N*             (or "*STUCK: nothing has stalled*")
+• {task's plain name} — {waiting N days | nothing started}
+  (the first three as loop-health printed them, record IDs removed)
+
+*BROKEN: N things*     (or "*Nothing broke.*")
+{Name them in plain words, one line: "the brain publisher, the Fylde summons
+agent. The fixer has them." or "Fix waiting for your review."}
+
+Everything else ran.   (or: "{Phase name} did not run: {why, plainly}.")
+Detail: monitoring/daily-ops-{date}.md
+```
+
+Rules for the DM:
+
+- NEEDS YOU is only for things Kevin himself must do today: a decision, an
+  approval, a signature, a payment, a call only he can make. Not things that are
+  interesting. Not things an agent or Mica can do.
+- STUCK keeps the order loop-health printed, for the reason given above. Strip the
+  `rec...` IDs and any field names; keep the plain task name and the days.
+- BROKEN is a count and plain names. No finding numbers, no PR numbers, no exit
+  codes. The fix PR is "Fix waiting for your review"; the link is in the file.
+- Banned words and tokens: see the contract. If you cannot say it without a
+  record ID or a script name, it goes in the file.
+- Never present a partial run as a complete one. A phase that did not run is
+  named on the "Everything else ran" line instead, with the reason in plain words.
+- Corrections: if you later learn something in this DM was wrong AND it changes
+  what Kevin should do, send one short follow-up saying what changed. No
+  follow-ups for anything else.
 
 Finally, delete `~/knowledge-os/logs/daily-ops-progress.json` so tomorrow starts fresh.

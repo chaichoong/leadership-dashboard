@@ -428,8 +428,23 @@ def build(now_dt=None):
     for job, behind in timed_out:
         alarm = True
         lines.append(":hourglass: *%s* — gave up waiting behind %s." % (job, behind))
-    for job, reason in skipped:
-        lines.append(":fast_forward: %s — skipped, %s" % (job, reason))
+    # One line for every skip, not one line per skip. The per-job version read
+    # "skipped, due 2026-08-19 22:40, 1380 min late, limit 300" ten times over and
+    # Kevin called it gobbledygook (21 Aug 2026). The detail is still in
+    # queue-events.jsonl for whoever is fixing it.
+    if skipped:
+        lines.append(":fast_forward: %d skipped because the Mac woke too late for "
+                     "them to be useful: %s"
+                     % (len(skipped), ", ".join(sorted(j for j, _ in skipped))))
+    # Every job skipped and nothing ran is one fault, not ten shrugs. Seen 20 and
+    # 21 Aug 2026: "0 ran, 10 skipped" two mornings running, each skip "1380 min
+    # late", and nobody read it as an outage because each line looked routine.
+    if skipped and not ran and not failed and len(skipped) >= 3:
+        alarm = True
+        lines.append(":rotating_light: *Every job was skipped and none ran.* That is "
+                     "one problem, not %d: either the Mac slept through the whole "
+                     "day or the queue's idea of the time is wrong. The fixer needs "
+                     "to look at job-queue.py and the wake times." % len(skipped))
     if ran:
         lines.append("Worked: " + ", ".join(sorted(ran)))
 
@@ -438,7 +453,7 @@ def build(now_dt=None):
         lines.append("")
         lines.append("*Findings waiting for the fixer: %d* (%d high or critical)"
                      % (len(open_findings), len(crit)))
-        for f in crit[:5]:
+        for f in crit[:3]:
             lines.append("  • [%s] %s — %s" % (f.get("severity"), f["routine"], f["title"]))
         if len(open_findings) > len(crit):
             lines.append("  • plus %d medium or low" % (len(open_findings) - len(crit)))
