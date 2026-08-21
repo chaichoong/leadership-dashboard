@@ -107,6 +107,7 @@
         </div>
 
         <div class="section">Leadership</div>
+        <div class="navitem" data-page="ceo-brief" data-module="ceo_brief"><span class="ico">☀️</span> CEO Brief <span class="dot"></span></div>
         <div class="navitem" data-page="dashboard" data-module="command_centre"><span class="ico">📊</span> Leadership Dashboard <span class="dot"></span></div>
         <div class="navitem" data-page="os-strategy" data-module="strategy"><span class="ico">🎯</span> Objective &amp; Strategy <span class="dot"></span></div>
         <div class="navitem" data-page="os-bplan" data-module="plan_builder"><span class="ico">📋</span> Plan Builder <span class="dot"></span></div>
@@ -148,6 +149,7 @@
     const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { auth: { persistSession: true, storageKey: '_dlr_sb_app' } });
 
     const PAGES = {
+      'ceo-brief': 'ceo-brief-supabase.html?v=1',
       dashboard: 'index-supabase.html?v=6',
       'os-strategy': 'os/strategy/index-supabase.html',
       'os-bplan': 'os/business-plan-builder/index.html',
@@ -171,7 +173,7 @@
 
     // Clean URL slug per page (the segment shown in the address bar, e.g. /crm).
     const SLUG = {
-      dashboard: 'dashboard', 'os-strategy': 'strategy', 'os-bplan': 'plan-builder',
+      'ceo-brief': 'ceo-brief', dashboard: 'dashboard', 'os-strategy': 'strategy', 'os-bplan': 'plan-builder',
       'ai-brain': 'ai-brain', tasks: 'tasks', crm: 'crm', operations: 'operations',
       comms: 'comms', systemisation: 'systemisation', money: 'money', accounts: 'accounts',
       pnl: 'pnl', wealth: 'wealth', 'os-team': 'team', sitemap: 'sitemap', skills: 'skills',
@@ -219,7 +221,7 @@
     // safe: if the fetch fails, base + opt-out features stay visible and add-ons
     // stay hidden.
     const BASE_MODULES = ['strategy','tasks','team','systemisation','ai_assistant','dod_queue','crm'];
-    const OPT_OUT_MODULES = ['plan_builder','command_centre'];
+    const OPT_OUT_MODULES = ['plan_builder','command_centre','ceo_brief'];
     async function applyEntitlements() {
       const enabled = new Set([...BASE_MODULES, ...OPT_OUT_MODULES]);
       try {

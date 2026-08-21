@@ -1,191 +1,249 @@
-# CEO Brief: client onboarding runbook
+# CEO Brief: the client onboarding path
 
-Written 21 Aug 2026 by reverse-engineering Kevin's own CEO Brief. This is the checklist for
-standing up the same brief for a new Operations Director client. It lists what we need from
-the client, what we build, and how we prove it works. It is not a plan; the plan is
-MASTER-PLAN.md.
+Every step a new client goes through to get their own AI CEO, board of directors, worker
+agents and daily brief, from the signed order to the fifth morning brief. Written so Mica
+can run it without Kevin, and so Kevin can see every question before a client ever sees it.
 
-Visual map of how the brief works: `ceo-brief-workflow.html` (linked from the CEO Brief tab).
+The questions in phase 3 are printed from `js/ceo-brief-defaults.mjs` (`SETUP_QUESTIONS`).
+That file is what the setup screen renders and what the robot reads, so this document,
+the screen and the robot cannot drift. `tests/ceo-brief-onboarding-doc.test.js` fails if a
+question exists in the code and not here.
 
-## 1. What the client gets
+Visual map of the pipeline: `ceo-brief-workflow.html`. Product decision: MASTER-PLAN §13,
+21 Aug 2026 (the brief is the "daily direction" layer of the Command Centre, base, not an
+add-on; the AI Brain is an input, never the home).
 
-Every weekday at 9am London they receive one Slack message from their AI CEO, and the same
-brief appears on the CEO Brief tab of their dashboard:
+## The shape in one screen
 
-- The ONE thing to do today and a ten-minute first step.
-- Why it wins today.
-- What to ignore today.
-- What was handed off, and to whom (a named AI agent or a named team member).
-- At most two board flags from the directors.
-- Their money traffic light and the safe-to-act figure.
-
-Behind it sits an AI CEO persona, a board of department heads (each a named author voice with
-directors as lenses), and worker agents that do the handed-off work. The huddle runs before
-the brief; the brief leads with the board's conclusion.
-
-## 2. The components, and what each one needs
-
-| Stage | Component in Kevin's build | Per-client equivalent | Inputs it needs |
+| Phase | Who does it | How long | Output |
 |---|---|---|---|
-| Brain | Drive vault `00 AI Context` (founder-profile, current-priorities, Decisions/, People/, Knowledge/) | A client brain folder or Supabase tenant knowledge store | Founder profile, priorities, red lines, key people, decisions log |
-| Board | `~/.claude/agents/od-ceo.md` + 11 `dept-*.md` + 5 `worker-*.md` + `GUARDRAILS.md` | Per-tenant persona records (data-shaped, see `docs/ai-org-chart-spec.md` "Productised end state") | CEO voice, department list, lead author per seat, lanes, vetoes, non-negotiables |
-| Book context | Audiobook pipeline into `Learning & Reference/Transcripts` and `Knowledge/frameworks-library.md` | Shared OD framework library (already harvested) plus client-specific sources | Nothing from the client unless they want their own sources mined |
-| Huddle | daily-ops phase 2 (`.claude/scheduled-tasks/ceo-huddle/SKILL.md`, `~/.claude/skills/huddle/SKILL.md`) | A scheduled agent run per tenant, writing a stub row | Their open tasks, their quarter targets, their calendar |
-| Brief writer | Cloudflare Worker `money-confidence-daily` (`scripts/slack-automation/money-daily-worker.js`) | Same worker, parameterised per tenant | Secrets listed in section 4 |
-| Money light | `loadAndCompute()` reading Accounts, Tenancies, Costs, Transactions | Their finance tables (Supabase) or a simpler safe-to-act input | Bank balances, expected income, expected costs |
-| Tasks | Airtable Tasks table `tblqB8b22hKBL4PF1` (Task Name, Assignee, Due Date, Status, Priority, Task Type) | Their Tasks table | A tasks source with those six fields, and a Status value meaning "finished agent work awaiting approval" |
-| Store | Airtable `CEO Briefs` table `tblIxbzDSOCI5hqJn` | Per-tenant briefs table | None; we create it |
-| Delivery | Slack bot DM to one user, looked up by email | Their Slack workspace, or email/WhatsApp if no Slack | A Slack workspace with the bot installed and the recipient's email |
-| Display | `js/ceo-brief.js` tab, reads by field ID, four health checks | Same tab in the client app | None |
-| Watchdog | daily-ops phase 7.2 (`ceo-brief-morning-check`) | Same check per tenant | None |
+| 0. Sale closes | Client + Kevin | done before this starts | Paid order, signed terms |
+| 1. Kick-off call | Client + Mica (Kevin optional) | 45 minutes | The answers marked CALL below, the three hated jobs |
+| 2. Provision | Mica, in the CRM | 15 minutes | Workspace, login, CEO Brief page visible |
+| 3. Setup screen | Client (alone, async), Mica checks | 30 to 40 minutes for the client | Config saved, readiness panel green |
+| 4. Dry run | Mica | 10 minutes | A real brief generated, not sent; wording checked with the client |
+| 5. Go live | Mica flips the switch | 1 minute | First brief the next weekday at the client's chosen hour |
+| 6. Five-day acceptance | Mica + client | 5 working days | Five briefs, health strip green, client confirms the first step was genuinely theirs |
+| 7. Quarterly refresh | Client, nudged by the brief | 5 minutes a quarter | New quarter context |
 
-## 3. What we need FROM the client (intake list)
+## Phase 0: what the client has already done before we start
 
-Collect these on the onboarding call or the intake form. Nothing here needs a phone call from
-the client afterwards.
+- Bought the base plan (the CEO Brief ships with every plan; it is an opt-out, not an add-on).
+- Received the welcome email and the set-password link (`create-client` function sends both
+  via GoHighLevel).
+- Filled the public intake form (`onboarding.html`). Those answers (name, business, team,
+  bank accounts, targets, thresholds) land in `onboarding_submissions` and are pre-read by
+  Mica before the call. Nothing the client typed there is asked twice: Mica pre-fills the
+  setup screen from them in phase 2.
 
-### 3a. Identity and voice (feeds the CEO persona and the brain)
+## Phase 1: the kick-off call (45 minutes, Mica leads)
 
-1. Founder name, business name, what the business sells, to whom, at what price.
-2. The one-line mission and the 12-month target (revenue, clients, or whatever they score by).
-3. This quarter's targets and theme, as two or three sentences. This becomes `QUARTER_CONTEXT`
-   and is the ONLY authority on priorities in the prompt. Refresh it every quarter.
-4. Non-negotiables and red lines: income floor, protected time (family, training, health),
-   anything that must never be automated or published.
-5. Founder wheelhouse: what only they should do (decisions, approvals, signatures, payments,
-   client-facing moments) and what they never want to see (admin, chasing, paperwork).
-6. Working hours and the time they want the brief. Default 9am local. The worker gates on
-   Europe/London today; a client in another zone needs the gate parameterised.
+Agenda, in order. Everything captured here is typed into the client's setup screen during
+the call or straight after, under the CALL-tagged questions in phase 3.
 
-### 3b. The board (feeds the department agents)
+1. Five minutes. What the brief is: one message every weekday morning, one thing to do, a
+   ten-minute first step, what was handed to others. Show `ceo-brief-workflow.html` on
+   screen, section 1 only.
+2. Ten minutes. The three hated jobs. "Name the three jobs you do every week that you would
+   pay to never do again. Which of those follows the same steps every time?" Written into
+   the intake notes; this picks the first worker agent (existing §6 step, unchanged).
+3. Ten minutes. The board. Walk the eleven seats on the setup screen. Ask: "Any seat you do
+   not want? Any author or mentor you would rather hear in a seat?" Tick or rename live.
+4. Five minutes. Sensitive flag. "Anything sensitive we should be extra careful with in
+   writing: disputes, legal, partners?" Record yes or no only. Details never go into any
+   system.
+5. Ten minutes. Connections, done together on screen:
+   - Where tasks live (Tasks page in the app, or an Airtable base we connect).
+   - Money light: none for now, or a manual figure, or later through the Finance add-on.
+   - Delivery: Slack webhook created together (Slack, Apps, Incoming Webhooks, choose the
+     channel or DM, copy the address into the secret field), or email, or page only.
+   - Calendar: the client pastes their private ICS address into the secret field (Google
+     Calendar, Settings, the calendar, "Secret address in iCal format"). Never emailed.
+6. Five minutes. What happens next: they finish the setup screen alone, Mica runs a dry
+   run, they approve the wording, the switch goes on.
 
-7. Which departments they want seated. Default set: Strategy, Marketing, Sales, Operations,
-   Systemisation, Finance, Legal and Compliance, People, Productivity, Mindset. Wealth is
-   optional.
-8. For each seat, the author or mentor whose voice they want. If they have no preference, use
-   Kevin's defaults (Keller, Hormozi, Belfort, Wickman, Jenyns, Crabtree, Cunningham, Lencioni,
-   Bailey, DeMartini, Kiyosaki) and the shared framework library already covers them.
-9. Any books, courses or mentors of their own to mine into the brain (optional; each one goes
-   through transcript-to-brain).
+Rule for the call: nothing here needs the client to make a phone call afterwards, and no
+credential is ever spoken or emailed; secrets go into the two secret fields only.
 
-### 3c. People and agents (feeds the delegation order)
+## Phase 2: provisioning (Mica, 15 minutes)
 
-10. Team members by name and role, and what each may be handed. The CEO delegates AI first,
-    then a named human, then the founder. A blank list means everything not AI-shaped reaches
-    the founder.
-11. Which work types the AI agents may do without approval on day one. Default: none. Reading
-    and drafting are always allowed; sending, publishing, paying and signing are always gated.
-    This is the trust ramp: the client moves the gears, nothing auto-promotes.
+Each step names the button or file.
 
-### 3d. Data sources (feeds the gather step)
+1. CRM, Clients tab, "Create client account" (`create-client` function): sends the invite,
+   creates the workspace with the 8 base modules on. The CEO Brief page is an opt-out base
+   feature (`ceo_brief` in `OPT_OUT_MODULES`), so it is visible with no extra toggle.
+2. Confirm the client can sign in and sees "CEO Brief" at the top of the sidebar
+   (`supabase-app.html`, page `ceo-brief-supabase.html`).
+3. Open the client's CEO Brief page, Setup tab, and pre-fill step 1 and step 3 from the
+   intake form answers (name, business, what it sells, targets, act-below and ask-above
+   thresholds inform the income floor line). Save.
+4. If the tasks source is Airtable: store the client's Airtable token as a worker secret
+   (`wrangler secret put <NAME>` on `ceo-brief-tenants`) and type that secret's NAME into
+   the "Airtable token reference" field. The token itself never enters the page.
+5. Leave step 8 (the go-live switch) OFF.
 
-12. Tasks: where their open work lives. We need six fields per task: name, owner, due date,
-    status, priority, type. If they have no task system, the Tasks OS in the app is the source.
-13. Money: bank accounts to read (via the app's Fintable or Supabase feed), expected monthly
-    income lines, expected monthly cost lines. Without these the brief runs with no money
-    light and says so.
-14. Calendar: a private ICS address for the founder's calendar (optional). Google Calendar
-    gives one under Settings, Integrate calendar, Secret address in iCal format.
-15. Slack: workspace name and the founder's Slack email. They install the OD bot (needs
-    `chat:write`, `users:read`, `users:read.email`). If no Slack, pick email delivery and
-    note the tab becomes the primary surface.
+One-time platform steps, done once ever, not per client: migration `0043_ceo_brief.sql`
+run in the Supabase SQL editor; `manage-client` redeployed; the worker
+`workers/ceo-brief-tenants` deployed with its three secrets. See the worker README.
 
-### 3e. Approvals (one-time, done by the client themselves)
+## Phase 3: the setup screen, every question
 
-16. Slack bot install approval.
-17. Calendar ICS address pasted into the secure intake field (never into chat or email).
-18. Bank feed consent if the money light is wanted.
+The client opens CEO Brief, Setup. Eight steps. A dot marks a required answer. A chip on
+each question says who answers it: **You** (the client, alone), **With us on the call**
+(typed during phase 1), **We set this** (Mica, never the client).
 
-## 4. What WE build (setup checklist)
+### Step 1: Who you are
 
-Tick in order. Each step names the file or record it configures.
+| # | Question | Who | Required | Help shown under the question |
+|---|---|---|---|---|
+| 1 | Your name | You | yes | |
+| 2 | Business name | You | yes | |
+| 3 | What does the business sell, and at roughly what price? | You | yes | One or two sentences. Example: "Bookkeeping for trades businesses, £250 a month." |
+| 4 | Who buys it? | You | | Example: "Plumbers and electricians with 2 to 10 staff in the North West." |
+| 5 | The business in one line, the way you would say it to a friend | You | | |
+| 6 | Where should the business be in 12 months? | You | | A number if you have one: revenue, clients, profit, hours you work. |
 
-### Brain and personas
+### Step 2: This quarter
 
-- [ ] Create the client brain: founder-profile, current-priorities, constraints-and-red-lines,
-      key-people, a Decisions/ folder with the intake answers as the first dated entries.
-- [ ] Generate the CEO persona from the `od-ceo.md` template: swap founder facts, targets, team
-      names, delegation order. Keep the huddle rules, lane discipline, escalation rules and the
-      precedent rule unchanged.
-- [ ] Generate one department file per seat from the `dept-*.md` template: lead voice, directors,
-      lane, vetoes, "may NOT advise on", the client's non-negotiables block.
-- [ ] Copy the five worker agents and `GUARDRAILS.md`. Set every row to GATED except reading,
-      drafting and brain writes. Record the owner's name on the register.
-- [ ] Confirm every seated author has at least one processed book in the framework library.
-      Queue any gap through the audiobook pipeline or transcript-to-brain.
+| # | Question | Who | Required | Help |
+|---|---|---|---|---|
+| 7 | What are you aiming for this quarter, and what is the theme? | You | yes | Two or three sentences. This is the only thing your CEO uses to judge what matters. Update it every quarter. |
+| 8 | When does this quarter end? | You | | |
 
-### Data
+### Step 3: Rules and red lines
 
-- [ ] Create the client's `CEO Briefs` table with these fields: Date (date), One Thing (text),
-      First Step (text), Why (long text), Ignore Today (long text, newline-separated), Board
-      Flags (long text), Handed Off (long text), Money Light (text), Safe To Act (number), Full
-      Brief (long text, JSON). Record the FIELD IDS; both the worker and the tab read by ID.
-- [ ] Point the tab and the worker at those IDs (`F.ceo*` in `js/config.js` and the `F` map at
-      the top of the worker). A rename in the table must not be able to break the brief.
-- [ ] Map their Tasks source to the six fields the worker's `gatherTasks()` reads, and confirm
-      which Status value means "awaiting approval". The brief treats that bucket as finished
-      agent work, never as overdue work.
-- [ ] Map their money tables to `loadAndCompute()`, or set the money block to "not connected"
-      and confirm the brief still sends.
+| # | Question | Who | Required | Help |
+|---|---|---|---|---|
+| 9 | The minimum your household needs each month, no exceptions | You | | Your CEO will warn you before anything threatens it. |
+| 10 | Up to five things that must never be sacrificed for the business | You | | Health, family time, a day off, training, a side commitment. |
+| 11 | What should only YOU do in this business? | You | yes | Decisions, approvals, signatures, payments and anything physical are always yours. Add the rest: client calls, pricing, strategy, deep work. |
+| 12 | What do you never want to be asked to do again? | You | | Admin, chasing, paperwork, data entry. Your CEO hands these off instead of giving them to you. |
+| 13 | When the numbers look bad, how do you want it? | You | | Straight and blunt, or supportive with options. |
+| 14 | Is there anything sensitive we should be extra careful with in writing? (disputes, legal, partners) | With us on the call | | We store yes or no only. The details never go into any prompt. |
 
-### Worker (one deploy per tenant until the runtime is multi-tenant)
+### Step 4: Your team and your agents
 
-- [ ] `wrangler secret put` for: `SLACK_BOT_TOKEN`, `AIRTABLE_PAT` (or the Supabase key),
-      `PROXY_TOKEN`, `QUARTER_CONTEXT`, `PERSONA_CONTEXT` (their founder context paragraph;
-      never in the repo), `CALENDAR_ICS_URL` (optional), `RECIPIENT_EMAIL`, `TRIGGER_KEY`.
-- [ ] Set the model vars from `js/ai-models.js`; never hardcode a model ID.
-- [ ] Cron stays `0 8-11 * * *` (every day, hourly). The weekday and hour are decided in code by
-      `isLondonSendTime()`. For a non-London client, parameterise the timezone there and in
-      `todayLondonISO()`, and add the test case to `tests/ceo-brief-schedule.test.js`.
-- [ ] Deploy, then hit `/?mode=brief&key=…` to see a generated brief without sending, then
-      `/?mode=send&key=…` once to prove delivery and storage.
+| # | Question | Who | Required | Help |
+|---|---|---|---|---|
+| 15 | Your team: name, role, and what each person may be handed | You | | Your CEO hands work to AI first, then to a named person, then to you. Leave empty and everything not AI-shaped reaches you. |
+| 16 | The five AI worker agents (on by default) | We set this | | Builder, writer, researcher, analyst, auditor. We switch one off only if a client asks. |
 
-### Huddle and watchdog
+### Step 5: Your board
 
-- [ ] Add the client's huddle as a phase of their scheduled routine (one routine per tenant,
-      never a second routine per job). The huddle writes the stub row by 08:50 local and leaves
-      Full Brief empty.
-- [ ] Add the morning check: after 09:20 local, today's row must have Full Brief populated;
-      if not, trigger `mode=send` manually and file a finding.
+| # | Question | Who | Required | Help |
+|---|---|---|---|---|
+| 17 | Your board of directors | You | | Eleven seats, each with a named author as its voice. Untick a seat you do not want. Change a name if you would rather hear a different voice in that seat. |
+| 18 | Whose voice should your CEO speak in? | You | | Default: Dan Martell (Buy Back Your Time). Any author or mentor you trust. |
 
-### Display
+The eleven default seats, what each owns, and what each may not advise on:
 
-- [ ] Enable the CEO Brief tab for the tenant. Confirm the four health checks read green after
-      the first full brief: table reachable, today's brief arrived, latest brief complete,
-      robot ran within a week.
-- [ ] Link the workflow page from the tab header so the client can see how it works.
+| Seat | Default voice | Owns | Must not advise on |
+|---|---|---|---|
+| Strategy | Gary Keller | The one thing, the 20%, quarterly focus, sequencing | Tactics, money, professional opinions |
+| Marketing | Alex Hormozi | Offer strength, leads, positioning | Cash exposure, legal wording, delivery capacity |
+| Sales | Jordan Belfort | The call, conversion, pricing and terms | Positioning, finance policy |
+| Operations | Gino Wickman | Operating rhythm, accountability, can we deliver | Offer design, personal money |
+| Systemisation | Dave Jenyns | Every recurring problem into a system plus an agent | Strategy, money, legal |
+| Finance | Greg Crabtree | Real profit, cash discipline, what a target costs | Offer construction, marketing tools, legal |
+| Legal and Compliance | Keith Cunningham | Contract risk, compliance calendar, facts for real advisers | Giving legal advice |
+| People | Patrick Lencioni | Role clarity, accountability, the agent workforce | Money, legal |
+| Wealth | Robert Kiyosaki | Assets versus liabilities, passive income | Operations, tax advice |
+| Productivity | Chris Bailey | Attention, habits, how work reaches the founder | What the founder works on |
+| Mindset | John DeMartini | Values, overwhelm, the protected assets | Tactics, money |
 
-## 5. Proving it works (acceptance)
+### Step 6: Where your work lives
 
-1. Day 0: `mode=brief` returns JSON with one_thing, first_step, why, ignore, handed_off, flags,
-   headline. Every handed_off line names a real agent or a real team member.
-2. Day 1, 07:30 local: a stub row exists with One Thing, First Step, Board Flags; Full Brief
-   empty; the tab labels it "not finished".
-3. Day 1, 09:00 local: Slack DM received; the same row now has Full Brief; the tab shows the
-   money light and the reasoning; no duplicate row for the day.
-4. Day 1, 09:20: the morning check reports the brief landed without sending anything.
-5. Day 5: five weekday rows, each complete, zero weekend rows, health checks green.
-6. The founder confirms the first step was genuinely theirs (a decision, an approval, a
-   signature) and not admin an agent should have taken.
+| # | Question | Who | Required | Help |
+|---|---|---|---|---|
+| 19 | Where do your open tasks live? | With us on the call | | The Tasks page in this app, or an Airtable base we connect. Your CEO reads name, owner, due date, status, priority and type. |
+| 20 | Should the brief carry a money traffic light? | With us on the call | | Connected later through the Finance add-on. Until then: none, or a manual figure you keep updated. |
+| 21 | Your calendar's private address (optional) | You | | Google Calendar: Settings, your calendar, "Secret address in iCal format". Paste it here, never into an email. |
 
-## 6. Known single-tenant assumptions to remove before this is a module
+### Step 7: Delivery
 
-These are facts about Kevin's build that a second client breaks. Each is a build task, not a
-runbook step.
+| # | Question | Who | Required | Help |
+|---|---|---|---|---|
+| 22 | Your timezone | You | | London, Dublin, Paris, New York, Sydney |
+| 23 | What time should the brief arrive? | You | | 7am, 8am, 9am or 10am |
+| 24 | Where should it arrive? | You | | Only on this page, Slack, or email |
+| 25 | Slack incoming webhook address | With us on the call | if Slack | Set up with us on the call: Slack, Apps, Incoming Webhooks, pick the channel or your DM, copy the address. |
+| 26 | Email address for the brief | You | if email | |
 
-- The huddle runs on Kevin's Mac inside daily-ops. A client needs a hosted runner
-  (`workers/agent-runner`) that can dispatch the department agents.
-- The personas live in `~/.claude/agents/`, outside the repo, and reference Kevin's private
-  situation. Client personas must be data records per tenant.
-- The worker reads one Airtable base with hardcoded table IDs and one Slack recipient. It needs
-  a tenant parameter, or one deploy per tenant.
-- The board flag list inside the worker prompt (Crabtree, Michalowicz, Hormozi, Jenyns,
-  Martell, Peters, Keller) is hand-typed and already differs from the agent org chart. It must
-  be generated from the tenant's seated board.
-- The money light depends on the property-portfolio tables. A service business needs a
-  simpler safe-to-act input.
-- The calendar parser lists only events whose start stamp is today. Recurring events (an RRULE
-  with an old start date) and multi-day events that began yesterday are not shown. Expanding
-  RRULEs is the follow-up; a client who runs on recurring meetings needs it first.
-- Timezone is Europe/London in four places (worker gate, today's date, the tab, the huddle
-  clock rules).
+### Step 8: Go live
+
+| # | Question | Who | Required | Help |
+|---|---|---|---|---|
+| 27 | Switch the daily brief on | We set this | | We turn this on after the dry run reads right. The page shows what is still missing until then. |
+
+The readiness panel on the page lists exactly what blocks go-live. The blocking answers are:
+founder name, business name, what the business sells, this quarter's targets, what only the founder
+should do, at least one board seat, and the delivery address for the chosen channel.
+
+## Phase 4: the dry run (Mica, 10 minutes)
+
+1. Open `https://ceo-brief-tenants.kevinbrittain.workers.dev/?mode=brief&org=<workspace id>&key=<trigger key>`.
+   The worker runs every enabled seat, then the CEO, and returns the brief as JSON. Nothing
+   is stored or sent.
+2. Check four things against the config: the first step names something only the founder
+   can do; every handed-off line names an enabled worker or a named team member; the flags
+   come from enabled seats only; the quarter context is reflected in the "why".
+3. Read the one thing and the first step to the client (Slack message or a two-minute
+   Loom). Adjust wording in steps 3 and 5 if the voice is wrong. Re-run.
+
+## Phase 5: go live (1 minute)
+
+Setup, step 8, tick "Switch the daily brief on", Save. The page shows "Ready to go live"
+only when the blocking list is empty. The next weekday at the chosen hour, the worker
+sends and stores the first brief. Retries happen hourly for two hours if the first firing
+is missed; the stored row stops duplicates.
+
+## Phase 6: five-day acceptance
+
+| Day | Check | Where |
+|---|---|---|
+| 1 | Brief arrived at the chosen hour on the chosen channel and on the Today tab | Today tab health strip: "Today's brief arrived" |
+| 1 | No duplicate row for the day | `ceo_briefs` has one row per date |
+| 1 to 5 | The founder confirms the first step was genuinely theirs, not admin an agent should have taken | Ask in the Slack thread or by a one-line email |
+| 3 | At least one hand-off named a worker agent and that work appeared in the approval queue | Tasks page, approval queue |
+| 5 | Five weekday rows, zero weekend rows, health strip green | Today tab |
+| 5 | Client can say in one sentence what the board is for | Acceptance call, 10 minutes |
+
+## Phase 7: quarterly refresh
+
+In the last week of each quarter the brief flags "Keller: your quarter context ends on
+{date}; update it". The client opens Setup, step 2, rewrites two sentences, saves. Nothing
+else changes.
+
+## What is built, what is a handoff, what is not built yet
+
+Built in PR (this branch):
+- `js/ceo-brief-defaults.mjs` (config, defaults, every question).
+- `workers/ceo-brief-tenants/` (the cloud robot: board in parallel, CEO synthesis, store,
+  deliver, idempotent, per-tenant timezone).
+- `ceo-brief-supabase.html` (Today + Setup screens) registered in `supabase-app.html`.
+- `supabase-migration/supabase/migrations/0043_ceo_brief.sql` (the briefs table).
+- Tests: `tests/ceo-brief-tenants.test.js`, `tests/sync-invariants/ceo-brief-supabase.spec.js`,
+  `tests/ceo-brief-onboarding-doc.test.js`.
+
+One-time handoffs (Kevin or Mica hold the credentials; Claude cannot do these):
+- Run migration 0043 in the Supabase SQL editor. Redeploy `manage-client`.
+- Deploy the worker and set its three secrets (README in the worker folder).
+- Seed a test workspace and run one dry run end to end. Until this is done, the live proof
+  is the test suite, not a real brief.
+
+Not built yet, and the plan for each:
+- Per-tenant AI key routing (Supabase D9, due 31 Aug 2026). Until then every client's board
+  runs on Kevin's proxy credits. This gates taking a SECOND client onto the brief.
+- A Supabase tasks table. The Tasks twin page does not yet store tasks in Supabase, so
+  `tasks_source` supports none or Airtable today. When the tasks cutover lands, add kind
+  `supabase` in the worker's gather step (one function).
+- Email delivery. The worker posts to an `EMAIL_WEBHOOK_URL` if one is set (GoHighLevel
+  inbound webhook, the same pattern `create-client` uses); otherwise the brief is page
+  only. Choose the webhook once and set the secret.
+- Money light for non-finance clients: manual figure today; the Finance add-on feeds it
+  later.
+- Recurring calendar events (RRULE) are not expanded.
+- A precedents log the founder's approvals feed automatically. Today `precedents` is a
+  list Mica maintains by hand from the approval queue.
+- Kevin's own brief still runs on the Airtable worker and the Mac huddle. Moving Kevin onto
+  this tenant worker is a separate cutover, not part of client onboarding.

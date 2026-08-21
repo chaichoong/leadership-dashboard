@@ -378,15 +378,33 @@ flowchart TD
     <!-- ════════════════════════════════════════════════ -->
     <section class="section" id="client">
       <h2><span class="num">10</span> Setting it up for a client</h2>
-      <p>The same five stages work for any founder. What changes is the inputs. The full intake list and build checklist live in <code>docs/ceo-brief-client-onboarding.md</code>. In short, a client supplies:</p>
-      <ul class="steps">
-        <li>Who they are, what they sell, this quarter's targets, and their red lines.</li>
-        <li>Which board seats they want and whose voice sits in each.</li>
-        <li>Their team by name and what each person may be handed.</li>
-        <li>Where their tasks live, their bank feed for the money light, a calendar link, and a Slack workspace with the bot installed.</li>
-        <li>One-time approvals: the bot install, the calendar address, the bank consent.</li>
-      </ul>
-      <div class="callout warn"><strong>Honest state:</strong> today the board and huddle run on Kevin's Mac and the personas live outside the product. A second client needs a hosted runner and per-tenant persona records before this is a module rather than a service we set up by hand.</div>
+      <p>The same five stages work for any founder. A client gets their own board and brief through seven phases. Every question they answer, word for word, is in <code>docs/ceo-brief-client-onboarding.md</code>, and the setup screen in the app renders from the same list, so the two cannot drift.</p>
+
+      <div class="flowline">
+        <div class="flowbox"><h5>1. Kick-off call</h5><p>45 minutes with Mica. The three hated jobs, the board walk-through, the sensitive flag, connections set up together.</p></div>
+        <div class="flowbox"><h5>2. Provision</h5><p>Mica creates the workspace from the CRM. CEO Brief is visible on day one.</p></div>
+        <div class="flowbox"><h5>3. Setup screen</h5><p>Eight steps, 27 questions, 30 to 40 minutes for the client alone. Readiness panel says what is missing.</p></div>
+        <div class="flowbox"><h5>4. Dry run</h5><p>Mica generates one brief without sending it and checks the voice with the client.</p></div>
+      </div>
+      <div class="flowline">
+        <div class="flowbox"><h5>5. Go live</h5><p>One switch. The first brief lands the next weekday at the chosen hour.</p></div>
+        <div class="flowbox"><h5>6. Five-day check</h5><p>Five briefs, no duplicates, health strip green, founder confirms the first step was theirs.</p></div>
+        <div class="flowbox"><h5>7. Quarterly refresh</h5><p>Two sentences of new quarter context. Nothing else changes.</p></div>
+      </div>
+
+      <table class="tbl">
+        <tr><th>Setup step</th><th>What the client answers</th></tr>
+        <tr><td>1. Who you are</td><td>Name, business, what it sells and at what price, who buys it, the one-line pitch, the 12-month target</td></tr>
+        <tr><td>2. This quarter</td><td>This quarter's targets and theme, quarter end date. The only authority the CEO uses on priorities</td></tr>
+        <tr><td>3. Rules and red lines</td><td>Income floor, non-negotiables, what only the founder does, what they never want to see again, tone, the sensitive flag</td></tr>
+        <tr><td>4. Team and agents</td><td>Team members and what each may be handed; the five worker agents (on by default)</td></tr>
+        <tr><td>5. The board</td><td>Eleven seats to keep, drop or re-voice; whose voice the CEO speaks in</td></tr>
+        <tr><td>6. Where work lives</td><td>Tasks source, money light, calendar address</td></tr>
+        <tr><td>7. Delivery</td><td>Timezone, hour, Slack or email or page only</td></tr>
+        <tr><td>8. Go live</td><td>The switch, flipped by us after the dry run</td></tr>
+      </table>
+
+      <div class="callout warn"><strong>Honest state:</strong> the client version runs its board in the cloud (no Mac), but three things are still handoffs or gaps: the database change and the robot deploy need Kevin's or Mica's credentials once; every client's board runs on Kevin's AI credits until per-client AI keys ship (due 31 Aug 2026); tasks can come from Airtable or nowhere until the Tasks page stores tasks in the new database.</div>
     </section>
 
     <!-- ════════════════════════════════════════════════ -->

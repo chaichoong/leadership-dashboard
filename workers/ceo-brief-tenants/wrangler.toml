@@ -1,0 +1,38 @@
+# ceo-brief-tenants — the daily CEO Brief for every client workspace.
+#
+# Reads each tenant's setup from Supabase app_settings (key = ceo_brief), runs
+# their board and CEO through claude-proxy, stores the brief in ceo_briefs, then
+# delivers it to Slack, email, or the page only.
+#
+# Secrets (set via `wrangler secret put <NAME>`):
+#   SUPABASE_SERVICE_KEY  - service-role key (reads app_settings + org_modules, writes ceo_briefs)
+#   PROXY_TOKEN           - bearer token accepted by claude-proxy
+#   TRIGGER_KEY           - key for the manual ?mode= endpoints
+#   EMAIL_WEBHOOK_URL     - optional; when unset, email tenants get the page only
+#   <airtable_pat_ref>    - one per tenant whose tasks live in Airtable; the secret
+#                           NAME is what the tenant config stores, never the token
+
+name = "ceo-brief-tenants"
+main = "worker.js"
+compatibility_date = "2024-09-01"
+
+# Every day, hourly from 05:00 to 12:00 UTC. The DAY and the HOUR are decided in
+# code per tenant timezone (lib.mjs isSendWindow). Never put a day-of-week here:
+# Cloudflare counts Sunday as 1, so "1-5" runs Sun to Thu.
+[triggers]
+crons = ["0 5-12 * * *"]
+
+[observability]
+enabled = true
+
+# Same-zone workers cannot call each other via public URLs (error 1042).
+[[services]]
+binding = "PROXY"
+service = "claude-proxy"
+
+# ── AI models — the ONE place this deployable names a model ──
+# Mirrors js/ai-models.js. A retired model ID is an outage: change it here, redeploy.
+[vars]
+SUPABASE_URL = "https://ptkyhzlsvijcwyovgrgv.supabase.co"
+AI_MODEL_DEFAULT = "claude-sonnet-4-6"
+AI_MODEL_LIGHT = "claude-haiku-4-5-20251001"
