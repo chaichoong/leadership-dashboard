@@ -333,7 +333,14 @@ async function airtableFetch(tableId, params = {}) {
             headers: { 'Authorization': `Bearer ${PAT}` }
         });
         if (resp.status === 401 || resp.status === 403) {
+            // Clear BOTH stores. Only sessionStorage was cleared here, and init()
+            // reads localStorage FIRST, so a rejected token survived the rejection:
+            // reloading the page re-loaded the dead PAT, failed again, and showed the
+            // auth screen for ever with no way to tell why (finding 20260818-drift-
+            // monitor-196). The key is shared with the Inbound Comms Tracker, and that
+            // is the point — a token Airtable has refused is dead on every page.
             sessionStorage.removeItem('_dlr_pat');
+            localStorage.removeItem('airtable_pat');
             document.getElementById('authScreen').style.display = 'flex';
             document.getElementById('authError').style.display = 'block';
             document.getElementById('loadingOverlay').style.display = 'none';
@@ -495,16 +502,31 @@ async function loadData() {
             }
         }
 
-        // Helper: keep the cert with the latest renewal date (or prefer any date over none)
+        // Helper: keep the cert that best describes the row's real position — a live
+        // certificate over a lapsed one, then the latest renewal date (or any date
+        // over none).
+        //
+        // The expired-beats-nothing rule matters because expired certificates are no
+        // longer dropped (see below): without it, a lapsed record with a later date
+        // could hide a valid one and turn a compliant row red.
         function isNewer(existing, candidate) {
             if (!existing) return true;
+            const lapsed = c => certStatus(c).label === 'Expired';
+            if (lapsed(candidate) !== lapsed(existing)) return !lapsed(candidate);
             if (!candidate.d) return false;
             if (!existing.d) return true;
             return candidate.d > existing.d; // ISO date string comparison
         }
 
         for (const c of certs) {
-            if (c.s === 'Expired') continue; // skip expired certs — only show current
+            // An expired certificate used to be dropped here, before it could reach a
+            // row, by a skip on its Status. The cell then fell through to the
+            // grey dash and the tile counted it as missing++, so a GSC that lapsed in
+            // 2018 and six EICRs that lapsed in March reported as "no certificate on
+            // file" instead of Expired. Nothing errored; the red tile simply under-read
+            // on a legal-obligation surface (finding 20260818-drift-monitor-189, 15 such
+            // records live on 18 Aug 2026). certStatus() already labels these Expired —
+            // keep the record and let it, so the tile and the cell agree.
             const certObj = { s: c.s, d: c.d, recId: c.recId };
             const key = c.type === 'GSC' ? 'gsc' : c.type === 'EICR' ? 'eicr' : 'ins';
 

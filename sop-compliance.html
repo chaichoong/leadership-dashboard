@@ -306,6 +306,11 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
           <td>Each cert cell (if linked)</td>
           <td>Opens the specific Airtable cert record in a new tab. Only available when <code>recId</code> is known.</td>
         </tr>
+        <tr>
+          <td><strong>+ Task</strong></td>
+          <td>Floating button, bottom-right &mdash; only when Compliance is opened on its own (section 3), never inside the main dashboard</td>
+          <td>Comes from <code>js/quick-task.js</code>. It <strong>takes you off this page</strong>: it redirects to <code>index.html#tasks?qa=1</code> and opens the Add Task form on the Tasks page. It writes nothing to Airtable by itself, and nothing on Compliance is saved on the way out, so finish what you are doing here first.</td>
+        </tr>
       </tbody>
     </table>
   </div>
@@ -543,12 +548,12 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
 
     <div class="ts-item">
       <div class="ts-problem">Property shows all blank cells (no cert data)</div>
-      <div class="ts-solution">The property exists in Airtable but has no cert records linked to it, or all its cert records have Status = &ldquo;Expired&rdquo;. Add cert records manually (section 9) or check that existing records link to the correct property ID.</div>
+      <div class="ts-solution">The property exists in Airtable but has no cert records linked to it at all. An expired certificate is no longer hidden: since 21 Aug 2026 it shows in its cell with a red &ldquo;Expired&rdquo; tag and counts on the red tile, so a blank cell means nothing is on file. Add cert records manually (section 9) or check that existing records link to the correct property ID.</div>
     </div>
 
     <div class="ts-item">
       <div class="ts-problem">Certificate shows as &ldquo;Expired&rdquo; despite being valid</div>
-      <div class="ts-solution">The cert record in Airtable may have Status = &ldquo;Expired&rdquo;. The dashboard skips these records. Check the Certs table in Airtable and set Status to &ldquo;Active&rdquo; if the certificate is still valid.</div>
+      <div class="ts-solution">The cert record in Airtable has Status = &ldquo;Expired&rdquo;, or its Renewal Date has already passed. Either one is enough (section 5). The dashboard used to drop Status = &ldquo;Expired&rdquo; records entirely, which made a lapsed certificate read as &ldquo;No Cert&rdquo; on the grey tile instead of Expired on the red one; it now keeps them. Check the Certs table in Airtable, set Status to &ldquo;Active&rdquo; and give it a future Renewal Date if the certificate really is still valid. Where a property has both a lapsed record and a live one, the live one is shown.</div>
     </div>
 
     <div class="ts-item">
