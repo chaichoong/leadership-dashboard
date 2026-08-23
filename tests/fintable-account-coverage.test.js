@@ -74,3 +74,40 @@ describe('classifyFintableAccount handles what the filter used to hide', () => {
     expect(classifyFintableAccount(at(100)).status).toBe('alert');
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 23 Aug 2026 — "33 need reconnecting" counted feeds that can never reconnect
+// ─────────────────────────────────────────────────────────────────────────────
+// The Accounts table keeps every feed ever connected. Legacy Revolut / Wise / Two Chefs
+// / cafe accounts with no Business link (dead 1-2.5 years) and a manual ANNA account with
+// no Fintable user were all graded critical, burying the ten real dead feeds.
+describe('isMonitoredFintableAccount keeps only feeds worth reconnecting', () => {
+  const isMonitoredFintableAccount = new Function(
+    `const FINTABLE_EXCLUDED = ['Cafe Zempler']; ${extract('isMonitoredFintableAccount')}; return isMonitoredFintableAccount;`
+  )();
+  const rec = (fields) => ({ fields });
+
+  it('keeps an account linked to an active business with a Fintable user', () => {
+    expect(isMonitoredFintableAccount(rec({ 'Account Alias': 'Barclaycard', '**Fintable User': 'k@x.com', 'Active? (From Business)': [1] }))).toBe(true);
+  });
+
+  it('drops a legacy feed with no Business link', () => {
+    expect(isMonitoredFintableAccount(rec({ '*Name': 'KB Director Expenses', '**Fintable User': 'k@x.com' }))).toBe(false);
+  });
+
+  it('drops an account on an inactive business', () => {
+    expect(isMonitoredFintableAccount(rec({ 'Account Alias': 'Old', '**Fintable User': 'k@x.com', 'Active? (From Business)': [0] }))).toBe(false);
+  });
+
+  it('drops a manual account with no Fintable connection (nothing to reconnect)', () => {
+    expect(isMonitoredFintableAccount(rec({ 'Account Alias': 'Operations Director - ANNA', 'Active? (From Business)': [1] }))).toBe(false);
+  });
+
+  it('still honours the alias exclusion list', () => {
+    expect(isMonitoredFintableAccount(rec({ 'Account Alias': 'Cafe Zempler', '**Fintable User': 'k@x.com', 'Active? (From Business)': [1] }))).toBe(false);
+  });
+
+  it('is what fetchFintableAccounts filters on', () => {
+    expect(extract('fetchFintableAccounts')).toContain('filter(isMonitoredFintableAccount)');
+  });
+});
