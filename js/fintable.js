@@ -19,7 +19,8 @@
             'fldQ4vElprkABxQRx',  // **Institution
             'fldhDG5jDA8Tu2JyI',  // **GBP
             'fld21HAxSawQCxICj',  // Account Alias
-            'fldIyCsxvjoBqju3y'   // **Fintable User
+            'fldIyCsxvjoBqju3y',  // **Fintable User
+            'fldN0S2cW9MtB0Exk'   // Active? (From Business) — lookup, [1] when the linked business is active
         ];
 
         // NO staleness filter. This fetch used to drop anything whose last successful
@@ -51,7 +52,21 @@
         // render as a clean monitor with nothing to report — the same silent-zero trap that
         // hid the dead feeds in the first place.
         if (allRecords.length === 0) throw new Error('Accounts fetch returned zero rows — the accounts table is never empty, so this is a broken read, not a clean sync');
-        return allRecords.filter(r => !FINTABLE_EXCLUDED.includes(r.fields['Account Alias'] || ''));
+        return allRecords.filter(isMonitoredFintableAccount);
+    }
+
+    // Only feeds worth reconnecting are monitored. On 23 Aug 2026 the table held 48 rows
+    // and the banner read "33 need reconnecting": 23 of those were legacy Revolut / Wise /
+    // Two Chefs / cafe accounts with NO Business link, dead for 1-2.5 years and never
+    // coming back, and one was a manual ANNA account with no Fintable connection at all.
+    // Keep an account only when it is linked to an ACTIVE business, has a Fintable user
+    // (so "reconnect" is a real action), and is not on the alias exclusion list.
+    function isMonitoredFintableAccount(record) {
+        const f = record.fields || {};
+        if (FINTABLE_EXCLUDED.includes(f['Account Alias'] || '')) return false;
+        if (!f['**Fintable User']) return false;
+        const active = f['Active? (From Business)'];
+        return Array.isArray(active) && active.some(Boolean);
     }
 
     function classifyFintableAccount(record) {
@@ -237,7 +252,7 @@
             </tr>`;
         }).join('');
         // Empty state — never leave the table blank
-        tbody.innerHTML = rowsHtml || '<tr><td colspan="6" class="od-empty-state">No Fintable accounts found — accounts appear here once they have synced within the last 6 months. Check the Fintable connection if you expected accounts to show.</td></tr>';
+        tbody.innerHTML = rowsHtml || '<tr><td colspan="6" class="od-empty-state">No Fintable accounts found — only feeds linked to an active business with a Fintable connection appear here. Check the Business link on the account if you expected it to show.</td></tr>';
 
         // ── Sync Bar + Health Checks ──
         if (typeof registerSyncBar === 'function') {
