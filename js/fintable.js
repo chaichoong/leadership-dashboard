@@ -5,9 +5,16 @@
     let fintableLoaded = false;
     let fintableAccountsCache = null;
 
+    // Kevin's calls, 23 Aug 2026: Monese is monitored separately while the Fintable
+    // connection is sorted; the Tide accounts and First Direct are closed; Nationwide and
+    // PayPal do not need a feed. Barclaycard stays: dead feed, but the balance matters.
     const FINTABLE_EXCLUDED = [
         'Cafe Zempler', 'Personal Santander Maintenance', 'Personal Santander Budget',
-        'Personal Santander Investing', 'SHL Zempler', 'Two Chefs Zempler', 'Two Chefs Stripe'
+        'Personal Santander Investing', 'SHL Zempler', 'Two Chefs Zempler', 'Two Chefs Stripe',
+        'Monese CB', 'Monese PB',
+        'TNT Mgt Tide Current', 'TNT Mgt Tide Savings',
+        'Operations Director Tide Current', 'Operations Director Tide Savings',
+        'Personal Nationwide', 'First Direct', 'PayPal'
     ];
 
     async function fetchFintableAccounts() {

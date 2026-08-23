@@ -111,3 +111,13 @@ describe('isMonitoredFintableAccount keeps only feeds worth reconnecting', () =>
     expect(extract('fetchFintableAccounts')).toContain('filter(isMonitoredFintableAccount)');
   });
 });
+
+describe('FINTABLE_EXCLUDED carries the 23 Aug 2026 decisions', () => {
+  const list = new Function(`${src.match(/const FINTABLE_EXCLUDED = \[[\s\S]*?\];/)[0]}; return FINTABLE_EXCLUDED;`)();
+  it.each(['Monese CB', 'Monese PB', 'TNT Mgt Tide Current', 'TNT Mgt Tide Savings',
+    'Operations Director Tide Current', 'Operations Director Tide Savings',
+    'Personal Nationwide', 'First Direct', 'PayPal'])('excludes %s', (alias) => {
+    expect(list).toContain(alias);
+  });
+  it('keeps Barclaycard monitored', () => { expect(list).not.toContain('Barclaycard'); });
+});
