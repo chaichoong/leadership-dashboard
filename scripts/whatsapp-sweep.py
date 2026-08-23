@@ -304,6 +304,56 @@ def mark(upto_ts):
     return 0
 
 
+class UnresolvedChat(Exception):
+    """The --jid argument matched no chat at all. NOT the same as no reply."""
+
+
+def resolve_chat(conn, identifier):
+    """Turn whatever Inbound Sender holds into a real chat JID.
+
+    THE BUG THIS EXISTS FOR (findings 149, 202, 234, 261, 305, 321).
+    sent_check matched `s.ZCONTACTJID = ?` exactly. Step 5 of the sweep writes
+    "sender handle or chat name" into Inbound Sender, so some tasks store a
+    DISPLAY NAME. A name matches no chat, the query returns no rows, and the
+    command printed {"found": false, "outgoing_checked": 0} and exited 0 —
+    indistinguishable from "Kevin never replied". Proven 20 Aug 2026: the JID
+    447881924047@s.whatsapp.net returned 3 outgoing matches while "Roy Lavin",
+    the same chat, returned 0. Two tasks sat open for ever because of it.
+
+    Same class as the silent-zero filterByFormula trap: a lookup that CANNOT
+    match reads as a clean negative. So resolve the identifier first and fail
+    loudly when it resolves to nothing, rather than answering a question we
+    were never able to ask.
+    """
+    ident = (identifier or "").strip()
+    if not ident:
+        raise UnresolvedChat("empty identifier")
+    row = conn.execute(
+        "SELECT ZCONTACTJID AS jid FROM ZWACHATSESSION WHERE ZCONTACTJID = ?",
+        (ident,),
+    ).fetchone()
+    if row:
+        return row["jid"], "jid"
+    # Not a JID. Try it as a chat name, case-insensitively, the way the display
+    # name is actually stored.
+    names = conn.execute(
+        "SELECT ZCONTACTJID AS jid, ZPARTNERNAME AS name FROM ZWACHATSESSION "
+        "WHERE ZCONTACTJID IS NOT NULL AND LOWER(TRIM(ZPARTNERNAME)) = ?",
+        (ident.lower(),),
+    ).fetchall()
+    jids = sorted({r["jid"] for r in names if r["jid"]})
+    if len(jids) == 1:
+        return jids[0], "name"
+    if len(jids) > 1:
+        raise UnresolvedChat(
+            "ambiguous identifier %r: %d chats share that name (%s). Pass the "
+            "JID." % (ident, len(jids), ", ".join(jids[:5])))
+    raise UnresolvedChat(
+        "unresolved identifier %r: it is neither a chat JID nor the name of any "
+        "chat in this database. Answering 'no reply' for it would be a guess."
+        % ident)
+
+
 def sent_check(jid, contains, since_hours):
     """Has an outgoing WhatsApp message containing `contains` gone to `jid` recently?
 
@@ -311,8 +361,18 @@ def sent_check(jid, contains, since_hours):
     re-sends, so a crash between send and complete can never double-message
     somebody. Matched on ZTEXT, which WhatsApp populates directly (unlike
     Messages, where the text usually hides in attributedBody).
+
+    `jid` may be a JID or a chat display name — see resolve_chat. What it may
+    NOT be is unresolvable: that exits 2 with an error, never found:false.
     """
     conn = open_db()
+    try:
+        jid, via = resolve_chat(conn, jid)
+    except UnresolvedChat as e:
+        conn.close()
+        print(json.dumps({"error": str(e), "found": None, "resolved": False}),
+              file=sys.stderr)
+        return 2
     since_ts = now_apple_ts() - since_hours * 3600
     needle = re.sub(r"\s+", " ", contains).strip().lower()[:200] if contains else None
     rows = conn.execute(
@@ -336,7 +396,12 @@ def sent_check(jid, contains, since_hours):
             matches.append(apple_ts_to_iso(r["date"]))
     conn.close()
     print(json.dumps({"found": bool(matches), "count": len(matches),
-                      "outgoing_checked": len(rows), "match_times": matches[:5]}))
+                      "outgoing_checked": len(rows), "match_times": matches[:5],
+                      # The caller can now tell "this chat has no outgoing
+                      # messages" from "we could not find this chat" — the two
+                      # were the same answer before.
+                      "resolved": True, "resolved_jid": jid,
+                      "resolved_via": via}))
     return 0
 
 

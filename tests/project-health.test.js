@@ -132,3 +132,38 @@ describe('isWritableStatus — protects the Airtable single-select', () => {
         expect(isWritableStatus('On Target')).toBe(false);
     });
 });
+
+// ── Every health value the code can produce must have a chip (315) ──────────
+//
+// renderProjects does displayHealth.toLowerCase().replace(/\s+/g,'-') and drops
+// that on the badge as a class. CSS defined on-track, on-target, off-track,
+// not-started and completed. computeProjectHealth also returns 'Unknown' — on
+// two paths — so that badge rendered as bare unstyled text next to properly
+// chipped ones and read as a rendering fault. Asserted from the SOURCE of both
+// halves so adding a sixth return value without a rule fails here, not in
+// Kevin's browser.
+describe('project status chips cover every value computeProjectHealth returns', () => {
+    const { readFileSync } = require('fs');
+    // The literals returned by computeProjectHealth, read out of the file.
+    const healthSrc = readFileSync(resolve(ROOT, 'js/project-health.js'), 'utf8');
+    const fnStart = healthSrc.indexOf('function computeProjectHealth');
+    const values = [...new Set(
+        [...healthSrc.slice(fnStart).matchAll(/return '([A-Z][A-Za-z-]*)'/g)].map(m => m[1])
+    )];
+
+    it('found the return values, or this test is asserting nothing', () => {
+        expect(values.length).toBeGreaterThanOrEqual(5);
+        expect(values).toContain('Unknown');
+    });
+
+    for (const page of ['os/tasks/index.html', 'os/tasks/index-supabase.html']) {
+        it(`${page} styles all of: ${values.join(', ')}`, () => {
+            const css = readFileSync(resolve(ROOT, page), 'utf8');
+            for (const v of values) {
+                const cls = v.toLowerCase().replace(/\s+/g, '-');
+                expect(css, `.project-status.${cls} has no rule, so the "${v}" badge renders unstyled`)
+                    .toMatch(new RegExp(`\\.project-status\\.${cls}\\b`));
+            }
+        });
+    }
+});

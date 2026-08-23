@@ -838,7 +838,20 @@
                         const EMAILED = ['Contacted (1:1)', 'In Sequence'];
                         const DOWNSTREAM = ['Replied', 'No Response', 'Call Booked'];
                         const PRE_CONTACT = ['Ready for Review', 'Approved', 'Rejected', 'Suppressed'];
-                        const notLtd = r => prosField(r, 'Entity Type') !== 'Limited Company';
+                        const SOLICITED = 'Email reply (they asked)';
+                        const entityOf = r => prosField(r, 'Entity Type');
+                        const routeOf = r => prosField(r, 'Contact Route');
+                        // MIRROR THE SEND PATH, never re-derive it (findings
+                        // 20260816-prod-e2e-sweep-182, 20260823-prospect-daily-run-327).
+                        // The check counted every non-Ltd at an emailed status as a
+                        // breach while sendProspectEmailViaGHL exempts SOLICITED by
+                        // design (skill §4.5, Kevin 14 Jul 2026: they publicly asked
+                        // for help, so a reply is correspondence, not marketing) and
+                        // never sends a route outside PROS_EMAIL_ROUTES at all. So its
+                        // "23 breaches" were 4 solicited replies and 19 warm-lane
+                        // contacts, and the tab read FAIL every load for a week. A
+                        // gate that cries wolf daily is a gate nobody reads.
+                        const coldEmailed = r => prosIsEmailRoute(routeOf(r)) && routeOf(r) !== SOLICITED;
                         const inspected = records.filter(r => EMAILED.concat(DOWNSTREAM, ['Connect Sent']).includes(prosStatus(r)));
 
                         // Control. A status list that matches nothing reads as a
@@ -850,11 +863,24 @@
                             return { status: 'warn', detail: 'Nobody has been contacted yet, so this gate has never been exercised' };
                         }
 
-                        const breach = records.filter(r => EMAILED.includes(prosStatus(r)) && notLtd(r));
-                        if (breach.length) return { status: 'fail', detail: `${breach.length} non-Ltd prospect(s) have been emailed — PECR breach risk, stop and check them` };
-                        const unclear = records.filter(r => DOWNSTREAM.includes(prosStatus(r)) && notLtd(r));
-                        if (unclear.length) return { status: 'warn', detail: `${unclear.length} non-Ltd prospect(s) sit past first contact — check they were reached on LinkedIn, not by email` };
-                        return { status: 'pass', detail: `All ${inspected.length} contacted prospect(s) are Limited Companies` };
+                        // Second control. The exemptions above are the whole fix, so
+                        // they are the thing most likely to over-reach: if they ever
+                        // empty the cold population while cold sends are still going
+                        // out, this check has stopped checking anything.
+                        const cold = records.filter(r => EMAILED.includes(prosStatus(r)) && coldEmailed(r));
+                        const excluded = records.filter(r => EMAILED.includes(prosStatus(r)) && !coldEmailed(r));
+                        if (!cold.length && excluded.length) return { status: 'warn', detail: `No cold-route sends to check — all ${excluded.length} emailed prospect(s) are solicited replies or non-email routes. The Ltd gate is untested, not clean` };
+
+                        // Two populations, reported separately. A blank Entity Type is
+                        // a missing Companies House check, not a confirmed sole trader,
+                        // and calling it a breach is what made the number meaningless.
+                        const breach = cold.filter(r => entityOf(r) && entityOf(r) !== 'Limited Company');
+                        if (breach.length) return { status: 'fail', detail: `${breach.length} confirmed non-Ltd prospect(s) have been cold-emailed — PECR breach risk, stop and check them` };
+                        const unrecorded = cold.filter(r => !entityOf(r));
+                        if (unrecorded.length) return { status: 'warn', detail: `${unrecorded.length} cold-emailed prospect(s) have no Entity Type recorded — the Companies House step was skipped, so the gate could not be applied to them` };
+                        const unclear = records.filter(r => DOWNSTREAM.includes(prosStatus(r)) && coldEmailed(r) && entityOf(r) !== 'Limited Company');
+                        if (unclear.length) return { status: 'warn', detail: `${unclear.length} non-Ltd prospect(s) sit past first contact on a cold route — check they were reached on LinkedIn, not by email` };
+                        return { status: 'pass', detail: `All ${cold.length} cold-emailed prospect(s) are Limited Companies (${excluded.length} solicited or non-email route excluded)` };
                     }
                 },
                 {

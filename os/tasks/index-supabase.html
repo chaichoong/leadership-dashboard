@@ -324,6 +324,13 @@ body.app-busy,body.app-busy *{cursor:progress!important}
 .project-status.off-track{background:var(--danger-bg);color:var(--danger)}
 .project-status.not-started{background:var(--bg-surface-2);color:var(--text-secondary)}
 .project-status.completed{background:var(--accent-soft);color:var(--accent)}
+/* computeProjectHealth returns the literal 'Unknown' when a project has no
+   usable dates, or no KPI target and no task progress (js/project-health.js).
+   With no rule the chip fell through to the bare .project-status base and
+   rendered as unstyled text beside properly chipped ones, which reads as a
+   rendering fault rather than the honest 'cannot tell' it is
+   (20260822-agent-dispatch-315). Muted on purpose: unknown is not a warning. */
+.project-status.unknown{background:var(--bg-subtle);color:var(--text-muted)}
 .project-body{display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px}
 @media(max-width:700px){.project-body{grid-template-columns:1fr}}
 .project-col h5{font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:var(--text-secondary);margin-bottom:4px}

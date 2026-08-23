@@ -117,6 +117,22 @@ describe('agent-dispatch worklist selection', () => {
     expect(countOf(ids, 'new')).toBe(2);
   });
 
+  // 20260823-agent-dispatch-325. The report read "worklist 8, cap 5", which
+  // looked like the cap being ignored. It was not: CAP_PER_RUN is 50 and has
+  // been since 14 Aug, and select_worklist truncates. What was wrong was the
+  // skill file, which still ordered "at most the 5 items the script returned".
+  // Asserted here anyway, because "the cap is enforced by the dispatcher's
+  // discipline" is a thing somebody will believe again.
+  it('never returns more than the cap, whatever the mix of lanes', () => {
+    for (const [h, n, d] of [[100, 100, 100], [0, 100, 0], [100, 0, 0], [0, 0, 100], [7, 3, 2]]) {
+      for (const cap of [1, 5, 25, 50]) {
+        const { ids } = select(h, n, d, cap, 10);
+        expect(ids.length, `cap ${cap} returned ${ids.length} for ${h}/${n}/${d}`)
+          .toBeLessThanOrEqual(cap);
+      }
+    }
+  });
+
   it('clears the whole eligible queue at the shipped cap', () => {
     // Measured live on 14 Aug: 37 eligible (25 worklist + 12 reserve) at cap 25,
     // so 12 waited a day for nothing. At the shipped cap the backlog clears.

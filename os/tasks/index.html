@@ -380,6 +380,13 @@ body.app-busy,body.app-busy *{cursor:progress!important}
 .project-status.off-track{background:var(--danger-bg);color:var(--danger)}
 .project-status.not-started{background:var(--bg-surface-2);color:var(--text-secondary)}
 .project-status.completed{background:var(--accent-soft);color:var(--accent)}
+/* computeProjectHealth returns the literal 'Unknown' when a project has no
+   usable dates, or no KPI target and no task progress (js/project-health.js).
+   With no rule the chip fell through to the bare .project-status base and
+   rendered as unstyled text beside properly chipped ones, which reads as a
+   rendering fault rather than the honest 'cannot tell' it is
+   (20260822-agent-dispatch-315). Muted on purpose: unknown is not a warning. */
+.project-status.unknown{background:var(--bg-subtle);color:var(--text-muted)}
 .project-body{display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px}
 @media(max-width:700px){.project-body{grid-template-columns:1fr}}
 .project-col h5{font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:var(--text-secondary);margin-bottom:4px}
@@ -5203,10 +5210,17 @@ async function applyAutoSchedule(){
 // ======================================================
 // KEVIN OVERDUE AUTO-RESCHEDULE (keep)
 // ======================================================
+// The result of the last run, read by the 'Auto-reschedule overdue ran' health
+// check. Before 23 Aug 2026 the caller did `const r=await ...` and never read
+// r, so a failed PATCH was a console.warn nobody sees: the task showed today's
+// date in the browser and yesterday's in Airtable, and the health check
+// returned a HARDCODED pass off data it had already computed and thrown away
+// (20260822-agent-dispatch-319).
+let lastAutoReschedule=null;
 async function autoRescheduleOverdue(){
-  if(!currentUser||currentUser.key!=='kevin')return{count:0};
+  if(!currentUser||currentUser.key!=='kevin')return{count:0,skipped:'not Kevin'};
   const today=todayStr();
-  const member=TEAM.find(m=>m.key==='kevin');if(!member)return{count:0};
+  const member=TEAM.find(m=>m.key==='kevin');if(!member)return{count:0,skipped:'no Kevin row in TEAM'};
   const overdue=allTasks.filter(t=>t.assigneeEmail===member.email&&t.dueDate&&t.dueDate<today&&t.status!=='Completed'&&!t.someDay&&!t.hardDeadline);
   if(overdue.length===0)return{count:0};
   // Check res.ok before mutating, and count only what actually moved.
@@ -9482,7 +9496,7 @@ async function loadAllData(){
     // authority for running compute; Task OS reads the pre-computed
     // values + JSON from Airtable.
 
-    const r=await autoRescheduleOverdue();
+    lastAutoReschedule=await autoRescheduleOverdue();
 
     const tc=document.getElementById('taskCount');if(tc)tc.textContent=`${allTasks.length} tasks, ${allProjects.length} projects${cal.length?`, ${cal.length} cal events`:''}`;
     const ls=document.getElementById('lastSync');if(ls)ls.textContent=`Synced ${new Date().toLocaleTimeString('en-GB')}`;
@@ -9563,7 +9577,12 @@ async function loadAllData(){
           },
           {
             name:'Auto-reschedule overdue ran', kind:'automation', run:()=>{
-              return {status:'pass',detail:'Overdue tasks auto-rescheduled to today on every load (excludes Hard Deadline)'};
+              // Report what actually happened, not what was meant to.
+              const r=lastAutoReschedule;
+              if(!r) return {status:'warn',detail:'Has not run on this load yet — it runs once, after the task fetch'};
+              if(r.skipped) return {status:'pass',detail:`Not applicable: ${r.skipped}`};
+              if(r.failed) return {status:'fail',detail:`${r.failed} overdue task(s) could not be moved — they show today's date on screen but not in Airtable. Reload to see the real dates`};
+              return {status:'pass',detail:r.count?`${r.count} overdue task(s) moved to today (excludes Hard Deadline)`:'No overdue tasks needed moving (excludes Hard Deadline)'};
             }
           },
           {

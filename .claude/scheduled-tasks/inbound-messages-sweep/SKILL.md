@@ -91,6 +91,16 @@ the whole queue.
    Same rule as iMessage: close ONLY if a `match_times` entry is LATER than the
    task's `createdTime`. This runs headless now, so "app unavailable" is no
    longer an excuse to skip it.
+   READ THE EXIT CODE. `--jid` now accepts either a real JID or a chat display
+   name, because Step 5 has written both into Inbound Sender. Exit 0 with
+   `"resolved": true` means the chat was found and the answer is real. **Exit 2
+   means the identifier matched no chat at all** — that is a FAILURE to report,
+   never a no-reply, and the task must be left open. Until 23 Aug 2026 a display
+   name returned `{"found": false, "outgoing_checked": 0}` and exit 0, which is
+   indistinguishable from "Kevin never replied": two tasks sat open for ever
+   because of it, and the same bug was filed six separate times (findings 149,
+   202, 234, 261, 305, 321). Do not paper over an exit 2 by re-running with a
+   guess.
 4. Closing a task means exactly: Status `Completed`, Completion Date
    `fldFOi1SwEKuJRmdN` = now (ISO), and append to the Description:
    "Closed by inbound-messages-sweep <date>: Kevin replied himself (outgoing
@@ -160,7 +170,11 @@ One record per surviving candidate in Tasks `tblqB8b22hKBL4PF1`, base
 - `fldiXSzcMol6Tdwij` Inbound Source Type: `iMessage` or `WhatsApp`
 - `fldiSNijdCy5GXuzL` Inbound Message Content: the message text plus brief
   context (truncate to 5000 chars)
-- `fldzf4xlbrQuktx0i` Inbound Sender: sender handle or chat name
+- `fldzf4xlbrQuktx0i` Inbound Sender: the sender's stable IDENTIFIER — the
+  iMessage handle, or for WhatsApp the JID from `sender_identity` (e.g.
+  `447881924047@s.whatsapp.net`), never the display name. Step 2b looks the
+  chat up by this value; a name resolves today but breaks the moment the
+  contact is renamed, and it is what stranded two tasks open for a week.
 - `fldR4peEZRXo7tjoI` Inbound Date Received: message date (YYYY-MM-DD)
 - `fldXf1p0vtHqOZcKl` Inbound Note URL Link: the dedupe key from Step 4
 

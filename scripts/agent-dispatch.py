@@ -19,6 +19,11 @@ Field IDs mirror js/config.js TASK_FIELDS and scripts/slack-automation/
 approvals.js AF. tests/constant-drift.test.js fails if they ever disagree.
 
 Subcommands:
+  reconcile                   read-only, and the FIRST thing a run does.
+                              Names every finished deliverable on disk whose
+                              task never reached Kevin (empty Agent Output, or
+                              still pre-submit). Exits 1 if any, 2 if it cannot
+                              see the run directories at all.
   queue                       read-only. JSON of eligible work, capped.
   route    TASKID --to RECID  CEO reassigns Team Member.
   escalate TASKID             hand a task OFF the AI agents to Kevin. Team
@@ -791,6 +796,141 @@ def cmd_queue(args):
     print(json.dumps(out, indent=2))
 
 
+# ─── RECONCILE ────────────────────────────────────────────────────────
+#
+# 20260823-agent-dispatch-323. SKILL.md has ordered this as mandatory step 1
+# since the 19 Aug tier-1 incident, and the subcommand did not exist: argparse
+# refused it, the run reported the error and carried on, and nothing checked
+# the thing the step was added to check.
+#
+# WHAT IT IS FOR (19 Aug 2026). An agent finishes, writes its deliverable to
+# RUNDIR/TASKID.md, and the run dies before `submit`. The file is on disk, the
+# work is done, and the Airtable record still has an EMPTY Agent Output — so it
+# appears in NO surface Kevin looks at. That day it was a tier-1 deliverable
+# with a five-day court deadline. Nothing alarmed, because nothing had recorded
+# an action: an unfinished action leaves no trace, which is exactly why the
+# check has to read the DISK against Airtable rather than read a log.
+#
+# Read-only by design. It NAMES orphans and exits non-zero; the dispatcher
+# submits them with the normal `submit` call, so the gate is never bypassed.
+
+# The run directories daily-ops creates: 20260823-074522.
+RUNDIR_RE = re.compile(r"^\d{8}-\d{6}$")
+# A deliverable is named for its task: recXXXXXXXXXXXXXX.md, nothing else.
+DELIVERABLE_RE = re.compile(r"^(rec[A-Za-z0-9]{14})\.md$")
+RECONCILE_RUNS = 3
+# A file this short is not a finished deliverable. An agent that produced
+# nothing is a different failure (already reported as "hung, produced nothing")
+# and re-submitting an empty file would put noise through Kevin's gate.
+MIN_DELIVERABLE_CHARS = 40
+# Statuses that mean the task has moved on. A deliverable for one of these was
+# either submitted and decided, or the task was closed by hand.
+RECONCILE_DONE_STATUSES = ("Completed", "Cancelled")
+
+
+def recent_run_dirs(limit=RECONCILE_RUNS):
+    """The last `limit` dispatch run directories, oldest first."""
+    try:
+        names = [n for n in os.listdir(STATE_DIR) if RUNDIR_RE.match(n)
+                 and os.path.isdir(os.path.join(STATE_DIR, n))]
+    except FileNotFoundError:
+        return []
+    return [os.path.join(STATE_DIR, n) for n in sorted(names)[-limit:]]
+
+
+def deliverables_in(run_dirs):
+    """{task_id: path} for every finished deliverable, newest run winning."""
+    found = {}
+    for d in run_dirs:                      # oldest first, so later runs win
+        for name in sorted(os.listdir(d)):
+            m = DELIVERABLE_RE.match(name)
+            if not m:
+                continue
+            path = os.path.join(d, name)
+            if not os.path.isfile(path):
+                continue
+            found[m.group(1)] = path
+    return found
+
+
+def cmd_reconcile(args):
+    run_dirs = recent_run_dirs(args.runs)
+    if not run_dirs:
+        # Not "nothing to reconcile" — the state directory every run writes to
+        # is missing, so this check cannot see anything at all. A silent zero
+        # here would read as clean for ever. Exit 2, distinct from the 1 that
+        # means orphans were found, so the caller can tell them apart.
+        print(json.dumps({
+            "error": "no dispatch run directories under " + STATE_DIR,
+            "runsChecked": 0, "deliverablesChecked": 0,
+        }, indent=2), file=sys.stderr)
+        return 2
+
+    files = deliverables_in(run_dirs)
+    orphans, empty_files, unreadable, ok = [], [], [], 0
+    for task_id, path in sorted(files.items()):
+        try:
+            with open(path) as fh:
+                body = fh.read().strip()
+        except OSError as e:
+            unreadable.append({"task": task_id, "path": path, "why": str(e)})
+            continue
+        if len(body) < MIN_DELIVERABLE_CHARS:
+            empty_files.append({"task": task_id, "path": path,
+                                "chars": len(body)})
+            continue
+        try:
+            t = task_view(get_task(task_id))
+        except RuntimeError as e:
+            # A deleted task is not an orphaned deliverable. Named, not fatal.
+            unreadable.append({"task": task_id, "path": path, "why": str(e)})
+            continue
+        if t["status"] in RECONCILE_DONE_STATUSES:
+            ok += 1
+            continue
+        # The two ways the work never reached him. Agent Output empty is the
+        # 19 Aug shape. Still sitting in a pre-submit status with no approval
+        # record is the same failure one step later: submit never ran.
+        reasons = []
+        if not (t["agentOutput"] or "").strip():
+            reasons.append("Agent Output is empty")
+        if (t["status"] in OPEN_STATUSES and not t["sentForApprovalByIds"]
+                and not t["outcome"]):
+            reasons.append("status never left %s and it was never sent for "
+                           "approval" % (t["status"] or "(empty)"))
+        if not reasons:
+            ok += 1
+            continue
+        orphans.append({
+            "task": task_id, "name": t["name"], "path": path,
+            "status": t["status"], "taskType": t["taskType"],
+            "agentId": t["agentId"], "agentName": t["agentName"],
+            "chars": len(body), "why": "; ".join(reasons),
+        })
+
+    out = {
+        "generatedAt": now_iso(),
+        "runsChecked": [os.path.basename(d) for d in run_dirs],
+        "deliverablesChecked": len(files),
+        "reconciled": ok,
+        "orphans": orphans,
+        # Not orphans, but never silent: an agent that wrote nothing and a task
+        # that cannot be read are both things a human may need to look at.
+        "emptyDeliverables": empty_files,
+        "unreadable": unreadable,
+        "counts": {"orphans": len(orphans), "empty": len(empty_files),
+                   "unreadable": len(unreadable)},
+    }
+    print(json.dumps(out, indent=2))
+    if orphans:
+        print("ERROR: %d finished deliverable(s) never reached Kevin. Submit "
+              "each one before working anything new: %s"
+              % (len(orphans), ", ".join(o["task"] for o in orphans)),
+              file=sys.stderr)
+        return 1
+    return 0
+
+
 # ─── WRITES ───────────────────────────────────────────────────────────
 
 def cmd_route(args):
@@ -845,6 +985,19 @@ def cmd_handover(args):
         # agent-linked population and it would be worked again tomorrow.
         AF["teamMember"]: [who["rec"]],
         AF["assignee"]: {"email": args.to},
+        # BOTH links, or the handover does not take (20260823-agent-dispatch-324).
+        # cmd_queue's agent_linked filter reads Team Member OR Sent For Approval
+        # By, so clearing only the first left the task in the agent population:
+        # rec79mCohnwb2PmpE came back round every run for ever, with Mica's name
+        # on it and an agent working it anyway.
+        AF["sentForApprovalBy"]: [],
+        # And the standing verdict goes with it. An Approved outcome left behind
+        # means that if the task is ever routed back to an agent, the loop reads
+        # it as an approved carry-out and executes an action Kevin approved for
+        # somebody else's version of the work. The handover is recorded in Notes,
+        # which is where the audit trail belongs.
+        AF["approvalOutcome"]: None,
+        AF["approvedAt"]: None,
         AF["notes"]: (existing + "\n\n" + note).strip(),
     })
     print(json.dumps({"handedOver": args.task, "to": args.to,
@@ -1168,6 +1321,13 @@ def cmd_verify(args):
                 problems.append(f"{a['task']} was handed to {who['name']} but "
                                 "marked Completed — the work is not done, it "
                                 "changed hands")
+            elif live["sentForApprovalByIds"]:
+                # 20260823-agent-dispatch-324. Team Member alone is not the
+                # agent population — the queue reads this field too, so a
+                # handover that leaves it set does not actually hand over.
+                problems.append(f"{a['task']} was handed to {who['name']} but "
+                                "Sent For Approval By still points at an agent, "
+                                "so the queue works it again tomorrow")
 
     if problems:
         for p in problems:
@@ -1185,6 +1345,13 @@ def main():
     sub = p.add_subparsers(dest="cmd", required=True)
 
     sub.add_parser("queue")
+
+    rc = sub.add_parser(
+        "reconcile",
+        help="name finished deliverables on disk that never reached Airtable")
+    rc.add_argument("--runs", type=int, default=RECONCILE_RUNS,
+                    help="how many recent run directories to read "
+                         f"(default {RECONCILE_RUNS})")
 
     r = sub.add_parser("route")
     r.add_argument("task")
@@ -1229,10 +1396,15 @@ def main():
     v.add_argument("--report", required=True)
 
     args = p.parse_args()
-    {"queue": cmd_queue, "route": cmd_route, "escalate": cmd_escalate,
-     "handover": cmd_handover, "submit": cmd_submit, "annotate": cmd_annotate,
-     "intent": cmd_intent, "complete": cmd_complete,
-     "verify": cmd_verify}[args.cmd](args)
+    # The exit code is the contract for `reconcile` — SKILL.md step 1 branches
+    # on it — so main must PASS IT ON. Discarding it here would make the check
+    # exit 0 whatever it found, which is the failure it exists to prevent.
+    rc = {"queue": cmd_queue, "reconcile": cmd_reconcile, "route": cmd_route,
+          "escalate": cmd_escalate, "handover": cmd_handover,
+          "submit": cmd_submit, "annotate": cmd_annotate,
+          "intent": cmd_intent, "complete": cmd_complete,
+          "verify": cmd_verify}[args.cmd](args)
+    sys.exit(rc or 0)
 
 
 if __name__ == "__main__":
