@@ -28,14 +28,36 @@ Airtable fields and the private digest ONLY. Never into monitoring/ reports,
 findings, or your returned summary — the repo and its reports are public.
 Your report speaks in counts, never content.
 
-THE LABEL TAXONOMY (know all of it, touch only your part): the numbered
-labels are the system's routing. 8 "task created" is Mica's manual lane —
-you never file into it. 12 "Kevin to respond" is THE agent lane: everything
-actionable goes there. 13 is maintenance (contractor queue). 9 and 14 are
-COMPLETION labels owned by the completion sweep — triage never applies them.
+THE MAILBOX: you triage the business hub, kevin@runpreneur.org.uk — the
+account every address forwards into, the one Mica managed, where the label
+taxonomy lives (the script targets it; you never pass an account yourself).
+Kevin's personal kevinbrittain@gmail.com is the property mailbox and is OUT
+of scope for now.
+
+THE LABEL TAXONOMY (Kevin's ruling, 24 Aug 2026: know all of it, apply it
+accordingly). The numbered labels and what you may do with each:
+
+- **12 "kevin to respond"** — THE agent lane. Everything actionable goes
+  here, with a task (Step 4).
+- **13 "maintenance"** — contractor queue. Label, no task.
+- **File-only lanes** (label + archive, no task, via `act --do file`):
+  **6 newsletter** (instead of a bare archive when it fits),
+  **10 property compliance** (certificates and compliance paperwork; its own
+  agent is being built), **11 tenancy docs**, **17 OD Prospects** (inbound
+  interest in Operations Director), **18 creditor** (apply IN ADDITION to
+  lane 12 — creditor mail is always tier-1 and always gets a task).
+- **8 "task created"** — Mica's manual lane. You NEVER file into it (the
+  script refuses); you only rescue stranded mail already on it.
+- **NEVER APPLY**: 7 "delete" (other flows may purge it — you never delete),
+  9 and 14 (completion labels owned by the completion sweep), 1-5 (Kevin's
+  manual workflow states), 15 and 16 (automation-owned), and the
+  non-numbered pipeline labels ("Invoice to Airtable", "Send to Airtable",
+  "Add to ... AT Board") which trigger other automations. The script's
+  allow-list enforces this.
+
 On your first live run, run `python3 scripts/inbound-triage.py labels` and
-report (names only) any numbered label outside {8, 9, 12, 13, 14}, so the
-rules get extended deliberately rather than by guess.
+report (names only) any NUMBERED label outside {1-18}, so the rules get
+extended deliberately rather than by guess.
 
 All commands run from the main checkout
 (`/Users/kevinbrittain/Projects/leadership-dashboard`).
@@ -83,12 +105,17 @@ the `list-unsubscribe` header (its presence = machine mail).
    it as tier-1.
 2. **Label 13 — maintenance:** repair reports, contractor quotes, trade
    scheduling for a property job. Contractor queue, no task.
-3. **Archive — machine noise:** newsletters, marketing, promotions, automated
-   notifications, receipts and order confirmations with no ask (transactions
-   reach the books through the bank feeds, not the inbox). Machine-generated
-   AND no ask = archive. NEVER archive an email written by a human being
-   without creating a task for it — this is the hard guardrail.
-4. **Leave in inbox:** an email a human wrote that Kevin should read himself
+3. **File lanes — taxonomy homes without a task:** newsletters →
+   `file --label-num 6`; compliance certificates and paperwork → `file
+   --label-num 10`; tenancy documents → `file --label-num 11`; inbound
+   Operations Director interest → `file --label-num 17`. Creditor mail gets
+   lane 12 AND `file --label-num 18` on top (always tier-1, always a task).
+4. **Archive — machine noise with no taxonomy home:** marketing, promotions,
+   automated notifications, receipts and order confirmations with no ask
+   (transactions reach the books through the bank feeds, not the inbox).
+   Machine-generated AND no ask = archive. NEVER archive an email written by
+   a human being without creating a task for it — this is the hard guardrail.
+5. **Leave in inbox:** an email a human wrote that Kevin should read himself
    but needs no reply or action. Leaving it is a decision — log it. It will
    resurface in the stale flag after 48 hours, which is correct: his reading
    backlog must stay visible.
@@ -123,6 +150,7 @@ For every triaged message, apply the decision (this also logs it, with sender
 and subject pulled from the scan cache, to the private digest):
 
     python3 scripts/inbound-triage.py act --id <id> --do label12|label13|archive --reason "<one line, your own words>"
+    python3 scripts/inbound-triage.py act --id <id> --do file --label-num <6|10|11|17|18> --reason "<one line, your own words>"
     python3 scripts/inbound-triage.py note --id <id> --do leave --reason "<one line, your own words>"
 
 The `--reason` is always YOUR summary, never text copied from the email.

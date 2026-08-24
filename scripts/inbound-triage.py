@@ -43,6 +43,10 @@ USAGE
                                               apply one triage decision + log
                                               it (sender/subject come from the
                                               scan cache, never from argv)
+  inbound-triage.py act --id MSGID --do file --label-num N [--reason R]
+                                              file into an allow-listed
+                                              taxonomy label (6, 10, 11, 17,
+                                              18) and archive; no task
   inbound-triage.py note --id MSGID --do leave|task-created|duplicate|deferred [--reason R]
                                               log a no-Gmail-change decision
   inbound-triage.py mark --upto MS            advance the watermark (epoch ms)
@@ -66,6 +70,14 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 
 WORKER_URL = "https://drive-upload.kevinbrittain.workers.dev"
+
+# The mailbox this agent triages: the business hub every address forwards into
+# (it sends as the operationsdirector.co.uk addresses, carries the numbered
+# 1-18 label taxonomy, and is the inbox Mica managed). Established on the
+# first live run, 24 Aug 2026: kevinbrittain@gmail.com is a DIFFERENT mailbox
+# (273 property-address labels, no taxonomy) and is out of triage scope.
+TRIAGE_ACCOUNT = "kevin@runpreneur.org.uk"
+
 TRIAGE_KEY_FILE = Path.home() / ".config/od/gmail_triage_key"
 AIRTABLE_PAT_FILE = Path.home() / ".config/od/airtable_pat"
 
@@ -77,6 +89,14 @@ METRIC_SCORE_FIELD = "fldkGxrOlrfuLlH3J"  # singleLineText — current reading
 # One list call returns at most 25 (the worker's subrequest budget); we follow
 # nextPageToken up to this many pages per query, then report truncated=True.
 MAX_PAGES = 4
+
+# File-only lanes the agent may apply (label + archive, no task): 6 newsletter,
+# 10 property compliance, 11 tenancy docs, 17 OD prospects, 18 creditor.
+# NEVER in this set: 7 ("delete" — other flows may purge it), 9/14 (completion
+# labels owned by the completion sweep), 1-5 (Kevin's manual workflow states),
+# 15/16 (automation-owned), and the non-numbered pipeline labels ("Invoice to
+# Airtable", "Send to Airtable", "Add to ... AT Board") which trigger flows.
+FILE_LABEL_ALLOW = {"6", "10", "11", "17", "18"}
 
 # State + digest live OUTSIDE the repo: the repo is public and the digest holds
 # senders and subjects. INBOUND_TRIAGE_DIR exists so selftest can use a tempdir.
@@ -227,10 +247,18 @@ def read_secret(path, what):
 
 def worker_post(path, payload):
     key = read_secret(TRIAGE_KEY_FILE, "gmail triage key")
+    # Every call names the triage mailbox explicitly — the worker's default
+    # account is the SENDER default, which is a different mailbox entirely.
+    payload = dict(payload)
+    payload.setdefault("account", TRIAGE_ACCOUNT)
     req = urllib.request.Request(
         WORKER_URL + path,
         data=json.dumps(payload).encode(),
-        headers={"Authorization": "Bearer " + key, "Content-Type": "application/json"},
+        # Cloudflare's browser integrity check bans the default Python-urllib
+        # user agent with error 1010 (found on the first live run, 24 Aug
+        # 2026); curl passes. Any honest non-default UA satisfies it.
+        headers={"Authorization": "Bearer " + key, "Content-Type": "application/json",
+                 "User-Agent": "od-inbound-triage/1.0"},
         method="POST",
     )
     try:
@@ -365,10 +393,22 @@ def cmd_scan(back_hours):
     }))
 
 
-def cmd_act(msg_id, action, reason):
+def cmd_act(msg_id, action, reason, label_num=None):
     ctx = read_scan_cache().get(msg_id, {})
+    digest_do = action
     if action == "archive":
         add, remove = [], ["INBOX"]
+    elif action == "file":
+        n = str(label_num or "")
+        if n not in FILE_LABEL_ALLOW:
+            fail("label %r is not a file destination. Allowed: %s. 7/9/14 and "
+                 "the workflow/automation labels are never applied by triage."
+                 % (n, sorted(FILE_LABEL_ALLOW)))
+        lbl = find_label(worker_labels(), n)
+        if not lbl:
+            fail("no Gmail label with prefix %r found" % n)
+        add, remove = [lbl["name"]], ["INBOX"]
+        digest_do = "file-%s" % n
     elif action in ("label12", "label13"):
         l8, l12, l13 = resolve_triage_labels()
         chosen = l12 if action == "label12" else l13
@@ -386,9 +426,9 @@ def cmd_act(msg_id, action, reason):
     else:
         fail("unknown action %r" % action)
     result = worker_post("/gmail/modify", {"ids": [msg_id], "addLabels": add, "removeLabels": remove})
-    digest_append({"id": msg_id, "do": action, "sender": ctx.get("sender", ""),
+    digest_append({"id": msg_id, "do": digest_do, "sender": ctx.get("sender", ""),
                    "subject": ctx.get("subject", ""), "reason": reason})
-    print(json.dumps({"done": action, "id": msg_id, "modified": result.get("modified")}))
+    print(json.dumps({"done": digest_do, "id": msg_id, "modified": result.get("modified")}))
 
 
 def cmd_note(msg_id, action, reason):
@@ -466,6 +506,9 @@ def selftest():
     except ValueError:
         pass
 
+    check("file allowlist excludes delete and completion labels",
+          not ({"7", "9", "14"} & FILE_LABEL_ALLOW))
+
     check("watermark advances clean", next_watermark(1000, []) == 1000)
     check("watermark pins to oldest unhandled", next_watermark(1000, [800, 400]) == 399)
     check("watermark frozen on truncation", next_watermark(1000, [], truncated=True, old_ms=50) == 50)
@@ -536,7 +579,7 @@ def main(argv):
         action = opt("--do")
         if not msg_id or not action:
             fail("act needs --id and --do")
-        cmd_act(msg_id, action, opt("--reason", ""))
+        cmd_act(msg_id, action, opt("--reason", ""), opt("--label-num"))
     elif cmd == "note":
         msg_id = opt("--id")
         action = opt("--do")
