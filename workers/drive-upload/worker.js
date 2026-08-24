@@ -55,9 +55,11 @@
 //                        as "you have not seen everything".
 //   POST /gmail/modify — { ids: [..], addLabels?: [..], removeLabels?: [..], account? }
 //                        Applies label changes; archive = removeLabels ["INBOX"].
-//                        Label NAMES resolve via the labels list; ALL-CAPS
-//                        names (INBOX, UNREAD) pass through as system ids, so
-//                        a user label named in all caps would need its raw id.
+//                        Label NAMES resolve via the labels list; raw user-label
+//                        ids (Label_123...) and ALL-CAPS system ids (INBOX,
+//                        UNREAD) pass through. A user label whose NAME is bare
+//                        all-caps would be misread as a system id — keep the
+//                        numbered-prefix naming this system already uses.
 //                        SPAM and TRASH are refused: this endpoint can label
 //                        and archive, never send, delete, or mark spam. Max 40 ids.
 
@@ -254,8 +256,9 @@ export default {
 
         // ------------------------------------------------------------------
         // Gmail triage — script-only, never browser-origin. Reads and labels
-        // Kevin's inbox for the Inbound Comms Triage agent. Same bearer gate
-        // as /send-email; requires the gmail.modify scope (see header docs).
+        // Kevin's inbox for the Inbound Comms Triage agent. Same STYLE of
+        // bearer gate as /send-email but a deliberately DIFFERENT key, so the
+        // triage credential cannot send. Requires the gmail.modify scope.
         // ------------------------------------------------------------------
         if (url.pathname === '/gmail/labels' || url.pathname === '/gmail/list' || url.pathname === '/gmail/modify') {
             // A separate key from /send-email on purpose: the triage runtime's
@@ -488,7 +491,8 @@ async function gmailModify(token, { ids, addLabels, removeLabels }) {
     const byName = new Map(labels.map(l => [l.name.toLowerCase(), l.id]));
     const resolve = (name) => {
         const s = String(name);
-        if (/^[A-Z_]+$/.test(s)) return s; // system label id (INBOX, UNREAD, …)
+        if (/^Label_\d+$/.test(s)) return s; // raw user-label id
+        if (/^[A-Z_]+$/.test(s)) return s;   // system label id (INBOX, UNREAD, …)
         const id = byName.get(s.toLowerCase());
         if (!id) throw new Error(`Unknown Gmail label: ${s}`);
         return id;

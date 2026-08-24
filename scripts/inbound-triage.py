@@ -182,8 +182,11 @@ def digest_append(entry):
 def write_scan_cache(messages):
     """id → {sender, subject, threadId, internalDate} for every message the
     scan returned, so act/note can log context without taking email text as
-    arguments. Merged over the existing cache (multi-cycle runs)."""
-    cache = read_scan_cache()
+    arguments. Merged over the existing cache (multi-cycle runs), trimmed to
+    30 days so it cannot accrete for ever."""
+    cutoff_ms = int((datetime.now() - timedelta(days=30)).timestamp() * 1000)
+    cache = {k: v for k, v in read_scan_cache().items()
+             if (v.get("internalDate") or cutoff_ms) >= cutoff_ms}
     for m in messages:
         cache[m["id"]] = {
             "sender": parse_bare_email((m.get("headers") or {}).get("from", "")),
@@ -332,6 +335,18 @@ def cmd_scan(back_hours):
 
     write_scan_cache(new_inbox + stale + stranded_8 + stranded_12)
 
+    # Record what this scan saw, so `mark` can ENFORCE the truncation freeze
+    # rather than trusting the caller to apply it. Only new_inbox truncation
+    # freezes the watermark: it is the only list the watermark governs.
+    state["last_scan_truncated"] = bool(new_trunc)
+    # A truncated FIRST run must also pin the backlog window: without a stored
+    # watermark the 7-day default rolls forward daily, and a sustained backlog
+    # would silently slide old mail out of the window. Storing the default
+    # freezes the floor; only `mark` moves it after a full drain.
+    if first_run:
+        state["watermark_ms"] = wm
+    write_state(state)
+
     print(json.dumps({
         "watermark_ms": wm,
         "first_run": first_run,
@@ -387,6 +402,14 @@ def cmd_note(msg_id, action, reason):
 
 def cmd_mark(upto_ms):
     state = read_state()
+    # ENFORCED truncation freeze (not just an instruction): the last scan
+    # having more inbox matches than it fetched means unseen OLDER mail exists,
+    # and any forward move would lose it. Refuse; re-scan until the listing is
+    # complete, then mark.
+    if state.get("last_scan_truncated") and int(upto_ms) > state.get("watermark_ms", 0):
+        fail("refusing to advance the watermark: the last scan was TRUNCATED, "
+             "so unseen older mail exists. Re-run scan until truncated is "
+             "false, then mark.")
     state["watermark_ms"] = int(upto_ms)
     write_state(state)
     print(json.dumps({"watermark_ms": state["watermark_ms"]}))
@@ -470,6 +493,18 @@ def selftest():
             digest_file = next(Path(tmp).glob("digest-*.jsonl"))
             row = json.loads(digest_file.read_text().splitlines()[0])
             check("digest has decision", row["do"] == "archive" and "ts" in row)
+            # The truncation freeze is ENFORCED, not advisory: mark must refuse
+            # to move forward while the last scan reported unseen older mail.
+            write_state({"watermark_ms": 42, "last_scan_truncated": True})
+            try:
+                cmd_mark(100)
+                check("mark refuses while truncated", False)
+            except SystemExit:
+                pass
+            check("watermark unchanged after refusal", read_state()["watermark_ms"] == 42)
+            write_state({"watermark_ms": 42, "last_scan_truncated": False})
+            cmd_mark(100)
+            check("mark advances when not truncated", read_state()["watermark_ms"] == 100)
         finally:
             del os.environ["INBOUND_TRIAGE_DIR"]
 

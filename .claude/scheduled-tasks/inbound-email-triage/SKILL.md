@@ -164,10 +164,12 @@ in Tasks `tblqB8b22hKBL4PF1`, base `appnqjDpqDniH3IRl`, with
 
 After each created task, log it: `note --id <id> --do task-created`.
 
-If more than 10 threads (Step 4 lanes plus Step 5 rescues combined) survive
-dedupe, create the 10 most important (tier-1 first, then oldest), log the
-rest with `note --do deferred`, leave their emails untouched, and report how
-many were deferred — a silent cap reads as "covered everything".
+**Run Step 5's dedupe BEFORE creating anything here**, so lane threads and
+stranded rescues compete in ONE priority queue. If more than 10 threads
+survive dedupe across both, create the 10 most important (tier-1 first, then
+oldest), log the rest with `note --do deferred`, leave their emails
+untouched, and report how many were deferred — a silent cap reads as
+"covered everything".
 
 ## Step 5 — The stranded check (the safety net)
 
@@ -189,14 +191,16 @@ Advance the watermark only past what was fully handled AND fully seen:
 
     python3 scripts/inbound-triage.py mark --upto <MS>
 
-- Everything triaged, created, or deliberately left, no failures, and NO
-  `truncated` flag on the final scan → MS = `now_ms` from Step 1.
-- Anything deferred by the cap, or any thread whose dedupe query or task
-  creation failed → MS = the oldest such message's `internalDate` minus 1,
-  so tomorrow's scan sees it again.
-- The final scan still `truncated` → do NOT advance the watermark at all.
-  Gmail lists newest-first, so the unseen mail is the OLDER mail; advancing
-  would lose it for good.
+- The final scan still `truncated` on `new_inbox` → do NOT advance the
+  watermark at all, whatever else happened. Gmail lists newest-first, so the
+  unseen mail is the OLDER mail; advancing would lose it for good. This rule
+  beats both bullets below, and the script ENFORCES it: `mark` refuses to
+  move forward after a truncated scan.
+- Otherwise: everything triaged, created, or deliberately left, and no
+  failures → MS = `now_ms` from Step 1.
+- Otherwise: anything deferred by the cap, or any thread whose dedupe query
+  or task creation failed → MS = the oldest such message's `internalDate`
+  minus 1, so tomorrow's scan sees it again.
 
 Then the score. `waiting` = messages still needing triage or a task after
 this run: deferred count + failed count + any stranded email still without a
