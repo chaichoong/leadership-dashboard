@@ -16,14 +16,17 @@ const REGISTER = 'tbl9msVjyQWslLOIZ';
 const DAILY_LOG = 'tbl6VQKVMnK0Q7hbJ';
 
 const tasksPage = read('os/tasks/index.html');
-const sysPage = read('os/systemisation/index.html');
+// The register and its panel moved from os/systemisation to the Leadership
+// → AI Agents page (os/agents/) on 25 Aug 2026 — Systemisation keeps only
+// the SOP-building flow and a pointer tab.
+const agentsPage = read('os/agents/index.html');
 const skills = read('js/skills.js');
 const dashboard = read('js/dashboard.js');
 const shim = read('os/systemisation/systemisation-shim.js');
 const spec = read('docs/supabase-schema-spec.md');
 
 describe('every owner surface reads the register', () => {
-  for (const [name, src] of [['Tasks & Projects', tasksPage], ['Systemisation', sysPage], ['Skills Library', skills]]) {
+  for (const [name, src] of [['Tasks & Projects', tasksPage], ['AI Agents page', agentsPage], ['Skills Library', skills]]) {
     it(`${name} references the register table`, () => {
       expect(src).toContain(REGISTER);
     });
@@ -36,9 +39,9 @@ describe('every owner surface reads the register', () => {
     expect(read('js/config.js')).toContain(REGISTER);
   });
 
-  it('Tasks & Projects and Systemisation both read the Daily Log', () => {
+  it('Tasks & Projects and the AI Agents page both read the Daily Log', () => {
     expect(tasksPage).toContain(DAILY_LOG);
-    expect(sysPage).toContain(DAILY_LOG);
+    expect(agentsPage).toContain(DAILY_LOG);
   });
 
   it('the dashboard counts through the shared module, never raw addition', () => {
@@ -51,16 +54,23 @@ describe('every owner surface reads the register', () => {
 });
 
 describe('the role-agent deep link has both halves', () => {
-  it('the Skills Library (same window) uses the localStorage handoff', () => {
-    expect(skills).toContain("localStorage.setItem('sys_open_role_agent'");
-    expect(sysPage).toContain("localStorage.getItem('sys_open_role_agent')");
-    expect(sysPage).toContain("localStorage.removeItem('sys_open_role_agent')");
+  it('the Skills Library (same window) uses the parent postMessage helper — the localStorage handoff raced a reloading iframe (24 Aug 2026)', () => {
+    expect(skills).toContain('deepLinkAgents({ agent: recId })');
+    expect(skills).not.toContain("localStorage.setItem('sys_open_role_agent'");
+    // sender in shared.js, receiver + boot handshake on the page
+    const shared = read('js/shared.js');
+    expect(shared).toContain('window.deepLinkAgents');
+    expect(shared).toContain("'agentsPageReady'");
+    expect(agentsPage).toContain("'agentsDeepLink'");
+    expect(agentsPage).toContain("{ type:'agentsPageReady' }");
+    // the boot-time localStorage consumption stays for straggler writers
+    expect(agentsPage).toContain("localStorage.getItem('sys_open_role_agent')");
   });
 
   it('the Tasks roster (new tab) uses the URL hash — the storage event would be stolen by the hidden shell iframe', () => {
     expect(tasksPage).toContain('index.html#agent=');
     expect(tasksPage).not.toContain("localStorage.setItem('sys_open_role_agent'");
-    expect(sysPage).toMatch(/#agent=\(rec\[A-Za-z0-9\]\+\)/);
+    expect(agentsPage).toMatch(/#agent=\(rec\[A-Za-z0-9\]\+\)/);
   });
 });
 
@@ -76,5 +86,26 @@ describe('the client build knows what it owes', () => {
     expect(spec).toContain('ai_agents');
     expect(spec).toContain('agent_daily_log');
     expect(spec).toMatch(/agents: bool/);
+  });
+});
+
+describe("the shell's badge poll mirrors the page's approval queue", () => {
+  // The sidebar badge is polled by js/shared.js BEFORE the tab is ever
+  // opened (trust surfaces report absence, 24 Aug 2026). Its population
+  // must be the SAME queue the page renders: identical formula, identical
+  // Kevin-lane rule — a drifted copy silently shows him the wrong count.
+  const shared = read('js/shared.js');
+
+  it('formula strings are identical', () => {
+    const m = shared.match(/AGENTS_BADGE_FORMULA = "([^"]+)"/);
+    expect(m).not.toBeNull();
+    expect(agentsPage).toContain(m[1]);
+  });
+
+  it('both filter to the Kevin lane on the same approver field', () => {
+    for (const src of [shared, agentsPage]) {
+      expect(src).toContain('fldLLAG5HQPEFEfE5');
+      expect(src).toContain('kevin@runpreneur.org.uk');
+    }
   });
 });
