@@ -132,7 +132,9 @@ describe('truncation honesty (the critical finding)', () => {
 
     it('the watermark freezes on truncation (selftest-backed) and the skill forbids advancing', () => {
         expect(script).toMatch(/def next_watermark\(max_ms, unhandled_ms_list, truncated=False/);
-        expect(skill).toMatch(/truncated.*do NOT advance the watermark/is);
+        expect(skill).toMatch(/truncated.*do NOT advance the\s+watermark/is);
+        // And the freeze is enforced in code, not just instructed.
+        expect(script).toMatch(/refusing to advance the watermark/);
     });
 
     it('stranded lookups use exact label ids, not label: query syntax, with a first-run control', () => {
