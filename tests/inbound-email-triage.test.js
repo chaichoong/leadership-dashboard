@@ -1,0 +1,173 @@
+// The Inbound Comms Triage agent sorts Kevin's inbox every morning and turns
+// actionable email into agent-routed tasks. Regressions to fear:
+//
+//  - the skill's task shape drifting away from what the Inbound Comms page
+//    and the dispatch engine expect (a human assigned again, an approver
+//    other than Kevin creeping back in, a dedupe key format the page cannot
+//    see) — inbound mail would then double-task or fall off the agent queue
+//    with no error;
+//  - the triage plumbing growing a way to SEND or DELETE — this agent is
+//    triage-only by Kevin's ruling, enforced by a separate read/label-only
+//    key and worker-side SPAM/TRASH refusal;
+//  - truncation dishonesty: Gmail lists newest-first, so a capped listing
+//    plus a blindly-advanced watermark silently loses the OLDEST mail for
+//    ever (the review's critical finding) — the pagination plumbing and the
+//    frozen-on-truncation watermark rule are what prevent it;
+//  - the daily Go Signal falling out of the daily-ops sequence, or drifting
+//    to run AFTER agent-dispatch so the tasks it creates sit a full day
+//    before any agent picks them up.
+//
+// Constants are compared against follow-up.html (the routing's source of
+// truth) rather than copied, so a rename there fails here.
+
+import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const skill = readFileSync(path.join(root, '.claude/scheduled-tasks/inbound-email-triage/SKILL.md'), 'utf8');
+const dailyOps = readFileSync(path.join(root, '.claude/scheduled-tasks/daily-ops/SKILL.md'), 'utf8');
+const dailyOpsDoc = readFileSync(path.join(root, 'docs/daily-ops-routine.md'), 'utf8');
+const followUp = readFileSync(path.join(root, 'follow-up.html'), 'utf8');
+const worker = readFileSync(path.join(root, 'workers/drive-upload/worker.js'), 'utf8');
+const script = readFileSync(path.join(root, 'scripts/inbound-triage.py'), 'utf8');
+
+function fromFollowUp(pattern, label) {
+    const m = followUp.match(pattern);
+    if (!m) throw new Error(`follow-up.html no longer defines ${label} — routing source of truth moved`);
+    return m[1];
+}
+
+describe('task shape matches the routing source of truth (follow-up.html)', () => {
+    it('routes to the AI CEO as Team Member, with no Assignee', () => {
+        expect(skill).toContain('reciHUAEcEkbctnZ6');   // AI CEO Team Members row
+        expect(skill).toContain('flduCtmQGpOA4eWaj');   // Team Member field
+        expect(skill).toMatch(/NO Assignee/);
+    });
+
+    it("Kevin is the only approver the skill ever writes (his ruling, 24 Aug 2026)", () => {
+        const mica = fromFollowUp(/AIRTABLE_ASSIGNEE_DEFAULT = '(usr\w+)'/, 'Mica collaborator id');
+        const kevin = fromFollowUp(/AIRTABLE_ASSIGNEE_KEVIN = '(usr\w+)'/, 'Kevin collaborator id');
+        const approver = fromFollowUp(/AIRTABLE_APPROVER_FIELD = '(fld\w+)'/, 'Approver field id');
+        expect(skill).toContain(kevin);
+        expect(skill).toContain(approver);
+        // Nothing the triage agent creates routes to Mica's approval, and the
+        // script refuses label8 as a destination outright.
+        expect(skill).not.toContain(mica);
+        expect(script).toMatch(/label8 is not a triage destination/);
+    });
+
+    it('creates the CURRENT #all/ dedupe key, matches both forms, one task per thread', () => {
+        // The page writes #all/ links (they survive archiving); its dedupe
+        // reads #all/ and legacy #inbox/. The skill must do the same or
+        // page-created and triage-created tasks stop seeing each other.
+        expect(followUp).toContain("'https://mail.google.com/mail/u/0/#all/' + email.threadId");
+        expect(skill).toContain('https://mail.google.com/mail/u/0/#all/{threadId}');
+        expect(skill).toMatch(/FIND\("#all\/\{threadId\}"/);
+        expect(skill).toMatch(/FIND\("#inbox\/\{threadId\}"/);
+        expect(skill).toContain('fldXf1p0vtHqOZcKl');
+        // Two overnight messages in one thread must not become two tasks.
+        expect(skill).toMatch(/one thread = one task/i);
+    });
+
+    it('keeps the tier-1 rule and the email-typed sender field', () => {
+        expect(skill).toMatch(/PREPARED only/);
+        expect(skill).toMatch(/BARE email address/);
+    });
+});
+
+describe('triage stays triage-only', () => {
+    it('the /gmail/* gate uses its own read/label key, never the send key', () => {
+        const triageBlock = worker.slice(worker.indexOf("'/gmail/labels'"), worker.indexOf('const allowOrigin'));
+        expect(triageBlock).toContain('GMAIL_TRIAGE_KEY');
+        expect(triageBlock).not.toContain('GMAIL_SEND_KEY');
+        expect(triageBlock).not.toContain('buildRawEmail');
+        expect(triageBlock).not.toContain('/messages/send');
+    });
+
+    it('worker /gmail/modify refuses SPAM and TRASH', () => {
+        expect(worker).toMatch(/Refusing to add \$\{name\}/);
+        expect(worker).toMatch(/SPAM\|TRASH/);
+    });
+
+    it('gmail.modify scope is requested at consent (without it every triage call 403s)', () => {
+        expect(worker).toContain('https://www.googleapis.com/auth/gmail.modify');
+    });
+
+    it('the script only ever calls the three read/label endpoints, with its own key', () => {
+        const endpoints = [...script.matchAll(/worker_post\("([^"]+)"/g)].map(m => m[1]);
+        expect(endpoints.length).toBeGreaterThan(0);
+        const allowed = new Set(['/gmail/labels', '/gmail/list', '/gmail/modify']);
+        for (const e of endpoints) expect(allowed.has(e), `unexpected worker endpoint ${e}`).toBe(true);
+        expect(script).toContain('gmail_triage_key');
+        expect(script).not.toContain('gmail_send_key');
+        // No raw Gmail API or send-path fallback outside the worker.
+        expect(script).not.toContain('gmail.googleapis.com');
+        expect(script).not.toContain('/send-email');
+    });
+
+    it('email text never rides on a command line — act/note take ids and own-words reasons only', () => {
+        expect(script).not.toMatch(/--sender|--subject/);
+        expect(script).toContain('read_scan_cache');
+        expect(skill).toMatch(/never text copied from the email/i);
+    });
+
+    it('the skill forbids archiving human mail without a task', () => {
+        expect(skill).toMatch(/NEVER archive an email written by a human/i);
+    });
+});
+
+describe('truncation honesty (the critical finding)', () => {
+    it('the worker paginates: pageToken in, nextPageToken out', () => {
+        expect(worker).toMatch(/pageToken/);
+        expect(worker).toMatch(/nextPageToken: nextPageToken \|\| null/);
+    });
+
+    it('the script follows pages, reports truncated, and the scan exposes the flags', () => {
+        expect(script).toMatch(/MAX_PAGES/);
+        expect(script).toMatch(/"truncated"/);
+    });
+
+    it('the watermark freezes on truncation (selftest-backed) and the skill forbids advancing', () => {
+        expect(script).toMatch(/def next_watermark\(max_ms, unhandled_ms_list, truncated=False/);
+        expect(skill).toMatch(/truncated.*do NOT advance the\s+watermark/is);
+        // And the freeze is enforced in code, not just instructed.
+        expect(script).toMatch(/refusing to advance the watermark/);
+    });
+
+    it('stranded lookups use exact label ids, not label: query syntax, with a first-run control', () => {
+        expect(script).toMatch(/label_ids=\[l8\["id"\]\]/);
+        expect(script).toMatch(/label_ids=\[l12\["id"\]\]/);
+        expect(script).not.toMatch(/label:%s/);
+        expect(skill).toMatch(/FIRST-RUN PROOF/);
+    });
+});
+
+describe('the daily Go Signal is wired', () => {
+    // Both are REPO copies: the mirror the drift check syncs to
+    // ~/.claude/scheduled-tasks/ at deploy, and the versioned doc. The
+    // scheduled-tasks-tracked test is what proves the live install matches.
+    for (const [name, text] of [['repo mirror of the routine', dailyOps], ['versioned doc', dailyOpsDoc]]) {
+        it(`${name} runs inbound-email-triage before agent-dispatch`, () => {
+            const triageAt = text.indexOf('inbound-email-triage/SKILL.md');
+            const dispatchAt = text.indexOf('agent-dispatch/SKILL.md');
+            expect(triageAt).toBeGreaterThan(-1);
+            expect(dispatchAt).toBeGreaterThan(-1);
+            expect(triageAt).toBeLessThan(dispatchAt);
+        });
+    }
+});
+
+describe('inbound-triage.py mechanics', () => {
+    it('offline selftest passes (labels, bare-email parse, metric string, watermark rules, cache, digest)', () => {
+        const out = execFileSync('python3', [path.join(root, 'scripts/inbound-triage.py'), 'selftest'], { encoding: 'utf8' });
+        expect(out).toMatch(/selftest OK/);
+    });
+
+    it('writes its Metric Score to its own register row', () => {
+        expect(script).toContain('recYy33zkoa099uM2');
+        expect(script).toContain('fldkGxrOlrfuLlH3J');
+    });
+});
