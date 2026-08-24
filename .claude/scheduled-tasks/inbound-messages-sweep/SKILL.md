@@ -30,7 +30,9 @@ From the main checkout (`/Users/kevinbrittain/Projects/leadership-dashboard`):
     python3 scripts/imessage-sweep.py scan
 
 - Exit 2 or an `error` key = the read is broken. Report it loudly; do not treat
-  as a quiet day.
+  as a quiet day. Continue with the rest of the sweep regardless — Step 2b's
+  `sent` check works even when `scan` is broken, and closed-but-open tasks are
+  their own trust problem.
 - The script already applied the hard rules: incoming AND UNREAD only (a
   message Kevin has read, on any device, is his to deal with), since the last
   sweep, group chats only where Kevin is mentioned. Note the counts

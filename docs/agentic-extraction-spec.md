@@ -70,12 +70,12 @@ These map onto Chen's 3-Tier Decision Framework (Tier 1 fully delegated / Tier 2
 
 ### A — Aim
 - **Prompt:** "In a sentence or two, what is this process for, and why does it matter to the business?"
-- **Captures:** the goal and the success test (the agent's accuracy yardstick).
-- **Pass criteria:** a clear outcome AND a concrete, checkable test of correctness. A vague purpose with no way to spot a mistake fails.
+- **Captures:** the goal — why the process exists and what outcome it is responsible for. (The success test and the ongoing score moved to C on 24 Aug 2026.)
+- **Pass criteria:** a clear outcome and why it matters. A vague purpose fails.
 - **Not Applicable:** never.
 - **Follow-ups when thin:**
-  - "You told me what it does, but not how you would spot a mistake. What does a wrong result look like?"
-  - "If you handed this to someone new, how would they know they had done it correctly?"
+  - "What would the business lose if this never happened again?"
+  - "If you handed this to someone new, what would you tell them it is FOR?"
 
 ### G — Go Signal
 - **Prompt:** "What tells you it is time to do this? A set time, an email arriving, a new record, a payment landing, or someone asking?"
@@ -157,7 +157,7 @@ The shared wording lives in `agentricCheckIntro()` / `agentricPassRules()` / `ag
 ## Design guardrails
 
 - **Cap the asks.** Issue at most about three follow-ups at a time, the ones that most block building the agent. Three quick questions feels helpful; fifteen feels like homework and kills the slickness.
-- **Allow Not Applicable, with limits.** E and N can never be N/A. A, G, T should resolve to a real value (use "manual / on demand", "report only", etc.). I and C may be N/A with a reason; R may be N/A for human tasks only.
+- **Allow Not Applicable, with limits.** Only I may be N/A for an agent (with a reason); R may also be N/A for a human task. A, G, E, N, T and C never — G resolves to "manual / on demand", T to "report only", rather than N/A. The single source is `AGENTIC_STAGES.naAllowed` in the page code; this list mirrors it.
 - **Be strict on judgement.** An agent passes R only when the decision reasoning is present. This is the most common silent failure.
 - **Never double-penalise.** Decision rules spoken inside Navigate count towards R.
 - **Make topping up easy.** Default to a typed or voice answer for small gaps. Re-recording is per stage, never the whole video, because the script is split by letter.

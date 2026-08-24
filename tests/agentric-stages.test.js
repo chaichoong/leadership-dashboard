@@ -35,7 +35,7 @@ function extractFn(name) {
 const stagesCode = extractConst('AGENTIC_STAGES');
 const STAGES = new Function(`${stagesCode} return AGENTIC_STAGES;`)();
 const normalise = new Function(
-  `${stagesCode} ${extractFn('normaliseReadiness')} return normaliseReadiness;`
+  `${stagesCode} ${extractFn('stageNaAllowed')} ${extractFn('normaliseReadiness')} return normaliseReadiness;`
 )();
 
 const allClear = (letters) => letters.map(l => ({ letter: l, status: 'Clear', reason: '' }));
@@ -45,15 +45,16 @@ describe('AGENTRIC stages (the framework constant)', () => {
     expect(STAGES.map(s => s.letter).join('')).toBe('AGENTRIC');
   });
 
-  it('R (Reasoning) exists and is never N/A by default (agent mode)', () => {
+  it('R (Reasoning) exists: never N/A for an agent, N/A allowed for a human task', () => {
     const r = STAGES.find(s => s.letter === 'R');
     expect(r.name).toBe('Reasoning');
-    expect(r.naAllowed).toBe(false);
+    expect(r.naAllowed).toEqual({ agent: false, human: true });
     expect(r.prompt.length).toBeGreaterThan(20);
   });
 
-  it('only I allows N/A in the constant', () => {
-    expect(STAGES.filter(s => s.naAllowed).map(s => s.letter)).toEqual(['I']);
+  it('N/A per mode: only I for agents; only I and R for humans', () => {
+    expect(STAGES.filter(s => s.naAllowed.agent).map(s => s.letter)).toEqual(['I']);
+    expect(STAGES.filter(s => s.naAllowed.human).map(s => s.letter)).toEqual(['R', 'I']);
   });
 
   it('C carries the score', () => {
