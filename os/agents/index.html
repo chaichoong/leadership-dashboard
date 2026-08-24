@@ -1198,15 +1198,15 @@ function renderRegister(){
         .sort((a,b)=>(gf(a,WF.name)||'').toLowerCase()<(gf(b,WF.name)||'').toLowerCase()?-1:1);
     // A search can hide the selected process agent; keep the selection and
     // bring the panel back when it reappears — never null it.
-    // One agent, one count: a workflow already linked to a register row via
-    // AG.workflow is the same agent seen twice — exclude it from the process
-    // list and the header count (dedupe restored from the Systemisation
-    // original; dropped in the move, review finding 24 Aug 2026).
+    // One agent, one count — in the HEADER COUNT only: a workflow linked to
+    // a register row via AG.workflow is the same agent seen twice, so it is
+    // counted once, but it KEEPS its place in the process list (feed,
+    // approvals, run-now live there and nowhere else). Restored from the
+    // Systemisation original, 24 Aug 2026.
     const linkedWfIds = new Set(allAgents.flatMap(a=>linkIds(gf(a,AG.workflow))));
-    const processWfs = agentWfs.filter(w=>!linkedWfIds.has(w.id));
     // A search can hide the selected process agent; keep the selection and
     // bring the panel back when it reappears — never null it.
-    const selWfVisible = !!(selectedAgentWf && processWfs.some(w=>w.id===selectedAgentWf));
+    const selWfVisible = !!(selectedAgentWf && agentWfs.some(w=>w.id===selectedAgentWf));
     countEl.textContent = allAgents.length +
         allWorkflows.filter(w=>{ const s=getWfSopData(w.id); return s && s.disposition && s.disposition.type==='agent' && !linkedWfIds.has(w.id); }).length;
 
@@ -1263,10 +1263,10 @@ function renderRegister(){
     html += strategicLayerSection();
 
     // 3. Process agents (workflow-based, video route)
-    html += `<div class="auto-wf-header" style="margin:18px 0 6px">Process agents <span style="color:var(--text-muted);font-weight:var(--fw-regular)">(${processWfs.length})</span></div>`;
+    html += `<div class="auto-wf-header" style="margin:18px 0 6px">Process agents <span style="color:var(--text-muted);font-weight:var(--fw-regular)">(${agentWfs.length})</span></div>`;
     if(String(_workflowsState).indexOf('error') === 0){
         html += `<div class="zone-error">Could not read the workflows: ${esc(String(_workflowsState).slice(7))}</div>`;
-    } else if(!processWfs.length){
+    } else if(!agentWfs.length){
         html += `<div style="font-size:var(--fs-xs);color:var(--text-muted);margin-bottom:10px">${q?'None match the search.':'None yet. Build a workflow\'s SOP on the Systemisation page, then choose "Autonomous agent" as how it runs — it appears here, ready to test.'}</div>`;
     } else {
         html += `<table class="wf-grid" style="margin-bottom:14px"><thead><tr>
@@ -1275,7 +1275,7 @@ function renderRegister(){
             <th style="width:150px">Awaiting your OK</th>
             <th>Actions</th>
         </tr></thead><tbody>`;
-        processWfs.forEach(w=>{
+        agentWfs.forEach(w=>{
             const a = getWfAgent(w.id);
             const meta = a && AGENT_STATES[a.state] ? AGENT_STATES[a.state] : { label:'DRAFT', bg:'var(--bg-subtle)', fg:'var(--text-muted)' };
             const sel = w.id===selectedAgentWf;
@@ -1296,7 +1296,7 @@ function renderRegister(){
     pane.innerHTML = html;
     restoreSearchFocus();
     if(selectedAgentId) renderRoleAgentPanel();
-    if(processWfs.length) fillAgentPendingCounts(processWfs.map(w=>w.id));
+    if(agentWfs.length) fillAgentPendingCounts(agentWfs.map(w=>w.id));
     if(selWfVisible) renderAgentPanel(selectedAgentWf);
 }
 
@@ -2095,6 +2095,7 @@ function getWfAgent(wfId){
     return (sop && sop.agent) ? sop.agent : null;
 }
 async function setWfAgent(wfId, agent){
+    _sopMemo.clear(); // in-place SOP edits can collide on the length-keyed memo
     const w = allWorkflows.find(x=>x.id===wfId);
     if(!w) return;
     const sop = getWfSopData(wfId) || {};
@@ -2461,6 +2462,7 @@ async function approveAgentActivity(actId){
         if((rec.fields['State']||'') !== 'Proposed'){
             toast('Already decided elsewhere — refreshing');
             invalidateAgentActivity();
+            btns.forEach(b=>b.disabled=false);
             const wfId = (rec.fields['Agent']||[])[0];
             if(wfId) renderAgentFeed(wfId);
             return;

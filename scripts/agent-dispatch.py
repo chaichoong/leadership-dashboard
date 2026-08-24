@@ -1240,8 +1240,13 @@ def cmd_verify(args):
                       if a.get("kind") in ("redo", "new")
                       and not a.get("tier1")]
     ceo = report.get("ceoReview")
+    try:  # the report is LLM-written; "3" must count as 3, junk as 0
+        ceo_reviewed = int(ceo.get("reviewed", 0)) if isinstance(ceo, dict) \
+            else 0
+    except (TypeError, ValueError):
+        ceo_reviewed = 0
     if non_t1_submits and not (isinstance(ceo, dict)
-                               and (ceo.get("reviewed", 0) > 0
+                               and (ceo_reviewed > 0
                                     or ceo.get("error"))):
         problems.append(
             f"{len(non_t1_submits)} non-tier-1 submissions but no CEO review "
