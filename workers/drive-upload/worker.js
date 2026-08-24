@@ -35,7 +35,7 @@
 //                       unless the task says otherwise).
 //   GET  /send-email/test — token health + which senders are connected.
 //
-// GMAIL TRIAGE (added 25 Aug 2026, Inbound Comms Triage agent): script-only
+// GMAIL TRIAGE (added 24 Aug 2026, Inbound Comms Triage agent): script-only
 // read + label endpoints so the daily triage run can sort Kevin's inbox
 // headlessly. All gated by Bearer <GMAIL_SEND_KEY>, same as /send-email.
 // They need the gmail.modify scope — a 403 from Google means the stored token
@@ -270,7 +270,7 @@ export default {
                 // Google answers 403 insufficientPermissions when the stored
                 // token predates the gmail.modify scope — name the fix.
                 const hint = /insufficient|PERMISSION_DENIED|403/i.test(e.message)
-                    ? ' If this is a permission error, re-grant once at /auth/gmail (the triage scope was added 25 Aug 2026).' : '';
+                    ? ' If this is a permission error, re-grant once at /auth/gmail (the triage scope was added 24 Aug 2026).' : '';
                 return jsonResponse({ error: e.message + hint }, 500);
             }
         }
@@ -408,7 +408,7 @@ function buildRawEmail({ to, subject, text, cc, from }) {
 }
 
 // ---------------------------------------------------------------------------
-// Gmail triage helpers (Inbound Comms Triage agent, 25 Aug 2026)
+// Gmail triage helpers (Inbound Comms Triage agent, 24 Aug 2026)
 // ---------------------------------------------------------------------------
 
 async function gmailLabels(token) {
