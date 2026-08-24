@@ -21,7 +21,7 @@
 // truth) rather than copied, so a rename there fails here.
 
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { readFileSync, existsSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -155,17 +155,35 @@ describe('truncation honesty (the critical finding)', () => {
     });
 });
 
-describe('the daily Go Signal is wired', () => {
-    // Both are REPO copies: the mirror the drift check syncs to
-    // ~/.claude/scheduled-tasks/ at deploy, and the versioned doc. The
-    // scheduled-tasks-tracked test is what proves the live install matches.
+describe("the Go Signal is the agent's own 9/1/5 schedule (Kevin, 24 Aug 2026)", () => {
+    const sched = JSON.parse(readFileSync(path.join(root, 'scripts/job-schedule.json'), 'utf8'));
+    const runner = readFileSync(path.join(root, 'scripts/inbound-triage-run.sh'), 'utf8');
+
+    it('job-schedule carries inbound-triage at 09:00, 13:00 and 17:00, wrapped', () => {
+        expect(sched['inbound-triage']).toBeDefined();
+        expect(sched['inbound-triage'].cron).toBe('0 9,13,17 * * *');
+        expect(sched['inbound-triage'].mode).toBe('wrapped');
+    });
+
+    it('the runner drives both lanes headlessly and cannot send', () => {
+        expect(runner).toContain('inbound-email-triage/SKILL.md');
+        expect(runner).toContain('inbound-messages-sweep/SKILL.md');
+        expect(runner).toContain('claude_oauth_token');
+        expect(runner).not.toContain('send-email');
+    });
+
+    it('the job name is NOT a skill folder, so the one-routine guard stays quiet', () => {
+        // check-routines.py treats any queue event whose name matches a
+        // ~/.claude/scheduled-tasks folder as a second Claude routine.
+        expect(existsSync(path.join(root, '.claude/scheduled-tasks/inbound-triage'))).toBe(false);
+    });
+
+    // Both are REPO copies: the mirror the drift check syncs live at deploy,
+    // and the versioned doc.
     for (const [name, text] of [['repo mirror of the routine', dailyOps], ['versioned doc', dailyOpsDoc]]) {
-        it(`${name} runs inbound-email-triage before agent-dispatch`, () => {
-            const triageAt = text.indexOf('inbound-email-triage/SKILL.md');
-            const dispatchAt = text.indexOf('agent-dispatch/SKILL.md');
-            expect(triageAt).toBeGreaterThan(-1);
-            expect(dispatchAt).toBeGreaterThan(-1);
-            expect(triageAt).toBeLessThan(dispatchAt);
+        it(`${name} no longer runs the triage lanes as phases, and records why`, () => {
+            expect(text).not.toMatch(/^\d+\. `~\/\.claude\/scheduled-tasks\/inbound-(email-triage|messages-sweep)/m);
+            expect(text).toContain('com.kevinbrittain.inbound-triage');
         });
     }
 });
