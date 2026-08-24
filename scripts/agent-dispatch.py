@@ -174,7 +174,13 @@ OPEN_STATUSES = ("Today", "Overdue")
 #
 # Raise it further if the eligible count ever approaches it. The real limits are
 # how long the run takes and Airtable's rate limit, neither of which is near.
-CAP_PER_RUN = 50
+#
+# 24 Aug 2026, Kevin's ruling during the Inbound Comms Triage build: REMOVE the
+# cap entirely. None = uncapped: every eligible piece of work runs every run,
+# hand-backs first (Kevin is waiting on them), then new work, then deferred.
+# The 14 Aug history above is why this is safe: the cap was already a ceiling,
+# not a pace, and every queue it created was pure starvation.
+CAP_PER_RUN = None
 
 # Of those slots, how many are HELD BACK for new work that no agent has touched.
 #
@@ -395,6 +401,16 @@ def select_worklist(handbacks, new_work, deferred, cap=None, floor=None):
     """
     cap = CAP_PER_RUN if cap is None else cap
     floor = NEW_WORK_FLOOR if floor is None else floor
+    if cap is None:
+        # UNCAPPED (Kevin, 24 Aug 2026): everything eligible runs. The floor
+        # only exists to share a scarce cap, so it is moot here; the lane
+        # order still holds because hand-backs are what Kevin waits on.
+        seen, chosen = set(), []
+        for t in list(handbacks) + list(new_work) + list(deferred):
+            if t["id"] not in seen:
+                seen.add(t["id"])
+                chosen.append(t)
+        return chosen
     if cap <= 0:
         return []
 

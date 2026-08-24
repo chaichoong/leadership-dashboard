@@ -99,13 +99,22 @@ describe('agent-dispatch worklist selection', () => {
     expect(src).not.toMatch(/worklist\s*=\s*combined\[:\s*CAP_PER_RUN\s*\]/);
   });
 
-  it('ships a cap and floor that actually raise throughput', () => {
-    // The whole point of the change. If someone drops the cap back to 5 the
-    // starvation returns, because the floor would exceed the cap.
-    const { cap, floor } = select(1, 1, 0);
-    expect(cap).toBeGreaterThanOrEqual(50);
-    expect(floor).toBeGreaterThan(0);
-    expect(floor).toBeLessThan(cap);
+  it('ships UNCAPPED (Kevin, 24 Aug 2026) — every eligible piece runs', () => {
+    // The shipped default is no cap at all. If someone reintroduces a number
+    // here, queued work starts waiting a day again and this fails.
+    const { cap } = select(1, 1, 0);
+    expect(cap).toBeNull();
+  });
+
+  it('with no cap, a huge day runs in full: hand-backs first, then new, then deferred', () => {
+    const { ids } = select(100, 500, 7);
+    expect(ids).toHaveLength(607);
+    expect(new Set(ids).size).toBe(607);
+    expect(ids[0]).toMatch(/^hb/);
+    expect(countOf(ids, 'new')).toBe(500);
+    expect(countOf(ids, 'def')).toBe(7);
+    // Hand-backs stay ahead of new work: Kevin is waiting on them.
+    expect(ids.slice(0, 100).every(id => id.startsWith('hb'))).toBe(true);
   });
 
   it('is a ceiling, not a target — a short queue runs in full and no more', () => {

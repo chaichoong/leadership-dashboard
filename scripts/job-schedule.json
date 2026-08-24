@@ -305,5 +305,14 @@
     "mode": "wrapped",
     "queued": false,
     "note": "alarms if daily-ops left no phase-1 mark by 08:00 London \u2014 the scheduler stamped lastRunAt on 15 Aug 2026 while delivering the run to no session, so only the mark counts. Reports on the routine, so it must never wait behind anything. London gate lives in the code, not this cron (Mac timezone moves with Kevin)."
+  },
+  "inbound-triage": {
+    "cron": "0 9,13,17 * * *",
+    "maxLateMinutes": 150,
+    "mode": "wrapped",
+    "note": "the Inbound Comms Triage agent's own Go Signal (Kevin, 24 Aug 2026): both lanes at three fixed slots. NOT a daily-ops phase by explicit ruling; a headless claude run, so the generous lateness keeps a wake-delayed slot worth running",
+    "needs": [
+      "network"
+    ]
   }
 }
