@@ -2136,8 +2136,34 @@
     }
     window.previewAutoReconcile = previewAutoReconcile;
 
+    // Guardrail gate: the AI Agents register is the CONTROL for the auto tier,
+    // not a label. At "Approval required" (Kevin's ruling, 24 Aug 2026, holds
+    // until accuracy reaches 95%) every transaction waits for his yes, so no
+    // auto write is allowed. Fails closed: an unreadable register means no auto.
+    async function autoAllowedByGuardrail() {
+        if (typeof PAT === 'undefined' || !PAT) return false;
+        try {
+            const resp = await fetch(`https://api.airtable.com/v0/${BASE_ID}/${TABLES.aiAgents}/${AGENT_RECON.recordId}?returnFieldsByFieldId=true`, {
+                headers: { 'Authorization': 'Bearer ' + PAT }
+            });
+            if (!resp.ok) { console.warn('Guardrail check failed:', resp.status); return false; }
+            const data = await resp.json();
+            const level = (data.fields || {})[AGENT_RECON.guardrail];
+            return level === 'Hybrid escalation' || level === 'Autonomous';
+        } catch (e) {
+            console.warn('Guardrail check failed:', e);
+            return false;
+        }
+    }
+
+    window.autoAllowedByGuardrail = autoAllowedByGuardrail;
+
     // The agent run: match, pick the near-certain tier, approve them, log for undo.
     async function runAutoReconcile() {
+        if (!(await autoAllowedByGuardrail())) {
+            if (typeof showToast === 'function') showToast('Auto-reconcile is off: the agent guardrail is Approval required');
+            return;
+        }
         let results;
         try { results = await runReconciliationMatching(); }
         catch (e) { if (typeof showToast === 'function') showToast('Auto-reconcile: matcher error'); return; }
