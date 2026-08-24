@@ -25,6 +25,17 @@ Your report speaks in counts, never content.
 
 ## Step 1 — iMessage (works headless, always runs)
 
+**PRE-DUMP RULE (24 Aug 2026):** in the scheduled triage slots, macOS grants
+the Messages-database permission to the JOB's root process, not to you — a
+direct chat.db read from inside your session is denied there. The runner
+pre-reads for you. So FIRST check
+`~/knowledge-os/logs/inbound-triage/scratch/imessage-scan.json`: if it exists
+and is fresher than 45 minutes, use its contents AS the scan output below and
+do not run the scan command. The same file carries the error JSON if the
+pre-read itself broke — that is still a broken read, report it loudly. If the
+file is missing or stale (you are running under daily-ops or by hand, where
+direct reads work), run the scan yourself:
+
 From the main checkout (`/Users/kevinbrittain/Projects/leadership-dashboard`):
 
     python3 scripts/imessage-sweep.py scan
@@ -58,9 +69,13 @@ the whole queue.
    is zero but a previous run reported creating tasks, the field match is
    broken — report the failure and skip this step; a broken query must never
    read as "nothing to close".
-2. For each open task from an iMessage:
+2. For each open task from an iMessage — same pre-dump rule as Step 1: if
+   `~/knowledge-os/logs/inbound-triage/scratch/imessage-sent.json` is fresher
+   than 45 minutes, filter ITS `outgoing` list by the task's `Inbound Sender`
+   handle instead of running the command (each entry has handle, time, and
+   normalised text). Otherwise:
    `python3 scripts/imessage-sweep.py sent --handle <Inbound Sender> --since-hours <hours since the task's createdTime, plus 24>`
-   Close ONLY if a `match_times` entry is LATER than the task record's
+   Close ONLY if a matching outgoing time is LATER than the task record's
    `createdTime` — an outgoing message before the task existed proves nothing
    (and a pre-sweep reply would have marked the message read anyway).
 3. Closing a task means exactly: Status `Completed`, Completion Date

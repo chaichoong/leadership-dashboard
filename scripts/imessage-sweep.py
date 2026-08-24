@@ -305,6 +305,46 @@ def sent_check(handle, contains, since_hours):
     return 0
 
 
+def sent_dump(since_hours):
+    """Every outgoing message of the last N hours, all handles, one read.
+
+    Exists for the scheduled triage slots (24 Aug 2026): macOS attributes the
+    chat.db permission to the launchd job's ROOT process (python3, which has
+    Full Disk Access), not to the claude binary the job later starts — so any
+    chat.db read made from inside claude is denied. The runner calls this
+    BEFORE claude and the skill filters the dump instead of calling `sent`
+    per task. Text is normalised the same way sent_check matches, truncated,
+    and the dump lands only in the PRIVATE scratch dir, never the repo.
+    """
+    conn = open_db()
+    since_ns = now_apple_ns() - int(since_hours * 3600 * 1e9)
+    rows = conn.execute(
+        """
+        SELECT h.id AS handle, m.text, m.attributedBody, m.date
+        FROM message m
+        LEFT JOIN handle h ON h.ROWID = m.handle_id
+        WHERE m.is_from_me = 1 AND m.date > ?
+          AND m.item_type = 0 AND COALESCE(m.associated_message_type, 0) = 0
+        ORDER BY m.date DESC
+        """,
+        (since_ns,),
+    ).fetchall()
+    out = []
+    for r in rows:
+        text = message_text(r["text"], r["attributedBody"])
+        if not text:
+            continue
+        out.append({
+            "handle": r["handle"] or "",
+            "time": apple_ns_to_iso(r["date"]),
+            "text": re.sub(r"\s+", " ", text).strip().lower()[:300],
+        })
+    conn.close()
+    print(json.dumps({"generated_at": datetime.now(tz=timezone.utc).isoformat(),
+                      "since_hours": since_hours, "outgoing": out}))
+    return 0
+
+
 def selftest():
     failures = []
 
@@ -362,6 +402,8 @@ def main(argv):
             print("sent requires --handle", file=sys.stderr)
             return 2
         return sent_check(handle, opt("--contains"), float(opt("--since-hours", "48")))
+    if cmd == "sentdump":
+        return sent_dump(float(opt("--since-hours", "200")))
     if cmd == "selftest":
         return selftest()
     print(f"unknown command {cmd}", file=sys.stderr)
