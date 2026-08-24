@@ -45,6 +45,7 @@ Single source of truth for file locations across the Operations Director Platfor
 Do not move skills between tiers without reason: project skills travel with the repo, personal skills apply everywhere, plugin skills are managed by the app.
 
 6. **Scheduled routines** — `~/.claude/scheduled-tasks/<name>/SKILL.md` is what the app runs; `.claude/scheduled-tasks/` in this repo is the reviewed mirror of the same files. Edit the live one, then `scripts/sync-scheduled-tasks.py --pull` and commit, so the change is reviewed. They are not symlinked on purpose: the app's handling of a symlinked task directory is unverified, and getting it wrong stops all eighteen routines at once.
+7. **Agent definitions** — `~/.claude/agents/<name>.md`: the AI workforce's system prompts. The 17 strategic agents (od-ceo, dept-*, worker-*), plus one file per BUILT role agent (first: `inbound-comms-response.md`, 25 Aug 2026 — its build session adds the file AND its `ROLE_AGENTS` line in `scripts/agent-dispatch.py` together). `GUARDRAILS.md` in the same folder is the shared contract every agent reads: trust-ramp gates, the AI-brain grounding paths, and the feedback-capture rule (Kevin's feedback lands in a role agent's register Learning Log, or a strategic agent's own `## Lessons from Kevin` section — see the agent-dispatch skill). Role agents' single source of truth stays their register row in Airtable (`tbl9msVjyQWslLOIZ`); the file operationalises it.
 
 ## 4. Google Drive (`My Drive/Claude/`)
 
