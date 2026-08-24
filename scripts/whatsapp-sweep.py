@@ -64,6 +64,12 @@ CONTEXT_MESSAGES = 10
 # as text or draft a reply to.
 TEXT_MESSAGE_TYPE = 0
 
+# Types an outgoing REPLY can arrive as. Kevin answers with a link or a photo as
+# often as with plain text, and ZMESSAGETYPE = 0 only counts the plain ones — so
+# a real reply read as silence and the task could never auto-close. 7 (link) and
+# 8 (attachment/media) were both seen in live chats on 24 Aug 2026.
+REPLY_MESSAGE_TYPES = (0, 7, 8)
+
 # JID suffixes. Group chats end @g.us and need a mention; the rest are broadcast
 # surfaces with no reply expected.
 GROUP_SUFFIX = "@g.us"
@@ -304,6 +310,47 @@ def mark(upto_ts):
     return 0
 
 
+def strip_display_suffix(identifier):
+    """'447881924047@s.whatsapp.net (Roy Lavin)' -> '447881924047@s.whatsapp.net'.
+
+    Airtable's Inbound Sender is written for a human to read, so a JID often
+    arrives with the contact name appended. Matching that whole string against
+    ZCONTACTJID finds nothing.
+    """
+    if not identifier:
+        return identifier
+    return re.sub(r"\s*\([^)]*\)\s*$", "", identifier).strip()
+
+
+def resolve_chat(conn, identifier):
+    """Map an Inbound Sender value to chat session primary keys.
+
+    THE BUG THIS EXISTS FOR (findings 149, 202, 234, 261, 305, 321, 335)
+    --------------------------------------------------------------------
+    sent_check used to match `s.ZCONTACTJID = ?` and nothing else. A task whose
+    Inbound Sender holds a GROUP CHAT DISPLAY NAME ("Any excuse") matched zero
+    rows, and the command returned exit 0 with {"found": false} — byte-identical
+    to Kevin genuinely never replying. The task could never be auto-closed, the
+    bug was filed seven times, and every run reported success.
+
+    So: resolve first, on the JID or on the display name, and let the CALLER
+    tell the two outcomes apart. Returns a list of Z_PK values, empty when the
+    identifier matches no chat at all.
+    """
+    cleaned = strip_display_suffix(identifier)
+    rows = conn.execute(
+        "SELECT Z_PK FROM ZWACHATSESSION WHERE ZCONTACTJID = ?", (cleaned,)
+    ).fetchall()
+    if rows:
+        return [r["Z_PK"] for r in rows], "jid"
+    rows = conn.execute(
+        "SELECT Z_PK FROM ZWACHATSESSION WHERE ZPARTNERNAME = ?", (cleaned,)
+    ).fetchall()
+    if rows:
+        return [r["Z_PK"] for r in rows], "name"
+    return [], None
+
+
 def sent_check(jid, contains, since_hours):
     """Has an outgoing WhatsApp message containing `contains` gone to `jid` recently?
 
@@ -311,31 +358,52 @@ def sent_check(jid, contains, since_hours):
     re-sends, so a crash between send and complete can never double-message
     somebody. Matched on ZTEXT, which WhatsApp populates directly (unlike
     Messages, where the text usually hides in attributedBody).
+
+    Three outcomes, and they are DIFFERENT on purpose:
+      exit 0, resolved true,  found true   — a reply exists
+      exit 0, resolved true,  found false  — the chat exists and holds no reply
+      exit 2, resolved false               — the identifier matches no chat;
+                                             this is a broken lookup, not silence
     """
     conn = open_db()
+    pks, matched_on = resolve_chat(conn, jid)
+    if not pks:
+        conn.close()
+        # Loud, and non-zero. A lookup miss that exits 0 reads as "no reply" and
+        # that is exactly how this survived six earlier findings.
+        print(json.dumps({
+            "resolved": False,
+            "error": "no chat session matches this identifier",
+            "identifier": jid,
+        }), file=sys.stderr)
+        return 2
+
     since_ts = now_apple_ts() - since_hours * 3600
     needle = re.sub(r"\s+", " ", contains).strip().lower()[:200] if contains else None
+    placeholders = ",".join("?" for _ in pks)
+    types = ",".join("?" for _ in REPLY_MESSAGE_TYPES)
     rows = conn.execute(
         """
-        SELECT m.ZTEXT AS text, m.ZMESSAGEDATE AS date
+        SELECT m.ZTEXT AS text, m.ZMESSAGEDATE AS date, m.ZMESSAGETYPE AS msg_type
         FROM ZWAMESSAGE m
-        JOIN ZWACHATSESSION s ON s.Z_PK = m.ZCHATSESSION
         WHERE m.ZISFROMME = 1 AND m.ZMESSAGEDATE > ?
-          AND s.ZCONTACTJID = ? AND m.ZMESSAGETYPE = ?
+          AND m.ZCHATSESSION IN (%s) AND m.ZMESSAGETYPE IN (%s)
         ORDER BY m.ZMESSAGEDATE DESC
-        """,
-        (since_ts, jid, TEXT_MESSAGE_TYPE),
+        """ % (placeholders, types),
+        tuple([since_ts] + list(pks) + list(REPLY_MESSAGE_TYPES)),
     ).fetchall()
     matches = []
     for r in rows:
         text = (r["text"] or "").strip()
         if needle is None:
-            if text:
-                matches.append(apple_ts_to_iso(r["date"]))
+            # No needle: ANY outgoing message counts as a reply, including a
+            # link or a photo, which carry no ZTEXT at all.
+            matches.append(apple_ts_to_iso(r["date"]))
         elif text and needle in re.sub(r"\s+", " ", text).strip().lower():
             matches.append(apple_ts_to_iso(r["date"]))
     conn.close()
-    print(json.dumps({"found": bool(matches), "count": len(matches),
+    print(json.dumps({"resolved": True, "matched_on": matched_on,
+                      "found": bool(matches), "count": len(matches),
                       "outgoing_checked": len(rows), "match_times": matches[:5]}))
     return 0
 
@@ -385,6 +453,27 @@ def selftest():
 
     unknown = {"chat_jid": None, "chat_name": None, "member_jid": None, "member_name": None}
     check("missing jid degrades safely", sender_identity(unknown) == ("unknown", ""))
+
+    # Identifier cleaning for `sent`. Inbound Sender is written for a human, so
+    # a JID usually arrives with the contact name appended and a group chat
+    # arrives as a display name with no JID at all. Both matched zero rows and
+    # returned exit 0 found:false — filed as findings 149, 202, 234, 261, 305,
+    # 321 and 335 before the resolver existed.
+    check("suffix stripped",
+          strip_display_suffix("447881924047@s.whatsapp.net (Roy Lavin)")
+          == "447881924047@s.whatsapp.net")
+    check("bare jid untouched",
+          strip_display_suffix("447881924047@s.whatsapp.net")
+          == "447881924047@s.whatsapp.net")
+    check("display name untouched", strip_display_suffix("Any excuse") == "Any excuse")
+    check("name with brackets kept",
+          strip_display_suffix("Any excuse (2)") == "Any excuse")
+    check("none safe", strip_display_suffix(None) is None)
+
+    # A reply sent as a link or a photo is still a reply.
+    check("link is a reply type", 7 in REPLY_MESSAGE_TYPES)
+    check("attachment is a reply type", 8 in REPLY_MESSAGE_TYPES)
+    check("text is a reply type", TEXT_MESSAGE_TYPE in REPLY_MESSAGE_TYPES)
 
     check("otp automated", likely_automated("447900000001@s.whatsapp.net",
                                             "Your verification code is 482913"))

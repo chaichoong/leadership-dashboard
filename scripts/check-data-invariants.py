@@ -392,6 +392,36 @@ INVARIANTS = [
         "fields": ["Request", "Status", "Requested At", "Page ID"],
     },
     {
+        # Finding 20260816-ceo-huddle-154. Queried 16 Aug 2026: 74 tasks at
+        # Status=Approval, of which 63 had NO Approver — 85% of the live queue.
+        # Re-measured 24 Aug: 76 and 43. agent-dispatch.py comments that the
+        # Approver field decides who approves and that Inbound Comms sets it, so
+        # a blank is not a policy, it is a gap: cmd_submit falls back to Kevin,
+        # and Kevin becomes the approver of almost everything by accident.
+        #
+        # That is the mechanism behind a queue that only grows. One gate, one
+        # person, and no agent has cleared the promotion bar, so nothing thins
+        # out on its own either.
+        #
+        # This makes the blank LOUD. It deliberately does NOT decide the routing
+        # default — who a tier-2 approval belongs to is Kevin's call, not a
+        # fixer's.
+        "name": "approval-queue-names-its-approver",
+        "table": TASKS,
+        "incident": "Aug 2026 — 63 of 74 approval-queue items had no Approver, so everything defaulted to Kevin and the queue grew from 42 to 70 in two days",
+        "asserts": "Status = Approval => an Approver is set",
+        "violation": 'AND({Status} = "Approval", {Approver} = "")',
+        # Every task in the approval queue: the exact population a blank
+        # Approver misroutes. Measured live 24 Aug 2026 — control 76,
+        # violation 43, so the probe genuinely fires rather than reading clean.
+        "control": '{Status} = "Approval"',
+        "control_means": "tasks sitting at Status=Approval (the population the Approver field routes)",
+        # TRUE for blank and populated alike, so a renamed field 422s loudly
+        # instead of returning a quiet zero.
+        "field_probe": "OR(LEN({Approver} & '') >= 0, LEN({Status} & '') >= 0)",
+        "fields": ["Task Name", "Status", "Approver"],
+    },
+    {
         # Kevin's four-line shape, adopted 21 Aug 2026 after 137 cold emails produced
         # zero replies. The first touch asks a question the reader can answer in one
         # line; the booking link moves to touch 2 or 3, after they have replied. The
@@ -554,6 +584,80 @@ def check_bms_duplicates(pat):
     return violations, control
 
 
+UC_PREFIX = "UC verification:"
+
+# "UC verification: A Tenant £450.00 due 5 September" — the rent date is the
+# period the task covers, and it is only ever written into the name.
+_UC_DUE = re.compile(r"\bdue\s+(\d{1,2})\s+([A-Za-z]+)", re.IGNORECASE)
+
+
+def _uc_rent_period(task_name):
+    """The rent month a UC task covers, as 'day Month', or None."""
+    m = _UC_DUE.search(task_name or "")
+    if not m:
+        return None
+    return m.group(2).lower()
+
+
+def check_uc_duplicates(pat):
+    """One tenancy must not hold two OPEN UC verification tasks for one rent month.
+
+    Found 2026-08-19 and again on 20 Aug (findings 231 and 260): four tenancies
+    each held two byte-identical open tasks — same name, same due date, same
+    assignee — and every pair was created in the SAME SECOND. There are two
+    creators, js/arrears.js in the browser and scripts/uc-task-sync.py on a
+    schedule, and both deduped against a list read minutes before the write.
+    Whichever read first, both then POSTed.
+
+    Mica sees the same Universal Credit call listed twice and has no way to tell
+    which one to work. Nothing errors, and the earlier guard test
+    (tests/sync-invariants/uc-task-duplicate.spec.js) mocks /v0/**, so it stubs
+    out the only layer where this is visible — real Airtable state.
+
+    "Another row shares my tenancy and month" is a group-by, not a row
+    predicate, so a filterByFormula cannot express it. Hence a scan.
+
+    Returns (violations, control_population).
+    """
+    records = scan_all(pat, TASKS, ["Task Name", "Status", "Tenancies"])
+    groups = {}
+    control = 0
+    for r in records:
+        fields = r.get("fields", {})
+        name = str(fields.get("Task Name") or "")
+        if not name.startswith(UC_PREFIX):
+            continue
+        control += 1  # every UC verification task, open or not
+        status = fields.get("Status")
+        if isinstance(status, dict):
+            status = status.get("name")
+        if status == "Completed":
+            continue
+        tenancies = fields.get("Tenancies") or []
+        tenancy = tenancies[0] if tenancies else None
+        if isinstance(tenancy, dict):
+            tenancy = tenancy.get("id")
+        period = _uc_rent_period(name)
+        if not tenancy or not period:
+            continue
+        groups.setdefault((tenancy, period), []).append({"id": r["id"], "name": name})
+
+    violations = []
+    for (tenancy, period), rows in sorted(groups.items()):
+        if len(rows) > 1:
+            violations.append({
+                "tenancy": tenancy,
+                "rent_month": period,
+                "copies": len(rows),
+                "ids": sorted(x["id"] for x in rows),
+                # The names are byte-identical in the observed cases; showing one
+                # is enough to find them, and a tenant's name is not printed
+                # because this report is committed to a PUBLIC repo.
+                "same_name": len({x["name"] for x in rows}) == 1,
+            })
+    return violations, control
+
+
 KPI_LIBRARY_JS = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "js", "kpi-library.js")
 
 
@@ -706,6 +810,13 @@ SCANS = [
         "incident": "Aug 2026 — 11 duplicate Real Estate months split every monthly figure since Apr 2025; Oct 2025 revenue read 36,682.65 against a true 37,180.65",
         "control_means": "Business Monthly Summary rows carrying a key (the population a duplicate splits)",
         "run": check_bms_duplicates,
+    },
+    {
+        "name": "one-open-uc-task-per-tenancy-month",
+        "asserts": "one tenancy + one rent month => at most one OPEN UC verification task",
+        "incident": "Aug 2026 — four tenancies each held two byte-identical open UC tasks, every pair created in the same second; two creators (js/arrears.js and scripts/uc-task-sync.py) both deduped against a list read before the write. The fixture guard mocks /v0/** so it cannot see it",
+        "control_means": "UC verification tasks of any status (the population a duplicate splits)",
+        "run": check_uc_duplicates,
     },
     {
         "name": "no-reimport-duplicates",

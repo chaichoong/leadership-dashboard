@@ -30,20 +30,28 @@ const SCRUB = resolve(ROOT, 'scripts/report_scrub.py');
 // Drive the REAL Python patterns. Re-implementing them in JS would guard a copy
 // and let the shipped regex rot (recon-vendor-key.test.js learned this the hard
 // way). Python and JS regex dialects differ on exactly the lookbehinds used here.
-function scrub(samples) {
+// `roster` is passed explicitly so a test never depends on the machine's real
+// name roster (which lives outside the repo and is empty on a clean clone).
+// [] means "no names configured", which is what the pattern tests want.
+function scrub(samples, roster = []) {
   const script = `
 import importlib.util, json, sys
 spec = importlib.util.spec_from_file_location('rs', ${JSON.stringify(SCRUB)})
 m = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(m)
+roster = json.loads(sys.argv[2])
 out = {'selftest': m.selftest(), 'scrubbed': {}}
 for s in json.loads(sys.argv[1]):
-    text, hits = m.scrub(s)
+    text, hits = m.scrub(s, names=roster)
     out['scrubbed'][s] = {'text': text, 'hits': [k for k, _ in hits]}
 print(json.dumps(out))
 `;
   return JSON.parse(
-    execFileSync('python3', ['-c', script, JSON.stringify(samples)], { encoding: 'utf8' })
+    execFileSync(
+      'python3',
+      ['-c', script, JSON.stringify(samples), JSON.stringify(roster)],
+      { encoding: 'utf8' }
+    )
   );
 }
 
@@ -97,6 +105,68 @@ describe('report_scrub masks personal data', () => {
   });
 });
 
+// ─── THE NAME RULE ───────────────────────────────────────────────────
+//
+// Regression origin: 24 Aug 2026, finding 20260821-task-hygiene-sweep-286.
+// Phone numbers, emails and postcodes have a SHAPE, so a regex finds them in
+// text nobody has read. A person's name does not. Four tracked task-sweep
+// reports named an individual tenant against a rent-arrears task, and one named
+// a family member against a 2023/24 tax liability and the debt collector
+// chasing it — in a PUBLIC repo. The working tree was redacted BY HAND on
+// 21 Aug, which is the same non-control the phone masking already replaced.
+//
+// Names are masked from a roster kept OUTSIDE the repo. A checked-in list of
+// the people we must not name would leak exactly the names it protects, so
+// every test below uses a fixture roster.
+//
+// Back-tested: deleting the name pattern from scrub() makes the first two fail,
+// and removing the roster_problems() call from the collector makes the last one
+// report "WOULD COLLECT" instead of refusing.
+describe('report_scrub masks rostered names', () => {
+  const ROSTER = ['Jane Tenantington', 'Aa Bb Cc'];
+
+  it('masks a rostered name, whatever the case or spacing', () => {
+    const a = 'Chase Jane Tenantington for August rent';
+    const b = 'chase JANE  TENANTINGTON for august rent';
+    const r = scrub([a, b], ROSTER).scrubbed;
+    expect(r[a].text).toBe('Chase [name redacted] for August rent');
+    expect(r[a].hits).toContain('name');
+    expect(r[b].text).not.toContain('TENANTINGTON');
+  });
+
+  it('leaves a lone first name and a longer word that merely contains one', () => {
+    // A scrubber that mangles ordinary report text is one somebody turns off.
+    const samples = ['Jane closed 4 tasks', 'Tenantingtonshire Council sent a bill'];
+    const r = scrub(samples, ROSTER).scrubbed;
+    for (const s of samples) expect(r[s].text, `mangled: ${s}`).toBe(s);
+  });
+
+  it('masks nothing when no roster is configured (which is why the collector refuses)', () => {
+    const s = 'Chase Jane Tenantington for August rent';
+    expect(scrub([s], []).scrubbed[s].text).toBe(s);
+  });
+
+  it('the collector refuses to copy anything when the roster is empty', () => {
+    // The control. "No names configured" and "no names present" produce
+    // identical output, and only one of them is safe in a public repo.
+    let code = 0;
+    let output = '';
+    try {
+      output = execFileSync(
+        'python3',
+        [resolve(ROOT, 'scripts/collect-routine-reports.py'), '--check'],
+        { cwd: ROOT, encoding: 'utf8', env: { ...process.env, OD_REDACT_NAMES: '/dev/null' } }
+      );
+    } catch (err) {
+      code = err.status;
+      output = `${err.stdout || ''}${err.stderr || ''}`;
+    }
+    expect(code, 'an empty roster must stop the collection').toBe(1);
+    expect(output).toMatch(/roster is missing or empty/);
+    expect(output).not.toMatch(/WOULD COLLECT/);
+  });
+});
+
 describe('no tracked monitoring report contains personal data', () => {
   const files = execFileSync('git', ['ls-files', 'monitoring/'], { cwd: ROOT, encoding: 'utf8' })
     .split('\n')
@@ -116,5 +186,38 @@ describe('no tracked monitoring report contains personal data', () => {
       if (hits) offenders.push(`${f}: ${hits.length} hit(s)`);
     }
     expect(offenders, 'a raw phone number is in the public repo').toEqual([]);
+  });
+
+  it('contains no name from the local roster (skipped where no roster exists)', () => {
+    // This is the check that would have caught finding 286. It can only run
+    // where the roster does — a clean clone and CI have no roster and no way to
+    // get one, and that is the point: the list of people to protect must not be
+    // in the repo. It DOES run on the machine that publishes, which is the one
+    // that matters, and the pre-push gate runs there.
+    const script = `
+import importlib.util, json, sys
+spec = importlib.util.spec_from_file_location('rs', ${JSON.stringify(SCRUB)})
+m = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(m)
+roster = m.load_roster()
+out = {'roster': len(roster), 'offenders': []}
+if roster:
+    for path in json.loads(sys.argv[1]):
+        with open(path, encoding='utf-8') as fh:
+            text = fh.read()
+        _, hits = m.scrub(text, names=roster)
+        n = sum(1 for kind, _ in hits if kind == 'name')
+        if n:
+            out['offenders'].append('%s: %d name(s)' % (path, n))
+print(json.dumps(out))
+`;
+    const res = JSON.parse(
+      execFileSync('python3', ['-c', script, JSON.stringify(files)], {
+        cwd: ROOT,
+        encoding: 'utf8',
+      })
+    );
+    if (!res.roster) return; // no roster on this machine — nothing to assert
+    expect(res.offenders, 'a rostered name is in the public repo').toEqual([]);
   });
 });

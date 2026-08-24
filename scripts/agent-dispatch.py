@@ -963,11 +963,155 @@ def cmd_submit(args):
     if is_tier1:
         fields[AF["approver"]] = {"email": KEVIN_AIRTABLE_EMAIL}
     patch_task(args.task, fields)
+
+    # READ THE RECORD BACK (finding 20260823-queue-fixer-329).
+    #
+    # SKILL.md step 4 has told the dispatcher since 19 Aug that submit "reads
+    # the record back and exits non-zero if the Agent Output is empty or the
+    # Status did not move". It did not. Its only get_task was the approver
+    # lookup BEFORE the patch, so a submit was recorded green on the strength of
+    # a 200 — which is exactly how a finished tier-1 deliverable with a
+    # five-day court deadline came to sit on disk with an empty Agent Output and
+    # nothing alarmed.
+    #
+    # A PATCH returning 200 says the request was accepted. It does not say the
+    # field holds what you sent: a truncated write, a field-permission change or
+    # an automation firing on the same record all return 200 and leave the task
+    # unsubmitted. The dispatcher acts on the exit code, so the exit code has to
+    # mean something.
+    check = get_task(args.task).get("fields", {}) or {}
+    stored = (check.get(AF["agentOutput"]) or "").strip()
+    status = check.get(AF["status"])
+    if not stored:
+        sys.exit(
+            f"ERROR: submit of {args.task} did not stick — Agent Output is EMPTY "
+            "after the write.\n"
+            "       The PATCH returned 200 and the field is blank, so the work "
+            "has NOT reached Kevin.\n"
+            "       Do not record this task as submitted. Retry the submit."
+        )
+    if status != "Approval":
+        sys.exit(
+            f"ERROR: submit of {args.task} did not stick — Status is "
+            f"{status!r}, not 'Approval'.\n"
+            "       The task is not in the approval queue and Kevin will never "
+            "see it. Retry the submit."
+        )
+
     print(json.dumps({"submitted": args.task,
                       "agent": AGENTS[args.agent]["name"],
                       "type": args.type, "tier1": is_tier1,
                       "approver": approver_email,
-                      "chars": len(output)}))
+                      "chars": len(output),
+                      # Proof, not assertion: what the record HOLDS, read back
+                      # after the write.
+                      "verified": {"storedChars": len(stored), "status": status}}))
+
+
+RUN_LOG_ROOT = os.path.join(
+    os.path.expanduser("~"), "knowledge-os", "logs", "agent-dispatch"
+)
+
+
+def run_dirs(limit=3):
+    """The most recent run directories, newest last. Names sort chronologically."""
+    if not os.path.isdir(RUN_LOG_ROOT):
+        return []
+    dirs = sorted(
+        d for d in os.listdir(RUN_LOG_ROOT)
+        if os.path.isdir(os.path.join(RUN_LOG_ROOT, d))
+    )
+    return [os.path.join(RUN_LOG_ROOT, d) for d in dirs[-limit:]]
+
+
+def deliverables_on_disk(limit=3):
+    """{taskId: path} for every finished deliverable in the recent run dirs.
+
+    A finished deliverable is RUNDIR/TASKID.md — one level up from the agent's
+    own working directory, which is RUNDIR/TASKID/. Anything inside the working
+    directory is scratch and is deliberately not looked at.
+    """
+    found = {}
+    for d in run_dirs(limit):
+        for name in sorted(os.listdir(d)):
+            if not name.endswith(".md"):
+                continue
+            task_id = name[:-3]
+            if not task_id.startswith("rec"):
+                continue
+            path = os.path.join(d, name)
+            if os.path.isfile(path) and os.path.getsize(path) > 0:
+                found[task_id] = path  # newest run wins
+    return found
+
+
+def cmd_reconcile(args):
+    """Name every finished deliverable on disk that never reached Airtable.
+
+    WHY THIS EXISTS (finding 20260824-agent-dispatch-336)
+    ------------------------------------------------------
+    SKILL.md step 1 has mandated `agent-dispatch.py reconcile` as the FIRST
+    action of every run since 19 Aug 2026. The subparser list was queue, route,
+    escalate, handover, submit, annotate, intent, complete, verify. Running it
+    exited 2 with "invalid choice: reconcile", so the control the skill leans on
+    has never once run.
+
+    What it catches: a run that died between an agent writing RUNDIR/TASKID.md
+    and the submit call. The work exists, it is finished, and the Airtable
+    record still carries an empty Agent Output — so it appears in no surface
+    Kevin looks at and nothing alarms, because nothing recorded the action. On
+    19 Aug that was a tier-1 deliverable with a five-day court deadline.
+
+    Exits 1 when there are orphans, so a dispatcher that ignores the output
+    still cannot proceed past one.
+    """
+    disk = deliverables_on_disk(args.runs)
+    orphans, checked, errors = [], 0, []
+    for task_id, path in sorted(disk.items()):
+        try:
+            rec = get_task(task_id)
+        except Exception as exc:  # noqa: BLE001 - a deleted task must not stop the sweep
+            errors.append({"task": task_id, "error": str(exc)})
+            continue
+        checked += 1
+        fields = rec.get("fields", {}) or {}
+        if (fields.get(AF["agentOutput"]) or "").strip():
+            continue
+        orphans.append({
+            "task": task_id,
+            "name": fields.get(AF["name"]),
+            "status": fields.get(AF["status"]),
+            "deliverable": path,
+            "bytes": os.path.getsize(path),
+        })
+
+    # THE CONTROL. "No orphans" and "found no deliverables to look at" print the
+    # same reassuring line, and only one of them is good news. If the run
+    # directories hold nothing, say so as a WARNING and exit non-zero: a
+    # reconcile that inspected nothing has not proved anything.
+    out = {
+        "runDirs": [os.path.basename(d) for d in run_dirs(args.runs)],
+        "deliverablesFound": len(disk),
+        "recordsChecked": checked,
+        "orphans": orphans,
+        "errors": errors,
+    }
+    print(json.dumps(out, indent=1))
+    if not disk:
+        print("WARNING: no deliverables found in the last %d run directories — "
+              "nothing was verified. This is not the same as 'no orphans'."
+              % args.runs, file=sys.stderr)
+        return 1
+    if orphans:
+        print("ERROR: %d finished deliverable(s) never reached Airtable. Submit "
+              "each one BEFORE working anything new." % len(orphans),
+              file=sys.stderr)
+        return 1
+    if errors:
+        print("ERROR: %d task(s) could not be read; treat as unreconciled."
+              % len(errors), file=sys.stderr)
+        return 1
+    return 0
 
 
 def cmd_annotate(args):
@@ -1228,12 +1372,23 @@ def main():
     v = sub.add_parser("verify")
     v.add_argument("--report", required=True)
 
+    rc = sub.add_parser("reconcile",
+                        help="name finished deliverables on disk whose Airtable "
+                             "record still has an empty Agent Output")
+    rc.add_argument("--runs", type=int, default=3,
+                    help="how many recent run directories to inspect")
+
     args = p.parse_args()
-    {"queue": cmd_queue, "route": cmd_route, "escalate": cmd_escalate,
-     "handover": cmd_handover, "submit": cmd_submit, "annotate": cmd_annotate,
-     "intent": cmd_intent, "complete": cmd_complete,
-     "verify": cmd_verify}[args.cmd](args)
+    # RETURN the handler's exit code. Before 24 Aug 2026 the result was
+    # discarded, so a command that signalled failure by returning 1 still exited
+    # 0 and every caller read it as success. The handlers that refuse by calling
+    # sys.exit() were unaffected, which is why nothing looked wrong.
+    return {"queue": cmd_queue, "route": cmd_route, "escalate": cmd_escalate,
+            "handover": cmd_handover, "submit": cmd_submit,
+            "annotate": cmd_annotate, "intent": cmd_intent,
+            "complete": cmd_complete, "verify": cmd_verify,
+            "reconcile": cmd_reconcile}[args.cmd](args) or 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
