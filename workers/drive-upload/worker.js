@@ -37,21 +37,29 @@
 //
 // GMAIL TRIAGE (added 24 Aug 2026, Inbound Comms Triage agent): script-only
 // read + label endpoints so the daily triage run can sort Kevin's inbox
-// headlessly. All gated by Bearer <GMAIL_SEND_KEY>, same as /send-email.
+// headlessly. Gated by Bearer <GMAIL_TRIAGE_KEY> — deliberately NOT the send
+// key, so the credential the triage runtime holds cannot send email. Fails
+// closed if the secret is unset.
 // They need the gmail.modify scope — a 403 from Google means the stored token
 // predates this change (gmail.send only): re-grant once at /auth/gmail.
 //   POST /gmail/labels — { account? } → every label's { id, name }.
-//   POST /gmail/list   — { q, maxResults?, account? } → messages matching the
-//                        Gmail search q, each with headers, snippet, labelIds,
-//                        internalDate and a plain-text body excerpt. Read-only.
-//                        Max 25 per call: each message is its own Gmail fetch
-//                        and the worker has a 50-subrequest budget.
+//   POST /gmail/list   — { q?, labelIds?, maxResults?, pageToken?, account? }
+//                        Messages matching a Gmail search q and/or exact
+//                        labelIds (preferred for label lookups — no query
+//                        syntax to silently mis-parse), each with headers,
+//                        snippet, labelIds, internalDate and a plain-text body
+//                        excerpt. Read-only. Max 25 per call (each message is
+//                        its own Gmail fetch and the worker has a
+//                        50-subrequest budget); `nextPageToken` is returned
+//                        when more remain — callers MUST treat its presence
+//                        as "you have not seen everything".
 //   POST /gmail/modify — { ids: [..], addLabels?: [..], removeLabels?: [..], account? }
 //                        Applies label changes; archive = removeLabels ["INBOX"].
-//                        Label NAMES resolve via the labels list; ALL-CAPS ids
-//                        (INBOX, UNREAD) pass through. SPAM and TRASH are
-//                        refused: this endpoint can label and archive, never
-//                        send, delete, or mark spam. Max 40 ids.
+//                        Label NAMES resolve via the labels list; ALL-CAPS
+//                        names (INBOX, UNREAD) pass through as system ids, so
+//                        a user label named in all caps would need its raw id.
+//                        SPAM and TRASH are refused: this endpoint can label
+//                        and archive, never send, delete, or mark spam. Max 40 ids.
 
 // Kevin's ruling, 6 Aug 2026: emails go from this account unless the task
 // specifies another connected sender.
@@ -250,8 +258,10 @@ export default {
         // as /send-email; requires the gmail.modify scope (see header docs).
         // ------------------------------------------------------------------
         if (url.pathname === '/gmail/labels' || url.pathname === '/gmail/list' || url.pathname === '/gmail/modify') {
+            // A separate key from /send-email on purpose: the triage runtime's
+            // credential must not be able to send mail. Fails closed when unset.
             const auth = request.headers.get('Authorization') || '';
-            if (!env.GMAIL_SEND_KEY || auth !== `Bearer ${env.GMAIL_SEND_KEY}`) {
+            if (!env.GMAIL_TRIAGE_KEY || auth !== `Bearer ${env.GMAIL_TRIAGE_KEY}`) {
                 return jsonResponse({ error: 'Forbidden' }, 403);
             }
             if (request.method !== 'POST') return jsonResponse({ error: 'POST required' }, 405);
@@ -420,15 +430,22 @@ async function gmailLabels(token) {
     return { labels: labels.map(l => ({ id: l.id, name: l.name, type: l.type })) };
 }
 
-async function gmailList(token, { q, maxResults }) {
+async function gmailList(token, { q, labelIds, maxResults, pageToken }) {
     // Hard cap 25: the list call plus one get per message must stay inside the
-    // worker's 50-subrequest budget alongside the token refresh.
+    // worker's 50-subrequest budget alongside the token refresh. Callers
+    // paginate with pageToken; nextPageToken in the response means MORE REMAIN.
     const cap = Math.min(Math.max(Number(maxResults) || 25, 1), 25);
-    const listRes = await fetch(`https://gmail.googleapis.com/gmail/v1/users/me/messages?q=${encodeURIComponent(q || 'in:inbox')}&maxResults=${cap}`, {
+    const params = new URLSearchParams({ maxResults: String(cap) });
+    if (q) params.set('q', q);
+    // Exact label matching — no free-text label: syntax for Gmail to mis-parse.
+    for (const id of (Array.isArray(labelIds) ? labelIds : [])) params.append('labelIds', String(id));
+    if (!q && !(Array.isArray(labelIds) && labelIds.length)) params.set('q', 'in:inbox');
+    if (pageToken) params.set('pageToken', String(pageToken));
+    const listRes = await fetch(`https://gmail.googleapis.com/gmail/v1/users/me/messages?${params}`, {
         headers: { Authorization: `Bearer ${token}` },
     });
     if (!listRes.ok) throw new Error('Gmail list failed: ' + await listRes.text());
-    const { messages = [], resultSizeEstimate } = await listRes.json();
+    const { messages = [], resultSizeEstimate, nextPageToken } = await listRes.json();
     const out = [];
     for (const m of messages) {
         const msgRes = await fetch(`https://gmail.googleapis.com/gmail/v1/users/me/messages/${m.id}?format=full`, {
@@ -453,7 +470,7 @@ async function gmailList(token, { q, maxResults }) {
             body: extractPlainText(msg.payload).slice(0, 4000),
         });
     }
-    return { messages: out, resultSizeEstimate };
+    return { messages: out, resultSizeEstimate, nextPageToken: nextPageToken || null };
 }
 
 async function gmailModify(token, { ids, addLabels, removeLabels }) {

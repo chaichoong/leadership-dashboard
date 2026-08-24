@@ -3,44 +3,55 @@
 
 WHY THIS EXISTS
 The triage agent (AI Agents register row recYy33zkoa099uM2) sorts Kevin's
-inbox every morning: actionable emails become labelled, agent-routed tasks;
-machine noise is archived; nothing is ever sent, replied to, or deleted. The
-JUDGEMENT lives in the skill (~/.claude/scheduled-tasks/inbound-email-triage/
-SKILL.md) and in the agent's compiled prompt. This script is the mechanics:
+inbox every morning: actionable emails become agent-routed tasks with Kevin as
+the initial approver, machine noise is archived, and nothing is ever sent,
+replied to, or deleted. The JUDGEMENT lives in the skill
+(~/.claude/scheduled-tasks/inbound-email-triage/SKILL.md) and in the agent's
+compiled prompt. This script is the mechanics:
 
   * talks to the drive-upload worker's /gmail/* endpoints (the only headless
-    path into Gmail — the browser page needs Kevin's session);
-  * keeps the watermark so each run picks up where the last one stopped;
+    path into Gmail — the browser page needs Kevin's session). Those
+    endpoints hold a TRIAGE-ONLY key: it can read and label, never send;
+  * keeps the watermark so each run picks up where the last one stopped, and
+    reports TRUNCATION honestly — a capped listing must never let the
+    watermark advance past mail nobody saw;
+  * caches each scan's sender/subject per message id, so later `act` calls
+    never take email-controlled text as command-line input (a subject line is
+    attacker-controlled; it must never pass through a shell);
   * appends every decision to a PRIVATE digest log, so a wrong call is
     auditable and reversible (the repo is public; message content must never
     reach monitoring/ or any committed file);
   * writes the agent's Metric Score ("N waiting; at zero X of last 7 days")
     to its own register row, per the AGENTIC Conclusion & Score stage.
 
-The worker endpoints can label and archive, never send, delete, or mark spam
-(enforced worker-side too). Archive = remove from inbox; the email stays in
-All Mail and every label it carries, so every action here is reversible.
+Archive = remove from inbox; the email keeps every label and stays in All
+Mail, so every action here is reversible.
 
 USAGE
-  inbound-triage.py labels                    resolve the triage labels (8/12/13)
+  inbound-triage.py labels                    every Gmail label (id + name),
+                                              with the triage lanes resolved
   inbound-triage.py scan [--back-hours N]     JSON: new inbox mail since the
-                                              watermark (re-reads N hours behind
-                                              it, default 12), stale inbox mail
-                                              older than 2 days, and everything
-                                              on labels 8/12 from the last 14
-                                              days (for the stranded-task check)
-  inbound-triage.py act --id MSGID --do label8|label12|label13|archive
-                        [--reason R] [--sender S] [--subject SUBJ]
-                                              apply one triage decision + log it
-  inbound-triage.py note --id MSGID --do leave|task-created|duplicate|deferred
-                        [--reason R] [--sender S] [--subject SUBJ]
+                                              watermark (re-reading N hours
+                                              behind it, default 12), stale
+                                              inbox mail older than 2 days, and
+                                              everything on the source labels
+                                              from the last 14 days (stranded
+                                              check). Each list carries a
+                                              `truncated` flag — see Step 6 of
+                                              the skill for what that forbids.
+  inbound-triage.py act --id MSGID --do label12|label13|archive [--reason R]
+                                              apply one triage decision + log
+                                              it (sender/subject come from the
+                                              scan cache, never from argv)
+  inbound-triage.py note --id MSGID --do leave|task-created|duplicate|deferred [--reason R]
                                               log a no-Gmail-change decision
   inbound-triage.py mark --upto MS            advance the watermark (epoch ms)
   inbound-triage.py score --waiting N         record today's waiting count and
                                               write Metric Score to the register
   inbound-triage.py selftest                  offline checks of the pure helpers
 
-SECRETS: worker key at ~/.config/od/gmail_send_key, Airtable PAT at
+SECRETS: triage worker key at ~/.config/od/gmail_triage_key (read/label only,
+distinct from the send key by design), Airtable PAT at
 ~/.config/od/airtable_pat. Read from file, never printed, never in argv.
 """
 
@@ -55,13 +66,17 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 
 WORKER_URL = "https://drive-upload.kevinbrittain.workers.dev"
-GMAIL_KEY_FILE = Path.home() / ".config/od/gmail_send_key"
+TRIAGE_KEY_FILE = Path.home() / ".config/od/gmail_triage_key"
 AIRTABLE_PAT_FILE = Path.home() / ".config/od/airtable_pat"
 
 AIRTABLE_BASE = "appnqjDpqDniH3IRl"
 AGENTS_TABLE = "tbl9msVjyQWslLOIZ"
 TRIAGE_AGENT_ROW = "recYy33zkoa099uM2"   # "Inbound Comms Triage" in AI Agents
 METRIC_SCORE_FIELD = "fldkGxrOlrfuLlH3J"  # singleLineText — current reading
+
+# One list call returns at most 25 (the worker's subrequest budget); we follow
+# nextPageToken up to this many pages per query, then report truncated=True.
+MAX_PAGES = 4
 
 # State + digest live OUTSIDE the repo: the repo is public and the digest holds
 # senders and subjects. INBOUND_TRIAGE_DIR exists so selftest can use a tempdir.
@@ -73,13 +88,6 @@ def base_dir():
 # Pure helpers (covered by selftest)
 # ---------------------------------------------------------------------------
 
-def gmail_query_name(label_name):
-    """Gmail search syntax for a label name: spaces become hyphens.
-    "8: task created" → "8:-task-created" (the form the Gmail routines have
-    always used and Gmail accepts)."""
-    return label_name.replace(" ", "-")
-
-
 def find_label(labels, prefix):
     """First label whose name starts "<prefix>: " or "<prefix>. " — the same
     prefix convention follow-up.html matches with /^8[.:]\\s/."""
@@ -88,6 +96,17 @@ def find_label(labels, prefix):
         if pat.match(l.get("name", "")):
             return l
     return None
+
+
+def parse_bare_email(from_header):
+    """Bare address from a From header: '"Name" <a@b.com>' → 'a@b.com'.
+    Airtable's Inbound Sender field is type email; the raw header would be
+    rejected or stored as garbage."""
+    m = re.search(r"<([^<>\s]+@[^<>\s]+)>", from_header or "")
+    if m:
+        return m.group(1)
+    m = re.search(r"[^\s<>\"',;]+@[^\s<>\"',;]+", from_header or "")
+    return m.group(0) if m else ""
 
 
 def metric_string(history, today_iso):
@@ -107,11 +126,14 @@ def metric_string(history, today_iso):
     return "%d waiting; at zero %d of last 7 days" % (waiting, zero_days)
 
 
-def next_watermark(max_ms, unhandled_ms_list):
-    """Watermark rule (same as the iMessage sweep): advance to max_ms only when
-    everything seen was handled. Any deferred or failed item pins the watermark
-    just before the OLDEST of them, so tomorrow's scan sees it again. A
-    watermark that passes an untasked message loses it for good."""
+def next_watermark(max_ms, unhandled_ms_list, truncated=False, old_ms=0):
+    """Watermark rule. Advance to max_ms only when everything seen was handled
+    AND the scan saw everything (not truncated). Any deferred or failed item
+    pins the watermark just before the OLDEST of them. A truncated scan pins
+    it where it was: Gmail lists newest-first, so the unseen messages are the
+    OLDER ones, and advancing at all would lose them for good."""
+    if truncated:
+        return old_ms
     if not unhandled_ms_list:
         return max_ms
     return min(unhandled_ms_list) - 1
@@ -124,7 +146,7 @@ def trim_history(history, keep_days=30, today=None):
 
 
 # ---------------------------------------------------------------------------
-# State + digest
+# State, digest, scan cache
 # ---------------------------------------------------------------------------
 
 def read_state():
@@ -133,9 +155,10 @@ def read_state():
         return {}
     try:
         return json.loads(p.read_text())
-    except (json.JSONDecodeError, OSError) as e:
-        # A corrupt state file must be loud: silently restarting the watermark
-        # would re-create a week of tasks (dedupe is the only guard left).
+    except (ValueError, OSError) as e:
+        # ValueError covers JSONDecodeError AND UnicodeDecodeError. A corrupt
+        # state file must be loud: silently restarting the watermark would
+        # re-create a week of tasks (dedupe is the only guard left).
         fail("state file unreadable at %s: %s" % (p, e))
 
 
@@ -156,6 +179,33 @@ def digest_append(entry):
         f.write(json.dumps(entry) + "\n")
 
 
+def write_scan_cache(messages):
+    """id → {sender, subject, threadId, internalDate} for every message the
+    scan returned, so act/note can log context without taking email text as
+    arguments. Merged over the existing cache (multi-cycle runs)."""
+    cache = read_scan_cache()
+    for m in messages:
+        cache[m["id"]] = {
+            "sender": parse_bare_email((m.get("headers") or {}).get("from", "")),
+            "subject": ((m.get("headers") or {}).get("subject", ""))[:200],
+            "threadId": m.get("threadId", ""),
+            "internalDate": m.get("internalDate"),
+        }
+    d = base_dir()
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "scan-cache.json").write_text(json.dumps(cache))
+
+
+def read_scan_cache():
+    p = base_dir() / "scan-cache.json"
+    if not p.exists():
+        return {}
+    try:
+        return json.loads(p.read_text())
+    except (ValueError, OSError):
+        return {}
+
+
 # ---------------------------------------------------------------------------
 # Transport
 # ---------------------------------------------------------------------------
@@ -173,7 +223,7 @@ def read_secret(path, what):
 
 
 def worker_post(path, payload):
-    key = read_secret(GMAIL_KEY_FILE, "gmail worker key")
+    key = read_secret(TRIAGE_KEY_FILE, "gmail triage key")
     req = urllib.request.Request(
         WORKER_URL + path,
         data=json.dumps(payload).encode(),
@@ -182,23 +232,44 @@ def worker_post(path, payload):
     )
     try:
         with urllib.request.urlopen(req, timeout=120) as res:
-            return json.loads(res.read().decode())
+            body = res.read().decode()
     except urllib.error.HTTPError as e:
-        body = e.read().decode(errors="replace")[:500]
+        detail = e.read().decode(errors="replace")[:500]
         if e.code == 409:
             fail("Gmail not connected on the worker (409). Kevin grants once at "
-                 "%s/auth/gmail — then retry. Detail: %s" % (WORKER_URL, body))
-        fail("worker %s answered %d: %s" % (path, e.code, body))
+                 "%s/auth/gmail — then retry. Detail: %s" % (WORKER_URL, detail))
+        fail("worker %s answered %d: %s" % (path, e.code, detail))
     except (urllib.error.URLError, TimeoutError) as e:
         fail("worker %s unreachable: %s" % (path, e))
+    try:
+        return json.loads(body)
+    except ValueError:
+        fail("worker %s returned non-JSON (%s...)" % (path, body[:120]))
 
 
 def worker_labels():
     return worker_post("/gmail/labels", {}).get("labels", [])
 
 
-def worker_list(q, max_results=25):
-    return worker_post("/gmail/list", {"q": q, "maxResults": max_results}).get("messages", [])
+def worker_list(q=None, label_ids=None, max_pages=MAX_PAGES):
+    """Follow nextPageToken up to max_pages. Returns (messages, truncated).
+    truncated=True means Gmail had MORE matches than we fetched — the caller
+    must not treat the listing as complete."""
+    messages, token = [], None
+    for _ in range(max_pages):
+        payload = {}
+        if q:
+            payload["q"] = q
+        if label_ids:
+            payload["labelIds"] = label_ids
+        if token:
+            payload["pageToken"] = token
+        data = worker_post("/gmail/list", payload)
+        messages.extend(data.get("messages", []))
+        token = data.get("nextPageToken")
+        if not token:
+            return messages, False
+    return messages, True
 
 
 def airtable_patch_metric(text):
@@ -214,16 +285,16 @@ def airtable_patch_metric(text):
             return json.loads(res.read().decode())
     except urllib.error.HTTPError as e:
         fail("register Metric Score write failed (%d): %s" % (e.code, e.read().decode(errors="replace")[:300]))
-    except (urllib.error.URLError, TimeoutError) as e:
-        fail("Airtable unreachable writing Metric Score: %s" % e)
+    except (urllib.error.URLError, TimeoutError, ValueError) as e:
+        fail("Airtable unreachable or unreadable writing Metric Score: %s" % e)
 
 
 # ---------------------------------------------------------------------------
 # Commands
 # ---------------------------------------------------------------------------
 
-def resolve_triage_labels():
-    labels = worker_labels()
+def resolve_triage_labels(labels=None):
+    labels = labels if labels is not None else worker_labels()
     l8 = find_label(labels, "8")
     l12 = find_label(labels, "12")
     l13 = find_label(labels, "13")
@@ -235,31 +306,43 @@ def resolve_triage_labels():
 
 
 def cmd_labels():
-    l8, l12, l13 = resolve_triage_labels()
-    print(json.dumps({"label8": l8, "label12": l12, "label13": l13}, indent=1))
+    labels = worker_labels()
+    l8, l12, l13 = resolve_triage_labels(labels)
+    print(json.dumps({
+        "label8": l8, "label12": l12, "label13": l13,
+        "all_user_labels": [{"id": l["id"], "name": l["name"]}
+                            for l in labels if l.get("type") != "system"],
+    }, indent=1))
 
 
 def cmd_scan(back_hours):
-    l8, l12, l13 = resolve_triage_labels()
+    labels = worker_labels()
+    l8, l12, l13 = resolve_triage_labels(labels)
     state = read_state()
     now_ms = int(datetime.now().timestamp() * 1000)
     first_run = "watermark_ms" not in state
     wm = state.get("watermark_ms", now_ms - 7 * 86400 * 1000)
     after_s = max(0, wm // 1000 - back_hours * 3600)
 
-    new_inbox = worker_list("in:inbox -in:chats after:%d" % after_s)
-    stale = worker_list("in:inbox -in:chats older_than:2d")
-    stranded_8 = worker_list("label:%s newer_than:14d" % gmail_query_name(l8["name"]))
-    stranded_12 = worker_list("label:%s newer_than:14d" % gmail_query_name(l12["name"]))
+    new_inbox, new_trunc = worker_list(q="in:inbox -in:chats after:%d" % after_s)
+    stale, stale_trunc = worker_list(q="in:inbox -in:chats older_than:2d")
+    # Stranded lookups use exact label IDs — no query syntax to mis-parse.
+    stranded_8, s8_trunc = worker_list(label_ids=[l8["id"]], q="newer_than:14d")
+    stranded_12, s12_trunc = worker_list(label_ids=[l12["id"]], q="newer_than:14d")
+
+    write_scan_cache(new_inbox + stale + stranded_8 + stranded_12)
 
     print(json.dumps({
         "watermark_ms": wm,
         "first_run": first_run,
         "now_ms": now_ms,
-        "labels": {"label8": l8["name"], "label12": l12["name"],
-                   "label13": l13["name"] if l13 else None},
+        "labels": {"label8": {"id": l8["id"], "name": l8["name"]},
+                   "label12": {"id": l12["id"], "name": l12["name"]},
+                   "label13": {"id": l13["id"], "name": l13["name"]} if l13 else None},
         "counts": {"new_inbox": len(new_inbox), "stale": len(stale),
                    "stranded_8": len(stranded_8), "stranded_12": len(stranded_12)},
+        "truncated": {"new_inbox": new_trunc, "stale": stale_trunc,
+                      "stranded_8": s8_trunc, "stranded_12": s12_trunc},
         "new_inbox": new_inbox,
         "stale": stale,
         "stranded_8": stranded_8,
@@ -267,31 +350,38 @@ def cmd_scan(back_hours):
     }))
 
 
-ACT_LABEL = {"label8": "8", "label12": "12", "label13": "13"}
-
-
-def cmd_act(msg_id, action, reason, sender, subject):
+def cmd_act(msg_id, action, reason):
+    ctx = read_scan_cache().get(msg_id, {})
     if action == "archive":
         add, remove = [], ["INBOX"]
-    elif action in ACT_LABEL:
+    elif action in ("label12", "label13"):
         l8, l12, l13 = resolve_triage_labels()
-        chosen = {"label8": l8, "label12": l12, "label13": l13}[action]
+        chosen = l12 if action == "label12" else l13
         if not chosen:
             fail("label for %s not found in Gmail" % action)
         # Gmail's "move to label": add the label, take it out of the inbox —
         # exactly what Kevin's manual move does.
         add, remove = [chosen["name"]], ["INBOX"]
+    elif action == "label8":
+        # Kevin's ruling, 24 Aug 2026: the triage agent routes nothing to
+        # Mica's approval lane — the AI CEO handles her lane's work with Kevin
+        # approving. Label 8 stays hers for manual use only.
+        fail("label8 is not a triage destination (Kevin's ruling, 24 Aug 2026): "
+             "actionable mail goes to label12")
     else:
         fail("unknown action %r" % action)
     result = worker_post("/gmail/modify", {"ids": [msg_id], "addLabels": add, "removeLabels": remove})
-    digest_append({"id": msg_id, "do": action, "sender": sender, "subject": subject, "reason": reason})
+    digest_append({"id": msg_id, "do": action, "sender": ctx.get("sender", ""),
+                   "subject": ctx.get("subject", ""), "reason": reason})
     print(json.dumps({"done": action, "id": msg_id, "modified": result.get("modified")}))
 
 
-def cmd_note(msg_id, action, reason, sender, subject):
+def cmd_note(msg_id, action, reason):
     if action not in ("leave", "task-created", "duplicate", "deferred"):
         fail("unknown note %r" % action)
-    digest_append({"id": msg_id, "do": action, "sender": sender, "subject": subject, "reason": reason})
+    ctx = read_scan_cache().get(msg_id, {})
+    digest_append({"id": msg_id, "do": action, "sender": ctx.get("sender", ""),
+                   "subject": ctx.get("subject", ""), "reason": reason})
     print(json.dumps({"noted": action, "id": msg_id}))
 
 
@@ -326,15 +416,16 @@ def selftest():
             failures.append(name)
             print("FAIL %s" % name)
 
-    check("query name hyphens", gmail_query_name("8: task created") == "8:-task-created")
-    check("query name plain", gmail_query_name("12: Kevin to respond") == "12:-Kevin-to-respond")
-
     labels = [{"id": "La", "name": "8: task created"}, {"id": "Lb", "name": "12: Kevin to respond"},
               {"id": "Lc", "name": "13: Maintenance"}, {"id": "Ld", "name": "128: decoy"}]
     check("find 8", find_label(labels, "8")["id"] == "La")
     check("find 12", find_label(labels, "12")["id"] == "Lb")
     check("find 13", find_label(labels, "13")["id"] == "Lc")
     check("no prefix over-match", find_label(labels, "1") is None)
+
+    check("bare email from angle form", parse_bare_email('"Amy B" <amy@ex.com>') == "amy@ex.com")
+    check("bare email from plain form", parse_bare_email("amy@ex.com") == "amy@ex.com")
+    check("bare email from junk", parse_bare_email("no address here") == "")
 
     today = date.today()
     hist = {today.isoformat(): 0}
@@ -354,6 +445,8 @@ def selftest():
 
     check("watermark advances clean", next_watermark(1000, []) == 1000)
     check("watermark pins to oldest unhandled", next_watermark(1000, [800, 400]) == 399)
+    check("watermark frozen on truncation", next_watermark(1000, [], truncated=True, old_ms=50) == 50)
+    check("truncation beats clean-handled", next_watermark(1000, [800], truncated=True, old_ms=50) == 50)
 
     trimmed = trim_history({"2020-01-01": 1, today.isoformat(): 0}, keep_days=30, today=today)
     check("history trims old days", "2020-01-01" not in trimmed and today.isoformat() in trimmed)
@@ -363,6 +456,16 @@ def selftest():
         try:
             write_state({"watermark_ms": 42})
             check("state roundtrip", read_state()["watermark_ms"] == 42)
+            (Path(tmp) / "state.json").write_bytes(b"\xff\xfenot json")
+            try:
+                read_state()
+                check("corrupt state fails loudly", False)
+            except SystemExit:
+                pass
+            write_state({"watermark_ms": 42})
+            write_scan_cache([{"id": "m1", "threadId": "t1", "internalDate": 5,
+                               "headers": {"from": "Bob <bob@ex.com>", "subject": "Hi"}}])
+            check("scan cache stores bare sender", read_scan_cache()["m1"]["sender"] == "bob@ex.com")
             digest_append({"id": "m1", "do": "archive", "reason": "newsletter"})
             digest_file = next(Path(tmp).glob("digest-*.jsonl"))
             row = json.loads(digest_file.read_text().splitlines()[0])
@@ -398,13 +501,13 @@ def main(argv):
         action = opt("--do")
         if not msg_id or not action:
             fail("act needs --id and --do")
-        cmd_act(msg_id, action, opt("--reason", ""), opt("--sender", ""), opt("--subject", ""))
+        cmd_act(msg_id, action, opt("--reason", ""))
     elif cmd == "note":
         msg_id = opt("--id")
         action = opt("--do")
         if not msg_id or not action:
             fail("note needs --id and --do")
-        cmd_note(msg_id, action, opt("--reason", ""), opt("--sender", ""), opt("--subject", ""))
+        cmd_note(msg_id, action, opt("--reason", ""))
     elif cmd == "mark":
         upto = opt("--upto")
         if not upto:

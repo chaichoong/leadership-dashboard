@@ -1,12 +1,18 @@
 // The Inbound Comms Triage agent sorts Kevin's inbox every morning and turns
-// actionable email into agent-routed tasks. Three regressions to fear:
+// actionable email into agent-routed tasks. Regressions to fear:
 //
 //  - the skill's task shape drifting away from what the Inbound Comms page
-//    and the dispatch engine expect (a human assigned again, the wrong
-//    approver, a dedupe key format the page cannot see) — inbound mail would
-//    then double-task or fall off the agent queue with no error;
+//    and the dispatch engine expect (a human assigned again, an approver
+//    other than Kevin creeping back in, a dedupe key format the page cannot
+//    see) — inbound mail would then double-task or fall off the agent queue
+//    with no error;
 //  - the triage plumbing growing a way to SEND or DELETE — this agent is
-//    triage-only by Kevin's ruling, and the worker guard is what enforces it;
+//    triage-only by Kevin's ruling, enforced by a separate read/label-only
+//    key and worker-side SPAM/TRASH refusal;
+//  - truncation dishonesty: Gmail lists newest-first, so a capped listing
+//    plus a blindly-advanced watermark silently loses the OLDEST mail for
+//    ever (the review's critical finding) — the pagination plumbing and the
+//    frozen-on-truncation watermark rule are what prevent it;
 //  - the daily Go Signal falling out of the daily-ops sequence, or drifting
 //    to run AFTER agent-dispatch so the tasks it creates sit a full day
 //    before any agent picks them up.
@@ -41,20 +47,19 @@ describe('task shape matches the routing source of truth (follow-up.html)', () =
         expect(skill).toMatch(/NO Assignee/);
     });
 
-    it('approver ids for each lane match the page constants', () => {
+    it("Kevin is the only approver the skill ever writes (his ruling, 24 Aug 2026)", () => {
         const mica = fromFollowUp(/AIRTABLE_ASSIGNEE_DEFAULT = '(usr\w+)'/, 'Mica collaborator id');
         const kevin = fromFollowUp(/AIRTABLE_ASSIGNEE_KEVIN = '(usr\w+)'/, 'Kevin collaborator id');
         const approver = fromFollowUp(/AIRTABLE_APPROVER_FIELD = '(fld\w+)'/, 'Approver field id');
-        expect(skill).toContain(mica);
         expect(skill).toContain(kevin);
         expect(skill).toContain(approver);
-        // Lane 8 is Mica's, lane 12 is Kevin's — the skill must pair them
-        // the same way round as getApproverForLabel does.
-        expect(skill).toMatch(new RegExp(`lane 8[^\\n]*${mica}`, 'i'));
-        expect(skill).toMatch(new RegExp(`lane 12[^\\n]*${kevin}`, 'i'));
+        // Nothing the triage agent creates routes to Mica's approval, and the
+        // script refuses label8 as a destination outright.
+        expect(skill).not.toContain(mica);
+        expect(script).toMatch(/label8 is not a triage destination/);
     });
 
-    it('creates the CURRENT #all/ dedupe key and matches both forms on read', () => {
+    it('creates the CURRENT #all/ dedupe key, matches both forms, one task per thread', () => {
         // The page writes #all/ links (they survive archiving); its dedupe
         // reads #all/ and legacy #inbox/. The skill must do the same or
         // page-created and triage-created tasks stop seeing each other.
@@ -63,36 +68,50 @@ describe('task shape matches the routing source of truth (follow-up.html)', () =
         expect(skill).toMatch(/FIND\("#all\/\{threadId\}"/);
         expect(skill).toMatch(/FIND\("#inbox\/\{threadId\}"/);
         expect(skill).toContain('fldXf1p0vtHqOZcKl');
+        // Two overnight messages in one thread must not become two tasks.
+        expect(skill).toMatch(/one thread = one task/i);
     });
 
-    it('keeps the tier-1 rule: always Kevin, prepare only', () => {
-        expect(skill).toMatch(/[Tt]ier-1[^\n]*(always Kevin|Kevin's lane)/);
+    it('keeps the tier-1 rule and the email-typed sender field', () => {
         expect(skill).toMatch(/PREPARED only/);
+        expect(skill).toMatch(/BARE email address/);
     });
 });
 
 describe('triage stays triage-only', () => {
-    it('worker /gmail/modify refuses SPAM and TRASH and never exposes a send path', () => {
-        expect(worker).toMatch(/Refusing to add \$\{name\}/);
-        expect(worker).toMatch(/SPAM\|TRASH/);
-        // The triage route block must not reach the send handler's helpers.
+    it('the /gmail/* gate uses its own read/label key, never the send key', () => {
         const triageBlock = worker.slice(worker.indexOf("'/gmail/labels'"), worker.indexOf('const allowOrigin'));
+        expect(triageBlock).toContain('GMAIL_TRIAGE_KEY');
+        expect(triageBlock).not.toContain('GMAIL_SEND_KEY');
         expect(triageBlock).not.toContain('buildRawEmail');
         expect(triageBlock).not.toContain('/messages/send');
+    });
+
+    it('worker /gmail/modify refuses SPAM and TRASH', () => {
+        expect(worker).toMatch(/Refusing to add \$\{name\}/);
+        expect(worker).toMatch(/SPAM\|TRASH/);
     });
 
     it('gmail.modify scope is requested at consent (without it every triage call 403s)', () => {
         expect(worker).toContain('https://www.googleapis.com/auth/gmail.modify');
     });
 
-    it('the script only ever calls the three read/label endpoints', () => {
+    it('the script only ever calls the three read/label endpoints, with its own key', () => {
         const endpoints = [...script.matchAll(/worker_post\("([^"]+)"/g)].map(m => m[1]);
         expect(endpoints.length).toBeGreaterThan(0);
         const allowed = new Set(['/gmail/labels', '/gmail/list', '/gmail/modify']);
         for (const e of endpoints) expect(allowed.has(e), `unexpected worker endpoint ${e}`).toBe(true);
+        expect(script).toContain('gmail_triage_key');
+        expect(script).not.toContain('gmail_send_key');
         // No raw Gmail API or send-path fallback outside the worker.
         expect(script).not.toContain('gmail.googleapis.com');
         expect(script).not.toContain('/send-email');
+    });
+
+    it('email text never rides on a command line — act/note take ids and own-words reasons only', () => {
+        expect(script).not.toMatch(/--sender|--subject/);
+        expect(script).toContain('read_scan_cache');
+        expect(skill).toMatch(/never text copied from the email/i);
     });
 
     it('the skill forbids archiving human mail without a task', () => {
@@ -100,8 +119,35 @@ describe('triage stays triage-only', () => {
     });
 });
 
+describe('truncation honesty (the critical finding)', () => {
+    it('the worker paginates: pageToken in, nextPageToken out', () => {
+        expect(worker).toMatch(/pageToken/);
+        expect(worker).toMatch(/nextPageToken: nextPageToken \|\| null/);
+    });
+
+    it('the script follows pages, reports truncated, and the scan exposes the flags', () => {
+        expect(script).toMatch(/MAX_PAGES/);
+        expect(script).toMatch(/"truncated"/);
+    });
+
+    it('the watermark freezes on truncation (selftest-backed) and the skill forbids advancing', () => {
+        expect(script).toMatch(/def next_watermark\(max_ms, unhandled_ms_list, truncated=False/);
+        expect(skill).toMatch(/truncated.*do NOT advance the watermark/is);
+    });
+
+    it('stranded lookups use exact label ids, not label: query syntax, with a first-run control', () => {
+        expect(script).toMatch(/label_ids=\[l8\["id"\]\]/);
+        expect(script).toMatch(/label_ids=\[l12\["id"\]\]/);
+        expect(script).not.toMatch(/label:%s/);
+        expect(skill).toMatch(/FIRST-RUN PROOF/);
+    });
+});
+
 describe('the daily Go Signal is wired', () => {
-    for (const [name, text] of [['deployed routine', dailyOps], ['versioned doc', dailyOpsDoc]]) {
+    // Both are REPO copies: the mirror the drift check syncs to
+    // ~/.claude/scheduled-tasks/ at deploy, and the versioned doc. The
+    // scheduled-tasks-tracked test is what proves the live install matches.
+    for (const [name, text] of [['repo mirror of the routine', dailyOps], ['versioned doc', dailyOpsDoc]]) {
         it(`${name} runs inbound-email-triage before agent-dispatch`, () => {
             const triageAt = text.indexOf('inbound-email-triage/SKILL.md');
             const dispatchAt = text.indexOf('agent-dispatch/SKILL.md');
@@ -113,7 +159,7 @@ describe('the daily Go Signal is wired', () => {
 });
 
 describe('inbound-triage.py mechanics', () => {
-    it('offline selftest passes (labels, metric string, watermark rules, digest)', () => {
+    it('offline selftest passes (labels, bare-email parse, metric string, watermark rules, cache, digest)', () => {
         const out = execFileSync('python3', [path.join(root, 'scripts/inbound-triage.py'), 'selftest'], { encoding: 'utf8' });
         expect(out).toMatch(/selftest OK/);
     });

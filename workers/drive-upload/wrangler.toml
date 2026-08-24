@@ -9,6 +9,9 @@ compatibility_date = "2024-01-01"
 #   GOOGLE_SERVICE_ACCOUNT_JSON  - Full JSON key file content for the Google service account
 #   DRIVE_PARENT_FOLDER_ID       - ID of the shared Google Drive folder where SOP folders are created
 #   GMAIL_SEND_KEY               - Bearer key for POST /send-email (one copy lives at ~/.config/od/gmail_send_key)
+#   GMAIL_TRIAGE_KEY             - Bearer key for the /gmail/* read+label endpoints (one copy at
+#                                  ~/.config/od/gmail_triage_key). Separate from the send key on
+#                                  purpose: the triage runtime's credential must not be able to send.
 
 # Gmail send: holds the gmail.send refresh token, written by /auth/callback (state=gmail)
 [[kv_namespaces]]
