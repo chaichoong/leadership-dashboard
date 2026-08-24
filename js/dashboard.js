@@ -1107,14 +1107,28 @@
         const slot = document.getElementById('agentKpiCard');
         if (!slot || !PAT) return;
         try {
-            const [wfRes, actRes, regRecs] = await Promise.all([
-                fetch(`https://api.airtable.com/v0/${BASE_ID}/${AGENTS_WF_TBL}?returnFieldsByFieldId=true&pageSize=100&fields%5B%5D=${AGENTS_WF_SOP}`, { headers: { Authorization: `Bearer ${PAT}` } }),
-                fetch(`https://api.airtable.com/v0/${BASE_ID}/${AGENTS_ACTIVITY_TBL}?pageSize=100`, { headers: { Authorization: `Bearer ${PAT}` } }),
+            // Every read here paginates: Workflows sits at ~88 rows and Agent
+            // Activity at ~81, and a pageSize=100 fetch with no offset loop is
+            // the exact silent-truncation trap the recon accuracy card fell
+            // into (rows 101+ vanish from the count with no error).
+            const pagedFetch = async (url) => {
+                let out = [], offset = '';
+                do {
+                    const res = await fetch(url + (offset ? `&offset=${encodeURIComponent(offset)}` : ''), { headers: { Authorization: `Bearer ${PAT}` } });
+                    if (!res.ok) throw new Error('Airtable ' + res.status);
+                    const data = await res.json();
+                    out.push(...(data.records || []));
+                    offset = data.offset || '';
+                } while (offset);
+                return out;
+            };
+            const [wfs, actRecs, regRecs] = await Promise.all([
+                pagedFetch(`https://api.airtable.com/v0/${BASE_ID}/${AGENTS_WF_TBL}?returnFieldsByFieldId=true&pageSize=100&fields%5B%5D=${AGENTS_WF_SOP}`),
+                pagedFetch(`https://api.airtable.com/v0/${BASE_ID}/${AGENTS_ACTIVITY_TBL}?pageSize=100`)
+                    .catch(e => { console.warn('Agent Activity read failed:', e); return []; }),
                 airtableFetch(TABLES.aiAgents, { 'fields[]': [AGENTS_REG_NAME, AGENTS_REG_STATUS, AGENTS_REG_WORKFLOW, AGENTS_REG_SCORE_METRIC, AGENTS_REG_METRIC_SCORE] })
                     .catch(e => { console.warn('AI Agents register read failed:', e); return []; }),
             ]);
-            if (!wfRes.ok) return;
-            const wfs = (await wfRes.json()).records || [];
             const agents = [];
             wfs.forEach(w => {
                 try {
@@ -1125,12 +1139,10 @@
                 } catch (e) { /* not JSON — not an agent workflow */ }
             });
             const pendingByAgent = {};
-            if (actRes.ok) {
-                ((await actRes.json()).records || []).forEach(r => {
-                    if ((r.fields['State'] || '') !== 'Proposed') return;
-                    (r.fields['Agent'] || []).forEach(id => { pendingByAgent[id] = (pendingByAgent[id] || 0) + 1; });
-                });
-            }
+            actRecs.forEach(r => {
+                if ((r.fields['State'] || '') !== 'Proposed') return;
+                (r.fields['Agent'] || []).forEach(id => { pendingByAgent[id] = (pendingByAgent[id] || 0) + 1; });
+            });
             // Role agents from the AI Agents register (Systemisation rebuild,
             // 24 Aug 2026) — without them this card contradicts the tab badge.
             const roleAgents = (regRecs || []).map(r => ({
@@ -1148,7 +1160,13 @@
             const testing = counts.testing;
             const pending = agents.reduce((s, a) => s + (pendingByAgent[a.id] || 0), 0);
             const roleRows = roleAgents
-                .map(a => `<div class="od-breakdown-row"><span>${escHtml(a.name)}</span><span>${escHtml(String(a.status).toUpperCase())}${a.status === 'Live' && a.score ? ` · ${escHtml(a.score)}${a.target ? ` <span style="color:var(--text-muted)">(target: ${escHtml(a.target)})</span>` : ''}` : ''}</span></div>`).join('');
+                .map(a => {
+                    // Pending approvals on a workflow this register row LINKS
+                    // still belong to this agent — without this they inflate
+                    // the headline while vanishing from every breakdown row.
+                    const rolePending = a.workflowIds.reduce((s, id) => s + (pendingByAgent[id] || 0), 0);
+                    return `<div class="od-breakdown-row"><span>${escHtml(a.name)}</span><span>${escHtml(String(a.status).toUpperCase())}${a.status === 'Live' && a.score ? ` · ${escHtml(a.score)}${a.target ? ` <span style="color:var(--text-muted)">(target: ${escHtml(a.target)})</span>` : ''}` : ''}${rolePending ? ` · ${rolePending} awaiting OK` : ''}</span></div>`;
+                }).join('');
             const linkedWf = new Set(roleAgents.flatMap(a => a.workflowIds));
             const wfRows = agents
                 .filter(a => !linkedWf.has(a.id))   // register-linked workflows already listed above

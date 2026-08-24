@@ -51,14 +51,16 @@ describe('every owner surface reads the register', () => {
 });
 
 describe('the role-agent deep link has both halves', () => {
-  it('producers set sys_open_role_agent (Skills Library + Tasks roster)', () => {
+  it('the Skills Library (same window) uses the localStorage handoff', () => {
     expect(skills).toContain("localStorage.setItem('sys_open_role_agent'");
-    expect(tasksPage).toContain("localStorage.setItem('sys_open_role_agent'");
-  });
-
-  it('Systemisation consumes it and clears it', () => {
     expect(sysPage).toContain("localStorage.getItem('sys_open_role_agent')");
     expect(sysPage).toContain("localStorage.removeItem('sys_open_role_agent')");
+  });
+
+  it('the Tasks roster (new tab) uses the URL hash — the storage event would be stolen by the hidden shell iframe', () => {
+    expect(tasksPage).toContain('index.html#agent=');
+    expect(tasksPage).not.toContain("localStorage.setItem('sys_open_role_agent'");
+    expect(sysPage).toMatch(/#agent=\(rec\[A-Za-z0-9\]\+\)/);
   });
 });
 

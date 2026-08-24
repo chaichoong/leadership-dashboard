@@ -913,8 +913,10 @@ const REG_STATUS_META={
   Paused:{bg:'var(--warning-bg)',fg:'var(--warning)'},
 };
 let agentRegisterRows=null;   // null = not loaded yet; [] = loaded (possibly failed, see error)
-let agentRegisterError='';
+let agentRegisterError='';    // the REGISTER read failed — chips hidden
+let agentLogError='';         // only the daily-log read failed — chips fine, day lines missing
 let agentDailyByReg={};       // register recId → latest {date, summary}
+let _agentRegPromise=null;    // in-flight guard: overlapping renders share one fetch
 
 async function fetchAllAirtablePages(url){
   // Hand-rolled Airtable reads MUST paginate (the recon accuracy card once
@@ -931,13 +933,26 @@ async function fetchAllAirtablePages(url){
 }
 
 async function loadAgentRegister(){
+  // The two reads fail independently and must report independently: a dead
+  // log read must not claim the register failed (chips would be hidden and
+  // the sync bar would cry over data that loaded fine).
   try{
     agentRegisterRows=await fetchAllAirtablePages(
       `https://api.airtable.com/v0/${BASE_ID}/${AGENTS_REG_TBL}?returnFieldsByFieldId=true&pageSize=100`);
-    // Latest daily-log line per agent. One row per agent per day; 300 covers
-    // months, newest first so the first hit per agent is the latest.
+    agentRegisterError='';
+  }catch(e){
+    console.warn('AI Agents register read failed',e);
+    agentRegisterError=String(e&&e.message||e);
+    if(agentRegisterRows===null)agentRegisterRows=[];
+    return;
+  }
+  try{
+    // Latest daily-log line per agent, newest first so the first hit per
+    // agent wins. maxRecords=600 is a COST CAP, not "everything": at one row
+    // per RUNNING agent per day it is weeks-to-months of cover, and an agent
+    // idle longer than the window shows no day line (same as never-ran).
     const logs=await fetchAllAirtablePages(
-      `https://api.airtable.com/v0/${BASE_ID}/${AGENT_LOG_TBL}?returnFieldsByFieldId=true&pageSize=100&maxRecords=300&sort%5B0%5D%5Bfield%5D=Date&sort%5B0%5D%5Bdirection%5D=desc`);
+      `https://api.airtable.com/v0/${BASE_ID}/${AGENT_LOG_TBL}?returnFieldsByFieldId=true&pageSize=100&maxRecords=600&sort%5B0%5D%5Bfield%5D=Date&sort%5B0%5D%5Bdirection%5D=desc`);
     agentDailyByReg={};
     logs.forEach(r=>{
       (r.fields[ALOGF.agent]||[]).forEach(link=>{
@@ -945,19 +960,21 @@ async function loadAgentRegister(){
         if(aid&&!agentDailyByReg[aid])agentDailyByReg[aid]={date:r.fields[ALOGF.date]||'',summary:r.fields[ALOGF.summary]||''};
       });
     });
-    agentRegisterError='';
+    agentLogError='';
   }catch(e){
-    console.warn('AI Agents register read failed',e);
-    agentRegisterError=String(e&&e.message||e);
-    if(agentRegisterRows===null)agentRegisterRows=[];
+    console.warn('AI Agent Daily Log read failed',e);
+    agentLogError=String(e&&e.message||e);
+    agentDailyByReg={};   // stale day lines are worse than none
   }
 }
 
 function openAgentRegister(recId){
-  // Deep-link to the agent's panel on the Systemisation page (same handoff
-  // pattern the Skills Library uses; systemisation consumes the key on load).
-  try{localStorage.setItem('sys_open_role_agent',recId)}catch(e){/* private mode — link still opens */}
-  window.open('../systemisation/index.html','_blank');
+  // Deep-link to the agent's panel on the Systemisation page. Via the URL
+  // HASH, not localStorage: the shell keeps a hidden Systemisation iframe
+  // alive, and a localStorage write fires its storage listener, which would
+  // CONSUME the key before the new tab loads (review finding, 24 Aug 2026).
+  // A hash is per-window, so nothing can steal it.
+  window.open('../systemisation/index.html#agent='+encodeURIComponent(recId),'_blank');
 }
 window.openAgentRegister=openAgentRegister;
 
@@ -9307,7 +9324,10 @@ async function renderAgents(){
     el.innerHTML=`<div style="padding:24px;color:var(--text-secondary);font-size:var(--fs-sm)">Loading agent history…</div>`;
     await loadAgentApprovalHistory();
   }
-  if(agentRegisterRows===null)await loadAgentRegister();
+  if(agentRegisterRows===null){
+    _agentRegPromise=_agentRegPromise||loadAgentRegister().finally(()=>{_agentRegPromise=null});
+    await _agentRegPromise;
+  }
   const rows=computeAgentAccuracy(agentApprovalHistory);
   const recs=agentAutonomyRecommendations(rows);
   const waiting=(allTasks||[]).filter(t=>t.status==='Approval');
@@ -9391,25 +9411,38 @@ function renderAgentRoster(){
     </div>`;
   };
   const ids=Object.keys(AGENT_MAP||{}).sort((a,b)=>(load[b]||0)-(load[a]||0)||AGENT_MAP[a].localeCompare(AGENT_MAP[b]));
-  // Register rows with NO Team Member link would otherwise be invisible here
-  // and indistinguishable from idle — surface them explicitly instead.
-  const unwired=(agentRegisterRows||[]).filter(r=>!(r.fields[REG.teamMember]||[]).length);
-  const rows=ids.length
-    ? ids.map(id=>`<div class="acc-row" style="flex-wrap:wrap">
+  // Register rows this roster would otherwise HIDE: no Team Member link at
+  // all, OR a link pointing at a record that is not an active workforce
+  // member (deactivated, or mislinked to a human). Both would be silent
+  // absence — the failure mode this section exists to prevent.
+  const unwired=(agentRegisterRows||[]).filter(r=>{
+    const links=(r.fields[REG.teamMember]||[]).map(l=>typeof l==='object'?l.id:l);
+    return !links.some(id=>AGENT_MAP[id]);
+  });
+  const unwiredNote=(r)=>{
+    const hasLink=((r.fields[REG.teamMember]||[]).length>0);
+    return hasLink
+      ? 'wired to a Team Members row that is missing or inactive — its workload and accuracy read nothing'
+      : 'on the register but not wired to a Team Members row — its workload and accuracy have nothing to read';
+  };
+  const teamRows=ids.map(id=>`<div class="acc-row" style="flex-wrap:wrap">
         <span class="acc-type">${escHtml(AGENT_MAP[id])}</span>
         <span class="acc-n">${load[id]||0} open</span>
         <button class="btn btn-sm" onclick="setTeam('agents');setAgentFilter('${id}');switchView('list')" title="Show this agent's work">View work</button>
         ${regChip(regByTm[id])}
-      </div>`).join('')
-      +unwired.map(r=>`<div class="acc-row" style="flex-wrap:wrap">
+      </div>`).join('');
+  const unwiredRows=unwired.map(r=>`<div class="acc-row" style="flex-wrap:wrap">
         <span class="acc-type">${escHtml(r.fields[REG.name]||'Agent')}</span>
-        <span style="font-size:11px;color:var(--warning)">on the register but not wired to a Team Members row — its workload and accuracy have nothing to read</span>
+        <span style="font-size:11px;color:var(--warning)">${unwiredNote(r)}</span>
         ${regChip(r)}
-      </div>`).join('')
-    : `<div style="padding:10px 0;color:var(--text-secondary);font-size:var(--fs-sm)">No agents yet.</div>`;
+      </div>`).join('');
+  const rows=(teamRows+unwiredRows)
+    || `<div style="padding:10px 0;color:var(--text-secondary);font-size:var(--fs-sm)">No agents yet.</div>`;
   const regNote=agentRegisterError
     ? `<div style="font-size:11px;color:var(--warning);margin-bottom:4px">Register read failed (${escHtml(agentRegisterError)}) — status and scores are hidden. Refresh scores to retry.</div>`
-    : '';
+    : (agentLogError
+      ? `<div style="font-size:11px;color:var(--text-muted);margin-bottom:4px">Daily-decisions lines unavailable (log read failed) — status and scores are current. Refresh scores to retry.</div>`
+      : '');
   return `<div class="acc-card" style="margin-top:8px">
     <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:6px">
       <input id="newAgentName" type="text" placeholder="New agent name, e.g. AI Worker — Bookkeeper"
@@ -9633,6 +9666,7 @@ async function loadAllData(){
               if(agentRegisterRows===null) return {status:'pass',detail:'Loads with the AI Agents view (not opened yet this session)'};
               if(agentRegisterError) return {status:'fail',detail:'Register read failed: '+agentRegisterError};
               if(!agentRegisterRows.length) return {status:'warn',detail:'Register returned zero role agents (expected ~15) — table or field rename?'};
+              if(agentLogError) return {status:'warn',detail:`${agentRegisterRows.length} role agents loaded, but the daily-log read failed: `+agentLogError};
               return {status:'pass',detail:`${agentRegisterRows.length} role agents on the register`};
             }
           },

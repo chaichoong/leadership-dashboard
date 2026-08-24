@@ -179,6 +179,7 @@
     const SK_REG = { name: 'fldhtLvryVEzeGbl8', status: 'fld71vXWqcxhdljac', guardrail: 'fldWgqxMFmaAAvUHC', goal: 'fldz8O9KihauZ46Cd' };
     let _roleAgents = [];
     let _roleAgentsFetched = false;
+    let _roleAgentsFailed = false;
 
     async function fetchRoleAgents() {
         if (_roleAgentsFetched || typeof PAT === 'undefined' || !PAT) return;
@@ -192,8 +193,13 @@
                 goal: String((r.fields && r.fields[SK_REG.goal]) || '').split('\n')[0],
             }));
             _roleAgentsFetched = true;
+            _roleAgentsFailed = false;
         } catch (e) {
+            // Loud, not silent: 15 role agents quietly missing from the
+            // section reads as "no agents", which is the trust failure the
+            // absence-reporting rule exists to prevent.
             console.warn('Skills: AI Agents register read failed', e);
+            _roleAgentsFailed = true;
         }
     }
 
@@ -275,6 +281,9 @@
         });
 
         let html = '';
+        if (_roleAgentsFailed) {
+            html += `<div style="background:var(--warning-bg,#FBF3E4);border:1px solid var(--warning,#B8933A);border-radius:var(--radius-md,8px);padding:10px 14px;margin-bottom:12px;font-size:13px;color:var(--text-primary,#1C2422)">Couldn&rsquo;t load the AI Agents register &mdash; the role agents are hidden from this list. Reload the page to retry.</div>`;
+        }
         if (agentSkills.length || roleAgentsShown.length) {
             html += `<div class="skills-category-group">
                 <div class="skills-category-header">

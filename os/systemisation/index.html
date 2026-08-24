@@ -5091,8 +5091,19 @@ async function createAgentFromForm(){
 // AND via the storage event (fires here when the shell writes it while this
 // iframe is already loaded).
 function consumeAgentDeepLink(){
-    // Role agents (the register) — deep-linked from the Skills Library and
-    // the Tasks & Projects workforce roster.
+    // Role agents via URL hash (#agent=recXXX) — the Tasks & Projects roster
+    // opens a NEW tab, and a hash is per-window so the shell's hidden iframe
+    // cannot steal it the way a storage event can.
+    const hashMatch = (location.hash||'').match(/#agent=(rec[A-Za-z0-9]+)/);
+    if(hashMatch){
+        history.replaceState(null,'',location.pathname+location.search);
+        selectedAgentId = hashMatch[1];
+        switchView('automation');
+        return true;
+    }
+    // Role agents via localStorage — the Skills Library runs in the SHELL and
+    // fronts this same iframe with switchTab, so the storage event is exactly
+    // the delivery mechanism there.
     const roleId = localStorage.getItem('sys_open_role_agent');
     if(roleId){
         localStorage.removeItem('sys_open_role_agent');
