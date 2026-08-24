@@ -18,12 +18,18 @@ const src = readFileSync(resolve(root, 'os/agents/index.html'), 'utf8');
 const sysSrc = readFileSync(resolve(root, 'os/systemisation/index.html'), 'utf8');
 
 function extractConst(source, name) {
-  const start = source.indexOf(`const ${name} = [`);
+  // Handles array ([...]) and object ({...}) literals alike.
+  let open = '[', close = ']';
+  let start = source.indexOf(`const ${name} = [`);
+  if (start === -1) {
+    start = source.indexOf(`const ${name} = {`);
+    open = '{'; close = '}';
+  }
   if (start === -1) throw new Error(`${name} not found`);
-  let i = source.indexOf('[', start), depth = 0, end = -1;
+  let i = source.indexOf(open, start), depth = 0, end = -1;
   for (; i < source.length; i++) {
-    if (source[i] === '[') depth++;
-    else if (source[i] === ']') { depth--; if (depth === 0) { end = i + 1; break; } }
+    if (source[i] === open) depth++;
+    else if (source[i] === close) { depth--; if (depth === 0) { end = i + 1; break; } }
   }
   return source.slice(start, end) + ';';
 }
@@ -105,8 +111,11 @@ describe('normaliseReadiness N/A rules', () => {
 
 describe('accuracy bands (guardrailBand)', () => {
   const bandOf = (rows) => {
+    // GUARDRAIL_ORDER is extracted from the page, never copied here: a test
+    // that carries its own copy of a page constant certifies nothing when
+    // the page's copy changes (review finding, 24 Aug 2026).
     const fn = new Function(
-      `let _agentAccuracyRows = ${JSON.stringify(rows)}; const GUARDRAIL_ORDER = ['Approval required','Hybrid escalation','Autonomous']; ${extractFn(src, 'guardrailBand')} return guardrailBand('tm1');`
+      `let _agentAccuracyRows = ${JSON.stringify(rows)}; ${extractConst(src, 'GUARDRAIL_ORDER')} ${extractFn(src, 'guardrailBand')} return guardrailBand('tm1');`
     );
     return fn();
   };
@@ -165,6 +174,13 @@ describe('the agents page and the systemisation page carry identical framework c
     ['agenticPassRules', 'fn'],
     ['agenticResultShape', 'fn'],
     ['callClaudeJson', 'fn'],
+    // Added 24 Aug 2026 (review finding): legacyReadinessBanner had already
+    // diverged at birth — the one framework copy outside this list was the
+    // one that drifted. Every shared framework symbol belongs here.
+    ['legacyReadinessBanner', 'fn'],
+    ['agenticSopText', 'fn'],
+    ['readinessRowsHtml', 'fn'],
+    ['AGENTIC_STATUS', 'const'],
   ])('%s is byte-identical in both pages', (name, kind) => {
     const grab = kind === 'const' ? extractConst : extractFn;
     expect(grab(sysSrc, name)).toBe(grab(src, name));

@@ -470,6 +470,65 @@
         // Bubble the update to the section dot (worst-case rollup of all tabs in this section).
         rollUpSidebarSection(tabId);
     }
+    // ── AI Agents badge + deep links ─────────────────────────────────────
+    function setAgentsBadge(n) {
+        const badge = document.getElementById('agentsApprovalBadge');
+        if (!badge) return;
+        badge.textContent = String(n);
+        badge.style.display = n ? '' : 'none';
+    }
+
+    // The shell polls the waiting-approval count itself so agent work is
+    // never invisible before the tab's first open (trust surfaces report
+    // absence — review finding, 24 Aug 2026). Population and lane rules
+    // MIRROR loadApprovals in os/agents/index.html: loop-raised tasks at
+    // Status Approval, Kevin's lane only (Approver empty or Kevin) —
+    // drift-tested in tests/agent-register-surfaces.test.js.
+    const AGENTS_BADGE_FORMULA = "AND({Status}='Approval', LEN({Sent For Approval By}&'')>0)";
+    async function refreshAgentsBadge() {
+        if (typeof PAT === 'undefined' || !PAT) return;
+        try {
+            let count = 0, offset = '';
+            do {
+                const params = new URLSearchParams({
+                    returnFieldsByFieldId: 'true', pageSize: '100',
+                    filterByFormula: AGENTS_BADGE_FORMULA,
+                });
+                params.append('fields[]', 'fldLLAG5HQPEFEfE5'); // Approver
+                if (offset) params.set('offset', offset);
+                const res = await fetch(`https://api.airtable.com/v0/${BASE_ID}/tblqB8b22hKBL4PF1?${params}`,
+                    { headers: { 'Authorization': 'Bearer ' + PAT } });
+                if (!res.ok) return; // a broken poll never zeroes a good badge
+                const data = await res.json();
+                count += (data.records || []).filter(r => {
+                    const ap = (r.fields || {})['fldLLAG5HQPEFEfE5'];
+                    return !ap || !ap.email || ap.email === 'kevin@runpreneur.org.uk';
+                }).length;
+                offset = data.offset || '';
+            } while (offset);
+            setAgentsBadge(count);
+        } catch (err) { /* transient poll failure — keep the last honest count */ }
+    }
+    setTimeout(refreshAgentsBadge, 4000);      // after auth settles on load
+    setInterval(refreshAgentsBadge, 10 * 60 * 1000);
+
+    // Deep-link into the AI Agents page from anywhere in the shell:
+    // deepLinkAgents({agent: recId}) or ({wf: workflowId}). Sends directly
+    // when the iframe is alive; a reloading iframe collects the link via the
+    // agentsPageReady handshake below — no localStorage, no storage-event
+    // race (review finding, 24 Aug 2026).
+    // Pending links expire after 15s: a link delivered directly to a live
+    // iframe must not ALSO fire on some unrelated reload minutes later.
+    let _pendingAgentsLink = null;
+    window.deepLinkAgents = function (link) {
+        _pendingAgentsLink = { link, at: Date.now() };
+        if (typeof switchTab === 'function') switchTab('agents');
+        const fr = document.getElementById('agentsFrame');
+        if (fr && fr.contentWindow) {
+            try { fr.contentWindow.postMessage(Object.assign({ type: 'agentsDeepLink' }, link), '*'); } catch (err) { /* frame mid-reload; the handshake delivers it */ }
+        }
+    };
+
     // Listen for status pings from iframe pages.
     window.addEventListener('message', (e) => {
         if (!e.data || typeof e.data !== 'object') return;
@@ -480,15 +539,23 @@
             return;
         }
 
-        // The AI Agents iframe posts its waiting-approval count so the
-        // sidebar badge is right without the tab ever being opened.
+        // The AI Agents iframe posts its waiting-approval count whenever it
+        // is open; between opens the shell's own poll (refreshAgentsBadge)
+        // keeps the badge honest, so waiting work is never invisible.
         if (e.data.type === 'agentsApprovalCount') {
-            const badge = document.getElementById('agentsApprovalBadge');
-            if (badge) {
-                const n = Number(e.data.count) || 0;
-                badge.textContent = String(n);
-                badge.style.display = n ? '' : 'none';
+            setAgentsBadge(Number(e.data.count) || 0);
+            return;
+        }
+
+        // A freshly booted AI Agents page announces itself; if a deep link
+        // was requested while the iframe was reloading (the stale-iframe
+        // race, review finding 24 Aug 2026), deliver it now.
+        if (e.data.type === 'agentsPageReady') {
+            if (_pendingAgentsLink && e.source
+                && (Date.now() - _pendingAgentsLink.at) < 15000) {
+                e.source.postMessage(Object.assign({ type: 'agentsDeepLink' }, _pendingAgentsLink.link), '*');
             }
+            _pendingAgentsLink = null;
             return;
         }
 

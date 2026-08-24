@@ -263,10 +263,15 @@ const TF = {
     lmt:              'flddJA23cJRX5cs1K', // lastModifiedTime — watches every field
     slackBaseline:    'fldxsqj9JSRBGNyT9', // when the Slack card went out (submission proxy)
     inboundTask:      'fldueazD67F7fUGee', // Inbound Communication Task checkbox
+    approver:         'fldLLAG5HQPEFEfE5', // singleCollaborator — whose approval a task waits on
 };
 
 // This page is admin-only (Kevin's build). Decisions are stamped with the
 // same identity the Slack loop uses (APPROVERS.kevin in approvals.js).
+// That stamp is honest ONLY because loadApprovals filters the queue to
+// Kevin's lane (Approver empty or Kevin): every decidable item here is his
+// by construction. If this page ever shows another approver's lane, it must
+// grow the Tasks drawer's currentUser identity instead of this constant.
 const APPROVER_EMAIL = 'kevin@runpreneur.org.uk';
 const APPROVAL_OUTCOMES = (window.AgentAccuracy && window.AgentAccuracy.APPROVAL_OUTCOMES)
     || ['Approved as-is', 'Approved with minor edits', 'Changes requested', 'Rejected'];
@@ -284,7 +289,7 @@ function isTier1Output(raw){
     return s.startsWith(TIER1_BANNER) || /^(:rotating_light:|\u{1F6A8})\s*TIER\s*1\b/iu.test(s);
 }
 
-// ── AI Agents register (role agents) — moved from os/systemisation 25 Aug 2026 ──
+// ── AI Agents register (role agents) — moved from os/systemisation 24 Aug 2026 ──
 // One row per role-specific agent (Prospecting, Reconciliation, …). The
 // register is the management layer; each agent's runtime lives wherever it
 // executes. Identity for workload/accuracy comes from the linked Team Members
@@ -514,6 +519,12 @@ async function atFetch(tableId, fields, extraParams){
             break;
         }
         if(res.status===401||res.status===403){ showAuthBar(); throw new Error('auth'); }
+        // Any other non-OK (422 bad formula, 5xx) must THROW, never read as
+        // an empty page: an error body has no .records, and treating it as
+        // the last page renders "nothing waiting" over a broken read — the
+        // one queue (approvals) whose legitimate-empty case no zero-control
+        // can distinguish (review finding, 24 Aug 2026).
+        if(!res.ok) throw new Error(`Airtable ${res.status} reading ${tableId}`);
         const data = await res.json();
         all = all.concat(data.records||[]);
         offset = data.offset||'';
@@ -582,9 +593,19 @@ async function loadApprovals(){
     try {
         const recs = await atFetch(TASKS_TBL,
             [TF.name, TF.status, TF.description, TF.notes, TF.dueDate, TF.taskType,
-             TF.agentOutput, TF.sentForApprovalBy, TF.teamMember, TF.lmt, TF.slackBaseline],
+             TF.agentOutput, TF.sentForApprovalBy, TF.teamMember, TF.lmt, TF.slackBaseline,
+             TF.approver],
             { filterByFormula: "AND({Status}='Approval', LEN({Sent For Approval By}&'')>0)" });
-        allApprovals = recs.map(r=>({
+        // This queue and badge are KEVIN'S. The Approver field decides whose
+        // lane a task is in (empty = Kevin, same convention as approverFor in
+        // scripts/slack-automation/approvals.js); Mica's label-8 lane must
+        // not inflate his count or invite him to decide her items
+        // (review finding, 24 Aug 2026).
+        const mine = recs.filter(r => {
+            const ap = gf(r,TF.approver);
+            return !ap || !ap.email || ap.email === APPROVER_EMAIL;
+        });
+        allApprovals = mine.map(r=>({
             id: r.id,
             name: gf(r,TF.name)||'(Untitled)',
             taskType: selName(gf(r,TF.taskType)),
@@ -852,7 +873,8 @@ async function loadOpenTasks(){
 async function loadDailyLogs(){
     _dailyLogState = 'loading';
     try {
-        allDailyLogRows = await atFetch(ALOG_TABLE, null, {
+        allDailyLogRows = await atFetch(ALOG_TABLE,
+            [ALOG.logDay, ALOG.date, ALOG.agent, ALOG.summary, ALOG.decisions], {
             'sort[0][field]': 'Date', 'sort[0][direction]': 'desc', maxRecords: '200',
         });
         _dailyLogState = 'ready';
@@ -1000,7 +1022,7 @@ function loadChecksAndRender(){
 }
 
 // ═══════════════════════════════════════════════════════════════════════
-// ZONE C — Workforce register (moved from os/systemisation 25 Aug 2026)
+// ZONE C — Workforce register (moved from os/systemisation 24 Aug 2026)
 // Three layers:
 //   1. ROLE AGENTS — the register (Airtable AI Agents table): one row per
 //      role-specific agent, with goal, guardrail level, status, workload,
@@ -1154,6 +1176,9 @@ function wfMatchesQuery(w, q){
         || String(gf(w,WF.description)||'').toLowerCase().includes(q);
 }
 
+// Search types re-render at most every 150ms — a keystroke is not a render.
+const debouncedRenderRegister = (()=>{ let t; return ()=>{ clearTimeout(t); t=setTimeout(renderRegister,150); }; })();
+window.debouncedRenderRegister = debouncedRenderRegister;
 function renderRegister(){
     const pane = document.getElementById('registerBody');
     const countEl = document.getElementById('registerCount');
@@ -1173,13 +1198,22 @@ function renderRegister(){
         .sort((a,b)=>(gf(a,WF.name)||'').toLowerCase()<(gf(b,WF.name)||'').toLowerCase()?-1:1);
     // A search can hide the selected process agent; keep the selection and
     // bring the panel back when it reappears — never null it.
-    const selWfVisible = !!(selectedAgentWf && agentWfs.some(w=>w.id===selectedAgentWf));
-    countEl.textContent = allAgents.length + allWorkflows.filter(w=>{ const s=getWfSopData(w.id); return s && s.disposition && s.disposition.type==='agent'; }).length;
+    // One agent, one count: a workflow already linked to a register row via
+    // AG.workflow is the same agent seen twice — exclude it from the process
+    // list and the header count (dedupe restored from the Systemisation
+    // original; dropped in the move, review finding 24 Aug 2026).
+    const linkedWfIds = new Set(allAgents.flatMap(a=>linkIds(gf(a,AG.workflow))));
+    const processWfs = agentWfs.filter(w=>!linkedWfIds.has(w.id));
+    // A search can hide the selected process agent; keep the selection and
+    // bring the panel back when it reappears — never null it.
+    const selWfVisible = !!(selectedAgentWf && processWfs.some(w=>w.id===selectedAgentWf));
+    countEl.textContent = allAgents.length +
+        allWorkflows.filter(w=>{ const s=getWfSopData(w.id); return s && s.disposition && s.disposition.type==='agent' && !linkedWfIds.has(w.id); }).length;
 
     let html = `<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:12px;flex-wrap:wrap">
         <p style="font-size:var(--fs-sm);color:var(--text-secondary);margin:0">Your AI workforce: every agent, what it does, its guardrails, its workload, and its score.</p>
         <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-            ${agSearchInput('registerSearchInput', _registerSearch, "_registerSearch=this.value;_refocusSearchId='registerSearchInput';renderRegister()")}
+            ${agSearchInput('registerSearchInput', _registerSearch, "_registerSearch=this.value;_refocusSearchId='registerSearchInput';debouncedRenderRegister()")}
             <button class="btn btn-sm btn-primary" onclick="openAgentForm()">+ Create an agent</button>
         </div>
     </div>`;
@@ -1229,10 +1263,10 @@ function renderRegister(){
     html += strategicLayerSection();
 
     // 3. Process agents (workflow-based, video route)
-    html += `<div class="auto-wf-header" style="margin:18px 0 6px">Process agents <span style="color:var(--text-muted);font-weight:var(--fw-regular)">(${agentWfs.length})</span></div>`;
+    html += `<div class="auto-wf-header" style="margin:18px 0 6px">Process agents <span style="color:var(--text-muted);font-weight:var(--fw-regular)">(${processWfs.length})</span></div>`;
     if(String(_workflowsState).indexOf('error') === 0){
         html += `<div class="zone-error">Could not read the workflows: ${esc(String(_workflowsState).slice(7))}</div>`;
-    } else if(!agentWfs.length){
+    } else if(!processWfs.length){
         html += `<div style="font-size:var(--fs-xs);color:var(--text-muted);margin-bottom:10px">${q?'None match the search.':'None yet. Build a workflow\'s SOP on the Systemisation page, then choose "Autonomous agent" as how it runs — it appears here, ready to test.'}</div>`;
     } else {
         html += `<table class="wf-grid" style="margin-bottom:14px"><thead><tr>
@@ -1241,7 +1275,7 @@ function renderRegister(){
             <th style="width:150px">Awaiting your OK</th>
             <th>Actions</th>
         </tr></thead><tbody>`;
-        agentWfs.forEach(w=>{
+        processWfs.forEach(w=>{
             const a = getWfAgent(w.id);
             const meta = a && AGENT_STATES[a.state] ? AGENT_STATES[a.state] : { label:'DRAFT', bg:'var(--bg-subtle)', fg:'var(--text-muted)' };
             const sel = w.id===selectedAgentWf;
@@ -1262,7 +1296,7 @@ function renderRegister(){
     pane.innerHTML = html;
     restoreSearchFocus();
     if(selectedAgentId) renderRoleAgentPanel();
-    if(agentWfs.length) fillAgentPendingCounts(agentWfs.map(w=>w.id));
+    if(processWfs.length) fillAgentPendingCounts(processWfs.map(w=>w.id));
     if(selWfVisible) renderAgentPanel(selectedAgentWf);
 }
 
@@ -1753,7 +1787,7 @@ function readinessRowsHtml(stages){
 function legacyReadinessBanner(readiness){
     const n = (readiness && readiness.stages || []).length;
     if(!n || n === AGENTIC_STAGES.length) return '';
-    return `<div style="margin-top:8px;padding:8px 10px;border-radius:var(--radius-md);background:var(--warning-bg);color:var(--warning);font-size:var(--fs-xs)">Checked under the older ${n}-stage framework — re-run the check before trusting this verdict.</div>`;
+    return `<div style="margin-top:8px;padding:8px 10px;border-radius:var(--radius-md);background:var(--warning-bg);color:var(--warning);font-size:var(--fs-xs)">Checked under the older ${n}-stage framework — the Reasoning stage has never been scored here. Re-run the check before trusting this verdict.</div>`;
 }
 
 // ── Guided creation form ("fill in a form with the AI prompting you") ──
@@ -2007,6 +2041,7 @@ const AGENT_GEARS = [
 ];
 
 async function loadWorkflowData(){
+    _sopMemo.clear(); // fresh records may carry edited SOP JSON
     _workflowsState = 'loading';
     try {
         const [wfs, steps, biz] = await Promise.all([
@@ -2024,12 +2059,22 @@ async function loadWorkflowData(){
     }
 }
 
+// Parsed-SOP memo: renderRegister calls this for every workflow on every
+// render (including per-keystroke searches), and the SOP blobs are multi-KB
+// JSON. Keyed by record id + raw length so a refreshed record re-parses.
+const _sopMemo = new Map();
 function getWfSopData(wfId){
     const w = allWorkflows.find(x=>x.id===wfId);
     if(!w) return null;
     const raw = gf(w, WF.sopDocument);
     if(!raw) return null;
-    try { return JSON.parse(raw); } catch(e){ return null; }
+    const key = wfId + ':' + raw.length;
+    if(_sopMemo.has(key)) return _sopMemo.get(key);
+    let parsed = null;
+    try { parsed = JSON.parse(raw); }
+    catch(e){ console.warn('SOP JSON unreadable on', wfId, e.message); }
+    _sopMemo.set(key, parsed);
+    return parsed;
 }
 function stepsForWorkflow(wfId){
     return allSteps
@@ -2244,7 +2289,7 @@ function renderAgentPerms(wfId, rows){
     const agent = getWfAgent(wfId) || {};
     const fieldSet = new Set(agent.autoFields||[]);
     (rows||[]).forEach(r=>{
-        try { const p = JSON.parse(r.fields['Payload']||'null'); if(p && p.kind==='update' && p.fields) Object.keys(p.fields).forEach(f=>fieldSet.add(f)); } catch(e){}
+        try { const p = JSON.parse(r.fields['Payload']||'null'); if(p && p.kind==='update' && p.fields) Object.keys(p.fields).forEach(f=>fieldSet.add(f)); } catch(e){ console.warn('Perms: payload unreadable on', r.id, e.message); }
     });
     const fields = [...fieldSet].sort();
     const autoFields = agent.autoFields||[];
@@ -2276,6 +2321,10 @@ let _activityCache = { t:0, promise:null };
 function getAgentActivity(){
     const now = Date.now();
     if(_activityCache.promise && (now - _activityCache.t) < 60000) return _activityCache.promise;
+    // NOTE: this is a full-table read of a forward-only log. Fine at today's
+    // size; when it grows past a few hundred rows, split it into a filtered
+    // {State}='Proposed' read for the counts and a bounded read for the feed
+    // (needs a Created field on the table first — it has none today).
     _activityCache = { t: now, promise: atFetchByName(AGENT_ACTIVITY_TBL).catch(e=>{ _activityCache.t = 0; throw e; }) };
     return _activityCache.promise;
 }
@@ -2303,7 +2352,7 @@ function agentFeedRow(r){
         'Note':      'background:var(--info-bg);color:var(--info)',
     };
     let payload = null;
-    try { payload = JSON.parse(f['Payload']||'null'); } catch(e){}
+    try { payload = JSON.parse(f['Payload']||'null'); } catch(e){ console.warn('Activity payload unreadable', r.id, e.message); }
     const undoable = payload && payload.kind==='update' && payload.before && !payload.before._fetchFailed;
     let actions = '';
     let fbBox = '';
@@ -2403,16 +2452,34 @@ async function approveAgentActivity(actId){
     btns.forEach(b=>b.disabled=true);
     try {
         const res = await fetch(`https://api.airtable.com/v0/${BASE_ID}/${AGENT_ACTIVITY_TBL}/${actId}`, { headers:{ 'Authorization':`Bearer ${PAT}` } });
+        // A failed read must never fall through to the "nothing to execute"
+        // path and stamp Approved over an action that never ran (review
+        // finding, 24 Aug 2026). Same reason the live State is re-checked:
+        // a second tab or a 60s-stale render must not re-execute a comment.
+        if(!res.ok) throw new Error(`Airtable ${res.status} reading the proposal`);
         const rec = await res.json();
+        if((rec.fields['State']||'') !== 'Proposed'){
+            toast('Already decided elsewhere — refreshing');
+            invalidateAgentActivity();
+            const wfId = (rec.fields['Agent']||[])[0];
+            if(wfId) renderAgentFeed(wfId);
+            return;
+        }
         let payload = null;
-        try { payload = JSON.parse(rec.fields['Payload']||'null'); } catch(e){}
+        try { payload = JSON.parse(rec.fields['Payload']||'null'); }
+        catch(e){
+            // A corrupt Payload is a refusal, never a silent "manual":
+            // approving it would record an execution that did not happen.
+            throw new Error('proposal payload unreadable — not approved');
+        }
         if(payload && payload.kind==='update'){
             await atUpdate(payload.tableId, payload.recordId, payload.fields);
         } else if(payload && payload.kind==='comment'){
-            await fetch(`https://api.airtable.com/v0/${BASE_ID}/${payload.tableId}/${payload.recordId}/comments`, {
+            const cRes = await fetch(`https://api.airtable.com/v0/${BASE_ID}/${payload.tableId}/${payload.recordId}/comments`, {
                 method:'POST', headers:{ 'Authorization':`Bearer ${PAT}`, 'Content-Type':'application/json' },
                 body: JSON.stringify({ text: String(payload.text||'').slice(0,4000) })
             });
+            if(!cRes.ok) throw new Error(`comment write failed (${cRes.status})`);
         }
         // 'manual' payloads have nothing to execute — approving acknowledges them.
         await setActivityState(actId, 'Approved');
@@ -2440,7 +2507,7 @@ async function undoAgentActivity(actId){
         const res = await fetch(`https://api.airtable.com/v0/${BASE_ID}/${AGENT_ACTIVITY_TBL}/${actId}`, { headers:{ 'Authorization':`Bearer ${PAT}` } });
         const rec = await res.json();
         let payload = null;
-        try { payload = JSON.parse(rec.fields['Payload']||'null'); } catch(e){}
+        try { payload = JSON.parse(rec.fields['Payload']||'null'); } catch(e){ console.warn('Undo: payload unreadable on', actId, e.message); }
         if(!payload || payload.kind!=='update' || !payload.before){ toast('Nothing undoable on this entry'); return; }
         await atUpdate(payload.tableId, payload.recordId, payload.before);
         await setActivityState(actId, 'Undone');
@@ -2604,6 +2671,14 @@ function consumeAgentDeepLink(){
         selectedAgentId = hashMatch[1];
         return true;
     }
+    // Process-agent deep link, new-tab safe (a hash is per-window, so no
+    // other document can steal it — unlike the localStorage keys below).
+    const wfHash = (location.hash||'').match(/#wf=(rec[A-Za-z0-9]+)/);
+    if(wfHash){
+        history.replaceState(null,'',location.pathname+location.search);
+        selectedAgentWf = wfHash[1];
+        return true;
+    }
     const roleId = localStorage.getItem('sys_open_role_agent');
     if(roleId){
         localStorage.removeItem('sys_open_role_agent');
@@ -2618,13 +2693,22 @@ function consumeAgentDeepLink(){
     }
     return false;
 }
-window.addEventListener('storage', (e)=>{
-    if((e.key==='sys_open_agent' || e.key==='sys_open_role_agent') && e.newValue){
-        if(consumeAgentDeepLink() && _agentsRegisterState==='ready'){
-            renderRegister();
-            const z = document.getElementById('zoneRegister');
-            if(z) z.scrollIntoView({behavior:'smooth', block:'start'});
-        }
+// In-shell deep links arrive by postMessage from the parent's
+// deepLinkAgents helper — never by storage events, whose delivery order
+// between a dying and a booting document is a race that ate the key
+// (review finding, 24 Aug 2026). The localStorage reads above remain as
+// boot-time consumption only, for any straggler writer.
+window.addEventListener('message', (e)=>{
+    if(e.origin !== 'null' && e.origin !== window.location.origin) return;
+    const d = e.data;
+    if(!d || d.type !== 'agentsDeepLink') return;
+    if(d.agent) selectedAgentId = d.agent;
+    else if(d.wf) selectedAgentWf = d.wf;
+    else return;
+    if(_agentsRegisterState==='ready'){
+        renderRegister();
+        const z = document.getElementById('zoneRegister');
+        if(z) z.scrollIntoView({behavior:'smooth', block:'start'});
     }
 });
 
@@ -2693,6 +2777,14 @@ async function start(){
     document.getElementById('authBar').style.display='none';
     try {
         consumeAgentDeepLink();
+        // Announce boot so a deep link requested while this iframe was
+        // reloading gets re-delivered by the parent (agentsPageReady
+        // handshake in js/shared.js).
+        try {
+            if(window.parent && window.parent !== window){
+                window.parent.postMessage({ type:'agentsPageReady' }, '*');
+            }
+        } catch(e){ /* standalone — no parent */ }
         await loadEverything();
         document.getElementById('topbar').style.display='flex';
         document.getElementById('main').style.display='block';

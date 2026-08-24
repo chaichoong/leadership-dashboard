@@ -43,10 +43,10 @@
         { id: 'kpi-library', name: 'KPI Library', icon: '📚', pageVer: '1.7', sopFile: '', sopVer: '1.0', standalone: 'index.html#kpi-library', adminOnly: true },
         // AI Agents (Leadership) — ADMIN ONLY, like KPI Library. Approvals,
         // checks and the workforce register in one place (Kevin's ruling,
-        // 25 Aug 2026; moved out of the Systemisation page).
+        // 24 Aug 2026; moved out of the Systemisation page).
         { id: 'agents', name: 'AI Agents', icon: '🤖', pageVer: '1.0', sopFile: 'sop-ai-agents.html', sopVer: '1.0', standalone: 'os/agents/index.html', adminOnly: true },
         { id: 'fintable',  name: 'Accounts',                       icon: '🏦', pageVer: '1.19', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#fintable' },
-        { id: 'systemisation', name: 'Systemisation',              icon: '⚙️', pageVer: '1.17', sopFile: 'guides/systemisation.html',    sopVer: '1.11', standalone: 'os/systemisation/index.html' },
+        { id: 'systemisation', name: 'Systemisation',              icon: '⚙️', pageVer: '1.18', sopFile: 'guides/systemisation.html',    sopVer: '1.11', standalone: 'os/systemisation/index.html' },
         { id: 'os-team',    name: 'Team Members',                  icon: '👥', pageVer: '1.22', sopFile: '',                            sopVer: '1.1', standalone: 'os/team/index.html' },
         // pageVer corrected by hand 2026-08-06: the auto-bump never fired for this page
         // (crm-supabase.html was missing from the workflow `paths:` filter), so 1.0 was
@@ -57,7 +57,7 @@
         { id: 'content-machine', name: 'Content Machine',           icon: '🎬', pageVer: '1.0', sopFile: '',                            sopVer: '1.0', standalone: 'https://chaichoong.github.io/content-machine/' },
         { id: 'prospecting', name: 'Prospecting',                   icon: '🧲', pageVer: '1.15', sopFile: 'sop-prospecting.html',        sopVer: '1.5', standalone: 'index.html#prospecting' },
         { id: 'sitemap',    name: 'Site Map & Guides',             icon: '🔗', pageVer: '1.24', sopFile: 'sop-sitemap.html',            sopVer: '1.19', standalone: 'index.html#sitemap' },
-        { id: 'skills',     name: 'Skills Library',                icon: '🧠', pageVer: '1.14', sopFile: 'guides/skills.html',           sopVer: '1.0', standalone: 'index.html#skills' },
+        { id: 'skills',     name: 'Skills Library',                icon: '🧠', pageVer: '1.15', sopFile: 'guides/skills.html',           sopVer: '1.0', standalone: 'index.html#skills' },
         { id: 'ai-brain',  name: 'AI Brain',                       icon: '💭', pageVer: '1.0', sopFile: 'guides/ai-brain.html',         sopVer: '1.0', standalone: 'ai-brain.html' },
         { id: 'how-it-works', name: 'How It Works',               icon: '🗺️', pageVer: '2.2', sopFile: '',                             sopVer: '1.0', standalone: 'how-it-works.html' },
     ];

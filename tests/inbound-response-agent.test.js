@@ -65,14 +65,28 @@ describe('roster wiring', () => {
     expect(submit).not.toMatch(/args\.agent not in AGENTS\b/);
   });
 
-  it('inbound CEO tasks get the deterministic autoTarget, and the inbound field id is the sweep\'s', () => {
+  it('inbound CEO tasks get the deterministic autoTarget, gated on the LIVE register', () => {
     const queue = src.slice(src.indexOf('def cmd_queue'), src.indexOf('# ─── WRITES'));
-    expect(queue).toMatch(/if t\["inboundTask"\]:\s*\n\s*t\["autoTarget"\] = RESPONSE_REC_ID/);
+    // The stamp must consult role_roster's dispatchable flag — an ungated
+    // stamp routes work to a paused agent (review finding, 24 Aug 2026).
+    expect(queue).toMatch(/t\["inboundTask"\] and role_roster\.get\(\s*\n?\s*RESPONSE_REC_ID, \{\}\)\.get\("dispatchable"\)/);
     expect(src).toMatch(/"inboundTask":\s*"fldueazD67F7fUGee"/);
     // The queue JSON must expose the register roster AND its read failure —
     // a silently missing roster starves role agents run after run.
     expect(queue).toMatch(/"roleAgents": role_roster/);
     expect(queue).toMatch(/"roleAgentsError": role_roster_error/);
+  });
+
+  it('the register pause lever is enforced on every write path, and verify sees the loop\'s controls', () => {
+    // route and submit re-check the LIVE register for role agents
+    const route = src.slice(src.indexOf('def cmd_route'), src.indexOf('def cmd_escalate'));
+    const submit = src.slice(src.indexOf('def cmd_submit'), src.indexOf('def cmd_annotate'));
+    expect(route).toMatch(/require_role_agent_live\(args\.to/);
+    expect(submit).toMatch(/require_role_agent_live\(args\.agent/);
+    // verify fails on a broken roster read and on a skipped CEO review pass
+    const verify = src.slice(src.indexOf('def cmd_verify'), src.indexOf('# ─── SCORE'));
+    expect(verify).toMatch(/roleAgentsError/);
+    expect(verify).toMatch(/ceoReview/);
   });
 });
 
@@ -83,15 +97,15 @@ describe('24h score maths', () => {
     expect(out).toContain('selftest-score: all checks passed');
   });
 
-  it('cmd_score has a loud control before any write', () => {
+  it('cmd_score has a loud control on the ambiguous zero, and excludes Cancelled', () => {
     const score = src.slice(src.indexOf('def cmd_score'), src.indexOf('def response_score_selftest'));
-    // Control precedes the window query: zero inbound tasks all-time means the
-    // READ is broken (the population is known non-empty), never a quiet day.
-    const controlAt = score.indexOf('control failed');
-    const queryAt = score.indexOf("IS_AFTER(CREATED_TIME()");
-    expect(controlAt).toBeGreaterThan(-1);
-    expect(queryAt).toBeGreaterThan(-1);
-    expect(controlAt).toBeLessThan(queryAt);
+    // Control ON ZERO: only an empty main read triggers the all-time
+    // existence check, and a broken read exits rather than publishing.
+    expect(score).toMatch(/if not records and not query_tasks\("\{Inbound Communication Task\}"/);
+    expect(score).toMatch(/control failed/);
+    // Cancelled tasks are nobody-wants-it-answered — excluded at the query
+    // (review finding, 24 Aug 2026: junk inbound dragged the score for ever)
+    expect(score).toMatch(/\{Status\}!='Cancelled'/);
     // And the write targets the register row's Metric Score, change-gated
     expect(score).toMatch(/REGISTER_METRIC_SCORE/);
     expect(score).toMatch(/reading == prev/);

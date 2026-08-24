@@ -228,9 +228,15 @@ CEO_REC_ID = "reciHUAEcEkbctnZ6"
 
 # Role-specific agents from the AI Agents register (tbl9msVjyQWslLOIZ) that
 # have completed their own build session and can be DISPATCHED like the 17
-# above. One line per agent, added only by that agent's build session — an
-# entry here is a promise that the local agent file exists in
-# ~/.claude/agents/ and its register row is Built or Live.
+# above. An entry here is a promise the agent's whole touch-set exists —
+# a build session adding one must update ALL of:
+#   1. this dict (one line)
+#   2. ~/.claude/agents/<agent>.md (the local agent definition)
+#   3. AI_AGENT_TEAM_MEMBER_RECS in follow-up.html AND follow-up-supabase.html
+#      (content-equality drift-tested in follow-up-label12-agent-routing)
+#   4. the register row itself: all seven stages, Built/Live status
+# Dispatchability is enforced at runtime against the LIVE register status
+# (require_role_agent_live) — this dict alone never grants work.
 ROLE_AGENTS = {
     "recJ8J8idWE8d97tH": {"name": "AI Inbound Comms Response",
                           "agent": "inbound-comms-response", "role": "worker"},
@@ -518,24 +524,31 @@ def _request(method, path, body=None):
             f"{e.read().decode('utf-8', 'replace')[:300]}") from None
 
 
-def query_tasks(formula, max_records=None, minimal=False):
+def query_records(table, formula=None, fields=None, max_records=None):
+    """The one paginated Airtable read. Every list read in this file goes
+    through here — a second hand-rolled offset loop is how the recon accuracy
+    card came to score only its first page (CLAUDE.md anti-patterns)."""
     records, offset = [], None
     while True:
-        params = [("pageSize", "100"), ("returnFieldsByFieldId", "true"),
-                  ("filterByFormula", formula)]
+        params = [("pageSize", "100"), ("returnFieldsByFieldId", "true")]
+        if formula:
+            params.append(("filterByFormula", formula))
         if max_records:
             params.append(("maxRecords", str(max_records)))
-        if not minimal:
-            params += [("fields[]", f) for f in AF.values()]
-        else:
-            params.append(("fields[]", AF["name"]))
+        for f in (fields or []):
+            params.append(("fields[]", f))
         if offset:
             params.append(("offset", offset))
-        body = _request("GET", f"/{TASKS}?{urllib.parse.urlencode(params)}")
+        body = _request("GET", f"/{table}?{urllib.parse.urlencode(params)}")
         records += body.get("records", [])
         offset = body.get("offset")
         if not offset:
             return records
+
+
+def query_tasks(formula, max_records=None, minimal=False):
+    fields = [AF["name"]] if minimal else list(AF.values())
+    return query_records(TASKS, formula, fields, max_records)
 
 
 def patch_task(task_id, fields):
@@ -547,36 +560,26 @@ def fetch_role_roster():
     """The role-agent workforce from the AI Agents register, keyed by Team
     Members record id so the router speaks the same ids as task links.
 
-    A failed read must not kill the queue (routing to the 17 still works and
-    the deterministic inbound route does not depend on this), but it must be
-    VISIBLE: the caller puts the error in the queue JSON, and verify treats a
-    roster the run needed but could not read as a reportable failure."""
-    roster, offset = {}, None
-    params_base = [("pageSize", "100"), ("returnFieldsByFieldId", "true")]
-    params_base += [("fields[]", f) for f in REGISTER_FIELDS.values()]
-    while True:
-        params = list(params_base)
-        if offset:
-            params.append(("offset", offset))
-        body = _request(
-            "GET", f"/{AGENTS_TABLE}?{urllib.parse.urlencode(params)}")
-        for rec in body.get("records", []):
-            f = rec.get("fields", {})
-            tm = links(f.get(REGISTER_FIELDS["teamMember"]))
-            if not tm:
-                continue
-            status = sel(f.get(REGISTER_FIELDS["status"]))
-            roster[tm[0]] = {
-                "name": f.get(REGISTER_FIELDS["name"], ""),
-                "goal": f.get(REGISTER_FIELDS["goal"], ""),
-                "status": status,
-                "dispatchable": tm[0] in ROLE_AGENTS
-                                and status in ("Built", "Live"),
-                "learningLog": f.get(REGISTER_FIELDS["learningLog"], ""),
-            }
-        offset = body.get("offset")
-        if not offset:
-            return roster
+    A failed read must not kill the queue (routing to the 17 still works),
+    but it must be VISIBLE: the caller puts the error in the queue JSON, the
+    skill copies it into report.json, and cmd_verify fails the run on it."""
+    roster = {}
+    for rec in query_records(AGENTS_TABLE,
+                             fields=list(REGISTER_FIELDS.values())):
+        f = rec.get("fields", {})
+        tm = links(f.get(REGISTER_FIELDS["teamMember"]))
+        if not tm:
+            continue
+        status = sel(f.get(REGISTER_FIELDS["status"]))
+        roster[tm[0]] = {
+            "name": f.get(REGISTER_FIELDS["name"], ""),
+            "goal": f.get(REGISTER_FIELDS["goal"], ""),
+            "status": status,
+            "dispatchable": tm[0] in ROLE_AGENTS
+                            and status in ("Built", "Live"),
+            "learningLog": f.get(REGISTER_FIELDS["learningLog"], ""),
+        }
+    return roster
 
 
 def get_task(task_id):
@@ -821,7 +824,13 @@ def cmd_queue(args):
                 # the target is fixed (Kevin's ruling, 24 Aug 2026), so the
                 # dispatcher routes them straight to the Response agent with
                 # `route TASKID --to <autoTarget>` — no od-ceo dispatch.
-                if t["inboundTask"]:
+                # Gated on the LIVE register: if the Response agent's row is
+                # not Built/Live (Kevin's pause lever) or the roster read
+                # failed, the task stays in the CEO lane and routes to a
+                # strategic agent like any other — mail keeps flowing, the
+                # lever stays honoured, and cmd_route re-checks regardless.
+                if t["inboundTask"] and role_roster.get(
+                        RESPONSE_REC_ID, {}).get("dispatchable"):
                     t["autoTarget"] = RESPONSE_REC_ID
                 routing.append(t)
             elif tm in ALL_AGENTS:
@@ -912,12 +921,36 @@ def cmd_queue(args):
 
 # ─── WRITES ───────────────────────────────────────────────────────────
 
+def require_role_agent_live(rec_id, verb):
+    """The register row is Kevin's pause lever for a role agent — flipping its
+    Status off Built/Live must actually stop work reaching it. Strategic
+    agents (the 17) have no register row and always pass. Fails CLOSED on an
+    unreadable register: the caller then routes to a strategic agent instead,
+    so mail still flows while the lever stays honoured."""
+    if rec_id not in ROLE_AGENTS:
+        return
+    try:
+        roster = fetch_role_roster()
+    except Exception as exc:  # noqa: BLE001
+        sys.exit(f"ERROR: cannot {verb} to role agent "
+                 f"{ROLE_AGENTS[rec_id]['name']} — the register is "
+                 f"unreadable ({str(exc)[:160]}); use a strategic agent "
+                 "this run and let verify surface the roster failure")
+    entry = roster.get(rec_id)
+    if not entry or not entry.get("dispatchable"):
+        status = (entry or {}).get("status", "no register row")
+        sys.exit(f"ERROR: role agent {ROLE_AGENTS[rec_id]['name']} is not "
+                 f"dispatchable (register status: {status}) — Kevin's "
+                 "register controls this; route to a strategic agent instead")
+
+
 def cmd_route(args):
     if args.to not in ALL_AGENTS:
         sys.exit(f"ERROR: {args.to} is not a dispatchable AI agent record "
                  "(one of the 17 strategic agents or a built role agent)")
     if args.to == CEO_REC_ID:
         sys.exit("ERROR: routing back to the CEO is not a route")
+    require_role_agent_live(args.to, "route")
     patch_task(args.task, {AF["teamMember"]: [args.to]})
     print(json.dumps({"routed": args.task, "to": args.to,
                       "agent": ALL_AGENTS[args.to]["name"]}))
@@ -975,6 +1008,7 @@ def cmd_submit(args):
     if args.agent not in ALL_AGENTS:
         sys.exit(f"ERROR: {args.agent} is not a dispatchable AI agent record "
                  "(one of the 17 strategic agents or a built role agent)")
+    require_role_agent_live(args.agent, "submit")
     if args.type not in TASK_TYPES:
         sys.exit(f"ERROR: Task Type must be one of {TASK_TYPES}")
     with open(args.output_file) as fh:
@@ -1189,6 +1223,30 @@ def cmd_verify(args):
         problems.append(f"action failed: {a.get('kind')} {a.get('task')} — "
                         f"{str(a.get('error'))[:120]}")
 
+    # A register roster the queue could not read must never stay a stderr
+    # whisper: role agents silently stop receiving routed work and lessons.
+    # The skill copies queue.json's roleAgentsError into the report; a
+    # non-empty value fails the run so the alarm channel carries it.
+    if report.get("roleAgentsError"):
+        problems.append("role-agent register read failed: "
+                        f"{str(report['roleAgentsError'])[:160]}")
+
+    # The CEO review pass is mandatory for non-tier-1 prepared work (Kevin's
+    # ruling, 24 Aug 2026). A run that submitted such work with no ceoReview
+    # object either skipped the pass or hid its outcome — both are failures.
+    # A reviewer that broke mid-run reports {"error": ...}, which passes here
+    # (visible, not blocking Kevin's queue).
+    non_t1_submits = [a for a in ok_actions
+                      if a.get("kind") in ("redo", "new")
+                      and not a.get("tier1")]
+    ceo = report.get("ceoReview")
+    if non_t1_submits and not (isinstance(ceo, dict)
+                               and (ceo.get("reviewed", 0) > 0
+                                    or ceo.get("error"))):
+        problems.append(
+            f"{len(non_t1_submits)} non-tier-1 submissions but no CEO review "
+            "recorded — the review pass was skipped or its outcome hidden")
+
     # A tier-1 task on an agent is no longer a fault — Kevin's call, 6 Aug 2026.
     # Agents prepare it and it reaches him through the same gate as everything
     # else. So the alarm here is not "an agent touched it", it is "an agent
@@ -1309,23 +1367,27 @@ def cmd_verify(args):
 # controls). Runs at the end of every dispatch run and PATCHes the register
 # row's Metric Score, gated on change so quiet days add no Airtable traffic.
 
-RESPONSE_SCORE_STATE = os.path.expanduser(
-    "~/knowledge-os/logs/agent-dispatch/response-score.json")
+RESPONSE_SCORE_STATE = os.path.join(STATE_DIR, "response-score.json")
 
 
 def _parse_at(ts):
-    """ISO timestamp (Zulu or naive) → aware datetime, or a date-only marker.
+    """ISO timestamp (Zulu or naive) → AWARE datetime, or a date-only marker.
 
     Returns (datetime|None, is_date_only). Completion Date is written as full
-    ISO by the sweep and dispatch, but older app-stamped rows may carry a bare
-    date — those can only be judged to day precision, never hour."""
+    Zulu ISO by every known writer, but a naive-with-time string (a future
+    writer stamping local ISO) must not crash the score maths — it is treated
+    as UTC, never returned naive. Bare dates can only be judged to day
+    precision, never hour."""
     if not ts or not isinstance(ts, str):
         return None, False
     try:
         if len(ts) == 10:
             return datetime.strptime(ts, "%Y-%m-%d").replace(
                 tzinfo=timezone.utc), True
-        return datetime.fromisoformat(ts.replace("Z", "+00:00")), False
+        dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt, False
     except ValueError:
         return None, False
 
@@ -1346,6 +1408,11 @@ def response_score_reading(records, now_utc):
             continue
         f = rec.get("fields", {})
         status = sel(f.get(AF["status"]))
+        if status == "Cancelled":
+            # A cancelled task is one nobody wants answered (spam, junk,
+            # withdrawn). Neither an answer nor a miss — the query already
+            # excludes these; this guard keeps the maths honest if it stops.
+            continue
         if status == "Completed":
             if created < window_start:
                 continue  # window stats measure the last 7 days only
@@ -1380,18 +1447,20 @@ def cmd_score(args):
     if args.selftest:
         return response_score_selftest()
 
-    # Control first: the inbound-task population is known non-empty (hundreds
-    # of rows since Aug 2026), so zero here means the READ is broken — a typo'd
-    # field name must fail loudly, never publish "no inbound" as a score.
-    if not query_tasks("{Inbound Communication Task}", max_records=1,
-                       minimal=True):
-        sys.exit("ERROR: control failed — zero inbound tasks exist all-time. "
-                 "The read is broken, not the queue empty. No score written.")
-
     records = query_tasks(
-        "AND({Inbound Communication Task}, "
+        "AND({Inbound Communication Task}, {Status}!='Cancelled', "
         "OR(IS_AFTER(CREATED_TIME(), DATEADD(NOW(), -7, 'days')), "
         "{Status}!='Completed'))")
+
+    # Control ON ZERO: an empty main read is ambiguous — a genuinely quiet
+    # week and a typo'd field name look identical. The all-time population is
+    # known non-empty (hundreds of rows since Aug 2026), so only when the main
+    # query returns nothing do we spend the extra round-trip to tell the two
+    # apart, and a broken read fails loudly rather than publishing a score.
+    if not records and not query_tasks("{Inbound Communication Task}",
+                                       max_records=1, minimal=True):
+        sys.exit("ERROR: control failed — zero inbound tasks exist all-time. "
+                 "The read is broken, not the queue empty. No score written.")
     reading, stats = response_score_reading(
         records, datetime.now(timezone.utc))
 
@@ -1453,6 +1522,21 @@ def response_score_selftest():
         [rec("2026-08-25T11:00:00.000Z", "Today")], now)
     assert reading3 == "100% within 24h (0/0, 7 days); 1 open, 0 past 24h", \
         reading3
+
+    # Cancelled = nobody wants it answered: neither an answer nor a miss,
+    # however old (review finding, 24 Aug 2026 — junk inbound must not drag
+    # the score down for ever).
+    _, s4 = response_score_reading(
+        [rec("2026-08-20T09:00:00.000Z", "Cancelled")], now)
+    assert s4 == {"within24": 0, "answered": 0, "open": 0, "openPast24": 0,
+                  "judgeable": 0, "unstamped": 0}, s4
+
+    # A naive-with-time completion stamp must be treated as UTC, never crash
+    # the run with an aware-vs-naive TypeError (review finding, 24 Aug 2026).
+    _, s5 = response_score_reading(
+        [rec("2026-08-24T09:00:00.000Z", "Completed", "2026-08-24T11:00:00")],
+        now)
+    assert s5["within24"] == 1 and s5["answered"] == 1, s5
     print("selftest-score: all checks passed")
 
 

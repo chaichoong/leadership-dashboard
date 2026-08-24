@@ -211,11 +211,14 @@
         Paused:   { bg: 'var(--warning-bg)', fg: 'var(--warning)' },
     };
 
-    // Since 25 Aug 2026 the agents live on Leadership → AI Agents
-    // (os/agents/index.html); that page consumes the localStorage key.
+    // Since 24 Aug 2026 the agents live on Leadership → AI Agents
+    // (os/agents/index.html). Deep-linking goes through the parent's
+    // deepLinkAgents helper (postMessage + reload handshake) — the old
+    // localStorage key was consumed by a dying iframe when the frame was
+    // stale enough to reload (review finding, 24 Aug 2026).
     function openRoleAgentInSystemisation(recId) {
-        localStorage.setItem('sys_open_role_agent', recId);
-        if (typeof switchTab === 'function') switchTab('agents');
+        if (typeof deepLinkAgents === 'function') deepLinkAgents({ agent: recId });
+        else if (typeof switchTab === 'function') switchTab('agents');
     }
     window.openRoleAgentInSystemisation = openRoleAgentInSystemisation;
 
@@ -227,8 +230,8 @@
     };
 
     function openAgentInSystemisation(wfId) {
-        localStorage.setItem('sys_open_agent', wfId);
-        if (typeof switchTab === 'function') switchTab('agents');
+        if (typeof deepLinkAgents === 'function') deepLinkAgents({ wf: wfId });
+        else if (typeof switchTab === 'function') switchTab('agents');
     }
     window.openAgentInSystemisation = openAgentInSystemisation;
 

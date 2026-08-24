@@ -24,6 +24,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { execFileSync } from 'node:child_process';
 import { approverFor } from '../scripts/slack-automation/approvals.js';
 
 const SRC = readFileSync(resolve(__dirname, '../follow-up.html'), 'utf8');
@@ -140,6 +141,22 @@ describe('the Supabase shadow twin carries the same routing', () => {
     expect(TWIN).toContain('healthCheckAgentRoutedTask');
     expect(TWIN).not.toContain('healthCheckKevinTask');
   });
+
+  it('the twin roster CONTENTS equal the main page roster — containment is not enough', () => {
+    // 24 Aug 2026: the Response agent was added to follow-up.html but not the
+    // twin, and this suite stayed green because it only checked the constant
+    // NAME existed. Extract both literal sets and compare the record ids.
+    const extract = (src) => {
+      const start = src.indexOf('AI_AGENT_TEAM_MEMBER_RECS = new Set([');
+      expect(start).toBeGreaterThan(-1);
+      const body = src.slice(start, src.indexOf(']);', start));
+      return (body.match(/rec[A-Za-z0-9]{14}/g) || []).sort();
+    };
+    const FOLLOWUP = readFileSync(resolve(__dirname, '../follow-up.html'), 'utf8');
+    const mainIds = extract(FOLLOWUP);
+    expect(mainIds.length).toBeGreaterThan(0); // control: the parse works
+    expect(extract(TWIN)).toEqual(mainIds);
+  });
 });
 
 describe('the task drawer approval box works for any approver', () => {
@@ -164,13 +181,21 @@ describe('constant drift vs agent-dispatch.py, approvals.js and config.js', () =
     expect(CEO_REC).toBe(m[1]);
   });
 
-  it('agent roster matches the AGENTS dict in agent-dispatch.py exactly', () => {
-    const dispatchIds = new Set(
-      (DISPATCH.match(/"(rec[A-Za-z0-9]{14})":\s*\{"name": "AI /g) || [])
-        .map(s => s.match(/rec[A-Za-z0-9]{14}/)[0])
-    );
-    expect(dispatchIds.size).toBeGreaterThan(0); // control: the parse works
-    expect([...AGENT_ROSTER].sort()).toEqual([...dispatchIds].sort());
+  it('agent roster matches ALL_AGENTS in agent-dispatch.py exactly', () => {
+    // Parse the REAL dicts structurally via Python, not a formatting-dependent
+    // regex — a role agent named without the "AI " prefix or formatted with a
+    // line break would silently drop out of a regex-scooped set (24 Aug 2026).
+    const script = `
+import json, importlib.util
+spec = importlib.util.spec_from_file_location("dispatch", ${JSON.stringify(resolve(__dirname, '../scripts/agent-dispatch.py'))})
+mod = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(mod)
+print(json.dumps(sorted(mod.ALL_AGENTS.keys())))
+`;
+    const dispatchIds = JSON.parse(
+      execFileSync('python3', ['-c', script], { encoding: 'utf8' }));
+    expect(dispatchIds.length).toBeGreaterThan(0); // control: the parse works
+    expect([...AGENT_ROSTER].sort()).toEqual(dispatchIds);
   });
 
   it('Team Member and Approver field IDs match config.js TASK_FIELDS', () => {
