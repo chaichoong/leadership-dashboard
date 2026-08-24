@@ -546,20 +546,19 @@ const FULFILL_STAGES = [
 
 const DEPARTMENTS = ['Marketing', 'Sales', 'Operations', 'Finance', 'Admin / HR'];
 
-// AGENTRIC extraction script — the eight stages the owner narrates (Loom) or
-// answers in the guided form. Evolved 24 Aug 2026 from the seven-stage AGENTIC
-// model: R (Reasoning) added and C now carries the score, folding in Austin
-// Chen's Agent Logic Model (goal / reasoning / access / process / score).
+// AGENTIC extraction script — the seven stages the owner narrates (Loom) or
+// answers in the guided form. Amended 25 Aug 2026 on Kevin's call: the acronym
+// stays AGENTIC. Chen's reasoning core lives INSIDE Navigate (the walk-through
+// is where decisions get narrated) and C carries the score.
 // Wording is the single source of truth (see docs/agentic-extraction-spec.md).
 // naAllowed is PER MODE — the stage list, the pass rules and the normaliser all
 // derive from it, so the prompt can never contradict what is enforced.
 const AGENTIC_STAGES = [
     { letter:'A', name:'Aim',                     naAllowed:{agent:false,human:false}, prompt:'In a sentence or two, what is this process for, and why does it matter to the business?' },
-    { letter:'G', name:'Go Signal',               naAllowed:{agent:false,human:false}, prompt:'What tells you it is time to do this? A set time, an email arriving, a new record, a payment landing, or someone asking?' },
+    { letter:'G', name:'Go Signal',               naAllowed:{agent:false,human:false}, prompt:'What tells you it is time to do this? A set time, an email arriving, a new record, a payment landing, or someone asking? This trigger is specific to THIS agent — there is no blanket schedule.' },
     { letter:'E', name:'Entry Points',            naAllowed:{agent:false,human:false}, prompt:'Where do you go and what do you open to do this? Which systems, inboxes, files, or records, and what do you need from each?' },
-    { letter:'N', name:'Navigate the Process',    naAllowed:{agent:false,human:false}, prompt:'Walk me through exactly what you do, step by step. Most important: every time you make a choice, say out loud how you decide and why you pick what you pick.' },
+    { letter:'N', name:'Navigate the Process',    naAllowed:{agent:false,human:false}, prompt:'Walk me through exactly what you do, step by step. Every time you make a choice, say how you decide and why. And when something odd comes up that the steps do not cover, what happens: best guess, skip it, or stop and ask you?' },
     { letter:'T', name:'Tools & Transformations', naAllowed:{agent:false,human:false}, prompt:'What do you actually change, create, or send? Name every system you write into.' },
-    { letter:'R', name:'Reasoning',               naAllowed:{agent:false,human:true},  prompt:'How should good judgement sound when doing this? What rules of thumb decide the grey areas? And when it is unsure, what happens: best guess, skip it, or stop and ask you?' },
     { letter:'I', name:'Inspections & Caveats',   naAllowed:{agent:true,human:true},   prompt:'Before you call it done, what do you check? What would you never let go out unchecked? And what trips this up — the odd cases, the exceptions, anything you must never do?' },
     { letter:'C', name:'Conclusion & Score',      naAllowed:{agent:false,human:false}, prompt:'What does the finished job look like, and how is success scored? Describe the end result of one good run, and the number or check that tells you over time it is doing a good job.' },
 ];
@@ -615,15 +614,18 @@ const AG = {
     entryPoints: 'fld3i927FF2kjAtjQ',
     navigate:    'fldvevAHLlPMEIDoq',
     tools:       'fldihzJ09myArHyeO',
-    reasoning:   'fldkSsmUC1r3yMyIv',
+    // reasoning fldkSsmUC1r3yMyIv is DEPRECATED (folded into Navigate, 25 Aug 2026)
     inspections: 'fldm5DIBQyMYwfeMj',
     conclusion:  'fldDmYKLfbisjfm5m',
     scoreMetric: 'fldzuYYA67h3b3MHB',
     stageScores: 'fldxamwviB0v7YFJv',
     source:      'fldVRrIKo0yJDzhIe',
     notes:       'fldiKbBbhoKIN3Vmi',
+    metricScore: 'fldkGxrOlrfuLlH3J', // the agent's CURRENT reading vs its target
+    agentPrompt: 'fldV6ve4IEUDkiKoy', // compiled full working prompt
+    learningLog: 'fldBdnKB1U4jZM0Jj', // dated lessons from approval feedback
 };
-const AG_STAGE_FIELDS = { A:AG.aim, G:AG.goSignal, E:AG.entryPoints, N:AG.navigate, T:AG.tools, R:AG.reasoning, I:AG.inspections, C:AG.conclusion };
+const AG_STAGE_FIELDS = { A:AG.aim, G:AG.goSignal, E:AG.entryPoints, N:AG.navigate, T:AG.tools, I:AG.inspections, C:AG.conclusion };
 const AGENT_STATUSES = ['Planned','Building','Built','Live','Paused'];
 const AGENT_STATUS_META = {
     Planned:  { bg:'var(--bg-subtle)',   fg:'var(--text-muted)' },
@@ -3078,10 +3080,10 @@ function renderSteps(){
             html += `<div class="agentic-guide${hasSopDoc?'':' open'}" id="agenticGuide-${w.id}">
                 <div class="agentic-guide-head" onclick="this.parentElement.classList.toggle('open')">
                     <span class="resources-chevron">&#x25B6;</span>
-                    AGENTRIC script — what to cover in your video
+                    AGENTIC script — what to cover in your video
                 </div>
                 <div class="agentic-guide-body">
-                    <p class="agentic-guide-intro">Record one short Loom and talk through these ${AGENTIC_STAGES.length}, in order. The AGENTRIC method turns it into an autonomous agent.</p>
+                    <p class="agentic-guide-intro">Record one short Loom and talk through these ${AGENTIC_STAGES.length}, in order. The AGENTIC method turns it into an autonomous agent.</p>
                     ${AGENTIC_STAGES.map(s=>`<div class="agentic-guide-item">
                         <span class="agentic-letter">${s.letter}</span>
                         <div><strong>${esc(s.name)}</strong><span>${esc(s.prompt)}</span></div>
@@ -3187,7 +3189,7 @@ function restoreSavedSOPs(){
 }
 
 // ═══════════════════════════════════════════════════════════════════════
-// AGENTRIC readiness check — scores the SOP against the eight stages and
+// AGENTIC readiness check — scores the SOP against the seven stages and
 // surfaces gap questions. Stored inside the SOP document JSON (readiness key).
 // ═══════════════════════════════════════════════════════════════════════
 
@@ -3284,38 +3286,37 @@ function agenticSopText(wfId){
     return `SOP TITLE: ${sop.sopTitle||''}\n\nSTEPS (raw):\n${steps}\n\nSOP BODY:\n${body}\n\nCAUTIONS:\n- ${cautions}\n\nTIPS:\n- ${tips}`;
 }
 
-// Shared AGENTRIC check wording — used by the workflow readiness check AND the
+// Shared AGENTIC check wording — used by the workflow readiness check AND the
 // agents-register readiness check, so the two can never drift apart. The N/A
 // annotations and rule are GENERATED from AGENTIC_STAGES.naAllowed per mode, so
 // the stage list, the pass rules and normaliseReadiness always agree.
-function agentricStageListText(human){
+function agenticStageListText(human){
     return AGENTIC_STAGES.map(s=>`${s.letter} — ${s.name}${stageNaAllowed(s,human)?' (N/A allowed)':''}`).join('\n');
 }
-function agentricNaRule(human){
+function agenticNaRule(human){
     const allowed = AGENTIC_STAGES.filter(s=>stageNaAllowed(s,human)).map(s=>`${s.letter} (${s.name})`);
     const never = AGENTIC_STAGES.filter(s=>!stageNaAllowed(s,human)).map(s=>s.letter);
     return `- "NA": genuinely not applicable. Only allowed for ${allowed.join(' and ')||'no stage'}. Never for ${never.join(', ')}.`;
 }
-function agentricCheckIntro(human){
+function agenticCheckIntro(human){
     const n = AGENTIC_STAGES.length;
     return human
-        ? `You are checking whether a documented business process is clear enough for a PERSON to follow reliably as a recurring or ad-hoc task. Score it against the ${n} AGENTRIC stages from a human-task point of view.`
-        : `You are checking whether a documented business process contains enough to build a reliable autonomous AI agent. Score it against the ${n} AGENTRIC stages.`;
+        ? `You are checking whether a documented business process is clear enough for a PERSON to follow reliably as a recurring or ad-hoc task. Score it against the ${n} AGENTIC stages from a human-task point of view.`
+        : `You are checking whether a documented business process contains enough to build a reliable autonomous AI agent. Score it against the ${n} AGENTIC stages.`;
 }
-function agentricPassRules(human){
+function agenticPassRules(human){
     return human
         ? `- "Clear": clear enough for a person to follow.
 - "Thin": mentioned but a person might get stuck.
 - "Missing": not covered.
-${agentricNaRule(true)}
+${agenticNaRule(true)}
 - This is for a HUMAN to do, not an AI agent. Navigate needs clear, followable steps; the person supplies their own judgement, so do NOT require written decision-reasoning. Go Signal and Tools help but a person can infer them, so mark Thin (not Missing) when vague — never NA.
-- Reasoning: a person brings their own judgement, so mark it NA unless the process genuinely writes down decision rules (then score what is written).
 - Conclusion & Score should describe what the finished job looks like, so the person knows when they are done. A success measure helps but is not required for a human task.`
         : `- "Clear": the stage is fully covered.
 - "Thin": mentioned but incomplete.
 - "Missing": not covered.
-${agentricNaRule(false)}
-- Navigate must contain the actual steps in order. Reasoning must contain the DECISION RULES (how to decide at each choice, and what to do when unsure: guess, skip, or escalate to a human). Decision reasoning written inside Navigate counts towards R — credit it there rather than double-penalising.
+${agenticNaRule(false)}
+- Navigate must contain the actual steps in order AND the decision rules: how the person decides at each choice, and what happens when something is unsure or new (guess, skip, or escalate to a human). Steps with no "how I decide" are Thin at best.
 - Aim is the purpose — why the process exists.
 - Conclusion & Score must describe the CONCRETE end state of a successful run (what exists or has changed) AND how success is measured over time (a number or a check). End state with no measure is Thin.`;
 }
@@ -3334,7 +3335,7 @@ async function callClaudeJson(prompt, maxTokens){
     if(!m) throw new Error('Invalid AI response');
     return JSON.parse(m[0]);
 }
-function agentricResultShape(){
+function agenticResultShape(){
     const n = AGENTIC_STAGES.length;
     const letters = AGENTIC_STAGES.map(s=>s.letter).join(',');
     return `Return ONLY a JSON object:
@@ -3364,20 +3365,20 @@ async function runAgenticCheck(wfId, extraAnswers){
             Object.entries(extraAnswers).map(([k,v])=>`${k}: ${v}`).join('\n');
     }
 
-    const prompt = `${agentricCheckIntro(human)}
+    const prompt = `${agenticCheckIntro(human)}
 
 Process name: ${wName}
 
 The ${AGENTIC_STAGES.length} stages:
-${agentricStageListText(human)}
+${agenticStageListText(human)}
 
 Pass rules:
-${agentricPassRules(human)}
+${agenticPassRules(human)}
 
 Here is the documented process:
 ${agenticSopText(wfId)}${answersBlock}
 
-${agentricResultShape()}`;
+${agenticResultShape()}`;
 
     try {
         const parsed = await callClaudeJson(prompt, 1500);
@@ -3530,7 +3531,7 @@ function renderAgenticScorecard(wfId, readiness){
     container.innerHTML = `<div class="agentic-card" aria-live="polite">
         <div class="agentic-head">
             <div>
-                <div class="agentic-title">AGENTRIC readiness</div>
+                <div class="agentic-title">AGENTIC readiness</div>
                 <div class="agentic-sub">${human?'How ready this SOP is for a person to follow':'How ready this process is to become an autonomous agent'}</div>
             </div>
             <span class="agentic-state" style="background:${stateMeta.bg};color:${stateMeta.fg}">${esc(stateMeta.text)}</span>
@@ -4248,7 +4249,7 @@ async function deleteStepInline(stepId){
 // AI AGENTS tab — the operating home for every agent. Three layers:
 //   1. ROLE AGENTS — the register (Airtable AI Agents table): one row per
 //      role-specific agent, with goal, guardrail level, status, workload,
-//      accuracy, and the eight AGENTRIC stages. Created via the guided form
+//      accuracy, and the seven AGENTIC stages. Created via the guided form
 //      (or seeded). Each agent gets built in its own session.
 //   2. STRATEGIC LAYER — the AI CEO, department heads and generic workers
 //      (Team Members rows). Unchanged by the register; shown for workload.
@@ -4279,6 +4280,7 @@ async function loadAgentsRegister(force){
         allAgents = agents;
         allTeamAgents = team.sort((a,b)=>String(gf(a,TM_NAME)||'').localeCompare(String(gf(b,TM_NAME)||'')));
         computeAgentTaskStats(taskRecs);
+        await enforceGuardrailBands();
         _agentsRegisterState = 'ready';
     } catch(e){
         _agentsRegisterState = 'error: ' + (e.message || 'load failed');
@@ -4355,6 +4357,36 @@ function agentWorkloadText(tmIds){
     tmIds.forEach(id=>{ const s=_agentTaskStats[id]; if(s){ open+=s.open; done7+=s.done7; } });
     return open+' open · '+done7+' done (7d)';
 }
+// Kevin's accuracy bands (25 Aug 2026): the WORST job type with a real sample
+// (20+ checked pieces) decides the band. Below 70% = Approval required.
+// 70-90%, or any recent rejection = Hybrid. 90%+ clean = Autonomous eligible.
+// Moving DOWN happens automatically; moving UP is always Kevin's click.
+const GUARDRAIL_ORDER = ['Approval required','Hybrid escalation','Autonomous']; // strictest to loosest
+function guardrailBand(tmId){
+    const rows = _agentAccuracyRows.filter(r=>r.agentId===tmId && r.total >= 20);
+    if(!rows.length) return null; // not enough checked work to band on
+    const worst = rows.reduce((a,r)=>r.rate<a.rate?r:a);
+    const recentReject = rows.some(r=>r.recentRejections>0);
+    if(worst.rate < 0.70) return { level:'Approval required', why:'worst job type '+Math.round(worst.rate*100)+'% ('+worst.taskType+')' };
+    if(worst.rate < 0.90 || recentReject) return { level:'Hybrid escalation', why:'worst job type '+Math.round(worst.rate*100)+'%'+(recentReject?', recent rejection':'') };
+    return { level:'Autonomous', why:'every job type 90%+ with a clean recent run' };
+}
+async function enforceGuardrailBands(){
+    for(const a of allAgents){
+        const tmId = (gf(a,AG.teamMember)||[])[0];
+        if(!tmId) continue;
+        const band = guardrailBand(tmId);
+        if(!band) continue;
+        const cur = selName(gf(a,AG.guardrail));
+        const curIdx = GUARDRAIL_ORDER.indexOf(cur), recIdx = GUARDRAIL_ORDER.indexOf(band.level);
+        if(curIdx < 0 || recIdx < 0 || curIdx <= recIdx) continue; // never loosen automatically
+        const stamp = new Date().toISOString().slice(0,10);
+        const log = ((gf(a,AG.learningLog)||'') + '\n' + stamp + ': guardrails auto-tightened ' + cur + ' to ' + band.level + ' (' + band.why + '). Loosening is Kevin\'s click.').trim();
+        await patchAgent(a.id, { [AG.guardrail]: band.level, [AG.learningLog]: log }, null);
+        toast((gf(a,AG.name)||'Agent') + ': guardrails auto-tightened to ' + band.level);
+    }
+}
+
 function agentWorkloadCell(tmIds){
     const t = agentWorkloadText(tmIds);
     if(t===null) return '<span style="font-size:var(--fs-xs);color:var(--text-muted)" title="Wire this agent to a Team Members row in its panel to track workload">not wired</span>';
@@ -4402,14 +4434,15 @@ function renderAutomation(){
     } else if(!roleAgents.length){
         html += q
             ? `<div class="empty-state"><p>No role agents match "${esc(_autoSearch)}".</p></div>`
-            : `<div class="empty-state"><p>No role agents yet.</p><p>Use "+ Create an agent" and the AI will walk you through the ${AGENTIC_STAGES.length} AGENTRIC questions.</p></div>`;
+            : `<div class="empty-state"><p>No role agents yet.</p><p>Use "+ Create an agent" and the AI will walk you through the ${AGENTIC_STAGES.length} AGENTIC questions.</p></div>`;
     } else {
         html += `<table class="wf-grid" style="margin-bottom:14px"><thead><tr>
-            <th style="width:17%">Agent</th>
+            <th style="width:16%">Agent</th>
             <th>Goal</th>
-            <th style="width:120px">Guardrails</th>
-            <th style="width:90px">Status</th>
-            <th style="width:130px">Workload</th>
+            <th style="width:110px">Guardrails</th>
+            <th style="width:80px">Status</th>
+            <th style="width:90px">Metric</th>
+            <th style="width:120px">Workload</th>
             <th style="width:90px">Accuracy</th>
         </tr></thead><tbody>`;
         roleAgents.forEach(a=>{
@@ -4423,6 +4456,7 @@ function renderAutomation(){
                 <td style="font-size:var(--fs-xs);color:var(--text-secondary);overflow:hidden;text-overflow:ellipsis">${esc(String(gf(a,AG.goal)||'').split('\n')[0])}</td>
                 <td style="font-size:var(--fs-xs)">${esc(selName(gf(a,AG.guardrail))||'Not set')}</td>
                 <td><span class="agent-pill" style="background:${meta.bg};color:${meta.fg}">${esc(status)}</span></td>
+                <td style="font-size:var(--fs-xs)">${gf(a,AG.metricScore)?esc(String(gf(a,AG.metricScore))):`<span style="color:var(--text-muted)" title="Target: ${esc(String(gf(a,AG.scoreMetric)||'not set'))}. The agent's own runtime fills this in once built.">&mdash;</span>`}</td>
                 <td>${agentWorkloadCell(tmIds)}</td>
                 <td style="font-size:var(--fs-xs)">${acc ? esc(acc.text) : '<span style="color:var(--text-muted)" title="No approval history matched for this agent yet. If the dashboard card shows decisions, a field rename broke this read.">&mdash;</span>'}</td>
             </tr>`;
@@ -4510,6 +4544,41 @@ function strategicLayerSection(){
 
 // ── Role agent detail panel ────────────────────────────────────────────
 function agentIdSafe(a){ return (a && a.id) || 'unknown agent'; }
+
+// Deterministic compile: the stages ARE the prompt, so there is nothing to
+// drift. Lessons ride at the end so every run applies what Kevin taught it.
+function buildAgentPrompt(a){
+    const name = gf(a,AG.name)||'Agent';
+    const gl = selName(gf(a,AG.guardrail))||'Approval required';
+    const glDef = GUARDRAIL_LEVELS.find(g=>g.key===gl);
+    const lines = [
+        'You are "'+name+'", an AI agent on Kevin Brittain\'s team.',
+        '',
+        'GOAL: '+(gf(a,AG.goal)||'(not set)'),
+        'SCORE: '+(gf(a,AG.scoreMetric)||'(not set)')+(gf(a,AG.metricScore)?' (currently '+gf(a,AG.metricScore)+')':''),
+        'GUARDRAILS: '+gl+(glDef?' - '+glDef.blurb:''),
+        'Always ask first: money, deleting things, and anything only the owner can own.',
+        '',
+        'THE JOB (AGENTIC):',
+    ];
+    AGENTIC_STAGES.forEach(st=>{
+        lines.push(st.letter+' - '+st.name+':');
+        lines.push(gf(a,AG_STAGE_FIELDS[st.letter])||'(not captured yet)');
+        lines.push('');
+    });
+    const log = gf(a,AG.learningLog);
+    if(log){ lines.push('LESSONS LEARNED (apply every one):'); lines.push(log); }
+    return lines.join('\n').trim();
+}
+async function compileAgentPrompt(agentId){
+    const a = allAgents.find(x=>x.id===agentId);
+    if(!a) return;
+    const btn = document.getElementById('agCompileBtn');
+    if(btn){ btn.disabled = true; btn.textContent = 'Compiling…'; }
+    const text = 'Compiled '+new Date().toISOString().slice(0,16).replace('T',' ')+'\n\n'+buildAgentPrompt(a);
+    await patchAgent(agentId, { [AG.agentPrompt]: text }, 'Prompt compiled');
+    renderRoleAgentPanel();
+}
 function renderRoleAgentPanel(){
     const el = document.getElementById('roleagent-panel');
     const a = allAgents.find(x=>x.id===selectedAgentId);
@@ -4544,7 +4613,7 @@ function renderRoleAgentPanel(){
     const wireOptions = ['<option value="">Wire to a Team Members row…</option>']
         .concat(allTeamAgents.map(t=>`<option value="${t.id}" ${tmIds[0]===t.id?'selected':''}>${esc(gf(t,TM_NAME)||'Agent')}</option>`)).join('');
 
-    // AGENTRIC stages
+    // AGENTIC stages
     const stagesHtml = AGENTIC_STAGES.map(st=>{
         const text = gf(a,AG_STAGE_FIELDS[st.letter])||'';
         const editing = _agStageEditing === (a.id+':'+st.letter);
@@ -4586,12 +4655,40 @@ function renderRoleAgentPanel(){
 
     const readinessMeta = readiness==='Ready' ? {bg:'var(--success-bg)',fg:'var(--success)'} : readiness==='Needs input' ? {bg:'var(--warning-bg)',fg:'var(--warning)'} : {bg:'var(--bg-subtle)',fg:'var(--text-muted)'};
 
+    // Accuracy band suggestion. Tightening is automatic on load; a LOOSER band
+    // is only ever a suggestion — Kevin clicks it in himself via the select.
+    let bandHtml = '';
+    const band = tmIds.length ? guardrailBand(tmIds[0]) : null;
+    if(band){
+        bandHtml = band.level===guardrail
+            ? `<div style="font-size:var(--fs-xs);color:var(--success);margin-bottom:8px">Accuracy agrees with this guardrail setting (${esc(band.why)}).</div>`
+            : `<div style="font-size:var(--fs-xs);color:var(--warning);margin-bottom:8px">Accuracy suggests <strong>${esc(band.level)}</strong> (${esc(band.why)}). Loosening is your call, via the dropdown.</div>`;
+    } else if(tmIds.length){
+        bandHtml = `<div style="font-size:var(--fs-xs);color:var(--text-muted);margin-bottom:8px">No accuracy band yet: it needs 20+ checked pieces of work per job type.</div>`;
+    }
+
+    // The compiled working prompt + the learning log
+    const promptText = gf(a,AG.agentPrompt)||'';
+    const learningLog = gf(a,AG.learningLog)||'';
+    const promptHtml = `<div style="margin-top:12px;border-top:1px solid var(--border-subtle);padding-top:8px">
+        <div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px">
+            <div style="font-size:var(--fs-sm);font-weight:var(--fw-semibold)">The working prompt</div>
+            <button class="btn btn-sm" id="agCompileBtn" onclick="compileAgentPrompt('${a.id}')">${promptText?'Recompile':'Compile prompt'}</button>
+        </div>
+        <div style="font-size:var(--fs-xs);color:var(--text-muted);margin:2px 0 6px">Everything on this card compiled into the one prompt the agent runs on. Recompile after editing stages or when new lessons land.</div>
+        ${promptText?`<div style="font-size:var(--fs-xs);color:var(--text-secondary);white-space:pre-wrap;word-break:break-word;max-height:260px;overflow:auto;border:1px solid var(--border-subtle);border-radius:var(--radius-md);padding:8px 10px;background:var(--bg-surface-2)">${esc(promptText)}</div>`:`<div style="font-size:var(--fs-xs);color:var(--text-muted)">Not compiled yet.</div>`}
+    </div>`;
+    const logHtml = learningLog?`<div style="margin-top:10px">
+        <div style="font-size:var(--fs-xs);font-weight:var(--fw-semibold);margin-bottom:4px">Learning log</div>
+        <div style="font-size:var(--fs-xs);color:var(--text-secondary);white-space:pre-wrap;word-break:break-word;max-height:180px;overflow:auto">${esc(learningLog)}</div>
+    </div>`:'';
+
     el.innerHTML = `<div class="agentic-card" style="margin-bottom:16px">
         <div class="agentic-head">
             <div>
                 <div class="agentic-title">${esc(name)} ${dept?`<span style="font-weight:var(--fw-regular);color:var(--text-muted);font-size:var(--fs-xs)">&middot; ${esc(dept)}${source?' &middot; '+esc(source):''}</span>`:''}</div>
                 <div class="agentic-sub">${esc(String(gf(a,AG.goal)||'').split('\n')[0])}</div>
-                ${gf(a,AG.scoreMetric)?`<div class="agentic-sub"><strong>Score:</strong> ${esc(gf(a,AG.scoreMetric))}</div>`:''}
+                ${gf(a,AG.scoreMetric)?`<div class="agentic-sub"><strong>Score target:</strong> ${esc(gf(a,AG.scoreMetric))} &middot; <strong>current:</strong> ${esc(gf(a,AG.metricScore)||'not measured yet')}</div>`:''}
             </div>
             <span class="agentic-state" style="background:${readinessMeta.bg};color:${readinessMeta.fg}">${esc(readiness)}</span>
         </div>
@@ -4607,12 +4704,15 @@ function renderRoleAgentPanel(){
             <select onchange="wireAgentTeamMember('${a.id}',this.value)" style="font-size:var(--fs-xs)" aria-label="Wire to Team Members row">${wireOptions}</select>
         </div>
         ${glDef?`<div style="font-size:var(--fs-xs);color:var(--text-muted);margin-bottom:8px">${esc(glDef.blurb)}</div>`:''}
+        ${bandHtml}
         <div style="font-size:var(--fs-xs);color:var(--text-secondary);margin-bottom:4px"><strong>Workload:</strong> ${workload}</div>
         ${accHtml}
         <div style="margin-top:12px;border-top:1px solid var(--border-subtle);padding-top:8px">
-            <div style="font-size:var(--fs-sm);font-weight:var(--fw-semibold);margin-bottom:4px">The AGENTRIC spec</div>
+            <div style="font-size:var(--fs-sm);font-weight:var(--fw-semibold);margin-bottom:4px">The AGENTIC spec</div>
             ${stagesHtml}
         </div>
+        ${promptHtml}
+        ${logHtml}
         ${scoresHtml}
         ${notes?`<div style="margin-top:10px;font-size:var(--fs-xs);color:var(--text-muted);white-space:pre-wrap;word-break:break-word"><strong>Notes:</strong> ${esc(notes)}</div>`:''}
         <div class="agentic-foot">
@@ -4661,29 +4761,29 @@ async function saveAgentStage(agentId, letter){
 }
 
 // Readiness check for a REGISTER agent — same wording and normalisation as the
-// workflow check, sourced from the eight stage fields instead of the SOP blob.
+// workflow check, sourced from the seven stage fields instead of the SOP blob.
 async function runAgentRegisterCheck(agentId){
     const a = allAgents.find(x=>x.id===agentId);
     if(!a) return;
     const btn = document.getElementById('agRegCheckBtn');
     if(btn){ btn.disabled = true; btn.textContent = 'Checking…'; }
     const specText = AGENTIC_STAGES.map(st=>`${st.letter} — ${st.name}:\n${gf(a,AG_STAGE_FIELDS[st.letter])||'(not captured yet)'}`).join('\n\n');
-    const prompt = `${agentricCheckIntro(false)}
+    const prompt = `${agenticCheckIntro(false)}
 
 Process name: ${gf(a,AG.name)||'Untitled'}
 Agent goal: ${gf(a,AG.goal)||''}
 Success measure: ${gf(a,AG.scoreMetric)||''}
 
 The ${AGENTIC_STAGES.length} stages:
-${agentricStageListText(false)}
+${agenticStageListText(false)}
 
 Pass rules:
-${agentricPassRules(false)}
+${agenticPassRules(false)}
 
 Here is the agent's captured spec, stage by stage:
 ${specText}
 
-${agentricResultShape()}`;
+${agenticResultShape()}`;
     try {
         const parsed = await callClaudeJson(prompt, 1500);
         let prev = null;
@@ -4763,7 +4863,7 @@ async function agFormCheckStage(){
     if(btn){ btn.disabled = true; btn.textContent = 'Checking…'; }
     const naOk = stageNaAllowed(st, false);
     const statuses = 'Clear|Thin|Missing' + (naOk ? '|NA' : '');
-    const prompt = `You are helping a business owner define ONE stage of an AI agent using the AGENTRIC framework. Judge only this stage, in isolation — ignore any pass rule that refers to a different stage.
+    const prompt = `You are helping a business owner define ONE stage of an AI agent using the AGENTIC framework. Judge only this stage, in isolation — ignore any pass rule that refers to a different stage.
 
 Agent name: ${_agForm.basics.name||'New agent'}
 Agent goal: ${_agForm.basics.goal||''}
@@ -4772,7 +4872,7 @@ Stage ${st.letter} — ${st.name}.
 The question the owner was asked: ${st.prompt}
 
 Pass rules (agent mode):
-${agentricPassRules(false)}
+${agenticPassRules(false)}
 
 The owner's answer:
 ${text}
@@ -4801,7 +4901,7 @@ function renderAgentForm(){
 
     if(step===0){
         title = 'Create an agent';
-        sub = `The AI walks you through the ${total} AGENTRIC questions. Rough answers are fine — it checks each one and asks for what is missing.`;
+        sub = `The AI walks you through the ${total} AGENTIC questions. Rough answers are fine — it checks each one and asks for what is missing.`;
         body = `
             <label class="agf-label" for="agf-name">Agent name</label>
             <input id="agf-name" class="agentic-answer" style="min-height:0;height:36px" value="${esc(_agForm.basics.name)}" placeholder="e.g. Prospect Researcher">
@@ -5612,12 +5712,12 @@ function assignVideoTask(wfId){
     if(!w) return;
     const wName = gf(w,WF.name)||'Untitled';
 
-    // The AGENTRIC script travels WITH the task so whoever records the video sees
+    // The AGENTIC script travels WITH the task so whoever records the video sees
     // the stage prompts in Tasks & Projects — not just on the Systemisation page.
     const agenticScript = AGENTIC_STAGES.map(s=>`${s.letter} — ${s.name}: ${s.prompt}`).join('\n\n');
     const taskName = 'Record video: ' + wName;
     const taskDesc = 'Record a Loom video walkthrough of the "' + wName + '" workflow.\n\n'
-        + 'Follow the AGENTRIC script — cover all ' + AGENTIC_STAGES.length + ' while you record:\n\n'
+        + 'Follow the AGENTIC script — cover all ' + AGENTIC_STAGES.length + ' while you record:\n\n'
         + agenticScript
         + '\n\nWhen finished, replace the placeholder below with your Loom share URL and mark this task as Done.\n\n[loom:paste your Loom share URL here]';
 

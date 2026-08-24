@@ -97,6 +97,24 @@ STEPS
    - **Linked-record fields compare by DISPLAY NAME, not record ID.** `{Business}="Operations Director"` works. `FIND("reca9ofzhuw13ZzGE", ARRAYJOIN({Business}))` returns zero rows every time, because ARRAYJOIN on a link field yields the linked record's primary field, never its ID. The record ID reca9ofzhuw13ZzGE is correct for Operations Director and is fine for a direct GET, it just cannot be matched this way. This contradicts the general "filter linked records by record ID" line in the repo CLAUDE.md, which holds for lookup and rollup fields, not for ARRAYJOIN over a link field.
    - **CONTROL, and it is not optional.** This query must return **12** records: the 11 board tasks plus task 12, which was folded into task 6 on 30 Jul 2026 and is marked Completed. **Fewer than 11 means the query is broken, not that the board emptied.** Say so in the log and read the tasks another way before running the huddle. Never let a zero pass as "no live work": a broken filter and a finished launch look identical from here, and a huddle grounded in nothing will confidently invent the day.
 
+2c. Review the AI workforce (Kevin's instruction, 25 Aug 2026): the whole
+   workforce, every morning, as part of this check-in. Three reads, all via curl
+   with the PAT:
+   - The AI Agents register `tbl9msVjyQWslLOIZ`: Status `fld71vXWqcxhdljac`,
+     Guardrail Level `fldWgqxMFmaAAvUHC`, Metric Score `fldkGxrOlrfuLlH3J`,
+     Learning Log `fldBdnKB1U4jZM0Jj`. Flag: any agent whose Learning Log gained
+     an "auto-tightened" line since yesterday, and any Live/Built agent whose
+     Metric Score is empty or clearly off its Score Metric target.
+   - Stuck approvals: Tasks where `{Status}='Approval'` AND Sent For Approval By
+     is set AND created more than 24 hours ago. CONTROL: run the same query
+     without the age clause; if THAT is zero but dispatch reported submissions
+     yesterday, the query broke — say so rather than reporting "no queue".
+   - Board and workers: anything a dept head or worker flagged as blocked in
+     step 1.
+   Anything stuck or slipping becomes a digest flag (step 3) in plain English —
+   name the agent and the single unblocking action. Quiet is reported as quiet:
+   "workforce: nothing stuck" is one line the brief can carry.
+
 3. Synthesise ONE digest, never eleven reports: the one thing today, the tiny first step (about ten minutes), and at most TWO department flags. Anything a worker agent can do gets dispatched, not reported to Kevin. Remember the delegation order: AI first, then Mica or Ericamae, then Kevin and only for founder decisions, approvals, credentials, payments, signatures and physical actions.
 
 3b. Check the agent approval queue and the accuracy scores. Run `python3 /Users/kevinbrittain/Projects/leadership-dashboard/scripts/agent-accuracy-report.py`. Two things come out of it:
