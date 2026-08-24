@@ -33,6 +33,7 @@ const dailyOpsDoc = readFileSync(path.join(root, 'docs/daily-ops-routine.md'), '
 const followUp = readFileSync(path.join(root, 'follow-up.html'), 'utf8');
 const worker = readFileSync(path.join(root, 'workers/drive-upload/worker.js'), 'utf8');
 const script = readFileSync(path.join(root, 'scripts/inbound-triage.py'), 'utf8');
+const sysPage = readFileSync(path.join(root, 'os/systemisation/index.html'), 'utf8');
 
 function fromFollowUp(pattern, label) {
     const m = followUp.match(pattern);
@@ -167,6 +168,24 @@ describe('the daily Go Signal is wired', () => {
             expect(triageAt).toBeLessThan(dispatchAt);
         });
     }
+});
+
+describe('the daily decisions log reaches the agent record', () => {
+    it('script and panel agree on the AI Agent Daily Log table id', () => {
+        const m = script.match(/DAILY_LOG_TABLE = "(tbl\w+)"/);
+        expect(m).not.toBeNull();
+        expect(sysPage).toContain(m[1]);
+    });
+
+    it('the skill publishes after scoring, non-fatally', () => {
+        expect(skill).toMatch(/inbound-triage\.py publish/);
+        expect(skill).toMatch(/must never\s+block/i);
+    });
+
+    it('the panel renders a Daily decisions section', () => {
+        expect(sysPage).toContain('Daily decisions');
+        expect(sysPage).toContain('loadAgentDailyLogs');
+    });
 });
 
 describe('inbound-triage.py mechanics', () => {

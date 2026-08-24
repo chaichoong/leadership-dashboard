@@ -240,6 +240,14 @@ This writes "N waiting; at zero X of last 7 days" to the agent's own register
 row (Metric Score) — the dashboard reading. If it fails, report the failure;
 a score that silently stopped updating looks identical to a healthy zero.
 
+Then publish the day's decisions to the agent's record, so Kevin can check
+them from the agent's panel (Systemisation → AI Agents → Daily decisions):
+
+    python3 scripts/inbound-triage.py publish
+
+If publish fails, report it loudly and carry on — the log write must never
+block or undo the triage itself.
+
 ## Step 7 — Report (counts only, never content)
 
 Return at most ten lines: scanned / tasked / maintenance / archived / left /
