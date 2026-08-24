@@ -173,6 +173,19 @@ describe("the Go Signal is the agent's own 9/1/5 schedule (Kevin, 24 Aug 2026)",
         expect(runner).not.toContain('send-email');
     });
 
+    it('the runner pre-reads chat.db before claude starts (FDA attaches to the job root)', () => {
+        // Proven by launchd probe, 24 Aug 2026: python3-rooted jobs hold the
+        // Messages permission; the claude binary does not (and its path
+        // changes every update). The dumps are the sweep's data in the slots.
+        expect(runner).toMatch(/imessage-sweep\.py" scan > "\$SCRATCH\/imessage-scan\.json/);
+        expect(runner).toMatch(/sentdump --since-hours \d+ > "\$SCRATCH\/imessage-sent\.json/);
+        const sweepSkill = readFileSync(path.join(root, '.claude/scheduled-tasks/inbound-messages-sweep/SKILL.md'), 'utf8');
+        expect(sweepSkill).toContain('imessage-scan.json');
+        expect(sweepSkill).toContain('imessage-sent.json');
+        const sweepScript = readFileSync(path.join(root, 'scripts/imessage-sweep.py'), 'utf8');
+        expect(sweepScript).toContain('def sent_dump');
+    });
+
     it('the runner keeps email content out of the public repo and fails loudly on leaks', () => {
         // The first proof run dumped raw scan output (full bodies) into
         // monitoring/, which the nightly fixer commits. The prompt forbids it
