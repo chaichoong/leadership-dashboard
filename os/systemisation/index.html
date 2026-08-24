@@ -5091,6 +5091,15 @@ async function createAgentFromForm(){
 // AND via the storage event (fires here when the shell writes it while this
 // iframe is already loaded).
 function consumeAgentDeepLink(){
+    // Role agents (the register) — deep-linked from the Skills Library and
+    // the Tasks & Projects workforce roster.
+    const roleId = localStorage.getItem('sys_open_role_agent');
+    if(roleId){
+        localStorage.removeItem('sys_open_role_agent');
+        selectedAgentId = roleId;
+        switchView('automation');
+        return true;
+    }
     const wfId = localStorage.getItem('sys_open_agent');
     if(!wfId) return false;
     localStorage.removeItem('sys_open_agent');
@@ -5099,7 +5108,7 @@ function consumeAgentDeepLink(){
     return true;
 }
 window.addEventListener('storage', (e)=>{
-    if(e.key==='sys_open_agent' && e.newValue){ consumeAgentDeepLink(); }
+    if((e.key==='sys_open_agent' || e.key==='sys_open_role_agent') && e.newValue){ consumeAgentDeepLink(); }
 });
 
 // In-flight video recordings — build tracking, shown on the SOPs tab landing.

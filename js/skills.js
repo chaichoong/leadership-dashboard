@@ -152,6 +152,7 @@
             setTimeout(async () => {
                 _sopFetchFailed = false;
                 await fetchSOPSkills();
+        await fetchRoleAgents();
                 if (!_sopFetchFailed && typeof renderSkillsLibrary === 'function') renderSkillsLibrary();
             }, 2500);
         }
@@ -168,6 +169,47 @@
     // section up top with the agent's state and a Manage button that deep-links
     // through (localStorage handoff — the Systemisation iframe consumes it).
     let _agentByWf = {};
+
+    // ── ROLE agents from the AI Agents register (Systemisation's table) ──
+    // The library used to know only workflow-backed process agents, so none of
+    // the register's role agents (Reconciliation, Inbound Comms Triage, …)
+    // appeared here at all. One read, rendered at the top of the agents
+    // section with the same Manage deep-link.
+    const AGENTS_REG_TBL = 'tbl9msVjyQWslLOIZ';
+    const SK_REG = { name: 'fldhtLvryVEzeGbl8', status: 'fld71vXWqcxhdljac', guardrail: 'fldWgqxMFmaAAvUHC', goal: 'fldz8O9KihauZ46Cd' };
+    let _roleAgents = [];
+    let _roleAgentsFetched = false;
+
+    async function fetchRoleAgents() {
+        if (_roleAgentsFetched || typeof PAT === 'undefined' || !PAT) return;
+        try {
+            const recs = await airtableFetch(AGENTS_REG_TBL, { 'fields[]': [SK_REG.name, SK_REG.status, SK_REG.guardrail, SK_REG.goal] });
+            _roleAgents = (recs || []).map(r => ({
+                id: r.id,
+                name: (r.fields && r.fields[SK_REG.name]) || 'Agent',
+                status: (r.fields && r.fields[SK_REG.status]) || 'Planned',
+                guardrail: (r.fields && r.fields[SK_REG.guardrail]) || '',
+                goal: String((r.fields && r.fields[SK_REG.goal]) || '').split('\n')[0],
+            }));
+            _roleAgentsFetched = true;
+        } catch (e) {
+            console.warn('Skills: AI Agents register read failed', e);
+        }
+    }
+
+    const ROLE_STATUS_META = {
+        Live:     { bg: 'var(--success-bg)', fg: 'var(--success)' },
+        Built:    { bg: 'var(--accent-soft)', fg: 'var(--accent)' },
+        Building: { bg: 'var(--info-bg)',    fg: 'var(--info)' },
+        Planned:  { bg: 'var(--bg-subtle)',  fg: 'var(--text-muted)' },
+        Paused:   { bg: 'var(--warning-bg)', fg: 'var(--warning)' },
+    };
+
+    function openRoleAgentInSystemisation(recId) {
+        localStorage.setItem('sys_open_role_agent', recId);
+        if (typeof switchTab === 'function') switchTab('systemisation');
+    }
+    window.openRoleAgentInSystemisation = openRoleAgentInSystemisation;
 
     const AGENT_STATE_META = {
         live:    { label: 'LIVE',    bg: 'var(--success-bg)', fg: 'var(--success)' },
@@ -224,15 +266,36 @@
         const countEl = document.getElementById('skillsTotalCount');
         if (countEl) countEl.textContent = filtered.length + ' of ' + all.length + ' skills';
 
+        // Role agents match the search box by name/goal; category filters
+        // don't apply to them (they are workers, not catalogue entries).
+        const roleAgentsShown = _roleAgents.filter(a => {
+            if (!_searchTerm) return true;
+            const q = _searchTerm.toLowerCase();
+            return a.name.toLowerCase().includes(q) || a.goal.toLowerCase().includes(q);
+        });
+
         let html = '';
-        if (agentSkills.length) {
+        if (agentSkills.length || roleAgentsShown.length) {
             html += `<div class="skills-category-group">
                 <div class="skills-category-header">
                     <span class="skills-category-icon">&#x26A1;</span>
                     <span class="skills-category-name">AI Agents &mdash; autonomous workers</span>
-                    <span class="skills-category-count">${agentSkills.length}</span>
+                    <span class="skills-category-count">${agentSkills.length + roleAgentsShown.length}</span>
                 </div>
                 <div class="skills-grid">`;
+            roleAgentsShown.forEach(a => {
+                const meta = ROLE_STATUS_META[a.status] || ROLE_STATUS_META.Planned;
+                html += `<div class="skills-card">
+                    <div class="skills-card-header">
+                        <div class="skills-card-title">${escHtml(a.name)}</div>
+                        <span style="font-size:11px;font-weight:700;letter-spacing:.5px;padding:3px 10px;border-radius:999px;background:${meta.bg};color:${meta.fg}">${escHtml(a.status.toUpperCase())}</span>
+                    </div>
+                    <div class="skills-card-desc">${escHtml(a.goal)}${a.guardrail ? `<div style="margin-top:4px;color:var(--text-muted,#8A928C);font-size:12px">Guardrail: ${escHtml(a.guardrail)}</div>` : ''}</div>
+                    <div class="skills-card-actions" style="padding:8px 16px 12px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+                        <button class="skills-run-btn" onclick="openRoleAgentInSystemisation('${escJs(a.id)}')" style="padding:6px 14px;border:none;border-radius:var(--radius-sm,4px);background:var(--accent,#2C6E49);color:#fff;cursor:pointer;font-size:12px;font-weight:600;font-family:inherit">&#x26A1; Manage in AI Agents</button>
+                    </div>
+                </div>`;
+            });
             agentSkills.forEach(s => {
                 const st = _agentByWf[s.workflowId] || {};
                 const meta = AGENT_STATE_META[st.state] || AGENT_STATE_META.draft;
@@ -583,6 +646,7 @@
 
     window.renderSkillsTab = async function () {
         await fetchSOPSkills();
+        await fetchRoleAgents();
         await fetchActivePresets();
         renderSourcePills();
         renderFilterPills();

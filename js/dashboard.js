@@ -1099,6 +1099,9 @@
     // AI Agents register (role agents — Systemisation rebuild, 24 Aug 2026)
     const AGENTS_REG_NAME = 'fldhtLvryVEzeGbl8';
     const AGENTS_REG_STATUS = 'fld71vXWqcxhdljac';
+    const AGENTS_REG_WORKFLOW = 'fldSTcaGki2KgCwlD';   // link → Workflows; the overlap key
+    const AGENTS_REG_SCORE_METRIC = 'fldzuYYA67h3b3MHB';
+    const AGENTS_REG_METRIC_SCORE = 'fldkGxrOlrfuLlH3J';
 
     async function loadAgentKpi() {
         const slot = document.getElementById('agentKpiCard');
@@ -1107,7 +1110,7 @@
             const [wfRes, actRes, regRecs] = await Promise.all([
                 fetch(`https://api.airtable.com/v0/${BASE_ID}/${AGENTS_WF_TBL}?returnFieldsByFieldId=true&pageSize=100&fields%5B%5D=${AGENTS_WF_SOP}`, { headers: { Authorization: `Bearer ${PAT}` } }),
                 fetch(`https://api.airtable.com/v0/${BASE_ID}/${AGENTS_ACTIVITY_TBL}?pageSize=100`, { headers: { Authorization: `Bearer ${PAT}` } }),
-                airtableFetch(TABLES.aiAgents, { 'fields[]': [AGENTS_REG_NAME, AGENTS_REG_STATUS] })
+                airtableFetch(TABLES.aiAgents, { 'fields[]': [AGENTS_REG_NAME, AGENTS_REG_STATUS, AGENTS_REG_WORKFLOW, AGENTS_REG_SCORE_METRIC, AGENTS_REG_METRIC_SCORE] })
                     .catch(e => { console.warn('AI Agents register read failed:', e); return []; }),
             ]);
             if (!wfRes.ok) return;
@@ -1133,14 +1136,22 @@
             const roleAgents = (regRecs || []).map(r => ({
                 name: (r.fields && r.fields[AGENTS_REG_NAME]) || 'Agent',
                 status: (r.fields && r.fields[AGENTS_REG_STATUS]) || 'Planned',
+                workflowIds: ((r.fields && r.fields[AGENTS_REG_WORKFLOW]) || []).map(l => typeof l === 'object' ? l.id : l),
+                score: (r.fields && r.fields[AGENTS_REG_METRIC_SCORE]) || '',
+                target: (r.fields && r.fields[AGENTS_REG_SCORE_METRIC]) || '',
             }));
-            const live = agents.filter(a => a.state === 'live').length
-                + roleAgents.filter(a => a.status === 'Live').length;
-            const testing = agents.filter(a => a.state === 'testing').length;
+            // Shared counting (js/agent-accuracy.js): a workflow linked from a
+            // register row is the SAME agent, not a second one — this card once
+            // summed both populations raw and could exceed the tab it links to.
+            const counts = AgentAccuracy.countAgents(agents, roleAgents);
+            const live = counts.live;
+            const testing = counts.testing;
             const pending = agents.reduce((s, a) => s + (pendingByAgent[a.id] || 0), 0);
             const roleRows = roleAgents
-                .map(a => `<div class="od-breakdown-row"><span>${escHtml(a.name)}</span><span>${escHtml(String(a.status).toUpperCase())}</span></div>`).join('');
+                .map(a => `<div class="od-breakdown-row"><span>${escHtml(a.name)}</span><span>${escHtml(String(a.status).toUpperCase())}${a.status === 'Live' && a.score ? ` · ${escHtml(a.score)}${a.target ? ` <span style="color:var(--text-muted)">(target: ${escHtml(a.target)})</span>` : ''}` : ''}</span></div>`).join('');
+            const linkedWf = new Set(roleAgents.flatMap(a => a.workflowIds));
             const wfRows = agents
+                .filter(a => !linkedWf.has(a.id))   // register-linked workflows already listed above
                 .map(a => `<div class="od-breakdown-row"><span>${escHtml(a.title)}</span><span>${escHtml(a.state.toUpperCase())}${pendingByAgent[a.id] ? ` · ${pendingByAgent[a.id]} awaiting OK` : ''}</span></div>`).join('');
             const detail = (agents.length || roleAgents.length)
                 ? roleRows + wfRows

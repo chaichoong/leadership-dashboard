@@ -88,12 +88,36 @@
         });
     }
 
+    // The ONE way to count live agents across two populations that overlap:
+    // legacy workflow agents (SOP JSON, sop.agent.state) and register role
+    // agents (AI Agents table, Status). A register row may LINK a workflow
+    // (its `Workflow` field) — that pair is one agent, not two. The dashboard
+    // card once summed the populations raw while the Systemisation tab badge
+    // subtracted the overlap, so the front page could exceed the tab it links
+    // to. Same subtraction here, tested, shared.
+    //   wfAgents:     [{ id, state }]                (state: 'live'|'testing'|…)
+    //   registerRows: [{ status, workflowIds: [] }]  (status: 'Live'|'Built'|…)
+    function countAgents(wfAgents, registerRows) {
+        var linked = {};
+        (registerRows || []).forEach(function (r) {
+            (r.workflowIds || []).forEach(function (id) { linked[id] = true; });
+        });
+        var wfOnly = (wfAgents || []).filter(function (a) { return !linked[a.id]; });
+        return {
+            live: wfOnly.filter(function (a) { return a.state === 'live'; }).length
+                + (registerRows || []).filter(function (r) { return r.status === 'Live'; }).length,
+            testing: wfOnly.filter(function (a) { return a.state === 'testing'; }).length,
+            wfOverlap: (wfAgents || []).length - wfOnly.length,
+        };
+    }
+
     var api = {
         APPROVAL_OUTCOMES: APPROVAL_OUTCOMES,
         APPROVAL_ACCURATE: APPROVAL_ACCURATE,
         THRESHOLD: THRESHOLD,
         computeAgentAccuracy: computeAgentAccuracy,
         agentAutonomyRecommendations: agentAutonomyRecommendations,
+        countAgents: countAgents,
     };
 
     if (typeof module !== 'undefined' && module.exports) module.exports = api;
