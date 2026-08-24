@@ -165,11 +165,23 @@ describe("the Go Signal is the agent's own 9/1/5 schedule (Kevin, 24 Aug 2026)",
         expect(sched['inbound-triage'].mode).toBe('wrapped');
     });
 
-    it('the runner drives both lanes headlessly and cannot send', () => {
+    it('the runner drives both lanes plus dispatch, headlessly, and cannot send', () => {
         expect(runner).toContain('inbound-email-triage/SKILL.md');
         expect(runner).toContain('inbound-messages-sweep/SKILL.md');
+        expect(runner).toContain('agent-dispatch/SKILL.md');
         expect(runner).toContain('claude_oauth_token');
         expect(runner).not.toContain('send-email');
+    });
+
+    it('the runner keeps email content out of the public repo and fails loudly on leaks', () => {
+        // The first proof run dumped raw scan output (full bodies) into
+        // monitoring/, which the nightly fixer commits. The prompt forbids it
+        // and the post-run sweep quarantines + fails.
+        expect(runner).toMatch(/NEVER under the repo/);
+        expect(runner).toMatch(/"body":\|Inbound Message Content/);
+        expect(runner).toMatch(/__LEAKED/);
+        // A broken lane (e.g. Full Disk Access denied) must fail the job.
+        expect(runner).toMatch(/BROKEN\|Full Disk Access/);
     });
 
     it('the job name is NOT a skill folder, so the one-routine guard stays quiet', () => {

@@ -8,16 +8,25 @@
 # docs/daily-ops-routine.md — do not fold this back into daily-ops without
 # his word.
 #
-# Runs BOTH of the agent's lanes headlessly: the Gmail inbox triage skill,
-# then the iMessage sweep skill. Triage only — nothing is ever sent; every
-# outward reply stays approval-gated downstream (and the Gmail credential the
-# triage script holds cannot send by design).
+# Each slot runs, in order: the Gmail inbox triage skill, the iMessage sweep
+# skill, then the agent-dispatch skill (Kevin's ruling, 24 Aug 2026: dispatch
+# runs in all three slots, so triaged work is prepared for approval in the
+# SAME slot, not the next morning). Nothing here can send email directly —
+# the triage Gmail credential is read/label-only, and dispatch output goes to
+# the approval loop.
+#
+# PRIVACY: the first proof run dumped raw scan output (full email bodies)
+# into monitoring/, which the nightly fixer commits to the PUBLIC repo. All
+# working files now belong in $SCRATCH, the prompt says so, and the post-run
+# sweep below quarantines any content-bearing file that still lands in
+# monitoring/ and fails the run loudly.
 set -u
 CLAUDE="/Users/kevinbrittain/.local/bin/claude"
 REPO="/Users/kevinbrittain/Projects/leadership-dashboard"
 LOG_DIR="/Users/kevinbrittain/knowledge-os/logs/inbound-triage"
+SCRATCH="$LOG_DIR/scratch"
 LOG="$LOG_DIR/runs.log"
-mkdir -p "$LOG_DIR"
+mkdir -p "$SCRATCH"
 
 # Same token discipline as compound_brain.sh: without the exported OAuth token
 # a headless `claude -p` dies with "OAuth access token has expired".
@@ -35,15 +44,32 @@ __START_LINE=$(wc -l < "$LOG" 2>/dev/null || echo 0)
 echo "===== inbound-triage run $(date) =====" >> "$LOG"
 cd "$REPO" || { echo "ERROR: repo not found at $REPO" >&2; exit 1; }
 
-"$CLAUDE" -p "Follow /Users/kevinbrittain/.claude/scheduled-tasks/inbound-email-triage/SKILL.md in full, then follow /Users/kevinbrittain/.claude/scheduled-tasks/inbound-messages-sweep/SKILL.md in full. You are the Inbound Comms Triage agent's scheduled run (one of the 09:00 / 13:00 / 17:00 slots). This is real mail: when unsure between outcomes choose the agent-lane task; when unsure about archiving, do not archive; never send, reply, or delete anything. Do not take the queue lock (this run already holds it). Do not edit, commit, or push code; file anything needing a code change via scripts/findings.py. Complete each skill's closing steps in full (watermark, score, publish). End with at most fifteen lines of counts only — never message content, sender names, or record IDs." \
+"$CLAUDE" -p "You are the Inbound Comms Triage agent's scheduled run (one of the 09:00 / 13:00 / 17:00 slots). Do these three skills in order, each in full:
+1. /Users/kevinbrittain/.claude/scheduled-tasks/inbound-email-triage/SKILL.md
+2. /Users/kevinbrittain/.claude/scheduled-tasks/inbound-messages-sweep/SKILL.md
+3. /Users/kevinbrittain/.claude/scheduled-tasks/agent-dispatch/SKILL.md (Kevin's ruling, 24 Aug 2026: dispatch runs in every slot so the work triaged above reaches the approval queue in the same slot)
+Rules for the whole run: this is real mail — when unsure between outcomes choose the agent-lane task; when unsure about archiving, do not archive; never send, reply, or delete anything yourself (dispatch prepares and submits through its own gated script only). Working and temp files go ONLY under $SCRATCH — NEVER under the repo, and never in monitoring/, because monitoring/ is committed to a public repository and scan output carries full email bodies. Counts-only reports in monitoring/ are fine. A broken read (Gmail or iMessage) is reported loudly, never treated as a quiet day. Do not take the queue lock (this run already holds it). Do not edit, commit, or push code; file anything needing a code change via scripts/findings.py. Complete each skill's closing steps in full (watermark, score, publish; dispatch's verify step). End with at most twenty lines of counts only — never message content, sender names, or record IDs." \
   --permission-mode acceptEdits \
   --allowedTools "Bash(python3:*)" "Bash(curl:*)" >> "$LOG" 2>&1
 RC=$?
 
+# Privacy sweep: quarantine any content-bearing file the run left in
+# monitoring/ (raw scan output carries '"body":'; task payloads carry the
+# Inbound Message Content field name). Quarantining is not enough on its own —
+# the run FAILS so the leak-shaped behaviour gets fixed, not absorbed.
+__LEAKED=""
+while IFS= read -r f; do
+  [ -z "$f" ] && continue
+  mv "$f" "$SCRATCH/" && __LEAKED="$__LEAKED $f"
+done < <(grep -rlE '"body":|Inbound Message Content' "$REPO/monitoring/" 2>/dev/null || true)
+
 __TAIL=$(tail -n +$((__START_LINE + 1)) "$LOG" 2>/dev/null)
-__BAD=$(printf '%s\n' "$__TAIL" | grep -E '"error"|401|Unauthorized|OAuth access token has expired' || true)
+__BAD=$(printf '%s\n' "$__TAIL" | grep -E '"error"|401|Unauthorized|OAuth access token has expired|BROKEN|Full Disk Access' || true)
 echo "===== done rc=$RC $(date) =====" >> "$LOG"
-if [ $RC -ne 0 ] || [ -n "$__BAD" ]; then
+if [ -n "$__LEAKED" ]; then
+  echo "PRIVACY: content-bearing files quarantined from monitoring/ to $SCRATCH:$__LEAKED" >&2
+fi
+if [ $RC -ne 0 ] || [ -n "$__BAD" ] || [ -n "$__LEAKED" ]; then
   printf '%s\n' "$__BAD" | head -5 >&2
   echo "inbound-triage run FAILED (rc=$RC) — see $LOG" >&2
   exit 1
