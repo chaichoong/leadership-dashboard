@@ -266,8 +266,10 @@ Subagent prompt: "Follow ~/.claude/scheduled-tasks/task-hygiene-sweep/SKILL.md i
 These touch people and money, so they run even when the sweeps above failed. Run them in this order, each as its own subagent, each told not to take the queue lock and to return at most ten lines:
 
 1. `~/.claude/scheduled-tasks/uc-check-slack-notifier/SKILL.md` — Mica depends on this. If it fails, say so loudly in the report.
-2. `~/.claude/scheduled-tasks/agent-dispatch/SKILL.md`
-3. `~/.claude/scheduled-tasks/prospect-daily-run/SKILL.md`
+2. `~/.claude/scheduled-tasks/inbound-messages-sweep/SKILL.md` — runs BEFORE agent-dispatch on purpose, so the tasks it creates are dispatched in the same run. It is iMessage-only since 24 Aug 2026 (WhatsApp removed from agent work, Kevin's call) and has no excuse to skip. (This line drifted out of this doc while living in the deployed routine; restored 25 Aug 2026.)
+3. `~/.claude/scheduled-tasks/inbound-email-triage/SKILL.md` — the Inbound Comms Triage agent's daily Go Signal (its own trigger, 25 Aug 2026): sorts Kevin's Gmail inbox, converts labelled-but-untasked emails, scores itself on the register. Also BEFORE agent-dispatch, for the same reason. If it reports the Gmail read is broken, that goes in the report loudly — a silent skip here is missed inbound mail.
+4. `~/.claude/scheduled-tasks/agent-dispatch/SKILL.md`
+5. `~/.claude/scheduled-tasks/prospect-daily-run/SKILL.md`
 
 ## Phase 6b — Calendar work (only when due)
 

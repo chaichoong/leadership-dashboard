@@ -34,6 +34,24 @@
 //                       (Kevin's ruling, 6 Aug 2026: kevinbrittain@gmail.com
 //                       unless the task says otherwise).
 //   GET  /send-email/test — token health + which senders are connected.
+//
+// GMAIL TRIAGE (added 25 Aug 2026, Inbound Comms Triage agent): script-only
+// read + label endpoints so the daily triage run can sort Kevin's inbox
+// headlessly. All gated by Bearer <GMAIL_SEND_KEY>, same as /send-email.
+// They need the gmail.modify scope — a 403 from Google means the stored token
+// predates this change (gmail.send only): re-grant once at /auth/gmail.
+//   POST /gmail/labels — { account? } → every label's { id, name }.
+//   POST /gmail/list   — { q, maxResults?, account? } → messages matching the
+//                        Gmail search q, each with headers, snippet, labelIds,
+//                        internalDate and a plain-text body excerpt. Read-only.
+//                        Max 25 per call: each message is its own Gmail fetch
+//                        and the worker has a 50-subrequest budget.
+//   POST /gmail/modify — { ids: [..], addLabels?: [..], removeLabels?: [..], account? }
+//                        Applies label changes; archive = removeLabels ["INBOX"].
+//                        Label NAMES resolve via the labels list; ALL-CAPS ids
+//                        (INBOX, UNREAD) pass through. SPAM and TRASH are
+//                        refused: this endpoint can label and archive, never
+//                        send, delete, or mark spam. Max 40 ids.
 
 // Kevin's ruling, 6 Aug 2026: emails go from this account unless the task
 // specifies another connected sender.
@@ -104,7 +122,7 @@ export default {
             // openid email is included so the callback can prove WHICH account
             // granted, and file the token under that account.
             const hint = url.searchParams.get('account');
-            const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${env.GOOGLE_CLIENT_ID}&redirect_uri=${encodeURIComponent(url.origin + '/auth/callback')}&response_type=code&scope=${encodeURIComponent('openid email https://www.googleapis.com/auth/gmail.send')}&access_type=offline&prompt=consent&state=gmail${hint ? `&login_hint=${encodeURIComponent(hint)}` : ''}`;
+            const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${env.GOOGLE_CLIENT_ID}&redirect_uri=${encodeURIComponent(url.origin + '/auth/callback')}&response_type=code&scope=${encodeURIComponent('openid email https://www.googleapis.com/auth/gmail.send https://www.googleapis.com/auth/gmail.modify')}&access_type=offline&prompt=consent&state=gmail${hint ? `&login_hint=${encodeURIComponent(hint)}` : ''}`;
             return Response.redirect(authUrl, 302);
         }
 
@@ -132,8 +150,8 @@ export default {
                 await env.GMAIL_AUTH.put(`gmail_refresh_token:${email.toLowerCase()}`, tokenData.refresh_token);
                 return new Response(
                     `<html><body style="font-family:sans-serif;max-width:600px;margin:40px auto;padding:20px">
-                    <h2>Email sending is connected for ${email}</h2>
-                    <p>The agents can now send email from this account once work is approved. Nothing else to do — you can close this tab.</p>
+                    <h2>Email sending and inbox triage are connected for ${email}</h2>
+                    <p>The agents can now send approved email from this account, and the triage agent can read and sort its inbox. Nothing else to do — you can close this tab.</p>
                     </body></html>`,
                     { status: 200, headers: { 'Content-Type': 'text/html' } }
                 );
@@ -223,6 +241,37 @@ export default {
                 return jsonResponse({ status: 'sent', id: sent.id, threadId: sent.threadId });
             } catch (e) {
                 return jsonResponse({ error: e.message }, 500);
+            }
+        }
+
+        // ------------------------------------------------------------------
+        // Gmail triage — script-only, never browser-origin. Reads and labels
+        // Kevin's inbox for the Inbound Comms Triage agent. Same bearer gate
+        // as /send-email; requires the gmail.modify scope (see header docs).
+        // ------------------------------------------------------------------
+        if (url.pathname === '/gmail/labels' || url.pathname === '/gmail/list' || url.pathname === '/gmail/modify') {
+            const auth = request.headers.get('Authorization') || '';
+            if (!env.GMAIL_SEND_KEY || auth !== `Bearer ${env.GMAIL_SEND_KEY}`) {
+                return jsonResponse({ error: 'Forbidden' }, 403);
+            }
+            if (request.method !== 'POST') return jsonResponse({ error: 'POST required' }, 405);
+            try {
+                const body = await request.json().catch(() => ({}));
+                const account = (body.account || DEFAULT_SENDER).toLowerCase().trim();
+                const refreshToken = await env.GMAIL_AUTH.get(`gmail_refresh_token:${account}`);
+                if (!refreshToken) {
+                    return jsonResponse({ error: `Gmail not connected for ${account}. Grant once at /auth/gmail?account=${account}` }, 409);
+                }
+                const accessToken = await getGmailAccessToken(env, refreshToken);
+                if (url.pathname === '/gmail/labels') return jsonResponse(await gmailLabels(accessToken));
+                if (url.pathname === '/gmail/list') return jsonResponse(await gmailList(accessToken, body));
+                return jsonResponse(await gmailModify(accessToken, body));
+            } catch (e) {
+                // Google answers 403 insufficientPermissions when the stored
+                // token predates the gmail.modify scope — name the fix.
+                const hint = /insufficient|PERMISSION_DENIED|403/i.test(e.message)
+                    ? ' If this is a permission error, re-grant once at /auth/gmail (the triage scope was added 25 Aug 2026).' : '';
+                return jsonResponse({ error: e.message + hint }, 500);
             }
         }
 
@@ -356,6 +405,124 @@ function buildRawEmail({ to, subject, text, cc, from }) {
         bodyB64,
     ];
     return b64url(enc.encode(lines.join('\r\n')));
+}
+
+// ---------------------------------------------------------------------------
+// Gmail triage helpers (Inbound Comms Triage agent, 25 Aug 2026)
+// ---------------------------------------------------------------------------
+
+async function gmailLabels(token) {
+    const res = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/labels', {
+        headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!res.ok) throw new Error('Gmail labels list failed: ' + await res.text());
+    const { labels = [] } = await res.json();
+    return { labels: labels.map(l => ({ id: l.id, name: l.name, type: l.type })) };
+}
+
+async function gmailList(token, { q, maxResults }) {
+    // Hard cap 25: the list call plus one get per message must stay inside the
+    // worker's 50-subrequest budget alongside the token refresh.
+    const cap = Math.min(Math.max(Number(maxResults) || 25, 1), 25);
+    const listRes = await fetch(`https://gmail.googleapis.com/gmail/v1/users/me/messages?q=${encodeURIComponent(q || 'in:inbox')}&maxResults=${cap}`, {
+        headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!listRes.ok) throw new Error('Gmail list failed: ' + await listRes.text());
+    const { messages = [], resultSizeEstimate } = await listRes.json();
+    const out = [];
+    for (const m of messages) {
+        const msgRes = await fetch(`https://gmail.googleapis.com/gmail/v1/users/me/messages/${m.id}?format=full`, {
+            headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!msgRes.ok) throw new Error('Gmail get failed for ' + m.id + ': ' + await msgRes.text());
+        const msg = await msgRes.json();
+        const headers = {};
+        for (const h of (msg.payload?.headers || [])) {
+            const k = h.name.toLowerCase();
+            // list-unsubscribe is the strongest machine-mail signal the triage
+            // rules use, so it rides along with the human-readable headers.
+            if (['from', 'to', 'subject', 'date', 'list-unsubscribe'].includes(k)) headers[k] = h.value;
+        }
+        out.push({
+            id: msg.id,
+            threadId: msg.threadId,
+            labelIds: msg.labelIds || [],
+            internalDate: Number(msg.internalDate) || null,
+            snippet: msg.snippet || '',
+            headers,
+            body: extractPlainText(msg.payload).slice(0, 4000),
+        });
+    }
+    return { messages: out, resultSizeEstimate };
+}
+
+async function gmailModify(token, { ids, addLabels, removeLabels }) {
+    if (!Array.isArray(ids) || !ids.length) throw new Error('ids (array of message ids) is required');
+    if (ids.length > 40) throw new Error('40 ids max per call');
+    const add = Array.isArray(addLabels) ? addLabels : [];
+    const remove = Array.isArray(removeLabels) ? removeLabels : [];
+    if (!add.length && !remove.length) throw new Error('addLabels or removeLabels required');
+    // Triage can label and archive, never destroy: trashing or spamming a
+    // message from here would be a silent delete path.
+    for (const name of add) {
+        if (/^(SPAM|TRASH)$/i.test(String(name))) throw new Error(`Refusing to add ${name} — this endpoint never deletes or marks spam`);
+    }
+    const { labels } = await gmailLabels(token);
+    const byName = new Map(labels.map(l => [l.name.toLowerCase(), l.id]));
+    const resolve = (name) => {
+        const s = String(name);
+        if (/^[A-Z_]+$/.test(s)) return s; // system label id (INBOX, UNREAD, …)
+        const id = byName.get(s.toLowerCase());
+        if (!id) throw new Error(`Unknown Gmail label: ${s}`);
+        return id;
+    };
+    const addLabelIds = add.map(resolve);
+    const removeLabelIds = remove.map(resolve);
+    const results = [];
+    for (const id of ids) {
+        const res = await fetch(`https://gmail.googleapis.com/gmail/v1/users/me/messages/${id}/modify`, {
+            method: 'POST',
+            headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ addLabelIds, removeLabelIds }),
+        });
+        if (!res.ok) throw new Error(`Gmail modify failed for ${id}: ` + await res.text());
+        const msg = await res.json();
+        results.push({ id: msg.id, labelIds: msg.labelIds || [] });
+    }
+    return { modified: results.length, results };
+}
+
+// Prefer the text/plain part; fall back to text/html with tags stripped.
+// Gmail body data is base64url; decode unicode-safely (bodies carry £).
+function b64urlDecodeUtf8(data) {
+    const b64 = data.replace(/-/g, '+').replace(/_/g, '/');
+    const bin = atob(b64);
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    return new TextDecoder().decode(bytes);
+}
+
+function extractPlainText(payload) {
+    if (!payload) return '';
+    const queue = [payload];
+    let html = null;
+    while (queue.length) {
+        const p = queue.shift();
+        if (p.mimeType === 'text/plain' && p.body?.data) return b64urlDecodeUtf8(p.body.data);
+        if (p.mimeType === 'text/html' && p.body?.data && html === null) html = b64urlDecodeUtf8(p.body.data);
+        if (p.parts) queue.push(...p.parts);
+    }
+    if (html !== null) {
+        return html
+            .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+            .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+            .replace(/<[^>]+>/g, ' ')
+            .replace(/&nbsp;/gi, ' ')
+            .replace(/&amp;/gi, '&')
+            .replace(/\s+/g, ' ')
+            .trim();
+    }
+    return '';
 }
 
 async function getAccessToken(env) {
