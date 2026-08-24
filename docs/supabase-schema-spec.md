@@ -89,6 +89,30 @@ retrievable by someone who cannot open the note.
 - Airtable stays system of record until a module's page is verified on Supabase AND its write path lands (shims currently read-through; write path per-module cutover, tasks first — Mica's Tasks & Projects clone is furthest along).
 - GitHub Pages app remains the live product until cutover; Vercel build is the staging/dogfood target.
 
+### 2.8 AI Agents register + daily log (added 24 Aug 2026, Kevin's "all of it" sync ruling)
+
+The AI agent workforce is the product's core promise, and the client build currently has no
+agent tables at all (the Systemisation shim explicitly warns that a re-sync would fall
+through to Airtable). Two tables, mirroring the Airtable originals, RLS-scoped by tenant
+like every 2.2 retrofit:
+
+- **`ai_agents`** ← Airtable `AI Agents` (`tbl9msVjyQWslLOIZ`). One row per role agent per
+  tenant: name, goal, department, status (planned/building/built/live/paused), guardrail
+  level (autonomous / approval_required / hybrid), readiness, the seven AGENTIC stage
+  texts, score_metric (target), metric_score (current reading, written by the agent's
+  runtime), agent_prompt (compiled), learning_log, stage_scores jsonb, team_member ref,
+  workflow ref. The guardrail column is a CONTROL read by runtimes before autonomous
+  writes (the reconciliation gate pattern) — it must exist before any agent runtime moves
+  server-side (Phase C / S7).
+- **`agent_daily_log`** ← Airtable `AI Agent Daily Log` (`tbl6VQKVMnK0Q7hbJ`). One row per
+  agent per day: date, agent ref, summary (one line of counts), decisions (text, the full
+  list with reasons). Written by agent runtimes at the end of each run, non-fatal by rule;
+  rendered on the agent's panel ("Daily decisions") so the owner can check any day's calls.
+  Content is tenant data — same RLS scope, and the §2.6 memory-scoping rules apply to
+  anything an agent learns from it.
+- Module gating: add `agents: bool` to the §2.5 modules jsonb — the AI Agents tab is a
+  sellable module surface, not a free-rider on systemisation.
+
 ### Sequencing (feeds master plan)
 S1. RLS audit + enable on all existing tables (URGENT, security).
 S2. Migrations 0001-0014 recovered into repo.

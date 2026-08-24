@@ -12,10 +12,13 @@
 // is deferred to that module).
 //
 // ⚠ NOT YET MAPPED (added to the live page 24 Aug 2026, agents-register build):
-// AI Agents `tbl9msVjyQWslLOIZ` and Team Members `tblco0p2OnlLQVAX7`. Unknown
-// tables FALL THROUGH to real Airtable, so a byte-for-byte re-sync of the clone
-// would send register reads/writes to Airtable (401 under Supabase auth, or a
-// split system of record with a PAT). Map or stub BOTH before any re-sync.
+// AI Agents `tbl9msVjyQWslLOIZ`, AI Agent Daily Log `tbl6VQKVMnK0Q7hbJ` and
+// Team Members `tblco0p2OnlLQVAX7`. Unknown tables FALL THROUGH to real
+// Airtable, so a byte-for-byte re-sync of the clone would send register
+// reads/writes to Airtable (401 under Supabase auth, or a split system of
+// record with a PAT). Map or stub ALL THREE before any re-sync. The target
+// Supabase tables are specced: docs/supabase-schema-spec.md §2.8 (ai_agents,
+// agent_daily_log, and the `agents` module gate).
 (function () {
   const SB_URL  = window.SUPABASE_URL  || 'https://ptkyhzlsvijcwyovgrgv.supabase.co';
   const SB_ANON = window.SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InB0a3loemxzdmlqY3d5b3Zncmd2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzYzMzIxNzgsImV4cCI6MjA5MTkwODE3OH0.U5ZdIjw--_UgJlYi75JTjpb2doBTjO4W8LUZPnZzkFU';

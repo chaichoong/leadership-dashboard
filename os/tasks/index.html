@@ -894,6 +894,90 @@ const KEVIN_EMAIL = 'kevin@runpreneur.org.uk';
 // Agents filter and in every assignee picker. No Airtable login and no paid
 // seat — logins are managed separately.
 let AGENT_MAP = {};
+
+// ── The AI Agents register (Systemisation is its HOME; this page READS it) ──
+// One row per ROLE agent: build status, guardrail level, score vs its target,
+// and (via the Daily Log table) what it did today. Joined to the workforce
+// roster below through the register's Team Member link, so the two agent
+// lists — Team Members here, the register there — finally speak.
+const AGENTS_REG_TBL='tbl9msVjyQWslLOIZ';
+const REG={
+  name:'fldhtLvryVEzeGbl8', status:'fld71vXWqcxhdljac', guardrail:'fldWgqxMFmaAAvUHC',
+  scoreMetric:'fldzuYYA67h3b3MHB', metricScore:'fldkGxrOlrfuLlH3J', teamMember:'fldEtzFGbNe4te9xL',
+};
+const AGENT_LOG_TBL='tbl6VQKVMnK0Q7hbJ';
+const ALOGF={date:'fldr9ktRlG8e93AMN', agent:'fld8OSVSzfXcDjDIl', summary:'fld0vrdlfSiZjR6wg'};
+const REG_STATUS_META={
+  Live:{bg:'var(--success-bg)',fg:'var(--success)'}, Built:{bg:'var(--accent-soft)',fg:'var(--accent)'},
+  Building:{bg:'var(--info-bg)',fg:'var(--info)'}, Planned:{bg:'var(--bg-subtle)',fg:'var(--text-muted)'},
+  Paused:{bg:'var(--warning-bg)',fg:'var(--warning)'},
+};
+let agentRegisterRows=null;   // null = not loaded yet; [] = loaded (possibly failed, see error)
+let agentRegisterError='';    // the REGISTER read failed — chips hidden
+let agentLogError='';         // only the daily-log read failed — chips fine, day lines missing
+let agentDailyByReg={};       // register recId → latest {date, summary}
+let _agentRegPromise=null;    // in-flight guard: overlapping renders share one fetch
+
+async function fetchAllAirtablePages(url){
+  // Hand-rolled Airtable reads MUST paginate (the recon accuracy card once
+  // scored the first 100 rows as the whole truth for a month).
+  let out=[],offset='';
+  do{
+    const res=await fetch(url+(offset?`&offset=${encodeURIComponent(offset)}`:''),{headers:{Authorization:`Bearer ${PAT}`}});
+    if(!res.ok)throw new Error('Airtable '+res.status);
+    const data=await res.json();
+    out.push(...(data.records||[]));
+    offset=data.offset||'';
+  }while(offset);
+  return out;
+}
+
+async function loadAgentRegister(){
+  // The two reads fail independently and must report independently: a dead
+  // log read must not claim the register failed (chips would be hidden and
+  // the sync bar would cry over data that loaded fine).
+  try{
+    agentRegisterRows=await fetchAllAirtablePages(
+      `https://api.airtable.com/v0/${BASE_ID}/${AGENTS_REG_TBL}?returnFieldsByFieldId=true&pageSize=100`);
+    agentRegisterError='';
+  }catch(e){
+    console.warn('AI Agents register read failed',e);
+    agentRegisterError=String(e&&e.message||e);
+    if(agentRegisterRows===null)agentRegisterRows=[];
+    return;
+  }
+  try{
+    // Latest daily-log line per agent, newest first so the first hit per
+    // agent wins. maxRecords=600 is a COST CAP, not "everything": at one row
+    // per RUNNING agent per day it is weeks-to-months of cover, and an agent
+    // idle longer than the window shows no day line (same as never-ran).
+    const logs=await fetchAllAirtablePages(
+      `https://api.airtable.com/v0/${BASE_ID}/${AGENT_LOG_TBL}?returnFieldsByFieldId=true&pageSize=100&maxRecords=600&sort%5B0%5D%5Bfield%5D=Date&sort%5B0%5D%5Bdirection%5D=desc`);
+    agentDailyByReg={};
+    logs.forEach(r=>{
+      (r.fields[ALOGF.agent]||[]).forEach(link=>{
+        const aid=typeof link==='object'?link.id:link;
+        if(aid&&!agentDailyByReg[aid])agentDailyByReg[aid]={date:r.fields[ALOGF.date]||'',summary:r.fields[ALOGF.summary]||''};
+      });
+    });
+    agentLogError='';
+  }catch(e){
+    console.warn('AI Agent Daily Log read failed',e);
+    agentLogError=String(e&&e.message||e);
+    agentDailyByReg={};   // stale day lines are worse than none
+  }
+}
+
+function openAgentRegister(recId){
+  // Deep-link to the agent's panel on the Systemisation page. Via the URL
+  // HASH, not localStorage: the shell keeps a hidden Systemisation iframe
+  // alive, and a localStorage write fires its storage listener, which would
+  // CONSUME the key before the new tab loads (review finding, 24 Aug 2026).
+  // A hash is per-window, so nothing can steal it.
+  window.open('../systemisation/index.html#agent='+encodeURIComponent(recId),'_blank');
+}
+window.openAgentRegister=openAgentRegister;
+
 // The checkbox is the truth. The name prefix is only a fallback so the original
 // 17 keep working if someone adds an agent and forgets to tick the box.
 function isAgentRecord(rec){
@@ -9240,6 +9324,10 @@ async function renderAgents(){
     el.innerHTML=`<div style="padding:24px;color:var(--text-secondary);font-size:var(--fs-sm)">Loading agent history…</div>`;
     await loadAgentApprovalHistory();
   }
+  if(agentRegisterRows===null){
+    _agentRegPromise=_agentRegPromise||loadAgentRegister().finally(()=>{_agentRegPromise=null});
+    await _agentRegPromise;
+  }
   const rows=computeAgentAccuracy(agentApprovalHistory);
   const recs=agentAutonomyRecommendations(rows);
   const waiting=(allTasks||[]).filter(t=>t.status==='Approval');
@@ -9297,14 +9385,64 @@ function renderAgentRoster(){
   const active=(allTasks||[]).filter(t=>t.status!=='Completed'&&!t.someDay);
   const load={};
   active.forEach(t=>{const id=taskAgentId(t);if(id)load[id]=(load[id]||0)+1});
+  // Join the register onto the workforce via its Team Member link, so each
+  // roster row can carry the agent's build status, guardrail and score.
+  const regByTm={};
+  (agentRegisterRows||[]).forEach(r=>{
+    (r.fields[REG.teamMember]||[]).forEach(link=>{
+      const tm=typeof link==='object'?link.id:link;
+      if(tm)regByTm[tm]=r;
+    });
+  });
+  const regChip=(r)=>{
+    if(!r)return'';
+    const status=(r.fields[REG.status]&&(r.fields[REG.status].name||r.fields[REG.status]))||'Planned';
+    const meta=REG_STATUS_META[status]||REG_STATUS_META.Planned;
+    const guardrail=(r.fields[REG.guardrail]&&(r.fields[REG.guardrail].name||r.fields[REG.guardrail]))||'';
+    const score=r.fields[REG.metricScore]||'';
+    const target=r.fields[REG.scoreMetric]||'';
+    const daily=agentDailyByReg[r.id];
+    return `<div style="flex-basis:100%;display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:2px 0 4px">
+      <span style="font-size:11px;font-weight:700;letter-spacing:.5px;padding:2px 8px;border-radius:999px;background:${meta.bg};color:${meta.fg}">${escHtml(status.toUpperCase())}</span>
+      ${guardrail?`<span style="font-size:11px;color:var(--text-secondary)">${escHtml(guardrail)}</span>`:''}
+      ${score?`<span style="font-size:11px;color:var(--text-secondary)"><strong>Score:</strong> ${escHtml(score)}${target?` <span style="color:var(--text-muted)">(target: ${escHtml(target)})</span>`:''}</span>`:''}
+      ${daily&&daily.summary?`<span style="font-size:11px;color:var(--text-muted)" title="From the agent's own daily decisions log"><strong>${escHtml(daily.date)}:</strong> ${escHtml(daily.summary)}</span>`:''}
+      <button class="btn btn-sm" onclick="openAgentRegister('${r.id}')" title="Open this agent's register panel in Systemisation">Register</button>
+    </div>`;
+  };
   const ids=Object.keys(AGENT_MAP||{}).sort((a,b)=>(load[b]||0)-(load[a]||0)||AGENT_MAP[a].localeCompare(AGENT_MAP[b]));
-  const rows=ids.length
-    ? ids.map(id=>`<div class="acc-row">
+  // Register rows this roster would otherwise HIDE: no Team Member link at
+  // all, OR a link pointing at a record that is not an active workforce
+  // member (deactivated, or mislinked to a human). Both would be silent
+  // absence — the failure mode this section exists to prevent.
+  const unwired=(agentRegisterRows||[]).filter(r=>{
+    const links=(r.fields[REG.teamMember]||[]).map(l=>typeof l==='object'?l.id:l);
+    return !links.some(id=>AGENT_MAP[id]);
+  });
+  const unwiredNote=(r)=>{
+    const hasLink=((r.fields[REG.teamMember]||[]).length>0);
+    return hasLink
+      ? 'wired to a Team Members row that is missing or inactive — its workload and accuracy read nothing'
+      : 'on the register but not wired to a Team Members row — its workload and accuracy have nothing to read';
+  };
+  const teamRows=ids.map(id=>`<div class="acc-row" style="flex-wrap:wrap">
         <span class="acc-type">${escHtml(AGENT_MAP[id])}</span>
         <span class="acc-n">${load[id]||0} open</span>
         <button class="btn btn-sm" onclick="setTeam('agents');setAgentFilter('${id}');switchView('list')" title="Show this agent's work">View work</button>
-      </div>`).join('')
-    : `<div style="padding:10px 0;color:var(--text-secondary);font-size:var(--fs-sm)">No agents yet.</div>`;
+        ${regChip(regByTm[id])}
+      </div>`).join('');
+  const unwiredRows=unwired.map(r=>`<div class="acc-row" style="flex-wrap:wrap">
+        <span class="acc-type">${escHtml(r.fields[REG.name]||'Agent')}</span>
+        <span style="font-size:11px;color:var(--warning)">${unwiredNote(r)}</span>
+        ${regChip(r)}
+      </div>`).join('');
+  const rows=(teamRows+unwiredRows)
+    || `<div style="padding:10px 0;color:var(--text-secondary);font-size:var(--fs-sm)">No agents yet.</div>`;
+  const regNote=agentRegisterError
+    ? `<div style="font-size:11px;color:var(--warning);margin-bottom:4px">Register read failed (${escHtml(agentRegisterError)}) — status and scores are hidden. Refresh scores to retry.</div>`
+    : (agentLogError
+      ? `<div style="font-size:11px;color:var(--text-muted);margin-bottom:4px">Daily-decisions lines unavailable (log read failed) — status and scores are current. Refresh scores to retry.</div>`
+      : '');
   return `<div class="acc-card" style="margin-top:8px">
     <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:6px">
       <input id="newAgentName" type="text" placeholder="New agent name, e.g. AI Worker — Bookkeeper"
@@ -9312,7 +9450,8 @@ function renderAgentRoster(){
         onkeydown="if(event.key==='Enter')addAgent()">
       <button class="btn btn-primary btn-sm" onclick="addAgent()">Add agent</button>
     </div>
-    <div style="font-size:11px;color:var(--text-muted);margin-bottom:4px">Creates a Team Members record with "Is AI Agent" and "Active" ticked. No Airtable login and no paid seat — it can hold work straight away.</div>
+    <div style="font-size:11px;color:var(--text-muted);margin-bottom:4px">Creates a Team Members record with "Is AI Agent" and "Active" ticked. No Airtable login and no paid seat — it can hold work straight away. Build status, guardrails and scores come from the AI Agents register in Systemisation; the Register button opens the agent's full panel there.</div>
+    ${regNote}
     ${rows}
   </div>`;
 }
@@ -9348,6 +9487,7 @@ window.addAgent=addAgent;
 async function refreshAgentAccuracy(){
   agentHistoryLoaded=false;agentHistoryError='';
   agentCompletionsLoaded=false;  // else "Done" stays frozen at first paint
+  agentRegisterRows=null;        // register + daily log refetch too
   await loadAgentApprovalHistory(true);
   await renderAgents();
   toast('Agent scores refreshed');
@@ -9519,6 +9659,15 @@ async function loadAllData(){
               const n=Object.keys(AGENT_MAP||{}).length;
               if(!n) return {status:'warn',detail:'No AI agent Team Member records found — agent names will show as record IDs'};
               return {status:'pass',detail:`${n} AI agents available to receive work`};
+            }
+          },
+          {
+            name:'AI Agents register readable', kind:'sync', run:()=>{
+              if(agentRegisterRows===null) return {status:'pass',detail:'Loads with the AI Agents view (not opened yet this session)'};
+              if(agentRegisterError) return {status:'fail',detail:'Register read failed: '+agentRegisterError};
+              if(!agentRegisterRows.length) return {status:'warn',detail:'Register returned zero role agents (expected ~15) — table or field rename?'};
+              if(agentLogError) return {status:'warn',detail:`${agentRegisterRows.length} role agents loaded, but the daily-log read failed: `+agentLogError};
+              return {status:'pass',detail:`${agentRegisterRows.length} role agents on the register`};
             }
           },
           {

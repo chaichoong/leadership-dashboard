@@ -84,7 +84,7 @@ const KPI_LIBRARY = [
     { tier: 1, group: 'AI workforce', name: 'Approvals waiting', shape: 'T3', status: 'ready',
       how: 'Tasks sitting at Status Approval — work an agent prepared that awaits a human yes.' },
     { tier: 1, group: 'AI workforce', name: 'AI agents live', shape: 'T3', status: 'ready',
-      how: 'Workflow agents in the live state, with testing and pending counts alongside.' },
+      how: 'Register role agents at Status Live plus workflow agents in the live state, with register-linked workflows counted ONCE (AgentAccuracy.countAgents — the dashboard card and the Systemisation badge use the same subtraction). Live agents show their Metric Score against their Score Metric target.' },
     // Tier 2 — property pack (add-on only)
     { tier: 2, group: 'Property pack', name: 'Occupancy rate', shape: 'T4', status: 'ready', how: 'Occupied over total rental units.' },
     { tier: 2, group: 'Property pack', name: 'Rent roll (expected monthly income)', shape: 'T5', status: 'ready', how: 'Sum of rent by payment status over active tenancies.' },

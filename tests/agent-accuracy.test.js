@@ -7,7 +7,7 @@ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const require = createRequire(import.meta.url);
 // The real source the browser loads, not a copy — a threshold changed in the
 // app and not here would otherwise pass silently.
-const { computeAgentAccuracy, agentAutonomyRecommendations, THRESHOLD } = require(resolve(ROOT, 'js/agent-accuracy.js'));
+const { computeAgentAccuracy, agentAutonomyRecommendations, THRESHOLD, countAgents } = require(resolve(ROOT, 'js/agent-accuracy.js'));
 
 // Seeded decisions. `at` counts DOWN so index 0 is the newest, which is what
 // the "last 10" window depends on.
@@ -116,5 +116,31 @@ describe('agent accuracy — the threshold that recommends autonomy', () => {
   it('falls back to the record ID when no display name is known', () => {
     const rows = computeAgentAccuracy(seed('recUnknown', 'Build', [APPROVE]), NAMES);
     expect(rows[0].agentName).toBe('recUnknown');
+  });
+});
+
+describe('countAgents — one agent, one count, across two populations', () => {
+  const wf = [{ id: 'wf1', state: 'live' }, { id: 'wf2', state: 'testing' }, { id: 'wf3', state: 'live' }];
+
+  it('a register row linking a workflow is the SAME agent, not two', () => {
+    // wf1 is linked from a Live register row — counting both was the dashboard
+    // bug: the front-page headline exceeded the tab badge it links to.
+    const reg = [{ status: 'Live', workflowIds: ['wf1'] }, { status: 'Building', workflowIds: [] }];
+    const c = countAgents(wf, reg);
+    expect(c.live).toBe(2);        // wf3 + the register row (wf1 folded into it)
+    expect(c.testing).toBe(1);
+    expect(c.wfOverlap).toBe(1);
+  });
+
+  it('with no register rows, matches the old workflow-only behaviour', () => {
+    const c = countAgents(wf, []);
+    expect(c.live).toBe(2);
+    expect(c.testing).toBe(1);
+    expect(c.wfOverlap).toBe(0);
+  });
+
+  it('degrades safely on empty and missing inputs', () => {
+    expect(countAgents([], []).live).toBe(0);
+    expect(countAgents(null, null).live).toBe(0);
   });
 });
