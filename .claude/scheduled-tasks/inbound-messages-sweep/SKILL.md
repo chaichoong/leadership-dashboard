@@ -94,7 +94,7 @@ For each candidate, query Tasks `tblqB8b22hKBL4PF1` with filterByFormula on
 on error, skip creating that task and report the failure. Silent zero on a
 broken check is how duplicates happen.
 
-## Step 5 — Create the tasks (max 10 per run)
+## Step 5 — Create the tasks (no cap — every surviving candidate gets its task)
 
 One record per surviving candidate in Tasks `tblqB8b22hKBL4PF1`, base
 `appnqjDpqDniH3IRl`, via curl with the PAT at `~/.config/od/airtable_pat`
@@ -123,9 +123,11 @@ One record per surviving candidate in Tasks `tblqB8b22hKBL4PF1`, base
 - `fldR4peEZRXo7tjoI` Inbound Date Received: message date (YYYY-MM-DD)
 - `fldXf1p0vtHqOZcKl` Inbound Note URL Link: the dedupe key from Step 4
 
-If more than 10 survive triage, create the 10 most important (tier-1 first,
-then oldest) and report how many were left for tomorrow — a silent cap reads
-as "covered everything".
+There is NO task cap (Kevin's ruling, 24 Aug 2026: nothing actionable waits a
+day because of a quota — the same ruling as the Gmail triage lane). Create a
+task for EVERY candidate that survives triage and dedupe, tier-1 first then
+oldest, so a mid-run failure costs the least important tasks, and report the
+total created.
 
 ## Step 6 — Advance the watermark (only for what was handled)
 
@@ -135,7 +137,8 @@ Choose NS so the watermark never passes a message that was not fully handled:
 
 - Every candidate created, found duplicate, or triaged out, and no
   failures → NS = `max_date_ns` from Step 1.
-- The 10-task cap deferred candidates → NS = the oldest DEFERRED candidate's
+- A candidate deferred for any reason (there is no volume cap any more, so
+  this now only means a failure path) → NS = the oldest DEFERRED candidate's
   `date_ns` minus 1, so tomorrow's scan sees them again. Never mark past a
   deferred message: with no task and no dedupe key it would be lost for good.
 - Any task failed to create, or its Step 4 dedupe query errored (a
