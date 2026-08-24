@@ -125,4 +125,31 @@ test.describe('AI Reconciliation Accuracy stats', () => {
     expect(stats.byMatchType['Knowledge Base'].pct)
       .toBeGreaterThan(stats.byMatchType['Vendor'].pct);
   });
+
+  test('writes its Metric Score to the AI Agents register, once per changed reading', async ({ page }) => {
+    await page.addInitScript((pat) => localStorage.setItem('_dlr_pat', pat), MOCK_PAT);
+    await loadDashboard(page);
+    // Capture PATCHes to the register row. Registered before routeAuditPages, so the
+    // audit route (registered later, matched first) falls back to this for non-audit URLs.
+    const patches = [];
+    await page.route('**/api.airtable.com/v0/**/tbl9msVjyQWslLOIZ/**', async (route) => {
+      if (route.request().method() !== 'PATCH') { await route.fallback(); return; }
+      patches.push(route.request().postDataJSON());
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ id: 'recyrN5YCQFssAniE' }) });
+    });
+    await routeAuditPages(page, {
+      page0: { records: auditRows('recA', 10) },
+    });
+
+    await page.evaluate(async () => await refreshReconAccuracyStats());
+
+    // 5 of 10 accurate (even indices) -> the reading the register must receive.
+    await expect.poll(() => patches.length, { timeout: 5000 }).toBe(1);
+    expect(patches[0].fields['fldkGxrOlrfuLlH3J']).toBe('50% (5/10 checked, last 31 days)');
+
+    // Same reading again -> no second write; tab loads must not spam Airtable.
+    await page.evaluate(async () => await refreshReconAccuracyStats());
+    await page.waitForTimeout(500);
+    expect(patches.length).toBe(1);
+  });
 });

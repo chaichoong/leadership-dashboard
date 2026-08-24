@@ -1739,10 +1739,37 @@
             const stats = { total, accurate, pct, colour, label, byField, byMatchType };
             _reconStatsCache = stats;
             try { localStorage.setItem(RECON_CACHE_KEY, JSON.stringify({ ts: Date.now(), stats })); } catch {}
+            updateAgentMetricScore(stats).catch(() => {});
             return stats;
         } catch (e) {
             console.warn('refreshReconAccuracyStats failed:', e);
             return _reconStatsCache;
+        }
+    }
+
+    // Register wiring (AGENTIC "C — Conclusion & Score"): the agent keeps its own
+    // Metric Score current on the AI Agents register. Fire-and-forget from the stats
+    // refresh, and only writes when the reading has changed, so routine tab loads
+    // add no Airtable traffic.
+    const AGENT_SCORE_WRITTEN_KEY = 'recon_agent_score_written';
+    async function updateAgentMetricScore(stats) {
+        if (!stats || !stats.total) return;
+        if (typeof PAT === 'undefined' || !PAT) return;
+        const reading = `${stats.pct}% (${stats.accurate}/${stats.total} checked, last 31 days)`;
+        try { if (localStorage.getItem(AGENT_SCORE_WRITTEN_KEY) === reading) return; } catch {}
+        try {
+            const resp = await fetch(`https://api.airtable.com/v0/${BASE_ID}/${TABLES.aiAgents}/${AGENT_RECON.recordId}`, {
+                method: 'PATCH',
+                headers: { 'Authorization': 'Bearer ' + PAT, 'Content-Type': 'application/json' },
+                body: JSON.stringify({ fields: { [AGENT_RECON.metricScore]: reading } }),
+            });
+            if (resp.ok) {
+                try { localStorage.setItem(AGENT_SCORE_WRITTEN_KEY, reading); } catch {}
+            } else {
+                console.warn('Agent register Metric Score update failed:', resp.status);
+            }
+        } catch (e) {
+            console.warn('Agent register Metric Score update failed:', e);
         }
     }
 

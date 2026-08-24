@@ -19,8 +19,8 @@
 
     // ── Page & SOP Version Registry ──
     const PAGE_REGISTRY = [
-        { id: 'overview',    name: 'Leadership Dashboard',           icon: '📊', pageVer: '2.77', sopFile: 'sop.html',                   sopVer: '2.9', standalone: 'index.html#overview' },
-        { id: 'os-strategy', name: 'Objective & Strategy',           icon: '🎯', pageVer: '1.40', sopFile: 'os/strategy/sop.html',       sopVer: '1.1', standalone: 'os/strategy/index.html' },
+        { id: 'overview',    name: 'Leadership Dashboard',           icon: '📊', pageVer: '2.78', sopFile: 'sop.html',                   sopVer: '2.9', standalone: 'index.html#overview' },
+        { id: 'os-strategy', name: 'Objective & Strategy',           icon: '🎯', pageVer: '1.41', sopFile: 'os/strategy/sop.html',       sopVer: '1.1', standalone: 'os/strategy/index.html' },
         { id: 'tasks',       name: 'Tasks & Projects',   icon: '✅', pageVer: '1.140', sopFile: 'os/tasks/sop.html',             sopVer: '1.4', standalone: 'os/tasks/index.html' },
         { id: 'cfv',        name: 'CFVs',                          icon: '🚨', pageVer: '1.33', sopFile: 'sop-cfvs.html',               sopVer: '1.33', standalone: 'index.html#cfv' },
         { id: 'ceo-brief',  name: 'CEO Brief',                     icon: '☀️', pageVer: '1.2', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#ceo-brief' },
@@ -43,7 +43,7 @@
         { id: 'kpi-library', name: 'KPI Library', icon: '📚', pageVer: '1.5', sopFile: '', sopVer: '1.0', standalone: 'index.html#kpi-library', adminOnly: true },
         { id: 'fintable',  name: 'Accounts',                       icon: '🏦', pageVer: '1.19', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#fintable' },
         { id: 'systemisation', name: 'Systemisation',              icon: '⚙️', pageVer: '1.11', sopFile: 'guides/systemisation.html',    sopVer: '1.11', standalone: 'os/systemisation/index.html' },
-        { id: 'os-team',    name: 'Team Members',                  icon: '👥', pageVer: '1.18', sopFile: '',                            sopVer: '1.1', standalone: 'os/team/index.html' },
+        { id: 'os-team',    name: 'Team Members',                  icon: '👥', pageVer: '1.19', sopFile: '',                            sopVer: '1.1', standalone: 'os/team/index.html' },
         // pageVer corrected by hand 2026-08-06: the auto-bump never fired for this page
         // (crm-supabase.html was missing from the workflow `paths:` filter), so 1.0 was
         // stale — the CRM gained a 14-step interactive walkthrough on 2026-08-04 (319b438).
@@ -299,6 +299,14 @@
         mismatched:  'fldm4i2tYHhi4jFJb',  // singleLineText — CSV of fields that differed; '' when accurate
         matchType:   'fld2Vv0QJ2dNq5iVv',  // singleLineText — Knowledge Base | Composite | Vendor | …
         ruleConf:    'fldJ3tDV60HsOsJJ7',  // number — confidence of the rule that produced the suggestion
+    };
+
+    // AI Agents register wiring — the reconciliation agent owns its Metric Score
+    // (AGENTIC "C — Conclusion & Score"): after each accuracy refresh the runtime
+    // writes its current 31-day reading to its own register row.
+    const AGENT_RECON = {
+        recordId:    'recyrN5YCQFssAniE',  // "Reconciliation" row in AI Agents (TABLES.aiAgents)
+        metricScore: 'fldkGxrOlrfuLlH3J',  // singleLineText — current reading vs the 95% target
     };
 
     // AI Recon Rules field IDs — the knowledge base learned from Kevin's corrections.
