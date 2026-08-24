@@ -625,6 +625,17 @@ const AG = {
     agentPrompt: 'fldV6ve4IEUDkiKoy', // compiled full working prompt
     learningLog: 'fldBdnKB1U4jZM0Jj', // dated lessons from approval feedback
 };
+// AI Agent Daily Log — one row per agent per day, written by each agent's own
+// runtime (e.g. scripts/inbound-triage.py publish). The panel's "Daily
+// decisions" section reads it so Kevin can check any day's calls or leave them.
+const ALOG_TABLE = 'tbl6VQKVMnK0Q7hbJ';
+const ALOG = {
+    logDay:    'fldNLubsilKUL6fyd',
+    date:      'fldr9ktRlG8e93AMN',
+    agent:     'fld8OSVSzfXcDjDIl',  // link to AI Agents
+    summary:   'fld0vrdlfSiZjR6wg',
+    decisions: 'fldTwM2eJvNyUibi4',
+};
 const AG_STAGE_FIELDS = { A:AG.aim, G:AG.goSignal, E:AG.entryPoints, N:AG.navigate, T:AG.tools, I:AG.inspections, C:AG.conclusion };
 const AGENT_STATUSES = ['Planned','Building','Built','Live','Paused'];
 const AGENT_STATUS_META = {
@@ -4278,6 +4289,7 @@ async function loadAgentsRegister(force){
         // broke (a field rename), not an empty workforce — fail loudly.
         if(!team.length) throw new Error('Team Members returned zero AI agents (expected ~17) — check the "Is AI Agent" / "Active" field names');
         allAgents = agents;
+        _agentDailyLogs = {};   // register reloaded — daily logs refetch lazily
         allTeamAgents = team.sort((a,b)=>String(gf(a,TM_NAME)||'').localeCompare(String(gf(b,TM_NAME)||'')));
         computeAgentTaskStats(taskRecs);
         await enforceGuardrailBands();
@@ -4579,6 +4591,26 @@ async function compileAgentPrompt(agentId){
     await patchAgent(agentId, { [AG.agentPrompt]: text }, 'Prompt compiled');
     renderRoleAgentPanel();
 }
+// Lazy per-agent cache for the Daily decisions section: agentId → rows,
+// or 'error'. Cleared whenever the register reloads.
+let _agentDailyLogs = {};
+async function loadAgentDailyLogs(agentId){
+    if(_agentDailyLogs[agentId] !== undefined) return;
+    try {
+        // Small table (one row per agent per day) — fetch recent rows and
+        // filter by the link CLIENT-SIDE: matching a link field by record id
+        // inside a formula is the documented ARRAYJOIN trap.
+        const rows = await atFetch(ALOG_TABLE, null, {
+            'sort[0][field]': 'Date', 'sort[0][direction]': 'desc', maxRecords: '200',
+        });
+        _agentDailyLogs[agentId] = rows.filter(r=>(gf(r,ALOG.agent)||[]).includes(agentId)).slice(0,14);
+    } catch(e){
+        console.warn('daily log read failed for', agentId, e);
+        _agentDailyLogs[agentId] = 'error';
+    }
+    renderRoleAgentPanel();
+}
+
 function renderRoleAgentPanel(){
     const el = document.getElementById('roleagent-panel');
     const a = allAgents.find(x=>x.id===selectedAgentId);
@@ -4683,6 +4715,32 @@ function renderRoleAgentPanel(){
         <div style="font-size:var(--fs-xs);color:var(--text-secondary);white-space:pre-wrap;word-break:break-word;max-height:180px;overflow:auto">${esc(learningLog)}</div>
     </div>`:'';
 
+    // Daily decisions — the agent's own account of every call it made, one
+    // row per day, loaded lazily from the AI Agent Daily Log table.
+    const dl = _agentDailyLogs[a.id];
+    let dailyHtml = `<div style="margin-top:12px;border-top:1px solid var(--border-subtle);padding-top:8px">
+        <div style="font-size:var(--fs-sm);font-weight:var(--fw-semibold)">Daily decisions</div>
+        <div style="font-size:var(--fs-xs);color:var(--text-muted);margin:2px 0 6px">What the agent did each day and why, written by the agent itself at the end of every run. Check in when you want; it keeps itself.</div>`;
+    if(dl === undefined){
+        dailyHtml += `<div style="font-size:var(--fs-xs);color:var(--text-muted)">Loading…</div>`;
+        loadAgentDailyLogs(a.id);
+    } else if(dl === 'error'){
+        dailyHtml += `<div style="font-size:var(--fs-xs);color:var(--warning)">The daily log could not be read. <button class="btn btn-sm" onclick="delete _agentDailyLogs['${a.id}'];renderRoleAgentPanel()">Retry</button></div>`;
+    } else if(!dl.length){
+        dailyHtml += `<div style="font-size:var(--fs-xs);color:var(--text-muted)">No daily log yet. The agent writes its first one at the end of its next run.</div>`;
+    } else {
+        dailyHtml += dl.map(r=>{
+            const day = gf(r,ALOG.date)||'';
+            const summary = gf(r,ALOG.summary)||'';
+            const decisions = gf(r,ALOG.decisions)||'';
+            return `<details style="border:1px solid var(--border-subtle);border-radius:var(--radius-md);margin-bottom:6px;background:var(--bg-surface-2)">
+                <summary style="cursor:pointer;padding:6px 10px;font-size:var(--fs-xs)"><strong>${esc(day)}</strong> <span style="color:var(--text-secondary)">&middot; ${esc(summary)}</span></summary>
+                <div style="font-size:var(--fs-xs);color:var(--text-secondary);white-space:pre-wrap;word-break:break-word;max-height:340px;overflow:auto;padding:8px 10px;border-top:1px solid var(--border-subtle)">${esc(decisions)||'<em>No detail stored for this day.</em>'}</div>
+            </details>`;
+        }).join('');
+    }
+    dailyHtml += `</div>`;
+
     el.innerHTML = `<div class="agentic-card" style="margin-bottom:16px">
         <div class="agentic-head">
             <div>
@@ -4713,6 +4771,7 @@ function renderRoleAgentPanel(){
         </div>
         ${promptHtml}
         ${logHtml}
+        ${dailyHtml}
         ${scoresHtml}
         ${notes?`<div style="margin-top:10px;font-size:var(--fs-xs);color:var(--text-muted);white-space:pre-wrap;word-break:break-word"><strong>Notes:</strong> ${esc(notes)}</div>`:''}
         <div class="agentic-foot">

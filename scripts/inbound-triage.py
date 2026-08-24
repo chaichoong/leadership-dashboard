@@ -52,6 +52,10 @@ USAGE
   inbound-triage.py mark --upto MS            advance the watermark (epoch ms)
   inbound-triage.py score --waiting N         record today's waiting count and
                                               write Metric Score to the register
+  inbound-triage.py publish                   upsert today's decisions to the
+                                              AI Agent Daily Log row on the
+                                              register, so Kevin can check in
+                                              from the agent's panel
   inbound-triage.py selftest                  offline checks of the pure helpers
 
 SECRETS: triage worker key at ~/.config/od/gmail_triage_key (read/label only,
@@ -65,6 +69,7 @@ import re
 import sys
 import tempfile
 import urllib.error
+import urllib.parse
 import urllib.request
 from datetime import date, datetime, timedelta
 from pathlib import Path
@@ -85,6 +90,40 @@ AIRTABLE_BASE = "appnqjDpqDniH3IRl"
 AGENTS_TABLE = "tbl9msVjyQWslLOIZ"
 TRIAGE_AGENT_ROW = "recYy33zkoa099uM2"   # "Inbound Comms Triage" in AI Agents
 METRIC_SCORE_FIELD = "fldkGxrOlrfuLlH3J"  # singleLineText — current reading
+AGENT_NAME = "Inbound Comms Triage"
+
+# AI Agent Daily Log — one row per agent per day so Kevin can check the
+# decisions from the agent's panel (Systemisation → AI Agents) or leave them.
+# `publish` upserts today's row from the digest at the end of each run.
+DAILY_LOG_TABLE = "tbl6VQKVMnK0Q7hbJ"
+ALOG = {
+    "logDay":    "fldNLubsilKUL6fyd",  # primary — "<Agent Name> - YYYY-MM-DD"
+    "date":      "fldr9ktRlG8e93AMN",
+    "agent":     "fld8OSVSzfXcDjDIl",  # link to AI Agents
+    "summary":   "fld0vrdlfSiZjR6wg",
+    "decisions": "fldTwM2eJvNyUibi4",
+}
+
+# Decision groups in display order, shared by publish. Plain English: Kevin
+# reads this on the agent's panel.
+DECISION_GROUPS = [
+    ("label12",      "Moved to the agent lane (task for your approval)"),
+    ("task-created", "Task record written"),
+    ("label13",      "Maintenance, contractor queue"),
+    ("file-6",       "Filed: newsletter"),
+    ("file-10",      "Filed: property compliance"),
+    ("file-11",      "Filed: tenancy documents"),
+    ("file-17",      "Filed: OD prospects"),
+    ("file-18",      "Filed: creditor"),
+    ("archive",      "Archived as machine noise (reversible)"),
+    ("leave",        "Left in the inbox on purpose"),
+    ("deferred",     "Deferred to tomorrow (daily cap)"),
+    ("duplicate",    "Already had a task, nothing created"),
+]
+
+# Airtable multilineText holds ~100k chars; stay well clear so an oversized
+# day truncates predictably instead of failing the write.
+DECISIONS_CHAR_CAP = 90000
 
 # One list call returns at most 25 (the worker's subrequest budget); we follow
 # nextPageToken up to this many pages per query, then report truncated=True.
@@ -303,21 +342,27 @@ def worker_list(q=None, label_ids=None, max_pages=MAX_PAGES):
     return messages, True
 
 
-def airtable_patch_metric(text):
+def airtable_request(method, path, payload=None, what="Airtable call"):
     pat = read_secret(AIRTABLE_PAT_FILE, "Airtable PAT")
     req = urllib.request.Request(
-        "https://api.airtable.com/v0/%s/%s/%s" % (AIRTABLE_BASE, AGENTS_TABLE, TRIAGE_AGENT_ROW),
-        data=json.dumps({"fields": {METRIC_SCORE_FIELD: text}}).encode(),
+        "https://api.airtable.com/v0/%s/%s" % (AIRTABLE_BASE, path),
+        data=json.dumps(payload).encode() if payload is not None else None,
         headers={"Authorization": "Bearer " + pat, "Content-Type": "application/json"},
-        method="PATCH",
+        method=method,
     )
     try:
         with urllib.request.urlopen(req, timeout=60) as res:
             return json.loads(res.read().decode())
     except urllib.error.HTTPError as e:
-        fail("register Metric Score write failed (%d): %s" % (e.code, e.read().decode(errors="replace")[:300]))
+        fail("%s failed (%d): %s" % (what, e.code, e.read().decode(errors="replace")[:300]))
     except (urllib.error.URLError, TimeoutError, ValueError) as e:
-        fail("Airtable unreachable or unreadable writing Metric Score: %s" % e)
+        fail("%s unreachable or unreadable: %s" % (what, e))
+
+
+def airtable_patch_metric(text):
+    return airtable_request(
+        "PATCH", "%s/%s" % (AGENTS_TABLE, TRIAGE_AGENT_ROW),
+        {"fields": {METRIC_SCORE_FIELD: text}}, "register Metric Score write")
 
 
 # ---------------------------------------------------------------------------
@@ -467,6 +512,74 @@ def cmd_score(waiting):
     print(json.dumps({"metric_score": text, "written_to_register": True}))
 
 
+def format_daily_log(rows):
+    """(summary_line, decisions_text) from digest rows. Pure — selftested.
+    Groups follow DECISION_GROUPS order; unknown decision kinds are appended
+    rather than dropped, so a new action type can never vanish from the log."""
+    by = {}
+    for r in rows:
+        by.setdefault(r.get("do", "?"), []).append(r)
+    known = [k for k, _ in DECISION_GROUPS]
+    ordered = list(DECISION_GROUPS) + [(k, k) for k in by if k not in known]
+    counts, blocks = [], []
+    for key, label in ordered:
+        items = by.get(key, [])
+        if not items:
+            continue
+        counts.append("%d %s" % (len(items), key))
+        lines = ["== %s (%d) ==" % (label, len(items))]
+        for r in items:
+            t = (r.get("ts") or "")[11:16]
+            lines.append("%s  %s | %s" % (t, r.get("sender") or "?", (r.get("subject") or "").strip()))
+            if r.get("reason"):
+                lines.append("       why: %s" % r["reason"])
+        blocks.append("\n".join(lines))
+    text = "\n\n".join(blocks)
+    if len(text) > DECISIONS_CHAR_CAP:
+        text = text[:DECISIONS_CHAR_CAP] + ("\n\n[truncated at %d characters; the complete raw log is on the Mac at ~/knowledge-os/logs/inbound-triage/]" % DECISIONS_CHAR_CAP)
+    return ", ".join(counts), text
+
+
+def cmd_publish():
+    today = date.today().isoformat()
+    src = base_dir() / ("digest-%s.jsonl" % today)
+    if not src.exists():
+        fail("no digest for today at %s — nothing ran, nothing to publish" % src)
+    rows = [json.loads(l) for l in src.read_text().splitlines() if l.strip()]
+    if not rows:
+        fail("today's digest is empty — refusing to publish a blank day")
+    summary, decisions = format_daily_log(rows)
+    log_day = "%s - %s" % (AGENT_NAME, today)
+    fields = {
+        ALOG["logDay"]: log_day,
+        ALOG["date"]: today,
+        ALOG["agent"]: [TRIAGE_AGENT_ROW],
+        ALOG["summary"]: summary,
+        ALOG["decisions"]: decisions,
+    }
+    # Upsert on the primary key. A query ERROR must not fall through to a
+    # create — that is the documented silent-zero duplicate trap.
+    found = airtable_request(
+        "GET",
+        "%s?filterByFormula=%s&maxRecords=2" % (
+            DAILY_LOG_TABLE,
+            urllib.parse.quote("{Log Day}='%s'" % log_day.replace("'", "\\'"))),
+        None, "daily log lookup")
+    recs = found.get("records", [])
+    if recs:
+        result = airtable_request(
+            "PATCH", "%s/%s" % (DAILY_LOG_TABLE, recs[0]["id"]),
+            {"fields": fields, "typecast": True}, "daily log update")
+        action = "updated"
+    else:
+        result = airtable_request(
+            "POST", DAILY_LOG_TABLE,
+            {"records": [{"fields": fields}], "typecast": True}, "daily log create")
+        action = "created"
+    print(json.dumps({"published": action, "log_day": log_day,
+                      "decisions": len(rows), "summary": summary}))
+
+
 # ---------------------------------------------------------------------------
 # Selftest (offline — no network, no real state dir)
 # ---------------------------------------------------------------------------
@@ -508,6 +621,19 @@ def selftest():
 
     check("file allowlist excludes delete and completion labels",
           not ({"7", "9", "14"} & FILE_LABEL_ALLOW))
+
+    summary, text = format_daily_log([
+        {"ts": "2026-08-24T07:01:00", "do": "label12", "sender": "a@b.com", "subject": "Rent query", "reason": "needs a reply"},
+        {"ts": "2026-08-24T07:02:00", "do": "archive", "sender": "n@l.com", "subject": "Sale now on", "reason": "marketing"},
+        {"ts": "2026-08-24T07:03:00", "do": "someday-new-kind", "sender": "x@y.com", "subject": "Odd", "reason": "?"},
+    ])
+    check("daily log summary counts", "1 label12" in summary and "1 archive" in summary)
+    check("daily log groups labelled", "Moved to the agent lane" in text and "Rent query" in text)
+    check("daily log keeps unknown kinds", "someday-new-kind" in text)
+    long_rows = [{"ts": "2026-08-24T07:00:00", "do": "archive", "sender": "s@x.com",
+                  "subject": "y" * 200, "reason": "z" * 200} for _ in range(400)]
+    _, big = format_daily_log(long_rows)
+    check("daily log truncates predictably", len(big) < DECISIONS_CHAR_CAP + 200 and "truncated" in big)
 
     check("watermark advances clean", next_watermark(1000, []) == 1000)
     check("watermark pins to oldest unhandled", next_watermark(1000, [800, 400]) == 399)
@@ -596,6 +722,8 @@ def main(argv):
         if waiting is None:
             fail("score needs --waiting <count>")
         cmd_score(waiting)
+    elif cmd == "publish":
+        cmd_publish()
     elif cmd == "selftest":
         selftest()
     else:

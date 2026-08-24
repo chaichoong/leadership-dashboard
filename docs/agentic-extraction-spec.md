@@ -95,6 +95,8 @@ Every register agent carries:
 
 The CEO reviews the whole workforce every morning as part of the daily brief: register statuses, accuracy, stuck approvals, and anything blocked.
 
+**Daily decisions (added 24 Aug 2026, Kevin's ask):** every agent's runtime may write one row per day to the `AI Agent Daily Log` table (`tbl6VQKVMnK0Q7hbJ`): a one-line summary of counts plus the full list of decisions with reasons. The agent's panel shows the last 14 days under "Daily decisions", each day expandable — so Kevin can check any day's calls, or leave them. The write is non-fatal by rule: a failed log must never block the agent's actual work, but must be reported. First writer: the Inbound Comms Triage agent (`scripts/inbound-triage.py publish`).
+
 ---
 
 ## The seven stages
