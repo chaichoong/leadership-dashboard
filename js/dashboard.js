@@ -1096,14 +1096,19 @@
     const AGENTS_WF_TBL = 'tblLPoRHFBl0vqR24';
     const AGENTS_WF_SOP = 'fldW4qoDv2mrTNvu7';
     const AGENTS_ACTIVITY_TBL = 'tblJ3GFnAAoXf99e9';
+    // AI Agents register (role agents — Systemisation rebuild, 24 Aug 2026)
+    const AGENTS_REG_NAME = 'fldhtLvryVEzeGbl8';
+    const AGENTS_REG_STATUS = 'fld71vXWqcxhdljac';
 
     async function loadAgentKpi() {
         const slot = document.getElementById('agentKpiCard');
         if (!slot || !PAT) return;
         try {
-            const [wfRes, actRes] = await Promise.all([
+            const [wfRes, actRes, regRecs] = await Promise.all([
                 fetch(`https://api.airtable.com/v0/${BASE_ID}/${AGENTS_WF_TBL}?returnFieldsByFieldId=true&pageSize=100&fields%5B%5D=${AGENTS_WF_SOP}`, { headers: { Authorization: `Bearer ${PAT}` } }),
                 fetch(`https://api.airtable.com/v0/${BASE_ID}/${AGENTS_ACTIVITY_TBL}?pageSize=100`, { headers: { Authorization: `Bearer ${PAT}` } }),
+                airtableFetch(TABLES.aiAgents, { 'fields[]': [AGENTS_REG_NAME, AGENTS_REG_STATUS] })
+                    .catch(e => { console.warn('AI Agents register read failed:', e); return []; }),
             ]);
             if (!wfRes.ok) return;
             const wfs = (await wfRes.json()).records || [];
@@ -1123,13 +1128,24 @@
                     (r.fields['Agent'] || []).forEach(id => { pendingByAgent[id] = (pendingByAgent[id] || 0) + 1; });
                 });
             }
-            const live = agents.filter(a => a.state === 'live').length;
+            // Role agents from the AI Agents register (Systemisation rebuild,
+            // 24 Aug 2026) — without them this card contradicts the tab badge.
+            const roleAgents = (regRecs || []).map(r => ({
+                name: (r.fields && r.fields[AGENTS_REG_NAME]) || 'Agent',
+                status: (r.fields && r.fields[AGENTS_REG_STATUS]) || 'Planned',
+            }));
+            const live = agents.filter(a => a.state === 'live').length
+                + roleAgents.filter(a => a.status === 'Live').length;
             const testing = agents.filter(a => a.state === 'testing').length;
             const pending = agents.reduce((s, a) => s + (pendingByAgent[a.id] || 0), 0);
-            const detail = agents.length
-                ? agents.map(a => `<div class="od-breakdown-row"><span>${escHtml(a.title)}</span><span>${escHtml(a.state.toUpperCase())}${pendingByAgent[a.id] ? ` · ${pendingByAgent[a.id]} awaiting OK` : ''}</span></div>`).join('')
+            const roleRows = roleAgents
+                .map(a => `<div class="od-breakdown-row"><span>${escHtml(a.name)}</span><span>${escHtml(String(a.status).toUpperCase())}</span></div>`).join('');
+            const wfRows = agents
+                .map(a => `<div class="od-breakdown-row"><span>${escHtml(a.title)}</span><span>${escHtml(a.state.toUpperCase())}${pendingByAgent[a.id] ? ` · ${pendingByAgent[a.id]} awaiting OK` : ''}</span></div>`).join('');
+            const detail = (agents.length || roleAgents.length)
+                ? roleRows + wfRows
                     + `<div style="margin-top:8px"><button class="od-btn-secondary od-btn-sm" onclick="event.stopPropagation();switchTab('systemisation')">Open Systemisation</button></div>`
-                : '<div class="od-breakdown-row"><span>No agents yet — build one from a workflow SOP in Systemisation.</span></div>';
+                : '<div class="od-breakdown-row"><span>No agents yet — create one on the Systemisation AI Agents tab.</span></div>';
             const card = document.getElementById('agentKpiCard');
             if (!card) return;
             card.outerHTML = expandableCard('AI Agents', `${live} live`,

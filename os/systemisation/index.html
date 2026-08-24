@@ -388,6 +388,9 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 .settings-icon.spinning{animation:sys-spin .8s linear infinite}
 @keyframes sys-spin{to{transform:rotate(360deg)}}
 .agentic-loading{display:flex;align-items:center;gap:10px;padding:16px;color:var(--text-muted);font-size:var(--fs-sm)}
+/* Guided agent-creation form */
+.agf-label{display:block;font-size:var(--fs-xs);font-weight:var(--fw-semibold);color:var(--text-secondary);margin:10px 0 4px}
+.modal input.agentic-answer,.modal select.agentic-answer{min-height:0}
 @media(max-width:760px){.agentic-row{grid-template-columns:20px 1fr;row-gap:2px}.agentic-pill,.agentic-reason{grid-column:2}}
 /* Disposition fork */
 .disp-bar{border:1px solid var(--border-default);border-radius:var(--radius-md);background:var(--bg-surface);margin:14px 0;padding:12px 16px}
@@ -477,6 +480,9 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
      (it declares its own BASE_ID/PAT/TEAM/allBusinesses), so it reads
      window.AI_MODELS directly. Never hardcode a model ID below. -->
 <script src="../../js/ai-models.js?v=1"></script>
+<!-- Shared accuracy scoring (per agent PER TASK TYPE) — same maths as the
+     Leadership Dashboard card. Pure IIFE, safe to load here. -->
+<script src="../../js/agent-accuracy.js?v=1"></script>
 <script>
 // ═══════════════════════════════════════════════════════════════════════
 // Constants
@@ -540,17 +546,24 @@ const FULFILL_STAGES = [
 
 const DEPARTMENTS = ['Marketing', 'Sales', 'Operations', 'Finance', 'Admin / HR'];
 
-// AGENTIC extraction script — the seven stages the owner narrates in their Loom.
+// AGENTRIC extraction script — the eight stages the owner narrates (Loom) or
+// answers in the guided form. Evolved 24 Aug 2026 from the seven-stage AGENTIC
+// model: R (Reasoning) added and C now carries the score, folding in Austin
+// Chen's Agent Logic Model (goal / reasoning / access / process / score).
 // Wording is the single source of truth (see docs/agentic-extraction-spec.md).
+// naAllowed is PER MODE — the stage list, the pass rules and the normaliser all
+// derive from it, so the prompt can never contradict what is enforced.
 const AGENTIC_STAGES = [
-    { letter:'A', name:'Aim',                     naAllowed:false, prompt:'In a sentence or two, what is this process for, and why does it matter to the business?' },
-    { letter:'G', name:'Go Signal',               naAllowed:false, prompt:'What tells you it is time to do this? A set time, an email arriving, a new record, a payment landing, or someone asking?' },
-    { letter:'E', name:'Entry Points',            naAllowed:false, prompt:'Where do you go and what do you open to do this? Which systems, inboxes, files, or records, and what do you need from each?' },
-    { letter:'N', name:'Navigate the Process',    naAllowed:false, prompt:'Walk me through exactly what you do, step by step. Most important: every time you make a choice, say out loud how you decide and why you pick what you pick.' },
-    { letter:'T', name:'Tools & Transformations', naAllowed:false, prompt:'What do you actually change, create, or send? Name every system you write into.' },
-    { letter:'I', name:'Inspections & Caveats',   naAllowed:true,  prompt:'Before you call it done, what do you check? What would you never let go out unchecked? And what trips this up — the odd cases, the exceptions, anything you must never do?' },
-    { letter:'C', name:'Conclusion',              naAllowed:false, prompt:'What does the finished job look like? Describe the end result of a successful run — what exists or has changed, and how you would know it was a success.' },
+    { letter:'A', name:'Aim',                     naAllowed:{agent:false,human:false}, prompt:'In a sentence or two, what is this process for, and why does it matter to the business?' },
+    { letter:'G', name:'Go Signal',               naAllowed:{agent:false,human:false}, prompt:'What tells you it is time to do this? A set time, an email arriving, a new record, a payment landing, or someone asking?' },
+    { letter:'E', name:'Entry Points',            naAllowed:{agent:false,human:false}, prompt:'Where do you go and what do you open to do this? Which systems, inboxes, files, or records, and what do you need from each?' },
+    { letter:'N', name:'Navigate the Process',    naAllowed:{agent:false,human:false}, prompt:'Walk me through exactly what you do, step by step. Most important: every time you make a choice, say out loud how you decide and why you pick what you pick.' },
+    { letter:'T', name:'Tools & Transformations', naAllowed:{agent:false,human:false}, prompt:'What do you actually change, create, or send? Name every system you write into.' },
+    { letter:'R', name:'Reasoning',               naAllowed:{agent:false,human:true},  prompt:'How should good judgement sound when doing this? What rules of thumb decide the grey areas? And when it is unsure, what happens: best guess, skip it, or stop and ask you?' },
+    { letter:'I', name:'Inspections & Caveats',   naAllowed:{agent:true,human:true},   prompt:'Before you call it done, what do you check? What would you never let go out unchecked? And what trips this up — the odd cases, the exceptions, anything you must never do?' },
+    { letter:'C', name:'Conclusion & Score',      naAllowed:{agent:false,human:false}, prompt:'What does the finished job look like, and how is success scored? Describe the end result of one good run, and the number or check that tells you over time it is doing a good job.' },
 ];
+function stageNaAllowed(def, human){ return !!def.naAllowed[human ? 'human' : 'agent']; }
 
 // Disposition fork — what a documented process becomes once its SOP exists.
 const DISPOSITIONS = [
@@ -573,8 +586,61 @@ const TF = {
     attachments: 'fldEbs9cscRr8elcw',
     timeEstimate:'fld10VzzbiNNgRmIi',
     collaborators:'fldcq3t6uAPgWSOP8',
+    // Approval-loop + workload fields the agents register reads (24 Aug 2026)
+    teamMember:       'flduCtmQGpOA4eWaj',
+    sentForApprovalBy:'fld30Yw8SWYVp049g',
+    approvalOutcome:  'fldrHBSr6qoUfaKuZ',
+    approvedAt:       'fldr4Mvf2RzKvhZhi',
+    taskType:         'fldZ2moDV2041Sobc',
+    completionDate:   'fldFOi1SwEKuJRmdN',
 };
 
+// ── AI Agents register (role agents) — created 24 Aug 2026 ─────────────
+// One row per role-specific agent (Prospecting, Reconciliation, …). The
+// register is the management layer; each agent's runtime lives wherever it
+// executes. Identity for workload/accuracy comes from the linked Team Members
+// row — never duplicated here.
+const AGENTS_TBL = 'tbl9msVjyQWslLOIZ';
+const AG = {
+    name:        'fldhtLvryVEzeGbl8',
+    goal:        'fldz8O9KihauZ46Cd',
+    status:      'fld71vXWqcxhdljac',
+    guardrail:   'fldWgqxMFmaAAvUHC',
+    readiness:   'fld4qm3OtXPcSwHrl',
+    department:  'fldd49EhRAOeAMRvk',
+    teamMember:  'fldEtzFGbNe4te9xL',
+    workflow:    'fldSTcaGki2KgCwlD',
+    aim:         'fld7kWcEXyrX7pmC3',
+    goSignal:    'fldRWRHVJaYxX8im3',
+    entryPoints: 'fld3i927FF2kjAtjQ',
+    navigate:    'fldvevAHLlPMEIDoq',
+    tools:       'fldihzJ09myArHyeO',
+    reasoning:   'fldkSsmUC1r3yMyIv',
+    inspections: 'fldm5DIBQyMYwfeMj',
+    conclusion:  'fldDmYKLfbisjfm5m',
+    scoreMetric: 'fldzuYYA67h3b3MHB',
+    stageScores: 'fldxamwviB0v7YFJv',
+    source:      'fldVRrIKo0yJDzhIe',
+    notes:       'fldiKbBbhoKIN3Vmi',
+};
+const AG_STAGE_FIELDS = { A:AG.aim, G:AG.goSignal, E:AG.entryPoints, N:AG.navigate, T:AG.tools, R:AG.reasoning, I:AG.inspections, C:AG.conclusion };
+const AGENT_STATUSES = ['Planned','Building','Built','Live','Paused'];
+const AGENT_STATUS_META = {
+    Planned:  { bg:'var(--bg-subtle)',   fg:'var(--text-muted)' },
+    Building: { bg:'var(--info-bg)',     fg:'var(--info)' },
+    Built:    { bg:'var(--accent-soft)', fg:'var(--accent)' },
+    Live:     { bg:'var(--success-bg)',  fg:'var(--success)' },
+    Paused:   { bg:'var(--warning-bg)',  fg:'var(--warning)' },
+};
+// Kevin's three guardrail styles (matches Chen's 3-tier decision framework).
+const GUARDRAIL_LEVELS = [
+    { key:'Autonomous',        blurb:'Does the whole job start to finish on its own. For low-stakes, easily-undone work.' },
+    { key:'Approval required', blurb:'Prepares everything, acts only after your yes. Nothing reaches the outside world unapproved.' },
+    { key:'Hybrid escalation', blurb:'Runs the agreed process itself. Anything outside the agreed path comes to you first.' },
+];
+// Team Members (people AND AI agents). Read-only here.
+const TEAM_TBL = 'tblco0p2OnlLQVAX7';
+const TM_NAME = 'flds7xoRFQhcRTnbB', TM_ACTIVE = 'fld2YLfcPqSe6b60u', TM_IS_AI = 'fldKGsz9kTpFypeOr';
 const TEAM = [
     { key:'kevin', name:'Kevin Brittain',  email:'kevin@runpreneur.org.uk' },
     { key:'mica',  name:'Mica Albovias',   email:'micaa.work@gmail.com' },
@@ -601,6 +667,14 @@ let bizFilterId = '';
 let selectedStepsWf = null;
 let _allSearch = '', _stepsSearch = '', _autoSearch = '', _refocusSearchId = '';
 let _bulkPendingAssigns = {};
+// AI Agents register state
+let allAgents = [];            // rows from AGENTS_TBL
+let allTeamAgents = [];        // Team Members rows with Is AI Agent (strategic layer + wiring targets)
+let _agentTaskStats = {};      // teamMemberId -> {open, doneToday, done7}
+let _agentAccuracyRows = [];   // AgentAccuracy rows (per agent per task type)
+let _agentAccuracyOk = false;  // control: approval history matched at least one row
+let _agentsRegisterState = 'idle'; // idle | loading | ready | 'error: <message>'
+let selectedAgentId = null;    // selected ROLE agent (register record id)
 
 // Case-insensitive match of a workflow against a search query (name + description).
 function wfMatchesQuery(w, q){
@@ -715,22 +789,37 @@ function saveAuth(){
 // ═══════════════════════════════════════════════════════════════════════
 // Airtable API
 // ═══════════════════════════════════════════════════════════════════════
-async function atFetch(tableId, fields){
+async function atFetch(tableId, fields, extraParams){
     let all=[], offset='';
     const params = new URLSearchParams({ returnFieldsByFieldId:'true', pageSize:'100' });
     if(fields) fields.forEach(f=>params.append('fields[]',f));
+    if(extraParams) Object.entries(extraParams).forEach(([k,v])=>params.set(k,v));
     do {
         if(offset) params.set('offset',offset);
-        const res = await fetch(`https://api.airtable.com/v0/${BASE_ID}/${tableId}?${params}`,{
-            headers:{'Authorization':`Bearer ${PAT}`}
-        });
+        let res;
+        // Retry 429s in an inner loop, never with `continue`: in a do-while,
+        // continue jumps to the while(offset) test, which on the FIRST page
+        // (offset='') exited and returned [] as if the table were empty.
+        for(let attempt=0;;attempt++){
+            res = await fetch(`https://api.airtable.com/v0/${BASE_ID}/${tableId}?${params}`,{
+                headers:{'Authorization':`Bearer ${PAT}`}
+            });
+            if(res.status===429 && attempt<4){ await new Promise(r=>setTimeout(r,1100)); continue; }
+            break;
+        }
         if(res.status===401||res.status===403){ showAuthBar(); throw new Error('auth'); }
-        if(res.status===429){ await new Promise(r=>setTimeout(r,1100)); continue; }
         const data = await res.json();
         all = all.concat(data.records||[]);
         offset = data.offset||'';
     } while(offset);
     return all;
+}
+
+// Same paginated read with field NAMES in the response, for the Agent
+// Activity readers that were built on names. Delegates to atFetch so there is
+// exactly ONE pagination/retry/auth loop on this page.
+function atFetchByName(tableId, params){
+    return atFetch(tableId, null, Object.assign({ returnFieldsByFieldId:'false' }, params||{}));
 }
 
 async function atCreate(tableId, fields){
@@ -1024,8 +1113,13 @@ function updateCounts(){
     document.getElementById('allCount').textContent=wfs.length;
     const sopCount = wfs.filter(w=>!!gf(w,WF.sopDocument)).length;
     document.getElementById('stepsCount').textContent=sopCount;
-    const agentCount = wfs.filter(w=>{ const s=getWfSopData(w.id); return s && s.disposition && s.disposition.type==='agent'; }).length;
-    document.getElementById('autoCount').textContent=agentCount;
+    // Role agents (register) + process agents (workflow-based), minus workflows
+    // already linked to a register row via AG.workflow — one agent, one count.
+    // Process agents respect the business filter; role agents are business-wide.
+    const linkedWfs = new Set();
+    allAgents.forEach(a=>(gf(a,AG.workflow)||[]).forEach(id=>linkedWfs.add(id)));
+    const agentCount = wfs.filter(w=>{ const s=getWfSopData(w.id); return s && s.disposition && s.disposition.type==='agent' && !linkedWfs.has(w.id); }).length;
+    document.getElementById('autoCount').textContent = agentCount + allAgents.length;
 }
 
 // ── Customer Journey (FULFILL) ──
@@ -2984,10 +3078,10 @@ function renderSteps(){
             html += `<div class="agentic-guide${hasSopDoc?'':' open'}" id="agenticGuide-${w.id}">
                 <div class="agentic-guide-head" onclick="this.parentElement.classList.toggle('open')">
                     <span class="resources-chevron">&#x25B6;</span>
-                    AGENTIC script — what to cover in your video
+                    AGENTRIC script — what to cover in your video
                 </div>
                 <div class="agentic-guide-body">
-                    <p class="agentic-guide-intro">Record one short Loom and talk through these seven, in order. The AGENTIC method turns it into an autonomous agent.</p>
+                    <p class="agentic-guide-intro">Record one short Loom and talk through these ${AGENTIC_STAGES.length}, in order. The AGENTRIC method turns it into an autonomous agent.</p>
                     ${AGENTIC_STAGES.map(s=>`<div class="agentic-guide-item">
                         <span class="agentic-letter">${s.letter}</span>
                         <div><strong>${esc(s.name)}</strong><span>${esc(s.prompt)}</span></div>
@@ -3093,7 +3187,7 @@ function restoreSavedSOPs(){
 }
 
 // ═══════════════════════════════════════════════════════════════════════
-// AGENTIC readiness check — scores the SOP against the seven stages and
+// AGENTRIC readiness check — scores the SOP against the eight stages and
 // surfaces gap questions. Stored inside the SOP document JSON (readiness key).
 // ═══════════════════════════════════════════════════════════════════════
 
@@ -3190,6 +3284,67 @@ function agenticSopText(wfId){
     return `SOP TITLE: ${sop.sopTitle||''}\n\nSTEPS (raw):\n${steps}\n\nSOP BODY:\n${body}\n\nCAUTIONS:\n- ${cautions}\n\nTIPS:\n- ${tips}`;
 }
 
+// Shared AGENTRIC check wording — used by the workflow readiness check AND the
+// agents-register readiness check, so the two can never drift apart. The N/A
+// annotations and rule are GENERATED from AGENTIC_STAGES.naAllowed per mode, so
+// the stage list, the pass rules and normaliseReadiness always agree.
+function agentricStageListText(human){
+    return AGENTIC_STAGES.map(s=>`${s.letter} — ${s.name}${stageNaAllowed(s,human)?' (N/A allowed)':''}`).join('\n');
+}
+function agentricNaRule(human){
+    const allowed = AGENTIC_STAGES.filter(s=>stageNaAllowed(s,human)).map(s=>`${s.letter} (${s.name})`);
+    const never = AGENTIC_STAGES.filter(s=>!stageNaAllowed(s,human)).map(s=>s.letter);
+    return `- "NA": genuinely not applicable. Only allowed for ${allowed.join(' and ')||'no stage'}. Never for ${never.join(', ')}.`;
+}
+function agentricCheckIntro(human){
+    const n = AGENTIC_STAGES.length;
+    return human
+        ? `You are checking whether a documented business process is clear enough for a PERSON to follow reliably as a recurring or ad-hoc task. Score it against the ${n} AGENTRIC stages from a human-task point of view.`
+        : `You are checking whether a documented business process contains enough to build a reliable autonomous AI agent. Score it against the ${n} AGENTRIC stages.`;
+}
+function agentricPassRules(human){
+    return human
+        ? `- "Clear": clear enough for a person to follow.
+- "Thin": mentioned but a person might get stuck.
+- "Missing": not covered.
+${agentricNaRule(true)}
+- This is for a HUMAN to do, not an AI agent. Navigate needs clear, followable steps; the person supplies their own judgement, so do NOT require written decision-reasoning. Go Signal and Tools help but a person can infer them, so mark Thin (not Missing) when vague — never NA.
+- Reasoning: a person brings their own judgement, so mark it NA unless the process genuinely writes down decision rules (then score what is written).
+- Conclusion & Score should describe what the finished job looks like, so the person knows when they are done. A success measure helps but is not required for a human task.`
+        : `- "Clear": the stage is fully covered.
+- "Thin": mentioned but incomplete.
+- "Missing": not covered.
+${agentricNaRule(false)}
+- Navigate must contain the actual steps in order. Reasoning must contain the DECISION RULES (how to decide at each choice, and what to do when unsure: guess, skip, or escalate to a human). Decision reasoning written inside Navigate counts towards R — credit it there rather than double-penalising.
+- Aim is the purpose — why the process exists.
+- Conclusion & Score must describe the CONCRETE end state of a successful run (what exists or has changed) AND how success is measured over time (a number or a check). End state with no measure is Thin.`;
+}
+
+// One transport for every AI call on this page: proxy fetch, JSON extraction,
+// consistent errors. maxTokens per call; model always from window.AI_MODELS.
+async function callClaudeJson(prompt, maxTokens){
+    const res = await fetch(CLAUDE_PROXY, {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ model:window.AI_MODELS.default, max_tokens:maxTokens||1500, messages:[{role:'user',content:prompt}] })
+    });
+    if(!res.ok) throw new Error('AI request failed: '+res.status);
+    const data = await res.json();
+    const text = (data.content && data.content[0] && data.content[0].text) || '';
+    const m = text.match(/\{[\s\S]*\}/);
+    if(!m) throw new Error('Invalid AI response');
+    return JSON.parse(m[0]);
+}
+function agentricResultShape(){
+    const n = AGENTIC_STAGES.length;
+    const letters = AGENTIC_STAGES.map(s=>s.letter).join(',');
+    return `Return ONLY a JSON object:
+{
+  "stages": [ { "letter": "A", "status": "Clear|Thin|Missing|NA", "reason": "one short line" }, ... ${n} entries for ${letters} ],
+  "questions": [ { "letter": "N", "question": "a specific question to fill the gap" } ]
+}
+Include at most 3 questions, only for Thin or Missing stages, most important first. No text outside the JSON.`;
+}
+
 async function runAgenticCheck(wfId, extraAnswers){
     const w = allWorkflows.find(x=>x.id===wfId);
     if(!w) return;
@@ -3203,63 +3358,31 @@ async function runAgenticCheck(wfId, extraAnswers){
     if(container){ container.innerHTML = `<div class="agentic-loading"><div class="sop-spinner"></div><span>${human?'Checking this SOP is ready to follow…':'Checking your agent is ready…'}</span></div>`; container.scrollIntoView({block:'center'}); }
 
     const wName = gf(w,WF.name)||'Untitled';
-    const stageList = AGENTIC_STAGES.map(s=>`${s.letter} — ${s.name}${s.naAllowed?' (N/A allowed)':''}`).join('\n');
     let answersBlock = '';
     if(extraAnswers && Object.keys(extraAnswers).length){
         answersBlock = '\n\nThe owner has answered these follow-up questions. Treat the answers as an authoritative part of the process description. IMPORTANT: if an answer resolves a stage\'s gap, score that stage "Clear" — do not hold a stage at Thin when the owner has supplied the missing detail. Only ask a follow-up question for a stage that is STILL Thin or Missing after crediting the answers, and make it a sharper, more specific question than before — never repeat an answered one.\n' +
             Object.entries(extraAnswers).map(([k,v])=>`${k}: ${v}`).join('\n');
     }
 
-    const intro = human
-        ? 'You are checking whether a documented business process is clear enough for a PERSON to follow reliably as a recurring or ad-hoc task. Score it against the seven AGENTIC stages from a human-task point of view.'
-        : 'You are checking whether a documented business process contains enough to build a reliable autonomous AI agent. Score it against the seven AGENTIC stages.';
-    const passRules = human
-        ? `- "Clear": clear enough for a person to follow.
-- "Thin": mentioned but a person might get stuck.
-- "Missing": not covered.
-- "NA": genuinely not applicable. Only allowed for I (Inspections & Caveats). Never for A, E, N, C.
-- This is for a HUMAN to do, not an AI agent. Navigate needs clear, followable steps; the person supplies their own judgement, so do NOT require written decision-reasoning. Go Signal and Tools help but a person can infer them, so mark Thin (not Missing) when vague.
-- Conclusion should describe what the finished job looks like, so the person knows when they are done.`
-        : `- "Clear": the stage is fully covered.
-- "Thin": mentioned but incomplete.
-- "Missing": not covered.
-- "NA": genuinely not applicable. Only allowed for I (Inspections & Caveats). Never for A, G, E, N, T, C.
-- Navigate must contain the DECISION REASONING (how the person decides at each choice), not just a list of clicks or steps. If it is only steps with no "how I decide", mark it Thin at best.
-- Aim is the purpose — why the process exists.
-- Conclusion must describe the CONCRETE end state of a successful run (what exists or has changed) and a way to tell success from failure. A vague "it's done" is Thin.`;
-
-    const prompt = `${intro}
+    const prompt = `${agentricCheckIntro(human)}
 
 Process name: ${wName}
 
-The seven stages:
-${stageList}
+The ${AGENTIC_STAGES.length} stages:
+${agentricStageListText(human)}
 
 Pass rules:
-${passRules}
+${agentricPassRules(human)}
 
 Here is the documented process:
 ${agenticSopText(wfId)}${answersBlock}
 
-Return ONLY a JSON object:
-{
-  "stages": [ { "letter": "A", "status": "Clear|Thin|Missing|NA", "reason": "one short line" }, ... seven entries for A,G,E,N,T,I,C ],
-  "questions": [ { "letter": "N", "question": "a specific question to fill the gap" } ]
-}
-Include at most 3 questions, only for Thin or Missing stages, most important first. No text outside the JSON.`;
+${agentricResultShape()}`;
 
     try {
-        const res = await fetch(CLAUDE_PROXY, {
-            method:'POST', headers:{'Content-Type':'application/json'},
-            body: JSON.stringify({ model:window.AI_MODELS.default, max_tokens:1500, messages:[{role:'user',content:prompt}] })
-        });
-        if(!res.ok) throw new Error('AI request failed: '+res.status);
-        const data = await res.json();
-        const text = data.content?.[0]?.text || '{}';
-        const m = text.match(/\{[\s\S]*\}/);
-        if(!m) throw new Error('Invalid AI response');
+        const parsed = await callClaudeJson(prompt, 1500);
         const prevR = (getWfSopData(wfId)||{}).readiness || null;
-        const readiness = normaliseReadiness(JSON.parse(m[0]), extraAnswers, prevR);
+        const readiness = normaliseReadiness(parsed, extraAnswers, prevR, human);
         await saveAgenticReadiness(wfId, readiness);
         renderAgenticScorecard(wfId, readiness);
         const _ac = document.getElementById('agentic-'+wfId);
@@ -3279,13 +3402,15 @@ Include at most 3 questions, only for Thin or Missing stages, most important fir
     }
 }
 
-function normaliseReadiness(parsed, extraAnswers, prevReadiness){
+function normaliseReadiness(parsed, extraAnswers, prevReadiness, human){
     const byLetter = {};
     (parsed.stages||[]).forEach(s=>{ if(s && s.letter) byLetter[s.letter] = s; });
     const stages = AGENTIC_STAGES.map(def=>{
         const got = byLetter[def.letter] || {};
         let status = got.status || 'Missing';
-        if(status==='NA' && !def.naAllowed) status='Missing'; // never allow N/A where forbidden
+        // N/A only where the framework allows it for this mode (single source
+        // of truth: AGENTIC_STAGES.naAllowed, the same source the prompt used).
+        if(status==='NA' && !stageNaAllowed(def, human)) status='Missing';
         if(['Clear','Thin','Missing','NA'].indexOf(status)<0) status='Missing';
         return { letter:def.letter, name:def.name, status, reason:String(got.reason||'').slice(0,180) };
     });
@@ -3341,6 +3466,27 @@ const AGENTIC_STATUS = {
     NA:      { bg:'var(--bg-subtle)',  fg:'var(--text-muted)', label:'N/A' },
 };
 
+// One renderer for readiness stage rows — the workflow scorecard AND the
+// register panel both show normaliseReadiness output through this.
+function readinessRowsHtml(stages){
+    return (stages||[]).map(st=>{
+        const meta = AGENTIC_STATUS[st.status] || AGENTIC_STATUS.Missing;
+        return `<div class="agentic-row">
+            <span class="agentic-letter">${esc(st.letter)}</span>
+            <span class="agentic-name">${esc(st.name)}</span>
+            <span class="agentic-pill" style="background:${meta.bg};color:${meta.fg}">${esc(meta.label)}</span>
+            <span class="agentic-reason" title="${esc(st.reason||'')}">${esc(st.reason||'')}</span>
+        </div>`;
+    }).join('');
+}
+// A scorecard saved under an older framework shape (e.g. the 7-stage AGENTIC)
+// keeps its verdict but must say so — R was never assessed on it.
+function legacyReadinessBanner(readiness){
+    const n = (readiness && readiness.stages || []).length;
+    if(!n || n === AGENTIC_STAGES.length) return '';
+    return `<div style="margin-top:8px;padding:8px 10px;border-radius:var(--radius-md);background:var(--warning-bg);color:var(--warning);font-size:var(--fs-xs)">Checked under the older ${n}-stage framework — the Reasoning stage has never been scored here. Re-run the check before trusting this verdict.</div>`;
+}
+
 function renderAgenticScorecard(wfId, readiness){
     const container = document.getElementById('agentic-'+wfId);
     if(!container || !readiness) return;
@@ -3351,15 +3497,7 @@ function renderAgenticScorecard(wfId, readiness){
         ? { bg:'var(--success-bg)', fg:'var(--success)', text:'Ready', sub: human?'This SOP has everything a person needs to follow it.':'This process has everything an agent needs.' }
         : { bg:'var(--warning-bg)', fg:'var(--warning)', text:'Needs input', sub: human?'Great start. A few quick answers will finish this SOP.':'Great start. A few quick answers will finish your agent.' };
 
-    const rows = (readiness.stages||[]).map(s=>{
-        const meta = AGENTIC_STATUS[s.status] || AGENTIC_STATUS.Missing;
-        return `<div class="agentic-row">
-            <span class="agentic-letter">${esc(s.letter)}</span>
-            <span class="agentic-name">${esc(s.name)}</span>
-            <span class="agentic-pill" style="background:${meta.bg};color:${meta.fg}">${esc(meta.label)}</span>
-            <span class="agentic-reason" title="${esc(s.reason||'')}">${esc(s.reason||'')}</span>
-        </div>`;
-    }).join('');
+    const rows = readinessRowsHtml(readiness.stages);
 
     let questions = '';
     if(!ready && (!readiness.questions || !readiness.questions.length) && Object.keys(readiness.answers||{}).length){
@@ -3392,12 +3530,13 @@ function renderAgenticScorecard(wfId, readiness){
     container.innerHTML = `<div class="agentic-card" aria-live="polite">
         <div class="agentic-head">
             <div>
-                <div class="agentic-title">AGENTIC readiness</div>
+                <div class="agentic-title">AGENTRIC readiness</div>
                 <div class="agentic-sub">${human?'How ready this SOP is for a person to follow':'How ready this process is to become an autonomous agent'}</div>
             </div>
             <span class="agentic-state" style="background:${stateMeta.bg};color:${stateMeta.fg}">${esc(stateMeta.text)}</span>
         </div>
         <div class="agentic-rows">${rows}</div>
+        ${legacyReadinessBanner(readiness)}
         ${questions}
         <div class="agentic-foot">
             <button class="btn btn-sm" onclick="runAgenticCheck('${wfId}')">Re-check</button>
@@ -3839,13 +3978,23 @@ async function saveAgentPerms(wfId){
     toast('Saved — the agent may now do '+((agent.autoComments?1:0)+agent.autoFields.length)+' thing'+(((agent.autoComments?1:0)+agent.autoFields.length)===1?'':'s')+' without asking');
 }
 
+// One cached Agent Activity read serves the pending-count badges AND the
+// activity feed; any write to the table clears it. The 60-second TTL makes
+// re-renders (search keystrokes, row clicks) free instead of a request storm.
+let _activityCache = { t:0, promise:null };
+function getAgentActivity(){
+    const now = Date.now();
+    if(_activityCache.promise && (now - _activityCache.t) < 60000) return _activityCache.promise;
+    _activityCache = { t: now, promise: atFetchByName(AGENT_ACTIVITY_TBL).catch(e=>{ _activityCache.t = 0; throw e; }) };
+    return _activityCache.promise;
+}
+function invalidateAgentActivity(){ _activityCache.t = 0; }
+
 async function fetchAgentActivity(wfId){
-    const res = await fetch(`https://api.airtable.com/v0/${BASE_ID}/${AGENT_ACTIVITY_TBL}?pageSize=100`, {
-        headers:{ 'Authorization':`Bearer ${PAT}` }
-    });
-    if(!res.ok) throw new Error('activity fetch '+res.status);
-    const data = await res.json();
-    return (data.records||[])
+    // Paginated (atFetchByName) — a single-page fetch here silently showed an
+    // arbitrary 100 rows once the table grew past a page.
+    const recs = await getAgentActivity();
+    return recs
         .filter(r=>Array.isArray(r.fields['Agent']) && r.fields['Agent'].includes(wfId))
         .sort((a,b)=> new Date(b.createdTime) - new Date(a.createdTime))
         .slice(0, 25);
@@ -3917,6 +4066,7 @@ async function sendAgentFeedback(actId){
         const rec = await res.json();
         const wfId = (rec.fields['Agent']||[])[0];
         await atUpdate(AGENT_ACTIVITY_TBL, actId, { 'Feedback': text, 'State': 'Rejected' });
+        invalidateAgentActivity();
         if(wfId){
             const agent = getWfAgent(wfId) || { state:'testing', tables:[], autoFields:[] };
             agent.lessons = (agent.lessons||[]).slice(-19);
@@ -3951,6 +4101,7 @@ async function renderAgentFeed(wfId){
 
 async function setActivityState(actId, state){
     await atUpdate(AGENT_ACTIVITY_TBL, actId, { 'State': state });
+    invalidateAgentActivity();
 }
 
 async function approveAgentActivity(actId){
@@ -4094,67 +4245,686 @@ async function deleteStepInline(stepId){
 // Automation (Tab 6)
 // ═══════════════════════════════════════════════════════════════════════
 // ═══════════════════════════════════════════════════════════════════════
-// AI AGENTS tab — the operating home for every agent.
-// Fleet selector on top, the selected agent's full working panel below
-// (status, approvals feed, feedback, permissions, Run now, Go live).
-// Building SOPs stays on the SOPs tab; this tab is where agents are RUN.
+// AI AGENTS tab — the operating home for every agent. Three layers:
+//   1. ROLE AGENTS — the register (Airtable AI Agents table): one row per
+//      role-specific agent, with goal, guardrail level, status, workload,
+//      accuracy, and the eight AGENTRIC stages. Created via the guided form
+//      (or seeded). Each agent gets built in its own session.
+//   2. STRATEGIC LAYER — the AI CEO, department heads and generic workers
+//      (Team Members rows). Unchanged by the register; shown for workload.
+//   3. PROCESS AGENTS — workflows whose SOP runs as an agent (video route).
+// Building SOPs stays on the SOPs tab; this tab is where agents are MANAGED.
 // ═══════════════════════════════════════════════════════════════════════
 let selectedAgentWf = null;
+let _agentTaskStatsOk = false;
+let _agStageEditing = null;   // 'agentId:letter' while a stage is being edited
+let _agForm = null;           // in-progress guided form state (survives close)
+let _agFormOpen = false;
 
+// ── Register data ──────────────────────────────────────────────────────
+async function loadAgentsRegister(force){
+    if(_agentsRegisterState==='loading') return;
+    if(_agentsRegisterState==='ready' && !force) return;
+    _agentsRegisterState = 'loading';
+    try {
+        // The three reads are independent — run them together.
+        const [agents, team, taskRecs] = await Promise.all([
+            atFetch(AGENTS_TBL),
+            atFetch(TEAM_TBL, [TM_NAME, TM_ACTIVE, TM_IS_AI], { filterByFormula: 'AND({Is AI Agent}=1,{Active}=1)' }),
+            fetchAgentTaskRecords(),
+        ]);
+        // Control: ~17 AI-agent Team Members rows exist. Zero means the query
+        // broke (a field rename), not an empty workforce — fail loudly.
+        if(!team.length) throw new Error('Team Members returned zero AI agents (expected ~17) — check the "Is AI Agent" / "Active" field names');
+        allAgents = agents;
+        allTeamAgents = team.sort((a,b)=>String(gf(a,TM_NAME)||'').localeCompare(String(gf(b,TM_NAME)||'')));
+        computeAgentTaskStats(taskRecs);
+        _agentsRegisterState = 'ready';
+    } catch(e){
+        _agentsRegisterState = 'error: ' + (e.message || 'load failed');
+    } finally {
+        updateCounts();
+        if(currentView==='automation') renderAutomation();
+    }
+}
+
+// Workload + accuracy in ONE Tasks read: open tasks and last-7-day completions
+// for anyone linked via Team Member, plus the WHOLE approval-loop history —
+// matched on the outcome itself, so a decided task with only a Team Member
+// link still counts (same population as the Leadership Dashboard card).
+function fetchAgentTaskRecords(){
+    const fields = [TF.teamMember, TF.sentForApprovalBy, TF.approvalOutcome, TF.approvedAt, TF.taskType, TF.status, TF.completionDate];
+    const formula = "OR(AND(NOT({Team Member}=''),{Status}!='Completed'),AND(NOT({Team Member}=''),IS_AFTER({Completion Date},DATEADD(TODAY(),-7,'days'))),LEN({Approval Outcome}&'')>0)";
+    return atFetch(TASKS_TBL, fields, { filterByFormula: formula });
+}
+
+function computeAgentTaskStats(recs){
+    // Control: agents have had linked tasks for weeks. Zero rows means the
+    // query broke (field rename), not a quiet week — show "unavailable", never 0.
+    _agentTaskStatsOk = recs.length > 0;
+    const hist = [];
+    const statsMap = {};
+    const day = 86400000;
+    const localDay = d => { const x=new Date(d); return x.getFullYear()+'-'+String(x.getMonth()+1).padStart(2,'0')+'-'+String(x.getDate()).padStart(2,'0'); };
+    const today = localDay(Date.now());
+    recs.forEach(r=>{
+        const f = r.fields||{};
+        const status = selName(f[TF.status]);
+        const comp = f[TF.completionDate];
+        (f[TF.teamMember]||[]).forEach(id=>{
+            const st = statsMap[id] = statsMap[id]||{open:0,doneToday:0,done7:0};
+            if(status==='Completed'){
+                // The approval-history branch of the formula has NO date bound,
+                // so the 7-day window must be enforced here, never assumed.
+                if(comp && (Date.now()-Date.parse(comp)) < 7*day){ st.done7++; if(localDay(comp)===today) st.doneToday++; }
+            } else if(status && status!=='Cancelled') st.open++;
+        });
+        // Accuracy history — SAME mapping as js/dashboard.js loadAgentApprovalKpi:
+        // agent = Sent For Approval By, falling back to the Team Member link;
+        // blank task type buckets as 'Unclassified'. Divergence here would make
+        // two surfaces disagree on the same agent's score.
+        const outcome = selName(f[TF.approvalOutcome]);
+        const agentId = (f[TF.sentForApprovalBy]||[])[0] || (f[TF.teamMember]||[])[0];
+        if(outcome && agentId) hist.push({ agentId, taskType:selName(f[TF.taskType])||'Unclassified', outcome, at:String(f[TF.approvedAt]||'') });
+    });
+    _agentTaskStats = statsMap;
+    _agentAccuracyOk = hist.length > 0;
+    const names = {};
+    allTeamAgents.forEach(t=>{ names[t.id] = gf(t,TM_NAME) || 'Agent'; });
+    _agentAccuracyRows = (window.AgentAccuracy && window.AgentAccuracy.computeAgentAccuracy)
+        ? window.AgentAccuracy.computeAgentAccuracy(hist, names) : [];
+}
+
+// Never blend per-task-type rates into one number (js/agent-accuracy.js's
+// rule: a blended score hides a weak task type). One type shows its rate;
+// several show the WORST, which is the honest headline. Detail is per type.
+function agentAccuracySummary(tmId){
+    const rows = _agentAccuracyRows.filter(r=>r.agentId===tmId);
+    if(!rows.length) return null;
+    if(rows.length===1) return { text: Math.round(rows[0].rate*100)+'% ('+rows[0].total+')' };
+    const worst = Math.min.apply(null, rows.map(r=>r.rate));
+    return { text: 'worst '+Math.round(worst*100)+'% · '+rows.length+' types' };
+}
+
+// One workload formatter for the register table, the strategic chips and the
+// panel, so the three surfaces can never show different numbers.
+function agentWorkloadText(tmIds){
+    if(!tmIds || !tmIds.length) return null; // not wired
+    if(!_agentTaskStatsOk) return 'unavailable';
+    let open=0, done7=0;
+    tmIds.forEach(id=>{ const s=_agentTaskStats[id]; if(s){ open+=s.open; done7+=s.done7; } });
+    return open+' open · '+done7+' done (7d)';
+}
+function agentWorkloadCell(tmIds){
+    const t = agentWorkloadText(tmIds);
+    if(t===null) return '<span style="font-size:var(--fs-xs);color:var(--text-muted)" title="Wire this agent to a Team Members row in its panel to track workload">not wired</span>';
+    if(t==='unavailable') return '<span style="font-size:var(--fs-xs);color:var(--warning)">unavailable</span>';
+    return `<span style="font-size:var(--fs-xs)">${esc(t)}</span>`;
+}
+
+// ── The tab ────────────────────────────────────────────────────────────
 function renderAutomation(){
     const pane = document.getElementById('pane-automation');
+    if(_agentsRegisterState==='idle') loadAgentsRegister();
+
+    const q = (_autoSearch||'').trim().toLowerCase();
+    const statusOrder = { Live:0, Built:1, Building:2, Planned:3, Paused:4 };
+    const roleAgents = allAgents
+        .filter(a=>{ if(!q) return true;
+            return String(gf(a,AG.name)||'').toLowerCase().includes(q) || String(gf(a,AG.goal)||'').toLowerCase().includes(q); })
+        .sort((a,b)=>{
+            const so = (statusOrder[selName(gf(a,AG.status))]??9) - (statusOrder[selName(gf(b,AG.status))]??9);
+            return so !== 0 ? so : String(gf(a,AG.name)||'').localeCompare(String(gf(b,AG.name)||''));
+        });
     const agentWfs = filteredWorkflows()
         .filter(w=>wfMatchesQuery(w,_autoSearch))
         .filter(w=>{ const s=getWfSopData(w.id); return s && s.disposition && s.disposition.type==='agent'; })
         .sort((a,b)=>(gf(a,WF.name)||'').toLowerCase()<(gf(b,WF.name)||'').toLowerCase()?-1:1);
-
-    if(!agentWfs.length && !_autoSearch){
-        pane.innerHTML = `<div class="empty-state"><p>No AI agents yet.</p>
-            <p>Build a workflow's SOP on the SOPs tab, then choose "Autonomous agent" as how it runs — it appears here, ready to test.</p></div>`;
-        updateCounts();
-        return;
-    }
-    if(!selectedAgentWf || !agentWfs.some(w=>w.id===selectedAgentWf)) selectedAgentWf = agentWfs.length ? agentWfs[0].id : null;
+    // A search or business filter can hide the selected process agent; keep the
+    // selection and bring the panel back when it reappears — never null it.
+    const selWfVisible = !!(selectedAgentWf && agentWfs.some(w=>w.id===selectedAgentWf));
 
     let html = `<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:12px;flex-wrap:wrap">
-        <p style="font-size:var(--fs-sm);color:var(--text-secondary);margin:0">Your AI workforce. Pick an agent to review its work, teach it, and take it live.</p>
-        ${sysSearchInput('autoSearchInput', _autoSearch, "_autoSearch=this.value;_refocusSearchId='autoSearchInput';renderAutomation()")}
+        <p style="font-size:var(--fs-sm);color:var(--text-secondary);margin:0">Your AI workforce: every agent, what it does, its guardrails, its workload, and its score.</p>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+            ${sysSearchInput('autoSearchInput', _autoSearch, "_autoSearch=this.value;_refocusSearchId='autoSearchInput';renderAutomation()")}
+            <button class="btn btn-sm btn-primary" onclick="openAgentForm()">+ Create an agent</button>
+        </div>
     </div>`;
 
-    html += `<table class="wf-grid" style="margin-bottom:14px"><thead><tr>
-        <th style="width:32%">Agent</th>
-        <th style="width:110px">Status</th>
-        <th style="width:150px">Awaiting your OK</th>
-        <th>Actions</th>
-    </tr></thead><tbody>`;
-    agentWfs.forEach(w=>{
-        const a = getWfAgent(w.id);
-        const meta = a && AGENT_STATES[a.state] ? AGENT_STATES[a.state] : { label:'DRAFT', bg:'var(--bg-subtle)', fg:'var(--text-muted)' };
-        const sel = w.id===selectedAgentWf;
-        html += `<tr style="${sel?'background:var(--accent-soft)':''};cursor:pointer" onclick="selectAgentWf('${w.id}')">
-            <td style="font-weight:var(--fw-semibold)">${esc(gf(w,WF.name)||'Untitled')}</td>
-            <td><span class="agent-pill" style="background:${meta.bg};color:${meta.fg}">${meta.label}</span></td>
-            <td><span id="agpend-${w.id}" style="font-size:var(--fs-xs);color:var(--text-muted)">&mdash;</span></td>
-            <td style="display:flex;gap:4px;flex-wrap:wrap">
-                ${sel?'<span style="font-size:var(--fs-xs);color:var(--accent);font-weight:var(--fw-semibold);padding:4px 2px">Selected</span>':`<button class="btn btn-sm" onclick="event.stopPropagation();selectAgentWf('${w.id}')">Select</button>`}
-                <button class="btn btn-sm" onclick="event.stopPropagation();selectedStepsWf='${w.id}';switchView('steps')">View SOP</button>
-            </td>
-        </tr>`;
-    });
-    html += '</tbody></table>';
+    // 1. Role agents (the register)
+    html += `<div class="auto-wf-header" style="margin-bottom:6px">Role agents <span style="color:var(--text-muted);font-weight:var(--fw-regular)">(${roleAgents.length})</span></div>`;
+    if(_agentsRegisterState==='loading' && !allAgents.length){
+        html += `<div class="agentic-loading"><div class="sop-spinner"></div><span>Loading the agents register…</span></div>`;
+    } else if(String(_agentsRegisterState).indexOf('error') === 0){
+        html += `<div style="padding:12px;color:var(--danger);font-size:var(--fs-sm)">Could not load the agents register: ${esc(String(_agentsRegisterState).slice(7))}
+            <button class="btn btn-sm" style="margin-left:8px" onclick="loadAgentsRegister(true)">Retry</button></div>`;
+    } else if(!roleAgents.length){
+        html += q
+            ? `<div class="empty-state"><p>No role agents match "${esc(_autoSearch)}".</p></div>`
+            : `<div class="empty-state"><p>No role agents yet.</p><p>Use "+ Create an agent" and the AI will walk you through the ${AGENTIC_STAGES.length} AGENTRIC questions.</p></div>`;
+    } else {
+        html += `<table class="wf-grid" style="margin-bottom:14px"><thead><tr>
+            <th style="width:17%">Agent</th>
+            <th>Goal</th>
+            <th style="width:120px">Guardrails</th>
+            <th style="width:90px">Status</th>
+            <th style="width:130px">Workload</th>
+            <th style="width:90px">Accuracy</th>
+        </tr></thead><tbody>`;
+        roleAgents.forEach(a=>{
+            const sel = a.id===selectedAgentId;
+            const status = selName(gf(a,AG.status))||'Planned';
+            const meta = AGENT_STATUS_META[status] || AGENT_STATUS_META.Planned;
+            const tmIds = gf(a,AG.teamMember)||[];
+            const acc = (tmIds.length && _agentAccuracyOk) ? agentAccuracySummary(tmIds[0]) : null;
+            html += `<tr style="${sel?'background:var(--accent-soft);':''}cursor:pointer" onclick="selectRoleAgent('${a.id}')" aria-expanded="${sel?'true':'false'}">
+                <td style="font-weight:var(--fw-semibold)">${esc(gf(a,AG.name)||'Untitled')}</td>
+                <td style="font-size:var(--fs-xs);color:var(--text-secondary);overflow:hidden;text-overflow:ellipsis">${esc(String(gf(a,AG.goal)||'').split('\n')[0])}</td>
+                <td style="font-size:var(--fs-xs)">${esc(selName(gf(a,AG.guardrail))||'Not set')}</td>
+                <td><span class="agent-pill" style="background:${meta.bg};color:${meta.fg}">${esc(status)}</span></td>
+                <td>${agentWorkloadCell(tmIds)}</td>
+                <td style="font-size:var(--fs-xs)">${acc ? esc(acc.text) : '<span style="color:var(--text-muted)" title="No approval history matched for this agent yet. If the dashboard card shows decisions, a field rename broke this read.">&mdash;</span>'}</td>
+            </tr>`;
+        });
+        html += '</tbody></table>';
+    }
+    if(selectedAgentId) html += `<div id="roleagent-panel"></div>`;
 
-    if(selectedAgentWf) html += `<div id="agentpanel-${selectedAgentWf}"></div>`;
+    // 2. Strategic layer (collapsible)
+    html += strategicLayerSection();
+
+    // 3. Process agents (workflow-based, video route)
+    html += `<div class="auto-wf-header" style="margin:18px 0 6px">Process agents <span style="color:var(--text-muted);font-weight:var(--fw-regular)">(${agentWfs.length})</span></div>`;
+    if(!agentWfs.length){
+        html += `<div style="font-size:var(--fs-xs);color:var(--text-muted);margin-bottom:10px">${q?'None match the search.':'None yet. Build a workflow\'s SOP on the SOPs tab, then choose "Autonomous agent" as how it runs — it appears here, ready to test.'}</div>`;
+    } else {
+        html += `<table class="wf-grid" style="margin-bottom:14px"><thead><tr>
+            <th style="width:32%">Agent</th>
+            <th style="width:110px">Status</th>
+            <th style="width:150px">Awaiting your OK</th>
+            <th>Actions</th>
+        </tr></thead><tbody>`;
+        agentWfs.forEach(w=>{
+            const a = getWfAgent(w.id);
+            const meta = a && AGENT_STATES[a.state] ? AGENT_STATES[a.state] : { label:'DRAFT', bg:'var(--bg-subtle)', fg:'var(--text-muted)' };
+            const sel = w.id===selectedAgentWf;
+            html += `<tr style="${sel?'background:var(--accent-soft)':''};cursor:pointer" onclick="selectAgentWf('${w.id}')">
+                <td style="font-weight:var(--fw-semibold)">${esc(gf(w,WF.name)||'Untitled')}</td>
+                <td><span class="agent-pill" style="background:${meta.bg};color:${meta.fg}">${meta.label}</span></td>
+                <td><span id="agpend-${w.id}" style="font-size:var(--fs-xs);color:var(--text-muted)">&mdash;</span></td>
+                <td style="display:flex;gap:4px;flex-wrap:wrap">
+                    ${sel?'<span style="font-size:var(--fs-xs);color:var(--accent);font-weight:var(--fw-semibold);padding:4px 2px">Selected</span>':`<button class="btn btn-sm" onclick="event.stopPropagation();selectAgentWf('${w.id}')">Select</button>`}
+                    <button class="btn btn-sm" onclick="event.stopPropagation();selectedStepsWf='${w.id}';switchView('steps')">View SOP</button>
+                </td>
+            </tr>`;
+        });
+        html += '</tbody></table>';
+    }
+    if(selWfVisible) html += `<div id="agentpanel-${selectedAgentWf}"></div>`;
 
     pane.innerHTML = html;
     updateCounts();
     restoreSearchFocus();
+    if(selectedAgentId) renderRoleAgentPanel();
     if(agentWfs.length) fillAgentPendingCounts(agentWfs.map(w=>w.id));
-    if(selectedAgentWf) renderAgentPanel(selectedAgentWf);
+    if(selWfVisible) renderAgentPanel(selectedAgentWf);
 }
 
 function selectAgentWf(id){
     selectedAgentWf = id;
     renderAutomation();
+}
+
+function selectRoleAgent(id){
+    selectedAgentId = (selectedAgentId===id) ? null : id;
+    _agStageEditing = null;
+    renderAutomation();
+}
+
+// ── Strategic layer strip ──────────────────────────────────────────────
+function strategicLayerSection(){
+    if(!allTeamAgents.length) return '';
+    const linked = new Set();
+    allAgents.forEach(a=>(gf(a,AG.teamMember)||[]).forEach(id=>linked.add(id)));
+    const strip = allTeamAgents.filter(t=>!linked.has(t.id));
+    if(!strip.length) return '';
+    const chips = strip.map(t=>{
+        const load = agentWorkloadText([t.id]);
+        return `<div style="border:1px solid var(--border-subtle);border-radius:var(--radius-md);background:var(--bg-surface);padding:6px 10px;font-size:var(--fs-xs)">
+            <span style="font-weight:var(--fw-medium)">${esc(gf(t,TM_NAME)||'Agent')}</span>
+            ${(load && load!=='unavailable')?`<span style="color:var(--text-muted);margin-left:6px">${esc(load)}</span>`:''}
+        </div>`;
+    }).join('');
+    return `<div class="agentic-guide" id="strategicLayer" style="margin-top:16px">
+        <div class="agentic-guide-head" onclick="this.parentElement.classList.toggle('open')">
+            <span class="resources-chevron">&#x25B6;</span>
+            Strategic layer — the AI CEO, department heads and workers (${strip.length})
+        </div>
+        <div class="agentic-guide-body">
+            <p class="agentic-guide-intro">Strategic guidance and generic execution. These are unchanged by the register: role agents above do the specific jobs; this layer directs and fills the gaps.</p>
+            <div style="display:flex;gap:6px;flex-wrap:wrap">${chips}</div>
+        </div>
+    </div>`;
+}
+
+// ── Role agent detail panel ────────────────────────────────────────────
+function agentIdSafe(a){ return (a && a.id) || 'unknown agent'; }
+function renderRoleAgentPanel(){
+    const el = document.getElementById('roleagent-panel');
+    const a = allAgents.find(x=>x.id===selectedAgentId);
+    if(!el || !a){ if(el) el.innerHTML=''; return; }
+    const name = gf(a,AG.name)||'Untitled';
+    const status = selName(gf(a,AG.status))||'Planned';
+    const guardrail = selName(gf(a,AG.guardrail))||'';
+    const readiness = selName(gf(a,AG.readiness))||'Draft';
+    const tmIds = gf(a,AG.teamMember)||[];
+    const dept = selName(gf(a,AG.department))||'';
+    const source = selName(gf(a,AG.source))||'';
+    const notes = gf(a,AG.notes)||'';
+    const glDef = GUARDRAIL_LEVELS.find(g=>g.key===guardrail);
+
+    // Accuracy per task type (only when wired to a Team Members row)
+    let accHtml = '';
+    if(tmIds.length && _agentTaskStatsOk){
+        const rows = _agentAccuracyRows.filter(r=>r.agentId===tmIds[0]);
+        if(rows.length){
+            accHtml = `<div style="margin-top:10px"><div style="font-size:var(--fs-xs);font-weight:var(--fw-semibold);margin-bottom:4px">Accuracy by task type</div>
+                ${rows.map(r=>`<div style="font-size:var(--fs-xs);color:var(--text-secondary);padding:2px 0">${esc(r.taskType)}: ${Math.round(r.rate*100)}% of ${r.total}${r.ready?' <span style="color:var(--success);font-weight:var(--fw-semibold)">ready for more autonomy</span>':''}</div>`).join('')}</div>`;
+        }
+    }
+    const wl = agentWorkloadText(tmIds);
+    const st0 = tmIds.length ? _agentTaskStats[tmIds[0]] : null;
+    const workload = wl===null
+        ? 'Not wired to a Team Members row yet, so workload and accuracy have nothing to read.'
+        : (wl==='unavailable'
+            ? 'workload unavailable (task read failed — refresh to retry)'
+            : `${wl} · ${(st0&&st0.doneToday)||0} done today`);
+
+    const wireOptions = ['<option value="">Wire to a Team Members row…</option>']
+        .concat(allTeamAgents.map(t=>`<option value="${t.id}" ${tmIds[0]===t.id?'selected':''}>${esc(gf(t,TM_NAME)||'Agent')}</option>`)).join('');
+
+    // AGENTRIC stages
+    const stagesHtml = AGENTIC_STAGES.map(st=>{
+        const text = gf(a,AG_STAGE_FIELDS[st.letter])||'';
+        const editing = _agStageEditing === (a.id+':'+st.letter);
+        const body = editing
+            ? `<textarea id="agstage-edit-${st.letter}" class="agentic-answer" rows="4" aria-label="${esc(st.name)}">${esc(text)}</textarea>
+               <div style="display:flex;gap:6px;margin-top:6px">
+                   <button class="btn btn-sm btn-primary" onclick="saveAgentStage('${a.id}','${st.letter}')">Save</button>
+                   <button class="btn btn-sm" onclick="_agStageEditing=null;renderRoleAgentPanel()">Cancel</button>
+               </div>`
+            : `<div style="font-size:var(--fs-xs);color:${text?'var(--text-secondary)':'var(--text-muted)'};white-space:pre-wrap;word-break:break-word">${text?esc(text):'Not captured yet.'}</div>`;
+        return `<div class="agentic-guide-item" style="align-items:flex-start">
+            <span class="agentic-letter">${st.letter}</span>
+            <div style="flex:1;min-width:0">
+                <div style="display:flex;justify-content:space-between;gap:8px;align-items:baseline">
+                    <strong>${esc(st.name)}</strong>
+                    ${editing?'':`<button class="btn btn-sm" onclick="_agStageEditing='${a.id}:${st.letter}';renderRoleAgentPanel()">${text?'Edit':'Add'}</button>`}
+                </div>
+                ${body}
+            </div>
+        </div>`;
+    }).join('');
+
+    // Stored readiness scorecard
+    let scoresHtml = '';
+    try {
+        const r = JSON.parse(gf(a,AG.stageScores)||'null');
+        if(r && Array.isArray(r.stages)){
+            scoresHtml = `<div style="margin-top:10px">
+                <div style="font-size:var(--fs-xs);font-weight:var(--fw-semibold);margin-bottom:4px">Last readiness check ${r.checkedAt?esc('('+String(r.checkedAt).slice(0,10)+')'):''}</div>
+                <div class="agentic-rows">${readinessRowsHtml(r.stages)}</div>
+                ${legacyReadinessBanner(r)}
+                ${(r.questions&&r.questions.length)?`<div style="font-size:var(--fs-xs);color:var(--text-secondary);margin-top:6px"><strong>To close the gaps:</strong> ${r.questions.map(q=>esc(q.letter+': '+q.question)).join(' &middot; ')}<br>Add the missing detail to the stages above, then re-run the check.</div>`:''}
+            </div>`;
+        }
+    } catch(e){
+        console.warn('stage scores unreadable for', agentIdSafe(a), e);
+        scoresHtml = `<div style="margin-top:10px;font-size:var(--fs-xs);color:var(--warning)">The stored readiness scorecard could not be read. Run the readiness check to rebuild it.</div>`;
+    }
+
+    const readinessMeta = readiness==='Ready' ? {bg:'var(--success-bg)',fg:'var(--success)'} : readiness==='Needs input' ? {bg:'var(--warning-bg)',fg:'var(--warning)'} : {bg:'var(--bg-subtle)',fg:'var(--text-muted)'};
+
+    el.innerHTML = `<div class="agentic-card" style="margin-bottom:16px">
+        <div class="agentic-head">
+            <div>
+                <div class="agentic-title">${esc(name)} ${dept?`<span style="font-weight:var(--fw-regular);color:var(--text-muted);font-size:var(--fs-xs)">&middot; ${esc(dept)}${source?' &middot; '+esc(source):''}</span>`:''}</div>
+                <div class="agentic-sub">${esc(String(gf(a,AG.goal)||'').split('\n')[0])}</div>
+                ${gf(a,AG.scoreMetric)?`<div class="agentic-sub"><strong>Score:</strong> ${esc(gf(a,AG.scoreMetric))}</div>`:''}
+            </div>
+            <span class="agentic-state" style="background:${readinessMeta.bg};color:${readinessMeta.fg}">${esc(readiness)}</span>
+        </div>
+        <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:8px">
+            <label style="font-size:var(--fs-xs);color:var(--text-secondary)">Status
+                <select onchange="updateRoleAgentField('${a.id}','status',this.value)" style="margin-left:4px" aria-label="Agent status">
+                    ${AGENT_STATUSES.map(x=>`<option ${x===status?'selected':''}>${x}</option>`).join('')}
+                </select></label>
+            <label style="font-size:var(--fs-xs);color:var(--text-secondary)">Guardrails
+                <select onchange="updateRoleAgentField('${a.id}','guardrail',this.value)" style="margin-left:4px" aria-label="Guardrail level">
+                    ${GUARDRAIL_LEVELS.map(g=>`<option ${g.key===guardrail?'selected':''}>${g.key}</option>`).join('')}
+                </select></label>
+            <select onchange="wireAgentTeamMember('${a.id}',this.value)" style="font-size:var(--fs-xs)" aria-label="Wire to Team Members row">${wireOptions}</select>
+        </div>
+        ${glDef?`<div style="font-size:var(--fs-xs);color:var(--text-muted);margin-bottom:8px">${esc(glDef.blurb)}</div>`:''}
+        <div style="font-size:var(--fs-xs);color:var(--text-secondary);margin-bottom:4px"><strong>Workload:</strong> ${workload}</div>
+        ${accHtml}
+        <div style="margin-top:12px;border-top:1px solid var(--border-subtle);padding-top:8px">
+            <div style="font-size:var(--fs-sm);font-weight:var(--fw-semibold);margin-bottom:4px">The AGENTRIC spec</div>
+            ${stagesHtml}
+        </div>
+        ${scoresHtml}
+        ${notes?`<div style="margin-top:10px;font-size:var(--fs-xs);color:var(--text-muted);white-space:pre-wrap;word-break:break-word"><strong>Notes:</strong> ${esc(notes)}</div>`:''}
+        <div class="agentic-foot">
+            <button class="btn btn-sm btn-ai" id="agRegCheckBtn" onclick="runAgentRegisterCheck('${a.id}')">Run readiness check</button>
+        </div>
+    </div>`;
+}
+
+// One optimistic-update path for every register edit: mutate locally, PATCH,
+// roll back on failure. Every editable field on the panel goes through here.
+async function patchAgent(agentId, fieldsPatch, okMsg){
+    const a = allAgents.find(x=>x.id===agentId);
+    if(!a) return false;
+    const prev = {};
+    Object.keys(fieldsPatch).forEach(k=>{ prev[k] = a.fields[k]; });
+    Object.assign(a.fields, fieldsPatch);
+    try {
+        await atUpdate(AGENTS_TBL, agentId, fieldsPatch);
+        if(okMsg) toast(okMsg);
+        return true;
+    } catch(e){
+        Object.keys(prev).forEach(k=>{ if(prev[k]===undefined) delete a.fields[k]; else a.fields[k]=prev[k]; });
+        toast('Save failed: '+e.message);
+        return false;
+    }
+}
+
+async function updateRoleAgentField(agentId, key, value){
+    await patchAgent(agentId, { [key==='status' ? AG.status : AG.guardrail]: value },
+        key==='status' ? 'Status updated' : 'Guardrail level updated');
+    renderAutomation();
+}
+
+async function wireAgentTeamMember(agentId, tmId){
+    await patchAgent(agentId, { [AG.teamMember]: tmId ? [tmId] : [] },
+        tmId ? 'Wired — workload and accuracy now read from this row' : 'Unwired');
+    renderAutomation();
+}
+
+async function saveAgentStage(agentId, letter){
+    const ta = document.getElementById('agstage-edit-'+letter);
+    if(!ta) return;
+    _agStageEditing = null;
+    await patchAgent(agentId, { [AG_STAGE_FIELDS[letter]]: ta.value }, 'Stage saved');
+    renderRoleAgentPanel();
+}
+
+// Readiness check for a REGISTER agent — same wording and normalisation as the
+// workflow check, sourced from the eight stage fields instead of the SOP blob.
+async function runAgentRegisterCheck(agentId){
+    const a = allAgents.find(x=>x.id===agentId);
+    if(!a) return;
+    const btn = document.getElementById('agRegCheckBtn');
+    if(btn){ btn.disabled = true; btn.textContent = 'Checking…'; }
+    const specText = AGENTIC_STAGES.map(st=>`${st.letter} — ${st.name}:\n${gf(a,AG_STAGE_FIELDS[st.letter])||'(not captured yet)'}`).join('\n\n');
+    const prompt = `${agentricCheckIntro(false)}
+
+Process name: ${gf(a,AG.name)||'Untitled'}
+Agent goal: ${gf(a,AG.goal)||''}
+Success measure: ${gf(a,AG.scoreMetric)||''}
+
+The ${AGENTIC_STAGES.length} stages:
+${agentricStageListText(false)}
+
+Pass rules:
+${agentricPassRules(false)}
+
+Here is the agent's captured spec, stage by stage:
+${specText}
+
+${agentricResultShape()}`;
+    try {
+        const parsed = await callClaudeJson(prompt, 1500);
+        let prev = null;
+        try { prev = JSON.parse(gf(a,AG.stageScores)||'null'); }
+        catch(e){ console.warn('stored stage scores unreadable, starting fresh', e); }
+        const readiness = normaliseReadiness(parsed, {}, prev, false);
+        const ok = await patchAgent(agentId, {
+            [AG.stageScores]: JSON.stringify(readiness),
+            [AG.readiness]: readiness.state==='Ready' ? 'Ready' : 'Needs input',
+        }, null);
+        if(ok) toast('Readiness check complete — '+readiness.state);
+    } catch(e){
+        toast('Readiness check error: '+e.message);
+    }
+    renderRoleAgentPanel();
+}
+
+// ── Guided creation form ("fill in a form with the AI prompting you") ──
+function openAgentForm(){
+    if(!_agForm){
+        _agForm = { step:0, basics:{ name:'', goal:'', department:'Operations', guardrail:'Approval required', scoreMetric:'' }, stages:{}, checks:{} };
+    }
+    _agFormOpen = true;
+    renderAgentForm();
+}
+
+function closeAgentForm(){
+    _agFormOpen = false;
+    closeModal();
+    // _agForm is kept so a half-finished agent survives an accidental close.
+}
+
+// The page's global Escape handler closes the modal DOM; this keeps the form
+// flag in step so an in-flight AI check cannot reopen a dismissed form.
+document.addEventListener('keydown', e=>{ if(e.key==='Escape' && _agFormOpen) _agFormOpen = false; });
+
+// Collect the current step's inputs into _agForm before moving anywhere.
+function agFormCapture(){
+    if(!_agForm) return;
+    if(_agForm.step===0){
+        ['name','goal','scoreMetric'].forEach(k=>{
+            const el = document.getElementById('agf-'+k);
+            if(el) _agForm.basics[k] = el.value;
+        });
+        const d = document.getElementById('agf-department');
+        if(d) _agForm.basics.department = d.value;
+        const g = document.querySelector('input[name="agf-guardrail"]:checked');
+        if(g) _agForm.basics.guardrail = g.value;
+    } else if(_agForm.step>=1 && _agForm.step<=AGENTIC_STAGES.length){
+        const st = AGENTIC_STAGES[_agForm.step-1];
+        const ta = document.getElementById('agf-stage-text');
+        if(ta){
+            _agForm.stages[st.letter] = ta.value;
+            // A check certifies the exact text it saw — an edit after the check
+            // invalidates it, or an agent could be created "Ready" on stale ticks.
+            const c = _agForm.checks[st.letter];
+            if(c && c.text !== ta.value.trim()) delete _agForm.checks[st.letter];
+        }
+    }
+}
+
+function agFormGoto(step){
+    agFormCapture();
+    if(_agForm.step===0 && step>0 && !(_agForm.basics.name||'').trim()){
+        toast('Give the agent a name first'); return;
+    }
+    _agForm.step = Math.max(0, Math.min(AGENTIC_STAGES.length+1, step));
+    renderAgentForm();
+}
+
+async function agFormCheckStage(){
+    agFormCapture();
+    const st = AGENTIC_STAGES[_agForm.step-1];
+    const text = (_agForm.stages[st.letter]||'').trim();
+    if(!text){ toast('Write your answer first, or use Skip for now'); return; }
+    const btn = document.getElementById('agf-check-btn');
+    if(btn){ btn.disabled = true; btn.textContent = 'Checking…'; }
+    const naOk = stageNaAllowed(st, false);
+    const statuses = 'Clear|Thin|Missing' + (naOk ? '|NA' : '');
+    const prompt = `You are helping a business owner define ONE stage of an AI agent using the AGENTRIC framework. Judge only this stage, in isolation — ignore any pass rule that refers to a different stage.
+
+Agent name: ${_agForm.basics.name||'New agent'}
+Agent goal: ${_agForm.basics.goal||''}
+
+Stage ${st.letter} — ${st.name}.
+The question the owner was asked: ${st.prompt}
+
+Pass rules (agent mode):
+${agentricPassRules(false)}
+
+The owner's answer:
+${text}
+
+Return ONLY JSON: {"status":"${statuses}","reason":"one short line, plain UK English","questions":["up to 2 short, specific follow-up questions — empty array if Clear"]}`;
+    try {
+        const parsed = await callClaudeJson(prompt, 500);
+        const valid = ['Clear','Thin','Missing'].concat(naOk ? ['NA'] : []);
+        _agForm.checks[st.letter] = {
+            status: valid.includes(parsed.status) ? parsed.status : 'Thin',
+            reason: String(parsed.reason||'').slice(0,180),
+            questions: (parsed.questions||[]).slice(0,2).map(q=>String(q).slice(0,240)),
+            text,
+        };
+    } catch(e){
+        toast('Check failed: '+e.message);
+    }
+    renderAgentForm();
+}
+
+function renderAgentForm(){
+    if(!_agFormOpen || !_agForm) return;
+    const total = AGENTIC_STAGES.length;
+    const step = _agForm.step;
+    let body = '', title = '', sub = '';
+
+    if(step===0){
+        title = 'Create an agent';
+        sub = `The AI walks you through the ${total} AGENTRIC questions. Rough answers are fine — it checks each one and asks for what is missing.`;
+        body = `
+            <label class="agf-label" for="agf-name">Agent name</label>
+            <input id="agf-name" class="agentic-answer" style="min-height:0;height:36px" value="${esc(_agForm.basics.name)}" placeholder="e.g. Prospect Researcher">
+            <label class="agf-label" for="agf-goal">Goal — what result is this agent responsible for?</label>
+            <textarea id="agf-goal" class="agentic-answer" rows="2" placeholder="e.g. Research every prospect booked for a call and produce a dossier">${esc(_agForm.basics.goal)}</textarea>
+            <label class="agf-label" for="agf-scoreMetric">Score — the number or check that says it is doing a good job</label>
+            <input id="agf-scoreMetric" class="agentic-answer" style="min-height:0;height:36px" value="${esc(_agForm.basics.scoreMetric)}" placeholder="e.g. Dossier ready before every booked call">
+            <label class="agf-label" for="agf-department">Department</label>
+            <select id="agf-department" class="agentic-answer" style="min-height:0;height:36px">
+                ${DEPARTMENTS.map(d=>`<option ${d===_agForm.basics.department?'selected':''}>${d}</option>`).join('')}
+            </select>
+            <div class="agf-label">Guardrail style</div>
+            ${GUARDRAIL_LEVELS.map(g=>`<label style="display:flex;gap:8px;align-items:flex-start;padding:6px 0;font-size:var(--fs-sm);cursor:pointer">
+                <input type="radio" name="agf-guardrail" value="${g.key}" ${g.key===_agForm.basics.guardrail?'checked':''} style="margin-top:3px">
+                <span><strong>${g.key}</strong><br><span style="font-size:var(--fs-xs);color:var(--text-secondary)">${g.blurb}</span></span>
+            </label>`).join('')}`;
+    } else if(step>=1 && step<=total){
+        const st = AGENTIC_STAGES[step-1];
+        title = `${st.letter} — ${st.name}`;
+        sub = st.prompt;
+        const check = _agForm.checks[st.letter];
+        let feedback = '';
+        if(check){
+            const meta = AGENTIC_STATUS[check.status] || AGENTIC_STATUS.Thin;
+            feedback = `<div style="margin-top:8px;padding:8px 10px;border-radius:var(--radius-md);background:${meta.bg}">
+                <span style="color:${meta.fg};font-weight:var(--fw-semibold);font-size:var(--fs-xs)">${esc(check.status)}</span>
+                <span style="font-size:var(--fs-xs);color:var(--text-secondary);margin-left:6px">${esc(check.reason)}</span>
+                ${check.questions.length?`<ul style="margin:6px 0 0 16px;font-size:var(--fs-xs);color:var(--text-secondary)">${check.questions.map(q=>`<li>${esc(q)}</li>`).join('')}</ul>
+                <div style="font-size:var(--fs-xs);color:var(--text-muted);margin-top:4px">Add the answers into the box above, then check again — or continue and fill it later.</div>`:''}
+            </div>`;
+        }
+        body = `
+            <textarea id="agf-stage-text" class="agentic-answer" rows="6" placeholder="Type it the way you would say it — rough is fine" aria-label="${esc(st.name)}">${esc(_agForm.stages[st.letter]||'')}</textarea>
+            ${feedback}`;
+    } else {
+        title = 'Review and create';
+        const filled = AGENTIC_STAGES.filter(st=>(_agForm.stages[st.letter]||'').trim()).length;
+        sub = `${filled} of ${total} stages captured. Gaps are fine — the agent lands as "Needs input" and its panel shows what is missing.`;
+        body = AGENTIC_STAGES.map(st=>{
+            const txt = (_agForm.stages[st.letter]||'').trim();
+            const c0 = _agForm.checks[st.letter];
+            const check = (c0 && c0.text === txt) ? c0 : null; // stale check = not checked
+            const meta = check ? (AGENTIC_STATUS[check.status] || AGENTIC_STATUS.Thin) : null;
+            const pill = check
+                ? `<span class="agentic-pill" style="background:${meta.bg};color:${meta.fg}">${esc(check.status)}</span>`
+                : (txt?`<span class="agentic-pill" style="background:var(--bg-subtle);color:var(--text-muted)">Not checked</span>`:`<span class="agentic-pill" style="background:var(--danger-bg);color:var(--danger)">Empty</span>`);
+            return `<div style="display:flex;gap:8px;align-items:baseline;padding:4px 0;border-top:1px solid var(--border-subtle)">
+                <span class="agentic-letter" style="width:20px;height:20px;font-size:11px">${st.letter}</span>
+                <span style="font-size:var(--fs-sm);font-weight:var(--fw-medium);flex:1">${esc(st.name)}</span>
+                ${pill}
+                <button class="btn btn-sm" onclick="agFormGoto(${AGENTIC_STAGES.indexOf(st)+1})">Edit</button>
+            </div>`;
+        }).join('');
+    }
+
+    const nav = step===0
+        ? `<button class="btn btn-sm btn-primary" onclick="agFormGoto(1)">Start the questions</button>`
+        : step<=total
+            ? `<button class="btn btn-sm" onclick="agFormGoto(${step-1})">Back</button>
+               <button class="btn btn-sm btn-ai" id="agf-check-btn" onclick="agFormCheckStage()">Check with AI</button>
+               <button class="btn btn-sm btn-primary" onclick="agFormGoto(${step+1})">${(_agForm.stages[AGENTIC_STAGES[step-1].letter]||'').trim()?'Next':'Skip for now'}</button>`
+            : `<button class="btn btn-sm" onclick="agFormGoto(${total})">Back</button>
+               <button class="btn btn-sm btn-primary" id="agf-create-btn" onclick="createAgentFromForm()">Create agent</button>`;
+
+    // The page's one modal system (showModal/.modal-overlay) — never a second.
+    const headerNote = step>0?`<div style="font-size:var(--fs-xs);color:var(--text-muted);margin:8px 0 2px">${step<=total?`Question ${step} of ${total}`:'Review'} &middot; ${esc(_agForm.basics.name||'New agent')}</div>`:'';
+    showModal(title,
+        `<div style="font-size:var(--fs-xs);color:var(--text-secondary);margin:-8px 0 6px">${esc(sub)}</div>${headerNote}<div style="margin-top:6px">${body}</div>`,
+        nav);
+    const ov = document.getElementById('modalOverlay');
+    if(ov) ov.onclick = e=>{ if(e.target===ov) closeAgentForm(); };
+}
+
+async function createAgentFromForm(){
+    agFormCapture();
+    const b = _agForm.basics;
+    if(!(b.name||'').trim() || !(b.goal||'').trim()){ toast('Name and goal are required'); agFormGoto(0); return; }
+    const btn = document.getElementById('agf-create-btn');
+    if(btn){ btn.disabled = true; btn.textContent = 'Creating…'; }
+    const fields = {
+        [AG.name]: b.name.trim(),
+        [AG.goal]: b.goal.trim(),
+        [AG.department]: b.department,
+        [AG.guardrail]: b.guardrail,
+        [AG.scoreMetric]: (b.scoreMetric||'').trim(),
+        [AG.status]: 'Planned',
+        [AG.source]: 'Form',
+    };
+    AGENTIC_STAGES.forEach(st=>{
+        const t = (_agForm.stages[st.letter]||'').trim();
+        if(t) fields[AG_STAGE_FIELDS[st.letter]] = t;
+    });
+    if(!fields[AG.aim]) fields[AG.aim] = b.goal.trim();
+    // A check only counts if it certified the CURRENT text of its stage.
+    const freshCheck = st => {
+        const c = _agForm.checks[st.letter];
+        return (c && c.text === (_agForm.stages[st.letter]||'').trim()) ? c : null;
+    };
+    const stages = AGENTIC_STAGES.map(st=>{
+        const txt = (_agForm.stages[st.letter]||'').trim() || (st.letter==='A' ? b.goal.trim() : '');
+        const c = freshCheck(st);
+        return { letter:st.letter,
+            status: c ? c.status : (txt ? 'Thin' : 'Missing'),
+            reason: c ? c.reason : (txt ? 'Written but not checked yet' : 'Not captured yet') };
+    });
+    // One definition of Ready for the whole module: the same normaliser both
+    // readiness checks use, so the form can never grade by different rules.
+    const readiness = normaliseReadiness({ stages, questions: [] }, {}, null, false);
+    fields[AG.stageScores] = JSON.stringify(readiness);
+    const anyChecked = AGENTIC_STAGES.some(st=>freshCheck(st));
+    fields[AG.readiness] = anyChecked ? (readiness.state==='Ready' ? 'Ready' : 'Needs input') : 'Draft';
+    try {
+        const rec = await atCreate(AGENTS_TBL, fields);
+        allAgents.push(rec);
+        selectedAgentId = rec.id;
+        _agForm = null;
+        closeAgentForm();
+        renderAutomation();
+        toast(readiness.state==='Ready' && anyChecked ? 'Agent created — ready to build' : 'Agent created — its panel shows what is still missing');
+    } catch(e){
+        toast('Could not create the agent: '+e.message);
+        if(btn){ btn.disabled = false; btn.textContent = 'Create agent'; }
+    }
 }
 
 // Deep-link from the Skills Library ("Manage in AI Agents"): the shell writes
@@ -4212,13 +4982,11 @@ function buildVideoTasksTable(){
 // One fetch for the fleet: count Proposed activity rows per agent, fill the badges.
 async function fillAgentPendingCounts(agentIds){
     try {
-        const res = await fetch(`https://api.airtable.com/v0/${BASE_ID}/${AGENT_ACTIVITY_TBL}?pageSize=100`, {
-            headers:{ 'Authorization':`Bearer ${PAT}` }
-        });
-        if(!res.ok) return;
-        const data = await res.json();
+        // Paginated + cached — the old single-page fetch under-counted
+        // proposals once Agent Activity passed 100 rows.
+        const recs = await getAgentActivity();
         const counts = {};
-        (data.records||[]).forEach(r=>{
+        recs.forEach(r=>{
             if((r.fields['State']||'')!=='Proposed') return;
             (r.fields['Agent']||[]).forEach(id=>{ counts[id]=(counts[id]||0)+1; });
         });
@@ -4404,7 +5172,9 @@ async function doConvertWorkflowToSkill(wfId){
     if(raw){
         try {
             const sopData = JSON.parse(raw);
-            sopContent = (sopData.sopSteps||[]).map(s=>s.title+': '+(s.body||'')).join('\n');
+            // SOP steps are {name, detail[]} (see generateWorkflowSOP) — the old
+            // s.title/s.body read produced "undefined:" lines in every skill.
+            sopContent = (sopData.sopSteps||[]).map(s=>(s.name||'')+': '+((s.detail||[]).join(' '))).join('\n');
         } catch(e){ /* best-effort: safe fallback */ }
     }
 
@@ -4842,12 +5612,12 @@ function assignVideoTask(wfId){
     if(!w) return;
     const wName = gf(w,WF.name)||'Untitled';
 
-    // The AGENTIC script travels WITH the task so whoever records the video sees
-    // the seven prompts in Tasks & Projects — not just on the Systemisation page.
+    // The AGENTRIC script travels WITH the task so whoever records the video sees
+    // the stage prompts in Tasks & Projects — not just on the Systemisation page.
     const agenticScript = AGENTIC_STAGES.map(s=>`${s.letter} — ${s.name}: ${s.prompt}`).join('\n\n');
     const taskName = 'Record video: ' + wName;
     const taskDesc = 'Record a Loom video walkthrough of the "' + wName + '" workflow.\n\n'
-        + 'Follow the AGENTIC script — cover all seven while you record:\n\n'
+        + 'Follow the AGENTRIC script — cover all ' + AGENTIC_STAGES.length + ' while you record:\n\n'
         + agenticScript
         + '\n\nWhen finished, replace the placeholder below with your Loom share URL and mark this task as Done.\n\n[loom:paste your Loom share URL here]';
 
@@ -5029,6 +5799,7 @@ async function refreshData(){
     updateSyncStatus('syncing');
     try {
         await loadData();
+        loadAgentsRegister(true); // register refetch runs alongside the re-render
         render();
         updateSyncStatus('ok');
     } catch(e){
@@ -5054,6 +5825,9 @@ async function start(){
         render();
         updateSyncStatus('ok');
         updateAgentsLiveBadge();
+        // Load the agents register at start (not first tab visit), so the AI
+        // Agents tab badge is right from the first paint on every view.
+        loadAgentsRegister();
         consumeAgentDeepLink();
     } catch(e){
         if(e.message==='auth') return;

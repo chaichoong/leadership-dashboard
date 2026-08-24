@@ -10,6 +10,12 @@
 // Businesses (read), Tasks (read-by-id + create a video task). The Objective &
 // Strategy table is NOT migrated yet → stubbed empty (method→business grouping
 // is deferred to that module).
+//
+// ⚠ NOT YET MAPPED (added to the live page 24 Aug 2026, agents-register build):
+// AI Agents `tbl9msVjyQWslLOIZ` and Team Members `tblco0p2OnlLQVAX7`. Unknown
+// tables FALL THROUGH to real Airtable, so a byte-for-byte re-sync of the clone
+// would send register reads/writes to Airtable (401 under Supabase auth, or a
+// split system of record with a PAT). Map or stub BOTH before any re-sync.
 (function () {
   const SB_URL  = window.SUPABASE_URL  || 'https://ptkyhzlsvijcwyovgrgv.supabase.co';
   const SB_ANON = window.SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InB0a3loemxzdmlqY3d5b3Zncmd2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzYzMzIxNzgsImV4cCI6MjA5MTkwODE3OH0.U5ZdIjw--_UgJlYi75JTjpb2doBTjO4W8LUZPnZzkFU';
