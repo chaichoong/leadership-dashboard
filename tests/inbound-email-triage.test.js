@@ -114,8 +114,17 @@ describe('triage stays triage-only', () => {
         expect(skill).toMatch(/never text copied from the email/i);
     });
 
+
+    it('targets the business mailbox and enforces the file-label allowlist', () => {
+        expect(script).toContain('kevin@runpreneur.org.uk');
+        expect(script).toMatch(/payload\.setdefault\("account", TRIAGE_ACCOUNT\)/);
+        const allow = script.match(/FILE_LABEL_ALLOW = \{([^}]+)\}/)[1];
+        for (const banned of ['"7"', '"9"', '"14"']) expect(allow).not.toContain(banned);
+        expect(skill).toMatch(/NEVER APPLY.*7 "delete"/s);
+    });
+
     it('the skill forbids archiving human mail without a task', () => {
-        expect(skill).toMatch(/NEVER archive an email written by a human/i);
+        expect(skill).toMatch(/NEVER archive an email written by\s+a human/i);
     });
 });
 
