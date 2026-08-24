@@ -71,8 +71,8 @@ All commands run from the main checkout
   STOP — do not treat a broken read as a quiet day, and never advance the
   watermark.
 - `first_run: true` means there is no watermark yet and the scan covered a
-  7-day backlog window. Expect volume; the cap and deferral rules below
-  handle it.
+  7-day backlog window. Expect volume; there is no cap on how much you handle
+  (Kevin's ruling, 24 Aug 2026).
 - **Check the `truncated` flags.** Gmail lists newest-first and the scan
   fetches at most 100 per list; `truncated: true` means OLDER messages exist
   that you have NOT seen. You may act on what you have, but Step 6 forbids
@@ -144,7 +144,7 @@ A query ERROR is not "no duplicate" — on error, skip that thread, count it
 unhandled for Step 6, and report the failure. If a task already exists, apply
 the label move only (Step 4's act) and log `duplicate`.
 
-## Step 4 — Act and create the tasks (max 10 new tasks per run, Step 5 rescues included)
+## Step 4 — Act and create the tasks (no cap — every actionable thread gets its task)
 
 For every triaged message, apply the decision (this also logs it, with sender
 and subject pulled from the scan cache, to the private digest):
@@ -192,21 +192,23 @@ in Tasks `tblqB8b22hKBL4PF1`, base `appnqjDpqDniH3IRl`, with
 
 After each created task, log it: `note --id <id> --do task-created`.
 
-**Run Step 5's dedupe BEFORE creating anything here**, so lane threads and
-stranded rescues compete in ONE priority queue. If more than 10 threads
-survive dedupe across both, create the 10 most important (tier-1 first, then
-oldest), log the rest with `note --do deferred`, leave their emails
-untouched, and report how many were deferred — a silent cap reads as
-"covered everything".
+**There is NO task cap** (Kevin's ruling, 24 Aug 2026: nothing actionable
+waits a day because of a quota). Create a task for EVERY thread that
+survives dedupe, tier-1 first. Order the work tier-1 first, then oldest, so
+a mid-run failure costs the least important tasks, and report the total
+created. `note --do deferred` exists only for a thread whose dedupe query or
+task creation FAILED — never for volume. Be aware the dispatch engine
+prepares a limited number per morning, so a heavy day queues there; that
+queue is visible in the approval loop and is not your concern.
 
 ## Step 5 — The stranded check (the safety net)
 
 For every message in `stranded_8` and `stranded_12`: run the Step 3 dedupe on
 its thread. A labelled email with NO task is exactly the miss this agent
 exists to prevent — create its task now (same shape; a stranded label-8 email
-still gets Approver Kevin, per the 24 Aug ruling), count it against the
-10-task cap, log it, and say so in your report. Creating the task is the
-whole rescue: the email stays wherever Kevin put it.
+still gets Approver Kevin, per the 24 Aug ruling), log it, and say so in your
+report. Creating the task is the whole rescue: the email stays wherever
+Kevin put it.
 
 FIRST-RUN PROOF: labels 8 and 12 have real mail on them today, so on your
 first live run `stranded_8` + `stranded_12` returning zero messages means the
@@ -226,9 +228,9 @@ Advance the watermark only past what was fully handled AND fully seen:
   move forward after a truncated scan.
 - Otherwise: everything triaged, created, or deliberately left, and no
   failures → MS = `now_ms` from Step 1.
-- Otherwise: anything deferred by the cap, or any thread whose dedupe query
-  or task creation failed → MS = the oldest such message's `internalDate`
-  minus 1, so tomorrow's scan sees it again.
+- Otherwise: any thread whose dedupe query or task creation failed → MS =
+  the oldest such message's `internalDate` minus 1, so tomorrow's scan sees
+  it again.
 
 Then the score. `waiting` = messages still needing triage or a task after
 this run: deferred count + failed count + any stranded email still without a
