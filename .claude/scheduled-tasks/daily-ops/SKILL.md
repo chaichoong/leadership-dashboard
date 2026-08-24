@@ -147,9 +147,11 @@ and 17:00 via launchd `com.kevinbrittain.inbound-triage` (job `inbound-triage`
 in scripts/job-schedule.json, runner scripts/inbound-triage-run.sh). That is a
 registered wrapped job, not a second Claude routine, and the fixed-time
 exception to the one-routine rule was Kevin's explicit call. Do not fold it
-back in, and do not re-add those skills as phases, without his word. Accepted
-consequence: tasks the afternoon slots create are prepared at the NEXT
-morning's dispatch.
+back in, and do not re-add those skills as phases, without his word. Each
+slot also runs agent-dispatch (Kevin, 24 Aug 2026), so triaged work reaches
+the approval queue in the same slot; the phase-6 dispatch above still runs
+each morning to catch overnight approvals, and dispatch is built for
+repeated runs (intent ledger, dedupe).
 
 ## Phase 6b — Calendar work (only when due)
 
