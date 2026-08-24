@@ -50,6 +50,7 @@ on:
       - 'js/transactions.js'
       - 'js/wealth-ratios.js'
       - 'js/wealth.js'
+      - 'os/agents/index.html'
       - 'os/operations/index.html'
       - 'os/strategy/index.html'
       - 'os/strategy/strategy.css'

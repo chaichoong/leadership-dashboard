@@ -148,7 +148,7 @@ AF = {
     "agentOutput":       "fldzswp8fx6PqpLQ5",
     "taskType":          "fldZ2moDV2041Sobc",
     # Inbound-communication fields, written by the triage/sweep task creators
-    # (ids verified against the inbound-messages-sweep skill, 25 Aug 2026).
+    # (ids verified against the inbound-messages-sweep skill, 24 Aug 2026).
     "inboundTask":       "fldueazD67F7fUGee",
     "inboundSourceType": "fldiXSzcMol6Tdwij",
     "inboundSender":     "fldzf4xlbrQuktx0i",
@@ -238,7 +238,7 @@ ROLE_AGENTS = {
 ALL_AGENTS = {**AGENTS, **ROLE_AGENTS}
 
 # The Inbound Comms Response agent's identities. Inbound reply tasks route to
-# it DETERMINISTICALLY (Kevin's ruling, 25 Aug 2026) — no CEO judgement call
+# it DETERMINISTICALLY (Kevin's ruling, 24 Aug 2026) — no CEO judgement call
 # per routine reply. The CEO roster still routes everything else.
 RESPONSE_REC_ID = "recJ8J8idWE8d97tH"          # Team Members row
 RESPONSE_REGISTER_ROW = "recHfhVDb6BfQYco5"    # AI Agents register row
@@ -249,7 +249,7 @@ REGISTER_FIELDS = {  # read for the CEO's routing roster
     "goal":        "fldz8O9KihauZ46Cd",
     "status":      "fld71vXWqcxhdljac",
     "teamMember":  "fldEtzFGbNe4te9xL",
-    # Kevin's ruling, 25 Aug 2026: his feedback becomes part of the agent's
+    # Kevin's ruling, 24 Aug 2026: his feedback becomes part of the agent's
     # working instructions. The roster carries each role agent's Learning Log
     # so the dispatcher injects the lessons into every dispatch prompt —
     # a lesson that waits for the next build session is not self-learning.
@@ -818,7 +818,7 @@ def cmd_queue(args):
             tm = t["teamMemberIds"][0] if t["teamMemberIds"] else ""
             if tm == CEO_REC_ID:
                 # Inbound reply tasks skip the CEO's judgement pass entirely:
-                # the target is fixed (Kevin's ruling, 25 Aug 2026), so the
+                # the target is fixed (Kevin's ruling, 24 Aug 2026), so the
                 # dispatcher routes them straight to the Response agent with
                 # `route TASKID --to <autoTarget>` — no od-ceo dispatch.
                 if t["inboundTask"]:
@@ -1304,7 +1304,7 @@ def cmd_verify(args):
 # ─── SCORE — the Inbound Comms Response agent's goal metric ───────────
 #
 # "All inbound answered within 24 hours", measured from TASK CREATION to
-# Completed (Kevin's ruling, 25 Aug 2026: the triage agent's own metric covers
+# Completed (Kevin's ruling, 24 Aug 2026: the triage agent's own metric covers
 # message-arrival → task, so this one measures only what the Response agent
 # controls). Runs at the end of every dispatch run and PATCHes the register
 # row's Metric Score, gated on change so quiet days add no Airtable traffic.

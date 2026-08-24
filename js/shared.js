@@ -36,7 +36,7 @@
         // Launch Plan, etc.) — a dashboard reload blows through the loading
         // overlay and drops any in-flight wizard/form state.
         const activeTab = (window.location.hash || '#overview').slice(1);
-        const iframeTabs = ['os-strategy', 'tasks', 'comms', 'operations', 'systemisation', 'os-team', 'ai-brain'];
+        const iframeTabs = ['os-strategy', 'tasks', 'comms', 'operations', 'systemisation', 'agents', 'os-team', 'ai-brain'];
         if (iframeTabs.includes(activeTab)) {
             refreshPending = true;
             scheduleIdleRefresh();
@@ -480,6 +480,18 @@
             return;
         }
 
+        // The AI Agents iframe posts its waiting-approval count so the
+        // sidebar badge is right without the tab ever being opened.
+        if (e.data.type === 'agentsApprovalCount') {
+            const badge = document.getElementById('agentsApprovalBadge');
+            if (badge) {
+                const n = Number(e.data.count) || 0;
+                badge.textContent = String(n);
+                badge.style.display = n ? '' : 'none';
+            }
+            return;
+        }
+
         // Open lightweight task creation modal on the current page (no tab switch)
         if (e.data.type === 'qt:open-new-task-drawer') {
             const opts = e.data.opts || {};
@@ -748,6 +760,8 @@ if (tabId === 'comms') lazyLoadFrame('commsFrame', 'follow-up');
         // (Launch Plan tab removed — content was duplicating Strategy OS.)
         // Systemisation OS lazy-load (cache-busted so Pages deploys are picked up)
         if (tabId === 'systemisation') lazyLoadFrame('systemisationFrame', 'systemisation');
+        // AI Agents (Leadership) lazy-load — approvals, checks and the workforce register
+        if (tabId === 'agents') lazyLoadFrame('agentsFrame', 'agents');
         // Operations OS lazy-load (cache-busted so Pages deploys are picked up)
         if (tabId === 'operations') lazyLoadFrame('operationsFrame', 'operations');
         // Strategy iframe lazy-load (Plan Builder removed from the shell

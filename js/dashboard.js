@@ -1173,8 +1173,8 @@
                 .map(a => `<div class="od-breakdown-row"><span>${escHtml(a.title)}</span><span>${escHtml(a.state.toUpperCase())}${pendingByAgent[a.id] ? ` · ${pendingByAgent[a.id]} awaiting OK` : ''}</span></div>`).join('');
             const detail = (agents.length || roleAgents.length)
                 ? roleRows + wfRows
-                    + `<div style="margin-top:8px"><button class="od-btn-secondary od-btn-sm" onclick="event.stopPropagation();switchTab('systemisation')">Open Systemisation</button></div>`
-                : '<div class="od-breakdown-row"><span>No agents yet — create one on the Systemisation AI Agents tab.</span></div>';
+                    + `<div style="margin-top:8px"><button class="od-btn-secondary od-btn-sm" onclick="event.stopPropagation();switchTab('agents')">Open AI Agents</button></div>`
+                : '<div class="od-breakdown-row"><span>No agents yet — create one on the Leadership &rarr; AI Agents page.</span></div>';
             const card = document.getElementById('agentKpiCard');
             if (!card) return;
             card.outerHTML = expandableCard('AI Agents', `${live} live`,

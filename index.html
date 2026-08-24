@@ -54,7 +54,7 @@
              ────────────────────────────────────────────────────────────────── -->
         <nav class="sidebar-nav" id="sidebarNav">
 
-            <div class="sidebar-section" data-section="leadership" data-tabs="ceo-brief,overview,cfv,os-strategy,kpi-library">
+            <div class="sidebar-section" data-section="leadership" data-tabs="ceo-brief,overview,agents,cfv,os-strategy,kpi-library">
                 <div class="sidebar-section-header" role="button" tabindex="0" aria-expanded="true" onclick="toggleSidebarSection('leadership')" onkeydown="if(event.key==='Enter'||event.key===' ')toggleSidebarSection('leadership')">
                     <span class="sidebar-section-chevron">&#x25BE;</span>
                     <span class="sidebar-section-name">Leadership</span>
@@ -63,6 +63,8 @@
                 <div class="sidebar-section-body">
                     <div class="sidebar-item" role="menuitem" tabindex="0" onclick="switchTab('ceo-brief')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();switchTab('ceo-brief')}"><span class="sidebar-icon">&#x2600;&#xFE0F;</span><span class="sidebar-label">CEO Brief</span><span class="sidebar-health-dot unknown" data-sidebar-health="ceo-brief" title="No checks run yet"></span></div>
                     <div class="sidebar-item active" role="menuitem" tabindex="0" data-tab-group="dashboard" onclick="switchTab('overview')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();switchTab('overview')}"><span class="sidebar-icon">&#x1F4CA;</span><span class="sidebar-label">Leadership Dashboard</span><span class="sidebar-health-dot unknown" data-sidebar-health="overview" title="No checks run yet"></span><span id="cfvSidebarBadges" style="margin-left:6px;display:flex;gap:4px"></span></div>
+                    <!-- AI Agents (Leadership) — approvals, checks and the workforce register in one place (Kevin's ruling, 25 Aug 2026). The badge counts loop-raised tasks waiting for approval; the iframe posts the count up via postMessage. -->
+                    <div class="sidebar-item" role="menuitem" tabindex="0" onclick="switchTab('agents')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();switchTab('agents')}"><span class="sidebar-icon">&#x1F916;</span><span class="sidebar-label">AI Agents</span><span class="sidebar-health-dot unknown" data-sidebar-health="agents" title="No checks run yet"></span><span id="agentsApprovalBadge" title="Agent work waiting for your approval" style="display:none;margin-left:6px;background:var(--accent);color:var(--accent-on);font-size:var(--fs-xs);font-weight:var(--fw-semibold);border-radius:var(--radius-full);padding:1px 7px;"></span></div>
                     <div class="sidebar-item" role="menuitem" tabindex="0" onclick="switchTab('os-strategy')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();switchTab('os-strategy')}"><span class="sidebar-icon">&#x1F3AF;</span><span class="sidebar-label">Objective &amp; Strategy</span><span class="sidebar-health-dot unknown" data-sidebar-health="os-strategy" title="No checks run yet"></span></div>
                     <!-- Admin-only page: never appears in a client tenant's shell. Kevin's build IS the admin build today; the adminOnly flag in PAGE_REGISTRY carries the rule into the Supabase migration. -->
                     <div class="sidebar-item" role="menuitem" tabindex="0" onclick="switchTab('kpi-library')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();switchTab('kpi-library')}" title="Admin only — hidden from clients"><span class="sidebar-icon">&#x1F4DA;</span><span class="sidebar-label">KPI Library</span><span class="sidebar-health-dot unknown" data-sidebar-health="kpi-library" title="No checks run yet"></span></div>
@@ -688,6 +690,11 @@
         <!-- Tab: Systemisation -->
         <div class="tab-panel" id="tab-systemisation">
             <iframe class="tab-panel-iframe" id="systemisationFrame" src="" data-src="os/systemisation/index.html" loading="lazy" allowfullscreen style="border:none"></iframe>
+        </div>
+
+        <!-- Tab: AI Agents (Leadership) -->
+        <div class="tab-panel" id="tab-agents">
+            <iframe class="tab-panel-iframe" id="agentsFrame" src="" data-src="os/agents/index.html" loading="lazy" allowfullscreen style="border:none"></iframe>
         </div>
 
         <!-- Tab: Team Members -->

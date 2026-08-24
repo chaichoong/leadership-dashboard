@@ -19,9 +19,9 @@
 
     // ── Page & SOP Version Registry ──
     const PAGE_REGISTRY = [
-        { id: 'overview',    name: 'Leadership Dashboard',           icon: '📊', pageVer: '2.84', sopFile: 'sop.html',                   sopVer: '2.9', standalone: 'index.html#overview' },
+        { id: 'overview',    name: 'Leadership Dashboard',           icon: '📊', pageVer: '2.85', sopFile: 'sop.html',                   sopVer: '2.9', standalone: 'index.html#overview' },
         { id: 'os-strategy', name: 'Objective & Strategy',           icon: '🎯', pageVer: '1.44', sopFile: 'os/strategy/sop.html',       sopVer: '1.1', standalone: 'os/strategy/index.html' },
-        { id: 'tasks',       name: 'Tasks & Projects',   icon: '✅', pageVer: '1.143', sopFile: 'os/tasks/sop.html',             sopVer: '1.4', standalone: 'os/tasks/index.html' },
+        { id: 'tasks',       name: 'Tasks & Projects',   icon: '✅', pageVer: '1.144', sopFile: 'os/tasks/sop.html',             sopVer: '1.4', standalone: 'os/tasks/index.html' },
         { id: 'cfv',        name: 'CFVs',                          icon: '🚨', pageVer: '1.33', sopFile: 'sop-cfvs.html',               sopVer: '1.33', standalone: 'index.html#cfv' },
         { id: 'ceo-brief',  name: 'CEO Brief',                     icon: '☀️', pageVer: '1.2', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#ceo-brief' },
         { id: 'money',      name: 'Money Confidence',              icon: '🧭', pageVer: '1.1', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#money' },
@@ -33,7 +33,7 @@
         { id: 'pnl',        name: 'Profit & Loss',                 icon: '💰', pageVer: '2.32', sopFile: 'sop-pnl.html',               sopVer: '2.26', standalone: 'index.html#pnl' },
         { id: 'transactions', name: 'Transactions',                icon: '🔍', pageVer: '1.1', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#transactions' },
         { id: 'coa',        name: 'Chart of Accounts',             icon: '📒', pageVer: '1.3', sopFile: 'sop-coa.html',                sopVer: '1.1', standalone: 'index.html#coa' },
-        { id: 'comms',      name: 'Inbound Comms',                 icon: '📨', pageVer: '2.65', sopFile: 'inbound-comms-sop.html',      sopVer: '2.60', standalone: 'follow-up.html' },
+        { id: 'comms',      name: 'Inbound Comms',                 icon: '📨', pageVer: '2.66', sopFile: 'inbound-comms-sop.html',      sopVer: '2.60', standalone: 'follow-up.html' },
         { id: 'compliance', name: 'Property Compliance',            icon: '✅', pageVer: '1.15', sopFile: 'sop-compliance.html',         sopVer: '1.14', standalone: 'compliance.html' },
         { id: 'operations',  name: 'Operations',                    icon: '🏢', pageVer: '1.47', sopFile: '',                            sopVer: '1.0', standalone: 'os/operations/index.html' },
         // KPI Library (Leadership section) — ADMIN ONLY. Never rendered in a
@@ -41,8 +41,12 @@
         // migration must honour. Replaced the Plan Builder entry 1 Aug 2026 on
         // Kevin's direction (os/business-plan-builder/ files remain on disk).
         { id: 'kpi-library', name: 'KPI Library', icon: '📚', pageVer: '1.7', sopFile: '', sopVer: '1.0', standalone: 'index.html#kpi-library', adminOnly: true },
+        // AI Agents (Leadership) — ADMIN ONLY, like KPI Library. Approvals,
+        // checks and the workforce register in one place (Kevin's ruling,
+        // 25 Aug 2026; moved out of the Systemisation page).
+        { id: 'agents', name: 'AI Agents', icon: '🤖', pageVer: '1.0', sopFile: 'sop-ai-agents.html', sopVer: '1.0', standalone: 'os/agents/index.html', adminOnly: true },
         { id: 'fintable',  name: 'Accounts',                       icon: '🏦', pageVer: '1.19', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#fintable' },
-        { id: 'systemisation', name: 'Systemisation',              icon: '⚙️', pageVer: '1.16', sopFile: 'guides/systemisation.html',    sopVer: '1.11', standalone: 'os/systemisation/index.html' },
+        { id: 'systemisation', name: 'Systemisation',              icon: '⚙️', pageVer: '1.17', sopFile: 'guides/systemisation.html',    sopVer: '1.11', standalone: 'os/systemisation/index.html' },
         { id: 'os-team',    name: 'Team Members',                  icon: '👥', pageVer: '1.22', sopFile: '',                            sopVer: '1.1', standalone: 'os/team/index.html' },
         // pageVer corrected by hand 2026-08-06: the auto-bump never fired for this page
         // (crm-supabase.html was missing from the workflow `paths:` filter), so 1.0 was
@@ -53,7 +57,7 @@
         { id: 'content-machine', name: 'Content Machine',           icon: '🎬', pageVer: '1.0', sopFile: '',                            sopVer: '1.0', standalone: 'https://chaichoong.github.io/content-machine/' },
         { id: 'prospecting', name: 'Prospecting',                   icon: '🧲', pageVer: '1.15', sopFile: 'sop-prospecting.html',        sopVer: '1.5', standalone: 'index.html#prospecting' },
         { id: 'sitemap',    name: 'Site Map & Guides',             icon: '🔗', pageVer: '1.24', sopFile: 'sop-sitemap.html',            sopVer: '1.19', standalone: 'index.html#sitemap' },
-        { id: 'skills',     name: 'Skills Library',                icon: '🧠', pageVer: '1.13', sopFile: 'guides/skills.html',           sopVer: '1.0', standalone: 'index.html#skills' },
+        { id: 'skills',     name: 'Skills Library',                icon: '🧠', pageVer: '1.14', sopFile: 'guides/skills.html',           sopVer: '1.0', standalone: 'index.html#skills' },
         { id: 'ai-brain',  name: 'AI Brain',                       icon: '💭', pageVer: '1.0', sopFile: 'guides/ai-brain.html',         sopVer: '1.0', standalone: 'ai-brain.html' },
         { id: 'how-it-works', name: 'How It Works',               icon: '🗺️', pageVer: '2.2', sopFile: '',                             sopVer: '1.0', standalone: 'how-it-works.html' },
     ];
@@ -96,7 +100,7 @@
         arrearsLog:    'tblik5VI5Jy6tO2yc', // Arrears Contact Log — audit trail per contact event
         sysWorkflows:  'tblLPoRHFBl0vqR24', // Systemisation Workflows
         workflowSteps: 'tblTadoyWXFHbmYxm', // Workflow Steps (within Systemisation Workflows)
-        aiAgents:      'tbl9msVjyQWslLOIZ', // AI Agents — role-agent register (Systemisation AI Agents tab, AGENTRIC framework)
+        aiAgents:      'tbl9msVjyQWslLOIZ', // AI Agents — role-agent register (Leadership → AI Agents page, os/agents/)
         prospects:     'tbljHVGJoKJf8acy3', // Prospects — cold outbound pipeline (Prospecting tab)
         prospectKeywords: 'tblB5tZrXNaKFe02j', // Prospect Keywords — LinkedIn search strings the daily agent runs
         ceoBriefs:     'tblIxbzDSOCI5hqJn', // CEO Briefs — one row per weekday, written by the 09:00 money-daily worker

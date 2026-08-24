@@ -211,9 +211,11 @@
         Paused:   { bg: 'var(--warning-bg)', fg: 'var(--warning)' },
     };
 
+    // Since 25 Aug 2026 the agents live on Leadership → AI Agents
+    // (os/agents/index.html); that page consumes the localStorage key.
     function openRoleAgentInSystemisation(recId) {
         localStorage.setItem('sys_open_role_agent', recId);
-        if (typeof switchTab === 'function') switchTab('systemisation');
+        if (typeof switchTab === 'function') switchTab('agents');
     }
     window.openRoleAgentInSystemisation = openRoleAgentInSystemisation;
 
@@ -226,7 +228,7 @@
 
     function openAgentInSystemisation(wfId) {
         localStorage.setItem('sys_open_agent', wfId);
-        if (typeof switchTab === 'function') switchTab('systemisation');
+        if (typeof switchTab === 'function') switchTab('agents');
     }
     window.openAgentInSystemisation = openAgentInSystemisation;
 

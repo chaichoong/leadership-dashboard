@@ -969,12 +969,12 @@ async function loadAgentRegister(){
 }
 
 function openAgentRegister(recId){
-  // Deep-link to the agent's panel on the Systemisation page. Via the URL
-  // HASH, not localStorage: the shell keeps a hidden Systemisation iframe
-  // alive, and a localStorage write fires its storage listener, which would
-  // CONSUME the key before the new tab loads (review finding, 24 Aug 2026).
-  // A hash is per-window, so nothing can steal it.
-  window.open('../systemisation/index.html#agent='+encodeURIComponent(recId),'_blank');
+  // Deep-link to the agent's panel on the Leadership → AI Agents page. Via
+  // the URL HASH, not localStorage: the shell keeps a hidden iframe of that
+  // page alive, and a localStorage write fires its storage listener, which
+  // would CONSUME the key before the new tab loads (review finding,
+  // 24 Aug 2026). A hash is per-window, so nothing can steal it.
+  window.open('../agents/index.html#agent='+encodeURIComponent(recId),'_blank');
 }
 window.openAgentRegister=openAgentRegister;
 

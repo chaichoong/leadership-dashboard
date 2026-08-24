@@ -1,0 +1,2717 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI Agents — Leadership</title>
+<link rel="stylesheet" href="../../css/tokens.css?v=1">
+<link rel="stylesheet" href="../../css/sync-bar.css?v=3">
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{line-height:1.5;min-height:100vh;background:var(--bg-app);color:var(--text-primary)}
+a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
+
+.auth-bar{background:var(--bg-surface);border-bottom:1px solid var(--border-default);padding:14px 24px;display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.auth-bar input{background:var(--bg-surface-2);border:1px solid var(--border-default);color:var(--text-primary);padding:6px 12px;border-radius:6px;font-size:var(--fs-base);width:340px}
+.auth-bar button{background:var(--accent);color:var(--accent-on);border:none;padding:6px 16px;border-radius:6px;cursor:pointer;font-size:var(--fs-base);font-weight:var(--fw-semibold)}
+.auth-bar button:hover{background:var(--accent-hover)}
+
+.topbar{background:var(--bg-surface);border-bottom:1px solid var(--border-default);padding:12px 24px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;position:sticky;top:0;z-index:50;box-shadow:0 1px 0 var(--border-subtle)}
+.topbar h1{font-size:20px;font-weight:var(--fw-bold);display:flex;align-items:center;gap:8px}
+.topbar .subtitle{font-size:var(--fs-sm);color:var(--text-secondary)}
+.topbar-right{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+
+.btn{padding:6px 14px;border-radius:6px;border:1px solid var(--border-default);background:var(--bg-surface);color:var(--text-primary);cursor:pointer;font-size:var(--fs-sm);font-weight:var(--fw-semibold);display:inline-flex;align-items:center;gap:6px}
+.btn:hover{border-color:var(--accent);color:var(--accent)}
+.btn-primary{background:var(--accent);border-color:var(--accent);color:var(--accent-on)}
+.btn-primary:hover{background:var(--accent-hover);color:var(--accent-on)}
+.btn-sm{padding:4px 10px;font-size:var(--fs-xs)}
+.btn-danger{border-color:var(--danger);color:var(--danger)}
+.btn-danger:hover{background:var(--danger);color:var(--accent-on)}
+.btn-success{border-color:var(--success);color:var(--success)}
+.btn-success:hover{background:var(--success);color:var(--accent-on)}
+.btn-ai{border-color:var(--info);color:var(--info);background:var(--info-bg);font-weight:var(--fw-semibold)}
+.btn-ai:hover{background:var(--info);color:var(--accent-on)}
+.btn:disabled{opacity:.5;cursor:not-allowed;pointer-events:none}
+
+.main{padding:20px 24px;max-width:1400px;margin:0 auto}
+.zone{margin-bottom:28px}
+.zone-header{display:flex;align-items:center;gap:10px;margin-bottom:12px;padding-bottom:8px;border-bottom:2px solid var(--border-default)}
+.zone-title{font-size:var(--fs-lg);font-weight:var(--fw-bold)}
+.zone-count{background:var(--bg-subtle);color:var(--text-secondary);padding:1px 10px;border-radius:var(--radius-full);font-size:var(--fs-xs);font-weight:var(--fw-bold)}
+.zone-count.hot{background:var(--warning-bg);color:var(--warning)}
+.zone-sub{font-size:var(--fs-xs);color:var(--text-muted);margin-left:auto}
+
+.empty-state{text-align:center;padding:32px 20px;color:var(--text-muted)}
+.empty-state p{margin-bottom:8px}
+.loading{text-align:center;padding:60px 20px;color:var(--text-muted);font-size:var(--fs-sm)}
+.zone-loading{display:flex;align-items:center;gap:10px;padding:16px;color:var(--text-muted);font-size:var(--fs-sm)}
+.zone-error{padding:12px 16px;border:1px solid var(--danger);border-radius:var(--radius-md);background:var(--danger-bg);color:var(--danger);font-size:var(--fs-sm)}
+
+/* Approval cards (Zone A) */
+.apv-card{border:1px solid var(--border-default);border-left:4px solid var(--warning);border-radius:var(--radius-md);background:var(--bg-surface);padding:14px 16px;margin-bottom:12px}
+.apv-ask{font-size:var(--fs-base);font-weight:var(--fw-semibold);line-height:1.5;margin-bottom:6px}
+.apv-meta{display:flex;gap:8px;flex-wrap:wrap;align-items:center;font-size:var(--fs-xs);color:var(--text-secondary);margin-bottom:8px}
+.apv-chip{background:var(--bg-subtle);color:var(--text-secondary);padding:1px 8px;border-radius:var(--radius-full);font-weight:var(--fw-semibold);white-space:nowrap}
+.apv-age{color:var(--text-muted)}
+.apv-age.late{color:var(--warning);font-weight:var(--fw-semibold)}
+.apv-tier1{border:1px solid var(--danger);background:var(--danger-bg);color:var(--danger);border-radius:var(--radius-md);padding:8px 12px;font-size:var(--fs-xs);font-weight:var(--fw-semibold);margin-bottom:8px}
+.apv-details{margin:8px 0}
+.apv-details summary{cursor:pointer;font-size:var(--fs-xs);font-weight:var(--fw-semibold);color:var(--accent)}
+.apv-body{font-size:var(--fs-xs);color:var(--text-secondary);white-space:pre-wrap;word-break:break-word;max-height:340px;overflow:auto;border:1px solid var(--border-subtle);border-radius:var(--radius-md);padding:10px 12px;background:var(--bg-surface-2);margin-top:6px}
+.apv-note{width:100%;border:1px solid var(--border-default);background:var(--bg-surface);border-radius:var(--radius-md);padding:8px 10px;font-size:var(--fs-sm);color:var(--text-primary);font-family:inherit;resize:vertical;min-height:44px;margin:8px 0}
+.apv-note:focus{outline:none;border-color:var(--accent)}
+.apv-actions{display:flex;gap:8px;flex-wrap:wrap}
+.apv-type{background:var(--bg-surface);border:1px solid var(--border-default);color:var(--text-primary);padding:4px 8px;border-radius:var(--radius-sm);font-size:var(--fs-xs);font-family:inherit}
+
+/* Check list (Zone B) */
+.chk-item{display:flex;gap:10px;align-items:flex-start;border:1px solid var(--border-default);border-left:4px solid var(--warning);border-radius:var(--radius-md);background:var(--bg-surface);padding:10px 14px;margin-bottom:8px}
+.chk-item.danger{border-left-color:var(--danger)}
+.chk-lane{flex-shrink:0;font-size:var(--fs-xs);font-weight:var(--fw-bold);color:var(--text-secondary);background:var(--bg-subtle);padding:2px 8px;border-radius:var(--radius-full);white-space:nowrap;margin-top:1px}
+.chk-text{font-size:var(--fs-sm);color:var(--text-primary);line-height:1.5}
+.chk-detail{font-size:var(--fs-xs);color:var(--text-secondary);margin-top:2px}
+.chk-clear{border:1px solid var(--success);background:var(--success-bg);color:var(--success);border-radius:var(--radius-md);padding:12px 16px;font-size:var(--fs-sm);font-weight:var(--fw-semibold)}
+
+/* Register table + panel (moved from Systemisation) */
+.wf-grid{width:100%;border-collapse:collapse;font-size:var(--fs-sm);margin-bottom:16px}
+.wf-grid th{text-align:left;padding:8px 10px;font-size:var(--fs-xs);text-transform:uppercase;letter-spacing:.4px;color:var(--text-secondary);background:var(--bg-surface-2);border-bottom:1px solid var(--border-default);font-weight:var(--fw-bold)}
+.wf-grid td{padding:6px 8px;border-bottom:1px solid var(--border-subtle);vertical-align:top}
+.wf-grid tr:hover{background:var(--bg-surface-2)}
+.auto-wf-header{font-size:var(--fs-base);font-weight:var(--fw-semibold);padding:8px 0;margin-bottom:8px;border-bottom:1px solid var(--border-subtle)}
+
+.modal-overlay{position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;z-index:200}
+.modal{background:var(--bg-surface);border-radius:var(--radius-lg);box-shadow:var(--shadow-lg);width:90%;max-width:560px;max-height:90vh;overflow-y:auto;padding:24px}
+.modal-title{font-size:var(--fs-lg);font-weight:var(--fw-bold);margin-bottom:16px}
+.modal-footer{display:flex;justify-content:flex-end;gap:8px;margin-top:20px}
+
+.toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:var(--bg-sidebar);color:var(--text-inverse);padding:10px 20px;border-radius:var(--radius-md);font-size:var(--fs-sm);font-weight:var(--fw-semibold);z-index:300;opacity:0;transition:opacity .3s;pointer-events:none}
+.toast.show{opacity:1}
+
+.sync-status{display:inline-flex;align-items:center;gap:6px;font-size:var(--fs-xs);color:var(--text-secondary);white-space:nowrap}
+.sync-dot{width:8px;height:8px;border-radius:50%;background:var(--text-muted);flex-shrink:0}
+.sync-dot.ok{background:var(--success)}
+.sync-dot.syncing{background:var(--warning)}
+.sync-dot.error{background:var(--danger)}
+.settings-icon{background:none;border:none;font-size:18px;cursor:pointer;color:var(--text-muted);padding:4px}
+.settings-icon:hover{color:var(--text-primary)}
+.settings-icon.spinning{animation:ag-spin .8s linear infinite}
+@keyframes ag-spin{to{transform:rotate(360deg)}}
+.sop-spinner{width:32px;height:32px;border:3px solid var(--border-default);border-top-color:var(--accent);border-radius:50%;animation:ag-spin .8s linear infinite}
+
+/* AGENTIC scorecard + panel styles (moved from Systemisation) */
+.agentic-card{border:1px solid var(--border-default);border-radius:var(--radius-md);background:var(--bg-surface);margin:14px 0;padding:14px 16px}
+.agentic-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:10px}
+.agentic-title{font-weight:var(--fw-semibold);font-size:var(--fs-sm)}
+.agentic-sub{font-size:var(--fs-xs);color:var(--text-muted)}
+.agentic-state{flex-shrink:0;padding:3px 12px;border-radius:var(--radius-full);font-size:var(--fs-xs);font-weight:var(--fw-semibold)}
+.agentic-rows{display:flex;flex-direction:column;gap:1px}
+.agentic-row{display:grid;grid-template-columns:24px 150px 74px 1fr;gap:10px;align-items:center;padding:7px 0;border-top:1px solid var(--border-subtle);font-size:var(--fs-sm)}
+.agentic-row .agentic-letter{width:20px;height:20px;font-size:11px}
+.agentic-name{font-weight:var(--fw-medium)}
+.agentic-pill{justify-self:start;padding:2px 9px;border-radius:var(--radius-full);font-size:11px;font-weight:var(--fw-semibold);white-space:nowrap}
+.agentic-reason{font-size:var(--fs-xs);color:var(--text-secondary);overflow:hidden;text-overflow:ellipsis}
+.agentic-letter{flex-shrink:0;width:22px;height:22px;border-radius:50%;background:var(--accent-soft);color:var(--accent);font-weight:var(--fw-bold);font-size:12px;display:flex;align-items:center;justify-content:center}
+.agentic-answer{display:block;width:100%;box-sizing:border-box;border:1px solid var(--border-default);background:var(--bg-surface);border-radius:var(--radius-md);padding:8px 10px;min-height:46px;font-size:var(--fs-sm);color:var(--text-primary);resize:vertical}
+.agentic-answer::placeholder{color:var(--text-muted)}
+.agentic-answer:focus{outline:none;border-color:var(--accent);background:var(--bg-surface);box-shadow:0 0 0 2px var(--accent-soft)}
+.agentic-foot{margin-top:12px;display:flex;justify-content:flex-end}
+.agentic-loading{display:flex;align-items:center;gap:10px;padding:16px;color:var(--text-muted);font-size:var(--fs-sm)}
+.agentic-guide{border:1px solid var(--border-default);border-radius:var(--radius-md);background:var(--bg-surface);margin:12px 0;overflow:hidden}
+.agentic-guide-head{display:flex;align-items:center;gap:8px;padding:10px 14px;cursor:pointer;font-weight:var(--fw-semibold);font-size:var(--fs-sm);user-select:none}
+.agentic-guide-head .resources-chevron{transition:transform .2s;font-size:11px;color:var(--text-muted)}
+.agentic-guide.open .resources-chevron{transform:rotate(90deg)}
+.agentic-guide-body{display:none;padding:4px 14px 14px}
+.agentic-guide.open .agentic-guide-body{display:block}
+.agentic-guide-intro{font-size:var(--fs-xs);color:var(--text-secondary);margin:0 0 10px}
+.agentic-guide-item{display:flex;gap:10px;align-items:flex-start;padding:7px 0;border-top:1px solid var(--border-subtle)}
+.agentic-guide-item>div{display:flex;flex-direction:column;gap:1px}
+.agentic-guide-item strong{font-size:var(--fs-sm)}
+.agentic-guide-item span{font-size:var(--fs-xs);color:var(--text-secondary);line-height:1.45}
+.agf-label{display:block;font-size:var(--fs-xs);font-weight:var(--fw-semibold);color:var(--text-secondary);margin:10px 0 4px}
+.modal input.agentic-answer,.modal select.agentic-answer{min-height:0}
+@media(max-width:760px){.agentic-row{grid-template-columns:20px 1fr;row-gap:2px}.agentic-pill,.agentic-reason{grid-column:2}}
+
+/* Agent (process) panel styles (moved from Systemisation) */
+.agent-card{border:1px solid var(--border-default);border-radius:var(--radius-lg);background:var(--bg-surface);padding:14px 16px;margin:14px 0}
+.agent-head{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap}
+.agent-pill{display:inline-block;font-size:11px;font-weight:var(--fw-bold);letter-spacing:.5px;padding:3px 10px;border-radius:var(--radius-full)}
+.agent-sub{font-size:var(--fs-xs);color:var(--text-secondary);margin-left:8px}
+.agent-feed{margin-top:12px;border-top:1px solid var(--border-subtle);padding-top:6px;max-height:420px;overflow-y:auto}
+.agent-idcard{border:1px solid var(--border-default);border-radius:var(--radius-md);background:var(--bg-surface-2);padding:12px 14px;margin-top:12px}
+.agent-idcard-empty{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
+.agent-idcard-title{font-weight:var(--fw-semibold);font-size:var(--fs-sm)}
+.agent-idcard-head{display:flex;justify-content:space-between;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:8px}
+.agent-idcard-name{font-weight:var(--fw-bold);font-size:var(--fs-base)}
+.agent-idcard-role{font-size:var(--fs-xs);color:var(--text-secondary);margin-left:8px}
+.agent-idcard-body{display:grid;grid-template-columns:132px 1fr;gap:5px 12px;margin:0;font-size:var(--fs-xs)}
+.agent-idcard-body dt{color:var(--text-muted);font-weight:var(--fw-medium)}
+.agent-idcard-body dd{margin:0;color:var(--text-primary);line-height:1.5;word-break:break-word}
+.agent-idcard-never{margin:0;padding-left:16px}
+.agent-idcard-never li{margin-bottom:2px}
+.agent-idcard-foot{margin-top:10px;padding-top:8px;border-top:1px solid var(--border-subtle);font-size:11px;color:var(--text-muted)}
+.agent-ladder{margin-top:12px;border-top:1px solid var(--border-subtle);padding-top:10px}
+.ag-gear-row{display:flex;align-items:center;gap:0;flex-wrap:wrap}
+.ag-gear{display:flex;align-items:center;gap:6px;flex-shrink:0}
+.ag-gear-rail{flex:1;min-width:12px;height:2px;background:var(--border-default);margin:0 8px}
+.ag-gear-dot{width:20px;height:20px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:var(--fw-bold);flex-shrink:0}
+.ag-gear-name{font-size:var(--fs-xs);white-space:nowrap}
+.ag-gear-here .ag-gear-name{font-weight:var(--fw-semibold)}
+.ag-gear-advice{margin-top:9px;font-size:var(--fs-xs);color:var(--text-secondary);line-height:1.5}
+.ag-gear-advice strong{color:var(--text-primary);font-weight:var(--fw-semibold)}
+@media(max-width:720px){.ag-gear-rail{display:none}.ag-gear-row{gap:10px}.agent-idcard-body{grid-template-columns:1fr;gap:2px}.agent-idcard-body dt{margin-top:6px}}
+.agent-row{padding:9px 0;border-bottom:1px solid var(--border-subtle)}
+.agent-row:last-child{border-bottom:none}
+.agent-row-top{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.agent-chip{font-size:10px;font-weight:var(--fw-semibold);padding:2px 8px;border-radius:var(--radius-full);white-space:nowrap}
+.agent-row-summary{font-size:var(--fs-sm);font-weight:var(--fw-medium);flex:1;min-width:200px}
+.agent-row-when{font-size:var(--fs-xs);color:var(--text-muted);white-space:nowrap}
+.agent-row-detail{font-size:var(--fs-xs);color:var(--text-secondary);line-height:1.55;margin-top:4px;white-space:pre-wrap;word-break:break-word}
+.agent-row-actions{display:flex;gap:8px;margin-top:8px}
+.resources-chevron{font-size:10px;color:var(--text-muted);transition:transform .15s}
+.sop-fb-text{width:100%;box-sizing:border-box;border:1px solid var(--border-default);background:var(--bg-surface);border-radius:var(--radius-md);padding:8px 10px;font-size:var(--fs-sm);color:var(--text-primary);font-family:var(--font-family-base);resize:vertical}
+.sop-fb-actions{display:flex;gap:8px;margin-top:6px}
+</style>
+</head>
+<body>
+
+<div id="authBar" class="auth-bar" style="display:none">
+    <span>Airtable API Key:</span>
+    <input type="password" id="patInput" placeholder="pat..." onkeydown="if(event.key==='Enter')saveAuth()">
+    <button onclick="saveAuth()">Connect</button>
+    <span id="authError" style="display:none;color:var(--danger);font-size:var(--fs-sm)">Invalid key</span>
+</div>
+
+<div id="topbar" class="topbar" style="display:none">
+    <div>
+        <h1>AI Agents</h1>
+        <div class="subtitle">Everything waiting for you, everything to check, and the whole workforce</div>
+    </div>
+    <div class="topbar-right">
+        <span id="syncStatus" class="sync-status" title="Not synced yet"><span class="sync-dot"></span>Loading…</span>
+        <button class="settings-icon" id="refreshBtn" onclick="refreshAll()" title="Refresh data">&#x21BB;</button>
+    </div>
+</div>
+
+<div id="main" class="main" style="display:none">
+    <div data-sync-bar="agents" style="margin-bottom:16px"></div>
+
+    <div class="zone" id="zoneApprovals">
+        <div class="zone-header">
+            <span class="zone-title">Waiting for your approval</span>
+            <span class="zone-count" id="approvalsCount">0</span>
+            <span class="zone-sub">Loop-raised work only. Nothing is sent, filed or actioned until you decide.</span>
+        </div>
+        <div id="approvalsBody"><div class="zone-loading"><div class="sop-spinner"></div><span>Loading the approval queue…</span></div></div>
+    </div>
+
+    <div class="zone" id="zoneChecks">
+        <div class="zone-header">
+            <span class="zone-title">Check these</span>
+            <span class="zone-count" id="checksCount">0</span>
+            <span class="zone-sub">What should have moved and has not. Absence, not successes.</span>
+        </div>
+        <div id="checksBody"><div class="zone-loading"><div class="sop-spinner"></div><span>Working out what has not moved…</span></div></div>
+    </div>
+
+    <div class="zone" id="zoneRegister">
+        <div class="zone-header">
+            <span class="zone-title">Workforce register</span>
+            <span class="zone-count" id="registerCount">0</span>
+            <span class="zone-sub">Every agent, its guardrails, its workload and its score.</span>
+        </div>
+        <div id="registerBody"><div class="zone-loading"><div class="sop-spinner"></div><span>Loading the agents register…</span></div></div>
+    </div>
+</div>
+
+<div class="loading" id="loader">Loading...</div>
+<div class="toast" id="toast"></div>
+
+<!-- Model IDs live once in js/ai-models.js. This page cannot load js/config.js
+     (it declares its own BASE_ID/PAT), so it reads window.AI_MODELS directly.
+     Never hardcode a model ID below. -->
+<script src="../../js/ai-models.js?v=1"></script>
+<!-- Shared accuracy scoring (per agent PER TASK TYPE) — same maths as the
+     Leadership Dashboard card. Pure IIFE, safe to load here. -->
+<script src="../../js/agent-accuracy.js?v=1"></script>
+<script src="../../js/sync-bar.js?v=6"></script>
+<script>
+// ═══════════════════════════════════════════════════════════════════════
+// Constants
+// ═══════════════════════════════════════════════════════════════════════
+const BASE_ID = 'appnqjDpqDniH3IRl';
+const CLAUDE_PROXY = 'https://claude-proxy.kevinbrittain.workers.dev';
+
+// Tasks table — the approval loop's home. Field IDs match js/config.js
+// TASK_FIELDS, scripts/slack-automation/approvals.js AF and os/tasks.
+const TASKS_TBL = 'tblqB8b22hKBL4PF1';
+const TF = {
+    name:             'fldgFjGBw6bTKJFCD',
+    status:           'fldx4qCw17UfrKpaN',
+    description:      'fldRGhBQViKZKtkQ6',
+    notes:            'fldR7apBzSp3oxFxz',
+    dueDate:          'fld7XP8w8kbxfETV4',
+    assignee:         'fldELMncVJYPDRJNc',
+    teamMember:       'flduCtmQGpOA4eWaj',
+    sentForApprovalBy:'fld30Yw8SWYVp049g',
+    agentOutput:      'fldzswp8fx6PqpLQ5',
+    approvalOutcome:  'fldrHBSr6qoUfaKuZ',
+    approvalFeedback: 'fldtI7SJI4gEohHD1',
+    approvedBy:       'fldNntfwSzU5DlYS4',
+    approvedAt:       'fldr4Mvf2RzKvhZhi',
+    taskType:         'fldZ2moDV2041Sobc',
+    completionDate:   'fldFOi1SwEKuJRmdN',
+    lmt:              'flddJA23cJRX5cs1K', // lastModifiedTime — watches every field
+    slackBaseline:    'fldxsqj9JSRBGNyT9', // when the Slack card went out (submission proxy)
+    inboundTask:      'fldueazD67F7fUGee', // Inbound Communication Task checkbox
+};
+
+// This page is admin-only (Kevin's build). Decisions are stamped with the
+// same identity the Slack loop uses (APPROVERS.kevin in approvals.js).
+const APPROVER_EMAIL = 'kevin@runpreneur.org.uk';
+const APPROVAL_OUTCOMES = (window.AgentAccuracy && window.AgentAccuracy.APPROVAL_OUTCOMES)
+    || ['Approved as-is', 'Approved with minor edits', 'Changes requested', 'Rejected'];
+// Same list the Tasks drawer offers — scores the agent per kind of work.
+const TASK_TYPE_OPTIONS = ['Drafting','Research','Analysis','Build','Audit','Admin','Correspondence'];
+
+// The banner agent-dispatch.py stamps on tier-1 Agent Output. Defined once in
+// scripts/agent_email_format.py (TIER1_BANNER); duplicated here because a
+// browser page cannot import Python. Detection also accepts the emoji form.
+const TIER1_BANNER = ':rotating_light: TIER 1. This touches your private legal and financial '
+    + 'matter. An AI agent prepared it. Nothing has been sent, filed, paid or '
+    + 'changed anywhere. Read it before you approve.';
+function isTier1Output(raw){
+    const s = String(raw||'').trimStart();
+    return s.startsWith(TIER1_BANNER) || /^(:rotating_light:|\u{1F6A8})\s*TIER\s*1\b/iu.test(s);
+}
+
+// ── AI Agents register (role agents) — moved from os/systemisation 25 Aug 2026 ──
+// One row per role-specific agent (Prospecting, Reconciliation, …). The
+// register is the management layer; each agent's runtime lives wherever it
+// executes. Identity for workload/accuracy comes from the linked Team Members
+// row — never duplicated here.
+const AGENTS_TBL = 'tbl9msVjyQWslLOIZ';
+const AG = {
+    name:        'fldhtLvryVEzeGbl8',
+    goal:        'fldz8O9KihauZ46Cd',
+    status:      'fld71vXWqcxhdljac',
+    guardrail:   'fldWgqxMFmaAAvUHC',
+    readiness:   'fld4qm3OtXPcSwHrl',
+    department:  'fldd49EhRAOeAMRvk',
+    teamMember:  'fldEtzFGbNe4te9xL',
+    workflow:    'fldSTcaGki2KgCwlD',
+    aim:         'fld7kWcEXyrX7pmC3',
+    goSignal:    'fldRWRHVJaYxX8im3',
+    entryPoints: 'fld3i927FF2kjAtjQ',
+    navigate:    'fldvevAHLlPMEIDoq',
+    tools:       'fldihzJ09myArHyeO',
+    // reasoning fldkSsmUC1r3yMyIv is DEPRECATED (folded into Navigate, 25 Aug 2026) — never write it
+    inspections: 'fldm5DIBQyMYwfeMj',
+    conclusion:  'fldDmYKLfbisjfm5m',
+    scoreMetric: 'fldzuYYA67h3b3MHB',
+    stageScores: 'fldxamwviB0v7YFJv',
+    source:      'fldVRrIKo0yJDzhIe',
+    notes:       'fldiKbBbhoKIN3Vmi',
+    metricScore: 'fldkGxrOlrfuLlH3J', // the agent's CURRENT reading vs its target
+    agentPrompt: 'fldV6ve4IEUDkiKoy', // compiled full working prompt
+    learningLog: 'fldBdnKB1U4jZM0Jj', // dated lessons from approval feedback
+};
+// AI Agent Daily Log — one row per agent per day, written by each agent's own
+// runtime (e.g. scripts/inbound-triage.py publish). The panel's "Daily
+// decisions" section reads it so Kevin can check any day's calls or leave them.
+const ALOG_TABLE = 'tbl6VQKVMnK0Q7hbJ';
+const ALOG = {
+    logDay:    'fldNLubsilKUL6fyd',
+    date:      'fldr9ktRlG8e93AMN',
+    agent:     'fld8OSVSzfXcDjDIl',  // link to AI Agents
+    summary:   'fld0vrdlfSiZjR6wg',
+    decisions: 'fldTwM2eJvNyUibi4',
+};
+const AG_STAGE_FIELDS = { A:AG.aim, G:AG.goSignal, E:AG.entryPoints, N:AG.navigate, T:AG.tools, I:AG.inspections, C:AG.conclusion };
+const AGENT_STATUSES = ['Planned','Building','Built','Live','Paused'];
+const AGENT_STATUS_META = {
+    Planned:  { bg:'var(--bg-subtle)',   fg:'var(--text-muted)' },
+    Building: { bg:'var(--info-bg)',     fg:'var(--info)' },
+    Built:    { bg:'var(--accent-soft)', fg:'var(--accent)' },
+    Live:     { bg:'var(--success-bg)',  fg:'var(--success)' },
+    Paused:   { bg:'var(--warning-bg)',  fg:'var(--warning)' },
+};
+// Kevin's three guardrail styles (matches Chen's 3-tier decision framework).
+const GUARDRAIL_LEVELS = [
+    { key:'Autonomous',        blurb:'Does the whole job start to finish on its own. For low-stakes, easily-undone work.' },
+    { key:'Approval required', blurb:'Prepares everything, acts only after your yes. Nothing reaches the outside world unapproved.' },
+    { key:'Hybrid escalation', blurb:'Runs the agreed process itself. Anything outside the agreed path comes to you first.' },
+];
+// Team Members (people AND AI agents). Read-only here.
+const TEAM_TBL = 'tblco0p2OnlLQVAX7';
+const TM_NAME = 'flds7xoRFQhcRTnbB', TM_ACTIVE = 'fld2YLfcPqSe6b60u', TM_IS_AI = 'fldKGsz9kTpFypeOr';
+
+// Workflows + steps + businesses — read for the PROCESS agents (video route).
+// Building SOPs stays on the Systemisation page; this page only OPERATES the
+// workflows whose SOP runs as an agent.
+const WFS_TBL  = 'tblLPoRHFBl0vqR24';
+const WF = {
+    name:            'fldsaS0jeoSRuJN28',
+    description:     'fld1cGXzKp8ab5nBr',
+    business:        'fldQcQSnlSipSBhb4',
+    sopDocument:     'fldW4qoDv2mrTNvu7',
+};
+const STEPS_TBL = 'tblTadoyWXFHbmYxm';
+const ST = {
+    name:        'fldqKG4mVY16PTNmO',
+    description: 'fldlSSG0bV9VyhKEN',
+    workflow:    'fldmGLPupz0fZFfch',
+    sortOrder:   'fldOWS3MfMSVJyo0b',
+};
+const BIZ_TBL = 'tblpqkvWJJo8Uu25q';
+const BIZ_NAME = 'fldbbRqVxLxUdHwIR';
+const BIZ_ACTIVE = 'fldhXBnRrngCVsgSk';
+
+const DEPARTMENTS = ['Marketing', 'Sales', 'Operations', 'Finance', 'Admin / HR'];
+
+// AGENTIC extraction framework — the seven stages. Amended 25 Aug 2026 on
+// Kevin's call: the acronym stays AGENTIC. Chen's reasoning core lives INSIDE
+// Navigate (the walk-through is where decisions get narrated) and C carries
+// the score. Wording is the single source of truth (see
+// docs/agentic-extraction-spec.md). naAllowed is PER MODE — the stage list,
+// the pass rules and the normaliser all derive from it, so the prompt can
+// never contradict what is enforced. The Systemisation page keeps an
+// identical copy for its workflow (SOP) readiness check;
+// tests/agentic-stages.test.js fails if the two copies drift.
+const AGENTIC_STAGES = [
+    { letter:'A', name:'Aim',                     naAllowed:{agent:false,human:false}, prompt:'In a sentence or two, what is this process for, and why does it matter to the business?' },
+    { letter:'G', name:'Go Signal',               naAllowed:{agent:false,human:false}, prompt:'What tells you it is time to do this? A set time, an email arriving, a new record, a payment landing, or someone asking? This trigger is specific to THIS agent — there is no blanket schedule.' },
+    { letter:'E', name:'Entry Points',            naAllowed:{agent:false,human:false}, prompt:'Where do you go and what do you open to do this? Which systems, inboxes, files, or records, and what do you need from each?' },
+    { letter:'N', name:'Navigate the Process',    naAllowed:{agent:false,human:false}, prompt:'Walk me through exactly what you do, step by step. Every time you make a choice, say how you decide and why. And when something odd comes up that the steps do not cover, what happens: best guess, skip it, or stop and ask you?' },
+    { letter:'T', name:'Tools & Transformations', naAllowed:{agent:false,human:false}, prompt:'What do you actually change, create, or send? Name every system you write into.' },
+    { letter:'I', name:'Inspections & Caveats',   naAllowed:{agent:true,human:true},   prompt:'Before you call it done, what do you check? What would you never let go out unchecked? And what trips this up — the odd cases, the exceptions, anything you must never do?' },
+    { letter:'C', name:'Conclusion & Score',      naAllowed:{agent:false,human:false}, prompt:'What does the finished job look like, and how is success scored? Describe the end result of one good run, and the number or check that tells you over time it is doing a good job.' },
+];
+function stageNaAllowed(def, human){ return !!def.naAllowed[human ? 'human' : 'agent']; }
+
+// ═══════════════════════════════════════════════════════════════════════
+// State
+// ═══════════════════════════════════════════════════════════════════════
+let PAT = '';
+let allApprovals = [];          // loop-raised tasks at Status Approval
+let _approvalsState = 'idle';   // idle | loading | ready | 'error: <message>'
+let allOpenTasks = [];          // all non-Completed/non-Cancelled tasks (Check zone feeds)
+let _openTasksState = 'idle';
+let allAgents = [];             // rows from AGENTS_TBL
+let allTeam = [];               // every Team Members row (names for raiser lookup)
+let allTeamAgents = [];         // Team Members rows with Is AI Agent (strategic layer + wiring)
+let _agentTaskStats = {};       // teamMemberId -> {open, doneToday, done7}
+let _agentAccuracyRows = [];    // AgentAccuracy rows (per agent per task type)
+let _agentAccuracyOk = false;   // control: approval history matched at least one row
+let _agentTaskStatsOk = false;  // control: the task read returned rows
+let _agentsRegisterState = 'idle';
+let selectedAgentId = null;     // selected ROLE agent (register record id)
+let selectedAgentWf = null;     // selected PROCESS agent (workflow record id)
+let allWorkflows = [];
+let allSteps = [];
+let allBusinesses = [];
+let _workflowsState = 'idle';
+let allDailyLogRows = [];       // recent AI Agent Daily Log rows (newest first)
+let _dailyLogState = 'idle';
+let _agStageEditing = null;     // 'agentId:letter' while a stage is being edited
+let _agForm = null;             // in-progress guided form state (survives close)
+let _agFormOpen = false;
+let _registerSearch = '', _refocusSearchId = '';
+let _agentDailyLogs = {};       // lazy per-agent daily-log cache for the panel
+
+// ═══════════════════════════════════════════════════════════════════════
+// Helpers
+// ═══════════════════════════════════════════════════════════════════════
+function esc(s){ if(!s) return ''; return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+function gf(rec,fid){ return rec?.fields?.[fid] ?? null; }
+function selName(v){ return typeof v === 'object' && v !== null ? (v.name || '') : String(v||''); }
+function linkIds(v){ if(!v) return []; return (Array.isArray(v)?v:[v]).map(x=> typeof x==='string'?x:(x?.id||'')).filter(Boolean); }
+function toast(msg,ms=2500){ const t=document.getElementById('toast'); t.textContent=msg; t.classList.add('show'); setTimeout(()=>t.classList.remove('show'),ms); }
+function todayStr(){ const d=new Date(); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
+function hoursSince(iso){ if(!iso) return null; const ms = Date.now() - Date.parse(iso); return isNaN(ms) ? null : ms/3600000; }
+function agoText(iso){
+    const h = hoursSince(iso);
+    if(h===null) return 'unknown';
+    if(h < 1) return Math.max(1,Math.round(h*60)) + ' min';
+    if(h < 48) return Math.round(h) + 'h';
+    return Math.round(h/24) + ' days';
+}
+function teamName(id){
+    const t = allTeam.find(x=>x.id===id);
+    return t ? (gf(t,TM_NAME)||'Agent') : '';
+}
+
+function closeModal(){ const m=document.getElementById('modalOverlay'); if(m) m.remove(); }
+function showModal(title, body, footer){
+    closeModal();
+    const div = document.createElement('div');
+    div.id = 'modalOverlay';
+    div.className = 'modal-overlay';
+    div.onclick = e=>{ if(e.target===div) closeModal(); };
+    div.innerHTML = `<div class="modal" role="dialog" aria-modal="true" aria-label="${esc(title)}"><div class="modal-title">${esc(title)}</div>${body}<div class="modal-footer">${footer}</div></div>`;
+    document.body.appendChild(div);
+    const firstInput = div.querySelector('input,select,textarea');
+    if(firstInput) firstInput.focus();
+}
+document.addEventListener('keydown', e=>{ if(e.key==='Escape'){ closeModal(); if(_agFormOpen) _agFormOpen = false; } });
+
+// A styled search input. oninput updates the state var, flags itself for
+// re-focus, and re-renders — the render restores focus + caret.
+function agSearchInput(id, value, expr){
+    return `<input id="${id}" type="search" placeholder="Search agents…" value="${esc(value||'')}"
+        style="font-size:var(--fs-xs);padding:5px 10px;border:1px solid var(--border-default);border-radius:var(--radius-sm);background:var(--bg-surface);color:var(--text-primary);min-width:180px"
+        oninput="${expr}">`;
+}
+function restoreSearchFocus(){
+    if(!_refocusSearchId) return;
+    const el = document.getElementById(_refocusSearchId);
+    _refocusSearchId = '';
+    if(el){ el.focus(); const n = el.value.length; try { el.setSelectionRange(n, n); } catch(e){} }
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// Auth
+// ═══════════════════════════════════════════════════════════════════════
+function bootAuth(){
+    try { if(window.parent && window.parent!==window && window.parent.PAT){ PAT=window.parent.PAT; return true; } } catch(e){/* best-effort: safe fallback */}
+    const stored=localStorage.getItem('_dlr_pat');
+    if(stored){ PAT=stored; return true; }
+    return false;
+}
+function saveAuth(){
+    const v=document.getElementById('patInput').value.trim();
+    if(!v) return;
+    PAT=v;
+    localStorage.setItem('_dlr_pat',v);
+    document.getElementById('authError').style.display='none';
+    start();
+}
+function showAuthBar(){
+    PAT=''; localStorage.removeItem('_dlr_pat');
+    document.getElementById('authBar').style.display='flex';
+    document.getElementById('topbar').style.display='none';
+    document.getElementById('main').style.display='none';
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// Airtable API — every read paginates (follows the offset token)
+// ═══════════════════════════════════════════════════════════════════════
+async function atFetch(tableId, fields, extraParams){
+    let all=[], offset='';
+    const params = new URLSearchParams({ returnFieldsByFieldId:'true', pageSize:'100' });
+    if(fields) fields.forEach(f=>params.append('fields[]',f));
+    if(extraParams) Object.entries(extraParams).forEach(([k,v])=>params.set(k,v));
+    do {
+        if(offset) params.set('offset',offset);
+        let res;
+        // Retry 429s in an inner loop, never with `continue`: in a do-while,
+        // continue jumps to the while(offset) test, which on the FIRST page
+        // (offset='') exited and returned [] as if the table were empty.
+        for(let attempt=0;;attempt++){
+            res = await fetch(`https://api.airtable.com/v0/${BASE_ID}/${tableId}?${params}`,{
+                headers:{'Authorization':`Bearer ${PAT}`}
+            });
+            if(res.status===429 && attempt<4){ await new Promise(r=>setTimeout(r,1100)); continue; }
+            break;
+        }
+        if(res.status===401||res.status===403){ showAuthBar(); throw new Error('auth'); }
+        const data = await res.json();
+        all = all.concat(data.records||[]);
+        offset = data.offset||'';
+    } while(offset);
+    return all;
+}
+
+// Same paginated read with field NAMES in the response, for the Agent
+// Activity readers that were built on names. Delegates to atFetch so there is
+// exactly ONE pagination/retry/auth loop on this page.
+function atFetchByName(tableId, params){
+    return atFetch(tableId, null, Object.assign({ returnFieldsByFieldId:'false' }, params||{}));
+}
+
+async function atFetchOne(tableId, recId){
+    const res = await fetch(`https://api.airtable.com/v0/${BASE_ID}/${tableId}/${recId}?returnFieldsByFieldId=true`,{
+        headers:{'Authorization':`Bearer ${PAT}`}
+    });
+    if(res.status===401||res.status===403){ showAuthBar(); throw new Error('auth'); }
+    if(!res.ok) throw new Error(await res.text());
+    return res.json();
+}
+
+async function atCreate(tableId, fields){
+    const res = await fetch(`https://api.airtable.com/v0/${BASE_ID}/${tableId}`,{
+        method:'POST',
+        headers:{'Authorization':`Bearer ${PAT}`,'Content-Type':'application/json'},
+        body: JSON.stringify({ records:[{fields}], typecast:true, returnFieldsByFieldId:true })
+    });
+    if(!res.ok) throw new Error(await res.text());
+    const data = await res.json();
+    return data.records[0];
+}
+
+async function atUpdate(tableId, recId, fields){
+    const res = await fetch(`https://api.airtable.com/v0/${BASE_ID}/${tableId}/${recId}`,{
+        method:'PATCH',
+        headers:{'Authorization':`Bearer ${PAT}`,'Content-Type':'application/json'},
+        body: JSON.stringify({ fields, typecast:true, returnFieldsByFieldId:true })
+    });
+    if(!res.ok) throw new Error(await res.text());
+    return (await res.json());
+}
+
+// Best-effort Airtable record comment — same trail the Tasks drawer leaves.
+async function postTaskComment(taskId, text){
+    try {
+        await fetch(`https://api.airtable.com/v0/${BASE_ID}/${TASKS_TBL}/${taskId}/comments`,{
+            method:'POST',
+            headers:{'Authorization':`Bearer ${PAT}`,'Content-Type':'application/json'},
+            body: JSON.stringify({ text: String(text||'').slice(0,4000) })
+        });
+    } catch(e){ console.warn('approval comment failed', e); }
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// ZONE A — Waiting for your approval
+// ═══════════════════════════════════════════════════════════════════════
+// ONLY loop-raised tasks: Status = Approval AND Sent For Approval By set.
+// 22 legacy property-admin records sit at Status Approval for ever with no
+// raiser — they must never appear here. The exclusion is asserted again
+// client-side (see the sync-bar check), so a formula rename fails loudly
+// instead of quietly widening the queue.
+async function loadApprovals(){
+    _approvalsState = 'loading';
+    try {
+        const recs = await atFetch(TASKS_TBL,
+            [TF.name, TF.status, TF.description, TF.notes, TF.dueDate, TF.taskType,
+             TF.agentOutput, TF.sentForApprovalBy, TF.teamMember, TF.lmt, TF.slackBaseline],
+            { filterByFormula: "AND({Status}='Approval', LEN({Sent For Approval By}&'')>0)" });
+        allApprovals = recs.map(r=>({
+            id: r.id,
+            name: gf(r,TF.name)||'(Untitled)',
+            taskType: selName(gf(r,TF.taskType)),
+            agentOutput: gf(r,TF.agentOutput)||'',
+            description: gf(r,TF.description)||'',
+            notes: gf(r,TF.notes)||'',
+            raiserId: linkIds(gf(r,TF.sentForApprovalBy))[0] || linkIds(gf(r,TF.teamMember))[0] || '',
+            raiserLinked: linkIds(gf(r,TF.sentForApprovalBy)).length > 0,
+            lmt: gf(r,TF.lmt)||'',
+            // Submission-age proxy: the Slack baseline is stamped within a
+            // minute of the agent submitting; LMT is the fallback for a task
+            // the Slack sweep has not posted yet.
+            submittedAt: gf(r,TF.slackBaseline) || gf(r,TF.lmt) || r.createdTime,
+        }));
+        // Oldest waiting first — the longest-suffering ask leads.
+        allApprovals.sort((a,b)=> String(a.submittedAt).localeCompare(String(b.submittedAt)));
+        _approvalsState = 'ready';
+    } catch(e){
+        if(e.message==='auth') throw e;
+        _approvalsState = 'error: ' + (e.message||'load failed');
+    }
+    postApprovalBadge();
+}
+
+// One-glance summary of what the agent is proposing, derived from Agent
+// Output. Mirrors apvSummary in os/tasks/index.html and in
+// scripts/slack-automation/approvals.js — keep the three in step.
+function apvSummary(raw){
+    const text = String(raw||'').replace(/\r/g,'').trim();
+    if(!text || text.length < 280) return '';
+    const m = text.match(/\*{0,2}carrying this out will involve:?\*{0,2}\s*/i);
+    if(m){
+        const s = text.slice(m.index + m[0].length).trim();
+        if(s) return s.length > 400 ? s.slice(0,399)+'…' : s;
+    }
+    const to = text.match(/^TO:\s*(.+)$/im);
+    const subj = text.match(/^SUBJECT:\s*(.+)$/im);
+    if(to && subj) return `Send an email to ${to[1].trim()}. Subject: ${subj[1].trim()}`;
+    for(const line of text.split('\n')){
+        const l = line.trim();
+        if(!l) continue;
+        if(/^#{1,6}\s/.test(l)) continue;            // markdown heading
+        if(/^[-*_=]{3,}$/.test(l)) continue;          // horizontal rule
+        if(/^(:rotating_light:|\u{1F6A8})/u.test(l) || /^\W*tier 1\b/i.test(l)) continue; // tier-1 banner
+        const s = l.replace(/^[*_>#\s]+/,'').replace(/[*_\s]+$/,'');
+        if(!s) continue;
+        return s.length > 300 ? s.slice(0,299)+'…' : s;
+    }
+    return '';
+}
+
+function renderApprovals(){
+    const body = document.getElementById('approvalsBody');
+    const countEl = document.getElementById('approvalsCount');
+    if(String(_approvalsState).indexOf('error') === 0){
+        countEl.textContent = '?';
+        countEl.className = 'zone-count hot';
+        body.innerHTML = `<div class="zone-error">Could not load the approval queue: ${esc(String(_approvalsState).slice(7))}
+            <button class="btn btn-sm" style="margin-left:8px" onclick="refreshAll()">Retry</button></div>`;
+        return;
+    }
+    if(_approvalsState !== 'ready'){
+        body.innerHTML = `<div class="zone-loading"><div class="sop-spinner"></div><span>Loading the approval queue…</span></div>`;
+        return;
+    }
+    countEl.textContent = allApprovals.length;
+    countEl.className = 'zone-count' + (allApprovals.length ? ' hot' : '');
+    if(!allApprovals.length){
+        body.innerHTML = `<div class="empty-state"><p>Nothing is waiting for your approval.</p></div>`;
+        return;
+    }
+    body.innerHTML = allApprovals.map(apvCardHtml).join('');
+}
+
+function apvCardHtml(t){
+    const summary = apvSummary(t.agentOutput);
+    const ask = summary || t.name;
+    const agent = teamName(t.raiserId) || 'No agent recorded';
+    const tier1 = isTier1Output(t.agentOutput);
+    const ageH = hoursSince(t.submittedAt);
+    const late = ageH !== null && ageH > 24;
+    const work = String(t.agentOutput||'').trim();
+    return `<div class="apv-card" data-apv-card="${t.id}">
+        ${tier1 ? `<div class="apv-tier1">TIER 1. This touches your private legal and financial matter. An AI agent prepared it. Nothing has been sent, filed, paid or changed anywhere. Read it before you approve.</div>` : ''}
+        <div class="apv-ask">${esc(ask)}</div>
+        <div class="apv-meta">
+            <span class="apv-chip">${esc(agent)}</span>
+            ${t.taskType ? `<span class="apv-chip">${esc(t.taskType)}</span>` : ''}
+            <span class="apv-age${late?' late':''}" title="Measured from when it was posted for approval (or last changed, if it has not been posted yet)">waiting ${esc(agoText(t.submittedAt))}</span>
+        </div>
+        ${summary ? `<div style="font-size:var(--fs-xs);color:var(--text-muted);margin-bottom:4px">Task: ${esc(t.name)}</div>` : ''}
+        <details class="apv-details">
+            <summary>${work ? 'Read the agent’s full work' : 'The agent left its work empty'}</summary>
+            ${work
+                ? `<div class="apv-body">${esc(work)}</div>`
+                : `<div class="apv-body">The agent left its work empty, so there is nothing here to judge. Do not approve it blind. Use Request changes and tell it to show its work.</div>`}
+            ${t.description ? `<div style="font-size:var(--fs-xs);font-weight:var(--fw-semibold);color:var(--text-secondary);margin-top:8px">The task it was given</div><div class="apv-body">${esc(t.description)}</div>` : ''}
+        </details>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:4px">
+            <label style="font-size:var(--fs-xs);color:var(--text-secondary);font-weight:var(--fw-semibold)">Kind of work (scores the agent)</label>
+            <select class="apv-type" id="apvType-${t.id}">
+                <option value="">Not set</option>
+                ${TASK_TYPE_OPTIONS.map(o=>`<option value="${o}" ${t.taskType===o?'selected':''}>${o}</option>`).join('')}
+            </select>
+        </div>
+        <textarea class="apv-note" id="apvNote-${t.id}" placeholder="What to change, or why you are rejecting. Required for Request changes and Reject."></textarea>
+        <div class="apv-actions">
+            <button class="btn btn-success" data-apv-btn onclick="agDecide('${t.id}','Approved as-is')">Approve</button>
+            <button class="btn" data-apv-btn onclick="agDecide('${t.id}','Approved with minor edits')" title="Approved, but you tidied it first. Still counts as accurate.">Approve with minor edits</button>
+            <button class="btn" data-apv-btn onclick="agDecide('${t.id}','Changes requested')" title="Goes back to the agent to redo. Needs a comment.">Request changes</button>
+            <button class="btn btn-danger" data-apv-btn onclick="agDecide('${t.id}','Rejected')" title="Closed. Counts against the agent. Needs a reason.">Reject</button>
+        </div>
+    </div>`;
+}
+
+// Record Kevin's verdict — the SAME writes as the Tasks drawer's apvDecide and
+// the Slack loop's applyDecision. This page is the third face of the ONE
+// mechanism, never a new one. Reject asks for confirmation first.
+function agDecide(taskId, outcome){
+    const t = allApprovals.find(x=>x.id===taskId);
+    if(!t) return;
+    if(APPROVAL_OUTCOMES.indexOf(outcome)===-1) return;
+    const noteEl = document.getElementById('apvNote-'+taskId);
+    const note = (noteEl && noteEl.value || '').trim();
+    const needsNote = (outcome==='Changes requested' || outcome==='Rejected');
+    if(needsNote && !note){
+        toast(outcome==='Rejected' ? 'Add a reason before rejecting.' : 'Say what needs changing before sending it back.');
+        if(noteEl) noteEl.focus();
+        return;
+    }
+    if(outcome==='Rejected'){
+        const agent = teamName(t.raiserId) || 'the agent';
+        showModal('Reject this work?',
+            `<p style="font-size:var(--fs-sm);color:var(--text-secondary);line-height:1.6">This closes the task and counts against ${esc(agent)}. Nothing goes out.<br><br><strong>Reason:</strong> ${esc(note)}</p>`,
+            `<button class="btn" onclick="closeModal()">Cancel</button>
+             <button class="btn btn-danger" onclick="closeModal();applyApprovalDecision('${taskId}','Rejected')">Reject</button>`);
+        return;
+    }
+    applyApprovalDecision(taskId, outcome);
+}
+window.agDecide = agDecide;
+
+async function applyApprovalDecision(taskId, outcome){
+    const t = allApprovals.find(x=>x.id===taskId);
+    if(!t) return;
+    const noteEl = document.getElementById('apvNote-'+taskId);
+    const note = (noteEl && noteEl.value || '').trim();
+    const typeEl = document.getElementById('apvType-'+taskId);
+    const chosenType = (typeEl && typeEl.value) || '';
+    const card = document.querySelector(`[data-apv-card="${taskId}"]`);
+    const btns = card ? Array.from(card.querySelectorAll('[data-apv-btn]')) : [];
+    btns.forEach(b=>{ b.disabled = true; });
+    try {
+        // STALE-APPROVAL GUARD (same principle as the Slack baseline): a click
+        // approves what was on screen when the card RENDERED. Re-read the task
+        // and refuse if it has changed since, rather than acting on something
+        // Kevin has not read.
+        const live = await atFetchOne(TASKS_TBL, taskId);
+        const liveLmt = String(gf(live,TF.lmt)||'');
+        const liveStatus = selName(gf(live,TF.status));
+        if(liveStatus !== 'Approval'){
+            toast('Already decided elsewhere (Slack or the Tasks drawer). Reloading the queue.');
+            await loadApprovals(); renderApprovals();
+            return;
+        }
+        if(liveLmt !== String(t.lmt||'')){
+            toast('Not applying that. This task changed after it was shown here, so reload and read it again first.');
+            await loadApprovals(); renderApprovals();
+            return;
+        }
+
+        const nowIso = new Date().toISOString();
+        const payload = {};
+        payload[TF.approvalOutcome] = outcome;
+        payload[TF.approvedAt] = nowIso;
+        payload[TF.approvedBy] = { email: APPROVER_EMAIL };
+        if(chosenType && chosenType !== t.taskType) payload[TF.taskType] = chosenType;
+        // The agent reads this field to find out what to change. A record
+        // comment alone is not enough: the Slack worker's Airtable token
+        // cannot read comments, so the field is the only place both sides see.
+        if(note) payload[TF.approvalFeedback] = note;
+        if(outcome==='Rejected'){
+            // Closed with a reason. Counts against the agent's accuracy.
+            payload[TF.status] = 'Completed';
+            payload[TF.completionDate] = nowIso;
+        } else {
+            // Back to the agent, due today, so the approved action gets
+            // carried out. Reopening MUST clear the completion stamp (same
+            // rule as the Tasks drawer and the Slack worker).
+            payload[TF.status] = 'Today';
+            payload[TF.dueDate] = todayStr();
+            payload[TF.completionDate] = null;
+        }
+        if(t.raiserId){
+            payload[TF.teamMember] = [t.raiserId];
+            payload[TF.sentForApprovalBy] = [t.raiserId];
+            // The agent owns it now — Assignee is a human field and cannot hold one.
+            payload[TF.assignee] = null;
+        }
+        await atUpdate(TASKS_TBL, taskId, payload);
+
+        const agentLabel = teamName(t.raiserId) || 'the agent';
+        const line = outcome==='Rejected'
+            ? `Rejected. Reason: ${note}`
+            : outcome==='Changes requested'
+                ? `Changes requested. ${note}`
+                : `${outcome}. Back to ${agentLabel} to carry out.${note ? ' Note: '+note : ''}`;
+        await postTaskComment(taskId, line);
+
+        allApprovals = allApprovals.filter(x=>x.id!==taskId);
+        renderApprovals();
+        postApprovalBadge();
+        loadChecksAndRender(); // approvals feed the >24h check — keep it honest
+        if(!t.raiserId) toast('Recorded, but no agent was linked to this task, so it could not be handed back.');
+        else toast(outcome==='Rejected' ? 'Rejected and closed.' : `${outcome} — back to ${agentLabel}.`);
+    } catch(e){
+        if(e.message==='auth') return;
+        console.error('approval decision failed', e);
+        toast('Could not save the decision: ' + (e && e.message || e));
+        btns.forEach(b=>{ b.disabled = false; });
+    }
+}
+window.applyApprovalDecision = applyApprovalDecision;
+
+// The sidebar badge in the shell: post the waiting count up to the parent.
+// Same postMessage channel the sync bar uses (js/shared.js listens).
+function postApprovalBadge(){
+    try {
+        if(window.parent && window.parent !== window){
+            window.parent.postMessage({ type:'agentsApprovalCount', count: allApprovals.length }, '*');
+        }
+    } catch(e){ /* standalone page — no parent to tell */ }
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// ZONE B — Check these (absence and stuckness, not successes)
+// ═══════════════════════════════════════════════════════════════════════
+// Kevin's standing rule: a trust surface must report what SHOULD have moved
+// and has not. Arrivals-and-successes lists cannot restore trust.
+
+// One open-tasks read feeds two lanes (stuck agent tasks + inbound promise).
+// The only formula field is {Status}, which every existing query on this
+// platform already proves; everything else filters client-side on field IDs,
+// so a display-name rename cannot silently empty a lane.
+async function loadOpenTasks(){
+    _openTasksState = 'loading';
+    try {
+        allOpenTasks = await atFetch(TASKS_TBL,
+            [TF.name, TF.status, TF.dueDate, TF.teamMember, TF.lmt, TF.inboundTask],
+            { filterByFormula: "AND({Status}!='Completed', {Status}!='Cancelled')" });
+        // CONTROL: the board carries ~250-300 open tasks at all times. Zero
+        // rows means the query broke, not an empty business — fail loudly.
+        if(!allOpenTasks.length) throw new Error('open-tasks read returned zero rows (expected hundreds) — check the Status field name');
+        _openTasksState = 'ready';
+    } catch(e){
+        if(e.message==='auth') throw e;
+        _openTasksState = 'error: ' + (e.message||'load failed');
+    }
+}
+
+// Recent AI Agent Daily Log rows — feeds the "agent wrote nothing today" lane
+// and the per-agent Daily decisions panel. Sorted newest first server-side;
+// link matching is done CLIENT-side (matching a link field by record id inside
+// a formula is the documented ARRAYJOIN trap).
+async function loadDailyLogs(){
+    _dailyLogState = 'loading';
+    try {
+        allDailyLogRows = await atFetch(ALOG_TABLE, null, {
+            'sort[0][field]': 'Date', 'sort[0][direction]': 'desc', maxRecords: '200',
+        });
+        _dailyLogState = 'ready';
+    } catch(e){
+        if(e.message==='auth') throw e;
+        _dailyLogState = 'error: ' + (e.message||'load failed');
+    }
+}
+
+// Build the check items. Each lane returns {items:[...]} or {error:'...'} so a
+// broken feed shows as a fault, never as a clean slate.
+function computeCheckLanes(){
+    const lanes = [];
+    const aiAgentIds = new Set(allTeamAgents.map(t=>t.id));
+
+    // 1. Approvals waiting more than 24 hours (same loop-raised population as Zone A).
+    if(String(_approvalsState).indexOf('error') === 0){
+        lanes.push({ lane:'Approvals', error: String(_approvalsState).slice(7) });
+    } else {
+        lanes.push({ lane:'Approvals', items: allApprovals
+            .filter(t=>{ const h = hoursSince(t.submittedAt); return h !== null && h > 24; })
+            .map(t=>({
+                severity: 'warn',
+                text: `"${t.name}" should have been decided within a day. It has waited ${agoText(t.submittedAt)}.`,
+                detail: `Prepared by ${teamName(t.raiserId)||'an unrecorded agent'}. Decide it in the queue above.`,
+            })) });
+    }
+
+    // 2. Agent-owned tasks past their due date and not moving.
+    if(String(_openTasksState).indexOf('error') === 0){
+        lanes.push({ lane:'Stuck tasks', error: String(_openTasksState).slice(7) });
+    } else {
+        const today = todayStr();
+        lanes.push({ lane:'Stuck tasks', items: allOpenTasks
+            .filter(r=>{
+                const status = selName(gf(r,TF.status));
+                if(status!=='Today' && status!=='Overdue') return false;
+                const tmIds = linkIds(gf(r,TF.teamMember));
+                if(!tmIds.some(id=>aiAgentIds.has(id))) return false;
+                const due = String(gf(r,TF.dueDate)||'').slice(0,10);
+                return due && due < today;
+            })
+            .map(r=>{
+                const tmIds = linkIds(gf(r,TF.teamMember));
+                const agent = tmIds.map(teamName).filter(Boolean).join(', ') || 'an AI agent';
+                return {
+                    severity: 'warn',
+                    text: `"${gf(r,TF.name)||'(Untitled)'}" should have been done by ${String(gf(r,TF.dueDate)||'').slice(0,10)} and has not moved.`,
+                    detail: `Owned by ${agent}. Last touched ${agoText(gf(r,TF.lmt))} ago.`,
+                };
+            }) });
+    }
+
+    // 3. Open inbound reply tasks older than 24 hours — the 24-hour promise at risk.
+    if(String(_openTasksState).indexOf('error') === 0){
+        lanes.push({ lane:'Inbound', error: String(_openTasksState).slice(7) });
+    } else {
+        lanes.push({ lane:'Inbound', items: allOpenTasks
+            .filter(r=>{
+                if(!gf(r,TF.inboundTask)) return false;
+                const h = hoursSince(r.createdTime);
+                return h !== null && h > 24;
+            })
+            .map(r=>({
+                severity: 'danger',
+                text: `Inbound reply "${gf(r,TF.name)||'(Untitled)'}" should have gone out within 24 hours. It has been open ${agoText(r.createdTime)}.`,
+                detail: `Status ${selName(gf(r,TF.status))||'unknown'}. The 24-hour reply promise is at risk.`,
+            })) });
+    }
+
+    // 4. Built/Live agents that wrote nothing to the AI Agent Daily Log today.
+    if(String(_agentsRegisterState).indexOf('error') === 0){
+        lanes.push({ lane:'Daily logs', error: String(_agentsRegisterState).slice(7) });
+    } else if(String(_dailyLogState).indexOf('error') === 0){
+        lanes.push({ lane:'Daily logs', error: String(_dailyLogState).slice(7) });
+    } else {
+        const today = todayStr();
+        const loggedToday = new Set();
+        allDailyLogRows.forEach(r=>{
+            if(String(gf(r,ALOG.date)||'').slice(0,10) !== today) return;
+            linkIds(gf(r,ALOG.agent)).forEach(id=>loggedToday.add(id));
+        });
+        lanes.push({ lane:'Daily logs', items: allAgents
+            .filter(a=>{
+                const status = selName(gf(a,AG.status));
+                return (status==='Built' || status==='Live') && !loggedToday.has(a.id);
+            })
+            .map(a=>({
+                severity: 'warn',
+                text: `${gf(a,AG.name)||'An agent'} is ${selName(gf(a,AG.status))} but has written nothing to its daily log today.`,
+                detail: 'Every Built or Live agent should log its decisions at the end of each run. Silence means it has not run, or the log write is broken.',
+            })) });
+    }
+
+    // 5. Guardrail auto-tightening in the last 7 days — the system pulled an
+    // agent's leash in on its own; Kevin should know it happened.
+    if(String(_agentsRegisterState).indexOf('error') === 0){
+        lanes.push({ lane:'Guardrails', error: String(_agentsRegisterState).slice(7) });
+    } else {
+        const cutoff = Date.now() - 7*86400000;
+        const items = [];
+        allAgents.forEach(a=>{
+            const log = String(gf(a,AG.learningLog)||'');
+            log.split('\n').forEach(line=>{
+                const m = line.match(/^(\d{4}-\d{2}-\d{2}): (guardrails auto-tightened .+)$/);
+                if(!m) return;
+                const at = Date.parse(m[1]);
+                if(isNaN(at) || at < cutoff) return;
+                items.push({
+                    severity: 'danger',
+                    text: `${gf(a,AG.name)||'An agent'}: ${m[2]}`,
+                    detail: `Logged ${m[1]}. Accuracy dropped, so the system tightened it automatically. Loosening is your click, in the register below.`,
+                });
+            });
+        });
+        lanes.push({ lane:'Guardrails', items });
+    }
+
+    return lanes;
+}
+
+function loadChecksAndRender(){
+    const body = document.getElementById('checksBody');
+    const countEl = document.getElementById('checksCount');
+    const lanes = computeCheckLanes();
+    const errors = lanes.filter(l=>l.error);
+    const items = lanes.flatMap(l=>(l.items||[]).map(i=>Object.assign({lane:l.lane}, i)));
+    countEl.textContent = items.length;
+    countEl.className = 'zone-count' + (items.length ? ' hot' : '');
+    let html = '';
+    // A lane that could not be read must never read as clean.
+    errors.forEach(l=>{
+        html += `<div class="zone-error" style="margin-bottom:8px">The "${esc(l.lane)}" check could not run: ${esc(l.error)}. Treat this lane as unknown, not clear.</div>`;
+    });
+    if(items.length){
+        html += items.map(i=>`<div class="chk-item${i.severity==='danger'?' danger':''}">
+            <span class="chk-lane">${esc(i.lane)}</span>
+            <div><div class="chk-text">${esc(i.text)}</div>
+            ${i.detail?`<div class="chk-detail">${esc(i.detail)}</div>`:''}</div>
+        </div>`).join('');
+    } else if(!errors.length){
+        html = `<div class="chk-clear">Nothing needs you — all agents moving.</div>`;
+    }
+    body.innerHTML = html;
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// ZONE C — Workforce register (moved from os/systemisation 25 Aug 2026)
+// Three layers:
+//   1. ROLE AGENTS — the register (Airtable AI Agents table): one row per
+//      role-specific agent, with goal, guardrail level, status, workload,
+//      accuracy, and the seven AGENTIC stages.
+//   2. STRATEGIC LAYER — the AI CEO, department heads and generic workers
+//      (Team Members rows). Unchanged by the register; shown for workload.
+//   3. PROCESS AGENTS — workflows whose SOP runs as an agent (video route).
+// Building SOPs stays on the Systemisation page; agents are MANAGED here.
+// ═══════════════════════════════════════════════════════════════════════
+
+async function loadAgentsRegister(force){
+    if(_agentsRegisterState==='loading') return;
+    if(_agentsRegisterState==='ready' && !force) return;
+    _agentsRegisterState = 'loading';
+    try {
+        // The three reads are independent — run them together. The full Team
+        // Members read (names only) also resolves approval-raiser names.
+        const [agents, team, taskRecs] = await Promise.all([
+            atFetch(AGENTS_TBL),
+            atFetch(TEAM_TBL, [TM_NAME, TM_ACTIVE, TM_IS_AI]),
+            fetchAgentTaskRecords(),
+        ]);
+        allTeam = team;
+        const aiTeam = team.filter(t=>{
+            const isAi = gf(t,TM_IS_AI), active = gf(t,TM_ACTIVE);
+            return (isAi===true||isAi===1) && (active===true||active===1);
+        });
+        // Control: ~17 AI-agent Team Members rows exist. Zero means the read
+        // broke (a field rename), not an empty workforce — fail loudly.
+        if(!aiTeam.length) throw new Error('Team Members returned zero AI agents (expected ~17) — check the "Is AI Agent" / "Active" field IDs');
+        allAgents = agents;
+        allTeamAgents = aiTeam.sort((a,b)=>String(gf(a,TM_NAME)||'').localeCompare(String(gf(b,TM_NAME)||'')));
+        computeAgentTaskStats(taskRecs);
+        await enforceGuardrailBands();
+        _agentsRegisterState = 'ready';
+    } catch(e){
+        if(e.message==='auth') throw e;
+        _agentsRegisterState = 'error: ' + (e.message || 'load failed');
+    }
+}
+
+// Workload + accuracy in ONE Tasks read: open tasks and last-7-day completions
+// for anyone linked via Team Member, plus the WHOLE approval-loop history —
+// matched on the outcome itself, so a decided task with only a Team Member
+// link still counts (same population as the Leadership Dashboard card).
+function fetchAgentTaskRecords(){
+    const fields = [TF.teamMember, TF.sentForApprovalBy, TF.approvalOutcome, TF.approvedAt, TF.taskType, TF.status, TF.completionDate];
+    const formula = "OR(AND(NOT({Team Member}=''),{Status}!='Completed'),AND(NOT({Team Member}=''),IS_AFTER({Completion Date},DATEADD(TODAY(),-7,'days'))),LEN({Approval Outcome}&'')>0)";
+    return atFetch(TASKS_TBL, fields, { filterByFormula: formula });
+}
+
+function computeAgentTaskStats(recs){
+    // Control: agents have had linked tasks for weeks. Zero rows means the
+    // query broke (field rename), not a quiet week — show "unavailable", never 0.
+    _agentTaskStatsOk = recs.length > 0;
+    const hist = [];
+    const statsMap = {};
+    const day = 86400000;
+    const localDay = d => { const x=new Date(d); return x.getFullYear()+'-'+String(x.getMonth()+1).padStart(2,'0')+'-'+String(x.getDate()).padStart(2,'0'); };
+    const today = localDay(Date.now());
+    recs.forEach(r=>{
+        const f = r.fields||{};
+        const status = selName(f[TF.status]);
+        const comp = f[TF.completionDate];
+        (f[TF.teamMember]||[]).forEach(id=>{
+            const st = statsMap[id] = statsMap[id]||{open:0,doneToday:0,done7:0};
+            if(status==='Completed'){
+                // The approval-history branch of the formula has NO date bound,
+                // so the 7-day window must be enforced here, never assumed.
+                if(comp && (Date.now()-Date.parse(comp)) < 7*day){ st.done7++; if(localDay(comp)===today) st.doneToday++; }
+            } else if(status && status!=='Cancelled') st.open++;
+        });
+        // Accuracy history — SAME mapping as js/dashboard.js loadAgentApprovalKpi:
+        // agent = Sent For Approval By, falling back to the Team Member link;
+        // blank task type buckets as 'Unclassified'. Divergence here would make
+        // two surfaces disagree on the same agent's score.
+        const outcome = selName(f[TF.approvalOutcome]);
+        const agentId = (f[TF.sentForApprovalBy]||[])[0] || (f[TF.teamMember]||[])[0];
+        if(outcome && agentId) hist.push({ agentId, taskType:selName(f[TF.taskType])||'Unclassified', outcome, at:String(f[TF.approvedAt]||'') });
+    });
+    _agentTaskStats = statsMap;
+    _agentAccuracyOk = hist.length > 0;
+    const names = {};
+    allTeamAgents.forEach(t=>{ names[t.id] = gf(t,TM_NAME) || 'Agent'; });
+    _agentAccuracyRows = (window.AgentAccuracy && window.AgentAccuracy.computeAgentAccuracy)
+        ? window.AgentAccuracy.computeAgentAccuracy(hist, names) : [];
+}
+
+// Never blend per-task-type rates into one number (js/agent-accuracy.js's
+// rule: a blended score hides a weak task type). One type shows its rate;
+// several show the WORST, which is the honest headline. Detail is per type.
+function agentAccuracySummary(tmId){
+    const rows = _agentAccuracyRows.filter(r=>r.agentId===tmId);
+    if(!rows.length) return null;
+    if(rows.length===1) return { text: Math.round(rows[0].rate*100)+'% ('+rows[0].total+')' };
+    const worst = Math.min.apply(null, rows.map(r=>r.rate));
+    return { text: 'worst '+Math.round(worst*100)+'% · '+rows.length+' types' };
+}
+
+// One workload formatter for the register table, the strategic chips and the
+// panel, so the three surfaces can never show different numbers.
+function agentWorkloadText(tmIds){
+    if(!tmIds || !tmIds.length) return null; // not wired
+    if(!_agentTaskStatsOk) return 'unavailable';
+    let open=0, done7=0;
+    tmIds.forEach(id=>{ const s=_agentTaskStats[id]; if(s){ open+=s.open; done7+=s.done7; } });
+    return open+' open · '+done7+' done (7d)';
+}
+// Kevin's accuracy bands (25 Aug 2026): the WORST job type with a real sample
+// (20+ checked pieces) decides the band. Below 70% = Approval required.
+// 70-90%, or any recent rejection = Hybrid. 90%+ clean = Autonomous eligible.
+// Moving DOWN happens automatically; moving UP is always Kevin's click.
+const GUARDRAIL_ORDER = ['Approval required','Hybrid escalation','Autonomous']; // strictest to loosest
+function guardrailBand(tmId){
+    const rows = _agentAccuracyRows.filter(r=>r.agentId===tmId && r.total >= 20);
+    if(!rows.length) return null; // not enough checked work to band on
+    const worst = rows.reduce((a,r)=>r.rate<a.rate?r:a);
+    const recentReject = rows.some(r=>r.recentRejections>0);
+    if(worst.rate < 0.70) return { level:'Approval required', why:'worst job type '+Math.round(worst.rate*100)+'% ('+worst.taskType+')' };
+    if(worst.rate < 0.90 || recentReject) return { level:'Hybrid escalation', why:'worst job type '+Math.round(worst.rate*100)+'%'+(recentReject?', recent rejection':'') };
+    return { level:'Autonomous', why:'every job type 90%+ with a clean recent run' };
+}
+async function enforceGuardrailBands(){
+    for(const a of allAgents){
+        const tmId = (gf(a,AG.teamMember)||[])[0];
+        if(!tmId) continue;
+        const band = guardrailBand(tmId);
+        if(!band) continue;
+        const cur = selName(gf(a,AG.guardrail));
+        const curIdx = GUARDRAIL_ORDER.indexOf(cur), recIdx = GUARDRAIL_ORDER.indexOf(band.level);
+        if(curIdx < 0 || recIdx < 0 || curIdx <= recIdx) continue; // never loosen automatically
+        const stamp = new Date().toISOString().slice(0,10);
+        const log = ((gf(a,AG.learningLog)||'') + '\n' + stamp + ': guardrails auto-tightened ' + cur + ' to ' + band.level + ' (' + band.why + '). Loosening is Kevin\'s click.').trim();
+        await patchAgent(a.id, { [AG.guardrail]: band.level, [AG.learningLog]: log }, null);
+        toast((gf(a,AG.name)||'Agent') + ': guardrails auto-tightened to ' + band.level);
+    }
+}
+
+function agentWorkloadCell(tmIds){
+    const t = agentWorkloadText(tmIds);
+    if(t===null) return '<span style="font-size:var(--fs-xs);color:var(--text-muted)" title="Wire this agent to a Team Members row in its panel to track workload">not wired</span>';
+    if(t==='unavailable') return '<span style="font-size:var(--fs-xs);color:var(--warning)">unavailable</span>';
+    return `<span style="font-size:var(--fs-xs)">${esc(t)}</span>`;
+}
+
+// ── The register (Zone C body) ─────────────────────────────────────────
+function wfMatchesQuery(w, q){
+    q = (q||'').trim().toLowerCase();
+    if(!q) return true;
+    return String(gf(w,WF.name)||'').toLowerCase().includes(q)
+        || String(gf(w,WF.description)||'').toLowerCase().includes(q);
+}
+
+function renderRegister(){
+    const pane = document.getElementById('registerBody');
+    const countEl = document.getElementById('registerCount');
+
+    const q = (_registerSearch||'').trim().toLowerCase();
+    const statusOrder = { Live:0, Built:1, Building:2, Planned:3, Paused:4 };
+    const roleAgents = allAgents
+        .filter(a=>{ if(!q) return true;
+            return String(gf(a,AG.name)||'').toLowerCase().includes(q) || String(gf(a,AG.goal)||'').toLowerCase().includes(q); })
+        .sort((a,b)=>{
+            const so = (statusOrder[selName(gf(a,AG.status))]??9) - (statusOrder[selName(gf(b,AG.status))]??9);
+            return so !== 0 ? so : String(gf(a,AG.name)||'').localeCompare(String(gf(b,AG.name)||''));
+        });
+    const agentWfs = allWorkflows
+        .filter(w=>wfMatchesQuery(w,_registerSearch))
+        .filter(w=>{ const s=getWfSopData(w.id); return s && s.disposition && s.disposition.type==='agent'; })
+        .sort((a,b)=>(gf(a,WF.name)||'').toLowerCase()<(gf(b,WF.name)||'').toLowerCase()?-1:1);
+    // A search can hide the selected process agent; keep the selection and
+    // bring the panel back when it reappears — never null it.
+    const selWfVisible = !!(selectedAgentWf && agentWfs.some(w=>w.id===selectedAgentWf));
+    countEl.textContent = allAgents.length + allWorkflows.filter(w=>{ const s=getWfSopData(w.id); return s && s.disposition && s.disposition.type==='agent'; }).length;
+
+    let html = `<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:12px;flex-wrap:wrap">
+        <p style="font-size:var(--fs-sm);color:var(--text-secondary);margin:0">Your AI workforce: every agent, what it does, its guardrails, its workload, and its score.</p>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+            ${agSearchInput('registerSearchInput', _registerSearch, "_registerSearch=this.value;_refocusSearchId='registerSearchInput';renderRegister()")}
+            <button class="btn btn-sm btn-primary" onclick="openAgentForm()">+ Create an agent</button>
+        </div>
+    </div>`;
+
+    // 1. Role agents (the register)
+    html += `<div class="auto-wf-header" style="margin-bottom:6px">Role agents <span style="color:var(--text-muted);font-weight:var(--fw-regular)">(${roleAgents.length})</span></div>`;
+    if(_agentsRegisterState==='loading' && !allAgents.length){
+        html += `<div class="agentic-loading"><div class="sop-spinner"></div><span>Loading the agents register…</span></div>`;
+    } else if(String(_agentsRegisterState).indexOf('error') === 0){
+        html += `<div class="zone-error">Could not load the agents register: ${esc(String(_agentsRegisterState).slice(7))}
+            <button class="btn btn-sm" style="margin-left:8px" onclick="_agentsRegisterState='idle';refreshAll()">Retry</button></div>`;
+    } else if(!roleAgents.length){
+        html += q
+            ? `<div class="empty-state"><p>No role agents match "${esc(_registerSearch)}".</p></div>`
+            : `<div class="empty-state"><p>No role agents yet.</p><p>Use "+ Create an agent" and the AI will walk you through the ${AGENTIC_STAGES.length} AGENTIC questions.</p></div>`;
+    } else {
+        html += `<table class="wf-grid" style="margin-bottom:14px"><thead><tr>
+            <th style="width:16%">Agent</th>
+            <th>Goal</th>
+            <th style="width:110px">Guardrails</th>
+            <th style="width:80px">Status</th>
+            <th style="width:90px">Metric</th>
+            <th style="width:120px">Workload</th>
+            <th style="width:90px">Accuracy</th>
+        </tr></thead><tbody>`;
+        roleAgents.forEach(a=>{
+            const sel = a.id===selectedAgentId;
+            const status = selName(gf(a,AG.status))||'Planned';
+            const meta = AGENT_STATUS_META[status] || AGENT_STATUS_META.Planned;
+            const tmIds = gf(a,AG.teamMember)||[];
+            const acc = (tmIds.length && _agentAccuracyOk) ? agentAccuracySummary(tmIds[0]) : null;
+            html += `<tr style="${sel?'background:var(--accent-soft);':''}cursor:pointer" onclick="selectRoleAgent('${a.id}')" aria-expanded="${sel?'true':'false'}">
+                <td style="font-weight:var(--fw-semibold)">${esc(gf(a,AG.name)||'Untitled')}</td>
+                <td style="font-size:var(--fs-xs);color:var(--text-secondary);overflow:hidden;text-overflow:ellipsis">${esc(String(gf(a,AG.goal)||'').split('\n')[0])}</td>
+                <td style="font-size:var(--fs-xs)">${esc(selName(gf(a,AG.guardrail))||'Not set')}</td>
+                <td><span class="agent-pill" style="background:${meta.bg};color:${meta.fg}">${esc(status)}</span></td>
+                <td style="font-size:var(--fs-xs)">${gf(a,AG.metricScore)?esc(String(gf(a,AG.metricScore))):`<span style="color:var(--text-muted)" title="Target: ${esc(String(gf(a,AG.scoreMetric)||'not set'))}. The agent's own runtime fills this in once built.">&mdash;</span>`}</td>
+                <td>${agentWorkloadCell(tmIds)}</td>
+                <td style="font-size:var(--fs-xs)">${acc ? esc(acc.text) : '<span style="color:var(--text-muted)" title="No approval history matched for this agent yet. If the dashboard card shows decisions, a field rename broke this read.">&mdash;</span>'}</td>
+            </tr>`;
+        });
+        html += '</tbody></table>';
+    }
+    if(selectedAgentId) html += `<div id="roleagent-panel"></div>`;
+
+    // 2. Strategic layer (collapsible)
+    html += strategicLayerSection();
+
+    // 3. Process agents (workflow-based, video route)
+    html += `<div class="auto-wf-header" style="margin:18px 0 6px">Process agents <span style="color:var(--text-muted);font-weight:var(--fw-regular)">(${agentWfs.length})</span></div>`;
+    if(String(_workflowsState).indexOf('error') === 0){
+        html += `<div class="zone-error">Could not read the workflows: ${esc(String(_workflowsState).slice(7))}</div>`;
+    } else if(!agentWfs.length){
+        html += `<div style="font-size:var(--fs-xs);color:var(--text-muted);margin-bottom:10px">${q?'None match the search.':'None yet. Build a workflow\'s SOP on the Systemisation page, then choose "Autonomous agent" as how it runs — it appears here, ready to test.'}</div>`;
+    } else {
+        html += `<table class="wf-grid" style="margin-bottom:14px"><thead><tr>
+            <th style="width:32%">Agent</th>
+            <th style="width:110px">Status</th>
+            <th style="width:150px">Awaiting your OK</th>
+            <th>Actions</th>
+        </tr></thead><tbody>`;
+        agentWfs.forEach(w=>{
+            const a = getWfAgent(w.id);
+            const meta = a && AGENT_STATES[a.state] ? AGENT_STATES[a.state] : { label:'DRAFT', bg:'var(--bg-subtle)', fg:'var(--text-muted)' };
+            const sel = w.id===selectedAgentWf;
+            html += `<tr style="${sel?'background:var(--accent-soft)':''};cursor:pointer" onclick="selectAgentWf('${w.id}')">
+                <td style="font-weight:var(--fw-semibold)">${esc(gf(w,WF.name)||'Untitled')}</td>
+                <td><span class="agent-pill" style="background:${meta.bg};color:${meta.fg}">${meta.label}</span></td>
+                <td><span id="agpend-${w.id}" style="font-size:var(--fs-xs);color:var(--text-muted)">&mdash;</span></td>
+                <td style="display:flex;gap:4px;flex-wrap:wrap">
+                    ${sel?'<span style="font-size:var(--fs-xs);color:var(--accent);font-weight:var(--fw-semibold);padding:4px 2px">Selected</span>':`<button class="btn btn-sm" onclick="event.stopPropagation();selectAgentWf('${w.id}')">Select</button>`}
+                    <button class="btn btn-sm" onclick="event.stopPropagation();openWorkflowSop('${w.id}')">View SOP</button>
+                </td>
+            </tr>`;
+        });
+        html += '</tbody></table>';
+    }
+    if(selWfVisible) html += `<div id="agentpanel-${selectedAgentWf}"></div>`;
+
+    pane.innerHTML = html;
+    restoreSearchFocus();
+    if(selectedAgentId) renderRoleAgentPanel();
+    if(agentWfs.length) fillAgentPendingCounts(agentWfs.map(w=>w.id));
+    if(selWfVisible) renderAgentPanel(selectedAgentWf);
+}
+
+function selectAgentWf(id){
+    selectedAgentWf = id;
+    renderRegister();
+}
+
+function selectRoleAgent(id){
+    selectedAgentId = (selectedAgentId===id) ? null : id;
+    _agStageEditing = null;
+    renderRegister();
+}
+
+// The SOP itself is built and edited on the Systemisation page. Hand over via
+// localStorage (consumed there on load or via the storage event), then front
+// that tab in the shell — or open the page directly when standalone.
+function openWorkflowSop(wfId){
+    localStorage.setItem('sys_open_steps_wf', wfId);
+    try {
+        if(window.parent && window.parent !== window && typeof window.parent.switchTab === 'function'){
+            window.parent.switchTab('systemisation');
+            return;
+        }
+    } catch(e){ /* cross-origin or standalone — fall through */ }
+    window.open('../systemisation/index.html', '_blank');
+}
+window.openWorkflowSop = openWorkflowSop;
+
+// ── Strategic layer strip ──────────────────────────────────────────────
+function strategicLayerSection(){
+    if(!allTeamAgents.length) return '';
+    const linked = new Set();
+    allAgents.forEach(a=>(gf(a,AG.teamMember)||[]).forEach(id=>linked.add(id)));
+    const strip = allTeamAgents.filter(t=>!linked.has(t.id));
+    if(!strip.length) return '';
+    const chips = strip.map(t=>{
+        const load = agentWorkloadText([t.id]);
+        return `<div style="border:1px solid var(--border-subtle);border-radius:var(--radius-md);background:var(--bg-surface);padding:6px 10px;font-size:var(--fs-xs)">
+            <span style="font-weight:var(--fw-medium)">${esc(gf(t,TM_NAME)||'Agent')}</span>
+            ${(load && load!=='unavailable')?`<span style="color:var(--text-muted);margin-left:6px">${esc(load)}</span>`:''}
+        </div>`;
+    }).join('');
+    return `<div class="agentic-guide" id="strategicLayer" style="margin-top:16px">
+        <div class="agentic-guide-head" onclick="this.parentElement.classList.toggle('open')">
+            <span class="resources-chevron">&#x25B6;</span>
+            Strategic layer — the AI CEO, department heads and workers (${strip.length})
+        </div>
+        <div class="agentic-guide-body">
+            <p class="agentic-guide-intro">Strategic guidance and generic execution. These are unchanged by the register: role agents above do the specific jobs; this layer directs and fills the gaps.</p>
+            <div style="display:flex;gap:6px;flex-wrap:wrap">${chips}</div>
+        </div>
+    </div>`;
+}
+
+// ── Role agent detail panel ────────────────────────────────────────────
+function agentIdSafe(a){ return (a && a.id) || 'unknown agent'; }
+
+// Deterministic compile: the stages ARE the prompt, so there is nothing to
+// drift. Lessons ride at the end so every run applies what Kevin taught it.
+function buildAgentPrompt(a){
+    const name = gf(a,AG.name)||'Agent';
+    const gl = selName(gf(a,AG.guardrail))||'Approval required';
+    const glDef = GUARDRAIL_LEVELS.find(g=>g.key===gl);
+    const lines = [
+        'You are "'+name+'", an AI agent on Kevin Brittain\'s team.',
+        '',
+        'GOAL: '+(gf(a,AG.goal)||'(not set)'),
+        'SCORE: '+(gf(a,AG.scoreMetric)||'(not set)')+(gf(a,AG.metricScore)?' (currently '+gf(a,AG.metricScore)+')':''),
+        'GUARDRAILS: '+gl+(glDef?' - '+glDef.blurb:''),
+        'Always ask first: money, deleting things, and anything only the owner can own.',
+        '',
+        'THE JOB (AGENTIC):',
+    ];
+    AGENTIC_STAGES.forEach(st=>{
+        lines.push(st.letter+' - '+st.name+':');
+        lines.push(gf(a,AG_STAGE_FIELDS[st.letter])||'(not captured yet)');
+        lines.push('');
+    });
+    const log = gf(a,AG.learningLog);
+    if(log){ lines.push('LESSONS LEARNED (apply every one):'); lines.push(log); }
+    return lines.join('\n').trim();
+}
+async function compileAgentPrompt(agentId){
+    const a = allAgents.find(x=>x.id===agentId);
+    if(!a) return;
+    const btn = document.getElementById('agCompileBtn');
+    if(btn){ btn.disabled = true; btn.textContent = 'Compiling…'; }
+    const text = 'Compiled '+new Date().toISOString().slice(0,16).replace('T',' ')+'\n\n'+buildAgentPrompt(a);
+    await patchAgent(agentId, { [AG.agentPrompt]: text }, 'Prompt compiled');
+    renderRoleAgentPanel();
+}
+window.compileAgentPrompt = compileAgentPrompt;
+
+// The agent's recent Daily Log rows, from the page-level read (newest first).
+function agentDailyRows(agentId){
+    if(String(_dailyLogState).indexOf('error') === 0) return 'error';
+    return allDailyLogRows.filter(r=>linkIds(gf(r,ALOG.agent)).includes(agentId)).slice(0,14);
+}
+async function retryDailyLogs(){
+    await loadDailyLogs();
+    renderRoleAgentPanel();
+    loadChecksAndRender();
+}
+window.retryDailyLogs = retryDailyLogs;
+
+function renderRoleAgentPanel(){
+    const el = document.getElementById('roleagent-panel');
+    const a = allAgents.find(x=>x.id===selectedAgentId);
+    if(!el || !a){ if(el) el.innerHTML=''; return; }
+    const name = gf(a,AG.name)||'Untitled';
+    const status = selName(gf(a,AG.status))||'Planned';
+    const guardrail = selName(gf(a,AG.guardrail))||'';
+    const readiness = selName(gf(a,AG.readiness))||'Draft';
+    const tmIds = gf(a,AG.teamMember)||[];
+    const dept = selName(gf(a,AG.department))||'';
+    const source = selName(gf(a,AG.source))||'';
+    const notes = gf(a,AG.notes)||'';
+    const glDef = GUARDRAIL_LEVELS.find(g=>g.key===guardrail);
+
+    // Accuracy per task type (only when wired to a Team Members row)
+    let accHtml = '';
+    if(tmIds.length && _agentTaskStatsOk){
+        const rows = _agentAccuracyRows.filter(r=>r.agentId===tmIds[0]);
+        if(rows.length){
+            accHtml = `<div style="margin-top:10px"><div style="font-size:var(--fs-xs);font-weight:var(--fw-semibold);margin-bottom:4px">Accuracy by task type</div>
+                ${rows.map(r=>`<div style="font-size:var(--fs-xs);color:var(--text-secondary);padding:2px 0">${esc(r.taskType)}: ${Math.round(r.rate*100)}% of ${r.total}${r.ready?' <span style="color:var(--success);font-weight:var(--fw-semibold)">ready for more autonomy</span>':''}</div>`).join('')}</div>`;
+        }
+    }
+    const wl = agentWorkloadText(tmIds);
+    const st0 = tmIds.length ? _agentTaskStats[tmIds[0]] : null;
+    const workload = wl===null
+        ? 'Not wired to a Team Members row yet, so workload and accuracy have nothing to read.'
+        : (wl==='unavailable'
+            ? 'workload unavailable (task read failed — refresh to retry)'
+            : `${wl} · ${(st0&&st0.doneToday)||0} done today`);
+
+    const wireOptions = ['<option value="">Wire to a Team Members row…</option>']
+        .concat(allTeamAgents.map(t=>`<option value="${t.id}" ${tmIds[0]===t.id?'selected':''}>${esc(gf(t,TM_NAME)||'Agent')}</option>`)).join('');
+
+    // AGENTIC stages
+    const stagesHtml = AGENTIC_STAGES.map(st=>{
+        const text = gf(a,AG_STAGE_FIELDS[st.letter])||'';
+        const editing = _agStageEditing === (a.id+':'+st.letter);
+        const body = editing
+            ? `<textarea id="agstage-edit-${st.letter}" class="agentic-answer" rows="4" aria-label="${esc(st.name)}">${esc(text)}</textarea>
+               <div style="display:flex;gap:6px;margin-top:6px">
+                   <button class="btn btn-sm btn-primary" onclick="saveAgentStage('${a.id}','${st.letter}')">Save</button>
+                   <button class="btn btn-sm" onclick="_agStageEditing=null;renderRoleAgentPanel()">Cancel</button>
+               </div>`
+            : `<div style="font-size:var(--fs-xs);color:${text?'var(--text-secondary)':'var(--text-muted)'};white-space:pre-wrap;word-break:break-word">${text?esc(text):'Not captured yet.'}</div>`;
+        return `<div class="agentic-guide-item" style="align-items:flex-start">
+            <span class="agentic-letter">${st.letter}</span>
+            <div style="flex:1;min-width:0">
+                <div style="display:flex;justify-content:space-between;gap:8px;align-items:baseline">
+                    <strong>${esc(st.name)}</strong>
+                    ${editing?'':`<button class="btn btn-sm" onclick="_agStageEditing='${a.id}:${st.letter}';renderRoleAgentPanel()">${text?'Edit':'Add'}</button>`}
+                </div>
+                ${body}
+            </div>
+        </div>`;
+    }).join('');
+
+    // Stored readiness scorecard
+    let scoresHtml = '';
+    try {
+        const r = JSON.parse(gf(a,AG.stageScores)||'null');
+        if(r && Array.isArray(r.stages)){
+            scoresHtml = `<div style="margin-top:10px">
+                <div style="font-size:var(--fs-xs);font-weight:var(--fw-semibold);margin-bottom:4px">Last readiness check ${r.checkedAt?esc('('+String(r.checkedAt).slice(0,10)+')'):''}</div>
+                <div class="agentic-rows">${readinessRowsHtml(r.stages)}</div>
+                ${legacyReadinessBanner(r)}
+                ${(r.questions&&r.questions.length)?`<div style="font-size:var(--fs-xs);color:var(--text-secondary);margin-top:6px"><strong>To close the gaps:</strong> ${r.questions.map(q=>esc(q.letter+': '+q.question)).join(' &middot; ')}<br>Add the missing detail to the stages above, then re-run the check.</div>`:''}
+            </div>`;
+        }
+    } catch(e){
+        console.warn('stage scores unreadable for', agentIdSafe(a), e);
+        scoresHtml = `<div style="margin-top:10px;font-size:var(--fs-xs);color:var(--warning)">The stored readiness scorecard could not be read. Run the readiness check to rebuild it.</div>`;
+    }
+
+    const readinessMeta = readiness==='Ready' ? {bg:'var(--success-bg)',fg:'var(--success)'} : readiness==='Needs input' ? {bg:'var(--warning-bg)',fg:'var(--warning)'} : {bg:'var(--bg-subtle)',fg:'var(--text-muted)'};
+
+    // Accuracy band suggestion. Tightening is automatic on load; a LOOSER band
+    // is only ever a suggestion — Kevin clicks it in himself via the select.
+    let bandHtml = '';
+    const band = tmIds.length ? guardrailBand(tmIds[0]) : null;
+    if(band){
+        bandHtml = band.level===guardrail
+            ? `<div style="font-size:var(--fs-xs);color:var(--success);margin-bottom:8px">Accuracy agrees with this guardrail setting (${esc(band.why)}).</div>`
+            : `<div style="font-size:var(--fs-xs);color:var(--warning);margin-bottom:8px">Accuracy suggests <strong>${esc(band.level)}</strong> (${esc(band.why)}). Loosening is your call, via the dropdown.</div>`;
+    } else if(tmIds.length){
+        bandHtml = `<div style="font-size:var(--fs-xs);color:var(--text-muted);margin-bottom:8px">No accuracy band yet: it needs 20+ checked pieces of work per job type.</div>`;
+    }
+
+    // The compiled working prompt + the learning log
+    const promptText = gf(a,AG.agentPrompt)||'';
+    const learningLog = gf(a,AG.learningLog)||'';
+    const promptHtml = `<div style="margin-top:12px;border-top:1px solid var(--border-subtle);padding-top:8px">
+        <div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px">
+            <div style="font-size:var(--fs-sm);font-weight:var(--fw-semibold)">The working prompt</div>
+            <button class="btn btn-sm" id="agCompileBtn" onclick="compileAgentPrompt('${a.id}')">${promptText?'Recompile':'Compile prompt'}</button>
+        </div>
+        <div style="font-size:var(--fs-xs);color:var(--text-muted);margin:2px 0 6px">Everything on this card compiled into the one prompt the agent runs on. Recompile after editing stages or when new lessons land.</div>
+        ${promptText?`<div style="font-size:var(--fs-xs);color:var(--text-secondary);white-space:pre-wrap;word-break:break-word;max-height:260px;overflow:auto;border:1px solid var(--border-subtle);border-radius:var(--radius-md);padding:8px 10px;background:var(--bg-surface-2)">${esc(promptText)}</div>`:`<div style="font-size:var(--fs-xs);color:var(--text-muted)">Not compiled yet.</div>`}
+    </div>`;
+    const logHtml = learningLog?`<div style="margin-top:10px">
+        <div style="font-size:var(--fs-xs);font-weight:var(--fw-semibold);margin-bottom:4px">Learning log</div>
+        <div style="font-size:var(--fs-xs);color:var(--text-secondary);white-space:pre-wrap;word-break:break-word;max-height:180px;overflow:auto">${esc(learningLog)}</div>
+    </div>`:'';
+
+    // Daily decisions — the agent's own account of every call it made, one
+    // row per day, from the AI Agent Daily Log table.
+    const dl = agentDailyRows(a.id);
+    let dailyHtml = `<div style="margin-top:12px;border-top:1px solid var(--border-subtle);padding-top:8px">
+        <div style="font-size:var(--fs-sm);font-weight:var(--fw-semibold)">Daily decisions</div>
+        <div style="font-size:var(--fs-xs);color:var(--text-muted);margin:2px 0 6px">What the agent did each day and why, written by the agent itself at the end of every run. Check in when you want; it keeps itself.</div>`;
+    if(dl === 'error'){
+        dailyHtml += `<div style="font-size:var(--fs-xs);color:var(--warning)">The daily log could not be read. <button class="btn btn-sm" onclick="retryDailyLogs()">Retry</button></div>`;
+    } else if(!dl.length){
+        dailyHtml += `<div style="font-size:var(--fs-xs);color:var(--text-muted)">No daily log yet. The agent writes its first one at the end of its next run.</div>`;
+    } else {
+        dailyHtml += dl.map(r=>{
+            const day = gf(r,ALOG.date)||'';
+            const summary = gf(r,ALOG.summary)||'';
+            const decisions = gf(r,ALOG.decisions)||'';
+            return `<details style="border:1px solid var(--border-subtle);border-radius:var(--radius-md);margin-bottom:6px;background:var(--bg-surface-2)">
+                <summary style="cursor:pointer;padding:6px 10px;font-size:var(--fs-xs)"><strong>${esc(day)}</strong> <span style="color:var(--text-secondary)">&middot; ${esc(summary)}</span></summary>
+                <div style="font-size:var(--fs-xs);color:var(--text-secondary);white-space:pre-wrap;word-break:break-word;max-height:340px;overflow:auto;padding:8px 10px;border-top:1px solid var(--border-subtle)">${esc(decisions)||'<em>No detail stored for this day.</em>'}</div>
+            </details>`;
+        }).join('');
+    }
+    dailyHtml += `</div>`;
+
+    el.innerHTML = `<div class="agentic-card" style="margin-bottom:16px">
+        <div class="agentic-head">
+            <div>
+                <div class="agentic-title">${esc(name)} ${dept?`<span style="font-weight:var(--fw-regular);color:var(--text-muted);font-size:var(--fs-xs)">&middot; ${esc(dept)}${source?' &middot; '+esc(source):''}</span>`:''}</div>
+                <div class="agentic-sub">${esc(String(gf(a,AG.goal)||'').split('\n')[0])}</div>
+                ${gf(a,AG.scoreMetric)?`<div class="agentic-sub"><strong>Score target:</strong> ${esc(gf(a,AG.scoreMetric))} &middot; <strong>current:</strong> ${esc(gf(a,AG.metricScore)||'not measured yet')}</div>`:''}
+            </div>
+            <span class="agentic-state" style="background:${readinessMeta.bg};color:${readinessMeta.fg}">${esc(readiness)}</span>
+        </div>
+        <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:8px">
+            <label style="font-size:var(--fs-xs);color:var(--text-secondary)">Status
+                <select onchange="updateRoleAgentField('${a.id}','status',this.value)" style="margin-left:4px" aria-label="Agent status">
+                    ${AGENT_STATUSES.map(x=>`<option ${x===status?'selected':''}>${x}</option>`).join('')}
+                </select></label>
+            <label style="font-size:var(--fs-xs);color:var(--text-secondary)">Guardrails
+                <select onchange="updateRoleAgentField('${a.id}','guardrail',this.value)" style="margin-left:4px" aria-label="Guardrail level">
+                    ${GUARDRAIL_LEVELS.map(g=>`<option ${g.key===guardrail?'selected':''}>${g.key}</option>`).join('')}
+                </select></label>
+            <select onchange="wireAgentTeamMember('${a.id}',this.value)" style="font-size:var(--fs-xs)" aria-label="Wire to Team Members row">${wireOptions}</select>
+        </div>
+        ${glDef?`<div style="font-size:var(--fs-xs);color:var(--text-muted);margin-bottom:8px">${esc(glDef.blurb)}</div>`:''}
+        ${bandHtml}
+        <div style="font-size:var(--fs-xs);color:var(--text-secondary);margin-bottom:4px"><strong>Workload:</strong> ${workload}</div>
+        ${accHtml}
+        <div style="margin-top:12px;border-top:1px solid var(--border-subtle);padding-top:8px">
+            <div style="font-size:var(--fs-sm);font-weight:var(--fw-semibold);margin-bottom:4px">The AGENTIC spec</div>
+            ${stagesHtml}
+        </div>
+        ${promptHtml}
+        ${logHtml}
+        ${dailyHtml}
+        ${scoresHtml}
+        ${notes?`<div style="margin-top:10px;font-size:var(--fs-xs);color:var(--text-muted);white-space:pre-wrap;word-break:break-word"><strong>Notes:</strong> ${esc(notes)}</div>`:''}
+        <div class="agentic-foot">
+            <button class="btn btn-sm btn-ai" id="agRegCheckBtn" onclick="runAgentRegisterCheck('${a.id}')">Run readiness check</button>
+        </div>
+    </div>`;
+}
+
+// One optimistic-update path for every register edit: mutate locally, PATCH,
+// roll back on failure. Every editable field on the panel goes through here.
+async function patchAgent(agentId, fieldsPatch, okMsg){
+    const a = allAgents.find(x=>x.id===agentId);
+    if(!a) return false;
+    const prev = {};
+    Object.keys(fieldsPatch).forEach(k=>{ prev[k] = a.fields[k]; });
+    Object.assign(a.fields, fieldsPatch);
+    try {
+        await atUpdate(AGENTS_TBL, agentId, fieldsPatch);
+        if(okMsg) toast(okMsg);
+        return true;
+    } catch(e){
+        Object.keys(prev).forEach(k=>{ if(prev[k]===undefined) delete a.fields[k]; else a.fields[k]=prev[k]; });
+        toast('Save failed: '+e.message);
+        return false;
+    }
+}
+
+async function updateRoleAgentField(agentId, key, value){
+    await patchAgent(agentId, { [key==='status' ? AG.status : AG.guardrail]: value },
+        key==='status' ? 'Status updated' : 'Guardrail level updated');
+    renderRegister();
+}
+window.updateRoleAgentField = updateRoleAgentField;
+
+async function wireAgentTeamMember(agentId, tmId){
+    await patchAgent(agentId, { [AG.teamMember]: tmId ? [tmId] : [] },
+        tmId ? 'Wired — workload and accuracy now read from this row' : 'Unwired');
+    renderRegister();
+}
+window.wireAgentTeamMember = wireAgentTeamMember;
+
+async function saveAgentStage(agentId, letter){
+    const ta = document.getElementById('agstage-edit-'+letter);
+    if(!ta) return;
+    _agStageEditing = null;
+    await patchAgent(agentId, { [AG_STAGE_FIELDS[letter]]: ta.value }, 'Stage saved');
+    renderRoleAgentPanel();
+}
+window.saveAgentStage = saveAgentStage;
+
+// Readiness check for a REGISTER agent — same wording and normalisation as the
+// Systemisation workflow check, sourced from the seven stage fields.
+async function runAgentRegisterCheck(agentId){
+    const a = allAgents.find(x=>x.id===agentId);
+    if(!a) return;
+    const btn = document.getElementById('agRegCheckBtn');
+    if(btn){ btn.disabled = true; btn.textContent = 'Checking…'; }
+    const specText = AGENTIC_STAGES.map(st=>`${st.letter} — ${st.name}:\n${gf(a,AG_STAGE_FIELDS[st.letter])||'(not captured yet)'}`).join('\n\n');
+    const prompt = `${agenticCheckIntro(false)}
+
+Process name: ${gf(a,AG.name)||'Untitled'}
+Agent goal: ${gf(a,AG.goal)||''}
+Success measure: ${gf(a,AG.scoreMetric)||''}
+
+The ${AGENTIC_STAGES.length} stages:
+${agenticStageListText(false)}
+
+Pass rules:
+${agenticPassRules(false)}
+
+Here is the agent's captured spec, stage by stage:
+${specText}
+
+${agenticResultShape()}`;
+    try {
+        const parsed = await callClaudeJson(prompt, 1500);
+        let prev = null;
+        try { prev = JSON.parse(gf(a,AG.stageScores)||'null'); }
+        catch(e){ console.warn('stored stage scores unreadable, starting fresh', e); }
+        const readiness = normaliseReadiness(parsed, {}, prev, false);
+        const ok = await patchAgent(agentId, {
+            [AG.stageScores]: JSON.stringify(readiness),
+            [AG.readiness]: readiness.state==='Ready' ? 'Ready' : 'Needs input',
+        }, null);
+        if(ok) toast('Readiness check complete — '+readiness.state);
+    } catch(e){
+        toast('Readiness check error: '+e.message);
+    }
+    renderRoleAgentPanel();
+}
+window.runAgentRegisterCheck = runAgentRegisterCheck;
+
+// ═══════════════════════════════════════════════════════════════════════
+// Shared AGENTIC check wording — identical to the copy the Systemisation
+// page keeps for its workflow (SOP) readiness check, so the two routes can
+// never drift apart (tests/agentic-stages.test.js compares them). The N/A
+// annotations and rule are GENERATED from AGENTIC_STAGES.naAllowed per mode,
+// so the stage list, the pass rules and normaliseReadiness always agree.
+// ═══════════════════════════════════════════════════════════════════════
+function agenticStageListText(human){
+    return AGENTIC_STAGES.map(s=>`${s.letter} — ${s.name}${stageNaAllowed(s,human)?' (N/A allowed)':''}`).join('\n');
+}
+function agenticNaRule(human){
+    const allowed = AGENTIC_STAGES.filter(s=>stageNaAllowed(s,human)).map(s=>`${s.letter} (${s.name})`);
+    const never = AGENTIC_STAGES.filter(s=>!stageNaAllowed(s,human)).map(s=>s.letter);
+    return `- "NA": genuinely not applicable. Only allowed for ${allowed.join(' and ')||'no stage'}. Never for ${never.join(', ')}.`;
+}
+function agenticCheckIntro(human){
+    const n = AGENTIC_STAGES.length;
+    return human
+        ? `You are checking whether a documented business process is clear enough for a PERSON to follow reliably as a recurring or ad-hoc task. Score it against the ${n} AGENTIC stages from a human-task point of view.`
+        : `You are checking whether a documented business process contains enough to build a reliable autonomous AI agent. Score it against the ${n} AGENTIC stages.`;
+}
+function agenticPassRules(human){
+    return human
+        ? `- "Clear": clear enough for a person to follow.
+- "Thin": mentioned but a person might get stuck.
+- "Missing": not covered.
+${agenticNaRule(true)}
+- This is for a HUMAN to do, not an AI agent. Navigate needs clear, followable steps; the person supplies their own judgement, so do NOT require written decision-reasoning. Go Signal and Tools help but a person can infer them, so mark Thin (not Missing) when vague — never NA.
+- Conclusion & Score should describe what the finished job looks like, so the person knows when they are done. A success measure helps but is not required for a human task.`
+        : `- "Clear": the stage is fully covered.
+- "Thin": mentioned but incomplete.
+- "Missing": not covered.
+${agenticNaRule(false)}
+- Navigate must contain the actual steps in order AND the decision rules: how the person decides at each choice, and what happens when something is unsure or new (guess, skip, or escalate to a human). Steps with no "how I decide" are Thin at best.
+- Aim is the purpose — why the process exists.
+- Conclusion & Score must describe the CONCRETE end state of a successful run (what exists or has changed) AND how success is measured over time (a number or a check). End state with no measure is Thin.`;
+}
+
+// One transport for every AI call on this page: proxy fetch, JSON extraction,
+// consistent errors. maxTokens per call; model always from window.AI_MODELS.
+async function callClaudeJson(prompt, maxTokens){
+    const res = await fetch(CLAUDE_PROXY, {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ model:window.AI_MODELS.default, max_tokens:maxTokens||1500, messages:[{role:'user',content:prompt}] })
+    });
+    if(!res.ok) throw new Error('AI request failed: '+res.status);
+    const data = await res.json();
+    const text = (data.content && data.content[0] && data.content[0].text) || '';
+    const m = text.match(/\{[\s\S]*\}/);
+    if(!m) throw new Error('Invalid AI response');
+    return JSON.parse(m[0]);
+}
+function agenticResultShape(){
+    const n = AGENTIC_STAGES.length;
+    const letters = AGENTIC_STAGES.map(s=>s.letter).join(',');
+    return `Return ONLY a JSON object:
+{
+  "stages": [ { "letter": "A", "status": "Clear|Thin|Missing|NA", "reason": "one short line" }, ... ${n} entries for ${letters} ],
+  "questions": [ { "letter": "N", "question": "a specific question to fill the gap" } ]
+}
+Include at most 3 questions, only for Thin or Missing stages, most important first. No text outside the JSON.`;
+}
+
+function normaliseReadiness(parsed, extraAnswers, prevReadiness, human){
+    const byLetter = {};
+    (parsed.stages||[]).forEach(s=>{ if(s && s.letter) byLetter[s.letter] = s; });
+    const stages = AGENTIC_STAGES.map(def=>{
+        const got = byLetter[def.letter] || {};
+        let status = got.status || 'Missing';
+        // N/A only where the framework allows it for this mode (single source
+        // of truth: AGENTIC_STAGES.naAllowed, the same source the prompt used).
+        if(status==='NA' && !stageNaAllowed(def, human)) status='Missing';
+        if(['Clear','Thin','Missing','NA'].indexOf(status)<0) status='Missing';
+        return { letter:def.letter, name:def.name, status, reason:String(got.reason||'').slice(0,180) };
+    });
+    const blocking = stages.filter(s=>s.status==='Missing' || s.status==='Thin');
+    const state = blocking.length===0 ? 'Ready' : 'Needs input';
+
+    // Per-stage question rounds. A stage may be asked about at most TWICE:
+    // answering counts a round; a still-thin stage gets ONE better follow-up,
+    // then no more questions for it (the note points at step-edit / re-record).
+    // This keeps "no endless questions" while never dead-ending a thin stage.
+    const prevRounds = (prevReadiness && prevReadiness.rounds) || {};
+    const rounds = Object.assign({}, prevRounds);
+    if(extraAnswers && prevReadiness && Array.isArray(prevReadiness.questions)){
+        prevReadiness.questions.forEach(q=>{
+            if(q && q.letter && extraAnswers[q.letter] !== undefined){
+                rounds[q.letter] = (rounds[q.letter]||0) + 1;
+            }
+        });
+    }
+    const thinLetters = new Set(blocking.map(s=>s.letter));
+    // Never re-ask a question the owner has already been asked (same stage, same
+    // wording) — if the AI repeats itself, the repeat is dropped and the stage
+    // falls through to the "Nearly there" guidance instead of looping.
+    const prevAsked = (prevReadiness && prevReadiness.asked) || {};
+    const normQ = s=>String(s).toLowerCase().replace(/\s+/g,' ').trim();
+    const questions = (parsed.questions||[])
+        .filter(q=>q && q.question)
+        .map(q=>({ letter:String(q.letter||'').slice(0,1), question:String(q.question).slice(0,240) }))
+        .filter(q=>thinLetters.has(q.letter) && (rounds[q.letter]||0) < 2)
+        .filter(q=>!(prevAsked[q.letter]||[]).some(t=>normQ(t)===normQ(q.question)))
+        .slice(0,3);
+    const asked = {};
+    Object.entries(prevAsked).forEach(([L,list])=>{ asked[L]=list.slice(-4); });
+    questions.forEach(q=>{ (asked[q.letter]=asked[q.letter]||[]).push(q.question); });
+    return { state, stages, questions, rounds, asked, answers:(extraAnswers||{}), checkedAt:new Date().toISOString() };
+}
+
+const AGENTIC_STATUS = {
+    Clear:   { bg:'var(--success-bg)', fg:'var(--success)', label:'Clear' },
+    Thin:    { bg:'var(--warning-bg)', fg:'var(--warning)', label:'Thin' },
+    Missing: { bg:'var(--danger-bg)',  fg:'var(--danger)',  label:'Missing' },
+    NA:      { bg:'var(--bg-subtle)',  fg:'var(--text-muted)', label:'N/A' },
+};
+
+// One renderer for readiness stage rows — the register panel and the stored
+// scorecard both show normaliseReadiness output through this.
+function readinessRowsHtml(stages){
+    return (stages||[]).map(st=>{
+        const meta = AGENTIC_STATUS[st.status] || AGENTIC_STATUS.Missing;
+        return `<div class="agentic-row">
+            <span class="agentic-letter">${esc(st.letter)}</span>
+            <span class="agentic-name">${esc(st.name)}</span>
+            <span class="agentic-pill" style="background:${meta.bg};color:${meta.fg}">${esc(meta.label)}</span>
+            <span class="agentic-reason" title="${esc(st.reason||'')}">${esc(st.reason||'')}</span>
+        </div>`;
+    }).join('');
+}
+// A scorecard saved under an older framework shape (e.g. the 8-stage run)
+// keeps its verdict but must say so — the current stages were never assessed.
+function legacyReadinessBanner(readiness){
+    const n = (readiness && readiness.stages || []).length;
+    if(!n || n === AGENTIC_STAGES.length) return '';
+    return `<div style="margin-top:8px;padding:8px 10px;border-radius:var(--radius-md);background:var(--warning-bg);color:var(--warning);font-size:var(--fs-xs)">Checked under the older ${n}-stage framework — re-run the check before trusting this verdict.</div>`;
+}
+
+// ── Guided creation form ("fill in a form with the AI prompting you") ──
+function openAgentForm(){
+    if(!_agForm){
+        _agForm = { step:0, basics:{ name:'', goal:'', department:'Operations', guardrail:'Approval required', scoreMetric:'' }, stages:{}, checks:{} };
+    }
+    _agFormOpen = true;
+    renderAgentForm();
+}
+window.openAgentForm = openAgentForm;
+
+function closeAgentForm(){
+    _agFormOpen = false;
+    closeModal();
+    // _agForm is kept so a half-finished agent survives an accidental close.
+}
+window.closeAgentForm = closeAgentForm;
+
+// Collect the current step's inputs into _agForm before moving anywhere.
+function agFormCapture(){
+    if(!_agForm) return;
+    if(_agForm.step===0){
+        ['name','goal','scoreMetric'].forEach(k=>{
+            const el = document.getElementById('agf-'+k);
+            if(el) _agForm.basics[k] = el.value;
+        });
+        const d = document.getElementById('agf-department');
+        if(d) _agForm.basics.department = d.value;
+        const g = document.querySelector('input[name="agf-guardrail"]:checked');
+        if(g) _agForm.basics.guardrail = g.value;
+    } else if(_agForm.step>=1 && _agForm.step<=AGENTIC_STAGES.length){
+        const st = AGENTIC_STAGES[_agForm.step-1];
+        const ta = document.getElementById('agf-stage-text');
+        if(ta){
+            _agForm.stages[st.letter] = ta.value;
+            // A check certifies the exact text it saw — an edit after the check
+            // invalidates it, or an agent could be created "Ready" on stale ticks.
+            const c = _agForm.checks[st.letter];
+            if(c && c.text !== ta.value.trim()) delete _agForm.checks[st.letter];
+        }
+    }
+}
+
+function agFormGoto(step){
+    agFormCapture();
+    if(_agForm.step===0 && step>0 && !(_agForm.basics.name||'').trim()){
+        toast('Give the agent a name first'); return;
+    }
+    _agForm.step = Math.max(0, Math.min(AGENTIC_STAGES.length+1, step));
+    renderAgentForm();
+}
+window.agFormGoto = agFormGoto;
+
+async function agFormCheckStage(){
+    agFormCapture();
+    const st = AGENTIC_STAGES[_agForm.step-1];
+    const text = (_agForm.stages[st.letter]||'').trim();
+    if(!text){ toast('Write your answer first, or use Skip for now'); return; }
+    const btn = document.getElementById('agf-check-btn');
+    if(btn){ btn.disabled = true; btn.textContent = 'Checking…'; }
+    const naOk = stageNaAllowed(st, false);
+    const statuses = 'Clear|Thin|Missing' + (naOk ? '|NA' : '');
+    const prompt = `You are helping a business owner define ONE stage of an AI agent using the AGENTIC framework. Judge only this stage, in isolation — ignore any pass rule that refers to a different stage.
+
+Agent name: ${_agForm.basics.name||'New agent'}
+Agent goal: ${_agForm.basics.goal||''}
+
+Stage ${st.letter} — ${st.name}.
+The question the owner was asked: ${st.prompt}
+
+Pass rules (agent mode):
+${agenticPassRules(false)}
+
+The owner's answer:
+${text}
+
+Return ONLY JSON: {"status":"${statuses}","reason":"one short line, plain UK English","questions":["up to 2 short, specific follow-up questions — empty array if Clear"]}`;
+    try {
+        const parsed = await callClaudeJson(prompt, 500);
+        const valid = ['Clear','Thin','Missing'].concat(naOk ? ['NA'] : []);
+        _agForm.checks[st.letter] = {
+            status: valid.includes(parsed.status) ? parsed.status : 'Thin',
+            reason: String(parsed.reason||'').slice(0,180),
+            questions: (parsed.questions||[]).slice(0,2).map(q=>String(q).slice(0,240)),
+            text,
+        };
+    } catch(e){
+        toast('Check failed: '+e.message);
+    }
+    renderAgentForm();
+}
+window.agFormCheckStage = agFormCheckStage;
+
+function renderAgentForm(){
+    if(!_agFormOpen || !_agForm) return;
+    const total = AGENTIC_STAGES.length;
+    const step = _agForm.step;
+    let body = '', title = '', sub = '';
+
+    if(step===0){
+        title = 'Create an agent';
+        sub = `The AI walks you through the ${total} AGENTIC questions. Rough answers are fine — it checks each one and asks for what is missing.`;
+        body = `
+            <label class="agf-label" for="agf-name">Agent name</label>
+            <input id="agf-name" class="agentic-answer" style="min-height:0;height:36px" value="${esc(_agForm.basics.name)}" placeholder="e.g. Prospect Researcher">
+            <label class="agf-label" for="agf-goal">Goal — what result is this agent responsible for?</label>
+            <textarea id="agf-goal" class="agentic-answer" rows="2" placeholder="e.g. Research every prospect booked for a call and produce a dossier">${esc(_agForm.basics.goal)}</textarea>
+            <label class="agf-label" for="agf-scoreMetric">Score — the number or check that says it is doing a good job</label>
+            <input id="agf-scoreMetric" class="agentic-answer" style="min-height:0;height:36px" value="${esc(_agForm.basics.scoreMetric)}" placeholder="e.g. Dossier ready before every booked call">
+            <label class="agf-label" for="agf-department">Department</label>
+            <select id="agf-department" class="agentic-answer" style="min-height:0;height:36px">
+                ${DEPARTMENTS.map(d=>`<option ${d===_agForm.basics.department?'selected':''}>${d}</option>`).join('')}
+            </select>
+            <div class="agf-label">Guardrail style</div>
+            ${GUARDRAIL_LEVELS.map(g=>`<label style="display:flex;gap:8px;align-items:flex-start;padding:6px 0;font-size:var(--fs-sm);cursor:pointer">
+                <input type="radio" name="agf-guardrail" value="${g.key}" ${g.key===_agForm.basics.guardrail?'checked':''} style="margin-top:3px">
+                <span><strong>${g.key}</strong><br><span style="font-size:var(--fs-xs);color:var(--text-secondary)">${g.blurb}</span></span>
+            </label>`).join('')}`;
+    } else if(step>=1 && step<=total){
+        const st = AGENTIC_STAGES[step-1];
+        title = `${st.letter} — ${st.name}`;
+        sub = st.prompt;
+        const check = _agForm.checks[st.letter];
+        let feedback = '';
+        if(check){
+            const meta = AGENTIC_STATUS[check.status] || AGENTIC_STATUS.Thin;
+            feedback = `<div style="margin-top:8px;padding:8px 10px;border-radius:var(--radius-md);background:${meta.bg}">
+                <span style="color:${meta.fg};font-weight:var(--fw-semibold);font-size:var(--fs-xs)">${esc(check.status)}</span>
+                <span style="font-size:var(--fs-xs);color:var(--text-secondary);margin-left:6px">${esc(check.reason)}</span>
+                ${check.questions.length?`<ul style="margin:6px 0 0 16px;font-size:var(--fs-xs);color:var(--text-secondary)">${check.questions.map(q=>`<li>${esc(q)}</li>`).join('')}</ul>
+                <div style="font-size:var(--fs-xs);color:var(--text-muted);margin-top:4px">Add the answers into the box above, then check again — or continue and fill it later.</div>`:''}
+            </div>`;
+        }
+        body = `
+            <textarea id="agf-stage-text" class="agentic-answer" rows="6" placeholder="Type it the way you would say it — rough is fine" aria-label="${esc(st.name)}">${esc(_agForm.stages[st.letter]||'')}</textarea>
+            ${feedback}`;
+    } else {
+        title = 'Review and create';
+        const filled = AGENTIC_STAGES.filter(st=>(_agForm.stages[st.letter]||'').trim()).length;
+        sub = `${filled} of ${total} stages captured. Gaps are fine — the agent lands as "Needs input" and its panel shows what is missing.`;
+        body = AGENTIC_STAGES.map(st=>{
+            const txt = (_agForm.stages[st.letter]||'').trim();
+            const c0 = _agForm.checks[st.letter];
+            const check = (c0 && c0.text === txt) ? c0 : null; // stale check = not checked
+            const meta = check ? (AGENTIC_STATUS[check.status] || AGENTIC_STATUS.Thin) : null;
+            const pill = check
+                ? `<span class="agentic-pill" style="background:${meta.bg};color:${meta.fg}">${esc(check.status)}</span>`
+                : (txt?`<span class="agentic-pill" style="background:var(--bg-subtle);color:var(--text-muted)">Not checked</span>`:`<span class="agentic-pill" style="background:var(--danger-bg);color:var(--danger)">Empty</span>`);
+            return `<div style="display:flex;gap:8px;align-items:baseline;padding:4px 0;border-top:1px solid var(--border-subtle)">
+                <span class="agentic-letter" style="width:20px;height:20px;font-size:11px">${st.letter}</span>
+                <span style="font-size:var(--fs-sm);font-weight:var(--fw-medium);flex:1">${esc(st.name)}</span>
+                ${pill}
+                <button class="btn btn-sm" onclick="agFormGoto(${AGENTIC_STAGES.indexOf(st)+1})">Edit</button>
+            </div>`;
+        }).join('');
+    }
+
+    const nav = step===0
+        ? `<button class="btn btn-sm btn-primary" onclick="agFormGoto(1)">Start the questions</button>`
+        : step<=total
+            ? `<button class="btn btn-sm" onclick="agFormGoto(${step-1})">Back</button>
+               <button class="btn btn-sm btn-ai" id="agf-check-btn" onclick="agFormCheckStage()">Check with AI</button>
+               <button class="btn btn-sm btn-primary" onclick="agFormGoto(${step+1})">${(_agForm.stages[AGENTIC_STAGES[step-1].letter]||'').trim()?'Next':'Skip for now'}</button>`
+            : `<button class="btn btn-sm" onclick="agFormGoto(${total})">Back</button>
+               <button class="btn btn-sm btn-primary" id="agf-create-btn" onclick="createAgentFromForm()">Create agent</button>`;
+
+    // The page's one modal system (showModal/.modal-overlay) — never a second.
+    const headerNote = step>0?`<div style="font-size:var(--fs-xs);color:var(--text-muted);margin:8px 0 2px">${step<=total?`Question ${step} of ${total}`:'Review'} &middot; ${esc(_agForm.basics.name||'New agent')}</div>`:'';
+    showModal(title,
+        `<div style="font-size:var(--fs-xs);color:var(--text-secondary);margin:-8px 0 6px">${esc(sub)}</div>${headerNote}<div style="margin-top:6px">${body}</div>`,
+        nav);
+    const ov = document.getElementById('modalOverlay');
+    if(ov) ov.onclick = e=>{ if(e.target===ov) closeAgentForm(); };
+}
+
+async function createAgentFromForm(){
+    agFormCapture();
+    const b = _agForm.basics;
+    if(!(b.name||'').trim() || !(b.goal||'').trim()){ toast('Name and goal are required'); agFormGoto(0); return; }
+    const btn = document.getElementById('agf-create-btn');
+    if(btn){ btn.disabled = true; btn.textContent = 'Creating…'; }
+    const fields = {
+        [AG.name]: b.name.trim(),
+        [AG.goal]: b.goal.trim(),
+        [AG.department]: b.department,
+        [AG.guardrail]: b.guardrail,
+        [AG.scoreMetric]: (b.scoreMetric||'').trim(),
+        [AG.status]: 'Planned',
+        [AG.source]: 'Form',
+    };
+    AGENTIC_STAGES.forEach(st=>{
+        const t = (_agForm.stages[st.letter]||'').trim();
+        if(t) fields[AG_STAGE_FIELDS[st.letter]] = t;
+    });
+    if(!fields[AG.aim]) fields[AG.aim] = b.goal.trim();
+    // A check only counts if it certified the CURRENT text of its stage.
+    const freshCheck = st => {
+        const c = _agForm.checks[st.letter];
+        return (c && c.text === (_agForm.stages[st.letter]||'').trim()) ? c : null;
+    };
+    const stages = AGENTIC_STAGES.map(st=>{
+        const txt = (_agForm.stages[st.letter]||'').trim() || (st.letter==='A' ? b.goal.trim() : '');
+        const c = freshCheck(st);
+        return { letter:st.letter,
+            status: c ? c.status : (txt ? 'Thin' : 'Missing'),
+            reason: c ? c.reason : (txt ? 'Written but not checked yet' : 'Not captured yet') };
+    });
+    // One definition of Ready for the whole module: the same normaliser both
+    // readiness checks use, so the form can never grade by different rules.
+    const readiness = normaliseReadiness({ stages, questions: [] }, {}, null, false);
+    fields[AG.stageScores] = JSON.stringify(readiness);
+    const anyChecked = AGENTIC_STAGES.some(st=>freshCheck(st));
+    fields[AG.readiness] = anyChecked ? (readiness.state==='Ready' ? 'Ready' : 'Needs input') : 'Draft';
+    try {
+        const rec = await atCreate(AGENTS_TBL, fields);
+        allAgents.push(rec);
+        selectedAgentId = rec.id;
+        _agForm = null;
+        closeAgentForm();
+        renderRegister();
+        toast(readiness.state==='Ready' && anyChecked ? 'Agent created — ready to build' : 'Agent created — its panel shows what is still missing');
+    } catch(e){
+        toast('Could not create the agent: '+e.message);
+        if(btn){ btn.disabled = false; btn.textContent = 'Create agent'; }
+    }
+}
+window.createAgentFromForm = createAgentFromForm;
+
+// ═══════════════════════════════════════════════════════════════════════
+// PROCESS AGENTS (workflow-video route) — moved from os/systemisation.
+// The agent state lives INSIDE the workflow's SOP document JSON (sop.agent),
+// exactly where the Systemisation builder left it.
+// ═══════════════════════════════════════════════════════════════════════
+const AGENT_RUNNER_URL = 'https://agent-runner.kevinbrittain.workers.dev';
+const AGENT_ACTIVITY_TBL = 'tblJ3GFnAAoXf99e9';
+
+const AGENT_STATES = {
+    testing: { label:'TESTING', bg:'var(--warning-bg)', fg:'var(--warning)', sub:'Watching your data. It only proposes — nothing happens without your tick.' },
+    live:    { label:'LIVE',    bg:'var(--success-bg)', fg:'var(--success)', sub:'Running on a daily schedule. Safe actions automatic, anything risky asks first.' },
+    off:     { label:'PAUSED',  bg:'var(--bg-subtle)',  fg:'var(--text-muted)', sub:'Not running. Resume testing or go live when ready.' },
+};
+
+// The four gears name, in plain English, the ramp this module already runs:
+// draft -> testing (proposes only) -> testing with autoFields -> live.
+const AGENT_GEARS = [
+    { n:1, name:'Guardrails set',    blurb:'Its limits are written down: what it checks, and what it must never do on its own.' },
+    { n:2, name:'Approve everything', blurb:'It proposes every action and waits. Nothing happens without your tick.' },
+    { n:3, name:'Loosen the leash',   blurb:'The actions you trust happen automatically. Everything else still asks.' },
+    { n:4, name:'Heartbeat',          blurb:'It runs to a schedule on its own, and only escalates what needs you.' },
+];
+
+async function loadWorkflowData(){
+    _workflowsState = 'loading';
+    try {
+        const [wfs, steps, biz] = await Promise.all([
+            atFetch(WFS_TBL, [WF.name, WF.description, WF.business, WF.sopDocument]),
+            atFetch(STEPS_TBL, [ST.name, ST.description, ST.workflow, ST.sortOrder]),
+            atFetch(BIZ_TBL, [BIZ_NAME, BIZ_ACTIVE]),
+        ]);
+        allWorkflows = wfs;
+        allSteps = steps;
+        allBusinesses = biz.filter(b=>{ const a=gf(b,BIZ_ACTIVE); return a===true||a===1; });
+        _workflowsState = 'ready';
+    } catch(e){
+        if(e.message==='auth') throw e;
+        _workflowsState = 'error: ' + (e.message||'load failed');
+    }
+}
+
+function getWfSopData(wfId){
+    const w = allWorkflows.find(x=>x.id===wfId);
+    if(!w) return null;
+    const raw = gf(w, WF.sopDocument);
+    if(!raw) return null;
+    try { return JSON.parse(raw); } catch(e){ return null; }
+}
+function stepsForWorkflow(wfId){
+    return allSteps
+        .filter(s=> linkIds(gf(s,ST.workflow)).includes(wfId))
+        .sort((a,b)=>(gf(a,ST.sortOrder)||0)-(gf(b,ST.sortOrder)||0));
+}
+function agenticSopText(wfId){
+    const sop = getWfSopData(wfId);
+    const steps = stepsForWorkflow(wfId).map((s,i)=>`Step ${i+1}: ${gf(s,ST.name)||''} — ${gf(s,ST.description)||''}`).join('\n');
+    if(!sop) return steps;
+    const body = (sop.sopSteps||[]).map(s=>`${s.name}:\n- ${(s.detail||[]).join('\n- ')}`).join('\n\n');
+    const cautions = (sop.cautions||[]).join('\n- ');
+    const tips = (sop.tips||[]).join('\n- ');
+    return `SOP TITLE: ${sop.sopTitle||''}\n\nSTEPS (raw):\n${steps}\n\nSOP BODY:\n${body}\n\nCAUTIONS:\n- ${cautions}\n\nTIPS:\n- ${tips}`;
+}
+function getWfAgent(wfId){
+    const sop = getWfSopData(wfId);
+    return (sop && sop.agent) ? sop.agent : null;
+}
+async function setWfAgent(wfId, agent){
+    const w = allWorkflows.find(x=>x.id===wfId);
+    if(!w) return;
+    const sop = getWfSopData(wfId) || {};
+    sop.agent = agent;
+    const json = JSON.stringify(sop);
+    w.fields[WF.sopDocument] = json;
+    try { await atUpdate(WFS_TBL, wfId, { [WF.sopDocument]: json }); }
+    catch(e){ toast('Agent state save failed: '+e.message); }
+}
+
+// Derive the CURRENT gear from real state, never from a stored guess, so the
+// dial can never disagree with what the agent is actually doing.
+function getAgentGear(wfId){
+    const agent = getWfAgent(wfId);
+    const readiness = (getWfSopData(wfId)||{}).readiness;
+    const guardrailsSet = !!(readiness && readiness.state === 'Ready');
+    if(!agent || !agent.state || agent.state==='draft') return { gear: guardrailsSet ? 1 : 0, paused:false, guardrailsSet };
+    if(agent.state==='off') return { gear: 0, paused:true, guardrailsSet };
+    const loosened = !!((agent.autoFields||[]).length || agent.autoComments);
+    if(agent.state==='live') return { gear:4, paused:false, guardrailsSet };
+    return { gear: loosened ? 3 : 2, paused:false, guardrailsSet };
+}
+
+function agentGearAdvice(wfId){
+    const { gear, paused, guardrailsSet } = getAgentGear(wfId);
+    if(paused) return 'Paused. Resume testing when you want it watching again.';
+    if(!guardrailsSet) return 'Finish the readiness check first. An agent should not act until its never-dos are written down.';
+    if(gear===1) return 'Guardrails are set. Start testing so you can watch it propose before it touches anything.';
+    if(gear===2) return 'Watch its proposals until you would have ticked every one. Then tick the safest action below to let it do that one on its own.';
+    if(gear===3) return 'It is doing the safe actions for you. When a run goes by without you changing anything, it is ready to go live.';
+    return 'Running on its own. Review the activity below now and then, and pull it back a gear if anything looks off.';
+}
+
+function renderAutonomyLadder(wfId){
+    const { gear, paused } = getAgentGear(wfId);
+    const cells = AGENT_GEARS.map(g=>{
+        const done = !paused && gear > g.n;
+        const here = !paused && gear === g.n;
+        const bg = here ? 'var(--accent)' : done ? 'var(--accent-soft)' : 'var(--bg-subtle)';
+        const fg = here ? 'var(--accent-on)' : done ? 'var(--accent)' : 'var(--text-muted)';
+        return `<div class="ag-gear${here?' ag-gear-here':''}" title="${esc(g.blurb)}">
+            <span class="ag-gear-dot" style="background:${bg};color:${fg}">${g.n}</span>
+            <span class="ag-gear-name" style="color:${here?'var(--text-primary)':'var(--text-muted)'}">${esc(g.name)}</span>
+        </div>`;
+    }).join('<span class="ag-gear-rail" aria-hidden="true"></span>');
+    return `<div class="agent-ladder" role="group" aria-label="Autonomy level">
+        <div class="ag-gear-row">${cells}</div>
+        <div class="ag-gear-advice"><strong>OD suggests:</strong> ${esc(agentGearAdvice(wfId))}</div>
+    </div>`;
+}
+
+// ── The agent card (who this agent is) ─────────────────────────────────
+function renderAgentIdentity(wfId){
+    const agent = getWfAgent(wfId) || {};
+    const id = agent.identity;
+    if(!id){
+        return `<div class="agent-idcard agent-idcard-empty">
+            <div>
+                <div class="agent-idcard-title">This agent has no card yet</div>
+                <div class="agent-sub">A card names it, states what done looks like, and pins down what it must never do. Built from the SOP you already have.</div>
+            </div>
+            <button class="btn btn-sm btn-ai" onclick="generateAgentCard('${wfId}')" id="agcardBtn-${wfId}">Build the card</button>
+        </div>`;
+    }
+    const never = (id.neverDo||[]).map(n=>`<li>${esc(n)}</li>`).join('');
+    return `<div class="agent-idcard">
+        <div class="agent-idcard-head">
+            <div>
+                <span class="agent-idcard-name">${esc(id.name||'Unnamed')}</span>
+                <span class="agent-idcard-role">${esc(id.role||'')}</span>
+            </div>
+            <button class="btn btn-sm" onclick="generateAgentCard('${wfId}')" title="Rebuild this card from the current SOP">Rebuild</button>
+        </div>
+        <dl class="agent-idcard-body">
+            <dt>What done looks like</dt><dd>${esc(id.definitionOfDone||'Not set')}</dd>
+            <dt>Who it works for</dt><dd>${esc(id.servesWho||'Not set')}</dd>
+            <dt>How it behaves</dt><dd>${esc(id.voice||'Not set')}</dd>
+            <dt>Its lane</dt><dd>${esc(id.lane||'Not set')}</dd>
+            ${never?`<dt>It will never</dt><dd><ul class="agent-idcard-never">${never}</ul></dd>`:''}
+        </dl>
+        <div class="agent-idcard-foot">Runs on ${esc(window.AI_MODELS.default)}</div>
+    </div>`;
+}
+
+// Reverse-prompted from the SOP: the AI reads the captured process and writes
+// the card, exactly as the Systemisation builder writes the SOP itself.
+async function generateAgentCard(wfId){
+    const w = allWorkflows.find(x=>x.id===wfId);
+    if(!w) return;
+    if(!getWfSopData(wfId)){ toast('Generate the SOP first (on the Systemisation page)'); return; }
+    const btn = document.getElementById('agcardBtn-'+wfId);
+    if(btn){ btn.disabled = true; btn.textContent = 'Building…'; }
+    const wName = gf(w,WF.name)||'Untitled';
+    const bizRec = allBusinesses.find(b=>(gf(w,WF.business)||[])[0]===b.id)||{};
+    const prompt = `You are writing the identity card for an AI agent that runs this business process.
+
+PROCESS NAME: ${wName}
+BUSINESS: ${gf(bizRec,BIZ_NAME)||'the business'}
+
+${agenticSopText(wfId)}
+
+Write the agent's card. Return ONLY JSON, no prose, in this exact shape:
+{
+  "name": "a short human first name that suits the job, e.g. Amelia for an inbox agent",
+  "role": "its job title in 2-4 words",
+  "definitionOfDone": "ONE sentence describing the concrete finished state of a successful run, drawn from the SOP's conclusion",
+  "servesWho": "who it works for and what they care about, one short sentence",
+  "voice": "how it behaves and writes, one short sentence, plain and specific",
+  "lane": "the boundary of what it touches, one short sentence starting with what it may work on",
+  "neverDo": ["the hard never-dos and must-ask items, taken from the SOP cautions and checks, 2-5 short items"]
+}
+
+Rules: UK English. Plain language a non-technical owner understands. No jargon. No em dashes. Be specific to THIS process, never generic.`;
+    try {
+        const res = await fetch(CLAUDE_PROXY, {
+            method:'POST', headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({ model:window.AI_MODELS.default, max_tokens:900, messages:[{role:'user',content:prompt}] })
+        });
+        if(!res.ok) throw new Error('AI request failed ('+res.status+')');
+        const data = await res.json();
+        const raw = (data.content && data.content[0] && data.content[0].text) || '';
+        const match = raw.match(/\{[\s\S]*\}/);
+        if(!match) throw new Error('Could not read the card back');
+        const id = JSON.parse(match[0]);
+        if(!id.name || !id.definitionOfDone) throw new Error('The card came back incomplete');
+        if(!Array.isArray(id.neverDo)) id.neverDo = [];
+        const agent = getWfAgent(wfId) || { state:'draft' };
+        agent.identity = id;
+        await setWfAgent(wfId, agent);
+        renderAgentPanel(wfId);
+        toast('Agent card ready — read it and change anything that is not right');
+    } catch(e){
+        toast('Could not build the card: '+e.message);
+        if(btn){ btn.disabled = false; btn.textContent = 'Build the card'; }
+    }
+}
+window.generateAgentCard = generateAgentCard;
+
+async function renderAgentPanel(wfId){
+    const el = document.getElementById('agentpanel-'+wfId);
+    if(!el) return;
+    const sop = getWfSopData(wfId);
+    if(!sop || !sop.disposition || sop.disposition.type!=='agent'){ el.innerHTML=''; return; }
+    const agent = getWfAgent(wfId);
+
+    if(!agent || !agent.state || agent.state==='draft'){
+        el.innerHTML = `<div class="agent-card">
+            <div class="agent-head">
+                <div><span class="agent-pill" style="background:var(--bg-subtle);color:var(--text-muted)">DRAFT</span>
+                <span class="agent-sub">This process is marked to run as an AI agent, but the agent hasn't started yet.</span></div>
+                <button class="btn btn-sm btn-ai" onclick="startAgentTesting('${wfId}')">Start testing</button>
+            </div>
+            ${renderAgentIdentity(wfId)}
+            ${renderAutonomyLadder(wfId)}
+        </div>`;
+        return;
+    }
+
+    const meta = AGENT_STATES[agent.state] || AGENT_STATES.off;
+    let controls = '';
+    if(agent.state==='testing'){
+        controls = `<button class="btn btn-sm" onclick="runAgentNow('${wfId}')" id="agentRunBtn-${wfId}">Run now</button>
+            <button class="btn btn-sm btn-primary" onclick="confirmGoLive('${wfId}')">Go live</button>
+            <button class="btn btn-sm" onclick="setAgentState('${wfId}','off')">Pause</button>`;
+    } else if(agent.state==='live'){
+        controls = `<button class="btn btn-sm" onclick="runAgentNow('${wfId}')" id="agentRunBtn-${wfId}">Run now</button>
+            <button class="btn btn-sm" onclick="setAgentState('${wfId}','testing')">Back to testing</button>
+            <button class="btn btn-sm" onclick="setAgentState('${wfId}','off')">Pause</button>`;
+    } else {
+        controls = `<button class="btn btn-sm btn-ai" onclick="setAgentState('${wfId}','testing')">Resume testing</button>`;
+    }
+
+    el.innerHTML = `<div class="agent-card">
+        <div class="agent-head">
+            <div><span class="agent-pill" style="background:${meta.bg};color:${meta.fg}">${meta.label}</span>
+            <span class="agent-sub">${esc(meta.sub)}</span>
+            <span class="agent-sub" id="agstats-${wfId}" style="color:var(--text-muted)"></span></div>
+            <div style="display:flex;gap:6px;flex-wrap:wrap">${controls}</div>
+        </div>
+        ${renderAgentIdentity(wfId)}
+        ${renderAutonomyLadder(wfId)}
+        <div class="agent-perms" id="agentperms-${wfId}"></div>
+        <div class="agent-feed" id="agentfeed-${wfId}"><div style="padding:8px 0;font-size:var(--fs-xs);color:var(--text-muted)">Loading activity…</div></div>
+    </div>`;
+    renderAgentFeed(wfId);
+}
+
+// ── Permissions: what the agent may do WITHOUT asking (the graduated ramp) ──
+function renderAgentPerms(wfId, rows){
+    const el = document.getElementById('agentperms-'+wfId);
+    if(!el) return;
+    const agent = getWfAgent(wfId) || {};
+    const fieldSet = new Set(agent.autoFields||[]);
+    (rows||[]).forEach(r=>{
+        try { const p = JSON.parse(r.fields['Payload']||'null'); if(p && p.kind==='update' && p.fields) Object.keys(p.fields).forEach(f=>fieldSet.add(f)); } catch(e){}
+    });
+    const fields = [...fieldSet].sort();
+    const autoFields = agent.autoFields||[];
+    el.innerHTML = `<div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;padding:8px 0;border-top:1px solid var(--border-subtle);margin-top:10px;font-size:var(--fs-xs)">
+        <span style="font-weight:var(--fw-semibold);color:var(--text-secondary)">May do on its own when live:</span>
+        <label style="display:inline-flex;align-items:center;gap:5px;cursor:pointer;color:var(--text-primary)">
+            <input type="checkbox" id="agc-comments-${wfId}" ${agent.autoComments?'checked':''} onchange="saveAgentPerms('${wfId}')"> post audit comments
+        </label>
+        ${fields.map(f=>`<label style="display:inline-flex;align-items:center;gap:5px;cursor:pointer;color:var(--text-primary)">
+            <input type="checkbox" class="agc-field-${wfId}" data-field="${esc(f)}" ${autoFields.includes(f)?'checked':''} onchange="saveAgentPerms('${wfId}')"> update "${esc(f)}"
+        </label>`).join('')}
+        <span style="color:var(--text-muted)">everything else always asks first — messages to people always ask</span>
+    </div>`;
+}
+
+async function saveAgentPerms(wfId){
+    const agent = getWfAgent(wfId) || { state:'testing', tables:[] };
+    agent.autoComments = !!document.getElementById('agc-comments-'+wfId)?.checked;
+    agent.autoFields = [...document.querySelectorAll('.agc-field-'+wfId)].filter(c=>c.checked).map(c=>c.dataset.field);
+    await setWfAgent(wfId, agent);
+    toast('Saved — the agent may now do '+((agent.autoComments?1:0)+agent.autoFields.length)+' thing'+(((agent.autoComments?1:0)+agent.autoFields.length)===1?'':'s')+' without asking');
+}
+window.saveAgentPerms = saveAgentPerms;
+
+// One cached Agent Activity read serves the pending-count badges AND the
+// activity feed; any write to the table clears it. The 60-second TTL makes
+// re-renders (search keystrokes, row clicks) free instead of a request storm.
+let _activityCache = { t:0, promise:null };
+function getAgentActivity(){
+    const now = Date.now();
+    if(_activityCache.promise && (now - _activityCache.t) < 60000) return _activityCache.promise;
+    _activityCache = { t: now, promise: atFetchByName(AGENT_ACTIVITY_TBL).catch(e=>{ _activityCache.t = 0; throw e; }) };
+    return _activityCache.promise;
+}
+function invalidateAgentActivity(){ _activityCache.t = 0; }
+
+async function fetchAgentActivity(wfId){
+    // Paginated (atFetchByName) — a single-page fetch here silently showed an
+    // arbitrary 100 rows once the table grew past a page.
+    const recs = await getAgentActivity();
+    return recs
+        .filter(r=>Array.isArray(r.fields['Agent']) && r.fields['Agent'].includes(wfId))
+        .sort((a,b)=> new Date(b.createdTime) - new Date(a.createdTime))
+        .slice(0, 25);
+}
+
+function agentFeedRow(r){
+    const f = r.fields;
+    const state = f['State'] || 'Note';
+    const chipColors = {
+        'Proposed':  'background:var(--warning-bg);color:var(--warning)',
+        'Auto-done': 'background:var(--success-bg);color:var(--success)',
+        'Approved':  'background:var(--success-bg);color:var(--success)',
+        'Rejected':  'background:var(--danger-bg);color:var(--danger)',
+        'Undone':    'background:var(--bg-subtle);color:var(--text-muted)',
+        'Note':      'background:var(--info-bg);color:var(--info)',
+    };
+    let payload = null;
+    try { payload = JSON.parse(f['Payload']||'null'); } catch(e){}
+    const undoable = payload && payload.kind==='update' && payload.before && !payload.before._fetchFailed;
+    let actions = '';
+    let fbBox = '';
+    if(state==='Proposed'){
+        actions = `<button class="btn btn-sm btn-primary" onclick="approveAgentActivity('${r.id}')">&#x2713; Approve</button>
+            <button class="btn btn-sm" style="border-color:var(--danger);color:var(--danger)" onclick="rejectAgentActivity('${r.id}')">&#x2715; Reject</button>
+            <button class="btn btn-sm" onclick="toggleAgentFb('${r.id}')">&#x270E; Feedback</button>`;
+        fbBox = `<div id="agfb-${r.id}" style="display:none;margin-top:8px">
+            <textarea id="agfbtext-${r.id}" class="sop-fb-text" rows="2" placeholder="Tell the agent what's wrong or what to do differently — it learns this permanently"></textarea>
+            <div class="sop-fb-actions">
+                <button class="btn btn-sm btn-ai" onclick="sendAgentFeedback('${r.id}')">Send feedback</button>
+                <button class="btn btn-sm" onclick="toggleAgentFb('${r.id}')">Cancel</button>
+            </div>
+        </div>`;
+    } else if((state==='Auto-done'||state==='Approved') && undoable){
+        actions = `<button class="btn btn-sm" onclick="undoAgentActivity('${r.id}')">Undo</button>`;
+    }
+    const when = new Date(r.createdTime).toLocaleString('en-GB',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'});
+    const detail = String(f['Detail']||'').trim();
+    const fbShown = f['Feedback'] ? `<div class="agent-row-detail" style="color:var(--accent)">Your feedback: ${esc(String(f['Feedback']).slice(0,300))}</div>` : '';
+    return `<div class="agent-row" data-act="${r.id}">
+        <div class="agent-row-top">
+            <span class="agent-chip" style="${chipColors[state]||chipColors.Note}">${esc(state)}</span>
+            <span class="agent-row-summary">${esc(f['Summary']||'')}</span>
+            <span class="agent-row-when">${when}</span>
+        </div>
+        ${detail?`<div class="agent-row-detail">${esc(detail.slice(0,700))}${detail.length>700?'…':''}</div>`:''}
+        ${fbShown}
+        ${actions?`<div class="agent-row-actions">${actions}</div>`:''}
+        ${fbBox}
+    </div>`;
+}
+
+function toggleAgentFb(actId){
+    const box = document.getElementById('agfb-'+actId);
+    if(!box) return;
+    const showing = box.style.display !== 'none';
+    box.style.display = showing ? 'none' : 'block';
+    if(!showing){ const t=document.getElementById('agfbtext-'+actId); if(t) t.focus(); }
+}
+window.toggleAgentFb = toggleAgentFb;
+
+// Feedback = reject + teach. The proposal won't execute, the runner sees the
+// feedback on the rejected row, AND it becomes a permanent lesson in the agent
+// config injected into every future run.
+async function sendAgentFeedback(actId){
+    const ta = document.getElementById('agfbtext-'+actId);
+    const text = ta ? ta.value.trim() : '';
+    if(!text){ toast('Type your feedback first'); return; }
+    try {
+        const res = await fetch(`https://api.airtable.com/v0/${BASE_ID}/${AGENT_ACTIVITY_TBL}/${actId}`, { headers:{ 'Authorization':`Bearer ${PAT}` } });
+        const rec = await res.json();
+        const wfId = (rec.fields['Agent']||[])[0];
+        await atUpdate(AGENT_ACTIVITY_TBL, actId, { 'Feedback': text, 'State': 'Rejected' });
+        invalidateAgentActivity();
+        if(wfId){
+            const agent = getWfAgent(wfId) || { state:'testing', tables:[], autoFields:[] };
+            agent.lessons = (agent.lessons||[]).slice(-19);
+            agent.lessons.push({ text: text.slice(0,300), at: new Date().toISOString() });
+            await setWfAgent(wfId, agent);
+            renderAgentFeed(wfId);
+        }
+        toast('Feedback saved — the agent learns this permanently');
+    } catch(e){ toast('Feedback failed: '+e.message); }
+}
+window.sendAgentFeedback = sendAgentFeedback;
+
+async function renderAgentFeed(wfId){
+    const el = document.getElementById('agentfeed-'+wfId);
+    if(!el) return;
+    try {
+        const rows = await fetchAgentActivity(wfId);
+        el.innerHTML = rows.length
+            ? rows.map(agentFeedRow).join('')
+            : `<div style="padding:8px 0;font-size:var(--fs-xs);color:var(--text-muted)">No activity yet. Hit "Run now" to do a first pass over your data.</div>`;
+        renderAgentPerms(wfId, rows);
+        // The Go-Live guardrail metric: how often you've agreed with the agent.
+        const ok = rows.filter(r=>['Approved','Auto-done'].includes(r.fields['State'])).length;
+        const bad = rows.filter(r=>r.fields['State']==='Rejected').length;
+        const statsEl = document.getElementById('agstats-'+wfId);
+        if(statsEl){
+            statsEl.textContent = (ok+bad) ? `· ${ok} approved · ${bad} rejected (${Math.round(ok/(ok+bad)*100)}% approval)` : '';
+        }
+    } catch(e){
+        el.innerHTML = `<div style="padding:8px 0;font-size:var(--fs-xs);color:var(--danger)">Could not load activity: ${esc(e.message)}</div>`;
+    }
+}
+
+async function setActivityState(actId, state){
+    await atUpdate(AGENT_ACTIVITY_TBL, actId, { 'State': state });
+    invalidateAgentActivity();
+}
+
+async function approveAgentActivity(actId){
+    const row = document.querySelector(`[data-act="${actId}"]`);
+    const btns = row ? row.querySelectorAll('button') : [];
+    btns.forEach(b=>b.disabled=true);
+    try {
+        const res = await fetch(`https://api.airtable.com/v0/${BASE_ID}/${AGENT_ACTIVITY_TBL}/${actId}`, { headers:{ 'Authorization':`Bearer ${PAT}` } });
+        const rec = await res.json();
+        let payload = null;
+        try { payload = JSON.parse(rec.fields['Payload']||'null'); } catch(e){}
+        if(payload && payload.kind==='update'){
+            await atUpdate(payload.tableId, payload.recordId, payload.fields);
+        } else if(payload && payload.kind==='comment'){
+            await fetch(`https://api.airtable.com/v0/${BASE_ID}/${payload.tableId}/${payload.recordId}/comments`, {
+                method:'POST', headers:{ 'Authorization':`Bearer ${PAT}`, 'Content-Type':'application/json' },
+                body: JSON.stringify({ text: String(payload.text||'').slice(0,4000) })
+            });
+        }
+        // 'manual' payloads have nothing to execute — approving acknowledges them.
+        await setActivityState(actId, 'Approved');
+        toast(payload && payload.kind!=='manual' ? 'Approved and done' : 'Approved');
+        const wfId = (rec.fields['Agent']||[])[0];
+        if(wfId) renderAgentFeed(wfId);
+    } catch(e){ toast('Approve failed: '+e.message); btns.forEach(b=>b.disabled=false); }
+}
+window.approveAgentActivity = approveAgentActivity;
+
+async function rejectAgentActivity(actId){
+    try {
+        await setActivityState(actId, 'Rejected');
+        toast('Rejected — the agent won’t propose this again');
+        const res = await fetch(`https://api.airtable.com/v0/${BASE_ID}/${AGENT_ACTIVITY_TBL}/${actId}`, { headers:{ 'Authorization':`Bearer ${PAT}` } });
+        const rec = await res.json();
+        const wfId = (rec.fields['Agent']||[])[0];
+        if(wfId) renderAgentFeed(wfId);
+    } catch(e){ toast('Reject failed: '+e.message); }
+}
+window.rejectAgentActivity = rejectAgentActivity;
+
+async function undoAgentActivity(actId){
+    try {
+        const res = await fetch(`https://api.airtable.com/v0/${BASE_ID}/${AGENT_ACTIVITY_TBL}/${actId}`, { headers:{ 'Authorization':`Bearer ${PAT}` } });
+        const rec = await res.json();
+        let payload = null;
+        try { payload = JSON.parse(rec.fields['Payload']||'null'); } catch(e){}
+        if(!payload || payload.kind!=='update' || !payload.before){ toast('Nothing undoable on this entry'); return; }
+        await atUpdate(payload.tableId, payload.recordId, payload.before);
+        await setActivityState(actId, 'Undone');
+        toast('Undone — record restored');
+        const wfId = (rec.fields['Agent']||[])[0];
+        if(wfId) renderAgentFeed(wfId);
+    } catch(e){ toast('Undo failed: '+e.message); }
+}
+window.undoAgentActivity = undoAgentActivity;
+
+async function startAgentTesting(wfId){
+    await setWfAgent(wfId, { state:'testing', tables:['tenancies','tenants'], autoFields:[], configuredAt:new Date().toISOString() });
+    toast('Agent is in testing — it will propose, never act');
+    renderAgentPanel(wfId);
+}
+window.startAgentTesting = startAgentTesting;
+async function setAgentState(wfId, state){
+    const agent = getWfAgent(wfId) || { tables:['tenancies','tenants'], autoFields:[] };
+    agent.state = state;
+    await setWfAgent(wfId, agent);
+    toast(state==='live' ? 'Agent is LIVE' : state==='testing' ? 'Back to testing' : 'Agent paused');
+    renderAgentPanel(wfId);
+    renderRegister();
+}
+window.setAgentState = setAgentState;
+function confirmGoLive(wfId){
+    const body = `<p style="font-size:var(--fs-sm);color:var(--text-secondary);line-height:1.6">Going live means the agent runs every day on its own.<br><br>
+        <strong>Safe actions</strong> (pre-approved field updates) happen automatically.<br>
+        <strong>Everything else</strong> still queues here for your approval.<br>
+        Every action stays logged with one-click Undo, and you can pause any time.</p>`;
+    const footer = `<button class="btn" onclick="closeModal()">Not yet</button>
+        <button class="btn btn-primary" onclick="closeModal();setAgentState('${wfId}','live')">Go live</button>`;
+    showModal('Take this agent live?', body, footer);
+}
+window.confirmGoLive = confirmGoLive;
+
+async function runAgentNow(wfId){
+    const btn = document.getElementById('agentRunBtn-'+wfId);
+    if(btn){ btn.disabled=true; btn.textContent='Running…'; }
+    try {
+        const res = await fetch(`${AGENT_RUNNER_URL}/run?wf=${wfId}`, { method:'POST' });
+        if(!res.ok) throw new Error('runner '+res.status);
+        const data = await res.json();
+        const stats = (data.results && data.results[0] && data.results[0].stats) || {};
+        toast(`Run complete — ${stats.proposed||0} proposed, ${stats.auto||0} done automatically`);
+    } catch(e){ toast('Run failed: '+e.message); }
+    if(btn){ btn.disabled=false; btn.textContent='Run now'; }
+    invalidateAgentActivity();
+    renderAgentFeed(wfId);
+}
+window.runAgentNow = runAgentNow;
+
+// One fetch for the fleet: count Proposed activity rows per agent, fill the badges.
+async function fillAgentPendingCounts(agentIds){
+    try {
+        const recs = await getAgentActivity();
+        const counts = {};
+        recs.forEach(r=>{
+            if((r.fields['State']||'')!=='Proposed') return;
+            (r.fields['Agent']||[]).forEach(id=>{ counts[id]=(counts[id]||0)+1; });
+        });
+        agentIds.forEach(id=>{
+            const el = document.getElementById('agpend-'+id);
+            if(!el) return;
+            const n = counts[id]||0;
+            el.textContent = n ? `${n} proposal${n===1?'':'s'}` : 'Nothing waiting';
+            if(n){ el.style.color='var(--warning)'; el.style.fontWeight='var(--fw-semibold)'; }
+        });
+    } catch(e){ console.warn('pending counts failed', e); }
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// Sync bar + health checks — same conventions as the other iframe pages
+// (registerSyncBar / markTabSynced in js/sync-bar.js; the bar broadcasts its
+// rollup up to the shell, which colours the sidebar dot for 'agents').
+// ═══════════════════════════════════════════════════════════════════════
+function registerAgentsSyncBar(){
+    if(typeof registerSyncBar !== 'function') return;
+    registerSyncBar('agents', {
+        refreshFn: () => refreshAll(),
+        checks: [
+            {
+                name: 'Approvals queue read', kind: 'sync', run: () => {
+                    if(String(_approvalsState).indexOf('error') === 0) return { status:'fail', detail:String(_approvalsState).slice(7) };
+                    if(_approvalsState !== 'ready') return { status:'warn', detail:'Not loaded yet' };
+                    return { status:'pass', detail:`${allApprovals.length} loop-raised task(s) waiting` };
+                }
+            },
+            {
+                name: 'Legacy Approval records excluded', kind: 'sync', run: () => {
+                    // 22 legacy property-admin records sit at Status Approval
+                    // with no raiser. If one appears here, the filter broke.
+                    if(_approvalsState !== 'ready') return { status:'warn', detail:'Queue not loaded yet' };
+                    const leaked = allApprovals.filter(t=>!t.raiserLinked).length;
+                    if(leaked) return { status:'fail', detail:`${leaked} task(s) with no Sent For Approval By leaked into the queue — the formula filter broke` };
+                    return { status:'pass', detail:'Every queued task was raised by an agent' };
+                }
+            },
+            {
+                name: 'Agents register read', kind: 'sync', run: () => {
+                    if(String(_agentsRegisterState).indexOf('error') === 0) return { status:'fail', detail:String(_agentsRegisterState).slice(7) };
+                    if(_agentsRegisterState !== 'ready') return { status:'warn', detail:'Not loaded yet' };
+                    return { status:'pass', detail:`${allAgents.length} role agents · ${allTeamAgents.length} AI Team Members rows` };
+                }
+            },
+            {
+                name: 'Daily log read', kind: 'sync', run: () => {
+                    if(String(_dailyLogState).indexOf('error') === 0) return { status:'fail', detail:String(_dailyLogState).slice(7) };
+                    if(_dailyLogState !== 'ready') return { status:'warn', detail:'Not loaded yet' };
+                    const today = todayStr();
+                    const n = allDailyLogRows.filter(r=>String(gf(r,ALOG.date)||'').slice(0,10)===today).length;
+                    return { status:'pass', detail:`${allDailyLogRows.length} recent rows · ${n} written today` };
+                }
+            },
+            {
+                name: 'Accuracy stats control', kind: 'sync', run: () => {
+                    // Same control the register carries: zero matched rows on a
+                    // platform with weeks of approval history means a field
+                    // rename broke the read, not a quiet week.
+                    if(_agentsRegisterState !== 'ready') return { status:'warn', detail:'Register not loaded yet' };
+                    if(!_agentTaskStatsOk) return { status:'fail', detail:'Task read returned zero rows — workload figures are blind' };
+                    if(!_agentAccuracyOk) return { status:'fail', detail:'No approval history matched — if the dashboard card shows decisions, a field rename broke this read' };
+                    return { status:'pass', detail:`${_agentAccuracyRows.length} accuracy rows across agents and task types` };
+                }
+            },
+            {
+                name: 'Inbound Comms Response metric fresh', kind: 'automation', run: () => {
+                    if(_agentsRegisterState !== 'ready') return { status:'warn', detail:'Register not loaded yet' };
+                    const row = allAgents.find(a=>String(gf(a,AG.name)||'').toLowerCase().includes('inbound comms response'));
+                    if(!row) return { status:'fail', detail:'No "Inbound Comms Response" row in the register — the agent lost its home row' };
+                    const score = gf(row,AG.metricScore);
+                    if(!score) return { status:'fail', detail:'Metric Score is empty — the agent\'s runtime has stopped publishing its score' };
+                    return { status:'pass', detail:'Metric Score: '+String(score).split('\n')[0].slice(0,120) };
+                }
+            },
+            {
+                name: 'Check zones computed', kind: 'automation', run: () => {
+                    const lanes = computeCheckLanes();
+                    const broken = lanes.filter(l=>l.error).map(l=>l.lane);
+                    if(broken.length) return { status:'fail', detail:'Lanes that could not run: '+broken.join(', ') };
+                    const n = lanes.reduce((s,l)=>s+(l.items||[]).length,0);
+                    return { status:'pass', detail: n ? `${n} item(s) need attention` : 'All five lanes ran clean' };
+                }
+            },
+        ],
+    });
+    markTabSynced('agents');
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// Deep links — the Skills Library, the Tasks roster and the Systemisation
+// SOP pointer all open a specific agent here.
+//   #agent=recXXX        — role agent, via URL hash (new-tab safe)
+//   sys_open_role_agent  — role agent, via localStorage (in-shell)
+//   sys_open_agent       — process agent (workflow id), via localStorage
+// ═══════════════════════════════════════════════════════════════════════
+function consumeAgentDeepLink(){
+    const hashMatch = (location.hash||'').match(/#agent=(rec[A-Za-z0-9]+)/);
+    if(hashMatch){
+        history.replaceState(null,'',location.pathname+location.search);
+        selectedAgentId = hashMatch[1];
+        return true;
+    }
+    const roleId = localStorage.getItem('sys_open_role_agent');
+    if(roleId){
+        localStorage.removeItem('sys_open_role_agent');
+        selectedAgentId = roleId;
+        return true;
+    }
+    const wfId = localStorage.getItem('sys_open_agent');
+    if(wfId){
+        localStorage.removeItem('sys_open_agent');
+        selectedAgentWf = wfId;
+        return true;
+    }
+    return false;
+}
+window.addEventListener('storage', (e)=>{
+    if((e.key==='sys_open_agent' || e.key==='sys_open_role_agent') && e.newValue){
+        if(consumeAgentDeepLink() && _agentsRegisterState==='ready'){
+            renderRegister();
+            const z = document.getElementById('zoneRegister');
+            if(z) z.scrollIntoView({behavior:'smooth', block:'start'});
+        }
+    }
+});
+
+// ═══════════════════════════════════════════════════════════════════════
+// Boot
+// ═══════════════════════════════════════════════════════════════════════
+let _lastSyncAt = null;
+function updateSyncStatus(state, msg){
+    const el = document.getElementById('syncStatus');
+    if(!el) return;
+    if(state==='ok'){
+        _lastSyncAt = new Date();
+        const t = _lastSyncAt.toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'});
+        el.innerHTML = `<span class="sync-dot ok"></span>Synced ${t}`;
+        el.title = 'Last synced ' + _lastSyncAt.toLocaleString('en-GB');
+    } else if(state==='syncing'){
+        el.innerHTML = `<span class="sync-dot syncing"></span>Syncing…`;
+        el.title = 'Refreshing from Airtable';
+    } else {
+        el.innerHTML = `<span class="sync-dot error"></span>Sync failed`;
+        el.title = msg || 'Sync failed';
+    }
+}
+
+async function loadEverything(){
+    // The five loads are independent; each records its own error state so one
+    // broken feed never blanks the others.
+    await Promise.all([
+        loadApprovals(),
+        loadOpenTasks(),
+        loadDailyLogs(),
+        loadWorkflowData(),
+        (async ()=>{ _agentsRegisterState='idle'; await loadAgentsRegister(true); })(),
+    ]);
+}
+
+function renderAllZones(){
+    renderApprovals();
+    loadChecksAndRender();
+    renderRegister();
+}
+
+async function refreshAll(){
+    const btn = document.getElementById('refreshBtn');
+    if(btn){ btn.disabled = true; btn.classList.add('spinning'); }
+    if(typeof markTabRefreshing === 'function') markTabRefreshing('agents');
+    updateSyncStatus('syncing');
+    invalidateAgentActivity();
+    try {
+        await loadEverything();
+        renderAllZones();
+        registerAgentsSyncBar();
+        updateSyncStatus('ok');
+    } catch(e){
+        if(e.message==='auth') return;
+        updateSyncStatus('error', e.message);
+        toast('Refresh failed: ' + e.message);
+    } finally {
+        if(btn){ btn.disabled = false; btn.classList.remove('spinning'); }
+    }
+}
+window.refreshAll = refreshAll;
+
+async function start(){
+    document.getElementById('loader').style.display='block';
+    document.getElementById('authBar').style.display='none';
+    try {
+        consumeAgentDeepLink();
+        await loadEverything();
+        document.getElementById('topbar').style.display='flex';
+        document.getElementById('main').style.display='block';
+        document.getElementById('loader').style.display='none';
+        renderAllZones();
+        registerAgentsSyncBar();
+        updateSyncStatus('ok');
+    } catch(e){
+        if(e.message==='auth') return;
+        document.getElementById('loader').textContent='Error loading data: '+e.message;
+        updateSyncStatus('error', e.message);
+    }
+}
+
+if(bootAuth()) start();
+else {
+    document.getElementById('authBar').style.display='flex';
+    document.getElementById('loader').style.display='none';
+}
+</script>
+</body>
+</html>

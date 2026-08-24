@@ -5,38 +5,44 @@ import { fileURLToPath } from 'node:url';
 
 // The AGENTIC framework (Kevin's ruling 25 Aug 2026): seven stages, the
 // acronym unchanged, reasoning folded INTO Navigate, C carrying the score.
-// These tests pull the REAL constant and the REAL normaliser out of
-// os/systemisation/index.html, so a stage quietly dropped, reordered, or
-// given the wrong N/A rule fails here rather than in production.
+//
+// Since the AI Agents page moved out of Systemisation (25 Aug 2026), the
+// framework lives in TWO pages: os/agents/index.html (the register readiness
+// check and the guided creation form) and os/systemisation/index.html (the
+// workflow/SOP readiness check). The AGENTS page is canonical — every
+// behavioural test below extracts the REAL constant and the REAL normaliser
+// from it — and a dedicated block asserts the Systemisation copies are
+// byte-identical, so the two routes cannot drift apart.
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const src = readFileSync(resolve(root, 'os/systemisation/index.html'), 'utf8');
+const src = readFileSync(resolve(root, 'os/agents/index.html'), 'utf8');
+const sysSrc = readFileSync(resolve(root, 'os/systemisation/index.html'), 'utf8');
 
-function extractConst(name) {
-  const start = src.indexOf(`const ${name} = [`);
+function extractConst(source, name) {
+  const start = source.indexOf(`const ${name} = [`);
   if (start === -1) throw new Error(`${name} not found`);
-  let i = src.indexOf('[', start), depth = 0, end = -1;
-  for (; i < src.length; i++) {
-    if (src[i] === '[') depth++;
-    else if (src[i] === ']') { depth--; if (depth === 0) { end = i + 1; break; } }
+  let i = source.indexOf('[', start), depth = 0, end = -1;
+  for (; i < source.length; i++) {
+    if (source[i] === '[') depth++;
+    else if (source[i] === ']') { depth--; if (depth === 0) { end = i + 1; break; } }
   }
-  return src.slice(start, end) + ';';
+  return source.slice(start, end) + ';';
 }
 
-function extractFn(name) {
-  const start = src.indexOf(`function ${name}(`);
+function extractFn(source, name) {
+  const start = source.indexOf(`function ${name}(`);
   if (start === -1) throw new Error(`${name} not found`);
-  let i = src.indexOf('{', start), depth = 0, end = -1;
-  for (; i < src.length; i++) {
-    if (src[i] === '{') depth++;
-    else if (src[i] === '}') { depth--; if (depth === 0) { end = i + 1; break; } }
+  let i = source.indexOf('{', start), depth = 0, end = -1;
+  for (; i < source.length; i++) {
+    if (source[i] === '{') depth++;
+    else if (source[i] === '}') { depth--; if (depth === 0) { end = i + 1; break; } }
   }
-  return src.slice(start, end);
+  return source.slice(start, end);
 }
 
-const stagesCode = extractConst('AGENTIC_STAGES');
+const stagesCode = extractConst(src, 'AGENTIC_STAGES');
 const STAGES = new Function(`${stagesCode} return AGENTIC_STAGES;`)();
 const normalise = new Function(
-  `${stagesCode} ${extractFn('stageNaAllowed')} ${extractFn('normaliseReadiness')} return normaliseReadiness;`
+  `${stagesCode} ${extractFn(src, 'stageNaAllowed')} ${extractFn(src, 'normaliseReadiness')} return normaliseReadiness;`
 )();
 
 const allClear = (letters) => letters.map(l => ({ letter: l, status: 'Clear', reason: '' }));
@@ -100,7 +106,7 @@ describe('normaliseReadiness N/A rules', () => {
 describe('accuracy bands (guardrailBand)', () => {
   const bandOf = (rows) => {
     const fn = new Function(
-      `let _agentAccuracyRows = ${JSON.stringify(rows)}; ${extractFn('guardrailBand')} return guardrailBand('tm1');`
+      `let _agentAccuracyRows = ${JSON.stringify(rows)}; const GUARDRAIL_ORDER = ['Approval required','Hybrid escalation','Autonomous']; ${extractFn(src, 'guardrailBand')} return guardrailBand('tm1');`
     );
     return fn();
   };
@@ -124,14 +130,43 @@ describe('accuracy bands (guardrailBand)', () => {
 });
 
 describe('shared check wording (no drift between the two routes)', () => {
-  it('the workflow check, the register check, and the form check all use agenticPassRules', () => {
+  it('the agents page uses agenticPassRules for the register check and the form check', () => {
     const calls = src.split('agenticPassRules(').length - 1;
-    // 1 definition + at least 3 call sites (workflow check, register check, form stage check)
-    expect(calls).toBeGreaterThanOrEqual(4);
+    // 1 definition + at least 2 call sites (register check, form stage check)
+    expect(calls).toBeGreaterThanOrEqual(3);
   });
 
-  it('no eight-stage or AGENTRIC wording is left', () => {
-    expect(src).not.toMatch(/AGENTRIC/i);
-    expect(src).not.toMatch(/eight AGENTI?C/i);
+  it('the systemisation page still uses agenticPassRules for the workflow check', () => {
+    const calls = sysSrc.split('agenticPassRules(').length - 1;
+    // 1 definition + at least 1 call site (workflow/SOP check)
+    expect(calls).toBeGreaterThanOrEqual(2);
+  });
+
+  it('no eight-stage or AGENTRIC wording is left on either page', () => {
+    for (const s of [src, sysSrc]) {
+      expect(s).not.toMatch(/AGENTRIC/i);
+      expect(s).not.toMatch(/eight AGENTI?C/i);
+    }
+  });
+});
+
+// The framework exists in both pages because a plain <script> page cannot
+// import from another page. Copies drift — that is this platform's oldest
+// failure class — so the copies are held byte-identical here. A deliberate
+// change to the framework must land in BOTH files in the same commit.
+describe('the agents page and the systemisation page carry identical framework copies', () => {
+  it.each([
+    ['AGENTIC_STAGES', 'const'],
+    ['stageNaAllowed', 'fn'],
+    ['normaliseReadiness', 'fn'],
+    ['agenticStageListText', 'fn'],
+    ['agenticNaRule', 'fn'],
+    ['agenticCheckIntro', 'fn'],
+    ['agenticPassRules', 'fn'],
+    ['agenticResultShape', 'fn'],
+    ['callClaudeJson', 'fn'],
+  ])('%s is byte-identical in both pages', (name, kind) => {
+    const grab = kind === 'const' ? extractConst : extractFn;
+    expect(grab(sysSrc, name)).toBe(grab(src, name));
   });
 });

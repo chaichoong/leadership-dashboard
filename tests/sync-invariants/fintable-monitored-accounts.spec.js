@@ -13,8 +13,11 @@ const acc = (id, fields) => ({ id, fields });
 test('sync banner counts only feeds on an active business with a Fintable user', async ({ page }) => {
   const fixtures = makeFixtures();
   fixtures.accounts = [
-    // real dead feed: linked to an active business, has a Fintable user -> counted
-    acc('recDead', { 'Account Alias': 'Barclaycard', '**Fintable User': 'k@x.com', 'Active? (From Business)': [1], '**Last Successful Update': hoursAgo(384 * 24) }),
+    // real dead feed: linked to an active business, has a Fintable user -> counted.
+    // (Alias must NOT be on FINTABLE_EXCLUDED — this fixture used 'Barclaycard'
+    // until 24 Aug 2026, when Kevin's call excluded that alias and the fixture
+    // row started being hidden by the very filter under test.)
+    acc('recDead', { 'Account Alias': 'HSBC Business', '**Fintable User': 'k@x.com', 'Active? (From Business)': [1], '**Last Successful Update': hoursAgo(384 * 24) }),
     // legacy feed with no Business link -> hidden
     acc('recLegacy', { '*Name': 'KB Director Expenses', '**Fintable User': 'k@x.com', '**Last Successful Update': hoursAgo(931 * 24) }),
     // manual account, no Fintable connection -> hidden (nothing to reconnect)
@@ -33,7 +36,7 @@ test('sync banner counts only feeds on an active business with a Fintable user',
   await page.waitForFunction(() => document.querySelectorAll('#fintableBody tr').length > 0 && !document.querySelector('#fintableBody .od-empty-state'), { timeout: 20000 });
 
   const rows = await page.locator('#fintableBody tr').allInnerTexts();
-  expect(rows.join('\n')).toContain('Barclaycard');
+  expect(rows.join('\n')).toContain('HSBC Business');
   expect(rows.join('\n')).toContain('Santander');
   expect(rows.join('\n')).not.toContain('KB Director Expenses');
   expect(rows.join('\n')).not.toContain('ANNA');

@@ -42,6 +42,9 @@ FILE_TO_PAGE = {
     'js/skills.js':             'skills',
     'js/skills-data.js':        'skills',
     'os/systemisation/index.html': 'systemisation',
+    # SOP files (sop-*.html) are deliberately NOT mapped: sopVer moves by hand
+    # when the SOP is updated to match the page (see CLAUDE.md Version Tracking).
+    'os/agents/index.html':        'agents',
     'os/team/index.html':          'os-team',
     'how-it-works.html':           'how-it-works',
     # Previously-unmapped registered pages (their versions never bumped)

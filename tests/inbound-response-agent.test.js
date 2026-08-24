@@ -1,11 +1,11 @@
-// Guards the Inbound Comms Response agent's dispatch wiring (25 Aug 2026).
+// Guards the Inbound Comms Response agent's dispatch wiring (24 Aug 2026).
 //
 // WHAT THIS EXISTS FOR
 // The Response agent only works if four pieces stay true at once:
 //   1. Its Team Members record is a dispatchable agent (ROLE_AGENTS), so its
 //      tasks are picked up, attributed, and its learning log fed.
 //   2. Inbound reply tasks on the AI CEO auto-route to it deterministically
-//      (Kevin's ruling, 25 Aug 2026) — no od-ceo judgement per routine reply.
+//      (Kevin's ruling, 24 Aug 2026) — no od-ceo judgement per routine reply.
 //   3. route/submit accept role agents (ALL_AGENTS, not the 17-only AGENTS) —
 //      reverting either to AGENTS silently strands every routed inbound task.
 //   4. Its 24h metric maths stay honest — the score selftest runs the REAL
