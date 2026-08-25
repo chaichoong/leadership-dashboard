@@ -441,6 +441,23 @@ def cmd_note(task, move, reason, name=""):
     print(json.dumps({"noted": task, "move": move}))
 
 
+# The Step 3b approval-queue review's ONE write. Kevin's queue on the AI
+# Agents page sorts tier-1 first, then this field, then longest waiting —
+# so the board's 9am/1pm/5pm judgement reaches him through it. Options are
+# the LIVE single-select names; 'Project' is a workstream marker the board
+# never writes, and there is deliberately NO typecast: a typo'd option must
+# 422 loudly, never mint a phantom select option on a shared field.
+PRIORITY_FIELD = "fldS21RwmwOqt71LI"
+PRIORITY_OPTIONS = ("Urgent", "High", "Not Urgent")
+
+
+def cmd_priority(task, value):
+    airtable_request("PATCH", "%s/%s" % (TASKS_TABLE, task),
+                     {"fields": {PRIORITY_FIELD: value}}, "priority write")
+    digest_append({"task": task, "move": "priority", "to": value})
+    print(json.dumps({"task": task, "priority": value}))
+
+
 def cmd_score(stuck, open_total, kevin):
     state = read_state()
     history = state.get("history", {})
@@ -642,6 +659,9 @@ def main():
     s.add_argument("--stuck", required=True, type=int)
     s.add_argument("--open", required=True, type=int, dest="open_total")
     s.add_argument("--kevin", required=True, type=int)
+    p = sub.add_parser("priority")
+    p.add_argument("task")
+    p.add_argument("--set", required=True, dest="value", choices=list(PRIORITY_OPTIONS))
     sub.add_parser("publish")
     v = sub.add_parser("verify")
     v.add_argument("--report", required=True)
@@ -651,6 +671,8 @@ def main():
         cmd_board(a.dispatch_queue)
     elif a.cmd == "note":
         cmd_note(a.task, a.move, a.reason, a.name)
+    elif a.cmd == "priority":
+        cmd_priority(a.task, a.value)
     elif a.cmd == "score":
         cmd_score(a.stuck, a.open_total, a.kevin)
     elif a.cmd == "publish":

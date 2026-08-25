@@ -39,6 +39,7 @@ const TF = {
   approvedAt: 'fldr4Mvf2RzKvhZhi',
   taskType: 'fldZ2moDV2041Sobc',
   completionDate: 'fldFOi1SwEKuJRmdN',
+  priority: 'fldS21RwmwOqt71LI',
   lmt: 'flddJA23cJRX5cs1K',
   inboundTask: 'fldueazD67F7fUGee',
 };
@@ -102,17 +103,24 @@ function defaultFixtures() {
         [AG.guardrail]: 'Approval required', [AG.teamMember]: [AGENT_B], [AG.metricScore]: '92% within 24h',
       } },
     ],
+    // Importance spread on purpose: A1 is tier 1 (leads regardless of
+    // priority), B1 is Urgent (beats High), A2 is High — so the specs can
+    // assert the queue's most-important-first order.
     approvals: [
       { id: 'recApvA1', createdTime: now, fields: {
-        [TF.name]: 'Reply to Anglian Water', [TF.status]: 'Approval', [TF.agentOutput]: 'Draft: please freeze the account.',
+        [TF.name]: 'Reply to Anglian Water', [TF.status]: 'Approval',
+        [TF.agentOutput]: '🚨 TIER 1. This touches your private legal and financial matter. Draft: please freeze the account.',
+        [TF.priority]: 'High',
         [TF.sentForApprovalBy]: [AGENT_A], [TF.teamMember]: [AGENT_A], [TF.lmt]: now, [TF.taskType]: 'Correspondence',
       } },
       { id: 'recApvA2', createdTime: now, fields: {
         [TF.name]: 'Payment plan proposal', [TF.status]: 'Approval', [TF.agentOutput]: 'Draft: lowest possible plan.',
+        [TF.priority]: 'High',
         [TF.sentForApprovalBy]: [AGENT_A], [TF.teamMember]: [AGENT_A], [TF.lmt]: now, [TF.taskType]: 'Correspondence',
       } },
       { id: 'recApvB1', createdTime: now, fields: {
         [TF.name]: 'Reply to tenant email', [TF.status]: 'Approval', [TF.agentOutput]: 'Draft: thanks, will confirm.',
+        [TF.priority]: 'Urgent',
         [TF.sentForApprovalBy]: [AGENT_B], [TF.teamMember]: [AGENT_B], [TF.lmt]: now, [TF.taskType]: 'Drafting',
       } },
     ],

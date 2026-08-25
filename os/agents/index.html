@@ -66,8 +66,6 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 .apv-filter{border:1px solid var(--border-default);background:var(--bg-surface);color:var(--text-secondary);border-radius:var(--radius-full);padding:4px 12px;font-size:var(--fs-xs);font-weight:var(--fw-semibold);cursor:pointer;font-family:inherit}
 .apv-filter:hover{border-color:var(--accent);color:var(--accent)}
 .apv-filter.active{background:var(--accent);border-color:var(--accent);color:var(--accent-on)}
-.apv-group-head{font-size:var(--fs-sm);font-weight:var(--fw-bold);color:var(--text-secondary);margin:16px 0 8px;display:flex;align-items:center;gap:8px}
-.apv-group-head:first-child{margin-top:0}
 
 .zone{margin-bottom:28px}
 .zone-header{display:flex;align-items:center;gap:10px;margin-bottom:12px;padding-bottom:8px;border-bottom:2px solid var(--border-default)}
@@ -218,7 +216,7 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 <div id="topbar" class="topbar" style="display:none">
     <div>
         <h1>AI Agents</h1>
-        <div class="subtitle">Your AI team's dashboard, your approvals, and the CEO brief</div>
+        <div class="subtitle">The CEO brief and your team's stats, your approvals in priority order, and what has not moved</div>
     </div>
     <div class="topbar-right">
         <span id="syncStatus" class="sync-status" title="Not synced yet"><span class="sync-dot"></span>Loading…</span>
@@ -232,17 +230,15 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
     <div class="page-tabs" role="tablist">
         <button class="page-tab active" id="ptab-dashboard" role="tab" aria-selected="true" onclick="switchAgentsView('dashboard')">Dashboard</button>
         <button class="page-tab" id="ptab-approvals" role="tab" aria-selected="false" onclick="switchAgentsView('approvals')">Approvals <span class="page-tab-badge" id="approvalsTabBadge" style="display:none">0</span></button>
-        <button class="page-tab" id="ptab-ceo-brief" role="tab" aria-selected="false" onclick="switchAgentsView('ceo-brief')">CEO Brief</button>
+        <button class="page-tab" id="ptab-checks" role="tab" aria-selected="false" onclick="switchAgentsView('checks')">Check these <span class="page-tab-badge" id="checksTabBadge" style="display:none">0</span></button>
     </div>
 
+    <!-- Dashboard = the CEO brief plus one scorecard per agent (Kevin's
+         ruling, 25 Aug 2026 evening: no checks here, just the team and its
+         stats, with the brief folded in from its own tab). -->
     <div class="page-view active" id="view-dashboard">
-        <div class="zone" id="zoneChecks">
-            <div class="zone-header">
-                <span class="zone-title">Check these</span>
-                <span class="zone-count" id="checksCount">0</span>
-                <span class="zone-sub">What should have moved and has not. Absence, not successes.</span>
-            </div>
-            <div id="checksBody"><div class="zone-loading"><div class="sop-spinner"></div><span>Working out what has not moved…</span></div></div>
+        <div class="zone" id="zoneCeoBrief">
+            <div id="ceoBriefBody"><div class="zone-loading"><div class="sop-spinner"></div><span>Loading the CEO brief…</span></div></div>
         </div>
 
         <div class="zone" id="zoneRegister">
@@ -260,15 +256,20 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
             <div class="zone-header">
                 <span class="zone-title">Waiting for your approval</span>
                 <span class="zone-count" id="approvalsCount">0</span>
-                <span class="zone-sub">Loop-raised work only. Nothing is sent, filed or actioned until you decide.</span>
+                <span class="zone-sub">Most important first: tier 1, then priority, then longest waiting.</span>
             </div>
             <div id="approvalsBody"><div class="zone-loading"><div class="sop-spinner"></div><span>Loading the approval queue…</span></div></div>
         </div>
     </div>
 
-    <div class="page-view" id="view-ceo-brief">
-        <div class="zone" id="zoneCeoBrief">
-            <div id="ceoBriefBody"><div class="zone-loading"><div class="sop-spinner"></div><span>Loading the CEO brief…</span></div></div>
+    <div class="page-view" id="view-checks">
+        <div class="zone" id="zoneChecks">
+            <div class="zone-header">
+                <span class="zone-title">Check these</span>
+                <span class="zone-count" id="checksCount">0</span>
+                <span class="zone-sub">What should have moved and has not. Absence, not successes.</span>
+            </div>
+            <div id="checksBody"><div class="zone-loading"><div class="sop-spinner"></div><span>Working out what has not moved…</span></div></div>
         </div>
     </div>
 </div>
@@ -310,6 +311,7 @@ const TF = {
     approvedAt:       'fldr4Mvf2RzKvhZhi',
     taskType:         'fldZ2moDV2041Sobc',
     completionDate:   'fldFOi1SwEKuJRmdN',
+    priority:         'fldS21RwmwOqt71LI',
     lmt:              'flddJA23cJRX5cs1K', // lastModifiedTime — watches every field
     slackBaseline:    'fldxsqj9JSRBGNyT9', // when the Slack card went out (submission proxy)
     inboundTask:      'fldueazD67F7fUGee', // Inbound Communication Task checkbox
@@ -467,7 +469,11 @@ function stageNaAllowed(def, human){ return !!def.naAllowed[human ? 'human' : 'a
 // State
 // ═══════════════════════════════════════════════════════════════════════
 let PAT = '';
-const AGENT_VIEWS = ['dashboard','approvals','ceo-brief'];
+const AGENT_VIEWS = ['dashboard','approvals','checks'];
+// The CEO Brief lived as its own tab for a day (25 Aug 2026); it now sits on
+// the Dashboard. Old links, the shell's #ceo-brief forwarder and muscle
+// memory still say 'ceo-brief' — map them home rather than 404 the view.
+const AGENT_VIEW_ALIASES = { 'ceo-brief': 'dashboard' };
 let _agentsView = 'dashboard';  // which page tab is showing
 let allApprovals = [];          // loop-raised tasks at Status Approval
 let _approvalsState = 'idle';   // idle | loading | ready | 'error: <message>'
@@ -551,8 +557,9 @@ function restoreSearchFocus(){
 // ═══════════════════════════════════════════════════════════════════════
 // Auth
 // ═══════════════════════════════════════════════════════════════════════
-// ── Page tabs (Dashboard | Approvals | CEO Brief) ──────────────────────
+// ── Page tabs (Dashboard | Approvals | Check these) ────────────────────
 function switchAgentsView(view){
+    view = AGENT_VIEW_ALIASES[view] || view;
     if(AGENT_VIEWS.indexOf(view)===-1) view='dashboard';
     _agentsView = view;
     AGENT_VIEWS.forEach(v=>{
@@ -562,11 +569,11 @@ function switchAgentsView(view){
         if(btn){ btn.classList.toggle('active', v===view); btn.setAttribute('aria-selected', v===view?'true':'false'); }
     });
     // Re-render the view being entered from data already in memory (no
-    // fetch). The old shell re-rendered the CEO Brief on every tab open;
-    // without this, a page left open overnight keeps labelling yesterday's
-    // brief TODAY, and the approvals waiting-times freeze.
-    if(view==='ceo-brief' && _ceoBriefState==='ready') renderCeoBrief();
+    // fetch). Without this, a page left open overnight keeps labelling
+    // yesterday's brief TODAY, and the approvals waiting-times freeze.
+    if(view==='dashboard' && _ceoBriefState==='ready') renderCeoBrief();
     if(view==='approvals' && _approvalsState==='ready') renderApprovals();
+    if(view==='checks') loadChecksAndRender();
     window.scrollTo(0,0);
 }
 window.switchAgentsView = switchAgentsView;
@@ -696,7 +703,7 @@ async function loadApprovals(){
         const recs = await atFetch(TASKS_TBL,
             [TF.name, TF.status, TF.description, TF.notes, TF.dueDate, TF.taskType,
              TF.agentOutput, TF.sentForApprovalBy, TF.teamMember, TF.lmt, TF.slackBaseline,
-             TF.approver],
+             TF.approver, TF.priority],
             { filterByFormula: "AND({Status}='Approval', LEN({Sent For Approval By}&'')>0)" });
         // This queue and badge are KEVIN'S. The Approver field decides whose
         // lane a task is in (empty = Kevin, same convention as approverFor in
@@ -714,16 +721,30 @@ async function loadApprovals(){
             agentOutput: gf(r,TF.agentOutput)||'',
             description: gf(r,TF.description)||'',
             notes: gf(r,TF.notes)||'',
+            priority: selName(gf(r,TF.priority)),
             raiserId: linkIds(gf(r,TF.sentForApprovalBy))[0] || linkIds(gf(r,TF.teamMember))[0] || '',
             raiserLinked: linkIds(gf(r,TF.sentForApprovalBy)).length > 0,
             lmt: gf(r,TF.lmt)||'',
             // Submission-age proxy: the Slack baseline is stamped within a
             // minute of the agent submitting; LMT is the fallback for a task
-            // the Slack sweep has not posted yet.
+            // the Slack sweep has not posted yet. Known wrinkle: any field
+            // write (e.g. the board's Step 3b priority correction) bumps LMT,
+            // so an un-posted task's waiting clock can reset — the window is
+            // the minute before the sweep stamps the baseline, accepted.
             submittedAt: gf(r,TF.slackBaseline) || gf(r,TF.lmt) || r.createdTime,
         }));
-        // Oldest waiting first — the longest-suffering ask leads.
-        allApprovals.sort((a,b)=> String(a.submittedAt).localeCompare(String(b.submittedAt)));
+        // Most important first (Kevin's ruling, 25 Aug 2026): tier 1 leads,
+        // then the Priority field (which the Task Manager's 9am/1pm/5pm
+        // board pass reviews and corrects), then longest waiting. The
+        // board's judgement reaches this page through that field.
+        // The LIVE Priority options: Urgent / High / Project / Not Urgent.
+        // Project is a workstream marker, not urgency — it sits between High
+        // and an explicit Not Urgent; a blank priority ranks last.
+        const prioRank = p => ({ Urgent:4, High:3, Project:2, 'Not Urgent':1 })[p] || 0;
+        allApprovals.sort((a,b)=>
+            (isTier1Output(b.agentOutput)?1:0) - (isTier1Output(a.agentOutput)?1:0)
+            || prioRank(b.priority) - prioRank(a.priority)
+            || String(a.submittedAt).localeCompare(String(b.submittedAt)));
         _approvalsState = 'ready';
     } catch(e){
         if(e.message==='auth') throw e;
@@ -822,33 +843,30 @@ function renderApprovals(){
 
     snapshotApprovalDrafts();
 
-    // Group by the agent that raised each task; groups keep the queue's
-    // oldest-first order (the longest-suffering agent's group leads).
-    const groups = [];
+    // Filter chips per raising agent; the list itself stays FLAT in the
+    // queue's importance order (tier 1, then priority, then longest
+    // waiting) — grouping by agent would bury an urgent item under another
+    // agent's routine ones (Kevin's ruling, 25 Aug 2026).
+    const chips = [];
     const byKey = {};
     allApprovals.forEach(t=>{
         const key = t.raiserId || 'none';
         if(!byKey[key]){
             byKey[key] = { key, label: key==='none' ? 'No agent recorded' : (teamName(key)||'Unknown agent'), rows: [] };
-            groups.push(byKey[key]);
+            chips.push(byKey[key]);
         }
         byKey[key].rows.push(t);
     });
+    chips.sort((a,b)=>b.rows.length-a.rows.length || a.label.localeCompare(b.label));
     if(_apvAgentFilter && !byKey[_apvAgentFilter]) _apvAgentFilter = '';
 
     let html = `<div class="apv-filters">
         <button class="apv-filter${_apvAgentFilter?'':' active'}" onclick="setApvAgentFilter('')">All (${allApprovals.length})</button>
-        ${groups.map(g=>`<button class="apv-filter${_apvAgentFilter===g.key?' active':''}" onclick="setApvAgentFilter('${esc(g.key)}')">${esc(g.label)} (${g.rows.length})</button>`).join('')}
+        ${chips.map(g=>`<button class="apv-filter${_apvAgentFilter===g.key?' active':''}" onclick="setApvAgentFilter('${esc(g.key)}')">${esc(g.label)} (${g.rows.length})</button>`).join('')}
     </div>`;
 
-    if(_apvAgentFilter){
-        html += byKey[_apvAgentFilter].rows.map(apvCardHtml).join('');
-    } else {
-        html += groups.map(g=>
-            `<div class="apv-group-head">${esc(g.label)} <span class="zone-count">${g.rows.length}</span></div>`
-            + g.rows.map(apvCardHtml).join('')
-        ).join('');
-    }
+    const shown = _apvAgentFilter ? byKey[_apvAgentFilter].rows : allApprovals;
+    html += shown.map(apvCardHtml).join('');
     body.innerHTML = html;
     restoreApprovalDrafts();
 }
@@ -871,6 +889,7 @@ function apvCardHtml(t){
         ${tier1 ? `<div class="apv-tier1">TIER 1. This touches your private legal and financial matter. An AI agent prepared it. Nothing has been sent, filed, paid or changed anywhere. Read it before you approve.</div>` : ''}
         <div class="apv-ask">${esc(ask)}</div>
         <div class="apv-meta">
+            ${t.priority==='Urgent' ? '<span class="apv-chip" style="background:var(--danger-bg);color:var(--danger)">Urgent</span>' : ''}
             <span class="apv-chip">${esc(agent)}</span>
             ${t.taskType ? `<span class="apv-chip">${esc(t.taskType)}</span>` : ''}
             <span class="apv-age${late?' late':''}" title="Measured from when it was posted for approval (or last changed, if it has not been posted yet)">waiting ${esc(agoText(t.submittedAt))}</span>
@@ -895,7 +914,7 @@ function apvCardHtml(t){
             <button class="btn btn-success" data-apv-btn onclick="agDecide('${t.id}','Approved as-is')">Approve</button>
             <button class="btn" data-apv-btn onclick="agDecide('${t.id}','Approved with minor edits')" title="Approved, but you tidied it first. Still counts as accurate.">Approve with minor edits</button>
             <button class="btn" data-apv-btn onclick="agDecide('${t.id}','Changes requested')" title="Goes back to the agent to redo. Needs a comment.">Request changes</button>
-            <button class="btn btn-danger" data-apv-btn onclick="agDecide('${t.id}','Rejected')" title="Closed. Counts against the agent. Needs a reason.">Reject</button>
+            <button class="btn btn-danger" data-apv-btn onclick="agDecide('${t.id}','Rejected')" title="Closes the task for good. Counts against the agent. Needs a reason.">Reject and Close</button>
         </div>
     </div>`;
 }
@@ -920,7 +939,7 @@ function agDecide(taskId, outcome){
         showModal('Reject this work?',
             `<p style="font-size:var(--fs-sm);color:var(--text-secondary);line-height:1.6">This closes the task and counts against ${esc(agent)}. Nothing goes out.<br><br><strong>Reason:</strong> ${esc(note)}</p>`,
             `<button class="btn" onclick="closeModal()">Cancel</button>
-             <button class="btn btn-danger" onclick="closeModal();applyApprovalDecision('${taskId}','Rejected')">Reject</button>`);
+             <button class="btn btn-danger" onclick="closeModal();applyApprovalDecision('${taskId}','Rejected')">Reject and Close</button>`);
         return;
     }
     applyApprovalDecision(taskId, outcome);
@@ -1175,8 +1194,10 @@ function renderCeoBrief(){
         </div>
         ${todayHtml}
         ${history.length ? `
-        <div style="margin-top:var(--space-6);font-size:var(--fs-sm);font-weight:var(--fw-semibold);color:var(--text-secondary);margin-bottom:var(--space-3)">Previous briefs</div>
-        ${history.map(r => renderCeoBriefCard(r, false)).join('')}` : ''}
+        <details id="ceoBriefHistory" style="margin-top:var(--space-4)">
+            <summary style="cursor:pointer;font-size:var(--fs-sm);font-weight:var(--fw-semibold);color:var(--text-secondary);margin-bottom:var(--space-3)">Previous briefs (${history.length})</summary>
+            ${history.map(r => renderCeoBriefCard(r, false)).join('')}
+        </details>` : ''}
         ${!recs.length ? `<div style="margin-top:var(--space-4);color:var(--text-muted);font-size:var(--fs-sm)">No briefs stored yet. The first one lands the next weekday morning at 9am.</div>` : ''}
     </div>`;
 }
@@ -1240,7 +1261,7 @@ function computeCheckLanes(){
             .map(t=>({
                 severity: 'warn',
                 text: `"${t.name}" should have been decided within a day. It has waited ${agoText(t.submittedAt)}.`,
-                detail: `Prepared by ${teamName(t.raiserId)||'an unrecorded agent'}. Decide it in the queue above.`,
+                detail: `Prepared by ${teamName(t.raiserId)||'an unrecorded agent'}. Decide it on the Approvals tab.`,
             })) });
     }
 
@@ -1386,6 +1407,13 @@ function loadChecksAndRender(){
     const items = lanes.flatMap(l=>(l.items||[]).map(i=>Object.assign({lane:l.lane}, i)));
     countEl.textContent = items.length;
     countEl.className = 'zone-count' + (items.length ? ' hot' : '');
+    // The tab badge carries the count to every other tab; a lane error shows
+    // '?' — an unreadable lane must never look like a clean zero.
+    const badge = document.getElementById('checksTabBadge');
+    if(badge){
+        badge.textContent = errors.length ? '?' : items.length;
+        badge.style.display = (items.length || errors.length) ? '' : 'none';
+    }
     let html = '';
     // A lane that could not be read must never read as clean.
     errors.forEach(l=>{
@@ -3142,7 +3170,8 @@ function consumeAgentDeepLink(){
     const tabHash = (location.hash||'').match(/#tab=([a-z-]+)/);
     if(tabHash){
         history.replaceState(null,'',location.pathname+location.search);
-        _agentsView = AGENT_VIEWS.indexOf(tabHash[1]) !== -1 ? tabHash[1] : 'dashboard';
+        const v = AGENT_VIEW_ALIASES[tabHash[1]] || tabHash[1];
+        _agentsView = AGENT_VIEWS.indexOf(v) !== -1 ? v : 'dashboard';
         return true;
     }
     const hashMatch = (location.hash||'').match(/#agent=(rec[A-Za-z0-9]+)/);

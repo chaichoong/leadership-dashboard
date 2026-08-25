@@ -16,13 +16,20 @@ const { mockAgentsPage, loadAgentsPage } = require('./agents-page.helpers');
 const { loadDashboardWithFixtures } = require('./helpers');
 
 test.describe('AI Agents page tabs', () => {
-  test('boots on the Dashboard with a scorecard per agent', async ({ page }) => {
+  test('boots on the Dashboard: CEO brief on top, a scorecard per agent, no checks', async ({ page }) => {
     await mockAgentsPage(page);
     await loadAgentsPage(page);
 
     await expect(page.locator('#view-dashboard')).toBeVisible();
     await expect(page.locator('#view-approvals')).toBeHidden();
-    await expect(page.locator('#view-ceo-brief')).toBeHidden();
+    await expect(page.locator('#view-checks')).toBeHidden();
+
+    // The CEO brief lives ON the dashboard (Kevin's ruling, 25 Aug 2026)…
+    await expect(page.locator('#zoneCeoBrief')).toBeVisible();
+    await expect(page.locator('#zoneCeoBrief')).toContainText('Test the onboarding flow end to end');
+    // …and the checks do NOT — they have their own tab with a live count.
+    await expect(page.locator('#view-dashboard #checksBody')).toHaveCount(0);
+    await expect(page.locator('#checksTabBadge')).toHaveText('2');
 
     // One scorecard per register row, with the stats Kevin manages by.
     await expect(page.locator('.sc-card')).toHaveCount(2);
@@ -38,7 +45,7 @@ test.describe('AI Agents page tabs', () => {
     await expect(page.locator('#approvalsTabBadge')).toHaveText('3');
   });
 
-  test('the approvals tab groups by agent and the chips filter the queue', async ({ page }) => {
+  test('the approvals queue is most-important-first and the chips filter it', async ({ page }) => {
     await mockAgentsPage(page);
     await loadAgentsPage(page);
 
@@ -46,10 +53,15 @@ test.describe('AI Agents page tabs', () => {
     await expect(page.locator('#view-approvals')).toBeVisible();
     await expect(page.locator('#view-dashboard')).toBeHidden();
 
-    // All three cards, grouped under agent headings.
+    // Flat list in importance order: tier 1 leads regardless of priority,
+    // then Urgent beats High, then longest waiting. No agent grouping — a
+    // group heading would bury an urgent item under another agent's routine.
     await expect(page.locator('.apv-card')).toHaveCount(3);
-    await expect(page.locator('.apv-group-head', { hasText: 'Creditor Management' })).toHaveCount(1);
-    await expect(page.locator('.apv-group-head', { hasText: 'Inbound Comms Response' })).toHaveCount(1);
+    await expect(page.locator('.apv-card').nth(0)).toContainText('TIER 1');
+    await expect(page.locator('.apv-card').nth(1)).toContainText('Reply to tenant email');
+    await expect(page.locator('.apv-card').nth(1)).toContainText('Urgent');
+    await expect(page.locator('.apv-card').nth(2)).toContainText('Payment plan proposal');
+    await expect(page.locator('.apv-group-head')).toHaveCount(0);
 
     // Chips carry counts; clicking one narrows the list.
     await expect(page.locator('.apv-filter', { hasText: 'All (3)' })).toHaveCount(1);
@@ -60,6 +72,9 @@ test.describe('AI Agents page tabs', () => {
     // Back to All restores the full queue.
     await page.locator('.apv-filter', { hasText: 'All (3)' }).click();
     await expect(page.locator('.apv-card')).toHaveCount(3);
+
+    // The close button says what it does (Kevin's wording, 25 Aug 2026).
+    await expect(page.locator('.apv-card').first().locator('button', { hasText: 'Reject and Close' })).toHaveCount(1);
   });
 
   test('a scorecard’s waiting count jumps to the approvals tab pre-filtered', async ({ page }) => {
@@ -76,6 +91,8 @@ test.describe('AI Agents page tabs', () => {
     await mockAgentsPage(page);
     await loadAgentsPage(page);
 
+    await page.locator('#ptab-checks').click();
+    await expect(page.locator('#view-checks')).toBeVisible();
     const checks = page.locator('#checksBody');
     await expect(checks).toContainText('Duplicates');
     await expect(checks).toContainText('2 open tasks that look like the same job');
@@ -90,6 +107,13 @@ test.describe('AI Agents page tabs', () => {
     await expect(page.locator('#view-dashboard')).toBeHidden();
   });
 
+  test('the retired #tab=ceo-brief deep link lands on the Dashboard, never a blank view', async ({ page }) => {
+    await mockAgentsPage(page);
+    await loadAgentsPage(page, 'tab=ceo-brief');
+    await expect(page.locator('#view-dashboard')).toBeVisible();
+    await expect(page.locator('#zoneCeoBrief')).toContainText('CEO Brief');
+  });
+
   test('the shell forwards old #ceo-brief links to the brief tab on this page', async ({ page }) => {
     // The CEO Brief left the sidebar on 25 Aug 2026. Old bookmarks, the
     // workflow page's back link and muscle memory all still say #ceo-brief —
@@ -100,8 +124,9 @@ test.describe('AI Agents page tabs', () => {
     await expect(page.locator('.sidebar-item', { hasText: 'CEO Brief' })).toHaveCount(0);
     await expect(page.locator('#tab-agents')).toHaveClass(/active/);
     const inner = page.frameLocator('#agentsFrame');
-    await expect(inner.locator('#view-ceo-brief')).toBeVisible({ timeout: 20000 });
-    await expect(inner.locator('#view-dashboard')).toBeHidden();
+    // The brief lives on the Dashboard now; the old link must land there.
+    await expect(inner.locator('#view-dashboard')).toBeVisible({ timeout: 20000 });
+    await expect(inner.locator('#zoneCeoBrief')).toBeVisible();
   });
 
   test('approving from a filtered view still patches the task and updates the counts', async ({ page }) => {
