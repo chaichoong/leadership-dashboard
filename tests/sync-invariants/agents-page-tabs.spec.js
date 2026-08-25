@@ -12,7 +12,7 @@
 // Airtable is mocked (agents-page.helpers.js), so this runs with no PAT.
 
 const { test, expect } = require('@playwright/test');
-const { mockAgentsPage, loadAgentsPage } = require('./agents-page.helpers');
+const { TF, AGENT_A, defaultFixtures, mockAgentsPage, loadAgentsPage } = require('./agents-page.helpers');
 const { loadDashboardWithFixtures } = require('./helpers');
 
 test.describe('AI Agents page tabs', () => {
@@ -98,6 +98,42 @@ test.describe('AI Agents page tabs', () => {
     await expect(checks).toContainText('2 open tasks that look like the same job');
     await expect(checks).toContainText('Chase Acme invoice');
     await expect(checks).toContainText('One subject = one open task');
+  });
+
+  test('a jammed inbound approval rings ONE alarm, and never-logged agents get one line, not one a day', async ({ page }) => {
+    // 25 Aug 2026: 70 of 91 inbound alarms were the same tasks already
+    // ringing as late approvals, and four agents were flagged "silent today"
+    // that had never logged in their lives. Both inflations train Kevin to
+    // ignore the tab, which is how a real alarm gets missed.
+    const twoDaysAgo = new Date(Date.now() - 2 * 86400000).toISOString();
+    const fx = defaultFixtures();
+    // The same task is BOTH a late approval and an overdue inbound item…
+    fx.approvals.push({ id: 'recJammed', createdTime: twoDaysAgo, fields: {
+      [TF.name]: 'INBOUND: chase the jammed reply', [TF.status]: 'Approval',
+      [TF.agentOutput]: 'Draft: reply text.', [TF.priority]: 'High',
+      [TF.sentForApprovalBy]: [AGENT_A], [TF.teamMember]: [AGENT_A],
+      [TF.lmt]: twoDaysAgo, [TF.taskType]: 'Correspondence',
+    } });
+    fx.openTasks.push({ id: 'recJammed', createdTime: twoDaysAgo, fields: {
+      [TF.name]: 'INBOUND: chase the jammed reply', [TF.status]: 'Approval',
+      [TF.teamMember]: [AGENT_A], [TF.lmt]: twoDaysAgo, [TF.inboundTask]: true,
+    } });
+    // …while a genuinely adrift inbound task (not in the queue) must still ring.
+    fx.openTasks.push({ id: 'recAdrift', createdTime: twoDaysAgo, fields: {
+      [TF.name]: 'INBOUND: adrift with nobody queued', [TF.status]: 'Upcoming',
+      [TF.teamMember]: [AGENT_A], [TF.lmt]: twoDaysAgo, [TF.inboundTask]: true,
+    } });
+    await mockAgentsPage(page, { approvals: fx.approvals, openTasks: fx.openTasks });
+    await loadAgentsPage(page);
+    await page.locator('#ptab-checks').click();
+
+    const checks = page.locator('#checksBody');
+    await expect(checks.locator('.chk-item', { hasText: 'chase the jammed reply' })).toHaveCount(1);
+    await expect(checks.locator('.chk-item', { hasText: 'chase the jammed reply' })).toContainText('should have been decided');
+    await expect(checks.locator('.chk-item', { hasText: 'adrift with nobody queued' })).toHaveCount(1);
+    // Never-logged agents are one wiring line, not a daily per-agent alarm.
+    await expect(checks).toContainText('have never written a daily log: Inbound Comms Response');
+    await expect(checks).not.toContainText('usually writes a daily log');
   });
 
   test('#tab= deep links open the requested tab on load', async ({ page }) => {

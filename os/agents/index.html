@@ -1253,16 +1253,23 @@ function computeCheckLanes(){
     const aiAgentIds = new Set(allTeamAgents.map(t=>t.id));
 
     // 1. Approvals waiting more than 24 hours (same loop-raised population as Zone A).
+    // The id set is shared with the Inbound lane below: one jammed item must
+    // ring ONE alarm, not two (Kevin's ruling, 25 Aug 2026 — 70 of 91 inbound
+    // alarms were the same tasks already ringing here, inflating the count).
+    const lateApprovalIds = new Set();
     if(String(_approvalsState).indexOf('error') === 0){
         lanes.push({ lane:'Approvals', error: String(_approvalsState).slice(7) });
     } else {
         lanes.push({ lane:'Approvals', items: allApprovals
             .filter(t=>{ const h = hoursSince(t.submittedAt); return h !== null && h > 24; })
-            .map(t=>({
-                severity: 'warn',
-                text: `"${t.name}" should have been decided within a day. It has waited ${agoText(t.submittedAt)}.`,
-                detail: `Prepared by ${teamName(t.raiserId)||'an unrecorded agent'}. Decide it on the Approvals tab.`,
-            })) });
+            .map(t=>{
+                lateApprovalIds.add(t.id);
+                return {
+                    severity: 'warn',
+                    text: `"${t.name}" should have been decided within a day. It has waited ${agoText(t.submittedAt)}.`,
+                    detail: `Prepared by ${teamName(t.raiserId)||'an unrecorded agent'}. Decide it on the Approvals tab.`,
+                };
+            }) });
     }
 
     // 2. Agent-owned tasks past their due date and not moving.
@@ -1297,6 +1304,10 @@ function computeCheckLanes(){
         lanes.push({ lane:'Inbound', items: allOpenTasks
             .filter(r=>{
                 if(!gf(r,TF.inboundTask)) return false;
+                // Already ringing as a late approval above — same item, one
+                // alarm. The reply promise IS breached, but the cause and the
+                // fix are the approval queue, which lane 1 already says.
+                if(lateApprovalIds.has(r.id)) return false;
                 const h = hoursSince(r.createdTime);
                 return h !== null && h > 24;
             })
@@ -1314,21 +1325,36 @@ function computeCheckLanes(){
         lanes.push({ lane:'Daily logs', error: String(_dailyLogState).slice(7) });
     } else {
         const today = todayStr();
-        const loggedToday = new Set();
+        const loggedToday = new Set(), everLogged = new Set();
         allDailyLogRows.forEach(r=>{
-            if(String(gf(r,ALOG.date)||'').slice(0,10) !== today) return;
-            linkIds(gf(r,ALOG.agent)).forEach(id=>loggedToday.add(id));
+            const ids = linkIds(gf(r,ALOG.agent));
+            ids.forEach(id=>everLogged.add(id));
+            if(String(gf(r,ALOG.date)||'').slice(0,10) === today) ids.forEach(id=>loggedToday.add(id));
         });
-        lanes.push({ lane:'Daily logs', items: allAgents
-            .filter(a=>{
-                const status = selName(gf(a,AG.status));
-                return (status==='Built' || status==='Live') && !loggedToday.has(a.id);
-            })
-            .map(a=>({
+        // An agent that has NEVER logged (within the 200-row read window) is
+        // a wiring gap — its runtime has no publish step — not a daily
+        // incident. One line for the lot, or this lane rings the same false
+        // alarm every morning until nobody reads it (found 25 Aug 2026: four
+        // agents flagged "silent today" had never written a row in their
+        // lives, while all four had actually run).
+        const silent = allAgents.filter(a=>{
+            const status = selName(gf(a,AG.status));
+            return (status==='Built' || status==='Live') && !loggedToday.has(a.id);
+        });
+        const items = silent.filter(a=>everLogged.has(a.id)).map(a=>({
+            severity: 'danger',
+            text: `${gf(a,AG.name)||'An agent'} usually writes a daily log but has written nothing today.`,
+            detail: 'It logs most days, so silence today means it has not run, or its log write broke.',
+        }));
+        const neverWired = silent.filter(a=>!everLogged.has(a.id));
+        if(neverWired.length){
+            items.push({
                 severity: 'warn',
-                text: `${gf(a,AG.name)||'An agent'} is ${selName(gf(a,AG.status))} but has written nothing to its daily log today.`,
-                detail: 'Every Built or Live agent should log its decisions at the end of each run. Silence means it has not run, or the log write is broken.',
-            })) });
+                text: `${neverWired.length} agent(s) have never written a daily log: ${neverWired.map(a=>gf(a,AG.name)||'unnamed').join(', ')}.`,
+                detail: 'Their runtimes have no publish step yet, so their work cannot show here even when they run. A build task, not a daily alarm.',
+            });
+        }
+        lanes.push({ lane:'Daily logs', items });
     }
 
     // 5. Guardrail auto-tightening in the last 7 days — the system pulled an
