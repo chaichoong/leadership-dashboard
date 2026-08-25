@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { execFileSync } from 'child_process';
 import { readFileSync } from 'fs';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
@@ -46,5 +47,34 @@ describe('dupeTaskKey — one subject, one key', () => {
   it('a blank or reference-only name yields an empty key, which the lane skips', () => {
     expect(key('')).toBe('');
     expect(key('#12345')).toBe('');
+  });
+});
+
+// The create-time gate (scripts/create-agent-task.py) carries a Python port
+// of dupeTaskKey. If the two ever disagree, the preventer and the detector
+// classify the same title differently: the gate lets a sibling through that
+// the page then flags, or worse, folds what the page would call distinct.
+// Run BOTH implementations over one corpus and demand identical output.
+describe('dupe_task_key (Python) matches dupeTaskKey (JS)', () => {
+  const key = loadDupeTaskKey();
+  const CORPUS = [
+    '', '#12345', 'Chase Acme invoice #2', 'Chase Acme invoice #3',
+    'INBOUND: Outstanding invoices', 'Renew v12 licence', 'Pay ref 4471902',
+    'Reply to British Gas a1252236611488', 'UC47 form for Flat 3B',
+    'MAINTENANCE: boiler service, 12 High St', 'Council Tax 23242388 payment arrangement',
+    'Fixed cost review: find savings (weekly)', 'Email  with   extra    spaces',
+    'MiXeD CaSe TiTlE', '£1,742.60 refund from EDF', '2026-08-25 court hearing',
+  ];
+
+  it('every corpus entry keys identically in both languages', () => {
+    const script = resolve(ROOT, 'scripts/create-agent-task.py');
+    const py = JSON.parse(execFileSync('python3', ['-c', `
+import json, sys, importlib.util
+spec = importlib.util.spec_from_file_location("gate", ${JSON.stringify(script)})
+mod = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(mod)
+print(json.dumps([mod.dupe_task_key(n) for n in json.loads(sys.argv[1])]))
+`, JSON.stringify(CORPUS)], { encoding: 'utf8' }));
+    expect(py).toEqual(CORPUS.map(key));
   });
 });
