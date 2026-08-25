@@ -16,6 +16,7 @@
 // and asserts on the PATCH payloads the page actually sends.
 
 const { test, expect } = require('@playwright/test');
+const { localTodayISO } = require('./helpers');
 
 const PAGE = '/os/tasks/index.html';
 const TASKS_TABLE = 'tblqB8b22hKBL4PF1';
@@ -51,7 +52,7 @@ const DECIDED_ID = 'recAlreadyDecided';
 const KEVIN = 'kevin@runpreneur.org.uk';
 
 function taskRecords() {
-  const today = new Date().toISOString().slice(0, 10);
+  const today = localTodayISO();
   return { records: [
     // Waiting on Kevin: raised by an agent, assigned to him, no outcome yet.
     { id: WAITING_ID, createdTime: new Date().toISOString(), fields: {

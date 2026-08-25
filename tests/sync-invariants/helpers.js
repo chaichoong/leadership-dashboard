@@ -6,6 +6,15 @@ const { expect } = require('@playwright/test');
 
 const MOCK_PAT = 'pat_test_mock_token_for_playwright';
 
+// "Today" in the runner's LOCAL date parts — the same derivation as the
+// pages' todayStr(). A fixture built from toISOString() (UTC) is one day
+// behind local between 23:00 UTC and midnight during BST, so a task "due
+// today" rendered as Overdue and three specs failed the pre-push gate —
+// but only if the gate ran in that one hour. Found 26 Aug 2026, 00:47.
+function localTodayISO(d = new Date()) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
 // Real field IDs from js/config.js
 const FIELDS = {
   bizName: 'fldbbRqVxLxUdHwIR',
@@ -432,4 +441,4 @@ async function loadDashboardWithFixtures(page, fixtureOverrides, hash = '') {
   await page.waitForTimeout(1500);
 }
 
-module.exports = { MOCK_PAT, FIELDS, TABLE_MAP, BYNAME_FETCH_ALLOWLIST, tableIdFromUrl, assertByNameFetchesAllowed, makeFixtures, stubExternalHosts, setupMockAirtable, loadDashboard, loadDashboardWithFixtures };
+module.exports = { MOCK_PAT, localTodayISO, FIELDS, TABLE_MAP, BYNAME_FETCH_ALLOWLIST, tableIdFromUrl, assertByNameFetchesAllowed, makeFixtures, stubExternalHosts, setupMockAirtable, loadDashboard, loadDashboardWithFixtures };

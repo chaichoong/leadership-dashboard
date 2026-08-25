@@ -16,7 +16,7 @@
 // The gate went red with a DIFFERENT test failing each run while all 5 passed in isolation.
 
 const { test, expect } = require('@playwright/test');
-const { stubExternalHosts } = require('./helpers');
+const { stubExternalHosts, localTodayISO } = require('./helpers');
 
 const PAGE = '/os/tasks/index.html';
 const TASKS_TABLE = 'tblqB8b22hKBL4PF1';
@@ -32,7 +32,7 @@ function taskRecords() {
   return { records: [{ id: TASK_ID, createdTime: new Date().toISOString(), fields: {
     [F.name]: 'Mock drawer task',
     [F.status]: 'In Progress',
-    [F.dueDate]: new Date().toISOString().slice(0, 10),
+    [F.dueDate]: localTodayISO(),
   } }] };
 }
 

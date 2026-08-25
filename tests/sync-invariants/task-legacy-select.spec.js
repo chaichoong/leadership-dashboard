@@ -32,7 +32,7 @@
 // value, not in the shape of the data.
 
 const { test, expect } = require('@playwright/test');
-const { stubExternalHosts } = require('./helpers');
+const { stubExternalHosts, localTodayISO } = require('./helpers');
 
 const PAGE = '/os/tasks/index.html';
 const TASKS_TABLE = 'tblqB8b22hKBL4PF1';
@@ -47,7 +47,7 @@ const LEGACY_ID = 'recLegacyMock1';
 const MODERN_ID = 'recModernMock1';
 
 function taskRecords() {
-  const today = new Date().toISOString().slice(0, 10);
+  const today = localTodayISO();
   return { records: [
     { id: LEGACY_ID, createdTime: new Date().toISOString(), fields: {
       [F.name]: 'Legacy value task', [F.status]: 'To do', [F.priority]: 'High', [F.dueDate]: today } },
