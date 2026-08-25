@@ -114,9 +114,22 @@ broken check is how duplicates happen.
 
 ## Step 5 — Create the tasks (no cap — every surviving candidate gets its task)
 
-One record per surviving candidate in Tasks `tblqB8b22hKBL4PF1`, base
-`appnqjDpqDniH3IRl`, via curl with the PAT at `~/.config/od/airtable_pat`
-(never print the token). Use `"typecast": true`. Fields:
+One record per surviving candidate — **created through the duplicate gate,
+never a bare curl POST** (Kevin's rule, 25 Aug 2026: one subject = one open
+task; a sender chasing the same matter in a fresh message folds into the
+existing task instead of raising a sibling):
+
+    python3 scripts/create-agent-task.py create --fields-json '<the full fields JSON below>'
+
+Stdout `"action": "created"` means a new task; `"action": "updated"` means
+it folded the message into the existing open task on the same subject from
+the same sender — both count as handled. For iMessage this folds by PERSON
+(the task name keys to "reply to <sender>", numbers stripped), which is
+wanted: one open reply task per person, each new message folded in and the
+task pulled back to Today. Different senders never fold into each other. A NON-ZERO exit means the gate
+could not run (broken read); nothing was created — treat that candidate as
+unhandled for the watermark and report the failure. The gate adds
+`"typecast": true` itself. Fields, keyed by field ID:
 
 - `fldgFjGBw6bTKJFCD` Task Name: "INBOUND: reply to <sender/chat> (iMessage)".
   Under 100 chars. No em dashes anywhere in name or description.

@@ -169,9 +169,28 @@ Every message of a multi-message thread gets the act; the thread gets one
 task.
 
 Then one Airtable task per lane-12 THREAD (archive gets no task; lane-13
-threads get a Roy task instead — Step 4b),
-in Tasks `tblqB8b22hKBL4PF1`, base `appnqjDpqDniH3IRl`, with
-`"typecast": true`:
+threads get a Roy task instead — Step 4b). **Create through the duplicate
+gate, never a bare curl POST** (Kevin's rule, 25 Aug 2026: one subject = one
+open task — a creditor's NEW chaser arrives on a NEW thread, so the Step 3
+thread dedupe cannot catch it; the gate matches the SUBJECT and folds the
+chaser into the existing task):
+
+    python3 scripts/create-agent-task.py create --fields-json '<the full fields JSON below>'
+
+The gate answers on stdout: `"action": "created"` (log `note --do
+task-created` as before), or `"action": "updated"` (it folded your item into
+the existing open task on the same subject from the same sender — log `note
+--do duplicate` and move on; the fold IS the handling). A fold also appends
+the new thread's URL into the existing task's `Inbound Note URL Link`, so
+the Step 3 and Step 5 `FIND` queries recognise the folded thread as handled
+from then on. A `"note"` about a differing sender means it deliberately
+created anyway — never fold two counterparties into one task. A NON-ZERO
+exit means the gate could not run (broken read); nothing was created — count
+that thread unhandled for Step 6 and report it, exactly like a failed dedupe
+query.
+
+The fields JSON, keyed by field ID, with the gate adding `"typecast": true`
+itself:
 
 - `fldgFjGBw6bTKJFCD` Task Name: "INBOUND: <concise action from the email>".
   Under 100 chars. No em dashes anywhere in name or description.
@@ -248,17 +267,27 @@ no per-task ask, and NOT the agent lane shape above. Fields:
   (owner from Contractor); Roy raises contractor jobs himself via the
   property-management Slack channel once he has looked at it.
 
-Log each with `note --id <id> --do task-created`. The label move itself is
-still `act --do label13` exactly as before.
+Roy tasks go through the SAME gate (`python3 scripts/create-agent-task.py
+create --fields-json '<fields>'`): a tenant re-reporting the same fault on a
+new thread folds into Roy's existing job instead of raising a second one.
+The MAINTENANCE prefix keeps repair tasks from ever folding into INBOUND
+reply tasks — the two lanes stay separate by name.
+
+Log each with `note --id <id> --do task-created` (or `--do duplicate` when
+the gate answered `updated`). The label move itself is still `act --do
+label13` exactly as before.
 
 ## Step 5 — The stranded check (the safety net)
 
 For every message in `stranded_8`, `stranded_12` and `stranded_13`: run the
 Step 3 dedupe on its thread. A labelled email with NO task is exactly the
-miss this agent exists to prevent — create its task now (lane 8/12 stranded
-mail takes the Step 4 shape with Approver Kevin, per the 24 Aug ruling;
-lane-13 stranded mail takes the Step 4b Roy shape), log it, and say so in
-your report. Creating the task is the whole rescue: the email stays wherever
+miss this agent exists to prevent — create its task now THROUGH THE GATE
+(lane 8/12 stranded mail takes the Step 4 shape with Approver Kevin, per the
+24 Aug ruling; lane-13 stranded mail takes the Step 4b Roy shape), log it,
+and say so in your report. If the gate answers `"updated"`, the thread's
+matter already had an open task and the fold IS the rescue: log `note --do
+duplicate`, do NOT report it as a rescue, and note the fold recorded the
+thread URL so this thread stops surfacing here. Creating the task is the whole rescue: the email stays wherever
 Kevin put it. The stranded_13 sweep is ALSO the safety net for a Step 4b
 create that failed after the label was applied — the label move removes the
 mail from the inbox, so without this sweep a failed create would sit unseen
