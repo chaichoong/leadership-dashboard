@@ -40,7 +40,9 @@ fi
 # Everything below logs to $LOG; remember where this run starts so failures in
 # the tail can be surfaced on stderr for the wrapper. An empty stdout reads as
 # success to run-job.sh, which is how silent 401s once went unnoticed for a week.
-__START_LINE=$(wc -l < "$LOG" 2>/dev/null || echo 0)
+__START_LINE=$( { wc -l < "$LOG"; } 2>/dev/null || echo 0)
+__MARKER="$SCRATCH/.run-start.$$"
+touch "$__MARKER"
 echo "===== inbound-triage run $(date) =====" >> "$LOG"
 cd "$REPO" || { echo "ERROR: repo not found at $REPO" >&2; exit 1; }
 
@@ -67,11 +69,22 @@ RC=$?
 # monitoring/ (raw scan output carries '"body":'; task payloads carry the
 # Inbound Message Content field name). Quarantining is not enough on its own —
 # the run FAILS so the leak-shaped behaviour gets fixed, not absorbed.
+# Only files THIS RUN created or changed, and never git-tracked ones: the
+# unscoped version of this sweep quarantined 41 COMMITTED schema files on
+# 25 Aug 2026 (they carry "Inbound Message Content" as a field NAME in the
+# table structure, not as message content) and hard-failed the run; git
+# restore then re-armed the failure for the next slot.
 __LEAKED=""
 while IFS= read -r f; do
   [ -z "$f" ] && continue
-  mv "$f" "$SCRATCH/" && __LEAKED="$__LEAKED $f"
-done < <(grep -rlE '"body":|Inbound Message Content' "$REPO/monitoring/" 2>/dev/null || true)
+  if git -C "$REPO" ls-files --error-unmatch "${f#"$REPO"/}" >/dev/null 2>&1; then
+    continue
+  fi
+  if grep -qlE '"body":|Inbound Message Content' "$f" 2>/dev/null; then
+    mv "$f" "$SCRATCH/" && __LEAKED="$__LEAKED $f"
+  fi
+done < <(find "$REPO/monitoring" -type f -newer "$__MARKER" 2>/dev/null)
+rm -f "$__MARKER"
 
 __TAIL=$(tail -n +$((__START_LINE + 1)) "$LOG" 2>/dev/null)
 __BAD=$(printf '%s\n' "$__TAIL" | grep -E '"error"|401|Unauthorized|OAuth access token has expired|BROKEN|Full Disk Access' || true)

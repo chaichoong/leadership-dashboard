@@ -195,6 +195,10 @@ describe("the Go Signal is the agent's own 9/1/5 schedule (Kevin, 24 Aug 2026)",
         expect(runner).toMatch(/NEVER under the repo/);
         expect(runner).toMatch(/"body":\|Inbound Message Content/);
         expect(runner).toMatch(/__LEAKED/);
+        // Only files THIS run created, never git-tracked ones — the unscoped
+        // sweep quarantined 41 committed schema files on 25 Aug 2026.
+        expect(runner).toMatch(/-newer "\$__MARKER"/);
+        expect(runner).toMatch(/ls-files --error-unmatch/);
         // A broken lane (e.g. Full Disk Access denied) must fail the job.
         expect(runner).toMatch(/BROKEN\|Full Disk Access/);
     });
