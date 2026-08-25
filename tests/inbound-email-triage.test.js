@@ -157,6 +157,31 @@ describe('truncation honesty (the critical finding)', () => {
     });
 });
 
+describe('sent mail is measured; threads update, never duplicate (Kevin, 25 Aug 2026)', () => {
+    it('the scan reads in:sent and emits the per-thread latest-sent map', () => {
+        expect(script).toContain('in:sent');
+        expect(script).toContain('sent_threads');
+    });
+
+    it('the note taxonomy carries updated and answered', () => {
+        expect(script).toContain('"updated"');
+        expect(script).toContain('"answered"');
+    });
+
+    it('a dedupe hit updates the existing task; approval-loop tasks are never reopened', () => {
+        expect(skill).toMatch(/UPDATE it — never a twin/);
+        expect(skill).toMatch(/NEVER reopen it/);
+        expect(skill).toContain('INBOUND (follow-up):');
+    });
+
+    it('the email sent-check closes what Kevin answered himself, with a control and an honest note', () => {
+        expect(skill).toContain('Step 2c');
+        expect(skill).toMatch(/Closed by inbound-email-triage/);
+        expect(skill).toMatch(/Not verified: whether his reply covered everything/);
+        expect(skill).toMatch(/broken query must never read as\s+"nothing to close"/);
+    });
+});
+
 describe("the Go Signal is the agent's own 9/1/5 schedule (Kevin, 24 Aug 2026)", () => {
     const sched = JSON.parse(readFileSync(path.join(root, 'scripts/job-schedule.json'), 'utf8'));
     const runner = readFileSync(path.join(root, 'scripts/inbound-triage-run.sh'), 'utf8');

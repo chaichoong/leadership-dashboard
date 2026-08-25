@@ -266,6 +266,51 @@ def in_flight_ids(queue_json):
     return ids
 
 
+def thread_key(url):
+    """The Gmail thread id from an Inbound Note URL Link, whichever form the
+    task carries (#all/ current, #inbox/ legacy). One OPEN task per thread is
+    the board's no-duplicates invariant (Kevin, 25 Aug 2026)."""
+    if not url:
+        return None
+    for marker in ("#all/", "#inbox/"):
+        i = url.find(marker)
+        if i >= 0:
+            tid = url[i + len(marker):].split("?")[0].split("&")[0].strip("/ ")
+            return tid or None
+    return None
+
+
+def duplicate_groups(views):
+    """Open tasks sharing one thread AND one lane: [{thread, lane, ids,
+    names, untouchable}] sorted oldest first inside each group, so the keeper
+    is always ids[0]. A reply task and a Roy maintenance task on the same
+    thread are legitimately TWO tasks (a tenant email can need both an answer
+    and a repair), so the lane is part of the key. Twins at Status Approval
+    are listed under `untouchable`, never in the closable ids — a close
+    proposal would overwrite the Agent Output already waiting on Kevin."""
+    by = {}
+    for v in views:
+        k = thread_key(v.get("inboundUrl"))
+        if not k:
+            continue
+        lane = ("maintenance"
+                if (v.get("name", "").startswith("MAINTENANCE:")
+                    or ROY_REC in (v.get("teamMember") or []))
+                else "reply")
+        by.setdefault((k, lane), []).append(v)
+    out = []
+    for (k, lane), vs in by.items():
+        if len(vs) > 1:
+            vs = sorted(vs, key=lambda v: v.get("createdTime") or "")
+            out.append({"thread": k, "lane": lane,
+                        "ids": [v["id"] for v in vs
+                                if v.get("status") != "Approval"],
+                        "untouchable": [v["id"] for v in vs
+                                        if v.get("status") == "Approval"],
+                        "names": [v["name"] for v in vs]})
+    return sorted(out, key=lambda g: (g["thread"], g["lane"]))
+
+
 # ---------------------------------------------------------------------------
 # State + digest
 # ---------------------------------------------------------------------------
@@ -308,7 +353,7 @@ TASK_FIELDS = [
     "Task Name", "Status", "Due Date", "Created Time", "Approved At",
     "Approval Slack TS", "Approval Outcome", "Team Member", "Assignee",
     "Sent For Approval By", "Some Day", "Maintenance Ticket", "Task Type",
-    "Hard Deadline",
+    "Hard Deadline", "Inbound Note URL Link",
 ]
 # Field-name drift control: each of these appears on at least one record of
 # any real board. If one vanishes from the WHOLE read, the name has drifted
@@ -405,6 +450,8 @@ def cmd_board(dispatch_queue_path=None):
             "maintenanceTicket": bool(f.get("Maintenance Ticket")),
             "hardDeadline": bool(f.get("Hard Deadline")),
             "kevinOwned": is_kevin,
+            "inboundUrl": f.get("Inbound Note URL Link"),
+            "createdTime": f.get("Created Time"),
             "lastMoved": moved.isoformat() if moved else None,
             "daysStill": (round((now - moved).total_seconds() / 86400, 1)
                           if moved else None),
@@ -414,6 +461,8 @@ def cmd_board(dispatch_queue_path=None):
 
     for k in buckets:
         buckets[k].sort(key=lambda v: (v["lastMoved"] or ""))
+    all_views = [v for vs in buckets.values() for v in vs]
+    dupes = duplicate_groups(all_views)
     out = {
         "generatedAt": now.isoformat(),
         "stuckDays": STUCK_DAYS,
@@ -427,8 +476,11 @@ def cmd_board(dispatch_queue_path=None):
             "parked": len(buckets["parked"]),
             "moving": len(buckets["moving"]),
             "inFlight": len(buckets["inFlight"]),
+            "duplicateGroups": len(dupes),
+            "duplicateExtras": sum(len(g["ids"]) - 1 for g in dupes),
         },
         "stuck": buckets["stuck"],
+        "duplicates": dupes,
         "waitingOnKevin": buckets["waitingOnKevin"],
         "inFlight": [v["id"] for v in buckets["inFlight"]],
         "parked": [v["id"] for v in buckets["parked"]],
@@ -631,6 +683,28 @@ def cmd_selftest():
     assert "2026-07-01" not in h and "2026-08-20" in h
     assert in_flight_ids({"worklist": [{"id": "recW"}], "reserve": [{"id": "recR"}],
                           "other": [{"id": "recO"}]}) == {"recW", "recR"}
+    # thread dedupe: both URL forms resolve to one key; groups keep oldest first
+    assert thread_key("https://mail.google.com/mail/u/0/#all/187abc") == "187abc"
+    assert thread_key("https://mail.google.com/mail/u/0/#inbox/187abc") == "187abc"
+    assert thread_key("") is None and thread_key(None) is None
+    gs = duplicate_groups([
+        {"id": "t2", "name": "B", "inboundUrl": "https://mail.google.com/mail/u/0/#inbox/TH1", "createdTime": "2026-08-20T10:00:00.000Z"},
+        {"id": "t1", "name": "A", "inboundUrl": "https://mail.google.com/mail/u/0/#all/TH1", "createdTime": "2026-08-01T10:00:00.000Z"},
+        {"id": "t3", "name": "C", "inboundUrl": "https://mail.google.com/mail/u/0/#all/TH2", "createdTime": "2026-08-02T10:00:00.000Z"},
+    ])
+    assert len(gs) == 1 and gs[0]["ids"] == ["t1", "t2"], gs
+    # a Roy maintenance task on the same thread is NOT a duplicate of the
+    # reply task; a twin at Approval is untouchable, never closable
+    gs = duplicate_groups([
+        {"id": "r1", "name": "INBOUND: leak reply", "inboundUrl": "https://mail.google.com/mail/u/0/#all/TH3", "createdTime": "2026-08-01T10:00:00.000Z"},
+        {"id": "m1", "name": "MAINTENANCE: fix leak", "inboundUrl": "https://mail.google.com/mail/u/0/#all/TH3", "createdTime": "2026-08-02T10:00:00.000Z", "teamMember": ["reclbdjfVev3bqNHS"]},
+    ])
+    assert gs == [], gs
+    gs = duplicate_groups([
+        {"id": "a1", "name": "X", "inboundUrl": "https://mail.google.com/mail/u/0/#all/TH4", "createdTime": "2026-08-01T10:00:00.000Z"},
+        {"id": "a2", "name": "X again", "inboundUrl": "https://mail.google.com/mail/u/0/#all/TH4", "createdTime": "2026-08-03T10:00:00.000Z", "status": "Approval"},
+    ])
+    assert gs[0]["ids"] == ["a1"] and gs[0]["untouchable"] == ["a2"], gs
     with tempfile.TemporaryDirectory() as td:
         os.environ["TASK_MANAGER_DIR"] = td
         digest_append({"task": "recT", "move": "leave", "reason": "moving"})

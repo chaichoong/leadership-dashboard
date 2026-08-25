@@ -100,14 +100,24 @@ out of your list — the board subtracted dispatch's tasks in code):
 6. **Generic one-off work** (research, form-filling, analysis, drafting,
    digging) → `route` to the right strategic worker from the roster:
    researcher, builder, writer, analyst, or auditor. Record as `route`.
-7. **Done in reality, duplicate, or dead** (overtaken by events, refers to
+7. **Two or more OPEN tasks on one email thread** (the board's `duplicates`
+   list — one open task per thread and lane is the invariant, Kevin's ruling
+   25 Aug 2026): the KEEPER is `ids[0]`, the oldest. `annotate` the keeper
+   with anything unique from each twin (one line per twin), then
+   `close`-propose every other id in `ids` with output
+   "CLOSE PROPOSAL: duplicate of <keeper id> — folded into it". Never close
+   the keeper. The board already keeps you safe on the two edges: a Roy
+   maintenance task never groups with a reply task (lane is part of the
+   key), and a twin at Status Approval appears under `untouchable` — report
+   it, never touch it (its Agent Output is waiting on Kevin).
+8. **Done in reality, duplicate, or dead** (overtaken by events, refers to
    something closed, 300+ days still with no deadline) → `close`: submit as
    yourself, output "CLOSE PROPOSAL: <done already | dead — reason>", type
    `Admin`. Kevin's yes = complete it on hand-back.
-8. **Small generic admin you can finish now** (under 15 minutes, internal, no
+9. **Small generic admin you can finish now** (under 15 minutes, internal, no
    external send) → `finish` in-house: do the work, submit the result through
    the gate as your own output, type `Admin`.
-9. **Genuinely fine to sit** (future-dated on purpose, awaiting a fixed date)
+10. **Genuinely fine to sit** (future-dated on purpose, awaiting a fixed date)
     → `leave` with the reason noted.
 
 When unsure between two moves, prefer the one that keeps the gate in front of
@@ -195,9 +205,12 @@ LEADING with what should have moved and did not:
 
 1. Stuck backlog: count, the 10 oldest by name and days still, and what stops
    each (one line).
-2. Waiting on Kevin: count and the 5 oldest with hours waiting.
-3. Moves made this slot, by kind.
-4. Remaining backlog and what next slot takes first.
+2. Duplicate threads: the board's `duplicateGroups` and `duplicateExtras`
+   counts, and what was proposed for each group this slot. Zero is the only
+   healthy number.
+3. Waiting on Kevin: count and the 5 oldest with hours waiting.
+4. Moves made this slot, by kind.
+5. Remaining backlog and what next slot takes first.
 
 Never write task content into `monitoring/` — counts only, anywhere public.
 
