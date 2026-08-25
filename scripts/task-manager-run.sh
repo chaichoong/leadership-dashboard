@@ -57,7 +57,7 @@ else
   exit 1
 fi
 
-__START_LINE=$(wc -l < "$LOG" 2>/dev/null || echo 0)
+__START_LINE=$( { wc -l < "$LOG"; } 2>/dev/null || echo 0)
 __MARKER="$SCRATCH/.run-start.$$"
 touch "$__MARKER"
 echo "===== task-manager run $(date) =====" >> "$LOG"

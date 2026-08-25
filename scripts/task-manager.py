@@ -310,15 +310,25 @@ TASK_FIELDS = [
     "Sent For Approval By", "Some Day", "Maintenance Ticket", "Task Type",
     "Hard Deadline",
 ]
-# Field-name drift control: each of these appears on at least one record of a
-# ~300-task board today. If one vanishes from the WHOLE read, the name has
-# drifted and every downstream judgement would silently degrade. (Sparse
-# checkboxes — Some Day, Maintenance Ticket, Hard Deadline — are excluded:
-# Airtable omits false checkboxes, so absence is normal for them.)
+# Field-name drift control: each of these appears on at least one record of
+# any real board. If one vanishes from the WHOLE read, the name has drifted
+# and every downstream judgement would silently degrade. (Sparse checkboxes —
+# Some Day, Maintenance Ticket, Hard Deadline — are excluded: Airtable omits
+# false checkboxes, so absence is normal for them.)
 CONTROL_FIELDS = [
     "Task Name", "Status", "Created Time", "Team Member", "Assignee",
-    "Approved At", "Approval Slack TS", "Sent For Approval By",
-    "Approval Outcome", "Task Type", "Due Date",
+    "Due Date",
+]
+# The approval-lane stamps are TRANSIENT: a clean board (nothing waiting,
+# every hand-back carried out) legitimately holds none of them, so requiring
+# each one per-read false-positives the whole slot — the agent's own first
+# live run filed exactly this (finding 20260825-task-manager-board-365).
+# Their rename detection keys on the population instead: a board with a real
+# Approval queue but NOT ONE of these fields anywhere is a drifted read. A
+# single-field rename is still caught loudly at write time (dispatch 422s).
+APPROVAL_STAMP_FIELDS = [
+    "Approval Slack TS", "Sent For Approval By", "Approved At",
+    "Approval Outcome",
 ]
 
 
@@ -329,12 +339,19 @@ def cmd_board(dispatch_queue_path=None):
         fail("board read returned ZERO open tasks — with ~200+ live tasks that "
              "is a broken read, not an empty board")
     seen_fields = set()
+    approval_rows = 0
     for r in recs:
         seen_fields.update(r["fields"].keys())
+        if r["fields"].get("Status") == "Approval":
+            approval_rows += 1
     drifted = [f for f in CONTROL_FIELDS if f not in seen_fields]
     if drifted:
         fail("field(s) %s absent from every one of %d records — field names "
              "have drifted, do not trust this read" % (drifted, len(recs)))
+    if approval_rows >= 5 and not any(f in seen_fields for f in APPROVAL_STAMP_FIELDS):
+        fail("%d Approval-status rows but none of %s appears on any record — "
+             "the approval stamp field names have drifted"
+             % (approval_rows, APPROVAL_STAMP_FIELDS))
 
     now = datetime.now(timezone.utc)
     cutoff = (now - timedelta(days=STUCK_DAYS)).strftime("%Y-%m-%dT%H:%M:%S.000Z")

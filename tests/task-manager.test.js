@@ -63,6 +63,18 @@ describe('movement maths never trusts a re-stamped field', () => {
         expect(script).toMatch(/ZERO open tasks/);
     });
 
+    it('transient approval stamps are population-gated, never per-read controls', () => {
+        // Finding 20260825-task-manager-board-365, filed by the agent's own
+        // first live run: a clean board holds none of the approval stamps,
+        // so requiring them per-read false-positives every slot.
+        const control = script.slice(script.indexOf('CONTROL_FIELDS = ['), script.indexOf(']', script.indexOf('CONTROL_FIELDS = [')));
+        for (const f of ['Approved At', 'Approval Outcome', 'Approval Slack TS', 'Sent For Approval By']) {
+            expect(control).not.toContain(f);
+        }
+        expect(script).toContain('APPROVAL_STAMP_FIELDS');
+        expect(script).toMatch(/approval_rows >= 5/);
+    });
+
     it('the board read paginates (offset followed to the end)', () => {
         const queryAll = script.slice(script.indexOf('def query_all'), script.indexOf('# ---'));
         expect(queryAll).toMatch(/offset = out\.get\("offset"\)/);
