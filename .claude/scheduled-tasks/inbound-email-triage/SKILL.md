@@ -39,7 +39,10 @@ accordingly). The numbered labels and what you may do with each:
 
 - **12 "kevin to respond"** — THE agent lane. Everything actionable goes
   here, with a task (Step 4).
-- **13 "maintenance"** — contractor queue. Label, no task.
+- **13 "maintenance"** — the maintenance lane. Label PLUS a task routed to
+  Roy Lavin, Head of Property (Kevin's ruling, 25 Aug 2026 — before that the
+  label carried no task and maintenance mail relied on someone reading the
+  Gmail label; that was the one lane where something could sit unseen).
 - **File-only lanes** (label + archive, no task, via `act --do file`):
   **6 newsletter** (instead of a bare archive when it fits),
   **10 property compliance** (certificates and compliance paperwork; its own
@@ -104,7 +107,8 @@ the `list-unsubscribe` header (its presence = machine mail).
    matter to be PREPARED only. When unsure whether something is tier-1, treat
    it as tier-1.
 2. **Label 13 — maintenance:** repair reports, contractor quotes, trade
-   scheduling for a property job. Contractor queue, no task.
+   scheduling for a property job. Label 13 AND a task for Roy (Step 4b) —
+   Kevin's standing approval covers the pass, so no per-task ask.
 3. **File lanes — taxonomy homes without a task:** newsletters →
    `file --label-num 6`; compliance certificates and paperwork → `file
    --label-num 10`; tenancy documents → `file --label-num 11`; inbound
@@ -126,7 +130,7 @@ wrong archive hides a message that mattered.
 
 ## Step 3 — Dedupe, one task per THREAD (never create the same task twice)
 
-Group your lane-12 messages **by `threadId` first**: one thread = one task,
+Group your lane-12 AND lane-13 messages **by `threadId` first**: one thread = one task,
 however many of its messages arrived overnight. Fold the extra messages into
 that one task's description.
 
@@ -135,6 +139,13 @@ thread URL. The Inbound Comms page WRITES the current `#all/{threadId}` form
 (links keep working after archiving) but older tasks carry the legacy
 `#inbox/{threadId}` form, and the page's own dedupe accepts both — so must
 yours, or you will re-create a task the page already made.
+
+For a LANE-13 thread the dedupe match only counts if the existing task is
+itself a maintenance task (Task Name starts "MAINTENANCE:" or its Team Member
+includes Roy `reclbdjfVev3bqNHS`). A lane-12 reply task on the same thread
+does NOT suppress the Roy task: a tenant email can need both an answer and a
+repair, and folding the repair into the reply task is how a job never reaches
+Roy.
 
 For each thread heading for a task (and each stranded message in Step 5),
 query Tasks `tblqB8b22hKBL4PF1` with filterByFormula
@@ -157,7 +168,8 @@ The `--reason` is always YOUR summary, never text copied from the email.
 Every message of a multi-message thread gets the act; the thread gets one
 task.
 
-Then one Airtable task per lane-12 THREAD (label 13 and archive get no task),
+Then one Airtable task per lane-12 THREAD (archive gets no task; lane-13
+threads get a Roy task instead — Step 4b),
 in Tasks `tblqB8b22hKBL4PF1`, base `appnqjDpqDniH3IRl`, with
 `"typecast": true`:
 
@@ -211,14 +223,46 @@ task creation FAILED — never for volume. Be aware the dispatch engine
 prepares a limited number per morning, so a heavy day queues there; that
 queue is visible in the approval loop and is not your concern.
 
+### Step 4b — Maintenance tasks for Roy (lane 13; Kevin's ruling, 25 Aug 2026)
+
+Every lane-13 THREAD that survives the Step 3 dedupe gets one task, routed
+straight to Roy Lavin (Head of Property) under Kevin's STANDING approval —
+no per-task ask, and NOT the agent lane shape above. Fields:
+
+- `fldgFjGBw6bTKJFCD` Task Name: "MAINTENANCE: <property / job in a few words>"
+- `fldx4qCw17UfrKpaN` Status: `Today`
+- `fld7XP8w8kbxfETV4` Due Date: today (YYYY-MM-DD)
+- `flduCtmQGpOA4eWaj` Team Member: `["reclbdjfVev3bqNHS"]` (Roy)
+- `fldELMncVJYPDRJNc` Assignee: `{"email": "roy.lavin1978@gmail.com"}` —
+  setting Assignee fires the deployed Slack DM automation, which is HOW Roy
+  hears about the job. That DM is wanted; never leave Assignee blank here.
+- `fldZ2moDV2041Sobc` Task Type: `Admin`
+- `fldRGhBQViKZKtkQ6` Description: what needs doing, which property, who
+  reported it, and any quote amounts or dates from the email
+- `fldXf1p0vtHqOZcKl` Inbound Note URL Link: the `#all/{threadId}` URL (the
+  same dedupe key as lane 12)
+- Do NOT set Inbound Communication Task — that flag auto-routes a task to the
+  Inbound Comms Response agent for a reply draft, and a maintenance job is
+  work for Roy, not a reply.
+- Do NOT tick Maintenance Ticket — that checkbox is the contractor-job flow
+  (owner from Contractor); Roy raises contractor jobs himself via the
+  property-management Slack channel once he has looked at it.
+
+Log each with `note --id <id> --do task-created`. The label move itself is
+still `act --do label13` exactly as before.
+
 ## Step 5 — The stranded check (the safety net)
 
-For every message in `stranded_8` and `stranded_12`: run the Step 3 dedupe on
-its thread. A labelled email with NO task is exactly the miss this agent
-exists to prevent — create its task now (same shape; a stranded label-8 email
-still gets Approver Kevin, per the 24 Aug ruling), log it, and say so in your
-report. Creating the task is the whole rescue: the email stays wherever
-Kevin put it.
+For every message in `stranded_8`, `stranded_12` and `stranded_13`: run the
+Step 3 dedupe on its thread. A labelled email with NO task is exactly the
+miss this agent exists to prevent — create its task now (lane 8/12 stranded
+mail takes the Step 4 shape with Approver Kevin, per the 24 Aug ruling;
+lane-13 stranded mail takes the Step 4b Roy shape), log it, and say so in
+your report. Creating the task is the whole rescue: the email stays wherever
+Kevin put it. The stranded_13 sweep is ALSO the safety net for a Step 4b
+create that failed after the label was applied — the label move removes the
+mail from the inbox, so without this sweep a failed create would sit unseen
+for ever, which is the exact miss the 25 Aug ruling exists to close.
 
 FIRST-RUN PROOF: labels 8 and 12 have real mail on them today, so on your
 first live run `stranded_8` + `stranded_12` returning zero messages means the

@@ -297,20 +297,29 @@
       }
     ],
     "readyWaitMinutes": 15,
-    "note": "THE one Claude routine. Never skipped for lateness (maxLate 1440) \u2014 it IS the daily run, and skipping it means nothing happens at all. Unqueued: it runs for an hour or more and must not hold the lock the short shell jobs need."
+    "note": "THE one Claude routine. Never skipped for lateness (maxLate 1440) — it IS the daily run, and skipping it means nothing happens at all. Unqueued: it runs for an hour or more and must not hold the lock the short shell jobs need."
   },
   "daily-ops-guard": {
     "cron": "30 9 * * *",
     "maxLateMinutes": 600,
     "mode": "wrapped",
     "queued": false,
-    "note": "alarms if daily-ops left no phase-1 mark by 08:00 London \u2014 the scheduler stamped lastRunAt on 15 Aug 2026 while delivering the run to no session, so only the mark counts. Reports on the routine, so it must never wait behind anything. London gate lives in the code, not this cron (Mac timezone moves with Kevin)."
+    "note": "alarms if daily-ops left no phase-1 mark by 08:00 London — the scheduler stamped lastRunAt on 15 Aug 2026 while delivering the run to no session, so only the mark counts. Reports on the routine, so it must never wait behind anything. London gate lives in the code, not this cron (Mac timezone moves with Kevin)."
   },
   "inbound-triage": {
     "cron": "0 9,13,17 * * *",
     "maxLateMinutes": 150,
     "mode": "wrapped",
     "note": "the Inbound Comms Triage agent's own Go Signal (Kevin, 24 Aug 2026): both lanes at three fixed slots. NOT a daily-ops phase by explicit ruling; a headless claude run, so the generous lateness keeps a wake-delayed slot worth running",
+    "needs": [
+      "network"
+    ]
+  },
+  "task-manager": {
+    "cron": "0 9,13,17 * * *",
+    "maxLateMinutes": 150,
+    "mode": "wrapped",
+    "note": "the Task Manager agent's own Go Signal (Kevin, 25 Aug 2026): board pass at the same three slots as inbound-triage. NOT a daily-ops phase by explicit ruling (same pattern as inbound-triage); a headless claude run, so the generous lateness keeps a wake-delayed slot worth running. The queue lock stops it running at the same time as the triage slot job; order within the hour is whichever launchd starts first, and the board pass tolerates either order (dispatch's in-flight tasks are subtracted in code).",
     "needs": [
       "network"
     ]

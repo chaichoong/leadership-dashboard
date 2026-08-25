@@ -1,5 +1,14 @@
 # Contractor task creation — paths, drift, and the unified architecture
 
+> **Roy is no longer a contractor (Kevin's ruling, 25 Aug 2026).** Roy Lavin is
+> a team member: Head of Property (Team Members `reclbdjfVev3bqNHS`, Roles row
+> "Head of Property"). All maintenance tasks route to HIM under Kevin's
+> standing approval; Gary and Rob remain the doing contractors under him. The
+> contractor-bot deliberately keeps its Roy entry — the Slack channel is now
+> his maintenance interface (status updates, photos, job lists). Wherever this
+> document or a skill guardrail says "Gary, Roy, or Rob", read it as "Gary or
+> Rob" for the contractor-only rules.
+
 ## TL;DR
 
 Three ways to create a contractor task today. They've drifted because each

@@ -153,6 +153,15 @@ the approval queue in the same slot; the phase-6 dispatch above still runs
 each morning to catch overnight approvals, and dispatch is built for
 repeated runs (intent ledger, dedupe).
 
+The Task Manager agent runs the same way (Kevin's Go Signal ruling, 25 Aug
+2026): board pass at 09:00, 13:00 and 17:00 via launchd
+`com.kevinbrittain.task-manager` (job `task-manager` in
+scripts/job-schedule.json, runner scripts/task-manager-run.sh, skill folder
+task-manager-board). Same fixed-slot exception, same rule: never fold it back
+into daily-ops, and never re-add it as a phase, without Kevin's word. The
+queue lock stops it running at the same time as the triage slot job; order within the hour is whichever launchd starts first, and the board pass tolerates either order.
+
+
 ## Phase 6b — Calendar work (only when due)
 
 These used to be their own routines. They are folded in here so nothing is left
