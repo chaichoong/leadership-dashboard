@@ -9130,6 +9130,7 @@ function agentAutonomyRecommendations(rows){
 const STALL_AMEND_HOURS = 48;   // amended, and the agent has not redone it
 const STALL_DRAFT_HOURS = 24;   // agent owns it, it is DUE, and nothing drafted
 const STALL_DECIDE_DAYS = 5;    // sat waiting on a human this long
+const STALL_DEADLINE_DAYS = 3;  // a hard, externally-set deadline this close, or already passed
 // The statuses agent-dispatch.py actually works from (its OPEN_STATUSES). An
 // "Upcoming" task is scheduled, not late, and counting it as stalled buried the
 // real list: the first run of this flagged 156 items, 101 of them merely
@@ -9166,6 +9167,21 @@ function _hoursSince(v){
   if(!isFinite(t))return null;
   return (Date.now()-t)/36e5;
 }
+// Whole days from now to a date-only Due Date. Negative once past.
+// Only called for Hard Deadline tasks: auto-reschedule skips those, so their
+// Due Date is the real externally-set date and not a re-stamped one.
+function _daysUntil(v){
+  if(!v)return null;
+  const d=new Date(String(v).slice(0,10)+'T00:00:00Z').getTime();
+  if(!isFinite(d))return null;
+  const today=new Date(new Date().toISOString().slice(0,10)+'T00:00:00Z').getTime();
+  return Math.round((d-today)/864e5);
+}
+function _deadlineWhy(d){
+  if(d<0)return `Hard deadline passed ${-d} day${d===-1?'':'s'} ago`;
+  if(d===0)return 'Hard deadline is TODAY';
+  return `Hard deadline in ${d} day${d===1?'':'s'}`;
+}
 function _isAgentOwned(t){
   return ((t&&t.teamMemberIds)||[]).some(id=>AGENT_MAP[id]);
 }
@@ -9195,6 +9211,18 @@ function computeApprovalLoop(tasks){
   const stalled=[];
   all.forEach(t=>{
     if(!_isOpen(t))return;
+    // 0. A hard, externally-fixed deadline is imminent or already passed. Hard
+    //    Deadline means the date is not ours to move — a hearing, a summons, a
+    //    payment demand — so this rule outranks every one below it. It is also
+    //    the only rule allowed to read dueDate, because auto-reschedule skips
+    //    exactly these tasks (see rule 3 for why that matters).
+    if(t.hardDeadline){
+      const d=_daysUntil(t.dueDate);
+      if(d!==null&&d<=STALL_DEADLINE_DAYS){
+        stalled.push({t,days:-d,why:_deadlineWhy(d),rule:'deadline'});
+        return;
+      }
+    }
     // 1. Kevin asked for changes and nothing came back.
     if(t.approvalOutcome==='Changes requested'&&t.status!=='Approval'){
       const h=_hoursSince(t.approvedAt);
@@ -9242,7 +9270,10 @@ function computeApprovalLoop(tasks){
   // carries no day count (see rule 2), so sorting the whole list by age would
   // sink every "an agent has drafted nothing" item below every dated one — and
   // that rule is the one that catches work never being started at all.
-  const RULE_ORDER={amend:0,draft:1,decide:2};
+  // "deadline" outranks all three: they mean the loop is slow, it means a date
+  // somebody else set is about to pass. A council tax court date went by unseen
+  // on 24 Aug 2026 with nothing on any surface saying so.
+  const RULE_ORDER={deadline:0,amend:1,draft:2,decide:3};
   stalled.sort((a,b)=>(RULE_ORDER[a.rule]-RULE_ORDER[b.rule])||((b.days||0)-(a.days||0)));
   return {needsYou,done,stalled};
 }

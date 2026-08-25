@@ -2633,6 +2633,13 @@
         maintenance: 'fldSEUvVA98as1HW6',
         property: 'fldZKFvEpJ6NZeFKz',
         createdDate: 'fldRpwiBGqEVaN20H',
+        // Hard Deadline. Ticked when the letter or email names a real,
+        // externally-set date (hearing, summons, filing window, payment
+        // demand). It stops the auto-rescheduler moving the date and it is what
+        // loop-health.py's deadline rule fires on. Before 25 Aug 2026 nothing
+        // in any inbound lane ever set it, so a council tax court date lived
+        // only as prose in a truncated description and passed unnoticed.
+        hardDeadline: 'fldZKzIxgyrQ8CG8a',
         // Completion Date. reopenAirtableTask below MUST null this in the same
         // PATCH that sets Status back to Today, or a task that was completed
         // once keeps counting as completed work for ever (finding
@@ -2722,12 +2729,39 @@
         return localStorage.getItem('airtable_assignee') || AIRTABLE_ASSIGNEE_DEFAULT;
     }
 
+    // The AI summary used to be cut at 500 chars, which is roughly one paragraph
+    // of a council-tax summons, so the hearing date, the amount and the
+    // reference were routinely chopped off the end and the task read as
+    // "Council Tax reminder ..." with nothing actionable in it (finding
+    // 20260821-ceo-huddle-271). 1,800 is comfortably past the longest real
+    // letter summary and still short enough to read at a glance.
+    const DESCRIPTION_LIMIT = 1800;
+
+    // A deadline is only useful if it is a real, plausible date. The model is
+    // asked for YYYY-MM-DD and mostly gives it, but a hallucinated "2019-01-01"
+    // or a malformed string must not become a Due Date on a live task, and
+    // Hard Deadline makes that date immovable. So this refuses anything it
+    // cannot verify rather than guessing. Returns '' when there is no usable date.
+    function normaliseDeadline(raw) {
+        const s = String(raw || '').trim().slice(0, 10);
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return '';
+        const d = new Date(s + 'T00:00:00Z');
+        if (!isFinite(d.getTime()) || d.toISOString().slice(0, 10) !== s) return '';
+        const days = Math.round((d.getTime() - Date.now()) / 864e5);
+        // A statutory window is days or weeks away. Anything more than a year
+        // out, or more than a year in the past, is the model guessing.
+        if (days > 366 || days < -366) return '';
+        return s;
+    }
+
     async function generateAirtableTaskContent(email) {
         // Use Claude to generate a concise task title and description from the email
         const bodyText = email.messages.map(m => getPlainText(m) || m.snippet || '').join('\n').substring(0, 3000);
-        const prompt = `You are generating an Airtable task from an inbound email. Generate a JSON object with two fields:
+        const todayIso = new Date().toISOString().slice(0, 10);
+        const prompt = `You are generating an Airtable task from an inbound email. Generate a JSON object with three fields:
 - "title": A concise task title starting with "INBOUND: " followed by a brief action item. Under 100 chars. Do NOT use em dashes or en dashes.
-- "description": A professional, actionable description of what needs to be done based on the email. Include key details and any deadlines mentioned. Do NOT use em dashes or en dashes. Keep under 500 chars.
+- "description": A professional, actionable description of what needs to be done based on the email. Do NOT use em dashes or en dashes. Keep under ${DESCRIPTION_LIMIT} chars. NEVER drop a date, deadline, amount, account number or reference: those are the whole reason the task exists, and a summary that loses them costs money.
+- "deadline": If the message states a date by which something must happen (a court or hearing date, a summons return date, a payment-by date, a filing or response window, "within 14 days"), give that date as YYYY-MM-DD. Today is ${todayIso}, so resolve relative windows against it. If there is no such date, use an empty string. Do NOT invent one, and do NOT use the date the message was sent.
 
 Email subject: ${email.subject}
 From: ${email.from}
@@ -2750,13 +2784,15 @@ Respond with ONLY the JSON object, no markdown.`;
             const parsed = JSON.parse(text);
             return {
                 title: (parsed.title || 'INBOUND: Review email from ' + email.from).substring(0, 100),
-                description: (parsed.description || 'Review and action email: ' + email.subject).substring(0, 500)
+                description: (parsed.description || 'Review and action email: ' + email.subject).substring(0, DESCRIPTION_LIMIT),
+                deadline: normaliseDeadline(parsed.deadline)
             };
         } catch (err) {
             console.error('AI task generation failed, using fallback:', err);
             return {
                 title: ('INBOUND: ' + email.subject).substring(0, 100),
-                description: 'Review and action inbound email from ' + email.from + '. Subject: ' + email.subject
+                description: 'Review and action inbound email from ' + email.from + '. Subject: ' + email.subject,
+                deadline: ''
             };
         }
     }
@@ -2883,7 +2919,14 @@ Respond with ONLY the JSON object, no markdown.`;
                 [AIRTABLE_FIELDS.sender]: email.fromEmail || email.from,
                 [AIRTABLE_FIELDS.dateReceived]: today,
                 [AIRTABLE_FIELDS.noteUrl]: gmailUrl,
-                ...(opts.maintenance ? {} : { [AIRTABLE_FIELDS.dueDate]: today }),
+                // A stated deadline BEATS "today". Before this, every inbound
+                // task was due today and the real date survived only as prose,
+                // so the auto-rescheduler rolled it forward for ever and a
+                // court date never once read as overdue (findings
+                // 20260825-daily-ops-354, 20260824-post-manager-weekly-343).
+                // Hard Deadline is what stops the rescheduler moving it.
+                ...(opts.maintenance ? {} : { [AIRTABLE_FIELDS.dueDate]: content.deadline || today }),
+                ...(content.deadline ? { [AIRTABLE_FIELDS.hardDeadline]: true } : {}),
                 [AIRTABLE_COLLABORATORS_FIELD]: collaboratorIds,
                 ...(opts.maintenance ? {
                     [AIRTABLE_FIELDS.maintenance]: true,

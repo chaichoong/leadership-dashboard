@@ -92,6 +92,7 @@ function toParsed(rec, derive) {
     agentOutput: f['Agent Output'] || '',
     approvalSlackTs: f['Approval Slack TS'] || '',
     assigneeEmail: (f.Assignee || {}).email || '',
+    hardDeadline: !!f['Hard Deadline'],
   };
 }
 
@@ -203,6 +204,7 @@ describe('approval-loop stall rules', () => {
       expect(jsNum('STALL_AMEND_HOURS')).toBe(pyNum('STALL_AMEND_HOURS'));
       expect(jsNum('STALL_DRAFT_HOURS')).toBe(pyNum('STALL_DRAFT_HOURS'));
       expect(jsNum('STALL_DECIDE_DAYS')).toBe(pyNum('STALL_DECIDE_DAYS'));
+      expect(jsNum('STALL_DEADLINE_DAYS')).toBe(pyNum('STALL_DEADLINE_DAYS'));
     });
 
     it('restricts the draft rule to the statuses the dispatcher works from', () => {
@@ -255,6 +257,59 @@ describe('approval-loop stall rules', () => {
       expect(loopSrc).not.toMatch(/_hoursSince\(t\.dueDate\)/);
     });
 
+    // ── Rule 0: hard, externally-set deadlines (finding 20260825-daily-ops-354)
+    // A council tax court date passed unnoticed on 24 Aug 2026. Nothing on any
+    // surface said a fixed date was about to run out, because every existing
+    // rule measures how long OUR loop has been slow, and a hearing date does
+    // not care about that.
+    it('flags a hard deadline that has already passed, and says how long ago', () => {
+      const { js, py } = runBoth([task({ 'Task Name': 'Council tax summons',
+        Status: 'Upcoming', 'Hard Deadline': true, 'Due Date': '2026-08-10',
+        'Team Member': [AGENT], 'Created Time': '2026-08-01T09:00:00Z' })]);
+      expect(js.stalled.map(s => s.rule)).toEqual(['deadline']);
+      expect(py.stalled.map(s => s.rule)).toEqual(['deadline']);
+      expect(js.stalled[0].why).toBe('Hard deadline passed 4 days ago');
+      expect(py.stalled[0].why).toBe('Hard deadline passed 4 days ago');
+    });
+
+    it('flags one inside the window and ignores one beyond it', () => {
+      const inside = runBoth([task({ 'Task Name': 'Hearing', Status: 'Upcoming',
+        'Hard Deadline': true, 'Due Date': '2026-08-17', 'Team Member': [AGENT] })]);
+      expect(inside.js.stalled[0].why).toBe('Hard deadline in 3 days');
+      expect(inside.py.stalled[0].why).toBe('Hard deadline in 3 days');
+
+      const beyond = runBoth([task({ 'Task Name': 'Hearing', Status: 'Upcoming',
+        'Hard Deadline': true, 'Due Date': '2026-08-18', 'Team Member': [AGENT] })]);
+      expect(beyond.js.stalled).toHaveLength(0);
+      expect(beyond.py.stalled).toHaveLength(0);
+    });
+
+    it('does not fire on a due date alone — the flag is what makes it immovable', () => {
+      // Without Hard Deadline the rescheduler owns the date, so reading it
+      // would resurrect exactly the bug rule 3 was narrowed to avoid.
+      const { js, py } = runBoth([task({ 'Task Name': 'Ordinary', Status: 'Upcoming',
+        'Due Date': '2026-08-01', 'Team Member': [AGENT] })]);
+      expect(js.stalled).toHaveLength(0);
+      expect(py.stalled).toHaveLength(0);
+    });
+
+    it('sorts deadlines above every other rule, worst-overdue first', () => {
+      const records = [
+        task({ 'Task Name': 'Decide', Status: 'Approval', 'Team Member': [AGENT],
+               'Approval Slack TS': epoch('2026-08-01T09:00:00Z') }),
+        task({ 'Task Name': 'Amend', Status: 'Today', 'Team Member': [AGENT],
+               'Approval Outcome': 'Changes requested', 'Approved At': '2026-08-10T09:00:00Z' }),
+        task({ 'Task Name': 'Soon', Status: 'Upcoming', 'Hard Deadline': true,
+               'Due Date': '2026-08-16', 'Team Member': [AGENT] }),
+        task({ 'Task Name': 'Passed', Status: 'Upcoming', 'Hard Deadline': true,
+               'Due Date': '2026-07-31', 'Team Member': [AGENT] }),
+      ];
+      const { js, py } = runBoth(records);
+      const shape = (l) => l.map(x => `${x.rule}:${(x.t || x).name}`);
+      expect(shape(js.stalled)).toEqual(['deadline:Passed', 'deadline:Soon', 'amend:Amend', 'decide:Decide']);
+      expect(shape(py.stalled)).toEqual(['deadline:Passed', 'deadline:Soon', 'amend:Amend', 'decide:Decide']);
+    });
+
     it('never reports a completed task as stalled', () => {
       const { js, py } = runBoth([task({ 'Task Name': 'Done', Status: 'Completed',
         'Team Member': [AGENT], 'Completion Date': '2026-08-13T09:00:00Z',
@@ -287,6 +342,16 @@ describe('approval-loop stall rules', () => {
       expect(py).toMatch(/waiting approvals carrying an Approval Slack TS/);
       expect(py).toMatch(/tasks carrying Agent Output/);
       expect(py).toMatch(/open tasks linked to an AI agent/);
+      // Rule 0 can only fire on a ticked Hard Deadline. If the pipelines stop
+      // ticking it, it goes permanently quiet on the deadlines that matter most.
+      expect(py).toMatch(/open tasks carrying a Hard Deadline/);
+    });
+
+    it('asks Airtable for the fields rule 0 reads', () => {
+      // compute() is fed whatever main() fetched. Leaving these out of the
+      // fields list makes every task look like it has no deadline, and the
+      // rule reports a clean sheet for ever without erroring.
+      expect(py).toMatch(/"Due Date", "Hard Deadline"/);
     });
 
     it('counts the agent-link control over OPEN tasks only', () => {

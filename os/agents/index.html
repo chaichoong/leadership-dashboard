@@ -1396,6 +1396,30 @@ function agentDailyRows(agentId){
     if(String(_dailyLogState).indexOf('error') === 0) return 'error';
     return allDailyLogRows.filter(r=>linkIds(gf(r,ALOG.agent)).includes(agentId)).slice(0,14);
 }
+
+// How old the newest daily log for one agent is, in whole days. null when the
+// agent has never written one. This is the only dated evidence the page has
+// that a runtime is still running: Metric Score itself carries no timestamp,
+// so on its own it can only ever answer "was this ever set", never "is this
+// still true".
+function agentLogAgeDays(agentId){
+    const rows = allDailyLogRows.filter(r=>linkIds(gf(r,ALOG.agent)).includes(agentId));
+    let newest = null;
+    rows.forEach(r=>{
+        const d = String(gf(r,ALOG.date)||'').slice(0,10);
+        if(!/^\d{4}-\d{2}-\d{2}$/.test(d)) return;
+        if(newest === null || d > newest) newest = d;
+    });
+    if(newest === null) return null;
+    const ms = new Date(newest+'T00:00:00Z').getTime();
+    const today = new Date(todayStr()+'T00:00:00Z').getTime();
+    return Math.max(0, Math.round((today-ms)/864e5));
+}
+
+// 3 days, not 1: the runtime fires inside daily-ops, so Monday is legitimately
+// two days after Friday's log. A check that cries wolf every Monday is a check
+// nobody reads by Wednesday.
+const METRIC_STALE_DAYS = 3;
 async function retryDailyLogs(){
     await loadDailyLogs();
     renderRoleAgentPanel();
@@ -2636,13 +2660,31 @@ function registerAgentsSyncBar(){
                 }
             },
             {
+                // Named "fresh" but, until 25 Aug 2026, it only asked whether
+                // Metric Score was NON-EMPTY (finding 20260825-drift-monitor-355).
+                // A score written once in July passed this for ever, so the one
+                // check on the page whose whole job was to notice a stopped
+                // runtime could not notice a stopped runtime.
+                //
+                // Freshness needs something DATED. Metric Score carries no
+                // timestamp, so it is read for presence only and the age comes
+                // from the agent's own AI Agent Daily Log rows, which do carry
+                // a Date. Weekend-tolerant on purpose: the runtime runs inside
+                // daily-ops, so a Monday morning is legitimately 2 days after
+                // the last Friday log and alarming on that trains people to
+                // ignore it.
                 name: 'Inbound Comms Response metric fresh', kind: 'automation', run: () => {
                     if(_agentsRegisterState !== 'ready') return { status:'warn', detail:'Register not loaded yet' };
                     const row = allAgents.find(a=>String(gf(a,AG.name)||'').toLowerCase().includes('inbound comms response'));
                     if(!row) return { status:'fail', detail:'No "Inbound Comms Response" row in the register — the agent lost its home row' };
                     const score = gf(row,AG.metricScore);
                     if(!score) return { status:'fail', detail:'Metric Score is empty — the agent\'s runtime has stopped publishing its score' };
-                    return { status:'pass', detail:'Metric Score: '+String(score).split('\n')[0].slice(0,120) };
+                    if(String(_dailyLogState).indexOf('error') === 0) return { status:'warn', detail:'Cannot judge freshness: the daily-log read failed — '+String(_dailyLogState).slice(7) };
+                    if(_dailyLogState !== 'ready') return { status:'warn', detail:'Daily log not loaded yet' };
+                    const age = agentLogAgeDays(row.id);
+                    if(age === null) return { status:'fail', detail:'Metric Score is set but this agent has written no daily log at all, so nothing dates it — the score could be from any day' };
+                    if(age > METRIC_STALE_DAYS) return { status:'fail', detail:`Last daily log was ${age} day(s) ago (limit ${METRIC_STALE_DAYS}) — the runtime has stopped, and the Metric Score on screen is that old` };
+                    return { status:'pass', detail:`Metric Score ${age === 0 ? 'backed by a log written today' : 'backed by a log '+age+' day(s) old'}: `+String(score).split('\n')[0].slice(0,90) };
                 }
             },
             {

@@ -72,6 +72,7 @@ TASKS = "tblqB8b22hKBL4PF1"  # Tasks
 PROJECTS = "tblHrpTMd5LNYn8v1"  # Projects (quarterly projects from the Strategy push)
 BMS = "tblyr4h3Dap0EDN6S"  # Business Monthly Summary
 PROSPECTS = "tbljHVGJoKJf8acy3"  # Prospects (cold outbound)
+INVOICES = "tblkOTKIG2Tyiy9aM"  # Dashboard Invoices
 
 INVARIANTS = [
     {
@@ -416,6 +417,73 @@ INVARIANTS = [
         "control": "AND({Contact Route} = 'Email sequence (Ltd)', {Draft Message} != '')",
         "control_means": "cold-email drafts (the population the first-touch rule governs)",
         "fields": ["Name", "Company", "Status", "Contact Route", "Draft Message"],
+    },
+    {
+        # A Hard Deadline is a date somebody ELSE set — a hearing, a summons, a
+        # filing window. The auto-rescheduler already skips these tasks, so the
+        # date on the record is real. What nothing checked was whether the task
+        # is still sitting in the approval queue while that date runs out: a
+        # council tax court date passed on 24 Aug 2026 with the task waiting for
+        # a decision the whole time, and every surface reported it as normal
+        # queue depth.
+        #
+        # Back-tested read-only on 25 Aug 2026: the violation matched 4 live
+        # records (Utilita payment reminder due 22 Aug, two council tax items
+        # due 12 and 15 Aug, and a loan letter due 18 Aug), control 63.
+        "name": "hard-deadline-not-waiting-on-approval",
+        "table": TASKS,
+        "incident": "Aug 2026 — a council tax liability hearing passed while its task sat unapproved; nothing anywhere said the date was running out",
+        "asserts": "hard deadline within 3 days (or passed) => not still waiting on an approval",
+        "violation": ("AND({Hard Deadline} = 1, {Is Completed} = 0, "
+                      "{Status} = 'Approval', "
+                      "IS_BEFORE({Due Date}, DATEADD(TODAY(), 4, 'days')))"),
+        "control": "AND({Hard Deadline} = 1, {Is Completed} = 0)",
+        "control_means": "open tasks flagged with an immovable external deadline",
+        "field_probe": "OR({Hard Deadline} = 1, {Hard Deadline} = 0)",
+        "fields": ["Task Name", "Status", "Due Date", "Hard Deadline"],
+    },
+    {
+        # Ownership that points at somebody who has left is worse than no owner:
+        # it reads as owned on every surface, so nothing re-routes it and no
+        # agent picks it up. Karlo left and his open tasks stayed pointed at him.
+        #
+        # Read through the Tasks-side lookup rather than the Team Members table,
+        # so one query covers it. Back-tested read-only on 25 Aug 2026: the
+        # lookup returns 'Active' and 'Offboarded' values on live open tasks, so
+        # the FIND genuinely fires rather than matching nothing.
+        "name": "no-open-task-owned-by-a-departed-member",
+        "table": TASKS,
+        "incident": "Aug 2026 — 3 open tasks still linked to team members who had left; ownership pointed at nobody",
+        "asserts": "open task => its Team Member is not Offboarded/Offboarding",
+        "violation": ("AND({Is Completed} = 0, "
+                      "OR(FIND('Offboarded', ARRAYJOIN({Status for Team Members})), "
+                      "FIND('Offboarding', ARRAYJOIN({Status for Team Members}))))"),
+        "control": "LEN(ARRAYJOIN({Status for Team Members}) & '') > 0",
+        "control_means": "tasks whose Team Member link resolves to a status at all",
+        "fields": ["Task Name", "Status", "Status for Team Members"],
+    },
+    {
+        # "Paid" on an invoice is a claim that money left an account. The only
+        # evidence for it is a linked bank transaction; without one the stamp is
+        # somebody's memory, and it is being used to decide what still needs
+        # paying. A bulk stamp on 29 Jun 2026 marked a whole batch Paid with no
+        # match, including a £23,351.41 American Express invoice, and nothing
+        # anywhere distinguishes those from genuinely settled ones.
+        #
+        # Back-tested read-only on 25 Aug 2026: 93 violations, control 7. Kevin
+        # decides whether to reverse the 29 Jun stamp or narrow this to invoices
+        # stamped after the write path was fixed — until then it stays loud,
+        # because the alternative is a Paid column nobody can trust and nobody
+        # is told not to.
+        "name": "paid-invoice-has-a-matched-transaction",
+        "table": INVOICES,
+        "incident": "Jun 2026 — a bulk stamp marked invoices Paid with no matched transaction, £23k among them; the Paid column stopped being evidence",
+        "asserts": "Status = Paid with a Paid Date => a bank transaction is linked",
+        "violation": ("AND({Status} = 'Paid', {Paid Date} != BLANK(), "
+                      "LEN(ARRAYJOIN({Matched Transaction}) & '') = 0)"),
+        "control": "LEN(ARRAYJOIN({Matched Transaction}) & '') > 0",
+        "control_means": "invoices that DO carry a matched bank transaction",
+        "fields": ["Payee", "Amount", "Status", "Paid Date"],
     },
 ]
 

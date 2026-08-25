@@ -755,6 +755,29 @@ def sort_key(t):
 
 # ─── QUEUE ────────────────────────────────────────────────────────────
 
+def queue_control_failure(open_tasks, agent_linked, handback_population):
+    """Why this queue read cannot be trusted, or "" if it can.
+
+    Split out from cmd_queue so it is testable without Airtable. Two separate
+    questions, because a broken read and an empty queue look identical from the
+    outside and only one of them is good news:
+
+      1. Did the open-task read return anything at all? This base always has
+         live work, so zero rows is a broken formula, not a clear desk.
+      2. Is there anything agent-shaped in that live window? Nothing linked to
+         an agent AND nothing carrying an approval outcome means the agent-link
+         logic or the field names have moved.
+    """
+    if not open_tasks:
+        return ("the open-task read returned zero rows. This base always has "
+                "live work, so the query is broken, not the queue empty.")
+    if not agent_linked and not handback_population:
+        return ("zero live tasks linked to any AI agent and zero live tasks "
+                "carrying an approval outcome, out of %d open tasks. The read "
+                "is broken, not the queue empty." % len(open_tasks))
+    return ""
+
+
 def cmd_queue(args):
     formula = "OR({Status}='Today',{Status}='Overdue')"
     open_tasks = [task_view(r) for r in query_tasks(formula)]
@@ -780,12 +803,19 @@ def cmd_queue(args):
     agent_linked = [t for t in open_tasks
                     if any(i in ALL_AGENTS for i in t["teamMemberIds"])
                     or any(i in ALL_AGENTS for i in t["sentForApprovalByIds"])]
-    handback_population = query_tasks("LEN({Approval Outcome}&'')>0",
-                                      max_records=1, minimal=True)
-    if not agent_linked and not handback_population:
-        print("ERROR: control failed — zero tasks linked to any AI agent and "
-              "zero tasks with an approval outcome. The read is broken, not "
-              "the queue empty.", file=sys.stderr)
+    # LIVE WINDOW ONLY (finding 20260825-agent-dispatch-360). This probe used to
+    # run across the whole Tasks table — 7,400 rows, thousands of them approvals
+    # closed months ago — so it matched something no matter what state the queue
+    # was in, and the `and` below could never be false. A control that cannot
+    # fire is worse than none: it reads as verified. Bound it to the same live
+    # statuses the queue itself works from.
+    handback_population = query_tasks(
+        "AND(LEN({Approval Outcome}&'')>0,"
+        "OR({Status}='Today',{Status}='Overdue',{Status}='Approval'))",
+        max_records=1, minimal=True)
+    failure = queue_control_failure(open_tasks, agent_linked, handback_population)
+    if failure:
+        print("ERROR: control failed — " + failure, file=sys.stderr)
         sys.exit(1)
 
     tier1, skipped_tier2, unmapped, unclassified = [], [], [], []

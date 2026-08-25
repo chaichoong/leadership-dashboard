@@ -42,6 +42,7 @@ TEAM = "tblco0p2OnlLQVAX7"
 STALL_AMEND_HOURS = 48   # amended, and the agent has not redone it
 STALL_DRAFT_HOURS = 24   # an agent owns it, it is DUE, and nothing is drafted
 STALL_DECIDE_DAYS = 5    # sat waiting on a human this long
+STALL_DEADLINE_DAYS = 3  # a hard, externally-set deadline this close, or already passed
 
 # The statuses agent-dispatch.py actually works from (its OPEN_STATUSES). An
 # "Upcoming" task is scheduled, not late. Counting it as stalled made the first
@@ -57,7 +58,10 @@ KEVIN_AIRTABLE_EMAIL = "kevin@runpreneur.org.uk"
 # rule carries no day count, so sorting the whole list by age would sink every
 # "an agent has drafted nothing" item below every dated one — and that is the
 # rule that catches work never being started at all.
-RULE_ORDER = {"amend": 0, "draft": 1, "decide": 2}
+# "deadline" outranks everything: the others are the loop being slow, this one is
+# a date somebody else set — a hearing, a summons, a payment demand. A council
+# tax court date passed unnoticed on 24 Aug 2026 because nothing surfaced it.
+RULE_ORDER = {"deadline": 0, "amend": 1, "draft": 2, "decide": 3}
 
 
 def pat():
@@ -102,6 +106,33 @@ def hours_since(value, now):
     return (now - dt).total_seconds() / 3600.0
 
 
+def days_until(value, now):
+    """Whole days from `now` to a date-only Airtable field. Negative once past.
+
+    Only ever called for Hard Deadline tasks. Reading Due Date is unsafe
+    everywhere else in this file — the auto-rescheduler re-stamps it to today,
+    which is what made rule 3 silently never fire — but that rescheduler
+    explicitly SKIPS Hard Deadline tasks (os/tasks/index.html), so on those
+    records the date is the real one somebody else set.
+    """
+    if not value:
+        return None
+    raw = str(value)[:10]
+    try:
+        due = datetime.strptime(raw, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+    except ValueError:
+        return None
+    return (due.date() - now.astimezone(timezone.utc).date()).days
+
+
+def deadline_why(days):
+    if days < 0:
+        return "Hard deadline passed %d day%s ago" % (-days, "" if days == -1 else "s")
+    if days == 0:
+        return "Hard deadline is TODAY"
+    return "Hard deadline in %d day%s" % (days, "" if days == 1 else "s")
+
+
 def compute(tasks, agent_ids, now=None):
     now = now or datetime.now(timezone.utc)
     needs_you, done, stalled = [], [], []
@@ -129,6 +160,17 @@ def compute(tasks, agent_ids, now=None):
 
         if not is_open:
             continue
+
+        # 0. A hard, externally-fixed deadline is imminent or already passed.
+        #    Hard Deadline means the date is not ours to move, so this is the
+        #    one rule that reads Due Date (see days_until for why that is safe
+        #    here and nowhere else) and the one that sorts above the rest.
+        if f.get("Hard Deadline"):
+            d = days_until(f.get("Due Date"), now)
+            if d is not None and d <= STALL_DEADLINE_DAYS:
+                stalled.append({"id": r["id"], "name": name, "rule": "deadline",
+                                "days": -d, "why": deadline_why(d)})
+                continue
 
         # 1. Kevin asked for changes and nothing came back.
         if f.get("Approval Outcome") == "Changes requested" and status != "Approval":
@@ -189,7 +231,8 @@ def main():
         # clip a completion out of the report.
         tasks = fetch(TASKS, ["Task Name", "Status", "Team Member", "Approval Outcome",
                               "Approved At", "Agent Output", "Completion Date",
-                              "Created Time", "Approval Slack TS", "Assignee"],
+                              "Created Time", "Approval Slack TS", "Assignee",
+                              "Due Date", "Hard Deadline"],
                       formula=('OR({Status}!="Completed",'
                                "IS_AFTER({Completion Date},DATEADD(TODAY(),-8,'days')))"))
     except (urllib.error.HTTPError, urllib.error.URLError, OSError) as exc:
@@ -224,6 +267,12 @@ def main():
         # noise rather than signal — the opposite failure, equally useless.
         "tasks carrying Agent Output":
             sum(1 for f in fields if f.get("Agent Output")),
+        # Rule 0 can only fire on tasks somebody TICKED Hard Deadline on. If the
+        # pipelines stop ticking it, the rule reports a permanent all-clear on
+        # exactly the deadlines that matter most — which is the failure that
+        # filed this rule in the first place.
+        "open tasks carrying a Hard Deadline":
+            sum(1 for f in open_tasks if f.get("Hard Deadline")),
     }
     if not agent_ids:
         controls["AI agent records"] = 0
