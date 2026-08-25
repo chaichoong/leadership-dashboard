@@ -124,8 +124,15 @@ KEVIN_REC_ID = "recHEt2VPYothaqTd"
 # Members tblco0p2OnlLQVAX7 on 19 Aug 2026, not inferred.
 HUMANS = {
     "kevin@runpreneur.org.uk": {"rec": KEVIN_REC_ID, "name": "Kevin Brittain"},
+    # Kevin's ruling, 25 Aug 2026: no NEW routing to Mica or Ericamae — their
+    # entries stay ONLY so an explicit Kevin-ordered handover still lands on a
+    # real row instead of failing into a typo'd address.
     "micaa.work@gmail.com":    {"rec": "rec4b5MDoaxEC7WRE", "name": "Mica Albovias"},
     "atentaerica@gmail.com":   {"rec": "recEvm9wgsEnoNVZh", "name": "Ericamae Atenta"},
+    # Roy Lavin, Head of Property since 25 Aug 2026 (team member, not a
+    # contractor). Maintenance handovers to him carry Kevin's STANDING
+    # approval; other passes go through the gate first.
+    "roy.lavin1978@gmail.com": {"rec": "reclbdjfVev3bqNHS", "name": "Roy Lavin"},
 }
 
 # Field IDs — single source is js/config.js; drift-tested, never guess.
@@ -242,6 +249,8 @@ ROLE_AGENTS = {
                           "agent": "inbound-comms-response", "role": "worker"},
     "recjh6mmaF8KJW8t3": {"name": "AI Creditor Management",
                           "agent": "creditor-management", "role": "worker"},
+    "rec1hYELb4zS8pjjO": {"name": "AI Task Manager",
+                          "agent": "task-manager", "role": "worker"},
 }
 ALL_AGENTS = {**AGENTS, **ROLE_AGENTS}
 
@@ -257,6 +266,14 @@ RESPONSE_REGISTER_ROW = "recHfhVDb6BfQYco5"    # AI Agents register row
 # sends anything payment-related or creditor-chasing to the specialist.
 CREDITOR_REC_ID = "recjh6mmaF8KJW8t3"          # Team Members row
 CREDITOR_REGISTER_ROW = "recDvxwDGcC3pFbPa"    # AI Agents register row
+
+# The Task Manager agent's identities (build session 25 Aug 2026). It is the
+# board foreman: its own 09:00/13:00/17:00 slot job decides WHAT moves and
+# drives THIS script's per-task commands, so there is exactly one writing
+# muscle. Its approved hand-backs (close proposals, passes to Roy) are carried
+# out by the normal dispatch runs like any other role agent's.
+TASKMGR_REC_ID = "rec1hYELb4zS8pjjO"           # Team Members row
+TASKMGR_REGISTER_ROW = "reczg8BygPFnJMQnh"     # AI Agents register row
 
 # Fixed-cost metric source (Kevin's metric two, 25 Aug 2026). The active rule
 # MIRRORS isCostActive in js/shared.js — the single rule the Leadership

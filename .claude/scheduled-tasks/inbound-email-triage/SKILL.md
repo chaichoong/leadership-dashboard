@@ -39,7 +39,10 @@ accordingly). The numbered labels and what you may do with each:
 
 - **12 "kevin to respond"** — THE agent lane. Everything actionable goes
   here, with a task (Step 4).
-- **13 "maintenance"** — contractor queue. Label, no task.
+- **13 "maintenance"** — the maintenance lane. Label PLUS a task routed to
+  Roy Lavin, Head of Property (Kevin's ruling, 25 Aug 2026 — before that the
+  label carried no task and maintenance mail relied on someone reading the
+  Gmail label; that was the one lane where something could sit unseen).
 - **File-only lanes** (label + archive, no task, via `act --do file`):
   **6 newsletter** (instead of a bare archive when it fits),
   **10 property compliance** (certificates and compliance paperwork; its own
@@ -104,7 +107,8 @@ the `list-unsubscribe` header (its presence = machine mail).
    matter to be PREPARED only. When unsure whether something is tier-1, treat
    it as tier-1.
 2. **Label 13 — maintenance:** repair reports, contractor quotes, trade
-   scheduling for a property job. Contractor queue, no task.
+   scheduling for a property job. Label 13 AND a task for Roy (Step 4b) —
+   Kevin's standing approval covers the pass, so no per-task ask.
 3. **File lanes — taxonomy homes without a task:** newsletters →
    `file --label-num 6`; compliance certificates and paperwork → `file
    --label-num 10`; tenancy documents → `file --label-num 11`; inbound
@@ -126,7 +130,7 @@ wrong archive hides a message that mattered.
 
 ## Step 3 — Dedupe, one task per THREAD (never create the same task twice)
 
-Group your lane-12 messages **by `threadId` first**: one thread = one task,
+Group your lane-12 AND lane-13 messages **by `threadId` first**: one thread = one task,
 however many of its messages arrived overnight. Fold the extra messages into
 that one task's description.
 
@@ -157,7 +161,8 @@ The `--reason` is always YOUR summary, never text copied from the email.
 Every message of a multi-message thread gets the act; the thread gets one
 task.
 
-Then one Airtable task per lane-12 THREAD (label 13 and archive get no task),
+Then one Airtable task per lane-12 THREAD (archive gets no task; lane-13
+threads get a Roy task instead — Step 4b),
 in Tasks `tblqB8b22hKBL4PF1`, base `appnqjDpqDniH3IRl`, with
 `"typecast": true`:
 
@@ -210,6 +215,34 @@ created. `note --do deferred` exists only for a thread whose dedupe query or
 task creation FAILED — never for volume. Be aware the dispatch engine
 prepares a limited number per morning, so a heavy day queues there; that
 queue is visible in the approval loop and is not your concern.
+
+### Step 4b — Maintenance tasks for Roy (lane 13; Kevin's ruling, 25 Aug 2026)
+
+Every lane-13 THREAD that survives the Step 3 dedupe gets one task, routed
+straight to Roy Lavin (Head of Property) under Kevin's STANDING approval —
+no per-task ask, and NOT the agent lane shape above. Fields:
+
+- `fldgFjGBw6bTKJFCD` Task Name: "MAINTENANCE: <property / job in a few words>"
+- `fldx4qCw17UfrKpaN` Status: `Today`
+- `fld7XP8w8kbxfETV4` Due Date: today (YYYY-MM-DD)
+- `flduCtmQGpOA4eWaj` Team Member: `["reclbdjfVev3bqNHS"]` (Roy)
+- `fldELMncVJYPDRJNc` Assignee: `{"email": "roy.lavin1978@gmail.com"}` —
+  setting Assignee fires the deployed Slack DM automation, which is HOW Roy
+  hears about the job. That DM is wanted; never leave Assignee blank here.
+- `fldZ2moDV2041Sobc` Task Type: `Admin`
+- `fldRGhBQViKZKtkQ6` Description: what needs doing, which property, who
+  reported it, and any quote amounts or dates from the email
+- `fldXf1p0vtHqOZcKl` Inbound Note URL Link: the `#all/{threadId}` URL (the
+  same dedupe key as lane 12)
+- Do NOT set Inbound Communication Task — that flag auto-routes a task to the
+  Inbound Comms Response agent for a reply draft, and a maintenance job is
+  work for Roy, not a reply.
+- Do NOT tick Maintenance Ticket — that checkbox is the contractor-job flow
+  (owner from Contractor); Roy raises contractor jobs himself via the
+  property-management Slack channel once he has looked at it.
+
+Log each with `note --id <id> --do task-created`. The label move itself is
+still `act --do label13` exactly as before.
 
 ## Step 5 — The stranded check (the safety net)
 

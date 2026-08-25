@@ -109,7 +109,7 @@ ALOG = {
 DECISION_GROUPS = [
     ("label12",      "Moved to the agent lane (task for your approval)"),
     ("task-created", "Task record written"),
-    ("label13",      "Maintenance, contractor queue"),
+    ("label13",      "Maintenance, task raised for Roy"),
     ("file-6",       "Filed: newsletter"),
     ("file-10",      "Filed: property compliance"),
     ("file-11",      "Filed: tenancy documents"),
