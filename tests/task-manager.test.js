@@ -93,6 +93,20 @@ describe("the Go Signal is the agent's own 9/1/5 slot job (Kevin, 25 Aug 2026)",
         expect(runner).toMatch(/NEVER under the repo/);
         expect(runner).toMatch(/__LEAKED/);
         expect(runner).toMatch(/VERIFY FAIL/);
+        // Only files THIS run created, never git-tracked ones — the triage
+        // sweep quarantined 41 committed schema files on 25 Aug 2026.
+        expect(runner).toMatch(/-newer "\$__MARKER"/);
+        expect(runner).toMatch(/ls-files --error-unmatch/);
+    });
+
+    it('the failure grep is anchored — a count containing 401 is not a failure', () => {
+        expect(runner).not.toMatch(/grep -E '401\|/);
+        expect(runner).toMatch(/HTTP Error 401\|401 Unauthorized/);
+    });
+
+    it('a missing live skill file is a loud failure, not a polite no-op', () => {
+        expect(runner).toMatch(/\[ ! -f "\$SKILL" \]/);
+        expect(runner).toMatch(/BROKEN: skill file missing/);
     });
 
     it('the job name is NOT a skill folder, so the one-routine guard stays quiet', () => {
@@ -130,6 +144,48 @@ describe('the wiring names one identity everywhere', () => {
         expect(dispatch).toContain('"roy.lavin1978@gmail.com"');
         expect(dispatch).toContain(`"${ROY_REC}"`);
         expect(dispatch).toMatch(/no NEW routing to Mica or Ericamae/);
+    });
+});
+
+describe('duplicated constants stay in lockstep with their source copies', () => {
+    const triageScript = readFileSync(path.join(root, 'scripts/inbound-triage.py'), 'utf8');
+
+    function pyConst(src, name) {
+        const m = src.match(new RegExp(`^${name}\\s*=\\s*"([^"]+)"`, 'm'));
+        return m && m[1];
+    }
+    function pyDict(src, name) {
+        const start = src.indexOf(`${name} = {`);
+        const end = src.indexOf('}', start);
+        const body = src.slice(start, end);
+        const out = {};
+        for (const m of body.matchAll(/"(\w+)":\s*"(fld\w+)"/g)) out[m[1]] = m[2];
+        return out;
+    }
+
+    it('ALOG, metric field and daily-log table match inbound-triage.py exactly', () => {
+        expect(pyDict(script, 'ALOG')).toEqual(pyDict(triageScript, 'ALOG'));
+        expect(pyConst(script, 'METRIC_SCORE_FIELD')).toBe(pyConst(triageScript, 'METRIC_SCORE_FIELD'));
+        expect(pyConst(script, 'DAILY_LOG_TABLE')).toBe(pyConst(triageScript, 'DAILY_LOG_TABLE'));
+    });
+
+    it('Kevin identities match agent-dispatch.py', () => {
+        expect(pyConst(script, 'KEVIN_REC')).toBe(pyConst(dispatch, 'KEVIN_REC_ID'));
+        expect(dispatch).toContain(`"${pyConst(script, 'KEVIN_EMAIL')}"`);
+    });
+
+    it('the daily-log write is the atomic upsert, not find-then-create', () => {
+        expect(script).toContain('performUpsert');
+        expect(script).toContain('fieldsToMergeOn');
+    });
+});
+
+describe('handovers to a non-Kevin human are tier-1 gated in code', () => {
+    it('cmd_handover refuses tier-1 content without an approved outcome', () => {
+        expect(dispatch).toMatch(/refusing handover .*tier-1 content/s);
+        const gate = dispatch.slice(dispatch.indexOf('def cmd_handover'), dispatch.indexOf('def cmd_submit'));
+        expect(gate).toContain('tier_match(TIER1_PATTERNS');
+        expect(gate).toContain('outcome not in APPROVED');
     });
 });
 

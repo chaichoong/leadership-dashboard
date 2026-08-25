@@ -159,7 +159,7 @@ The Task Manager agent runs the same way (Kevin's Go Signal ruling, 25 Aug
 scripts/job-schedule.json, runner scripts/task-manager-run.sh, skill folder
 task-manager-board). Same fixed-slot exception, same rule: never fold it back
 into daily-ops, and never re-add it as a phase, without Kevin's word. The
-queue lock serialises it behind the triage slot job at the same hours.
+queue lock stops it running at the same time as the triage slot job; order within the hour is whichever launchd starts first, and the board pass tolerates either order.
 
 
 ## Phase 6b — Calendar work (only when due)

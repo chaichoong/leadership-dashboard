@@ -42,62 +42,72 @@ failure shape.)
 
 ## Step 0 — Identity and pause check
 
+Your working directory for this run is
+`~/knowledge-os/logs/task-manager/scratch` (the runner exports it as
+`$TASK_MANAGER_SCRATCH`). Every path below lives there.
+
 Read your register row (curl, PAT at `~/.config/od/airtable_pat`):
 `GET /v0/tbl9msVjyQWslLOIZ/reczg8BygPFnJMQnh` — fields Status, Guardrail Level,
 Learning Log, Agent Prompt.
 
 - Status `Paused` → stop immediately, output "register paused, no work done".
+- Status `Planned` or `Building` → stop immediately, output "register not
+  Built yet, no work done". A slot firing before the build session finished
+  must be a clean no-op, never a half-run: the dispatch gate would refuse
+  your gate submissions anyway (only Built/Live agents may submit), and a
+  board pass that can route but not close is a board pass that lies.
 - Read every dated lesson in Learning Log and apply it to today's judgements.
 
 ## Step 1 — Read the board
 
-    python3 scripts/task-manager.py board > $SCRATCH/board.json
+First read what dispatch already has in flight, then the board, so the
+overlap is subtracted IN CODE, never by eyeballing two JSON files:
 
-This fails loudly on a broken read — never continue past a failure. It gives
-you `stuck` (no honest movement stamp in 7 days), `waitingOnKevin` (genuine
-loop-raised approvals), `parked` (Some Day) and counts.
+    cd ~/knowledge-os/logs/task-manager/scratch
+    python3 /Users/kevinbrittain/Projects/leadership-dashboard/scripts/agent-dispatch.py queue > dispatch-queue.json
+    python3 /Users/kevinbrittain/Projects/leadership-dashboard/scripts/task-manager.py board --dispatch-queue dispatch-queue.json > board.json
 
-Then read what dispatch already has in flight, so you never double-handle:
-
-    python3 scripts/agent-dispatch.py queue > $SCRATCH/dispatch-queue.json
-
-(Its `worklist` and `reserve` tasks are dispatch's this slot — skip them. Its
-rosters give you every routable agent's Team Members rec id and live status.
-If `queue` exits non-zero because the population read looks broken, report it
-and continue with the board only — your read is independent.)
+The board read fails loudly on a broken read — never continue past a failure.
+It gives you `stuck` (no honest movement stamp in 7 days, already excluding
+dispatch's in-flight tasks), `inFlight` (dispatch's this slot — not yours),
+`waitingOnKevin` (genuine loop-raised approvals), `parked` (Some Day) and
+counts. Dispatch's queue JSON also gives you every routable agent's Team
+Members rec id and live status (its rosters). If `queue` exits non-zero
+because ITS population read looks broken, report it, run `board` without
+`--dispatch-queue`, and carry on — your read is independent.
 
 ## Step 2 — Decide ONE move per stuck task
 
 Work oldest-first, hard deadlines and Overdue first of all. For each stuck task
-pick exactly one move, applying this order:
+pick exactly one move, applying this order (the `inFlight` bucket is already
+out of your list — the board subtracted dispatch's tasks in code):
 
-1. **Already in dispatch's worklist this slot** → `leave` (reason: in flight).
-2. **Tier-1 smell** → creditor/payment-chasing: `route` to Creditor Management
+1. **Tier-1 smell** → creditor/payment-chasing: `route` to Creditor Management
    (`recjh6mmaF8KJW8t3`). Legal matter / court / police: `escalate`.
-3. **Maintenance Ticket true, or plainly a repair/contractor job** → `roy`
+2. **Maintenance Ticket true, or plainly a repair/contractor job** → `roy`
    (standing approval): `handover --to roy.lavin1978@gmail.com`.
-4. **Other property legwork needing a person** (viewing, inspection, meter
+3. **Other property legwork needing a person** (viewing, inspection, meter
    visit, key handover) → `close`-style gate proposal: submit as yourself with
    output "PASS TO ROY: <what and why>", type `Admin`. Kevin's yes = you hand
    it over next slot.
-5. **Kevin-only** (a decision, signature, credential, payment authorisation) →
+4. **Kevin-only** (a decision, signature, credential, payment authorisation) →
    `escalate` + `annotate` with ONE clear ask ("Decide X between A and B").
-6. **A domain agent owns it** (inbound reply → Inbound Comms Response; anything
+5. **A domain agent owns it** (inbound reply → Inbound Comms Response; anything
    a live role agent's goal covers, per the roster) → `route` to that agent.
    Waiting-on-someone-external tasks are a route too: route to the domain agent
    with an `annotate` saying "chase: draft the nudge to <who> about <what>".
-   Record the move as `chase` when the point is a nudge, `finish` otherwise.
-7. **Generic one-off work** (research, form-filling, analysis, drafting,
+   Record the move as `chase` when the point is a nudge, `route` otherwise.
+6. **Generic one-off work** (research, form-filling, analysis, drafting,
    digging) → `route` to the right strategic worker from the roster:
-   researcher, builder, writer, analyst, or auditor. Record as `finish`.
-8. **Done in reality, duplicate, or dead** (overtaken by events, refers to
+   researcher, builder, writer, analyst, or auditor. Record as `route`.
+7. **Done in reality, duplicate, or dead** (overtaken by events, refers to
    something closed, 300+ days still with no deadline) → `close`: submit as
    yourself, output "CLOSE PROPOSAL: <done already | dead — reason>", type
    `Admin`. Kevin's yes = complete it on hand-back.
-9. **Small generic admin you can finish now** (under 15 minutes, internal, no
+8. **Small generic admin you can finish now** (under 15 minutes, internal, no
    external send) → `finish` in-house: do the work, submit the result through
    the gate as your own output, type `Admin`.
-10. **Genuinely fine to sit** (future-dated on purpose, awaiting a fixed date)
+9. **Genuinely fine to sit** (future-dated on purpose, awaiting a fixed date)
     → `leave` with the reason noted.
 
 When unsure between two moves, prefer the one that keeps the gate in front of
@@ -132,11 +142,16 @@ exit codes):
   `python3 scripts/agent-dispatch.py submit TASKID --agent rec1hYELb4zS8pjjO --type Admin --output-file <path>`
   (output ends with the mandatory closing line
   `**Carrying this out will involve:** <what happens on approval>`)
-- chase: the route + annotate pair from Step 2 rule 6.
+- chase: the route + annotate pair from Step 2 rule 5 (record it with
+  `"to"` set to the agent rec id, same as a route).
+- The recorded move vocabulary is exactly the note command's: finish, route,
+  chase, close, escalate, roy, leave. `finish` and `close` mean a gate
+  submission under your own name; everything you merely re-linked is `route`,
+  `chase`, `roy`, or `escalate`.
 
 After each action: `python3 scripts/task-manager.py note --task TASKID --move
 <move> --reason "<one line, your words>" --name "<task name>"`. Record every
-action in `$SCRATCH/report.json` as
+action in `~/knowledge-os/logs/task-manager/scratch/report.json` as
 `{"task": id, "move": move, "to": recId?, "ok": true/false, "error": "..."}`.
 
 Your own approved hand-backs (closes and passes Kevin said yes to) are carried

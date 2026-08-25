@@ -3,9 +3,9 @@
 
 The Task Manager is the foreman of the task board: three slots a day it reads
 every open task, decides which ones stopped moving, and forces ONE move on each
-stuck one (finish / chase / close / escalate). This script is the part with no
-judgement in it: the board read, the movement maths, the score, the daily log,
-and the verify control. The judgement lives in the slot skill
+stuck one (finish / route / chase / close / escalate). This script is the part
+with no judgement in it: the board read, the movement maths, the score, the
+daily log, and the verify control. The judgement lives in the slot skill
 (~/.claude/scheduled-tasks/task-manager-board/SKILL.md), and every Airtable
 WRITE to a task goes through scripts/agent-dispatch.py so there is exactly one
 writing muscle (route / handover / escalate / submit / annotate / complete).
@@ -20,7 +20,7 @@ Time (any automation touching any field re-stamps it). Both have burned this
 platform before — see loop-health and its tests.
 
 Commands:
-  board                      read the board, print the JSON worklist
+  board [--dispatch-queue PATH]  read the board, print the JSON worklist
   note --task R --move M --reason S   append one decision to today's digest
   score --stuck N --open M --kevin K  write Metric Score to the register row
   publish                    upsert today's decisions to AI Agent Daily Log
@@ -31,8 +31,9 @@ Commands:
 import argparse
 import json
 import os
-import re
 import sys
+import time
+import urllib.error
 import urllib.parse
 import urllib.request
 from datetime import date, datetime, timedelta, timezone
@@ -51,9 +52,9 @@ METRIC_SCORE_FIELD = "fldkGxrOlrfuLlH3J"
 KEVIN_REC = "recHEt2VPYothaqTd"
 KEVIN_EMAIL = "kevin@runpreneur.org.uk"
 ROY_REC = "reclbdjfVev3bqNHS"
-ROY_EMAIL = "roy.lavin1978@gmail.com"
 
-# AI Agent Daily Log fields (same map as inbound-triage.py)
+# AI Agent Daily Log fields (same map as inbound-triage.py; drift-tested
+# against it in tests/task-manager.test.js)
 ALOG = {
     "logDay":    "fldNLubsilKUL6fyd",
     "date":      "fldr9ktRlG8e93AMN",
@@ -68,8 +69,9 @@ STUCK_DAYS = 7
 OPEN_STATUSES = ("Today", "Upcoming", "Overdue", "Approval")
 
 DECISION_GROUPS = [
-    ("finish",   "Finished or handed to the right doer"),
-    ("chase",    "Chase raised (through the approval gate)"),
+    ("finish",   "Finished in-house (through the approval gate)"),
+    ("route",    "Routed to the right doer"),
+    ("chase",    "Chase raised (routed with a nudge note)"),
     ("close",    "Close proposed (Kevin confirms)"),
     ("escalate", "Escalated to Kevin: one clear ask"),
     ("roy",      "Passed to Roy (maintenance / property legwork)"),
@@ -96,18 +98,42 @@ def pat():
 
 
 def airtable_request(method, path, body, why):
+    """One request with the failure modes this platform has actually hit:
+    a 429/5xx gets ONE retry after a pause (a slot run makes 50+ calls on a
+    base shared with daily-ops, so a transient throttle must not turn a
+    healthy run into a failed one); an HTTP error surfaces Airtable's body,
+    because "422 Unprocessable Entity" without the field name it names has
+    cost hours of diagnosis before."""
     url = "https://api.airtable.com/v0/%s/%s" % (BASE, path)
-    req = urllib.request.Request(
-        url,
-        data=json.dumps(body).encode() if body is not None else None,
-        headers={"Authorization": "Bearer " + pat(),
-                 "Content-Type": "application/json"},
-        method=method)
-    try:
-        with urllib.request.urlopen(req, timeout=60) as r:
-            return json.loads(r.read())
-    except Exception as e:  # noqa: BLE001 — every failure here must be loud
-        fail("%s failed: %s" % (why, e))
+    last_err = None
+    for attempt in (1, 2):
+        req = urllib.request.Request(
+            url,
+            data=json.dumps(body).encode() if body is not None else None,
+            headers={"Authorization": "Bearer " + pat(),
+                     "Content-Type": "application/json"},
+            method=method)
+        try:
+            with urllib.request.urlopen(req, timeout=60) as r:
+                return json.loads(r.read())
+        except urllib.error.HTTPError as e:
+            detail = ""
+            try:
+                detail = e.read().decode("utf-8", "replace")[:300]
+            except OSError:
+                pass
+            last_err = "HTTP %s on %s: %s" % (e.code, why, detail or e.reason)
+            if e.code == 429 or e.code >= 500:
+                if attempt == 1:
+                    time.sleep(int(e.headers.get("Retry-After") or 20))
+                    continue
+            break
+        except Exception as e:  # noqa: BLE001 — every failure here must be loud
+            last_err = "%s: %s" % (type(e).__name__, e)
+            if attempt == 1:
+                time.sleep(5)
+                continue
+    fail("%s failed: %s" % (why, last_err))
 
 
 def query_all(table, formula, fields, why):
@@ -169,25 +195,26 @@ def last_movement(f, activity_ids, now=None):
 
 
 def classify(f, activity_ids, now=None):
-    """One task's bucket: parked | waitingOnKevin | stuck | moving."""
+    """One task's bucket: parked | waitingOnKevin | stuck | moving.
+    Returns (bucket, source, moved_dt) so the caller never recomputes."""
     now = now or datetime.now(timezone.utc)
+    moved, src = last_movement(f, activity_ids, now)
     if f.get("Some Day"):
-        return "parked", None
+        return "parked", src, moved
     # Only a task the approval loop itself raised counts as Kevin's queue —
     # legacy rows parked at Status Approval since before the loop existed
     # (22 of them found 4 Aug 2026, 80+ by late Aug) are stuck work wearing
     # an Approval badge, and counting them as "with Kevin" hides them forever.
     if (f.get("Status") == "Approval" and not f.get("Approval Outcome")
             and f.get("Sent For Approval By")):
-        return "waitingOnKevin", None
-    moved, src = last_movement(f, activity_ids, now)
+        return "waitingOnKevin", src, moved
     if moved is None:
         # No stamp at all should be impossible (Created Time is automatic);
         # treat as stuck so it surfaces rather than hides.
-        return "stuck", "no-stamp"
+        return "stuck", "no-stamp", None
     if (now - moved) >= timedelta(days=STUCK_DAYS):
-        return "stuck", src
-    return "moving", src
+        return "stuck", src, moved
+    return "moving", src, moved
 
 
 def metric_text(stuck, open_total, kevin):
@@ -223,8 +250,20 @@ def format_daily_log(rows):
         blocks.append("\n".join(lines))
     text = "\n\n".join(blocks)
     if len(text) > DECISIONS_CHAR_CAP:
-        text = text[:DECISIONS_CHAR_CAP] + "\n\n[truncated]"
+        text = text[:DECISIONS_CHAR_CAP] + (
+            "\n\n[truncated at %d characters; the complete raw log is on the "
+            "Mac at ~/knowledge-os/logs/task-manager/]" % DECISIONS_CHAR_CAP)
     return ", ".join(counts) or "no decisions", text
+
+
+def in_flight_ids(queue_json):
+    """Task ids dispatch already owns this slot: worklist + reserve."""
+    ids = set()
+    for key in ("worklist", "reserve"):
+        for t in queue_json.get(key) or []:
+            if isinstance(t, dict) and t.get("id"):
+                ids.add(t["id"])
+    return ids
 
 
 # ---------------------------------------------------------------------------
@@ -269,33 +308,60 @@ TASK_FIELDS = [
     "Task Name", "Status", "Due Date", "Created Time", "Approved At",
     "Approval Slack TS", "Approval Outcome", "Team Member", "Assignee",
     "Sent For Approval By", "Some Day", "Maintenance Ticket", "Task Type",
-    "Hard Deadline", "Contractor",
+    "Hard Deadline",
+]
+# Field-name drift control: each of these appears on at least one record of a
+# ~300-task board today. If one vanishes from the WHOLE read, the name has
+# drifted and every downstream judgement would silently degrade. (Sparse
+# checkboxes — Some Day, Maintenance Ticket, Hard Deadline — are excluded:
+# Airtable omits false checkboxes, so absence is normal for them.)
+CONTROL_FIELDS = [
+    "Task Name", "Status", "Created Time", "Team Member", "Assignee",
+    "Approved At", "Approval Slack TS", "Sent For Approval By",
+    "Approval Outcome", "Task Type", "Due Date",
 ]
 
 
-def cmd_board():
+def cmd_board(dispatch_queue_path=None):
     formula = "OR(%s)" % ",".join("{Status}='%s'" % s for s in OPEN_STATUSES)
     recs = query_all(TASKS_TABLE, formula, TASK_FIELDS, "board read")
     if not recs:
         fail("board read returned ZERO open tasks — with ~200+ live tasks that "
              "is a broken read, not an empty board")
-    # Field-name drift control: Created Time is stamped by Airtable itself on
-    # every record, so a single missing value means the read is lying.
-    missing = [r["id"] for r in recs if not r["fields"].get("Created Time")]
-    if missing:
-        fail("Created Time missing on %d records (e.g. %s) — field names have "
-             "drifted, do not trust this read" % (len(missing), missing[0]))
+    seen_fields = set()
+    for r in recs:
+        seen_fields.update(r["fields"].keys())
+    drifted = [f for f in CONTROL_FIELDS if f not in seen_fields]
+    if drifted:
+        fail("field(s) %s absent from every one of %d records — field names "
+             "have drifted, do not trust this read" % (drifted, len(recs)))
 
     now = datetime.now(timezone.utc)
     cutoff = (now - timedelta(days=STUCK_DAYS)).strftime("%Y-%m-%dT%H:%M:%S.000Z")
     activity = query_all(
         ACTIVITY_TABLE,
         "IS_AFTER({At}, DATETIME_PARSE('%s'))" % cutoff,
-        ["TaskId", "At"], "activity read")
+        ["TaskId"], "activity read")
     activity_ids = {a["fields"].get("TaskId") for a in activity
                     if a["fields"].get("TaskId")}
+    if activity and not activity_ids:
+        fail("%d Task Activity rows in the window but ZERO carry TaskId — the "
+             "activity writer has drifted; every web-app edit would read as "
+             "no-movement" % len(activity))
 
-    buckets = {"stuck": [], "waitingOnKevin": [], "parked": [], "moving": []}
+    dispatch_ids = set()
+    if dispatch_queue_path:
+        try:
+            dispatch_ids = in_flight_ids(
+                json.loads(Path(dispatch_queue_path).read_text()))
+        except (OSError, ValueError) as e:
+            # The board is independent of dispatch; a missing queue file must
+            # not kill the pass, but it must be visible in the output.
+            print("WARNING: dispatch queue unreadable (%s) — inFlight "
+                  "detection disabled this slot" % e, file=sys.stderr)
+
+    buckets = {"stuck": [], "waitingOnKevin": [], "parked": [], "moving": [],
+               "inFlight": []}
     by_status, kevin_count = {}, 0
     for r in recs:
         f = dict(r["fields"], _id=r["id"])
@@ -305,8 +371,11 @@ def cmd_board():
         is_kevin = assignee == KEVIN_EMAIL or KEVIN_REC in team
         if is_kevin:
             kevin_count += 1
-        bucket, src = classify(f, activity_ids, now)
-        moved, _ = last_movement(f, activity_ids, now)
+        bucket, src, moved = classify(f, activity_ids, now)
+        # A stuck task dispatch already holds this slot is not the foreman's
+        # to touch — set-subtract in code, never by eyeballing two JSON files.
+        if bucket == "stuck" and r["id"] in dispatch_ids:
+            bucket = "inFlight"
         view = {
             "id": r["id"],
             "name": f.get("Task Name", ""),
@@ -320,7 +389,8 @@ def cmd_board():
             "hardDeadline": bool(f.get("Hard Deadline")),
             "kevinOwned": is_kevin,
             "lastMoved": moved.isoformat() if moved else None,
-            "daysStill": round((now - moved).days, 1) if moved else None,
+            "daysStill": (round((now - moved).total_seconds() / 86400, 1)
+                          if moved else None),
             "movementSource": src,
         }
         buckets[bucket].append(view)
@@ -339,9 +409,11 @@ def cmd_board():
             "waitingOnKevin": len(buckets["waitingOnKevin"]),
             "parked": len(buckets["parked"]),
             "moving": len(buckets["moving"]),
+            "inFlight": len(buckets["inFlight"]),
         },
         "stuck": buckets["stuck"],
         "waitingOnKevin": buckets["waitingOnKevin"],
+        "inFlight": [v["id"] for v in buckets["inFlight"]],
         "parked": [v["id"] for v in buckets["parked"]],
     }
     print(json.dumps(out, indent=1))
@@ -376,30 +448,25 @@ def cmd_publish():
         fail("today's digest is empty — refusing to publish a blank day")
     summary, decisions = format_daily_log(rows)
     log_day = "%s - %s" % (AGENT_NAME, today)
-    fields = {
-        ALOG["logDay"]: log_day,
-        ALOG["date"]: today,
-        ALOG["agent"]: [TASKMGR_REGISTER_ROW],
-        ALOG["summary"]: summary,
-        ALOG["decisions"]: decisions,
-    }
-    found = airtable_request(
-        "GET", "%s?filterByFormula=%s&maxRecords=2" % (
-            DAILY_LOG_TABLE,
-            urllib.parse.quote("{Log Day}='%s'" % log_day.replace("'", "\\'"))),
-        None, "daily log lookup")
-    recs = found.get("records", [])
-    if recs:
-        airtable_request("PATCH", "%s/%s" % (DAILY_LOG_TABLE, recs[0]["id"]),
-                         {"fields": fields, "typecast": True}, "daily log update")
-        action = "updated"
-    else:
-        airtable_request("POST", DAILY_LOG_TABLE,
-                         {"records": [{"fields": fields}], "typecast": True},
-                         "daily log create")
-        action = "created"
-    print(json.dumps({"published": action, "log_day": log_day,
-                      "decisions": len(rows), "summary": summary}))
+    # One atomic upsert on the primary key. The find-then-create shape has a
+    # race between the three daily slots AND a silent-zero trap (a renamed
+    # Log Day field would read as "not found" and create a duplicate every
+    # slot); performUpsert 422s loudly on a bad merge field instead.
+    out = airtable_request(
+        "PATCH", DAILY_LOG_TABLE,
+        {"performUpsert": {"fieldsToMergeOn": [ALOG["logDay"]]},
+         "records": [{"fields": {
+             ALOG["logDay"]: log_day,
+             ALOG["date"]: today,
+             ALOG["agent"]: [TASKMGR_REGISTER_ROW],
+             ALOG["summary"]: summary,
+             ALOG["decisions"]: decisions,
+         }}],
+         "typecast": True}, "daily log upsert")
+    created = out.get("createdRecords") or []
+    print(json.dumps({"published": "created" if created else "updated",
+                      "log_day": log_day, "decisions": len(rows),
+                      "summary": summary}))
 
 
 def cmd_verify(report_path):
@@ -416,36 +483,60 @@ def cmd_verify(report_path):
         problems.append("report carries no positive openTasksRead — board never read")
     stuck = board.get("stuck")
     actions = report.get("actions") or []
-    ok_actions = [a for a in actions if a.get("ok")]
     if isinstance(stuck, int) and stuck > 0 and not actions:
         problems.append("%d stuck tasks but zero actions recorded" % stuck)
     for a in actions:
         if not a.get("ok"):
             problems.append("failed action on %s: %s" % (a.get("task"), a.get("error")))
 
-    # Spot-verify claimed writes against the live table (up to 12).
-    checked = 0
-    for a in ok_actions:
-        if checked >= 12:
-            break
-        move, task_id = a.get("move"), a.get("task")
-        if not task_id or move not in ("route", "roy", "escalate", "close", "chase", "finish"):
+    # Spot-verify claimed writes against the live table: one batched read,
+    # then a REAL assertion per move kind. An entry only counts as checked
+    # when something was actually asserted — a no-op check that eats the
+    # budget is how a false green gets made.
+    GATE_MOVES = ("close", "finish")          # submitted through the gate
+    LINK_MOVES = ("route", "chase", "roy", "escalate")  # re-linked a person/agent
+    checkable = []
+    for a in actions:
+        if not a.get("ok") or not a.get("task"):
             continue
-        rec = airtable_request("GET", "%s/%s" % (TASKS_TABLE, task_id), None,
-                               "verify read %s" % task_id)
-        f = rec.get("fields", {})
-        team = f.get("Team Member") or []
+        move = a.get("move")
+        if move in GATE_MOVES:
+            checkable.append(a)
+        elif move in LINK_MOVES and (move in ("roy", "escalate") or a.get("to")):
+            checkable.append(a)
+        if len(checkable) >= 12:
+            break
+    live = {}
+    if checkable:
+        formula = "OR(%s)" % ",".join(
+            "RECORD_ID()='%s'" % a["task"] for a in checkable)
+        for rec in query_all(TASKS_TABLE, formula,
+                             ["Team Member", "Status", "Sent For Approval By"],
+                             "verify read"):
+            live[rec["id"]] = rec.get("fields", {})
+    checked = 0
+    for a in checkable:
+        f = live.get(a["task"])
+        if f is None:
+            problems.append("claimed %s on %s but the task cannot be read back"
+                            % (a.get("move"), a["task"]))
+            continue
+        move, team = a.get("move"), f.get("Team Member") or []
         checked += 1
         if move == "roy" and ROY_REC not in team:
-            problems.append("claimed pass-to-Roy on %s but Roy is not on it" % task_id)
+            problems.append("claimed pass-to-Roy on %s but Roy is not on it" % a["task"])
         elif move == "escalate" and KEVIN_REC not in team:
-            problems.append("claimed escalate on %s but Kevin is not on it" % task_id)
-        elif move == "route" and a.get("to") and a["to"] not in team:
-            problems.append("claimed route of %s to %s but the link is absent"
-                            % (task_id, a["to"]))
-        elif move in ("close", "chase") and f.get("Status") not in ("Approval", "Completed"):
-            problems.append("claimed %s on %s but status is %s (never reached "
-                            "the gate)" % (move, task_id, f.get("Status")))
+            problems.append("claimed escalate on %s but Kevin is not on it" % a["task"])
+        elif move in ("route", "chase") and a.get("to") not in team:
+            problems.append("claimed %s of %s to %s but the link is absent"
+                            % (move, a["task"], a.get("to")))
+        elif move in GATE_MOVES:
+            if f.get("Status") not in ("Approval", "Completed"):
+                problems.append("claimed %s on %s but status is %s (never "
+                                "reached the gate)" % (move, a["task"], f.get("Status")))
+            elif TASKMGR_TEAM_REC not in (f.get("Sent For Approval By") or []):
+                problems.append("claimed %s on %s but Sent For Approval By is "
+                                "not the Task Manager" % (move, a["task"]))
 
     if not report.get("scoreWritten"):
         problems.append("score not written — the register reading silently froze")
@@ -469,37 +560,43 @@ def cmd_selftest():
     # movement: activity beats stamps
     dt, src = last_movement({"_id": "recX", "Created Time": old}, {"recX"}, now)
     assert src == "activity"
-    # stale created only → stuck
-    b, _ = classify({"_id": "recY", "Created Time": old}, set(), now)
-    assert b == "stuck", b
+    # stale created only → stuck, and moved is returned alongside
+    b, _, moved = classify({"_id": "recY", "Created Time": old}, set(), now)
+    assert b == "stuck" and moved is not None, b
     # fresh approval stamp → moving
-    b, _ = classify({"_id": "recZ", "Created Time": old, "Approved At": fresh}, set(), now)
+    b, _, _ = classify({"_id": "recZ", "Created Time": old, "Approved At": fresh}, set(), now)
     assert b == "moving", b
     # slack ts counts as a stamp
     ts = str((now - timedelta(days=2)).timestamp())
-    b, _ = classify({"_id": "recS", "Created Time": old, "Approval Slack TS": ts}, set(), now)
+    b, _, _ = classify({"_id": "recS", "Created Time": old, "Approval Slack TS": ts}, set(), now)
     assert b == "moving", b
     # approval waiting beats stuck — but ONLY for loop-raised tasks
-    b, _ = classify({"_id": "recA", "Created Time": old, "Status": "Approval",
-                     "Sent For Approval By": ["recAgent1"]}, set(), now)
+    b, _, _ = classify({"_id": "recA", "Created Time": old, "Status": "Approval",
+                        "Sent For Approval By": ["recAgent1"]}, set(), now)
     assert b == "waitingOnKevin", b
     # legacy Approval row (no Sent For Approval By) is stuck, not Kevin's queue
-    b, _ = classify({"_id": "recL", "Created Time": old, "Status": "Approval"}, set(), now)
+    b, _, _ = classify({"_id": "recL", "Created Time": old, "Status": "Approval"}, set(), now)
     assert b == "stuck", b
-    # decided approval (outcome set) is NOT waiting — falls through to movement
-    b, _ = classify({"_id": "recB", "Created Time": old, "Status": "Approval",
-                     "Approval Outcome": "Approved as-is"}, set(), now)
+    # decided approval (outcome set) falls through to movement
+    b, _, _ = classify({"_id": "recB", "Created Time": old, "Status": "Approval",
+                        "Approval Outcome": "Approved as-is",
+                        "Sent For Approval By": ["recAgent1"]}, set(), now)
     assert b == "stuck", b
     # some day parks
-    b, _ = classify({"_id": "recP", "Created Time": old, "Some Day": True}, set(), now)
+    b, _, _ = classify({"_id": "recP", "Created Time": old, "Some Day": True}, set(), now)
     assert b == "parked", b
     assert metric_text(3, 210, 12) == "3 stuck (target 0); 210 open; 12 with Kevin"
+    # route is a first-class move in the digest taxonomy
+    assert "route" in [k for k, _ in DECISION_GROUPS]
     s, t = format_daily_log([
         {"move": "finish", "name": "A", "reason": "small admin", "ts": "2026-08-25T09:10:00"},
+        {"move": "route", "name": "R", "ts": "2026-08-25T09:12:00"},
         {"move": "newkind", "name": "B", "ts": "2026-08-25T09:11:00"}])
-    assert "1 finish" in s and "newkind" in s and "A" in t and "B" in t
+    assert "1 finish" in s and "1 route" in s and "newkind" in s and "A" in t
     h = trim_history({"2026-07-01": 5, "2026-08-20": 2}, today=date(2026, 8, 25))
     assert "2026-07-01" not in h and "2026-08-20" in h
+    assert in_flight_ids({"worklist": [{"id": "recW"}], "reserve": [{"id": "recR"}],
+                          "other": [{"id": "recO"}]}) == {"recW", "recR"}
     with tempfile.TemporaryDirectory() as td:
         os.environ["TASK_MANAGER_DIR"] = td
         digest_append({"task": "recT", "move": "leave", "reason": "moving"})
@@ -514,7 +611,10 @@ def cmd_selftest():
 def main():
     ap = argparse.ArgumentParser()
     sub = ap.add_subparsers(dest="cmd", required=True)
-    sub.add_parser("board")
+    b = sub.add_parser("board")
+    b.add_argument("--dispatch-queue", default=None,
+                   help="path to agent-dispatch queue JSON; its worklist and "
+                        "reserve tasks are marked inFlight, not stuck")
     n = sub.add_parser("note")
     n.add_argument("--task", required=True)
     n.add_argument("--move", required=True,
@@ -531,7 +631,7 @@ def main():
     sub.add_parser("selftest")
     a = ap.parse_args()
     if a.cmd == "board":
-        cmd_board()
+        cmd_board(a.dispatch_queue)
     elif a.cmd == "note":
         cmd_note(a.task, a.move, a.reason, a.name)
     elif a.cmd == "score":

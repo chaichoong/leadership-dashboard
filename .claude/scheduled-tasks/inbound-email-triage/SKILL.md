@@ -140,6 +140,13 @@ thread URL. The Inbound Comms page WRITES the current `#all/{threadId}` form
 `#inbox/{threadId}` form, and the page's own dedupe accepts both — so must
 yours, or you will re-create a task the page already made.
 
+For a LANE-13 thread the dedupe match only counts if the existing task is
+itself a maintenance task (Task Name starts "MAINTENANCE:" or its Team Member
+includes Roy `reclbdjfVev3bqNHS`). A lane-12 reply task on the same thread
+does NOT suppress the Roy task: a tenant email can need both an answer and a
+repair, and folding the repair into the reply task is how a job never reaches
+Roy.
+
 For each thread heading for a task (and each stranded message in Step 5),
 query Tasks `tblqB8b22hKBL4PF1` with filterByFormula
 `OR(FIND("#all/{threadId}", {Inbound Note URL Link}), FIND("#inbox/{threadId}", {Inbound Note URL Link}))`
@@ -246,12 +253,16 @@ still `act --do label13` exactly as before.
 
 ## Step 5 — The stranded check (the safety net)
 
-For every message in `stranded_8` and `stranded_12`: run the Step 3 dedupe on
-its thread. A labelled email with NO task is exactly the miss this agent
-exists to prevent — create its task now (same shape; a stranded label-8 email
-still gets Approver Kevin, per the 24 Aug ruling), log it, and say so in your
-report. Creating the task is the whole rescue: the email stays wherever
-Kevin put it.
+For every message in `stranded_8`, `stranded_12` and `stranded_13`: run the
+Step 3 dedupe on its thread. A labelled email with NO task is exactly the
+miss this agent exists to prevent — create its task now (lane 8/12 stranded
+mail takes the Step 4 shape with Approver Kevin, per the 24 Aug ruling;
+lane-13 stranded mail takes the Step 4b Roy shape), log it, and say so in
+your report. Creating the task is the whole rescue: the email stays wherever
+Kevin put it. The stranded_13 sweep is ALSO the safety net for a Step 4b
+create that failed after the label was applied — the label move removes the
+mail from the inbox, so without this sweep a failed create would sit unseen
+for ever, which is the exact miss the 25 Aug ruling exists to close.
 
 FIRST-RUN PROOF: labels 8 and 12 have real mail on them today, so on your
 first live run `stranded_8` + `stranded_12` returning zero messages means the

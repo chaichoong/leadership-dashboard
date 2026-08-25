@@ -1111,7 +1111,27 @@ def cmd_handover(args):
     stamp = datetime.now(LONDON).strftime("%d %b %Y")
     reason = (args.reason or "").strip() or "approved reassignment"
     t = get_task(args.task)
-    existing = t.get("fields", {}).get(AF["notes"], "") or ""
+    # Tier-1 gate (25 Aug 2026, Task Manager build review): a handover to
+    # anyone but Kevin moves the task OUT of the agent queue and DMs the new
+    # owner, so tier-1 content (creditor, legal, courts, HMRC, the live legal
+    # matter) may only leave through it after Kevin has approved that exact
+    # reassignment. Roy's standing approval covers maintenance, and genuine
+    # maintenance never trips these patterns — prose rules in a skill are not
+    # a gate, this is.
+    tf = t.get("fields", {})
+    if who["rec"] != KEVIN_REC_ID:
+        outcome = tf.get(AF["approvalOutcome"], "")
+        texts = [tf.get(AF["name"], ""), tf.get(AF["description"], ""),
+                 tf.get(AF["notes"], "") or ""]
+        hit = tier_match(TIER1_PATTERNS, *texts)
+        if hit and outcome not in APPROVED:
+            sys.exit(
+                f"ERROR: refusing handover of {args.task} to {who['name']} — "
+                f"tier-1 content (matched {hit!r}) with no approved outcome. "
+                "Tier-1 work is prepared for Kevin and reassigned only after "
+                "his explicit yes (submit it for approval instead)."
+            )
+    existing = tf.get(AF["notes"], "") or ""
     note = (f"[{stamp} — agent-dispatch] Handed over to {who['name']} "
             f"({args.to}): {reason}")
     patch_task(args.task, {

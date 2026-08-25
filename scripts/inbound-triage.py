@@ -109,7 +109,7 @@ ALOG = {
 DECISION_GROUPS = [
     ("label12",      "Moved to the agent lane (task for your approval)"),
     ("task-created", "Task record written"),
-    ("label13",      "Maintenance, task raised for Roy"),
+    ("label13",      "Moved to the maintenance lane"),
     ("file-6",       "Filed: newsletter"),
     ("file-10",      "Filed: property compliance"),
     ("file-11",      "Filed: tenancy documents"),
@@ -405,8 +405,13 @@ def cmd_scan(back_hours):
     # Stranded lookups use exact label IDs — no query syntax to mis-parse.
     stranded_8, s8_trunc = worker_list(label_ids=[l8["id"]], q="newer_than:14d")
     stranded_12, s12_trunc = worker_list(label_ids=[l12["id"]], q="newer_than:14d")
+    # Lane 13 raises a Roy task since 25 Aug 2026, so a labelled-but-taskless
+    # maintenance email is now exactly the kind of miss the stranded check
+    # exists for. l13 missing from Gmail is survivable (empty list) but noted.
+    stranded_13, s13_trunc = (worker_list(label_ids=[l13["id"]], q="newer_than:14d")
+                              if l13 else ([], False))
 
-    write_scan_cache(new_inbox + stale + stranded_8 + stranded_12)
+    write_scan_cache(new_inbox + stale + stranded_8 + stranded_12 + stranded_13)
 
     # Record what this scan saw, so `mark` can ENFORCE the truncation freeze
     # rather than trusting the caller to apply it. Only new_inbox truncation
@@ -428,13 +433,16 @@ def cmd_scan(back_hours):
                    "label12": {"id": l12["id"], "name": l12["name"]},
                    "label13": {"id": l13["id"], "name": l13["name"]} if l13 else None},
         "counts": {"new_inbox": len(new_inbox), "stale": len(stale),
-                   "stranded_8": len(stranded_8), "stranded_12": len(stranded_12)},
+                   "stranded_8": len(stranded_8), "stranded_12": len(stranded_12),
+                   "stranded_13": len(stranded_13)},
         "truncated": {"new_inbox": new_trunc, "stale": stale_trunc,
-                      "stranded_8": s8_trunc, "stranded_12": s12_trunc},
+                      "stranded_8": s8_trunc, "stranded_12": s12_trunc,
+                      "stranded_13": s13_trunc},
         "new_inbox": new_inbox,
         "stale": stale,
         "stranded_8": stranded_8,
         "stranded_12": stranded_12,
+        "stranded_13": stranded_13,
     }))
 
 

@@ -319,7 +319,7 @@
     "cron": "0 9,13,17 * * *",
     "maxLateMinutes": 150,
     "mode": "wrapped",
-    "note": "the Task Manager agent's own Go Signal (Kevin, 25 Aug 2026): board pass at the same three slots as inbound-triage. NOT a daily-ops phase by explicit ruling (same pattern as inbound-triage); a headless claude run, so the generous lateness keeps a wake-delayed slot worth running. The queue lock serialises it behind the triage slot job.",
+    "note": "the Task Manager agent's own Go Signal (Kevin, 25 Aug 2026): board pass at the same three slots as inbound-triage. NOT a daily-ops phase by explicit ruling (same pattern as inbound-triage); a headless claude run, so the generous lateness keeps a wake-delayed slot worth running. The queue lock stops it running at the same time as the triage slot job; order within the hour is whichever launchd starts first, and the board pass tolerates either order (dispatch's in-flight tasks are subtracted in code).",
     "needs": [
       "network"
     ]
