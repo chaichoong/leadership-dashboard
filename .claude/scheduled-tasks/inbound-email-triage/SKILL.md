@@ -143,18 +143,28 @@ If Kevin replies from Gmail after a task was created, the task must come OFF
 the board — an open task for a done reply is noise (Kevin's ruling, 25 Aug
 2026, same principle as the iMessage sweep's Step 2b).
 
+0. If the scan reported `truncated.sent: true`, SKIP this whole step and say
+   so — an incomplete sent listing must never decide a close.
 1. Query Tasks `tblqB8b22hKBL4PF1` with filterByFormula
-   `AND({Inbound Communication Task}, {Inbound Source Type}='Gmail', {Status}!='Completed')`.
-   CONTROL: also run the same query WITHOUT the Status clause. If that total
-   is zero while this agent has ever created tasks, the field match is broken —
-   report the failure and skip this step; a broken query must never read as
-   "nothing to close".
-2. For each open task: take its `threadId` from `Inbound Note URL Link`. Close
-   ONLY if BOTH hold: `sent_threads[threadId]` is LATER than the task's
-   `Created Time`, AND the thread is not among this scan's `new_inbox` or
-   `stale` messages with an inbound message NEWER than that sent time (if the
-   sender came back after our reply, the thread is live — Step 3 updates the
-   task instead).
+   `AND({Inbound Communication Task}, {Inbound Source Type}='Gmail', {Status}!='Completed', {Status}!='Approval', LEN({Approval Outcome}&'')=0)`.
+   The last two clauses are load-bearing: a task at Approval carries a draft
+   waiting on Kevin, and a task with an Approval Outcome is an approved
+   hand-back the dispatch engine has yet to carry out — closing either one
+   silently cancels a reply Kevin asked for or already approved.
+   CONTROL: also run the same query with ONLY the Inbound clauses. If that
+   total is zero while this agent has ever created tasks, the field match is
+   broken — report the failure and skip this step; a broken query must never
+   read as "nothing to close".
+2. For each open task: `Inbound Note URL Link` can hold SEVERAL
+   space-separated thread URLs after a fold — collect every threadId. Close
+   ONLY if, for EVERY one of its threads, `sent_threads[threadId]` is LATER
+   than ALL of the task's own inbound evidence: its `Created Time`, its
+   `Inbound Date Received`, and the newest `NEW MESSAGE <date>` or
+   `REOPENED <date>` line in its Description. Do NOT test against this
+   scan's inbox lists — Step 3's own update path removes handled mail from
+   the inbox and the watermark moves past it, so the scan window proves
+   nothing about who spoke last; the task's own stamps do. A date-only stamp
+   (no time) counts as end-of-day: same-day means NOT later, do not close.
 3. Closing means exactly: Status `Completed`, Completion Date
    `fldFOi1SwEKuJRmdN` = now (ISO), and append to the Description:
    "Closed by inbound-email-triage <date>: Kevin replied himself (sent message
@@ -198,7 +208,11 @@ unhandled for Step 6, and report the failure.
   the whole conversation.
 - **Existing task COMPLETED and the new message needs action:**
   - If the task has NO `Approval Outcome` (it never went through the approval
-    loop) → REOPEN it: Status `Today`, append
+    loop) → REOPEN it: Status `Today`, Completion Date `fldFOi1SwEKuJRmdN`
+    set to null IN THE SAME PATCH (every reopen path must clear it — an open
+    task with a Completion Date trips the daily completed-stamp invariant
+    and double-counts as done work; this exact miss was an Aug 2026
+    incident), and append
     `REOPENED <date>: new reply after completion — <summary>`. Log `updated`.
   - If it HAS an `Approval Outcome` → NEVER reopen it: an open task with an
     approved outcome reads to the dispatch engine as an approved hand-back

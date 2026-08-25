@@ -102,14 +102,17 @@ out of your list — the board subtracted dispatch's tasks in code):
    researcher, builder, writer, analyst, or auditor. Record as `route`.
 7. **Two or more OPEN tasks on one email thread** (the board's `duplicates`
    list — one open task per thread and lane is the invariant, Kevin's ruling
-   25 Aug 2026): the KEEPER is `ids[0]`, the oldest. `annotate` the keeper
-   with anything unique from each twin (one line per twin), then
-   `close`-propose every other id in `ids` with output
+   25 Aug 2026): each group names its `keeper` (the oldest task), its
+   `closable` twins, and its `untouchable` twins. `annotate` the keeper with
+   anything unique from each closable twin (one line per twin), then
+   `close`-propose each id in `closable` with output
    "CLOSE PROPOSAL: duplicate of <keeper id> — folded into it". Never close
-   the keeper. The board already keeps you safe on the two edges: a Roy
-   maintenance task never groups with a reply task (lane is part of the
-   key), and a twin at Status Approval appears under `untouchable` — report
-   it, never touch it (its Agent Output is waiting on Kevin).
+   the keeper; one proposal per task even when a folded task appears in two
+   groups. `untouchable` twins sit at Status Approval — report them, never
+   touch them (their Agent Output is waiting on Kevin); a group whose
+   closable list is empty is report-only this slot. The board already keeps
+   the other edges safe in code: Roy maintenance tasks never group with
+   reply tasks, and parked or dispatch-in-flight tasks are never grouped.
 8. **Done in reality, duplicate, or dead** (overtaken by events, refers to
    something closed, 300+ days still with no deadline) → `close`: submit as
    yourself, output "CLOSE PROPOSAL: <done already | dead — reason>", type

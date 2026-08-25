@@ -266,48 +266,59 @@ def in_flight_ids(queue_json):
     return ids
 
 
-def thread_key(url):
-    """The Gmail thread id from an Inbound Note URL Link, whichever form the
-    task carries (#all/ current, #inbox/ legacy). One OPEN task per thread is
-    the board's no-duplicates invariant (Kevin, 25 Aug 2026)."""
-    if not url:
-        return None
-    for marker in ("#all/", "#inbox/"):
-        i = url.find(marker)
-        if i >= 0:
-            tid = url[i + len(marker):].split("?")[0].split("&")[0].strip("/ ")
-            return tid or None
-    return None
+def thread_keys(url_field):
+    """Every Gmail thread id in an Inbound Note URL Link. The field can hold
+    SEVERAL space-separated URLs after a subject-gate fold, in either form
+    (#all/ current, #inbox/ legacy) — a folded task must still meet its twin
+    on any of its threads. One OPEN task per thread and lane is the board's
+    no-duplicates invariant (Kevin, 25 Aug 2026)."""
+    keys = []
+    for part in (url_field or "").split():
+        for marker in ("#all/", "#inbox/"):
+            i = part.find(marker)
+            if i >= 0:
+                tid = part[i + len(marker):].split("?")[0].split("&")[0].strip("/ ")
+                if tid and tid not in keys:
+                    keys.append(tid)
+                break
+    return keys
 
 
 def duplicate_groups(views):
-    """Open tasks sharing one thread AND one lane: [{thread, lane, ids,
-    names, untouchable}] sorted oldest first inside each group, so the keeper
-    is always ids[0]. A reply task and a Roy maintenance task on the same
-    thread are legitimately TWO tasks (a tenant email can need both an answer
-    and a repair), so the lane is part of the key. Twins at Status Approval
-    are listed under `untouchable`, never in the closable ids — a close
-    proposal would overwrite the Agent Output already waiting on Kevin."""
+    """Open tasks sharing one thread AND one lane:
+    [{thread, lane, keeper, closable, untouchable, names}].
+
+    - keeper: the oldest task overall — the one everything folds into.
+    - closable: every other task NOT at Status Approval (safe to
+      close-propose).
+    - untouchable: twins at Status Approval — a close proposal would
+      overwrite the Agent Output already waiting on Kevin; report only.
+    A reply task and a Roy maintenance task on the same thread are
+    legitimately TWO tasks, so the lane is part of the key. A folded task can
+    appear in more than one group. Callers pass only actionable views
+    (never parked or dispatch-in-flight)."""
     by = {}
     for v in views:
-        k = thread_key(v.get("inboundUrl"))
-        if not k:
-            continue
         lane = ("maintenance"
                 if (v.get("name", "").startswith("MAINTENANCE:")
                     or ROY_REC in (v.get("teamMember") or []))
                 else "reply")
-        by.setdefault((k, lane), []).append(v)
+        for k in thread_keys(v.get("inboundUrl")):
+            by.setdefault((k, lane), []).append(v)
     out = []
     for (k, lane), vs in by.items():
         if len(vs) > 1:
             vs = sorted(vs, key=lambda v: v.get("createdTime") or "")
-            out.append({"thread": k, "lane": lane,
-                        "ids": [v["id"] for v in vs
-                                if v.get("status") != "Approval"],
-                        "untouchable": [v["id"] for v in vs
-                                        if v.get("status") == "Approval"],
-                        "names": [v["name"] for v in vs]})
+            keeper = vs[0]
+            out.append({
+                "thread": k, "lane": lane,
+                "keeper": keeper["id"],
+                "closable": [v["id"] for v in vs[1:]
+                             if v.get("status") != "Approval"],
+                "untouchable": [v["id"] for v in vs
+                                if v.get("status") == "Approval"],
+                "names": [v["name"] for v in vs],
+            })
     return sorted(out, key=lambda g: (g["thread"], g["lane"]))
 
 
@@ -461,8 +472,12 @@ def cmd_board(dispatch_queue_path=None):
 
     for k in buckets:
         buckets[k].sort(key=lambda v: (v["lastMoved"] or ""))
-    all_views = [v for vs in buckets.values() for v in vs]
-    dupes = duplicate_groups(all_views)
+    # Duplicates are judged over ACTIONABLE views only: parked (Some Day)
+    # twins are deliberately dormant, and dispatch's in-flight tasks are not
+    # the foreman's to touch this slot. waitingOnKevin views join so an
+    # Approval twin can surface as untouchable.
+    dupes = duplicate_groups(
+        buckets["stuck"] + buckets["moving"] + buckets["waitingOnKevin"])
     out = {
         "generatedAt": now.isoformat(),
         "stuckDays": STUCK_DAYS,
@@ -477,7 +492,7 @@ def cmd_board(dispatch_queue_path=None):
             "moving": len(buckets["moving"]),
             "inFlight": len(buckets["inFlight"]),
             "duplicateGroups": len(dupes),
-            "duplicateExtras": sum(len(g["ids"]) - 1 for g in dupes),
+            "duplicateExtras": sum(len(g["closable"]) for g in dupes),
         },
         "stuck": buckets["stuck"],
         "duplicates": dupes,
@@ -683,28 +698,36 @@ def cmd_selftest():
     assert "2026-07-01" not in h and "2026-08-20" in h
     assert in_flight_ids({"worklist": [{"id": "recW"}], "reserve": [{"id": "recR"}],
                           "other": [{"id": "recO"}]}) == {"recW", "recR"}
-    # thread dedupe: both URL forms resolve to one key; groups keep oldest first
-    assert thread_key("https://mail.google.com/mail/u/0/#all/187abc") == "187abc"
-    assert thread_key("https://mail.google.com/mail/u/0/#inbox/187abc") == "187abc"
-    assert thread_key("") is None and thread_key(None) is None
+    # thread dedupe: both URL forms and folded multi-URL fields resolve
+    assert thread_keys("https://mail.google.com/mail/u/0/#all/187abc") == ["187abc"]
+    assert thread_keys("https://mail.google.com/mail/u/0/#inbox/187abc") == ["187abc"]
+    assert thread_keys("https://mail.google.com/mail/u/0/#all/T1 https://mail.google.com/mail/u/0/#all/T2") == ["T1", "T2"]
+    assert thread_keys("") == [] and thread_keys(None) == []
     gs = duplicate_groups([
         {"id": "t2", "name": "B", "inboundUrl": "https://mail.google.com/mail/u/0/#inbox/TH1", "createdTime": "2026-08-20T10:00:00.000Z"},
         {"id": "t1", "name": "A", "inboundUrl": "https://mail.google.com/mail/u/0/#all/TH1", "createdTime": "2026-08-01T10:00:00.000Z"},
         {"id": "t3", "name": "C", "inboundUrl": "https://mail.google.com/mail/u/0/#all/TH2", "createdTime": "2026-08-02T10:00:00.000Z"},
     ])
-    assert len(gs) == 1 and gs[0]["ids"] == ["t1", "t2"], gs
+    assert len(gs) == 1 and gs[0]["keeper"] == "t1" and gs[0]["closable"] == ["t2"], gs
+    # a folded task meets its twin on the second URL too
+    gs = duplicate_groups([
+        {"id": "f1", "name": "folded", "inboundUrl": "https://mail.google.com/mail/u/0/#all/OLD https://mail.google.com/mail/u/0/#all/NEW", "createdTime": "2026-08-01T10:00:00.000Z"},
+        {"id": "f2", "name": "twin", "inboundUrl": "https://mail.google.com/mail/u/0/#all/NEW", "createdTime": "2026-08-02T10:00:00.000Z"},
+    ])
+    assert len(gs) == 1 and gs[0]["thread"] == "NEW" and gs[0]["closable"] == ["f2"], gs
     # a Roy maintenance task on the same thread is NOT a duplicate of the
-    # reply task; a twin at Approval is untouchable, never closable
+    # reply task; an Approval twin is untouchable; extras never negative
     gs = duplicate_groups([
         {"id": "r1", "name": "INBOUND: leak reply", "inboundUrl": "https://mail.google.com/mail/u/0/#all/TH3", "createdTime": "2026-08-01T10:00:00.000Z"},
         {"id": "m1", "name": "MAINTENANCE: fix leak", "inboundUrl": "https://mail.google.com/mail/u/0/#all/TH3", "createdTime": "2026-08-02T10:00:00.000Z", "teamMember": ["reclbdjfVev3bqNHS"]},
     ])
     assert gs == [], gs
     gs = duplicate_groups([
-        {"id": "a1", "name": "X", "inboundUrl": "https://mail.google.com/mail/u/0/#all/TH4", "createdTime": "2026-08-01T10:00:00.000Z"},
+        {"id": "a1", "name": "X", "inboundUrl": "https://mail.google.com/mail/u/0/#all/TH4", "createdTime": "2026-08-01T10:00:00.000Z", "status": "Approval"},
         {"id": "a2", "name": "X again", "inboundUrl": "https://mail.google.com/mail/u/0/#all/TH4", "createdTime": "2026-08-03T10:00:00.000Z", "status": "Approval"},
     ])
-    assert gs[0]["ids"] == ["a1"] and gs[0]["untouchable"] == ["a2"], gs
+    assert gs[0]["closable"] == [] and len(gs[0]["untouchable"]) == 2, gs
+    assert sum(len(g["closable"]) for g in gs) == 0
     with tempfile.TemporaryDirectory() as td:
         os.environ["TASK_MANAGER_DIR"] = td
         digest_append({"task": "recT", "move": "leave", "reason": "moving"})

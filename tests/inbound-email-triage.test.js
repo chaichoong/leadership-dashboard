@@ -178,7 +178,17 @@ describe('sent mail is measured; threads update, never duplicate (Kevin, 25 Aug 
         expect(skill).toContain('Step 2c');
         expect(skill).toMatch(/Closed by inbound-email-triage/);
         expect(skill).toMatch(/Not verified: whether his reply covered everything/);
-        expect(skill).toMatch(/broken query must never read as\s+"nothing to close"/);
+        expect(skill).toMatch(/broken query must never\s+read as\s+"nothing to close"/);
+        // Review findings, 25 Aug 2026: never cancel the approval loop's
+        // work, never trust the scan window over the task's own stamps,
+        // never decide a close from a truncated sent listing.
+        expect(skill).toMatch(/\{Status\}!='Approval', LEN\(\{Approval Outcome\}&''\)=0/);
+        expect(skill).toMatch(/Do NOT test against this\s+scan's inbox lists/);
+        expect(skill).toMatch(/truncated\.sent: true`?, SKIP/);
+    });
+
+    it('every reopen path clears Completion Date in the same PATCH', () => {
+        expect(skill).toMatch(/Completion Date `fldFOi1SwEKuJRmdN`\s+set to null IN THE SAME PATCH/);
     });
 });
 

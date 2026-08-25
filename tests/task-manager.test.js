@@ -233,11 +233,13 @@ describe('the board skill holds the rules that keep the gate in front', () => {
 describe('one open task per thread and lane (Kevin, 25 Aug 2026)', () => {
     it('the board reads the thread link and emits lane-aware duplicate groups', () => {
         expect(script).toContain('"Inbound Note URL Link"');
-        expect(script).toContain('def thread_key');
+        expect(script).toContain('def thread_keys');
         expect(script).toContain('def duplicate_groups');
-        // Approval twins are untouchable; maintenance and reply lanes never merge.
+        // Approval twins are untouchable; maintenance and reply lanes never
+        // merge; parked and in-flight tasks are never grouped.
         expect(script).toContain('untouchable');
         expect(script).toMatch(/lane = \("maintenance"/);
+        expect(script).toMatch(/buckets\["stuck"\] \+ buckets\["moving"\] \+ buckets\["waitingOnKevin"\]/);
     });
 
     it('the skill closes twins through the gate and never touches the keeper or Approval twins', () => {
