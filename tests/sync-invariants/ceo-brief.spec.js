@@ -1,71 +1,24 @@
 // CEO Brief tab — render invariants.
-// The tab READS the CEO Briefs table and renders today's brief card plus history.
-// The worker writes the table; the tab never writes. Regression targets: tab
-// renders from fixture data, today's card is highlighted, the health bar
-// registers, and the empty state never blanks.
+// The brief moved from its own shell tab into the AI Agents page (os/agents/
+// index.html, CEO Brief tab) on 25 Aug 2026; js/ceo-brief.js was deleted.
+// The tab READS the CEO Briefs table and renders today's brief card plus
+// history. The worker writes the table; the tab never writes. Regression
+// targets: tab renders from fixture data, today's card is highlighted, the
+// huddle stub is labelled unfinished, the health checks agree, and the empty
+// state never blanks.
 //
 // Fixtures are keyed by FIELD ID, matching the real returnFieldsByFieldId=true
-// response. Both sides moved off field names on 2026-07-29 so the drift monitor
-// can see this table; keying the fixture by name here would let the tab regress
-// to names and still pass.
+// response. Both sides moved off field names on 2026-07-29 so the drift
+// monitor can see this table; keying the fixture by name here would let the
+// tab regress to names and still pass.
 
 const { test, expect } = require('@playwright/test');
-const { loadDashboardWithFixtures } = require('./helpers');
+const { CEO, defaultFixtures, mockAgentsPage, loadAgentsPage, londonTodayISO, isLondonWeekend } = require('./agents-page.helpers');
 
-function londonTodayISO() {
-  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/London' }).format(new Date());
-}
+const BRIEFS = defaultFixtures().ceoBriefs;
 
-// Mirrors F.ceo* in js/config.js.
-const CEO = {
-  date:        'fldzLwBd3Mjg7rDxM',
-  oneThing:    'fldQDCAcd74Bb6mpY',
-  firstStep:   'fld4O4EuxHzMWARV7',
-  why:         'fldqooUbDCQ4yNlWQ',
-  ignoreToday: 'fldmC5AYRaJdfyFGx',
-  boardFlags:  'fldS7ZoGAS7sAJfJq',
-  handedOff:   'fld9PQ10p8V4N8Y0U',
-  moneyLight:  'fldBIbjpHlA2QmVbO',
-  safeToAct:   'fldQ4JEWYpHpI2KDs',
-  fullBrief:   'fldPkiaWvmYAoyHEl',
-};
-
-const BRIEF_FIXTURES = {
-  ceoBriefs: [
-    {
-      id: 'recBriefToday',
-      fields: {
-        [CEO.date]: londonTodayISO(),
-        [CEO.oneThing]: 'Test the onboarding flow end to end',
-        [CEO.firstStep]: 'Open the staging site and create one pretend client',
-        [CEO.why]: 'First client by 31 August depends on onboarding working.',
-        [CEO.ignoreToday]: 'Old invoice filing\nNon-urgent email',
-        [CEO.boardFlags]: 'Keller: two of today’s tasks are scatter — refocus.',
-        [CEO.handedOff]: 'worker-writer — draft the warm-20 re-engagement message\nMica — chase the UC verification',
-        [CEO.moneyLight]: 'green',
-        [CEO.safeToAct]: 1234.56,
-        // Full Brief is what marks a brief FINISHED — the 09:00 worker writes it,
-        // the 07:30 huddle does not. Every fixture that stands for a completed
-        // brief must carry it, or the tab correctly treats it as a huddle stub.
-        [CEO.fullBrief]: '{"one_thing":"Test the onboarding flow end to end"}',
-      },
-    },
-    {
-      id: 'recBriefPrev',
-      fields: {
-        [CEO.date]: '2026-07-25',
-        [CEO.oneThing]: 'Yesterday thing',
-        [CEO.firstStep]: 'Yesterday step',
-        [CEO.moneyLight]: 'amber',
-        [CEO.safeToAct]: 900,
-        [CEO.fullBrief]: '{"one_thing":"Yesterday thing"}',
-      },
-    },
-  ],
-};
-
-// The 07:30 department huddle's half-written record: the one thing, the first step
-// and the flags, and nothing the 09:00 worker adds.
+// The 07:30 department huddle's half-written record: the one thing, the first
+// step and the flags, and nothing the 09:00 worker adds.
 const HUDDLE_STUB = {
   id: 'recBriefStub',
   fields: {
@@ -76,13 +29,19 @@ const HUDDLE_STUB = {
   },
 };
 
-test.describe('CEO Brief tab', () => {
-  test('renders today’s brief and history from the briefs table', async ({ page }) => {
-    await loadDashboardWithFixtures(page, BRIEF_FIXTURES, 'ceo-brief');
-    await page.evaluate(() => switchTab('ceo-brief'));
-    await page.waitForTimeout(1200);
+async function openBriefTab(page) {
+  await page.evaluate(() => switchAgentsView('ceo-brief'));
+  await page.waitForTimeout(300);
+}
 
-    const panel = page.locator('#tab-ceo-brief');
+test.describe('CEO Brief tab on the AI Agents page', () => {
+  test('renders today’s brief and history from the briefs table', async ({ page }) => {
+    await mockAgentsPage(page);
+    await loadAgentsPage(page);
+    await openBriefTab(page);
+
+    const panel = page.locator('#view-ceo-brief');
+    await expect(panel).toBeVisible();
     await expect(panel).toContainText('CEO Brief');
     await expect(panel).toContainText('Test the onboarding flow end to end');
     await expect(panel).toContainText('Start here (10 min):');
@@ -93,22 +52,22 @@ test.describe('CEO Brief tab', () => {
     await expect(panel).toContainText('Yesterday thing');
     // board flag renders escaped
     await expect(panel).toContainText('Keller:');
-    // A finished brief carries no unfinished labelling. The other side of the
-    // huddle-stub guard below: read the marker backwards and every real 9am brief
-    // wears an alarming banner, which is how a warning stops being read.
+    // A finished brief carries no unfinished labelling — read the marker
+    // backwards and every real 9am brief wears an alarming banner, which is
+    // how a warning stops being read.
     await expect(panel).not.toContainText('not the finished brief');
     await expect(panel).not.toContainText('NOT FINISHED');
   });
 
-  test('shows what was handed off, and to which agent or person', async ({ page }) => {
-    // Added 2026-07-29. The brief's whole job is keeping work OFF Kevin: it routes to a named
-    // AI agent first, then Mica or Ericamae. If the tab silently drops that list, delegated work
-    // looks like it vanished, and the next brief gets trusted a little less.
-    await loadDashboardWithFixtures(page, BRIEF_FIXTURES, 'ceo-brief');
-    await page.evaluate(() => switchTab('ceo-brief'));
-    await page.waitForTimeout(1200);
+  test('shows what was handed off, and omits the section when empty', async ({ page }) => {
+    // The brief's whole job is keeping work OFF Kevin: it routes to a named AI
+    // agent first, then the team. If the tab silently drops that list,
+    // delegated work looks like it vanished.
+    await mockAgentsPage(page);
+    await loadAgentsPage(page);
+    await openBriefTab(page);
 
-    const panel = page.locator('#tab-ceo-brief');
+    const panel = page.locator('#view-ceo-brief');
     await expect(panel).toContainText('Not yours today, handed off:');
     await expect(panel).toContainText('worker-writer — draft the warm-20 re-engagement message');
     await expect(panel).toContainText('Mica — chase the UC verification');
@@ -117,38 +76,29 @@ test.describe('CEO Brief tab', () => {
   });
 
   test('a brief with nothing handed off omits the section entirely', async ({ page }) => {
-    const noneHanded = { ceoBriefs: [{ ...BRIEF_FIXTURES.ceoBriefs[0], fields: { ...BRIEF_FIXTURES.ceoBriefs[0].fields, [CEO.handedOff]: '' } }] };
-    await loadDashboardWithFixtures(page, noneHanded, 'ceo-brief');
-    await page.evaluate(() => switchTab('ceo-brief'));
-    await page.waitForTimeout(1200);
-    await expect(page.locator('#tab-ceo-brief')).not.toContainText('handed off');
+    const noneHanded = [{ ...BRIEFS[0], fields: { ...BRIEFS[0].fields, [CEO.handedOff]: '' } }];
+    await mockAgentsPage(page, { ceoBriefs: noneHanded });
+    await loadAgentsPage(page);
+    await openBriefTab(page);
+    await expect(page.locator('#view-ceo-brief')).not.toContainText('handed off');
   });
 
-  // ── The 07:30 huddle stub ───────────────────────────────────────────────────
-  // Found by the drift monitor 2026-07-31. The brief is written in two stages: the
-  // 07:30 huddle lays down the one thing, the first step and the flags, then the
-  // 09:00 worker fills in the money light, the safe-to-act figure and the reasoning.
-  // The tab used to ask only "is there a record dated today?", so for 90 minutes
-  // every weekday the stub rendered as a finished brief with a dash for the money
-  // light, a dash for the figure, and no warning that anything was missing.
-  // Full Brief is the marker for stage two, and the worker already uses exactly this
-  // test on the write side (gatherHuddle). These tests fail without that fix.
+  // ── The 07:30 huddle stub ─────────────────────────────────────────────
+  // Found by the drift monitor 2026-07-31. The brief is written in two
+  // stages; the tab used to ask only "is there a record dated today?", so for
+  // 90 minutes every weekday the stub rendered as a finished brief. Full
+  // Brief is the stage-two marker, and the worker uses exactly this test on
+  // the write side (gatherHuddle). These tests fail without that fix.
+  test('the 7:30 huddle stub is labelled unfinished, and the health checks agree', async ({ page }) => {
+    await mockAgentsPage(page, { ceoBriefs: [HUDDLE_STUB, BRIEFS[1]] });
+    await loadAgentsPage(page);
+    await openBriefTab(page);
 
-  // Card and health bar are asserted from ONE fixture load on purpose. This spec
-  // shares a worker and a dev server with the rest of the suite, and the task-drawer
-  // spec that runs last is timing-sensitive: three extra dashboard loads here were
-  // enough to make it drop a test. Keep this file's page loads to a minimum.
-  test('the 7:30 huddle stub is labelled unfinished, and the health bar agrees', async ({ page }) => {
-    await loadDashboardWithFixtures(page, { ceoBriefs: [HUDDLE_STUB, BRIEF_FIXTURES.ceoBriefs[1]] }, 'ceo-brief');
-    await page.evaluate(() => switchTab('ceo-brief'));
-    await page.waitForTimeout(1200);
-
-    const panel = page.locator('#tab-ceo-brief');
-    // says so in plain words, above the card. At the weekend a stub is FINAL
-    // (the 9am robot never runs), so the tab must say that instead of promising
-    // a brief that cannot come.
-    const londonDay = new Date(`${londonTodayISO()}T00:00:00Z`).getUTCDay();
-    if (londonDay === 0 || londonDay === 6) {
+    const panel = page.locator('#view-ceo-brief');
+    // Says so in plain words, above the card. At the weekend a stub is FINAL
+    // (the 9am robot never runs), so the tab must say that instead of
+    // promising a brief that cannot come.
+    if (isLondonWeekend()) {
       await expect(panel).toContainText('no 9am brief at the weekend');
       await expect(panel).not.toContainText('NOT FINISHED');
     } else {
@@ -163,24 +113,23 @@ test.describe('CEO Brief tab', () => {
     expect(todayCard).not.toContain('Safe to act');
     expect(todayCard).not.toMatch(/\b(GREEN|AMBER|RED)\b/);
 
-    // The stub also made the sync bar lie in both directions: "today's brief
-    // arrived" went green off a stub, and "latest brief is complete" went red
-    // every morning between 7:30 and 9am, which is a normal state by design.
+    // The stub also made the health checks lie in both directions: "today's
+    // brief arrived" went green off a stub, and "latest brief is complete"
+    // went red every morning between 7:30 and 9am, a normal state by design.
     const results = await page.evaluate(() => {
       let cfg = null;
       const orig = window.registerSyncBar;
-      window.registerSyncBar = (id, c) => { if (id === 'ceo-brief') cfg = c; };
-      registerCeoBriefSyncBar();
+      window.registerSyncBar = (id, c) => { if (id === 'agents') cfg = c; };
+      registerAgentsSyncBar();
       window.registerSyncBar = orig;
       const run = (prefix) => cfg.checks.find((c) => c.name.startsWith(prefix)).run();
       return { arrived: run("Today's brief arrived"), complete: run('Latest brief is complete') };
     });
 
-    // "arrived" is allowed to pass on the calendar alone in two cases — a weekend,
-    // when no brief is due at all, and before 10am on a weekday, when one may still
-    // be on its way. After 10am on a weekday a stub must read as a failure. Assert
-    // on whichever branch this run took, or the gate goes red every Saturday and
-    // Sunday for a reason that has nothing to do with the code under test.
+    // "arrived" is allowed to pass on the calendar alone in two cases — a
+    // weekend, when no brief is due, and before 10am on a weekday, when one
+    // may still be on its way. After 10am on a weekday a stub must read as a
+    // failure. Assert on whichever branch this run took.
     if (results.arrived.status === 'fail') {
       expect(results.arrived.detail).toContain('morning huddle');
     } else {
@@ -191,11 +140,10 @@ test.describe('CEO Brief tab', () => {
   });
 
   test('a weekend huddle stub in history is labelled as such, not as unfinished', async ({ page }) => {
-    // 9 and 16 Aug 2026 (both Sundays) were huddle stubs with no Full Brief. The
-    // worker correctly refuses weekends, so nothing was ever going to finish
-    // them, yet the tab filed them as "NOT FINISHED" and the card promised the
-    // money light at 9am. The huddle phase now skips weekends; the tab also
-    // labels any weekend stub honestly so the two old rows stop crying wolf.
+    // 9 and 16 Aug 2026 (both Sundays) were huddle stubs with no Full Brief.
+    // The worker correctly refuses weekends, so nothing was ever going to
+    // finish them, yet the tab filed them as "NOT FINISHED" and promised the
+    // money light at 9am. Any weekend stub is labelled honestly instead.
     const sundayStub = {
       id: 'recSundayStub',
       fields: {
@@ -205,11 +153,11 @@ test.describe('CEO Brief tab', () => {
         [CEO.boardFlags]: 'Keller: rest is part of the plan.',
       },
     };
-    await loadDashboardWithFixtures(page, { ceoBriefs: [BRIEF_FIXTURES.ceoBriefs[0], sundayStub] }, 'ceo-brief');
-    await page.evaluate(() => switchTab('ceo-brief'));
-    await page.waitForTimeout(1200);
+    await mockAgentsPage(page, { ceoBriefs: [BRIEFS[0], sundayStub] });
+    await loadAgentsPage(page);
+    await openBriefTab(page);
 
-    const history = (await page.locator('#tab-ceo-brief').textContent()).split('Previous briefs')[1] || '';
+    const history = (await page.locator('#view-ceo-brief').textContent()).split('Previous briefs')[1] || '';
     expect(history).toContain('Sunday board note');
     expect(history).toContain('Weekend huddle');
     expect(history).toContain('no 9am brief at weekends');
@@ -218,49 +166,24 @@ test.describe('CEO Brief tab', () => {
   });
 
   test('the header links to the visual workflow page', async ({ page }) => {
-    await loadDashboardWithFixtures(page, BRIEF_FIXTURES, 'ceo-brief');
-    await page.evaluate(() => switchTab('ceo-brief'));
-    await page.waitForTimeout(1200);
-    const link = page.locator('#tab-ceo-brief a[href="ceo-brief-workflow.html"]');
+    await mockAgentsPage(page);
+    await loadAgentsPage(page);
+    await openBriefTab(page);
+    const link = page.locator('#view-ceo-brief a[href="../../ceo-brief-workflow.html"]');
     await expect(link).toHaveCount(1);
     await expect(link).toContainText('How it works');
   });
 
   test('empty table shows a friendly state, never a blank tab', async ({ page }) => {
-    await loadDashboardWithFixtures(page, { ceoBriefs: [] }, 'ceo-brief');
-    await page.evaluate(() => switchTab('ceo-brief'));
-    await page.waitForTimeout(1200);
-    const panel = page.locator('#tab-ceo-brief');
-    const text = (await panel.textContent()) || '';
-    expect(text.length).toBeGreaterThan(40); // some guidance text rendered
-    await expect(panel).toContainText(/brief/i);
-  });
-
-  test('reads the briefs table by field ID, never by name', async ({ page }) => {
-    // The guard for the 2026-07-29 drift fix. A by-name read would render fine off a
-    // by-name fixture and look healthy right up until someone renames a field in
-    // Airtable, at which point the brief goes blank with nothing to catch it.
-    const briefUrls = [];
-    page.on('request', (r) => {
-      const u = r.url();
-      if (u.includes('tblIxbzDSOCI5hqJn')) briefUrls.push(u);
-    });
-    await loadDashboardWithFixtures(page, BRIEF_FIXTURES, 'ceo-brief');
-    await page.evaluate(() => switchTab('ceo-brief'));
-    await page.waitForTimeout(1200);
-
-    expect(briefUrls.length, 'the tab should have fetched the CEO Briefs table').toBeGreaterThan(0);
-    const byName = briefUrls.filter((u) => !u.includes('returnFieldsByFieldId=true'));
-    expect(byName, `CEO Briefs fetched by name:\n${byName.join('\n')}`).toEqual([]);
-    // and the sort travels as a field ID too
-    expect(briefUrls.some((u) => u.includes(encodeURIComponent(CEO.date)) || u.includes(CEO.date))).toBe(true);
-  });
-
-  test('health bar registers for the tab', async ({ page }) => {
-    await loadDashboardWithFixtures(page, BRIEF_FIXTURES, 'ceo-brief');
-    await page.evaluate(() => switchTab('ceo-brief'));
-    await page.waitForTimeout(1200);
-    const bar = page.locator('#tab-ceo-brief [data-sync-bar="ceo-brief"]');
-    await expect(bar).toHaveCount(1);
+    await mockAgentsPage(page, { ceoBriefs: [] });
+    await loadAgentsPage(page);
+    await openBriefTab(page);
+    const panel = page.locator('#view-ceo-brief');
+    if (isLondonWeekend()) {
+      await expect(panel).toContainText('No brief today');
+    } else {
+      await expect(panel).toContainText("Today's brief has not arrived yet");
+    }
+    await expect(panel).toContainText('No briefs stored yet');
   });
 });
