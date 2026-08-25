@@ -129,6 +129,35 @@ returns PASS or REDO with 1-2 sentences per item; apply one redo round, then
 submit. It reviews, never rewrites. Record `ceoReview` counts in the report.
 Routes and escalates need no review — they are reversible internal moves.
 
+## Step 3b — Approval queue priority review (the board's 9am/1pm/5pm pass)
+
+Kevin's ruling (25 Aug 2026): the most important approvals must sit at the
+top of his queue, reviewed by the board at each slot. The AI Agents page
+orders his queue tier-1 first, then the `Priority` field, then longest
+waiting — so the ONE lever this review moves is Priority.
+
+Read the queue — KEVIN'S LANE ONLY, the same population as his page: Tasks
+`tblqB8b22hKBL4PF1`, `AND({Status}='Approval', LEN({Sent For Approval
+By}&'')>0)`, then drop any row whose Approver is set to someone other than
+Kevin (empty Approver = Kevin). Rank each item as the CEO would (WWKD):
+anything tier-1 (debts, litigation, enforcement, bailiffs, the restraint
+order, sums owed either way) and anything with a real-world deadline inside
+7 days is `Urgent`; income-protecting and client-facing work is `High`;
+routine drafts and admin are `Not Urgent`. Those THREE are the only values
+you may write — `Project` is a workstream marker, never a ranking; leave it
+in place unless the item genuinely needs Urgent or High. Where the current
+`Priority` is CLEARLY wrong against that ranking, correct it through the
+audited command (never a raw Airtable write — the hard rule above applies
+here too):
+
+    python3 scripts/task-manager.py priority TASKID --set "Urgent|High|Not Urgent"
+
+When unsure, leave it: a churning priority field stops meaning anything.
+Record every change in the report as `{"task": id, "move": "priority",
+"to": "<value>", "ok": true}` and count them in the summary (the verify
+step reads `ok`; a record without it is counted a failed action). Zero
+changes on most passes is the healthy outcome, not a skipped step.
+
 ## Step 4 — Execute the moves
 
 For each decided move, in this order (hand nothing to a dead command — check
@@ -147,7 +176,8 @@ exit codes):
 - The recorded move vocabulary is exactly the note command's: finish, route,
   chase, close, escalate, roy, leave. `finish` and `close` mean a gate
   submission under your own name; everything you merely re-linked is `route`,
-  `chase`, `roy`, or `escalate`.
+  `chase`, `roy`, or `escalate`. (Step 3b's `priority` corrections are logged
+  by the priority command itself — no separate note.)
 
 After each action: `python3 scripts/task-manager.py note --task TASKID --move
 <move> --reason "<one line, your words>" --name "<task name>"`. Record every

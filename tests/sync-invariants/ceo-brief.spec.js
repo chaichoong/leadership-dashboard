@@ -40,7 +40,7 @@ test.describe('CEO Brief tab on the AI Agents page', () => {
     await loadAgentsPage(page);
     await openBriefTab(page);
 
-    const panel = page.locator('#view-ceo-brief');
+    const panel = page.locator('#zoneCeoBrief');
     await expect(panel).toBeVisible();
     await expect(panel).toContainText('CEO Brief');
     await expect(panel).toContainText('Test the onboarding flow end to end');
@@ -67,7 +67,7 @@ test.describe('CEO Brief tab on the AI Agents page', () => {
     await loadAgentsPage(page);
     await openBriefTab(page);
 
-    const panel = page.locator('#view-ceo-brief');
+    const panel = page.locator('#zoneCeoBrief');
     await expect(panel).toContainText('Not yours today, handed off:');
     await expect(panel).toContainText('worker-writer — draft the warm-20 re-engagement message');
     await expect(panel).toContainText('Mica — chase the UC verification');
@@ -80,7 +80,7 @@ test.describe('CEO Brief tab on the AI Agents page', () => {
     await mockAgentsPage(page, { ceoBriefs: noneHanded });
     await loadAgentsPage(page);
     await openBriefTab(page);
-    await expect(page.locator('#view-ceo-brief')).not.toContainText('handed off');
+    await expect(page.locator('#zoneCeoBrief')).not.toContainText('handed off');
   });
 
   // ── The 07:30 huddle stub ─────────────────────────────────────────────
@@ -94,7 +94,7 @@ test.describe('CEO Brief tab on the AI Agents page', () => {
     await loadAgentsPage(page);
     await openBriefTab(page);
 
-    const panel = page.locator('#view-ceo-brief');
+    const panel = page.locator('#zoneCeoBrief');
     // Says so in plain words, above the card. At the weekend a stub is FINAL
     // (the 9am robot never runs), so the tab must say that instead of
     // promising a brief that cannot come.
@@ -157,7 +157,7 @@ test.describe('CEO Brief tab on the AI Agents page', () => {
     await loadAgentsPage(page);
     await openBriefTab(page);
 
-    const history = (await page.locator('#view-ceo-brief').textContent()).split('Previous briefs')[1] || '';
+    const history = (await page.locator('#zoneCeoBrief').textContent()).split('Previous briefs')[1] || '';
     expect(history).toContain('Sunday board note');
     expect(history).toContain('Weekend huddle');
     expect(history).toContain('no 9am brief at weekends');
@@ -169,7 +169,7 @@ test.describe('CEO Brief tab on the AI Agents page', () => {
     await mockAgentsPage(page);
     await loadAgentsPage(page);
     await openBriefTab(page);
-    const link = page.locator('#view-ceo-brief a[href="../../ceo-brief-workflow.html"]');
+    const link = page.locator('#zoneCeoBrief a[href="../../ceo-brief-workflow.html"]');
     await expect(link).toHaveCount(1);
     await expect(link).toContainText('How it works');
   });
@@ -178,7 +178,7 @@ test.describe('CEO Brief tab on the AI Agents page', () => {
     await mockAgentsPage(page, { ceoBriefs: [] });
     await loadAgentsPage(page);
     await openBriefTab(page);
-    const panel = page.locator('#view-ceo-brief');
+    const panel = page.locator('#zoneCeoBrief');
     if (isLondonWeekend()) {
       await expect(panel).toContainText('No brief today');
     } else {
