@@ -27,8 +27,17 @@ FORMAT
     CC: optional@example.com
     FROM: optional-sender@example.com
     SUBJECT: The subject line
+    ATTACH: /path/under/the/attachments/dir/file.pdf   (optional, exactly one)
     ---
     The body of the email, as many lines as needed.
+
+ATTACH names ONE local file (added 25 Aug 2026 for the Creditor Management
+agent's restraint-order pages). The parser checks shape only; the send path
+enforces the real guards — the file must live under the attachments
+directory, carry an allowed extension, exist, and fit the size cap — because
+an approved output can be carried out days after it was written, and because
+a path outside the allowlist is how an injected header would try to mail a
+secret out.
 
 A tier-1 banner may sit above the headers, and the mandatory "Carrying this
 out will involve:" closing line may sit below the body. Both are written for
@@ -44,7 +53,7 @@ import re
 
 EMAIL_RE = re.compile(r"^[^@\s,]+@[^@\s,]+\.[^@\s,]+$")
 
-ALLOWED_HEADERS = {"TO", "CC", "SUBJECT", "FROM"}
+ALLOWED_HEADERS = {"TO", "CC", "SUBJECT", "FROM", "ATTACH"}
 
 # Prepended by agent-dispatch.py `submit --tier1`. Defined here so the writer
 # and the parser can never drift: the string that gets added is the string that
@@ -174,6 +183,14 @@ def parse_output(output):
         raise EmailFormatError("more than one FROM address")
     sender = senders[0] if senders else None
     subject = headers.get("SUBJECT", "").strip()
+    attach = headers.get("ATTACH", "").strip() or None
+    if attach and ("," in attach or ";" in attach):
+        # One file per email, deliberately: every extra attachment is another
+        # thing Kevin approved without opening. Widen only on his say-so.
+        raise EmailFormatError("ATTACH names more than one file — exactly one "
+                               "attachment is supported")
+    if attach and ("\n" in attach or "\r" in attach):
+        raise EmailFormatError("ATTACH contains a line break")
     # The approval-box marker is stripped in the SAME place as the tier-1
     # banner: both are addressed to Kevin, neither is addressed to the
     # recipient. Stripped before the empty-body check, so an output that is
@@ -187,4 +204,4 @@ def parse_output(output):
     if not body:
         raise EmailFormatError("empty body")
     return {"to": to, "cc": cc, "from": sender, "subject": subject,
-            "body": body}
+            "body": body, "attach": attach}

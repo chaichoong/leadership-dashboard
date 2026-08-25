@@ -310,6 +310,53 @@ def cmd_preview(args):
     print("\n--- body ---\n" + mail["body"])
 
 
+# ─── Attachments (25 Aug 2026, Creditor Management agent) ────────────
+#
+# ATTACH names one local file that goes out with the email. The guards live
+# HERE, not in the format parser, because this is the process that reads the
+# file from disk — and reading a file into an outbound email is exactly the
+# move a prompt-injected header would try ("ATTACH: ~/.config/od/..."). So:
+# the file must sit under ONE directory that exists for outbound attachments,
+# resolved against symlinks; only document/image extensions; a hard size cap.
+# Agents write their attachments (e.g. extracted PDF pages) into this
+# directory at DRAFT time — run scratch dirs are cleaned between the draft
+# and the carry-out, which can be days apart.
+ATTACH_DIR = os.path.realpath(os.path.expanduser(
+    os.environ.get("SEND_EMAIL_ATTACH_DIR")
+    or "~/knowledge-os/attachments"))
+ATTACH_EXTENSIONS = {".pdf", ".png", ".jpg", ".jpeg"}
+ATTACH_MAX_BYTES = 5 * 1024 * 1024
+ATTACH_MIME = {".pdf": "application/pdf", ".png": "image/png",
+               ".jpg": "image/jpeg", ".jpeg": "image/jpeg"}
+
+
+def load_attachment(attach, task_id):
+    """Path from the approved ATTACH header → worker payload dict, or refuse."""
+    import base64
+    real = os.path.realpath(os.path.expanduser(attach))
+    if not (real.startswith(ATTACH_DIR + os.sep)):
+        sys.exit(f"REFUSED: task {task_id} ATTACH is outside the attachments "
+                 f"directory ({ATTACH_DIR}). Files are only ever sent from "
+                 "there — put the file in it and reference that path.")
+    name = os.path.basename(real)
+    ext = os.path.splitext(name)[1].lower()
+    if name.startswith(".") or ext not in ATTACH_EXTENSIONS:
+        sys.exit(f"REFUSED: task {task_id} ATTACH type {ext or '(none)'} is "
+                 f"not allowed. Allowed: {', '.join(sorted(ATTACH_EXTENSIONS))}.")
+    if not os.path.isfile(real):
+        sys.exit(f"ERROR: task {task_id} ATTACH file does not exist: {name}. "
+                 "It must exist at send time — agents write attachments to "
+                 "the attachments directory at draft time, never a scratch dir.")
+    size = os.path.getsize(real)
+    if size > ATTACH_MAX_BYTES:
+        sys.exit(f"REFUSED: task {task_id} ATTACH is {size} bytes — over the "
+                 f"{ATTACH_MAX_BYTES} cap.")
+    with open(real, "rb") as fh:
+        data = fh.read()
+    return {"filename": name, "mimeType": ATTACH_MIME[ext],
+            "dataB64": base64.b64encode(data).decode(), "bytes": size}
+
+
 def cmd_send(args):
     prior = already_sent(args.task)
     if prior:
@@ -324,6 +371,11 @@ def cmd_send(args):
     sender_problem = business_identity_mismatch(
         mail["subject"], mail["body"], mail["from"])
 
+    # The attachment guards run for the dry run too: proving the payload is
+    # the dry run's whole point, and a missing or out-of-bounds file is
+    # exactly what it exists to catch before the real send.
+    attachment = load_attachment(mail["attach"], args.task) if mail.get("attach") else None
+
     if args.dry_run:
         print(json.dumps({"dryRun": True, "task": args.task,
                           "approvalOutcome": mail["outcome"]
@@ -334,6 +386,9 @@ def cmd_send(args):
                           "senderProblem": sender_problem or None,
                           "to": mail["to"], "cc": mail["cc"],
                           "subject": mail["subject"],
+                          "attachment": ({"filename": attachment["filename"],
+                                          "bytes": attachment["bytes"]}
+                                         if attachment else None),
                           "bodyChars": len(mail["body"])}, indent=2))
         return
 
@@ -348,6 +403,9 @@ def cmd_send(args):
         payload["cc"] = ", ".join(mail["cc"])
     if mail["from"]:
         payload["from"] = mail["from"]
+    if attachment:
+        payload["attachment"] = {k: attachment[k]
+                                 for k in ("filename", "mimeType", "dataB64")}
 
     # Intent first. If this process dies after the worker accepts the message
     # but before the sent row lands, the next run still sees the task in the
@@ -455,6 +513,60 @@ def cmd_selftest(args):
     cases.append(("the refusal names the sender to use",
                   BUSINESS_SENDER in business_identity_mismatch(
                       "x", warm, None)))
+
+    # Attachments (25 Aug 2026). The parser accepts the header shape; the
+    # file guards are what stop an injected "ATTACH: ~/.config/od/<secret>"
+    # riding an approved email out — so those are exercised against real
+    # files in a throwaway attachments dir, not asserted from source.
+    withattach = parse_output(
+        "TO: a@b.com\nSUBJECT: x\nATTACH: /tmp/x/file.pdf\n---\nb", "selftest")
+    cases.append(("parses ATTACH", withattach["attach"] == "/tmp/x/file.pdf"))
+    cases.append(("ATTACH defaults to None", good.get("attach") is None))
+    refuses("refuses two ATTACH files",
+            "TO: a@b.com\nSUBJECT: x\nATTACH: a.pdf, b.pdf\n---\nb")
+
+    import tempfile
+    global ATTACH_DIR
+    real_dir = ATTACH_DIR
+    with tempfile.TemporaryDirectory() as tmp:
+        ATTACH_DIR = os.path.realpath(tmp)
+        try:
+            inside = os.path.join(ATTACH_DIR, "pages.pdf")
+            with open(inside, "wb") as fh:
+                fh.write(b"%PDF-1.4 test")
+            loaded = load_attachment(inside, "selftest")
+            cases.append(("loads a file from the attachments dir",
+                          loaded["filename"] == "pages.pdf"
+                          and loaded["mimeType"] == "application/pdf"
+                          and loaded["bytes"] == 13))
+
+            def guard_refuses(name, path):
+                try:
+                    load_attachment(path, "selftest")
+                except SystemExit:
+                    cases.append((name, True))
+                else:
+                    cases.append((name, False))
+
+            guard_refuses("refuses a path outside the attachments dir",
+                          os.path.expanduser("~/.config/od/airtable_pat"))
+            # A symlink INSIDE the dir pointing outside must not smuggle the
+            # target through the prefix check — realpath resolves it first.
+            link = os.path.join(ATTACH_DIR, "sneaky.pdf")
+            os.symlink("/etc/hosts", link)
+            guard_refuses("refuses a symlink escaping the dir", link)
+            bad_ext = os.path.join(ATTACH_DIR, "notes.txt")
+            open(bad_ext, "w").write("x")
+            guard_refuses("refuses a disallowed extension", bad_ext)
+            guard_refuses("refuses a missing file",
+                          os.path.join(ATTACH_DIR, "ghost.pdf"))
+            big = os.path.join(ATTACH_DIR, "big.pdf")
+            with open(big, "wb") as fh:
+                fh.seek(ATTACH_MAX_BYTES)
+                fh.write(b"x")
+            guard_refuses("refuses an oversize file", big)
+        finally:
+            ATTACH_DIR = real_dir
 
     failed = [n for n, ok in cases if not ok]
     for n, ok in cases:

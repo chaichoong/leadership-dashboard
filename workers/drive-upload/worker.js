@@ -215,9 +215,13 @@ export default {
                 }
 
                 if (request.method !== 'POST') return jsonResponse({ error: 'POST required' }, 405);
-                const { to, subject, text, cc, from } = await request.json();
+                const { to, subject, text, cc, from, attachment } = await request.json();
                 if (!to || !subject || !text) {
                     return jsonResponse({ error: 'to, subject and text are required' }, 400);
+                }
+                if (attachment !== undefined && attachment !== null) {
+                    const bad = attachmentProblem(attachment);
+                    if (bad) return jsonResponse({ error: bad }, 400);
                 }
 
                 const sender = (from || DEFAULT_SENDER).toLowerCase().trim();
@@ -240,7 +244,8 @@ export default {
                 }
                 const accessToken = await getGmailAccessToken(env, refreshToken);
 
-                const raw = buildRawEmail({ to, subject, text, cc, from: sender });
+                const raw = buildRawEmail({ to, subject, text, cc, from: sender,
+                                            attachment: attachment || undefined });
                 const sendRes = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', {
                     method: 'POST',
                     headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
@@ -400,11 +405,11 @@ function b64url(bytes) {
     return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 }
 
-function buildRawEmail({ to, subject, text, cc, from }) {
+function buildRawEmail({ to, subject, text, cc, from, attachment }) {
     const enc = new TextEncoder();
     const encodedSubject = `=?UTF-8?B?${btoa(String.fromCharCode(...enc.encode(subject)))}?=`;
     const bodyB64 = btoa(String.fromCharCode(...enc.encode(text)));
-    const lines = [
+    const headers = [
         // From is stamped explicitly so a send-as alias keeps its identity;
         // Gmail validates it against the account's verified senders.
         ...(from ? [`From: ${from}`] : []),
@@ -412,12 +417,61 @@ function buildRawEmail({ to, subject, text, cc, from }) {
         ...(cc ? [`Cc: ${cc}`] : []),
         `Subject: ${encodedSubject}`,
         'MIME-Version: 1.0',
+    ];
+    if (!attachment) {
+        const lines = [
+            ...headers,
+            'Content-Type: text/plain; charset=UTF-8',
+            'Content-Transfer-Encoding: base64',
+            '',
+            bodyB64,
+        ];
+        return b64url(enc.encode(lines.join('\r\n')));
+    }
+    // One attachment → multipart/mixed (added 25 Aug 2026 for the Creditor
+    // Management agent's restraint-order pages; send-email.py is the only
+    // caller and enforces the file guards). Every part below is ASCII by
+    // construction — the body and the file ride as base64, the subject as an
+    // encoded-word — so the whole raw message goes through btoa directly.
+    // The per-byte b64url loop would be a CPU-limit risk at megabyte scale.
+    const boundary = 'od-part-' + crypto.randomUUID();
+    const safeName = String(attachment.filename).replace(/[^\w.\- ]/g, '_');
+    const raw = [
+        ...headers,
+        `Content-Type: multipart/mixed; boundary="${boundary}"`,
+        '',
+        `--${boundary}`,
         'Content-Type: text/plain; charset=UTF-8',
         'Content-Transfer-Encoding: base64',
         '',
         bodyB64,
-    ];
-    return b64url(enc.encode(lines.join('\r\n')));
+        `--${boundary}`,
+        `Content-Type: ${attachment.mimeType}; name="${safeName}"`,
+        'Content-Transfer-Encoding: base64',
+        `Content-Disposition: attachment; filename="${safeName}"`,
+        '',
+        attachment.dataB64,
+        `--${boundary}--`,
+    ].join('\r\n');
+    return btoa(raw).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+// Shape gate for the optional /send-email attachment. Returns an error string
+// or null. The real file guards (allowlisted directory, extension, size on
+// disk) live in scripts/send-email.py, the only caller — this is the
+// worker-side floor so a direct call cannot send arbitrary content shapes.
+const ATTACH_MIME_ALLOWED = ['application/pdf', 'image/png', 'image/jpeg'];
+const ATTACH_B64_MAX = 7 * 1024 * 1024; // ~5MB file, base64-encoded
+function attachmentProblem(a) {
+    if (!a || typeof a !== 'object') return 'attachment must be an object';
+    if (!a.filename || typeof a.filename !== 'string') return 'attachment.filename required';
+    if (!ATTACH_MIME_ALLOWED.includes(a.mimeType)) {
+        return `attachment.mimeType must be one of ${ATTACH_MIME_ALLOWED.join(', ')}`;
+    }
+    if (typeof a.dataB64 !== 'string' || !a.dataB64) return 'attachment.dataB64 required';
+    if (a.dataB64.length > ATTACH_B64_MAX) return 'attachment too large';
+    if (!/^[A-Za-z0-9+/=]+$/.test(a.dataB64)) return 'attachment.dataB64 is not base64';
+    return null;
 }
 
 // ---------------------------------------------------------------------------
