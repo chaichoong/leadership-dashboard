@@ -144,13 +144,15 @@ If PDFs are found, process each one through this pipeline:
    deadline at all.
 
    The `Deadline:` line in the email is not decoration: it is the one place
-   the date survives outside the PDF's prose, so downstream triage can date the
-   task from it. NOTE (25 Aug 2026): the intended enforcement chain — triage
-   writing the Deadline into the task's Due Date, a Hard Deadline flag the
-   rescheduler cannot roll, a loop-health NOT MOVING rule and a daily invariant
-   — is DESIGNED but NOT YET BUILT. Nothing downstream parses this line today,
-   so until that build lands, the deadline ordering in step 7's report is the
-   only net. Do not treat the chain as existing.
+   the date survives outside the PDF's prose, and the enforcement chain reads
+   it (BUILT 25 Aug 2026). Inbound triage — the inbound-email-triage skill and
+   the Inbound Comms page both — writes it into the task's Due Date and ticks
+   Hard Deadline, which the auto-rescheduler never rolls. From there
+   scripts/loop-health.py reports it under NOT MOVING from 3 days out
+   (rule "deadline"), and the daily `hard-deadline-passed-still-open`
+   invariant in scripts/check-data-invariants.py fails the sweep if the date
+   passes with the task still open. Omit the line and that whole chain goes
+   quiet — which is exactly what happened before 25 Aug 2026.
 
    You still MUST NOT pay anything, contact a council, or answer a court. Tier 1
    work is prepared for Kevin's approval, never carried out.

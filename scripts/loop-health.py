@@ -42,6 +42,7 @@ TEAM = "tblco0p2OnlLQVAX7"
 STALL_AMEND_HOURS = 48   # amended, and the agent has not redone it
 STALL_DRAFT_HOURS = 24   # an agent owns it, it is DUE, and nothing is drafted
 STALL_DECIDE_DAYS = 5    # sat waiting on a human this long
+STALL_DEADLINE_DAYS = 3  # a hard deadline this close (or past) with the task open
 
 # The statuses agent-dispatch.py actually works from (its OPEN_STATUSES). An
 # "Upcoming" task is scheduled, not late. Counting it as stalled made the first
@@ -57,7 +58,14 @@ KEVIN_AIRTABLE_EMAIL = "kevin@runpreneur.org.uk"
 # rule carries no day count, so sorting the whole list by age would sink every
 # "an agent has drafted nothing" item below every dated one — and that is the
 # rule that catches work never being started at all.
-RULE_ORDER = {"amend": 0, "draft": 1, "decide": 2}
+RULE_ORDER = {"deadline": 0, "amend": 1, "draft": 2, "decide": 3}
+
+# The UC verification lane routinely holds open tasks past their date (its
+# dates are enforced by the dedicated UC watchdog, not this report). On the
+# day the deadline rule was written it would have contributed 24 of 30 hits —
+# a flood that buries the six real ones, which is exactly how lists stop
+# being read. Excluded by name prefix, here and in the invariant.
+DEADLINE_EXCLUDE_PREFIX = "UC verification:"
 
 
 def pat():
@@ -102,6 +110,17 @@ def hours_since(value, now):
     return (now - dt).total_seconds() / 3600.0
 
 
+def days_until(value, now):
+    """Date-only field → whole days from now's UTC date (negative = past)."""
+    if not value:
+        return None
+    try:
+        d = datetime.strptime(str(value)[:10], "%Y-%m-%d").date()
+    except ValueError:
+        return None
+    return (d - now.date()).days
+
+
 def compute(tasks, agent_ids, now=None):
     now = now or datetime.now(timezone.utc)
     needs_you, done, stalled = [], [], []
@@ -129,6 +148,26 @@ def compute(tasks, agent_ids, now=None):
 
         if not is_open:
             continue
+
+        # 0. A hard deadline — a real-world date lifted from the letter itself
+        #    (a court date, a pay-by, a filing window) — inside the warning
+        #    window or already past, with the task still open. Fires whatever
+        #    the status, INCLUDING Approval: a deadline does not pause while
+        #    the draft waits for a decision. This is the rule the whole
+        #    deadline chain exists for (dated response windows closed unread,
+        #    3 Jul – 24 Aug 2026).
+        if (f.get("Hard Deadline") and f.get("Due Date")
+                and not str(name).startswith(DEADLINE_EXCLUDE_PREFIX)):
+            left = days_until(f.get("Due Date"), now)
+            if left is not None and left <= STALL_DEADLINE_DAYS:
+                due = str(f.get("Due Date"))[:10]
+                why = (f"Hard deadline {due} passed {-left} days ago and it is still open"
+                       if left < 0 else
+                       f"Hard deadline {due} is TODAY" if left == 0 else
+                       f"Hard deadline {due} is {left} days away")
+                stalled.append({"id": r["id"], "name": name, "rule": "deadline",
+                                "days": max(0, -left), "why": why})
+                continue
 
         # 1. Kevin asked for changes and nothing came back.
         if f.get("Approval Outcome") == "Changes requested" and status != "Approval":
@@ -189,7 +228,8 @@ def main():
         # clip a completion out of the report.
         tasks = fetch(TASKS, ["Task Name", "Status", "Team Member", "Approval Outcome",
                               "Approved At", "Agent Output", "Completion Date",
-                              "Created Time", "Approval Slack TS", "Assignee"],
+                              "Created Time", "Approval Slack TS", "Assignee",
+                              "Due Date", "Hard Deadline"],
                       formula=('OR({Status}!="Completed",'
                                "IS_AFTER({Completion Date},DATEADD(TODAY(),-8,'days')))"))
     except (urllib.error.HTTPError, urllib.error.URLError, OSError) as exc:
@@ -224,6 +264,11 @@ def main():
         # noise rather than signal — the opposite failure, equally useless.
         "tasks carrying Agent Output":
             sum(1 for f in fields if f.get("Agent Output")),
+        # Rule 0's population. Triage stamps the flag from the letter's
+        # Deadline line; if that stops, the deadline rule reports all-clear
+        # for ever — the pre-25-Aug failure this chain was built to end.
+        "tasks carrying Hard Deadline":
+            sum(1 for f in fields if f.get("Hard Deadline")),
     }
     if not agent_ids:
         controls["AI agent records"] = 0

@@ -9135,6 +9135,12 @@ const STALL_DECIDE_DAYS = 5;    // sat waiting on a human this long
 // real list: the first run of this flagged 156 items, 101 of them merely
 // future-dated. A list that long is noise, and noise is what stops it being read.
 const STALL_DUE_STATUSES = ['Today','Overdue'];
+const STALL_DEADLINE_DAYS = 3;  // a hard deadline this close (or past) with the task open
+// The UC verification lane routinely holds open tasks past their date (its
+// dates are enforced by the dedicated UC watchdog, not this report) — 24 of
+// 30 hits on the day the deadline rule was written. Excluded by name prefix,
+// in step with scripts/loop-health.py.
+const DEADLINE_EXCLUDE_PREFIX = 'UC verification:';
 
 // Completed agent work for the "Done" panel. Held separately because the page's
 // own task fetch excludes Completed records by design.
@@ -9166,6 +9172,18 @@ function _hoursSince(v){
   if(!isFinite(t))return null;
   return (Date.now()-t)/36e5;
 }
+function _daysUntil(v){
+  // Date-only field → whole days from today's UTC date (negative = past).
+  // Mirrors days_until in scripts/loop-health.py exactly.
+  if(!v)return null;
+  const m=/^(\d{4})-(\d{2})-(\d{2})/.exec(String(v));
+  if(!m)return null;
+  const due=Date.UTC(+m[1],+m[2]-1,+m[3]);
+  if(!isFinite(due))return null;
+  const now=new Date();
+  const today=Date.UTC(now.getUTCFullYear(),now.getUTCMonth(),now.getUTCDate());
+  return Math.round((due-today)/864e5);
+}
 function _isAgentOwned(t){
   return ((t&&t.teamMemberIds)||[]).some(id=>AGENT_MAP[id]);
 }
@@ -9195,6 +9213,22 @@ function computeApprovalLoop(tasks){
   const stalled=[];
   all.forEach(t=>{
     if(!_isOpen(t))return;
+    // 0. A hard deadline — a real-world date lifted from the letter itself —
+    //    inside the warning window or already past, with the task still open.
+    //    Fires whatever the status, INCLUDING Approval: a deadline does not
+    //    pause while the draft waits for a decision. Mirrors rule 0 in
+    //    scripts/loop-health.py (guarded by tests/loop-health.test.js).
+    if(t.hardDeadline&&t.dueDate&&!String(t.name||'').startsWith(DEADLINE_EXCLUDE_PREFIX)){
+      const left=_daysUntil(t.dueDate);
+      if(left!==null&&left<=STALL_DEADLINE_DAYS){
+        const due=String(t.dueDate).slice(0,10);
+        const why=left<0?`Hard deadline ${due} passed ${-left} days ago and it is still open`
+          :left===0?`Hard deadline ${due} is TODAY`
+          :`Hard deadline ${due} is ${left} days away`;
+        stalled.push({t,days:Math.max(0,-left),why,rule:'deadline'});
+        return;
+      }
+    }
     // 1. Kevin asked for changes and nothing came back.
     if(t.approvalOutcome==='Changes requested'&&t.status!=='Approval'){
       const h=_hoursSince(t.approvedAt);
@@ -9242,7 +9276,7 @@ function computeApprovalLoop(tasks){
   // carries no day count (see rule 2), so sorting the whole list by age would
   // sink every "an agent has drafted nothing" item below every dated one — and
   // that rule is the one that catches work never being started at all.
-  const RULE_ORDER={amend:0,draft:1,decide:2};
+  const RULE_ORDER={deadline:0,amend:1,draft:2,decide:3};
   stalled.sort((a,b)=>(RULE_ORDER[a.rule]-RULE_ORDER[b.rule])||((b.days||0)-(a.days||0)));
   return {needsYou,done,stalled};
 }
