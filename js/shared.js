@@ -677,6 +677,13 @@
     }
 
     async function switchTab(tabId) {
+        // The CEO Brief lives on the AI Agents page since 25 Aug 2026. Old
+        // links and bookmarks (#ceo-brief, the workflow page's back link)
+        // land here — forward them to the brief's tab on that page.
+        if (tabId === 'ceo-brief') {
+            if (typeof window.deepLinkAgents === 'function') window.deepLinkAgents({ view: 'ceo-brief' });
+            return;
+        }
         // Leaving the AI Brain tab: refresh its sidebar badge so answers Kevin
         // just tapped drop the waiting count straight away.
         if (window.location.hash === '#ai-brain' && tabId !== 'ai-brain') {
@@ -790,10 +797,6 @@ if (tabId === 'comms') lazyLoadFrame('commsFrame', 'follow-up');
         if (tabId === 'coa') {
             if (typeof renderCoaTab === 'function') renderCoaTab();
         }
-        // Render CEO Brief on switch
-        if (tabId === 'ceo-brief') {
-            if (typeof renderCeoBriefTab === 'function') renderCeoBriefTab();
-        }
         // Render Money Confidence on switch
         if (tabId === 'money') {
             if (typeof renderMoneyTab === 'function') renderMoneyTab();
@@ -901,7 +904,10 @@ if (tabId === 'comms') lazyLoadFrame('commsFrame', 'follow-up');
     // On load: check URL hash for deep-linking
     window.addEventListener('load', () => {
         const hash = window.location.hash.replace('#', '');
-        if (hash && document.getElementById('tab-' + hash)) {
+        // 'ceo-brief' has no panel of its own any more — switchTab forwards
+        // it to the CEO Brief tab on the AI Agents page. It must pass this
+        // panel-exists guard or old bookmarks silently land on Overview.
+        if (hash && (hash === 'ceo-brief' || document.getElementById('tab-' + hash))) {
             switchTab(hash);
             // A cold deep-link renders the tab here, before loadDashboard has fetched
             // the data it needs, so a non-overview tab shows only its loading state.

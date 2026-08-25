@@ -54,14 +54,13 @@
              ────────────────────────────────────────────────────────────────── -->
         <nav class="sidebar-nav" id="sidebarNav">
 
-            <div class="sidebar-section" data-section="leadership" data-tabs="ceo-brief,overview,agents,cfv,os-strategy,kpi-library">
+            <div class="sidebar-section" data-section="leadership" data-tabs="overview,agents,cfv,os-strategy,kpi-library">
                 <div class="sidebar-section-header" role="button" tabindex="0" aria-expanded="true" onclick="toggleSidebarSection('leadership')" onkeydown="if(event.key==='Enter'||event.key===' ')toggleSidebarSection('leadership')">
                     <span class="sidebar-section-chevron">&#x25BE;</span>
                     <span class="sidebar-section-name">Leadership</span>
                     <span class="sidebar-section-dot unknown" data-section-dot="leadership"></span>
                 </div>
                 <div class="sidebar-section-body">
-                    <div class="sidebar-item" role="menuitem" tabindex="0" onclick="switchTab('ceo-brief')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();switchTab('ceo-brief')}"><span class="sidebar-icon">&#x2600;&#xFE0F;</span><span class="sidebar-label">CEO Brief</span><span class="sidebar-health-dot unknown" data-sidebar-health="ceo-brief" title="No checks run yet"></span></div>
                     <div class="sidebar-item active" role="menuitem" tabindex="0" data-tab-group="dashboard" onclick="switchTab('overview')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();switchTab('overview')}"><span class="sidebar-icon">&#x1F4CA;</span><span class="sidebar-label">Leadership Dashboard</span><span class="sidebar-health-dot unknown" data-sidebar-health="overview" title="No checks run yet"></span><span id="cfvSidebarBadges" style="margin-left:6px;display:flex;gap:4px"></span></div>
                     <!-- AI Agents (Leadership) — approvals, checks and the workforce register in one place (Kevin's ruling, 24 Aug 2026). The badge counts loop-raised tasks waiting for Kevin's approval: the shell polls the count itself (refreshAgentsBadge in shared.js) so it shows before the tab is ever opened, and the iframe's postMessage keeps it live while open. -->
                     <div class="sidebar-item" role="menuitem" tabindex="0" onclick="switchTab('agents')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();switchTab('agents')}"><span class="sidebar-icon">&#x1F916;</span><span class="sidebar-label">AI Agents</span><span class="sidebar-health-dot unknown" data-sidebar-health="agents" title="No checks run yet"></span><span id="agentsApprovalBadge" title="Agent work waiting for your approval" style="display:none;margin-left:6px;background:var(--accent);color:var(--accent-on);font-size:var(--fs-xs);font-weight:var(--fw-semibold);border-radius:var(--radius-full);padding:1px 7px;"></span></div>
@@ -624,8 +623,6 @@
         <!-- Tab: Transactions -->
         <div class="tab-panel" id="tab-transactions"></div>
 
-        <!-- Tab: CEO Brief (isolated — reads the CEO Briefs table only) -->
-        <div class="tab-panel" id="tab-ceo-brief"></div>
 
         <!-- Tab: Money Confidence (isolated — does not touch the Leadership Dashboard) -->
         <div class="tab-panel" id="tab-money"></div>
@@ -885,16 +882,15 @@
     <!-- Agent accuracy scoring + the autonomy threshold. Shared with the
          Task OS so both surfaces score identically. -->
     <script defer src="js/agent-accuracy.js?v=1"></script>
-    <script defer src="js/config.js?v=58"></script>
+    <script defer src="js/config.js?v=59"></script>
     <script defer src="js/prompts/boardroom-mentor.js?v=3"></script>
-    <script defer src="js/shared.js?v=37"></script>
+    <script defer src="js/shared.js?v=38"></script>
     <script defer src="js/sync-bar.js?v=6"></script>
     <script defer src="js/project-health.js?v=1"></script>
     <script defer src="js/dashboard.js?v=27"></script>
     <script defer src="js/cashflow.js?v=22"></script>
     <script defer src="js/money.js?v=4"></script>
     <script defer src="js/kpi-library.js?v=1"></script>
-    <script defer src="js/ceo-brief.js?v=5"></script>
     <script defer src="js/wealth.js?v=66"></script>
     <script defer src="js/wealth-ratios.js?v=10"></script>
     <script defer src="js/sitemap.js?v=28"></script>

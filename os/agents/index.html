@@ -35,6 +35,40 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 .btn:disabled{opacity:.5;cursor:not-allowed;pointer-events:none}
 
 .main{padding:20px 24px;max-width:1400px;margin:0 auto}
+
+/* Page tabs — Dashboard | Approvals | CEO Brief */
+.page-tabs{display:flex;gap:4px;margin-bottom:20px;border-bottom:2px solid var(--border-default);flex-wrap:wrap}
+.page-tab{appearance:none;border:none;background:none;padding:10px 18px;font-size:var(--fs-base);font-weight:var(--fw-semibold);color:var(--text-secondary);cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-2px;display:inline-flex;align-items:center;gap:8px;font-family:inherit}
+.page-tab:hover{color:var(--text-primary)}
+.page-tab.active{color:var(--accent);border-bottom-color:var(--accent)}
+.page-tab-badge{background:var(--warning-bg);color:var(--warning);font-size:var(--fs-xs);font-weight:var(--fw-bold);border-radius:var(--radius-full);padding:1px 8px}
+.page-view{display:none}
+.page-view.active{display:block}
+
+/* Agent scorecards (Dashboard) */
+.sc-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(290px,1fr));gap:12px;margin-bottom:14px}
+.sc-card{border:1px solid var(--border-default);border-radius:var(--radius-lg);background:var(--bg-surface);padding:14px 16px;cursor:pointer;box-shadow:var(--shadow-sm)}
+.sc-card:hover{border-color:var(--accent)}
+.sc-card.selected{border-color:var(--accent);background:var(--accent-soft)}
+.sc-head{display:flex;justify-content:space-between;align-items:flex-start;gap:8px;margin-bottom:4px}
+.sc-name{font-weight:var(--fw-bold);font-size:var(--fs-base)}
+.sc-goal{font-size:var(--fs-xs);color:var(--text-secondary);margin-bottom:8px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sc-row{display:flex;justify-content:space-between;gap:8px;font-size:var(--fs-xs);padding:3px 0;border-top:1px solid var(--border-subtle)}
+.sc-label{color:var(--text-muted);flex-shrink:0}
+.sc-val{text-align:right;font-weight:var(--fw-medium);word-break:break-word}
+.sc-val.warn{color:var(--warning)}
+.sc-val.good{color:var(--success)}
+.sc-wait-link{color:var(--warning);font-weight:var(--fw-semibold);cursor:pointer}
+.sc-wait-link:hover{text-decoration:underline}
+
+/* Approvals filter chips */
+.apv-filters{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px}
+.apv-filter{border:1px solid var(--border-default);background:var(--bg-surface);color:var(--text-secondary);border-radius:var(--radius-full);padding:4px 12px;font-size:var(--fs-xs);font-weight:var(--fw-semibold);cursor:pointer;font-family:inherit}
+.apv-filter:hover{border-color:var(--accent);color:var(--accent)}
+.apv-filter.active{background:var(--accent);border-color:var(--accent);color:var(--accent-on)}
+.apv-group-head{font-size:var(--fs-sm);font-weight:var(--fw-bold);color:var(--text-secondary);margin:16px 0 8px;display:flex;align-items:center;gap:8px}
+.apv-group-head:first-child{margin-top:0}
+
 .zone{margin-bottom:28px}
 .zone-header{display:flex;align-items:center;gap:10px;margin-bottom:12px;padding-bottom:8px;border-bottom:2px solid var(--border-default)}
 .zone-title{font-size:var(--fs-lg);font-weight:var(--fw-bold)}
@@ -184,7 +218,7 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 <div id="topbar" class="topbar" style="display:none">
     <div>
         <h1>AI Agents</h1>
-        <div class="subtitle">Everything waiting for you, everything to check, and the whole workforce</div>
+        <div class="subtitle">Your AI team's dashboard, your approvals, and the CEO brief</div>
     </div>
     <div class="topbar-right">
         <span id="syncStatus" class="sync-status" title="Not synced yet"><span class="sync-dot"></span>Loading…</span>
@@ -195,31 +229,47 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 <div id="main" class="main" style="display:none">
     <div data-sync-bar="agents" style="margin-bottom:16px"></div>
 
-    <div class="zone" id="zoneApprovals">
-        <div class="zone-header">
-            <span class="zone-title">Waiting for your approval</span>
-            <span class="zone-count" id="approvalsCount">0</span>
-            <span class="zone-sub">Loop-raised work only. Nothing is sent, filed or actioned until you decide.</span>
-        </div>
-        <div id="approvalsBody"><div class="zone-loading"><div class="sop-spinner"></div><span>Loading the approval queue…</span></div></div>
+    <div class="page-tabs" role="tablist">
+        <button class="page-tab active" id="ptab-dashboard" role="tab" aria-selected="true" onclick="switchAgentsView('dashboard')">Dashboard</button>
+        <button class="page-tab" id="ptab-approvals" role="tab" aria-selected="false" onclick="switchAgentsView('approvals')">Approvals <span class="page-tab-badge" id="approvalsTabBadge" style="display:none">0</span></button>
+        <button class="page-tab" id="ptab-ceo-brief" role="tab" aria-selected="false" onclick="switchAgentsView('ceo-brief')">CEO Brief</button>
     </div>
 
-    <div class="zone" id="zoneChecks">
-        <div class="zone-header">
-            <span class="zone-title">Check these</span>
-            <span class="zone-count" id="checksCount">0</span>
-            <span class="zone-sub">What should have moved and has not. Absence, not successes.</span>
+    <div class="page-view active" id="view-dashboard">
+        <div class="zone" id="zoneChecks">
+            <div class="zone-header">
+                <span class="zone-title">Check these</span>
+                <span class="zone-count" id="checksCount">0</span>
+                <span class="zone-sub">What should have moved and has not. Absence, not successes.</span>
+            </div>
+            <div id="checksBody"><div class="zone-loading"><div class="sop-spinner"></div><span>Working out what has not moved…</span></div></div>
         </div>
-        <div id="checksBody"><div class="zone-loading"><div class="sop-spinner"></div><span>Working out what has not moved…</span></div></div>
+
+        <div class="zone" id="zoneRegister">
+            <div class="zone-header">
+                <span class="zone-title">Your AI team</span>
+                <span class="zone-count" id="registerCount">0</span>
+                <span class="zone-sub">One scorecard per agent: accuracy, guardrails, workload, and what it last did.</span>
+            </div>
+            <div id="registerBody"><div class="zone-loading"><div class="sop-spinner"></div><span>Loading the agents register…</span></div></div>
+        </div>
     </div>
 
-    <div class="zone" id="zoneRegister">
-        <div class="zone-header">
-            <span class="zone-title">Workforce register</span>
-            <span class="zone-count" id="registerCount">0</span>
-            <span class="zone-sub">Every agent, its guardrails, its workload and its score.</span>
+    <div class="page-view" id="view-approvals">
+        <div class="zone" id="zoneApprovals">
+            <div class="zone-header">
+                <span class="zone-title">Waiting for your approval</span>
+                <span class="zone-count" id="approvalsCount">0</span>
+                <span class="zone-sub">Loop-raised work only. Nothing is sent, filed or actioned until you decide.</span>
+            </div>
+            <div id="approvalsBody"><div class="zone-loading"><div class="sop-spinner"></div><span>Loading the approval queue…</span></div></div>
         </div>
-        <div id="registerBody"><div class="zone-loading"><div class="sop-spinner"></div><span>Loading the agents register…</span></div></div>
+    </div>
+
+    <div class="page-view" id="view-ceo-brief">
+        <div class="zone" id="zoneCeoBrief">
+            <div id="ceoBriefBody"><div class="zone-loading"><div class="sop-spinner"></div><span>Loading the CEO brief…</span></div></div>
+        </div>
     </div>
 </div>
 
@@ -331,6 +381,26 @@ const ALOG = {
     summary:   'fld0vrdlfSiZjR6wg',
     decisions: 'fldTwM2eJvNyUibi4',
 };
+// CEO Briefs — the daily brief the 09:00 worker writes. Rendered on this
+// page's CEO Brief tab since 25 Aug 2026 (moved from the shell tab and
+// js/ceo-brief.js, which was deleted). The IDs are duplicated from
+// js/config.js (TABLES.ceoBriefs / F.ceo*) because this page cannot load
+// config.js; config.js stays the drift monitor's source of truth, and
+// tests/ceo-brief-ids-drift.test.js fails if the two copies disagree.
+const CEOB_TBL = 'tblIxbzDSOCI5hqJn';
+const CEOB = {
+    date:        'fldzLwBd3Mjg7rDxM',
+    oneThing:    'fldQDCAcd74Bb6mpY',
+    firstStep:   'fld4O4EuxHzMWARV7',
+    why:         'fldqooUbDCQ4yNlWQ',
+    ignoreToday: 'fldmC5AYRaJdfyFGx',
+    boardFlags:  'fldS7ZoGAS7sAJfJq',
+    handedOff:   'fld9PQ10p8V4N8Y0U',
+    moneyLight:  'fldBIbjpHlA2QmVbO',
+    safeToAct:   'fldQ4JEWYpHpI2KDs',
+    fullBrief:   'fldPkiaWvmYAoyHEl',
+};
+
 const AG_STAGE_FIELDS = { A:AG.aim, G:AG.goSignal, E:AG.entryPoints, N:AG.navigate, T:AG.tools, I:AG.inspections, C:AG.conclusion };
 const AGENT_STATUSES = ['Planned','Building','Built','Live','Paused'];
 const AGENT_STATUS_META = {
@@ -397,8 +467,13 @@ function stageNaAllowed(def, human){ return !!def.naAllowed[human ? 'human' : 'a
 // State
 // ═══════════════════════════════════════════════════════════════════════
 let PAT = '';
+const AGENT_VIEWS = ['dashboard','approvals','ceo-brief'];
+let _agentsView = 'dashboard';  // which page tab is showing
 let allApprovals = [];          // loop-raised tasks at Status Approval
 let _approvalsState = 'idle';   // idle | loading | ready | 'error: <message>'
+let _apvAgentFilter = '';       // Team Member id, or '' = every agent
+let ceoBriefRecords = null;     // CEO Briefs rows, newest first
+let _ceoBriefState = 'idle';
 let allOpenTasks = [];          // all non-Completed/non-Cancelled tasks (Check zone feeds)
 let _openTasksState = 'idle';
 let allAgents = [];             // rows from AGENTS_TBL
@@ -476,6 +551,33 @@ function restoreSearchFocus(){
 // ═══════════════════════════════════════════════════════════════════════
 // Auth
 // ═══════════════════════════════════════════════════════════════════════
+// ── Page tabs (Dashboard | Approvals | CEO Brief) ──────────────────────
+function switchAgentsView(view){
+    if(AGENT_VIEWS.indexOf(view)===-1) view='dashboard';
+    _agentsView = view;
+    AGENT_VIEWS.forEach(v=>{
+        const pane = document.getElementById('view-'+v);
+        const btn = document.getElementById('ptab-'+v);
+        if(pane) pane.classList.toggle('active', v===view);
+        if(btn){ btn.classList.toggle('active', v===view); btn.setAttribute('aria-selected', v===view?'true':'false'); }
+    });
+    // Re-render the view being entered from data already in memory (no
+    // fetch). The old shell re-rendered the CEO Brief on every tab open;
+    // without this, a page left open overnight keeps labelling yesterday's
+    // brief TODAY, and the approvals waiting-times freeze.
+    if(view==='ceo-brief' && _ceoBriefState==='ready') renderCeoBrief();
+    if(view==='approvals' && _approvalsState==='ready') renderApprovals();
+    window.scrollTo(0,0);
+}
+window.switchAgentsView = switchAgentsView;
+
+// Jump to the Approvals tab already filtered to one agent (scorecard link).
+function filterApprovalsFor(tmId){
+    setApvAgentFilter(tmId || '');
+    switchAgentsView('approvals');
+}
+window.filterApprovalsFor = filterApprovalsFor;
+
 function bootAuth(){
     try { if(window.parent && window.parent!==window && window.parent.PAT){ PAT=window.parent.PAT; return true; } } catch(e){/* best-effort: safe fallback */}
     const stored=localStorage.getItem('_dlr_pat');
@@ -657,12 +759,50 @@ function apvSummary(raw){
     return '';
 }
 
+// The Approvals tab badge mirrors the zone count so the number shows even
+// when another tab is open. On a broken read it must show '?' — a hidden
+// badge over an unknown queue reads as "nothing waiting".
+function updateApprovalsTabBadge(){
+    const badge = document.getElementById('approvalsTabBadge');
+    if(!badge) return;
+    if(String(_approvalsState).indexOf('error') === 0){
+        badge.textContent = '?';
+        badge.style.display = '';
+        return;
+    }
+    const n = allApprovals.length;
+    badge.textContent = n;
+    badge.style.display = n ? '' : 'none';
+}
+
+// Half-typed notes and chosen work types, keyed by task id. Page-level so a
+// draft survives ANY re-render, including one whose filter hides the card it
+// belongs to (a per-render snapshot lost exactly that case).
+const _apvDrafts = {};
+function snapshotApprovalDrafts(){
+    allApprovals.forEach(t=>{
+        const n = document.getElementById('apvNote-'+t.id);
+        if(n) _apvDrafts[t.id] = Object.assign(_apvDrafts[t.id]||{}, { note: n.value });
+        const ty = document.getElementById('apvType-'+t.id);
+        if(ty) _apvDrafts[t.id] = Object.assign(_apvDrafts[t.id]||{}, { type: ty.value });
+    });
+}
+function restoreApprovalDrafts(){
+    Object.entries(_apvDrafts).forEach(([id,d])=>{
+        const n = document.getElementById('apvNote-'+id);
+        if(n && d.note) n.value = d.note;
+        const ty = document.getElementById('apvType-'+id);
+        if(ty && d.type) ty.value = d.type;
+    });
+}
+
 function renderApprovals(){
     const body = document.getElementById('approvalsBody');
     const countEl = document.getElementById('approvalsCount');
     if(String(_approvalsState).indexOf('error') === 0){
         countEl.textContent = '?';
         countEl.className = 'zone-count hot';
+        updateApprovalsTabBadge();
         body.innerHTML = `<div class="zone-error">Could not load the approval queue: ${esc(String(_approvalsState).slice(7))}
             <button class="btn btn-sm" style="margin-left:8px" onclick="refreshAll()">Retry</button></div>`;
         return;
@@ -673,12 +813,51 @@ function renderApprovals(){
     }
     countEl.textContent = allApprovals.length;
     countEl.className = 'zone-count' + (allApprovals.length ? ' hot' : '');
+    updateApprovalsTabBadge();
     if(!allApprovals.length){
+        _apvAgentFilter = '';
         body.innerHTML = `<div class="empty-state"><p>Nothing is waiting for your approval.</p></div>`;
         return;
     }
-    body.innerHTML = allApprovals.map(apvCardHtml).join('');
+
+    snapshotApprovalDrafts();
+
+    // Group by the agent that raised each task; groups keep the queue's
+    // oldest-first order (the longest-suffering agent's group leads).
+    const groups = [];
+    const byKey = {};
+    allApprovals.forEach(t=>{
+        const key = t.raiserId || 'none';
+        if(!byKey[key]){
+            byKey[key] = { key, label: key==='none' ? 'No agent recorded' : (teamName(key)||'Unknown agent'), rows: [] };
+            groups.push(byKey[key]);
+        }
+        byKey[key].rows.push(t);
+    });
+    if(_apvAgentFilter && !byKey[_apvAgentFilter]) _apvAgentFilter = '';
+
+    let html = `<div class="apv-filters">
+        <button class="apv-filter${_apvAgentFilter?'':' active'}" onclick="setApvAgentFilter('')">All (${allApprovals.length})</button>
+        ${groups.map(g=>`<button class="apv-filter${_apvAgentFilter===g.key?' active':''}" onclick="setApvAgentFilter('${esc(g.key)}')">${esc(g.label)} (${g.rows.length})</button>`).join('')}
+    </div>`;
+
+    if(_apvAgentFilter){
+        html += byKey[_apvAgentFilter].rows.map(apvCardHtml).join('');
+    } else {
+        html += groups.map(g=>
+            `<div class="apv-group-head">${esc(g.label)} <span class="zone-count">${g.rows.length}</span></div>`
+            + g.rows.map(apvCardHtml).join('')
+        ).join('');
+    }
+    body.innerHTML = html;
+    restoreApprovalDrafts();
 }
+
+function setApvAgentFilter(key){
+    _apvAgentFilter = key;
+    renderApprovals();
+}
+window.setApvAgentFilter = setApvAgentFilter;
 
 function apvCardHtml(t){
     const summary = apvSummary(t.agentOutput);
@@ -768,12 +947,12 @@ async function applyApprovalDecision(taskId, outcome){
         const liveStatus = selName(gf(live,TF.status));
         if(liveStatus !== 'Approval'){
             toast('Already decided elsewhere (Slack or the Tasks drawer). Reloading the queue.');
-            await loadApprovals(); renderApprovals();
+            await loadApprovals(); renderApprovals(); renderRegister();
             return;
         }
         if(liveLmt !== String(t.lmt||'')){
             toast('Not applying that. This task changed after it was shown here, so reload and read it again first.');
-            await loadApprovals(); renderApprovals();
+            await loadApprovals(); renderApprovals(); renderRegister();
             return;
         }
 
@@ -816,9 +995,11 @@ async function applyApprovalDecision(taskId, outcome){
         await postTaskComment(taskId, line);
 
         allApprovals = allApprovals.filter(x=>x.id!==taskId);
+        delete _apvDrafts[taskId];
         renderApprovals();
         postApprovalBadge();
         loadChecksAndRender(); // approvals feed the >24h check — keep it honest
+        renderRegister();      // the scorecards' "Waiting on you" counts read allApprovals
         if(!t.raiserId) toast('Recorded, but no agent was linked to this task, so it could not be handed back.');
         else toast(outcome==='Rejected' ? 'Rejected and closed.' : `${outcome} — back to ${agentLabel}.`);
     } catch(e){
@@ -838,6 +1019,166 @@ function postApprovalBadge(){
             window.parent.postMessage({ type:'agentsApprovalCount', count: allApprovals.length }, '*');
         }
     } catch(e){ /* standalone page — no parent to tell */ }
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// CEO BRIEF tab — the AI CEO's daily direction
+// ═══════════════════════════════════════════════════════════════════════
+// Shows the same brief the 09:00 Slack DM delivers, plus history. The brief
+// is WRITTEN by the money-confidence-daily Cloudflare worker (scripts/
+// slack-automation/money-daily-worker.js) into the CEO Briefs table; this
+// tab only READS. Discussion happens in Slack by design (Kevin, 28 Jul
+// 2026) — the tab is the record, Slack is the conversation. Ported from
+// js/ceo-brief.js (deleted) when the brief moved into this page, 25 Aug 2026.
+
+async function loadCeoBriefs(){
+    _ceoBriefState = 'loading';
+    try {
+        ceoBriefRecords = await atFetch(CEOB_TBL, null, {
+            'sort[0][field]': CEOB.date, 'sort[0][direction]': 'desc', maxRecords: '30',
+        });
+        _ceoBriefState = 'ready';
+    } catch(e){
+        if(e.message==='auth') throw e;
+        _ceoBriefState = 'error: ' + (e.message||'load failed');
+        // The error card sits in a pane that may be hidden — the toast is the
+        // always-visible signal the old shell tab gave (showToast there).
+        toast('Could not load the CEO briefs');
+    }
+}
+
+function ceoBriefTodayISO(){
+    return new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/London' }).format(new Date());
+}
+
+// A brief is written in TWO stages, so "a record exists for today" does not
+// mean "today's brief is ready". The 07:30 department huddle writes the
+// record first with only One Thing, First Step and Board Flags; the 09:00
+// worker then PATCHes in the money light, safe-to-act figure, why,
+// ignore-today and handed-off. Full Brief is the marker for stage two, and
+// the worker uses exactly this test on the write side, so both halves of
+// the pipeline agree on what "finished" means.
+function ceoBriefIsComplete(rec){
+    return Boolean((rec && rec.fields || {})[CEOB.fullBrief]);
+}
+
+// A brief the worker stored AFTER the CEO layer failed (money message sent
+// instead). Full Brief is populated so the 10:00/11:00 retries stop, but
+// the health bar must not call it a good morning.
+function ceoBriefIsFallback(rec){
+    try { return Boolean(JSON.parse((rec && rec.fields || {})[CEOB.fullBrief] || '{}').fallback); }
+    catch(e){ return false; }
+}
+
+// Saturday or Sunday for a YYYY-MM-DD string, read as a calendar date rather
+// than through the browser's own timezone.
+function ceoBriefIsWeekendDate(iso){
+    const d = new Date(`${iso}T00:00:00Z`).getUTCDay();
+    return d === 0 || d === 6;
+}
+
+// Today's record. Prefer a finished row over a stub when a past bug left two
+// rows for one day, so the tab and the health checks agree with the worker.
+function ceoBriefTodayRecord(recs, today){
+    const rows = (recs || []).filter(r => (r.fields || {})[CEOB.date] === today);
+    return rows.find(ceoBriefIsComplete) || rows[0] || null;
+}
+
+function ceoLightBadge(light){
+    const map = {
+        green: ['var(--success)', 'var(--success-bg)', 'GREEN'],
+        amber: ['var(--warning)', 'var(--warning-bg)', 'AMBER'],
+        red:   ['var(--danger)',  'var(--danger-bg)',  'RED'],
+    };
+    const pick = map[light] || ['var(--text-muted)', 'var(--bg-subtle)', '—'];
+    return `<span style="color:${pick[0]};background:${pick[1]};padding:2px 10px;border-radius:var(--radius-full);font-size:var(--fs-xs);font-weight:var(--fw-semibold)">${pick[2]}</span>`;
+}
+
+function renderCeoBriefCard(rec, isToday){
+    const f = rec.fields || {};
+    const flags = String(f[CEOB.boardFlags] || '').split('\n').filter(Boolean);
+    const ignore = String(f[CEOB.ignoreToday] || '').split('\n').filter(Boolean);
+    const handed = String(f[CEOB.handedOff] || '').split('\n').filter(Boolean);
+    const money = f[CEOB.safeToAct] != null
+        ? `£${Number(f[CEOB.safeToAct]).toLocaleString('en-GB', { minimumFractionDigits: 2 })}` : '—';
+    // Stage one only: show what the 07:30 huddle decided and say plainly that
+    // the money light and the reasoning land at 9am, rather than printing two
+    // dashes and letting the card read as finished.
+    const provisional = !ceoBriefIsComplete(rec);
+    // A weekend stub is final: the huddle ran, the 9am robot never runs at
+    // the weekend by design, so nothing is coming.
+    const weekendStub = provisional && ceoBriefIsWeekendDate(String(f[CEOB.date] || ''));
+    const fallback = ceoBriefIsFallback(rec);
+    const statusHtml = weekendStub
+        ? `<span style="font-size:var(--fs-xs);color:var(--text-secondary);background:var(--bg-subtle);padding:2px 10px;border-radius:var(--radius-full)">Weekend huddle · no 9am brief at weekends</span>`
+        : provisional
+        ? `<span style="font-size:var(--fs-xs);color:var(--text-secondary);background:var(--bg-subtle);padding:2px 10px;border-radius:var(--radius-full)">Morning huddle · money light and reasoning land at 9am</span>`
+        : `${fallback ? `<span style="font-size:var(--fs-xs);color:var(--warning);background:var(--warning-bg);padding:2px 10px;border-radius:var(--radius-full)">Brief failed · money message sent instead</span>` : ''}${ceoLightBadge(f[CEOB.moneyLight])}<span style="font-size:var(--fs-xs);color:var(--text-secondary)">Safe to act: <strong>${esc(money)}</strong></span>`;
+    return `
+    <div style="background:var(--bg-surface);border:1px solid ${isToday ? 'var(--accent)' : 'var(--border-default)'};border-radius:var(--radius-lg);padding:var(--space-5);margin-bottom:var(--space-4);box-shadow:var(--shadow-sm)">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:var(--space-3);flex-wrap:wrap">
+            <div style="font-size:var(--fs-xs);color:var(--text-muted);font-weight:var(--fw-medium)">${esc(f[CEOB.date] || '')}${isToday ? ' · TODAY' : ''}${provisional && !weekendStub ? ' · NOT FINISHED' : ''}</div>
+            <div style="display:flex;align-items:center;gap:var(--space-2)">${statusHtml}</div>
+        </div>
+        <div style="margin-top:var(--space-3);font-size:var(--fs-lg);font-weight:var(--fw-bold);color:var(--text-primary)">${esc(f[CEOB.oneThing] || '')}</div>
+        ${f[CEOB.firstStep] ? `<div style="margin-top:var(--space-2);padding:var(--space-3);background:var(--accent-soft);border-radius:var(--radius-md);font-size:var(--fs-sm);color:var(--text-primary)"><strong>Start here (10 min):</strong> ${esc(f[CEOB.firstStep])}</div>` : ''}
+        ${f[CEOB.why] ? `<div style="margin-top:var(--space-3);font-size:var(--fs-sm);color:var(--text-secondary)"><strong>Why this wins:</strong> ${esc(f[CEOB.why])}</div>` : ''}
+        ${handed.length ? `<div style="margin-top:var(--space-3);padding:var(--space-3);background:var(--bg-surface-2);border-radius:var(--radius-md);font-size:var(--fs-sm);color:var(--text-secondary)"><strong style="color:var(--text-primary)">Not yours today, handed off:</strong><ul style="margin:var(--space-1) 0 0 var(--space-5);padding:0">${handed.map(h => `<li>${esc(h)}</li>`).join('')}</ul></div>` : ''}
+        ${ignore.length ? `<div style="margin-top:var(--space-3);font-size:var(--fs-sm);color:var(--text-muted)"><strong>Ignore today:</strong><ul style="margin:var(--space-1) 0 0 var(--space-5);padding:0">${ignore.map(i => `<li>${esc(i)}</li>`).join('')}</ul></div>` : ''}
+        ${flags.map(fl => `<div style="margin-top:var(--space-2);font-size:var(--fs-sm);color:var(--warning);background:var(--warning-bg);padding:var(--space-2) var(--space-3);border-radius:var(--radius-md)">⚑ ${esc(fl)}</div>`).join('')}
+    </div>`;
+}
+
+function renderCeoBrief(){
+    const el = document.getElementById('ceoBriefBody');
+    if(!el) return;
+    if(String(_ceoBriefState).indexOf('error') === 0){
+        el.innerHTML = `<div class="zone-error">Could not load the CEO briefs: ${esc(String(_ceoBriefState).slice(7))}
+            <button class="btn btn-sm" style="margin-left:8px" onclick="refreshAll()">Retry</button></div>`;
+        return;
+    }
+    if(_ceoBriefState !== 'ready'){
+        el.innerHTML = `<div class="zone-loading"><div class="sop-spinner"></div><span>Loading the CEO brief…</span></div>`;
+        return;
+    }
+    const recs = ceoBriefRecords || [];
+    const today = ceoBriefTodayISO();
+    const todayRec = ceoBriefTodayRecord(recs, today);
+    const history = recs.filter(r => r !== todayRec);
+    // London's weekend, not the viewer's. The rest of the tab keys on the
+    // London date, and a viewer abroad around midnight saw the wrong branch.
+    const isWeekend = ceoBriefIsWeekendDate(today);
+
+    let todayHtml;
+    if(todayRec){
+        // A stage-one record still gets shown — the one thing and the first
+        // step are the most useful part of the brief — but it is labelled,
+        // and the note below says what is still coming.
+        const stubNote = ceoBriefIsComplete(todayRec) ? ''
+            : isWeekend
+            ? `<div style="background:var(--bg-subtle);border-radius:var(--radius-md);padding:var(--space-3);margin-bottom:var(--space-3);font-size:var(--fs-sm);color:var(--text-secondary)">The board huddled this morning. There is no 9am brief at the weekend, so this is the whole of today's note.</div>`
+            : `<div style="background:var(--bg-subtle);border-radius:var(--radius-md);padding:var(--space-3);margin-bottom:var(--space-3);font-size:var(--fs-sm);color:var(--text-secondary)">This is the morning huddle's call, not the finished brief. The money light, the safe-to-act figure and the reasoning arrive at 9am with the Slack DM.</div>`;
+        todayHtml = stubNote + renderCeoBriefCard(todayRec, true);
+    } else if(isWeekend){
+        todayHtml = `<div style="background:var(--bg-surface);border:1px solid var(--border-default);border-radius:var(--radius-lg);padding:var(--space-5);color:var(--text-secondary);font-size:var(--fs-sm)">No brief today — the CEO writes briefs on weekday mornings at 9am. Enjoy the weekend.</div>`;
+    } else {
+        todayHtml = `<div style="background:var(--warning-bg);border:1px solid var(--border-default);border-radius:var(--radius-lg);padding:var(--space-5);color:var(--text-primary);font-size:var(--fs-sm)">⚠️ Today's brief has not arrived yet. It is written at 9am on weekdays. If it is past 9:15am, check the Slack DM — if that is missing too, the morning robot needs looking at.</div>`;
+    }
+
+    el.innerHTML = `<div style="max-width:860px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:var(--space-4);flex-wrap:wrap;gap:var(--space-2)">
+            <h2 style="margin:0;font-size:var(--fs-2xl);font-weight:var(--fw-bold);color:var(--text-primary)">☀️ CEO Brief</h2>
+            <div style="display:flex;align-items:center;gap:var(--space-3);font-size:var(--fs-xs);color:var(--text-muted)">
+                <span>Written 9am weekdays · reply in the Slack DM to talk it through</span>
+                <a href="../../ceo-brief-workflow.html" target="_blank" rel="noopener" title="Visual map of how the CEO Brief works, step by step" style="display:inline-flex;align-items:center;gap:4px;padding:4px 10px;border:1px solid var(--border-default);border-radius:var(--radius-md);background:var(--bg-surface);color:var(--accent);font-weight:var(--fw-semibold);text-decoration:none">📖 How it works</a>
+            </div>
+        </div>
+        ${todayHtml}
+        ${history.length ? `
+        <div style="margin-top:var(--space-6);font-size:var(--fs-sm);font-weight:var(--fw-semibold);color:var(--text-secondary);margin-bottom:var(--space-3)">Previous briefs</div>
+        ${history.map(r => renderCeoBriefCard(r, false)).join('')}` : ''}
+        ${!recs.length ? `<div style="margin-top:var(--space-4);color:var(--text-muted);font-size:var(--fs-sm)">No briefs stored yet. The first one lands the next weekday morning at 9am.</div>` : ''}
+    </div>`;
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -993,7 +1334,48 @@ function computeCheckLanes(){
         lanes.push({ lane:'Guardrails', items });
     }
 
+    // 6. Possible duplicate open tasks — same agent, same subject. Kevin's
+    // standing rule: one subject = one open task; chasers and follow-ups
+    // update the existing task instead of raising siblings.
+    if(String(_openTasksState).indexOf('error') === 0){
+        lanes.push({ lane:'Duplicates', error: String(_openTasksState).slice(7) });
+    } else {
+        const buckets = {};
+        allOpenTasks.forEach(r=>{
+            const tmIds = linkIds(gf(r,TF.teamMember));
+            const owner = tmIds.find(id=>aiAgentIds.has(id));
+            if(!owner) return;
+            const key = dupeTaskKey(gf(r,TF.name));
+            if(!key) return;
+            (buckets[owner+'|'+key] = buckets[owner+'|'+key] || []).push(r);
+        });
+        const items = [];
+        Object.values(buckets).forEach(rows=>{
+            if(rows.length < 2) return;
+            const owner = linkIds(gf(rows[0],TF.teamMember)).find(id=>aiAgentIds.has(id));
+            items.push({
+                severity: 'warn',
+                text: `${teamName(owner)||'An agent'} has ${rows.length} open tasks that look like the same job: "${gf(rows[0],TF.name)||'(Untitled)'}".`,
+                detail: 'One subject = one open task. Fold the updates into a single task and close the rest.',
+            });
+        });
+        lanes.push({ lane:'Duplicates', items });
+    }
+
     return lanes;
+}
+
+// The duplicate key: lowercase the task name, strip punctuation, then drop
+// pure numbers and reference-like tokens (letters mixed with 3+ digits) so
+// "Chase Acme invoice #2" and "Chase Acme invoice #3" collide. Two digits
+// stays — that is a brand (v12), three or more is a reference. Same lesson
+// as the reconciliation vendor key (see Known Anti-Patterns).
+function dupeTaskKey(name){
+    return String(name||'').toLowerCase()
+        .replace(/[^a-z0-9\s]/g,' ')
+        .split(/\s+/)
+        .filter(w=>w && !/^\d+$/.test(w) && !/^(?=(?:[^\d]*\d){3,})[a-z\d]+$/.test(w))
+        .join(' ').trim();
 }
 
 function loadChecksAndRender(){
@@ -1111,17 +1493,6 @@ function computeAgentTaskStats(recs){
         ? window.AgentAccuracy.computeAgentAccuracy(hist, names) : [];
 }
 
-// Never blend per-task-type rates into one number (js/agent-accuracy.js's
-// rule: a blended score hides a weak task type). One type shows its rate;
-// several show the WORST, which is the honest headline. Detail is per type.
-function agentAccuracySummary(tmId){
-    const rows = _agentAccuracyRows.filter(r=>r.agentId===tmId);
-    if(!rows.length) return null;
-    if(rows.length===1) return { text: Math.round(rows[0].rate*100)+'% ('+rows[0].total+')' };
-    const worst = Math.min.apply(null, rows.map(r=>r.rate));
-    return { text: 'worst '+Math.round(worst*100)+'% · '+rows.length+' types' };
-}
-
 // One workload formatter for the register table, the strategic chips and the
 // panel, so the three surfaces can never show different numbers.
 function agentWorkloadText(tmIds){
@@ -1169,6 +1540,70 @@ function agentWorkloadCell(tmIds){
 }
 
 // ── The register (Zone C body) ─────────────────────────────────────────
+
+// Most recent AI Agent Daily Log date for a register row — "when it last
+// fired". allDailyLogRows is sorted newest first, so the first match wins.
+function lastLogDate(agentId){
+    if(_dailyLogState !== 'ready') return null;
+    const row = allDailyLogRows.find(r=>linkIds(gf(r,ALOG.agent)).includes(agentId));
+    return row ? String(gf(row,ALOG.date)||'').slice(0,10) : null;
+}
+
+// One scorecard per role agent: status, guardrails, accuracy per kind of
+// work (worst first — a blended number hides a weak type), workload, what
+// is waiting on Kevin, and when it last wrote its daily log.
+function agentScorecardHtml(a){
+    const sel = a.id===selectedAgentId;
+    const status = selName(gf(a,AG.status))||'Planned';
+    const meta = AGENT_STATUS_META[status] || AGENT_STATUS_META.Planned;
+    const tmIds = gf(a,AG.teamMember)||[];
+    const tmId = tmIds[0] || '';
+
+    let accHtml = '<span style="color:var(--text-muted)" title="No approval history matched for this agent yet. If the dashboard card shows decisions, a field rename broke this read.">&mdash;</span>';
+    if(tmId && _agentAccuracyOk){
+        const rows = _agentAccuracyRows.filter(r=>r.agentId===tmId).sort((x,y)=>x.rate-y.rate);
+        if(rows.length){
+            const shown = rows.slice(0,3).map(r=>`${esc(r.taskType)} ${Math.round(r.rate*100)}% (${r.total})`);
+            accHtml = shown.join('<br>') + (rows.length>3 ? `<br><span style="color:var(--text-muted)">+${rows.length-3} more types</span>` : '');
+        }
+    }
+
+    const band = tmId ? guardrailBand(tmId) : null;
+    const guardrail = selName(gf(a,AG.guardrail))||'Not set';
+    const metric = gf(a,AG.metricScore);
+    const fired = lastLogDate(a.id);
+
+    // A broken feed must never read as a clean zero (trust surfaces report
+    // absence, not silence) — say "unavailable", not "Nothing"/"Never".
+    const apvBroken = String(_approvalsState).indexOf('error') === 0;
+    const logBroken = String(_dailyLogState).indexOf('error') === 0;
+    const waiting = (!apvBroken && tmId) ? allApprovals.filter(t=>t.raiserId===tmId).length : 0;
+    const waitingHtml = apvBroken
+        ? '<span class="sc-val warn" title="The approval queue could not be read — the count is unknown, not zero.">unavailable</span>'
+        : waiting
+        ? `<span class="sc-wait-link" onclick="event.stopPropagation();filterApprovalsFor('${esc(tmId)}')">${waiting} to approve &rarr;</span>`
+        : '<span style="color:var(--text-muted)">Nothing</span>';
+    const firedHtml = logBroken
+        ? '<span class="sc-val warn" title="The daily log could not be read — unknown, not silent.">unavailable</span>'
+        : fired
+        ? `${esc(fired)}${fired===todayStr()?' <span style="color:var(--success)">(today)</span>':''}`
+        : '<span style="color:var(--text-muted)" title="No daily log rows for this agent yet.">Never logged</span>';
+
+    return `<div class="sc-card${sel?' selected':''}" onclick="selectRoleAgent('${a.id}')" aria-expanded="${sel?'true':'false'}">
+        <div class="sc-head">
+            <span class="sc-name">${esc(gf(a,AG.name)||'Untitled')}</span>
+            <span class="agent-pill" style="background:${meta.bg};color:${meta.fg}">${esc(status)}</span>
+        </div>
+        <div class="sc-goal">${esc(String(gf(a,AG.goal)||'').split('\n')[0])}</div>
+        <div class="sc-row"><span class="sc-label">Guardrails</span><span class="sc-val" ${band?`title="${esc(band.why)}"`:''}>${esc(guardrail)}</span></div>
+        <div class="sc-row"><span class="sc-label">Accuracy</span><span class="sc-val">${accHtml}</span></div>
+        <div class="sc-row"><span class="sc-label">Workload</span><span class="sc-val">${agentWorkloadCell(tmIds)}</span></div>
+        <div class="sc-row"><span class="sc-label">Metric</span><span class="sc-val">${metric?`<span title="${esc(String(metric))}">${esc(String(metric).split('\n')[0])}</span>`:`<span style="color:var(--text-muted)" title="Target: ${esc(String(gf(a,AG.scoreMetric)||'not set'))}. The agent's own runtime fills this in once built.">&mdash;</span>`}</span></div>
+        <div class="sc-row"><span class="sc-label">Waiting on you</span><span class="sc-val">${waitingHtml}</span></div>
+        <div class="sc-row"><span class="sc-label">Last fired</span><span class="sc-val">${firedHtml}</span></div>
+    </div>`;
+}
+
 function wfMatchesQuery(w, q){
     q = (q||'').trim().toLowerCase();
     if(!q) return true;
@@ -1230,32 +1665,7 @@ function renderRegister(){
             ? `<div class="empty-state"><p>No role agents match "${esc(_registerSearch)}".</p></div>`
             : `<div class="empty-state"><p>No role agents yet.</p><p>Use "+ Create an agent" and the AI will walk you through the ${AGENTIC_STAGES.length} AGENTIC questions.</p></div>`;
     } else {
-        html += `<table class="wf-grid" style="margin-bottom:14px"><thead><tr>
-            <th style="width:16%">Agent</th>
-            <th>Goal</th>
-            <th style="width:110px">Guardrails</th>
-            <th style="width:80px">Status</th>
-            <th style="width:90px">Metric</th>
-            <th style="width:120px">Workload</th>
-            <th style="width:90px">Accuracy</th>
-        </tr></thead><tbody>`;
-        roleAgents.forEach(a=>{
-            const sel = a.id===selectedAgentId;
-            const status = selName(gf(a,AG.status))||'Planned';
-            const meta = AGENT_STATUS_META[status] || AGENT_STATUS_META.Planned;
-            const tmIds = gf(a,AG.teamMember)||[];
-            const acc = (tmIds.length && _agentAccuracyOk) ? agentAccuracySummary(tmIds[0]) : null;
-            html += `<tr style="${sel?'background:var(--accent-soft);':''}cursor:pointer" onclick="selectRoleAgent('${a.id}')" aria-expanded="${sel?'true':'false'}">
-                <td style="font-weight:var(--fw-semibold)">${esc(gf(a,AG.name)||'Untitled')}</td>
-                <td style="font-size:var(--fs-xs);color:var(--text-secondary);overflow:hidden;text-overflow:ellipsis">${esc(String(gf(a,AG.goal)||'').split('\n')[0])}</td>
-                <td style="font-size:var(--fs-xs)">${esc(selName(gf(a,AG.guardrail))||'Not set')}</td>
-                <td><span class="agent-pill" style="background:${meta.bg};color:${meta.fg}">${esc(status)}</span></td>
-                <td style="font-size:var(--fs-xs)">${gf(a,AG.metricScore)?esc(String(gf(a,AG.metricScore))):`<span style="color:var(--text-muted)" title="Target: ${esc(String(gf(a,AG.scoreMetric)||'not set'))}. The agent's own runtime fills this in once built.">&mdash;</span>`}</td>
-                <td>${agentWorkloadCell(tmIds)}</td>
-                <td style="font-size:var(--fs-xs)">${acc ? esc(acc.text) : '<span style="color:var(--text-muted)" title="No approval history matched for this agent yet. If the dashboard card shows decisions, a field rename broke this read.">&mdash;</span>'}</td>
-            </tr>`;
-        });
-        html += '</tbody></table>';
+        html += `<div class="sc-grid">${roleAgents.map(agentScorecardHtml).join('')}</div>`;
     }
     if(selectedAgentId) html += `<div id="roleagent-panel"></div>`;
 
@@ -1368,6 +1778,7 @@ function buildAgentPrompt(a){
         'SCORE: '+(gf(a,AG.scoreMetric)||'(not set)')+(gf(a,AG.metricScore)?' (currently '+gf(a,AG.metricScore)+')':''),
         'GUARDRAILS: '+gl+(glDef?' - '+glDef.blurb:''),
         'Always ask first: money, deleting things, and anything only the owner can own.',
+        'NO DUPLICATES: one subject = one open task. Before creating any task, search for an existing open task on the same subject and update that one instead. Chasers, follow-ups and new developments on a matter are appended to its existing task, never raised as new tasks.',
         '',
         'THE JOB (AGENTIC):',
     ];
@@ -2646,6 +3057,65 @@ function registerAgentsSyncBar(){
                 }
             },
             {
+                name: 'CEO Briefs table reachable', kind: 'sync', run: () => {
+                    if(String(_ceoBriefState).indexOf('error') === 0) return { status:'fail', detail:String(_ceoBriefState).slice(7) };
+                    if(_ceoBriefState !== 'ready') return { status:'warn', detail:'Briefs not loaded yet — press Refresh' };
+                    // The fetch is capped at the latest 30 rows on purpose;
+                    // this is not a count of the table.
+                    return { status:'pass', detail:`Latest ${(ceoBriefRecords||[]).length} brief(s) loaded from the CEO Briefs table` };
+                }
+            },
+            {
+                name: "Today's brief arrived (weekdays after 10am)", kind: 'automation', run: () => {
+                    if(_ceoBriefState !== 'ready') return { status:'warn', detail:'Briefs not loaded yet' };
+                    const today = ceoBriefTodayISO();
+                    if(ceoBriefIsWeekendDate(today)) return { status:'pass', detail:'Weekend — no brief expected' };
+                    const londonHour = Number(new Intl.DateTimeFormat('en-GB', { timeZone:'Europe/London', hour:'numeric', hour12:false }).format(new Date()));
+                    if(londonHour < 10) return { status:'pass', detail:'Before 10am — the brief may still be on its way' };
+                    // The morning huddle leaves a record behind, so "a record
+                    // exists" is not proof the 9am robot ran. Only a finished
+                    // brief counts as arrived.
+                    const rec = ceoBriefTodayRecord(ceoBriefRecords, today);
+                    if(!rec) return { status:'fail', detail:'Missing — check the Slack DM; if that is missing too, the morning robot needs attention' };
+                    if(!ceoBriefIsComplete(rec)) return { status:'fail', detail:'Only the morning huddle landed — the 9am robot did not finish the brief' };
+                    if(ceoBriefIsFallback(rec)) return { status: 'fail', detail:'The CEO brief failed today — only the money message was sent. Check the Slack alert' };
+                    return { status:'pass', detail:'Arrived and stored' };
+                }
+            },
+            {
+                name: 'Latest brief is complete', kind: 'sync', run: () => {
+                    if(_ceoBriefState !== 'ready') return { status:'warn', detail:'Briefs not loaded yet' };
+                    const recs = ceoBriefRecords || [];
+                    if(!recs.length) return { status:'warn', detail:'No briefs stored yet — first one lands next weekday 9am' };
+                    // Judge the latest FINISHED brief. Checking recs[0] blindly
+                    // turned this red every weekday between 7:30 and 9am, when
+                    // today's record is a huddle stub by design.
+                    const latest = recs.find(ceoBriefIsComplete);
+                    if(!latest) return { status:'warn', detail:'Only the morning huddle so far — the 9am brief has not landed yet' };
+                    if(ceoBriefIsFallback(latest)) return { status:'fail', detail:`Latest brief (${(latest.fields||{})[CEOB.date]||''}) is a failure marker — the CEO layer did not run` };
+                    const f = latest.fields || {};
+                    const missing = [['One Thing', CEOB.oneThing], ['First Step', CEOB.firstStep], ['Money Light', CEOB.moneyLight]]
+                        .filter(pair => !f[pair[1]]).map(pair => pair[0]);
+                    if(missing.length) return { status:'fail', detail:'Latest brief missing: ' + missing.join(', ') };
+                    return { status:'pass', detail:'One thing, first step and money light all present' };
+                }
+            },
+            {
+                name: 'Morning robot ran within the last week', kind: 'automation', run: () => {
+                    if(_ceoBriefState !== 'ready') return { status:'warn', detail:'Briefs not loaded yet' };
+                    const recs = ceoBriefRecords || [];
+                    if(!recs.length) return { status:'warn', detail:'No briefs yet — new install' };
+                    // Finished briefs only. A run of 7:30 huddle stubs would
+                    // otherwise keep this green through a week-long outage.
+                    const newest = recs.find(ceoBriefIsComplete);
+                    if(!newest) return { status:'fail', detail:'No finished brief stored — the 9am robot has not completed a run' };
+                    const latest = (newest.fields||{})[CEOB.date] || '';
+                    const age = Math.round((new Date(ceoBriefTodayISO()) - new Date(latest)) / 86400000);
+                    if(age > 6) return { status:'fail', detail:`Latest brief is ${age} days old — the 9am robot has stopped` };
+                    return { status:'pass', detail:`Latest brief: ${latest}` };
+                }
+            },
+            {
                 name: 'Check zones computed', kind: 'automation', run: () => {
                     const lanes = computeCheckLanes();
                     const broken = lanes.filter(l=>l.error).map(l=>l.lane);
@@ -2667,6 +3137,14 @@ function registerAgentsSyncBar(){
 //   sys_open_agent       — process agent (workflow id), via localStorage
 // ═══════════════════════════════════════════════════════════════════════
 function consumeAgentDeepLink(){
+    // #tab=approvals / #tab=ceo-brief / #tab=dashboard — open a page tab
+    // directly (new-tab safe).
+    const tabHash = (location.hash||'').match(/#tab=([a-z-]+)/);
+    if(tabHash){
+        history.replaceState(null,'',location.pathname+location.search);
+        _agentsView = AGENT_VIEWS.indexOf(tabHash[1]) !== -1 ? tabHash[1] : 'dashboard';
+        return true;
+    }
     const hashMatch = (location.hash||'').match(/#agent=(rec[A-Za-z0-9]+)/);
     if(hashMatch){
         history.replaceState(null,'',location.pathname+location.search);
@@ -2704,9 +3182,13 @@ window.addEventListener('message', (e)=>{
     if(e.origin !== 'null' && e.origin !== window.location.origin) return;
     const d = e.data;
     if(!d || d.type !== 'agentsDeepLink') return;
+    // A view request on its own (e.g. the shell's old #ceo-brief hash
+    // forwarding here) just opens that page tab.
+    if(d.view && !d.agent && !d.wf){ switchAgentsView(d.view); return; }
     if(d.agent) selectedAgentId = d.agent;
     else if(d.wf) selectedAgentWf = d.wf;
     else return;
+    switchAgentsView('dashboard'); // agent panels live on the Dashboard tab
     if(_agentsRegisterState==='ready'){
         renderRegister();
         const z = document.getElementById('zoneRegister');
@@ -2736,13 +3218,14 @@ function updateSyncStatus(state, msg){
 }
 
 async function loadEverything(){
-    // The five loads are independent; each records its own error state so one
+    // The six loads are independent; each records its own error state so one
     // broken feed never blanks the others.
     await Promise.all([
         loadApprovals(),
         loadOpenTasks(),
         loadDailyLogs(),
         loadWorkflowData(),
+        loadCeoBriefs(),
         (async ()=>{ _agentsRegisterState='idle'; await loadAgentsRegister(true); })(),
     ]);
 }
@@ -2751,6 +3234,7 @@ function renderAllZones(){
     renderApprovals();
     loadChecksAndRender();
     renderRegister();
+    renderCeoBrief();
 }
 
 async function refreshAll(){
@@ -2791,6 +3275,7 @@ async function start(){
         document.getElementById('topbar').style.display='flex';
         document.getElementById('main').style.display='block';
         document.getElementById('loader').style.display='none';
+        switchAgentsView(_agentsView); // apply any #tab= deep link
         renderAllZones();
         registerAgentsSyncBar();
         updateSyncStatus('ok');

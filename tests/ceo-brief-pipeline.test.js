@@ -16,7 +16,9 @@ const read = (p) => readFileSync(resolve(ROOT, p), 'utf8');
 
 const WORKER = read('scripts/slack-automation/money-daily-worker.js');
 const HUDDLE_PHASE = read('.claude/scheduled-tasks/ceo-huddle/SKILL.md');
-const TAB = read('js/ceo-brief.js');
+// The tab's render moved into the AI Agents page on 25 Aug 2026
+// (js/ceo-brief.js was deleted); the same function names and guards live on.
+const TAB = read('os/agents/index.html');
 
 function loadFn(name) {
   const m = WORKER.match(new RegExp(`function ${name}\\([\\s\\S]*?\\n\\}`));

@@ -30,7 +30,6 @@ on:
       - 'js/ar-variable.js'
       - 'js/arrears.js'
       - 'js/cashflow.js'
-      - 'js/ceo-brief.js'
       - 'js/cfv.js'
       - 'js/coa.js'
       - 'js/costs.js'

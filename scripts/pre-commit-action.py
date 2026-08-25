@@ -54,7 +54,6 @@ FILE_TO_PAGE = {
     'js/transactions.js':   'transactions',
     'js/coa.js':            'coa',
     'ai-brain.html':        'ai-brain',
-    'js/ceo-brief.js':      'ceo-brief',
     # Supporting files that ship page behaviour but had no mapping
     'js/cashflow.js':       'overview',
     'js/arrears.js':        'cfv',
