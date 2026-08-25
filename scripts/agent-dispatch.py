@@ -237,43 +237,97 @@ CEO_REC_ID = "reciHUAEcEkbctnZ6"
 # have completed their own build session and can be DISPATCHED like the 17
 # above. An entry here is a promise the agent's whole touch-set exists —
 # a build session adding one must update ALL of:
-#   1. this dict (one line)
+#   1. this dict (one entry, its registerRow included)
 #   2. ~/.claude/agents/<agent>.md (the local agent definition)
 #   3. AI_AGENT_TEAM_MEMBER_RECS in follow-up.html AND follow-up-supabase.html
 #      (content-equality drift-tested in follow-up-label12-agent-routing)
 #   4. the register row itself: all seven stages, Built/Live status
+#   5. AUTO_ROUTES below, if the agent has a deterministic lane
 # Dispatchability is enforced at runtime against the LIVE register status
 # (require_role_agent_live) — this dict alone never grants work.
+#
+# registerRow lives HERE, in the same entry as the rec id, because agent
+# identity split across parallel constants blocks is exactly the drift
+# constant-drift.test.js exists for (25 Aug 2026 review). The *_REC_ID /
+# *_REGISTER_ROW names below are derived aliases, kept so the many existing
+# readers (and their tests) stay true — never redefine them by hand.
 ROLE_AGENTS = {
     "recJ8J8idWE8d97tH": {"name": "AI Inbound Comms Response",
-                          "agent": "inbound-comms-response", "role": "worker"},
+                          "agent": "inbound-comms-response", "role": "worker",
+                          "registerRow": "recHfhVDb6BfQYco5"},
     "recjh6mmaF8KJW8t3": {"name": "AI Creditor Management",
-                          "agent": "creditor-management", "role": "worker"},
+                          "agent": "creditor-management", "role": "worker",
+                          "registerRow": "recDvxwDGcC3pFbPa"},
     "rec1hYELb4zS8pjjO": {"name": "AI Task Manager",
-                          "agent": "task-manager", "role": "worker"},
+                          "agent": "task-manager", "role": "worker",
+                          "registerRow": "reczg8BygPFnJMQnh"},
 }
 ALL_AGENTS = {**AGENTS, **ROLE_AGENTS}
 
-# The Inbound Comms Response agent's identities. Inbound reply tasks route to
-# it DETERMINISTICALLY (Kevin's ruling, 24 Aug 2026) — no CEO judgement call
-# per routine reply. The CEO roster still routes everything else.
+# Derived aliases — single source is ROLE_AGENTS above.
 RESPONSE_REC_ID = "recJ8J8idWE8d97tH"          # Team Members row
-RESPONSE_REGISTER_ROW = "recHfhVDb6BfQYco5"    # AI Agents register row
-
-# The Creditor Management agent's identities (build session 25 Aug 2026).
-# Creditor and payment-chasing tasks route to it DETERMINISTICALLY, ahead of
-# the generic Response route — Kevin's approval: the inbound comms process
-# sends anything payment-related or creditor-chasing to the specialist.
 CREDITOR_REC_ID = "recjh6mmaF8KJW8t3"          # Team Members row
-CREDITOR_REGISTER_ROW = "recDvxwDGcC3pFbPa"    # AI Agents register row
-
-# The Task Manager agent's identities (build session 25 Aug 2026). It is the
-# board foreman: its own 09:00/13:00/17:00 slot job decides WHAT moves and
-# drives THIS script's per-task commands, so there is exactly one writing
-# muscle. Its approved hand-backs (close proposals, passes to Roy) are carried
-# out by the normal dispatch runs like any other role agent's.
 TASKMGR_REC_ID = "rec1hYELb4zS8pjjO"           # Team Members row
-TASKMGR_REGISTER_ROW = "reczg8BygPFnJMQnh"     # AI Agents register row
+RESPONSE_REGISTER_ROW = ROLE_AGENTS[RESPONSE_REC_ID]["registerRow"]
+CREDITOR_REGISTER_ROW = ROLE_AGENTS[CREDITOR_REC_ID]["registerRow"]
+TASKMGR_REGISTER_ROW = ROLE_AGENTS[TASKMGR_REC_ID]["registerRow"]
+
+# ─── Deterministic routing lanes (ordered, first match wins) ─────────
+#
+# Kevin's rulings: inbound reply tasks go to the Response agent (24 Aug 2026)
+# and creditor/payment-chasing inbound goes to the Creditor Management agent
+# (25 Aug 2026) — no CEO judgement per routine item. Creditor sits FIRST
+# because a creditor email is an inbound task too, and the specialist owns it.
+#
+# "fresh" decides a CEO-lane task that no agent owns yet. "steal" decides
+# whether a task already sitting with agent `tm` moves to this lane's
+# specialist — deliberately narrower, so the CEO's explicit routing decisions
+# are not silently overridden (a dept head ANALYSING a payment-plan question
+# keeps its task). The dispatchable gate (Kevin's register pause lever) is
+# applied uniformly in the helpers below, never per entry.
+#
+# The creditor "fresh" lane is INBOUND-ONLY: the floor patterns are too loose
+# for arbitrary CEO-lane text ("set up a payment plan for the client
+# onboarding fee" is not a debt matter — review finding, 25 Aug 2026).
+# Non-inbound creditor work reaches the specialist via the CEO judgement pass.
+# Its "steal" covers the generalist Response agent and formerly-parked
+# creditor correspondence (t["tier2Correspondence"]) only.
+AUTO_ROUTES = (
+    {"rec": CREDITOR_REC_ID,
+     "fresh": lambda t: t["creditor"] and t["inboundTask"],
+     "steal": lambda t, tm: t["creditor"] and (
+         tm == RESPONSE_REC_ID or t["tier2Correspondence"])},
+    {"rec": RESPONSE_REC_ID,
+     "fresh": lambda t: t["inboundTask"],
+     "steal": None},
+)
+
+
+def auto_route_fresh(t, role_roster):
+    """First dispatchable lane matching an unowned CEO-lane task, or None."""
+    for lane in AUTO_ROUTES:
+        if lane["fresh"](t) and role_roster.get(
+                lane["rec"], {}).get("dispatchable"):
+            return lane["rec"]
+    return None
+
+
+def auto_route_steal(t, tm, role_roster):
+    """A lane's specialist this agent-owned task must MOVE to, or None."""
+    for lane in AUTO_ROUTES:
+        if tm == lane["rec"] or lane["steal"] is None:
+            continue
+        if lane["steal"](t, tm) and role_roster.get(
+                lane["rec"], {}).get("dispatchable"):
+            return lane["rec"]
+    return None
+
+# Task Manager context (build session 25 Aug 2026; identities live in
+# ROLE_AGENTS above): it is the board foreman — its own 09:00/13:00/17:00
+# slot job decides WHAT moves and drives THIS script's per-task commands, so
+# there is exactly one writing muscle. Its approved hand-backs (close
+# proposals, passes to Roy) are carried out by the normal dispatch runs like
+# any other role agent's.
 
 # Fixed-cost metric source (Kevin's metric two, 25 Aug 2026). The active rule
 # MIRRORS isCostActive in js/shared.js — the single rule the Leadership
@@ -894,6 +948,9 @@ def cmd_queue(args):
         hit2 = tier_match(TIER2_PATTERNS, t["name"], t["description"], t["notes"])
         out2 = outbound_intent(t["name"], t["description"],
                                t["notes"]) if hit2 else ""
+        # Stored on the task because the AUTO_ROUTES steal predicates read it
+        # after this loop iteration's locals are gone.
+        t["tier2Correspondence"] = bool(hit2 and out2)
         if hit2 and out2 and not creditor_ok:
             # The old Mica lane survives ONLY as the fallback: while the
             # Creditor Management agent's register row is not Built/Live
@@ -915,39 +972,28 @@ def cmd_queue(args):
         elif not t["outcome"]:
             tm = t["teamMemberIds"][0] if t["teamMemberIds"] else ""
             if tm == CEO_REC_ID:
-                # Fixed-destination lanes skip the CEO's judgement pass
-                # entirely (Kevin's rulings, 24 Aug and 25 Aug 2026): the
+                # Deterministic lanes skip the CEO's judgement pass entirely
+                # (AUTO_ROUTES — Kevin's rulings, 24 and 25 Aug 2026): the
                 # dispatcher routes them straight to the role agent with
                 # `route TASKID --to <autoTarget>` — no od-ceo dispatch.
-                # Creditor beats Response: a creditor email is an inbound
-                # task too, and the specialist owns it. Gated on the LIVE
-                # register: if the role agent's row is not Built/Live
-                # (Kevin's pause lever) or the roster read failed, the task
-                # stays in the CEO lane and routes to a strategic agent like
-                # any other — work keeps flowing, the lever stays honoured,
-                # and cmd_route re-checks regardless.
-                # The creditor stamp is deliberately INBOUND-ONLY: the ruling
-                # covers the inbound comms process, and the floor patterns
-                # are too loose for arbitrary CEO-lane task text ("set up a
-                # payment plan for the client onboarding fee" is not a debt
-                # matter — review finding, 25 Aug 2026). Non-inbound creditor
-                # work reaches the specialist via the CEO judgement pass.
-                if t["creditor"] and t["inboundTask"] and creditor_ok:
-                    t["autoTarget"] = CREDITOR_REC_ID
-                elif t["inboundTask"] and role_roster.get(
-                        RESPONSE_REC_ID, {}).get("dispatchable"):
-                    t["autoTarget"] = RESPONSE_REC_ID
+                # Gated on the LIVE register inside auto_route_fresh: if the
+                # lane's row is not Built/Live (Kevin's pause lever) or the
+                # roster read failed, the task stays in the CEO lane and
+                # routes to a strategic agent like any other — work keeps
+                # flowing, the lever stays honoured, and cmd_route re-checks
+                # regardless.
+                target = auto_route_fresh(t, role_roster)
+                if target:
+                    t["autoTarget"] = target
                 routing.append(t)
             elif tm in ALL_AGENTS:
-                # A creditor matter sitting with the WRONG agent moves to the
-                # specialist: inbound creditor threads used to land with the
-                # generalist Response agent, and formerly-parked creditor
-                # correspondence may sit with any agent the CEO once chose.
-                # Deliberately narrow beyond those two cases — a dept head
-                # ANALYSING a payment-plan question keeps its task.
-                if (t["creditor"] and creditor_ok and tm != CREDITOR_REC_ID
-                        and (tm == RESPONSE_REC_ID or bool(hit2 and out2))):
-                    t["autoTarget"] = CREDITOR_REC_ID
+                # A task sitting with the WRONG agent moves to its lane's
+                # specialist — the deliberately narrow steal predicates in
+                # AUTO_ROUTES decide, so the CEO's explicit routing choices
+                # are not silently overridden.
+                target = auto_route_steal(t, tm, role_roster)
+                if target:
+                    t["autoTarget"] = target
                     routing.append(t)
                 else:
                     new_work.append(t)
@@ -1593,16 +1639,14 @@ def response_score_reading(records, now_utc):
 
 def cmd_score(args):
     if args.selftest:
-        response_score_selftest()
-        creditor_score_selftest()
+        for selftest in SCORE_SELFTESTS:
+            selftest()
         return
     # Each agent's step runs and reports independently: a broken creditor
     # read must not stop the response score being written, and vice versa. A
     # failure still exits non-zero at the end, so the job alarm sees it.
     failures = []
-    for label, fn in (("response", response_score),
-                      ("creditor", creditor_score),
-                      ("weekly-review", ensure_weekly_review)):
+    for label, fn in SCORE_STEPS:
         try:
             fn()
         except SystemExit as exc:
@@ -1937,6 +1981,19 @@ def creditor_score_selftest():
     assert frag5 == "fixed costs £140.50/mo (steady since 20 Aug)", frag5
     assert extra5["monthlyChangedAt"] == "20 Aug", extra5
     print("selftest-creditor-score: all checks passed")
+
+
+# One row per per-agent housekeeping step the score command runs. A new role
+# agent's build session adds its reading function and ONE entry here — never
+# another copy of the loop or the change-gated register write (that is
+# write_register_reading). Selftests ride in the parallel tuple so
+# `score --selftest` can never silently skip a new agent's maths.
+SCORE_STEPS = (
+    ("response", response_score),
+    ("creditor", creditor_score),
+    ("weekly-review", ensure_weekly_review),
+)
+SCORE_SELFTESTS = (response_score_selftest, creditor_score_selftest)
 
 
 def main():

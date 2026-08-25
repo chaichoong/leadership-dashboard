@@ -26,6 +26,7 @@ import { execFileSync } from 'child_process';
 import { readFileSync, existsSync } from 'fs';
 import { resolve } from 'path';
 import { homedir } from 'os';
+import { makeRunPy } from './helpers/dispatch-py.js';
 
 const ROOT = resolve(__dirname, '..');
 const DISPATCH = resolve(ROOT, 'scripts/agent-dispatch.py');
@@ -34,16 +35,17 @@ const src = readFileSync(DISPATCH, 'utf8');
 const CREDITOR_TM = 'recjh6mmaF8KJW8t3';
 const CREDITOR_ROW = 'recDvxwDGcC3pFbPa';
 
-function pyEval(expr) {
-  const script = `
-import json, importlib.util
-spec = importlib.util.spec_from_file_location("dispatch", ${JSON.stringify(DISPATCH)})
-mod = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(mod)
-print(json.dumps(${expr}))
-`;
-  return JSON.parse(execFileSync('python3', ['-c', script], { encoding: 'utf8' }));
-}
+const pyEval = makeRunPy(DISPATCH);
+
+// Synthetic task/roster shapes for the AUTO_ROUTES helpers — the keys the
+// predicates read, nothing more.
+const T = (over) => ({ creditor: false, inboundTask: false,
+                       tier2Correspondence: false, ...over });
+const LIVE_ROSTER = {
+  [CREDITOR_TM]: { dispatchable: true },
+  recJ8J8idWE8d97tH: { dispatchable: true },
+};
+const route = (fn, ...args) => pyEval(`mod.${fn}(*arg)`, args);
 
 describe('roster wiring', () => {
   it('the Creditor agent is a dispatchable role agent with the right identities', () => {
@@ -102,18 +104,25 @@ describe('the routing floor (real creditor_match, one batched python call)', () 
 describe('queue routing and the pause lever', () => {
   const queue = src.slice(src.indexOf('def cmd_queue'), src.indexOf('# ─── WRITES'));
 
-  it('the deterministic creditor stamp is inbound-only and beats the Response route', () => {
-    const ceoBranch = queue.slice(queue.indexOf('if tm == CEO_REC_ID:'),
-                                  queue.indexOf('elif tm in ALL_AGENTS:'));
-    // Inbound-only: the ruling covers the inbound comms process; arbitrary
-    // CEO-lane text must go through the CEO judgement pass instead.
-    expect(ceoBranch).toMatch(/t\["creditor"\] and t\["inboundTask"\] and creditor_ok/);
-    // Creditor first, Response second — a creditor email is inbound too.
-    const credAt = ceoBranch.indexOf('t["autoTarget"] = CREDITOR_REC_ID');
-    const respAt = ceoBranch.indexOf('t["autoTarget"] = RESPONSE_REC_ID');
-    expect(credAt).toBeGreaterThan(-1);
-    expect(respAt).toBeGreaterThan(-1);
-    expect(credAt).toBeLessThan(respAt);
+  it('the deterministic creditor lane is inbound-only and beats the Response route (real AUTO_ROUTES)', () => {
+    // Behavioural, through the real table — never source offsets.
+    // Creditor beats Response: a creditor email is an inbound task too.
+    expect(route('auto_route_fresh',
+      T({ creditor: true, inboundTask: true }), LIVE_ROSTER)).toBe(CREDITOR_TM);
+    // A plain inbound task goes to the generalist.
+    expect(route('auto_route_fresh',
+      T({ inboundTask: true }), LIVE_ROSTER)).toBe('recJ8J8idWE8d97tH');
+    // Inbound-only: creditor-flavoured CEO-lane text that is NOT inbound
+    // goes to the CEO judgement pass, not the keyword floor.
+    expect(route('auto_route_fresh',
+      T({ creditor: true }), LIVE_ROSTER)).toBeNull();
+    // Kevin's pause lever: creditor row not dispatchable → the inbound task
+    // still flows, to the Response agent.
+    expect(route('auto_route_fresh', T({ creditor: true, inboundTask: true }),
+      { recJ8J8idWE8d97tH: { dispatchable: true } })).toBe('recJ8J8idWE8d97tH');
+    // Both paused (or the roster read failed) → CEO lane keeps it.
+    expect(route('auto_route_fresh',
+      T({ creditor: true, inboundTask: true }), {})).toBeNull();
   });
 
   it('creditor work is forced tier-1 in the queue, and the tier-1 keywords carry the tier-2 vocabulary', () => {
@@ -136,11 +145,25 @@ describe('queue routing and the pause lever', () => {
       /creditor_ok = bool\(role_roster\.get\(CREDITOR_REC_ID, \{\}\)\.get\("dispatchable"\)\)/);
   });
 
-  it('reroutes off the WRONG agent narrowly: Response or parked correspondence only', () => {
-    const agentBranch = queue.slice(queue.indexOf('elif tm in ALL_AGENTS:'),
-                                    queue.indexOf('unclassified.append'));
-    expect(agentBranch).toMatch(/tm == RESPONSE_REC_ID or bool\(hit2 and out2\)/);
-    expect(agentBranch).toMatch(/tm != CREDITOR_REC_ID/);
+  it('reroutes off the WRONG agent narrowly: Response or parked correspondence only (real AUTO_ROUTES)', () => {
+    const RESPONSE = 'recJ8J8idWE8d97tH';
+    // An inbound creditor thread sitting with the generalist moves over.
+    expect(route('auto_route_steal',
+      T({ creditor: true }), RESPONSE, LIVE_ROSTER)).toBe(CREDITOR_TM);
+    // Formerly-parked creditor correspondence moves whoever holds it.
+    expect(route('auto_route_steal',
+      T({ creditor: true, tier2Correspondence: true }), 'recSomeDeptHead00',
+      LIVE_ROSTER)).toBe(CREDITOR_TM);
+    // A dept head ANALYSING a creditor-flavoured question keeps its task —
+    // the CEO's explicit routing decision is not silently overridden.
+    expect(route('auto_route_steal',
+      T({ creditor: true }), 'recSomeDeptHead00', LIVE_ROSTER)).toBeNull();
+    // Already with the specialist: nothing to move.
+    expect(route('auto_route_steal',
+      T({ creditor: true }), CREDITOR_TM, LIVE_ROSTER)).toBeNull();
+    // Pause lever: creditor row not dispatchable → no move.
+    expect(route('auto_route_steal', T({ creditor: true }), RESPONSE,
+      { [RESPONSE]: { dispatchable: true } })).toBeNull();
   });
 
   it('the queue JSON carries the creditor visibility counter', () => {
@@ -183,7 +206,11 @@ describe('register metrics (Kevin\'s two, 25 Aug 2026)', () => {
 
   it('one broken score cannot silently stop the other, and the shared write is change-gated', () => {
     const score = src.slice(src.indexOf('def cmd_score'), src.indexOf('def response_score_selftest'));
-    expect(score).toMatch(/for label, fn in \(\("response", response_score\),\s*\n?\s*\("creditor", creditor_score\),\s*\n?\s*\("weekly-review", ensure_weekly_review\)\)/);
+    // The steps are a table now — assert its CONTENT through the module, so
+    // a new agent's build session adds an entry and this stays true.
+    expect(pyEval('[label for label, fn in mod.SCORE_STEPS]'))
+      .toEqual(['response', 'creditor', 'weekly-review']);
+    expect(score).toMatch(/for label, fn in SCORE_STEPS/);
     expect(score).toMatch(/sys\.exit\("ERROR: score failed/);
     // The one shared register write: change-gated, per-agent state file.
     expect(score).toMatch(/def write_register_reading/);

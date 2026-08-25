@@ -3,6 +3,7 @@ import { execFileSync } from 'child_process';
 import { readFileSync, existsSync } from 'fs';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
+import { makeRunPy } from './helpers/dispatch-py.js';
 import { homedir } from 'os';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -29,22 +30,12 @@ const SKILL = resolve(homedir(), '.claude/scheduled-tasks/agent-dispatch/SKILL.m
 // re-implemented as JS RegExp. Python and JS regex dialects differ, and a test
 // that quietly diverges from the code it guards is worse than no test.
 
-function pyMatch(cases) {
-  const script = `
-import importlib.util, json, sys
-spec = importlib.util.spec_from_file_location('ad', ${JSON.stringify(DISPATCH)})
-m = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(m)
-cases = json.loads(sys.argv[1])
-out = {
-    'count': len(m.TIER1_PATTERNS),
-    'patterns': [p.pattern for p in m.TIER1_PATTERNS],
-    'results': {c: m.tier_match(m.TIER1_PATTERNS, c, '', '') for c in cases},
-}
-print(json.dumps(out))
-`;
-  return JSON.parse(execFileSync('python3', ['-c', script, JSON.stringify(cases)], { encoding: 'utf8' }));
-}
+const runPy = makeRunPy(DISPATCH);
+const pyMatch = (cases) => runPy(`{
+    'count': len(mod.TIER1_PATTERNS),
+    'patterns': [p.pattern for p in mod.TIER1_PATTERNS],
+    'results': {c: mod.tier_match(mod.TIER1_PATTERNS, c, '', '') for c in arg},
+}`, cases);
 
 // Each SKILL.md tier-1 category, paired with a task name written the way one
 // would really arrive in Airtable. `phrase` is the wording to look for in
