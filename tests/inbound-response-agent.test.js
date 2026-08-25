@@ -18,6 +18,7 @@ import { execFileSync } from 'child_process';
 import { readFileSync, existsSync } from 'fs';
 import { resolve } from 'path';
 import { homedir } from 'os';
+import { makeRunPy } from './helpers/dispatch-py.js';
 
 const ROOT = resolve(__dirname, '..');
 const DISPATCH = resolve(ROOT, 'scripts/agent-dispatch.py');
@@ -26,16 +27,7 @@ const src = readFileSync(DISPATCH, 'utf8');
 const RESPONSE_TM = 'recJ8J8idWE8d97tH';
 const RESPONSE_ROW = 'recHfhVDb6BfQYco5';
 
-function pyEval(expr) {
-  const script = `
-import json, importlib.util
-spec = importlib.util.spec_from_file_location("dispatch", ${JSON.stringify(DISPATCH)})
-mod = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(mod)
-print(json.dumps(${expr}))
-`;
-  return JSON.parse(execFileSync('python3', ['-c', script], { encoding: 'utf8' }));
-}
+const pyEval = makeRunPy(DISPATCH);
 
 describe('roster wiring', () => {
   it('the Response agent is a dispatchable role agent with the right identities', () => {
@@ -67,9 +59,16 @@ describe('roster wiring', () => {
 
   it('inbound CEO tasks get the deterministic autoTarget, gated on the LIVE register', () => {
     const queue = src.slice(src.indexOf('def cmd_queue'), src.indexOf('# ─── WRITES'));
-    // The stamp must consult role_roster's dispatchable flag — an ungated
-    // stamp routes work to a paused agent (review finding, 24 Aug 2026).
-    expect(queue).toMatch(/t\["inboundTask"\] and role_roster\.get\(\s*\n?\s*RESPONSE_REC_ID, \{\}\)\.get\("dispatchable"\)/);
+    // Behavioural, through the real AUTO_ROUTES table: a plain inbound task
+    // routes to the Response agent when its register row is dispatchable,
+    // and stays in the CEO lane when it is not (Kevin's pause lever) or the
+    // roster read failed (review finding, 24 Aug 2026).
+    const T = { creditor: false, inboundTask: true, tier2Correspondence: false };
+    expect(pyEval('mod.auto_route_fresh(*arg)',
+      [T, { [RESPONSE_TM]: { dispatchable: true } }])).toBe(RESPONSE_TM);
+    expect(pyEval('mod.auto_route_fresh(*arg)',
+      [T, { [RESPONSE_TM]: { dispatchable: false } }])).toBeNull();
+    expect(pyEval('mod.auto_route_fresh(*arg)', [T, {}])).toBeNull();
     expect(src).toMatch(/"inboundTask":\s*"fldueazD67F7fUGee"/);
     // The queue JSON must expose the register roster AND its read failure —
     // a silently missing roster starves role agents run after run.

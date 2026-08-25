@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { execFileSync } from 'child_process';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
+import { makeRunPy } from './helpers/dispatch-py.js';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const DISPATCH = resolve(ROOT, 'scripts/agent-dispatch.py');
@@ -32,22 +33,13 @@ const DISPATCH = resolve(ROOT, 'scripts/agent-dispatch.py');
 // JS regex dialects differ, and a test that re-implements the patterns in JS
 // quietly stops guarding the code it names.
 
-function classify(cases) {
-  const script = `
-import importlib.util, json, sys
-spec = importlib.util.spec_from_file_location('ad', ${JSON.stringify(DISPATCH)})
-m = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(m)
-cases = json.loads(sys.argv[1])
-out = {}
-for c in cases:
-    subject = m.tier_match(m.TIER2_PATTERNS, c, '', '')
-    outbound = m.outbound_intent(c, '', '') if subject else ''
-    out[c] = {'subject': subject, 'outbound': outbound, 'parked': bool(subject and outbound)}
-print(json.dumps(out))
-`;
-  return JSON.parse(execFileSync('python3', ['-c', script, JSON.stringify(cases)], { encoding: 'utf8' }));
-}
+const runPy = makeRunPy(DISPATCH);
+const classify = (cases) => runPy(`{
+    c: {'subject': (subj := mod.tier_match(mod.TIER2_PATTERNS, c, '', '')),
+        'outbound': (outb := mod.outbound_intent(c, '', '') if subj else ''),
+        'parked': bool(subj and outb)}
+    for c in arg
+}`, cases);
 
 // Read-only work on a tier-2 subject. None of these may be parked.
 const READ_ONLY = [
