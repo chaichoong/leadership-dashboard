@@ -177,7 +177,9 @@ in Tasks `tblqB8b22hKBL4PF1`, base `appnqjDpqDniH3IRl`, with
 - `fld10VzzbiNNgRmIi` Time Estimate: `15 min`
 - `fldRGhBQViKZKtkQ6` Description: what the email asks, who it is from, what a
   good response covers, and the tier-1 prepare-only note when Step 2 flagged
-  it.
+  it. For a creditor thread (any thread you file label 18 on top of), START
+  the Description with the line `CREDITOR MATTER` — the dispatch engine
+  routes on that marker to the Creditor Management agent (25 Aug 2026).
 - `fldueazD67F7fUGee` Inbound Communication Task: true
 - `fldiXSzcMol6Tdwij` Inbound Source Type: `Gmail`
 - `fldiSNijdCy5GXuzL` Inbound Message Content: the email body from the scan

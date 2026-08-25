@@ -196,6 +196,13 @@ const KEVIN_ONLY_PATTERNS = [
     /income and expenditure/i,
     /settlement offer/i,
     /full and final/i,
+    // Creditor correspondence vocabulary (25 Aug 2026) — added with the
+    // Creditor Management agent build, in step with agent-dispatch.py:
+    // creditor work is always tier-1 by ruling, and these were tier-2-only
+    // words that would have reached an approval card unbannered.
+    /statutory demand/i,
+    /letter of claim/i,
+    /bounce ?back loan/i,
     // Legal correspondence, including law-firm senders and invoices.
     /solicitor/i,
     /litigation/i,

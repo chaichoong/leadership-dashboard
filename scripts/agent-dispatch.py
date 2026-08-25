@@ -240,6 +240,8 @@ CEO_REC_ID = "reciHUAEcEkbctnZ6"
 ROLE_AGENTS = {
     "recJ8J8idWE8d97tH": {"name": "AI Inbound Comms Response",
                           "agent": "inbound-comms-response", "role": "worker"},
+    "recjh6mmaF8KJW8t3": {"name": "AI Creditor Management",
+                          "agent": "creditor-management", "role": "worker"},
 }
 ALL_AGENTS = {**AGENTS, **ROLE_AGENTS}
 
@@ -248,6 +250,24 @@ ALL_AGENTS = {**AGENTS, **ROLE_AGENTS}
 # per routine reply. The CEO roster still routes everything else.
 RESPONSE_REC_ID = "recJ8J8idWE8d97tH"          # Team Members row
 RESPONSE_REGISTER_ROW = "recHfhVDb6BfQYco5"    # AI Agents register row
+
+# The Creditor Management agent's identities (build session 25 Aug 2026).
+# Creditor and payment-chasing tasks route to it DETERMINISTICALLY, ahead of
+# the generic Response route — Kevin's approval: the inbound comms process
+# sends anything payment-related or creditor-chasing to the specialist.
+CREDITOR_REC_ID = "recjh6mmaF8KJW8t3"          # Team Members row
+CREDITOR_REGISTER_ROW = "recDvxwDGcC3pFbPa"    # AI Agents register row
+
+# Fixed-cost metric source (Kevin's metric two, 25 Aug 2026). The active rule
+# MIRRORS isCostActive in js/shared.js — the single rule the Leadership
+# Dashboard's Monthly Costs card uses — so the register and the dashboard can
+# never disagree about the month's fixed-cost total.
+COSTS_TABLE = "tblx5kvhzNEI5TFlS"
+COST_FIELDS = {
+    "expected":  "fld9JibXkMpTeMcxw",   # Expected Cost — monthly-equivalent £
+    "inactive":  "fldQJPGLFMbwVelsW",   # Inactive checkbox
+    "payStatus": "fldXZNI96v8HgjuSh",   # legacy Payment Status singleSelect
+}
 AGENTS_TABLE = "tbl9msVjyQWslLOIZ"
 REGISTER_METRIC_SCORE = "fldkGxrOlrfuLlH3J"    # Metric Score (current reading)
 REGISTER_FIELDS = {  # read for the CEO's routing roster
@@ -324,6 +344,11 @@ TIER1_PATTERNS = [
         # Debt settlement and financial disclosure.
         r"standard financial statement", r"income and expenditure",
         r"settlement offer", r"full and final",
+        # Creditor correspondence vocabulary (25 Aug 2026): these were tier-2
+        # only, so once the tier-2 park opened into the creditor lane a
+        # "reply to the statutory demand" task could reach approval without
+        # the banner. Creditor work is always tier-1 by ruling.
+        r"statutory demand", r"letter of claim", r"bounce ?back loan",
         # Legal correspondence, including law-firm senders and invoices.
         r"solicitor", r"litigation",
     )
@@ -395,6 +420,43 @@ READ_ONLY_RE = re.compile(
     r"do not act\b|evidence only|no outbound",
     re.I,
 )
+
+# Creditor lane: money Kevin or his businesses OWE. The routing floor for the
+# Creditor Management agent (build session 25 Aug 2026; Kevin approved routing
+# creditor and payment-chasing work to the specialist, including the formerly
+# tier-2-parked correspondence). Same floor-not-ceiling contract as
+# TIER1_PATTERNS: the dispatcher's judgement pass routes what these miss.
+CREDITOR_PATTERNS = [
+    re.compile(p, re.I) for p in (
+        r"creditor",  # includes the triage skill's CREDITOR MATTER marker
+        r"chas(?:e|ing)\s+(?:a\s|the\s)?payment", r"payment\s+chas",
+        r"final\s+(?:notice|demand)", r"letter\s+before\s+action",
+        r"letter\s+of\s+claim", r"statutory\s+demand", r"bounce\s?back\s+loan",
+        r"debt\s+(?:collect|recovery)", r"collection\s+agency",
+        r"payment\s+(?:plan|arrangement)", r"instalment\s+plan",
+        r"overdue\s+(?:invoice|payment|account|balance)",
+        r"outstanding\s+(?:invoice|balance|payment|amount)",
+    )
+]
+# The patterns above are DIRECTION-BLIND: "chase the payment", "payment
+# plan" and "final notice" appear just as readily in money owed TO Kevin —
+# tenant rent chasing, client invoicing, UC verification — which is never
+# this agent's lane (review finding, 25 Aug 2026: "chase the payment from
+# the client for the July invoice" matched). Receivable vocabulary vetoes
+# the match outright. A vetoed true-creditor task still gets worked — it
+# falls to the CEO lane, whose judgement pass knows the creditor lane — so
+# the veto errs on the safe side of the asymmetry.
+CREDITOR_EXCLUDE_RE = re.compile(
+    r"tenant|tenanc|\brent\b|arrears|universal credit|\buc\b|client",
+    re.I,
+)
+
+
+def creditor_match(*texts):
+    joined = " ".join(t or "" for t in texts)
+    if CREDITOR_EXCLUDE_RE.search(joined):
+        return False
+    return bool(tier_match(CREDITOR_PATTERNS, *texts))
 
 
 def outbound_intent(*texts):
@@ -790,6 +852,8 @@ def cmd_queue(args):
 
     tier1, skipped_tier2, unmapped, unclassified = [], [], [], []
     approved_hb, changes_hb, new_work, routing = [], [], [], []
+    creditor_ok = bool(role_roster.get(CREDITOR_REC_ID, {}).get("dispatchable"))
+    creditor_count = 0
 
     for t in agent_linked:
         # Tier 1 no longer drops out of the worklist. It is MARKED and worked,
@@ -800,10 +864,24 @@ def cmd_queue(args):
         t["matchedPattern"] = hit1 or ""
         if hit1:
             tier1.append(t)
+        t["creditor"] = creditor_match(t["name"], t["description"], t["notes"])
+        creditor_count += t["creditor"]
+        # Creditor work is ALWAYS tier-1 (Kevin's triage ruling, 24 Aug 2026)
+        # — but "statutory demand" and "letter of claim" are tier-2 vocabulary
+        # the tier-1 keyword list missed, so an unparked correspondence task
+        # would have reached Kevin unbannered (review finding, 25 Aug 2026).
+        if t["creditor"] and not t["tier1"]:
+            t["tier1"] = True
+            t["matchedPattern"] = t["matchedPattern"] or "creditor lane"
+            tier1.append(t)
         hit2 = tier_match(TIER2_PATTERNS, t["name"], t["description"], t["notes"])
         out2 = outbound_intent(t["name"], t["description"],
                                t["notes"]) if hit2 else ""
-        if hit2 and out2:
+        if hit2 and out2 and not creditor_ok:
+            # The old Mica lane survives ONLY as the fallback: while the
+            # Creditor Management agent's register row is not Built/Live
+            # (Kevin's pause lever), creditor correspondence parks exactly as
+            # it did before 25 Aug 2026 rather than flowing to a generalist.
             skipped_tier2.append({**t, "matchedPattern": hit2,
                                   "outboundPattern": out2})
             continue
@@ -820,21 +898,42 @@ def cmd_queue(args):
         elif not t["outcome"]:
             tm = t["teamMemberIds"][0] if t["teamMemberIds"] else ""
             if tm == CEO_REC_ID:
-                # Inbound reply tasks skip the CEO's judgement pass entirely:
-                # the target is fixed (Kevin's ruling, 24 Aug 2026), so the
-                # dispatcher routes them straight to the Response agent with
+                # Fixed-destination lanes skip the CEO's judgement pass
+                # entirely (Kevin's rulings, 24 Aug and 25 Aug 2026): the
+                # dispatcher routes them straight to the role agent with
                 # `route TASKID --to <autoTarget>` — no od-ceo dispatch.
-                # Gated on the LIVE register: if the Response agent's row is
-                # not Built/Live (Kevin's pause lever) or the roster read
-                # failed, the task stays in the CEO lane and routes to a
-                # strategic agent like any other — mail keeps flowing, the
-                # lever stays honoured, and cmd_route re-checks regardless.
-                if t["inboundTask"] and role_roster.get(
+                # Creditor beats Response: a creditor email is an inbound
+                # task too, and the specialist owns it. Gated on the LIVE
+                # register: if the role agent's row is not Built/Live
+                # (Kevin's pause lever) or the roster read failed, the task
+                # stays in the CEO lane and routes to a strategic agent like
+                # any other — work keeps flowing, the lever stays honoured,
+                # and cmd_route re-checks regardless.
+                # The creditor stamp is deliberately INBOUND-ONLY: the ruling
+                # covers the inbound comms process, and the floor patterns
+                # are too loose for arbitrary CEO-lane task text ("set up a
+                # payment plan for the client onboarding fee" is not a debt
+                # matter — review finding, 25 Aug 2026). Non-inbound creditor
+                # work reaches the specialist via the CEO judgement pass.
+                if t["creditor"] and t["inboundTask"] and creditor_ok:
+                    t["autoTarget"] = CREDITOR_REC_ID
+                elif t["inboundTask"] and role_roster.get(
                         RESPONSE_REC_ID, {}).get("dispatchable"):
                     t["autoTarget"] = RESPONSE_REC_ID
                 routing.append(t)
             elif tm in ALL_AGENTS:
-                new_work.append(t)
+                # A creditor matter sitting with the WRONG agent moves to the
+                # specialist: inbound creditor threads used to land with the
+                # generalist Response agent, and formerly-parked creditor
+                # correspondence may sit with any agent the CEO once chose.
+                # Deliberately narrow beyond those two cases — a dept head
+                # ANALYSING a payment-plan question keeps its task.
+                if (t["creditor"] and creditor_ok and tm != CREDITOR_REC_ID
+                        and (tm == RESPONSE_REC_ID or bool(hit2 and out2))):
+                    t["autoTarget"] = CREDITOR_REC_ID
+                    routing.append(t)
+                else:
+                    new_work.append(t)
             else:
                 # e.g. Team Member cleared while Sent For Approval By still
                 # points at an agent. Surfaced, never silently dropped.
@@ -909,6 +1008,11 @@ def cmd_queue(args):
             # count makes the park visible in the same object that reports the
             # emptiness it causes.
             "tier2Parked": len(skipped_tier2),
+            # Creditor-lane keyword matches across the whole agent-linked
+            # read, hand-backs included (routing floor, not judgement). Zero
+            # with the register row Built/Live and creditor mail known to be
+            # arriving = the patterns or the triage marker broke.
+            "creditorMatters": creditor_count,
             "routingNeeded": len(routing),
             "unclassified": len(unclassified),
             "tier1Open": len(tier1),
@@ -1274,8 +1378,10 @@ def cmd_verify(args):
     # human is told. It sat in the report and nothing read the report. Alarm
     # once per task, the same way parkedFlags does, so a task parked by mistake
     # surfaces on the first run instead of never.
-    flags += [("task PARKED as creditor correspondence — Mica's lane, no agent "
-               "will work it", t) for t in report.get("skippedTier2", [])]
+    flags += [("task PARKED as creditor correspondence — the Creditor "
+               "Management agent is not dispatchable (register row not "
+               "Built/Live, or the register read failed), so no agent will "
+               "work it", t) for t in report.get("skippedTier2", [])]
     for label, t in flags:
         if t.get("id") not in alerted:
             problems.append(f"{label}: {t.get('id')} "
@@ -1450,8 +1556,27 @@ def response_score_reading(records, now_utc):
 
 def cmd_score(args):
     if args.selftest:
-        return response_score_selftest()
+        response_score_selftest()
+        creditor_score_selftest()
+        return
+    # Each agent's step runs and reports independently: a broken creditor
+    # read must not stop the response score being written, and vice versa. A
+    # failure still exits non-zero at the end, so the job alarm sees it.
+    failures = []
+    for label, fn in (("response", response_score),
+                      ("creditor", creditor_score),
+                      ("weekly-review", ensure_weekly_review)):
+        try:
+            fn()
+        except SystemExit as exc:
+            failures.append(f"{label}: {exc}")
+        except Exception as exc:  # noqa: BLE001 — surfaced, never swallowed
+            failures.append(f"{label}: {exc}")
+    if failures:
+        sys.exit("ERROR: score failed — " + "; ".join(failures))
 
+
+def response_score():
     records = query_tasks(
         "AND({Inbound Communication Task}, {Status}!='Cancelled', "
         "OR(IS_AFTER(CREATED_TIME(), DATEADD(NOW(), -7, 'days')), "
@@ -1469,23 +1594,36 @@ def cmd_score(args):
     reading, stats = response_score_reading(
         records, datetime.now(timezone.utc))
 
-    prev = ""
+    write_register_reading("response", RESPONSE_REGISTER_ROW,
+                           RESPONSE_SCORE_STATE, reading, stats)
+
+
+def load_score_state(state_path):
     try:
-        with open(RESPONSE_SCORE_STATE) as fh:
-            prev = json.load(fh).get("reading", "")
+        with open(state_path) as fh:
+            return json.load(fh)
     except (OSError, ValueError):
-        pass
+        return {}
+
+
+def write_register_reading(label, register_row, state_path, reading, stats,
+                           state_extra=None):
+    """The one change-gated register write every role agent's score uses.
+    Fifteen agents are seeded in the register; each build session adds a
+    reading function, never another copy of this write."""
+    prev = load_score_state(state_path).get("reading", "")
     if reading == prev:
-        print(json.dumps({"reading": reading, "written": False,
-                          "reason": "unchanged", **stats}))
+        print(json.dumps({"agent": label, "reading": reading,
+                          "written": False, "reason": "unchanged", **stats}))
         return
-    _request("PATCH", f"/{AGENTS_TABLE}/{RESPONSE_REGISTER_ROW}",
+    _request("PATCH", f"/{AGENTS_TABLE}/{register_row}",
              {"fields": {REGISTER_METRIC_SCORE: reading}})
-    os.makedirs(os.path.dirname(RESPONSE_SCORE_STATE), exist_ok=True)
-    with open(RESPONSE_SCORE_STATE, "w") as fh:
-        json.dump({"reading": reading,
-                   "writtenAt": now_iso()}, fh)
-    print(json.dumps({"reading": reading, "written": True, **stats}))
+    os.makedirs(os.path.dirname(state_path), exist_ok=True)
+    with open(state_path, "w") as fh:
+        json.dump({"reading": reading, "writtenAt": now_iso(),
+                   **(state_extra or {})}, fh)
+    print(json.dumps({"agent": label, "reading": reading,
+                      "written": True, **stats}))
 
 
 def response_score_selftest():
@@ -1545,6 +1683,225 @@ def response_score_selftest():
     print("selftest-score: all checks passed")
 
 
+CREDITOR_SCORE_STATE = os.path.join(STATE_DIR, "creditor-score.json")
+
+
+def creditor_coverage(records):
+    """Metric one (Kevin's definition, 25 Aug 2026): every creditor inbound
+    is answered or has a prepared response. Prepared INCLUDES everything
+    sitting in Kevin's approval queue — a bottleneck at approval is his lane,
+    and must never read as the agent falling behind."""
+    population = prepared = with_kevin = 0
+    for t in records:
+        f = t.get("fields", {})
+        linked = set(links(f.get(AF["teamMember"]))) | set(
+            links(f.get(AF["sentForApprovalBy"])))
+        if CREDITOR_REC_ID not in linked:
+            continue
+        status = sel(f.get(AF["status"]))
+        if status == "Cancelled":
+            continue
+        population += 1
+        if f.get(AF["sentForApprovalBy"]) or status in ("Approval",
+                                                        "Completed"):
+            prepared += 1
+        if status == "Approval":
+            with_kevin += 1
+    if not population:
+        frag = "creditor inbound: none in the last 7 days"
+    else:
+        frag = f"creditor inbound: {prepared}/{population} prepared"
+        if with_kevin:
+            frag += f", {with_kevin} with Kevin"
+    return frag, {"creditorTasks": population, "prepared": prepared,
+                  "withKevin": with_kevin}
+
+
+def fixed_costs_reading(cost_records, prev, today_label):
+    """Metric two (Kevin's definition, 25 Aug 2026): the month's fixed-cost
+    total and its movement since the reading last changed. Active rule
+    mirrors isCostActive in js/shared.js exactly (see COSTS_TABLE comment)."""
+    total, active = 0.0, 0
+    for r in cost_records:
+        f = r.get("fields", {})
+        if f.get(COST_FIELDS["inactive"]):
+            continue
+        if sel(f.get(COST_FIELDS["payStatus"])) not in ("In Payment",
+                                                        "Overdue"):
+            continue
+        active += 1
+        total += float(f.get(COST_FIELDS["expected"]) or 0)
+    total = round(total, 2)
+    prev_total = prev.get("monthly")
+    changed_at = prev.get("monthlyChangedAt") or today_label
+    if prev_total is None:
+        move = "(first reading)"
+    elif total > prev_total:
+        move = f"(up £{total - prev_total:,.2f} since {changed_at})"
+        changed_at = today_label
+    elif total < prev_total:
+        move = f"(down £{prev_total - total:,.2f} since {changed_at})"
+        changed_at = today_label
+    else:
+        move = f"(steady since {changed_at})"
+    return (f"fixed costs £{total:,.2f}/mo {move}",
+            {"activeCosts": active, "monthlyFixedCosts": total},
+            {"monthly": total, "monthlyChangedAt": changed_at})
+
+
+def creditor_score():
+    # The wide read (non-cancelled tasks, open or created in the window) is a
+    # known non-empty population, so an empty result is a broken read — the
+    # creditor SUBSET being empty is fine (the agent is new).
+    tasks = query_tasks(
+        "AND({Status}!='Cancelled', "
+        "OR(IS_AFTER(CREATED_TIME(), DATEADD(NOW(), -7, 'days')), "
+        "{Status}!='Completed'))")
+    if not tasks:
+        sys.exit("ERROR: control failed — the open/recent task read returned "
+                 "zero rows. The read is broken, not the queue empty. No "
+                 "creditor score written.")
+    cov_frag, cov_stats = creditor_coverage(tasks)
+    costs = query_records(COSTS_TABLE, fields=list(COST_FIELDS.values()))
+    prev = load_score_state(CREDITOR_SCORE_STATE)
+    today_label = datetime.now(LONDON).strftime("%-d %b")
+    cost_frag, cost_stats, extra = fixed_costs_reading(costs, prev,
+                                                       today_label)
+    if not cost_stats["activeCosts"]:
+        sys.exit("ERROR: control failed — zero ACTIVE costs read from the "
+                 "Costs table (90 existed on 25 Aug 2026). The read or the "
+                 "active rule is broken. No creditor score written.")
+    write_register_reading("creditor", CREDITOR_REGISTER_ROW,
+                           CREDITOR_SCORE_STATE,
+                           cov_frag + "; " + cost_frag,
+                           {**cov_stats, **cost_stats}, extra)
+
+
+CREDITOR_REVIEW_STATE = os.path.join(STATE_DIR, "creditor-review.json")
+REVIEW_TASK_NAME = "Fixed cost review: find savings (weekly)"
+REVIEW_TASK_FIELDS = {   # write-side ids, matching the triage create spec
+    "name":     "fldgFjGBw6bTKJFCD",
+    "status":   "fldx4qCw17UfrKpaN",
+    "due":      "fld7XP8w8kbxfETV4",
+    "team":     "flduCtmQGpOA4eWaj",
+    "approver": "fldLLAG5HQPEFEfE5",
+    "priority": "fldS21RwmwOqt71LI",
+    "estimate": "fld10VzzbiNNgRmIi",
+    "desc":     "fldRGhBQViKZKtkQ6",
+}
+KEVIN_APPROVER_USR = "usrKkopUJSGsBhWMD"
+
+
+def ensure_weekly_review():
+    """The Creditor Management agent's weekly fixed-cost review task, raised
+    by the engine every Monday (Kevin's ruling, 25 Aug 2026).
+
+    Raised HERE, in code, London time — never via the Airtable Recurring
+    field: nothing deployed flips a future-dated Upcoming task into the
+    Today/Overdue window the queue reads ("When Due Date is updated, adjust
+    the Status" exists but is undeployed), and an API completion would not
+    roll the cadence forward. The engine runs several times daily, so the
+    Monday 07:00 run creates it and the 09:00 slot works it."""
+    now = datetime.now(LONDON)
+    if now.weekday() != 0:      # Monday only, decided in code, London time
+        return
+    week = now.strftime("%G-W%V")
+    state = load_score_state(CREDITOR_REVIEW_STATE)
+    if state.get("week") == week:
+        return
+    # Belt for a lost state file: an existing open/recent copy means a task
+    # was already raised. A BROKEN read here would return zero and mint a
+    # duplicate, so this is the belt only — the state file above is the
+    # authoritative guard, and a duplicate is a visible task, not silent
+    # corruption.
+    existing = query_tasks(
+        "AND({Task Name}='" + REVIEW_TASK_NAME + "', "
+        "IS_AFTER(CREATED_TIME(), DATEADD(NOW(), -6, 'days')))",
+        max_records=1, minimal=True)
+    if not existing:
+        _request("POST", f"/{TASKS}", {"typecast": True, "fields": {
+            REVIEW_TASK_FIELDS["name"]: REVIEW_TASK_NAME,
+            REVIEW_TASK_FIELDS["status"]: "Today",
+            REVIEW_TASK_FIELDS["due"]: now.strftime("%Y-%m-%d"),
+            REVIEW_TASK_FIELDS["team"]: [CREDITOR_REC_ID],
+            REVIEW_TASK_FIELDS["approver"]: {"id": KEVIN_APPROVER_USR},
+            REVIEW_TASK_FIELDS["priority"]: "High",
+            REVIEW_TASK_FIELDS["estimate"]: "30 min",
+            REVIEW_TASK_FIELDS["desc"]: (
+                "Weekly fixed-cost review (raised automatically each Monday "
+                "by agent-dispatch). Follow the ordered review steps in the "
+                "Creditor Management agent's register row: read active "
+                "costs, flag rises above 10% or £10/mo, duplicates, and "
+                "costs with no matching transaction in 90 days; every "
+                "saving of £5/mo or more becomes its own recommendation "
+                "with the monthly saving quantified. Prepare-only — no "
+                "record changes without Kevin's approval."),
+        }})
+    os.makedirs(STATE_DIR, exist_ok=True)
+    with open(CREDITOR_REVIEW_STATE, "w") as fh:
+        json.dump({"week": week, "raisedAt": now_iso(),
+                   "existing": bool(existing)}, fh)
+    print(json.dumps({"agent": "creditor", "weeklyReview": week,
+                      "created": not existing}))
+
+
+def creditor_score_selftest():
+    def task(status, team=None, sent=None):
+        fields = {AF["status"]: {"name": status}}
+        if team:
+            fields[AF["teamMember"]] = list(team)
+        if sent:
+            fields[AF["sentForApprovalBy"]] = list(sent)
+        return {"fields": fields}
+
+    CRED = CREDITOR_REC_ID
+    frag, s = creditor_coverage([
+        task("Approval", team=[CRED]),              # prepared, with Kevin
+        task("Today", team=[CRED]),                 # unprepared, open
+        task("Completed", sent=[CRED]),             # prepared and answered
+        task("Today", team=[CRED], sent=[CRED]),    # submitted redo → prepared
+        task("Today", team=["recSomeoneElse123"]),  # not the creditor agent's
+        task("Cancelled", team=[CRED]),             # nobody wants it → out
+    ])
+    assert s == {"creditorTasks": 4, "prepared": 3, "withKevin": 1}, s
+    assert frag == "creditor inbound: 3/4 prepared, 1 with Kevin", frag
+
+    frag2, s2 = creditor_coverage([task("Today", team=["recX"])])
+    assert frag2 == "creditor inbound: none in the last 7 days", frag2
+    assert s2 == {"creditorTasks": 0, "prepared": 0, "withKevin": 0}, s2
+
+    def cost(expected=None, inactive=False, status="In Payment"):
+        f = {COST_FIELDS["payStatus"]: {"name": status}}
+        if inactive:
+            f[COST_FIELDS["inactive"]] = True
+        if expected is not None:
+            f[COST_FIELDS["expected"]] = expected
+        return {"fields": f}
+
+    frag3, s3, extra3 = fixed_costs_reading([
+        cost(100.50), cost(50, status="Overdue"),
+        cost(999, inactive=True),        # inactive box → excluded
+        cost(999, status="Paused"),      # not In Payment/Overdue → excluded
+        cost(),                          # blank Expected → £0, still counted
+    ], {}, "25 Aug")
+    assert s3 == {"activeCosts": 3, "monthlyFixedCosts": 150.5}, s3
+    assert frag3 == "fixed costs £150.50/mo (first reading)", frag3
+    assert extra3 == {"monthly": 150.5, "monthlyChangedAt": "25 Aug"}, extra3
+
+    frag4, _, extra4 = fixed_costs_reading(
+        [cost(140.50)], {"monthly": 150.5, "monthlyChangedAt": "18 Aug"},
+        "25 Aug")
+    assert frag4 == "fixed costs £140.50/mo (down £10.00 since 18 Aug)", frag4
+    assert extra4["monthlyChangedAt"] == "25 Aug", extra4
+
+    frag5, _, extra5 = fixed_costs_reading(
+        [cost(140.50)], {"monthly": 140.5, "monthlyChangedAt": "20 Aug"},
+        "25 Aug")
+    assert frag5 == "fixed costs £140.50/mo (steady since 20 Aug)", frag5
+    assert extra5["monthlyChangedAt"] == "20 Aug", extra5
+    print("selftest-creditor-score: all checks passed")
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -1553,7 +1910,8 @@ def main():
 
     sc = sub.add_parser("score",
                         help="compute the Inbound Comms Response 24h metric "
-                             "and write it to the register's Metric Score")
+                             "and the Creditor Management ledger reading, "
+                             "and write each to its register Metric Score")
     sc.add_argument("--selftest", action="store_true",
                     help="run the offline maths checks, no Airtable access")
 
