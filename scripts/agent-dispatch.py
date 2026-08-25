@@ -240,6 +240,8 @@ CEO_REC_ID = "reciHUAEcEkbctnZ6"
 ROLE_AGENTS = {
     "recJ8J8idWE8d97tH": {"name": "AI Inbound Comms Response",
                           "agent": "inbound-comms-response", "role": "worker"},
+    "recjh6mmaF8KJW8t3": {"name": "AI Creditor Management",
+                          "agent": "creditor-management", "role": "worker"},
 }
 ALL_AGENTS = {**AGENTS, **ROLE_AGENTS}
 
@@ -248,6 +250,18 @@ ALL_AGENTS = {**AGENTS, **ROLE_AGENTS}
 # per routine reply. The CEO roster still routes everything else.
 RESPONSE_REC_ID = "recJ8J8idWE8d97tH"          # Team Members row
 RESPONSE_REGISTER_ROW = "recHfhVDb6BfQYco5"    # AI Agents register row
+
+# The Creditor Management agent's identities (build session 25 Aug 2026).
+# Creditor and payment-chasing tasks route to it DETERMINISTICALLY, ahead of
+# the generic Response route — Kevin's approval: the inbound comms process
+# sends anything payment-related or creditor-chasing to the specialist.
+CREDITOR_REC_ID = "recjh6mmaF8KJW8t3"          # Team Members row
+CREDITOR_REGISTER_ROW = "recDvxwDGcC3pFbPa"    # AI Agents register row
+CREDITOR_PLANS_TABLE = "tbljyVlkq1BXzny2G"     # the agent's outcome ledger
+CREDITOR_PLANS_FIELDS = {                       # read by cmd_score
+    "status":  "fldoNpdLRrT2gBFxQ",             # singleSelect
+    "monthly": "fldn7xH0KuleraGVA",             # currency £/mo
+}
 AGENTS_TABLE = "tbl9msVjyQWslLOIZ"
 REGISTER_METRIC_SCORE = "fldkGxrOlrfuLlH3J"    # Metric Score (current reading)
 REGISTER_FIELDS = {  # read for the CEO's routing roster
@@ -395,6 +409,27 @@ READ_ONLY_RE = re.compile(
     r"do not act\b|evidence only|no outbound",
     re.I,
 )
+
+# Creditor lane: money Kevin or his businesses OWE. The routing floor for the
+# Creditor Management agent (build session 25 Aug 2026; Kevin approved routing
+# creditor and payment-chasing work to the specialist, including the formerly
+# tier-2-parked correspondence). Same floor-not-ceiling contract as
+# TIER1_PATTERNS: the dispatcher's judgement pass routes what these miss.
+# Money owed TO Kevin — client invoices, tenant rent arrears, UC chasing —
+# is NEVER this lane, so those words stay out of this list on purpose
+# ("arrears" in particular would misroute tenant work).
+CREDITOR_PATTERNS = [
+    re.compile(p, re.I) for p in (
+        r"creditor",  # includes the triage skill's CREDITOR MATTER marker
+        r"chas(?:e|ing)\s+(?:a\s|the\s)?payment", r"payment\s+chas",
+        r"final\s+(?:notice|demand)", r"letter\s+before\s+action",
+        r"letter\s+of\s+claim", r"statutory\s+demand", r"bounce\s?back\s+loan",
+        r"debt\s+(?:collect|recovery)", r"collection\s+agency",
+        r"payment\s+(?:plan|arrangement)", r"instalment\s+plan",
+        r"overdue\s+(?:invoice|payment|account|balance)",
+        r"outstanding\s+(?:invoice|balance|payment|amount)",
+    )
+]
 
 
 def outbound_intent(*texts):
@@ -790,6 +825,7 @@ def cmd_queue(args):
 
     tier1, skipped_tier2, unmapped, unclassified = [], [], [], []
     approved_hb, changes_hb, new_work, routing = [], [], [], []
+    creditor_ok = bool(role_roster.get(CREDITOR_REC_ID, {}).get("dispatchable"))
 
     for t in agent_linked:
         # Tier 1 no longer drops out of the worklist. It is MARKED and worked,
@@ -800,10 +836,19 @@ def cmd_queue(args):
         t["matchedPattern"] = hit1 or ""
         if hit1:
             tier1.append(t)
+        hitc = tier_match(CREDITOR_PATTERNS, t["name"], t["description"],
+                          t["notes"])
+        t["creditor"] = bool(hitc)
+        t["creditorPattern"] = hitc or ""
         hit2 = tier_match(TIER2_PATTERNS, t["name"], t["description"], t["notes"])
         out2 = outbound_intent(t["name"], t["description"],
                                t["notes"]) if hit2 else ""
-        if hit2 and out2:
+        t["tier2Correspondence"] = bool(hit2 and out2)
+        if hit2 and out2 and not creditor_ok:
+            # The old Mica lane survives ONLY as the fallback: while the
+            # Creditor Management agent's register row is not Built/Live
+            # (Kevin's pause lever), creditor correspondence parks exactly as
+            # it did before 25 Aug 2026 rather than flowing to a generalist.
             skipped_tier2.append({**t, "matchedPattern": hit2,
                                   "outboundPattern": out2})
             continue
@@ -820,21 +865,37 @@ def cmd_queue(args):
         elif not t["outcome"]:
             tm = t["teamMemberIds"][0] if t["teamMemberIds"] else ""
             if tm == CEO_REC_ID:
-                # Inbound reply tasks skip the CEO's judgement pass entirely:
-                # the target is fixed (Kevin's ruling, 24 Aug 2026), so the
-                # dispatcher routes them straight to the Response agent with
+                # Fixed-destination lanes skip the CEO's judgement pass
+                # entirely (Kevin's rulings, 24 Aug and 25 Aug 2026): the
+                # dispatcher routes them straight to the role agent with
                 # `route TASKID --to <autoTarget>` — no od-ceo dispatch.
-                # Gated on the LIVE register: if the Response agent's row is
-                # not Built/Live (Kevin's pause lever) or the roster read
-                # failed, the task stays in the CEO lane and routes to a
-                # strategic agent like any other — mail keeps flowing, the
-                # lever stays honoured, and cmd_route re-checks regardless.
-                if t["inboundTask"] and role_roster.get(
+                # Creditor beats Response: a creditor email is an inbound
+                # task too, and the specialist owns it. Gated on the LIVE
+                # register: if the role agent's row is not Built/Live
+                # (Kevin's pause lever) or the roster read failed, the task
+                # stays in the CEO lane and routes to a strategic agent like
+                # any other — work keeps flowing, the lever stays honoured,
+                # and cmd_route re-checks regardless.
+                if t["creditor"] and creditor_ok:
+                    t["autoTarget"] = CREDITOR_REC_ID
+                elif t["inboundTask"] and role_roster.get(
                         RESPONSE_REC_ID, {}).get("dispatchable"):
                     t["autoTarget"] = RESPONSE_REC_ID
                 routing.append(t)
             elif tm in ALL_AGENTS:
-                new_work.append(t)
+                # A creditor matter sitting with the WRONG agent moves to the
+                # specialist: inbound creditor threads used to land with the
+                # generalist Response agent, and formerly-parked creditor
+                # correspondence may sit with any agent the CEO once chose.
+                # Deliberately narrow beyond those two cases — a dept head
+                # ANALYSING a payment-plan question keeps its task.
+                if (t["creditor"] and creditor_ok and tm != CREDITOR_REC_ID
+                        and (tm == RESPONSE_REC_ID
+                             or t["tier2Correspondence"])):
+                    t["autoTarget"] = CREDITOR_REC_ID
+                    routing.append(t)
+                else:
+                    new_work.append(t)
             else:
                 # e.g. Team Member cleared while Sent For Approval By still
                 # points at an agent. Surfaced, never silently dropped.
@@ -909,6 +970,11 @@ def cmd_queue(args):
             # count makes the park visible in the same object that reports the
             # emptiness it causes.
             "tier2Parked": len(skipped_tier2),
+            # Creditor-lane matches this run (routing floor, not judgement).
+            # Zero with the register row Built/Live and creditor mail known
+            # to be arriving = the patterns or the triage marker broke.
+            "creditorMatters": sum(
+                1 for t in agent_linked if t.get("creditor")),
             "routingNeeded": len(routing),
             "unclassified": len(unclassified),
             "tier1Open": len(tier1),
@@ -1274,8 +1340,9 @@ def cmd_verify(args):
     # human is told. It sat in the report and nothing read the report. Alarm
     # once per task, the same way parkedFlags does, so a task parked by mistake
     # surfaces on the first run instead of never.
-    flags += [("task PARKED as creditor correspondence — Mica's lane, no agent "
-               "will work it", t) for t in report.get("skippedTier2", [])]
+    flags += [("task PARKED as creditor correspondence — the Creditor "
+               "Management agent is not Built/Live, so no agent will work it",
+               t) for t in report.get("skippedTier2", [])]
     for label, t in flags:
         if t.get("id") not in alerted:
             problems.append(f"{label}: {t.get('id')} "
@@ -1450,8 +1517,26 @@ def response_score_reading(records, now_utc):
 
 def cmd_score(args):
     if args.selftest:
-        return response_score_selftest()
+        response_score_selftest()
+        creditor_score_selftest()
+        return
+    # Each agent's reading runs and reports independently: a broken creditor
+    # read must not stop the response score being written, and vice versa. A
+    # failure still exits non-zero at the end, so the job alarm sees it.
+    failures = []
+    for label, fn in (("response", response_score),
+                      ("creditor", creditor_score)):
+        try:
+            fn()
+        except SystemExit as exc:
+            failures.append(f"{label}: {exc}")
+        except Exception as exc:  # noqa: BLE001 — surfaced, never swallowed
+            failures.append(f"{label}: {exc}")
+    if failures:
+        sys.exit("ERROR: score failed — " + "; ".join(failures))
 
+
+def response_score():
     records = query_tasks(
         "AND({Inbound Communication Task}, {Status}!='Cancelled', "
         "OR(IS_AFTER(CREATED_TIME(), DATEADD(NOW(), -7, 'days')), "
@@ -1545,6 +1630,104 @@ def response_score_selftest():
     print("selftest-score: all checks passed")
 
 
+CREDITOR_SCORE_STATE = os.path.join(STATE_DIR, "creditor-score.json")
+
+# Ledger statuses → how the reading counts them. Settled and dissolved-closed
+# rows are finished business and priced at nothing; everything unlisted here
+# (a status added later in Airtable) counts as OPEN, so a new state surfaces
+# in the reading instead of silently vanishing from it.
+CREDITOR_PLAN_STATUSES = {"Plan agreed": "plan", "Frozen": "frozen",
+                          "Settled": "done",
+                          "Closed - dissolved business": "done"}
+
+
+def creditor_score_reading(records):
+    """The Creditor Management agent's goal is the LOWEST possible monthly
+    fixed outgoings, so the score IS the ledger: what is committed per month,
+    what is frozen at £0, and how many matters are still moving. Read from
+    the Creditor Plans table — no filterByFormula, so a broken table id fails
+    with HTTP 404 rather than a silent empty list, and zero rows genuinely
+    means an empty ledger (the table is new, 25 Aug 2026)."""
+    plans = frozen = open_m = 0
+    total = 0.0
+    for r in records:
+        f = r.get("fields", {})
+        status = sel(f.get(CREDITOR_PLANS_FIELDS["status"]))
+        kind = CREDITOR_PLAN_STATUSES.get(status, "open")
+        if kind == "plan":
+            plans += 1
+            total += float(f.get(CREDITOR_PLANS_FIELDS["monthly"]) or 0)
+        elif kind == "frozen":
+            frozen += 1
+        elif kind == "open":
+            open_m += 1
+    if not (plans or frozen or open_m):
+        return ("ledger empty — no creditor matters recorded yet",
+                {"plans": 0, "frozen": 0, "open": 0, "monthly": 0.0})
+    reading = (f"£{total:,.2f}/mo across {plans} agreed plan"
+               f"{'' if plans == 1 else 's'}; {frozen} frozen at £0; "
+               f"{open_m} open")
+    return reading, {"plans": plans, "frozen": frozen, "open": open_m,
+                     "monthly": round(total, 2)}
+
+
+def creditor_score():
+    records = query_records(CREDITOR_PLANS_TABLE,
+                            fields=list(CREDITOR_PLANS_FIELDS.values()))
+    reading, stats = creditor_score_reading(records)
+    prev = ""
+    try:
+        with open(CREDITOR_SCORE_STATE) as fh:
+            prev = json.load(fh).get("reading", "")
+    except (OSError, ValueError):
+        pass
+    if reading == prev:
+        print(json.dumps({"agent": "creditor", "reading": reading,
+                          "written": False, "reason": "unchanged", **stats}))
+        return
+    _request("PATCH", f"/{AGENTS_TABLE}/{CREDITOR_REGISTER_ROW}",
+             {"fields": {REGISTER_METRIC_SCORE: reading}})
+    os.makedirs(os.path.dirname(CREDITOR_SCORE_STATE), exist_ok=True)
+    with open(CREDITOR_SCORE_STATE, "w") as fh:
+        json.dump({"reading": reading, "writtenAt": now_iso()}, fh)
+    print(json.dumps({"agent": "creditor", "reading": reading,
+                      "written": True, **stats}))
+
+
+def creditor_score_selftest():
+    def rec(status, monthly=None):
+        fields = {CREDITOR_PLANS_FIELDS["status"]: {"name": status}}
+        if monthly is not None:
+            fields[CREDITOR_PLANS_FIELDS["monthly"]] = monthly
+        return {"fields": fields}
+
+    reading, s = creditor_score_reading([
+        rec("Plan agreed", 25.50), rec("Plan agreed", 100),
+        rec("Frozen"), rec("Frozen", 0),
+        rec("Awaiting response"), rec("Disputed"),
+        rec("Escalated to Kevin"),
+        rec("Settled", 50),                       # finished → priced at nothing
+        rec("Closed - dissolved business"),       # finished → not open
+        rec("Some Future Status"),                # unknown → OPEN, never hidden
+    ])
+    assert s == {"plans": 2, "frozen": 2, "open": 4, "monthly": 125.5}, s
+    assert reading == ("£125.50/mo across 2 agreed plans; 2 frozen at £0; "
+                       "4 open"), reading
+
+    reading2, s2 = creditor_score_reading([])
+    assert reading2 == "ledger empty — no creditor matters recorded yet", \
+        reading2
+    assert s2 == {"plans": 0, "frozen": 0, "open": 0, "monthly": 0.0}, s2
+
+    # A plan row with a blank Monthly Amount must count the plan and add £0,
+    # not crash on None (Airtable omits empty currency fields entirely).
+    reading3, s3 = creditor_score_reading([rec("Plan agreed")])
+    assert s3 == {"plans": 1, "frozen": 0, "open": 0, "monthly": 0.0}, s3
+    assert reading3 == "£0.00/mo across 1 agreed plan; 0 frozen at £0; 0 open", \
+        reading3
+    print("selftest-creditor-score: all checks passed")
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -1553,7 +1736,8 @@ def main():
 
     sc = sub.add_parser("score",
                         help="compute the Inbound Comms Response 24h metric "
-                             "and write it to the register's Metric Score")
+                             "and the Creditor Management ledger reading, "
+                             "and write each to its register Metric Score")
     sc.add_argument("--selftest", action="store_true",
                     help="run the offline maths checks, no Airtable access")
 
