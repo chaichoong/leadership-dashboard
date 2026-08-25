@@ -109,12 +109,11 @@ If PDFs are found, process each one through this pipeline:
       date). Record it as `YYYY-MM-DD`, or `none` when the letter genuinely names
       no date. Do NOT use the date the letter was written, and do NOT guess.
 
-      Why this line exists: from 3 Jul to 16 Aug 2026 a 7-day Utilita demand, a
-      14-day Companies House strike-off window, a 14-day charging-order
-      reconsideration window and a 3 Aug BW Legal deadline all closed unread, and
-      on 24 Aug 2026 a council tax court date passed the same way. The dates were
-      in the letters. Nothing ever lifted them out of the prose, so no task was
-      ever dated and nothing chased them.
+      Why this line exists: from 3 Jul to 24 Aug 2026 several dated response
+      windows in scanned post closed unread. The dates were in the letters.
+      Nothing ever lifted them out of the prose, so no task was ever dated and
+      nothing chased them. (Specific instances live in the private brain, not
+      in this public file.)
 
 4. Split the PDF into individual files using Python pypdf:
    - Output to "/Users/kevinbrittain/Library/CloudStorage/GoogleDrive-kevin@runpreneur.org.uk/My Drive/Post Inbox/Split/"
@@ -144,14 +143,14 @@ If PDFs are found, process each one through this pipeline:
    deadline buried at position nine of a list of twelve is the same as no
    deadline at all.
 
-   The `Deadline:` line in the email is not decoration. The inbound triage in
-   `follow-up.html` reads it, writes it into the task's **Due Date**, and ticks
-   **Hard Deadline** so the auto-rescheduler cannot roll it forward. From there
-   `scripts/loop-health.py` reports it under NOT MOVING once it is within three
-   days or already passed, and the daily `hard-deadline-not-waiting-on-approval`
-   invariant fails if it is still sitting in the approval queue. Omit the line
-   and that whole chain goes quiet — which is exactly what happened before
-   25 Aug 2026.
+   The `Deadline:` line in the email is not decoration: it is the one place
+   the date survives outside the PDF's prose, so downstream triage can date the
+   task from it. NOTE (25 Aug 2026): the intended enforcement chain — triage
+   writing the Deadline into the task's Due Date, a Hard Deadline flag the
+   rescheduler cannot roll, a loop-health NOT MOVING rule and a daily invariant
+   — is DESIGNED but NOT YET BUILT. Nothing downstream parses this line today,
+   so until that build lands, the deadline ordering in step 7's report is the
+   only net. Do not treat the chain as existing.
 
    You still MUST NOT pay anything, contact a council, or answer a court. Tier 1
    work is prepared for Kevin's approval, never carried out.

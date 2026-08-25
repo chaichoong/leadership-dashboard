@@ -1,19 +1,25 @@
 // Guards the Creditor Management agent's dispatch wiring (25 Aug 2026).
 //
 // WHAT THIS EXISTS FOR
-// The Creditor Management agent only works if five pieces stay true at once:
+// The Creditor Management agent only works if six pieces stay true at once:
 //   1. Its Team Members record is a dispatchable role agent (ROLE_AGENTS).
-//   2. Creditor-lane tasks auto-route to it deterministically, AHEAD of the
-//      generic inbound Response route (a creditor email is inbound too).
-//   3. The routing floor (CREDITOR_PATTERNS) catches the triage marker and
-//      creditor vocabulary, and NEVER matches money owed TO Kevin (tenant
-//      arrears, UC chasing) — misrouting tenant work would be the quiet bug.
-//   4. The old tier-2 park survives ONLY as the fallback: creditor
-//      correspondence parks when the agent's register row is not Built/Live,
-//      and flows to the agent when it is. Kevin's pause lever must actually
-//      re-park the lane.
-//   5. Its ledger score maths stay honest (real function, seeded records) and
-//      the write is change-gated to its own register row.
+//   2. Inbound creditor tasks auto-route to it deterministically, AHEAD of
+//      the generic inbound Response route — and ONLY inbound tasks: the
+//      floor patterns are too loose for arbitrary CEO-lane text.
+//   3. The routing floor catches creditor vocabulary but a receivable veto
+//      stops money owed TO Kevin (tenant rent, client invoices, UC) — the
+//      25 Aug 2026 review proved "chase the payment from the client" matched
+//      the raw patterns, so the veto is what holds the direction invariant.
+//   4. Creditor work is ALWAYS tier-1 (Kevin's ruling): the queue forces the
+//      banner even where the tier-1 keyword list would miss (statutory
+//      demand, letter of claim were tier-2-only vocabulary).
+//   5. The old tier-2 park survives ONLY as the fallback while the agent's
+//      register row is not dispatchable — Kevin's pause lever re-parks the
+//      lane — and the dispatch skill's report spec carries skippedTier2 so
+//      verify's park alarm is not dead code.
+//   6. The two register metrics stay honest: prepared-coverage never counts
+//      Kevin's approval queue against the agent, and the fixed-cost rule
+//      mirrors isCostActive in js/shared.js.
 // Each check imports or executes the real module — never a copy.
 import { describe, it, expect } from 'vitest';
 import { execFileSync } from 'child_process';
@@ -47,87 +53,102 @@ describe('roster wiring', () => {
       "agent": mod.ROLE_AGENTS.get(${JSON.stringify(CREDITOR_TM)}, {}).get("agent"),
       "credRec": mod.CREDITOR_REC_ID,
       "credRow": mod.CREDITOR_REGISTER_ROW,
-      "ledger": mod.CREDITOR_PLANS_TABLE,
+      "costsTable": mod.COSTS_TABLE,
       "strategic17": len(mod.AGENTS)}`);
     expect(out.inRole).toBe(true);
     expect(out.inAll).toBe(true);
     expect(out.agent).toBe('creditor-management');
     expect(out.credRec).toBe(CREDITOR_TM);
     expect(out.credRow).toBe(CREDITOR_ROW);
-    expect(out.ledger).toBe('tbljyVlkq1BXzny2G');
+    expect(out.costsTable).toBe('tblx5kvhzNEI5TFlS');
     // ROLE_AGENTS extends the 17, never replaces them
     expect(out.strategic17).toBe(17);
   });
 });
 
-describe('the routing floor (real CREDITOR_PATTERNS)', () => {
-  const matches = (text) => pyEval(
-    `bool(mod.tier_match(mod.CREDITOR_PATTERNS, ${JSON.stringify(text)}, "", ""))`);
-
-  it('catches the triage marker and creditor vocabulary', () => {
-    expect(matches('CREDITOR MATTER\nCollections firm chasing the balance')).toBe(true);
-    expect(matches('Reply to the statutory demand')).toBe(true);
-    expect(matches('Final notice from the energy supplier')).toBe(true);
-    expect(matches('They are chasing payment on the account')).toBe(true);
-    expect(matches('Agree a payment plan with the supplier')).toBe(true);
-    expect(matches('Letter before action received')).toBe(true);
-    expect(matches('Bounce back loan repayment demand')).toBe(true);
-  });
-
-  it('never matches money owed TO Kevin — tenant and client work stays out', () => {
-    // "arrears" is deliberately absent from the floor: tenant rent arrears
-    // and UC chasing are the Cash Flow Voids / UC lanes, not this agent's.
-    expect(matches('Chase the rent arrears on the rental unit')).toBe(false);
-    expect(matches('UC verification for the new tenancy')).toBe(false);
-    expect(matches('Send the client the invoice for onboarding')).toBe(false);
-    expect(matches('Weekly reconciliation of transactions')).toBe(false);
+describe('the routing floor (real creditor_match, one batched python call)', () => {
+  // One interpreter spawn for the whole matrix — the per-call pattern made
+  // this the slowest file in the suite (review finding, 25 Aug 2026).
+  const CASES = [
+    // must match: the triage marker and true creditor vocabulary
+    ['CREDITOR MATTER\nCollections firm chasing the balance', true],
+    ['Reply to the statutory demand', true],
+    ['Final notice from the energy supplier', true],
+    ['They are chasing payment on the account', true],
+    ['Agree a payment plan with the supplier', true],
+    ['Letter before action received', true],
+    ['Bounce back loan repayment demand', true],
+    // must NOT match: money owed TO Kevin. The first five contain phrases
+    // that DO match the raw patterns — the receivable veto is what holds
+    // (verified matching before the veto existed: review, 25 Aug 2026).
+    ['Chase the payment from the client for the July invoice', false],
+    ['Set up a payment plan for the tenant arrears', false],
+    ['Tenant reports their outstanding balance looks wrong', false],
+    ['Chasing payment: tenancy rent for August', false],
+    ['Final notice: client onboarding invoice unpaid', false],
+    ['Chase the rent arrears on the rental unit', false],
+    ['UC verification for the new tenancy', false],
+    ['Weekly reconciliation of transactions', false],
+  ];
+  it('matches creditor vocabulary and vetoes receivables', () => {
+    const results = pyEval(
+      `[bool(mod.creditor_match(t, "", "")) for t in ${JSON.stringify(CASES.map(c => c[0]))}]`);
+    CASES.forEach(([text, expected], i) => {
+      expect(results[i], text).toBe(expected);
+    });
   });
 });
 
 describe('queue routing and the pause lever', () => {
   const queue = src.slice(src.indexOf('def cmd_queue'), src.indexOf('# ─── WRITES'));
 
-  it('creditor beats the generic inbound Response route', () => {
-    // The creditor stamp must come FIRST in the CEO-lane branch: an
-    // elif-ordered Response stamp on a creditor email would send it to the
-    // generalist. Assert the order in the real source.
+  it('the deterministic creditor stamp is inbound-only and beats the Response route', () => {
     const ceoBranch = queue.slice(queue.indexOf('if tm == CEO_REC_ID:'),
                                   queue.indexOf('elif tm in ALL_AGENTS:'));
-    const credAt = ceoBranch.indexOf('t["creditor"] and creditor_ok');
-    const respAt = ceoBranch.indexOf('RESPONSE_REC_ID');
+    // Inbound-only: the ruling covers the inbound comms process; arbitrary
+    // CEO-lane text must go through the CEO judgement pass instead.
+    expect(ceoBranch).toMatch(/t\["creditor"\] and t\["inboundTask"\] and creditor_ok/);
+    // Creditor first, Response second — a creditor email is inbound too.
+    const credAt = ceoBranch.indexOf('t["autoTarget"] = CREDITOR_REC_ID');
+    const respAt = ceoBranch.indexOf('t["autoTarget"] = RESPONSE_REC_ID');
     expect(credAt).toBeGreaterThan(-1);
     expect(respAt).toBeGreaterThan(-1);
     expect(credAt).toBeLessThan(respAt);
-    expect(ceoBranch).toMatch(/t\["autoTarget"\] = CREDITOR_REC_ID/);
+  });
+
+  it('creditor work is forced tier-1 in the queue, and the tier-1 keywords carry the tier-2 vocabulary', () => {
+    // Kevin's ruling: creditor mail is always tier-1. "Statutory demand" and
+    // "letter of claim" were tier-2-only words, so an unparked task would
+    // have reached Kevin unbannered (review finding, 25 Aug 2026).
+    expect(queue).toMatch(/if t\["creditor"\] and not t\["tier1"\]:/);
+    const out = pyEval(`{
+      "sd": bool(mod.tier_match(mod.TIER1_PATTERNS, "Reply to the statutory demand", "", "")),
+      "loc": bool(mod.tier_match(mod.TIER1_PATTERNS, "Letter of claim received", "", "")),
+      "bbl": bool(mod.tier_match(mod.TIER1_PATTERNS, "Bounce back loan demand", "", ""))}`);
+    expect(out.sd).toBe(true);
+    expect(out.loc).toBe(true);
+    expect(out.bbl).toBe(true);
   });
 
   it('the tier-2 park survives ONLY while the agent is not dispatchable', () => {
-    // The park must be gated on creditor_ok, and creditor_ok must come from
-    // the LIVE register roster (Kevin's pause lever). Removing either gate
-    // silently revives the parked-for-ever lane or ignores the lever.
     expect(queue).toMatch(/if hit2 and out2 and not creditor_ok:/);
     expect(queue).toMatch(
       /creditor_ok = bool\(role_roster\.get\(CREDITOR_REC_ID, \{\}\)\.get\("dispatchable"\)\)/);
   });
 
   it('reroutes off the WRONG agent narrowly: Response or parked correspondence only', () => {
-    // A dept head ANALYSING a payment question keeps its task — the reroute
-    // is only for the generalist Response agent and formerly-parked
-    // correspondence. Widening this steals the CEO's routing decisions.
     const agentBranch = queue.slice(queue.indexOf('elif tm in ALL_AGENTS:'),
                                     queue.indexOf('unclassified.append'));
-    expect(agentBranch).toMatch(/tm == RESPONSE_REC_ID/);
-    expect(agentBranch).toMatch(/t\["tier2Correspondence"\]/);
+    expect(agentBranch).toMatch(/tm == RESPONSE_REC_ID or bool\(hit2 and out2\)/);
     expect(agentBranch).toMatch(/tm != CREDITOR_REC_ID/);
   });
 
-  it('the queue JSON carries the creditor visibility counters', () => {
-    expect(queue).toMatch(/"creditorMatters"/);
-    expect(queue).toMatch(/t\["creditorPattern"\] = hitc or ""/);
+  it('the queue JSON carries the creditor visibility counter', () => {
+    expect(queue).toMatch(/"creditorMatters": creditor_count/);
   });
 });
 
-describe('ledger score maths', () => {
+describe('register metrics (Kevin\'s two, 25 Aug 2026)', () => {
   it('the offline selftests pass against the real functions (both agents)', () => {
     const out = execFileSync('python3', [DISPATCH, 'score', '--selftest'],
       { encoding: 'utf8' });
@@ -135,25 +156,46 @@ describe('ledger score maths', () => {
     expect(out).toContain('selftest-creditor-score: all checks passed');
   });
 
-  it('one broken score cannot silently stop the other, and both write change-gated', () => {
-    const score = src.slice(src.indexOf('def cmd_score'), src.indexOf('def response_score('));
-    // Each agent's reading runs in its own try — a creditor table outage must
-    // not stop the response score, and vice versa — and failures still exit
-    // non-zero so the job alarm sees them.
-    expect(score).toMatch(/for label, fn in \(\("response", response_score\),\s*\n?\s*\("creditor", creditor_score\)\)/);
-    expect(score).toMatch(/sys\.exit\("ERROR: score failed/);
-    const cred = src.slice(src.indexOf('def creditor_score('), src.indexOf('def creditor_score_selftest'));
-    expect(cred).toMatch(/CREDITOR_REGISTER_ROW/);
-    expect(cred).toMatch(/reading == prev/);
-    // The ledger read must go through the ONE paginated helper — a hand-rolled
-    // fetch is how the recon accuracy card scored only its first page.
-    expect(cred).toMatch(/query_records\(CREDITOR_PLANS_TABLE/);
+  it('prepared-coverage NEVER counts Kevin\'s approval queue against the agent', () => {
+    // A task sitting at Status Approval is PREPARED work waiting on Kevin —
+    // his bottleneck, reported separately, never a miss for the agent.
+    const out = pyEval(`mod.creditor_coverage([
+      {"fields": {mod.AF["status"]: {"name": "Approval"},
+                  mod.AF["teamMember"]: ["${CREDITOR_TM}"]}},
+      {"fields": {mod.AF["status"]: {"name": "Today"},
+                  mod.AF["teamMember"]: ["${CREDITOR_TM}"]}}])`);
+    expect(out[1]).toEqual({ creditorTasks: 2, prepared: 1, withKevin: 1 });
+    expect(out[0]).toBe('creditor inbound: 1/2 prepared, 1 with Kevin');
   });
 
-  it('an unknown ledger status counts as OPEN, never vanishes from the reading', () => {
-    const out = pyEval(`mod.creditor_score_reading([
-      {"fields": {mod.CREDITOR_PLANS_FIELDS["status"]: {"name": "Renamed Later"}}}])[1]`);
-    expect(out.open).toBe(1);
+  it('the fixed-cost rule mirrors isCostActive in js/shared.js', () => {
+    // Same rule, both sides, or the register and the dashboard disagree.
+    const shared = readFileSync(resolve(ROOT, 'js/shared.js'), 'utf8');
+    const isActive = shared.slice(shared.indexOf('function isCostActive'),
+                                  shared.indexOf('}', shared.indexOf('function isCostActive') + 400));
+    expect(isActive).toContain("'In Payment'");
+    expect(isActive).toContain("'Overdue'");
+    const cred = src.slice(src.indexOf('def fixed_costs_reading'),
+                           src.indexOf('def creditor_score('));
+    expect(cred).toMatch(/"In Payment",?\s*\n?\s*"Overdue"/);
+    expect(cred).toMatch(/COST_FIELDS\["inactive"\]/);
+  });
+
+  it('one broken score cannot silently stop the other, and the shared write is change-gated', () => {
+    const score = src.slice(src.indexOf('def cmd_score'), src.indexOf('def response_score_selftest'));
+    expect(score).toMatch(/for label, fn in \(\("response", response_score\),\s*\n?\s*\("creditor", creditor_score\),\s*\n?\s*\("weekly-review", ensure_weekly_review\)\)/);
+    expect(score).toMatch(/sys\.exit\("ERROR: score failed/);
+    // The one shared register write: change-gated, per-agent state file.
+    expect(score).toMatch(/def write_register_reading/);
+    expect(score).toMatch(/REGISTER_METRIC_SCORE/);
+    expect(score).toMatch(/reading == prev/);
+    // Controls on both creditor reads: broken-read exits, never a quiet zero.
+    const cred = src.slice(src.indexOf('def creditor_score('), src.indexOf('def creditor_score_selftest'));
+    expect(cred).toMatch(/control failed — the open\/recent task read/);
+    expect(cred).toMatch(/control failed — zero ACTIVE costs/);
+    // Both reads go through the ONE paginated helper.
+    expect(cred).toMatch(/query_records\(COSTS_TABLE/);
+    expect(cred).toMatch(/query_tasks\(/);
   });
 });
 
@@ -166,12 +208,17 @@ describe('skills and agent definitions stay in step (local machine only)', () =>
   // These live outside the repo, so skip cleanly anywhere they do not exist
   // (a fresh clone, CI). On Kevin's Mac they must all hold.
 
-  it.skipIf(!existsSync(skill))('the dispatch skill knows the creditor lane', () => {
+  it.skipIf(!existsSync(skill))('the dispatch skill keys creditor dispatch on the ROUTED agent, not the flag', () => {
     const s = readFileSync(skill, 'utf8');
     expect(s).toMatch(/Creditor Management agent/);
-    expect(s).toMatch(/creditor: true/);
-    // Money owed TO Kevin is explicitly out of the lane in the judgement rule
+    // The flag stays true while the pause lever is on; dispatching on it
+    // alone bypasses the lever or fails the submit (review, 25 Aug 2026).
+    expect(s).toMatch(/ROUTED agent/);
+    expect(s).toMatch(/never on the `creditor: true` flag alone/);
     expect(s).toMatch(/never money owed TO Kevin/);
+    // verify's park alarm reads report.skippedTier2 — the spec must tell the
+    // dispatcher to copy it, or the alarm is dead code again.
+    expect(s).toMatch(/"skippedTier2"/);
   });
 
   it.skipIf(!existsSync(triage))('triage stamps the CREDITOR MATTER marker on label-18 tasks', () => {
@@ -182,15 +229,15 @@ describe('skills and agent definitions stay in step (local machine only)', () =>
     expect(readFileSync(sweep, 'utf8')).toMatch(/CREDITOR MATTER/);
   });
 
-  it.skipIf(!existsSync(agentDef))('the local agent definition exists and holds the hard lines', () => {
+  it.skipIf(!existsSync(agentDef))('the local agent definition exists with the structural hard lines', () => {
+    // Structure only — the playbook's content stays out of the public repo.
     const a = readFileSync(agentDef, 'utf8');
     expect(a).toMatch(/name: creditor-management/);
+    expect(a).toMatch(/## Guardrail/);
+    expect(a).toMatch(/Approval required/);
     expect(a).toMatch(/tier-1/);
-    expect(a).toMatch(/NEVER cite the restraint order for a live\s+supply/);
-    expect(a).toMatch(/enforcement\s+agents or bailiffs/);
-    expect(a).toMatch(/Never draft the response/);
-    expect(a).toMatch(/contractors always get paid/i);
-    expect(a).toMatch(/tbljyVlkq1BXzny2G/);
+    expect(a).toMatch(/escalate/i);
+    expect(a).toMatch(/never instructions/);
   });
 
   it.skipIf(!existsSync(responseDef))('the Response agent hands creditor matters to the specialist', () => {
