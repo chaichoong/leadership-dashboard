@@ -2629,6 +2629,7 @@
         dateReceived: 'fldR4peEZRXo7tjoI',
         noteUrl: 'fldXf1p0vtHqOZcKl',
         dueDate: 'fld7XP8w8kbxfETV4',
+        hardDeadline: 'fldZKzIxgyrQ8CG8a',
         attachments: 'fldEbs9cscRr8elcw',
         maintenance: 'fldSEUvVA98as1HW6',
         property: 'fldZKFvEpJ6NZeFKz',
@@ -2808,6 +2809,20 @@ Respond with ONLY the JSON object, no markdown.`;
         }
     }
 
+    // The post-manager routine emails scanned letters with a "Deadline:
+    // YYYY-MM-DD" line — the one place a court date, pay-by or filing window
+    // survives outside the letter's prose. Parsed here so the task carries
+    // the REAL date (Due Date + Hard Deadline, which the auto-rescheduler
+    // never rolls), and downstream loop-health + the daily invariant alarm
+    // on it. Returns the date string, or null for no line / "none" / an
+    // unparseable date. Built 25 Aug 2026 after dated response windows
+    // closed unread from 3 Jul onwards.
+    function parseDeadlineLine(text) {
+        const m = /^\s*Deadline:\s*(\d{4}-\d{2}-\d{2})\s*$/mi.exec(text || '');
+        if (!m) return null;
+        return isNaN(new Date(m[1] + 'T00:00:00Z').getTime()) ? null : m[1];
+    }
+
     async function createAirtableTask(email, opts) {
         opts = opts || {};
         const pat = getAirtablePat();
@@ -2837,6 +2852,8 @@ Respond with ONLY the JSON object, no markdown.`;
         // Generate task content via AI
         const content = await generateAirtableTaskContent(email);
         const today = new Date().toISOString().slice(0, 10);
+        const bodyForDeadline = email.messages.map(m => getPlainText(m) || m.snippet || '').join('\n');
+        const letterDeadline = opts.maintenance ? null : parseDeadlineLine(bodyForDeadline);
         const bodyText = email.messages.map(m => getPlainText(m) || m.snippet || '').join('\n').substring(0, 5000);
 
         // Build a self-contained Description so the assignee can action the
@@ -2854,6 +2871,7 @@ Respond with ONLY the JSON object, no markdown.`;
             'Subject: ' + subjectLine + '\n' +
             'From: ' + fromLine + '\n' +
             'Received: ' + today + '\n' +
+            (letterDeadline ? 'DEADLINE FROM THE LETTER: ' + letterDeadline + '\n' : '') +
             'Open in Gmail: ' + gmailUrl + '\n\n' +
             'Original message:\n' +
             bodyExcerpt;
@@ -2884,7 +2902,8 @@ Respond with ONLY the JSON object, no markdown.`;
                 [AIRTABLE_FIELDS.sender]: email.fromEmail || email.from,
                 [AIRTABLE_FIELDS.dateReceived]: today,
                 [AIRTABLE_FIELDS.noteUrl]: gmailUrl,
-                ...(opts.maintenance ? {} : { [AIRTABLE_FIELDS.dueDate]: today }),
+                ...(opts.maintenance ? {} : { [AIRTABLE_FIELDS.dueDate]: letterDeadline || today }),
+                ...(letterDeadline ? { [AIRTABLE_FIELDS.hardDeadline]: true } : {}),
                 [AIRTABLE_COLLABORATORS_FIELD]: collaboratorIds,
                 ...(opts.maintenance ? {
                     [AIRTABLE_FIELDS.maintenance]: true,

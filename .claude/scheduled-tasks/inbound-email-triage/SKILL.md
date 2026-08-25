@@ -164,7 +164,15 @@ in Tasks `tblqB8b22hKBL4PF1`, base `appnqjDpqDniH3IRl`, with
 - `fldgFjGBw6bTKJFCD` Task Name: "INBOUND: <concise action from the email>".
   Under 100 chars. No em dashes anywhere in name or description.
 - `fldx4qCw17UfrKpaN` Status: `Today`
-- `fld7XP8w8kbxfETV4` Due Date: today (YYYY-MM-DD)
+- `fld7XP8w8kbxfETV4` Due Date: today (YYYY-MM-DD) — UNLESS the email body
+  carries a `Deadline: YYYY-MM-DD` line (the post-manager scanned-letter
+  format). Then Due Date = that date exactly, and ALSO set
+  `fldZKzIxgyrQ8CG8a` Hard Deadline: true. A hard deadline is a real-world
+  date (court date, pay-by, filing window): the rescheduler never rolls it,
+  loop-health warns from 3 days out, and the daily invariant fails if it
+  passes with the task still open. If the letter's deadline is already past,
+  keep it as the Due Date (the invariant alarm firing is CORRECT) and say so
+  in the Description. `Deadline: none` or a malformed date = no deadline.
 - `flduCtmQGpOA4eWaj` Team Member: `["reciHUAEcEkbctnZ6"]` (AI CEO — the
   dispatch engine picks it up and routes it to the right role agent)
 - NO Assignee — a blank Assignee is the agent-owned convention.

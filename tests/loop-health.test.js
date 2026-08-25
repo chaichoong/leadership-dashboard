@@ -92,6 +92,7 @@ function toParsed(rec, derive) {
     agentOutput: f['Agent Output'] || '',
     approvalSlackTs: f['Approval Slack TS'] || '',
     assigneeEmail: (f.Assignee || {}).email || '',
+    hardDeadline: !!f['Hard Deadline'],
   };
 }
 
@@ -186,12 +187,48 @@ describe('approval-loop stall rules', () => {
                'Created Time': '2026-08-01T09:00:00Z' }),
         task({ 'Task Name': 'Amend', Status: 'Today', 'Team Member': [AGENT],
                'Approval Outcome': 'Changes requested', 'Approved At': '2026-08-10T09:00:00Z' }),
+        task({ 'Task Name': 'Deadline', Status: 'Upcoming', 'Team Member': [AGENT],
+               'Due Date': '2026-08-10', 'Hard Deadline': true }),
       ];
       const { js, py } = runBoth(records);
-      // amend, then draft, then decide — the draft rule carries no day count, so
+      // deadline first (a real-world date beats every internal staleness),
+      // then amend, draft, decide — the draft rule carries no day count, so
       // a plain age sort would bury it under every dated item.
-      expect(js.stalled.map(s => s.rule)).toEqual(['amend', 'draft', 'decide']);
-      expect(py.stalled.map(s => s.rule)).toEqual(['amend', 'draft', 'decide']);
+      expect(js.stalled.map(s => s.rule)).toEqual(['deadline', 'amend', 'draft', 'decide']);
+      expect(py.stalled.map(s => s.rule)).toEqual(['deadline', 'amend', 'draft', 'decide']);
+    });
+
+    it('flags a hard deadline near or past whatever the status, and leaves the UC lane to its watchdog', () => {
+      // Past deadline sitting at Approval: the date does not pause while the
+      // draft waits on a decision — this is the 24 Aug council-tax failure.
+      const past = runBoth([task({ 'Task Name': 'Council reply', Status: 'Approval', 'Team Member': [AGENT],
+        'Due Date': '2026-08-12', 'Hard Deadline': true,
+        'Approval Slack TS': epoch('2026-08-13T09:00:00Z') })]);
+      expect(past.js.stalled.map(s => s.rule)).toEqual(['deadline']);
+      expect(past.py.stalled.map(s => s.rule)).toEqual(['deadline']);
+      expect(past.js.stalled[0].why).toContain('passed 2 days ago');
+      expect(past.py.stalled[0].why).toContain('passed 2 days ago');
+
+      // Inside the warning window, stored Upcoming, HUMAN-owned — still fires:
+      // the queue-window and ownership narrowing of the draft rule do not
+      // apply, because the date is a fact about the world, not the loop.
+      const near = runBoth([task({ 'Task Name': 'Filing window', Status: 'Upcoming', 'Team Member': ['recHUMAN'],
+        'Due Date': '2026-08-16', 'Hard Deadline': true })]);
+      expect(near.js.stalled.map(s => s.rule)).toEqual(['deadline']);
+      expect(near.py.stalled.map(s => s.rule)).toEqual(['deadline']);
+
+      const far = runBoth([task({ 'Task Name': 'Far off', Status: 'Upcoming', 'Team Member': [AGENT],
+        'Due Date': '2026-08-20', 'Hard Deadline': true })]);
+      expect(far.js.stalled).toHaveLength(0);
+      expect(far.py.stalled).toHaveLength(0);
+
+      // The UC verification lane is excluded by prefix — its dates belong to
+      // the UC watchdog, and its routinely open-past-date reminders would
+      // have drowned this list 24-to-6 on day one.
+      const uc = runBoth([task({ 'Task Name': 'UC verification: T Tenant, £897.52 due 6 August', Status: 'Upcoming',
+        'Team Member': [AGENT], 'Due Date': '2026-08-01', 'Hard Deadline': true })]);
+      expect(uc.js.stalled).toHaveLength(0);
+      expect(uc.py.stalled).toHaveLength(0);
     });
   });
 
@@ -203,6 +240,14 @@ describe('approval-loop stall rules', () => {
       expect(jsNum('STALL_AMEND_HOURS')).toBe(pyNum('STALL_AMEND_HOURS'));
       expect(jsNum('STALL_DRAFT_HOURS')).toBe(pyNum('STALL_DRAFT_HOURS'));
       expect(jsNum('STALL_DECIDE_DAYS')).toBe(pyNum('STALL_DECIDE_DAYS'));
+      expect(jsNum('STALL_DEADLINE_DAYS')).toBe(pyNum('STALL_DEADLINE_DAYS'));
+    });
+
+    it('excludes the same UC lane on both sides', () => {
+      const jsPrefix = loopSrc.match(/DEADLINE_EXCLUDE_PREFIX\s*=\s*'([^']+)'/)[1];
+      const pyPrefix = py.match(/DEADLINE_EXCLUDE_PREFIX\s*=\s*"([^"]+)"/)[1];
+      expect(jsPrefix).toBe(pyPrefix);
+      expect(jsPrefix).toBe('UC verification:');
     });
 
     it('restricts the draft rule to the statuses the dispatcher works from', () => {

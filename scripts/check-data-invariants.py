@@ -141,6 +141,35 @@ INVARIANTS = [
         "fields": ["Task Name", "Status", "Processed by AI Agent"],
     },
     {
+        # A Hard Deadline is a real-world date lifted from the letter itself —
+        # a court date, a pay-by, a filing window — stamped by inbound triage
+        # from the post-manager email's Deadline line. One PASSING with the
+        # task still open means the exact failure the deadline chain was built
+        # to end: between 3 Jul and 24 Aug 2026 several dated legal response
+        # windows closed unread because no surface ever alarmed on the date.
+        # The softer within-3-days warning lives in scripts/loop-health.py
+        # (rule "deadline"); this invariant is the hard line: a missed
+        # deadline on an open task is always wrong.
+        #
+        # The UC verification lane is excluded by name prefix, in step with
+        # loop-health: its dates are enforced by the dedicated UC watchdog,
+        # and its routinely open-past-date reminders contributed 24 of 30
+        # hits on the day this was written — a flood that would have made
+        # the alarm unreadable from day one.
+        "name": "hard-deadline-passed-still-open",
+        "table": TASKS,
+        "incident": "3 Jul – 24 Aug 2026 — dated legal response windows in scanned post closed unread; no task ever carried the date",
+        "asserts": "hard-deadline task with its date passed => the task is closed",
+        "violation": (
+            "AND({Hard Deadline} = 1, {Due Date}, {Due Date} < TODAY(), "
+            "{Status} != 'Completed', {Status} != 'Cancelled', "
+            "FIND('UC verification:', {Task Name}) = 0)"
+        ),
+        "control": "AND({Hard Deadline} = 1, {Due Date})",
+        "control_means": "hard-deadline tasks carrying a due date (the population triage stamps)",
+        "fields": ["Task Name", "Status", "Due Date", "Hard Deadline"],
+    },
+    {
         # `Completion Date` is a dateTime and `Due Date` is a plain date, which
         # Airtable reads as midnight. So the original formula
         # (`{Completion Date} <= {Due Date}`) scored EVERY task finished on its
