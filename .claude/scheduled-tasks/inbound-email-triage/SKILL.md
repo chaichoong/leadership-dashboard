@@ -96,6 +96,15 @@ All commands run from the main checkout
 Decide ONE outcome per message. Read the sender, subject, body excerpt, and
 the `list-unsubscribe` header (its presence = machine mail).
 
+0. **Already answered by us — no task (Kevin's ruling, 25 Aug 2026):** check
+   the scan's `sent_threads` map first. If this message's `threadId` is in it
+   with a LATER time than the message's own `internalDate`, we spoke last:
+   Kevin (or an agent send) has already answered this thread. Log
+   `note --do answered` and create nothing. The email stays where it is —
+   his inbox tidying is his. If the sent time is EARLIER than this message,
+   the sender replied to us: this is live conversation, continue to rule 1
+   (the Step 3 dedupe will UPDATE the thread's task rather than duplicate it).
+
 1. **Label 12 — actionable (task created, Kevin approves):** anything needing
    a reply or action — personal, family, legal, courts, creditors, banks,
    HMRC, accountants, insurance, tenant matters, complaints, suppliers,
@@ -128,6 +137,40 @@ the `list-unsubscribe` header (its presence = machine mail).
 and anything else, do not archive.** A wrong task costs Kevin a click; a
 wrong archive hides a message that mattered.
 
+## Step 2c — Close what Kevin answered himself (email twin of the iMessage rule)
+
+If Kevin replies from Gmail after a task was created, the task must come OFF
+the board — an open task for a done reply is noise (Kevin's ruling, 25 Aug
+2026, same principle as the iMessage sweep's Step 2b).
+
+0. If the scan reported `truncated.sent: true`, SKIP this whole step and say
+   so — an incomplete sent listing must never decide a close.
+1. Query Tasks `tblqB8b22hKBL4PF1` with filterByFormula
+   `AND({Inbound Communication Task}, {Inbound Source Type}='Gmail', {Status}!='Completed', {Status}!='Approval', LEN({Approval Outcome}&'')=0)`.
+   The last two clauses are load-bearing: a task at Approval carries a draft
+   waiting on Kevin, and a task with an Approval Outcome is an approved
+   hand-back the dispatch engine has yet to carry out — closing either one
+   silently cancels a reply Kevin asked for or already approved.
+   CONTROL: also run the same query with ONLY the Inbound clauses. If that
+   total is zero while this agent has ever created tasks, the field match is
+   broken — report the failure and skip this step; a broken query must never
+   read as "nothing to close".
+2. For each open task: `Inbound Note URL Link` can hold SEVERAL
+   space-separated thread URLs after a fold — collect every threadId. Close
+   ONLY if, for EVERY one of its threads, `sent_threads[threadId]` is LATER
+   than ALL of the task's own inbound evidence: its `Created Time`, its
+   `Inbound Date Received`, and the newest `NEW MESSAGE <date>` or
+   `REOPENED <date>` line in its Description. Do NOT test against this
+   scan's inbox lists — Step 3's own update path removes handled mail from
+   the inbox and the watermark moves past it, so the scan window proves
+   nothing about who spoke last; the task's own stamps do. A date-only stamp
+   (no time) counts as end-of-day: same-day means NOT later, do not close.
+3. Closing means exactly: Status `Completed`, Completion Date
+   `fldFOi1SwEKuJRmdN` = now (ISO), and append to the Description:
+   "Closed by inbound-email-triage <date>: Kevin replied himself (sent message
+   seen <time>). Not verified: whether his reply covered everything the
+   thread asked." State what was NOT verified — a close is a claim.
+
 ## Step 3 — Dedupe, one task per THREAD (never create the same task twice)
 
 Group your lane-12 AND lane-13 messages **by `threadId` first**: one thread = one task,
@@ -152,8 +195,33 @@ query Tasks `tblqB8b22hKBL4PF1` with filterByFormula
 `OR(FIND("#all/{threadId}", {Inbound Note URL Link}), FIND("#inbox/{threadId}", {Inbound Note URL Link}))`
 via curl with the PAT at `~/.config/od/airtable_pat` (never print the token).
 A query ERROR is not "no duplicate" — on error, skip that thread, count it
-unhandled for Step 6, and report the failure. If a task already exists, apply
-the label move only (Step 4's act) and log `duplicate`.
+unhandled for Step 6, and report the failure.
+
+**When a task already exists, UPDATE it — never a twin, never a silent drop
+(Kevin's ruling, 25 Aug 2026):**
+
+- **Existing task OPEN** → apply the label move, then PATCH the existing task:
+  append to its Description a dated line
+  `NEW MESSAGE <date>: <your one-line summary>` (and refresh
+  `Inbound Message Content` with the latest message if the task carries it).
+  Log `note --do updated`. One thread stays one task, and the task carries
+  the whole conversation.
+- **Existing task COMPLETED and the new message needs action:**
+  - If the task has NO `Approval Outcome` (it never went through the approval
+    loop) → REOPEN it: Status `Today`, Completion Date `fldFOi1SwEKuJRmdN`
+    set to null IN THE SAME PATCH (every reopen path must clear it — an open
+    task with a Completion Date trips the daily completed-stamp invariant
+    and double-counts as done work; this exact miss was an Aug 2026
+    incident), and append
+    `REOPENED <date>: new reply after completion — <summary>`. Log `updated`.
+  - If it HAS an `Approval Outcome` → NEVER reopen it: an open task with an
+    approved outcome reads to the dispatch engine as an approved hand-back
+    and would be carried out AGAIN. Create a fresh task instead (Step 4
+    shape), Task Name prefixed `INBOUND (follow-up):`, same thread URL, and
+    a Description line naming the earlier task. One OPEN task per thread
+    still holds — the next dedupe finds this one.
+- **Existing task COMPLETED and the new message needs nothing** (a thanks, a
+  confirmation) → log `note --do duplicate` and move on.
 
 ## Step 4 — Act and create the tasks (no cap — every actionable thread gets its task)
 

@@ -116,6 +116,8 @@ DECISION_GROUPS = [
     ("file-17",      "Filed: OD prospects"),
     ("file-18",      "Filed: creditor"),
     ("archive",      "Archived as machine noise (reversible)"),
+    ("updated",      "Existing thread task updated, no duplicate made"),
+    ("answered",     "Already answered by us, no task needed"),
     ("leave",        "Left in the inbox on purpose"),
     ("deferred",     "Deferred to tomorrow (daily cap)"),
     ("duplicate",    "Already had a task, nothing created"),
@@ -410,6 +412,17 @@ def cmd_scan(back_hours):
     # exists for. l13 missing from Gmail is survivable (empty list) but noted.
     stranded_13, s13_trunc = (worker_list(label_ids=[l13["id"]], q="newer_than:14d")
                               if l13 else ([], False))
+    # SENT mail (Kevin's ruling, 25 Aug 2026): what WE sent must be measured
+    # too, so a thread Kevin already answered never spawns a task and an open
+    # task he answered himself gets closed. 3 days covers a weekend of manual
+    # replies; the per-thread map keeps only the LATEST outgoing time.
+    sent_msgs, sent_trunc = worker_list(q="in:sent newer_than:3d")
+    sent_threads = {}
+    for m in sent_msgs:
+        tid = m.get("threadId")
+        ts = int(m.get("internalDate") or 0)
+        if tid and ts > sent_threads.get(tid, 0):
+            sent_threads[tid] = ts
 
     write_scan_cache(new_inbox + stale + stranded_8 + stranded_12 + stranded_13)
 
@@ -434,15 +447,16 @@ def cmd_scan(back_hours):
                    "label13": {"id": l13["id"], "name": l13["name"]} if l13 else None},
         "counts": {"new_inbox": len(new_inbox), "stale": len(stale),
                    "stranded_8": len(stranded_8), "stranded_12": len(stranded_12),
-                   "stranded_13": len(stranded_13)},
+                   "stranded_13": len(stranded_13), "sent": len(sent_msgs)},
         "truncated": {"new_inbox": new_trunc, "stale": stale_trunc,
                       "stranded_8": s8_trunc, "stranded_12": s12_trunc,
-                      "stranded_13": s13_trunc},
+                      "stranded_13": s13_trunc, "sent": sent_trunc},
         "new_inbox": new_inbox,
         "stale": stale,
         "stranded_8": stranded_8,
         "stranded_12": stranded_12,
         "stranded_13": stranded_13,
+        "sent_threads": sent_threads,
     }))
 
 
@@ -485,7 +499,8 @@ def cmd_act(msg_id, action, reason, label_num=None):
 
 
 def cmd_note(msg_id, action, reason):
-    if action not in ("leave", "task-created", "duplicate", "deferred"):
+    if action not in ("leave", "task-created", "duplicate", "deferred",
+                      "updated", "answered"):
         fail("unknown note %r" % action)
     ctx = read_scan_cache().get(msg_id, {})
     digest_append({"id": msg_id, "do": action, "sender": ctx.get("sender", ""),

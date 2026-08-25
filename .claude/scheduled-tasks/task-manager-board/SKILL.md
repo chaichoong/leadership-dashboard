@@ -100,14 +100,27 @@ out of your list — the board subtracted dispatch's tasks in code):
 6. **Generic one-off work** (research, form-filling, analysis, drafting,
    digging) → `route` to the right strategic worker from the roster:
    researcher, builder, writer, analyst, or auditor. Record as `route`.
-7. **Done in reality, duplicate, or dead** (overtaken by events, refers to
+7. **Two or more OPEN tasks on one email thread** (the board's `duplicates`
+   list — one open task per thread and lane is the invariant, Kevin's ruling
+   25 Aug 2026): each group names its `keeper` (the oldest task), its
+   `closable` twins, and its `untouchable` twins. `annotate` the keeper with
+   anything unique from each closable twin (one line per twin), then
+   `close`-propose each id in `closable` with output
+   "CLOSE PROPOSAL: duplicate of <keeper id> — folded into it". Never close
+   the keeper; one proposal per task even when a folded task appears in two
+   groups. `untouchable` twins sit at Status Approval — report them, never
+   touch them (their Agent Output is waiting on Kevin); a group whose
+   closable list is empty is report-only this slot. The board already keeps
+   the other edges safe in code: Roy maintenance tasks never group with
+   reply tasks, and parked or dispatch-in-flight tasks are never grouped.
+8. **Done in reality, duplicate, or dead** (overtaken by events, refers to
    something closed, 300+ days still with no deadline) → `close`: submit as
    yourself, output "CLOSE PROPOSAL: <done already | dead — reason>", type
    `Admin`. Kevin's yes = complete it on hand-back.
-8. **Small generic admin you can finish now** (under 15 minutes, internal, no
+9. **Small generic admin you can finish now** (under 15 minutes, internal, no
    external send) → `finish` in-house: do the work, submit the result through
    the gate as your own output, type `Admin`.
-9. **Genuinely fine to sit** (future-dated on purpose, awaiting a fixed date)
+10. **Genuinely fine to sit** (future-dated on purpose, awaiting a fixed date)
     → `leave` with the reason noted.
 
 When unsure between two moves, prefer the one that keeps the gate in front of
@@ -195,9 +208,12 @@ LEADING with what should have moved and did not:
 
 1. Stuck backlog: count, the 10 oldest by name and days still, and what stops
    each (one line).
-2. Waiting on Kevin: count and the 5 oldest with hours waiting.
-3. Moves made this slot, by kind.
-4. Remaining backlog and what next slot takes first.
+2. Duplicate threads: the board's `duplicateGroups` and `duplicateExtras`
+   counts, and what was proposed for each group this slot. Zero is the only
+   healthy number.
+3. Waiting on Kevin: count and the 5 oldest with hours waiting.
+4. Moves made this slot, by kind.
+5. Remaining backlog and what next slot takes first.
 
 Never write task content into `monitoring/` — counts only, anywhere public.
 
