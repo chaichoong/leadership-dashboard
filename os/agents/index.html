@@ -66,6 +66,10 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 .apv-filter{border:1px solid var(--border-default);background:var(--bg-surface);color:var(--text-secondary);border-radius:var(--radius-full);padding:4px 12px;font-size:var(--fs-xs);font-weight:var(--fw-semibold);cursor:pointer;font-family:inherit}
 .apv-filter:hover{border-color:var(--accent);color:var(--accent)}
 .apv-filter.active{background:var(--accent);border-color:var(--accent);color:var(--accent-on)}
+.apv-filter-tier1.active{background:var(--danger);border-color:var(--danger);color:var(--accent-on)}
+.apv-filter-clear{border-style:dashed;color:var(--text-muted)}
+.apv-email{font-size:var(--fs-xs);font-weight:var(--fw-semibold);color:var(--accent);text-decoration:none;white-space:nowrap}
+.apv-email:hover{text-decoration:underline}
 
 .zone{margin-bottom:28px}
 .zone-header{display:flex;align-items:center;gap:10px;margin-bottom:12px;padding-bottom:8px;border-bottom:2px solid var(--border-default)}
@@ -316,6 +320,7 @@ const TF = {
     lmt:              'flddJA23cJRX5cs1K', // lastModifiedTime — watches every field
     slackBaseline:    'fldxsqj9JSRBGNyT9', // when the Slack card went out (submission proxy)
     inboundTask:      'fldueazD67F7fUGee', // Inbound Communication Task checkbox
+    inboundUrl:       'fldXf1p0vtHqOZcKl', // Gmail thread URL (or imessage:<guid>)
     approver:         'fldLLAG5HQPEFEfE5', // singleCollaborator — whose approval a task waits on
 };
 
@@ -338,8 +343,8 @@ const TIER1_BANNER = ':rotating_light: TIER 1. This touches your private legal a
     + 'matter. An AI agent prepared it. Nothing has been sent, filed, paid or '
     + 'changed anywhere. Read it before you approve.';
 function isTier1Output(raw){
-    const s = String(raw||'').trimStart();
-    return s.startsWith(TIER1_BANNER) || /^(:rotating_light:|\u{1F6A8})\s*TIER\s*1\b/iu.test(s);
+    const s = String(raw||'');
+    return s.includes(TIER1_BANNER) || /(:rotating_light:|\u{1F6A8})\s*TIER\s*1\b/iu.test(s);
 }
 
 // ── AI Agents register (role agents) — moved from os/systemisation 24 Aug 2026 ──
@@ -479,6 +484,7 @@ let _agentsView = 'dashboard';  // which page tab is showing
 let allApprovals = [];          // loop-raised tasks at Status Approval
 let _approvalsState = 'idle';   // idle | loading | ready | 'error: <message>'
 let _apvAgentFilter = '';       // Team Member id, or '' = every agent
+let _apvTier1Only = false;      // tier-1 toggle, AND-ed with the agent filter
 let ceoBriefRecords = null;     // CEO Briefs rows, newest first
 let _ceoBriefState = 'idle';
 let allOpenTasks = [];          // all non-Completed/non-Cancelled tasks (Check zone feeds)
@@ -581,6 +587,7 @@ window.switchAgentsView = switchAgentsView;
 
 // Jump to the Approvals tab already filtered to one agent (scorecard link).
 function filterApprovalsFor(tmId){
+    _apvTier1Only = false;   // the count on the card was of ALL its approvals
     setApvAgentFilter(tmId || '');
     switchAgentsView('approvals');
 }
@@ -704,7 +711,7 @@ async function loadApprovals(){
         const recs = await atFetch(TASKS_TBL,
             [TF.name, TF.status, TF.description, TF.notes, TF.dueDate, TF.taskType,
              TF.agentOutput, TF.sentForApprovalBy, TF.teamMember, TF.lmt, TF.slackBaseline,
-             TF.approver, TF.priority],
+             TF.approver, TF.priority, TF.inboundUrl],
             { filterByFormula: "AND({Status}='Approval', LEN({Sent For Approval By}&'')>0)" });
         // This queue and badge are KEVIN'S. The Approver field decides whose
         // lane a task is in (empty = Kevin, same convention as approverFor in
@@ -723,6 +730,8 @@ async function loadApprovals(){
             description: gf(r,TF.description)||'',
             notes: gf(r,TF.notes)||'',
             priority: selName(gf(r,TF.priority)),
+            tier1: isTier1Output(gf(r,TF.agentOutput)||''),
+            emailLinks: apvEmailLinks(gf(r,TF.inboundUrl)),
             raiserId: linkIds(gf(r,TF.sentForApprovalBy))[0] || linkIds(gf(r,TF.teamMember))[0] || '',
             raiserLinked: linkIds(gf(r,TF.sentForApprovalBy)).length > 0,
             lmt: gf(r,TF.lmt)||'',
@@ -743,7 +752,7 @@ async function loadApprovals(){
         // and an explicit Not Urgent; a blank priority ranks last.
         const prioRank = p => ({ Urgent:4, High:3, Project:2, 'Not Urgent':1 })[p] || 0;
         allApprovals.sort((a,b)=>
-            (isTier1Output(b.agentOutput)?1:0) - (isTier1Output(a.agentOutput)?1:0)
+            (b.tier1?1:0) - (a.tier1?1:0)
             || prioRank(b.priority) - prioRank(a.priority)
             || String(a.submittedAt).localeCompare(String(b.submittedAt)));
         _approvalsState = 'ready';
@@ -779,6 +788,17 @@ function apvSummary(raw){
         return s.length > 300 ? s.slice(0,299)+'…' : s;
     }
     return '';
+}
+
+// Openable email links from Inbound Note URL Link. The field also holds
+// non-web keys (imessage:<guid>), and a folded duplicate appends a second
+// thread URL separated by a space — so split, keep only http(s), dedupe.
+// Anything else renders no link rather than a broken or unsafe one.
+function apvEmailLinks(raw){
+    const seen = new Set();
+    return String(raw||'').split(/\s+/)
+        .filter(u=>/^https?:\/\//i.test(u))
+        .filter(u=>{ if(seen.has(u)) return false; seen.add(u); return true; });
 }
 
 // The Approvals tab badge mirrors the zone count so the number shows even
@@ -837,7 +857,7 @@ function renderApprovals(){
     countEl.className = 'zone-count' + (allApprovals.length ? ' hot' : '');
     updateApprovalsTabBadge();
     if(!allApprovals.length){
-        _apvAgentFilter = '';
+        _apvAgentFilter = ''; _apvTier1Only = false;
         body.innerHTML = `<div class="empty-state"><p>Nothing is waiting for your approval.</p></div>`;
         return;
     }
@@ -861,13 +881,28 @@ function renderApprovals(){
     chips.sort((a,b)=>b.rows.length-a.rows.length || a.label.localeCompare(b.label));
     if(_apvAgentFilter && !byKey[_apvAgentFilter]) _apvAgentFilter = '';
 
+    const inTier = t => !_apvTier1Only || t.tier1;
+    const inAgent = t => !_apvAgentFilter || (t.raiserId||'none') === _apvAgentFilter;
+    const tier1Count = allApprovals.filter(t=>t.tier1 && inAgent(t)).length;
+    const anyFilter = _apvAgentFilter || _apvTier1Only;
+
     let html = `<div class="apv-filters">
-        <button class="apv-filter${_apvAgentFilter?'':' active'}" onclick="setApvAgentFilter('')">All (${allApprovals.length})</button>
-        ${chips.map(g=>`<button class="apv-filter${_apvAgentFilter===g.key?' active':''}" onclick="setApvAgentFilter('${esc(g.key)}')">${esc(g.label)} (${g.rows.length})</button>`).join('')}
+        <button class="apv-filter${anyFilter?'':' active'}" onclick="clearApvFilters()">All (${allApprovals.length})</button>
+        ${chips.map(g=>{
+            const n = g.rows.filter(inTier).length;
+            return `<button class="apv-filter${_apvAgentFilter===g.key?' active':''}" onclick="setApvAgentFilter('${esc(g.key)}')">${esc(g.label)} (${n})</button>`;
+        }).join('')}
+        <button class="apv-filter apv-filter-tier1${_apvTier1Only?' active':''}" onclick="toggleApvTier1()" title="Only the work touching your private legal and financial matter">Tier 1 (${tier1Count})</button>
+        ${anyFilter ? `<button class="apv-filter apv-filter-clear" onclick="clearApvFilters()">&times; Clear filters</button>` : ''}
     </div>`;
 
-    const shown = _apvAgentFilter ? byKey[_apvAgentFilter].rows : allApprovals;
-    html += shown.map(apvCardHtml).join('');
+    const shown = allApprovals.filter(t=>inAgent(t) && inTier(t));
+    // Two filters can now AND down to nothing (an agent with no tier-1 work),
+    // which one filter never could. Say so, with the way out.
+    html += shown.length
+        ? shown.map(apvCardHtml).join('')
+        : `<div class="empty-state"><p>No approvals match these filters.</p>
+           <button class="btn btn-sm" onclick="clearApvFilters()">Clear filters</button></div>`;
     body.innerHTML = html;
     restoreApprovalDrafts();
 }
@@ -878,11 +913,29 @@ function setApvAgentFilter(key){
 }
 window.setApvAgentFilter = setApvAgentFilter;
 
+function toggleApvTier1(){
+    _apvTier1Only = !_apvTier1Only;
+    renderApprovals();
+}
+window.toggleApvTier1 = toggleApvTier1;
+
+function clearApvFilters(){
+    _apvAgentFilter = '';
+    _apvTier1Only = false;
+    renderApprovals();
+}
+window.clearApvFilters = clearApvFilters;
+
 function apvCardHtml(t){
     const summary = apvSummary(t.agentOutput);
     const ask = summary || t.name;
     const agent = teamName(t.raiserId) || 'No agent recorded';
-    const tier1 = isTier1Output(t.agentOutput);
+    const tier1 = t.tier1;
+    const links = t.emailLinks || [];
+    const linksHtml = links.map((u,i)=>
+        `<a class="apv-email" href="${esc(u)}" target="_blank" rel="noopener noreferrer"
+            title="Opens the original email in Gmail, in a new tab">&#9993; ${links.length>1?`Open email ${i+1}`:'Open the email'}</a>`
+    ).join('');
     const ageH = hoursSince(t.submittedAt);
     const late = ageH !== null && ageH > 24;
     const work = String(t.agentOutput||'').trim();
@@ -894,6 +947,7 @@ function apvCardHtml(t){
             <span class="apv-chip">${esc(agent)}</span>
             ${t.taskType ? `<span class="apv-chip">${esc(t.taskType)}</span>` : ''}
             <span class="apv-age${late?' late':''}" title="Measured from when it was posted for approval (or last changed, if it has not been posted yet)">waiting ${esc(agoText(t.submittedAt))}</span>
+            ${linksHtml}
         </div>
         ${summary ? `<div style="font-size:var(--fs-xs);color:var(--text-muted);margin-bottom:4px">Task: ${esc(t.name)}</div>` : ''}
         <details class="apv-details">
