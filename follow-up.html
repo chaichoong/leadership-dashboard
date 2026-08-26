@@ -2094,6 +2094,25 @@
         }
     }
 
+    // The task dedupe key (Inbound Note URL Link) can hold SEVERAL Gmail
+    // URLs: the create-time duplicate gate appends a folded thread's URL,
+    // space-separated (scripts/create-agent-task.py build_update). Two of
+    // the three readers below were $-anchored and saw only the LAST one, so
+    // a folded thread's other email rendered as having no task and nobody
+    // assigned — inviting exactly the duplicate the gate exists to stop.
+    // One reader now, returning every id. Legacy #inbox/ and current #all/
+    // links both count.
+    function inboundThreadIds(url) {
+        const ids = [];
+        for (const m of String(url || '').matchAll(/#(?:inbox|all)\/([a-f0-9]+)/gi)) {
+            // Deduped: a legacy #inbox/ link and a current #all/ link for the
+            // SAME thread must read as one thread, not as a consolidation
+            // (scripts/task-manager.py thread_keys does the same).
+            if (!ids.includes(m[1])) ids.push(m[1]);
+        }
+        return ids;
+    }
+
     function parseThread(thread) {
         const messages = thread.messages || [];
         if (messages.length === 0) return null;
@@ -2106,7 +2125,19 @@
         };
 
         const subject = getHeader(firstMsg, 'Subject') || '(No subject)';
-        const from = getHeader(firstMsg, 'From');
+        // A thread shows where the conversation IS, not where it started
+        // (Kevin, 26 Aug 2026): a creditor's third reply used to render as
+        // the original message, sender and preview.
+        //
+        // The sender is the newest message that is NOT Kevin, never simply
+        // the newest: `from`/`fromEmail` also become a created task's
+        // Inbound Sender (line ~2888) and the unsubscribe log's key, and
+        // the create-time duplicate gate FOLDS on sender — resolving those
+        // to Kevin's own address when he replied last would poison all
+        // three. Same 'kevin' test the reply-to fallback already used.
+        const isFromKevin = m => getHeader(m, 'From').toLowerCase().includes('kevin');
+        const lastExternalMsg = [...messages].reverse().find(m => !isFromKevin(m)) || firstMsg;
+        const from = getHeader(lastExternalMsg, 'From');
         const lastDate = new Date(parseInt(lastMsg.internalDate));
         const firstDate = new Date(parseInt(firstMsg.internalDate));
 
@@ -2130,16 +2161,8 @@
 
         // Determine reply-to: check Reply-To header first (bridge emails set this),
         // then fall back to the From of the last non-Kevin message
-        let replyTo = from;
         const firstReplyToHeader = getHeader(firstMsg, 'Reply-To');
-        if (firstReplyToHeader) {
-            replyTo = firstReplyToHeader;
-        } else {
-            for (let m of messages) {
-                const mFrom = getHeader(m, 'From');
-                if (!mFrom.toLowerCase().includes('kevin')) replyTo = mFrom;
-            }
-        }
+        const replyTo = firstReplyToHeader || from;
 
         const msgIds = messages.map(m => m.id);
 
@@ -2186,7 +2209,7 @@
             daysOld,
             messageCount: messages.length,
             messages: threadMessages,
-            snippet: firstMsg.snippet
+            snippet: lastMsg.snippet
         };
     }
 
@@ -3661,11 +3684,15 @@ Body: ${bodyText}`;
             const threadGroups = new Map();
             for (const rec of records) {
                 const url = rec.fields[AIRTABLE_FIELDS.noteUrl] || '';
-                const m = url.match(/#(?:inbox|all)\/([a-f0-9]+)/i);
-                if (!m) continue;
-                const threadId = m[1];
-                if (!threadGroups.has(threadId)) threadGroups.set(threadId, []);
-                threadGroups.get(threadId).push(rec);
+                const ids = inboundThreadIds(url);
+                if (!ids.length) continue;
+                // Group under EVERY thread the task claims, so a folded
+                // consolidation meeting a twin on its second url is still
+                // reported as the duplicate it is.
+                for (const threadId of ids) {
+                    if (!threadGroups.has(threadId)) threadGroups.set(threadId, []);
+                    threadGroups.get(threadId).push(rec);
+                }
             }
 
             // For each group with 2+ tasks: oldest stays, others go.
@@ -3676,7 +3703,12 @@ Body: ${bodyText}`;
                 // Sort ascending by createdTime — oldest first.
                 group.sort((a, b) => new Date(a.createdTime) - new Date(b.createdTime));
                 const keep = group[0];
-                const dupes = group.slice(1);
+                // A consolidation may be the keeper, but is never deleted:
+                // it is the only task for its OTHER thread too, so removing
+                // it here would silently drop that thread's work.
+                const dupes = group.slice(1)
+                    .filter(r => inboundThreadIds(r.fields[AIRTABLE_FIELDS.noteUrl] || '').length === 1);
+                if (!dupes.length) continue;
                 affectedThreads.push({ threadId, keep, dupes });
                 for (const d of dupes) toDelete.push(d.id);
             }
@@ -4098,7 +4130,16 @@ Body: ${bodyText}`;
     ];
 
     function looksLikeSignedTenancyDoc(email) {
-        const sender = (email.fromEmail || email.from || '').toLowerCase();
+        // Gate 1 asks "did an e-sign platform send into this thread", which
+        // is a fact about the THREAD, not about whoever replied last. Since
+        // parseThread started reporting the newest sender (26 Aug 2026), a
+        // tenant replying "thanks, all signed" would otherwise move the
+        // sender off the platform and the signed AST would never be filed.
+        const senders = [email.fromEmail || email.from || '',
+            ...((email.messages || []).map(m => m.from || ''))]
+            .map(v => String(v).toLowerCase());
+        const sender = senders.find(v => _ESIGN_SENDERS.some(d => v.includes(d)))
+            || String(email.fromEmail || email.from || '').toLowerCase();
         const subject = email.subject || '';
 
         // Gate 1: e-sign platform
@@ -4567,11 +4608,20 @@ Body: ${bodyText}`;
                 // so they keep working after the email is labelled, but this
                 // extraction regex was missed and the sweep stopped finding
                 // any new completed tasks.
-                const match = url.match(/#(?:inbox|all)\/([a-f0-9]+)$/i);
-                if (match) {
-                    map.set(match[1], rec.fields[AIRTABLE_FIELDS.taskName] || 'Unknown task');
+                for (const id of inboundThreadIds(url)) {
+                    map.set(id, rec.fields[AIRTABLE_FIELDS.taskName] || 'Unknown task');
                 }
             }
+            // A thread counts as answered only when NOTHING open still claims
+            // it. Reading every url off a completed task (above) means a
+            // folded consolidation now speaks for its folded-in threads too,
+            // and one of those can still have its own open task: verified
+            // 26 Aug 2026, completed recI2fF4sflvYdAq4 and OPEN Approval
+            // recWhPiKKpr4OUPoQ both claim thread 1a0383d003d2b53a. Filing
+            // that email as answered would hide a live creditor matter, so
+            // an open claim always wins.
+            const stillOpen = await fetchActiveInboundTaskAssignees();
+            for (const id of stillOpen.keys()) map.delete(id);
             return map;
         } catch (err) {
             console.warn('Failed to fetch completed threads from Airtable:', err);
@@ -4589,7 +4639,7 @@ Body: ${bodyText}`;
 
         try {
             const formula = encodeURIComponent(
-                'AND({' + AIRTABLE_FIELDS.isInbound + '}, {' + AIRTABLE_FIELDS.status + '} != "Completed", {' + AIRTABLE_FIELDS.noteUrl + '} != "")'
+                'AND({' + AIRTABLE_FIELDS.isInbound + '}, {' + AIRTABLE_FIELDS.status + '} != "Completed", {' + AIRTABLE_FIELDS.status + '} != "Cancelled", {' + AIRTABLE_FIELDS.noteUrl + '} != "")'
             );
             const fields = [AIRTABLE_FIELDS.taskName, AIRTABLE_FIELDS.assignee, AIRTABLE_FIELDS.noteUrl, AIRTABLE_TEAM_MEMBER_FIELD, AIRTABLE_APPROVER_FIELD]
                 .map(f => 'fields%5B%5D=' + f).join('&');
@@ -4602,10 +4652,17 @@ Body: ${bodyText}`;
             const map = new Map();
             for (const rec of (data.records || [])) {
                 const url = rec.fields[AIRTABLE_FIELDS.noteUrl] || '';
-                const match = url.match(/#(?:inbox|all)\/([a-f0-9]+)$/i);
-                if (match) {
-                    const assignee = rec.fields[AIRTABLE_FIELDS.assignee];
-                    map.set(match[1], {
+                const assignee = rec.fields[AIRTABLE_FIELDS.assignee];
+                for (const id of inboundThreadIds(url)) {
+                    // One thread can be claimed by two open tasks (a folded
+                    // consolidation and a twin). Whoever Airtable returned
+                    // first keeps the claim rather than the later page
+                    // silently overwriting it — this map drives label moves
+                    // and an Assignee PATCH, so a non-deterministic winner
+                    // means acting on the wrong record. The Duplicates lane
+                    // is what surfaces the pair.
+                    if (map.has(id)) continue;
+                    map.set(id, {
                         id: rec.id,
                         taskName: rec.fields[AIRTABLE_FIELDS.taskName] || 'Unknown task',
                         assigneeId: assignee?.id || null,
