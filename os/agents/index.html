@@ -103,6 +103,7 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 .chk-text{font-size:var(--fs-sm);color:var(--text-primary);line-height:1.5}
 .chk-detail{font-size:var(--fs-xs);color:var(--text-secondary);margin-top:2px}
 .chk-clear{border:1px solid var(--success);background:var(--success-bg);color:var(--success);border-radius:var(--radius-md);padding:12px 16px;font-size:var(--fs-sm);font-weight:var(--fw-semibold)}
+.chk-divider{display:flex;align-items:center;gap:8px;font-size:var(--fs-sm);font-weight:var(--fw-bold);color:var(--text-secondary);margin:18px 0 8px;padding-bottom:6px;border-bottom:1px solid var(--border-default)}
 
 /* Register table + panel (moved from Systemisation) */
 .wf-grid{width:100%;border-collapse:collapse;font-size:var(--fs-sm);margin-bottom:16px}
@@ -1266,6 +1267,7 @@ function computeCheckLanes(){
                 lateApprovalIds.add(t.id);
                 return {
                     severity: 'warn',
+                    at: t.submittedAt,
                     text: `"${t.name}" should have been decided within a day. It has waited ${agoText(t.submittedAt)}.`,
                     detail: `Prepared by ${teamName(t.raiserId)||'an unrecorded agent'}. Decide it on the Approvals tab.`,
                 };
@@ -1291,6 +1293,7 @@ function computeCheckLanes(){
                 const agent = tmIds.map(teamName).filter(Boolean).join(', ') || 'an AI agent';
                 return {
                     severity: 'warn',
+                    at: String(gf(r,TF.dueDate)||'').slice(0,10),
                     text: `"${gf(r,TF.name)||'(Untitled)'}" should have been done by ${String(gf(r,TF.dueDate)||'').slice(0,10)} and has not moved.`,
                     detail: `Owned by ${agent}. Last touched ${agoText(gf(r,TF.lmt))} ago.`,
                 };
@@ -1313,6 +1316,7 @@ function computeCheckLanes(){
             })
             .map(r=>({
                 severity: 'danger',
+                at: r.createdTime,
                 text: `Inbound reply "${gf(r,TF.name)||'(Untitled)'}" should have gone out within 24 hours. It has been open ${agoText(r.createdTime)}.`,
                 detail: `Status ${selName(gf(r,TF.status))||'unknown'}. The 24-hour reply promise is at risk.`,
             })) });
@@ -1343,6 +1347,7 @@ function computeCheckLanes(){
         });
         const items = silent.filter(a=>everLogged.has(a.id)).map(a=>({
             severity: 'danger',
+            at: today,
             text: `${gf(a,AG.name)||'An agent'} usually writes a daily log but has written nothing today.`,
             detail: 'It logs most days, so silence today means it has not run, or its log write broke.',
         }));
@@ -1373,6 +1378,7 @@ function computeCheckLanes(){
                 if(isNaN(at) || at < cutoff) return;
                 items.push({
                     severity: 'danger',
+                    at: m[1],
                     text: `${gf(a,AG.name)||'An agent'}: ${m[2]}`,
                     detail: `Logged ${m[1]}. Accuracy dropped, so the system tightened it automatically. Loosening is your click, in the register below.`,
                 });
@@ -1402,6 +1408,7 @@ function computeCheckLanes(){
             const owner = linkIds(gf(rows[0],TF.teamMember)).find(id=>aiAgentIds.has(id));
             items.push({
                 severity: 'warn',
+                at: rows.map(x=>x.createdTime).sort()[0],
                 text: `${teamName(owner)||'An agent'} has ${rows.length} open tasks that look like the same job: "${gf(rows[0],TF.name)||'(Untitled)'}".`,
                 detail: 'One subject = one open task. Fold the updates into a single task and close the rest.',
             });
@@ -1446,15 +1453,61 @@ function loadChecksAndRender(){
         html += `<div class="zone-error" style="margin-bottom:8px">The "${esc(l.lane)}" check could not run: ${esc(l.error)}. Treat this lane as unknown, not clear.</div>`;
     });
     if(items.length){
-        html += items.map(i=>`<div class="chk-item${i.severity==='danger'?' danger':''}">
-            <span class="chk-lane">${esc(i.lane)}</span>
-            <div><div class="chk-text">${esc(i.text)}</div>
-            ${i.detail?`<div class="chk-detail">${esc(i.detail)}</div>`:''}</div>
-        </div>`).join('');
+        // Age bands, oldest first (Kevin's ask, 26 Aug 2026): the point of
+        // this tab is seeing whether the backlog is CLEARING, and the shape
+        // that shows it is the old tail. An item leaves the moment the
+        // underlying thing moves; a shrinking top band means it is working.
+        const bands = checkAgeBands(items);
+        html += `<div style="font-size:var(--fs-xs);color:var(--text-muted);margin-bottom:10px">Oldest first. Each item disappears the moment the thing it points at moves — so a shrinking top band means the backlog is clearing.</div>`;
+        bands.forEach(b=>{
+            html += `<div class="chk-divider">${esc(b.label)} <span class="zone-count${b.order<=1?' hot':''}">${b.items.length}</span></div>`;
+            html += b.items.map(i=>`<div class="chk-item${i.severity==='danger'?' danger':''}">
+                <span class="chk-lane">${esc(i.lane)}</span>
+                <div><div class="chk-text">${esc(i.text)}</div>
+                ${i.detail?`<div class="chk-detail">${esc(i.detail)}</div>`:''}</div>
+            </div>`).join('');
+        });
     } else if(!errors.length){
         html = `<div class="chk-clear">Nothing needs you — all agents moving.</div>`;
     }
     body.innerHTML = html;
+}
+
+// Group check items into age bands from each item's own date (`at`): when an
+// approval was submitted, when a due date passed, when an inbound message
+// arrived. Undated items (wiring gaps and other standing setup work) sit in
+// their own band at the bottom — they are not part of the daily flow.
+function checkAgeBands(items){
+    const defs = [
+        { key:'m1', label:'Over a month old',   order:0, min:30 },
+        { key:'w1', label:'Over a week old',    order:1, min:7 },
+        { key:'d2', label:'2 to 7 days old',    order:2, min:2 },
+        { key:'d1', label:'Since yesterday',    order:3, min:1 },
+        { key:'d0', label:'New today',          order:4, min:0 },
+        { key:'na', label:'Standing (no date — setup and wiring, not daily flow)', order:5, min:null },
+    ];
+    // Band on CALENDAR days in local time, whatever shape `at` arrives in
+    // (full ISO timestamps and bare YYYY-MM-DD dates both occur). Mixing
+    // elapsed-hours maths with UTC-midnight date parses put two same-day
+    // events in different bands (review finding, 26 Aug 2026).
+    const localDay = at=>{
+        if(!at) return null;
+        const s = String(at);
+        if(s.length <= 10) return s.slice(0,10);
+        const d = new Date(s);
+        if(isNaN(d)) return null;
+        return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+    };
+    const todayMs = Date.parse(todayStr());
+    const byKey = {};
+    items.forEach(i=>{
+        const day = localDay(i.at);
+        const days = day === null ? null : Math.max(0, Math.round((todayMs - Date.parse(day)) / 86400000));
+        const def = days === null ? defs[5] : defs.find(d=>d.min !== null && days >= d.min) || defs[4];
+        (byKey[def.key] = byKey[def.key] || { label:def.label, order:def.order, items:[] }).items.push(i);
+    });
+    Object.values(byKey).forEach(b=>b.items.sort((a,x)=>String(a.at||'').localeCompare(String(x.at||''))));
+    return Object.values(byKey).sort((a,b)=>a.order-b.order);
 }
 
 // ═══════════════════════════════════════════════════════════════════════

@@ -1687,11 +1687,32 @@ def load_score_state(state_path):
         return {}
 
 
+# Display names for the daily-log key, per score label. The log row is what
+# the AI Agents page's "Daily logs" check reads: without it an agent's runs
+# are invisible and the page can only report a wiring gap (found 26 Aug 2026
+# — four Built/Live agents had never logged once).
+SCORE_AGENT_NAMES = {"response": "Inbound Comms Response",
+                     "creditor": "Creditor Management"}
+
+
 def write_register_reading(label, register_row, state_path, reading, stats,
                            state_extra=None):
     """The one change-gated register write every role agent's score uses.
     Fifteen agents are seeded in the register; each build session adds a
     reading function, never another copy of this write."""
+    # Daily log first, and BEFORE the change gate: the row proves the agent
+    # RAN today even when its reading has not moved. A failed log write must
+    # not cost the score write — the page's silence alarm is the backstop
+    # for a broken log, so warn and carry on.
+    try:
+        import agent_daily_log
+        agent_daily_log.publish(
+            register_row, SCORE_AGENT_NAMES.get(label, label),
+            reading, "\n".join(f"{k}: {v}" for k, v in sorted(stats.items())))
+    except Exception as exc:  # noqa: BLE001 — surfaced, never swallowed
+        print(f"WARNING: daily log publish failed for {label}: {exc}",
+              file=sys.stderr)
+
     prev = load_score_state(state_path).get("reading", "")
     if reading == prev:
         print(json.dumps({"agent": label, "reading": reading,
