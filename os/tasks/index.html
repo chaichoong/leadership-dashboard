@@ -796,6 +796,11 @@ const F = {
   taskType:    'fldZ2moDV2041Sobc',  // singleSelect — work class; accuracy is scored per agent PER TASK TYPE
   agentOutput: 'fldzswp8fx6PqpLQ5',  // what the agent PRODUCED (separate from Description, which is the brief)
   approvalFeedback:'fldtI7SJI4gEohHD1', // Kevin's words back to the agent on a change or a rejection
+  // The learning loop (26 Aug 2026). Ticking rememberThis is all this page
+  // does; scripts/agent-dispatch.py lessons writes the lesson into the agent's
+  // own definition file, which is what it reads on every future run.
+  rememberThis:'fldZurhdHutYIDKVx',    // checkbox — "reject and remember"
+  feedbackHistory:'fldOzsq68lhfprKJu', // append-only archive of every verdict's words
 };
 const TASK_FIELD_IDS = Object.values(F);
 
@@ -1992,6 +1997,7 @@ function parseTask(rec){
     processedByAI:!!gf(rec,F.processedByAI),
     agentOutput:gf(rec,F.agentOutput)||'',
     approvalFeedback:gf(rec,F.approvalFeedback)||'',
+    feedbackHistory:gf(rec,F.feedbackHistory)||'',
     _startMin:null, // scheduled start minute of day (for My Day timeline)
   };
 }
@@ -3766,12 +3772,17 @@ function renderApprovalBlock(t){
         <option value="">Not set</option>
         ${TASK_TYPE_OPTIONS.map(o=>`<option value="${o}" ${t.taskType===o?'selected':''}>${o}</option>`).join('')}
       </select></div>
-    <textarea id="apvNote" placeholder="What to change, or why you are rejecting. Required for Request changes and Reject. (In Slack you just reply in the thread — same thing.)"></textarea>
+    <textarea id="apvNote" placeholder="What to change, or why you are rejecting. Required for Request changes and both Reject buttons. (In Slack you just reply in the thread — same thing.)"></textarea>
+    <label style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--text-secondary);margin:6px 0 2px">
+      <input type="checkbox" id="apvRemember" style="margin:0">
+      Remember this too, so the agent applies it from now on
+    </label>
     <div class="apv-actions">
       <button class="btn btn-success" data-apv-btn onclick="apvDecide('${t.id}','Approved as-is')">Approve</button>
       <button class="btn" data-apv-btn onclick="apvDecide('${t.id}','Approved with minor edits')" title="Approved, but you tidied it first — still counts as accurate">Approve with minor edits</button>
       <button class="btn" data-apv-btn onclick="apvDecide('${t.id}','Changes requested')" title="Goes back to the agent to redo. Needs a comment.">Request changes</button>
-      <button class="btn btn-danger" data-apv-btn onclick="apvDecide('${t.id}','Rejected')" title="Closed. Counts against the agent. Needs a reason.">Reject</button>
+      <button class="btn btn-danger" data-apv-btn onclick="apvDecide('${t.id}','Rejected')" title="Closed. Nothing is learned — use this when the reason is a one-off.">Reject and close</button>
+      <button class="btn btn-danger" data-apv-btn onclick="apvDecide('${t.id}','Rejected',true)" title="Closed, AND your reason becomes a standing rule in the agent's instructions so it stops raising work like this.">Reject and remember</button>
     </div>
   </div>`;
 }
@@ -3781,14 +3792,26 @@ function renderApprovalBlock(t){
 // Deliberately PATCHes directly rather than going through updateTaskField:
 // a rejection closes the task WITHOUT logging a productive completion or
 // rolling a recurrence, and the approval gate must not fire on our own write.
-async function apvDecide(taskId,outcome){
+async function apvDecide(taskId,outcome,remember){
   const t=findTaskAnywhere(taskId);if(!t)return;
   if(APPROVAL_OUTCOMES.indexOf(outcome)===-1)return;
   const noteEl=document.getElementById('apvNote');
   const note=(noteEl&&noteEl.value||'').trim();
+  // The tickbox is the "remember" route for the other three verdicts; the
+  // second Reject button is the same thing with one click instead of two.
+  const rememberEl=document.getElementById('apvRemember');
+  remember=!!remember||!!(rememberEl&&rememberEl.checked);
   const needsNote=(outcome==='Changes requested'||outcome==='Rejected');
   if(needsNote&&!note){
     toast(outcome==='Rejected'?'Add a reason before rejecting.':'Say what needs changing before sending it back.',true);
+    if(noteEl)noteEl.focus();
+    return;
+  }
+  // A lesson with no words teaches nothing. Ask rather than storing an empty
+  // rule or quietly downgrading to a plain reject, which would look identical
+  // on screen and lose the thing Kevin meant to keep.
+  if(remember&&!note){
+    toast('Type the reason first — that is what the agent will remember.',true);
     if(noteEl)noteEl.focus();
     return;
   }
@@ -3807,6 +3830,19 @@ async function apvDecide(taskId,outcome){
   // alone is not enough: the Slack worker's Airtable token cannot read comments
   // (403), so the field is the only place both sides can see.
   if(note)payload[F.approvalFeedback]=note;
+  // The durable copy. Approval Feedback is cleared by the agent's next submit,
+  // so without this the words that caused a redo are gone within the hour and
+  // the lesson writer has nothing left to read.
+  if(note){
+    const prior=String(t.feedbackHistory||'');
+    const block='['+nowIso.replace('T',' ').slice(0,16)+'] '+note;
+    if(prior.indexOf(block)===-1)payload[F.feedbackHistory]=(prior.replace(/\s+$/,'')+'\n\n'+block).trim();
+  }
+  // Kevin asked for this one to be remembered. Ticking the box is ALL this
+  // drawer does: scripts/agent-dispatch.py lessons writes the lesson into the
+  // agent's own definition file on the Mac, because a browser cannot reach the
+  // filesystem and one writer beats three.
+  if(remember&&note)payload[F.rememberThis]=true;
   if(outcome==='Rejected'){
     // Closed with a reason. Counts against the agent's accuracy.
     payload[F.status]='Completed';
@@ -3847,13 +3883,15 @@ async function apvDecide(taskId,outcome){
       t.assignee='';t.assigneeEmail='';t.assigneeId='';
     }
     const agentLabel=agentNamesFor(t)||'the agent';
+    const rememberLine=(remember&&note)?` Kept as a standing rule for ${agentLabel}.`:'';
     const line=outcome==='Rejected'
-      ? `Rejected. Reason: ${note}`
+      ? `Rejected. Reason: ${note}${rememberLine}`
       : outcome==='Changes requested'
-        ? `Changes requested. ${note}`
-        : `${outcome}. Back to ${agentLabel} to carry out.${note?' Note: '+note:''}`;
+        ? `Changes requested. ${note}${rememberLine}`
+        : `${outcome}. Back to ${agentLabel} to carry out.${note?' Note: '+note:''}${rememberLine}`;
     try{await postComment(taskId,line)}catch(e){console.warn('approval comment failed',e)}
     if(!agentId)toast('Recorded, but no agent was linked to this task, so it could not be handed back.',true);
+    else if(remember&&note)toast(`${outcome==='Rejected'?'Rejected and closed':outcome} — ${agentLabel} will remember your reason.`);
     else toast(outcome==='Rejected'?'Rejected and closed.':`${outcome} — back to ${agentLabel}.`);
     closeDrawer();
     renderAll();
