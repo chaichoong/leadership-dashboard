@@ -47,6 +47,40 @@ print('@@@' + json.dumps({
   return { ...parsed, refused: Boolean(parsed.error) };
 }
 
+// Applies the real handover patch to a task record, then runs the real
+// agent-linked test cmd_queue uses. A fields-only assertion would pass even if
+// the filter changed shape underneath it.
+function agentLinkedAfterHandover(to) {
+  const script = `
+import importlib.util, json
+spec = importlib.util.spec_from_file_location('ad', ${JSON.stringify(DISPATCH)})
+m = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(m)
+AGENT = "recQkO6BA4w5zqwZ4"
+rec = {"id": "recTEST", "fields": {
+    m.AF["name"]: "T",
+    m.AF["teamMember"]: [{"id": AGENT}],
+    m.AF["sentForApprovalBy"]: [{"id": AGENT}],
+    m.AF["approvalOutcome"]: {"name": "Approved as-is"},
+}}
+m.get_task = lambda tid: rec
+def fake_patch(tid, fields):
+    for k, v in fields.items():
+        rec["fields"][k] = v
+    return {}
+m.patch_task = fake_patch
+class A: pass
+a = A(); a.task = 'recTEST'; a.to = ${JSON.stringify(to)}; a.reason = ''
+m.cmd_handover(a)
+t = m.task_view(rec)
+linked = (any(i in m.AGENTS for i in t["teamMemberIds"])
+          or any(i in m.AGENTS for i in t["sentForApprovalByIds"]))
+print('@@@' + json.dumps({"linked": linked}))
+`;
+  const out = execFileSync('python3', ['-c', script], { encoding: 'utf8' });
+  return JSON.parse(out.slice(out.indexOf('@@@') + 3)).linked;
+}
+
 describe('agent-dispatch handover', () => {
   it('points Team Member and Assignee at the named human', () => {
     const r = handover({ to: 'micaa.work@gmail.com', reason: 'Kevin approved reassignment' });
@@ -60,6 +94,29 @@ describe('agent-dispatch handover', () => {
     const link = r.captured.fields[r.fieldMap.teamMember];
     expect(link).toHaveLength(1);
     expect(link[0]).toBe(r.humans['atentaerica@gmail.com'].rec);
+  });
+
+  // 20260823-agent-dispatch-324. Team Member alone is NOT the agent population.
+  // cmd_queue keeps a task if EITHER Team Member or Sent For Approval By points
+  // at an agent, so clearing one of the two left the handover cosmetic:
+  // rec79mCohnwb2PmpE came back into the worklist every single run, with Mica's
+  // name on the task and an agent working it anyway.
+  it('clears Sent For Approval By as well, which is the half that was missed', () => {
+    const r = handover({ to: 'micaa.work@gmail.com' });
+    expect(r.captured.fields[r.fieldMap.sentForApprovalBy],
+      'the task stays in the queue agent-linked population for ever').toEqual([]);
+  });
+
+  it('clears the standing approval, so a re-route cannot re-execute it', () => {
+    const r = handover({ to: 'micaa.work@gmail.com' });
+    expect(r.captured.fields).toHaveProperty(r.fieldMap.approvalOutcome, null);
+  });
+
+  it('actually drops out of the agent-linked filter after the patch', () => {
+    // Asserting the filter, not just the fields — the fields only matter
+    // because of what cmd_queue does with them.
+    const stillLinked = agentLinkedAfterHandover('micaa.work@gmail.com');
+    expect(stillLinked, 'handed-over task is still agent-linked').toBe(false);
   });
 
   it('does NOT mark the task Completed — it changed hands, it is not done', () => {

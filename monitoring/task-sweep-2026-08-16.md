@@ -65,7 +65,7 @@ the ones to drop. **None of them is an assignee write, so approving sends 0 Slac
 | INBOUND: 18 Siddows Avenue Clitheroe | Owner (AI) | AI Operations | confirm we still act for the property, then draft the reply to the Environmental Health Officer for you to approve |
 | Replace window hinge – second bedroom | Owner (AI) | AI Operations | agent books and chases the contractor; the person who actually attends goes on the Contractor field |
 | Measure and quote carpets – both bedrooms | Owner (AI) | AI Operations | a quote request is pure coordination |
-| Mark Peters COA and rent into payment | Project | Close the payment gap | it is exactly what that project is for; flagged on 14 Aug and never linked |
+| [name redacted] COA and rent into payment | Project | Close the payment gap | it is exactly what that project is for; flagged on 14 Aug and never linked |
 
 **What changed since 14 Aug:** the window hinge and the carpets were both proposed to Mica.
 The CEO overruled that tonight. Booking and chasing a contractor is coordination an agent
@@ -99,8 +99,8 @@ All 8 reached, none skipped. I did not act on any of them.
 | DD Fire Alarms Ltd – Duckworth Buildings | 20 Mar | 149 | agent | Same. This one is an estimate rather than an invoice, so it may simply be dead. |
 | Invoice 40859 from DD Fire Alarms Ltd | 20 Mar | 149 | agent | Same. No DD Fire payment found. |
 | Fwd: Cleaning Invoice (Naturally Neat) | 27 Mar | 142 | agent | Same, and low value. Close if Roy confirms it was paid. |
-| Invoice 40893 from DD Fire Alarms Ltd | 27 Mar | 142 | agent | Same. Intus Lettings asked you to settle direct with DD Fire. |
-| Mark Peters COA and rent into payment | 22 Apr | 116 | person | Still live. Belongs to the payment-gap project (linking it is in tonight's pending list) and needs a new due date. |
+| Invoice 40893 from DD Fire Alarms Ltd | 27 Mar | 142 | agent | Same. [name redacted] asked you to settle direct with DD Fire. |
+| [name redacted] COA and rent into payment | 22 Apr | 116 | person | Still live. Belongs to the payment-gap project (linking it is in tonight's pending list) and needs a new due date. |
 
 **The CEO's point on these five invoices:** they are all owned by an agent, and every one of
 them ends in a payment only you can make. An agent cannot finish them, so they sit. That is

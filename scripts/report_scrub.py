@@ -40,6 +40,7 @@ Never widen ALLOWED_EMAIL_DOMAINS to a domain that belongs to a third party.
 The list is Kevin's own identities, which are already public in this repo.
 """
 
+import os
 import re
 
 # Kevin's own, already-public identities. Masking these would only make the
@@ -71,8 +72,20 @@ ALLOWED_EMAILS = ("kevinbrittain@gmail.com",)
 #     monitoring/task-sweep-2026-08-26.md: two tenant mobiles were sitting in the
 #     task titles, reported as "masked 3 phone" because OTHER numbers on the page
 #     did match. A partial mask reads exactly like a complete one.
+# The trailing lookahead is `(?![\d/\-]|\.\d)`, NOT `(?![\d/.\-])`.
+#
+# Blocking on a bare "." blocked a full stop, so a number at the END OF A
+# SENTENCE could never be masked (finding 20260821-task-hygiene-sweep-286, found
+# while testing the fix for it). "+447700907077." sailed through every sweep,
+# and monitoring/task-sweep-2026-08-23.md carried a real one into this PUBLIC
+# repo for five days.
+#
+# What the lookahead is actually FOR is decimals and dates — "1.0", "2026-08-05"
+# — so it only needs to block a dot FOLLOWED BY A DIGIT. A dot followed by a
+# space, a newline or end-of-text is punctuation, and the number before it is a
+# phone number.
 _PHONE_CANDIDATE = re.compile(
-    r"(?<![\d/.\-])(\+ ?44[\d \-()]{7,15}\d|44\d{9,11}|0\d[\d \-]{6,12}\d)(?![\d/.\-])"
+    r"(?<![\d/.\-])(\+ ?44[\d \-()]{7,15}\d|44\d{9,11}|0\d[\d \-]{6,12}\d)(?![\d/\-]|\.\d)"
 )
 
 _EMAIL = re.compile(r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}")
@@ -118,6 +131,86 @@ def _mask_postcode(match):
     return "%s XXX" % match.group(1)
 
 
+
+# ─── NAME ROSTER (finding 20260821-task-hygiene-sweep-286) ───────────
+#
+# A tenant and one of Kevin's family members were named in reports committed to
+# this PUBLIC repository. Phone, email and postcode all have a SHAPE a regex can
+# find; a name does not. The only way to mask one reliably is to know it in
+# advance, so the names come from a roster.
+#
+# THE ROSTER LIVES OUTSIDE THE REPO on purpose (~/.config/od/redact-names.txt,
+# override with $OD_REDACT_NAMES). Committing a list of the exact people to hide
+# would publish the very thing it exists to protect.
+#
+# Missing roster returns [] and masks nothing. That is deliberate: a scrubber
+# that refuses to run leaves the raw report in place, which is worse. Callers
+# that need the guarantee check `load_roster()` themselves.
+
+# Kevin's own name is deliberately NOT maskable: he is the author of this repo
+# and appears in every commit, so masking it would only make reports unreadable
+# without protecting anybody.
+ALLOWED_NAMES = ("kevin brittain", "kevin", "brittain")
+
+DEFAULT_ROSTER = os.path.join(
+    os.path.expanduser("~"), ".config", "od", "redact-names.txt"
+)
+
+
+def roster_path():
+    return os.environ.get("OD_REDACT_NAMES", DEFAULT_ROSTER)
+
+
+def load_roster(path=None):
+    """The names to mask. A missing file returns []; callers check."""
+    path = path or roster_path()
+    if not os.path.isfile(path):
+        return []
+    names = []
+    with open(path, encoding="utf-8") as fh:
+        for line in fh:
+            name = line.strip()
+            if not name or name.startswith("#"):
+                continue
+            if name.lower() in ALLOWED_NAMES:
+                continue
+            # A single word is too collision-prone to mask globally ("Martin",
+            # "May", "Price" are all ordinary report words), so the roster only
+            # ever matches a full name.
+            if len(name.split()) < 2:
+                continue
+            names.append(name)
+    return names
+
+
+def compile_names(names):
+    """Longest name first, so 'Jane Q Tenant' wins over 'Jane Tenant'."""
+    if not names:
+        return None
+    ordered = sorted(set(names), key=len, reverse=True)
+    # Escape each word and rejoin on \s+, so "Jane  Tenant" and a name split
+    # across a line wrap both match. Do NOT rely on re.escape() escaping the
+    # space itself: it did on Python 3.6 and does not on 3.7+.
+    joined = "|".join(
+        r"\s+".join(re.escape(word) for word in n.split()) for n in ordered
+    )
+    return re.compile(r"(?<![\w'])(%s)(?![\w'])" % joined, re.IGNORECASE)
+
+
+_ROSTER_CACHE = {}
+
+
+def _name_pattern():
+    path = roster_path()
+    if path not in _ROSTER_CACHE:
+        _ROSTER_CACHE[path] = compile_names(load_roster(path))
+    return _ROSTER_CACHE[path]
+
+
+def _mask_name(match):
+    return "[name redacted]"
+
+
 RULES = (
     ("phone", _PHONE_CANDIDATE, _mask_phone),
     ("email", _EMAIL, _mask_email),
@@ -125,8 +218,12 @@ RULES = (
 )
 
 
-def scrub(text):
-    """Return (scrubbed_text, hits) where hits is [(kind, original), ...]."""
+def scrub(text, names=None):
+    """Return (scrubbed_text, hits) where hits is [(kind, original), ...].
+
+    `names` overrides the roster (used by the tests). Passing None loads the
+    roster from disk; passing [] masks no names at all.
+    """
     hits = []
 
     def wrap(kind, fn):
@@ -140,6 +237,13 @@ def scrub(text):
 
     for kind, pattern, fn in RULES:
         text = pattern.sub(wrap(kind, fn), text)
+
+    # Names last. The shaped rules above have already replaced phone numbers and
+    # emails, so a name inside an email local-part is gone before we get here
+    # and cannot be double-masked into nonsense.
+    pattern = compile_names(names) if names is not None else _name_pattern()
+    if pattern is not None:
+        text = pattern.sub(wrap("name", _mask_name), text)
     return text, hits
 
 
@@ -155,6 +259,10 @@ SELFTEST_CASES = (
     ("Landline 01223 456789 rang out", "456789"),
     ("Chase accounts@some-letting-agent.co.uk for the statement", "some-letting-agent"),
     ("Tenant at CB23 6DL reported damp", "6DL"),
+    # END OF SENTENCE. The old trailing lookahead blocked on a bare ".", so this
+    # shape survived every sweep and reached the public repo.
+    ("INBOUND: SMS reply from +447700907077.", "7700907077"),
+    ("Ring 07538631747. Then log it.", "7538631747"),
 )
 
 # Inputs that must survive UNTOUCHED. A scrubber that mangles ordinary report
@@ -170,26 +278,79 @@ SELFTEST_UNTOUCHED = (
 )
 
 
+SELFTEST_ROSTER = ("Jane Tenantington", "Aa Bb Cc")
+
+SELFTEST_NAME_CASES = (
+    ("Chase Jane Tenantington for August rent", "Tenantington"),
+    ("chase JANE  TENANTINGTON for august rent", "TENANTINGTON"),
+    ("Tax liability 2023/24 - Aa Bb Cc, 189 days late", "Bb Cc"),
+)
+
+# Must survive: a single roster word on its own is ordinary report text, and a
+# longer word that merely CONTAINS a roster name is a different word.
+SELFTEST_NAME_UNTOUCHED = (
+    "Jane closed 4 tasks",
+    "Tenantingtonshire Council sent a bill",
+)
+
+
 def selftest():
     """Return a list of failure strings. Empty list means the patterns work."""
     failures = []
     for text, must_go in SELFTEST_CASES:
-        out, hits = scrub(text)
+        out, hits = scrub(text, names=SELFTEST_ROSTER)
         if must_go in out:
             failures.append("did not mask %r in %r (got %r)" % (must_go, text, out))
         elif not hits:
             failures.append("masked %r but reported no hit" % text)
     for text in SELFTEST_UNTOUCHED:
-        out, hits = scrub(text)
+        out, hits = scrub(text, names=SELFTEST_ROSTER)
         if out != text:
             failures.append("false positive: %r became %r" % (text, out))
+
+    for text, must_go in SELFTEST_NAME_CASES:
+        out, hits = scrub(text, names=SELFTEST_ROSTER)
+        if must_go in out:
+            failures.append("did not mask name %r in %r (got %r)"
+                            % (must_go, text, out))
+        elif not any(kind == "name" for kind, _ in hits):
+            failures.append("masked %r but reported no name hit" % text)
+    for text in SELFTEST_NAME_UNTOUCHED:
+        out, _ = scrub(text, names=SELFTEST_ROSTER)
+        if out != text:
+            failures.append("name false positive: %r became %r" % (text, out))
+
     return failures
+
+
+def roster_problems(path=None):
+    """THE CONTROL ON THE ROSTER, kept separate from selftest() on purpose.
+
+    An absent or empty roster masks no names and reports a clean sweep, which is
+    indistinguishable from a report that genuinely names nobody. Only one of
+    those is safe in a public repo.
+
+    It is NOT folded into selftest() because the two answer different questions.
+    selftest() asks "do the patterns still work", which must be true on any
+    machine and in CI. This asks "is this machine configured to publish", which
+    is only meaningful where reports are actually collected. Merging them would
+    fail the suite on a clean clone for a reason unrelated to the code under
+    test, which is the kind of red that teaches people to bypass a gate.
+    """
+    path = path or roster_path()
+    if not load_roster(path):
+        return [
+            "name roster is missing or empty at %s - run "
+            "scripts/refresh-redact-names.py (nothing can be published until "
+            "the roster loads)" % path
+        ]
+    return []
 
 
 if __name__ == "__main__":
     import sys
 
-    problems = selftest()
+    problems = selftest() + roster_problems()
     if problems:
         for p in problems:
             print("FAIL: %s" % p)

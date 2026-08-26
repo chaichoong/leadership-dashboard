@@ -16,7 +16,7 @@ on 28 July.
 | HMRC Self Assessment — submit overdue payment / restraint order notification | Karlo Teves | 11 Aug |
 | Property insurance DDs | Reichelle Rellora | 11 Aug |
 | Update Together Duckworth and Together 6CP payment due dates | Reichelle Rellora | 22 Apr |
-| Mark Peters COA and rent into payment | Clare Harradine | 22 Apr |
+| [name redacted] COA and rent into payment | Clare Harradine | 22 Apr |
 
 I logged the code fix for this (finding 20260812-task-hygiene-109). The sweep treats any
 name in Team Member as a real owner and never checks whether that person still works here.
@@ -71,7 +71,7 @@ the ones to drop.
 | INBOUND: 1406 Oldham Road electrical certificate | Owner | AI Legal & Compliance | council chasing a certificate; hand the electrician booking to AI Operations |
 | Replace window hinge – second bedroom | Owner | AI Operations | booking the contractor is admin an agent can prepare |
 | Measure and quote carpets | Owner | AI Operations | chase a supplier for a measure-and-quote |
-| Mark Peters COA and rent into payment | Project | Close the payment gap | that project's exact objective |
+| [name redacted] COA and rent into payment | Project | Close the payment gap | that project's exact objective |
 
 ## Left alone
 
@@ -102,7 +102,7 @@ Proposals only. Nothing here was changed.
 | Fwd: Cleaning Invoice (Naturally Neat) | 27 Mar | **Verify then close.** No matching payment found. |
 | Invoice 40893 from DD Fire Alarms Ltd | 27 Mar | **Verify then close.** No matching payment found. |
 | Update Together Duckworth and Together 6CP payment due dates to the 28th | 22 Apr | **Still live.** Owned by Reichelle Rellora, who has left. Needs a live owner first. |
-| Mark Peters COA and rent into payment | 22 Apr | **Still live.** Owned by Clare Harradine, who has left. Needs a live owner first. |
+| [name redacted] COA and rent into payment | 22 Apr | **Still live.** Owned by Clare Harradine, who has left. Needs a live owner first. |
 
 All nine were reached; none skipped. Note that five of the seven invoice or payment items
 are already owned by AI Worker — Analyst and have still sat untouched for 138 to 145 days.

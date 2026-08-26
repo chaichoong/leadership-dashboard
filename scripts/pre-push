@@ -14,12 +14,39 @@
 #
 # Skips if:
 #   - Not pushing to main
-#   - The relevant runner is not installed
 #   - SKIP_SYNC_TESTS=1 is set (escape hatch — skips BOTH suites)
+#
+# A MISSING RUNNER BLOCKS THE PUSH (24 Aug 2026 — finding 20260822-ceo-memory-sweep-318)
+# --------------------------------------------------------------------------------------
+# Until today an absent node_modules turned this gate into a pass: a missing
+# vitest printed a warning and carried on, and a missing @playwright printed a
+# warning and `exit 0`. Two pushes to main on 21 Aug ran the SAME gate in the
+# SAME checkout with different outcomes — the first ran no tests at all, the
+# second ran 211. Nothing recorded which was which.
+#
+# That is SKIP_SYNC_TESTS=1 without anyone having to type it, and it is worse
+# than the escape hatch: the escape hatch is a deliberate act that shows up in
+# the shell history. So a missing runner now FAILS. `npm install` is the fix and
+# it takes seconds; if the push genuinely must go out untested, type the escape
+# hatch and own it.
+#
+# EVERY DECISION IS LOGGED. The log lives outside the repo (this repo is public)
+# at ~/knowledge-os/logs/pre-push-gate.log, so "did the gate actually run before
+# that push" is a question with an answer.
 
 set -e
 
+GATE_LOG="${GATE_LOG:-$HOME/knowledge-os/logs/pre-push-gate.log}"
+mkdir -p "$(dirname "$GATE_LOG")" 2>/dev/null || true
+
+gate_log() {
+    printf '%s\t%s\t%s\t%s\n' \
+        "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$(git rev-parse --short HEAD 2>/dev/null || echo unknown)" \
+        "$1" "$2" >> "$GATE_LOG" 2>/dev/null || true
+}
+
 if [ "$SKIP_SYNC_TESTS" = "1" ]; then
+    gate_log BYPASSED "SKIP_SYNC_TESTS=1"
     exit 0
 fi
 
@@ -27,41 +54,51 @@ fi
 remote="$1"
 while read local_ref local_sha remote_ref remote_sha; do
     if echo "$remote_ref" | grep -q "refs/heads/main"; then
-        # Check if playwright is installed
         if ! command -v npx >/dev/null 2>&1; then
-            echo "⚠️  npx not found — skipping sync-invariant tests"
-            exit 0
+            echo "❌ npx not found — cannot run the test gate, so this push to main is blocked."
+            echo "   Install Node, or use SKIP_SYNC_TESTS=1 git push to bypass deliberately."
+            gate_log BLOCKED "npx missing"
+            exit 1
         fi
 
         # ── Unit tests first: they take about a second, so a failure here costs
         # nothing, whereas letting Playwright run first burns ~2 minutes before
         # reporting a break that vitest would have caught immediately.
         if [ ! -d "node_modules/vitest" ]; then
-            echo "⚠️  vitest not installed — run 'npm install' to enable unit tests in this gate"
+            echo "❌ vitest is not installed — the unit-test gate cannot run, so this push to main is blocked."
+            echo "   Run 'npm install' (seconds), then push again."
+            echo "   A missing runner used to warn and carry on, which is how two"
+            echo "   pushes on 21 Aug 2026 ran the same gate with different outcomes."
+            gate_log BLOCKED "node_modules/vitest missing"
+            exit 1
+        fi
+        echo "🧪 Running unit tests (vitest) before push to main..."
+        if npx vitest run --reporter=dot; then
+            echo "✅ Unit tests passed"
         else
-            echo "🧪 Running unit tests (vitest) before push to main..."
-            if npx vitest run --reporter=dot; then
-                echo "✅ Unit tests passed"
-            else
-                echo ""
-                echo "❌ Unit tests (vitest) FAILED — push to main blocked."
-                echo "   Fix the failing tests or use SKIP_SYNC_TESTS=1 git push to bypass."
-                exit 1
-            fi
+            echo ""
+            echo "❌ Unit tests (vitest) FAILED — push to main blocked."
+            echo "   Fix the failing tests or use SKIP_SYNC_TESTS=1 git push to bypass."
+            gate_log FAILED vitest
+            exit 1
         fi
 
         if [ ! -d "node_modules/@playwright" ]; then
-            echo "⚠️  Playwright not installed — run 'npm install' to enable pre-push tests"
-            exit 0
+            echo "❌ Playwright is not installed — the sync-invariant gate cannot run, so this push to main is blocked."
+            echo "   Run 'npm install', then push again."
+            gate_log BLOCKED "node_modules/@playwright missing"
+            exit 1
         fi
 
         echo "🧪 Running sync-invariant tests before push to main..."
         if npx playwright test tests/sync-invariants/ --reporter=dot --workers=2; then
             echo "✅ All sync-invariant tests passed"
+            gate_log RAN "vitest + playwright"
         else
             echo ""
             echo "❌ Sync-invariant tests FAILED — push to main blocked."
             echo "   Fix the failing tests or use SKIP_SYNC_TESTS=1 git push to bypass."
+            gate_log FAILED playwright
             exit 1
         fi
     fi

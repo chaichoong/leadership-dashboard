@@ -50,7 +50,7 @@ Only 3 of these name an AI agent and none names a person, so approving the lot s
 | 1406 Oldham Road, council chasing electrical certificate | Owner | AI Legal & Compliance | council letter with a compliance deadline |
 | 18 Siddows Avenue, council garden complaint | Owner | AI Legal & Compliance | statutory complaint needing a reply |
 | SMS reply from +4477XXXXX077 | Owner | AI Operations | inbound tenant text about a maintenance job |
-| Mark Peters COA and rent into payment | Project | Close the payment gap | that is exactly what the project covers |
+| [name redacted] COA and rent into payment | Project | Close the payment gap | that is exactly what the project covers |
 | Together arrears top up payments | Project | £12,000 Operating Cushion | the project title names the £500 Together allowance |
 | Mortgage Product Transfers Plan | Project | £12,000 Operating Cushion | product transfers cut the monthly fixed cost the project measures |
 | Reply to SSE Energy Solutions (£1,073 debt) | Business | Real Estate | held, see CEO review below |
@@ -93,7 +93,7 @@ I reached all 8. None acted on; these are proposals only.
 | Invoice 40859, DD Fire Alarms | 152 days | **Cannot tell.** Same. |
 | Fwd: Cleaning Invoice | 145 days | **Cannot tell.** Same. |
 | Invoice 40893, DD Fire Alarms | 145 days | **Cannot tell.** Same. |
-| Mark Peters COA and rent into payment | 119 days | **Probably done.** He now has live UC verification tasks for August and September, so the rent is flowing. Verify, then close. |
+| [name redacted] COA and rent into payment | 119 days | **Probably done.** He now has live UC verification tasks for August and September, so the rent is flowing. Verify, then close. |
 
 The five invoice tasks are one decision, not five: none of them ever became an invoice
 record, so there is no paper trail either way. Ask the suppliers or write them off.

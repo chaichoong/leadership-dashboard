@@ -59,7 +59,7 @@ name the ones to drop.
 | Replace window hinge, second bedroom | Owner | AI Operations | agent books the contractor, contractor attends |
 | Measure and quote carpets, both bedrooms | Owner | AI Operations | agent arranges, contractor attends |
 | INBOUND: SMS reply from tenant re tap | Owner | AI Operations | agent replies and books it |
-| Mark Peters COA and rent into payment | Project | Close the payment gap | third night proposed, never approved |
+| [name redacted] COA and rent into payment | Project | Close the payment gap | third night proposed, never approved |
 
 ## Left alone
 
@@ -81,7 +81,7 @@ name the ones to drop.
 | Fwd: Cleaning Invoice, Naturally Neat, £44 | 144 days | **Still live** — no invoice record at all | Verify with Roy, then pay or close |
 | Pay Final Council Tax Adjustment, 32 Elmdon Place, £9.96 | 208 days | **Still live**, misrouted | £9.96 is under your £50 act-and-go rule. Chasing it for seven months has cost more than the debt. Just pay it |
 | Pay tax liability 2023/24, Ciara Brittain, £124.60 | 186 days | **Still live**, misrouted | Sat with Mica since February marked Urgent. Only you can pay it. Agent prepares, you click once |
-| Mark Peters COA and rent into payment | 118 days | **Still live** | See the project decision above |
+| [name redacted] COA and rent into payment | 118 days | **Still live** | See the project decision above |
 
 All 8 reviewed. None left unreached.
 

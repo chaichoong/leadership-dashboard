@@ -65,7 +65,7 @@ to apply them, or name the ones to drop.
 | Invoice 40859 from DD Fire Alarms Ltd | 146 | Probably done already. Same check. |
 | Fwd: Cleaning Invoice | 139 | Probably done already. Same check. |
 | Invoice 40893 from DD Fire Alarms Ltd | 139 | Probably done already. Same check. |
-| Mark Peters COA and rent into payment | 113 | Still live. This is a payment-gap tenancy, so it belongs on that project with a real date. |
+| [name redacted] COA and rent into payment | 113 | Still live. This is a payment-gap tenancy, so it belongs on that project with a real date. |
 
 All 8 reviewed, none skipped. I have not acted on any of them — these are proposals.
 No duplicates found: none of the pairs matched on name, business and due date together.

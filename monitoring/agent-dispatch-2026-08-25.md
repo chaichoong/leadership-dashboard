@@ -16,7 +16,7 @@
 - Tier-1 tasks prepared: 3 (Lex AutoLease creditor letter, HMRC VAT response, Duckworth Section 59 analysis)
 - Non-tier-1 worklist: 7 tasks
 - CEO review: 7 reviewed, 3 PASS, 4 REDO (open-choice violations x3, wrong escalation path x1)
-- Redo round: all 4 redos actioned (Airtable queried for Mark Peters; Workers Paid recommendation firmed; build session routing fixed; cost review set as default)
+- Redo round: all 4 redos actioned (Airtable queried for [name redacted]; Workers Paid recommendation firmed; build session routing fixed; cost review set as default)
 - Submitted to approval: 10 total (3 tier-1 + 7 non-tier-1)
 - Parked: 0
 - Verify: ok (10 actions verified)

@@ -49,10 +49,16 @@ payload = json.loads(sys.argv[1])
 
 # submit reads the task to find its Approver — stub it so no Airtable call
 # happens. An approverEmail in the payload lands in the Approver field.
+# submit calls get_task twice: once BEFORE the patch to find the Approver, and
+# once AFTER it to read the record back (finding 20260823-queue-fixer-329 — the
+# skill promised that read-back for four days before it existed). The stub has
+# to behave like Airtable and return what was just written, or the read-back
+# sees an empty Agent Output and correctly refuses.
 def fake_get(task):
     fields = {}
     if payload.get('approverEmail'):
         fields[m.AF['approver']] = {'email': payload['approverEmail']}
+    fields.update(captured.get('fields', {}))
     return {'id': task, 'fields': fields}
 m.get_task = fake_get
 fh = tempfile.NamedTemporaryFile('w', suffix='.md', delete=False)
