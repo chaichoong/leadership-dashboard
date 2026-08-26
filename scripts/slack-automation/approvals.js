@@ -98,6 +98,13 @@ const AF = {
     approvedAt:      'fldr4Mvf2RzKvhZhi',
     taskType:        'fldZ2moDV2041Sobc',
     approver:        'fldLLAG5HQPEFEfE5', // singleCollaborator — who approves (see APPROVERS)
+    // The learning loop (Kevin's ruling, 26 Aug 2026). "Reject and remember"
+    // ticks rememberThis, and scripts/agent-dispatch.py lessons then writes his
+    // reason into the agent's own definition file, where it is read on every
+    // future run. Feedback History is the durable archive, because
+    // approvalFeedback is cleared by the next submit.
+    rememberThis:    'fldZurhdHutYIDKVx',
+    feedbackHistory: 'fldOzsq68lhfprKJu',
     slackTs:         'fldHTaX3wP9VhD5Oz',
     slackBaseline:   'fldxsqj9JSRBGNyT9',
 };
@@ -122,7 +129,24 @@ const REACTION_OUTCOMES = {
     x:                'Rejected',
     negative_squared_cross_mark: 'Rejected',
     heavy_multiplication_x: 'Rejected',
+    // REJECT AND REMEMBER (Kevin's design, 26 Aug 2026). Same verdict as ❌ —
+    // the work is killed and it counts against the agent — but his reason is
+    // ALSO stored as a standing lesson in that agent's prompt.
+    //
+    // A second emoji rather than a cleverer classifier: 47 of the 60 pieces of
+    // feedback he had ever given were rejections, some of them genuine rules
+    // ("Roy deals with this directly") and some pure one-offs ("already done").
+    // Nothing can reliably tell those apart from the text. He can, in the
+    // moment, for the price of picking a different emoji.
+    brain:            'Rejected',
+    bulb:             'Rejected',
+    books:            'Rejected',
 };
+
+// The subset of the above that also means "remember this". Kept as its own set
+// so the outcome map stays a plain emoji → Approval Outcome lookup, and so a
+// new reject emoji can never accidentally start storing lessons.
+const REMEMBER_REACTIONS = new Set(['brain', 'bulb', 'books']);
 
 // The task's LMT is bumped by our own "Approval Slack TS" write, which lands a
 // beat after the message goes out, so the baseline needs a little room. Any
@@ -379,6 +403,7 @@ function taskView(rec) {
         outcome: selName(f[AF.approvalOutcome]),
         agentId: linkIds(f[AF.sentForApprovalBy])[0] || linkIds(f[AF.teamMember])[0] || '',
         approverEmail: ((f[AF.approver] || {}).email) || '',
+        feedbackHistory: f[AF.feedbackHistory] || '',
     };
 }
 
@@ -569,6 +594,8 @@ function buildApprovalBlocks(t, agent, warn) {
             text: 'Nothing has been sent, filed or actioned yet.\n'
                 + ':white_check_mark:  *approve* — the agent goes and does it, then closes the task\n'
                 + ':x:  *reject* — kill this piece of work entirely, it should not happen. Counts against the agent\n'
+                + ':brain:  *reject and remember* — same as reject, but reply with the reason and '
+                + 'the agent keeps it as a standing rule so it stops raising these\n'
                 + ':speech_balloon:  *changes* — just reply in this thread with what to change. No emoji needed. '
                 + 'It goes back to the agent with your words and nothing goes out',
         },
@@ -631,12 +658,16 @@ async function fetchMessage(env, channel, ts) {
 
 function reactionFrom(msg, slackId) {
     const reactions = (msg && msg.reactions) || [];
-    for (const r of reactions) {
-        const outcome = REACTION_OUTCOMES[r.name];
-        if (!outcome) continue;
-        if ((r.users || []).indexOf(slackId) !== -1) return { outcome, emoji: r.name };
-    }
-    return null;
+    const mine = reactions.filter(r => REACTION_OUTCOMES[r.name]
+        && (r.users || []).indexOf(slackId) !== -1);
+    if (!mine.length) return null;
+    // A remember reaction WINS over a plain one. Kevin hitting ❌ and then 🧠
+    // means "actually, learn from this" — reaction order in the Slack payload
+    // is arrival order, so first-match would have thrown the lesson away and
+    // looked identical to a plain reject.
+    const r = mine.find(x => REMEMBER_REACTIONS.has(x.name)) || mine[0];
+    return { outcome: REACTION_OUTCOMES[r.name], emoji: r.name,
+             remember: REMEMBER_REACTIONS.has(r.name) };
 }
 
 // True when the task changed after the Slack message went out — i.e. the
@@ -654,7 +685,7 @@ async function threadReply(env, channel, ts, text) {
 // hands the task BACK to the agent (due today) to carry the action out; reject
 // closes it. Nothing here ever marks approved work Completed — that is the
 // agent's job, after it has actually done the thing.
-async function applyDecision(env, t, outcome, decidedVia, note, approver) {
+async function applyDecision(env, t, outcome, decidedVia, note, approver, remember) {
     approver = approver || APPROVERS.kevin;
     const now = new Date().toISOString();
     const fields = {
@@ -684,10 +715,28 @@ async function applyDecision(env, t, outcome, decidedVia, note, approver) {
     // comments either. Without this the whole point of an amendment — telling
     // the agent what to change — would be lost.
     if (note) fields[AF.approvalFeedback] = note;
+    // The durable copy. approvalFeedback is cleared by the next submit, so
+    // without this the words that caused a redo are gone within the hour and
+    // the lesson writer has nothing left to read.
+    if (note) {
+        const prior = String(t.feedbackHistory || '');
+        const block = `[${now.replace('T', ' ').slice(0, 16)}] ${note}`;
+        if (prior.indexOf(block) === -1) {
+            fields[AF.feedbackHistory] = (prior.replace(/\s+$/, '') + '\n\n' + block).trim();
+        }
+    }
+    // Kevin asked for this one to be remembered. The flag is all this worker
+    // does: the lesson itself is written by scripts/agent-dispatch.py lessons,
+    // on the Mac, because the destination is the agent's own definition file
+    // and a Cloudflare Worker cannot reach the filesystem. Ticking the box here
+    // and writing there keeps ONE writer, which is why the register and the
+    // agent file can never disagree.
+    if (remember && note) fields[AF.rememberThis] = true;
     await airtable(env, 'PATCH', `/${TABLE_TASKS}/${t.id}`, { fields, typecast: true });
     const agent = await agentName(env, t.agentId);
     const line = outcome === 'Rejected'
         ? `Rejected by ${approver.name} ${decidedVia}. Closed, and counted against ${agent || 'the agent'}.`
+              + (remember && note ? ` ${agent || 'The agent'} will remember your reason from now on.` : '')
               + (note ? `\n\nReason: ${note}` : '')
         : outcome === 'Changes requested'
             ? `Changes requested by ${approver.name} ${decidedVia}. Back to ${agent || 'the agent'}. Nothing has gone out.`
@@ -768,6 +817,20 @@ async function processResponses(env, channels, log) {
             continue;
         }
 
+        // Same principle for "reject and remember": the whole point is the
+        // reason, so a lone :brain: has nothing to teach. Ask rather than
+        // storing an empty lesson or silently downgrading it to a plain
+        // reject, which would look identical to Kevin and lose the rule.
+        if (reaction && reaction.remember && !replies.length) {
+            await threadReply(env, channel, t.ts,
+                'Happy to make that a standing rule — I just need the reason. '
+                + 'Reply here with what the agent should learn (for example '
+                + '"Roy deals with council fire safety letters directly") and '
+                + 'I will reject this and add it to its instructions for good.');
+            log.push(`asked for the lesson on ${t.id}`);
+            continue;
+        }
+
         const outcome = reaction && reaction.outcome !== 'Changes requested'
             ? reaction.outcome          // approve or reject
             : 'Changes requested';      // a written reply, or pencil plus words
@@ -794,7 +857,9 @@ async function processResponses(env, channels, log) {
         const staleNote = (isStale(t) && outcome === 'Changes requested')
             ? '\n\n(The task had changed since I posted it, so read the current version before redoing it.)'
             : '';
-        const line = await applyDecision(env, t, outcome, 'in Slack', note ? note + staleNote : staleNote.trim(), approver);
+        const line = await applyDecision(env, t, outcome, 'in Slack',
+            note ? note + staleNote : staleNote.trim(), approver,
+            !!(reaction && reaction.remember));
         await threadReply(env, channel, t.ts,
             outcome === 'Changes requested'
                 ? `:writing_hand: Sent back with your notes. ${esc(line.split('\n')[0])}`

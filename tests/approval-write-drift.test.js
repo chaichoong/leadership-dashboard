@@ -80,3 +80,60 @@ describe.each(FACES)('%s writes the full decision state', (face, src) => {
     expect(src).toMatch(/assignee[^=]*=\s*null|\[TF\.assignee\]\s*=\s*null|assignee:\s*null|fldELMncVJYPDRJNc\]\s*=\s*null/i);
   });
 });
+
+// ─── THE LEARNING LOOP (26 Aug 2026) ──────────────────────────────────
+//
+// Kevin's question: "how do I know the agent is learning from my feedback?"
+// The answer was that it was not. Feedback reached an agent for one task and
+// was then wiped by the next submit; a rejection never reached an agent at
+// all. His fix: a second reject that says "remember this", so HE classifies
+// which feedback is a standing rule and nothing has to guess.
+//
+// A face that forgets the flag is the silent failure — Kevin clicks a button
+// labelled "Reject and remember", the reject lands, and the lesson never
+// exists. Nothing errors, so it would go unnoticed exactly as long as the
+// last version did.
+describe.each(FACES)('%s carries the remember flag into the write', (face, src) => {
+  const REMEMBER = 'fldZurhdHutYIDKVx';
+  const HISTORY = 'fldOzsq68lhfprKJu';
+  const constants = face === 'slack worker' ? WORKER
+    : face === 'tasks drawer' ? TASKS_PAGE : AGENTS_PAGE;
+
+  it('knows the Remember This and Feedback History field ids', () => {
+    expect(constants).toContain(REMEMBER);
+    expect(constants).toContain(HISTORY);
+  });
+
+  it('writes Remember This when the decision says to remember', () => {
+    expect(src).toMatch(/rememberThis|fldZurhdHutYIDKVx/);
+    // Guarded on the note: a remember with no words stores an empty lesson.
+    expect(src).toMatch(/remember\s*&&\s*note|remember\s*&&\s*!!note/i);
+  });
+
+  it('archives the feedback before the next submit can clear it', () => {
+    expect(src).toMatch(/feedbackHistory|fldOzsq68lhfprKJu/);
+  });
+});
+
+// The two reject routes must be visibly different in the UI, or the split is
+// only in the code and Kevin has no way to choose.
+describe('the two reject buttons', () => {
+  it.each([['agents page', AGENTS_PAGE], ['tasks drawer', TASKS_PAGE]])(
+    '%s offers reject-and-close AND reject-and-remember', (_face, page) => {
+      expect(page).toMatch(/Reject and close/i);
+      expect(page).toMatch(/Reject and remember/i);
+      expect(page).toMatch(/'Rejected'\s*,\s*true\)/);
+    });
+
+  it('the slack worker maps a remember emoji and advertises it', () => {
+    expect(WORKER).toMatch(/REMEMBER_REACTIONS/);
+    expect(WORKER).toMatch(/brain/);
+    expect(WORKER).toMatch(/reject and remember/i);
+  });
+
+  it('a remember emoji with no reason asks rather than storing nothing', () => {
+    // The lone-pencil precedent: ask, never guess. A silent downgrade to a
+    // plain reject looks identical to Kevin and loses the rule.
+    expect(WORKER).toMatch(/reaction\.remember\s*&&\s*!replies\.length/);
+  });
+});

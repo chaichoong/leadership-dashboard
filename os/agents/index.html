@@ -322,6 +322,13 @@ const TF = {
     inboundTask:      'fldueazD67F7fUGee', // Inbound Communication Task checkbox
     inboundUrl:       'fldXf1p0vtHqOZcKl', // Gmail thread URL (or imessage:<guid>)
     approver:         'fldLLAG5HQPEFEfE5', // singleCollaborator — whose approval a task waits on
+    // The learning loop (Kevin's ruling, 26 Aug 2026). Ticking rememberThis is
+    // all any decision surface does — scripts/agent-dispatch.py lessons then
+    // writes the reason into the agent's own definition file, which is what it
+    // reads on every future run. Feedback History is the durable archive,
+    // because Approval Feedback is cleared by the agent's next submit.
+    rememberThis:     'fldZurhdHutYIDKVx',
+    feedbackHistory:  'fldOzsq68lhfprKJu',
 };
 
 // This page is admin-only (Kevin's build). Decisions are stamped with the
@@ -964,12 +971,17 @@ function apvCardHtml(t){
                 ${TASK_TYPE_OPTIONS.map(o=>`<option value="${o}" ${t.taskType===o?'selected':''}>${o}</option>`).join('')}
             </select>
         </div>
-        <textarea class="apv-note" id="apvNote-${t.id}" placeholder="What to change, or why you are rejecting. Required for Request changes and Reject."></textarea>
+        <textarea class="apv-note" id="apvNote-${t.id}" placeholder="What to change, or why you are rejecting. Required for Request changes and both Reject buttons."></textarea>
+        <label style="display:flex;align-items:center;gap:6px;font-size:var(--fs-xs);color:var(--text-secondary);margin-top:6px">
+            <input type="checkbox" id="apvRemember-${t.id}" style="margin:0">
+            Remember this too, so the agent applies it from now on
+        </label>
         <div class="apv-actions">
             <button class="btn btn-success" data-apv-btn onclick="agDecide('${t.id}','Approved as-is')">Approve</button>
             <button class="btn" data-apv-btn onclick="agDecide('${t.id}','Approved with minor edits')" title="Approved, but you tidied it first. Still counts as accurate.">Approve with minor edits</button>
             <button class="btn" data-apv-btn onclick="agDecide('${t.id}','Changes requested')" title="Goes back to the agent to redo. Needs a comment.">Request changes</button>
-            <button class="btn btn-danger" data-apv-btn onclick="agDecide('${t.id}','Rejected')" title="Closes the task for good. Counts against the agent. Needs a reason.">Reject and Close</button>
+            <button class="btn btn-danger" data-apv-btn onclick="agDecide('${t.id}','Rejected')" title="Closes the task for good. Nothing is learned — use this when the reason is a one-off.">Reject and close</button>
+            <button class="btn btn-danger" data-apv-btn onclick="agDecide('${t.id}','Rejected',true)" title="Closes the task AND keeps your reason as a standing rule in the agent's instructions, so it stops raising work like this.">Reject and remember</button>
         </div>
     </div>`;
 }
@@ -977,31 +989,44 @@ function apvCardHtml(t){
 // Record Kevin's verdict — the SAME writes as the Tasks drawer's apvDecide and
 // the Slack loop's applyDecision. This page is the third face of the ONE
 // mechanism, never a new one. Reject asks for confirmation first.
-function agDecide(taskId, outcome){
+function agDecide(taskId, outcome, remember){
     const t = allApprovals.find(x=>x.id===taskId);
     if(!t) return;
     if(APPROVAL_OUTCOMES.indexOf(outcome)===-1) return;
     const noteEl = document.getElementById('apvNote-'+taskId);
     const note = (noteEl && noteEl.value || '').trim();
+    // The tickbox is the "remember" route for the other three verdicts; the
+    // second Reject button is the same thing with one click instead of two.
+    const boxEl = document.getElementById('apvRemember-'+taskId);
+    remember = !!remember || !!(boxEl && boxEl.checked);
     const needsNote = (outcome==='Changes requested' || outcome==='Rejected');
     if(needsNote && !note){
         toast(outcome==='Rejected' ? 'Add a reason before rejecting.' : 'Say what needs changing before sending it back.');
         if(noteEl) noteEl.focus();
         return;
     }
-    if(outcome==='Rejected'){
-        const agent = teamName(t.raiserId) || 'the agent';
-        showModal('Reject this work?',
-            `<p style="font-size:var(--fs-sm);color:var(--text-secondary);line-height:1.6">This closes the task and counts against ${esc(agent)}. Nothing goes out.<br><br><strong>Reason:</strong> ${esc(note)}</p>`,
-            `<button class="btn" onclick="closeModal()">Cancel</button>
-             <button class="btn btn-danger" onclick="closeModal();applyApprovalDecision('${taskId}','Rejected')">Reject and Close</button>`);
+    // A lesson with no words teaches nothing. Ask rather than storing an empty
+    // rule or quietly downgrading to a plain reject, which would look
+    // identical on screen and lose the thing Kevin meant to keep.
+    if(remember && !note){
+        toast('Type the reason first — that is what the agent will remember.');
+        if(noteEl) noteEl.focus();
         return;
     }
-    applyApprovalDecision(taskId, outcome);
+    if(outcome==='Rejected'){
+        const agent = teamName(t.raiserId) || 'the agent';
+        showModal(remember ? 'Reject this, and make it a rule?' : 'Reject this work?',
+            `<p style="font-size:var(--fs-sm);color:var(--text-secondary);line-height:1.6">This closes the task and counts against ${esc(agent)}. Nothing goes out.<br><br><strong>Reason:</strong> ${esc(note)}</p>`
+            + (remember ? `<p style="font-size:var(--fs-sm);color:var(--text-primary);line-height:1.6;background:var(--accent-soft);border-radius:var(--radius-md);padding:10px 12px;margin-top:10px">${esc(agent)} keeps this reason in its instructions and applies it to every future task, until you remove it.</p>` : ''),
+            `<button class="btn" onclick="closeModal()">Cancel</button>
+             <button class="btn btn-danger" onclick="closeModal();applyApprovalDecision('${taskId}','Rejected',${remember?'true':'false'})">${remember ? 'Reject and remember' : 'Reject and close'}</button>`);
+        return;
+    }
+    applyApprovalDecision(taskId, outcome, remember);
 }
 window.agDecide = agDecide;
 
-async function applyApprovalDecision(taskId, outcome){
+async function applyApprovalDecision(taskId, outcome, remember){
     const t = allApprovals.find(x=>x.id===taskId);
     if(!t) return;
     const noteEl = document.getElementById('apvNote-'+taskId);
@@ -1040,6 +1065,19 @@ async function applyApprovalDecision(taskId, outcome){
         // comment alone is not enough: the Slack worker's Airtable token
         // cannot read comments, so the field is the only place both sides see.
         if(note) payload[TF.approvalFeedback] = note;
+        // The durable copy. Approval Feedback is cleared by the agent's next
+        // submit, so without this the words that caused a redo are gone within
+        // the hour and the lesson writer has nothing left to read.
+        if(note){
+            const prior = String(gf(live,TF.feedbackHistory) || '');
+            const block = '['+nowIso.replace('T',' ').slice(0,16)+'] '+note;
+            if(prior.indexOf(block) === -1) payload[TF.feedbackHistory] = (prior.replace(/\s+$/,'') + '\n\n' + block).trim();
+        }
+        // Kevin asked for this one to be remembered. Ticking the box is ALL
+        // this page does: scripts/agent-dispatch.py lessons writes the lesson
+        // into the agent's own definition file on the Mac, because a browser
+        // cannot reach the filesystem and one writer beats three.
+        if(remember && note) payload[TF.rememberThis] = true;
         if(outcome==='Rejected'){
             // Closed with a reason. Counts against the agent's accuracy.
             payload[TF.status] = 'Completed';
@@ -1061,11 +1099,12 @@ async function applyApprovalDecision(taskId, outcome){
         await atUpdate(TASKS_TBL, taskId, payload);
 
         const agentLabel = teamName(t.raiserId) || 'the agent';
+        const rememberLine = (remember && note) ? ` Kept as a standing rule for ${agentLabel}.` : '';
         const line = outcome==='Rejected'
-            ? `Rejected. Reason: ${note}`
+            ? `Rejected. Reason: ${note}${rememberLine}`
             : outcome==='Changes requested'
-                ? `Changes requested. ${note}`
-                : `${outcome}. Back to ${agentLabel} to carry out.${note ? ' Note: '+note : ''}`;
+                ? `Changes requested. ${note}${rememberLine}`
+                : `${outcome}. Back to ${agentLabel} to carry out.${note ? ' Note: '+note : ''}${rememberLine}`;
         await postTaskComment(taskId, line);
 
         allApprovals = allApprovals.filter(x=>x.id!==taskId);
@@ -1075,6 +1114,7 @@ async function applyApprovalDecision(taskId, outcome){
         loadChecksAndRender(); // approvals feed the >24h check — keep it honest
         renderRegister();      // the scorecards' "Waiting on you" counts read allApprovals
         if(!t.raiserId) toast('Recorded, but no agent was linked to this task, so it could not be handed back.');
+        else if(remember && note) toast(`${outcome==='Rejected' ? 'Rejected and closed' : outcome} — ${agentLabel} will remember your reason.`);
         else toast(outcome==='Rejected' ? 'Rejected and closed.' : `${outcome} — back to ${agentLabel}.`);
     } catch(e){
         if(e.message==='auth') return;

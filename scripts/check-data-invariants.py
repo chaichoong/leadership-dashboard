@@ -141,6 +141,39 @@ INVARIANTS = [
         "fields": ["Task Name", "Status", "Processed by AI Agent"],
     },
     {
+        # THE LEARNING LOOP (26 Aug 2026). Kevin ticks "reject and remember"
+        # when his reason should become a standing rule for that agent;
+        # scripts/agent-dispatch.py lessons writes it into the agent's own
+        # definition file and stamps Lesson Written At.
+        #
+        # This is the live half of the guard, and it is the half that matters.
+        # The fixture tests mock Airtable, so they cannot see the failure that
+        # actually happened here: the rule existed, nothing enforced it, and 54
+        # redos produced zero stored lessons while every surface looked healthy.
+        # A ticked box with no stamp a day later means the writer has stopped
+        # and Kevin is teaching an agent that is not listening.
+        #
+        # A day of grace, not the writer's 90 minutes: this runs once daily and
+        # must not fire on a lesson ticked an hour before the sweep.
+        "name": "remembered-feedback-reaches-the-agent",
+        "table": TASKS,
+        "incident": "26 Aug 2026 — 47 of 60 pieces of Kevin's feedback were rejections, which never reached an agent at all; 14 of 15 agent Learning Logs were empty",
+        "asserts": "Remember This ticked and decided yesterday or earlier => a lesson has been written",
+        "violation": (
+            "AND({Remember This}, LEN({Lesson Written At} & '') = 0, "
+            "IS_BEFORE({Approved At}, DATEADD(TODAY(), -1, 'days')))"
+        ),
+        "control": "{Remember This}",
+        "control_means": "tasks Kevin has asked an agent to remember (the population this can silently drop)",
+        # TRUE for every record and touching all three field names, so a rename
+        # is caught even while the control is legitimately empty — which it is
+        # until the first "reject and remember" is ever used.
+        "field_probe": ("OR({Remember This}, NOT({Remember This}), "
+                        "LEN({Lesson Written At} & '') >= 0, "
+                        "LEN({Approval Feedback} & '') >= 0)"),
+        "fields": ["Task Name", "Approval Outcome", "Approval Feedback"],
+    },
+    {
         # A Hard Deadline is a real-world date lifted from the letter itself —
         # a court date, a pay-by, a filing window — stamped by inbound triage
         # from the post-manager email's Deadline line. One PASSING with the

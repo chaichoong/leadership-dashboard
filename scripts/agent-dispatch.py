@@ -160,6 +160,22 @@ AF = {
     "inboundSourceType": "fldiXSzcMol6Tdwij",
     "inboundSender":     "fldzf4xlbrQuktx0i",
     "inboundContent":    "fldiSNijdCy5GXuzL",
+    # THE LEARNING LOOP (Kevin's ruling, 26 Aug 2026). Before these existed,
+    # feedback was single-use: it reached the agent for that one task and was
+    # then wiped by the next submit. Zero of 54 redos between 24 and 26 Aug
+    # left a trace, and 47 of 60 pieces of feedback were rejections, which
+    # never reach an agent at all because rejecting CLOSES the task and the
+    # queue only reads Today/Overdue.
+    #   rememberThis    — Kevin ticked "Reject and remember": his reason
+    #                     becomes a standing lesson. HE classifies, so nothing
+    #                     has to guess which feedback is a one-off.
+    #   lessonWrittenAt — idempotency stamp set by `lessons` once the line is
+    #                     in the agent's file. Never written by hand.
+    #   feedbackHistory — append-only archive, because submit clears
+    #                     approvalFeedback and the history was unrecoverable.
+    "rememberThis":      "fldZurhdHutYIDKVx",
+    "lessonWrittenAt":   "fldFfzXOME9Rh8SyM",
+    "feedbackHistory":   "fldOzsq68lhfprKJu",
 }
 
 TASK_TYPES = ("Drafting", "Research", "Analysis", "Build",
@@ -1268,11 +1284,13 @@ def cmd_submit(args):
     # financial matters never route to the team. The banner check catches a
     # tier-1 connection the agent only discovered while working, and the
     # pattern re-check catches a dispatcher that forgot --tier1.
+    # Read once and reuse: the approver decision and the feedback archive below
+    # both need the stored record, and two fetches of the same task can
+    # disagree if a decision lands between them.
+    tf = (get_task(args.task).get("fields", {}) or {})
     approver_email = KEVIN_AIRTABLE_EMAIL
     is_tier1 = bool(args.tier1) or TIER1_BANNER in output
     if not is_tier1:
-        t = get_task(args.task)
-        tf = t.get("fields", {}) or {}
         if tier_match(TIER1_PATTERNS, tf.get(AF["name"]),
                       tf.get(AF["description"]), tf.get(AF["notes"])):
             is_tier1 = True
@@ -1292,6 +1310,20 @@ def cmd_submit(args):
     # queue classifier both gate on that field alone, and would have carried out
     # text Kevin never saw. The mirror image broke the redo path: a stale
     # 'Changes requested' re-queued the same task as a redo on every run.
+    # ARCHIVE BEFORE THE WIPE. Clearing Approval Feedback below is correct for
+    # the gate, but it also destroyed the record: 54 redos ran between 24 and
+    # 26 Aug 2026 and only 8 still carried the words that caused them, so the
+    # feedback could not be reviewed, counted or learned from after the fact.
+    # Append-only, and it costs one field.
+    prior = str(tf.get(AF["approvalFeedback"]) or "").strip()
+    archived = None
+    if prior:
+        hist = str(tf.get(AF["feedbackHistory"]) or "")
+        stamp = datetime.now(LONDON).strftime("%Y-%m-%d %H:%M")
+        block = f"[{stamp}] {prior}"
+        if block not in hist:
+            archived = (hist.rstrip() + "\n\n" + block).strip()
+
     fields = {
         AF["agentOutput"]: output[:95000],
         AF["taskType"]: args.type,
@@ -1308,6 +1340,16 @@ def cmd_submit(args):
         # every throughput and Completed Month figure as finished work.
         AF["completion"]: None,
     }
+    if archived:
+        fields[AF["feedbackHistory"]] = archived
+    # RESET THE REMEMBER CYCLE, BUT ONLY ONCE THE LESSON IS SAFE. An agent can
+    # redo and resubmit inside the 30-minute lesson poll, so clearing the flag
+    # unconditionally would drop exactly the lessons from the fastest redos.
+    # Cleared together with the stamp so a later "remember" on this same task
+    # is not mistaken for one already stored.
+    if str(tf.get(AF["lessonWrittenAt"]) or "").strip():
+        fields[AF["rememberThis"]] = False
+        fields[AF["lessonWrittenAt"]] = None
     # Tier 1 moves the APPROVER field too, not just the assignee. The Slack
     # router reads Approver to decide whose channel the card lands in, so
     # leaving it on Mica while the engine had already decided "Kevin only" put
@@ -1374,6 +1416,204 @@ def cmd_annotate(args):
         AF["notes"]: (existing + "\n\n" + note).strip(),
     })
     print(json.dumps({"annotated": args.task, "chars": len(note)}))
+
+
+# ─── THE LEARNING LOOP ────────────────────────────────────────────────
+#
+# Kevin's question, 26 Aug 2026: "how do I know the feedback is being taken by
+# the agent and that it is learning from it?" The honest answer at the time was
+# that it was not. Feedback reached the agent for that ONE task and was then
+# wiped by the next submit; rejections never reached an agent at all. The rule
+# saying to record a lesson lived in a skill document, so skipping it was free
+# and silent, and 54 redos in three days produced zero stored lessons.
+#
+# So the write is HERE, in code, and cmd_verify fails a run that leaves one
+# unwritten. Two properties matter more than sophistication:
+#
+#   1. THE FILE IS THE DELIVERY MECHANISM. ~/.claude/agents/<agent>.md IS the
+#      agent's system prompt — every one of the 20 agents has one. A lesson in
+#      that file is read on the agent's next run whether or not anything
+#      remembers to inject it. The register Learning Log is MIRRORED for the
+#      app to display, never relied on for delivery.
+#   2. KEVIN CLASSIFIES, NOTHING GUESSES. A lesson is stored only when he
+#      ticked "Reject and remember" (or the same box on another verdict), so
+#      "no action, Roy handles this" becomes a rule and "wrong invoice number"
+#      stays a one-off. This is what keeps the logs from filling with noise.
+AGENT_DIR = os.path.expanduser("~/.claude/agents")
+LESSONS_HEADING = "## Lessons from Kevin"
+LESSONS_PREAMBLE = (
+    "Standing rules from Kevin's approval decisions. Each line is a verdict he\n"
+    "asked to be remembered. Apply every one before drafting anything; if a\n"
+    "lesson conflicts with the task you have been given, say so rather than\n"
+    "guessing. Appended by `scripts/agent-dispatch.py lessons` — never edit a\n"
+    "line to change its meaning, and never delete one without Kevin's say-so."
+)
+# Past this many lines the log is more prompt than instruction and wants a
+# distil pass in a build session. A soft signal in the JSON, never a silent
+# truncation: dropping Kevin's rulings to stay tidy is the one failure this
+# whole mechanism exists to prevent.
+LESSON_SOFT_CAP = 30
+# Three missed 30-minute polls. Anything older is a broken writer, not a lag.
+LESSON_GRACE_MIN = 90
+
+
+def lesson_line(date, task_name, feedback):
+    """One dated line, Kevin's words kept intact.
+
+    Deliberately NOT summarised by a model here. A model pass can improve the
+    wording later, but the raw sentence is the thing that must survive: the
+    generalise-first design is what produced nothing at all for three days."""
+    name = " ".join(str(task_name or "untitled task").split())[:70]
+    words = " ".join(str(feedback or "").split())[:400]
+    return f"- {date}: {name} — {words}"
+
+
+def _lessons_section_bounds(text):
+    """Where the lessons live, so a line is appended INSIDE the section even
+    when later sections follow it. Appending at end-of-file looked right until
+    someone added a section below, which silently orphaned every new lesson."""
+    start = text.find(LESSONS_HEADING)
+    if start == -1:
+        return None
+    body = start + len(LESSONS_HEADING)
+    nxt = re.search(r"^## ", text[body:], re.M)
+    return (start, body + nxt.start() if nxt else len(text))
+
+
+def append_lesson_to_file(agent_slug, line):
+    """Append one lesson to the agent's definition file. Idempotent on the
+    exact line, so a re-run after a crash cannot duplicate it."""
+    path = os.path.join(AGENT_DIR, f"{agent_slug}.md")
+    if not os.path.exists(path):
+        raise RuntimeError(f"no agent file at {path}")
+    with open(path, encoding="utf-8") as fh:
+        text = fh.read()
+    if line in text:
+        return {"path": path, "written": False, "reason": "already present"}
+    bounds = _lessons_section_bounds(text)
+    if bounds is None:
+        new = (text.rstrip("\n") + "\n\n" + LESSONS_HEADING + "\n\n"
+               + LESSONS_PREAMBLE + "\n\n" + line + "\n")
+    else:
+        _, end = bounds
+        section = text[:end].rstrip("\n")
+        new = section + "\n" + line + "\n" + text[end:]
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as fh:
+        fh.write(new)
+    os.replace(tmp, path)          # atomic: a crash never truncates the prompt
+    with open(path, encoding="utf-8") as fh:
+        landed = fh.read()
+    if line not in landed:         # claimed writes get checked, always
+        raise RuntimeError(f"lesson did not land in {path}")
+    bounds = _lessons_section_bounds(landed)
+    count = len([l for l in landed[bounds[0]:bounds[1]].splitlines()
+                 if l.startswith("- ")]) if bounds else 0
+    return {"path": path, "written": True, "lessonCount": count}
+
+
+def mirror_lesson_to_register(register_row, line):
+    """Role agents also show their log in the app. Append, never overwrite."""
+    rec = _request("GET", f"/{AGENTS_TABLE}/{register_row}"
+                          "?returnFieldsByFieldId=true")
+    existing = rec.get("fields", {}).get(REGISTER_FIELDS["learningLog"], "")
+    if line in existing:
+        return False
+    _request("PATCH", f"/{AGENTS_TABLE}/{register_row}", {"fields": {
+        REGISTER_FIELDS["learningLog"]: (existing.rstrip() + "\n" + line).strip(),
+    }})
+    return True
+
+
+def lesson_source_text(f):
+    """Kevin's words. Approval Feedback is cleared on every resubmit, so a
+    redo's feedback can be gone before the writer next runs — Feedback History
+    is the durable copy the three decision surfaces also write."""
+    live = str(f.get(AF["approvalFeedback"]) or "").strip()
+    if live:
+        return live
+    hist = str(f.get(AF["feedbackHistory"]) or "").strip()
+    return hist.split("\n\n")[-1].strip() if hist else ""
+
+
+def pending_lessons():
+    """Decided tasks Kevin asked to be remembered that have no lesson yet."""
+    return query_tasks(
+        "AND({Remember This}, LEN({Lesson Written At}&'')=0)")
+
+
+def cmd_lessons(args):
+    # THE CONTROL. The formula matches on field NAMES, so a rename returns
+    # 200 OK with zero rows and this reads as "nothing to do" for ever — the
+    # exact silent-zero failure CLAUDE.md was written about. An empty pending
+    # list is only trustworthy if the field can still be seen at all, which is
+    # what `remembered` proves once a single lesson has ever been stored.
+    remembered = query_tasks("{Remember This}", minimal=True)
+    stamped = query_tasks("LEN({Lesson Written At}&'')>0", minimal=True)
+    if not remembered and stamped:
+        raise RuntimeError(
+            "CONTROL FAILED: no task matches {Remember This} yet "
+            f"{len(stamped)} carry a Lesson Written At stamp. The field has "
+            "been renamed or the formula no longer sees it — every lesson "
+            "Kevin stores from now on would be silently dropped.")
+
+    written, problems = [], []
+    for rec in pending_lessons():
+        f = rec.get("fields", {})
+        task_id = rec["id"]
+        name = f.get(AF["name"], "")
+        words = lesson_source_text(f)
+        if not words:
+            problems.append({"task": task_id, "name": name,
+                             "error": "Remember ticked but no feedback text"})
+            continue
+        agent_recs = (links(f.get(AF["sentForApprovalBy"]))
+                      or links(f.get(AF["teamMember"])))
+        entry = ALL_AGENTS.get(agent_recs[0]) if agent_recs else None
+        if not entry:
+            # Never silently dropped: a lesson with nowhere to land is the
+            # failure, so it stays pending and shows up in the run report.
+            problems.append({"task": task_id, "name": name,
+                             "error": "no known agent on the task"})
+            continue
+        decided = str(f.get(AF["approvedAt"]) or "")[:10] or today_london()
+        line = lesson_line(decided, name, words)
+        try:
+            res = append_lesson_to_file(entry["agent"], line)
+            mirrored = False
+            if entry.get("registerRow"):
+                mirrored = mirror_lesson_to_register(entry["registerRow"], line)
+            # Stamp LAST. If anything above threw, the task stays pending and
+            # the next run retries — appends are idempotent on the exact line.
+            patch_task(task_id, {AF["lessonWrittenAt"]: now_iso()})
+            written.append({"task": task_id, "agent": entry["agent"],
+                            "line": line, "mirrored": mirrored,
+                            "lessonCount": res.get("lessonCount"),
+                            "crowded": (res.get("lessonCount") or 0)
+                                       > LESSON_SOFT_CAP})
+        except Exception as e:                        # noqa: BLE001
+            problems.append({"task": task_id, "name": name, "error": str(e)})
+
+    out = {"written": written, "problems": problems,
+           "pendingAfter": len(problems),
+           "rememberedTotal": len(remembered)}
+    print(json.dumps(out, indent=2))
+    return 1 if problems else 0
+
+
+def overdue_lessons(now_utc=None):
+    """Pending lessons old enough to mean the writer is broken rather than
+    merely behind. Read by cmd_verify — a learning loop nobody checks is the
+    one that quietly stopped."""
+    now_utc = now_utc or datetime.now(timezone.utc)
+    late = []
+    for rec in pending_lessons():
+        f = rec.get("fields", {})
+        at, _ = _parse_at(str(f.get(AF["approvedAt"]) or ""))
+        if at and (now_utc - at) > timedelta(minutes=LESSON_GRACE_MIN):
+            late.append({"task": rec["id"], "name": f.get(AF["name"], ""),
+                         "decidedAt": f.get(AF["approvedAt"])})
+    return late
 
 
 def cmd_intent(args):
@@ -1468,6 +1708,26 @@ def cmd_verify(args):
     if report.get("roleAgentsError"):
         problems.append("role-agent register read failed: "
                         f"{str(report['roleAgentsError'])[:160]}")
+
+    # THE LEARNING GATE (Kevin's ruling, 26 Aug 2026). Read from the LIVE
+    # table, never from what the run claimed, and checked on every run whether
+    # or not this run touched the task — a lesson Kevin asked for that nobody
+    # stored is a broken promise regardless of who was meant to store it.
+    #
+    # This exists because the previous version of the rule was prose in a skill
+    # file with nothing checking it, and produced zero stored lessons from 54
+    # redos. Anything under the grace window is simply waiting for the next
+    # 30-minute poll and is not a problem.
+    try:
+        late = overdue_lessons()
+    except Exception as e:                            # noqa: BLE001
+        problems.append(f"lesson check failed to run: {str(e)[:160]}")
+        late = []
+    for l in late:
+        problems.append(
+            f"lesson NOT stored: {l['task']} \"{str(l['name'])[:60]}\" — Kevin "
+            f"ticked remember at {str(l['decidedAt'])[:16]} and the agent still "
+            "cannot see it. Run: python3 scripts/agent-dispatch.py lessons")
 
     # The CEO review pass is mandatory for non-tier-1 prepared work (Kevin's
     # ruling, 24 Aug 2026). A run that submitted such work with no ceoReview
@@ -2231,17 +2491,23 @@ def main():
     rc.add_argument("--runs", type=int, default=3,
                     help="how many recent run directories to inspect")
 
+    sub.add_parser("lessons",
+                   help="write every lesson Kevin asked to be remembered into "
+                        "the agent files. Deterministic, idempotent, safe to "
+                        "run as often as you like")
+
     args = p.parse_args()
     # RETURN the handler's exit code. It used to be discarded, so a command that
     # signalled failure by returning 1 still exited 0 and every caller read it
     # as success. Nothing looked wrong because the handlers that refuse do it by
-    # calling sys.exit() — but `reconcile` reports by RETURNING, so discarding
-    # the result here would make the whole check ornamental.
+    # calling sys.exit() — but `reconcile` and `lessons` report by RETURNING, so
+    # discarding the result here would make both checks ornamental.
     return {"queue": cmd_queue, "route": cmd_route, "escalate": cmd_escalate,
             "handover": cmd_handover, "submit": cmd_submit,
             "annotate": cmd_annotate, "intent": cmd_intent,
             "complete": cmd_complete, "verify": cmd_verify,
-            "score": cmd_score, "reconcile": cmd_reconcile}[args.cmd](args) or 0
+            "score": cmd_score, "reconcile": cmd_reconcile,
+            "lessons": cmd_lessons}[args.cmd](args) or 0
 
 
 if __name__ == "__main__":

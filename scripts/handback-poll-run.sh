@@ -41,6 +41,22 @@ beat() {  # decision reason handbacks spawned
 
 cd "$REPO" || { echo "ERROR: repo not found at $REPO" >&2; exit 1; }
 
+# --- free half: store the lessons Kevin asked to be remembered -------------
+# Runs on EVERY tick, including the quiet ones that exit before Claude starts.
+# It costs one Airtable read and no model tokens, which is why it sits above
+# the gate rather than inside the expensive half: a "reject and remember" is
+# most often the LAST thing Kevin does before closing the queue, so the tick
+# that follows it is usually an idle one. Gating the write on there being
+# hand-back work would have delayed every lesson until the next real run.
+#
+# Deterministic and idempotent. A failure here must be loud but must not stop
+# the hand-backs Kevin is waiting on, so it is reported and the poll continues.
+if ! /usr/bin/python3 "$REPO/scripts/agent-dispatch.py" lessons > "$SCRATCH/lessons.json" 2>"$SCRATCH/lessons.err"; then
+  echo "WARNING: lesson write failed — Kevin's feedback is NOT yet in the agent files" >&2
+  tail -c 500 "$SCRATCH/lessons.err" >&2
+  tail -c 500 "$SCRATCH/lessons.json" >&2
+fi
+
 # --- cheap half: is anything actually handed back? -------------------------
 # One read, through the SAME command the real run uses, so the gate and the run
 # can never disagree about what is queued. cmd_queue has its own control and
@@ -95,7 +111,7 @@ RUNDIR is $RUNDIR and STEP 1 IS ALREADY DONE — $RUNDIR/queue.json was written 
 
 WORK ONLY THE HAND-BACKS. From the worklist, work every item whose kind is carry_out (Approval Outcome is an Approved kind) or redo (Approval Outcome is Changes requested). IGNORE new work entirely, do NO routing and NO escalation — those belong to the 09:00/13:00/17:00 slots and to daily-ops, and re-deciding them every thirty minutes would burn Kevin's tokens on questions nobody has answered since the last tick. If the only items left are new work, write the report and stop.
 
-Everything else in the skill still applies in full and must not be weakened: the gate sits BEFORE the action; step 2's tier-1 labelling pass on every item you work, submitting tier-1 redos with --tier1; the carry_out intent/verify-first/complete discipline, including the never-automated list (payments, credentials, signatures, phone calls) which are parked and listed in parkedFlags, never retried; the learning-log capture for every task carrying Approval Feedback, routed by agent kind; the mandatory closing 'Carrying this out will involve:' line under 400 characters on every redo; and step 4b's CEO review pass over non-tier-1 redos before they are submitted.
+Everything else in the skill still applies in full and must not be weakened: the gate sits BEFORE the action; step 2's tier-1 labelling pass on every item you work, submitting tier-1 redos with --tier1; the carry_out intent/verify-first/complete discipline, including the never-automated list (payments, credentials, signatures, phone calls) which are parked and listed in parkedFlags, never retried; the mandatory closing 'Carrying this out will involve:' line under 400 characters on every redo; and step 4b's CEO review pass over non-tier-1 redos before they are submitted.
 
 Step 5: write $RUNDIR/report.json exactly as the skill specifies, copying queueCounts, roleAgentsError and skippedTier2 VERBATIM from queue.json. Step 6's escalation DM applies as written. Step 7 (verify) is MANDATORY — run it and do not swallow its exit code. SKIP step 7b (score): the daily slots compute it and recomputing it forty-eight times a day is waste.
 
