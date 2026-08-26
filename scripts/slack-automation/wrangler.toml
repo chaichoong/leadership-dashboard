@@ -21,6 +21,13 @@ bucket_name = "contractor-bot-attachments"
 # Approval to the approvals channel, read Kevin's emoji back, and close threads
 # for anything he decided in the dashboard instead. A minute of latency on an
 # approval is invisible to him; an hour is not.
+# DO NOT REMOVE THIS CRON TO "TURN OFF THE CONTRACTOR BOT". Checked 27 Aug
+# 2026: the scheduled() handler runs ONLY runApprovalSweep — Kevin's AI agent
+# approval loop. The contractor conversation runs off fetch() (the Slack events
+# webhook) and does not use the cron at all. Removing this cron stops Kevin's
+# approvals reaching Slack and stops his emoji replies being read, while the
+# contractor chat carries on regardless. It was removed for four minutes on
+# 27 Aug 2026 for exactly this reason and restored once the handler was read.
 [triggers]
 crons = ["* * * * *"]
 

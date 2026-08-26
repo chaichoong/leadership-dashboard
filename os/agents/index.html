@@ -52,7 +52,12 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 .sc-card.selected{border-color:var(--accent);background:var(--accent-soft)}
 .sc-head{display:flex;justify-content:space-between;align-items:flex-start;gap:8px;margin-bottom:4px}
 .sc-name{font-weight:var(--fw-bold);font-size:var(--fs-base)}
-.sc-goal{font-size:var(--fs-xs);color:var(--text-secondary);margin-bottom:8px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sc-goal{font-size:var(--fs-xs);color:var(--text-secondary);margin-bottom:6px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* The plain-English description. Deliberately NOT truncated: this is the
+   field that answers "what does this thing actually do", so clipping it
+   would defeat the only reason it exists. */
+.sc-what{font-size:var(--fs-xs);color:var(--text-secondary);line-height:1.5;margin-bottom:8px;word-break:break-word}
+.sc-what-missing{color:var(--text-muted);font-style:italic}
 .sc-row{display:flex;justify-content:space-between;gap:8px;font-size:var(--fs-xs);padding:3px 0;border-top:1px solid var(--border-subtle)}
 .sc-label{color:var(--text-muted);flex-shrink:0}
 .sc-val{text-align:right;font-weight:var(--fw-medium);word-break:break-word}
@@ -289,6 +294,7 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 <!-- Shared accuracy scoring (per agent PER TASK TYPE) — same maths as the
      Leadership Dashboard card. Pure IIFE, safe to load here. -->
 <script src="../../js/agent-accuracy.js?v=1"></script>
+<script src="../../js/automations-data.js?v=1"></script>
 <script src="../../js/sync-bar.js?v=6"></script>
 <script>
 // ═══════════════════════════════════════════════════════════════════════
@@ -384,6 +390,11 @@ const AG = {
     metricScore: 'fldkGxrOlrfuLlH3J', // the agent's CURRENT reading vs its target
     agentPrompt: 'fldV6ve4IEUDkiKoy', // compiled full working prompt
     learningLog: 'fldBdnKB1U4jZM0Jj', // dated lessons from approval feedback
+    // Plain-English "what this actually does", shown on every scorecard (27 Aug
+    // 2026). Goal is the TARGET; this is the DESCRIPTION, and they are different
+    // things — Kevin's rule is that you cannot safely retire what you cannot
+    // describe, and by row 26 nobody remembers what row 4 was for.
+    whatItDoes:  'fldhpQOgGF7khDBp2',
 };
 // AI Agent Daily Log — one row per agent per day, written by each agent's own
 // runtime (e.g. scripts/inbound-triage.py publish). The panel's "Daily
@@ -1800,6 +1811,7 @@ function agentScorecardHtml(a){
             <span class="agent-pill" style="background:${meta.bg};color:${meta.fg}">${esc(status)}</span>
         </div>
         <div class="sc-goal">${esc(String(gf(a,AG.goal)||'').split('\n')[0])}</div>
+        ${gf(a,AG.whatItDoes) ? `<div class="sc-what">${esc(String(gf(a,AG.whatItDoes)))}</div>` : '<div class="sc-what sc-what-missing">No description yet. Add one so this agent can be understood, and retired, without reading its code.</div>'}
         <div class="sc-row"><span class="sc-label">Guardrails</span><span class="sc-val" ${band?`title="${esc(band.why)}"`:''}>${esc(guardrail)}</span></div>
         <div class="sc-row"><span class="sc-label">Accuracy</span><span class="sc-val">${accHtml}</span></div>
         <div class="sc-row"><span class="sc-label">Workload</span><span class="sc-val">${agentWorkloadCell(tmIds)}</span></div>
@@ -1876,6 +1888,7 @@ function renderRegister(){
 
     // 2. Strategic layer (collapsible)
     html += strategicLayerSection();
+    html += automationsSection(q);
 
     // 3. Process agents (workflow-based, video route)
     html += `<div class="auto-wf-header" style="margin:18px 0 6px">Process agents <span style="color:var(--text-muted);font-weight:var(--fw-regular)">(${agentWfs.length})</span></div>`;
@@ -1963,6 +1976,77 @@ function strategicLayerSection(){
         <div class="agentic-guide-body">
             <p class="agentic-guide-intro">Strategic guidance and generic execution. These are unchanged by the register: role agents above do the specific jobs; this layer directs and fills the gaps.</p>
             <div style="display:flex;gap:6px;flex-wrap:wrap">${chips}</div>
+        </div>
+    </div>`;
+}
+
+// ── Automations strip ──────────────────────────────────────────────────
+// Chen's Agent Assignment Matrix splits the estate in two: judgement work is
+// an agent, deterministic if/then is what he calls "simple automation". These
+// are the second kind, so they deliberately have no register row — running a
+// conditional through the AGENTIC stages dresses a script up as a colleague.
+// They are shown HERE, on the same page, because the register alone would let
+// ~70 running jobs disappear from view, and you cannot retire what you cannot
+// describe. Data and the reasoning live in js/automations-data.js.
+function automationRow(e){
+    const off = e.status === 'off';
+    return `<tr${off?' style="opacity:.62"':''}>
+        <td style="white-space:nowrap;font-weight:var(--fw-medium)">${esc(e.name)}${e.agent?' <span style="font-weight:var(--fw-regular);font-size:var(--fs-xs);color:var(--accent)" title="This one IS an AI agent and has its own scorecard above. It is listed here only so every scheduled job is accounted for.">&uarr; agent</span>':''}</td>
+        <td style="white-space:nowrap;color:var(--text-secondary)">${esc(e.when||'')}</td>
+        <td><span class="agent-pill" style="background:${off?'var(--bg-subtle)':'var(--success-bg)'};color:${off?'var(--text-muted)':'var(--success)'}">${off?'Off':'On'}</span></td>
+        <td style="color:var(--text-secondary);line-height:1.5">${esc(e.what||'')}</td>
+    </tr>`;
+}
+// An `agent: true` row is an AI agent that happens to be scheduled. It is
+// SHOWN (nothing is hidden) but never COUNTED as an automation — counting it
+// would make the header claim more "fixed-rule jobs" than exist, on the one
+// page whose job is to tell agents and automations apart.
+function isAgentRow(r){ return r.agent === true; }
+function automationGroup(title, blurb, rows){
+    if(!rows || !rows.length) return '';
+    const real = rows.filter(r=>!isAgentRow(r));
+    const on = real.filter(r=>r.status!=='off').length;
+    const agents = rows.length - real.length;
+    return `<div style="margin-top:14px">
+        <div style="font-size:var(--fs-sm);font-weight:var(--fw-semibold);color:var(--text-primary);margin-bottom:2px">${esc(title)} <span style="color:var(--text-muted);font-weight:var(--fw-regular)">(${on} on, ${real.length-on} off${agents?`, plus ${agents} agent${agents>1?'s':''} listed for completeness`:''})</span></div>
+        <div style="font-size:var(--fs-xs);color:var(--text-muted);margin-bottom:6px">${esc(blurb)}</div>
+        <div style="overflow-x:auto"><table class="wf-grid"><thead><tr>
+            <th style="width:210px">Name</th><th style="width:130px">When</th><th style="width:70px">State</th><th>What it does</th>
+        </tr></thead><tbody>${rows.map(automationRow).join('')}</tbody></table></div>
+    </div>`;
+}
+function automationsSection(q){
+    // A missing data file must say so, not render an empty, reassuring box.
+    if(typeof AUTOMATIONS === 'undefined'){
+        return `<div class="agentic-guide" style="margin-top:16px"><div class="agentic-guide-body">
+            <div class="zone-error">The automations list could not be loaded (js/automations-data.js did not load). This list is NOT empty — it could not be read.</div>
+        </div></div>`;
+    }
+    // `q` is already lowercased and trimmed by renderRegister.
+    const hit = e => !q || (String(e.name||'') + ' ' + String(e.what||'')).toLowerCase().includes(q);
+    const mac = (AUTOMATIONS.macJobs||[]).concat(AUTOMATIONS.otherMacJobs||[]).filter(hit);
+    const offList = (AUTOMATIONS.airtableOff||[]).filter(n=>!q || String(n).toLowerCase().includes(q));
+    // Count only genuine automations — see isAgentRow above.
+    const total = [mac, (AUTOMATIONS.workers||[]).filter(hit), (AUTOMATIONS.airtable||[]).filter(hit)]
+        .reduce((n, g) => n + g.filter(r=>!isAgentRow(r)).length, 0) + offList.length;
+    return `<div class="agentic-guide" id="automationsLayer" style="margin-top:16px">
+        <div class="agentic-guide-head" onclick="this.parentElement.classList.toggle('open')">
+            <span class="resources-chevron">&#x25B6;</span>
+            Automations &mdash; the jobs that follow fixed rules (${total})
+        </div>
+        <div class="agentic-guide-body">
+            <p class="agentic-guide-intro">These are not AI agents. Every one follows a fixed rule with no AI deciding anything, which is why none of them has a register row above: Austin Chen's test is that an agent doing an if/then is over-engineering. They are listed here so nothing running on your behalf is invisible, and so you can tell what a job does before deciding to switch it off.</p>
+            ${automationGroup('Scheduled jobs on the Mac',
+                'Run on a timer on this machine. If one stops, the 11am Job Digest is what tells you.', mac)}
+            ${automationGroup('Cloudflare Workers',
+                'Small always-on services. Most are transport: they carry something from A to B and decide nothing.', (AUTOMATIONS.workers||[]).filter(hit))}
+            ${automationGroup('Airtable automations',
+                'Fire when a record changes or on a timer inside Airtable. Exactly one of the 50 uses AI, and that one has a register row above instead.', (AUTOMATIONS.airtable||[]).filter(hit))}
+            ${offList.length ? `<div style="margin-top:14px">
+                <div style="font-size:var(--fs-sm);font-weight:var(--fw-semibold);color:var(--text-primary);margin-bottom:2px">Airtable automations that are built but switched off <span style="color:var(--text-muted);font-weight:var(--fw-regular)">(${offList.length})</span></div>
+                <div style="font-size:var(--fs-xs);color:var(--text-muted);margin-bottom:6px">Named so a switched-off automation stays a visible decision rather than a thing nobody remembers exists.</div>
+                <div style="font-size:var(--fs-xs);color:var(--text-secondary);line-height:1.7">${offList.map(n=>esc(n)).join(' &middot; ')}</div>
+            </div>` : ''}
         </div>
     </div>`;
 }

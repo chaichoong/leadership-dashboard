@@ -108,7 +108,9 @@ APPROVED_SLOTS = {
     "task-manager": "Task Manager board pass, 09/13/17 (Kevin, 25 Aug 2026)",
     "ceo-agent": "CEO huddle + memory sweep, 06:45 (Kevin, 26 Aug 2026)",
     "prospecting": "Prospecting agent, 09:15 (Kevin, 26 Aug 2026)",
-    "uc-check": "Universal Credit list to Mica, 08:00 (Kevin, 26 Aug 2026)",
+    # uc-check REMOVED 27 Aug 2026 (Kevin, estate audit): the Universal Credit
+    # slot is switched off, so an allowlist entry for it would wave through a
+    # job that must no longer run. Its register row is "UC Verification", Paused.
     "prod-sweep-weekly": "Full browser walk, Sundays 07:30 (Kevin, 26 Aug 2026)",
 }
 
