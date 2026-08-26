@@ -26,7 +26,7 @@ const GUARD = resolve(__dirname, '../scripts/check-routines.py');
 const ROOT = mkdtempSync(join(tmpdir(), 'routineguard-'));
 afterAll(() => rmSync(ROOT, { recursive: true, force: true }));
 
-let box, routineDir, eventsPath;
+let box, routineDir, eventsPath, schedulePath;
 
 /** A routine is a folder with a SKILL.md. That is what separates it from the
  *  shell jobs, which take the same lock legitimately many times a day. */
@@ -61,15 +61,33 @@ print(json.dumps({"code": code, "res": res}))
 `;
   return JSON.parse(execFileSync('python3', ['-c', src], {
     encoding: 'utf8',
-    env: { ...process.env, JOB_QUEUE_EVENTS: eventsPath, CLAUDE_ROUTINE_DIR: routineDir },
+    env: {
+      ...process.env,
+      JOB_QUEUE_EVENTS: eventsPath,
+      CLAUDE_ROUTINE_DIR: routineDir,
+      JOB_SCHEDULE_FILE: schedulePath,
+    },
   }).trim());
+}
+
+/** The job register. An approved slot MUST appear here too — an allowlist entry
+ *  for a job nobody registered would be waved past the guard AND be invisible to
+ *  the digest that notices a job has stopped. */
+function writeSchedule(names) {
+  writeFileSync(schedulePath, JSON.stringify(
+    Object.fromEntries(names.map((n) => [n, { cron: '0 9 * * *', mode: 'wrapped' }])), null, 2));
 }
 
 beforeEach(() => {
   box = mkdtempSync(join(ROOT, 'box-'));
   routineDir = join(box, 'scheduled-tasks');
   eventsPath = join(box, 'queue', 'queue-events.jsonl');
+  schedulePath = join(box, 'job-schedule.json');
   mkdirSync(routineDir, { recursive: true });
+  // Default: every slot the guard allowlists is registered, so existing tests
+  // exercise the stacking logic rather than the registration control.
+  writeSchedule(['inbound-triage', 'task-manager', 'ceo-agent', 'prospecting',
+                 'uc-check', 'prod-sweep-weekly']);
 });
 
 describe('only daily-ops may actually run', () => {
@@ -239,5 +257,100 @@ describe('the guard is actually wired in', () => {
     // Without this line in phase 1 the guard fails every day with "nothing ran".
     const routine = readFileSync(resolve(__dirname, '../docs/daily-ops-routine.md'), 'utf8');
     expect(routine).toMatch(/job-queue\.py mark daily-ops/);
+  });
+});
+
+// ─── APPROVED ROLE-AGENT SLOTS (Kevin's restructure, 26 Aug 2026) ─────
+//
+// Role-specific work now runs in fixed slots instead of inside a daily-ops
+// sequence that reached 6h43 on 26 Aug. A slot is a WRAPPED shell job: it
+// takes the lock and heartbeats, so a sleeping one frees the lock in minutes.
+// That is the whole difference between a slot and the second Claude routine
+// this guard exists to prevent.
+//
+// Until now a slot passed the guard by being named differently from its skill
+// folder (`task-manager` vs `task-manager-board`). That convention was
+// deliberate and documented, but it made the guard's verdict depend on a
+// filename rather than on whether Kevin sanctioned the job. The first test
+// below is the back-test for the trap that removes.
+describe('approved role-agent slots run beside daily-ops', () => {
+  it('does NOT fire when an approved slot shares its skill folder name', () => {
+    // THE TRAP THIS REMOVES: before the allowlist, the only thing keeping
+    // task-manager clean was that no folder was called `task-manager`. Rename
+    // the folder to match the job — the obvious tidy-up — and the guard cried
+    // stacking every morning over a job Kevin had explicitly sanctioned.
+    writeRoutines(['daily-ops', 'task-manager', 'ceo-agent']);
+    writeEvents([
+      { job: 'daily-ops', state: 'mark' },
+      { job: 'task-manager', state: 'acquired' },
+      { job: 'ceo-agent', state: 'acquired' },
+    ]);
+    const { code, res } = guard();
+    expect(code).toBe(0);
+    expect(res.extras).toEqual([]);
+    expect(res.approved_slots_that_ran).toEqual(['ceo-agent', 'task-manager']);
+  });
+
+  it('still fires for a routine that is NOT on the allowlist', () => {
+    // The allowlist widens the door by exactly six named jobs and not one more.
+    writeRoutines(['daily-ops', 'task-manager', 'drift-monitor']);
+    writeEvents([
+      { job: 'daily-ops', state: 'mark' },
+      { job: 'task-manager', state: 'acquired' },
+      { job: 'drift-monitor', state: 'acquired' },
+    ]);
+    const { code, res } = guard();
+    expect(code).toBe(1);
+    expect(res.extras).toEqual(['drift-monitor']);
+  });
+
+  it('names the slots that ran, so a clean run still shows its working', () => {
+    writeRoutines(['daily-ops', 'uc-check']);
+    writeEvents([
+      { job: 'daily-ops', state: 'mark' },
+      { job: 'uc-check', state: 'acquired' },
+    ]);
+    const { res } = guard();
+    expect(res.reason).toMatch(/uc-check/);
+  });
+
+  it('CANNOT VERIFY when an allowlisted slot is missing from the register', () => {
+    // A slot waved through here but absent from job-schedule.json is invisible
+    // to the digest that notices a job has stopped. Silent on both surfaces is
+    // exactly the shape of failure this whole design keeps hitting, so the
+    // disagreement is exit 2, never a pass.
+    writeRoutines(['daily-ops']);
+    writeEvents([{ job: 'daily-ops', state: 'mark' }]);
+    writeSchedule(['inbound-triage']);           // the other five are missing
+    const { code, res } = guard();
+    expect(code).toBe(2);
+    expect(res.ok).toBe(false);
+    expect(res.reason).toMatch(/missing from the job register/);
+    expect(res.reason).toMatch(/ceo-agent/);
+  });
+
+  it('CANNOT VERIFY when the register itself is unreadable', () => {
+    writeRoutines(['daily-ops']);
+    writeEvents([{ job: 'daily-ops', state: 'mark' }]);
+    rmSync(schedulePath, { force: true });
+    const { code, res } = guard();
+    expect(code).toBe(2);
+    expect(res.reason).toMatch(/cannot read the job register/);
+  });
+
+  it('every allowlisted slot is registered in the REAL job-schedule.json', () => {
+    // The control above, run against production rather than a fixture. This is
+    // what fails the pre-push gate if somebody allowlists a job and forgets to
+    // register it.
+    const src = `
+import importlib.util, json
+spec = importlib.util.spec_from_file_location('cr', ${JSON.stringify(GUARD)})
+m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+print(json.dumps({"slots": sorted(m.APPROVED_SLOTS), "registered": sorted(m.registered_jobs() or [])}))
+`;
+    const { slots, registered } = JSON.parse(
+      execFileSync('python3', ['-c', src], { encoding: 'utf8' }).trim());
+    expect(slots.length).toBeGreaterThan(0);
+    for (const s of slots) expect(registered).toContain(s);
   });
 });

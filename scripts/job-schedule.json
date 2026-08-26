@@ -49,7 +49,7 @@
     "cron": "30 2 * * *",
     "maxLateMinutes": 180,
     "mode": "cooperative",
-    "note": "ABSORBED into daily-ops 8 Aug 2026; no longer scheduled separately. Kept here so the digest does not report it as a missing run.",
+    "note": "RETIRED 26 Aug 2026 (Kevin's restructure). Absorbed into the Task Manager agent's board pass, which already walked the same board three times a day. Never re-enable and never re-add as a daily-ops phase.",
     "needs": [
       "network"
     ],
@@ -119,7 +119,7 @@
     "cron": "20 9 * * 1-5",
     "maxLateMinutes": 120,
     "mode": "cooperative",
-    "note": "ABSORBED into daily-ops 8 Aug 2026; no longer scheduled separately. Kept here so the digest does not report it as a missing run.",
+    "note": "RETIRED 26 Aug 2026 (Kevin's restructure). It met its own written self-retirement condition of five clean weekdays and filed a finding about itself (20260826-ceo-brief-morning-check-374). The 09:30 daily-ops guard already reports a missing brief.",
     "needs": [
       "network"
     ],
@@ -297,20 +297,84 @@
       }
     ],
     "readyWaitMinutes": 15,
-    "note": "THE one Claude routine. Never skipped for lateness (maxLate 1440) — it IS the daily run, and skipping it means nothing happens at all. Unqueued: it runs for an hour or more and must not hold the lock the short shell jobs need."
+    "note": "THE one Claude routine. Never skipped for lateness (maxLate 1440) \u2014 it IS the daily run, and skipping it means nothing happens at all. Unqueued: it runs for an hour or more and must not hold the lock the short shell jobs need."
   },
   "daily-ops-guard": {
     "cron": "30 9 * * *",
     "maxLateMinutes": 600,
     "mode": "wrapped",
     "queued": false,
-    "note": "alarms if daily-ops left no phase-1 mark by 08:00 London — the scheduler stamped lastRunAt on 15 Aug 2026 while delivering the run to no session, so only the mark counts. Reports on the routine, so it must never wait behind anything. London gate lives in the code, not this cron (Mac timezone moves with Kevin)."
+    "note": "alarms if daily-ops left no phase-1 mark by 08:00 London \u2014 the scheduler stamped lastRunAt on 15 Aug 2026 while delivering the run to no session, so only the mark counts. Reports on the routine, so it must never wait behind anything. London gate lives in the code, not this cron (Mac timezone moves with Kevin)."
   },
   "inbound-triage": {
     "cron": "0 9,13,17 * * *",
     "maxLateMinutes": 150,
     "mode": "wrapped",
     "note": "the Inbound Comms Triage agent's own Go Signal (Kevin, 24 Aug 2026): both lanes at three fixed slots. NOT a daily-ops phase by explicit ruling; a headless claude run, so the generous lateness keeps a wake-delayed slot worth running",
+    "needs": [
+      "network"
+    ]
+  },
+  "ceo-agent": {
+    "cron": "45 6 * * *",
+    "maxLateMinutes": 120,
+    "mode": "wrapped",
+    "note": "Kevin's restructure of 26 Aug 2026: role-specific work leaves the daily-ops sequence and runs as its own slot. A wrapped shell job, so it takes the lock and heartbeats \u2014 a slot, never a second Claude routine. Allowlisted in scripts/check-routines.py. CEO huddle plus the memory sweep of YESTERDAY, early so the 09:00 CEO brief always has its input \u2014 the old phase-2 slot inside a run that reached 6h43 on 26 Aug put that deadline at risk. Weekend hard stop lives in the skill, not the cron (never express a weekday in a cron).",
+    "needs": [
+      "network",
+      "drive"
+    ]
+  },
+  "uc-check": {
+    "cron": "0 8 * * *",
+    "maxLateMinutes": 480,
+    "mode": "wrapped",
+    "note": "Kevin's restructure of 26 Aug 2026: role-specific work leaves the daily-ops sequence and runs as its own slot. A wrapped shell job, so it takes the lock and heartbeats \u2014 a slot, never a second Claude routine. Allowlisted in scripts/check-routines.py. Mica's Universal Credit list. Generous lateness because it touches a person and an obligation: still worth sending at lunchtime. Restores the 08:00 delivery the absorption gave up (Kevin ruled on 10 Aug that a later time was acceptable, not that an earlier one was forbidden).",
+    "needs": [
+      "network"
+    ]
+  },
+  "prospecting": {
+    "cron": "15 9 * * *",
+    "maxLateMinutes": 240,
+    "mode": "wrapped",
+    "note": "Kevin's restructure of 26 Aug 2026: role-specific work leaves the daily-ops sequence and runs as its own slot. A wrapped shell job, so it takes the lock and heartbeats \u2014 a slot, never a second Claude routine. Allowlisted in scripts/check-routines.py. The Prospecting agent (register row: status Built). Runs after the 09:00 slots so a prospect task it creates is picked up by the same morning's board pass.",
+    "needs": [
+      "network"
+    ]
+  },
+  "prod-sweep-weekly": {
+    "cron": "0 11 * * *",
+    "maxLateMinutes": 300,
+    "mode": "wrapped",
+    "note": "Kevin's restructure of 26 Aug 2026: role-specific work leaves the daily-ops sequence and runs as its own slot. A wrapped shell job, so it takes the lock and heartbeats \u2014 a slot, never a second Claude routine. Allowlisted in scripts/check-routines.py. The FULL 28-page authenticated browser walk, Sundays only \u2014 the day check is in the skill, never in the cron. 11:00 keeps it clear of the 07:00 daily-ops run, which does not take the lock and so cannot be serialised against. Daily coverage is now scripts/check-data-invariants.py via the data-invariants job, which is the part with teeth: 28 pages passed clean every day 22-26 Aug while the invariants caught 7 tasks past their hard deadlines.",
+    "needs": [
+      "network"
+    ]
+  },
+  "data-invariants": {
+    "cron": "40 6 * * *",
+    "maxLateMinutes": 180,
+    "mode": "wrapped",
+    "note": "Kevin's restructure of 26 Aug 2026: the live Airtable invariants run as a plain script every morning, with no Claude in the loop. Each invariant carries a control that fails the run rather than passing on an empty population. daily-ops reads the result and only applies judgement when it FAILED.",
+    "needs": [
+      "network"
+    ]
+  },
+  "drift-scan": {
+    "cron": "20 6 * * *",
+    "maxLateMinutes": 180,
+    "mode": "wrapped",
+    "note": "Kevin's restructure of 26 Aug 2026: the schema snapshot and dead-reference scan are a diff, not a judgement, so they run as a script. It exits 0 when nothing changed and writes an exceptions file only when it did. The old Claude drift phase was the single largest source of findings (68 open) and its own report called the SOP metric 'red every day and carries no signal'.",
+    "needs": [
+      "network"
+    ]
+  },
+  "drive-auth": {
+    "cron": "50 6 * * *",
+    "maxLateMinutes": 240,
+    "mode": "wrapped",
+    "note": "Kevin's restructure of 26 Aug 2026: scripts/drive-auth-check.py was already a script with its own selftest control. It no longer needs a Claude phase to run it.",
     "needs": [
       "network"
     ]
@@ -328,7 +392,7 @@
     "cron": "*/30 * * * *",
     "maxLateMinutes": 20,
     "mode": "wrapped",
-    "note": "Kevin's call, 26 Aug 2026, after measuring the approval loop: the agent's own work on a hand-back is a median of FIVE MINUTES, but he waited a median of 3.6 hours over 1-26 Aug because nothing opened the queue between daily-ops (07:00) and the three triage slots. This checks every half hour and wakes a headless claude run ONLY when a hand-back is actually waiting; a quiet tick is one Airtable read and costs no tokens. HAND-BACKS ONLY (carry_out and redo) — new work, routing and escalation stay in the daily slots. Lateness is deliberately tight: a tick more than 20 minutes late is covered by the next one, so a wake-stampede must not run six of these back to back. The job name is NOT a skill folder name, so check-routines.py sees a registered shell job rather than a second Claude routine.",
+    "note": "Kevin's call, 26 Aug 2026, after measuring the approval loop: the agent's own work on a hand-back is a median of FIVE MINUTES, but he waited a median of 3.6 hours over 1-26 Aug because nothing opened the queue between daily-ops (07:00) and the three triage slots. This checks every half hour and wakes a headless claude run ONLY when a hand-back is actually waiting; a quiet tick is one Airtable read and costs no tokens. HAND-BACKS ONLY (carry_out and redo) \u2014 new work, routing and escalation stay in the daily slots. Lateness is deliberately tight: a tick more than 20 minutes late is covered by the next one, so a wake-stampede must not run six of these back to back. The job name is NOT a skill folder name, so check-routines.py sees a registered shell job rather than a second Claude routine.",
     "needs": [
       "network"
     ]

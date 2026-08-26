@@ -80,6 +80,47 @@ ROUTINE_DIR = os.environ.get(
 # The one routine allowed to run.
 THE_ROUTINE = "daily-ops"
 
+# ─── APPROVED ROLE-AGENT SLOTS ───────────────────────────────────────
+#
+# Kevin's restructure of 26 Aug 2026 moves role-specific work OUT of the
+# daily-ops sequence and into fixed slots, one per role agent. Those slots
+# are wrapped shell jobs (job-queue.py run), so they take the lock, they
+# heartbeat, and a sleeping one frees the lock in minutes. That is the whole
+# difference between a slot and a second Claude routine, and it is why the
+# stampede this guard exists to prevent cannot come back through this door.
+#
+# WHY AN EXPLICIT LIST AND NOT A NAMING CONVENTION
+# ------------------------------------------------
+# Until now a slot passed this guard by being named differently from its
+# skill folder — `task-manager` the job vs `task-manager-board` the folder,
+# `inbound-triage` vs `inbound-email-triage`. That convention is documented
+# in scripts/task-manager-run.sh and it was deliberate, but it carries two
+# faults. Rename a folder to match its job and the guard fails every morning
+# for no reason. Worse, the guard cannot tell an approved slot from a rogue
+# routine that happens to be named unlike any folder — the mismatch proves
+# nothing about whether Kevin sanctioned it.
+#
+# So the sanction is written down, with the date of the ruling. A job in this
+# list is allowed to run beside daily-ops. Anything else that ran and matches
+# a routine folder is still the alarm.
+APPROVED_SLOTS = {
+    "inbound-triage": "Inbound Comms Triage, 09/13/17 (Kevin, 24 Aug 2026)",
+    "task-manager": "Task Manager board pass, 09/13/17 (Kevin, 25 Aug 2026)",
+    "ceo-agent": "CEO huddle + memory sweep, 06:45 (Kevin, 26 Aug 2026)",
+    "prospecting": "Prospecting agent, 09:15 (Kevin, 26 Aug 2026)",
+    "uc-check": "Universal Credit list to Mica, 08:00 (Kevin, 26 Aug 2026)",
+    "prod-sweep-weekly": "Full browser walk, Sundays 07:30 (Kevin, 26 Aug 2026)",
+}
+
+# Where the slots must also be registered. An allowlist entry for a job nobody
+# registered is exactly how a rogue would get in: it would be waved through
+# here and be invisible to the digest that notices a job has stopped. So the
+# two lists must agree, and disagreement is "cannot verify", not "clean".
+SCHEDULE_FILE = os.environ.get(
+    "JOB_SCHEDULE_FILE",
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "job-schedule.json"),
+)
+
 # A full day plus the slack for a late wake. daily-ops itself runs an hour or two.
 DEFAULT_WINDOW_HOURS = 26
 
@@ -97,6 +138,16 @@ def known_routines():
         return None
     return {n for n in names
             if os.path.isfile(os.path.join(ROUTINE_DIR, n, "SKILL.md"))}
+
+
+def registered_jobs():
+    """Every job name in scripts/job-schedule.json. None if unreadable."""
+    try:
+        with open(SCHEDULE_FILE) as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        return None
+    return {k for k in data if not k.startswith("_")}
 
 
 def read_events(window_hours):
@@ -133,6 +184,24 @@ def check(window_hours=DEFAULT_WINDOW_HOURS):
                    "detail": "%s holds no folder with a SKILL.md. An empty list "
                              "would match nothing and pass for ever." % ROUTINE_DIR}
 
+    registered = registered_jobs()
+    if registered is None:
+        return 2, {"ok": False,
+                   "reason": "cannot read the job register",
+                   "detail": "%s is unreadable, so an approved slot cannot be "
+                             "told from an unregistered one. Cannot verify, so "
+                             "treat as broken rather than clean." % SCHEDULE_FILE}
+    unregistered = sorted(n for n in APPROVED_SLOTS if n not in registered)
+    if unregistered:
+        return 2, {"ok": False,
+                   "reason": "approved slot(s) missing from the job register: %s"
+                             % ", ".join(unregistered),
+                   "detail": "An allowlist entry for a job nobody registered "
+                             "would be waved through here AND be invisible to "
+                             "the digest that notices a job has stopped. Add it "
+                             "to %s or remove it from APPROVED_SLOTS."
+                             % SCHEDULE_FILE}
+
     rows, err = read_events(window_hours)
     if err:
         return 2, {"ok": False, "reason": err,
@@ -151,7 +220,9 @@ def check(window_hours=DEFAULT_WINDOW_HOURS):
             ran.setdefault(rec.get("job"), []).append(rec.get("ts"))
 
     ran_routines = sorted(n for n in ran if n in routines)
-    extras = sorted(n for n in ran_routines if n != THE_ROUTINE)
+    extras = sorted(n for n in ran_routines
+                    if n != THE_ROUTINE and n not in APPROVED_SLOTS)
+    slots_that_ran = sorted(n for n in ran if n in APPROVED_SLOTS)
 
     result = {
         "events_log": EVENTS,
@@ -159,6 +230,7 @@ def check(window_hours=DEFAULT_WINDOW_HOURS):
         "events_in_window": len(rows),
         "routines_known": len(routines),
         "routines_that_ran": ran_routines,
+        "approved_slots_that_ran": slots_that_ran,
         "extras": extras,
         "the_routine_ran": THE_ROUTINE in ran,
         "non_routine_jobs_that_ran": sorted(n for n in ran if n not in routines),
@@ -186,8 +258,11 @@ def check(window_hours=DEFAULT_WINDOW_HOURS):
         return 1, result
 
     result["ok"] = True
-    result["reason"] = ("only %s ran in the last %dh (%d queue events seen)"
-                        % (THE_ROUTINE, window_hours, len(rows)))
+    result["reason"] = (
+        "only %s and its approved slots ran in the last %dh (%d queue events "
+        "seen; slots: %s)"
+        % (THE_ROUTINE, window_hours, len(rows),
+           ", ".join(slots_that_ran) if slots_that_ran else "none"))
     return 0, result
 
 

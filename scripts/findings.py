@@ -33,7 +33,37 @@ FINDINGS = os.environ.get(
 )
 
 SEVERITIES = ["critical", "high", "medium", "low"]
-OPEN_STATES = ["open", "claimed"]
+# `pending` is a fix that is WRITTEN but not LANDED. It is not open (the fixer
+# must not redo it) and it is not fixed (nothing reached production yet).
+OPEN_STATES = ["open", "claimed", "pending"]
+
+# Anything at or above this severity is always accepted, cap or no cap. A
+# production break must never be refused because a routine's queue is untidy.
+ALWAYS_ACCEPT = ("critical", "high")
+
+# ─── WHY THERE IS A CAP AT ALL (26 Aug 2026, Kevin's restructure) ────
+#
+# Measured over the 18 days to 26 Aug 2026: the routines filed 364 findings and
+# closed 168. Phase 8 fixes at most ten a day; the sweeps produced about twenty.
+# Net growth +196, ending at 202 open — 3 critical, 53 high, 36 of them older
+# than a fortnight. A queue fed at twenty and drained at ten has one possible
+# future, and the routine's main output had become a backlog nothing could
+# reach.
+#
+# Worse, the drain was not even ten. PRs #107, #110, #126 and #137 were all
+# still OPEN and unmerged on 26 Aug while forty findings sat closed as "fixed"
+# citing them. The queue was reporting work as done that had never landed.
+#
+# Two answers, both here:
+#   1. A cap, so a routine cannot file unboundedly into a queue nobody reaches.
+#      Refused findings are NOT lost — they go to the overflow log, and the
+#      refusal says so. Losing the information would be its own bug.
+#   2. `pending`, so a written-but-unmerged fix stops counting as fixed.
+MAX_OPEN_PER_ROUTINE = 15
+OVERFLOW = os.environ.get(
+    "FINDINGS_OVERFLOW_FILE",
+    os.path.join(HOME, "knowledge-os/logs/findings-overflow.jsonl"),
+)
 
 # ─── A CLAIM THAT OUTLIVES ITS RUN ───────────────────────────────────
 #
@@ -106,10 +136,59 @@ def current_state():
                 state[fid].pop("claimed_by", None)
                 state[fid].pop("claimed_at", None)
                 state[fid]["reopen_note"] = rec.get("note")
+            elif rec.get("op") == "recur":
+                # Seen again. Evidence about an existing finding, never a new
+                # one. Severity only ever ratchets UP: a defect that turns out
+                # to be critical on its third sighting is critical.
+                state[fid]["seen"] = state[fid].get("seen", 1) + 1
+                state[fid]["last_seen"] = rec.get("ts")
+                old_sev, new_sev = state[fid].get("severity"), rec.get("severity")
+                if (new_sev in SEVERITIES and old_sev in SEVERITIES
+                        and SEVERITIES.index(new_sev) < SEVERITIES.index(old_sev)):
+                    state[fid]["severity"] = new_sev
+            elif rec.get("op") == "land":
+                # The PR carrying this fix actually merged.
+                state[fid]["status"] = "fixed"
+                state[fid]["landed_at"] = rec.get("ts")
+                state[fid]["landed_pr"] = rec.get("pr")
             elif rec.get("op") == "close":
-                state[fid]["status"] = rec.get("outcome", "closed")
+                outcome = rec.get("outcome", "closed")
+                # "pending" is written but NOT landed. It stays out of the open
+                # queue so the fixer does not redo it, and out of the fixed
+                # count so nobody reads unmerged work as finished.
+                state[fid]["status"] = "pending" if outcome == "pending" else outcome
                 state[fid]["close_note"] = rec.get("note")
+                if rec.get("pr"):
+                    state[fid]["pr"] = rec.get("pr")
     return state
+
+
+def dedupe_key(routine, title, where):
+    """What makes two findings THE SAME finding.
+
+    The sweeps already do this by hand against Airtable — "appended a dated
+    recurrence line to the existing task rather than raising a duplicate" — and
+    the findings queue had no equivalent, so the same defect was filed over and
+    over. `cfv_{id}_startDate has no writer` went in three separate times and
+    all three sat open at once.
+
+    Normalise hard: lowercase, collapse whitespace, drop punctuation. A title
+    reworded slightly between runs is still the same defect.
+    """
+    def norm(v):
+        # Each field is normalised on its OWN, then joined. Normalising the
+        # joined string instead lets the separator glue to a neighbouring token
+        # ("writer!|js" collapses differently from "writer|js"), so two
+        # identical findings get different keys and both are filed.
+        keep = [c if (c.isalnum() or c.isspace()) else " " for c in (v or "").lower()]
+        return " ".join("".join(keep).split())
+
+    return "|".join(norm(v) for v in (routine, title, where))
+
+
+def open_findings_for(state, routine):
+    return [r for r in state.values()
+            if r.get("routine") == routine and r.get("status") in OPEN_STATES]
 
 
 def next_id(routine):
@@ -143,6 +222,45 @@ def is_stale_claim(rec, hours=STALE_CLAIM_HOURS, now=None):
 
 
 def cmd_add(a):
+    state = current_state()
+    key = dedupe_key(a.routine, a.title, a.where)
+
+    # 1. Already known and still open? Record the recurrence on the existing
+    #    finding and return ITS id. A defect seen again is evidence about that
+    #    defect, never a second defect.
+    for r in state.values():
+        if r.get("status") not in OPEN_STATES:
+            continue
+        if dedupe_key(r.get("routine"), r.get("title"), r.get("where")) != key:
+            continue
+        append({"op": "recur", "id": r["id"], "ts": iso(),
+                "severity": a.severity, "note": a.detail})
+        print(r["id"])
+        print("RECURRENCE of %s (seen %d times) — no duplicate filed."
+              % (r["id"], r.get("seen", 1) + 1), file=sys.stderr)
+        return 0
+
+    # 2. Cap the routine's own open queue. Critical and high are never refused.
+    if a.severity not in ALWAYS_ACCEPT:
+        mine = open_findings_for(state, a.routine)
+        if len(mine) >= MAX_OPEN_PER_ROUTINE:
+            rec = {"op": "overflow", "ts": iso(), "routine": a.routine,
+                   "severity": a.severity, "title": a.title, "where": a.where,
+                   "detail": a.detail, "proposed_fix": a.fix,
+                   "touches_code": a.touches_code, "key": key}
+            os.makedirs(os.path.dirname(OVERFLOW), exist_ok=True)
+            with open(OVERFLOW, "a") as f:
+                f.write(json.dumps(rec) + "\n")
+            oldest = sorted(mine, key=lambda r: r["ts"])[:3]
+            print("REFUSED: %s already has %d open findings (cap %d)."
+                  % (a.routine, len(mine), MAX_OPEN_PER_ROUTINE), file=sys.stderr)
+            print("Kept in %s — nothing is lost." % OVERFLOW, file=sys.stderr)
+            print("Close or merge some of yours first. Oldest three:", file=sys.stderr)
+            for r in oldest:
+                print("  %s  %-8s %s" % (r["id"], r.get("severity", "?"), r["title"]),
+                      file=sys.stderr)
+            return 2
+
     fid = next_id(a.routine)
     append({
         "op": "add", "id": fid, "ts": iso(), "routine": a.routine,
@@ -251,8 +369,26 @@ def cmd_close(a):
         print("ERROR: no finding %s" % a.id, file=sys.stderr)
         return 1
     append({"op": "close", "id": a.id, "ts": iso(),
-            "outcome": a.outcome, "note": a.note})
+            "outcome": a.outcome, "note": a.note, "pr": getattr(a, "pr", "")})
     print("closed %s as %s" % (a.id, a.outcome))
+    if a.outcome == "pending":
+        print("NOT counted as fixed until the PR merges — run "
+              "`findings.py land --pr %s` then." % (getattr(a, "pr", "") or "<n>"),
+              file=sys.stderr)
+    return 0
+
+
+def cmd_land(a):
+    """A PR merged. Everything pending on it is now genuinely fixed."""
+    state = current_state()
+    hit = [r for r in state.values()
+           if r.get("status") == "pending" and str(r.get("pr", "")) == str(a.pr)]
+    if not hit:
+        print("No pending findings cite PR #%s." % a.pr, file=sys.stderr)
+        return 1
+    for r in hit:
+        append({"op": "land", "id": r["id"], "ts": iso(), "pr": str(a.pr)})
+    print("landed %d finding(s) from PR #%s" % (len(hit), a.pr))
     return 0
 
 
@@ -309,9 +445,18 @@ def main(argv=None):
     sp = sub.add_parser("close")
     sp.add_argument("id")
     sp.add_argument("--outcome", required=True,
-                    choices=["fixed", "rejected", "deferred"])
+                    choices=["fixed", "pending", "rejected", "deferred"],
+                    help="'fixed' means LANDED on origin/main. A fix sitting in "
+                         "an open PR is 'pending' — on 26 Aug 2026 four fixer "
+                         "PRs were unmerged while 40 findings citing them read "
+                         "as fixed.")
+    sp.add_argument("--pr", default="", help="PR number carrying the fix")
     sp.add_argument("--note", default="")
     sp.set_defaults(fn=cmd_close)
+
+    sp = sub.add_parser("land", help="a PR merged — flip its pending findings to fixed")
+    sp.add_argument("--pr", required=True)
+    sp.set_defaults(fn=cmd_land)
 
     sp = sub.add_parser("count")
     sp.add_argument("--status")

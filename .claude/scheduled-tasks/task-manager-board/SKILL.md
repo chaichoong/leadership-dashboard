@@ -76,6 +76,53 @@ Members rec id and live status (its rosters). If `queue` exits non-zero
 because ITS population read looks broken, report it, run `board` without
 `--dispatch-queue`, and carry on — your read is independent.
 
+## Step 1b — Field hygiene (09:00 SLOT ONLY)
+
+**Absorbed from the task-hygiene-sweep, 26 Aug 2026 (Kevin's restructure).** That
+sweep was phase 5 of `daily-ops` and it walked the same board you walk, three
+times less often. On 26 Aug it held 13 routing decisions for Kevin while you
+reported 191 stuck. Two things reading every open task and proposing owners for
+the same work is duplicated effort and two sources of truth. Its deterministic
+half is a script; you now run it.
+
+**Only in the 09:00 slot.** Check the hour in London first:
+
+    TZ=Europe/London date +%H
+
+Not 09: skip this step entirely, say so in one line, and go to step 2. Filling
+the same fields three times a day is pure waste, and the auto writes are only
+safe because they are idempotent, not because repeating them is free.
+
+    cd ~/knowledge-os/logs/task-manager/scratch
+    python3 /Users/kevinbrittain/Projects/leadership-dashboard/scripts/task-hygiene-sweep.py audit
+
+Then apply the **auto tier only**, dry run first, exactly as the old sweep did:
+
+    python3 .../scripts/task-hygiene-sweep.py apply --decisions <decisions-file> --tier auto --dry-run
+    python3 .../scripts/task-hygiene-sweep.py apply --decisions <decisions-file> --tier auto
+
+The auto tier is time estimate, business and due date. Those set off no Airtable
+automation, which is the only reason they are safe unattended. **Assignee is NOT
+auto tier and never becomes one** — writing it fires a Slack DM, and a blank
+Assignee means an AI agent owns the task, so bulk-filling it would both spam
+people and rewrite ownership.
+
+**Everything the audit leaves pending is now YOUR decision, not a separate
+approval pile.** Fold the proposed owners into the routing you are already doing
+in step 2, under your own rules: never Mica or Ericamae, maintenance to Roy under
+Kevin's standing approval, tier-1 content to the Creditor Management agent or
+escalated to Kevin. Do not raise a second "approve the sweep" surface — one board,
+one queue, one approval route.
+
+**Never route to an agent that is not Built.** On 25 and 26 Aug the sweep proposed
+owners that were still `Planned` or `Building`, which marks work as owned while
+nothing runs. Dispatch's queue JSON gives you every agent's live status; check it
+before you route. Joining the register on 26 Aug showed 105 of 270 open tasks
+owned by an agent that does not run, putting the real AI share at 9.3% rather
+than the ~48% the raw count implied.
+
+**Keep the undo log.** The apply step writes one; name it in your report.
+
 ## Step 2 — Decide ONE move per stuck task
 
 Work oldest-first, hard deadlines and Overdue first of all. For each stuck task
