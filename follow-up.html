@@ -1477,17 +1477,39 @@
         if (ghlLoc) { localStorage.setItem('ghl_location_id', ghlLoc); ghlLocationId = ghlLoc; }
         else { localStorage.removeItem('ghl_location_id'); ghlLocationId = ''; }
 
+        updateAirtableStatus();   // re-validate the token just entered
         closeSettings();
     }
 
+    // "Connected" is a claim about Airtable, so it has to come FROM Airtable.
+    // This used to report connected whenever a non-empty string sat in
+    // localStorage: on 26 Aug 2026 it reassured Kevin that tasks would
+    // auto-create while Airtable rejected the token with a 401 on every
+    // call, and the three task-creation health checks were failing red
+    // right beside it. whoami is the cheapest validation there is - it
+    // needs no base access, so a 401 means the token itself is bad.
     function updateAirtableStatus() {
         const el = document.getElementById('airtableStatus');
         const pat = localStorage.getItem('airtable_pat');
-        if (pat) {
-            el.innerHTML = '<span style="color:var(--success);">Connected</span> - Tasks will auto-create when emails move to label 8.';
-        } else {
+        if (!pat) {
             el.innerHTML = '<span style="color:var(--warning);">Not configured</span> - Add your token to enable Airtable integration.';
+            return;
         }
+        el.innerHTML = '<span style="color:var(--text-muted);">Checking the token with Airtable...</span>';
+        fetch('https://api.airtable.com/v0/meta/whoami', { headers: { Authorization: 'Bearer ' + pat } })
+            .then(r => {
+                if (r.ok) {
+                    el.innerHTML = '<span style="color:var(--success);">Connected</span> - Tasks will auto-create when emails move to label 8.';
+                } else if (r.status === 401) {
+                    el.innerHTML = '<span style="color:var(--danger);">Token rejected by Airtable (401)</span> - it is expired, revoked, or not the right token. Tasks will NOT auto-create until it is replaced.';
+                } else {
+                    el.innerHTML = '<span style="color:var(--danger);">Airtable refused the token (HTTP ' + r.status + ')</span> - task creation will not work.';
+                }
+            })
+            .catch(err => {
+                // Unknown is not the same as working, and must not read as it.
+                el.innerHTML = '<span style="color:var(--warning);">Could not reach Airtable to check the token</span> - ' + escapeHtml(String((err && err.message) || err));
+            });
     }
 
     function updateKbStatusDisplay() {
