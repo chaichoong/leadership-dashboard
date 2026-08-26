@@ -1015,9 +1015,13 @@ function agDecide(taskId, outcome, remember){
     }
     if(outcome==='Rejected'){
         const agent = teamName(t.raiserId) || 'the agent';
+        // Capitalised only where it STARTS a sentence. The fallback is the
+        // lower-case "the agent", which read as a typo mid-dialog on a task
+        // with no agent linked.
+        const Agent = agent.charAt(0).toUpperCase() + agent.slice(1);
         showModal(remember ? 'Reject this, and make it a rule?' : 'Reject this work?',
             `<p style="font-size:var(--fs-sm);color:var(--text-secondary);line-height:1.6">This closes the task and counts against ${esc(agent)}. Nothing goes out.<br><br><strong>Reason:</strong> ${esc(note)}</p>`
-            + (remember ? `<p style="font-size:var(--fs-sm);color:var(--text-primary);line-height:1.6;background:var(--accent-soft);border-radius:var(--radius-md);padding:10px 12px;margin-top:10px">${esc(agent)} keeps this reason in its instructions and applies it to every future task, until you remove it.</p>` : ''),
+            + (remember ? `<p style="font-size:var(--fs-sm);color:var(--text-primary);line-height:1.6;background:var(--accent-soft);border-radius:var(--radius-md);padding:10px 12px;margin-top:10px">${esc(Agent)} keeps this reason in its instructions and applies it to every future task, until you remove it.</p>` : ''),
             `<button class="btn" onclick="closeModal()">Cancel</button>
              <button class="btn btn-danger" onclick="closeModal();applyApprovalDecision('${taskId}','Rejected',${remember?'true':'false'})">${remember ? 'Reject and remember' : 'Reject and close'}</button>`);
         return;
