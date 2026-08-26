@@ -63,3 +63,14 @@ Run the prospecting agent for Operations Director. Working directory: /Users/kev
 Invoke the project skill `prospect-daily` (defined in .claude/skills/prospect-daily/SKILL.md) and follow it exactly. In brief: read active keywords from the Airtable Prospect Keywords table (base appnqjDpqDniH3IRl, table tblB5tZrXNaKFe02j, PAT at ~/.config/od/airtable_pat — never print it), search LinkedIn posts through Kevin's logged-in Chrome via the claude-in-chrome tools at human pace (max 20 profile views, 5-15s pauses, STOP for the day on any captcha or unusual-activity warning), qualify founder-led UK micro/small business owners posting genuine overload pain, find their website and a PUBLISHED contact email (never guess addresses), classify entity via the public Companies House register (only Limited Company may ever be email-sequenced — PECR), dedupe against existing Prospects (table tbljHVGJoKJf8acy3) including the permanent Suppressed list, write new records with Status "Ready for Review", update keyword Last Used/Prospects Found, then sync any Status "Approved" prospects to GoHighLevel (token at ~/.config/od/ghl_api_key + location at ~/.config/od/ghl_location_id; tag Ltd contacts od-prospect-nurture, all others od-prospect-manual; write back GHL Contact ID and Status "Synced to GHL"; if the token files are missing, skip the sync and say what Kevin must create).
 
 If Chrome is not connected or the Mac was asleep, report "run skipped" honestly. Do NOT DM Kevin (Slack contract, 21 Aug 2026). Finish by returning one line to daily-ops: found count, synced count, keywords used, warnings. If something needs a decision from Kevin, start that line with NEEDS KEVIN and say the decision in one plain sentence, so phase 9 lifts it into the report.
+
+Before returning that line, write the agent's daily log (this is how the AI
+Agents page sees the run — added 26 Aug 2026; skipped runs log too, honestly):
+
+    python3 scripts/agent_daily_log.py publish --agent-row recbQr4hq0hkVVVNE \
+        --name "Prospecting" \
+        --summary "<the same one line: found X, synced Y, keywords used>" \
+        --decisions "<a few lines: which keywords, notable qualify/reject calls, any warnings>"
+
+A non-zero exit means the log write failed — say so in the returned line,
+never retry-loop it.

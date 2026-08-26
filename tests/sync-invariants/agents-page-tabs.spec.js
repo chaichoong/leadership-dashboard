@@ -134,6 +134,19 @@ test.describe('AI Agents page tabs', () => {
     // Never-logged agents are one wiring line, not a daily per-agent alarm.
     await expect(checks).toContainText('have never written a daily log: Inbound Comms Response');
     await expect(checks).not.toContainText('usually writes a daily log');
+
+    // Age dividers (Kevin's ask, 26 Aug 2026): items group under date bands,
+    // oldest first, so a shrinking top band shows the backlog clearing.
+    // The two 2-day-old fixtures band together; today's duplicate pair bands
+    // as new; the wiring line sits under Standing, outside the daily flow.
+    // Assert the COUNT badge itself — the label '2 to 7 days old' contains
+    // a '2' of its own, so a bare toContainText('2') passes vacuously.
+    await expect(checks.locator('.chk-divider', { hasText: '2 to 7 days old' }).locator('.zone-count')).toHaveText('2');
+    await expect(checks.locator('.chk-divider', { hasText: 'New today' })).toHaveCount(1);
+    await expect(checks.locator('.chk-divider', { hasText: 'Standing' })).toHaveCount(1);
+    const bandOrder = await checks.locator('.chk-divider').allTextContents();
+    expect(bandOrder.findIndex(t => t.includes('2 to 7 days')))
+      .toBeLessThan(bandOrder.findIndex(t => t.includes('New today')));
   });
 
   test('#tab= deep links open the requested tab on load', async ({ page }) => {
