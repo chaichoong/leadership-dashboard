@@ -66,6 +66,19 @@ describe('report_scrub masks personal data', () => {
     expect(r.text).toBe('| SMS reply from +4475XXXXX747 | Business | Real Estate |');
   });
 
+  it('masks a bare 44-led number — the shape the SMS bridge writes', () => {
+    // 26 Aug 2026: monitoring/task-sweep-2026-08-26.md carried two tenant mobiles
+    // as "447738707077" in the task titles. Neither the "+44" branch nor the "0"
+    // branch matched, and the collector still printed "masked 3 phone" because
+    // other numbers on the page did. A partial mask reads like a complete one.
+    const s = '| MAINTENANCE: SMS reply from 447738707077 - second thread | 15 min |';
+    const r = scrub([s]).scrubbed[s];
+    expect(r.text).not.toContain('447738707077');
+    expect(r.text).not.toContain('7738707077');
+    expect(r.hits).toContain('phone');
+    expect(r.text).toBe('| MAINTENANCE: SMS reply from +4477XXXXX077 - second thread | 15 min |');
+  });
+
   it('masking is idempotent, so a second pass cannot corrupt a masked report', () => {
     const s = 'from +4475XXXXX747 today';
     expect(scrub([s]).scrubbed[s].text).toBe(s);

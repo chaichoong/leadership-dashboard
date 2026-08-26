@@ -954,15 +954,40 @@
 
     // ── Comments ──
 
+    // A comment is not decoration here: a dismissal is RESTORED from the tagged
+    // [CFV-DISMISSED:date] comment when localStorage is empty, so a comment that
+    // never lands means the dismissal is lost on the next device or cache clear.
+    // This used to swallow both halves — the fetch never checked res.ok, so a 403
+    // from a PAT missing data.recordComments:write returned "successfully" and only
+    // a console.warn covered a thrown error. Both now reach the operator.
     async function addTenancyComment(recordId, text) {
-        if (!PAT) return;
+        if (!PAT) return false;
         try {
-            await fetch(`https://api.airtable.com/v0/${BASE_ID}/${TABLES.tenancies}/${recordId}/comments`, {
+            const res = await fetch(`https://api.airtable.com/v0/${BASE_ID}/${TABLES.tenancies}/${recordId}/comments`, {
                 method: 'POST',
                 headers: { 'Authorization': 'Bearer ' + PAT, 'Content-Type': 'application/json' },
                 body: JSON.stringify({ text: text })
             });
-        } catch (e) { console.warn('Failed to add comment:', e); }
+            if (!res.ok) {
+                const hint = res.status === 403
+                    ? ' — your Airtable token is missing the data.recordComments:write scope'
+                    : '';
+                if (typeof showToast === 'function') {
+                    showToast(`Audit comment not saved (${res.status})${hint}. The action itself went through.`,
+                        { type: 'warning', duration: 7000 });
+                }
+                console.warn('Failed to add comment:', res.status, hint);
+                return false;
+            }
+            return true;
+        } catch (e) {
+            if (typeof showToast === 'function') {
+                showToast('Audit comment not saved (network error). The action itself went through.',
+                    { type: 'warning', duration: 7000 });
+            }
+            console.warn('Failed to add comment:', e);
+            return false;
+        }
     }
 
     // Fetch ALL comments from a record (paginate if needed)

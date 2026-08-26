@@ -65,8 +65,14 @@ ALLOWED_EMAILS = ("kevinbrittain@gmail.com",)
 #     "...totalling 00\n2026-08-05" parsed as an eleven-digit phone number.
 #   * the match must END on a digit. Ending on the trailing space swallowed it,
 #     so the masked text ran into the next word.
+#   * a BARE 44-led number with no plus and no leading zero. GoHighLevel and the
+#     SMS bridge write the sender as "447738707077", and neither the "+44" branch
+#     nor the "0" branch matches that shape. Found 26 Aug 2026 while collecting
+#     monitoring/task-sweep-2026-08-26.md: two tenant mobiles were sitting in the
+#     task titles, reported as "masked 3 phone" because OTHER numbers on the page
+#     did match. A partial mask reads exactly like a complete one.
 _PHONE_CANDIDATE = re.compile(
-    r"(?<![\d/.\-])(\+ ?44[\d \-()]{7,15}\d|0\d[\d \-]{6,12}\d)(?![\d/.\-])"
+    r"(?<![\d/.\-])(\+ ?44[\d \-()]{7,15}\d|44\d{9,11}|0\d[\d \-]{6,12}\d)(?![\d/.\-])"
 )
 
 _EMAIL = re.compile(r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}")
@@ -86,7 +92,9 @@ def _mask_phone(match):
     # because a scrubber that mangles ordinary numbers gets switched off.
     if not (10 <= len(digits) <= 13):
         return raw
-    prefix = "+44" if raw.lstrip().startswith("+") else "0"
+    # A bare "447..." is a +44 number written without the plus, not a 0-led one.
+    bare_intl = not raw.lstrip().startswith("0") and digits.startswith("44")
+    prefix = "+44" if (raw.lstrip().startswith("+") or bare_intl) else "0"
     tail = digits[2:] if prefix == "+44" else digits[1:]
     if len(tail) < 6:
         return raw
@@ -141,6 +149,9 @@ SELFTEST_CASES = (
     ("SMS reply from +447538631747 about a tap", "7538631747"),
     ("SMS reply from +44 7538 631747 about a tap", "631747"),
     ("Called 07538631747 twice", "7538631747"),
+    # GoHighLevel / SMS-bridge shape: no plus, no leading zero.
+    ("SMS reply from 447738707077 - second thread", "7738707077"),
+    ("MAINTENANCE: SMS from 447538631747 - maintenance reply", "7538631747"),
     ("Landline 01223 456789 rang out", "456789"),
     ("Chase accounts@some-letting-agent.co.uk for the statement", "some-letting-agent"),
     ("Tenant at CB23 6DL reported damp", "6DL"),

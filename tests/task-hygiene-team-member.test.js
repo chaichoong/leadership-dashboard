@@ -62,7 +62,11 @@ print(json.dumps({
 d = {"field": "teamMember", "value": "recNOTANAGENT00001"}
 print(json.dumps({"err": m.validate(d, set(), set(), {"${AGENT}"})}))`);
     expect(r.err, 'an unknown Team Member ID was accepted').toBeTruthy();
-    expect(r.err).toMatch(/unknown AI agent/);
+    // The roster passed in is the ROUTABLE one (Built or Live on the AI Agents
+    // register) since 26 Aug 2026, so this message covers both an ID that is not
+    // an agent and one whose agent has not been built yet.
+    expect(r.err).toMatch(/AI agent record\(s\)/);
+    expect(r.err).toContain('recNOTANAGENT00001');
   });
 
   it('refuses an agent NAME — that would create a new Team Member record', () => {

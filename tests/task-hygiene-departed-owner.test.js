@@ -46,12 +46,16 @@ const SRC = readFileSync(SWEEP, 'utf8');
 // owner_kind is a closure inside cmd_audit and cannot be imported, so it is
 // rebuilt here from the SAME source lines — extracted, not retyped, so an edit
 // to the real function changes what this test runs.
-function ownerKindHarness(rec, { agentIds = [], departedIds = [] } = {}) {
+// `routableAgentIds` defaults to every agent, which is what the function saw before
+// the AI Agents register was joined on (finding 20260825-task-hygiene-sweep-359).
+// The unbuilt-agent cases below pass it explicitly.
+function ownerKindHarness(rec, { agentIds = [], departedIds = [], routableAgentIds = null } = {}) {
   const body = SRC.match(/def owner_kind\(rec\):\n([\s\S]*?)\n\n/);
   if (!body) throw new Error('owner_kind not found in task-hygiene-sweep.py');
   const src = `def owner_kind(rec):\n${body[1]}`;
   return py(`
 agent_ids = set(${JSON.stringify(agentIds)})
+routable_agent_ids = set(${JSON.stringify(routableAgentIds || agentIds)})
 departed_ids = set(${JSON.stringify(departedIds)})
 get = m.get
 ${src.split('\n').map((l) => l).join('\n')}
@@ -91,6 +95,17 @@ describe('THE REGRESSION: a departed member is not an owner', () => {
       { agentIds: [AGENT], departedIds: [DEPARTED] });
     expect(kind, 'an offboarded member still counts as a valid owner').not.toBe('human');
     expect(kind).toBe('departed');
+  });
+
+  it('an agent that has not been built yet is not an owner either', () => {
+    // Finding 20260825-task-hygiene-sweep-359. On 26 Aug 2026, 105 of 270 live
+    // tasks were held by an agent still Planned or Building on the register: an
+    // owner-shaped link with nothing behind it, exactly like a departed member.
+    const UNBUILT = 'recPLANNED00000001';
+    const kind = ownerKindHarness(task({ [F.teamMember]: [{ id: UNBUILT }] }),
+      { agentIds: [AGENT, UNBUILT], routableAgentIds: [AGENT], departedIds: [DEPARTED] });
+    expect(kind, 'a Planned agent still counts as AI capacity').not.toBe('ai');
+    expect(kind).toBe('ai_unbuilt');
   });
 
   it('plain string links are handled too, not only {id} objects', () => {
@@ -139,7 +154,8 @@ print(json.dumps(m.assess(rec, "human")))
   it('the ownership report has its own bucket, never folded into human or nobody', () => {
     // Counting it inside "unowned" would hide the distinction Kevin acts on:
     // unowned needs an owner, departed needs a HANDOVER.
-    expect(SRC).toMatch(/"ai": 0, "human": 0, "departed": 0, "unowned": 0/);
+    // 'ai_unbuilt' joined the buckets on 26 Aug 2026 for the same reason.
+    expect(SRC).toMatch(/"ai": 0, "ai_unbuilt": 0, "human": 0, "departed": 0, "unowned": 0/);
     expect(SRC).toMatch(/owned by someone who has left/);
   });
 });

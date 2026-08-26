@@ -94,6 +94,20 @@ FIELDS = {
 TEAM_MEMBERS_TBL = "tblco0p2OnlLQVAX7"
 TM_IS_AGENT = "Is AI Agent"
 TM_STATUS = "Status"
+
+# The AI Agents register. 'Is AI Agent' on Team Members says a record REPRESENTS an
+# agent; it says nothing about whether that agent has been built. On 25 Aug 2026 the
+# register held 15 rows of which 7 were still Planned and 2 Building, and every one of
+# them was offered to the sweep as a routing target — so a task could be stamped
+# "owned" by an agent that does not exist and would never run.
+# (Finding 20260825-task-hygiene-sweep-359.)
+AI_AGENTS_TBL = "tbl9msVjyQWslLOIZ"
+AGENT_TEAM_MEMBER_FIELD = "Team Member"
+AGENT_STATUS = "Status"
+# Register Status options: Planned / Building / Built / Live / Paused.
+# Only these two mean "this agent can be given work today". Paused is deliberate,
+# and Planned/Building have nothing behind them at all.
+ROUTABLE_AGENT_STATUSES = frozenset({"Built", "Live"})
 # The two Status choices that mean "no longer doing the work". The full option
 # list on Team Members is Onboarding / Active / Offboarding / Offboarded.
 TM_DEPARTED = frozenset({"Offboarding", "Offboarded"})
@@ -250,6 +264,42 @@ def get(rec, key, default=None):
     return rec["fields"].get(fname(key), default)
 
 
+def agent_build_status(token):
+    """Map Team Member record id -> AI Agents register Status.
+
+    The register is the only place that records whether an agent has actually been
+    built. Without this join the sweep offered Planned agents as owners and the work
+    looked assigned while nothing ran.
+    """
+    rows = fetch_all(token, AI_AGENTS_TBL,
+                     fields=["Name", AGENT_STATUS, AGENT_TEAM_MEMBER_FIELD])
+    # CONTROL — an empty register means a renamed table or field, not a business with
+    # no agents. Reading zero rows would mark every agent "not in register" and take
+    # the whole roster out of routing silently, so fail instead.
+    if not rows:
+        raise SystemExit(
+            f"FAIL: control check — zero rows on the AI Agents register {AI_AGENTS_TBL}. "
+            "Either the table or a field was renamed, or the read is broken. Refusing "
+            "to decide what is routable against an empty register."
+        )
+    status_by_member = {}
+    for rec in rows:
+        status = rec["fields"].get(AGENT_STATUS)
+        for link in rec["fields"].get(AGENT_TEAM_MEMBER_FIELD) or []:
+            member_id = link.get("id") if isinstance(link, dict) else link
+            if member_id:
+                status_by_member[member_id] = status
+    # CONTROL — the same trap one field along. If 'Team Member' is renamed, every row
+    # parses and NOTHING links, which reads as "no agent is registered".
+    if not status_by_member:
+        raise SystemExit(
+            f"FAIL: control check — {len(rows)} register rows but not one links to a "
+            f"Team Member via '{AGENT_TEAM_MEMBER_FIELD}'. The link field was probably "
+            "renamed. Refusing to report every agent as unregistered."
+        )
+    return status_by_member
+
+
 def reference_data(token):
     """Businesses, projects and AI agents the sweep may link a task to.
 
@@ -268,12 +318,24 @@ def reference_data(token):
         if status not in ("Completed", "Complete", "Archived"):
             projects.append({"id": rec["id"], "name": rec["fields"].get("Project Name"),
                              "status": status})
+    # Build status is held on the AI Agents register, not on Team Members, so read
+    # it first and carry it onto every agent below.
+    register = agent_build_status(token)
+
     agents = []
     departed = set()
     for rec in fetch_all(token, TEAM_MEMBERS_TBL,
                          fields=["Name", TM_IS_AGENT, TM_STATUS]):
         if rec["fields"].get(TM_IS_AGENT):
-            agents.append({"id": rec["id"], "name": rec["fields"].get("Name")})
+            # No register row is not "fine by default": an agent nobody registered
+            # has been through no build gate, so it is reported and not routable.
+            status = register.get(rec["id"], "not in register")
+            agents.append({
+                "id": rec["id"],
+                "name": rec["fields"].get("Name"),
+                "buildStatus": status,
+                "routable": status in ROUTABLE_AGENT_STATUSES,
+            })
             continue
         # Someone who has left is not an owner. The sweep used to count any
         # Team Member link as "human owned", so 'Karlo Teves' — offboarded —
@@ -302,6 +364,15 @@ def reference_data(token):
             "Either the field or a choice was renamed, or the read is broken. "
             "Refusing to report every owner as current."
         )
+    # CONTROL — at least one agent must be routable. Six were Built or Live on
+    # 26 Aug 2026, so zero means the register join broke, not that the estate
+    # emptied. Routing to nothing would look identical to "no owner was suitable".
+    if not any(a["routable"] for a in agents):
+        raise SystemExit(
+            f"FAIL: control check — none of the {len(agents)} AI agents is Built or "
+            f"Live on the register {AI_AGENTS_TBL}. Either the join or the Status "
+            "field broke. Refusing to run with nothing to route to."
+        )
     return businesses, projects, agents, departed
 
 
@@ -312,7 +383,7 @@ def strip_html(text):
 def assess(rec, owner="human"):
     """Return the list of rule gaps on one open task, with exemptions applied.
 
-    `owner` is the owner_kind() verdict: ai / human / departed / unowned. It is
+    `owner` is the owner_kind() verdict: ai / ai_unbuilt / human / departed / unowned. It is
     passed in rather than recomputed because deciding it needs the Team Members
     roster, which this function does not have. Defaulting to "human" keeps the
     old behaviour for any caller that does not know the owner.
@@ -324,8 +395,11 @@ def assess(rec, owner="human"):
     # "Owned by someone who has left" is a gap, not ownership. Without this the
     # task carries a Team Member link, passes the check, and is never proposed
     # to anyone — the most invisible way for work to stop.
+    # 'ai_unbuilt' joins 'departed' for the same reason: the task carries a link,
+    # looks owned, and the thing it names cannot do the work. An agent still at
+    # Planned or Building on the register runs nothing at all.
     owned = (bool(get(rec, "assignee")) or bool(get(rec, "teamMember"))) \
-        and owner != "departed"
+        and owner not in ("departed", "ai_unbuilt")
     if not owned and not (maintenance and get(rec, "contractor")):
         gaps.append("assignee")
     if not get(rec, "dueDate") and not some_day:
@@ -367,6 +441,67 @@ def is_stale(rec, today):
     return days if days > STALE_DAYS else None
 
 
+def previous_worklist(today):
+    """The most recent worklist written before today, or None.
+
+    Read to compare denominators. The file name carries its date, so no parsing of
+    the contents is needed to order them.
+    """
+    try:
+        names = sorted(n for n in os.listdir(MONITORING)
+                       if n.startswith("task-sweep-worklist-") and n.endswith(".json"))
+    except FileNotFoundError:
+        return None
+    for name in reversed(names):
+        stamp = name[len("task-sweep-worklist-"):-len(".json")]
+        if stamp >= str(today):
+            continue
+        try:
+            with open(os.path.join(MONITORING, name)) as fh:
+                prev = json.load(fh)
+        except (OSError, ValueError):
+            continue
+        prev["_file"] = name
+        prev["_date"] = stamp
+        return prev
+    return None
+
+
+# A denominator that moves this much needs explaining before any score built on it
+# is compared with yesterday's.
+DENOMINATOR_SHRINK_PCT = 10
+
+
+def assess_denominator(prev_open, cur_open, completed_since, shrink_pct=DENOMINATOR_SHRINK_PCT):
+    """Is today's compliance score comparable with the previous run's?
+
+    The score is compliant/openTasks, and 'Approval' is not open work — so moving a
+    batch of tasks to Approval RAISES the percentage while nothing was fixed. On
+    14 and 16 Aug 2026 the sweep reported an improvement on exactly that basis.
+
+    A shrinking denominator is only progress when completions explain it. Returns
+    (comparable: bool, reason: str|None). Nothing here fabricates a number; it
+    decides whether the comparison may be made at all.
+    (Finding 20260816-task-hygiene-sweep-183.)
+    """
+    if not prev_open:
+        return True, None
+    if cur_open >= prev_open:
+        return True, None
+    shrank_by = prev_open - cur_open
+    if shrank_by * 100 < prev_open * shrink_pct:
+        return True, None
+    if completed_since >= shrank_by:
+        return True, None
+    unexplained = shrank_by - completed_since
+    return False, (
+        f"denominator shrank by {shrank_by} ({prev_open} -> {cur_open} live tasks) "
+        f"but only {completed_since} task(s) completed in the gap. {unexplained} left "
+        "live work without being finished — most likely moved to Approval or blanked. "
+        "Any rise in compliance % is arithmetic, not progress: do not report it as one."
+    )
+
+
 def cmd_audit(args):
     token = pat()
     load_schema(token)
@@ -383,12 +518,18 @@ def cmd_audit(args):
     # agent the roster it may propose an owner from.
     businesses, projects, agents, departed_ids = reference_data(token)
     agent_ids = {a["id"] for a in agents}
+    routable_agent_ids = {a["id"] for a in agents if a["routable"]}
 
     def owner_kind(rec):
         links = get(rec, "teamMember") or []
         ids = [l.get("id") if isinstance(l, dict) else l for l in links]
-        if any(i in agent_ids for i in ids):
+        if any(i in routable_agent_ids for i in ids):
             return "ai"
+        # Linked to an agent that is still Planned or Building. Reported as its own
+        # bucket: it is not AI capacity and it is not human capacity, it is work
+        # nobody and nothing is doing behind an owner-shaped link.
+        if any(i in agent_ids for i in ids):
+            return "ai_unbuilt"
         # A link to someone who has left is NOT ownership. Reported as its own
         # bucket rather than folded into "unowned" so it cannot hide inside the
         # compliance score: these tasks need re-owning, and "unowned" and "owned
@@ -411,7 +552,7 @@ def cmd_audit(args):
     items, counts = [], {}
     non_compliant = 0
     today = date.today()
-    stale, owners = [], {"ai": 0, "human": 0, "departed": 0, "unowned": 0}
+    stale, owners = [], {"ai": 0, "ai_unbuilt": 0, "human": 0, "departed": 0, "unowned": 0}
     for rec in open_tasks:
         kind = owner_kind(rec)
         owners[kind] += 1
@@ -482,12 +623,38 @@ def cmd_audit(args):
         })
 
     clean = len(open_tasks) - non_compliant
+
+    # ── Is the score comparable with the last run? ──────────────────────
+    # Approval-status tasks leave the denominator, so the percentage can rise while
+    # nothing was fixed. Work out whether completions explain any shrink.
+    prev = previous_worklist(today)
+    completed_since = 0
+    if prev:
+        for rec in records:
+            if get(rec, "status") != "Completed":
+                continue
+            done = str(get(rec, "completionDate") or "")[:10]
+            if done and done > prev["_date"]:
+                completed_since += 1
+    comparable, denominator_note = assess_denominator(
+        (prev or {}).get("openTasks", 0), len(open_tasks), completed_since)
+
     out = {
         "generatedAt": datetime.now().isoformat(timespec="seconds"),
         "openTasks": len(open_tasks),
         "compliant": clean,
         "compliancePct": round(100 * clean / len(open_tasks), 1),
         "complianceNote": "'project' is advisory and does not count against the score",
+        # The score alone is not a trend. Always read it with the approval queue:
+        # a task moved to Approval leaves the denominator and flatters the score.
+        "scoreComparable": comparable,
+        "denominatorAlert": denominator_note,
+        "previous": None if not prev else {
+            "date": prev["_date"],
+            "openTasks": prev.get("openTasks"),
+            "compliancePct": prev.get("compliancePct"),
+            "completedSince": completed_since,
+        },
         "gapCounts": counts,
         "ownership": owners,
         "aiSharePct": round(100 * owners["ai"] / len(open_tasks), 1),
@@ -505,7 +672,11 @@ def cmd_audit(args):
             "projects": projects,
             # AI FIRST. Propose one of these as `teamMember` before ever proposing
             # a human `assignee`; a human owner is for work a person must do.
+            # ONLY entries with "routable": true may be proposed — the rest are
+            # Planned or Building on the register and would run nothing. A write to
+            # a non-routable agent is rejected by validate(), not silently applied.
             "aiAgents": agents,
+            "aiAgentsNote": "propose only agents with routable=true; buildStatus says why",
             "team": [{"email": e, "name": n} for e, n in TEAM.items()],
             "timeEstimateOptions": EXPECTED_CHOICES["timeEstimate"],
             "recurringOptions": EXPECTED_CHOICES["recurring"],
@@ -519,9 +690,20 @@ def cmd_audit(args):
     with open(path, "w") as fh:
         json.dump(out, fh, indent=2)
 
-    print(f"Live work: {len(open_tasks)} tasks   compliant: {clean} ({out['compliancePct']}%)")
+    # The score and the queue that feeds off its denominator, on one line. Reading
+    # the percentage on its own is what let a growing approval queue read as progress.
+    print(f"Live work: {len(open_tasks)} tasks   compliant: {clean} ({out['compliancePct']}%)"
+          f"   |   waiting on approval: {len(waiting)} (not scored)")
+    if prev:
+        print(f"  previous run {prev['_date']}: {prev.get('openTasks')} live, "
+              f"{prev.get('compliancePct')}%   completed since: {completed_since}")
+    if not comparable:
+        print(f"  ALARM: score NOT comparable with the previous run — {denominator_note}")
     print(f"  excluded: {len(waiting)} waiting on approval, {len(untriaged)} with no status")
     print(f"  owned by AI: {owners['ai']} ({out['aiSharePct']}%)   human: {owners['human']}   nobody: {owners['unowned']}")
+    # Own line, never folded into "AI": these tasks name an agent that has not been
+    # built, so they are not being done at all.
+    print(f"  owned by an UNBUILT agent (Planned/Building): {owners['ai_unbuilt']}")
     # Reported on its own line, never folded into "human" or "nobody": these
     # tasks LOOK owned and are not being done by anyone.
     print(f"  owned by someone who has left: {owners['departed']}")
@@ -561,10 +743,14 @@ def validate(decision, ref_business_ids, ref_project_ids, ref_agent_ids=frozense
         # and an unknown ID is exactly the silent no-op the Assignee check exists
         # to prevent.
         ids = value if isinstance(value, list) else [value]
+        # ref_agent_ids carries only ROUTABLE agents (Built or Live on the register).
+        # An agent still Planned or Building would leave the task looking owned with
+        # nothing behind it, which is the failure this check exists to stop.
         bad = [i for i in ids if i not in ref_agent_ids]
         if bad:
-            return (f"unknown AI agent record(s): {bad} — Team Member takes "
-                    "record IDs from reference.aiAgents, not names")
+            return (f"unknown or not-yet-built AI agent record(s): {bad} — Team Member "
+                    "takes record IDs from reference.aiAgents with routable=true "
+                    "(Built or Live on the register), not names and not Planned agents")
     if field == "business":
         ids = value if isinstance(value, list) else [value]
         bad = [i for i in ids if i not in ref_business_ids]
@@ -614,7 +800,7 @@ def cmd_apply(args):
     businesses, projects, agents, _departed = reference_data(token)
     b_ids = {b["id"] for b in businesses}
     p_ids = {p["id"] for p in projects}
-    a_ids = {a["id"] for a in agents}
+    a_ids = {a["id"] for a in agents if a["routable"]}
 
     rejected = []
     for d in decisions:

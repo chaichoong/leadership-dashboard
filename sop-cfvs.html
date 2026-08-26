@@ -103,7 +103,7 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
     <a href="index.html#sitemap" class="header-back">&larr; Back to Site Map</a>
     <h1>Cash Flow Voids (CFVs) &mdash; Standard Operating Procedure</h1>
     <div class="subtitle">Detection, management, chase tracking, auto-return and resolution of missing rent payments</div>
-    <div class="version">Version 1.33 &middot; 20 August 2026 &middot; Owner: Kevin Brittain</div>
+    <div class="version">Version 1.34 &middot; 26 August 2026 &middot; Owner: Kevin Brittain</div>
   </div>
 </div>
 
@@ -136,7 +136,7 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
       </div>
       <div class="qr-item">
         <div class="qr-label">Version</div>
-        <div class="qr-value">1.6</div>
+        <div class="qr-value">1.34</div>
       </div>
     </div>
   </div>
@@ -158,10 +158,11 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
         <a href="#reflag"><span class="toc-num">10</span> Re-Flagging Logic</a>
         <a href="#comments"><span class="toc-num">11</span> Comments &amp; Audit Trail</a>
         <a href="#sidebar-badges"><span class="toc-num">12</span> Sidebar Badges</a>
-        <a href="#data-fields"><span class="toc-num">13</span> Data Fields &amp; Airtable Reference</a>
-        <a href="#localStorage"><span class="toc-num">14</span> Local Storage Keys</a>
-        <a href="#troubleshooting"><span class="toc-num">15</span> Troubleshooting</a>
-        <a href="#changelog"><span class="toc-num">16</span> Changelog</a>
+        <a href="#rent-statements"><span class="toc-num">13</span> Rent Statements Block</a>
+        <a href="#data-fields"><span class="toc-num">14</span> Data Fields &amp; Airtable Reference</a>
+        <a href="#localStorage"><span class="toc-num">15</span> Local Storage Keys</a>
+        <a href="#troubleshooting"><span class="toc-num">16</span> Troubleshooting</a>
+        <a href="#changelog"><span class="toc-num">17</span> Changelog</a>
       </div>
     </div>
   </div>
@@ -189,8 +190,8 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
     <div class="card">
       <ol class="steps">
         <li>Open the Leadership Dashboard at <a href="https://chaichoong.github.io/leadership-dashboard/">chaichoong.github.io/leadership-dashboard/</a></li>
-        <li>Enter your Airtable Personal Access Token (PAT) if prompted. Your PAT must have scopes: <code>data.records:read</code>, <code>data.records:write</code>, and <code>data.recordComments:read</code>.</li>
-        <li>Click <strong>Cash Flow Voids</strong> in the sidebar (marked with the &#x1F6A8; icon).</li>
+        <li>Enter your Airtable Personal Access Token (PAT) if prompted. Your PAT must have scopes: <code>data.records:read</code>, <code>data.records:write</code>, <code>data.recordComments:read</code> and <code>data.recordComments:write</code>. The write scope is what lets the tab save its audit comments &mdash; including the dismissal tag it later reads back.</li>
+        <li>Open <strong>Leadership Dashboard</strong> in the sidebar, then click the <strong>Cash Flow Voids</strong> button in the bar of buttons across the top of the dashboard. There is no separate Cash Flow Voids item in the sidebar.</li>
         <li>The CFV tab loads automatically &mdash; detection runs each time you switch to this tab or when the dashboard refreshes.</li>
       </ol>
       <div class="info-box info">
@@ -289,7 +290,7 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
         <tbody>
           <tr><td>In Payment &rarr; <span class="label-badge lb-amber">Potential CFV</span></td><td>Automatic: due day + 2 days passed with no linked reconciled transaction</td><td>No &mdash; display only in dashboard</td></tr>
           <tr><td>Potential CFV &rarr; <span class="label-badge lb-red">CFV</span></td><td>User clicks <strong>&ldquo;Confirm CFV&rdquo;</strong> button</td><td>Yes &mdash; PATCH to set status to CFV</td></tr>
-          <tr><td>Potential CFV &rarr; dismissed</td><td>User clicks <strong>&ldquo;Not a CFV&rdquo;</strong> button. Stored in localStorage for 25 days, then re-checks.</td><td>No &mdash; localStorage only</td></tr>
+          <tr><td>Potential CFV &rarr; dismissed</td><td>User clicks <strong>&ldquo;Not a CFV&rdquo;</strong> button. Only a <strong>Potential CFV</strong> can be dismissed. The dismissal lasts until the tenancy&rsquo;s <strong>next rent due day plus the 2-day tolerance</strong>, then the tenancy is re-checked.</td><td>Yes &mdash; posts a tagged <code>[CFV-DISMISSED:YYYY-MM-DD]</code> comment on the tenancy, as well as saving it in localStorage</td></tr>
           <tr><td>CFV &rarr; <span class="label-badge lb-amber">CFV Actioned</span></td><td>User clicks <strong>&ldquo;Mark Actioned&rdquo;</strong> button</td><td>Yes &mdash; PATCH to set status to CFV Actioned</td></tr>
           <tr><td>CFV Actioned &rarr; <span class="label-badge lb-green">In Payment</span></td><td>User clicks <strong>&ldquo;In Payment&rdquo;</strong> button, or <strong>automatically</strong> when a reconciled linked transaction is detected</td><td>Yes &mdash; PATCH to set status to In Payment</td></tr>
           <tr><td>CFV Actioned &rarr; <span class="label-badge lb-red">CFV</span></td><td>User clicks <strong>&ldquo;Move to CFV&rdquo;</strong> button, or user confirms a re-flag</td><td>Yes &mdash; PATCH to set status to CFV</td></tr>
@@ -373,7 +374,7 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
           <tr><td><strong>Property</strong></td><td><code>tenProperty</code> + <code>tenUnitRef</code></td><td>Property name with unit reference below.</td></tr>
           <tr><td><strong>Rent</strong></td><td><code>tenRent</code></td><td>Monthly rent amount in &pound;, right-aligned with tabular numerals.</td></tr>
           <tr><td><strong>Due Day</strong></td><td><code>tenDueDay</code></td><td>The day of the month rent is due (e.g. 1, 15, 28).</td></tr>
-          <tr><td><strong>Days Overdue</strong></td><td>Calculated</td><td>Days since the CFV start date (see below). Colour-coded: black (0&ndash;3), amber (4&ndash;7), red (8+).</td></tr>
+          <tr><td><strong>Days Overdue</strong></td><td>Calculated</td><td>Days since the rent cycle that the last received payment did NOT cover (see below). Colour-coded: black (0&ndash;3), amber (4&ndash;7), red (8+).</td></tr>
           <tr><td><strong>Status</strong></td><td><code>tenPayStatus</code></td><td>Badge: <span class="label-badge lb-amber">Potential CFV</span>, <span class="label-badge lb-red">CFV</span>, <span class="label-badge lb-purple">CFV Actioned</span>, or <span class="label-badge lb-amber">Re-flagged</span></td></tr>
           <tr><td><strong>Chase</strong></td><td>Calculated</td><td>Chase stage badge (Stage 1 / 2 / 3). Dash for CFV Actioned items.</td></tr>
           <tr><td><strong>Contact</strong></td><td><code>tenantPhone</code> + <code>tenantEmail</code></td><td>Clickable phone (tel:) and email (mailto:) links. Shows warning if no contact info.</td></tr>
@@ -384,16 +385,17 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
 
     <div class="card">
       <div class="card-header">Days Overdue Calculation</div>
-      <p>Days overdue is calculated from a <strong>persistent start date</strong> stored in localStorage, not a live formula:</p>
+      <p>Days overdue is worked out live from the <strong>last rent payment actually received</strong> for that tenancy. Nothing is stored on your computer, so the number is the same on every device.</p>
       <ol class="steps">
-        <li>When a CFV is first detected, the system calculates the due date for the current (or previous) month based on the tenancy&rsquo;s <code>tenDueDay</code>.</li>
-        <li>If the due day this month is still in the future, it uses <strong>last month&rsquo;s</strong> due date as the start.</li>
-        <li>This start date is stored in <code>cfv_{tenancyId}_startDate</code> in localStorage.</li>
-        <li>Days overdue = <code>Math.floor((today - cfvStartDate) / 86400000)</code>, minimum 0.</li>
+        <li>Find the most recent reconciled transaction linked to the tenancy. That is the last payment.</li>
+        <li>Add <strong>5 days</strong> to that payment date (<code>CFV_EARLY_PAY_DAYS = 5</code>). A tenant who pays up to five days early has still paid that month, and without this the payment would be credited to the wrong cycle.</li>
+        <li>The cycle that payment covered is the latest rent due day on or before that adjusted date. The <strong>next</strong> due day after it is the one now outstanding.</li>
+        <li>Days overdue = today minus that outstanding due day, minimum 0.</li>
+        <li><strong>If the tenancy has no payment history at all</strong>, the count runs from the most recent due day that has already passed &mdash; this month&rsquo;s if it has been and gone, otherwise last month&rsquo;s.</li>
       </ol>
       <div class="info-box info">
         <span class="ib-icon">&#8505;&#65039;</span>
-        <span>Because the start date persists in localStorage, the days overdue counter continues to climb across months &mdash; it does not reset on the 1st of each month.</span>
+        <span>Clearing your browser data does <strong>not</strong> reset this figure any more. If the number changes, a payment was reconciled, unreconciled, or relinked to a different tenancy.</span>
       </div>
     </div>
   </div>
@@ -409,7 +411,7 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
         <thead><tr><th>Button</th><th>Appearance</th><th>What It Does</th></tr></thead>
         <tbody>
           <tr><td><strong>Confirm CFV</strong></td><td>Red background, white text</td><td>After confirmation dialog: sends PATCH to Airtable to set status to <strong>CFV</strong>. Adds audit comment &ldquo;Confirmed as CFV from Leadership Dashboard.&rdquo; Re-renders CFV tab after 1.5s, reloads dashboard after 3s.</td></tr>
-          <tr><td><strong>Not a CFV</strong></td><td>Green/success style</td><td>After confirmation dialog: stores dismissal timestamp in localStorage (<code>cfv_dismissed_{id}</code>). Adds comment &ldquo;Dismissed as not a CFV from Leadership Dashboard. Payment confirmed via other means.&rdquo; Clears chase tracking data. <strong>Auto-expires after 25 days</strong> &mdash; the system will re-check on the next cycle.</td></tr>
+          <tr><td><strong>Not a CFV</strong></td><td>Green/success style</td><td>After confirmation dialog: stores the dismissal timestamp in localStorage (<code>cfv_dismissed_{id}</code>) <strong>and</strong> posts a tagged comment to the tenancy in Airtable &mdash; &ldquo;<code>[CFV-DISMISSED:YYYY-MM-DD]</code> Dismissed as not a CFV from Leadership Dashboard. Payment confirmed via other means.&rdquo; Clears chase tracking data. <strong>Expires at the tenancy&rsquo;s next rent due day plus the 2-day tolerance</strong>, then the system re-checks. Only a Potential CFV can be dismissed.</td></tr>
         </tbody>
       </table>
 
@@ -498,13 +500,20 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
       <p>The following actions automatically add a comment to the tenancy record:</p>
       <ul>
         <li>Confirming a potential as CFV: <em>&ldquo;Confirmed as CFV from Leadership Dashboard.&rdquo;</em></li>
-        <li>Dismissing a potential: <em>&ldquo;Dismissed as not a CFV from Leadership Dashboard. Payment confirmed via other means.&rdquo;</em></li>
+        <li>Dismissing a potential: <em>&ldquo;<code>[CFV-DISMISSED:YYYY-MM-DD]</code> Dismissed as not a CFV from Leadership Dashboard. Payment confirmed via other means.&rdquo;</em> The date tag is what the dashboard reads back &mdash; do not edit or delete these comments.</li>
         <li>Marking as CFV Actioned: <em>&ldquo;Status changed to CFV Actioned from Leadership Dashboard.&rdquo;</em></li>
         <li>Returning to In Payment: <em>&ldquo;Returned to In Payment from Leadership Dashboard. Payment confirmed.&rdquo;</em></li>
         <li>Moving back to CFV: <em>&ldquo;Moved back to CFV from CFV Actioned via Leadership Dashboard.&rdquo;</em></li>
         <li>Re-flagging: <em>&ldquo;Re-flagged as CFV &mdash; payment not received on next due date.&rdquo;</em></li>
         <li>Auto-return: <em>&ldquo;Auto-returned to In Payment &mdash; reconciled transaction linked to this tenancy detected for [Month Year].&rdquo;</em></li>
       </ul>
+
+      <h4 style="margin-top:1rem;font-weight:700">Dismissals are restored from these comments</h4>
+      <p>When the CFV tab loads on a computer that has no record of a dismissal &mdash; a different device, a new browser, or after clearing browser data &mdash; it reads the tenancy&rsquo;s Airtable comments and looks for the newest <code>[CFV-DISMISSED:YYYY-MM-DD]</code> tag. Older dismissals made before the tag existed are still recognised by their wording. If that dismissal has not yet reached the next rent due day plus the 2-day tolerance, the tenancy stays hidden and the dismissal is saved locally again.</p>
+      <div class="info-box warn">
+        <span class="ib-icon">&#9888;&#65039;</span>
+        <span>Your PAT needs the <code>data.recordComments:write</code> scope for this to work. If a comment fails to save you now get a warning message on screen; before August 2026 that failure was silent, and the dismissal simply came back on the next device.</span>
+      </div>
 
       <h4 style="margin-top:1rem;font-weight:700">Viewing Comments</h4>
       <ol class="steps">
@@ -533,7 +542,7 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
   <div class="section" id="sidebar-badges">
     <h2 class="section-title"><span class="icon">&#128276;</span> 12. Sidebar Badges</h2>
     <div class="card">
-      <p>The <strong>Cash Flow Voids</strong> sidebar menu item shows numeric badges that update every time the dashboard loads or the CFV tab renders:</p>
+      <p>The badges sit on the <strong>Leadership Dashboard</strong> item in the sidebar (there is no Cash Flow Voids item of its own). They update every time the dashboard loads or the CFV tab renders:</p>
       <table class="label-table">
         <thead><tr><th>Badge</th><th>Colour</th><th>What It Counts</th></tr></thead>
         <tbody>
@@ -549,9 +558,32 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
     </div>
   </div>
 
-  <!-- 13. Data Fields & Airtable Reference -->
+  <!-- 13. Rent Statements Block -->
+  <div class="section" id="rent-statements">
+    <h2 class="section-title"><span class="icon">&#128181;</span> 13. Rent Statements Block</h2>
+    <div class="card">
+      <p>Below the CFV table the same tab renders a second block called <strong>Rent Statements</strong>. It is a different feature with a different job: the CFV table asks &ldquo;did this month&rsquo;s rent arrive?&rdquo;, Rent Statements asks &ldquo;how much does this tenant owe in total?&rdquo;</p>
+      <p>Each row shows the tenant and unit, the tenancy type, the monthly rent, the running balance, how many days of rent that balance represents, and whether the arrears have reached the Section 8 threshold.</p>
+      <table class="label-table">
+        <thead><tr><th>Figure</th><th>How it is worked out</th></tr></thead>
+        <tbody>
+          <tr><td><strong>Balance</strong></td><td>Rent charged for the tenancy so far, less every reconciled payment linked to it.</td></tr>
+          <tr><td><strong>Days in arrears</strong></td><td>Balance divided by the daily rent, where daily rent = monthly rent &divide; 31. It is a measure of the debt, not of how long it has been owed.</td></tr>
+          <tr><td><strong>Section 8</strong></td><td>Flagged once days in arrears reaches <strong>62</strong> &mdash; two months at 31 days a month, the threshold for a Section 8 ground 8 notice. It is an indicator, not legal advice: check the position before serving anything.</td></tr>
+        </tbody>
+      </table>
+      <h4 style="margin-top:1rem;font-weight:700">This block writes to Airtable</h4>
+      <p>Click a row to expand it and you see every payment attached to that tenancy, each with five dropdowns: Category, Sub-Category, <strong>Tenancy</strong>, Unit and Property.</p>
+      <div class="info-box danger">
+        <span class="ib-icon">&#9888;&#65039;</span>
+        <span>Changing any of these dropdowns writes <strong>straight to the Transactions table</strong> the moment you pick a value. There is no confirmation dialog. Changing <strong>Tenancy</strong> also rewrites that transaction&rsquo;s Unit and Property to match the new tenancy, and moves the payment off one tenant and onto another &mdash; which changes both tenants&rsquo; balances, their days overdue, and whether either is detected as a CFV. An <strong>Undo</strong> appears in the toast message; use it straight away if you picked the wrong row.</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- 14. Data Fields & Airtable Reference -->
   <div class="section" id="data-fields">
-    <h2 class="section-title"><span class="icon">&#128736;</span> 13. Data Fields &amp; Airtable Reference</h2>
+    <h2 class="section-title"><span class="icon">&#128736;</span> 14. Data Fields &amp; Airtable Reference</h2>
     <div class="card">
       <div class="card-header">Tenancies Table Fields Used</div>
       <table class="label-table">
@@ -603,7 +635,7 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
       </table>
       <div class="info-box warn">
         <span class="ib-icon">&#9888;&#65039;</span>
-        <span>If these select option IDs change in Airtable (e.g. by deleting and recreating the field), you must update the constants in <code>js/cfv.js</code> to match.</span>
+        <span>These IDs are recorded for reference only &mdash; the dashboard does not send them. Every status update sends the option <strong>name</strong> (&ldquo;In Payment&rdquo;, &ldquo;CFV&rdquo;, &ldquo;CFV Actioned&rdquo;). So the thing that breaks this tab is <strong>renaming</strong> a Payment Status option in Airtable, not deleting and recreating the field. If an option is renamed, update the strings in the PATCH body in <code>js/cfv.js</code> to match.</span>
       </div>
     </div>
     <div class="card">
@@ -621,17 +653,16 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
 
   <!-- 14. Local Storage Keys -->
   <div class="section" id="localStorage">
-    <h2 class="section-title"><span class="icon">&#128190;</span> 14. Local Storage Keys</h2>
+    <h2 class="section-title"><span class="icon">&#128190;</span> 15. Local Storage Keys</h2>
     <div class="card">
       <p>The Cash Flow Voids tab stores tracking data in your browser&rsquo;s localStorage. These persist across sessions but are specific to the browser/device.</p>
       <table class="label-table">
         <thead><tr><th>Key Pattern</th><th>Value</th><th>Purpose</th><th>Cleared When</th></tr></thead>
         <tbody>
-          <tr><td><code>cfv_{id}_startDate</code></td><td>ISO date string</td><td>The due date when this CFV was first detected. Used for &ldquo;days overdue&rdquo; calculation.</td><td>Returned to In Payment (manual or auto)</td></tr>
           <tr><td><code>cfv_{id}_chaseStart</code></td><td>ISO date string</td><td>When the chase stage tracking began. Used to determine Stage 1/2/3.</td><td>Returned to In Payment or dismissed</td></tr>
           <tr><td><code>cfv_{id}_returned</code></td><td>&ldquo;1&rdquo;</td><td>Prevents a just-returned tenancy from re-appearing before the next full data load.</td><td>Cleared if Airtable PATCH fails</td></tr>
           <tr><td><code>cfv_{id}_returnDismissed</code></td><td>&ldquo;1&rdquo;</td><td>Legacy flag for dismissing return banners.</td><td>Returned to In Payment</td></tr>
-          <tr><td><code>cfv_dismissed_{id}</code></td><td>ISO date string</td><td>Potential CFV dismissed by user. <strong>Auto-expires after 25 days</strong> &mdash; system re-checks.</td><td>Expires automatically after 25 days</td></tr>
+          <tr><td><code>cfv_dismissed_{id}</code></td><td>ISO date string</td><td>Potential CFV dismissed by user. Backed up as a <code>[CFV-DISMISSED:date]</code> comment in Airtable and restored from it on another device.</td><td>Expires at the next rent due day + 2 days, then the system re-checks</td></tr>
           <tr><td><code>cfv_reflag_dismissed_{id}</code></td><td>ISO date string</td><td>Re-flag dismissed by user. Tenancy stays CFV Actioned.</td><td>When user confirms re-flag as CFV</td></tr>
         </tbody>
       </table>
@@ -644,7 +675,7 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
 
   <!-- 15. Troubleshooting -->
   <div class="section" id="troubleshooting">
-    <h2 class="section-title"><span class="icon">&#128295;</span> 15. Troubleshooting</h2>
+    <h2 class="section-title"><span class="icon">&#128295;</span> 16. Troubleshooting</h2>
     <div class="card">
       <div class="ts-item">
         <div class="ts-problem">A tenant paid but the CFV is still showing</div>
@@ -671,23 +702,24 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
         <div class="ts-solution">Badges only appear when there are CFVs to show. If you expect to see badges, ensure the dashboard data has loaded (check for the spinning loader). The badges update after the initial data load and after every CFV tab render.</div>
       </div>
       <div class="ts-item">
-        <div class="ts-problem">Days overdue resets to 0 unexpectedly</div>
-        <div class="ts-solution">The days overdue counter is stored in localStorage. If you cleared your browser data or switched to a different device, the start date will be recalculated. This is expected behaviour &mdash; the counter will resume from the current month&rsquo;s due date.</div>
+        <div class="ts-problem">Days overdue changed unexpectedly</div>
+        <div class="ts-solution">The figure comes from the last rent payment linked to the tenancy, not from anything stored in your browser, so clearing browser data cannot change it. If it moved, a payment was reconciled, unreconciled, or relinked to a different tenancy. Open the Rent Statements block below the CFV table and check which payments are attached to this tenancy.</div>
       </div>
       <div class="ts-item">
         <div class="ts-problem">A dismissed potential CFV has reappeared</div>
-        <div class="ts-solution">Dismissals auto-expire after <strong>25 days</strong> by design. If the tenant still hasn&rsquo;t paid, the system re-flags them for review. Dismiss again or confirm as CFV if payment is still missing.</div>
+        <div class="ts-solution">Dismissals last until the tenancy&rsquo;s <strong>next rent due day plus 2 days</strong>, then expire by design &mdash; so a dismissal made just before the due day is short, and one made just after it lasts almost a month. If the tenant still has not paid, the system re-flags them for review. Dismiss again or confirm as CFV if the payment is still missing.</div>
       </div>
     </div>
   </div>
 
-  <!-- 16. Changelog -->
+  <!-- 17. Changelog -->
   <div class="section" id="changelog">
-    <h2 class="section-title"><span class="icon">&#128203;</span> 16. Changelog</h2>
+    <h2 class="section-title"><span class="icon">&#128203;</span> 17. Changelog</h2>
     <div class="card">
       <table class="label-table">
         <thead><tr><th>Version</th><th>Date</th><th>Changes</th></tr></thead>
         <tbody>
+          <tr><td><strong>1.34</strong></td><td>26 Aug 2026</td><td>Drift repair against the live code (findings 164&ndash;169, 172). Dismissals expire at the next rent due day + 2 days, not after 25 days, and are backed up as tagged Airtable comments that restore them on another device. Days Overdue is derived from the last reconciled payment with a 5-day early-pay window; the localStorage start date is gone. New section 13 documents the Rent Statements block and its live writes to the Transactions table. Corrected how the tab is opened (dashboard button, not a sidebar item) and where the badges render. Payment Status is PATCHed by NAME, so a renamed option is what breaks it. Added the <code>data.recordComments:write</code> scope; a failed comment now warns on screen instead of failing silently.</td></tr>
           <tr><td><strong>1.6</strong></td><td>16 Apr 2026</td><td>Complete SOP rewrite. Documented: direct tenancy-linked payment detection (replaced keyword matching), auto-return to In Payment, re-flagging logic, sidebar badges, all action buttons per status, comments system via Airtable Comments API, localStorage tracking keys, chase stages (visual only, not automated), all Airtable field IDs and select option IDs.</td></tr>
           <tr><td><strong>1.4</strong></td><td>12 Apr 2026</td><td>Added Potential CFVs section, UC Check section, status IDs reference.</td></tr>
           <tr><td><strong>1.0</strong></td><td>Mar 2026</td><td>Initial SOP release.</td></tr>
