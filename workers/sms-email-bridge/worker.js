@@ -47,6 +47,13 @@ export default {
         },
         polling: {
           lastPoll: lastPoll || 'never',
+          // The poll runs every minute, but the heartbeat is only written every
+          // HEARTBEAT_INTERVAL_MS (KV free tier allows 1,000 writes a day and a
+          // per-tick write costs 1,440). So lastPoll may legitimately be up to
+          // this many minutes old on a healthy worker — do not read a gap
+          // smaller than this as an outage.
+          heartbeatEveryMinutes: HEARTBEAT_INTERVAL_MS / 60000,
+          staleAfterMinutes: (HEARTBEAT_INTERVAL_MS / 60000) * 2,
           lastMessageTimestamp: lastMsgTs || 'none',
           forwardedCount: parseInt(forwardedCount || '0', 10),
         },
@@ -98,6 +105,25 @@ export default {
 
 
 /* ------------------------------------------------------------------ */
+/*  KV write budget                                                     */
+/* ------------------------------------------------------------------ */
+
+// Cloudflare's free tier allows 1,000 KV writes per namespace per day. The cron
+// fires every minute (1,440 ticks), so anything written unconditionally per tick
+// exhausts the budget before 17:00 and every write after that silently fails.
+// The heartbeat is a status field only (surfaced on /test), so writing it every
+// 30 minutes costs at most 48 puts a day and loses nothing that matters.
+const HEARTBEAT_INTERVAL_MS = 30 * 60 * 1000;
+
+function shouldWriteHeartbeat(lastPollIso, nowMs, intervalMs = HEARTBEAT_INTERVAL_MS) {
+  if (!lastPollIso) return true;                 // never written
+  const last = Date.parse(lastPollIso);
+  if (!Number.isFinite(last)) return true;       // unreadable value — replace it
+  if (last > nowMs) return true;                 // stamped in the future — replace it
+  return (nowMs - last) >= intervalMs;
+}
+
+/* ------------------------------------------------------------------ */
 /*  Poll GHL for new inbound SMS messages                              */
 /* ------------------------------------------------------------------ */
 
@@ -107,7 +133,17 @@ async function pollGhlMessages(env) {
     return { status: 'skipped', reason: 'missing GHL credentials' };
   }
 
-  await env.SMS_STATE.put('lastPollTime', new Date().toISOString());
+  // Heartbeat, rate-limited. This used to be an unconditional put on every cron
+  // tick: 1,440 writes a day against Cloudflare's 1,000/day free-tier KV limit.
+  // Once the budget ran out every OTHER write failed too — including
+  // lastMessageTimestamp, the checkpoint that stops messages being forwarded
+  // twice — and nothing raised an error. Only write when the stamp is actually
+  // stale. (Found 26 Aug 2026, finding 20260826-agent-dispatch-370.)
+  const nowMs = Date.now();
+  const lastPollIso = await env.SMS_STATE.get('lastPollTime');
+  if (shouldWriteHeartbeat(lastPollIso, nowMs)) {
+    await env.SMS_STATE.put('lastPollTime', new Date(nowMs).toISOString());
+  }
 
   // Get the timestamp of the last message we processed (stored as epoch ms)
   const lastTimestamp = parseInt(await env.SMS_STATE.get('lastMessageTimestamp') || '0', 10);
