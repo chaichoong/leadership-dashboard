@@ -217,10 +217,11 @@
     "cron": "0 9 * * *",
     "maxLateMinutes": 600,
     "mode": "wrapped",
-    "note": "proves uc-check sent; must not skip before the job it watches",
+    "note": "TURNED OFF 27 Aug 2026 with uc-check, the job it exists to watch. A watchdog for a job that no longer runs would alarm every morning for ever. PREVIOUSLY: proves uc-check sent; must not skip before the job it watches",
     "needs": [
       "network"
-    ]
+    ],
+    "enabled": false
   },
   "apple-notes-bridge": {
     "cron": "40 22 * * *",
@@ -329,10 +330,11 @@
     "cron": "0 8 * * *",
     "maxLateMinutes": 480,
     "mode": "wrapped",
-    "note": "Kevin's restructure of 26 Aug 2026: role-specific work leaves the daily-ops sequence and runs as its own slot. A wrapped shell job, so it takes the lock and heartbeats \u2014 a slot, never a second Claude routine. Allowlisted in scripts/check-routines.py. Mica's Universal Credit list. Generous lateness because it touches a person and an obligation: still worth sending at lunchtime. Restores the 08:00 delivery the absorption gave up (Kevin ruled on 10 Aug that a later time was acceptable, not that an earlier one was forbidden).",
+    "note": "TURNED OFF 27 Aug 2026 on Kevin's instruction (estate audit). The launchd job is unloaded, the allowlist entry is removed from scripts/check-routines.py, and the slot is off the daily-ops SKILL table. Kept here, disabled, so the digest does not report it as a missing run and so switching it off stays a visible decision rather than a gap. Register row: 'UC Verification', Status Paused. PREVIOUSLY: Kevin's restructure of 26 Aug 2026: role-specific work leaves the daily-ops sequence and runs as its own slot. A wrapped shell job, so it takes the lock and heartbeats \u2014 a slot, never a second Claude routine. Allowlisted in scripts/check-routines.py. Mica's Universal Credit list. Generous lateness because it touches a person and an obligation: still worth sending at lunchtime. Restores the 08:00 delivery the absorption gave up (Kevin ruled on 10 Aug that a later time was acceptable, not that an earlier one was forbidden).",
     "needs": [
       "network"
-    ]
+    ],
+    "enabled": false
   },
   "prospecting": {
     "cron": "15 9 * * *",
