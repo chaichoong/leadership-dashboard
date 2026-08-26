@@ -36,7 +36,7 @@ Only 3 of these name a real person, so approving everything sends 3 Slack alerts
 | INBOUND: SMS reply from +4477XXXXX077 | teamMember | AI Inbound Comms Response | CEO review: inbound message task, Property Maintenance agent is only Planned; Inbound Comms Response is Built |
 | Approve the 6 four-line test emails + 1 delivery seed (Prosp | assignee | kevin@runpreneur.org.uk | The task IS Kevin approving 6 cold emails - nobody else can approve them |
 | Reconnect Monese to Fintable (Airtable to Monese connection  | assignee | kevin@runpreneur.org.uk | Task text: bank authorisation cannot be done by an agent |
-| Mark Peters COA and rent into payment | project | Close the payment gap. Get the four tenancies that are  | Mark Peters COA and rent into payment is literally the close-the-payment-gap project |
+| [name redacted] COA and rent into payment | project | Close the payment gap. Get the four tenancies that are  | [name redacted] COA and rent into payment is literally the close-the-payment-gap project |
 | Drift Monitor [WARNING]: Client CEO Brief is merged but not  | project | Complete all modules for Operations Director Web App | Client CEO Brief is a web app module that is merged but not live |
 | Spec the OD quarterly client-journey renewal report | project | Complete all modules for Operations Director Web App | Spec for a new OD client-journey renewal report module |
 | Fix email authentication for operationsdirector.co.uk (SPF + | project | The outbound engine runs, every day. Cold prospecting l | SPF and DKIM on operationsdirector.co.uk gates cold outbound deliverability |
@@ -45,7 +45,7 @@ Only 3 of these name a real person, so approving everything sends 3 Slack alerts
 ## Left alone
 4 tasks still have no owner tonight, on purpose.
 
-- **Replace window hinge – second bedroom** (Stacey Mayes, Unit 1) and **Measure and quote carpets – both bedrooms**. Both need someone to physically attend. The AI Property Maintenance agent is still only *Planned*, so handing it these would make them look owned while nothing happened. They need a contractor named, and I could not tell from the record which one covers that property.
+- **Replace window hinge – second bedroom** ([name redacted], Unit 1) and **Measure and quote carpets – both bedrooms**. Both need someone to physically attend. The AI Property Maintenance agent is still only *Planned*, so handing it these would make them look owned while nothing happened. They need a contractor named, and I could not tell from the record which one covers that property.
 - **Q4 review: bring back the live-build sales call**. Not due until 1 October, and the task itself says run the Rocket Demo first to get a baseline. There is nothing to review yet.
 - **PARKED — revisit after the first client**. A rolled-up holding record with four unrelated items inside. No single honest owner.
 

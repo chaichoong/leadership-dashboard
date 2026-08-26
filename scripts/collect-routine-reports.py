@@ -44,6 +44,29 @@ unattended job.
 So every collected file is scrubbed on the way in (scripts/report_scrub.py) and
 the scrubber's own selftest runs FIRST: a broken or deleted pattern stops the
 collection instead of quietly reporting a clean sweep.
+
+THE SCHEMA BASELINE (24 Aug 2026 — finding 20260819-drift-monitor-250)
+-----------------------------------------------------------------------
+`monitoring/.gitignore` ignores the daily `schema-YYYY-MM-DD.json` snapshots on
+purpose: they are ~500 KB each, so tracking one a day adds 15 MB a month for a
+file only ever read as "what did the schema look like last time". But 41 dated
+snapshots up to 6 Aug ARE tracked (git ignores the ignore rule once a path is
+tracked), so the series looked healthy in the repo while every snapshot written
+since sat only on this Mac. A clean clone could not detect any schema change
+made after 6 Aug.
+
+The tracked artefact is `monitoring/schema-baseline.json`, which the drift
+monitor compares against. So collection advances the baseline to the newest
+local snapshot. One tracked file, refreshed daily, and a clone can always diff.
+
+AND NAMES, WHICH HAVE NO SHAPE (24 Aug 2026 — finding 20260821-task-hygiene-sweep-286)
+---------------------------------------------------------------------------------------
+Phone numbers, emails and postcodes can be found by pattern in text nobody has
+read. A person's name cannot, so four tracked reports named a tenant against a
+rent-arrears task and one named a family member against a tax liability. Names
+are now masked from a roster kept outside the repo
+(~/.config/od/redact-names.txt, rebuilt by scripts/refresh-redact-names.py).
+An empty roster fails the selftest rather than reading as "no names present".
 """
 
 import argparse
@@ -53,7 +76,13 @@ import subprocess
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from report_scrub import scrub, selftest as scrub_selftest  # noqa: E402
+from report_scrub import (  # noqa: E402
+    load_roster,
+    roster_path,
+    roster_problems,
+    scrub,
+    selftest as scrub_selftest,
+)
 
 REPORT_DIR = "monitoring"
 
@@ -114,6 +143,42 @@ def is_ignored(path, cwd):
     )
 
 
+SCHEMA_BASELINE = os.path.join(REPORT_DIR, "schema-baseline.json")
+
+
+def refresh_schema_baseline(source, here):
+    """Advance the tracked baseline to the newest dated snapshot in `source`.
+
+    The dated snapshots are ignored (too big to track one a day), so without
+    this the only schema a clean clone can diff against is whatever was last
+    committed — 6 Aug 2026, when the routines went read-only.
+    """
+    snap_dir = os.path.join(source, REPORT_DIR)
+    if not os.path.isdir(snap_dir):
+        return None
+    snapshots = sorted(
+        f for f in os.listdir(snap_dir)
+        if f.startswith("schema-2") and f.endswith(".json")
+    )
+    if not snapshots:
+        return None
+    newest = os.path.join(snap_dir, snapshots[-1])
+    dst = os.path.join(here, SCHEMA_BASELINE)
+    with open(newest, encoding="utf-8") as fh:
+        new_text = fh.read()
+    if os.path.isfile(dst):
+        with open(dst, encoding="utf-8") as fh:
+            if fh.read() == new_text:
+                return None
+    # A schema snapshot is table and field metadata — no records, so no personal
+    # data — but it goes through the scrubber anyway: nothing reaches a public
+    # repo through this script unscrubbed.
+    cleaned, _ = scrub(new_text)
+    with open(dst, "w", encoding="utf-8") as fh:
+        fh.write(cleaned)
+    return snapshots[-1]
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument(
@@ -125,13 +190,20 @@ def main():
 
     # The control on the control. A scrubber whose patterns stopped matching
     # reports "0 items masked" for ever and reads exactly like a clean day.
-    problems = scrub_selftest()
+    problems = scrub_selftest() + roster_problems()
     if problems:
-        print("ERROR: report_scrub selftest FAILED — refusing to collect "
+        print("ERROR: report scrubbing is not safe — refusing to collect "
               "anything into a public repo:", file=sys.stderr)
         for p in problems:
             print("  %s" % p, file=sys.stderr)
         return 1
+
+    # The name roster is the half of the scrubber that has no shape to match on,
+    # so its SIZE is the only evidence it is loaded. Print the count (never the
+    # names — this output is itself committed). selftest() above already refuses
+    # to run on an empty roster.
+    print("Name roster: %d name(s) loaded from %s"
+          % (len(load_roster()), roster_path()))
 
     here = repo_root(os.getcwd())
     source = main_checkout(here)
@@ -178,6 +250,15 @@ def main():
             fh.write(cleaned)
         shutil.copystat(src, dst)
         print("COLLECTED %s%s" % (rel, _hit_summary(hits)))
+
+    if args.check:
+        print("WOULD REFRESH %s from the newest local snapshot" % SCHEMA_BASELINE)
+    else:
+        advanced = refresh_schema_baseline(source, here)
+        if advanced:
+            print("BASELINE %s <- %s" % (SCHEMA_BASELINE, advanced))
+        else:
+            print("BASELINE %s already current" % SCHEMA_BASELINE)
 
     return 0
 

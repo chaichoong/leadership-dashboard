@@ -493,7 +493,68 @@
 
             try {
                 if (created + updated > 0) await new Promise(r => setTimeout(r, 500));
-                await ucCreateTask(c);
+
+                // RE-CHECK IMMEDIATELY BEFORE THE WRITE.
+                //
+                // Findings 20260819-uc-notifier-231 and 20260820-uc-check-slack-notifier-260.
+                // Four tenancies ended up holding two byte-identical open UC tasks
+                // each, every pair created in the same second. There are TWO
+                // creators — this function and scripts/uc-task-sync.py — and both
+                // deduped against a list read minutes earlier. Whichever read
+                // first, both then POSTed. Mica saw the same UC call listed twice.
+                //
+                // The list read at the top of this pass cannot see a write another
+                // process made since. So re-read here, and fail CLOSED: a check
+                // that cannot be trusted skips the create rather than writing the
+                // duplicate it exists to prevent.
+                const fresh = await ucFetchExistingTasks(candidates.map(x => x.tenancyId));
+
+                // THE CONTROL. An empty result and a broken query are
+                // indistinguishable — a wrong field name returns 200 OK and
+                // {"records":[]}, which reads as "nothing exists, go ahead and
+                // create". If the first read saw tasks and this one sees none,
+                // the read is the thing that changed, not the data.
+                if (!fresh.length && existingTasks.length) {
+                    console.warn('UC task create skipped for', c.tenantName,
+                        '- the pre-write duplicate check returned nothing while',
+                        existingTasks.length, 'UC tasks were read moments ago.',
+                        'Treating that as a broken read, not an empty table.');
+                    continue;
+                }
+
+                const raced = fresh.some(t => {
+                    const name = t.fields?.['fldgFjGBw6bTKJFCD'] || '';
+                    if (name === candidateName) return true;
+                    if (!ucTaskIsOpen(t)) return false;
+                    if (!ucTaskLinksTenancy(t, c.tenancyId)) return false;
+                    const existingDue = ucRentDueFromTaskName(name);
+                    return !!existingDue && ucSameRentMonth(existingDue, c.nextDue);
+                });
+                if (raced) {
+                    // The other creator got there first. Keep the in-memory list
+                    // in step so later candidates see it too.
+                    existingTasks.push(...fresh.filter(t =>
+                        !existingTasks.some(e => e.id === t.id)));
+                    continue;
+                }
+
+                // ucWriteTask returns the new record ID, not the record.
+                const createdId = await ucCreateTask(c);
+
+                // Keep the in-memory copy in step, exactly as the supersede branch
+                // nine lines above already does and as uc-task-sync.py does after
+                // every POST. Without this a SECOND candidate for the same tenancy
+                // in the same pass cannot see what this one just created, which is
+                // the in-process half of the duplicate bug.
+                existingTasks.push({
+                    id: createdId || `pending-${c.tenancyId}-${c.nextDue}`,
+                    fields: {
+                        fldgFjGBw6bTKJFCD: candidateName,
+                        fld7XP8w8kbxfETV4: ucTaskDateKey(c.taskDue),
+                        fldmne4RYJU22ICub: [c.tenancyId],
+                        fldx4qCw17UfrKpaN: UC_TASK.status,
+                    },
+                });
                 created++;
             } catch (err) {
                 console.warn('UC task create failed for', c.tenantName, err);

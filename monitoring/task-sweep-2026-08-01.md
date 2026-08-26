@@ -84,7 +84,7 @@ of tidying up. I am not doing that without you saying yes to it specifically.
 | Who | How many | The kind of work |
 |---|---|---|
 | Mica | 92 | UC rent checks, supplier invoices to prepare, certificates, licensing, tenant and neighbour issues, routine mortgage and council tax letters |
-| You | 59 | Money decisions, legal and creditor matters, the Simon Collins recovery, the platform build, the offer and sales calls |
+| You | 59 | Money decisions, legal and creditor matters, the [name redacted] recovery, the platform build, the offer and sales calls |
 | Ericamae | 7 | LinkedIn posts, prospect sourcing and contact, video and funnel copy |
 
 ## What your CEO changed
@@ -158,7 +158,7 @@ parked those on purpose.
 
 Only one task needed a project link tonight (recGVmc4GFodYZGmL, getting prospecting live). I
 checked 32 candidates against your eight open projects and 31 of them were **already linked** —
-the Simon Collins work, the payment gap, the outbound engine, the delivery rehearsals, first
+the [name redacted] work, the payment gap, the outbound engine, the delivery rehearsals, first
 cash. That part of your board is in good shape.
 
 Everything else with no project is ordinary operations: invoices, tenant issues, council post,
@@ -175,7 +175,7 @@ These are the reasons the score cannot reach 100% by tidying alone. Each is a sm
 2. **Your AI agents cannot be given a task.** Assignee is a people-only field, and the 17 AI
    agent records have no login, so they can never hold one. About 26 of the 59 tasks I routed to
    you tonight are things an agent could do or at least draft: version bumps, a flaky test, two
-   drift-monitor defects, an SSL renewal, rebuilding the Simon Collins arrears from transactions.
+   drift-monitor defects, an SSL renewal, rebuilding the [name redacted] arrears from transactions.
    There is already a separate `Team Member` link field on Tasks that **can** hold an agent. The
    sweep is not allowed to write it. Letting it would put your delegation rule into practice
    instead of quietly breaking it every night.

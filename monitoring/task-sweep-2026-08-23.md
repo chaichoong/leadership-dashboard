@@ -31,14 +31,14 @@ Only one auto write tonight because the CEO review killed the other one (see bel
 | Approve the 6 four-line test emails + 1 seed | Assignee | Kevin | only you can approve a send (Slack message 1) |
 | Replace window hinge, second bedroom | Assignee | Roy Lavin | someone has to turn up with a screwdriver (Slack message 2) |
 | Measure and quote carpets, both bedrooms | Assignee | Roy Lavin | someone has to measure the rooms on site (Slack message 3) |
-| Mark Peters COA and rent into payment | Project | Close the payment gap | he is one of the tenancies not paying |
+| [name redacted] COA and rent into payment | Project | Close the payment gap | he is one of the tenancies not paying |
 | Drift Monitor: CEO Brief not live | Project | Complete all modules for the web app | the CEO Brief is a client module |
 | Fix email authentication for operationsdirector.co.uk | Project | The outbound engine runs, every day | SPF and DKIM decide whether the cold emails land |
 
 ## Left alone
 - **PARKED — revisit after the first client.** No owner on purpose.
 - **INBOUND: Important information (SSE smart-meter blast).** No owner and no due date proposed. It is a marketing notice, and there is a far more serious SSE thread that needs you instead (see below).
-- **INBOUND: SMS reply from +447738707077.** Left alone because the same conversation already has a task owned by Mica. Giving the reply side an AI owner would put two owners on one unidentified number.
+- **INBOUND: SMS reply from +4477XXXXX077.** Left alone because the same conversation already has a task owned by Mica. Giving the reply side an AI owner would put two owners on one unidentified number.
 - **INBOUND: 123 Reg renewal notice (done).** Business still blank, but now with evidence: I searched the whole transaction ledger for "123 REG", "123-REG" and "123REG" and got zero rows, against a control search for "ANGLIAN" that returned 4. The domain fees are not in the ledger under that name, so there is nothing to attribute from.
 - **INBOUND: Welcome to NeighborsCU (done).** You already closed this on 11 Aug as spam sent to the wrong person. Leaving it blank stands.
 - **129 of the 132 tasks with no project** are ordinary day-to-day work and belong to no project. Only 3 were linked. That is a real answer, not a miss.

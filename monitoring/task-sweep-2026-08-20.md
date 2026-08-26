@@ -44,7 +44,7 @@ Carried over from yesterday (8):
 | INBOUND: Urgent Update required: 1406 Oldham Road | owner | AI Legal & Compliance | Manchester Council chasing an electrical safety certificate |
 | INBOUND: 18 Siddows Avenue Clitheroe | owner | AI Legal & Compliance | Ribble Valley Council complaint about garden condition |
 | INBOUND: SMS reply from +4477XXXXX077 | owner | AI Operations | tenant SMS about a maintenance job, needs a reply drafted |
-| Mark Peters COA and rent into payment | project | Close the payment gap | that is exactly what the project covers |
+| [name redacted] COA and rent into payment | project | Close the payment gap | that is exactly what the project covers |
 | Together arrears top up payments | project | £12k Operating Cushion | the project names the £500 Together allowance in its own title |
 | Mortgage Product Transfers Plan | project | £12k Operating Cushion | product transfers cut monthly fixed costs |
 | INBOUND: reply to SSE Energy Solutions | business | Real Estate | every past SSE task is tagged Real Estate |
@@ -76,7 +76,7 @@ so all 8 carried forward. (Overwriting is the bug filed as
   someone on a car — almost certainly not yours). Both guesses would be inventions.
 - **149 tasks with no project.** Judged not project-based. Most work is ordinary
   operations and belongs to no project.
-- **Two Simon Collins tasks I deliberately did NOT link to a project.** The Birmingham
+- **Two [name redacted] tasks I deliberately did NOT link to a project.** The Birmingham
   Midshires end-of-term letter for 15 Marloes Court, and the 13 John Street product
   transfer. Both properties are named in the recovery project, but linking a task to
   a project adds that project's collaborators to it, and that matter is sensitive.
@@ -101,7 +101,7 @@ late) and Ciara Brittain's 2023/24 tax liability (188 days late). Your CEO's rea
 is not untidy tasks, it is a payment queue that has stopped moving. It should be raised
 as a payments blocker, not swept.
 
-**Mark Peters COA and rent into payment** (120 days late) — still real, and its project
+**[name redacted] COA and rent into payment** (120 days late) — still real, and its project
 link is in the approval queue above.
 
 ## Keeping the AI metric honest

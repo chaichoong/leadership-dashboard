@@ -32,7 +32,7 @@ Only ONE of them is a person, so approving sends ONE Slack message, not twelve.
 | Replace window hinge, second bedroom | Owner | AI Operations | book and quote it; a person only if someone must attend |
 | Measure and quote carpets, both bedrooms | Owner | AI Operations | quote only, nothing ordered |
 | Approve the 6 four-line test emails + 1 seed | Assignee | Kevin | only you can approve a send. This is the one Slack message |
-| Mark Peters COA and rent into payment | Project | Close the payment gap | he is one of the tenancies not paying |
+| [name redacted] COA and rent into payment | Project | Close the payment gap | he is one of the tenancies not paying |
 | Drift Monitor: CEO Brief not live | Project | Complete all modules for the web app | the CEO Brief is a client module |
 
 ## Left alone

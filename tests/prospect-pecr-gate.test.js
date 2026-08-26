@@ -115,23 +115,36 @@ function pecrCheck() {
   const runAt = src.indexOf('run: () =>', marker);
   const bodyStart = src.indexOf('{', runAt);
   const body = src.slice(bodyStart, braceEnd(runAt));
-  return new Function('records', 'prosStatus', 'prosField', `return (() => ${body})();`);
+  return new Function('records', 'prosStatus', 'prosField', 'prosIsEmailRoute',
+    `return (() => ${body})();`);
 }
+
+// The route predicate comes out of the SOURCE too. Hand-writing it here would
+// let the check and the send path drift apart again, which is the whole of
+// finding 20260823-prospect-daily-run-327.
+const routeHarness = new Function(`
+  ${src.slice(src.indexOf('const PROS_EMAIL_ROUTES'), src.indexOf('\n', src.indexOf('const PROS_EMAIL_ROUTES')))}
+  ${extractFn('prosIsEmailRoute')}
+  return prosIsEmailRoute;
+`)();
 
 function check(records) {
   const fn = pecrCheck();
   const prosField = (rec, name) => (rec.fields && rec.fields[name]) || '';
   const prosStatus = (rec) => prosField(rec, 'Status') || 'Found';
-  return fn(records, prosStatus, prosField);
+  return fn(records, prosStatus, prosField, routeHarness);
 }
 
-const rec = (Status, entity) => ({ fields: { Status, 'Entity Type': entity } });
+// Default route is the COLD one, so every pre-existing case below still tests
+// the cold lane it was written for.
+const rec = (Status, entity, route = 'Email sequence (Ltd)') =>
+  ({ fields: { Status, 'Entity Type': entity, 'Contact Route': route } });
 
 describe('PECR health check sees the status the send path writes (096)', () => {
   it('fails on a non-Ltd at Contacted (1:1) — the status that was invisible', () => {
     const r = check([rec('Contacted (1:1)', 'Sole Trader'), rec('Contacted (1:1)', 'Limited Company')]);
     expect(r.status, 'the breach status is still not inspected').toBe('fail');
-    expect(r.detail).toMatch(/1 non-Ltd/);
+    expect(r.detail).toMatch(/1 confirmed non-Ltd/);
   });
 
   it('passes when everyone contacted is a Limited Company', () => {
@@ -163,5 +176,63 @@ describe('PECR health check sees the status the send path writes (096)', () => {
     const r = check([rec('Ready for Review', 'Sole Trader'), rec('Approved', 'Limited Company')]);
     expect(r.status).toBe('warn');
     expect(r.detail).toMatch(/never been exercised/);
+  });
+});
+
+// ── The exemptions the check was missing (182, 327) ─────────────────────────
+
+describe('PECR health check counts BREACHES, not every non-Ltd it can see', () => {
+  it('does not flag a solicited reply to a sole trader', () => {
+    // Verified live 23 Aug 2026: all 4 non-Ltd records at an emailed status
+    // carry Contact Route 'Email reply (they asked)'. The tab read FAIL every
+    // load because of them, and the send path exempts that route by design.
+    const r = check([
+      rec('Contacted (1:1)', 'Sole Trader / Partnership', 'Email reply (they asked)'),
+      rec('Contacted (1:1)', 'Unknown', 'Email reply (they asked)'),
+      rec('Contacted (1:1)', 'Limited Company'),
+    ]);
+    expect(r.status, r.detail).toBe('pass');
+    expect(r.detail).toMatch(/2 solicited or non-email route excluded/);
+  });
+
+  it('does not flag a warm-lane send, which this send path never makes', () => {
+    // 19 live records sit on 'Warm lane (email)' with no Entity Type. The old
+    // check called every one of them a PECR breach.
+    const r = check([
+      rec('Contacted (1:1)', '', 'Warm lane (email)'),
+      rec('Contacted (1:1)', 'Limited Company'),
+    ]);
+    expect(r.status, r.detail).toBe('pass');
+  });
+
+  it('still fails on a confirmed non-Ltd cold-emailed — the real breach', () => {
+    const r = check([rec('Contacted (1:1)', 'Sole Trader / Partnership'), rec('Contacted (1:1)', 'Limited Company')]);
+    expect(r.status).toBe('fail');
+    expect(r.detail).toMatch(/1 confirmed non-Ltd/);
+  });
+
+  it('separates a missing Companies House check from a confirmed breach', () => {
+    // A blank Entity Type is an unanswered question. Reported as a warn naming
+    // the skipped step, never counted into the breach number.
+    const r = check([rec('Contacted (1:1)', ''), rec('Contacted (1:1)', 'Limited Company')]);
+    expect(r.status).toBe('warn');
+    expect(r.detail).toMatch(/no Entity Type recorded/);
+    expect(r.detail).not.toMatch(/breach/);
+  });
+
+  it('refuses to read green when the exemptions have emptied the cold lane', () => {
+    // The control for the fix itself. If the exemptions ever swallow every cold
+    // send, this check is measuring nothing and must say so.
+    const r = check([rec('Contacted (1:1)', 'Limited Company', 'Email reply (they asked)')]);
+    expect(r.status, 'an untested gate reported clean').toBe('warn');
+    expect(r.detail).toMatch(/untested, not clean/);
+  });
+
+  it('does not flag a downstream non-Ltd that arrived by a solicited reply', () => {
+    const r = check([
+      rec('No Response', 'Sole Trader / Partnership', 'Email reply (they asked)'),
+      rec('Contacted (1:1)', 'Limited Company'),
+    ]);
+    expect(r.status, r.detail).toBe('pass');
   });
 });

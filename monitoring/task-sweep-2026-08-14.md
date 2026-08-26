@@ -58,8 +58,8 @@ task in the window carries a time estimate, so coverage is 100 of 100%.
 | DD Fire Alarms Ltd – Duckworth Buildings | 20 Mar | 147 | Same. This one is an estimate, not an invoice, so it may simply be dead. |
 | Invoice 40859 from DD Fire Alarms Ltd | 20 Mar | 147 | Same. No DD Fire payment found in transactions. |
 | Fwd: Cleaning Invoice (Naturally Neat) | 27 Mar | 140 | Same, and low value. Propose closing if Roy confirms it was paid. |
-| Invoice 40893 from DD Fire Alarms Ltd | 27 Mar | 140 | Same. Intus Lettings asked Kevin to settle direct with DD Fire. |
-| Mark Peters COA and rent into payment | 22 Apr | 114 | Still live. Mica owns it, status Today, and it belongs with the payment-gap project. Propose a new due date. |
+| Invoice 40893 from DD Fire Alarms Ltd | 27 Mar | 140 | Same. [name redacted] asked Kevin to settle direct with DD Fire. |
+| [name redacted] COA and rent into payment | 22 Apr | 114 | Still live. Mica owns it, status Today, and it belongs with the payment-gap project. Propose a new due date. |
 
 All 8 reached, none skipped. I did not act on any of them.
 

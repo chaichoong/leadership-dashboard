@@ -16,7 +16,7 @@ not over whatever happened to carry an estimate.
 
 | Task | Field | Value | Why |
 |---|---|---|---|
-| SMS reply from +4475XXXXX747 | Business | Real Estate | Tenant reporting a leaking tap. The phone number matches Anthony Chappell, an active tenant. |
+| SMS reply from +4475XXXXX747 | Business | Real Estate | Tenant reporting a leaking tap. The phone number matches [name redacted], an active tenant. |
 | SMS reply from +4475XXXXX747 | Due date | 11 Aug (today) | The message says water is pouring out of the tap. The task was flagged "Not Urgent" with no date at all. |
 | Urgent Update required: 1406 Oldham Road | Business | Real Estate | Manchester Council chasing the electrical safety certificate for one of your properties. |
 | Urgent Update required: 1406 Oldham Road | Due date | 14 Aug | Council marked it urgent but gave no deadline in the email, so three working days. |
@@ -39,7 +39,7 @@ Undo all of it with:
 
 | Task | Field | Proposed | Why |
 |---|---|---|---|
-| Mark Peters COA and rent into payment | Project | Close the payment gap | The task is word for word what that project exists to do. |
+| [name redacted] COA and rent into payment | Project | Close the payment gap | The task is word for word what that project exists to do. |
 | Fix email authentication for operationsdirector.co.uk (SPF + DKIM) | Project | The outbound engine runs, every day | Cold email will not land without these, so it blocks the outbound project. |
 
 ## Left alone
@@ -98,7 +98,7 @@ in the transaction history. They have simply been left.
 | Invoice 40893, DD Fire Alarms | 137 days | Still live. Never paid. |
 | Cleaning invoice (Naturally Neat) | 137 days | Still live. Never paid. |
 | Update Together payment dates to the 28th | 111 days | Still live. Small admin job. |
-| Mark Peters COA and rent into payment | 111 days | Still live. This is the payment-gap project. |
+| [name redacted] COA and rent into payment | 111 days | Still live. This is the payment-gap project. |
 
 None skipped — the list was 9 tonight, down from 65 on 9 August.
 

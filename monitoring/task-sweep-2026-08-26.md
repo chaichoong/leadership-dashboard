@@ -9,8 +9,8 @@ Open tasks: 263. Fully compliant: 195 (74.1%). Was 93.8% yesterday. The drop is 
 | Task | Field | Value | Why |
 | MAINTENANCE: SMS - Anthony confirmed back door access for co | Time estimate | 15 min | confirm contractor visit happened, one call or message |
 | MAINTENANCE: SMS - Anthony confirmed back door access for co | Business | Real Estate | contractor visit at a rental property |
-| MAINTENANCE: SSE Energy on site today - Intus Lettings Lytha | Time estimate | 15 min | follow-up call to letting agent about SSE visit |
-| MAINTENANCE: SSE Energy on site today - Intus Lettings Lytha | Business | Real Estate | energy work at Lytham rental property |
+| MAINTENANCE: SSE Energy on site today - [name redacted] Lytha | Time estimate | 15 min | follow-up call to letting agent about SSE visit |
+| MAINTENANCE: SSE Energy on site today - [name redacted] Lytha | Business | Real Estate | energy work at Lytham rental property |
 | MAINTENANCE: Yale smart lock batteries low notification | Time estimate | 30 min | check Yale app, identify property, arrange battery swap |
 | MAINTENANCE: Yale smart lock batteries low notification | Business | Real Estate | lock at a rental property |
 | MAINTENANCE: SSE Energy Solutions important information | Time estimate | 15 min | read one supplier email and action |
@@ -65,7 +65,7 @@ Open tasks: 263. Fully compliant: 195 (74.1%). Was 93.8% yesterday. The drop is 
 | INBOUND: Suffolk Council fire safety audit 55 Elmdon Place H | Business | Real Estate | fire safety at 55 Elmdon Place HMO |
 | INBOUND: 1406 Oldham Road M40 XXX - Manchester Council stran | Business | Real Estate | council thread on 1406 Oldham Road rental |
 | INBOUND: Manchester Council 1406 Oldham Road EICR compliance | Business | Real Estate | EICR certificate at 1406 Oldham Road rental |
-| INBOUND: Intus Lettings Apt 4 Duckworth Building matter | Business | Real Estate | agent letter about Duckworth Building flat |
+| INBOUND: [name redacted] Apt 4 Duckworth Building matter | Business | Real Estate | agent letter about Duckworth Building flat |
 | INBOUND: SMS from +4475XXXXX747 stranded in label 8 | Business | Real Estate | tenant maintenance SMS thread |
 | INBOUND: Ribble Valley Council 18 Siddows Avenue Clitheroe | Business | Real Estate | council matter at 18 Siddows Avenue rental |
 | INBOUND: 57a West Street William H Brown correspondence | Business | Real Estate | agent letter about 57a West Street rental |
