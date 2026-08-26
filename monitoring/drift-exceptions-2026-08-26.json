@@ -1,0 +1,39 @@
+{
+  "ok": true,
+  "date": "2026-08-26",
+  "tables": 122,
+  "fields": 4958,
+  "compared_against": "schema-2026-08-06.json",
+  "schema_changes": {
+    "new_tables": [
+      "AI Recon Rules (tblQ9sFD7Fs5CaVwG)",
+      "AI Agents (tbl9msVjyQWslLOIZ)",
+      "AI Agent Daily Log (tbl6VQKVMnK0Q7hbJ)",
+      "Creditor Plans (tbljyVlkq1BXzny2G)"
+    ],
+    "removed_tables": [],
+    "new_fields": [
+      "Tasks.Approver (fldLLAG5HQPEFEfE5)",
+      "Tasks.Creditor Plans (fldN1DTm15qJW3izY)",
+      "Team Members.AI Agents (fldJwVsMD9Cg1KZpN)",
+      "AI Recon Audit.Mismatched Fields (fldm4i2tYHhi4jFJb)",
+      "AI Recon Audit.Match Type (fld2Vv0QJ2dNq5iVv)",
+      "AI Recon Audit.Rule Confidence (fldJ3tDV60HsOsJJ7)",
+      "Systemisation Workflows.AI Agents (fldrAKeWaxMAUvDp4)",
+      "Income Buckets.Start Date (fldo5P3NSnyKtrx7t)",
+      "Prospects.Email Subject (fldKcQIXhHE2r0PnP)"
+    ],
+    "removed_fields": [],
+    "renamed_fields": [
+      "Daily Routine Table: Kevin Q10: Did you do something kind for [family member]? -> Kevin Q10: Did you do something kind for Ciara? (fld5EtY25FlwcYT7v)",
+      "Income Buckets: Balance -> Opening Balance (fld50s2fcXr4vEiVy)"
+    ],
+    "retyped_fields": []
+  },
+  "mapped_ids": 457,
+  "dead_mapped_ids": [],
+  "repo_ids_scanned": 894,
+  "unresolvable_repo_ids": {},
+  "snapshot": "monitoring/schema-2026-08-26.json",
+  "verdict": "DRIFT"
+}

@@ -40,6 +40,7 @@ import argparse
 import json
 import os
 import re
+import subprocess
 import sys
 import urllib.error
 import urllib.request
@@ -58,8 +59,16 @@ MIN_TABLES = 50
 MIN_REPO_IDS = 100
 
 SCAN_EXTS = (".js", ".mjs", ".html", ".py")
+# `tests` is excluded deliberately, and this is the one judgement call in the
+# file. Test fixtures INVENT Airtable-shaped ids on purpose — this script's own
+# own test builds zero-padded `tbl` ids on purpose — so scanning them reports a
+# permanent false DRIFT every single day, and an exceptions file that is never
+# empty is one nobody reads. Known limit, stated rather than hidden: a test
+# referencing a genuinely dead PRODUCTION id is not caught here. config.js
+# remains covered by the reference-map check, which is where real references
+# live.
 SKIP_DIRS = {"node_modules", ".git", "monitoring", "test-results",
-             "playwright-report", ".claude", "dist", "coverage"}
+             "playwright-report", ".claude", "dist", "coverage", "tests"}
 
 # An identifier boundary on BOTH sides. Without it the scan matches inside
 # ordinary variable names; with it, names like `selectedProjectId` and
@@ -149,9 +158,56 @@ def known_ids(schema):
     return ids
 
 
+def tracked_files():
+    """Git's file list, or None if git cannot answer.
+
+    TRACKED FILES ONLY, and that is deliberate. The repo root collects
+    untracked scratch (`_tmp_costs_query.py` and a dozen siblings on 26 Aug
+    2026) carrying ids from other bases and older experiments. One held a table
+    id that returns HTTP 403 rather than 404 — this token cannot SEE it, which
+    is not evidence that it is dead, and it would have been reported as
+    unresolvable every day for ever. Scratch nobody committed is not the
+    codebase.
+
+    (Note the literal ids are described, never written out: this file is itself
+    scanned, and an example id in a comment reports as a dead reference.)
+
+    The cost is a one-day lag on a genuinely new file. The daily scan picks it
+    up the moment it is committed, which is also the moment it starts mattering.
+    """
+    try:
+        out = subprocess.run(["git", "-C", REPO, "ls-files", "-z"],
+                             capture_output=True, timeout=30)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if out.returncode != 0:
+        return None
+    names = [n for n in out.stdout.decode("utf-8", "ignore").split("\0") if n]
+    return names or None
+
+
 def scan_repo():
-    """Every Airtable-shaped ID in the repo, with the files holding it."""
+    """Every Airtable-shaped ID in the repo's tracked files."""
     found = {}
+    tracked = tracked_files()
+    if tracked is not None:
+        for rel in tracked:
+            if not rel.endswith(SCAN_EXTS):
+                continue
+            if any(part in SKIP_DIRS for part in rel.split(os.sep)):
+                continue
+            path = os.path.join(REPO, rel)
+            try:
+                with open(path, encoding="utf-8", errors="ignore") as f:
+                    text = f.read()
+            except OSError:
+                continue
+            for m in ID_RE.finditer(text):
+                found.setdefault(m.group(0), set()).add(rel)
+        return found
+
+    # Fallback when git cannot answer at all. The MIN_REPO_IDS floor still
+    # guards this path, so a broken walk cannot read as clean either.
     for root, dirs, files in os.walk(REPO):
         dirs[:] = [d for d in dirs if d not in SKIP_DIRS]
         for name in files:

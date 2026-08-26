@@ -17,7 +17,7 @@
 // looks exactly like a scan that is broken, so each of these exits 2.
 import { describe, it, expect, beforeEach, afterAll } from 'vitest';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync, cpSync, existsSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync, mkdirSync, cpSync, existsSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
@@ -177,6 +177,54 @@ describe('the diff itself', () => {
     // Today's own snapshot is skipped, so with no earlier one it says so
     // rather than silently comparing against itself.
     expect(r.json.compared_against).not.toBe(`schema-${today}.json`);
+  });
+});
+
+describe('the scan only looks where production code lives', () => {
+  it('ignores test fixtures — they invent ids on purpose', () => {
+    // FOUND BY RUNNING IT. The first live run reported this script's OWN test
+    // fixtures as unresolvable references, every one of them a deliberate fake.
+    // An exceptions file that is never empty is one nobody reads, so tests/ is
+    // excluded. Stated limit: a test referencing a genuinely dead PRODUCTION id
+    // is not caught here; config.js stays covered by the reference-map check.
+    const src = readFileSync(resolve(__dirname, '../scripts/drift-scan.py'), 'utf8');
+    expect(src).toMatch(/SKIP_DIRS = \{[^}]*"tests"/s);
+  });
+
+  it('scans tracked files only, so untracked scratch cannot flag for ever', () => {
+    // Also found by running it: the repo root collects `_tmp_*.py` scratch from
+    // earlier sessions, and one held a table id returning HTTP 403 — this token
+    // cannot SEE it, which is not evidence it is dead.
+    const src = readFileSync(resolve(__dirname, '../scripts/drift-scan.py'), 'utf8');
+    expect(src).toMatch(/ls-files/);
+  });
+
+  it('writes no fld/tbl id of its own — it is scanned too', () => {
+    // The second live run flagged the example ids written in this file's OWN
+    // comments. A scanner matching its own documentation reports permanent
+    // drift, so the ids are now described rather than written out.
+    //
+    // fld and tbl ONLY, because those are the two the scan actually judges —
+    // rec and sel are absent from the compact snapshot by design. Proving the
+    // point: the comment explaining that `selectedProjectId` is a false
+    // positive contains `selectedProjectId`, which is exactly the harmless
+    // sel-prefixed match it describes.
+    const src = readFileSync(resolve(__dirname, '../scripts/drift-scan.py'), 'utf8');
+    const body = src.replace(/\(fld\|tbl\|rec\|sel\)\[A-Za-z0-9\]\{14\}/g, '');
+    const hits = body.match(/(?<![A-Za-z0-9_])(fld|tbl)[A-Za-z0-9]{14}(?![A-Za-z0-9_])/g) || [];
+    expect(hits).toEqual([]);
+  });
+
+  it('finds nothing unresolvable in the REAL repo today', () => {
+    // The end-to-end proof: run it for real. A non-empty result here means
+    // either a genuine dead reference or new self-inflicted noise, and both
+    // are worth failing over.
+    const r = spawnSync('python3', [resolve(__dirname, '../scripts/drift-scan.py'), '--json',
+                                    '--out', box], { encoding: 'utf8' });
+    if (r.status === 2) return;              // no token in CI — not this test's business
+    const out = JSON.parse(r.stdout);
+    expect(Object.keys(out.unresolvable_repo_ids || {})).toEqual([]);
+    expect(out.repo_ids_scanned).toBeGreaterThan(100);
   });
 });
 
