@@ -42,6 +42,7 @@ const TF = {
   priority: 'fldS21RwmwOqt71LI',
   lmt: 'flddJA23cJRX5cs1K',
   inboundTask: 'fldueazD67F7fUGee',
+  inboundUrl: 'fldXf1p0vtHqOZcKl',
 };
 const TM = { name: 'flds7xoRFQhcRTnbB', active: 'fld2YLfcPqSe6b60u', isAi: 'fldKGsz9kTpFypeOr' };
 const AG = {
@@ -111,16 +112,21 @@ function defaultFixtures() {
         [TF.name]: 'Reply to Anglian Water', [TF.status]: 'Approval',
         [TF.agentOutput]: '🚨 TIER 1. This touches your private legal and financial matter. Draft: please freeze the account.',
         [TF.priority]: 'High',
+        [TF.inboundUrl]: 'https://mail.google.com/mail/u/0/#all/19f3c5386a9f5910',
         [TF.sentForApprovalBy]: [AGENT_A], [TF.teamMember]: [AGENT_A], [TF.lmt]: now, [TF.taskType]: 'Correspondence',
       } },
       { id: 'recApvA2', createdTime: now, fields: {
         [TF.name]: 'Payment plan proposal', [TF.status]: 'Approval', [TF.agentOutput]: 'Draft: lowest possible plan.',
         [TF.priority]: 'High',
+        // Folded duplicate: the gate appended a second thread's URL.
+        [TF.inboundUrl]: 'https://mail.google.com/mail/u/0/#all/1a0373a0fec1897c https://mail.google.com/mail/u/0/#all/1a02ac3541a86728',
         [TF.sentForApprovalBy]: [AGENT_A], [TF.teamMember]: [AGENT_A], [TF.lmt]: now, [TF.taskType]: 'Correspondence',
       } },
       { id: 'recApvB1', createdTime: now, fields: {
         [TF.name]: 'Reply to tenant email', [TF.status]: 'Approval', [TF.agentOutput]: 'Draft: thanks, will confirm.',
         [TF.priority]: 'Urgent',
+        // iMessage: a real key, but nothing a browser can open.
+        [TF.inboundUrl]: 'imessage:259F4464-838C-F860-3997-F3BD783F426E',
         [TF.sentForApprovalBy]: [AGENT_B], [TF.teamMember]: [AGENT_B], [TF.lmt]: now, [TF.taskType]: 'Drafting',
       } },
     ],
