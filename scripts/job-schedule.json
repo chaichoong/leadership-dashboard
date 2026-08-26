@@ -323,5 +323,14 @@
     "needs": [
       "network"
     ]
+  },
+  "handback-poll": {
+    "cron": "*/30 * * * *",
+    "maxLateMinutes": 20,
+    "mode": "wrapped",
+    "note": "Kevin's call, 26 Aug 2026, after measuring the approval loop: the agent's own work on a hand-back is a median of FIVE MINUTES, but he waited a median of 3.6 hours over 1-26 Aug because nothing opened the queue between daily-ops (07:00) and the three triage slots. This checks every half hour and wakes a headless claude run ONLY when a hand-back is actually waiting; a quiet tick is one Airtable read and costs no tokens. HAND-BACKS ONLY (carry_out and redo) — new work, routing and escalation stay in the daily slots. Lateness is deliberately tight: a tick more than 20 minutes late is covered by the next one, so a wake-stampede must not run six of these back to back. The job name is NOT a skill folder name, so check-routines.py sees a registered shell job rather than a second Claude routine.",
+    "needs": [
+      "network"
+    ]
   }
 }
