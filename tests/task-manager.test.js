@@ -121,8 +121,18 @@ describe("the Go Signal is the agent's own 9/1/5 slot job (Kevin, 25 Aug 2026)",
         expect(runner).toMatch(/BROKEN: skill file missing/);
     });
 
-    it('the job name is NOT a skill folder, so the one-routine guard stays quiet', () => {
-        expect(existsSync(path.join(root, '.claude/scheduled-tasks/task-manager'))).toBe(false);
+    it('the skill folder is task-manager-board, and it is tracked', () => {
+        // This used to be the ONLY thing keeping the one-routine guard quiet:
+        // the job was named unlike any skill folder, so the guard classified it
+        // as a shell job. That made the verdict depend on a filename — renaming
+        // this folder to match the job would have made the guard cry stacking
+        // every morning over work Kevin had explicitly sanctioned.
+        //
+        // Since 26 Aug 2026 the sanction is written down instead, in
+        // APPROVED_SLOTS in scripts/check-routines.py, with the date of the
+        // ruling. The folder name no longer carries any load. The assertion
+        // stays because the runner and the skill both reference this path, and
+        // a rename would break them.
         expect(existsSync(path.join(root, '.claude/scheduled-tasks/task-manager-board/SKILL.md'))).toBe(true);
     });
 

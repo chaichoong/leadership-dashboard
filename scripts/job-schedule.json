@@ -344,10 +344,10 @@
     ]
   },
   "prod-sweep-weekly": {
-    "cron": "30 7 * * *",
+    "cron": "0 11 * * *",
     "maxLateMinutes": 300,
     "mode": "wrapped",
-    "note": "Kevin's restructure of 26 Aug 2026: role-specific work leaves the daily-ops sequence and runs as its own slot. A wrapped shell job, so it takes the lock and heartbeats \u2014 a slot, never a second Claude routine. Allowlisted in scripts/check-routines.py. The FULL 28-page authenticated browser walk, Sundays only \u2014 the day check is in the skill, never in the cron. Daily coverage is now scripts/check-data-invariants.py via the data-invariants job, which is the part with teeth: 28 pages passed clean every day 22-26 Aug while the invariants caught 7 tasks past their hard deadlines.",
+    "note": "Kevin's restructure of 26 Aug 2026: role-specific work leaves the daily-ops sequence and runs as its own slot. A wrapped shell job, so it takes the lock and heartbeats \u2014 a slot, never a second Claude routine. Allowlisted in scripts/check-routines.py. The FULL 28-page authenticated browser walk, Sundays only \u2014 the day check is in the skill, never in the cron. 11:00 keeps it clear of the 07:00 daily-ops run, which does not take the lock and so cannot be serialised against. Daily coverage is now scripts/check-data-invariants.py via the data-invariants job, which is the part with teeth: 28 pages passed clean every day 22-26 Aug while the invariants caught 7 tasks past their hard deadlines.",
     "needs": [
       "network"
     ]
