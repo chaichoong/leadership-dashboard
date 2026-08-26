@@ -289,6 +289,35 @@ task-manager-board). Same fixed-slot exception, same rule: never fold it back
 into daily-ops, and never re-add it as a phase, without Kevin's word. The
 queue lock stops it running at the same time as the triage slot job; order within the hour is whichever launchd starts first, and the board pass tolerates either order.
 
+Hand-backs are ALSO polled every thirty minutes, outside all of the above
+(Kevin's call, 26 Aug 2026): launchd `com.kevinbrittain.handback-poll`, job
+`handback-poll` in scripts/job-schedule.json, runner
+scripts/handback-poll-run.sh, gate scripts/handback-poll.py. Same pattern as
+the two jobs above — a registered wrapped job, not a second Claude routine, and
+no skill folder of that name exists or may be created.
+
+Why it exists: measured across 1-26 Aug 2026, an agent's own work on a
+hand-back took a median of FIVE MINUTES, while Kevin waited a median of 3.6
+hours. Ninety-nine per cent of that was queue time. Nothing opened the
+hand-back queue between 07:00 and the 09:00 slot, so a tap on Slack at 09:05
+sat until 13:00.
+
+Two things keep it cheap and safe, and neither may be weakened:
+
+- **It works HAND-BACKS ONLY** — carry_out and redo. New work, routing and
+  escalation stay in the daily slots, because polling those every half hour
+  re-decides questions nobody has answered since the last tick.
+- **The expensive half is gated.** A tick is one Airtable read through the same
+  `agent-dispatch.py queue` the real run uses; a headless claude run starts only
+  when a hand-back is genuinely waiting. On a quiet tick it spends no tokens.
+
+The gate FAILS rather than reporting a quiet queue when the queue JSON is
+missing, when its counts object is empty, when any hand-back count key has been
+renamed, or when agents hold open tasks while every lane reads zero. It also
+skips a tick while a dispatch run is actively writing, judged on file freshness
+rather than on the absence of a report, so a crashed run cannot stop the poller
+for ever. Guarded by tests/handback-poll.test.js (21 tests, back-tested).
+
 
 ## Phase 6b — Calendar work (only when due)
 
