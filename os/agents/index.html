@@ -911,14 +911,29 @@ function apvSummary(raw){
 // on click so Kevin always opens a live link rather than an expired one.
 function apvOpenAttachment(ev, taskId, filename){
     ev.preventDefault();
-    const tab = window.open('', '_blank', 'noopener');   // synchronous: keeps the gesture
+    // Opened synchronously so the click still counts as the gesture that
+    // permits it — the re-read below is async and would lose it.
+    //
+    // It must NOT ask for 'noopener' here. The HTML standard makes
+    // window.open() return null whenever that feature is set, so `tab` was
+    // ALWAYS null: the browser opened a tab, nothing ever navigated it, and
+    // every attachment Kevin clicked gave him a blank screen for ever
+    // (reported 27 Aug 2026, reproduced in his own Chrome). The close() calls
+    // below were dead for the same reason. Cut the back-reference by hand
+    // instead, while the new tab is still about:blank and same-origin.
+    const tab = window.open('', '_blank');
+    if(!tab){
+        toast('Your browser blocked the new tab. Allow pop-ups for this page, then click ' + filename + ' again.', 5000);
+        return false;
+    }
+    try { tab.opener = null; } catch(e) { /* cross-origin already; nothing to sever */ }
     atFetchOne(TASKS_TBL, taskId).then(rec=>{
         const hit = (gf(rec,TF.attachments)||[]).find(a=>a.filename===filename);
-        if(hit && /^https?:\/\//i.test(hit.url||'')){ if(tab) tab.location = hit.url; return; }
-        if(tab) tab.close();
+        if(hit && /^https?:\/\//i.test(hit.url||'')){ tab.location = hit.url; return; }
+        tab.close();
         toast(filename + ' is no longer on this task. Refresh to see what is.');
     }).catch(e=>{
-        if(tab) tab.close();
+        tab.close();
         if(e.message !== 'auth') toast('Could not open ' + filename + ': ' + (e.message||e));
     });
     return false;
