@@ -25,6 +25,12 @@
 # Airtable read, and on a quiet tick this script costs no Claude tokens at all.
 set -uo pipefail
 
+# Tool policy is shared, never hand-rolled here — see scripts/agent-tools.sh
+# for why the old two-tool cap made every agent look like it could only
+# draft emails. Guarded by tests/agent-tools-parity.test.js.
+. "$(dirname "$0")/agent-tools.sh"
+
+
 CLAUDE="/Users/kevinbrittain/.local/bin/claude"
 REPO="/Users/kevinbrittain/Projects/leadership-dashboard"
 LOG_DIR="/Users/kevinbrittain/knowledge-os/logs/handback-poll"
@@ -117,7 +123,7 @@ Step 5: write $RUNDIR/report.json exactly as the skill specifies, copying queueC
 
 Do not take the queue lock — this run already holds it. Do not edit, commit or push code; file anything needing a code change via scripts/findings.py. Working and temp files go under $RUNDIR/TASKID/ only, never in monitoring/ and never anywhere else in the repo. Close with at most ten lines of counts only: no message content, no sender names, no record IDs." \
   --permission-mode acceptEdits \
-  --allowedTools "Bash(python3:*)" "Bash(curl:*)" "Bash(osascript:*)" >> "$LOG" 2>&1
+  --allowedTools "${AGENT_ALLOWED_TOOLS[@]}" "Bash(osascript:*)" >> "$LOG" 2>&1
 RC=$?
 
 __TAIL=$(tail -n +$((__START_LINE + 1)) "$LOG" 2>/dev/null)

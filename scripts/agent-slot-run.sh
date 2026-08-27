@@ -23,6 +23,12 @@
 # Usage:  agent-slot-run.sh <job-name> <skill-path> [extra prompt lines...]
 set -u
 
+# Tool policy is shared, never hand-rolled here — see scripts/agent-tools.sh
+# for why the old two-tool cap made every agent look like it could only
+# draft emails. Guarded by tests/agent-tools-parity.test.js.
+. "$(dirname "$0")/agent-tools.sh"
+
+
 JOB="${1:-}"
 SKILL="${2:-}"
 shift 2 || true
@@ -91,7 +97,7 @@ Rules for the whole run:
 $EXTRA
 End with at most fifteen lines: what you did, what you found, what you could not do." \
   --permission-mode acceptEdits \
-  --allowedTools "Bash(python3:*)" "Bash(curl:*)" >> "$LOG" 2>&1
+  --allowedTools "${AGENT_ALLOWED_TOOLS[@]}" >> "$LOG" 2>&1
 RC=$?
 
 # Privacy sweep: quarantine any content-bearing file THIS RUN left in

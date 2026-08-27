@@ -21,6 +21,12 @@
 # sweep below quarantines any content-bearing file that still lands in
 # monitoring/ and fails the run loudly.
 set -u
+
+# Tool policy is shared, never hand-rolled here — see scripts/agent-tools.sh
+# for why the old two-tool cap made every agent look like it could only
+# draft emails. Guarded by tests/agent-tools-parity.test.js.
+. "$(dirname "$0")/agent-tools.sh"
+
 CLAUDE="/Users/kevinbrittain/.local/bin/claude"
 REPO="/Users/kevinbrittain/Projects/leadership-dashboard"
 LOG_DIR="/Users/kevinbrittain/knowledge-os/logs/inbound-triage"
@@ -62,7 +68,7 @@ cd "$REPO" || { echo "ERROR: repo not found at $REPO" >&2; exit 1; }
 3. /Users/kevinbrittain/.claude/scheduled-tasks/agent-dispatch/SKILL.md (Kevin's ruling, 24 Aug 2026: dispatch runs in every slot so the work triaged above reaches the approval queue in the same slot)
 Rules for the whole run: this is real mail — when unsure between outcomes choose the agent-lane task; when unsure about archiving, do not archive; never send, reply, or delete anything yourself (dispatch prepares and submits through its own gated script only). Working and temp files go ONLY under $SCRATCH — NEVER under the repo, and never in monitoring/, because monitoring/ is committed to a public repository and scan output carries full email bodies. Counts-only reports in monitoring/ are fine. A broken read (Gmail or iMessage) is reported loudly, never treated as a quiet day. Do not take the queue lock (this run already holds it). Do not edit, commit, or push code; file anything needing a code change via scripts/findings.py. Complete each skill's closing steps in full (watermark, score, publish; dispatch's verify step). End with at most twenty lines of counts only — never message content, sender names, or record IDs." \
   --permission-mode acceptEdits \
-  --allowedTools "Bash(python3:*)" "Bash(curl:*)" >> "$LOG" 2>&1
+  --allowedTools "${AGENT_ALLOWED_TOOLS[@]}" >> "$LOG" 2>&1
 RC=$?
 
 # Privacy sweep: quarantine any content-bearing file the run left in
