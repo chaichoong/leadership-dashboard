@@ -251,6 +251,7 @@ AGENTS = {
     "recqmKBmq8ZGkxVH9": {"name": "AI Worker — Analyst",                     "agent": "worker-analyst",        "role": "worker"},
 }
 CEO_REC_ID = "reciHUAEcEkbctnZ6"
+REASSIGN_MAX = 2          # bounces before a task becomes Kevin's decision
 
 # Role-specific agents from the AI Agents register (tbl9msVjyQWslLOIZ) that
 # have completed their own build session and can be DISPATCHED like the 17
@@ -867,7 +868,18 @@ def open_intents():
     return {t for t, e in state.items() if e == "intent"}
 
 
-def carry_out_problem(output):
+# Machine detail that means nothing to Kevin: a script path, a filename with
+# an extension, an Airtable record/field/table id, or an API/CLI word. Matched
+# only inside the CLOSING line, never the body — the body is allowed to be
+# technical, that is where an agent shows its working.
+JARGON_RE = re.compile(
+    r"(\bscripts?/[\w./-]+"
+    r"|(?<![@\w.])[\w-]+\.(?:py|js|sh|mjs|json)\b"
+    r"|\b(?:rec|fld|tbl|usr|app)[A-Za-z0-9]{14}\b"
+    r"|\bfilterByFormula\b|\bcurl\b)")
+
+
+def carry_out_problem(output, strict=True):
     """Reason the approval box would have to guess this output's summary.
 
     Empty string means the output is fine. See CARRY_OUT_MARKER above.
@@ -875,12 +887,20 @@ def carry_out_problem(output):
     text = (output or "").strip()
     if len(text) < SUMMARY_MIN_CHARS:
         return ""
-    m = CARRY_OUT_RE.search(text)
-    if not m:
+    matches = list(CARRY_OUT_RE.finditer(text))
+    if not matches:
         return "it has no '%s' line" % CARRY_OUT_MARKER
-    tail = text[m.end():].strip()
+    tail = text[matches[-1].end():].strip()
     if not tail:
         return "its '%s' line says nothing" % CARRY_OUT_MARKER
+    jargon = JARGON_RE.search(tail) if strict else None
+    if jargon:
+        return ("its '%s' line contains '%s' — that is machine detail, not "
+                "plain English. Kevin reads this line to decide WHETHER the "
+                "action happens, not how it is done. Write it so a "
+                "thirteen-year-old understands: say 'sending the email to "
+                "Fylde Council', never 'via scripts/send-email.py' or a "
+                "record id" % (CARRY_OUT_MARKER, jargon.group(0)))
     if len(tail) > CARRY_OUT_TAIL_MAX:
         return ("its '%s' line is not the CLOSING line — keep what follows it "
                 "under %d characters; yours is %d. The approval box shows only "
@@ -1219,6 +1239,77 @@ def cmd_route(args):
     patch_task(args.task, {AF["teamMember"]: [args.to]})
     print(json.dumps({"routed": args.task, "to": args.to,
                       "agent": ALL_AGENTS[args.to]["name"]}))
+
+
+REASSIGN_MARK = "REASSIGNED TO CEO"
+REASSIGN_LINE_RE = re.compile(r"^\[[^\]]+\] " + REASSIGN_MARK, re.M)
+
+
+def reassign_bounces(notes):
+    """How many times this task has ALREADY been sent back to the CEO.
+
+    Counts only the stamped lines this command writes. A bare substring count
+    also matched the marker appearing inside an agent's own --reason text, so
+    one honest bounce could read as two and lock the task out of the loop."""
+    return len(REASSIGN_LINE_RE.findall(str(notes or "")))
+
+
+def cmd_reassign(args):
+    """Hand a task back to the AI CEO to be given to a different agent.
+
+    `route` deliberately refuses the CEO, and still does: routing is the CEO
+    handing work DOWN, so letting it point back up made a loop with nothing
+    to stop it. Reassignment is the opposite direction and needs its own
+    door — with a reason, and a limit. The CEO reads the reason in Notes and
+    picks someone else; after REASSIGN_MAX bounces the task goes to Kevin
+    instead, because a job nobody can place is a decision, not a routing
+    problem."""
+    task = get_task(args.task)
+    tf = task.get("fields", {}) or {}
+    notes = str(tf.get(AF["notes"]) or "")
+    bounces = reassign_bounces(notes)
+    if bounces >= REASSIGN_MAX:
+        sys.exit(
+            f"ERROR: {args.task} has already gone back to the CEO "
+            f"{bounces} times. Escalate it to Kevin instead:\n"
+            f"         python3 scripts/agent-dispatch.py escalate {args.task}\n"
+            "       A task nobody can place is a decision for him, not "
+            "another lap of the routing loop.")
+    stamp = datetime.now(LONDON).strftime("%Y-%m-%d %H:%M")
+    # One line, whatever the reason contains: a newline in free text would
+    # otherwise fake a second stamped line for the counter above.
+    reason = " ".join(str(args.reason).split())
+    by = " ".join(str(args.by or "the dispatcher").split())
+    line = f"[{stamp}] {REASSIGN_MARK} by {by}: {reason}"
+    fields = {
+        AF["teamMember"]: [CEO_REC_ID],
+        AF["notes"]: (notes.rstrip() + "\n" + line).strip()[-90000:],
+        # Back into the queue the CEO actually reads. Its own approval state
+        # is cleared: the next agent must be judged on ITS work, not inherit
+        # a verdict on somebody else's.
+        AF["status"]: "Today",
+        AF["dueDate"]: datetime.now(LONDON).strftime("%Y-%m-%d"),
+        AF["approvalOutcome"]: None,
+        AF["approvalFeedback"]: None,
+        AF["approvedAt"]: None,
+        AF["sentForApprovalBy"]: [],
+        # Agent-owned again: a blank Assignee is the convention, and leaving
+        # Kevin on it puts a task he no longer owns back on his own list.
+        AF["assignee"]: None,
+    }
+    # ARCHIVE BEFORE THE WIPE — the same rule cmd_submit follows. Kevin's
+    # words are why the next agent should do anything differently; clearing
+    # them here would send the work onward with the reason erased, and would
+    # leave a ticked "remember this" lesson with no text to learn from.
+    prior = str(tf.get(AF["approvalFeedback"]) or "").strip()
+    if prior:
+        hist = str(tf.get(AF["feedbackHistory"]) or "")
+        block = f"[{stamp}] {prior}"
+        if block not in hist:
+            fields[AF["feedbackHistory"]] = (hist.rstrip() + "\n\n" + block).strip()
+    patch_task(args.task, fields)
+    print(json.dumps({"reassigned": args.task, "to": "AI CEO (Dan Martell)",
+                      "reason": args.reason, "priorBounces": bounces}))
 
 
 def cmd_escalate(args):
@@ -1756,7 +1847,9 @@ def cmd_revise(args):
 
     # The revised text still has to satisfy every rule the original did: it is
     # what will actually be sent, and it has not been through submit's checks.
-    problem = carry_out_problem(revised)
+    # strict=False: this text was already approved by Kevin. A plain-English
+    # rule added later must not strand his approved edit (review, 26 Aug 2026).
+    problem = carry_out_problem(revised, strict=False)
     if problem:
         sys.exit(f"ERROR: refusing to revise {args.task} — {problem}. Keep the "
                  f"closing '{CARRY_OUT_MARKER}' line on the edited version.")
@@ -2622,6 +2715,14 @@ def main():
     sc.add_argument("--selftest", action="store_true",
                     help="run the offline maths checks, no Airtable access")
 
+    ra = sub.add_parser("reassign",
+                        help="hand a task back to the AI CEO to be given to a "
+                             "different agent")
+    ra.add_argument("task")
+    ra.add_argument("--reason", required=True,
+                    help="why this agent is the wrong home for it, in one line")
+    ra.add_argument("--by", default="", help="who is sending it back")
+
     r = sub.add_parser("route")
     r.add_argument("task")
     r.add_argument("--to", required=True)
@@ -2703,7 +2804,8 @@ def main():
             "complete": cmd_complete, "verify": cmd_verify,
             "score": cmd_score, "reconcile": cmd_reconcile,
             "lessons": cmd_lessons, "revise": cmd_revise,
-            "attach": cmd_attach}[args.cmd](args) or 0
+            "attach": cmd_attach,
+            "reassign": cmd_reassign}[args.cmd](args) or 0
 
 
 if __name__ == "__main__":
