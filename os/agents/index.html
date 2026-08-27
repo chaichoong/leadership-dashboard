@@ -92,6 +92,8 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 /* Approval cards (Zone A) */
 .apv-card{border:1px solid var(--border-default);border-left:4px solid var(--warning);border-radius:var(--radius-md);background:var(--bg-surface);padding:14px 16px;margin-bottom:12px}
 .apv-ask{font-size:var(--fs-base);font-weight:var(--fw-semibold);line-height:1.5;margin-bottom:6px}
+.apv-ask-stem{color:var(--accent);font-weight:var(--fw-bold)}
+.apv-email-from{display:flex;gap:16px;flex-wrap:wrap;font-size:var(--fs-xs);color:var(--text-secondary);background:var(--bg-subtle);border-radius:var(--radius-md);padding:4px 10px;margin-bottom:6px}
 .apv-meta{display:flex;gap:8px;flex-wrap:wrap;align-items:center;font-size:var(--fs-xs);color:var(--text-secondary);margin-bottom:8px}
 .apv-chip{background:var(--bg-subtle);color:var(--text-secondary);padding:1px 8px;border-radius:var(--radius-full);font-weight:var(--fw-semibold);white-space:nowrap}
 .apv-age{color:var(--text-muted)}
@@ -804,13 +806,54 @@ async function loadApprovals(){
 // One-glance summary of what the agent is proposing, derived from Agent
 // Output. Mirrors apvSummary in os/tasks/index.html and in
 // scripts/slack-automation/approvals.js — keep the three in step.
+// Which address an email will actually be sent FROM. The header is OPTIONAL
+// in the Agent Output contract, and when it is missing send-email.py falls
+// back to Kevin's personal Gmail (his ruling, 6 Aug 2026) — so a card that
+// showed nothing was hiding the difference between writing as himself and
+// writing as Operations Director. Never leave it blank: say the default.
+const APV_DEFAULT_SENDER = 'kevinbrittain@gmail.com';
+const APV_BUSINESS_SENDER = 'kevin@operationsdirector.co.uk';
+// Mirrors BUSINESS_BRAND in scripts/send-email.py. Kept in step by
+// tests/approval-clarity.test.js, which reads both.
+const APV_BUSINESS_BRAND = /operationsdirector\.co\.uk|\bOperations Director\b/i;
+
+function apvEmailFrom(raw){
+    // Split the way the canonical parser does — agent_email_format.py uses
+    // partition("---"), so a "----" divider is a header break there and must
+    // be one here too, or a FROM quoted in the body poses as the sender.
+    const text = String(raw||'').replace(/\r\n/g,'\n');
+    const cut = text.indexOf('---');
+    if(cut === -1) return null;
+    const head = text.slice(0, cut);
+    const body = text.slice(cut);
+    const to = head.match(/^\s*TO:\s*(.+)$/im);
+    if(!to) return null;                                   // not an email draft
+    const subj = head.match(/^\s*SUBJECT:\s*(.+)$/im);
+    const from = head.match(/^\s*FROM:\s*(.+)$/im);
+    // send-email.py REFUSES a draft with no FROM whose copy speaks as the
+    // business. Naming the personal default there would promise a send that
+    // cannot happen, so say what will really occur instead.
+    const speaksAsBusiness = !from && APV_BUSINESS_BRAND.test(
+        (subj ? subj[1] : '') + '\n' + body);
+    return {
+        to: to[1].trim(),
+        from: from ? from[1].trim() : (speaksAsBusiness ? '' : APV_DEFAULT_SENDER),
+        isDefault: !from && !speaksAsBusiness,
+        blocked: speaksAsBusiness,
+    };
+}
+
+// Marks a summary that really is the "what happens on approval" line, so the
+// card only promises a consequence when it has one. Stripped before display.
+const APV_SUMMARY_IS_ACTION = '\u0000action';
 function apvSummary(raw){
     const text = String(raw||'').replace(/\r/g,'').trim();
     if(!text || text.length < 280) return '';
-    const m = text.match(/\*{0,2}carrying this out will involve:?\*{0,2}\s*/i);
+    const all = [...text.matchAll(/\*{0,2}carrying this out will involve:?\*{0,2}\s*/gi)];
+    const m = all.length ? all[all.length-1] : null;   // LAST, as the gate reads it
     if(m){
         const s = text.slice(m.index + m[0].length).trim();
-        if(s) return s.length > 400 ? s.slice(0,399)+'…' : s;
+        if(s) return (s.length > 400 ? s.slice(0,399)+'…' : s) + APV_SUMMARY_IS_ACTION;
     }
     const to = text.match(/^TO:\s*(.+)$/im);
     const subj = text.match(/^SUBJECT:\s*(.+)$/im);
@@ -1109,7 +1152,9 @@ function clearApvFilters(){
 window.clearApvFilters = clearApvFilters;
 
 function apvCardHtml(t){
-    const summary = apvSummary(t.agentOutput);
+    const raw = apvSummary(t.agentOutput);
+    const isAction = raw.endsWith(APV_SUMMARY_IS_ACTION);
+    const summary = isAction ? raw.slice(0, -APV_SUMMARY_IS_ACTION.length) : raw;
     const ask = summary || t.name;
     const agent = teamName(t.raiserId) || 'No agent recorded';
     const tier1 = t.tier1;
@@ -1123,7 +1168,7 @@ function apvCardHtml(t){
     const work = String(t.agentOutput||'').trim();
     return `<div class="apv-card" data-apv-card="${t.id}">
         ${tier1 ? `<div class="apv-tier1">TIER 1. This touches your private legal and financial matter. An AI agent prepared it. Nothing has been sent, filed, paid or changed anywhere. Read it before you approve.</div>` : ''}
-        <div class="apv-ask">${esc(ask)}</div>
+        <div class="apv-ask">${isAction ? `<span class="apv-ask-stem">If you approve, this happens:</span> ` : ''}${esc(ask)}</div>
         <div class="apv-meta">
             ${t.priority==='Urgent' ? '<span class="apv-chip" style="background:var(--danger-bg);color:var(--danger)">Urgent</span>' : ''}
             <span class="apv-chip">${esc(agent)}</span>
@@ -1131,6 +1176,19 @@ function apvCardHtml(t){
             <span class="apv-age${late?' late':''}" title="Measured from when it was posted for approval (or last changed, if it has not been posted yet)">waiting ${esc(agoText(t.submittedAt))}</span>
             ${linksHtml}
         </div>
+        ${(()=>{
+            // Correspondence only: another task type quoting email headers in
+            // its draft is not a send, and saying so would be a false promise.
+            if(t.taskType !== 'Correspondence') return '';
+            const e = apvEmailFrom(t.agentOutput);
+            if(!e) return '';
+            return `<div class="apv-email-from${e.blocked?' apv-email-blocked':''}">
+                <span><strong>Sends from:</strong> ${e.blocked
+                    ? `<span style="color:var(--danger)">not set — and this copy speaks as Operations Director, so the sender will refuse it. It needs <strong>${esc(APV_BUSINESS_SENDER)}</strong>.</span>`
+                    : `${esc(e.from)}${e.isDefault ? ' <span style="color:var(--text-muted)">(default — the agent did not choose one)</span>' : ''}`}</span>
+                <span><strong>To:</strong> ${esc(e.to)}</span>
+            </div>`;
+        })()}
         ${summary ? `<div style="font-size:var(--fs-xs);color:var(--text-muted);margin-bottom:4px">Task: ${esc(t.name)}</div>` : ''}
         <details class="apv-details">
             <summary>${work ? 'Read the agent’s full work' : 'The agent left its work empty'}</summary>
