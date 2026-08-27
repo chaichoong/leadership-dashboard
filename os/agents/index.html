@@ -104,7 +104,12 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 .apv-note:focus{outline:none;border-color:var(--accent)}
 .apv-actions{display:flex;gap:8px;flex-wrap:wrap}
 .apv-type{background:var(--bg-surface);border:1px solid var(--border-default);color:var(--text-primary);padding:4px 8px;border-radius:var(--radius-sm);font-size:var(--fs-xs);font-family:inherit}
-.apv-attach{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:6px}
+.apv-attach{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:6px;border-radius:var(--radius-md);padding:2px}
+.apv-attach.apv-drop-over{background:var(--accent-soft);outline:2px dashed var(--accent)}
+.apv-agent-files{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:8px 0 4px;padding:8px 10px;background:var(--accent-soft);border-radius:var(--radius-md)}
+.apv-agent-files-label{font-size:var(--fs-xs);font-weight:var(--fw-semibold);color:var(--accent)}
+.apv-agent-file{font-size:var(--fs-xs);font-weight:var(--fw-semibold);color:var(--accent);background:var(--bg-surface);border:1px solid var(--border-default);border-radius:var(--radius-full);padding:2px 10px;text-decoration:none}
+.apv-agent-file:hover{border-color:var(--accent);text-decoration:underline}
 .apv-attach-btn{border:1px dashed var(--border-default);border-radius:var(--radius-md);padding:4px 10px;font-size:var(--fs-xs);font-weight:var(--fw-semibold);color:var(--text-secondary);cursor:pointer}
 .apv-attach-btn:hover{border-color:var(--accent);color:var(--accent)}
 .apv-file-list{display:flex;gap:6px;flex-wrap:wrap}
@@ -737,7 +742,7 @@ async function loadApprovals(){
         const recs = await atFetch(TASKS_TBL,
             [TF.name, TF.status, TF.description, TF.notes, TF.dueDate, TF.taskType,
              TF.agentOutput, TF.sentForApprovalBy, TF.teamMember, TF.lmt, TF.slackBaseline,
-             TF.approver, TF.priority, TF.inboundUrl],
+             TF.approver, TF.priority, TF.inboundUrl, TF.attachments],
             { filterByFormula: "AND({Status}='Approval', LEN({Sent For Approval By}&'')>0)" });
         // This queue and badge are KEVIN'S. The Approver field decides whose
         // lane a task is in (empty = Kevin, same convention as approverFor in
@@ -758,6 +763,13 @@ async function loadApprovals(){
             priority: selName(gf(r,TF.priority)),
             tier1: isTier1Output(gf(r,TF.agentOutput)||''),
             emailLinks: apvEmailLinks(gf(r,TF.inboundUrl)),
+            // Files already ON the task — normally the agent's own work
+            // (a drafted letter of authority, a filled form) attached with
+            // `agent-dispatch.py submit --attach`, so Kevin can open and
+            // read it before he decides.
+            files: (gf(r,TF.attachments)||[]).map(a=>({
+                filename: a.filename || 'file', url: a.url || '', size: a.size || 0,
+            })).filter(a=>/^https?:\/\//i.test(a.url)),
             raiserId: linkIds(gf(r,TF.sentForApprovalBy))[0] || linkIds(gf(r,TF.teamMember))[0] || '',
             raiserLinked: linkIds(gf(r,TF.sentForApprovalBy)).length > 0,
             lmt: gf(r,TF.lmt)||'',
@@ -816,6 +828,37 @@ function apvSummary(raw){
     return '';
 }
 
+// A file dropped ANYWHERE but the attach strip would otherwise navigate this
+// frame to it and unload the page, taking every unsaved draft in the queue
+// with it. The zone's own handlers stop propagation by consuming the event
+// first; this is the net under the rest of the page.
+['dragover','drop'].forEach(evt=>{
+    window.addEventListener(evt, e=>{
+        if(e.target && e.target.closest && e.target.closest('.apv-attach')) return;
+        e.preventDefault();
+        if(evt === 'drop') e.dataTransfer && (e.dataTransfer.dropEffect = 'none');
+    });
+});
+
+// Airtable's attachment URLs are short-lived signed links, but this page can
+// sit open for hours (the queue exists BECAUSE things wait). Re-read the task
+// on click so Kevin always opens a live link rather than an expired one.
+function apvOpenAttachment(ev, taskId, filename){
+    ev.preventDefault();
+    const tab = window.open('', '_blank', 'noopener');   // synchronous: keeps the gesture
+    atFetchOne(TASKS_TBL, taskId).then(rec=>{
+        const hit = (gf(rec,TF.attachments)||[]).find(a=>a.filename===filename);
+        if(hit && /^https?:\/\//i.test(hit.url||'')){ if(tab) tab.location = hit.url; return; }
+        if(tab) tab.close();
+        toast(filename + ' is no longer on this task. Refresh to see what is.');
+    }).catch(e=>{
+        if(tab) tab.close();
+        if(e.message !== 'auth') toast('Could not open ' + filename + ': ' + (e.message||e));
+    });
+    return false;
+}
+window.apvOpenAttachment = apvOpenAttachment;
+
 // Openable email links from Inbound Note URL Link. The field also holds
 // non-web keys (imessage:<guid>), and a folded duplicate appends a second
 // thread URL separated by a space — so split, keep only http(s), dedupe.
@@ -856,7 +899,10 @@ function apvFilesFor(taskId){
 
 function apvQueueFiles(taskId, fileList){
     const incoming = Array.from(fileList || []);
-    if(!incoming.length) return;
+    if(!incoming.length){
+        toast('That did not carry a file. Drag the file itself, or use Attach a file.');
+        return;
+    }
     const already = apvFilesFor(taskId);
     const sameFile = (a,b) => a.name===b.name && a.size===b.size && a.lastModified===b.lastModified;
     const tooBig = [], empty = [], dupes = [], ok = [];
@@ -1093,6 +1139,12 @@ function apvCardHtml(t){
                 : `<div class="apv-body">The agent left its work empty, so there is nothing here to judge. Do not approve it blind. Use Request changes and tell it to show its work.</div>`}
             ${t.description ? `<div style="font-size:var(--fs-xs);font-weight:var(--fw-semibold);color:var(--text-secondary);margin-top:8px">The task it was given</div><div class="apv-body">${esc(t.description)}</div>` : ''}
         </details>
+        ${(t.files||[]).length ? `<div class="apv-agent-files">
+            <span class="apv-agent-files-label">&#128206; ${t.files.length === 1 ? 'File on this task' : t.files.length + ' files on this task'} — open before you decide</span>
+            ${t.files.map(f=>`<a class="apv-agent-file" href="${esc(f.url)}" target="_blank" rel="noopener noreferrer"
+                onclick="return apvOpenAttachment(event,'${t.id}','${esc(f.filename)}')"
+                title="Opens in a new tab. Could be the agent's own work, a document from the sender, or a file you attached — this field holds all three.">${esc(f.filename)}${f.size ? ` <span style="color:var(--text-muted)">${Math.max(1, Math.round(f.size/1024))} KB</span>` : ''}</a>`).join('')}
+        </div>` : ''}
         <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:4px">
             <label style="font-size:var(--fs-xs);color:var(--text-secondary);font-weight:var(--fw-semibold)">Kind of work (scores the agent)</label>
             <select class="apv-type" id="apvType-${t.id}">
@@ -1101,8 +1153,11 @@ function apvCardHtml(t){
             </select>
         </div>
         <textarea class="apv-note" id="apvNote-${t.id}" placeholder="What to change, or why you are rejecting. Required for Request changes and both Reject buttons."></textarea>
-        <div class="apv-attach">
-            <label class="apv-attach-btn" for="apvFile-${t.id}" title="Attach a screenshot, letter or document. It goes onto the task with your feedback.">&#128206; Attach a file</label>
+        <div class="apv-attach" id="apvDrop-${t.id}"
+             ondragover="event.preventDefault();this.classList.add('apv-drop-over')"
+             ondragleave="this.classList.remove('apv-drop-over')"
+             ondrop="event.preventDefault();this.classList.remove('apv-drop-over');apvQueueFiles('${t.id}', event.dataTransfer.files)">
+            <label class="apv-attach-btn" for="apvFile-${t.id}" title="Attach a screenshot, letter or document, or drop one here. It goes onto the task with your feedback.">&#128206; Attach a file <span style="font-weight:var(--fw-regular);color:var(--text-muted)">or drop one here</span></label>
             <input type="file" id="apvFile-${t.id}" multiple style="display:none"
                    onchange="apvQueueFiles('${t.id}', this.files); this.value='';">
             <span id="apvFiles-${t.id}" class="apv-file-list">${apvFileChipsHtml(t.id)}</span>
