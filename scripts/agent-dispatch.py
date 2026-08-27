@@ -289,6 +289,28 @@ ROLE_AGENTS = {
     "rec1hYELb4zS8pjjO": {"name": "AI Task Manager",
                           "agent": "task-manager", "role": "worker",
                           "registerRow": "reczg8BygPFnJMQnh"},
+    # LESSONS ONLY — never dispatched. Added 27 Aug 2026.
+    #
+    # Inbound Comms Triage makes roughly forty create-or-not decisions a day,
+    # more consequential judgement than any other agent makes, and until now it
+    # was the ONE agent in the estate that could not receive a lesson: it had a
+    # register row and a Team Members row but no entry here and no definition
+    # file, so `lessons` had nowhere to land a rule and its Learning Log was
+    # permanently empty.
+    #
+    # The consequence, measured across all 58 rejections: "only show me tasks
+    # like this if it's a major issue" landed on the agent that DRAFTED the
+    # reply, which never chose the task and cannot stop the next one being
+    # created. Kevin taught the wrong agent every time.
+    #
+    # `dispatch: False` is why this entry is safe. It runs its own Go Signal
+    # (09:00/13:00/17:00 via inbound-triage-run.sh) and must never be handed
+    # work by the CEO pass — being in this dict would otherwise make it
+    # dispatchable the moment its register row reads Live, which it does.
+    "recCUfsTXzmVZynEI": {"name": "AI Inbound Comms Triage",
+                          "agent": "inbound-comms-triage", "role": "worker",
+                          "registerRow": "recYy33zkoa099uM2",
+                          "dispatch": False},
 }
 ALL_AGENTS = {**AGENTS, **ROLE_AGENTS}
 
@@ -848,7 +870,11 @@ def fetch_role_roster():
             "name": f.get(REGISTER_FIELDS["name"], ""),
             "goal": f.get(REGISTER_FIELDS["goal"], ""),
             "status": status,
+            # An entry with dispatch=False can receive LESSONS but never WORK.
+            # Its own scheduled job is its Go Signal; the CEO pass must not
+            # hand it tasks on top.
             "dispatchable": tm[0] in ROLE_AGENTS
+                            and ROLE_AGENTS[tm[0]].get("dispatch", True)
                             and status in ("Built", "Live"),
             "learningLog": f.get(REGISTER_FIELDS["learningLog"], ""),
         }
@@ -1828,6 +1854,58 @@ def lesson_source_text(f):
     return hist.split("\n\n")[-1].strip() if hist else ""
 
 
+# ─── WHICH AGENT A LESSON BELONGS TO (27 Aug 2026) ──────────────────
+#
+# Until now every lesson went to whoever DRAFTED the work. Measured across all
+# 58 rejections Kevin had ever made, that was wrong 58 times out of 58: not one
+# was about the draft. "Only show me tasks like this if it's a major issue"
+# landed on the Response agent, which never chose to be given the task and
+# cannot stop the next one being created. He was teaching the wrong agent.
+#
+# The rule is simple once the reason is recorded: a lesson about whether the
+# work should have been DONE belongs to whoever decided it was worth doing; a
+# lesson about how it was WRITTEN belongs to whoever wrote it.
+#
+# For an inbound task the commissioner is always Inbound Comms Triage. For
+# anything else the raising agent IS the commissioner, so nothing changes — and
+# that fallback is deliberate rather than lazy: routing a non-inbound relevance
+# lesson to triage would teach it about work it never saw.
+RELEVANCE_REASONS = (
+    "Already done elsewhere",
+    "Roy owns it",
+    "Not worth my attention",
+    "Duplicate",
+    "Parked for now",
+    "No longer relevant",
+)
+QUALITY_REASON = "The work is wrong"
+TRIAGE_REC_ID = "recCUfsTXzmVZynEI"
+
+# Prefixes triage itself stamps on the tasks it raises. Checked alongside the
+# Inbound Task checkbox because the two disagree on the live board: some rows
+# carry the prefix with the box unticked.
+INBOUND_NAME_RE = re.compile(r"^\s*(INBOUND|MAINTENANCE)\b", re.I)
+
+
+def lesson_destination(fields, raiser_id):
+    """(rec_id, why) — which agent this lesson is FOR.
+
+    Returns the raiser unchanged unless Kevin's reason says the task should not
+    have existed AND the task came in through triage.
+    """
+    reason = sel(fields.get(AF["verdictReason"]))
+    if reason not in RELEVANCE_REASONS:
+        # No reason recorded, or "The work is wrong". Both mean the drafting
+        # agent. An unrecorded reason is NOT guessed at: routing on a guess is
+        # how a rule ends up in a file nobody meant to change.
+        return raiser_id, ""
+    inbound = bool(fields.get(AF["inboundTask"])) or bool(
+        INBOUND_NAME_RE.match(str(fields.get(AF["name"]) or "")))
+    if not inbound:
+        return raiser_id, ""
+    return TRIAGE_REC_ID, reason
+
+
 def pending_lessons():
     """Decided tasks Kevin asked to be remembered that have no lesson yet."""
     return query_tasks(
@@ -1861,7 +1939,10 @@ def cmd_lessons(args):
             continue
         agent_recs = (links(f.get(AF["sentForApprovalBy"]))
                       or links(f.get(AF["teamMember"])))
-        entry = ALL_AGENTS.get(agent_recs[0]) if agent_recs else None
+        raiser = agent_recs[0] if agent_recs else None
+        # Route by WHY, not by who happened to hold the pen.
+        target, rerouted = lesson_destination(f, raiser)
+        entry = ALL_AGENTS.get(target) if target else None
         if not entry:
             # Never silently dropped: a lesson with nowhere to land is the
             # failure, so it stays pending and shows up in the run report.
@@ -1879,6 +1960,12 @@ def cmd_lessons(args):
             # the next run retries — appends are idempotent on the exact line.
             patch_task(task_id, {AF["lessonWrittenAt"]: now_iso()})
             written.append({"task": task_id, "agent": entry["agent"],
+                            # Say when a lesson went somewhere other than the
+                            # obvious place, so a mis-route is visible in the
+                            # report rather than only in a file nobody reads.
+                            "reroutedFrom": (ALL_AGENTS.get(raiser, {}).get("agent", raiser)
+                                             if rerouted else ""),
+                            "reroutedBecause": rerouted,
                             "line": line, "mirrored": mirrored,
                             "lessonCount": res.get("lessonCount"),
                             "crowded": (res.get("lessonCount") or 0)

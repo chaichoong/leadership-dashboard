@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync, readdirSync } from 'node:fs';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -19,6 +19,32 @@ function isIgnored(path) {
     execFileSync('git', ['check-ignore', '-q', path], { cwd: root, stdio: 'ignore' });
     return true;
   } catch { return false; }
+}
+
+/** Which of these paths git ignores — in ONE subprocess, not one each.
+ *
+ * The per-path helper above spawned 124 `git check-ignore` processes against
+ * this file's 5-second budget. Fine in the main checkout; NOT fine in a linked
+ * worktree, where every git invocation first resolves the worktree's gitdir
+ * pointer. Under a full parallel suite it tipped over the timeout and failed a
+ * test that asserts nothing about the code being changed.
+ *
+ * A false red in the push gate is not cosmetic — it is exactly what teaches
+ * people to reach for SKIP_SYNC_TESTS=1, and CLAUDE.md tells every concurrent
+ * session to work in a worktree, so this would have fired on most future
+ * pushes. `--stdin` asks the same question once. (27 Aug 2026)
+ */
+function ignoredAmong(paths) {
+  if (!paths.length) return [];
+  const res = spawnSync('git', ['check-ignore', '--stdin'],
+    { cwd: root, input: paths.join('\n'), encoding: 'utf8' });
+  // 0 = some ignored, 1 = none ignored. Anything else is git itself failing,
+  // and returning [] there would read as "nothing is ignored" — the PASSING
+  // answer. A broken check must never be indistinguishable from a clean one.
+  if (res.status !== 0 && res.status !== 1) {
+    throw new Error(`git check-ignore failed (status ${res.status}): ${res.stderr}`);
+  }
+  return res.stdout.split('\n').map((x) => x.trim()).filter(Boolean);
 }
 
 
@@ -73,7 +99,7 @@ describe('monitoring reports can actually reach git', () => {
     const files = readdirSync(resolve(root, 'monitoring'))
       .filter(f => /^(drift|e2e-sweep|task-sweep)-\d{4}-\d{2}-\d{2}\.md$/.test(f));
     expect(files.length).toBeGreaterThan(0);   // control: an empty glob asserts nothing
-    const ignored = files.filter(f => isIgnored(`monitoring/${f}`));
+    const ignored = ignoredAmong(files.map((f) => `monitoring/${f}`));
     expect(ignored).toEqual([]);
   });
 });

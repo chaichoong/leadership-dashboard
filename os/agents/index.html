@@ -104,6 +104,15 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 .apv-body{font-size:var(--fs-xs);color:var(--text-secondary);white-space:pre-wrap;word-break:break-word;max-height:340px;overflow:auto;border:1px solid var(--border-subtle);border-radius:var(--radius-md);padding:10px 12px;background:var(--bg-surface-2);margin-top:6px}
 .apv-note{width:100%;border:1px solid var(--border-default);background:var(--bg-surface);border-radius:var(--radius-md);padding:8px 10px;font-size:var(--fs-sm);color:var(--text-primary);font-family:inherit;resize:vertical;min-height:44px;margin:8px 0}
 .apv-note:focus{outline:none;border-color:var(--accent)}
+.apv-group{border:1px solid var(--warning-border);border-radius:var(--radius-lg);
+    background:var(--warning-bg);padding:0 0 2px;margin-bottom:var(--space-4)}
+.apv-group-head{display:flex;flex-wrap:wrap;gap:var(--space-3);align-items:center;
+    justify-content:space-between;padding:10px 14px}
+.apv-group-count{font-size:var(--fs-sm);font-weight:var(--fw-bold);color:var(--warning)}
+.apv-group-sub{font-size:var(--fs-xs);color:var(--text-secondary);margin-left:8px}
+.apv-group-actions{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.apv-group-label{font-size:var(--fs-xs);color:var(--text-secondary);font-weight:var(--fw-semibold)}
+.apv-group .apv-card{margin:0 10px 10px}
 .apv-reasons{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:8px;
     padding-top:10px;border-top:1px dashed var(--border-subtle)}
 .apv-reasons-label{font-size:var(--fs-xs);color:var(--text-muted);font-weight:var(--fw-semibold);margin-right:2px}
@@ -1139,7 +1148,7 @@ function renderApprovals(){
     // Two filters can now AND down to nothing (an agent with no tier-1 work),
     // which one filter never could. Say so, with the way out.
     html += shown.length
-        ? shown.map(apvCardHtml).join('')
+        ? apvGroupedHtml(shown)
         : `<div class="empty-state"><p>No approvals match these filters.</p>
            <button class="btn btn-sm" onclick="clearApvFilters()">Clear filters</button></div>`;
     body.innerHTML = html;
@@ -1164,6 +1173,121 @@ function clearApvFilters(){
     renderApprovals();
 }
 window.clearApvFilters = clearApvFilters;
+
+// Mirrors SYSTEM_ALERT_PATTERNS in scripts/agent-dispatch.py — the NAME half
+// only, because the browser cannot see the Inbound Sender the engine matches
+// on first. So this lane under-reports rather than over-reports, which is the
+// safe direction for a list whose job is to prove nothing is being hidden.
+// Kept in sync by tests/approval-gate-defaults.test.js.
+const APV_ALERT_RE = /apps script|cloudflare (kv|worker)|airtable automation|gmail quota/i;
+
+// ─── ONE INCIDENT, ONE DECISION (27 Aug 2026) ────────────────────────
+//
+// 13 of the 60 tasks waiting that day were the SAME four or five incidents
+// written up in fresh words each time: three "Invoices Dashboard Apps Script"
+// tasks, four "Meetings Intake", two "Cloudflare KV", three "Airtable
+// automation". Kevin read and decided each one separately.
+//
+// dupeTaskKey already groups them correctly — verified against those exact 13
+// live task names, which collapse to the right 5. Until now it was only used
+// to FLAG duplicates on the Check these tab; here it does something useful
+// with the same answer.
+//
+// A group of one renders exactly as before, so nothing changes for the 46
+// genuine one-off decisions. Only a real cluster gets a header, and the header
+// is where the whole group can be closed in one verdict.
+function apvGroupTasks(rows){
+    const groups = [];
+    const byKey = {};
+    rows.forEach(t=>{
+        // Fall back to the task id so two nameless tasks can never collide —
+        // an empty key would merge unrelated work into one verdict.
+        const key = dupeTaskKey(t.name || '') || ('id:' + t.id);
+        if(!byKey[key]){ byKey[key] = { key, rows: [] }; groups.push(byKey[key]); }
+        byKey[key].rows.push(t);
+    });
+    return groups;
+}
+
+function apvGroupedHtml(rows){
+    return apvGroupTasks(rows).map(g=>{
+        if(g.rows.length < 2) return apvCardHtml(g.rows[0]);
+        const ids = JSON.stringify(g.rows.map(r=>r.id)).replace(/"/g, '&quot;');
+        const agents = Array.from(new Set(g.rows.map(r=>teamName(r.raiserId)).filter(Boolean)));
+        return `<div class="apv-group" data-apv-group="${esc(g.key)}">
+            <div class="apv-group-head">
+                <div>
+                    <span class="apv-group-count">${g.rows.length} tasks, one thing</span>
+                    <span class="apv-group-sub">${esc(agents.join(', ') || 'no agent recorded')}</span>
+                </div>
+                <div class="apv-group-actions">
+                    <span class="apv-group-label">Reject all ${g.rows.length} because&hellip;</span>
+                    ${APV_REASONS.filter(r=>!r.countsAgainstDraft).map(r=>
+                        `<button class="apv-reason" data-apv-btn
+                           onclick="agRejectGroup(${ids},'${esc(r.key)}')"
+                          >${esc(r.chip)}</button>`).join('')}
+                </div>
+            </div>
+            ${g.rows.map(apvCardHtml).join('')}
+        </div>`;
+    }).join('');
+}
+
+// One verdict for the whole group. Deliberately REJECT-ONLY, and only on the
+// relevance reasons: approving several different pieces of prepared work on one
+// click would be approving text Kevin has not read, which is the single thing
+// the gate exists to prevent. "The work is wrong" is excluded too — that one is
+// a judgement on a specific draft and cannot be made in bulk.
+function agRejectGroup(taskIds, reasonKey){
+    const r = APV_REASON_BY_KEY[reasonKey];
+    if(!r || r.countsAgainstDraft || !taskIds || !taskIds.length) return;
+    const n = taskIds.length;
+    const idsAttr = JSON.stringify(taskIds).replace(/"/g, '&quot;');
+    showModal(`Reject all ${n}?`,
+        `<p style="font-size:var(--fs-sm);color:var(--text-secondary);line-height:1.6">
+           These ${n} tasks are the same thing written up ${n} different ways. This closes all of them.
+           Nothing goes out, and it does <strong>not</strong> count against any agent &mdash; the work was fine,
+           the tasks should not have reached you.<br><br>
+           <strong>Because:</strong> ${esc(r.chip)}<br>
+           <strong>Reason:</strong> ${esc(r.note)}</p>
+         <label style="display:flex;gap:8px;align-items:flex-start;margin-top:12px;background:var(--accent-soft);border-radius:var(--radius-md);padding:10px 12px;cursor:pointer">
+           <input type="checkbox" id="apvGroupRemember" style="margin:3px 0 0">
+           <span style="font-size:var(--fs-sm);color:var(--text-primary);line-height:1.5">Remember this reason, so these stop reaching you.</span>
+         </label>`,
+        `<button class="btn" onclick="closeModal()">Cancel</button>
+         <button class="btn btn-danger" onclick="agConfirmRejectGroup(${idsAttr},'${esc(reasonKey)}')">Reject all ${n}</button>`);
+}
+window.agRejectGroup = agRejectGroup;
+
+async function agConfirmRejectGroup(taskIds, reasonKey){
+    const box = document.getElementById('apvGroupRemember');
+    const remember = !!(box && box.checked);
+    closeModal();
+    const r = APV_REASON_BY_KEY[reasonKey];
+    let done = 0, failed = 0;
+    // One at a time, not Promise.all: a half-failed batch must leave a truthful
+    // queue, and each write carries its own stale-check against the live task.
+    for(let i = 0; i < taskIds.length; i++){
+        const id = taskIds[i];
+        _apvReason[id] = reasonKey;
+        const noteEl = document.getElementById('apvNote-' + id);
+        if(noteEl && !noteEl.value.trim() && r && r.note) noteEl.value = r.note;
+        try {
+            // Remember on the FIRST only. One tick teaches one rule; writing
+            // the same line into an agent file five times is not five lessons.
+            await applyApprovalDecision(id, 'Rejected', remember && i === 0);
+            done++;
+        } catch(e){
+            failed++;
+            console.error('group reject failed for ' + id, e);
+        }
+    }
+    toast(failed
+        ? `Closed ${done}. ${failed} could not be closed and are still in the queue.`
+        : `Closed all ${done}.`);
+    await loadApprovals(); renderApprovals(); renderRegister();
+}
+window.agConfirmRejectGroup = agConfirmRejectGroup;
 
 function apvCardHtml(t){
     const raw = apvSummary(t.agentOutput);
@@ -1812,6 +1936,51 @@ function computeCheckLanes(){
                 text: `Inbound reply "${gf(r,TF.name)||'(Untitled)'}" should have gone out within 24 hours. It has been open ${agoText(r.createdTime)}.`,
                 detail: `Status ${selName(gf(r,TF.status))||'unknown'}. The 24-hour reply promise is at risk.`,
             })) });
+    }
+
+    // 3b. WHAT I DID NOT SHOW YOU (27 Aug 2026).
+    //
+    // Two lanes now keep work OUT of Kevin's approval queue: system alerts are
+    // diverted to the board by agent-dispatch.py, and threads already answered
+    // are filed by triage rather than drafted. Both are the right call and both
+    // are the kind of change that quietly becomes a hole.
+    //
+    // So the suppressed work is listed HERE, in the same twenty-second scan he
+    // already does. This lane was built in the SAME change as the suppression,
+    // never afterwards — a queue that hides things and reports nothing cannot
+    // be told apart from a queue that loses them.
+    //
+    // These are open TASKS, not a separate ledger: a diverted alert stays on
+    // the board, so it is queryable and nothing new has to be trusted.
+    if(String(_openTasksState).indexOf('error') === 0){
+        lanes.push({ lane:'Kept off your queue', error: String(_openTasksState).slice(7) });
+    } else {
+        const alerts = allOpenTasks.filter(r=>{
+            if(selName(gf(r,TF.status)) === 'Approval') return false;   // it DID reach him
+            return APV_ALERT_RE.test(String(gf(r,TF.name)||''));
+        });
+        // Same incident anchor the queue groups by, so three write-ups of one
+        // broken script read as one thing here too.
+        const byKey = {};
+        alerts.forEach(r=>{
+            const k = dupeTaskKey(gf(r,TF.name)||'') || r.id;
+            (byKey[k] = byKey[k] || []).push(r);
+        });
+        lanes.push({ lane:'Kept off your queue', items: Object.keys(byKey).map(k=>{
+            const rows = byKey[k];
+            const oldest = rows.map(r=>r.createdTime).sort()[0];
+            const n = rows.length;
+            return {
+                // Never 'danger'. Nothing here is wrong; it is a report of a
+                // decision made on his behalf, and colouring it as a fault
+                // would train him to ignore the lane that keeps it honest.
+                severity: n >= 3 ? 'warn' : 'info',
+                at: oldest,
+                text: `${n} alert${n===1?'':'s'} about "${gf(rows[0],TF.name)||'(Untitled)'}" stayed on the board instead of asking you to approve them.`,
+                detail: `A machine reporting a breakage is work, not a decision — approving "investigate the failing script" changes nothing. Oldest ${agoText(oldest)}.`
+                        + (n >= 3 ? ' Three or more of the same thing means nobody has fixed it.' : ''),
+            };
+        }) });
     }
 
     // 4. Built/Live agents that wrote nothing to the AI Agent Daily Log today.
