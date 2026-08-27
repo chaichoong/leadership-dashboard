@@ -279,3 +279,58 @@ describe('a reject from Slack records the same reason as a chip', () => {
     });
   });
 });
+
+// ── NOTHING IS SUPPRESSED INVISIBLY (wave 2, 27 Aug 2026) ──────────────────
+//
+// Two lanes now keep work out of Kevin's queue: system alerts are diverted to
+// the board, and threads already answered are filed rather than drafted. Both
+// are right, and both are the kind of change that quietly becomes a hole.
+//
+// The protection he asked for, in his words, is a list he can scan in twenty
+// seconds — built in the SAME change as the suppression, never afterwards.
+describe('what was kept off the queue is listed where Kevin already looks', () => {
+  const page = () => readFileSync(resolve(ROOT, 'os/agents/index.html'), 'utf8');
+
+  it('there is a lane for it on the Check these tab', () => {
+    expect(page()).toContain("lane:'Kept off your queue'");
+  });
+
+  it('the lane reports a broken read instead of an empty list', () => {
+    // An error that renders as "nothing was suppressed" is the failure this
+    // lane exists to prevent, wearing the lane's own clothes.
+    const src = page();
+    const i = src.indexOf("lane:'Kept off your queue', error:");
+    expect(i, 'no error branch on the suppression lane').toBeGreaterThan(-1);
+  });
+
+  it('the page classifier does not drift from the engine name patterns', () => {
+    // The browser cannot see Inbound Sender, so it matches on NAME only and
+    // under-reports rather than over-reports. But the name patterns themselves
+    // must stay identical, or the list stops showing a whole category.
+    const engine = readFileSync(resolve(ROOT, 'scripts/agent-dispatch.py'), 'utf8');
+    const block = engine.match(/SYSTEM_ALERT_PATTERNS = \[([\s\S]*?)\]/)[1];
+    const enginePatterns = [...block.matchAll(/r"([^"]+)"/g)].map((m) => m[1]);
+    const pageRe = page().match(/const APV_ALERT_RE = \/([^/]+)\/i;/);
+    expect(pageRe, 'page has no APV_ALERT_RE').toBeTruthy();
+    // CONTROL: an empty parse on either side would compare '' to '' and pass.
+    expect(enginePatterns.length).toBeGreaterThan(0);
+    // Compare the WHOLE source, not a naive split on '|' — that would tear
+    // `cloudflare (kv|worker)` in half and fail on identical lists.
+    expect(pageRe[1]).toBe(enginePatterns.join('|'));
+  });
+
+  it('suppressed work is never coloured as a fault', () => {
+    // Nothing in this lane is wrong. Colouring it danger would train him to
+    // ignore the one lane whose job is proving nothing is hidden.
+    const src = page();
+    const lane = src.slice(src.indexOf("lane:'Kept off your queue', items:"),
+                           src.indexOf('// 4. Built/Live agents'));
+    expect(lane).not.toContain("severity: 'danger'");
+    expect(lane).toContain("'warn'");
+  });
+
+  it('a repeat of the same incident is escalated, not just repeated', () => {
+    const src = page();
+    expect(src).toMatch(/Three or more of the same thing means nobody has fixed it/);
+  });
+});

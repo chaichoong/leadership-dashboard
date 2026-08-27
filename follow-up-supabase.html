@@ -2680,6 +2680,10 @@
         'recbHvWqlQBbunF2F', // AI Worker — Researcher
         'recqmKBmq8ZGkxVH9', // AI Worker — Analyst
         'recJ8J8idWE8d97tH', // AI Inbound Comms Response (role agent, dispatchable since 24 Aug 2026)
+        // Lessons-only in agent-dispatch.py (dispatch:false) — it runs its own
+        // Go Signal and is never handed work. It belongs HERE regardless: this
+        // set answers "does an AI agent own this task", not "who can be sent work".
+        'recCUfsTXzmVZynEI', // AI Inbound Comms Triage (added 27 Aug 2026)
         'recjh6mmaF8KJW8t3', // AI Creditor Management (role agent, dispatchable since 25 Aug 2026)
         'rec1hYELb4zS8pjjO', // AI Task Manager (role agent, dispatchable since 25 Aug 2026)
     ]);

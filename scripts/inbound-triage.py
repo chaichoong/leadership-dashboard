@@ -508,6 +508,60 @@ def cmd_note(msg_id, action, reason):
     print(json.dumps({"noted": action, "id": msg_id}))
 
 
+# ─── HAS THIS ALREADY BEEN DEALT WITH? (27 Aug 2026) ────────────────
+#
+# 24 of the 58 rejections Kevin had ever made — 41%, the single largest group —
+# were "already dealt with elsewhere". He had replied himself, or Roy had, or
+# another task had covered it, and the agent drafted a reply to a thread that
+# was already answered. It could not have known: nothing in the pipeline ever
+# looked at what had been SENT.
+#
+# The iMessage lane has had this since it was built (`imessage-sweep.py
+# sentdump`). Gmail never did. This is the same check on the same shape: one
+# listing of the sent folder, reduced to thread id -> the newest send.
+#
+# It is produced as a FILE by the runner before the agent starts, exactly like
+# the iMessage dumps, because a check the agent has to remember to run is a
+# check that gets skipped.
+#
+# THE CONTROL. An empty sent folder over a working week is not a quiet week, it
+# is a broken query or a dead credential — and a broken query here reads as
+# "nothing has been answered", which would send the agent to draft replies to
+# every thread Kevin has already handled. So zero sends across the window FAILS
+# rather than returning an empty map. See feedback_a_running_job_is_not_a_working_job.
+SENTCHECK_MIN_DAYS_FOR_CONTROL = 3
+
+
+def cmd_sentcheck(days):
+    """thread id -> newest sent timestamp (ms), for the last `days` days."""
+    days = max(1, int(days))
+    messages, truncated = worker_list(q="in:sent newer_than:%dd" % days)
+    threads = {}
+    for m in messages:
+        tid = m.get("threadId")
+        if not tid:
+            continue
+        ts = int(m.get("internalDate") or 0)
+        if ts > threads.get(tid, 0):
+            threads[tid] = ts
+    out = {
+        "days": days,
+        "sentMessages": len(messages),
+        "threads": threads,
+        # The agent MUST know when the listing was cut short: a truncated sent
+        # folder means "not found here" no longer implies "not answered".
+        "truncated": truncated,
+    }
+    if not messages and days >= SENTCHECK_MIN_DAYS_FOR_CONTROL:
+        out["error"] = (
+            "CONTROL FAILED: zero sent messages in %d days. Treat every thread "
+            "as UNCHECKED, not as unanswered — this is a broken query or a dead "
+            "credential, and drafting on it would reply to threads already "
+            "handled." % days)
+    print(json.dumps(out, indent=1))
+    return 1 if out.get("error") else 0
+
+
 def cmd_mark(upto_ms):
     state = read_state()
     # ENFORCED truncation freeze (not just an instruction): the last scan
@@ -735,6 +789,8 @@ def main(argv):
         if not msg_id or not action:
             fail("note needs --id and --do")
         cmd_note(msg_id, action, opt("--reason", ""))
+    elif cmd == "sentcheck":
+        return cmd_sentcheck(opt("--days", "7"))
     elif cmd == "mark":
         upto = opt("--upto")
         if not upto:
