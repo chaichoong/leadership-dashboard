@@ -1480,12 +1480,31 @@ if (tabId === 'comms') lazyLoadFrame('commsFrame', 'follow-up');
                     attDrop.innerHTML = '<span style="color:var(--text-muted,#8A928C);font-size:12px">Uploading...</span>';
                     try {
                         for (const file of files) {
-                            const formData = new FormData();
-                            formData.append('file', file);
-                            const res = await fetch(`https://content.airtable.com/v0/${BASE_ID}/${TABLES.tasks}/${taskId}/${TASK_FIELDS.attachments}/uploadAttachment`, {
+                            // Airtable's content endpoint takes base64 JSON and
+                            // nothing else. This used to POST multipart FormData
+                            // to a path carrying the TABLE id, which returns 404
+                            // — probed live 26 Aug 2026, so quick-task
+                            // attachments had never once uploaded. Multipart to
+                            // the correct path returns 400. Both wrong shapes
+                            // are asserted against in tests/airtable-upload-shape.test.js.
+                            const b64 = await new Promise((resolve, reject) => {
+                                const r = new FileReader();
+                                r.onerror = () => reject(new Error('could not read ' + file.name));
+                                r.onload = () => {
+                                    const v = String(r.result || '');
+                                    const i = v.indexOf(',');
+                                    i === -1 ? reject(new Error('unreadable file ' + file.name)) : resolve(v.slice(i + 1));
+                                };
+                                r.readAsDataURL(file);
+                            });
+                            const res = await fetch(`https://content.airtable.com/v0/${BASE_ID}/${taskId}/${TASK_FIELDS.attachments}/uploadAttachment`, {
                                 method: 'POST',
-                                headers: { Authorization: 'Bearer ' + PAT },
-                                body: formData
+                                headers: { Authorization: 'Bearer ' + PAT, 'Content-Type': 'application/json' },
+                                body: JSON.stringify({
+                                    contentType: file.type || 'application/octet-stream',
+                                    filename: file.name,
+                                    file: b64
+                                })
                             });
                             if (!res.ok) throw new Error('Upload failed: ' + res.status);
                         }

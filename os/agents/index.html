@@ -104,6 +104,13 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 .apv-note:focus{outline:none;border-color:var(--accent)}
 .apv-actions{display:flex;gap:8px;flex-wrap:wrap}
 .apv-type{background:var(--bg-surface);border:1px solid var(--border-default);color:var(--text-primary);padding:4px 8px;border-radius:var(--radius-sm);font-size:var(--fs-xs);font-family:inherit}
+.apv-attach{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:6px}
+.apv-attach-btn{border:1px dashed var(--border-default);border-radius:var(--radius-md);padding:4px 10px;font-size:var(--fs-xs);font-weight:var(--fw-semibold);color:var(--text-secondary);cursor:pointer}
+.apv-attach-btn:hover{border-color:var(--accent);color:var(--accent)}
+.apv-file-list{display:flex;gap:6px;flex-wrap:wrap}
+.apv-file-chip{display:inline-flex;align-items:center;gap:6px;background:var(--bg-subtle);border-radius:var(--radius-full);padding:2px 4px 2px 10px;font-size:var(--fs-xs);color:var(--text-primary)}
+.apv-file-x{border:none;background:none;color:var(--text-muted);cursor:pointer;font-size:14px;line-height:1;padding:0 4px;font-family:inherit}
+.apv-file-x:hover{color:var(--danger)}
 
 /* Check list (Zone B) */
 .chk-item{display:flex;gap:10px;align-items:flex-start;border:1px solid var(--border-default);border-left:4px solid var(--warning);border-radius:var(--radius-md);background:var(--bg-surface);padding:10px 14px;margin-bottom:8px}
@@ -327,6 +334,7 @@ const TF = {
     slackBaseline:    'fldxsqj9JSRBGNyT9', // when the Slack card went out (submission proxy)
     inboundTask:      'fldueazD67F7fUGee', // Inbound Communication Task checkbox
     inboundUrl:       'fldXf1p0vtHqOZcKl', // Gmail thread URL (or imessage:<guid>)
+    attachments:      'fldEbs9cscRr8elcw', // multipleAttachments — files Kevin adds with his feedback
     approver:         'fldLLAG5HQPEFEfE5', // singleCollaborator — whose approval a task waits on
     // The learning loop (Kevin's ruling, 26 Aug 2026). Ticking rememberThis is
     // all any decision surface does — scripts/agent-dispatch.py lessons then
@@ -835,6 +843,111 @@ function updateApprovalsTabBadge(){
     badge.style.display = n ? '' : 'none';
 }
 
+// Files Kevin attaches to his feedback, queued per task until he decides.
+// Airtable's cap is on the FILE, not the encoded body: 4.9MB raw went up
+// fine as a 6.6MB base64 request (probed live 26 Aug 2026), so 5MB raw is
+// the real ceiling. Enforced here so an oversized file is refused at the
+// door rather than blocking a decision half way through.
+const APV_MAX_FILE_BYTES = 5 * 1024 * 1024;
+
+function apvFilesFor(taskId){
+    return (_apvDrafts[taskId] && _apvDrafts[taskId].files) || [];
+}
+
+function apvQueueFiles(taskId, fileList){
+    const incoming = Array.from(fileList || []);
+    if(!incoming.length) return;
+    const already = apvFilesFor(taskId);
+    const sameFile = (a,b) => a.name===b.name && a.size===b.size && a.lastModified===b.lastModified;
+    const tooBig = [], empty = [], dupes = [], ok = [];
+    incoming.forEach(f=>{
+        if(f.size > APV_MAX_FILE_BYTES) tooBig.push(f);
+        // An empty file uploads as an empty payload, which Airtable refuses —
+        // and because the upload gates the decision, one would block every
+        // button on the card until Kevin worked out why.
+        else if(f.size === 0) empty.push(f);
+        else if(already.some(q=>sameFile(q,f)) || ok.some(q=>sameFile(q,f))) dupes.push(f);
+        else ok.push(f);
+    });
+    if(ok.length) _apvDrafts[taskId] = Object.assign(_apvDrafts[taskId]||{}, { files: already.concat(ok) });
+    const say = (list, why) => { if(list.length) toast(list.map(f=>f.name).join(', ') + ' ' + why); };
+    say(tooBig, 'is over 5MB, which Airtable will not take. Not attached.');
+    say(empty, 'is empty, so there is nothing to attach.');
+    say(dupes, 'is already attached to this decision.');
+    renderApvFileChips(taskId);
+}
+window.apvQueueFiles = apvQueueFiles;
+
+function apvRemoveFile(taskId, idx){
+    const files = apvFilesFor(taskId).slice();
+    files.splice(idx, 1);
+    _apvDrafts[taskId] = Object.assign(_apvDrafts[taskId]||{}, { files });
+    renderApvFileChips(taskId);
+}
+window.apvRemoveFile = apvRemoveFile;
+
+function apvFileChipsHtml(taskId){
+    const files = apvFilesFor(taskId);
+    if(!files.length) return '';
+    return files.map((f,i)=>`<span class="apv-file-chip">&#128206; ${esc(f.name)}
+        <span style="color:var(--text-muted)">${Math.max(1, Math.round(f.size/1024))} KB</span>
+        <button type="button" class="apv-file-x" title="Remove this file" onclick="apvRemoveFile('${taskId}',${i})">&times;</button></span>`).join('');
+}
+
+function renderApvFileChips(taskId){
+    const el = document.getElementById('apvFiles-'+taskId);
+    if(el) el.innerHTML = apvFileChipsHtml(taskId);
+}
+
+// Airtable's content endpoint takes base64 JSON and nothing else: multipart
+// returns 400, and putting the TABLE id in the path returns 404 (both probed
+// live, 26 Aug 2026 — the quick-task uploader in js/shared.js had been doing
+// exactly that and has never once worked).
+function apvFileToBase64(file){
+    return new Promise((resolve, reject)=>{
+        const r = new FileReader();
+        r.onerror = ()=>reject(new Error('could not read ' + file.name));
+        r.onload = ()=>{
+            const s = String(r.result||'');
+            const comma = s.indexOf(',');
+            comma === -1 ? reject(new Error('unreadable file ' + file.name)) : resolve(s.slice(comma+1));
+        };
+        r.readAsDataURL(file);
+    });
+}
+
+async function uploadOneApprovalAttachment(taskId, file){
+    const b64 = await apvFileToBase64(file);
+    const res = await fetch(`https://content.airtable.com/v0/${BASE_ID}/${taskId}/${TF.attachments}/uploadAttachment`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${PAT}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            contentType: file.type || 'application/octet-stream',
+            filename: file.name,
+            file: b64,
+        }),
+    });
+    if(res.status===401||res.status===403){ showAuthBar(); throw new Error('auth'); }
+    if(!res.ok) throw new Error(`${file.name}: Airtable refused the upload (${res.status})`);
+}
+
+// Upload the queue file by file, taking each one OUT of the queue the moment
+// it lands and remembering its name on the draft. Three things follow, and
+// all three were review findings: a mid-batch failure never re-uploads what
+// already went up; a file Kevin adds mid-flight is not silently discarded
+// (the queue is filtered, never overwritten); and if the DECISION then fails,
+// the remembered names survive the retry so the trail still names the files.
+async function uploadQueuedApprovalFiles(taskId){
+    for(const file of apvFilesFor(taskId).slice()){
+        await uploadOneApprovalAttachment(taskId, file);
+        const d = _apvDrafts[taskId] = _apvDrafts[taskId] || {};
+        d.files = (d.files || []).filter(f => f !== file);
+        d.uploaded = (d.uploaded || []).concat(file.name);
+        renderApvFileChips(taskId);
+    }
+    return (_apvDrafts[taskId] && _apvDrafts[taskId].uploaded) || [];
+}
+
 // Half-typed notes and chosen work types, keyed by task id. Page-level so a
 // draft survives ANY re-render, including one whose filter hides the card it
 // belongs to (a per-render snapshot lost exactly that case).
@@ -845,6 +958,8 @@ function snapshotApprovalDrafts(){
         if(n) _apvDrafts[t.id] = Object.assign(_apvDrafts[t.id]||{}, { note: n.value });
         const ty = document.getElementById('apvType-'+t.id);
         if(ty) _apvDrafts[t.id] = Object.assign(_apvDrafts[t.id]||{}, { type: ty.value });
+        const rm = document.getElementById('apvRemember-'+t.id);
+        if(rm) _apvDrafts[t.id] = Object.assign(_apvDrafts[t.id]||{}, { remember: rm.checked });
     });
 }
 function restoreApprovalDrafts(){
@@ -853,6 +968,9 @@ function restoreApprovalDrafts(){
         if(n && d.note) n.value = d.note;
         const ty = document.getElementById('apvType-'+id);
         if(ty && d.type) ty.value = d.type;
+        const rm = document.getElementById('apvRemember-'+id);
+        if(rm && d.remember) rm.checked = true;
+        renderApvFileChips(id);   // queued files survive a filter click
     });
 }
 
@@ -983,6 +1101,12 @@ function apvCardHtml(t){
             </select>
         </div>
         <textarea class="apv-note" id="apvNote-${t.id}" placeholder="What to change, or why you are rejecting. Required for Request changes and both Reject buttons."></textarea>
+        <div class="apv-attach">
+            <label class="apv-attach-btn" for="apvFile-${t.id}" title="Attach a screenshot, letter or document. It goes onto the task with your feedback.">&#128206; Attach a file</label>
+            <input type="file" id="apvFile-${t.id}" multiple style="display:none"
+                   onchange="apvQueueFiles('${t.id}', this.files); this.value='';">
+            <span id="apvFiles-${t.id}" class="apv-file-list">${apvFileChipsHtml(t.id)}</span>
+        </div>
         <label style="display:flex;align-items:center;gap:6px;font-size:var(--fs-xs);color:var(--text-secondary);margin-top:6px">
             <input type="checkbox" id="apvRemember-${t.id}" style="margin:0">
             Remember this reason — the agent applies it to every future task
@@ -1070,6 +1194,7 @@ async function applyApprovalDecision(taskId, outcome, remember){
     const card = document.querySelector(`[data-apv-card="${taskId}"]`);
     const btns = card ? Array.from(card.querySelectorAll('[data-apv-btn]')) : [];
     btns.forEach(b=>{ b.disabled = true; });
+    let phase = 'check';
     try {
         // STALE-APPROVAL GUARD (same principle as the Slack baseline): a click
         // approves what was on screen when the card RENDERED. Re-read the task
@@ -1088,6 +1213,14 @@ async function applyApprovalDecision(taskId, outcome, remember){
             await loadApprovals(); renderApprovals(); renderRegister();
             return;
         }
+
+        // Files go up BEFORE the decision is written: if Airtable refuses
+        // one, nothing has been decided and Kevin still has his queue. They
+        // are cleared from the queue the moment they land, so a later
+        // failure on the decision itself cannot upload them twice.
+        phase = 'upload';
+        const attachedNames = await uploadQueuedApprovalFiles(taskId);
+        phase = 'decide';
 
         const nowIso = new Date().toISOString();
         const payload = {};
@@ -1134,11 +1267,13 @@ async function applyApprovalDecision(taskId, outcome, remember){
 
         const agentLabel = teamName(t.raiserId) || 'the agent';
         const rememberLine = (remember && note) ? ` Kept as a standing rule for ${agentLabel}.` : '';
+        const attachComment = attachedNames.length
+            ? ` Attached: ${attachedNames.join(', ')}.` : '';
         const line = outcome==='Rejected'
-            ? `Rejected. Reason: ${note}${rememberLine}`
+            ? `Rejected. Reason: ${note}${attachComment}${rememberLine}`
             : outcome==='Changes requested'
-                ? `Changes requested. ${note}${rememberLine}`
-                : `${outcome}. Back to ${agentLabel} to carry out.${note ? ' Note: '+note : ''}${rememberLine}`;
+                ? `Changes requested. ${note}${attachComment}${rememberLine}`
+                : `${outcome}. Back to ${agentLabel} to carry out.${note ? ' Note: '+note : ''}${attachComment}${rememberLine}`;
         await postTaskComment(taskId, line);
 
         allApprovals = allApprovals.filter(x=>x.id!==taskId);
@@ -1153,7 +1288,9 @@ async function applyApprovalDecision(taskId, outcome, remember){
     } catch(e){
         if(e.message==='auth') return;
         console.error('approval decision failed', e);
-        toast('Could not save the decision: ' + (e && e.message || e));
+        toast(phase === 'upload'
+            ? 'File not attached, so nothing was decided: ' + (e && e.message || e)
+            : 'Could not save the decision: ' + (e && e.message || e));
         btns.forEach(b=>{ b.disabled = false; });
     }
 }
