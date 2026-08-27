@@ -168,15 +168,44 @@ describe('the diff itself', () => {
     expect(r.json.dead_mapped_ids).toContain('fldDEADDEADDEAD1');
   });
 
+  // The date is PINNED via --today rather than derived here. Deriving it was a
+  // real bug: this test used `new Date().toISOString()` (UTC) while the script
+  // used `datetime.now()` (LOCAL), so during BST they disagreed for the hour
+  // after midnight and the suite went red for a reason unrelated to drift.
+  // A test that guesses which clock its subject read is a test that fails at
+  // 00:30 and teaches people to bypass the gate.
+  const PINNED = '2026-08-27';
+
   it('never diffs today against today — that would report clean for ever', () => {
     const s = schema(60);
     ready(s);
-    const today = new Date().toISOString().slice(0, 10);
-    writeFileSync(join(box, `schema-${today}.json`), JSON.stringify(schema(1)));
-    const r = scan(['--schema-file', writeSchema('s.json', s)]);
+    writeFileSync(join(box, `schema-${PINNED}.json`), JSON.stringify(schema(1)));
+    const r = scan(['--today', PINNED, '--schema-file', writeSchema('s.json', s)]);
     // Today's own snapshot is skipped, so with no earlier one it says so
     // rather than silently comparing against itself.
-    expect(r.json.compared_against).not.toBe(`schema-${today}.json`);
+    expect(r.json.compared_against).not.toBe(`schema-${PINNED}.json`);
+  });
+
+  it('never diffs against a snapshot dated in the future either', () => {
+    const s = schema(60);
+    ready(s);
+    // A clock that jumped forward, then back, leaves a later-dated snapshot on
+    // disk. Names sort lexicographically, so the newest name wins — and before
+    // this was fixed that meant diffing against the future and reporting clean.
+    writeFileSync(join(box, 'schema-2099-01-01.json'), JSON.stringify(schema(1)));
+    writeFileSync(join(box, 'schema-2026-08-01.json'), JSON.stringify(schema(60)));
+    const r = scan(['--today', PINNED, '--schema-file', writeSchema('s.json', s)]);
+    expect(r.json.compared_against).not.toBe('schema-2099-01-01.json');
+    expect(r.json.compared_against).toBe('schema-2026-08-01.json');
+  });
+
+  it('picks the most recent EARLIER snapshot, not just any older one', () => {
+    const s = schema(60);
+    ready(s);
+    writeFileSync(join(box, 'schema-2026-01-01.json'), JSON.stringify(schema(1)));
+    writeFileSync(join(box, 'schema-2026-08-26.json'), JSON.stringify(schema(60)));
+    const r = scan(['--today', PINNED, '--schema-file', writeSchema('s.json', s)]);
+    expect(r.json.compared_against).toBe('schema-2026-08-26.json');
   });
 });
 

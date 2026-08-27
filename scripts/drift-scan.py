@@ -230,9 +230,18 @@ def main(argv=None):
     p.add_argument("--out", default=os.path.join(REPO, "monitoring"))
     p.add_argument("--json", action="store_true")
     p.add_argument("--schema-file", help="read a snapshot instead of calling Airtable")
+    # Injectable so tests are deterministic. A test that derives the date
+    # itself has to guess which clock this script read: the test used UTC
+    # (new Date().toISOString()) while this used LOCAL time, so for the one
+    # hour after midnight in BST they disagreed and the suite failed for a
+    # reason that had nothing to do with drift (27 Aug 2026).
+    p.add_argument("--today", help="override today's date (YYYY-MM-DD), for tests")
     a = p.parse_args(argv)
 
-    today = datetime.now().strftime("%Y-%m-%d")
+    # LOCAL time on purpose: the monitoring reports are filed by local day and
+    # Kevin reads them that way. The one rule is that everything downstream
+    # uses THIS value, never its own clock read.
+    today = a.today or datetime.now().strftime("%Y-%m-%d")
 
     if a.schema_file:
         try:
@@ -260,10 +269,19 @@ def main(argv=None):
 
     # Diff against the most recent EARLIER snapshot, never today's own.
     prior_path, prior = None, None
+    # STRICTLY EARLIER than today. Excluding only "schema-<today>.json" was not
+    # enough: the names sort lexicographically, so any snapshot dated today or
+    # later would be picked as the "prior" one and the scan would diff a
+    # snapshot against itself (or against the future) and report clean for ever.
+    def snap_date(name):
+        """The YYYY-MM-DD in "schema-<date>.json", or None if it is not one."""
+        stem = name[len("schema-"):-len(".json")]
+        return stem if re.fullmatch(r"\d{4}-\d{2}-\d{2}", stem) else None
+
     snaps = sorted(f for f in os.listdir(a.out)
                    if f.startswith("schema-") and f.endswith(".json")
-                   and f != "schema-%s.json" % today
-                   and f != "schema-baseline.json")
+                   and snap_date(f) is not None
+                   and snap_date(f) < today)
     if snaps:
         prior_path = os.path.join(a.out, snaps[-1])
     elif os.path.exists(os.path.join(a.out, "schema-baseline.json")):
