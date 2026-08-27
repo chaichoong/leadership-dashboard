@@ -104,6 +104,8 @@ const AF = {
     // future run. Feedback History is the durable archive, because
     // approvalFeedback is cleared by the next submit.
     rememberThis:    'fldZurhdHutYIDKVx',
+    // Why he decided as he did — see AF.verdictReason in agent-dispatch.py.
+    verdictReason:   'fldF9Bs4N5mttQvtl',
     feedbackHistory: 'fldOzsq68lhfprKJu',
     slackTs:         'fldHTaX3wP9VhD5Oz',
     slackBaseline:   'fldxsqj9JSRBGNyT9',
@@ -593,7 +595,15 @@ function buildApprovalBlocks(t, agent, warn) {
             type: 'mrkdwn',
             text: 'Nothing has been sent, filed or actioned yet.\n'
                 + ':white_check_mark:  *approve* — the agent goes and does it, then closes the task\n'
-                + ':x:  *reject* — kill this piece of work entirely, it should not happen. Counts against the agent\n'
+                + ':x:  *reject* — kill this piece of work entirely, it should not happen\n'
+                // The web queue asks WHY with seven chips. Slack has no chips,
+                // so one word at the start of the reply is the equivalent — and
+                // it decides whether the agent is scored down for it, exactly
+                // as the chip does. Advertised HERE because a shortcut nobody
+                // is told about is a shortcut nobody uses.
+                + '       _with a reply starting_ `done` `roy` `noise` `dupe` `park` `stale` — '
+                + 'the task should not have reached you, and the agent is not marked down\n'
+                + '       _or_ `wrong` — the draft itself is bad. That one does count against it\n'
                 + ':brain:  *reject and remember* — same as reject, but reply with the reason and '
                 + 'the agent keeps it as a standing rule so it stops raising these\n'
                 + ':speech_balloon:  *changes* — just reply in this thread with what to change. No emoji needed. '
@@ -683,9 +693,52 @@ async function threadReply(env, channel, ts, text) {
 
 // Apply the approver's verdict. Same semantics as the task drawer: approve
 // hands the task BACK to the agent (due today) to carry the action out; reject
+// ─── THE SAME REASONS AS THE PAGE, AS ONE WORD ──────────────────────
+//
+// The web queue asks WHY with seven chips (os/agents/index.html, 27 Aug 2026),
+// because all 58 rejections Kevin had ever made were classified that day and
+// not one was about the draft — every one was about the task existing. Slack
+// has no chips, so the equivalent is a thread reply that STARTS with one of
+// these words, exactly as ":brain:" is the Slack equivalent of the remember
+// tickbox.
+//
+// This is matching, not inferring. The word is one Kevin chose to type, the
+// same act as tapping a chip. A reply that starts with none of them records NO
+// reason rather than a guessed one — an unclassified rejection still counts
+// against the agent, and the accuracy report says how many there are, which is
+// honest. A guessed reason would not be.
+//
+// Keys MUST stay identical to APV_REASONS in os/agents/index.html and to
+// RELEVANCE_REASONS in js/agent-accuracy.js.
+const SLACK_REASON_WORDS = [
+    [/^done\b[:,.\s-]*/i,     'Already done elsewhere'],
+    [/^roy\b[:,.\s-]*/i,      'Roy owns it'],
+    [/^noise\b[:,.\s-]*/i,    'Not worth my attention'],
+    [/^dupe\b[:,.\s-]*/i,     'Duplicate'],
+    [/^park\b[:,.\s-]*/i,     'Parked for now'],
+    [/^stale\b[:,.\s-]*/i,    'No longer relevant'],
+    [/^wrong\b[:,.\s-]*/i,    'The work is wrong'],
+];
+
+/** Split a leading reason word off a thread reply.
+ *  → { reason, note }. reason is '' when the reply names none. */
+export function splitReason(text) {
+    const raw = String(text || '').trim();
+    for (const [re, reason] of SLACK_REASON_WORDS) {
+        const m = raw.match(re);
+        if (m) {
+            const rest = raw.slice(m[0].length).trim();
+            // A bare word is a complete instruction: the page fills the sentence
+            // from the chip, so Slack must not demand more typing than the page.
+            return { reason, note: rest };
+        }
+    }
+    return { reason: '', note: raw };
+}
+
 // closes it. Nothing here ever marks approved work Completed — that is the
 // agent's job, after it has actually done the thing.
-async function applyDecision(env, t, outcome, decidedVia, note, approver, remember) {
+async function applyDecision(env, t, outcome, decidedVia, note, approver, remember, reason) {
     approver = approver || APPROVERS.kevin;
     const now = new Date().toISOString();
     const fields = {
@@ -715,6 +768,9 @@ async function applyDecision(env, t, outcome, decidedVia, note, approver, rememb
     // comments either. Without this the whole point of an amendment — telling
     // the agent what to change — would be lost.
     if (note) fields[AF.approvalFeedback] = note;
+    // WHY, recorded as data. Without it a reject from the phone degrades the
+    // score in a way a reject from the desk no longer does.
+    if (reason) fields[AF.verdictReason] = reason;
     // The durable copy. approvalFeedback is cleared by the next submit, so
     // without this the words that caused a redo are gone within the hour and
     // the lesson writer has nothing left to read.
@@ -735,7 +791,10 @@ async function applyDecision(env, t, outcome, decidedVia, note, approver, rememb
     await airtable(env, 'PATCH', `/${TABLE_TASKS}/${t.id}`, { fields, typecast: true });
     const agent = await agentName(env, t.agentId);
     const line = outcome === 'Rejected'
-        ? `Rejected by ${approver.name} ${decidedVia}. Closed, and counted against ${agent || 'the agent'}.`
+        ? `Rejected by ${approver.name} ${decidedVia}. Closed`
+              + (reason && reason !== 'The work is wrong'
+                  ? `. Not counted against ${agent || 'the agent'} — the task should not have reached you (${reason.toLowerCase()}).`
+                  : `, and counted against ${agent || 'the agent'}.`)
               + (remember && note ? ` ${agent || 'The agent'} will remember your reason from now on.` : '')
               + (note ? `\n\nReason: ${note}` : '')
         : outcome === 'Changes requested'
@@ -857,9 +916,14 @@ async function processResponses(env, channels, log) {
         const staleNote = (isStale(t) && outcome === 'Changes requested')
             ? '\n\n(The task had changed since I posted it, so read the current version before redoing it.)'
             : '';
+        // Only a REJECT carries a reason. On an approve or an amendment the
+        // leading word is just the first word of Kevin's sentence, and eating
+        // it would silently change what the agent is told to do.
+        const parsed = outcome === 'Rejected' ? splitReason(note) : { reason: '', note };
+        const finalNote = parsed.note ? parsed.note + staleNote : staleNote.trim();
         const line = await applyDecision(env, t, outcome, 'in Slack',
-            note ? note + staleNote : staleNote.trim(), approver,
-            !!(reaction && reaction.remember));
+            finalNote, approver,
+            !!(reaction && reaction.remember), parsed.reason);
         await threadReply(env, channel, t.ts,
             outcome === 'Changes requested'
                 ? `:writing_hand: Sent back with your notes. ${esc(line.split('\n')[0])}`

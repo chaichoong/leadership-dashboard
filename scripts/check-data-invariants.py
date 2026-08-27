@@ -141,6 +141,37 @@ INVARIANTS = [
         "fields": ["Task Name", "Status", "Processed by AI Agent"],
     },
     {
+        # THE SPLIT DEPENDS ENTIRELY ON THIS FIELD BEING WRITTEN.
+        # 27 Aug 2026: all 58 rejections Kevin had ever made were classified and
+        # NOT ONE was about the draft — every one was about the task existing.
+        # So a rejection with no reason recorded is the old, wrong behaviour
+        # returning, and it returns SILENTLY: the score simply stays at 66.9%
+        # instead of the 96.7% the drafts are actually worth, and the guardrail
+        # bands keep tightening on agents that did nothing wrong. Nothing errors
+        # and every surface looks healthy, which is exactly the shape of failure
+        # this file exists for.
+        #
+        # Only rejections decided AFTER the chips shipped count: everything
+        # before carries no reason and nothing may guess one on Kevin's behalf.
+        # The date is the line between "not built yet" and "built, not working".
+        "name": "rejections-record-why",
+        "table": TASKS,
+        "incident": "27 Aug 2026 — 58 of 58 rejections carried no reason, so every one counted against the agent that wrote the draft rather than whatever created the task",
+        "asserts": "a rejection decided after 27 Aug 2026 carries a Verdict Reason",
+        "violation": (
+            "AND({Approval Outcome} = 'Rejected', "
+            "LEN({Verdict Reason} & '') = 0, "
+            "IS_AFTER({Approved At}, DATETIME_PARSE('2026-08-28', 'YYYY-MM-DD')))"
+        ),
+        "control": "{Approval Outcome} = 'Rejected'",
+        "control_means": "rejections (the population that loses its reason)",
+        # TRUE for every record and naming both fields, so a rename is caught
+        # even while the control is legitimately empty.
+        "field_probe": ("OR(LEN({Verdict Reason} & '') >= 0, "
+                        "LEN({Approval Outcome} & '') >= 0)"),
+        "fields": ["Task Name", "Approval Outcome", "Approved At"],
+    },
+    {
         # THE LEARNING LOOP (26 Aug 2026). Kevin ticks "reject and remember"
         # when his reason should become a standing rule for that agent;
         # scripts/agent-dispatch.py lessons writes it into the agent's own
