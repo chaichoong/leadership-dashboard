@@ -985,14 +985,13 @@ function apvCardHtml(t){
         <textarea class="apv-note" id="apvNote-${t.id}" placeholder="What to change, or why you are rejecting. Required for Request changes and both Reject buttons."></textarea>
         <label style="display:flex;align-items:center;gap:6px;font-size:var(--fs-xs);color:var(--text-secondary);margin-top:6px">
             <input type="checkbox" id="apvRemember-${t.id}" style="margin:0">
-            Remember this too, so the agent applies it from now on
+            Remember this reason — the agent applies it to every future task
         </label>
         <div class="apv-actions">
             <button class="btn btn-success" data-apv-btn onclick="agDecide('${t.id}','Approved as-is')">Approve</button>
             <button class="btn" data-apv-btn onclick="agDecide('${t.id}','Approved with minor edits')" title="Approved, but you tidied it first. Still counts as accurate.">Approve with minor edits</button>
             <button class="btn" data-apv-btn onclick="agDecide('${t.id}','Changes requested')" title="Goes back to the agent to redo. Needs a comment.">Request changes</button>
-            <button class="btn btn-danger" data-apv-btn onclick="agDecide('${t.id}','Rejected')" title="Closes the task for good. Nothing is learned — use this when the reason is a one-off.">Reject and close</button>
-            <button class="btn btn-danger" data-apv-btn onclick="agDecide('${t.id}','Rejected',true)" title="Closes the task AND keeps your reason as a standing rule in the agent's instructions, so it stops raising work like this.">Reject and remember</button>
+            <button class="btn btn-danger" data-apv-btn onclick="agDecide('${t.id}','Rejected')" title="Closes the task for good. Tick Remember above if the reason should become a standing rule.">Reject and close</button>
         </div>
     </div>`;
 }
@@ -1006,8 +1005,9 @@ function agDecide(taskId, outcome, remember){
     if(APPROVAL_OUTCOMES.indexOf(outcome)===-1) return;
     const noteEl = document.getElementById('apvNote-'+taskId);
     const note = (noteEl && noteEl.value || '').trim();
-    // The tickbox is the "remember" route for the other three verdicts; the
-    // second Reject button is the same thing with one click instead of two.
+    // The tickbox is the ONLY way anything becomes a standing rule (Kevin's
+    // call, 26 Aug 2026 — the separate "Reject and remember" button was
+    // removed as a duplicate of it).
     const boxEl = document.getElementById('apvRemember-'+taskId);
     remember = !!remember || !!(boxEl && boxEl.checked);
     const needsNote = (outcome==='Changes requested' || outcome==='Rejected');
@@ -1030,16 +1030,35 @@ function agDecide(taskId, outcome, remember){
         // lower-case "the agent", which read as a typo mid-dialog on a task
         // with no agent linked.
         const Agent = agent.charAt(0).toUpperCase() + agent.slice(1);
-        showModal(remember ? 'Reject this, and make it a rule?' : 'Reject this work?',
-            `<p style="font-size:var(--fs-sm);color:var(--text-secondary);line-height:1.6">This closes the task and counts against ${esc(agent)}. Nothing goes out.<br><br><strong>Reason:</strong> ${esc(note)}</p>`
-            + (remember ? `<p style="font-size:var(--fs-sm);color:var(--text-primary);line-height:1.6;background:var(--accent-soft);border-radius:var(--radius-md);padding:10px 12px;margin-top:10px">${esc(Agent)} keeps this reason in its instructions and applies it to every future task, until you remove it.</p>` : ''),
+        // The remember choice is REPEATED here, pre-set from the tickbox above.
+        // With the second button gone, the tickbox is the only route, and a
+        // tickbox above the buttons is exactly the control you scroll past
+        // while typing a reason worth keeping. This puts the choice at the
+        // moment of commitment, where it cannot be missed.
+        showModal('Reject this work?',
+            `<p style="font-size:var(--fs-sm);color:var(--text-secondary);line-height:1.6">This closes the task and counts against ${esc(agent)}. Nothing goes out.<br><br><strong>Reason:</strong> ${esc(note)}</p>
+             <label style="display:flex;gap:8px;align-items:flex-start;margin-top:12px;background:var(--accent-soft);border-radius:var(--radius-md);padding:10px 12px;cursor:pointer">
+               <input type="checkbox" id="apvRememberConfirm" ${remember?'checked':''} style="margin:3px 0 0">
+               <span style="font-size:var(--fs-sm);color:var(--text-primary);line-height:1.5">Remember this reason. ${esc(Agent)} keeps it in its instructions and applies it to every future task, until you remove it.</span>
+             </label>`,
             `<button class="btn" onclick="closeModal()">Cancel</button>
-             <button class="btn btn-danger" onclick="closeModal();applyApprovalDecision('${taskId}','Rejected',${remember?'true':'false'})">${remember ? 'Reject and remember' : 'Reject and close'}</button>`);
+             <button class="btn btn-danger" onclick="agConfirmReject('${taskId}')">Reject and close</button>`);
         return;
     }
     applyApprovalDecision(taskId, outcome, remember);
 }
 window.agDecide = agDecide;
+
+// Read the dialog's own tickbox at the moment of confirming, so changing your
+// mind inside the dialog is what counts — not what was ticked when it opened.
+function agConfirmReject(taskId){
+    const box = document.getElementById('apvRememberConfirm');
+    const remember = !!(box && box.checked);
+    closeModal();
+    applyApprovalDecision(taskId, 'Rejected', remember);
+}
+window.agConfirmReject = agConfirmReject;
+
 
 async function applyApprovalDecision(taskId, outcome, remember){
     const t = allApprovals.find(x=>x.id===taskId);

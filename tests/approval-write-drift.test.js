@@ -115,15 +115,36 @@ describe.each(FACES)('%s carries the remember flag into the write', (face, src) 
   });
 });
 
-// The two reject routes must be visibly different in the UI, or the split is
-// only in the code and Kevin has no way to choose.
-describe('the two reject buttons', () => {
+// The remember route must be REACHABLE in the UI, or the mechanism exists only
+// in the code and Kevin has no way to teach anything.
+//
+// The dedicated "Reject and remember" button was removed on 26 Aug 2026 as a
+// duplicate of the tickbox (Kevin's call). That makes the tickbox the ONLY
+// route, so losing it silently would turn every lesson off with nothing
+// failing — which is precisely the shape of the original bug.
+describe('the remember route survives in the UI', () => {
   it.each([['agents page', AGENTS_PAGE], ['tasks drawer', TASKS_PAGE]])(
-    '%s offers reject-and-close AND reject-and-remember', (_face, page) => {
+    '%s has a remember tickbox and reads it in the decide function', (_face, page) => {
+      expect(page).toMatch(/id="apvRemember/);
+      expect(page).toMatch(/Remember this reason/i);
+      expect(page).toMatch(/checked/);
       expect(page).toMatch(/Reject and close/i);
-      expect(page).toMatch(/Reject and remember/i);
-      expect(page).toMatch(/'Rejected'\s*,\s*true\)/);
     });
+
+  it('the agents page repeats the choice inside the reject confirm dialog', () => {
+    // A tickbox above the buttons is the control you scroll past while typing
+    // the reason worth keeping, so the choice is offered again at the moment
+    // of commitment and read THEN, not when the dialog opened.
+    expect(AGENTS_PAGE).toMatch(/apvRememberConfirm/);
+    expect(AGENTS_PAGE).toMatch(/function agConfirmReject/);
+    expect(AGENTS_PAGE).toMatch(/box && box\.checked/);
+  });
+
+  it('no stray duplicate reject-and-remember button remains', () => {
+    for (const page of [AGENTS_PAGE, TASKS_PAGE]) {
+      expect(page).not.toMatch(/>Reject and remember</);
+    }
+  });
 
   it('the slack worker maps a remember emoji and advertises it', () => {
     expect(WORKER).toMatch(/REMEMBER_REACTIONS/);

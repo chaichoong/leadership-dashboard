@@ -764,6 +764,18 @@ INTENT_LEDGER = os.path.join(STATE_DIR, "carryout-intent.jsonl")
 # verbatim, so changing it here changes both halves at once.
 CARRIED_OUT_MARK = "CARRIED OUT (task left open):"
 
+# "Approve with minor edits" USED to be a scoring label and nothing more: both
+# approve kinds told the agent to carry out its original text "deviating in
+# nothing", so a note saying "change the date to Friday" was passed along and
+# then ignored. Kevin found this on 26 Aug 2026 and it is the wrong way round —
+# he types an edit expecting it to be made.
+#
+# Now the edit is APPLIED before the action, and `complete` refuses a
+# minor-edits task that never applied one. This marker in Notes is the
+# machine-readable half, read back from the LIVE record rather than trusted
+# from the run, exactly like CARRIED_OUT_MARK above.
+EDITS_APPLIED_MARK = "EDITS APPLIED:"
+
 
 def ledger_append(task_id, event):
     os.makedirs(STATE_DIR, exist_ok=True)
@@ -1624,12 +1636,92 @@ def cmd_intent(args):
     print(json.dumps({"intentRecorded": args.task}))
 
 
+def cmd_revise(args):
+    """Apply Kevin's minor edits to the approved text BEFORE it is carried out.
+
+    Only for 'Approved with minor edits'. The gate's whole promise is that
+    nothing goes out that Kevin has not seen, so this is deliberately narrow:
+    the agent may make ONLY the change he described, and the text he originally
+    approved is archived on the record so what actually went out can always be
+    compared with what he read."""
+    t = task_view(get_task(args.task))
+    if t["outcome"] != "Approved with minor edits":
+        sys.exit(f"ERROR: refusing to revise {args.task} — outcome is "
+                 f"'{t['outcome'] or 'empty'}'. Only 'Approved with minor "
+                 "edits' applies an edit. An 'Approved as-is' task goes out "
+                 "VERBATIM; if it needs changing, it needed Request changes.")
+    if not str(t["feedback"] or "").strip():
+        sys.exit(f"ERROR: refusing to revise {args.task} — there is no "
+                 "Approval Feedback, so there is no edit to apply. Carry out "
+                 "the approved text unchanged.")
+    with open(args.output_file) as fh:
+        revised = fh.read().strip()
+    if not revised:
+        sys.exit("ERROR: refusing to store an empty revision")
+    original = str(t["agentOutput"] or "").strip()
+    if revised == original:
+        # An unchanged "revision" means the edit was not applied. Letting it
+        # pass would tick the box while sending the text Kevin asked to change,
+        # which is the bug this command exists to end.
+        sys.exit(f"ERROR: refusing to revise {args.task} — the text is "
+                 "identical to what was approved, so the edit was not applied. "
+                 f"Kevin asked for: {str(t['feedback'])[:200]}")
+
+    # The revised text still has to satisfy every rule the original did: it is
+    # what will actually be sent, and it has not been through submit's checks.
+    problem = carry_out_problem(revised)
+    if problem:
+        sys.exit(f"ERROR: refusing to revise {args.task} — {problem}. Keep the "
+                 f"closing '{CARRY_OUT_MARKER}' line on the edited version.")
+    promise = send_promise_problem(revised, t["taskType"])
+    if promise:
+        sys.exit(f"ERROR: refusing to revise {args.task} — {promise}")
+    if t["taskType"] == "Correspondence":
+        try:
+            parse_email_output(revised)
+        except EmailFormatError as exc:
+            sys.exit(f"ERROR: refusing to revise {args.task} — the edited "
+                     f"Correspondence no longer parses: {exc}")
+    if TIER1_BANNER in original and TIER1_BANNER not in revised:
+        sys.exit(f"ERROR: refusing to revise {args.task} — the edit dropped "
+                 "the tier-1 banner. The label travels with the work.")
+
+    stamp = datetime.now(LONDON).strftime("%d %b %Y %H:%M")
+    mark = (f"[{stamp} — agent] {EDITS_APPLIED_MARK} "
+            f"{' '.join(str(t['feedback']).split())[:300]}\n\n"
+            "--- TEXT KEVIN APPROVED, BEFORE THE EDIT ---\n"
+            f"{original[:20000]}")
+    patch_task(args.task, {
+        AF["agentOutput"]: revised[:95000],
+        AF["notes"]: ((t["notes"] or "") + "\n\n" + mark).strip(),
+    })
+    print(json.dumps({"revised": args.task, "chars": len(revised),
+                      "wasChars": len(original)}))
+
+
 def cmd_complete(args):
     t = task_view(get_task(args.task))
     if t["outcome"] not in APPROVED:
         sys.exit(f"ERROR: refusing to complete {args.task} — outcome is "
                  f"'{t['outcome'] or 'empty'}', not an approval. Only "
                  "approved, carried-out work completes.")
+
+    # THE MINOR-EDITS GATE (Kevin's ruling, 26 Aug 2026). If he asked for an
+    # edit, it must have been applied before the action. Refusing HERE rather
+    # than flagging it in verify afterwards is the point: verify runs after the
+    # email has gone, and an unedited email cannot be unsent.
+    if (t["outcome"] == "Approved with minor edits"
+            and str(t["feedback"] or "").strip()
+            and EDITS_APPLIED_MARK not in (t["notes"] or "")):
+        sys.exit(
+            f"ERROR: refusing to complete {args.task} — Kevin approved it "
+            "WITH EDITS and no edit was applied.\n"
+            f"       He asked for: {' '.join(str(t['feedback']).split())[:200]}\n"
+            "       Apply it to the Agent Output, then run:\n"
+            f"         python3 scripts/agent-dispatch.py revise {args.task} "
+            "--output-file <file>\n"
+            "       and carry out the REVISED text. Completing without it "
+            "sends the version he asked to change.")
 
     # Carrying the action out and CLOSING the task are two different things.
     #
@@ -2491,6 +2583,12 @@ def main():
     rc.add_argument("--runs", type=int, default=3,
                     help="how many recent run directories to inspect")
 
+    rv = sub.add_parser("revise",
+                        help="apply Kevin's minor edits to the approved text "
+                             "before it is carried out")
+    rv.add_argument("task")
+    rv.add_argument("--output-file", required=True)
+
     sub.add_parser("lessons",
                    help="write every lesson Kevin asked to be remembered into "
                         "the agent files. Deterministic, idempotent, safe to "
@@ -2507,7 +2605,7 @@ def main():
             "annotate": cmd_annotate, "intent": cmd_intent,
             "complete": cmd_complete, "verify": cmd_verify,
             "score": cmd_score, "reconcile": cmd_reconcile,
-            "lessons": cmd_lessons}[args.cmd](args) or 0
+            "lessons": cmd_lessons, "revise": cmd_revise}[args.cmd](args) or 0
 
 
 if __name__ == "__main__":

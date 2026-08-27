@@ -3775,14 +3775,13 @@ function renderApprovalBlock(t){
     <textarea id="apvNote" placeholder="What to change, or why you are rejecting. Required for Request changes and both Reject buttons. (In Slack you just reply in the thread — same thing.)"></textarea>
     <label style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--text-secondary);margin:6px 0 2px">
       <input type="checkbox" id="apvRemember" style="margin:0">
-      Remember this too, so the agent applies it from now on
+      Remember this reason — the agent applies it to every future task
     </label>
     <div class="apv-actions">
       <button class="btn btn-success" data-apv-btn onclick="apvDecide('${t.id}','Approved as-is')">Approve</button>
       <button class="btn" data-apv-btn onclick="apvDecide('${t.id}','Approved with minor edits')" title="Approved, but you tidied it first — still counts as accurate">Approve with minor edits</button>
       <button class="btn" data-apv-btn onclick="apvDecide('${t.id}','Changes requested')" title="Goes back to the agent to redo. Needs a comment.">Request changes</button>
-      <button class="btn btn-danger" data-apv-btn onclick="apvDecide('${t.id}','Rejected')" title="Closed. Nothing is learned — use this when the reason is a one-off.">Reject and close</button>
-      <button class="btn btn-danger" data-apv-btn onclick="apvDecide('${t.id}','Rejected',true)" title="Closed, AND your reason becomes a standing rule in the agent's instructions so it stops raising work like this.">Reject and remember</button>
+      <button class="btn btn-danger" data-apv-btn onclick="apvDecide('${t.id}','Rejected')" title="Closed. Tick Remember above if the reason should become a standing rule.">Reject and close</button>
     </div>
   </div>`;
 }
