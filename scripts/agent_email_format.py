@@ -205,3 +205,182 @@ def parse_output(output):
         raise EmailFormatError("empty body")
     return {"to": to, "cc": cc, "from": sender, "subject": subject,
             "body": body, "attach": attach}
+
+
+# ─── SENDER IDENTITY AND SIGN-OFF: THE TWO MISSING DEFAULTS ──────────
+#
+# Measured 27 Aug 2026 across every approval decision Kevin had ever made:
+# 22 were "Approved with minor edits", and 14 of those 22 (64%) were him
+# correcting one of two things by hand, one task at a time.
+#
+#   11x  "Send from kevinbrittain@gmail.com"
+#    3x  "Just sign my name, no address or contact details"
+#
+# Neither rule was written down anywhere. FROM was optional in the format
+# above, and nothing said anything at all about a sign-off, so every agent
+# guessed and Kevin corrected the guess at roughly two minutes a go. That is
+# not an accuracy problem and no amount of agent improvement would have fixed
+# it: it is a default nobody had ever stated.
+#
+# So it is stated here, once, and enforced at SUBMIT rather than requested in
+# prose. A rule in prose is the rule that gets skipped — the same lesson as
+# the learning loop, which produced zero stored lessons in the three days it
+# was a paragraph in a skill file.
+#
+# WHY SUBMIT AND NOT SEND. parse_output() above stays permissive on purpose.
+# It runs on the send path too, days after Kevin approved, and an approved
+# action that cannot be carried out is worse than a refused one — the whole
+# reason this module exists. So the strict layer is a SEPARATE function that
+# only the submit gate calls: a bad draft is refused before Kevin ever reads
+# it, and work he already approved still goes out.
+
+PERSONAL_SENDER = "kevinbrittain@gmail.com"
+BUSINESS_SENDER = "kevin@operationsdirector.co.uk"
+RUNPRENEUR_SENDER = "kevin@runpreneur.org.uk"
+
+# Kevin's ruling, 27 Aug 2026, in his own words on task recV3nCmp3ivQeXTN:
+# "Send from kevinbrittain@gmail.com. Never send from kevin@runpreneur.org.uk
+# unless it's to do with Runpreneur. Revert to sending from
+# kevinbrittain@gmail.com as standard."
+ALLOWED_SENDERS = (PERSONAL_SENDER, BUSINESS_SENDER, RUNPRENEUR_SENDER)
+
+BUSINESS_BRAND_RE = re.compile(
+    r"operationsdirector\.co\.uk|\bOperations Director\b", re.I)
+RUNPRENEUR_BRAND_RE = re.compile(r"\bRunpreneur\b|runpreneur\.org", re.I)
+
+# Sign-off phrases, longest first so "Many thanks" wins over "thanks".
+SIGNOFF_RE = re.compile(
+    r"^\s*(yours sincerely|yours faithfully|kind regards|best wishes|"
+    r"many thanks|best regards|with thanks|regards|sincerely|thanks)\b[,.]?\s*$",
+    re.I | re.M)
+
+# What may never appear BELOW the sign-off. Each is a contact detail Kevin has
+# asked three separate times to have removed, and each is unambiguous in a
+# closing block: a postcode in the body is a property reference, a postcode in
+# the signature is his home address.
+UK_PHONE_RE = re.compile(r"(?:\+44|\b0)\s?\d[\d\s().-]{7,}\d")
+UK_POSTCODE_RE = re.compile(
+    r"\b[A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2}\b", re.I)
+ANY_EMAIL_RE = re.compile(r"[^@\s,<>]+@[^@\s,<>]+\.[^@\s,<>]+")
+# A closing block runs to the end of the body, but cap the search so a quoted
+# email thread pasted under the signature is not read as Kevin's own contact
+# block. Six non-empty lines is a generous signature and a short quote.
+SIGNOFF_TAIL_LINES = 6
+
+
+def closing_block(body):
+    """The lines a reader would call the signature, or [] if there is none.
+
+    Everything AFTER the last sign-off phrase. Falls back to the last few
+    non-empty lines when the draft has no recognisable sign-off, because a
+    contact block pasted with no "Kind regards" above it is still a contact
+    block.
+    """
+    text = body or ""
+    last = None
+    for m in SIGNOFF_RE.finditer(text):
+        last = m
+    tail = text[last.end():] if last else text
+    lines = [ln.strip() for ln in tail.splitlines() if ln.strip()]
+    if last is None:
+        lines = lines[-SIGNOFF_TAIL_LINES:]
+    return lines[:SIGNOFF_TAIL_LINES]
+
+
+def signoff_problem(body):
+    """Reason string when the sign-off carries contact details, else ""."""
+    for line in closing_block(body):
+        if UK_PHONE_RE.search(line):
+            return ("the sign-off carries a phone number (%r). Kevin signs "
+                    "with his name only." % line)
+        if UK_POSTCODE_RE.search(line):
+            return ("the sign-off carries an address (%r). Kevin signs with "
+                    "his name only." % line)
+        if ANY_EMAIL_RE.search(line):
+            return ("the sign-off carries an email address (%r). Kevin signs "
+                    "with his name only." % line)
+    return ""
+
+
+def expected_sender(subject, body):
+    """Which identity this copy must go out as.
+
+    Business first: a Runpreneur mention inside an Operations Director email
+    is a topic, whereas OD branding inside a Runpreneur email would be the
+    business speaking, and the business identity is the one with a prospect on
+    the other end of it.
+    """
+    text = "%s\n%s" % (subject or "", body or "")
+    if BUSINESS_BRAND_RE.search(text):
+        return BUSINESS_SENDER
+    if RUNPRENEUR_BRAND_RE.search(text):
+        return RUNPRENEUR_SENDER
+    return PERSONAL_SENDER
+
+
+def validate_submission(output):
+    """Strict checks the SUBMIT gate applies. Raises EmailFormatError.
+
+    Returns the parsed email so the caller does not parse twice. Never called
+    on the send path — see the note above.
+    """
+    parsed = parse_output(output)
+    sender = parsed["from"]
+    if not sender:
+        want = expected_sender(parsed["subject"], parsed["body"])
+        raise EmailFormatError(
+            "no FROM address. Kevin corrected this by hand 11 times in one "
+            "month, so it is now required, not assumed. This copy should go "
+            "out as %s — add `FROM: %s` to the headers." % (want, want))
+    if sender.lower() not in ALLOWED_SENDERS:
+        raise EmailFormatError(
+            "FROM is %s, which is not one of Kevin's sending identities (%s)"
+            % (sender, ", ".join(ALLOWED_SENDERS)))
+    # DIRECTIONAL, not symmetric. A blanket "FROM must equal expected_sender"
+    # reads well and blocks legitimate work: an email that happens to mention
+    # Operations Director in passing would be forced onto the business address
+    # with no way to say otherwise, and there would be no override at all.
+    #
+    # So each identity is checked for the mistake that identity actually makes:
+    #
+    #   personal   -> refused when the copy SPEAKS AS a brand. This is finding
+    #                 20260812-ceo-huddle-094: ten warm-lane emails saying "you
+    #                 booked a call with Operations Director" about to go to
+    #                 Kevin's highest-intent audience from a gmail address.
+    #   a brand    -> refused when the copy carries NO signal for that brand.
+    #                 This is Kevin's 27 Aug complaint: creditor and council
+    #                 letters drafted to send from kevin@runpreneur.org.uk for
+    #                 no reason at all.
+    #
+    # Copy that genuinely mentions both keeps whichever the agent chose, and
+    # Kevin sees the sender on the approval card before he decides. That is the
+    # override: visible, not silent.
+    text = "%s\n%s" % (parsed["subject"] or "", parsed["body"] or "")
+    if sender.lower() == PERSONAL_SENDER:
+        for brand_re, addr, label in (
+                (BUSINESS_BRAND_RE, BUSINESS_SENDER, "the business"),
+                (RUNPRENEUR_BRAND_RE, RUNPRENEUR_SENDER, "Runpreneur")):
+            hit = brand_re.search(text)
+            if hit:
+                raise EmailFormatError(
+                    "this copy speaks as %s (matched %r) but sends from the "
+                    "personal address. Use `FROM: %s`, or take the brand out "
+                    "of the copy." % (label, hit.group(0), addr))
+    elif sender.lower() == BUSINESS_SENDER and not BUSINESS_BRAND_RE.search(text):
+        raise EmailFormatError(
+            "FROM is the Operations Director address but nothing in the copy "
+            "speaks as the business. The standing default is %s."
+            % PERSONAL_SENDER)
+    elif sender.lower() == RUNPRENEUR_SENDER and not RUNPRENEUR_BRAND_RE.search(text):
+        raise EmailFormatError(
+            "FROM is the Runpreneur address but this has nothing to do with "
+            "Runpreneur. Kevin's ruling, 27 Aug 2026: never send from %s "
+            "unless it is a Runpreneur matter; %s is the standard."
+            % (RUNPRENEUR_SENDER, PERSONAL_SENDER))
+    bad = signoff_problem(parsed["body"])
+    if bad:
+        raise EmailFormatError(
+            "%s Sign off as `Kevin Brittain`, or `Kevin Brittain` on its own "
+            "line above `on behalf of <company>` when writing for an entity. "
+            "No address, no phone number, no contact block." % bad)
+    return parsed

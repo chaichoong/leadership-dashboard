@@ -87,7 +87,13 @@ print(json.dumps(out))
   return JSON.parse(raw.split('---JSON---')[1]);
 }
 
-const GOOD_EMAIL = 'TO: someone@example.com\nSUBJECT: A subject\n---\nThe body of the email.';
+// FROM is mandatory on a submit since 27 Aug 2026 — Kevin corrected a missing
+// or wrong sender by hand 11 times in a month. See tests/approval-gate-defaults.
+// It also carries the closing line. Without one this fixture sat one
+// character under SUMMARY_MIN_CHARS (280) once the tier-1 banner was
+// prepended, so adding any header at all silently flipped that test into
+// a different code path. A realistic submission has both.
+const GOOD_EMAIL = 'TO: someone@example.com\nFROM: kevinbrittain@gmail.com\nSUBJECT: A subject\n---\nThe body of the email.\n\n**Carrying this out will involve:** sending this email to someone@example.com.';
 
 // A long deliverable — the shape that gets a derived summary in Kevin's approval
 // box. Anything under 280 characters is shown whole, so the mandate below does
@@ -217,7 +223,7 @@ describe('agent-dispatch submit gate', () => {
     });
 
     it('accepts the same words once the type is Correspondence', () => {
-      const email = ['TO: council@example.com', 'SUBJECT: Account 123', '---',
+      const email = ['TO: council@example.com', 'FROM: kevinbrittain@gmail.com', 'SUBJECT: Account 123', '---',
         'Dear Sir,', '', 'x'.repeat(300), '',
         "**Carrying this out will involve:** sending the email to the council from Kevin's Gmail."].join('\n');
       const r = submit({ type: 'Correspondence', output: email });
@@ -280,7 +286,7 @@ m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
 print(json.dumps(m.parse_output(sys.stdin.read())))
 `], { encoding: 'utf8', input: output }));
 
-      const EMAIL = 'TO: enquiries@companieshouse.gov.uk\nSUBJECT: Company 12345678\n---\nDear Sir,\n\nPlease find the response attached.\n\nKind regards\nKevin';
+      const EMAIL = 'TO: enquiries@companieshouse.gov.uk\nFROM: kevinbrittain@gmail.com\nSUBJECT: Company 12345678\n---\nDear Sir,\n\nPlease find the response attached.\n\nKind regards\nKevin';
 
       it('strips the closing line from the email body', () => {
         const body = parse(`${EMAIL}\n\n${CARRY_OUT}`).body;

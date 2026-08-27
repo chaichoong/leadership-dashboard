@@ -104,6 +104,18 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 .apv-body{font-size:var(--fs-xs);color:var(--text-secondary);white-space:pre-wrap;word-break:break-word;max-height:340px;overflow:auto;border:1px solid var(--border-subtle);border-radius:var(--radius-md);padding:10px 12px;background:var(--bg-surface-2);margin-top:6px}
 .apv-note{width:100%;border:1px solid var(--border-default);background:var(--bg-surface);border-radius:var(--radius-md);padding:8px 10px;font-size:var(--fs-sm);color:var(--text-primary);font-family:inherit;resize:vertical;min-height:44px;margin:8px 0}
 .apv-note:focus{outline:none;border-color:var(--accent)}
+.apv-reasons{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:8px;
+    padding-top:10px;border-top:1px dashed var(--border-subtle)}
+.apv-reasons-label{font-size:var(--fs-xs);color:var(--text-muted);font-weight:var(--fw-semibold);margin-right:2px}
+.apv-reason{font-size:var(--fs-xs);font-weight:var(--fw-medium);padding:4px 10px;cursor:pointer;
+    border:1px solid var(--border-default);border-radius:var(--radius-full);
+    background:var(--bg-surface);color:var(--text-secondary);line-height:1.4}
+.apv-reason:hover{background:var(--danger-bg);border-color:var(--danger-border);color:var(--danger)}
+/* The one reason that is a judgement on the agent's writing, so it reads as a
+   different KIND of verdict rather than a seventh flavour of the same one. */
+.apv-reason-quality{border-style:dashed;color:var(--text-muted)}
+.apv-reason-quality:hover{background:var(--warning-bg);border-color:var(--warning-border);color:var(--warning)}
+.apv-reason:disabled{opacity:.45;cursor:default}
 .apv-actions{display:flex;gap:8px;flex-wrap:wrap}
 .apv-type{background:var(--bg-surface);border:1px solid var(--border-default);color:var(--text-primary);padding:4px 8px;border-radius:var(--radius-sm);font-size:var(--fs-xs);font-family:inherit}
 .apv-attach{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:6px;border-radius:var(--radius-md);padding:2px}
@@ -349,6 +361,7 @@ const TF = {
     // reads on every future run. Feedback History is the durable archive,
     // because Approval Feedback is cleared by the agent's next submit.
     rememberThis:     'fldZurhdHutYIDKVx',
+    verdictReason:    'fldF9Bs4N5mttQvtl',
     feedbackHistory:  'fldOzsq68lhfprKJu',
 };
 
@@ -755,6 +768,7 @@ async function loadApprovals(){
             const ap = gf(r,TF.approver);
             return !ap || !ap.email || ap.email === APPROVER_EMAIL;
         });
+        _apvReason = {};
         allApprovals = mine.map(r=>({
             id: r.id,
             name: gf(r,TF.name)||'(Untitled)',
@@ -1210,7 +1224,7 @@ function apvCardHtml(t){
                 ${TASK_TYPE_OPTIONS.map(o=>`<option value="${o}" ${t.taskType===o?'selected':''}>${o}</option>`).join('')}
             </select>
         </div>
-        <textarea class="apv-note" id="apvNote-${t.id}" placeholder="What to change, or why you are rejecting. Required for Request changes and both Reject buttons."></textarea>
+        <textarea class="apv-note" id="apvNote-${t.id}" placeholder="Optional. A reject chip fills this in for you — type here only if you want to be more specific, or to say what needs changing."></textarea>
         <div class="apv-attach" id="apvDrop-${t.id}"
              ondragover="event.preventDefault();this.classList.add('apv-drop-over')"
              ondragleave="this.classList.remove('apv-drop-over')"
@@ -1228,13 +1242,97 @@ function apvCardHtml(t){
             <button class="btn btn-success" data-apv-btn onclick="agDecide('${t.id}','Approved as-is')">Approve</button>
             <button class="btn" data-apv-btn onclick="agDecide('${t.id}','Approved with minor edits')" title="Approved, but you tidied it first. Still counts as accurate.">Approve with minor edits</button>
             <button class="btn" data-apv-btn onclick="agDecide('${t.id}','Changes requested')" title="Goes back to the agent to redo. Needs a comment.">Request changes</button>
-            <button class="btn btn-danger" data-apv-btn onclick="agDecide('${t.id}','Rejected')" title="Closes the task for good. Tick Remember above if the reason should become a standing rule.">Reject and close</button>
         </div>
+        ${apvReasonChips(t.id)}
     </div>`;
 }
 
 // Record Kevin's verdict — the SAME writes as the Tasks drawer's apvDecide and
 // the Slack loop's applyDecision. This page is the third face of the ONE
+// ─── WHY, NOT JUST NO (27 Aug 2026) ──────────────────────────────────
+//
+// Every rejection Kevin had made up to that day was classified against the
+// reason he typed. 58 rejections, and NOT ONE said the draft was wrong:
+//
+//   41%  already dealt with somewhere else
+//   14%  below the threshold of what he wants to see
+//   12%  Roy owns it
+//    9%  parked until something else is built
+//    7%  stale
+//    5%  duplicate
+//    0%  the work itself was wrong
+//
+// Two things followed. He was typing the same sentence over and over — "Roy is
+// dealing with this" seven separate times — at roughly two and a half minutes a
+// go. And every one of those rejections counted against the agent that WROTE
+// the draft, which had not chosen the task and could not have prevented it.
+// Blended accuracy read 66.9%; excluding relevance failures it was 96.7%.
+//
+// So the reason is now a chip, not a paragraph. One tap records the verdict,
+// the reason and the sentence. `countsAgainstDraft` is the load-bearing flag:
+// only "The work is wrong" is a judgement on the agent's writing. The rest say
+// the task should never have existed, which is a fact about whatever created
+// it — see scripts/agent-dispatch.py, which routes the lesson accordingly.
+//
+// The `note` here is a DEFAULT, not a lock. Kevin can type over it before he
+// confirms, and often should: "Roy owns it" is the rule, "Roy owns 1406 Oldham
+// Road" is the useful version of the rule.
+const APV_REASONS = [
+    { key: 'Already done elsewhere',  chip: 'Already done',
+      note: 'This has already been dealt with elsewhere.',       countsAgainstDraft: false },
+    { key: 'Roy owns it',             chip: 'Roy owns it',
+      note: 'Roy is dealing with this directly.',                countsAgainstDraft: false },
+    { key: 'Not worth my attention',  chip: 'Not worth my time',
+      note: 'Only bring me something like this if it is a major issue.', countsAgainstDraft: false },
+    { key: 'Duplicate',               chip: 'Duplicate',
+      note: 'Duplicate of another task. Spot these before sending them to me.', countsAgainstDraft: false },
+    { key: 'Parked for now',          chip: 'Parked',
+      note: 'Not now. Hold this until I say otherwise.',          countsAgainstDraft: false },
+    { key: 'No longer relevant',      chip: 'No longer relevant',
+      note: 'This is stale and no longer applies.',               countsAgainstDraft: false },
+    { key: 'The work is wrong',       chip: 'The work is wrong',
+      note: '',                                                   countsAgainstDraft: true },
+];
+const APV_REASON_BY_KEY = Object.fromEntries(APV_REASONS.map(r => [r.key, r]));
+
+// The chip Kevin last clicked per task, so the confirm dialog and the write
+// agree about what he chose. Cleared when the queue reloads.
+let _apvReason = {};
+
+function apvReasonChips(taskId){
+    return `<div class="apv-reasons" role="group" aria-label="Why are you rejecting this?">
+        <span class="apv-reasons-label">Reject because&hellip;</span>
+        ${APV_REASONS.map(r=>`<button class="apv-reason${r.countsAgainstDraft?' apv-reason-quality':''}"
+             data-apv-btn onclick="agRejectWithReason('${taskId}','${esc(r.key)}')"
+             title="${r.countsAgainstDraft
+                 ? 'The only reason that counts against this agent&apos;s draft quality.'
+                 : 'The task should not have reached you. Does not count against the agent that wrote it.'}"
+            >${esc(r.chip)}</button>`).join('')}
+    </div>`;
+}
+
+// One tap: records the reason, fills the sentence, and goes straight to the
+// confirm. Typing is now optional rather than mandatory, which is the whole
+// point — but the note is still editable in the dialog, and the remember
+// choice still lands at the moment of commitment.
+function agRejectWithReason(taskId, reasonKey){
+    const r = APV_REASON_BY_KEY[reasonKey];
+    if(!r) return;
+    _apvReason[taskId] = reasonKey;
+    const noteEl = document.getElementById('apvNote-'+taskId);
+    // Never overwrite words Kevin has already typed: they are more specific
+    // than the default, and losing them mid-click is exactly the kind of small
+    // betrayal that stops someone trusting a fast path.
+    if(noteEl && !noteEl.value.trim() && r.note) noteEl.value = r.note;
+    if(r.countsAgainstDraft && noteEl && !noteEl.value.trim()){
+        toast('Say what is wrong with it — that is the part the agent can act on.');
+        noteEl.focus();
+        return;
+    }
+    agDecide(taskId, 'Rejected');
+}
+window.agRejectWithReason = agRejectWithReason;
+
 // mechanism, never a new one. Reject asks for confirmation first.
 function agDecide(taskId, outcome, remember){
     const t = allApprovals.find(x=>x.id===taskId);
@@ -1272,8 +1370,19 @@ function agDecide(taskId, outcome, remember){
         // tickbox above the buttons is exactly the control you scroll past
         // while typing a reason worth keeping. This puts the choice at the
         // moment of commitment, where it cannot be missed.
+        // What the dialog SAYS about the score now depends on the reason. The
+        // old wording ("counts against the agent") was true of every rejection
+        // and should never have been: 58 of 58 rejections were relevance
+        // failures the drafting agent could not have prevented, and telling
+        // Kevin they counted against it was telling him something false.
+        const reason = APV_REASON_BY_KEY[_apvReason[taskId] || ''] || null;
+        const scoreLine = !reason
+            ? `This closes the task and counts against ${esc(agent)}. Nothing goes out.`
+            : reason.countsAgainstDraft
+                ? `This closes the task and counts against ${esc(agent)}&rsquo;s draft quality. Nothing goes out.`
+                : `This closes the task. Nothing goes out, and it does <strong>not</strong> count against ${esc(agent)} &mdash; the work was fine, the task should not have reached you.`;
         showModal('Reject this work?',
-            `<p style="font-size:var(--fs-sm);color:var(--text-secondary);line-height:1.6">This closes the task and counts against ${esc(agent)}. Nothing goes out.<br><br><strong>Reason:</strong> ${esc(note)}</p>
+            `<p style="font-size:var(--fs-sm);color:var(--text-secondary);line-height:1.6">${scoreLine}${reason?`<br><br><strong>Because:</strong> ${esc(reason.chip)}`:''}<br><br><strong>Reason:</strong> ${esc(note)}</p>
              <label style="display:flex;gap:8px;align-items:flex-start;margin-top:12px;background:var(--accent-soft);border-radius:var(--radius-md);padding:10px 12px;cursor:pointer">
                <input type="checkbox" id="apvRememberConfirm" ${remember?'checked':''} style="margin:3px 0 0">
                <span style="font-size:var(--fs-sm);color:var(--text-primary);line-height:1.5">Remember this reason. ${esc(Agent)} keeps it in its instructions and applies it to every future task, until you remove it.</span>
@@ -1345,6 +1454,11 @@ async function applyApprovalDecision(taskId, outcome, remember){
         // comment alone is not enough: the Slack worker's Airtable token
         // cannot read comments, so the field is the only place both sides see.
         if(note) payload[TF.approvalFeedback] = note;
+        // WHY, recorded as data rather than left in prose nobody can count.
+        // This is what lets accuracy separate "the draft was wrong" from "the
+        // task should not have existed", and what tells the lesson writer
+        // which agent the rule belongs to.
+        if(_apvReason[taskId]) payload[TF.verdictReason] = _apvReason[taskId];
         // The durable copy. Approval Feedback is cleared by the agent's next
         // submit, so without this the words that caused a redo are gone within
         // the hour and the lesson writer has nothing left to read.

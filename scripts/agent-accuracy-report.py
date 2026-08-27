@@ -38,6 +38,30 @@ RECENT_N = 10
 
 ACCURATE = ("Approved as-is", "Approved with minor edits")
 
+# ─── A REJECTION IS NOT ALWAYS A MARK AGAINST THE WRITER ─────────────
+#
+# Kept identical to RELEVANCE_REASONS in js/agent-accuracy.js, which is what
+# the browser scores with. tests/constant-drift.test.js fails if they diverge —
+# the huddle telling Kevin an agent is at 96% while the dashboard says 66% is
+# exactly the kind of split this file exists to prevent.
+#
+# Measured 27 Aug 2026 across all 175 decisions: of 58 rejections, NOT ONE said
+# the draft was wrong. Every one said the task should not have existed. A
+# rejection carrying one of these leaves the draft-quality bucket entirely.
+RELEVANCE_REASONS = (
+    "Already done elsewhere",
+    "Roy owns it",
+    "Not worth my attention",
+    "Duplicate",
+    "Parked for now",
+    "No longer relevant",
+)
+QUALITY_REASON = "The work is wrong"
+
+
+def is_relevance_failure(d):
+    return d["outcome"] == "Rejected" and d.get("reason", "") in RELEVANCE_REASONS
+
 
 def pat():
     path = os.path.expanduser("~/.config/od/airtable_pat")
@@ -90,11 +114,22 @@ def score(decisions, names):
     for (agent_id, task_type), items in buckets.items():
         # Newest first; undated entries sort last so they cannot pass as recent.
         items.sort(key=lambda d: d["at"] or "", reverse=True)
-        total = len(items)
-        accurate = sum(1 for d in items if d["outcome"] in ACCURATE)
-        rejected = sum(1 for d in items if d["outcome"] == "Rejected")
-        recent_rejections = sum(1 for d in items[:RECENT_N] if d["outcome"] == "Rejected")
+        # Split before counting. A relevance failure never touches this agent's
+        # rate, its sample, or its recent run — including the "no rejections in
+        # the last 10" clause, which one of them could otherwise use to block
+        # the bar for ever. That was blocking Writer/Correspondence at 95%.
+        relevance = [d for d in items if is_relevance_failure(d)]
+        judged = [d for d in items if not is_relevance_failure(d)]
+        total = len(judged)
+        accurate = sum(1 for d in judged if d["outcome"] in ACCURATE)
+        rejected = sum(1 for d in judged if d["outcome"] == "Rejected")
+        recent_rejections = sum(1 for d in judged[:RECENT_N] if d["outcome"] == "Rejected")
         rate = accurate / total if total else 0.0
+        # Every decision before 27 Aug 2026 carries no reason, and nothing may
+        # guess one on Kevin's behalf. They stay in the total; this says how
+        # much of the score is therefore unexplained.
+        unclassified = sum(1 for d in judged
+                           if d["outcome"] == "Rejected" and not d.get("reason"))
         rows.append({
             "agent": names.get(agent_id, agent_id),
             "task_type": task_type,
@@ -103,6 +138,8 @@ def score(decisions, names):
             "rejected": rejected,
             "rate": round(rate, 4),
             "recent_rejections": recent_rejections,
+            "relevance_failures": len(relevance),
+            "unclassified_rejections": unclassified,
             "ready": total >= MIN_SAMPLE and rate >= MIN_RATE and recent_rejections == 0,
         })
     rows.sort(key=lambda r: (r["agent"], r["task_type"]))
@@ -114,7 +151,8 @@ def main():
     # LEN(field & '') rather than != '' — a blank Airtable field is not reliably
     # unequal to an empty string, and that trap has emptied a whole query here.
     decided = query(token, TASKS, "LEN({Approval Outcome} & '') > 0",
-                    ["Approval Outcome", "Approved At", "Task Type", "Sent For Approval By", "Team Member"])
+                    ["Approval Outcome", "Approved At", "Task Type", "Sent For Approval By",
+                     "Team Member", "Verdict Reason"])
     waiting = query(token, TASKS, "{Status} = 'Approval'", ["Task Name"])
     team = query(token, TEAM, None, ["Name"])
     names = {r["id"]: r["fields"].get("Name", r["id"]) for r in team}
@@ -131,6 +169,7 @@ def main():
             "type": select_name(f.get("Task Type")) or "Unclassified",
             "outcome": outcome,
             "at": f.get("Approved At") or "",
+            "reason": select_name(f.get("Verdict Reason")),
         })
 
     rows = score(decisions, names)
@@ -156,6 +195,16 @@ def main():
     print("=" * 60)
     print(f"Waiting for Kevin right now : {len(waiting)}")
     print(f"Decisions recorded          : {len(decisions)}")
+    # Why the number may not have moved yet. A score you cannot explain is a
+    # score nobody acts on, and this one changed shape on 27 Aug 2026: every
+    # decision before then carries no reason and is still counted the old way.
+    relevance_total = sum(r["relevance_failures"] for r in rows)
+    unclassified_total = sum(r["unclassified_rejections"] for r in rows)
+    print(f"Not the agent's fault       : {relevance_total} "
+          f"(task should not have existed — excluded from draft quality)")
+    if unclassified_total:
+        print(f"Rejections with no reason   : {unclassified_total} "
+              f"— still counted against the agent, because only Kevin can say why")
     print()
     if not rows:
         print("No approval decisions recorded yet — nothing to score.")

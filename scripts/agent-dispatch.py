@@ -73,6 +73,7 @@ from agent_email_format import (  # noqa: E402
     TIER1_BANNER,
     EmailFormatError,
     parse_output as parse_email_output,
+    validate_submission as validate_email_submission,
 )
 
 BASE_ID = "appnqjDpqDniH3IRl"
@@ -177,6 +178,13 @@ AF = {
     #   feedbackHistory — append-only archive, because submit clears
     #                     approvalFeedback and the history was unrecoverable.
     "rememberThis":      "fldZurhdHutYIDKVx",
+    #   verdictReason   — WHY he decided as he did (27 Aug 2026). All 58
+    #   rejections he had ever made were classified that day and NOT ONE was
+    #   about the draft: every one was about the task existing. So the reason
+    #   decides two things a free-text box never could — which agent the
+    #   lesson belongs to, and whether the verdict counts against draft
+    #   quality at all. Only "The work is wrong" does.
+    "verdictReason":     "fldF9Bs4N5mttQvtl",
     "lessonWrittenAt":   "fldFfzXOME9Rh8SyM",
     "feedbackHistory":   "fldOzsq68lhfprKJu",
 }
@@ -511,6 +519,55 @@ READ_ONLY_RE = re.compile(
     r"do not act\b|evidence only|no outbound",
     re.I,
 )
+
+# ─── SYSTEM ALERTS ARE NOT APPROVALS (27 Aug 2026) ──────────────────
+#
+# Measured that day: 13 of the 60 tasks sitting at Status Approval were
+# automation failure emails — Google Apps Script, Cloudflare KV, Airtable
+# automations. Every failure notification had become its own task, its own
+# draft and its own approval, and approving "investigate the meetings script"
+# does nothing at all: agents are read-only on code, and the meetings pipeline
+# had been dead since 15 July regardless.
+#
+# The approval gate answers one question: MAY I DO THIS THING to a person, a
+# creditor, a council or a bank. A broken cron is not that question. It is work,
+# and work belongs on the board.
+#
+# So an alert task is CLASSIFIED and left OPEN rather than submitted. Nothing is
+# hidden and nothing is closed: it stays on the board where the Task Manager
+# agent already counts it, and the run report carries the count so the absence
+# is reportable. That is deliberately the same shape as skippedTier2 — a lane
+# that is diverted and named, never a lane that is silently dropped.
+#
+# MATCH ON THE SENDER, not the subject. A monitoring system always mails from
+# the same address, whereas an AI writes the same incident up in fresh words
+# every time — the exact reason the old duplicate key caught none of these. The
+# name patterns below are a SECOND label for an alert forwarded by hand or
+# raised by an agent that noticed the failure itself, and each covers the
+# other's blind spot. Deliberately absent: Stripe and Supabase account mail,
+# which reads like monitoring and is genuinely actionable (verification
+# deadlines, a paused project), so it keeps its trip to Kevin.
+SYSTEM_ALERT_SENDERS = (
+    "apps-scripts-notifications@google.com",
+    "noreply@airtable.com",
+    "noreply@notify.cloudflare.com",
+)
+SYSTEM_ALERT_PATTERNS = [
+    re.compile(r"apps script", re.I),
+    re.compile(r"cloudflare (kv|worker)", re.I),
+    re.compile(r"airtable automation", re.I),
+    re.compile(r"gmail quota", re.I),
+]
+
+
+def system_alert_match(sender, *texts):
+    """Why this is a machine telling us something broke, or ""."""
+    addr = str(sender or "").lower()
+    for known in SYSTEM_ALERT_SENDERS:
+        if known in addr:
+            return known
+    return tier_match(SYSTEM_ALERT_PATTERNS, *texts)
+
 
 # Creditor lane: money Kevin or his businesses OWE. The routing floor for the
 # Creditor Management agent (build session 25 Aug 2026; Kevin approved routing
@@ -1040,6 +1097,7 @@ def cmd_queue(args):
         sys.exit(1)
 
     tier1, skipped_tier2, unmapped, unclassified = [], [], [], []
+    system_alerts = []
     approved_hb, changes_hb, new_work, routing = [], [], [], []
     creditor_ok = bool(role_roster.get(CREDITOR_REC_ID, {}).get("dispatchable"))
     creditor_count = 0
@@ -1076,6 +1134,15 @@ def cmd_queue(args):
             # it did before 25 Aug 2026 rather than flowing to a generalist.
             skipped_tier2.append({**t, "matchedPattern": hit2,
                                   "outboundPattern": out2})
+            continue
+        # A machine reporting a breakage is work for the board, never a
+        # question for Kevin. Checked AFTER tier 1 and tier 2 on purpose: those
+        # classifications are about what the work TOUCHES and must win, and a
+        # monitoring alert never trips them anyway.
+        hit_alert = system_alert_match(
+            t.get("inboundSender"), t["name"], t["description"], t["notes"])
+        if hit_alert and t["outcome"] not in APPROVED:
+            system_alerts.append({**t, "alertSource": hit_alert})
             continue
         if not t["localAgent"]:
             unmapped.append(t)
@@ -1164,6 +1231,9 @@ def cmd_queue(args):
         # with --tier1 so the banner reaches Kevin. Not a skip list.
         "tier1Tasks": tier1,
         "skippedTier2": skipped_tier2,
+        # Named, counted, and left open on the board. Never dropped: an alert
+        # that vanishes is worse than one that clogs the gate.
+        "systemAlerts": system_alerts,
         "unmappedAgent": unmapped,
         "unclassified": unclassified,  # states the buckets cannot place — eyes, not silence
         "agents": ALL_AGENTS,          # the roster the CEO routes against
@@ -1189,6 +1259,7 @@ def cmd_queue(args):
             # count makes the park visible in the same object that reports the
             # emptiness it causes.
             "tier2Parked": len(skipped_tier2),
+            "systemAlerts": len(system_alerts),
             # Creditor-lane keyword matches across the whole agent-linked
             # read, hand-backs included (routing floor, not judgement). Zero
             # with the register row Built/Live and creditor mail known to be
@@ -1441,13 +1512,44 @@ def cmd_submit(args):
             "       a refused one: the refusal arrives after the decision."
         )
 
+    # Read once for the gate below; the approver decision further down reuses
+    # its own read, because a decision landing between two fetches of the same
+    # task is exactly how the two can disagree.
+    tf_probe = (get_task(args.task).get("fields", {}) or {})
+
+    # SECOND LABEL, same two-sided contract as tier 1. The queue diverts alert
+    # tasks before an agent ever works them; this catches the other blind spot
+    # — a task the queue did not classify (no sender recorded, an unfamiliar
+    # monitoring address) that an agent has now read and written up as a
+    # breakage. Neither side can see what the other sees, so both stay.
+    alert_hit = system_alert_match(
+        tf_probe.get(AF["inboundSender"], ""),
+        tf_probe.get(AF["name"], ""), tf_probe.get(AF["description"], "") or "",
+        tf_probe.get(AF["notes"], "") or "")
+    if alert_hit and args.type != "Correspondence":
+        sys.exit(
+            f"ERROR: refusing to submit {args.task} for approval — this is a "
+            f"machine reporting a breakage (matched {alert_hit!r}), not a "
+            "decision for Kevin.\n"
+            "       Approving 'investigate the failing script' changes nothing: "
+            "agents are read-only on code.\n"
+            "       Leave it OPEN on the board with your findings in Notes "
+            "(`annotate`). The run report counts it and the\n"
+            "       morning digest names the system, so it is visible without "
+            "costing him an approval."
+        )
+
     # A Correspondence submit is a promise that send-email.py can carry the
     # action out. Validate with the SAME parser the send gate uses, or the
     # promise is only discovered to be false days later, after Kevin has
     # approved it (finding 20260811-agent-dispatch-085, task recFdEICxHjYCzDkS).
     if args.type == "Correspondence":
+        # validate_submission is the STRICT layer: the send path's parser plus
+        # the two defaults Kevin was correcting by hand (sender identity and a
+        # sign-off with no contact block). It runs only here, never on the send
+        # path, so a draft he already approved is still carried out.
         try:
-            parse_email_output(output)
+            validate_email_submission(output)
         except EmailFormatError as exc:
             sys.exit(
                 f"ERROR: refusing to submit {args.task} as Correspondence — {exc}\n"
@@ -2046,6 +2148,15 @@ def cmd_verify(args):
             f"{len(non_t1_submits)} non-tier-1 submissions but no CEO review "
             "recorded — the review pass was skipped or its outcome hidden")
 
+    # Alerts are diverted, not dropped, so the run must SAY how many. A lane
+    # that removes work from Kevin's queue and reports nothing is indis-
+    # tinguishable from a lane that lost it.
+    alerts = report.get("systemAlerts") or []
+    alert_summary = {}
+    for a in alerts:
+        src = a.get("alertSource", "?")
+        alert_summary[src] = alert_summary.get(src, 0) + 1
+
     # A tier-1 task on an agent is no longer a fault — Kevin's call, 6 Aug 2026.
     # Agents prepare it and it reaches him through the same gate as everything
     # else. So the alarm here is not "an agent touched it", it is "an agent
@@ -2155,6 +2266,11 @@ def cmd_verify(args):
         sys.exit(1)
     print(json.dumps({"ok": True,
                       "actionsVerified": len(ok_actions),
+                      # Diverted, not dropped. A lane that takes work out of
+                      # Kevin's queue and reports nothing cannot be told apart
+                      # from a lane that lost it.
+                      "systemAlertsHeldBack": len(alerts),
+                      "systemAlertsBySource": alert_summary,
                       "worklistAtStart": counts.get("worklist", 0)}))
 
 

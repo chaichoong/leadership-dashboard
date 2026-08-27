@@ -1197,7 +1197,10 @@
         if (!slot || !PAT) return;
         const url = (params) => `https://api.airtable.com/v0/${BASE_ID}/${TABLES.tasks}?returnFieldsByFieldId=true&pageSize=100&${params}`;
         const flds = [TASK_FIELDS.name, TASK_FIELDS.approvalOutcome, TASK_FIELDS.approvedAt,
-                      TASK_FIELDS.taskType, TASK_FIELDS.sentForApprovalBy, TASK_FIELDS.teamMember]
+                      TASK_FIELDS.taskType, TASK_FIELDS.sentForApprovalBy, TASK_FIELDS.teamMember,
+                      // Without the reason the split cannot happen and every
+                      // relevance failure lands on the drafting agent again.
+                      TASK_FIELDS.verdictReason]
             .map(f => `fields%5B%5D=${f}`).join('&');
         try {
             const [waitRes, histRes, teamRes] = await Promise.all([
@@ -1223,10 +1226,13 @@
                     outcome: selName(f[TASK_FIELDS.approvalOutcome]),
                     taskType: selName(f[TASK_FIELDS.taskType]) || 'Unclassified',
                     at: f[TASK_FIELDS.approvedAt] || '',
+                    reason: selName(f[TASK_FIELDS.verdictReason]),
                 };
             });
             const rows = AgentAccuracy.computeAgentAccuracy(decisions, names)
-                .map(r => ({ agent: r.agentName, type: r.taskType, total: r.total, accurate: r.accurate, rate: r.rate, ready: r.ready }))
+                .map(r => ({ agent: r.agentName, type: r.taskType, total: r.total, accurate: r.accurate,
+                             rate: r.rate, ready: r.ready, relevanceFailures: r.relevanceFailures,
+                             unclassifiedRejections: r.unclassifiedRejections }))
                 .sort((a, c) => c.total - a.total);
             const recs = rows.filter(r => r.ready);
 

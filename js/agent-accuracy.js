@@ -26,6 +26,40 @@
     var APPROVAL_OUTCOMES = ['Approved as-is', 'Approved with minor edits', 'Changes requested', 'Rejected'];
     var APPROVAL_ACCURATE = ['Approved as-is', 'Approved with minor edits'];
 
+    // ─── A REJECTION IS NOT ALWAYS A MARK AGAINST THE WRITER ──────────
+    //
+    // Measured 27 Aug 2026 across all 175 decisions Kevin had made. Of his 58
+    // rejections, NOT ONE said the draft was wrong. Every one said the task
+    // should not have existed: already handled, Roy's, too trivial, duplicate,
+    // stale. Blended accuracy read 66.9%; on the drafts that were actually
+    // judged AS drafts it was 96.7%.
+    //
+    // That gap was not cosmetic. Guardrail bands tighten automatically on this
+    // number, so agents were being restricted for a failure upstream of them —
+    // the Inbound Comms Response agent read 57% on correspondence while scoring
+    // 100% on the eight drafts anyone had actually judged.
+    //
+    // So a rejection carrying one of these reasons leaves the draft-quality
+    // bucket ENTIRELY. Not counted as accurate, not counted in the total: it is
+    // evidence about whatever created the task, not about the agent that wrote
+    // it. `Verdict Reason` on the task is where Kevin records which it was, in
+    // one tap, at the moment he decides. He classifies; no model guesses.
+    var RELEVANCE_REASONS = [
+        'Already done elsewhere',
+        'Roy owns it',
+        'Not worth my attention',
+        'Duplicate',
+        'Parked for now',
+        'No longer relevant',
+    ];
+    // The one reason that IS a judgement on the writing.
+    var QUALITY_REASON = 'The work is wrong';
+
+    function isRelevanceFailure(item) {
+        return item.outcome === 'Rejected'
+            && RELEVANCE_REASONS.indexOf(item.reason || '') !== -1;
+    }
+
     var THRESHOLD = {
         minSample: 20,  // decisions of that task type by that agent
         minRate: 0.9,   // 90% accurate
@@ -53,12 +87,29 @@
             var items = b.items.slice().sort(function (a, c) {
                 return String(c.at || '').localeCompare(String(a.at || ''));
             });
-            var total = items.length;
-            var accurate = items.filter(function (i) { return APPROVAL_ACCURATE.indexOf(i.outcome) !== -1; }).length;
-            var rejected = items.filter(function (i) { return i.outcome === 'Rejected'; }).length;
-            var recent = items.slice(0, THRESHOLD.recentN);
+            // Split before counting anything. Relevance failures are not this
+            // agent's work being judged, so they never touch its rate, its
+            // sample, or its recent run — including the "no rejections in the
+            // last 10" clause, which a single relevance failure could
+            // otherwise use to block an agent from the bar indefinitely. That
+            // is exactly what was blocking Writer/Correspondence at 95%.
+            var relevance = items.filter(isRelevanceFailure);
+            var judged = items.filter(function (i) { return !isRelevanceFailure(i); });
+
+            var total = judged.length;
+            var accurate = judged.filter(function (i) { return APPROVAL_ACCURATE.indexOf(i.outcome) !== -1; }).length;
+            var rejected = judged.filter(function (i) { return i.outcome === 'Rejected'; }).length;
+            var recent = judged.slice(0, THRESHOLD.recentN);
             var recentRejections = recent.filter(function (i) { return i.outcome === 'Rejected'; }).length;
             var rate = total ? accurate / total : 0;
+            // Honesty about the past. Every decision made before 27 Aug 2026
+            // carries no reason, and nothing may guess one on Kevin's behalf —
+            // he is the only one who can tell "Roy owns this" (a rule) from
+            // "wrong invoice number" (a one-off). They stay in the total, and
+            // this count says how much of the score is therefore unexplained.
+            var unclassified = judged.filter(function (i) {
+                return i.outcome === 'Rejected' && !i.reason;
+            }).length;
             return {
                 agentId: b.agentId,
                 agentName: lookup[b.agentId] || b.agentId,
@@ -68,6 +119,11 @@
                 rejected: rejected,
                 rate: rate,
                 recentRejections: recentRejections,
+                // Not this agent's failure. Counted so it is never silently
+                // dropped: these are the tasks that should not have reached
+                // Kevin at all, and somebody has to own that number.
+                relevanceFailures: relevance.length,
+                unclassifiedRejections: unclassified,
                 ready: total >= THRESHOLD.minSample && rate >= THRESHOLD.minRate && recentRejections === 0,
             };
         }).sort(function (a, c) {
@@ -111,9 +167,33 @@
         };
     }
 
+    // The second number: how much of what reached Kevin should never have.
+    // Draft quality belongs to the agent that wrote it; relevance belongs to
+    // whatever created the task. One number could never carry both.
+    function relevanceScore(history) {
+        var all = (history || []).filter(function (h) { return h && h.outcome; });
+        var bad = all.filter(isRelevanceFailure).length;
+        var classified = all.filter(function (h) {
+            return h.outcome !== 'Rejected' || h.reason;
+        }).length;
+        return {
+            decisions: all.length,
+            classified: classified,
+            relevanceFailures: bad,
+            // Share of CLASSIFIED decisions that were worth his time. Measured
+            // against classified only, because an unclassified rejection is an
+            // unknown, not a pass.
+            rate: classified ? (classified - bad) / classified : 0,
+        };
+    }
+
     var api = {
         APPROVAL_OUTCOMES: APPROVAL_OUTCOMES,
         APPROVAL_ACCURATE: APPROVAL_ACCURATE,
+        RELEVANCE_REASONS: RELEVANCE_REASONS,
+        QUALITY_REASON: QUALITY_REASON,
+        isRelevanceFailure: isRelevanceFailure,
+        relevanceScore: relevanceScore,
         THRESHOLD: THRESHOLD,
         computeAgentAccuracy: computeAgentAccuracy,
         agentAutonomyRecommendations: agentAutonomyRecommendations,
