@@ -50,6 +50,8 @@ var AUTOMATIONS = {
           what: 'One summary of every scheduled job and whether it ran, was skipped, or failed. This is how a job that quietly stopped gets noticed.' },
         { key: 'daily-ops-guard', name: 'Daily Sweep Guard', when: '9:30am daily', status: 'on',
           what: 'Proves the 7am Daily Sweep actually ran. A routine cannot be trusted to report its own absence, so something outside it has to check.' },
+        { key: 'retry-deferred', name: 'Retry Deferred Jobs', when: 'every hour', status: 'on',
+          what: 'Re-runs a scheduled job that was turned away earlier because the Mac was not ready, once the thing that blocked it has cleared. Your Mac only tries each job once, at its set time, so a job that could not run because Google Drive was asleep used to just lose the day. That is how the brain went four days without being fed in August 2026. It only re-runs jobs that have been signed up for it, and it says out loud when a job lost the day anyway.' },
         { key: 'mac-guard', name: 'Mac Guard', when: 'every hour', status: 'on',
           what: 'Kills leftover preview servers that outlived the session that started them. They hold ports forever otherwise. It only touches servers over 4 hours old with nothing connected.' },
         { key: 'uc-notifier-watchdog', name: 'UC Notifier Watchdog', when: '9:00am daily', status: 'off',

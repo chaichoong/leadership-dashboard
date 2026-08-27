@@ -201,7 +201,8 @@
     "mode": "wrapped",
     "needs": [
       "network"
-    ]
+    ],
+    "retryWhenDeferred": true
   },
   "audiobook-morning-report": {
     "cron": "0 8 * * *",
@@ -219,7 +220,8 @@
       {
         "drive": "~/Library/CloudStorage/GoogleDrive-kevin@runpreneur.org.uk/My Drive/00 AI Context"
       }
-    ]
+    ],
+    "retryWhenDeferred": true
   },
   "uc-notifier-watchdog": {
     "cron": "0 9 * * *",
@@ -241,36 +243,39 @@
   },
   "feed-brain": {
     "cron": "45 22 * * *",
-    "maxLateMinutes": 300,
+    "maxLateMinutes": 720,
     "mode": "wrapped",
     "needs": [
       "network",
       {
         "drive": "~/Library/CloudStorage/GoogleDrive-kevin@runpreneur.org.uk/My Drive/00 AI Context"
       }
-    ]
+    ],
+    "retryWhenDeferred": true
   },
   "compound-brain": {
     "cron": "0 23 * * *",
-    "maxLateMinutes": 300,
+    "maxLateMinutes": 720,
     "mode": "wrapped",
     "needs": [
       "network",
       {
         "drive": "~/Library/CloudStorage/GoogleDrive-kevin@runpreneur.org.uk/My Drive/00 AI Context"
       }
-    ]
+    ],
+    "retryWhenDeferred": true
   },
   "publish-brain": {
     "cron": "20 23 * * *",
-    "maxLateMinutes": 300,
+    "maxLateMinutes": 720,
     "mode": "wrapped",
     "needs": [
       "network",
       {
         "drive": "~/Library/CloudStorage/GoogleDrive-kevin@runpreneur.org.uk/My Drive/00 AI Context"
       }
-    ]
+    ],
+    "retryWhenDeferred": true
   },
   "audiobook-backfill": {
     "cron": "0 0 * * *",
@@ -313,7 +318,8 @@
     "maxLateMinutes": 600,
     "mode": "wrapped",
     "queued": false,
-    "note": "alarms if daily-ops left no phase-1 mark by 08:00 London \u2014 the scheduler stamped lastRunAt on 15 Aug 2026 while delivering the run to no session, so only the mark counts. Reports on the routine, so it must never wait behind anything. London gate lives in the code, not this cron (Mac timezone moves with Kevin)."
+    "note": "alarms if daily-ops left no phase-1 mark by 08:00 London \u2014 the scheduler stamped lastRunAt on 15 Aug 2026 while delivering the run to no session, so only the mark counts. Reports on the routine, so it must never wait behind anything. London gate lives in the code, not this cron (Mac timezone moves with Kevin).",
+    "retryWhenDeferred": true
   },
   "inbound-triage": {
     "cron": "0 9,13,17 * * *",
@@ -331,7 +337,9 @@
     "note": "Kevin's restructure of 26 Aug 2026: role-specific work leaves the daily-ops sequence and runs as its own slot. A wrapped shell job, so it takes the lock and heartbeats \u2014 a slot, never a second Claude routine. Allowlisted in scripts/check-routines.py. CEO huddle plus the memory sweep of YESTERDAY, early so the 09:00 CEO brief always has its input \u2014 the old phase-2 slot inside a run that reached 6h43 on 26 Aug put that deadline at risk. Weekend hard stop lives in the skill, not the cron (never express a weekday in a cron).",
     "needs": [
       "network",
-      "drive"
+      {
+        "drive": "~/Library/CloudStorage/GoogleDrive-kevin@runpreneur.org.uk/My Drive/00 AI Context"
+      }
     ]
   },
   "uc-check": {
@@ -406,5 +414,12 @@
     "needs": [
       "network"
     ]
+  },
+  "retry-deferred": {
+    "cron": "20 * * * *",
+    "maxLateMinutes": 45,
+    "mode": "wrapped",
+    "queued": false,
+    "note": "Added 27 Aug 2026. launchd fires a job once; if the machine is not ready the queue DEFERS, and until this existed nothing ever came back, so a defer was a lost day and maxLateMinutes allowed lateness nothing could use. The brain went four days unfed that way (24-27 Aug), Drive being unreadable from a sleeping Mac at 22:45 every night. Hourly at :20, OUTSIDE the queue on purpose - it exists to rescue jobs the queue turned away, so waiting behind a stuck routine would stop it doing the one thing it is for. Only re-fires jobs carrying retryWhenDeferred, and REPORTS any other job that deferred rather than silently passing over it."
   }
 }
