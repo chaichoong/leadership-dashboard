@@ -922,6 +922,126 @@ print(json.dumps(list(m.drive_ready(${JSON.stringify(VAULT())}))))
 });
 
 // ---------------------------------------------------------------------------
+// A precondition checked before the queue wait is evidence about THEN.
+//
+// Preconditions are deliberately checked BEFORE the lock, so a job waiting for
+// the network does not hold the queue shut. The gap that leaves: the wait is
+// unbounded, and on this Mac the thing that CAUSES a long wait is sleep, which
+// is also the thing that kills the network.
+//
+// 27 Aug 2026: handback-poll queued at 08:30 with the network up, waited 43
+// minutes while the Mac slept, took the lock the instant it woke, and died on
+// DNS ("nodename nor servname provided"). job-status.jsonl carries the same
+// shape for compound-brain (x2), publish-brain, masterplan-sync and
+// daily-ops-guard. Each one is a false alarm, and a false alarm repeated is how
+// an alarm channel stops being read.
+// ---------------------------------------------------------------------------
+describe('a precondition can lapse during the queue wait', () => {
+  const VAULT = () => join(stateDir, 'lapsing-vault');
+
+  /** Schedule with one blocker and one job whose readiness we can revoke. */
+  function scheduleWithVault() {
+    writeFileSync(schedulePath, JSON.stringify({
+      blocker: { cron: '* * * * *', maxLateMinutes: 600, mode: 'wrapped' },
+      waiter: {
+        cron: '* * * * *', maxLateMinutes: 600, mode: 'wrapped',
+        needs: [{ drive: VAULT() }],
+      },
+    }));
+    mkdirSync(VAULT(), { recursive: true });
+    writeFileSync(join(VAULT(), 'note.md'), 'ready at queue time');
+  }
+
+  /** Re-check after 1s of waiting, and give the machine 0 min to recover. */
+  const FAST = { JOB_QUEUE_RECHECK_AFTER: '1', JOB_QUEUE_POST_LOCK_WAIT: '0' };
+
+  it('DEFERS instead of failing when readiness lapsed while it queued', async () => {
+    scheduleWithVault();
+    expect(run(['acquire', 'blocker', '--no-stale-check']).code).toBe(0);
+
+    const waiter = runAsync(['acquire', 'waiter', '--no-stale-check'], { env: FAST });
+    await new Promise((r) => setTimeout(r, 1500));
+
+    // The machine changes under it, exactly as sleep does to the network.
+    rmSync(VAULT(), { recursive: true, force: true });
+    run(['release', 'blocker']);
+
+    const r = await waiter;
+    expect(r.code).toBe(69);                       // EX_NOTREADY, not a traceback
+    expect(events().some((e) => e.state === 'deferred-stale-precondition')).toBe(true);
+  });
+
+  it('does not leave the queue shut behind it', async () => {
+    scheduleWithVault();
+    expect(run(['acquire', 'blocker', '--no-stale-check']).code).toBe(0);
+    const waiter = runAsync(['acquire', 'waiter', '--no-stale-check'], { env: FAST });
+    await new Promise((r) => setTimeout(r, 1500));
+    rmSync(VAULT(), { recursive: true, force: true });
+    run(['release', 'blocker']);
+    await waiter;
+
+    // Deferring happens AFTER the lock is taken, so a missing release would
+    // hold the queue until the lease lapsed.
+    expect(run(['status']).stdout).toMatch(/FREE/);
+  });
+
+  it('BACK-TEST: without the re-check it acquires on a machine that is not ready', async () => {
+    // Same scenario, re-check pushed out of reach. This is the old behaviour,
+    // and it is what handed the job a dead network to run against.
+    scheduleWithVault();
+    expect(run(['acquire', 'blocker', '--no-stale-check']).code).toBe(0);
+    const waiter = runAsync(['acquire', 'waiter', '--no-stale-check'],
+      { env: { JOB_QUEUE_RECHECK_AFTER: '99999', JOB_QUEUE_POST_LOCK_WAIT: '0' } });
+    await new Promise((r) => setTimeout(r, 1500));
+    rmSync(VAULT(), { recursive: true, force: true });
+    run(['release', 'blocker']);
+
+    const r = await waiter;
+    expect(r.code).toBe(0);
+    expect(events().some((e) => e.state === 'acquired' && e.job === 'waiter')).toBe(true);
+    run(['release', 'waiter']);
+  });
+
+  it('proceeds when readiness survived the wait', async () => {
+    // The re-check must not turn a healthy long wait into a deferral.
+    scheduleWithVault();
+    expect(run(['acquire', 'blocker', '--no-stale-check']).code).toBe(0);
+    const waiter = runAsync(['acquire', 'waiter', '--no-stale-check'], { env: FAST });
+    await new Promise((r) => setTimeout(r, 1500));
+    run(['release', 'blocker']);            // vault left in place
+
+    const r = await waiter;
+    expect(r.code).toBe(0);
+    run(['release', 'waiter']);
+  });
+
+  it('leaves a job with no preconditions alone, however long it waited', async () => {
+    writeFileSync(schedulePath, JSON.stringify({
+      blocker: { cron: '* * * * *', maxLateMinutes: 600, mode: 'wrapped' },
+      waiter: { cron: '* * * * *', maxLateMinutes: 600, mode: 'wrapped' },
+    }));
+    expect(run(['acquire', 'blocker', '--no-stale-check']).code).toBe(0);
+    const waiter = runAsync(['acquire', 'waiter', '--no-stale-check'], { env: FAST });
+    await new Promise((r) => setTimeout(r, 1500));
+    run(['release', 'blocker']);
+
+    expect((await waiter).code).toBe(0);
+    expect(events().some((e) => e.state === 'deferred-stale-precondition')).toBe(false);
+    run(['release', 'waiter']);
+  });
+
+  it('does not re-probe after a short wait', () => {
+    // The common case must keep its behaviour and its latency. Threshold left
+    // at the 60s default: this job takes the lock immediately.
+    scheduleWithVault();
+    const r = run(['acquire', 'waiter', '--no-stale-check']);
+    expect(r.code).toBe(0);
+    expect(events().some((e) => e.state === 'waiting-for-ready')).toBe(false);
+    run(['release', 'waiter']);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Queue capacity. A job that waits less time than a routine takes to run does
 // not get serialised, it gets dropped.
 // ---------------------------------------------------------------------------
