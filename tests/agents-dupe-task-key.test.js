@@ -18,8 +18,14 @@ const SRC = readFileSync(resolve(ROOT, 'os/agents/index.html'), 'utf8');
 function loadDupeTaskKey() {
   const m = SRC.match(/function dupeTaskKey\([\s\S]*?\n\}/);
   if (!m) throw new Error('dupeTaskKey not found in os/agents/index.html');
+  // The key depends on the shared DUPE_GENERIC vocabulary (added 27 Aug 2026
+  // when the key became an incident anchor). Extract that from the page too,
+  // rather than copying the word list here — a copied vocabulary is exactly
+  // the drift this test exists to catch.
+  const v = SRC.match(/const DUPE_GENERIC = \[[\s\S]*?\];/);
+  if (!v) throw new Error('DUPE_GENERIC not found in os/agents/index.html');
   // eslint-disable-next-line no-new-func
-  return new Function(`${m[0]}; return dupeTaskKey;`)();
+  return new Function(`${v[0]}\n${m[0]}; return dupeTaskKey;`)();
 }
 
 describe('dupeTaskKey — one subject, one key', () => {
@@ -78,3 +84,71 @@ print(json.dumps([mod.dupe_task_key(n) for n in json.loads(sys.argv[1])]))
     expect(py).toEqual(CORPUS.map(key));
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 27 Aug 2026: the incident anchor. These ten task names are the REAL open
+// approvals from that morning's queue — ten tasks covering four incidents,
+// every one of which the old key read as a distinct subject. Back-tested:
+// restoring the old "every significant word in order" key regroups them as
+// ten singletons and fails every GROUPS case below.
+// ─────────────────────────────────────────────────────────────────────────────
+describe('dupeTaskKey — the live clog it was rewritten for', () => {
+  const key = loadDupeTaskKey();
+  const group = (names) => {
+    const g = {};
+    names.forEach(n => { (g[key(n)] = g[key(n)] || []).push(n); });
+    return g;
+  };
+
+  const INVOICES = [
+    'INBOUND: Google Apps Script Invoices Dashboard failing, investigate and fix',
+    'INBOUND: Invoices Dashboard Apps Script failures',
+    'INBOUND: Invoices Dashboard Apps Script failing again',
+  ];
+  const INTAKE = [
+    'INBOUND: Google Apps Script Meetings Intake failing repeatedly, investigate and fix',
+    'INBOUND: Meetings Intake script failing with Gmail quota error',
+    'INBOUND: Google Apps Script Meetings Intake failing, Gmail quota exceeded',
+  ];
+  const SUPABASE = [
+    'INBOUND: Meetings to Supabase Apps Script failures',
+    'INBOUND: investigate Meetings to Supabase script failure',
+  ];
+  const KV = [
+    'INBOUND: Cloudflare KV put limit exceeded - investigate and fix',
+    'INBOUND: Cloudflare KV at 90 percent daily limit, review usage and consider upgrade',
+  ];
+
+  it('GROUPS each incident, however differently the AI worded it', () => {
+    for (const [label, set] of Object.entries({ INVOICES, INTAKE, SUPABASE, KV })) {
+      expect(Object.keys(group(set)), `${label} must be one key`).toHaveLength(1);
+    }
+  });
+
+  it('keeps the four incidents apart (control — one key for all ten would also "group")', () => {
+    const all = [...INVOICES, ...INTAKE, ...SUPABASE, ...KV];
+    expect(Object.keys(group(all))).toHaveLength(4);
+  });
+
+  it('does not merge two different scripts that share a word', () => {
+    // "Meetings Intake" and "Meetings to Supabase" are separate Apps Scripts.
+    // With the lane prefix left in the words this pair merged, because
+    // "INBOUND" ate one of the two subject slots.
+    expect(key(INTAKE[0])).not.toBe(key(SUPABASE[0]));
+  });
+
+  it('keeps the maintenance lane separate from the inbound lane', () => {
+    // Deliberate: the triage skill only dedupes a lane-13 thread against other
+    // maintenance tasks, so collapsing these would cross a designed boundary.
+    expect(key('MAINTENANCE: SMS reply from 447738707077 - unknown content'))
+      .not.toBe(key('INBOUND: Incoming SMS from +447738707077'));
+  });
+
+  it('platform and outcome words alone never make a key', () => {
+    // "Google Apps Script ... failing, investigate and fix" describes any
+    // incident equally. Two unrelated failures must not collide on it.
+    expect(key('INBOUND: Google Apps Script Payroll Export failing, investigate and fix'))
+      .not.toBe(key('INBOUND: Google Apps Script Invoices Dashboard failing, investigate and fix'));
+  });
+});
+

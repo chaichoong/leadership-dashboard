@@ -1814,6 +1814,30 @@ def cmd_intent(args):
     print(json.dumps({"intentRecorded": args.task}))
 
 
+def cmd_outcome(args):
+    """Read one task's live approval state. The browser lane's gate.
+
+    scripts/agent-browser.js calls this before it is allowed to press submit on
+    a web form. It goes through THIS script, like every other Airtable read, so
+    the browser gate and the approval loop can never drift apart about what
+    "Approved" means — a second hand-rolled read of the same field is exactly
+    how the recon accuracy card came to measure the first 100 rows for a month.
+
+    Prints JSON and exits 0 whatever the verdict; the CALLER decides. An
+    unreadable task raises, because a failed read must never be mistaken for
+    "not approved yet" and quietly stall a form Kevin already approved.
+    """
+    t = task_view(get_task(args.task))
+    print(json.dumps({
+        "id": t["id"],
+        "name": t["name"],
+        "status": t["status"],
+        "outcome": t["outcome"],
+        "approved": t["outcome"] in APPROVED,
+        "feedback": t["feedback"],
+    }))
+
+
 def cmd_revise(args):
     """Apply Kevin's minor edits to the approved text BEFORE it is carried out.
 
@@ -2760,6 +2784,10 @@ def main():
     an.add_argument("task")
     an.add_argument("--note", required=True)
 
+    oc = sub.add_parser("outcome",
+                        help="print one task's live approval state as JSON "
+                             "(the browser lane's submit gate)")
+    oc.add_argument("task")
     i = sub.add_parser("intent")
     i.add_argument("task")
 
@@ -2804,7 +2832,7 @@ def main():
             "complete": cmd_complete, "verify": cmd_verify,
             "score": cmd_score, "reconcile": cmd_reconcile,
             "lessons": cmd_lessons, "revise": cmd_revise,
-            "attach": cmd_attach,
+            "attach": cmd_attach, "outcome": cmd_outcome,
             "reassign": cmd_reassign}[args.cmd](args) or 0
 
 

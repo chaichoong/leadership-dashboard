@@ -28,6 +28,12 @@
 # triage agent's version of this sweep quarantined 41 committed schema files
 # on 25 Aug 2026 because it matched patterns across ALL of monitoring/.
 set -u
+
+# Tool policy is shared, never hand-rolled here — see scripts/agent-tools.sh
+# for why the old two-tool cap made every agent look like it could only
+# draft emails. Guarded by tests/agent-tools-parity.test.js.
+. "$(dirname "$0")/agent-tools.sh"
+
 CLAUDE="/Users/kevinbrittain/.local/bin/claude"
 REPO="/Users/kevinbrittain/Projects/leadership-dashboard"
 LOG_DIR="/Users/kevinbrittain/knowledge-os/logs/task-manager"
@@ -66,7 +72,7 @@ cd "$REPO" || { echo "ERROR: repo not found at $REPO" >&2; exit 1; }
 "$CLAUDE" -p "You are the Task Manager agent's scheduled run (one of the 09:00 / 13:00 / 17:00 slots). Do this skill in full: $SKILL
 Rules for the whole run: the BOARD PASS ALWAYS COMPLETES FIRST — never start doing work before every stuck task has its move decided. Every task write goes through scripts/agent-dispatch.py or scripts/task-manager.py — never a raw Airtable write to a task. Never route work to Mica or Ericamae (Kevin's ruling, 25 Aug 2026). Never send, reply, pay, or delete anything yourself. Working and temp files go ONLY under $SCRATCH — NEVER under the repo, and never in monitoring/ (public repository; task content includes tenant, creditor and legal detail; counts-only reports in monitoring/ are fine). A broken read is reported loudly, never treated as a quiet board. Do not take the queue lock (this run already holds it). Do not edit, commit, or push code; file anything needing a code change via scripts/findings.py. Complete the closing steps in full (score, publish, verify). End with at most twenty lines of counts only — never task content or record IDs." \
   --permission-mode acceptEdits \
-  --allowedTools "Bash(python3:*)" "Bash(curl:*)" >> "$LOG" 2>&1
+  --allowedTools "${AGENT_ALLOWED_TOOLS[@]}" >> "$LOG" 2>&1
 RC=$?
 
 # Privacy sweep: quarantine any content-bearing file THIS RUN left in

@@ -1802,12 +1802,60 @@ function computeCheckLanes(){
 // "Chase Acme invoice #2" and "Chase Acme invoice #3" collide. Two digits
 // stays — that is a brand (v12), three or more is a reference. Same lesson
 // as the reconciliation vendor key (see Known Anti-Patterns).
+// Words that describe ANY incident and so cannot identify one. Shared
+// verbatim with DUPE_GENERIC in scripts/create-agent-task.py.
+const DUPE_GENERIC = [
+    'a', 'an', 'and', 'are', 'as', 'at', 'be', 'been', 'by', 'for', 'from', 'in', 'is', 'it', 'its', 'of', 'on', 'or', 're', 'that', 'the', 'this', 'to', 'was', 'were', 'with', 'action', 'again', 'asap', 'check', 'consider', 'deal', 'fix', 'handle', 'investigate', 'look', 'needs', 'please', 'repeatedly', 'resolve', 'review', 'sort', 'urgent', 'broken', 'error', 'errors', 'exceed', 'exceeded', 'exceeding', 'fail', 'failed', 'failing', 'failure', 'failures', 'issue', 'issues', 'problem', 'problems', 'api', 'app', 'apps', 'google', 'script', 'scripts', 'service', 'services', 'ref', 'reference', 'usage'
+];
+
 function dupeTaskKey(name){
-    return String(name||'').toLowerCase()
+    // THE INCIDENT ANCHOR (rewritten 27 Aug 2026).
+    //
+    // The old key was "every significant word, in order". It caught a task
+    // whose only difference was a reference number and nothing else. Measured
+    // against the live queue that day, it caught ZERO of the real duplicates:
+    // ten open tasks covering three incidents all read as ten distinct
+    // subjects, because an AI writes the same incident up in fresh words each
+    // time ("Meetings Intake failing repeatedly" / "Meetings Intake script
+    // failing with Gmail quota error"). The Duplicates lane reported clean
+    // while the approvals gate held the duplicates.
+    //
+    // Two parts:
+    //
+    // 1. THE LANE — a leading "INBOUND:" / "MAINTENANCE:" / "Drift Monitor:"
+    //    prefix. It is kept, because a maintenance task and an inbound reply
+    //    task about one thread are deliberately separate (the triage skill's
+    //    Step 3 only dedupes lane 13 against other maintenance tasks). It is
+    //    split off rather than left in the words: as an ordinary token it ate
+    //    one of the two subject slots, which merged "Meetings Intake" with
+    //    "Meetings to Supabase" — two different scripts, one key.
+    //
+    // 2. THE SUBJECT — drop reference-like tokens as before, drop a fixed
+    //    vocabulary of filler, outcome and platform words that describe any
+    //    incident equally, then keep the first two survivors, sorted.
+    //    "Meetings Intake" survives; "Google Apps Script ... failing,
+    //    investigate and fix" does not.
+    //
+    // Two words, not all of them: one word over-collides ("chase"), and the
+    // whole set under-collides because each writer adds different detail.
+    // Sorted so word order cannot split one incident in two.
+    //
+    // Falls back to the old full key when nothing distinctive survives, since
+    // an empty key would collide everything.
+    var raw = String(name||'');
+    var lane = '';
+    var m = raw.match(/^([A-Za-z][A-Za-z ]*(?:\([^)]*\))?)\s*:\s*/);
+    if(m){ lane = m[1].toLowerCase().replace(/[^a-z0-9]+/g,' ').trim(); raw = raw.slice(m[0].length); }
+    var words = raw.toLowerCase()
         .replace(/[^a-z0-9\s]/g,' ')
         .split(/\s+/)
-        .filter(w=>w && !/^\d+$/.test(w) && !/^(?=(?:[^\d]*\d){3,})[a-z\d]+$/.test(w))
-        .join(' ').trim();
+        .filter(function(w){
+            return w && !/^\d+$/.test(w) && !/^(?=(?:[^\d]*\d){3,})[a-z\d]+$/.test(w);
+        });
+    var distinctive = words.filter(function(w){ return DUPE_GENERIC.indexOf(w) === -1; });
+    var subject = distinctive.length ? distinctive.slice(0,2).sort().join(' ')
+                                     : words.join(' ').trim();
+    return lane ? lane + '|' + subject : subject;
 }
 
 function loadChecksAndRender(){

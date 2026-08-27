@@ -81,19 +81,117 @@ PUBLIC_MAIL_DOMAINS = {
 CLOSED_STATUSES = {"Completed", "Cancelled"}
 
 
+# Words that describe ANY incident and so cannot identify one. Shared
+# verbatim with DUPE_GENERIC in os/agents/index.html.
+DUPE_GENERIC = {
+    "a",
+    "an",
+    "and",
+    "are",
+    "as",
+    "at",
+    "be",
+    "been",
+    "by",
+    "for",
+    "from",
+    "in",
+    "is",
+    "it",
+    "its",
+    "of",
+    "on",
+    "or",
+    "re",
+    "that",
+    "the",
+    "this",
+    "to",
+    "was",
+    "were",
+    "with",
+    "action",
+    "again",
+    "asap",
+    "check",
+    "consider",
+    "deal",
+    "fix",
+    "handle",
+    "investigate",
+    "look",
+    "needs",
+    "please",
+    "repeatedly",
+    "resolve",
+    "review",
+    "sort",
+    "urgent",
+    "broken",
+    "error",
+    "errors",
+    "exceed",
+    "exceeded",
+    "exceeding",
+    "fail",
+    "failed",
+    "failing",
+    "failure",
+    "failures",
+    "issue",
+    "issues",
+    "problem",
+    "problems",
+    "api",
+    "app",
+    "apps",
+    "google",
+    "script",
+    "scripts",
+    "service",
+    "services",
+    "ref",
+    "reference",
+    "usage",
+}
+
+
 def dupe_task_key(name):
-    """Line-for-line port of dupeTaskKey (os/agents/index.html): lowercase,
-    strip punctuation, drop pure numbers and reference-like tokens (letters
-    mixed with 3+ digits). Two digits stays: v12 is a brand, 4471902 is a
-    reference. Drift-tested against the JS original."""
-    s = re.sub(r"[^a-z0-9\s]", " ", str(name or "").lower())
+    """THE INCIDENT ANCHOR. Line-for-line port of dupeTaskKey in
+    os/agents/index.html; drift-tested in tests/agents-dupe-task-key.test.js.
+
+    Rewritten 27 Aug 2026. The old key was "every significant word, in order",
+    which caught a task differing only by a reference number and nothing else.
+    Measured against the live queue that day it caught ZERO of the real
+    duplicates: ten open tasks covering three incidents read as ten distinct
+    subjects, because an AI writes the same incident up in fresh words each
+    time. The Duplicates lane reported clean while the approvals gate held the
+    duplicates.
+
+    Two parts. THE LANE: a leading "INBOUND:" / "MAINTENANCE:" prefix is split
+    off and kept, because a maintenance task and an inbound reply task about
+    one thread are deliberately separate. Left in the words it ate one of the
+    two subject slots and merged "Meetings Intake" with "Meetings to Supabase".
+    THE SUBJECT: drop reference-like tokens, drop the generic vocabulary, keep
+    the first two survivors, sort them. Falls back to the old full key when
+    nothing distinctive survives, since an empty key would collide everything.
+    """
+    raw = str(name or "")
+    lane = ""
+    m = re.match(r"^([A-Za-z][A-Za-z ]*(?:\([^)]*\))?)\s*:\s*", raw)
+    if m:
+        lane = re.sub(r"[^a-z0-9]+", " ", m.group(1).lower()).strip()
+        raw = raw[m.end():]
+    s = re.sub(r"[^a-z0-9\s]", " ", raw.lower())
     words = [
         w for w in re.split(r"\s+", s)
         if w
         and not re.fullmatch(r"\d+", w)
         and not re.fullmatch(r"(?=(?:[^\d]*\d){3,})[a-z\d]+", w)
     ]
-    return " ".join(words).strip()
+    distinctive = [w for w in words if w not in DUPE_GENERIC]
+    subject = " ".join(sorted(distinctive[:2])) if distinctive else " ".join(words).strip()
+    return (lane + "|" + subject) if lane else subject
 
 
 def _sel_name(v):
