@@ -665,12 +665,29 @@ describe('morning digest', () => {
 describe('lock is never observed half-made', () => {
   it('always has a readable holder the moment it exists', async () => {
     const lockDir = join(stateDir, 'lock');
-    const holder = join(lockDir, 'holder.json');
     let sawOrphan = false;
 
-    const watcher = setInterval(() => {
-      if (existsSync(lockDir) && !existsSync(holder)) sawOrphan = true;
-    }, 1);
+    // ONE snapshot of the directory, never two separate existence checks.
+    //
+    // This watcher used to ask existsSync(lockDir) and then existsSync(holder).
+    // Release renames the whole lock directory away in a single atomic step, so
+    // a release landing between those two syscalls answers "the directory is
+    // there" and then "the holder is not" — which is indistinguishable from a
+    // half-made lock, while nothing was ever half-made. It failed approximately
+    // one run in six under load and passed alone, so it read as a mystery
+    // rather than a flake. Caught 28 Aug 2026 by instrumenting the watcher: at
+    // the moment it flagged, the lock was already gone (stillThere:false,
+    // readdir ENOENT), and a single-snapshot check saw nothing all run.
+    //
+    // readdirSync answers both questions at once. ENOENT means the lock is not
+    // there, which is not an orphan; a listing means it really is there, and
+    // only then does a missing holder.json mean what this test is looking for.
+    const orphaned = () => {
+      try { return !readdirSync(lockDir).includes('holder.json'); }
+      catch { return false; }
+    };
+
+    const watcher = setInterval(() => { if (orphaned()) sawOrphan = true; }, 1);
 
     await Promise.all(['a', 'b', 'c', 'd', 'e', 'f'].map((j) =>
       runAsync(['run', j, '--no-stale-check', '--timeout', '2', '--',
@@ -678,6 +695,15 @@ describe('lock is never observed half-made', () => {
 
     clearInterval(watcher);
     expect(sawOrphan).toBe(false);
+
+    // CONTROL. A watcher that can no longer SEE a half-made lock would pass
+    // this test for ever by detecting nothing at all, which is the failure mode
+    // that makes a green suite worthless. Build the exact shape the original
+    // bug produced — the directory present, the holder missing — and require
+    // the check to catch it.
+    mkdirSync(lockDir, { recursive: true });
+    expect(orphaned(), 'the orphan check stopped detecting a real half-made lock').toBe(true);
+    rmSync(lockDir, { recursive: true, force: true });
   });
 
   it('leaves no staging or dropped directories behind', () => {
