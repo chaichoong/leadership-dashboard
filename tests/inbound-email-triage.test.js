@@ -223,19 +223,24 @@ describe("the Go Signal is the agent's own 9/1/5 schedule (Kevin, 24 Aug 2026)",
         expect(sweepScript).toContain('def sent_dump');
     });
 
-    it('the runner keeps email content out of the public repo and fails loudly on leaks', () => {
+    it('the runner keeps email content out of the public repo and sweeps leaks via the shared epilogue', () => {
         // The first proof run dumped raw scan output (full bodies) into
         // monitoring/, which the nightly fixer commits. The prompt forbids it
-        // and the post-run sweep quarantines + fails.
+        // and the post-run sweep quarantines. Since 27 Aug 2026 (finding
+        // 20260827-phase-2-381) the sweep lives in scripts/slot-postrun.sh,
+        // shared by every slot wrapper; the runner hands it this job's leak
+        // and failure patterns. Behaviour is covered end to end by
+        // tests/slot-postrun.test.js.
         expect(runner).toMatch(/NEVER under the repo/);
+        expect(runner).toMatch(/slot-postrun\.sh/);
         expect(runner).toMatch(/"body":\|Inbound Message Content/);
-        expect(runner).toMatch(/__LEAKED/);
-        // Only files THIS run created, never git-tracked ones — the unscoped
-        // sweep quarantined 41 committed schema files on 25 Aug 2026.
-        expect(runner).toMatch(/-newer "\$__MARKER"/);
-        expect(runner).toMatch(/ls-files --error-unmatch/);
         // A broken lane (e.g. Full Disk Access denied) must fail the job.
         expect(runner).toMatch(/BROKEN\|Full Disk Access/);
+        const postrun = readFileSync(path.join(root, 'scripts/slot-postrun.sh'), 'utf8');
+        // Only files THIS run created, never git-tracked ones — the unscoped
+        // sweep quarantined 41 committed schema files on 25 Aug 2026.
+        expect(postrun).toMatch(/-newer "\$MARKER"/);
+        expect(postrun).toMatch(/ls-files --error-unmatch/);
     });
 
     it('the job name is NOT a skill folder, so the one-routine guard stays quiet', () => {

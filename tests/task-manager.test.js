@@ -101,14 +101,21 @@ describe("the Go Signal is the agent's own 9/1/5 slot job (Kevin, 25 Aug 2026)",
         expect(runner).not.toContain('send-email');
     });
 
-    it('the runner keeps task content out of the public repo and fails loudly on leaks', () => {
+    it('the runner keeps task content out of the public repo and sweeps leaks via the shared epilogue', () => {
         expect(runner).toMatch(/NEVER under the repo/);
-        expect(runner).toMatch(/__LEAKED/);
+        // The sweep itself moved to scripts/slot-postrun.sh on 27 Aug 2026
+        // (finding 20260827-phase-2-381): the runner must hand it the leak
+        // and failure patterns, and the helper must keep the marker scoping
+        // and git-tracked exemption. Behaviour is covered end to end by
+        // tests/slot-postrun.test.js.
+        expect(runner).toMatch(/slot-postrun\.sh/);
+        expect(runner).toMatch(/CREDITOR MATTER/);
         expect(runner).toMatch(/VERIFY FAIL/);
+        const postrun = readFileSync(path.join(root, 'scripts/slot-postrun.sh'), 'utf8');
         // Only files THIS run created, never git-tracked ones — the triage
         // sweep quarantined 41 committed schema files on 25 Aug 2026.
-        expect(runner).toMatch(/-newer "\$__MARKER"/);
-        expect(runner).toMatch(/ls-files --error-unmatch/);
+        expect(postrun).toMatch(/-newer "\$MARKER"/);
+        expect(postrun).toMatch(/ls-files --error-unmatch/);
     });
 
     it('the failure grep is anchored — a count containing 401 is not a failure', () => {

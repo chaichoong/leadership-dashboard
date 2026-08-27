@@ -44,6 +44,27 @@ __START_LINE=$( { wc -l < "$LOG"; } 2>/dev/null || echo 0)
 __MARKER="$SCRATCH/.run-start.$$"
 touch "$__MARKER"
 echo "===== inbound-triage run $(date) =====" >> "$LOG"
+
+# Finding 20260827-phase-2-382: this slot's 09:00 run on 26 Aug started and
+# vanished — a start header with no done line, indistinguishable from a run
+# still going, and no job-status row either (the whole process tree died, so
+# the death was a SIGKILL or a sleep-kill launchd never reported). Trap the
+# catchable terminations (TERM from launchd/session teardown, HUP, INT) and
+# any abnormal exit so those at least always write a done line. A SIGKILL
+# remains untrappable by anything.
+__POSTRUN_DONE=0
+__on_exit() {
+  __rc=$?
+  if [ "$__POSTRUN_DONE" -eq 0 ]; then
+    echo "===== done rc=$__rc (ABNORMAL: wrapper terminated before postrun) $(date) =====" >> "$LOG"
+    echo "inbound-triage run DIED before completing (rc=$__rc) — see $LOG" >&2
+  fi
+}
+trap __on_exit EXIT
+trap 'exit 143' TERM
+trap 'exit 129' HUP
+trap 'exit 130' INT
+
 cd "$REPO" || { echo "ERROR: repo not found at $REPO" >&2; exit 1; }
 
 # PRE-READ the Messages database HERE, before claude starts. macOS attributes
@@ -65,36 +86,15 @@ Rules for the whole run: this is real mail — when unsure between outcomes choo
   --allowedTools "Bash(python3:*)" "Bash(curl:*)" >> "$LOG" 2>&1
 RC=$?
 
-# Privacy sweep: quarantine any content-bearing file the run left in
-# monitoring/ (raw scan output carries '"body":'; task payloads carry the
-# Inbound Message Content field name). Quarantining is not enough on its own —
-# the run FAILS so the leak-shaped behaviour gets fixed, not absorbed.
-# Only files THIS RUN created or changed, and never git-tracked ones: the
-# unscoped version of this sweep quarantined 41 COMMITTED schema files on
-# 25 Aug 2026 (they carry "Inbound Message Content" as a field NAME in the
-# table structure, not as message content) and hard-failed the run; git
-# restore then re-armed the failure for the next slot.
-__LEAKED=""
-while IFS= read -r f; do
-  [ -z "$f" ] && continue
-  if git -C "$REPO" ls-files --error-unmatch "${f#"$REPO"/}" >/dev/null 2>&1; then
-    continue
-  fi
-  if grep -qlE '"body":|Inbound Message Content' "$f" 2>/dev/null; then
-    mv "$f" "$SCRATCH/" && __LEAKED="$__LEAKED $f"
-  fi
-done < <(find "$REPO/monitoring" -type f -newer "$__MARKER" 2>/dev/null)
-rm -f "$__MARKER"
-
-__TAIL=$(tail -n +$((__START_LINE + 1)) "$LOG" 2>/dev/null)
-__BAD=$(printf '%s\n' "$__TAIL" | grep -E '"error"|401|Unauthorized|OAuth access token has expired|BROKEN|Full Disk Access' || true)
-echo "===== done rc=$RC $(date) =====" >> "$LOG"
-if [ -n "$__LEAKED" ]; then
-  echo "PRIVACY: content-bearing files quarantined from monitoring/ to $SCRATCH:$__LEAKED" >&2
-fi
-if [ $RC -ne 0 ] || [ -n "$__BAD" ] || [ -n "$__LEAKED" ]; then
-  printf '%s\n' "$__BAD" | head -5 >&2
-  echo "inbound-triage run FAILED (rc=$RC) — see $LOG" >&2
-  exit 1
-fi
-echo "inbound-triage run OK"
+# Shared epilogue (finding 20260827-phase-2-381): privacy sweep, done line,
+# and exit-code semantics live in ONE place now — scripts/slot-postrun.sh.
+# It preserves the real rc, treats a quarantine as informational (still loud
+# on stderr), and never quarantines the drift scanner's schema snapshots,
+# which false-positived here on 25 Aug 2026 (they carry "Inbound Message
+# Content" as a field NAME in the table structure, not as message content).
+"$REPO/scripts/slot-postrun.sh" "inbound-triage" "$RC" "$LOG" "$__START_LINE" "$__MARKER" "$SCRATCH" \
+  '"body":|Inbound Message Content' \
+  '"error"|401|Unauthorized|OAuth access token has expired|BROKEN|Full Disk Access'
+__FINAL=$?
+__POSTRUN_DONE=1
+exit "$__FINAL"

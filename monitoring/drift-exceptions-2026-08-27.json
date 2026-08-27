@@ -1,0 +1,26 @@
+{
+  "ok": true,
+  "date": "2026-08-27",
+  "tables": 122,
+  "fields": 4962,
+  "compared_against": "schema-2026-08-26.json",
+  "schema_changes": {
+    "new_tables": [],
+    "removed_tables": [],
+    "new_fields": [
+      "Tasks.Remember This (fldZurhdHutYIDKVx)",
+      "Tasks.Lesson Written At (fldFfzXOME9Rh8SyM)",
+      "Tasks.Feedback History (fldOzsq68lhfprKJu)",
+      "AI Agents.What It Does (fldhpQOgGF7khDBp2)"
+    ],
+    "removed_fields": [],
+    "renamed_fields": [],
+    "retyped_fields": []
+  },
+  "mapped_ids": 457,
+  "dead_mapped_ids": [],
+  "repo_ids_scanned": 900,
+  "unresolvable_repo_ids": {},
+  "snapshot": "monitoring/schema-2026-08-27.json",
+  "verdict": "DRIFT"
+}

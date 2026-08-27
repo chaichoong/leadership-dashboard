@@ -61,6 +61,27 @@ __START_LINE=$( { wc -l < "$LOG"; } 2>/dev/null || echo 0)
 __MARKER="$SCRATCH/.run-start.$$"
 touch "$__MARKER"
 echo "===== task-manager run $(date) =====" >> "$LOG"
+
+# Finding 20260827-phase-2-382: the inbound-triage 09:00 slot on 26 Aug died
+# leaving a start header and no done line, indistinguishable from a run still
+# going. Same shape applies here, so every wrapper now traps catchable
+# terminations (TERM from launchd/session teardown, HUP, INT) and writes a
+# done line before dying. A SIGKILL is untrappable by anything; that death
+# still shows as a start header with an ABNORMAL line missing, but every
+# catchable one is now logged.
+__POSTRUN_DONE=0
+__on_exit() {
+  __rc=$?
+  if [ "$__POSTRUN_DONE" -eq 0 ]; then
+    echo "===== done rc=$__rc (ABNORMAL: wrapper terminated before postrun) $(date) =====" >> "$LOG"
+    echo "task-manager run DIED before completing (rc=$__rc) — see $LOG" >&2
+  fi
+}
+trap __on_exit EXIT
+trap 'exit 143' TERM
+trap 'exit 129' HUP
+trap 'exit 130' INT
+
 cd "$REPO" || { echo "ERROR: repo not found at $REPO" >&2; exit 1; }
 
 "$CLAUDE" -p "You are the Task Manager agent's scheduled run (one of the 09:00 / 13:00 / 17:00 slots). Do this skill in full: $SKILL
@@ -69,31 +90,15 @@ Rules for the whole run: the BOARD PASS ALWAYS COMPLETES FIRST — never start d
   --allowedTools "Bash(python3:*)" "Bash(curl:*)" >> "$LOG" 2>&1
 RC=$?
 
-# Privacy sweep: quarantine any content-bearing file THIS RUN left in
-# monitoring/ — files newer than the start marker, never git-tracked ones.
-# Quarantining alone is not enough — the run FAILS so the leak-shaped
-# behaviour gets fixed, not absorbed.
-__LEAKED=""
-while IFS= read -r f; do
-  [ -z "$f" ] && continue
-  if git -C "$REPO" ls-files --error-unmatch "${f#"$REPO"/}" >/dev/null 2>&1; then
-    continue
-  fi
-  if grep -qlE '"description":|Inbound Message Content|CREDITOR MATTER' "$f" 2>/dev/null; then
-    mv "$f" "$SCRATCH/" && __LEAKED="$__LEAKED $f"
-  fi
-done < <(find "$REPO/monitoring" -type f -newer "$__MARKER" 2>/dev/null)
-rm -f "$__MARKER"
-
-__TAIL=$(tail -n +$((__START_LINE + 1)) "$LOG" 2>/dev/null)
-__BAD=$(printf '%s\n' "$__TAIL" | grep -E 'HTTP Error 401|401 Unauthorized|Unauthorized|OAuth access token has expired|BROKEN|VERIFY FAIL' || true)
-echo "===== done rc=$RC $(date) =====" >> "$LOG"
-if [ -n "$__LEAKED" ]; then
-  echo "PRIVACY: content-bearing files quarantined from monitoring/ to $SCRATCH:$__LEAKED" >&2
-fi
-if [ $RC -ne 0 ] || [ -n "$__BAD" ] || [ -n "$__LEAKED" ]; then
-  printf '%s\n' "$__BAD" | head -5 >&2
-  echo "task-manager run FAILED (rc=$RC) — see $LOG" >&2
-  exit 1
-fi
-echo "task-manager run OK"
+# Shared epilogue (finding 20260827-phase-2-381): privacy sweep, done line,
+# and exit-code semantics live in ONE place now — scripts/slot-postrun.sh.
+# The old inline copy of this block hard-failed a SUCCESSFUL run when the
+# sweep quarantined the drift scanner's schema snapshot, reporting
+# "FAILED (rc=0)". The helper preserves the real rc, treats a quarantine as
+# informational, and never quarantines schema-YYYY-MM-DD.json.
+"$REPO/scripts/slot-postrun.sh" "task-manager" "$RC" "$LOG" "$__START_LINE" "$__MARKER" "$SCRATCH" \
+  '"description":|Inbound Message Content|CREDITOR MATTER' \
+  'HTTP Error 401|401 Unauthorized|Unauthorized|OAuth access token has expired|BROKEN|VERIFY FAIL'
+__FINAL=$?
+__POSTRUN_DONE=1
+exit "$__FINAL"
