@@ -139,6 +139,7 @@ HUMANS = {
 AF = {
     "name":              "fldgFjGBw6bTKJFCD",
     "description":       "fldRGhBQViKZKtkQ6",
+    "attachments":       "fldEbs9cscRr8elcw",
     "notes":             "fldR7apBzSp3oxFxz",
     "status":            "fldx4qCw17UfrKpaN",
     "assignee":          "fldELMncVJYPDRJNc",
@@ -906,6 +907,10 @@ def task_view(rec):
         "inboundTask": bool(f.get(AF["inboundTask"])),
         "inboundSourceType": sel(f.get(AF["inboundSourceType"])),
         "inboundSender": f.get(AF["inboundSender"], ""),
+        "attachments": [
+            {"filename": a.get("filename", ""), "url": a.get("url", "")}
+            for a in (f.get(AF["attachments"]) or [])
+        ],
     }
 
 
