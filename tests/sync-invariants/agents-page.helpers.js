@@ -43,6 +43,7 @@ const TF = {
   lmt: 'flddJA23cJRX5cs1K',
   inboundTask: 'fldueazD67F7fUGee',
   inboundUrl: 'fldXf1p0vtHqOZcKl',
+  attachments: 'fldEbs9cscRr8elcw',
 };
 const TM = { name: 'flds7xoRFQhcRTnbB', active: 'fld2YLfcPqSe6b60u', isAi: 'fldKGsz9kTpFypeOr' };
 const AG = {
