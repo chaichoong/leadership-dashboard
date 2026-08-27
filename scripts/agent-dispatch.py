@@ -50,7 +50,9 @@ Auth:   ~/.config/od/airtable_pat (never printed).
 """
 
 import argparse
+import base64
 import json
+import mimetypes
 import os
 import re
 import sys
@@ -701,6 +703,69 @@ def query_tasks(formula, max_records=None, minimal=False):
     return query_records(TASKS, formula, fields, max_records)
 
 
+ATTACH_MAX_BYTES = 5 * 1024 * 1024   # Airtable's cap, on the raw file
+
+
+def upload_attachment(task_id, path):
+    """Put a local file on a task's Attachments field, so Kevin can open it
+    from the approval card before deciding. Same shape the AI Agents page
+    uses and tests/airtable-upload-shape.test.js pins: base64 JSON to the
+    RECORD path (multipart returns 400, a table id in the path returns 404 —
+    both probed live 26 Aug 2026). Exits rather than leaving a half-attached
+    approval."""
+    if not os.path.isfile(path):
+        sys.exit(f"ERROR: no such file to attach: {path}")
+    size = os.path.getsize(path)
+    if size == 0:
+        sys.exit(f"ERROR: refusing to attach an empty file: {path}")
+    if size > ATTACH_MAX_BYTES:
+        sys.exit(f"ERROR: {path} is {size / 1048576:.1f}MB — Airtable's limit "
+                 "is 5MB an attachment. Attach a smaller file, or put it in "
+                 "Drive and give Kevin the link in the Agent Output.")
+    with open(path, "rb") as fh:
+        blob = base64.b64encode(fh.read()).decode()
+    url = (f"https://content.airtable.com/v0/{BASE_ID}/{task_id}/"
+           f"{AF['attachments']}/uploadAttachment")
+    req = urllib.request.Request(url, method="POST", data=json.dumps({
+        "contentType": mimetypes.guess_type(path)[0] or "application/octet-stream",
+        "filename": os.path.basename(path),
+        "file": blob,
+    }).encode(), headers={"Authorization": f"Bearer {pat()}",
+                          "Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=120) as resp:
+            json.load(resp)
+    except urllib.error.HTTPError as e:
+        sys.exit(f"ERROR: Airtable refused the attachment {path} -> HTTP "
+                 f"{e.code}: {e.read().decode('utf-8', 'replace')[:200]}")
+    except (urllib.error.URLError, TimeoutError, OSError) as e:
+        # A timeout is the awkward one: Airtable may have stored the file
+        # anyway, so the retry has to be safe. supersede_attachments below is
+        # what makes it safe — same filename replaces, never accumulates.
+        sys.exit(f"ERROR: could not reach Airtable to attach {path}: {e}")
+    return os.path.basename(path)
+
+
+def supersede_attachments(task_id, filenames):
+    """Drop any attachment already on the task whose filename matches one we
+    are about to upload, keeping everything else.
+
+    The Attachments field is a SHARED bucket: the inbound importer puts the
+    sender's own email attachments there (follow-up.html writes the same
+    field id), and Kevin's feedback files land there too. So an agent
+    re-attaching letter-of-authority.pdf after a redo must replace ITS OWN
+    previous version and leave the creditor's notice.pdf alone — clearing the
+    field wholesale would destroy evidence Kevin needs. Without this a redo
+    leaves two identically-named links on the approval card and no way to
+    tell which one is current."""
+    if not filenames:
+        return
+    atts = (get_task(task_id).get("fields", {}) or {}).get(AF["attachments"]) or []
+    keep = [{"id": a["id"]} for a in atts if a.get("filename") not in filenames]
+    if len(keep) != len(atts):
+        patch_task(task_id, {AF["attachments"]: keep})
+
+
 def patch_task(task_id, fields):
     return _request("PATCH", f"/{TASKS}/{task_id}",
                     {"fields": fields, "typecast": True})
@@ -1237,6 +1302,12 @@ def cmd_handover(args):
                       "name": who["name"], "reason": reason}))
 
 
+def cmd_attach(args):
+    supersede_attachments(args.task, {os.path.basename(p) for p in args.file})
+    names = [upload_attachment(args.task, p) for p in args.file]
+    print(json.dumps({"task": args.task, "attached": names}))
+
+
 def cmd_submit(args):
     if args.agent not in ALL_AGENTS:
         sys.exit(f"ERROR: {args.agent} is not a dispatchable AI agent record "
@@ -1340,6 +1411,17 @@ def cmd_submit(args):
         block = f"[{stamp}] {prior}"
         if block not in hist:
             archived = (hist.rstrip() + "\n\n" + block).strip()
+
+    # The files go up FIRST. If one is refused the run stops here with the
+    # task still unsubmitted — better than an approval card promising a
+    # letter that never arrived.
+    # getattr, not args.attach: cmd_submit is called with hand-built args in
+    # seventeen tests and any internal caller, none of which know about a flag
+    # added later. A new optional flag must never make an existing caller crash.
+    to_attach = list(getattr(args, "attach", None) or [])
+    supersede_attachments(args.task, {os.path.basename(p) for p in to_attach})
+    for path in to_attach:
+        upload_attachment(args.task, path)
 
     fields = {
         AF["agentOutput"]: output[:95000],
@@ -2559,9 +2641,19 @@ def main():
     s.add_argument("--agent", required=True)
     s.add_argument("--type", required=True)
     s.add_argument("--output-file", required=True)
+    s.add_argument("--attach", action="append", metavar="PATH",
+                   help="attach a file to this approval so Kevin can open it "
+                        "before deciding (repeat for several): a prepared "
+                        "letter, a filled form, a spreadsheet")
     s.add_argument("--tier1", action="store_true",
                    help="task touches the private legal/financial matter: "
                         "stamp the tier-1 banner on top of the Agent Output")
+
+    at = sub.add_parser("attach",
+                        help="attach a file to a task already waiting for "
+                             "approval")
+    at.add_argument("task")
+    at.add_argument("--file", required=True, action="append", metavar="PATH")
 
     an = sub.add_parser("annotate")
     an.add_argument("task")
@@ -2610,7 +2702,8 @@ def main():
             "annotate": cmd_annotate, "intent": cmd_intent,
             "complete": cmd_complete, "verify": cmd_verify,
             "score": cmd_score, "reconcile": cmd_reconcile,
-            "lessons": cmd_lessons, "revise": cmd_revise}[args.cmd](args) or 0
+            "lessons": cmd_lessons, "revise": cmd_revise,
+            "attach": cmd_attach}[args.cmd](args) or 0
 
 
 if __name__ == "__main__":
