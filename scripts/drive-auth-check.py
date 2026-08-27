@@ -152,6 +152,55 @@ def save_state(state):
         json.dump(state, f, indent=1)
 
 
+# ── The LOCAL MOUNT half (added 27 Aug 2026) ────────────────────────────────
+#
+# This check reported HEALTHY every morning from 24 to 27 Aug 2026 while the
+# brain was dead. It was not wrong about what it measured; it was measuring the
+# wrong Drive. It asks the Google Drive API whether a folder reads back, and the
+# API was fine. Every job that matters reads the LOCAL CloudStorage mount, and
+# that mount was refusing to open a file from a launchd context with
+# `[Errno 11] Resource deadlock avoided`.
+#
+# The cost: feed-brain, compound-brain and publish-brain deferred and gave up
+# every night for four nights, knowledge-os-sort likewise, and the one check
+# built to notice said HEALTHY throughout. Kevin found out by asking.
+#
+# The probe is IMPORTED from job-queue.py rather than reimplemented, because a
+# second copy is how the health check and the thing it is meant to protect drift
+# into disagreeing — and disagreeing silently is exactly this failure again.
+VAULT = os.path.expanduser(
+    '~/Library/CloudStorage/GoogleDrive-kevin@runpreneur.org.uk/My Drive/00 AI Context')
+
+
+def _drive_ready():
+    """(ok, reason) for the local vault, using job-queue's own probe."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(
+        'jq', os.path.join(os.path.dirname(os.path.abspath(__file__)), 'job-queue.py'))
+    jq = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(jq)
+    return jq.drive_ready(VAULT)
+
+
+def check_vault():
+    """Judge the local mount. Returns (verdict, reason).
+
+    A probe that itself blows up is UNKNOWN, never HEALTHY: an unreadable
+    control must not read as a pass.
+    """
+    try:
+        ok, why = _drive_ready()
+    except Exception as e:                                   # noqa: BLE001
+        return UNKNOWN, f'could not probe the local vault ({type(e).__name__}: {e})'
+    if ok:
+        return HEALTHY, 'local vault readable'
+    return BROKEN, (
+        f'the local Drive mount is NOT readable ({why}). Every job that reads the '
+        f'brain vault will defer and give up: feed-brain, compound-brain, '
+        f'publish-brain, knowledge-os-sort. The Drive API can be fine while this '
+        f'is broken, and on 24-27 Aug 2026 it was.')
+
+
 def fetch():
     req = urllib.request.Request(TEST_URL, headers=HEADERS)
     try:
@@ -165,7 +214,21 @@ def fetch():
 
 def run():
     status_code, body = fetch()
-    verdict, reason = classify(status_code, body)
+    api_verdict, api_reason = classify(status_code, body)
+    vault_verdict, vault_reason = check_vault()
+
+    # WORST OF THE TWO WINS, and the reason NAMES the half that failed.
+    # A score graded all-or-nothing across several things, with no record of
+    # which one missed, cannot be acted on — the same lesson as the recon
+    # accuracy card. So the verdict is the worse of the two and the reason
+    # always says whether it was the API or the mount.
+    RANK = {HEALTHY: 0, GATE: 1, UNKNOWN: 2, BROKEN: 3}
+    if RANK[vault_verdict] > RANK[api_verdict]:
+        verdict, reason = vault_verdict, 'local mount: ' + vault_reason
+    else:
+        verdict, reason = api_verdict, 'Drive API: ' + api_reason
+        if vault_verdict != HEALTHY:
+            reason += f' | local mount: {vault_reason}'
 
     state = load_state()
     gate_streak = state.get('consecutive_gate', 0)
@@ -193,6 +256,9 @@ def run():
         'verdict': verdict,
         'reason': reason,
         'http_status': status_code,
+        'api_verdict': api_verdict,
+        'vault_verdict': vault_verdict,
+        'vault_reason': vault_reason,
         'alert_kevin': verdict in (BROKEN, UNKNOWN),
         'consecutive_gate': gate_streak,
         'raw': body[:600],
