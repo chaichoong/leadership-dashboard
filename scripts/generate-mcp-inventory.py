@@ -44,6 +44,7 @@ import re
 import glob
 import shutil
 import subprocess
+import time
 import sys
 from datetime import datetime, timezone
 
@@ -182,7 +183,7 @@ def needs_auth(cache):
     return set(cache.keys())
 
 
-def health_env():
+def shell_env():
     """Environment for `claude mcp list` that can actually start the servers.
 
     The github server is launched with `npx`, so a PATH without node makes the
@@ -225,7 +226,7 @@ def live_health():
         proc = subprocess.run(
             [binary, "mcp", "list"],
             capture_output=True, text=True, timeout=120, cwd=REPO,
-            env=health_env(),
+            env=shell_env(),
         )
     except (subprocess.TimeoutExpired, OSError) as exc:
         return {}, f"claude mcp list did not complete ({exc})"
@@ -441,10 +442,17 @@ def previous_tools(path):
         return None
     try:
         with open(path) as fh:
-            body = fh.read()
+            return parse_tools(fh.read())
+    except OSError:
+        return None
+
+
+def parse_tools(body):
+    """The tool set inside a mcp-tools-data.js body, or None if unreadable."""
+    try:
         start = body.index("var MCP_TOOLS = ") + len("var MCP_TOOLS = ")
         data = json.loads(body[start:].rstrip().rstrip(";\n").rstrip(";"))
-    except (ValueError, OSError):
+    except ValueError:
         return None
     return {
         (t["name"], t.get("scope", ""), t["auth"], t["agents"])
@@ -461,6 +469,8 @@ def current_tools(data):
 
 
 PR_BRANCH = "chore/mcp-inventory"
+TARGET_REL = "js/mcp-tools-data.js"
+CANDIDATE = os.path.join(REPO, ".git", "mcp-inventory-candidate.js")
 
 
 def tool(*names):
@@ -482,7 +492,50 @@ def git(*args, **kw):
                           capture_output=True, text=True, check=True, **kw).stdout.strip()
 
 
-def publish_pr(out):
+def published_tools():
+    """The tool set in origin/main's copy — what the PAGE is actually showing.
+
+    When publishing, the local working file is the wrong baseline: it may be
+    ahead of the page (a previous run wrote it) or behind it (someone merged
+    from elsewhere). The question worth asking is "has the estate moved since
+    what the page shows", so the answer comes from origin/main.
+    """
+    git("fetch", "--quiet", "origin", "main")
+    try:
+        body = git("show", f"origin/main:{TARGET_REL}")
+    except subprocess.CalledProcessError:
+        return None
+    return parse_tools(body)
+
+
+def run_guard_tests(candidate):
+    """Run the data-shape tests against the CANDIDATE before publishing it.
+
+    This is the whole point of auto-merging safely. Nothing runs on a pull
+    request in this repo, so merging unchecked would let a brand new tool reach
+    the page with no description — defeating the guard that exists to stop
+    exactly that. The job therefore checks its own work instead of relying on a
+    human being the checkpoint.
+
+    Returns (passed, output).
+    """
+    npx = tool("npx")
+    if not npx:
+        return False, "npx not found, cannot run the guard tests"
+    # ONLY the data-shape block. The publish-safety tests in the same file check
+    # the script and the repo's state against origin/main, and one of them
+    # legitimately fails while a change is pending — which would mean the gate
+    # blocked every publish it was meant to wave through. The gate's question is
+    # narrow: is the DATA about to be published well formed and fully described.
+    proc = subprocess.run(
+        [npx, "vitest", "run", "tests/mcp-inventory.test.js", "-t", "MCP tools list"],
+        cwd=REPO, capture_output=True, text=True, timeout=600,
+        env=dict(shell_env(), MCP_TOOLS_FILE=candidate, CI="1"),
+    )
+    return proc.returncode == 0, (proc.stdout + proc.stderr)[-2000:]
+
+
+def publish_pr(candidate, merge=False):
     """Open (or refresh) a PR carrying the regenerated list.
 
     WHY PLUMBING AND NOT `git add`. This runs unattended in the MAIN checkout,
@@ -499,14 +552,15 @@ def publish_pr(out):
     if not gh:
         raise SourceFailure("gh not found, cannot open a PR for the changed list")
 
-    rel = os.path.relpath(out, REPO)
-    if os.path.isabs(rel) or rel.startswith(".."):
-        raise SourceFailure(f"refusing to publish {out}: it is outside the repo")
+    # The path that lands in the repo is a CONSTANT, never derived from an
+    # argument. --out can redirect where a test writes; it must never be able to
+    # redirect what gets committed.
+    rel = TARGET_REL
 
     git("fetch", "--quiet", "origin", "main")
     base = git("rev-parse", "origin/main")
 
-    blob = git("hash-object", "-w", "--path", rel, out)
+    blob = git("hash-object", "-w", "--path", rel, candidate)
     index = os.path.join(REPO, ".git", f"index-mcp-inventory-{os.getpid()}")
     env = dict(os.environ, GIT_INDEX_FILE=index)
     try:
@@ -522,7 +576,7 @@ def publish_pr(out):
             os.remove(index)
 
     if tree == git("rev-parse", f"{base}^{{tree}}"):
-        return "the regenerated list already matches origin/main; nothing to open"
+        return True, "the regenerated list already matches origin/main; nothing to open"
 
     msg = ("Tools list: the connected-tool inventory has changed\n\n"
            "Opened automatically by the 06:10 mcp-inventory job, which rebuilds\n"
@@ -540,7 +594,10 @@ def publish_pr(out):
         cwd=REPO, capture_output=True, text=True)
     if existing.returncode == 0 and json.loads(existing.stdout or "[]"):
         n = json.loads(existing.stdout)[0]["number"]
-        return f"refreshed the existing PR #{n}"
+        if not merge:
+            return True, f"refreshed the existing PR #{n}"
+        ok, note = merge_pr(gh)
+        return ok, f"refreshed the existing PR #{n}; {note}"
 
     made = subprocess.run(
         [gh, "pr", "create", "--base", "main", "--head", PR_BRANCH,
@@ -549,7 +606,44 @@ def publish_pr(out):
         cwd=REPO, capture_output=True, text=True)
     if made.returncode != 0:
         raise SourceFailure(f"could not open the PR: {made.stderr.strip()}")
-    return f"opened {made.stdout.strip()}"
+    url = made.stdout.strip()
+    if not merge:
+        return True, f"opened {url}"
+    ok, note = merge_pr(gh)
+    return ok, f"opened {url}; {note}"
+
+
+MERGE_ATTEMPTS = 5
+MERGE_WAIT_SECONDS = 12
+
+
+def merge_pr(gh):
+    """Squash-merge the open PR. Only ever called when the guard tests passed.
+
+    RETRIES ON PURPOSE. GitHub computes a PR's mergeability asynchronously, so
+    merging straight after the branch push loses a race and comes back with
+    "Base branch was modified" — which sounds like a conflict and is really just
+    "ask me again in a moment". Observed on the very first live run, 28 Aug 2026.
+    Backing off and retrying is the difference between hands-off and a PR that
+    silently waits for Kevin every time.
+
+    Returns (merged, message).
+    """
+    last = ""
+    for attempt in range(1, MERGE_ATTEMPTS + 1):
+        done = subprocess.run(
+            [gh, "pr", "merge", PR_BRANCH, "--squash", "--delete-branch"],
+            cwd=REPO, capture_output=True, text=True)
+        if done.returncode == 0:
+            note = f" (after {attempt} tries)" if attempt > 1 else ""
+            return True, f"merged it{note}; the page updates in a couple of minutes"
+        last = done.stderr.strip()
+        # A genuine conflict or a closed PR will never resolve by waiting.
+        if "conflict" in last.lower() or "not open" in last.lower():
+            break
+        if attempt < MERGE_ATTEMPTS:
+            time.sleep(MERGE_WAIT_SECONDS)
+    return False, f"could NOT merge it after {MERGE_ATTEMPTS} tries, so it is waiting for you: {last}"
 
 
 def main(argv=None):
@@ -580,7 +674,19 @@ def main(argv=None):
             print(f"FAIL: refusing to write, output contains '{marker}'", file=sys.stderr)
             return 1
 
-    before = previous_tools(out)
+    publishing = "--publish" in argv
+
+    # WHEN PUBLISHING, NOTHING IS WRITTEN INTO THE WORKING TREE. The candidate
+    # goes inside .git/, which git never tracks, so the shared checkout stays
+    # byte-for-byte clean whatever happens. The baseline is origin/main — what
+    # the page is actually showing — rather than a local file that may be ahead
+    # of it or behind it.
+    if publishing:
+        before = published_tools()
+        target = CANDIDATE
+    else:
+        before = previous_tools(out)
+        target = out
     after = current_tools(data)
     changed = before is None or before != after
 
@@ -595,13 +701,14 @@ def main(argv=None):
     # signal: a clean `git status` means the estate has not moved, and a diff on
     # js/mcp-tools-data.js means it has and is worth shipping.
     if changed:
-        with open(out, "w") as fh:
+        with open(target, "w") as fh:
             fh.write(body)
     c = data["counts"]
     # Say which of the two things actually happened. A log claiming "Wrote" on a
     # run that deliberately left the file alone teaches the reader to disbelieve
     # the log, and this log is the only place the nightly run speaks.
-    print(f"{'Wrote' if changed else 'Checked'} {out}")
+    print(f"{'Wrote' if changed else 'Checked'} "
+          f"{TARGET_REL if publishing else out}")
     print(f"  {c['total']} tools: {c['verified']} verified, {c['declared']} declared")
     print(f"  reachable by Kevin: {c['kevin']}   by headless agents: {c['agents']}")
     print(f"  unauthorised: {c['needsAuth']}")
@@ -623,14 +730,30 @@ def main(argv=None):
             print(f"  appeared or changed state: {', '.join(new_)}")
         if gone:
             print(f"  gone or changed state: {', '.join(gone)}")
-        if "--publish" in argv:
+        if publishing:
             try:
-                print(f"  {publish_pr(out)}")
-            except (SourceFailure, subprocess.CalledProcessError) as exc:
-                detail = getattr(exc, "stderr", "") or str(exc)
+                passed, detail = run_guard_tests(target)
+                print("  guard tests " + ("passed" if passed
+                      else "FAILED, so it will NOT be merged"))
+                shipped, note = publish_pr(target, merge=passed)
+                print(f"  {note}")
+                if passed and not shipped:
+                    print(f"FAIL: the list changed and passed its tests, but the "
+                          f"merge did not go through: {note}", file=sys.stderr)
+                    return 1
+                if not passed:
+                    print("FAIL: the new list did not pass its own tests. The PR "
+                          f"is open for you to look at.\n{detail}", file=sys.stderr)
+                    return 1
+            except (SourceFailure, subprocess.CalledProcessError,
+                    subprocess.TimeoutExpired) as exc:
+                why = getattr(exc, "stderr", "") or str(exc)
                 print(f"FAIL: the list changed but could not be published: "
-                      f"{str(detail).strip()}", file=sys.stderr)
+                      f"{str(why).strip()}", file=sys.stderr)
                 return 1
+            finally:
+                if os.path.exists(CANDIDATE):
+                    os.remove(CANDIDATE)
         else:
             print("  js/mcp-tools-data.js is now modified in git — commit it to "
                   "update the AI Agents page (or run with --publish).")

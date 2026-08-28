@@ -21,8 +21,15 @@ const read = (p) => readFileSync(resolve(ROOT, p), 'utf8');
 // (2) is the one that matters. It is back-tested below by feeding the generator
 // a deliberately broken config and asserting it exits non-zero.
 
+// MCP_TOOLS_FILE lets the 06:10 job validate the list it is ABOUT to publish
+// rather than the one already published. Without it the job could only test
+// yesterday's data, which would make the guard useless at exactly the moment it
+// matters: the morning a brand new tool turns up.
+const DATA_FILE = process.env.MCP_TOOLS_FILE || resolve(ROOT, 'js/mcp-tools-data.js');
+const readData = () => readFileSync(DATA_FILE, 'utf8');
+
 function loadTools() {
-    const src = read('js/mcp-tools-data.js');
+    const src = readData();
     const sandbox = {};
     new Function('globalThis', src + '\n;globalThis.__M = MCP_TOOLS;').call(sandbox, sandbox);
     return sandbox.__M;
@@ -62,7 +69,7 @@ describe('MCP tools list', () => {
     });
 
     it('never leaks a credential into the published file', () => {
-        const src = read('js/mcp-tools-data.js');
+        const src = readData();
         for (const marker of ['github_pat_', 'ghp_', 'xoxb-', 'xoxp-', 'AKIA', 'Bearer ']) {
             expect(src.toLowerCase()).not.toContain(marker.toLowerCase());
         }
@@ -324,23 +331,55 @@ describe('the automatic publish cannot damage the checkout', () => {
         expect(src).toMatch(/finally:\s*\n\s*if os\.path\.exists\(index\):/);
     });
 
-    it('refuses to publish a file from outside the repo', () => {
-        const out = join(mkdtempSync(join(tmpdir(), 'mcp-out-')), 'evil.js');
-        writeFileSync(out, 'var MCP_TOOLS = {};');
-        const py = [
-            "import importlib.util",
-            "spec=importlib.util.spec_from_file_location('g','scripts/generate-mcp-inventory.py')",
-            "g=importlib.util.module_from_spec(spec); spec.loader.exec_module(g)",
-            "try:",
-            `    g.publish_pr(${JSON.stringify(out)}); print('NO GUARD')`,
-            "except g.SourceFailure as e: print('REFUSED:', e)",
-        ].join('\n');
-        const r = spawnSync('python3', ['-c', py], { cwd: ROOT, encoding: 'utf8' });
-        expect(r.stdout, r.stderr).toContain('REFUSED');
-        expect(r.stdout).toContain('outside the repo');
-    }, 30_000);
+    it('can only ever commit to the one known path', () => {
+        // Stronger than the old outside-the-repo check: the committed path is a
+        // constant, so no argument — not --out, not a candidate location — can
+        // redirect what actually lands in the repo.
+        expect(src).toContain('TARGET_REL = "js/mcp-tools-data.js"');
+        expect(src, 'the commit path must not be derived from an argument')
+            .toMatch(/rel = TARGET_REL/);
+        expect(src).not.toMatch(/rel = os\.path\.relpath/);
+    });
+
+    it('only merges when the guard tests passed', () => {
+        // Nothing runs on a PR in this repo, so an unconditional merge would put
+        // an undescribed new tool straight on the page.
+        expect(src).toMatch(/merge=passed/);
+        // Every CALL site must sit behind an `if not merge:` early return.
+        // Counted rather than pattern-matched on one line, because the guard and
+        // the call are deliberately on separate lines now. The `def merge_pr`
+        // line is excluded — a cleverer regex mistook the definition for a call
+        // on the first attempt.
+        const calls = src.split('\n')
+            .filter((l) => l.includes('merge_pr(gh)') && !l.trim().startsWith('def '));
+        expect(calls.length, 'expected merge_pr to be called somewhere').toBeGreaterThan(0);
+        const guards = (src.match(/if not merge:/g) || []).length;
+        expect(guards, 'every merge_pr call needs its own `if not merge:` early return')
+            .toBe(calls.length);
+    });
+
+    it('cleans up its candidate file whatever happens', () => {
+        expect(src).toMatch(/finally:\s*\n\s*if os\.path\.exists\(CANDIDATE\):/);
+    });
+
+    it('keeps the candidate out of the tracked working tree', () => {
+        // .git is never tracked, so a run in progress cannot dirty the shared
+        // checkout or be swept into another session's commit.
+        expect(src).toMatch(/CANDIDATE = os\.path\.join\(REPO, "\.git"/);
+    });
 
     it('opens nothing when the list already matches origin/main', () => {
+        // This one CALLS publish_pr for real, so it must only run when the
+        // committed file and origin/main agree — otherwise the test itself would
+        // push a branch and open a PR as a side effect. Skipped, loudly, rather
+        // than silently doing something.
+        const live = spawnSync('git', ['show', 'origin/main:js/mcp-tools-data.js'],
+            { cwd: ROOT, encoding: 'utf8' });
+        if (live.status !== 0 || live.stdout !== read('js/mcp-tools-data.js')) {
+            console.warn('skipped: a tools-list change is pending, so publish_pr '
+                + 'would have real side effects');
+            return;
+        }
         // The committed file IS the published one, so a publish attempt here
         // must be a no-op rather than an empty PR. Guards against the job
         // reopening a PR every morning for a change that already shipped.
