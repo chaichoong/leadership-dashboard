@@ -84,6 +84,63 @@ DEFER_STATES = ("deferred-not-ready", "deferred-stale-precondition")
 
 
 # ---------------------------------------------------------------------------
+# wiring check — the two settings only make sense together
+# ---------------------------------------------------------------------------
+# A job gated on the Google Drive mount CAN be deferred: the mount wakes lazily
+# and an unmounted vault lists but will not open. If such a job has no
+# retryWhenDeferred declaration, a defer is a lost day and nothing ever comes
+# back. That is exactly what happened to ceo-agent on 27 Aug 2026 — deferred at
+# 06:45, then reported "NOT WIRED" on eight consecutive hourly sweeps while the
+# 09:00 CEO brief went without its input.
+#
+# Reporting that per-day, only on the days it bites, is too late. The pairing is
+# a property of the schedule and is checked on EVERY run, whether or not the job
+# happened to defer today.
+#
+# `false` counts as declared. Some jobs must not be re-fired unattended (see
+# daily-ops), and an explicit no with a reason is a decision. A MISSING key is
+# not a decision, it is an omission, and that is the only thing this fails on.
+
+
+def drive_gated(cfg):
+    """True when this job's preconditions include a Google Drive probe."""
+    for need in (cfg.get("needs") or []):
+        if isinstance(need, dict) and "drive" in need:
+            return True
+    return False
+
+
+def undeclared_retry_jobs(schedule):
+    """Job names gated on Drive that never say whether they may be retried."""
+    out = []
+    for job, cfg in sorted((schedule or {}).items()):
+        if job.startswith("_") or not isinstance(cfg, dict) or not cfg.get("cron"):
+            continue
+        if cfg.get("enabled") is False:
+            continue
+        if drive_gated(cfg) and "retryWhenDeferred" not in cfg:
+            out.append(job)
+    return out
+
+
+def check_wiring(schedule):
+    """(exit_code, lines). Loud on an omission, silent on a declared no."""
+    bad = undeclared_retry_jobs(schedule)
+    if not bad:
+        gated = [j for j, c in (schedule or {}).items()
+                 if isinstance(c, dict) and drive_gated(c)]
+        return 0, ["wiring: %d drive-gated job(s) all declare retryWhenDeferred "
+                   "(%s)" % (len(gated), ", ".join(sorted(gated)) or "none")]
+    lines = ["WIRING FAILURE: %d drive-gated job(s) declare no retryWhenDeferred. "
+             "A drive precondition without one means a deferred run is a lost "
+             "day with no way back." % len(bad)]
+    for job in bad:
+        lines.append('  UNDECLARED %-20s add "retryWhenDeferred": true (or false '
+                     "with a reason) to its job-schedule.json entry" % job)
+    return 1, lines
+
+
+# ---------------------------------------------------------------------------
 # reading the world
 # ---------------------------------------------------------------------------
 
@@ -403,6 +460,25 @@ def selftest():
         # just because it is not opted in, or every job on the Mac becomes noise.
         ("no defer + not opted in -> skip",     d(defer_reason=None, opted_in=False), "skip"),
     ]
+    # The wiring check, with its own control: removing the flag from a job that
+    # HAS it must fail, or the check is decoration.
+    good = {"feed-brain": {"cron": "45 22 * * *", "retryWhenDeferred": True,
+                           "needs": ["network", {"drive": "~/vault"}]},
+            "daily-ops": {"cron": "0 7 * * *", "retryWhenDeferred": False,
+                          "needs": [{"drive": "~/vault"}]},
+            "job-digest": {"cron": "0 8 * * *"}}
+    broken = json.loads(json.dumps(good))
+    del broken["feed-brain"]["retryWhenDeferred"]
+    cases = cases + [
+        ("wiring: all declared -> pass", "pass" if check_wiring(good)[0] == 0 else "fail", "pass"),
+        ("wiring: explicit false counts as declared",
+         "pass" if "daily-ops" not in undeclared_retry_jobs(good) else "fail", "pass"),
+        ("wiring: flag removed -> FAILS (back-test)",
+         "fail" if check_wiring(broken)[0] == 1 else "pass", "fail"),
+        ("wiring: no drive probe, no flag needed",
+         "pass" if "job-digest" not in undeclared_retry_jobs(broken) else "fail", "pass"),
+    ]
+
     failed = [(n, got, want) for n, got, want in cases if got != want]
     for n, got, want in cases:
         print("%-4s %s (got %s)" % ("PASS" if got == want else "FAIL", n, got))
@@ -414,8 +490,24 @@ def main():
     argv = sys.argv[1:]
     if "selftest" in argv:
         return selftest()
+    if "checkwiring" in argv:
+        path = next((a for a in argv if a.endswith(".json")), None)
+        schedule = json.load(open(path)) if path else jq.load_schedule()
+        rc, lines = check_wiring(schedule)
+        for line in lines:
+            print(line)
+        return rc
+
     results = sweep(dry_run="--dry-run" in argv)
-    return report(results, as_json="--json" in argv)
+    rc = report(results, as_json="--json" in argv)
+
+    # Checked on every run, not only when something deferred: the pairing is a
+    # property of the schedule, and the day it bites is too late to notice it.
+    wiring_rc, lines = check_wiring(jq.load_schedule())
+    if wiring_rc or "--json" not in argv:
+        for line in lines:
+            print(line)
+    return rc or wiring_rc
 
 
 if __name__ == "__main__":

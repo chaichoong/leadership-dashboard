@@ -323,7 +323,9 @@ describe('agent-dispatch.py does not drift from config.js or approvals.js', () =
       // could not see a tier-1 connection the agent found mid-work. See
       // tests/approvals-tier1-routing.test.js.
       expect(APPROVALS).toMatch(/const warn = isTier1Task\(t\)/);
-      expect(APPROVALS).toMatch(/buildApprovalBlocks\(t, agent, warn\)/);
+      // The approver is passed in since 28 Aug 2026 so the message can @mention
+      // them — see tests/approvals-mention.test.js (finding 146).
+      expect(APPROVALS).toMatch(/buildApprovalBlocks\(t, agent, warn, approver\)/);
       expect(APPROVALS).toMatch(/if \(warn\) \{/);
       // The old wording told him an agent should not be preparing this at all.
       // That is now false and would read as a system fault every time.

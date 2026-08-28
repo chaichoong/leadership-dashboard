@@ -1,0 +1,23 @@
+{
+  "ok": true,
+  "date": "2026-08-28",
+  "tables": 122,
+  "fields": 4963,
+  "compared_against": "schema-2026-08-27.json",
+  "schema_changes": {
+    "new_tables": [],
+    "removed_tables": [],
+    "new_fields": [
+      "Tasks.Verdict Reason (fldF9Bs4N5mttQvtl)"
+    ],
+    "removed_fields": [],
+    "renamed_fields": [],
+    "retyped_fields": []
+  },
+  "mapped_ids": 457,
+  "dead_mapped_ids": [],
+  "repo_ids_scanned": 903,
+  "unresolvable_repo_ids": {},
+  "snapshot": "monitoring/schema-2026-08-28.json",
+  "verdict": "DRIFT"
+}

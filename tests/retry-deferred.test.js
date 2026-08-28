@@ -19,7 +19,12 @@ const read = (p) => readFileSync(resolve(ROOT, p), 'utf8');
 describe('retry-deferred decision table', () => {
   it('passes its own selftest, covering every branch', () => {
     const out = execFileSync('python3', [SWEEP, 'selftest'], { encoding: 'utf8' });
-    expect(out).toMatch(/11\/11 decision cases pass/);
+    // Count is read from the output rather than hardcoded — a hardcoded 11
+    // turns every new case into a failing test instead of a passing one.
+    const m = out.match(/(\d+)\/(\d+) decision cases pass/);
+    expect(m, `no tally in: ${out}`).toBeTruthy();
+    expect(m[1]).toBe(m[2]);
+    expect(Number(m[2])).toBeGreaterThanOrEqual(11);
     expect(out).not.toMatch(/^FAIL/m);
   });
 

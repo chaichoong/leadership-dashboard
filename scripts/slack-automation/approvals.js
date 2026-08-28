@@ -520,8 +520,22 @@ export function apvSummary(raw) {
 // The message has to carry enough for Kevin to judge the work from his phone,
 // without opening Airtable. Five parts, in the order he needs them:
 //   the ask in one line · the full work · what it is · what he was asked for · how to answer
-function buildApprovalBlocks(t, agent, warn) {
+export function buildApprovalBlocks(t, agent, warn, approver) {
     const blocks = [];
+
+    // THE @MENTION. Finding 20260814-daily-ops-146: approvals posted to the
+    // private #agent-approvals channel with no mention of anyone. Kevin is a
+    // member, so the messages arrived — and Slack raised no badge and no push,
+    // because a channel message that names nobody notifies nobody. He reads his
+    // DMs (the daily-ops digest reached him there fine) and does not open the
+    // channel, so 30 approvals accumulated unseen, 22 of them six days old.
+    // Posted is not received. The mention rides in the FIRST block and in the
+    // `text` fallback, which is what Slack reads for the push notification.
+    const who = (approver && approver.slackId) || KEVIN_SLACK_ID;
+    blocks.push({
+        type: 'section',
+        text: { type: 'mrkdwn', text: `<@${who}> — approval needed` },
+    });
 
     // The SUMMARY of what the agent is proposing leads the message (Kevin's
     // request, 11 Aug 2026, matching the web app's approval box). Putting the
@@ -636,8 +650,8 @@ async function postPending(env, channels, log) {
             method: 'POST',
             body: JSON.stringify({
                 channel,
-                text: `Approval needed: ${t.name}`,
-                blocks: buildApprovalBlocks(t, agent, warn),
+                text: `<@${approver.slackId}> ${warn ? '[Tier 1] ' : ''}Approval needed: ${t.name}`,
+                blocks: buildApprovalBlocks(t, agent, warn, approver),
             }),
         });
         if (!res.ok) { log.push(`post failed ${t.id}: ${res.error}`); continue; }
@@ -1045,14 +1059,15 @@ export async function rewriteApprovalPost(env, taskId) {
     if (t.status !== 'Approval' || !t.ts) return { ok: false, error: `task ${id} has no live approval message (status ${t.status || 'unknown'}, ts ${t.ts ? 'set' : 'empty'})` };
     const agent = await agentName(env, t.agentId);
     const warn = isTier1Task(t);
-    const chId = await resolveChannelFor(env, approverFor(t, warn), {}, []);
+    const approver = approverFor(t, warn);
+    const chId = await resolveChannelFor(env, approver, {}, []);
     const res = await slack(env, SLACK.update, {
         method: 'POST',
         body: JSON.stringify({
             channel: chId,
             ts: t.ts,
-            text: `Approval needed: ${t.name}`,
-            blocks: buildApprovalBlocks(t, agent, warn),
+            text: `<@${approver.slackId}> ${warn ? '[Tier 1] ' : ''}Approval needed: ${t.name}`,
+            blocks: buildApprovalBlocks(t, agent, warn, approver),
         }),
     });
     if (!res.ok) return { ok: false, error: res.error, task: id };
