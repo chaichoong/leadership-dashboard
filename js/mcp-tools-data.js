@@ -13,15 +13,15 @@
 // Guarded by tests/mcp-inventory.test.js.
 
 var MCP_TOOLS = {
-  "generatedAt": "2026-08-28T11:24:27Z",
+  "generatedAt": "2026-08-28T12:21:39Z",
   "generator": "scripts/generate-mcp-inventory.py",
   "healthNote": "",
   "agentAllowlistSize": 9,
   "counts": {
-    "total": 43,
+    "total": 44,
     "verified": 30,
-    "declared": 13,
-    "kevin": 21,
+    "declared": 14,
+    "kevin": 22,
     "agents": 0,
     "needsAuth": 21
   },
@@ -183,6 +183,15 @@ var MCP_TOOLS = {
         {
           "name": "Read and Send iMessages",
           "what": "Reads and sends iMessages. The inbound sweep uses this.",
+          "auth": "connected",
+          "kevin": true,
+          "agents": false,
+          "source": "declared",
+          "scope": ""
+        },
+        {
+          "name": "TEST-undescribed-tool",
+          "what": "Temporary row proving the auto-merge path. Reverted immediately.",
           "auth": "connected",
           "kevin": true,
           "agents": false,
