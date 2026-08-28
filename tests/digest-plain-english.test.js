@@ -78,8 +78,14 @@ function runDigest() {
  * a dropped job says so plainly — the original failure surfaced as a confusing
  * "expected /2 skipped/" mismatch that named no missing job at all.
  */
+/** The one "Scheduled jobs: ..." line — icon included, since the icon is the
+ *  first thing read on a phone. */
+function headlineOf(out) {
+  return out.split('\n').find((l) => l.includes('Scheduled jobs:')) || '';
+}
+
 function expectAllJobsCounted(out) {
-  const headline = out.split('\n').find((l) => l.includes('Scheduled jobs:')) || '';
+  const headline = headlineOf(out);
   // Every group the headline can carry — see build() in morning-digest.py.
   const total = [...headline.matchAll(/(\d+) (?:ran|failed|halted|skipped|queued out|no record)/g)]
     .reduce((n, m) => n + Number(m[1]), 0);
@@ -131,6 +137,12 @@ describe('morning digest — plain English', () => {
     expectAllJobsCounted(out);
     expect(out).toContain('Every job was skipped and none ran');
     expect(code).toBe(1);
+    // The HEADLINE carries it too. Until 28 Aug 2026 this line read
+    // ":white_check_mark: Scheduled jobs: 0 ran, 3 skipped." with the alarm
+    // one line below, so the first thing Kevin saw on his phone for a morning
+    // where nothing ran was a green tick.
+    expect(headlineOf(out)).toContain(':rotating_light:');
+    expect(headlineOf(out)).not.toContain(':white_check_mark:');
   });
 
   it('stays quiet about the all-skipped alarm when something actually ran', () => {
@@ -145,5 +157,10 @@ describe('morning digest — plain English', () => {
 
     expectAllJobsCounted(out);
     expect(out).not.toContain('Every job was skipped');
+    // CONTROL for the red headline above. Skips on their own stay green: two
+    // late jobs and one that worked is a normal morning, and a digest that
+    // shouts every day is one nobody reads, which is the whole reason this
+    // file exists.
+    expect(headlineOf(out)).toContain(':white_check_mark:');
   });
 });
