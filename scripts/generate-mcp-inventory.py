@@ -41,6 +41,7 @@ the writer asserts no known secret marker reaches the output file.
 import json
 import os
 import re
+import glob
 import shutil
 import subprocess
 import sys
@@ -181,15 +182,50 @@ def needs_auth(cache):
     return set(cache.keys())
 
 
+def health_env():
+    """Environment for `claude mcp list` that can actually start the servers.
+
+    The github server is launched with `npx`, so a PATH without node makes the
+    health check report "Failed to connect" — true of the job's environment,
+    false of Kevin's. launchd hands a job PATH=/usr/bin:/bin and no shell
+    profile, so the unattended run measured itself rather than the estate.
+    agent-tools.sh solves the same problem the same way; nvm is why node is
+    never where a bare launchd job expects it.
+    """
+    env = dict(os.environ)
+    extra = []
+    node = shutil.which("node")
+    if node:
+        extra.append(os.path.dirname(node))
+    else:
+        nvm = sorted(glob.glob(os.path.join(HOME, ".nvm/versions/node/*/bin")))
+        if nvm:
+            extra.append(nvm[-1])
+    extra += ["/opt/homebrew/bin", "/usr/local/bin"]
+    existing = env.get("PATH", "")
+    env["PATH"] = ":".join([p for p in extra if os.path.isdir(p)] +
+                           ([existing] if existing else []))
+    return env
+
+
 def live_health():
-    """`claude mcp list` health. Only ever sees locally-configured servers."""
+    """`claude mcp list` health. Only ever sees locally-configured servers.
+
+    MUST run with cwd=REPO. MCP servers are stored per PROJECT in ~/.claude.json,
+    keyed by working directory, so `claude mcp list` from anywhere else prints
+    "No MCP servers configured" and exits 0. Under launchd the job inherits a
+    different cwd, which on 28 Aug 2026 made the first real run write github as
+    "Not checked" instead of "Connected" and drop Kevin's reachable count from
+    21 to 20 — a broken read presented as a fact, nightly.
+    """
     binary = shutil.which("claude") or os.path.join(HOME, ".local", "bin", "claude")
     if not os.path.exists(binary):
         return {}, "claude binary not found, health not checked this run"
     try:
         proc = subprocess.run(
             [binary, "mcp", "list"],
-            capture_output=True, text=True, timeout=120,
+            capture_output=True, text=True, timeout=120, cwd=REPO,
+            env=health_env(),
         )
     except (subprocess.TimeoutExpired, OSError) as exc:
         return {}, f"claude mcp list did not complete ({exc})"
@@ -248,6 +284,20 @@ def build():
     connectors = claudeai_connectors(claude_json)
     unauthorised = needs_auth(auth_cache)
     health, health_note = live_health()
+
+    # A health check that finds nothing while the config holds servers has not
+    # discovered an empty estate, it has failed to look. Writing that result
+    # downgrades every local server to "Not checked" and quietly publishes it.
+    # Refusing to write leaves the last good list in place, which is correct and
+    # current, and the job failure is what gets noticed.
+    if not health:
+        raise SourceFailure(
+            f"`claude mcp list` returned no servers while ~/.claude.json holds "
+            f"{len(local)}. That is a failed check, not an empty estate "
+            f"({health_note or 'no reason given'}). Most likely cause: it ran "
+            f"with the wrong working directory — MCP servers are stored per "
+            f"project, so it must run with cwd={REPO}."
+        )
     agent_servers, agent_entries = agent_mcp_tools()
     plugins = sorted(
         k.split("@")[0] for k in (claude_json.get("pluginUsage") or {})

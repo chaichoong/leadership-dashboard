@@ -118,98 +118,170 @@ describe('MCP tools list', () => {
 // ── CONTROLS ───────────────────────────────────────────────────────────
 // Back-tested: each case below was confirmed to make the generator exit 1.
 // Without these, a broken source produces a short list that looks like news.
+//
+// Two harnesses, because the sources behave differently. The CONFIG controls
+// run under a fixture HOME, and fire before the health check is ever reached.
+// The HEALTH controls must use the real HOME, because `claude mcp list` reads
+// far more than ~/.claude.json and reports nothing under a synthetic one — so a
+// fixture HOME could not tell a real failure from an artificial one.
 describe('generator refuses to write on a bad read', () => {
     const script = resolve(ROOT, 'scripts/generate-mcp-inventory.py');
-
-    function runWithFakeHome(claudeJson, needsAuth) {
-        const home = mkdtempSync(join(tmpdir(), 'mcp-inv-'));
-        writeFileSync(join(home, '.claude.json'), JSON.stringify(claudeJson));
-        execFileSync('mkdir', ['-p', join(home, '.claude')]);
-        writeFileSync(join(home, '.claude', 'mcp-needs-auth-cache.json'), JSON.stringify(needsAuth));
-        // --out keeps the fixture away from the real js/mcp-tools-data.js.
-        // Without it the success case overwrites the live list with test data.
-        const out = join(home, 'out.js');
-        try {
-            execFileSync('python3', [script, '--out', out],
-                { env: { ...process.env, HOME: home }, encoding: 'utf8' });
-            return 0;
-        } catch (e) {
-            return e.status ?? 1;
-        }
-    }
 
     const goodAuth = Object.fromEntries(
         ['a', 'b', 'c', 'd', 'e', 'f'].map((k) => [`plugin:x:${k}`, { timestamp: 1 }])
     );
     const goodJson = {
-        projects: { '/x/leadership-dashboard': { mcpServers: { github: {} } } },
+        projects: { [ROOT]: { mcpServers: { github: {}, metricool: {} } } },
         claudeAiMcpEverConnected: ['claude.ai Airtable', 'claude.ai Gmail', 'claude.ai Slack'],
         pluginUsage: {},
     };
 
+    function tmpHome(claudeJson, needsAuth) {
+        const home = mkdtempSync(join(tmpdir(), 'mcp-inv-'));
+        writeFileSync(join(home, '.claude.json'), JSON.stringify(claudeJson));
+        execFileSync('mkdir', ['-p', join(home, '.claude')]);
+        writeFileSync(join(home, '.claude', 'mcp-needs-auth-cache.json'),
+            JSON.stringify(needsAuth));
+        return home;
+    }
+
+    // --out keeps every fixture away from the real js/mcp-tools-data.js.
+    function run(env, out) {
+        try {
+            return { status: 0, stdout: execFileSync('python3', [script, '--out', out],
+                { env, encoding: 'utf8' }) };
+        } catch (e) {
+            return { status: e.status ?? 1, stdout: e.stdout || '', stderr: e.stderr || '' };
+        }
+    }
+
+    function runFixture(claudeJson, needsAuth) {
+        const home = tmpHome(claudeJson, needsAuth);
+        return run({ ...process.env, HOME: home }, join(home, 'out.js')).status;
+    }
+
     it('fails when no MCP server is configured anywhere', () => {
-        expect(runWithFakeHome({ ...goodJson, projects: {} }, goodAuth)).toBe(1);
+        expect(runFixture({ ...goodJson, projects: {} }, goodAuth)).toBe(1);
     });
 
     it('fails when the claude.ai connector list is empty', () => {
-        expect(runWithFakeHome({ ...goodJson, claudeAiMcpEverConnected: [] }, goodAuth)).toBe(1);
+        expect(runFixture({ ...goodJson, claudeAiMcpEverConnected: [] }, goodAuth)).toBe(1);
     });
 
     it('fails when the needs-auth cache is empty', () => {
-        expect(runWithFakeHome(goodJson, {})).toBe(1);
+        expect(runFixture(goodJson, {})).toBe(1);
     });
 
-    it('never writes to the real data file', () => {
-        // The bug this catches: the generator wrote to a fixed path regardless
-        // of --out, so running it under a fake HOME replaced the live 43-tool
-        // list with a 23-tool fixture and nothing errored.
-        const before = read('js/mcp-tools-data.js');
-        runWithFakeHome(goodJson, goodAuth);
-        expect(read('js/mcp-tools-data.js')).toBe(before);
-    });
-
-
-    it('says when the list has actually moved, and stays quiet when it has not',
-        () => {
-        // The page is served from GitHub Pages, so regenerating on the Mac does
-        // not update what Kevin sees — that needs a commit. The generator's job
-        // is therefore to say loudly when there is something worth shipping.
-        // A comparison that ignored the timestamp incorrectly would either cry
-        // "changed" every single night (noise nobody reads) or never at all.
-        const home = mkdtempSync(join(tmpdir(), 'mcp-chg-'));
-        writeFileSync(join(home, '.claude.json'), JSON.stringify(goodJson));
+    it('refuses to write when the health check finds nothing', () => {
+        // THE BUG THIS CATCHES (28 Aug 2026). MCP servers are stored per project
+        // in ~/.claude.json, keyed by working directory. Under launchd the job
+        // inherited a different cwd, so `claude mcp list` printed "No MCP servers
+        // configured" and exited 0. The generator believed it, wrote github as
+        // "Not checked" instead of "Connected", and dropped Kevin's reachable
+        // count from 21 to 20. It would have published that as fact every night.
+        //
+        // Copy the REAL config into a home with no ~/.local/bin/claude, and
+        // strip PATH. The config reads then succeed so we actually reach the
+        // health check, and the binary cannot be found, which reproduces the
+        // same empty-health condition the wrong cwd produced. Pointing HOME at
+        // the real home would not work: the fallback binary path is deliberately
+        // robust enough to find claude even with PATH stripped.
+        const home = mkdtempSync(join(tmpdir(), 'mcp-health-'));
         execFileSync('mkdir', ['-p', join(home, '.claude')]);
+        writeFileSync(join(home, '.claude.json'),
+            readFileSync(join(homedir(), '.claude.json'), 'utf8'));
         writeFileSync(join(home, '.claude', 'mcp-needs-auth-cache.json'),
-            JSON.stringify(goodAuth));
+            readFileSync(join(homedir(), '.claude', 'mcp-needs-auth-cache.json'), 'utf8'));
         const out = join(home, 'out.js');
-        const run = () => execFileSync('python3', [script, '--out', out],
-            { env: { ...process.env, HOME: home }, encoding: 'utf8' });
+        const r = run({ HOME: home, PATH: '/usr/bin:/bin' }, out);
+        expect(r.status, 'an unreadable health check must not produce a file').toBe(1);
+        expect(r.stderr).toContain('failed check, not an empty estate');
+        expect(existsSync(out), 'nothing should have been written').toBe(false);
+    }, 30_000);
 
-        expect(run()).toContain('first run');
+    it('pins the working directory when checking health', () => {
+        // The cwd is the actual root cause. A future edit that drops it would
+        // reintroduce a bug that only shows up in the unattended run.
+        expect(read('scripts/generate-mcp-inventory.py'),
+            'live_health() must pass cwd=REPO to the subprocess')
+            .toMatch(/timeout=120,\s*cwd=REPO/);
+    });
 
-        // Same inputs, new timestamp: must NOT report a change, and must NOT
-        // touch the file. Rewriting nightly for a fresh timestamp would leave a
-        // permanently-modified tracked file for another session to sweep up,
-        // and would destroy the signal that a diff here means something moved.
+    it('says when the list has moved, and stays quiet when it has not', () => {
+        // The page is served from GitHub Pages, so regenerating on the Mac does
+        // not update what Kevin sees. The generator's job is to say when there is
+        // something worth shipping, and to leave the file alone otherwise: a diff
+        // on js/mcp-tools-data.js IS the alert, so a nightly no-op rewrite would
+        // both destroy that signal and leave a permanently dirty tracked file.
+        const out = join(mkdtempSync(join(tmpdir(), 'mcp-chg-')), 'out.js');
+        const env = { ...process.env };
+
+        expect(run(env, out).stdout).toContain('first run');
+
         const stamp = statSync(out).mtimeMs;
-        expect(run()).toContain('No change since the committed list');
+        expect(run(env, out).stdout).toContain('No change since the committed list');
         expect(statSync(out).mtimeMs,
             'the generator rewrote an unchanged file').toBe(stamp);
 
-        // Drop a tool from the previous file: must name it.
+        // Drop a tool from the previous file: it must notice and name it.
         const prev = readFileSync(out, 'utf8');
         const i = prev.indexOf('var MCP_TOOLS = ') + 'var MCP_TOOLS = '.length;
         const parsed = JSON.parse(prev.slice(i).trim().replace(/;$/, ''));
         const dropped = parsed.groups.find((g) => g.tools.length).tools.shift().name;
         writeFileSync(out, prev.slice(0, i) + JSON.stringify(parsed) + ';\n');
-        const after = run();
+        const after = run(env, out).stdout;
         expect(after).toContain('CHANGED');
         expect(after).toContain(dropped);
-    });
+    }, 60_000);
 
-    it('control: the same inputs unbroken do NOT fail', () => {
-        // Without this, all three checks above would pass even if the generator
-        // were simply broken and always exited 1.
-        expect(runWithFakeHome(goodJson, goodAuth)).toBe(0);
-    });
+    it('never writes to the real data file', () => {
+        // The bug this catches: the generator wrote to a fixed path regardless
+        // of --out, so running it under a fixture replaced the live 43-tool list
+        // with a 23-tool fixture and nothing errored.
+        const before = read('js/mcp-tools-data.js');
+        runFixture(goodJson, goodAuth);
+        run({ ...process.env }, join(mkdtempSync(join(tmpdir(), 'mcp-x-')), 'out.js'));
+        expect(read('js/mcp-tools-data.js')).toBe(before);
+    }, 60_000);
+
+
+    it.runIf(hasSources)('reports the same health however the job was launched', () => {
+        // THE REAL ROOT CAUSE (28 Aug 2026). The github server starts via `npx`,
+        // so a PATH without node makes `claude mcp list` say "Failed to connect".
+        // That is true of the environment the check ran in and false of Kevin's.
+        // launchd gives a job PATH=/usr/bin:/bin and no shell profile, so the
+        // first unattended run measured ITSELF and published github as
+        // "Not checked", dropping the reachable count from 21 to 20.
+        //
+        // The invariant, and the only one worth asserting: the answer must not
+        // depend on who launched the job. A wrong cwd or a thin PATH must not
+        // change what this says about the estate.
+        const dir = mkdtempSync(join(tmpdir(), 'mcp-env-'));
+        const rich = join(dir, 'rich.js');
+        const thin = join(dir, 'thin.js');
+
+        expect(run({ ...process.env }, rich).status).toBe(0);
+        // env -i equivalent: no inherited PATH, no shell profile, foreign cwd.
+        expect(run({ HOME: homedir(), PATH: '/usr/bin:/bin' }, thin).status).toBe(0);
+
+        const authOf = (f) => {
+            const src = readFileSync(f, 'utf8');
+            const i = src.indexOf('var MCP_TOOLS = ') + 'var MCP_TOOLS = '.length;
+            const d = JSON.parse(src.slice(i).trim().replace(/;$/, ''));
+            return Object.fromEntries(
+                d.groups.flatMap((g) => g.tools).map((t) => [t.name, t.auth]));
+        };
+        expect(authOf(thin),
+            'a thin launchd-style environment reported different health to an '
+            + 'interactive one — the check is measuring itself, not the estate')
+            .toEqual(authOf(rich));
+    }, 60_000);
+
+    it('control: a good read really does succeed', () => {
+        // Without this, every check above would pass even if the generator were
+        // simply broken and always exited 1.
+        const out = join(mkdtempSync(join(tmpdir(), 'mcp-ok-')), 'out.js');
+        expect(run({ ...process.env }, out).status).toBe(0);
+        expect(existsSync(out)).toBe(true);
+    }, 30_000);
 });
