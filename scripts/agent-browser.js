@@ -354,10 +354,18 @@ async function runSteps(page, steps, allowSubmit) {
 }
 
 function readPlan(p) {
-  if (!p) die('--plan is required');
+  // `--plan -` reads STDIN. On 28 Aug 2026 an agent could not write to its own
+  // scratch dir and fell back to /tmp world-readable; a plan names the document
+  // and the signer, so it gets the same treatment as the letter spec. Piping
+  // adobe-plan.js straight in means the whole signing path writes no temp file.
+  if (!p) die('--plan FILE.json or --plan - (stdin) is required');
+  let raw;
+  try {
+    raw = p === '-' ? fs.readFileSync(0, 'utf8') : fs.readFileSync(p, 'utf8');
+  } catch (e) { die(`could not read ${p === '-' ? 'stdin' : p}: ${e.message}`); }
   let plan;
-  try { plan = JSON.parse(fs.readFileSync(p, 'utf8')); } catch (e) { die(`unreadable plan ${p}: ${e.message}`); }
-  if (!Array.isArray(plan.steps) || !plan.steps.length) die('the plan has no steps');
+  try { plan = JSON.parse(raw); } catch (e) { die(`plan is not valid JSON: ${e.message}`); }
+  if (!plan || !Array.isArray(plan.steps)) die('plan has no steps array');
   return plan;
 }
 
