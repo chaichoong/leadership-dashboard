@@ -139,6 +139,9 @@ HUMANS = {
     # approval; other passes go through the gate first.
     "roy.lavin1978@gmail.com": {"rec": "reclbdjfVev3bqNHS", "name": "Roy Lavin"},
 }
+# Named once so the property lane and HUMANS can never disagree about which
+# address is his.
+ROY_EMAIL = "roy.lavin1978@gmail.com"
 
 # Field IDs — single source is js/config.js; drift-tested, never guess.
 AF = {
@@ -543,6 +546,102 @@ READ_ONLY_RE = re.compile(
     r"do not act\b|evidence only|no outbound",
     re.I,
 )
+
+# ─── ROY'S LANE (28 Aug 2026) ───────────────────────────────────────
+#
+# "Roy is dealing with this directly" was typed SEVEN separate times across the
+# 58 rejections Kevin had ever made — 12%, the third largest group. Every one
+# cost him a read, a decision and a couple of minutes, on work that was never
+# his in the first place.
+#
+# Roy Lavin has been Head of Property since 25 Aug 2026 and `handover` has
+# existed since then, carrying his standing approval for maintenance. Nothing
+# ever routed to him. The capability was built and never wired, so every
+# property matter still walked past him and stopped at Kevin.
+#
+# WHAT THIS LANE IS: the physical building. Certificates, inspections, repairs,
+# contractors. Things Roy can act on by going to a property or ringing a trade.
+ROY_PATTERNS = [
+    re.compile(p, re.I) for p in (
+        # Compliance certificates
+        r"\beicr\b", r"electrical\s+(?:safety|installation|cert)",
+        r"gas\s+safety", r"\bcp12\b", r"\bepc\b", r"energy\s+performance",
+        r"legionella", r"\bpat\s+test", r"fire\s+(?:safety|risk|alarm|door)",
+        r"emergency\s+lighting", r"smoke\s+alarm", r"carbon\s+monoxide",
+        # Inspections and the licensing REGIME (not its fee — see the veto)
+        r"(?:property|council|hmo|housing)\s+inspection",
+        r"inspection\s+(?:report|notice|visit)", r"improvement\s+notice",
+        r"hmo\s+licen[cs]", r"selective\s+licen[cs]", r"housing\s+standards",
+        # The building itself
+        r"\brepair", r"\bboiler\b", r"\bleak\b", r"\bdamp\b", r"\bmould\b",
+        r"\bheating\b", r"\bplumb", r"\broof\b", r"\bguttering\b",
+        r"\bcontractor\b", r"\bhandyman\b",
+        r"\bvoid\b", r"\bgarden",
+        # The fabric of the building. Added after a live pass missed "urgent
+        # kitchen ceiling and rat infestation" — a category-1 hazard with no
+        # matching word in the first cut.
+        r"\bceiling\b", r"\binfestation\b", r"\bvermin\b", r"\bpest\b",
+        r"\brats?\b", r"\bmice\b", r"\bdrain", r"\bsewer",
+        r"\bwindow\b", r"\bflooring\b", r"\bcarpet\b",
+    )
+]
+# DELIBERATELY NOT A PATTERN: a bare `maintenance`. Every task in the
+# MAINTENANCE: lane carries the word in its name, so it matched the whole lane
+# — including "Yale Smart Lock battery low at Brittain Home front door" (Kevin's
+# own house) and "57a West Street - William H Brown letter" (an estate agent,
+# so a letting or sale matter, not a repair). The lane prefix says where a task
+# CAME FROM, never what it is.
+
+# Kevin's own home is not part of the portfolio and never Roy's. Family-named
+# DIY ("Fit hand rails for Paul's shower access") lives on the same board.
+ROY_HOME_RE = re.compile(r"brittain\s+home|\bmy\s+(?:house|home)\b", re.I)
+
+# THE VETO, and it is the whole safety of this lane.
+#
+# Modelled on CREDITOR_EXCLUDE_RE and for the same reason: the patterns above
+# are blind to what the message is actually ASKING FOR. "Pay the overdue HMO
+# licence fee" matches `hmo licen`, and it is a payment decision, not a job for
+# the head of property. So does an enforcement notice about a fire risk — the
+# risk is Roy's, the enforcement is Kevin's.
+#
+# Money, law and the live legal matter VETO the match outright. A vetoed
+# property task is not lost: it falls through to the normal lane and reaches
+# Kevin exactly as it does today. The asymmetry is deliberate — over-vetoing
+# costs Kevin a decision he is already making, under-vetoing sends a solicitor's
+# letter to a contractor.
+#
+# Kevin's own rejections show the cost of getting this right rather than wide:
+# he DID want "pay overdue HMO licence fee ... forward the existing email to
+# roy" to reach Roy. It is vetoed here anyway, because the same words on an
+# enforcement letter must not be. He can still forward it in one click.
+ROY_EXCLUDE_RE = re.compile(
+    r"\bfee\b|\binvoice|\bpayment|\bpay\b|\barrears|\bdebt\b|"
+    r"council\s+tax|\bhmrc\b|companies\s+house|solicitor|\bcourt\b|"
+    r"enforcement|bailiff|liability\s+order|restraint\s+order|"
+    r"statutory\s+demand|\blegal\b|insurance|mortgage|\bsell\b|refinanc",
+    re.I,
+)
+
+
+def roy_match(name, description="", notes=""):
+    """Why this is Roy's, or "".
+
+    MATCHES ON THE NAME ONLY, and vetoes on everything. That asymmetry is the
+    point: the name is what the task IS, while the description is context that
+    routinely mentions a property or a repair in passing — matching on it sent
+    a PROSPECTING task to the head of property in testing. A veto anywhere is
+    still a veto, because the thing that makes a task not-Roy's (a payment, a
+    solicitor, the live legal matter) is exactly the thing that turns up in the
+    body rather than the subject.
+
+    Missing one costs Kevin a decision he is already making. Getting one wrong
+    sends his private legal correspondence to a contractor.
+    """
+    everything = " ".join(str(t or "") for t in (name, description, notes))
+    if ROY_EXCLUDE_RE.search(everything) or ROY_HOME_RE.search(everything):
+        return ""
+    return tier_match(ROY_PATTERNS, name)
+
 
 # ─── SYSTEM ALERTS ARE NOT APPROVALS (27 Aug 2026) ──────────────────
 #
@@ -1094,7 +1193,13 @@ def sort_key(t):
 
 # ─── QUEUE ────────────────────────────────────────────────────────────
 
-def cmd_queue(args):
+def build_queue(args=None):
+    """Classify the open board. Returns the queue dict, prints nothing.
+
+    Split out of cmd_queue on 28 Aug 2026 so `handover-property` classifies
+    with the SAME code the run reads. Two classifiers would be two answers to
+    "is this Roy's", and the one that writes must be the one Kevin saw.
+    """
     formula = "OR({Status}='Today',{Status}='Overdue')"
     open_tasks = [task_view(r) for r in query_tasks(formula)]
 
@@ -1129,6 +1234,7 @@ def cmd_queue(args):
 
     tier1, skipped_tier2, unmapped, unclassified = [], [], [], []
     system_alerts = []
+    roy_lane = []
     approved_hb, changes_hb, new_work, routing = [], [], [], []
     creditor_ok = bool(role_roster.get(CREDITOR_REC_ID, {}).get("dispatchable"))
     creditor_count = 0
@@ -1174,6 +1280,16 @@ def cmd_queue(args):
             t.get("inboundSender"), t["name"], t["description"], t["notes"])
         if hit_alert and t["outcome"] not in APPROVED:
             system_alerts.append({**t, "alertSource": hit_alert})
+            continue
+        # ROY'S LANE. Checked AFTER tier 1, the creditor lane and the alert
+        # lane, all of which must win: the veto in roy_match already keeps
+        # money and law out, and this ordering is the second line of the same
+        # defence. An APPROVED task is never diverted — Kevin has already said
+        # yes to that exact work and it must be carried out, not handed on.
+        hit_roy = ("" if (t["tier1"] or t["creditor"] or t["outcome"] in APPROVED)
+                   else roy_match(t["name"], t["description"], t["notes"]))
+        if hit_roy:
+            roy_lane.append({**t, "royReason": hit_roy})
             continue
         if not t["localAgent"]:
             unmapped.append(t)
@@ -1265,6 +1381,10 @@ def cmd_queue(args):
         # Named, counted, and left open on the board. Never dropped: an alert
         # that vanishes is worse than one that clogs the gate.
         "systemAlerts": system_alerts,
+        # Property work for Roy. Diverted and NAMED, never dropped — and not
+        # acted on here: cmd_queue is a read. `handover-property` does the
+        # writing, so one command owns the change.
+        "royLane": roy_lane,
         "unmappedAgent": unmapped,
         "unclassified": unclassified,  # states the buckets cannot place — eyes, not silence
         "agents": ALL_AGENTS,          # the roster the CEO routes against
@@ -1291,6 +1411,7 @@ def cmd_queue(args):
             # emptiness it causes.
             "tier2Parked": len(skipped_tier2),
             "systemAlerts": len(system_alerts),
+            "royLane": len(roy_lane),
             # Creditor-lane keyword matches across the whole agent-linked
             # read, hand-backs included (routing floor, not judgement). Zero
             # with the register row Built/Live and creditor mail known to be
@@ -1303,7 +1424,11 @@ def cmd_queue(args):
             "worklist": len(worklist),
         },
     }
-    print(json.dumps(out, indent=2))
+    return out
+
+
+def cmd_queue(args):
+    print(json.dumps(build_queue(), indent=2))
 
 
 # ─── WRITES ───────────────────────────────────────────────────────────
@@ -1493,6 +1618,47 @@ def cmd_handover(args):
     })
     print(json.dumps({"handedOver": args.task, "to": args.to,
                       "name": who["name"], "reason": reason}))
+
+
+def cmd_handover_property(args):
+    """Hand every task in Roy's lane to Roy, in one deterministic pass.
+
+    WHY THIS IS A COMMAND AND NOT A SKILL STEP. `handover` has existed since
+    25 Aug 2026 with Roy's standing approval on it, and in three days nothing
+    routed a single task to him — because the instruction to do it lived in
+    prose. Kevin then typed "Roy is dealing with this" seven times. The same
+    lesson as the learning loop: a rule nothing enforces is a rule that gets
+    skipped. See scripts/inbound-triage-run.sh, which calls this.
+
+    Reuses cmd_handover per task, so the tier-1 gate, the both-links write and
+    the cleared-verdict rule are the SAME code the manual path uses. A second
+    implementation here is how the two would drift apart.
+    """
+    queue = build_queue()
+    lane = queue.get("royLane") or []
+    done, failed = [], []
+    for t in lane:
+        entry = {"task": t["id"], "name": t["name"], "why": t.get("royReason", "")}
+        if args.dry_run:
+            done.append({**entry, "dryRun": True})
+            continue
+        try:
+            cmd_handover(argparse.Namespace(
+                task=t["id"], to=ROY_EMAIL,
+                reason=f"property matter ({t.get('royReason','')}) — Roy is "
+                       "Head of Property and this is his standing lane"))
+            done.append(entry)
+        except SystemExit as exc:
+            # cmd_handover REFUSES tier-1 content with a sys.exit. That is the
+            # gate doing its job, not an error to swallow: it is reported so a
+            # pattern that keeps tripping it gets fixed rather than retried
+            # silently every run.
+            failed.append({**entry, "refused": str(exc)})
+        except Exception as exc:                               # noqa: BLE001
+            failed.append({**entry, "error": str(exc)})
+    print(json.dumps({"royLane": len(lane), "handedOver": done,
+                      "refused": failed}, indent=2))
+    return 1 if failed else 0
 
 
 def cmd_attach(args):
@@ -2327,6 +2493,10 @@ def cmd_verify(args):
     # Alerts are diverted, not dropped, so the run must SAY how many. A lane
     # that removes work from Kevin's queue and reports nothing is indis-
     # tinguishable from a lane that lost it.
+    # Roy's lane is work that LEFT Kevin's queue. Counted for the same reason
+    # the alert lane is: a lane that removes work and reports nothing cannot be
+    # told apart from a lane that lost it.
+    roy = report.get("royLane") or []
     alerts = report.get("systemAlerts") or []
     alert_summary = {}
     for a in alerts:
@@ -2446,6 +2616,7 @@ def cmd_verify(args):
                       # Kevin's queue and reports nothing cannot be told apart
                       # from a lane that lost it.
                       "systemAlertsHeldBack": len(alerts),
+                      "handedToRoy": len(roy),
                       "systemAlertsBySource": alert_summary,
                       "worklistAtStart": counts.get("worklist", 0)}))
 
@@ -3066,6 +3237,11 @@ def main():
                    help="task touches the private legal/financial matter: "
                         "stamp the tier-1 banner on top of the Agent Output")
 
+    hp = sub.add_parser("handover-property",
+                        help="hand every property task in Roy's lane to Roy")
+    hp.add_argument("--dry-run", action="store_true",
+                    help="list what WOULD be handed over and change nothing")
+
     at = sub.add_parser("attach",
                         help="attach a file to a task already waiting for "
                              "approval")
@@ -3125,7 +3301,8 @@ def main():
             "score": cmd_score, "reconcile": cmd_reconcile,
             "lessons": cmd_lessons, "revise": cmd_revise,
             "attach": cmd_attach, "outcome": cmd_outcome,
-            "reassign": cmd_reassign}[args.cmd](args) or 0
+            "reassign": cmd_reassign,
+            "handover-property": cmd_handover_property}[args.cmd](args) or 0
 
 
 if __name__ == "__main__":

@@ -73,6 +73,17 @@ cd "$REPO" || { echo "ERROR: repo not found at $REPO" >&2; exit 1; }
 # treating "no sends found" as "nothing answered".
 /usr/bin/python3 "$REPO/scripts/inbound-triage.py" sentcheck --days 7 > "$SCRATCH/gmail-sent.json" 2>&1 || true
 
+# ROY'S LANE (28 Aug 2026). "Roy is dealing with this directly" was typed SEVEN
+# times across Kevin's 58 rejections — 12%, on work that was never his. Roy has
+# been Head of Property since 25 Aug and `handover` has carried his standing
+# approval for maintenance ever since; nothing ever routed to him, because the
+# instruction to do it lived in prose. It is a command now, and it runs BEFORE
+# the dispatch skill so a property task is passed on rather than drafted for
+# Kevin first. `|| true`: a refusal is reported in its JSON, and one refused
+# handover must not stop the rest of the slot.
+/usr/bin/python3 "$REPO/scripts/agent-dispatch.py" handover-property \
+  > "$SCRATCH/roy-handovers.json" 2>&1 || true
+
 # THE LESSONS FILE IS READ FIRST, AND THAT IS LOAD-BEARING (27 Aug 2026).
 #
 # This runner invokes `claude -p` against SKILL.md files. It does NOT load

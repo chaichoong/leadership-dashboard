@@ -58,7 +58,7 @@ describe('roster wiring', () => {
   });
 
   it('inbound CEO tasks get the deterministic autoTarget, gated on the LIVE register', () => {
-    const queue = src.slice(src.indexOf('def cmd_queue'), src.indexOf('# ─── WRITES'));
+    const queue = src.slice(src.indexOf('def build_queue'), src.indexOf('# ─── WRITES'));
     // Behavioural, through the real AUTO_ROUTES table: a plain inbound task
     // routes to the Response agent when its register row is dispatchable,
     // and stays in the CEO lane when it is not (Kevin's pause lever) or the
