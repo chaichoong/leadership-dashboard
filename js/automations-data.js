@@ -40,6 +40,8 @@ var AUTOMATIONS = {
           what: 'Copies project status between the repo and Airtable so both show the same thing.' },
         { key: 'masterplan-sync', name: 'Master Plan Sync', when: '7:00am daily', status: 'on',
           what: 'Pushes MASTER-PLAN.md into Airtable so the team works from the same plan you do.' },
+        { key: 'signature-watch', name: 'Signed Document Watch', when: '9:20am, 12:20pm, 3:20pm, 6:20pm daily', status: 'on',
+          what: 'Watches for documents you sent out for signature coming back signed. When one is done it downloads the signed copy and files it, so it can be put in front of you for the second approval before it is posted or emailed. It checks Adobe itself rather than waiting for an email, because an email can be filtered or archived and the signed copy has to come from Adobe anyway. If it cannot see your Adobe account it says so loudly instead of reporting that nothing has been signed.' },
         { key: 'knowledge-os-sort', name: 'Knowledge Sorter', when: '9:00am daily', status: 'on',
           what: 'Files new brain documents into the right folder using the naming rules. It moves files, it does not read or judge them.' },
         { key: 'publish-brain', name: 'Brain Publisher', when: '11:20pm daily', status: 'on',
