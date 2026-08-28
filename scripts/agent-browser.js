@@ -45,6 +45,7 @@
  * USAGE
  *   node scripts/agent-browser.js login   --url URL [--profile NAME]
  *   node scripts/agent-browser.js read    --url URL [--shot OUT.png]
+ *   node scripts/agent-browser.js loom-search --query "..." [--limit 20]
  *   node scripts/agent-browser.js prepare --plan PLAN.json --shot OUT.png
  *   node scripts/agent-browser.js commit  --plan PLAN.json --task recXXX --shot OUT.png
  *   node scripts/agent-browser.js sites
@@ -105,6 +106,19 @@ const BUILTIN_SITES = {
   //                          signature end to end.
   'acrobat.adobe.com':          { label: 'Adobe Acrobat Sign', login: true  },
   'documents.adobe.com':        { label: 'Adobe Sign (signing links)', login: false },
+  // Loom (29 Aug 2026). Kevin's video archive, so an agent can search what he
+  // has already recorded instead of asking him to re-explain something.
+  //
+  // A SINGLE video needs nothing: its transcript comes from a public GraphQL
+  // endpoint, which is what scripts/agent-dispatch.py `expand_looms` uses for
+  // approval feedback and what the transcript-to-brain skill uses. That path
+  // is unchanged and needs no login and no allowlist entry.
+  //
+  // THE LIBRARY is different — it is his account. Hence login: true and the
+  // one-time `login` step. Nothing here can post, share or delete: `read` and
+  // `loom-search` only navigate and read text, and any form submit still goes
+  // through `commit`, which refuses without an approved task.
+  'loom.com':                   { label: 'Loom (video archive)', login: true  },
 };
 
 function loadSites() {
@@ -418,6 +432,75 @@ async function main() {
     });
     ledger({ cmd: 'read', url, profile, screenshot: res.screenshot });
     console.log(JSON.stringify(res));
+    return;
+  }
+
+  // ── loom-search ────────────────────────────────────────────────────────────
+  // "Search my Loom library" — Kevin's ask, 29 Aug 2026. Returns the videos
+  // matching a phrase, each with the share URL, so the caller can then pull a
+  // transcript with the existing public-endpoint fetcher and read what he
+  // actually said. Two steps on purpose: the library needs his session, the
+  // transcript does not.
+  if (cmd === 'loom-search') {
+    const query = arg(rest, 'query');
+    if (!query) die('--query is required');
+    const limit = Number(arg(rest, 'limit', '20')) || 20;
+    const shot = arg(rest, 'shot');
+    const url = 'https://www.loom.com/looms/videos?search=' + encodeURIComponent(query);
+    if (!hostAllowed(url)) die('loom.com is not on the allowlist.');
+
+    const res = await withPage(profile, false, async (page) => {
+      await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 45000 });
+      // Loom renders the library client-side, so the links arrive after load.
+      // A fixed sleep would be a race; waiting for the selector and tolerating
+      // the timeout lets the not-signed-in case fall through to the check
+      // below instead of throwing something less useful.
+      await page.waitForSelector('a[href*="/share/"]', { timeout: 15000 })
+        .catch(() => {});
+
+      const signedOut = await page.evaluate(() =>
+        /log ?in|sign ?in|get started free/i.test(document.body.innerText.slice(0, 1500))
+        && !document.querySelector('a[href*="/share/"]'));
+
+      const videos = await page.evaluate((max) => {
+        const seen = new Set();
+        const out = [];
+        for (const a of document.querySelectorAll('a[href*="/share/"]')) {
+          const m = (a.getAttribute('href') || '').match(/\/share\/([0-9a-f]{32})/i);
+          if (!m || seen.has(m[1])) continue;
+          seen.add(m[1]);
+          // The title is the link's own text where it has any, otherwise the
+          // nearest heading in its card.
+          const card = a.closest('[class*="card"], li, article') || a;
+          const title = (a.innerText || '').trim()
+            || (card.querySelector('h1,h2,h3,h4,[class*="title"]')?.innerText || '').trim();
+          out.push({ id: m[1], title: title.slice(0, 160),
+                     url: 'https://www.loom.com/share/' + m[1] });
+          if (out.length >= max) break;
+        }
+        return out;
+      }, limit);
+
+      const png = await shoot(page, shot);
+      return { query, signedOut, count: videos.length, videos, screenshot: png };
+    });
+
+    if (res.signedOut) {
+      // Say it plainly rather than returning an empty list. "No videos found"
+      // and "you are not signed in" look identical to a caller and mean
+      // opposite things — one is an answer, the other is a broken session.
+      console.log(JSON.stringify({
+        query, error: 'NOT SIGNED IN to Loom in the agent profile. '
+          + 'This is a one-time human step, and no password ever reaches an agent:'
+          + '\n  node scripts/agent-browser.js login --url https://www.loom.com/looms/videos'
+          + '\nA browser opens, Kevin signs in, the profile keeps the session.',
+        videos: [] }, null, 2));
+      ledger({ cmd: 'loom-search', query, profile, error: 'not signed in' });
+      return;
+    }
+    ledger({ cmd: 'loom-search', query, profile, count: res.count,
+             screenshot: res.screenshot });
+    console.log(JSON.stringify(res, null, 2));
     return;
   }
 
