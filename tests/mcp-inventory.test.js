@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync, existsSync, mkdtempSync, writeFileSync, statSync } from 'fs';
-import { execFileSync } from 'child_process';
+import { execFileSync, spawnSync } from 'child_process';
 import { resolve, dirname, join } from 'path';
 import { tmpdir, homedir } from 'os';
 import { fileURLToPath } from 'url';
@@ -290,4 +290,67 @@ describe('generator refuses to write on a bad read', () => {
         expect(run({ ...process.env }, out).status).toBe(0);
         expect(existsSync(out)).toBe(true);
     }, 30_000);
+});
+
+// ── AUTO-PUBLISH SAFETY ────────────────────────────────────────────────
+// When the list changes the 06:10 job opens a PR by itself. It runs unattended
+// in the MAIN checkout, where other sessions routinely have uncommitted work,
+// so the dangerous failure is not "the PR is wrong" — it is "the job ate
+// somebody's changes". These lock the properties that prevent that.
+describe('the automatic publish cannot damage the checkout', () => {
+    const src = read('scripts/generate-mcp-inventory.py');
+
+    it('never pushes to main', () => {
+        const pushes = [...src.matchAll(/git\("push"[^)]*\)/g)].map((m) => m[0]);
+        expect(pushes.length, 'expected exactly one push').toBe(1);
+        expect(pushes[0]).toContain('refs/heads/{PR_BRANCH}');
+        expect(pushes[0]).not.toMatch(/\bmain\b/);
+    });
+
+    it('assembles the commit without touching the index, HEAD or working tree', () => {
+        // git add / commit / checkout / stash all operate on state shared with
+        // whatever session is mid-task in this checkout.
+        expect(src, 'must build the tree in a throwaway index')
+            .toContain('GIT_INDEX_FILE=index');
+        expect(src).toContain('commit-tree');
+        for (const forbidden of ['"add"', '"commit"', '"checkout"', '"stash"',
+                                 '"reset"', '"merge"']) {
+            expect(src, `git ${forbidden} would touch shared state`)
+                .not.toContain(`git(${forbidden}`);
+        }
+    });
+
+    it('removes its throwaway index even when a step fails', () => {
+        expect(src).toMatch(/finally:\s*\n\s*if os\.path\.exists\(index\):/);
+    });
+
+    it('refuses to publish a file from outside the repo', () => {
+        const out = join(mkdtempSync(join(tmpdir(), 'mcp-out-')), 'evil.js');
+        writeFileSync(out, 'var MCP_TOOLS = {};');
+        const py = [
+            "import importlib.util",
+            "spec=importlib.util.spec_from_file_location('g','scripts/generate-mcp-inventory.py')",
+            "g=importlib.util.module_from_spec(spec); spec.loader.exec_module(g)",
+            "try:",
+            `    g.publish_pr(${JSON.stringify(out)}); print('NO GUARD')`,
+            "except g.SourceFailure as e: print('REFUSED:', e)",
+        ].join('\n');
+        const r = spawnSync('python3', ['-c', py], { cwd: ROOT, encoding: 'utf8' });
+        expect(r.stdout, r.stderr).toContain('REFUSED');
+        expect(r.stdout).toContain('outside the repo');
+    }, 30_000);
+
+    it('opens nothing when the list already matches origin/main', () => {
+        // The committed file IS the published one, so a publish attempt here
+        // must be a no-op rather than an empty PR. Guards against the job
+        // reopening a PR every morning for a change that already shipped.
+        const py = [
+            "import importlib.util",
+            "spec=importlib.util.spec_from_file_location('g','scripts/generate-mcp-inventory.py')",
+            "g=importlib.util.module_from_spec(spec); spec.loader.exec_module(g)",
+            "print(g.publish_pr('js/mcp-tools-data.js'))",
+        ].join('\n');
+        const r = spawnSync('python3', ['-c', py], { cwd: ROOT, encoding: 'utf8' });
+        expect(r.stdout, r.stderr).toContain('already matches origin/main');
+    }, 60_000);
 });

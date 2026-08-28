@@ -459,6 +459,99 @@ def current_tools(data):
     }
 
 
+
+PR_BRANCH = "chore/mcp-inventory"
+
+
+def tool(*names):
+    """Resolve a binary without relying on PATH. launchd sources no profile."""
+    for n in names:
+        found = shutil.which(n)
+        if found:
+            return found
+    for cand in (os.path.join(HOME, "tools/bin/gh"),
+                 os.path.join(HOME, ".local/bin/claude")):
+        if os.path.basename(cand) in names and os.path.exists(cand):
+            return cand
+    return None
+
+
+def git(*args, **kw):
+    """Run git in the repo. Raises on failure so a broken step is loud."""
+    return subprocess.run(["git", "-C", REPO, *args],
+                          capture_output=True, text=True, check=True, **kw).stdout.strip()
+
+
+def publish_pr(out):
+    """Open (or refresh) a PR carrying the regenerated list.
+
+    WHY PLUMBING AND NOT `git add`. This runs unattended in the MAIN checkout,
+    where other sessions routinely have uncommitted work. Touching the index,
+    HEAD or the working tree is exactly how one session eats another's changes
+    (see the concurrency rules in CLAUDE.md). So the commit is assembled with
+    hash-object / read-tree / commit-tree against a THROWAWAY index, and the
+    branch ref is written directly. The working tree is never involved.
+
+    It never pushes to main. A fixed branch name means a change that has sat
+    unmerged for three days refreshes one PR instead of opening three.
+    """
+    gh = tool("gh")
+    if not gh:
+        raise SourceFailure("gh not found, cannot open a PR for the changed list")
+
+    rel = os.path.relpath(out, REPO)
+    if os.path.isabs(rel) or rel.startswith(".."):
+        raise SourceFailure(f"refusing to publish {out}: it is outside the repo")
+
+    git("fetch", "--quiet", "origin", "main")
+    base = git("rev-parse", "origin/main")
+
+    blob = git("hash-object", "-w", "--path", rel, out)
+    index = os.path.join(REPO, ".git", f"index-mcp-inventory-{os.getpid()}")
+    env = dict(os.environ, GIT_INDEX_FILE=index)
+    try:
+        subprocess.run(["git", "-C", REPO, "read-tree", base],
+                       env=env, check=True, capture_output=True)
+        subprocess.run(["git", "-C", REPO, "update-index", "--add",
+                        "--cacheinfo", f"100644,{blob},{rel}"],
+                       env=env, check=True, capture_output=True)
+        tree = subprocess.run(["git", "-C", REPO, "write-tree"], env=env,
+                              check=True, capture_output=True, text=True).stdout.strip()
+    finally:
+        if os.path.exists(index):
+            os.remove(index)
+
+    if tree == git("rev-parse", f"{base}^{{tree}}"):
+        return "the regenerated list already matches origin/main; nothing to open"
+
+    msg = ("Tools list: the connected-tool inventory has changed\n\n"
+           "Opened automatically by the 06:10 mcp-inventory job, which rebuilds\n"
+           "js/mcp-tools-data.js from the real MCP configuration and only writes\n"
+           "when something actually moved. Review the diff to see what appeared,\n"
+           "vanished, or changed authorisation state.\n")
+    commit = git("commit-tree", tree, "-p", base, "-m", msg)
+
+    # --force-with-lease has no meaning for a ref we own outright and rewrite
+    # each time; the branch exists only to carry this one file.
+    git("push", "--force", "origin", f"{commit}:refs/heads/{PR_BRANCH}")
+
+    existing = subprocess.run(
+        [gh, "pr", "list", "--head", PR_BRANCH, "--state", "open", "--json", "number"],
+        cwd=REPO, capture_output=True, text=True)
+    if existing.returncode == 0 and json.loads(existing.stdout or "[]"):
+        n = json.loads(existing.stdout)[0]["number"]
+        return f"refreshed the existing PR #{n}"
+
+    made = subprocess.run(
+        [gh, "pr", "create", "--base", "main", "--head", PR_BRANCH,
+         "--title", "Tools list: the connected-tool inventory has changed",
+         "--body", msg],
+        cwd=REPO, capture_output=True, text=True)
+    if made.returncode != 0:
+        raise SourceFailure(f"could not open the PR: {made.stderr.strip()}")
+    return f"opened {made.stdout.strip()}"
+
+
 def main(argv=None):
     argv = sys.argv[1:] if argv is None else argv
     # --out exists so the control tests can exercise a failing read without
@@ -530,8 +623,17 @@ def main(argv=None):
             print(f"  appeared or changed state: {', '.join(new_)}")
         if gone:
             print(f"  gone or changed state: {', '.join(gone)}")
-        print("  js/mcp-tools-data.js is now modified in git — commit it to "
-              "update the AI Agents page.")
+        if "--publish" in argv:
+            try:
+                print(f"  {publish_pr(out)}")
+            except (SourceFailure, subprocess.CalledProcessError) as exc:
+                detail = getattr(exc, "stderr", "") or str(exc)
+                print(f"FAIL: the list changed but could not be published: "
+                      f"{str(detail).strip()}", file=sys.stderr)
+                return 1
+        else:
+            print("  js/mcp-tools-data.js is now modified in git — commit it to "
+                  "update the AI Agents page (or run with --publish).")
     else:
         print("No change since the committed list. File left untouched, so a "
               "clean git status means the estate has not moved.")
