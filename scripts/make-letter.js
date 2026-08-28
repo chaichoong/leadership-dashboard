@@ -35,6 +35,7 @@
  *
  * USAGE
  *   node scripts/make-letter.js --spec letter.json [--out FILE.pdf]
+ *   ... | node scripts/make-letter.js --spec -        <- spec on STDIN, no temp file
  *   node scripts/make-letter.js --selftest
  *
  * SPEC
@@ -71,7 +72,7 @@ const ADDRESS_LEFT_MM = 25;
 // Refusals EXIT when this runs as a command and THROW when required as a
 // module or exercised by the selftest, so a test can assert on the refusal
 // instead of the runner being killed by the guard it is testing.
-let THROW_ON_REFUSE = require.main !== module;
+let THROW_ON_REFUSE = require.main !== module;  // tests and module users get throws
 
 function die(msg) {
   if (THROW_ON_REFUSE) throw new Error('LETTER REFUSED: ' + msg);
@@ -158,7 +159,50 @@ function buildHtml(spec) {
   ${head.footer ? `<div class="foot">${esc(head.footer)}</div>` : ''}`;
 }
 
-async function render(html, outPath) {
+// THE SELF-CHECK (28 Aug 2026)
+//
+// A real headless agent generated a letter with this tool and reported that it
+// had "opened the PDF locally for visual verification". It cannot see anything.
+// Its success meant only that the script exited zero, and it said more than it
+// knew. In a pipeline that posts to HMRC at about £2.50 a letter, that is the
+// gap that produces a confident wrong result.
+//
+// So the tool checks its own work, at RENDER time, against the laid-out page
+// rather than against the CSS it was handed. getBoundingClientRect reports
+// where the address ACTUALLY ended up: if a long letterhead pushed it, if the
+// stylesheet failed, if the block overflowed, the number moves and this
+// refuses. Measured against the live Pingen API, 64mm reads as "valid" and
+// 71mm does not, so the tolerance is deliberately tight.
+const MM_PER_PX = 25.4 / 96;
+const POSITION_TOLERANCE_MM = 2;
+
+async function verifyLayout(page, expectedLines) {
+  const got = await page.evaluate(() => {
+    const el = document.querySelector('.to');
+    if (!el) return null;
+    const r = el.getBoundingClientRect();
+    return { top: r.top, left: r.left, text: el.textContent };
+  });
+  if (!got) die('the address block did not render at all');
+  const topMm = got.top * MM_PER_PX;
+  const leftMm = got.left * MM_PER_PX;
+  if (Math.abs(topMm - ADDRESS_TOP_MM) > POSITION_TOLERANCE_MM ||
+      Math.abs(leftMm - ADDRESS_LEFT_MM) > POSITION_TOLERANCE_MM) {
+    die(`the address rendered at ${topMm.toFixed(1)}mm/${leftMm.toFixed(1)}mm, not ` +
+        `${ADDRESS_TOP_MM}mm/${ADDRESS_LEFT_MM}mm. Pingen reads the recipient out of the ` +
+        'envelope window, so this letter would come back. Nothing was written.');
+  }
+  const rendered = got.text.split('\n').map((l) => l.trim()).filter(Boolean);
+  const want = expectedLines.map((l) => String(l).trim()).filter(Boolean);
+  if (rendered.length !== want.length || rendered.some((l, i) => l !== want[i])) {
+    die('the address block on the page does not match the address requested.\n' +
+        `  requested: ${JSON.stringify(want)}\n  rendered : ${JSON.stringify(rendered)}`);
+  }
+  return { topMm: Number(topMm.toFixed(2)), leftMm: Number(leftMm.toFixed(2)),
+           lines: rendered.length };
+}
+
+async function render(html, outPath, expectedLines) {
   let chromium;
   for (const mod of ['playwright-core', '@playwright/test',
                      path.join(path.resolve(__dirname, '..'), 'node_modules', 'playwright-core')]) {
@@ -166,9 +210,13 @@ async function render(html, outPath) {
   }
   if (!chromium) die('playwright not found. Run npm install in the repo.');
   const browser = await chromium.launch({ headless: true });
+  let verified = null;
   try {
     const page = await browser.newPage();
     await page.setContent(html, { waitUntil: 'load' });
+    // Verify BEFORE writing. A refused letter must leave no file behind for
+    // something downstream to pick up and post.
+    verified = await verifyLayout(page, expectedLines);
     fs.mkdirSync(path.dirname(outPath), { recursive: true });
     // printBackground off: this is a letter, not a web page.
     await page.pdf({ path: outPath, format: 'A4', printBackground: false,
@@ -176,7 +224,7 @@ async function render(html, outPath) {
   } finally {
     await browser.close();
   }
-  return outPath;
+  return { outPath, verified };
 }
 
 function outputPath(spec, explicit) {
@@ -234,19 +282,44 @@ async function main() {
   const rest = process.argv.slice(2);
   if (rest.includes('--selftest')) return selftest();
   const specPath = arg(rest, 'spec');
-  if (!specPath) die('--spec FILE.json is required (or --selftest)');
+  if (!specPath) die('--spec FILE.json or --spec - (stdin) is required (or --selftest)');
+  // `--spec -` reads STDIN, and it is the route agents should use.
+  //
+  // WHY (28 Aug 2026). A real headless agent ran this tool, found it could not
+  // write to its own $AGENT_SLOT_SCRATCH, and quietly fell back to /tmp —
+  // leaving both the spec and the finished letter world-readable at
+  // -rw-r--r-- until reboot. A letter carries creditor, tenant and legal
+  // detail. Nothing errored and the agent reported success.
+  //
+  // Not the command line either: argv is readable by any process via ps and
+  // lands in session transcripts, which is the same rule that keeps tokens out
+  // of arguments. Stdin touches neither. With no --out the PDF lands in the
+  // attachments directory, so a correct run writes exactly one file, in the
+  // one place the sending scripts read from.
+  let raw;
+  try {
+    raw = specPath === '-'
+      ? fs.readFileSync(0, 'utf8')
+      : fs.readFileSync(specPath, 'utf8');
+  } catch (e) { die(`could not read ${specPath === '-' ? 'stdin' : specPath}: ${e.message}`); }
   let spec;
-  try { spec = JSON.parse(fs.readFileSync(specPath, 'utf8')); }
-  catch (e) { die(`could not read ${specPath}: ${e.message}`); }
+  try { spec = JSON.parse(raw); }
+  catch (e) { die(`spec is not valid JSON: ${e.message}`); }
   validate(spec);
   const out = outputPath(spec, arg(rest, 'out'));
-  await render(buildHtml(spec), out);
+  const { verified } = await render(buildHtml(spec), out, spec.to);
   console.log(JSON.stringify({
-    pdf: out, bytes: fs.statSync(out).size,
-    to: spec.to, addressTopMm: ADDRESS_TOP_MM, addressLeftMm: ADDRESS_LEFT_MM,
-    next: `python3 scripts/send-letter.py prepare <taskId>  (checks what Pingen actually reads)`,
+    pdf: out, bytes: fs.statSync(out).size, to: spec.to,
+    // MEASURED off the laid-out page, not the CSS. Quote this, not an eyeball:
+    // a headless agent cannot look at a PDF and must not say it did.
+    verifiedAddressPositionMm: { top: verified.topMm, left: verified.leftMm },
+    verifiedAddressLines: verified.lines,
+    next: 'python3 scripts/send-letter.py prepare <taskId>  (checks what Pingen actually reads)',
   }, null, 2));
 }
 
 if (require.main === module) main().catch((e) => { console.error('ERROR', e.message); process.exit(1); });
-module.exports = { buildHtml, validate, outputPath, ADDRESS_TOP_MM, ADDRESS_LEFT_MM, OUT_DIR };
+module.exports = { buildHtml, validate, outputPath, ADDRESS_TOP_MM, ADDRESS_LEFT_MM, OUT_DIR,
+                   // Exported for the layout back-test only: a guard nobody has
+                   // watched fire is not a guard.
+                   __renderForTest: render };
