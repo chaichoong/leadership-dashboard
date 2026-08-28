@@ -430,9 +430,21 @@ def main(argv=None):
 
     before = previous_tools(out)
     after = current_tools(data)
+    changed = before is None or before != after
 
-    with open(out, "w") as fh:
-        fh.write(body)
+    # ONLY WRITE WHEN SOMETHING ACTUALLY MOVED. Rewriting nightly for a fresh
+    # timestamp would leave a permanently-modified tracked file in a shared
+    # checkout, which is precisely the kind of thing another session sweeps into
+    # an unrelated commit (see the concurrency rules in CLAUDE.md).
+    #
+    # It also solves the alerting problem. The morning digest does not carry job
+    # stdout, so a "CHANGED" line printed to a log would be a message nobody
+    # reads. Writing only on a real change makes the modified file itself the
+    # signal: a clean `git status` means the estate has not moved, and a diff on
+    # js/mcp-tools-data.js means it has and is worth shipping.
+    if changed:
+        with open(out, "w") as fh:
+            fh.write(body)
     c = data["counts"]
     print(f"Wrote {out}")
     print(f"  {c['total']} tools: {c['verified']} verified, {c['declared']} declared")
@@ -448,7 +460,7 @@ def main(argv=None):
     # it. Silence means the estate genuinely has not moved.
     if before is None:
         print("CHANGED: no previous list to compare against (first run).")
-    elif before != after:
+    elif changed:
         gone = sorted(n for (n, _s, _a, _g) in before - after)
         new_ = sorted(n for (n, _s, _a, _g) in after - before)
         print("CHANGED: the tools list has moved since it was last committed.")
@@ -456,9 +468,11 @@ def main(argv=None):
             print(f"  appeared or changed state: {', '.join(new_)}")
         if gone:
             print(f"  gone or changed state: {', '.join(gone)}")
-        print("  commit js/mcp-tools-data.js to update the AI Agents page.")
+        print("  js/mcp-tools-data.js is now modified in git — commit it to "
+              "update the AI Agents page.")
     else:
-        print("No change since the committed list.")
+        print("No change since the committed list. File left untouched, so a "
+              "clean git status means the estate has not moved.")
     return 0
 
 

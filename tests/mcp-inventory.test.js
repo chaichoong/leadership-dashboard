@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { readFileSync, existsSync, mkdtempSync, writeFileSync } from 'fs';
+import { readFileSync, existsSync, mkdtempSync, writeFileSync, statSync } from 'fs';
 import { execFileSync } from 'child_process';
 import { resolve, dirname, join } from 'path';
 import { tmpdir, homedir } from 'os';
@@ -187,8 +187,14 @@ describe('generator refuses to write on a bad read', () => {
 
         expect(run()).toContain('first run');
 
-        // Same inputs, new timestamp: must NOT report a change.
+        // Same inputs, new timestamp: must NOT report a change, and must NOT
+        // touch the file. Rewriting nightly for a fresh timestamp would leave a
+        // permanently-modified tracked file for another session to sweep up,
+        // and would destroy the signal that a diff here means something moved.
+        const stamp = statSync(out).mtimeMs;
         expect(run()).toContain('No change since the committed list');
+        expect(statSync(out).mtimeMs,
+            'the generator rewrote an unchanged file').toBe(stamp);
 
         // Drop a tool from the previous file: must name it.
         const prev = readFileSync(out, 'utf8');

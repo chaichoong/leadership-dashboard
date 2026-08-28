@@ -2756,7 +2756,7 @@ function mcpToolsSection(q){
             <p class="agentic-guide-intro">Every outside system Claude can reach, what state it is in, and who can use it. ${c.verified} of these ${c.total} were read from a real config file or checked live; ${c.declared} are listed by hand because nothing on this Mac records them. ${c.needsAuth} are installed but never authorised, so they do nothing at all.</p>
             <div style="background:var(--warning-bg);border:1px solid var(--warning);border-radius:var(--radius-lg);padding:12px 14px;font-size:var(--fs-sm);color:var(--text-primary);line-height:1.6">${gap}</div>
             ${groups || `<div style="margin-top:14px;font-size:var(--fs-sm);color:var(--text-muted)">No tools match the search.</div>`}
-            <div style="margin-top:14px;font-size:var(--fs-xs);color:var(--text-muted)">Read from your real settings on ${esc(stale)}. A job rechecks every morning and says if anything moved; this page catches up when that change is shipped, so treat the date as the date. ${esc(MCP_TOOLS.healthNote || '')}</div>
+            <div style="margin-top:14px;font-size:var(--fs-xs);color:var(--text-muted)">Last changed ${esc(stale)}. A job rechecks your real settings every morning and only rewrites this list when something actually moves, so an old date means nothing has changed, not that nobody looked. ${esc(MCP_TOOLS.healthNote || '')}</div>
         </div>
     </div>`;
 }
