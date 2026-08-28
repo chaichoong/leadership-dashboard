@@ -58,6 +58,7 @@
  *       {"do":"select", "selector":"#type", "value":"arrears"},
  *       {"do":"check",  "selector":"#agree"},
  *       {"do":"upload", "selector":"#pick", "file":"~/knowledge-os/attachments/ast.pdf"},
+ *       {"do":"press",  "selector":"#email", "key":"Enter"},
  *       {"do":"click",  "selector":"#next"},
  *       {"do":"submit", "selector":"#submit"}      <- prepare stops before this
  *     ]
@@ -332,6 +333,15 @@ async function runSteps(page, steps, allowSubmit) {
         }
         break;
       }
+      case 'press':
+        // Some fields only COMMIT on Enter — Adobe's recipient box turns typed
+        // text into a recipient chip that way, and without it the email is
+        // still just text in a box when Send is pressed. Same credential guard
+        // as fill: a key sequence into a password box is still typing into a
+        // password box.
+        await assertNotCredential(page, s.selector, '');
+        await page.press(s.selector, String(s.key || 'Enter'), { timeout: 20000 });
+        break;
       case 'wait':
         await page.waitForTimeout(Math.min(Number(s.ms) || 1000, 15000));
         break;
