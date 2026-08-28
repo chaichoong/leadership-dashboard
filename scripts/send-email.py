@@ -68,6 +68,7 @@ Usage:
   python3 scripts/send-email.py health             # worker + consent check
 """
 
+import importlib.util
 import argparse
 import json
 import os
@@ -94,6 +95,10 @@ AF = {
     "approvalOutcome": "fldrHBSr6qoUfaKuZ",
     "agentOutput":     "fldzswp8fx6PqpLQ5",
     "taskType":        "fldZ2moDV2041Sobc",
+    # Read by `notify`: Roy has no login, so the email carries the work
+    # itself rather than a link he cannot follow.
+    "description":     "fldRGhBQViKZKtkQ6",
+    "notes":           "fldR7apBzSp3oxFxz",
 }
 
 APPROVED = ("Approved as-is", "Approved with minor edits")
@@ -427,6 +432,114 @@ def cmd_send(args):
                       "messageId": result.get("id")}))
 
 
+# ─── TELLING A TEAM MEMBER THEY NOW OWN SOMETHING (28 Aug 2026) ─────
+#
+# `agent-dispatch.py handover` has reassigned tasks since 25 Aug 2026 and has
+# NEVER told the new owner. 47 tasks were sitting linked to Roy Lavin the day
+# this was found, and not one email had gone to him. A comment in the code said
+# the handover "DMs the new owner"; nothing in the code did.
+#
+# It did not matter much while every handover was Kevin typing one by hand. It
+# matters completely now the property lane routes automatically: work would
+# leave Kevin's queue, land on a name, and be seen by nobody. That is worse
+# than clogging his queue — he would believe it was handled.
+#
+# Kevin's requirement, 28 Aug 2026, in his own words: "as long as he's got the
+# information by our email as well, that's the most important thing." Roy is
+# not on Operations Director yet and email is all he has.
+#
+# WHY THIS IS NOT `send`. That path carries an approval gate because it puts
+# words in front of a creditor, a council or a prospect. This one tells a
+# colleague what he now owns. Different act, different guard:
+#
+#   * The recipient MUST be one of the known team addresses. Not an allowlist
+#     of domains — the literal set of people, read from agent-dispatch.py so
+#     there is ONE roster and adding a person cannot be done here by accident.
+#   * TIER-1 CONTENT IS REFUSED outright, even to a team member. The private
+#     legal matter does not travel because the recipient is trusted.
+#   * It never invents a recipient from the task. `--to` is checked against the
+#     roster and nothing else is read.
+TEAM_NOTIFY_SUBJECT = "Operations Director: a task is now yours"
+
+
+def team_roster():
+    """The HUMANS dict from agent-dispatch.py — the ONE roster.
+
+    Imported rather than copied: a second list of who may be emailed is how an
+    address gets added in one file and trusted in the other.
+    """
+    spec = importlib.util.spec_from_file_location(
+        "ad", os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                           "agent-dispatch.py"))
+    ad = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(ad)
+    return ad.HUMANS, ad.TIER1_PATTERNS, ad.tier_match
+
+
+def cmd_notify(args):
+    humans, tier1_patterns, tier_match = team_roster()
+    to = (args.to or "").strip().lower()
+    who = humans.get(to)
+    if not who:
+        sys.exit(f"REFUSED: {args.to} is not a team member. This command mails "
+                 f"colleagues about work, never third parties.\n"
+                 f"       Allowed: {', '.join(sorted(humans))}")
+
+    rec = get_task(args.task)
+    f = rec.get("fields", {})
+    name = f.get(AF["name"], "") or "(untitled task)"
+    desc = (f.get(AF["description"], "") or "").strip()
+    notes = (f.get(AF["notes"], "") or "").strip()
+    output = (f.get(AF["agentOutput"], "") or "").strip()
+
+    hit = tier_match(tier1_patterns, name, desc, notes)
+    if hit:
+        sys.exit(f"REFUSED: {args.task} matches tier-1 ({hit!r}). Kevin's "
+                 "private legal and financial matter is never emailed onward, "
+                 "not even to the team.")
+
+    # The point of the email is that Roy can ACT without the app. So it carries
+    # the work, not a link to it: he has no login to follow.
+    parts = [f"{who['name']},", "",
+             "This has been passed to you in Operations Director. "
+             "You do not need to log in — everything is below.", "",
+             f"TASK: {name}"]
+    if desc:
+        parts += ["", "WHAT IT IS", desc]
+    if output:
+        parts += ["", "WHAT WE FOUND", output]
+    if args.reason:
+        parts += ["", f"WHY IT IS YOURS: {args.reason}"]
+    parts += ["", "Reply to this email with what you have done and it will be "
+              "logged against the task.", "", "Kevin"]
+    body = "\n".join(parts)
+
+    if args.dry_run:
+        print(json.dumps({"dryRun": True, "to": to, "name": who["name"],
+                          "subject": f"{TEAM_NOTIFY_SUBJECT}: {name}",
+                          "bodyChars": len(body), "tier1": False}, indent=2))
+        return
+
+    # Same ledger as `send`, so one task cannot be notified twice by two runs.
+    prior = already_sent(args.task)
+    if prior and prior.get("event") != "notify-superseded":
+        print(json.dumps({"skipped": args.task,
+                          "why": "already emailed at %s" % prior.get("ts")}))
+        return
+
+    ledger_append({"task": args.task, "ts": now_iso(), "event": "intent",
+                   "to": [to], "cc": [], "subject": TEAM_NOTIFY_SUBJECT})
+    result = worker_call(SEND_URL, {"to": to,
+                                    "subject": f"{TEAM_NOTIFY_SUBJECT}: {name}",
+                                    "text": body})
+    ledger_append({"task": args.task, "ts": now_iso(), "event": "sent",
+                   "from": "(default)", "to": [to], "cc": [],
+                   "subject": TEAM_NOTIFY_SUBJECT, "taskName": name,
+                   "messageId": result.get("id")})
+    print(json.dumps({"notified": args.task, "to": to, "name": who["name"],
+                      "messageId": result.get("id")}))
+
+
 def cmd_selftest(args):
     """Offline checks of the parser — the part a bug would turn into a wrong
     recipient. No network, no Airtable, safe anywhere."""
@@ -587,6 +700,14 @@ def main():
     s.add_argument("--dry-run", action="store_true",
                    help="parse, validate and report, but do not send")
     s.set_defaults(func=cmd_send)
+
+    n = sub.add_parser("notify",
+                       help="tell a TEAM MEMBER a task is now theirs (never a third party)")
+    n.add_argument("task")
+    n.add_argument("--to", required=True, help="team email address")
+    n.add_argument("--reason", default="", help="why it is theirs")
+    n.add_argument("--dry-run", action="store_true")
+    n.set_defaults(func=cmd_notify)
 
     v = sub.add_parser("preview", help="parse and print, never sends")
     v.add_argument("task")

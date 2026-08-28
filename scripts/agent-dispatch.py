@@ -1616,8 +1616,43 @@ def cmd_handover(args):
         AF["approvedAt"]: None,
         AF["notes"]: (existing + "\n\n" + note).strip(),
     })
+    # TELL THEM. Until 28 Aug 2026 this command reassigned the task and
+    # notified nobody: 47 tasks sat linked to Roy Lavin and not one email had
+    # ever gone to him. A comment here even claimed it "DMs the new owner"; no
+    # code did. That was survivable while every handover was Kevin typing one
+    # by hand, and is not survivable now the property lane routes automatically
+    # — work would leave his queue, land on a name and be seen by nobody, which
+    # is worse than clogging the queue because he would believe it was handled.
+    #
+    # Roy is not on Operations Director yet, so the email carries the WORK, not
+    # a link to it. Kevin's requirement, in his words: "as long as he's got the
+    # information by our email as well, that's the most important thing."
+    #
+    # Kevin himself is never emailed — he reads the board.
+    # A send failure does NOT roll back the reassignment: the task genuinely
+    # moved, and a half-undone handover is worse than one that is loud about
+    # not having been announced. It is reported instead.
+    notified, notify_error = False, ""
+    if who["rec"] != KEVIN_REC_ID:
+        try:
+            subprocess.run(
+                [sys.executable,
+                 os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                              "send-email.py"),
+                 "notify", args.task, "--to", args.to, "--reason", reason],
+                check=True, capture_output=True, text=True, timeout=90)
+            notified = True
+        except subprocess.CalledProcessError as exc:
+            notify_error = (exc.stdout or exc.stderr or "").strip().splitlines()[-1][:200] \
+                if (exc.stdout or exc.stderr) else f"exit {exc.returncode}"
+        except Exception as exc:                               # noqa: BLE001
+            notify_error = str(exc)[:200]
     print(json.dumps({"handedOver": args.task, "to": args.to,
-                      "name": who["name"], "reason": reason}))
+                      "name": who["name"], "reason": reason,
+                      "emailed": notified,
+                      # Loud on purpose. An unannounced handover is the failure
+                      # this whole change exists to stop.
+                      "NOT EMAILED": notify_error or None}))
 
 
 def cmd_handover_property(args):
