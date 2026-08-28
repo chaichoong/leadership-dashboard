@@ -291,22 +291,45 @@ async function runSteps(page, steps, allowSubmit) {
         await page.click(s.selector, { timeout: 20000 });
         break;
       case 'upload': {
-        // Adobe Acrobat has NO <input type=file> in the DOM — not in the page,
-        // not in any shadow root. It creates one on click, and that click opens
-        // a native OS dialog. So setInputFiles() has nothing to target, and the
-        // Chrome-extension lane cannot do this at all: it was the one step that
-        // blocked "agent creates a PDF and sends it for signature".
+        // TWO patterns exist and a site tells you which only by behaving.
+        // Handling one of them is how this step failed against the real Adobe
+        // on its first live run.
         //
-        // Playwright intercepts the chooser IN PROCESS, so the OS dialog never
-        // opens. Arm the listener FIRST and click second — the other order
-        // races and the dialog wins. Verified 28 Aug 2026 against a page
-        // reproducing Adobe's exact create-on-click pattern.
+        //  (a) NATIVE DIALOG. The page clicks a file input itself, the OS
+        //      dialog opens, and nothing in the DOM can be targeted.
+        //      Playwright intercepts the chooser in-process.
+        //  (b) INPUT APPEARS. The click CREATES a hidden <input type=file> and
+        //      leaves it alone, waiting for a real user's dialog. No chooser
+        //      event ever fires. This is what Adobe Acrobat does — measured
+        //      28 Aug 2026: zero file inputs before the click, exactly one
+        //      after, and `filechooser` never fired in 30 seconds.
+        //
+        // So: arm the chooser, click, then race the chooser against an input
+        // appearing. Arm BEFORE the click or pattern (a) races and the dialog
+        // wins. `s.input` overrides the input selector for a page with several.
         const files = assertUploadable(s.files || s.file);
-        const [chooser] = await Promise.all([
-          page.waitForEvent('filechooser', { timeout: 30000 }),
-          page.click(s.selector, { timeout: 20000 }),
-        ]);
-        await chooser.setFiles(files);
+        const inputSel = s.input || 'input[type=file]';
+        const before = await page.locator(inputSel).count();
+        const upWait = Math.min(Number(s.timeoutMs) || 30000, 60000);
+        const chooserP = page.waitForEvent('filechooser', { timeout: upWait })
+          .then((c) => ({ chooser: c })).catch(() => null);
+        const inputP = page.waitForFunction(
+          ([sel, n]) => document.querySelectorAll(sel).length > n,
+          [inputSel, before], { timeout: upWait },
+        ).then(() => ({ input: true })).catch(() => null);
+
+        await page.click(s.selector, { timeout: 20000 });
+
+        const winner = await Promise.race([chooserP, inputP]);
+        if (winner && winner.chooser) {
+          await winner.chooser.setFiles(files);
+        } else if (winner && winner.input) {
+          // Hidden is fine: setInputFiles does not require visibility.
+          await page.locator(inputSel).last().setInputFiles(files);
+        } else {
+          die(`upload: clicking ${s.selector} produced neither a file dialog ` +
+              `nor a new ${inputSel}. The selector probably missed.`);
+        }
         break;
       }
       case 'wait':

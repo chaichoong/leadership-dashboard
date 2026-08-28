@@ -24,7 +24,7 @@ const require_ = createRequire(import.meta.url);
 let chromium;
 try { ({ chromium } = require_('playwright-core')); } catch { /* reported below */ }
 
-let dir, uploadDir, pagePath, mod;
+let dir, uploadDir, pagePath, adobeRealPath, mod;
 
 beforeAll(() => {
   dir = mkdtempSync(join(tmpdir(), 'agent-upload-'));
@@ -36,6 +36,25 @@ beforeAll(() => {
   writeFileSync(join(uploadDir, 'ast.pdf'), '%PDF-1.4 pretend');
   writeFileSync(join(uploadDir, 'notes.txt'), 'not allowed');
   writeFileSync(join(dir, 'outside.pdf'), '%PDF-1.4 outside the fence');
+
+  // Adobe's REAL behaviour, measured live: the click CREATES a hidden input
+  // and leaves it alone. No filechooser event ever fires. Handling only the
+  // native-dialog pattern is exactly how the step failed on its first live run.
+  adobeRealPath = join(dir, 'adobe_real.html');
+  writeFileSync(adobeRealPath, `<!doctype html><meta charset="utf-8">
+<button id="pick">select a file</button><p id="out">nothing chosen</p>
+<script>
+document.getElementById('pick').addEventListener('click', () => {
+  if (document.querySelector('input[type=file]')) return;
+  const i = document.createElement('input');
+  i.type = 'file'; i.multiple = true; i.style.display = 'none';
+  i.addEventListener('change', () => {
+    const f = i.files[0];
+    document.getElementById('out').textContent = f ? 'CHOSEN: ' + f.name : 'nothing chosen';
+  });
+  document.body.appendChild(i);   // created, NEVER clicked — no OS dialog
+});
+</script>`);
 
   pagePath = join(dir, 'adobe_pattern.html');
   writeFileSync(pagePath, `<!doctype html><meta charset="utf-8">
@@ -104,6 +123,44 @@ describe('agent-browser upload step (real Playwright)', () => {
 
       expect(res.stoppedBeforeSubmit).toBeFalsy();
       expect(await page.locator('#out').textContent()).toBe('CHOSEN: ast.pdf');
+    } finally {
+      await ctx.close();
+    }
+  }, 60000);
+
+  // The live failure on 28 Aug 2026: Adobe fired no chooser in 30s, and the
+  // step timed out even though a perfectly good input was sitting in the DOM.
+  it('uploads when the click creates an input but fires no chooser (Adobe)', async () => {
+    expect(chromium).toBeTruthy();
+    const ctx = await chromium.launchPersistentContext(join(dir, 'profile3'), { headless: true });
+    try {
+      const page = ctx.pages()[0] || await ctx.newPage();
+      let chooserFired = false;
+      page.on('filechooser', () => { chooserFired = true; });
+      await page.goto('file://' + adobeRealPath);
+      expect(await page.locator('input[type=file]').count()).toBe(0);
+
+      await mod.runSteps(page, [
+        { do: 'upload', selector: '#pick', file: join(uploadDir, 'ast.pdf') },
+      ], false);
+
+      expect(chooserFired, 'fixture no longer reproduces the Adobe pattern').toBe(false);
+      expect(await page.locator('#out').textContent()).toBe('CHOSEN: ast.pdf');
+    } finally {
+      await ctx.close();
+    }
+  }, 60000);
+
+  it('refuses clearly when the selector matches nothing useful', async () => {
+    expect(chromium).toBeTruthy();
+    const ctx = await chromium.launchPersistentContext(join(dir, 'profile4'), { headless: true });
+    try {
+      const page = ctx.pages()[0] || await ctx.newPage();
+      await page.setContent('<button id="inert">does nothing</button>');
+      await expect(mod.runSteps(page, [
+        // Short timeout: the refusal is the point, not waiting 30s for it.
+        { do: 'upload', selector: '#inert', file: join(uploadDir, 'ast.pdf'), timeoutMs: 1500 },
+      ], false)).rejects.toThrow(/neither a file dialog nor a new/i);
     } finally {
       await ctx.close();
     }
