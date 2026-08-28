@@ -1,6 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import { execFileSync } from 'child_process';
-import { readFileSync } from 'fs';
+import { readFileSync, existsSync, rmSync } from 'fs';
+import { spawnSync } from 'child_process';
+import { tmpdir } from 'os';
+import { join } from 'path';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { createRequire } from 'module';
@@ -76,6 +79,73 @@ describe('make-letter.js', () => {
     expect(p.startsWith(mod.OUT_DIR + '/')).toBe(true);
     expect(p).toMatch(/HMRC_letter\.pdf$/);
   });
+
+  // THE SELF-CHECK, back-tested.
+  //
+  // A real headless agent generated a letter with this tool on 28 Aug 2026 and
+  // reported it had "opened the PDF locally for visual verification". It cannot
+  // see anything. Its success meant only that the script exited zero. So the
+  // tool now measures the laid-out page itself and refuses if the address did
+  // not land in the envelope window.
+  it('REFUSES when the address does not render in the window, and writes no file', () => {
+    const spec = {
+      from: 'agile-lets',
+      to: ['Corporation Tax', 'HM Revenue and Customs', 'BX9 1AX'],
+      body: ['x'],
+      name: 'layout_backtest',
+    };
+    // Break the layout the way a stylesheet failure or a bad edit would.
+    const broken = mod.buildHtml(spec).replace(/top:\s*64mm/, 'top: 95mm');
+    const out = join(tmpdir(), `letter-backtest-${process.pid}.pdf`);
+    rmSync(out, { force: true });
+
+    const r = spawnSync('node', ['-e', `
+      const m = require(${JSON.stringify(GEN)});
+      const fs = require('fs');
+      m.__renderForTest(${JSON.stringify(broken)}, ${JSON.stringify(out)}, ${JSON.stringify(spec.to)})
+        .then(() => { console.log('WROTE'); })
+        .catch(e => { console.error(e.message); process.exit(1); });
+    `], { encoding: 'utf8' });
+
+    expect(r.status, 'a mispositioned address was accepted').not.toBe(0);
+    expect((r.stderr || '') + (r.stdout || '')).toMatch(/not 64mm\/25mm|rendered at/);
+    expect(existsSync(out), 'a refused letter left a file behind for something to post').toBe(false);
+  }, 60000);
+
+  it('reports the address position it MEASURED, not the one it assumed', () => {
+    const src = SRC;
+    expect(src).toMatch(/getBoundingClientRect/);
+    expect(src).toMatch(/verifiedAddressPositionMm/);
+    expect(src, 'the measured position must come from the laid-out page')
+      .toMatch(/verifyLayout\(page, expectedLines\)/);
+  });
+
+  // A real agent could not write to its own $AGENT_SLOT_SCRATCH and fell back
+  // to /tmp, leaving the spec AND the finished letter world-readable until
+  // reboot. A letter carries creditor, tenant and legal detail. Stdin removes
+  // the temp file entirely; the command line is not an option either, because
+  // argv is readable via ps.
+  it('accepts the spec on stdin so no temp file is needed', () => {
+    const spec = JSON.stringify({
+      from: 'agile-lets',
+      to: ['Corporation Tax', 'HM Revenue and Customs', 'BX9 1AX'],
+      body: ['No temp file anywhere.'],
+    });
+    const out = join(tmpdir(), `letter-stdin-${process.pid}.pdf`);
+    rmSync(out, { force: true });
+    const r = spawnSync('node', [GEN, '--spec', '-', '--out', out],
+      { input: spec, encoding: 'utf8' });
+    expect(r.status, r.stderr).toBe(0);
+    expect(JSON.parse(r.stdout).verifiedAddressPositionMm.top).toBe(64);
+    expect(existsSync(out)).toBe(true);
+    rmSync(out, { force: true });
+  }, 60000);
+
+  it('refuses a spec that is not valid JSON, rather than guessing', () => {
+    const r = spawnSync('node', [GEN, '--spec', '-'], { input: 'not json', encoding: 'utf8' });
+    expect(r.status).not.toBe(0);
+    expect((r.stderr || '') + (r.stdout || '')).toMatch(/not valid JSON/);
+  }, 60000);
 
   it('adds no new dependency', () => {
     expect(SRC, 'a PDF library crept in; Chromium is already here and headless-proven')
