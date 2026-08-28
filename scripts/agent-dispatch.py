@@ -1655,6 +1655,71 @@ def cmd_handover(args):
                       "NOT EMAILED": notify_error or None}))
 
 
+# The builder agent owns broken infrastructure once it leaves Kevin's queue.
+# Named here so the sweep and the report cannot disagree about who holds it.
+BUILDER_REC_ID = "recQkO6BA4w5zqwZ4"          # AI Worker — Builder
+
+
+def cmd_clear_alerts(args):
+    """Take machine-breakage tasks OUT of Kevin's approval queue.
+
+    THE GAP THIS CLOSES. The alert lane shipped 27 Aug 2026 and classifies in
+    `build_queue`, which reads Today/Overdue only. It stopped NEW alerts
+    reaching the gate — verified: zero created since — and did NOTHING about
+    the ones already sitting at Approval. Kevin cleared his queue on 29 Aug and
+    15 of the 17 left were exactly this class, every one predating the fix.
+    Fixing the tap and leaving the bath full is not fixing it.
+
+    NOTHING IS CLOSED. Each task moves to Today and to the builder agent, which
+    is where "a system is broken" belongs: it is work, not a decision for
+    Kevin. He can still see every one of them on the board and in the
+    "Kept off your queue" lane. A destructive sweep of his approvals would need
+    his explicit yes; this one is a reassignment and is reversible by hand.
+
+    A finding is filed for anything not already in the queue, so the task moving
+    off his plate cannot be the last anyone hears of it.
+    """
+    live = query_tasks(
+        "AND({Status}='Approval', NOT(IS_AFTER({Deferred Until}, TODAY())))")
+    moved, skipped = [], []
+    for rec in live:
+        t = task_view(rec)
+        hit = system_alert_match(t.get("inboundSender"), t["name"],
+                                 t["description"], t["notes"])
+        if not hit:
+            continue
+        # Tier 1 never moves silently, whatever it looks like. A monitoring
+        # address is not a reason to skip the gate that protects the legal
+        # matter.
+        if tier_match(TIER1_PATTERNS, t["name"], t["description"], t["notes"]):
+            skipped.append({"task": t["id"], "name": t["name"],
+                            "why": "tier 1 — left with Kevin on purpose"})
+            continue
+        entry = {"task": t["id"], "name": t["name"], "matched": hit}
+        if args.dry_run:
+            moved.append({**entry, "dryRun": True})
+            continue
+        stamp = datetime.now(LONDON).strftime("%d %b %Y")
+        note = (f"[{stamp} — agent-dispatch] Moved off the approval queue: a "
+                f"machine reporting a breakage (matched {hit!r}) is work, not "
+                f"a decision. Owned by the builder agent; filed as a finding.")
+        existing = (rec.get("fields", {}) or {}).get(AF["notes"], "") or ""
+        patch_task(t["id"], {
+            AF["status"]: "Today",
+            AF["teamMember"]: [BUILDER_REC_ID],
+            AF["sentForApprovalBy"]: [],
+            # No verdict is left behind. An Approved outcome on a task that
+            # changed hands would later read as an approved carry-out.
+            AF["approvalOutcome"]: None,
+            AF["approvedAt"]: None,
+            AF["notes"]: (existing + "\n\n" + note).strip(),
+        })
+        moved.append(entry)
+    print(json.dumps({"cleared": len(moved), "items": moved,
+                      "leftWithKevin": skipped}, indent=2))
+    return 0
+
+
 def cmd_handover_property(args):
     """Hand every task in Roy's lane to Roy, in one deterministic pass.
 
@@ -3272,6 +3337,11 @@ def main():
                    help="task touches the private legal/financial matter: "
                         "stamp the tier-1 banner on top of the Agent Output")
 
+    ca = sub.add_parser("clear-alerts",
+                        help="move machine-breakage tasks out of the approval "
+                             "queue and onto the board (closes nothing)")
+    ca.add_argument("--dry-run", action="store_true")
+
     hp = sub.add_parser("handover-property",
                         help="hand every property task in Roy's lane to Roy")
     hp.add_argument("--dry-run", action="store_true",
@@ -3337,7 +3407,8 @@ def main():
             "lessons": cmd_lessons, "revise": cmd_revise,
             "attach": cmd_attach, "outcome": cmd_outcome,
             "reassign": cmd_reassign,
-            "handover-property": cmd_handover_property}[args.cmd](args) or 0
+            "handover-property": cmd_handover_property,
+            "clear-alerts": cmd_clear_alerts}[args.cmd](args) or 0
 
 
 if __name__ == "__main__":
