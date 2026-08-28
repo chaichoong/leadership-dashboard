@@ -28,6 +28,8 @@ var AUTOMATIONS = {
     // ── Scheduled jobs on Kevin's Mac (launchd) ───────────────────────
     // `key` must match the key in scripts/job-schedule.json.
     macJobs: [
+        { key: 'mcp-inventory', name: 'Tools & Connections List', when: '6:10am daily', status: 'on',
+          what: 'Rebuilds the list of every outside system the AI is plugged into, on the AI Agents page. Reads the real settings rather than a list someone remembered to update, and refuses to write a shorter list if it cannot read one of its sources properly.' },
         { key: 'drift-scan', name: 'Drift Scan', when: '6:20am daily', status: 'on',
           what: 'Reads the code looking for references to things that no longer exist: a field that was renamed, a file that was deleted, a page that was retired. It reports them so a broken link is found before it breaks something.' },
         { key: 'data-invariants', name: 'Data Invariants Check', when: '6:40am daily', status: 'on',

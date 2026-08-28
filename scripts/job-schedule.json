@@ -421,5 +421,14 @@
     "mode": "wrapped",
     "queued": false,
     "note": "Added 27 Aug 2026. launchd fires a job once; if the machine is not ready the queue DEFERS, and until this existed nothing ever came back, so a defer was a lost day and maxLateMinutes allowed lateness nothing could use. The brain went four days unfed that way (24-27 Aug), Drive being unreadable from a sleeping Mac at 22:45 every night. Hourly at :20, OUTSIDE the queue on purpose - it exists to rescue jobs the queue turned away, so waiting behind a stuck routine would stop it doing the one thing it is for. Only re-fires jobs carrying retryWhenDeferred, and REPORTS any other job that deferred rather than silently passing over it."
+  },
+  "mcp-inventory": {
+    "cron": "10 6 * * *",
+    "maxLateMinutes": 240,
+    "mode": "wrapped",
+    "note": "Regenerates js/mcp-tools-data.js, the Tools & Connections list on the AI Agents page, from the real MCP configuration (28 Aug 2026). A pure read of local config files plus one `claude mcp list` health check; no AI, no judgement, nothing written outside the repo. Every source has a floor and the run FAILS rather than writing a shorter list, because a list that quietly shrank would read as a smaller estate instead of a broken read. Generous lateness: the answer is just as true at 10am.",
+    "needs": [
+      "network"
+    ]
   }
 }

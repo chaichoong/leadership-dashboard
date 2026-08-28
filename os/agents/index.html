@@ -330,6 +330,7 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
      Leadership Dashboard card. Pure IIFE, safe to load here. -->
 <script src="../../js/agent-accuracy.js?v=1"></script>
 <script src="../../js/automations-data.js?v=1"></script>
+<script src="../../js/mcp-tools-data.js?v=1"></script>
 <script src="../../js/sync-bar.js?v=6"></script>
 <script>
 // ═══════════════════════════════════════════════════════════════════════
@@ -2504,6 +2505,7 @@ function renderRegister(){
     // 2. Strategic layer (collapsible)
     html += strategicLayerSection();
     html += automationsSection(q);
+    html += mcpToolsSection(q);
 
     // 3. Process agents (workflow-based, video route)
     html += `<div class="auto-wf-header" style="margin:18px 0 6px">Process agents <span style="color:var(--text-muted);font-weight:var(--fw-regular)">(${agentWfs.length})</span></div>`;
@@ -2662,6 +2664,93 @@ function automationsSection(q){
                 <div style="font-size:var(--fs-xs);color:var(--text-muted);margin-bottom:6px">Named so a switched-off automation stays a visible decision rather than a thing nobody remembers exists.</div>
                 <div style="font-size:var(--fs-xs);color:var(--text-secondary);line-height:1.7">${offList.map(n=>esc(n)).join(' &middot; ')}</div>
             </div>` : ''}
+        </div>
+    </div>`;
+}
+
+// ── Tools & Connections ────────────────────────────────────────────────
+// The list of every connector Claude Code can reach, and — the part that
+// changes decisions — whether a headless agent can reach it too. Data and the
+// reasoning live in js/mcp-tools-data.js, regenerated nightly by
+// scripts/generate-mcp-inventory.py.
+//
+// WHY THE verified/declared SPLIT IS ON THE PAGE. `claude mcp list` only ever
+// sees the handful of servers configured in files on this Mac. The connectors
+// Kevin actually uses arrive through the Claude app's own session and no script
+// can see them. Presenting both kinds as equally checked would be a confident
+// lie about what the platform is connected to.
+function mcpAuthChip(auth){
+    const map = {
+        'connected':  ['Connected',        'var(--success)', 'var(--success-bg)'],
+        'needs-auth': ['Needs authorising','var(--warning)', 'var(--warning-bg)'],
+        'unknown':    ['Not checked',      'var(--text-secondary)', 'var(--bg-subtle)']
+    };
+    const [label, fg, bg] = map[auth] || map.unknown;
+    return `<span style="display:inline-block;white-space:nowrap;font-size:var(--fs-xs);font-weight:var(--fw-medium);color:${fg};background:${bg};padding:2px 8px;border-radius:var(--radius-full)">${esc(label)}</span>`;
+}
+function mcpYesNo(on){
+    return on
+        ? `<span title="Yes" style="color:var(--success);font-weight:var(--fw-semibold)">&#10003;</span>`
+        : `<span title="No" style="color:var(--text-muted)">&ndash;</span>`;
+}
+function mcpToolRow(t){
+    const src = t.source === 'verified'
+        ? `<span title="Read from a real config file or a live health check" style="font-size:var(--fs-xs);color:var(--text-secondary)">checked</span>`
+        : `<span title="Hand-listed: nothing on disk records this one" style="font-size:var(--fs-xs);color:var(--text-muted)">by hand</span>`;
+    return `<tr>
+        <td><div style="font-weight:var(--fw-medium)">${esc(t.name)}</div>${t.scope?`<div style="font-size:var(--fs-xs);color:var(--text-muted)">${esc(t.scope)}</div>`:''}</td>
+        <td>${mcpAuthChip(t.auth)}</td>
+        <td style="text-align:center">${mcpYesNo(t.kevin)}</td>
+        <td style="text-align:center">${mcpYesNo(t.agents)}</td>
+        <td style="font-size:var(--fs-xs);color:var(--text-secondary)">${esc(t.what)}</td>
+        <td>${src}</td>
+    </tr>`;
+}
+function mcpToolGroup(g, q){
+    const rows = (g.tools || []).filter(t => !q ||
+        (String(t.name||'') + ' ' + String(t.what||'') + ' ' + String(t.scope||''))
+            .toLowerCase().includes(q));
+    if(!rows.length) return '';
+    const live = rows.filter(t => t.auth === 'connected').length;
+    return `<div style="margin-top:14px">
+        <div style="font-size:var(--fs-sm);font-weight:var(--fw-semibold);color:var(--text-primary);margin-bottom:2px">${esc(g.title)} <span style="color:var(--text-muted);font-weight:var(--fw-regular)">(${live} working, ${rows.length - live} not)</span></div>
+        <div style="font-size:var(--fs-xs);color:var(--text-muted);margin-bottom:6px">${esc(g.blurb)}</div>
+        <div style="overflow-x:auto"><table class="wf-grid"><thead><tr>
+            <th style="width:170px">Tool</th>
+            <th style="width:130px">Status</th>
+            <th style="width:52px" title="Can you use it in a Claude session?">You</th>
+            <th style="width:62px" title="Can a scheduled AI agent use it on its own?">Agents</th>
+            <th>What it does</th>
+            <th style="width:70px">Source</th>
+        </tr></thead><tbody>${rows.map(mcpToolRow).join('')}</tbody></table></div>
+    </div>`;
+}
+function mcpToolsSection(q){
+    // A missing data file must say so, not render an empty, reassuring box.
+    if(typeof MCP_TOOLS === 'undefined'){
+        return `<div class="agentic-guide" style="margin-top:16px"><div class="agentic-guide-body">
+            <div class="zone-error">The tools list could not be loaded (js/mcp-tools-data.js did not load). This list is NOT empty &mdash; it could not be read.</div>
+        </div></div>`;
+    }
+    const c = MCP_TOOLS.counts || {};
+    const groups = (MCP_TOOLS.groups || []).map(g => mcpToolGroup(g, q)).join('');
+    const shown = (MCP_TOOLS.groups || []).reduce((n, g) => n + (g.tools||[]).filter(t => !q ||
+        (String(t.name||'') + ' ' + String(t.what||'') + ' ' + String(t.scope||''))
+            .toLowerCase().includes(q)).length, 0);
+    // The headline is computed, never typed: the day the agent tool policy
+    // changes, this sentence changes with it.
+    const gap = `Your scheduled AI agents can use <strong>${c.agents} of the ${c.kevin} tools you can use</strong>. They are deliberately limited to reading, searching the web and a controlled browser, and everything else they do goes through scripts in this repo that hold the credentials properly. It is a policy, not a fault &mdash; but it is why an agent asked to do something in Airtable or Slack cannot simply go and do it.`;
+    const stale = MCP_TOOLS.generatedAt || '';
+    return `<div class="agentic-guide" id="mcpToolsLayer" style="margin-top:16px">
+        <div class="agentic-guide-head" onclick="this.parentElement.classList.toggle('open')">
+            <span class="resources-chevron">&#x25B6;</span>
+            Tools &amp; connections &mdash; what the AI is plugged into (${q ? shown + ' of ' + c.total : c.total})
+        </div>
+        <div class="agentic-guide-body">
+            <p class="agentic-guide-intro">Every outside system Claude can reach, what state it is in, and who can use it. ${c.verified} of these ${c.total} were read from a real config file or checked live; ${c.declared} are listed by hand because nothing on this Mac records them. ${c.needsAuth} are installed but never authorised, so they do nothing at all.</p>
+            <div style="background:var(--warning-bg);border:1px solid var(--warning);border-radius:var(--radius-lg);padding:12px 14px;font-size:var(--fs-sm);color:var(--text-primary);line-height:1.6">${gap}</div>
+            ${groups || `<div style="margin-top:14px;font-size:var(--fs-sm);color:var(--text-muted)">No tools match the search.</div>`}
+            <div style="margin-top:14px;font-size:var(--fs-xs);color:var(--text-muted)">Rebuilt nightly from the real configuration. Last rebuilt ${esc(stale)}. ${esc(MCP_TOOLS.healthNote || '')}</div>
         </div>
     </div>`;
 }
