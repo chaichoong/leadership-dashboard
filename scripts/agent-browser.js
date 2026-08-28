@@ -57,6 +57,7 @@
  *       {"do":"fill",   "selector":"#ref",  "value":"123456"},
  *       {"do":"select", "selector":"#type", "value":"arrears"},
  *       {"do":"check",  "selector":"#agree"},
+ *       {"do":"upload", "selector":"#pick", "file":"~/knowledge-os/attachments/ast.pdf"},
  *       {"do":"click",  "selector":"#next"},
  *       {"do":"submit", "selector":"#submit"}      <- prepare stops before this
  *     ]
@@ -92,6 +93,17 @@ const BUILTIN_SITES = {
                                 { label: 'Companies House',    login: false },
   'gov.uk':                     { label: 'GOV.UK',             login: false },
   'tax.service.gov.uk':         { label: 'HMRC',               login: true  },
+  // Adobe Acrobat Sign (28 Aug 2026). Two different jobs on two different
+  // hosts, and only one of them needs Kevin's account:
+  //   acrobat.adobe.com    — SENDING a document out for signature. Needs the
+  //                          Agile Lets login held in the persistent profile.
+  //   documents.adobe.com  — the /public/esign SIGNING pages. Needs NOTHING:
+  //                          the tsid in the emailed link is the whole
+  //                          credential. Proven by opening a live link in a
+  //                          browser with no Adobe session and completing a
+  //                          signature end to end.
+  'acrobat.adobe.com':          { label: 'Adobe Acrobat Sign', login: true  },
+  'documents.adobe.com':        { label: 'Adobe Sign (signing links)', login: false },
 };
 
 function loadSites() {
@@ -149,6 +161,50 @@ async function assertNotCredential(page, selector, value) {
   if (SECRET_NAME_RE.test(String(value))) {
     die(`the value for ${selector} looks like a secret. Refusing.`);
   }
+}
+
+// ── Upload guard ─────────────────────────────────────────────────────────────
+// An agent that can put ANY file from this Mac onto ANY allowlisted website is
+// a data-exfiltration route wearing a productivity costume. The allowlist stops
+// it reaching a bad site; this stops it sending a bad file to a good one.
+//
+// One directory, the same one send-email.py and send-letter.py post from, so
+// there is a single place where "a file an agent may send outward" is decided.
+// BOTH sides of the comparison must be realpath'd. On macOS /var/folders is a
+// symlink to /private/var/folders, so realpath'ing only the FILE resolves it to
+// /private/... while the directory stays /var/..., the prefix check fails, and a
+// perfectly legitimate upload is refused. Caught by the test on the first run;
+// send-email.py already did this correctly and this file did not.
+function realpathOrResolve(p) {
+  const abs = path.resolve(String(p).replace(/^~(?=$|\/)/, os.homedir()));
+  try { return fs.realpathSync(abs); } catch { return abs; }
+}
+
+const UPLOAD_DIR = realpathOrResolve(process.env.AGENT_UPLOAD_DIR ||
+  path.join(os.homedir(), 'knowledge-os', 'attachments'));
+const UPLOAD_EXTENSIONS = new Set(['.pdf', '.png', '.jpg', '.jpeg']);
+const UPLOAD_MAX_BYTES = 20 * 1024 * 1024;
+
+function assertUploadable(files) {
+  const list = (Array.isArray(files) ? files : [files]).filter(Boolean);
+  if (!list.length) die('upload step needs a `file` (or `files`) path');
+  return list.map((f) => {
+    const abs = path.resolve(String(f).replace(/^~(?=$|\/)/, os.homedir()));
+    if (!fs.existsSync(abs)) die(`upload file does not exist: ${abs}`);
+    const resolved = fs.realpathSync(abs);
+    if (!(resolved === UPLOAD_DIR || resolved.startsWith(UPLOAD_DIR + path.sep))) {
+      die(`${resolved} is outside the attachments directory (${UPLOAD_DIR}). ` +
+          'Agents upload only from there — write the file to it first.');
+    }
+    const ext = path.extname(resolved).toLowerCase();
+    if (!UPLOAD_EXTENSIONS.has(ext)) {
+      die(`upload type ${ext || '(none)'} is not allowed. Allowed: ` +
+          `${[...UPLOAD_EXTENSIONS].sort().join(', ')}`);
+    }
+    const size = fs.statSync(resolved).size;
+    if (size > UPLOAD_MAX_BYTES) die(`${path.basename(resolved)} is ${size} bytes — over the ${UPLOAD_MAX_BYTES} cap`);
+    return resolved;
+  });
 }
 
 // ── Approval gate ────────────────────────────────────────────────────────────
@@ -234,6 +290,25 @@ async function runSteps(page, steps, allowSubmit) {
       case 'submit':
         await page.click(s.selector, { timeout: 20000 });
         break;
+      case 'upload': {
+        // Adobe Acrobat has NO <input type=file> in the DOM — not in the page,
+        // not in any shadow root. It creates one on click, and that click opens
+        // a native OS dialog. So setInputFiles() has nothing to target, and the
+        // Chrome-extension lane cannot do this at all: it was the one step that
+        // blocked "agent creates a PDF and sends it for signature".
+        //
+        // Playwright intercepts the chooser IN PROCESS, so the OS dialog never
+        // opens. Arm the listener FIRST and click second — the other order
+        // races and the dialog wins. Verified 28 Aug 2026 against a page
+        // reproducing Adobe's exact create-on-click pattern.
+        const files = assertUploadable(s.files || s.file);
+        const [chooser] = await Promise.all([
+          page.waitForEvent('filechooser', { timeout: 30000 }),
+          page.click(s.selector, { timeout: 20000 }),
+        ]);
+        await chooser.setFiles(files);
+        break;
+      }
       case 'wait':
         await page.waitForTimeout(Math.min(Number(s.ms) || 1000, 15000));
         break;
@@ -349,4 +424,5 @@ if (require.main === module) {
   main().catch(e => { console.error('BROWSER ERROR: ' + (e && e.stack || e)); process.exit(1); });
 }
 
-module.exports = { hostAllowed, runSteps, assertNotCredential, assertApproved, SECRET_NAME_RE, loadSites };
+module.exports = { hostAllowed, runSteps, assertNotCredential, assertApproved, SECRET_NAME_RE, loadSites,
+                   assertUploadable, UPLOAD_DIR, UPLOAD_EXTENSIONS };
