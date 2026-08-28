@@ -384,3 +384,226 @@ def validate_submission(output):
             "line above `on behalf of <company>` when writing for an entity. "
             "No address, no phone number, no contact block." % bad)
     return parsed
+
+
+# ─── THE OTHER TWO SHAPES: POST AND SIGN ─────────────────────────────
+#
+# Kevin's workflow, in his words on 28 Aug 2026:
+#
+#   "They would create the PDF and show me it for approval. They would then
+#    send it off to be signed by the relevant people. Once it comes back, they
+#    would then show me that document with the email correspondence ready to
+#    go, and I would then confirm it. They would then send it off."
+#
+# That is TWO gates on one piece of work, and the second one is a different
+# shape from the first. Correspondence used to mean email and nothing else, so
+# the submit gate refused a postal letter outright:
+#
+#   REFUSED: header line is not `KEY: value`: 'Corporation Tax'
+#
+# An agent literally could not put a letter in front of Kevin. Three shapes now
+# exist, and they live HERE, in the one module, for the reason this file was
+# written in the first place: two scripts that had to agree on a format did not,
+# and an approved action that cannot be carried out is worse than a refused one.
+#
+#   SIGN   gate 1 — "here is the document, may it go for signature?"
+#   POST   gate 2 — "here is the signed letter, may I post it?"
+#   EMAIL  gate 2 — "here is the signed letter, may I email it?"  (unchanged)
+#
+# The body is REQUIRED on all three. Kevin's own ruling on the approval surface
+# is that it must say what the thing IS, not just name a file: approving
+# "AST_Smith.pdf" is not consent to its contents.
+
+POST_HEADERS = {"POST", "DOCUMENT", "DELIVERY"}
+SIGN_HEADERS = {"DOCUMENT", "SIGNERS", "SUBJECT"}
+
+# Matches send-letter.py's Pingen products. "registered" is accepted by the API
+# but is NOT confirmed available for UK destinations.
+DELIVERY_PRODUCTS = ("cheap", "fast", "bulk", "premium", "registered")
+
+
+def _head_and_body(output):
+    text = strip_tier1_banner(output or "")
+    if not text.strip():
+        raise EmailFormatError("Agent Output is empty")
+    if "---" not in text:
+        raise EmailFormatError(
+            "Agent Output has no `---` line separating headers from body")
+    head, _, body = text.partition("---")
+    return head, strip_carry_out_line(body)
+
+
+def detect_kind(output):
+    """Which of the three shapes this output is. Never raises on shape alone."""
+    try:
+        head, _ = _head_and_body(output)
+    except EmailFormatError:
+        return "email"          # let the email parser produce the real message
+    lines = [ln.strip() for ln in head.splitlines() if ln.strip()]
+    if lines and lines[0].rstrip().upper().rstrip(":") == "POST":
+        return "post"
+    keys = {ln.partition(":")[0].strip().upper() for ln in lines if ":" in ln}
+    if "SIGNERS" in keys:
+        return "sign"
+    return "email"
+
+
+def _one_file(value, header):
+    path = (value or "").strip()
+    if not path:
+        raise EmailFormatError(f"{header} names no file")
+    if "," in path or ";" in path:
+        raise EmailFormatError(
+            f"{header} names more than one file — exactly one is supported. "
+            "Every extra file is another thing approved without being opened.")
+    if "\n" in path or "\r" in path:
+        raise EmailFormatError(f"{header} contains a line break")
+    return path
+
+
+def parse_post_output(output):
+    """A postal letter: an address block, the PDF to post, and a summary.
+
+        POST:
+        Corporation Tax
+        HM Revenue and Customs
+        BX9 1AX
+        United Kingdom
+        DOCUMENT: ~/knowledge-os/attachments/hmrc.pdf
+        DELIVERY: cheap
+        ---
+        Plain English: what this letter says and why.
+
+    The address lines are deliberately NOT `KEY: value` — an address is not a
+    header. They run from the POST: line to the first real header.
+    """
+    head, body = _head_and_body(output)
+    lines = [ln.rstrip() for ln in head.splitlines()]
+    started = False
+    address, headers = [], {}
+    for raw in lines:
+        line = raw.strip()
+        if not line:
+            continue
+        if not started:
+            if line.rstrip().upper().rstrip(":") != "POST":
+                raise EmailFormatError(
+                    "a postal letter must start with a `POST:` line")
+            started = True
+            continue
+        # Catch a bare "To:" BEFORE the header branch. It parses as an empty
+        # TO header and would otherwise be refused as merely "unsupported",
+        # losing the lesson: two of the six HMRC letters returned "Not at this
+        # address" in 2025 carried exactly this line at the top of the block
+        # that Pingen reads off the page.
+        if re.fullmatch(r"to:?", line, re.I):
+            raise EmailFormatError(
+                'the address block contains a bare "To:" line. That exact '
+                "defect put six HMRC letters in the returned pile — the block "
+                "must hold ONLY the address.")
+        key, sep, val = line.partition(":")
+        if sep and key.strip().upper() in POST_HEADERS | {"CC", "TO", "FROM", "SUBJECT", "ATTACH"}:
+            headers[key.strip().upper()] = val.strip()
+            continue
+        if headers:
+            raise EmailFormatError(
+                f"address line {line!r} appears AFTER a header. The whole "
+                "address must sit directly under POST:")
+        address.append(line)
+
+    unknown = set(headers) - POST_HEADERS
+    if unknown:
+        raise EmailFormatError(
+            f"unsupported header(s) for a postal letter: {', '.join(sorted(unknown))}. "
+            "Only DOCUMENT and DELIVERY.")
+
+    # Pingen reads the recipient off the PAGE, out of the envelope window, so
+    # this block is not metadata — it is what send-letter.py compares against
+    # what Pingen actually read. Six HMRC letters came back "Not at this
+    # address" in 2025, two of them with a stray "To:" leading the address.
+    if any(re.fullmatch(r"to:?", ln, re.I) for ln in address):
+        raise EmailFormatError(
+            'the address block contains a bare "To:" line. That exact defect '
+            "put six HMRC letters in the returned pile — the block must hold "
+            "ONLY the address.")
+    if len(address) < 3:
+        raise EmailFormatError(
+            f"only {len(address)} address line(s) under POST:. A postal address "
+            "needs at least a name, a street or office, and a postcode.")
+
+    document = _one_file(headers.get("DOCUMENT"), "DOCUMENT")
+    delivery = (headers.get("DELIVERY") or "cheap").strip().lower()
+    if delivery not in DELIVERY_PRODUCTS:
+        raise EmailFormatError(
+            f"DELIVERY is {delivery!r}, not one of {', '.join(DELIVERY_PRODUCTS)}")
+    if not body:
+        raise EmailFormatError(
+            "no summary below the `---`. Approving a posted letter means "
+            "approving what it SAYS, so say it in plain English.")
+    return {"kind": "post", "address": address, "document": document,
+            "delivery": delivery, "body": body}
+
+
+def parse_sign_output(output):
+    """Gate 1: a document going out for signature.
+
+        DOCUMENT: ~/knowledge-os/attachments/loa_hmrc.pdf
+        SIGNERS: kevinbrittain@gmail.com, adviser@example.com
+        SUBJECT: Letter of authority                      (optional)
+        ---
+        Plain English: what this document is and what signing it commits you to.
+    """
+    head, body = _head_and_body(output)
+    headers = {}
+    for raw in head.splitlines():
+        line = raw.strip()
+        if not line:
+            continue
+        key, sep, val = line.partition(":")
+        if not sep:
+            raise EmailFormatError(f"header line is not `KEY: value`: {line!r}")
+        headers[key.strip().upper()] = val.strip()
+    unknown = set(headers) - SIGN_HEADERS
+    if unknown:
+        raise EmailFormatError(
+            f"unsupported header(s) for a signature request: "
+            f"{', '.join(sorted(unknown))}. Only DOCUMENT, SIGNERS and SUBJECT.")
+    document = _one_file(headers.get("DOCUMENT"), "DOCUMENT")
+    signers = parse_addresses(headers.get("SIGNERS", ""), "SIGNERS")
+    if not signers:
+        raise EmailFormatError("no SIGNERS — name who has to sign it")
+    if not body:
+        raise EmailFormatError(
+            "no explanation below the `---`. Approving a filename is not "
+            "consent to a document's contents; say what it is and what "
+            "signing it commits Kevin to.")
+    return {"kind": "sign", "document": document, "signers": signers,
+            "subject": headers.get("SUBJECT", "").strip(), "body": body}
+
+
+def parse_any(output):
+    """Parse whichever of the three shapes this is. Always carries `kind`."""
+    kind = detect_kind(output)
+    if kind == "post":
+        return parse_post_output(output)
+    if kind == "sign":
+        return parse_sign_output(output)
+    parsed = parse_output(output)
+    parsed["kind"] = "email"
+    return parsed
+
+
+def validate_submission_any(output):
+    """The SUBMIT gate for all three shapes. Raises EmailFormatError.
+
+    Email keeps its strict extra rules (a FROM identity, no contact details
+    under the sign-off) because those came from counting Kevin's own
+    corrections. A postal letter and a signature request have no sender
+    identity to get wrong, so their strict layer IS their parser.
+    """
+    kind = detect_kind(output)
+    if kind == "post":
+        return parse_post_output(output)
+    if kind == "sign":
+        return parse_sign_output(output)
+    return validate_submission(output)

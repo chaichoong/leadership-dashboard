@@ -193,8 +193,18 @@ describe('the rules are enforced where they cannot be skipped', () => {
     // parse_output stays permissive on purpose: it also runs on the send path,
     // days after Kevin approved, and an approved action that cannot be carried
     // out is worse than a refused one. Strictness belongs at submit only.
+    //
+    // Broadened 28 Aug 2026. Correspondence used to mean email and nothing
+    // else, so the gate refused a postal letter outright ("header line is not
+    // KEY: value: 'Corporation Tax'") and an agent could not put a letter in
+    // front of Kevin at all. validate_submission_any routes email to the same
+    // strict checks as before, and post/sign to their own parsers, which ARE
+    // their strict layer. The property under test is unchanged: submit
+    // validates strictly, and never with the permissive parser.
     const src = readFileSync(DISPATCH, 'utf8');
-    expect(src).toMatch(/validate_email_submission\(output\)/);
+    expect(src).toMatch(/validate_any_submission\(output\)/);
+    expect(src, 'submit fell back to the permissive parser')
+      .not.toMatch(/^\s*parse_email_output\(output\)/m);
   });
 
   it('the send path does NOT use the strict validator', () => {

@@ -74,6 +74,7 @@ from agent_email_format import (  # noqa: E402
     EmailFormatError,
     parse_output as parse_email_output,
     validate_submission as validate_email_submission,
+    validate_submission_any as validate_any_submission,
 )
 
 BASE_ID = "appnqjDpqDniH3IRl"
@@ -1575,14 +1576,18 @@ def cmd_submit(args):
         # sign-off with no contact block). It runs only here, never on the send
         # path, so a draft he already approved is still carried out.
         try:
-            validate_email_submission(output)
+            validate_any_submission(output)
         except EmailFormatError as exc:
             sys.exit(
                 f"ERROR: refusing to submit {args.task} as Correspondence — {exc}\n"
-                "       Agent Output must be TO:/CC:/FROM:/SUBJECT: headers, a\n"
-                "       `---` line, then the body. See scripts/send-email.py.\n"
-                "       An approved email that cannot be sent is worse than a\n"
-                "       refused draft: the refusal arrives after the decision."
+                "       Correspondence is one of THREE shapes, all defined in\n"
+                "       scripts/agent_email_format.py:\n"
+                "         email  TO:/CC:/FROM:/SUBJECT:, `---`, body\n"
+                "         post   POST: + address lines, DOCUMENT:, `---`, summary\n"
+                "         sign   DOCUMENT:, SIGNERS:, `---`, what it commits Kevin to\n"
+                "       An approved action that cannot be carried out is worse\n"
+                "       than a refused draft: the refusal arrives after the\n"
+                "       decision."
             )
 
     # WHO approves. The task's Approver field decides (set by Inbound Comms at
