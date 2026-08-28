@@ -190,8 +190,193 @@ def dupe_task_key(name):
         and not re.fullmatch(r"(?=(?:[^\d]*\d){3,})[a-z\d]+", w)
     ]
     distinctive = [w for w in words if w not in DUPE_GENERIC]
-    subject = " ".join(sorted(distinctive[:2])) if distinctive else " ".join(words).strip()
+    # AN ADDRESS SAYS WHERE, NOT WHICH (28 Aug 2026). Two slots is not many,
+    # and when the address leads the title it takes both: "18 Siddows Avenue —
+    # garden complaint" and "18 Siddows Avenue — rent arrears" both keyed to
+    # `avenue siddows` and folded into one another. Kevin has ~27 properties
+    # with many open tasks each, so this was live. Place words now go to the
+    # BACK of the queue for a slot rather than being dropped, because a task
+    # whose whole subject is an address still needs a key.
+    places = _place_tokens(words)
+    ranked = [w for w in distinctive if w not in places] + \
+             [w for w in distinctive if w in places]
+    subject = " ".join(sorted(ranked[:2])) if ranked else " ".join(words).strip()
     return (lane + "|" + subject) if lane else subject
+
+
+# ─── THE SECOND PASS: SAME MATTER, DIFFERENT WORDS (28 Aug 2026) ────
+#
+# Kevin, working the queue that morning: "there's still a lot where I seem to
+# see some duplication, something referencing the same issue but with slightly
+# different information."
+#
+# He was right. Measured against the 55 tasks waiting: the key above grouped
+# them into 43 cards and missed SEVEN real pairs, every one of them the same
+# matter written two different ways —
+#
+#   "Sefton Council HMO licence fee 150 unpaid 23 Viola St Bootle"
+#   "pay Sefton landlord licence fee 150 GBP for 23 Viola Street Bootle"
+#
+#   "SMS reply from +447538631747"          (INBOUND lane)
+#   "SMS from 447538631747 - maintenance"   (MAINTENANCE lane)
+#
+# Three reasons the key alone could not catch them:
+#
+#   1. IT KEEPS ONLY THE FIRST TWO DISTINCTIVE WORDS, SORTED. "Sefton Council"
+#      and "pay Sefton" therefore differ, because `council` and `pay` both
+#      survive as distinctive and only two slots exist.
+#   2. IT DELETES EVERY NUMBER. A phone number or a house number is the
+#      STRONGEST identity signal there is — two tasks quoting 447538631747 are
+#      the same thread, whatever words surround them — and the key strips them
+#      as reference noise.
+#   3. IT SPLITS ON THE LANE PREFIX. Deliberate, and right for FOLDING (a
+#      maintenance job and a reply about one thread are separate pieces of
+#      work). Wrong for SHOWING him, which is what he was asking about.
+#
+# So this does not replace the key. The key is a fast exact bucket and keeps
+# every catch it already has; this is a second pass over what it missed. A
+# match is either.
+#
+# STRICTNESS IS A PARAMETER, because the two callers do different things:
+#   fold  — destructive, one task absorbs another. Same lane required.
+#   group — display only, in the approvals queue. Lane ignored, because a
+#           thread appearing in two lanes is exactly the duplication he sees.
+
+# Words that say what to DO about a matter rather than WHICH matter it is.
+# "pay Sefton" and "Sefton Council" are one thing; the verb is not identity.
+# Extends DUPE_GENERIC rather than replacing it — kept separate so the key's
+# own behaviour, and its tests, are untouched.
+DUPE_ACTION_WORDS = {
+    "respond", "reply", "replies", "replying", "required", "require",
+    "requires", "send", "sending", "sent", "provide", "pay", "paid", "paying",
+    "call", "calling", "chase", "chasing", "contact", "unpaid", "outstanding",
+    "overdue", "further", "recovery", "notice", "notification", "update",
+    "updates", "incoming", "new", "important", "info", "information",
+}
+
+# A UK phone number in any of the shapes these tasks carry: +447538631747,
+# 447538631747, 07538631747. The last nine digits are the same in all three,
+# which is what makes them comparable.
+DUPE_PHONE_RE = re.compile(r"\b(?:\+?44|0)?(\d{9,12})\b")
+
+DUPE_MIN_SHARED = 2      # one shared word is a coincidence ("emails")
+DUPE_MIN_RATIO = 0.5     # of the SHORTER task's distinctive words
+
+# ─── AN ADDRESS SAYS WHERE, NOT WHICH ────────────────────────────────
+#
+# Caught by this file's own test before it shipped. "Gas safety certificate due
+# 23 Viola Street Bootle" folded into "action overdue licensing tasks 23 Viola
+# Street Bootle - EICR and Gas" on four shared words — three of which were the
+# ADDRESS.
+#
+# That direction is genuinely dangerous here. Kevin has around 27 properties
+# with many open tasks each, so counting address words as evidence would
+# eventually fold a garden complaint into a rent arrears chase at the same
+# house. The place is context; the matter is what differs.
+#
+# So place tokens still SHOW in the explanation (they are why a human recognises
+# the pair) but never count toward the shared-word threshold.
+DUPE_STREET_TYPES = {
+    "street", "st", "road", "rd", "avenue", "ave", "lane", "close", "drive",
+    "way", "court", "place", "crescent", "grove", "terrace", "gardens",
+    "square", "walk", "hill", "park", "row", "view", "rise", "mews",
+}
+
+
+def _place_tokens(words):
+    """Tokens naming WHERE: the street type, the name before it, the town
+    after it. `23 Viola Street Bootle` -> viola, street, bootle."""
+    place = set()
+    for i, w in enumerate(words):
+        if w not in DUPE_STREET_TYPES:
+            continue
+        place.add(w)
+        if i:
+            place.add(words[i - 1])
+        if i + 1 < len(words):
+            place.add(words[i + 1])
+    return place
+
+
+def dupe_signals(name):
+    """(lane, strong_ids, distinctive_words) — what identifies this matter.
+
+    Mirrored verbatim by dupeSignals in os/agents/index.html; drift-tested in
+    tests/agents-dupe-task-key.test.js.
+    """
+    raw = str(name or "")
+    lane = ""
+    m = re.match(r"^([A-Za-z][A-Za-z ]*(?:\([^)]*\))?)\s*:\s*", raw)
+    if m:
+        lane = re.sub(r"[^a-z0-9]+", " ", m.group(1).lower()).strip()
+        raw = raw[m.end():]
+    strong = set()
+    for digits in DUPE_PHONE_RE.findall(raw):
+        strong.add("tel:" + digits[-9:])
+    for digits in re.findall(r"\b\d{4,}\b", raw):
+        # A phone number already claimed above must not also register as a
+        # plain reference, or one number would count as two agreements.
+        if "tel:" + digits[-9:] not in strong:
+            strong.add("num:" + digits)
+    cleaned = re.sub(r"[^a-z0-9\s]", " ", raw.lower())
+    words = [
+        w for w in cleaned.split()
+        if w
+        and not re.fullmatch(r"\d+", w)
+        and not re.fullmatch(r"(?=(?:[^\d]*\d){3,})[a-z\d]+", w)
+        and w not in DUPE_GENERIC
+        and w not in DUPE_ACTION_WORDS
+    ]
+    # Kept as an ordered list too: a place is recognised by adjacency, and a
+    # set has thrown that away.
+    return lane, strong, set(words), _place_tokens(words)
+
+
+def dupe_verdict(name_a, name_b, mode="group"):
+    """Are these the same matter? Returns {match, why, shared}.
+
+    `why` is written for KEVIN, not for a log: it is shown on the group header
+    so he can confirm the call himself rather than trusting it. That is what he
+    asked for — "a little bit better confirmation of that".
+    """
+    lane_a, strong_a, words_a, place_a = dupe_signals(name_a)
+    lane_b, strong_b, words_b, place_b = dupe_signals(name_b)
+
+    # THE LANE CHECK COMES FIRST IN FOLD MODE, ahead of even a shared phone
+    # number. Folding is destructive — one task absorbs the other — and a
+    # maintenance job absorbed into a reply task is a real obligation lost.
+    # "SMS reply from +447538631747" and "SMS from 447538631747 - maintenance
+    # reply" ARE one thread, and Kevin should SEE them together; that does not
+    # mean one may quietly eat the other. Grouping shows, folding destroys, and
+    # only the second needs to be careful.
+    if mode == "fold" and lane_a != lane_b:
+        return {"match": False, "why": "", "shared": []}
+
+    both = sorted(strong_a & strong_b)
+    if both:
+        label = ", ".join(
+            ("phone " + x[4:]) if x.startswith("tel:") else ("reference " + x[4:])
+            for x in both)
+        return {"match": True, "why": "same " + label, "shared": both}
+
+    if not words_a or not words_b:
+        return {"match": False, "why": "", "shared": []}
+    shared = sorted(words_a & words_b)
+    # The threshold is judged on what is left once the address is set aside.
+    places = place_a | place_b
+    telling = [w for w in shared if w not in places]
+    if len(telling) < DUPE_MIN_SHARED:
+        return {"match": False, "why": "", "shared": shared}
+    ratio = len(shared) / min(len(words_a), len(words_b))
+    if ratio < DUPE_MIN_RATIO:
+        # Enough words in common to look related, not enough to be the same
+        # matter: "Sefton licence fee" and "Viola Street EICR and Gas" share a
+        # property and nothing else.
+        return {"match": False, "why": "", "shared": shared}
+    return {"match": True, "why": "both about " + ", ".join(telling)
+            + (" (at " + ", ".join(w for w in shared if w in places) + ")"
+               if any(w in places for w in shared) else ""),
+            "shared": shared}
 
 
 def _sel_name(v):
@@ -238,14 +423,25 @@ def decide(incoming_fields, open_rows):
         return {"action": "create", "key": key}
     incoming_sender = incoming_fields.get(F["inboundSender"], "")
 
-    matches = []
+    incoming_name = incoming_fields.get(F["name"], "")
+    matches, why_matched = [], {}
     for row in open_rows:
         f = row.get("fields", {})
         if _sel_name(f.get(F["status"])) in CLOSED_STATUSES:
             continue
-        if dupe_task_key(f.get(F["name"], "")) != key:
+        other = f.get(F["name"], "")
+        # TWO PASSES, and a match is either. The key is the fast exact bucket
+        # and keeps every catch it already had; the verdict is the second pass
+        # over what it missed — seven real pairs on the live queue of 28 Aug
+        # 2026, each the same matter written two different ways.
+        if dupe_task_key(other) == key:
+            why_matched[row["id"]] = "same subject"
+            matches.append(row)
             continue
-        matches.append(row)
+        verdict = dupe_verdict(incoming_name, other, mode="fold")
+        if verdict["match"]:
+            why_matched[row["id"]] = verdict["why"]
+            matches.append(row)
 
     if not matches:
         return {"action": "create", "key": key}
@@ -258,6 +454,9 @@ def decide(incoming_fields, open_rows):
                 "key": key,
                 "taskId": row["id"],
                 "matchedName": row.get("fields", {}).get(F["name"], ""),
+                # WHY it folded, in Kevin's words rather than a key. A fold he
+                # cannot audit is a fold he has to take on trust.
+                "matchedWhy": why_matched.get(row["id"], "same subject"),
             }
     return {
         "action": "create",
