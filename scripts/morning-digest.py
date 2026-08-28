@@ -388,6 +388,12 @@ def build(now_dt=None):
         lines.append(":rotating_light: *Routine stacking* — %s" % stacking)
         lines.append("")
 
+    # Every job skipped and nothing ran. Decided ONCE, here, because it colours
+    # the headline and raises the alarm further down. Two copies of the same
+    # condition would eventually disagree, and the disagreement Kevin would see
+    # is a green tick sitting directly above a red alarm.
+    all_skipped = bool(skipped) and not ran and not failed and len(skipped) >= 3
+
     # The control fires first and loudest.
     if not events:
         alarm = True
@@ -401,9 +407,18 @@ def build(now_dt=None):
                              ("queued out", timed_out), ("no record", never)):
             if group:
                 headline += ", %d %s" % (len(group), label)
-        icon = (":white_check_mark:"
-                if not (failed or never or timed_out or halted or stalled)
-                else ":warning:")
+        # A morning where nothing ran is not a tick. Skips alone stay green on
+        # purpose — a couple of late jobs is a normal morning — but "0 ran" is
+        # the outage this whole digest exists to catch, and it read as :white_
+        # check_mark: on the phone with the alarm hidden a line below it
+        # (Kevin, 28 Aug 2026). Same icon as the queue-silence control, because
+        # it means the same thing: nothing worked.
+        if all_skipped:
+            icon = ":rotating_light:"
+        elif failed or never or timed_out or halted or stalled:
+            icon = ":warning:"
+        else:
+            icon = ":white_check_mark:"
         lines.append("%s Scheduled jobs: %s." % (icon, headline))
 
     # Loudest after the queue-silence control: a job that has been quietly failing
@@ -439,7 +454,7 @@ def build(now_dt=None):
     # Every job skipped and nothing ran is one fault, not ten shrugs. Seen 20 and
     # 21 Aug 2026: "0 ran, 10 skipped" two mornings running, each skip "1380 min
     # late", and nobody read it as an outage because each line looked routine.
-    if skipped and not ran and not failed and len(skipped) >= 3:
+    if all_skipped:
         alarm = True
         lines.append(":rotating_light: *Every job was skipped and none ran.* That is "
                      "one problem, not %d: either the Mac slept through the whole "
