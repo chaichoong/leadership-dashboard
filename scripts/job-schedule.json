@@ -424,9 +424,9 @@
   },
   "mcp-inventory": {
     "cron": "10 6 * * *",
-    "maxLateMinutes": 240,
+    "maxLateMinutes": 600,
     "mode": "wrapped",
-    "note": "Regenerates js/mcp-tools-data.js, the Tools & Connections list on the AI Agents page, from the real MCP configuration (28 Aug 2026). A pure read of local config files plus one `claude mcp list` health check; no AI, no judgement, nothing written outside the repo. Every source has a floor and the run FAILS rather than writing a shorter list, because a list that quietly shrank would read as a smaller estate instead of a broken read. Generous lateness: the answer is just as true at 10am.",
+    "note": "Regenerates js/mcp-tools-data.js, the Tools & Connections list on the AI Agents page, from the real MCP configuration (28 Aug 2026). A pure read of local config files plus one `claude mcp list` health check; no AI, no judgement, nothing written outside the repo. Every source has a floor and the run FAILS rather than writing a shorter list, because a list that quietly shrank would read as a smaller estate instead of a broken read. maxLateMinutes is deliberately huge: this Mac sleeps, and the first manual run SKIPPED at 249 minutes late under the original 240. An inventory of what we are connected to is just as true at 4pm as at 6am, so a late refresh beats no refresh.",
     "needs": [
       "network"
     ]
