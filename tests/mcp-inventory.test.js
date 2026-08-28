@@ -219,7 +219,13 @@ describe('generator refuses to write on a bad read', () => {
         expect(run(env, out).stdout).toContain('first run');
 
         const stamp = statSync(out).mtimeMs;
-        expect(run(env, out).stdout).toContain('No change since the committed list');
+        const quiet = run(env, out).stdout;
+        expect(quiet).toContain('No change since the committed list');
+        // The log must not claim "Wrote" on a run that deliberately wrote
+        // nothing. It said exactly that for one commit, and this log is the only
+        // place the unattended run speaks.
+        expect(quiet).toContain('Checked ');
+        expect(quiet).not.toContain('Wrote ');
         expect(statSync(out).mtimeMs,
             'the generator rewrote an unchanged file').toBe(stamp);
 

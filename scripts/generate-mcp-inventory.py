@@ -496,7 +496,10 @@ def main(argv=None):
         with open(out, "w") as fh:
             fh.write(body)
     c = data["counts"]
-    print(f"Wrote {out}")
+    # Say which of the two things actually happened. A log claiming "Wrote" on a
+    # run that deliberately left the file alone teaches the reader to disbelieve
+    # the log, and this log is the only place the nightly run speaks.
+    print(f"{'Wrote' if changed else 'Checked'} {out}")
     print(f"  {c['total']} tools: {c['verified']} verified, {c['declared']} declared")
     print(f"  reachable by Kevin: {c['kevin']}   by headless agents: {c['agents']}")
     print(f"  unauthorised: {c['needsAuth']}")
