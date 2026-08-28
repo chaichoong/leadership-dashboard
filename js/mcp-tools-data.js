@@ -18,9 +18,9 @@ var MCP_TOOLS = {
   "healthNote": "",
   "agentAllowlistSize": 9,
   "counts": {
-    "total": 43,
+    "total": 44,
     "verified": 30,
-    "declared": 13,
+    "declared": 14,
     "kevin": 21,
     "agents": 0,
     "needsAuth": 21
@@ -57,6 +57,15 @@ var MCP_TOOLS = {
           "agents": false,
           "source": "verified",
           "scope": "this repo"
+        },
+        {
+          "name": "TEMP-PUBLISH-TEST",
+          "what": "Temporary row created to prove the auto-PR path works. Delete.",
+          "auth": "unknown",
+          "kevin": false,
+          "agents": false,
+          "source": "declared",
+          "scope": "test"
         }
       ]
     },
