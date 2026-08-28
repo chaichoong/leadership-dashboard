@@ -21,6 +21,7 @@ Exit:   0 always (this is a report, not a gate).
 Auth:   ~/.config/od/airtable_pat (never printed).
 """
 
+import datetime
 import json
 import os
 import sys
@@ -35,6 +36,12 @@ TEAM = "tblco0p2OnlLQVAX7"
 MIN_SAMPLE = 20
 MIN_RATE = 0.9
 RECENT_N = 10
+# Kevin's ruling, 28 Aug 2026. The day the first agent ever cleared this bar,
+# all 26 of its decisions had happened in THREE days. Volume is not consistency:
+# a busy Tuesday manufactures a sample in an afternoon, and elapsed time is the
+# one thing that cannot be manufactured. Kept identical to THRESHOLD.minDays in
+# js/agent-accuracy.js — drift-tested.
+MIN_DAYS = 30
 
 ACCURATE = ("Approved as-is", "Approved with minor edits")
 
@@ -105,6 +112,20 @@ def select_name(value):
     return value or ""
 
 
+def span_days(items):
+    """Whole days between the oldest and newest DATED decision.
+
+    Undated entries are ignored rather than counted as today: treating a blank
+    date as now would let a single dated decision look like a 30-day span.
+    """
+    days = sorted(d["at"][:10] for d in items if d.get("at"))
+    if len(days) < 2:
+        return 0
+    a = datetime.date.fromisoformat(days[0])
+    b = datetime.date.fromisoformat(days[-1])
+    return (b - a).days
+
+
 def score(decisions, names):
     buckets = {}
     for d in decisions:
@@ -125,6 +146,10 @@ def score(decisions, names):
         rejected = sum(1 for d in judged if d["outcome"] == "Rejected")
         recent_rejections = sum(1 for d in judged[:RECENT_N] if d["outcome"] == "Rejected")
         rate = accurate / total if total else 0.0
+        # Measured across the JUDGED decisions: the question is how long this
+        # agent has done THIS WORK to this standard, and a task rejected as
+        # irrelevant is not evidence either way.
+        days = span_days(judged)
         # Every decision before 27 Aug 2026 carries no reason, and nothing may
         # guess one on Kevin's behalf. They stay in the total; this says how
         # much of the score is therefore unexplained.
@@ -140,7 +165,10 @@ def score(decisions, names):
             "recent_rejections": recent_rejections,
             "relevance_failures": len(relevance),
             "unclassified_rejections": unclassified,
-            "ready": total >= MIN_SAMPLE and rate >= MIN_RATE and recent_rejections == 0,
+            "span_days": days,
+            "days_to_go": max(0, MIN_DAYS - days),
+            "ready": (total >= MIN_SAMPLE and rate >= MIN_RATE
+                      and recent_rejections == 0 and days >= MIN_DAYS),
         })
     rows.sort(key=lambda r: (r["agent"], r["task_type"]))
     return rows
@@ -189,7 +217,8 @@ def main():
     rows = score(decisions, names)
     recommendations = [
         f"{r['agent']} has cleared the bar on {r['task_type']}: {round(r['rate'] * 100)}% over "
-        f"{r['total']} approvals, no rejections in the last {min(r['total'], RECENT_N)}. "
+        f"{r['total']} approvals across {r['span_days']} days, "
+        f"no rejections in the last {min(r['total'], RECENT_N)}. "
         f"Your call whether it runs that task type without the gate."
         for r in rows if r["ready"]
     ]
@@ -223,9 +252,23 @@ def main():
     if not rows:
         print("No approval decisions recorded yet — nothing to score.")
     for r in rows:
-        flag = "READY (recommend)" if r["ready"] else (
-            f"{r['recent_rejections']} rejected in last {RECENT_N}" if r["recent_rejections"]
-            else f"{r['total']}/{MIN_SAMPLE} to the bar")
+        # Name the ONE thing still missing, in the order that decides it. A row
+        # that just says "not ready" tells Kevin nothing about whether to wait a
+        # week or fix the agent, and those need opposite responses.
+        if r["ready"]:
+            flag = "READY (recommend)"
+        elif r["recent_rejections"]:
+            flag = f"{r['recent_rejections']} rejected in last {RECENT_N}"
+        elif r["total"] < MIN_SAMPLE:
+            flag = f"{r['total']}/{MIN_SAMPLE} to the bar"
+        elif r["days_to_go"]:
+            # Passes on volume and rate; only time is short. This is the state
+            # Creditor Management was in on 28 Aug 2026 — 100% over 26, all of
+            # it inside three days.
+            flag = (f"holding {round(r['rate'] * 100)}% — {r['days_to_go']}d more "
+                    f"(only {r['span_days']}d of history)")
+        else:
+            flag = f"{round(r['rate'] * 100)}% — under {round(MIN_RATE * 100)}%"
         print(f"  {r['agent']:<34} {r['task_type']:<16} "
               f"{round(r['rate'] * 100):>3}%  {r['accurate']}/{r['total']}   {flag}")
     print()

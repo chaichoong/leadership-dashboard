@@ -60,11 +60,35 @@
             && RELEVANCE_REASONS.indexOf(item.reason || '') !== -1;
     }
 
+    // ─── THE BAR (Kevin, 31 Jul 2026; MIN DAYS added 28 Aug 2026) ─────
+    //
+    // The day the first agent ever cleared this bar, the sample was checked and
+    // all 26 of its decisions had happened in THREE DAYS — 3 on the 26th, 14 on
+    // the 27th, 9 on the 28th. A burst, not a track record, and the report was
+    // about to recommend autonomy on it.
+    //
+    // Kevin's ruling: an agent must hold the standard over a rolling 30 days
+    // before it passes. Volume is not the same as consistency, and a busy
+    // Tuesday can manufacture a sample in an afternoon. Elapsed time is the one
+    // thing that cannot be manufactured.
     var THRESHOLD = {
         minSample: 20,  // decisions of that task type by that agent
         minRate: 0.9,   // 90% accurate
         recentN: 10,    // and zero rejections in the last this-many
+        minDays: 30,    // spanning at least this many days, first to last
     };
+
+    /** Whole days between the oldest and newest dated decision in a bucket.
+     *  Undated entries are ignored rather than counted as today: treating a
+     *  blank date as now would let a single dated decision look like a span. */
+    function spanDays(items) {
+        var dates = (items || [])
+            .map(function (i) { return Date.parse(i.at || ''); })
+            .filter(function (t) { return !isNaN(t); });
+        if (dates.length < 2) return 0;
+        return Math.floor((Math.max.apply(null, dates) - Math.min.apply(null, dates))
+            / 86400000);
+    }
 
     // history: [{ agentId, taskType, outcome, at }]  (at = ISO string, may be blank)
     // names:   optional { agentId: 'Display name' }
@@ -110,10 +134,17 @@
             var unclassified = judged.filter(function (i) {
                 return i.outcome === 'Rejected' && !i.reason;
             }).length;
+            // Measured across the JUDGED decisions, not the relevance failures:
+            // the question is how long this agent has been doing THIS WORK to
+            // this standard, and a rejected-as-irrelevant task is not evidence
+            // either way.
+            var days = spanDays(judged);
             return {
                 agentId: b.agentId,
                 agentName: lookup[b.agentId] || b.agentId,
                 taskType: b.taskType,
+                spanDays: days,
+                daysToGo: Math.max(0, THRESHOLD.minDays - days),
                 total: total,
                 accurate: accurate,
                 rejected: rejected,
@@ -124,7 +155,8 @@
                 // Kevin at all, and somebody has to own that number.
                 relevanceFailures: relevance.length,
                 unclassifiedRejections: unclassified,
-                ready: total >= THRESHOLD.minSample && rate >= THRESHOLD.minRate && recentRejections === 0,
+                ready: total >= THRESHOLD.minSample && rate >= THRESHOLD.minRate
+                       && recentRejections === 0 && days >= THRESHOLD.minDays,
             };
         }).sort(function (a, c) {
             return String(a.agentName).localeCompare(String(c.agentName))
@@ -138,7 +170,8 @@
     function agentAutonomyRecommendations(rows) {
         return (rows || []).filter(function (r) { return r.ready; }).map(function (r) {
             return r.agentName + ' has cleared the bar on ' + r.taskType + ': '
-                + Math.round(r.rate * 100) + '% over ' + r.total + ' approvals, no rejections in the last '
+                + Math.round(r.rate * 100) + '% over ' + r.total + ' approvals across '
+                + r.spanDays + ' days, no rejections in the last '
                 + Math.min(r.total, THRESHOLD.recentN)
                 + '. Your call whether it runs that task type without the gate.';
         });
@@ -198,6 +231,7 @@
         computeAgentAccuracy: computeAgentAccuracy,
         agentAutonomyRecommendations: agentAutonomyRecommendations,
         countAgents: countAgents,
+        spanDays: spanDays,
     };
 
     if (typeof module !== 'undefined' && module.exports) module.exports = api;

@@ -1573,7 +1573,7 @@ function apvCardHtml(t){
                 ${TASK_TYPE_OPTIONS.map(o=>`<option value="${o}" ${t.taskType===o?'selected':''}>${o}</option>`).join('')}
             </select>
         </div>
-        <textarea class="apv-note" id="apvNote-${t.id}" placeholder="Optional. A reject chip fills this in for you — type here only if you want to be more specific, or to say what needs changing."></textarea>
+        <textarea class="apv-note" id="apvNote-${t.id}" placeholder="Optional. A reject chip fills this in for you — type here only if you want to be more specific, or to say what needs changing. Easier to say than type? Paste a Loom link and the agent reads what you said."></textarea>
         <div class="apv-attach" id="apvDrop-${t.id}"
              ondragover="event.preventDefault();this.classList.add('apv-drop-over')"
              ondragleave="this.classList.remove('apv-drop-over')"
