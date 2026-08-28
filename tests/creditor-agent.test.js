@@ -102,7 +102,7 @@ describe('the routing floor (real creditor_match, one batched python call)', () 
 });
 
 describe('queue routing and the pause lever', () => {
-  const queue = src.slice(src.indexOf('def cmd_queue'), src.indexOf('# ─── WRITES'));
+  const queue = src.slice(src.indexOf('def build_queue'), src.indexOf('# ─── WRITES'));
 
   it('the deterministic creditor lane is inbound-only and beats the Response route (real AUTO_ROUTES)', () => {
     // Behavioural, through the real table — never source offsets.

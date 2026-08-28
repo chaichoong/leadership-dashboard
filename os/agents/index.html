@@ -1373,6 +1373,13 @@ window.clearApvFilters = clearApvFilters;
 // Kept in sync by tests/approval-gate-defaults.test.js.
 const APV_ALERT_RE = /apps script|cloudflare (kv|worker)|airtable automation|gmail quota/i;
 
+// Work that went to Roy instead of to Kevin (28 Aug 2026). Same reason the
+// alert lane is listed: a lane that takes work OUT of his queue and reports
+// nothing cannot be told apart from a lane that lost it. Read off the Notes
+// stamp `handover` writes, so this shows what actually happened rather than
+// what a classifier thinks should have.
+const APV_ROY_NOTE_RE = /Handed over to Roy Lavin/i;
+
 // ─── ONE INCIDENT, ONE DECISION (27 Aug 2026) ────────────────────────
 //
 // 13 of the 60 tasks waiting that day were the SAME four or five incidents
@@ -2397,10 +2404,25 @@ function computeCheckLanes(){
             const k = dupeTaskKey(gf(r,TF.name)||'') || r.id;
             (byKey[k] = byKey[k] || []).push(r);
         });
+        // Roy's lane, from the audit stamp rather than from a re-run of the
+        // matcher: what he was actually sent, not what would match today.
+        const toRoy = allOpenTasks.filter(r=>APV_ROY_NOTE_RE.test(String(gf(r,TF.notes)||'')));
+        toRoy.forEach(r=>{
+            const nm = gf(r,TF.name)||'(Untitled)';
+            (byKey['roy:'+r.id] = byKey['roy:'+r.id] || []).push(r);
+        });
         lanes.push({ lane:'Kept off your queue', items: Object.keys(byKey).map(k=>{
             const rows = byKey[k];
             const oldest = rows.map(r=>r.createdTime).sort()[0];
             const n = rows.length;
+            if(k.indexOf('roy:') === 0){
+                return {
+                    severity: 'info',
+                    at: oldest,
+                    text: `"${gf(rows[0],TF.name)||'(Untitled)'}" went to Roy, not to you.`,
+                    detail: `Property work is his lane and it carries your standing approval. Money, legal and anything touching the private matter never go to him. Handed over ${agoText(oldest)}.`,
+                };
+            }
             return {
                 // Never 'danger'. Nothing here is wrong; it is a report of a
                 // decision made on his behalf, and colouring it as a fault
