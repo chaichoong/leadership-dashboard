@@ -561,7 +561,18 @@ def publish_pr(candidate, merge=False):
     base = git("rev-parse", "origin/main")
 
     blob = git("hash-object", "-w", "--path", rel, candidate)
-    index = os.path.join(REPO, ".git", f"index-mcp-inventory-{os.getpid()}")
+    # ASK GIT WHERE ITS DIRECTORY IS — never assume REPO/.git (28 Aug 2026).
+    #
+    # In a LINKED WORKTREE `.git` is a FILE containing "gitdir: ...", not a
+    # directory, so this path was "a file / a name" and could not be created:
+    # `read-tree` died with exit 128 and the whole publish path failed. It
+    # passed in the main checkout and failed everywhere else — and CLAUDE.md
+    # tells every concurrent session to work in a worktree, so this fired for
+    # most sessions running the suite while asserting nothing about their work.
+    # A false red in the gate is what teaches people to reach for
+    # SKIP_SYNC_TESTS=1.
+    git_dir = git("rev-parse", "--absolute-git-dir")
+    index = os.path.join(git_dir, f"index-mcp-inventory-{os.getpid()}")
     env = dict(os.environ, GIT_INDEX_FILE=index)
     try:
         subprocess.run(["git", "-C", REPO, "read-tree", base],
