@@ -130,6 +130,33 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 .apv-reason-quality{border-style:dashed;color:var(--text-muted)}
 .apv-reason-quality:hover{background:var(--warning-bg);border-color:var(--warning-border);color:var(--warning)}
 .apv-reason:disabled{opacity:.45;cursor:default}
+/* Not now. Deliberately quieter than the verdict row above it: this is the
+   absence of a decision, not a seventh flavour of one. */
+.apv-defer{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:6px;padding-top:8px;
+    border-top:1px dashed var(--border-subtle)}
+.apv-defer-label{font-size:var(--fs-xs);color:var(--text-muted);font-weight:var(--fw-semibold);margin-right:2px}
+.apv-defer-btn{font-size:var(--fs-xs);font-weight:var(--fw-medium);padding:4px 10px;cursor:pointer;
+    border:1px solid var(--border-default);border-radius:var(--radius-full);
+    background:var(--bg-surface);color:var(--text-secondary);line-height:1.4;font-family:inherit}
+.apv-defer-btn:hover{background:var(--accent-soft);border-color:var(--accent);color:var(--accent)}
+.apv-defer-btn:disabled{opacity:.45;cursor:default}
+.apv-defer-on{display:flex;align-items:center;gap:5px;font-size:var(--fs-xs);color:var(--text-muted)}
+.apv-defer-on input{font-family:inherit;font-size:var(--fs-xs);padding:3px 6px;color:var(--text-primary);
+    border:1px solid var(--border-default);border-radius:var(--radius-sm);background:var(--bg-surface)}
+/* What is hidden, and when it comes back. A queue that suppresses without
+   reporting cannot be told apart from one that loses things. */
+.apv-later{border:1px solid var(--border-default);border-radius:var(--radius-md);
+    background:var(--bg-surface-2);margin-bottom:12px;overflow:hidden}
+.apv-later > summary{cursor:pointer;padding:9px 12px;font-size:var(--fs-sm);
+    font-weight:var(--fw-semibold);color:var(--text-secondary);list-style:none}
+.apv-later > summary::-webkit-details-marker{display:none}
+.apv-later > summary:hover{background:var(--bg-subtle)}
+.apv-later-list{padding:2px 12px 10px}
+.apv-later-row{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;padding:7px 0;
+    border-top:1px solid var(--border-subtle);font-size:var(--fs-sm)}
+.apv-later-when{font-size:var(--fs-xs);font-weight:var(--fw-semibold);color:var(--accent);
+    background:var(--accent-soft);border-radius:var(--radius-full);padding:2px 9px;white-space:nowrap}
+.apv-later-why{font-size:var(--fs-xs);color:var(--text-muted);flex:1 1 180px}
 .apv-actions{display:flex;gap:8px;flex-wrap:wrap}
 .apv-type{background:var(--bg-surface);border:1px solid var(--border-default);color:var(--text-primary);padding:4px 8px;border-radius:var(--radius-sm);font-size:var(--fs-xs);font-family:inherit}
 .apv-attach{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:6px;border-radius:var(--radius-md);padding:2px}
@@ -378,6 +405,10 @@ const TF = {
     rememberThis:     'fldZurhdHutYIDKVx',
     verdictReason:    'fldF9Bs4N5mttQvtl',
     feedbackHistory:  'fldOzsq68lhfprKJu',
+    // Knock it back (28 Aug 2026) — see TASK_FIELDS.deferredUntil in
+    // js/config.js for why this is a date on the task rather than a queue
+    // somewhere else.
+    deferredUntil:    'fldJ9IHS1yxwYzYSN',
 };
 
 // This page is admin-only (Kevin's build). Decisions are stamped with the
@@ -544,6 +575,8 @@ const AGENT_VIEW_ALIASES = { 'ceo-brief': 'dashboard' };
 let _agentsView = 'dashboard';  // which page tab is showing
 let allApprovals = [];          // loop-raised tasks at Status Approval
 let _approvalsState = 'idle';   // idle | loading | ready | 'error: <message>'
+let allDeferred = [];           // knocked back to a date — same queue, hidden until then
+let _deferredState = 'idle';    // idle | loading | ready | 'error: <message>'
 let _apvAgentFilter = '';       // Team Member id, or '' = every agent
 let _apvTier1Only = false;      // tier-1 toggle, AND-ed with the agent filter
 let ceoBriefRecords = null;     // CEO Briefs rows, newest first
@@ -766,14 +799,45 @@ async function postTaskComment(taskId, text){
 // raiser — they must never appear here. The exclusion is asserted again
 // client-side (see the sync-bar check), so a formula rename fails loudly
 // instead of quietly widening the queue.
+// KNOCKED BACK, NOT LOST (28 Aug 2026)
+// ------------------------------------
+// Kevin: "we've got a couple of confirmation statements to submit, and we need
+// authentication codes. It takes a week for those to arrive. Rather than having
+// something sitting clogging the approval gate up, I need to knock it back a
+// week."
+//
+// So a deferred task keeps Status Approval and keeps every scrap of the agent's
+// work. The ONLY thing that changes is a date, and every approval surface reads
+// that same date: this queue, the sidebar badge (js/shared.js), the Slack loop
+// (scripts/slack-automation/approvals.js) and the CEO brief's waiting count
+// (money-daily-worker.js). Nothing has to remember to bring it back — the day
+// the date passes, the filter stops matching and the task is simply there
+// again, in all four places at once.
+//
+// Back-tested against the live base on 28 Aug 2026: the queue read 66, one
+// record stamped +7 days took it to 65 with 1 deferred, and stamping it TODAY
+// or yesterday put it straight back to 66. A blank date always shows, which is
+// the case that matters — get that wrong and the whole queue vanishes.
+// Guarded by tests/approval-defer.test.js.
+//
+// The queue formula is written out in FULL, as one literal, and js/shared.js
+// holds a byte-identical copy for the sidebar badge. That duplication is
+// deliberate: tests/agent-register-surfaces.test.js reads the string out of
+// both files and fails if they differ, so the badge can never count a queue
+// the page does not show. Composing it from parts would slip past that test.
+const APV_QUEUE_FORMULA = "AND({Status}='Approval', LEN({Sent For Approval By}&'')>0, NOT(IS_AFTER({Deferred Until}, TODAY())))";
+const APV_DEFERRED_FORMULA = "AND({Status}='Approval', LEN({Sent For Approval By}&'')>0, IS_AFTER({Deferred Until}, TODAY()))";
+const APV_QUEUE_FIELDS = () => [
+    TF.name, TF.status, TF.description, TF.notes, TF.dueDate, TF.taskType,
+    TF.agentOutput, TF.sentForApprovalBy, TF.teamMember, TF.lmt, TF.slackBaseline,
+    TF.approver, TF.priority, TF.inboundUrl, TF.attachments, TF.deferredUntil,
+    TF.feedbackHistory];
+
 async function loadApprovals(){
     _approvalsState = 'loading';
     try {
-        const recs = await atFetch(TASKS_TBL,
-            [TF.name, TF.status, TF.description, TF.notes, TF.dueDate, TF.taskType,
-             TF.agentOutput, TF.sentForApprovalBy, TF.teamMember, TF.lmt, TF.slackBaseline,
-             TF.approver, TF.priority, TF.inboundUrl, TF.attachments],
-            { filterByFormula: "AND({Status}='Approval', LEN({Sent For Approval By}&'')>0)" });
+        const recs = await atFetch(TASKS_TBL, APV_QUEUE_FIELDS(),
+            { filterByFormula: APV_QUEUE_FORMULA });
         // This queue and badge are KEVIN'S. The Approver field decides whose
         // lane a task is in (empty = Kevin, same convention as approverFor in
         // scripts/slack-automation/approvals.js); Mica's label-8 lane must
@@ -810,7 +874,13 @@ async function loadApprovals(){
             // write (e.g. the board's Step 3b priority correction) bumps LMT,
             // so an un-posted task's waiting clock can reset — the window is
             // the minute before the sweep stamps the baseline, accepted.
-            submittedAt: gf(r,TF.slackBaseline) || gf(r,TF.lmt) || r.createdTime,
+            // Carried so the sync bar can assert the date filter held. Same
+            // reason raiserLinked is carried: a formula that quietly stops
+            // excluding must fail loudly, not widen the queue in silence.
+            deferredUntil: String(gf(r,TF.deferredUntil)||'').slice(0,10),
+            submittedAt: apvWaitingSince(
+                gf(r,TF.slackBaseline) || gf(r,TF.lmt) || r.createdTime,
+                gf(r,TF.deferredUntil)),
         }));
         // Most important first (Kevin's ruling, 25 Aug 2026): tier 1 leads,
         // then the Priority field (which the Task Manager's 9am/1pm/5pm
@@ -830,6 +900,70 @@ async function loadApprovals(){
         _approvalsState = 'error: ' + (e.message||'load failed');
     }
     postApprovalBadge();
+}
+
+// A task coming back from a knock-back has NOT been waiting on Kevin all week.
+// Without this it returns already stamped "waiting 8 days", instantly trips the
+// over-24-hours check, and rings an alarm about the one thing he handled
+// correctly. The date he chose is the honest start of the new wait.
+function apvWaitingSince(stamped, deferredUntil){
+    const back = String(deferredUntil||'').slice(0,10);
+    if(!back) return stamped;
+    const backIso = back + 'T00:00:00.000Z';
+    // Only ever moves the clock FORWARD. A future date cannot be reached (the
+    // queue formula excludes those), and an older one must not undo a fresh
+    // Slack baseline stamped when the card was re-posted.
+    return (!stamped || String(stamped) < backIso) ? backIso : stamped;
+}
+
+// The other half of the queue: everything Kevin knocked back to a date.
+//
+// This is not optional decoration. A gate that hides things and reports
+// nothing cannot be told apart from a gate that loses them, which is the
+// whole reason the "Kept off your queue" lane exists further down this file.
+// Deferring is a stronger version of the same suppression — it is HIS choice,
+// but it still takes work off the surface he trusts — so the list of what is
+// hidden, and the date each item returns, ships in the same change as the
+// hiding. A failure to load it says so rather than reading as "nothing
+// deferred".
+async function loadDeferred(){
+    _deferredState = 'loading';
+    try {
+        const recs = await atFetch(TASKS_TBL, APV_QUEUE_FIELDS(),
+            { filterByFormula: APV_DEFERRED_FORMULA });
+        const mine = recs.filter(r => {
+            const ap = gf(r,TF.approver);
+            return !ap || !ap.email || ap.email === APPROVER_EMAIL;
+        });
+        allDeferred = mine.map(r=>({
+            id: r.id,
+            name: gf(r,TF.name)||'(Untitled)',
+            raiserId: linkIds(gf(r,TF.sentForApprovalBy))[0] || linkIds(gf(r,TF.teamMember))[0] || '',
+            until: String(gf(r,TF.deferredUntil)||'').slice(0,10),
+            tier1: isTier1Output(gf(r,TF.agentOutput)||''),
+            why: apvDeferReasonFrom(gf(r,TF.feedbackHistory)),
+        })).sort((a,b)=>String(a.until).localeCompare(String(b.until)));
+        _deferredState = 'ready';
+    } catch(e){
+        if(e.message==='auth') throw e;
+        _deferredState = 'error: ' + (e.message||'load failed');
+    }
+}
+
+// Kevin's own words about WHY he knocked it back, pulled back out of the
+// durable archive a week later. Without this the item returns as a mystery:
+// he knows he parked it, not what he was waiting for. Feedback History is
+// append-only and read by nothing that acts, which is exactly what a note to
+// your future self needs — writing it to Approval Feedback instead would put
+// it where an agent reads instructions.
+const APV_DEFER_TAG = 'Knocked back to ';
+function apvDeferReasonFrom(history){
+    const lines = String(history||'').split('\n');
+    for(let i = lines.length - 1; i >= 0; i--){
+        const m = lines[i].match(/\]\s*Knocked back to \d{4}-\d{2}-\d{2}(?::\s*(.+))?$/);
+        if(m) return (m[1]||'').trim();
+    }
+    return '';
 }
 
 // One-glance summary of what the agent is proposing, derived from Agent
@@ -1107,6 +1241,39 @@ function restoreApprovalDrafts(){
     });
 }
 
+// Everything Kevin knocked back, and the day each one returns. Collapsed by
+// default so it costs him nothing on a normal morning, but the COUNT and the
+// next return date are always on screen — the point is that he can see the
+// queue is smaller because he made it smaller, not because something broke.
+function apvDeferredLaneHtml(){
+    if(String(_deferredState).indexOf('error') === 0){
+        return `<div class="zone-error">Could not load what you have knocked back: ${esc(String(_deferredState).slice(7))}.
+            Some approvals may be hidden. <button class="btn btn-sm" style="margin-left:8px" onclick="refreshAll()">Retry</button></div>`;
+    }
+    if(!allDeferred.length) return '';
+    const next = allDeferred[0];
+    const due = allDeferred.filter(t=>{ const d = apvDaysUntil(t.until); return d !== null && d <= 1; }).length;
+    return `<details class="apv-later">
+        <summary>&#128340; ${allDeferred.length} knocked back &mdash; ${due ? `${due} back within a day` : `next back ${esc(apvDeferDateLabel(next.until))}`}</summary>
+        <div class="apv-later-list">
+            ${allDeferred.map(t=>{
+                const d = apvDaysUntil(t.until);
+                const when = d === null ? esc(t.until)
+                    : d <= 0 ? 'back today'
+                    : d === 1 ? 'back tomorrow'
+                    : `back ${esc(apvDeferDateLabel(t.until))}`;
+                return `<div class="apv-later-row">
+                    <span class="apv-later-when">${when}</span>
+                    <span style="flex:2 1 220px">${t.tier1?'<strong style="color:var(--danger)">TIER 1</strong> ':''}${esc(t.name)}</span>
+                    <span class="apv-later-why">${t.why ? 'Waiting on: '+esc(t.why) : esc(teamName(t.raiserId)||'no agent recorded')}</span>
+                    <button class="btn btn-sm" onclick="agUndefer('${t.id}')"
+                            title="Puts it straight back in your queue and re-posts it to Slack.">Bring back now</button>
+                </div>`;
+            }).join('')}
+        </div>
+    </details>`;
+}
+
 function renderApprovals(){
     const body = document.getElementById('approvalsBody');
     const countEl = document.getElementById('approvalsCount');
@@ -1125,9 +1292,13 @@ function renderApprovals(){
     countEl.textContent = allApprovals.length;
     countEl.className = 'zone-count' + (allApprovals.length ? ' hot' : '');
     updateApprovalsTabBadge();
+    // Rendered FIRST and in BOTH branches. An empty queue whose items are all
+    // knocked back must never read as "nothing is waiting" with no sign of
+    // where they went.
+    const laterHtml = apvDeferredLaneHtml();
     if(!allApprovals.length){
         _apvAgentFilter = ''; _apvTier1Only = false;
-        body.innerHTML = `<div class="empty-state"><p>Nothing is waiting for your approval.</p></div>`;
+        body.innerHTML = laterHtml + `<div class="empty-state"><p>Nothing is waiting for your approval${allDeferred.length?' right now':''}.</p></div>`;
         return;
     }
 
@@ -1155,7 +1326,7 @@ function renderApprovals(){
     const tier1Count = allApprovals.filter(t=>t.tier1 && inAgent(t)).length;
     const anyFilter = _apvAgentFilter || _apvTier1Only;
 
-    let html = `<div class="apv-filters">
+    let html = laterHtml + `<div class="apv-filters">
         <button class="apv-filter${anyFilter?'':' active'}" onclick="clearApvFilters()">All (${allApprovals.length})</button>
         ${chips.map(g=>{
             const n = g.rows.filter(inTier).length;
@@ -1420,8 +1591,11 @@ function apvCardHtml(t){
             <button class="btn btn-success" data-apv-btn onclick="agDecide('${t.id}','Approved as-is')">Approve</button>
             <button class="btn" data-apv-btn onclick="agDecide('${t.id}','Approved with minor edits')" title="Approved, but you tidied it first. Still counts as accurate.">Approve with minor edits</button>
             <button class="btn" data-apv-btn onclick="agDecide('${t.id}','Changes requested')" title="Goes back to the agent to redo. Needs a comment.">Request changes</button>
+            <button class="btn btn-danger" data-apv-btn onclick="agDecide('${t.id}','Rejected')"
+                    title="Closes the task for good. Type your reason in the box above first — or use a chip below if one of them fits.">Reject</button>
         </div>
         ${apvReasonChips(t.id)}
+        ${apvDeferRow(t.id)}
     </div>`;
 }
 
@@ -1486,6 +1660,29 @@ function apvReasonChips(taskId){
                  ? 'The only reason that counts against this agent&apos;s draft quality.'
                  : 'The task should not have reached you. Does not count against the agent that wrote it.'}"
             >${esc(r.chip)}</button>`).join('')}
+    </div>`;
+}
+
+// The third row of the card: not now.
+//
+// It sits UNDER the reject chips on purpose. Approve, request changes and
+// reject are all decisions; this is the absence of one, and putting it beside
+// them invites a knock-back where a verdict belongs. The date picker is there
+// because Kevin often knows the actual day something lands (a hearing, a
+// renewal, a code in the post) and rounding that to "a week" just means
+// deciding it twice.
+function apvDeferRow(taskId){
+    return `<div class="apv-defer" role="group" aria-label="Knock this back to a date">
+        <span class="apv-defer-label" title="It leaves every approval surface until the date, then comes back on its own with the agent&apos;s work untouched.">Not yet &mdash; bring it back in&hellip;</span>
+        ${APV_DEFER_OPTIONS.map(o=>`<button class="apv-defer-btn" data-apv-btn
+             onclick="agDefer('${taskId}',${o.days})"
+             title="Returns on ${esc(apvDeferDateLabel(apvDatePlus(o.days)))}">${esc(o.label)}</button>`).join('')}
+        <span class="apv-defer-on">
+            <label for="apvDeferDate-${taskId}">or on</label>
+            <input type="date" id="apvDeferDate-${taskId}" min="${esc(apvDatePlus(1))}"
+                   onkeydown="if(event.key==='Enter'){event.preventDefault();agDeferOnDate('${taskId}')}">
+            <button class="apv-defer-btn" data-apv-btn onclick="agDeferOnDate('${taskId}')">Go</button>
+        </span>
     </div>`;
 }
 
@@ -1700,6 +1897,186 @@ async function applyApprovalDecision(taskId, outcome, remember){
     }
 }
 window.applyApprovalDecision = applyApprovalDecision;
+
+// ═══════════════════════════════════════════════════════════════════════
+// KNOCK IT BACK — defer an approval to a date
+// ═══════════════════════════════════════════════════════════════════════
+// Kevin's case: a confirmation statement he cannot file until an
+// authentication code arrives by post, a week away. Approving is wrong (it is
+// not ready), rejecting is wrong (it still has to happen), and leaving it is
+// what he asked to stop. So there is a third verdict, and it is NOT an
+// approval outcome: nothing is decided, nothing is scored, nothing goes back
+// to the agent. The task simply stops being visible until the date.
+//
+// Deliberately NOT done here: changing Status. Moving the task to Upcoming
+// would need something to move it back, and a job that has to remember is a
+// job that can forget — the exact failure that lost six weeks of meetings and
+// every Friday CEO brief. A date the surfaces read themselves cannot forget.
+//
+// The Slack side is left to the worker, on purpose: this page writes ONLY the
+// date. scripts/slack-automation/approvals.js sees the deferral within the
+// minute, replies in the existing thread with the return date, and clears the
+// timestamp itself — which is what makes a fresh card appear on the day. One
+// writer owns Slack, so a thread can never be orphaned with no explanation in
+// it, and if that phase breaks the sweep logs "reconcile FAILED" instead of
+// losing the task.
+const APV_DEFER_OPTIONS = [
+    { days: 3,  label: '3 days'  },
+    { days: 7,  label: 'A week'  },
+    { days: 14, label: '2 weeks' },
+    { days: 30, label: 'A month' },
+];
+
+// Date arithmetic in LOCAL time, matching todayStr(). Using an ISO round-trip
+// here would shift the date by a day either side of a BST change.
+function apvDatePlus(days){
+    const d = new Date();
+    d.setDate(d.getDate() + Number(days||0));
+    return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+}
+
+function apvDeferDateLabel(iso){
+    const d = new Date(String(iso||'') + 'T12:00:00');
+    if(isNaN(d)) return String(iso||'');
+    return d.toLocaleDateString('en-GB', { weekday:'short', day:'numeric', month:'short' });
+}
+
+// Days from today until `iso`, local, whole days. Negative means overdue.
+function apvDaysUntil(iso){
+    const t = Date.parse(String(iso||'') + 'T12:00:00');
+    if(isNaN(t)) return null;
+    const now = Date.parse(todayStr() + 'T12:00:00');
+    return Math.round((t - now) / 86400000);
+}
+
+function agDefer(taskId, days){
+    const t = allApprovals.find(x=>x.id===taskId);
+    if(!t) return;
+    const until = apvDatePlus(days);
+    apvConfirmDefer(taskId, until);
+}
+window.agDefer = agDefer;
+
+// A date typed into the card's own picker. Rejects today and the past: a
+// "defer" that changes nothing would look like it worked and leave the item
+// exactly where it was.
+function agDeferOnDate(taskId){
+    const el = document.getElementById('apvDeferDate-'+taskId);
+    const until = (el && el.value || '').trim();
+    if(!/^\d{4}-\d{2}-\d{2}$/.test(until)){ toast('Pick a date first.'); return; }
+    if(until <= todayStr()){
+        toast('Pick a date after today — anything earlier leaves it in the queue.');
+        return;
+    }
+    apvConfirmDefer(taskId, until);
+}
+window.agDeferOnDate = agDeferOnDate;
+
+function apvConfirmDefer(taskId, until){
+    const t = allApprovals.find(x=>x.id===taskId);
+    if(!t) return;
+    const noteEl = document.getElementById('apvNote-'+taskId);
+    const note = (noteEl && noteEl.value || '').trim();
+    const n = apvDaysUntil(until);
+    showModal('Knock this back?',
+        `<p style="font-size:var(--fs-sm);color:var(--text-secondary);line-height:1.6">
+            It leaves your queue, Slack and the CEO brief until
+            <strong>${esc(apvDeferDateLabel(until))}</strong>${n!==null?` (${n} day${n===1?'':'s'})`:''},
+            then comes back on its own with the agent&rsquo;s work exactly as it is now.
+            Nothing is approved, nothing is sent, and it does not count against
+            ${esc(teamName(t.raiserId) || 'the agent')}.
+         </p>
+         <label style="display:block;font-size:var(--fs-xs);font-weight:var(--fw-semibold);color:var(--text-secondary);margin-top:12px">
+            What are you waiting for? <span style="font-weight:var(--fw-regular);color:var(--text-muted)">Optional, but you will be glad of it in ${n!==null&&n>1?n+' days':'a few days'}.</span></label>
+         <input type="text" id="apvDeferWhy" value="${esc(note)}"
+                placeholder="e.g. waiting on the Companies House authentication code"
+                style="width:100%;margin-top:5px;padding:8px 10px;border:1px solid var(--border-default);border-radius:var(--radius-md);font-family:inherit;font-size:var(--fs-sm)">`,
+        `<button class="btn" onclick="closeModal()">Cancel</button>
+         <button class="btn btn-primary" onclick="agConfirmDefer('${taskId}','${esc(until)}')">Knock it back</button>`);
+}
+
+function agConfirmDefer(taskId, until){
+    const el = document.getElementById('apvDeferWhy');
+    const why = (el && el.value || '').trim();
+    closeModal();
+    applyApprovalDefer(taskId, until, why);
+}
+window.agConfirmDefer = agConfirmDefer;
+
+// The write. Same stale guard as a decision: a card shows what was true when
+// it rendered, and deferring something that has since been decided elsewhere
+// would resurrect it into the queue a week later.
+async function applyApprovalDefer(taskId, until, why){
+    const t = allApprovals.find(x=>x.id===taskId);
+    if(!t) return;
+    const card = document.querySelector(`[data-apv-card="${taskId}"]`);
+    const btns = card ? Array.from(card.querySelectorAll('[data-apv-btn]')) : [];
+    btns.forEach(b=>{ b.disabled = true; });
+    try {
+        const live = await atFetchOne(TASKS_TBL, taskId);
+        if(selName(gf(live,TF.status)) !== 'Approval'){
+            toast('Already decided elsewhere (Slack or the Tasks drawer). Reloading the queue.');
+            await refreshApprovalZone();
+            return;
+        }
+        const nowIso = new Date().toISOString();
+        const payload = {};
+        payload[TF.deferredUntil] = until;
+        // The Slack fields are deliberately NOT touched here. The worker's
+        // reconcile phase picks the deferral up within the minute, replies in
+        // the existing thread with the return date, and clears the timestamp
+        // itself — which is what makes the fresh card appear on the day. Two
+        // writers on one pair of fields is how a thread ends up orphaned with
+        // no explanation in it. If that phase ever breaks, the sweep logs
+        // "reconcile FAILED" rather than losing the task quietly.
+        // The note to his future self. Tagged so the deferred lane can read it
+        // back; appended, never overwritten, so a second knock-back keeps the
+        // first reason.
+        const stamp = '['+nowIso.replace('T',' ').slice(0,16)+'] '+APV_DEFER_TAG+until+(why?': '+why:'');
+        const prior = String(gf(live,TF.feedbackHistory) || '');
+        payload[TF.feedbackHistory] = (prior.replace(/\s+$/,'') + '\n\n' + stamp).trim();
+        await atUpdate(TASKS_TBL, taskId, payload);
+        await postTaskComment(taskId,
+            'Knocked back by Kevin until ' + until + '.' + (why ? ' Waiting on: ' + why : '')
+            + ' Not approved, not rejected — it returns to the approval queue on that date.');
+        await refreshApprovalZone();
+        toast('Knocked back to ' + apvDeferDateLabel(until) + '.');
+    } catch(e){
+        if(e.message==='auth') return;
+        console.error('defer failed', e);
+        toast('Could not knock it back: ' + (e && e.message || e));
+        btns.forEach(b=>{ b.disabled = false; });
+    }
+}
+
+// Bring one back now — the way out of a knock-back that was wrong, or that
+// resolved early. Clearing the date is all it takes; the queue formula picks
+// it up again and the Slack worker posts a fresh card within the minute.
+async function agUndefer(taskId){
+    const t = allDeferred.find(x=>x.id===taskId);
+    if(!t) return;
+    try {
+        await atUpdate(TASKS_TBL, taskId, { [TF.deferredUntil]: null });
+        await postTaskComment(taskId, 'Brought back to the approval queue by Kevin, ahead of ' + t.until + '.');
+        await refreshApprovalZone();
+        toast('Back in your queue.');
+    } catch(e){
+        if(e.message==='auth') return;
+        toast('Could not bring it back: ' + (e && e.message || e));
+    }
+}
+window.agUndefer = agUndefer;
+
+// Both halves of the queue move together. Reloading only one leaves the badge
+// counting a task the list no longer shows, which is the drift the shell's
+// badge test exists to prevent.
+async function refreshApprovalZone(){
+    await Promise.all([loadApprovals(), loadDeferred()]);
+    renderApprovals();
+    postApprovalBadge();
+    loadChecksAndRender();
+    renderRegister();
+}
 
 // The sidebar badge in the shell: post the waiting count up to the parent.
 // Same postMessage channel the sync bar uses (js/shared.js listens).
@@ -4191,6 +4568,23 @@ function registerAgentsSyncBar(){
                 }
             },
             {
+                name: 'Knocked-back items stay out', kind: 'sync', run: () => {
+                    // The date filter lives in an Airtable formula, and a
+                    // formula that stops excluding returns 200 OK with MORE
+                    // rows — it looks like a busy morning, not like a bug.
+                    // A renamed field throws (atFetch fails on 422) and the
+                    // check above catches it; this catches the quieter case.
+                    if(_approvalsState !== 'ready') return { status:'warn', detail:'Queue not loaded yet' };
+                    if(String(_deferredState).indexOf('error') === 0) return { status:'fail', detail:'Could not read what you knocked back, so some approvals may be hidden with nothing saying so: '+String(_deferredState).slice(7) };
+                    const today = todayStr();
+                    const leaked = allApprovals.filter(t=>t.deferredUntil && t.deferredUntil > today).length;
+                    if(leaked) return { status:'fail', detail:`${leaked} task(s) you knocked back are back in the queue early — the date filter broke` };
+                    return { status:'pass', detail: allDeferred.length
+                        ? `${allDeferred.length} knocked back, all still parked`
+                        : 'Nothing knocked back' };
+                }
+            },
+            {
                 name: 'Agents register read', kind: 'sync', run: () => {
                     if(String(_agentsRegisterState).indexOf('error') === 0) return { status:'fail', detail:String(_agentsRegisterState).slice(7) };
                     if(_agentsRegisterState !== 'ready') return { status:'warn', detail:'Not loaded yet' };
@@ -4390,10 +4784,11 @@ function updateSyncStatus(state, msg){
 }
 
 async function loadEverything(){
-    // The six loads are independent; each records its own error state so one
+    // The loads are independent; each records its own error state so one
     // broken feed never blanks the others.
     await Promise.all([
         loadApprovals(),
+        loadDeferred(),
         loadOpenTasks(),
         loadDailyLogs(),
         loadWorkflowData(),

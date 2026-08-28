@@ -109,6 +109,11 @@ const AF = {
     feedbackHistory: 'fldOzsq68lhfprKJu',
     slackTs:         'fldHTaX3wP9VhD5Oz',
     slackBaseline:   'fldxsqj9JSRBGNyT9',
+    // Knocked back to a date (28 Aug 2026). Kevin's example: a confirmation
+    // statement he cannot file until an authentication code arrives in the
+    // post. Approving is wrong, rejecting is wrong, and leaving it posted here
+    // for a week is the nag he asked us to stop.
+    deferredUntil:   'fldJ9IHS1yxwYzYSN',
 };
 
 // Emoji names are workspace-specific: this workspace's picker calls ✅
@@ -406,6 +411,7 @@ function taskView(rec) {
         agentId: linkIds(f[AF.sentForApprovalBy])[0] || linkIds(f[AF.teamMember])[0] || '',
         approverEmail: ((f[AF.approver] || {}).email) || '',
         feedbackHistory: f[AF.feedbackHistory] || '',
+        deferredUntil: String(f[AF.deferredUntil] || '').slice(0, 10),
     };
 }
 
@@ -624,8 +630,18 @@ function buildApprovalBlocks(t, agent, warn) {
     return blocks;
 }
 
+// The date clause is what makes a knock-back come back on its own. Nothing
+// schedules the return: this query simply stops matching while the date is in
+// the future, and starts matching again the morning it is not — at which point
+// the task has no Slack timestamp (the dashboard cleared it, and the reconcile
+// phase below clears it for anything deferred after it was posted), so a fresh
+// card goes out as if it had just arrived. A job that has to remember to
+// un-park something is a job that can forget; this one has nothing to
+// remember. Mirrors APV_QUEUE_FORMULA in os/agents/index.html.
+const NOT_DEFERRED = `NOT(IS_AFTER({Deferred Until}, TODAY()))`;
+
 async function postPending(env, channels, log) {
-    const recs = await queryTasks(env, `AND({Status}='Approval', LEN({Approval Slack TS}&'')=0)`, MAX_POSTS_PER_RUN);
+    const recs = await queryTasks(env, `AND({Status}='Approval', LEN({Approval Slack TS}&'')=0, ${NOT_DEFERRED})`, MAX_POSTS_PER_RUN);
     for (const rec of recs) {
         const t = taskView(rec);
         const agent = await agentName(env, t.agentId);
@@ -938,19 +954,32 @@ async function processResponses(env, channels, log) {
 // The approver decided in the dashboard while a Slack message was still live.
 // Close the thread so the conversation never shows a stale "waiting" post, and
 // clear the timestamp — which is also what stops this running twice on a task.
+//
+// A knock-back rides the same path, and belongs here rather than in a phase of
+// its own: it is the same event — this stopped being a live ask somewhere else
+// — and the same two writes fix it. The only difference is what the thread is
+// told and the fact that the task is coming BACK, which the cleared timestamp
+// arranges by itself the day postPending's date clause starts matching again.
 async function reconcileDecidedElsewhere(env, channels, log) {
-    const recs = await queryTasks(env, `AND({Status}!='Approval', LEN({Approval Slack TS}&'')>0)`, MAX_RECONCILES_PER_RUN);
+    const recs = await queryTasks(env,
+        `AND(LEN({Approval Slack TS}&'')>0, OR({Status}!='Approval', IS_AFTER({Deferred Until}, TODAY())))`,
+        MAX_RECONCILES_PER_RUN);
     for (const rec of recs) {
         const t = taskView(rec);
         const approver = approverFor(t, isTier1Task(t));
         const channel = await resolveChannelFor(env, approver, channels, log);
+        // Deferred is checked FIRST: a task can be both at Status Approval and
+        // knocked back, and "left the approval queue" would be the wrong story
+        // for something that is due back on a known date.
+        const deferred = t.status === 'Approval' && t.deferredUntil;
         await threadReply(env, channel, t.ts,
-            t.outcome ? `:heavy_check_mark: Decided in the dashboard: *${t.outcome}*.`
-                      : `:information_source: This task left the approval queue in the dashboard.`);
+            deferred ? `:alarm_clock: Knocked back until *${t.deferredUntil}*. Nothing approved, nothing sent — it comes back to you here that morning.`
+                     : t.outcome ? `:heavy_check_mark: Decided in the dashboard: *${t.outcome}*.`
+                                 : `:information_source: This task left the approval queue in the dashboard.`);
         await airtable(env, 'PATCH', `/${TABLE_TASKS}/${t.id}`, {
             fields: { [AF.slackTs]: '', [AF.slackBaseline]: '' }, typecast: true,
         });
-        log.push(`closed thread for ${t.id}`);
+        log.push(deferred ? `deferred ${t.id} to ${t.deferredUntil}` : `closed thread for ${t.id}`);
     }
     return recs.length;
 }

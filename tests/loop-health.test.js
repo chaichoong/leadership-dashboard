@@ -46,6 +46,10 @@ function slice(startMarker, endMarker) {
 
 const loopSrc = slice('const STALL_AMEND_HOURS', 'return {needsYou,done,stalled};\n}');
 const deriveSrc = slice('function deriveTaskStatus(', '\n}');
+// computeApprovalLoop calls this from 28 Aug 2026: a task Kevin knocked back
+// to a date is not waiting on him. Extracted rather than stubbed, so the rule
+// this suite runs is the rule the drawer runs.
+const knockedBackSrc = slice('function isKnockedBack(', '}');
 
 // Build the JS side with the same globals the page provides.
 function makeJs(nowMs) {
@@ -63,6 +67,7 @@ function makeJs(nowMs) {
     };
     Date.parse = Date_.parse;
     ${deriveSrc}
+    ${knockedBackSrc}
     ${loopSrc}
     return {
       run: (tasks, completions) => { agentCompletions = completions || []; return computeApprovalLoop(tasks); },
@@ -93,6 +98,7 @@ function toParsed(rec, derive) {
     approvalSlackTs: f['Approval Slack TS'] || '',
     assigneeEmail: (f.Assignee || {}).email || '',
     hardDeadline: !!f['Hard Deadline'],
+    deferredUntil: f['Deferred Until'] || '',
   };
 }
 
@@ -267,6 +273,28 @@ describe('approval-loop stall rules', () => {
   });
 
   describe('the rules themselves', () => {
+    // 28 Aug 2026. Kevin can knock an approval back to a date from the AI
+    // Agents gate ("we need authentication codes, it takes a week"). The
+    // Tasks drawer is a DIFFERENT surface reading the same table, so if it
+    // does not honour the date it goes on telling him the thing is waiting on
+    // him from a second page — which is the nag he asked us to remove, wearing
+    // a different hat.
+    it('a knocked-back approval is not waiting on him, until the day it is', () => {
+      const js = makeJs(NOW_MS);
+      const parsed = (deferredUntil) => [toParsed(
+        task({ 'Task Name': 'File the confirmation statement', Status: 'Approval',
+               'Team Member': [AGENT], 'Deferred Until': deferredUntil }), js.derive)];
+
+      // Parked for another week: off his list.
+      expect(js.run(parsed('2026-08-21'), []).needsYou).toHaveLength(0);
+      // Back ON the day he chose, not the day after. Off by one here and the
+      // filing he can finally do stays hidden for another day.
+      expect(js.run(parsed('2026-08-14'), []).needsYou).toHaveLength(1);
+      expect(js.run(parsed('2026-08-13'), []).needsYou).toHaveLength(1);
+      // And the case almost every task is in: no date at all.
+      expect(js.run(parsed(''), []).needsYou).toHaveLength(1);
+    });
+
     it('flags an amendment that has not come back, and drops it once it has', () => {
       const stale = runBoth([task({ 'Task Name': 'A', Status: 'Today', 'Team Member': [AGENT],
         'Approval Outcome': 'Changes requested', 'Approved At': '2026-08-11T09:00:00Z' })]);

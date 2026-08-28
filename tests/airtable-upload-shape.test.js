@@ -174,7 +174,11 @@ describe('agents can attach a deliverable to an approval', () => {
   });
 
   it('the approvals card fetches and shows what the agent attached', () => {
-    expect(page).toMatch(/TF\.inboundUrl, TF\.attachments\]/);   // fetched
+    // The queue's field list moved into APV_QUEUE_FIELDS() on 28 Aug 2026 so
+    // the knocked-back lane reads the same fields as the queue. Attachments
+    // must still be in it — dropped from there, the card silently stops
+    // showing the letter or form the agent produced, and Kevin approves blind.
+    expect(page).toMatch(/APV_QUEUE_FIELDS = \(\) => \[[^\]]*TF\.attachments/s);   // fetched
     expect(page).toMatch(/files: \(gf\(r,TF\.attachments\)\|\|\[\]\)/); // mapped
     expect(page).toMatch(/open before you decide/);                 // shown
     // Only real http(s) urls become links — same scheme guard as the email links.
