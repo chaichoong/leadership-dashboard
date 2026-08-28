@@ -110,6 +110,11 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
     justify-content:space-between;padding:10px 14px}
 .apv-group-count{font-size:var(--fs-sm);font-weight:var(--fw-bold);color:var(--warning)}
 .apv-group-sub{font-size:var(--fs-xs);color:var(--text-secondary);margin-left:8px}
+/* The evidence. Kevin asked for "a little bit better confirmation" that two
+   tasks really are one thing, so the reason is on the header, not in a log. */
+.apv-group-why{display:block;font-size:var(--fs-xs);color:var(--text-secondary);
+    margin-top:2px;font-family:var(--font-family-base)}
+.apv-group-why::before{content:'\2713\00a0';color:var(--warning);font-weight:var(--fw-bold)}
 .apv-group-actions{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
 .apv-group-label{font-size:var(--fs-xs);color:var(--text-secondary);font-weight:var(--fw-semibold)}
 .apv-group .apv-card{margin:0 10px 10px}
@@ -1213,15 +1218,47 @@ const APV_ALERT_RE = /apps script|cloudflare (kv|worker)|airtable automation|gma
 // genuine one-off decisions. Only a real cluster gets a header, and the header
 // is where the whole group can be closed in one verdict.
 function apvGroupTasks(rows){
-    const groups = [];
-    const byKey = {};
+    // TWO PASSES, and a match is either (28 Aug 2026). The exact key is the
+    // fast bucket and keeps every catch it had; dupeVerdict is the second pass
+    // over what it missed — seven real pairs on the live queue that morning,
+    // which is what Kevin was seeing twice.
+    //
+    // Union-find, because duplication is transitive: if A matches B on a phone
+    // number and B matches C on wording, all three are one matter. Grouping
+    // them pairwise would leave C on its own.
+    const parent = {}, reason = {};
+    const find = (x)=>{ while(parent[x] !== x){ parent[x] = parent[parent[x]]; x = parent[x]; } return x; };
+    rows.forEach(t=>{ parent[t.id] = t.id; });
+    for(let i = 0; i < rows.length; i++){
+        for(let j = i + 1; j < rows.length; j++){
+            const a = rows[i], b = rows[j];
+            // Fall back to the id so two NAMELESS tasks can never collide — an
+            // empty key would merge unrelated work into one verdict.
+            const ka = dupeTaskKey(a.name || '') || ('id:' + a.id);
+            const kb = dupeTaskKey(b.name || '') || ('id:' + b.id);
+            let why = '';
+            if(ka === kb) why = 'same subject';
+            else {
+                const v = dupeVerdict(a.name || '', b.name || '', 'group');
+                if(v.match) why = v.why;
+            }
+            if(!why) continue;
+            const ra = find(a.id), rb = find(b.id);
+            if(ra !== rb) parent[ra] = rb;
+            // Keep the FIRST reason found for the merged set: it is the one
+            // that put these two together, and a later pair's wording would
+            // describe a different edge of the same cluster.
+            const root = find(a.id);
+            if(!reason[root]) reason[root] = why;
+        }
+    }
+    const byRoot = {}, groups = [];
     rows.forEach(t=>{
-        // Fall back to the task id so two nameless tasks can never collide —
-        // an empty key would merge unrelated work into one verdict.
-        const key = dupeTaskKey(t.name || '') || ('id:' + t.id);
-        if(!byKey[key]){ byKey[key] = { key, rows: [] }; groups.push(byKey[key]); }
-        byKey[key].rows.push(t);
+        const r = find(t.id);
+        if(!byRoot[r]){ byRoot[r] = { key: r, rows: [], why: '' }; groups.push(byRoot[r]); }
+        byRoot[r].rows.push(t);
     });
+    groups.forEach(g=>{ g.why = reason[g.key] || ''; });
     return groups;
 }
 
@@ -1234,6 +1271,7 @@ function apvGroupedHtml(rows){
             <div class="apv-group-head">
                 <div>
                     <span class="apv-group-count">${g.rows.length} tasks, one thing</span>
+                    ${g.why ? `<span class="apv-group-why" title="Why these are grouped. Check it before you close them all — if it looks wrong, decide them one at a time instead.">${esc(g.why)}</span>` : ''}
                     <span class="apv-group-sub">${esc(agents.join(', ') || 'no agent recorded')}</span>
                 </div>
                 <div class="apv-group-actions">
@@ -2070,24 +2108,40 @@ function computeCheckLanes(){
     if(String(_openTasksState).indexOf('error') === 0){
         lanes.push({ lane:'Duplicates', error: String(_openTasksState).slice(7) });
     } else {
-        const buckets = {};
-        allOpenTasks.forEach(r=>{
-            const tmIds = linkIds(gf(r,TF.teamMember));
-            const owner = tmIds.find(id=>aiAgentIds.has(id));
-            if(!owner) return;
-            const key = dupeTaskKey(gf(r,TF.name));
-            if(!key) return;
-            (buckets[owner+'|'+key] = buckets[owner+'|'+key] || []).push(r);
-        });
+        // TWO FIXES, both 28 Aug 2026, after Kevin said he was still seeing the
+        // same issue written up twice.
+        //
+        // 1. It keyed on dupeTaskKey ALONE, so it reported clean while seven
+        //    real pairs sat in the gate. Now it runs the same two passes the
+        //    approvals queue does, through the same apvGroupTasks — one
+        //    grouping, so this lane and that queue can never disagree.
+        // 2. It bucketed by OWNER, which made a cross-agent duplicate
+        //    invisible BY DESIGN. Two agents doing the same job is worse than
+        //    one agent doing it twice, not better, so the owner is now
+        //    reported rather than used to separate.
+        const owned = allOpenTasks.filter(r=>
+            linkIds(gf(r,TF.teamMember)).some(id=>aiAgentIds.has(id)));
         const items = [];
-        Object.values(buckets).forEach(rows=>{
-            if(rows.length < 2) return;
-            const owner = linkIds(gf(rows[0],TF.teamMember)).find(id=>aiAgentIds.has(id));
+        apvGroupTasks(owned.map(r=>({ id:r.id, name: gf(r,TF.name)||'', _row:r })))
+          .forEach(g=>{
+            if(g.rows.length < 2) return;
+            const rows = g.rows.map(x=>x._row);
+            const owners = Array.from(new Set(rows
+                .map(r=>teamName(linkIds(gf(r,TF.teamMember)).find(id=>aiAgentIds.has(id))))
+                .filter(Boolean)));
+            const cross = owners.length > 1;
             items.push({
-                severity: 'warn',
+                severity: cross ? 'danger' : 'warn',
                 at: rows.map(x=>x.createdTime).sort()[0],
-                text: `${teamName(owner)||'An agent'} has ${rows.length} open tasks that look like the same job: "${gf(rows[0],TF.name)||'(Untitled)'}".`,
-                detail: 'One subject = one open task. Fold the updates into a single task and close the rest.',
+                text: cross
+                    ? `${owners.join(' and ')} both have an open task for the same job: "${gf(rows[0],TF.name)||'(Untitled)'}".`
+                    : `${owners[0]||'An agent'} has ${rows.length} open tasks that look like the same job: "${gf(rows[0],TF.name)||'(Untitled)'}".`,
+                // The evidence, same as the queue header. A duplicate Kevin
+                // cannot check is one he has to take on trust.
+                detail: (g.why ? `Grouped because ${g.why}. ` : '')
+                    + (cross
+                        ? 'Two agents are doing one job. Decide which owns it, then close the other.'
+                        : 'One subject = one open task. Fold the updates into a single task and close the rest.'),
             });
         });
         lanes.push({ lane:'Duplicates', items });
@@ -2152,9 +2206,113 @@ function dupeTaskKey(name){
             return w && !/^\d+$/.test(w) && !/^(?=(?:[^\d]*\d){3,})[a-z\d]+$/.test(w);
         });
     var distinctive = words.filter(function(w){ return DUPE_GENERIC.indexOf(w) === -1; });
-    var subject = distinctive.length ? distinctive.slice(0,2).sort().join(' ')
-                                     : words.join(' ').trim();
+    // AN ADDRESS SAYS WHERE, NOT WHICH (28 Aug 2026). Two slots is not many,
+    // and when the address leads the title it takes both: "18 Siddows Avenue —
+    // garden complaint" and "18 Siddows Avenue — rent arrears" both keyed to
+    // `avenue siddows`. Kevin has ~27 properties with many open tasks each.
+    // Place words go to the BACK of the queue for a slot rather than being
+    // dropped, so a task whose whole subject is an address still gets a key.
+    var places = placeTokens(words);
+    var ranked = distinctive.filter(function(w){ return places.indexOf(w) === -1; })
+                   .concat(distinctive.filter(function(w){ return places.indexOf(w) !== -1; }));
+    var subject = ranked.length ? ranked.slice(0,2).sort().join(' ')
+                                : words.join(' ').trim();
     return lane ? lane + '|' + subject : subject;
+}
+
+// ─── THE SECOND PASS: SAME MATTER, DIFFERENT WORDS (28 Aug 2026) ──────
+//
+// Kevin, working the queue that morning: "there's still a lot where I seem to
+// see some duplication, something referencing the same issue but with slightly
+// different information."
+//
+// Measured against the 55 tasks waiting: the key above made 43 cards and
+// missed SEVEN real pairs, each the same matter written two ways — "Sefton
+// Council HMO licence fee ... Viola St" vs "pay Sefton landlord licence fee
+// ... Viola Street", and the same SMS thread once in each lane.
+//
+// Three things the key alone cannot do: it keeps only two words, it deletes
+// every number (a phone number IS the identity), and it splits on the lane
+// prefix. This does not replace it — a match is either — and it carries a
+// plain-English reason, because a grouping Kevin cannot check is one he has to
+// take on trust. Mirrors dupe_signals / dupe_verdict in
+// scripts/create-agent-task.py; drift-tested in tests/agents-dupe-task-key.test.js.
+const DUPE_ACTION_WORDS = ['respond','reply','replies','replying','required','require',
+  'requires','send','sending','sent','provide','pay','paid','paying','call','calling',
+  'chase','chasing','contact','unpaid','outstanding','overdue','further','recovery',
+  'notice','notification','update','updates','incoming','new','important','info','information'];
+const DUPE_STREET_TYPES = ['street','st','road','rd','avenue','ave','lane','close','drive',
+  'way','court','place','crescent','grove','terrace','gardens','square','walk','hill',
+  'park','row','view','rise','mews'];
+const DUPE_MIN_SHARED = 2;   // one shared word is a coincidence ("emails")
+const DUPE_MIN_RATIO = 0.5;  // of the SHORTER task's distinctive words
+
+/** Tokens naming WHERE: the street type, the name before it, the town after.
+ *  `23 Viola Street Bootle` -> viola, street, bootle. */
+function placeTokens(words){
+    const out = [];
+    words.forEach(function(w,i){
+        if(DUPE_STREET_TYPES.indexOf(w) === -1) return;
+        [w, words[i-1], words[i+1]].forEach(function(x){
+            if(x && out.indexOf(x) === -1) out.push(x);
+        });
+    });
+    return out;
+}
+
+function dupeSignals(name){
+    let raw = String(name||''), lane = '';
+    const m = raw.match(/^([A-Za-z][A-Za-z ]*(?:\([^)]*\))?)\s*:\s*/);
+    if(m){ lane = m[1].toLowerCase().replace(/[^a-z0-9]+/g,' ').trim(); raw = raw.slice(m[0].length); }
+    const strong = [];
+    // A UK number in any shape these tasks carry: +447538631747, 447538631747,
+    // 07538631747. The last nine digits are the same in all three.
+    (raw.match(/(?:\+?44|0)?\d{9,12}/g) || []).forEach(function(d){
+        const k = 'tel:' + d.slice(-9);
+        if(strong.indexOf(k) === -1) strong.push(k);
+    });
+    (raw.match(/\b\d{4,}\b/g) || []).forEach(function(d){
+        // A phone number already claimed must not also count as a reference.
+        if(strong.indexOf('tel:' + d.slice(-9)) !== -1) return;
+        const k = 'num:' + d;
+        if(strong.indexOf(k) === -1) strong.push(k);
+    });
+    const words = raw.toLowerCase().replace(/[^a-z0-9\s]/g,' ').split(/\s+/)
+        .filter(function(w){
+            return w && !/^\d+$/.test(w) && !/^(?=(?:[^\d]*\d){3,})[a-z\d]+$/.test(w)
+                && DUPE_GENERIC.indexOf(w) === -1 && DUPE_ACTION_WORDS.indexOf(w) === -1;
+        });
+    return { lane: lane, strong: strong, words: words, places: placeTokens(words) };
+}
+
+/** {match, why} — is this the same matter, and how would Kevin check?
+ *  mode 'group' (display) ignores the lane; 'fold' (destructive) does not. */
+function dupeVerdict(nameA, nameB, mode){
+    const a = dupeSignals(nameA), b = dupeSignals(nameB);
+    // In fold mode the lane check comes FIRST, ahead of even a shared phone
+    // number: folding is destructive, and a maintenance job absorbed into a
+    // reply task is a real obligation lost. Grouping only shows.
+    if(mode === 'fold' && a.lane !== b.lane) return { match:false, why:'' };
+    const both = a.strong.filter(function(x){ return b.strong.indexOf(x) !== -1; }).sort();
+    if(both.length){
+        return { match:true, why:'same ' + both.map(function(x){
+            return x.indexOf('tel:') === 0 ? 'phone ' + x.slice(4) : 'reference ' + x.slice(4);
+        }).join(', ') };
+    }
+    if(!a.words.length || !b.words.length) return { match:false, why:'' };
+    const shared = a.words.filter(function(w){ return b.words.indexOf(w) !== -1; })
+                          .filter(function(w,i,arr){ return arr.indexOf(w) === i; }).sort();
+    // The threshold is judged on what is left once the ADDRESS is set aside.
+    // Counting address words would eventually fold a garden complaint into a
+    // rent arrears chase at the same house.
+    const places = a.places.concat(b.places);
+    const telling = shared.filter(function(w){ return places.indexOf(w) === -1; });
+    if(telling.length < DUPE_MIN_SHARED) return { match:false, why:'' };
+    const ratio = shared.length / Math.min(a.words.length, b.words.length);
+    if(ratio < DUPE_MIN_RATIO) return { match:false, why:'' };
+    const at = shared.filter(function(w){ return places.indexOf(w) !== -1; });
+    return { match:true, why:'both about ' + telling.join(', ')
+             + (at.length ? ' (at ' + at.join(', ') + ')' : '') };
 }
 
 function loadChecksAndRender(){
