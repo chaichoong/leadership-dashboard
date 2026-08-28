@@ -19,7 +19,7 @@
 
     // ── Page & SOP Version Registry ──
     const PAGE_REGISTRY = [
-        { id: 'overview',    name: 'Leadership Dashboard',           icon: '📊', pageVer: '2.92', sopFile: 'sop.html',                   sopVer: '2.9', standalone: 'index.html#overview' },
+        { id: 'overview',    name: 'Leadership Dashboard',           icon: '📊', pageVer: '2.93', sopFile: 'sop.html',                   sopVer: '2.93', standalone: 'index.html#overview' },
         { id: 'os-strategy', name: 'Objective & Strategy',           icon: '🎯', pageVer: '1.46', sopFile: 'os/strategy/sop.html',       sopVer: '1.1', standalone: 'os/strategy/index.html' },
         { id: 'tasks',       name: 'Tasks & Projects',   icon: '✅', pageVer: '1.157', sopFile: 'os/tasks/sop.html',             sopVer: '1.4', standalone: 'os/tasks/index.html' },
         { id: 'cfv',        name: 'CFVs',                          icon: '🚨', pageVer: '1.37', sopFile: 'sop-cfvs.html',               sopVer: '1.34', standalone: 'index.html#cfv' },
@@ -39,7 +39,7 @@
         // client tenant's shell; the adminOnly flag is the contract the Supabase
         // migration must honour. Replaced the Plan Builder entry 1 Aug 2026 on
         // Kevin's direction (os/business-plan-builder/ files remain on disk).
-        { id: 'kpi-library', name: 'KPI Library', icon: '📚', pageVer: '1.7', sopFile: '', sopVer: '1.0', standalone: 'index.html#kpi-library', adminOnly: true },
+        { id: 'kpi-library', name: 'KPI Library', icon: '📚', pageVer: '1.8', sopFile: '', sopVer: '1.0', standalone: 'index.html#kpi-library', adminOnly: true },
         // AI Agents (Leadership) — ADMIN ONLY, like KPI Library. Approvals,
         // checks and the workforce register in one place (Kevin's ruling,
         // 24 Aug 2026; moved out of the Systemisation page).
@@ -987,6 +987,22 @@
     const WAGES_TARGET_GBP = 1500;     // £1,500/month wages budget
     const CFV_TARGET_GBP = 1500;       // £1,500/month CFV allowance
     const CLEAR_PROFIT_TARGET = 10000; // £10,000/month clear profit after all variable costs
+
+    // AI labour saved (north-star card on the Leadership Dashboard).
+    // Rate: fully-loaded hourly cost of the office/admin work agents replace —
+    // UK admin median ~£15/hr (ONS ASHE Apr 2025; all-jobs FT median £19.67)
+    // plus employer NI (15% above the £5,000 threshold from Apr 2025) and 3%
+    // auto-enrolment pension ≈ £17.50. Kevin's call, 28 Aug 2026. Shown on the
+    // card next to every £ figure; change it here only.
+    const AI_LABOUR_RATE_GBP_PER_HOUR = 17.50;
+    // Earliest date any AI agent completed a task. Bounds the "since AI
+    // go-live" fetch so the card never pulls the full 7,300+ task history.
+    // Verified 28 Aug 2026: 0 agent-owned completions before this date,
+    // control 258 agent-owned completions all-time (same formula unbounded).
+    const AI_WORK_EPOCH = '2026-06-01';
+    // A full-time month at the UK-standard 37.5-hour week: 37.5 × (30/7).
+    // Used only for the "of a full-time person" framing on the card.
+    const FTE_HOURS_PER_30_DAYS = 160.7;
 
     const REC = {
         santander:         'rec3LiEiifomEHlvy',

@@ -1290,16 +1290,52 @@
         host.replaceWith(card);
     }
 
+    // Sister card: the same engine expressed as hours handed to AI and the
+    // labour cost that saved. Read by the overview sync-bar check, so a
+    // broken load shows up on the health bar rather than as a silently
+    // missing card.
+    let _aiSavedState = null;
+
+    function renderAiSavedCard(value, sub, detail, valueClass = '') {
+        const host = document.getElementById('aiSavedCard');
+        if (!host) return;
+        const tmp = document.createElement('div');
+        tmp.innerHTML = expandableCard('AI Time & Money Saved', value, sub, detail, valueClass);
+        const card = tmp.firstElementChild;
+        if (!card) return;
+        card.id = 'aiSavedCard';
+        host.replaceWith(card);
+    }
+
     async function loadAiShareKpi() {
         if (!document.getElementById('aiShareCard') || !PAT) return;
         try {
+            // One fetch feeds BOTH cards (share % and labour saved). The window
+            // reaches back to whichever is earlier: 90 days for the share card,
+            // or AI go-live for the saved-since-go-live totals. ~670 records
+            // today (~7 pages of 100); it grows with history, so move this to a
+            // monthly aggregate at the Supabase cutover before it gets heavy.
+            const cutoff = (days) => {
+                const d = new Date(); d.setDate(d.getDate() - days);
+                return d.toISOString().slice(0, 10);
+            };
+            const fetchFrom = AI_WORK_EPOCH < cutoff(90) ? AI_WORK_EPOCH : cutoff(90);
+            // IS_AFTER is strict, so fetch from the day BEFORE the boundary and
+            // let the client-side windows make the precise inclusive cut — a
+            // task stamped exactly midnight on the epoch day must not vanish
+            // from "since go-live" for ever.
+            const fetchBound = (() => {
+                const d = new Date(fetchFrom + 'T00:00:00Z');
+                d.setUTCDate(d.getUTCDate() - 1);
+                return d.toISOString().slice(0, 10);
+            })();
             const [tasks, team] = await Promise.all([
                 airtableFetch(TABLES.tasks, {
                     pageSize: 100,
                     'fields[]': [TASK_FIELDS.name, TASK_FIELDS.completionDate,
                                  TASK_FIELDS.estimatedMinutes, TASK_FIELDS.teamMember,
                                  TASK_FIELDS.approvalOutcome, TASK_FIELDS.sentForApprovalBy],
-                    filterByFormula: `AND({Status}='Completed', IS_AFTER({Completion Date}, DATEADD(TODAY(),-90,'days')))`,
+                    filterByFormula: `AND({Status}='Completed', IS_AFTER({Completion Date}, DATETIME_PARSE('${fetchBound}')))`,
                 }),
                 airtableFetch(TABLES.teamMembers, {
                     pageSize: 100,
@@ -1314,15 +1350,15 @@
                 renderAiShareCard('no data',
                     'nothing completed in the last 90 days, or the query is broken',
                     '<div class="od-breakdown-row"><span>No completed tasks came back. This card shows a number only when there is work to measure.</span></div>');
+                _aiSavedState = { noData: true };
+                renderAiSavedCard('no data',
+                    'nothing completed since AI go-live, or the query is broken',
+                    '<div class="od-breakdown-row"><span>No completed tasks came back. This card shows a saving only when there is work to measure.</span></div>');
                 return;
             }
 
             const agentIds = new Set(team.filter(r => (r.fields || {})[TEAM_MEMBER_FIELDS.isAgent]).map(r => r.id));
             const linkIds = (v) => Array.isArray(v) ? v.map(x => (x && typeof x === 'object') ? x.id : x) : [];
-            const cutoff = (days) => {
-                const d = new Date(); d.setDate(d.getDate() - days);
-                return d.toISOString().slice(0, 10);
-            };
 
             // Kevin's ruling, 9 Aug 2026: work an agent prepared and he approved
             // FIRST TIME is AI work — he only spent an approval on it. The rule cuts
@@ -1341,14 +1377,16 @@
                 return linkIds(f[TASK_FIELDS.teamMember]).some(id => agentIds.has(id));
             };
 
-            const window_ = (days) => {
-                const from = cutoff(days);
+            // A window is [fromStr, toStr): toStr lets the trend compare this
+            // 30 days against the 30 before it, and a null toStr runs to today.
+            const windowBetween = (fromStr, toStr) => {
                 let aiMin = 0, humanMin = 0, aiCount = 0, total = 0, withEstimate = 0;
                 let approvedFirstTime = 0, sentBack = 0, minorEdits = 0;
                 tasks.forEach(r => {
                     const f = r.fields || {};
                     const done = String(f[TASK_FIELDS.completionDate] || '').slice(0, 10);
-                    if (!done || done < from) return;
+                    if (!done || done < fromStr) return;
+                    if (toStr && done >= toStr) return;
                     total++;
                     const outcome = selName(f[TASK_FIELDS.approvalOutcome]);
                     if (outcome === 'Approved as-is') approvedFirstTime++;
@@ -1370,7 +1408,13 @@
                 };
             };
 
+            const window_ = (days) => windowBetween(cutoff(days), null);
             const m30 = window_(30), m90 = window_(90);
+            // The client-side epoch guard matters even though the fetch is
+            // bounded: it keeps "since go-live" honest if the fetch window is
+            // ever widened, and it is what the fixture tests exercise.
+            const mAll = windowBetween(AI_WORK_EPOCH, null);
+            const prior30 = windowBetween(cutoff(60), cutoff(30));
             const hrs = (m) => (m / 60).toFixed(1);
             const trend = m90.measured
                 ? (m30.share >= m90.share ? 'text-green' : 'text-amber')
@@ -1393,7 +1437,46 @@
             renderAiShareCard(`${m30.share.toFixed(1)}%`,
                 `last 30 days, by time | ${hrs(m30.aiMin)} of ${hrs(m30.measured)} hrs`,
                 detail, trend);
-        } catch (e) { console.warn('AI share KPI load failed:', e); }
+
+            // ── AI Time & Money Saved: hours handed to AI and the labour cost
+            // that saved, valued at the fully-loaded rate in config.js. Whole
+            // pounds on purpose: pence on an estimate is false precision.
+            const gbpOf = (min) => '£' + Math.round((min / 60) * AI_LABOUR_RATE_GBP_PER_HOUR).toLocaleString('en-GB');
+            const goLiveLabel = new Date(AI_WORK_EPOCH + 'T00:00:00Z').toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' });
+            const fte = (m30.aiMin / 60) / FTE_HOURS_PER_30_DAYS;
+            const fteText = m30.aiMin === 0 ? 'none yet'
+                : fte < 0.05 ? 'under 0.1 of a full-time person'
+                : `${fte.toFixed(1)} of a full-time person`;
+            const grew = m30.aiMin >= prior30.aiMin;
+            const savedTrendClass = m30.aiMin === 0 ? '' : grew ? 'text-green' : 'text-amber';
+            const savedDetail = `
+                <div class="od-breakdown-row"><span>AI hours (last 30 days)</span><span>${hrs(m30.aiMin)}</span></div>
+                <div class="od-breakdown-row"><span>Labour cost saved (last 30 days)</span><span>${gbpOf(m30.aiMin)}</span></div>
+                <div class="od-breakdown-row" style="border-top:1px solid var(--border-default);margin-top:4px;padding-top:4px"><span>AI hours since go-live (${goLiveLabel})</span><span>${hrs(mAll.aiMin)}</span></div>
+                <div class="od-breakdown-row"><span>Labour cost saved since go-live</span><span>${gbpOf(mAll.aiMin)}</span></div>
+                <div class="od-breakdown-row" style="border-top:1px solid var(--border-default);margin-top:4px;padding-top:4px"><span>Doing the work of</span><span>${fteText}</span></div>
+                <div class="od-breakdown-row"><span>vs the 30 days before</span><span class="${savedTrendClass}">${gbpOf(prior30.aiMin)} &rarr; ${gbpOf(m30.aiMin)}</span></div>
+                <div class="od-breakdown-row"><span>Rate used</span><span>£${AI_LABOUR_RATE_GBP_PER_HOUR.toFixed(2)}/hr, office admin wage + employer NI &amp; pension</span></div>
+                <div class="od-breakdown-row"><span>What counts as AI work</span><span>same rules as the Work Done by AI card</span></div>
+                ${lowCoverage ? `<div class="od-breakdown-row"><span class="text-amber">Under 80% of completed tasks have a time estimate, so this figure is shakier than usual. The nightly task sweep fills estimates in.</span></div>` : ''}
+                <div style="margin-top:8px"><button class="od-btn-secondary od-btn-sm" onclick="event.stopPropagation();switchTab('tasks')">Open Tasks &rarr; AI Agents</button></div>`;
+
+            _aiSavedState = {
+                hours30: m30.aiMin / 60,
+                saved30: (m30.aiMin / 60) * AI_LABOUR_RATE_GBP_PER_HOUR,
+                hoursAll: mAll.aiMin / 60,
+                savedAll: (mAll.aiMin / 60) * AI_LABOUR_RATE_GBP_PER_HOUR,
+                coverage: m30.coverage,
+            };
+            renderAiSavedCard(gbpOf(m30.aiMin),
+                `saved in 30 days | ${hrs(m30.aiMin)} hrs by AI | ${gbpOf(mAll.aiMin)} since go-live`,
+                savedDetail, savedTrendClass);
+        } catch (e) {
+            console.warn('AI share KPI load failed:', e);
+            // A failed refresh must not leave the health check reporting the
+            // previous run's numbers as a pass.
+            _aiSavedState = { error: true };
+        }
     }
 
     function renderDashboard(accounts, costs, tenancies, transactions, rentalUnits, tenants) {
@@ -1835,6 +1918,7 @@
             <div id="agentKpiCard"></div>
             <div id="agentApprovalCard"></div>
             <div id="aiShareCard"></div>
+            <div id="aiSavedCard"></div>
         `;
         loadAgentKpi();
         loadAgentApprovalKpi();
@@ -2110,6 +2194,14 @@
                             const computed = auto.filter(p => p.kpiCurrent != null && p.kpiCurrent !== 0);
                             if (auto.length === 0) return { status: 'pass', detail: 'No automated-KPI projects — nothing to compute' };
                             return { status: 'pass', detail: `${computed.length}/${auto.length} automated KPIs have a current value` };
+                        }
+                    },
+                    {
+                        name: 'AI Time & Money Saved card computed', kind: 'automation', run: () => {
+                            if (!_aiSavedState) return { status: 'warn', detail: 'Card not yet loaded (loads in background)' };
+                            if (_aiSavedState.error) return { status: 'warn', detail: 'Last load failed — the card may be stale. Refresh to retry.' };
+                            if (_aiSavedState.noData) return { status: 'warn', detail: 'No completed tasks came back — the card shows "no data" rather than a fake £0' };
+                            return { status: 'pass', detail: `${_aiSavedState.hours30.toFixed(1)} hrs / £${Math.round(_aiSavedState.saved30).toLocaleString('en-GB')} saved in 30 days · £${Math.round(_aiSavedState.savedAll).toLocaleString('en-GB')} since AI go-live` };
                         }
                     },
                     {

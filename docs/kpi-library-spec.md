@@ -60,6 +60,8 @@ Work
 12. **Completed tasks (optionally name-matched)** — T7. *Live twice.*
 13. **Active / overdue task counts** — T3.
 14. **Team utilisation %** — T4: allocated hours ÷ capacity. BLOCKER: capacity lives in localStorage today; must move to a per-tenant settings table first.
+14a. **Work done by AI %** — T4: estimated minutes of AI work ÷ estimated minutes of all work, on tasks completed in the window. AI work = agent on Team Member OR raised by an agent and approved first time; NEVER work the owner sent back. Publish estimate coverage beside it. *Live.* (Shipped 9 Aug 2026 in js/kpi-library.js; recorded here 28 Aug 2026 — this doc had fallen behind the canonical array.)
+14b. **AI hours + labour cost saved** — T5 on the same engine: AI minutes × a fully-loaded hourly wage rate, as a rolling 30 days and a since-AI-go-live total, plus a full-time-equivalent framing. Rate and go-live date become per-tenant settings (Kevin's build: £17.50/hr, 1 Jun 2026). *Live.*
 
 Sales and growth
 15. **Prospects contacted** — T6: status at or beyond the contact stage. *Live.*
