@@ -184,6 +184,55 @@ describe('agent-browser upload step (real Playwright)', () => {
   }, 60000);
 });
 
+// Adobe's recipient box turns typed text into a recipient CHIP only on Enter.
+// Without that, the address is still loose text in a box when Send is pressed,
+// and the agreement goes nowhere with no error.
+describe('press step', () => {
+  it('commits a value that only lands on Enter', async () => {
+    expect(chromium).toBeTruthy();
+    const ctx = await chromium.launchPersistentContext(join(dir, 'profile5'), { headless: true });
+    try {
+      const page = ctx.pages()[0] || await ctx.newPage();
+      await page.setContent(`<input id="who" placeholder="Enter email..."><ul id="chips"></ul>
+        <script>
+        document.getElementById('who').addEventListener('keydown', e => {
+          if (e.key !== 'Enter') return;
+          const li = document.createElement('li');
+          li.textContent = e.target.value; document.getElementById('chips').appendChild(li);
+          e.target.value = '';
+        });
+        </script>`);
+
+      await mod.runSteps(page, [
+        { do: 'fill', selector: '#who', value: 'kevin@example.com' },
+      ], false);
+      expect(await page.locator('#chips li').count(),
+        'fill alone should NOT commit the recipient').toBe(0);
+
+      await mod.runSteps(page, [
+        { do: 'press', selector: '#who', key: 'Enter' },
+      ], false);
+      expect(await page.locator('#chips li').first().textContent()).toBe('kevin@example.com');
+    } finally {
+      await ctx.close();
+    }
+  }, 60000);
+
+  it('will not press keys into a password field', async () => {
+    expect(chromium).toBeTruthy();
+    const ctx = await chromium.launchPersistentContext(join(dir, 'profile6'), { headless: true });
+    try {
+      const page = ctx.pages()[0] || await ctx.newPage();
+      await page.setContent('<input id="pw" type="password">');
+      await expect(mod.runSteps(page, [
+        { do: 'press', selector: '#pw', key: 'Enter' },
+      ], false)).rejects.toThrow(/password field/i);
+    } finally {
+      await ctx.close();
+    }
+  }, 60000);
+});
+
 describe('Adobe hosts on the allowlist', () => {
   it('allows the signing-link host and the app host', () => {
     expect(mod.hostAllowed('https://na1.documents.adobe.com/public/esign?tsid=x')).toBe(true);
