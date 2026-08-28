@@ -236,12 +236,16 @@ def decide(job, cfg, ref, *, due, late, is_stale, opted_in, has_label,
     in, and a decision function that needs a machine in that state to be tested
     is a decision function that never gets tested.
     """
+    # THE ONLY THREE SILENCES. Each means the job has nothing outstanding: it
+    # was never due, it already ran, or it never deferred. They are named
+    # individually rather than sharing one "skip" so that report() can
+    # allow-list silence instead of guessing at it — see SILENT_ACTIONS.
     if due is None:
-        return "skip", "no scheduled occurrence in the lookback window"
+        return "skip-not-due", "no scheduled occurrence in the lookback window"
     if succeeded:
-        return "skip", "already completed since %s" % due.strftime("%H:%M")
+        return "skip-succeeded", "already completed since %s" % due.strftime("%H:%M")
     if defer_reason is None:
-        return "skip", "did not defer since %s — nothing to retry" % due.strftime("%H:%M")
+        return "skip-not-deferred", "did not defer since %s — nothing to retry" % due.strftime("%H:%M")
 
     # From here the job DID defer and has not run. Everything below is a reason
     # we cannot help, and every one of them is reported rather than dropped.
@@ -260,12 +264,24 @@ def decide(job, cfg, ref, *, due, late, is_stale, opted_in, has_label,
     if not has_label:
         return "error", ("opted in to retry but no launchd label could be resolved; "
                          "it can never be re-fired and this run would otherwise look clean")
+    # WAITING, NOT SILENCE. Both of these were "skip" until 28 Aug 2026, and
+    # report() prints no line for a skip — so on a morning when the queue
+    # happened to be busy, three brain jobs that had deferred overnight and
+    # still had not run vanished from the report and it printed "nothing had
+    # deferred — this is a real all-clear". Observed live that morning:
+    # inbound-triage held the lock, feed-brain was 40 minutes from losing the
+    # day, and the sweep built to prevent exactly that said everything was
+    # fine. Whether we can help is not the question. Whether the job ran is.
     if attempts >= MAX_PER_DAY:
-        return "skip", "already re-fired %d times today (cap %d)" % (attempts, MAX_PER_DAY)
+        return "waiting", ("deferred (%s) and already re-fired %d times today "
+                           "(cap %d); it has still not run"
+                           % (defer_reason, attempts, MAX_PER_DAY))
     if not ready:
         return "blocked", "still blocked: %s" % ready_why
     if lock_holder:
-        return "skip", "queue lock held by %s — will try again next hour" % lock_holder
+        return "waiting", ("deferred (%s); ready to re-fire but the queue lock is "
+                           "held by %s, so it has still not run"
+                           % (defer_reason, lock_holder))
     return "retry", "deferred (%s); blocker has cleared, re-firing" % defer_reason
 
 
@@ -339,6 +355,23 @@ def sweep(dry_run=False, ref=None):
     return results
 
 
+# The ONLY actions that may pass without a line in the report. Each means the
+# job has nothing outstanding. Every other action — including one added to
+# decide() later — is printed, because a job that deferred and has not run must
+# never be represented by silence. Inverting this was the 28 Aug 2026 fix:
+# "queue lock is busy" used to be a bare "skip", and a skip printed nothing.
+SILENT_ACTIONS = ("skip-not-due", "skip-succeeded", "skip-not-deferred")
+
+ACTION_LABELS = {
+    "retry": "RE-FIRED",
+    "missed": "MISSED",
+    "blocked": "BLOCKED",
+    "waiting": "WAITING",
+    "gap": "NOT WIRED",
+    "error": "ERROR",
+}
+
+
 def report(results, as_json=False):
     if as_json:
         print(json.dumps(results, indent=2))
@@ -349,28 +382,33 @@ def report(results, as_json=False):
     blocked = [r for r in results if r["action"] == "blocked"]
     gaps = [r for r in results if r["action"] == "gap"]
     missed = [r for r in results if r["action"] == "missed"]
+    waiting = [r for r in results if r["action"] == "waiting"]
     errors = [r for r in results if r["action"] == "error"]
+    # Anything this run did not recognise. An action added to decide() without
+    # a line here would otherwise be as invisible as the old silent skip was.
+    known = SILENT_ACTIONS + tuple(ACTION_LABELS)
+    unknown = [r for r in results if r["action"] not in known]
 
     if not as_json:
         # ABSENCE, NOT SUCCESSES. A list of what ran cannot tell you what did
         # not, and what did not is the whole point of this job.
         print("retry-deferred: %d re-fired, %d lost the day, %d still blocked, "
-              "%d not opted in, %d error(s)"
-              % (len(retried), len(missed), len(blocked), len(gaps), len(errors)))
-        for r in retried:
-            print("  RE-FIRED  %-20s %s" % (r["job"], r["reason"]))
-        for r in missed:
-            print("  MISSED    %-20s %s" % (r["job"], r["reason"]))
-        for r in blocked:
-            print("  BLOCKED   %-20s %s" % (r["job"], r["reason"]))
-        for r in gaps:
-            print("  NOT WIRED %-20s %s" % (r["job"], r["reason"]))
-        for r in errors:
-            print("  ERROR     %-20s %s" % (r["job"], r["reason"]))
-        if not (retried or missed or blocked or gaps or errors):
+              "%d waiting, %d not opted in, %d error(s)"
+              % (len(retried), len(missed), len(blocked), len(waiting),
+                 len(gaps), len(errors)))
+        # SILENCE IS THE ALLOW-LIST, not the default. Every result whose action
+        # is not one of the three "nothing outstanding" states gets a line,
+        # including one this function has never heard of.
+        for r in results:
+            if r["action"] in SILENT_ACTIONS:
+                continue
+            print("  %-9s %-20s %s"
+                  % (ACTION_LABELS.get(r["action"], r["action"].upper()),
+                     r["job"], r["reason"]))
+        if not any(r["action"] not in SILENT_ACTIONS for r in results):
             print("  nothing had deferred — this is a real all-clear, "
                   "read from %d schedule entries" % len(results))
-    return 1 if errors else 0
+    return 1 if (errors or unknown) else 0
 
 
 # ---------------------------------------------------------------------------
@@ -390,24 +428,49 @@ def selftest():
 
     cases = [
         ("deferred, clear, in window -> retry", d(), "retry"),
-        ("already succeeded -> skip",           d(succeeded=True), "skip"),
-        ("never deferred -> skip",              d(defer_reason=None), "skip"),
+        ("already succeeded -> silent",         d(succeeded=True), "skip-succeeded"),
+        ("never deferred -> silent",            d(defer_reason=None), "skip-not-deferred"),
         ("not opted in -> gap (reported)",      d(opted_in=False), "gap"),
         ("past its window -> missed (NOT a clean skip)", d(is_stale=True), "missed"),
         ("no launchd label -> error",           d(has_label=False), "error"),
-        ("cap reached -> skip",                 d(attempts=MAX_PER_DAY), "skip"),
+        # These two were "skip" until 28 Aug 2026, and report() prints nothing
+        # for a skip. Both mean the job deferred and has STILL NOT RUN, so both
+        # must be visible or the sweep prints an all-clear over an unfed brain.
+        ("cap reached -> waiting (reported)",   d(attempts=MAX_PER_DAY), "waiting"),
         ("still blocked -> blocked",            d(ready=False, ready_why="drive down"), "blocked"),
-        ("lock held -> skip",                   d(lock_holder="daily-ops"), "skip"),
-        ("no occurrence -> skip",               d(due=None), "skip"),
+        ("lock held -> waiting (reported)",     d(lock_holder="daily-ops"), "waiting"),
+        ("no occurrence -> silent",             d(due=None), "skip-not-due"),
         # Order matters: a job that never deferred must not be reported as a gap
         # just because it is not opted in, or every job on the Mac becomes noise.
-        ("no defer + not opted in -> skip",     d(defer_reason=None, opted_in=False), "skip"),
+        ("no defer + not opted in -> silent",   d(defer_reason=None, opted_in=False),
+         "skip-not-deferred"),
     ]
     failed = [(n, got, want) for n, got, want in cases if got != want]
     for n, got, want in cases:
         print("%-4s %s (got %s)" % ("PASS" if got == want else "FAIL", n, got))
+
+    # THE INVARIANT, not just the table. Once a job has deferred and has not
+    # succeeded, NO combination of the remaining inputs may return a silent
+    # action — that is what "queue lock held" quietly did for three brain jobs
+    # on 28 Aug 2026. Enumerated rather than listed, so a branch added later
+    # is covered by a case nobody remembered to write.
+    silent_leaks = []
+    for over in ({}, {"opted_in": False}, {"is_stale": True}, {"has_label": False},
+                 {"attempts": MAX_PER_DAY}, {"ready": False, "ready_why": "drive down"},
+                 {"lock_holder": "daily-ops"},
+                 {"attempts": MAX_PER_DAY, "lock_holder": "daily-ops"},
+                 {"is_stale": True, "lock_holder": "daily-ops"},
+                 {"ready": False, "ready_why": "x", "lock_holder": "daily-ops"}):
+        got = d(**over)
+        if got in SILENT_ACTIONS:
+            silent_leaks.append((over, got))
+    for over, got in silent_leaks:
+        print("FAIL a deferred job went SILENT as %s with %s" % (got, over))
+    print("%-4s a job that deferred is never silent (%d input combinations)"
+          % ("FAIL" if silent_leaks else "PASS", 10))
+
     print("\n%d/%d decision cases pass." % (len(cases) - len(failed), len(cases)))
-    return 1 if failed else 0
+    return 1 if (failed or silent_leaks) else 0
 
 
 def main():

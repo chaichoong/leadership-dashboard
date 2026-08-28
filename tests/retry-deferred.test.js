@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { execFileSync } from 'child_process';
+import { execFileSync, spawnSync } from 'child_process';
 import { readFileSync } from 'fs';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
@@ -62,6 +62,75 @@ describe('BACK-TEST: the two bugs this sweep\'s own dry run caught', () => {
     const src = read('scripts/retry-deferred.py');
     expect(src).toMatch(/def _aware\(dt\)/);
     expect(src).toMatch(/_aware\(due\)/);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// THE FALSE ALL-CLEAR (28 Aug 2026).
+//
+// The brain jobs deferred overnight with Drive unreadable from a sleeping Mac.
+// By morning Drive was readable and they were ready to re-fire — but another
+// job held the queue lock, and "lock held" returned a bare "skip". report()
+// prints no line for a skip and counted none of them, so the sweep printed:
+//
+//     retry-deferred: 0 re-fired, 0 lost the day, 0 still blocked, ...
+//       nothing had deferred — this is a real all-clear
+//
+// while feed-brain sat 40 minutes from losing the day. The sweep built to end
+// exactly this failure was announcing it as success. Observed live that
+// morning, then reproduced by calling decide() with only lock_holder changed.
+//
+// The fix inverts the default: silence is an ALLOW-LIST of three states that
+// each mean "nothing outstanding". Everything else is printed, including an
+// action this code has never seen.
+// ─────────────────────────────────────────────────────────────────────────────
+describe('a job that did not run is never represented by silence', () => {
+  function report(results) {
+    const py = `
+import importlib.util, json, sys
+spec = importlib.util.spec_from_file_location('rd', ${JSON.stringify(SWEEP)})
+rd = importlib.util.module_from_spec(spec); spec.loader.exec_module(rd)
+sys.exit(rd.report(json.loads(sys.argv[1])))
+`;
+    const r = spawnSync('python3', ['-c', py, JSON.stringify(results)], { encoding: 'utf8' });
+    return { out: r.stdout || '', code: r.status };
+  }
+
+  it('a deferred job waiting on the queue is NAMED, never silent', () => {
+    const { out } = report([{
+      job: 'feed-brain', action: 'waiting',
+      reason: 'deferred (drive unreadable); ready to re-fire but the queue lock is held by inbound-triage',
+    }]);
+    expect(out).toMatch(/WAITING\s+feed-brain/);
+    expect(out).toMatch(/1 waiting/);
+    // The exact sentence that appeared over three un-run brain jobs.
+    expect(out).not.toMatch(/real all-clear/);
+  });
+
+  it('the cap-reached case is reported too — it also means the job never ran', () => {
+    const { out } = report([{ job: 'publish-brain', action: 'waiting', reason: 'already re-fired 3 times' }]);
+    expect(out).toMatch(/WAITING\s+publish-brain/);
+    expect(out).not.toMatch(/real all-clear/);
+  });
+
+  it('only the three "nothing outstanding" states may pass in silence', () => {
+    const { out } = report([
+      { job: 'a', action: 'skip-not-due', reason: 'never due' },
+      { job: 'b', action: 'skip-succeeded', reason: 'already ran' },
+      { job: 'c', action: 'skip-not-deferred', reason: 'did not defer' },
+    ]);
+    // These three genuinely have nothing outstanding, so the all-clear is real.
+    expect(out).toMatch(/real all-clear/);
+    expect(out).not.toMatch(/WAITING|BLOCKED|MISSED/);
+  });
+
+  it('an action nobody wrote a label for is still printed, and fails the run', () => {
+    // The property that keeps this fixed: a branch added to decide() later is
+    // visible by default rather than silent by default.
+    const { out, code } = report([{ job: 'z', action: 'invented-today', reason: 'new branch' }]);
+    expect(out).toMatch(/INVENTED-TODAY\s+z/);
+    expect(out).not.toMatch(/real all-clear/);
+    expect(code).toBe(1);
   });
 });
 
