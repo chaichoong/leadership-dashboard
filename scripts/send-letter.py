@@ -83,6 +83,18 @@ import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
 
+# The letter format lives in ONE place, shared with agent-dispatch.py's submit
+# validation and with send-email.py. Two copies of this parser is exactly the
+# bug agent_email_format.py was written to end: the submit gate and the carry-out
+# path disagreeing about what a valid Correspondence output is, so an approved
+# action could not be carried out.
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from agent_email_format import (  # noqa: E402
+    EmailFormatError,
+    parse_post_output,
+    DELIVERY_PRODUCTS,
+)
+
 BASE_ID = "appnqjDpqDniH3IRl"
 TASKS = "tblqB8b22hKBL4PF1"
 
@@ -116,8 +128,6 @@ DOC_MAX_BYTES = 20 * 1024 * 1024
 # accepted by the API but is NOT confirmed available for UK destinations — the
 # UK delivery options page lists 1st and 2nd class only. `prepare` prints the
 # price Pingen quotes, which is where an unavailable product shows up.
-DELIVERY_PRODUCTS = ("cheap", "fast", "bulk", "premium", "registered")
-
 # Pingen grades every uploaded letter itself. Measured against the live API on
 # 28 Aug 2026 by uploading the same address block at three heights:
 #
@@ -215,58 +225,10 @@ def org_id():
 
 # ─── The format ──────────────────────────────────────────────────────────
 
-class LetterFormatError(Exception):
-    pass
-
-
-TIER1_BANNER = re.compile(r"^\s*(?:\*\*)?TIER\s*1\b.*?$\n+", re.I | re.M)
-
-
 def parse_letter_output(output):
-    """Approved Agent Output → {address, document, delivery, notes}.
-
-    Strict on purpose. A malformed block is a refusal, never a guess, because
-    guessing here means guessing where a piece of paper gets posted.
-    """
-    text = TIER1_BANNER.sub("", output or "", count=1).strip()
-    if not text:
-        raise LetterFormatError("has an empty Agent Output")
-
-    head, _, notes = text.partition("\n---")
-    lines = [ln.rstrip() for ln in head.splitlines()]
-
-    if not lines or lines[0].strip().upper() != "POST:":
-        raise LetterFormatError(
-            "does not start with a 'POST:' line. A postal letter declares its "
-            "recipient address under POST:; an email uses TO:")
-
-    address, document, delivery = [], None, "cheap"
-    for ln in lines[1:]:
-        s = ln.strip()
-        if s.upper().startswith("DOCUMENT:"):
-            document = s.split(":", 1)[1].strip()
-        elif s.upper().startswith("DELIVERY:"):
-            delivery = s.split(":", 1)[1].strip().lower()
-        elif s:
-            if document is not None:
-                raise LetterFormatError(
-                    f"has an address line {s!r} AFTER the DOCUMENT: line. "
-                    "The whole address must sit directly under POST:")
-            address.append(s)
-
-    if len(address) < 3:
-        raise LetterFormatError(
-            f"has only {len(address)} address line(s) under POST:. A postal "
-            "address needs at least a name, a street or office, and a postcode")
-    if not document:
-        raise LetterFormatError("has no 'DOCUMENT:' line naming the PDF to post")
-    if delivery not in DELIVERY_PRODUCTS:
-        raise LetterFormatError(
-            f"has DELIVERY: {delivery!r}, which is not one of "
-            f"{', '.join(DELIVERY_PRODUCTS)}")
-
-    return {"address": address, "document": document,
-            "delivery": delivery, "notes": notes.strip()}
+    """Thin wrapper over the shared contract, so this path and the submit gate
+    can never disagree about what a postal letter is."""
+    return parse_post_output(output)
 
 
 def normalise_address(value):
@@ -355,7 +317,7 @@ def load_approved(task_id, require_approval=True):
 
     try:
         parsed = parse_letter_output(output)
-    except LetterFormatError as exc:
+    except EmailFormatError as exc:
         sys.exit(f"ERROR: task {task_id} {exc}. "
                  "See the format in this script's docstring.")
     parsed.update({"taskName": name, "outcome": outcome})
@@ -439,7 +401,7 @@ def cmd_preview(args):
         "document": os.path.basename(real),
         "documentBytes": size,
         "delivery": letter["delivery"],
-        "notes": letter["notes"],
+        "notes": letter["body"],
     }, indent=2))
     print("\nPreview only. Nothing uploaded, nothing posted.")
 
@@ -582,7 +544,7 @@ def cmd_selftest(args):
         try:
             parse_letter_output(text)
             return False
-        except LetterFormatError:
+        except EmailFormatError:
             return True
 
     check("refuses an email TO: block",
