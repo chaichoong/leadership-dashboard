@@ -370,6 +370,36 @@ HEADER = """// ═════════════════════�
 """
 
 
+def previous_tools(path):
+    """The tool set in the file we are about to replace, or None if unreadable.
+
+    Compared WITHOUT generatedAt: the timestamp changes every run, so a naive
+    file diff says "changed" every night and means nothing. What Kevin needs to
+    know is when a tool actually appeared, vanished or changed authorisation
+    state, because that is the thing worth shipping to the page.
+    """
+    if not os.path.exists(path):
+        return None
+    try:
+        with open(path) as fh:
+            body = fh.read()
+        start = body.index("var MCP_TOOLS = ") + len("var MCP_TOOLS = ")
+        data = json.loads(body[start:].rstrip().rstrip(";\n").rstrip(";"))
+    except (ValueError, OSError):
+        return None
+    return {
+        (t["name"], t.get("scope", ""), t["auth"], t["agents"])
+        for g in data.get("groups", []) for t in g.get("tools", [])
+    }
+
+
+def current_tools(data):
+    return {
+        (t["name"], t.get("scope", ""), t["auth"], t["agents"])
+        for g in data["groups"] for t in g["tools"]
+    }
+
+
 def main(argv=None):
     argv = sys.argv[1:] if argv is None else argv
     # --out exists so the control tests can exercise a failing read without
@@ -398,6 +428,9 @@ def main(argv=None):
             print(f"FAIL: refusing to write, output contains '{marker}'", file=sys.stderr)
             return 1
 
+    before = previous_tools(out)
+    after = current_tools(data)
+
     with open(out, "w") as fh:
         fh.write(body)
     c = data["counts"]
@@ -407,6 +440,25 @@ def main(argv=None):
     print(f"  unauthorised: {c['needsAuth']}")
     if data["healthNote"]:
         print(f"  note: {data['healthNote']}")
+
+    # The page is served from GitHub Pages, so regenerating the file on this Mac
+    # does NOT update what Kevin looks at — that needs a commit. No scheduled job
+    # in this repo pushes to main on its own, so instead of pretending, this says
+    # loudly when there is something worth shipping. The 11am Job Digest carries
+    # it. Silence means the estate genuinely has not moved.
+    if before is None:
+        print("CHANGED: no previous list to compare against (first run).")
+    elif before != after:
+        gone = sorted(n for (n, _s, _a, _g) in before - after)
+        new_ = sorted(n for (n, _s, _a, _g) in after - before)
+        print("CHANGED: the tools list has moved since it was last committed.")
+        if new_:
+            print(f"  appeared or changed state: {', '.join(new_)}")
+        if gone:
+            print(f"  gone or changed state: {', '.join(gone)}")
+        print("  commit js/mcp-tools-data.js to update the AI Agents page.")
+    else:
+        print("No change since the committed list.")
     return 0
 
 

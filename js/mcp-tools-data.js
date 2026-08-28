@@ -13,7 +13,7 @@
 // Guarded by tests/mcp-inventory.test.js.
 
 var MCP_TOOLS = {
-  "generatedAt": "2026-08-28T09:12:54Z",
+  "generatedAt": "2026-08-28T09:33:29Z",
   "generator": "scripts/generate-mcp-inventory.py",
   "healthNote": "",
   "agentAllowlistSize": 9,

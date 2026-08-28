@@ -168,6 +168,39 @@ describe('generator refuses to write on a bad read', () => {
         expect(read('js/mcp-tools-data.js')).toBe(before);
     });
 
+
+    it('says when the list has actually moved, and stays quiet when it has not',
+        () => {
+        // The page is served from GitHub Pages, so regenerating on the Mac does
+        // not update what Kevin sees — that needs a commit. The generator's job
+        // is therefore to say loudly when there is something worth shipping.
+        // A comparison that ignored the timestamp incorrectly would either cry
+        // "changed" every single night (noise nobody reads) or never at all.
+        const home = mkdtempSync(join(tmpdir(), 'mcp-chg-'));
+        writeFileSync(join(home, '.claude.json'), JSON.stringify(goodJson));
+        execFileSync('mkdir', ['-p', join(home, '.claude')]);
+        writeFileSync(join(home, '.claude', 'mcp-needs-auth-cache.json'),
+            JSON.stringify(goodAuth));
+        const out = join(home, 'out.js');
+        const run = () => execFileSync('python3', [script, '--out', out],
+            { env: { ...process.env, HOME: home }, encoding: 'utf8' });
+
+        expect(run()).toContain('first run');
+
+        // Same inputs, new timestamp: must NOT report a change.
+        expect(run()).toContain('No change since the committed list');
+
+        // Drop a tool from the previous file: must name it.
+        const prev = readFileSync(out, 'utf8');
+        const i = prev.indexOf('var MCP_TOOLS = ') + 'var MCP_TOOLS = '.length;
+        const parsed = JSON.parse(prev.slice(i).trim().replace(/;$/, ''));
+        const dropped = parsed.groups.find((g) => g.tools.length).tools.shift().name;
+        writeFileSync(out, prev.slice(0, i) + JSON.stringify(parsed) + ';\n');
+        const after = run();
+        expect(after).toContain('CHANGED');
+        expect(after).toContain(dropped);
+    });
+
     it('control: the same inputs unbroken do NOT fail', () => {
         // Without this, all three checks above would pass even if the generator
         // were simply broken and always exited 1.
