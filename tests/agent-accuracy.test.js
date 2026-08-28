@@ -11,12 +11,19 @@ const { computeAgentAccuracy, agentAutonomyRecommendations, THRESHOLD, countAgen
 
 // Seeded decisions. `at` counts DOWN so index 0 is the newest, which is what
 // the "last 10" window depends on.
+// One decision every TWO DAYS, newest first. The spacing is load-bearing:
+// since 28 Aug 2026 the bar also requires the sample to span 30 days (Kevin's
+// ruling, after the first agent to clear it turned out to have done all 26 of
+// its decisions inside three days). At one an hour these fixtures spanned less
+// than a day and would fail the bar for a reason none of them is testing.
+// The 30-day rule itself is covered by tests/autonomy-30-days.test.js.
+const SEED_STEP_MS = 2 * 24 * 3600e3;
 function seed(agentId, taskType, outcomes) {
   return outcomes.map((outcome, i) => ({
     agentId,
     taskType,
     outcome,
-    at: new Date(Date.UTC(2026, 6, 31, 12, 0, 0) - i * 3600e3).toISOString(),
+    at: new Date(Date.UTC(2026, 6, 31, 12, 0, 0) - i * SEED_STEP_MS).toISOString(),
   }));
 }
 const APPROVE = 'Approved as-is';
@@ -159,7 +166,10 @@ const { relevanceScore, isRelevanceFailure, RELEVANCE_REASONS, QUALITY_REASON } 
   require(resolve(ROOT, 'js/agent-accuracy.js'));
 
 describe('a rejection is not automatically a mark against the writer', () => {
-  const dated = (i) => `2026-08-${String(10 + i).padStart(2, '0')}T09:00:00.000Z`;
+  // Two days apart, so a 22-item fixture spans 42 days and clears the 30-day
+  // rule added 28 Aug 2026. Ordering is unchanged — i still increases with
+  // time, so the last item is still the newest and lands in the recent-10.
+  const dated = (i) => new Date(Date.UTC(2026, 5, 1) + i * 2 * 24 * 3600e3).toISOString();
   const rows = (items) => computeAgentAccuracy(
     items.map((x, i) => ({ agentId: 'recW', taskType: 'Correspondence', at: dated(i), ...x })),
     { recW: 'Writer' })[0];

@@ -55,6 +55,7 @@ import json
 import mimetypes
 import os
 import re
+import subprocess
 import sys
 import urllib.error
 import urllib.parse
@@ -1063,7 +1064,10 @@ def task_view(rec):
         "priority": sel(f.get(AF["priority"])),
         "urgencyScore": f.get(AF["urgencyScore"]) or 0,
         "outcome": sel(f.get(AF["approvalOutcome"])),
-        "feedback": f.get(AF["approvalFeedback"], ""),
+        # Expanded here so a REDO gets the spoken instruction, not a bare URL.
+        # No Loom link means no network call — this is a regex miss on almost
+        # every task.
+        "feedback": expand_looms(f.get(AF["approvalFeedback"], "")),
         "agentOutput": f.get(AF["agentOutput"], ""),
         "taskType": sel(f.get(AF["taskType"])),
         "teamMemberIds": links(f.get(AF["teamMember"])),
@@ -1846,6 +1850,86 @@ def mirror_lesson_to_register(register_row, line):
         REGISTER_FIELDS["learningLog"]: (existing.rstrip() + "\n" + line).strip(),
     }})
     return True
+
+
+# ─── A LOOM IS FEEDBACK TOO (28 Aug 2026) ───────────────────────────
+#
+# Kevin asked whether he could attach a Loom to his approval feedback and have
+# the agent actually understand it. He can now: paste the share link into the
+# feedback box and the transcript is fetched and handed to the agent with his
+# typed words.
+#
+# Loom exposes an auto-generated transcript through a PUBLIC GraphQL endpoint —
+# no auth, no cookies, no allowlist entry needed, so this works from a headless
+# run where his Chrome connector cannot be reached. The fetcher already existed
+# for the transcript-to-brain skill; it was BROKEN (Loom removed the `id` field
+# and the query failed validation for every video) and was fixed in the same
+# change.
+#
+# THE RULE THAT MATTERS: a Loom that cannot be read is said out loud, never
+# swallowed. If the fetch fails and the feedback silently carries on as the
+# typed words alone, Kevin believes his video was taken into account when it
+# never was — and he would have no way to tell. That is worse than not offering
+# the feature. So a failure is written INTO the feedback the agent reads, and
+# the agent is told to say so rather than guess what the video said.
+LOOM_URL_RE = re.compile(
+    r"https?://(?:www\.)?loom\.com/(?:share|embed)/([0-9a-f]{32})", re.I)
+LOOM_FETCHER = os.path.expanduser(
+    "~/.claude/skills/transcript-to-brain/scripts/fetch_loom_transcript.py")
+# A five-minute Loom is roughly 750 words. The agent gets the whole thing for
+# the task in hand; only the STANDING lesson is capped, further down.
+LOOM_FETCH_TIMEOUT = 45
+
+
+def fetch_loom_transcript(url):
+    """(transcript, error). Exactly one of the two is non-empty."""
+    if not os.path.exists(LOOM_FETCHER):
+        return "", f"the Loom fetcher is missing at {LOOM_FETCHER}"
+    try:
+        res = subprocess.run([sys.executable, LOOM_FETCHER, url],
+                             capture_output=True, text=True,
+                             timeout=LOOM_FETCH_TIMEOUT)
+    except subprocess.TimeoutExpired:
+        return "", f"Loom did not answer within {LOOM_FETCH_TIMEOUT}s"
+    except Exception as exc:                                   # noqa: BLE001
+        return "", f"could not run the Loom fetcher: {exc}"
+    out = (res.stdout or "").strip()
+    if res.returncode != 0 or not out:
+        why = (res.stderr or out or "no transcript returned").strip()
+        return "", why.splitlines()[0][:200]
+    return out, ""
+
+
+def expand_looms(text):
+    """Kevin's words with any Loom link replaced by its transcript.
+
+    Unchanged when there is no Loom link — no network call, no cost on the
+    99% of feedback that is typed.
+    """
+    raw = str(text or "")
+    urls = []
+    for m in LOOM_URL_RE.finditer(raw):
+        if m.group(0) not in urls:
+            urls.append(m.group(0))
+    if not urls:
+        return raw
+    parts = [raw]
+    for url in urls:
+        transcript, err = fetch_loom_transcript(url)
+        if transcript:
+            parts.append(
+                f"\n\n--- WHAT KEVIN SAID IN THE LOOM ({url}) ---\n"
+                f"This is an automatic transcript of the video he attached. Treat it\n"
+                f"as his instruction, exactly like typed feedback.\n\n{transcript}")
+        else:
+            # Loud, and in the agent's own input. Never silent.
+            parts.append(
+                f"\n\n--- LOOM COULD NOT BE READ ({url}) ---\n"
+                f"Reason: {err}\n"
+                f"Do NOT guess what the video said. Do the part of the task his typed\n"
+                f"words cover, and say plainly in your output that the video could not\n"
+                f"be read and what you still need from him.")
+    return "".join(parts)
 
 
 def lesson_source_text(f):
