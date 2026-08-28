@@ -2682,11 +2682,22 @@ function automationsSection(q){
 function mcpAuthChip(auth){
     const map = {
         'connected':  ['Connected',        'var(--success)', 'var(--success-bg)'],
+        // Weaker than Connected on purpose: authorisation is on file and has not
+        // lapsed, but nothing records a disconnection, so this is not a live check.
+        'authorised': ['Authorised',       'var(--success)', 'var(--success-bg)'],
         'needs-auth': ['Needs authorising','var(--warning)', 'var(--warning-bg)'],
         'unknown':    ['Not checked',      'var(--text-secondary)', 'var(--bg-subtle)']
     };
+    const tips = {
+        'connected':  'A live check passed when this list was last built.',
+        'authorised': 'You have authorised it and the authorisation has not lapsed. '
+                    + 'Nothing records a disconnection, so this is not a live check.',
+        'needs-auth': 'Installed but never authorised, so nothing can use it.',
+        'unknown':    'Its health could not be checked when this list was built.'
+    };
     const [label, fg, bg] = map[auth] || map.unknown;
-    return `<span style="display:inline-block;white-space:nowrap;font-size:var(--fs-xs);font-weight:var(--fw-medium);color:${fg};background:${bg};padding:2px 8px;border-radius:var(--radius-full)">${esc(label)}</span>`;
+    const tip = tips[auth] || tips.unknown;
+    return `<span title="${esc(tip)}" style="display:inline-block;white-space:nowrap;font-size:var(--fs-xs);font-weight:var(--fw-medium);color:${fg};background:${bg};padding:2px 8px;border-radius:var(--radius-full)">${esc(label)}</span>`;
 }
 function mcpYesNo(on){
     return on
@@ -2711,7 +2722,10 @@ function mcpToolGroup(g, q){
         (String(t.name||'') + ' ' + String(t.what||'') + ' ' + String(t.scope||''))
             .toLowerCase().includes(q));
     if(!rows.length) return '';
-    const live = rows.filter(t => t.auth === 'connected').length;
+    // "authorised" is a working tool too; it is a weaker claim about how we know,
+    // not about whether it works. Counting only 'connected' made a group of seven
+    // live connectors read "0 working".
+    const live = rows.filter(t => t.auth === 'connected' || t.auth === 'authorised').length;
     return `<div style="margin-top:14px">
         <div style="font-size:var(--fs-sm);font-weight:var(--fw-semibold);color:var(--text-primary);margin-bottom:2px">${esc(g.title)} <span style="color:var(--text-muted);font-weight:var(--fw-regular)">(${live} working, ${rows.length - live} not)</span></div>
         <div style="font-size:var(--fs-xs);color:var(--text-muted);margin-bottom:6px">${esc(g.blurb)}</div>

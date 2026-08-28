@@ -13,7 +13,7 @@
 // Guarded by tests/mcp-inventory.test.js.
 
 var MCP_TOOLS = {
-  "generatedAt": "2026-08-28T09:33:29Z",
+  "generatedAt": "2026-08-28T11:24:27Z",
   "generator": "scripts/generate-mcp-inventory.py",
   "healthNote": "",
   "agentAllowlistSize": 9,
@@ -63,12 +63,12 @@ var MCP_TOOLS = {
     {
       "key": "claudeai",
       "title": "claude.ai connectors",
-      "blurb": "Authorised on your Claude account and delivered through the app. These are the ones you actually use day to day. A script cannot confirm they are live, only that they were connected and whether authorisation has lapsed.",
+      "blurb": "Authorised on your Claude account and delivered through the app. These are the ones you use day to day. Nothing on this Mac records a DISCONNECTION, so if you remove one of these it will keep showing here until its authorisation lapses. Treat this group as what you have authorised, not as a live check.",
       "tools": [
         {
           "name": "Airtable",
           "what": "Reads and writes the Operations Director base: tasks, tenancies, costs, agents.",
-          "auth": "connected",
+          "auth": "authorised",
           "kevin": true,
           "agents": false,
           "source": "verified",
@@ -77,7 +77,7 @@ var MCP_TOOLS = {
         {
           "name": "Claude Code Remote",
           "what": "Lets you drive a Claude Code session from another device.",
-          "auth": "connected",
+          "auth": "authorised",
           "kevin": true,
           "agents": false,
           "source": "verified",
@@ -86,7 +86,7 @@ var MCP_TOOLS = {
         {
           "name": "Gmail",
           "what": "Reads, labels and drafts email in your inbox.",
-          "auth": "connected",
+          "auth": "authorised",
           "kevin": true,
           "agents": false,
           "source": "verified",
@@ -95,7 +95,7 @@ var MCP_TOOLS = {
         {
           "name": "Google Calendar",
           "what": "Reads and creates calendar events.",
-          "auth": "connected",
+          "auth": "authorised",
           "kevin": true,
           "agents": false,
           "source": "verified",
@@ -104,7 +104,7 @@ var MCP_TOOLS = {
         {
           "name": "Google Drive",
           "what": "Reads and writes files in Drive, including the AI brain vault.",
-          "auth": "connected",
+          "auth": "authorised",
           "kevin": true,
           "agents": false,
           "source": "verified",
@@ -122,7 +122,7 @@ var MCP_TOOLS = {
         {
           "name": "Slack",
           "what": "Reads channels and sends messages.",
-          "auth": "connected",
+          "auth": "authorised",
           "kevin": true,
           "agents": false,
           "source": "verified",
@@ -140,7 +140,7 @@ var MCP_TOOLS = {
         {
           "name": "Zoom for Claude",
           "what": "Reads Zoom recordings, transcripts and meeting notes.",
-          "auth": "connected",
+          "auth": "authorised",
           "kevin": true,
           "agents": false,
           "source": "verified",

@@ -311,7 +311,10 @@ def build():
             "name": label,
             "what": describe(name),
             "auth": auth,
-            "kevin": auth == "connected",
+            # "authorised" counts as reachable: authorisation is on file and has
+            # not lapsed. It is a weaker claim than "connected", which means a
+            # live check passed this run. See the claudeai group below.
+            "kevin": auth in ("connected", "authorised"),
             "agents": bool(agents) if agents is not None else (name in agent_servers),
             "source": source,
             "scope": scope,
@@ -339,15 +342,21 @@ def build():
     })
     connector_rows = []
     for name in connector_names:
-        auth = "needs-auth" if name in unauthorised else "connected"
+        # NOT "connected". The only signals available are an APPEND-ONLY list of
+        # connectors ever authorised, plus the needs-auth cache. Nothing records
+        # a disconnection, so a connector Kevin removed today would keep reading
+        # "Connected" for ever. "Authorised" is the strongest honest claim: the
+        # authorisation is on file and has not lapsed.
+        auth = "needs-auth" if name in unauthorised else "authorised"
         connector_rows.append(row(name, name.replace("claude.ai ", ""), auth, "verified"))
     groups.append({
         "key": "claudeai",
         "title": "claude.ai connectors",
         "blurb": "Authorised on your Claude account and delivered through the app. "
-                 "These are the ones you actually use day to day. A script cannot "
-                 "confirm they are live, only that they were connected and whether "
-                 "authorisation has lapsed.",
+                 "These are the ones you use day to day. Nothing on this Mac "
+                 "records a DISCONNECTION, so if you remove one of these it will "
+                 "keep showing here until its authorisation lapses. Treat this "
+                 "group as what you have authorised, not as a live check.",
         "tools": connector_rows,
     })
 
