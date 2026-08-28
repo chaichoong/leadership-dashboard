@@ -38,6 +38,9 @@ const worker = read('scripts/slack-automation/approvals.js');
 const brief = read('scripts/slack-automation/money-daily-worker.js');
 const tasksPage = read('os/tasks/index.html');
 const config = read('js/config.js');
+// The two COUNTING surfaces, found 28 Aug 2026 — see the block at the bottom.
+const huddle = read('scripts/agent-accuracy-report.py');
+const dashboard = read('js/dashboard.js');
 
 // The field the whole feature turns on. Created on the live base 28 Aug 2026.
 const DEFERRED_FIELD_ID = 'fldJ9IHS1yxwYzYSN';
@@ -392,5 +395,60 @@ describe('the write itself', () => {
     const picker = agentsPage.slice(agentsPage.indexOf('function agDeferOnDate'),
                                     agentsPage.indexOf('function apvConfirmDefer'));
     expect(picker).toContain('until <= todayStr()');
+  });
+});
+
+// ─── THE TWO SURFACES NOBODY COUNTED (found 28 Aug 2026) ─────────────
+//
+// The knock-back shipped with five surfaces honouring the date. Two more were
+// missed, and both were missed for the same reason: they REPORT a number
+// rather than RENDER a queue, so they did not look like "approval filters".
+//
+// Measured live that afternoon: Kevin's real queue held 56 items, four of them
+// knocked back to September at his own request. The CEO huddle read "60
+// waiting" and the Leadership Dashboard card read 60 too. He parks something
+// and two of the places he looks keep nagging him about it — which is exactly
+// the failure mode the original five were built to avoid, and it reads as "the
+// feature was never built" rather than as a bug.
+//
+// A counting surface is an approval filter. That is the rule these guard.
+describe('the surfaces that COUNT the queue honour the date too', () => {
+  it('the CEO huddle does not count what Kevin parked', () => {
+    const m = huddle.match(/waiting = query\(\s*token,\s*TASKS,([\s\S]{0,300}?)\[/);
+    expect(m, 'could not find the waiting query in agent-accuracy-report.py').toBeTruthy();
+    expect(m[1]).toContain('Deferred Until');
+    expect(m[1]).toContain('NOT(IS_AFTER(');
+    // Still only Approval — widening the status while adding the date would
+    // swap one wrong number for another.
+    expect(m[1]).toContain("{Status} = 'Approval'");
+  });
+
+  it('the Leadership Dashboard card does not count what Kevin parked', () => {
+    // The front page disagreeing with the page it links to, about the one
+    // number the card exists to report.
+    const m = dashboard.match(/filterByFormula=\$\{encodeURIComponent\(`([^`]*Status[^`]*Approval[^`]*)`\)/);
+    expect(m, 'could not find the waiting-count fetch in js/dashboard.js').toBeTruthy();
+    expect(m[1]).toContain('Deferred Until');
+    expect(m[1]).toContain('NOT(IS_AFTER(');
+  });
+
+  it('both use the SAME boundary as the queue itself', () => {
+    // The date is IN. `> TODAY()` and `!= BLANK()` both go wrong on an empty
+    // field, which is nearly every task in the base — that mistake empties the
+    // count rather than losing one item, so it would look like good news.
+    for (const [name, src] of [['huddle', huddle], ['dashboard', dashboard]]) {
+      const idx = src.indexOf('Deferred Until');
+      expect(idx, `${name} never names the field`).toBeGreaterThan(-1);
+      const near = src.slice(Math.max(0, idx - 200), idx + 200);
+      expect(near, `${name} uses the wrong boundary`).toContain('NOT(IS_AFTER(');
+    }
+  });
+
+  it('every surface that reads the field agrees it is called the same thing', () => {
+    // CONTROL: if the field were renamed, each check above would still pass on
+    // its own literal while the live query returned nothing.
+    for (const [name, src] of [['huddle', huddle], ['dashboard', dashboard]]) {
+      expect(src, `${name}`).toContain(DEFERRED_FIELD_NAME);
+    }
   });
 });

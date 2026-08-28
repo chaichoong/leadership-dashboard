@@ -153,7 +153,21 @@ def main():
     decided = query(token, TASKS, "LEN({Approval Outcome} & '') > 0",
                     ["Approval Outcome", "Approved At", "Task Type", "Sent For Approval By",
                      "Team Member", "Verdict Reason"])
-    waiting = query(token, TASKS, "{Status} = 'Approval'", ["Task Name"])
+    # HONOUR THE KNOCK-BACK (28 Aug 2026). Kevin can defer an approval to a
+    # date instead of deciding it, and five surfaces were built to respect that.
+    # This was a SIXTH nobody counted, because it reports a number rather than
+    # rendering a queue — so the huddle read "60 waiting" while his actual queue
+    # was 56 and four of them were parked to September at his own request.
+    #
+    # A knock-back that some surfaces honour and others do not reads as "the
+    # feature was never built" rather than as a bug. Same boundary as
+    # APV_QUEUE_FORMULA in os/agents/index.html: the date itself is IN, and a
+    # blank date must always show — that is nearly every task in the base, and
+    # getting it wrong empties the count rather than losing one item.
+    waiting = query(token, TASKS,
+                    "AND({Status} = 'Approval', "
+                    "NOT(IS_AFTER({Deferred Until}, TODAY())))",
+                    ["Task Name"])
     team = query(token, TEAM, None, ["Name"])
     names = {r["id"]: r["fields"].get("Name", r["id"]) for r in team}
 

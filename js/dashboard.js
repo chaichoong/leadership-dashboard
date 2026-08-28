@@ -1204,7 +1204,12 @@
             .map(f => `fields%5B%5D=${f}`).join('&');
         try {
             const [waitRes, histRes, teamRes] = await Promise.all([
-                fetch(url(`${flds}&filterByFormula=${encodeURIComponent(`{Status}='Approval'`)}`), { headers: { Authorization: `Bearer ${PAT}` } }),
+                // Honour the knock-back, same boundary as APV_QUEUE_FORMULA in
+                // os/agents/index.html. A card that says 60 while the queue he
+                // opens holds 56 is not a rounding difference — it is the
+                // front page disagreeing with the page it links to, about the
+                // one number this card exists to report.
+                fetch(url(`${flds}&filterByFormula=${encodeURIComponent(`AND({Status}='Approval', NOT(IS_AFTER({Deferred Until}, TODAY())))`)}`), { headers: { Authorization: `Bearer ${PAT}` } }),
                 // LEN(field&'') rather than != '' — a blank Airtable field is not
                 // reliably unequal to an empty string, and that trap has emptied
                 // a whole query in this base before.
