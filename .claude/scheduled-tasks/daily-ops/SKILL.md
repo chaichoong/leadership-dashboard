@@ -130,8 +130,8 @@ The overnight scripts have already run. **You are reading their results, not red
 Run this as one subagent with the prompt: "Read the results of this morning's three script jobs and report what needs a human decision. Do NOT re-run work that passed. You are read-only with respect to code; file findings via scripts/findings.py. Do not take the queue lock. Return at most ten lines."
 
 **1. Drift scan** — `python3 scripts/drift-scan.py --json` already ran at 06:20.
-   - Exit 0: clean. One line, move on.
-   - Exit 1: read `monitoring/drift-exceptions-{date}.json`. Judge each change. A new table with no repo consumers is usually expected and needs nothing. A **removed** or **retyped** field that config.js maps is a live break — file it high. A renamed field is the dangerous quiet one: sub-category names are load-bearing in the P&L and Wealth code.
+   - Exit 0: nothing that can break. Two verdicts land here. `CLEAN` means nothing moved. `ADDITIONS` means new tables or fields appeared and nothing else did — that cannot break anything, because no code already written can reference a field that did not exist until today. One line, move on; the report already names them and says which the repo references.
+   - Exit 1: read `monitoring/drift-exceptions-{date}.json`. Since 28 Aug 2026 this fires ONLY for changes that can break something, so treat every one as real. A **removed** or **retyped** field that config.js maps is a live break — file it high. A renamed field is the dangerous quiet one: it keeps the same field id, so every id check in the scan passes while a name-matched `filterByFormula` silently returns zero rows, and sub-category names are load-bearing in the P&L and Wealth code.
    - Exit 2: **CANNOT VERIFY.** Do not read this as clean. Report it on the BROKEN line.
 
 **2. Data invariants** — `scripts/check-data-invariants.py` already ran at 06:40.

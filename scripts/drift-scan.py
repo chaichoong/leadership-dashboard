@@ -346,9 +346,52 @@ def main(argv=None):
         "snapshot": os.path.relpath(snap_path, REPO),
     }
 
-    drifted = bool(dead_mapped) or bool(unresolved) or (
-        changes and any(changes.values()))
-    res["verdict"] = "DRIFT" if drifted else "CLEAN"
+    # WHAT CAN ACTUALLY BREAK.
+    #
+    # Adding a table or a field cannot break anything: no code can already
+    # reference something that did not exist until today. Every other kind of
+    # change can, and two of them are invisible to BOTH id checks above,
+    # because a rename or a retype keeps the same id alive — dead_mapped and
+    # unresolved sail straight past while a name-matched filterByFormula
+    # silently returns zero rows and a typed write silently writes the wrong
+    # shape. Removals are treated the same way and for the same reason: this
+    # codebase references fields by NAME inside formulas, which no id scan can
+    # see.
+    #
+    # This is the judgement the daily-ops runbook already asked a human to make
+    # by hand every morning — "a new table with no repo consumers is usually
+    # expected and needs nothing; a removed or retyped field that config.js
+    # maps is a live break; a renamed field is the dangerous quiet one".
+    # Putting it in the exit code is the whole point. Before this, ONE field we
+    # had added ourselves the day before turned this job red directly beside
+    # data-invariants reporting a 28-day-old council tax summons, at identical
+    # severity, one line apart (28 Aug 2026). Two alarms of equal weight where
+    # one is always noise is how the real one stops being read.
+    #
+    # ADDITIVE is the allow-list, not BREAKING, so a change category added to
+    # diff_schema() later is treated as breaking until someone decides
+    # otherwise. Unknown means loud.
+    ADDITIVE = ("new_tables", "new_fields")
+    additions = {k: v for k, v in (changes or {}).items() if k in ADDITIVE and v}
+    breaking = {k: v for k, v in (changes or {}).items() if k not in ADDITIVE and v}
+
+    # Whether an addition is already wired up, which is what distinguishes a
+    # field we added on purpose yesterday from one that appeared in Airtable
+    # with nothing in the repo expecting it. Neither breaks anything; the
+    # difference is worth a word in the report rather than an alarm.
+    known_new = []
+    for entries in additions.values():
+        for line in entries:
+            m = re.search(r"\((fld|tbl)[A-Za-z0-9]{14}\)$", line)
+            if m and (m.group(0)[1:-1] in mapped or m.group(0)[1:-1] in repo_ids):
+                known_new.append(line)
+
+    drifted = bool(dead_mapped) or bool(unresolved) or bool(breaking)
+    res["breaking_changes"] = sorted(breaking)
+    res["additions_already_referenced"] = known_new
+    res["verdict"] = ("DRIFT" if drifted
+                      else "ADDITIONS" if additions
+                      else "CLEAN")
     if not prior:
         res["note"] = ("no earlier snapshot to compare against; today's is now "
                        "the baseline")
@@ -382,6 +425,17 @@ def emit(code, res, a):
         for k, v in ch.items():
             for line in v:
                 print("    %-16s %s" % (k, line))
+    # Say why this is not an alarm, in the same breath as the change itself.
+    # A bare list of new fields under a green exit invites the reader to wonder
+    # whether something was missed.
+    if res.get("verdict") == "ADDITIONS":
+        print("    no action: additions only, and nothing already written can "
+              "reference a field that did not exist until today")
+        known = res.get("additions_already_referenced") or []
+        if known:
+            print("    %d of %d already referenced in the repo, so they were "
+                  "added on purpose"
+                  % (len(known), sum(len(v) for v in ch.values())))
     for i in res.get("dead_mapped_ids", []):
         print("    DEAD (config)    %s" % i)
     for i, files in res.get("unresolvable_repo_ids", {}).items():
