@@ -482,9 +482,13 @@
     // never invisible before the tab's first open (trust surfaces report
     // absence — review finding, 24 Aug 2026). Population and lane rules
     // MIRROR loadApprovals in os/agents/index.html: loop-raised tasks at
-    // Status Approval, Kevin's lane only (Approver empty or Kevin) —
-    // drift-tested in tests/agent-register-surfaces.test.js.
-    const AGENTS_BADGE_FORMULA = "AND({Status}='Approval', LEN({Sent For Approval By}&'')>0)";
+    // Status Approval, Kevin's lane only (Approver empty or Kevin), and NOT
+    // knocked back to a future date (28 Aug 2026) — a badge that keeps
+    // counting something he has deliberately parked for a week is the nag he
+    // asked us to stop. This string is byte-identical to APV_QUEUE_FORMULA in
+    // os/agents/index.html and drift-tested in
+    // tests/agent-register-surfaces.test.js.
+    const AGENTS_BADGE_FORMULA = "AND({Status}='Approval', LEN({Sent For Approval By}&'')>0, NOT(IS_AFTER({Deferred Until}, TODAY())))";
     async function refreshAgentsBadge() {
         if (typeof PAT === 'undefined' || !PAT) return;
         try {

@@ -154,6 +154,40 @@ INVARIANTS = [
         # Only rejections decided AFTER the chips shipped count: everything
         # before carries no reason and nothing may guess one on Kevin's behalf.
         # The date is the line between "not built yet" and "built, not working".
+        # A KNOCK-BACK MUST NEVER BECOME A DISAPPEARANCE.
+        # 28 Aug 2026: Kevin can now defer an approval to a date ("we need
+        # authentication codes, it takes a week for those to arrive"). The task
+        # keeps Status Approval and every surface hides it until the date
+        # passes. That is safe ONLY because the date is in the future — a task
+        # left with a PAST date is meant to be back in his queue, and if any
+        # surface ever writes one without meaning to, the item is not late, it
+        # is invisible, and nothing errors. The four surfaces agree on the rule
+        # in code (tests/approval-defer.test.js); this checks the DATA, which
+        # a fixture test cannot see.
+        #
+        # The violation is a knocked-back task that is not at Approval at all:
+        # a stale date riding on a task that has since been approved or
+        # rejected. Harmless on the approval surfaces, which check the status
+        # too — but it is the shape of a bug that would hide live work if the
+        # status clause were ever dropped, and it means a decision path failed
+        # to clear the date it should have.
+        "name": "knock-back-only-parks-live-approvals",
+        "table": TASKS,
+        "incident": "28 Aug 2026 — deferring an approval hides it from four surfaces at once; a date left behind on a decided task is the same mechanism pointed at live work",
+        "asserts": "Deferred Until in the future => the task is still at Status Approval",
+        "violation": (
+            "AND(IS_AFTER({Deferred Until}, TODAY()), {Status} != 'Approval')"
+        ),
+        # Every task ever raised for approval — the population a stray
+        # knock-back date could hide. Deliberately NOT "tasks with a Deferred
+        # Until set": on the day nothing is knocked back that would be zero and
+        # the check would report a control failure for a perfectly healthy base.
+        "control": "LEN(ARRAYJOIN({Sent For Approval By}) & '') > 0",
+        "control_means": "tasks an agent has ever raised for approval (the population a stray knock-back date could hide)",
+        "field_probe": "OR(IS_AFTER({Deferred Until}, TODAY()), {Status} = 'Approval')",
+        "fields": ["Task Name", "Status", "Deferred Until"],
+    },
+    {
         "name": "rejections-record-why",
         "table": TASKS,
         "incident": "27 Aug 2026 — 58 of 58 rejections carried no reason, so every one counted against the agent that wrote the draft rather than whatever created the task",

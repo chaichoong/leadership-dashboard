@@ -353,7 +353,7 @@ async function gatherHuddle(pat) {
 async function gatherTasks(pat) {
     const rows = await airtableFetch(pat, TBL_TASKS, {
         filterByFormula: `AND({Task Name}!='',NOT({Status}='Completed'),NOT({Status}='Cancelled'))`,
-        'fields[]': ['Task Name', 'Assignee', 'Due Date', 'Status', 'Priority', 'Task Type'],
+        'fields[]': ['Task Name', 'Assignee', 'Due Date', 'Status', 'Priority', 'Task Type', 'Deferred Until'],
     }, true);
     const today = todayLondonISO();
     const t = rows.map(r => ({
@@ -363,10 +363,18 @@ async function gatherTasks(pat) {
         status: String(r.fields['Status'] || ''),
         priority: String(r.fields['Priority'] || ''),
         type: String(r.fields['Task Type'] || ''),
+        deferred: String(r.fields['Deferred Until'] || '').slice(0, 10),
     }));
+    // Knocked back to a date (28 Aug 2026) — Kevin's answer to work he cannot
+    // act on yet, like a filing that needs an authentication code in the post.
+    // The brief must respect it or the one surface he reads every morning goes
+    // on telling him about the thing he just took off his plate. Compared in
+    // LONDON time against the same string form the brief already uses for
+    // due-dates, so it flips on the same boundary as everything else here.
+    const parked = x => x.status === 'Approval' && x.deferred && x.deferred > today;
     // Split first. An Approval task counted as overdue reads as work Kevin has not
     // done, when it is work an agent already did and he has not looked at.
-    const waiting = t.filter(x => x.status === 'Approval');
+    const waiting = t.filter(x => x.status === 'Approval' && !parked(x));
     const live = t.filter(x => x.status !== 'Approval');
     const overdue = live.filter(x => x.due && x.due < today);
     const dueToday = live.filter(x => x.due === today);
