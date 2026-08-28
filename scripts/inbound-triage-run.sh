@@ -84,6 +84,16 @@ cd "$REPO" || { echo "ERROR: repo not found at $REPO" >&2; exit 1; }
 /usr/bin/python3 "$REPO/scripts/agent-dispatch.py" handover-property \
   > "$SCRATCH/roy-handovers.json" 2>&1 || true
 
+# CLEAR THE ALERT BACKLOG (29 Aug 2026). The alert lane classifies in
+# build_queue, which reads Today/Overdue — so it stopped NEW breakage tasks
+# reaching the gate and did nothing about those already sitting at Approval.
+# Kevin cleared his queue on 29 Aug and 15 of the 17 left were this class,
+# every one predating the fix. Runs every slot rather than once, because a task
+# can still arrive at Approval by a path the queue never classified, and a
+# one-off cleanup would leave the same gap open behind it. Closes nothing.
+/usr/bin/python3 "$REPO/scripts/agent-dispatch.py" clear-alerts \
+  > "$SCRATCH/cleared-alerts.json" 2>&1 || true
+
 # THE LESSONS FILE IS READ FIRST, AND THAT IS LOAD-BEARING (27 Aug 2026).
 #
 # This runner invokes `claude -p` against SKILL.md files. It does NOT load
