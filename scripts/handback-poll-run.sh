@@ -127,7 +127,7 @@ Do not take the queue lock — this run already holds it. Do not edit, commit or
 RC=$?
 
 __TAIL=$(tail -n +$((__START_LINE + 1)) "$LOG" 2>/dev/null)
-__BAD=$(printf '%s\n' "$__TAIL" | grep -E '"error"|401|Unauthorized|OAuth access token has expired|BROKEN' || true)
+__BAD=$(printf '%s\n' "$__TAIL" | grep -E '"error"|HTTP Error 401|401 Unauthorized|Unauthorized|OAuth access token has expired|BROKEN' || true)
 echo "===== done rc=$RC $(date) =====" >> "$LOG"
 
 # A run that produced no report is a blind run, whatever it printed. verify
@@ -142,7 +142,10 @@ fi
 beat work "$REASON" "$TOTAL" yes
 if [ $RC -ne 0 ] || [ -n "$__BAD" ]; then
   printf '%s\n' "$__BAD" | head -5 >&2
-  echo "handback-poll run FAILED (rc=$RC) — see $LOG" >&2
+  __WHY=""
+  [ $RC -ne 0 ] && __WHY="the command exited $RC"
+  [ -n "$__BAD" ] && __WHY="${__WHY:+$__WHY; }error text in the log"
+  echo "handback-poll run FAILED: $__WHY — see $LOG" >&2
   exit 1
 fi
 echo "handback-poll run OK — worked $TOTAL hand-back(s)"

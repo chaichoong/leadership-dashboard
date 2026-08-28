@@ -228,7 +228,12 @@ describe("the Go Signal is the agent's own 9/1/5 schedule (Kevin, 24 Aug 2026)",
         // monitoring/, which the nightly fixer commits. The prompt forbids it
         // and the post-run sweep quarantines + fails.
         expect(runner).toMatch(/NEVER under the repo/);
-        expect(runner).toMatch(/"body":\|Inbound Message Content/);
+        // KEY form on both signals (28 Aug 2026). Matching the field NAME
+        // anywhere also matched Airtable schema snapshots, where the string is
+        // a VALUE — the table merely naming a column — so 69 legitimate daily
+        // snapshots were moved out of monitoring/ and each run reported a false
+        // failure. Behaviour is covered in tests/runner-failure-reporting.test.js.
+        expect(runner).toMatch(/"body" \*:\|"Inbound Message Content" \*:/);
         expect(runner).toMatch(/__LEAKED/);
         // Only files THIS run created, never git-tracked ones — the unscoped
         // sweep quarantined 41 committed schema files on 25 Aug 2026.

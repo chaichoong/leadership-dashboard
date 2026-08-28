@@ -85,7 +85,8 @@ while IFS= read -r f; do
   if git -C "$REPO" ls-files --error-unmatch "${f#"$REPO"/}" >/dev/null 2>&1; then
     continue
   fi
-  if grep -qlE '"description":|Inbound Message Content|CREDITOR MATTER' "$f" 2>/dev/null; then
+  # KEY form for the field name: as a VALUE it is a schema naming a column.
+  if grep -qlE '"description" *:|"Inbound Message Content" *:|CREDITOR MATTER' "$f" 2>/dev/null; then
     mv "$f" "$SCRATCH/" && __LEAKED="$__LEAKED $f"
   fi
 done < <(find "$REPO/monitoring" -type f -newer "$__MARKER" 2>/dev/null)
@@ -99,7 +100,11 @@ if [ -n "$__LEAKED" ]; then
 fi
 if [ $RC -ne 0 ] || [ -n "$__BAD" ] || [ -n "$__LEAKED" ]; then
   printf '%s\n' "$__BAD" | head -5 >&2
-  echo "task-manager run FAILED (rc=$RC) — see $LOG" >&2
+  __WHY=""
+  [ $RC -ne 0 ] && __WHY="the command exited $RC"
+  [ -n "$__BAD" ] && __WHY="${__WHY:+$__WHY; }error text in the log"
+  [ -n "$__LEAKED" ] && __WHY="${__WHY:+$__WHY; }files quarantined from monitoring/"
+  echo "task-manager run FAILED: $__WHY — see $LOG" >&2
   exit 1
 fi
 echo "task-manager run OK"

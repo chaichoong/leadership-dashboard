@@ -110,21 +110,29 @@ while IFS= read -r f; do
   if git -C "$REPO" ls-files --error-unmatch "${f#"$REPO"/}" >/dev/null 2>&1; then
     continue
   fi
-  if grep -qlE '"body":|Inbound Message Content' "$f" 2>/dev/null; then
+  # KEY form only. In a schema snapshot the string appears as a VALUE
+  # ("name": "Inbound Message Content") — the table merely NAMING a column,
+  # carrying no message content at all. Matching it anywhere quarantined 69
+  # legitimate daily snapshots out of monitoring/ and failed the run each time.
+  if grep -qlE '"body" *:|"Inbound Message Content" *:' "$f" 2>/dev/null; then
     mv "$f" "$SCRATCH/" && __LEAKED="$__LEAKED $f"
   fi
 done < <(find "$REPO/monitoring" -type f -newer "$__MARKER" 2>/dev/null)
 rm -f "$__MARKER"
 
 __TAIL=$(tail -n +$((__START_LINE + 1)) "$LOG" 2>/dev/null)
-__BAD=$(printf '%s\n' "$__TAIL" | grep -E '"error"|401|Unauthorized|OAuth access token has expired|BROKEN|Full Disk Access' || true)
+__BAD=$(printf '%s\n' "$__TAIL" | grep -E '"error"|HTTP Error 401|401 Unauthorized|Unauthorized|OAuth access token has expired|BROKEN|Full Disk Access' || true)
 echo "===== done rc=$RC $(date) =====" >> "$LOG"
 if [ -n "$__LEAKED" ]; then
   echo "PRIVACY: content-bearing files quarantined from monitoring/ to $SCRATCH:$__LEAKED" >&2
 fi
 if [ $RC -ne 0 ] || [ -n "$__BAD" ] || [ -n "$__LEAKED" ]; then
   printf '%s\n' "$__BAD" | head -5 >&2
-  echo "inbound-triage run FAILED (rc=$RC) — see $LOG" >&2
+  __WHY=""
+  [ $RC -ne 0 ] && __WHY="the command exited $RC"
+  [ -n "$__BAD" ] && __WHY="${__WHY:+$__WHY; }error text in the log"
+  [ -n "$__LEAKED" ] && __WHY="${__WHY:+$__WHY; }files quarantined from monitoring/"
+  echo "inbound-triage run FAILED: $__WHY — see $LOG" >&2
   exit 1
 fi
 echo "inbound-triage run OK"
