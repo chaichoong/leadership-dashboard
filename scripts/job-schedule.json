@@ -430,5 +430,15 @@
     "needs": [
       "network"
     ]
+  },
+  "signature-watch": {
+    "cron": "20 9,12,15,18 * * *",
+    "maxLateMinutes": 240,
+    "mode": "wrapped",
+    "note": "Polls Adobe for documents that have come back signed and files the signed PDF for Kevin's second approval. Four times a day: a signature can land at any hour and the poll costs nothing when nothing is registered, because it exits before opening a browser. Generous lateness on purpose \u2014 a signed document is still worth picking up late. NO day-of-week: people sign at weekends.",
+    "needs": [
+      "network"
+    ],
+    "enabled": true
   }
 }
