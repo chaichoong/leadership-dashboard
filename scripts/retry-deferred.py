@@ -77,6 +77,11 @@ STATUS_FILE = os.path.join(HOME, "knowledge-os", "logs", "job-status.jsonl")
 LEDGER = os.path.join(HOME, "knowledge-os", "logs", "retry-deferred", "attempts.jsonl")
 MAX_PER_DAY = 3
 
+# Days without a completion before a MISSED job stops being "late" and starts
+# being broken. Two, because every job here runs at least daily: missing two
+# of its own scheduled runs cannot be bad luck.
+MISSED_DAYS_ESCALATE = 2
+
 # States that mean "the queue turned this job away because the machine was not
 # ready". Kept as a named set so a rename in job-queue.py is a loud test failure
 # rather than a sweep that quietly stops finding anything.
@@ -178,6 +183,39 @@ def succeeded_since(job, since, status_rows, events):
     return False
 
 
+def days_since_success(job, ref, status_rows, events):
+    """Whole days since `job` last completed, or None if it never has here.
+
+    WHY (finding 397, 29 Aug 2026): "MISSED" is printed identically whether a job
+    lost ONE morning to a flap or has not run for two days. On 29 Aug
+    compound-brain and feed-brain had last run on 27 Aug — the brain had not been
+    fed, compounded or published for two days — and the only signal was hourly
+    BLOCKED lines nobody reads. A day lost is noise; a job silent across two of
+    its own scheduled runs is a broken system, and the two must not look the same.
+    """
+    ref = _aware(ref)
+    last = None
+    for r in status_rows:
+        if r.get("job") != job or not r.get("ok"):
+            continue
+        t = _ts(r.get("ts"))
+        if t and (last is None or t > last):
+            last = t
+    for e in events:
+        if e.get("job") != job:
+            continue
+        if e.get("state") not in ("released", "finished"):
+            continue
+        if e.get("outcome") not in (None, "completed"):
+            continue
+        t = _ts(e.get("ts"))
+        if t and (last is None or t > last):
+            last = t
+    if last is None:
+        return None
+    return max(0, (ref.date() - last.astimezone(jq.LONDON).date()).days)
+
+
 def deferred_since(job, since, events):
     for e in events:
         if e.get("job") != job or e.get("state") not in DEFER_STATES:
@@ -229,8 +267,10 @@ def ledger_append(entry):
 # ---------------------------------------------------------------------------
 
 def decide(job, cfg, ref, *, due, late, is_stale, opted_in, has_label,
-           succeeded, defer_reason, ready, ready_why, lock_holder, attempts):
-    """(action, reason). action is 'retry' | 'skip' | 'blocked' | 'gap' | 'error'.
+           succeeded, defer_reason, ready, ready_why, lock_holder, attempts,
+           days_silent=None):
+    """(action, reason). action is 'retry' | 'skip' | 'blocked' | 'gap' | 'error'
+    | 'missed' | 'missed-days'.
 
     No I/O in here on purpose: every branch below is a real state this has been
     in, and a decision function that needs a machine in that state to be tested
@@ -258,9 +298,19 @@ def decide(job, cfg, ref, *, due, late, is_stale, opted_in, has_label,
         # would have let the sweep print a clean all-clear on the very morning
         # the brain was four days unfed, which is the failure this whole job
         # exists to end.
-        return "missed", ("deferred (%s) and is now %.0f min late, past its "
-                          "maxLateMinutes (%s). It did not run and will not run "
-                          "today." % (defer_reason, late or 0, cfg.get("maxLateMinutes")))
+        base = ("deferred (%s) and is now %.0f min late, past its "
+                "maxLateMinutes (%s). It did not run and will not run today."
+                % (defer_reason, late or 0, cfg.get("maxLateMinutes")))
+        # ESCALATION, not a louder version of the same line (finding 397).
+        # One lost morning is a flap. Two lost days is the brain going stale
+        # with nothing telling Kevin, which is what happened 27-29 Aug 2026:
+        # compound-brain and feed-brain last ran on the 27th and every hourly
+        # pass printed the same MISSED line as any ordinary late job.
+        if days_silent is not None and days_silent >= MISSED_DAYS_ESCALATE:
+            return "missed-days", (
+                "%s IT HAS NOT COMPLETED FOR %d DAYS — this is no longer a late "
+                "job, it is a job that has stopped." % (base, days_silent))
+        return "missed", base
     if not has_label:
         return "error", ("opted in to retry but no launchd label could be resolved; "
                          "it can never be re-fired and this run would otherwise look clean")
@@ -334,6 +384,7 @@ def sweep(dry_run=False, ref=None):
             ready=ready, ready_why=ready_why,
             lock_holder=holder if holder and holder != job else None,
             attempts=attempts_today(job, datetime.now().astimezone()),
+            days_silent=days_since_success(job, ref, status_rows, events),
         )
         row = {"job": job, "action": action, "reason": reason,
                "due": due.strftime("%Y-%m-%d %H:%M") if due else None}
@@ -365,6 +416,7 @@ SILENT_ACTIONS = ("skip-not-due", "skip-succeeded", "skip-not-deferred")
 ACTION_LABELS = {
     "retry": "RE-FIRED",
     "missed": "MISSED",
+    "missed-days": "STOPPED",
     "blocked": "BLOCKED",
     "waiting": "WAITING",
     "gap": "NOT WIRED",
@@ -382,6 +434,7 @@ def report(results, as_json=False):
     blocked = [r for r in results if r["action"] == "blocked"]
     gaps = [r for r in results if r["action"] == "gap"]
     missed = [r for r in results if r["action"] == "missed"]
+    stopped = [r for r in results if r["action"] == "missed-days"]
     waiting = [r for r in results if r["action"] == "waiting"]
     errors = [r for r in results if r["action"] == "error"]
     # Anything this run did not recognise. An action added to decide() without
@@ -392,10 +445,18 @@ def report(results, as_json=False):
     if not as_json:
         # ABSENCE, NOT SUCCESSES. A list of what ran cannot tell you what did
         # not, and what did not is the whole point of this job.
-        print("retry-deferred: %d re-fired, %d lost the day, %d still blocked, "
-              "%d waiting, %d not opted in, %d error(s)"
-              % (len(retried), len(missed), len(blocked), len(waiting),
-                 len(gaps), len(errors)))
+        print("retry-deferred: %d re-fired, %d lost the day, %d STOPPED, "
+              "%d still blocked, %d waiting, %d not opted in, %d error(s)"
+              % (len(retried), len(missed), len(stopped), len(blocked),
+                 len(waiting), len(gaps), len(errors)))
+        # NAMED ON ITS OWN LINE, at the top, so daily-ops can lift it straight
+        # onto the BROKEN line. A job buried thirty lines down among BLOCKED
+        # noise is a job nobody reads — that is exactly how the brain went two
+        # days unfed while every pass printed something.
+        if stopped:
+            print("  ESCALATE: %s have not completed for %d+ days"
+                  % (", ".join(sorted(r["job"] for r in stopped)),
+                     MISSED_DAYS_ESCALATE))
         # SILENCE IS THE ALLOW-LIST, not the default. Every result whose action
         # is not one of the three "nothing outstanding" states gets a line,
         # including one this function has never heard of.
@@ -408,7 +469,10 @@ def report(results, as_json=False):
         if not any(r["action"] not in SILENT_ACTIONS for r in results):
             print("  nothing had deferred — this is a real all-clear, "
                   "read from %d schedule entries" % len(results))
-    return 1 if (errors or unknown) else 0
+    # A job that has stopped is a failure of this sweep's whole purpose, so the
+    # exit code says so. MISSED for one day does not — that is the flap case,
+    # and alarming on it daily is what teaches people to ignore the alarm.
+    return 1 if (errors or unknown or stopped) else 0
 
 
 # ---------------------------------------------------------------------------
@@ -421,7 +485,7 @@ def selftest():
     cfg = {"cron": "45 22 * * *", "maxLateMinutes": 300, "retryWhenDeferred": True}
     base = dict(due=due, late=540.0, is_stale=False, opted_in=True, has_label=True,
                 succeeded=False, defer_reason="google drive: cannot read", ready=True,
-                ready_why="ready", lock_holder=None, attempts=0)
+                ready_why="ready", lock_holder=None, attempts=0, days_silent=0)
 
     def d(**over):
         return decide("feed-brain", cfg, now, **dict(base, **over))[0]
@@ -432,6 +496,16 @@ def selftest():
         ("never deferred -> silent",            d(defer_reason=None), "skip-not-deferred"),
         ("not opted in -> gap (reported)",      d(opted_in=False), "gap"),
         ("past its window -> missed (NOT a clean skip)", d(is_stale=True), "missed"),
+        # Finding 397: one lost morning and a job that has stopped for two days
+        # printed the SAME line, so the second was invisible inside the first.
+        ("stale + 2 days silent -> missed-days (escalated)",
+         d(is_stale=True, days_silent=MISSED_DAYS_ESCALATE), "missed-days"),
+        ("stale + 1 day silent -> plain missed, not escalated",
+         d(is_stale=True, days_silent=1), "missed"),
+        ("stale + never seen here -> plain missed, not a fake escalation",
+         d(is_stale=True, days_silent=None), "missed"),
+        ("2 days silent but NOT stale -> still retryable, not escalated",
+         d(days_silent=5), "retry"),
         ("no launchd label -> error",           d(has_label=False), "error"),
         # These two were "skip" until 28 Aug 2026, and report() prints nothing
         # for a skip. Both mean the job deferred and has STILL NOT RUN, so both
@@ -460,6 +534,7 @@ def selftest():
                  {"lock_holder": "daily-ops"},
                  {"attempts": MAX_PER_DAY, "lock_holder": "daily-ops"},
                  {"is_stale": True, "lock_holder": "daily-ops"},
+                 {"is_stale": True, "days_silent": 3},
                  {"ready": False, "ready_why": "x", "lock_holder": "daily-ops"}):
         got = d(**over)
         if got in SILENT_ACTIONS:
@@ -467,7 +542,7 @@ def selftest():
     for over, got in silent_leaks:
         print("FAIL a deferred job went SILENT as %s with %s" % (got, over))
     print("%-4s a job that deferred is never silent (%d input combinations)"
-          % ("FAIL" if silent_leaks else "PASS", 10))
+          % ("FAIL" if silent_leaks else "PASS", 11))
 
     print("\n%d/%d decision cases pass." % (len(cases) - len(failed), len(cases)))
     return 1 if (failed or silent_leaks) else 0

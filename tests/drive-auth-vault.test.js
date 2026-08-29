@@ -21,7 +21,24 @@ const CHECK = resolve(ROOT, 'scripts/drive-auth-check.py');
 
 // Drives run() with both halves stubbed, so the outcome is deterministic and
 // does not depend on this machine's Drive being up or down while tests run.
-function verdictFor({ api, vaultOk, vaultRaises = false }) {
+// `okOnAttempt` drives the 29 Aug retry: the probe fails until that attempt,
+// then reads. 0 means it never reads. Sleep is stubbed, so the ~10 minutes of
+// real patience costs the suite nothing — and the stub COUNTS the sleeps, so a
+// silent removal of the backoff shows up as attempts:1.
+function verdictFor({ api, vaultOk, vaultRaises = false, okOnAttempt = null,
+                      state = {} }) {
+  const probe = vaultRaises
+    ? "def _boom(): raise OSError(11, 'Resource deadlock avoided')\nm._drive_ready = _boom"
+    : okOnAttempt !== null
+      ? `_n = [0]
+def _probe():
+    _n[0] += 1
+    if ${okOnAttempt} and _n[0] >= ${okOnAttempt}:
+        return True, 'readable'
+    return False, 'cannot read founder-profile.md: [Errno 11] Resource deadlock avoided'
+m._drive_ready = _probe`
+      : `m._drive_ready = lambda: (${vaultOk ? 'True' : 'False'}, 'cannot read founder-profile.md: [Errno 11] Resource deadlock avoided')`;
+
   const py = `
 import importlib.util, io, json, sys, contextlib
 spec = importlib.util.spec_from_file_location('dac', ${JSON.stringify(CHECK)})
@@ -29,17 +46,21 @@ m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
 
 m.fetch = lambda: (200, '{}')
 m.classify = lambda sc, b: (${JSON.stringify(api)}, 'stubbed api')
-${vaultRaises
-  ? "def _boom(): raise OSError(11, 'Resource deadlock avoided')\nm._drive_ready = _boom"
-  : `m._drive_ready = lambda: (${vaultOk ? 'True' : 'False'}, 'cannot read founder-profile.md: [Errno 11] Resource deadlock avoided')`}
-m.load_state = lambda: {}
-m.save_state = lambda s: None
+${probe}
+_slept = []
+m._sleep = lambda s: _slept.append(s)
+_saved = {}
+m.load_state = lambda: json.loads(${JSON.stringify(JSON.stringify(state))})
+def _save(s): _saved.update(s)
+m.save_state = _save
 
 buf = io.StringIO()
 with contextlib.redirect_stdout(buf):
     code = m.run()
 out = json.loads(buf.getvalue())
 out['exit'] = code
+out['slept'] = _slept
+out['saved_state'] = _saved
 print(json.dumps(out))
 `;
   return JSON.parse(execFileSync('python3', ['-c', py], { encoding: 'utf8' }));
@@ -112,5 +133,82 @@ describe('drive-auth judges the local mount, not just the API', () => {
   it('the existing API classifier is untouched (9 cases still pass)', () => {
     const out = execFileSync('python3', [CHECK, 'selftest'], { encoding: 'utf8' });
     expect(out).toMatch(/9\/9 classifier cases pass/);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 29 Aug 2026, findings 394 and 397 — the SAME symptom filed twice, in opposite
+// directions, on the same morning.
+//
+// 394: at 06:50 the probe said BROKEN ('[Errno 11] Resource deadlock avoided');
+// at 07:12 the SAME file read 200 bytes. Google Drive File Stream is a FUSE
+// mount that finishes waking minutes after login, and EDEADLK is what it says
+// while it is still waking. One failed read became a whole-day verdict, and on
+// 28 Aug that cost compound-brain and feed-brain the day: BLOCKED from 06:50,
+// marked MISSED at 11:06, an hour AFTER the mount cleared at 10:06.
+//
+// 397: from 28 Aug 11:06Z to 29 Aug 09:30Z the mount was continuously
+// unreadable. A spot-check that happens to succeed must never downgrade that to
+// a flap. So patience is bounded AND the outage is timed across runs.
+// ─────────────────────────────────────────────────────────────────────────────
+describe('a cold mount is not a broken mount, and an outage is not a flap', () => {
+  it('BACK-TEST: a mount that reads on the second attempt is HEALTHY, not BROKEN', () => {
+    // Before this change the first EDEADLK was the verdict and this was BROKEN,
+    // which is exactly what lost 28 Aug.
+    const r = verdictFor({ api: 'HEALTHY', okOnAttempt: 2 });
+    expect(r.vault_verdict).toBe('HEALTHY');
+    expect(r.verdict).toBe('HEALTHY');
+    expect(r.alert_kevin).toBe(false);
+    expect(r.exit).toBe(0);
+  });
+
+  it('says it had to wait, so a slow mount is visible rather than invisible', () => {
+    const r = verdictFor({ api: 'HEALTHY', okOnAttempt: 3 });
+    expect(r.vault_attempts).toBe(3);
+    expect(r.vault_reason).toMatch(/attempt 3 of 5/);
+    expect(r.vault_reason).toMatch(/still waking/i);
+  });
+
+  it('actually backs off between attempts instead of spinning', () => {
+    const r = verdictFor({ api: 'HEALTHY', okOnAttempt: 4 });
+    expect(r.slept).toHaveLength(3);           // 3 gaps between 4 attempts
+    for (const s of r.slept) expect(s).toBeGreaterThan(0);
+  });
+
+  it('a mount that never reads is STILL BROKEN — patience is bounded', () => {
+    // The opposite mistake, and the worse one. 397 is a 22-hour outage.
+    const r = verdictFor({ api: 'HEALTHY', okOnAttempt: 0 });
+    expect(r.vault_verdict).toBe('BROKEN');
+    expect(r.vault_attempts).toBe(5);
+    expect(r.vault_reason).toMatch(/after 5 attempts/);
+    expect(r.alert_kevin).toBe(true);
+  });
+
+  it('times the outage across runs, so 22 hours cannot read as a cold start', () => {
+    const since = new Date(Date.now() - 22 * 3600 * 1000)
+      .toISOString().replace(/\.\d+Z$/, 'Z');
+    const r = verdictFor({ api: 'HEALTHY', vaultOk: false,
+                           state: { vault_broken_since: since } });
+    expect(r.vault_broken_hours).toBeGreaterThan(21);
+    expect(r.reason).toMatch(/OUTAGE, not a cold start/);
+  });
+
+  it('stamps the clock on the FIRST broken run and clears it on a good one', () => {
+    const first = verdictFor({ api: 'HEALTHY', vaultOk: false });
+    expect(first.saved_state.vault_broken_since).toBeTruthy();
+    // Under two hours it is not yet called an outage — that is the flap window.
+    expect(first.reason).not.toMatch(/OUTAGE/);
+
+    const cleared = verdictFor({ api: 'HEALTHY', vaultOk: true,
+                                 state: { vault_broken_since: '2026-08-28T11:06:00Z' } });
+    expect(cleared.saved_state.vault_broken_since).toBeNull();
+    expect(cleared.vault_broken_hours).toBe(0);
+  });
+
+  it('an unparseable stamp reports 0 hours, never an invented outage', () => {
+    const r = verdictFor({ api: 'HEALTHY', vaultOk: false,
+                           state: { vault_broken_since: 'not a date' } });
+    expect(r.vault_broken_hours).toBe(0);
+    expect(r.vault_verdict).toBe('BROKEN');   // still broken, just not timed
   });
 });

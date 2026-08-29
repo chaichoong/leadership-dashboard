@@ -1078,7 +1078,13 @@ def main(argv=None):
         return EX_OK
     if a.cmd == "mark":
         rec = event(a.job, "mark", note=a.note)
-        print("%s: marked as running at %s" % (a.job, rec["ts"]))
+        # THE NOTE DECIDES THE WORDING (finding 387, 28 Aug 2026). The event was
+        # always right — {state: mark, note: "end"} — but the console said
+        # "marked as running" for it, so an END stamp read as a START. A later
+        # run trusting the console instead of the log would conclude the end mark
+        # failed and re-stamp, or treat a finished day as unfinished.
+        print("%s: marked as %s at %s"
+              % (a.job, "FINISHED" if a.note == "end" else "running", rec["ts"]))
         return EX_OK
     return EX_USAGE
 

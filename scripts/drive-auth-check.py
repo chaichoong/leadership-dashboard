@@ -45,6 +45,7 @@ Usage
 import json
 import os
 import sys
+import time
 import urllib.error
 import urllib.request
 
@@ -182,23 +183,67 @@ def _drive_ready():
     return jq.drive_ready(VAULT)
 
 
+# ── ONE FAILED READ IS NOT A VERDICT (29 Aug 2026) ──────────────────────────
+#
+# The probe opened one file once and turned the first
+# `[Errno 11] Resource deadlock avoided` into a whole-day verdict. On 29 Aug at
+# 06:50 it returned BROKEN; at 07:12 the SAME path read 200 bytes with no error.
+# Google Drive File Stream is a FUSE mount that finishes waking some minutes
+# after login, and EDEADLK is what it returns while it is STILL WAKING — "not
+# ready yet", not "broken". Treating the first one as final cost compound-brain
+# and feed-brain the whole of 28 Aug: held BLOCKED from 06:50 and marked MISSED
+# at 11:06, an hour AFTER the mount had cleared at 10:06.
+#
+# So a BROKEN verdict now costs up to ~10 minutes of patience before it alarms.
+#
+# THE OPPOSITE MISTAKE IS THE WORSE ONE, and finding 397 filed it the same day:
+# from 28 Aug 11:06Z to 29 Aug 09:30Z the mount was continuously unreadable and
+# a single spot-check that happened to succeed must NEVER downgrade that to a
+# flap. Patience is therefore bounded, and run() records how long the mount has
+# been unreadable ACROSS runs, so a 22-hour outage cannot wear the face of a
+# cold start.
+VAULT_PROBE_ATTEMPTS = int(os.environ.get('DRIVE_VAULT_PROBE_ATTEMPTS', '5'))
+VAULT_PROBE_GAP_SECONDS = float(os.environ.get('DRIVE_VAULT_PROBE_GAP', '150'))
+
+
+def _sleep(seconds):
+    """Named so a test can replace it; time.sleep cannot be stubbed in place."""
+    time.sleep(seconds)
+
+
 def check_vault():
-    """Judge the local mount. Returns (verdict, reason).
+    """Judge the local mount. Returns (verdict, reason, attempts).
 
     A probe that itself blows up is UNKNOWN, never HEALTHY: an unreadable
-    control must not read as a pass.
+    control must not read as a pass. A probe that fails once and then succeeds
+    is HEALTHY, and says so — a mount that was merely slow to wake is not an
+    outage, and calling it one loses the brain jobs a day.
     """
-    try:
-        ok, why = _drive_ready()
-    except Exception as e:                                   # noqa: BLE001
-        return UNKNOWN, f'could not probe the local vault ({type(e).__name__}: {e})'
-    if ok:
-        return HEALTHY, 'local vault readable'
+    attempts = max(1, VAULT_PROBE_ATTEMPTS)
+    why = 'the probe never ran'
+    for attempt in range(1, attempts + 1):
+        try:
+            ok, why = _drive_ready()
+        except Exception as e:                               # noqa: BLE001
+            return (UNKNOWN,
+                    f'could not probe the local vault ({type(e).__name__}: {e})',
+                    attempt)
+        if ok:
+            if attempt == 1:
+                return HEALTHY, 'local vault readable', attempt
+            return (HEALTHY,
+                    f'local vault readable, but only on attempt {attempt} of '
+                    f'{attempts} — the mount was still waking, not broken',
+                    attempt)
+        if attempt < attempts:
+            _sleep(VAULT_PROBE_GAP_SECONDS)
+    waited = round(VAULT_PROBE_GAP_SECONDS * (attempts - 1) / 60)
     return BROKEN, (
-        f'the local Drive mount is NOT readable ({why}). Every job that reads the '
+        f'the local Drive mount is NOT readable after {attempts} attempts over '
+        f'~{waited} minutes ({why}). Every job that reads the '
         f'brain vault will defer and give up: feed-brain, compound-brain, '
         f'publish-brain, knowledge-os-sort. The Drive API can be fine while this '
-        f'is broken, and on 24-27 Aug 2026 it was.')
+        f'is broken, and on 24-27 Aug 2026 it was.'), attempts
 
 
 def fetch():
@@ -212,10 +257,46 @@ def fetch():
         return None, f'{type(e).__name__}: {e}'
 
 
+def _iso_now():
+    return time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
+
+
+def _hours_since(stamp):
+    """Hours between an ISO-Z stamp and now. A stamp we cannot parse reads as 0,
+    never as a huge number: an unreadable clock must not invent an outage."""
+    try:
+        t = time.strptime(stamp, '%Y-%m-%dT%H:%M:%SZ')
+    except (TypeError, ValueError):
+        return 0.0
+    import calendar
+    return max(0.0, (time.time() - calendar.timegm(t)) / 3600.0)
+
+
 def run():
     status_code, body = fetch()
     api_verdict, api_reason = classify(status_code, body)
-    vault_verdict, vault_reason = check_vault()
+    vault_verdict, vault_reason, vault_attempts = check_vault()
+
+    state = load_state()
+    gate_streak = state.get('consecutive_gate', 0)
+
+    # HOW LONG, not just whether (finding 397, 29 Aug 2026). A single verdict
+    # cannot tell a cold-start flap from a 22-hour outage, and on 28-29 Aug the
+    # two were confused in both directions on the same day. The first run that
+    # sees an unreadable mount stamps the clock; every later run reports the
+    # elapsed hours until a HEALTHY read clears it.
+    broken_since = state.get('vault_broken_since')
+    if vault_verdict == HEALTHY:
+        broken_since = None
+        vault_broken_hours = 0.0
+    else:
+        broken_since = broken_since or _iso_now()
+        vault_broken_hours = _hours_since(broken_since)
+        if vault_broken_hours >= 2:
+            vault_reason += (
+                f' The mount has now been unreadable for {vault_broken_hours:.1f} '
+                f'hours (since {broken_since}). This is an OUTAGE, not a cold start.')
+    state['vault_broken_since'] = broken_since
 
     # WORST OF THE TWO WINS, and the reason NAMES the half that failed.
     # A score graded all-or-nothing across several things, with no record of
@@ -229,9 +310,6 @@ def run():
         verdict, reason = api_verdict, 'Drive API: ' + api_reason
         if vault_verdict != HEALTHY:
             reason += f' | local mount: {vault_reason}'
-
-    state = load_state()
-    gate_streak = state.get('consecutive_gate', 0)
 
     if verdict == GATE:
         gate_streak += 1
@@ -259,6 +337,8 @@ def run():
         'api_verdict': api_verdict,
         'vault_verdict': vault_verdict,
         'vault_reason': vault_reason,
+        'vault_attempts': vault_attempts,
+        'vault_broken_hours': round(vault_broken_hours, 2),
         'alert_kevin': verdict in (BROKEN, UNKNOWN),
         'consecutive_gate': gate_streak,
         'raw': body[:600],

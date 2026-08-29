@@ -191,6 +191,20 @@ describe('staleness cut-off', () => {
 // The core promise: one at a time.
 // ---------------------------------------------------------------------------
 describe('serialisation under real concurrency', () => {
+  // RETRYABLE, and only these two (finding 20260821-queue-fixer-298).
+  //
+  // Both drive REAL subprocesses against a REAL lock, so under load it is the OS
+  // scheduler, not the lock, that decides whether a holder's heartbeat lands in
+  // time — and a starved heartbeat lets the lease lapse, which is the documented
+  // behaviour, not a bug. Measured on the 21 Aug merge run: one failure in the
+  // #90 pass, two in #96, zero in three consecutive isolated runs, zero on a
+  // re-run of the full suite (763/763).
+  //
+  // A gate that goes red for reasons unrelated to the change is precisely what
+  // teaches people to reach for SKIP_SYNC_TESTS=1, which CLAUDE.md already warns
+  // about. Retrying is safe HERE because the guarantee under test is absolute:
+  // a genuine serialisation regression overlaps on every attempt, so it still
+  // fails all three. Do not copy this to a test whose bug is itself intermittent.
   it('runs five simultaneous jobs strictly one at a time', async () => {
     const jobs = ['alpha', 'bravo', 'charlie', 'delta', 'echo'];
     const results = await Promise.all(jobs.map((j) =>
@@ -227,7 +241,7 @@ describe('serialisation under real concurrency', () => {
       }
     }
     expect(holder).toBeNull();
-  }, 60000);
+  }, { timeout: 60000, retry: 2 });
 
   it('reports a queue depth, proving jobs actually waited', async () => {
     const jobs = ['one', 'two', 'three'];
@@ -369,6 +383,27 @@ describe('rantoday', () => {
 
   it('an empty history is a safe start, not an error', () => {
     expect(run(['rantoday', 'daily-ops', '--now', '2026-08-20T09:00:00Z']).code).toBe(0);
+  });
+
+  // Finding 20260828-daily-ops-387. `mark --note end` wrote the right event and
+  // printed the WRONG sentence: "daily-ops: marked as running". Verified live on
+  // 28 Aug 07:24. rantoday reads the log so it was unaffected, but a human or a
+  // later run reading the console would conclude the end mark failed and
+  // re-stamp it, or treat a finished day as unfinished.
+  it('an END stamp says FINISHED, and a start still says running', () => {
+    const end = run(['mark', 'daily-ops', '--note', 'end']);
+    expect(end.stdout).toMatch(/marked as FINISHED at /);
+    expect(end.stdout, 'the 387 bug returning').not.toMatch(/marked as running/);
+
+    const start = run(['mark', 'daily-ops']);
+    expect(start.stdout).toMatch(/marked as running at /);
+    expect(start.stdout).not.toMatch(/FINISHED/);
+  });
+
+  it('the wording changed, the EVENT did not — the log is what rantoday reads', () => {
+    run(['mark', 'daily-ops', '--note', 'end']);
+    const marks = events().filter((e) => e.state === 'mark');
+    expect(marks.at(-1).note).toBe('end');
   });
 });
 
@@ -704,7 +739,10 @@ describe('lock is never observed half-made', () => {
     mkdirSync(lockDir, { recursive: true });
     expect(orphaned(), 'the orphan check stopped detecting a real half-made lock').toBe(true);
     rmSync(lockDir, { recursive: true, force: true });
-  });
+    // Retryable for the same reason as the five-job test above, and with the
+    // same limit: the CONTROL at the end of this test is not timing-dependent,
+    // so a watcher that has gone blind still fails every attempt.
+  }, { retry: 2 });
 
   it('leaves no staging or dropped directories behind', () => {
     run(['acquire', 'tidy', '--no-stale-check']);

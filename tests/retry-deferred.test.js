@@ -19,7 +19,7 @@ const read = (p) => readFileSync(resolve(ROOT, p), 'utf8');
 describe('retry-deferred decision table', () => {
   it('passes its own selftest, covering every branch', () => {
     const out = execFileSync('python3', [SWEEP, 'selftest'], { encoding: 'utf8' });
-    expect(out).toMatch(/11\/11 decision cases pass/);
+    expect(out).toMatch(/15\/15 decision cases pass/);
     expect(out).not.toMatch(/^FAIL/m);
   });
 
@@ -223,5 +223,121 @@ describe('the jobs that lost days are opted in, and the sweep is registered', ()
     const m = src.match(/if not has_label:[\s\S]{0,240}/);
     expect(m).not.toBeNull();
     expect(m[0]).toContain('"error"');
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 29 Aug 2026, finding 397. maxLateMinutes 720 turns a long outage into a
+// silent lost day. From 28 Aug 23:07Z to 29 Aug 09:08Z every hourly pass logged
+// "still blocked: cannot read founder-profile.md [Errno 11]" for compound-brain,
+// feed-brain and publish-brain. compound-brain last ran 27 Aug 16:33 and
+// feed-brain 27 Aug 16:17 — the brain went TWO DAYS unfed, unpublished and
+// uncompounded, and the only signal was one drive-auth line and hourly BLOCKED
+// lines nobody reads. A lost morning and a job that has stopped printed the
+// same word.
+// ─────────────────────────────────────────────────────────────────────────────
+describe('a job silent for two days is escalated, not filed under MISSED', () => {
+  // Drives the real decide() so the branch is exercised, not just grepped for.
+  const decide = (over) => {
+    const py = `
+import importlib.util, json
+from datetime import datetime, timedelta
+spec = importlib.util.spec_from_file_location('rd', ${JSON.stringify(SWEEP)})
+m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+now = datetime(2026, 8, 29, 11, 30)
+cfg = {"cron": "0 23 * * *", "maxLateMinutes": 960, "retryWhenDeferred": True}
+base = dict(due=now - timedelta(hours=12), late=720.0, is_stale=True, opted_in=True,
+            has_label=True, succeeded=False, defer_reason="cannot read founder-profile.md",
+            ready=False, ready_why="drive", lock_holder=None, attempts=0, days_silent=0)
+base.update(json.loads(${JSON.stringify(JSON.stringify(over))}))
+action, reason = m.decide("compound-brain", cfg, now, **base)
+print(json.dumps({"action": action, "reason": reason}))
+`;
+    return JSON.parse(execFileSync('python3', ['-c', py], { encoding: 'utf8' }));
+  };
+
+  it('BACK-TEST: two days silent is STOPPED, where it used to be plain MISSED', () => {
+    const r = decide({ days_silent: 2 });
+    expect(r.action).toBe('missed-days');
+    expect(r.reason).toMatch(/HAS NOT COMPLETED FOR 2 DAYS/);
+  });
+
+  it('CONTROL: one lost day is still an ordinary MISSED, or the alarm is noise', () => {
+    // Escalating on every late morning is what teaches people to ignore it.
+    expect(decide({ days_silent: 1 }).action).toBe('missed');
+    expect(decide({ days_silent: 0 }).action).toBe('missed');
+  });
+
+  it('a job never seen completing here is not turned into a fake escalation', () => {
+    expect(decide({ days_silent: null }).action).toBe('missed');
+  });
+
+  it('escalation needs the job to be OUT of its window, not merely stale data', () => {
+    // Still inside maxLateMinutes means it can still be re-fired today.
+    expect(decide({ days_silent: 9, is_stale: false, ready: true }).action).toBe('retry');
+  });
+
+  it('report() names the stopped jobs on their own line and fails the run', () => {
+    const py = `
+import importlib.util, io, json, contextlib
+spec = importlib.util.spec_from_file_location('rd', ${JSON.stringify(SWEEP)})
+m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+rows = [
+  {"job": "compound-brain", "action": "missed-days", "reason": "stopped", "due": None},
+  {"job": "feed-brain", "action": "missed-days", "reason": "stopped", "due": None},
+  {"job": "masterplan-sync", "action": "blocked", "reason": "still blocked", "due": None},
+]
+buf = io.StringIO()
+with contextlib.redirect_stdout(buf):
+    code = m.report(rows)
+print(json.dumps({"out": buf.getvalue(), "code": code}))
+`;
+    const r = JSON.parse(execFileSync('python3', ['-c', py], { encoding: 'utf8' }));
+    expect(r.out).toMatch(/ESCALATE: compound-brain, feed-brain/);
+    // On its own line near the top — buried thirty lines down among BLOCKED
+    // noise is how the brain went two days unfed with something printed daily.
+    const lines = r.out.split('\n');
+    expect(lines.findIndex((l) => l.includes('ESCALATE'))).toBeLessThan(2);
+    expect(r.code, 'a stopped job must not exit 0').toBe(1);
+  });
+
+  it('CONTROL: an ordinary MISSED still exits 0, so the escalation means something', () => {
+    const py = `
+import importlib.util, io, json, contextlib
+spec = importlib.util.spec_from_file_location('rd', ${JSON.stringify(SWEEP)})
+m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+rows = [{"job": "feed-brain", "action": "missed", "reason": "late", "due": None}]
+buf = io.StringIO()
+with contextlib.redirect_stdout(buf):
+    code = m.report(rows)
+print(json.dumps({"out": buf.getvalue(), "code": code}))
+`;
+    const r = JSON.parse(execFileSync('python3', ['-c', py], { encoding: 'utf8' }));
+    expect(r.code).toBe(0);
+    expect(r.out).not.toMatch(/ESCALATE/);
+  });
+});
+
+describe('the Drive-gated jobs get a window a morning flap cannot eat', () => {
+  // 28 Aug: the mount cleared at 10:06 and compound-brain was marked MISSED at
+  // 11:06 anyway, because 23:00 + 720 min expires at 11:00. The window has to
+  // outlast a morning flap or retry-deferred can never rescue anything.
+  for (const job of ['feed-brain', 'compound-brain', 'publish-brain']) {
+    it(`${job} survives past midday`, () => {
+      const cfg = SCHEDULE[job];
+      const [, hh] = cfg.cron.split(' ');
+      const expiresAt = Number(hh) * 60 + Number(cfg.cron.split(' ')[0]) + cfg.maxLateMinutes;
+      // Minutes past its own start; it fires the night before, so > 24h means
+      // it would never be skipped at all, which is the opposite mistake.
+      expect(expiresAt, 'must reach past 13:00 the next day').toBeGreaterThan(24 * 60 + 13 * 60);
+      expect(cfg.maxLateMinutes, 'must still be skippable').toBeLessThan(1440);
+      expect(cfg.retryWhenDeferred).toBe(true);
+    });
+  }
+
+  it('knowledge-os-sort keeps a window inside the same working day', () => {
+    const cfg = SCHEDULE['knowledge-os-sort'];
+    expect(cfg.maxLateMinutes).toBeGreaterThan(480);
+    expect(9 * 60 + cfg.maxLateMinutes).toBeLessThanOrEqual(20 * 60);
   });
 });
