@@ -213,8 +213,9 @@
     ]
   },
   "knowledge-os-sort": {
+    "note": "Drive-gated. maxLateMinutes raised 480 -> 600 on 29 Aug 2026 (findings 394/397) for the same reason as the three brain jobs: a morning mount flap must not cost the day. 09:00 + 600 reaches 19:00, still the same working day.",
     "cron": "0 9 * * *",
-    "maxLateMinutes": 480,
+    "maxLateMinutes": 600,
     "mode": "wrapped",
     "needs": [
       {
@@ -242,8 +243,9 @@
     ]
   },
   "feed-brain": {
+    "note": "Drive-gated. maxLateMinutes raised 29 Aug 2026 (findings 394/397): a morning Drive-mount flap used to cost the whole day. feed/compound/publish fire at 22:45-23:20, so 720 min expired at ~11:00 \u2014 on 28 Aug the mount cleared at 10:06 and they were marked MISSED at 11:06 anyway. 960 carries them to mid-afternoon, which is still worth doing; beyond that they would collide with the next night's run, so the window stops there rather than becoming never-skipped.",
     "cron": "45 22 * * *",
-    "maxLateMinutes": 720,
+    "maxLateMinutes": 960,
     "mode": "wrapped",
     "needs": [
       "network",
@@ -254,8 +256,9 @@
     "retryWhenDeferred": true
   },
   "compound-brain": {
+    "note": "Drive-gated. maxLateMinutes raised 29 Aug 2026 (findings 394/397): a morning Drive-mount flap used to cost the whole day. feed/compound/publish fire at 22:45-23:20, so 720 min expired at ~11:00 \u2014 on 28 Aug the mount cleared at 10:06 and they were marked MISSED at 11:06 anyway. 960 carries them to mid-afternoon, which is still worth doing; beyond that they would collide with the next night's run, so the window stops there rather than becoming never-skipped.",
     "cron": "0 23 * * *",
-    "maxLateMinutes": 720,
+    "maxLateMinutes": 960,
     "mode": "wrapped",
     "needs": [
       "network",
@@ -266,8 +269,9 @@
     "retryWhenDeferred": true
   },
   "publish-brain": {
+    "note": "Drive-gated. maxLateMinutes raised 29 Aug 2026 (findings 394/397): a morning Drive-mount flap used to cost the whole day. feed/compound/publish fire at 22:45-23:20, so 720 min expired at ~11:00 \u2014 on 28 Aug the mount cleared at 10:06 and they were marked MISSED at 11:06 anyway. 960 carries them to mid-afternoon, which is still worth doing; beyond that they would collide with the next night's run, so the window stops there rather than becoming never-skipped.",
     "cron": "20 23 * * *",
-    "maxLateMinutes": 720,
+    "maxLateMinutes": 960,
     "mode": "wrapped",
     "needs": [
       "network",
