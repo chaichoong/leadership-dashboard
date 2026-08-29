@@ -367,9 +367,21 @@ Follow `~/.claude/scheduled-tasks/queue-fixer/SKILL.md`, with these changes:
 
 **Close findings honestly.** A fix that is written but sitting in an open PR is `--outcome pending --pr <n>`, NOT `--outcome fixed`. On 26 Aug 2026 four fixer PRs (#107, #110, #126, #137) were all open and unmerged while forty findings sat closed as "fixed" citing them — the queue was reporting work as done that had never reached production. When a PR merges, `python3 scripts/findings.py land --pr <n>` turns its pending findings into fixed.
 
-**Before you open a new PR, check the old ones.** If three or more fixer PRs are open and unmerged, do NOT open a fourth. Say so at the top of the report as the one thing Kevin must do, because until he merges them the fix queue has a drain rate of zero and everything you write today is theatre.
+**Before you open a new PR, check the old ones.** Since 29 Aug 2026 the fixer merges its own
+green work, so an open fixer PR now means one of two things and the report must say which: the
+gate went RED, or it touched a protected path and is waiting for Kevin. If three or more are
+open, do NOT open a fourth — that is the drain failing again, and only he can clear it.
 
-Cap at ten findings, one pull request, and do NOT merge it. Kevin reviews.
+Cap at **25** findings and one pull request, then **merge it through the gate**:
+
+```
+python3 scripts/fixer-merge.py merge --pr <n>
+```
+
+Kevin's ruling, 29 Aug 2026. He was the drain — 213 open findings against a cap of ten — and the
+gate is stricter than his glance: full vitest AND browser suite, and an outright refusal on
+money, auth, the approval loop, the send path, shared files and the workers. Those stay open and
+go on NEEDS YOU. A red gate leaves the PR open and merges nothing.
 
 ## Phase 5 — Report
 
