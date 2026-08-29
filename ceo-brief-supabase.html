@@ -258,10 +258,14 @@ function healthChecks() {
   const due = localHour(tz) >= Number(cfg.send_hour) + 1;
   const latest = briefs[0];
   const age = latest ? daysBetween(today, latest.brief_date) : null;
+  // Order matters. A row that EXISTS is always reported on, pass or fail; the weekend
+  // excuse only covers an ABSENT brief. A run that fired on a Saturday and failed still
+  // failed, and answering "No brief at weekends" puts a green tick over a broken brief
+  // while the card beside it says "Brief failed". This is the order renderToday() uses.
   const arrived = !cfg.enabled ? { st: 'warn', s: 'Not switched on' }
-    : weekend ? { st: 'ok', s: 'No brief at weekends' }
     : todayRow && todayRow.fallback ? { st: 'fail', s: 'Brief failed today' }
     : todayRow ? { st: 'ok', s: 'Arrived' }
+    : weekend ? { st: 'ok', s: 'No brief at weekends' }
     : due ? { st: 'fail', s: `Missing after ${hourLabel(cfg.send_hour)}` }
     : { st: 'warn', s: `Due at ${hourLabel(cfg.send_hour)}` };
   return [
