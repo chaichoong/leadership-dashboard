@@ -92,7 +92,29 @@ gh pr create --title "Queue fixer {date}: N findings" --body "..."
 
 Body must list, per finding: the ID, what was wrong, what you changed, and the test that now covers it. Include the count left in the queue.
 
-Do NOT merge it yourself. Kevin reviews. This is the review step the old auto-fixing routines skipped.
+Then MERGE IT YOURSELF, through the gate:
+
+```
+python3 /Users/kevinbrittain/Projects/leadership-dashboard/scripts/fixer-merge.py merge --pr <n>
+```
+
+**Kevin's ruling, 29 Aug 2026:** "the fixer needs to merge them all so that there's nothing left
+hanging that's not finished." He was the drain on the whole queue and he is not a code reviewer.
+On the day he said it there were 213 open findings, 4 critical, 8 more in overflow, and two fixer
+PRs sitting unmerged — while this very file said that until he merged them "the fix queue has a
+drain rate of zero and everything you write today is theatre."
+
+**What replaced his review is not nothing.** `fixer-merge.py` is stricter than a glance:
+
+- It runs the FULL gate — vitest AND the browser suite. `npm test` is vitest only, and both of
+  this platform's worst incidents would have walked straight through a vitest-only check.
+- It REFUSES to auto-merge anything touching a protected path: money, auth, the approval loop
+  itself, the outbound send path, the shared files every page loads, and the workers. Those stay
+  open as a PR and go on the NEEDS YOU line. A wrong fix there is not a bug, it is an incident.
+- A red gate leaves the PR open. It never merges "probably fine".
+
+Do not merge with a bare `gh pr merge`. The gate is the point, and skipping it is how an
+unreviewed change to the approval loop reaches production.
 
 ## STEP 6 — Release, always
 
@@ -108,7 +130,14 @@ Do NOT DM Kevin (Slack contract, 21 Aug 2026). Return to daily-ops: how many fin
 
 ## Rules
 
-- One PR per run. Never push straight to main.
+- One PR per run. Never push straight to main — the PR is the audit trail even when the
+  fixer merges it itself.
 - Never `git stash`. Another session's work is usually in the main checkout.
 - Never fix something absent from the findings queue. If you spot a new problem, add it as a finding for tomorrow rather than widening today's run.
-- Cap of 10 is a real cap, reported not hidden.
+- **Cap of 25 per run** (raised from 10 on 29 Aug 2026, with auto-merge). It is a real cap,
+  reported not hidden. It was never a safety limit — it was set when the drain was Kevin's
+  review time, and the fixer now drains its own work.
+- **Report the arithmetic, not just the count.** Findings filed today, findings closed today,
+  and the resulting open total. A queue fed at 20 and drained at 25 clears; one fed at 20 and
+  drained at 10 does not, and only the arithmetic says which is happening. On 29 Aug 2026 it
+  stood at 213 open against a cap of 10 — a backlog nothing could reach.
