@@ -441,54 +441,93 @@ async function main() {
   // transcript with the existing public-endpoint fetcher and read what he
   // actually said. Two steps on purpose: the library needs his session, the
   // transcript does not.
+  // ── loom-search ────────────────────────────────────────────────────────────
+  // "Search my Loom library" — Kevin's ask, 29 Aug 2026, against 2,255 videos.
+  //
+  // IT READS THE SEARCH RESPONSE, NOT THE PAGE. Two earlier attempts failed in
+  // ways worth recording, because both LOOKED like they worked:
+  //
+  //   1. `?search=` in the URL is IGNORED by Loom. It returned the same library
+  //      for every query — proven by running two unrelated queries and getting
+  //      byte-identical ids back. "Here are your matches" that is really "here
+  //      are your newest videos" is worse than an error.
+  //   2. Typing into the box DOES search, but the results render in a typeahead
+  //      listbox that contains NO links and no video id anywhere in the DOM,
+  //      while the library grid behind it never changes. Scraping the page
+  //      therefore returns the grid, i.e. the same bug as (1).
+  //
+  // The typeahead calls loom.com/graphql, and that response carries exactly
+  // what is needed: id, name, share URI, duration, date, and `matchedFields`
+  // saying whether the hit was in the TITLE or the TRANSCRIPT. Loom indexes
+  // transcripts, which is the thing that makes this worth having at all.
   if (cmd === 'loom-search') {
     const query = arg(rest, 'query');
     if (!query) die('--query is required');
     const limit = Number(arg(rest, 'limit', '20')) || 20;
     const shot = arg(rest, 'shot');
-    const url = 'https://www.loom.com/looms/videos?search=' + encodeURIComponent(query);
-    if (!hostAllowed(url)) die('loom.com is not on the allowlist.');
+    const LIB = 'https://www.loom.com/looms/videos';
+    if (!hostAllowed(LIB)) die('loom.com is not on the allowlist.');
 
     const res = await withPage(profile, false, async (page) => {
-      await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 45000 });
-      // Loom renders the library client-side, so the links arrive after load.
-      // A fixed sleep would be a race; waiting for the selector and tolerating
-      // the timeout lets the not-signed-in case fall through to the check
-      // below instead of throwing something less useful.
-      await page.waitForSelector('a[href*="/share/"]', { timeout: 15000 })
+      const hits = [];
+      page.on('response', async (r) => {
+        if (!/\/graphql/.test(r.url()) || r.request().method() !== 'POST') return;
+        try {
+          const j = await r.json();
+          const nodes = j?.data?.videos?.videoResults?.nodes;
+          if (Array.isArray(nodes) && nodes.length) hits.push(nodes);
+        } catch { /* not JSON, or a response we do not care about */ }
+      });
+
+      await page.goto(LIB, { waitUntil: 'domcontentloaded', timeout: 45000 });
+      await page.waitForSelector('a[href*="/share/"]', { timeout: 20000 })
         .catch(() => {});
 
+      // Signed out is decided by whether the LIBRARY rendered, not by hunting
+      // for the words "log in": Loom's marketing pages carry /share/ links, so
+      // a text test alone reads the login page as a full library.
       const signedOut = await page.evaluate(() =>
-        /log ?in|sign ?in|get started free/i.test(document.body.innerText.slice(0, 1500))
-        && !document.querySelector('a[href*="/share/"]'));
+        /\/login/.test(location.pathname) ||
+        !document.querySelector('a[href*="/share/"]'));
+      if (signedOut) return { signedOut: true, videos: [], count: 0 };
 
-      const videos = await page.evaluate((max) => {
-        const seen = new Set();
-        const out = [];
-        for (const a of document.querySelectorAll('a[href*="/share/"]')) {
-          const m = (a.getAttribute('href') || '').match(/\/share\/([0-9a-f]{32})/i);
-          if (!m || seen.has(m[1])) continue;
-          seen.add(m[1]);
-          // The title is the link's own text where it has any, otherwise the
-          // nearest heading in its card.
-          const card = a.closest('[class*="card"], li, article') || a;
-          const title = (a.innerText || '').trim()
-            || (card.querySelector('h1,h2,h3,h4,[class*="title"]')?.innerText || '').trim();
-          out.push({ id: m[1], title: title.slice(0, 160),
-                     url: 'https://www.loom.com/share/' + m[1] });
-          if (out.length >= max) break;
-        }
-        return out;
-      }, limit);
+      const box = page.locator('input[aria-label*="Search for people"]').first();
+      await box.waitFor({ timeout: 15000 });
+      await box.click();
+      await box.fill(query);
+
+      // Wait for the SEARCH RESPONSE, not for a length of time. A sleep a shade
+      // too short falls back to whatever was on screen, which is the unfiltered
+      // library — the exact failure this command already had twice.
+      await page.waitForFunction(() => true, null, { timeout: 1 }).catch(() => {});
+      const deadline = Date.now() + 20000;
+      while (!hits.length && Date.now() < deadline) await page.waitForTimeout(250);
 
       const png = await shoot(page, shot);
-      return { query, signedOut, count: videos.length, videos, screenshot: png };
+      if (!hits.length) return { signedOut: false, noResponse: true, videos: [], count: 0, screenshot: png };
+
+      const nodes = hits[hits.length - 1].slice(0, limit);
+      const videos = nodes.map((n) => {
+        const v = n.video || {};
+        const matched = (n.matchedFields || []).map((f) => f.fieldName);
+        const secs = Number(v.playable_duration) || 0;
+        return {
+          id: v.id,
+          title: v.name || '',
+          url: (v.sharePageUri || ('https://loom.com/share/' + v.id))
+                 .replace('https://loom.com', 'https://www.loom.com'),
+          recorded: (v.createdAt || '').slice(0, 10),
+          duration: secs >= 60 ? `${Math.round(secs / 60)} min` : `${Math.round(secs)} sec`,
+          // The useful part: a transcript hit means he SAID it, even though the
+          // title never mentions it.
+          matchedTranscript: matched.includes('transcriptText'),
+          matchedTitle: matched.includes('name'),
+        };
+      }).filter((v) => v.id);
+      return { signedOut: false, count: videos.length, videos, screenshot: png };
     });
 
     if (res.signedOut) {
-      // Say it plainly rather than returning an empty list. "No videos found"
-      // and "you are not signed in" look identical to a caller and mean
-      // opposite things — one is an answer, the other is a broken session.
       console.log(JSON.stringify({
         query, error: 'NOT SIGNED IN to Loom in the agent profile. '
           + 'This is a one-time human step, and no password ever reaches an agent:'
@@ -498,9 +537,20 @@ async function main() {
       ledger({ cmd: 'loom-search', query, profile, error: 'not signed in' });
       return;
     }
+    if (res.noResponse) {
+      // NEVER report this as "no matches". An empty answer and a search that
+      // never ran look identical to a caller and mean opposite things.
+      console.log(JSON.stringify({
+        query, error: 'Loom returned no search response within 20s. This is NOT '
+          + '"no matches" — the search did not run. Retry; if it persists the '
+          + 'typeahead has changed and loom-search needs re-pointing.',
+        videos: [] }, null, 2));
+      ledger({ cmd: 'loom-search', query, profile, error: 'no search response' });
+      return;
+    }
     ledger({ cmd: 'loom-search', query, profile, count: res.count,
              screenshot: res.screenshot });
-    console.log(JSON.stringify(res, null, 2));
+    console.log(JSON.stringify(Object.assign({ query }, res), null, 2));
     return;
   }
 
