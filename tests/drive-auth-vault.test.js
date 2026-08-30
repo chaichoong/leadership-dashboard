@@ -165,7 +165,7 @@ describe('a cold mount is not a broken mount, and an outage is not a flap', () =
   it('says it had to wait, so a slow mount is visible rather than invisible', () => {
     const r = verdictFor({ api: 'HEALTHY', okOnAttempt: 3 });
     expect(r.vault_attempts).toBe(3);
-    expect(r.vault_reason).toMatch(/attempt 3 of 5/);
+    expect(r.vault_reason).toMatch(/attempt 3 of 13/);
     expect(r.vault_reason).toMatch(/still waking/i);
   });
 
@@ -179,8 +179,40 @@ describe('a cold mount is not a broken mount, and an outage is not a flap', () =
     // The opposite mistake, and the worse one. 397 is a 22-hour outage.
     const r = verdictFor({ api: 'HEALTHY', okOnAttempt: 0 });
     expect(r.vault_verdict).toBe('BROKEN');
-    expect(r.vault_attempts).toBe(5);
-    expect(r.vault_reason).toMatch(/after 5 attempts/);
+    expect(r.vault_attempts).toBe(13);
+    expect(r.vault_reason).toMatch(/after 13 attempts/);
+    expect(r.alert_kevin).toBe(true);
+  });
+
+  // 30 Aug 2026, finding 20260830-exceptions-412. The window was 5x150s
+  // (~10 minutes) and alarmed BROKEN four mornings running while the mount
+  // healed on its own minutes later — on 30 Aug the same file read fine at
+  // 07:15 after the probe gave up at 07:00, and ceo-agent acquired cleanly at
+  // 07:07:29 under its 45-minute allowance. The window must cover the OBSERVED
+  // recovery, not a guess.
+  it('waits out the mount\'s own recovery: the window spans at least 25 minutes', () => {
+    const r = verdictFor({ api: 'HEALTHY', okOnAttempt: 0 });
+    const waitedSeconds = r.slept.reduce((a, b) => a + b, 0);
+    expect(waitedSeconds).toBeGreaterThanOrEqual(25 * 60);
+    // BACK-TEST: the old 5x150s window totalled 600s and fails this assertion.
+    expect(waitedSeconds).toBeGreaterThan(600);
+  });
+
+  it('BACK-TEST: a mount that heals at the 25-minute mark is HEALTHY, not BROKEN', () => {
+    // Attempt 11 sits at 25 minutes in (10 gaps x 150s). Under the old
+    // 5-attempt window the probe had already returned BROKEN and alerted.
+    const r = verdictFor({ api: 'HEALTHY', okOnAttempt: 11 });
+    expect(r.vault_verdict).toBe('HEALTHY');
+    expect(r.alert_kevin).toBe(false);
+    expect(r.exit).toBe(0);
+  });
+
+  it('patience stays BOUNDED — widening the window did not remove the ceiling', () => {
+    // Finding 397's half of the contract. A 22-hour outage must not wear the
+    // face of a cold start just because the probe now waits longer.
+    const r = verdictFor({ api: 'HEALTHY', okOnAttempt: 0 });
+    expect(r.slept.length).toBeLessThan(60);
+    expect(r.vault_verdict).toBe('BROKEN');
     expect(r.alert_kevin).toBe(true);
   });
 

@@ -254,18 +254,34 @@ INVARIANTS = [
         # and its routinely open-past-date reminders contributed 24 of 30
         # hits on the day this was written — a flood that would have made
         # the alarm unreadable from day one.
+        # A FUTURE `Deferred Until` is a DECISION, not a miss (finding
+        # 20260830-exceptions-413, 30 Aug 2026). Kevin knocking an approval
+        # back to a later date is the documented park mechanism, and the
+        # knock-back-only-parks-live-approvals invariant separately guards that
+        # those tasks stay at Status Approval. Without this clause the parked
+        # task reads identically to one nobody has touched: recM60eTkHuO7fTdV
+        # (Sefton HMO licence fee, 23 Viola Street, due 28 Aug, parked to
+        # 27 Sep) would have reported a violation every morning until 27 Sep,
+        # which trains the routine to skim the count — and the genuinely
+        # unattended council tax summons was sitting in the same list of three.
+        # Blank-safe by construction: an empty date field is falsey in Airtable,
+        # so AND({Deferred Until}, ...) is FALSE when blank and NOT() keeps the
+        # task in the population. The control deliberately still matches the
+        # FULL overrun population, so a typo'd field name here fails loudly
+        # instead of quietly excluding everything.
         "name": "hard-deadline-passed-still-open",
         "table": TASKS,
         "incident": "3 Jul – 24 Aug 2026 — dated legal response windows in scanned post closed unread; no task ever carried the date",
-        "asserts": "hard-deadline task with its date passed => the task is closed",
+        "asserts": "hard-deadline task with its date passed, and not deliberately parked to a future date => the task is closed",
         "violation": (
             "AND({Hard Deadline} = 1, {Due Date}, {Due Date} < TODAY(), "
             "{Status} != 'Completed', {Status} != 'Cancelled', "
+            "NOT(AND({Deferred Until}, {Deferred Until} > TODAY())), "
             "FIND('UC verification:', {Task Name}) = 0)"
         ),
         "control": "AND({Hard Deadline} = 1, {Due Date})",
         "control_means": "hard-deadline tasks carrying a due date (the population triage stamps)",
-        "fields": ["Task Name", "Status", "Due Date", "Hard Deadline"],
+        "fields": ["Task Name", "Status", "Due Date", "Hard Deadline", "Deferred Until"],
     },
     {
         # `Completion Date` is a dateTime and `Due Date` is a plain date, which
