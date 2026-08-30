@@ -194,7 +194,28 @@ def _drive_ready():
 # and feed-brain the whole of 28 Aug: held BLOCKED from 06:50 and marked MISSED
 # at 11:06, an hour AFTER the mount had cleared at 10:06.
 #
-# So a BROKEN verdict now costs up to ~10 minutes of patience before it alarms.
+# So a BROKEN verdict now costs up to ~30 minutes of patience before it alarms.
+#
+# 30 AUG 2026, finding 20260830-exceptions-412 — WHY IT IS 30 AND NOT 10.
+# The 5x150s window (~10 minutes) was a guess, and it was too short four
+# mornings running: 27, 28, 29 and 30 Aug all alarmed BROKEN with
+# alert_kevin=true, and on 30 Aug the SAME file read 200 bytes in 0.0s at
+# 07:15 — the mount healed between 07:00 and 07:15, minutes after the probe
+# had given up at 07:00. ceo-agent proved it from the other side the same
+# morning: it hit the identical EDEADLK at 06:45, kept retrying under its
+# 45-minute allowance, and acquired cleanly at 07:07:29. The job with the
+# longer patience got through; the monitor with the shorter one declared an
+# outage. An alert that fires every morning on a mount that self-heals is one
+# Kevin learns to ignore, and the next real outage rides in behind it.
+#
+# So the window is now measured against the observed recovery (~25 minutes
+# from the 06:50 start) rather than guessed: 13 attempts x 150s spans 30
+# minutes. It costs NOTHING on a healthy morning — the probe returns on the
+# first successful read — and it is still BOUNDED, which is the half that
+# finding 397 exists to protect. A mount still dead after 30 minutes is a real
+# outage and still alarms on the same single daily run, so widening the window
+# introduces no blind spot: no verdict was muted and no alert was deferred to
+# tomorrow.
 #
 # THE OPPOSITE MISTAKE IS THE WORSE ONE, and finding 397 filed it the same day:
 # from 28 Aug 11:06Z to 29 Aug 09:30Z the mount was continuously unreadable and
@@ -202,7 +223,7 @@ def _drive_ready():
 # flap. Patience is therefore bounded, and run() records how long the mount has
 # been unreadable ACROSS runs, so a 22-hour outage cannot wear the face of a
 # cold start.
-VAULT_PROBE_ATTEMPTS = int(os.environ.get('DRIVE_VAULT_PROBE_ATTEMPTS', '5'))
+VAULT_PROBE_ATTEMPTS = int(os.environ.get('DRIVE_VAULT_PROBE_ATTEMPTS', '13'))
 VAULT_PROBE_GAP_SECONDS = float(os.environ.get('DRIVE_VAULT_PROBE_GAP', '150'))
 
 

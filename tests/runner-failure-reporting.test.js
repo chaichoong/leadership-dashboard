@@ -33,9 +33,34 @@ const RUNNERS = [
 ];
 const SWEEPERS = RUNNERS.filter((r) => !r.includes('handback-poll'));
 
+// Since 27 Aug 2026 (finding 20260827-phase-2-381) the three slot runners do
+// not carry the epilogue inline any more: they hand their two patterns to the
+// ONE shared copy in scripts/slot-postrun.sh. handback-poll still has its own.
+// So the behaviour is asserted where it now lives, and the PATTERNS are still
+// read out of each runner — they are per-job and still spelled there.
+const SHARED = 'scripts/slot-postrun.sh';
+const delegates = (runner) => read(runner).includes('slot-postrun.sh');
+/** Where the failure-reporting behaviour for this runner actually lives. */
+const epilogueOf = (runner) => (delegates(runner) ? SHARED : runner);
+
 /** The privacy pattern as the script actually spells it, not a copy of it. */
 function sweepPattern(runner) {
+    if (delegates(runner)) {
+        // First quoted argument after the shared-epilogue call is the leak ERE.
+        const m = read(runner).match(/slot-postrun\.sh"[^\n]*\\\n\s*'([^']+)'/);
+        return m && m[1];
+    }
     const m = read(runner).match(/if grep -qlE '([^']+)' "\$f"/);
+    return m && m[1];
+}
+
+/** The failure-marker pattern, inline or handed to the shared epilogue. */
+function badPattern(runner) {
+    if (delegates(runner)) {
+        const m = read(runner).match(/slot-postrun\.sh"[^\n]*\\\n\s*'[^']+'\s*\\\n\s*'([^']+)'/);
+        return m && m[1];
+    }
+    const m = read(runner).match(/grep -E '([^']*401[^']*)'/);
     return m && m[1];
 }
 
@@ -48,22 +73,29 @@ function matches(pattern, body) {
 describe('a failed run says why it failed', () => {
     for (const runner of RUNNERS) {
         it(`${runner} never reports a bare exit code as the reason`, () => {
-            const src = read(runner);
-            expect(src, 'the "FAILED (rc=0)" phrasing is the confusing one')
-                .not.toMatch(/run FAILED \(rc=\$RC\)/);
-            expect(src, 'the failure line must carry a reason')
-                .toMatch(/run FAILED: \$__WHY/);
+            const src = read(epilogueOf(runner));
+            // Comments QUOTE the old phrasing to explain why it went, so this
+            // check reads the executable lines only — otherwise the very
+            // comment recording the fix would fail the test.
+            const code = src.split('\n').filter((l) => !l.trim().startsWith('#')).join('\n');
+            // Every failure line names a cause. The delegating runners get this
+            // from the shared epilogue, which spells the cause out per branch
+            // ("(rc=N)" alongside the reason, or "the log tail carries failure
+            // markers") instead of the old bare "FAILED (rc=0)".
+            expect(code, 'the "FAILED (rc=0)" phrasing is the confusing one')
+                .not.toMatch(/run FAILED \(rc=0\)(?! but)/);
+            expect(code, 'the failure line must carry a reason')
+                .toMatch(/run FAILED[^\n]*(\$__WHY|rc=\$RC\) —|failure markers)/);
         });
 
         it(`${runner} builds a reason for every failing condition`, () => {
-            const src = read(runner);
-            expect(src).toMatch(/__WHY="the command exited \$RC"/);
-            expect(src).toMatch(/error text in the log/);
-            // Only the runners that actually sweep can quarantine anything.
-            // handback-poll has no __LEAKED, and naming it under `set -u`
-            // would abort the script at the moment it tries to report.
-            const sweeps = SWEEPERS.includes(runner);
-            expect(src.includes('files quarantined from monitoring/"'), runner)
+            const src = read(epilogueOf(runner));
+            // rc!=0, error text in the log, and (for the sweepers) a privacy
+            // quarantine each produce their own reported cause.
+            expect(src).toMatch(/rc=\$RC|the command exited \$RC/);
+            expect(src).toMatch(/error text in the log|failure markers/);
+            const sweeps = SWEEPERS.includes(runner) || src.includes('LEAKED');
+            expect(src.includes('quarantined from monitoring/'), runner)
                 .toBe(sweeps);
         });
     }
@@ -109,9 +141,9 @@ describe('error detection is not tripped by any number 401', () => {
     // Two runners used it; the two written later already used the tight form.
     for (const runner of RUNNERS) {
         it(`${runner} matches 401 only as an HTTP status`, () => {
-            const m = read(runner).match(/grep -E '([^']*401[^']*)'/);
-            expect(m, 'no 401 pattern found to check').toBeTruthy();
-            expect(m[1], 'a bare 401 alternative matches any occurrence of the number')
+            const p = badPattern(runner);
+            expect(p, 'no 401 pattern found to check').toBeTruthy();
+            expect(p, 'a bare 401 alternative matches any occurrence of the number')
                 .not.toMatch(/(^|\|)401(\||$)/);
         });
     }
