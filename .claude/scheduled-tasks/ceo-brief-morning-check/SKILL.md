@@ -1,6 +1,7 @@
 ---
 name: ceo-brief-morning-check
-description: ABSORBED into daily-ops (8 Aug 2026) as phase 7.2. Do not re-enable separately.
+description: RETIRED 26 Aug 2026 (register entry disabled). Previously ABSORBED into daily-ops (8 Aug 2026) as phase 7.2. Do not re-enable.
+disabled: true
 ---
 
 ## QUEUE AND WRITE POLICY (added 6 Aug 2026 — do this before anything else)
@@ -67,4 +68,6 @@ Steps:
 3. If it does NOT exist: diagnose. Pull worker logs via `npx -y wrangler@4 tail` is live-only, so instead query the Cloudflare API observability/telemetry for the worker (account c4206efef5c8ea5d6b9bfac3d281e0db, wrangler is authenticated on this Mac), or check https://dash.cloudflare.com logs. Also test the pipeline manually: TRIGGER_KEY is in ~/.config/od/money_trigger_key; GET https://money-confidence-daily.kevinbrittain.workers.dev/?mode=brief&key=KEY shows whether generation works.
 4. If generation works but the cron path failed again: send today's brief manually with mode=send (same URL pattern), confirm a record appears in the CEO Briefs table, then Slack-DM Kevin (user U08HW8F1MA8, use the Slack MCP tools) ONE short plain-English message: the brief was late, it has been sent manually, and the fix is being worked on. Then fix the root cause if the logs make it clear, or record the findings in /Users/kevinbrittain/Projects/leadership-dashboard/monitoring/ceo-brief-cron-findings.md for the main session. **APPEND to that file under a new `## {date}` heading — never rewrite it.** It is one running log across every failure, not today's snapshot, and the pattern across mornings is the evidence: the day-of-week cron bug was only visible because several dates sat side by side. Overwriting it destroys the diagnosis you are trying to build.
 5. Plain English (13-year-old level) in anything Kevin sees. Never print secrets.
-This task exists because of the CEO's kaizen duty: the brief must never fail silently. If the cron has run correctly for 5 consecutive weekdays (check the CEO Briefs table has an unbroken run of weekday records), disable this task by editing its own SKILL.md frontmatter to disabled and note why.
+This task exists because of the CEO's kaizen duty: the brief must never fail silently.
+
+RETIREMENT NOTE (27 Aug 2026, finding 20260826-ceo-brief-morning-check-374): the self-retirement condition above was met — the cron ran clean for 8 unbroken weekdays to 26 Aug 2026 — and the register entry in scripts/job-schedule.json was disabled on 26 Aug in Kevin's restructure. The frontmatter now carries disabled: true, which resolves the ambiguity between the ABSORBED note and the self-disable rule. The 09:30 daily-ops guard reports a missing brief, so the check is still covered.

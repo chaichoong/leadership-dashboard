@@ -23,12 +23,6 @@
 # Usage:  agent-slot-run.sh <job-name> <skill-path> [extra prompt lines...]
 set -u
 
-# Tool policy is shared, never hand-rolled here — see scripts/agent-tools.sh
-# for why the old two-tool cap made every agent look like it could only
-# draft emails. Guarded by tests/agent-tools-parity.test.js.
-. "$(dirname "$0")/agent-tools.sh"
-
-
 JOB="${1:-}"
 SKILL="${2:-}"
 shift 2 || true
@@ -72,6 +66,25 @@ __START_LINE=$( { wc -l < "$LOG"; } 2>/dev/null || echo 0)
 __MARKER="$SCRATCH/.run-start.$$"
 touch "$__MARKER"
 echo "===== $JOB slot run $(date) =====" >> "$LOG"
+
+# Finding 20260827-phase-2-382: a slot that dies mid-run must still write a
+# done line — the inbound-triage 09:00 slot on 26 Aug left a bare start
+# header, indistinguishable from a run still going. Trap the catchable
+# terminations (TERM, HUP, INT) and any abnormal exit. A SIGKILL is
+# untrappable by anything.
+__POSTRUN_DONE=0
+__on_exit() {
+  __rc=$?
+  if [ "$__POSTRUN_DONE" -eq 0 ]; then
+    echo "===== done rc=$__rc (ABNORMAL: wrapper terminated before postrun) $(date) =====" >> "$LOG"
+    echo "$JOB slot run DIED before completing (rc=$__rc) — see $LOG" >&2
+  fi
+}
+trap __on_exit EXIT
+trap 'exit 143' TERM
+trap 'exit 129' HUP
+trap 'exit 130' INT
+
 cd "$REPO" || { echo "ERROR: repo not found at $REPO" >&2; exit 1; }
 
 "$CLAUDE" -p "You are the $JOB slot run. Do this skill in full: $SKILL
@@ -97,41 +110,17 @@ Rules for the whole run:
 $EXTRA
 End with at most fifteen lines: what you did, what you found, what you could not do." \
   --permission-mode acceptEdits \
-  --allowedTools "${AGENT_ALLOWED_TOOLS[@]}" >> "$LOG" 2>&1
+  --allowedTools "Bash(python3:*)" "Bash(curl:*)" >> "$LOG" 2>&1
 RC=$?
 
-# Privacy sweep: quarantine any content-bearing file THIS RUN left in
-# monitoring/. Only files newer than the start marker, and never a git-tracked
-# one — the triage agent's version of this sweep quarantined 41 committed
-# schema files on 25 Aug 2026 by matching across all of monitoring/.
-# Quarantining alone is not enough: the run FAILS, so the leak-shaped behaviour
-# gets fixed rather than absorbed.
-__LEAKED=""
-while IFS= read -r f; do
-  [ -z "$f" ] && continue
-  if git -C "$REPO" ls-files --error-unmatch "${f#"$REPO"/}" >/dev/null 2>&1; then
-    continue
-  fi
-  # KEY form for the field name: as a VALUE it is a schema naming a column.
-  if grep -qlE '"description" *:|"Inbound Message Content" *:|CREDITOR MATTER' "$f" 2>/dev/null; then
-    mv "$f" "$SCRATCH/" && __LEAKED="$__LEAKED $f"
-  fi
-done < <(find "$REPO/monitoring" -type f -newer "$__MARKER" 2>/dev/null)
-rm -f "$__MARKER"
-
-__TAIL=$(tail -n +$((__START_LINE + 1)) "$LOG" 2>/dev/null)
-__BAD=$(printf '%s\n' "$__TAIL" | grep -E 'HTTP Error 401|401 Unauthorized|Unauthorized|OAuth access token has expired|BROKEN|VERIFY FAIL' || true)
-echo "===== done rc=$RC $(date) =====" >> "$LOG"
-if [ -n "$__LEAKED" ]; then
-  echo "PRIVACY: content-bearing files quarantined from monitoring/ to $SCRATCH:$__LEAKED" >&2
-fi
-if [ $RC -ne 0 ] || [ -n "$__BAD" ] || [ -n "$__LEAKED" ]; then
-  printf '%s\n' "$__BAD" | head -5 >&2
-  __WHY=""
-  [ $RC -ne 0 ] && __WHY="the command exited $RC"
-  [ -n "$__BAD" ] && __WHY="${__WHY:+$__WHY; }error text in the log"
-  [ -n "$__LEAKED" ] && __WHY="${__WHY:+$__WHY; }files quarantined from monitoring/"
-  echo "$JOB slot run FAILED: $__WHY — see $LOG" >&2
-  exit 1
-fi
-echo "$JOB slot run OK"
+# Shared epilogue (finding 20260827-phase-2-381): privacy sweep, done line,
+# and exit-code semantics live in ONE place now — scripts/slot-postrun.sh.
+# It preserves the real rc, treats a quarantine as informational (still loud
+# on stderr), and never quarantines the drift scanner's schema snapshots
+# (schema-YYYY-MM-DD.json), which false-positived on 25 and 26 Aug 2026.
+"$REPO/scripts/slot-postrun.sh" "$JOB slot" "$RC" "$LOG" "$__START_LINE" "$__MARKER" "$SCRATCH" \
+  '"description" *:|"Inbound Message Content" *:|CREDITOR MATTER' \
+  'HTTP Error 401|401 Unauthorized|Unauthorized|OAuth access token has expired|BROKEN|VERIFY FAIL'
+__FINAL=$?
+__POSTRUN_DONE=1
+exit "$__FINAL"
