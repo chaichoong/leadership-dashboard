@@ -164,6 +164,26 @@ describe('agent autonomy threshold does not drift between the app and the huddle
     expect(pyConst('RECENT_N')).toBe(jsThreshold('recentN'));
   });
 
+  // The reason list decides whether a rejection touches an agent's score at
+  // all, so a divergence here means the huddle and the dashboard disagree about
+  // whether an agent has earned autonomy — which is precisely what this file
+  // exists to stop. Added 27 Aug 2026 with the quality/relevance split.
+  it('both treat the SAME reasons as not-the-agent-fault', () => {
+    const jsList = JS.match(/RELEVANCE_REASONS\s*=\s*\[([^\]]+)\]/);
+    const pyList = PY.match(/RELEVANCE_REASONS\s*=\s*\(([^)]+)\)/);
+    // CONTROL: a missing block would make every comparison below vacuous.
+    expect(jsList, 'js/agent-accuracy.js has no RELEVANCE_REASONS').toBeTruthy();
+    expect(pyList, 'agent-accuracy-report.py has no RELEVANCE_REASONS').toBeTruthy();
+    const names = (block) => (block.match(/'([^']+)'|"([^"]+)"/g) || [])
+      .map((x) => x.slice(1, -1)).sort();
+    expect(names(pyList[1])).toEqual(names(jsList[1]));
+    expect(names(jsList[1]).length).toBeGreaterThan(0);
+    // The one reason that IS a judgement on the writing must never be in it,
+    // or a genuinely bad draft would stop counting against anyone.
+    expect(names(jsList[1])).not.toContain('The work is wrong');
+    expect(names(pyList[1])).not.toContain('The work is wrong');
+  });
+
   it('both count the same two outcomes as accurate', () => {
     const jsAccurate = JS.match(/APPROVAL_ACCURATE\s*=\s*\[([^\]]+)\]/)[1];
     const pyAccurate = PY.match(/ACCURATE\s*=\s*\(([^)]+)\)/)[1];

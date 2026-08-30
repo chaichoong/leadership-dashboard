@@ -28,6 +28,8 @@ var AUTOMATIONS = {
     // ── Scheduled jobs on Kevin's Mac (launchd) ───────────────────────
     // `key` must match the key in scripts/job-schedule.json.
     macJobs: [
+        { key: 'mcp-inventory', name: 'Tools & Connections List', when: '6:10am daily', status: 'on',
+          what: 'Rebuilds the list of every outside system the AI is plugged into, on the AI Agents page. Reads the real settings rather than a list someone remembered to update, and refuses to write a shorter list if it cannot read one of its sources properly. When something has genuinely changed it tests its own work and, if it passes, ships the update itself, so the page cannot drift behind your actual setup. If its tests fail it leaves the change waiting for you instead.' },
         { key: 'drift-scan', name: 'Drift Scan', when: '6:20am daily', status: 'on',
           what: 'Reads the code looking for references to things that no longer exist: a field that was renamed, a file that was deleted, a page that was retired. It reports them so a broken link is found before it breaks something.' },
         { key: 'data-invariants', name: 'Data Invariants Check', when: '6:40am daily', status: 'on',
@@ -38,6 +40,8 @@ var AUTOMATIONS = {
           what: 'Copies project status between the repo and Airtable so both show the same thing.' },
         { key: 'masterplan-sync', name: 'Master Plan Sync', when: '7:00am daily', status: 'on',
           what: 'Pushes MASTER-PLAN.md into Airtable so the team works from the same plan you do.' },
+        { key: 'signature-watch', name: 'Signed Document Watch', when: '9:20am, 12:20pm, 3:20pm, 6:20pm daily', status: 'on',
+          what: 'Watches for documents you sent out for signature coming back signed. When one is done it downloads the signed copy and files it, so it can be put in front of you for the second approval before it is posted or emailed. It checks Adobe itself rather than waiting for an email, because an email can be filtered or archived and the signed copy has to come from Adobe anyway. If it cannot see your Adobe account it says so loudly instead of reporting that nothing has been signed.' },
         { key: 'knowledge-os-sort', name: 'Knowledge Sorter', when: '9:00am daily', status: 'on',
           what: 'Files new brain documents into the right folder using the naming rules. It moves files, it does not read or judge them.' },
         { key: 'publish-brain', name: 'Brain Publisher', when: '11:20pm daily', status: 'on',
@@ -50,6 +54,8 @@ var AUTOMATIONS = {
           what: 'One summary of every scheduled job and whether it ran, was skipped, or failed. This is how a job that quietly stopped gets noticed.' },
         { key: 'daily-ops-guard', name: 'Daily Sweep Guard', when: '9:30am daily', status: 'on',
           what: 'Proves the 7am Daily Sweep actually ran. A routine cannot be trusted to report its own absence, so something outside it has to check.' },
+        { key: 'retry-deferred', name: 'Retry Deferred Jobs', when: 'every hour', status: 'on',
+          what: 'Re-runs a scheduled job that was turned away earlier because the Mac was not ready, once the thing that blocked it has cleared. Your Mac only tries each job once, at its set time, so a job that could not run because Google Drive was asleep used to just lose the day. That is how the brain went four days without being fed in August 2026. It only re-runs jobs that have been signed up for it, and it says out loud when a job lost the day anyway.' },
         { key: 'mac-guard', name: 'Mac Guard', when: 'every hour', status: 'on',
           what: 'Kills leftover preview servers that outlived the session that started them. They hold ports forever otherwise. It only touches servers over 4 hours old with nothing connected.' },
         { key: 'uc-notifier-watchdog', name: 'UC Notifier Watchdog', when: '9:00am daily', status: 'off',

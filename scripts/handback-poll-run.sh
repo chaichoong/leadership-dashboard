@@ -25,6 +25,12 @@
 # Airtable read, and on a quiet tick this script costs no Claude tokens at all.
 set -uo pipefail
 
+# Tool policy is shared, never hand-rolled here — see scripts/agent-tools.sh
+# for why the old two-tool cap made every agent look like it could only
+# draft emails. Guarded by tests/agent-tools-parity.test.js.
+. "$(dirname "$0")/agent-tools.sh"
+
+
 CLAUDE="/Users/kevinbrittain/.local/bin/claude"
 REPO="/Users/kevinbrittain/Projects/leadership-dashboard"
 LOG_DIR="/Users/kevinbrittain/knowledge-os/logs/handback-poll"
@@ -111,17 +117,17 @@ RUNDIR is $RUNDIR and STEP 1 IS ALREADY DONE — $RUNDIR/queue.json was written 
 
 WORK ONLY THE HAND-BACKS. From the worklist, work every item whose kind is carry_out (Approval Outcome is an Approved kind) or redo (Approval Outcome is Changes requested). IGNORE new work entirely, do NO routing and NO escalation — those belong to the 09:00/13:00/17:00 slots and to daily-ops, and re-deciding them every thirty minutes would burn Kevin's tokens on questions nobody has answered since the last tick. If the only items left are new work, write the report and stop.
 
-Everything else in the skill still applies in full and must not be weakened: the gate sits BEFORE the action; step 2's tier-1 labelling pass on every item you work, submitting tier-1 redos with --tier1; the carry_out intent/verify-first/complete discipline, including the never-automated list (payments, credentials, signatures, phone calls) which are parked and listed in parkedFlags, never retried; the mandatory closing 'Carrying this out will involve:' line under 400 characters on every redo; and step 4b's CEO review pass over non-tier-1 redos before they are submitted.
+Everything else in the skill still applies in full and must not be weakened: the gate sits BEFORE the action; step 2's tier-1 labelling pass on every item you work, submitting tier-1 redos with --tier1; the carry_out intent/verify-first/complete discipline, including the never-automated list (payments, credentials, signatures, phone calls) which are parked and listed in parkedFlags, never retried; the MINOR-EDITS branch on every carry_out (an Approved with minor edits carrying a note means Kevin typed an edit: apply only that change, run the revise subcommand, and carry out the REVISED text — complete refuses otherwise); the mandatory closing 'Carrying this out will involve:' line under 400 characters on every redo; and step 4b's CEO review pass over non-tier-1 redos before they are submitted.
 
 Step 5: write $RUNDIR/report.json exactly as the skill specifies, copying queueCounts, roleAgentsError and skippedTier2 VERBATIM from queue.json. Step 6's escalation DM applies as written. Step 7 (verify) is MANDATORY — run it and do not swallow its exit code. SKIP step 7b (score): the daily slots compute it and recomputing it forty-eight times a day is waste.
 
 Do not take the queue lock — this run already holds it. Do not edit, commit or push code; file anything needing a code change via scripts/findings.py. Working and temp files go under $RUNDIR/TASKID/ only, never in monitoring/ and never anywhere else in the repo. Close with at most ten lines of counts only: no message content, no sender names, no record IDs." \
   --permission-mode acceptEdits \
-  --allowedTools "Bash(python3:*)" "Bash(curl:*)" "Bash(osascript:*)" >> "$LOG" 2>&1
+  --allowedTools "${AGENT_ALLOWED_TOOLS[@]}" "Bash(osascript:*)" >> "$LOG" 2>&1
 RC=$?
 
 __TAIL=$(tail -n +$((__START_LINE + 1)) "$LOG" 2>/dev/null)
-__BAD=$(printf '%s\n' "$__TAIL" | grep -E '"error"|401|Unauthorized|OAuth access token has expired|BROKEN' || true)
+__BAD=$(printf '%s\n' "$__TAIL" | grep -E '"error"|HTTP Error 401|401 Unauthorized|Unauthorized|OAuth access token has expired|BROKEN' || true)
 echo "===== done rc=$RC $(date) =====" >> "$LOG"
 
 # A run that produced no report is a blind run, whatever it printed. verify
@@ -136,7 +142,10 @@ fi
 beat work "$REASON" "$TOTAL" yes
 if [ $RC -ne 0 ] || [ -n "$__BAD" ]; then
   printf '%s\n' "$__BAD" | head -5 >&2
-  echo "handback-poll run FAILED (rc=$RC) — see $LOG" >&2
+  __WHY=""
+  [ $RC -ne 0 ] && __WHY="the command exited $RC"
+  [ -n "$__BAD" ] && __WHY="${__WHY:+$__WHY; }error text in the log"
+  echo "handback-poll run FAILED: $__WHY — see $LOG" >&2
   exit 1
 fi
 echo "handback-poll run OK — worked $TOTAL hand-back(s)"

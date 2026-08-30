@@ -43,6 +43,10 @@ const TF = {
   lmt: 'flddJA23cJRX5cs1K',
   inboundTask: 'fldueazD67F7fUGee',
   inboundUrl: 'fldXf1p0vtHqOZcKl',
+  attachments: 'fldEbs9cscRr8elcw',
+  slackBaseline: 'fldxsqj9JSRBGNyT9',
+  feedbackHistory: 'fldOzsq68lhfprKJu',
+  deferredUntil: 'fldJ9IHS1yxwYzYSN',
 };
 const TM = { name: 'flds7xoRFQhcRTnbB', active: 'fld2YLfcPqSe6b60u', isAi: 'fldKGsz9kTpFypeOr' };
 const AG = {
@@ -154,6 +158,10 @@ function defaultFixtures() {
         [ALOG.date]: today, [ALOG.agent]: ['recRegCreditor'], [ALOG.summary]: 'Ran the morning sweep',
       } },
     ],
+    // Knocked back to a date. Empty by default so every existing spec sees the
+    // queue exactly as it did before this feature; the knock-back specs
+    // override it.
+    deferred: [],
     workflows: [],
     steps: [],
     businesses: [],
@@ -184,7 +192,18 @@ function defaultFixtures() {
 
 // Markers are matched against the DECODED url (URLSearchParams encodes a
 // space as '+', so encoded matching would silently miss and misroute).
+//
+// ORDER MATTERS from 28 Aug 2026. The queue formula and the knocked-back one
+// are near-identical — same table, same status, same 'Sent For Approval By'
+// clause — and differ only in whether the date test is wrapped in NOT(). The
+// deferred marker therefore has to be tried FIRST and has to include the
+// characters that only the deferred formula has: the queue's version reads
+// ", NOT(IS_AFTER({Deferred Until}", so keying on ", IS_AFTER({Deferred Until}"
+// cannot match it. Get this wrong and the knocked-back lane silently renders
+// the live approval fixtures, which looks like a passing test of a feature
+// that is doing the opposite of its job.
 const TASK_QUERY_MARKERS = [
+  { marker: ', IS_AFTER({Deferred Until}', key: 'deferred' },
   { marker: 'Sent For Approval By', key: 'approvals' },
   { marker: 'Approval Outcome', key: 'taskHistory' },
 ];
@@ -213,7 +232,7 @@ async function mockAgentsPage(page, overrides = {}) {
       // Single-record read (the stale-approval guard re-reads one task).
       const one = url.match(new RegExp(`${TABLES.tasks}/(rec[A-Za-z0-9]+)`));
       if (one) {
-        const all = [...fixtures.approvals, ...fixtures.openTasks, ...fixtures.taskHistory];
+        const all = [...fixtures.approvals, ...fixtures.deferred, ...fixtures.openTasks, ...fixtures.taskHistory];
         const rec = all.find((r) => r.id === one[1]);
         return rec ? json(rec) : json({ error: 'NOT_FOUND' }, 404);
       }

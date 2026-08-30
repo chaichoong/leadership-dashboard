@@ -45,7 +45,7 @@ code { background: var(--bg-subtle); padding: 0.1rem 0.4rem; border-radius: 4px;
     <a class="header-back" href="index.html#agents">&larr; Back to the platform</a>
     <h1>&#x1F916; AI Agents</h1>
     <div class="subtitle">Leadership page for the whole AI workforce: approvals, checks, register</div>
-    <div class="version">SOP v1.0 &middot; Page v1.0 &middot; Owner: Kevin (decisions), AI agents (execution)</div>
+    <div class="version">SOP v1.18 &middot; Page v1.18 &middot; Owner: Kevin (decisions), AI agents (execution)</div>
   </div>
 </div>
 <div class="container">
@@ -53,33 +53,41 @@ code { background: var(--bg-subtle); padding: 0.1rem 0.4rem; border-radius: 4px;
   <div class="section">
     <h2 class="section-title">1. What this page is</h2>
     <div class="card">
-      <p>One page for everything to do with the AI agent workforce. It replaced the AI Agents tab that used to sit inside the Systemisation page (moved 24 Aug 2026, Kevin's ruling). Three zones, in the order they need attention:</p>
+      <p>One page for everything to do with the AI agent workforce. It replaced the AI Agents tab that used to sit inside the Systemisation page (moved 24 Aug 2026, Kevin's ruling). On 25 Aug 2026 the three scrolling zones became <strong>three tabs</strong>, and the CEO Brief moved here from its own shell tab.</p>
       <div class="flow">
-        <div class="flow-step primary">1. Waiting for your approval</div><div class="flow-arrow">&rarr;</div>
-        <div class="flow-step">2. Check these</div><div class="flow-arrow">&rarr;</div>
-        <div class="flow-step">3. Workforce register</div>
+        <div class="flow-step primary">Dashboard</div><div class="flow-arrow">&rarr;</div>
+        <div class="flow-step">Approvals</div><div class="flow-arrow">&rarr;</div>
+        <div class="flow-step">Check these</div>
       </div>
       <ul>
-        <li><strong>Waiting for your approval:</strong> every piece of work an agent has prepared and stopped on. Nothing is sent, filed, paid or changed until you decide. Same queue as Slack (#agent-approvals) and the Tasks drawer, decided the same way.</li>
+        <li><strong>Dashboard</strong> (opens first): the CEO Brief at the top, then one scorecard per agent &ndash; accuracy, guardrails, workload, and what it last did. No checks here, deliberately: this tab answers "how is my team doing", not "what is broken".</li>
+        <li><strong>Approvals:</strong> every piece of work an agent has prepared and stopped on. Nothing is sent, filed, paid or changed until you decide. Same queue as Slack (#agent-approvals) and the Tasks drawer, decided the same way.</li>
         <li><strong>Check these:</strong> what should have moved and has not. Absence and stuckness, never a list of successes.</li>
-        <li><strong>Workforce register:</strong> every agent, its goal, guardrails, status, workload, accuracy, its AGENTIC spec, its compiled prompt, its learning log and its daily decisions.</li>
       </ul>
-      <p>Building an agent's SOP from a video stays on the Systemisation page. This page is where agents are <strong>managed and judged</strong>.</p>
+      <p>The Approvals and Check these tabs carry a <strong>count badge</strong>, so you can see there is something waiting without opening the tab. Building an agent's SOP from a video stays on the Systemisation page. This page is where agents are <strong>managed and judged</strong>.</p>
+      <h3>The CEO Brief (top of the Dashboard)</h3>
+      <p>Today's brief from the morning robot: what the board flagged, what to ignore today, what was handed off, and the "safe to act today" money figure. Read straight from the CEO Briefs table, newest first. Two things worth knowing:</p>
+      <ul>
+        <li>The 07:30 huddle writes a partial card. <strong>The money figure and the reasoning land at 9am</strong>, and the card says so rather than showing two dashes and reading as finished.</li>
+        <li>Three of the page's health checks watch this brief, including one that fails if no <em>finished</em> brief has been stored for more than six days. A run of 07:30 stubs cannot keep it green through an outage.</li>
+      </ul>
     </div>
   </div>
 
   <div class="section">
-    <h2 class="section-title">2. The approval queue (zone 1)</h2>
+    <h2 class="section-title">2. The Approvals tab</h2>
     <div class="card">
-      <p>The queue shows ONLY loop-raised work: tasks at Status <code>Approval</code> that carry a <code>Sent For Approval By</code> agent link. Legacy records parked at Approval status never appear. Each card leads with the one-line ask (the agent's own "Carrying this out will involve" line), then the agent's full work, the brief it was given, and the age it has been waiting. Tier 1 items carry a red banner: read those fully before deciding.</p>
+      <p>The queue shows ONLY loop-raised work: tasks at Status <code>Approval</code> that carry a <code>Sent For Approval By</code> agent link. Legacy records parked at Approval status never appear. Cards are ordered <strong>tier 1 first, then priority, then longest waiting</strong>. Each card leads with the one-line ask (the agent's own "Carrying this out will involve" line), then the agent's full work, the brief it was given, and the age it has been waiting. Tier 1 items carry a red banner: read those fully before deciding. Where the task came from an email, the card links straight to the original thread.</p><h3>Filters</h3><p>Above the cards: <strong>All</strong>, one chip per agent with its count, and a <strong>Tier 1</strong> toggle for the work touching your private legal and financial matter. The two combine, so they can narrow to nothing (an agent with no tier-1 work) &ndash; when that happens the page says so and offers <strong>Clear filters</strong> rather than looking like an empty queue.</p>
       <h3>The four actions and exactly what each writes</h3>
       <p>This page is the third face of ONE mechanism. It writes the same fields as the Tasks drawer and the Slack loop, so the three surfaces can never disagree.</p>
       <table>
         <tr><th>Action</th><th>What it means</th><th>What is written to the task</th></tr>
         <tr><td><strong>Approve</strong></td><td>Release the work. The agent carries it out, then completes the task itself.</td><td>Approval Outcome = Approved as-is &middot; Approved At = now &middot; Approved By = Kevin &middot; Status = Today &middot; Due Date = today &middot; Completion Date cleared &middot; task handed back to the agent (Team Member + Sent For Approval By = the agent, Assignee cleared)</td></tr>
-        <tr><td><strong>Approve with minor edits</strong></td><td>You tidied it first. Still counts as accurate work.</td><td>Same as Approve, with Approval Outcome = Approved with minor edits</td></tr>
+        <tr><td><strong>Approve with minor edits</strong></td><td>Release the work, but with the change you describe applied first. Your comment is an EDIT INSTRUCTION: the agent makes only that change, then carries out the edited version. Still counts as accurate work. Until 26 Aug 2026 this carried out the ORIGINAL text and ignored your comment; it now refuses to complete until the edit has been applied. For anything bigger than a small edit, use Request changes.</td><td>Same as Approve, with Approval Outcome = Approved with minor edits &middot; Approval Feedback = your edit. The agent then rewrites Agent Output via <code>agent-dispatch.py revise</code>, which archives the text you approved into Notes so what went out can be compared with what you read.</td></tr>
         <tr><td><strong>Request changes</strong></td><td>Back to the agent to redo. A comment is required; your words are the instruction.</td><td>Approval Outcome = Changes requested &middot; Approval Feedback = your comment &middot; Approved At/By stamped &middot; Status = Today, due today, handed back to the agent</td></tr>
-        <tr><td><strong>Reject</strong></td><td>Kill the work entirely. A reason is required and a confirm dialog stands in the way. Counts against the agent's accuracy.</td><td>Approval Outcome = Rejected &middot; Approval Feedback = your reason &middot; Status = Completed &middot; Completion Date = now &middot; agent links set as above</td></tr>
+        <tr><td><strong>Reject and close</strong></td><td>Kill the work entirely. A reason is required and a confirm dialog stands in the way. Counts against the agent's accuracy.</td><td>Approval Outcome = Rejected &middot; Approval Feedback = your reason &middot; Status = Completed &middot; Completion Date = now &middot; agent links set as above</td></tr>
+        <tr><td><strong>Not yet &mdash; bring it back in&hellip;</strong> (3 days / a week / 2 weeks / a month, or a date you pick)</td><td>The one that is <em>not</em> a verdict. Use it when the work is fine but you cannot act on it yet &mdash; a confirmation statement waiting on an authentication code in the post, a renewal that is not due, a reply that depends on someone else. The task leaves your queue, the sidebar badge, your Slack DM and the CEO brief, and comes back on that date with the agent&rsquo;s work exactly as it is now. Nothing is approved, nothing is sent, and it does <strong>not</strong> count against the agent. Everything parked is listed at the top of the Approvals tab with its return date, and &ldquo;Bring back now&rdquo; undoes it in one click. Added 28 Aug 2026 at Kevin&rsquo;s request.</td><td>Deferred Until = the date, plus your note appended to Feedback History. <strong>Nothing else</strong> &mdash; no Approval Outcome, no status change, no hand-back. There is no job that brings it back: all four surfaces filter on the date themselves, so the morning it passes the task is simply there again. The Slack worker replies in the existing thread with the return date, clears the message timestamp, and posts a fresh card on the day.</td></tr>
+        <tr><td><strong>Remember this reason</strong> (tickbox)</td><td>The one control that makes anything permanent. Tick it with ANY of the four verdicts (it does not apply to a knock-back, which decides nothing and teaches nothing) and your reason becomes a standing rule in that agent's own instruction file, applied to every future task. Leave it unticked and nothing is learned: Request changes still fixes that one task, but the agent will not remember why. The reject confirm dialog offers it again so it cannot be missed. In Slack the equivalent is reacting :brain: instead of :x:.</td><td>Remember This = ticked. Within 30 minutes <code>agent-dispatch.py lessons</code> appends a dated line to <code>~/.claude/agents/&lt;agent&gt;.md</code> under "Lessons from Kevin", mirrors it to the register Learning Log, and stamps Lesson Written At. The dispatch run FAILS if a ticked lesson is still unwritten 90 minutes later.</td></tr>
       </table>
       <p>Every decision also leaves an Airtable comment on the task, and the optional "Kind of work" picker sets the Task Type used to score the agent per job type.</p>
       <div class="callout"><strong>Stale-approval guard:</strong> a click approves what was on screen when the card rendered. Before writing, the page re-reads the task; if it changed since (or was decided in Slack or the drawer), the decision is refused with a message and the queue reloads. Same principle as the Slack baseline guard.</div>
@@ -88,9 +96,9 @@ code { background: var(--bg-subtle); padding: 0.1rem 0.4rem; border-radius: 4px;
   </div>
 
   <div class="section">
-    <h2 class="section-title">3. Check these (zone 2)</h2>
+    <h2 class="section-title">3. The Check these tab</h2>
     <div class="card">
-      <p>Five lanes, each reporting absence. A lane that cannot be read shows a fault line, never a clean slate. When all five run clean the zone says: <em>"Nothing needs you &ndash; all agents moving."</em></p>
+      <p>Six lanes, each reporting absence. A lane that cannot be read shows a fault line, never a clean slate. When all six run clean the tab says: <em>"Nothing needs you &ndash; all agents moving."</em></p>
       <table>
         <tr><th>Lane</th><th>What it flags</th><th>Why</th></tr>
         <tr><td>Approvals</td><td>Loop-raised work waiting more than 24 hours for a decision</td><td>An agent is blocked on you; the queue is the bottleneck</td></tr>
@@ -98,19 +106,20 @@ code { background: var(--bg-subtle); padding: 0.1rem 0.4rem; border-radius: 4px;
         <tr><td>Inbound</td><td>Open inbound reply tasks older than 24 hours</td><td>The 24-hour reply promise is at risk</td></tr>
         <tr><td>Daily logs</td><td>Built or Live agents that wrote nothing to the AI Agent Daily Log today</td><td>Silence means the agent did not run, or its log write broke</td></tr>
         <tr><td>Guardrails</td><td>Any automatic guardrail tightening in the last 7 days</td><td>The system pulled a leash in on falling accuracy; you should know</td></tr>
+        <tr><td>Duplicates</td><td>Two or more open tasks with the same owner and the same subject</td><td>Your standing rule is one subject = one open task. A chaser should update the existing task, not raise a sibling</td></tr>
       </table>
     </div>
   </div>
 
   <div class="section">
-    <h2 class="section-title">4. The workforce register (zone 3)</h2>
+    <h2 class="section-title">4. The workforce register (on the Dashboard tab)</h2>
     <div class="card">
       <ul>
         <li><strong>Role agents:</strong> one row per role-specific agent from the AI Agents table. Click a row for its panel: the seven AGENTIC stage fields (editable), a readiness check button, the accuracy band suggestion, "Compile prompt" (builds the one working prompt from the card), the learning log, and "Daily decisions" read from the AI Agent Daily Log.</li>
         <li><strong>Guardrails:</strong> tightening is automatic when accuracy drops (worst job type with 20+ checked pieces decides the band). Loosening is always your click, via the dropdown.</li>
         <li><strong>Strategic layer:</strong> the AI CEO, department heads and generic workers (Team Members rows), shown with workload only.</li>
         <li><strong>Process agents:</strong> workflows whose SOP runs as an agent (the video route). Their panel carries the identity card, the autonomy ladder, testing/live controls, the proposal feed with Approve/Reject/Undo, and per-action permissions. "View SOP" opens the workflow on the Systemisation page.</li>
-        <li><strong>+ Create an agent:</strong> the guided form walks you through the seven AGENTIC questions with an AI check on each answer.</li>
+        <li><strong>Automations (NOT agents):</strong> a separate layer listing the scheduled jobs, Cloudflare Workers and Airtable automations that run the estate. They follow fixed rules and make no judgements, so they are deliberately kept out of the agent counts and out of the accuracy figures. If this list fails to load the page says it could not be read, never that it is empty.</li><li><strong>+ Create an agent:</strong> the guided form walks you through the seven AGENTIC questions with an AI check on each answer.</li><li><strong>Search:</strong> the box at the top of the register filters agents, process agents and automations together.</li>
       </ul>
     </div>
   </div>
@@ -118,7 +127,7 @@ code { background: var(--bg-subtle); padding: 0.1rem 0.4rem; border-radius: 4px;
   <div class="section">
     <h2 class="section-title">5. Health checks</h2>
     <div class="card">
-      <p>The sync bar at the top of the page runs seven checks; the sidebar dot in the shell mirrors the worst of them.</p>
+      <p>The sync bar at the top of the page runs ten checks; the sidebar dot in the shell mirrors the worst of them.</p>
       <table>
         <tr><th>Check</th><th>If it fails</th></tr>
         <tr><td>Approvals queue read</td><td>Airtable auth or a broken formula. Hit Refresh; if it persists, the Status or Sent For Approval By field name changed.</td></tr>
@@ -128,6 +137,9 @@ code { background: var(--bg-subtle); padding: 0.1rem 0.4rem; border-radius: 4px;
         <tr><td>Accuracy stats control</td><td>Zero approval history matched. On a platform with weeks of decisions, zero means a field rename, not a quiet week.</td></tr>
         <tr><td>Inbound Comms Response metric fresh</td><td>That agent's register row lost its Metric Score. Its runtime stopped publishing; check the triage job.</td></tr>
         <tr><td>Check zones computed</td><td>One or more lanes could not run. Treat those lanes as unknown, never as clear.</td></tr>
+        <tr><td>CEO Briefs table reachable</td><td>The CEO Briefs table could not be read, so the Dashboard brief is blind rather than empty.</td></tr>
+        <tr><td>Latest brief is complete</td><td>The newest brief is still a 07:30 stub. The 9am robot did not finish it: the money figure and the reasoning are missing.</td></tr>
+        <tr><td>Morning robot ran within the last week</td><td>No FINISHED brief in the last six days. The 9am robot has stopped; a run of 07:30 stubs cannot mask this.</td></tr>
       </table>
     </div>
   </div>
@@ -139,6 +151,8 @@ code { background: var(--bg-subtle); padding: 0.1rem 0.4rem; border-radius: 4px;
         <li>The register, panels, guided form, strategic layer and process agents all lived on the Systemisation page's AI Agents tab until 24 Aug 2026. That tab is now a pointer to this page.</li>
         <li>Approvals still also arrive in Slack (#agent-approvals) and can still be decided in the Tasks drawer. All three surfaces write the same fields; decide wherever you are.</li>
         <li>Deep links: the Skills Library's "Manage in AI Agents", the Tasks roster's agent links, and the Systemisation SOP pointer all open this page with the right agent selected.</li>
+        <li>The CEO Brief had its own tab in the shell until 25 Aug 2026. It now sits at the top of this page's Dashboard tab; <code>js/ceo-brief.js</code> was deleted.</li>
+        <li>The three scrolling zones became three tabs on 25 Aug 2026, and the register moved up to sit under the brief.</li>
       </ul>
     </div>
   </div>

@@ -93,7 +93,7 @@ RC=$?
 # which false-positived here on 25 Aug 2026 (they carry "Inbound Message
 # Content" as a field NAME in the table structure, not as message content).
 "$REPO/scripts/slot-postrun.sh" "inbound-triage" "$RC" "$LOG" "$__START_LINE" "$__MARKER" "$SCRATCH" \
-  '"body":|Inbound Message Content' \
+  '"body" *:|"Inbound Message Content" *:' \
   '"error"|401|Unauthorized|OAuth access token has expired|BROKEN|Full Disk Access'
 __FINAL=$?
 __POSTRUN_DONE=1

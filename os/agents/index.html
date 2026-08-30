@@ -92,6 +92,8 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 /* Approval cards (Zone A) */
 .apv-card{border:1px solid var(--border-default);border-left:4px solid var(--warning);border-radius:var(--radius-md);background:var(--bg-surface);padding:14px 16px;margin-bottom:12px}
 .apv-ask{font-size:var(--fs-base);font-weight:var(--fw-semibold);line-height:1.5;margin-bottom:6px}
+.apv-ask-stem{color:var(--accent);font-weight:var(--fw-bold)}
+.apv-email-from{display:flex;gap:16px;flex-wrap:wrap;font-size:var(--fs-xs);color:var(--text-secondary);background:var(--bg-subtle);border-radius:var(--radius-md);padding:4px 10px;margin-bottom:6px}
 .apv-meta{display:flex;gap:8px;flex-wrap:wrap;align-items:center;font-size:var(--fs-xs);color:var(--text-secondary);margin-bottom:8px}
 .apv-chip{background:var(--bg-subtle);color:var(--text-secondary);padding:1px 8px;border-radius:var(--radius-full);font-weight:var(--fw-semibold);white-space:nowrap}
 .apv-age{color:var(--text-muted)}
@@ -102,8 +104,73 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 .apv-body{font-size:var(--fs-xs);color:var(--text-secondary);white-space:pre-wrap;word-break:break-word;max-height:340px;overflow:auto;border:1px solid var(--border-subtle);border-radius:var(--radius-md);padding:10px 12px;background:var(--bg-surface-2);margin-top:6px}
 .apv-note{width:100%;border:1px solid var(--border-default);background:var(--bg-surface);border-radius:var(--radius-md);padding:8px 10px;font-size:var(--fs-sm);color:var(--text-primary);font-family:inherit;resize:vertical;min-height:44px;margin:8px 0}
 .apv-note:focus{outline:none;border-color:var(--accent)}
+.apv-group{border:1px solid var(--warning-border);border-radius:var(--radius-lg);
+    background:var(--warning-bg);padding:0 0 2px;margin-bottom:var(--space-4)}
+.apv-group-head{display:flex;flex-wrap:wrap;gap:var(--space-3);align-items:center;
+    justify-content:space-between;padding:10px 14px}
+.apv-group-count{font-size:var(--fs-sm);font-weight:var(--fw-bold);color:var(--warning)}
+.apv-group-sub{font-size:var(--fs-xs);color:var(--text-secondary);margin-left:8px}
+/* The evidence. Kevin asked for "a little bit better confirmation" that two
+   tasks really are one thing, so the reason is on the header, not in a log. */
+.apv-group-why{display:block;font-size:var(--fs-xs);color:var(--text-secondary);
+    margin-top:2px;font-family:var(--font-family-base)}
+.apv-group-why::before{content:'\2713\00a0';color:var(--warning);font-weight:var(--fw-bold)}
+.apv-group-actions{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.apv-group-label{font-size:var(--fs-xs);color:var(--text-secondary);font-weight:var(--fw-semibold)}
+.apv-group .apv-card{margin:0 10px 10px}
+.apv-reasons{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:8px;
+    padding-top:10px;border-top:1px dashed var(--border-subtle)}
+.apv-reasons-label{font-size:var(--fs-xs);color:var(--text-muted);font-weight:var(--fw-semibold);margin-right:2px}
+.apv-reason{font-size:var(--fs-xs);font-weight:var(--fw-medium);padding:4px 10px;cursor:pointer;
+    border:1px solid var(--border-default);border-radius:var(--radius-full);
+    background:var(--bg-surface);color:var(--text-secondary);line-height:1.4}
+.apv-reason:hover{background:var(--danger-bg);border-color:var(--danger-border);color:var(--danger)}
+/* The one reason that is a judgement on the agent's writing, so it reads as a
+   different KIND of verdict rather than a seventh flavour of the same one. */
+.apv-reason-quality{border-style:dashed;color:var(--text-muted)}
+.apv-reason-quality:hover{background:var(--warning-bg);border-color:var(--warning-border);color:var(--warning)}
+.apv-reason:disabled{opacity:.45;cursor:default}
+/* Not now. Deliberately quieter than the verdict row above it: this is the
+   absence of a decision, not a seventh flavour of one. */
+.apv-defer{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:6px;padding-top:8px;
+    border-top:1px dashed var(--border-subtle)}
+.apv-defer-label{font-size:var(--fs-xs);color:var(--text-muted);font-weight:var(--fw-semibold);margin-right:2px}
+.apv-defer-btn{font-size:var(--fs-xs);font-weight:var(--fw-medium);padding:4px 10px;cursor:pointer;
+    border:1px solid var(--border-default);border-radius:var(--radius-full);
+    background:var(--bg-surface);color:var(--text-secondary);line-height:1.4;font-family:inherit}
+.apv-defer-btn:hover{background:var(--accent-soft);border-color:var(--accent);color:var(--accent)}
+.apv-defer-btn:disabled{opacity:.45;cursor:default}
+.apv-defer-on{display:flex;align-items:center;gap:5px;font-size:var(--fs-xs);color:var(--text-muted)}
+.apv-defer-on input{font-family:inherit;font-size:var(--fs-xs);padding:3px 6px;color:var(--text-primary);
+    border:1px solid var(--border-default);border-radius:var(--radius-sm);background:var(--bg-surface)}
+/* What is hidden, and when it comes back. A queue that suppresses without
+   reporting cannot be told apart from one that loses things. */
+.apv-later{border:1px solid var(--border-default);border-radius:var(--radius-md);
+    background:var(--bg-surface-2);margin-bottom:12px;overflow:hidden}
+.apv-later > summary{cursor:pointer;padding:9px 12px;font-size:var(--fs-sm);
+    font-weight:var(--fw-semibold);color:var(--text-secondary);list-style:none}
+.apv-later > summary::-webkit-details-marker{display:none}
+.apv-later > summary:hover{background:var(--bg-subtle)}
+.apv-later-list{padding:2px 12px 10px}
+.apv-later-row{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;padding:7px 0;
+    border-top:1px solid var(--border-subtle);font-size:var(--fs-sm)}
+.apv-later-when{font-size:var(--fs-xs);font-weight:var(--fw-semibold);color:var(--accent);
+    background:var(--accent-soft);border-radius:var(--radius-full);padding:2px 9px;white-space:nowrap}
+.apv-later-why{font-size:var(--fs-xs);color:var(--text-muted);flex:1 1 180px}
 .apv-actions{display:flex;gap:8px;flex-wrap:wrap}
 .apv-type{background:var(--bg-surface);border:1px solid var(--border-default);color:var(--text-primary);padding:4px 8px;border-radius:var(--radius-sm);font-size:var(--fs-xs);font-family:inherit}
+.apv-attach{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:6px;border-radius:var(--radius-md);padding:2px}
+.apv-attach.apv-drop-over{background:var(--accent-soft);outline:2px dashed var(--accent)}
+.apv-agent-files{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:8px 0 4px;padding:8px 10px;background:var(--accent-soft);border-radius:var(--radius-md)}
+.apv-agent-files-label{font-size:var(--fs-xs);font-weight:var(--fw-semibold);color:var(--accent)}
+.apv-agent-file{font-size:var(--fs-xs);font-weight:var(--fw-semibold);color:var(--accent);background:var(--bg-surface);border:1px solid var(--border-default);border-radius:var(--radius-full);padding:2px 10px;text-decoration:none}
+.apv-agent-file:hover{border-color:var(--accent);text-decoration:underline}
+.apv-attach-btn{border:1px dashed var(--border-default);border-radius:var(--radius-md);padding:4px 10px;font-size:var(--fs-xs);font-weight:var(--fw-semibold);color:var(--text-secondary);cursor:pointer}
+.apv-attach-btn:hover{border-color:var(--accent);color:var(--accent)}
+.apv-file-list{display:flex;gap:6px;flex-wrap:wrap}
+.apv-file-chip{display:inline-flex;align-items:center;gap:6px;background:var(--bg-subtle);border-radius:var(--radius-full);padding:2px 4px 2px 10px;font-size:var(--fs-xs);color:var(--text-primary)}
+.apv-file-x{border:none;background:none;color:var(--text-muted);cursor:pointer;font-size:14px;line-height:1;padding:0 4px;font-family:inherit}
+.apv-file-x:hover{color:var(--danger)}
 
 /* Check list (Zone B) */
 .chk-item{display:flex;gap:10px;align-items:flex-start;border:1px solid var(--border-default);border-left:4px solid var(--warning);border-radius:var(--radius-md);background:var(--bg-surface);padding:10px 14px;margin-bottom:8px}
@@ -295,6 +362,7 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
      Leadership Dashboard card. Pure IIFE, safe to load here. -->
 <script src="../../js/agent-accuracy.js?v=1"></script>
 <script src="../../js/automations-data.js?v=1"></script>
+<script src="../../js/mcp-tools-data.js?v=1"></script>
 <script src="../../js/sync-bar.js?v=6"></script>
 <script>
 // ═══════════════════════════════════════════════════════════════════════
@@ -327,6 +395,7 @@ const TF = {
     slackBaseline:    'fldxsqj9JSRBGNyT9', // when the Slack card went out (submission proxy)
     inboundTask:      'fldueazD67F7fUGee', // Inbound Communication Task checkbox
     inboundUrl:       'fldXf1p0vtHqOZcKl', // Gmail thread URL (or imessage:<guid>)
+    attachments:      'fldEbs9cscRr8elcw', // multipleAttachments — files Kevin adds with his feedback
     approver:         'fldLLAG5HQPEFEfE5', // singleCollaborator — whose approval a task waits on
     // The learning loop (Kevin's ruling, 26 Aug 2026). Ticking rememberThis is
     // all any decision surface does — scripts/agent-dispatch.py lessons then
@@ -334,7 +403,12 @@ const TF = {
     // reads on every future run. Feedback History is the durable archive,
     // because Approval Feedback is cleared by the agent's next submit.
     rememberThis:     'fldZurhdHutYIDKVx',
+    verdictReason:    'fldF9Bs4N5mttQvtl',
     feedbackHistory:  'fldOzsq68lhfprKJu',
+    // Knock it back (28 Aug 2026) — see TASK_FIELDS.deferredUntil in
+    // js/config.js for why this is a date on the task rather than a queue
+    // somewhere else.
+    deferredUntil:    'fldJ9IHS1yxwYzYSN',
 };
 
 // This page is admin-only (Kevin's build). Decisions are stamped with the
@@ -501,6 +575,8 @@ const AGENT_VIEW_ALIASES = { 'ceo-brief': 'dashboard' };
 let _agentsView = 'dashboard';  // which page tab is showing
 let allApprovals = [];          // loop-raised tasks at Status Approval
 let _approvalsState = 'idle';   // idle | loading | ready | 'error: <message>'
+let allDeferred = [];           // knocked back to a date — same queue, hidden until then
+let _deferredState = 'idle';    // idle | loading | ready | 'error: <message>'
 let _apvAgentFilter = '';       // Team Member id, or '' = every agent
 let _apvTier1Only = false;      // tier-1 toggle, AND-ed with the agent filter
 let ceoBriefRecords = null;     // CEO Briefs rows, newest first
@@ -723,14 +799,45 @@ async function postTaskComment(taskId, text){
 // raiser — they must never appear here. The exclusion is asserted again
 // client-side (see the sync-bar check), so a formula rename fails loudly
 // instead of quietly widening the queue.
+// KNOCKED BACK, NOT LOST (28 Aug 2026)
+// ------------------------------------
+// Kevin: "we've got a couple of confirmation statements to submit, and we need
+// authentication codes. It takes a week for those to arrive. Rather than having
+// something sitting clogging the approval gate up, I need to knock it back a
+// week."
+//
+// So a deferred task keeps Status Approval and keeps every scrap of the agent's
+// work. The ONLY thing that changes is a date, and every approval surface reads
+// that same date: this queue, the sidebar badge (js/shared.js), the Slack loop
+// (scripts/slack-automation/approvals.js) and the CEO brief's waiting count
+// (money-daily-worker.js). Nothing has to remember to bring it back — the day
+// the date passes, the filter stops matching and the task is simply there
+// again, in all four places at once.
+//
+// Back-tested against the live base on 28 Aug 2026: the queue read 66, one
+// record stamped +7 days took it to 65 with 1 deferred, and stamping it TODAY
+// or yesterday put it straight back to 66. A blank date always shows, which is
+// the case that matters — get that wrong and the whole queue vanishes.
+// Guarded by tests/approval-defer.test.js.
+//
+// The queue formula is written out in FULL, as one literal, and js/shared.js
+// holds a byte-identical copy for the sidebar badge. That duplication is
+// deliberate: tests/agent-register-surfaces.test.js reads the string out of
+// both files and fails if they differ, so the badge can never count a queue
+// the page does not show. Composing it from parts would slip past that test.
+const APV_QUEUE_FORMULA = "AND({Status}='Approval', LEN({Sent For Approval By}&'')>0, NOT(IS_AFTER({Deferred Until}, TODAY())))";
+const APV_DEFERRED_FORMULA = "AND({Status}='Approval', LEN({Sent For Approval By}&'')>0, IS_AFTER({Deferred Until}, TODAY()))";
+const APV_QUEUE_FIELDS = () => [
+    TF.name, TF.status, TF.description, TF.notes, TF.dueDate, TF.taskType,
+    TF.agentOutput, TF.sentForApprovalBy, TF.teamMember, TF.lmt, TF.slackBaseline,
+    TF.approver, TF.priority, TF.inboundUrl, TF.attachments, TF.deferredUntil,
+    TF.feedbackHistory];
+
 async function loadApprovals(){
     _approvalsState = 'loading';
     try {
-        const recs = await atFetch(TASKS_TBL,
-            [TF.name, TF.status, TF.description, TF.notes, TF.dueDate, TF.taskType,
-             TF.agentOutput, TF.sentForApprovalBy, TF.teamMember, TF.lmt, TF.slackBaseline,
-             TF.approver, TF.priority, TF.inboundUrl],
-            { filterByFormula: "AND({Status}='Approval', LEN({Sent For Approval By}&'')>0)" });
+        const recs = await atFetch(TASKS_TBL, APV_QUEUE_FIELDS(),
+            { filterByFormula: APV_QUEUE_FORMULA });
         // This queue and badge are KEVIN'S. The Approver field decides whose
         // lane a task is in (empty = Kevin, same convention as approverFor in
         // scripts/slack-automation/approvals.js); Mica's label-8 lane must
@@ -740,6 +847,7 @@ async function loadApprovals(){
             const ap = gf(r,TF.approver);
             return !ap || !ap.email || ap.email === APPROVER_EMAIL;
         });
+        _apvReason = {};
         allApprovals = mine.map(r=>({
             id: r.id,
             name: gf(r,TF.name)||'(Untitled)',
@@ -750,6 +858,13 @@ async function loadApprovals(){
             priority: selName(gf(r,TF.priority)),
             tier1: isTier1Output(gf(r,TF.agentOutput)||''),
             emailLinks: apvEmailLinks(gf(r,TF.inboundUrl)),
+            // Files already ON the task — normally the agent's own work
+            // (a drafted letter of authority, a filled form) attached with
+            // `agent-dispatch.py submit --attach`, so Kevin can open and
+            // read it before he decides.
+            files: (gf(r,TF.attachments)||[]).map(a=>({
+                filename: a.filename || 'file', url: a.url || '', size: a.size || 0,
+            })).filter(a=>/^https?:\/\//i.test(a.url)),
             raiserId: linkIds(gf(r,TF.sentForApprovalBy))[0] || linkIds(gf(r,TF.teamMember))[0] || '',
             raiserLinked: linkIds(gf(r,TF.sentForApprovalBy)).length > 0,
             lmt: gf(r,TF.lmt)||'',
@@ -759,7 +874,13 @@ async function loadApprovals(){
             // write (e.g. the board's Step 3b priority correction) bumps LMT,
             // so an un-posted task's waiting clock can reset — the window is
             // the minute before the sweep stamps the baseline, accepted.
-            submittedAt: gf(r,TF.slackBaseline) || gf(r,TF.lmt) || r.createdTime,
+            // Carried so the sync bar can assert the date filter held. Same
+            // reason raiserLinked is carried: a formula that quietly stops
+            // excluding must fail loudly, not widen the queue in silence.
+            deferredUntil: String(gf(r,TF.deferredUntil)||'').slice(0,10),
+            submittedAt: apvWaitingSince(
+                gf(r,TF.slackBaseline) || gf(r,TF.lmt) || r.createdTime,
+                gf(r,TF.deferredUntil)),
         }));
         // Most important first (Kevin's ruling, 25 Aug 2026): tier 1 leads,
         // then the Priority field (which the Task Manager's 9am/1pm/5pm
@@ -781,16 +902,121 @@ async function loadApprovals(){
     postApprovalBadge();
 }
 
+// A task coming back from a knock-back has NOT been waiting on Kevin all week.
+// Without this it returns already stamped "waiting 8 days", instantly trips the
+// over-24-hours check, and rings an alarm about the one thing he handled
+// correctly. The date he chose is the honest start of the new wait.
+function apvWaitingSince(stamped, deferredUntil){
+    const back = String(deferredUntil||'').slice(0,10);
+    if(!back) return stamped;
+    const backIso = back + 'T00:00:00.000Z';
+    // Only ever moves the clock FORWARD. A future date cannot be reached (the
+    // queue formula excludes those), and an older one must not undo a fresh
+    // Slack baseline stamped when the card was re-posted.
+    return (!stamped || String(stamped) < backIso) ? backIso : stamped;
+}
+
+// The other half of the queue: everything Kevin knocked back to a date.
+//
+// This is not optional decoration. A gate that hides things and reports
+// nothing cannot be told apart from a gate that loses them, which is the
+// whole reason the "Kept off your queue" lane exists further down this file.
+// Deferring is a stronger version of the same suppression — it is HIS choice,
+// but it still takes work off the surface he trusts — so the list of what is
+// hidden, and the date each item returns, ships in the same change as the
+// hiding. A failure to load it says so rather than reading as "nothing
+// deferred".
+async function loadDeferred(){
+    _deferredState = 'loading';
+    try {
+        const recs = await atFetch(TASKS_TBL, APV_QUEUE_FIELDS(),
+            { filterByFormula: APV_DEFERRED_FORMULA });
+        const mine = recs.filter(r => {
+            const ap = gf(r,TF.approver);
+            return !ap || !ap.email || ap.email === APPROVER_EMAIL;
+        });
+        allDeferred = mine.map(r=>({
+            id: r.id,
+            name: gf(r,TF.name)||'(Untitled)',
+            raiserId: linkIds(gf(r,TF.sentForApprovalBy))[0] || linkIds(gf(r,TF.teamMember))[0] || '',
+            until: String(gf(r,TF.deferredUntil)||'').slice(0,10),
+            tier1: isTier1Output(gf(r,TF.agentOutput)||''),
+            why: apvDeferReasonFrom(gf(r,TF.feedbackHistory)),
+        })).sort((a,b)=>String(a.until).localeCompare(String(b.until)));
+        _deferredState = 'ready';
+    } catch(e){
+        if(e.message==='auth') throw e;
+        _deferredState = 'error: ' + (e.message||'load failed');
+    }
+}
+
+// Kevin's own words about WHY he knocked it back, pulled back out of the
+// durable archive a week later. Without this the item returns as a mystery:
+// he knows he parked it, not what he was waiting for. Feedback History is
+// append-only and read by nothing that acts, which is exactly what a note to
+// your future self needs — writing it to Approval Feedback instead would put
+// it where an agent reads instructions.
+const APV_DEFER_TAG = 'Knocked back to ';
+function apvDeferReasonFrom(history){
+    const lines = String(history||'').split('\n');
+    for(let i = lines.length - 1; i >= 0; i--){
+        const m = lines[i].match(/\]\s*Knocked back to \d{4}-\d{2}-\d{2}(?::\s*(.+))?$/);
+        if(m) return (m[1]||'').trim();
+    }
+    return '';
+}
+
 // One-glance summary of what the agent is proposing, derived from Agent
 // Output. Mirrors apvSummary in os/tasks/index.html and in
 // scripts/slack-automation/approvals.js — keep the three in step.
+// Which address an email will actually be sent FROM. The header is OPTIONAL
+// in the Agent Output contract, and when it is missing send-email.py falls
+// back to Kevin's personal Gmail (his ruling, 6 Aug 2026) — so a card that
+// showed nothing was hiding the difference between writing as himself and
+// writing as Operations Director. Never leave it blank: say the default.
+const APV_DEFAULT_SENDER = 'kevinbrittain@gmail.com';
+const APV_BUSINESS_SENDER = 'kevin@operationsdirector.co.uk';
+// Mirrors BUSINESS_BRAND in scripts/send-email.py. Kept in step by
+// tests/approval-clarity.test.js, which reads both.
+const APV_BUSINESS_BRAND = /operationsdirector\.co\.uk|\bOperations Director\b/i;
+
+function apvEmailFrom(raw){
+    // Split the way the canonical parser does — agent_email_format.py uses
+    // partition("---"), so a "----" divider is a header break there and must
+    // be one here too, or a FROM quoted in the body poses as the sender.
+    const text = String(raw||'').replace(/\r\n/g,'\n');
+    const cut = text.indexOf('---');
+    if(cut === -1) return null;
+    const head = text.slice(0, cut);
+    const body = text.slice(cut);
+    const to = head.match(/^\s*TO:\s*(.+)$/im);
+    if(!to) return null;                                   // not an email draft
+    const subj = head.match(/^\s*SUBJECT:\s*(.+)$/im);
+    const from = head.match(/^\s*FROM:\s*(.+)$/im);
+    // send-email.py REFUSES a draft with no FROM whose copy speaks as the
+    // business. Naming the personal default there would promise a send that
+    // cannot happen, so say what will really occur instead.
+    const speaksAsBusiness = !from && APV_BUSINESS_BRAND.test(
+        (subj ? subj[1] : '') + '\n' + body);
+    return {
+        to: to[1].trim(),
+        from: from ? from[1].trim() : (speaksAsBusiness ? '' : APV_DEFAULT_SENDER),
+        isDefault: !from && !speaksAsBusiness,
+        blocked: speaksAsBusiness,
+    };
+}
+
+// Marks a summary that really is the "what happens on approval" line, so the
+// card only promises a consequence when it has one. Stripped before display.
+const APV_SUMMARY_IS_ACTION = '\u0000action';
 function apvSummary(raw){
     const text = String(raw||'').replace(/\r/g,'').trim();
     if(!text || text.length < 280) return '';
-    const m = text.match(/\*{0,2}carrying this out will involve:?\*{0,2}\s*/i);
+    const all = [...text.matchAll(/\*{0,2}carrying this out will involve:?\*{0,2}\s*/gi)];
+    const m = all.length ? all[all.length-1] : null;   // LAST, as the gate reads it
     if(m){
         const s = text.slice(m.index + m[0].length).trim();
-        if(s) return s.length > 400 ? s.slice(0,399)+'…' : s;
+        if(s) return (s.length > 400 ? s.slice(0,399)+'…' : s) + APV_SUMMARY_IS_ACTION;
     }
     const to = text.match(/^TO:\s*(.+)$/im);
     const subj = text.match(/^SUBJECT:\s*(.+)$/im);
@@ -807,6 +1033,52 @@ function apvSummary(raw){
     }
     return '';
 }
+
+// A file dropped ANYWHERE but the attach strip would otherwise navigate this
+// frame to it and unload the page, taking every unsaved draft in the queue
+// with it. The zone's own handlers stop propagation by consuming the event
+// first; this is the net under the rest of the page.
+['dragover','drop'].forEach(evt=>{
+    window.addEventListener(evt, e=>{
+        if(e.target && e.target.closest && e.target.closest('.apv-attach')) return;
+        e.preventDefault();
+        if(evt === 'drop') e.dataTransfer && (e.dataTransfer.dropEffect = 'none');
+    });
+});
+
+// Airtable's attachment URLs are short-lived signed links, but this page can
+// sit open for hours (the queue exists BECAUSE things wait). Re-read the task
+// on click so Kevin always opens a live link rather than an expired one.
+function apvOpenAttachment(ev, taskId, filename){
+    ev.preventDefault();
+    // Opened synchronously so the click still counts as the gesture that
+    // permits it — the re-read below is async and would lose it.
+    //
+    // It must NOT ask for 'noopener' here. The HTML standard makes
+    // window.open() return null whenever that feature is set, so `tab` was
+    // ALWAYS null: the browser opened a tab, nothing ever navigated it, and
+    // every attachment Kevin clicked gave him a blank screen for ever
+    // (reported 27 Aug 2026, reproduced in his own Chrome). The close() calls
+    // below were dead for the same reason. Cut the back-reference by hand
+    // instead, while the new tab is still about:blank and same-origin.
+    const tab = window.open('', '_blank');
+    if(!tab){
+        toast('Your browser blocked the new tab. Allow pop-ups for this page, then click ' + filename + ' again.', 5000);
+        return false;
+    }
+    try { tab.opener = null; } catch(e) { /* cross-origin already; nothing to sever */ }
+    atFetchOne(TASKS_TBL, taskId).then(rec=>{
+        const hit = (gf(rec,TF.attachments)||[]).find(a=>a.filename===filename);
+        if(hit && /^https?:\/\//i.test(hit.url||'')){ tab.location = hit.url; return; }
+        tab.close();
+        toast(filename + ' is no longer on this task. Refresh to see what is.');
+    }).catch(e=>{
+        tab.close();
+        if(e.message !== 'auth') toast('Could not open ' + filename + ': ' + (e.message||e));
+    });
+    return false;
+}
+window.apvOpenAttachment = apvOpenAttachment;
 
 // Openable email links from Inbound Note URL Link. The field also holds
 // non-web keys (imessage:<guid>), and a folded duplicate appends a second
@@ -835,6 +1107,114 @@ function updateApprovalsTabBadge(){
     badge.style.display = n ? '' : 'none';
 }
 
+// Files Kevin attaches to his feedback, queued per task until he decides.
+// Airtable's cap is on the FILE, not the encoded body: 4.9MB raw went up
+// fine as a 6.6MB base64 request (probed live 26 Aug 2026), so 5MB raw is
+// the real ceiling. Enforced here so an oversized file is refused at the
+// door rather than blocking a decision half way through.
+const APV_MAX_FILE_BYTES = 5 * 1024 * 1024;
+
+function apvFilesFor(taskId){
+    return (_apvDrafts[taskId] && _apvDrafts[taskId].files) || [];
+}
+
+function apvQueueFiles(taskId, fileList){
+    const incoming = Array.from(fileList || []);
+    if(!incoming.length){
+        toast('That did not carry a file. Drag the file itself, or use Attach a file.');
+        return;
+    }
+    const already = apvFilesFor(taskId);
+    const sameFile = (a,b) => a.name===b.name && a.size===b.size && a.lastModified===b.lastModified;
+    const tooBig = [], empty = [], dupes = [], ok = [];
+    incoming.forEach(f=>{
+        if(f.size > APV_MAX_FILE_BYTES) tooBig.push(f);
+        // An empty file uploads as an empty payload, which Airtable refuses —
+        // and because the upload gates the decision, one would block every
+        // button on the card until Kevin worked out why.
+        else if(f.size === 0) empty.push(f);
+        else if(already.some(q=>sameFile(q,f)) || ok.some(q=>sameFile(q,f))) dupes.push(f);
+        else ok.push(f);
+    });
+    if(ok.length) _apvDrafts[taskId] = Object.assign(_apvDrafts[taskId]||{}, { files: already.concat(ok) });
+    const say = (list, why) => { if(list.length) toast(list.map(f=>f.name).join(', ') + ' ' + why); };
+    say(tooBig, 'is over 5MB, which Airtable will not take. Not attached.');
+    say(empty, 'is empty, so there is nothing to attach.');
+    say(dupes, 'is already attached to this decision.');
+    renderApvFileChips(taskId);
+}
+window.apvQueueFiles = apvQueueFiles;
+
+function apvRemoveFile(taskId, idx){
+    const files = apvFilesFor(taskId).slice();
+    files.splice(idx, 1);
+    _apvDrafts[taskId] = Object.assign(_apvDrafts[taskId]||{}, { files });
+    renderApvFileChips(taskId);
+}
+window.apvRemoveFile = apvRemoveFile;
+
+function apvFileChipsHtml(taskId){
+    const files = apvFilesFor(taskId);
+    if(!files.length) return '';
+    return files.map((f,i)=>`<span class="apv-file-chip">&#128206; ${esc(f.name)}
+        <span style="color:var(--text-muted)">${Math.max(1, Math.round(f.size/1024))} KB</span>
+        <button type="button" class="apv-file-x" title="Remove this file" onclick="apvRemoveFile('${taskId}',${i})">&times;</button></span>`).join('');
+}
+
+function renderApvFileChips(taskId){
+    const el = document.getElementById('apvFiles-'+taskId);
+    if(el) el.innerHTML = apvFileChipsHtml(taskId);
+}
+
+// Airtable's content endpoint takes base64 JSON and nothing else: multipart
+// returns 400, and putting the TABLE id in the path returns 404 (both probed
+// live, 26 Aug 2026 — the quick-task uploader in js/shared.js had been doing
+// exactly that and has never once worked).
+function apvFileToBase64(file){
+    return new Promise((resolve, reject)=>{
+        const r = new FileReader();
+        r.onerror = ()=>reject(new Error('could not read ' + file.name));
+        r.onload = ()=>{
+            const s = String(r.result||'');
+            const comma = s.indexOf(',');
+            comma === -1 ? reject(new Error('unreadable file ' + file.name)) : resolve(s.slice(comma+1));
+        };
+        r.readAsDataURL(file);
+    });
+}
+
+async function uploadOneApprovalAttachment(taskId, file){
+    const b64 = await apvFileToBase64(file);
+    const res = await fetch(`https://content.airtable.com/v0/${BASE_ID}/${taskId}/${TF.attachments}/uploadAttachment`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${PAT}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            contentType: file.type || 'application/octet-stream',
+            filename: file.name,
+            file: b64,
+        }),
+    });
+    if(res.status===401||res.status===403){ showAuthBar(); throw new Error('auth'); }
+    if(!res.ok) throw new Error(`${file.name}: Airtable refused the upload (${res.status})`);
+}
+
+// Upload the queue file by file, taking each one OUT of the queue the moment
+// it lands and remembering its name on the draft. Three things follow, and
+// all three were review findings: a mid-batch failure never re-uploads what
+// already went up; a file Kevin adds mid-flight is not silently discarded
+// (the queue is filtered, never overwritten); and if the DECISION then fails,
+// the remembered names survive the retry so the trail still names the files.
+async function uploadQueuedApprovalFiles(taskId){
+    for(const file of apvFilesFor(taskId).slice()){
+        await uploadOneApprovalAttachment(taskId, file);
+        const d = _apvDrafts[taskId] = _apvDrafts[taskId] || {};
+        d.files = (d.files || []).filter(f => f !== file);
+        d.uploaded = (d.uploaded || []).concat(file.name);
+        renderApvFileChips(taskId);
+    }
+    return (_apvDrafts[taskId] && _apvDrafts[taskId].uploaded) || [];
+}
+
 // Half-typed notes and chosen work types, keyed by task id. Page-level so a
 // draft survives ANY re-render, including one whose filter hides the card it
 // belongs to (a per-render snapshot lost exactly that case).
@@ -845,6 +1225,8 @@ function snapshotApprovalDrafts(){
         if(n) _apvDrafts[t.id] = Object.assign(_apvDrafts[t.id]||{}, { note: n.value });
         const ty = document.getElementById('apvType-'+t.id);
         if(ty) _apvDrafts[t.id] = Object.assign(_apvDrafts[t.id]||{}, { type: ty.value });
+        const rm = document.getElementById('apvRemember-'+t.id);
+        if(rm) _apvDrafts[t.id] = Object.assign(_apvDrafts[t.id]||{}, { remember: rm.checked });
     });
 }
 function restoreApprovalDrafts(){
@@ -853,7 +1235,43 @@ function restoreApprovalDrafts(){
         if(n && d.note) n.value = d.note;
         const ty = document.getElementById('apvType-'+id);
         if(ty && d.type) ty.value = d.type;
+        const rm = document.getElementById('apvRemember-'+id);
+        if(rm && d.remember) rm.checked = true;
+        renderApvFileChips(id);   // queued files survive a filter click
     });
+}
+
+// Everything Kevin knocked back, and the day each one returns. Collapsed by
+// default so it costs him nothing on a normal morning, but the COUNT and the
+// next return date are always on screen — the point is that he can see the
+// queue is smaller because he made it smaller, not because something broke.
+function apvDeferredLaneHtml(){
+    if(String(_deferredState).indexOf('error') === 0){
+        return `<div class="zone-error">Could not load what you have knocked back: ${esc(String(_deferredState).slice(7))}.
+            Some approvals may be hidden. <button class="btn btn-sm" style="margin-left:8px" onclick="refreshAll()">Retry</button></div>`;
+    }
+    if(!allDeferred.length) return '';
+    const next = allDeferred[0];
+    const due = allDeferred.filter(t=>{ const d = apvDaysUntil(t.until); return d !== null && d <= 1; }).length;
+    return `<details class="apv-later">
+        <summary>&#128340; ${allDeferred.length} knocked back &mdash; ${due ? `${due} back within a day` : `next back ${esc(apvDeferDateLabel(next.until))}`}</summary>
+        <div class="apv-later-list">
+            ${allDeferred.map(t=>{
+                const d = apvDaysUntil(t.until);
+                const when = d === null ? esc(t.until)
+                    : d <= 0 ? 'back today'
+                    : d === 1 ? 'back tomorrow'
+                    : `back ${esc(apvDeferDateLabel(t.until))}`;
+                return `<div class="apv-later-row">
+                    <span class="apv-later-when">${when}</span>
+                    <span style="flex:2 1 220px">${t.tier1?'<strong style="color:var(--danger)">TIER 1</strong> ':''}${esc(t.name)}</span>
+                    <span class="apv-later-why">${t.why ? 'Waiting on: '+esc(t.why) : esc(teamName(t.raiserId)||'no agent recorded')}</span>
+                    <button class="btn btn-sm" onclick="agUndefer('${t.id}')"
+                            title="Puts it straight back in your queue and re-posts it to Slack.">Bring back now</button>
+                </div>`;
+            }).join('')}
+        </div>
+    </details>`;
 }
 
 function renderApprovals(){
@@ -874,9 +1292,13 @@ function renderApprovals(){
     countEl.textContent = allApprovals.length;
     countEl.className = 'zone-count' + (allApprovals.length ? ' hot' : '');
     updateApprovalsTabBadge();
+    // Rendered FIRST and in BOTH branches. An empty queue whose items are all
+    // knocked back must never read as "nothing is waiting" with no sign of
+    // where they went.
+    const laterHtml = apvDeferredLaneHtml();
     if(!allApprovals.length){
         _apvAgentFilter = ''; _apvTier1Only = false;
-        body.innerHTML = `<div class="empty-state"><p>Nothing is waiting for your approval.</p></div>`;
+        body.innerHTML = laterHtml + `<div class="empty-state"><p>Nothing is waiting for your approval${allDeferred.length?' right now':''}.</p></div>`;
         return;
     }
 
@@ -904,7 +1326,7 @@ function renderApprovals(){
     const tier1Count = allApprovals.filter(t=>t.tier1 && inAgent(t)).length;
     const anyFilter = _apvAgentFilter || _apvTier1Only;
 
-    let html = `<div class="apv-filters">
+    let html = laterHtml + `<div class="apv-filters">
         <button class="apv-filter${anyFilter?'':' active'}" onclick="clearApvFilters()">All (${allApprovals.length})</button>
         ${chips.map(g=>{
             const n = g.rows.filter(inTier).length;
@@ -918,7 +1340,7 @@ function renderApprovals(){
     // Two filters can now AND down to nothing (an agent with no tier-1 work),
     // which one filter never could. Say so, with the way out.
     html += shown.length
-        ? shown.map(apvCardHtml).join('')
+        ? apvGroupedHtml(shown)
         : `<div class="empty-state"><p>No approvals match these filters.</p>
            <button class="btn btn-sm" onclick="clearApvFilters()">Clear filters</button></div>`;
     body.innerHTML = html;
@@ -944,8 +1366,165 @@ function clearApvFilters(){
 }
 window.clearApvFilters = clearApvFilters;
 
+// Mirrors SYSTEM_ALERT_PATTERNS in scripts/agent-dispatch.py — the NAME half
+// only, because the browser cannot see the Inbound Sender the engine matches
+// on first. So this lane under-reports rather than over-reports, which is the
+// safe direction for a list whose job is to prove nothing is being hidden.
+// Kept in sync by tests/approval-gate-defaults.test.js.
+const APV_ALERT_RE = /apps script|cloudflare (kv|worker)|airtable automation|gmail quota/i;
+
+// Work that went to Roy instead of to Kevin (28 Aug 2026). Same reason the
+// alert lane is listed: a lane that takes work OUT of his queue and reports
+// nothing cannot be told apart from a lane that lost it. Read off the Notes
+// stamp `handover` writes, so this shows what actually happened rather than
+// what a classifier thinks should have.
+const APV_ROY_NOTE_RE = /Handed over to Roy Lavin/i;
+
+// ─── ONE INCIDENT, ONE DECISION (27 Aug 2026) ────────────────────────
+//
+// 13 of the 60 tasks waiting that day were the SAME four or five incidents
+// written up in fresh words each time: three "Invoices Dashboard Apps Script"
+// tasks, four "Meetings Intake", two "Cloudflare KV", three "Airtable
+// automation". Kevin read and decided each one separately.
+//
+// dupeTaskKey already groups them correctly — verified against those exact 13
+// live task names, which collapse to the right 5. Until now it was only used
+// to FLAG duplicates on the Check these tab; here it does something useful
+// with the same answer.
+//
+// A group of one renders exactly as before, so nothing changes for the 46
+// genuine one-off decisions. Only a real cluster gets a header, and the header
+// is where the whole group can be closed in one verdict.
+function apvGroupTasks(rows){
+    // TWO PASSES, and a match is either (28 Aug 2026). The exact key is the
+    // fast bucket and keeps every catch it had; dupeVerdict is the second pass
+    // over what it missed — seven real pairs on the live queue that morning,
+    // which is what Kevin was seeing twice.
+    //
+    // Union-find, because duplication is transitive: if A matches B on a phone
+    // number and B matches C on wording, all three are one matter. Grouping
+    // them pairwise would leave C on its own.
+    const parent = {}, reason = {};
+    const find = (x)=>{ while(parent[x] !== x){ parent[x] = parent[parent[x]]; x = parent[x]; } return x; };
+    rows.forEach(t=>{ parent[t.id] = t.id; });
+    for(let i = 0; i < rows.length; i++){
+        for(let j = i + 1; j < rows.length; j++){
+            const a = rows[i], b = rows[j];
+            // Fall back to the id so two NAMELESS tasks can never collide — an
+            // empty key would merge unrelated work into one verdict.
+            const ka = dupeTaskKey(a.name || '') || ('id:' + a.id);
+            const kb = dupeTaskKey(b.name || '') || ('id:' + b.id);
+            let why = '';
+            if(ka === kb) why = 'same subject';
+            else {
+                const v = dupeVerdict(a.name || '', b.name || '', 'group');
+                if(v.match) why = v.why;
+            }
+            if(!why) continue;
+            const ra = find(a.id), rb = find(b.id);
+            if(ra !== rb) parent[ra] = rb;
+            // Keep the FIRST reason found for the merged set: it is the one
+            // that put these two together, and a later pair's wording would
+            // describe a different edge of the same cluster.
+            const root = find(a.id);
+            if(!reason[root]) reason[root] = why;
+        }
+    }
+    const byRoot = {}, groups = [];
+    rows.forEach(t=>{
+        const r = find(t.id);
+        if(!byRoot[r]){ byRoot[r] = { key: r, rows: [], why: '' }; groups.push(byRoot[r]); }
+        byRoot[r].rows.push(t);
+    });
+    groups.forEach(g=>{ g.why = reason[g.key] || ''; });
+    return groups;
+}
+
+function apvGroupedHtml(rows){
+    return apvGroupTasks(rows).map(g=>{
+        if(g.rows.length < 2) return apvCardHtml(g.rows[0]);
+        const ids = JSON.stringify(g.rows.map(r=>r.id)).replace(/"/g, '&quot;');
+        const agents = Array.from(new Set(g.rows.map(r=>teamName(r.raiserId)).filter(Boolean)));
+        return `<div class="apv-group" data-apv-group="${esc(g.key)}">
+            <div class="apv-group-head">
+                <div>
+                    <span class="apv-group-count">${g.rows.length} tasks, one thing</span>
+                    ${g.why ? `<span class="apv-group-why" title="Why these are grouped. Check it before you close them all — if it looks wrong, decide them one at a time instead.">${esc(g.why)}</span>` : ''}
+                    <span class="apv-group-sub">${esc(agents.join(', ') || 'no agent recorded')}</span>
+                </div>
+                <div class="apv-group-actions">
+                    <span class="apv-group-label">Reject all ${g.rows.length} because&hellip;</span>
+                    ${APV_REASONS.filter(r=>!r.countsAgainstDraft).map(r=>
+                        `<button class="apv-reason" data-apv-btn
+                           onclick="agRejectGroup(${ids},'${esc(r.key)}')"
+                          >${esc(r.chip)}</button>`).join('')}
+                </div>
+            </div>
+            ${g.rows.map(apvCardHtml).join('')}
+        </div>`;
+    }).join('');
+}
+
+// One verdict for the whole group. Deliberately REJECT-ONLY, and only on the
+// relevance reasons: approving several different pieces of prepared work on one
+// click would be approving text Kevin has not read, which is the single thing
+// the gate exists to prevent. "The work is wrong" is excluded too — that one is
+// a judgement on a specific draft and cannot be made in bulk.
+function agRejectGroup(taskIds, reasonKey){
+    const r = APV_REASON_BY_KEY[reasonKey];
+    if(!r || r.countsAgainstDraft || !taskIds || !taskIds.length) return;
+    const n = taskIds.length;
+    const idsAttr = JSON.stringify(taskIds).replace(/"/g, '&quot;');
+    showModal(`Reject all ${n}?`,
+        `<p style="font-size:var(--fs-sm);color:var(--text-secondary);line-height:1.6">
+           These ${n} tasks are the same thing written up ${n} different ways. This closes all of them.
+           Nothing goes out, and it does <strong>not</strong> count against any agent &mdash; the work was fine,
+           the tasks should not have reached you.<br><br>
+           <strong>Because:</strong> ${esc(r.chip)}<br>
+           <strong>Reason:</strong> ${esc(r.note)}</p>
+         <label style="display:flex;gap:8px;align-items:flex-start;margin-top:12px;background:var(--accent-soft);border-radius:var(--radius-md);padding:10px 12px;cursor:pointer">
+           <input type="checkbox" id="apvGroupRemember" style="margin:3px 0 0">
+           <span style="font-size:var(--fs-sm);color:var(--text-primary);line-height:1.5">Remember this reason, so these stop reaching you.</span>
+         </label>`,
+        `<button class="btn" onclick="closeModal()">Cancel</button>
+         <button class="btn btn-danger" onclick="agConfirmRejectGroup(${idsAttr},'${esc(reasonKey)}')">Reject all ${n}</button>`);
+}
+window.agRejectGroup = agRejectGroup;
+
+async function agConfirmRejectGroup(taskIds, reasonKey){
+    const box = document.getElementById('apvGroupRemember');
+    const remember = !!(box && box.checked);
+    closeModal();
+    const r = APV_REASON_BY_KEY[reasonKey];
+    let done = 0, failed = 0;
+    // One at a time, not Promise.all: a half-failed batch must leave a truthful
+    // queue, and each write carries its own stale-check against the live task.
+    for(let i = 0; i < taskIds.length; i++){
+        const id = taskIds[i];
+        _apvReason[id] = reasonKey;
+        const noteEl = document.getElementById('apvNote-' + id);
+        if(noteEl && !noteEl.value.trim() && r && r.note) noteEl.value = r.note;
+        try {
+            // Remember on the FIRST only. One tick teaches one rule; writing
+            // the same line into an agent file five times is not five lessons.
+            await applyApprovalDecision(id, 'Rejected', remember && i === 0);
+            done++;
+        } catch(e){
+            failed++;
+            console.error('group reject failed for ' + id, e);
+        }
+    }
+    toast(failed
+        ? `Closed ${done}. ${failed} could not be closed and are still in the queue.`
+        : `Closed all ${done}.`);
+    await loadApprovals(); renderApprovals(); renderRegister();
+}
+window.agConfirmRejectGroup = agConfirmRejectGroup;
+
 function apvCardHtml(t){
-    const summary = apvSummary(t.agentOutput);
+    const raw = apvSummary(t.agentOutput);
+    const isAction = raw.endsWith(APV_SUMMARY_IS_ACTION);
+    const summary = isAction ? raw.slice(0, -APV_SUMMARY_IS_ACTION.length) : raw;
     const ask = summary || t.name;
     const agent = teamName(t.raiserId) || 'No agent recorded';
     const tier1 = t.tier1;
@@ -959,7 +1538,7 @@ function apvCardHtml(t){
     const work = String(t.agentOutput||'').trim();
     return `<div class="apv-card" data-apv-card="${t.id}">
         ${tier1 ? `<div class="apv-tier1">TIER 1. This touches your private legal and financial matter. An AI agent prepared it. Nothing has been sent, filed, paid or changed anywhere. Read it before you approve.</div>` : ''}
-        <div class="apv-ask">${esc(ask)}</div>
+        <div class="apv-ask">${isAction ? `<span class="apv-ask-stem">If you approve, this happens:</span> ` : ''}${esc(ask)}</div>
         <div class="apv-meta">
             ${t.priority==='Urgent' ? '<span class="apv-chip" style="background:var(--danger-bg);color:var(--danger)">Urgent</span>' : ''}
             <span class="apv-chip">${esc(agent)}</span>
@@ -967,6 +1546,19 @@ function apvCardHtml(t){
             <span class="apv-age${late?' late':''}" title="Measured from when it was posted for approval (or last changed, if it has not been posted yet)">waiting ${esc(agoText(t.submittedAt))}</span>
             ${linksHtml}
         </div>
+        ${(()=>{
+            // Correspondence only: another task type quoting email headers in
+            // its draft is not a send, and saying so would be a false promise.
+            if(t.taskType !== 'Correspondence') return '';
+            const e = apvEmailFrom(t.agentOutput);
+            if(!e) return '';
+            return `<div class="apv-email-from${e.blocked?' apv-email-blocked':''}">
+                <span><strong>Sends from:</strong> ${e.blocked
+                    ? `<span style="color:var(--danger)">not set — and this copy speaks as Operations Director, so the sender will refuse it. It needs <strong>${esc(APV_BUSINESS_SENDER)}</strong>.</span>`
+                    : `${esc(e.from)}${e.isDefault ? ' <span style="color:var(--text-muted)">(default — the agent did not choose one)</span>' : ''}`}</span>
+                <span><strong>To:</strong> ${esc(e.to)}</span>
+            </div>`;
+        })()}
         ${summary ? `<div style="font-size:var(--fs-xs);color:var(--text-muted);margin-bottom:4px">Task: ${esc(t.name)}</div>` : ''}
         <details class="apv-details">
             <summary>${work ? 'Read the agent’s full work' : 'The agent left its work empty'}</summary>
@@ -975,6 +1567,12 @@ function apvCardHtml(t){
                 : `<div class="apv-body">The agent left its work empty, so there is nothing here to judge. Do not approve it blind. Use Request changes and tell it to show its work.</div>`}
             ${t.description ? `<div style="font-size:var(--fs-xs);font-weight:var(--fw-semibold);color:var(--text-secondary);margin-top:8px">The task it was given</div><div class="apv-body">${esc(t.description)}</div>` : ''}
         </details>
+        ${(t.files||[]).length ? `<div class="apv-agent-files">
+            <span class="apv-agent-files-label">&#128206; ${t.files.length === 1 ? 'File on this task' : t.files.length + ' files on this task'} — open before you decide</span>
+            ${t.files.map(f=>`<a class="apv-agent-file" href="${esc(f.url)}" target="_blank" rel="noopener noreferrer"
+                onclick="return apvOpenAttachment(event,'${t.id}','${esc(f.filename)}')"
+                title="Opens in a new tab. Could be the agent's own work, a document from the sender, or a file you attached — this field holds all three.">${esc(f.filename)}${f.size ? ` <span style="color:var(--text-muted)">${Math.max(1, Math.round(f.size/1024))} KB</span>` : ''}</a>`).join('')}
+        </div>` : ''}
         <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:4px">
             <label style="font-size:var(--fs-xs);color:var(--text-secondary);font-weight:var(--fw-semibold)">Kind of work (scores the agent)</label>
             <select class="apv-type" id="apvType-${t.id}">
@@ -982,23 +1580,141 @@ function apvCardHtml(t){
                 ${TASK_TYPE_OPTIONS.map(o=>`<option value="${o}" ${t.taskType===o?'selected':''}>${o}</option>`).join('')}
             </select>
         </div>
-        <textarea class="apv-note" id="apvNote-${t.id}" placeholder="What to change, or why you are rejecting. Required for Request changes and both Reject buttons."></textarea>
+        <textarea class="apv-note" id="apvNote-${t.id}" placeholder="Optional. A reject chip fills this in for you — type here only if you want to be more specific, or to say what needs changing. Easier to say than type? Paste a Loom link and the agent reads what you said."></textarea>
+        <div class="apv-attach" id="apvDrop-${t.id}"
+             ondragover="event.preventDefault();this.classList.add('apv-drop-over')"
+             ondragleave="this.classList.remove('apv-drop-over')"
+             ondrop="event.preventDefault();this.classList.remove('apv-drop-over');apvQueueFiles('${t.id}', event.dataTransfer.files)">
+            <label class="apv-attach-btn" for="apvFile-${t.id}" title="Attach a screenshot, letter or document, or drop one here. It goes onto the task with your feedback.">&#128206; Attach a file <span style="font-weight:var(--fw-regular);color:var(--text-muted)">or drop one here</span></label>
+            <input type="file" id="apvFile-${t.id}" multiple style="display:none"
+                   onchange="apvQueueFiles('${t.id}', this.files); this.value='';">
+            <span id="apvFiles-${t.id}" class="apv-file-list">${apvFileChipsHtml(t.id)}</span>
+        </div>
         <label style="display:flex;align-items:center;gap:6px;font-size:var(--fs-xs);color:var(--text-secondary);margin-top:6px">
             <input type="checkbox" id="apvRemember-${t.id}" style="margin:0">
-            Remember this too, so the agent applies it from now on
+            Remember this reason — the agent applies it to every future task
         </label>
         <div class="apv-actions">
             <button class="btn btn-success" data-apv-btn onclick="agDecide('${t.id}','Approved as-is')">Approve</button>
             <button class="btn" data-apv-btn onclick="agDecide('${t.id}','Approved with minor edits')" title="Approved, but you tidied it first. Still counts as accurate.">Approve with minor edits</button>
             <button class="btn" data-apv-btn onclick="agDecide('${t.id}','Changes requested')" title="Goes back to the agent to redo. Needs a comment.">Request changes</button>
-            <button class="btn btn-danger" data-apv-btn onclick="agDecide('${t.id}','Rejected')" title="Closes the task for good. Nothing is learned — use this when the reason is a one-off.">Reject and close</button>
-            <button class="btn btn-danger" data-apv-btn onclick="agDecide('${t.id}','Rejected',true)" title="Closes the task AND keeps your reason as a standing rule in the agent's instructions, so it stops raising work like this.">Reject and remember</button>
+            <button class="btn btn-danger" data-apv-btn onclick="agDecide('${t.id}','Rejected')"
+                    title="Closes the task for good. Type your reason in the box above first — or use a chip below if one of them fits.">Reject</button>
         </div>
+        ${apvReasonChips(t.id)}
+        ${apvDeferRow(t.id)}
     </div>`;
 }
 
 // Record Kevin's verdict — the SAME writes as the Tasks drawer's apvDecide and
 // the Slack loop's applyDecision. This page is the third face of the ONE
+// ─── WHY, NOT JUST NO (27 Aug 2026) ──────────────────────────────────
+//
+// Every rejection Kevin had made up to that day was classified against the
+// reason he typed. 58 rejections, and NOT ONE said the draft was wrong:
+//
+//   41%  already dealt with somewhere else
+//   14%  below the threshold of what he wants to see
+//   12%  Roy owns it
+//    9%  parked until something else is built
+//    7%  stale
+//    5%  duplicate
+//    0%  the work itself was wrong
+//
+// Two things followed. He was typing the same sentence over and over — "Roy is
+// dealing with this" seven separate times — at roughly two and a half minutes a
+// go. And every one of those rejections counted against the agent that WROTE
+// the draft, which had not chosen the task and could not have prevented it.
+// Blended accuracy read 66.9%; excluding relevance failures it was 96.7%.
+//
+// So the reason is now a chip, not a paragraph. One tap records the verdict,
+// the reason and the sentence. `countsAgainstDraft` is the load-bearing flag:
+// only "The work is wrong" is a judgement on the agent's writing. The rest say
+// the task should never have existed, which is a fact about whatever created
+// it — see scripts/agent-dispatch.py, which routes the lesson accordingly.
+//
+// The `note` here is a DEFAULT, not a lock. Kevin can type over it before he
+// confirms, and often should: "Roy owns it" is the rule, "Roy owns 1406 Oldham
+// Road" is the useful version of the rule.
+const APV_REASONS = [
+    { key: 'Already done elsewhere',  chip: 'Already done',
+      note: 'This has already been dealt with elsewhere.',       countsAgainstDraft: false },
+    { key: 'Roy owns it',             chip: 'Roy owns it',
+      note: 'Roy is dealing with this directly.',                countsAgainstDraft: false },
+    { key: 'Not worth my attention',  chip: 'Not worth my time',
+      note: 'Only bring me something like this if it is a major issue.', countsAgainstDraft: false },
+    { key: 'Duplicate',               chip: 'Duplicate',
+      note: 'Duplicate of another task. Spot these before sending them to me.', countsAgainstDraft: false },
+    { key: 'Parked for now',          chip: 'Parked',
+      note: 'Not now. Hold this until I say otherwise.',          countsAgainstDraft: false },
+    { key: 'No longer relevant',      chip: 'No longer relevant',
+      note: 'This is stale and no longer applies.',               countsAgainstDraft: false },
+    { key: 'The work is wrong',       chip: 'The work is wrong',
+      note: '',                                                   countsAgainstDraft: true },
+];
+const APV_REASON_BY_KEY = Object.fromEntries(APV_REASONS.map(r => [r.key, r]));
+
+// The chip Kevin last clicked per task, so the confirm dialog and the write
+// agree about what he chose. Cleared when the queue reloads.
+let _apvReason = {};
+
+function apvReasonChips(taskId){
+    return `<div class="apv-reasons" role="group" aria-label="Why are you rejecting this?">
+        <span class="apv-reasons-label">Reject because&hellip;</span>
+        ${APV_REASONS.map(r=>`<button class="apv-reason${r.countsAgainstDraft?' apv-reason-quality':''}"
+             data-apv-btn onclick="agRejectWithReason('${taskId}','${esc(r.key)}')"
+             title="${r.countsAgainstDraft
+                 ? 'The only reason that counts against this agent&apos;s draft quality.'
+                 : 'The task should not have reached you. Does not count against the agent that wrote it.'}"
+            >${esc(r.chip)}</button>`).join('')}
+    </div>`;
+}
+
+// The third row of the card: not now.
+//
+// It sits UNDER the reject chips on purpose. Approve, request changes and
+// reject are all decisions; this is the absence of one, and putting it beside
+// them invites a knock-back where a verdict belongs. The date picker is there
+// because Kevin often knows the actual day something lands (a hearing, a
+// renewal, a code in the post) and rounding that to "a week" just means
+// deciding it twice.
+function apvDeferRow(taskId){
+    return `<div class="apv-defer" role="group" aria-label="Knock this back to a date">
+        <span class="apv-defer-label" title="It leaves every approval surface until the date, then comes back on its own with the agent&apos;s work untouched.">Not yet &mdash; bring it back in&hellip;</span>
+        ${APV_DEFER_OPTIONS.map(o=>`<button class="apv-defer-btn" data-apv-btn
+             onclick="agDefer('${taskId}',${o.days})"
+             title="Returns on ${esc(apvDeferDateLabel(apvDatePlus(o.days)))}">${esc(o.label)}</button>`).join('')}
+        <span class="apv-defer-on">
+            <label for="apvDeferDate-${taskId}">or on</label>
+            <input type="date" id="apvDeferDate-${taskId}" min="${esc(apvDatePlus(1))}"
+                   onkeydown="if(event.key==='Enter'){event.preventDefault();agDeferOnDate('${taskId}')}">
+            <button class="apv-defer-btn" data-apv-btn onclick="agDeferOnDate('${taskId}')">Go</button>
+        </span>
+    </div>`;
+}
+
+// One tap: records the reason, fills the sentence, and goes straight to the
+// confirm. Typing is now optional rather than mandatory, which is the whole
+// point — but the note is still editable in the dialog, and the remember
+// choice still lands at the moment of commitment.
+function agRejectWithReason(taskId, reasonKey){
+    const r = APV_REASON_BY_KEY[reasonKey];
+    if(!r) return;
+    _apvReason[taskId] = reasonKey;
+    const noteEl = document.getElementById('apvNote-'+taskId);
+    // Never overwrite words Kevin has already typed: they are more specific
+    // than the default, and losing them mid-click is exactly the kind of small
+    // betrayal that stops someone trusting a fast path.
+    if(noteEl && !noteEl.value.trim() && r.note) noteEl.value = r.note;
+    if(r.countsAgainstDraft && noteEl && !noteEl.value.trim()){
+        toast('Say what is wrong with it — that is the part the agent can act on.');
+        noteEl.focus();
+        return;
+    }
+    agDecide(taskId, 'Rejected');
+}
+window.agRejectWithReason = agRejectWithReason;
+
 // mechanism, never a new one. Reject asks for confirmation first.
 function agDecide(taskId, outcome, remember){
     const t = allApprovals.find(x=>x.id===taskId);
@@ -1006,8 +1722,9 @@ function agDecide(taskId, outcome, remember){
     if(APPROVAL_OUTCOMES.indexOf(outcome)===-1) return;
     const noteEl = document.getElementById('apvNote-'+taskId);
     const note = (noteEl && noteEl.value || '').trim();
-    // The tickbox is the "remember" route for the other three verdicts; the
-    // second Reject button is the same thing with one click instead of two.
+    // The tickbox is the ONLY way anything becomes a standing rule (Kevin's
+    // call, 26 Aug 2026 — the separate "Reject and remember" button was
+    // removed as a duplicate of it).
     const boxEl = document.getElementById('apvRemember-'+taskId);
     remember = !!remember || !!(boxEl && boxEl.checked);
     const needsNote = (outcome==='Changes requested' || outcome==='Rejected');
@@ -1030,16 +1747,46 @@ function agDecide(taskId, outcome, remember){
         // lower-case "the agent", which read as a typo mid-dialog on a task
         // with no agent linked.
         const Agent = agent.charAt(0).toUpperCase() + agent.slice(1);
-        showModal(remember ? 'Reject this, and make it a rule?' : 'Reject this work?',
-            `<p style="font-size:var(--fs-sm);color:var(--text-secondary);line-height:1.6">This closes the task and counts against ${esc(agent)}. Nothing goes out.<br><br><strong>Reason:</strong> ${esc(note)}</p>`
-            + (remember ? `<p style="font-size:var(--fs-sm);color:var(--text-primary);line-height:1.6;background:var(--accent-soft);border-radius:var(--radius-md);padding:10px 12px;margin-top:10px">${esc(Agent)} keeps this reason in its instructions and applies it to every future task, until you remove it.</p>` : ''),
+        // The remember choice is REPEATED here, pre-set from the tickbox above.
+        // With the second button gone, the tickbox is the only route, and a
+        // tickbox above the buttons is exactly the control you scroll past
+        // while typing a reason worth keeping. This puts the choice at the
+        // moment of commitment, where it cannot be missed.
+        // What the dialog SAYS about the score now depends on the reason. The
+        // old wording ("counts against the agent") was true of every rejection
+        // and should never have been: 58 of 58 rejections were relevance
+        // failures the drafting agent could not have prevented, and telling
+        // Kevin they counted against it was telling him something false.
+        const reason = APV_REASON_BY_KEY[_apvReason[taskId] || ''] || null;
+        const scoreLine = !reason
+            ? `This closes the task and counts against ${esc(agent)}. Nothing goes out.`
+            : reason.countsAgainstDraft
+                ? `This closes the task and counts against ${esc(agent)}&rsquo;s draft quality. Nothing goes out.`
+                : `This closes the task. Nothing goes out, and it does <strong>not</strong> count against ${esc(agent)} &mdash; the work was fine, the task should not have reached you.`;
+        showModal('Reject this work?',
+            `<p style="font-size:var(--fs-sm);color:var(--text-secondary);line-height:1.6">${scoreLine}${reason?`<br><br><strong>Because:</strong> ${esc(reason.chip)}`:''}<br><br><strong>Reason:</strong> ${esc(note)}</p>
+             <label style="display:flex;gap:8px;align-items:flex-start;margin-top:12px;background:var(--accent-soft);border-radius:var(--radius-md);padding:10px 12px;cursor:pointer">
+               <input type="checkbox" id="apvRememberConfirm" ${remember?'checked':''} style="margin:3px 0 0">
+               <span style="font-size:var(--fs-sm);color:var(--text-primary);line-height:1.5">Remember this reason. ${esc(Agent)} keeps it in its instructions and applies it to every future task, until you remove it.</span>
+             </label>`,
             `<button class="btn" onclick="closeModal()">Cancel</button>
-             <button class="btn btn-danger" onclick="closeModal();applyApprovalDecision('${taskId}','Rejected',${remember?'true':'false'})">${remember ? 'Reject and remember' : 'Reject and close'}</button>`);
+             <button class="btn btn-danger" onclick="agConfirmReject('${taskId}')">Reject and close</button>`);
         return;
     }
     applyApprovalDecision(taskId, outcome, remember);
 }
 window.agDecide = agDecide;
+
+// Read the dialog's own tickbox at the moment of confirming, so changing your
+// mind inside the dialog is what counts — not what was ticked when it opened.
+function agConfirmReject(taskId){
+    const box = document.getElementById('apvRememberConfirm');
+    const remember = !!(box && box.checked);
+    closeModal();
+    applyApprovalDecision(taskId, 'Rejected', remember);
+}
+window.agConfirmReject = agConfirmReject;
+
 
 async function applyApprovalDecision(taskId, outcome, remember){
     const t = allApprovals.find(x=>x.id===taskId);
@@ -1051,6 +1798,7 @@ async function applyApprovalDecision(taskId, outcome, remember){
     const card = document.querySelector(`[data-apv-card="${taskId}"]`);
     const btns = card ? Array.from(card.querySelectorAll('[data-apv-btn]')) : [];
     btns.forEach(b=>{ b.disabled = true; });
+    let phase = 'check';
     try {
         // STALE-APPROVAL GUARD (same principle as the Slack baseline): a click
         // approves what was on screen when the card RENDERED. Re-read the task
@@ -1070,6 +1818,14 @@ async function applyApprovalDecision(taskId, outcome, remember){
             return;
         }
 
+        // Files go up BEFORE the decision is written: if Airtable refuses
+        // one, nothing has been decided and Kevin still has his queue. They
+        // are cleared from the queue the moment they land, so a later
+        // failure on the decision itself cannot upload them twice.
+        phase = 'upload';
+        const attachedNames = await uploadQueuedApprovalFiles(taskId);
+        phase = 'decide';
+
         const nowIso = new Date().toISOString();
         const payload = {};
         payload[TF.approvalOutcome] = outcome;
@@ -1080,6 +1836,11 @@ async function applyApprovalDecision(taskId, outcome, remember){
         // comment alone is not enough: the Slack worker's Airtable token
         // cannot read comments, so the field is the only place both sides see.
         if(note) payload[TF.approvalFeedback] = note;
+        // WHY, recorded as data rather than left in prose nobody can count.
+        // This is what lets accuracy separate "the draft was wrong" from "the
+        // task should not have existed", and what tells the lesson writer
+        // which agent the rule belongs to.
+        if(_apvReason[taskId]) payload[TF.verdictReason] = _apvReason[taskId];
         // The durable copy. Approval Feedback is cleared by the agent's next
         // submit, so without this the words that caused a redo are gone within
         // the hour and the lesson writer has nothing left to read.
@@ -1115,11 +1876,13 @@ async function applyApprovalDecision(taskId, outcome, remember){
 
         const agentLabel = teamName(t.raiserId) || 'the agent';
         const rememberLine = (remember && note) ? ` Kept as a standing rule for ${agentLabel}.` : '';
+        const attachComment = attachedNames.length
+            ? ` Attached: ${attachedNames.join(', ')}.` : '';
         const line = outcome==='Rejected'
-            ? `Rejected. Reason: ${note}${rememberLine}`
+            ? `Rejected. Reason: ${note}${attachComment}${rememberLine}`
             : outcome==='Changes requested'
-                ? `Changes requested. ${note}${rememberLine}`
-                : `${outcome}. Back to ${agentLabel} to carry out.${note ? ' Note: '+note : ''}${rememberLine}`;
+                ? `Changes requested. ${note}${attachComment}${rememberLine}`
+                : `${outcome}. Back to ${agentLabel} to carry out.${note ? ' Note: '+note : ''}${attachComment}${rememberLine}`;
         await postTaskComment(taskId, line);
 
         allApprovals = allApprovals.filter(x=>x.id!==taskId);
@@ -1134,11 +1897,193 @@ async function applyApprovalDecision(taskId, outcome, remember){
     } catch(e){
         if(e.message==='auth') return;
         console.error('approval decision failed', e);
-        toast('Could not save the decision: ' + (e && e.message || e));
+        toast(phase === 'upload'
+            ? 'File not attached, so nothing was decided: ' + (e && e.message || e)
+            : 'Could not save the decision: ' + (e && e.message || e));
         btns.forEach(b=>{ b.disabled = false; });
     }
 }
 window.applyApprovalDecision = applyApprovalDecision;
+
+// ═══════════════════════════════════════════════════════════════════════
+// KNOCK IT BACK — defer an approval to a date
+// ═══════════════════════════════════════════════════════════════════════
+// Kevin's case: a confirmation statement he cannot file until an
+// authentication code arrives by post, a week away. Approving is wrong (it is
+// not ready), rejecting is wrong (it still has to happen), and leaving it is
+// what he asked to stop. So there is a third verdict, and it is NOT an
+// approval outcome: nothing is decided, nothing is scored, nothing goes back
+// to the agent. The task simply stops being visible until the date.
+//
+// Deliberately NOT done here: changing Status. Moving the task to Upcoming
+// would need something to move it back, and a job that has to remember is a
+// job that can forget — the exact failure that lost six weeks of meetings and
+// every Friday CEO brief. A date the surfaces read themselves cannot forget.
+//
+// The Slack side is left to the worker, on purpose: this page writes ONLY the
+// date. scripts/slack-automation/approvals.js sees the deferral within the
+// minute, replies in the existing thread with the return date, and clears the
+// timestamp itself — which is what makes a fresh card appear on the day. One
+// writer owns Slack, so a thread can never be orphaned with no explanation in
+// it, and if that phase breaks the sweep logs "reconcile FAILED" instead of
+// losing the task.
+const APV_DEFER_OPTIONS = [
+    { days: 3,  label: '3 days'  },
+    { days: 7,  label: 'A week'  },
+    { days: 14, label: '2 weeks' },
+    { days: 30, label: 'A month' },
+];
+
+// Date arithmetic in LOCAL time, matching todayStr(). Using an ISO round-trip
+// here would shift the date by a day either side of a BST change.
+function apvDatePlus(days){
+    const d = new Date();
+    d.setDate(d.getDate() + Number(days||0));
+    return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+}
+
+function apvDeferDateLabel(iso){
+    const d = new Date(String(iso||'') + 'T12:00:00');
+    if(isNaN(d)) return String(iso||'');
+    return d.toLocaleDateString('en-GB', { weekday:'short', day:'numeric', month:'short' });
+}
+
+// Days from today until `iso`, local, whole days. Negative means overdue.
+function apvDaysUntil(iso){
+    const t = Date.parse(String(iso||'') + 'T12:00:00');
+    if(isNaN(t)) return null;
+    const now = Date.parse(todayStr() + 'T12:00:00');
+    return Math.round((t - now) / 86400000);
+}
+
+function agDefer(taskId, days){
+    const t = allApprovals.find(x=>x.id===taskId);
+    if(!t) return;
+    const until = apvDatePlus(days);
+    apvConfirmDefer(taskId, until);
+}
+window.agDefer = agDefer;
+
+// A date typed into the card's own picker. Rejects today and the past: a
+// "defer" that changes nothing would look like it worked and leave the item
+// exactly where it was.
+function agDeferOnDate(taskId){
+    const el = document.getElementById('apvDeferDate-'+taskId);
+    const until = (el && el.value || '').trim();
+    if(!/^\d{4}-\d{2}-\d{2}$/.test(until)){ toast('Pick a date first.'); return; }
+    if(until <= todayStr()){
+        toast('Pick a date after today — anything earlier leaves it in the queue.');
+        return;
+    }
+    apvConfirmDefer(taskId, until);
+}
+window.agDeferOnDate = agDeferOnDate;
+
+function apvConfirmDefer(taskId, until){
+    const t = allApprovals.find(x=>x.id===taskId);
+    if(!t) return;
+    const noteEl = document.getElementById('apvNote-'+taskId);
+    const note = (noteEl && noteEl.value || '').trim();
+    const n = apvDaysUntil(until);
+    showModal('Knock this back?',
+        `<p style="font-size:var(--fs-sm);color:var(--text-secondary);line-height:1.6">
+            It leaves your queue, Slack and the CEO brief until
+            <strong>${esc(apvDeferDateLabel(until))}</strong>${n!==null?` (${n} day${n===1?'':'s'})`:''},
+            then comes back on its own with the agent&rsquo;s work exactly as it is now.
+            Nothing is approved, nothing is sent, and it does not count against
+            ${esc(teamName(t.raiserId) || 'the agent')}.
+         </p>
+         <label style="display:block;font-size:var(--fs-xs);font-weight:var(--fw-semibold);color:var(--text-secondary);margin-top:12px">
+            What are you waiting for? <span style="font-weight:var(--fw-regular);color:var(--text-muted)">Optional, but you will be glad of it in ${n!==null&&n>1?n+' days':'a few days'}.</span></label>
+         <input type="text" id="apvDeferWhy" value="${esc(note)}"
+                placeholder="e.g. waiting on the Companies House authentication code"
+                style="width:100%;margin-top:5px;padding:8px 10px;border:1px solid var(--border-default);border-radius:var(--radius-md);font-family:inherit;font-size:var(--fs-sm)">`,
+        `<button class="btn" onclick="closeModal()">Cancel</button>
+         <button class="btn btn-primary" onclick="agConfirmDefer('${taskId}','${esc(until)}')">Knock it back</button>`);
+}
+
+function agConfirmDefer(taskId, until){
+    const el = document.getElementById('apvDeferWhy');
+    const why = (el && el.value || '').trim();
+    closeModal();
+    applyApprovalDefer(taskId, until, why);
+}
+window.agConfirmDefer = agConfirmDefer;
+
+// The write. Same stale guard as a decision: a card shows what was true when
+// it rendered, and deferring something that has since been decided elsewhere
+// would resurrect it into the queue a week later.
+async function applyApprovalDefer(taskId, until, why){
+    const t = allApprovals.find(x=>x.id===taskId);
+    if(!t) return;
+    const card = document.querySelector(`[data-apv-card="${taskId}"]`);
+    const btns = card ? Array.from(card.querySelectorAll('[data-apv-btn]')) : [];
+    btns.forEach(b=>{ b.disabled = true; });
+    try {
+        const live = await atFetchOne(TASKS_TBL, taskId);
+        if(selName(gf(live,TF.status)) !== 'Approval'){
+            toast('Already decided elsewhere (Slack or the Tasks drawer). Reloading the queue.');
+            await refreshApprovalZone();
+            return;
+        }
+        const nowIso = new Date().toISOString();
+        const payload = {};
+        payload[TF.deferredUntil] = until;
+        // The Slack fields are deliberately NOT touched here. The worker's
+        // reconcile phase picks the deferral up within the minute, replies in
+        // the existing thread with the return date, and clears the timestamp
+        // itself — which is what makes the fresh card appear on the day. Two
+        // writers on one pair of fields is how a thread ends up orphaned with
+        // no explanation in it. If that phase ever breaks, the sweep logs
+        // "reconcile FAILED" rather than losing the task quietly.
+        // The note to his future self. Tagged so the deferred lane can read it
+        // back; appended, never overwritten, so a second knock-back keeps the
+        // first reason.
+        const stamp = '['+nowIso.replace('T',' ').slice(0,16)+'] '+APV_DEFER_TAG+until+(why?': '+why:'');
+        const prior = String(gf(live,TF.feedbackHistory) || '');
+        payload[TF.feedbackHistory] = (prior.replace(/\s+$/,'') + '\n\n' + stamp).trim();
+        await atUpdate(TASKS_TBL, taskId, payload);
+        await postTaskComment(taskId,
+            'Knocked back by Kevin until ' + until + '.' + (why ? ' Waiting on: ' + why : '')
+            + ' Not approved, not rejected — it returns to the approval queue on that date.');
+        await refreshApprovalZone();
+        toast('Knocked back to ' + apvDeferDateLabel(until) + '.');
+    } catch(e){
+        if(e.message==='auth') return;
+        console.error('defer failed', e);
+        toast('Could not knock it back: ' + (e && e.message || e));
+        btns.forEach(b=>{ b.disabled = false; });
+    }
+}
+
+// Bring one back now — the way out of a knock-back that was wrong, or that
+// resolved early. Clearing the date is all it takes; the queue formula picks
+// it up again and the Slack worker posts a fresh card within the minute.
+async function agUndefer(taskId){
+    const t = allDeferred.find(x=>x.id===taskId);
+    if(!t) return;
+    try {
+        await atUpdate(TASKS_TBL, taskId, { [TF.deferredUntil]: null });
+        await postTaskComment(taskId, 'Brought back to the approval queue by Kevin, ahead of ' + t.until + '.');
+        await refreshApprovalZone();
+        toast('Back in your queue.');
+    } catch(e){
+        if(e.message==='auth') return;
+        toast('Could not bring it back: ' + (e && e.message || e));
+    }
+}
+window.agUndefer = agUndefer;
+
+// Both halves of the queue move together. Reloading only one leaves the badge
+// counting a task the list no longer shows, which is the drift the shell's
+// badge test exists to prevent.
+async function refreshApprovalZone(){
+    await Promise.all([loadApprovals(), loadDeferred()]);
+    renderApprovals();
+    postApprovalBadge();
+    loadChecksAndRender();
+    renderRegister();
+}
 
 // The sidebar badge in the shell: post the waiting count up to the parent.
 // Same postMessage channel the sync bar uses (js/shared.js listens).
@@ -1431,6 +2376,66 @@ function computeCheckLanes(){
             })) });
     }
 
+    // 3b. WHAT I DID NOT SHOW YOU (27 Aug 2026).
+    //
+    // Two lanes now keep work OUT of Kevin's approval queue: system alerts are
+    // diverted to the board by agent-dispatch.py, and threads already answered
+    // are filed by triage rather than drafted. Both are the right call and both
+    // are the kind of change that quietly becomes a hole.
+    //
+    // So the suppressed work is listed HERE, in the same twenty-second scan he
+    // already does. This lane was built in the SAME change as the suppression,
+    // never afterwards — a queue that hides things and reports nothing cannot
+    // be told apart from a queue that loses them.
+    //
+    // These are open TASKS, not a separate ledger: a diverted alert stays on
+    // the board, so it is queryable and nothing new has to be trusted.
+    if(String(_openTasksState).indexOf('error') === 0){
+        lanes.push({ lane:'Kept off your queue', error: String(_openTasksState).slice(7) });
+    } else {
+        const alerts = allOpenTasks.filter(r=>{
+            if(selName(gf(r,TF.status)) === 'Approval') return false;   // it DID reach him
+            return APV_ALERT_RE.test(String(gf(r,TF.name)||''));
+        });
+        // Same incident anchor the queue groups by, so three write-ups of one
+        // broken script read as one thing here too.
+        const byKey = {};
+        alerts.forEach(r=>{
+            const k = dupeTaskKey(gf(r,TF.name)||'') || r.id;
+            (byKey[k] = byKey[k] || []).push(r);
+        });
+        // Roy's lane, from the audit stamp rather than from a re-run of the
+        // matcher: what he was actually sent, not what would match today.
+        const toRoy = allOpenTasks.filter(r=>APV_ROY_NOTE_RE.test(String(gf(r,TF.notes)||'')));
+        toRoy.forEach(r=>{
+            const nm = gf(r,TF.name)||'(Untitled)';
+            (byKey['roy:'+r.id] = byKey['roy:'+r.id] || []).push(r);
+        });
+        lanes.push({ lane:'Kept off your queue', items: Object.keys(byKey).map(k=>{
+            const rows = byKey[k];
+            const oldest = rows.map(r=>r.createdTime).sort()[0];
+            const n = rows.length;
+            if(k.indexOf('roy:') === 0){
+                return {
+                    severity: 'info',
+                    at: oldest,
+                    text: `"${gf(rows[0],TF.name)||'(Untitled)'}" went to Roy, not to you.`,
+                    detail: `Property work is his lane and it carries your standing approval. Money, legal and anything touching the private matter never go to him. Handed over ${agoText(oldest)}.`,
+                };
+            }
+            return {
+                // Never 'danger'. Nothing here is wrong; it is a report of a
+                // decision made on his behalf, and colouring it as a fault
+                // would train him to ignore the lane that keeps it honest.
+                severity: n >= 3 ? 'warn' : 'info',
+                at: oldest,
+                text: `${n} alert${n===1?'':'s'} about "${gf(rows[0],TF.name)||'(Untitled)'}" stayed on the board instead of asking you to approve them.`,
+                detail: `A machine reporting a breakage is work, not a decision — approving "investigate the failing script" changes nothing. Oldest ${agoText(oldest)}.`
+                        + (n >= 3 ? ' Three or more of the same thing means nobody has fixed it.' : ''),
+            };
+        }) });
+    }
+
     // 4. Built/Live agents that wrote nothing to the AI Agent Daily Log today.
     if(String(_agentsRegisterState).indexOf('error') === 0){
         lanes.push({ lane:'Daily logs', error: String(_agentsRegisterState).slice(7) });
@@ -1502,24 +2507,40 @@ function computeCheckLanes(){
     if(String(_openTasksState).indexOf('error') === 0){
         lanes.push({ lane:'Duplicates', error: String(_openTasksState).slice(7) });
     } else {
-        const buckets = {};
-        allOpenTasks.forEach(r=>{
-            const tmIds = linkIds(gf(r,TF.teamMember));
-            const owner = tmIds.find(id=>aiAgentIds.has(id));
-            if(!owner) return;
-            const key = dupeTaskKey(gf(r,TF.name));
-            if(!key) return;
-            (buckets[owner+'|'+key] = buckets[owner+'|'+key] || []).push(r);
-        });
+        // TWO FIXES, both 28 Aug 2026, after Kevin said he was still seeing the
+        // same issue written up twice.
+        //
+        // 1. It keyed on dupeTaskKey ALONE, so it reported clean while seven
+        //    real pairs sat in the gate. Now it runs the same two passes the
+        //    approvals queue does, through the same apvGroupTasks — one
+        //    grouping, so this lane and that queue can never disagree.
+        // 2. It bucketed by OWNER, which made a cross-agent duplicate
+        //    invisible BY DESIGN. Two agents doing the same job is worse than
+        //    one agent doing it twice, not better, so the owner is now
+        //    reported rather than used to separate.
+        const owned = allOpenTasks.filter(r=>
+            linkIds(gf(r,TF.teamMember)).some(id=>aiAgentIds.has(id)));
         const items = [];
-        Object.values(buckets).forEach(rows=>{
-            if(rows.length < 2) return;
-            const owner = linkIds(gf(rows[0],TF.teamMember)).find(id=>aiAgentIds.has(id));
+        apvGroupTasks(owned.map(r=>({ id:r.id, name: gf(r,TF.name)||'', _row:r })))
+          .forEach(g=>{
+            if(g.rows.length < 2) return;
+            const rows = g.rows.map(x=>x._row);
+            const owners = Array.from(new Set(rows
+                .map(r=>teamName(linkIds(gf(r,TF.teamMember)).find(id=>aiAgentIds.has(id))))
+                .filter(Boolean)));
+            const cross = owners.length > 1;
             items.push({
-                severity: 'warn',
+                severity: cross ? 'danger' : 'warn',
                 at: rows.map(x=>x.createdTime).sort()[0],
-                text: `${teamName(owner)||'An agent'} has ${rows.length} open tasks that look like the same job: "${gf(rows[0],TF.name)||'(Untitled)'}".`,
-                detail: 'One subject = one open task. Fold the updates into a single task and close the rest.',
+                text: cross
+                    ? `${owners.join(' and ')} both have an open task for the same job: "${gf(rows[0],TF.name)||'(Untitled)'}".`
+                    : `${owners[0]||'An agent'} has ${rows.length} open tasks that look like the same job: "${gf(rows[0],TF.name)||'(Untitled)'}".`,
+                // The evidence, same as the queue header. A duplicate Kevin
+                // cannot check is one he has to take on trust.
+                detail: (g.why ? `Grouped because ${g.why}. ` : '')
+                    + (cross
+                        ? 'Two agents are doing one job. Decide which owns it, then close the other.'
+                        : 'One subject = one open task. Fold the updates into a single task and close the rest.'),
             });
         });
         lanes.push({ lane:'Duplicates', items });
@@ -1533,12 +2554,164 @@ function computeCheckLanes(){
 // "Chase Acme invoice #2" and "Chase Acme invoice #3" collide. Two digits
 // stays — that is a brand (v12), three or more is a reference. Same lesson
 // as the reconciliation vendor key (see Known Anti-Patterns).
+// Words that describe ANY incident and so cannot identify one. Shared
+// verbatim with DUPE_GENERIC in scripts/create-agent-task.py.
+const DUPE_GENERIC = [
+    'a', 'an', 'and', 'are', 'as', 'at', 'be', 'been', 'by', 'for', 'from', 'in', 'is', 'it', 'its', 'of', 'on', 'or', 're', 'that', 'the', 'this', 'to', 'was', 'were', 'with', 'action', 'again', 'asap', 'check', 'consider', 'deal', 'fix', 'handle', 'investigate', 'look', 'needs', 'please', 'repeatedly', 'resolve', 'review', 'sort', 'urgent', 'broken', 'error', 'errors', 'exceed', 'exceeded', 'exceeding', 'fail', 'failed', 'failing', 'failure', 'failures', 'issue', 'issues', 'problem', 'problems', 'api', 'app', 'apps', 'google', 'script', 'scripts', 'service', 'services', 'ref', 'reference', 'usage'
+];
+
 function dupeTaskKey(name){
-    return String(name||'').toLowerCase()
+    // THE INCIDENT ANCHOR (rewritten 27 Aug 2026).
+    //
+    // The old key was "every significant word, in order". It caught a task
+    // whose only difference was a reference number and nothing else. Measured
+    // against the live queue that day, it caught ZERO of the real duplicates:
+    // ten open tasks covering three incidents all read as ten distinct
+    // subjects, because an AI writes the same incident up in fresh words each
+    // time ("Meetings Intake failing repeatedly" / "Meetings Intake script
+    // failing with Gmail quota error"). The Duplicates lane reported clean
+    // while the approvals gate held the duplicates.
+    //
+    // Two parts:
+    //
+    // 1. THE LANE — a leading "INBOUND:" / "MAINTENANCE:" / "Drift Monitor:"
+    //    prefix. It is kept, because a maintenance task and an inbound reply
+    //    task about one thread are deliberately separate (the triage skill's
+    //    Step 3 only dedupes lane 13 against other maintenance tasks). It is
+    //    split off rather than left in the words: as an ordinary token it ate
+    //    one of the two subject slots, which merged "Meetings Intake" with
+    //    "Meetings to Supabase" — two different scripts, one key.
+    //
+    // 2. THE SUBJECT — drop reference-like tokens as before, drop a fixed
+    //    vocabulary of filler, outcome and platform words that describe any
+    //    incident equally, then keep the first two survivors, sorted.
+    //    "Meetings Intake" survives; "Google Apps Script ... failing,
+    //    investigate and fix" does not.
+    //
+    // Two words, not all of them: one word over-collides ("chase"), and the
+    // whole set under-collides because each writer adds different detail.
+    // Sorted so word order cannot split one incident in two.
+    //
+    // Falls back to the old full key when nothing distinctive survives, since
+    // an empty key would collide everything.
+    var raw = String(name||'');
+    var lane = '';
+    var m = raw.match(/^([A-Za-z][A-Za-z ]*(?:\([^)]*\))?)\s*:\s*/);
+    if(m){ lane = m[1].toLowerCase().replace(/[^a-z0-9]+/g,' ').trim(); raw = raw.slice(m[0].length); }
+    var words = raw.toLowerCase()
         .replace(/[^a-z0-9\s]/g,' ')
         .split(/\s+/)
-        .filter(w=>w && !/^\d+$/.test(w) && !/^(?=(?:[^\d]*\d){3,})[a-z\d]+$/.test(w))
-        .join(' ').trim();
+        .filter(function(w){
+            return w && !/^\d+$/.test(w) && !/^(?=(?:[^\d]*\d){3,})[a-z\d]+$/.test(w);
+        });
+    var distinctive = words.filter(function(w){ return DUPE_GENERIC.indexOf(w) === -1; });
+    // AN ADDRESS SAYS WHERE, NOT WHICH (28 Aug 2026). Two slots is not many,
+    // and when the address leads the title it takes both: "18 Siddows Avenue —
+    // garden complaint" and "18 Siddows Avenue — rent arrears" both keyed to
+    // `avenue siddows`. Kevin has ~27 properties with many open tasks each.
+    // Place words go to the BACK of the queue for a slot rather than being
+    // dropped, so a task whose whole subject is an address still gets a key.
+    var places = placeTokens(words);
+    var ranked = distinctive.filter(function(w){ return places.indexOf(w) === -1; })
+                   .concat(distinctive.filter(function(w){ return places.indexOf(w) !== -1; }));
+    var subject = ranked.length ? ranked.slice(0,2).sort().join(' ')
+                                : words.join(' ').trim();
+    return lane ? lane + '|' + subject : subject;
+}
+
+// ─── THE SECOND PASS: SAME MATTER, DIFFERENT WORDS (28 Aug 2026) ──────
+//
+// Kevin, working the queue that morning: "there's still a lot where I seem to
+// see some duplication, something referencing the same issue but with slightly
+// different information."
+//
+// Measured against the 55 tasks waiting: the key above made 43 cards and
+// missed SEVEN real pairs, each the same matter written two ways — "Sefton
+// Council HMO licence fee ... Viola St" vs "pay Sefton landlord licence fee
+// ... Viola Street", and the same SMS thread once in each lane.
+//
+// Three things the key alone cannot do: it keeps only two words, it deletes
+// every number (a phone number IS the identity), and it splits on the lane
+// prefix. This does not replace it — a match is either — and it carries a
+// plain-English reason, because a grouping Kevin cannot check is one he has to
+// take on trust. Mirrors dupe_signals / dupe_verdict in
+// scripts/create-agent-task.py; drift-tested in tests/agents-dupe-task-key.test.js.
+const DUPE_ACTION_WORDS = ['respond','reply','replies','replying','required','require',
+  'requires','send','sending','sent','provide','pay','paid','paying','call','calling',
+  'chase','chasing','contact','unpaid','outstanding','overdue','further','recovery',
+  'notice','notification','update','updates','incoming','new','important','info','information'];
+const DUPE_STREET_TYPES = ['street','st','road','rd','avenue','ave','lane','close','drive',
+  'way','court','place','crescent','grove','terrace','gardens','square','walk','hill',
+  'park','row','view','rise','mews'];
+const DUPE_MIN_SHARED = 2;   // one shared word is a coincidence ("emails")
+const DUPE_MIN_RATIO = 0.5;  // of the SHORTER task's distinctive words
+
+/** Tokens naming WHERE: the street type, the name before it, the town after.
+ *  `23 Viola Street Bootle` -> viola, street, bootle. */
+function placeTokens(words){
+    const out = [];
+    words.forEach(function(w,i){
+        if(DUPE_STREET_TYPES.indexOf(w) === -1) return;
+        [w, words[i-1], words[i+1]].forEach(function(x){
+            if(x && out.indexOf(x) === -1) out.push(x);
+        });
+    });
+    return out;
+}
+
+function dupeSignals(name){
+    let raw = String(name||''), lane = '';
+    const m = raw.match(/^([A-Za-z][A-Za-z ]*(?:\([^)]*\))?)\s*:\s*/);
+    if(m){ lane = m[1].toLowerCase().replace(/[^a-z0-9]+/g,' ').trim(); raw = raw.slice(m[0].length); }
+    const strong = [];
+    // A UK number in any shape these tasks carry: +447538631747, 447538631747,
+    // 07538631747. The last nine digits are the same in all three.
+    (raw.match(/(?:\+?44|0)?\d{9,12}/g) || []).forEach(function(d){
+        const k = 'tel:' + d.slice(-9);
+        if(strong.indexOf(k) === -1) strong.push(k);
+    });
+    (raw.match(/\b\d{4,}\b/g) || []).forEach(function(d){
+        // A phone number already claimed must not also count as a reference.
+        if(strong.indexOf('tel:' + d.slice(-9)) !== -1) return;
+        const k = 'num:' + d;
+        if(strong.indexOf(k) === -1) strong.push(k);
+    });
+    const words = raw.toLowerCase().replace(/[^a-z0-9\s]/g,' ').split(/\s+/)
+        .filter(function(w){
+            return w && !/^\d+$/.test(w) && !/^(?=(?:[^\d]*\d){3,})[a-z\d]+$/.test(w)
+                && DUPE_GENERIC.indexOf(w) === -1 && DUPE_ACTION_WORDS.indexOf(w) === -1;
+        });
+    return { lane: lane, strong: strong, words: words, places: placeTokens(words) };
+}
+
+/** {match, why} — is this the same matter, and how would Kevin check?
+ *  mode 'group' (display) ignores the lane; 'fold' (destructive) does not. */
+function dupeVerdict(nameA, nameB, mode){
+    const a = dupeSignals(nameA), b = dupeSignals(nameB);
+    // In fold mode the lane check comes FIRST, ahead of even a shared phone
+    // number: folding is destructive, and a maintenance job absorbed into a
+    // reply task is a real obligation lost. Grouping only shows.
+    if(mode === 'fold' && a.lane !== b.lane) return { match:false, why:'' };
+    const both = a.strong.filter(function(x){ return b.strong.indexOf(x) !== -1; }).sort();
+    if(both.length){
+        return { match:true, why:'same ' + both.map(function(x){
+            return x.indexOf('tel:') === 0 ? 'phone ' + x.slice(4) : 'reference ' + x.slice(4);
+        }).join(', ') };
+    }
+    if(!a.words.length || !b.words.length) return { match:false, why:'' };
+    const shared = a.words.filter(function(w){ return b.words.indexOf(w) !== -1; })
+                          .filter(function(w,i,arr){ return arr.indexOf(w) === i; }).sort();
+    // The threshold is judged on what is left once the ADDRESS is set aside.
+    // Counting address words would eventually fold a garden complaint into a
+    // rent arrears chase at the same house.
+    const places = a.places.concat(b.places);
+    const telling = shared.filter(function(w){ return places.indexOf(w) === -1; });
+    if(telling.length < DUPE_MIN_SHARED) return { match:false, why:'' };
+    const ratio = shared.length / Math.min(a.words.length, b.words.length);
+    if(ratio < DUPE_MIN_RATIO) return { match:false, why:'' };
+    const at = shared.filter(function(w){ return places.indexOf(w) !== -1; });
+    return { match:true, why:'both about ' + telling.join(', ')
+             + (at.length ? ' (at ' + at.join(', ') + ')' : '') };
 }
 
 function loadChecksAndRender(){
@@ -1889,6 +3062,7 @@ function renderRegister(){
     // 2. Strategic layer (collapsible)
     html += strategicLayerSection();
     html += automationsSection(q);
+    html += mcpToolsSection(q);
 
     // 3. Process agents (workflow-based, video route)
     html += `<div class="auto-wf-header" style="margin:18px 0 6px">Process agents <span style="color:var(--text-muted);font-weight:var(--fw-regular)">(${agentWfs.length})</span></div>`;
@@ -2047,6 +3221,113 @@ function automationsSection(q){
                 <div style="font-size:var(--fs-xs);color:var(--text-muted);margin-bottom:6px">Named so a switched-off automation stays a visible decision rather than a thing nobody remembers exists.</div>
                 <div style="font-size:var(--fs-xs);color:var(--text-secondary);line-height:1.7">${offList.map(n=>esc(n)).join(' &middot; ')}</div>
             </div>` : ''}
+        </div>
+    </div>`;
+}
+
+// ── Tools & Connections ────────────────────────────────────────────────
+// The list of every connector Claude Code can reach, and — the part that
+// changes decisions — whether a headless agent can reach it too. Data and the
+// reasoning live in js/mcp-tools-data.js, regenerated nightly by
+// scripts/generate-mcp-inventory.py.
+//
+// WHY THE verified/declared SPLIT IS ON THE PAGE. `claude mcp list` only ever
+// sees the handful of servers configured in files on this Mac. The connectors
+// Kevin actually uses arrive through the Claude app's own session and no script
+// can see them. Presenting both kinds as equally checked would be a confident
+// lie about what the platform is connected to.
+function mcpAuthChip(auth){
+    const map = {
+        'connected':  ['Connected',        'var(--success)', 'var(--success-bg)'],
+        // Weaker than Connected on purpose: authorisation is on file and has not
+        // lapsed, but nothing records a disconnection, so this is not a live check.
+        'authorised': ['Authorised',       'var(--success)', 'var(--success-bg)'],
+        'needs-auth': ['Needs authorising','var(--warning)', 'var(--warning-bg)'],
+        'unknown':    ['Not checked',      'var(--text-secondary)', 'var(--bg-subtle)']
+    };
+    const tips = {
+        'connected':  'A live check passed when this list was last built.',
+        'authorised': 'You have authorised it and the authorisation has not lapsed. '
+                    + 'Nothing records a disconnection, so this is not a live check.',
+        'needs-auth': 'Installed but never authorised, so nothing can use it.',
+        'unknown':    'Its health could not be checked when this list was built.'
+    };
+    const [label, fg, bg] = map[auth] || map.unknown;
+    const tip = tips[auth] || tips.unknown;
+    return `<span title="${esc(tip)}" style="display:inline-block;white-space:nowrap;font-size:var(--fs-xs);font-weight:var(--fw-medium);color:${fg};background:${bg};padding:2px 8px;border-radius:var(--radius-full)">${esc(label)}</span>`;
+}
+function mcpYesNo(on){
+    return on
+        ? `<span title="Yes" style="color:var(--success);font-weight:var(--fw-semibold)">&#10003;</span>`
+        : `<span title="No" style="color:var(--text-muted)">&ndash;</span>`;
+}
+function mcpToolRow(t){
+    const src = t.source === 'verified'
+        ? `<span title="Read from a real config file or a live health check" style="font-size:var(--fs-xs);color:var(--text-secondary)">checked</span>`
+        : `<span title="Hand-listed: nothing on disk records this one" style="font-size:var(--fs-xs);color:var(--text-muted)">by hand</span>`;
+    return `<tr>
+        <td><div style="font-weight:var(--fw-medium)">${esc(t.name)}</div>${t.scope?`<div style="font-size:var(--fs-xs);color:var(--text-muted)">${esc(t.scope)}</div>`:''}</td>
+        <td>${mcpAuthChip(t.auth)}</td>
+        <td style="text-align:center">${mcpYesNo(t.kevin)}</td>
+        <td style="text-align:center">${mcpYesNo(t.agents)}</td>
+        <td style="font-size:var(--fs-xs);color:var(--text-secondary)">${esc(t.what)}</td>
+        <td>${src}</td>
+    </tr>`;
+}
+function mcpToolGroup(g, q){
+    const rows = (g.tools || []).filter(t => !q ||
+        (String(t.name||'') + ' ' + String(t.what||'') + ' ' + String(t.scope||''))
+            .toLowerCase().includes(q));
+    if(!rows.length) return '';
+    // "authorised" is a working tool too; it is a weaker claim about how we know,
+    // not about whether it works. Counting only 'connected' made a group of seven
+    // live connectors read "0 working".
+    const live = rows.filter(t => t.auth === 'connected' || t.auth === 'authorised').length;
+    return `<div style="margin-top:14px">
+        <div style="font-size:var(--fs-sm);font-weight:var(--fw-semibold);color:var(--text-primary);margin-bottom:2px">${esc(g.title)} <span style="color:var(--text-muted);font-weight:var(--fw-regular)">(${live} working, ${rows.length - live} not)</span></div>
+        <div style="font-size:var(--fs-xs);color:var(--text-muted);margin-bottom:6px">${esc(g.blurb)}</div>
+        <div style="overflow-x:auto"><table class="wf-grid"><thead><tr>
+            <th style="width:170px">Tool</th>
+            <th style="width:130px">Status</th>
+            <th style="width:52px" title="Can you use it in a Claude session?">You</th>
+            <th style="width:62px" title="Can a scheduled AI agent use it on its own?">Agents</th>
+            <th>What it does</th>
+            <th style="width:70px">Source</th>
+        </tr></thead><tbody>${rows.map(mcpToolRow).join('')}</tbody></table></div>
+    </div>`;
+}
+function mcpToolsSection(q){
+    // A missing data file must say so, not render an empty, reassuring box.
+    if(typeof MCP_TOOLS === 'undefined'){
+        return `<div class="agentic-guide" style="margin-top:16px"><div class="agentic-guide-body">
+            <div class="zone-error">The tools list could not be loaded (js/mcp-tools-data.js did not load). This list is NOT empty &mdash; it could not be read.</div>
+        </div></div>`;
+    }
+    const c = MCP_TOOLS.counts || {};
+    const groups = (MCP_TOOLS.groups || []).map(g => mcpToolGroup(g, q)).join('');
+    const shown = (MCP_TOOLS.groups || []).reduce((n, g) => n + (g.tools||[]).filter(t => !q ||
+        (String(t.name||'') + ' ' + String(t.what||'') + ' ' + String(t.scope||''))
+            .toLowerCase().includes(q)).length, 0);
+    // The headline is computed, never typed: the day the agent tool policy
+    // changes, this sentence changes with it.
+    const gap = `Your scheduled AI agents can use <strong>${c.agents} of the ${c.kevin} tools you can use</strong>. They are deliberately limited to reading, searching the web and a controlled browser, and everything else they do goes through scripts in this repo that hold the credentials properly. It is a policy, not a fault &mdash; but it is why an agent asked to do something in Airtable or Slack cannot simply go and do it.`;
+    // The data keeps a machine-clean ISO stamp; a person reads "28 Aug 2026".
+    const stale = (function(iso){
+        if(!iso) return 'an unknown date';
+        const d = new Date(iso);
+        if(isNaN(d)) return iso;
+        return d.toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric'});
+    })(MCP_TOOLS.generatedAt);
+    return `<div class="agentic-guide" id="mcpToolsLayer" style="margin-top:16px">
+        <div class="agentic-guide-head" onclick="this.parentElement.classList.toggle('open')">
+            <span class="resources-chevron">&#x25B6;</span>
+            Tools &amp; connections &mdash; what the AI is plugged into (${q ? shown + ' of ' + c.total : c.total})
+        </div>
+        <div class="agentic-guide-body">
+            <p class="agentic-guide-intro">Every outside system Claude can reach, what state it is in, and who can use it. ${c.verified} of these ${c.total} were read from a real config file or checked live; ${c.declared} are listed by hand because nothing on this Mac records them. ${c.needsAuth} are installed but never authorised, so they do nothing at all.</p>
+            <div style="background:var(--warning-bg);border:1px solid var(--warning);border-radius:var(--radius-lg);padding:12px 14px;font-size:var(--fs-sm);color:var(--text-primary);line-height:1.6">${gap}</div>
+            ${groups || `<div style="margin-top:14px;font-size:var(--fs-sm);color:var(--text-muted)">No tools match the search.</div>`}
+            <div style="margin-top:14px;font-size:var(--fs-xs);color:var(--text-muted)">Last changed ${esc(stale)}. A job rechecks your real settings every morning and only rewrites this list when something actually moves, so an old date means nothing has changed, not that nobody looked. ${esc(MCP_TOOLS.healthNote || '')}</div>
         </div>
     </div>`;
 }
@@ -3309,6 +4590,23 @@ function registerAgentsSyncBar(){
                 }
             },
             {
+                name: 'Knocked-back items stay out', kind: 'sync', run: () => {
+                    // The date filter lives in an Airtable formula, and a
+                    // formula that stops excluding returns 200 OK with MORE
+                    // rows — it looks like a busy morning, not like a bug.
+                    // A renamed field throws (atFetch fails on 422) and the
+                    // check above catches it; this catches the quieter case.
+                    if(_approvalsState !== 'ready') return { status:'warn', detail:'Queue not loaded yet' };
+                    if(String(_deferredState).indexOf('error') === 0) return { status:'fail', detail:'Could not read what you knocked back, so some approvals may be hidden with nothing saying so: '+String(_deferredState).slice(7) };
+                    const today = todayStr();
+                    const leaked = allApprovals.filter(t=>t.deferredUntil && t.deferredUntil > today).length;
+                    if(leaked) return { status:'fail', detail:`${leaked} task(s) you knocked back are back in the queue early — the date filter broke` };
+                    return { status:'pass', detail: allDeferred.length
+                        ? `${allDeferred.length} knocked back, all still parked`
+                        : 'Nothing knocked back' };
+                }
+            },
+            {
                 name: 'Agents register read', kind: 'sync', run: () => {
                     if(String(_agentsRegisterState).indexOf('error') === 0) return { status:'fail', detail:String(_agentsRegisterState).slice(7) };
                     if(_agentsRegisterState !== 'ready') return { status:'warn', detail:'Not loaded yet' };
@@ -3508,10 +4806,11 @@ function updateSyncStatus(state, msg){
 }
 
 async function loadEverything(){
-    // The six loads are independent; each records its own error state so one
+    // The loads are independent; each records its own error state so one
     // broken feed never blanks the others.
     await Promise.all([
         loadApprovals(),
+        loadDeferred(),
         loadOpenTasks(),
         loadDailyLogs(),
         loadWorkflowData(),

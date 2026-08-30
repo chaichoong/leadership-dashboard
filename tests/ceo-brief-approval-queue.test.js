@@ -144,8 +144,12 @@ describe('what the CEO is told about the approval queue', () => {
   });
 
   it('Approval tasks are their own bucket, not counted as overdue work', () => {
+    // The waiting bucket gained a second clause on 28 Aug 2026: a task Kevin
+    // has knocked back to a date is not waiting on him, and the brief is the
+    // one surface he reads every morning. The SPLIT is what this guards — the
+    // exclusion is guarded in tests/approval-defer.test.js.
     expect(WORKER, 'Approval is still mixed into the live task pile')
-      .toMatch(/const waiting = t\.filter\(x => x\.status === 'Approval'\)/);
+      .toMatch(/const waiting = t\.filter\(x => x\.status === 'Approval'/);
     expect(WORKER).toMatch(/const live = t\.filter\(x => x\.status !== 'Approval'\)/);
     // The overdue / due-today / Kevin lists must come from `live`, or finished
     // work reads as work Kevin has failed to do.

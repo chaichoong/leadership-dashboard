@@ -181,7 +181,8 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
       <a href="#smart-refresh"><span class="toc-num">13</span> Smart Refresh System</a>
       <a href="#apps-script"><span class="toc-num">14</span> Google Apps Script Setup</a>
       <a href="#troubleshooting"><span class="toc-num">15</span> Troubleshooting</a>
-      <a href="#changelog"><span class="toc-num">16</span> Changelog</a>
+      <a href="#ai-workforce"><span class="toc-num">16</span> AI Workforce &amp; Labour Saved</a>
+      <a href="#changelog"><span class="toc-num">17</span> Changelog</a>
     </div>
   </div>
 </div>
@@ -724,13 +725,38 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
   </div>
 </div>
 
-<!-- ============ 16. CHANGELOG ============ -->
+<!-- ============ 16. AI WORKFORCE & LABOUR SAVED ============ -->
+<div class="section" id="ai-workforce">
+  <h2 class="section-title"><span class="icon">&#x1F916;</span> 16. AI Workforce &amp; Labour Saved</h2>
+  <div class="card">
+    <p>Four cards at the bottom of the KPI grid track the north star: getting up to 90% of repeatable operational work done by AI agents. Two of them measure the outcome.</p>
+    <table class="label-table">
+      <thead><tr><th>Card</th><th>What it shows</th></tr></thead>
+      <tbody>
+        <tr><td><strong>AI Agents</strong></td><td>How many agents are live and testing, and how much of their work is waiting for an approval.</td></tr>
+        <tr><td><strong>Agent Approvals</strong></td><td>Work waiting for a yes right now, plus each agent's accuracy record per type of work.</td></tr>
+        <tr><td><strong>Work Done by AI</strong></td><td>The share of completed work (measured in time, not task count) done by AI over the last 30 days. Target: 90% of repeatable operational work.</td></tr>
+        <tr><td><strong>AI Time &amp; Money Saved</strong></td><td>The same work expressed as hours handed to AI and the labour cost that saved, over the last 30 days and since AI go-live (1 Jun 2026). Includes a "doing the work of X of a full-time person" line and a trend against the 30 days before.</td></tr>
+      </tbody>
+    </table>
+    <p><strong>What counts as AI work (both cards use the same rules):</strong> a task completed with an AI agent on the Team Member field, or work an agent prepared that was approved first time. Work that was sent back for changes never counts as AI work, whatever the links say, because a human had to redo it.</p>
+    <p><strong>How the money figure is worked out:</strong> every completed task carries a time estimate (how long a person would need). AI hours are those estimates summed for AI work, then valued at &pound;17.50 per hour: the UK office admin wage plus employer National Insurance and pension. The rate and the go-live date live in <code>js/config.js</code> (<code>AI_LABOUR_RATE_GBP_PER_HOUR</code>, <code>AI_WORK_EPOCH</code>), so changing them is one edit. Figures are whole pounds; pence on an estimate would be false precision.</p>
+    <p><strong>Trust guards:</strong> both cards publish the share of completed tasks carrying a time estimate and warn below 80% (a task without an estimate is invisible to the sums). An empty query shows "no data", never a fake 0% or &pound;0. The health bar's "AI Time &amp; Money Saved card computed" check confirms the card loaded on every sync.</p>
+  </div>
+</div>
+
+<!-- ============ 17. CHANGELOG ============ -->
 <div class="section" id="changelog">
-  <h2 class="section-title"><span class="icon">&#x1F4DD;</span> 16. Changelog</h2>
+  <h2 class="section-title"><span class="icon">&#x1F4DD;</span> 17. Changelog</h2>
   <div class="card">
     <table class="label-table">
       <thead><tr><th>Version</th><th>Date</th><th>Changes</th></tr></thead>
       <tbody>
+        <tr>
+          <td><strong>2.93</strong></td>
+          <td>28 Aug 2026</td>
+          <td>Added AI Workforce &amp; Labour Saved section covering the four agent cards, including the new AI Time &amp; Money Saved card (hours + &pound; saved, 30-day and since go-live, FTE framing, trend).</td>
+        </tr>
         <tr>
           <td><strong>2.9</strong></td>
           <td>16 Apr 2026</td>

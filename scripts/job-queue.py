@@ -107,6 +107,13 @@ DEFAULT_TIMEOUT_MIN = 120
 # a run that actually happens rather than one that gets skipped for lateness.
 DEFAULT_READY_WAIT_MIN = 45
 # Poll gently rather than hammering a half-awake interface every 15s for 45 minutes.
+# A precondition checked before the lock wait is evidence about THEN, not now.
+# The wait is unbounded, and on this Mac the thing that causes a long wait is
+# sleep — which is also the thing that kills the network. So re-probe after a
+# wait longer than this, and hold the lock only briefly while doing it.
+RECHECK_AFTER_SECONDS = float(os.environ.get("JOB_QUEUE_RECHECK_AFTER", "60"))
+POST_LOCK_READY_WAIT_MIN = float(os.environ.get("JOB_QUEUE_POST_LOCK_WAIT", "1"))
+
 READY_POLL_START = 5
 READY_POLL_MAX = 60
 
@@ -618,6 +625,36 @@ def acquire(job, mode="cooperative", lease_minutes=DEFAULT_LEASE_MIN,
 
             if first == ticket_name and try_take_lock(job, mode, lease_minutes):
                 waited = round(now() - started, 1)
+
+                # The precondition check ran BEFORE this wait, deliberately, so a
+                # job waiting for the network does not hold the queue shut. That
+                # is still right. What was missing is that the check can be
+                # arbitrarily stale by the time the lock is ours.
+                #
+                # 27 Aug 2026: handback-poll queued at 08:30 with the network up,
+                # waited 43 minutes while the Mac slept, took the lock the instant
+                # it woke and died on DNS — "nodename nor servname provided". The
+                # same shape sits in job-status.jsonl for compound-brain (x2),
+                # publish-brain, masterplan-sync and daily-ops-guard: rare,
+                # self-healing, and each one a false alarm that teaches Kevin to
+                # ignore the alarm channel.
+                #
+                # So re-probe, briefly, and DEFER rather than fail. A deferral is
+                # honest ("the machine was not ready") where a traceback is not.
+                # Jobs with no `needs` are untouched: wait_for_preconditions
+                # returns True immediately for them.
+                if waited >= RECHECK_AFTER_SECONDS and not wait_for_preconditions(
+                        job, cfg, POST_LOCK_READY_WAIT_MIN, quiet=quiet):
+                    event(job, "deferred-stale-precondition",
+                          waited_seconds=waited, mode=mode)
+                    release(job, quiet=True, outcome="deferred",
+                            reason="preconditions lapsed during a %ss queue wait"
+                                   % waited)
+                    if not quiet:
+                        print("NOT READY %s: ready before the queue wait, not "
+                              "after %ss — deferred, not failed" % (job, waited))
+                    return EX_NOTREADY
+
                 event(job, "acquired", mode=mode, waited_seconds=waited,
                       queue_depth=len(waiting) - 1, lease_minutes=lease_minutes)
                 if not quiet:
@@ -1041,7 +1078,13 @@ def main(argv=None):
         return EX_OK
     if a.cmd == "mark":
         rec = event(a.job, "mark", note=a.note)
-        print("%s: marked as running at %s" % (a.job, rec["ts"]))
+        # THE NOTE DECIDES THE WORDING (finding 387, 28 Aug 2026). The event was
+        # always right — {state: mark, note: "end"} — but the console said
+        # "marked as running" for it, so an END stamp read as a START. A later
+        # run trusting the console instead of the log would conclude the end mark
+        # failed and re-stamp, or treat a finished day as unfinished.
+        print("%s: marked as %s at %s"
+              % (a.job, "FINISHED" if a.note == "end" else "running", rec["ts"]))
         return EX_OK
     return EX_USAGE
 

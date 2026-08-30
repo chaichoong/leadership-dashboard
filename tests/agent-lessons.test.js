@@ -200,3 +200,70 @@ describe('the loop is wired up, not just written', () => {
     expect(dispatch).toMatch(/if str\(tf\.get\(AF\["lessonWrittenAt"\]\) or ""\)\.strip\(\)/);
   });
 });
+
+// ─── "APPROVE WITH MINOR EDITS" ACTUALLY APPLIES THE EDITS (26 Aug 2026) ──
+//
+// Kevin found that the button did not do what its name says. BOTH approve
+// kinds told the agent to carry out the original agentOutput "deviating in
+// nothing", and the note was passed along and ignored. So typing "change the
+// date to Friday" and approving-with-edits sent the UNCHANGED text — the one
+// failure mode where the gate's promise (nothing goes out that he has not
+// agreed) is kept in letter and broken in spirit.
+//
+// The fix is a gate at `complete`, not a check in `verify`: verify runs after
+// the email has gone, and an unedited email cannot be unsent.
+describe('the minor-edits gate', () => {
+  const dispatch = readFileSync(DISPATCH, 'utf8');
+  const skill = readFileSync(SKILL, 'utf8');
+
+  it('complete REFUSES a minor-edits task whose edit was never applied', () => {
+    expect(dispatch).toMatch(/refusing to complete .*Kevin approved it/s);
+    expect(dispatch).toMatch(/EDITS_APPLIED_MARK not in/);
+  });
+
+  it('the refusal blocks BEFORE the action, not after it', () => {
+    // The gate must sit in cmd_complete (which runs before the run is graded),
+    // never only in cmd_verify.
+    const complete = dispatch.indexOf('def cmd_complete');
+    const verify = dispatch.indexOf('def cmd_verify');
+    const gate = dispatch.indexOf('Kevin approved it');
+    expect(gate).toBeGreaterThan(complete);
+    expect(gate).toBeLessThan(verify);
+  });
+
+  it('revise refuses an unchanged text — the "edit" that was never made', () => {
+    expect(dispatch).toMatch(/identical to what was approved, so the edit was not applied/);
+  });
+
+  it('revise refuses on the wrong outcome, so approve-as-is stays verbatim', () => {
+    const revise = dispatch.slice(dispatch.indexOf('def cmd_revise'),
+                                 dispatch.indexOf('def cmd_complete'));
+    // The exact guard, not a phrase that happens to appear somewhere.
+    expect(revise).toMatch(/if t\["outcome"\] != "Approved with minor edits":/);
+    expect(revise).toMatch(/sys\.exit\(f"ERROR: refusing to revise/);
+    expect(revise).toContain('VERBATIM');
+  });
+
+  it('the revised text is re-validated, not trusted', () => {
+    // It never went through submit's checks, and it is what actually gets sent.
+    const revise = dispatch.slice(dispatch.indexOf('def cmd_revise'),
+                                 dispatch.indexOf('def cmd_complete'));
+    expect(revise).toMatch(/carry_out_problem/);
+    expect(revise).toMatch(/send_promise_problem/);
+    expect(revise).toMatch(/parse_email_output/);
+    expect(revise).toMatch(/TIER1_BANNER/);
+  });
+
+  it('archives the text Kevin actually approved', () => {
+    // So what went out can always be compared with what he read.
+    expect(dispatch).toMatch(/TEXT KEVIN APPROVED, BEFORE THE EDIT/);
+  });
+
+  it('the skill branches on WHICH approval it is', () => {
+    expect(skill).toMatch(/Approved as-is/);
+    expect(skill).toMatch(/Approved with minor edits, WITH a note/);
+    expect(skill).toMatch(/agent-dispatch\.py revise/);
+    // And refuses to let a "minor edit" become a rewrite.
+    expect(skill).toMatch(/not a licence to rewrite/);
+  });
+});

@@ -191,6 +191,20 @@ describe('staleness cut-off', () => {
 // The core promise: one at a time.
 // ---------------------------------------------------------------------------
 describe('serialisation under real concurrency', () => {
+  // RETRYABLE, and only these two (finding 20260821-queue-fixer-298).
+  //
+  // Both drive REAL subprocesses against a REAL lock, so under load it is the OS
+  // scheduler, not the lock, that decides whether a holder's heartbeat lands in
+  // time — and a starved heartbeat lets the lease lapse, which is the documented
+  // behaviour, not a bug. Measured on the 21 Aug merge run: one failure in the
+  // #90 pass, two in #96, zero in three consecutive isolated runs, zero on a
+  // re-run of the full suite (763/763).
+  //
+  // A gate that goes red for reasons unrelated to the change is precisely what
+  // teaches people to reach for SKIP_SYNC_TESTS=1, which CLAUDE.md already warns
+  // about. Retrying is safe HERE because the guarantee under test is absolute:
+  // a genuine serialisation regression overlaps on every attempt, so it still
+  // fails all three. Do not copy this to a test whose bug is itself intermittent.
   it('runs five simultaneous jobs strictly one at a time', async () => {
     const jobs = ['alpha', 'bravo', 'charlie', 'delta', 'echo'];
     const results = await Promise.all(jobs.map((j) =>
@@ -227,7 +241,7 @@ describe('serialisation under real concurrency', () => {
       }
     }
     expect(holder).toBeNull();
-  }, 60000);
+  }, { timeout: 60000, retry: 2 });
 
   it('reports a queue depth, proving jobs actually waited', async () => {
     const jobs = ['one', 'two', 'three'];
@@ -369,6 +383,27 @@ describe('rantoday', () => {
 
   it('an empty history is a safe start, not an error', () => {
     expect(run(['rantoday', 'daily-ops', '--now', '2026-08-20T09:00:00Z']).code).toBe(0);
+  });
+
+  // Finding 20260828-daily-ops-387. `mark --note end` wrote the right event and
+  // printed the WRONG sentence: "daily-ops: marked as running". Verified live on
+  // 28 Aug 07:24. rantoday reads the log so it was unaffected, but a human or a
+  // later run reading the console would conclude the end mark failed and
+  // re-stamp it, or treat a finished day as unfinished.
+  it('an END stamp says FINISHED, and a start still says running', () => {
+    const end = run(['mark', 'daily-ops', '--note', 'end']);
+    expect(end.stdout).toMatch(/marked as FINISHED at /);
+    expect(end.stdout, 'the 387 bug returning').not.toMatch(/marked as running/);
+
+    const start = run(['mark', 'daily-ops']);
+    expect(start.stdout).toMatch(/marked as running at /);
+    expect(start.stdout).not.toMatch(/FINISHED/);
+  });
+
+  it('the wording changed, the EVENT did not — the log is what rantoday reads', () => {
+    run(['mark', 'daily-ops', '--note', 'end']);
+    const marks = events().filter((e) => e.state === 'mark');
+    expect(marks.at(-1).note).toBe('end');
   });
 });
 
@@ -665,12 +700,29 @@ describe('morning digest', () => {
 describe('lock is never observed half-made', () => {
   it('always has a readable holder the moment it exists', async () => {
     const lockDir = join(stateDir, 'lock');
-    const holder = join(lockDir, 'holder.json');
     let sawOrphan = false;
 
-    const watcher = setInterval(() => {
-      if (existsSync(lockDir) && !existsSync(holder)) sawOrphan = true;
-    }, 1);
+    // ONE snapshot of the directory, never two separate existence checks.
+    //
+    // This watcher used to ask existsSync(lockDir) and then existsSync(holder).
+    // Release renames the whole lock directory away in a single atomic step, so
+    // a release landing between those two syscalls answers "the directory is
+    // there" and then "the holder is not" — which is indistinguishable from a
+    // half-made lock, while nothing was ever half-made. It failed approximately
+    // one run in six under load and passed alone, so it read as a mystery
+    // rather than a flake. Caught 28 Aug 2026 by instrumenting the watcher: at
+    // the moment it flagged, the lock was already gone (stillThere:false,
+    // readdir ENOENT), and a single-snapshot check saw nothing all run.
+    //
+    // readdirSync answers both questions at once. ENOENT means the lock is not
+    // there, which is not an orphan; a listing means it really is there, and
+    // only then does a missing holder.json mean what this test is looking for.
+    const orphaned = () => {
+      try { return !readdirSync(lockDir).includes('holder.json'); }
+      catch { return false; }
+    };
+
+    const watcher = setInterval(() => { if (orphaned()) sawOrphan = true; }, 1);
 
     await Promise.all(['a', 'b', 'c', 'd', 'e', 'f'].map((j) =>
       runAsync(['run', j, '--no-stale-check', '--timeout', '2', '--',
@@ -678,7 +730,19 @@ describe('lock is never observed half-made', () => {
 
     clearInterval(watcher);
     expect(sawOrphan).toBe(false);
-  });
+
+    // CONTROL. A watcher that can no longer SEE a half-made lock would pass
+    // this test for ever by detecting nothing at all, which is the failure mode
+    // that makes a green suite worthless. Build the exact shape the original
+    // bug produced — the directory present, the holder missing — and require
+    // the check to catch it.
+    mkdirSync(lockDir, { recursive: true });
+    expect(orphaned(), 'the orphan check stopped detecting a real half-made lock').toBe(true);
+    rmSync(lockDir, { recursive: true, force: true });
+    // Retryable for the same reason as the five-job test above, and with the
+    // same limit: the CONTROL at the end of this test is not timing-dependent,
+    // so a watcher that has gone blind still fails every attempt.
+  }, { retry: 2 });
 
   it('leaves no staging or dropped directories behind', () => {
     run(['acquire', 'tidy', '--no-stale-check']);
@@ -918,6 +982,126 @@ print(json.dumps(list(m.drive_ready(${JSON.stringify(VAULT())}))))
   it('runs normally when the job declares no preconditions', () => {
     expect(run(['acquire', 'plain-job', '--no-stale-check']).code).toBe(0);
     run(['release', 'plain-job']);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// A precondition checked before the queue wait is evidence about THEN.
+//
+// Preconditions are deliberately checked BEFORE the lock, so a job waiting for
+// the network does not hold the queue shut. The gap that leaves: the wait is
+// unbounded, and on this Mac the thing that CAUSES a long wait is sleep, which
+// is also the thing that kills the network.
+//
+// 27 Aug 2026: handback-poll queued at 08:30 with the network up, waited 43
+// minutes while the Mac slept, took the lock the instant it woke, and died on
+// DNS ("nodename nor servname provided"). job-status.jsonl carries the same
+// shape for compound-brain (x2), publish-brain, masterplan-sync and
+// daily-ops-guard. Each one is a false alarm, and a false alarm repeated is how
+// an alarm channel stops being read.
+// ---------------------------------------------------------------------------
+describe('a precondition can lapse during the queue wait', () => {
+  const VAULT = () => join(stateDir, 'lapsing-vault');
+
+  /** Schedule with one blocker and one job whose readiness we can revoke. */
+  function scheduleWithVault() {
+    writeFileSync(schedulePath, JSON.stringify({
+      blocker: { cron: '* * * * *', maxLateMinutes: 600, mode: 'wrapped' },
+      waiter: {
+        cron: '* * * * *', maxLateMinutes: 600, mode: 'wrapped',
+        needs: [{ drive: VAULT() }],
+      },
+    }));
+    mkdirSync(VAULT(), { recursive: true });
+    writeFileSync(join(VAULT(), 'note.md'), 'ready at queue time');
+  }
+
+  /** Re-check after 1s of waiting, and give the machine 0 min to recover. */
+  const FAST = { JOB_QUEUE_RECHECK_AFTER: '1', JOB_QUEUE_POST_LOCK_WAIT: '0' };
+
+  it('DEFERS instead of failing when readiness lapsed while it queued', async () => {
+    scheduleWithVault();
+    expect(run(['acquire', 'blocker', '--no-stale-check']).code).toBe(0);
+
+    const waiter = runAsync(['acquire', 'waiter', '--no-stale-check'], { env: FAST });
+    await new Promise((r) => setTimeout(r, 1500));
+
+    // The machine changes under it, exactly as sleep does to the network.
+    rmSync(VAULT(), { recursive: true, force: true });
+    run(['release', 'blocker']);
+
+    const r = await waiter;
+    expect(r.code).toBe(69);                       // EX_NOTREADY, not a traceback
+    expect(events().some((e) => e.state === 'deferred-stale-precondition')).toBe(true);
+  });
+
+  it('does not leave the queue shut behind it', async () => {
+    scheduleWithVault();
+    expect(run(['acquire', 'blocker', '--no-stale-check']).code).toBe(0);
+    const waiter = runAsync(['acquire', 'waiter', '--no-stale-check'], { env: FAST });
+    await new Promise((r) => setTimeout(r, 1500));
+    rmSync(VAULT(), { recursive: true, force: true });
+    run(['release', 'blocker']);
+    await waiter;
+
+    // Deferring happens AFTER the lock is taken, so a missing release would
+    // hold the queue until the lease lapsed.
+    expect(run(['status']).stdout).toMatch(/FREE/);
+  });
+
+  it('BACK-TEST: without the re-check it acquires on a machine that is not ready', async () => {
+    // Same scenario, re-check pushed out of reach. This is the old behaviour,
+    // and it is what handed the job a dead network to run against.
+    scheduleWithVault();
+    expect(run(['acquire', 'blocker', '--no-stale-check']).code).toBe(0);
+    const waiter = runAsync(['acquire', 'waiter', '--no-stale-check'],
+      { env: { JOB_QUEUE_RECHECK_AFTER: '99999', JOB_QUEUE_POST_LOCK_WAIT: '0' } });
+    await new Promise((r) => setTimeout(r, 1500));
+    rmSync(VAULT(), { recursive: true, force: true });
+    run(['release', 'blocker']);
+
+    const r = await waiter;
+    expect(r.code).toBe(0);
+    expect(events().some((e) => e.state === 'acquired' && e.job === 'waiter')).toBe(true);
+    run(['release', 'waiter']);
+  });
+
+  it('proceeds when readiness survived the wait', async () => {
+    // The re-check must not turn a healthy long wait into a deferral.
+    scheduleWithVault();
+    expect(run(['acquire', 'blocker', '--no-stale-check']).code).toBe(0);
+    const waiter = runAsync(['acquire', 'waiter', '--no-stale-check'], { env: FAST });
+    await new Promise((r) => setTimeout(r, 1500));
+    run(['release', 'blocker']);            // vault left in place
+
+    const r = await waiter;
+    expect(r.code).toBe(0);
+    run(['release', 'waiter']);
+  });
+
+  it('leaves a job with no preconditions alone, however long it waited', async () => {
+    writeFileSync(schedulePath, JSON.stringify({
+      blocker: { cron: '* * * * *', maxLateMinutes: 600, mode: 'wrapped' },
+      waiter: { cron: '* * * * *', maxLateMinutes: 600, mode: 'wrapped' },
+    }));
+    expect(run(['acquire', 'blocker', '--no-stale-check']).code).toBe(0);
+    const waiter = runAsync(['acquire', 'waiter', '--no-stale-check'], { env: FAST });
+    await new Promise((r) => setTimeout(r, 1500));
+    run(['release', 'blocker']);
+
+    expect((await waiter).code).toBe(0);
+    expect(events().some((e) => e.state === 'deferred-stale-precondition')).toBe(false);
+    run(['release', 'waiter']);
+  });
+
+  it('does not re-probe after a short wait', () => {
+    // The common case must keep its behaviour and its latency. Threshold left
+    // at the 60s default: this job takes the lock immediately.
+    scheduleWithVault();
+    const r = run(['acquire', 'waiter', '--no-stale-check']);
+    expect(r.code).toBe(0);
+    expect(events().some((e) => e.state === 'waiting-for-ready')).toBe(false);
+    run(['release', 'waiter']);
   });
 });
 

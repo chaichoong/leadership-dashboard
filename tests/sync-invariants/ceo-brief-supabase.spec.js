@@ -197,6 +197,36 @@ test.describe('CEO Brief (Supabase page)', () => {
     await expect(page.locator('#health .hc').nth(2)).toContainText('Brief failed today');
   });
 
+  // The weekend excuse used to be tested BEFORE the row, so a brief that fired on a
+  // Saturday and failed was reported as "No brief at weekends" — a green tick over a
+  // broken brief, beside a card already saying "Brief failed". It only misreported at
+  // weekends, so it passed Mon–Fri for weeks. These three pin the clock so the whole
+  // precedence is checked every day: a row is reported on pass or fail, and the weekend
+  // excuse still covers a genuinely absent brief.
+  const SATURDAY = new Date('2026-08-29T09:30:00Z');   // 10:30 in London, BST
+  const SAT_ISO = '2026-08-29';
+
+  test('a weekend fallback row still reads as failed in the health strip', async ({ page }) => {
+    await page.clock.setFixedTime(SATURDAY);
+    await setup(page, { cfg: ENABLED_CFG, briefs: [briefRow({ brief_date: SAT_ISO, fallback: true, one_thing: null })] });
+    await expect(page.locator('#health .hc').nth(2)).toHaveClass(/fail/);
+    await expect(page.locator('#health .hc').nth(2)).toContainText('Brief failed today');
+  });
+
+  test('a weekend brief that DID arrive reads as arrived, not as absent', async ({ page }) => {
+    await page.clock.setFixedTime(SATURDAY);
+    await setup(page, { cfg: ENABLED_CFG, briefs: [briefRow({ brief_date: SAT_ISO })] });
+    await expect(page.locator('#health .hc').nth(2)).toHaveClass(/ok/);
+    await expect(page.locator('#health .hc').nth(2)).toContainText('Arrived');
+  });
+
+  test('with no row at all, the weekend excuse still stands', async ({ page }) => {
+    await page.clock.setFixedTime(SATURDAY);
+    await setup(page, { cfg: ENABLED_CFG, briefs: [] });
+    await expect(page.locator('#health .hc').nth(2)).toHaveClass(/ok/);
+    await expect(page.locator('#health .hc').nth(2)).toContainText('No brief at weekends');
+  });
+
   test('a secret is never echoed back into its field', async ({ page }) => {
     await setup(page, { cfg: { calendar_ics_url: 'https://calendar.example.com/private-abc.ics' }, briefs: [] });
     await page.click('.tab[data-tab="setup"]');

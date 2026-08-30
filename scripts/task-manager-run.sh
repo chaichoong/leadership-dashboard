@@ -97,7 +97,7 @@ RC=$?
 # "FAILED (rc=0)". The helper preserves the real rc, treats a quarantine as
 # informational, and never quarantines schema-YYYY-MM-DD.json.
 "$REPO/scripts/slot-postrun.sh" "task-manager" "$RC" "$LOG" "$__START_LINE" "$__MARKER" "$SCRATCH" \
-  '"description":|Inbound Message Content|CREDITOR MATTER' \
+  '"description" *:|"Inbound Message Content" *:|CREDITOR MATTER' \
   'HTTP Error 401|401 Unauthorized|Unauthorized|OAuth access token has expired|BROKEN|VERIFY FAIL'
 __FINAL=$?
 __POSTRUN_DONE=1

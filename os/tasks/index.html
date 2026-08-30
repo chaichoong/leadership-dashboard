@@ -793,6 +793,10 @@ const F = {
   // Due Date looks like one but is re-stamped to today by the rescheduler, so
   // 28 of 29 waiting approvals read as due today however long they have sat.
   approvalSlackTs:'fldHTaX3wP9VhD5Oz',
+  // Knocked back to a date from the AI Agents approval gate (28 Aug 2026).
+  // The task stays at Status Approval with the agent's work intact; every
+  // approval surface, this one included, hides it until the date arrives.
+  deferredUntil:'fldJ9IHS1yxwYzYSN',
   taskType:    'fldZ2moDV2041Sobc',  // singleSelect — work class; accuracy is scored per agent PER TASK TYPE
   agentOutput: 'fldzswp8fx6PqpLQ5',  // what the agent PRODUCED (separate from Description, which is the brief)
   approvalFeedback:'fldtI7SJI4gEohHD1', // Kevin's words back to the agent on a change or a rejection
@@ -1727,6 +1731,12 @@ function minutesToTime(m){const h=Math.floor(m/60),mm=m%60,ampm=h>=12?'PM':'AM',
 function formatMins(m){if(!m)return'-';if(m<60)return m+'m';const h=Math.floor(m/60),r=m%60;return r?`${h}h ${r}m`:`${h}h`}
 function minutesToTimeEst(mins){let best=TIME_OPTIONS[0],bd=Infinity;TIME_OPTIONS.forEach(o=>{const d=Math.abs(TIME_MINUTES[o]-mins);if(d<bd){bd=d;best=o}});return best}
 function isOverdue(t){if(!t.dueDate||t.status==='Completed')return false;return t.dueDate<todayStr()}
+// Knocked back from the AI Agents approval gate to a date in the future. Every
+// surface that says "this is waiting on you" has to honour it, or the item
+// Kevin deliberately parked keeps chasing him from a different page. Same rule
+// as APV_QUEUE_FORMULA in os/agents/index.html: the date itself is IN, so a
+// task knocked back to today is back in the queue that morning.
+function isKnockedBack(t){return t.status==='Approval'&&!!t.deferredUntil&&t.deferredUntil>todayStr()}
 function dateToMs(dateStr){const p=dateStr.split('-').map(Number);return new Date(p[0],p[1]-1,p[2]).getTime()}
 // computeProjectHealth is defined in ../../js/project-health.js — one rule
 // shared with the Leadership Dashboard and the daily sync job, so the three
@@ -1993,6 +2003,7 @@ function parseTask(rec){
     approvedByName:(gf(rec,F.approvedBy)||{}).name||'',
     approvedAt:gf(rec,F.approvedAt)||'',
     approvalSlackTs:gf(rec,F.approvalSlackTs)||'',
+    deferredUntil:String(gf(rec,F.deferredUntil)||'').slice(0,10),
     taskType:selectName(gf(rec,F.taskType)),
     processedByAI:!!gf(rec,F.processedByAI),
     agentOutput:gf(rec,F.agentOutput)||'',
@@ -2823,7 +2834,7 @@ function renderKPIs(){
   const dueToday=active.filter(t=>t.dueDate===today||t.status==='Today');
   const upcoming=active.filter(t=>t.status==='Upcoming');
   const totalHrs=active.reduce((s,t)=>s+t.minutes,0)/60;
-  const approvalCount=active.filter(t=>t.status==='Approval').length;
+  const approvalCount=active.filter(t=>t.status==='Approval'&&!isKnockedBack(t)).length;
   const recurCount=active.filter(t=>t.recurring||t.recurFlag).length;
   const kpis=[
     {label:'Due Today',value:dueToday.length,cls:dueToday.length>0?'amber':'green'},
@@ -3775,14 +3786,13 @@ function renderApprovalBlock(t){
     <textarea id="apvNote" placeholder="What to change, or why you are rejecting. Required for Request changes and both Reject buttons. (In Slack you just reply in the thread — same thing.)"></textarea>
     <label style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--text-secondary);margin:6px 0 2px">
       <input type="checkbox" id="apvRemember" style="margin:0">
-      Remember this too, so the agent applies it from now on
+      Remember this reason — the agent applies it to every future task
     </label>
     <div class="apv-actions">
       <button class="btn btn-success" data-apv-btn onclick="apvDecide('${t.id}','Approved as-is')">Approve</button>
       <button class="btn" data-apv-btn onclick="apvDecide('${t.id}','Approved with minor edits')" title="Approved, but you tidied it first — still counts as accurate">Approve with minor edits</button>
       <button class="btn" data-apv-btn onclick="apvDecide('${t.id}','Changes requested')" title="Goes back to the agent to redo. Needs a comment.">Request changes</button>
-      <button class="btn btn-danger" data-apv-btn onclick="apvDecide('${t.id}','Rejected')" title="Closed. Nothing is learned — use this when the reason is a one-off.">Reject and close</button>
-      <button class="btn btn-danger" data-apv-btn onclick="apvDecide('${t.id}','Rejected',true)" title="Closed, AND your reason becomes a standing rule in the agent's instructions so it stops raising work like this.">Reject and remember</button>
+      <button class="btn btn-danger" data-apv-btn onclick="apvDecide('${t.id}','Rejected')" title="Closed. Tick Remember above if the reason should become a standing rule.">Reject and close</button>
     </div>
   </div>`;
 }
@@ -9236,7 +9246,7 @@ function computeApprovalLoop(tasks){
   const all=tasks||[];
   const myEmail=((currentUser&&currentUser.email)||'').toLowerCase();
 
-  const needsYou=all.filter(t=>t.status==='Approval'&&(!t.assigneeEmail||(t.assigneeEmail||'').toLowerCase()===myEmail));
+  const needsYou=all.filter(t=>t.status==='Approval'&&!isKnockedBack(t)&&(!t.assigneeEmail||(t.assigneeEmail||'').toLowerCase()===myEmail));
 
   // Finished agent work, newest first. Proof the loop closed.
   //
@@ -9402,7 +9412,7 @@ async function renderAgents(){
   }
   const rows=computeAgentAccuracy(agentApprovalHistory);
   const recs=agentAutonomyRecommendations(rows);
-  const waiting=(allTasks||[]).filter(t=>t.status==='Approval');
+  const waiting=(allTasks||[]).filter(t=>t.status==='Approval'&&!isKnockedBack(t));
 
   const waitingHtml=waiting.length
     ? waiting.map(t=>`<div class="acc-row"><span class="acc-type">${escHtml(t.name)}</span><span class="acc-n">${escHtml(agentNamesFor(t)||'no agent')}</span><button class="btn btn-sm" onclick="openTaskDrawer('${t.id}')">Review</button></div>`).join('')

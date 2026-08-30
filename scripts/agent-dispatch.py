@@ -50,9 +50,12 @@ Auth:   ~/.config/od/airtable_pat (never printed).
 """
 
 import argparse
+import base64
 import json
+import mimetypes
 import os
 import re
+import subprocess
 import sys
 import urllib.error
 import urllib.parse
@@ -71,6 +74,8 @@ from agent_email_format import (  # noqa: E402
     TIER1_BANNER,
     EmailFormatError,
     parse_output as parse_email_output,
+    validate_submission as validate_email_submission,
+    validate_submission_any as validate_any_submission,
 )
 
 BASE_ID = "appnqjDpqDniH3IRl"
@@ -134,11 +139,15 @@ HUMANS = {
     # approval; other passes go through the gate first.
     "roy.lavin1978@gmail.com": {"rec": "reclbdjfVev3bqNHS", "name": "Roy Lavin"},
 }
+# Named once so the property lane and HUMANS can never disagree about which
+# address is his.
+ROY_EMAIL = "roy.lavin1978@gmail.com"
 
 # Field IDs — single source is js/config.js; drift-tested, never guess.
 AF = {
     "name":              "fldgFjGBw6bTKJFCD",
     "description":       "fldRGhBQViKZKtkQ6",
+    "attachments":       "fldEbs9cscRr8elcw",
     "notes":             "fldR7apBzSp3oxFxz",
     "status":            "fldx4qCw17UfrKpaN",
     "assignee":          "fldELMncVJYPDRJNc",
@@ -174,6 +183,13 @@ AF = {
     #   feedbackHistory — append-only archive, because submit clears
     #                     approvalFeedback and the history was unrecoverable.
     "rememberThis":      "fldZurhdHutYIDKVx",
+    #   verdictReason   — WHY he decided as he did (27 Aug 2026). All 58
+    #   rejections he had ever made were classified that day and NOT ONE was
+    #   about the draft: every one was about the task existing. So the reason
+    #   decides two things a free-text box never could — which agent the
+    #   lesson belongs to, and whether the verdict counts against draft
+    #   quality at all. Only "The work is wrong" does.
+    "verdictReason":     "fldF9Bs4N5mttQvtl",
     "lessonWrittenAt":   "fldFfzXOME9Rh8SyM",
     "feedbackHistory":   "fldOzsq68lhfprKJu",
 }
@@ -248,6 +264,7 @@ AGENTS = {
     "recqmKBmq8ZGkxVH9": {"name": "AI Worker — Analyst",                     "agent": "worker-analyst",        "role": "worker"},
 }
 CEO_REC_ID = "reciHUAEcEkbctnZ6"
+REASSIGN_MAX = 2          # bounces before a task becomes Kevin's decision
 
 # Role-specific agents from the AI Agents register (tbl9msVjyQWslLOIZ) that
 # have completed their own build session and can be DISPATCHED like the 17
@@ -277,6 +294,28 @@ ROLE_AGENTS = {
     "rec1hYELb4zS8pjjO": {"name": "AI Task Manager",
                           "agent": "task-manager", "role": "worker",
                           "registerRow": "reczg8BygPFnJMQnh"},
+    # LESSONS ONLY — never dispatched. Added 27 Aug 2026.
+    #
+    # Inbound Comms Triage makes roughly forty create-or-not decisions a day,
+    # more consequential judgement than any other agent makes, and until now it
+    # was the ONE agent in the estate that could not receive a lesson: it had a
+    # register row and a Team Members row but no entry here and no definition
+    # file, so `lessons` had nowhere to land a rule and its Learning Log was
+    # permanently empty.
+    #
+    # The consequence, measured across all 58 rejections: "only show me tasks
+    # like this if it's a major issue" landed on the agent that DRAFTED the
+    # reply, which never chose the task and cannot stop the next one being
+    # created. Kevin taught the wrong agent every time.
+    #
+    # `dispatch: False` is why this entry is safe. It runs its own Go Signal
+    # (09:00/13:00/17:00 via inbound-triage-run.sh) and must never be handed
+    # work by the CEO pass — being in this dict would otherwise make it
+    # dispatchable the moment its register row reads Live, which it does.
+    "recCUfsTXzmVZynEI": {"name": "AI Inbound Comms Triage",
+                          "agent": "inbound-comms-triage", "role": "worker",
+                          "registerRow": "recYy33zkoa099uM2",
+                          "dispatch": False},
 }
 ALL_AGENTS = {**AGENTS, **ROLE_AGENTS}
 
@@ -508,6 +547,151 @@ READ_ONLY_RE = re.compile(
     re.I,
 )
 
+# ─── ROY'S LANE (28 Aug 2026) ───────────────────────────────────────
+#
+# "Roy is dealing with this directly" was typed SEVEN separate times across the
+# 58 rejections Kevin had ever made — 12%, the third largest group. Every one
+# cost him a read, a decision and a couple of minutes, on work that was never
+# his in the first place.
+#
+# Roy Lavin has been Head of Property since 25 Aug 2026 and `handover` has
+# existed since then, carrying his standing approval for maintenance. Nothing
+# ever routed to him. The capability was built and never wired, so every
+# property matter still walked past him and stopped at Kevin.
+#
+# WHAT THIS LANE IS: the physical building. Certificates, inspections, repairs,
+# contractors. Things Roy can act on by going to a property or ringing a trade.
+ROY_PATTERNS = [
+    re.compile(p, re.I) for p in (
+        # Compliance certificates
+        r"\beicr\b", r"electrical\s+(?:safety|installation|cert)",
+        r"gas\s+safety", r"\bcp12\b", r"\bepc\b", r"energy\s+performance",
+        r"legionella", r"\bpat\s+test", r"fire\s+(?:safety|risk|alarm|door)",
+        r"emergency\s+lighting", r"smoke\s+alarm", r"carbon\s+monoxide",
+        # Inspections and the licensing REGIME (not its fee — see the veto)
+        r"(?:property|council|hmo|housing)\s+inspection",
+        r"inspection\s+(?:report|notice|visit)", r"improvement\s+notice",
+        r"hmo\s+licen[cs]", r"selective\s+licen[cs]", r"housing\s+standards",
+        # The building itself
+        r"\brepair", r"\bboiler\b", r"\bleak\b", r"\bdamp\b", r"\bmould\b",
+        r"\bheating\b", r"\bplumb", r"\broof\b", r"\bguttering\b",
+        r"\bcontractor\b", r"\bhandyman\b",
+        r"\bvoid\b", r"\bgarden",
+        # The fabric of the building. Added after a live pass missed "urgent
+        # kitchen ceiling and rat infestation" — a category-1 hazard with no
+        # matching word in the first cut.
+        r"\bceiling\b", r"\binfestation\b", r"\bvermin\b", r"\bpest\b",
+        r"\brats?\b", r"\bmice\b", r"\bdrain", r"\bsewer",
+        r"\bwindow\b", r"\bflooring\b", r"\bcarpet\b",
+    )
+]
+# DELIBERATELY NOT A PATTERN: a bare `maintenance`. Every task in the
+# MAINTENANCE: lane carries the word in its name, so it matched the whole lane
+# — including "Yale Smart Lock battery low at Brittain Home front door" (Kevin's
+# own house) and "57a West Street - William H Brown letter" (an estate agent,
+# so a letting or sale matter, not a repair). The lane prefix says where a task
+# CAME FROM, never what it is.
+
+# Kevin's own home is not part of the portfolio and never Roy's. Family-named
+# DIY ("Fit hand rails for Paul's shower access") lives on the same board.
+ROY_HOME_RE = re.compile(r"brittain\s+home|\bmy\s+(?:house|home)\b", re.I)
+
+# THE VETO, and it is the whole safety of this lane.
+#
+# Modelled on CREDITOR_EXCLUDE_RE and for the same reason: the patterns above
+# are blind to what the message is actually ASKING FOR. "Pay the overdue HMO
+# licence fee" matches `hmo licen`, and it is a payment decision, not a job for
+# the head of property. So does an enforcement notice about a fire risk — the
+# risk is Roy's, the enforcement is Kevin's.
+#
+# Money, law and the live legal matter VETO the match outright. A vetoed
+# property task is not lost: it falls through to the normal lane and reaches
+# Kevin exactly as it does today. The asymmetry is deliberate — over-vetoing
+# costs Kevin a decision he is already making, under-vetoing sends a solicitor's
+# letter to a contractor.
+#
+# Kevin's own rejections show the cost of getting this right rather than wide:
+# he DID want "pay overdue HMO licence fee ... forward the existing email to
+# roy" to reach Roy. It is vetoed here anyway, because the same words on an
+# enforcement letter must not be. He can still forward it in one click.
+ROY_EXCLUDE_RE = re.compile(
+    r"\bfee\b|\binvoice|\bpayment|\bpay\b|\barrears|\bdebt\b|"
+    r"council\s+tax|\bhmrc\b|companies\s+house|solicitor|\bcourt\b|"
+    r"enforcement|bailiff|liability\s+order|restraint\s+order|"
+    r"statutory\s+demand|\blegal\b|insurance|mortgage|\bsell\b|refinanc",
+    re.I,
+)
+
+
+def roy_match(name, description="", notes=""):
+    """Why this is Roy's, or "".
+
+    MATCHES ON THE NAME ONLY, and vetoes on everything. That asymmetry is the
+    point: the name is what the task IS, while the description is context that
+    routinely mentions a property or a repair in passing — matching on it sent
+    a PROSPECTING task to the head of property in testing. A veto anywhere is
+    still a veto, because the thing that makes a task not-Roy's (a payment, a
+    solicitor, the live legal matter) is exactly the thing that turns up in the
+    body rather than the subject.
+
+    Missing one costs Kevin a decision he is already making. Getting one wrong
+    sends his private legal correspondence to a contractor.
+    """
+    everything = " ".join(str(t or "") for t in (name, description, notes))
+    if ROY_EXCLUDE_RE.search(everything) or ROY_HOME_RE.search(everything):
+        return ""
+    return tier_match(ROY_PATTERNS, name)
+
+
+# ─── SYSTEM ALERTS ARE NOT APPROVALS (27 Aug 2026) ──────────────────
+#
+# Measured that day: 13 of the 60 tasks sitting at Status Approval were
+# automation failure emails — Google Apps Script, Cloudflare KV, Airtable
+# automations. Every failure notification had become its own task, its own
+# draft and its own approval, and approving "investigate the meetings script"
+# does nothing at all: agents are read-only on code, and the meetings pipeline
+# had been dead since 15 July regardless.
+#
+# The approval gate answers one question: MAY I DO THIS THING to a person, a
+# creditor, a council or a bank. A broken cron is not that question. It is work,
+# and work belongs on the board.
+#
+# So an alert task is CLASSIFIED and left OPEN rather than submitted. Nothing is
+# hidden and nothing is closed: it stays on the board where the Task Manager
+# agent already counts it, and the run report carries the count so the absence
+# is reportable. That is deliberately the same shape as skippedTier2 — a lane
+# that is diverted and named, never a lane that is silently dropped.
+#
+# MATCH ON THE SENDER, not the subject. A monitoring system always mails from
+# the same address, whereas an AI writes the same incident up in fresh words
+# every time — the exact reason the old duplicate key caught none of these. The
+# name patterns below are a SECOND label for an alert forwarded by hand or
+# raised by an agent that noticed the failure itself, and each covers the
+# other's blind spot. Deliberately absent: Stripe and Supabase account mail,
+# which reads like monitoring and is genuinely actionable (verification
+# deadlines, a paused project), so it keeps its trip to Kevin.
+SYSTEM_ALERT_SENDERS = (
+    "apps-scripts-notifications@google.com",
+    "noreply@airtable.com",
+    "noreply@notify.cloudflare.com",
+)
+SYSTEM_ALERT_PATTERNS = [
+    re.compile(r"apps script", re.I),
+    re.compile(r"cloudflare (kv|worker)", re.I),
+    re.compile(r"airtable automation", re.I),
+    re.compile(r"gmail quota", re.I),
+]
+
+
+def system_alert_match(sender, *texts):
+    """Why this is a machine telling us something broke, or ""."""
+    addr = str(sender or "").lower()
+    for known in SYSTEM_ALERT_SENDERS:
+        if known in addr:
+            return known
+    return tier_match(SYSTEM_ALERT_PATTERNS, *texts)
+
+
 # Creditor lane: money Kevin or his businesses OWE. The routing floor for the
 # Creditor Management agent (build session 25 Aug 2026; Kevin approved routing
 # creditor and payment-chasing work to the specialist, including the formerly
@@ -700,6 +884,69 @@ def query_tasks(formula, max_records=None, minimal=False):
     return query_records(TASKS, formula, fields, max_records)
 
 
+ATTACH_MAX_BYTES = 5 * 1024 * 1024   # Airtable's cap, on the raw file
+
+
+def upload_attachment(task_id, path):
+    """Put a local file on a task's Attachments field, so Kevin can open it
+    from the approval card before deciding. Same shape the AI Agents page
+    uses and tests/airtable-upload-shape.test.js pins: base64 JSON to the
+    RECORD path (multipart returns 400, a table id in the path returns 404 —
+    both probed live 26 Aug 2026). Exits rather than leaving a half-attached
+    approval."""
+    if not os.path.isfile(path):
+        sys.exit(f"ERROR: no such file to attach: {path}")
+    size = os.path.getsize(path)
+    if size == 0:
+        sys.exit(f"ERROR: refusing to attach an empty file: {path}")
+    if size > ATTACH_MAX_BYTES:
+        sys.exit(f"ERROR: {path} is {size / 1048576:.1f}MB — Airtable's limit "
+                 "is 5MB an attachment. Attach a smaller file, or put it in "
+                 "Drive and give Kevin the link in the Agent Output.")
+    with open(path, "rb") as fh:
+        blob = base64.b64encode(fh.read()).decode()
+    url = (f"https://content.airtable.com/v0/{BASE_ID}/{task_id}/"
+           f"{AF['attachments']}/uploadAttachment")
+    req = urllib.request.Request(url, method="POST", data=json.dumps({
+        "contentType": mimetypes.guess_type(path)[0] or "application/octet-stream",
+        "filename": os.path.basename(path),
+        "file": blob,
+    }).encode(), headers={"Authorization": f"Bearer {pat()}",
+                          "Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=120) as resp:
+            json.load(resp)
+    except urllib.error.HTTPError as e:
+        sys.exit(f"ERROR: Airtable refused the attachment {path} -> HTTP "
+                 f"{e.code}: {e.read().decode('utf-8', 'replace')[:200]}")
+    except (urllib.error.URLError, TimeoutError, OSError) as e:
+        # A timeout is the awkward one: Airtable may have stored the file
+        # anyway, so the retry has to be safe. supersede_attachments below is
+        # what makes it safe — same filename replaces, never accumulates.
+        sys.exit(f"ERROR: could not reach Airtable to attach {path}: {e}")
+    return os.path.basename(path)
+
+
+def supersede_attachments(task_id, filenames):
+    """Drop any attachment already on the task whose filename matches one we
+    are about to upload, keeping everything else.
+
+    The Attachments field is a SHARED bucket: the inbound importer puts the
+    sender's own email attachments there (follow-up.html writes the same
+    field id), and Kevin's feedback files land there too. So an agent
+    re-attaching letter-of-authority.pdf after a redo must replace ITS OWN
+    previous version and leave the creditor's notice.pdf alone — clearing the
+    field wholesale would destroy evidence Kevin needs. Without this a redo
+    leaves two identically-named links on the approval card and no way to
+    tell which one is current."""
+    if not filenames:
+        return
+    atts = (get_task(task_id).get("fields", {}) or {}).get(AF["attachments"]) or []
+    keep = [{"id": a["id"]} for a in atts if a.get("filename") not in filenames]
+    if len(keep) != len(atts):
+        patch_task(task_id, {AF["attachments"]: keep})
+
+
 def patch_task(task_id, fields):
     return _request("PATCH", f"/{TASKS}/{task_id}",
                     {"fields": fields, "typecast": True})
@@ -724,7 +971,11 @@ def fetch_role_roster():
             "name": f.get(REGISTER_FIELDS["name"], ""),
             "goal": f.get(REGISTER_FIELDS["goal"], ""),
             "status": status,
+            # An entry with dispatch=False can receive LESSONS but never WORK.
+            # Its own scheduled job is its Go Signal; the CEO pass must not
+            # hand it tasks on top.
             "dispatchable": tm[0] in ROLE_AGENTS
+                            and ROLE_AGENTS[tm[0]].get("dispatch", True)
                             and status in ("Built", "Live"),
             "learningLog": f.get(REGISTER_FIELDS["learningLog"], ""),
         }
@@ -764,6 +1015,18 @@ INTENT_LEDGER = os.path.join(STATE_DIR, "carryout-intent.jsonl")
 # verbatim, so changing it here changes both halves at once.
 CARRIED_OUT_MARK = "CARRIED OUT (task left open):"
 
+# "Approve with minor edits" USED to be a scoring label and nothing more: both
+# approve kinds told the agent to carry out its original text "deviating in
+# nothing", so a note saying "change the date to Friday" was passed along and
+# then ignored. Kevin found this on 26 Aug 2026 and it is the wrong way round —
+# he types an edit expecting it to be made.
+#
+# Now the edit is APPLIED before the action, and `complete` refuses a
+# minor-edits task that never applied one. This marker in Notes is the
+# machine-readable half, read back from the LIVE record rather than trusted
+# from the run, exactly like CARRIED_OUT_MARK above.
+EDITS_APPLIED_MARK = "EDITS APPLIED:"
+
 
 def ledger_append(task_id, event):
     os.makedirs(STATE_DIR, exist_ok=True)
@@ -789,7 +1052,18 @@ def open_intents():
     return {t for t, e in state.items() if e == "intent"}
 
 
-def carry_out_problem(output):
+# Machine detail that means nothing to Kevin: a script path, a filename with
+# an extension, an Airtable record/field/table id, or an API/CLI word. Matched
+# only inside the CLOSING line, never the body — the body is allowed to be
+# technical, that is where an agent shows its working.
+JARGON_RE = re.compile(
+    r"(\bscripts?/[\w./-]+"
+    r"|(?<![@\w.])[\w-]+\.(?:py|js|sh|mjs|json)\b"
+    r"|\b(?:rec|fld|tbl|usr|app)[A-Za-z0-9]{14}\b"
+    r"|\bfilterByFormula\b|\bcurl\b)")
+
+
+def carry_out_problem(output, strict=True):
     """Reason the approval box would have to guess this output's summary.
 
     Empty string means the output is fine. See CARRY_OUT_MARKER above.
@@ -797,12 +1071,20 @@ def carry_out_problem(output):
     text = (output or "").strip()
     if len(text) < SUMMARY_MIN_CHARS:
         return ""
-    m = CARRY_OUT_RE.search(text)
-    if not m:
+    matches = list(CARRY_OUT_RE.finditer(text))
+    if not matches:
         return "it has no '%s' line" % CARRY_OUT_MARKER
-    tail = text[m.end():].strip()
+    tail = text[matches[-1].end():].strip()
     if not tail:
         return "its '%s' line says nothing" % CARRY_OUT_MARKER
+    jargon = JARGON_RE.search(tail) if strict else None
+    if jargon:
+        return ("its '%s' line contains '%s' — that is machine detail, not "
+                "plain English. Kevin reads this line to decide WHETHER the "
+                "action happens, not how it is done. Write it so a "
+                "thirteen-year-old understands: say 'sending the email to "
+                "Fylde Council', never 'via scripts/send-email.py' or a "
+                "record id" % (CARRY_OUT_MARKER, jargon.group(0)))
     if len(tail) > CARRY_OUT_TAIL_MAX:
         return ("its '%s' line is not the CLOSING line — keep what follows it "
                 "under %d characters; yours is %d. The approval box shows only "
@@ -881,7 +1163,10 @@ def task_view(rec):
         "priority": sel(f.get(AF["priority"])),
         "urgencyScore": f.get(AF["urgencyScore"]) or 0,
         "outcome": sel(f.get(AF["approvalOutcome"])),
-        "feedback": f.get(AF["approvalFeedback"], ""),
+        # Expanded here so a REDO gets the spoken instruction, not a bare URL.
+        # No Loom link means no network call — this is a regex miss on almost
+        # every task.
+        "feedback": expand_looms(f.get(AF["approvalFeedback"], "")),
         "agentOutput": f.get(AF["agentOutput"], ""),
         "taskType": sel(f.get(AF["taskType"])),
         "teamMemberIds": links(f.get(AF["teamMember"])),
@@ -894,6 +1179,10 @@ def task_view(rec):
         "inboundTask": bool(f.get(AF["inboundTask"])),
         "inboundSourceType": sel(f.get(AF["inboundSourceType"])),
         "inboundSender": f.get(AF["inboundSender"], ""),
+        "attachments": [
+            {"filename": a.get("filename", ""), "url": a.get("url", "")}
+            for a in (f.get(AF["attachments"]) or [])
+        ],
     }
 
 
@@ -904,7 +1193,13 @@ def sort_key(t):
 
 # ─── QUEUE ────────────────────────────────────────────────────────────
 
-def cmd_queue(args):
+def build_queue(args=None):
+    """Classify the open board. Returns the queue dict, prints nothing.
+
+    Split out of cmd_queue on 28 Aug 2026 so `handover-property` classifies
+    with the SAME code the run reads. Two classifiers would be two answers to
+    "is this Roy's", and the one that writes must be the one Kevin saw.
+    """
     formula = "OR({Status}='Today',{Status}='Overdue')"
     open_tasks = [task_view(r) for r in query_tasks(formula)]
 
@@ -938,6 +1233,8 @@ def cmd_queue(args):
         sys.exit(1)
 
     tier1, skipped_tier2, unmapped, unclassified = [], [], [], []
+    system_alerts = []
+    roy_lane = []
     approved_hb, changes_hb, new_work, routing = [], [], [], []
     creditor_ok = bool(role_roster.get(CREDITOR_REC_ID, {}).get("dispatchable"))
     creditor_count = 0
@@ -974,6 +1271,25 @@ def cmd_queue(args):
             # it did before 25 Aug 2026 rather than flowing to a generalist.
             skipped_tier2.append({**t, "matchedPattern": hit2,
                                   "outboundPattern": out2})
+            continue
+        # A machine reporting a breakage is work for the board, never a
+        # question for Kevin. Checked AFTER tier 1 and tier 2 on purpose: those
+        # classifications are about what the work TOUCHES and must win, and a
+        # monitoring alert never trips them anyway.
+        hit_alert = system_alert_match(
+            t.get("inboundSender"), t["name"], t["description"], t["notes"])
+        if hit_alert and t["outcome"] not in APPROVED:
+            system_alerts.append({**t, "alertSource": hit_alert})
+            continue
+        # ROY'S LANE. Checked AFTER tier 1, the creditor lane and the alert
+        # lane, all of which must win: the veto in roy_match already keeps
+        # money and law out, and this ordering is the second line of the same
+        # defence. An APPROVED task is never diverted — Kevin has already said
+        # yes to that exact work and it must be carried out, not handed on.
+        hit_roy = ("" if (t["tier1"] or t["creditor"] or t["outcome"] in APPROVED)
+                   else roy_match(t["name"], t["description"], t["notes"]))
+        if hit_roy:
+            roy_lane.append({**t, "royReason": hit_roy})
             continue
         if not t["localAgent"]:
             unmapped.append(t)
@@ -1062,6 +1378,13 @@ def cmd_queue(args):
         # with --tier1 so the banner reaches Kevin. Not a skip list.
         "tier1Tasks": tier1,
         "skippedTier2": skipped_tier2,
+        # Named, counted, and left open on the board. Never dropped: an alert
+        # that vanishes is worse than one that clogs the gate.
+        "systemAlerts": system_alerts,
+        # Property work for Roy. Diverted and NAMED, never dropped — and not
+        # acted on here: cmd_queue is a read. `handover-property` does the
+        # writing, so one command owns the change.
+        "royLane": roy_lane,
         "unmappedAgent": unmapped,
         "unclassified": unclassified,  # states the buckets cannot place — eyes, not silence
         "agents": ALL_AGENTS,          # the roster the CEO routes against
@@ -1087,6 +1410,8 @@ def cmd_queue(args):
             # count makes the park visible in the same object that reports the
             # emptiness it causes.
             "tier2Parked": len(skipped_tier2),
+            "systemAlerts": len(system_alerts),
+            "royLane": len(roy_lane),
             # Creditor-lane keyword matches across the whole agent-linked
             # read, hand-backs included (routing floor, not judgement). Zero
             # with the register row Built/Live and creditor mail known to be
@@ -1099,7 +1424,11 @@ def cmd_queue(args):
             "worklist": len(worklist),
         },
     }
-    print(json.dumps(out, indent=2))
+    return out
+
+
+def cmd_queue(args):
+    print(json.dumps(build_queue(), indent=2))
 
 
 # ─── WRITES ───────────────────────────────────────────────────────────
@@ -1137,6 +1466,77 @@ def cmd_route(args):
     patch_task(args.task, {AF["teamMember"]: [args.to]})
     print(json.dumps({"routed": args.task, "to": args.to,
                       "agent": ALL_AGENTS[args.to]["name"]}))
+
+
+REASSIGN_MARK = "REASSIGNED TO CEO"
+REASSIGN_LINE_RE = re.compile(r"^\[[^\]]+\] " + REASSIGN_MARK, re.M)
+
+
+def reassign_bounces(notes):
+    """How many times this task has ALREADY been sent back to the CEO.
+
+    Counts only the stamped lines this command writes. A bare substring count
+    also matched the marker appearing inside an agent's own --reason text, so
+    one honest bounce could read as two and lock the task out of the loop."""
+    return len(REASSIGN_LINE_RE.findall(str(notes or "")))
+
+
+def cmd_reassign(args):
+    """Hand a task back to the AI CEO to be given to a different agent.
+
+    `route` deliberately refuses the CEO, and still does: routing is the CEO
+    handing work DOWN, so letting it point back up made a loop with nothing
+    to stop it. Reassignment is the opposite direction and needs its own
+    door — with a reason, and a limit. The CEO reads the reason in Notes and
+    picks someone else; after REASSIGN_MAX bounces the task goes to Kevin
+    instead, because a job nobody can place is a decision, not a routing
+    problem."""
+    task = get_task(args.task)
+    tf = task.get("fields", {}) or {}
+    notes = str(tf.get(AF["notes"]) or "")
+    bounces = reassign_bounces(notes)
+    if bounces >= REASSIGN_MAX:
+        sys.exit(
+            f"ERROR: {args.task} has already gone back to the CEO "
+            f"{bounces} times. Escalate it to Kevin instead:\n"
+            f"         python3 scripts/agent-dispatch.py escalate {args.task}\n"
+            "       A task nobody can place is a decision for him, not "
+            "another lap of the routing loop.")
+    stamp = datetime.now(LONDON).strftime("%Y-%m-%d %H:%M")
+    # One line, whatever the reason contains: a newline in free text would
+    # otherwise fake a second stamped line for the counter above.
+    reason = " ".join(str(args.reason).split())
+    by = " ".join(str(args.by or "the dispatcher").split())
+    line = f"[{stamp}] {REASSIGN_MARK} by {by}: {reason}"
+    fields = {
+        AF["teamMember"]: [CEO_REC_ID],
+        AF["notes"]: (notes.rstrip() + "\n" + line).strip()[-90000:],
+        # Back into the queue the CEO actually reads. Its own approval state
+        # is cleared: the next agent must be judged on ITS work, not inherit
+        # a verdict on somebody else's.
+        AF["status"]: "Today",
+        AF["dueDate"]: datetime.now(LONDON).strftime("%Y-%m-%d"),
+        AF["approvalOutcome"]: None,
+        AF["approvalFeedback"]: None,
+        AF["approvedAt"]: None,
+        AF["sentForApprovalBy"]: [],
+        # Agent-owned again: a blank Assignee is the convention, and leaving
+        # Kevin on it puts a task he no longer owns back on his own list.
+        AF["assignee"]: None,
+    }
+    # ARCHIVE BEFORE THE WIPE — the same rule cmd_submit follows. Kevin's
+    # words are why the next agent should do anything differently; clearing
+    # them here would send the work onward with the reason erased, and would
+    # leave a ticked "remember this" lesson with no text to learn from.
+    prior = str(tf.get(AF["approvalFeedback"]) or "").strip()
+    if prior:
+        hist = str(tf.get(AF["feedbackHistory"]) or "")
+        block = f"[{stamp}] {prior}"
+        if block not in hist:
+            fields[AF["feedbackHistory"]] = (hist.rstrip() + "\n\n" + block).strip()
+    patch_task(args.task, fields)
+    print(json.dumps({"reassigned": args.task, "to": "AI CEO (Dan Martell)",
+                      "reason": args.reason, "priorBounces": bounces}))
 
 
 def cmd_escalate(args):
@@ -1216,8 +1616,155 @@ def cmd_handover(args):
         AF["approvedAt"]: None,
         AF["notes"]: (existing + "\n\n" + note).strip(),
     })
+    # TELL THEM. Until 28 Aug 2026 this command reassigned the task and
+    # notified nobody: 47 tasks sat linked to Roy Lavin and not one email had
+    # ever gone to him. A comment here even claimed it "DMs the new owner"; no
+    # code did. That was survivable while every handover was Kevin typing one
+    # by hand, and is not survivable now the property lane routes automatically
+    # — work would leave his queue, land on a name and be seen by nobody, which
+    # is worse than clogging the queue because he would believe it was handled.
+    #
+    # Roy is not on Operations Director yet, so the email carries the WORK, not
+    # a link to it. Kevin's requirement, in his words: "as long as he's got the
+    # information by our email as well, that's the most important thing."
+    #
+    # Kevin himself is never emailed — he reads the board.
+    # A send failure does NOT roll back the reassignment: the task genuinely
+    # moved, and a half-undone handover is worse than one that is loud about
+    # not having been announced. It is reported instead.
+    notified, notify_error = False, ""
+    if who["rec"] != KEVIN_REC_ID:
+        try:
+            subprocess.run(
+                [sys.executable,
+                 os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                              "send-email.py"),
+                 "notify", args.task, "--to", args.to, "--reason", reason],
+                check=True, capture_output=True, text=True, timeout=90)
+            notified = True
+        except subprocess.CalledProcessError as exc:
+            notify_error = (exc.stdout or exc.stderr or "").strip().splitlines()[-1][:200] \
+                if (exc.stdout or exc.stderr) else f"exit {exc.returncode}"
+        except Exception as exc:                               # noqa: BLE001
+            notify_error = str(exc)[:200]
     print(json.dumps({"handedOver": args.task, "to": args.to,
-                      "name": who["name"], "reason": reason}))
+                      "name": who["name"], "reason": reason,
+                      "emailed": notified,
+                      # Loud on purpose. An unannounced handover is the failure
+                      # this whole change exists to stop.
+                      "NOT EMAILED": notify_error or None}))
+
+
+# The builder agent owns broken infrastructure once it leaves Kevin's queue.
+# Named here so the sweep and the report cannot disagree about who holds it.
+BUILDER_REC_ID = "recQkO6BA4w5zqwZ4"          # AI Worker — Builder
+
+
+def cmd_clear_alerts(args):
+    """Take machine-breakage tasks OUT of Kevin's approval queue.
+
+    THE GAP THIS CLOSES. The alert lane shipped 27 Aug 2026 and classifies in
+    `build_queue`, which reads Today/Overdue only. It stopped NEW alerts
+    reaching the gate — verified: zero created since — and did NOTHING about
+    the ones already sitting at Approval. Kevin cleared his queue on 29 Aug and
+    15 of the 17 left were exactly this class, every one predating the fix.
+    Fixing the tap and leaving the bath full is not fixing it.
+
+    NOTHING IS CLOSED. Each task moves to Today and to the builder agent, which
+    is where "a system is broken" belongs: it is work, not a decision for
+    Kevin. He can still see every one of them on the board and in the
+    "Kept off your queue" lane. A destructive sweep of his approvals would need
+    his explicit yes; this one is a reassignment and is reversible by hand.
+
+    A finding is filed for anything not already in the queue, so the task moving
+    off his plate cannot be the last anyone hears of it.
+    """
+    live = query_tasks(
+        "AND({Status}='Approval', NOT(IS_AFTER({Deferred Until}, TODAY())))")
+    moved, skipped = [], []
+    for rec in live:
+        t = task_view(rec)
+        hit = system_alert_match(t.get("inboundSender"), t["name"],
+                                 t["description"], t["notes"])
+        if not hit:
+            continue
+        # Tier 1 never moves silently, whatever it looks like. A monitoring
+        # address is not a reason to skip the gate that protects the legal
+        # matter.
+        if tier_match(TIER1_PATTERNS, t["name"], t["description"], t["notes"]):
+            skipped.append({"task": t["id"], "name": t["name"],
+                            "why": "tier 1 — left with Kevin on purpose"})
+            continue
+        entry = {"task": t["id"], "name": t["name"], "matched": hit}
+        if args.dry_run:
+            moved.append({**entry, "dryRun": True})
+            continue
+        stamp = datetime.now(LONDON).strftime("%d %b %Y")
+        note = (f"[{stamp} — agent-dispatch] Moved off the approval queue: a "
+                f"machine reporting a breakage (matched {hit!r}) is work, not "
+                f"a decision. Owned by the builder agent; filed as a finding.")
+        existing = (rec.get("fields", {}) or {}).get(AF["notes"], "") or ""
+        patch_task(t["id"], {
+            AF["status"]: "Today",
+            AF["teamMember"]: [BUILDER_REC_ID],
+            AF["sentForApprovalBy"]: [],
+            # No verdict is left behind. An Approved outcome on a task that
+            # changed hands would later read as an approved carry-out.
+            AF["approvalOutcome"]: None,
+            AF["approvedAt"]: None,
+            AF["notes"]: (existing + "\n\n" + note).strip(),
+        })
+        moved.append(entry)
+    print(json.dumps({"cleared": len(moved), "items": moved,
+                      "leftWithKevin": skipped}, indent=2))
+    return 0
+
+
+def cmd_handover_property(args):
+    """Hand every task in Roy's lane to Roy, in one deterministic pass.
+
+    WHY THIS IS A COMMAND AND NOT A SKILL STEP. `handover` has existed since
+    25 Aug 2026 with Roy's standing approval on it, and in three days nothing
+    routed a single task to him — because the instruction to do it lived in
+    prose. Kevin then typed "Roy is dealing with this" seven times. The same
+    lesson as the learning loop: a rule nothing enforces is a rule that gets
+    skipped. See scripts/inbound-triage-run.sh, which calls this.
+
+    Reuses cmd_handover per task, so the tier-1 gate, the both-links write and
+    the cleared-verdict rule are the SAME code the manual path uses. A second
+    implementation here is how the two would drift apart.
+    """
+    queue = build_queue()
+    lane = queue.get("royLane") or []
+    done, failed = [], []
+    for t in lane:
+        entry = {"task": t["id"], "name": t["name"], "why": t.get("royReason", "")}
+        if args.dry_run:
+            done.append({**entry, "dryRun": True})
+            continue
+        try:
+            cmd_handover(argparse.Namespace(
+                task=t["id"], to=ROY_EMAIL,
+                reason=f"property matter ({t.get('royReason','')}) — Roy is "
+                       "Head of Property and this is his standing lane"))
+            done.append(entry)
+        except SystemExit as exc:
+            # cmd_handover REFUSES tier-1 content with a sys.exit. That is the
+            # gate doing its job, not an error to swallow: it is reported so a
+            # pattern that keeps tripping it gets fixed rather than retried
+            # silently every run.
+            failed.append({**entry, "refused": str(exc)})
+        except Exception as exc:                               # noqa: BLE001
+            failed.append({**entry, "error": str(exc)})
+    print(json.dumps({"royLane": len(lane), "handedOver": done,
+                      "refused": failed}, indent=2))
+    return 1 if failed else 0
+
+
+def cmd_attach(args):
+    supersede_attachments(args.task, {os.path.basename(p) for p in args.file})
+    names = [upload_attachment(args.task, p) for p in args.file]
+    print(json.dumps({"task": args.task, "attached": names}))
 
 
 def cmd_submit(args):
@@ -1262,20 +1809,55 @@ def cmd_submit(args):
             "       a refused one: the refusal arrives after the decision."
         )
 
+    # Read once for the gate below; the approver decision further down reuses
+    # its own read, because a decision landing between two fetches of the same
+    # task is exactly how the two can disagree.
+    tf_probe = (get_task(args.task).get("fields", {}) or {})
+
+    # SECOND LABEL, same two-sided contract as tier 1. The queue diverts alert
+    # tasks before an agent ever works them; this catches the other blind spot
+    # — a task the queue did not classify (no sender recorded, an unfamiliar
+    # monitoring address) that an agent has now read and written up as a
+    # breakage. Neither side can see what the other sees, so both stay.
+    alert_hit = system_alert_match(
+        tf_probe.get(AF["inboundSender"], ""),
+        tf_probe.get(AF["name"], ""), tf_probe.get(AF["description"], "") or "",
+        tf_probe.get(AF["notes"], "") or "")
+    if alert_hit and args.type != "Correspondence":
+        sys.exit(
+            f"ERROR: refusing to submit {args.task} for approval — this is a "
+            f"machine reporting a breakage (matched {alert_hit!r}), not a "
+            "decision for Kevin.\n"
+            "       Approving 'investigate the failing script' changes nothing: "
+            "agents are read-only on code.\n"
+            "       Leave it OPEN on the board with your findings in Notes "
+            "(`annotate`). The run report counts it and the\n"
+            "       morning digest names the system, so it is visible without "
+            "costing him an approval."
+        )
+
     # A Correspondence submit is a promise that send-email.py can carry the
     # action out. Validate with the SAME parser the send gate uses, or the
     # promise is only discovered to be false days later, after Kevin has
     # approved it (finding 20260811-agent-dispatch-085, task recFdEICxHjYCzDkS).
     if args.type == "Correspondence":
+        # validate_submission is the STRICT layer: the send path's parser plus
+        # the two defaults Kevin was correcting by hand (sender identity and a
+        # sign-off with no contact block). It runs only here, never on the send
+        # path, so a draft he already approved is still carried out.
         try:
-            parse_email_output(output)
+            validate_any_submission(output)
         except EmailFormatError as exc:
             sys.exit(
                 f"ERROR: refusing to submit {args.task} as Correspondence — {exc}\n"
-                "       Agent Output must be TO:/CC:/FROM:/SUBJECT: headers, a\n"
-                "       `---` line, then the body. See scripts/send-email.py.\n"
-                "       An approved email that cannot be sent is worse than a\n"
-                "       refused draft: the refusal arrives after the decision."
+                "       Correspondence is one of THREE shapes, all defined in\n"
+                "       scripts/agent_email_format.py:\n"
+                "         email  TO:/CC:/FROM:/SUBJECT:, `---`, body\n"
+                "         post   POST: + address lines, DOCUMENT:, `---`, summary\n"
+                "         sign   DOCUMENT:, SIGNERS:, `---`, what it commits Kevin to\n"
+                "       An approved action that cannot be carried out is worse\n"
+                "       than a refused draft: the refusal arrives after the\n"
+                "       decision."
             )
 
     # WHO approves. The task's Approver field decides (set by Inbound Comms at
@@ -1323,6 +1905,17 @@ def cmd_submit(args):
         block = f"[{stamp}] {prior}"
         if block not in hist:
             archived = (hist.rstrip() + "\n\n" + block).strip()
+
+    # The files go up FIRST. If one is refused the run stops here with the
+    # task still unsubmitted — better than an approval card promising a
+    # letter that never arrived.
+    # getattr, not args.attach: cmd_submit is called with hand-built args in
+    # seventeen tests and any internal caller, none of which know about a flag
+    # added later. A new optional flag must never make an existing caller crash.
+    to_attach = list(getattr(args, "attach", None) or [])
+    supersede_attachments(args.task, {os.path.basename(p) for p in to_attach})
+    for path in to_attach:
+        upload_attachment(args.task, path)
 
     fields = {
         AF["agentOutput"]: output[:95000],
@@ -1525,6 +2118,86 @@ def mirror_lesson_to_register(register_row, line):
     return True
 
 
+# ─── A LOOM IS FEEDBACK TOO (28 Aug 2026) ───────────────────────────
+#
+# Kevin asked whether he could attach a Loom to his approval feedback and have
+# the agent actually understand it. He can now: paste the share link into the
+# feedback box and the transcript is fetched and handed to the agent with his
+# typed words.
+#
+# Loom exposes an auto-generated transcript through a PUBLIC GraphQL endpoint —
+# no auth, no cookies, no allowlist entry needed, so this works from a headless
+# run where his Chrome connector cannot be reached. The fetcher already existed
+# for the transcript-to-brain skill; it was BROKEN (Loom removed the `id` field
+# and the query failed validation for every video) and was fixed in the same
+# change.
+#
+# THE RULE THAT MATTERS: a Loom that cannot be read is said out loud, never
+# swallowed. If the fetch fails and the feedback silently carries on as the
+# typed words alone, Kevin believes his video was taken into account when it
+# never was — and he would have no way to tell. That is worse than not offering
+# the feature. So a failure is written INTO the feedback the agent reads, and
+# the agent is told to say so rather than guess what the video said.
+LOOM_URL_RE = re.compile(
+    r"https?://(?:www\.)?loom\.com/(?:share|embed)/([0-9a-f]{32})", re.I)
+LOOM_FETCHER = os.path.expanduser(
+    "~/.claude/skills/transcript-to-brain/scripts/fetch_loom_transcript.py")
+# A five-minute Loom is roughly 750 words. The agent gets the whole thing for
+# the task in hand; only the STANDING lesson is capped, further down.
+LOOM_FETCH_TIMEOUT = 45
+
+
+def fetch_loom_transcript(url):
+    """(transcript, error). Exactly one of the two is non-empty."""
+    if not os.path.exists(LOOM_FETCHER):
+        return "", f"the Loom fetcher is missing at {LOOM_FETCHER}"
+    try:
+        res = subprocess.run([sys.executable, LOOM_FETCHER, url],
+                             capture_output=True, text=True,
+                             timeout=LOOM_FETCH_TIMEOUT)
+    except subprocess.TimeoutExpired:
+        return "", f"Loom did not answer within {LOOM_FETCH_TIMEOUT}s"
+    except Exception as exc:                                   # noqa: BLE001
+        return "", f"could not run the Loom fetcher: {exc}"
+    out = (res.stdout or "").strip()
+    if res.returncode != 0 or not out:
+        why = (res.stderr or out or "no transcript returned").strip()
+        return "", why.splitlines()[0][:200]
+    return out, ""
+
+
+def expand_looms(text):
+    """Kevin's words with any Loom link replaced by its transcript.
+
+    Unchanged when there is no Loom link — no network call, no cost on the
+    99% of feedback that is typed.
+    """
+    raw = str(text or "")
+    urls = []
+    for m in LOOM_URL_RE.finditer(raw):
+        if m.group(0) not in urls:
+            urls.append(m.group(0))
+    if not urls:
+        return raw
+    parts = [raw]
+    for url in urls:
+        transcript, err = fetch_loom_transcript(url)
+        if transcript:
+            parts.append(
+                f"\n\n--- WHAT KEVIN SAID IN THE LOOM ({url}) ---\n"
+                f"This is an automatic transcript of the video he attached. Treat it\n"
+                f"as his instruction, exactly like typed feedback.\n\n{transcript}")
+        else:
+            # Loud, and in the agent's own input. Never silent.
+            parts.append(
+                f"\n\n--- LOOM COULD NOT BE READ ({url}) ---\n"
+                f"Reason: {err}\n"
+                f"Do NOT guess what the video said. Do the part of the task his typed\n"
+                f"words cover, and say plainly in your output that the video could not\n"
+                f"be read and what you still need from him.")
+    return "".join(parts)
+
+
 def lesson_source_text(f):
     """Kevin's words. Approval Feedback is cleared on every resubmit, so a
     redo's feedback can be gone before the writer next runs — Feedback History
@@ -1534,6 +2207,58 @@ def lesson_source_text(f):
         return live
     hist = str(f.get(AF["feedbackHistory"]) or "").strip()
     return hist.split("\n\n")[-1].strip() if hist else ""
+
+
+# ─── WHICH AGENT A LESSON BELONGS TO (27 Aug 2026) ──────────────────
+#
+# Until now every lesson went to whoever DRAFTED the work. Measured across all
+# 58 rejections Kevin had ever made, that was wrong 58 times out of 58: not one
+# was about the draft. "Only show me tasks like this if it's a major issue"
+# landed on the Response agent, which never chose to be given the task and
+# cannot stop the next one being created. He was teaching the wrong agent.
+#
+# The rule is simple once the reason is recorded: a lesson about whether the
+# work should have been DONE belongs to whoever decided it was worth doing; a
+# lesson about how it was WRITTEN belongs to whoever wrote it.
+#
+# For an inbound task the commissioner is always Inbound Comms Triage. For
+# anything else the raising agent IS the commissioner, so nothing changes — and
+# that fallback is deliberate rather than lazy: routing a non-inbound relevance
+# lesson to triage would teach it about work it never saw.
+RELEVANCE_REASONS = (
+    "Already done elsewhere",
+    "Roy owns it",
+    "Not worth my attention",
+    "Duplicate",
+    "Parked for now",
+    "No longer relevant",
+)
+QUALITY_REASON = "The work is wrong"
+TRIAGE_REC_ID = "recCUfsTXzmVZynEI"
+
+# Prefixes triage itself stamps on the tasks it raises. Checked alongside the
+# Inbound Task checkbox because the two disagree on the live board: some rows
+# carry the prefix with the box unticked.
+INBOUND_NAME_RE = re.compile(r"^\s*(INBOUND|MAINTENANCE)\b", re.I)
+
+
+def lesson_destination(fields, raiser_id):
+    """(rec_id, why) — which agent this lesson is FOR.
+
+    Returns the raiser unchanged unless Kevin's reason says the task should not
+    have existed AND the task came in through triage.
+    """
+    reason = sel(fields.get(AF["verdictReason"]))
+    if reason not in RELEVANCE_REASONS:
+        # No reason recorded, or "The work is wrong". Both mean the drafting
+        # agent. An unrecorded reason is NOT guessed at: routing on a guess is
+        # how a rule ends up in a file nobody meant to change.
+        return raiser_id, ""
+    inbound = bool(fields.get(AF["inboundTask"])) or bool(
+        INBOUND_NAME_RE.match(str(fields.get(AF["name"]) or "")))
+    if not inbound:
+        return raiser_id, ""
+    return TRIAGE_REC_ID, reason
 
 
 def pending_lessons():
@@ -1569,7 +2294,10 @@ def cmd_lessons(args):
             continue
         agent_recs = (links(f.get(AF["sentForApprovalBy"]))
                       or links(f.get(AF["teamMember"])))
-        entry = ALL_AGENTS.get(agent_recs[0]) if agent_recs else None
+        raiser = agent_recs[0] if agent_recs else None
+        # Route by WHY, not by who happened to hold the pen.
+        target, rerouted = lesson_destination(f, raiser)
+        entry = ALL_AGENTS.get(target) if target else None
         if not entry:
             # Never silently dropped: a lesson with nowhere to land is the
             # failure, so it stays pending and shows up in the run report.
@@ -1587,6 +2315,12 @@ def cmd_lessons(args):
             # the next run retries — appends are idempotent on the exact line.
             patch_task(task_id, {AF["lessonWrittenAt"]: now_iso()})
             written.append({"task": task_id, "agent": entry["agent"],
+                            # Say when a lesson went somewhere other than the
+                            # obvious place, so a mis-route is visible in the
+                            # report rather than only in a file nobody reads.
+                            "reroutedFrom": (ALL_AGENTS.get(raiser, {}).get("agent", raiser)
+                                             if rerouted else ""),
+                            "reroutedBecause": rerouted,
                             "line": line, "mirrored": mirrored,
                             "lessonCount": res.get("lessonCount"),
                             "crowded": (res.get("lessonCount") or 0)
@@ -1624,12 +2358,118 @@ def cmd_intent(args):
     print(json.dumps({"intentRecorded": args.task}))
 
 
+def cmd_outcome(args):
+    """Read one task's live approval state. The browser lane's gate.
+
+    scripts/agent-browser.js calls this before it is allowed to press submit on
+    a web form. It goes through THIS script, like every other Airtable read, so
+    the browser gate and the approval loop can never drift apart about what
+    "Approved" means — a second hand-rolled read of the same field is exactly
+    how the recon accuracy card came to measure the first 100 rows for a month.
+
+    Prints JSON and exits 0 whatever the verdict; the CALLER decides. An
+    unreadable task raises, because a failed read must never be mistaken for
+    "not approved yet" and quietly stall a form Kevin already approved.
+    """
+    t = task_view(get_task(args.task))
+    print(json.dumps({
+        "id": t["id"],
+        "name": t["name"],
+        "status": t["status"],
+        "outcome": t["outcome"],
+        "approved": t["outcome"] in APPROVED,
+        "feedback": t["feedback"],
+    }))
+
+
+def cmd_revise(args):
+    """Apply Kevin's minor edits to the approved text BEFORE it is carried out.
+
+    Only for 'Approved with minor edits'. The gate's whole promise is that
+    nothing goes out that Kevin has not seen, so this is deliberately narrow:
+    the agent may make ONLY the change he described, and the text he originally
+    approved is archived on the record so what actually went out can always be
+    compared with what he read."""
+    t = task_view(get_task(args.task))
+    if t["outcome"] != "Approved with minor edits":
+        sys.exit(f"ERROR: refusing to revise {args.task} — outcome is "
+                 f"'{t['outcome'] or 'empty'}'. Only 'Approved with minor "
+                 "edits' applies an edit. An 'Approved as-is' task goes out "
+                 "VERBATIM; if it needs changing, it needed Request changes.")
+    if not str(t["feedback"] or "").strip():
+        sys.exit(f"ERROR: refusing to revise {args.task} — there is no "
+                 "Approval Feedback, so there is no edit to apply. Carry out "
+                 "the approved text unchanged.")
+    with open(args.output_file) as fh:
+        revised = fh.read().strip()
+    if not revised:
+        sys.exit("ERROR: refusing to store an empty revision")
+    original = str(t["agentOutput"] or "").strip()
+    if revised == original:
+        # An unchanged "revision" means the edit was not applied. Letting it
+        # pass would tick the box while sending the text Kevin asked to change,
+        # which is the bug this command exists to end.
+        sys.exit(f"ERROR: refusing to revise {args.task} — the text is "
+                 "identical to what was approved, so the edit was not applied. "
+                 f"Kevin asked for: {str(t['feedback'])[:200]}")
+
+    # The revised text still has to satisfy every rule the original did: it is
+    # what will actually be sent, and it has not been through submit's checks.
+    # strict=False: this text was already approved by Kevin. A plain-English
+    # rule added later must not strand his approved edit (review, 26 Aug 2026).
+    problem = carry_out_problem(revised, strict=False)
+    if problem:
+        sys.exit(f"ERROR: refusing to revise {args.task} — {problem}. Keep the "
+                 f"closing '{CARRY_OUT_MARKER}' line on the edited version.")
+    promise = send_promise_problem(revised, t["taskType"])
+    if promise:
+        sys.exit(f"ERROR: refusing to revise {args.task} — {promise}")
+    if t["taskType"] == "Correspondence":
+        try:
+            parse_email_output(revised)
+        except EmailFormatError as exc:
+            sys.exit(f"ERROR: refusing to revise {args.task} — the edited "
+                     f"Correspondence no longer parses: {exc}")
+    if TIER1_BANNER in original and TIER1_BANNER not in revised:
+        sys.exit(f"ERROR: refusing to revise {args.task} — the edit dropped "
+                 "the tier-1 banner. The label travels with the work.")
+
+    stamp = datetime.now(LONDON).strftime("%d %b %Y %H:%M")
+    mark = (f"[{stamp} — agent] {EDITS_APPLIED_MARK} "
+            f"{' '.join(str(t['feedback']).split())[:300]}\n\n"
+            "--- TEXT KEVIN APPROVED, BEFORE THE EDIT ---\n"
+            f"{original[:20000]}")
+    patch_task(args.task, {
+        AF["agentOutput"]: revised[:95000],
+        AF["notes"]: ((t["notes"] or "") + "\n\n" + mark).strip(),
+    })
+    print(json.dumps({"revised": args.task, "chars": len(revised),
+                      "wasChars": len(original)}))
+
+
 def cmd_complete(args):
     t = task_view(get_task(args.task))
     if t["outcome"] not in APPROVED:
         sys.exit(f"ERROR: refusing to complete {args.task} — outcome is "
                  f"'{t['outcome'] or 'empty'}', not an approval. Only "
                  "approved, carried-out work completes.")
+
+    # THE MINOR-EDITS GATE (Kevin's ruling, 26 Aug 2026). If he asked for an
+    # edit, it must have been applied before the action. Refusing HERE rather
+    # than flagging it in verify afterwards is the point: verify runs after the
+    # email has gone, and an unedited email cannot be unsent.
+    if (t["outcome"] == "Approved with minor edits"
+            and str(t["feedback"] or "").strip()
+            and EDITS_APPLIED_MARK not in (t["notes"] or "")):
+        sys.exit(
+            f"ERROR: refusing to complete {args.task} — Kevin approved it "
+            "WITH EDITS and no edit was applied.\n"
+            f"       He asked for: {' '.join(str(t['feedback']).split())[:200]}\n"
+            "       Apply it to the Agent Output, then run:\n"
+            f"         python3 scripts/agent-dispatch.py revise {args.task} "
+            "--output-file <file>\n"
+            "       and carry out the REVISED text. Completing without it "
+            "sends the version he asked to change.")
 
     # Carrying the action out and CLOSING the task are two different things.
     #
@@ -1750,6 +2590,19 @@ def cmd_verify(args):
             f"{len(non_t1_submits)} non-tier-1 submissions but no CEO review "
             "recorded — the review pass was skipped or its outcome hidden")
 
+    # Alerts are diverted, not dropped, so the run must SAY how many. A lane
+    # that removes work from Kevin's queue and reports nothing is indis-
+    # tinguishable from a lane that lost it.
+    # Roy's lane is work that LEFT Kevin's queue. Counted for the same reason
+    # the alert lane is: a lane that removes work and reports nothing cannot be
+    # told apart from a lane that lost it.
+    roy = report.get("royLane") or []
+    alerts = report.get("systemAlerts") or []
+    alert_summary = {}
+    for a in alerts:
+        src = a.get("alertSource", "?")
+        alert_summary[src] = alert_summary.get(src, 0) + 1
+
     # A tier-1 task on an agent is no longer a fault — Kevin's call, 6 Aug 2026.
     # Agents prepare it and it reaches him through the same gate as everything
     # else. So the alarm here is not "an agent touched it", it is "an agent
@@ -1859,6 +2712,12 @@ def cmd_verify(args):
         sys.exit(1)
     print(json.dumps({"ok": True,
                       "actionsVerified": len(ok_actions),
+                      # Diverted, not dropped. A lane that takes work out of
+                      # Kevin's queue and reports nothing cannot be told apart
+                      # from a lane that lost it.
+                      "systemAlertsHeldBack": len(alerts),
+                      "handedToRoy": len(roy),
+                      "systemAlertsBySource": alert_summary,
                       "worklistAtStart": counts.get("worklist", 0)}))
 
 
@@ -2443,6 +3302,14 @@ def main():
     sc.add_argument("--selftest", action="store_true",
                     help="run the offline maths checks, no Airtable access")
 
+    ra = sub.add_parser("reassign",
+                        help="hand a task back to the AI CEO to be given to a "
+                             "different agent")
+    ra.add_argument("task")
+    ra.add_argument("--reason", required=True,
+                    help="why this agent is the wrong home for it, in one line")
+    ra.add_argument("--by", default="", help="who is sending it back")
+
     r = sub.add_parser("route")
     r.add_argument("task")
     r.add_argument("--to", required=True)
@@ -2462,14 +3329,38 @@ def main():
     s.add_argument("--agent", required=True)
     s.add_argument("--type", required=True)
     s.add_argument("--output-file", required=True)
+    s.add_argument("--attach", action="append", metavar="PATH",
+                   help="attach a file to this approval so Kevin can open it "
+                        "before deciding (repeat for several): a prepared "
+                        "letter, a filled form, a spreadsheet")
     s.add_argument("--tier1", action="store_true",
                    help="task touches the private legal/financial matter: "
                         "stamp the tier-1 banner on top of the Agent Output")
+
+    ca = sub.add_parser("clear-alerts",
+                        help="move machine-breakage tasks out of the approval "
+                             "queue and onto the board (closes nothing)")
+    ca.add_argument("--dry-run", action="store_true")
+
+    hp = sub.add_parser("handover-property",
+                        help="hand every property task in Roy's lane to Roy")
+    hp.add_argument("--dry-run", action="store_true",
+                    help="list what WOULD be handed over and change nothing")
+
+    at = sub.add_parser("attach",
+                        help="attach a file to a task already waiting for "
+                             "approval")
+    at.add_argument("task")
+    at.add_argument("--file", required=True, action="append", metavar="PATH")
 
     an = sub.add_parser("annotate")
     an.add_argument("task")
     an.add_argument("--note", required=True)
 
+    oc = sub.add_parser("outcome",
+                        help="print one task's live approval state as JSON "
+                             "(the browser lane's submit gate)")
+    oc.add_argument("task")
     i = sub.add_parser("intent")
     i.add_argument("task")
 
@@ -2491,6 +3382,12 @@ def main():
     rc.add_argument("--runs", type=int, default=3,
                     help="how many recent run directories to inspect")
 
+    rv = sub.add_parser("revise",
+                        help="apply Kevin's minor edits to the approved text "
+                             "before it is carried out")
+    rv.add_argument("task")
+    rv.add_argument("--output-file", required=True)
+
     sub.add_parser("lessons",
                    help="write every lesson Kevin asked to be remembered into "
                         "the agent files. Deterministic, idempotent, safe to "
@@ -2507,7 +3404,11 @@ def main():
             "annotate": cmd_annotate, "intent": cmd_intent,
             "complete": cmd_complete, "verify": cmd_verify,
             "score": cmd_score, "reconcile": cmd_reconcile,
-            "lessons": cmd_lessons}[args.cmd](args) or 0
+            "lessons": cmd_lessons, "revise": cmd_revise,
+            "attach": cmd_attach, "outcome": cmd_outcome,
+            "reassign": cmd_reassign,
+            "handover-property": cmd_handover_property,
+            "clear-alerts": cmd_clear_alerts}[args.cmd](args) or 0
 
 
 if __name__ == "__main__":

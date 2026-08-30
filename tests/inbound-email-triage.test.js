@@ -233,7 +233,13 @@ describe("the Go Signal is the agent's own 9/1/5 schedule (Kevin, 24 Aug 2026)",
         // tests/slot-postrun.test.js.
         expect(runner).toMatch(/NEVER under the repo/);
         expect(runner).toMatch(/slot-postrun\.sh/);
-        expect(runner).toMatch(/"body":\|Inbound Message Content/);
+        // KEY form on both signals (28 Aug 2026). Matching the field NAME
+        // anywhere also matched Airtable schema snapshots, where the string is
+        // a VALUE — the table merely naming a column — so 69 legitimate daily
+        // snapshots were moved out of monitoring/ and each run reported a false
+        // failure. The pattern is now handed to the shared epilogue, so the
+        // KEY form has to survive the move.
+        expect(runner).toMatch(/"body" \*:\|"Inbound Message Content" \*:/);
         // A broken lane (e.g. Full Disk Access denied) must fail the job.
         expect(runner).toMatch(/BROKEN\|Full Disk Access/);
         const postrun = readFileSync(path.join(root, 'scripts/slot-postrun.sh'), 'utf8');

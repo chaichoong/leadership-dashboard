@@ -16509,6 +16509,10 @@
     "name": "Same Assignment Key (from Business Assignments)",
     "type": "multipleLookupValues"
    },
+   "fldF9Bs4N5mttQvtl": {
+    "name": "Verdict Reason",
+    "type": "singleSelect"
+   },
    "fldFKIxtg6nxLd9Pd": {
     "name": "Processed By Automation",
     "type": "checkbox"
@@ -16596,6 +16600,10 @@
    "fldIvPhhl67XcoJqH": {
     "name": "Calculated Rate",
     "type": "formula"
+   },
+   "fldJ9IHS1yxwYzYSN": {
+    "name": "Deferred Until",
+    "type": "date"
    },
    "fldJPWWQ1y9NSGGGW": {
     "name": "Document Link",

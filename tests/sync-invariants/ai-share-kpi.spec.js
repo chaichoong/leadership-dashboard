@@ -202,3 +202,112 @@ test.describe('Work Done by AI KPI', () => {
     expect(all).toMatch(/carrying a time estimate[\s\S]*?50%/); // coverage: 2 of 4 carry an estimate
   });
 });
+
+// ── AI Time & Money Saved ──────────────────────────────────────────────────
+// The sister card: the same minutes valued at AI_LABOUR_RATE_GBP_PER_HOUR
+// (£17.50 fully-loaded, js/config.js). Same counting rules as the share card
+// — the two cards disagreeing about what counts as AI work would be worse
+// than no card. Every £ assertion below hand-derives from minutes × 17.50/60.
+const savedCardText = async (page) => {
+  await page.waitForFunction(
+    () => /ai time & money saved/i.test(document.body.innerText),
+    { timeout: 15000 },
+  );
+  return page.evaluate(() => {
+    const cards = [...document.querySelectorAll('.kpi-card')];
+    const c = cards.find(el => /ai time & money saved/i.test(el.textContent));
+    if (!c) return { head: '', all: '' };
+    const v = c.querySelector('.kpi-card-value');
+    return { head: v ? v.textContent.trim() : '', all: c.textContent };
+  });
+};
+
+test.describe('AI Time & Money Saved KPI', () => {
+
+  test('values AI hours at the fully-loaded rate, whole pounds', async ({ page }) => {
+    await page.addInitScript((pat) => localStorage.setItem('_dlr_pat', pat), MOCK_PAT);
+    await loadDashboard(page);
+    await routeAiShare(page, {
+      // 9,600 AI minutes = 160 hrs × £17.50 = £2,800 — also proves the
+      // thousands separator and the FTE line (160 ÷ 160.7 ≈ 1.0 person).
+      tasks: [task('recAi1', 9600, AGENT, 2), task('recH1', 60, HUMAN, 2)],
+    });
+    await page.evaluate(async () => await loadAiShareKpi());
+
+    const { head, all } = await savedCardText(page);
+    expect(head).toBe('£2,800');
+    expect(all).toMatch(/Doing the work of[\s\S]*?1\.0 of a full-time person/);
+    expect(all).toMatch(/£17\.50\/hr/);   // the rate is published, never implicit
+  });
+
+  test('rolling 30 days and since-go-live are separate windows', async ({ page }) => {
+    await page.addInitScript((pat) => localStorage.setItem('_dlr_pat', pat), MOCK_PAT);
+    await loadDashboard(page);
+    await routeAiShare(page, {
+      // 60 min inside 30 days (£18 headline), another 60 min at 40 days —
+      // outside the rolling window but inside go-live (£35 total).
+      tasks: [task('recAiNow', 60, AGENT, 2), task('recAiOld', 60, AGENT, 40)],
+    });
+    await page.evaluate(async () => await loadAiShareKpi());
+
+    const { head, all } = await savedCardText(page);
+    expect(head).toBe('£18');
+    expect(all).toMatch(/£35 since go-live/);
+  });
+
+  test('work completed before AI go-live never counts, even if fetched', async ({ page }) => {
+    await page.addInitScript((pat) => localStorage.setItem('_dlr_pat', pat), MOCK_PAT);
+    await loadDashboard(page);
+    // 6,000 pre-epoch minutes would add £1,750. The fetch is date-bounded in
+    // production, but the client-side epoch guard is what keeps "since
+    // go-live" honest if that bound is ever widened — so feed the record in
+    // deliberately. Absolute date: immune to the test suite ageing.
+    const preEpoch = task('recAncient', 6000, AGENT, 2);
+    preEpoch.fields[F_DONE] = '2025-01-15T09:00:00.000Z';
+    await routeAiShare(page, { tasks: [task('recAiNow', 60, AGENT, 2), preEpoch] });
+    await page.evaluate(async () => await loadAiShareKpi());
+
+    const { head, all } = await savedCardText(page);
+    expect(head).toBe('£18');
+    expect(all).toMatch(/Labour cost saved since go-live£18/);
+    expect(all).not.toMatch(/£1,768/);   // what including pre-epoch work would print
+  });
+
+  test('work sent back to the agent saves nothing', async ({ page }) => {
+    await page.addInitScript((pat) => localStorage.setItem('_dlr_pat', pat), MOCK_PAT);
+    await loadDashboard(page);
+    const rejected = task('recSentBack', 60, AGENT, 2);
+    rejected.fields[F_OUTCOME] = 'Changes requested';
+    rejected.fields[F_RAISED_BY] = [AGENT];
+    await routeAiShare(page, { tasks: [rejected, task('recH1', 60, HUMAN, 2)] });
+    await page.evaluate(async () => await loadAiShareKpi());
+
+    const { head } = await savedCardText(page);
+    expect(head).toBe('£0');       // Kevin redid it — claiming a saving would be a lie
+    expect(head).not.toBe('£18');
+  });
+
+  test('shows the trend against the 30 days before', async ({ page }) => {
+    await page.addInitScript((pat) => localStorage.setItem('_dlr_pat', pat), MOCK_PAT);
+    await loadDashboard(page);
+    await routeAiShare(page, {
+      // Prior window (30–60 days ago): 120 min = £35. Current: 60 min = £18.
+      tasks: [task('recAiPrior', 120, AGENT, 40), task('recAiNow', 60, AGENT, 2)],
+    });
+    await page.evaluate(async () => await loadAiShareKpi());
+
+    const { all } = await savedCardText(page);
+    expect(all).toMatch(/vs the 30 days before[\s\S]*?£35\s*→\s*£18/);
+  });
+
+  test('says "no data" rather than £0 when the query comes back empty', async ({ page }) => {
+    await page.addInitScript((pat) => localStorage.setItem('_dlr_pat', pat), MOCK_PAT);
+    await loadDashboard(page);
+    await routeAiShare(page, { tasks: [] });
+    await page.evaluate(async () => await loadAiShareKpi());
+
+    const { head } = await savedCardText(page);
+    expect(head).toBe('no data');
+    expect(head).not.toBe('£0');   // an empty query is a broken query, not a zero saving
+  });
+});

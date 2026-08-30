@@ -154,6 +154,99 @@ describe('the diff itself', () => {
       || existsSync(join(box, `drift-exceptions-${r.json.date}.json`))).toBe(true);
   });
 
+  // ADDING SOMETHING CANNOT BREAK SOMETHING ELSE (28 Aug 2026).
+  //
+  // Until this split, ANY schema change exited 1. So one field we had added
+  // ourselves the day before — Tasks.Verdict Reason, already wired into
+  // config.js — turned this job red in the morning digest directly beside
+  // data-invariants reporting a council tax summons 28 days past its hard
+  // deadline. Identical severity, one line apart. An alarm that fires every
+  // time anyone adds a field is an alarm nobody reads, and the one that
+  // mattered had been ignored for four weeks.
+  //
+  // The split is deliberately asymmetric. Additions are the ONLY safe
+  // category, because nothing already written can reference a field that did
+  // not exist. The three below all stay loud, and the last two matter most:
+  // a rename and a retype keep the same id, so every id check in this file
+  // passes while a name-matched formula quietly returns zero rows.
+  describe('an addition is not a break', () => {
+    function evolve(fn) {
+      const before = schema(60);
+      const after = JSON.parse(JSON.stringify(before));
+      fn(after);
+      return { before, after };
+    }
+    function run(before, after, mapAgainst) {
+      ready(mapAgainst || after);
+      writeFileSync(join(box, 'schema-2020-01-01.json'), JSON.stringify(before));
+      return scan(['--schema-file', writeSchema('after.json', after)]);
+    }
+
+    it('a new field alone is ADDITIONS and exits 0', () => {
+      const { before, after } = evolve((a) => {
+        a['tbl00000000000000'].fields['fld00000000000077'] =
+          { name: 'Verdict Reason', type: 'singleSelect' };
+      });
+      const r = run(before, after);
+      expect(r.code).toBe(0);
+      expect(r.json.verdict).toBe('ADDITIONS');
+      expect(r.json.schema_changes.new_fields.join()).toMatch(/Verdict Reason/);
+      expect(r.json.breaking_changes).toEqual([]);
+      // The repo maps it, so the report can say it was deliberate.
+      expect(r.json.additions_already_referenced.join()).toMatch(/Verdict Reason/);
+      // No exceptions file: it is the artefact that means "go and read this".
+      expect(existsSync(join(box, `drift-exceptions-${r.json.date}.json`))).toBe(false);
+    });
+
+    it('a new field nothing references yet is still only ADDITIONS', () => {
+      const { before, after } = evolve((a) => {
+        a['tbl00000000000000'].fields['fld00000000000078'] =
+          { name: 'Someone Elses Field', type: 'singleLineText' };
+      });
+      // Mapped against `before`, so the new id is in neither config nor repo.
+      const r = run(before, after, before);
+      expect(r.code).toBe(0);
+      expect(r.json.verdict).toBe('ADDITIONS');
+      expect(r.json.additions_already_referenced).toEqual([]);
+    });
+
+    it('a removed field alone still exits 1', () => {
+      const { before, after } = evolve((a) => {
+        delete a['tbl00000000000002'].fields['fld00000000000002'];
+      });
+      // Mapped against `after`, so the DEAD-id check cannot be what fires.
+      const r = run(before, after);
+      expect(r.code).toBe(1);
+      expect(r.json.verdict).toBe('DRIFT');
+      expect(r.json.dead_mapped_ids).toEqual([]);
+      expect(r.json.breaking_changes).toContain('removed_fields');
+    });
+
+    it('a rename alone still exits 1 — every id is healthy and it is still a break', () => {
+      const { before, after } = evolve((a) => {
+        a['tbl00000000000003'].fields['fld00000000000003'].name = 'Opening Balance';
+      });
+      const r = run(before, after);
+      expect(r.code).toBe(1);
+      expect(r.json.verdict).toBe('DRIFT');
+      // The point: nothing id-shaped is wrong, which is why this needed saying.
+      expect(r.json.dead_mapped_ids).toEqual([]);
+      expect(r.json.unresolvable_repo_ids).toEqual({});
+      expect(r.json.breaking_changes).toContain('renamed_fields');
+    });
+
+    it('a retype alone still exits 1', () => {
+      const { before, after } = evolve((a) => {
+        a['tbl00000000000004'].fields['fld00000000000004'].type = 'number';
+      });
+      const r = run(before, after);
+      expect(r.code).toBe(1);
+      expect(r.json.verdict).toBe('DRIFT');
+      expect(r.json.dead_mapped_ids).toEqual([]);
+      expect(r.json.breaking_changes).toContain('retyped_fields');
+    });
+  });
+
   it('flags a mapped field that no longer exists upstream as DEAD', () => {
     const s = schema(60);
     const ids = idsFrom(s);

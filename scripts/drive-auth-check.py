@@ -45,6 +45,7 @@ Usage
 import json
 import os
 import sys
+import time
 import urllib.error
 import urllib.request
 
@@ -152,6 +153,99 @@ def save_state(state):
         json.dump(state, f, indent=1)
 
 
+# ── The LOCAL MOUNT half (added 27 Aug 2026) ────────────────────────────────
+#
+# This check reported HEALTHY every morning from 24 to 27 Aug 2026 while the
+# brain was dead. It was not wrong about what it measured; it was measuring the
+# wrong Drive. It asks the Google Drive API whether a folder reads back, and the
+# API was fine. Every job that matters reads the LOCAL CloudStorage mount, and
+# that mount was refusing to open a file from a launchd context with
+# `[Errno 11] Resource deadlock avoided`.
+#
+# The cost: feed-brain, compound-brain and publish-brain deferred and gave up
+# every night for four nights, knowledge-os-sort likewise, and the one check
+# built to notice said HEALTHY throughout. Kevin found out by asking.
+#
+# The probe is IMPORTED from job-queue.py rather than reimplemented, because a
+# second copy is how the health check and the thing it is meant to protect drift
+# into disagreeing — and disagreeing silently is exactly this failure again.
+VAULT = os.path.expanduser(
+    '~/Library/CloudStorage/GoogleDrive-kevin@runpreneur.org.uk/My Drive/00 AI Context')
+
+
+def _drive_ready():
+    """(ok, reason) for the local vault, using job-queue's own probe."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(
+        'jq', os.path.join(os.path.dirname(os.path.abspath(__file__)), 'job-queue.py'))
+    jq = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(jq)
+    return jq.drive_ready(VAULT)
+
+
+# ── ONE FAILED READ IS NOT A VERDICT (29 Aug 2026) ──────────────────────────
+#
+# The probe opened one file once and turned the first
+# `[Errno 11] Resource deadlock avoided` into a whole-day verdict. On 29 Aug at
+# 06:50 it returned BROKEN; at 07:12 the SAME path read 200 bytes with no error.
+# Google Drive File Stream is a FUSE mount that finishes waking some minutes
+# after login, and EDEADLK is what it returns while it is STILL WAKING — "not
+# ready yet", not "broken". Treating the first one as final cost compound-brain
+# and feed-brain the whole of 28 Aug: held BLOCKED from 06:50 and marked MISSED
+# at 11:06, an hour AFTER the mount had cleared at 10:06.
+#
+# So a BROKEN verdict now costs up to ~10 minutes of patience before it alarms.
+#
+# THE OPPOSITE MISTAKE IS THE WORSE ONE, and finding 397 filed it the same day:
+# from 28 Aug 11:06Z to 29 Aug 09:30Z the mount was continuously unreadable and
+# a single spot-check that happened to succeed must NEVER downgrade that to a
+# flap. Patience is therefore bounded, and run() records how long the mount has
+# been unreadable ACROSS runs, so a 22-hour outage cannot wear the face of a
+# cold start.
+VAULT_PROBE_ATTEMPTS = int(os.environ.get('DRIVE_VAULT_PROBE_ATTEMPTS', '5'))
+VAULT_PROBE_GAP_SECONDS = float(os.environ.get('DRIVE_VAULT_PROBE_GAP', '150'))
+
+
+def _sleep(seconds):
+    """Named so a test can replace it; time.sleep cannot be stubbed in place."""
+    time.sleep(seconds)
+
+
+def check_vault():
+    """Judge the local mount. Returns (verdict, reason, attempts).
+
+    A probe that itself blows up is UNKNOWN, never HEALTHY: an unreadable
+    control must not read as a pass. A probe that fails once and then succeeds
+    is HEALTHY, and says so — a mount that was merely slow to wake is not an
+    outage, and calling it one loses the brain jobs a day.
+    """
+    attempts = max(1, VAULT_PROBE_ATTEMPTS)
+    why = 'the probe never ran'
+    for attempt in range(1, attempts + 1):
+        try:
+            ok, why = _drive_ready()
+        except Exception as e:                               # noqa: BLE001
+            return (UNKNOWN,
+                    f'could not probe the local vault ({type(e).__name__}: {e})',
+                    attempt)
+        if ok:
+            if attempt == 1:
+                return HEALTHY, 'local vault readable', attempt
+            return (HEALTHY,
+                    f'local vault readable, but only on attempt {attempt} of '
+                    f'{attempts} — the mount was still waking, not broken',
+                    attempt)
+        if attempt < attempts:
+            _sleep(VAULT_PROBE_GAP_SECONDS)
+    waited = round(VAULT_PROBE_GAP_SECONDS * (attempts - 1) / 60)
+    return BROKEN, (
+        f'the local Drive mount is NOT readable after {attempts} attempts over '
+        f'~{waited} minutes ({why}). Every job that reads the '
+        f'brain vault will defer and give up: feed-brain, compound-brain, '
+        f'publish-brain, knowledge-os-sort. The Drive API can be fine while this '
+        f'is broken, and on 24-27 Aug 2026 it was.'), attempts
+
+
 def fetch():
     req = urllib.request.Request(TEST_URL, headers=HEADERS)
     try:
@@ -163,12 +257,59 @@ def fetch():
         return None, f'{type(e).__name__}: {e}'
 
 
+def _iso_now():
+    return time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
+
+
+def _hours_since(stamp):
+    """Hours between an ISO-Z stamp and now. A stamp we cannot parse reads as 0,
+    never as a huge number: an unreadable clock must not invent an outage."""
+    try:
+        t = time.strptime(stamp, '%Y-%m-%dT%H:%M:%SZ')
+    except (TypeError, ValueError):
+        return 0.0
+    import calendar
+    return max(0.0, (time.time() - calendar.timegm(t)) / 3600.0)
+
+
 def run():
     status_code, body = fetch()
-    verdict, reason = classify(status_code, body)
+    api_verdict, api_reason = classify(status_code, body)
+    vault_verdict, vault_reason, vault_attempts = check_vault()
 
     state = load_state()
     gate_streak = state.get('consecutive_gate', 0)
+
+    # HOW LONG, not just whether (finding 397, 29 Aug 2026). A single verdict
+    # cannot tell a cold-start flap from a 22-hour outage, and on 28-29 Aug the
+    # two were confused in both directions on the same day. The first run that
+    # sees an unreadable mount stamps the clock; every later run reports the
+    # elapsed hours until a HEALTHY read clears it.
+    broken_since = state.get('vault_broken_since')
+    if vault_verdict == HEALTHY:
+        broken_since = None
+        vault_broken_hours = 0.0
+    else:
+        broken_since = broken_since or _iso_now()
+        vault_broken_hours = _hours_since(broken_since)
+        if vault_broken_hours >= 2:
+            vault_reason += (
+                f' The mount has now been unreadable for {vault_broken_hours:.1f} '
+                f'hours (since {broken_since}). This is an OUTAGE, not a cold start.')
+    state['vault_broken_since'] = broken_since
+
+    # WORST OF THE TWO WINS, and the reason NAMES the half that failed.
+    # A score graded all-or-nothing across several things, with no record of
+    # which one missed, cannot be acted on — the same lesson as the recon
+    # accuracy card. So the verdict is the worse of the two and the reason
+    # always says whether it was the API or the mount.
+    RANK = {HEALTHY: 0, GATE: 1, UNKNOWN: 2, BROKEN: 3}
+    if RANK[vault_verdict] > RANK[api_verdict]:
+        verdict, reason = vault_verdict, 'local mount: ' + vault_reason
+    else:
+        verdict, reason = api_verdict, 'Drive API: ' + api_reason
+        if vault_verdict != HEALTHY:
+            reason += f' | local mount: {vault_reason}'
 
     if verdict == GATE:
         gate_streak += 1
@@ -193,6 +334,11 @@ def run():
         'verdict': verdict,
         'reason': reason,
         'http_status': status_code,
+        'api_verdict': api_verdict,
+        'vault_verdict': vault_verdict,
+        'vault_reason': vault_reason,
+        'vault_attempts': vault_attempts,
+        'vault_broken_hours': round(vault_broken_hours, 2),
         'alert_kevin': verdict in (BROKEN, UNKNOWN),
         'consecutive_gate': gate_streak,
         'raw': body[:600],

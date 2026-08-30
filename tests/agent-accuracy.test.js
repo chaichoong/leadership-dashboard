@@ -11,12 +11,19 @@ const { computeAgentAccuracy, agentAutonomyRecommendations, THRESHOLD, countAgen
 
 // Seeded decisions. `at` counts DOWN so index 0 is the newest, which is what
 // the "last 10" window depends on.
+// One decision every TWO DAYS, newest first. The spacing is load-bearing:
+// since 28 Aug 2026 the bar also requires the sample to span 30 days (Kevin's
+// ruling, after the first agent to clear it turned out to have done all 26 of
+// its decisions inside three days). At one an hour these fixtures spanned less
+// than a day and would fail the bar for a reason none of them is testing.
+// The 30-day rule itself is covered by tests/autonomy-30-days.test.js.
+const SEED_STEP_MS = 2 * 24 * 3600e3;
 function seed(agentId, taskType, outcomes) {
   return outcomes.map((outcome, i) => ({
     agentId,
     taskType,
     outcome,
-    at: new Date(Date.UTC(2026, 6, 31, 12, 0, 0) - i * 3600e3).toISOString(),
+    at: new Date(Date.UTC(2026, 6, 31, 12, 0, 0) - i * SEED_STEP_MS).toISOString(),
   }));
 }
 const APPROVE = 'Approved as-is';
@@ -142,5 +149,115 @@ describe('countAgents — one agent, one count, across two populations', () => {
   it('degrades safely on empty and missing inputs', () => {
     expect(countAgents([], []).live).toBe(0);
     expect(countAgents(null, null).live).toBe(0);
+  });
+});
+
+// ── THE QUALITY / RELEVANCE SPLIT (27 Aug 2026) ────────────────────────────
+//
+// Measured live that day across all 175 decisions Kevin had made: of his 58
+// rejections, NOT ONE said the draft was wrong. Every one said the task should
+// not have existed — already handled, Roy's, too trivial, duplicate, stale.
+// Blended accuracy read 66.9%; on the drafts anyone had actually judged AS
+// drafts it was 96.7%.
+//
+// The consequence was not cosmetic. Guardrail bands tighten AUTOMATICALLY on
+// this number, so agents were being restricted for a failure upstream of them.
+const { relevanceScore, isRelevanceFailure, RELEVANCE_REASONS, QUALITY_REASON } =
+  require(resolve(ROOT, 'js/agent-accuracy.js'));
+
+describe('a rejection is not automatically a mark against the writer', () => {
+  // Two days apart, so a 22-item fixture spans 42 days and clears the 30-day
+  // rule added 28 Aug 2026. Ordering is unchanged — i still increases with
+  // time, so the last item is still the newest and lands in the recent-10.
+  const dated = (i) => new Date(Date.UTC(2026, 5, 1) + i * 2 * 24 * 3600e3).toISOString();
+  const rows = (items) => computeAgentAccuracy(
+    items.map((x, i) => ({ agentId: 'recW', taskType: 'Correspondence', at: dated(i), ...x })),
+    { recW: 'Writer' })[0];
+
+  it('a relevance rejection leaves the draft-quality bucket entirely', () => {
+    const r = rows([
+      { outcome: 'Approved as-is' },
+      { outcome: 'Rejected', reason: 'Roy owns it' },
+    ]);
+    // Not counted as accurate AND not counted in the total. Leaving it in the
+    // denominator would still halve the rate, which is the bug.
+    expect(r.total).toBe(1);
+    expect(r.accurate).toBe(1);
+    expect(r.rate).toBe(1);
+    expect(r.relevanceFailures).toBe(1);
+  });
+
+  it('"The work is wrong" still counts, or nothing ever does', () => {
+    const r = rows([
+      { outcome: 'Approved as-is' },
+      { outcome: 'Rejected', reason: QUALITY_REASON },
+    ]);
+    expect(r.total).toBe(2);
+    expect(r.accurate).toBe(1);
+    expect(r.rate).toBe(0.5);
+    expect(r.relevanceFailures).toBe(0);
+  });
+
+  it('every relevance reason is treated the same way', () => {
+    RELEVANCE_REASONS.forEach((reason) => {
+      expect(isRelevanceFailure({ outcome: 'Rejected', reason }), reason).toBe(true);
+    });
+    expect(isRelevanceFailure({ outcome: 'Rejected', reason: QUALITY_REASON })).toBe(false);
+    // An APPROVAL carrying a reason is not a rejection, whatever the reason says.
+    expect(isRelevanceFailure({ outcome: 'Approved as-is', reason: 'Roy owns it' })).toBe(false);
+  });
+
+  it('a relevance rejection does not block the bar through the recent-10 clause', () => {
+    // This is what was blocking Writer/Correspondence: 95% over 22 decisions,
+    // held back for ever by ONE rejection that was a relevance failure.
+    const items = Array(21).fill({ outcome: 'Approved as-is' })
+      .concat([{ outcome: 'Rejected', reason: 'Already done elsewhere' }]);
+    const r = rows(items);
+    expect(r.recentRejections).toBe(0);
+    expect(r.total).toBe(21);
+    expect(r.ready, 'a task that should not have existed must not gate autonomy').toBe(true);
+  });
+
+  it('a QUALITY rejection still blocks the bar', () => {
+    const items = Array(21).fill({ outcome: 'Approved as-is' })
+      .concat([{ outcome: 'Rejected', reason: QUALITY_REASON }]);
+    // Newest first: the quality rejection is dated last, so it lands in recent.
+    expect(rows(items).ready).toBe(false);
+  });
+
+  it('history with no reason is counted the old way, and SAID so', () => {
+    // Every decision before 27 Aug 2026 has no reason and nothing may guess one
+    // on Kevin's behalf — he is the only one who can tell a rule from a one-off.
+    // So the old behaviour stands, and the count makes that visible rather than
+    // letting the score quietly look better than the evidence supports.
+    const r = rows([{ outcome: 'Approved as-is' }, { outcome: 'Rejected' }]);
+    expect(r.total).toBe(2);
+    expect(r.rate).toBe(0.5);
+    expect(r.unclassifiedRejections).toBe(1);
+    expect(r.relevanceFailures).toBe(0);
+  });
+});
+
+describe('relevance is its own score, owned by whatever created the task', () => {
+  it('measures against classified decisions only', () => {
+    const s = relevanceScore([
+      { outcome: 'Approved as-is' },
+      { outcome: 'Rejected', reason: 'Duplicate' },
+      { outcome: 'Rejected' },                       // unknown, not a pass
+    ]);
+    expect(s.decisions).toBe(3);
+    expect(s.classified).toBe(2);
+    expect(s.relevanceFailures).toBe(1);
+    expect(s.rate).toBe(0.5);
+  });
+
+  it('is 100% when nothing was rejected for existing', () => {
+    expect(relevanceScore([{ outcome: 'Approved as-is' },
+                           { outcome: 'Rejected', reason: QUALITY_REASON }]).rate).toBe(1);
+  });
+
+  it('does not divide by zero on an empty history', () => {
+    expect(relevanceScore([]).rate).toBe(0);
+    expect(relevanceScore(null).decisions).toBe(0);
   });
 });

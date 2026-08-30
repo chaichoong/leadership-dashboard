@@ -104,9 +104,16 @@ const AF = {
     // future run. Feedback History is the durable archive, because
     // approvalFeedback is cleared by the next submit.
     rememberThis:    'fldZurhdHutYIDKVx',
+    // Why he decided as he did — see AF.verdictReason in agent-dispatch.py.
+    verdictReason:   'fldF9Bs4N5mttQvtl',
     feedbackHistory: 'fldOzsq68lhfprKJu',
     slackTs:         'fldHTaX3wP9VhD5Oz',
     slackBaseline:   'fldxsqj9JSRBGNyT9',
+    // Knocked back to a date (28 Aug 2026). Kevin's example: a confirmation
+    // statement he cannot file until an authentication code arrives in the
+    // post. Approving is wrong, rejecting is wrong, and leaving it posted here
+    // for a week is the nag he asked us to stop.
+    deferredUntil:   'fldJ9IHS1yxwYzYSN',
 };
 
 // Emoji names are workspace-specific: this workspace's picker calls ✅
@@ -404,6 +411,7 @@ function taskView(rec) {
         agentId: linkIds(f[AF.sentForApprovalBy])[0] || linkIds(f[AF.teamMember])[0] || '',
         approverEmail: ((f[AF.approver] || {}).email) || '',
         feedbackHistory: f[AF.feedbackHistory] || '',
+        deferredUntil: String(f[AF.deferredUntil] || '').slice(0, 10),
     };
 }
 
@@ -593,7 +601,15 @@ function buildApprovalBlocks(t, agent, warn) {
             type: 'mrkdwn',
             text: 'Nothing has been sent, filed or actioned yet.\n'
                 + ':white_check_mark:  *approve* — the agent goes and does it, then closes the task\n'
-                + ':x:  *reject* — kill this piece of work entirely, it should not happen. Counts against the agent\n'
+                + ':x:  *reject* — kill this piece of work entirely, it should not happen\n'
+                // The web queue asks WHY with seven chips. Slack has no chips,
+                // so one word at the start of the reply is the equivalent — and
+                // it decides whether the agent is scored down for it, exactly
+                // as the chip does. Advertised HERE because a shortcut nobody
+                // is told about is a shortcut nobody uses.
+                + '       _with a reply starting_ `done` `roy` `noise` `dupe` `park` `stale` — '
+                + 'the task should not have reached you, and the agent is not marked down\n'
+                + '       _or_ `wrong` — the draft itself is bad. That one does count against it\n'
                 + ':brain:  *reject and remember* — same as reject, but reply with the reason and '
                 + 'the agent keeps it as a standing rule so it stops raising these\n'
                 + ':speech_balloon:  *changes* — just reply in this thread with what to change. No emoji needed. '
@@ -614,8 +630,18 @@ function buildApprovalBlocks(t, agent, warn) {
     return blocks;
 }
 
+// The date clause is what makes a knock-back come back on its own. Nothing
+// schedules the return: this query simply stops matching while the date is in
+// the future, and starts matching again the morning it is not — at which point
+// the task has no Slack timestamp (the dashboard cleared it, and the reconcile
+// phase below clears it for anything deferred after it was posted), so a fresh
+// card goes out as if it had just arrived. A job that has to remember to
+// un-park something is a job that can forget; this one has nothing to
+// remember. Mirrors APV_QUEUE_FORMULA in os/agents/index.html.
+const NOT_DEFERRED = `NOT(IS_AFTER({Deferred Until}, TODAY()))`;
+
 async function postPending(env, channels, log) {
-    const recs = await queryTasks(env, `AND({Status}='Approval', LEN({Approval Slack TS}&'')=0)`, MAX_POSTS_PER_RUN);
+    const recs = await queryTasks(env, `AND({Status}='Approval', LEN({Approval Slack TS}&'')=0, ${NOT_DEFERRED})`, MAX_POSTS_PER_RUN);
     for (const rec of recs) {
         const t = taskView(rec);
         const agent = await agentName(env, t.agentId);
@@ -683,9 +709,52 @@ async function threadReply(env, channel, ts, text) {
 
 // Apply the approver's verdict. Same semantics as the task drawer: approve
 // hands the task BACK to the agent (due today) to carry the action out; reject
+// ─── THE SAME REASONS AS THE PAGE, AS ONE WORD ──────────────────────
+//
+// The web queue asks WHY with seven chips (os/agents/index.html, 27 Aug 2026),
+// because all 58 rejections Kevin had ever made were classified that day and
+// not one was about the draft — every one was about the task existing. Slack
+// has no chips, so the equivalent is a thread reply that STARTS with one of
+// these words, exactly as ":brain:" is the Slack equivalent of the remember
+// tickbox.
+//
+// This is matching, not inferring. The word is one Kevin chose to type, the
+// same act as tapping a chip. A reply that starts with none of them records NO
+// reason rather than a guessed one — an unclassified rejection still counts
+// against the agent, and the accuracy report says how many there are, which is
+// honest. A guessed reason would not be.
+//
+// Keys MUST stay identical to APV_REASONS in os/agents/index.html and to
+// RELEVANCE_REASONS in js/agent-accuracy.js.
+const SLACK_REASON_WORDS = [
+    [/^done\b[:,.\s-]*/i,     'Already done elsewhere'],
+    [/^roy\b[:,.\s-]*/i,      'Roy owns it'],
+    [/^noise\b[:,.\s-]*/i,    'Not worth my attention'],
+    [/^dupe\b[:,.\s-]*/i,     'Duplicate'],
+    [/^park\b[:,.\s-]*/i,     'Parked for now'],
+    [/^stale\b[:,.\s-]*/i,    'No longer relevant'],
+    [/^wrong\b[:,.\s-]*/i,    'The work is wrong'],
+];
+
+/** Split a leading reason word off a thread reply.
+ *  → { reason, note }. reason is '' when the reply names none. */
+export function splitReason(text) {
+    const raw = String(text || '').trim();
+    for (const [re, reason] of SLACK_REASON_WORDS) {
+        const m = raw.match(re);
+        if (m) {
+            const rest = raw.slice(m[0].length).trim();
+            // A bare word is a complete instruction: the page fills the sentence
+            // from the chip, so Slack must not demand more typing than the page.
+            return { reason, note: rest };
+        }
+    }
+    return { reason: '', note: raw };
+}
+
 // closes it. Nothing here ever marks approved work Completed — that is the
 // agent's job, after it has actually done the thing.
-async function applyDecision(env, t, outcome, decidedVia, note, approver, remember) {
+async function applyDecision(env, t, outcome, decidedVia, note, approver, remember, reason) {
     approver = approver || APPROVERS.kevin;
     const now = new Date().toISOString();
     const fields = {
@@ -715,6 +784,9 @@ async function applyDecision(env, t, outcome, decidedVia, note, approver, rememb
     // comments either. Without this the whole point of an amendment — telling
     // the agent what to change — would be lost.
     if (note) fields[AF.approvalFeedback] = note;
+    // WHY, recorded as data. Without it a reject from the phone degrades the
+    // score in a way a reject from the desk no longer does.
+    if (reason) fields[AF.verdictReason] = reason;
     // The durable copy. approvalFeedback is cleared by the next submit, so
     // without this the words that caused a redo are gone within the hour and
     // the lesson writer has nothing left to read.
@@ -735,7 +807,10 @@ async function applyDecision(env, t, outcome, decidedVia, note, approver, rememb
     await airtable(env, 'PATCH', `/${TABLE_TASKS}/${t.id}`, { fields, typecast: true });
     const agent = await agentName(env, t.agentId);
     const line = outcome === 'Rejected'
-        ? `Rejected by ${approver.name} ${decidedVia}. Closed, and counted against ${agent || 'the agent'}.`
+        ? `Rejected by ${approver.name} ${decidedVia}. Closed`
+              + (reason && reason !== 'The work is wrong'
+                  ? `. Not counted against ${agent || 'the agent'} — the task should not have reached you (${reason.toLowerCase()}).`
+                  : `, and counted against ${agent || 'the agent'}.`)
               + (remember && note ? ` ${agent || 'The agent'} will remember your reason from now on.` : '')
               + (note ? `\n\nReason: ${note}` : '')
         : outcome === 'Changes requested'
@@ -857,9 +932,14 @@ async function processResponses(env, channels, log) {
         const staleNote = (isStale(t) && outcome === 'Changes requested')
             ? '\n\n(The task had changed since I posted it, so read the current version before redoing it.)'
             : '';
+        // Only a REJECT carries a reason. On an approve or an amendment the
+        // leading word is just the first word of Kevin's sentence, and eating
+        // it would silently change what the agent is told to do.
+        const parsed = outcome === 'Rejected' ? splitReason(note) : { reason: '', note };
+        const finalNote = parsed.note ? parsed.note + staleNote : staleNote.trim();
         const line = await applyDecision(env, t, outcome, 'in Slack',
-            note ? note + staleNote : staleNote.trim(), approver,
-            !!(reaction && reaction.remember));
+            finalNote, approver,
+            !!(reaction && reaction.remember), parsed.reason);
         await threadReply(env, channel, t.ts,
             outcome === 'Changes requested'
                 ? `:writing_hand: Sent back with your notes. ${esc(line.split('\n')[0])}`
@@ -874,19 +954,32 @@ async function processResponses(env, channels, log) {
 // The approver decided in the dashboard while a Slack message was still live.
 // Close the thread so the conversation never shows a stale "waiting" post, and
 // clear the timestamp — which is also what stops this running twice on a task.
+//
+// A knock-back rides the same path, and belongs here rather than in a phase of
+// its own: it is the same event — this stopped being a live ask somewhere else
+// — and the same two writes fix it. The only difference is what the thread is
+// told and the fact that the task is coming BACK, which the cleared timestamp
+// arranges by itself the day postPending's date clause starts matching again.
 async function reconcileDecidedElsewhere(env, channels, log) {
-    const recs = await queryTasks(env, `AND({Status}!='Approval', LEN({Approval Slack TS}&'')>0)`, MAX_RECONCILES_PER_RUN);
+    const recs = await queryTasks(env,
+        `AND(LEN({Approval Slack TS}&'')>0, OR({Status}!='Approval', IS_AFTER({Deferred Until}, TODAY())))`,
+        MAX_RECONCILES_PER_RUN);
     for (const rec of recs) {
         const t = taskView(rec);
         const approver = approverFor(t, isTier1Task(t));
         const channel = await resolveChannelFor(env, approver, channels, log);
+        // Deferred is checked FIRST: a task can be both at Status Approval and
+        // knocked back, and "left the approval queue" would be the wrong story
+        // for something that is due back on a known date.
+        const deferred = t.status === 'Approval' && t.deferredUntil;
         await threadReply(env, channel, t.ts,
-            t.outcome ? `:heavy_check_mark: Decided in the dashboard: *${t.outcome}*.`
-                      : `:information_source: This task left the approval queue in the dashboard.`);
+            deferred ? `:alarm_clock: Knocked back until *${t.deferredUntil}*. Nothing approved, nothing sent — it comes back to you here that morning.`
+                     : t.outcome ? `:heavy_check_mark: Decided in the dashboard: *${t.outcome}*.`
+                                 : `:information_source: This task left the approval queue in the dashboard.`);
         await airtable(env, 'PATCH', `/${TABLE_TASKS}/${t.id}`, {
             fields: { [AF.slackTs]: '', [AF.slackBaseline]: '' }, typecast: true,
         });
-        log.push(`closed thread for ${t.id}`);
+        log.push(deferred ? `deferred ${t.id} to ${t.deferredUntil}` : `closed thread for ${t.id}`);
     }
     return recs.length;
 }

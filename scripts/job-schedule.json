@@ -25,6 +25,14 @@
     "ready. A drive probe READS A BYTE: an unmounted Drive folder still exists and still",
     "lists, and only fails on open with 'Resource deadlock avoided'.",
     "",
+    "27 Aug 2026: that check runs BEFORE the lock wait, on purpose, so a job waiting for the",
+    "network does not hold the queue shut. But the wait is unbounded, and the thing that causes",
+    "a long wait here is the Mac sleeping, which is also what kills the network. handback-poll",
+    "queued at 08:30 with the network up, waited 43 minutes, took the lock the instant the Mac",
+    "woke, and died on DNS. acquire() now RE-PROBES after a wait longer than 60s and DEFERS",
+    "instead of failing. The same shape had already hit compound-brain, publish-brain,",
+    "masterplan-sync and daily-ops-guard.",
+    "",
     "8 Aug 2026: the fourteen Claude routines were absorbed into one, `daily-ops`.",
     "Serialising them behind a lock stopped them overwriting each other, then created a",
     "worse failure: a routine suspended by the Mac sleeping keeps HOLDING the lock.",
@@ -193,7 +201,8 @@
     "mode": "wrapped",
     "needs": [
       "network"
-    ]
+    ],
+    "retryWhenDeferred": true
   },
   "audiobook-morning-report": {
     "cron": "0 8 * * *",
@@ -204,14 +213,16 @@
     ]
   },
   "knowledge-os-sort": {
+    "note": "Drive-gated. maxLateMinutes raised 480 -> 600 on 29 Aug 2026 (findings 394/397) for the same reason as the three brain jobs: a morning mount flap must not cost the day. 09:00 + 600 reaches 19:00, still the same working day.",
     "cron": "0 9 * * *",
-    "maxLateMinutes": 480,
+    "maxLateMinutes": 600,
     "mode": "wrapped",
     "needs": [
       {
         "drive": "~/Library/CloudStorage/GoogleDrive-kevin@runpreneur.org.uk/My Drive/00 AI Context"
       }
-    ]
+    ],
+    "retryWhenDeferred": true
   },
   "uc-notifier-watchdog": {
     "cron": "0 9 * * *",
@@ -232,37 +243,43 @@
     ]
   },
   "feed-brain": {
+    "note": "Drive-gated. maxLateMinutes raised 29 Aug 2026 (findings 394/397): a morning Drive-mount flap used to cost the whole day. feed/compound/publish fire at 22:45-23:20, so 720 min expired at ~11:00 \u2014 on 28 Aug the mount cleared at 10:06 and they were marked MISSED at 11:06 anyway. 960 carries them to mid-afternoon, which is still worth doing; beyond that they would collide with the next night's run, so the window stops there rather than becoming never-skipped.",
     "cron": "45 22 * * *",
-    "maxLateMinutes": 300,
+    "maxLateMinutes": 960,
     "mode": "wrapped",
     "needs": [
       "network",
       {
         "drive": "~/Library/CloudStorage/GoogleDrive-kevin@runpreneur.org.uk/My Drive/00 AI Context"
       }
-    ]
+    ],
+    "retryWhenDeferred": true
   },
   "compound-brain": {
+    "note": "Drive-gated. maxLateMinutes raised 29 Aug 2026 (findings 394/397): a morning Drive-mount flap used to cost the whole day. feed/compound/publish fire at 22:45-23:20, so 720 min expired at ~11:00 \u2014 on 28 Aug the mount cleared at 10:06 and they were marked MISSED at 11:06 anyway. 960 carries them to mid-afternoon, which is still worth doing; beyond that they would collide with the next night's run, so the window stops there rather than becoming never-skipped.",
     "cron": "0 23 * * *",
-    "maxLateMinutes": 300,
+    "maxLateMinutes": 960,
     "mode": "wrapped",
     "needs": [
       "network",
       {
         "drive": "~/Library/CloudStorage/GoogleDrive-kevin@runpreneur.org.uk/My Drive/00 AI Context"
       }
-    ]
+    ],
+    "retryWhenDeferred": true
   },
   "publish-brain": {
+    "note": "Drive-gated. maxLateMinutes raised 29 Aug 2026 (findings 394/397): a morning Drive-mount flap used to cost the whole day. feed/compound/publish fire at 22:45-23:20, so 720 min expired at ~11:00 \u2014 on 28 Aug the mount cleared at 10:06 and they were marked MISSED at 11:06 anyway. 960 carries them to mid-afternoon, which is still worth doing; beyond that they would collide with the next night's run, so the window stops there rather than becoming never-skipped.",
     "cron": "20 23 * * *",
-    "maxLateMinutes": 300,
+    "maxLateMinutes": 960,
     "mode": "wrapped",
     "needs": [
       "network",
       {
         "drive": "~/Library/CloudStorage/GoogleDrive-kevin@runpreneur.org.uk/My Drive/00 AI Context"
       }
-    ]
+    ],
+    "retryWhenDeferred": true
   },
   "audiobook-backfill": {
     "cron": "0 0 * * *",
@@ -305,7 +322,8 @@
     "maxLateMinutes": 600,
     "mode": "wrapped",
     "queued": false,
-    "note": "alarms if daily-ops left no phase-1 mark by 08:00 London \u2014 the scheduler stamped lastRunAt on 15 Aug 2026 while delivering the run to no session, so only the mark counts. Reports on the routine, so it must never wait behind anything. London gate lives in the code, not this cron (Mac timezone moves with Kevin)."
+    "note": "alarms if daily-ops left no phase-1 mark by 08:00 London \u2014 the scheduler stamped lastRunAt on 15 Aug 2026 while delivering the run to no session, so only the mark counts. Reports on the routine, so it must never wait behind anything. London gate lives in the code, not this cron (Mac timezone moves with Kevin).",
+    "retryWhenDeferred": true
   },
   "inbound-triage": {
     "cron": "0 9,13,17 * * *",
@@ -323,7 +341,9 @@
     "note": "Kevin's restructure of 26 Aug 2026: role-specific work leaves the daily-ops sequence and runs as its own slot. A wrapped shell job, so it takes the lock and heartbeats \u2014 a slot, never a second Claude routine. Allowlisted in scripts/check-routines.py. CEO huddle plus the memory sweep of YESTERDAY, early so the 09:00 CEO brief always has its input \u2014 the old phase-2 slot inside a run that reached 6h43 on 26 Aug put that deadline at risk. Weekend hard stop lives in the skill, not the cron (never express a weekday in a cron).",
     "needs": [
       "network",
-      "drive"
+      {
+        "drive": "~/Library/CloudStorage/GoogleDrive-kevin@runpreneur.org.uk/My Drive/00 AI Context"
+      }
     ]
   },
   "uc-check": {
@@ -398,5 +418,31 @@
     "needs": [
       "network"
     ]
+  },
+  "retry-deferred": {
+    "cron": "20 * * * *",
+    "maxLateMinutes": 45,
+    "mode": "wrapped",
+    "queued": false,
+    "note": "Added 27 Aug 2026. launchd fires a job once; if the machine is not ready the queue DEFERS, and until this existed nothing ever came back, so a defer was a lost day and maxLateMinutes allowed lateness nothing could use. The brain went four days unfed that way (24-27 Aug), Drive being unreadable from a sleeping Mac at 22:45 every night. Hourly at :20, OUTSIDE the queue on purpose - it exists to rescue jobs the queue turned away, so waiting behind a stuck routine would stop it doing the one thing it is for. Only re-fires jobs carrying retryWhenDeferred, and REPORTS any other job that deferred rather than silently passing over it."
+  },
+  "mcp-inventory": {
+    "cron": "10 6 * * *",
+    "maxLateMinutes": 600,
+    "mode": "wrapped",
+    "note": "Regenerates js/mcp-tools-data.js, the Tools & Connections list on the AI Agents page, from the real MCP configuration (28 Aug 2026). A pure read of local config files plus one `claude mcp list` health check; no AI, no judgement, nothing written outside the repo. Every source has a floor and the run FAILS rather than writing a shorter list, because a list that quietly shrank would read as a smaller estate instead of a broken read. maxLateMinutes is deliberately huge: this Mac sleeps, and the first manual run SKIPPED at 249 minutes late under the original 240. An inventory of what we are connected to is just as true at 4pm as at 6am, so a late refresh beats no refresh. Runs with --publish: when the list genuinely changes it opens a PR carrying the one file, assembled with git plumbing against a throwaway index so it can never disturb another session's uncommitted work in this shared checkout. It never pushes to main. Before publishing it runs the list's own data-shape tests against the candidate and merges only if they pass; a failure leaves the PR open and exits non-zero so the digest catches it.",
+    "needs": [
+      "network"
+    ]
+  },
+  "signature-watch": {
+    "cron": "20 9,12,15,18 * * *",
+    "maxLateMinutes": 240,
+    "mode": "wrapped",
+    "note": "Polls Adobe for documents that have come back signed and files the signed PDF for Kevin's second approval. Four times a day: a signature can land at any hour and the poll costs nothing when nothing is registered, because it exits before opening a browser. Generous lateness on purpose \u2014 a signed document is still worth picking up late. NO day-of-week: people sign at weekends.",
+    "needs": [
+      "network"
+    ],
+    "enabled": true
   }
 }

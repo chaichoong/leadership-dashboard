@@ -335,8 +335,8 @@ The overnight scripts have already run. **You are reading their results, not red
 Run this as one subagent with the prompt: "Read the results of this morning's three script jobs and report what needs a human decision. Do NOT re-run work that passed. You are read-only with respect to code; file findings via scripts/findings.py. Do not take the queue lock. Return at most ten lines."
 
 **1. Drift scan** — `python3 scripts/drift-scan.py --json` already ran at 06:20.
-   - Exit 0: clean. One line, move on.
-   - Exit 1: read `monitoring/drift-exceptions-{date}.json`. Judge each change. A new table with no repo consumers is usually expected and needs nothing. A **removed** or **retyped** field that config.js maps is a live break — file it high. A renamed field is the dangerous quiet one: sub-category names are load-bearing in the P&L and Wealth code.
+   - Exit 0: nothing that can break. Two verdicts land here. `CLEAN` means nothing moved. `ADDITIONS` means new tables or fields appeared and nothing else did — that cannot break anything, because no code already written can reference a field that did not exist until today. One line, move on; the report already names them and says which the repo references.
+   - Exit 1: read `monitoring/drift-exceptions-{date}.json`. Since 28 Aug 2026 this fires ONLY for changes that can break something, so treat every one as real. A **removed** or **retyped** field that config.js maps is a live break — file it high. A renamed field is the dangerous quiet one: it keeps the same field id, so every id check in the scan passes while a name-matched `filterByFormula` silently returns zero rows, and sub-category names are load-bearing in the P&L and Wealth code.
    - Exit 2: **CANNOT VERIFY.** Do not read this as clean. Report it on the BROKEN line.
 
 **2. Data invariants** — `scripts/check-data-invariants.py` already ran at 06:40.
@@ -367,9 +367,21 @@ Follow `~/.claude/scheduled-tasks/queue-fixer/SKILL.md`, with these changes:
 
 **Close findings honestly.** A fix that is written but sitting in an open PR is `--outcome pending --pr <n>`, NOT `--outcome fixed`. On 26 Aug 2026 four fixer PRs (#107, #110, #126, #137) were all open and unmerged while forty findings sat closed as "fixed" citing them — the queue was reporting work as done that had never reached production. When a PR merges, `python3 scripts/findings.py land --pr <n>` turns its pending findings into fixed.
 
-**Before you open a new PR, check the old ones.** If three or more fixer PRs are open and unmerged, do NOT open a fourth. Say so at the top of the report as the one thing Kevin must do, because until he merges them the fix queue has a drain rate of zero and everything you write today is theatre.
+**Before you open a new PR, check the old ones.** Since 29 Aug 2026 the fixer merges its own
+green work, so an open fixer PR now means one of two things and the report must say which: the
+gate went RED, or it touched a protected path and is waiting for Kevin. If three or more are
+open, do NOT open a fourth — that is the drain failing again, and only he can clear it.
 
-Cap at ten findings, one pull request, and do NOT merge it. Kevin reviews.
+Cap at **25** findings and one pull request, then **merge it through the gate**:
+
+```
+python3 scripts/fixer-merge.py merge --pr <n>
+```
+
+Kevin's ruling, 29 Aug 2026. He was the drain — 213 open findings against a cap of ten — and the
+gate is stricter than his glance: full vitest AND browser suite, and an outright refusal on
+money, auth, the approval loop, the send path, shared files and the workers. Those stay open and
+go on NEEDS YOU. A red gate leaves the PR open and merges nothing.
 
 ## Phase 5 — Report
 

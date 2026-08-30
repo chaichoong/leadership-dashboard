@@ -119,7 +119,7 @@ RC=$?
 # on stderr), and never quarantines the drift scanner's schema snapshots
 # (schema-YYYY-MM-DD.json), which false-positived on 25 and 26 Aug 2026.
 "$REPO/scripts/slot-postrun.sh" "$JOB slot" "$RC" "$LOG" "$__START_LINE" "$__MARKER" "$SCRATCH" \
-  '"description":|Inbound Message Content|CREDITOR MATTER' \
+  '"description" *:|"Inbound Message Content" *:|CREDITOR MATTER' \
   'HTTP Error 401|401 Unauthorized|Unauthorized|OAuth access token has expired|BROKEN|VERIFY FAIL'
 __FINAL=$?
 __POSTRUN_DONE=1
