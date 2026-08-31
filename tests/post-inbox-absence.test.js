@@ -22,10 +22,18 @@ const SCRIPT = resolve(__dirname, '../scripts/post-inbox-absence.py');
 const DAY = 86400;
 
 // Build a Post Inbox whose Processed folder holds one PDF aged `daysAgo`.
-function inbox({ processed = true, pdfs = [], base = true } = {}) {
+function inbox({ processed = true, pdfs = [], base = true, rootPdfs = [] } = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'postinbox-'));
   const root = join(dir, 'Post Inbox');
   if (base) mkdirSync(root, { recursive: true });
+  if (base) {
+    const now = Date.now() / 1000;
+    for (const { name, daysAgo } of rootPdfs) {
+      const f = join(root, name);
+      writeFileSync(f, '%PDF-1.4\n');
+      utimesSync(f, now - daysAgo * DAY, now - daysAgo * DAY);
+    }
+  }
   if (base && processed) {
     const p = join(root, 'Processed');
     mkdirSync(p, { recursive: true });
@@ -126,5 +134,81 @@ describe('post inbox absence check', () => {
     expect(run(root).code).toBe(0);
     expect(run(root, ['--stale-days', '7']).code).toBe(1);
     cleanup();
+  });
+
+  // ── SCANNED IS NOT PROCESSED (finding 20260831-post-manager-weekly-418) ──
+  //
+  // The check only read Processed/. Scanning drops a PDF in the ROOT; it only
+  // reaches Processed/ once the post phase has worked it. On 31 Aug 2026 the
+  // check printed "nobody scanned for 15 days" and told Kevin to go and scan,
+  // while 37 pages he HAD scanned on 26 Aug sat unread in the root holding
+  // four charging-order threats and two strike-off notices.
+  describe('an unprocessed backlog is its own failure, not "nobody scanned"', () => {
+    it('reports the backlog instead of telling Kevin to scan', () => {
+      const { root, cleanup } = inbox({
+        pdfs: [{ name: 'old.pdf', daysAgo: 15 }],       // Processed/ is stale
+        rootPdfs: [{ name: 'Scanned 26 Aug.pdf', daysAgo: 5 }],
+      });
+      const { code, out } = run(root);
+      cleanup();
+      expect(code, 'an unprocessed backlog still reported as "nobody scanned"').toBe(3);
+      expect(out).toMatch(/waiting to be processed/i);
+      expect(out, 'told Kevin to scan post he had already scanned')
+        .not.toMatch(/No physical post has been scanned/i);
+      expect(out).not.toMatch(/Scan whatever is in the pile/i);
+    });
+
+    it('names how many are waiting and how old the oldest is', () => {
+      const { root, cleanup } = inbox({
+        pdfs: [{ name: 'old.pdf', daysAgo: 40 }],
+        rootPdfs: [
+          { name: 'a.pdf', daysAgo: 9 },
+          { name: 'b.pdf', daysAgo: 2 },
+          { name: 'c.pdf', daysAgo: 5 },
+        ],
+      });
+      const { code, out } = run(root);
+      cleanup();
+      expect(code).toBe(3);
+      expect(out, 'the count is not in the message').toMatch(/3 scanned documents/);
+      expect(out, 'ages off the NEWEST, so an old backlog reads as new').toMatch(/9 days ago/);
+    });
+
+    it('a backlog outranks a fresh Processed folder too — nothing has read it', () => {
+      const { root, cleanup } = inbox({
+        pdfs: [{ name: 'recent.pdf', daysAgo: 1 }],
+        rootPdfs: [{ name: 'waiting.pdf', daysAgo: 1 }],
+      });
+      const { code } = run(root);
+      cleanup();
+      expect(code, 'a fresh Processed/ hid a pile nobody had opened').toBe(3);
+    });
+
+    it('does not count Processed/ or Split/ contents as a backlog', () => {
+      // BACK-TEST for the obvious wrong fix: a recursive walk would see every
+      // archived PDF and alarm for ever.
+      const { root, cleanup } = inbox({ pdfs: [{ name: 'a.pdf', daysAgo: 3 }] });
+      mkdirSync(join(root, 'Split'), { recursive: true });
+      writeFileSync(join(root, 'Split', 'page-1.pdf'), '%PDF-1.4\n');
+      const { code, out } = run(root);
+      cleanup();
+      expect(code, 'archived post read as an unprocessed pile').toBe(0);
+      expect(out).toMatch(/fresh/);
+    });
+
+    it('ignores non-PDF clutter in the root', () => {
+      const { root, cleanup } = inbox({ pdfs: [{ name: 'a.pdf', daysAgo: 3 }] });
+      writeFileSync(join(root, '.DS_Store'), 'x');
+      const { code } = run(root);
+      cleanup();
+      expect(code).toBe(0);
+    });
+
+    it('a missing folder still wins: unreadable is never a backlog', () => {
+      const { root, cleanup } = inbox({ base: false });
+      const { code } = run(root);
+      cleanup();
+      expect(code).toBe(2);
+    });
   });
 });

@@ -93,6 +93,16 @@ Exit 3 means today already stamped an end mark. **STOP the whole run**, post one
 
 A START mark alone does NOT block: a run the Mac killed halfway has to be resumable, and only a matching END means the day is done. (Regression origin: 19 Aug 2026 — the first run stamped end at 14:12:19Z and a second full run started at 14:22:56Z. Finding 20260819-daily-ops-252.)
 
+**Then sweep the queue.**
+
+```
+python3 scripts/job-queue.py sweep
+```
+
+Exit 0 means nothing was wrong (no lock, or a live one). **Exit 1 means it found a lock whose lease had run out and reclaimed it — put that line in the report**, because everything queued behind that holder never ran and nobody was told.
+
+Why it is here (9 Aug 2026, finding 20260809-drift-029): expired locks were only ever broken inside `acquire`, so a crashed holder kept the queue until the next job turned up and asked. Over a quiet weekend that is two days of a dead holder while `status` reported the queue as busy. This is one file read and needs no daemon; daily-ops is simply the thing that runs most reliably on a clock.
+
 The Mac usually wakes into this routine, and the network and Google Drive lag behind the wake by a minute or two.
 
 ```
@@ -149,7 +159,14 @@ Check the date first and SKIP with a note when not due. A skip you announce is f
 
 - **1st of the month:** `~/.claude/scheduled-tasks/monthly-rent-due-date/SKILL.md`
   Advances rent due dates for every active tenancy. This is a real obligation; if it is the 1st and this fails, say so at the very top of the report.
-- **Mondays:** `~/.claude/scheduled-tasks/post-manager-weekly/SKILL.md`
+- **EVERY DAY — post:** run `python3 scripts/post-inbox-absence.py` from the repo. It is one directory listing and costs seconds.
+  - **exit 3** — scans are sitting unprocessed in the Post Inbox root. Run `~/.claude/scheduled-tasks/post-manager-weekly/SKILL.md` NOW, whatever day it is. Only the days it finds something pay for the OCR, split and email work.
+  - **exit 1 on a Monday** — nothing scanned for a fortnight. Put the printed message at the top of the report, per that skill's STEP 0.
+  - **exit 1 midweek** — note it in the report and move on. Monday owns the nobody-scanned alarm; repeating it daily would train Kevin to skip it.
+  - **exit 2** — say you could not tell. Never report "no post" on an exit 2.
+- **Mondays:** the full `~/.claude/scheduled-tasks/post-manager-weekly/SKILL.md` pass, including its STEP 0 absence alert, even when the daily check found nothing.
+
+  Why the check is daily (31 Aug 2026, finding 20260831-post-manager-weekly-419): the post phase was Mondays-only, so a Wednesday scan sat unread until the following Monday. Post carries 7 and 14 day clocks — a Companies House strike-off window, a charging-order reconsideration window — and losing five days of a fourteen spends more than a third of the response time before the letter is even opened. On 31 Aug 37 pages scanned on 26 Aug were still unread, including four charging-order threats.
 - **1st of Jan / Apr / Jul / Oct:** `~/.claude/scheduled-tasks/update-master-prompt-quarterly/SKILL.md`
   Propose-only. It must never write to the master prompt without Kevin's yes.
 
