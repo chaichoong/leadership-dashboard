@@ -21,3 +21,16 @@ airtable_pat
 
 # Build-verification screenshots — artifacts, and this repo is PUBLIC.
 .claude/shots/
+
+# Agent scratch output — dispatch queues, board dumps, close-out notes, triage
+# runs. Written to the working tree by the dispatch/task-manager/triage jobs and
+# never meant to be committed. 129 of them had accumulated by 31 Aug 2026, oldest
+# 27 Aug at the repo root plus 8 more in scripts/. They contain live business data
+# (creditor matters, task bodies, HMRC working files) and this repo is PUBLIC, so
+# one `git add -A` would publish them. Ignoring is safer than leaving them
+# visible-but-uncommitted. Deliberately NOT anchored with a leading slash: agents
+# drop this scratch in subdirectories too, so the pattern must match at any depth.
+_tmp_*
+_tm_*
+_triage_*
+_dispatch_*
