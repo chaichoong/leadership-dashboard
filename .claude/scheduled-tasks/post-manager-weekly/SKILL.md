@@ -71,6 +71,16 @@ python3 scripts/post-inbox-absence.py
   not a footnote: an empty inbox is only good news when somebody is feeding it.
 - **exit 2** — the folder is missing or unreadable. Report that you could not
   tell. Never report "no post" on an exit 2.
+- **exit 3** — scans are sitting in the Post Inbox ROOT, unprocessed. The post
+  HAS been scanned and nothing has read it. Go straight to STEP 1 and process
+  them. Do NOT tell Kevin to scan; he already did.
+
+Scanned and processed are different things and they fail in opposite
+directions (31 Aug 2026, finding 20260831-post-manager-weekly-418). Scanning
+puts a PDF in the root; only this phase moves it to `Processed/`. Reading only
+`Processed/` made a five-day-old backlog print "nobody scanned for 15 days" —
+while 37 pages from 26 Aug sat in the root holding four charging-order threats
+and two Companies House strike-off notices.
 
 Why this comes first (16 Aug 2026, finding 20260818-post-manager-weekly-214):
 this phase fires when a PDF appears in Google Drive, and post arriving in the
