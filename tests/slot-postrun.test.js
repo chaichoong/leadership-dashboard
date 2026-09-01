@@ -173,3 +173,46 @@ describe('slot wrappers use the shared epilogue and trap abnormal death (finding
     });
   }
 });
+
+describe('repo TOP-LEVEL sweep (1 Sep 2026: report files landed in the repo root)', () => {
+  // The 13:00 and 17:00 task-manager slots wrote report-*.json/md at the
+  // repo root: the skill referenced $LOG_DIR/$SCRATCH, which the runner
+  // never exported under those names, so relative writes landed in the
+  // wrapper's cwd. The sweep must now catch run artifacts at -maxdepth 1.
+  it('quarantines a slot-run artifact this run created at the repo root, informationally', () => {
+    const stray = join(repo, 'report-2026-09-01-17-v2.json');
+    writeFileSync(stray, '{"actions": [{"task": "recX", "move": "close"}]}');
+    const r = runPostrun({ rc: 0 });
+    expect(r.status).toBe(0);
+    expect(r.stderr).toContain('PRIVACY');
+    expect(existsSync(stray)).toBe(false);
+    expect(existsSync(join(scratch, 'report-2026-09-01-17-v2.json'))).toBe(true);
+  });
+
+  it('quarantines a leak-content top-level file even when the name is unfamiliar', () => {
+    const stray = join(repo, 'notes-tmp.txt');
+    writeFileSync(stray, 'CREDITOR MATTER — draft that must never sit in a public repo');
+    const r = runPostrun({ rc: 0 });
+    expect(r.status).toBe(0);
+    expect(existsSync(stray)).toBe(false);
+  });
+
+  it('leaves a harmless unfamiliar top-level file, a tracked file, and a pre-run file alone', () => {
+    const harmless = join(repo, 'scribble.txt');
+    writeFileSync(harmless, 'no leak content here');
+    const tracked = join(repo, 'report-tracked.json');
+    writeFileSync(tracked, '{}');
+    sh('git', ['-C', repo, 'add', 'report-tracked.json']);
+    sh('git', ['-C', repo, '-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-q', '-m', 'seed']);
+    writeFileSync(tracked, '{"touched": "this run"}');
+    const old = join(repo, 'board-tmp.json');
+    writeFileSync(old, '{"predates": "this run"}');
+    const past = new Date(Date.now() - 120_000);
+    utimesSync(old, past, past);
+    const r = runPostrun({ rc: 0 });
+    expect(r.status).toBe(0);
+    expect(existsSync(harmless)).toBe(true);
+    expect(existsSync(tracked)).toBe(true);
+    expect(existsSync(old)).toBe(true);
+  });
+});

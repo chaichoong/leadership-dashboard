@@ -56,6 +56,27 @@ while IFS= read -r f; do
     mv "$f" "$SCRATCH/" && LEAKED="$LEAKED $f"
   fi
 done < <(find "$REPO/monitoring" -type f -newer "$MARKER" 2>/dev/null)
+
+# Repo TOP-LEVEL sweep (1 Sep 2026): the 13:00 and 17:00 task-manager slots
+# wrote report-*.json/md into the repo root — the skill referenced $LOG_DIR
+# and $SCRATCH, which the runner never exported under those names, so
+# relative writes landed in the wrapper's cwd (the repo). The variable names
+# are fixed in the skill, but an instruction is not a gate: any top-level
+# file THIS RUN created that is named like a slot-run artifact, or that
+# carries leak content, is quarantined. Scoped to -maxdepth 1 and -newer so
+# another session's repo work is never touched; git-tracked files stay
+# exempt, same as everywhere else.
+while IFS= read -r f; do
+  [ -z "$f" ] && continue
+  if git -C "$REPO" ls-files --error-unmatch "${f#"$REPO"/}" >/dev/null 2>&1; then
+    continue
+  fi
+  case "$(basename "$f")" in
+    report*|board*.json|gate*.json|dispatch-queue*.json) : ;;
+    *) grep -qlE "$LEAK_ERE" "$f" 2>/dev/null || continue ;;
+  esac
+  mv "$f" "$SCRATCH/" && LEAKED="$LEAKED $f"
+done < <(find "$REPO" -maxdepth 1 -type f -newer "$MARKER" 2>/dev/null)
 rm -f "$MARKER"
 
 TAIL_TEXT=$(tail -n +$((START_LINE + 1)) "$LOG" 2>/dev/null)
