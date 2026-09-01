@@ -278,3 +278,61 @@ describe('label 13 maintenance mail now raises a Roy task (Kevin, 25 Aug 2026)',
         expect(triageSkill).toMatch(/Do NOT set Inbound Communication Task/);
     });
 });
+
+describe("gate cleanse + brain grounding (Kevin's approved extension, 1 Sep 2026)", () => {
+    it('the gate lane read is code, paginated, and structurally excludes legacy Approval rows', () => {
+        // A hand-rolled single-page fetch is how the recon accuracy card
+        // measured 100 of 259 rows; the lane read must go through query_all.
+        const gate = script.slice(script.indexOf('GATE_FORMULA'), script.indexOf('def cmd_note'));
+        expect(gate).toContain('query_all');
+        expect(gate).not.toContain('urllib.request.urlopen');
+        // Legacy rows (4 Aug 2026 lesson) are excluded IN THE FORMULA, so the
+        // cleanse can never sweep them however the judgement drifts.
+        expect(script).toMatch(/GATE_FORMULA = "AND\(\{Status\}='Approval', LEN\(\{Sent For Approval By\}&''\)>0\)"/);
+    });
+
+    it('a zero lane alongside a populated Approval status fails loudly (drifted-formula control)', () => {
+        const gate = script.slice(script.indexOf('def cmd_gate'), script.indexOf('def cmd_note'));
+        expect(gate).toMatch(/gate control read/);
+        expect(gate).toMatch(/len\(status_only\) >= 5/);
+        expect(gate).toMatch(/fail\(/);
+    });
+
+    it('lane age anchors on Slack TS then Created Time, never a re-stamped field', () => {
+        const laneView = script.slice(script.indexOf('def lane_view'), script.indexOf('# ---', script.indexOf('def lane_view')));
+        expect(laneView).toContain('Approval Slack TS');
+        expect(laneView).toContain('Created Time');
+        expect(laneView).not.toContain('Due Date');
+        expect(laneView).not.toContain('Last Modified');
+        expect(laneView).not.toMatch(/"Approved At"/);
+    });
+
+    it('the cleanse preserves the original submission and is capped, aged, and audited', () => {
+        // dispatch submit REPLACES Agent Output wholesale, so the skill must
+        // prepend the proposal above the preserved original.
+        expect(skill).toMatch(/ORIGINAL SUBMISSION \(preserved\)/);
+        expect(skill).toMatch(/at most 25 cleanse proposals per pass/i);
+        expect(skill).toMatch(/younger than 48 hours/);
+        expect(skill).toMatch(/never removed silently|Nothing is ever removed silently/i);
+        // Cleanse proposals join the CEO review batch like every other close.
+        expect(skill).toMatch(/step 2 or the step 2b cleanse/);
+    });
+
+    it('step 3b reads the same coded lane, not its own raw curl formula', () => {
+        const step3b = skill.slice(skill.indexOf('Step 3b'), skill.indexOf('Step 4'));
+        expect(step3b).toContain('gate.json');
+        expect(step3b).not.toMatch(/curl|api\.airtable\.com/);
+    });
+
+    it('brain grounding probes by reading a byte and reports UNCHECKED, never silence', () => {
+        expect(skill).toMatch(/Step 1c/);
+        expect(skill).toMatch(/READING A BYTE/);
+        expect(skill).toMatch(/brain UNCHECKED/);
+        expect(skill).toMatch(/never a quiet "no rulings"/i);
+    });
+
+    it('the report leads gate health with size and median age', () => {
+        expect(skill).toMatch(/median age in hours/);
+        expect(script).toContain('medianAgeHours');
+    });
+});
