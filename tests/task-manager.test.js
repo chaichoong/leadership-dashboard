@@ -336,3 +336,28 @@ describe("gate cleanse + brain grounding (Kevin's approved extension, 1 Sep 2026
         expect(script).toContain('medianAgeHours');
     });
 });
+
+describe('skill paths never depend on the cwd (1 Sep 2026: repo-root report leak)', () => {
+  it('the skill only uses the variables the runner actually exports', () => {
+    // $LOG_DIR and $SCRATCH are unset in the agent shell — a write through
+    // them lands in the cwd, which the wrapper sets to the PUBLIC repo.
+    expect(skill).not.toMatch(/\$LOG_DIR\b/);
+    expect(skill).not.toMatch(/\$\{?SCRATCH\b/);
+    expect(runner).toMatch(/export TASK_MANAGER_SCRATCH=/);
+    expect(runner).toMatch(/export TASK_MANAGER_LOG_DIR=/);
+    expect(skill).toContain('$TASK_MANAGER_LOG_DIR/report-');
+  });
+
+  it('every skill redirect targets the scratch dir by absolute path', () => {
+    expect(skill).toMatch(/gate > "\$TASK_MANAGER_SCRATCH\/gate\.json"/);
+    expect(skill).toMatch(/queue > "\$TASK_MANAGER_SCRATCH\/dispatch-queue\.json"/);
+    expect(skill).toMatch(/> "\$TASK_MANAGER_SCRATCH\/board\.json"/);
+    expect(skill).not.toMatch(/> (?:gate|board|dispatch-queue|report)[-.\w]*\.json/);
+  });
+
+  it('the shared epilogue sweeps the repo top level, not only monitoring/', () => {
+    const postrun = readFileSync(path.join(root, 'scripts/slot-postrun.sh'), 'utf8');
+    expect(postrun).toMatch(/-maxdepth 1 -type f -newer/);
+    expect(postrun).toMatch(/report\*\|board\*\.json\|gate\*\.json\|dispatch-queue\*\.json/);
+  });
+});

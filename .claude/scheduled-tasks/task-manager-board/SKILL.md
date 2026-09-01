@@ -64,8 +64,8 @@ First read what dispatch already has in flight, then the board, so the
 overlap is subtracted IN CODE, never by eyeballing two JSON files:
 
     cd ~/knowledge-os/logs/task-manager/scratch
-    python3 /Users/kevinbrittain/Projects/leadership-dashboard/scripts/agent-dispatch.py queue > dispatch-queue.json
-    python3 /Users/kevinbrittain/Projects/leadership-dashboard/scripts/task-manager.py board --dispatch-queue dispatch-queue.json > board.json
+    python3 /Users/kevinbrittain/Projects/leadership-dashboard/scripts/agent-dispatch.py queue > "$TASK_MANAGER_SCRATCH/dispatch-queue.json"
+    python3 /Users/kevinbrittain/Projects/leadership-dashboard/scripts/task-manager.py board --dispatch-queue "$TASK_MANAGER_SCRATCH/dispatch-queue.json" > "$TASK_MANAGER_SCRATCH/board.json"
 
 The board read fails loudly on a broken read — never continue past a failure.
 It gives you `stuck` (no honest movement stamp in 7 days, already excluding
@@ -207,7 +207,7 @@ The gate must hold only what genuinely needs Kevin. Cross-agent gate hygiene
 lives with YOU; each doer agent withdraws only its own submissions. Read the
 lane:
 
-    python3 /Users/kevinbrittain/Projects/leadership-dashboard/scripts/task-manager.py gate > gate.json
+    python3 /Users/kevinbrittain/Projects/leadership-dashboard/scripts/task-manager.py gate > "$TASK_MANAGER_SCRATCH/gate.json"
 
 It gives you Kevin's lane (empty Approver = Kevin) oldest first with a
 600-char output excerpt each, the median age, and counts — legacy Approval
@@ -260,7 +260,7 @@ top of his queue, reviewed by the board at each slot. The AI Agents page
 orders his queue tier-1 first, then the `Priority` field, then longest
 waiting — so the ONE lever this review moves is Priority.
 
-Read the queue from `gate.json` (already produced in step 2b — same
+Read the queue from `$TASK_MANAGER_SCRATCH/gate.json` (already produced in step 2b — same
 population as his page: loop-raised Approval rows, non-Kevin Approvers
 already split out, paginated in code). Rank each item as the CEO would (WWKD):
 anything tier-1 (debts, litigation, enforcement, bailiffs, the restraint
@@ -313,7 +313,10 @@ here unless dispatch's queue shows them as `priorIntent` orphans.
 
 ## Step 5 — The "didn't move" report
 
-Write `$LOG_DIR/report-<date>-<HH>.md` (private dir, full content allowed),
+Write `$TASK_MANAGER_LOG_DIR/report-<date>-<HH>.md` (private dir, full
+content allowed — that exact variable, exported by the runner; a shortened
+variable name is unset in your shell and sends the write to your cwd, which
+is the PUBLIC repo),
 LEADING with what should have moved and did not:
 
 1. Stuck backlog: count, the 10 oldest by name and days still, and what stops
@@ -333,7 +336,7 @@ Never write task content into `monitoring/` — counts only, anywhere public.
 
     python3 scripts/task-manager.py score --stuck <N> --open <M> --kevin <K>
     python3 scripts/task-manager.py publish
-    python3 scripts/task-manager.py verify --report $SCRATCH/report.json
+    python3 scripts/task-manager.py verify --report "$TASK_MANAGER_SCRATCH/report.json"
 
 `score` writes "<N> stuck (target 0); <M> open; <K> with Kevin" to the register
 row — the dashboard reading. Numbers come from THIS run's board.json counts:
