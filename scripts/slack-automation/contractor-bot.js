@@ -851,11 +851,11 @@ async function handleDmThreadReply(evt, env) {
     }
     const taskId = extractTaskIdFromMessage(parent.messages[0]);
     if (!taskId) {
-        // Not a task-comment thread. If it's Kevin, this is a CEO-brief (or any
-        // other) thread — hand the whole thing to the CEO conversation handler.
-        const tm = TEAM_MEMBERS[evt.user];
-        if (tm && tm.firstName === 'Kevin') return handleCeoConversation(evt, env);
-        console.warn('[dm-thread] no Task ID in parent — ignoring', parent.messages[0].ts);
+        // Not a task-comment thread. The CEO conversation used to catch
+        // Kevin's replies here; RETIRED 1 Sep 2026 with the rest of the CEO
+        // DM chat — a reply under the morning brief or the approvals digest
+        // must never wake the AI. Ignore it, loudly in the logs.
+        console.warn('[dm-thread] no Task ID in parent — ignoring (CEO chat retired 1 Sep 2026)', parent.messages[0].ts);
         return;
     }
 

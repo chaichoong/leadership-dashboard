@@ -43,10 +43,16 @@ os.environ["MONITORING_DIR"] = ${JSON.stringify(monitoring)}
 spec = importlib.util.spec_from_file_location("md", ${JSON.stringify(SCRIPT)})
 md = importlib.util.module_from_spec(spec); spec.loader.exec_module(md)
 sent = []
+notified = []
+# post_to_slack is a retired no-op in production (1 Sep 2026) but the alarm
+# text still flows through it, so capturing it checks the message content.
+# mac_notify is the REAL surviving surface — an alarm that skips it reaches
+# nobody, which is exactly what these tests exist to prevent.
 md.post_to_slack = lambda m: sent.append(m)
+md.mac_notify = lambda t: notified.append(t)
 now = datetime.fromisoformat(sys.argv[1]).replace(tzinfo=ZoneInfo("Europe/London"))
 code = md.guard(now_dt=now)
-print(json.dumps({"code": code, "sent": sent}))
+print(json.dumps({"code": code, "sent": sent, "notified": notified}))
 `;
   const out = execFileSync('python3', ['-c', py, nowLondonIso], { encoding: 'utf8' });
   return JSON.parse(out.trim().split('\n').pop());
@@ -57,33 +63,40 @@ const endAt = (iso) => ({ job: 'daily-ops', state: 'mark', ts: iso, note: 'end' 
 
 describe('daily-ops guard', () => {
   it('stays silent when the run marked today', () => {
-    const { code, sent } = runGuard(
+    const { code, sent, notified } = runGuard(
       [markAt('2026-08-15T05:20:00Z')], '2026-08-15T09:30:00');
     expect(code).toBe(0);
     expect(sent).toHaveLength(0);
+    expect(notified).toHaveLength(0);
   });
 
   it('alarms when there is no mark today after 08:00 London', () => {
-    const { code, sent } = runGuard([], '2026-08-15T09:30:00');
+    const { code, sent, notified } = runGuard([], '2026-08-15T09:30:00');
     expect(code).toBe(1);
     expect(sent).toHaveLength(1);
     expect(sent[0]).toContain('daily-ops has not started today');
     expect(sent[0]).toContain('run daily ops');
+    // The macOS notification is the only surface left that reaches a human
+    // (Slack alerts retired 1 Sep 2026) — an alarm that skips it is silent.
+    expect(notified).toHaveLength(1);
+    expect(notified[0]).toContain('run daily ops');
   });
 
   it("yesterday's mark does not cover today — the 15 Aug case exactly", () => {
     // On 15 Aug the newest mark was 14 Aug's. lastRunAt said today; the mark
     // said otherwise. The mark must win.
-    const { code, sent } = runGuard(
+    const { code, sent, notified } = runGuard(
       [markAt('2026-08-14T05:20:15Z')], '2026-08-15T09:30:00');
     expect(code).toBe(1);
     expect(sent).toHaveLength(1);
+    expect(notified).toHaveLength(1);
   });
 
   it('holds its tongue before 08:00 London instead of crying at a slow wake', () => {
-    const { code, sent } = runGuard([], '2026-08-15T07:15:00');
+    const { code, sent, notified } = runGuard([], '2026-08-15T07:15:00');
     expect(code).toBe(0);
     expect(sent).toHaveLength(0);
+    expect(notified).toHaveLength(0);
   });
 
   it('counts the London day, not the UTC day, at the midnight boundary', () => {

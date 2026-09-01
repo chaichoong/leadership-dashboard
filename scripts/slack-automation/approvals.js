@@ -372,13 +372,13 @@ async function resolveChannelFor(env, approver, channels, log) {
         log.push(`channel ${ch.id} (${ch.how})`);
         id = ch.id;
     } else {
-        const dm = await slack(env, 'https://slack.com/api/conversations.open', { method: 'POST', body: JSON.stringify({ users: approver.slackId }) });
-        if (dm.ok && dm.channel && dm.channel.id) {
-            id = dm.channel.id;
+        const dm = await openDm(env, approver.slackId);
+        if (dm) {
+            id = dm;
             log.push(`${approver.name} DM ${id}`);
         } else {
             id = await resolveChannelFor(env, APPROVERS.kevin, channels, log);
-            log.push(`${approver.name} DM FAILED (${dm.error || 'unknown'}) — routing to Kevin's channel`);
+            log.push(`${approver.name} DM FAILED — routing to Kevin's channel`);
         }
     }
     channels[approver.key] = id;
@@ -390,9 +390,20 @@ async function resolveChannelFor(env, approver, channels, log) {
 const TASK_FIELD_LIST = Object.values(AF).map(f => `fields%5B%5D=${f}`).join('&');
 
 async function queryTasks(env, formula, max) {
-    const params = `returnFieldsByFieldId=true&pageSize=${Math.min(max || 50, 100)}&${TASK_FIELD_LIST}&filterByFormula=${encodeURIComponent(formula)}`;
-    const data = await airtable(env, 'GET', `/${TABLE_TASKS}?${params}`);
-    return (data.records || []).slice(0, max || 50);
+    // Follows the offset token. A single-page read silently caps at 100 and
+    // presents the cap as the truth — the exact recon-accuracy-card bug the
+    // repo rules warn about — and this file's counts now reach Kevin as his
+    // only signal, so they have to be real.
+    const cap = max || 50;
+    const out = [];
+    let offset = '';
+    do {
+        const params = `returnFieldsByFieldId=true&pageSize=${Math.min(cap - out.length, 100)}&${TASK_FIELD_LIST}&filterByFormula=${encodeURIComponent(formula)}${offset ? `&offset=${encodeURIComponent(offset)}` : ''}`;
+        const data = await airtable(env, 'GET', `/${TABLE_TASKS}?${params}`);
+        out.push(...(data.records || []));
+        offset = data.offset || '';
+    } while (offset && out.length < cap);
+    return out.slice(0, cap);
 }
 
 function taskView(rec) {
@@ -643,9 +654,16 @@ function buildApprovalBlocks(t, agent, warn) {
 const NOT_DEFERRED = `NOT(IS_AFTER({Deferred Until}, TODAY()))`;
 
 async function postPending(env, channels, log) {
-    const recs = await queryTasks(env, `AND({Status}='Approval', LEN({Approval Slack TS}&'')=0, ${NOT_DEFERRED})`, MAX_POSTS_PER_RUN);
-    let posted = 0;
+    // Kevin's lane never receives a Slack TS any more, so his rows match this
+    // formula until he decides them in the dashboard. Fetching only
+    // MAX_POSTS_PER_RUN rows would let ten of his rows permanently occupy the
+    // whole page and silently starve Mica's cards — so over-fetch, filter,
+    // and cap the POSTS, not the read.
+    const recs = await queryTasks(env, `AND({Status}='Approval', LEN({Approval Slack TS}&'')=0, ${NOT_DEFERRED})`, 200);
+    if (recs.length === 200) log.push('post: unposted queue hit the 200-row read cap — some of Mica\u2019s cards may wait a sweep');
+    let posted = 0, kevinHeld = 0;
     for (const rec of recs) {
+        if (posted >= MAX_POSTS_PER_RUN) break;
         const t = taskView(rec);
         const warn = isTier1Task(t);
         const approver = approverFor(t, warn);
@@ -653,7 +671,7 @@ async function postPending(env, channels, log) {
         // 08:00 digest and the dashboard queue replaced them. Leaving the
         // task unposted (no Slack TS) is deliberate: nothing to react to,
         // nothing to reconcile, nothing on his phone.
-        if (approver.key === 'kevin') continue;
+        if (approver.key === 'kevin') { kevinHeld++; continue; }
         const agent = await agentName(env, t.agentId);
         const channel = await resolveChannelFor(env, approver, channels, log);
         const res = await slack(env, SLACK.post, {
@@ -676,6 +694,7 @@ async function postPending(env, channels, log) {
         posted++;
         log.push(`posted ${t.id}`);
     }
+    if (kevinHeld) log.push(`kevin-lane pending without cards (by design): ${kevinHeld}`);
     return posted;
 }
 
@@ -696,45 +715,67 @@ export function londonParts(now = new Date()) {
     return { date: `${parts.year}-${parts.month}-${parts.day}`, hour: Number(parts.hour) % 24 };
 }
 
-export function buildDigestText(count, names, dashUrl) {
+export function buildDigestText(count, names, dashUrl, capped) {
+    const shown = `${count}${capped ? '+' : ''}`;
     const top = names.slice(0, 3).map(n => `• ${n}`).join('\n');
-    const more = count > 3 ? `\n…and ${count - 3} more.` : '';
-    return `*${count} item${count === 1 ? '' : 's'} waiting for your approval.*\n`
+    const more = count > 3 ? `\n…and ${capped ? 'more' : `${count - 3} more`}.` : '';
+    return truncate(`*${shown} item${count === 1 && !capped ? '' : 's'} waiting for your approval.*\n`
         + `${top}${more}\n\n`
         + `Decide them here: ${dashUrl}\n`
-        + `_This is the only approvals message you get today. Nothing has been sent or actioned._`;
+        + `_This is the only approvals message you get today. Nothing has been sent or actioned._`, 2900);
 }
 
 const DASHBOARD_QUEUE_URL = 'https://chaichoong.github.io/leadership-dashboard/os/agents/index.html#tab=approvals';
+const DIGEST_MAX = 500;
+
+async function openDm(env, slackId) {
+    const dm = await slack(env, 'https://slack.com/api/conversations.open', { method: 'POST', body: JSON.stringify({ users: slackId }) });
+    return (dm.ok && dm.channel && dm.channel.id) ? dm.channel.id : null;
+}
 
 async function postKevinDigest(env, log) {
     const { date, hour } = londonParts();
     if (hour !== 8) return 0;
+    // FAIL CLOSED on a missing KV binding. Falling through without the
+    // send-once memory would post this DM every minute for the whole hour —
+    // the exact flood the digest exists to end.
+    if (!env.STATE) { log.push('digest SKIPPED: STATE KV binding missing — will not send without send-once memory'); return -1; }
     const kvKey = `apv-digest-${date}`;
-    if (env.STATE && await env.STATE.get(kvKey)) return 0;
+    if (await env.STATE.get(kvKey)) return 0;
 
-    // Same population the dashboard queue shows (APV_QUEUE_FORMULA there),
-    // minus Mica's lane — her cards still reach her directly.
-    const recs = await queryTasks(env, `AND({Status}='Approval', ${NOT_DEFERRED})`, 100);
-    const mine = recs.map(taskView).filter(t => approverFor(t, isTier1Task(t)).key === 'kevin');
+    // EXACTLY the dashboard queue's population (APV_QUEUE_FORMULA plus its
+    // lane filter in os/agents/index.html) — the DM links there, so the two
+    // numbers must be the same number.
+    const recs = await queryTasks(env, `AND({Status}='Approval', LEN({Sent For Approval By}&'')>0, ${NOT_DEFERRED})`, DIGEST_MAX);
+    const mine = recs.map(taskView).filter(t => {
+        const e = String(t.approverEmail || '').toLowerCase();
+        return !e || e === KEVIN_AIRTABLE_EMAIL;
+    });
 
     if (mine.length) {
-        const dm = await slack(env, 'https://slack.com/api/conversations.open', { method: 'POST', body: JSON.stringify({ users: KEVIN_SLACK_ID }) });
-        if (!dm.ok || !dm.channel) { log.push(`digest DM open failed: ${dm.error || 'unknown'}`); return -1; }
+        const channel = await openDm(env, KEVIN_SLACK_ID);
+        if (!channel) { log.push('digest DM open failed'); return -1; }
+        const capped = recs.length >= DIGEST_MAX;
         const res = await slack(env, SLACK.post, {
             method: 'POST',
             body: JSON.stringify({
-                channel: dm.channel.id,
-                text: `${mine.length} approvals waiting`,
-                blocks: [{ type: 'section', text: { type: 'mrkdwn', text: buildDigestText(mine.length, mine.map(t => esc(t.name)), DASHBOARD_QUEUE_URL) } }],
+                channel,
+                text: `${mine.length}${capped ? '+' : ''} approvals waiting`,
+                blocks: [{ type: 'section', text: { type: 'mrkdwn', text: buildDigestText(mine.length, mine.map(t => esc(truncate(t.name, 120))), DASHBOARD_QUEUE_URL, capped) } }],
             }),
         });
         if (!res.ok) { log.push(`digest post failed: ${res.error}`); return -1; }
-        log.push(`digest sent: ${mine.length} pending`);
+        log.push(`digest sent: ${mine.length}${capped ? '+' : ''} pending`);
     } else {
-        log.push('digest: nothing pending, staying quiet');
+        // CONTROL. A broken value comparison returns 200 OK and zero rows,
+        // which reads exactly like an empty queue — and quiet-zero then locks
+        // the day. Prove the population the formula filters still exists at
+        // all before trusting the zero.
+        const control = await queryTasks(env, `LEN({Sent For Approval By}&'')>0`, 1);
+        if (!control.length) { log.push('digest CONTROL FAILED: no task anywhere has Sent For Approval By — the read is broken, not the queue empty'); return -1; }
+        log.push('digest: nothing pending (control passed), staying quiet');
     }
-    if (env.STATE) await env.STATE.put(kvKey, mine.length ? 'sent' : 'quiet-zero', { expirationTtl: 172800 });
+    await env.STATE.put(kvKey, mine.length ? 'sent' : 'quiet-zero', { expirationTtl: 172800 });
     return mine.length;
 }
 
@@ -984,16 +1025,23 @@ async function processResponses(env, channels, log) {
         // out into the world, and refusing Kevin's words would be the wrong
         // trade. The agent is told the task moved instead.
         if (isStale(t) && outcome !== 'Changes requested') {
+            // Where it goes next differs by lane: Mica's card is reposted
+            // fresh; Kevin's lane gets no cards any more (1 Sep 2026), so his
+            // truth is the dashboard queue and the next digest. Promising him
+            // a repost that cannot happen would be a lie in the thread.
+            const next = approver.key === 'kevin'
+                ? `This card is now closed — read it as it stands and decide it in the dashboard queue: ${DASHBOARD_QUEUE_URL}`
+                : 'I am posting it again as it now stands.';
             await threadReply(env, channel, t.ts,
                 `:warning: Not applying that. This task changed after I posted it, so your ${outcome === 'Rejected' ? 'rejection' : 'approval'} `
                 + `would be acting on something you have not read. Posted as at ${t.baseline.replace('T', ' ').slice(0, 16)} UTC, `
-                + `last changed ${String(t.lmt).replace('T', ' ').slice(0, 16)} UTC. I am posting it again as it now stands.`);
-            // Clearing the timestamp is what makes the post phase pick it up
-            // again on the next sweep, with a fresh baseline.
+                + `last changed ${String(t.lmt).replace('T', ' ').slice(0, 16)} UTC. ${next}`);
+            // Clearing the timestamp takes it out of the reactions loop; for
+            // Mica's lane it is also what makes the post phase repost it.
             await airtable(env, 'PATCH', `/${TABLE_TASKS}/${t.id}`, {
                 fields: { [AF.slackTs]: '', [AF.slackBaseline]: '' }, typecast: true,
             });
-            log.push(`STALE ${t.id} — ${outcome} refused, re-queued`);
+            log.push(`STALE ${t.id} — ${outcome} refused, ${approver.key === 'kevin' ? 'sent to dashboard' : 're-queued'}`);
             continue;
         }
 
@@ -1040,8 +1088,11 @@ async function reconcileDecidedElsewhere(env, channels, log) {
         // knocked back, and "left the approval queue" would be the wrong story
         // for something that is due back on a known date.
         const deferred = t.status === 'Approval' && t.deferredUntil;
+        const returnsTo = approver.key === 'kevin'
+            ? 'your dashboard queue and morning digest'
+            : 'you here';
         await threadReply(env, channel, t.ts,
-            deferred ? `:alarm_clock: Knocked back until *${t.deferredUntil}*. Nothing approved, nothing sent — it comes back to you here that morning.`
+            deferred ? `:alarm_clock: Knocked back until *${t.deferredUntil}*. Nothing approved, nothing sent — it comes back to ${returnsTo} that morning.`
                      : t.outcome ? `:heavy_check_mark: Decided in the dashboard: *${t.outcome}*.`
                                  : `:information_source: This task left the approval queue in the dashboard.`);
         await airtable(env, 'PATCH', `/${TABLE_TASKS}/${t.id}`, {

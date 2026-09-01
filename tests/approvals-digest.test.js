@@ -20,10 +20,25 @@ describe('Kevin gets no per-task cards', () => {
     it('postPending skips his lane before any Slack call', () => {
         const fn = SRC.match(/async function postPending\(env[\s\S]*?\n\}/);
         expect(fn).not.toBeNull();
-        const kevinSkip = fn[0].indexOf("if (approver.key === 'kevin') continue;");
+        const kevinSkip = fn[0].indexOf("if (approver.key === 'kevin') { kevinHeld++; continue; }");
         const firstPost = fn[0].indexOf('SLACK.post');
         expect(kevinSkip, 'the kevin-lane skip must exist in postPending').toBeGreaterThan(-1);
         expect(kevinSkip, 'the skip must come before the card is posted').toBeLessThan(firstPost);
+    });
+    it('his skipped rows cannot starve Mica: read wide, cap the posts', () => {
+        // Kevin's rows never get a Slack TS, so they match the unposted
+        // formula forever. Reading only MAX_POSTS_PER_RUN rows let ten of his
+        // rows occupy the whole page and silently stop Mica's cards (review
+        // finding, 1 Sep 2026). The read must be far wider than the post cap.
+        const fn = SRC.match(/async function postPending\(env[\s\S]*?\n\}/)[0];
+        expect(fn).toMatch(/queryTasks\(env, [\s\S]*?, 200\)/);
+        expect(fn).toContain('if (posted >= MAX_POSTS_PER_RUN) break;');
+        expect(fn, 'held-back rows must be visible in the log').toContain('kevin-lane pending without cards');
+    });
+    it('queryTasks follows the offset token instead of capping at one page', () => {
+        const fn = SRC.match(/async function queryTasks\(env[\s\S]*?\n\}/)[0];
+        expect(fn).toMatch(/data\.offset/);
+        expect(fn).toMatch(/while \(offset/);
     });
     it('the sweep still posts, reconciles and reads reactions for live cards (Mica + legacy)', () => {
         expect(SRC).toMatch(/phase\('post', \(\) => postPending/);
@@ -55,6 +70,35 @@ describe('the 08:00 digest', () => {
         // The marker write sits OUTSIDE the "anything pending" branch, so a
         // task arriving at 08:40 waits for tomorrow rather than pinging him.
         expect(SRC).toMatch(/env\.STATE\.put\(kvKey, mine\.length \? 'sent' : 'quiet-zero'/);
+    });
+    it('fails CLOSED when the KV binding is missing', () => {
+        // Falling through without send-once memory means a DM every minute
+        // for the whole hour — the exact flood the digest exists to end.
+        expect(SRC).toMatch(/if \(!env\.STATE\) \{ log\.push\('digest SKIPPED: STATE KV binding missing/);
+    });
+    it('counts the SAME population as the dashboard queue it links to', () => {
+        // APV_QUEUE_FORMULA in os/agents/index.html requires Sent For
+        // Approval By; a digest without that clause counts items the page
+        // cannot show, and Kevin can never find the difference.
+        const digest = SRC.match(/async function postKevinDigest[\s\S]*?\n\}/)[0];
+        expect(digest).toContain("LEN({Sent For Approval By}&'')>0");
+        const dashboard = readFileSync(join(ROOT, 'os/agents/index.html'), 'utf8');
+        expect(dashboard).toContain("LEN({Sent For Approval By}&'')>0");
+    });
+    it('a zero count is only trusted after a control read proves the field works', () => {
+        // A broken value comparison returns 200 OK and zero rows — identical
+        // to an empty queue — and quiet-zero then locks in for the day.
+        const digest = SRC.match(/async function postKevinDigest[\s\S]*?\n\}/)[0];
+        expect(digest).toContain('digest CONTROL FAILED');
+    });
+    it('long agent task names cannot kill the one message of the day', () => {
+        // Slack rejects the whole message if a block passes ~3000 chars.
+        const digest = SRC.match(/async function postKevinDigest[\s\S]*?\n\}/)[0];
+        expect(digest).toMatch(/esc\(truncate\(t\.name, 120\)\)/);
+        const build = SRC.match(/export function buildDigestText[\s\S]*?\n\}/)[0];
+        expect(build).toMatch(/truncate\([\s\S]*2900\)/);
+        // And a capped read says so rather than presenting the cap as truth.
+        expect(buildDigestText(500, ['A', 'B', 'C'], 'u', true)).toContain('*500+ items');
     });
     it('says the count, the top names, and where to decide — nothing else', () => {
         const url = 'https://example.test/queue';

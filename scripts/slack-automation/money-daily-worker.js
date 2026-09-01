@@ -775,8 +775,10 @@ function buildBriefBlocks(m, brief) {
     for (const f of brief.flags) {
         blocks.push({ type: 'section', text: { type: 'mrkdwn', text: `⚑ ${f}` } });
     }
+    // No "reply here" invitation: the CEO DM chat was retired 1 Sep 2026, so
+    // a reply in this thread reaches nobody.
     blocks.push({ type: 'context', elements: [{ type: 'mrkdwn',
-        text: `${londonDateLabel()} · 09:00 CEO brief · reply here to talk it through · history on the CEO Brief tab` }] });
+        text: `${londonDateLabel()} · 09:00 CEO brief · history on the CEO Brief tab` }] });
     return blocks;
 }
 
@@ -836,7 +838,7 @@ async function storeFallbackMarker(pat, m, tasks, huddle, reason, sentBrief) {
     try {
         const marker = sentBrief ? { ...sentBrief } : {
             one_thing: 'The CEO brief could not be written today. The money message was sent instead.',
-            first_step: 'Read the alert in Slack, then open the Money tab.',
+            first_step: 'Open the Money tab in the app; the reason is in the CEO Brief tab and the worker logs.',
             why: '',
             ignore: [],
             handed_off: [],
@@ -846,7 +848,11 @@ async function storeFallbackMarker(pat, m, tasks, huddle, reason, sentBrief) {
         marker.fallback = true;
         marker.fallback_reason = String(reason).slice(0, 300);
         await storeBrief(pat, marker, m, tasks || { counts: {} }, huddle);
-    } catch (_) { /* alerted already; nothing more we can do */ }
+    } catch (e) {
+        // The last line of evidence: if this write fails too, today's row
+        // stays empty and the later crons re-send. Say so in the logs.
+        console.error('[ceo-brief] fallback marker write ALSO failed — repeats likely:', e && e.message || e);
+    }
 }
 
 // Best-effort failure alert so a broken feed never fails silently. The title

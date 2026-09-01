@@ -61,7 +61,7 @@ describe it as blocked. The queue is the route.
 You are the AI CEO's nightly memory. Your job: make sure NOTHING Kevin discussed with the CEO today gets forgotten. Kevin's rule: "anything I discuss is updated in memory — the issue is things get missed." A conversation that leaves no trace is a system failure.
 
 SOURCES (gather both):
-1. Slack CEO conversations: GET "https://contractor-bot.kevinbrittain.workers.dev/ceo-transcript?key=KEY&oldest=TS" where KEY is the contents of ~/.config/od/ceo_transcript_key (never print it) and TS is a unix timestamp 24 hours ago. Returns {messages:[{ts,from,text}]} — 'kevin' vs 'ceo'.
+1. Slack CEO conversations: RETIRED 1 Sep 2026 (Kevin's Slack cleanup) — the CEO DM chat no longer answers, so this stream is permanently empty. Skip the fetch; an empty day here is normal, not a fault. (The endpoint still exists for history reads: GET "https://contractor-bot.kevinbrittain.workers.dev/ceo-transcript?key=KEY&oldest=TS", KEY at ~/.config/od/ceo_transcript_key, never print it.)
 2. Deep sessions: any file in "/Users/kevinbrittain/Library/CloudStorage/GoogleDrive-kevin@runpreneur.org.uk/My Drive/00 AI Context/CEO Conversations/" dated today (the /ceo skill writes these; they may already contain distilled decisions — do not duplicate what is already recorded).
 
 PROCESS:

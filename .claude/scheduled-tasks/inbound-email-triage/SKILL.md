@@ -382,8 +382,10 @@ no per-task ask, and NOT the agent lane shape above. Fields:
   Inbound Comms Response agent for a reply draft, and a maintenance job is
   work for Roy, not a reply.
 - Do NOT tick Maintenance Ticket — that checkbox is the contractor-job flow
-  (owner from Contractor); Roy raises contractor jobs himself via the
-  property-management Slack channel once he has looked at it.
+  (owner from Contractor); Roy raises contractor jobs in the dashboard's
+  Tasks page once he has looked at it (the Slack channel flow was retired
+  1 Sep 2026; assignment DMs still reach the person via the Airtable
+  task-assigned automation).
 
 Roy tasks go through the SAME gate (`python3 scripts/create-agent-task.py
 create --fields-json '<fields>'`): a tenant re-reporting the same fault on a

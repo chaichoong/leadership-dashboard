@@ -105,15 +105,16 @@ describe('THE REGRESSION: agent-discovered tier 1 never reaches Mica', () => {
 });
 
 describe('no routing decision reads name + description alone any more', () => {
-    it('the five call sites all go through isTier1Task', () => {
+    it('the four call sites all go through isTier1Task', () => {
         // The pre-fix expression, in the exact form the original four sites used.
         const old = APPROVALS.match(/isKevinOnlyMatter\(`\$\{t\.name\} \$\{t\.description\}`\)/g) || [];
         expect(old, 'a routing site still reads name + description only').toEqual([]);
         // Calls only — the `function isTier1Task(t)` declaration is not a site.
-        // Five since 1 Sep 2026: post, reconcile, reactions, digest lane filter,
-        // and the approver resolution inside postPending.
+        // Four: postPending, reactions, reconcile, rewriteApprovalPost. The
+        // 08:00 digest deliberately does NOT use it — it mirrors the
+        // dashboard queue's approver-email rule so the two counts match.
         const routed = APPROVALS.match(/(?<!function )isTier1Task\(t\)/g) || [];
-        expect(routed.length, 'every routing site should go through isTier1Task').toBe(5);
+        expect(routed.length, 'every routing site should go through isTier1Task').toBe(4);
     });
 });
 
