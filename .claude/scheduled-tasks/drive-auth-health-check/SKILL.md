@@ -91,9 +91,11 @@ worker even runs.
 - **GATE** — the worker's origin gate refused this one run. Do nothing this time;
   the script counts it. Two in a row is promoted to BROKEN automatically, because
   at that point "ignore and retry" has become a silence.
-- **BROKEN or UNKNOWN** (`alert_kevin` is true) — send ONE Slack DM to Kevin
-  (U08HW8F1MA8). Lead with the `reason` verbatim, then the fix below. Never
-  include any token or secret.
+- **BROKEN or UNKNOWN** (`alert_kevin` is true) — NO Slack DM (Kevin retired
+  system alerts on 1 Sep 2026). Instead file a HIGH finding via
+  `scripts/findings.py` with the `reason` verbatim plus the fix below, so it
+  lands in the daily report he reads in Claude Code. Never include any token
+  or secret.
 
 BROKEN usually means the Google token expired. Message:
 

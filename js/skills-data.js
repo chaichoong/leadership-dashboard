@@ -1539,11 +1539,9 @@ description: Create INTERNAL TEAM tasks (Kevin / Mica / Ericamae) in Kevin Britt
 > resolution. This skill bypasses all of that.
 >
 > Tell the user:
-> > "For contractor jobs, please use either:
-> > • The \`#property-management\` Slack channel — type the description
-> >   (e.g. *'boiler broken at 55 Elmdon, give it to Gary'*) and the bot
-> >   will handle it; or
-> > • The dashboard's *Add Task* button on the Tasks OS — set Assignee to
+> > "For contractor jobs, please use:
+> > • The dashboard's *Add Task* button on the Tasks OS (the Slack
+> >   channel flow was retired 1 Sep 2026) — set Assignee to
 > >   the contractor and Business will default to Real Estate (change to
 > >   Operations Director only if it's a non-property task for Roy).
 > > Both paths automatically notify the contractor in Slack."
@@ -2224,11 +2222,10 @@ description: Automates the extraction and assignment of INTERNAL TEAM tasks from
 > do NOT create it through this skill. Instead:
 >
 > 1. Show those items to the user separately as "Contractor jobs to log".
-> 2. Ask the user to log each one via the \`#property-management\` Slack
->    channel (e.g. *"boiler broken at 55 Elmdon, give it to Gary"*) so
->    the contractor-bot creates them with the right Business field, the
->    Maintenance Ticket flag, the contractor DM, and per-contractor
->    business resolution.
+> 2. Ask the user to log each one via the dashboard's *Add Task* button on
+>    the Tasks OS with the Maintenance Ticket flag ticked (the Slack
+>    channel flow was retired 1 Sep 2026; the Airtable task-assigned
+>    automation still DMs the contractor).
 >
 > Architectural rationale lives in
 > \`~/Projects/leadership-dashboard/scripts/slack-automation/CONTRACTOR-TASK-PATHS.md\`.

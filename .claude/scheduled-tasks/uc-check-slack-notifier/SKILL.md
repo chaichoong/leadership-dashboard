@@ -3,6 +3,13 @@ name: uc-check-slack-notifier
 description: ABSORBED into daily-ops (8 Aug 2026) as phase 6.1. Do not re-enable separately. Disabled AGAIN 15 Aug 2026 after the launchd watchdog kept flipping it back on (its repair() predated the absorption and treated disabled as broken) — that repair path is now deleted from scripts/uc-notifier-watchdog.py, which reports ENABLED as the fault instead.
 ---
 
+> **RETIRED 1 Sep 2026 — Kevin's ruling (Slack cleanup).** The whole Universal
+> Credit check process stopped: no tasks are created, no list is sent to Mica,
+> no watchdog runs. Kevin's words: even when a missing payment was caught early
+> there was never enough time to resolve it before it arrived or did not, so
+> missed UC now surfaces as arrears and is dealt with then. The steps below are
+> history, kept so the process can be rebuilt if he ever reverses this.
+
 ## QUEUE AND WRITE POLICY (added 6 Aug 2026 — do this before anything else)
 
 On 6 Aug 2026 ten routines woke together after the Mac slept and all ran between

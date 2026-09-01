@@ -314,7 +314,9 @@ export default {
         // shared with the office team. Different auth from the Slack
         // event flow because there's no Slack signature to verify.
         if (url.pathname === '/create-task') {
-            return handleInternalCreateTask(request, env);
+            // Retired 1 Sep 2026 with the contractor Slack flow (Kevin's
+            // ruling). Jobs are added in the dashboard's Tasks page instead.
+            return new Response(JSON.stringify({ ok: false, error: 'The contractor bot was retired on 1 Sep 2026. Add jobs in the dashboard Tasks page.' }), { status: 410, headers: { 'Content-Type': 'application/json' } });
         }
 
         // Read raw body once — needed verbatim for signature verification.
@@ -421,11 +423,15 @@ function shouldHandle(evt) {
     // the parent was actually a comment-DM (Task ID embedded in context
     // block) before doing anything.
     if (evt.channel_type === 'im' && evt.thread_ts && evt.text) return true;
-    // BRANCH 1b — CEO conversation: ANY direct message from Kevin (top-level,
-    // not just thread replies). Kevin talks to the AI CEO in this DM — daily
-    // brief follow-ups, strategy sessions, anything. Added 28 Jul 2026.
-    if (evt.channel_type === 'im' && !evt.thread_ts && evt.text && TEAM_MEMBERS[evt.user] && TEAM_MEMBERS[evt.user].firstName === 'Kevin') return true;
-    // BRANCH 2 — contractor channel message (legacy / primary flow).
+    // BRANCH 1b — CEO conversation: RETIRED 1 Sep 2026 (Kevin's ruling in the
+    // Slack cleanup). He was not using the DM chat; a top-level DM from him is
+    // now ignored rather than answered by the AI CEO.
+    //
+    // BRANCH 2 — contractor channel flow: RETIRED 1 Sep 2026 (same ruling).
+    // Contractors no longer log jobs through Slack; channel messages are
+    // ignored. The machinery below survives in the file so switching either
+    // flow back on is a one-line change here, but nothing reaches it.
+    if (evt.channel_type !== 'im' || !evt.thread_ts) return false;
     if (evt.channel !== PROPERTY_CHANNEL_ID) return false;
     // Accept messages from BOTH contractors and team members. Contractors
     // do their own work; team members can log new jobs and assign them.
@@ -453,12 +459,9 @@ async function routeMessage(evt, env) {
     if (evt.channel_type === 'im' && evt.thread_ts) {
         return handleDmThreadReply(evt, env);
     }
-    // CEO conversation — top-level DM from Kevin (28 Jul 2026).
-    if (evt.channel_type === 'im' && !evt.thread_ts) {
-        const tm = TEAM_MEMBERS[evt.user];
-        if (tm && tm.firstName === 'Kevin') return handleCeoConversation(evt, env);
-        return;
-    }
+    // CEO conversation: retired 1 Sep 2026 — shouldHandle no longer lets
+    // top-level DMs through, so only the guard below remains.
+    if (evt.channel_type === 'im' && !evt.thread_ts) return;
     const sender = senderFor(evt.user);
     if (!sender) return;
     const text = (evt.text || '').trim();
@@ -848,11 +851,11 @@ async function handleDmThreadReply(evt, env) {
     }
     const taskId = extractTaskIdFromMessage(parent.messages[0]);
     if (!taskId) {
-        // Not a task-comment thread. If it's Kevin, this is a CEO-brief (or any
-        // other) thread — hand the whole thing to the CEO conversation handler.
-        const tm = TEAM_MEMBERS[evt.user];
-        if (tm && tm.firstName === 'Kevin') return handleCeoConversation(evt, env);
-        console.warn('[dm-thread] no Task ID in parent — ignoring', parent.messages[0].ts);
+        // Not a task-comment thread. The CEO conversation used to catch
+        // Kevin's replies here; RETIRED 1 Sep 2026 with the rest of the CEO
+        // DM chat — a reply under the morning brief or the approvals digest
+        // must never wake the AI. Ignore it, loudly in the logs.
+        console.warn('[dm-thread] no Task ID in parent — ignoring (CEO chat retired 1 Sep 2026)', parent.messages[0].ts);
         return;
     }
 

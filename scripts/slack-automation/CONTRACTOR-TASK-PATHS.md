@@ -1,5 +1,13 @@
 # Contractor task creation — paths, drift, and the unified architecture
 
+> **RETIRED 1 Sep 2026 (Kevin's Slack cleanup ruling).** The contractor Slack
+> flow is OFF: the bot ignores `#property-management` messages, the
+> `/create-task` endpoint returns 410, and contractors are no longer DMed by
+> the bot. Maintenance jobs are created in the dashboard's Tasks page; the
+> Airtable automation "When task is assigned, send Slack alert" still DMs the
+> assignee (Roy included), so people are still told about work they are given.
+> Everything below is history, kept so the flow can be rebuilt if reversed.
+
 > **Roy is no longer a contractor (Kevin's ruling, 25 Aug 2026).** Roy Lavin is
 > a team member: Head of Property (Team Members `reclbdjfVev3bqNHS`, Roles row
 > "Head of Property"). All maintenance tasks route to HIM under Kevin's

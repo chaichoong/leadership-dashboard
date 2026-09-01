@@ -22,7 +22,7 @@
         { id: 'overview',    name: 'Leadership Dashboard',           icon: '📊', pageVer: '2.96', sopFile: 'sop.html',                   sopVer: '2.94', standalone: 'index.html#overview' },
         { id: 'os-strategy', name: 'Objective & Strategy',           icon: '🎯', pageVer: '1.51', sopFile: 'os/strategy/sop.html',       sopVer: '1.1', standalone: 'os/strategy/index.html' },
         { id: 'tasks',       name: 'Tasks & Projects',   icon: '✅', pageVer: '1.157', sopFile: 'os/tasks/sop.html',             sopVer: '1.4', standalone: 'os/tasks/index.html' },
-        { id: 'cfv',        name: 'CFVs',                          icon: '🚨', pageVer: '1.37', sopFile: 'sop-cfvs.html',               sopVer: '1.34', standalone: 'index.html#cfv' },
+        { id: 'cfv',        name: 'CFVs',                          icon: '🚨', pageVer: '1.38', sopFile: 'sop-cfvs.html',               sopVer: '1.34', standalone: 'index.html#cfv' },
         { id: 'money',      name: 'Money Confidence',              icon: '🧭', pageVer: '1.1', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#money' },
         { id: 'wealth',     name: 'Wealth',                        icon: '📈', pageVer: '1.19', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#wealth' },
         { id: 'income',     name: 'Accounts Receivable Fixed',     icon: '💷', pageVer: '1.5', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#income' },
@@ -56,7 +56,7 @@
         { id: 'content-machine', name: 'Content Machine',           icon: '🎬', pageVer: '1.0', sopFile: '',                            sopVer: '1.0', standalone: 'https://chaichoong.github.io/content-machine/' },
         { id: 'prospecting', name: 'Prospecting',                   icon: '🧲', pageVer: '1.17', sopFile: 'sop-prospecting.html',        sopVer: '1.5', standalone: 'index.html#prospecting' },
         { id: 'sitemap',    name: 'Site Map & Guides',             icon: '🔗', pageVer: '1.24', sopFile: 'sop-sitemap.html',            sopVer: '1.19', standalone: 'index.html#sitemap' },
-        { id: 'skills',     name: 'Skills Library',                icon: '🧠', pageVer: '1.16', sopFile: 'guides/skills.html',           sopVer: '1.0', standalone: 'index.html#skills' },
+        { id: 'skills',     name: 'Skills Library',                icon: '🧠', pageVer: '1.17', sopFile: 'guides/skills.html',           sopVer: '1.0', standalone: 'index.html#skills' },
         { id: 'ai-brain',  name: 'AI Brain',                       icon: '💭', pageVer: '1.0', sopFile: 'guides/ai-brain.html',         sopVer: '1.0', standalone: 'ai-brain.html' },
         { id: 'how-it-works', name: 'How It Works',               icon: '🗺️', pageVer: '2.2', sopFile: '',                             sopVer: '1.0', standalone: 'how-it-works.html' },
     ];

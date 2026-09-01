@@ -157,8 +157,10 @@ describe('the queue formula', () => {
 
 describe('the Slack loop honours the same date', () => {
   it('does not post a knocked-back approval', () => {
+    // 800 chars: the starvation-fix comment (1 Sep 2026) sits between the
+    // function head and the formula line.
     const post = worker.slice(worker.indexOf('async function postPending'),
-                              worker.indexOf('async function postPending') + 400);
+                              worker.indexOf('async function postPending') + 800);
     expect(post).toContain('NOT_DEFERRED');
     expect(worker).toMatch(/const NOT_DEFERRED = `NOT\(IS_AFTER\(\{Deferred Until\}, TODAY\(\)\)\)`/);
   });

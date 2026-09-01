@@ -125,7 +125,8 @@ Tool names: this harness exposes the browser as `mcp__Claude_Browser__*` — `pr
    element lookup, or just use the `tab-overview` size and the record counts.
 
    If the app genuinely cannot authenticate or never finishes loading, that is a FAIL — the token
-   may have been rotated; note it and Slack Kevin.
+   may have been rotated; note it and file a HIGH finding. No Slack (Kevin retired system alerts
+   1 Sep 2026; the ONLY sweep DM left is production DOWN).
 
 ### If `javascript_tool` is denied (auth cannot be injected)
 
@@ -138,9 +139,10 @@ The permission classifier can refuse every JS evaluation, including trivial read
 - Run the sweep **unauthenticated** anyway — see STEP 4's degraded mode. You still get real signal:
   shell render, sidebar integrity, navigation wiring, and per-tab console errors. What you do NOT
   get is data rendering, so say so explicitly and mark those tabs UNVERIFIED, never PASS.
-- Record the denial as a FAIL in the report and Slack Kevin that auth was blocked, so the fix
-  (pre-approving `mcp__Claude_Browser__javascript_tool` for this task) stays visible rather than
-  quietly degrading the sweep every morning.
+- Record the denial as a FAIL in the report and file a HIGH finding that auth was blocked, so the
+  fix (pre-approving `mcp__Claude_Browser__javascript_tool` for this task) stays visible rather
+  than quietly degrading the sweep every morning. No Slack DM for this — production DOWN is the
+  only DM this sweep may send (Kevin's ruling, 1 Sep 2026).
 
 ## STEP 3 — Enumerate the tabs dynamically (self-maintaining)
 Do NOT hardcode a tab list. Read the current set of tabs from the live app so this sweep stays correct as the app grows:
@@ -330,6 +332,6 @@ trail still lands daily; it just lands once, from one writer.
   `preview_start` fails, or `computer{screenshot}` and `get_page_text` both fail. A JS denial alone
   is DEGRADED, not blind: walk the tabs by clicking and report what you could and could not verify.
 - If the browser is genuinely unavailable, do NOT silently pass — record that the sweep could not
-  run and Slack Kevin that the sweep is blind today, then exit.
-- Keep Slack noise to a minimum: at most one DM per run, and only on failure. Kevin does not want a green "all good" message every day.
+  run, file a HIGH finding that the sweep was blind today, then exit. No DM for this.
+- The ONE Slack DM this sweep may ever send: production DOWN (the live URL check failed). Everything else goes in the report and the findings queue (Kevin's ruling, 1 Sep 2026).
 - This sweep is meant to be self-maintaining: because you enumerate tabs from the live app, new tabs are covered automatically. If you notice the app has changed shape in a way this prompt does not handle well, note it in the report so Kevin can tune the sweep.
