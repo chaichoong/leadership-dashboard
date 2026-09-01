@@ -123,6 +123,24 @@ than the ~48% the raw count implied.
 
 **Keep the undo log.** The apply step writes one; name it in your report.
 
+## Step 1c — Ground in the brain (Kevin's approved extension, 1 Sep 2026)
+
+Before deciding any move, check the AI brain for standing rulings. Paths are in
+`~/.claude/agents/GUARDRAILS.md`; the vault root is
+`.../My Drive/00 AI Context/`.
+
+- Probe first by READING A BYTE from one file in `Decisions/` — an unmounted
+  Drive folder still lists, and only fails on open. If the probe fails, write
+  **"brain UNCHECKED"** at the top of your report, say so in your summary, and
+  carry on with the board pass. A broken read is never a quiet "no rulings".
+- If the probe succeeds: list `Decisions/` filenames once, and for any stuck
+  task whose sender or subject matches a ruling, read that ruling before
+  choosing the move. When a ruling decides or shapes a move, name it in the
+  reason you record. Do not scan the whole vault — targeted reads only; the
+  board pass is a router, not a researcher.
+- A ruling never overrides the hard rules above. On a conflict, escalate the
+  task with the conflict named — never silently pick a side.
+
 ## Step 2 — Decide ONE move per stuck task
 
 Work oldest-first, hard deadlines and Overdue first of all. For each stuck task
@@ -156,7 +174,9 @@ out of your list — the board subtracted dispatch's tasks in code):
    "CLOSE PROPOSAL: duplicate of <keeper id> — folded into it". Never close
    the keeper; one proposal per task even when a folded task appears in two
    groups. `untouchable` twins sit at Status Approval — report them, never
-   touch them (their Agent Output is waiting on Kevin); a group whose
+   touch them HERE (their Agent Output is waiting on Kevin; the step 2b
+   cleanse is the one deliberate route that may propose on a lane item,
+   under its own limits); a group whose
    closable list is empty is report-only this slot. The board already keeps
    the other edges safe in code: Roy maintenance tasks never group with
    reply tasks, and parked or dispatch-in-flight tasks are never grouped.
@@ -181,13 +201,57 @@ as the slot allows. Gate submissions (close, pass-to-Roy, in-house finish) need
 real judgement — quality beats volume; never submit a proposal you have not
 checked against the task's own content.
 
+## Step 2b — Approval-gate cleanse (Kevin's approved extension, 1 Sep 2026)
+
+The gate must hold only what genuinely needs Kevin. Cross-agent gate hygiene
+lives with YOU; each doer agent withdraws only its own submissions. Read the
+lane:
+
+    python3 /Users/kevinbrittain/Projects/leadership-dashboard/scripts/task-manager.py gate > gate.json
+
+It gives you Kevin's lane (empty Approver = Kevin) oldest first with a
+600-char output excerpt each, the median age, and counts — legacy Approval
+rows without Sent For Approval By are excluded IN THE FORMULA, so they can
+never be swept here (they are stuck work, handled in step 2). A zero lane
+alongside 5+ Approval-status rows fails the read loudly; report it.
+
+For each lane item, oldest first, ask three questions — checks with findable
+answers, not vibes:
+
+1. **Already handled elsewhere?** A completed task, a sent reply, or an
+   approved sibling covers the same matter.
+2. **Overtaken by events?** The deadline passed harmlessly, the sender
+   resolved it, or the thing it proposes no longer exists.
+3. **Duplicate of another lane item?** Same matter waiting twice (the step 2
+   duplicates list and inboundUrl thread keys are your evidence — address
+   words are never evidence, per the dupe rules).
+
+Any yes → a CLOSE PROPOSAL through the gate. Mechanics that protect the
+original submission (dispatch submit REPLACES Agent Output wholesale):
+
+    python3 .../scripts/task-manager.py gate TASKID   # full original output
+
+Build the proposal file as: your `CLOSE PROPOSAL: <reason with the evidence
+named>` first, then a `--- ORIGINAL SUBMISSION (preserved) ---` divider, then
+the full original output. Submit it as yourself (`submit TASKID --agent
+rec1hYELb4zS8pjjO --type Admin`), ending with the mandatory closing line.
+Nothing is ever removed silently: every removal is a proposal Kevin sees, and
+a rejected proposal still shows the original below the divider.
+
+Limits: **at most 25 cleanse proposals per pass**, oldest first, remainder
+counted in the report. Never propose on an item younger than 48 hours (a
+live decision, not a stale one), never a second proposal for the same task,
+and record each as `{"task": id, "move": "close", "ok": ...}` like any other
+gate submission. All no → leave it; it genuinely needs Kevin.
+
 ## Step 3 — CEO review of gate proposals
 
-Before submitting any `close`, PASS TO ROY, or in-house `finish`, dispatch the
-`od-ceo` agent ONCE with the full list (task name, your proposed output). It
-returns PASS or REDO with 1-2 sentences per item; apply one redo round, then
-submit. It reviews, never rewrites. Record `ceoReview` counts in the report.
-Routes and escalates need no review — they are reversible internal moves.
+Before submitting any `close` (step 2 or the step 2b cleanse), PASS TO ROY,
+or in-house `finish`, dispatch the `od-ceo` agent ONCE with the full list
+(task name, your proposed output). It returns PASS or REDO with 1-2 sentences
+per item; apply one redo round, then submit. It reviews, never rewrites.
+Record `ceoReview` counts in the report. Routes and escalates need no
+review — they are reversible internal moves.
 
 ## Step 3b — Approval queue priority review (the board's 9am/1pm/5pm pass)
 
@@ -196,10 +260,9 @@ top of his queue, reviewed by the board at each slot. The AI Agents page
 orders his queue tier-1 first, then the `Priority` field, then longest
 waiting — so the ONE lever this review moves is Priority.
 
-Read the queue — KEVIN'S LANE ONLY, the same population as his page: Tasks
-`tblqB8b22hKBL4PF1`, `AND({Status}='Approval', LEN({Sent For Approval
-By}&'')>0)`, then drop any row whose Approver is set to someone other than
-Kevin (empty Approver = Kevin). Rank each item as the CEO would (WWKD):
+Read the queue from `gate.json` (already produced in step 2b — same
+population as his page: loop-raised Approval rows, non-Kevin Approvers
+already split out, paginated in code). Rank each item as the CEO would (WWKD):
 anything tier-1 (debts, litigation, enforcement, bailiffs, the restraint
 order, sums owed either way) and anything with a real-world deadline inside
 7 days is `Urgent`; income-protecting and client-facing work is `High`;
@@ -259,8 +322,10 @@ LEADING with what should have moved and did not:
    counts, and what was proposed for each group this slot. Zero is the only
    healthy number.
 3. Waiting on Kevin: count and the 5 oldest with hours waiting.
-4. Moves made this slot, by kind.
-5. Remaining backlog and what next slot takes first.
+4. Gate health (from gate.json): lane size, median age in hours, cleanse
+   proposals made this slot, and the cleanse remainder still to judge.
+5. Moves made this slot, by kind.
+6. Remaining backlog and what next slot takes first.
 
 Never write task content into `monitoring/` — counts only, anywhere public.
 

@@ -356,6 +356,44 @@ def digest_append(entry):
         fh.write(json.dumps(entry) + "\n")
 
 
+def median_hours(values):
+    """Median of a list of hour counts, or None on an empty lane."""
+    vals = sorted(v for v in values if v is not None)
+    if not vals:
+        return None
+    mid = len(vals) // 2
+    if len(vals) % 2:
+        return round(vals[mid], 1)
+    return round((vals[mid - 1] + vals[mid]) / 2, 1)
+
+
+def lane_view(f, now=None):
+    """One approvals-lane row → the view the cleanse and priority review judge.
+
+    Age anchors on Approval Slack TS (the moment the card reached Kevin) with
+    Created Time as the honest fallback — never the approval decision stamp,
+    and never the due or last-modified stamps (both re-stamped by
+    automations). The Agent Output is excerpted, not dumped: 600 characters is
+    enough to judge stale/overtaken/duplicate without hauling every full
+    draft through the run, and the tier-1 banner sits at the top when present."""
+    now = now or datetime.now(timezone.utc)
+    sent = (parse_slack_ts(f.get("Approval Slack TS"))
+            or parse_iso(f.get("Created Time")))
+    output = (f.get("Agent Output") or "").strip()
+    return {
+        "id": f.get("_id"),
+        "name": f.get("Task Name", ""),
+        "submittedBy": f.get("Sent For Approval By") or [],
+        "approverEmail": (f.get("Approver") or {}).get("email", ""),
+        "priority": f.get("Priority"),
+        "hoursWaiting": (round((now - sent).total_seconds() / 3600, 1)
+                         if sent else None),
+        "createdTime": f.get("Created Time"),
+        "inboundUrl": f.get("Inbound Note URL Link"),
+        "outputExcerpt": output[:600] + ("…" if len(output) > 600 else ""),
+    }
+
+
 # ---------------------------------------------------------------------------
 # Commands
 # ---------------------------------------------------------------------------
@@ -499,6 +537,71 @@ def cmd_board(dispatch_queue_path=None):
         "waitingOnKevin": buckets["waitingOnKevin"],
         "inFlight": [v["id"] for v in buckets["inFlight"]],
         "parked": [v["id"] for v in buckets["parked"]],
+    }
+    print(json.dumps(out, indent=1))
+
+
+# The gate lane read serving Step 2b (approval-gate cleanse, Kevin's approved
+# extension of 1 Sep 2026) and Step 3b (priority review). Same population as
+# Kevin's queue on the AI Agents page: Status Approval AND loop-raised (Sent
+# For Approval By set). Legacy Approval rows without that stamp are STUCK
+# work (4 Aug 2026 lesson) and never match the formula, so the cleanse can
+# never sweep them — that guarantee lives HERE, not in the skill's judgement.
+GATE_FORMULA = "AND({Status}='Approval', LEN({Sent For Approval By}&'')>0)"
+GATE_FIELDS = [
+    "Task Name", "Status", "Created Time", "Approval Slack TS",
+    "Sent For Approval By", "Approver", "Priority", "Agent Output",
+    "Inbound Note URL Link",
+]
+
+
+def cmd_gate(task=None):
+    if task:
+        # Full single-item read for building a cleanse proposal: dispatch
+        # submit REPLACES Agent Output wholesale, so the proposal file must
+        # carry the original submission below it — which needs the FULL
+        # text, not the lane listing's 600-char excerpt.
+        rec = airtable_request("GET", "%s/%s" % (TASKS_TABLE, task), None,
+                              "gate single read")
+        f = dict(rec.get("fields", {}), _id=rec["id"])
+        view = lane_view(f)
+        view["outputFull"] = (f.get("Agent Output") or "").strip()
+        print(json.dumps(view, indent=1))
+        return
+    recs = query_all(TASKS_TABLE, GATE_FORMULA, GATE_FIELDS, "gate lane read")
+    # Zero-read control: lane=0 while many rows sit at Status Approval means
+    # the formula's stamp field has drifted, because a typo'd field name
+    # returns 200 OK and an empty list. A handful of legacy rows alongside an
+    # empty lane is normal; five or more stamped-era rows with NO lane match
+    # is a broken read, not a clean gate.
+    status_only = query_all(TASKS_TABLE, "{Status}='Approval'",
+                            ["Task Name"], "gate control read")
+    if not recs and len(status_only) >= 5:
+        fail("gate lane read matched ZERO rows while %d tasks sit at Status "
+             "Approval — the formula's field names have drifted, do not "
+             "trust this read" % len(status_only))
+    now = datetime.now(timezone.utc)
+    lane, other = [], []
+    for r in recs:
+        v = lane_view(dict(r["fields"], _id=r["id"]), now)
+        # Empty Approver = Kevin (same rule dispatch applies at submit time);
+        # a submission awaiting someone else is not his to cleanse or rank.
+        if not v["approverEmail"] or v["approverEmail"] == KEVIN_EMAIL:
+            lane.append(v)
+        else:
+            other.append(v)
+    lane.sort(key=lambda v: -(v["hoursWaiting"] or 0))  # oldest first
+    out = {
+        "generatedAt": now.isoformat(),
+        "counts": {
+            "laneRead": len(recs),
+            "kevinLane": len(lane),
+            "otherApprovers": len(other),
+            "legacyApprovalRows": len(status_only) - len(recs),
+        },
+        "medianAgeHours": median_hours([v["hoursWaiting"] for v in lane]),
+        "lane": lane,
+        "otherApprovers": other,
     }
     print(json.dumps(out, indent=1))
 
@@ -736,6 +839,24 @@ def cmd_selftest():
         write_state({"history": {"2026-08-25": 1}})
         assert read_state()["history"]["2026-08-25"] == 1
         del os.environ["TASK_MANAGER_DIR"]
+    # gate lane maths (Step 2b cleanse + Step 3b priority review share it)
+    assert median_hours([]) is None
+    assert median_hours([5.0]) == 5.0
+    assert median_hours([1.0, 3.0, 100.0]) == 3.0
+    assert median_hours([1.0, 2.0, 3.0, 4.0]) == 2.5
+    lv = lane_view({"_id": "recG", "Task Name": "G", "Created Time": old,
+                    "Agent Output": "x" * 700,
+                    "Approver": {"email": "someone@else.com"}}, now)
+    assert lv["hoursWaiting"] and lv["hoursWaiting"] > 24 * 20, lv
+    assert len(lv["outputExcerpt"]) == 601, lv
+    assert lv["approverEmail"] == "someone@else.com", lv
+    ts2 = str((now - timedelta(hours=2)).timestamp())
+    lv = lane_view({"_id": "recG2", "Created Time": old,
+                    "Approval Slack TS": ts2}, now)
+    assert lv["hoursWaiting"] == 2.0, lv  # slack ts beats created time
+    # the lane can NEVER include a legacy Approval row: the formula itself
+    # requires the stamp, mirroring the classify rule tested above
+    assert "Sent For Approval By" in GATE_FORMULA
     print("selftest OK")
 
 
@@ -759,6 +880,10 @@ def main():
     p = sub.add_parser("priority")
     p.add_argument("task")
     p.add_argument("--set", required=True, dest="value", choices=list(PRIORITY_OPTIONS))
+    g = sub.add_parser("gate")
+    g.add_argument("task", nargs="?", default=None,
+                   help="one task id → full lane view incl. complete Agent "
+                        "Output (for building a cleanse proposal)")
     sub.add_parser("publish")
     v = sub.add_parser("verify")
     v.add_argument("--report", required=True)
@@ -766,6 +891,8 @@ def main():
     a = ap.parse_args()
     if a.cmd == "board":
         cmd_board(a.dispatch_queue)
+    elif a.cmd == "gate":
+        cmd_gate(a.task)
     elif a.cmd == "note":
         cmd_note(a.task, a.move, a.reason, a.name)
     elif a.cmd == "priority":
