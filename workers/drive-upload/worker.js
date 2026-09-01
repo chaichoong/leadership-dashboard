@@ -286,10 +286,14 @@ export default {
             }
             try {
                 if (url.pathname === '/calendar/test') {
+                    // Probe the account the diary writes will actually use —
+                    // probing whichever account lists first reported a
+                    // NEIGHBOUR'S consent state as this lane's health.
+                    const acctQ = (url.searchParams.get('account') || DEFAULT_SENDER).toLowerCase().trim();
                     const listed = await env.GMAIL_AUTH.list({ prefix: 'gmail_refresh_token:' });
                     const connected = listed.keys.map(k => k.name.slice('gmail_refresh_token:'.length));
                     let scope = null, calendarScope = false;
-                    const probe = connected[0] && await env.GMAIL_AUTH.get(`gmail_refresh_token:${connected[0]}`);
+                    const probe = await env.GMAIL_AUTH.get(`gmail_refresh_token:${acctQ}`);
                     if (probe) {
                         const accessToken = await getGmailAccessToken(env, probe);
                         const info = await fetch(`https://oauth2.googleapis.com/tokeninfo?access_token=${encodeURIComponent(accessToken)}`);
@@ -298,9 +302,9 @@ export default {
                         calendarScope = !!(scope && scope.includes('calendar.events'));
                     }
                     return jsonResponse({ status: calendarScope ? 'ok' : 'not-connected',
-                                          connected, calendarScope,
+                                          account: acctQ, connected, calendarScope,
                                           hint: calendarScope ? undefined
-                                              : `Re-grant once at /auth/gmail — the stored token predates the calendar scope.` },
+                                              : `Re-grant once at /auth/gmail?account=${acctQ} — the stored token predates the calendar scope.` },
                                         calendarScope ? 200 : 409);
                 }
 

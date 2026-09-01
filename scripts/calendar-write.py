@@ -67,10 +67,17 @@ LEDGER = os.path.join(STATE_DIR, "calendar-created.jsonl")
 PAT_PATH = os.path.expanduser("~/.config/od/airtable_pat")
 SEND_KEY_PATH = os.path.expanduser("~/.config/od/gmail_send_key")
 
+# Which Google account's diary the entry lands in. Kevin's ruling, 1 Sep 2026:
+# his main calendar lives on the WORKSPACE account, kevin@runpreneur.org.uk —
+# kevinbrittain@gmail.com is the personal free account. This deliberately
+# DIFFERS from the email default (gmail, per GUARDRAILS): the two defaults
+# answer different questions ("who is writing" vs "whose diary is it").
+CALENDAR_ACCOUNT = "kevin@runpreneur.org.uk"
+
 WORKER = "https://drive-upload.kevinbrittain.workers.dev"
 CREATE_URL = f"{WORKER}/calendar/create"
-HEALTH_URL = f"{WORKER}/calendar/test"
-CONSENT_URL = f"{WORKER}/auth/gmail"
+HEALTH_URL = f"{WORKER}/calendar/test?account={CALENDAR_ACCOUNT}"
+CONSENT_URL = f"{WORKER}/auth/gmail?account={CALENDAR_ACCOUNT}"
 
 # How far in the past START may sit at create time. A draft can wait in the
 # approval queue for a while, so a small grace beats a refusal Kevin cannot
@@ -210,6 +217,7 @@ def cmd_create(args):
                    "title": event["title"], "start": event["start"]})
 
     result = worker_call(CREATE_URL, {
+        "account": CALENDAR_ACCOUNT,
         "title": event["title"],
         "start": event["start"],
         "end": event["end"],
