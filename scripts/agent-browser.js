@@ -277,10 +277,32 @@ async function shoot(page, out) {
   return out;
 }
 
+// A submit is only DONE when the page proves it. On 28 Aug 2026 four Adobe
+// e-sign sends logged every step executed:true, ending with a click on "Send" —
+// and all four agreements sat in Adobe as DRAFTS for four days. Nobody was
+// emailed, nothing errored, and the tasks were completed. `executed: true`
+// records that Playwright clicked an element, never that the site accepted the
+// action. So a commit plan that submits must DECLARE its proof: something the
+// page shows only after a successful submit. No declared proof, no run.
+function assertConfirmable(plan) {
+  const submits = (plan.steps || []).some((s) => s && s.do === 'submit');
+  if (!submits) return;
+  const c = plan.confirm;
+  if (!c || typeof c.selector !== 'string' || !c.selector.trim()) {
+    die('this plan submits but declares no proof of landing. Add\n' +
+        '  "confirm": { "selector": "<what the page shows ONLY after a successful submit>" }\n' +
+        'e.g. Adobe e-sign: "text=/[Ss]uccessfully sent/". A submit whose success cannot be\n' +
+        'seen is the four-drafts failure of 28 Aug 2026 waiting to repeat.');
+  }
+}
+
 // Runs plan steps. `allowSubmit` false means the submit step is unreachable —
-// the loop returns before it, it does not skip past it.
-async function runSteps(page, steps, allowSubmit) {
+// the loop returns before it, it does not skip past it. `confirm` is the
+// declared proof of landing; checked after the final step whenever a submit
+// actually executed.
+async function runSteps(page, steps, allowSubmit, confirm) {
   const done = [];
+  let submitted = false;
   for (const s of steps) {
     if (s.do === 'submit' && !allowSubmit) {
       done.push({ do: 'submit', executed: false, reason: 'prepare mode stops here' });
@@ -304,6 +326,7 @@ async function runSteps(page, steps, allowSubmit) {
       case 'click':
       case 'submit':
         await page.click(s.selector, { timeout: 20000 });
+        if (s.do === 'submit') submitted = true;
         break;
       case 'upload': {
         // TWO patterns exist and a site tells you which only by behaving.
@@ -363,6 +386,18 @@ async function runSteps(page, steps, allowSubmit) {
         die(`unknown step "${s.do}"`);
     }
     done.push({ do: s.do, executed: true, selector: s.selector || null, url: s.url || null });
+  }
+  if (submitted && confirm && confirm.selector) {
+    const timeout = Math.min(Number(confirm.timeoutMs) || 30000, 120000);
+    try {
+      await page.waitForSelector(confirm.selector, { timeout });
+    } catch {
+      throw new Error(
+        `SUBMIT NOT CONFIRMED: pressed submit but the page never showed the declared proof ` +
+        `(${confirm.selector}) within ${timeout}ms. Treat this action as NOT DONE — do not ` +
+        `complete the task. On Adobe, check the Drafts list for a stranded copy before retrying.`);
+    }
+    done.push({ do: 'confirm', executed: true, selector: confirm.selector });
   }
   return { done, stoppedBeforeSubmit: false };
 }
@@ -558,11 +593,14 @@ async function main() {
     const plan = readPlan(arg(rest, 'plan'));
     const shot = arg(rest, 'shot');
     if (!shot) die('--shot is required: the screenshot IS the thing Kevin approves');
+    // Checked BEFORE the approval read and the browser launch: a plan that
+    // cannot prove its submit landed is refused while it is still cheap.
+    if (cmd === 'commit') assertConfirmable(plan);
     let approval = null;
     if (cmd === 'commit') approval = assertApproved(arg(rest, 'task'));
 
     const res = await withPage(profile, false, async (page) => {
-      const r = await runSteps(page, plan.steps, cmd === 'commit');
+      const r = await runSteps(page, plan.steps, cmd === 'commit', plan.confirm);
       const png = await shoot(page, shot);
       return Object.assign(r, { screenshot: png, url: page.url(), title: await page.title() });
     });
@@ -599,4 +637,4 @@ if (require.main === module) {
 }
 
 module.exports = { hostAllowed, runSteps, assertNotCredential, assertApproved, SECRET_NAME_RE, loadSites,
-                   assertUploadable, UPLOAD_DIR, UPLOAD_EXTENSIONS };
+                   assertUploadable, assertConfirmable, UPLOAD_DIR, UPLOAD_EXTENSIONS };
