@@ -79,9 +79,14 @@ describe('what the fixer may never merge on its own', () => {
     const fn = SRC.slice(SRC.indexOf('def cmd_merge'), SRC.indexOf('def main'));
     expect(fn).toMatch(/if not d\["mayAutoMerge"\]:[\s\S]{0,400}return 0/);
     // …and it must return BEFORE the gate runs, so a protected PR is never
-    // merged by a lucky green run.
+    // merged by a lucky green run. It must also return before the merge result
+    // is BUILT: that fetches and creates a worktree for a PR we already know we
+    // will not merge. (Signature widened 1 Sep 2026 — the gate now takes the
+    // tree to test; see tests/fixer-merge-result.test.js and finding 414.)
     const refuseAt = fn.indexOf('mayAutoMerge');
-    const gateAt = fn.indexOf('run_gate()');
+    const gateAt = Math.min(
+      ...[fn.indexOf('run_gate('), fn.indexOf('build_merge_result(')].filter((i) => i > -1)
+    );
     expect(refuseAt, 'the protected-path refusal is gone').toBeGreaterThan(-1);
     expect(gateAt).toBeGreaterThan(-1);
     expect(refuseAt).toBeLessThan(gateAt);
