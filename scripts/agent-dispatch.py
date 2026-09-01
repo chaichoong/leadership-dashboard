@@ -77,6 +77,9 @@ from agent_email_format import (  # noqa: E402
     validate_submission as validate_email_submission,
     validate_submission_any as validate_any_submission,
 )
+# The CALENDAR contract lives in one place too, shared with
+# scripts/calendar-write.py — same one-parser rule, same reason.
+from agent_calendar_format import calendar_submit_problem  # noqa: E402
 
 BASE_ID = "appnqjDpqDniH3IRl"
 TASKS = "tblqB8b22hKBL4PF1"
@@ -1859,6 +1862,22 @@ def cmd_submit(args):
                 "       than a refused draft: the refusal arrives after the\n"
                 "       decision."
             )
+
+    # A CALENDAR output is the same promise about calendar-write.py. Validated
+    # with the SAME parser that script uses, for the same reason as above —
+    # and quiet on any output that is not claiming the CALENDAR shape.
+    cal_problem = calendar_submit_problem(output, args.type)
+    if cal_problem:
+        sys.exit(
+            f"ERROR: refusing to submit {args.task} — {cal_problem}.\n"
+            "       The CALENDAR shape is defined in\n"
+            "       scripts/agent_calendar_format.py:\n"
+            "         CALENDAR: / TITLE: / START: / END: (YYYY-MM-DD HH:MM,\n"
+            "         London), optional LOCATION:/NOTES:, `---`, then a plain\n"
+            "         summary. Submit with --type Admin. No attendees ever.\n"
+            "       An approved entry that cannot be created is worse than a\n"
+            "       refused draft: the refusal arrives after the decision."
+        )
 
     # WHO approves. The task's Approver field decides (set by Inbound Comms at
     # creation: label 8 = Mica, label 12 = Kevin); empty means Kevin. Tier 1

@@ -35,6 +35,20 @@
 //                       unless the task says otherwise).
 //   GET  /send-email/test — token health + which senders are connected.
 //
+// CALENDAR (added 1 Sep 2026, Inbound Comms Response extension): approved
+// diary entries land in Kevin's Google Calendar headlessly. Gated by the SAME
+// Bearer <GMAIL_SEND_KEY> as /send-email — a diary write is a send-class
+// consequence. The CONTROL is scripts/calendar-write.py, which only forwards
+// the Agent Output of a task Kevin approved. Requires the calendar.events
+// scope — a 403 from Google means the stored token predates this change:
+// re-grant once at /auth/gmail. Attendees are REFUSED at this layer too: a
+// diary entry never emails a third party; invites are Correspondence.
+//   POST /calendar/create — { title, start, end, timeZone, location?,
+//                             description?, account? } → { id, htmlLink }.
+//                             start/end are RFC3339 local times paired with
+//                             timeZone (Europe/London from the script).
+//   GET  /calendar/test   — token health + whether calendar scope is granted.
+//
 // GMAIL TRIAGE (added 24 Aug 2026, Inbound Comms Triage agent): script-only
 // read + label endpoints so the daily triage run can sort Kevin's inbox
 // headlessly. Gated by Bearer <GMAIL_TRIAGE_KEY> — deliberately NOT the send
@@ -132,7 +146,7 @@ export default {
             // openid email is included so the callback can prove WHICH account
             // granted, and file the token under that account.
             const hint = url.searchParams.get('account');
-            const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${env.GOOGLE_CLIENT_ID}&redirect_uri=${encodeURIComponent(url.origin + '/auth/callback')}&response_type=code&scope=${encodeURIComponent('openid email https://www.googleapis.com/auth/gmail.send https://www.googleapis.com/auth/gmail.modify')}&access_type=offline&prompt=consent&state=gmail${hint ? `&login_hint=${encodeURIComponent(hint)}` : ''}`;
+            const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${env.GOOGLE_CLIENT_ID}&redirect_uri=${encodeURIComponent(url.origin + '/auth/callback')}&response_type=code&scope=${encodeURIComponent('openid email https://www.googleapis.com/auth/gmail.send https://www.googleapis.com/auth/gmail.modify https://www.googleapis.com/auth/calendar.events')}&access_type=offline&prompt=consent&state=gmail${hint ? `&login_hint=${encodeURIComponent(hint)}` : ''}`;
             return Response.redirect(authUrl, 302);
         }
 
@@ -160,8 +174,8 @@ export default {
                 await env.GMAIL_AUTH.put(`gmail_refresh_token:${email.toLowerCase()}`, tokenData.refresh_token);
                 return new Response(
                     `<html><body style="font-family:sans-serif;max-width:600px;margin:40px auto;padding:20px">
-                    <h2>Email sending and inbox triage are connected for ${email}</h2>
-                    <p>The agents can now send approved email from this account, and the triage agent can read and sort its inbox. Nothing else to do — you can close this tab.</p>
+                    <h2>Email, inbox triage and calendar are connected for ${email}</h2>
+                    <p>The agents can now send approved email from this account, the triage agent can read and sort its inbox, and approved calendar entries can be added to its diary. Nothing else to do — you can close this tab.</p>
                     </body></html>`,
                     { status: 200, headers: { 'Content-Type': 'text/html' } }
                 );
@@ -254,6 +268,77 @@ export default {
                 if (!sendRes.ok) throw new Error('Gmail send failed: ' + await sendRes.text());
                 const sent = await sendRes.json();
                 return jsonResponse({ status: 'sent', id: sent.id, threadId: sent.threadId });
+            } catch (e) {
+                return jsonResponse({ error: e.message }, 500);
+            }
+        }
+
+        // ------------------------------------------------------------------
+        // Calendar — script-only, never browser-origin. Writes an approved
+        // entry to Kevin's own diary. Same key as /send-email: a diary write
+        // is a send-class consequence, and the approval gate lives in
+        // scripts/calendar-write.py, not here.
+        // ------------------------------------------------------------------
+        if (url.pathname === '/calendar/create' || url.pathname === '/calendar/test') {
+            const auth = request.headers.get('Authorization') || '';
+            if (!env.GMAIL_SEND_KEY || auth !== `Bearer ${env.GMAIL_SEND_KEY}`) {
+                return jsonResponse({ error: 'Forbidden' }, 403);
+            }
+            try {
+                if (url.pathname === '/calendar/test') {
+                    const listed = await env.GMAIL_AUTH.list({ prefix: 'gmail_refresh_token:' });
+                    const connected = listed.keys.map(k => k.name.slice('gmail_refresh_token:'.length));
+                    let scope = null, calendarScope = false;
+                    const probe = connected[0] && await env.GMAIL_AUTH.get(`gmail_refresh_token:${connected[0]}`);
+                    if (probe) {
+                        const accessToken = await getGmailAccessToken(env, probe);
+                        const info = await fetch(`https://oauth2.googleapis.com/tokeninfo?access_token=${encodeURIComponent(accessToken)}`);
+                        const data = await info.json();
+                        scope = data.scope || null;
+                        calendarScope = !!(scope && scope.includes('calendar.events'));
+                    }
+                    return jsonResponse({ status: calendarScope ? 'ok' : 'not-connected',
+                                          connected, calendarScope,
+                                          hint: calendarScope ? undefined
+                                              : `Re-grant once at /auth/gmail — the stored token predates the calendar scope.` },
+                                        calendarScope ? 200 : 409);
+                }
+
+                if (request.method !== 'POST') return jsonResponse({ error: 'POST required' }, 405);
+                const body = await request.json();
+                if (body.attendees !== undefined) {
+                    return jsonResponse({ error: 'attendees are not supported: a diary entry never emails a third party. Anything inviting someone is Correspondence and goes through the email gate.' }, 400);
+                }
+                const { title, start, end, timeZone, location, description, account } = body;
+                if (!title || !start || !end || !timeZone) {
+                    return jsonResponse({ error: 'title, start, end and timeZone are required' }, 400);
+                }
+                const acct = (account || DEFAULT_SENDER).toLowerCase().trim();
+                const refreshToken = await env.GMAIL_AUTH.get(`gmail_refresh_token:${acct}`);
+                if (!refreshToken) {
+                    return jsonResponse({ error: `Google not connected for ${acct}. Grant once at /auth/gmail?account=${acct}` }, 409);
+                }
+                const accessToken = await getGmailAccessToken(env, refreshToken);
+                const createRes = await fetch('https://www.googleapis.com/calendar/v3/calendars/primary/events', {
+                    method: 'POST',
+                    headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        summary: title,
+                        start: { dateTime: start, timeZone },
+                        end: { dateTime: end, timeZone },
+                        location: location || undefined,
+                        description: description || undefined,
+                    }),
+                });
+                if (!createRes.ok) {
+                    const detail = await createRes.text();
+                    if (createRes.status === 403) {
+                        return jsonResponse({ error: `Calendar scope not granted for ${acct} — re-grant once at /auth/gmail?account=${acct}. Google said: ${detail.slice(0, 200)}` }, 409);
+                    }
+                    throw new Error('Calendar create failed: ' + detail);
+                }
+                const ev = await createRes.json();
+                return jsonResponse({ status: 'created', id: ev.id, htmlLink: ev.htmlLink });
             } catch (e) {
                 return jsonResponse({ error: e.message }, 500);
             }
