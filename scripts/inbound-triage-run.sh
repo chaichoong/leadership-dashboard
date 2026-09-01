@@ -120,6 +120,26 @@ cd "$REPO" || { echo "ERROR: repo not found at $REPO" >&2; exit 1; }
 /usr/bin/python3 "$REPO/scripts/agent-dispatch.py" clear-alerts \
   > "$SCRATCH/cleared-alerts.json" 2>&1 || true
 
+# THE HISTORY BOOK + OPEN MATTERS (1 Sep 2026, agent-gate EXTEND verdict —
+# the approved chain map lives on the register row recYy33zkoa099uM2). Two
+# pre-reads on the same contract as gmail-sent.json: produced HERE because a
+# check the agent must remember to run is a check that gets skipped, and a
+# failure lands IN the file as an error object the skill treats as
+# UNCHECKED, never as absence. The history book is where each sender's mail
+# has historically been filed BY HUMANS — the agent's own moves are excluded
+# so it cannot learn its own guesses — rebuilt weekly (history-stale gates
+# it) from end-state Gmail label membership into the Triage History Book
+# table. The matters snapshot is every open agent task plus 14 days of
+# completed ones, so a message on a known matter JOINS its task at the gate
+# instead of becoming a sibling for Kevin to reject.
+if /usr/bin/python3 "$REPO/scripts/inbound-triage.py" history-stale >> "$LOG" 2>&1; then
+  /usr/bin/python3 "$REPO/scripts/inbound-triage.py" history-build >> "$LOG" 2>&1 || true
+fi
+/usr/bin/python3 "$REPO/scripts/inbound-triage.py" history-dump \
+  > "$SCRATCH/history-book.json" 2>&1 || true
+/usr/bin/python3 "$REPO/scripts/inbound-triage.py" matters \
+  > "$SCRATCH/open-matters.json" 2>&1 || true
+
 # THE LESSONS FILE IS READ FIRST, AND THAT IS LOAD-BEARING (27 Aug 2026).
 #
 # This runner invokes `claude -p` against SKILL.md files. It does NOT load
@@ -134,7 +154,7 @@ cd "$REPO" || { echo "ERROR: repo not found at $REPO" >&2; exit 1; }
 "$CLAUDE" -p "You are the Inbound Comms Triage agent's scheduled run. THIS RUN IS THE $SLOT_LABEL SLOT — that is the wall clock at run start, read for you. Head your report with exactly '$SLOT_LABEL slot' and never substitute a slot you worked out yourself.
 0. FIRST read /Users/kevinbrittain/.claude/agents/inbound-comms-triage.md — that file is your standing instructions, including the '## Lessons from Kevin' section, which is where every rule he has asked you to remember lives. Apply every lesson in it to the decisions you make below. If a lesson conflicts with a skill step, say so in your report rather than guessing which wins.
 Then do these three skills in order, each in full:
-1. /Users/kevinbrittain/.claude/scheduled-tasks/inbound-email-triage/SKILL.md — BEFORE creating a task for any email thread, check \$SCRATCH/gmail-sent.json: if that thread id already has a send NEWER than the incoming message, it has been answered — file it, do not create a task. If that file carries an \"error\" key or \"truncated\": true, treat every thread as UNCHECKED and say so in your report; never read a failed check as \"nothing was answered\". Report how many you suppressed this way.
+1. /Users/kevinbrittain/.claude/scheduled-tasks/inbound-email-triage/SKILL.md — BEFORE creating a task for any email thread, check \$SCRATCH/gmail-sent.json: if that thread id already has a send NEWER than the incoming message, it has been answered — file it, do not create a task. If that file carries an \"error\" key or \"truncated\": true, treat every thread as UNCHECKED and say so in your report; never read a failed check as \"nothing was answered\". Report how many you suppressed this way. Two more pre-reads on the same contract: \$SCRATCH/history-book.json is where each sender's mail has HISTORICALLY been filed by humans (the skill's Step 2 history-book rule — the skill's rules WIN over the book, and a disagreement goes in your --reason), and \$SCRATCH/open-matters.json is every open agent task plus 14 days of completed ones (the skill's Step 3b matter check — one matter, one task). An \"error\" key in either file means that check is UNCHECKED this run: say so and fall back to the rules and the per-thread dedupe alone. Report how many decisions the book steered and how many threads JOINED an existing matter.
 2. /Users/kevinbrittain/.claude/scheduled-tasks/inbound-messages-sweep/SKILL.md — IMPORTANT: in this context chat.db reads are DENIED to you; the fresh pre-read dumps at $SCRATCH/imessage-scan.json and $SCRATCH/imessage-sent.json are your scan and sent-check data, per the skill's pre-dump rules.
 3. /Users/kevinbrittain/.claude/scheduled-tasks/agent-dispatch/SKILL.md (Kevin's ruling, 24 Aug 2026: dispatch runs in every slot so the work triaged above reaches the approval queue in the same slot)
 Rules for the whole run: this is real mail — when unsure between outcomes choose the agent-lane task; when unsure about archiving, do not archive; never send, reply, or delete anything yourself (dispatch prepares and submits through its own gated script only). Working and temp files go ONLY under $SCRATCH — NEVER under the repo, and never in monitoring/, because monitoring/ is committed to a public repository and scan output carries full email bodies. Counts-only reports in monitoring/ are fine. A broken read (Gmail or iMessage) is reported loudly, never treated as a quiet day. Do not take the queue lock (this run already holds it). Do not edit, commit, or push code; file anything needing a code change via scripts/findings.py. Complete each skill's closing steps in full (watermark, score, publish; dispatch's verify step). End with at most twenty lines of counts only — never message content, sender names, or record IDs." \

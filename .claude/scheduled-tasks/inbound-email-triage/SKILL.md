@@ -105,6 +105,20 @@ the `list-unsubscribe` header (its presence = machine mail).
    the sender replied to us: this is live conversation, continue to rule 1
    (the Step 3 dedupe will UPDATE the thread's task rather than duplicate it).
 
+0b. **The history book (Kevin's approved revamp, 1 Sep 2026):** the runner
+   pre-reads `$SCRATCH/history-book.json` — for each sender, where their mail
+   has HISTORICALLY been filed by humans (Kevin's and Mica's filing; this
+   agent's own past moves are excluded so it cannot learn its own guesses).
+   Look a sender up with Grep on the file rather than reading it whole. A
+   sender with a `vote` (3+ filings, 80% one lane) is strong evidence for
+   that lane — especially between a file lane and a bare archive, where the
+   book knows a home the rules alone would miss. THE RULES IN THIS SKILL WIN
+   over the book: when they disagree, follow the rules and name the
+   disagreement in your `--reason` (the digest is how a wrong rule gets
+   found). If the file is missing, is not JSON, or carries an `error` key,
+   every sender is UNKNOWN — say so in your report and triage on the rules
+   alone; a broken book never reads as "no history".
+
 1. **Label 12 — actionable (task created, Kevin approves):** anything needing
    a reply or action — personal, family, legal, courts, creditors, banks,
    HMRC, accountants, insurance, tenant matters, complaints, suppliers,
@@ -223,6 +237,40 @@ unhandled for Step 6, and report the failure.
 - **Existing task COMPLETED and the new message needs nothing** (a thanks, a
   confirmation) → log `note --do duplicate` and move on.
 
+### Step 3b — The matter check (one matter, one task; Kevin's approved revamp, 1 Sep 2026)
+
+The thread dedupe above catches the SAME thread. It cannot catch the same
+MATTER arriving on a new thread or from another channel — an email, an
+action completed, a wait, then a fresh email — which is how Kevin ends up
+approving three tasks for one thing. The runner pre-reads
+`$SCRATCH/open-matters.json`: every open agent task and the last 14 days of
+completed ones, each with its name, matter `key`, status, approval outcome,
+sender, thread `urls` and owning team member.
+
+Before creating any task, check the new item against it:
+
+- **An OPEN task on the same matter** (same sender and same subject, or its
+  `urls` already carry this thread) → this is a JOIN, not a create. Send it
+  through the Step 4 gate as normal — the gate folds it — and when the gate
+  answers `updated`, log `note --do updated --reason "joined open matter:
+  <matchedName from the gate output>"` so the digest shows every join
+  (Kevin audits these during the first week).
+- **A COMPLETED task on the same matter, closed within 14 days, and the new
+  message carries NO new ask** (a receipt, a confirmation, a thanks, an
+  auto-acknowledgement) → file or archive by the Step 2 rules and log
+  `note --do answered --reason "matter already handled: <task name>"`.
+  That is question 1 of the five questions, answered with data instead of
+  memory.
+- **A COMPLETED task on the same matter and the new message DOES carry a new
+  ask** → create through the gate as normal, and START the Description with
+  a line naming the earlier task, so the approver sees the history instead
+  of a cold start.
+
+If the file is missing, is not JSON, or carries an `error` key, the matter
+check is UNCHECKED this run: fall back to the Step 3 thread dedupe alone and
+say so in your report. Never treat a broken pre-read as "no open matters" —
+that is how duplicates get minted with a clean conscience.
+
 ## Step 4 — Act and create the tasks (no cap — every actionable thread gets its task)
 
 For every triaged message, apply the decision (this also logs it, with sender
@@ -247,8 +295,10 @@ chaser into the existing task):
 
 The gate answers on stdout: `"action": "created"` (log `note --do
 task-created` as before), or `"action": "updated"` (it folded your item into
-the existing open task on the same subject from the same sender — log `note
---do duplicate` and move on; the fold IS the handling). A fold also appends
+the existing open task on the same matter from the same sender — log `note
+--do updated --reason "joined open matter: <matchedName from the gate
+output>"` and move on; the fold IS the handling, and the reason is the
+audit trail Kevin checks). A fold also appends
 the new thread's URL into the existing task's `Inbound Note URL Link`, so
 the Step 3 and Step 5 `FIND` queries recognise the folded thread as handled
 from then on. A `"note"` about a differing sender means it deliberately
@@ -341,9 +391,9 @@ new thread folds into Roy's existing job instead of raising a second one.
 The MAINTENANCE prefix keeps repair tasks from ever folding into INBOUND
 reply tasks — the two lanes stay separate by name.
 
-Log each with `note --id <id> --do task-created` (or `--do duplicate` when
-the gate answered `updated`). The label move itself is still `act --do
-label13` exactly as before.
+Log each with `note --id <id> --do task-created` (or `--do updated --reason
+"joined open matter: <matchedName>"` when the gate answered `updated`). The
+label move itself is still `act --do label13` exactly as before.
 
 ## Step 5 — The stranded check (the safety net)
 
@@ -354,8 +404,9 @@ miss this agent exists to prevent — create its task now THROUGH THE GATE
 24 Aug ruling; lane-13 stranded mail takes the Step 4b Roy shape), log it,
 and say so in your report. If the gate answers `"updated"`, the thread's
 matter already had an open task and the fold IS the rescue: log `note --do
-duplicate`, do NOT report it as a rescue, and note the fold recorded the
-thread URL so this thread stops surfacing here. Creating the task is the whole rescue: the email stays wherever
+updated --reason "joined open matter: <matchedName>"`, do NOT report it as
+a rescue, and note the fold recorded the thread URL so this thread stops
+surfacing here. Creating the task is the whole rescue: the email stays wherever
 Kevin put it. The stranded_13 sweep is ALSO the safety net for a Step 4b
 create that failed after the label was applied — the label move removes the
 mail from the inbox, so without this sweep a failed create would sit unseen
@@ -403,9 +454,11 @@ block or undo the triage itself.
 
 ## Step 7 — Report (counts only, never content)
 
-Return at most ten lines: scanned / tasked / maintenance / archived / left /
-duplicates / stranded rescues / deferred / waiting score / anything that
-failed. Include the stale count from the scan ("N emails older than 2 days
+Return at most twelve lines: scanned / tasked / maintenance / archived /
+left / duplicates / matter joins / history-book steers (and any rule-vs-book
+disagreements) / stranded rescues / deferred / waiting score / anything that
+failed — including a pre-read (sent, history book, open matters) that came
+back UNCHECKED. Include the stale count from the scan ("N emails older than 2 days
 sit in the inbox") — those are Kevin's reading backlog and the daily report
 is where they stay visible. Say when a scan stayed truncated after 5 cycles.
 Zero new messages two days running is worth saying explicitly so a broken
