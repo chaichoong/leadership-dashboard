@@ -397,4 +397,23 @@ describe('skills and agent definitions stay in step (local machine only)', () =>
   it.skipIf(!existsSync(responseDef))('the Response agent hands creditor matters to the specialist', () => {
     expect(readFileSync(responseDef, 'utf8')).toMatch(/Creditor Management agent/);
   });
+
+  it.skipIf(!existsSync(responseDef) || !existsSync(agentDef))(
+    'tool parity and one-tap approvals bind BOTH admin agents (Kevin\'s riders, 1 Sep 2026)', () => {
+    // The tool layer is estate-level: both playbooks point at the shared
+    // policy and the GUARDRAILS lanes, never a private list — and both carry
+    // "Kevin does as little as possible" as a standing section, not a
+    // one-off lesson line. Losing either re-opens the per-agent fork the
+    // rider forbids.
+    const r = readFileSync(responseDef, 'utf8');
+    expect(r).toMatch(/parity ruling/i);
+    expect(r).toMatch(/agent-tools\.sh/);
+    expect(r).toMatch(/per-agent fork/i);
+    expect(r).toMatch(/Kevin does as little as possible/);
+    expect(r).toMatch(/ONE TAP/);
+    const a = readFileSync(agentDef, 'utf8');
+    expect(a).toMatch(/Kevin does as little as possible/);
+    expect(a).toMatch(/ONE TAP/);
+    expect(a).toMatch(/counts against\s+.{0,10}accuracy/i);
+  });
 });

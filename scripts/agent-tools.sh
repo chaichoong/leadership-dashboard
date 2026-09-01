@@ -36,7 +36,7 @@
 #   states the rule); a tool they cannot use cannot be used by accident.
 #
 # Sourced by: agent-slot-run.sh, handback-poll-run.sh, inbound-triage-run.sh,
-# task-manager-run.sh. Guarded by tests/agent-tools-parity.test.js, which fails
+# task-manager-run.sh. Guarded by tests/agent-initiative.test.js, which fails
 # if a runner hand-rolls its own list again.
 
 # Node lives under nvm, which launchd does not put on PATH. Resolve it once
