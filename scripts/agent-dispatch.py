@@ -2485,12 +2485,61 @@ def cmd_revise(args):
                       "wasChars": len(original)}))
 
 
+SIGNATURE_WATCH_LEDGER = os.environ.get(
+    "SIGNATURE_WATCH_LEDGER",
+    os.path.expanduser("~/knowledge-os/logs/signature-watch/watch.jsonl"))
+
+
+def sign_output_needs_watch(agent_output):
+    """True when the approved output is a SIGN carry-out — a document going
+    out for signature. The SIGN shape (agent_email_format.py) carries a
+    SIGNERS: header line before the --- divider; nothing else does."""
+    head = (agent_output or "").split("---", 1)[0]
+    return any(line.strip().upper().startswith("SIGNERS:")
+               for line in head.splitlines())
+
+
+def signature_watch_registered(task_id):
+    """Read the watcher's OWN ledger, never the run's claims. A register row
+    for this task means the signed-copy return leg is armed."""
+    try:
+        with open(SIGNATURE_WATCH_LEDGER) as fh:
+            for line in fh:
+                try:
+                    row = json.loads(line)
+                except ValueError:
+                    continue
+                if row.get("cmd") == "register" and row.get("task") == task_id:
+                    return True
+    except OSError:
+        pass
+    return False
+
+
 def cmd_complete(args):
     t = task_view(get_task(args.task))
     if t["outcome"] not in APPROVED:
         sys.exit(f"ERROR: refusing to complete {args.task} — outcome is "
                  f"'{t['outcome'] or 'empty'}', not an approval. Only "
                  "approved, carried-out work completes.")
+
+    # THE SIGNATURE-WATCH GATE (1 Sep 2026). A SIGN carry-out is not done when
+    # the request is sent; it is done when the signed copy can find its way
+    # back. On 28 Aug 2026 four letters of authority were "sent", completed,
+    # and never watched — they sat as Adobe drafts for four days and the
+    # watcher's ledger read "nothing registered and unsigned" the whole time.
+    # Refusing HERE is the point: an unwatched agreement is invisible for ever.
+    if sign_output_needs_watch(t["agentOutput"]) and \
+            not signature_watch_registered(args.task):
+        sys.exit(
+            f"ERROR: refusing to complete {args.task} — this is a SIGN "
+            "carry-out and no signature watch is registered for it.\n"
+            "       Arm the return leg first:\n"
+            f"         node scripts/signature-watch.js register --task "
+            f"{args.task} --agreement \"<Adobe agreement name>\" "
+            "--then post|email\n"
+            "       then complete. A signature request nobody is watching "
+            "is the 28 Aug 2026 four-drafts failure again.")
 
     # THE MINOR-EDITS GATE (Kevin's ruling, 26 Aug 2026). If he asked for an
     # edit, it must have been applied before the action. Refusing HERE rather
