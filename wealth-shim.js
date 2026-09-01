@@ -22,8 +22,9 @@
     'tblvtDXCBJCHu9hnK': 'net_worth_by_month',
     'tbldMPjXTu7ho5f0T': 'income_buckets',
     'tblm5ZxyoiLfaBAS4': 'personal_budgets',
+    'tblTz8ErAmQGu7rIZ': 'debt_terms',   // liabilities + Payment Match (id-keyed; migration 0044, data via sync-debt-terms.py)
   };
-  const STUB = new Set(['tblTz8ErAmQGu7rIZ', 'tblZYsa0u1M17N7ZE']);  // debtTerms, valuations — deferred (optional)
+  const STUB = new Set(['tblZYsa0u1M17N7ZE']);  // valuations — still deferred (optional per-property overlay)
 
   const json = (obj, status = 200) => new Response(JSON.stringify(obj), { status, headers: { 'Content-Type': 'application/json' } });
   const rec = row => ({ id: row.id, fields: row.fields || {}, cellValuesByFieldId: row.fields || {} });
