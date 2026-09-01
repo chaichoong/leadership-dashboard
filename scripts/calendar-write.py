@@ -123,6 +123,9 @@ def worker_call(url, payload=None):
                                  method="POST" if payload else "GET")
     req.add_header("Authorization", f"Bearer {key}")
     req.add_header("Content-Type", "application/json")
+    # Cloudflare bans Python's default user agent outright (error 1010) —
+    # the same trap send-email.py and inbound-triage.py already carry.
+    req.add_header("User-Agent", "od-calendar-write/1.0")
     try:
         with urllib.request.urlopen(req) as r:
             return json.loads(r.read())
