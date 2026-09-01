@@ -10,15 +10,17 @@
 //   1. An agent PREPARES work and proposes it. It sends, files and executes
 //      NOTHING. It sets Status = Approval and records itself in
 //      "Sent For Approval By".
-//   2. This sweep posts that task to the approvals channel.
-//   3. Kevin answers. Two emoji and a sentence:
-//        ✅ approve — release it
-//        ❌ reject  — kill this piece of work entirely; counts against the agent
-//        a plain REPLY IN THE THREAD — the amendment. His words go back to the
-//        agent as the instruction. No emoji to remember, and no separate step:
-//        the reply IS the request for changes.
-//      This is why the message carries what the agent actually produced, not
-//      just the task title: he has to be able to judge it from his phone.
+//   2. KEVIN'S LANE (1 Sep 2026, his ruling): NO per-task Slack cards. 20+
+//      cards a day buried the phone and he stopped reading them. Instead ONE
+//      digest DM at 08:00 London — the count, the top few names, and a link
+//      to the dashboard approval queue, where every decision now happens
+//      (approve / reject / reject-and-remember / amend / knock back all live
+//      there already). Zero pending means no message at all.
+//   3. MICA'S LANE is unchanged: her label-8 cards still go to her bot DM as
+//      full cards, and her emoji verdicts are still read back by this sweep.
+//      The card-posting, reaction and staleness machinery below is HERS now
+//      (plus any of Kevin's cards still live from before the switch — those
+//      keep working until decided, they are just never posted again).
 //   4. Approve hands the task BACK to the agent, due today, so the agent can
 //      carry the approved action out and only THEN mark it Completed.
 //      Approving is not completing. Kevin never marks anything Completed.
@@ -642,11 +644,17 @@ const NOT_DEFERRED = `NOT(IS_AFTER({Deferred Until}, TODAY()))`;
 
 async function postPending(env, channels, log) {
     const recs = await queryTasks(env, `AND({Status}='Approval', LEN({Approval Slack TS}&'')=0, ${NOT_DEFERRED})`, MAX_POSTS_PER_RUN);
+    let posted = 0;
     for (const rec of recs) {
         const t = taskView(rec);
-        const agent = await agentName(env, t.agentId);
         const warn = isTier1Task(t);
         const approver = approverFor(t, warn);
+        // Kevin's lane gets NO per-task card (his ruling, 1 Sep 2026) — the
+        // 08:00 digest and the dashboard queue replaced them. Leaving the
+        // task unposted (no Slack TS) is deliberate: nothing to react to,
+        // nothing to reconcile, nothing on his phone.
+        if (approver.key === 'kevin') continue;
+        const agent = await agentName(env, t.agentId);
         const channel = await resolveChannelFor(env, approver, channels, log);
         const res = await slack(env, SLACK.post, {
             method: 'POST',
@@ -665,9 +673,69 @@ async function postPending(env, channels, log) {
             fields: { [AF.slackTs]: res.ts, [AF.slackBaseline]: new Date().toISOString() },
             typecast: true,
         });
+        posted++;
         log.push(`posted ${t.id}`);
     }
-    return recs.length;
+    return posted;
+}
+
+// ─── KEVIN'S DAILY DIGEST (1 Sep 2026) ───────────────────────────────
+
+// One DM at 08:00 London: how many items wait for him and where to decide
+// them. Replaces his per-task cards entirely. The hour lives in code, not the
+// cron, for the same reason as the CEO brief (Cloudflare's week starts on
+// Sunday and its clock is UTC — see money-daily-worker.js isLondonSendTime).
+// KV remembers "sent today" so the every-minute cron sends exactly once, and
+// the marker is written even on a zero-pending morning so a task arriving at
+// 08:40 waits for tomorrow's digest rather than pinging him mid-morning.
+export function londonParts(now = new Date()) {
+    const parts = new Intl.DateTimeFormat('en-GB', {
+        timeZone: 'Europe/London', hour12: false,
+        year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit',
+    }).formatToParts(now).reduce((a, p) => (a[p.type] = p.value, a), {});
+    return { date: `${parts.year}-${parts.month}-${parts.day}`, hour: Number(parts.hour) % 24 };
+}
+
+export function buildDigestText(count, names, dashUrl) {
+    const top = names.slice(0, 3).map(n => `• ${n}`).join('\n');
+    const more = count > 3 ? `\n…and ${count - 3} more.` : '';
+    return `*${count} item${count === 1 ? '' : 's'} waiting for your approval.*\n`
+        + `${top}${more}\n\n`
+        + `Decide them here: ${dashUrl}\n`
+        + `_This is the only approvals message you get today. Nothing has been sent or actioned._`;
+}
+
+const DASHBOARD_QUEUE_URL = 'https://chaichoong.github.io/leadership-dashboard/os/agents/index.html#tab=approvals';
+
+async function postKevinDigest(env, log) {
+    const { date, hour } = londonParts();
+    if (hour !== 8) return 0;
+    const kvKey = `apv-digest-${date}`;
+    if (env.STATE && await env.STATE.get(kvKey)) return 0;
+
+    // Same population the dashboard queue shows (APV_QUEUE_FORMULA there),
+    // minus Mica's lane — her cards still reach her directly.
+    const recs = await queryTasks(env, `AND({Status}='Approval', ${NOT_DEFERRED})`, 100);
+    const mine = recs.map(taskView).filter(t => approverFor(t, isTier1Task(t)).key === 'kevin');
+
+    if (mine.length) {
+        const dm = await slack(env, 'https://slack.com/api/conversations.open', { method: 'POST', body: JSON.stringify({ users: KEVIN_SLACK_ID }) });
+        if (!dm.ok || !dm.channel) { log.push(`digest DM open failed: ${dm.error || 'unknown'}`); return -1; }
+        const res = await slack(env, SLACK.post, {
+            method: 'POST',
+            body: JSON.stringify({
+                channel: dm.channel.id,
+                text: `${mine.length} approvals waiting`,
+                blocks: [{ type: 'section', text: { type: 'mrkdwn', text: buildDigestText(mine.length, mine.map(t => esc(t.name)), DASHBOARD_QUEUE_URL) } }],
+            }),
+        });
+        if (!res.ok) { log.push(`digest post failed: ${res.error}`); return -1; }
+        log.push(`digest sent: ${mine.length} pending`);
+    } else {
+        log.push('digest: nothing pending, staying quiet');
+    }
+    if (env.STATE) await env.STATE.put(kvKey, mine.length ? 'sent' : 'quiet-zero', { expirationTtl: 172800 });
+    return mine.length;
 }
 
 // ─── REACTION PHASE ───────────────────────────────────────────────────
@@ -1016,10 +1084,11 @@ export async function runApprovalSweep(env) {
         try { return await fn(); }
         catch (err) { log.push(`${name} FAILED: ${String(err && err.message || err).slice(0, 200)}`); return -1; }
     };
+    const digest = await phase('digest', () => postKevinDigest(env, log));
     const posted = await phase('post', () => postPending(env, channels, log));
     const closed = await phase('reconcile', () => reconcileDecidedElsewhere(env, channels, log));
     const checked = await phase('reactions', () => processResponses(env, channels, log));
-    return { ok: true, channel: channels.kevin || null, posted, checked, closed, log };
+    return { ok: true, channel: channels.kevin || null, digest, posted, checked, closed, log };
 }
 
 // Delete the bot's OWN posts in the approvals channel whose text contains

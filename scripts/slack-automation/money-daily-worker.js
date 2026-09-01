@@ -805,14 +805,19 @@ async function sendDailyDM(env) {
         await slackPost(token, userId, fallbackText, buildBriefBlocks(m, brief));
         try { await storeBrief(pat, brief, m, tasks, huddle); }
         catch (e) {
-            await alertFailure(env, new Error('Brief sent but NOT stored: ' + e.message), 'CEO brief sent but not saved');
+            // No Slack alert: the brief itself arrived, so a save failure is an
+            // engineering fact for the logs, not a message for Kevin (his Slack
+            // cleanup ruling, 1 Sep 2026). Workers Logs keep the evidence.
+            console.error('[ceo-brief] sent but NOT stored:', e && e.message || e);
             await storeFallbackMarker(pat, m, tasks, huddle, 'stored after a save error: ' + e.message, brief);
         }
         return m;
     } catch (ceoErr) {
         const fallback = `Safe to act today: ${fmt(m.safeToActToday)} (${LIGHT_LABEL[m.light]})`;
         await slackPost(token, userId, fallback, buildBlocks(m));
-        await alertFailure(env, new Error('CEO brief failed (money DM sent as fallback): ' + ceoErr.message), 'CEO brief failed, money message sent instead');
+        // The money DM reached him, which is the story he needs; the WHY the
+        // CEO layer failed lives in Workers Logs, not his phone (1 Sep 2026).
+        console.error('[ceo-brief] CEO layer failed, money DM sent as fallback:', ceoErr && ceoErr.message || ceoErr);
         await storeFallbackMarker(pat, m, tasks, huddle, ceoErr.message, null);
         return m;
     }

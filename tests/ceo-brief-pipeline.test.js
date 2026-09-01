@@ -135,7 +135,7 @@ describe('a failed morning still marks today as sent', () => {
     expect(fallbackPath[0]).toContain('storeFallbackMarker(');
   });
   it('the sent-but-not-stored path retries with the marker', () => {
-    const notStored = WORKER.match(/Brief sent but NOT stored[\s\S]*?\n        \}/);
+    const notStored = WORKER.match(/sent but NOT stored[\s\S]*?\n        \}/);
     expect(notStored).not.toBeNull();
     expect(notStored[0]).toContain('storeFallbackMarker(');
   });
@@ -144,9 +144,17 @@ describe('a failed morning still marks today as sent', () => {
     expect(TAB).toMatch(/function ceoBriefIsFallback/);
     expect(TAB).toMatch(/ceoBriefIsFallback\(rec\)\) return \{ status: 'fail'/);
   });
-  it('alerts carry a title naming the failure', () => {
-    expect(WORKER).toMatch(/alertFailure\(env, new Error\('Brief sent but NOT stored: ' \+ e\.message\), '/);
-    expect(WORKER).toMatch(/alertFailure\(env, new Error\('CEO brief failed \(money DM sent as fallback\): ' \+ ceoErr\.message\), '/);
+  it('survivable failures log instead of DMing (Kevin retired system alerts, 1 Sep 2026)', () => {
+    // Both survivable paths (brief arrived / money fallback arrived) log to
+    // Workers Logs and must NOT DM Kevin.
+    expect(WORKER).toMatch(/console\.error\('\[ceo-brief\] sent but NOT stored:'/);
+    expect(WORKER).toMatch(/console\.error\('\[ceo-brief\] CEO layer failed, money DM sent as fallback:'/);
+    // The ONE surviving alertFailure call: total failure in scheduled(), when
+    // NO message reached him at all. Definition site + alertFailure's own
+    // internals don't count as call sites.
+    const calls = WORKER.match(/await alertFailure\(/g) || [];
+    expect(calls.length, 'exactly one alert path may remain: total failure').toBe(1);
+    expect(WORKER).toMatch(/catch \(err\) \{ await alertFailure\(env, err\); throw err; \}/);
   });
 });
 

@@ -39,7 +39,7 @@ JOBS=(
   "data-invariants|6:40|/usr/bin/python3 $REPO/scripts/check-data-invariants.py"
   "drive-auth|6:50|/usr/bin/python3 $REPO/scripts/drive-auth-check.py"
   "ceo-agent|6:45|/bin/bash $SLOT ceo-agent $TASKS/ceo-agent/SKILL.md"
-  "uc-check|8:00|/bin/bash $SLOT uc-check $TASKS/uc-check/SKILL.md"
+  # uc-check RETIRED 1 Sep 2026 (Kevin, Slack cleanup): whole UC process stopped.
   "prospecting|9:15|/bin/bash $SLOT prospecting $TASKS/prospecting/SKILL.md"
   "prod-sweep-weekly|11:00|/bin/bash $SLOT prod-sweep-weekly $TASKS/prod-sweep-weekly/SKILL.md"
 )

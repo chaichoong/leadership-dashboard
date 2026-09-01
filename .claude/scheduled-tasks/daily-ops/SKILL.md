@@ -34,7 +34,6 @@ half no arrivals list can show: **saying when one did not run.**
 | Inbound Comms Triage | `com.kevinbrittain.inbound-triage` | 09:00 / 13:00 / 17:00 | Kevin, 24 Aug 2026 |
 | Task Manager board pass | `com.kevinbrittain.task-manager` | 09:00 / 13:00 / 17:00 | Kevin, 25 Aug 2026 |
 | CEO huddle + memory sweep | `com.kevinbrittain.ceo-agent` | 06:45 | Kevin, 26 Aug 2026 |
-| Universal Credit list | `com.kevinbrittain.uc-check` | 08:00 | Kevin, 26 Aug 2026 |
 | Prospecting | `com.kevinbrittain.prospecting` | 09:15 | Kevin, 26 Aug 2026 |
 | Production sweep (full walk) | `com.kevinbrittain.prod-sweep-weekly` | Sundays 11:00 | Kevin, 26 Aug 2026 |
 
@@ -56,27 +55,26 @@ You run at 07:00. The role-agent slots run at 09:00, 13:00 and 17:00. So the day
 
 STUCK and NEEDS YOU are live reads of the board, so they are current regardless.
 
-## What Kevin's Slack receives (the contract, 21 Aug 2026)
+## What Kevin's Slack receives (the contract, retightened 1 Sep 2026)
 
-Kevin asked for this after a week in which nine different automated message types hit his Slack, most of them engineering logs. His words: it needs to be decipherable by a 13-year-old. Every sender follows this. If you are about to send a Slack message that is not on this list, do not send it. Put it in your report file or file a finding.
+Kevin set the first version of this on 21 Aug 2026 after nine automated message types buried his phone. On 1 Sep 2026 he tightened it again: the Daily Ops DM, all per-task approval cards to him, the contractor bot, his CEO DM chat, the whole Universal Credit process and every system alert are GONE. If you are about to send a Slack message that is not on this list, do not send it. Put it in your report file or file a finding.
 
-**On a normal day, exactly two messages:**
+**On a normal day, at most three messages, all morning:**
 
-1. The 09:00 CEO brief (`money-daily-worker.js`). Owns "what to do today".
-2. The Daily Ops DM from phase 5. Owns "what needs you, what is stuck, what broke".
+1. The 08:00 approvals digest (`approvals.js` in the contractor-bot worker). ONE DM: how many items wait for his decision, the top names, a link to the dashboard queue. Silent when nothing is waiting.
+2. The 09:00 CEO brief (`money-daily-worker.js`). Owns "what to do today".
+3. Task movement DMs (assigned / completed / comment) via the slack-notify worker and the Airtable task automations. These are working messages between people, not reports.
 
 **Only when it applies:**
 
-- Approval cards in #agent-approvals (and Mica's DM for her lane). They ARE the work.
-- Mica's Universal Credit list, from the 08:00 slot. Mica only, by Kevin's instruction of 1 Aug 2026.
+- Mica's approval cards, in her bot DM. Her lane only; Kevin gets no cards.
 - Agent-dispatch escalation: a task taken off the agents because preparing it would mean acting for Kevin in the legal matter.
-- The 09:30 guard: "daily-ops has not started" or "started but did not finish".
-- Drive auth BROKEN.
-- The CEO huddle's late-path brief, when the 09:00 brief missed.
+- Production DOWN, from the weekly sweep. The single surviving system alert, kept by Kevin's explicit choice on 1 Sep 2026.
 - A correction to an earlier message, only when it changes what Kevin should do.
-- Production DOWN, from the weekly sweep.
 
-**Never a separate DM from:** any slot other than the UC list, any script, the fixer, drift, the memory sweep. Each returns its lines to you, and you fold them into the one report. A fault that is not urgent goes to `scripts/findings.py` and is counted in the report's BROKEN line.
+**Retired on 1 Sep 2026 (do not bring these back without his word):** the Daily Ops DM (phase 5 now writes the report file ONLY — he reads it in Claude Code), per-task approval cards to Kevin, the 09:30 guard DM, the job digest Slack post, Drive-auth DMs, the "brief was late" DM, the CEO huddle late-path DM (write the record, skip the DM), the contractor bot in full, the CEO DM chat, and the Universal Credit list and process.
+
+**Never a separate DM from:** any slot, any script, the fixer, drift, the memory sweep. Each returns its lines to you, and you fold them into the one report file. A fault that is not urgent goes to `scripts/findings.py` and is counted in the report's BROKEN line.
 
 **Reading level:** a 13-year-old on a phone. Banned from any message to Kevin: record IDs (`rec...`), finding numbers, PR numbers, exit codes, phase numbers, field names, script names, and the words "invariant", "control", "subagent", "dispatch", "slot". If a sentence needs one of those to make sense, it belongs in the report file.
 
@@ -205,13 +203,13 @@ python3 scripts/loop-health.py
 
 It exits 1 rather than printing an all-clear if the read failed or no task anywhere links to an agent, so a broken query can never read as "nothing is stuck". If it exits 1, the STUCK line reads "*STUCK: could not check*" plus the reason in plain words.
 
-Put anything under **NOT MOVING** into the DM's *STUCK* block, with the count and the FIRST THREE AS PRINTED. Do not re-sort them by age: the list is already ordered by how much each item needs someone, and the "agent has drafted nothing" rule deliberately carries no day count, so an age sort buries exactly the items that mean nothing has started. Kevin asked for this on 14 Aug 2026 after losing trust in the loop: an approvals list only shows what arrived, and a completions list only shows successes, so neither can show the thing that actually went wrong.
+Put anything under **NOT MOVING** into the report's *STUCK* block, with the count and the FIRST THREE AS PRINTED. Do not re-sort them by age: the list is already ordered by how much each item needs someone, and the "agent has drafted nothing" rule deliberately carries no day count, so an age sort buries exactly the items that mean nothing has started. Kevin asked for this on 14 Aug 2026 after losing trust in the loop: an approvals list only shows what arrived, and a completions list only shows successes, so neither can show the thing that actually went wrong.
 
 If NOT MOVING is zero, say that explicitly — "nothing has stalled" is the sentence that earns the trust, and a silent omission reads identically to the check never having run.
 
-**Write the full report file first:** `monitoring/daily-ops-{date}.md`. Everything that used to go in the DM goes here: run time, one line per phase, one line per slot and script in the last 24 hours, counts, record IDs, finding numbers, PR links. Phase 4 commits it tomorrow. The file is the record; the DM is the summary.
+**Write the full report file:** `monitoring/daily-ops-{date}.md`. Run time, one line per phase, one line per slot and script in the last 24 hours, counts, record IDs, finding numbers, PR links. Phase 4 commits it tomorrow. The file is the record.
 
-Then ONE Slack DM to Kevin, following the contract above. The reader is a 13-year-old on a phone. **At most 12 lines.** This exact shape, these exact headings, in this order:
+**NO Slack DM. None.** Kevin retired the Daily Ops DM on 1 Sep 2026: he reads this in Claude Code each morning, so the DM told him nothing the file did not. Open the report with a summary block in exactly the shape the DM used, so his morning read starts the same way:
 
 ```
 *Daily Ops, {weekday} {day} {month}.* {Ran fine. | N things broke.}
@@ -227,16 +225,13 @@ Then ONE Slack DM to Kevin, following the contract above. The reader is a 13-yea
 {Name them in plain words, one line.}
 
 Everything else ran.   (or: "{Name} did not run: {why, plainly}.")
-Detail: monitoring/daily-ops-{date}.md
 ```
 
-Rules for the DM:
+Rules for the summary block:
 
 - NEEDS YOU is only for things Kevin himself must do: a decision, an approval, a signature, a payment, a call only he can make. **Unmerged fix PRs belong here** whenever three or more are open — that is the drain on the whole fix queue and only he can clear it.
-- STUCK keeps the order loop-health printed. Strip the `rec...` IDs and field names.
-- BROKEN is a count and plain names. No finding numbers, no PR numbers, no exit codes.
+- STUCK keeps the order loop-health printed. Strip the `rec...` IDs and field names from the summary block (they belong in the detail below it).
 - **A slot that did not run is named on the "Everything else ran" line.** This is the half that cannot be seen from an arrivals list, and it is the reason phase 2 reads absence rather than successes.
 - Never present a partial run as a complete one.
-- Corrections: if you later learn something in this DM was wrong AND it changes what Kevin should do, send one short follow-up. No follow-ups for anything else.
 
 Finally, delete `~/knowledge-os/logs/daily-ops-progress.json` so tomorrow starts fresh.

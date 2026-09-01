@@ -370,6 +370,11 @@
     let _ucSyncLastRun = 0;
 
     async function syncUCRecurringTasks() {
+        // RETIRED 1 Sep 2026 (Kevin's ruling, Slack cleanup): the whole
+        // Universal Credit check process stopped — no tasks, no Mica list.
+        // Missing UC payments are handled when they show as arrears instead.
+        // The machinery below is kept so reinstating is a one-line change.
+        return;
         if (!PAT || !allTenancies?.length || !allTenants?.length) return;
         if (_ucSyncRunning) return;
         if (Date.now() - _ucSyncLastRun < UC_SYNC_COOLDOWN_MS) return;

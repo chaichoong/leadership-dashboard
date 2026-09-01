@@ -1,7 +1,14 @@
 ---
 name: uc-check
-description: "Universal Credit slot — books the checks, sends Mica ONE list. 08:00 daily. Approved slot (Kevin, 26 Aug 2026)."
+description: "RETIRED 1 Sep 2026 — do not run. Universal Credit slot — books the checks, sends Mica ONE list. 08:00 daily. Approved slot (Kevin, 26 Aug 2026)."
 ---
+
+> **RETIRED 1 Sep 2026 — Kevin's ruling (Slack cleanup).** The whole Universal
+> Credit check process stopped: no tasks are created, no list is sent to Mica,
+> no watchdog runs. Kevin's words: even when a missing payment was caught early
+> there was never enough time to resolve it before it arrived or did not, so
+> missed UC now surfaces as arrears and is dealt with then. The steps below are
+> history, kept so the process can be rebuilt if he ever reverses this.
 
 # Universal Credit check — the 08:00 slot
 

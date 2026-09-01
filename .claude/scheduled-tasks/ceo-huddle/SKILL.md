@@ -149,13 +149,13 @@ STEPS
 4b. IF THE WORKER HAS ALREADY RUN (Full Brief populated when you reach step 4), the brief has been written AND delivered to Kevin. Do not overwrite One Thing, First Step or Board Flags: he has already read them, and the CEO Brief tab plus `ceo-brief-morning-check` both key on that record. **But do not just stop, either.** Kevin's standing instruction (3 Aug 2026): a huddle that missed the brief is still worth having, because the board's read on the day does not expire at 09:00. Take the LATE PATH:
 
    a. Run the huddle anyway, sized by the clock per step 0 (after 08:15 that means no departments, digest from task data alone).
-   b. Deliver it to Kevin DIRECTLY by Slack DM, not to Airtable. Open with one line naming what happened, for example: "Late huddle. The 09:00 brief already went out, so this did not go into it." Then the one thing, the first step and at most two flags, same shape as always.
+   b. Write it to `monitoring/late-huddle-{date}.md` in the dashboard repo, same shape as always: one line naming what happened, the one thing, the first step, at most two flags. NO Slack DM — Kevin retired the late-path DM on 1 Sep 2026 with the rest of the system alerts; he picks the file up in Claude Code.
    c. Leave the CEO Briefs record completely untouched.
    d. Log the elapsed time and the cause, so a pattern is visible.
 
    The point of the late path is that Kevin gets the board's view of the day either way. Only the delivery channel changes.
 
-5. Verify. Re-read the record, confirm the three fields are populated and Full Brief is empty. If the write failed, log it and stop. Do not retry blindly into a duplicate. On the late path (4b) there is nothing to verify in Airtable: confirm instead that the Slack DM actually sent, and say so.
+5. Verify. Re-read the record, confirm the three fields are populated and Full Brief is empty. If the write failed, log it and stop. Do not retry blindly into a duplicate. On the late path (4b) there is nothing to verify in Airtable: confirm instead that the file was written, and say so.
 
 6. Say NOTHING to Kevin. This is plumbing; he sees the result at 09:00. Message him only if the huddle found something genuinely urgent that cannot wait 90 minutes, and then one short plain-English line.
 

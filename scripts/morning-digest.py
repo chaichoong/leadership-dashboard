@@ -35,7 +35,7 @@ QUEUE_DIR = os.environ.get("JOB_QUEUE_DIR", os.path.join(LOGDIR, "queue"))
 EVENTS = os.path.join(QUEUE_DIR, "queue-events.jsonl")
 STATUS = os.path.join(LOGDIR, "job-status.jsonl")
 FINDINGS = os.environ.get("FINDINGS_FILE", os.path.join(LOGDIR, "findings-queue.jsonl"))
-WEBHOOK_FILE = os.path.join(HOME, "knowledge-os/slack_webhook.txt")
+# WEBHOOK_FILE retired 1 Sep 2026 with post_to_slack (Slack cleanup ruling).
 
 WINDOW_HOURS = 26
 
@@ -610,19 +610,14 @@ def guard_completion(now_ldn, today, finished):
 
 
 def post_to_slack(msg):
-    if not os.path.exists(WEBHOOK_FILE):
-        return
-    url = open(WEBHOOK_FILE).read().strip()
-    if not url.startswith("https://hooks.slack.com/"):
-        return
-    import urllib.request
-    req = urllib.request.Request(
-        url, data=json.dumps({"text": msg}).encode(),
-        headers={"Content-Type": "application/json"})
-    try:
-        urllib.request.urlopen(req, timeout=15)
-    except Exception as e:  # a failed post must not hide the digest itself
-        print("WARNING: could not post to Slack: %s" % e, file=sys.stderr)
+    """RETIRED 1 Sep 2026 (Kevin's Slack cleanup ruling): system alerts no
+    longer go to Slack — he was not reading them and they buried the two
+    messages he does read. The digest and the guard still print to their
+    logs, still exit non-zero on an alarm, and the guard still raises the
+    macOS notification. Every call site is kept so turning Slack back on is
+    a one-function change here."""
+    del msg  # intentionally unused — see docstring
+    return
 
 
 def main():
