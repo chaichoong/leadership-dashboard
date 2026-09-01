@@ -1308,6 +1308,9 @@
             unitId: r.unitId, propertyId: r.propertyId, costId: r.costId,
             // Carried so the audit row can record which matcher produced this suggestion.
             matchType: r.matchType, score: r.score,
+            // Carried so the audit row can be stamped with its slice (reconSlice needs the
+            // amount sign and the vendor for the auto-eligibility check).
+            txAmount: r.txAmount, txVendor: r.txVendor,
             status: r.status
         }));
     }
@@ -1648,6 +1651,16 @@
         const learnHtml = (kb && kb.total)
             ? `<div class="od-text-muted-sm" style="margin-top:2px">From your corrections: ${kb.pct}% (${kb.total})${cold && cold.total ? ` · cold guess: ${cold.pct}% (${cold.total})` : ''}</div>`
             : '';
+        // The number the guardrail flip keys on: accuracy over only the rows the auto tier
+        // would approve. Ready when it holds 90%+ across a population big enough to mean
+        // a full window (30+ checked rows), per Kevin's ruling of 1 Sep 2026.
+        const a = stats.autoSlice;
+        const autoReady = a && a.total >= AUTO_FLIP_MIN_ROWS && a.pct >= AUTO_FLIP_MIN_PCT;
+        const autoHtml = (a && a.total)
+            ? `<div class="od-text-muted-sm" style="margin-top:2px">Safe pile (would auto-reconcile): ${a.pct}% (${a.accurate}/${a.total})${autoReady
+                ? ' · <span style="color:var(--success);font-weight:600">ready — you may flip the guardrail to Hybrid escalation</span>'
+                : ` · flips at ${AUTO_FLIP_MIN_PCT}%+ over a full window`}</div>`
+            : '';
         return `
             <div class="kpi-card">
                 <div class="kpi-card-label">AI Reconciliation Accuracy</div>
@@ -1659,6 +1672,7 @@
                 <div class="od-text-muted-sm" style="margin-top:6px">Target: ≥90% <span style="color:var(--success)">●</span> 75–89% <span style="color:var(--warning)">●</span> &lt;75% <span style="color:var(--danger)">●</span></div>
                 ${worstHtml}
                 ${learnHtml}
+                ${autoHtml}
             </div>`;
     }
 
@@ -1722,6 +1736,11 @@
             // suggestion: if Knowledge Base rows do not beat cold Vendor rows, the
             // corrections are not being learned from and the loop is decorative.
             const byMatchType = {};
+            // The auto-slice score: accuracy over ONLY the rows the auto tier would have
+            // approved (stamped 'auto-eligible' at suggestion time). The guardrail flip
+            // decision keys on this number, not the blended one — the blended score forever
+            // includes the hard cases that stay manual (Agent Gate, 1 Sep 2026).
+            let autoTotal = 0, autoAccurate = 0;
             for (const r of records) {
                 const f = r.fields || {};
                 const ok = !!f[RECAUDIT.wasAccurate];
@@ -1732,11 +1751,18 @@
                 const bucket = byMatchType[mt] || (byMatchType[mt] = { total: 0, accurate: 0 });
                 bucket.total++;
                 if (ok) bucket.accurate++;
+                if ((f[RECAUDIT.slice] || '') === 'auto-eligible') {
+                    autoTotal++;
+                    if (ok) autoAccurate++;
+                }
             }
             for (const b of Object.values(byMatchType)) {
                 b.pct = b.total ? Math.round((b.accurate / b.total) * 100) : 0;
             }
-            const stats = { total, accurate, pct, colour, label, byField, byMatchType };
+            const autoSlice = autoTotal
+                ? { total: autoTotal, accurate: autoAccurate, pct: Math.round((autoAccurate / autoTotal) * 100) }
+                : null;
+            const stats = { total, accurate, pct, colour, label, byField, byMatchType, autoSlice };
             _reconStatsCache = stats;
             try { localStorage.setItem(RECON_CACHE_KEY, JSON.stringify({ ts: Date.now(), stats })); } catch {}
             updateAgentMetricScore(stats).catch(() => {});
@@ -1755,7 +1781,10 @@
     async function updateAgentMetricScore(stats) {
         if (!stats || !stats.total) return;
         if (typeof PAT === 'undefined' || !PAT) return;
-        const reading = `${stats.pct}% (${stats.accurate}/${stats.total} checked, last 31 days)`;
+        let reading = `${stats.pct}% (${stats.accurate}/${stats.total} checked, last 31 days)`;
+        if (stats.autoSlice && stats.autoSlice.total) {
+            reading += `; auto-slice ${stats.autoSlice.pct}% (${stats.autoSlice.accurate}/${stats.autoSlice.total})`;
+        }
         try { if (localStorage.getItem(AGENT_SCORE_WRITTEN_KEY) === reading) return; } catch {}
         try {
             const resp = await fetch(`https://api.airtable.com/v0/${BASE_ID}/${TABLES.aiAgents}/${AGENT_RECON.recordId}`, {
@@ -1779,7 +1808,20 @@
     // when accurate). `matchType`/`ruleConf` record WHICH matcher produced the suggestion and
     // how confident its rule was, so accuracy can be split by source and the knowledge base
     // can be shown to compound (or not) instead of being assumed to.
-    async function logReconAccuracy(txId, wasAccurate, mismatched, matchType, ruleConf) {
+    // Which pile did this suggestion sit in? Stamped on every audit row so accuracy can be
+    // read for the exact slice the auto tier would touch — the number the guardrail flip
+    // decision needs (Agent Gate, 1 Sep 2026). Uses the SAME isAutoApprovable gate as the
+    // auto tier itself, never a copy, so the stamp and the gate cannot drift apart. While
+    // the suppression store is unloaded/unreadable, isAutoApprovable fails closed and an
+    // eligible row stamps 'other' — the slice score under-counts rather than over-claims.
+    function reconSlice(r) {
+        if (!r) return '';
+        if (isAutoApprovable(r)) return 'auto-eligible';
+        if (r.tenancyId || (Number(r.txAmount) || 0) >= 0) return 'income-tenancy';
+        return 'other';
+    }
+
+    async function logReconAccuracy(txId, wasAccurate, mismatched, matchType, ruleConf, slice) {
         if (typeof PAT === 'undefined' || !PAT) return;
         try {
             const fields = {
@@ -1788,6 +1830,7 @@
                 [RECAUDIT.wasAccurate]: !!wasAccurate,
                 [RECAUDIT.mismatched]: (mismatched || []).join(','),
                 [RECAUDIT.matchType]: matchType || '',
+                [RECAUDIT.slice]: slice || '',
             };
             // Airtable number fields must receive a Number, never a string.
             if (ruleConf !== undefined && ruleConf !== null && ruleConf !== '') {
@@ -1982,7 +2025,10 @@
             // all-or-nothing (unchanged), but a miss is now attributable to a named field.
             const mismatched = ['categoryId', 'subCatId', 'businessId', 'tenancyId', 'unitId', 'propertyId', 'costId']
                 .filter(f => (final[f] || '') !== (orig[f] || ''));
-            logReconAccuracy(r.txId, mismatched.length === 0, mismatched, orig.matchType, orig.score);
+            // The slice stamp reads the suppression list; make sure it has been loaded once
+            // (no-op after the first call, and reconSlice fails safe if the load failed).
+            await loadAutoState();
+            logReconAccuracy(r.txId, mismatched.length === 0, mismatched, orig.matchType, orig.score, reconSlice(orig));
         }
 
         const getInputVal = (id) => { const el = document.getElementById(id); return el ? el.value : ''; };
@@ -2020,6 +2066,12 @@
     // ══════════════════════════════════════════
     const AUTO_MIN_SCORE = 8;
     const AUTO_MIN_COMPOSITE_COUNT = 3;
+    // Guardrail flip rule (Kevin's ruling, 1 Sep 2026): the auto tier may be switched on
+    // when the auto-slice score holds at 90%+ over a full 31-day window. The row floor
+    // stops a lucky week of 12 rows reading as "ready". The flip itself is always Kevin's
+    // click on the register — nothing here changes the guardrail.
+    const AUTO_FLIP_MIN_PCT = 90;
+    const AUTO_FLIP_MIN_ROWS = 30;
 
     function autoMatchCount(matchType) {
         const m = /\((\d+)x\)/.exec(matchType || '');
@@ -2034,15 +2086,124 @@
         return reconVendorKey(vendor);
     }
 
-    // Suppression list — the checking mechanism. When Kevin undoes an auto-reconciliation,
-    // that vendor goes here, and the agent NEVER auto-approves it again (it still appears
-    // in the manual flow). So any mistake, once corrected, can never silently recur.
-    function getAutoSuppress() { try { return JSON.parse(localStorage.getItem('recon_auto_suppress') || '[]'); } catch { return []; } }
-    function addAutoSuppress(vendorKey) {
-        if (!vendorKey) return;
-        const s = getAutoSuppress();
-        if (!s.includes(vendorKey)) { s.push(vendorKey); localStorage.setItem('recon_auto_suppress', JSON.stringify(s)); }
+    // ── Auto-tier state, Airtable-backed (TABLES.reconAutoLog) ──
+    // The undo log and the never-auto-again suppression list both accumulate safety value,
+    // so neither can live in localStorage: one cache clear would orphan every undo and
+    // un-suppress every vendor Kevin has ever corrected — the same failure that destroyed
+    // the knowledge base's compounding before 6 Aug 2026. One table holds both: active
+    // rows ARE the undo log, rows with Undone ticked ARE the suppression list.
+    //
+    // _autoSuppressSet === null means the store has not loaded or could not be read.
+    // isAutoApprovable() then refuses every row, so an unreadable store switches the
+    // auto tier OFF — the same fail-closed rule the guardrail read already follows.
+    let _autoLogCache = [];
+    let _autoSuppressSet = null;
+    let _autoStateLoaded = false;
+
+    async function loadAutoState(force) {
+        if (_autoStateLoaded && !force) return _autoSuppressSet !== null;
+        if (typeof PAT === 'undefined' || !PAT) return false;
+        try {
+            // One-shot: lift any legacy localStorage suppressions into the table first.
+            // The auto tier never ran while the guardrail was off, so these are expected
+            // to be empty — but a suppression silently dropped would let a corrected
+            // mistake recur, so migrate rather than assume.
+            let legacy = [];
+            try { legacy = JSON.parse(localStorage.getItem('recon_auto_suppress') || '[]'); } catch { legacy = []; }
+            if (Array.isArray(legacy)) {
+                for (const key of legacy.filter(Boolean)) {
+                    await createAutoLogRow({ vendor: key, vendorKey: key, undone: true });
+                }
+            }
+            localStorage.removeItem('recon_auto_suppress');
+            localStorage.removeItem('recon_auto_log');
+
+            const records = [];
+            let offset = '';
+            do {
+                const url = `https://api.airtable.com/v0/${BASE_ID}/${TABLES.reconAutoLog}`
+                    + `?pageSize=100&returnFieldsByFieldId=true`
+                    + (offset ? `&offset=${encodeURIComponent(offset)}` : '');
+                const resp = await fetch(url, { headers: { 'Authorization': 'Bearer ' + PAT } });
+                if (!resp.ok) throw new Error('HTTP ' + resp.status);
+                const data = await resp.json();
+                records.push(...(data.records || []));
+                offset = data.offset || '';
+            } while (offset);
+
+            const log = [], suppress = new Set();
+            for (const rec of records) {
+                const f = rec.fields || {};
+                if (f[RECAUTO.undone]) {
+                    if (f[RECAUTO.vendorKey]) suppress.add(f[RECAUTO.vendorKey]);
+                    continue;
+                }
+                let extra = {};
+                try { extra = JSON.parse(f[RECAUTO.setFields] || '{}'); } catch { extra = {}; }
+                log.push({
+                    recId: rec.id,
+                    txId: f[RECAUTO.txId] || '',
+                    vendor: f[RECAUTO.vendor] || '',
+                    vendorKey: f[RECAUTO.vendorKey] || '',
+                    amount: Number(f[RECAUTO.amount]) || 0,
+                    account: f[RECAUTO.account] || '',
+                    matchType: f[RECAUTO.matchType] || '',
+                    score: Number(f[RECAUTO.score]) || 0,
+                    at: Date.parse(rec.createdTime) || 0,
+                    setFields: extra.setFields || {},
+                    categoryName: extra.categoryName || '',
+                    subCatName: extra.subCatName || '',
+                    date: extra.date || '',
+                });
+            }
+            _autoLogCache = log;
+            _autoSuppressSet = suppress;
+            _autoStateLoaded = true;
+            return true;
+        } catch (e) {
+            console.warn('loadAutoState failed — auto tier stays off:', e);
+            _autoSuppressSet = null;
+            _autoStateLoaded = true; // don't hammer Airtable; runAutoReconcile forces a reload
+            return false;
+        }
     }
+    window.loadAutoState = loadAutoState;
+
+    async function createAutoLogRow(entry) {
+        const fields = {
+            [RECAUTO.txId]: entry.txId || '',
+            [RECAUTO.vendor]: entry.vendor || '',
+            [RECAUTO.vendorKey]: entry.vendorKey || '',
+            [RECAUTO.amount]: Number(entry.amount) || 0,
+            [RECAUTO.account]: entry.account || '',
+            [RECAUTO.matchType]: entry.matchType || '',
+            [RECAUTO.score]: Number(entry.score) || 0,
+            [RECAUTO.setFields]: JSON.stringify({
+                setFields: entry.setFields || {},
+                categoryName: entry.categoryName || '',
+                subCatName: entry.subCatName || '',
+                date: entry.date || '',
+            }),
+        };
+        if (entry.undone) {
+            fields[RECAUTO.undone] = true;
+            fields[RECAUTO.undoneAt] = new Date().toISOString();
+        }
+        const resp = await fetch(`https://api.airtable.com/v0/${BASE_ID}/${TABLES.reconAutoLog}`, {
+            method: 'POST',
+            headers: { 'Authorization': 'Bearer ' + PAT, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ fields }),
+        });
+        if (!resp.ok) { const e = await resp.json().catch(() => ({})); throw new Error(e.error?.message || resp.status); }
+        const data = await resp.json();
+        return data.id;
+    }
+
+    // Suppression list — the checking mechanism. When Kevin undoes an auto-reconciliation,
+    // its log row is marked Undone, and the agent NEVER auto-approves that vendor again
+    // (it still appears in the manual flow). So any mistake, once corrected, can never
+    // silently recur.
+    function getAutoSuppress() { return _autoSuppressSet ? Array.from(_autoSuppressSet) : []; }
     window.getAutoSuppress = getAutoSuppress;
 
     // Opt-in auto-run on dashboard load.
@@ -2058,7 +2219,8 @@
         if (r.tenancyId) return false;            // never anything linked to a tenancy
         if (!r.categoryId || !r.subCatId) return false; // complete categorisation required
         if ((r.score || 0) < AUTO_MIN_SCORE) return false;
-        if (getAutoSuppress().includes(autoVendorKey(r.txVendor))) return false; // Kevin undid this before — never auto again
+        if (!(_autoSuppressSet instanceof Set)) return false; // suppression list not loaded/unreadable — fail closed
+        if (_autoSuppressSet.has(autoVendorKey(r.txVendor))) return false; // Kevin undid this before — never auto again
         const isKB = r.matchType === 'Knowledge Base';
         const isStrongComposite = /^Composite/.test(r.matchType || '') && autoMatchCount(r.matchType) >= AUTO_MIN_COMPOSITE_COUNT;
         return isKB || isStrongComposite;
@@ -2073,9 +2235,31 @@
     }
     window.maybeAutoReconcileOnLoad = maybeAutoReconcileOnLoad;
 
-    function getAutoLog() { try { return JSON.parse(localStorage.getItem('recon_auto_log') || '[]'); } catch { return []; } }
-    function setAutoLog(list) { localStorage.setItem('recon_auto_log', JSON.stringify(list.slice(-100))); }
+    function getAutoLog() { return _autoLogCache.slice(); }
     window.getAutoLog = getAutoLog;
+
+    // The visible log of what AI auto-approved today, each with one-click undo. Built here
+    // (single source of truth over _autoLogCache) and rendered by dashboard.js into
+    // #autoReconPanel — first from the cache for an instant paint, again after
+    // loadAutoState() pulls the authoritative rows from Airtable.
+    function buildAutoPanelHtml() {
+        const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
+        const entries = _autoLogCache.filter(e => (e.at || 0) >= todayStart.getTime());
+        if (entries.length === 0) return '';
+        return `
+            <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border-default)">
+                <div style="font-size:12px;font-weight:600;color:var(--text-secondary);margin-bottom:2px">Auto-reconciled today (${entries.length}) — AI did these, review and undo any</div>
+                <div style="font-size:10px;color:var(--text-muted);margin-bottom:6px">Undo also stops the AI auto-doing that one again.</div>
+                ${entries.map(e => `<div class="detail-item" style="align-items:center">
+                    <span class="detail-item-name">${escHtml(e.date || '')} — ${escHtml(e.vendor || '')} <span style="color:var(--text-muted)">&rarr; ${escHtml(e.subCatName || e.categoryName || '')}</span></span>
+                    <span style="display:flex;align-items:center;gap:8px">
+                        <span class="detail-item-value">${fmt(Number(e.amount) || 0)}</span>
+                        <button onclick="event.stopPropagation(); undoAutoReconcile('${escHtml(e.txId)}')" class="od-btn" style="padding:2px 8px;font-size:11px">Undo</button>
+                    </span>
+                </div>`).join('')}
+            </div>`;
+    }
+    window.buildAutoPanelHtml = buildAutoPanelHtml;
 
     // Headless approve straight from the match result (no modal/DOM needed).
     async function autoApproveRow(r) {
@@ -2131,6 +2315,7 @@
 
     // Preview only — what WOULD be auto-approved. No writes. (Used for safe verification.)
     async function previewAutoReconcile() {
+        await loadAutoState(); // without the suppression set every row reads ineligible
         const results = await runReconciliationMatching();
         return (results || []).filter(isAutoApprovable);
     }
@@ -2164,6 +2349,13 @@
             if (typeof showToast === 'function') showToast('Auto-reconcile is off: the agent guardrail is Approval required');
             return;
         }
+        // The undo log and suppression list gate the run the same way the guardrail does:
+        // if they cannot be read, nothing is auto-approved (isAutoApprovable also refuses
+        // every row while the set is null, so this return is belt AND braces).
+        if (!(await loadAutoState(true))) {
+            if (typeof showToast === 'function') showToast('Auto-reconcile is off: the auto log could not be read');
+            return;
+        }
         let results;
         try { results = await runReconciliationMatching(); }
         catch (e) { if (typeof showToast === 'function') showToast('Auto-reconcile: matcher error'); return; }
@@ -2172,59 +2364,98 @@
             if (typeof showToast === 'function') showToast('No safe matches to auto-reconcile right now');
             return;
         }
-        const log = getAutoLog();
         let done = 0;
         for (const r of eligible) {
-            let ok = false, attempts = 0;
-            while (!ok && attempts < 3) {
-                attempts++;
-                try { const entry = await autoApproveRow(r); entry.at = Date.now(); log.push(entry); done++; ok = true; }
-                catch (e) { if (attempts >= 3) console.error('Auto-approve failed', r.txId, e.message); else await new Promise(res => setTimeout(res, attempts * 1500)); }
+            let entry = null;
+            for (let attempts = 0; attempts < 3 && !entry; attempts++) {
+                try { entry = await autoApproveRow(r); }
+                catch (e) {
+                    if (attempts >= 2) console.error('Auto-approve failed', r.txId, e.message);
+                    else await new Promise(res => setTimeout(res, (attempts + 1) * 1500));
+                }
+            }
+            if (entry) {
+                entry.at = Date.now();
+                entry.vendorKey = autoVendorKey(r.txVendor);
+                // The undo row is part of the action, not an optional log: without it the
+                // auto-approval is invisible and irreversible. If it cannot be written,
+                // put the transaction back rather than leave a dark write.
+                try {
+                    entry.recId = await createAutoLogRow(entry);
+                    _autoLogCache.push(entry);
+                    done++;
+                } catch (e) {
+                    console.error('Auto log write failed — reverting', r.txId, e.message);
+                    try { await revertAutoTx(r.txId, entry.setFields); }
+                    catch (e2) { console.error('Revert after log failure ALSO failed', r.txId, e2.message); }
+                }
             }
             await new Promise(res => setTimeout(res, 500)); // respect Airtable rate limits
         }
-        setAutoLog(log);
         if (typeof clearDashCache === 'function') clearDashCache();
         if (typeof showToast === 'function') showToast(`Auto-reconciled ${done} safe transaction${done === 1 ? '' : 's'}`);
         if (typeof loadDashboard === 'function') setTimeout(loadDashboard, 700);
     }
     window.runAutoReconcile = runAutoReconcile;
 
-    // Undo a single auto-reconciliation: flip back to unreconciled and clear what we set.
-    async function undoAutoReconcile(txId) {
-        const log = getAutoLog();
-        const entry = log.find(e => e.txId === txId);
+    // Flip a transaction back to unreconciled and clear exactly the links the auto tier set.
+    // Shared by undo and by the log-write-failure revert in runAutoReconcile.
+    async function revertAutoTx(txId, setFields) {
         const fields = { [F.txReconciled]: false };
-        if (entry && entry.setFields) {
-            if (entry.setFields.cat) fields[F.txCategory] = [];
-            if (entry.setFields.sub) fields[F.txSubCategory] = [];
-            if (entry.setFields.biz) fields[F.txBusiness] = [];
-            if (entry.setFields.cost) fields[F.txCost] = [];
+        if (setFields) {
+            if (setFields.cat) fields[F.txCategory] = [];
+            if (setFields.sub) fields[F.txSubCategory] = [];
+            if (setFields.biz) fields[F.txBusiness] = [];
+            if (setFields.cost) fields[F.txCost] = [];
         }
-        try {
-            const resp = await fetch(`https://api.airtable.com/v0/${BASE_ID}/${TABLES.transactions}/${txId}`, {
-                method: 'PATCH',
-                headers: { 'Authorization': 'Bearer ' + PAT, 'Content-Type': 'application/json' },
-                body: JSON.stringify({ fields })
-            });
-            if (!resp.ok) { const e = await resp.json().catch(() => ({})); throw new Error(e.error?.message || resp.status); }
-        } catch (e) { if (typeof showToast === 'function') showToast('Undo failed: ' + e.message); return; }
-
+        const resp = await fetch(`https://api.airtable.com/v0/${BASE_ID}/${TABLES.transactions}/${txId}`, {
+            method: 'PATCH',
+            headers: { 'Authorization': 'Bearer ' + PAT, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ fields })
+        });
+        if (!resp.ok) { const e = await resp.json().catch(() => ({})); throw new Error(e.error?.message || resp.status); }
         const localTx = allTransactions.find(t => t.id === txId);
         if (localTx && localTx.fields) {
             localTx.fields[F.txReconciled] = false;
-            if (entry && entry.setFields) {
-                if (entry.setFields.cat) localTx.fields[F.txCategory] = [];
-                if (entry.setFields.sub) localTx.fields[F.txSubCategory] = [];
-                if (entry.setFields.biz) localTx.fields[F.txBusiness] = [];
-                if (entry.setFields.cost) localTx.fields[F.txCost] = [];
+            if (setFields) {
+                if (setFields.cat) localTx.fields[F.txCategory] = [];
+                if (setFields.sub) localTx.fields[F.txSubCategory] = [];
+                if (setFields.biz) localTx.fields[F.txBusiness] = [];
+                if (setFields.cost) localTx.fields[F.txCost] = [];
             }
         }
-        // Teach the agent: never auto-approve this vendor again (still available manually)
-        addAutoSuppress(autoVendorKey(entry ? entry.vendor : ''));
-        setAutoLog(log.filter(e => e.txId !== txId));
+    }
+
+    // Undo a single auto-reconciliation: flip back to unreconciled and clear what we set.
+    async function undoAutoReconcile(txId) {
+        const entry = _autoLogCache.find(e => e.txId === txId);
+        try { await revertAutoTx(txId, entry && entry.setFields); }
+        catch (e) { if (typeof showToast === 'function') showToast('Undo failed: ' + e.message); return; }
+
+        // Teach the agent: mark the log row Undone. That IS the permanent suppression —
+        // this vendor never auto-approves again (it still appears in the manual flow).
+        let suppressed = false;
+        if (entry && entry.recId) {
+            try {
+                const resp = await fetch(`https://api.airtable.com/v0/${BASE_ID}/${TABLES.reconAutoLog}/${entry.recId}`, {
+                    method: 'PATCH',
+                    headers: { 'Authorization': 'Bearer ' + PAT, 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ fields: { [RECAUTO.undone]: true, [RECAUTO.undoneAt]: new Date().toISOString() } })
+                });
+                if (!resp.ok) { const e = await resp.json().catch(() => ({})); throw new Error(e.error?.message || resp.status); }
+                suppressed = true;
+            } catch (e) { console.warn('Suppression write failed:', e); }
+        }
+        // Session-level suppression regardless, so this run cannot repeat the mistake even
+        // when the Airtable write failed.
+        if (entry && _autoSuppressSet) _autoSuppressSet.add(entry.vendorKey || autoVendorKey(entry.vendor));
+        _autoLogCache = _autoLogCache.filter(e => e.txId !== txId);
         if (typeof clearDashCache === 'function') clearDashCache();
-        if (typeof showToast === 'function') showToast('Undone — and the AI won\'t auto-do this one again');
+        if (typeof showToast === 'function') {
+            showToast(suppressed
+                ? 'Undone — and the AI won\'t auto-do this one again'
+                : 'Undone — but the never-again marker failed to save, so the AI may try this vendor again');
+        }
         if (typeof loadDashboard === 'function') setTimeout(loadDashboard, 500);
     }
     window.undoAutoReconcile = undoAutoReconcile;
@@ -2919,6 +3150,7 @@
                 // row compared final propertyId against undefined and logged a phantom miss.
                 unitId: nr.unitId, propertyId: nr.propertyId, costId: nr.costId,
                 matchType: nr.matchType, score: nr.score,
+                txAmount: nr.txAmount, txVendor: nr.txVendor,
                 status: nr.status,
             })));
 

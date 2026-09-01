@@ -19,8 +19,8 @@
 
     // ── Page & SOP Version Registry ──
     const PAGE_REGISTRY = [
-        { id: 'overview',    name: 'Leadership Dashboard',           icon: '📊', pageVer: '2.94', sopFile: 'sop.html',                   sopVer: '2.94', standalone: 'index.html#overview' },
-        { id: 'os-strategy', name: 'Objective & Strategy',           icon: '🎯', pageVer: '1.49', sopFile: 'os/strategy/sop.html',       sopVer: '1.1', standalone: 'os/strategy/index.html' },
+        { id: 'overview',    name: 'Leadership Dashboard',           icon: '📊', pageVer: '2.95', sopFile: 'sop.html',                   sopVer: '2.94', standalone: 'index.html#overview' },
+        { id: 'os-strategy', name: 'Objective & Strategy',           icon: '🎯', pageVer: '1.50', sopFile: 'os/strategy/sop.html',       sopVer: '1.1', standalone: 'os/strategy/index.html' },
         { id: 'tasks',       name: 'Tasks & Projects',   icon: '✅', pageVer: '1.157', sopFile: 'os/tasks/sop.html',             sopVer: '1.4', standalone: 'os/tasks/index.html' },
         { id: 'cfv',        name: 'CFVs',                          icon: '🚨', pageVer: '1.37', sopFile: 'sop-cfvs.html',               sopVer: '1.34', standalone: 'index.html#cfv' },
         { id: 'money',      name: 'Money Confidence',              icon: '🧭', pageVer: '1.1', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#money' },
@@ -46,7 +46,7 @@
         { id: 'agents', name: 'AI Agents', icon: '🤖', pageVer: '1.46', sopFile: 'sop-ai-agents.html', sopVer: '1.42', standalone: 'os/agents/index.html', adminOnly: true },
         { id: 'fintable',  name: 'Accounts',                       icon: '🏦', pageVer: '1.19', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#fintable' },
         { id: 'systemisation', name: 'Systemisation',              icon: '⚙️', pageVer: '1.19', sopFile: 'guides/systemisation.html',    sopVer: '1.11', standalone: 'os/systemisation/index.html' },
-        { id: 'os-team',    name: 'Team Members',                  icon: '👥', pageVer: '1.27', sopFile: '',                            sopVer: '1.1', standalone: 'os/team/index.html' },
+        { id: 'os-team',    name: 'Team Members',                  icon: '👥', pageVer: '1.28', sopFile: '',                            sopVer: '1.1', standalone: 'os/team/index.html' },
         // pageVer corrected by hand 2026-08-06: the auto-bump never fired for this page
         // (crm-supabase.html was missing from the workflow `paths:` filter), so 1.0 was
         // stale — the CRM gained a 14-step interactive walkthrough on 2026-08-04 (319b438).
@@ -95,6 +95,7 @@
         projects:      'tblHrpTMd5LNYn8v1', // Projects (quarterly projects from Strategy push here)
         reconAudit:    'tblbfuxYxu4uMMWwT', // AI Recon Audit — accuracy log (auto-pruned to last 35 days)
         reconRules:    'tblQ9sFD7Fs5CaVwG', // AI Recon Rules — knowledge base learned from corrections
+        reconAutoLog:  'tblPg6Uk8AlmQnofu', // AI Recon Auto Log — auto-tier undo log; Undone rows are the permanent never-auto-again suppression list
         arrears:       'tblzG0B9oRRpszcgC', // Arrears Records — 7-stage credit control pipeline
         arrearsLog:    'tblik5VI5Jy6tO2yc', // Arrears Contact Log — audit trail per contact event
         sysWorkflows:  'tblLPoRHFBl0vqR24', // Systemisation Workflows
@@ -323,6 +324,27 @@
         mismatched:  'fldm4i2tYHhi4jFJb',  // singleLineText — CSV of fields that differed; '' when accurate
         matchType:   'fld2Vv0QJ2dNq5iVv',  // singleLineText — Knowledge Base | Composite | Vendor | …
         ruleConf:    'fldJ3tDV60HsOsJJ7',  // number — confidence of the rule that produced the suggestion
+        // Which pile the suggestion sat in at suggestion time: auto-eligible | income-tenancy | other.
+        // The guardrail flip keys on accuracy over the auto-eligible slice alone, because the
+        // blended score forever includes the hard cases that stay manual (Agent Gate, 1 Sep 2026).
+        slice:       'fldzAqifUzN5HIQpE',  // singleLineText
+    };
+
+    // AI Recon Auto Log field IDs — one row per auto-reconciled transaction. Rows with
+    // Undone ticked double as the permanent never-auto-again suppression list. This pair
+    // lived in localStorage (recon_auto_log / recon_auto_suppress) until 1 Sep 2026; a
+    // store the undo safety depends on cannot sit one cache clear from empty.
+    const RECAUTO = {
+        txId:      'fldN4D106HHlpz9pX',  // singleLineText — transaction record ID
+        vendor:    'fldoaPh36BVnPVxoU',  // singleLineText — raw vendor text
+        vendorKey: 'fld8uHHkINZj39dbv',  // singleLineText — normalised key, same rule as the knowledge base
+        amount:    'fldful1fmSiNj7Zpu',  // number(2)
+        account:   'fldpB2vgfEC8imEMm',  // singleLineText
+        setFields: 'fldByQpyur3xlGwsf',  // multilineText — JSON: what auto wrote (undo clears exactly these) + display names
+        matchType: 'fldqS7pN7xB3ZCSWv',  // singleLineText
+        score:     'fldXUWKHZXJbboDCz',  // number(0)
+        undone:    'fldSLhjeaBepaBC9w',  // checkbox — ticked = Kevin undid it = vendor suppressed from auto forever
+        undoneAt:  'fldcE9dWDWIhhbosm',  // dateTime
     };
 
     // AI Agents register wiring — the reconciliation agent owns its Metric Score
