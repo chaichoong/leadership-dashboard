@@ -49,7 +49,13 @@ fi
 __START_LINE=$( { wc -l < "$LOG"; } 2>/dev/null || echo 0)
 __MARKER="$SCRATCH/.run-start.$$"
 touch "$__MARKER"
-echo "===== inbound-triage run $(date) =====" >> "$LOG"
+# WHICH SLOT IS THIS? Decided here, by the clock, once (finding
+# 20260829-daily-ops-396). The agent used to be told "one of the 09:00 /
+# 13:00 / 17:00 slots" and left to work it out; nothing in its context carries
+# the trigger time, so it guessed "13:00 slot" every run and all three rounds
+# filed under the same heading.
+SLOT_LABEL="$(/usr/bin/python3 "$REPO/scripts/slot-label.py" 2>/dev/null || echo unknown)"
+echo "===== inbound-triage run [$SLOT_LABEL slot] $(date) =====" >> "$LOG"
 
 # Finding 20260827-phase-2-382: this slot's 09:00 run on 26 Aug started and
 # vanished — a start header with no done line, indistinguishable from a run
@@ -125,7 +131,7 @@ cd "$REPO" || { echo "ERROR: repo not found at $REPO" >&2; exit 1; }
 #
 # Do not remove step 0 to shorten the prompt. tests/triage-learns.test.js
 # fails if this path stops being named here.
-"$CLAUDE" -p "You are the Inbound Comms Triage agent's scheduled run (one of the 09:00 / 13:00 / 17:00 slots).
+"$CLAUDE" -p "You are the Inbound Comms Triage agent's scheduled run. THIS RUN IS THE $SLOT_LABEL SLOT — that is the wall clock at run start, read for you. Head your report with exactly '$SLOT_LABEL slot' and never substitute a slot you worked out yourself.
 0. FIRST read /Users/kevinbrittain/.claude/agents/inbound-comms-triage.md — that file is your standing instructions, including the '## Lessons from Kevin' section, which is where every rule he has asked you to remember lives. Apply every lesson in it to the decisions you make below. If a lesson conflicts with a skill step, say so in your report rather than guessing which wins.
 Then do these three skills in order, each in full:
 1. /Users/kevinbrittain/.claude/scheduled-tasks/inbound-email-triage/SKILL.md — BEFORE creating a task for any email thread, check \$SCRATCH/gmail-sent.json: if that thread id already has a send NEWER than the incoming message, it has been answered — file it, do not create a task. If that file carries an \"error\" key or \"truncated\": true, treat every thread as UNCHECKED and say so in your report; never read a failed check as \"nothing was answered\". Report how many you suppressed this way.

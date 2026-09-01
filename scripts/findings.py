@@ -17,7 +17,9 @@ Usage
     findings.py reopen <id> [--force] | findings.py reopen --stale
     findings.py list --stale
     findings.py close <id> --outcome fixed|rejected|deferred --note "..."
-    findings.py count [--status open]
+    findings.py count                 # the BACKLOG: open + claimed + pending
+    findings.py count --status all    # every finding ever filed
+    findings.py count --breakdown     # every status, labelled
 """
 
 import argparse
@@ -393,11 +395,32 @@ def cmd_land(a):
 
 
 def cmd_count(a):
+    """The bare number MUST be the backlog, not the archive.
+
+    29 Aug 2026, finding 20260829-queue-fixer-401. `count` with no flag
+    returned every finding ever filed — 402 that day against a real backlog of
+    213 — and every routine that quoted "the findings count" quoted the
+    lifetime total. Nearly double. A number nobody can act on is worse than no
+    number, because it gets acted on anyway.
+
+    So: bare `count` is what is still owed (open + claimed + pending). The
+    lifetime total is still available, it just has to be asked for by name.
+    """
     state = current_state()
-    if a.status:
+    if a.breakdown:
+        for st in OPEN_STATES + ["fixed", "rejected", "deferred"]:
+            print("%-9s %d" % (st, sum(1 for r in state.values()
+                                       if r["status"] == st)))
+        print("%-9s %d" % ("BACKLOG", sum(1 for r in state.values()
+                                          if r["status"] in OPEN_STATES)))
+        print("%-9s %d" % ("TOTAL", len(state)))
+        return 0
+    if a.status == "all":
+        print(len(state))
+    elif a.status:
         print(sum(1 for r in state.values() if r["status"] == a.status))
     else:
-        print(len(state))
+        print(sum(1 for r in state.values() if r["status"] in OPEN_STATES))
     return 0
 
 
@@ -458,8 +481,12 @@ def main(argv=None):
     sp.add_argument("--pr", required=True)
     sp.set_defaults(fn=cmd_land)
 
-    sp = sub.add_parser("count")
-    sp.add_argument("--status")
+    sp = sub.add_parser(
+        "count", help="bare = the BACKLOG (open+claimed+pending), not the archive")
+    sp.add_argument("--status",
+                    help="one status, or 'all' for every finding ever filed")
+    sp.add_argument("--breakdown", action="store_true",
+                    help="every status, labelled, plus BACKLOG and TOTAL")
     sp.set_defaults(fn=cmd_count)
 
     a = p.parse_args(argv)

@@ -957,6 +957,41 @@ def status():
     return EX_OK
 
 
+def sweep():
+    """Reclaim a lock whose lease has run out, WITHOUT waiting for a contender.
+
+    9 Aug 2026, finding 20260809-drift-029. break_stale_lock() was only ever
+    called from inside acquire(), so an expired lease did nothing until the
+    next job turned up and asked for the lock. On a quiet Saturday that is two
+    days of a dead holder sitting on the queue, and `status` reported it as
+    held the whole time — a crashed run and a working one looked identical.
+
+    Nothing here needs a daemon. Call it from the start of daily-ops, and from
+    anything else that runs on a clock.
+
+    Exit 0 nothing wrong (no lock, or a live one) · 1 a stale lock was
+    reclaimed, and that is worth reporting, not swallowing.
+    """
+    if not os.path.isdir(LOCK_DIR):
+        print("queue sweep: no lock held.")
+        return EX_OK
+
+    holder = read_holder() or {}
+    job = holder.get("job", "unknown")
+    held = now() - holder.get("acquired_at", now())
+    reason = break_stale_lock()
+    if reason:
+        print("queue sweep: RECLAIMED the queue from %s — %s. It had held the "
+              "lock for %.0f min. Anything queued behind it never ran."
+              % (job, reason, held / 60))
+        return 1
+
+    left = (holder.get("lease_until", now()) - now()) / 60
+    print("queue sweep: %s still holds the queue, lease live for another "
+          "%.0f min." % (job, left))
+    return EX_OK
+
+
 def main(argv=None):
     p = argparse.ArgumentParser(description="Serialise scheduled jobs.")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -1000,6 +1035,10 @@ def main(argv=None):
     sp.add_argument("--quiet", action="store_true")
 
     sub.add_parser("status")
+
+    # Reclaim on EXPIRY, not on the next contender's arrival (finding
+    # 20260809-drift-029). Exit 1 means it found and broke a stale lock.
+    sub.add_parser("sweep", help="reclaim a lock whose lease has run out")
 
     sp = sub.add_parser("ready")
     sp.add_argument("job")
@@ -1052,6 +1091,8 @@ def main(argv=None):
         return assert_held(a.job, quiet=a.quiet)
     if a.cmd == "status":
         return status()
+    if a.cmd == "sweep":
+        return sweep()
     if a.cmd == "ready":
         cfg = load_schedule().get(a.job) or {}
         ok, why = preconditions_met(cfg)

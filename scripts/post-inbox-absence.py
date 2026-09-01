@@ -24,7 +24,22 @@ A folder that does not exist, or that holds no processed post at all, is NOT
 a pass. It exits 2 and says so. The failure this replaces was a check that
 could only ever return "fine", so a check that cannot fail would repeat it.
 
-Exit codes: 0 fresh · 1 stale, alert · 2 cannot tell (folder missing/empty).
+THE SECOND FAILURE (31 Aug 2026, finding 20260831-post-manager-weekly-418)
+--------------------------------------------------------------------------
+The check only ever read Processed/. Scanning puts a PDF in the Post Inbox
+ROOT; it only reaches Processed/ once the post phase has run over it. So a
+pile that Kevin HAD scanned but nothing had processed still counted as
+"nobody scanned" — and on 31 Aug it printed exactly that, telling him to go
+and scan, while 37 pages from 26 Aug sat unprocessed in the root holding four
+charging-order threats and two Companies House strike-off notices.
+
+Unscanned and unprocessed are different failures with opposite fixes. The
+root is checked FIRST now, because a backlog is the louder and more actionable
+of the two, and telling Kevin to scan post he has already scanned is the fastest
+way to teach him to ignore this check.
+
+Exit codes: 0 fresh · 1 stale, alert · 2 cannot tell (folder missing/empty)
+            · 3 scans are waiting, unprocessed, in the inbox root.
 """
 
 import argparse
@@ -69,6 +84,37 @@ def newest_processed(processed_dir):
     return newest, name, count
 
 
+# Subfolders of Post Inbox that are pipeline state, not unprocessed input.
+PIPELINE_DIRS = ("Processed", "Split")
+
+
+def unprocessed_pdfs(base):
+    """(count, oldest mtime, oldest name) of PDFs sitting in the inbox ROOT.
+
+    Only the top level. Processed/ and Split/ are where the pipeline PUTS
+    things; anything loose in the root has been scanned and not yet worked.
+    """
+    count, oldest, name = 0, None, None
+    try:
+        entries = os.listdir(base)
+    except OSError:
+        return 0, None, None
+    for entry in entries:
+        if not entry.endswith(PDF_SUFFIXES):
+            continue
+        path = os.path.join(base, entry)
+        if not os.path.isfile(path):
+            continue
+        try:
+            mtime = os.path.getmtime(path)
+        except OSError:
+            continue
+        count += 1
+        if oldest is None or mtime < oldest:
+            oldest, name = mtime, entry
+    return count, oldest, name
+
+
 def check(base=None, stale_days=STALE_DAYS, now=None):
     """Returns (exit_code, message)."""
     base = base or DRIVE
@@ -81,6 +127,19 @@ def check(base=None, stale_days=STALE_DAYS, now=None):
                    "an unreadable folder and an empty one look identical, and "
                    "reading either as 'no post' is the bug this check exists for."
                    % base)
+    waiting, oldest, oldest_name = unprocessed_pdfs(base)
+    if waiting:
+        age = (now - oldest) / 86400.0
+        stamp = time.strftime("%d %b %Y", time.localtime(oldest))
+        return 3, (
+            ":mailbox_with_mail: *%d scanned document%s waiting to be processed* "
+            "in the Post Inbox (oldest scanned %s, %.0f days ago).\n"
+            "The post has been SCANNED. Nothing has read it. On 31 Aug 2026 this "
+            "backlog held four charging-order threats and two Companies House "
+            "strike-off notices while the check told Kevin to go and scan.\n"
+            "*Run the post phase over the Post Inbox — no scanning needed.*"
+            % (waiting, "" if waiting == 1 else "s", stamp, age))
+
     if not os.path.isdir(processed):
         return 2, ("post-inbox: CANNOT TELL — no Processed folder under %s, so "
                    "there is no record of post ever having been scanned."

@@ -66,7 +66,11 @@ fi
 __START_LINE=$( { wc -l < "$LOG"; } 2>/dev/null || echo 0)
 __MARKER="$SCRATCH/.run-start.$$"
 touch "$__MARKER"
-echo "===== task-manager run $(date) =====" >> "$LOG"
+# WHICH SLOT IS THIS? Decided here, by the clock, once (finding
+# 20260829-daily-ops-396). See scripts/slot-label.py — the agent used to guess,
+# and it guessed "13:00 slot" every run.
+SLOT_LABEL="$(/usr/bin/python3 "$REPO/scripts/slot-label.py" 2>/dev/null || echo unknown)"
+echo "===== task-manager run [$SLOT_LABEL slot] $(date) =====" >> "$LOG"
 
 # Finding 20260827-phase-2-382: the inbound-triage 09:00 slot on 26 Aug died
 # leaving a start header and no done line, indistinguishable from a run still
@@ -89,7 +93,7 @@ trap 'exit 129' HUP
 trap 'exit 130' INT
 cd "$REPO" || { echo "ERROR: repo not found at $REPO" >&2; exit 1; }
 
-"$CLAUDE" -p "You are the Task Manager agent's scheduled run (one of the 09:00 / 13:00 / 17:00 slots). Do this skill in full: $SKILL
+"$CLAUDE" -p "You are the Task Manager agent's scheduled run. THIS RUN IS THE $SLOT_LABEL SLOT — that is the wall clock at run start, read for you. Head your report with exactly '$SLOT_LABEL slot' and never substitute a slot you worked out yourself. Do this skill in full: $SKILL
 Rules for the whole run: the BOARD PASS ALWAYS COMPLETES FIRST — never start doing work before every stuck task has its move decided. Every task write goes through scripts/agent-dispatch.py or scripts/task-manager.py — never a raw Airtable write to a task. Never route work to Mica or Ericamae (Kevin's ruling, 25 Aug 2026). Never send, reply, pay, or delete anything yourself. Working and temp files go ONLY under $SCRATCH — NEVER under the repo, and never in monitoring/ (public repository; task content includes tenant, creditor and legal detail; counts-only reports in monitoring/ are fine). A broken read is reported loudly, never treated as a quiet board. Do not take the queue lock (this run already holds it). Do not edit, commit, or push code; file anything needing a code change via scripts/findings.py. Complete the closing steps in full (score, publish, verify). End with at most twenty lines of counts only — never task content or record IDs." \
   --permission-mode acceptEdits \
   --allowedTools "${AGENT_ALLOWED_TOOLS[@]}" >> "$LOG" 2>&1
