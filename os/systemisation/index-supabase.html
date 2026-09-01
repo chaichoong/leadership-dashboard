@@ -171,6 +171,12 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 .sop-spinner{width:32px;height:32px;border:3px solid var(--border-default);border-top-color:var(--accent);border-radius:50%;animation:sop-spin .8s linear infinite;margin:0 auto}
 @keyframes sop-spin{to{transform:rotate(360deg)}}
 .sop-doc-ai-detail ul{margin:0;padding:0 0 0 18px;list-style:disc}.sop-doc-ai-detail li{margin-bottom:4px}
+.sop-fb{margin-top:8px}
+.sop-fb-toggle{background:none;border:none;color:var(--accent);font-size:var(--fs-xs);cursor:pointer;padding:2px 0;font-weight:var(--fw-medium)}
+.sop-fb-toggle:hover{text-decoration:underline}
+.sop-fb-box{margin-top:8px}
+.sop-fb-text{width:100%;box-sizing:border-box;border:1px solid var(--border-default);background:var(--bg-surface);border-radius:var(--radius-md);padding:8px 10px;font-size:var(--fs-sm);color:var(--text-primary);font-family:var(--font-family-base);resize:vertical}
+.sop-fb-actions{display:flex;gap:8px;margin-top:6px}
 
 .empty-state{text-align:center;padding:40px 20px;color:var(--text-muted)}
 .empty-state p{margin-bottom:12px}
@@ -306,6 +312,85 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 .wf-card-body{display:block!important}
 .main{padding:10px}
 }
+
+/* AGENTIC extraction — script guide + readiness scorecard */
+.agentic-guide{border:1px solid var(--border-default);border-radius:var(--radius-md);background:var(--bg-surface);margin:12px 0;overflow:hidden}
+.agentic-guide-head{display:flex;align-items:center;gap:8px;padding:10px 14px;cursor:pointer;font-weight:var(--fw-semibold);font-size:var(--fs-sm);user-select:none}
+.agentic-guide-head .resources-chevron{transition:transform .2s;font-size:11px;color:var(--text-muted)}
+.agentic-guide.open .resources-chevron{transform:rotate(90deg)}
+.agentic-guide-body{display:none;padding:4px 14px 14px}
+.agentic-guide.open .agentic-guide-body{display:block}
+.agentic-guide-intro{font-size:var(--fs-xs);color:var(--text-secondary);margin:0 0 10px}
+.agentic-guide-item{display:flex;gap:10px;align-items:flex-start;padding:7px 0;border-top:1px solid var(--border-subtle)}
+.agentic-guide-item>div{display:flex;flex-direction:column;gap:1px}
+.agentic-guide-item strong{font-size:var(--fs-sm)}
+.agentic-guide-item span{font-size:var(--fs-xs);color:var(--text-secondary);line-height:1.45}
+.agentic-letter{flex-shrink:0;width:22px;height:22px;border-radius:50%;background:var(--accent-soft);color:var(--accent);font-weight:var(--fw-bold);font-size:12px;display:flex;align-items:center;justify-content:center}
+.agentic-card{border:1px solid var(--border-default);border-radius:var(--radius-md);background:var(--bg-surface);margin:14px 0;padding:14px 16px}
+.agentic-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:10px}
+.agentic-title{font-weight:var(--fw-semibold);font-size:var(--fs-sm)}
+.agentic-sub{font-size:var(--fs-xs);color:var(--text-muted)}
+.agentic-state{flex-shrink:0;padding:3px 12px;border-radius:var(--radius-full);font-size:var(--fs-xs);font-weight:var(--fw-semibold)}
+.agentic-rows{display:flex;flex-direction:column;gap:1px}
+.agentic-row{display:grid;grid-template-columns:24px 150px 74px 1fr;gap:10px;align-items:center;padding:7px 0;border-top:1px solid var(--border-subtle);font-size:var(--fs-sm)}
+.agentic-row .agentic-letter{width:20px;height:20px;font-size:11px}
+.agentic-name{font-weight:var(--fw-medium)}
+.agentic-pill{justify-self:start;padding:2px 9px;border-radius:var(--radius-full);font-size:11px;font-weight:var(--fw-semibold);white-space:nowrap}
+.agentic-reason{font-size:var(--fs-xs);color:var(--text-secondary);overflow:hidden;text-overflow:ellipsis}
+.agentic-questions{margin-top:14px;padding-top:12px;border-top:1px solid var(--border-subtle)}
+.agentic-q-title{font-size:var(--fs-sm);font-weight:var(--fw-medium);color:var(--accent);margin-bottom:10px}
+.agentic-q{margin-bottom:10px}
+.agentic-q label{display:block;font-size:var(--fs-xs);color:var(--text-secondary);margin-bottom:4px}
+/* Make the answer box unmistakably an input field (was transparent until focus). */
+.agentic-answer{display:block;width:100%;box-sizing:border-box;border:1px solid var(--border-default);background:var(--bg-surface);border-radius:var(--radius-md);padding:8px 10px;min-height:46px;font-size:var(--fs-sm);color:var(--text-primary);resize:vertical}
+.agentic-answer::placeholder{color:var(--text-muted)}
+.agentic-answer:focus{outline:none;border-color:var(--accent);background:var(--bg-surface);box-shadow:0 0 0 2px var(--accent-soft)}
+.agentic-foot{margin-top:12px;display:flex;justify-content:flex-end}
+/* Agent panel */
+.agent-card{border:1px solid var(--border-default);border-radius:var(--radius-lg);background:var(--bg-surface);padding:14px 16px;margin:14px 0}
+.agent-pill{display:inline-block;font-size:11px;font-weight:var(--fw-bold);letter-spacing:.5px;padding:3px 10px;border-radius:var(--radius-full)}
+.agent-sub{font-size:var(--fs-xs);color:var(--text-secondary);margin-left:8px}
+/* Agent identity card — who this agent is, in the client's language */
+/* Autonomy ladder — names the ramp the module already runs */
+/* Sync / refresh bar in the topbar */
+.sync-status{display:inline-flex;align-items:center;gap:6px;font-size:var(--fs-xs);color:var(--text-secondary);white-space:nowrap}
+.sync-dot{width:8px;height:8px;border-radius:50%;background:var(--text-muted);flex-shrink:0}
+.sync-dot.ok{background:var(--success,#2C6E49)}
+.sync-dot.syncing{background:var(--warning,#C6A15B)}
+.sync-dot.error{background:var(--danger,#C0392B)}
+.settings-icon.spinning{animation:sys-spin .8s linear infinite}
+@keyframes sys-spin{to{transform:rotate(360deg)}}
+.agentic-loading{display:flex;align-items:center;gap:10px;padding:16px;color:var(--text-muted);font-size:var(--fs-sm)}
+/* Guided agent-creation form */
+.modal input.agentic-answer,.modal select.agentic-answer{min-height:0}
+@media(max-width:760px){.agentic-row{grid-template-columns:20px 1fr;row-gap:2px}.agentic-pill,.agentic-reason{grid-column:2}}
+/* Disposition fork */
+.disp-bar{border:1px solid var(--border-default);border-radius:var(--radius-md);background:var(--bg-surface);margin:14px 0;padding:12px 16px}
+.disp-q{font-weight:var(--fw-semibold);font-size:var(--fs-sm);margin-bottom:8px}
+.disp-opts{display:flex;gap:8px;flex-wrap:wrap}
+.disp-opt{padding:6px 14px;border:1px solid var(--border-default);border-radius:var(--radius-full);background:var(--bg-surface);color:var(--text-secondary);font-size:var(--fs-sm);font-family:inherit;cursor:pointer;transition:border-color .15s,color .15s,background .15s}
+.disp-opt:hover{border-color:var(--accent);color:var(--accent)}
+.disp-opt.sel{background:var(--accent);border-color:var(--accent);color:var(--bg-surface);font-weight:var(--fw-semibold)}
+.disp-hint{font-size:var(--fs-xs);color:var(--text-muted);margin-top:8px}
+.disp-opt.rec{border-color:var(--accent);color:var(--accent)}
+.disp-rec{font-size:10px;font-weight:var(--fw-semibold);text-transform:uppercase;letter-spacing:.4px;opacity:.75;margin-left:5px}
+/* Rule of R — the gate before the disposition choice */
+.ror-bar{border:1px solid var(--border-default);border-radius:var(--radius-md);background:var(--bg-surface);margin:14px 0 0;padding:12px 16px}
+.ror-rows{display:flex;gap:18px;flex-wrap:wrap}
+.ror-row{display:flex;align-items:center;gap:8px}
+.ror-q{font-size:var(--fs-sm);color:var(--text-secondary);cursor:help}
+.ror-btns{display:inline-flex;border:1px solid var(--border-default);border-radius:var(--radius-full);overflow:hidden}
+.ror-btn{padding:3px 11px;border:none;background:var(--bg-surface);color:var(--text-muted);font-size:var(--fs-xs);font-family:inherit;cursor:pointer;transition:background .15s,color .15s}
+.ror-btn:hover{background:var(--bg-surface-2)}
+.ror-btn.sel{background:var(--accent);color:var(--bg-surface);font-weight:var(--fw-semibold)}
+.ror-verdict{font-size:var(--fs-xs);color:var(--text-secondary);margin-top:10px;padding-top:8px;border-top:1px solid var(--border-subtle);line-height:1.5}
+.ror-verdict strong{color:var(--text-primary)}
+.ror-verdict-empty{color:var(--text-muted)}
+@media(max-width:720px){.ror-rows{gap:8px;flex-direction:column;align-items:stretch}.ror-row{justify-content:space-between}}
+.disp-tag{flex-shrink:0;font-size:10px;font-weight:var(--fw-semibold);padding:1px 6px;border-radius:var(--radius-full)}
+.disp-tag-agent{background:var(--accent-soft);color:var(--accent)}
+.disp-tag-recurring{background:var(--warning-bg);color:var(--warning)}
+.disp-tag-adhoc{background:var(--info-bg);color:var(--info)}
 </style>
 </head>
 <body>
@@ -323,6 +408,8 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
         <div class="subtitle">Map, document and automate every business process</div>
     </div>
     <div class="topbar-right">
+        <span id="syncStatus" class="sync-status" title="Not synced yet"><span class="sync-dot"></span>Loading…</span>
+        <button class="settings-icon" id="refreshBtn" onclick="refreshData()" title="Refresh data">&#x21BB;</button>
         <select id="bizFilter" class="filter-select" onchange="applyBizFilter()">
             <option value="">All Businesses</option>
         </select>
@@ -336,7 +423,8 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
     <button class="pipeline-tab" data-tab="dept" onclick="switchView('dept')">Departmental <span class="count" id="deptCount">0</span></button>
     <button class="pipeline-tab" data-tab="all" onclick="switchView('all')">All Workflows <span class="count" id="allCount">0</span></button>
     <button class="pipeline-tab" data-tab="steps" onclick="switchView('steps')">SOPs <span class="count" id="stepsCount">0</span></button>
-    <button class="pipeline-tab" data-tab="automation" onclick="switchView('automation')">Automation <span class="count" id="autoCount">0</span></button>
+    <!-- The AI Agents tab moved to Leadership → AI Agents (os/agents/) on 24 Aug 2026. This pane is a pointer only. -->
+    <button class="pipeline-tab" data-tab="automation" onclick="switchView('automation')">AI Agents</button>
 </div>
 
 <div id="main" class="main" style="display:none">
@@ -360,7 +448,9 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 </div>
 
 <script src="../../js/prompts/boardroom-mentor.js"></script>
-<!-- Model IDs live once in js/ai-models.js. Never hardcode a model ID below. -->
+<!-- Model IDs live once in js/ai-models.js. This page cannot load js/config.js
+     (it declares its own BASE_ID/PAT/TEAM/allBusinesses), so it reads
+     window.AI_MODELS directly. Never hardcode a model ID below. -->
 <script src="../../js/ai-models.js?v=1"></script>
 <script>
 // ═══════════════════════════════════════════════════════════════════════
@@ -400,6 +490,8 @@ const ST = {
 };
 const CLAUDE_PROXY = 'https://claude-proxy.kevinbrittain.workers.dev';
 const DRIVE_UPLOAD_ENDPOINT = 'https://drive-upload.kevinbrittain.workers.dev/upload';
+// Real spoken transcripts (no Loom API key needed) — see workers/loom-transcript
+const LOOM_TRANSCRIPT_ENDPOINT = 'https://loom-transcript.kevinbrittain.workers.dev/';
 const MM = { name: 'fldRphzaAUzBqconG', description: 'fldWDxL9EyS1iaGlf', business: 'fldi4uVOf2NgxiSKy' };
 const BIZ_NAME = 'fldbbRqVxLxUdHwIR';
 const BIZ_ACTIVE = 'fldhXBnRrngCVsgSk';
@@ -423,6 +515,31 @@ const FULFILL_STAGES = [
 
 const DEPARTMENTS = ['Marketing', 'Sales', 'Operations', 'Finance', 'Admin / HR'];
 
+// AGENTIC extraction script — the seven stages the owner narrates (Loom) or
+// answers in the guided form. Amended 25 Aug 2026 on Kevin's call: the acronym
+// stays AGENTIC. Chen's reasoning core lives INSIDE Navigate (the walk-through
+// is where decisions get narrated) and C carries the score.
+// Wording is the single source of truth (see docs/agentic-extraction-spec.md).
+// naAllowed is PER MODE — the stage list, the pass rules and the normaliser all
+// derive from it, so the prompt can never contradict what is enforced.
+const AGENTIC_STAGES = [
+    { letter:'A', name:'Aim',                     naAllowed:{agent:false,human:false}, prompt:'In a sentence or two, what is this process for, and why does it matter to the business?' },
+    { letter:'G', name:'Go Signal',               naAllowed:{agent:false,human:false}, prompt:'What tells you it is time to do this? A set time, an email arriving, a new record, a payment landing, or someone asking? This trigger is specific to THIS agent — there is no blanket schedule.' },
+    { letter:'E', name:'Entry Points',            naAllowed:{agent:false,human:false}, prompt:'Where do you go and what do you open to do this? Which systems, inboxes, files, or records, and what do you need from each?' },
+    { letter:'N', name:'Navigate the Process',    naAllowed:{agent:false,human:false}, prompt:'Walk me through exactly what you do, step by step. Every time you make a choice, say how you decide and why. And when something odd comes up that the steps do not cover, what happens: best guess, skip it, or stop and ask you?' },
+    { letter:'T', name:'Tools & Transformations', naAllowed:{agent:false,human:false}, prompt:'What do you actually change, create, or send? Name every system you write into.' },
+    { letter:'I', name:'Inspections & Caveats',   naAllowed:{agent:true,human:true},   prompt:'Before you call it done, what do you check? What would you never let go out unchecked? And what trips this up — the odd cases, the exceptions, anything you must never do?' },
+    { letter:'C', name:'Conclusion & Score',      naAllowed:{agent:false,human:false}, prompt:'What does the finished job look like, and how is success scored? Describe the end result of one good run, and the number or check that tells you over time it is doing a good job.' },
+];
+function stageNaAllowed(def, human){ return !!def.naAllowed[human ? 'human' : 'agent']; }
+
+// Disposition fork — what a documented process becomes once its SOP exists.
+const DISPOSITIONS = [
+    { key:'agent',     label:'Autonomous agent',     tag:'AI',     hint:'AI will run this. Flagged to build as an agent (the runtime is coming).' },
+    { key:'recurring', label:'Recurring human task', tag:'Task',   hint:'Assigned as a recurring task on Tasks & Projects, with the SOP linked.' },
+    { key:'adhoc',     label:'Ad-hoc human task',    tag:'Ad-hoc', hint:'Staff follow the SOP whenever this is needed. No schedule.' },
+];
+
 const TASKS_TBL = 'tblqB8b22hKBL4PF1';
 const TF = {
     name:        'fldgFjGBw6bTKJFCD',
@@ -430,14 +547,22 @@ const TF = {
     assignee:    'fldELMncVJYPDRJNc',
     description: 'fldRGhBQViKZKtkQ6',
     category:    'fldVDvfhfOUBNvAxe',
+    business:    'fldLu1Y4GzyWcDoxr',  // link to Businesses — ties the video task (and its SOP) to a business
     notes:       'fldR7apBzSp3oxFxz',
     dueDate:     'fld7XP8w8kbxfETV4',
     priority:    'fldS21RwmwOqt71LI',
     attachments: 'fldEbs9cscRr8elcw',
     timeEstimate:'fld10VzzbiNNgRmIi',
     collaborators:'fldcq3t6uAPgWSOP8',
+    // The approval-loop + workload field ids moved to os/agents/index.html
+    // with the register (24 Aug 2026). Not kept here: a dead copy of live
+    // field ids is the copy a future fix lands on by mistake.
 };
 
+// ── AI Agents register — MOVED to os/agents/index.html (Leadership → AI
+// Agents) on 24 Aug 2026, Kevin's ruling: everything about the agent
+// workforce lives on ONE page. This page keeps only the SOP-building flow
+// and a pointer on the old tab.
 const TEAM = [
     { key:'kevin', name:'Kevin Brittain',  email:'kevin@runpreneur.org.uk' },
     { key:'mica',  name:'Mica Albovias',   email:'micaa.work@gmail.com' },
@@ -462,7 +587,30 @@ let _drawerKey = null;
 let _drawerView = null;
 let bizFilterId = '';
 let selectedStepsWf = null;
+let _allSearch = '', _stepsSearch = '', _refocusSearchId = '';
 let _bulkPendingAssigns = {};
+
+// Case-insensitive match of a workflow against a search query (name + description).
+function wfMatchesQuery(w, q){
+    q = (q||'').trim().toLowerCase();
+    if(!q) return true;
+    return String(gf(w,WF.name)||'').toLowerCase().includes(q)
+        || String(gf(w,WF.description)||'').toLowerCase().includes(q);
+}
+// A styled search input. oninput updates the state var, flags itself for re-focus,
+// and re-renders — the render restores focus + caret so typing is not interrupted.
+function sysSearchInput(id, value, expr){
+    return `<input id="${id}" type="search" placeholder="Search workflows…" value="${esc(value||'')}"
+        style="font-size:var(--fs-xs);padding:5px 10px;border:1px solid var(--border-default);border-radius:var(--radius-sm);background:var(--bg-surface);color:var(--text-primary);min-width:180px"
+        oninput="${expr}">`;
+}
+// Called at the end of a render that a search box triggered: restore focus + caret.
+function restoreSearchFocus(){
+    if(!_refocusSearchId) return;
+    const el = document.getElementById(_refocusSearchId);
+    _refocusSearchId = '';
+    if(el){ el.focus(); const n = el.value.length; try { el.setSelectionRange(n, n); } catch(e){} }
+}
 
 function isSkillCreated(stepId){
     if(localStorage.getItem('sys_skill_'+stepId)==='1') return true;
@@ -538,7 +686,7 @@ function toast(msg,ms=2500){ const t=document.getElementById('toast'); t.textCon
 // Auth
 // ═══════════════════════════════════════════════════════════════════════
 function bootAuth(){
-    try { if(window.parent && window.parent!==window && window.parent.PAT){ PAT=window.parent.PAT; return true; } } catch(e){}
+    try { if(window.parent && window.parent!==window && window.parent.PAT){ PAT=window.parent.PAT; return true; } } catch(e){/* best-effort: safe fallback */}
     const stored=localStorage.getItem('_dlr_pat');
     if(stored){ PAT=stored; return true; }
     return false;
@@ -555,17 +703,25 @@ function saveAuth(){
 // ═══════════════════════════════════════════════════════════════════════
 // Airtable API
 // ═══════════════════════════════════════════════════════════════════════
-async function atFetch(tableId, fields){
+async function atFetch(tableId, fields, extraParams){
     let all=[], offset='';
     const params = new URLSearchParams({ returnFieldsByFieldId:'true', pageSize:'100' });
     if(fields) fields.forEach(f=>params.append('fields[]',f));
+    if(extraParams) Object.entries(extraParams).forEach(([k,v])=>params.set(k,v));
     do {
         if(offset) params.set('offset',offset);
-        const res = await fetch(`https://api.airtable.com/v0/${BASE_ID}/${tableId}?${params}`,{
-            headers:{'Authorization':`Bearer ${PAT}`}
-        });
+        let res;
+        // Retry 429s in an inner loop, never with `continue`: in a do-while,
+        // continue jumps to the while(offset) test, which on the FIRST page
+        // (offset='') exited and returned [] as if the table were empty.
+        for(let attempt=0;;attempt++){
+            res = await fetch(`https://api.airtable.com/v0/${BASE_ID}/${tableId}?${params}`,{
+                headers:{'Authorization':`Bearer ${PAT}`}
+            });
+            if(res.status===429 && attempt<4){ await new Promise(r=>setTimeout(r,1100)); continue; }
+            break;
+        }
         if(res.status===401||res.status===403){ showAuthBar(); throw new Error('auth'); }
-        if(res.status===429){ await new Promise(r=>setTimeout(r,1100)); continue; }
         const data = await res.json();
         all = all.concat(data.records||[]);
         offset = data.offset||'';
@@ -628,7 +784,41 @@ async function loadData(){
     allObjStrat = os;
     buildMethodBizMap();
     populateBizFilter();
+    await rebuildVideoTaskTracking();
     await checkVideoTasks();
+}
+
+// The task↔workflow link used to live ONLY in this browser's localStorage, so the
+// pipeline automation never fired on another device or after a cache clear. The
+// workflow id is stamped in every video task's Notes ("[Systemisation] Workflow
+// ID: recX") — rebuild the local tracking from Airtable on every load.
+async function rebuildVideoTaskTracking(){
+    try {
+        const records = [];
+        let offset = null;
+        do {
+            const params = new URLSearchParams({
+                returnFieldsByFieldId:'true', pageSize:'100',
+                filterByFormula: "AND({Task Category}='Systemisation', FIND('[Systemisation] Workflow ID:', {Notes}&''))"
+            });
+            params.append('fields[]', TF.notes);
+            if(offset) params.set('offset', offset);
+            const res = await fetch(`https://api.airtable.com/v0/${BASE_ID}/${TASKS_TBL}?${params}`,{
+                headers:{'Authorization':`Bearer ${PAT}`}
+            });
+            if(!res.ok) return;
+            const data = await res.json();
+            records.push(...(data.records||[]));
+            offset = data.offset || null;
+        } while(offset);
+        for(const t of records){
+            const m = String(gf(t,TF.notes)||'').match(/\[Systemisation\] Workflow ID:\s*(rec\w+)/);
+            if(!m) continue;
+            const wfId = m[1];
+            if(!allWorkflows.some(w=>w.id===wfId)) continue;   // workflow deleted
+            if(!getWfVideoTaskId(wfId)) setWfVideoTaskId(wfId, t.id);
+        }
+    } catch(e){ console.warn('Video task tracking rebuild failed:', e); }
 }
 
 async function checkVideoTasks(){
@@ -830,8 +1020,7 @@ function updateCounts(){
     document.getElementById('allCount').textContent=wfs.length;
     const sopCount = wfs.filter(w=>!!gf(w,WF.sopDocument)).length;
     document.getElementById('stepsCount').textContent=sopCount;
-    const skillsBuilt = wfs.filter(w=>!!gf(w,WF.skillDefinition) || !!localStorage.getItem('sys_wfskill_'+w.id)).length;
-    document.getElementById('autoCount').textContent=skillsBuilt;
+    // The AI Agents tab is a pointer to Leadership → AI Agents; no count here.
 }
 
 // ── Customer Journey (FULFILL) ──
@@ -1013,7 +1202,7 @@ function renderAll(){
     allBusinesses.forEach(b=>{ orderedMethodsForBiz(b.id).forEach(m=>{ if(!methodOrder.includes(m.id)) methodOrder.push(m.id); }); });
     allMethods.forEach(m=>{ if(!methodOrder.includes(m.id)) methodOrder.push(m.id); });
     const nameCmp = (a,b)=>{ const na=(gf(a,WF.name)||'').toLowerCase(), nb=(gf(b,WF.name)||'').toLowerCase(); return na<nb?-1:na>nb?1:0; };
-    const wfs = filteredWorkflows().slice().sort((a,b)=>{
+    const wfs = filteredWorkflows().filter(w=>wfMatchesQuery(w,_allSearch)).slice().sort((a,b)=>{
         if(_allSortMode==='alpha') return nameCmp(a,b);
         if(_allSortMode==='department'){
             const da=selName(gf(a,WF.department))||'', db=selName(gf(b,WF.department))||'';
@@ -1054,7 +1243,8 @@ function renderAll(){
     topBar.appendChild(hint);
     const sortWrap = document.createElement('div');
     sortWrap.style.cssText = 'display:flex;align-items:center;gap:8px';
-    sortWrap.innerHTML = `<label style="font-size:var(--fs-xs);color:var(--text-secondary);white-space:nowrap">Sort by</label>
+    sortWrap.innerHTML = `${sysSearchInput('allSearchInput', _allSearch, "_allSearch=this.value;_refocusSearchId='allSearchInput';renderAll()")}
+        <label style="font-size:var(--fs-xs);color:var(--text-secondary);white-space:nowrap">Sort by</label>
         <select style="font-size:var(--fs-xs);padding:4px 8px;border:1px solid var(--border-default);border-radius:var(--radius-sm);background:var(--bg-surface);color:var(--text-primary)" onchange="_allSortMode=this.value;renderAll()">
             <option value="method"${_allSortMode==='method'?' selected':''}>Main Method</option>
             <option value="department"${_allSortMode==='department'?' selected':''}>Department</option>
@@ -1158,6 +1348,7 @@ function renderAll(){
     paneEl.appendChild(table);
     pane.innerHTML = '';
     pane.appendChild(paneEl);
+    restoreSearchFocus();
 }
 
 function buildAllGridRow(w){
@@ -1357,47 +1548,49 @@ function buildNewRow(stageKey, view){
     const tr = document.createElement('tr');
     tr.className = 'wf-grid-new';
     tr.innerHTML = `
-        <td><input class="wf-grid-input" placeholder="Type workflow name and press Enter" data-field="name"></td>
+        <td><input class="wf-grid-input" placeholder="Type workflow name (saves automatically)" data-field="name"></td>
         <td><textarea class="wf-grid-input" rows="1" placeholder="Description (optional)" data-field="desc"></textarea></td>
         <td></td>`;
 
     const nameInput = tr.querySelector('[data-field="name"]');
     const descInput = tr.querySelector('[data-field="desc"]');
+    let committing = false;
 
-    nameInput.addEventListener('keydown', async(e)=>{
-        if(e.key==='Enter'){
-            e.preventDefault();
-            const name = nameInput.value.trim();
-            if(!name) return;
-            nameInput.disabled = true;
-            const fields = { [WF.name]: name, [WF.status]: 'Not Started' };
-            const desc = descInput.value.trim();
-            if(desc) fields[WF.description] = desc;
-            if(view==='fulfill') fields[WF.fulfillStage] = stageKey;
-            else if(view==='method') fields[WF.mainMethodStage] = [stageKey];
-            else if(view==='dept') fields[WF.department] = stageKey;
-            if(bizFilterId) fields[WF.business] = [bizFilterId];
-            try {
-                const rec = await atCreate(TBL.workflows, fields);
-                allWorkflows.push(rec);
-                const tbody = tr.parentElement;
-                const newDataRow = buildGridRow(rec, stageKey, view);
-                tbody.insertBefore(newDataRow, tr);
-                nameInput.value = ''; descInput.value = '';
-                nameInput.disabled = false;
-                nameInput.focus();
-                updateTabCounts();
-                if(currentView==='fulfill') renderFulfill();
-                else if(currentView==='method') renderMethod();
-                else if(currentView==='dept') renderDept();
-                toast('Workflow added');
-            } catch(err){ toast('Error: '+err.message); nameInput.disabled = false; }
-        }
-    });
+    async function commitNew(){
+        const name = nameInput.value.trim();
+        if(!name || committing || nameInput.disabled) return;
+        committing = true;
+        nameInput.disabled = true;
+        const fields = { [WF.name]: name, [WF.status]: 'Not Started' };
+        const desc = descInput.value.trim();
+        if(desc) fields[WF.description] = desc;
+        if(view==='fulfill') fields[WF.fulfillStage] = stageKey;
+        else if(view==='method') fields[WF.mainMethodStage] = [stageKey];
+        else if(view==='dept') fields[WF.department] = stageKey;
+        if(bizFilterId) fields[WF.business] = [bizFilterId];
+        try {
+            const rec = await atCreate(TBL.workflows, fields);
+            allWorkflows.push(rec);
+            const tbody = tr.parentElement;
+            if(tbody){ const newDataRow = buildGridRow(rec, stageKey, view); tbody.insertBefore(newDataRow, tr); }
+            nameInput.value = ''; descInput.value = '';
+            nameInput.disabled = false;
+            updateTabCounts();
+            if(currentView==='fulfill') renderFulfill();
+            else if(currentView==='method') renderMethod();
+            else if(currentView==='dept') renderDept();
+            toast('Workflow added');
+        } catch(err){ toast('Error: '+err.message); nameInput.disabled = false; }
+        committing = false;
+    }
 
-    descInput.addEventListener('keydown', (e)=>{
-        if(e.key==='Enter'){ e.preventDefault(); nameInput.focus(); nameInput.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter'})); }
-    });
+    // Commit on Enter, OR when focus leaves the whole new row (no Enter needed).
+    // Skip when focus just moves between the name and description of the same row.
+    const commitOnLeave = (e)=>{ const to = e.relatedTarget; if(to && tr.contains(to)) return; commitNew(); };
+    nameInput.addEventListener('keydown', (e)=>{ if(e.key==='Enter'){ e.preventDefault(); commitNew(); } });
+    descInput.addEventListener('keydown', (e)=>{ if(e.key==='Enter'){ e.preventDefault(); commitNew(); } });
+    nameInput.addEventListener('blur', commitOnLeave);
+    descInput.addEventListener('blur', commitOnLeave);
 
     autoGrowTextarea(descInput);
 
@@ -2140,7 +2333,7 @@ async function generateWorkflowSOP(wfId){
             transcript = await fetchLoomTranscript(loomUrl);
             const oembedRes = await fetch(`https://www.loom.com/v1/oembed?url=${encodeURIComponent(loomUrl)}`);
             if(oembedRes.ok){ const od = await oembedRes.json(); videoTitle = od.title||''; }
-        } catch(e){}
+        } catch(e){ console.warn('[skill-gen] Loom transcript fetch failed', e); }
     }
 
     const stepsText = steps.map((s,i)=>`Step ${i+1}: ${gf(s,ST.name)||'Untitled'}\nDescription: ${gf(s,ST.description)||'None'}`).join('\n\n');
@@ -2157,6 +2350,8 @@ The workflow has the following steps:
 ${stepsText}
 
 ${transcript ? `IMPORTANT: Below is the transcript from the actual video walkthrough of this process. Use the specific details, system names, screen locations, and actions mentioned in the transcript to write accurate, context-specific instructions. Do NOT write generic software help. Write instructions that match exactly what happens in the video.
+
+CRITICAL — examples are not rules: when the narrator walks through specific cases (a tenant's name, one bank account, a particular amount or date), treat them as worked examples ONLY. Write every instruction generically so it applies to EVERY case of this process. Never hard-code an example case, name, or date into a step.
 
 VIDEO TRANSCRIPT:
 ${transcript}` : ''}
@@ -2203,7 +2398,17 @@ No other text outside the JSON object.`;
         const tips = sopData.tips || [];
 
         renderSOPDocument(wfId, wName, wDesc, dept, fulfill, loomUrl, steps, sopSteps, container, sopTitle, cautions, tips, videoTitle);
-        const sopJson = JSON.stringify({ sopTitle, sopSteps, cautions, tips, videoTitle, generatedDate: new Date().toISOString() });
+        // Regenerating must NOT wipe how the workflow runs: keep the disposition, the
+        // agent config, and the owner's Rule of R answers (they describe the WORK, which
+        // a re-record does not change). Readiness is deliberately reset — new content,
+        // new score. Anything not listed here is silently dropped on regenerate.
+        const prevSop = getWfSopData(wfId) || {};
+        const sopJson = JSON.stringify(Object.assign(
+            { sopTitle, sopSteps, cautions, tips, videoTitle, generatedDate: new Date().toISOString() },
+            prevSop.disposition ? { disposition: prevSop.disposition } : {},
+            prevSop.agent ? { agent: prevSop.agent } : {},
+            prevSop.ruleOfR ? { ruleOfR: prevSop.ruleOfR } : {}
+        ));
         try {
             await atUpdate(TBL.workflows, wfId, { [WF.sopDocument]: sopJson });
             const wi = allWorkflows.findIndex(w2=>w2.id===wfId);
@@ -2211,6 +2416,7 @@ No other text outside the JSON object.`;
         } catch(e){ console.error('SOP save error:', e); }
         toast('SOP generated');
         await autoUploadToDrive(wfId);
+        runAgenticCheck(wfId); // auto-score readiness once the SOP exists
     } catch(e){
         toast('SOP generation error: '+e.message);
         container.innerHTML = `<div style="padding:20px;color:var(--danger)">Error generating SOP: ${esc(e.message)}</div>`;
@@ -2267,6 +2473,16 @@ function renderSOPDocument(wfId, wName, wDesc, dept, fulfill, loomUrl, steps, so
                     <div class="sop-doc-step-name">${esc(sName)}</div>
                     ${sDesc?`<div class="sop-doc-step-desc">${esc(sDesc)}</div>`:''}
                     ${detailHtml?`<div class="sop-doc-ai-detail">${detailHtml}</div>`:''}
+                    <div class="sop-fb">
+                        <button class="sop-fb-toggle" onclick="toggleSopFb('${s.id}')">&#x270E; Improve this step</button>
+                        <div class="sop-fb-box" id="sopfbbox-${s.id}" style="display:none">
+                            <textarea id="sopfbtext-${s.id}" class="sop-fb-text" rows="2" placeholder="Say what to change. For example: remove the specific example and keep it general."></textarea>
+                            <div class="sop-fb-actions">
+                                <button class="btn btn-sm btn-ai" onclick="submitSopStepFeedback('${wfId}','${s.id}')">Submit &amp; revise</button>
+                                <button class="btn btn-sm" onclick="toggleSopFb('${s.id}')">Cancel</button>
+                            </div>
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>`;
@@ -2286,9 +2502,16 @@ function renderSOPDocument(wfId, wName, wDesc, dept, fulfill, loomUrl, steps, so
 
     html += '</div>';
 
+    const driveDoc = getWfDriveDocUrl(wfId);
+    const driveBtns = driveDoc
+        ? `<a class="btn btn-sm" href="${esc(driveDoc)}" target="_blank" rel="noopener">View in Drive</a>
+           <button class="btn btn-sm btn-drive-upload" onclick="uploadSOPToDrive('${wfId}')">Re-upload to Drive</button>`
+        : `<button class="btn btn-sm btn-drive-upload" onclick="uploadSOPToDrive('${wfId}')">Upload to Drive</button>`;
     html += `<div class="sop-doc-footer">
         <span>Generated ${now}</span>
-        <div style="display:flex;gap:8px">
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+            ${loomUrl ? `<button class="btn btn-sm btn-ai" onclick="regenerateFromVideo('${wfId}')">&#x21BB; Regenerate from video</button>` : ''}
+            ${driveBtns}
             <button class="btn btn-sm btn-primary" onclick="exportSOPAsHTML('${wfId}')">Export</button>
             <button class="btn btn-sm btn-danger" onclick="deleteSOPDocument('${wfId}')">Clear</button>
         </div>
@@ -2344,10 +2567,11 @@ function buildSOPExportHTML(d){
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>${esc(d.sopTitle)} - SOP</title>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
+/* Standalone export doc — no tokens.css, so sage token values are inlined as hex literals */
 *{box-sizing:border-box;margin:0;padding:0}
-body{font-family:'Inter',system-ui,sans-serif;line-height:1.6;color:#1C2422;background:#fff;max-width:800px;margin:0 auto;padding:40px 24px}
+body{font-family:'DM Sans',system-ui,sans-serif;line-height:1.6;color:#1C2422;background:#fff;max-width:800px;margin:0 auto;padding:40px 24px}
 .header{background:#2C6E49;color:#fff;padding:24px 32px;border-radius:8px;margin-bottom:32px}
 .header h1{font-size:22px;font-weight:700;margin:0 0 4px 0}
 .header p{margin:0;opacity:.85;font-size:14px}
@@ -2367,11 +2591,11 @@ body{font-family:'Inter',system-ui,sans-serif;line-height:1.6;color:#1C2422;back
 .step-desc{font-size:14px;color:#5A6660;margin:0 0 8px 0}
 .step-detail{margin-top:8px;padding:14px;background:#F4F6F1;border-radius:6px;font-size:14px;line-height:1.7}
 .step-detail ul{margin:0;padding:0 0 0 18px;list-style:disc}.step-detail li{margin-bottom:4px}
-.cautions{margin-top:32px;padding:20px;background:#FFF8E6;border-radius:8px;border-left:4px solid #C6A15B}
-.cautions h3{font-size:14px;font-weight:700;margin:0 0 10px 0;color:#946B1F}
+.cautions{margin-top:32px;padding:20px;background:#EFE3CA;border-radius:8px;border-left:4px solid #C6A15B}
+.cautions h3{font-size:14px;font-weight:700;margin:0 0 10px 0;color:#8A6B2D}
 .cautions ul{margin:0;padding:0 0 0 20px;font-size:14px;line-height:2}
-.tips{margin-top:16px;padding:20px;background:#E8F4FD;border-radius:8px;border-left:4px solid #5A86CF}
-.tips h3{font-size:14px;font-weight:700;margin:0 0 10px 0;color:#3A6AB0}
+.tips{margin-top:16px;padding:20px;background:#DCE5F2;border-radius:8px;border-left:4px solid #5A86CF}
+.tips h3{font-size:14px;font-weight:700;margin:0 0 10px 0;color:#3560A8}
 .tips ul{margin:0;padding:0 0 0 20px;font-size:14px;line-height:2}
 .footer{margin-top:32px;padding-top:16px;border-top:1px solid #DDE1D9;font-size:12px;color:#8A928C;display:flex;justify-content:space-between}
 @media print{body{max-width:100%;padding:20px}.header{-webkit-print-color-adjust:exact;print-color-adjust:exact}.step-num{-webkit-print-color-adjust:exact;print-color-adjust:exact}.cautions,.tips{-webkit-print-color-adjust:exact;print-color-adjust:exact}}
@@ -2418,6 +2642,17 @@ function exportSOPAsHTML(wfId){
     toast('SOP downloaded');
 }
 
+// Turn a Drive-worker failure into a clear, actionable message. The Google OAuth token
+// on the drive-upload worker periodically expires (invalid_grant); the fix then is to
+// reconnect Drive, not to retry.
+function driveErrMsg(e){
+    const m = (e && e.message) ? e.message : String(e);
+    if(/invalid_grant|expired|revoked|unauthor|auth failed|\b401\b|\b403\b/i.test(m)){
+        return 'Google Drive needs reconnecting (token expired). Reconnect Drive, then use "Upload to Drive" on the SOP.';
+    }
+    return 'Drive upload failed: ' + m;
+}
+
 async function autoUploadToDrive(wfId){
     const w = allWorkflows.find(w=>w.id===wfId);
     const wName = w ? (gf(w,WF.name)||'Untitled') : 'Untitled';
@@ -2425,7 +2660,7 @@ async function autoUploadToDrive(wfId){
     try {
         await uploadSOPToDrive(wfId);
     } catch(e){
-        toast('Drive upload skipped: '+e.message);
+        toast(driveErrMsg(e), 'warning');
     }
 }
 
@@ -2463,10 +2698,39 @@ async function uploadSOPToDrive(wfId){
         }
         render();
     } catch(e){
-        toast('Drive upload error: '+e.message);
+        toast(driveErrMsg(e), 'warning');
     } finally {
         if(btn){ btn.disabled = false; btn.textContent = 'Upload to Drive'; }
     }
+}
+
+// One-click full rebuild from the video: clears the extracted steps and re-runs
+// the whole pipeline (real transcript → steps → SOP → Drive → readiness → skill).
+// Disposition and agent config survive (generateWorkflowSOP carries them forward);
+// readiness deliberately resets for a fresh score. Used after a re-record, or when
+// the pipeline itself has improved (e.g. the AGENTIC definition changed).
+function regenerateFromVideo(wfId){
+    const body = `<p style="font-size:var(--fs-sm);color:var(--text-secondary);line-height:1.6">This rebuilds everything from the video: fresh steps, a fresh SOP, a fresh readiness check.<br><br>
+        Your agent settings and how it runs are kept.<br>
+        Step edits and readiness answers are replaced by what the video says — use this after a re-record or to pick up improvements.</p>`;
+    const footer = `<button class="btn" onclick="closeModal()">Cancel</button>
+        <button class="btn btn-ai" onclick="closeModal();doRegenerateFromVideo('${wfId}')">Rebuild from video</button>`;
+    showModal('Rebuild this SOP from the video?', body, footer);
+}
+
+async function doRegenerateFromVideo(wfId){
+    const w = allWorkflows.find(x=>x.id===wfId);
+    if(!w) return;
+    if(!getWfLoomUrl(wfId)){ toast('No video linked to this workflow'); return; }
+    toast('Rebuilding from the video…');
+    try {
+        // clear the old extracted steps so extraction starts clean
+        const old = stepsForWorkflow(wfId);
+        for(const s of old){ try { await atDelete(TBL.steps, s.id); } catch(e){} }
+        allSteps = allSteps.filter(s=>!old.some(o=>o.id===s.id));
+        renderSteps();
+        await autoGenerateSOPPipeline(wfId);
+    } catch(e){ toast('Rebuild failed: '+e.message); }
 }
 
 function deleteSOPDocument(wfId){
@@ -2660,7 +2924,8 @@ function renderSteps(){
     let html = '<div class="steps-layout">';
     html += '<div class="steps-sidebar">';
     html += '<div class="steps-sidebar-title">Workflows</div>';
-    const wfs = filteredWorkflows().slice().sort((a,b)=>(gf(a,WF.name)||'').toLowerCase()<(gf(b,WF.name)||'').toLowerCase()?-1:1);
+    html += `<div style="padding:0 8px 10px">${sysSearchInput('stepsSearchInput', _stepsSearch, "_stepsSearch=this.value;_refocusSearchId='stepsSearchInput';renderSteps()")}</div>`;
+    const wfs = filteredWorkflows().filter(w=>wfMatchesQuery(w,_stepsSearch)).slice().sort((a,b)=>(gf(a,WF.name)||'').toLowerCase()<(gf(b,WF.name)||'').toLowerCase()?-1:1);
     wfs.forEach(w=>{
         const name = gf(w,WF.name)||'Untitled';
         const hasSop = !!gf(w,WF.sopDocument);
@@ -2668,8 +2933,12 @@ function renderSteps(){
         const sopIndicator = hasSop
             ? '<span style="width:8px;height:8px;border-radius:50%;background:var(--success,#2C6E49);flex-shrink:0" title="SOP complete"></span>'
             : '<span style="width:8px;height:8px;border-radius:50%;background:var(--border-default,#DDE1D9);flex-shrink:0" title="No SOP"></span>';
+        const wfDisp = hasSop ? getWfDisposition(w.id) : null;
+        const dispDef = wfDisp ? DISPOSITIONS.find(d=>d.key===wfDisp.type) : null;
+        const dispTag = dispDef ? `<span class="disp-tag disp-tag-${wfDisp.type}" title="${esc(dispDef.label)}">${esc(dispDef.tag)}</span>` : '';
         html += `<div class="steps-wf-item${active}" onclick="selectStepsWf('${w.id}')" title="${esc(name)}">
             <span class="steps-wf-name">${esc(name)}</span>
+            ${dispTag}
             ${sopIndicator}
         </div>`;
     });
@@ -2678,6 +2947,7 @@ function renderSteps(){
     html += '<div class="steps-main">';
     if(!selectedStepsWf){
         html += '<div class="empty-state"><p>Select a workflow from the list to view and manage its steps.</p></div>';
+        html += buildVideoTasksTable();
     } else {
         const w = allWorkflows.find(w=>w.id===selectedStepsWf);
         if(!w){
@@ -2693,13 +2963,30 @@ function renderSteps(){
 
             const hasSopDoc = !!gf(w,WF.sopDocument);
             const hasLoom = !!loomUrl;
+            const hasReadiness = !!((getWfSopData(w.id)||{}).readiness);
             html += `<div class="steps-header">
                 <h3 style="margin:0;font-size:var(--fs-lg)">${esc(wName)}</h3>
                 <div style="display:flex;gap:8px">
                     ${steps.length && !hasSopDoc ?`<button class="btn btn-sm btn-ai" onclick="generateWorkflowSOP('${w.id}')">Generate SOP</button>`:''}
+                    ${hasSopDoc && !hasReadiness ?`<button class="btn btn-sm btn-ai" onclick="runAgenticCheck('${w.id}')">Check readiness</button>`:''}
                     ${!hasLoom && !hasSopDoc ?`<button class="btn btn-sm btn-ai" onclick="suggestSteps('${w.id}')">Suggest Steps (AI)</button>`:''}
                     ${!vtaskId && !hasSopDoc ?`<button class="btn btn-sm" style="border-color:var(--info);color:var(--info)" onclick="assignVideoTask('${w.id}')">Assign Video Task</button>`:''}
                     ${!vtaskId && hasSopDoc ?`<button class="btn btn-sm" style="border-color:var(--warning);color:var(--warning)" onclick="assignVideoTask('${w.id}')">Re-record Process</button>`:''}
+                </div>
+            </div>`;
+
+            // AGENTIC script guide — open by default until an SOP exists
+            html += `<div class="agentic-guide${hasSopDoc?'':' open'}" id="agenticGuide-${w.id}">
+                <div class="agentic-guide-head" onclick="this.parentElement.classList.toggle('open')">
+                    <span class="resources-chevron">&#x25B6;</span>
+                    AGENTIC script — what to cover in your video
+                </div>
+                <div class="agentic-guide-body">
+                    <p class="agentic-guide-intro">Record one short Loom and talk through these ${AGENTIC_STAGES.length}, in order. The AGENTIC method turns it into an autonomous agent.</p>
+                    ${AGENTIC_STAGES.map(s=>`<div class="agentic-guide-item">
+                        <span class="agentic-letter">${s.letter}</span>
+                        <div><strong>${esc(s.name)}</strong><span>${esc(s.prompt)}</span></div>
+                    </div>`).join('')}
                 </div>
             </div>`;
 
@@ -2767,12 +3054,17 @@ function renderSteps(){
 
             html += '</tbody></table>';
 
+            html += `<div id="disposition-${w.id}">${hasSopDoc ? dispositionBarHtml(w.id) : ''}</div>`;
+            html += agentLinkBarHtml(w.id);
+            html += `<div id="agentic-${w.id}"></div>`;
             html += `<div id="sopDoc-${w.id}"></div>`;
         }
     }
     html += '</div></div>';
     pane.innerHTML = html;
     restoreSavedSOPs();
+    restoreSearchFocus();
+
 }
 
 function restoreSavedSOPs(){
@@ -2790,13 +3082,551 @@ function restoreSavedSOPs(){
             const loomUrl = getWfLoomUrl(w.id);
             const steps = stepsForWorkflow(w.id);
             renderSOPDocument(w.id, wName, wDesc, dept, fulfill, loomUrl, steps, saved.sopSteps||[], container, saved.sopTitle||wName, saved.cautions||[], saved.tips||[], saved.videoTitle||'');
+            if(saved.readiness) renderAgenticScorecard(w.id, saved.readiness);
         } catch(e){ console.error('SOP restore error for '+w.id, e); }
     });
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// AGENTIC readiness check — scores the SOP against the seven stages and
+// surfaces gap questions. Stored inside the SOP document JSON (readiness key).
+// ═══════════════════════════════════════════════════════════════════════
+
+function getWfSopData(wfId){
+    const w = allWorkflows.find(x=>x.id===wfId);
+    if(!w) return null;
+    const raw = gf(w, WF.sopDocument);
+    if(!raw) return null;
+    try { return JSON.parse(raw); } catch(e){ return null; }
+}
+
+// ── Per-step SOP feedback: comment on a step, AI revises its text, save + re-render ──
+function toggleSopFb(stepId){
+    const box = document.getElementById('sopfbbox-'+stepId);
+    if(!box) return;
+    const showing = box.style.display !== 'none';
+    box.style.display = showing ? 'none' : 'block';
+    if(!showing){ const t = document.getElementById('sopfbtext-'+stepId); if(t) t.focus(); }
+}
+async function submitSopStepFeedback(wfId, stepId){
+    const t = document.getElementById('sopfbtext-'+stepId);
+    const feedback = t ? t.value.trim() : '';
+    if(!feedback){ toast('Type what to change first'); return; }
+    const step = allSteps.find(s=>s.id===stepId);
+    if(!step){ toast('Step not found'); return; }
+    const sName = gf(step,ST.name)||'';
+    const sDesc = gf(step,ST.description)||'';
+    const sop = getWfSopData(wfId) || {};
+    const entry = (sop.sopSteps||[]).find(ss=>ss.name===sName);
+    const curDetail = entry ? entry.detail : '';
+    const detailText = Array.isArray(curDetail) ? curDetail.map(b=>'- '+b).join('\n') : (curDetail||'');
+
+    const btn = document.querySelector('#sopfbbox-'+stepId+' .btn-ai');
+    if(btn){ btn.disabled = true; btn.textContent = 'Revising…'; }
+    try {
+        const prompt = `You are revising ONE step of a written SOP based on the owner's feedback.
+
+Step name: ${sName}
+Current description: ${sDesc || '(none)'}
+Current detailed instructions:
+${detailText || '(none)'}
+
+The owner's requested change: ${feedback}
+
+Rules:
+- Apply the change. If they ask to remove a specific one-off example, rewrite it so the wording is general and applies to EVERY case, not just that example.
+- Keep it a clear, followable SOP step. British English. No preamble.
+- Keep the step name unchanged.
+Return ONLY JSON: {"description": "a one-line brief description", "detail": ["bullet 1", "bullet 2", ...]}`;
+        const res = await fetch(CLAUDE_PROXY, {
+            method:'POST', headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({ model:window.AI_MODELS.default, max_tokens:1200, messages:[{role:'user',content:prompt}] })
+        });
+        if(!res.ok) throw new Error('AI request failed: '+res.status);
+        const data = await res.json();
+        const text = data.content?.[0]?.text || '{}';
+        const m = text.match(/\{[\s\S]*\}/);
+        if(!m) throw new Error('Invalid AI response');
+        const revised = JSON.parse(m[0]);
+        const newDesc = String(revised.description || sDesc).slice(0,500);
+        let newDetail = revised.detail;
+        if(!Array.isArray(newDetail)) newDetail = newDetail ? [String(newDetail)] : [];
+        newDetail = newDetail.map(b=>String(b).slice(0,400)).filter(Boolean).slice(0,12);
+
+        // 1) step record description
+        await atUpdate(TBL.steps, stepId, { [ST.description]: newDesc });
+        step.fields[ST.description] = newDesc;
+        // 2) SOP JSON elaborated detail for this step
+        let e = (sop.sopSteps || (sop.sopSteps = [])).find(ss=>ss.name===sName);
+        if(!e){ e = { name:sName }; sop.sopSteps.push(e); }
+        e.detail = newDetail;
+        const w = allWorkflows.find(x=>x.id===wfId);
+        const json = JSON.stringify(sop);
+        if(w) w.fields[WF.sopDocument] = json;
+        await atUpdate(TBL.workflows, wfId, { [WF.sopDocument]: json });
+
+        toast('Step revised');
+        renderSteps();
+    } catch(err){
+        toast('Revise failed: '+err.message);
+        if(btn){ btn.disabled = false; btn.textContent = 'Submit & revise'; }
+    }
+}
+window.toggleSopFb = toggleSopFb;
+window.submitSopStepFeedback = submitSopStepFeedback;
+
+function agenticSopText(wfId){
+    const sop = getWfSopData(wfId);
+    const steps = stepsForWorkflow(wfId).map((s,i)=>`Step ${i+1}: ${gf(s,ST.name)||''} — ${gf(s,ST.description)||''}`).join('\n');
+    if(!sop) return steps;
+    const body = (sop.sopSteps||[]).map(s=>`${s.name}:\n- ${(s.detail||[]).join('\n- ')}`).join('\n\n');
+    const cautions = (sop.cautions||[]).join('\n- ');
+    const tips = (sop.tips||[]).join('\n- ');
+    return `SOP TITLE: ${sop.sopTitle||''}\n\nSTEPS (raw):\n${steps}\n\nSOP BODY:\n${body}\n\nCAUTIONS:\n- ${cautions}\n\nTIPS:\n- ${tips}`;
+}
+
+// Shared AGENTIC check wording — used by the workflow readiness check AND the
+// agents-register readiness check, so the two can never drift apart. The N/A
+// annotations and rule are GENERATED from AGENTIC_STAGES.naAllowed per mode, so
+// the stage list, the pass rules and normaliseReadiness always agree.
+function agenticStageListText(human){
+    return AGENTIC_STAGES.map(s=>`${s.letter} — ${s.name}${stageNaAllowed(s,human)?' (N/A allowed)':''}`).join('\n');
+}
+function agenticNaRule(human){
+    const allowed = AGENTIC_STAGES.filter(s=>stageNaAllowed(s,human)).map(s=>`${s.letter} (${s.name})`);
+    const never = AGENTIC_STAGES.filter(s=>!stageNaAllowed(s,human)).map(s=>s.letter);
+    return `- "NA": genuinely not applicable. Only allowed for ${allowed.join(' and ')||'no stage'}. Never for ${never.join(', ')}.`;
+}
+function agenticCheckIntro(human){
+    const n = AGENTIC_STAGES.length;
+    return human
+        ? `You are checking whether a documented business process is clear enough for a PERSON to follow reliably as a recurring or ad-hoc task. Score it against the ${n} AGENTIC stages from a human-task point of view.`
+        : `You are checking whether a documented business process contains enough to build a reliable autonomous AI agent. Score it against the ${n} AGENTIC stages.`;
+}
+function agenticPassRules(human){
+    return human
+        ? `- "Clear": clear enough for a person to follow.
+- "Thin": mentioned but a person might get stuck.
+- "Missing": not covered.
+${agenticNaRule(true)}
+- This is for a HUMAN to do, not an AI agent. Navigate needs clear, followable steps; the person supplies their own judgement, so do NOT require written decision-reasoning. Go Signal and Tools help but a person can infer them, so mark Thin (not Missing) when vague — never NA.
+- Conclusion & Score should describe what the finished job looks like, so the person knows when they are done. A success measure helps but is not required for a human task.`
+        : `- "Clear": the stage is fully covered.
+- "Thin": mentioned but incomplete.
+- "Missing": not covered.
+${agenticNaRule(false)}
+- Navigate must contain the actual steps in order AND the decision rules: how the person decides at each choice, and what happens when something is unsure or new (guess, skip, or escalate to a human). Steps with no "how I decide" are Thin at best.
+- Aim is the purpose — why the process exists.
+- Conclusion & Score must describe the CONCRETE end state of a successful run (what exists or has changed) AND how success is measured over time (a number or a check). End state with no measure is Thin.`;
+}
+
+// One transport for every AI call on this page: proxy fetch, JSON extraction,
+// consistent errors. maxTokens per call; model always from window.AI_MODELS.
+async function callClaudeJson(prompt, maxTokens){
+    const res = await fetch(CLAUDE_PROXY, {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ model:window.AI_MODELS.default, max_tokens:maxTokens||1500, messages:[{role:'user',content:prompt}] })
+    });
+    if(!res.ok) throw new Error('AI request failed: '+res.status);
+    const data = await res.json();
+    const text = (data.content && data.content[0] && data.content[0].text) || '';
+    const m = text.match(/\{[\s\S]*\}/);
+    if(!m) throw new Error('Invalid AI response');
+    return JSON.parse(m[0]);
+}
+function agenticResultShape(){
+    const n = AGENTIC_STAGES.length;
+    const letters = AGENTIC_STAGES.map(s=>s.letter).join(',');
+    return `Return ONLY a JSON object:
+{
+  "stages": [ { "letter": "A", "status": "Clear|Thin|Missing|NA", "reason": "one short line" }, ... ${n} entries for ${letters} ],
+  "questions": [ { "letter": "N", "question": "a specific question to fill the gap" } ]
+}
+Include at most 3 questions, only for Thin or Missing stages, most important first. No text outside the JSON.`;
+}
+
+async function runAgenticCheck(wfId, extraAnswers){
+    const w = allWorkflows.find(x=>x.id===wfId);
+    if(!w) return;
+    if(!getWfSopData(wfId)){ toast('Generate the SOP first'); return; }
+    // A plain Re-check must NOT throw away the owner's saved answers — fold them
+    // back in so the score never regresses and answered questions never resurface.
+    if(!extraAnswers){ extraAnswers = ((getWfSopData(wfId)||{}).readiness||{}).answers || {}; }
+    const container = document.getElementById('agentic-'+wfId);
+    const disp = getWfDisposition(wfId);
+    const human = !!(disp && (disp.type==='recurring' || disp.type==='adhoc'));
+    if(container){ container.innerHTML = `<div class="agentic-loading"><div class="sop-spinner"></div><span>${human?'Checking this SOP is ready to follow…':'Checking your agent is ready…'}</span></div>`; container.scrollIntoView({block:'center'}); }
+
+    const wName = gf(w,WF.name)||'Untitled';
+    let answersBlock = '';
+    if(extraAnswers && Object.keys(extraAnswers).length){
+        answersBlock = '\n\nThe owner has answered these follow-up questions. Treat the answers as an authoritative part of the process description. IMPORTANT: if an answer resolves a stage\'s gap, score that stage "Clear" — do not hold a stage at Thin when the owner has supplied the missing detail. Only ask a follow-up question for a stage that is STILL Thin or Missing after crediting the answers, and make it a sharper, more specific question than before — never repeat an answered one.\n' +
+            Object.entries(extraAnswers).map(([k,v])=>`${k}: ${v}`).join('\n');
+    }
+
+    const prompt = `${agenticCheckIntro(human)}
+
+Process name: ${wName}
+
+The ${AGENTIC_STAGES.length} stages:
+${agenticStageListText(human)}
+
+Pass rules:
+${agenticPassRules(human)}
+
+Here is the documented process:
+${agenticSopText(wfId)}${answersBlock}
+
+${agenticResultShape()}`;
+
+    try {
+        const parsed = await callClaudeJson(prompt, 1500);
+        const prevR = (getWfSopData(wfId)||{}).readiness || null;
+        const readiness = normaliseReadiness(parsed, extraAnswers, prevR, human);
+        await saveAgenticReadiness(wfId, readiness);
+        renderAgenticScorecard(wfId, readiness);
+        const _ac = document.getElementById('agentic-'+wfId);
+        if(_ac) _ac.scrollIntoView({block:'start'}); // bring the finished scorecard into view
+        // Say what MOVED, so a re-check never looks like it did nothing.
+        let delta = '';
+        if(prevR && Array.isArray(prevR.stages)){
+            const changes = readiness.stages
+                .map(s=>{ const p = prevR.stages.find(x=>x.letter===s.letter); return (p && p.status!==s.status) ? `${s.letter}: ${p.status} → ${s.status}` : null; })
+                .filter(Boolean);
+            delta = changes.length ? ' — ' + changes.join(' · ') : ' — scores unchanged';
+        }
+        toast('Readiness check complete' + delta);
+    } catch(e){
+        toast('Readiness check error: '+e.message);
+        if(container) container.innerHTML = `<div style="padding:12px;color:var(--danger)">Could not run the readiness check: ${esc(e.message)}</div>`;
+    }
+}
+
+function normaliseReadiness(parsed, extraAnswers, prevReadiness, human){
+    const byLetter = {};
+    (parsed.stages||[]).forEach(s=>{ if(s && s.letter) byLetter[s.letter] = s; });
+    const stages = AGENTIC_STAGES.map(def=>{
+        const got = byLetter[def.letter] || {};
+        let status = got.status || 'Missing';
+        // N/A only where the framework allows it for this mode (single source
+        // of truth: AGENTIC_STAGES.naAllowed, the same source the prompt used).
+        if(status==='NA' && !stageNaAllowed(def, human)) status='Missing';
+        if(['Clear','Thin','Missing','NA'].indexOf(status)<0) status='Missing';
+        return { letter:def.letter, name:def.name, status, reason:String(got.reason||'').slice(0,180) };
+    });
+    const blocking = stages.filter(s=>s.status==='Missing' || s.status==='Thin');
+    const state = blocking.length===0 ? 'Ready' : 'Needs input';
+
+    // Per-stage question rounds. A stage may be asked about at most TWICE:
+    // answering counts a round; a still-thin stage gets ONE better follow-up,
+    // then no more questions for it (the note points at step-edit / re-record).
+    // This keeps "no endless questions" while never dead-ending a thin stage.
+    const prevRounds = (prevReadiness && prevReadiness.rounds) || {};
+    const rounds = Object.assign({}, prevRounds);
+    if(extraAnswers && prevReadiness && Array.isArray(prevReadiness.questions)){
+        prevReadiness.questions.forEach(q=>{
+            if(q && q.letter && extraAnswers[q.letter] !== undefined){
+                rounds[q.letter] = (rounds[q.letter]||0) + 1;
+            }
+        });
+    }
+    const thinLetters = new Set(blocking.map(s=>s.letter));
+    // Never re-ask a question the owner has already been asked (same stage, same
+    // wording) — if the AI repeats itself, the repeat is dropped and the stage
+    // falls through to the "Nearly there" guidance instead of looping.
+    const prevAsked = (prevReadiness && prevReadiness.asked) || {};
+    const normQ = s=>String(s).toLowerCase().replace(/\s+/g,' ').trim();
+    const questions = (parsed.questions||[])
+        .filter(q=>q && q.question)
+        .map(q=>({ letter:String(q.letter||'').slice(0,1), question:String(q.question).slice(0,240) }))
+        .filter(q=>thinLetters.has(q.letter) && (rounds[q.letter]||0) < 2)
+        .filter(q=>!(prevAsked[q.letter]||[]).some(t=>normQ(t)===normQ(q.question)))
+        .slice(0,3);
+    const asked = {};
+    Object.entries(prevAsked).forEach(([L,list])=>{ asked[L]=list.slice(-4); });
+    questions.forEach(q=>{ (asked[q.letter]=asked[q.letter]||[]).push(q.question); });
+    return { state, stages, questions, rounds, asked, answers:(extraAnswers||{}), checkedAt:new Date().toISOString() };
+}
+
+async function saveAgenticReadiness(wfId, readiness){
+    const w = allWorkflows.find(x=>x.id===wfId);
+    if(!w) return;
+    const sop = getWfSopData(wfId) || {};
+    sop.readiness = readiness;
+    const json = JSON.stringify(sop);
+    w.fields[WF.sopDocument] = json;
+    try { await atUpdate(TBL.workflows, wfId, { [WF.sopDocument]: json }); }
+    catch(e){ console.error('readiness save error', e); }
+}
+
+const AGENTIC_STATUS = {
+    Clear:   { bg:'var(--success-bg)', fg:'var(--success)', label:'Clear' },
+    Thin:    { bg:'var(--warning-bg)', fg:'var(--warning)', label:'Thin' },
+    Missing: { bg:'var(--danger-bg)',  fg:'var(--danger)',  label:'Missing' },
+    NA:      { bg:'var(--bg-subtle)',  fg:'var(--text-muted)', label:'N/A' },
+};
+
+// One renderer for readiness stage rows — the workflow scorecard AND the
+// register panel both show normaliseReadiness output through this.
+function readinessRowsHtml(stages){
+    return (stages||[]).map(st=>{
+        const meta = AGENTIC_STATUS[st.status] || AGENTIC_STATUS.Missing;
+        return `<div class="agentic-row">
+            <span class="agentic-letter">${esc(st.letter)}</span>
+            <span class="agentic-name">${esc(st.name)}</span>
+            <span class="agentic-pill" style="background:${meta.bg};color:${meta.fg}">${esc(meta.label)}</span>
+            <span class="agentic-reason" title="${esc(st.reason||'')}">${esc(st.reason||'')}</span>
+        </div>`;
+    }).join('');
+}
+// A scorecard saved under an older framework shape (e.g. the 7-stage AGENTIC)
+// keeps its verdict but must say so — R was never assessed on it.
+function legacyReadinessBanner(readiness){
+    const n = (readiness && readiness.stages || []).length;
+    if(!n || n === AGENTIC_STAGES.length) return '';
+    return `<div style="margin-top:8px;padding:8px 10px;border-radius:var(--radius-md);background:var(--warning-bg);color:var(--warning);font-size:var(--fs-xs)">Checked under the older ${n}-stage framework — the Reasoning stage has never been scored here. Re-run the check before trusting this verdict.</div>`;
+}
+
+function renderAgenticScorecard(wfId, readiness){
+    const container = document.getElementById('agentic-'+wfId);
+    if(!container || !readiness) return;
+    const disp = getWfDisposition(wfId);
+    const human = !!(disp && (disp.type==='recurring' || disp.type==='adhoc'));
+    const ready = readiness.state==='Ready';
+    const stateMeta = ready
+        ? { bg:'var(--success-bg)', fg:'var(--success)', text:'Ready', sub: human?'This SOP has everything a person needs to follow it.':'This process has everything an agent needs.' }
+        : { bg:'var(--warning-bg)', fg:'var(--warning)', text:'Needs input', sub: human?'Great start. A few quick answers will finish this SOP.':'Great start. A few quick answers will finish your agent.' };
+
+    const rows = readinessRowsHtml(readiness.stages);
+
+    let questions = '';
+    if(!ready && (!readiness.questions || !readiness.questions.length) && Object.keys(readiness.answers||{}).length){
+        // Answered but still short somewhere: no dead-end. The questions are used up,
+        // so flip the direction — let the owner TELL it what's missing, free-text.
+        const thinStages = (readiness.stages||[]).filter(s=>s.status==='Thin'||s.status==='Missing');
+        questions = `<div class="agentic-questions">
+            <div class="agentic-q-title">Nearly there. Tell it what's missing in your own words below — or use the "Improve this step" boxes on the SOP, or re-record that part of the video.</div>
+            ${thinStages.map(s=>`<div class="agentic-q">
+                <label><strong>${esc(s.letter)}</strong> &middot; ${esc(s.name)} — <span style="color:var(--text-muted)">${esc(s.reason||'still thin')}</span></label>
+                <textarea class="wf-grid-input agentic-answer agentic-extra" data-letter="${esc(s.letter)}" rows="2" placeholder="Add the missing detail for ${esc(s.name)}, in your own words"></textarea>
+            </div>`).join('')}
+            <button class="btn btn-sm btn-ai" onclick="submitAgenticExtra('${wfId}')">Add detail &amp; re-check</button>
+        </div>`;
+    }
+    else if(readiness.questions && readiness.questions.length){
+        questions = `<div class="agentic-questions">
+            <div class="agentic-q-title">${esc(stateMeta.sub)}</div>
+            ${readiness.questions.map((q,i)=>{
+                const prevA = readiness.answers && readiness.answers[q.letter];
+                return `<div class="agentic-q">
+                <label><strong>${esc(q.letter)}</strong> &middot; ${esc(q.question)}</label>
+                ${prevA?`<div style="font-size:var(--fs-xs);color:var(--text-muted);margin:2px 0 4px">You previously said: ${esc(String(prevA).slice(0,220))}</div>`:''}
+                <textarea class="wf-grid-input agentic-answer" rows="2" data-q="${i}" placeholder="${prevA?'Add the NEW detail this question asks for — no need to repeat what you already said':'Type your answer, or re-record this stage in a new video'}"></textarea>
+            </div>`}).join('')}
+            <button class="btn btn-sm btn-ai" onclick="submitAgenticAnswers('${wfId}')">Submit answers &amp; re-check</button>
+        </div>`;
+    }
+
+    container.innerHTML = `<div class="agentic-card" aria-live="polite">
+        <div class="agentic-head">
+            <div>
+                <div class="agentic-title">AGENTIC readiness</div>
+                <div class="agentic-sub">${human?'How ready this SOP is for a person to follow':'How ready this process is to become an autonomous agent'}</div>
+            </div>
+            <span class="agentic-state" style="background:${stateMeta.bg};color:${stateMeta.fg}">${esc(stateMeta.text)}</span>
+        </div>
+        <div class="agentic-rows">${rows}</div>
+        ${legacyReadinessBanner(readiness)}
+        ${questions}
+        <div class="agentic-foot">
+            <button class="btn btn-sm" onclick="runAgenticCheck('${wfId}')">Re-check</button>
+        </div>
+    </div>`;
+}
+
+// Owner-initiated extra detail for still-thin stages (after the question rounds
+// are used up). Appends to the existing answer so nothing already said is lost.
+function submitAgenticExtra(wfId){
+    const container = document.getElementById('agentic-'+wfId);
+    if(!container) return;
+    const readiness = (getWfSopData(wfId)||{}).readiness || {};
+    const answers = Object.assign({}, readiness.answers||{});
+    let added = 0;
+    container.querySelectorAll('.agentic-extra').forEach(el=>{
+        const L = el.dataset.letter;
+        const v = el.value.trim();
+        if(!L || !v) return;
+        answers[L] = ((answers[L] ? answers[L] + ' ' : '') + v).slice(0, 1500);
+        added++;
+    });
+    if(!added){ toast('Type the missing detail first'); return; }
+    runAgenticCheck(wfId, answers);
+}
+
+function submitAgenticAnswers(wfId){
+    const container = document.getElementById('agentic-'+wfId);
+    if(!container) return;
+    const readiness = (getWfSopData(wfId)||{}).readiness || {};
+    const answers = Object.assign({}, readiness.answers||{});
+    container.querySelectorAll('.agentic-answer').forEach(el=>{
+        const i = parseInt(el.dataset.q,10);
+        const q = (readiness.questions||[])[i];
+        const v = el.value.trim();
+        if(q && v) answers[q.letter] = v;
+    });
+    if(!Object.keys(answers).length){ toast('Type an answer first'); return; }
+    runAgenticCheck(wfId, answers);
+}
+
+// ── Disposition: agent vs recurring human task vs ad-hoc human task ──
+function getWfDisposition(wfId){
+    const sop = getWfSopData(wfId);
+    return (sop && sop.disposition) ? sop.disposition : null;
+}
+
+// ── Rule of R: is this worth an agent at all? ──────────────────────────
+// Three questions, asked BEFORE "how will this run?", because the cheapest
+// agent is the one you never build. The answers describe the work itself, so
+// they survive a re-record (see the regenerate preservation list above).
+const RULE_OF_R = [
+    { key:'repetitive',  q:'Repetitive?',   hint:'Would you do this every week, or close to it?' },
+    { key:'rulesBased',  q:'Rules-based?',  hint:'Same kind of input, same kind of outcome each time?' },
+    { key:'returnsTime', q:'Returns time?', hint:'Would automating it save more time than building it costs?' },
+];
+
+function getWfRuleOfR(wfId){
+    const sop = getWfSopData(wfId);
+    return (sop && sop.ruleOfR) ? sop.ruleOfR : null;
+}
+
+// Map the answers onto the three dispositions that already exist. This only ever
+// RECOMMENDS — the owner still picks. Unanswered means no recommendation.
+function ruleOfRVerdict(r){
+    if(!r || RULE_OF_R.some(c=>typeof r[c.key] !== 'boolean')) return null;
+    if(r.repetitive && r.rulesBased && r.returnsTime)
+        return { rec:'agent', label:'Good agent candidate', why:'Repetitive, rules-based, and it pays back the build.' };
+    if(r.repetitive && r.rulesBased && !r.returnsTime)
+        return { rec:'recurring', label:'Systemise, do not automate', why:'It is repeatable, but building an agent costs more time than it saves.' };
+    if(r.repetitive && !r.rulesBased)
+        return { rec:'recurring', label:'Needs a human call', why:'It happens often, but the judgement changes each time.' };
+    return { rec:'adhoc', label:'Leave it ad-hoc', why:'It is not regular enough to be worth systemising.' };
+}
+
+async function setWfRuleOfR(wfId, key, value){
+    const w = allWorkflows.find(x=>x.id===wfId);
+    if(!w) return;
+    const sop = getWfSopData(wfId);
+    if(!sop){ toast('Generate the SOP first'); return; }
+    sop.ruleOfR = Object.assign({}, sop.ruleOfR, { [key]: value });
+    const json = JSON.stringify(sop);
+    w.fields[WF.sopDocument] = json;
+    try { await atUpdate(TBL.workflows, wfId, { [WF.sopDocument]: json }); }
+    catch(e){ toast('Could not save that answer: '+e.message); return; }
+    const host = document.getElementById('disposition-'+wfId);
+    if(host) host.innerHTML = dispositionBarHtml(wfId);
+}
+window.setWfRuleOfR = setWfRuleOfR;
+
+function ruleOfRHtml(wfId){
+    const r = getWfRuleOfR(wfId) || {};
+    const rows = RULE_OF_R.map(c=>{
+        const v = r[c.key];
+        const btn = (val,label)=>`<button class="ror-btn${v===val?' sel':''}" onclick="setWfRuleOfR('${wfId}','${c.key}',${val})">${label}</button>`;
+        return `<div class="ror-row">
+            <span class="ror-q" title="${esc(c.hint)}">${esc(c.q)}</span>
+            <span class="ror-btns">${btn(true,'Yes')}${btn(false,'No')}</span>
+        </div>`;
+    }).join('');
+    const v = ruleOfRVerdict(r);
+    const verdict = v
+        ? `<div class="ror-verdict"><strong>${esc(v.label)}.</strong> ${esc(v.why)}</div>`
+        : `<div class="ror-verdict ror-verdict-empty">Answer these three and we will suggest how it should run.</div>`;
+    return `<div class="ror-bar">
+        <div class="disp-q">Is this worth an agent?</div>
+        <div class="ror-rows">${rows}</div>
+        ${verdict}
+    </div>`;
+}
+
+function dispositionBarHtml(wfId){
+    const cur = getWfDisposition(wfId);
+    const v = ruleOfRVerdict(getWfRuleOfR(wfId));
+    const opts = DISPOSITIONS.map(d=>{
+        const sel = cur && cur.type===d.key;
+        const rec = v && v.rec===d.key && !sel;
+        return `<button class="disp-opt${sel?' sel':''}${rec?' rec':''}" onclick="setWfDisposition('${wfId}','${d.key}')">${esc(d.label)}${rec?' <span class="disp-rec">suggested</span>':''}</button>`;
+    }).join('');
+    const cd = cur ? DISPOSITIONS.find(d=>d.key===cur.type) : null;
+    const hint = cd ? cd.hint : 'Once the SOP is ready, choose how this process runs.';
+    return `${ruleOfRHtml(wfId)}
+    <div class="disp-bar">
+        <div class="disp-q">How will this run?</div>
+        <div class="disp-opts">${opts}</div>
+        <div class="disp-hint">${esc(hint)}</div>
+    </div>`;
+}
+
+async function setWfDisposition(wfId, type){
+    const def = DISPOSITIONS.find(d=>d.key===type);
+    if(!def) return;
+    const w = allWorkflows.find(x=>x.id===wfId);
+    if(!w) return;
+    const sop = getWfSopData(wfId);
+    if(!sop){ toast('Generate the SOP first'); return; }
+    sop.disposition = { type, setAt:new Date().toISOString() };
+    const json = JSON.stringify(sop);
+    w.fields[WF.sopDocument] = json;
+    try { await atUpdate(TBL.workflows, wfId, { [WF.sopDocument]: json }); }
+    catch(e){ console.error('disposition save error', e); }
+    // route based on the choice
+    if(type==='recurring'){ assignRecurringTask(wfId); }
+    else if(type==='adhoc'){ toast('Marked ad-hoc. Staff follow the SOP when needed.'); }
+    else {
+        // Autonomous agent → create the Skills Library entry (if not already there) so it is logged and runnable
+        if(gf(w, WF.skillDefinition)){ toast('Marked to run as an AI agent.'); }
+        else { toast('Marked as an AI agent — adding it to the Skills Library…'); doConvertWorkflowToSkill(wfId); }
+    }
+    renderSteps();
+    // Re-render the existing scorecard under the new human/agent framing WITHOUT firing a
+    // fresh AI interrogation. Selecting a disposition must never pop a new batch of
+    // questions. If the owner wants a fresh score under the new bar, the Re-check button does it.
+    if(sop.readiness) renderAgenticScorecard(wfId, sop.readiness);
 }
 
 function selectStepsWf(id){
     selectedStepsWf = id;
     renderSteps();
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// Process agents — the RUNTIME (testing/live controls, activity feed,
+// approve/reject/undo, autonomy ladder) moved to os/agents/index.html on
+// 24 Aug 2026. This page keeps getWfAgent for the slim status pill on the
+// SOPs tab (agentLinkBarHtml below).
+// ═══════════════════════════════════════════════════════════════════════
+function getWfAgent(wfId){
+    const sop = getWfSopData(wfId);
+    return (sop && sop.agent) ? sop.agent : null;
+}
+const AGENT_STATES = {
+    testing: { label:'TESTING', bg:'var(--warning-bg)', fg:'var(--warning)', sub:'Watching your data. It only proposes — nothing happens without your tick.' },
+    live:    { label:'LIVE',    bg:'var(--success-bg)', fg:'var(--success)', sub:'Running on a daily schedule. Safe actions automatic, anything risky asks first.' },
+    off:     { label:'PAUSED',  bg:'var(--bg-subtle)',  fg:'var(--text-muted)', sub:'Not running. Resume testing or go live when ready.' },
+};
+
+// Slim pointer on the SOPs (builder) page — the agent is OPERATED on the
+// Leadership → AI Agents page. The localStorage key is consumed by that page
+// on load, or via its storage listener when its iframe is already open.
+function agentLinkBarHtml(wfId){
+    const disp = getWfDisposition(wfId);
+    if(!disp || disp.type!=='agent') return '';
+    const agent = getWfAgent(wfId);
+    const meta = agent && AGENT_STATES[agent.state] ? AGENT_STATES[agent.state] : { label:'DRAFT', bg:'var(--bg-subtle)', fg:'var(--text-muted)' };
+    return `<div class="agent-card" style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
+        <div><span class="agent-pill" style="background:${meta.bg};color:${meta.fg}">${meta.label}</span>
+        <span class="agent-sub">This process runs as an AI agent — review its work and controls on Leadership &rarr; AI Agents.</span></div>
+        <button class="btn btn-sm btn-ai" onclick="openAgentsPage('${wfId}')">Open in AI Agents</button>
+    </div>`;
 }
 
 let _stepSaveTimers = {};
@@ -2850,179 +3680,92 @@ async function deleteStepInline(stepId){
 }
 
 // ═══════════════════════════════════════════════════════════════════════
-// Automation (Tab 6)
+// AI Agents (Tab 6) — MOVED. The register, the approval queue, the checks,
+// the strategic layer and the process-agent runtime all live on the new
+// Leadership → AI Agents page (os/agents/index.html), Kevin's ruling of
+// 24 Aug 2026. This pane is a pointer so old muscle memory still lands.
 // ═══════════════════════════════════════════════════════════════════════
 function renderAutomation(){
     const pane = document.getElementById('pane-automation');
-    const wfs = filteredWorkflows().slice().sort((a,b)=>{
-        if(_autoSortMode==='alpha') return (gf(a,WF.name)||'').toLowerCase()<(gf(b,WF.name)||'').toLowerCase()?-1:1;
-        if(_autoSortMode==='department'){
-            const da = selName(gf(a,WF.department))||'zzz', db = selName(gf(b,WF.department))||'zzz';
-            return da<db?-1:da>db?1:(gf(a,WF.name)||'').toLowerCase()<(gf(b,WF.name)||'').toLowerCase()?-1:1;
-        }
-        if(_autoSortMode==='journey'){
-            const fa = selName(gf(a,WF.fulfillStage))||'zzz', fb = selName(gf(b,WF.fulfillStage))||'zzz';
-            return fa<fb?-1:fa>fb?1:(gf(a,WF.name)||'').toLowerCase()<(gf(b,WF.name)||'').toLowerCase()?-1:1;
-        }
-        // method
-        const mA = linkIds(gf(a,WF.mainMethodStage)), mB = linkIds(gf(b,WF.mainMethodStage));
-        const mAn = mA.length ? (gf(allMethods.find(m=>m.id===mA[0]),MM.name)||'zzz') : 'zzz';
-        const mBn = mB.length ? (gf(allMethods.find(m=>m.id===mB[0]),MM.name)||'zzz') : 'zzz';
-        return mAn<mBn?-1:mAn>mBn?1:(gf(a,WF.name)||'').toLowerCase()<(gf(b,WF.name)||'').toLowerCase()?-1:1;
-    });
-    const stepsWithSop = allSteps.filter(s=>selName(gf(s,ST.sopStatus))==='Complete');
-
-    let html = `<div style="display:flex;justify-content:flex-end;align-items:center;gap:8px;margin-bottom:12px">
-        <span style="font-size:var(--fs-xs);color:var(--text-secondary)">Sort by:</span>
-        <select style="font-size:var(--fs-xs);padding:4px 8px;border:1px solid var(--border-default);border-radius:var(--radius-sm);background:var(--bg-surface);color:var(--text-primary)" onchange="_autoSortMode=this.value;renderAutomation()">
-            <option value="method"${_autoSortMode==='method'?' selected':''}>Main Method</option>
-            <option value="department"${_autoSortMode==='department'?' selected':''}>Department</option>
-            <option value="journey"${_autoSortMode==='journey'?' selected':''}>Customer Journey</option>
-            <option value="alpha"${_autoSortMode==='alpha'?' selected':''}>Alphabetical (A-Z)</option>
-        </select>
+    pane.innerHTML = `<div class="empty-state" style="padding:60px 20px">
+        <p style="font-size:var(--fs-lg);font-weight:var(--fw-semibold);color:var(--text-primary);margin-bottom:8px">AI Agents has moved to Leadership &rarr; AI Agents</p>
+        <p>Approvals, the checks and the workforce register now live on their own page.</p>
+        <button class="btn btn-primary" style="margin-top:12px" onclick="openAgentsPage()">Open AI Agents</button>
     </div>`;
+}
 
-    const wfsWithTasks = wfs.filter(w=>getWfVideoTaskId(w.id));
-    if(wfsWithTasks.length){
-        html += '<div class="auto-wf-group">';
-        html += '<div class="auto-wf-header">Video Recording Tasks <span style="color:var(--text-muted);font-weight:var(--fw-regular)">(' + wfsWithTasks.length + ' assigned)</span></div>';
-        html += `<table class="wf-grid"><thead><tr>
-            <th style="width:30%">Workflow</th>
-            <th style="width:100px">Task Status</th>
-            <th style="width:100px">Loom URL</th>
-            <th style="width:100px">Steps Extracted</th>
-            <th style="width:120px">Actions</th>
-        </tr></thead><tbody>`;
-
-        wfsWithTasks.forEach(w=>{
-            const wName = gf(w,WF.name)||'Untitled';
-            const vtaskStatus = getWfVideoTaskStatus(w.id);
-            const loomUrl = getWfLoomUrl(w.id);
-            const steps = stepsForWorkflow(w.id);
-            const statusCls = vtaskStatus==='complete'?'task-complete':'task-pending';
-            const statusLabel = vtaskStatus==='complete'?'Complete':'Pending';
-            const hasSteps = steps.length > 0;
-
-            html += `<tr>
-                <td style="font-weight:var(--fw-semibold)">${esc(wName)}</td>
-                <td><span class="task-status-badge ${statusCls}">${statusLabel}</span></td>
-                <td>${loomUrl?'<span style="color:var(--success);font-size:var(--fs-xs)">Linked</span>':'<span style="color:var(--text-muted);font-size:var(--fs-xs)">None</span>'}</td>
-                <td>${hasSteps?'<span style="color:var(--success);font-size:var(--fs-xs)">'+steps.length+' steps</span>':'<span style="color:var(--text-muted);font-size:var(--fs-xs)">Not yet</span>'}</td>
-                <td style="display:flex;gap:4px;flex-wrap:wrap">
-                    ${vtaskStatus==='complete'&&loomUrl&&!hasSteps?`<button class="btn btn-sm btn-ai" onclick="selectedStepsWf='${w.id}';importFromLoom('${w.id}')">Extract Steps</button>`:''}
-                    <button class="btn btn-sm" onclick="selectedStepsWf='${w.id}';switchView('steps')">View</button>
-                </td>
-            </tr>`;
-        });
-
-        html += '</tbody></table></div>';
-    }
-
-    // Completed SOPs section — workflows with generated SOP documents
-    const wfsWithSop = wfs.filter(w=>!!gf(w,WF.sopDocument));
-    if(wfsWithSop.length){
-        html += '<div class="auto-wf-group" style="margin-top:16px">';
-        html += '<div class="auto-wf-header">Completed SOPs <span style="color:var(--text-muted);font-weight:var(--fw-regular)">(' + wfsWithSop.length + ' workflows)</span></div>';
-        html += '<p style="font-size:var(--fs-xs);color:var(--text-secondary);margin:0 0 8px 0">Workflows with generated SOP documents. Assign as a recurring task or convert to an AI skill.</p>';
-        html += `<table class="wf-grid"><thead><tr>
-            <th style="width:22%">Workflow</th>
-            <th style="width:15%">Department</th>
-            <th style="width:12%">SOP</th>
-            <th style="width:12%">Drive</th>
-            <th style="width:12%">Skill Status</th>
-            <th style="width:15%">Skill Name</th>
-            <th>Actions</th>
-        </tr></thead><tbody>`;
-
-        wfsWithSop.forEach(w=>{
-            const wName = gf(w,WF.name)||'Untitled';
-            const dept = selName(gf(w,WF.department))||'';
-            const driveDocUrl = getWfDriveDocUrl(w.id);
-            const driveUrl = getWfDriveUrl(w.id);
-            const hasWfSkill = !!gf(w,WF.skillDefinition);
-            const stepsWithSkills = stepsForWorkflow(w.id).filter(s=>isSkillCreated(s.id));
-            const lsSkill = localStorage.getItem('sys_wfskill_'+w.id);
-            let lsSkillData = null;
-            if(lsSkill){ try { lsSkillData = JSON.parse(lsSkill); } catch(e){} }
-            const hasSkill = hasWfSkill || stepsWithSkills.length > 0 || !!lsSkillData;
-            let skillName = '';
-            if(hasWfSkill){
-                try { const sk = JSON.parse(gf(w,WF.skillDefinition)); skillName = Array.isArray(sk) ? (sk[0]||{}).name||'' : sk.name||''; } catch(e){}
-            } else if(lsSkillData){
-                skillName = lsSkillData.name||'';
-            } else if(stepsWithSkills.length){
-                const sid = gf(stepsWithSkills[0],ST.skillId);
-                skillName = sid || (gf(stepsWithSkills[0],ST.name)||'');
+// Front the AI Agents tab in the shell (deep link via the parent's
+// postMessage helper); fall back to a hash-addressed new tab when this page
+// is viewed standalone — a hash is per-window, so no other document can
+// steal it, unlike the old localStorage key (review finding, 24 Aug 2026).
+function openAgentsPage(wfId){
+    try {
+        if(window.parent && window.parent !== window){
+            if(wfId && typeof window.parent.deepLinkAgents === 'function'){
+                window.parent.deepLinkAgents({ wf: wfId });
+                return;
             }
+            if(typeof window.parent.switchTab === 'function'){
+                window.parent.switchTab('agents');
+                return;
+            }
+        }
+    } catch(e){ /* cross-origin or standalone — fall through */ }
+    window.open('../agents/index.html' + (wfId ? '#wf=' + wfId : ''), '_blank');
+}
+window.openAgentsPage = openAgentsPage;
 
-            html += `<tr>
-                <td style="font-weight:var(--fw-semibold);cursor:pointer;color:var(--accent)" onclick="selectedStepsWf='${w.id}';switchView('steps')">${esc(wName)}</td>
-                <td style="font-size:var(--fs-xs);color:var(--text-secondary)">${esc(dept)}</td>
-                <td>${driveDocUrl?`<a href="${esc(driveDocUrl)}" target="_blank" rel="noopener" style="color:var(--accent);font-size:var(--fs-xs)">Open SOP &#x2197;</a>`:'<span style="font-size:var(--fs-xs);color:var(--text-muted)">Local only</span>'}</td>
-                <td>${driveUrl?`<a href="${esc(driveUrl)}" target="_blank" rel="noopener" style="color:var(--accent);font-size:var(--fs-xs)">Folder &#x2197;</a>`:'<span style="font-size:var(--fs-xs);color:var(--text-muted)">Not uploaded</span>'}</td>
-                <td>${hasSkill?'<span style="font-size:var(--fs-xs);color:var(--success)">Skill Created</span>':'<button class="btn btn-sm" style="border-color:var(--info);color:var(--info)" onclick="convertWorkflowToSkill(\''+w.id+'\')">Convert to Skill</button>'}</td>
-                <td style="font-size:var(--fs-xs);color:var(--text-secondary)">${esc(skillName)}</td>
-                <td style="display:flex;gap:4px;flex-wrap:wrap">
-                    <button class="btn btn-sm" style="border-color:var(--accent-gold);color:var(--accent-gold)" onclick="assignRecurringTask('${w.id}')">Assign Task</button>
-                    ${hasWfSkill?`<button class="btn btn-sm" style="border-color:var(--success);color:var(--success)" onclick="runWorkflowSkill('${w.id}')">Run Skill</button>`:''}
-                </td>
-            </tr>`;
-        });
+// Deep-link INTO this page: the AI Agents page's "View SOP" button writes
+// sys_open_steps_wf to localStorage then fronts this tab. Consume it on load
+// AND via the storage event (fires here when written while this iframe is
+// already loaded). The agent deep-links (sys_open_agent, sys_open_role_agent,
+// #agent=) are consumed by os/agents/index.html now, never here.
+function consumeAgentDeepLink(){
+    const wfId = localStorage.getItem('sys_open_steps_wf');
+    if(!wfId) return false;
+    localStorage.removeItem('sys_open_steps_wf');
+    selectedStepsWf = wfId;
+    switchView('steps');
+    return true;
+}
+window.addEventListener('storage', (e)=>{
+    if(e.key==='sys_open_steps_wf' && e.newValue){ consumeAgentDeepLink(); }
+});
 
-        html += '</tbody></table></div>';
-    }
-
-    if(!stepsWithSop.length && !wfsWithTasks.length && !wfsWithSop.length){
-        pane.innerHTML = '<div class="empty-state"><p>No automation activity yet.</p><p>Assign video tasks in the SOPs tab, or complete SOPs to convert them to Skills or Tasks.</p></div>';
-        return;
-    }
-
-    if(stepsWithSop.length){
-        html += '<p style="font-size:var(--fs-sm);color:var(--text-secondary);margin-bottom:16px;margin-top:16px">Steps with completed SOPs, ready for automation. Convert to an AI Skill (automated) or a recurring Task (manual).</p>';
-
-        wfs.forEach(w=>{
-            const steps = stepsForWorkflow(w.id).filter(s=>selName(gf(s,ST.sopStatus))==='Complete');
-            if(!steps.length) return;
-            const wName = gf(w,WF.name)||'Untitled';
-
-            html += `<div class="auto-wf-group">
-                <div class="auto-wf-header">${esc(wName)} <span style="color:var(--text-muted);font-weight:var(--fw-regular)">(${steps.length} ready)</span></div>
-                <table class="wf-grid"><thead><tr>
-                    <th style="width:25%">Step</th>
-                    <th style="width:30%">Description</th>
-                    <th style="width:90px">Type</th>
-                    <th style="width:100px">Pipeline</th>
-                    <th style="width:120px">Actions</th>
-                </tr></thead><tbody>`;
-
-            steps.forEach(s=>{
-                const sName = gf(s,ST.name)||'Untitled';
-                const sDesc = gf(s,ST.description)||'';
-                const sType = selName(gf(s,ST.stepType))||'Staff Task';
-                const sTypeClass = sType==='AI Skill'?'step-type-ai':sType==='Both'?'step-type-both':'step-type-staff';
-                const ps = pipelineStatus(s);
-                const canSkill = (sType==='AI Skill'||sType==='Both') && !isSkillCreated(s.id);
-                const canTask = (sType==='Staff Task'||sType==='Both') && !isTaskCreated(s.id);
-
-                html += `<tr>
-                    <td>${esc(sName)}</td>
-                    <td style="font-size:var(--fs-xs);color:var(--text-secondary)">${esc(sDesc)}</td>
-                    <td><span class="step-type-badge ${sTypeClass}">${esc(sType)}</span></td>
-                    <td><span class="pipeline-badge ${ps.cls}">${esc(ps.label)}</span></td>
-                    <td style="display:flex;gap:4px;flex-wrap:wrap">
-                        ${canSkill?`<button class="btn btn-sm" style="border-color:var(--info);color:var(--info)" onclick="convertToSkill('${s.id}')">To Skill</button>`:''}
-                        ${canTask?`<button class="btn btn-sm" style="border-color:var(--accent-gold);color:var(--accent-gold)" onclick="convertToTask('${s.id}')">To Task</button>`:''}
-                        ${!canSkill&&!canTask?'<span style="font-size:var(--fs-xs);color:var(--text-muted)">Converted</span>':''}
-                    </td>
-                </tr>`;
-            });
-
-            html += '</tbody></table></div>';
-        });
-    }
-
-    pane.innerHTML = html;
-    updateCounts();
+// In-flight video recordings — build tracking, shown on the SOPs tab landing.
+function buildVideoTasksTable(){
+    const wfsWithTasks = filteredWorkflows().filter(w=>getWfVideoTaskId(w.id));
+    if(!wfsWithTasks.length) return '';
+    let html = '<div class="auto-wf-group" style="margin-top:18px">';
+    html += '<div class="auto-wf-header">Video recordings in progress <span style="color:var(--text-muted);font-weight:var(--fw-regular)">(' + wfsWithTasks.length + ')</span></div>';
+    html += `<table class="wf-grid"><thead><tr>
+        <th style="width:30%">Workflow</th>
+        <th style="width:100px">Task Status</th>
+        <th style="width:100px">Loom URL</th>
+        <th style="width:100px">Steps Extracted</th>
+        <th style="width:120px">Actions</th>
+    </tr></thead><tbody>`;
+    wfsWithTasks.forEach(w=>{
+        const wName = gf(w,WF.name)||'Untitled';
+        const vtaskStatus = getWfVideoTaskStatus(w.id);
+        const loomUrl = getWfLoomUrl(w.id);
+        const steps = stepsForWorkflow(w.id);
+        const statusCls = vtaskStatus==='complete'?'task-complete':'task-pending';
+        const statusLabel = vtaskStatus==='complete'?'Complete':'Pending';
+        const hasSteps = steps.length > 0;
+        html += `<tr>
+            <td style="font-weight:var(--fw-semibold)">${esc(wName)}</td>
+            <td><span class="task-status-badge ${statusCls}">${statusLabel}</span></td>
+            <td>${loomUrl?'<span style="color:var(--success);font-size:var(--fs-xs)">Linked</span>':'<span style="color:var(--text-muted);font-size:var(--fs-xs)">None</span>'}</td>
+            <td>${hasSteps?'<span style="color:var(--success);font-size:var(--fs-xs)">'+steps.length+' steps</span>':'<span style="color:var(--text-muted);font-size:var(--fs-xs)">Not yet</span>'}</td>
+            <td style="display:flex;gap:4px;flex-wrap:wrap">
+                ${vtaskStatus==='complete'&&loomUrl&&!hasSteps?`<button class="btn btn-sm btn-ai" onclick="selectedStepsWf='${w.id}';importFromLoom('${w.id}')">Extract Steps</button>`:''}
+                <button class="btn btn-sm" onclick="selectStepsWf('${w.id}')">View</button>
+            </td>
+        </tr>`;
+    });
+    html += '</tbody></table></div>';
+    return html;
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -3197,8 +3940,10 @@ async function doConvertWorkflowToSkill(wfId){
     if(raw){
         try {
             const sopData = JSON.parse(raw);
-            sopContent = (sopData.sopSteps||[]).map(s=>s.title+': '+(s.body||'')).join('\n');
-        } catch(e){}
+            // SOP steps are {name, detail[]} (see generateWorkflowSOP) — the old
+            // s.title/s.body read produced "undefined:" lines in every skill.
+            sopContent = (sopData.sopSteps||[]).map(s=>(s.name||'')+': '+((s.detail||[]).join(' '))).join('\n');
+        } catch(e){ /* best-effort: safe fallback */ }
     }
 
     toast('Generating skill definition...');
@@ -3329,7 +4074,7 @@ function openInCowork(wfId){
     const driveUrl = getWfDriveUrl(wfId);
     const driveDocUrl = getWfDriveDocUrl(wfId);
     let skills = [];
-    try { skills = JSON.parse(gf(w,WF.skillDefinition)); if(!Array.isArray(skills)) skills = [skills]; } catch(e){}
+    try { skills = JSON.parse(gf(w,WF.skillDefinition)); if(!Array.isArray(skills)) skills = [skills]; } catch(e){/* best-effort: safe fallback */}
     const wfSkill = skills.find(sk => sk.workflowId === wfId && !sk.stepId) || skills[0] || {};
     const instructions = wfSkill.instructions || wfSkill.description || '';
 
@@ -3474,6 +4219,17 @@ function renderStepsResourceEmbed(wfId){
 async function fetchLoomTranscript(loomUrl){
     const match = loomUrl.match(/loom\.com\/share\/([a-zA-Z0-9]+)/);
     if(!match) return '';
+    // 1) The loom-transcript worker returns the REAL spoken transcript, extracted
+    //    server-side from the share page's signed CDN link. Before this, the only
+    //    working path was the oembed fallback below — the video TITLE — so SOPs
+    //    were generated from the title, not what was actually said.
+    try {
+        const wres = await fetch(LOOM_TRANSCRIPT_ENDPOINT + '?id=' + match[1]);
+        if(wres.ok){
+            const wdata = await wres.json();
+            if(wdata.transcript && wdata.transcript.trim().split(/\s+/).length > 15) return wdata.transcript.trim();
+        }
+    } catch(e){ console.warn('[loom] transcript worker unavailable, falling back', e); }
     const apiKey = getLoomApiKey();
     let transcript = '';
     if(apiKey){
@@ -3487,7 +4243,7 @@ async function fetchLoomTranscript(loomUrl){
                 if(data.transcript) transcript = data.transcript;
                 else if(data.data) transcript = typeof data.data === 'string' ? data.data : JSON.stringify(data.data);
             }
-        } catch(e){}
+        } catch(e){ console.warn('[loom] transcription API fetch failed', e); }
     }
     if(!transcript){
         try {
@@ -3497,7 +4253,7 @@ async function fetchLoomTranscript(loomUrl){
                 transcript = odata.title || '';
                 if(odata.description) transcript += '. ' + odata.description;
             }
-        } catch(e){}
+        } catch(e){ console.warn('[loom] oembed fallback failed', e); }
     }
     return transcript;
 }
@@ -3517,6 +4273,7 @@ Here is the video transcript:
 ${transcript}
 
 Extract discrete, actionable workflow steps from this transcript. Each step should be a specific task someone would perform.
+CRITICAL — examples are not steps: when the narrator walks through specific cases (a tenant's name, one account, an amount), those are worked examples of ONE generic step, not separate steps. Never name a step after a specific case (no "Review John Smith Case"); write the generic step it demonstrates (e.g. "Review each open case individually") and keep all names/amounts out of step names and descriptions.
 Return ONLY a JSON array of objects with "name" and "description" keys. No other text.`
         : `Suggest 5-8 workflow steps for a workflow called "${wName}".
 ${wDesc ? `Workflow description: ${wDesc}` : ''}
@@ -3623,14 +4380,23 @@ function assignVideoTask(wfId){
     if(!w) return;
     const wName = gf(w,WF.name)||'Untitled';
 
+    // The AGENTIC script travels WITH the task so whoever records the video sees
+    // the stage prompts in Tasks & Projects — not just on the Systemisation page.
+    const agenticScript = AGENTIC_STAGES.map(s=>`${s.letter} — ${s.name}: ${s.prompt}`).join('\n\n');
     const taskName = 'Record video: ' + wName;
-    const taskDesc = 'Record a Loom video walkthrough of the "' + wName + '" workflow.\n\nWhen finished, replace the placeholder below with your Loom share URL and mark this task as Done.\n\n[loom:paste your Loom share URL here]';
+    const taskDesc = 'Record a Loom video walkthrough of the "' + wName + '" workflow.\n\n'
+        + 'Follow the AGENTIC script — cover all ' + AGENTIC_STAGES.length + ' while you record:\n\n'
+        + agenticScript
+        + '\n\nWhen finished, replace the placeholder below with your Loom share URL and mark this task as Done.\n\n[loom:paste your Loom share URL here]';
 
+    const bizIds = linkIds(gf(w,WF.business));
     window.parent.postMessage({
         type: 'qt:open-new-task-drawer',
         opts: {
             name: taskName,
             description: taskDesc,
+            business: bizIds[0] || '',
+            requireBusiness: true,   // every SOP must belong to a business
             _wfId: wfId,
         }
     }, '*');
@@ -3777,6 +4543,42 @@ function hidePipelineProgress() {
 // ═══════════════════════════════════════════════════════════════════════
 // Boot
 // ═══════════════════════════════════════════════════════════════════════
+let _lastSyncAt = null;
+function updateSyncStatus(state, msg){
+    const el = document.getElementById('syncStatus');
+    if(!el) return;
+    if(state==='ok'){
+        _lastSyncAt = new Date();
+        const t = _lastSyncAt.toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'});
+        el.innerHTML = `<span class="sync-dot ok"></span>Synced ${t}`;
+        el.title = 'Last synced ' + _lastSyncAt.toLocaleString('en-GB');
+    } else if(state==='syncing'){
+        el.innerHTML = `<span class="sync-dot syncing"></span>Syncing…`;
+        el.title = 'Refreshing from Airtable';
+    } else {
+        el.innerHTML = `<span class="sync-dot error"></span>Sync failed`;
+        el.title = msg || 'Sync failed';
+    }
+}
+// Manual refresh: reload data from Airtable and re-render the current view.
+async function refreshData(){
+    const btn = document.getElementById('refreshBtn');
+    if(btn){ btn.disabled = true; btn.classList.add('spinning'); }
+    updateSyncStatus('syncing');
+    try {
+        await loadData();
+        render();
+        updateSyncStatus('ok');
+    } catch(e){
+        if(e.message==='auth') return;
+        updateSyncStatus('error', e.message);
+        toast('Refresh failed: ' + e.message);
+    } finally {
+        if(btn){ btn.disabled = false; btn.classList.remove('spinning'); }
+    }
+}
+window.refreshData = refreshData;
+
 async function start(){
     document.getElementById('loader').style.display='block';
     document.getElementById('authBar').style.display='none';
@@ -3788,9 +4590,12 @@ async function start(){
         document.getElementById('loader').style.display='none';
         populateBizFilter();
         render();
+        updateSyncStatus('ok');
+        consumeAgentDeepLink();
     } catch(e){
         if(e.message==='auth') return;
         document.getElementById('loader').textContent='Error loading data: '+e.message;
+        updateSyncStatus('error', e.message);
     }
 }
 
