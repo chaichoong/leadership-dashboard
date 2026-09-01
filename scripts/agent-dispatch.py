@@ -1371,6 +1371,20 @@ def build_queue(args=None):
     chosen = {t["id"] for t in worklist}
     reserve = [t for t in combined if t["id"] not in chosen][:CAP_PER_RUN]
 
+    # The creditor record book rides with the queue (approved chain link 2,
+    # 1 Sep 2026): history is READ before a word is drafted, and the drafting
+    # agent can only read what this hands it. A failed read carries the error
+    # instead — the skill then refuses to draft creditor responses blind, and
+    # verify's record-book gate would fail the run regardless (no agent can
+    # update a book it cannot reach).
+    creditor_ledger, creditor_ledger_error = [], ""
+    if creditor_count or any(CREDITOR_REC_ID in (t.get("teamMemberIds") or [])
+                             for t in worklist):
+        try:
+            creditor_ledger = [plan_digest(p) for p in fetch_plans()]
+        except Exception as e:                            # noqa: BLE001
+            creditor_ledger_error = str(e)[:200]
+
     out = {
         "generatedAt": now_iso(),
         "cap": CAP_PER_RUN,
@@ -1381,6 +1395,11 @@ def build_queue(args=None):
         # with --tier1 so the banner reaches Kevin. Not a skip list.
         "tier1Tasks": tier1,
         "skippedTier2": skipped_tier2,
+        # The record book, one compact page per creditor matter. The skill
+        # hands the matching page (or "no page yet") to every creditor
+        # dispatch so the agent never repeats a step already taken.
+        "creditorLedger": creditor_ledger,
+        "creditorLedgerError": creditor_ledger_error,
         # Named, counted, and left open on the board. Never dropped: an alert
         # that vanishes is worse than one that clogs the gate.
         "systemAlerts": system_alerts,
@@ -2659,6 +2678,7 @@ def cmd_verify(args):
 
     # Trust nothing the run claimed: re-read each touched task and check the
     # state actually landed.
+    creditor_submits = []
     for a in ok_actions:
         try:
             live = task_view(get_task(a["task"]))
@@ -2666,6 +2686,14 @@ def cmd_verify(args):
             problems.append(f"could not re-read {a.get('task')}: {e}")
             continue
         kind = a.get("kind")
+        # Collected for the record-book gate below. The engine-raised cost
+        # reviews are cost work with no creditor matter, so the name prefix
+        # exempts them — everything else the creditor agent submits is a
+        # matter with a page.
+        if (kind in ("redo", "new")
+                and CREDITOR_REC_ID in live["teamMemberIds"]
+                and not str(live["name"]).startswith(REVIEW_TASK_PREFIX)):
+            creditor_submits.append((a["task"], str(live["name"])[:60]))
         if kind == "carry_out":
             # Two legitimate end states, and each is verified against the field
             # that actually proves it. A keep-open carry-out that checked Status
@@ -2724,6 +2752,37 @@ def cmd_verify(args):
                 problems.append(f"{a['task']} was handed to {who['name']} but "
                                 "marked Completed — the work is not done, it "
                                 "changed hands")
+
+    # THE RECORD-BOOK GATE (approved chain link 9, Kevin's revamp, 1 Sep
+    # 2026). Read from the LIVE table, never from what the run claimed. This
+    # exists because the previous version of the rule was prose in the agent
+    # file with no write path and nothing checking it, and produced 29 of 30
+    # pages stuck at "Awaiting response" with zero outcomes recorded — the
+    # same lesson as the learning gate above. A book the engine cannot reach
+    # fails the run too: a creditor draft written blind is exactly what the
+    # read-back step exists to prevent.
+    if creditor_submits:
+        try:
+            plans = fetch_plans()
+            by_task = {tid: p for p in plans for tid in p["taskIds"]}
+            for tid, name in creditor_submits:
+                page = by_task.get(tid)
+                if page is None:
+                    problems.append(
+                        f"creditor task {tid} '{name}' submitted with NO "
+                        "record-book update — every matter updates its "
+                        "Creditor Plans page (python3 scripts/"
+                        f"agent-dispatch.py ledger {tid} --creditor ... "
+                        "--status ... --next-step ...)")
+                elif not (page["nextStep"] or "").strip():
+                    problems.append(
+                        f"creditor task {tid} '{name}' record-book page "
+                        f"({page['id']}) has an empty Next Step — every "
+                        "outcome states where the matter goes next")
+        except Exception as e:                            # noqa: BLE001
+            problems.append(
+                "record book unreachable while creditor work was submitted "
+                f"— the run drafted blind and cannot verify: {str(e)[:160]}")
 
     if problems:
         for p in problems:
@@ -3062,10 +3121,19 @@ def creditor_score():
         sys.exit("ERROR: control failed — zero ACTIVE costs read from the "
                  "Costs table (90 existed on 25 Aug 2026). The read or the "
                  "active rule is broken. No creditor score written.")
+    # Metric three (revamp, 1 Sep 2026): the record-book postures. The
+    # dispatch skill promised this reading since 25 Aug; the code now keeps
+    # the promise.
+    plans = fetch_plans()
+    if not plans:
+        sys.exit("ERROR: control failed — zero pages read from the Creditor "
+                 "Plans record book (30 existed on 1 Sep 2026). The read is "
+                 "broken, not the book empty. No creditor score written.")
+    ledger_frag, ledger_stats = ledger_postures(plans)
     write_register_reading("creditor", CREDITOR_REGISTER_ROW,
                            CREDITOR_SCORE_STATE,
-                           cov_frag + "; " + cost_frag,
-                           {**cov_stats, **cost_stats}, extra)
+                           cov_frag + "; " + cost_frag + "; " + ledger_frag,
+                           {**cov_stats, **cost_stats, **ledger_stats}, extra)
 
 
 CREDITOR_REVIEW_STATE = os.path.join(STATE_DIR, "creditor-review.json")
@@ -3136,6 +3204,297 @@ def ensure_weekly_review():
                       "created": not existing}))
 
 
+# ─── THE CREDITOR RECORD BOOK (revamp, Kevin-approved chain, 1 Sep 2026) ──
+#
+# One page per creditor matter in the Creditor Plans table. The approved
+# chain's three enforced links live here: link 2 (the queue hands the book to
+# the drafting agent so history is READ before a word is written), link 9
+# (every creditor submit updates its page — verify fails the run otherwise),
+# link 10 (a daily date check raises chase tasks, only where the agent judged
+# something is owed BACK to us and wrote a date; a freeze request never gets
+# a date, so this check can never chase one). Before 1 Sep 2026 the book was
+# written-only in prose with no write path in this file: 29 of 30 pages sat
+# at "Awaiting response" with zero outcomes recorded.
+
+CREDITOR_PLANS = "tbljyVlkq1BXzny2G"
+PLAN_FIELDS = {
+    "creditor":    "fldRmcVPa2OxHP0Ed",
+    "status":      "fldoNpdLRrT2gBFxQ",
+    "amount":      "fldn7xH0KuleraGVA",
+    "entity":      "fldfizzBcgQyK6EBm",
+    "lane":        "fld6Lu7KpXZTCnGaV",
+    "agreed":      "fldOd2BbJC5z2xv6s",
+    "lastContact": "fldayQPedcPHFVVQO",
+    "notes":       "fldkLJxtPOpSYHuCT",
+    "tasks":       "fldZHxI4Pim6AbO8l",
+    "nextStep":    "fldKlaHlN00o9mogx",
+    "nextDate":    "fldrkrv4MNIyJEymH",
+}
+PLAN_STATUSES = ("Awaiting response", "Frozen", "Plan agreed", "Disputed",
+                 "Escalated to Kevin", "Closed - dissolved business",
+                 "Settled")
+PLAN_LANES = ("Debt correspondence", "Live utility", "Contractor", "Other")
+PLAN_CLOSED_STATUSES = ("Settled", "Closed - dissolved business")
+# Both engine-raised review tasks are COST work, not creditor matters, so the
+# record-book gate skips them by this prefix (weekly and monthly names share it
+# on purpose — a rename that breaks the prefix re-arms the gate loudly, the
+# safe failure direction).
+REVIEW_TASK_PREFIX = "Fixed cost"
+
+
+def plan_view(rec):
+    f = rec.get("fields", {})
+    return {
+        "id": rec.get("id"),
+        "createdTime": rec.get("createdTime", ""),
+        "creditor": f.get(PLAN_FIELDS["creditor"], ""),
+        "status": sel(f.get(PLAN_FIELDS["status"])),
+        "monthlyAmount": f.get(PLAN_FIELDS["amount"]),
+        "entity": f.get(PLAN_FIELDS["entity"], ""),
+        "lane": sel(f.get(PLAN_FIELDS["lane"])),
+        "lastContact": f.get(PLAN_FIELDS["lastContact"], ""),
+        "nextStep": f.get(PLAN_FIELDS["nextStep"], ""),
+        "nextStepDate": f.get(PLAN_FIELDS["nextDate"], ""),
+        "taskIds": links(f.get(PLAN_FIELDS["tasks"])),
+        "notes": f.get(PLAN_FIELDS["notes"], ""),
+    }
+
+
+def fetch_plans():
+    return [plan_view(r) for r in query_records(CREDITOR_PLANS)]
+
+
+def plan_digest(p):
+    """The compact page the queue JSON carries: enough for the drafting agent
+    to see where the matter stands and what has already been said, without
+    hauling the full notes history into every run."""
+    tail = [l for l in (p["notes"] or "").splitlines() if l.strip()][-3:]
+    return {**{k: p[k] for k in ("id", "creditor", "status", "monthlyAmount",
+                                 "lastContact", "nextStep", "nextStepDate")},
+            "recentNotes": tail}
+
+
+def find_plan(plans, task_id, creditor):
+    """Which page is this matter's page. A page already linked to the task
+    wins outright; otherwise exact case-insensitive creditor name. Oldest
+    page wins when twins exist, so a duplicate created by mistake can never
+    hijack the original's history — and the caller warns about the twins."""
+    linked = [p for p in plans if task_id and task_id in p["taskIds"]]
+    if linked:
+        return sorted(linked, key=lambda p: p["createdTime"])[0], []
+    name = (creditor or "").strip().lower()
+    named = sorted([p for p in plans
+                    if (p["creditor"] or "").strip().lower() == name],
+                   key=lambda p: p["createdTime"])
+    if not named:
+        return None, []
+    return named[0], named[1:]
+
+
+def ledger_postures(plans):
+    """Register metric three (Kevin's definition, 1 Sep 2026): how many
+    matters are frozen, how many are on agreed plans and what those plans
+    commit per month, and how many still await a response. A blank Monthly
+    Amount on an agreed plan counts £0 — never skipped (the blank-field
+    lesson in CLAUDE.md)."""
+    frozen = sum(1 for p in plans if p["status"] == "Frozen")
+    on_plan = [p for p in plans if p["status"] == "Plan agreed"]
+    committed = round(sum(float(p["monthlyAmount"] or 0) for p in on_plan), 2)
+    awaiting = sum(1 for p in plans if p["status"] == "Awaiting response")
+    frag = (f"ledger: {frozen} frozen, {len(on_plan)} on plans "
+            f"£{committed:,.2f}/mo, {awaiting} awaiting")
+    return frag, {"frozen": frozen, "onPlans": len(on_plan),
+                  "plansMonthly": committed, "awaiting": awaiting}
+
+
+def chase_due(plans, today):
+    """Pure: which pages are owed a chase today. Only pages where the agent
+    judged something is owed BACK to us and wrote a Next Step Date qualify —
+    ISO strings compare lexicographically, so <= is a real date comparison."""
+    return [p for p in plans
+            if p["nextStepDate"] and p["nextStepDate"] <= today
+            and (p["nextStep"] or "").strip()
+            and p["status"] not in PLAN_CLOSED_STATUSES]
+
+
+def is_first_monday(now):
+    return now.weekday() == 0 and now.day <= 7
+
+
+def cmd_ledger(args):
+    """The ONE write path to the record book. Finds the matter's page (task
+    link first, then name; oldest twin wins), creates it when none exists,
+    stamps Last Contact, links the task, and appends the dated note. verify
+    fails any creditor submit whose task never passed through here."""
+    if args.next_date and args.next_date != "none":
+        try:
+            datetime.strptime(args.next_date, "%Y-%m-%d")
+        except ValueError:
+            sys.exit("ERROR: --next-date must be YYYY-MM-DD (or 'none' to "
+                     "clear it)")
+    plans = fetch_plans()
+    row, twins = find_plan(plans, args.task, args.creditor)
+    for t in twins:
+        print(f"WARNING: duplicate page for '{args.creditor}' ({t['id']}) — "
+              f"updating the oldest ({row['id']}); fold the twin by hand",
+              file=sys.stderr)
+
+    next_step = args.next_step if args.next_step is not None else \
+        (row["nextStep"] if row else "")
+    if args.next_date and args.next_date != "none" and not next_step.strip():
+        sys.exit("ERROR: --next-date without a Next Step is an alarm with no "
+                 "message — say what the chase is for")
+
+    fields = {PLAN_FIELDS["lastContact"]: today_london()}
+    if args.status:
+        fields[PLAN_FIELDS["status"]] = args.status
+    if args.next_step is not None:
+        fields[PLAN_FIELDS["nextStep"]] = args.next_step
+    if args.next_date == "none":
+        fields[PLAN_FIELDS["nextDate"]] = None
+    elif args.next_date:
+        fields[PLAN_FIELDS["nextDate"]] = args.next_date
+    if args.amount is not None:
+        fields[PLAN_FIELDS["amount"]] = float(args.amount)
+    if args.entity:
+        fields[PLAN_FIELDS["entity"]] = args.entity
+    if args.lane:
+        fields[PLAN_FIELDS["lane"]] = args.lane
+    if args.note:
+        prior = row["notes"] if row else ""
+        line = f"{today_london()}: {args.note}"
+        fields[PLAN_FIELDS["notes"]] = (prior + "\n" + line) if prior else line
+
+    if row:
+        fields[PLAN_FIELDS["tasks"]] = sorted(set(row["taskIds"])
+                                              | {args.task})
+        result = _request("PATCH", f"/{CREDITOR_PLANS}/{row['id']}",
+                          {"fields": fields, "typecast": True})
+    else:
+        fields[PLAN_FIELDS["creditor"]] = args.creditor.strip()
+        fields[PLAN_FIELDS["tasks"]] = [args.task]
+        fields.setdefault(PLAN_FIELDS["status"], "Awaiting response")
+        result = _request("POST", f"/{CREDITOR_PLANS}",
+                          {"fields": fields, "typecast": True})
+    # Echo from a LIVE re-read, never from the write response: POST/PATCH
+    # responses key fields by NAME while plan_view reads by field id, so the
+    # response echoed blanks (caught by the build session's live write test,
+    # 1 Sep 2026) — and an echo of what actually landed beats an echo of what
+    # was sent anyway.
+    live = plan_view(_request(
+        "GET", f"/{CREDITOR_PLANS}/{result['id']}?returnFieldsByFieldId=true"))
+    print(json.dumps({"row": live["id"], "created": row is None,
+                      "creditor": live["creditor"], "status": live["status"],
+                      "nextStep": live["nextStep"],
+                      "nextStepDate": live["nextStepDate"]}))
+
+
+MONTHLY_REVIEW_STATE = os.path.join(STATE_DIR, "creditor-deepdive.json")
+MONTHLY_REVIEW_NAME = ("Fixed cost deep dive: subscriptions and plans "
+                       "(monthly)")
+
+
+def ensure_monthly_review():
+    """The monthly deep cost dive (Kevin's cadence call, 1 Sep 2026): first
+    Monday of the month, decided IN CODE in London time — never a cron
+    day-of-week field and never the Airtable Recurring field, for the same
+    reasons as ensure_weekly_review above."""
+    now = datetime.now(LONDON)
+    if not is_first_monday(now):
+        return
+    month = now.strftime("%Y-%m")
+    state = load_score_state(MONTHLY_REVIEW_STATE)
+    if state.get("month") == month:
+        return
+    # Belt for a lost state file, same shape as the weekly review's.
+    existing = query_tasks(
+        "AND({Task Name}='" + MONTHLY_REVIEW_NAME + "', "
+        "IS_AFTER(CREATED_TIME(), DATEADD(NOW(), -20, 'days')))",
+        max_records=1, minimal=True)
+    if not existing:
+        _request("POST", f"/{TASKS}", {"typecast": True, "fields": {
+            REVIEW_TASK_FIELDS["name"]: MONTHLY_REVIEW_NAME,
+            REVIEW_TASK_FIELDS["status"]: "Today",
+            REVIEW_TASK_FIELDS["due"]: now.strftime("%Y-%m-%d"),
+            REVIEW_TASK_FIELDS["team"]: [CREDITOR_REC_ID],
+            REVIEW_TASK_FIELDS["approver"]: {"id": KEVIN_APPROVER_USR},
+            REVIEW_TASK_FIELDS["priority"]: "High",
+            REVIEW_TASK_FIELDS["estimate"]: "1 hour",
+            REVIEW_TASK_FIELDS["desc"]: (
+                "Monthly deep cost dive (raised automatically on the first "
+                "Monday by agent-dispatch). Go beyond the weekly quick "
+                "check: for EVERY active cost, question whether it is still "
+                "used (recent Transactions are the evidence), whether the "
+                "plan level fits, and whether a cheaper tier or a "
+                "cancellation exists — research the supplier where needed. "
+                "Rank candidates by monthly saving; every saving of £5/mo "
+                "or more becomes its own recommendation with the £/month "
+                "quantified. Never recommend cutting insurance, compliance "
+                "or maintenance-capability cover — flag those as Kevin's "
+                "judgement call with the trade-off stated. Prepare-only — "
+                "no record changes without Kevin's approval."),
+        }})
+    os.makedirs(STATE_DIR, exist_ok=True)
+    with open(MONTHLY_REVIEW_STATE, "w") as fh:
+        json.dump({"month": month, "raisedAt": now_iso(),
+                   "existing": bool(existing)}, fh)
+    print(json.dumps({"agent": "creditor", "monthlyReview": month,
+                      "created": not existing}))
+
+
+CHASE_STATE = os.path.join(STATE_DIR, "creditor-chase.json")
+
+
+def ensure_chase_tasks():
+    """Link 10 of the approved chain: the daily date check. Raises one chase
+    task per due page per Next Step Date — the state file makes a date fire
+    once, and the recent-task belt holds if the state file is lost. The
+    judgment about WHETHER to chase already happened at write time (only a
+    matter owed something back to us carries a date), so this stays a pure
+    if/then."""
+    plans = fetch_plans()
+    due = chase_due(plans, today_london())
+    if not due:
+        return
+    state = load_score_state(CHASE_STATE)
+    # One name-only read outside the loop; creditor names can carry quotes,
+    # so the belt compares in Python rather than interpolating a formula.
+    recent = {t.get("fields", {}).get(AF["name"], "")
+              for t in query_tasks(
+                  "IS_AFTER(CREATED_TIME(), DATEADD(NOW(), -14, 'days'))",
+                  minimal=True)}
+    created = []
+    for p in due:
+        if state.get(p["id"]) == p["nextStepDate"]:
+            continue
+        name = f"Chase: {p['creditor']} - {p['nextStep']}"[:100]
+        if name not in recent:
+            _request("POST", f"/{TASKS}", {"typecast": True, "fields": {
+                REVIEW_TASK_FIELDS["name"]: name,
+                REVIEW_TASK_FIELDS["status"]: "Today",
+                REVIEW_TASK_FIELDS["due"]: today_london(),
+                REVIEW_TASK_FIELDS["team"]: [CREDITOR_REC_ID],
+                REVIEW_TASK_FIELDS["approver"]: {"id": KEVIN_APPROVER_USR},
+                REVIEW_TASK_FIELDS["priority"]: "High",
+                REVIEW_TASK_FIELDS["estimate"]: "20 min",
+                REVIEW_TASK_FIELDS["desc"]: (
+                    "CREDITOR MATTER — chase raised automatically from the "
+                    f"creditor record book. The next step for "
+                    f"{p['creditor']} was due {p['nextStepDate']}: "
+                    f"{p['nextStep']}. Read the record-book page before "
+                    "drafting, and update it after (agent-dispatch.py "
+                    "ledger)."),
+            }})
+            created.append({"creditor": p["creditor"],
+                            "dueDate": p["nextStepDate"]})
+        state[p["id"]] = p["nextStepDate"]
+    os.makedirs(STATE_DIR, exist_ok=True)
+    with open(CHASE_STATE, "w") as fh:
+        json.dump(state, fh)
+    print(json.dumps({"agent": "creditor", "chasesDue": len(due),
+                      "chasesCreated": created}))
+
+
 def creditor_score_selftest():
     def task(status, team=None, sent=None):
         fields = {AF["status"]: {"name": status}}
@@ -3193,6 +3552,67 @@ def creditor_score_selftest():
     print("selftest-creditor-score: all checks passed")
 
 
+def creditor_ledger_selftest():
+    def page(**over):
+        base = {"id": "recP", "createdTime": "2026-09-01T00:00:00.000Z",
+                "creditor": "HMRC", "status": "Awaiting response",
+                "monthlyAmount": None, "entity": "", "lane": "",
+                "lastContact": "", "nextStep": "", "nextStepDate": "",
+                "taskIds": [], "notes": ""}
+        return {**base, **over}
+
+    # Postures: blank Monthly Amount on an agreed plan counts £0, never skips.
+    frag, s = ledger_postures([
+        page(status="Frozen"), page(status="Frozen"),
+        page(status="Plan agreed", monthlyAmount=25.5),
+        page(status="Plan agreed"),                      # blank amount → £0
+        page(status="Awaiting response"),
+        page(status="Settled"),
+    ])
+    assert s == {"frozen": 2, "onPlans": 2, "plansMonthly": 25.5,
+                 "awaiting": 1}, s
+    assert frag == "ledger: 2 frozen, 2 on plans £25.50/mo, 1 awaiting", frag
+
+    # find_plan: a task link beats a name match; names are case-insensitive;
+    # the OLDEST twin wins and the others are named.
+    old = page(id="recOld", createdTime="2026-08-01T00:00:00.000Z",
+               creditor="Fylde Council")
+    new = page(id="recNew", createdTime="2026-08-20T00:00:00.000Z",
+               creditor="FYLDE COUNCIL")
+    linked = page(id="recLinked", creditor="Someone Else",
+                  taskIds=["recTask1"])
+    hit, twins = find_plan([old, new, linked], "recTask1", "fylde council")
+    assert hit["id"] == "recLinked" and twins == [], (hit, twins)
+    hit, twins = find_plan([new, old], "", "fylde council")
+    assert hit["id"] == "recOld", hit
+    assert [t["id"] for t in twins] == ["recNew"], twins
+    hit, twins = find_plan([old], "", "Utilita")
+    assert hit is None and twins == [], (hit, twins)
+
+    # chase_due: fires on the day and after, never early, never on a closed
+    # matter, never without a step, never without a date — a freeze request
+    # carries no date, so it can never appear here.
+    due = chase_due([
+        page(id="a", nextStep="Chase LOA return", nextStepDate="2026-09-01"),
+        page(id="b", nextStep="Chase refund", nextStepDate="2026-08-30"),
+        page(id="c", nextStep="Too early", nextStepDate="2026-09-02"),
+        page(id="d", nextStep="", nextStepDate="2026-09-01"),
+        page(id="e", nextStep="Closed matter", nextStepDate="2026-09-01",
+             status="Settled"),
+        page(id="f", nextStep="No date set"),
+    ], "2026-09-01")
+    assert [p["id"] for p in due] == ["a", "b"], due
+
+    # First-Monday gate, decided in code: Sept 2026 starts on a Tuesday, so
+    # the first Monday is the 7th; the 14th is a Monday but not the first;
+    # 1 Jun 2026 is a day-1 Monday.
+    assert is_first_monday(datetime(2026, 9, 7)) is True
+    assert is_first_monday(datetime(2026, 9, 14)) is False
+    assert is_first_monday(datetime(2026, 9, 1)) is False
+    assert is_first_monday(datetime(2026, 6, 1)) is True
+    print("selftest-creditor-ledger: all checks passed")
+
+
 # One row per per-agent housekeeping step the score command runs. A new role
 # agent's build session adds its reading function and ONE entry here — never
 # another copy of the loop or the change-gated register write (that is
@@ -3202,8 +3622,11 @@ SCORE_STEPS = (
     ("response", response_score),
     ("creditor", creditor_score),
     ("weekly-review", ensure_weekly_review),
+    ("monthly-review", ensure_monthly_review),
+    ("chase", ensure_chase_tasks),
 )
-SCORE_SELFTESTS = (response_score_selftest, creditor_score_selftest)
+SCORE_SELFTESTS = (response_score_selftest, creditor_score_selftest,
+                   creditor_ledger_selftest)
 
 
 # ─── RECONCILE: work that finished on disk but never reached Airtable ──
@@ -3412,6 +3835,31 @@ def main():
                         "the agent files. Deterministic, idempotent, safe to "
                         "run as often as you like")
 
+    lg = sub.add_parser("ledger",
+                        help="update (or create) a creditor matter's page in "
+                             "the Creditor Plans record book — the ONE write "
+                             "path; verify fails any creditor submit whose "
+                             "task never passed through it")
+    lg.add_argument("task")
+    lg.add_argument("--creditor", required=True,
+                    help="creditor name as it appears; matching is "
+                         "case-insensitive and a page already linked to the "
+                         "task wins over a name match")
+    lg.add_argument("--status", choices=PLAN_STATUSES)
+    lg.add_argument("--next-step",
+                    help="where the matter goes next — required on every "
+                         "outcome")
+    lg.add_argument("--next-date",
+                    help="YYYY-MM-DD, ONLY when something is owed back to us "
+                         "(a signature, a confirmation, a refund); 'none' "
+                         "clears it. A freeze request never gets a date")
+    lg.add_argument("--note",
+                    help="one line of what was said or done, appended dated "
+                         "to the page's history")
+    lg.add_argument("--amount", type=float, help="agreed monthly amount")
+    lg.add_argument("--entity", help="which entity owes it")
+    lg.add_argument("--lane", choices=PLAN_LANES)
+
     args = p.parse_args()
     # RETURN the handler's exit code. It used to be discarded, so a command that
     # signalled failure by returning 1 still exited 0 and every caller read it
@@ -3425,7 +3873,7 @@ def main():
             "score": cmd_score, "reconcile": cmd_reconcile,
             "lessons": cmd_lessons, "revise": cmd_revise,
             "attach": cmd_attach, "outcome": cmd_outcome,
-            "reassign": cmd_reassign,
+            "reassign": cmd_reassign, "ledger": cmd_ledger,
             "handover-property": cmd_handover_property,
             "clear-alerts": cmd_clear_alerts}[args.cmd](args) or 0
 

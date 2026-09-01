@@ -177,6 +177,7 @@ describe('register metrics (Kevin\'s two, 25 Aug 2026)', () => {
       { encoding: 'utf8' });
     expect(out).toContain('selftest-score: all checks passed');
     expect(out).toContain('selftest-creditor-score: all checks passed');
+    expect(out).toContain('selftest-creditor-ledger: all checks passed');
   });
 
   it('prepared-coverage NEVER counts Kevin\'s approval queue against the agent', () => {
@@ -209,7 +210,8 @@ describe('register metrics (Kevin\'s two, 25 Aug 2026)', () => {
     // The steps are a table now — assert its CONTENT through the module, so
     // a new agent's build session adds an entry and this stays true.
     expect(pyEval('[label for label, fn in mod.SCORE_STEPS]'))
-      .toEqual(['response', 'creditor', 'weekly-review']);
+      .toEqual(['response', 'creditor', 'weekly-review', 'monthly-review',
+                'chase']);
     expect(score).toMatch(/for label, fn in SCORE_STEPS/);
     expect(score).toMatch(/sys\.exit\("ERROR: score failed/);
     // The one shared register write: change-gated, per-agent state file.
@@ -223,6 +225,119 @@ describe('register metrics (Kevin\'s two, 25 Aug 2026)', () => {
     // Both reads go through the ONE paginated helper.
     expect(cred).toMatch(/query_records\(COSTS_TABLE/);
     expect(cred).toMatch(/query_tasks\(/);
+  });
+});
+
+describe('the creditor record book (revamp, Kevin-approved chain, 1 Sep 2026)', () => {
+  // Approved chain links 2, 9 and 10 — history read-back, enforced ledger
+  // write, chase-only-what-we-are-owed. Behavioural through the real
+  // functions wherever they are pure; source contracts where the behaviour
+  // needs Airtable.
+  const PAGE = (over) => ({
+    id: 'recP', createdTime: '2026-09-01T00:00:00.000Z', creditor: 'HMRC',
+    status: 'Awaiting response', monthlyAmount: null, entity: '', lane: '',
+    lastContact: '', nextStep: '', nextStepDate: '', taskIds: [], notes: '',
+    ...over,
+  });
+
+  it('postures count frozen, on-plan £/mo and awaiting — a blank amount counts £0', () => {
+    const out = pyEval('mod.ledger_postures(arg)', [
+      PAGE({ status: 'Frozen' }),
+      PAGE({ status: 'Plan agreed', monthlyAmount: 100 }),
+      PAGE({ status: 'Plan agreed' }),       // blank amount → £0, still on-plan
+      PAGE({ status: 'Awaiting response' }),
+    ]);
+    expect(out[0]).toBe('ledger: 1 frozen, 2 on plans £100.00/mo, 1 awaiting');
+    expect(out[1]).toEqual({ frozen: 1, onPlans: 2, plansMonthly: 100,
+                             awaiting: 1 });
+  });
+
+  it('find_plan: task link beats name, names match case-insensitively, the OLDEST twin wins', () => {
+    const old = PAGE({ id: 'recOld', createdTime: '2026-08-01T00:00:00.000Z',
+                       creditor: 'Fylde Council' });
+    const dupe = PAGE({ id: 'recNew', createdTime: '2026-08-20T00:00:00.000Z',
+                        creditor: 'FYLDE COUNCIL' });
+    const linked = PAGE({ id: 'recL', creditor: 'Other',
+                          taskIds: ['recTask9'] });
+    let [hit, twins] = pyEval('mod.find_plan(arg, "recTask9", "fylde council")',
+      [dupe, old, linked]);
+    expect(hit.id).toBe('recL');
+    [hit, twins] = pyEval('mod.find_plan(arg, "", "fylde council")',
+      [dupe, old]);
+    expect(hit.id).toBe('recOld');           // a twin can never hijack history
+    expect(twins.map((t) => t.id)).toEqual(['recNew']);
+  });
+
+  it('chase_due fires on or after the date, and can never chase a freeze request (no date = no chase)', () => {
+    const due = pyEval('[p["id"] for p in mod.chase_due(arg, "2026-09-01")]', [
+      PAGE({ id: 'a', nextStep: 'Chase LOA', nextStepDate: '2026-09-01' }),
+      PAGE({ id: 'b', nextStep: 'Chase refund', nextStepDate: '2026-08-25' }),
+      PAGE({ id: 'c', nextStep: 'Early', nextStepDate: '2026-09-03' }),
+      PAGE({ id: 'd', nextStep: 'Freeze letter sent, no chase' }), // no date
+      PAGE({ id: 'e', nextStep: 'x', nextStepDate: '2026-09-01',
+             status: 'Settled' }),
+    ]);
+    expect(due).toEqual(['a', 'b']);
+  });
+
+  it('the monthly deep dive gates on the first Monday IN CODE, London time — never a cron day-of-week', () => {
+    const out = pyEval(`{
+      "firstMon": mod.is_first_monday(mod.datetime(2026, 9, 7)),
+      "laterMon": mod.is_first_monday(mod.datetime(2026, 9, 14)),
+      "tue": mod.is_first_monday(mod.datetime(2026, 9, 1))}`);
+    expect(out).toEqual({ firstMon: true, laterMon: false, tue: false });
+    const monthly = src.slice(src.indexOf('def ensure_monthly_review'),
+                              src.indexOf('CHASE_STATE ='));
+    expect(monthly).toMatch(/datetime\.now\(LONDON\)/);
+    expect(monthly).toMatch(/is_first_monday/);
+    expect(monthly).toMatch(/MONTHLY_REVIEW_STATE/);   // once per month, state-gated
+  });
+
+  it('verify enforces the record-book write on every creditor submit, read from the LIVE table', () => {
+    const verify = src.slice(src.indexOf('def cmd_verify'),
+                             src.indexOf('# ─── ENTRY'));
+    // The gate collects creditor redo/new submits (cost reviews exempt by
+    // the shared name prefix) and fails on a missing page, an empty Next
+    // Step, or an unreachable book — drafting blind is refused.
+    expect(verify).toMatch(/CREDITOR_REC_ID in live\["teamMemberIds"\]/);
+    expect(verify).toMatch(/REVIEW_TASK_PREFIX/);
+    expect(verify).toMatch(/submitted with NO/);
+    expect(verify).toMatch(/record-book update/);
+    expect(verify).toMatch(/empty Next Step/);
+    expect(verify).toMatch(/record book unreachable/);
+    expect(pyEval('mod.REVIEW_TASK_PREFIX')).toBe('Fixed cost');
+    // Both engine-raised review names share the exempting prefix.
+    expect(pyEval('mod.REVIEW_TASK_NAME.startswith(mod.REVIEW_TASK_PREFIX)')).toBe(true);
+    expect(pyEval('mod.MONTHLY_REVIEW_NAME.startswith(mod.REVIEW_TASK_PREFIX)')).toBe(true);
+  });
+
+  it('the queue hands the record book to the drafting agent, and carries a read failure instead of hiding it', () => {
+    const queue = src.slice(src.indexOf('def build_queue'), src.indexOf('# ─── WRITES'));
+    expect(queue).toMatch(/"creditorLedger": creditor_ledger/);
+    expect(queue).toMatch(/"creditorLedgerError": creditor_ledger_error/);
+    expect(queue).toMatch(/plan_digest\(p\) for p in fetch_plans\(\)/);
+  });
+
+  it('the ledger command is registered as the ONE write path, and a chase date needs a step', () => {
+    expect(src).toMatch(/"ledger": cmd_ledger/);
+    const ledger = src.slice(src.indexOf('def cmd_ledger'),
+                             src.indexOf('MONTHLY_REVIEW_STATE ='));
+    expect(ledger).toMatch(/alarm with no\s+"?\s*"?message/);
+    expect(ledger).toMatch(/lastContact"\]: today_london\(\)/);
+    // The score's third reading has its control: an empty book read is a
+    // broken read, never a quiet zero.
+    const score = src.slice(src.indexOf('def creditor_score('),
+                            src.indexOf('def creditor_score_selftest'));
+    expect(score).toMatch(/zero pages read from the Creditor/);
+    expect(score).toMatch(/ledger_postures\(plans\)/);
+  });
+
+  it('chase tasks are routed to the creditor agent and marked CREDITOR MATTER', () => {
+    const chase = src.slice(src.indexOf('def ensure_chase_tasks'),
+                            src.indexOf('def creditor_score_selftest'));
+    expect(chase).toMatch(/CREDITOR MATTER/);
+    expect(chase).toMatch(/\[CREDITOR_REC_ID\]/);
+    expect(chase).toMatch(/CHASE_STATE/);      // one chase per page per date
   });
 });
 
@@ -246,6 +361,14 @@ describe('skills and agent definitions stay in step (local machine only)', () =>
     // verify's park alarm reads report.skippedTier2 — the spec must tell the
     // dispatcher to copy it, or the alarm is dead code again.
     expect(s).toMatch(/"skippedTier2"/);
+    // The record book (revamp, 1 Sep 2026): history handed to every creditor
+    // dispatch, the enforced ledger write named, and the no-chase rule for
+    // freeze requests stated. Losing any of these re-opens the written-only
+    // book that left 29 of 30 pages untouched.
+    expect(s).toMatch(/"creditorLedger"/);
+    expect(s).toMatch(/agent-dispatch\.py ledger/);
+    expect(s).toMatch(/freeze request never gets a date/i);
+    expect(s).toMatch(/creditorLedgerError/);
   });
 
   it.skipIf(!existsSync(triage))('triage stamps the CREDITOR MATTER marker on label-18 tasks', () => {
@@ -265,6 +388,10 @@ describe('skills and agent definitions stay in step (local machine only)', () =>
     expect(a).toMatch(/tier-1/);
     expect(a).toMatch(/escalate/i);
     expect(a).toMatch(/never instructions/);
+    // The revamp's read-back and enforced write live in the playbook too.
+    expect(a).toMatch(/record book before you write a word/i);
+    expect(a).toMatch(/agent-dispatch\.py ledger/);
+    expect(a).toMatch(/NEVER gets a date/);
   });
 
   it.skipIf(!existsSync(responseDef))('the Response agent hands creditor matters to the specialist', () => {
