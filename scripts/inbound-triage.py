@@ -56,6 +56,18 @@ USAGE
                                               AI Agent Daily Log row on the
                                               register, so Kevin can check in
                                               from the agent's panel
+  inbound-triage.py history-stale             exit 0 when the history book needs
+                                              a rebuild (never built, or older
+                                              than 7 days)
+  inbound-triage.py history-build [--pages N] rebuild the Triage History Book in
+                                              Airtable from end-state label
+                                              membership — human filing only,
+                                              the agent's own moves excluded
+  inbound-triage.py history-dump              the history book as JSON, for the
+                                              run's pre-read file
+  inbound-triage.py matters                   every open agent task plus 14 days
+                                              of completed ones, keyed for the
+                                              matter-level dedupe
   inbound-triage.py selftest                  offline checks of the pure helpers
 
 SECRETS: triage worker key at ~/.config/od/gmail_triage_key (read/label only,
@@ -658,6 +670,339 @@ def cmd_publish():
 
 
 # ---------------------------------------------------------------------------
+# The history book + open matters (Kevin's approved chain map, 1 Sep 2026)
+# ---------------------------------------------------------------------------
+#
+# Agent-gate EXTEND verdict on the register row (recYy33zkoa099uM2), 1 Sep
+# 2026: two new pre-reads ground every run. THE HISTORY BOOK is where each
+# sender's mail has historically been filed BY HUMANS — Kevin's and Mica's
+# filing, never this agent's own, because a corpus containing the agent's own
+# moves would teach it its own guesses (the don't-train-on-own-output rule).
+# Gmail keeps no log of label MOVES, so end-state membership is the record:
+# where an email sits today IS the accumulated filing decision. OPEN MATTERS
+# is the estate-wide task snapshot, so a new message on a matter any agent
+# already holds JOINS that task instead of becoming a sibling at the gate.
+
+# Midnight 24 Aug 2026 Europe/London (BST, so 23:00 UTC on the 23rd) — the
+# agent's first live run. Labelled mail received before this was filed by a
+# human. The selftest derives this same number via zoneinfo, so a wrong
+# hand-computed constant cannot survive.
+AGENT_ERA_START_MS = 1787526000000
+
+HISTORY_TABLE = "tblK1aGR7dYYYX2Bo"   # "Triage History Book"
+HB = {
+    "sender":    "fldbh3eMZ4C4l1G3n",  # primary — bare email address, lowercase
+    "counts":    "fldRJHBqB1tKMeMZ0",  # JSON of RAW label-prefix counts ("6": 4)
+    "dominant":  "fldLTwLk0V5ksY8X6",
+    "total":     "fld085RNxSK6XpaT2",
+    "humanEra":  "fldlD2ZHPMxrrwwYC",
+    "handMoves": "fldfwOBqdtI6Yf7N5",
+    "lastSeen":  "fldoVBjVL56AoiSZV",
+    "lastBuilt": "fldA7wfceYI28zIwC",
+}
+
+# Which labels the book samples, and the triage OUTCOME each stands for. The
+# completion labels 9 and 14 are evidence too: mail there passed through the
+# actionable lanes before the completion sweep moved it, so both vote label12.
+# Counts are STORED by raw label prefix — re-derivable if this mapping ever
+# changes (the recon knowledge base's unrecoverable-key lesson); the mapping
+# is applied only when a vote is computed, at dump time.
+HISTORY_LANE_MAP = {
+    "6": "file-6", "8": "label12", "9": "label12", "10": "file-10",
+    "11": "file-11", "12": "label12", "13": "label13", "14": "label12",
+    "17": "file-17", "18": "file-18",
+}
+HISTORY_STALE_DAYS = 7
+HISTORY_BUILD_PAGES = 20      # per label; the worker returns 25 a page
+HISTORY_MIN_SENDERS = 20      # control: the human era alone holds hundreds
+HISTORY_MIN_TOTAL = 3         # a sender votes only with 3+ filings...
+HISTORY_MIN_SHARE = 0.8       # ...and 80% agreement on one outcome
+
+TEAM_TABLE = "tblco0p2OnlLQVAX7"
+TM_NAME_FIELDS = ("fldFyTZu3vu1a7X3a", "fld1DYEbtyVsO2GVP")  # Preferred, Legal
+
+# Task fields the matters snapshot reads — the same write-side ids the skill
+# and create-agent-task.py use, so a rename cannot split read from write.
+TASKS_TABLE = "tblqB8b22hKBL4PF1"
+MT = {
+    "name":     "fldgFjGBw6bTKJFCD",
+    "status":   "fldx4qCw17UfrKpaN",
+    "sender":   "fldzf4xlbrQuktx0i",
+    "urls":     "fldXf1p0vtHqOZcKl",
+    "team":     "flduCtmQGpOA4eWaj",
+    "outcome":  "fldrHBSr6qoUfaKuZ",
+    "priority": "fldS21RwmwOqt71LI",
+}
+MATTERS_CLOSED_DAYS = 14
+
+
+def collect_agent_ids(digest_dir=None):
+    """Message ids whose LABEL PLACEMENT this agent chose — every digest entry
+    that MOVED mail (label12, label13, archive, file-*). Note-only entries
+    (task-created, duplicate, updated, leave, answered, deferred) are kept
+    OUT on purpose: stranded mail was labelled by a human before the agent
+    ever tasked it, and that human filing is exactly the evidence the book
+    exists to keep."""
+    d = Path(digest_dir) if digest_dir else base_dir()
+    ids = set()
+    for p in sorted(d.glob("digest-*.jsonl")):
+        for line in p.read_text().splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                entry = json.loads(line)
+            except ValueError:
+                continue
+            do = str(entry.get("do", ""))
+            if do in ("archive", "label12", "label13") or do.startswith("file-"):
+                if entry.get("id"):
+                    ids.add(entry["id"])
+    return ids
+
+
+def classify_era(internal_ms, msg_id, agent_ids):
+    """Who filed this labelled message? The agent check comes FIRST: the 24
+    Aug 2026 backlog clear filed hundreds of PRE-era messages, so date alone
+    would count the agent's own moves as human ground truth."""
+    if msg_id in agent_ids:
+        return "agent"
+    if int(internal_ms or 0) < AGENT_ERA_START_MS:
+        return "human-era"
+    return "hand-move"
+
+
+def map_counts(raw_counts):
+    out = {}
+    for prefix, n in (raw_counts or {}).items():
+        lane = HISTORY_LANE_MAP.get(str(prefix))
+        if lane:
+            out[lane] = out.get(lane, 0) + int(n)
+    return out
+
+
+def history_vote(raw_counts):
+    """The book's steer for a sender: a lane, or None when the evidence is
+    thin (under HISTORY_MIN_TOTAL filings) or split (under HISTORY_MIN_SHARE
+    agreement). None means 'no vote', never 'archive'."""
+    lanes = map_counts(raw_counts)
+    total = sum(lanes.values())
+    if total < HISTORY_MIN_TOTAL:
+        return None
+    lane, top = max(lanes.items(), key=lambda kv: kv[1])
+    return lane if top / total >= HISTORY_MIN_SHARE else None
+
+
+def history_json(rows, now_iso):
+    """The pre-read file from the Airtable rows. An empty book is a broken
+    read or a never-run build — an ERROR object, never a quiet 'no history',
+    because 'unknown sender' and 'no history exists' must stay distinguishable."""
+    senders, built = {}, ""
+    for r in rows:
+        f = r.get("fields", {})
+        addr = str(f.get(HB["sender"], "")).strip().lower()
+        if not addr:
+            continue
+        try:
+            raw = json.loads(f.get(HB["counts"]) or "{}")
+        except ValueError:
+            raw = {}
+        senders[addr] = {
+            "counts": raw,
+            "total": int(f.get(HB["total"]) or 0),
+            "vote": history_vote(raw),
+            "humanEra": int(f.get(HB["humanEra"]) or 0),
+            "handMoves": int(f.get(HB["handMoves"]) or 0),
+        }
+        built = max(built, str(f.get(HB["lastBuilt"]) or ""))
+    if not senders:
+        return {"error": "history book is EMPTY — treat every sender as "
+                         "UNKNOWN; this is a broken read or a never-run "
+                         "build, not an absence of history",
+                "generated": now_iso}
+    return {"generated": now_iso, "built": built,
+            "senderCount": len(senders), "senders": senders}
+
+
+def _status_name(v):
+    return v.get("name", "") if isinstance(v, dict) else str(v or "")
+
+
+def matters_json(open_rows, closed_rows, key_fn, team_names, now_iso):
+    """The open-matters pre-read. Zero OPEN tasks is a broken read (the board
+    always carries hundreds) — an error object, never an empty list, because
+    'no open matter found' gates a create."""
+    def item(r):
+        f = r.get("fields", {})
+        return {
+            "id": r.get("id", ""),
+            "name": f.get(MT["name"], ""),
+            "key": key_fn(f.get(MT["name"], "")),
+            "status": _status_name(f.get(MT["status"])),
+            "outcome": _status_name(f.get(MT["outcome"])),
+            "sender": str(f.get(MT["sender"]) or ""),
+            "urls": str(f.get(MT["urls"]) or ""),
+            "team": [team_names.get(t, t) for t in (f.get(MT["team"]) or [])],
+        }
+    if not open_rows:
+        return {"error": "open-tasks read returned ZERO rows (expected "
+                         "hundreds) — the matter check is UNCHECKED this "
+                         "run; fall back to the per-thread dedupe and say so",
+                "generated": now_iso}
+    return {"generated": now_iso,
+            "open": [item(r) for r in open_rows],
+            "recentlyClosed": [item(r) for r in closed_rows],
+            "counts": {"open": len(open_rows),
+                       "recentlyClosed": len(closed_rows)}}
+
+
+def _load_dupe_key():
+    """dupe_task_key from create-agent-task.py — imported, never copied, so
+    the matter key in the snapshot can never drift from the gate's own key."""
+    import importlib.util
+    p = Path(__file__).resolve().parent / "create-agent-task.py"
+    spec = importlib.util.spec_from_file_location("od_catask", p)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod.dupe_task_key
+
+
+def _airtable_get_all(path_base, params):
+    records, offset = [], None
+    while True:
+        qs = list(params)
+        if offset:
+            qs.append(("offset", offset))
+        data = airtable_request(
+            "GET", "%s?%s" % (path_base, urllib.parse.urlencode(qs)),
+            None, "Airtable list %s" % path_base)
+        records.extend(data.get("records", []))
+        offset = data.get("offset")
+        if not offset:
+            return records
+
+
+def cmd_history_stale():
+    state = read_state()
+    built = state.get("history_built_ms")
+    now_ms = int(datetime.now().timestamp() * 1000)
+    stale = built is None or (now_ms - built) > HISTORY_STALE_DAYS * 86400 * 1000
+    print(json.dumps({"stale": stale, "built_ms": built}))
+    return 0 if stale else 1
+
+
+def cmd_history_build(pages):
+    labels = worker_labels()
+    agent_ids = collect_agent_ids()
+    stats, sampled, truncated = {}, {}, {}
+    excluded_agent = 0
+    for prefix in sorted(HISTORY_LANE_MAP, key=int):
+        lbl = find_label(labels, prefix)
+        if not lbl:
+            sampled[prefix] = None   # label absent in Gmail — noted, not fatal
+            continue
+        msgs, trunc = worker_list(label_ids=[lbl["id"]], max_pages=pages)
+        truncated[prefix] = trunc
+        kept = 0
+        for m in msgs:
+            addr = parse_bare_email((m.get("headers") or {}).get("from", ""))
+            if not addr:
+                continue
+            era = classify_era(m.get("internalDate"), m.get("id"), agent_ids)
+            if era == "agent":
+                excluded_agent += 1
+                continue
+            s = stats.setdefault(addr.lower(),
+                                 {"counts": {}, "human": 0, "hand": 0, "last_ms": 0})
+            s["counts"][prefix] = s["counts"].get(prefix, 0) + 1
+            s["human" if era == "human-era" else "hand"] += 1
+            s["last_ms"] = max(s["last_ms"], int(m.get("internalDate") or 0))
+            kept += 1
+        sampled[prefix] = {"listed": len(msgs), "kept": kept}
+    if len(stats) < HISTORY_MIN_SENDERS:
+        fail("CONTROL FAILED: history build found %d senders (expected %d+). "
+             "The human era alone holds hundreds of filed emails, so this is "
+             "a broken listing or a mis-scoped account, not an empty history. "
+             "Nothing was written." % (len(stats), HISTORY_MIN_SENDERS))
+    now_iso = datetime.now().isoformat(timespec="seconds")
+    records = []
+    for addr, s in stats.items():
+        records.append({"fields": {
+            HB["sender"]: addr,
+            HB["counts"]: json.dumps(s["counts"], sort_keys=True),
+            HB["dominant"]: history_vote(s["counts"]) or "",
+            HB["total"]: sum(s["counts"].values()),
+            HB["humanEra"]: s["human"],
+            HB["handMoves"]: s["hand"],
+            HB["lastSeen"]: (datetime.fromtimestamp(s["last_ms"] / 1000)
+                             .date().isoformat() if s["last_ms"] else ""),
+            HB["lastBuilt"]: now_iso,
+        }})
+    for i in range(0, len(records), 10):
+        airtable_request("PATCH", HISTORY_TABLE, {
+            "performUpsert": {"fieldsToMergeOn": [HB["sender"]]},
+            "records": records[i:i + 10],
+            "typecast": True,
+        }, "history book upsert")
+    state = read_state()
+    state["history_built_ms"] = int(datetime.now().timestamp() * 1000)
+    write_state(state)
+    # Counts only — runs.log must never carry sender addresses.
+    print(json.dumps({"built": now_iso, "senders": len(stats),
+                      "agentMovesExcluded": excluded_agent,
+                      "sampled": sampled, "truncated": truncated}))
+
+
+def cmd_history_dump():
+    # returnFieldsByFieldId is load-bearing: history_json reads by field ID,
+    # and without it Airtable keys the response by field NAME, every read
+    # returns nothing, and the whole book presents as empty. The control
+    # caught exactly this on the first live run, 1 Sep 2026.
+    rows = _airtable_get_all(HISTORY_TABLE, [("pageSize", "100"),
+                                             ("returnFieldsByFieldId", "true")])
+    out = history_json(rows, datetime.now().isoformat(timespec="seconds"))
+    print(json.dumps(out, indent=1))
+    return 1 if out.get("error") else 0
+
+
+def cmd_matters():
+    key_fn = _load_dupe_key()
+    formula = ("OR(AND({Status}!='Completed',{Status}!='Cancelled'),"
+               "AND({Status}='Completed',"
+               "IS_AFTER(LAST_MODIFIED_TIME(),DATEADD(TODAY(),-%d,'days'))))"
+               % MATTERS_CLOSED_DAYS)
+    params = [("pageSize", "100"), ("returnFieldsByFieldId", "true"),
+              ("filterByFormula", formula)]
+    for fid in MT.values():
+        params.append(("fields[]", fid))
+    rows = _airtable_get_all(TASKS_TABLE, params)
+    team_names = {}
+    tm_params = [("pageSize", "100"), ("returnFieldsByFieldId", "true")]
+    tm_params += [("fields[]", f) for f in TM_NAME_FIELDS]
+    for r in _airtable_get_all(TEAM_TABLE, tm_params):
+        f = r.get("fields", {})
+        nm = ""
+        for fid in TM_NAME_FIELDS:
+            v = f.get(fid)
+            if isinstance(v, dict):
+                v = v.get("name", "")
+            if v:
+                nm = str(v)
+                break
+        team_names[r["id"]] = nm or r["id"]
+    open_rows = [r for r in rows
+                 if _status_name(r.get("fields", {}).get(MT["status"]))
+                 not in ("Completed", "Cancelled")]
+    closed_rows = [r for r in rows
+                   if _status_name(r.get("fields", {}).get(MT["status"]))
+                   == "Completed"]
+    out = matters_json(open_rows, closed_rows, key_fn, team_names,
+                       datetime.now().isoformat(timespec="seconds"))
+    print(json.dumps(out, indent=1))
+    return 1 if out.get("error") else 0
+
+
+# ---------------------------------------------------------------------------
 # Selftest (offline — no network, no real state dir)
 # ---------------------------------------------------------------------------
 
@@ -719,6 +1064,68 @@ def selftest():
 
     trimmed = trim_history({"2020-01-01": 1, today.isoformat(): 0}, keep_days=30, today=today)
     check("history trims old days", "2020-01-01" not in trimmed and today.isoformat() in trimmed)
+
+    # ── the history book + open matters (1 Sep 2026) ──
+    from zoneinfo import ZoneInfo
+    check("era start is midnight 24 Aug 2026 London",
+          AGENT_ERA_START_MS == int(datetime(2026, 8, 24,
+              tzinfo=ZoneInfo("Europe/London")).timestamp() * 1000))
+    agent_ids = {"mAgent"}
+    check("agent-acted PRE-era mail is still the agent's, never human ground truth",
+          classify_era(AGENT_ERA_START_MS - 999, "mAgent", agent_ids) == "agent")
+    check("pre-era untouched mail is human filing",
+          classify_era(AGENT_ERA_START_MS - 1, "mOld", agent_ids) == "human-era")
+    check("post-era untouched mail is a hand move",
+          classify_era(AGENT_ERA_START_MS + 1, "mNew", agent_ids) == "hand-move")
+    check("thin evidence gives no vote", history_vote({"6": 2}) is None)
+    check("split evidence gives no vote", history_vote({"6": 2, "12": 1}) is None)
+    check("strong file lane votes", history_vote({"6": 4, "12": 1}) == "file-6")
+    check("labels 8 and 9 fold into the actionable vote",
+          history_vote({"8": 2, "9": 1}) == "label12")
+    check("unknown label prefixes never vote",
+          history_vote({"7": 5, "15": 5}) is None)
+    empty_book = history_json([], "t")
+    check("empty book is an error, not an empty map", "error" in empty_book)
+    book = history_json([{"fields": {
+        HB["sender"]: "Amy@Ex.com", HB["counts"]: '{"6": 4}',
+        HB["total"]: 4, HB["humanEra"]: 4, HB["handMoves"]: 0,
+        HB["lastBuilt"]: "2026-09-01T09:00:00"}}], "t")
+    check("book keys senders lowercase with a vote",
+          book["senders"]["amy@ex.com"]["vote"] == "file-6"
+          and book["built"] == "2026-09-01T09:00:00")
+    no_matters = matters_json([], [], lambda n: n, {}, "t")
+    check("zero open tasks is an error, not an empty matters list",
+          "error" in no_matters)
+    m = matters_json(
+        [{"id": "recX", "fields": {
+            MT["name"]: "INBOUND: Sefton licence fee",
+            MT["status"]: "Today", MT["sender"]: "a@council.gov.uk",
+            MT["urls"]: "https://mail.google.com/mail/u/0/#all/T1",
+            MT["team"]: ["reciHUAEcEkbctnZ6"]}}],
+        [{"id": "recY", "fields": {
+            MT["name"]: "INBOUND: eBay refund", MT["status"]: "Completed",
+            MT["outcome"]: "Approved as-is"}}],
+        lambda n: "KEY:" + n, {"reciHUAEcEkbctnZ6": "AI CEO"}, "t")
+    check("matters items carry key, team name and both populations",
+          m["open"][0]["key"].startswith("KEY:")
+          and m["open"][0]["team"] == ["AI CEO"]
+          and m["counts"] == {"open": 1, "recentlyClosed": 1})
+
+    with tempfile.TemporaryDirectory() as tmp:
+        for name, rows_ in [
+            ("digest-2026-08-24.jsonl", [
+                {"id": "mMoved", "do": "label12"},
+                {"id": "mFiled", "do": "file-6"},
+                {"id": "mArch", "do": "archive"},
+                {"id": "mNoted", "do": "task-created"},
+                {"id": "mLeft", "do": "leave"},
+            ]),
+        ]:
+            (Path(tmp) / name).write_text(
+                "\n".join(json.dumps(r) for r in rows_) + "\nnot json\n")
+        got = collect_agent_ids(tmp)
+        check("digest ids: moves collected, notes and junk lines skipped",
+              got == {"mMoved", "mFiled", "mArch"})
 
     with tempfile.TemporaryDirectory() as tmp:
         os.environ["INBOUND_TRIAGE_DIR"] = tmp
@@ -803,6 +1210,14 @@ def main(argv):
         cmd_score(waiting)
     elif cmd == "publish":
         cmd_publish()
+    elif cmd == "history-stale":
+        return cmd_history_stale()
+    elif cmd == "history-build":
+        cmd_history_build(int(opt("--pages", str(HISTORY_BUILD_PAGES))))
+    elif cmd == "history-dump":
+        return cmd_history_dump()
+    elif cmd == "matters":
+        return cmd_matters()
     elif cmd == "selftest":
         selftest()
     else:
@@ -810,4 +1225,7 @@ def main(argv):
 
 
 if __name__ == "__main__":
-    main(sys.argv[1:])
+    # main() returns the exit code for commands whose callers branch on it
+    # (history-stale gates the weekly rebuild; sentcheck's control failure).
+    # Dropping the return value here silently turned every one into 0.
+    sys.exit(main(sys.argv[1:]) or 0)
