@@ -1541,22 +1541,12 @@
         // cached values for an instant paint; the async refresh below rehydrates from Airtable and
         // swaps in fresh HTML without disturbing the Unreconciled card next to it.
         const accCard = buildAccuracyKPIHtml(getReconAccuracyStats());
-        // Auto-reconcile agent — the visible log of what AI auto-approved today, each with one-click undo
-        const _autoLog = (typeof getAutoLog === 'function' ? getAutoLog() : []);
-        const _todayStart = new Date(); _todayStart.setHours(0, 0, 0, 0);
-        const _autoToday = _autoLog.filter(e => (e.at || 0) >= _todayStart.getTime());
-        const autoPanelHtml = _autoToday.length === 0 ? '' : `
-            <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border-default)">
-                <div style="font-size:12px;font-weight:600;color:var(--text-secondary);margin-bottom:2px">Auto-reconciled today (${_autoToday.length}) — AI did these, review and undo any</div>
-                <div style="font-size:10px;color:var(--text-muted);margin-bottom:6px">Undo also stops the AI auto-doing that one again.</div>
-                ${_autoToday.map(e => `<div class="detail-item" style="align-items:center">
-                    <span class="detail-item-name">${escHtml(e.date || '')} — ${escHtml(e.vendor || '')} <span style="color:var(--text-muted)">&rarr; ${escHtml(e.subCatName || e.categoryName || '')}</span></span>
-                    <span style="display:flex;align-items:center;gap:8px">
-                        <span class="detail-item-value">${fmt(Number(e.amount) || 0)}</span>
-                        <button onclick="event.stopPropagation(); undoAutoReconcile('${escHtml(e.txId)}')" class="od-btn" style="padding:2px 8px;font-size:11px">Undo</button>
-                    </span>
-                </div>`).join('')}
-            </div>`;
+        // Auto-reconcile agent — the visible log of what AI auto-approved today, each with
+        // one-click undo. Markup comes from buildAutoPanelHtml() in reconciliation.js (the
+        // log now lives in Airtable): painted from the in-memory cache for an instant
+        // render, repainted in the async block below once loadAutoState() has pulled the
+        // authoritative rows.
+        const autoPanelHtml = (typeof buildAutoPanelHtml === 'function') ? buildAutoPanelHtml() : '';
         document.getElementById('reconBar').innerHTML = `
             ${expandableCard('Unreconciled Transactions', unreconciledTx.length, `Santander + TNT Mgt Zempler`,
                 (unreconciledTx.length === 0
@@ -1570,7 +1560,7 @@
                     </label>
                     <span style="font-size:11px;color:var(--text-muted)" id="reconStatus"></span>
                 </div>`
-                + autoPanelHtml
+                + `<div id="autoReconPanel">${autoPanelHtml}</div>`
             )}
             <div id="accuracyKpiCard">${accCard}</div>
         `;
@@ -1591,6 +1581,15 @@
                 const host = document.getElementById('accuracyKpiCard');
                 if (host) host.innerHTML = buildAccuracyKPIHtml(fresh);
             } catch (e) { console.warn('[renderDashboard] accuracy stats refresh failed:', e); }
+            // Auto-tier state (undo log + never-again list) lives in Airtable now; pull it
+            // and repaint the auto panel. A failed load leaves the auto tier off (fails
+            // closed inside isAutoApprovable), so a warn is all that is needed here.
+            try {
+                if (typeof loadAutoState === 'function' && await loadAutoState()) {
+                    const panel = document.getElementById('autoReconPanel');
+                    if (panel && typeof buildAutoPanelHtml === 'function') panel.innerHTML = buildAutoPanelHtml();
+                }
+            } catch (e) { console.warn('[renderDashboard] auto log load failed:', e); }
         })();
 
         document.getElementById('financialCards').innerHTML = `
