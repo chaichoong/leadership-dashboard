@@ -126,6 +126,16 @@ recalled. Kasim Aslam's Rocks / Risks / Reaches, source doc in `Learning & Refer
 - [x] MICA — Full client's-shoes test pass of the migrated app [AT:recAuoApJczmHgXTG] (done when: bug list or clean report; due 24 Jul) *(ticked 2026-07-29, synced from Airtable)*
 - [ ] OPUS — Replace Airtable automations that migrated pages rely on [AT:recXh2jvXq59eGkQM] (done when: no migrated page depends on one; due 24 Jul)
 
+#### Post-migration Airtable→Supabase drift (audit 2026-07-31; base schema itself stable — 4 new tables, 3 new fields; the rest is app features)
+- [x] OPUS — (NEW 31 Jul) Wealth Ratios, AI Brain "Setup" upgrade, Team/HR page rebuild → Supabase; dashboard-twin cache-version refresh *(built + deployed 30–31 Jul; migrations 0041 ai_brain_inbox + 0042 hr_reviews_dod run by Kevin)* [AT:-]
+- [ ] OPUS — (NEW 31 Jul) CEO Brief → Supabase: new `ceo_briefs` table + `ceo-brief-supabase` page + shim + shell nav (done when: CEO Brief renders in the Supabase shell; due 8 Aug) [AT:-]
+- [ ] OPUS — (NEW 31 Jul) Task Activity + task-drawer rework (30 Jul: new `Task Activity` table, inline comments, activity toggle) → update the Tasks Supabase twin + shim (done when: task drawer comments/activity work on Vercel; due 8 Aug) [AT:-]
+- [ ] OPUS — (NEW 31 Jul) Systemisation upgrades (16 Jul: Rule of R gate, agent identity card, autonomy ladder) → port into the Systemisation twin (done when: the three show on the Supabase Systemisation page; due 8 Aug) [AT:-]
+- [ ] OPUS — (NEW 31 Jul) "Money Group" field (Chart of Accounts – Sub Categories) → add `money_group` column to coa_sub_categories + map in dashboard-shim + backfill (done when: Wealth budgets/buckets group correctly on Vercel; due 6 Aug) [AT:-]
+- [ ] OPUS — (NEW 31 Jul) "Payment Match" (Debt Terms) → un-stub debt_terms (table + ETL + wealth-shim) — currently stubbed empty (done when: credit-card single-source matching works on Vercel; due 8 Aug) [AT:-]
+- [ ] OPUS — (NEW 31 Jul) Training tab "assign as task" — Tasks-table lookup plumbing (SOP link / team member / training flag + filter translation) so the Team/HR Training tab's task assignment + "watching" status work (done when: assigning training creates a task + watching shows on Vercel; due 8 Aug) [AT:-]
+- [D] OPUS — (NEW 31 Jul) Prospecting engine (Prospects/Prospect Keywords tables + tab) → Supabase — DROPPED: internal lead-gen tool, not client-facing (Kevin's call, 30 Jul); stays Airtable-only [AT:-]
+
 ### De-Kevining (per PRODUCTISATION.md §4)
 - [x] OPUS — Identity/branding → tenant_config (done when: no Kevin hardcodes in migrated pages; due 22 Jul) [AT:recZyJQRT2I2MCcaV] *(ticked 2026-07-29, synced from Airtable)*
 - [x] OPUS — Team hardcodes → team_members table (done when: 6 arrays → one helper; due 22 Jul) [AT:reczyLcCLX61vkH9i] *(ticked 2026-07-29, synced from Airtable)*
@@ -359,3 +369,4 @@ personal profile keeps Runpreneur in the feed and carries OD in its static secti
 | 2026-07-25 | Nightly sync (scripts/sync-master-plan.py) | ticked 1 from Airtable completions. |
 | 2026-07-29 | Nightly sync (scripts/sync-master-plan.py) | ticked 6 from Airtable completions. |
 | 2026-07-31 | Nightly sync (scripts/sync-master-plan.py) | ticked 89 from Airtable completions. |
+| 2026-07-31 | Kevin, in-session (Airtable→Supabase drift audit) | Audited the live Airtable system vs the migration and logged the outstanding sync work in §4 Migration. **Finding: the base schema is stable** — only 4 new tables (`CEO Briefs`, `Task Activity`, `Prospects`, `Prospect Keywords`) and 3 new fields (`Money Group`, `Payment Match`, Tasks→`Task Activity` link) since 9 Jul; everything else is app features. Already synced this session (deployed): Wealth Ratios, AI Brain Setup upgrade, Team/HR page rebuild, dashboard-twin cache-version refresh (migrations 0041 + 0042 run by Kevin). Outstanding → tasks added: CEO Brief, Task Activity/task-drawer rework, Systemisation upgrades, Money Group column, Payment Match (needs debt_terms un-stubbed), Training assign-as-task plumbing. Prospecting marked `[D]` — internal lead-gen, stays Airtable-only. Shared-JS fixes already flow to the Supabase pages via the shared files. |
