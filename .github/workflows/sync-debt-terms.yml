@@ -1,0 +1,22 @@
+name: Copy Debt Terms (Airtable → Supabase)
+on:
+  workflow_dispatch: {}
+permissions:
+  contents: read
+concurrency:
+  group: sync-debt-terms
+  cancel-in-progress: false
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Copy debt_terms
+        env:
+          AIRTABLE_PAT: ${{ secrets.AIRTABLE_PAT }}
+          SUPABASE_URL: 'https://ptkyhzlsvijcwyovgrgv.supabase.co'
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+        run: python3 scripts/sync-debt-terms.py
