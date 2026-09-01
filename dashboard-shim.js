@@ -72,7 +72,7 @@
     fldAXzP9SGIHiAhrv:['status','scalar'],
   }};
   M[CATS]    = { source:'coa_categories', write:'coa_categories', map:{ fldii4oUzSfmplihO:['name','scalar'] }};
-  M[SUBCATS] = { source:'coa_sub_categories', write:'coa_sub_categories', map:{ fldO4BTJhFv5EsN6i:['name','scalar'] }};
+  M[SUBCATS] = { source:'coa_sub_categories', write:'coa_sub_categories', map:{ fldO4BTJhFv5EsN6i:['name','scalar'], fld4sJbnOMJ4A1Uey:['money_group','scalar'] }};
   M[BIZ]     = { source:'businesses', write:'businesses', map:{ fldbbRqVxLxUdHwIR:['name','scalar'], fldhXBnRrngCVsgSk:['active','bool'] }};
   M[SOP_QUEUE] = { source:'sop_queue', write:'sop_queue', map:{   // Sitemap "request SOP update" write-only queue
     fld0ShElHxR10mmBk:['request','scalar'], fldLvshpipHswyudX:['sop_file','scalar'],
