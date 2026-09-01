@@ -600,7 +600,17 @@ async function main() {
     if (cmd === 'commit') approval = assertApproved(arg(rest, 'task'));
 
     const res = await withPage(profile, false, async (page) => {
-      const r = await runSteps(page, plan.steps, cmd === 'commit', plan.confirm);
+      let r;
+      try {
+        r = await runSteps(page, plan.steps, cmd === 'commit', plan.confirm);
+      } catch (e) {
+        // The failure screenshot IS the diagnosis: without it, an unconfirmed
+        // submit says only "the proof never appeared" and nobody can see the
+        // modal or error the page actually showed.
+        const failShot = await shoot(page, shot).catch(() => null);
+        if (failShot) e.message += ` Failure screenshot: ${failShot}`;
+        throw e;
+      }
       const png = await shoot(page, shot);
       return Object.assign(r, { screenshot: png, url: page.url(), title: await page.title() });
     });
