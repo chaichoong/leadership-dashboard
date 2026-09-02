@@ -448,9 +448,23 @@ Step 4 way with `create --force` and log `note --do task-created --reason
 "OVERRIDE auto-reply flag: <why it is human>"` — the override is how a wrong
 flag gets found.
 
-For every message in `stranded_8`, `stranded_12` and `stranded_13`: run the
-Step 3 dedupe on its thread. A labelled email with NO task is exactly the
-miss this agent exists to prevent — create its task now THROUGH THE GATE
+The scan has ALSO removed every thread that already has a task, whatever
+that task's status — they are in `stranded_handled`, each naming the task
+and its status (Kevin's ruling, 2 Sep 2026). "No OPEN task" was being read
+as "no task": eight items Kevin had completed came straight back to his gate
+as fresh tasks, one per bulk-close. A completed task on the thread means the
+thread was handled; the Step 3 "COMPLETED and the new message needs action"
+branch is for a message NEWER than the completion, and a stranded message is
+never that — it is the same old mail. Count `stranded_handled` in your
+report and do nothing with it. If the scan says `stranded_lookup:
+"UNCHECKED: …"`, the lists were NOT filtered: run the Step 3 dedupe yourself
+on each thread, treat any task of any status as handled, and say the lookup
+failed in your report.
+
+For every message in `stranded_8`, `stranded_12` and `stranded_13` (which
+now hold only mail whose thread has NEVER had a task): run the Step 3 dedupe
+on its thread as a belt-and-braces check. A labelled email with NO task is
+exactly the miss this agent exists to prevent — create its task now THROUGH THE GATE
 (lane 8/12 stranded mail takes the Step 4 shape with Approver Kevin, per the
 24 Aug ruling; lane-13 stranded mail takes the Step 4b Roy shape), log it,
 and say so in your report. If the gate answers `"updated"`, the thread's
@@ -507,7 +521,9 @@ block or undo the triage itself.
 
 Return at most twelve lines: scanned / tasked / maintenance / archived /
 left / duplicates / matter joins / history-book steers (and any rule-vs-book
-disagreements) / stranded rescues / auto-replies suppressed (inbox +
+disagreements) / stranded rescues / stranded already-handled (threads with
+a task of any status, from `counts.stranded_handled`; say if
+`stranded_lookup` was UNCHECKED) / auto-replies suppressed (inbox +
 stranded, from the scan's counts; any `--override` used, with its reason) /
 deferred / waiting score / anything that
 failed — including a pre-read (sent, history book, open matters) that came
