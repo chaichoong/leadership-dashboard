@@ -126,9 +126,13 @@ it folded the message into the existing open task on the same subject from
 the same sender — both count as handled. For iMessage this folds by PERSON
 (the task name keys to "reply to <sender>", numbers stripped), which is
 wanted: one open reply task per person, each new message folded in and the
-task pulled back to Today. Different senders never fold into each other. A NON-ZERO exit means the gate
-could not run (broken read); nothing was created — treat that candidate as
-unhandled for the watermark and report the failure. The gate adds
+task pulled back to Today. Different senders never fold into each other. Exit 3 with
+`"action": "refused"` means the gate judged the task an auto-reply (an
+"Automatic reply:"-style name — a machine's receipt of something we sent,
+2 Sep 2026 ruling): nothing was created and nothing is unhandled — log it and
+move on. Any OTHER non-zero exit means the gate could not run (broken read);
+nothing was created — treat that candidate as unhandled for the watermark and
+report the failure. The gate adds
 `"typecast": true` itself. Fields, keyed by field ID:
 
 - `fldgFjGBw6bTKJFCD` Task Name: "INBOUND: reply to <sender/chat> (iMessage)".

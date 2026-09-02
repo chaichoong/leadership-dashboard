@@ -96,6 +96,30 @@ All commands run from the main checkout
 Decide ONE outcome per message. Read the sender, subject, body excerpt, and
 the `list-unsubscribe` header (its presence = machine mail).
 
+0a. **An auto-reply never becomes a task (Kevin's ruling, 2 Sep 2026):** the
+   scan stamps every message with `auto_reply` — the reason it is a machine
+   reply (an RFC 3834 / Exchange header, an "Automatic reply:" / out-of-office
+   subject, or a receipt-shaped body such as "your request has been logged
+   with reference…" with no question and no ask), or `null`. A flagged
+   message is a machine's receipt of something WE sent: it asks nothing, so
+   nobody needs to approve anything. Between 28 Aug and 1 Sep 2026 four of
+   these reached Kevin's approval gate as tasks. So, for `auto_reply` set:
+   - NEVER a task, never lane 12 or 13. The script refuses `act --do
+     label12|label13` on a flagged message; the task gate refuses a create
+     whose thread is all auto-replies (exit 3, `"action": "refused"`).
+   - If an OPEN task exists on the matter (Step 3 thread dedupe or the Step
+     3b matter file), append ONE dated line to its Description — `ACK <date>:
+     <sender> acknowledged, ref <reference if any>` — so the reference is on
+     the record without a tap from Kevin. A completed matter needs nothing
+     appended: the creditor plan or the completed task already holds it.
+   - Then `act --do archive` (or `act --do file --label-num 18` when it is
+     creditor mail, so lane 18 stays complete), `--reason "auto-reply: <the
+     auto_reply value>"`. Never leave a flagged message in the inbox.
+   - The flag is a heuristic on the body for the receipt shape only. If you
+     can SEE a human wrote it (a name, a real question, a new fact), lane it
+     with `act --do label12 --override "<why it is human>"` — the override
+     is logged in the digest so a wrong flag gets found.
+
 0. **Already answered by us — no task (Kevin's ruling, 25 Aug 2026):** check
    the scan's `sent_threads` map first. If this message's `threadId` is in it
    with a LATER time than the message's own `internalDate`, we spoke last:
@@ -302,8 +326,11 @@ audit trail Kevin checks). A fold also appends
 the new thread's URL into the existing task's `Inbound Note URL Link`, so
 the Step 3 and Step 5 `FIND` queries recognise the folded thread as handled
 from then on. A `"note"` about a differing sender means it deliberately
-created anyway — never fold two counterparties into one task. A NON-ZERO
-exit means the gate could not run (broken read); nothing was created — count
+created anyway — never fold two counterparties into one task. Exit 3 with
+`"action": "refused"` is the gate applying rule 0a (the task is an
+auto-reply): nothing was created and nothing is unhandled — log `note --do
+answered --reason "auto-reply: gate refused"` and archive per rule 0a. Any
+OTHER non-zero exit means the gate could not run (broken read); nothing was created — count
 that thread unhandled for Step 6 and report it, exactly like a failed dedupe
 query.
 
@@ -399,6 +426,19 @@ label move itself is still `act --do label13` exactly as before.
 
 ## Step 5 — The stranded check (the safety net)
 
+The scan has ALREADY removed machine replies from these lists (they are in
+`stranded_auto_replies`, each with the reason, sender, subject and a 300-char
+excerpt): a thread whose real task completed still carries its label, so
+every later auto-acknowledgement on it looks "labelled with no open task" —
+that is how four council receipts became approval tasks (28 Aug – 1 Sep
+2026). A stranded auto-reply is never a rescue; apply rule 0a to it (append
+the reference to an open matter if one exists, otherwise nothing) and count
+it in your report. READ the excerpts: the body test is a heuristic, and if
+one is plainly a person (a name, a question, a new fact), rescue it the
+Step 4 way with `create --force` and log `note --do task-created --reason
+"OVERRIDE auto-reply flag: <why it is human>"` — the override is how a wrong
+flag gets found.
+
 For every message in `stranded_8`, `stranded_12` and `stranded_13`: run the
 Step 3 dedupe on its thread. A labelled email with NO task is exactly the
 miss this agent exists to prevent — create its task now THROUGH THE GATE
@@ -458,7 +498,9 @@ block or undo the triage itself.
 
 Return at most twelve lines: scanned / tasked / maintenance / archived /
 left / duplicates / matter joins / history-book steers (and any rule-vs-book
-disagreements) / stranded rescues / deferred / waiting score / anything that
+disagreements) / stranded rescues / auto-replies suppressed (inbox +
+stranded, from the scan's counts; any `--override` used, with its reason) /
+deferred / waiting score / anything that
 failed — including a pre-read (sent, history book, open matters) that came
 back UNCHECKED. Include the stale count from the scan ("N emails older than 2 days
 sit in the inbox") — those are Kevin's reading backlog and the daily report
