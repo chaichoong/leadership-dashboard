@@ -1769,7 +1769,7 @@ function sendOnboardingForm() {
     if (!email) { showToast('Add an email to send to.'); return; }
     const first = name ? name.split(' ')[0] : 'there';
     const subject = 'Welcome to the team \u2014 please complete your onboarding form';
-    const body = `Hi ${first},\n\nWelcome to the team. Please complete your onboarding form so we can get you set up:\n\n${ONBOARDING_FORM_PAGE_URL}\n\n${note ? note + '\n\n' : ''}Thanks,\nKevin`;
+    const body = `Hi ${first},\n\nWelcome to the team. Please complete your onboarding form so we can get you set up:\n\n${ONBOARDING_FORM_PAGE_URL}\n\n${note ? note + '\n\n' : ''}Thanks`;
     const url = `https://mail.google.com/mail/u/${encodeURIComponent(SENDER_EMAIL)}/?view=cm&fs=1&tf=1&to=${encodeURIComponent(email)}&su=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
     window.open(url, '_blank');
     showToast('Opening the welcome email with the onboarding form link.');
@@ -2082,7 +2082,7 @@ async function runConfirm() { const fn = _confirmFn; closeConfirm(); if (fn) awa
 // New starter: open the onboarding form directly
 function openOnboardingFormDirect() { window.open(ONBOARDING_FORM_PAGE_URL, '_blank'); }
 
-const SENDER_EMAIL = 'kevin@runpreneur.org.uk';
+const SENDER_EMAIL = '0'; // Gmail "u/0" opens the user's OWN default Google account (white-label; was the owner's mailbox)
 const HANDBOOK_URL = 'https://launch.operationsdirector.co.uk/team-handbook-page';
 function handbookLinkFor(m) {
     const raw = gf(m, TEAM.handbookLink);
@@ -2098,7 +2098,7 @@ function emailOnboardingForm() {
     const name = (document.getElementById('nsName') || {}).value || 'there';
     if (!email) { showToast('Enter the starter email first, or use Open form.'); return; }
     const subject = encodeURIComponent('Welcome aboard, please complete your onboarding form');
-    const body = encodeURIComponent(`Hi ${name},\n\nWelcome to the team. Please complete your onboarding form so we have everything we need:\n\n${ONBOARDING_FORM_PAGE_URL}\n\nThanks,\nKevin`);
+    const body = encodeURIComponent(`Hi ${name},\n\nWelcome to the team. Please complete your onboarding form so we have everything we need:\n\n${ONBOARDING_FORM_PAGE_URL}\n\nThanks`);
     // Open Gmail compose as kevin@runpreneur.org.uk (the sending account)
     const url = `https://mail.google.com/mail/u/${encodeURIComponent(SENDER_EMAIL)}/?view=cm&fs=1&tf=1&to=${encodeURIComponent(email)}&su=${subject}&body=${body}`;
     window.open(url, '_blank');
@@ -2680,7 +2680,7 @@ function emailHandbook(memberId) {
     if (!link) { showToast('No handbook link on this person yet.'); return; }
     const name = memberName(m).split(' ')[0] || 'there';
     const subject = encodeURIComponent('Please read and confirm the company handbook');
-    const body = encodeURIComponent(`Hi ${name},\n\nPlease read the company handbook here:\n\n${link}\n\nOnce you have read it, reply to confirm so we can mark it acknowledged.\n\nThanks,\nKevin`);
+    const body = encodeURIComponent(`Hi ${name},\n\nPlease read the company handbook here:\n\n${link}\n\nOnce you have read it, reply to confirm so we can mark it acknowledged.\n\nThanks`);
     const url = `https://mail.google.com/mail/u/${encodeURIComponent(SENDER_EMAIL)}/?view=cm&fs=1&tf=1&to=${encodeURIComponent(email)}&su=${subject}&body=${body}`;
     window.open(url, '_blank');
 }
@@ -2704,7 +2704,7 @@ function renderHandbook() {
     const allEmails = members.map(m => gf(m, TEAM.workEmail)).filter(Boolean).join(',');
     html += `<div class="review-actions" style="margin-bottom:14px;display:flex;gap:8px;flex-wrap:wrap">
         <a class="btn btn-sm btn-primary" href="${escHtml(HANDBOOK_URL)}" target="_blank">&#x1F4D6; Open live handbook</a>
-        ${allEmails ? `<a class="btn btn-sm" href="https://mail.google.com/mail/u/${encodeURIComponent(SENDER_EMAIL)}/?view=cm&fs=1&tf=1&to=${encodeURIComponent(allEmails)}&su=${encodeURIComponent('Please read and confirm the company handbook')}&body=${encodeURIComponent('Hi team,\n\nPlease read the company handbook here:\n\n' + HANDBOOK_URL + '\n\nReply to confirm once read.\n\nThanks,\nKevin')}" target="_blank">&#x2709;&#xFE0F; Issue to everyone</a>` : ''}
+        ${allEmails ? `<a class="btn btn-sm" href="https://mail.google.com/mail/u/${encodeURIComponent(SENDER_EMAIL)}/?view=cm&fs=1&tf=1&to=${encodeURIComponent(allEmails)}&su=${encodeURIComponent('Please read and confirm the company handbook')}&body=${encodeURIComponent('Hi team,\n\nPlease read the company handbook here:\n\n' + HANDBOOK_URL + '\n\nReply to confirm once read.\n\nThanks')}" target="_blank">&#x2709;&#xFE0F; Issue to everyone</a>` : ''}
     </div>`;
     html += '<div class="hb-grid">';
     html += members.map(m => {
@@ -2863,7 +2863,7 @@ function toggleNewStarter() {
             <input type="text" id="nsEmail" placeholder="name@example.com">
             <div class="add-form-actions">
                 <button class="btn" onclick="toggleNewStarter()">Cancel</button>
-                <button class="btn" onclick="emailOnboardingForm()">Email form to starter (from Kevin)</button>
+                <button class="btn" onclick="emailOnboardingForm()">Email form to starter</button>
                 <button class="btn btn-primary" onclick="openOnboardingFormDirect()">Open onboarding form</button>
             </div>
             <div style="font-size:var(--fs-xs);color:var(--text-muted);margin-top:8px">Once the form is submitted, click refresh on the page to see the new starter.</div>
