@@ -563,14 +563,24 @@ const TF = {
 // Agents) on 24 Aug 2026, Kevin's ruling: everything about the agent
 // workforce lives on ONE page. This page keeps only the SOP-building flow
 // and a pointer on the old tab.
-const TEAM = [
-    { key:'kevin', name:'Kevin Brittain',  email:'kevin@runpreneur.org.uk' },
-    { key:'mica',  name:'Mica Albovias',   email:'micaa.work@gmail.com' },
-    { key:'erica', name:'Ericamae Atenta', email:'atentaerica@gmail.com' },
-    { key:'gary',  name:'Gary Marsh',      email:'gkm.property.maintenance@outlook.com' },
-    { key:'rob',   name:'Rob Jackson',     email:'rjm320@hotmail.com' },
-    { key:'roy',   name:'Roy Lavin',       email:'roy.lavin1978@gmail.com' },
-];
+// White-label: only the OWNER's workspace sees the hard-coded team. Any other
+// logged-in user (a client) sees just themselves — so a client never sees the
+// owner's people. Identity comes from the Supabase session (same pattern the
+// Tasks page uses). _dlr_sb_app is persisted, so this reads synchronously.
+const OWNER_LOGIN = 'kevin@operationsdirector.co.uk';
+function _sbSess(){ try{ return JSON.parse(localStorage.getItem('_dlr_sb_app')||'{}'); }catch(e){ return {}; } }
+function _sbEmail(){ const s=_sbSess(); const u=s.user||(s.currentSession&&s.currentSession.user); if(u&&u.email)return String(u.email).toLowerCase(); const tok=s.access_token||(s.currentSession&&s.currentSession.access_token); if(tok){ try{ const p=JSON.parse(atob(tok.split('.')[1].replace(/-/g,'+').replace(/_/g,'/'))); return String(p.email||'').toLowerCase(); }catch(e){} } return ''; }
+function _sbName(){ const s=_sbSess(); const u=s.user||(s.currentSession&&s.currentSession.user); const meta=(u&&u.user_metadata)||{}; return meta.full_name||meta.name||meta.org_name||((_sbEmail()||'').split('@')[0])||'Me'; }
+const TEAM = (_sbEmail()===OWNER_LOGIN)
+    ? [
+        { key:'kevin', name:'Kevin Brittain',  email:'kevin@runpreneur.org.uk' },
+        { key:'mica',  name:'Mica Albovias',   email:'micaa.work@gmail.com' },
+        { key:'erica', name:'Ericamae Atenta', email:'atentaerica@gmail.com' },
+        { key:'gary',  name:'Gary Marsh',      email:'gkm.property.maintenance@outlook.com' },
+        { key:'rob',   name:'Rob Jackson',     email:'rjm320@hotmail.com' },
+        { key:'roy',   name:'Roy Lavin',       email:'roy.lavin1978@gmail.com' },
+      ]
+    : [ { key:'me', name:_sbName(), email:_sbEmail() } ];
 
 let PAT = '';
 let allWorkflows = [];
@@ -4429,7 +4439,7 @@ async function createVideoTask(wfId){
         [TF.priority]: 'Not Urgent',
         [TF.dueDate]: today,
         [TF.timeEstimate]: '15 min',
-        [TF.collaborators]: [{email: 'kevin@runpreneur.org.uk'}],
+        [TF.collaborators]: [{email: (typeof _sbEmail==='function' && _sbEmail()) || 'kevin@runpreneur.org.uk'}],
     };
 
     try {
