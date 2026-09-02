@@ -159,6 +159,7 @@ certs = [{"id":"c1","type":"EICR","propertyIds":["p1"],"unitIds":[],"status":"Ac
 m.compliance_book_pages = lambda refresh=False: m.compliance_pages(props, certs, "2026-09-02")
 m.today_london = lambda: "2026-09-02"
 m.fetch_role_roster = lambda: {m.PROPERTY_REC_ID: {"dispatchable": False}}
+m.load_score_state = lambda path: {}      # never read this Mac's real state files
 posted = []
 m._request = lambda *a, **k: posted.append(a) or {}
 m.query_tasks = lambda *a, **k: []
@@ -184,7 +185,7 @@ describe('the compliance book (approved chain, 2 Sep 2026)', () => {
   it('the offline selftest passes against the real functions', () => {
     expect(cli('score', '--selftest')).toMatch(/selftest-property: all checks passed/);
   });
-  it('a block counts its EICRs per apartment, a live certificate beats a lapsed one, and a held type becomes required', () => {
+  it('a block counts its EICRs per apartment, a live certificate beats a lapsed one, a block-wide certificate covers every apartment, and a held type becomes required', () => {
     const props = [P({ id: 'd', name: 'D', short: 'D', kind: 'Block', units: ['u1', 'u2', 'u3'],
                        required: ['Landlord Insurance', 'EICR', 'EPC', 'Fire Alarm Cert', 'Emergency Lighting'] })];
     const certs = [
@@ -193,15 +194,26 @@ describe('the compliance book (approved chain, 2 Sep 2026)', () => {
       C({ id: 'live-earlier', type: 'EICR', propertyIds: ['d'], unitIds: ['u2'], renewalDate: '2026-11-01' }),
       C({ id: 'ins', type: 'Landlord Insurance', propertyIds: ['d'], renewalDate: '2027-01-01' }),
       C({ id: 'gsc-old', type: 'GSC', propertyIds: ['d'], unitIds: ['u1'], renewalDate: '2025-01-01' }),
+      C({ id: 'epc-wide', type: 'EPC', propertyIds: ['d'], renewalDate: '2030-01-01' }),
+      C({ id: 'fa-undated', type: 'Fire Alarm Cert', propertyIds: ['d'], status: 'Expired', renewalDate: '' }),
     ];
-    const out = pyEval('(lambda pages: [pages[0]["units"], sorted((i["type"], i.get("unit"), i["state"]) for i in pages[0]["issues"]), pages[0]["required"]])(mod.compliance_pages(arg[0], arg[1], "2026-09-02"))', [props, certs]);
+    const out = pyEval('(lambda pages: [pages[0]["units"], sorted((i["type"], i.get("unit"), i["state"]) for i in pages[0]["issues"]), pages[0]["required"], pages[0]["holds"]])(mod.compliance_pages(arg[0], arg[1], "2026-09-02", {"u1": "Unit 1 – D"}))', [props, certs]);
     expect(out[0].u2.EICR.certificate).toBe('live-earlier');
     expect(out[0].u1.EICR.state).toBe('in date');
+    expect(out[0].u1.name).toBe('Unit 1 – D');
+    expect(out[0].u3.EPC.certificate).toBe('epc-wide');
+    expect(out[3]['Fire Alarm Cert'].state).toBe('expired');
     expect(out[1]).toEqual([
-      ['EICR', 'u3', 'missing'], ['EPC', null, 'missing'], ['Emergency Lighting', null, 'missing'],
-      ['Fire Alarm Cert', null, 'missing'], ['GSC', 'u1', 'expired'], ['GSC', 'u2', 'missing'], ['GSC', 'u3', 'missing'],
+      ['EICR', 'u3', 'missing'], ['Emergency Lighting', null, 'missing'], ['Fire Alarm Cert', null, 'expired'],
+      ['GSC', 'u1', 'expired'], ['GSC', 'u2', 'missing'], ['GSC', 'u3', 'missing'],
     ]);
     expect(out[2]).toContain('GSC');
+  });
+  it('a non-block property carries no per-unit slots, and its unit-linked certificates fold into the property', () => {
+    const props = [P({ id: 'h', name: 'H', short: 'H', kind: 'HMO', units: ['u1', 'u2'], required: ['EICR'] })];
+    const certs = [C({ id: 'e', type: 'EICR', propertyIds: ['h'], unitIds: ['u1'], renewalDate: '2030-01-01' })];
+    const out = pyEval('(lambda p: [p["units"], p["holds"]["EICR"]["certificate"]])(mod.compliance_pages(arg[0], arg[1], "2026-09-02")[0])', [props, certs]);
+    expect(out).toEqual([{}, 'e']);
   });
   it('the reading counts expired, missing and undated as outstanding, and inactive properties never count', () => {
     const props = [
@@ -223,6 +235,12 @@ describe('the compliance book (approved chain, 2 Sep 2026)', () => {
     ];
     const due = pyEval('[(d["certificate"], d["unit"], d["days"]) for d in mod.renewals_due(mod.compliance_pages(arg[0], arg[1], "2026-09-02"), "2026-09-02")]', [props, certs]);
     expect(due).toEqual([['lapsed', 'u1', -3], ['in', 'u1', 18]]);
+  });
+  it('a block-wide certificate covering many apartments is ONE renewal, named for the block', () => {
+    const props = [P({ id: 'p1', name: 'A', short: 'A', kind: 'Block', units: ['u1', 'u2', 'u3'], required: ['EICR'] })];
+    const certs = [C({ id: 'wide', type: 'EICR', propertyIds: ['p1'], renewalDate: '2026-09-20' })];
+    const due = pyEval('[(d["certificate"], d["unit"], d["days"]) for d in mod.renewals_due(mod.compliance_pages(arg[0], arg[1], "2026-09-02"), "2026-09-02")]', [props, certs]);
+    expect(due).toEqual([['wide', 'u1', 18]]);
   });
   it('the quarterly review gates on the first Monday of Jan/Apr/Jul/Oct IN CODE, London time', () => {
     const out = pyEval(`[mod.is_quarter_first_monday(mod.datetime(*d)) for d in arg]`,
@@ -268,8 +286,10 @@ describe('the certificate write path and its gate', () => {
       (mod.find_certificate_twin(arg, "pD", "EPC", "2030-01-01", None) or {}).get("id")]`, certs);
     expect(out).toEqual(['d1', null, null, 'p0']);
     const body = src.slice(src.indexOf('def cmd_certificate'), src.indexOf('def property_selftest'));
-    expect(body).toMatch(/if twin:\s+fields = \{CERT_FIELDS\["tasks"\]: sorted\(set\(twin\["taskIds"\]\) \| \{args\.task\}\)\}/);
-    expect(body).toMatch(/if not twin\["hasFile"\]:\s+filename = upload_file\(twin\["id"\]/);
+    // the file goes on BEFORE the task link, and notes append rather than replace
+    const twinPath = body.slice(body.indexOf('if twin:'), body.indexOf('else:', body.indexOf('if twin:')));
+    expect(twinPath.indexOf('upload_file(twin["id"]')).toBeLessThan(twinPath.indexOf('_request("PATCH"'));
+    expect(twinPath).toMatch(/\(prior \+ "\\n" \+ line\) if prior else line/);
   });
   it('a failed rollback delete is NAMED, never swallowed', () => {
     const body = src.slice(src.indexOf('def cmd_certificate'), src.indexOf('def property_selftest'));
@@ -280,12 +300,12 @@ describe('the certificate write path and its gate', () => {
     expect(src).toMatch(/return upload_file\(task_id, AF\["attachments"\], path\)/);
     expect(src).toMatch(/upload_file\(row_id, CERT_FIELDS\["attachments"\]/);
   });
-  it('verify gates ENGINE-RAISED renewals only (the description mark, not the name prefix), and a handover in the same run satisfies it', () => {
+  it('verify gates ENGINE-RAISED renewals only (the description mark, not the name prefix), and only a row WITH its document counts', () => {
     const gate = src.slice(src.indexOf('compliance_closes = []'), src.indexOf('if problems:', src.indexOf('THE COMPLIANCE-BOOK GATE')));
     expect(gate).toMatch(/ENGINE_RENEWAL_MARK in str\(live\["description"\]/);
     expect(gate).not.toMatch(/startswith\(COMPLIANCE_TASK_PREFIX\)/);
-    expect(gate).toMatch(/handed = \{a\.get\("task"\) for a in ok_actions if a\.get\("kind"\) == "handover"\}/);
-    expect(gate).toMatch(/if tid not in linked and tid not in handed:/);
+    expect(gate).toMatch(/if c\["hasFile"\] for tid in c\["taskIds"\]/);
+    expect(gate).not.toMatch(/handed = \{/);
     // and the engine stamps the mark on every renewal it raises
     expect(src).toMatch(/f"PROPERTY COMPLIANCE — \{ENGINE_RENEWAL_MARK\}/);
   });

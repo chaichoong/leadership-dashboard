@@ -1169,6 +1169,28 @@ def selftest():
 
 # ---------------------------------------------------------------------------
 
+def cmd_search(q, limit):
+    """Read-only Gmail search for the role agents (Property Administration
+    build, 2 Sep 2026): the search-first rule needs a route into the mailbox
+    that is NOT a hand-rolled curl carrying the triage key. Same worker, same
+    read-and-label credential, one page, never a modify."""
+    if not q or not q.strip():
+        fail("search needs --q <gmail query>")
+    msgs, truncated = worker_list(q=q.strip(), max_pages=1)
+    keep = ("id", "threadId", "internalDate", "from", "subject", "snippet",
+            "date", "labelIds")
+    rows = []
+    for m in msgs[:limit]:
+        row = {k: m.get(k) for k in keep if m.get(k) is not None}
+        ts = int(m.get("internalDate") or 0)
+        if ts:
+            row["when"] = datetime.fromtimestamp(ts / 1000).strftime("%Y-%m-%d %H:%M")
+        rows.append(row)
+    print(json.dumps({"q": q.strip(), "count": len(msgs), "shown": len(rows),
+                      "truncated": truncated or len(msgs) > limit,
+                      "messages": rows}, indent=1))
+
+
 def main(argv):
     if not argv:
         print(__doc__)
@@ -1218,6 +1240,8 @@ def main(argv):
         return cmd_history_dump()
     elif cmd == "matters":
         return cmd_matters()
+    elif cmd == "search":
+        cmd_search(opt("--q"), int(opt("--limit", "20")))
     elif cmd == "selftest":
         selftest()
     else:

@@ -1416,6 +1416,13 @@ def build_queue(args=None):
         # build — the same fallback shape as the creditor tier-2 park.
         t["property"] = ("" if (t["tier1"] or t["creditor"] or not property_ok) else
                          property_match(t["name"], t["description"], t["notes"]))
+        # A CEO-lane task the fresh lane cannot place (neither inbound nor
+        # COMPLIANCE-named) keeps its old home — the Roy lane — rather than
+        # being taken from Roy and routed nowhere (review finding, 2 Sep 2026).
+        owner = t["teamMemberIds"][0] if t["teamMemberIds"] else ""
+        if (t["property"] and owner == CEO_REC_ID and not t["inboundTask"]
+                and not str(t["name"]).startswith(COMPLIANCE_TASK_PREFIX)):
+            t["property"] = ""
         property_count += bool(t["property"])
         hit_roy = ("" if (t["tier1"] or t["creditor"] or t["outcome"] in APPROVED
                           or t["property"])
@@ -2996,18 +3003,20 @@ def cmd_verify(args):
         problems.append("compliance book read failed: "
                         f"{str(report['complianceBookError'])[:160]}")
     if compliance_closes:
-        handed = {a.get("task") for a in ok_actions if a.get("kind") == "handover"}
         try:
+            # A linked row with no document is a claim, not a certificate.
             linked = {tid for c in fetch_certificates(refresh=True)
-                      for tid in c["taskIds"]}
+                      if c["hasFile"] for tid in c["taskIds"]}
             for tid, name in compliance_closes:
-                if tid not in linked and tid not in handed:
+                if tid not in linked:
                     problems.append(
                         f"compliance task {tid} '{name}' was closed with NO "
-                        "certificate filed — every renewal ends with "
-                        "python3 scripts/agent-dispatch.py certificate "
-                        f"{tid} --property ... --type ... --renewal ... "
-                        "--file ..., or stays open")
+                        "certificate (with its document) linked — a renewal "
+                        "ends with python3 scripts/agent-dispatch.py "
+                        f"certificate {tid} --property ... --type ... "
+                        "--renewal ... --file ..., or stays open "
+                        "(complete --keep-open) while a person holds the "
+                        "next step")
         except Exception as e:                            # noqa: BLE001
             problems.append(
                 "compliance book unreachable while a renewal was closed — "
@@ -3894,7 +3903,11 @@ CERT_FIELDS = {
 CERT_TYPES = ("GSC", "EICR", "EPC", "Fire Alarm Cert", "Emergency Lighting",
               "HMO Cert", "Landlord Insurance")
 # In a Block these are held per apartment; everything else is the building's.
-UNIT_LEVEL_TYPES = ("EICR", "GSC")
+# A certificate filed for the whole block with NO unit link covers every
+# apartment (compliance.html spreads it the same way).
+UNIT_LEVEL_TYPES = ("EICR", "GSC", "EPC")
+UNITS_TABLE = "tblM3mZCR5kiEdWMj"
+UNIT_NAME_FIELD = "fldr8sliyu8h2jw9t"    # Rental Unit (primary, formula)
 # What every property must hold, before its own Certificates Required field
 # and its own history add to it (the rules are written out for Kevin in the
 # brain: Knowledge/property-compliance-requirements.md). Landlord insurance,
@@ -3992,6 +4005,16 @@ def fetch_certificates(refresh=False):
     return _BOOK_CACHE["certificates"]
 
 
+def fetch_unit_names(refresh=False):
+    """{unitId: 'Unit 8 – Duckworth Building'} — a task or a book page that
+    names an apartment by its record id is one nobody can act on."""
+    if refresh or "units" not in _BOOK_CACHE:
+        _BOOK_CACHE["units"] = {
+            r["id"]: (r.get("fields", {}).get(UNIT_NAME_FIELD) or r["id"])
+            for r in query_records(UNITS_TABLE, fields=[UNIT_NAME_FIELD])}
+    return _BOOK_CACHE["units"]
+
+
 def days_until(date_str, today):
     """Days from today to an ISO date; None when the date is blank."""
     if not date_str:
@@ -4000,11 +4023,13 @@ def days_until(date_str, today):
             - datetime.strptime(today, "%Y-%m-%d").date()).days
 
 
-def item_state(days):
+def item_state(days, status=""):
+    """compliance.html's certStatus: a row marked Expired IS expired, whatever
+    its date says; otherwise the date decides."""
+    if status == "Expired" or (days is not None and days < 0):
+        return "expired"
     if days is None:
         return "no date"
-    if days < 0:
-        return "expired"
     if days <= RENEWAL_WINDOW_DAYS:
         return "due"
     return "in date"
@@ -4032,16 +4057,18 @@ def newer_cert(a, b, today):
 def _item(c, today):
     d = days_until(c["renewalDate"], today)
     return {"certificate": c["id"], "renewalDate": c["renewalDate"],
-            "days": d, "state": item_state(d), "hasFile": c["hasFile"]}
+            "days": d, "state": item_state(d, c["status"]), "hasFile": c["hasFile"]}
 
 
-def compliance_pages(properties, certificates, today):
+def compliance_pages(properties, certificates, today, unit_names=None):
     """Pure: the book. One page per property: the LATEST certificate of each
     type at property level (`holds`), the latest per apartment for the
-    unit-level types in a Block (`units`), and the `issues` the reading
-    counts. Inactive properties keep a page (a stray certificate can still be
-    filed against them) but never count toward the reading."""
-    prop_level, unit_level, held_types = {}, {}, {}
+    unit-level types in a Block (`units`, block pages only), and the `issues`
+    the reading counts. A block-wide certificate with no unit link covers
+    every apartment. Inactive properties keep a page (a stray certificate
+    can still be filed against them) but never count toward the reading."""
+    unit_names = unit_names or {}
+    prop_level, unit_level, block_wide, held_types = {}, {}, {}, {}
     for c in certificates:
         if c["type"] not in CERT_TYPES:
             continue
@@ -4049,6 +4076,9 @@ def compliance_pages(properties, certificates, today):
             held_types.setdefault(pid, set()).add(c["type"])
             for uid in c["unitIds"]:
                 slot = unit_level.setdefault(pid, {}).setdefault(uid, {})
+                slot[c["type"]] = newer_cert(slot.get(c["type"]), c, today)
+            if not c["unitIds"]:
+                slot = block_wide.setdefault(pid, {})
                 slot[c["type"]] = newer_cert(slot.get(c["type"]), c, today)
             slot = prop_level.setdefault(pid, {})
             slot[c["type"]] = newer_cert(slot.get(c["type"]), c, today)
@@ -4075,18 +4105,23 @@ def compliance_pages(properties, certificates, today):
             if it["state"] in ("expired", "due", "no date"):
                 issues.append({"type": t, **{k: it[k] for k in ("state", "renewalDate", "days")}})
         units = {}
-        for uid in p["units"]:
+        for uid in (p["units"] if is_block else []):
             u_held = unit_level.get(p["id"], {}).get(uid, {})
-            units[uid] = {}
+            wide = block_wide.get(p["id"], {})
+            label = unit_names.get(uid, uid)
+            units[uid] = {"name": label}
             for t in per_unit:
-                c = u_held.get(t)
+                # The apartment's own certificate, else the block-wide one
+                # (a whole-building EICR or communal-boiler GSC), else missing.
+                c = newer_cert(u_held.get(t), wide[t], today) if t in wide else u_held.get(t)
                 if c is None:
-                    issues.append({"type": t, "state": "missing", "unit": uid})
+                    issues.append({"type": t, "state": "missing", "unit": uid,
+                                   "unitName": label})
                     continue
                 it = _item(c, today)
                 units[uid][t] = it
                 if it["state"] in ("expired", "due", "no date"):
-                    issues.append({"type": t, "unit": uid,
+                    issues.append({"type": t, "unit": uid, "unitName": label,
                                    **{k: it[k] for k in ("state", "renewalDate", "days")}})
         pages.append({**p, "required": required, "holds": holds,
                       "units": units, "issues": issues})
@@ -4095,7 +4130,7 @@ def compliance_pages(properties, certificates, today):
 
 def compliance_book_pages(refresh=False):
     return compliance_pages(fetch_properties(refresh), fetch_certificates(refresh),
-                            today_london())
+                            today_london(), fetch_unit_names(refresh))
 
 
 def compliance_reading(pages):
@@ -4152,15 +4187,23 @@ def renewals_due(pages, today):
     for p in pages:
         if not p["active"]:
             continue
-        slots = [(None, t, it) for t, it in p["holds"].items()]
+        slots = [(None, None, t, it) for t, it in p["holds"].items()]
         for uid, items in p["units"].items():
-            slots += [(uid, t, it) for t, it in items.items()]
-        for uid, t, it in slots:
+            slots += [(uid, items.get("name", uid), t, it)
+                      for t, it in items.items() if t != "name"]
+        seen = set()
+        for uid, uname, t, it in slots:
             d = it["days"]
             if d is None or not (-RENEWAL_LAPSE_GRACE_DAYS <= d <= RENEWAL_WINDOW_DAYS):
                 continue
+            # A block-wide certificate covering nine apartments is ONE
+            # renewal, not nine: key on the certificate.
+            if it["certificate"] in seen:
+                continue
+            seen.add(it["certificate"])
             due.append({"propertyId": p["id"], "property": p["short"],
-                        "unit": uid, "type": t, "renewalDate": it["renewalDate"],
+                        "unit": uid, "unitName": uname, "type": t,
+                        "renewalDate": it["renewalDate"],
                         "days": d, "certificate": it["certificate"],
                         "manager": p["manager"]})
     return due
@@ -4179,13 +4222,13 @@ def ensure_renewal_tasks():
     within 30 days, so a task lands on the agent's board. One task per
     certificate per renewal date — the state file makes a date fire once and
     the prefix-filtered recent-task belt holds if the state file is lost."""
+    if property_agent_paused():
+        print(json.dumps({"agent": "property", "paused": True,
+                          "renewalTasksCreated": []}))
+        return
     pages = compliance_book_pages()
     due = renewals_due(pages, today_london())
     if not due:
-        return
-    if property_agent_paused():
-        print(json.dumps({"agent": "property", "renewalsDue": len(due),
-                          "paused": True, "renewalTasksCreated": []}))
         return
     state = load_score_state(RENEWAL_STATE)
     fresh = [r for r in due if not state.get(f"{r['certificate']}:{r['renewalDate']}")]
@@ -4199,7 +4242,7 @@ def ensure_renewal_tasks():
                   minimal=True)}
     created = []
     for r in fresh:
-        where = r["property"] + (f" (unit {r['unit']})" if r["unit"] else "")
+        where = r["property"] + (f" ({r['unitName']})" if r["unit"] else "")
         name = (f"{COMPLIANCE_TASK_PREFIX} {r['type']} renewal due "
                 f"{r['renewalDate']} - {where}")[:100]
         if name not in recent:
@@ -4324,15 +4367,22 @@ def cmd_certificate(args):
     twin = find_certificate_twin(fetch_certificates(), args.property,
                                  args.type, args.renewal, args.unit)
     if twin:
-        fields = {CERT_FIELDS["tasks"]: sorted(set(twin["taskIds"]) | {args.task})}
-        if args.note:
-            fields[CERT_FIELDS["notes"]] = f"{today_london()}: {args.note}"
-        _request("PATCH", f"/{CERTIFICATES_TABLE}/{twin['id']}",
-                 {"fields": fields, "typecast": True})
+        # The file goes on BEFORE the task is linked: a link on a row with no
+        # document would let verify read the close as filed. Notes append,
+        # never replace — the row may carry a policy number Kevin typed.
         filename = None
         if not twin["hasFile"]:
             filename = upload_file(twin["id"], CERT_FIELDS["attachments"],
                                    args.file)
+        fields = {CERT_FIELDS["tasks"]: sorted(set(twin["taskIds"]) | {args.task})}
+        if args.note:
+            prior = _request("GET", f"/{CERTIFICATES_TABLE}/{twin['id']}"
+                             "?returnFieldsByFieldId=true").get(
+                "fields", {}).get(CERT_FIELDS["notes"], "")
+            line = f"{today_london()}: {args.note}"
+            fields[CERT_FIELDS["notes"]] = (prior + "\n" + line) if prior else line
+        _request("PATCH", f"/{CERTIFICATES_TABLE}/{twin['id']}",
+                 {"fields": fields, "typecast": True})
         row_id = twin["id"]
     else:
         fields = {
@@ -4391,6 +4441,10 @@ def property_selftest():
           required=["Landlord Insurance", "EICR", "EPC"], active=False),
         P(id="pD", name="D", short="D", kind="Block", units=["u1", "u2", "u3"],
           required=["Landlord Insurance", "EICR", "EPC", "Fire Alarm Cert", "Emergency Lighting"]),
+        # E, a block with one block-wide EICR and no unit links: every
+        # apartment is covered by it, and it is ONE renewal
+        P(id="pE", name="E", short="E", kind="Block", units=["e1", "e2"],
+          required=["EICR"]),
     ]
     certs = [
         # A: old GSC then a newer one — latest wins and it is due in 20 days
@@ -4414,8 +4468,12 @@ def property_selftest():
         C(id="d2", type="EICR", propertyIds=["pD"], unitIds=["u2"], status="Expired", renewalDate="2026-03-08"),
         C(id="d2b", type="EICR", propertyIds=["pD"], unitIds=["u2"], renewalDate="2026-12-01"),
         C(id="d3", type="Landlord Insurance", propertyIds=["pD"], renewalDate="2027-01-01"),
+        # D: a block-wide EPC covers u1..u3; a Status-Expired undated row IS expired
+        C(id="d4", type="EPC", propertyIds=["pD"], renewalDate="2030-01-01"),
+        C(id="d5", type="Fire Alarm Cert", propertyIds=["pD"], status="Expired", renewalDate=""),
+        C(id="e0", type="EICR", propertyIds=["pE"], renewalDate="2026-09-15"),
     ]
-    pages = compliance_pages(props, certs, today)
+    pages = compliance_pages(props, certs, today, {"u1": "Unit 1 – D", "e1": "Unit 1 – E"})
     frag, s = compliance_reading(pages)
     a = next(p for p in pages if p["id"] == "pA")
     assert a["holds"]["GSC"]["certificate"] == "c2", "latest certificate must win"
@@ -4423,22 +4481,29 @@ def property_selftest():
     b = next(p for p in pages if p["id"] == "pB")
     assert "Fire Alarm Cert" in b["required"], "a held type becomes required"
     assert [i["type"] for i in b["issues"]] == ["Fire Alarm Cert"], b["issues"]
+    assert "units" not in b or b["units"] == {}, "only a block carries per-unit slots"
     d = next(p for p in pages if p["id"] == "pD")
-    assert "EICR" not in d["holds"], "a block's EICR is per apartment"
+    assert "EICR" not in d["holds"] and "EPC" not in d["holds"], "a block's EICR and EPC are per apartment"
+    assert d["units"]["u1"]["name"] == "Unit 1 – D" and d["units"]["u2"]["name"] == "u2"
     assert d["units"]["u1"]["EICR"]["state"] == "in date"
     assert d["units"]["u2"]["EICR"]["certificate"] == "d2b", "live beats lapsed"
     assert d["units"]["u2"]["EICR"]["state"] == "in date"
+    assert all(d["units"][u]["EPC"]["certificate"] == "d4" for u in ("u1", "u2", "u3")), "a block-wide certificate covers every apartment"
+    assert d["holds"]["Fire Alarm Cert"]["state"] == "expired", "Status Expired is expired even undated"
     d_issues = sorted((i["type"], i.get("unit"), i["state"]) for i in d["issues"])
-    assert d_issues == [("EICR", "u3", "missing"), ("EPC", None, "missing"),
-                        ("Emergency Lighting", None, "missing"),
-                        ("Fire Alarm Cert", None, "missing")], d_issues
+    assert d_issues == [("EICR", "u3", "missing"), ("Emergency Lighting", None, "missing"),
+                        ("Fire Alarm Cert", None, "expired")], d_issues
+    e = next(p for p in pages if p["id"] == "pE")
+    assert all(e["units"][u]["EICR"]["certificate"] == "e0" for u in ("e1", "e2"))
     # A: 1 expired (EICR) + 3 missing + 1 undated (insurance); B: 1 expired;
-    # D: 4 missing; C: nothing (inactive). Due: A's GSC.
-    assert s == {"outstanding": 10, "expired": 2, "missing": 7, "undated": 1,
-                 "dueSoon": 1}, s
-    assert frag == "10 outstanding (2 expired, 7 missing, 1 undated); 1 due in 30 days", frag
+    # D: 2 missing + 1 expired; C: nothing (inactive); E: nothing outstanding.
+    # Due: A's GSC and E's block-wide EICR (once, not per apartment).
+    assert s == {"outstanding": 9, "expired": 3, "missing": 5, "undated": 1,
+                 "dueSoon": 3}, s
+    assert frag == "9 outstanding (3 expired, 5 missing, 1 undated); 3 due in 30 days", frag
     due = renewals_due(pages, today)
-    assert [(r["type"], r["unit"], r["days"]) for r in due] == [("GSC", None, 20)], due
+    assert [(r["type"], r["unit"], r["unitName"], r["days"]) for r in due] == [
+        ("GSC", None, None, 20), ("EICR", "e1", "Unit 1 – E", 13)], due
     # A lapse inside the grace window still fires; older lapses do not.
     lapsed = compliance_pages(
         [props[1]], [C(id="x", type="EICR", propertyIds=["pB"], renewalDate="2026-08-30"),
