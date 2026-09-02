@@ -77,6 +77,47 @@ while IFS= read -r f; do
   esac
   mv "$f" "$SCRATCH/" && LEAKED="$LEAKED $f"
 done < <(find "$REPO" -maxdepth 1 -type f -newer "$MARKER" 2>/dev/null)
+
+# Repo-WIDE sweep (2 Sep 2026, finding 20260902-task-manager-17-435): the
+# 17:00 task-manager slot ignored its scratch dir and wrote ten helper
+# scripts into scripts/_tm_*.py, a close-proposal text and a task briefing
+# (message content) into the public checkout. The top-level sweep above
+# could not see any of it. Two rules, both scoped to files THIS RUN created
+# (newer than the marker) that git does not track:
+#   1. by NAME anywhere: an underscore-prefixed file under scripts/ (the
+#      agents' own helper-script habit), a rec*-output.md briefing, or a
+#      slot artifact (report*/board*/gate*/dispatch-queue*/close_*);
+#   2. by CONTENT anywhere except tests/ (fixtures legitimately carry the
+#      leak markers) and the scratch dir itself.
+# Never .git, node_modules, or another session's worktree under .claude/.
+# Quarantined, never deleted, and reported — same informational contract.
+while IFS= read -r f; do
+  [ -z "$f" ] && continue
+  rel="${f#"$REPO"/}"
+  case "$rel" in
+    monitoring/*|tests/*) continue ;;
+  esac
+  case "$f" in
+    "$SCRATCH"/*) continue ;;
+  esac
+  if git -C "$REPO" ls-files --error-unmatch "$rel" >/dev/null 2>&1; then
+    continue
+  fi
+  base="$(basename "$f")"
+  named=0
+  case "$base" in
+    report*|board*.json|gate*.json|dispatch-queue*.json|close_*|rec*-output.md) named=1 ;;
+  esac
+  case "$rel" in
+    scripts/_*) named=1 ;;
+  esac
+  if [ "$named" -eq 0 ]; then
+    grep -qlE "$LEAK_ERE" "$f" 2>/dev/null || continue
+  fi
+  mv "$f" "$SCRATCH/" && LEAKED="$LEAKED $rel"
+done < <(find "$REPO" -mindepth 2 -type f -newer "$MARKER" \
+           -not -path "$REPO/.git/*" -not -path "*/node_modules/*" \
+           -not -path "$REPO/.claude/worktrees/*" 2>/dev/null)
 rm -f "$MARKER"
 
 TAIL_TEXT=$(tail -n +$((START_LINE + 1)) "$LOG" 2>/dev/null)
