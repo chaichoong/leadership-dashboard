@@ -297,6 +297,13 @@ ROLE_AGENTS = {
     "rec1hYELb4zS8pjjO": {"name": "AI Task Manager",
                           "agent": "task-manager", "role": "worker",
                           "registerRow": "reczg8BygPFnJMQnh"},
+    # Property Administration (build session 2 Sep 2026; was Property
+    # Compliance, with Property Maintenance merged in at the agent gate).
+    # Owns certificates, licences, landlord insurance and inspections across
+    # the portfolio; repairs stay Roy's same-hour lane (Kevin's ruling).
+    "recwWvBju2ycB63i4": {"name": "AI Property Administration",
+                          "agent": "property-administration", "role": "worker",
+                          "registerRow": "recZBW9tjcx9WJw4q"},
     # LESSONS ONLY — never dispatched. Added 27 Aug 2026.
     #
     # Inbound Comms Triage makes roughly forty create-or-not decisions a day,
@@ -326,9 +333,11 @@ ALL_AGENTS = {**AGENTS, **ROLE_AGENTS}
 RESPONSE_REC_ID = "recJ8J8idWE8d97tH"          # Team Members row
 CREDITOR_REC_ID = "recjh6mmaF8KJW8t3"          # Team Members row
 TASKMGR_REC_ID = "rec1hYELb4zS8pjjO"           # Team Members row
+PROPERTY_REC_ID = "recwWvBju2ycB63i4"          # Team Members row
 RESPONSE_REGISTER_ROW = ROLE_AGENTS[RESPONSE_REC_ID]["registerRow"]
 CREDITOR_REGISTER_ROW = ROLE_AGENTS[CREDITOR_REC_ID]["registerRow"]
 TASKMGR_REGISTER_ROW = ROLE_AGENTS[TASKMGR_REC_ID]["registerRow"]
+PROPERTY_REGISTER_ROW = ROLE_AGENTS[PROPERTY_REC_ID]["registerRow"]
 
 # ─── Deterministic routing lanes (ordered, first match wins) ─────────
 #
@@ -350,11 +359,24 @@ TASKMGR_REGISTER_ROW = ROLE_AGENTS[TASKMGR_REC_ID]["registerRow"]
 # Non-inbound creditor work reaches the specialist via the CEO judgement pass.
 # Its "steal" covers the generalist Response agent and formerly-parked
 # creditor correspondence (t["tier2Correspondence"]) only.
+#
+# The property lane (2 Sep 2026) sits between them: a compliance matter —
+# certificate, licence, landlord insurance, inspection — goes to the Property
+# Administration agent whether or not it arrived by email, because its
+# engine-raised renewal tasks are not inbound and must still land there. It
+# is NOT inbound-only like the creditor lane because property_match is
+# name-only with a legal veto, the same discipline that makes the Roy lane
+# safe. Creditor stays first: a premium-finance default notice is money owed,
+# and the specialist for that owns it. Repairs never enter this lane — they
+# keep Roy's same-hour handover (Kevin's ruling, 2 Sep 2026).
 AUTO_ROUTES = (
     {"rec": CREDITOR_REC_ID,
      "fresh": lambda t: t["creditor"] and t["inboundTask"],
      "steal": lambda t, tm: t["creditor"] and (
          tm == RESPONSE_REC_ID or t["tier2Correspondence"])},
+    {"rec": PROPERTY_REC_ID,
+     "fresh": lambda t: bool(t.get("property")),
+     "steal": lambda t, tm: bool(t.get("property")) and tm == RESPONSE_REC_ID},
     {"rec": RESPONSE_REC_ID,
      "fresh": lambda t: t["inboundTask"],
      "steal": None},
@@ -646,6 +668,66 @@ def roy_match(name, description="", notes=""):
     return tier_match(ROY_PATTERNS, name)
 
 
+# ─── THE PROPERTY ADMINISTRATION LANE (build session, 2 Sep 2026) ────
+#
+# WHAT THIS LANE IS: the paperwork of the portfolio. Certificates, licences,
+# landlord insurance, inspection notices, and their renewals. Kevin's agent
+# gate on 2 Sep 2026 measured why it needed a home of its own: 17 of 26
+# properties had no insurance on record, 19 certificate records had expired,
+# and NOTHING alerted — the Roy lane's veto throws out every task that mentions
+# insurance, a fee or a licence payment, which is exactly this work, so it all
+# walked past Roy and stopped at Kevin.
+#
+# Same discipline as the Roy lane: MATCH ON THE NAME, VETO ON EVERYTHING. The
+# veto here is the law and the live legal matter plus creditor vocabulary
+# (money owed is the Creditor Management agent's, contractor invoices
+# included). Money words that ARE this lane — a licence fee, an insurance
+# premium — are deliberately not vetoed: the approval gate sits before every
+# payment regardless, and Kevin pays; the agent only prepares.
+#
+# Repairs are absent on purpose. A leak reaches Roy the same hour through the
+# Roy lane; this agent follows up open repairs later, it never delays them.
+PROPERTY_PATTERNS = [
+    re.compile(p, re.I) for p in (
+        # Certificates and their renewals
+        r"\beicr\b", r"electrical\s+(?:safety|installation|cert)",
+        r"gas\s+safe", r"\bcp12\b", r"\bepc\b", r"energy\s+performance",
+        r"legionella", r"\bpat\s+test", r"fire\s+(?:safety|risk|alarm)",
+        r"emergency\s+lighting", r"smoke\s+alarm", r"carbon\s+monoxide",
+        r"\bcertificat", r"\bcompliance\b",
+        # Licensing, fee included — the licence lane is this agent's
+        r"hmo\s+licen[cs]", r"selective\s+licen[cs]", r"landlord\s+licen[cs]",
+        r"licen[cs]e\s+(?:fee|renewal|application)",
+        r"(?:property|council|hmo|housing)\s+inspection",
+        r"inspection\s+(?:report|notice|visit)", r"improvement\s+notice",
+        r"housing\s+standards",
+        # Landlord insurance, always via TopCashback (Kevin's ruling)
+        r"landlord(?:s'?|s)?\s+insurance", r"buildings?\s+insurance",
+        r"property\s+insurance", r"insurance\s+(?:renewal|policy|quote)",
+        r"topcashback",
+    )
+]
+PROPERTY_EXCLUDE_RE = re.compile(
+    # The law and the live legal matter — Kevin's, never an agent's
+    r"solicitor|\bcourt\b|enforcement|bailiff|liability\s+order|"
+    r"restraint\s+order|statutory\s+demand|\blegal\b|\bhmrc\b|"
+    r"companies\s+house|council\s+tax|mortgage|\bsell\b|refinanc|"
+    # Creditor vocabulary — money OWED is the Creditor Management lane
+    r"\binvoice|chas(?:e|ing)\s+(?:a\s|the\s)?payment|payment\s+chas|"
+    r"\bdebt\b|\barrears|final\s+(?:notice|demand)|letter\s+(?:before|of)\s+"
+    r"(?:action|claim)|default\s+notice|premium\s+finance",
+    re.I,
+)
+
+
+def property_match(name, description="", notes=""):
+    """Why this is the Property Administration agent's, or ""."""
+    everything = " ".join(str(t or "") for t in (name, description, notes))
+    if PROPERTY_EXCLUDE_RE.search(everything) or ROY_HOME_RE.search(everything):
+        return ""
+    return tier_match(PROPERTY_PATTERNS, name)
+
+
 # ─── SYSTEM ALERTS ARE NOT APPROVALS (27 Aug 2026) ──────────────────
 #
 # Measured that day: 13 of the 60 tasks sitting at Status Approval were
@@ -897,6 +979,14 @@ def upload_attachment(task_id, path):
     RECORD path (multipart returns 400, a table id in the path returns 404 —
     both probed live 26 Aug 2026). Exits rather than leaving a half-attached
     approval."""
+    return upload_file(task_id, AF["attachments"], path)
+
+
+def upload_file(record_id, field_id, path):
+    """The one attachment upload, for any record in the base. Split out of
+    upload_attachment on 2 Sep 2026 so the certificate write path attaches
+    the document to the Property Certificates row through the SAME code —
+    a second copy of the upload shape is how the two would drift apart."""
     if not os.path.isfile(path):
         sys.exit(f"ERROR: no such file to attach: {path}")
     size = os.path.getsize(path)
@@ -908,8 +998,8 @@ def upload_attachment(task_id, path):
                  "Drive and give Kevin the link in the Agent Output.")
     with open(path, "rb") as fh:
         blob = base64.b64encode(fh.read()).decode()
-    url = (f"https://content.airtable.com/v0/{BASE_ID}/{task_id}/"
-           f"{AF['attachments']}/uploadAttachment")
+    url = (f"https://content.airtable.com/v0/{BASE_ID}/{record_id}/"
+           f"{field_id}/uploadAttachment")
     req = urllib.request.Request(url, method="POST", data=json.dumps({
         "contentType": mimetypes.guess_type(path)[0] or "application/octet-stream",
         "filename": os.path.basename(path),
@@ -1241,6 +1331,8 @@ def build_queue(args=None):
     approved_hb, changes_hb, new_work, routing = [], [], [], []
     creditor_ok = bool(role_roster.get(CREDITOR_REC_ID, {}).get("dispatchable"))
     creditor_count = 0
+    property_ok = bool(role_roster.get(PROPERTY_REC_ID, {}).get("dispatchable"))
+    property_count = 0
 
     for t in agent_linked:
         # Tier 1 no longer drops out of the worklist. It is MARKED and worked,
@@ -1289,7 +1381,19 @@ def build_queue(args=None):
         # money and law out, and this ordering is the second line of the same
         # defence. An APPROVED task is never diverted — Kevin has already said
         # yes to that exact work and it must be carried out, not handed on.
-        hit_roy = ("" if (t["tier1"] or t["creditor"] or t["outcome"] in APPROVED)
+        # THE PROPERTY LANE (2 Sep 2026). Compliance matters go to the
+        # Property Administration agent through AUTO_ROUTES below, so they
+        # are marked here and NOT diverted to Roy. While the agent's register
+        # row is not Built/Live (Kevin's pause lever) the mark is dropped and
+        # the task falls through to the Roy lane exactly as before this
+        # build — the same fallback shape as the creditor tier-2 park.
+        t["property"] = ("" if (t["tier1"] or t["creditor"]) else
+                         property_match(t["name"], t["description"], t["notes"]))
+        property_count += bool(t["property"])
+        if t["property"] and not property_ok:
+            t["property"] = ""
+        hit_roy = ("" if (t["tier1"] or t["creditor"] or t["outcome"] in APPROVED
+                          or t["property"])
                    else roy_match(t["name"], t["description"], t["notes"]))
         if hit_roy:
             roy_lane.append({**t, "royReason": hit_roy})
@@ -1385,6 +1489,20 @@ def build_queue(args=None):
         except Exception as e:                            # noqa: BLE001
             creditor_ledger_error = str(e)[:200]
 
+    # The compliance book rides with the queue the same way (approved chain
+    # link 2, 2 Sep 2026): what every property holds, what it must hold, and
+    # what is missing or lapsed — read BEFORE the agent creates anything, so
+    # a renewal that already exists is never bought twice. A failed read
+    # carries the error; the skill then refuses to dispatch property work
+    # blind rather than letting the agent guess at the portfolio.
+    compliance_book, compliance_book_error = [], ""
+    if property_count or any(PROPERTY_REC_ID in (t.get("teamMemberIds") or [])
+                             for t in worklist):
+        try:
+            compliance_book = compliance_book_pages()
+        except Exception as e:                            # noqa: BLE001
+            compliance_book_error = str(e)[:200]
+
     out = {
         "generatedAt": now_iso(),
         "cap": CAP_PER_RUN,
@@ -1400,6 +1518,11 @@ def build_queue(args=None):
         # dispatch so the agent never repeats a step already taken.
         "creditorLedger": creditor_ledger,
         "creditorLedgerError": creditor_ledger_error,
+        # The compliance book, one page per property: manager, what it must
+        # hold, what it holds and when each item runs out. The skill hands the
+        # matching page to every property dispatch.
+        "complianceBook": compliance_book,
+        "complianceBookError": compliance_book_error,
         # Named, counted, and left open on the board. Never dropped: an alert
         # that vanishes is worse than one that clogs the gate.
         "systemAlerts": system_alerts,
@@ -2728,6 +2851,7 @@ def cmd_verify(args):
     # Trust nothing the run claimed: re-read each touched task and check the
     # state actually landed.
     creditor_submits = []
+    compliance_closes = []
     for a in ok_actions:
         try:
             live = task_view(get_task(a["task"]))
@@ -2743,6 +2867,14 @@ def cmd_verify(args):
                 and CREDITOR_REC_ID in live["teamMemberIds"]
                 and not str(live["name"]).startswith(REVIEW_TASK_PREFIX)):
             creditor_submits.append((a["task"], str(live["name"])[:60]))
+        # Collected for the compliance-book gate below: a renewal the
+        # Property Administration agent carried out and CLOSED must have
+        # filed its certificate, or been handed to a person.
+        if (kind == "carry_out" and not a.get("keepOpen")
+                and PROPERTY_REC_ID in (live["teamMemberIds"]
+                                        + live["sentForApprovalByIds"])
+                and str(live["name"]).startswith(COMPLIANCE_TASK_PREFIX)):
+            compliance_closes.append((a["task"], str(live["name"])[:60]))
         if kind == "carry_out":
             # Two legitimate end states, and each is verified against the field
             # that actually proves it. A keep-open carry-out that checked Status
@@ -2832,6 +2964,28 @@ def cmd_verify(args):
             problems.append(
                 "record book unreachable while creditor work was submitted "
                 f"— the run drafted blind and cannot verify: {str(e)[:160]}")
+
+    # THE COMPLIANCE-BOOK GATE (approved chain link 5, 2 Sep 2026). A
+    # COMPLIANCE renewal task the agent closed must show a certificate row
+    # linked to it — the filed document with its renewal date — read from the
+    # LIVE table. Without this the agent could report "renewed" and the book
+    # would still say expired, which is the silent failure the whole agent
+    # exists to end.
+    if compliance_closes:
+        try:
+            linked = {tid for c in fetch_certificates() for tid in c["taskIds"]}
+            for tid, name in compliance_closes:
+                if tid not in linked:
+                    problems.append(
+                        f"compliance task {tid} '{name}' was closed with NO "
+                        "certificate filed — every renewal ends with "
+                        "python3 scripts/agent-dispatch.py certificate "
+                        f"{tid} --property ... --type ... --renewal ... "
+                        "--file ..., or stays open")
+        except Exception as e:                            # noqa: BLE001
+            problems.append(
+                "compliance book unreachable while a renewal was closed — "
+                f"cannot verify the certificate was filed: {str(e)[:160]}")
 
     if problems:
         for p in problems:
@@ -2989,7 +3143,8 @@ def load_score_state(state_path):
 # are invisible and the page can only report a wiring gap (found 26 Aug 2026
 # — four Built/Live agents had never logged once).
 SCORE_AGENT_NAMES = {"response": "Inbound Comms Response",
-                     "creditor": "Creditor Management"}
+                     "creditor": "Creditor Management",
+                     "property": "Property Administration"}
 
 
 def write_register_reading(label, register_row, state_path, reading, stats,
@@ -3662,6 +3817,451 @@ def creditor_ledger_selftest():
     print("selftest-creditor-ledger: all checks passed")
 
 
+# ─── THE COMPLIANCE BOOK (Property Administration, Kevin-approved chain,
+#     2 Sep 2026) ────────────────────────────────────────────────────────
+#
+# One page per property: who manages it, what it must hold, what it holds and
+# when each item runs out. Three of the approved chain's links live here:
+# link 2 (the queue hands the book to the agent so the portfolio is READ
+# before anything is created — the gate's first rule was "never add a renewal
+# that already exists"), link 5 (the ONE write path for a filed certificate,
+# `certificate`, which refuses an incomplete write), and link 7 (the register
+# reading: outstanding issues, baseline 59 on 2 Sep 2026).
+#
+# Triggers (a) and (c) of the map are the two engine-raised tasks below —
+# renewal-due 30 days ahead, and the quarterly review on the first Monday of
+# the quarter, decided in code in London time, never via the Airtable
+# Recurring field (the same reason ensure_weekly_review gives).
+
+PROPERTIES_TABLE = "tbl6f0OkAmTC2jbuG"
+CERTIFICATES_TABLE = "tbl35rf9qtmq0P87r"
+PROPERTY_FIELDS = {
+    "name":       "fldy2t735TV5e1DIL",   # Property (full address)
+    "short":      "fldqMbR329TNY974G",   # Property Name (Short), formula
+    "kind":       "fldOySSrZBYkOLLTX",   # Single Let / HMO / Block
+    "manager":    "fldEUrWVhSp3NY8Hh",   # Agent/Landlord (free text)
+    "managerEmail": "fldwPGfGVHFf1d2dA",
+    "postcode":   "fld6ebSQgD7eRsobd",
+    "required":   "flduFyaQBD4duhR3l",   # Certificates Required (multi)
+    "active":     "fldBUeSJQZZSnFrFW",   # Active? (from Business), lookup
+}
+CERT_FIELDS = {
+    "type":        "fld00ZuxT8uKagM0b",
+    "property":    "fldXdDStBL7xrytgT",
+    "unit":        "fldAa2aZINAPgmR79",
+    "status":      "fldcSmrEQxoqpEQYF",
+    "renewal":     "fldhZw8IrmgLt1hLY",
+    "attachments": "fld8dwyOKs4AA0L9v",
+    "notes":       "fldzNfi71BXP1E3pj",
+    "tasks":       "fldnVZs4DKbcR3Ze9",
+}
+# The dated, renewable items. "Lock Code" and "Other" exist on the table but
+# are not compliance items and never count toward the reading.
+CERT_TYPES = ("GSC", "EICR", "EPC", "Fire Alarm Cert", "Emergency Lighting",
+              "HMO Cert", "Landlord Insurance")
+# What every property must hold, before its own Certificates Required field
+# adds to it (the rules are written out for Kevin in the brain:
+# Knowledge/property-compliance-requirements.md). Landlord insurance and an
+# EICR are universal; gas safety comes only from the field, because not every
+# property has gas; HMOs need a licence and a fire alarm certificate; a block
+# needs the fire alarm and emergency lighting for its common parts.
+REQUIRED_ALL = ("Landlord Insurance", "EICR")
+REQUIRED_BY_KIND = {
+    "HMO": ("HMO Cert", "Fire Alarm Cert"),
+    "Block": ("Fire Alarm Cert", "Emergency Lighting"),
+}
+# The field's own spelling of one option, and a non-item that lives in it.
+REQUIRED_FIELD_ALIASES = {"Landlord Insurace": "Landlord Insurance"}
+REQUIRED_FIELD_IGNORE = ("Completed",)
+RENEWAL_WINDOW_DAYS = 30
+PROPERTY_SCORE_STATE = os.path.join(STATE_DIR, "property-score.json")
+RENEWAL_STATE = os.path.join(STATE_DIR, "property-renewals.json")
+QUARTERLY_REVIEW_STATE = os.path.join(STATE_DIR, "property-review.json")
+QUARTERLY_REVIEW_NAME = "Property compliance review: full portfolio (quarterly)"
+COMPLIANCE_TASK_PREFIX = "COMPLIANCE:"
+
+
+def property_view(rec):
+    f = rec.get("fields", {})
+    kind = sel(f.get(PROPERTY_FIELDS["kind"])).strip()
+    field_req = []
+    for v in (f.get(PROPERTY_FIELDS["required"]) or []):
+        v = sel(v).strip()
+        v = REQUIRED_FIELD_ALIASES.get(v, v)
+        if v and v not in REQUIRED_FIELD_IGNORE:
+            field_req.append(v)
+    required = list(REQUIRED_ALL) + list(REQUIRED_BY_KIND.get(kind, ()))
+    for v in field_req:
+        if v not in required:
+            required.append(v)
+    active = f.get(PROPERTY_FIELDS["active"])
+    return {
+        "id": rec.get("id"),
+        "name": f.get(PROPERTY_FIELDS["name"], ""),
+        "short": f.get(PROPERTY_FIELDS["short"], "") or f.get(PROPERTY_FIELDS["name"], "")[:30],
+        "kind": kind,
+        "manager": (f.get(PROPERTY_FIELDS["manager"]) or "").strip(),
+        "managerEmail": f.get(PROPERTY_FIELDS["managerEmail"], ""),
+        "postcode": f.get(PROPERTY_FIELDS["postcode"], ""),
+        "required": required,
+        "active": bool(active[0]) if isinstance(active, list) and active else bool(active),
+    }
+
+
+def cert_view(rec):
+    f = rec.get("fields", {})
+    return {
+        "id": rec.get("id"),
+        "type": sel(f.get(CERT_FIELDS["type"])),
+        "propertyIds": links(f.get(CERT_FIELDS["property"])),
+        "unitIds": links(f.get(CERT_FIELDS["unit"])),
+        "status": sel(f.get(CERT_FIELDS["status"])),
+        "renewalDate": (f.get(CERT_FIELDS["renewal"]) or "")[:10],
+        "hasFile": bool(f.get(CERT_FIELDS["attachments"])),
+        "taskIds": links(f.get(CERT_FIELDS["tasks"])),
+    }
+
+
+def fetch_properties():
+    return [property_view(r) for r in query_records(
+        PROPERTIES_TABLE, fields=list(PROPERTY_FIELDS.values()))]
+
+
+def fetch_certificates():
+    return [cert_view(r) for r in query_records(
+        CERTIFICATES_TABLE, fields=list(CERT_FIELDS.values()))]
+
+
+def days_until(date_str, today):
+    """Days from today to an ISO date; None when the date is blank."""
+    if not date_str:
+        return None
+    return (datetime.strptime(date_str[:10], "%Y-%m-%d").date()
+            - datetime.strptime(today, "%Y-%m-%d").date()).days
+
+
+def item_state(days):
+    if days is None:
+        return "no date"
+    if days < 0:
+        return "expired"
+    if days <= RENEWAL_WINDOW_DAYS:
+        return "due"
+    return "in date"
+
+
+def compliance_pages(properties, certificates, today):
+    """Pure: the book. One page per active property, the LATEST certificate
+    of each type (the compliance page's rule: the newest renewal date wins,
+    and an expired certificate still beats no certificate), each item's
+    state, and the issues list the reading counts. Inactive properties are
+    left out of the reading but kept in the book so a stray certificate can
+    still be filed against them."""
+    by_prop = {}
+    for c in certificates:
+        if c["type"] not in CERT_TYPES:
+            continue
+        for pid in c["propertyIds"]:
+            held = by_prop.setdefault(pid, {})
+            cur = held.get(c["type"])
+            if cur is None or (c["renewalDate"] or "") > (cur["renewalDate"] or ""):
+                held[c["type"]] = c
+    pages = []
+    for p in sorted(properties, key=lambda x: x["name"]):
+        held = by_prop.get(p["id"], {})
+        items, issues = {}, []
+        for t in CERT_TYPES:
+            c = held.get(t)
+            if c is None:
+                if t in p["required"]:
+                    issues.append({"type": t, "state": "missing"})
+                continue
+            d = days_until(c["renewalDate"], today)
+            state = item_state(d)
+            items[t] = {"certificate": c["id"], "renewalDate": c["renewalDate"],
+                        "days": d, "state": state, "hasFile": c["hasFile"]}
+            if state in ("expired", "due", "no date"):
+                issues.append({"type": t, "state": state,
+                               "renewalDate": c["renewalDate"], "days": d})
+        pages.append({**p, "holds": items, "issues": issues})
+    return pages
+
+
+def compliance_book_pages():
+    return compliance_pages(fetch_properties(), fetch_certificates(),
+                            today_london())
+
+
+def compliance_reading(pages):
+    """Register metric (Kevin's definition, 2 Sep 2026): outstanding
+    compliance issues — an expired, missing or undated required item, latest
+    per property per type — plus what is due inside the 30-day window."""
+    expired = missing = undated = due = 0
+    for p in pages:
+        if not p["active"]:
+            continue
+        for i in p["issues"]:
+            if i["state"] == "expired":
+                expired += 1
+            elif i["state"] == "missing":
+                missing += 1
+            elif i["state"] == "no date":
+                undated += 1
+            elif i["state"] == "due":
+                due += 1
+    outstanding = expired + missing + undated
+    frag = (f"{outstanding} outstanding ({expired} expired, {missing} missing, "
+            f"{undated} undated); {due} due in {RENEWAL_WINDOW_DAYS} days")
+    return frag, {"outstanding": outstanding, "expired": expired,
+                  "missing": missing, "undated": undated, "dueSoon": due}
+
+
+def property_score():
+    props = fetch_properties()
+    certs = fetch_certificates()
+    # Controls: both populations are known non-empty (26 properties and 83
+    # certificates on 2 Sep 2026). An empty read is a broken read, and a
+    # broken read must never publish "0 outstanding".
+    if not props:
+        sys.exit("ERROR: control failed — zero properties read (26 existed on "
+                 "2 Sep 2026). The read is broken. No property score written.")
+    if not certs:
+        sys.exit("ERROR: control failed — zero certificate rows read (83 "
+                 "existed on 2 Sep 2026). The read is broken. No property "
+                 "score written.")
+    frag, stats = compliance_reading(compliance_pages(props, certs,
+                                                      today_london()))
+    write_register_reading("property", PROPERTY_REGISTER_ROW,
+                           PROPERTY_SCORE_STATE, frag, stats)
+
+
+def renewals_due(pages, today):
+    """Pure: which held items need a renewal task raised — inside the 30-day
+    window, or lapsed within the last week (a lapse the window missed while
+    the agent was paused). Missing items are the review's job, not this
+    trigger's: a trigger cannot renew what was never held."""
+    due = []
+    for p in pages:
+        if not p["active"]:
+            continue
+        for t, it in p["holds"].items():
+            d = it["days"]
+            if d is None or t not in p["required"] and d > RENEWAL_WINDOW_DAYS:
+                continue
+            if -7 <= d <= RENEWAL_WINDOW_DAYS:
+                due.append({"propertyId": p["id"], "property": p["short"],
+                            "type": t, "renewalDate": it["renewalDate"],
+                            "days": d, "certificate": it["certificate"],
+                            "manager": p["manager"]})
+    return due
+
+
+def ensure_renewal_tasks():
+    """Trigger (a) of the approved map: a certificate's renewal date lands
+    within 30 days, so a task lands on the agent's board. One task per
+    certificate per renewal date — the state file makes a date fire once and
+    the recent-task belt holds if the state file is lost."""
+    pages = compliance_book_pages()
+    due = renewals_due(pages, today_london())
+    if not due:
+        return
+    state = load_score_state(RENEWAL_STATE)
+    recent = {t.get("fields", {}).get(AF["name"], "")
+              for t in query_tasks(
+                  "IS_AFTER(CREATED_TIME(), DATEADD(NOW(), -60, 'days'))",
+                  minimal=True)}
+    created = []
+    for r in due:
+        key = f"{r['certificate']}:{r['renewalDate']}"
+        if state.get(key):
+            continue
+        name = (f"{COMPLIANCE_TASK_PREFIX} {r['type']} renewal due "
+                f"{r['renewalDate']} - {r['property']}")[:100]
+        if name not in recent:
+            _request("POST", f"/{TASKS}", {"typecast": True, "fields": {
+                REVIEW_TASK_FIELDS["name"]: name,
+                REVIEW_TASK_FIELDS["status"]: "Today",
+                REVIEW_TASK_FIELDS["due"]: today_london(),
+                REVIEW_TASK_FIELDS["team"]: [PROPERTY_REC_ID],
+                REVIEW_TASK_FIELDS["approver"]: {"id": KEVIN_APPROVER_USR},
+                REVIEW_TASK_FIELDS["priority"]: "High",
+                REVIEW_TASK_FIELDS["estimate"]: "45 min",
+                REVIEW_TASK_FIELDS["desc"]: (
+                    f"PROPERTY COMPLIANCE — renewal raised automatically by "
+                    f"agent-dispatch. The {r['type']} at {r['property']} "
+                    f"runs out on {r['renewalDate']} ({r['days']} days). "
+                    f"Managed by: {r['manager'] or 'us'}. Search everything "
+                    "first (the compliance book, the brain, both Drives, "
+                    "Gmail, Evernote): if a newer certificate or policy "
+                    "already exists, file it and close this. Otherwise work "
+                    "the lane on your register row (letting agent chase, "
+                    "three quotes to Roy, or TopCashback insurance) and file "
+                    "the result with agent-dispatch.py certificate."),
+            }})
+            created.append({"type": r["type"], "property": r["property"],
+                            "renewalDate": r["renewalDate"]})
+        state[key] = today_london()
+    os.makedirs(STATE_DIR, exist_ok=True)
+    with open(RENEWAL_STATE, "w") as fh:
+        json.dump(state, fh)
+    print(json.dumps({"agent": "property", "renewalsDue": len(due),
+                      "renewalTasksCreated": created}))
+
+
+def is_quarter_first_monday(now):
+    """First Monday of March, June, September or December, London time."""
+    return is_first_monday(now) and now.month in (3, 6, 9, 12)
+
+
+def ensure_quarterly_review():
+    """Trigger (c) of the approved map: the full portfolio review, quarterly.
+    The FIRST review is raised by the build session itself, not here."""
+    now = datetime.now(LONDON)
+    if not is_quarter_first_monday(now):
+        return
+    quarter = f"{now.year}-Q{(now.month - 1) // 3 + 1}"
+    state = load_score_state(QUARTERLY_REVIEW_STATE)
+    if state.get("quarter") == quarter:
+        return
+    existing = query_tasks(
+        "AND({Task Name}='" + QUARTERLY_REVIEW_NAME + "', "
+        "IS_AFTER(CREATED_TIME(), DATEADD(NOW(), -60, 'days')))",
+        max_records=1, minimal=True)
+    if not existing:
+        _request("POST", f"/{TASKS}", {"typecast": True, "fields": {
+            REVIEW_TASK_FIELDS["name"]: QUARTERLY_REVIEW_NAME,
+            REVIEW_TASK_FIELDS["status"]: "Today",
+            REVIEW_TASK_FIELDS["due"]: now.strftime("%Y-%m-%d"),
+            REVIEW_TASK_FIELDS["team"]: [PROPERTY_REC_ID],
+            REVIEW_TASK_FIELDS["approver"]: {"id": KEVIN_APPROVER_USR},
+            REVIEW_TASK_FIELDS["priority"]: "High",
+            REVIEW_TASK_FIELDS["estimate"]: "2 hours",
+            REVIEW_TASK_FIELDS["desc"]: (
+                "PROPERTY COMPLIANCE — quarterly full review (raised "
+                "automatically on the first Monday of the quarter). Walk every "
+                "property in the compliance book: confirm what it must hold, "
+                "find every certificate, licence and policy that exists "
+                "anywhere (Airtable, brain, both Drives, Gmail, Evernote, "
+                "Loom), file what is found, and prepare ONE plan of what is "
+                "missing in Kevin's priority order: insurance, gas safety, "
+                "then the rest. Also chase any repair task with Roy that has "
+                "not moved in 7 days. One submission, not one per issue."),
+        }})
+    os.makedirs(STATE_DIR, exist_ok=True)
+    with open(QUARTERLY_REVIEW_STATE, "w") as fh:
+        json.dump({"quarter": quarter, "raisedAt": now_iso(),
+                   "existing": bool(existing)}, fh)
+    print(json.dumps({"agent": "property", "quarterlyReview": quarter,
+                      "created": not existing}))
+
+
+def cmd_certificate(args):
+    """Link 5 of the approved map, and the ONE write path to the Property
+    Certificates table. A filed certificate needs the property, the type,
+    the renewal date and the document, or it is refused: a dated row with no
+    file is a claim, and a file with no date never alerts. verify fails any
+    COMPLIANCE task the agent completes without passing through here."""
+    if args.type not in CERT_TYPES:
+        sys.exit(f"ERROR: --type must be one of {', '.join(CERT_TYPES)}")
+    try:
+        datetime.strptime(args.renewal, "%Y-%m-%d")
+    except ValueError:
+        sys.exit("ERROR: --renewal must be YYYY-MM-DD — the date the "
+                 "certificate or policy runs out")
+    if not os.path.isfile(args.file):
+        sys.exit(f"ERROR: no such document to file: {args.file}")
+    props = {p["id"]: p for p in fetch_properties()}
+    if args.property not in props:
+        sys.exit(f"ERROR: {args.property} is not a Properties record — a "
+                 "certificate filed against the wrong record is invisible")
+    twins = [c for c in fetch_certificates()
+             if args.property in c["propertyIds"] and c["type"] == args.type
+             and c["renewalDate"] == args.renewal]
+    if twins:
+        sys.exit(f"ERROR: a {args.type} for {props[args.property]['short']} "
+                 f"running to {args.renewal} already exists ({twins[0]['id']})"
+                 " — filing it twice would double-count nothing and confuse "
+                 "the book. Attach to that row if the file is missing.")
+    fields = {
+        CERT_FIELDS["type"]: args.type,
+        CERT_FIELDS["property"]: [args.property],
+        CERT_FIELDS["status"]: "Active",
+        CERT_FIELDS["renewal"]: args.renewal,
+        CERT_FIELDS["tasks"]: [args.task],
+    }
+    if args.unit:
+        fields[CERT_FIELDS["unit"]] = [args.unit]
+    if args.note:
+        fields[CERT_FIELDS["notes"]] = f"{today_london()}: {args.note}"
+    created = _request("POST", f"/{CERTIFICATES_TABLE}",
+                       {"fields": fields, "typecast": True})
+    # The file goes on AFTER the row exists (the upload needs a record id),
+    # and a refused upload deletes the row again: a dated row with no
+    # document must never survive a failed run.
+    try:
+        filename = upload_file(created["id"], CERT_FIELDS["attachments"],
+                               args.file)
+    except SystemExit:
+        _request("DELETE", f"/{CERTIFICATES_TABLE}/{created['id']}")
+        raise
+    live = cert_view(_request(
+        "GET", f"/{CERTIFICATES_TABLE}/{created['id']}?returnFieldsByFieldId=true"))
+    print(json.dumps({"row": live["id"], "type": live["type"],
+                      "property": props[args.property]["short"],
+                      "renewalDate": live["renewalDate"],
+                      "file": filename, "hasFile": live["hasFile"]}))
+
+
+def property_selftest():
+    today = "2026-09-02"
+    props = [
+        {"id": "pA", "name": "A", "short": "A", "kind": "HMO", "manager": "",
+         "managerEmail": "", "postcode": "", "required": ["Landlord Insurance", "EICR", "HMO Cert", "Fire Alarm Cert", "GSC"],
+         "active": True},
+        {"id": "pB", "name": "B", "short": "B", "kind": "Single Let ", "manager": "Agent",
+         "managerEmail": "", "postcode": "", "required": ["Landlord Insurance", "EICR"],
+         "active": True},
+        {"id": "pC", "name": "C", "short": "C", "kind": "Single Let ", "manager": "",
+         "managerEmail": "", "postcode": "", "required": ["Landlord Insurance", "EICR"],
+         "active": False},
+    ]
+    certs = [
+        # A: old GSC then a newer one — latest wins and it is due in 20 days
+        {"id": "c1", "type": "GSC", "propertyIds": ["pA"], "unitIds": [], "status": "Expired", "renewalDate": "2025-01-01", "hasFile": True, "taskIds": []},
+        {"id": "c2", "type": "GSC", "propertyIds": ["pA"], "unitIds": [], "status": "Active", "renewalDate": "2026-09-22", "hasFile": True, "taskIds": []},
+        # A: EICR expired, insurance undated, HMO cert + fire alarm missing
+        {"id": "c3", "type": "EICR", "propertyIds": ["pA"], "unitIds": [], "status": "Active", "renewalDate": "2026-03-01", "hasFile": True, "taskIds": []},
+        {"id": "c4", "type": "Landlord Insurance", "propertyIds": ["pA"], "unitIds": [], "status": "Active", "renewalDate": "", "hasFile": False, "taskIds": []},
+        # B: everything in date; a Lock Code row must be ignored
+        {"id": "c5", "type": "EICR", "propertyIds": ["pB"], "unitIds": [], "status": "Active", "renewalDate": "2030-01-01", "hasFile": True, "taskIds": []},
+        {"id": "c6", "type": "Landlord Insurance", "propertyIds": ["pB"], "unitIds": [], "status": "Active", "renewalDate": "2027-06-01", "hasFile": True, "taskIds": []},
+        {"id": "c7", "type": "Lock Code", "propertyIds": ["pB"], "unitIds": [], "status": "", "renewalDate": "", "hasFile": False, "taskIds": []},
+        # C is inactive: its missing items never count
+    ]
+    pages = compliance_pages(props, certs, today)
+    frag, s = compliance_reading(pages)
+    assert s == {"outstanding": 4, "expired": 1, "missing": 2, "undated": 1,
+                 "dueSoon": 1}, s
+    assert frag == "4 outstanding (1 expired, 2 missing, 1 undated); 1 due in 30 days", frag
+    a = next(p for p in pages if p["id"] == "pA")
+    assert a["holds"]["GSC"]["certificate"] == "c2", "latest certificate must win"
+    assert {i["type"] for i in a["issues"] if i["state"] == "missing"} == {"HMO Cert", "Fire Alarm Cert"}
+    due = renewals_due(pages, today)
+    assert [(d["type"], d["days"]) for d in due] == [("GSC", 20)], due
+    # The property matcher: name-only, legal and creditor vetoes
+    assert property_match("Landlord insurance renewal - 23 Viola Street")
+    assert property_match("Sefton HMO licence fee overdue 23 Viola Street")
+    assert property_match("EICR certificate outstanding - 1406 Oldham Road")
+    assert not property_match("Close Brothers Premium Finance default notice on insurance")
+    assert not property_match("Boiler leak at 5 Dalham Place"), "repairs stay Roy's"
+    assert not property_match("Gas safety certificate", "solicitor letter attached")
+    assert not property_match("Insurance for Brittain Home")
+    assert is_quarter_first_monday(datetime(2026, 9, 7)) is True
+    assert is_quarter_first_monday(datetime(2026, 9, 14)) is False
+    assert is_quarter_first_monday(datetime(2026, 10, 5)) is False
+    print("selftest-property: all checks passed")
+
+
 # One row per per-agent housekeeping step the score command runs. A new role
 # agent's build session adds its reading function and ONE entry here — never
 # another copy of the loop or the change-gated register write (that is
@@ -3673,9 +4273,12 @@ SCORE_STEPS = (
     ("weekly-review", ensure_weekly_review),
     ("monthly-review", ensure_monthly_review),
     ("chase", ensure_chase_tasks),
+    ("property", property_score),
+    ("renewals", ensure_renewal_tasks),
+    ("quarterly-review", ensure_quarterly_review),
 )
 SCORE_SELFTESTS = (response_score_selftest, creditor_score_selftest,
-                   creditor_ledger_selftest)
+                   creditor_ledger_selftest, property_selftest)
 
 
 # ─── RECONCILE: work that finished on disk but never reached Airtable ──
@@ -3787,9 +4390,11 @@ def main():
     sub.add_parser("queue")
 
     sc = sub.add_parser("score",
-                        help="compute the Inbound Comms Response 24h metric "
-                             "and the Creditor Management ledger reading, "
-                             "and write each to its register Metric Score")
+                        help="compute the Inbound Comms Response 24h metric, "
+                             "the Creditor Management ledger reading and the "
+                             "Property Administration outstanding-issues "
+                             "reading, write each to its register Metric "
+                             "Score, and raise the engine's own tasks")
     sc.add_argument("--selftest", action="store_true",
                     help="run the offline maths checks, no Airtable access")
 
@@ -3909,6 +4514,24 @@ def main():
     lg.add_argument("--entity", help="which entity owes it")
     lg.add_argument("--lane", choices=PLAN_LANES)
 
+    ct = sub.add_parser("certificate",
+                        help="file a certificate, licence or insurance policy "
+                             "on the Property Certificates table — the ONE "
+                             "write path; refuses without property, type, "
+                             "renewal date AND the document")
+    ct.add_argument("task", help="the task this filing closes")
+    ct.add_argument("--property", required=True,
+                    help="Properties record id (rec...)")
+    ct.add_argument("--type", required=True,
+                    help="one of " + ", ".join(CERT_TYPES))
+    ct.add_argument("--renewal", required=True,
+                    help="YYYY-MM-DD the certificate or policy runs out")
+    ct.add_argument("--file", required=True,
+                    help="the document itself (PDF/JPG/PNG, under 5MB)")
+    ct.add_argument("--unit", help="Rental Unit record id, for a unit-level "
+                                   "certificate in a block")
+    ct.add_argument("--note", help="one line: who issued it, policy number")
+
     args = p.parse_args()
     # RETURN the handler's exit code. It used to be discarded, so a command that
     # signalled failure by returning 1 still exited 0 and every caller read it
@@ -3923,6 +4546,7 @@ def main():
             "lessons": cmd_lessons, "revise": cmd_revise,
             "attach": cmd_attach, "outcome": cmd_outcome,
             "reassign": cmd_reassign, "ledger": cmd_ledger,
+            "certificate": cmd_certificate,
             "handover-property": cmd_handover_property,
             "clear-alerts": cmd_clear_alerts}[args.cmd](args) or 0
 

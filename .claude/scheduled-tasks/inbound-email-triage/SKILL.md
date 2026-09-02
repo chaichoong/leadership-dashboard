@@ -124,6 +124,15 @@ the `list-unsubscribe` header (its presence = machine mail).
    HMRC, accountants, insurance, tenant matters, complaints, suppliers,
    utilities, council, viewing requests, certificates, invoices, bookings,
    key relationships. The AI CEO routes the task to the right role agent.
+   PROPERTY COMPLIANCE (build 2 Sep 2026): a certificate, licence, landlord
+   insurance or council inspection matter about one of Kevin's properties is
+   the Property Administration agent's lane, and the dispatch engine routes
+   it there BY THE TASK NAME. So name it for the matter: start the Task Name
+   with `COMPLIANCE:` and name the item and the property ("COMPLIANCE: gas
+   safety certificate due - 22 Newton Street", "COMPLIANCE: landlord
+   insurance renewal - 5 Dalham Place"). A contractor's invoice or a
+   premium-finance notice is money owed and stays in the creditor lane; a
+   repair is lane 13 (Roy, same hour) as below.
    TIER-1 CHECK (mirror agent-dispatch): anything touching debts, litigation,
    enforcement, bailiffs, the restraint order, or sums Kevin owes or is owed →
    Priority `Urgent`, and the task Description must say this is a tier-1

@@ -211,7 +211,7 @@ describe('register metrics (Kevin\'s two, 25 Aug 2026)', () => {
     // a new agent's build session adds an entry and this stays true.
     expect(pyEval('[label for label, fn in mod.SCORE_STEPS]'))
       .toEqual(['response', 'creditor', 'weekly-review', 'monthly-review',
-                'chase']);
+                'chase', 'property', 'renewals', 'quarterly-review']);
     expect(score).toMatch(/for label, fn in SCORE_STEPS/);
     expect(score).toMatch(/sys\.exit\("ERROR: score failed/);
     // The one shared register write: change-gated, per-agent state file.
