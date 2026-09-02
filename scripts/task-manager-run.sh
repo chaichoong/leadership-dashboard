@@ -45,6 +45,13 @@ mkdir -p "$SCRATCH"
 # shell resolves them identically.
 export TASK_MANAGER_SCRATCH="$SCRATCH"
 export TASK_MANAGER_LOG_DIR="$LOG_DIR"
+# When THIS run began, for task-manager.py verify: a board.json or gate.json
+# older than this is a previous slot's read, and a report built on it is a
+# report about a board nobody looked at (finding 20260902-task-manager-17-435:
+# the 17:00 slot reported 259 open tasks off a hand-rolled read while
+# board.json still carried the 13:00 slot's).
+export TASK_MANAGER_RUN_START="$(date +%s)"
+rm -f "$SCRATCH/verify-result.json"
 
 # A missing skill file must be a loud failure, not a polite no-op: headless
 # claude exits 0 after saying it cannot find the file, which run-job.sh would
@@ -94,10 +101,25 @@ trap 'exit 130' INT
 cd "$REPO" || { echo "ERROR: repo not found at $REPO" >&2; exit 1; }
 
 "$CLAUDE" -p "You are the Task Manager agent's scheduled run. THIS RUN IS THE $SLOT_LABEL SLOT — that is the wall clock at run start, read for you. Head your report with exactly '$SLOT_LABEL slot' and never substitute a slot you worked out yourself. Do this skill in full: $SKILL
-Rules for the whole run: the BOARD PASS ALWAYS COMPLETES FIRST — never start doing work before every stuck task has its move decided. Every task write goes through scripts/agent-dispatch.py or scripts/task-manager.py — never a raw Airtable write to a task. Never route work to Mica or Ericamae (Kevin's ruling, 25 Aug 2026). Never send, reply, pay, or delete anything yourself. Working and temp files go ONLY under $SCRATCH — NEVER under the repo, and never in monitoring/ (public repository; task content includes tenant, creditor and legal detail; counts-only reports in monitoring/ are fine). A broken read is reported loudly, never treated as a quiet board. Do not take the queue lock (this run already holds it). Do not edit, commit, or push code; file anything needing a code change via scripts/findings.py. Complete the closing steps in full (score, publish, verify). End with at most twenty lines of counts only — never task content or record IDs." \
+Rules for the whole run: your working directory for every file you write is $SCRATCH (absolute path) — helper scripts, proposal texts, briefings, JSON, everything; the repo is PUBLIC and the after-run sweep quarantines anything you leave in it. Record IDs come ONLY from board.json, gate.json or dispatch-queue.json — copy them programmatically, never retype one (a retyped id with one wrong letter escalated nothing on 2 Sep 2026 and read as a permissions error). The BOARD PASS ALWAYS COMPLETES FIRST — never start doing work before every stuck task has its move decided. Every task write goes through scripts/agent-dispatch.py or scripts/task-manager.py — never a raw Airtable write to a task. Never route work to Mica or Ericamae (Kevin's ruling, 25 Aug 2026). Never send, reply, pay, or delete anything yourself. Working and temp files go ONLY under $SCRATCH — NEVER under the repo, and never in monitoring/ (public repository; task content includes tenant, creditor and legal detail; counts-only reports in monitoring/ are fine). A broken read is reported loudly, never treated as a quiet board. Do not take the queue lock (this run already holds it). Do not edit, commit, or push code; file anything needing a code change via scripts/findings.py. Complete the closing steps in full (score, publish, verify). End with at most twenty lines of counts only — never task content or record IDs." \
   --permission-mode acceptEdits \
   --allowedTools "${AGENT_ALLOWED_TOOLS[@]}" >> "$LOG" 2>&1
 RC=$?
+
+# The verify verdict is a FILE, not a sentence (finding
+# 20260902-task-manager-17-435). `claude -p` prints only the agent's closing
+# text, so the log tail carried "VERIFY: FAILED" in the agent's own words
+# and the failure-marker pattern ("VERIFY FAIL") never matched; the run was
+# reported OK with a failed self-check inside it. task-manager.py verify now
+# writes $SCRATCH/verify-result.json on every run, pass or fail. A verdict
+# that is missing (verify never ran) or false is written into the log tail
+# in the marker form, so the shared epilogue fails the run with its reason.
+__VERDICT="$SCRATCH/verify-result.json"
+if [ ! -f "$__VERDICT" ] || [ ! "$__VERDICT" -nt "$__MARKER" ]; then
+  echo "TASK-MANAGER VERIFY FAIL: verify never ran this slot (no fresh $__VERDICT)" >> "$LOG"
+elif ! /usr/bin/python3 -c "import json,sys; sys.exit(0 if json.load(open(sys.argv[1])).get('verified') is True else 1)" "$__VERDICT" 2>/dev/null; then
+  echo "TASK-MANAGER VERIFY FAIL: $(/usr/bin/python3 -c "import json,sys; d=json.load(open(sys.argv[1])); print('; '.join(d.get('problems') or ['verdict false']))" "$__VERDICT" 2>/dev/null | cut -c1-400)" >> "$LOG"
+fi
 
 # Shared epilogue (finding 20260827-phase-2-381): privacy sweep, done line,
 # and exit-code semantics live in ONE place now — scripts/slot-postrun.sh.

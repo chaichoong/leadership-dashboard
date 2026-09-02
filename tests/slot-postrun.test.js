@@ -216,3 +216,55 @@ describe('repo TOP-LEVEL sweep (1 Sep 2026: report files landed in the repo root
     expect(existsSync(old)).toBe(true);
   });
 });
+
+describe('repo-WIDE sweep (2 Sep 2026, finding 435: helper scripts and a briefing in scripts/ and deeper)', () => {
+  // The 17:00 task-manager slot wrote ten scripts/_tm_*.py helpers, a
+  // close-proposal text and a rec*-output.md briefing with message content
+  // into the public checkout. The top-level sweep saw none of it.
+  it('quarantines an underscore helper under scripts/ even with no leak content', () => {
+    mkdirSync(join(repo, 'scripts'));
+    const stray = join(repo, 'scripts', '_tm_board_dups.py');
+    writeFileSync(stray, 'import json\nprint("no private content here")\n');
+    const r = runPostrun({ rc: 0 });
+    expect(r.status).toBe(0);
+    expect(r.stderr).toContain('PRIVACY');
+    expect(existsSync(stray)).toBe(false);
+    expect(existsSync(join(scratch, '_tm_board_dups.py'))).toBe(true);
+  });
+
+  it('quarantines a rec*-output.md briefing and a deep leak-content file', () => {
+    mkdirSync(join(repo, 'scripts'));
+    mkdirSync(join(repo, 'docs'));
+    const brief = join(repo, 'scripts', 'recr4lh8H9kALXMFy-output.md');
+    writeFileSync(brief, 'TASK ID: recr4lh8H9kALXMFy\nTASK NAME: set a password\n');
+    const deep = join(repo, 'docs', 'notes.txt');
+    writeFileSync(deep, 'CREDITOR MATTER — never in a public repo');
+    const r = runPostrun({ rc: 0 });
+    expect(r.status).toBe(0);
+    expect(existsSync(brief)).toBe(false);
+    expect(existsSync(deep)).toBe(false);
+  });
+
+  it('leaves tests/ fixtures, harmless untracked code, tracked files and the scratch dir alone', () => {
+    mkdirSync(join(repo, 'tests'));
+    mkdirSync(join(repo, 'js'));
+    const fixture = join(repo, 'tests', 'new-case.test.js');
+    writeFileSync(fixture, "const s = 'CREDITOR MATTER fixture';");
+    const code = join(repo, 'js', 'feature.js');
+    writeFileSync(code, 'export const x = 1;');
+    const inScratch = join(scratch, 'close_recABC.txt');
+    writeFileSync(inScratch, 'CLOSE PROPOSAL: duplicate');
+    const tracked = join(repo, 'js', 'tracked.js');
+    writeFileSync(tracked, '"description": "field"');
+    sh('git', ['-C', repo, 'add', 'js/tracked.js']);
+    sh('git', ['-C', repo, '-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-q', '-m', 'seed']);
+    writeFileSync(tracked, '"description": "touched this run"');
+    const r = runPostrun({ rc: 0 });
+    expect(r.status).toBe(0);
+    expect(r.stderr).not.toContain('PRIVACY');
+    expect(existsSync(fixture)).toBe(true);
+    expect(existsSync(code)).toBe(true);
+    expect(existsSync(inScratch)).toBe(true);
+    expect(existsSync(tracked)).toBe(true);
+  });
+});

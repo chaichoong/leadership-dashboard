@@ -470,3 +470,71 @@ print(json.dumps(m.lane_view(f, now, cache={})))
         expect(skill).toMatch(/Needs no decision from Kevin\?/);
     });
 });
+
+// Finding 20260902-task-manager-17-435. The 17:00 slot on 2 Sep 2026 never
+// re-read the board into scratch (board.json still held the 13:00 read),
+// reported counts from a hand-rolled read, escalated a retyped record id
+// that does not exist, and wrote "VERIFY: FAILED" in its own words — which
+// the failure-marker pattern ("VERIFY FAIL") never saw, so the wrapper
+// exited 0. Three guards: verify checks the reads are THIS slot's, verify
+// writes a machine-readable verdict, and the runner fails the run off that
+// file rather than off the agent's prose.
+describe('verify proves the slot read its own board and leaves a verdict file', () => {
+    const { mkdtempSync, writeFileSync, utimesSync, readFileSync: rf } = require('node:fs');
+    const os = require('node:os');
+    function pyVerify({ boardCount, stale = false, reportCount = boardCount, withGate = true }) {
+        const scratch = mkdtempSync(path.join(os.tmpdir(), 'tm-verify-'));
+        const start = Math.floor(Date.now() / 1000);
+        const boardPath = path.join(scratch, 'board.json');
+        writeFileSync(boardPath, JSON.stringify({ counts: { openTasksRead: boardCount } }));
+        if (withGate) writeFileSync(path.join(scratch, 'gate.json'), '{"lane": []}');
+        if (stale) {
+            const past = new Date((start - 3600) * 1000);
+            utimesSync(boardPath, past, past);
+        }
+        const report = path.join(scratch, 'report.json');
+        writeFileSync(report, JSON.stringify({ board: { openTasksRead: reportCount, stuck: 0 }, actions: [], scoreWritten: true }));
+        const out = execFileSync('python3', ['-c', `
+import json, importlib.util, sys, datetime
+spec = importlib.util.spec_from_file_location("tm", ${JSON.stringify(path.join(root, 'scripts/task-manager.py'))})
+m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+m.read_state = lambda: {"history": {datetime.date.today().isoformat(): {}}}
+m.query_all = lambda *a, **k: (_ for _ in ()).throw(RuntimeError("network reached"))
+try:
+    m.cmd_verify(sys.argv[1]); code = 0
+except SystemExit as e:
+    code = e.code
+print(json.dumps({"code": code}))
+`, report], { encoding: 'utf8', env: { ...process.env, TASK_MANAGER_SCRATCH: scratch, TASK_MANAGER_RUN_START: String(start - 60) } });
+        const verdict = JSON.parse(rf(path.join(scratch, 'verify-result.json'), 'utf8'));
+        return { code: JSON.parse(out.trim().split('\n').pop()).code, verdict };
+    }
+
+    it('passes when board.json is fresh and the report count matches it, and writes verified:true', () => {
+        const r = pyVerify({ boardCount: 259 });
+        expect(r.code).toBe(0);
+        expect(r.verdict.verified).toBe(true);
+    });
+    it('fails a board.json older than the run start (the 17:00 case), verdict false with the reason', () => {
+        const r = pyVerify({ boardCount: 259, stale: true });
+        expect(r.code).toBe(1);
+        expect(r.verdict.verified).toBe(false);
+        expect(r.verdict.problems.join(' ')).toMatch(/PREVIOUS slot/);
+    });
+    it('fails a report whose open count is not the board read\'s, and a missing gate.json', () => {
+        const r = pyVerify({ boardCount: 315, reportCount: 259, withGate: false });
+        expect(r.code).toBe(1);
+        const text = r.verdict.problems.join(' ');
+        expect(text).toMatch(/not built from this slot/);
+        expect(text).toMatch(/gate\.json missing/);
+    });
+    it('the runner exports the run start, clears the old verdict, and fails the run off the verdict file', () => {
+        expect(runner).toMatch(/export TASK_MANAGER_RUN_START=/);
+        expect(runner).toMatch(/rm -f "\$SCRATCH\/verify-result\.json"/);
+        expect(runner).toMatch(/verify never ran this slot/);
+        expect(runner).toMatch(/TASK-MANAGER VERIFY FAIL: \$\(/);
+        // Both branches write the marker form the epilogue's BAD pattern matches.
+        expect(runner).toMatch(/VERIFY FAIL/);
+        expect(runner).toMatch(/Record IDs come ONLY from board\.json/);
+    });
+});

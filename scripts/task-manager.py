@@ -822,12 +822,76 @@ def cmd_verify(report_path):
     if date.today().isoformat() not in state.get("history", {}):
         problems.append("no score history entry for today — score claim is false")
 
+    problems.extend(freshness_problems(board))
+
+    verdict = {
+        "verified": not problems,
+        "problems": problems,
+        "actionsChecked": checked,
+        "actions": len(actions),
+        "at": datetime.now(timezone.utc).isoformat(),
+    }
+    write_verdict(verdict)
     if problems:
         for p in problems:
             print("TASK-MANAGER VERIFY FAIL: %s" % p, file=sys.stderr)
         sys.exit(1)
     print(json.dumps({"verified": True, "actionsChecked": checked,
                       "actions": len(actions)}))
+
+
+def freshness_problems(report_board, scratch=None, run_start=None):
+    """The slot's own reads must be THIS slot's. Finding
+    20260902-task-manager-17-435: the 17:00 pass reported 259 open tasks from
+    a hand-rolled read while scratch/board.json still held the 13:00 slot's
+    315, and said "gate.json not in scratch" while it sat there from 13:07.
+    A report built on a board nobody re-read is a report about nothing. When
+    the runner exports the run start, board.json and gate.json must be newer
+    than it, and the report's open count must be the board's."""
+    scratch = scratch or os.environ.get("TASK_MANAGER_SCRATCH")
+    run_start = run_start if run_start is not None else os.environ.get("TASK_MANAGER_RUN_START")
+    if not scratch or not run_start:
+        return []
+    try:
+        start = float(run_start)
+    except ValueError:
+        return ["TASK_MANAGER_RUN_START is not an epoch: %r" % run_start]
+    out = []
+    for name in ("board.json", "gate.json"):
+        p = Path(scratch) / name
+        if not p.exists():
+            out.append("%s missing from scratch — this slot never ran the %s read"
+                       % (name, name.split(".")[0]))
+            continue
+        if p.stat().st_mtime < start:
+            out.append("%s is from a PREVIOUS slot (older than this run's start) — "
+                       "the board was never re-read this slot" % name)
+            continue
+        if name == "board.json":
+            try:
+                counts = (json.loads(p.read_text()).get("counts") or {})
+            except (OSError, ValueError) as e:
+                out.append("board.json unreadable: %s" % e)
+                continue
+            if counts.get("openTasksRead") != report_board.get("openTasksRead"):
+                out.append("report says %s open tasks but board.json read %s — the "
+                           "report was not built from this slot's board read"
+                           % (report_board.get("openTasksRead"), counts.get("openTasksRead")))
+    return out
+
+
+def write_verdict(verdict):
+    """verify-result.json in scratch: the machine-readable verdict the runner
+    gates on. Written on pass AND fail, before any exit."""
+    scratch = os.environ.get("TASK_MANAGER_SCRATCH")
+    if not scratch:
+        return
+    try:
+        Path(scratch).mkdir(parents=True, exist_ok=True)
+        (Path(scratch) / "verify-result.json").write_text(json.dumps(verdict, indent=1))
+    except OSError as e:
+        print("TASK-MANAGER VERIFY FAIL: could not write verdict file: %s" % e,
+              file=sys.stderr)
 
 
 def cmd_selftest():
