@@ -11,7 +11,7 @@
 
 import { describe, it, expect, beforeEach, afterAll, vi } from 'vitest';
 import { execFile, execFileSync } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync, readdirSync, mkdirSync, chmodSync, appendFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync, readdirSync, mkdirSync, chmodSync, appendFileSync, utimesSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
@@ -1230,6 +1230,94 @@ describe('a sleeping job cannot hold the lock', () => {
     expect(existsSync(marker), 'the evicted job ran to completion anyway').toBe(false);
     expect(events().some((e) => e.state === 'lease-lost' && e.job === 'evicted'),
       'losing the lock was never recorded').toBe(true);
+  });
+
+  // -------------------------------------------------------------------------
+  // 2 Sep 2026, task-manager 13:00 slot. The heartbeat rewrote holder.json with
+  // open(path, "w") — truncate, then write. inbound-triage, polling every two
+  // seconds, read the file in the gap, decoded nothing, and break_stale_lock
+  // judged the lock ownerless: its age gate keyed on the lock DIRECTORY's
+  // mtime (fixed at acquire time), so a live 15-minute-old lock read as 903s
+  // of debris. The thief acquired, the heartbeat saw a foreign holder and
+  // SIGKILLed a run that had done nothing wrong. No score, no report, no
+  // done line, no alarm. Same shape on 27 Aug (prospecting, "lock is not held
+  // by anyone": lapsed through sleep, nobody had taken it, run killed anyway).
+  // -------------------------------------------------------------------------
+
+  it('holder rewrites never expose a live lock: an unreadable-but-fresh holder is not debris', () => {
+    run(['acquire', 'beating', '--no-stale-check', '--lease', '30']);
+    const lockDir = join(stateDir, 'lock');
+    const holderFile = join(lockDir, 'holder.json');
+    // The directory stamp is old (the lock was taken long ago)...
+    const old = new Date(Date.now() - 20 * 60 * 1000);
+    utimesSync(lockDir, old, old);
+    // ...and the holder file is what a reader sees mid-rewrite: empty, but
+    // stamped NOW because a heartbeat just touched it.
+    writeFileSync(holderFile, '');
+    const thief = run(['acquire', 'thief', '--no-stale-check', '--timeout', '0.02']);
+    expect(thief.code, 'a live lock was stolen because one read of its holder flickered').toBe(75);
+    expect(events().some((e) => e.state === 'lock-broken')).toBe(false);
+    rmSync(lockDir, { recursive: true, force: true });
+  });
+
+  it('an unreadable holder older than a whole lease IS debris and is cleared', () => {
+    run(['acquire', 'crashed', '--no-stale-check', '--lease', '30']);
+    const lockDir = join(stateDir, 'lock');
+    const holderFile = join(lockDir, 'holder.json');
+    writeFileSync(holderFile, '');
+    const old = new Date(Date.now() - 20 * 60 * 1000);
+    utimesSync(holderFile, old, old);
+    utimesSync(lockDir, old, old);
+    const next = run(['acquire', 'nextday', '--no-stale-check', '--timeout', '0.05']);
+    expect(next.code, 'genuine debris blocked the queue').toBe(0);
+    expect(events().some((e) => e.state === 'lock-broken' && /unreadable/.test(e.reason))).toBe(true);
+    run(['release', 'nextday']);
+  });
+
+  it('writes the holder file atomically — no truncate-then-write anywhere', () => {
+    const body = src();
+    expect(body).toMatch(/os\.replace\(tmp, HOLDER_FILE\)/);
+    // The one legitimate direct write is inside the staging directory that
+    // try_take_lock renames into place whole. Nothing may open the LIVE
+    // holder path for writing.
+    expect(body).not.toMatch(/open\(HOLDER_FILE,\s*["']w["']\)/);
+  });
+
+  it('re-takes a lapsed lock nobody claimed instead of killing the run', async () => {
+    const marker = join(stateDir, 'retaken-done.txt');
+    const body = `import time; time.sleep(3); open(${JSON.stringify(marker)}, 'w').write('done')`;
+    const job = runAsync(['run', 'sleeper', '--no-stale-check', '--lease', '5',
+      '--', 'python3', '-c', body], { env: { JOB_QUEUE_HEARTBEAT: '0.3' } });
+    // The lock lapses and is cleared as debris while the job sleeps, but no
+    // other job takes it: there is nobody to collide with.
+    await new Promise((r) => setTimeout(r, 1000));
+    rmSync(join(stateDir, 'lock'), { recursive: true, force: true });
+    const r = await job;
+    expect(r.code, 'a run nobody displaced was killed').toBe(0);
+    expect(existsSync(marker)).toBe(true);
+    expect(events().some((e) => e.state === 'lock-retaken' && e.job === 'sleeper')).toBe(true);
+    expect(events().some((e) => e.state === 'lease-lost' && e.job === 'sleeper')).toBe(false);
+  });
+
+  it('stops a displaced child with TERM first, so its wrapper can write a done line', async () => {
+    const marker = join(stateDir, 'term-seen.txt');
+    const body = `import signal, sys, time
+def bye(*a):
+    open(${JSON.stringify(marker)}, 'w').write('term')
+    sys.exit(143)
+signal.signal(signal.SIGTERM, bye)
+time.sleep(8)`;
+    const job = runAsync(['run', 'displaced', '--no-stale-check', '--lease', '5',
+      '--', 'python3', '-c', body], { env: { JOB_QUEUE_HEARTBEAT: '0.3' } });
+    await new Promise((r) => setTimeout(r, 1200));
+    writeFileSync(join(stateDir, 'lock', 'holder.json'), JSON.stringify({
+      job: 'thief', mode: 'wrapped', acquired_at: Date.now() / 1000,
+      lease_until: Date.now() / 1000 + 3600,
+    }));
+    const r = await job;
+    expect(r.code).toBe(70);
+    expect(existsSync(marker), 'the child was SIGKILLed before it could record its own death').toBe(true);
+    rmSync(join(stateDir, 'lock'), { recursive: true, force: true });
   });
 
   it('heartbeat reports a lost lock with its own exit code, not a usage error', () => {

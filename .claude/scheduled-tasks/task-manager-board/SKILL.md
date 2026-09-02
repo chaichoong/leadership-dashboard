@@ -96,7 +96,24 @@ safe because they are idempotent, not because repeating them is free.
     cd ~/knowledge-os/logs/task-manager/scratch
     python3 /Users/kevinbrittain/Projects/leadership-dashboard/scripts/task-hygiene-sweep.py audit
 
-Then apply the **auto tier only**, dry run first, exactly as the old sweep did:
+The audit writes a WORKLIST (`task-sweep-worklist-<date>.json`, key `tasks`):
+each task's `gaps` and `context`, plus `reference` (businesses, time estimate
+options). It lists gaps; it never decides values. **You author the decisions
+file** — feeding the worklist straight to `apply` is refused in one line
+(2 Sep 2026, finding 434: that is exactly what happened, and the step
+reported "broken" for a day). Write
+`$TASK_MANAGER_SCRATCH/task-sweep-decisions-<date>.json` as:
+
+    {"decisions": [{"recordId": "rec...", "field": "timeEstimate", "value": "30 min",
+                    "reason": "one-line why"}]}
+
+Auto-tier fields only, one entry per gap you are SURE of from the task's own
+context: `timeEstimate` (one of the options in `reference.timeEstimateOptions`),
+`business` (a record id from `reference.businesses`, never a name), `dueDate`
+(YYYY-MM-DD, today to 90 days out, only when the task names its own date).
+A gap you cannot decide from the context stays a gap — a guess written to
+Airtable looks exactly like a fact. Then apply the **auto tier only**, dry run
+first, exactly as the old sweep did:
 
     python3 .../scripts/task-hygiene-sweep.py apply --decisions <decisions-file> --tier auto --dry-run
     python3 .../scripts/task-hygiene-sweep.py apply --decisions <decisions-file> --tier auto
@@ -174,7 +191,11 @@ out of your list — the board subtracted dispatch's tasks in code):
    `closable` twins, and its `untouchable` twins. `annotate` the keeper with
    anything unique from each closable twin (one line per twin), then
    `close`-propose each id in `closable` with output
-   "CLOSE PROPOSAL: duplicate of <keeper id> — folded into it". Never close
+   "CLOSE PROPOSAL: duplicate of <keeper id> — folded into it". The gate
+   accepts a CLOSE PROPOSAL on a system-alert thread (an Apps Script or
+   Cloudflare failure mail) — folding a duplicate alert is hygiene, not
+   "investigate the script", and was wrongly refused for three slots on
+   1-2 Sep 2026. Never close
    the keeper; one proposal per task even when a folded task appears in two
    groups. `untouchable` twins sit at Status Approval — report them, never
    touch them HERE (their Agent Output is waiting on Kevin; the step 2b
@@ -327,7 +348,10 @@ LEADING with what should have moved and did not:
 2. Duplicate threads: the board's `duplicateGroups` and `duplicateExtras`
    counts, and what was proposed for each group this slot. Zero is the only
    healthy number.
-3. Waiting on Kevin: count and the 5 oldest with hours waiting.
+3. Waiting on Kevin: count and the 5 oldest with hours waiting — read
+   `hoursWaiting` off each `waitingOnKevin` view in board.json (anchored on
+   the Slack card time, Created Time as fallback). Never write 0 for a
+   value you did not read; a missing figure is reported as missing.
 4. Gate health (from gate.json): lane size, median age in hours, cleanse
    proposals made this slot, and the cleanse remainder still to judge.
 5. Moves made this slot, by kind.
