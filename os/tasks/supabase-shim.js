@@ -23,7 +23,7 @@
   const TASKS = 'tblqB8b22hKBL4PF1', PROJECTS = 'tblHrpTMd5LNYn8v1',
         BUSINESSES = 'tblpqkvWJJo8Uu25q', PROPS = 'tbl6f0OkAmTC2jbuG',
         TEAM = 'tblco0p2OnlLQVAX7', COMPL = 'tblxnBxgD9pzLlvgl',
-        MEETINGS = 'tblNodbh9B3WLzCIK';
+        MEETINGS = 'tblNodbh9B3WLzCIK', ACTIVITY = 'tbl2ZTHBDBPo681UL';
 
   const M = {};
   M[TASKS] = { source: 'tasks', write: 'tasks', map: {
@@ -212,6 +212,34 @@
     return { id: data.id, text: data.body, createdTime: data.created_at, author: { name: data.author_name, email: data.author_email } };
   }
 
+  // ── task activity (audit trail) ──
+  // The page writes entries id-keyed (returnFieldsByFieldId=true) and reads them
+  // back by field NAME, filtered by {TaskId}='...'. Store name-keyed + a task_id
+  // column; convert the incoming id-keyed write to names here.
+  const ACT_ID2NAME = {
+    fld8L7jkAl0fZTj2v: 'Activity ID', fldt6HxujV1G7qciw: 'Task', fldSnPrhxVjOlrKRO: 'TaskId',
+    fldS82AEmQQmp8HX9: 'Task Name', fldhhv2FNSLxUFK21: 'Actor', fld6Sdd4wAuCbGlWB: 'Actor Email',
+    fld1ywgv5GDZG7Ke0: 'Field', fldLU5oE32TIZPwEB: 'Summary', fldWMf3c4Cc7paqHu: 'From',
+    fldVTCAZD87I897Fl: 'To', fldCnAcIDuoNtYLui: 'Source', fldUj4SUqAdW4Tl1D: 'At',
+  };
+  async function listActivity(formula) {
+    const mm = /\{TaskId\}='([^']*)'/.exec(decodeURIComponent(formula || ''));
+    const taskId = mm ? mm[1] : null;
+    let q = sb.from('task_activity').select('*').order('created_at', { ascending: false }).limit(50);
+    if (taskId) q = q.eq('task_id', taskId);
+    const { data, error } = await q;
+    if (error) throw new Error(error.message);
+    return { records: (data || []).map(r => ({ id: r.id, fields: r.fields || {}, createdTime: r.created_at })) };
+  }
+  async function createActivity(idKeyed) {
+    const fields = {};
+    for (const fid in (idKeyed || {})) fields[ACT_ID2NAME[fid] || fid] = idKeyed[fid];
+    const task_id = fields.TaskId || null;
+    const { data, error } = await sb.from('task_activity').insert({ task_id, fields }).select().single();
+    if (error) throw new Error(error.message);
+    return { id: data.id, fields: data.fields || {}, createdTime: data.created_at };
+  }
+
   // ── attachments (Storage) ──
   async function uploadAttachment(taskId, fieldId, payload) {
     const { filename, file, contentType } = payload;
@@ -252,6 +280,11 @@
           if (method === 'GET') return json(await listComments(recId));
           if (method === 'POST') { const b = JSON.parse(init.body || '{}'); return json(await createComment(recId, b.text)); }
           if (method === 'DELETE') { await sb.from('task_comments').delete().eq('id', commentId); return json({ id: commentId, deleted: true }); }
+        }
+        // task activity: /{ACTIVITY}?filterByFormula={TaskId}='id' (GET) or ?returnFieldsByFieldId (POST)
+        if (tableId === ACTIVITY) {
+          if (method === 'GET') { const url = new URL(urlStr); return json(await listActivity(url.searchParams.get('filterByFormula') || '')); }
+          if (method === 'POST') { const b = JSON.parse(init.body || '{}'); return json(await createActivity(b.fields || {})); }
         }
         if (!M[tableId]) return realFetch(input, init); // unmapped table → let it hit Airtable
         const url = new URL(urlStr);
