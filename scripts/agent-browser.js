@@ -258,9 +258,26 @@ async function withPage(profile, headed, fn) {
   if (!chromium) die(`playwright not found (tried: ${tried.join(', ')}). Run npm install in ${REPO}.`);
   const dir = path.join(PROFILE_ROOT, profile || 'default');
   fs.mkdirSync(dir, { recursive: true });
-  const ctx = await chromium.launchPersistentContext(dir, {
+  // Prefer Kevin's installed Google Chrome over Playwright's bundled test build
+  // (2 Sep 2026). The bundled Chromium announces itself as automated
+  // (navigator.webdriver = true, "controlled by automated test software"),
+  // and Evernote's login refused Kevin's own valid credentials in it while the
+  // same credentials worked in his real Chrome. Real Chrome with the
+  // automation switch off is what a person's browser looks like, and the
+  // existing sessions (Loom, TopCashback) survived the switch on a copied
+  // profile before this landed. Falls back to the bundled build when Chrome is
+  // absent, so an unattended run never dies on a missing app.
+  const launch = {
     headless: !headed,
     viewport: { width: 1280, height: 900 },
+  };
+  if (fs.existsSync('/Applications/Google Chrome.app')) {
+    launch.channel = 'chrome';
+    launch.ignoreDefaultArgs = ['--enable-automation'];
+  }
+  const ctx = await chromium.launchPersistentContext(dir, launch);
+  await ctx.addInitScript(() => {
+    Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
   });
   try {
     const page = ctx.pages()[0] || await ctx.newPage();
