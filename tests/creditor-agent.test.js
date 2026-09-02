@@ -336,7 +336,7 @@ describe('the creditor record book (revamp, Kevin-approved chain, 1 Sep 2026)', 
     const chase = src.slice(src.indexOf('def ensure_chase_tasks'),
                             src.indexOf('def creditor_score_selftest'));
     expect(chase).toMatch(/CREDITOR MATTER/);
-    expect(chase).toMatch(/\[CREDITOR_REC_ID\]/);
+    expect(chase).toMatch(/raise_engine_task\(\s*name, CREDITOR_REC_ID/);
     expect(chase).toMatch(/CHASE_STATE/);      // one chase per page per date
   });
 });
