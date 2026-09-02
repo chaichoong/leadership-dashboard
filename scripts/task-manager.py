@@ -416,7 +416,53 @@ def task_view(rec, activity_ids, dispatch_ids, now):
     return bucket, is_kevin, view
 
 
-def lane_view(f, now=None):
+_GATE_MOD = None
+
+
+def _load_gate():
+    """create-agent-task.py as a module — imported, never copied, so the
+    auto-reply signal the lane check uses can never drift from the one the
+    creation gate uses (same pattern as inbound-triage.py)."""
+    global _GATE_MOD
+    if _GATE_MOD is None:
+        import importlib.util
+        p = Path(__file__).resolve().parent / "create-agent-task.py"
+        spec = importlib.util.spec_from_file_location("od_catask", p)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        _GATE_MOD = mod
+    return _GATE_MOD
+
+
+def auto_reply_flag(f, cache=None, gate=None):
+    """Why this lane item's source message is a machine acknowledgement, or
+    None. Kevin's ask, 2 Sep 2026: the creation gate refuses NEW auto-reply
+    tasks, but anything laned before it existed, or moved by hand, sits in
+    his queue untouched. So the cleanse runs the SAME machine signal over
+    the lane: the creation-time test (task name family, every scanned
+    message on the thread flagged) plus the full signal over the stored
+    message (sender, subject, receipt wording with no ask). A flag is a
+    prompt for a one-line CLOSE PROPOSAL, never a silent removal, and a
+    bounce never flags (the signal excludes it: a bounce IS a task)."""
+    gate = gate or _load_gate()
+    if cache is None:
+        cache = gate.load_scan_cache()
+    name = f.get("Task Name", "") or ""
+    why = gate.auto_reply_refusal(
+        {gate.F["name"]: name,
+         gate.F["inboundUrl"]: f.get("Inbound Note URL Link", "") or ""},
+        cache)
+    if why:
+        return why
+    subject = name
+    while gate.TASK_NAME_PREFIX_RE.search(subject):
+        subject = gate.TASK_NAME_PREFIX_RE.sub("", subject, count=1)
+    return gate.auto_reply_signal(
+        {"from": f.get("Inbound Sender", "") or ""}, subject,
+        f.get("Inbound Message Content", "") or "")
+
+
+def lane_view(f, now=None, cache=None, gate=None):
     """One approvals-lane row → the view the cleanse and priority review judge.
 
     Age anchors on Approval Slack TS (the moment the card reached Kevin) with
@@ -436,6 +482,8 @@ def lane_view(f, now=None):
         "hoursWaiting": hours_waiting(f, now),
         "createdTime": f.get("Created Time"),
         "inboundUrl": f.get("Inbound Note URL Link"),
+        "inboundSender": f.get("Inbound Sender", "") or "",
+        "autoReply": auto_reply_flag(f, cache, gate),
         "outputExcerpt": output[:600] + ("…" if len(output) > 600 else ""),
     }
 
@@ -571,7 +619,7 @@ GATE_FORMULA = "AND({Status}='Approval', LEN({Sent For Approval By}&'')>0)"
 GATE_FIELDS = [
     "Task Name", "Status", "Created Time", "Approval Slack TS",
     "Sent For Approval By", "Approver", "Priority", "Agent Output",
-    "Inbound Note URL Link",
+    "Inbound Note URL Link", "Inbound Sender", "Inbound Message Content",
 ]
 
 
@@ -601,9 +649,11 @@ def cmd_gate(task=None):
              "Approval — the formula's field names have drifted, do not "
              "trust this read" % len(status_only))
     now = datetime.now(timezone.utc)
+    gate = _load_gate()
+    cache = gate.load_scan_cache()
     lane, other = [], []
     for r in recs:
-        v = lane_view(dict(r["fields"], _id=r["id"]), now)
+        v = lane_view(dict(r["fields"], _id=r["id"]), now, cache, gate)
         # Empty Approver = Kevin (same rule dispatch applies at submit time);
         # a submission awaiting someone else is not his to cleanse or rank.
         if not v["approverEmail"] or v["approverEmail"] == KEVIN_EMAIL:
@@ -618,6 +668,10 @@ def cmd_gate(task=None):
             "kevinLane": len(lane),
             "otherApprovers": len(other),
             "legacyApprovalRows": len(status_only) - len(recs),
+            # Lane items whose source message is a machine acknowledgement:
+            # each one is a CLOSE PROPOSAL waiting to be written. Zero is
+            # the healthy number; a non-zero count is reported, never hidden.
+            "autoReplyFlagged": sum(1 for v in lane if v["autoReply"]),
         },
         "medianAgeHours": median_hours([v["hoursWaiting"] for v in lane]),
         "lane": lane,

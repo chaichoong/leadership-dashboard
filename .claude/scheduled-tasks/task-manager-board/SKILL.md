@@ -239,7 +239,7 @@ rows without Sent For Approval By are excluded IN THE FORMULA, so they can
 never be swept here (they are stuck work, handled in step 2). A zero lane
 alongside 5+ Approval-status rows fails the read loudly; report it.
 
-For each lane item, oldest first, ask three questions — checks with findable
+For each lane item, oldest first, ask five questions — checks with findable
 answers, not vibes:
 
 1. **Already handled elsewhere?** A completed task, a sent reply, or an
@@ -249,6 +249,24 @@ answers, not vibes:
 3. **Duplicate of another lane item?** Same matter waiting twice (the step 2
    duplicates list and inboundUrl thread keys are your evidence — address
    words are never evidence, per the dupe rules).
+4. **A machine acknowledgement of something we sent?** (Kevin's ask, 2 Sep
+   2026.) The lane read runs the creation gate's own `auto_reply_signal`
+   over each item's stored message and sets `autoReply` to the reason
+   ("subject: Automatic reply…", "body: thank you for contacting…");
+   `counts.autoReplyFlagged` is the total. The creation gate now refuses
+   these, so a flagged lane item predates it or was moved by hand. Read the
+   excerpt to confirm nothing in it asks or instructs (the flag is a prompt,
+   not a verdict; a bounce never flags), then propose exactly the wording in
+   GUARDRAILS: "CLOSE PROPOSAL: auto-acknowledgement of our send, reference
+   logged on <the open task or Creditor Plans row>". Note the reference on
+   that row first (`annotate`). Never a chaser, never a briefing.
+5. **Needs no decision from Kevin?** Approving it would change nothing: a
+   NO ACTION REQUIRED briefing, work an agent already holds standing
+   approval for (Roy's maintenance), a question the brain already answers,
+   or an agent's own admin. Say in the proposal what happens instead (who
+   carries it, or that nothing needs doing). Anything tier-1, anything with
+   money, a signature or a send to the outside world is NOT this — those
+   are his by design.
 
 Any yes → a CLOSE PROPOSAL through the gate. Mechanics that protect the
 original submission (dispatch submit REPLACES Agent Output wholesale):
@@ -352,8 +370,11 @@ LEADING with what should have moved and did not:
    `hoursWaiting` off each `waitingOnKevin` view in board.json (anchored on
    the Slack card time, Created Time as fallback). Never write 0 for a
    value you did not read; a missing figure is reported as missing.
-4. Gate health (from gate.json): lane size, median age in hours, cleanse
-   proposals made this slot, and the cleanse remainder still to judge.
+4. Gate health (from gate.json): lane size, median age in hours,
+   `counts.autoReplyFlagged` (zero is healthy; each flagged item is named
+   with what was proposed for it), cleanse proposals made this slot by
+   question (handled / overtaken / duplicate / auto-reply / no decision),
+   and the cleanse remainder still to judge.
 5. Moves made this slot, by kind.
 6. Remaining backlog and what next slot takes first.
 
