@@ -104,21 +104,28 @@ CLOSED_STATUSES = {"Completed", "Cancelled"}
 # the flag and the refusal can never disagree. Three signals, strongest
 # first: RFC 3834 / Exchange headers, the "Automatic reply:" subject family,
 # and an acknowledgement-shaped body (a receipt phrase, no question, no ask).
-AUTO_REPLY_HEADER_SIGNALS = (
-    # header name, value test (None = any presence counts)
-    ("auto-submitted", lambda v: v.strip().lower() not in ("", "no")),
-    ("x-auto-response-suppress", None),
-    ("x-autoreply", None),
-    ("x-autorespond", None),
-    ("precedence", lambda v: v.strip().lower() == "auto_reply"),
-)
+# The ONE header that is a signal on its own: "auto-replied" is the RFC 3834
+# word for "a mailbox answered by itself". Nothing else is. "auto-generated"
+# and Exchange's x-auto-response-suppress ride on bank alerts, e-signature
+# requests, Stripe notices and spam too — mail that can carry a real ask —
+# and on the live lane-12 corpus (2 Sep 2026) x-auto-response-suppress alone
+# flagged a phishing mail and nothing useful. The worker still returns those
+# headers; they are evidence for a human reading the digest, not a rule.
+AUTO_REPLY_DEFINITIVE_HEADER = ("auto-submitted", "auto-replied")
+
+# A bounce is auto-replied too (mailer-daemon sets it), but a bounce means
+# something Kevin sent did NOT arrive — that is a task, never a receipt.
+BOUNCE_SENDER_RE = re.compile(r"^(?:mailer-daemon|postmaster)@", re.I)
+BOUNCE_SUBJECT_RE = re.compile(
+    r"delivery status notification|undeliverable|mail delivery fail|"
+    r"delivery failure|returned mail|delivery has failed", re.I)
 
 # Anchored at the START on purpose: "RE: Automatic reply: …" is a human
 # writing back inside the auto-reply's thread, and that is live conversation.
 AUTO_REPLY_SUBJECT_RE = re.compile(
-    r"^\s*(?:\[[^\]]{1,20}\]\s*)?"
+    r"^\s*(?:\[[^\]]{1,40}\]\s*)?"
     r"(?:automatic reply|automated (?:reply|response)|auto[- ]?(?:reply|response)"
-    r"|autoreply|autoresponse|out of (?:the )?office|ooo)\b",
+    r"|autoreply|autoresponse|out of (?:the )?office|ooo\s*[:\-\u2013\u2014])\b",
     re.I,
 )
 
@@ -139,14 +146,17 @@ ACK_BODY_PHRASES = (
     "we have received your", "has been logged with reference",
     "your request has been logged", "your email has reached",
     "we aim to respond", "we aim to reply", "we aim to send an initial reply",
-    "will receive an initial response", "will respond within",
+    "will receive an initial response", "we will respond within",
     "has been forwarded to our", "we have forwarded your",
     "acknowledgement of receipt", "acknowledge receipt",
 )
+# An ask, or a position taken, means a person is talking — task it.
 ACK_BODY_VETO_PHRASES = (
     "please provide", "please send", "please confirm", "please complete",
     "please sign", "please pay", "you must", "you need to", "you are required",
     "we require", "we need you to", "by return",
+    "not accept", "do not agree", "disagree", "dispute", "reject", "refuse",
+    "deny", "withdraw", "terminate", "breach", "proceedings", "court",
 )
 QUOTED_BODY_RE = re.compile(
     r"(?:^|\n)\s*(?:>|from:|-----original message-----|on .{5,120} wrote:)",
@@ -164,17 +174,24 @@ def unquoted_body(body):
 
 
 def auto_reply_signal(headers, subject, body):
-    """The reason this message is a machine reply, or None. Pure."""
+    """The reason this message is a machine reply, or None. Pure.
+
+    Order: a bounce is never one; then the definitive header; the subject
+    family; then a receipt phrase in the sender's own words — and the body
+    disagrees the moment it asks a question, gives an instruction, or takes
+    a position."""
     hdrs = {str(k).lower(): str(v) for k, v in (headers or {}).items()}
-    for name, test in AUTO_REPLY_HEADER_SIGNALS:
-        if name in hdrs and (test is None or test(hdrs[name])):
-            return "header %s: %s" % (name, hdrs[name].strip()[:40] or "present")
+    sender = hdrs.get("from", "")
+    sender = sender[sender.rfind("<") + 1:].rstrip("> ").strip().lower()
+    if BOUNCE_SENDER_RE.search(sender) or BOUNCE_SUBJECT_RE.search(str(subject or "")):
+        return None
+    dname, dvalue = AUTO_REPLY_DEFINITIVE_HEADER
+    if hdrs.get(dname, "").strip().lower().startswith(dvalue):
+        return "header %s: %s" % (dname, hdrs[dname].strip()[:40])
     if AUTO_REPLY_SUBJECT_RE.search(str(subject or "")):
         return "subject: %s" % str(subject).strip()[:50]
     own = unquoted_body(body)[:1200].lower()
-    if "?" in own:
-        return None
-    if any(v in own for v in ACK_BODY_VETO_PHRASES):
+    if "?" in own or any(v in own for v in ACK_BODY_VETO_PHRASES):
         return None
     for phrase in ACK_BODY_PHRASES:
         if phrase in own:
@@ -212,7 +229,9 @@ def auto_reply_refusal(fields, cache):
     """Why this create must be refused, or None. Two reads: the task name
     carries an auto-reply subject, or every scanned message on the thread(s)
     the task points at was flagged by the scan."""
-    name = TASK_NAME_PREFIX_RE.sub("", str(fields.get(F["name"], "")))
+    name = str(fields.get(F["name"], ""))
+    while TASK_NAME_PREFIX_RE.search(name):      # "INBOUND (follow-up): INBOUND: …"
+        name = TASK_NAME_PREFIX_RE.sub("", name, count=1)
     if AUTO_REPLY_SUBJECT_RE.search(name):
         return "task name is an auto-reply subject (%s)" % name.strip()[:60]
     threads = THREAD_URL_RE.findall(str(fields.get(F["inboundUrl"], "")))
@@ -896,7 +915,8 @@ def selftest():
     check("RFC 3834 header wins", sig({"Auto-Submitted": "auto-replied"}, "Re: hi", "") and
           sig({"Auto-Submitted": "auto-replied"}, "Re: hi", "").startswith("header"))
     check("Auto-Submitted: no is not a signal", sig({"auto-submitted": "no"}, "Re: hi", "") is None)
-    check("Exchange suppress header", sig({"X-Auto-Response-Suppress": "All"}, "x", "") is not None)
+    check("Exchange suppress header on a subject-family reply still flags by subject",
+          str(sig({"X-Auto-Response-Suppress": "All"}, "Automatic reply: x", "")).startswith("subject"))
     check("Automatic reply subject (Burnley shape)",
           sig({}, "Automatic reply: Liability Order — 22 Newton Street", "") is not None)
     check("bracketed tag before the prefix",
@@ -920,6 +940,27 @@ def selftest():
           sig({}, "RE: x", "We reviewed this and disagree.\n\nFrom: Council\nThank you for "
               "contacting us. Your request has been logged with reference 1.") is None)
     check("plain human mail is not flagged", sig({}, "Rent query", "Hi, the boiler is broken.") is None)
+    check("auto-replied header is definitive even with an ask in the body",
+          str(sig({"Auto-Submitted": "auto-replied"}, "Re: x", "Please pay £100 by Friday")).startswith("header"))
+    check("auto-generated header does NOT override an ask (Stripe/Adobe shape)",
+          sig({"auto-submitted": "auto-generated"}, "Action required", "Please complete verification by 9 Oct.") is None)
+    check("Exchange suppress header alone is NOT a signal (flagged phishing on the live corpus)",
+          sig({"X-Auto-Response-Suppress": "OOF, AutoReply", "list-unsubscribe": "<x>"}, "Visit on August 31",
+              "<table><tr><td>Home</td></tr></table>") is None)
+    check("a bounce is a task, never a receipt, even with auto-replied set",
+          sig({"auto-submitted": "auto-replied", "from": "Mail Delivery Subsystem <mailer-daemon@googlemail.com>"},
+              "Delivery Status Notification (Failure)", "Final-Recipient: rfc822; x@y.com\nAction: failed") is None)
+    check("an 'Undeliverable' subject is a bounce whoever sent it",
+          sig({"auto-submitted": "auto-replied"}, "Undeliverable: Liability Order", "") is None)
+    check("a position taken is a human (notice to quit)",
+          sig({}, "RE: notice", "We have received your notice to quit. Our client does not accept it.") is None)
+    check("a person promising to respond is a human",
+          sig({}, "RE: plumber", "Hi Kevin, I will respond within the week once I have spoken to the plumber.") is None)
+    check("'Ooo la la' is not out of office", sig({}, "Ooo la la bathroom quote", "") is None)
+    check("long external-sender tag before the prefix",
+          sig({}, "[EXTERNAL SENDER WARNING] Automatic reply: x", "") is not None)
+    check("stacked lane prefixes are all stripped",
+          auto_reply_refusal({F["name"]: "INBOUND (follow-up): INBOUND: Automatic reply: x"}, {}) is not None)
     check("gate refuses an auto-reply task name",
           auto_reply_refusal({F["name"]: "INBOUND: Automatic reply: Liability Order"}, {})
           .startswith("task name"))

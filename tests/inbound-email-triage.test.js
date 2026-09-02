@@ -333,11 +333,17 @@ describe('an auto-reply never becomes a task (Kevin, 2 Sep 2026)', () => {
         expect(act).toMatch(/OVERRIDE auto-reply flag/);
     });
 
-    it('the worker exposes the RFC 3834 / Exchange auto-reply headers the signal reads', () => {
+    it('the worker exposes the auto-reply headers; the gate rules on auto-submitted alone and never on a bounce', () => {
         for (const h of ['auto-submitted', 'x-auto-response-suppress', 'x-autoreply', 'precedence']) {
             expect(worker, `worker /gmail/list must return ${h}`).toContain(`'${h}'`);
-            expect(gate, `gate must read ${h}`).toContain(`"${h}"`);
         }
+        expect(gate).toMatch(/AUTO_REPLY_DEFINITIVE_HEADER = \("auto-submitted", "auto-replied"\)/);
+        // x-auto-response-suppress alone flagged a phishing mail on the live
+        // corpus (2 Sep 2026); it is evidence in the digest, never a rule.
+        expect(gate).not.toMatch(/SUPPORTING_HEADERS/);
+        // A bounce carries auto-replied too, and a bounce IS a task.
+        expect(gate).toMatch(/BOUNCE_SENDER_RE/);
+        expect(gate).toMatch(/BOUNCE_SUBJECT_RE/);
     });
 
     it('the skill carries the rule in the judgement step, the stranded step and the report', () => {

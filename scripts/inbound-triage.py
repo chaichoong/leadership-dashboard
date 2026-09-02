@@ -493,7 +493,12 @@ def cmd_scan(back_hours):
         # can log the reference on the open matter — never a rescue.
         "stranded_auto_replies": [
             {"id": m.get("id"), "threadId": m.get("threadId"),
-             "auto_reply": m.get("auto_reply")} for m in stranded_auto_replies],
+             "auto_reply": m.get("auto_reply"),
+             "sender": parse_bare_email((m.get("headers") or {}).get("from", "")),
+             "subject": ((m.get("headers") or {}).get("subject", ""))[:120],
+             # enough to spot a wrong flag; the body test is a heuristic
+             "excerpt": _load_gate().unquoted_body(m.get("body", ""))[:300]}
+            for m in stranded_auto_replies],
         "sent_threads": sent_threads,
     }))
 

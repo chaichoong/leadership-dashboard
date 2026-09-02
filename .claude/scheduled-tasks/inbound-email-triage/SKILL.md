@@ -326,8 +326,11 @@ audit trail Kevin checks). A fold also appends
 the new thread's URL into the existing task's `Inbound Note URL Link`, so
 the Step 3 and Step 5 `FIND` queries recognise the folded thread as handled
 from then on. A `"note"` about a differing sender means it deliberately
-created anyway — never fold two counterparties into one task. A NON-ZERO
-exit means the gate could not run (broken read); nothing was created — count
+created anyway — never fold two counterparties into one task. Exit 3 with
+`"action": "refused"` is the gate applying rule 0a (the task is an
+auto-reply): nothing was created and nothing is unhandled — log `note --do
+answered --reason "auto-reply: gate refused"` and archive per rule 0a. Any
+OTHER non-zero exit means the gate could not run (broken read); nothing was created — count
 that thread unhandled for Step 6 and report it, exactly like a failed dedupe
 query.
 
@@ -424,12 +427,17 @@ label move itself is still `act --do label13` exactly as before.
 ## Step 5 — The stranded check (the safety net)
 
 The scan has ALREADY removed machine replies from these lists (they are in
-`stranded_auto_replies`, with the reason): a thread whose real task completed
-still carries its label, so every later auto-acknowledgement on it looks
-"labelled with no open task" — that is how four council receipts became
-approval tasks (28 Aug – 1 Sep 2026). A stranded auto-reply is never a
-rescue; apply rule 0a to it (append the reference to an open matter if one
-exists, otherwise nothing) and count it in your report.
+`stranded_auto_replies`, each with the reason, sender, subject and a 300-char
+excerpt): a thread whose real task completed still carries its label, so
+every later auto-acknowledgement on it looks "labelled with no open task" —
+that is how four council receipts became approval tasks (28 Aug – 1 Sep
+2026). A stranded auto-reply is never a rescue; apply rule 0a to it (append
+the reference to an open matter if one exists, otherwise nothing) and count
+it in your report. READ the excerpts: the body test is a heuristic, and if
+one is plainly a person (a name, a question, a new fact), rescue it the
+Step 4 way with `create --force` and log `note --do task-created --reason
+"OVERRIDE auto-reply flag: <why it is human>"` — the override is how a wrong
+flag gets found.
 
 For every message in `stranded_8`, `stranded_12` and `stranded_13`: run the
 Step 3 dedupe on its thread. A labelled email with NO task is exactly the
