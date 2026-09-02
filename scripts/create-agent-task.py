@@ -35,8 +35,14 @@ that gates a create is exactly how duplicates get minted. On zero rows or
 any API error the script EXITS NON-ZERO and creates nothing; the calling
 skill counts the item unhandled and reports the failure.
 
+  * The task IS an auto-reply (its name carries an "Automatic reply:"
+    subject, or the scan flagged every message on its thread) -> REFUSED,
+    exit 3, nothing created or updated. A machine receipt of something we
+    sent is never a matter; the reference it carries belongs on the open
+    task or the creditor plan, not in Kevin's approval gate (2 Sep 2026).
+
 Exit codes: 0 created/updated (JSON on stdout), 2 gate could not run
-(broken read), 1 anything else.
+(broken read), 3 refused (auto-reply), 1 anything else.
 """
 
 import json
@@ -79,6 +85,144 @@ PUBLIC_MAIL_DOMAINS = {
 
 # Statuses that mean the task is finished with; everything else is "open".
 CLOSED_STATUSES = {"Completed", "Cancelled"}
+
+
+# ─── AN AUTO-REPLY NEVER BECOMES A TASK (2 Sep 2026) ────────────────
+#
+# Between 28 Aug and 1 Sep 2026 Kevin was asked to approve FOUR tasks whose
+# only content was a council's automatic receipt of an email he had already
+# approved and sent (Burnley "Automatic reply: Liability Order…", three Fylde
+# "Thank you for contacting… logged with reference CSV-…"). Each one had
+# been created by the triage skill's stranded-mail rescue (a labelled thread
+# with no OPEN task looks stranded once the real task completes), handed to
+# a role agent, and came back as a "NO ACTION REQUIRED" briefing or a CLOSE
+# PROPOSAL that still needed his tap. Kevin's ruling: these must never reach
+# the approval gate.
+#
+# The machine signal is read here, in the gate every task create passes
+# through, and shared with the triage scan (inbound-triage.py imports it) so
+# the flag and the refusal can never disagree. Three signals, strongest
+# first: RFC 3834 / Exchange headers, the "Automatic reply:" subject family,
+# and an acknowledgement-shaped body (a receipt phrase, no question, no ask).
+AUTO_REPLY_HEADER_SIGNALS = (
+    # header name, value test (None = any presence counts)
+    ("auto-submitted", lambda v: v.strip().lower() not in ("", "no")),
+    ("x-auto-response-suppress", None),
+    ("x-autoreply", None),
+    ("x-autorespond", None),
+    ("precedence", lambda v: v.strip().lower() == "auto_reply"),
+)
+
+# Anchored at the START on purpose: "RE: Automatic reply: …" is a human
+# writing back inside the auto-reply's thread, and that is live conversation.
+AUTO_REPLY_SUBJECT_RE = re.compile(
+    r"^\s*(?:\[[^\]]{1,20}\]\s*)?"
+    r"(?:automatic reply|automated (?:reply|response)|auto[- ]?(?:reply|response)"
+    r"|autoreply|autoresponse|out of (?:the )?office|ooo)\b",
+    re.I,
+)
+
+# Receipt phrases as they actually arrive (Fylde, Burnley, SSE, UK Search,
+# 28 Aug – 1 Sep 2026). The body test needs one of these in the UNQUOTED
+# part AND no question AND no instruction phrase — a human who acknowledges
+# and then asks for something is a task.
+# RECEIPT language only — "we got what you sent". Generic machine markers
+# ("do not reply to this email", "this is an automated message") are NOT
+# here on purpose: a bank alert or a Stripe "action required" notice carries
+# them too, and those can hold a real ask. Back-tested 2 Sep 2026 against
+# the 100 most recent lane-12 messages: the 8 behind the four wrongly-gated
+# tasks flag, nothing human does.
+ACK_BODY_PHRASES = (
+    "thank you for contacting", "thanks for contacting",
+    "your email has been received", "your message has been received",
+    "your request has been received", "your enquiry has been received",
+    "we have received your", "has been logged with reference",
+    "your request has been logged", "your email has reached",
+    "we aim to respond", "we aim to reply", "we aim to send an initial reply",
+    "will receive an initial response", "will respond within",
+    "has been forwarded to our", "we have forwarded your",
+    "acknowledgement of receipt", "acknowledge receipt",
+)
+ACK_BODY_VETO_PHRASES = (
+    "please provide", "please send", "please confirm", "please complete",
+    "please sign", "please pay", "you must", "you need to", "you are required",
+    "we require", "we need you to", "by return",
+)
+QUOTED_BODY_RE = re.compile(
+    r"(?:^|\n)\s*(?:>|from:|-----original message-----|on .{5,120} wrote:)",
+    re.I,
+)
+
+
+def unquoted_body(body):
+    """The sender's own words: everything above the first quoted block."""
+    text = str(body or "").replace("\r", "")
+    m = QUOTED_BODY_RE.search(text)
+    if m:
+        text = text[:m.start()]
+    return text
+
+
+def auto_reply_signal(headers, subject, body):
+    """The reason this message is a machine reply, or None. Pure."""
+    hdrs = {str(k).lower(): str(v) for k, v in (headers or {}).items()}
+    for name, test in AUTO_REPLY_HEADER_SIGNALS:
+        if name in hdrs and (test is None or test(hdrs[name])):
+            return "header %s: %s" % (name, hdrs[name].strip()[:40] or "present")
+    if AUTO_REPLY_SUBJECT_RE.search(str(subject or "")):
+        return "subject: %s" % str(subject).strip()[:50]
+    own = unquoted_body(body)[:1200].lower()
+    if "?" in own:
+        return None
+    if any(v in own for v in ACK_BODY_VETO_PHRASES):
+        return None
+    for phrase in ACK_BODY_PHRASES:
+        if phrase in own:
+            return "body: %s" % phrase
+    return None
+
+
+# Task-name prefixes the skills add before the subject; the subject test
+# must see past them.
+TASK_NAME_PREFIX_RE = re.compile(
+    r"^\s*(?:inbound(?:\s*\(follow-up\))?|maintenance|post)\s*:\s*", re.I)
+
+THREAD_URL_RE = re.compile(r"#(?:all|inbox)/([0-9a-f]{8,})")
+
+
+def scan_cache_path():
+    """The triage scan cache (message id -> sender, subject, threadId,
+    auto_reply), written by inbound-triage.py scan. Same env override so a
+    test can point both scripts at one directory."""
+    base = os.environ.get("INBOUND_TRIAGE_DIR") or os.path.join(
+        os.path.expanduser("~"), "knowledge-os/logs/inbound-triage")
+    return os.path.join(base, "scan-cache.json")
+
+
+def load_scan_cache():
+    try:
+        with open(scan_cache_path()) as fh:
+            data = json.load(fh)
+        return data if isinstance(data, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def auto_reply_refusal(fields, cache):
+    """Why this create must be refused, or None. Two reads: the task name
+    carries an auto-reply subject, or every scanned message on the thread(s)
+    the task points at was flagged by the scan."""
+    name = TASK_NAME_PREFIX_RE.sub("", str(fields.get(F["name"], "")))
+    if AUTO_REPLY_SUBJECT_RE.search(name):
+        return "task name is an auto-reply subject (%s)" % name.strip()[:60]
+    threads = THREAD_URL_RE.findall(str(fields.get(F["inboundUrl"], "")))
+    for tid in threads:
+        on_thread = [v for v in cache.values()
+                     if isinstance(v, dict) and v.get("threadId") == tid]
+        if on_thread and all(v.get("auto_reply") for v in on_thread):
+            return ("every scanned message on thread %s is an auto-reply (%s)"
+                    % (tid, on_thread[0].get("auto_reply")))
+    return None
 
 
 # Words that describe ANY incident and so cannot identify one. Shared
@@ -593,6 +737,14 @@ def cmd_create(fields, force=False, dry_run=False):
 
     verdict = {"action": "create", "key": dupe_task_key(fields.get(F["name"], ""))}
     if not force:
+        # Refuse BEFORE the board read: an auto-reply is not a matter, so the
+        # duplicate question never arises. --force is the human override and
+        # is logged by the caller's own reason.
+        why = auto_reply_refusal(fields, load_scan_cache())
+        if why:
+            print(json.dumps({"action": "refused", "reason": why,
+                              "key": verdict["key"], "dryRun": dry_run}))
+            return 3
         rows = fetch_open_tasks()
         if not rows:
             # CONTROL: the board carries hundreds of open tasks at all times.
@@ -738,6 +890,54 @@ def selftest():
     pa = build_update(apv_hard, hard_in, "2026-08-25")
     check("a hard deadline updates due even at Approval, without moving status",
           pa[F["due"]] == "2026-09-01" and F["status"] not in pa)
+
+    # ── auto-replies never become tasks (2 Sep 2026) ──
+    sig = auto_reply_signal
+    check("RFC 3834 header wins", sig({"Auto-Submitted": "auto-replied"}, "Re: hi", "") and
+          sig({"Auto-Submitted": "auto-replied"}, "Re: hi", "").startswith("header"))
+    check("Auto-Submitted: no is not a signal", sig({"auto-submitted": "no"}, "Re: hi", "") is None)
+    check("Exchange suppress header", sig({"X-Auto-Response-Suppress": "All"}, "x", "") is not None)
+    check("Automatic reply subject (Burnley shape)",
+          sig({}, "Automatic reply: Liability Order — 22 Newton Street", "") is not None)
+    check("bracketed tag before the prefix",
+          sig({}, "[EXTERNAL] Automatic reply: Account IST", "") is not None)
+    check("out of office subject", sig({}, "Out of Office", "") is not None)
+    check("a human reply inside the auto-reply thread is NOT one",
+          sig({}, "RE: Automatic reply: Liability Order", "Hi Kevin, can you resend?") is None)
+    fylde = ("Thank you for contacting Fylde Borough Council.\n\nYour request has been "
+             "logged with reference CSV-2026-1159. Please quote this reference in any "
+             "future correspondence.\n\nYou will receive an initial response within two "
+             "working days.")
+    check("Fylde receipt body flags", sig({}, "RE: Council Tax Account 23242360", fylde) is not None)
+    check("forwarded-to-department body flags",
+          sig({}, "RE: Follow-up", "Good Morning,\n\nThank you for your email.\n\nWe have "
+              "forwarded your email to our Revenues department for their attention.") is not None)
+    check("an acknowledgement with a question is a human",
+          sig({}, "RE: x", "Thank you for contacting us. Could you send the order copy?") is None)
+    check("an acknowledgement with an instruction is a human",
+          sig({}, "RE: x", "Thank you for contacting us. Please provide proof of ID.") is None)
+    check("receipt phrase only inside the quoted original does not count",
+          sig({}, "RE: x", "We reviewed this and disagree.\n\nFrom: Council\nThank you for "
+              "contacting us. Your request has been logged with reference 1.") is None)
+    check("plain human mail is not flagged", sig({}, "Rent query", "Hi, the boiler is broken.") is None)
+    check("gate refuses an auto-reply task name",
+          auto_reply_refusal({F["name"]: "INBOUND: Automatic reply: Liability Order"}, {})
+          .startswith("task name"))
+    check("gate refuses a follow-up-prefixed auto-reply name",
+          auto_reply_refusal({F["name"]: "INBOUND (follow-up): Out of office: Jo Bloggs"}, {}))
+    cache = {"m1": {"threadId": "1a047d45bad0d05a", "auto_reply": "subject: Automatic reply"},
+             "m2": {"threadId": "1a0496b9df667238", "auto_reply": "body: has been logged with reference"},
+             "m3": {"threadId": "1a0496b9df667238", "auto_reply": None}}
+    fylde_task = {F["name"]: "INBOUND: RE: Council Tax Account 23242360",
+                  F["inboundUrl"]: "https://mail.google.com/mail/u/0/#all/1a047d45bad0d05a"}
+    check("gate refuses a task whose thread is all auto-replies",
+          auto_reply_refusal(fylde_task, cache) and "thread 1a047d45bad0d05a" in
+          auto_reply_refusal(fylde_task, cache))
+    mixed = dict(fylde_task, **{F["inboundUrl"]: "https://mail.google.com/mail/u/0/#all/1a0496b9df667238"})
+    check("a thread with one human message still creates", auto_reply_refusal(mixed, cache) is None)
+    unknown = dict(fylde_task, **{F["inboundUrl"]: "https://mail.google.com/mail/u/0/#inbox/deadbeef00"})
+    check("an unscanned thread is not assumed to be an auto-reply", auto_reply_refusal(unknown, cache) is None)
+    check("a normal task name passes", auto_reply_refusal({F["name"]: "INBOUND: reply to Swinton"}, cache) is None)
 
     failed = [label for label, ok in checks if not ok]
     print(json.dumps({"checks": len(checks), "failed": failed}))

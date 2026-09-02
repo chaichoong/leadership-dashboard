@@ -604,7 +604,14 @@ async function gmailList(token, { q, labelIds, maxResults, pageToken }) {
             const k = h.name.toLowerCase();
             // list-unsubscribe is the strongest machine-mail signal the triage
             // rules use, so it rides along with the human-readable headers.
-            if (['from', 'to', 'subject', 'date', 'list-unsubscribe'].includes(k)) headers[k] = h.value;
+            // The auto-reply set (RFC 3834 auto-submitted, Exchange's
+            // x-auto-response-suppress, x-autoreply/x-autorespond,
+            // precedence) lets the triage scan mark a machine receipt of
+            // something we sent WITHOUT judgement — those were reaching
+            // Kevin's approval gate as tasks (2 Sep 2026).
+            if (['from', 'to', 'subject', 'date', 'list-unsubscribe',
+                 'auto-submitted', 'x-auto-response-suppress', 'x-autoreply',
+                 'x-autorespond', 'precedence', 'in-reply-to'].includes(k)) headers[k] = h.value;
         }
         out.push({
             id: msg.id,

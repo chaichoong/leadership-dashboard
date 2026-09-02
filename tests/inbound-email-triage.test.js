@@ -283,6 +283,71 @@ describe('the daily decisions log reaches the agent record', () => {
     });
 });
 
+describe('an auto-reply never becomes a task (Kevin, 2 Sep 2026)', () => {
+    // Four council receipts of emails Kevin had already sent reached his
+    // approval gate as tasks between 28 Aug and 1 Sep 2026, via the
+    // stranded-mail rescue. The signal lives in the task gate; the scan
+    // stamps it, the stranded lists exclude it, act refuses to lane it.
+    const gate = readFileSync(path.join(root, 'scripts/create-agent-task.py'), 'utf8');
+
+    it('the gate owns ONE signal and the scan imports it rather than copying it', () => {
+        expect(gate).toMatch(/def auto_reply_signal\(headers, subject, body\)/);
+        expect(gate).toMatch(/def auto_reply_refusal\(/);
+        expect(script).toMatch(/_load_gate\(\)\.auto_reply_signal/);
+        expect(script).not.toMatch(/def auto_reply_signal/);
+    });
+
+    it('the gate refuses before the board read, exit 3, and only --force overrides it', () => {
+        const create = gate.slice(gate.indexOf('def cmd_create('), gate.indexOf('def cmd_check('));
+        expect(create.indexOf('auto_reply_refusal(')).toBeGreaterThan(-1);
+        expect(create.indexOf('auto_reply_refusal(')).toBeLessThan(create.indexOf('fetch_open_tasks()'));
+        expect(create).toMatch(/"action": "refused"/);
+        expect(create).toMatch(/return 3/);
+    });
+
+    it('a dry-run create of an auto-reply task is refused without touching Airtable', () => {
+        const fields = JSON.stringify({ fldgFjGBw6bTKJFCD: 'INBOUND: Automatic reply: Liability Order — 22 Newton Street' });
+        let code = 0, out = '';
+        try {
+            out = execFileSync('python3', [path.join(root, 'scripts/create-agent-task.py'), 'create', '--fields-json', fields, '--dry-run'],
+                { encoding: 'utf8', env: { ...process.env, INBOUND_TRIAGE_DIR: '/nonexistent-dir-for-test' } });
+        } catch (e) { code = e.status; out = String(e.stdout || ''); }
+        expect(code).toBe(3);
+        expect(JSON.parse(out.trim().split('\n').pop()).action).toBe('refused');
+    });
+
+    it('the scan stamps auto_reply, keeps flagged mail out of every stranded list, and caches the reason', () => {
+        const scan = script.slice(script.indexOf('def cmd_scan('), script.indexOf('def cmd_act('));
+        expect(scan).toMatch(/annotate_auto_replies\(lst, signal_fn\)/);
+        for (const lane of ['stranded_8', 'stranded_12', 'stranded_13']) {
+            expect(scan).toMatch(new RegExp(`${lane}, ar\\d+ = split_auto_replies\\(${lane}\\)`));
+        }
+        expect(scan).toMatch(/"stranded_auto_replies": len\(stranded_auto_replies\)/);
+        expect(script).toMatch(/"auto_reply": m\.get\("auto_reply"\) or None/);
+    });
+
+    it('act refuses to lane a flagged message; archive and file stay open; an override is logged', () => {
+        expect(script).toMatch(/LANE_ACTIONS = \("label12", "label13", "label8"\)/);
+        const act = script.slice(script.indexOf('def cmd_act('), script.indexOf('def cmd_note('));
+        expect(act.indexOf('act_block_reason(')).toBeLessThan(act.indexOf('worker_post('));
+        expect(act).toMatch(/OVERRIDE auto-reply flag/);
+    });
+
+    it('the worker exposes the RFC 3834 / Exchange auto-reply headers the signal reads', () => {
+        for (const h of ['auto-submitted', 'x-auto-response-suppress', 'x-autoreply', 'precedence']) {
+            expect(worker, `worker /gmail/list must return ${h}`).toContain(`'${h}'`);
+            expect(gate, `gate must read ${h}`).toContain(`"${h}"`);
+        }
+    });
+
+    it('the skill carries the rule in the judgement step, the stranded step and the report', () => {
+        expect(skill).toMatch(/0a\. \*\*An auto-reply never becomes a task/);
+        expect(skill).toMatch(/A stranded auto-reply is never a\s+rescue/);
+        expect(skill).toMatch(/auto-replies suppressed/);
+        expect(skill).toMatch(/--override "<why it is human>"/);
+    });
+});
+
 describe('inbound-triage.py mechanics', () => {
     it('offline selftest passes (labels, bare-email parse, metric string, watermark rules, cache, digest)', () => {
         const out = execFileSync('python3', [path.join(root, 'scripts/inbound-triage.py'), 'selftest'], { encoding: 'utf8' });

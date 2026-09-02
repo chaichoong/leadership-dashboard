@@ -40,6 +40,9 @@ USAGE
                                               `truncated` flag — see Step 6 of
                                               the skill for what that forbids.
   inbound-triage.py act --id MSGID --do label12|label13|archive [--reason R]
+                                              [--override "why a human wrote it"]
+                                              (label12/13 refuse a scan-flagged
+                                              auto-reply without an override)
                                               apply one triage decision + log
                                               it (sender/subject come from the
                                               scan cache, never from argv)
@@ -266,6 +269,9 @@ def write_scan_cache(messages):
             "subject": ((m.get("headers") or {}).get("subject", ""))[:200],
             "threadId": m.get("threadId", ""),
             "internalDate": m.get("internalDate"),
+            # read back by act (lane refusal) and by the task gate (thread
+            # refusal) — the reason string, so the digest can say why
+            "auto_reply": m.get("auto_reply") or None,
         }
     d = base_dir()
     d.mkdir(parents=True, exist_ok=True)
@@ -436,7 +442,20 @@ def cmd_scan(back_hours):
         if tid and ts > sent_threads.get(tid, 0):
             sent_threads[tid] = ts
 
-    write_scan_cache(new_inbox + stale + stranded_8 + stranded_12 + stranded_13)
+    # Stamp every message with the auto-reply signal (shared with the task
+    # gate), then keep machine replies OUT of the stranded lists: a stranded
+    # list exists only to mint tasks, and a machine receipt never gets one.
+    signal_fn = _load_gate().auto_reply_signal
+    for lst in (new_inbox, stale, stranded_8, stranded_12, stranded_13):
+        annotate_auto_replies(lst, signal_fn)
+    stranded_8, ar8 = split_auto_replies(stranded_8)
+    stranded_12, ar12 = split_auto_replies(stranded_12)
+    stranded_13, ar13 = split_auto_replies(stranded_13)
+    stranded_auto_replies = ar8 + ar12 + ar13
+    inbox_auto_replies = sum(1 for m in new_inbox if m.get("auto_reply"))
+
+    write_scan_cache(new_inbox + stale + stranded_8 + stranded_12 + stranded_13
+                     + stranded_auto_replies)
 
     # Record what this scan saw, so `mark` can ENFORCE the truncation freeze
     # rather than trusting the caller to apply it. Only new_inbox truncation
@@ -459,7 +478,9 @@ def cmd_scan(back_hours):
                    "label13": {"id": l13["id"], "name": l13["name"]} if l13 else None},
         "counts": {"new_inbox": len(new_inbox), "stale": len(stale),
                    "stranded_8": len(stranded_8), "stranded_12": len(stranded_12),
-                   "stranded_13": len(stranded_13), "sent": len(sent_msgs)},
+                   "stranded_13": len(stranded_13), "sent": len(sent_msgs),
+                   "inbox_auto_replies": inbox_auto_replies,
+                   "stranded_auto_replies": len(stranded_auto_replies)},
         "truncated": {"new_inbox": new_trunc, "stale": stale_trunc,
                       "stranded_8": s8_trunc, "stranded_12": s12_trunc,
                       "stranded_13": s13_trunc, "sent": sent_trunc},
@@ -468,12 +489,23 @@ def cmd_scan(back_hours):
         "stranded_8": stranded_8,
         "stranded_12": stranded_12,
         "stranded_13": stranded_13,
+        # Flagged lane mail, listed so the report can count it and the agent
+        # can log the reference on the open matter — never a rescue.
+        "stranded_auto_replies": [
+            {"id": m.get("id"), "threadId": m.get("threadId"),
+             "auto_reply": m.get("auto_reply")} for m in stranded_auto_replies],
         "sent_threads": sent_threads,
     }))
 
 
-def cmd_act(msg_id, action, reason, label_num=None):
+def cmd_act(msg_id, action, reason, label_num=None, override=None):
     ctx = read_scan_cache().get(msg_id, {})
+    blocked = act_block_reason(ctx, action, override)
+    if blocked:
+        fail(blocked)
+    if override and override.strip() and ctx.get("auto_reply"):
+        reason = "OVERRIDE auto-reply flag (%s): %s — %s" % (
+            ctx.get("auto_reply"), override.strip(), reason)
     digest_do = action
     if action == "archive":
         add, remove = [], ["INBOX"]
@@ -856,15 +888,65 @@ def matters_json(open_rows, closed_rows, key_fn, team_names, now_iso):
                        "recentlyClosed": len(closed_rows)}}
 
 
-def _load_dupe_key():
-    """dupe_task_key from create-agent-task.py — imported, never copied, so
-    the matter key in the snapshot can never drift from the gate's own key."""
+def _load_gate():
+    """create-agent-task.py as a module — imported, never copied, so the
+    matter key AND the auto-reply signal here can never drift from the
+    gate's own."""
     import importlib.util
     p = Path(__file__).resolve().parent / "create-agent-task.py"
     spec = importlib.util.spec_from_file_location("od_catask", p)
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
-    return mod.dupe_task_key
+    return mod
+
+
+def _load_dupe_key():
+    return _load_gate().dupe_task_key
+
+
+# ─── AUTO-REPLIES (2 Sep 2026) ────────────────────────────────────────
+#
+# A council's automatic receipt of an email Kevin had already approved and
+# sent reached his approval gate four times between 28 Aug and 1 Sep 2026.
+# The route was the stranded-mail rescue: the thread carried label 12, its
+# real task had COMPLETED, so "labelled with no open task" read as stranded
+# and a fresh task was minted for a message that asks nothing. The signal
+# (headers, subject family, receipt-shaped body) lives in the task gate;
+# the scan stamps every message with it, keeps flagged mail OUT of the
+# stranded lists, and `act` refuses to lane a flagged message unless the
+# agent overrides with a reason that lands in the digest.
+
+def annotate_auto_replies(messages, signal_fn):
+    """Stamp each scanned message with auto_reply = reason or None."""
+    for m in messages:
+        h = m.get("headers") or {}
+        m["auto_reply"] = signal_fn(h, h.get("subject", ""), m.get("body", ""))
+    return messages
+
+
+def split_auto_replies(messages):
+    """(kept, dropped): stranded candidates minus the machine replies."""
+    kept = [m for m in messages if not m.get("auto_reply")]
+    dropped = [m for m in messages if m.get("auto_reply")]
+    return kept, dropped
+
+
+LANE_ACTIONS = ("label12", "label13", "label8")
+
+
+def act_block_reason(ctx, action, override):
+    """Why `act` must refuse, or None. Only the task lanes are guarded:
+    archiving or filing a machine reply is exactly what should happen."""
+    if action not in LANE_ACTIONS or not ctx.get("auto_reply"):
+        return None
+    if override and override.strip():
+        return None
+    return ("%s refused: the scan flagged this message as an auto-reply (%s). "
+            "A machine receipt never gets a task — archive it, or file it in "
+            "lane 18 if it is creditor mail, and log the reference on the open "
+            "matter. If a human really wrote it, repeat with "
+            "--override \"<why it is human>\" (the override is logged)."
+            % (action, ctx.get("auto_reply")))
 
 
 def _airtable_get_all(path_base, params):
@@ -1161,6 +1243,52 @@ def selftest():
         finally:
             del os.environ["INBOUND_TRIAGE_DIR"]
 
+    # ── auto-replies never become tasks (2 Sep 2026) ──
+    gate = _load_gate()
+    msgs = [
+        {"id": "a", "threadId": "1a047d45bad0d05a", "headers": {"subject": "Automatic reply: Liability Order",
+                                                   "from": "lt@burnley.gov.uk"}, "body": "Your email has reached the team."},
+        {"id": "b", "threadId": "1a0496b9df667238", "headers": {"subject": "RE: Council Tax Account 23242360",
+                                                   "from": "l@fylde.gov.uk"},
+         "body": "Thank you for contacting Fylde Borough Council.\n\nYour request has been logged with reference CSV-2026-1159."},
+        {"id": "c", "threadId": "1a05bdd5ac5c463e", "headers": {"subject": "Boiler", "from": "t@x.com"},
+         "body": "Hi Kevin, the boiler has failed again, can someone come?"},
+    ]
+    annotate_auto_replies(msgs, gate.auto_reply_signal)
+    check("scan stamps the subject-family reply", str(msgs[0]["auto_reply"]).startswith("subject"))
+    check("scan stamps the receipt-body reply", str(msgs[1]["auto_reply"]).startswith("body"))
+    check("scan leaves the human alone", msgs[2]["auto_reply"] is None)
+    kept, dropped = split_auto_replies(msgs)
+    check("stranded lists drop only the machine replies",
+          [m["id"] for m in kept] == ["c"] and [m["id"] for m in dropped] == ["a", "b"])
+    flagged = {"auto_reply": "subject: Automatic reply"}
+    check("act refuses label12 on a flagged message", act_block_reason(flagged, "label12", None))
+    check("act refuses label13 on a flagged message", act_block_reason(flagged, "label13", "") is not None)
+    check("act still archives a flagged message", act_block_reason(flagged, "archive", None) is None)
+    check("act still files a flagged message", act_block_reason(flagged, "file", None) is None)
+    check("an override with a reason lifts the refusal",
+          act_block_reason(flagged, "label12", "a person wrote this") is None)
+    check("unflagged mail is unaffected", act_block_reason({"auto_reply": None}, "label12", None) is None)
+    with tempfile.TemporaryDirectory() as td:
+        os.environ["INBOUND_TRIAGE_DIR"] = td
+        try:
+            write_scan_cache(msgs)
+            cache = read_scan_cache()
+            check("cache carries the auto-reply reason", cache["a"]["auto_reply"] == msgs[0]["auto_reply"]
+                  and cache["c"]["auto_reply"] is None)
+            check("the gate reads the SAME cache file the scan wrote",
+                  gate.scan_cache_path() == str(base_dir() / "scan-cache.json"))
+            check("the gate refuses a task on the flagged thread",
+                  gate.auto_reply_refusal({gate.F["name"]: "INBOUND: RE: Council Tax Account 23242360",
+                                           gate.F["inboundUrl"]: "https://mail.google.com/mail/u/0/#all/1a0496b9df667238"},
+                                          gate.load_scan_cache()) is not None)
+            check("the gate creates for the human thread",
+                  gate.auto_reply_refusal({gate.F["name"]: "INBOUND: Boiler",
+                                           gate.F["inboundUrl"]: "https://mail.google.com/mail/u/0/#all/1a05bdd5ac5c463e"},
+                                          gate.load_scan_cache()) is None)
+        finally:
+            del os.environ["INBOUND_TRIAGE_DIR"]
+
     if failures:
         print("selftest FAILED: %d" % len(failures))
         sys.exit(1)
@@ -1189,7 +1317,8 @@ def main(argv):
         action = opt("--do")
         if not msg_id or not action:
             fail("act needs --id and --do")
-        cmd_act(msg_id, action, opt("--reason", ""), opt("--label-num"))
+        cmd_act(msg_id, action, opt("--reason", ""), opt("--label-num"),
+                opt("--override"))
     elif cmd == "note":
         msg_id = opt("--id")
         action = opt("--do")
