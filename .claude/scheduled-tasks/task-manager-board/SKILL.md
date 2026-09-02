@@ -151,6 +151,9 @@ out of your list — the board subtracted dispatch's tasks in code):
    (`recjh6mmaF8KJW8t3`). Legal matter / court / police: `escalate`.
 2. **Maintenance Ticket true, or plainly a repair/contractor job** → `roy`
    (standing approval): `handover --to roy.lavin1978@gmail.com`.
+2b. **A certificate, licence, landlord insurance or inspection matter** (not a
+   repair, not an invoice) → `route` to Property Administration
+   (`recwWvBju2ycB63i4`), provided the register shows it dispatchable.
 3. **Other property legwork needing a person** (viewing, inspection, meter
    visit, key handover) → `close`-style gate proposal: submit as yourself with
    output "PASS TO ROY: <what and why>", type `Admin`. Kevin's yes = you hand
