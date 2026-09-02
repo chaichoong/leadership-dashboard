@@ -153,7 +153,7 @@ describe('truncation honesty (the critical finding)', () => {
         expect(script).toMatch(/label_ids=\[l8\["id"\]\]/);
         expect(script).toMatch(/label_ids=\[l12\["id"\]\]/);
         expect(script).not.toMatch(/label:%s/);
-        expect(skill).toMatch(/FIRST-RUN PROOF/);
+        expect(skill).toMatch(/THE CONTROL:[\s\S]{0,400}stranded_handled \+\s*stranded_auto_replies` summing to ZERO/);
     });
 });
 
@@ -351,6 +351,47 @@ describe('an auto-reply never becomes a task (Kevin, 2 Sep 2026)', () => {
         expect(skill).toMatch(/A stranded auto-reply is never a\s+rescue/);
         expect(skill).toMatch(/auto-replies suppressed/);
         expect(skill).toMatch(/--override "<why it is human>"/);
+    });
+});
+
+describe('"no open task" is not "no task" (Kevin, 2 Sep 2026)', () => {
+    // Eight items Kevin had completed were re-created by the stranded rescue
+    // because it only looked for OPEN tasks. A thread that has ever had a
+    // task is handled; the lookup is any-status and runs inside the scan.
+    it('the scan looks up ANY task on each stranded thread and drops the handled ones before the JSON', () => {
+        const scan = script.slice(script.indexOf('def cmd_scan('), script.indexOf('def cmd_act('));
+        expect(scan).toMatch(/lookup_thread_tasks\(/);
+        for (const lane of ['stranded_8', 'stranded_12', 'stranded_13']) {
+            expect(scan).toMatch(new RegExp(`${lane}, h\\d+ = split_handled\\(${lane}, thread_map`));
+        }
+        // lane 13 keeps the Step 3 exception: a reply task never handles a repair
+        expect(scan).toMatch(/split_handled\(stranded_13, thread_map, maintenance_only=True\)/);
+        expect(script).toMatch(/def is_maintenance_task\(/);
+        expect(script).toContain('reclbdjfVev3bqNHS');
+        {
+        }
+        expect(scan.indexOf('split_handled(')).toBeLessThan(scan.indexOf('write_scan_cache('));
+        expect(scan).toMatch(/"stranded_handled": len\(stranded_handled\)/);
+    });
+
+    it('the lookup is any-status (no Status filter) and matches both URL forms', () => {
+        const fn = script.slice(script.indexOf('def thread_tasks_formula('), script.indexOf('def _airtable_get_raise('));
+        expect(fn).not.toMatch(/Status/);
+        expect(fn).toContain('#all/');
+        expect(fn).toContain('#inbox/');
+    });
+
+    it('a failed lookup reads UNCHECKED and leaves the lists untouched, never as "nothing handled"', () => {
+        const scan = script.slice(script.indexOf('def cmd_scan('), script.indexOf('def cmd_act('));
+        expect(scan).toMatch(/stranded_lookup = "UNCHECKED: %s"/);
+        expect(scan).toMatch(/"stranded_lookup": stranded_lookup/);
+        expect(script).toMatch(/def _airtable_get_raise\(/);
+    });
+
+    it('the skill tells the agent a completed task on the thread means handled, and what to do when UNCHECKED', () => {
+        expect(skill).toMatch(/whatever\s+that task's status/);
+        expect(skill).toMatch(/stranded_lookup:\s*"UNCHECKED/);
+        expect(skill).toMatch(/stranded already-handled/);
     });
 });
 
