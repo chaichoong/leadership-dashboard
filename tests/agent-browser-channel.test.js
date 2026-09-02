@@ -28,6 +28,15 @@ describe('agent-browser launches like a real browser', () => {
     expect(withPage).toMatch(/addInitScript/);
     expect(withPage).toMatch(/navigator, 'webdriver'/);
   });
+  it('signs Kevin in through a PLAIN Chrome window that shares the mock keychain', () => {
+    // Evernote rejected a correct password in every Playwright-driven window
+    // (2 Sep 2026), and a bare Chrome window wiped the other sessions because
+    // it encrypts cookies with the real keychain. Both halves must hold.
+    const login = src.slice(src.indexOf("if (cmd === 'login')"), src.indexOf("if (cmd === 'read')"));
+    expect(login).toMatch(/spawn\('open', \['-na', 'Google Chrome'/);
+    expect(login).toMatch(/'--use-mock-keychain'/);
+    expect(login).toMatch(/already open in another Chrome/);
+  });
   it('keeps the bundled build as the fallback (channel is not unconditional)', () => {
     const launchBlock = withPage.slice(withPage.indexOf('const launch = {'), withPage.indexOf('launchPersistentContext'));
     expect(launchBlock).toMatch(/if \(fs\.existsSync/);
