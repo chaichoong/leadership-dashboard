@@ -361,3 +361,59 @@ describe('skill paths never depend on the cwd (1 Sep 2026: repo-root report leak
     expect(postrun).toMatch(/report\*\|board\*\.json\|gate\*\.json\|dispatch-queue\*\.json/);
   });
 });
+
+// 1 Sep 2026 13:00 report: every waiting-on-Kevin item showed "0 hours"
+// because the board view carried no hoursWaiting at all and the skill read a
+// field that did not exist. The view is built by task_view, loaded here from
+// the real script so the shape under test is the shape the slot reads.
+describe('waiting-on-Kevin views carry a real hours-waiting figure', () => {
+    function pyView(fields) {
+        const out = execFileSync('python3', ['-c', `
+import json, importlib.util, sys
+from datetime import datetime, timezone
+spec = importlib.util.spec_from_file_location("tm", ${JSON.stringify(path.join(root, 'scripts/task-manager.py'))})
+m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+now = datetime(2026, 9, 2, 12, 0, tzinfo=timezone.utc)
+rec = {"id": "recTASK0000000001", "fields": json.loads(sys.argv[1])}
+bucket, is_kevin, view = m.task_view(rec, set(), set(), now)
+print(json.dumps({"bucket": bucket, "view": view}))
+`, JSON.stringify(fields)], { encoding: 'utf8' });
+        return JSON.parse(out.trim().split('\n').pop());
+    }
+
+    it('anchors on the Slack card time when the loop raised it', () => {
+        const r = pyView({
+            'Task Name': 'x', Status: 'Approval', 'Sent For Approval By': ['recAGENT000000001'],
+            'Created Time': '2026-08-30T12:00:00.000Z',
+            'Approval Slack TS': '1788307200.000000',   // 2026-09-02T00:00:00Z
+            Priority: 'Urgent',
+        });
+        expect(r.bucket).toBe('waitingOnKevin');
+        expect(r.view.hoursWaiting).toBe(12);
+        expect(r.view.priority).toBe('Urgent');
+    });
+
+    it('falls back to Created Time, and is null (never 0) with no stamp at all', () => {
+        const withCreated = pyView({ 'Task Name': 'x', Status: 'Today', 'Created Time': '2026-09-01T12:00:00.000Z' });
+        expect(withCreated.view.hoursWaiting).toBe(24);
+        const bare = pyView({ 'Task Name': 'x', Status: 'Today' });
+        expect(bare.view.hoursWaiting).toBeNull();
+    });
+
+    it('the skill reads hoursWaiting off the board view and the board fetches Priority', () => {
+        expect(skill).toMatch(/hoursWaiting/);
+        const fields = script.slice(script.indexOf('TASK_FIELDS = ['), script.indexOf(']', script.indexOf('TASK_FIELDS = [')));
+        expect(fields).toContain('"Priority"');
+    });
+});
+
+// Finding 20260902-task-manager-09-434: the 09:00 slot fed the audit worklist
+// to `apply`. The skill now says who authors the decisions file and in what
+// shape; without that line the agent has nothing to go on but the file names.
+describe('the field-hygiene step says the agent authors the decisions file', () => {
+    it('names the decisions shape and the auto-tier fields', () => {
+        expect(skill).toMatch(/task-sweep-decisions-<date>\.json/);
+        expect(skill).toMatch(/"decisions": \[\{"recordId"/);
+        expect(skill).toMatch(/reference\.businesses/);
+    });
+});

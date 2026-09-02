@@ -31,7 +31,7 @@ const SEND_EMAIL = resolve(ROOT, 'scripts/send-email.py');
 // no Airtable call happens and the assertions are against the payload the
 // script would really send. Re-implementing the payload in JS would guard
 // nothing.
-function submit({ type, output, tier1 = false, approverEmail = '' }) {
+function submit({ type, output, tier1 = false, approverEmail = '', inboundSender = '' }) {
   const script = `
 import importlib.util, json, sys, tempfile, os, types
 spec = importlib.util.spec_from_file_location('ad', ${JSON.stringify(DISPATCH)})
@@ -58,6 +58,8 @@ def fake_get(task):
     fields = {}
     if payload.get('approverEmail'):
         fields[m.AF['approver']] = {'email': payload['approverEmail']}
+    if payload.get('inboundSender'):
+        fields[m.AF['inboundSender']] = payload['inboundSender']
     fields.update(captured.get('fields', {}))
     return {'id': task, 'fields': fields}
 m.get_task = fake_get
@@ -82,7 +84,7 @@ out['captured'] = captured
 print('---JSON---')
 print(json.dumps(out))
 `;
-  const raw = execFileSync('python3', ['-c', script, JSON.stringify({ type, output, tier1, approverEmail })],
+  const raw = execFileSync('python3', ['-c', script, JSON.stringify({ type, output, tier1, approverEmail, inboundSender })],
     { encoding: 'utf8' });
   return JSON.parse(raw.split('---JSON---')[1]);
 }
@@ -331,6 +333,27 @@ print(json.dumps(m.parse_output(sys.stdin.read())))
       expect(r.captured.fields[r.fieldMap.assignee]).toEqual({ email: 'kevin@runpreneur.org.uk' });
       // The label travels with the work, however tier 1 was spotted.
       expect(r.captured.fields[r.fieldMap.agentOutput]).toContain('TIER 1');
+    });
+  });
+
+  // 1-2 Sep 2026: recPqpTwyBCWs3mPs, an Apps Script alert that triage raised
+  // twice. The duplicate rule said fold it into its keeper; this gate said
+  // "machine reporting a breakage, never submit" and refused for three slots.
+  // A CLOSE PROPOSAL is about the task, not the breakage — Kevin approves
+  // removing a duplicate, not investigating a script — so it passes. The
+  // original refusal still stands for anything else on an alert thread.
+  describe('system-alert tasks', () => {
+    const ALERT = 'apps-scripts-notifications@google.com';
+    it('still refuses a write-up of the breakage', () => {
+      const r = submit({ type: 'Drafting', inboundSender: ALERT,
+        output: 'The Meetings Intake script is failing on every run; recommend investigating the trigger.\n\n' + CARRY_OUT });
+      expect(r.refused).toBe(true);
+      expect(r.error).toMatch(/machine reporting a breakage/);
+    });
+    it('accepts a CLOSE PROPOSAL, because folding a duplicate alert is hygiene', () => {
+      const r = submit({ type: 'Admin', inboundSender: ALERT,
+        output: 'CLOSE PROPOSAL: duplicate of recKEEPER0000000 — folded into it.\n\n**Carrying this out will involve:** marking this task complete as a duplicate.' });
+      expect(r.refused, r.error).toBe(false);
     });
   });
 });

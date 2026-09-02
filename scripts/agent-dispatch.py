@@ -1996,7 +1996,16 @@ def cmd_submit(args):
         tf_probe.get(AF["inboundSender"], ""),
         tf_probe.get(AF["name"], ""), tf_probe.get(AF["description"], "") or "",
         tf_probe.get(AF["notes"], "") or "")
-    if alert_hit and args.type != "Correspondence":
+    # A CLOSE PROPOSAL is the one submission that is ABOUT the task rather
+    # than about the breakage: the Task Manager folding a duplicate alert
+    # thread into its keeper, or closing a dead one. Refusing it left
+    # recPqpTwyBCWs3mPs (an Apps Script alert raised twice by triage) blocked
+    # for three consecutive slots on 1-2 Sep 2026 — the duplicate rule said
+    # close it, this gate said never submit it, and the board carried the
+    # twin for ever. Nothing about the breakage reaches Kevin through a close:
+    # he approves removing a duplicate, not investigating a script.
+    is_close_proposal = output.lstrip().upper().startswith("CLOSE PROPOSAL:")
+    if alert_hit and args.type != "Correspondence" and not is_close_proposal:
         sys.exit(
             f"ERROR: refusing to submit {args.task} for approval — this is a "
             f"machine reporting a breakage (matched {alert_hit!r}), not a "
