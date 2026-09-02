@@ -153,7 +153,7 @@ describe('truncation honesty (the critical finding)', () => {
         expect(script).toMatch(/label_ids=\[l8\["id"\]\]/);
         expect(script).toMatch(/label_ids=\[l12\["id"\]\]/);
         expect(script).not.toMatch(/label:%s/);
-        expect(skill).toMatch(/FIRST-RUN PROOF/);
+        expect(skill).toMatch(/THE CONTROL:[\s\S]{0,400}stranded_handled \+\s*stranded_auto_replies` summing to ZERO/);
     });
 });
 
@@ -362,7 +362,13 @@ describe('"no open task" is not "no task" (Kevin, 2 Sep 2026)', () => {
         const scan = script.slice(script.indexOf('def cmd_scan('), script.indexOf('def cmd_act('));
         expect(scan).toMatch(/lookup_thread_tasks\(/);
         for (const lane of ['stranded_8', 'stranded_12', 'stranded_13']) {
-            expect(scan).toMatch(new RegExp(`${lane}, h\\d+ = split_handled\\(${lane}, thread_map\\)`));
+            expect(scan).toMatch(new RegExp(`${lane}, h\\d+ = split_handled\\(${lane}, thread_map`));
+        }
+        // lane 13 keeps the Step 3 exception: a reply task never handles a repair
+        expect(scan).toMatch(/split_handled\(stranded_13, thread_map, maintenance_only=True\)/);
+        expect(script).toMatch(/def is_maintenance_task\(/);
+        expect(script).toContain('reclbdjfVev3bqNHS');
+        {
         }
         expect(scan.indexOf('split_handled(')).toBeLessThan(scan.indexOf('write_scan_cache('));
         expect(scan).toMatch(/"stranded_handled": len\(stranded_handled\)/);

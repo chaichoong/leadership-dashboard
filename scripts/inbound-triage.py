@@ -463,7 +463,7 @@ def cmd_scan(back_hours):
             thread_ids_of(stranded_8 + stranded_12 + stranded_13))
         stranded_8, h8 = split_handled(stranded_8, thread_map)
         stranded_12, h12 = split_handled(stranded_12, thread_map)
-        stranded_13, h13 = split_handled(stranded_13, thread_map)
+        stranded_13, h13 = split_handled(stranded_13, thread_map, maintenance_only=True)
         stranded_handled = h8 + h12 + h13
     except Exception as e:  # noqa: BLE001 — any failure = UNCHECKED, lists untouched
         stranded_lookup = "UNCHECKED: %s" % str(e)[:200]
@@ -974,6 +974,16 @@ def split_auto_replies(messages):
 # stay in the stranded lists and the scan says UNCHECKED — a broken read
 # must never look like "nothing handled" (feedback_a_running_job_is_not_a_working_job).
 STRANDED_LOOKUP_BATCH = 12
+# Roy Lavin's Team Members row. Lane 13 has its own exception (skill Step 3):
+# a reply task on the thread does NOT handle the repair — folding the repair
+# into the reply is how a job never reaches Roy — so for stranded_13 only a
+# MAINTENANCE task counts as handling.
+ROY_TEAM_MEMBER = "reclbdjfVev3bqNHS"
+
+
+def is_maintenance_task(task):
+    name = str(task.get("name") or "")
+    return name.upper().startswith("MAINTENANCE:") or ROY_TEAM_MEMBER in (task.get("team") or [])
 
 
 def thread_ids_of(messages):
@@ -998,8 +1008,14 @@ def thread_tasks_formula(thread_ids):
 
 def _airtable_get_raise(path_base, params):
     """Like _airtable_get_all but RAISES instead of fail()-exiting: the scan
-    must survive a failed lookup and report it as UNCHECKED."""
-    pat = read_secret(AIRTABLE_PAT_FILE, "Airtable PAT")
+    must survive a failed lookup and report it as UNCHECKED. That includes
+    the PAT read — read_secret() would sys.exit the whole scan."""
+    try:
+        pat = AIRTABLE_PAT_FILE.read_text().strip()
+    except OSError as e:
+        raise RuntimeError("Airtable PAT unreadable: %s" % e.__class__.__name__)
+    if not pat:
+        raise RuntimeError("Airtable PAT file is empty")
     records, offset = [], None
     while True:
         qs = list(params)
@@ -1008,8 +1024,12 @@ def _airtable_get_raise(path_base, params):
         req = urllib.request.Request(
             "https://api.airtable.com/v0/%s/%s?%s" % (AIRTABLE_BASE, path_base, urllib.parse.urlencode(qs)),
             headers={"Authorization": "Bearer " + pat})
-        with urllib.request.urlopen(req, timeout=60) as res:
-            data = json.loads(res.read().decode())
+        try:
+            with urllib.request.urlopen(req, timeout=60) as res:
+                data = json.loads(res.read().decode())
+        except urllib.error.HTTPError as e:
+            # the body names the broken field; the PAT is a header, never in it
+            raise RuntimeError("Airtable %d: %s" % (e.code, e.read().decode(errors="replace")[:160]))
         records.extend(data.get("records", []))
         offset = data.get("offset")
         if not offset:
@@ -1025,7 +1045,7 @@ def lookup_thread_tasks(thread_ids, fetch=None):
         batch = thread_ids[i:i + STRANDED_LOOKUP_BATCH]
         params = [("pageSize", "100"), ("returnFieldsByFieldId", "true"),
                   ("filterByFormula", thread_tasks_formula(batch))]
-        for fid in (MT["name"], MT["status"], MT["urls"]):
+        for fid in (MT["name"], MT["status"], MT["urls"], MT["team"]):
             params.append(("fields[]", fid))
         for r in fetch(params):
             f = r.get("fields", {})
@@ -1034,16 +1054,20 @@ def lookup_thread_tasks(thread_ids, fetch=None):
                 if ("#all/%s" % t) in urls or ("#inbox/%s" % t) in urls:
                     found.setdefault(t, []).append({
                         "id": r.get("id"), "status": _status_name(f.get(MT["status"])),
-                        "name": str(f.get(MT["name"]) or "")[:80]})
+                        "name": str(f.get(MT["name"]) or "")[:80],
+                        "team": list(f.get(MT["team"]) or [])})
     return found
 
 
-def split_handled(messages, thread_map):
+def split_handled(messages, thread_map, maintenance_only=False):
     """(still_stranded, handled): a message whose thread has ANY task is
-    handled, whatever that task's status."""
+    handled, whatever that task's status. With maintenance_only (lane 13)
+    only a maintenance task counts — a reply task never handles a repair."""
     kept, handled = [], []
     for m in messages:
-        tasks = thread_map.get(m.get("threadId"))
+        tasks = thread_map.get(m.get("threadId")) or []
+        if maintenance_only:
+            tasks = [t for t in tasks if is_maintenance_task(t)]
         if tasks:
             handled.append(dict(m, handled_by=tasks))
         else:
@@ -1413,6 +1437,19 @@ def selftest():
     calls.clear(); lookup_thread_tasks(many, fetch=lambda p: (calls.append(p) or []))
     check("lookup batches the formula", len(calls) == 3)
     check("split with an empty map changes nothing", split_handled(strand, {})[0] == strand)
+    check("lookup asks for the URL field, the team field and no Status filter",
+          '{Inbound Note URL Link}' in dict(calls[0])["filterByFormula"] and "Status" not in dict(calls[0])["filterByFormula"]
+          and [v for k, v in calls[0] if k == "fields[]"] == [MT["name"], MT["status"], MT["urls"], MT["team"]])
+    roy_map = {"tR": [{"id": "recReply", "status": "Today", "name": "INBOUND: reply to tenant", "team": ["recCEO"]}],
+               "tM": [{"id": "recJob", "status": "Completed", "name": "MAINTENANCE: boiler", "team": []}],
+               "tY": [{"id": "recRoy", "status": "Today", "name": "Fix the gate", "team": [ROY_TEAM_MEMBER]}]}
+    l13 = [{"id": "r", "threadId": "tR"}, {"id": "m", "threadId": "tM"}, {"id": "y", "threadId": "tY"}]
+    kept13, handled13 = split_handled(l13, roy_map, maintenance_only=True)
+    check("lane 13: a reply task does NOT handle the repair (the job must still reach Roy)",
+          [x["id"] for x in kept13] == ["r"])
+    check("lane 13: a MAINTENANCE-named or Roy-owned task does handle it, any status",
+          sorted(x["id"] for x in handled13) == ["m", "y"])
+    check("lane 12: the same reply task DOES handle the thread", split_handled(l13[:1], roy_map)[1])
 
     with tempfile.TemporaryDirectory() as td:
         os.environ["INBOUND_TRIAGE_DIR"] = td

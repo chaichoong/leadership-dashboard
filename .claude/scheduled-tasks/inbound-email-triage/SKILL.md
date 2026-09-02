@@ -450,7 +450,10 @@ flag gets found.
 
 The scan has ALSO removed every thread that already has a task, whatever
 that task's status — they are in `stranded_handled`, each naming the task
-and its status (Kevin's ruling, 2 Sep 2026). "No OPEN task" was being read
+and its status (Kevin's ruling, 2 Sep 2026). For lane 13 the scan applies
+the Step 3 exception itself: only a MAINTENANCE task (name "MAINTENANCE:"
+or Roy as Team Member) handles a repair thread, so a reply task on the
+thread leaves the lane-13 message stranded and the Roy task still gets made. "No OPEN task" was being read
 as "no task": eight items Kevin had completed came straight back to his gate
 as fresh tasks, one per bulk-close. A completed task on the thread means the
 thread was handled; the Step 3 "COMPLETED and the new message needs action"
@@ -477,10 +480,15 @@ create that failed after the label was applied — the label move removes the
 mail from the inbox, so without this sweep a failed create would sit unseen
 for ever, which is the exact miss the 25 Aug ruling exists to close.
 
-FIRST-RUN PROOF: labels 8 and 12 have real mail on them today, so on your
-first live run `stranded_8` + `stranded_12` returning zero messages means the
-lookup is BROKEN, not that nothing is stranded. Report it as a failure and do
-not advance the watermark.
+THE CONTROL: labels 8 and 12 always carry real mail, so the scan's
+`counts.stranded_8 + stranded_12 + stranded_13 + stranded_handled +
+stranded_auto_replies` summing to ZERO means the label lookup is BROKEN, not
+that nothing is stranded — report it as a failure and do not advance the
+watermark. (The stranded lists THEMSELVES being empty is the healthy
+result: every labelled thread that has a task is filtered into
+`stranded_handled`.) One more edge: a stranded list that reports
+`truncated: true` was cut at the listing cap BEFORE the filter, so an empty
+filtered list does not prove nothing older is stranded — say so.
 
 ## Step 6 — Watermark, waiting count, and score
 
