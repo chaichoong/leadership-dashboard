@@ -201,10 +201,13 @@ def plan_views(t, Rs, n_frames, offset, smooth_s, blend, tilt_deg, level, raise_
         for i in range(n_frames):
             B = basis(F_sm[i]); ax = B[:, 0]
             F_sm[i] = skew_exp(ax * math.radians(-tilt_deg)) @ F_sm[i]
-    # face mode: look along the stick again but with no level/tilt (camera is raised, face is near the stick line)
-    for i in range(n_frames):
-        if mode[i] == "face":
-            F_sm[i] = F_fast[i]
+    # face mode: the camera is raised above the head and its FRONT lens faces Kevin, so look along
+    # the front lens axis (smoothed), roll still locked to gravity. Along the stick you would see his hand.
+    if (mode == "face").any():
+        F_face = smooth_dirs(np.einsum("nij,j->ni", Rf, np.array([0.0, 0.0, 1.0], np.float32)), int(round(0.3 * FPS)) | 1)
+        for i in range(n_frames):
+            if mode[i] == "face":
+                F_sm[i] = F_face[i]
     return Rf, F_sm, mode
 
 
