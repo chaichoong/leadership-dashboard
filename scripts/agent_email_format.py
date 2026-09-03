@@ -237,12 +237,16 @@ def parse_output(output):
 PERSONAL_SENDER = "kevinbrittain@gmail.com"
 BUSINESS_SENDER = "kevin@operationsdirector.co.uk"
 RUNPRENEUR_SENDER = "kevin@runpreneur.org.uk"
+# Kevin's ruling, 3 Sep 2026: all property maintenance and compliance
+# correspondence (gas certificates, EICRs, HMO licences, repairs) goes from
+# info@agilelets.co.uk, which is a Send As alias within his Gmail account.
+PROPERTY_SENDER = "info@agilelets.co.uk"
 
 # Kevin's ruling, 27 Aug 2026, in his own words on task recV3nCmp3ivQeXTN:
 # "Send from kevinbrittain@gmail.com. Never send from kevin@runpreneur.org.uk
 # unless it's to do with Runpreneur. Revert to sending from
 # kevinbrittain@gmail.com as standard."
-ALLOWED_SENDERS = (PERSONAL_SENDER, BUSINESS_SENDER, RUNPRENEUR_SENDER)
+ALLOWED_SENDERS = (PERSONAL_SENDER, BUSINESS_SENDER, RUNPRENEUR_SENDER, PROPERTY_SENDER)
 
 BUSINESS_BRAND_RE = re.compile(
     r"operationsdirector\.co\.uk|\bOperations Director\b", re.I)
