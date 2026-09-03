@@ -341,7 +341,8 @@ if __name__ == "__main__":
     ap.add_argument("--start", type=float, default=0.0); ap.add_argument("--end", type=float, default=None)
     ap.add_argument("--size", default="1920x1080"); ap.add_argument("--smooth", type=float, default=1.0)
     ap.add_argument("--tilt", type=float, default=0.0); ap.add_argument("--times", default="5,20,35")
-    ap.add_argument("--no-roll-lock", action="store_true"); ap.add_argument("--gain", type=float, default=0.0003); ap.add_argument("--offset", type=float, default=0.0); ap.add_argument("--blend", type=float, default=0.5); ap.add_argument("--still", type=float, default=None); ap.add_argument("--proj", default="sg"); ap.add_argument("--hfov", type=float, default=120.0); ap.add_argument("--level", action="store_true"); ap.add_argument("--workers", type=int, default=1); ap.add_argument("--no-raise-cut", action="store_true"); ap.add_argument("--video-only", action="store_true")   # Kevin (3 Sep 2026): no close-up at the raised camera; one angle throughout; ap.add_argument("--only", default=None)
+    ap.add_argument("--no-roll-lock", action="store_true"); ap.add_argument("--gain", type=float, default=0.0003); ap.add_argument("--offset", type=float, default=0.0); ap.add_argument("--blend", type=float, default=0.5); ap.add_argument("--still", type=float, default=None); ap.add_argument("--proj", default="sg"); ap.add_argument("--hfov", type=float, default=120.0); ap.add_argument("--level", action="store_true"); ap.add_argument("--workers", type=int, default=1); ap.add_argument("--no-raise-cut", action="store_true"); ap.add_argument("--video-only", action="store_true"); ap.add_argument("--only", default=None)
+    # --no-raise-cut: Kevin (3 Sep 2026), no close-up at the raised camera; one angle throughout
     a = ap.parse_args()
     if a.mode == "calib":
         calib(a.clip, a.out, times=tuple(float(x) for x in a.times.split(",")), dfov=a.dfov, gain=a.gain, only=(a.only.split(",") if a.only else None))
