@@ -44,7 +44,7 @@
  *
  * USAGE
  *   node scripts/agent-browser.js login   --url URL [--profile NAME]
- *   node scripts/agent-browser.js read    --url URL [--shot OUT.png]
+ *   node scripts/agent-browser.js read    --url URL [--shot OUT.png] [--wait MS] [--wait-for SELECTOR]
  *   node scripts/agent-browser.js loom-search --query "..." [--limit 20]
  *   node scripts/agent-browser.js prepare --plan PLAN.json --shot OUT.png
  *   node scripts/agent-browser.js commit  --plan PLAN.json --task recXXX --shot OUT.png
@@ -514,6 +514,12 @@ async function main() {
     const shot = arg(rest, 'shot');
     const res = await withPage(profile, false, async (page) => {
       await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 45000 });
+      // Single-page apps (Spotify for Creators, Strava's dashboard) paint nothing at
+      // domcontentloaded; --wait gives them time and --wait-for waits for a selector.
+      const waitMs = Number(arg(rest, 'wait', '0')) || 0;
+      if (waitMs) await page.waitForTimeout(Math.min(waitMs, 60000));
+      const waitFor = arg(rest, 'wait-for');
+      if (waitFor) await page.waitForSelector(waitFor, { timeout: 60000 }).catch(() => {});
       const text = await page.evaluate(() => document.body.innerText.slice(0, 20000));
       const png = await shoot(page, shot);
       return { title: await page.title(), text, screenshot: png };
