@@ -258,9 +258,26 @@ async function withPage(profile, headed, fn) {
   if (!chromium) die(`playwright not found (tried: ${tried.join(', ')}). Run npm install in ${REPO}.`);
   const dir = path.join(PROFILE_ROOT, profile || 'default');
   fs.mkdirSync(dir, { recursive: true });
-  const ctx = await chromium.launchPersistentContext(dir, {
+  // Prefer Kevin's installed Google Chrome over Playwright's bundled test build
+  // (2 Sep 2026). The bundled Chromium announces itself as automated
+  // (navigator.webdriver = true, "controlled by automated test software"),
+  // and Evernote's login refused Kevin's own valid credentials in it while the
+  // same credentials worked in his real Chrome. Real Chrome with the
+  // automation switch off is what a person's browser looks like, and the
+  // existing sessions (Loom, TopCashback) survived the switch on a copied
+  // profile before this landed. Falls back to the bundled build when Chrome is
+  // absent, so an unattended run never dies on a missing app.
+  const launch = {
     headless: !headed,
     viewport: { width: 1280, height: 900 },
+  };
+  if (fs.existsSync('/Applications/Google Chrome.app')) {
+    launch.channel = 'chrome';
+    launch.ignoreDefaultArgs = ['--enable-automation'];
+  }
+  const ctx = await chromium.launchPersistentContext(dir, launch);
+  await ctx.addInitScript(() => {
+    Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
   });
   try {
     const page = ctx.pages()[0] || await ctx.newPage();
@@ -444,6 +461,42 @@ async function main() {
       fs.mkdirSync(path.dirname(SITES_FILE), { recursive: true });
       fs.writeFileSync(SITES_FILE, JSON.stringify(sites, null, 2));
       console.log(`Added ${host} to the allowlist.`);
+    }
+    // TWO TRAPS, both paid for on 2 Sep 2026 (Evernote):
+    //
+    // 1. A login window driven by Playwright is still an automated browser,
+    //    whatever flags are hidden, and Evernote answered a CORRECT password
+    //    with "the password entered is incorrect" three times in a row. So
+    //    the sign-in window is a PLAIN Chrome process on the profile, with
+    //    nothing attached to it, which Evernote accepted first time.
+    //
+    // 2. Plain Chrome encrypts cookies with the Mac keychain; Playwright
+    //    launches Chrome with --use-mock-keychain. Opening the profile in
+    //    bare Chrome wiped the TopCashback and Loom sessions (undecryptable
+    //    cookies are dropped) and saved Evernote's in a form the agent could
+    //    not read. The plain window MUST carry --use-mock-keychain so every
+    //    cookie Kevin creates is readable by the agent's launch.
+    //
+    // Falls back to the Playwright-driven window only when Chrome is absent.
+    const dir = path.join(PROFILE_ROOT, profile || 'default');
+    if (fs.existsSync('/Applications/Google Chrome.app')) {
+      fs.mkdirSync(dir, { recursive: true });
+      const { spawnSync, spawn } = require('child_process');
+      const busy = spawnSync('pgrep', ['-f', `user-data-dir=${dir}`]).status === 0;
+      if (busy) die(`the profile at ${dir} is already open in another Chrome. Quit it (Cmd+Q) first.`);
+      spawn('open', ['-na', 'Google Chrome', '--args', `--user-data-dir=${dir}`,
+        '--use-mock-keychain', '--no-first-run', url], { stdio: 'ignore' }).unref();
+      console.log(`Plain Chrome window open for ${host} (no automation attached). Log in, then Cmd+Q that window.`);
+      const deadline = Date.now() + 15 * 60 * 1000;
+      let seen = false;
+      while (Date.now() < deadline) {
+        await new Promise(r => setTimeout(r, 2000));
+        const running = spawnSync('pgrep', ['-f', `user-data-dir=${dir}`]).status === 0;
+        if (running) seen = true;
+        else if (seen) break;
+      }
+      ledger({ cmd: 'login', host, profile, mode: 'plain-chrome-mock-keychain' });
+      return;
     }
     await withPage(profile, true, async (page) => {
       await page.goto(url, { waitUntil: 'domcontentloaded' });

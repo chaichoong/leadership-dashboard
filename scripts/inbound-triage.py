@@ -40,6 +40,9 @@ USAGE
                                               `truncated` flag — see Step 6 of
                                               the skill for what that forbids.
   inbound-triage.py act --id MSGID --do label12|label13|archive [--reason R]
+                                              [--override "why a human wrote it"]
+                                              (label12/13 refuse a scan-flagged
+                                              auto-reply without an override)
                                               apply one triage decision + log
                                               it (sender/subject come from the
                                               scan cache, never from argv)
@@ -266,6 +269,9 @@ def write_scan_cache(messages):
             "subject": ((m.get("headers") or {}).get("subject", ""))[:200],
             "threadId": m.get("threadId", ""),
             "internalDate": m.get("internalDate"),
+            # read back by act (lane refusal) and by the task gate (thread
+            # refusal) — the reason string, so the digest can say why
+            "auto_reply": m.get("auto_reply") or None,
         }
     d = base_dir()
     d.mkdir(parents=True, exist_ok=True)
@@ -436,7 +442,34 @@ def cmd_scan(back_hours):
         if tid and ts > sent_threads.get(tid, 0):
             sent_threads[tid] = ts
 
-    write_scan_cache(new_inbox + stale + stranded_8 + stranded_12 + stranded_13)
+    # Stamp every message with the auto-reply signal (shared with the task
+    # gate), then keep machine replies OUT of the stranded lists: a stranded
+    # list exists only to mint tasks, and a machine receipt never gets one.
+    signal_fn = _load_gate().auto_reply_signal
+    for lst in (new_inbox, stale, stranded_8, stranded_12, stranded_13):
+        annotate_auto_replies(lst, signal_fn)
+    stranded_8, ar8 = split_auto_replies(stranded_8)
+    stranded_12, ar12 = split_auto_replies(stranded_12)
+    stranded_13, ar13 = split_auto_replies(stranded_13)
+    stranded_auto_replies = ar8 + ar12 + ar13
+    inbox_auto_replies = sum(1 for m in new_inbox if m.get("auto_reply"))
+
+    # A thread that has EVER had a task is handled, whatever the task's
+    # status — the stranded lists keep only mail that never got one.
+    stranded_lookup = "checked"
+    stranded_handled = []
+    try:
+        thread_map = lookup_thread_tasks(
+            thread_ids_of(stranded_8 + stranded_12 + stranded_13))
+        stranded_8, h8 = split_handled(stranded_8, thread_map)
+        stranded_12, h12 = split_handled(stranded_12, thread_map)
+        stranded_13, h13 = split_handled(stranded_13, thread_map, maintenance_only=True)
+        stranded_handled = h8 + h12 + h13
+    except Exception as e:  # noqa: BLE001 — any failure = UNCHECKED, lists untouched
+        stranded_lookup = "UNCHECKED: %s" % str(e)[:200]
+
+    write_scan_cache(new_inbox + stale + stranded_8 + stranded_12 + stranded_13
+                     + stranded_auto_replies + stranded_handled)
 
     # Record what this scan saw, so `mark` can ENFORCE the truncation freeze
     # rather than trusting the caller to apply it. Only new_inbox truncation
@@ -459,7 +492,13 @@ def cmd_scan(back_hours):
                    "label13": {"id": l13["id"], "name": l13["name"]} if l13 else None},
         "counts": {"new_inbox": len(new_inbox), "stale": len(stale),
                    "stranded_8": len(stranded_8), "stranded_12": len(stranded_12),
-                   "stranded_13": len(stranded_13), "sent": len(sent_msgs)},
+                   "stranded_13": len(stranded_13), "sent": len(sent_msgs),
+                   "inbox_auto_replies": inbox_auto_replies,
+                   "stranded_auto_replies": len(stranded_auto_replies),
+                   "stranded_handled": len(stranded_handled)},
+        # "checked", or "UNCHECKED: <why>" — then the stranded lists still
+        # hold threads that may already have a task; say so in the report.
+        "stranded_lookup": stranded_lookup,
         "truncated": {"new_inbox": new_trunc, "stale": stale_trunc,
                       "stranded_8": s8_trunc, "stranded_12": s12_trunc,
                       "stranded_13": s13_trunc, "sent": sent_trunc},
@@ -468,12 +507,33 @@ def cmd_scan(back_hours):
         "stranded_8": stranded_8,
         "stranded_12": stranded_12,
         "stranded_13": stranded_13,
+        # Flagged lane mail, listed so the report can count it and the agent
+        # can log the reference on the open matter — never a rescue.
+        "stranded_auto_replies": [
+            {"id": m.get("id"), "threadId": m.get("threadId"),
+             "auto_reply": m.get("auto_reply"),
+             "sender": parse_bare_email((m.get("headers") or {}).get("from", "")),
+             "subject": ((m.get("headers") or {}).get("subject", ""))[:120],
+             # enough to spot a wrong flag; the body test is a heuristic
+             "excerpt": _load_gate().unquoted_body(m.get("body", ""))[:300]}
+            for m in stranded_auto_replies],
+        # Labelled mail whose thread already has a task (any status): handled,
+        # never a rescue. Listed so the report can count it.
+        "stranded_handled": [
+            {"id": m.get("id"), "threadId": m.get("threadId"),
+             "handled_by": m.get("handled_by")} for m in stranded_handled],
         "sent_threads": sent_threads,
     }))
 
 
-def cmd_act(msg_id, action, reason, label_num=None):
+def cmd_act(msg_id, action, reason, label_num=None, override=None):
     ctx = read_scan_cache().get(msg_id, {})
+    blocked = act_block_reason(ctx, action, override)
+    if blocked:
+        fail(blocked)
+    if override and override.strip() and ctx.get("auto_reply"):
+        reason = "OVERRIDE auto-reply flag (%s): %s — %s" % (
+            ctx.get("auto_reply"), override.strip(), reason)
     digest_do = action
     if action == "archive":
         add, remove = [], ["INBOX"]
@@ -856,15 +916,181 @@ def matters_json(open_rows, closed_rows, key_fn, team_names, now_iso):
                        "recentlyClosed": len(closed_rows)}}
 
 
-def _load_dupe_key():
-    """dupe_task_key from create-agent-task.py — imported, never copied, so
-    the matter key in the snapshot can never drift from the gate's own key."""
+def _load_gate():
+    """create-agent-task.py as a module — imported, never copied, so the
+    matter key AND the auto-reply signal here can never drift from the
+    gate's own."""
     import importlib.util
     p = Path(__file__).resolve().parent / "create-agent-task.py"
     spec = importlib.util.spec_from_file_location("od_catask", p)
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
-    return mod.dupe_task_key
+    return mod
+
+
+def _load_dupe_key():
+    return _load_gate().dupe_task_key
+
+
+# ─── AUTO-REPLIES (2 Sep 2026) ────────────────────────────────────────
+#
+# A council's automatic receipt of an email Kevin had already approved and
+# sent reached his approval gate four times between 28 Aug and 1 Sep 2026.
+# The route was the stranded-mail rescue: the thread carried label 12, its
+# real task had COMPLETED, so "labelled with no open task" read as stranded
+# and a fresh task was minted for a message that asks nothing. The signal
+# (headers, subject family, receipt-shaped body) lives in the task gate;
+# the scan stamps every message with it, keeps flagged mail OUT of the
+# stranded lists, and `act` refuses to lane a flagged message unless the
+# agent overrides with a reason that lands in the digest.
+
+def annotate_auto_replies(messages, signal_fn):
+    """Stamp each scanned message with auto_reply = reason or None."""
+    for m in messages:
+        h = m.get("headers") or {}
+        m["auto_reply"] = signal_fn(h, h.get("subject", ""), m.get("body", ""))
+    return messages
+
+
+def split_auto_replies(messages):
+    """(kept, dropped): stranded candidates minus the machine replies."""
+    kept = [m for m in messages if not m.get("auto_reply")]
+    dropped = [m for m in messages if m.get("auto_reply")]
+    return kept, dropped
+
+
+# ─── "NO OPEN TASK" IS NOT "NO TASK" (2 Sep 2026) ────────────────────
+#
+# Eight of the nine "nothing to decide" items Kevin cleared from his gate on
+# 2 Sep 2026 were re-creations: each thread already had a task that he had
+# COMPLETED days earlier (a dental reminder, a data-breach notice, a Premium
+# Credit statement, two bounces, a Supabase pause, a GoCardless payout, an
+# HL notice). The stranded rescue asked "is there an OPEN task on this
+# thread?", found none, and minted a fresh one — so every bulk-close he
+# made came straight back as a new approval. A thread that has EVER had a
+# task is handled: the stranded check exists for mail that never got one.
+# The lookup is any-status and runs in the scan, so the agent never sees a
+# handled thread as a candidate. If the lookup itself fails, the threads
+# stay in the stranded lists and the scan says UNCHECKED — a broken read
+# must never look like "nothing handled" (feedback_a_running_job_is_not_a_working_job).
+STRANDED_LOOKUP_BATCH = 12
+# Roy Lavin's Team Members row. Lane 13 has its own exception (skill Step 3):
+# a reply task on the thread does NOT handle the repair — folding the repair
+# into the reply is how a job never reaches Roy — so for stranded_13 only a
+# MAINTENANCE task counts as handling.
+ROY_TEAM_MEMBER = "reclbdjfVev3bqNHS"
+
+
+def is_maintenance_task(task):
+    name = str(task.get("name") or "")
+    return name.upper().startswith("MAINTENANCE:") or ROY_TEAM_MEMBER in (task.get("team") or [])
+
+
+def thread_ids_of(messages):
+    seen, out = set(), []
+    for m in messages:
+        tid = m.get("threadId")
+        if tid and tid not in seen:
+            seen.add(tid)
+            out.append(tid)
+    return out
+
+
+def thread_tasks_formula(thread_ids):
+    """Any task, whatever its status, whose dedupe URL field carries one of
+    these threads — both the current #all/ form and the legacy #inbox/."""
+    finds = []
+    for t in thread_ids:
+        finds.append('FIND("#all/%s",{Inbound Note URL Link})' % t)
+        finds.append('FIND("#inbox/%s",{Inbound Note URL Link})' % t)
+    return "OR(%s)" % ",".join(finds)
+
+
+def _airtable_get_raise(path_base, params):
+    """Like _airtable_get_all but RAISES instead of fail()-exiting: the scan
+    must survive a failed lookup and report it as UNCHECKED. That includes
+    the PAT read — read_secret() would sys.exit the whole scan."""
+    try:
+        pat = AIRTABLE_PAT_FILE.read_text().strip()
+    except OSError as e:
+        raise RuntimeError("Airtable PAT unreadable: %s" % e.__class__.__name__)
+    if not pat:
+        raise RuntimeError("Airtable PAT file is empty")
+    records, offset = [], None
+    while True:
+        qs = list(params)
+        if offset:
+            qs.append(("offset", offset))
+        req = urllib.request.Request(
+            "https://api.airtable.com/v0/%s/%s?%s" % (AIRTABLE_BASE, path_base, urllib.parse.urlencode(qs)),
+            headers={"Authorization": "Bearer " + pat})
+        try:
+            with urllib.request.urlopen(req, timeout=60) as res:
+                data = json.loads(res.read().decode())
+        except urllib.error.HTTPError as e:
+            # the body names the broken field; the PAT is a header, never in it
+            raise RuntimeError("Airtable %d: %s" % (e.code, e.read().decode(errors="replace")[:160]))
+        records.extend(data.get("records", []))
+        offset = data.get("offset")
+        if not offset:
+            return records
+
+
+def lookup_thread_tasks(thread_ids, fetch=None):
+    """thread id -> [{id, status, name}] for every thread that has ANY task.
+    `fetch(params)` is injectable for the selftest."""
+    fetch = fetch or (lambda params: _airtable_get_raise(TASKS_TABLE, params))
+    found = {}
+    for i in range(0, len(thread_ids), STRANDED_LOOKUP_BATCH):
+        batch = thread_ids[i:i + STRANDED_LOOKUP_BATCH]
+        params = [("pageSize", "100"), ("returnFieldsByFieldId", "true"),
+                  ("filterByFormula", thread_tasks_formula(batch))]
+        for fid in (MT["name"], MT["status"], MT["urls"], MT["team"]):
+            params.append(("fields[]", fid))
+        for r in fetch(params):
+            f = r.get("fields", {})
+            urls = str(f.get(MT["urls"]) or "")
+            for t in batch:
+                if ("#all/%s" % t) in urls or ("#inbox/%s" % t) in urls:
+                    found.setdefault(t, []).append({
+                        "id": r.get("id"), "status": _status_name(f.get(MT["status"])),
+                        "name": str(f.get(MT["name"]) or "")[:80],
+                        "team": list(f.get(MT["team"]) or [])})
+    return found
+
+
+def split_handled(messages, thread_map, maintenance_only=False):
+    """(still_stranded, handled): a message whose thread has ANY task is
+    handled, whatever that task's status. With maintenance_only (lane 13)
+    only a maintenance task counts — a reply task never handles a repair."""
+    kept, handled = [], []
+    for m in messages:
+        tasks = thread_map.get(m.get("threadId")) or []
+        if maintenance_only:
+            tasks = [t for t in tasks if is_maintenance_task(t)]
+        if tasks:
+            handled.append(dict(m, handled_by=tasks))
+        else:
+            kept.append(m)
+    return kept, handled
+
+
+LANE_ACTIONS = ("label12", "label13", "label8")
+
+
+def act_block_reason(ctx, action, override):
+    """Why `act` must refuse, or None. Only the task lanes are guarded:
+    archiving or filing a machine reply is exactly what should happen."""
+    if action not in LANE_ACTIONS or not ctx.get("auto_reply"):
+        return None
+    if override and override.strip():
+        return None
+    return ("%s refused: the scan flagged this message as an auto-reply (%s). "
+            "A machine receipt never gets a task — archive it, or file it in "
+            "lane 18 if it is creditor mail, and log the reference on the open "
+            "matter. If a human really wrote it, repeat with "
+            "--override \"<why it is human>\" (the override is logged)."
+            % (action, ctx.get("auto_reply")))
 
 
 def _airtable_get_all(path_base, params):
@@ -1161,6 +1387,90 @@ def selftest():
         finally:
             del os.environ["INBOUND_TRIAGE_DIR"]
 
+    # ── auto-replies never become tasks (2 Sep 2026) ──
+    gate = _load_gate()
+    msgs = [
+        {"id": "a", "threadId": "1a047d45bad0d05a", "headers": {"subject": "Automatic reply: Liability Order",
+                                                   "from": "lt@burnley.gov.uk"}, "body": "Your email has reached the team."},
+        {"id": "b", "threadId": "1a0496b9df667238", "headers": {"subject": "RE: Council Tax Account 23242360",
+                                                   "from": "l@fylde.gov.uk"},
+         "body": "Thank you for contacting Fylde Borough Council.\n\nYour request has been logged with reference CSV-2026-1159."},
+        {"id": "c", "threadId": "1a05bdd5ac5c463e", "headers": {"subject": "Boiler", "from": "t@x.com"},
+         "body": "Hi Kevin, the boiler has failed again, can someone come?"},
+    ]
+    annotate_auto_replies(msgs, gate.auto_reply_signal)
+    check("scan stamps the subject-family reply", str(msgs[0]["auto_reply"]).startswith("subject"))
+    check("scan stamps the receipt-body reply", str(msgs[1]["auto_reply"]).startswith("body"))
+    check("scan leaves the human alone", msgs[2]["auto_reply"] is None)
+    kept, dropped = split_auto_replies(msgs)
+    check("stranded lists drop only the machine replies",
+          [m["id"] for m in kept] == ["c"] and [m["id"] for m in dropped] == ["a", "b"])
+    flagged = {"auto_reply": "subject: Automatic reply"}
+    check("act refuses label12 on a flagged message", act_block_reason(flagged, "label12", None))
+    check("act refuses label13 on a flagged message", act_block_reason(flagged, "label13", "") is not None)
+    check("act still archives a flagged message", act_block_reason(flagged, "archive", None) is None)
+    check("act still files a flagged message", act_block_reason(flagged, "file", None) is None)
+    check("an override with a reason lifts the refusal",
+          act_block_reason(flagged, "label12", "a person wrote this") is None)
+    check("unflagged mail is unaffected", act_block_reason({"auto_reply": None}, "label12", None) is None)
+    # ── "no open task" is not "no task" (2 Sep 2026) ──
+    strand = [{"id": "s1", "threadId": "1a0435e6d4d33f33"}, {"id": "s2", "threadId": "1a0435e6d4d33f33"},
+              {"id": "s3", "threadId": "1a0424ba4103ee86"}, {"id": "s4", "threadId": "1a04879a06de44c9"}]
+    check("thread ids are unique and ordered", thread_ids_of(strand) == ["1a0435e6d4d33f33", "1a0424ba4103ee86", "1a04879a06de44c9"])
+    fm = thread_tasks_formula(["1a0435e6d4d33f33"])
+    check("lookup matches both URL forms", '#all/1a0435e6d4d33f33' in fm and '#inbox/1a0435e6d4d33f33' in fm and fm.startswith("OR("))
+    calls = []
+    def fake_fetch(params):
+        calls.append(params)
+        return [{"id": "recDone", "fields": {MT["name"]: "INBOUND: bounce", MT["status"]: {"name": "Completed"},
+                                             MT["urls"]: "https://mail.google.com/mail/u/0/#all/1a0435e6d4d33f33"}},
+                {"id": "recOpen", "fields": {MT["name"]: "INBOUND: payout", MT["status"]: {"name": "Today"},
+                                             MT["urls"]: "https://mail.google.com/mail/u/0/#inbox/1a0424ba4103ee86 https://x/#all/zzz"}}]
+    tm = lookup_thread_tasks(thread_ids_of(strand), fetch=fake_fetch)
+    check("a COMPLETED task still counts as handled", tm["1a0435e6d4d33f33"][0]["status"] == "Completed")
+    check("legacy #inbox/ URL counts", tm["1a0424ba4103ee86"][0]["id"] == "recOpen")
+    check("a thread with no task is absent", "1a04879a06de44c9" not in tm)
+    kept, handled = split_handled(strand, tm)
+    check("only the never-tasked thread stays stranded", [m["id"] for m in kept] == ["s4"] and len(handled) == 3)
+    check("handled messages carry the task that handles them", handled[0]["handled_by"][0]["id"] == "recDone")
+    many = ["%016x" % i for i in range(30)]
+    calls.clear(); lookup_thread_tasks(many, fetch=lambda p: (calls.append(p) or []))
+    check("lookup batches the formula", len(calls) == 3)
+    check("split with an empty map changes nothing", split_handled(strand, {})[0] == strand)
+    check("lookup asks for the URL field, the team field and no Status filter",
+          '{Inbound Note URL Link}' in dict(calls[0])["filterByFormula"] and "Status" not in dict(calls[0])["filterByFormula"]
+          and [v for k, v in calls[0] if k == "fields[]"] == [MT["name"], MT["status"], MT["urls"], MT["team"]])
+    roy_map = {"tR": [{"id": "recReply", "status": "Today", "name": "INBOUND: reply to tenant", "team": ["recCEO"]}],
+               "tM": [{"id": "recJob", "status": "Completed", "name": "MAINTENANCE: boiler", "team": []}],
+               "tY": [{"id": "recRoy", "status": "Today", "name": "Fix the gate", "team": [ROY_TEAM_MEMBER]}]}
+    l13 = [{"id": "r", "threadId": "tR"}, {"id": "m", "threadId": "tM"}, {"id": "y", "threadId": "tY"}]
+    kept13, handled13 = split_handled(l13, roy_map, maintenance_only=True)
+    check("lane 13: a reply task does NOT handle the repair (the job must still reach Roy)",
+          [x["id"] for x in kept13] == ["r"])
+    check("lane 13: a MAINTENANCE-named or Roy-owned task does handle it, any status",
+          sorted(x["id"] for x in handled13) == ["m", "y"])
+    check("lane 12: the same reply task DOES handle the thread", split_handled(l13[:1], roy_map)[1])
+
+    with tempfile.TemporaryDirectory() as td:
+        os.environ["INBOUND_TRIAGE_DIR"] = td
+        try:
+            write_scan_cache(msgs)
+            cache = read_scan_cache()
+            check("cache carries the auto-reply reason", cache["a"]["auto_reply"] == msgs[0]["auto_reply"]
+                  and cache["c"]["auto_reply"] is None)
+            check("the gate reads the SAME cache file the scan wrote",
+                  gate.scan_cache_path() == str(base_dir() / "scan-cache.json"))
+            check("the gate refuses a task on the flagged thread",
+                  gate.auto_reply_refusal({gate.F["name"]: "INBOUND: RE: Council Tax Account 23242360",
+                                           gate.F["inboundUrl"]: "https://mail.google.com/mail/u/0/#all/1a0496b9df667238"},
+                                          gate.load_scan_cache()) is not None)
+            check("the gate creates for the human thread",
+                  gate.auto_reply_refusal({gate.F["name"]: "INBOUND: Boiler",
+                                           gate.F["inboundUrl"]: "https://mail.google.com/mail/u/0/#all/1a05bdd5ac5c463e"},
+                                          gate.load_scan_cache()) is None)
+        finally:
+            del os.environ["INBOUND_TRIAGE_DIR"]
+
     if failures:
         print("selftest FAILED: %d" % len(failures))
         sys.exit(1)
@@ -1168,6 +1478,28 @@ def selftest():
 
 
 # ---------------------------------------------------------------------------
+
+def cmd_search(q, limit):
+    """Read-only Gmail search for the role agents (Property Administration
+    build, 2 Sep 2026): the search-first rule needs a route into the mailbox
+    that is NOT a hand-rolled curl carrying the triage key. Same worker, same
+    read-and-label credential, one page, never a modify."""
+    if not q or not q.strip():
+        fail("search needs --q <gmail query>")
+    msgs, truncated = worker_list(q=q.strip(), max_pages=1)
+    keep = ("id", "threadId", "internalDate", "from", "subject", "snippet",
+            "date", "labelIds")
+    rows = []
+    for m in msgs[:limit]:
+        row = {k: m.get(k) for k in keep if m.get(k) is not None}
+        ts = int(m.get("internalDate") or 0)
+        if ts:
+            row["when"] = datetime.fromtimestamp(ts / 1000).strftime("%Y-%m-%d %H:%M")
+        rows.append(row)
+    print(json.dumps({"q": q.strip(), "count": len(msgs), "shown": len(rows),
+                      "truncated": truncated or len(msgs) > limit,
+                      "messages": rows}, indent=1))
+
 
 def main(argv):
     if not argv:
@@ -1189,7 +1521,8 @@ def main(argv):
         action = opt("--do")
         if not msg_id or not action:
             fail("act needs --id and --do")
-        cmd_act(msg_id, action, opt("--reason", ""), opt("--label-num"))
+        cmd_act(msg_id, action, opt("--reason", ""), opt("--label-num"),
+                opt("--override"))
     elif cmd == "note":
         msg_id = opt("--id")
         action = opt("--do")
@@ -1218,6 +1551,8 @@ def main(argv):
         return cmd_history_dump()
     elif cmd == "matters":
         return cmd_matters()
+    elif cmd == "search":
+        cmd_search(opt("--q"), int(opt("--limit", "20")))
     elif cmd == "selftest":
         selftest()
     else:

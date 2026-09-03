@@ -96,7 +96,24 @@ safe because they are idempotent, not because repeating them is free.
     cd ~/knowledge-os/logs/task-manager/scratch
     python3 /Users/kevinbrittain/Projects/leadership-dashboard/scripts/task-hygiene-sweep.py audit
 
-Then apply the **auto tier only**, dry run first, exactly as the old sweep did:
+The audit writes a WORKLIST (`task-sweep-worklist-<date>.json`, key `tasks`):
+each task's `gaps` and `context`, plus `reference` (businesses, time estimate
+options). It lists gaps; it never decides values. **You author the decisions
+file** — feeding the worklist straight to `apply` is refused in one line
+(2 Sep 2026, finding 434: that is exactly what happened, and the step
+reported "broken" for a day). Write
+`$TASK_MANAGER_SCRATCH/task-sweep-decisions-<date>.json` as:
+
+    {"decisions": [{"recordId": "rec...", "field": "timeEstimate", "value": "30 min",
+                    "reason": "one-line why"}]}
+
+Auto-tier fields only, one entry per gap you are SURE of from the task's own
+context: `timeEstimate` (one of the options in `reference.timeEstimateOptions`),
+`business` (a record id from `reference.businesses`, never a name), `dueDate`
+(YYYY-MM-DD, today to 90 days out, only when the task names its own date).
+A gap you cannot decide from the context stays a gap — a guess written to
+Airtable looks exactly like a fact. Then apply the **auto tier only**, dry run
+first, exactly as the old sweep did:
 
     python3 .../scripts/task-hygiene-sweep.py apply --decisions <decisions-file> --tier auto --dry-run
     python3 .../scripts/task-hygiene-sweep.py apply --decisions <decisions-file> --tier auto
@@ -151,6 +168,9 @@ out of your list — the board subtracted dispatch's tasks in code):
    (`recjh6mmaF8KJW8t3`). Legal matter / court / police: `escalate`.
 2. **Maintenance Ticket true, or plainly a repair/contractor job** → `roy`
    (standing approval): `handover --to roy.lavin1978@gmail.com`.
+2b. **A certificate, licence, landlord insurance or inspection matter** (not a
+   repair, not an invoice) → `route` to Property Administration
+   (`recwWvBju2ycB63i4`), provided the register shows it dispatchable.
 3. **Other property legwork needing a person** (viewing, inspection, meter
    visit, key handover) → `close`-style gate proposal: submit as yourself with
    output "PASS TO ROY: <what and why>", type `Admin`. Kevin's yes = you hand
@@ -171,7 +191,11 @@ out of your list — the board subtracted dispatch's tasks in code):
    `closable` twins, and its `untouchable` twins. `annotate` the keeper with
    anything unique from each closable twin (one line per twin), then
    `close`-propose each id in `closable` with output
-   "CLOSE PROPOSAL: duplicate of <keeper id> — folded into it". Never close
+   "CLOSE PROPOSAL: duplicate of <keeper id> — folded into it". The gate
+   accepts a CLOSE PROPOSAL on a system-alert thread (an Apps Script or
+   Cloudflare failure mail) — folding a duplicate alert is hygiene, not
+   "investigate the script", and was wrongly refused for three slots on
+   1-2 Sep 2026. Never close
    the keeper; one proposal per task even when a folded task appears in two
    groups. `untouchable` twins sit at Status Approval — report them, never
    touch them HERE (their Agent Output is waiting on Kevin; the step 2b
@@ -215,7 +239,7 @@ rows without Sent For Approval By are excluded IN THE FORMULA, so they can
 never be swept here (they are stuck work, handled in step 2). A zero lane
 alongside 5+ Approval-status rows fails the read loudly; report it.
 
-For each lane item, oldest first, ask three questions — checks with findable
+For each lane item, oldest first, ask five questions — checks with findable
 answers, not vibes:
 
 1. **Already handled elsewhere?** A completed task, a sent reply, or an
@@ -225,6 +249,24 @@ answers, not vibes:
 3. **Duplicate of another lane item?** Same matter waiting twice (the step 2
    duplicates list and inboundUrl thread keys are your evidence — address
    words are never evidence, per the dupe rules).
+4. **A machine acknowledgement of something we sent?** (Kevin's ask, 2 Sep
+   2026.) The lane read runs the creation gate's own `auto_reply_signal`
+   over each item's stored message and sets `autoReply` to the reason
+   ("subject: Automatic reply…", "body: thank you for contacting…");
+   `counts.autoReplyFlagged` is the total. The creation gate now refuses
+   these, so a flagged lane item predates it or was moved by hand. Read the
+   excerpt to confirm nothing in it asks or instructs (the flag is a prompt,
+   not a verdict; a bounce never flags), then propose exactly the wording in
+   GUARDRAILS: "CLOSE PROPOSAL: auto-acknowledgement of our send, reference
+   logged on <the open task or Creditor Plans row>". Note the reference on
+   that row first (`annotate`). Never a chaser, never a briefing.
+5. **Needs no decision from Kevin?** Approving it would change nothing: a
+   NO ACTION REQUIRED briefing, work an agent already holds standing
+   approval for (Roy's maintenance), a question the brain already answers,
+   or an agent's own admin. Say in the proposal what happens instead (who
+   carries it, or that nothing needs doing). Anything tier-1, anything with
+   money, a signature or a send to the outside world is NOT this — those
+   are his by design.
 
 Any yes → a CLOSE PROPOSAL through the gate. Mechanics that protect the
 original submission (dispatch submit REPLACES Agent Output wholesale):
@@ -324,9 +366,15 @@ LEADING with what should have moved and did not:
 2. Duplicate threads: the board's `duplicateGroups` and `duplicateExtras`
    counts, and what was proposed for each group this slot. Zero is the only
    healthy number.
-3. Waiting on Kevin: count and the 5 oldest with hours waiting.
-4. Gate health (from gate.json): lane size, median age in hours, cleanse
-   proposals made this slot, and the cleanse remainder still to judge.
+3. Waiting on Kevin: count and the 5 oldest with hours waiting — read
+   `hoursWaiting` off each `waitingOnKevin` view in board.json (anchored on
+   the Slack card time, Created Time as fallback). Never write 0 for a
+   value you did not read; a missing figure is reported as missing.
+4. Gate health (from gate.json): lane size, median age in hours,
+   `counts.autoReplyFlagged` (zero is healthy; each flagged item is named
+   with what was proposed for it), cleanse proposals made this slot by
+   question (handled / overtaken / duplicate / auto-reply / no decision),
+   and the cleanse remainder still to judge.
 5. Moves made this slot, by kind.
 6. Remaining backlog and what next slot takes first.
 

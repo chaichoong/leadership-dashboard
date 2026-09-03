@@ -211,7 +211,7 @@ describe('register metrics (Kevin\'s two, 25 Aug 2026)', () => {
     // a new agent's build session adds an entry and this stays true.
     expect(pyEval('[label for label, fn in mod.SCORE_STEPS]'))
       .toEqual(['response', 'creditor', 'weekly-review', 'monthly-review',
-                'chase']);
+                'chase', 'property', 'renewals', 'quarterly-review']);
     expect(score).toMatch(/for label, fn in SCORE_STEPS/);
     expect(score).toMatch(/sys\.exit\("ERROR: score failed/);
     // The one shared register write: change-gated, per-agent state file.
@@ -336,7 +336,7 @@ describe('the creditor record book (revamp, Kevin-approved chain, 1 Sep 2026)', 
     const chase = src.slice(src.indexOf('def ensure_chase_tasks'),
                             src.indexOf('def creditor_score_selftest'));
     expect(chase).toMatch(/CREDITOR MATTER/);
-    expect(chase).toMatch(/\[CREDITOR_REC_ID\]/);
+    expect(chase).toMatch(/raise_engine_task\(\s*name, CREDITOR_REC_ID/);
     expect(chase).toMatch(/CHASE_STATE/);      // one chase per page per date
   });
 });

@@ -96,6 +96,30 @@ All commands run from the main checkout
 Decide ONE outcome per message. Read the sender, subject, body excerpt, and
 the `list-unsubscribe` header (its presence = machine mail).
 
+0a. **An auto-reply never becomes a task (Kevin's ruling, 2 Sep 2026):** the
+   scan stamps every message with `auto_reply` — the reason it is a machine
+   reply (an RFC 3834 / Exchange header, an "Automatic reply:" / out-of-office
+   subject, or a receipt-shaped body such as "your request has been logged
+   with reference…" with no question and no ask), or `null`. A flagged
+   message is a machine's receipt of something WE sent: it asks nothing, so
+   nobody needs to approve anything. Between 28 Aug and 1 Sep 2026 four of
+   these reached Kevin's approval gate as tasks. So, for `auto_reply` set:
+   - NEVER a task, never lane 12 or 13. The script refuses `act --do
+     label12|label13` on a flagged message; the task gate refuses a create
+     whose thread is all auto-replies (exit 3, `"action": "refused"`).
+   - If an OPEN task exists on the matter (Step 3 thread dedupe or the Step
+     3b matter file), append ONE dated line to its Description — `ACK <date>:
+     <sender> acknowledged, ref <reference if any>` — so the reference is on
+     the record without a tap from Kevin. A completed matter needs nothing
+     appended: the creditor plan or the completed task already holds it.
+   - Then `act --do archive` (or `act --do file --label-num 18` when it is
+     creditor mail, so lane 18 stays complete), `--reason "auto-reply: <the
+     auto_reply value>"`. Never leave a flagged message in the inbox.
+   - The flag is a heuristic on the body for the receipt shape only. If you
+     can SEE a human wrote it (a name, a real question, a new fact), lane it
+     with `act --do label12 --override "<why it is human>"` — the override
+     is logged in the digest so a wrong flag gets found.
+
 0. **Already answered by us — no task (Kevin's ruling, 25 Aug 2026):** check
    the scan's `sent_threads` map first. If this message's `threadId` is in it
    with a LATER time than the message's own `internalDate`, we spoke last:
@@ -124,6 +148,15 @@ the `list-unsubscribe` header (its presence = machine mail).
    HMRC, accountants, insurance, tenant matters, complaints, suppliers,
    utilities, council, viewing requests, certificates, invoices, bookings,
    key relationships. The AI CEO routes the task to the right role agent.
+   PROPERTY COMPLIANCE (build 2 Sep 2026): a certificate, licence, landlord
+   insurance or council inspection matter about one of Kevin's properties is
+   the Property Administration agent's lane, and the dispatch engine routes
+   it there BY THE TASK NAME. So name it for the matter: start the Task Name
+   with `COMPLIANCE:` and name the item and the property ("COMPLIANCE: gas
+   safety certificate due - 22 Newton Street", "COMPLIANCE: landlord
+   insurance renewal - 5 Dalham Place"). A contractor's invoice or a
+   premium-finance notice is money owed and stays in the creditor lane; a
+   repair is lane 13 (Roy, same hour) as below.
    TIER-1 CHECK (mirror agent-dispatch): anything touching debts, litigation,
    enforcement, bailiffs, the restraint order, or sums Kevin owes or is owed →
    Priority `Urgent`, and the task Description must say this is a tier-1
@@ -302,8 +335,11 @@ audit trail Kevin checks). A fold also appends
 the new thread's URL into the existing task's `Inbound Note URL Link`, so
 the Step 3 and Step 5 `FIND` queries recognise the folded thread as handled
 from then on. A `"note"` about a differing sender means it deliberately
-created anyway — never fold two counterparties into one task. A NON-ZERO
-exit means the gate could not run (broken read); nothing was created — count
+created anyway — never fold two counterparties into one task. Exit 3 with
+`"action": "refused"` is the gate applying rule 0a (the task is an
+auto-reply): nothing was created and nothing is unhandled — log `note --do
+answered --reason "auto-reply: gate refused"` and archive per rule 0a. Any
+OTHER non-zero exit means the gate could not run (broken read); nothing was created — count
 that thread unhandled for Step 6 and report it, exactly like a failed dedupe
 query.
 
@@ -399,9 +435,39 @@ label move itself is still `act --do label13` exactly as before.
 
 ## Step 5 — The stranded check (the safety net)
 
-For every message in `stranded_8`, `stranded_12` and `stranded_13`: run the
-Step 3 dedupe on its thread. A labelled email with NO task is exactly the
-miss this agent exists to prevent — create its task now THROUGH THE GATE
+The scan has ALREADY removed machine replies from these lists (they are in
+`stranded_auto_replies`, each with the reason, sender, subject and a 300-char
+excerpt): a thread whose real task completed still carries its label, so
+every later auto-acknowledgement on it looks "labelled with no open task" —
+that is how four council receipts became approval tasks (28 Aug – 1 Sep
+2026). A stranded auto-reply is never a rescue; apply rule 0a to it (append
+the reference to an open matter if one exists, otherwise nothing) and count
+it in your report. READ the excerpts: the body test is a heuristic, and if
+one is plainly a person (a name, a question, a new fact), rescue it the
+Step 4 way with `create --force` and log `note --do task-created --reason
+"OVERRIDE auto-reply flag: <why it is human>"` — the override is how a wrong
+flag gets found.
+
+The scan has ALSO removed every thread that already has a task, whatever
+that task's status — they are in `stranded_handled`, each naming the task
+and its status (Kevin's ruling, 2 Sep 2026). For lane 13 the scan applies
+the Step 3 exception itself: only a MAINTENANCE task (name "MAINTENANCE:"
+or Roy as Team Member) handles a repair thread, so a reply task on the
+thread leaves the lane-13 message stranded and the Roy task still gets made. "No OPEN task" was being read
+as "no task": eight items Kevin had completed came straight back to his gate
+as fresh tasks, one per bulk-close. A completed task on the thread means the
+thread was handled; the Step 3 "COMPLETED and the new message needs action"
+branch is for a message NEWER than the completion, and a stranded message is
+never that — it is the same old mail. Count `stranded_handled` in your
+report and do nothing with it. If the scan says `stranded_lookup:
+"UNCHECKED: …"`, the lists were NOT filtered: run the Step 3 dedupe yourself
+on each thread, treat any task of any status as handled, and say the lookup
+failed in your report.
+
+For every message in `stranded_8`, `stranded_12` and `stranded_13` (which
+now hold only mail whose thread has NEVER had a task): run the Step 3 dedupe
+on its thread as a belt-and-braces check. A labelled email with NO task is
+exactly the miss this agent exists to prevent — create its task now THROUGH THE GATE
 (lane 8/12 stranded mail takes the Step 4 shape with Approver Kevin, per the
 24 Aug ruling; lane-13 stranded mail takes the Step 4b Roy shape), log it,
 and say so in your report. If the gate answers `"updated"`, the thread's
@@ -414,10 +480,15 @@ create that failed after the label was applied — the label move removes the
 mail from the inbox, so without this sweep a failed create would sit unseen
 for ever, which is the exact miss the 25 Aug ruling exists to close.
 
-FIRST-RUN PROOF: labels 8 and 12 have real mail on them today, so on your
-first live run `stranded_8` + `stranded_12` returning zero messages means the
-lookup is BROKEN, not that nothing is stranded. Report it as a failure and do
-not advance the watermark.
+THE CONTROL: labels 8 and 12 always carry real mail, so the scan's
+`counts.stranded_8 + stranded_12 + stranded_13 + stranded_handled +
+stranded_auto_replies` summing to ZERO means the label lookup is BROKEN, not
+that nothing is stranded — report it as a failure and do not advance the
+watermark. (The stranded lists THEMSELVES being empty is the healthy
+result: every labelled thread that has a task is filtered into
+`stranded_handled`.) One more edge: a stranded list that reports
+`truncated: true` was cut at the listing cap BEFORE the filter, so an empty
+filtered list does not prove nothing older is stranded — say so.
 
 ## Step 6 — Watermark, waiting count, and score
 
@@ -458,7 +529,11 @@ block or undo the triage itself.
 
 Return at most twelve lines: scanned / tasked / maintenance / archived /
 left / duplicates / matter joins / history-book steers (and any rule-vs-book
-disagreements) / stranded rescues / deferred / waiting score / anything that
+disagreements) / stranded rescues / stranded already-handled (threads with
+a task of any status, from `counts.stranded_handled`; say if
+`stranded_lookup` was UNCHECKED) / auto-replies suppressed (inbox +
+stranded, from the scan's counts; any `--override` used, with its reason) /
+deferred / waiting score / anything that
 failed — including a pre-read (sent, history book, open matters) that came
 back UNCHECKED. Include the stale count from the scan ("N emails older than 2 days
 sit in the inbox") — those are Kevin's reading backlog and the daily report

@@ -127,6 +127,9 @@ READY_POLL_MAX = 60
 # has not woken yet, the lease releases the lock when a job never wakes at all.
 WRAPPED_LEASE_MIN = 5
 HEARTBEAT_SECONDS = float(os.environ.get("JOB_QUEUE_HEARTBEAT", "60"))
+# How long a displaced wrapped job gets to write its own done line after TERM
+# before it is killed outright.
+STOP_GRACE_SECONDS = float(os.environ.get("JOB_QUEUE_STOP_GRACE", "10"))
 POLL_SECONDS = float(os.environ.get("JOB_QUEUE_POLL", "2"))
 
 
@@ -479,11 +482,38 @@ def drop_lock():
 
 
 def read_holder():
-    try:
-        with open(HOLDER_FILE) as f:
-            return json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError):
-        return None
+    """The lock's holder, or None when there is no readable holder file.
+
+    Two reads, not one: the holder file is rewritten by every heartbeat, and
+    a reader arriving in the same instant used to see a half-written file and
+    conclude "holder unreadable" (2 Sep 2026, task-manager 13:00 slot: the
+    inbound-triage waiter judged the lock ownerless and stole it from a live,
+    beating run 15 minutes in). write_holder is now atomic, so this retry is
+    belt-and-braces against anything else that can make a read flicker."""
+    for attempt in range(2):
+        try:
+            with open(HOLDER_FILE) as f:
+                return json.load(f)
+        except FileNotFoundError:
+            return None
+        except (json.JSONDecodeError, OSError):
+            if attempt == 0:
+                time.sleep(0.05)
+    return None
+
+
+def write_holder(holder):
+    """Replace the holder file in ONE step, so no reader ever sees it empty.
+
+    open(path, "w") truncates first and writes second; a reader in between
+    gets zero bytes, and zero bytes is what break_stale_lock read as an
+    ownerless lock. Write beside it and rename over it — rename is atomic on
+    every POSIX filesystem, which is the same guarantee the lock directory
+    itself relies on."""
+    tmp = "%s.%d.tmp" % (HOLDER_FILE, os.getpid())
+    with open(tmp, "w") as f:
+        json.dump(holder, f)
+    os.replace(tmp, HOLDER_FILE)
 
 
 def break_stale_lock():
@@ -503,11 +533,24 @@ def break_stale_lock():
         # is debris from an older version or a corrupted disk write. Clear it,
         # but say so loudly rather than silently, and age-gate it so a lock that
         # is genuinely mid-rename is never stolen.
+        #
+        # The age is the NEWEST of the directory and the holder file. The
+        # directory's stamp is the moment the lock was taken and never moves;
+        # the holder file is re-stamped by every heartbeat. Gating on the
+        # directory alone read a 15-minute-old, still-beating task-manager lock
+        # as 903 seconds of debris (2 Sep 2026) the instant one read flickered.
+        # A live wrapped job beats every HEARTBEAT_SECONDS, so a holder file
+        # older than its whole lease is genuinely abandoned; anything younger
+        # is somebody's lock.
         try:
             age = now() - os.path.getmtime(LOCK_DIR)
+            try:
+                age = min(age, now() - os.path.getmtime(HOLDER_FILE))
+            except OSError:
+                pass
         except OSError:
             return None
-        if age > 30:
+        if age > WRAPPED_LEASE_MIN * 60:
             event("unknown", "lock-broken", reason="holder file unreadable",
                   age_seconds=round(age))
             drop_lock()
@@ -781,8 +824,7 @@ def heartbeat(job, lease_minutes=DEFAULT_LEASE_MIN):
               file=sys.stderr)
         return EX_LOSTLOCK
     holder["lease_until"] = now() + lease_minutes * 60
-    with open(HOLDER_FILE, "w") as f:
-        json.dump(holder, f)
+    write_holder(holder)
     event(job, "heartbeat", lease_minutes=lease_minutes)
     return EX_OK
 
@@ -824,32 +866,66 @@ def run(job, cmd, lease_minutes, timeout_minutes, check_stale,
     stop = threading.Event()
     running = {"proc": None, "lost": ""}
 
+    def stop_child(reason):
+        # TERM first, KILL only if it lingers. A wrapper script traps TERM and
+        # writes its "done" line and log summary before dying; SIGKILL is
+        # untrappable, so the 13:00 task-manager slot of 2 Sep 2026 died with
+        # no done line, no score and no report — invisible to every monitor.
+        proc = running["proc"]
+        if proc is None:
+            return
+        try:
+            proc.terminate()
+        except OSError:
+            return
+        try:
+            proc.wait(timeout=STOP_GRACE_SECONDS)
+        except subprocess.TimeoutExpired:
+            try:
+                proc.kill()
+            except OSError:
+                pass
+
     def beat():
         # Re-arm well inside the lease so an ordinary scheduling hiccup does not
         # drop the lock, but a genuine suspend does.
+        write_failures = 0
         while not stop.wait(HEARTBEAT_SECONDS):
             holder = read_holder()
+            if not holder:
+                # The lock lapsed (the Mac slept through the lease) or was
+                # broken as debris, and NOBODY has taken it. There is no second
+                # writer to collide with, so re-take it and carry on — killing a
+                # run that nobody displaced only loses the work (27 Aug 2026,
+                # prospecting: "lock is not held by anyone", run destroyed for
+                # no contender at all).
+                if try_take_lock(job, "wrapped", WRAPPED_LEASE_MIN):
+                    event(job, "lock-retaken",
+                          reason="lease had lapsed with no new holder")
+                    continue
+                holder = read_holder()
             if not holder or holder.get("job") != job:
                 # Losing the lock used to be advisory: the thread returned and
                 # the job carried on writing, alongside whoever now holds the
                 # queue. Two writers is the collision this whole file exists to
-                # prevent, so a lost lock now KILLS the run.
+                # prevent, so a lost lock to ANOTHER JOB still ends the run.
                 running["lost"] = ("lock is not held by anyone" if not holder
                                    else "lock is held by %s" % holder.get("job"))
                 event(job, "lease-lost", reason=running["lost"])
-                proc = running["proc"]
-                if proc is not None:
-                    try:
-                        proc.kill()
-                    except OSError:
-                        pass
+                stop_child(running["lost"])
                 return
             holder["lease_until"] = now() + WRAPPED_LEASE_MIN * 60
             try:
-                with open(HOLDER_FILE, "w") as f:
-                    json.dump(holder, f)
-            except OSError:
-                return
+                write_holder(holder)
+                write_failures = 0
+            except OSError as exc:
+                # Returning here silently stopped the heartbeat, so the lease
+                # lapsed a few minutes later and the run was killed for a
+                # disk hiccup. Say so once and keep trying; the lease only
+                # lapses if the failure persists for the whole lease.
+                write_failures += 1
+                if write_failures == 1:
+                    event(job, "heartbeat-write-failed", reason=str(exc))
 
     ticker = threading.Thread(target=beat, daemon=True)
     ticker.start()

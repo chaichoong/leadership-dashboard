@@ -153,7 +153,7 @@ describe('truncation honesty (the critical finding)', () => {
         expect(script).toMatch(/label_ids=\[l8\["id"\]\]/);
         expect(script).toMatch(/label_ids=\[l12\["id"\]\]/);
         expect(script).not.toMatch(/label:%s/);
-        expect(skill).toMatch(/FIRST-RUN PROOF/);
+        expect(skill).toMatch(/THE CONTROL:[\s\S]{0,400}stranded_handled \+\s*stranded_auto_replies` summing to ZERO/);
     });
 });
 
@@ -280,6 +280,118 @@ describe('the daily decisions log reaches the agent record', () => {
     it('the panel renders a Daily decisions section', () => {
         expect(agentsPage).toContain('Daily decisions');
         expect(agentsPage).toContain('loadDailyLogs');
+    });
+});
+
+describe('an auto-reply never becomes a task (Kevin, 2 Sep 2026)', () => {
+    // Four council receipts of emails Kevin had already sent reached his
+    // approval gate as tasks between 28 Aug and 1 Sep 2026, via the
+    // stranded-mail rescue. The signal lives in the task gate; the scan
+    // stamps it, the stranded lists exclude it, act refuses to lane it.
+    const gate = readFileSync(path.join(root, 'scripts/create-agent-task.py'), 'utf8');
+
+    it('the gate owns ONE signal and the scan imports it rather than copying it', () => {
+        expect(gate).toMatch(/def auto_reply_signal\(headers, subject, body\)/);
+        expect(gate).toMatch(/def auto_reply_refusal\(/);
+        expect(script).toMatch(/_load_gate\(\)\.auto_reply_signal/);
+        expect(script).not.toMatch(/def auto_reply_signal/);
+    });
+
+    it('the gate refuses before the board read, exit 3, and only --force overrides it', () => {
+        const create = gate.slice(gate.indexOf('def cmd_create('), gate.indexOf('def cmd_check('));
+        expect(create.indexOf('auto_reply_refusal(')).toBeGreaterThan(-1);
+        expect(create.indexOf('auto_reply_refusal(')).toBeLessThan(create.indexOf('fetch_open_tasks()'));
+        expect(create).toMatch(/"action": "refused"/);
+        expect(create).toMatch(/return 3/);
+    });
+
+    it('a dry-run create of an auto-reply task is refused without touching Airtable', () => {
+        const fields = JSON.stringify({ fldgFjGBw6bTKJFCD: 'INBOUND: Automatic reply: Liability Order — 22 Newton Street' });
+        let code = 0, out = '';
+        try {
+            out = execFileSync('python3', [path.join(root, 'scripts/create-agent-task.py'), 'create', '--fields-json', fields, '--dry-run'],
+                { encoding: 'utf8', env: { ...process.env, INBOUND_TRIAGE_DIR: '/nonexistent-dir-for-test' } });
+        } catch (e) { code = e.status; out = String(e.stdout || ''); }
+        expect(code).toBe(3);
+        expect(JSON.parse(out.trim().split('\n').pop()).action).toBe('refused');
+    });
+
+    it('the scan stamps auto_reply, keeps flagged mail out of every stranded list, and caches the reason', () => {
+        const scan = script.slice(script.indexOf('def cmd_scan('), script.indexOf('def cmd_act('));
+        expect(scan).toMatch(/annotate_auto_replies\(lst, signal_fn\)/);
+        for (const lane of ['stranded_8', 'stranded_12', 'stranded_13']) {
+            expect(scan).toMatch(new RegExp(`${lane}, ar\\d+ = split_auto_replies\\(${lane}\\)`));
+        }
+        expect(scan).toMatch(/"stranded_auto_replies": len\(stranded_auto_replies\)/);
+        expect(script).toMatch(/"auto_reply": m\.get\("auto_reply"\) or None/);
+    });
+
+    it('act refuses to lane a flagged message; archive and file stay open; an override is logged', () => {
+        expect(script).toMatch(/LANE_ACTIONS = \("label12", "label13", "label8"\)/);
+        const act = script.slice(script.indexOf('def cmd_act('), script.indexOf('def cmd_note('));
+        expect(act.indexOf('act_block_reason(')).toBeLessThan(act.indexOf('worker_post('));
+        expect(act).toMatch(/OVERRIDE auto-reply flag/);
+    });
+
+    it('the worker exposes the auto-reply headers; the gate rules on auto-submitted alone and never on a bounce', () => {
+        for (const h of ['auto-submitted', 'x-auto-response-suppress', 'x-autoreply', 'precedence']) {
+            expect(worker, `worker /gmail/list must return ${h}`).toContain(`'${h}'`);
+        }
+        expect(gate).toMatch(/AUTO_REPLY_DEFINITIVE_HEADER = \("auto-submitted", "auto-replied"\)/);
+        // x-auto-response-suppress alone flagged a phishing mail on the live
+        // corpus (2 Sep 2026); it is evidence in the digest, never a rule.
+        expect(gate).not.toMatch(/SUPPORTING_HEADERS/);
+        // A bounce carries auto-replied too, and a bounce IS a task.
+        expect(gate).toMatch(/BOUNCE_SENDER_RE/);
+        expect(gate).toMatch(/BOUNCE_SUBJECT_RE/);
+    });
+
+    it('the skill carries the rule in the judgement step, the stranded step and the report', () => {
+        expect(skill).toMatch(/0a\. \*\*An auto-reply never becomes a task/);
+        expect(skill).toMatch(/A stranded auto-reply is never a\s+rescue/);
+        expect(skill).toMatch(/auto-replies suppressed/);
+        expect(skill).toMatch(/--override "<why it is human>"/);
+    });
+});
+
+describe('"no open task" is not "no task" (Kevin, 2 Sep 2026)', () => {
+    // Eight items Kevin had completed were re-created by the stranded rescue
+    // because it only looked for OPEN tasks. A thread that has ever had a
+    // task is handled; the lookup is any-status and runs inside the scan.
+    it('the scan looks up ANY task on each stranded thread and drops the handled ones before the JSON', () => {
+        const scan = script.slice(script.indexOf('def cmd_scan('), script.indexOf('def cmd_act('));
+        expect(scan).toMatch(/lookup_thread_tasks\(/);
+        for (const lane of ['stranded_8', 'stranded_12', 'stranded_13']) {
+            expect(scan).toMatch(new RegExp(`${lane}, h\\d+ = split_handled\\(${lane}, thread_map`));
+        }
+        // lane 13 keeps the Step 3 exception: a reply task never handles a repair
+        expect(scan).toMatch(/split_handled\(stranded_13, thread_map, maintenance_only=True\)/);
+        expect(script).toMatch(/def is_maintenance_task\(/);
+        expect(script).toContain('reclbdjfVev3bqNHS');
+        {
+        }
+        expect(scan.indexOf('split_handled(')).toBeLessThan(scan.indexOf('write_scan_cache('));
+        expect(scan).toMatch(/"stranded_handled": len\(stranded_handled\)/);
+    });
+
+    it('the lookup is any-status (no Status filter) and matches both URL forms', () => {
+        const fn = script.slice(script.indexOf('def thread_tasks_formula('), script.indexOf('def _airtable_get_raise('));
+        expect(fn).not.toMatch(/Status/);
+        expect(fn).toContain('#all/');
+        expect(fn).toContain('#inbox/');
+    });
+
+    it('a failed lookup reads UNCHECKED and leaves the lists untouched, never as "nothing handled"', () => {
+        const scan = script.slice(script.indexOf('def cmd_scan('), script.indexOf('def cmd_act('));
+        expect(scan).toMatch(/stranded_lookup = "UNCHECKED: %s"/);
+        expect(scan).toMatch(/"stranded_lookup": stranded_lookup/);
+        expect(script).toMatch(/def _airtable_get_raise\(/);
+    });
+
+    it('the skill tells the agent a completed task on the thread means handled, and what to do when UNCHECKED', () => {
+        expect(skill).toMatch(/whatever\s+that task's status/);
+        expect(skill).toMatch(/stranded_lookup:\s*"UNCHECKED/);
+        expect(skill).toMatch(/stranded already-handled/);
     });
 });
 

@@ -782,13 +782,48 @@ def to_payload(field, value):
     return value
 
 
-def cmd_apply(args):
-    token = pat()
-    load_schema(token)
+WORKLIST_NOT_DECISIONS = (
+    "ERROR: {path} is the AUDIT WORKLIST (key 'tasks'), not a decisions file.\n"
+    "       The audit lists GAPS; it never decides values. Author the decisions\n"
+    "       yourself from tasks[].gaps + reference, then apply THAT file:\n"
+    "         {{\"decisions\": [{{\"recordId\": \"rec...\", \"field\": \"timeEstimate\",\n"
+    "                          \"value\": \"30 min\", \"reason\": \"...\"}}]}}\n"
+    "       Auto-tier fields: timeEstimate (one of {choices}), business (a record\n"
+    "       id from reference.businesses), dueDate (YYYY-MM-DD, today..+{horizon}d).\n"
+    "       One entry per gap you are sure of; leave a gap you cannot decide."
+)
 
+
+def decisions_from_doc(doc, path="<decisions>"):
+    """The decision list inside an apply input, or a loud refusal.
+
+    The Task Manager's 09:00 slot fed the audit's worklist straight back to
+    apply on 2 Sep 2026 (finding 20260902-task-manager-09-434): the worklist
+    carries 'tasks' (gaps to decide), apply wanted 'decisions' (values to
+    write), and doc['decisions'] raised a bare KeyError. Accepting 'tasks' as
+    a fallback would be worse — those rows hold no field or value, so nothing
+    could be written and the step would report success over zero writes."""
+    if isinstance(doc, list):
+        return doc
+    if isinstance(doc, dict) and "decisions" in doc:
+        return doc["decisions"] if isinstance(doc["decisions"], list) else []
+    if isinstance(doc, dict) and "tasks" in doc:
+        raise SystemExit(WORKLIST_NOT_DECISIONS.format(
+            path=path, choices=", ".join(EXPECTED_CHOICES["timeEstimate"]),
+            horizon=DUE_DATE_MAX_HORIZON_DAYS))
+    raise SystemExit(f"ERROR: {path} has neither a 'decisions' list nor a top-level "
+                     "list — nothing to apply")
+
+
+def cmd_apply(args):
+    # Shape check FIRST, before any token read or schema call: a wrong file is
+    # answered in one line with no network, and a test can prove it.
     with open(args.decisions) as fh:
         doc = json.load(fh)
-    decisions = doc["decisions"] if isinstance(doc, dict) else doc
+    decisions = decisions_from_doc(doc, args.decisions)
+
+    token = pat()
+    load_schema(token)
 
     if args.tier == "auto":
         decisions = [d for d in decisions if WRITABLE.get(d.get("field")) == "auto"]

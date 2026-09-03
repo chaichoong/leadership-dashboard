@@ -367,7 +367,102 @@ def median_hours(values):
     return round((vals[mid - 1] + vals[mid]) / 2, 1)
 
 
-def lane_view(f, now=None):
+def hours_waiting(f, now=None):
+    """Hours since this task reached Kevin: Approval Slack TS (the moment the
+    card was posted) with Created Time as the honest fallback. None when
+    neither stamp exists. Shared by the board's waitingOnKevin views and the
+    gate lane, so the two never disagree about the same task."""
+    now = now or datetime.now(timezone.utc)
+    sent = (parse_slack_ts(f.get("Approval Slack TS"))
+            or parse_iso(f.get("Created Time")))
+    return round((now - sent).total_seconds() / 3600, 1) if sent else None
+
+
+def task_view(rec, activity_ids, dispatch_ids, now):
+    """One board record → (bucket, view). Pulled out of cmd_board so the view
+    shape is testable without a live read. The 1 Sep 2026 13:00 report showed
+    every waiting-on-Kevin item as 0 hours because the view carried no
+    hoursWaiting at all and the skill assumed it did."""
+    f = dict(rec["fields"], _id=rec["id"])
+    assignee = (f.get("Assignee") or {}).get("email", "")
+    team = f.get("Team Member") or []
+    is_kevin = assignee == KEVIN_EMAIL or KEVIN_REC in team
+    bucket, src, moved = classify(f, activity_ids, now)
+    # A stuck task dispatch already holds this slot is not the foreman's
+    # to touch — set-subtract in code, never by eyeballing two JSON files.
+    if bucket == "stuck" and rec["id"] in dispatch_ids:
+        bucket = "inFlight"
+    view = {
+        "id": rec["id"],
+        "name": f.get("Task Name", ""),
+        "status": f.get("Status"),
+        "priority": f.get("Priority"),
+        "dueDate": f.get("Due Date"),
+        "taskType": f.get("Task Type"),
+        "teamMember": team,
+        "assigneeEmail": assignee,
+        "sentForApprovalBy": f.get("Sent For Approval By") or [],
+        "maintenanceTicket": bool(f.get("Maintenance Ticket")),
+        "hardDeadline": bool(f.get("Hard Deadline")),
+        "kevinOwned": is_kevin,
+        "inboundUrl": f.get("Inbound Note URL Link"),
+        "createdTime": f.get("Created Time"),
+        "lastMoved": moved.isoformat() if moved else None,
+        "daysStill": (round((now - moved).total_seconds() / 86400, 1)
+                      if moved else None),
+        "hoursWaiting": hours_waiting(f, now),
+        "movementSource": src,
+    }
+    return bucket, is_kevin, view
+
+
+_GATE_MOD = None
+
+
+def _load_gate():
+    """create-agent-task.py as a module — imported, never copied, so the
+    auto-reply signal the lane check uses can never drift from the one the
+    creation gate uses (same pattern as inbound-triage.py)."""
+    global _GATE_MOD
+    if _GATE_MOD is None:
+        import importlib.util
+        p = Path(__file__).resolve().parent / "create-agent-task.py"
+        spec = importlib.util.spec_from_file_location("od_catask", p)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        _GATE_MOD = mod
+    return _GATE_MOD
+
+
+def auto_reply_flag(f, cache=None, gate=None):
+    """Why this lane item's source message is a machine acknowledgement, or
+    None. Kevin's ask, 2 Sep 2026: the creation gate refuses NEW auto-reply
+    tasks, but anything laned before it existed, or moved by hand, sits in
+    his queue untouched. So the cleanse runs the SAME machine signal over
+    the lane: the creation-time test (task name family, every scanned
+    message on the thread flagged) plus the full signal over the stored
+    message (sender, subject, receipt wording with no ask). A flag is a
+    prompt for a one-line CLOSE PROPOSAL, never a silent removal, and a
+    bounce never flags (the signal excludes it: a bounce IS a task)."""
+    gate = gate or _load_gate()
+    if cache is None:
+        cache = gate.load_scan_cache()
+    name = f.get("Task Name", "") or ""
+    why = gate.auto_reply_refusal(
+        {gate.F["name"]: name,
+         gate.F["inboundUrl"]: f.get("Inbound Note URL Link", "") or ""},
+        cache)
+    if why:
+        return why
+    subject = name
+    while gate.TASK_NAME_PREFIX_RE.search(subject):
+        subject = gate.TASK_NAME_PREFIX_RE.sub("", subject, count=1)
+    return gate.auto_reply_signal(
+        {"from": f.get("Inbound Sender", "") or ""}, subject,
+        f.get("Inbound Message Content", "") or "")
+
+
+def lane_view(f, now=None, cache=None, gate=None):
     """One approvals-lane row → the view the cleanse and priority review judge.
 
     Age anchors on Approval Slack TS (the moment the card reached Kevin) with
@@ -377,8 +472,6 @@ def lane_view(f, now=None):
     enough to judge stale/overtaken/duplicate without hauling every full
     draft through the run, and the tier-1 banner sits at the top when present."""
     now = now or datetime.now(timezone.utc)
-    sent = (parse_slack_ts(f.get("Approval Slack TS"))
-            or parse_iso(f.get("Created Time")))
     output = (f.get("Agent Output") or "").strip()
     return {
         "id": f.get("_id"),
@@ -386,10 +479,11 @@ def lane_view(f, now=None):
         "submittedBy": f.get("Sent For Approval By") or [],
         "approverEmail": (f.get("Approver") or {}).get("email", ""),
         "priority": f.get("Priority"),
-        "hoursWaiting": (round((now - sent).total_seconds() / 3600, 1)
-                         if sent else None),
+        "hoursWaiting": hours_waiting(f, now),
         "createdTime": f.get("Created Time"),
         "inboundUrl": f.get("Inbound Note URL Link"),
+        "inboundSender": f.get("Inbound Sender", "") or "",
+        "autoReply": auto_reply_flag(f, cache, gate),
         "outputExcerpt": output[:600] + ("…" if len(output) > 600 else ""),
     }
 
@@ -402,7 +496,7 @@ TASK_FIELDS = [
     "Task Name", "Status", "Due Date", "Created Time", "Approved At",
     "Approval Slack TS", "Approval Outcome", "Team Member", "Assignee",
     "Sent For Approval By", "Some Day", "Maintenance Ticket", "Task Type",
-    "Hard Deadline", "Inbound Note URL Link",
+    "Hard Deadline", "Inbound Note URL Link", "Priority",
 ]
 # Field-name drift control: each of these appears on at least one record of
 # any real board. If one vanishes from the WHOLE read, the name has drifted
@@ -475,37 +569,11 @@ def cmd_board(dispatch_queue_path=None):
                "inFlight": []}
     by_status, kevin_count = {}, 0
     for r in recs:
-        f = dict(r["fields"], _id=r["id"])
-        by_status[f.get("Status", "?")] = by_status.get(f.get("Status", "?"), 0) + 1
-        assignee = (f.get("Assignee") or {}).get("email", "")
-        team = f.get("Team Member") or []
-        is_kevin = assignee == KEVIN_EMAIL or KEVIN_REC in team
+        status = r["fields"].get("Status", "?")
+        by_status[status] = by_status.get(status, 0) + 1
+        bucket, is_kevin, view = task_view(r, activity_ids, dispatch_ids, now)
         if is_kevin:
             kevin_count += 1
-        bucket, src, moved = classify(f, activity_ids, now)
-        # A stuck task dispatch already holds this slot is not the foreman's
-        # to touch — set-subtract in code, never by eyeballing two JSON files.
-        if bucket == "stuck" and r["id"] in dispatch_ids:
-            bucket = "inFlight"
-        view = {
-            "id": r["id"],
-            "name": f.get("Task Name", ""),
-            "status": f.get("Status"),
-            "dueDate": f.get("Due Date"),
-            "taskType": f.get("Task Type"),
-            "teamMember": team,
-            "assigneeEmail": assignee,
-            "sentForApprovalBy": f.get("Sent For Approval By") or [],
-            "maintenanceTicket": bool(f.get("Maintenance Ticket")),
-            "hardDeadline": bool(f.get("Hard Deadline")),
-            "kevinOwned": is_kevin,
-            "inboundUrl": f.get("Inbound Note URL Link"),
-            "createdTime": f.get("Created Time"),
-            "lastMoved": moved.isoformat() if moved else None,
-            "daysStill": (round((now - moved).total_seconds() / 86400, 1)
-                          if moved else None),
-            "movementSource": src,
-        }
         buckets[bucket].append(view)
 
     for k in buckets:
@@ -551,7 +619,7 @@ GATE_FORMULA = "AND({Status}='Approval', LEN({Sent For Approval By}&'')>0)"
 GATE_FIELDS = [
     "Task Name", "Status", "Created Time", "Approval Slack TS",
     "Sent For Approval By", "Approver", "Priority", "Agent Output",
-    "Inbound Note URL Link",
+    "Inbound Note URL Link", "Inbound Sender", "Inbound Message Content",
 ]
 
 
@@ -581,9 +649,11 @@ def cmd_gate(task=None):
              "Approval — the formula's field names have drifted, do not "
              "trust this read" % len(status_only))
     now = datetime.now(timezone.utc)
+    gate = _load_gate()
+    cache = gate.load_scan_cache()
     lane, other = [], []
     for r in recs:
-        v = lane_view(dict(r["fields"], _id=r["id"]), now)
+        v = lane_view(dict(r["fields"], _id=r["id"]), now, cache, gate)
         # Empty Approver = Kevin (same rule dispatch applies at submit time);
         # a submission awaiting someone else is not his to cleanse or rank.
         if not v["approverEmail"] or v["approverEmail"] == KEVIN_EMAIL:
@@ -598,6 +668,10 @@ def cmd_gate(task=None):
             "kevinLane": len(lane),
             "otherApprovers": len(other),
             "legacyApprovalRows": len(status_only) - len(recs),
+            # Lane items whose source message is a machine acknowledgement:
+            # each one is a CLOSE PROPOSAL waiting to be written. Zero is
+            # the healthy number; a non-zero count is reported, never hidden.
+            "autoReplyFlagged": sum(1 for v in lane if v["autoReply"]),
         },
         "medianAgeHours": median_hours([v["hoursWaiting"] for v in lane]),
         "lane": lane,
