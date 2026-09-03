@@ -91,10 +91,29 @@ def parse_mine(result):
         return None
 
 
-def verbatim(quote, transcript):
-    """A quote counts only if its words appear in the transcript in order (punctuation and case aside)."""
-    norm = lambda s: re.sub(r"[^a-z0-9 ]", "", re.sub(r"\s+", " ", s.lower()))
-    return norm(quote) in norm(transcript)
+def verbatim(quote, transcript, min_ratio=0.85):
+    """A quote counts if it appears in the transcript in order, allowing the small drift a model makes
+    when it quotes speech (a dropped "um", a comma, "gonna" for "going to"): the best-matching window
+    of the transcript must agree with the quote at 85% or better (difflib ratio on normalised words).
+    An exact substring passes at once. A quote the transcript never said fails."""
+    import difflib
+    norm = lambda s: re.sub(r"[^a-z0-9' ]", "", re.sub(r"\s+", " ", s.lower())).strip()
+    q, t = norm(quote), norm(transcript)
+    if not q or not t: return False
+    if q in t: return True
+    qw, tw = q.split(), t.split()
+    n = len(qw)
+    if n > len(tw): return False
+    best = 0.0
+    first = qw[0]
+    for i, w in enumerate(tw):
+        if w != first and (i + n > len(tw) or difflib.SequenceMatcher(None, w, first).ratio() < 0.8): continue
+        for span in (n, n + 1, n + 2, n - 1):
+            if span < 3 or i + span > len(tw): continue
+            r = difflib.SequenceMatcher(None, qw, tw[i:i + span]).ratio()
+            if r > best: best = r
+            if best >= min_ratio: return True
+    return best >= min_ratio
 
 
 def week_monday(today=None):
@@ -109,8 +128,9 @@ def slot_dates(monday):
     return [(monday + dt.timedelta(days=i), name, slot, pillar) for i, (name, slot, pillar) in enumerate(P.SLOTS)]
 
 
-def pick_moment(bank, pillar, used, today=None):
-    """Best unused moment for a pillar: highest episode score first, then newest. None = nothing sourced."""
+def pick_moment(bank, pillar, used, today=None, week_episodes=()):
+    """Best unused moment for a pillar: an episode not already used this week first (one episode should
+    not fill four of the five slots), then highest episode score, then newest. None = nothing sourced."""
     today = today or dt.date.today()
     cands = []
     for rid, e in bank.items():
@@ -121,11 +141,32 @@ def pick_moment(bank, pillar, used, today=None):
             key = "%s#%d" % (rid, i)
             if key in used: continue
             if pillar and m.get("pillar") != pillar: continue
-            cands.append((-e.get("score", 0), -e.get("episode", 0), key, rid, m))
+            cands.append((1 if e.get("episode") in week_episodes else 0, -e.get("score", 0), -e.get("episode", 0), key, rid, m))
     if not cands: return None
-    cands.sort(key=lambda c: (c[0], c[1]))
-    _, _, key, rid, m = cands[0]
+    cands.sort(key=lambda c: (c[0], c[1], c[2]))
+    _, _, _, key, rid, m = cands[0]
     return {"key": key, "record": rid, "episode": bank[rid].get("episode"), "quote": m["quote"], "angle": m.get("angle", ""), "pillar": m.get("pillar")}
+
+
+REGISTER_API = "https://api.airtable.com/v0/%s/tbl9msVjyQWslLOIZ" % watch.BASE
+
+
+def register_proof_source(state, fetch=None):
+    """Wednesday's Proof source when no transcript moment is a Proof moment (Kevin's decision 8, 3 Sep 2026):
+    one AI Agents register row at Status Live or Built, what it does in the row's own words, rotated so the
+    same agent is not the subject twice in eight weeks. No figure comes with it: the post describes the agent
+    and states no number the row does not carry. Returns (source, source_line) or (None, None)."""
+    fetch = fetch or (lambda: watch._airtable("GET", REGISTER_API + "?" + urllib.parse.urlencode({"filterByFormula": 'OR({Status}="Live",{Status}="Built")', "pageSize": 50})
+                                             + "&fields[]=Name&fields[]=Status&fields[]=What+It+Does&fields[]=Department").get("records", []))
+    rows = [r for r in fetch() if (r.get("fields", {}).get("What It Does") or "").strip()]
+    if not rows: return None, None
+    recent = state.setdefault("proof_rows", [])[-8:]
+    rows.sort(key=lambda r: (r["id"] in recent, r["fields"].get("Status") != "Live", r["fields"].get("Name", "")))
+    r = rows[0]; f = r["fields"]
+    state["proof_rows"] = (recent + [r["id"]])[-8:]
+    src = ("AI Agents register row %s: agent \"%s\" (Status %s, %s department), running on Kevin's own businesses. What it does, in the register's words: %s"
+           % (r["id"], f.get("Name"), f.get("Status"), f.get("Department", "?"), f["What It Does"].strip()))
+    return src, "AI Agents register, agent \"%s\" (Status %s): what it does, in the register's own words. No figures: none are on the row." % (f.get("Name"), f.get("Status"))
 
 
 def hot_button_source(monday):
@@ -269,7 +310,8 @@ def mine_one(rec, ask=None):
     parsed = parse_mine(text)
     if parsed is None:
         entry.update({"verdict": "unread", "score": None, "how": "AI did not answer in shape", "moments": [], "raw": text[:200]}); return entry
-    parsed["moments"] = [x for x in parsed["moments"] if verbatim(x["quote"], t)]
+    kept = [x for x in parsed["moments"] if verbatim(x["quote"], t)]
+    parsed["moments_dropped"] = len(parsed["moments"]) - len(kept); parsed["moments"] = kept
     entry.update(parsed); entry["how"] = "AI"; entry["cost_usd"] = cost
     return entry
 
@@ -305,12 +347,14 @@ def _claude(system, user, brand_lessons=True):
     return pc.ask_claude(system + (od_lessons() if brand_lessons else ""), user)[0]
 
 
-def source_for(mom, monday, pillar, bank):
+def source_for(mom, monday, pillar, bank, state=None):
     if mom:
         return ("Episode %d of Kevin's run diary, verbatim: \"%s\" (angle: %s)" % (mom["episode"], mom["quote"], mom["angle"]),
                 "Episode %d, Kevin's own words on camera: \"%s\"" % (mom["episode"], mom["quote"]))
     if pillar == "Pain":
         s = hot_button_source(monday); return s, s
+    if pillar == "Proof" and state is not None:
+        return register_proof_source(state)
     return None, None
 
 
@@ -332,14 +376,18 @@ def draft(week=None, dry_run=False):
     monday = dt.date.fromisoformat(week) if week else week_monday()
     posts = state.setdefault("posts", {})
     used = {p["moment"] for p in posts.values() if p.get("moment")}
+    week_eps = set()
     voice = P.voice_profile(); voice_loaded = bool(voice)
     made = 0
     for date, _, slot_name, pillar in slot_dates(monday):
         pid = date.isoformat()
-        if pid in posts: continue
-        mom = pick_moment(bank, pillar, used) if slot_name != "Offer" else (pick_moment(bank, None, used))
+        if pid in posts:
+            if posts[pid].get("episode"): week_eps.add(posts[pid]["episode"])
+            continue
+        mom = pick_moment(bank, pillar, used, week_episodes=week_eps) if slot_name != "Offer" else (pick_moment(bank, None, used, week_episodes=week_eps))
         if slot_name == "Proof" and mom and mom["pillar"] != "Proof": mom = None      # Proof only from a real Proof moment
-        source, source_line = source_for(mom, monday, pillar, bank)
+        source, source_line = source_for(mom, monday, pillar, bank, state)
+        if mom: used.add(mom["key"]); week_eps.add(mom["episode"])
         post = {"date": pid, "slot": slot_name, "pillar": pillar or "Offer", "brand": BRAND, "moment": mom["key"] if mom else None,
                 "episode": mom["episode"] if mom else None, "quote": mom["quote"] if mom else None, "created": dt.datetime.now().isoformat(timespec="seconds"),
                 "voice_loaded": voice_loaded}
@@ -350,7 +398,6 @@ def draft(week=None, dry_run=False):
             if dry_run: print("od draft: %s %s <- %s" % (pid, slot_name, source_line[:100])); continue
             w = write_post(slot_name, pillar, date, source, voice)
             post.update(w); post["source_line"] = source_line
-            if mom: used.add(mom["key"])
             print("od draft: %s %s written, %d words%s" % (pid, slot_name, len(w["text"].split()), ("; flagged: " + "; ".join(w["issues"])) if w["issues"] else ""))
         posts[pid] = post; made += 1
     if dry_run: return
@@ -544,6 +591,9 @@ def selftest():
     assert parse_mine('```json\n{"score": 8, "pillar": "Method", "posts_possible": 2, "moments": [{"quote": "one two three four five six", "angle": "a", "pillar": "Method"}, {"quote": "too short", "angle": "b"}]}\n```')["moments"].__len__() == 1
     assert parse_mine('{"score": 3, "moments": []}')["verdict"] == "no" and parse_mine("I cannot help") is None
     assert verbatim("turn SOPs into AI agents", "you can now turn SOPs, into AI agents and more") and not verbatim("agents into SOPs", "turn SOPs into AI agents")
+    assert verbatim("remove as much of the emotion from the process as possible", "so, um, remove as much of the emotion, from the process as possible because")
+    assert verbatim("I normally look at them over a 30 day period", "and I normally look at them over a thirty, 30 day period and that's")
+    assert not verbatim("we doubled revenue in six months", "we ran ten kilometres in the rain and it was cold and the wind was up")
     assert week_monday(dt.date(2026, 9, 3)) == dt.date(2026, 9, 7) and week_monday(dt.date(2026, 9, 6)) == dt.date(2026, 9, 7) and week_monday(dt.date(2026, 9, 7)) == dt.date(2026, 9, 7)
     sd = slot_dates(dt.date(2026, 9, 7)); assert [s[2] for s in sd] == ["Pain", "Method", "Proof", "Contrarian", "Offer"] and sd[4][0] == dt.date(2026, 9, 11) and sd[3][3] == "Philosophy"
     bank = {"r1": {"verdict": "OD", "score": 9, "episode": 1992, "mined": "2026-09-03T00:00:00", "moments": [{"quote": "q1 " * 4, "angle": "a", "pillar": "Method"}, {"quote": "q2 " * 4, "angle": "b", "pillar": "Pain"}]},
@@ -554,6 +604,15 @@ def selftest():
     m = pick_moment(bank, "Method", set(), today); assert m["key"] == "r1#0", "highest score first, never a 'no' episode, never older than %d days" % BANK_DAYS
     assert pick_moment(bank, "Method", {"r1#0"}, today)["key"] == "r2#0" and pick_moment(bank, "Proof", set(), today) is None
     assert pick_moment(bank, None, {"r1#0", "r1#1", "r2#0"}, today) is None, "the stale r4 moment is never picked"
+    assert pick_moment(bank, "Method", set(), today, week_episodes={1992})["key"] == "r2#0", "an episode already used this week yields to another"
+    assert pick_moment(bank, "Method", {"r2#0"}, today, week_episodes={1992})["key"] == "r1#0", "unless it is the only one left"
+    rows = [{"id": "a", "fields": {"Name": "Task Manager", "Status": "Live", "What It Does": "Keeps the board small.", "Department": "Operations"}},
+            {"id": "b", "fields": {"Name": "Content Engine", "Status": "Built", "What It Does": "Turns episodes into posts.", "Department": "Marketing"}},
+            {"id": "c", "fields": {"Name": "Empty", "Status": "Live", "What It Does": ""}}]
+    st = {}
+    src, line = register_proof_source(st, fetch=lambda: rows); assert "Task Manager" in src and st["proof_rows"] == ["a"] and "No figures" in line
+    src2, _ = register_proof_source(st, fetch=lambda: rows); assert "Content Engine" in src2, "rotates off the agent used last time"
+    assert register_proof_source({}, fetch=lambda: []) == (None, None)
     assert "hot-button" in hot_button_source(dt.date(2026, 9, 7)) and hot_button_source(dt.date(2026, 9, 7)) != hot_button_source(dt.date(2026, 9, 14))
     good = "Your business runs on you.\n\n" + ("Every decision waits for you. " * 12) + "\nThat is the trap Operations Director exists to remove."
     t, issues = rules_check(good, "", "Pain"); assert issues == [], issues
@@ -577,7 +636,7 @@ def selftest():
     assert thin.startswith("THIN SLOT") and "Nothing is written from nothing" in thin and thin.rstrip().split("\n")[-1].startswith(CLOSING)
     assert minutes_for("Approved as-is") == 2 and minutes_for("Approved with minor edits") == 5 and minutes_for("Changes requested") == 10
     assert BUSINESS_OD != approval.BUSINESS_PERSONAL and publish.BRANDS[BRAND]["category"] == BRAND
-    print(json.dumps({"checks": 30, "failed": []}))
+    print(json.dumps({"checks": 36, "failed": []}))
 
 
 if __name__ == "__main__":

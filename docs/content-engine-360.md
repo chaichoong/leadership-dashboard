@@ -326,5 +326,15 @@ Instagram for OD waits until LinkedIn shows a signal; designed quote cards are r
   `posts/list` needs account ids), so weekly view counts are a follow-up, not a promise.
 - **Filter lesson from the selftest:** "run" is a business word ("runs without you" is the core message), so the
   strip list catches only the running senses (my run, running streak, km, Vibrams, Strava, charity, children).
+- **First mine (3 Sep 2026, the 40 most recent transcripts):** 9 episodes OD at score 7+, 18 verbatim moments banked
+  (Method 11, Pain 4, Philosophy 3, Proof 0), 31 not OD. The exact-substring quote check dropped every quote from four
+  OD episodes because a model quoting speech drifts by a comma or an "um"; `verbatim` is now a fuzzy window match
+  (difflib ratio 0.85 or better against the best transcript window, exact substring passes at once) and the four were
+  re-mined. Episode 2003 still lost its three quotes (`moments_dropped`), so it is counted OD with nothing to post.
+- **Slot fill rule added after the first dry run:** an episode already used this week yields to another (the first
+  dry run put Episode 1992 in four of five slots). **Wednesday Proof** falls back to one AI Agents register row at
+  Status Live or Built (`register_proof_source`, Kevin's decision 8): the agent described in the register's own words,
+  rotated over eight weeks, with NO figure because the row carries none; numbers arrive when Kevin states them on
+  camera (the talking points ask for them).
 - Tests: `tests/content-engine-od.test.js` (selftests, playbook pricing and hot-buttons pinned against the
   prompt, the brand map, the nightly wiring, the business each card lands under).
