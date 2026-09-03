@@ -34,3 +34,14 @@ earlier iterations kept for comparison.
 - Still to build: folder watch (R1), transcript-driven LFMD/Summary segment choice (R4, an AI call),
   Drive URL write-back (R5), thumbnail (R6), captions copy (R7), rules check (R8), approval card (R9),
   GHL scheduling with the two Content Engine keys.
+
+## Speed (measured 3 Sep 2026, clip 064 = 41.6 s, 999 frames, 1080p)
+- Original numpy sampler + software HEVC decode: 11 min.
+- Hardware decode (`-hwaccel videotoolbox`, 7x faster than software here) + OpenCV `remap`
+  sampling (55 ms/frame vs ~600) + a prefetch thread on each decoder pipe: **4 min 8 s**
+  (about 6x real time). Per frame: render 107 ms, the rest is decode/pipe/encode hand-off.
+- Time-sliced parallel workers (`--workers N`) were SLOWER on this Mac in every trial (3 or 4
+  slices: 20 to 27 min) and the pool version was slower still, so the default is one worker.
+  Untested hypothesis: OpenCV and numpy each spin up all cores per process and thrash. Try
+  `cv2.setNumThreads(1)` per slice before spending more time here. Half-resolution maps were
+  also slower and softer. A 71 s clip is ~7 min, so a 90-clip monthly batch is ~8 machine hours.

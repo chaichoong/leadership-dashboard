@@ -139,7 +139,7 @@ def render_frame(front, back, R, F_world, vd, w, h, roll_lock=True):
     B = basis(F_world) if roll_lock else None
     d_world = vd @ B.T
     d_cam = d_world @ R           # R^T applied: d_cam = R^T d_world  -> (N,3) @ R
-    return insta.sample(front, back, d_cam.astype(np.float32)).reshape(h, w, 3)
+    return insta.sample(front, back, d_cam.astype(np.float32), shape=(h, w)).reshape(h, w, 3)
 
 
 def calib(clip, out_png, times=(5.0, 20.0, 35.0), size=(320, 180), dfov=200, gain=0.003, only=None):
@@ -183,13 +183,16 @@ def plan_views(t, Rs, n_frames, offset, smooth_s, blend, tilt_deg, level, raise_
     F_slow = smooth_dirs(F_all, int(round(smooth_s * FPS)) | 1)
     F_sm = (1 - blend) * F_fast + blend * F_slow
     F_sm /= np.linalg.norm(F_sm, axis=1, keepdims=True)
-    # raise detection: stick pitched above -25 deg (world y is down, so F_y > -sin(25)) for > 0.5 s
+    # raise detection: Kevin lifts the camera above his head at the sign-off, so the stick (camera
+    # to hand) pitches steeply DOWN relative to how he normally holds it (median -7 deg on the July
+    # clips, -65 deg while raised). Flag a drop of more than 25 deg below the clip median lasting > 0.5 s.
     mode = np.array(["body"] * n_frames, dtype=object)
     if raise_cut:
-        up = F_slow[:, 1] > -math.sin(math.radians(25))
+        pitch = np.degrees(np.arcsin(np.clip(-F_slow[:, 1], -1, 1)))
+        raised = pitch < (np.median(pitch) - 25.0)
         run = 0
         for i in range(n_frames):
-            run = run + 1 if up[i] else 0
+            run = run + 1 if raised[i] else 0
             if run >= int(0.5 * FPS): mode[i - run + 1:i + 1] = "face"
     if level:
         F_sm[:, 1] = 0.0
@@ -213,7 +216,7 @@ def _render_one(args):
 
 def render(clip, out_mp4, map_name, dfov, start, end, size, smooth_s=1.0, tilt_deg=0.0, roll_lock=True,
            gain=0.0003, offset=0.0, blend=0.5, still=None, proj="sg", hfov=120.0, level=False,
-           workers=4, raise_cut=True, video_only=False):
+           workers=1, raise_cut=True, video_only=False):
     t, gyro, acc = load_imu(clip)
     M = mapping_matrices()[map_name]
     Rs = integrate(t, gyro, acc, M, gain=gain)
@@ -317,6 +320,12 @@ def selftest():
     Rall = np.repeat(np.eye(3)[None], len(tt), 0)
     Rf, F, mode = plan_views(tt, Rall, n, 0.0, 1.0, 0.5, 0.0, False, raise_cut=False)
     assert (mode == "body").all()
+    # normal hold = stick pitch about -7 deg; raised camera = stick pitch about -65 deg (measured 3 Sep 2026)
+    Rhold = skew_exp(np.array([math.radians(83), 0, 0]))     # R*(0,1,0) -> pitch 83-90 = -7 deg
+    Rup = skew_exp(np.array([math.radians(25), 0, 0]))       # pitch -65 deg
+    Rall2 = np.repeat(Rhold[None], len(tt), 0); Rall2[int(3 * 1000):] = Rup
+    _, _, mode2 = plan_views(tt, Rall2, n, 0.0, 1.0, 0.5, 0.0, False, raise_cut=True)
+    assert (mode2[: int(2.5 * FPS)] == "body").all() and (mode2[-int(0.5 * FPS):] == "face").all(), mode2[-30:]
     print("stab selftest ok")
 
 
@@ -329,7 +338,7 @@ if __name__ == "__main__":
     ap.add_argument("--start", type=float, default=0.0); ap.add_argument("--end", type=float, default=None)
     ap.add_argument("--size", default="1920x1080"); ap.add_argument("--smooth", type=float, default=1.0)
     ap.add_argument("--tilt", type=float, default=0.0); ap.add_argument("--times", default="5,20,35")
-    ap.add_argument("--no-roll-lock", action="store_true"); ap.add_argument("--gain", type=float, default=0.0003); ap.add_argument("--offset", type=float, default=0.0); ap.add_argument("--blend", type=float, default=0.5); ap.add_argument("--still", type=float, default=None); ap.add_argument("--proj", default="sg"); ap.add_argument("--hfov", type=float, default=120.0); ap.add_argument("--level", action="store_true"); ap.add_argument("--workers", type=int, default=4); ap.add_argument("--no-raise-cut", action="store_true"); ap.add_argument("--video-only", action="store_true"); ap.add_argument("--only", default=None)
+    ap.add_argument("--no-roll-lock", action="store_true"); ap.add_argument("--gain", type=float, default=0.0003); ap.add_argument("--offset", type=float, default=0.0); ap.add_argument("--blend", type=float, default=0.5); ap.add_argument("--still", type=float, default=None); ap.add_argument("--proj", default="sg"); ap.add_argument("--hfov", type=float, default=120.0); ap.add_argument("--level", action="store_true"); ap.add_argument("--workers", type=int, default=1); ap.add_argument("--no-raise-cut", action="store_true"); ap.add_argument("--video-only", action="store_true"); ap.add_argument("--only", default=None)
     a = ap.parse_args()
     if a.mode == "calib":
         calib(a.clip, a.out, times=tuple(float(x) for x in a.times.split(",")), dfov=a.dfov, gain=a.gain, only=(a.only.split(",") if a.only else None))

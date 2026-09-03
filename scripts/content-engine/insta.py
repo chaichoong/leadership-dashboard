@@ -9,6 +9,9 @@ full frame width spanning LENS_FOV degrees.
 import numpy as np, subprocess, os, sys, json
 
 FFMPEG = os.path.expanduser("~/tools/bin/ffmpeg")
+# Hardware HEVC decode: 7x faster than software on this Mac (3.1 s vs 21.4 s for 10 s of both
+# lenses, measured 3 Sep 2026). Frames still arrive in system memory for numpy.
+HWACCEL = ["-hwaccel", "videotoolbox"] if os.environ.get("CE_NO_HWACCEL") is None else []
 SIZE = 2880
 LENS_FOV = 190.0
 FRONT = 1   # stream index that looks at Kevin (yaw 0 in the v360 stitch)
@@ -35,7 +38,7 @@ def lens_size(path):
 def decode_frame(path, t, stream):
     """One frame of one stream as HxWx3 uint8 (RGB)."""
     n = lens_size(path)
-    cmd = [FFMPEG, "-v", "error", "-ss", str(t), "-i", path, "-map", "0:%d" % stream,
+    cmd = [FFMPEG, "-v", "error"] + HWACCEL + ["-ss", str(t), "-i", path, "-map", "0:%d" % stream,
            "-frames:v", "1", "-f", "rawvideo", "-pix_fmt", "rgb24", "-"]
     raw = subprocess.run(cmd, check=True, capture_output=True).stdout
     return np.frombuffer(raw, np.uint8).reshape(n, n, 3)
@@ -45,7 +48,7 @@ def frame_stream(path, stream, w=None, h=None, fps=None, start=None, end=None):
     """Yield frames of one stream as HxWx3 uint8."""
     n = lens_size(path)
     w = w or n; h = h or n
-    cmd = [FFMPEG, "-v", "error"]
+    cmd = [FFMPEG, "-v", "error"] + HWACCEL
     if start is not None: cmd += ["-ss", str(start)]
     cmd += ["-i", path]
     if end is not None: cmd += ["-t", str((end - (start or 0)))]
@@ -57,10 +60,21 @@ def frame_stream(path, stream, w=None, h=None, fps=None, start=None, end=None):
     cmd += ["-f", "rawvideo", "-pix_fmt", "rgb24", "-"]
     p = subprocess.Popen(cmd, stdout=subprocess.PIPE, bufsize=w * h * 3 * 4)
     n = w * h * 3
+    # prefetch on a thread so the decoder runs ahead of the consumer instead of blocking on the pipe
+    import threading, queue
+    q = queue.Queue(maxsize=6)
+
+    def pump():
+        while True:
+            buf = p.stdout.read(n)
+            if len(buf) < n:
+                q.put(None); break
+            q.put(np.frombuffer(buf, np.uint8).reshape(h, w, 3))
+    threading.Thread(target=pump, daemon=True).start()
     while True:
-        buf = p.stdout.read(n)
-        if len(buf) < n: break
-        yield np.frombuffer(buf, np.uint8).reshape(h, w, 3)
+        item = q.get()
+        if item is None: break
+        yield item
     p.wait()
 
 
@@ -89,8 +103,17 @@ def bilinear(img, u, v):
     return (a * (1 - fu) + b * fu) * (1 - fv) + (c * (1 - fu) + e * fu) * fv
 
 
-def sample(front, back, d, feather_deg=8.0, fov=LENS_FOV):
-    """Sample colours for directions d (N,3) from both lens images with a feathered blend."""
+try:
+    import cv2
+except ImportError:      # numpy fallback (about 100x slower); the build installs opencv-python-headless
+    cv2 = None
+
+
+def sample(front, back, d, feather_deg=8.0, fov=LENS_FOV, shape=None):
+    """Sample colours for directions d (N,3) from both lens images with a feathered blend.
+    With OpenCV present and `shape=(h, w)` given, uses cv2.remap (C++ bilinear) instead of numpy."""
+    if cv2 is not None and shape is not None:
+        return _sample_cv(front, back, d, feather_deg, fov, shape)
     uf, vf, thf = dirs_to_lens_uv(d, "front", size=front.shape[0], fov=fov)
     ub, vb, thb = dirs_to_lens_uv(d, "back", size=back.shape[0], fov=fov)
     half = np.deg2rad(fov / 2.0)
@@ -102,6 +125,32 @@ def sample(front, back, d, feather_deg=8.0, fov=LENS_FOV):
     mf = wf[:, 0] > 0; mb = wb[:, 0] > 0
     if mf.any(): out[mf] += wf[mf] * bilinear(front, uf[mf], vf[mf])
     if mb.any(): out[mb] += wb[mb] * bilinear(back, ub[mb], vb[mb])
+    return np.clip(out, 0, 255).astype(np.uint8)
+
+
+MAP_SCALE = 1   # half-res maps were measured slower and softer (3 Sep 2026); keep full res
+
+
+def _sample_cv(front, back, d, feather_deg, fov, shape):
+    h, w = shape
+    hs, ws = h // MAP_SCALE, w // MAP_SCALE
+    if MAP_SCALE > 1:
+        # d arrives at full res in row-major (h, w); subsample the grid
+        d = d.reshape(h, w, 3)[::MAP_SCALE, ::MAP_SCALE].reshape(-1, 3)
+        hs, ws = (h + MAP_SCALE - 1) // MAP_SCALE, (w + MAP_SCALE - 1) // MAP_SCALE
+    uf, vf, thf = dirs_to_lens_uv(d, "front", size=front.shape[0], fov=fov)
+    ub, vb, thb = dirs_to_lens_uv(d, "back", size=back.shape[0], fov=fov)
+    half = np.deg2rad(fov / 2.0)
+    wf = np.clip((half - thf) / np.deg2rad(feather_deg), 0, 1)
+    wb = np.clip((half - thb) / np.deg2rad(feather_deg), 0, 1)
+    ssum = wf + wb; ssum[ssum == 0] = 1.0
+    def up(a):
+        a = a.reshape(hs, ws).astype(np.float32)
+        return a if MAP_SCALE == 1 else cv2.resize(a, (w, h), interpolation=cv2.INTER_LINEAR)
+    wf = up(wf / ssum)[:, :, None]; wb = up(wb / ssum)[:, :, None]
+    ff = cv2.remap(front, up(uf), up(vf), cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE)
+    bb = cv2.remap(back, up(ub), up(vb), cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE)
+    out = ff.astype(np.float32) * wf + bb.astype(np.float32) * wb
     return np.clip(out, 0, 255).astype(np.uint8)
 
 
