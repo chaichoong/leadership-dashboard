@@ -15,7 +15,7 @@ describe('content-engine render', () => {
   it('passes its own selftest (folder naming, output names, banner title, record fields)', () => {
     const out = JSON.parse(execFileSync('python3', [RENDER, 'selftest'], { encoding: 'utf8', cwd: DIR }));
     expect(out.failed).toEqual([]);
-    expect(out.checks).toBeGreaterThanOrEqual(9);
+    expect(out.checks).toBeGreaterThanOrEqual(17);
   });
 
   it('never writes copy from an empty transcript: under 50 characters of speech is B-roll', () => {
@@ -30,6 +30,15 @@ describe('content-engine render', () => {
     const w = readFileSync(WATCH, 'utf8');
     expect(w).toContain('"catch-up for the missed previous day"');
     expect(w).toMatch(/spoken day %d disagrees with the date/);
+  });
+
+  it("builds the LFMD from the 'Learnings from my diary' section, and the Summary from the teaser clip (Kevin, 3 Sep 2026)", () => {
+    const src = readFileSync(RENDER, 'utf8');
+    expect(src).toMatch(/LFMD_START_RE = re\.compile\(r"learnings\?\\s\+\(\?:from\|for\|of\)/);
+    expect(src).toContain('def lfmd_window(segments');
+    expect(src).toContain('TEASER_MAX_SECONDS = 150');
+    expect(src).toContain('if role == "teaser":');
+    expect(src).toContain('"--no-raise-cut"');   // one angle for the whole clip
   });
 
   it('uses the approved recipe numbers for both aspects', () => {

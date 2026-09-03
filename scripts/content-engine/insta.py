@@ -3,7 +3,7 @@
 Geometry convention (matches ffmpeg v360 after calibration below):
   unit direction d = (x, y, z); z forward = centre of the "front" lens (stream FRONT),
   y down, x right. yaw = atan2(x, z), pitch = -asin(y)  (pitch > 0 looks up).
-Each lens is modelled as equidistant fisheye, circle centred in its 2880x2880 frame,
+Each lens is modelled as an equisolid fisheye, circle centred in its 2880x2880 frame,
 full frame width spanning LENS_FOV degrees.
 """
 import numpy as np, subprocess, os, sys, json
@@ -85,7 +85,9 @@ def dirs_to_lens_uv(d, which, size=SIZE, fov=LENS_FOV):
         z = -z
     theta = np.arccos(np.clip(z, -1, 1))                  # angle from lens axis
     lh = np.hypot(x, y); lh[lh == 0] = 1.0
-    r = theta / np.deg2rad(fov / 2.0) * (size / 2.0)       # equidistant
+    # equisolid: r = 2 f sin(theta/2). Fitted on the seam band of three clips (3 Sep 2026): equisolid
+    # at 190 deg agrees best across the lens overlap (err 29.5 vs 32.8 for equidistant at its best FOV)
+    r = np.sin(theta / 2.0) / np.sin(np.deg2rad(fov / 2.0) / 2.0) * (size / 2.0)
     mx, my = MIRROR[which]
     if ROLL180[which]: mx, my = -mx, -my
     u = size / 2.0 + r * (x / lh) * mx
@@ -128,6 +130,7 @@ def sample(front, back, d, feather_deg=8.0, fov=LENS_FOV, shape=None):
     return np.clip(out, 0, 255).astype(np.uint8)
 
 
+FRONT_PRIORITY = os.environ.get("CE_FRONT_PRIORITY", "1") == "1"   # see _sample_cv
 MAP_SCALE = 1   # half-res maps were measured slower and softer (3 Sep 2026); keep full res
 
 
@@ -143,6 +146,13 @@ def _sample_cv(front, back, d, feather_deg, fov, shape):
     half = np.deg2rad(fov / 2.0)
     wf = np.clip((half - thf) / np.deg2rad(feather_deg), 0, 1)
     wb = np.clip((half - thb) / np.deg2rad(feather_deg), 0, 1)
+    if FRONT_PRIORITY:
+        # Anything near Kevin (the front-lens side) is seen whole by the front lens; blending it with
+        # the back lens' edge turns a close hand into a ghost. So the front lens wins everywhere it
+        # covers (to its own edge, with a short ramp) and the back lens fills only beyond it. The seam
+        # moves to the front lens' rim, which is behind Kevin, not on him.
+        ramp = np.clip((half - thf) / np.deg2rad(3.0), 0, 1)
+        wf = np.maximum(wf, ramp); wb = wb * (1 - ramp)
     ssum = wf + wb; ssum[ssum == 0] = 1.0
     def up(a):
         a = a.reshape(hs, ws).astype(np.float32)

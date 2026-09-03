@@ -52,3 +52,19 @@ earlier iterations kept for comparison.
   `watch.resolve_episode`: match = normal; spoken = date - 1 with no talk clip the day before =
   catch-up (he missed a day and recorded two the next day); anything else = trust the date and
   flag it in the record Notes. A clip with under 50 characters of speech is B-roll and is skipped.
+
+## Fixes after the first real episode (Kevin, 3 Sep 2026)
+- No close-up when the camera is raised: the render keeps one angle for the whole clip
+  (`--no-raise-cut` is in the recipe). The raise detector stays in the code for a later smooth opening.
+- Lens model is now equisolid at 190 deg: fitted on the seam band of three clips, the two lenses agree
+  best there (error 29.5 vs 32.8 for equidistant). Front-lens priority: the front lens wins everywhere
+  it covers, so anything close to Kevin is never half-blended with the back lens' edge.
+- The hand on the stick: in the July 2026 clips the raw lens frames do not contain the hand at all
+  (checked frame by frame at 12 s of clip 064), so no stitch can show it. In the winter clips, held out
+  in front, the hand is at the bottom of the frame and comes through skewed, as it did in Insta360 Studio.
+- LFMD = the "Learnings from my diary" section only: from the last sentence that names it to the
+  sign-off ("thank you as always" / "stay positive" / "see you tomorrow"), 20-120 s, cut from the 9:16
+  master with its own captions. If a clip has no such section, no LFMD is written for it.
+- A shooting day holds a short teaser (the Summary) and a long episode (Full + LFMD). Clips over
+  150 s, or any clip with a diary section, are episodes; the rest are teasers. Only the episode clip
+  sets the transcript and the status on the record.
