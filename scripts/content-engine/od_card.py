@@ -42,7 +42,7 @@ def _textfile(s):
     fh = tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False); fh.write(s); fh.close(); return fh.name
 
 
-def render(quote, out_png, attribution="Kevin Brittain, Operations Director", kicker="FROM TODAY'S RUN"):
+def render(quote, out_png, attribution="Kevin Brittain, Operations Director", kicker="FROM THE RUN DIARY"):
     """Write the PNG. Raises SystemExit with ffmpeg's error if it fails; never leaves a half file."""
     size, lines = fit(quote)
     files = []

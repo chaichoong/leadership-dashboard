@@ -177,10 +177,27 @@ def hot_button_source(monday):
     return "Playbook section 3, hot-button %d, a customer's words on a real sales call: %s. \"%s\"" % (i + 1, a, b)
 
 
+TICS = re.compile(r"(?:^|(?<=[.!?]\s)|(?<=\n))(The reality is|Here's the thing|Let that sink in|The truth is)[,:]?\s+(\w)", re.M)
+TIME_WORDS = re.compile(r"\b(today|this morning|yesterday|this week|tonight|just now|earlier today)\b", re.I)
+
+
+def strip_tics(text):
+    """Remove the model's stock phrases in place and re-capitalise what follows. Deterministic, like the em-dash fix."""
+    return TICS.sub(lambda m: m.group(2).upper(), text)
+
+
+def bridge_check(text):
+    """A bridge post is written weeks after the episode: any 'today' is false (Chen's time-sensitive rule)."""
+    m = TIME_WORDS.search(text)
+    return ["time word '%s' in a bridge post about an old episode" % m.group(0)] if m else []
+
+
 def rules_check(text, source, slot_name, is_friday=False):
     """(fixed_text, issues). Em dashes fixed in place; everything else reported, never rewritten."""
     t = text.replace(" — ", ". ").replace("—", ", ").replace(" – ", ", ").strip()
     issues = ["em dash replaced"] if t != text.strip() else []
+    t2 = strip_tics(t)
+    if t2 != t: issues.append("stock phrase removed"); t = t2
     low = t.lower()
     if STRIP_WORDS.search(t): issues.append("Runpreneur word: '%s'" % STRIP_WORDS.search(t).group(0))
     for b in BANNED:
@@ -228,7 +245,7 @@ def build_card(post, mode):
     if post.get("card_url"): parts.append("Quote card (attached to the post): " + post["card_url"])
     parts.append("Where it came from:\n" + post["source_line"])
     if post.get("bridge_text"): parts.append("Bridge post for your personal profile, 12:00 the same day (Runpreneur-framed, no ask):\n\n" + post["bridge_text"])
-    issues = post.get("issues") or []
+    issues = (post.get("issues") or []) + (post.get("bridge_issues") or [])
     parts.append(("Rules check flagged: " + "; ".join(issues)) if issues else "Rules check: nothing flagged (UK English, no em dashes, no hashtags, no running words, every figure in the source, no ask before Friday).")
     if not post.get("voice_loaded"): parts.append("Note: Kevin's voice profile was not readable when this was written (Drive offline), so the post was written from the rules alone.")
     if mode == "live":
@@ -412,7 +429,8 @@ def draft(week=None, dry_run=False):
     for p in week_posts:
         if p["slot"] in ("Method", "Proof") and p.get("episode") and not p.get("bridge_text"):
             txt = _claude(P.BRIDGE_SYSTEM, P.BRIDGE_PROMPT.format(episode=p["episode"], quote=p["quote"], post=p["text"]), brand_lessons=False)
-            p["bridge_text"] = txt.strip() + "\n\n" + P.OD_PAGE_URL
+            txt = strip_tics(txt.strip()); p["bridge_issues"] = bridge_check(txt)
+            p["bridge_text"] = txt + "\n\n" + P.OD_PAGE_URL
     _save(STATE, state)
     for p in week_posts:
         if not p.get("record"): p["record"] = create_record(p)
@@ -634,9 +652,13 @@ def selftest():
     _, _, live = build_card({**post, "facebook": True}, "live"); assert "Facebook page" in live and "08:00" in live and live.rstrip().split("\n")[-1].startswith(CLOSING)
     _, _, thin = build_card({"date": "2026-09-09", "slot": "Proof", "pillar": "Proof", "thin": True, "source_line": "Nothing sourced", "voice_loaded": True}, "test")
     assert thin.startswith("THIN SLOT") and "Nothing is written from nothing" in thin and thin.rstrip().split("\n")[-1].startswith(CLOSING)
+    assert strip_tics("Plan it.\n\nThe reality is, a plan in memory is not a plan. Here's the thing: it fails.") == "Plan it.\n\nA plan in memory is not a plan. It fails."
+    assert strip_tics("the reality is what it is") == "the reality is what it is", "mid-sentence use is left alone"
+    t, issues = rules_check(good.replace("Every decision", "The reality is, every decision", 1), "", "Pain"); assert "stock phrase removed" in issues and "The reality is" not in t
+    assert bridge_check("Episode 1971 this morning. A thought") and not bridge_check("Episode 1971. A thought")
     assert minutes_for("Approved as-is") == 2 and minutes_for("Approved with minor edits") == 5 and minutes_for("Changes requested") == 10
     assert BUSINESS_OD != approval.BUSINESS_PERSONAL and publish.BRANDS[BRAND]["category"] == BRAND
-    print(json.dumps({"checks": 36, "failed": []}))
+    print(json.dumps({"checks": 40, "failed": []}))
 
 
 if __name__ == "__main__":

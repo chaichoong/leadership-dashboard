@@ -59,7 +59,7 @@ HARD RULES (immutable, from the playbook Kevin approved):
 5. Pricing, if mentioned, is exactly: """ + PRICING + """. Never module pricing.
 6. Call things what they are: an agent runs itself on a schedule; an assistant acts when a human asks. Do not call an engine that is not AI "AI".
 7. Never mention running, the streak, barefoot shoes, kilometres, Runpreneur, fundraising or children's charities. The source may be a running vlog transcript: keep the business idea, drop every trace of the run.
-8. Do not open with "In business and" or any stock opener. Do not write "Day N". Do not end with a summary line.
+8. Do not open with "In business and" or any stock opener. Do not write "Day N". Do not end with a summary line. Never use the phrases "The reality is", "Here's the thing", "Let that sink in", "The truth is". Vary the shape of the opening line from post to post.
 
 SHAPE: 60 to 220 words. The first line is the hook and must stand alone in a feed preview (under 120 characters). One idea per post. Line breaks between short paragraphs. Plain text only, no markdown, no labels, no commentary. Output the post and nothing else."""
 
@@ -89,13 +89,13 @@ POLISH_PROMPT = """Here is a draft LinkedIn post for the Operations Director pag
 Polish it. Tighten the opening two sentences. Trim any paragraph that does not advance the argument. Remove any sentence that sounds AI-flavoured: vague hedging, throat-clearing transitions, generic framing. Keep Kevin's voice and cadence; do NOT make it punchier or add energy. Keep every fact exactly as it is; add none. Keep it between 60 and 220 words, UK English, no em dashes, no hashtags. Output the polished post only."""
 
 BRIDGE_SYSTEM = """You are Kevin Brittain writing on your own LinkedIn profile, where your followers know you for Runpreneur, the daily run and the mission to raise £1 million for children's charities. First person. Humble, factual, UK English, no em dashes, no hashtags, no emojis. 40 to 120 words. Plain text only."""
-BRIDGE_PROMPT = """On today's run (Diary of a Runpreneur, Episode {episode}) you talked about a business idea. Here is what you said, verbatim from the transcript:
+BRIDGE_PROMPT = """On one of your recent runs (Diary of a Runpreneur, Episode {episode}, recorded some time ago, NOT today) you talked about a business idea. Here is what you said, verbatim from the transcript:
 "{quote}"
 
 The Operations Director page has published a post on it:
 {post}
 
-Write a short bridge post for your personal profile: one or two lines of what the run was like today is fine if it is in the transcript, then the business idea in your own words, then one line saying the full thought is on the Operations Director page (the URL is added after your text, do not write it). No ask, no hashtags, no figures that are not in the transcript."""
+Write a short bridge post for your personal profile: open with the idea itself (never "today", "this morning", "yesterday" or "this week": the run was not today), the business idea in your own words, then one line saying the full thought is on the Operations Director page (the URL is added after your text, do not write it). No ask, no hashtags, no figures that are not in the transcript."""
 
 MINE_SYSTEM = """You classify a transcript of Kevin Brittain's daily running vlog for a SEPARATE brand, Operations Director (OD).
 OD sells a done-for-you operations service to founder-led UK small businesses: AI agents and systems run the everyday work so the business runs without the founder.
