@@ -15,7 +15,16 @@ describe('content-engine render', () => {
   it('passes its own selftest (folder naming, output names, banner title, record fields)', () => {
     const out = JSON.parse(execFileSync('python3', [RENDER, 'selftest'], { encoding: 'utf8', cwd: DIR }));
     expect(out.failed).toEqual([]);
-    expect(out.checks).toBeGreaterThanOrEqual(17);
+    expect(out.checks).toBeGreaterThanOrEqual(25);
+  });
+
+  it("inserts Ericamae's 8 second branded intro after the sign-off line (her app's rule) and makes the podcast audio", () => {
+    const src = readFileSync(RENDER, 'utf8');
+    expect(src).toContain('INTRO_CLIP = os.path.join(EDITED_ROOT, "Vlog Intro", "runprenuer-intro_clip.mp4")');
+    expect(src).toContain('def intro_insert_seconds(segments');
+    expect(src).toContain('insert_intro(captioned, at, paths["full"])');
+    expect(src).toContain('paths["podcast"] = podcast_audio(paths["full"]');
+    expect(src).toMatch(/keep on \(\?:watching\|listening\)/);
   });
 
   it('never writes copy from an empty transcript: under 50 characters of speech is B-roll', () => {

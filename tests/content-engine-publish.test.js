@@ -16,7 +16,7 @@ describe('content-engine publish (GHL)', () => {
   it('passes its own selftest (London slots, YouTube parts, link fill, account map, stages, post bodies)', () => {
     const out = JSON.parse(execFileSync('python3', [PUBLISH, 'selftest'], { encoding: 'utf8', cwd: DIR }));
     expect(out.failed).toEqual([]);
-    expect(out.checks).toBeGreaterThanOrEqual(16);
+    expect(out.checks).toBeGreaterThanOrEqual(22);
   });
 
   it('only ever schedules episodes Kevin approved on the card', () => {
@@ -57,6 +57,24 @@ describe('content-engine publish (GHL)', () => {
     expect(src).toContain('return "live" if m == "live" else "test"');
     expect(src).toContain('status = "scheduled" if (not test or platform == "youtube") else "draft"');
     expect(src).toContain('privacy="unlisted" if test else "public"');
+  });
+
+  it("writes the link fields Ericamae's QC and Ready pages read, on the Full record and the clip's own record", () => {
+    const src = readFileSync(PUBLISH, 'utf8');
+    for (const f of ['"YouTube Link"', '"TikTok Link"', '"Facebook Post Link"', '"Instagram Post Link"', '"LinkedIn Link"', '"Threads Link"']) expect(src).toContain(f);
+    expect(src).toContain('clip_links.setdefault(p["clip"], {})');
+    expect(src).toContain('fields["Video Title"] = yt_title; fields["Target Publish Date"]');
+  });
+
+  it('publishes the blog article through the GHL Blog API at stage 2 (draft in test mode) and passes its selftest', () => {
+    const src = readFileSync(PUBLISH, 'utf8');
+    expect(src).toContain('pid, url = blog.publish_blog(day, full, entry, media.get("thumb"), entry["youtube_link"], test)');
+    expect(src).toContain('fields["Blog Link"] = url');
+    const out = JSON.parse(execFileSync('python3', [path.join(DIR, 'blog.py'), 'selftest'], { encoding: 'utf8', cwd: DIR }));
+    expect(out.failed).toEqual([]);
+    const blog = readFileSync(path.join(DIR, 'blog.py'), 'utf8');
+    expect(blog).toContain('"DRAFT" if test else "PUBLISHED"');
+    expect(blog).toContain('BLOG_ID = "YvavGIzJ2jDX8gs9CjYZ"');
   });
 
   it('X is not a channel and every copy field it reads exists on the record type it reads it from', () => {

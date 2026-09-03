@@ -85,11 +85,18 @@ CHANNELS = {
         {"clip": "lfmd", "record": "Learnings From My Diary", "field": "Threads Copy", "slot": LFMD_SLOT, "ptype": "post"}]},
 }
 # Where each channel's published link lands on the episode record (the team's QC page reads these).
-LINK_FIELDS = {("youtube", "full"): ("YouTube Full Link", "Link of Youtube Video"), ("tiktok", "summary"): ("Link of Tiktok Video",),
-               ("facebook", "summary"): ("Link of Facebook Reels",), ("facebook", "lfmd"): ("Link of Facebook Page Post",),
-               ("instagram", "summary"): ("Link of Instagram Reels",), ("instagram", "lfmd"): ("Link of Instagram Post",),
-               ("linkedin", "summary"): ("Link of Linkedin Post",), ("threads", "summary"): ("Link of Threads Post",)}
-CLIP_FILES = {"full": "Episode_%d_Full_Episode.mp4", "lfmd": "Ep%d_LFMD.mp4", "summary": "Ep%d_Summary.mp4", "thumb": "Episode_%d_Thumbnail.png"}
+# Both sets: the "Link of ..." fields and the fields Ericamae filled by hand, which the team's QC and
+# Ready pages read (YouTube Link, TikTok Link, Facebook Post Link, Instagram Post Link, LinkedIn Link,
+# Threads Link). Written on the Full record AND on the clip's own record (Short / Learnings), as she did.
+LINK_FIELDS = {("youtube", "full"): ("YouTube Full Link", "Link of Youtube Video", "YouTube Link"),
+               ("tiktok", "summary"): ("Link of Tiktok Video", "TikTok Link"), ("tiktok", "lfmd"): ("TikTok Link",),
+               ("facebook", "summary"): ("Link of Facebook Reels", "Facebook Post Link"), ("facebook", "lfmd"): ("Link of Facebook Page Post", "Facebook Post Link"),
+               ("instagram", "summary"): ("Link of Instagram Reels", "Instagram Post Link"), ("instagram", "lfmd"): ("Link of Instagram Post", "Instagram Post Link"),
+               ("linkedin", "summary"): ("Link of Linkedin Post", "LinkedIn Link"), ("linkedin", "lfmd"): ("LinkedIn Link",),
+               ("threads", "summary"): ("Link of Threads Post", "Threads Link"), ("threads", "lfmd"): ("Threads Link",)}
+CLIP_RECORD = {"summary": "Short Form Video", "lfmd": "Learnings From My Diary", "full": "Long Form Video"}
+CLIP_FILES = {"full": "Episode_%d_Full_Episode.mp4", "lfmd": "Ep%d_LFMD.mp4", "summary": "Ep%d_Summary.mp4", "thumb": "Episode_%d_Thumbnail.png",
+              "podcast": "Ep%d_Podcast.mp3"}
 TIKTOK = {"privacyLevel": "PUBLIC_TO_EVERYONE", "promoteOtherBrand": False, "enableComment": True, "enableDuet": True, "enableStitch": True,
           "videoDisclosure": False, "promoteYourBrand": False}
 
@@ -202,7 +209,7 @@ def upload_media(path):
         os.chmod(fh.name, 0o600)
         fh.write('header = "Authorization: Bearer %s"\nheader = "Version: 2021-07-28"\nuser-agent = "%s"\n' % (key, UA))
         cfg = fh.name
-    mime = "image/png" if path.endswith(".png") else "video/mp4"
+    mime = "image/png" if path.endswith(".png") else ("audio/mpeg" if path.endswith(".mp3") else "video/mp4")
     try:
         r = subprocess.run(["curl", "-s", "-K", cfg, "-F", "file=@%s;type=%s" % (path, mime), "-F", "hosted=false", "-F", "name=" + os.path.basename(path),
                             GHL + "/medias/upload-file?altType=location&altId=" + loc], capture_output=True, text=True, timeout=1800)
@@ -229,7 +236,7 @@ def media_for(day, entry, kinds):
     for k in kinds:
         if media.get(k): continue
         if not os.path.exists(files[k]):
-            if k == "thumb": continue
+            if k in ("thumb", "podcast"): continue
             raise SystemExit("episode %d: %s is not in the edited folder (%s)" % (day, k, files[k]))
         media[k] = upload_media(files[k])
         print("episode %d: uploaded %s" % (day, k))
@@ -291,8 +298,26 @@ def schedule_stage(day, entry, recs, acct_map, stage, dry_run=False):
         print("episode %d [%s]: %s %s -> %s %s %s (post %s)" % (day, m.upper(), spec["clip"], platform, account["name"], status, when if status == "scheduled" else "", pid))
     status = STATUS_YT if stage == 1 else STATUS_SOCIALS
     what = ("full episode to YouTube%s" % (" (UNLISTED, test mode)" if test else "")) if stage == 1 else ("Summary and Learnings clips to the socials%s" % (" as DRAFTS (test mode)" if test else ""))
-    note = approval.append_note(full, "%s: %s through GoHighLevel." % (dt.date.today().isoformat(), what))
-    watch._airtable("PATCH", watch.API + "/" + full["id"], {"fields": {"Record Status": status, "Notes": note}})
+    fields = {"Record Status": status}
+    if stage == 1:
+        yt_title = youtube_parts(ff.get("YouTube Copy"), day)[0]
+        fields["Video Title"] = yt_title; fields["Target Publish Date"] = day_london.isoformat()
+    if stage == 2:
+        # the article and the podcast audio ride with the socials: same approval, same night
+        import blog
+        media = media_for(day, entry, ["thumb", "podcast"])
+        try:
+            pid, url = blog.publish_blog(day, full, entry, media.get("thumb"), entry["youtube_link"], test)
+            fields["Blog Link"] = url
+            what += "; blog article %s" % ("saved as a DRAFT (test mode)" if test else "published")
+            print("episode %d [%s]: blog %s -> %s (post %s)" % (day, m.upper(), "draft" if test else "published", url, pid))
+        except SystemExit as ex:
+            print("episode %d: blog not published (%s)" % (day, str(ex)[:160]))
+        if media.get("podcast"):
+            entry.setdefault("podcast", {})["audio_url"] = media["podcast"]
+            what += "; podcast audio on the CDN, waiting for the Spotify step"
+    fields["Notes"] = approval.append_note(full, "%s: %s through GoHighLevel." % (dt.date.today().isoformat(), what))
+    watch._airtable("PATCH", watch.API + "/" + full["id"], {"fields": fields})
     return len(todo)
 
 
@@ -326,7 +351,7 @@ def sync():
     for day, entry in state.items():
         posts = entry.get("posts", {})
         if not posts: continue
-        changed = False; links = {}
+        changed = False; links = {}; clip_links = {}
         for key, p in posts.items():
             if p.get("status") in ("published", "draft"): continue     # a draft (test mode) never moves on its own
             try:
@@ -340,7 +365,9 @@ def sync():
             if st == "published" and link:
                 p["link"] = link; changed = True
                 if p["platform"] == "youtube" and not entry.get("youtube_link"): entry["youtube_link"] = link
-                for f in LINK_FIELDS.get((p["platform"], p["clip"]), ()): links[f] = link
+                for f in LINK_FIELDS.get((p["platform"], p["clip"]), ()):
+                    links.setdefault(f, link)                      # first account wins (the Runpreneur page before the profile)
+                    clip_links.setdefault(p["clip"], {}).setdefault(f, link)
         if links or (changed and all(p.get("status") == "published" for p in posts.values())):
             full = pc.find_by_name(pc.record_name(int(day), "Long Form Video"))
             fields = dict(links)
@@ -348,6 +375,10 @@ def sync():
             if all(p.get("status") == "published" for p in posts.values()) and len([k for k in posts if not k.startswith("youtube|")]):
                 fields["Record Status"] = STATUS_PUBLISHED; fields["Date Published (Other)"] = dt.date.today().isoformat()
             watch._airtable("PATCH", watch.API + "/" + full["id"], {"fields": fields})
+            for clip, cl in clip_links.items():
+                if clip == "full": continue
+                rec = pc.find_by_name(pc.record_name(int(day), CLIP_RECORD[clip]))
+                if rec: watch._airtable("PATCH", watch.API + "/" + rec["id"], {"fields": {k: v for k, v in cl.items() if not k.startswith("Link of")}})
             print("episode %s: %s" % (day, ", ".join(sorted(fields))))
         if changed: save_state(state)
 
@@ -400,6 +431,9 @@ def selftest():
     assert fb["type"] == "reel" and fb["facebookPostDetails"] == {"type": "reel"} and "scheduleDate" not in fb
     assert all(spec["field"] in dict(pc.TYPES[spec["record"]]["sections"]).values() for c in CHANNELS.values() for spec in c["posts"]), "every copy field exists on its record type"
     assert "twitter" not in CHANNELS
+    assert "YouTube Link" in LINK_FIELDS[("youtube", "full")] and "TikTok Link" in LINK_FIELDS[("tiktok", "summary")] and "Facebook Post Link" in LINK_FIELDS[("facebook", "summary")]
+    assert "LinkedIn Link" in LINK_FIELDS[("linkedin", "summary")] and "Threads Link" in LINK_FIELDS[("threads", "summary")], "the fields Ericamae's pages read"
+    assert CLIP_FILES["podcast"] == "Ep%d_Podcast.mp3"
     old = MODE_FILE
     import tempfile as _tf
     globals()["MODE_FILE"] = os.path.join(_tf.gettempdir(), "od-mode-test-%d" % os.getpid())
@@ -408,7 +442,7 @@ def selftest():
     open(MODE_FILE, "w").write("anything else"); assert mode() == "test"; os.remove(MODE_FILE); globals()["MODE_FILE"] = old
     u = build_post("youtube", accts[5], spec, "d", "https://cdn/f.mp4", None, "x", "u1", 1, "T", privacy="unlisted")
     assert u["youtubePostDetails"]["privacyLevel"] == "unlisted"
-    print(json.dumps({"checks": 19, "failed": []}))
+    print(json.dumps({"checks": 22, "failed": []}))
 
 
 if __name__ == "__main__":
