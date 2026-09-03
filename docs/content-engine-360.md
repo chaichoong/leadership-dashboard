@@ -115,3 +115,8 @@ Measured against the team's episode 2049 thumbnail at 1280x720: icon 245 px at (
 - Proof on 3 Sep 2026: Episode 2195's Summary uploaded to the library and one DRAFT post created on the Runpreneur LinkedIn page (id in publishing.json under proof; a draft publishes nothing).
 
 State: `~/knowledge-os/logs/content-engine/publishing.json` (episode -> media urls, posts with GHL ids/status/link, youtube_link).
+
+
+## Test mode before going live (3 Sep 2026)
+
+The engine starts in TEST mode and stays there until Kevin writes `live` to `~/.config/od/content_engine_mode`. In test mode the whole chain runs for real, approval card included, but nothing reaches a public feed: the full episode goes to YouTube as UNLISTED (so the link exists and fills the copy), and every social post is created as a DRAFT in the GoHighLevel planner for Kevin to open and check. The approval card's closing line says which mode it is in. Ericamae's daily process is untouched during the test because drafts and unlisted videos never appear on the feeds she posts to; the first live episode is chosen with her so the same day is not published twice.

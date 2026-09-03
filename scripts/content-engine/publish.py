@@ -52,6 +52,16 @@ STATUS_PUBLISHED = "Published"
 PUBLISHABLE = (STATUS_APPROVED, STATUS_YT, STATUS_SOCIALS)
 YT_SLOT, SUMMARY_SLOT, LFMD_SLOT = (6, 0), (9, 0), (17, 0)     # London hours; the team posted around 08:00-09:00 UK
 PLACEHOLDER = "[ADD YOUTUBE LINK]"
+MODE_FILE = os.path.expanduser("~/.config/od/content_engine_mode")   # "test" (default) or "live"; Kevin flips it
+
+
+def mode():
+    """TEST until Kevin says live. Test mode runs the whole chain but keeps it off the public feeds:
+    YouTube goes up UNLISTED (so the link exists and the copy fills), the socials are created as
+    DRAFTS in the planner for him to open and check. Live mode: public video, scheduled posts."""
+    try: m = open(MODE_FILE).read().strip().lower()
+    except OSError: return "test"
+    return "live" if m == "live" else "test"
 
 # Which clip and which copy field each channel gets. "clip" is the file kind on the edited
 # folder; "record" is which of the episode's three records carries the copy. Keys are
@@ -120,7 +130,7 @@ def account_map(accounts):
     return out
 
 
-def build_post(platform, account, spec, copy, media_url, thumb_url, schedule_iso, user_id, day, title=None, status="scheduled"):
+def build_post(platform, account, spec, copy, media_url, thumb_url, schedule_iso, user_id, day, title=None, status="scheduled", privacy="public"):
     """One GHL post body: one account, that platform's copy, the clip, the slot."""
     media = {"url": media_url, "type": "video/mp4"}
     if thumb_url and spec["clip"] == "full": media["thumbnail"] = thumb_url
@@ -128,7 +138,7 @@ def build_post(platform, account, spec, copy, media_url, thumb_url, schedule_iso
             "userId": user_id, "createdBy": user_id, "tags": []}
     if status == "scheduled": body["scheduleDate"] = schedule_iso
     if platform == "tiktok": body["tiktokPostDetails"] = dict(TIKTOK)
-    if platform == "youtube": body["youtubePostDetails"] = {"title": title or ("Diary of a Runpreneur, Day %d" % day), "privacyLevel": "public", "type": "video"}
+    if platform == "youtube": body["youtubePostDetails"] = {"title": title or ("Diary of a Runpreneur, Day %d" % day), "privacyLevel": privacy, "type": "video"}
     if platform == "facebook": body["facebookPostDetails"] = {"type": spec["ptype"]}
     if platform == "instagram": body["instagramPostDetails"] = {"type": spec["ptype"], "showOnFeed": True}
     return body
@@ -268,14 +278,20 @@ def schedule_stage(day, entry, recs, acct_map, stage, dry_run=False):
             print("  would schedule %s (%s) <- %s at %s: %s" % (platform, account["name"], spec["clip"], slot_iso(day_london, spec["slot"]), text[:90].replace("\n", " ")))
         return len(todo)
     media = media_for(day, entry, kinds)
+    m = mode(); test = m == "test"
     for platform, account, spec, text, title, key in todo:
         when = slot_iso(day_london, spec["slot"])
-        body = build_post(platform, account, spec, text, media[spec["clip"]], media.get("thumb"), when, user, day, title)
+        # Test mode: YouTube still goes up (unlisted, so the link exists) but every social post is a DRAFT.
+        status = "scheduled" if (not test or platform == "youtube") else "draft"
+        body = build_post(platform, account, spec, text, media[spec["clip"]], media.get("thumb"), when, user, day, title,
+                          status=status, privacy="unlisted" if test else "public")
         pid = create_post(body)
-        entry.setdefault("posts", {})[key] = {"id": pid, "platform": platform, "account": account["name"], "clip": spec["clip"], "scheduled": when, "status": "scheduled"}
-        print("episode %d: %s %s -> %s scheduled %s (post %s)" % (day, spec["clip"], platform, account["name"], when, pid))
+        entry.setdefault("posts", {})[key] = {"id": pid, "platform": platform, "account": account["name"], "clip": spec["clip"], "scheduled": when if status == "scheduled" else None,
+                                              "status": status, "mode": m}
+        print("episode %d [%s]: %s %s -> %s %s %s (post %s)" % (day, m.upper(), spec["clip"], platform, account["name"], status, when if status == "scheduled" else "", pid))
     status = STATUS_YT if stage == 1 else STATUS_SOCIALS
-    note = approval.append_note(full, "%s: %s scheduled through GoHighLevel." % (dt.date.today().isoformat(), "full episode to YouTube" if stage == 1 else "Summary and Learnings clips to the socials"))
+    what = ("full episode to YouTube%s" % (" (UNLISTED, test mode)" if test else "")) if stage == 1 else ("Summary and Learnings clips to the socials%s" % (" as DRAFTS (test mode)" if test else ""))
+    note = approval.append_note(full, "%s: %s through GoHighLevel." % (dt.date.today().isoformat(), what))
     watch._airtable("PATCH", watch.API + "/" + full["id"], {"fields": {"Record Status": status, "Notes": note}})
     return len(todo)
 
@@ -312,7 +328,7 @@ def sync():
         if not posts: continue
         changed = False; links = {}
         for key, p in posts.items():
-            if p.get("status") == "published": continue
+            if p.get("status") in ("published", "draft"): continue     # a draft (test mode) never moves on its own
             try:
                 g = ghl("GET", "/social-media-posting/%s/posts/%s" % (loc, p["id"]))
             except SystemExit as ex:
@@ -338,6 +354,7 @@ def sync():
 
 def report():
     state = load_state(); days = approved_days()
+    print("content publishing mode: %s%s" % (mode().upper(), " (YouTube unlisted, socials as drafts; write 'live' to ~/.config/od/content_engine_mode to go live)" if mode() == "test" else ""))
     waiting = [d for d in days if not state.get(str(d), {}).get("posts")]
     scheduled = sum(1 for e in state.values() for p in e.get("posts", {}).values() if p.get("status") == "scheduled")
     failed = sum(1 for e in state.values() for p in e.get("posts", {}).values() if p.get("status") == "failed")
@@ -383,7 +400,15 @@ def selftest():
     assert fb["type"] == "reel" and fb["facebookPostDetails"] == {"type": "reel"} and "scheduleDate" not in fb
     assert all(spec["field"] in dict(pc.TYPES[spec["record"]]["sections"]).values() for c in CHANNELS.values() for spec in c["posts"]), "every copy field exists on its record type"
     assert "twitter" not in CHANNELS
-    print(json.dumps({"checks": 16, "failed": []}))
+    old = MODE_FILE
+    import tempfile as _tf
+    globals()["MODE_FILE"] = os.path.join(_tf.gettempdir(), "od-mode-test-%d" % os.getpid())
+    assert mode() == "test", "no mode file means TEST, never live by accident"
+    open(MODE_FILE, "w").write("LIVE\n"); assert mode() == "live"
+    open(MODE_FILE, "w").write("anything else"); assert mode() == "test"; os.remove(MODE_FILE); globals()["MODE_FILE"] = old
+    u = build_post("youtube", accts[5], spec, "d", "https://cdn/f.mp4", None, "x", "u1", 1, "T", privacy="unlisted")
+    assert u["youtubePostDetails"]["privacyLevel"] == "unlisted"
+    print(json.dumps({"checks": 19, "failed": []}))
 
 
 if __name__ == "__main__":
