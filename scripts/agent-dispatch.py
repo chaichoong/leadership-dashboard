@@ -326,6 +326,16 @@ ROLE_AGENTS = {
                           "agent": "inbound-comms-triage", "role": "worker",
                           "registerRow": "recYy33zkoa099uM2",
                           "dispatch": False},
+    # Content Engine (build 2-3 Sep 2026): the Runpreneur 360 lane. Runs on its
+    # own Go Signal (02:00 nightly, scripts/content-engine-run.sh) and raises
+    # one approval card per finished episode through `submit`, so it must be
+    # in this dict; `dispatch: False` because the CEO pass must never hand it
+    # work — its work arrives as raw clips, not tasks. Lessons land in
+    # ~/.claude/agents/content-engine.md and both of its Claude calls read them.
+    "recRcy1Edas6rGaaF": {"name": "AI Content Engine",
+                          "agent": "content-engine", "role": "worker",
+                          "registerRow": "recNaC0N5KiTGBPNy",
+                          "dispatch": False},
 }
 ALL_AGENTS = {**AGENTS, **ROLE_AGENTS}
 
@@ -1622,8 +1632,15 @@ def require_role_agent_live(rec_id, verb):
                  f"unreadable ({str(exc)[:160]}); use a strategic agent "
                  "this run and let verify surface the roster failure")
     entry = roster.get(rec_id)
+    status = (entry or {}).get("status", "no register row")
+    # `dispatch: False` means the CEO pass never hands this agent WORK. It does
+    # not mean the agent cannot hand in its OWN work: the Content Engine runs on
+    # its own Go Signal and raises an approval card per episode through
+    # `submit` (3 Sep 2026). For a submit the lever is the register status
+    # alone — Built or Live — exactly as it is for a dispatchable agent.
+    if verb == "submit" and entry and status in ("Built", "Live"):
+        return
     if not entry or not entry.get("dispatchable"):
-        status = (entry or {}).get("status", "no register row")
         sys.exit(f"ERROR: role agent {ROLE_AGENTS[rec_id]['name']} is not "
                  f"dispatchable (register status: {status}) — Kevin's "
                  "register controls this; route to a strategic agent instead")

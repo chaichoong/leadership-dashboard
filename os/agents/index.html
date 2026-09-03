@@ -1521,6 +1521,13 @@ async function agConfirmRejectGroup(taskIds, reasonKey){
 }
 window.agConfirmRejectGroup = agConfirmRejectGroup;
 
+// Links in the agent's work must open: a video the Content Engine asks Kevin to watch is a
+// Drive URL, and esc() alone left it as dead text. Escape first, then anchor. The body is
+// pre-wrap, so newlines stay as they are. Mirrors linkifyUrls in os/tasks/index.html.
+function apvLinkify(text){
+    return esc(String(text||'')).replace(/(https?:\/\/[^\s<]+)/g,
+        '<a href="$1" target="_blank" rel="noopener noreferrer" style="color:var(--accent);text-decoration:underline;word-break:break-all">$1</a>');
+}
 function apvCardHtml(t){
     const raw = apvSummary(t.agentOutput);
     const isAction = raw.endsWith(APV_SUMMARY_IS_ACTION);
@@ -1563,7 +1570,7 @@ function apvCardHtml(t){
         <details class="apv-details">
             <summary>${work ? 'Read the agent’s full work' : 'The agent left its work empty'}</summary>
             ${work
-                ? `<div class="apv-body">${esc(work)}</div>`
+                ? `<div class="apv-body">${apvLinkify(work)}</div>`
                 : `<div class="apv-body">The agent left its work empty, so there is nothing here to judge. Do not approve it blind. Use Request changes and tell it to show its work.</div>`}
             ${t.description ? `<div style="font-size:var(--fs-xs);font-weight:var(--fw-semibold);color:var(--text-secondary);margin-top:8px">The task it was given</div><div class="apv-body">${esc(t.description)}</div>` : ''}
         </details>

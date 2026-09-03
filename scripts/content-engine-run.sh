@@ -16,7 +16,12 @@
 #                      links (R2, R3, R5). About 10 minutes for a 40 s clip. Never publishes.
 #   4. platform_copy : platform copy for episodes whose transcript is in and whose copy is not
 #                      (R7 + R8; the Content Machine's own prompts, headless Claude, rules check).
-#   5. report        : one line for the morning digest.
+#   5. approval sync : Kevin's verdicts on open cards -> the episode record (Approved for Publishing,
+#                      or his words into Feedback). Never publishes.
+#   6. approval run  : one approval card per finished episode (video + thumbnail + copy all in),
+#                      through the duplicate gate and agent-dispatch submit, so the 08:00 digest
+#                      counts it and Kevin decides on the AI Agents page (R9).
+#   7. report        : one line for the morning digest.
 set -uo pipefail
 REPO="/Users/kevinbrittain/Projects/leadership-dashboard"
 LOG_DIR="/Users/kevinbrittain/knowledge-os/logs/content-engine"
@@ -26,4 +31,7 @@ python3 scripts/content-engine/watch.py scan --create || exit 1
 python3 scripts/content-engine/watch.py next || exit 1
 python3 scripts/content-engine/render.py run --limit 1 || exit 1
 python3 scripts/content-engine/platform_copy.py run --pending --limit 2 || exit 1
+python3 scripts/content-engine/approval.py sync || exit 1
+python3 scripts/content-engine/approval.py run --pending --limit 2 || exit 1
 python3 scripts/content-engine/watch.py report
+python3 scripts/content-engine/approval.py report

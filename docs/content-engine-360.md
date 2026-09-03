@@ -90,3 +90,14 @@ earlier iterations kept for comparison.
 - Output: `Episode_<n>_Thumbnail.png` in the episode's Drive folder, link in `Thumbnail URL` on the episode record. Episode clips only; a teaser has no thumbnail.
 
 Measured against the team's episode 2049 thumbnail at 1280x720: icon 245 px at (127, 55), LINE 1 top at 353 with a 100 px start size that shrinks 4 px at a time until it fits between x=80 and 40 px short of the slash, LINE 2 box top at 434.
+
+
+## Approval card (R9, 3 Sep 2026)
+
+`approval.py` raises ONE card per finished episode in the same queue as every other agent's work: a Tasks record at Status Approval with Sent For Approval By = the Content Engine (Team Members `recRcy1Edas6rGaaF`, register `recNaC0N5KiTGBPNy`, `ROLE_AGENTS` entry with `dispatch: False`). The 08:00 digest counts it; Kevin decides on the AI Agents page; `sync` writes his verdict onto the episode record (Approved -> "Approved for Publishing", which the publishing step will read; Rejected or Changes requested -> his words into Feedback). The card leads with the ask in one line, lists the videos and thumbnail as links (the approvals page now linkifies the work), the copy for all three records as written, the rules-check result, and ends with the "Carrying this out will involve:" line. It says plainly that scheduling is the next build and nothing goes out on approval until it is live.
+
+- A card needs Record Status "Copies in Progress" plus Video Edited URL, Thumbnail URL and YouTube Copy. Raising it moves the record to "Quality Control" and notes the task id.
+- The duplicate gate strips numbers, so every "Publish Episode N" shares one key; the script does its own exact-name check with a control and calls the gate with `--force`.
+- `submit` refuses an agent whose register row is not Built or Live; the row was set to Built on 3 Sep 2026.
+- Lessons: both Claude calls in the lane (`platform_copy.ask_claude`, `thumbnail.titles_from_transcript`) append `watch.kevin_lessons()`, the "## Lessons from Kevin" section of `~/.claude/agents/content-engine.md`, so "reject and remember" changes the next episode.
+- State: `~/knowledge-os/logs/content-engine/approvals.json` (episode -> task, record, verdict).

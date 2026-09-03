@@ -283,9 +283,12 @@ def compose(photo_path, out_png, line1, line2, icon=None, day=None):
 
 
 def titles_from_transcript(transcript):
+    import watch   # the lessons reader lives with the ledger; imported here so `make` needs no Airtable module
+    lessons = watch.kevin_lessons()
+    system = KEVIN_CONTEXT + ("\n\n" + lessons if lessons else "")
     env = dict(os.environ)
     if os.path.exists(TOKEN_FILE): env["CLAUDE_CODE_OAUTH_TOKEN"] = open(TOKEN_FILE).read().strip()
-    r = subprocess.run([CLAUDE, "-p", TITLE_PROMPT % transcript[:2000], "--system-prompt", KEVIN_CONTEXT, "--model", "sonnet",
+    r = subprocess.run([CLAUDE, "-p", TITLE_PROMPT % transcript[:2000], "--system-prompt", system, "--model", "sonnet",
                         "--output-format", "json", "--tools", "", "--max-turns", "1"], capture_output=True, text=True, env=env, timeout=300)
     if r.returncode != 0: raise SystemExit("claude failed: " + r.stderr[-300:])
     out = json.loads(r.stdout).get("result", "")

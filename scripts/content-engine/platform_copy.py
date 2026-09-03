@@ -119,6 +119,8 @@ def rules_check(fields, transcript=""):
 # ---------- IO ----------
 
 def ask_claude(system, user):
+    lessons = watch.kevin_lessons()
+    if lessons: system = system + "\n\n" + lessons
     env = dict(os.environ)
     if os.path.exists(TOKEN_FILE): env["CLAUDE_CODE_OAUTH_TOKEN"] = open(TOKEN_FILE).read().strip()
     r = subprocess.run([CLAUDE, "-p", user, "--system-prompt", system, "--model", MODEL, "--output-format", "json",
