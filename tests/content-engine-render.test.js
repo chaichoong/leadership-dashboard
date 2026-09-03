@@ -41,6 +41,13 @@ describe('content-engine render', () => {
     expect(src).toContain('"--no-raise-cut"');   // one angle for the whole clip
   });
 
+  it('every flag the render passes to stab.py is a flag stab.py accepts (a comment once swallowed --video-only)', () => {
+    const out = execFileSync('python3', [path.join(DIR, 'stab.py'), 'render', '--help'], { encoding: 'utf8', cwd: DIR });
+    for (const flag of ['--proj', '--dfov', '--tilt', '--level', '--blend', '--size', '--no-raise-cut', '--workers', '--video-only', '--map']) {
+      expect(out, flag).toContain(flag);
+    }
+  });
+
   it('uses the approved recipe numbers for both aspects', () => {
     const src = readFileSync(RENDER, 'utf8');
     expect(src).toMatch(/"16:9": \["--proj", "sg", "--dfov", "250", "--tilt", "11", "--level"/);
