@@ -19,9 +19,9 @@ and X <= 300 characters, no figures that are not in the transcript. Em dashes ar
 the copy is left for review, never silently rewritten.
 
 Usage:
-  copy.py run --day N            # generate for one episode
-  copy.py run --pending [--limit N]  # every Full record with a transcript and no YouTube copy yet
-  copy.py selftest
+  platform_copy.py run --day N            # generate for one episode
+  platform_copy.py run --pending [--limit N]  # every Full record with a transcript and no YouTube copy yet
+  platform_copy.py selftest
 """
 import argparse, datetime as dt, json, os, re, subprocess, sys, urllib.parse
 
@@ -217,4 +217,4 @@ if __name__ == "__main__":
     if a.mode == "selftest": selftest()
     elif a.mode == "run" and a.day: run_day(a.day, [a.only] if a.only else None)
     elif a.mode == "run" and a.pending: run_pending(a.limit)
-    else: raise SystemExit("usage: copy.py run --day N | run --pending | selftest")
+    else: raise SystemExit("usage: platform_copy.py run --day N | run --pending | selftest")
