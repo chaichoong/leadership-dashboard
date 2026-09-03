@@ -27,6 +27,14 @@ describe('content-engine render', () => {
     expect(src).toMatch(/keep on \(\?:watching\|listening\)/);
   });
 
+  it('finds the episode record by NAME first, and by raw link only among Full Episode records (3 Sep 2026: a catch-up clip landed on the 2195 Short record)', () => {
+    const w = readFileSync(WATCH, 'utf8');
+    const name = w.indexOf('{Content Name}="%s"\' % episode_name(day)');
+    const raw = w.indexOf('FIND("%s", {Raw File Link}), {Content Type}="Long Form Video"');
+    expect(name).toBeGreaterThan(-1);
+    expect(raw).toBeGreaterThan(name);
+  });
+
   it('never writes copy from an empty transcript: under 50 characters of speech is B-roll', () => {
     const src = readFileSync(RENDER, 'utf8');
     expect(src).toMatch(/MIN_TRANSCRIPT_CHARS = 50/);
