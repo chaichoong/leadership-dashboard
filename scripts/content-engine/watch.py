@@ -31,6 +31,18 @@ import argparse, datetime as dt, json, os, re, shutil, subprocess, sys, time, ur
 
 RAW_ROOT = os.path.expanduser("~/Library/CloudStorage/GoogleDrive-kevin@runpreneur.org.uk/Shared drives/Marketing/Runpreneur/Runpreneur - Raw Video")
 LEDGER = os.path.expanduser("~/knowledge-os/logs/content-engine/ledger.json")
+AGENT_FILE = os.path.expanduser("~/.claude/agents/content-engine.md")   # the agent's definition; lessons land in it
+
+
+def kevin_lessons(path=None):
+    """The '## Lessons from Kevin' section of the agent file, for every Claude call in this lane.
+    A lesson written where nothing reads it is the failure the learning loop exists to fix."""
+    path = path or AGENT_FILE
+    if not os.path.exists(path): return ""
+    text = open(path).read()
+    m = re.search(r"^## Lessons from Kevin\s*\n(.*?)(?=^## |\Z)", text, re.S | re.M)
+    body = (m.group(1) if m else "").strip()
+    return ("Lessons Kevin has asked you to remember (apply every one):\n" + body) if body else ""
 WORK = os.path.expanduser("~/knowledge-os/logs/content-engine/work")
 PAT_FILE = os.path.expanduser("~/.config/od/airtable_pat")
 BASE = "appnqjDpqDniH3IRl"
