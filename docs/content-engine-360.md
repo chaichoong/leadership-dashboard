@@ -70,7 +70,7 @@ earlier iterations kept for comparison.
   sets the transcript and the status on the record.
 
 ## Copy step (R7 + R8, 3 Sep 2026)
-- `copy.py run --day N` fills the copy fields on the Full, LFMD and Short records (creating LFMD and
+- `platform_copy.py run --day N` fills the copy fields on the Full, LFMD and Short records (creating LFMD and
   Short if the render has not). Prompts are the Content Machine's own, byte for byte (`cm_prompts.py`).
 - Model route: `claude -p --system-prompt ... --model sonnet --tools ""` with the OAuth token, like the
   other headless agents. About 3 minutes and a few pence per record type.

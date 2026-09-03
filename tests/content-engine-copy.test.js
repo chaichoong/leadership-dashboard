@@ -1,4 +1,4 @@
-// Content Engine R7 + R8: platform copy (scripts/content-engine/copy.py) with the rules check.
+// Content Engine R7 + R8: platform copy (scripts/content-engine/platform_copy.py) with the rules check.
 // The prompts are the Content Machine app's own, lifted verbatim into cm_prompts.py; these tests
 // pin that the lift is intact (Kevin's voice rules, fixed hashtags, section labels) and that the
 // rules check still fixes em dashes and reports, never rewrites, everything else.
@@ -8,7 +8,7 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 
 const DIR = path.resolve(__dirname, '..', 'scripts', 'content-engine');
-const COPY = path.join(DIR, 'copy.py');
+const COPY = path.join(DIR, 'platform_copy.py');
 const PROMPTS = path.join(DIR, 'cm_prompts.py');
 
 describe('content-engine copy', () => {
