@@ -41,6 +41,11 @@ python3 scripts/content-engine/approval.py sync || exit 1
 python3 scripts/content-engine/approval.py run --pending --limit 2 || exit 1
 python3 scripts/content-engine/publish.py sync || exit 1
 python3 scripts/content-engine/publish.py run --limit 2 || exit 1
+# 8b. runpreneur sync: latest Strava run -> running total, Stripe donations -> total raised, the four
+#     numbers onto the website's custom values, the run renamed on Strava (SOP 62 / the app's Runpreneur
+#     Sync page). Holds harmlessly on Strava's quota (the app is on a -1 tier until Kevin upgrades it).
+python3 scripts/content-engine/runpreneur_sync.py run || echo "runpreneur sync: skipped this run (see above)"
 python3 scripts/content-engine/watch.py report
 python3 scripts/content-engine/approval.py report
 python3 scripts/content-engine/publish.py report
+python3 scripts/content-engine/runpreneur_sync.py report
