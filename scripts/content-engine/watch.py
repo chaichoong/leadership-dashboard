@@ -10,8 +10,11 @@ usually holds two or three clips (the 4 June 2026 batch: 94 clips over 46 days);
 Facts it relies on (measured 2-3 Sep 2026):
   - The Drive desktop client exposes each file's Drive id as the extended attribute
     `com.google.drivefs.item-id#S`, so the Raw File Link needs no API call.
-  - Streak day = 2225 on 4 Jul 2026 (from the transcript of VID_20260704_105737), so
-    day = 2225 + (clip date - 2026-07-04). Checked against 14 Jul (2235) and 8 Jun (2199).
+  - Kevin's running streak started on 1 June 2020 = day 1 (Kevin, 3 Sep 2026), so the
+    date-based day = (clip date - 2020-06-01) + 1: 4 Jul 2026 = 2225, which is what he says
+    in that clip. He occasionally misstates the day, and after a missed day (camera flat,
+    lightning) he records two episodes the next day, so render.py checks the spoken day
+    against the date and applies the catch-up rule (see resolve_episode).
   - Drive streams a cold file at roughly 1 GB per 15 minutes and stalled on 2 GB+ clips, so the
     pull step copies ONE clip at a time to a local work folder and checks the byte count.
   - This Mac has ~60 GB free, so local copies are deleted after the render (R2) has its outputs.
@@ -33,7 +36,7 @@ PAT_FILE = os.path.expanduser("~/.config/od/airtable_pat")
 BASE = "appnqjDpqDniH3IRl"
 TABLE = "tblEPzZdwBZeSXFRB"
 API = "https://api.airtable.com/v0/%s/%s" % (BASE, TABLE)
-STREAK_ANCHOR = (dt.date(2026, 7, 4), 2225)
+STREAK_START = dt.date(2020, 6, 1)      # day 1
 SKIP_DIRS = ("Image", "Footage to be filed", "Time Urgency")
 CLIP_RE = re.compile(r"^VID_(\d{4})(\d{2})(\d{2})_(\d{6})_00_(\d{3})\.insv$", re.I)
 DEFAULT_SINCE = dt.date(2026, 6, 4)     # the batch Kevin approved the spike on; older batches are the team's
@@ -50,7 +53,31 @@ def parse_clip(name):
 
 
 def streak_day(date):
-    return STREAK_ANCHOR[1] + (date - STREAK_ANCHOR[0]).days
+    return (date - STREAK_START).days + 1
+
+
+def resolve_episode(date_day, spoken_day, prev_day_has_talk=True):
+    """Which episode a talk clip is. Returns (day, reason).
+    - spoken == date day: normal.
+    - spoken == date day - 1 and the previous day has no talk clip: a catch-up (he missed a day and
+      recorded two the next day), so the clip IS the missed day's episode.
+    - no spoken day: trust the date.
+    - anything else: trust the date and say so; Kevin sometimes misspeaks the number."""
+    if spoken_day is None: return date_day, "no spoken day, date used"
+    if spoken_day == date_day: return date_day, "spoken day matches the date"
+    if spoken_day == date_day - 1 and not prev_day_has_talk: return spoken_day, "catch-up for the missed previous day"
+    return date_day, "spoken day %d disagrees with the date (%d); date used, flagged" % (spoken_day, date_day)
+
+
+SPOKEN_DAY_RE = re.compile(r"\bday,?\s*([0-9][0-9,]{2,5})\b", re.I)
+
+
+def spoken_day(transcript):
+    """First 'day 2,225' / 'day 2225' in the opening of the transcript, or None."""
+    m = SPOKEN_DAY_RE.search(transcript[:600])
+    if not m: return None
+    try: return int(m.group(1).replace(",", ""))
+    except ValueError: return None
 
 
 def drive_link(file_id):
@@ -222,8 +249,15 @@ def report():
 def selftest():
     assert parse_clip("VID_20260704_105737_00_064.insv") == (dt.date(2026, 7, 4), "105737", 64)
     assert parse_clip("VID_20260704_105737_00_064.lrv") is None and parse_clip("random.insv") is None
-    assert streak_day(dt.date(2026, 7, 4)) == 2225
+    assert streak_day(dt.date(2020, 6, 1)) == 1 and streak_day(dt.date(2026, 7, 4)) == 2225
     assert streak_day(dt.date(2026, 7, 14)) == 2235 and streak_day(dt.date(2026, 6, 8)) == 2199
+    assert spoken_day("So consecutive day, 2,225 of a diary of a Runpreneur") == 2225
+    assert spoken_day("So consecutive day 2199 of a diary") == 2199 and spoken_day("no number here") is None
+    assert resolve_episode(2225, 2225)[0] == 2225
+    assert resolve_episode(2225, 2224, prev_day_has_talk=False) == (2224, "catch-up for the missed previous day")
+    assert resolve_episode(2225, 2224, prev_day_has_talk=True)[0] == 2225
+    assert resolve_episode(2225, 2200)[0] == 2225 and "flagged" in resolve_episode(2225, 2200)[1]
+    assert resolve_episode(2225, None)[0] == 2225
     assert drive_link("abc") == "https://drive.google.com/file/d/abc/view"
     f = record_fields(2225, ["VID_a.insv", "VID_b.insv"], "abc", dt.date(2026, 7, 4))
     assert f["Content Name"] == "Episode 2225 Full Episode" and f["Record Status"] == "New Upload"
@@ -233,7 +267,7 @@ def selftest():
            "c": {"date": "2026-07-04", "seq": 1, "size": 4000, "status": "new"}}
     assert choose_next(led) == "b", "oldest date then smallest clip"
     assert choose_next({"x": {"date": "2026-01-01", "seq": 1, "status": "pulled"}}) is None
-    print(json.dumps({"checks": 10, "failed": []}))
+    print(json.dumps({"checks": 18, "failed": []}))
 
 
 if __name__ == "__main__":

@@ -11,8 +11,10 @@
 #   2. next          : pulls the oldest waiting clip to the local work folder, one per run,
 #                      never more than two waiting locally (disk is ~60 GB, clips 0.3-5 GB,
 #                      Drive streams cold files at ~1 GB per 15 min).
-#   3. report        : one line for the morning digest.
-# The render (R2) picks pulled clips up in its own step; this script never renders.
+#   3. render run    : ONE pulled clip through transcript -> episode number check -> 16:9 and
+#                      9:16 renders -> captions and banners -> edited Drive folder -> record
+#                      links (R2, R3, R5). About 10 minutes for a 40 s clip. Never publishes.
+#   4. report        : one line for the morning digest.
 set -uo pipefail
 REPO="/Users/kevinbrittain/Projects/leadership-dashboard"
 LOG_DIR="/Users/kevinbrittain/knowledge-os/logs/content-engine"
@@ -20,4 +22,5 @@ mkdir -p "$LOG_DIR"
 cd "$REPO" || exit 1
 python3 scripts/content-engine/watch.py scan --create || exit 1
 python3 scripts/content-engine/watch.py next || exit 1
+python3 scripts/content-engine/render.py run --limit 1 || exit 1
 python3 scripts/content-engine/watch.py report
