@@ -246,7 +246,10 @@ def build_card(post, mode):
     parts.append("Where it came from:\n" + post["source_line"])
     if post.get("bridge_text"): parts.append("Bridge post for your personal profile, 12:00 the same day (Runpreneur-framed, no ask):\n\n" + post["bridge_text"])
     issues = (post.get("issues") or []) + (post.get("bridge_issues") or [])
-    parts.append(("Rules check flagged: " + "; ".join(issues)) if issues else "Rules check: nothing flagged (UK English, no em dashes, no hashtags, no running words, every figure in the source, no ask before Friday).")
+    fixes = [i for i in issues if i in ("em dash replaced", "stock phrase removed")]; flags = [i for i in issues if i not in fixes]
+    line = "Rules check: " + ("FLAGGED for you: " + "; ".join(flags) if flags else "nothing flagged (UK English, no em dashes, no hashtags, no running words, every figure in the source, no ask before Friday)")
+    if fixes: line += ". Fixed automatically: " + "; ".join(fixes) + "."
+    parts.append(line)
     if not post.get("voice_loaded"): parts.append("Note: Kevin's voice profile was not readable when this was written (Drive offline), so the post was written from the rules alone.")
     if mode == "live":
         parts.append("%s scheduling this post to %s through GoHighLevel for %s 08:00%s. Nothing else." % (CLOSING, where, date.strftime("%A"), ", and the bridge post to your LinkedIn profile at 12:00" if post.get("bridge_text") else ""))
