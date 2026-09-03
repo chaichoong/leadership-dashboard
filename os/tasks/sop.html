@@ -101,7 +101,7 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
     <a href="../../index.html#sitemap" class="header-back">&#x2190; Back to Site Map</a>
     <h1>&#x2705; Tasks &amp; Projects</h1>
     <div class="subtitle">Standard Operating Procedure &mdash; Team task management, smart daily planning, calendar integration, and project tracking synced with Airtable</div>
-    <div class="version">Version 1.4 &bull; 19 Aug 2026 &bull; Owner: Kevin Brittain</div>
+    <div class="version">Version 1.5 &bull; 3 Sep 2026 &bull; Owner: Kevin Brittain</div>
   </div>
 </div>
 
@@ -265,10 +265,10 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
       </div>
       <div class="card">
         <div class="card-header">&#x1F4CB; Task List</div>
-        <p>A paginated table of all non-someday, non-Project-priority tasks. Each row shows task name, due date, status badge, assignee avatar, priority, time estimate, business, and recurring flag. Clicking any row expands it in-place to show description, metadata, attachments, a status dropdown, and an "Open in Airtable" link. Supports bulk selection.</p>
+        <p>A paginated table of every task that is not a Some Day task, whatever its priority. Each row shows task name, due date, status badge, assignee avatar, priority, time estimate, business, and recurring flag. Clicking any row expands it in-place to show description, metadata, attachments, a status dropdown, and an "Open in Airtable" link. Supports bulk selection.</p>
         <div class="info-box info">
           <span class="ib-icon">&#x2139;</span>
-          <span>The Task List deliberately excludes <strong>Project</strong>-priority tasks; those are managed in the Kanban view.</span>
+          <span><strong>Project</strong>-priority tasks show here as well. Kanban is a second way to see them laid out week by week, not the only place they appear. Completed tasks are hidden until you pick <strong>Completed (history)</strong> in the status filter, which fetches them separately.</span>
         </div>
       </div>
       <div class="card">
@@ -302,22 +302,16 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
     <div class="card">
       <div class="card-header">Task status flow</div>
       <div class="flow">
-        <div class="flow-step">
-          <span class="flow-icon">&#x1F4DD;</span>
-          To do
-          <span class="flow-sub">Backlog task</span>
+        <div class="flow-step primary">
+          <span class="flow-icon">&#x1F4C5;</span>
+          Upcoming
+          <span class="flow-sub">Due after today</span>
         </div>
         <div class="flow-arrow">&#x2192;</div>
         <div class="flow-step warning">
           <span class="flow-icon">&#x23F0;</span>
           Today
           <span class="flow-sub">Due today</span>
-        </div>
-        <div class="flow-arrow">&#x2192;</div>
-        <div class="flow-step primary">
-          <span class="flow-icon">&#x1F4C5;</span>
-          Upcoming
-          <span class="flow-sub">Scheduled</span>
         </div>
         <div class="flow-arrow">&#x2192;</div>
         <div class="flow-step purple">
@@ -335,6 +329,10 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
       <div class="info-box danger" style="margin-top:0.5rem;">
         <span class="ib-icon">&#x26A0;</span>
         <span><strong>Overdue</strong> is a derived state: a task is treated as Overdue when its due date is before today and its status is not "Completed". The Airtable field can also hold "Overdue" as an explicit value. Overdue tasks appear with a red left border in the Task List and with an "OVERDUE" label in the timeline.</span>
+      </div>
+      <div class="info-box warn" style="margin-top:0.5rem;">
+        <span class="ib-icon">&#x26A0;</span>
+        <span><strong>"To do" is a legacy status.</strong> The Airtable field still offers it and older records still hold it, but the page's five status choices are Today, Upcoming, Approval, Completed and Overdue. A task sitting on "To do" is shown with a "(legacy)" tag in the dropdown so you can see it, and picking anything else moves it off. There is no way to put a task back on "To do" from the page, and the status filter has no "To do" option, so use Airtable if you need to find those records.</span>
       </div>
     </div>
 
@@ -370,22 +368,22 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
             <td>Task completed by assignee but awaiting approval before final sign-off.</td>
           </tr>
           <tr>
-            <td><span class="label-badge lb-blue">To do</span></td>
-            <td>3</td>
-            <td>Info blue</td>
-            <td>Standard backlog task with no specific due date urgency.</td>
-          </tr>
-          <tr>
             <td><span class="label-badge lb-blue">Upcoming</span></td>
-            <td>4</td>
+            <td>3</td>
             <td>Accent green</td>
             <td>Scheduled for a future date.</td>
           </tr>
           <tr>
             <td><span class="label-badge lb-green">Completed</span></td>
-            <td>5 (lowest)</td>
+            <td>4 (lowest)</td>
             <td>Green</td>
-            <td>Task is done. Excluded from all live views (filtered out on fetch).</td>
+            <td>Task is done. Left out of the normal fetch, so it does not clutter the active list. Pick <strong>Completed (history)</strong> in the Task List status filter to bring completed tasks back: you get the 300 most recently completed, or any date range you set.</td>
+          </tr>
+          <tr>
+            <td><span class="label-badge lb-blue">To do</span> <em>(legacy)</em></td>
+            <td>None</td>
+            <td>Info blue</td>
+            <td>An old Airtable value the page no longer offers. It is displayed on any record that still holds it, but the page never sets it and cannot filter for it.</td>
           </tr>
         </tbody>
       </table>
@@ -404,31 +402,35 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
         </thead>
         <tbody>
           <tr>
-            <td><span class="label-badge lb-red">Urgent</span></td>
+            <td><span class="label-badge lb-blue">Project</span></td>
             <td>0</td>
+            <td>My Day, Task List, Kanban, Capacity, Recurring</td>
+            <td>Kanban shows Project tasks only, laid out week by week. They are not held back from the other views.</td>
+          </tr>
+          <tr>
+            <td><span class="label-badge lb-red">Urgent</span></td>
+            <td>1</td>
             <td>My Day, Task List, Capacity, Recurring</td>
             <td>Scheduled first in the daily planner. Deferred last in overcommitment suggestions.</td>
           </tr>
           <tr>
-            <td><span class="label-badge lb-blue">High</span></td>
-            <td>1</td>
-            <td>My Day, Task List, Capacity, Recurring</td>
-            <td>Second priority in planner scheduling.</td>
-          </tr>
-          <tr>
-            <td><span class="label-badge lb-blue">Project</span></td>
-            <td>2</td>
-            <td>Kanban only</td>
-            <td>Project tasks are excluded from Task List and My Day; shown only in the Kanban view.</td>
-          </tr>
-          <tr>
             <td><span class="label-badge lb-green">Not Urgent</span></td>
-            <td>3</td>
+            <td>2</td>
             <td>My Day, Task List, Capacity, Recurring</td>
             <td>Deferred first when the planner identifies an overcommitted day.</td>
           </tr>
+          <tr>
+            <td><span class="label-badge lb-blue">High</span> <em>(legacy)</em></td>
+            <td>1 (same as Urgent)</td>
+            <td>My Day, Task List, Capacity, Recurring</td>
+            <td>An old Airtable value. The page's three choices are Project, Urgent and Not Urgent. A task still on High keeps it and is shown with a "(legacy)" tag, but you cannot set High from the page and the priority filter has no High option.</td>
+          </tr>
         </tbody>
       </table>
+      <div class="info-box warn" style="margin-top:0.75rem;">
+        <span class="ib-icon">&#x26A0;</span>
+        <span>Both legacy values still exist in Airtable, so a routine writing straight to the table can create a task on "To do" or "High". Set those records to a current value the first time you touch them.</span>
+      </div>
     </div>
   </div>
 
@@ -438,10 +440,38 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
 
     <div class="card">
       <div class="card-header">Creating tasks</div>
-      <p>Tasks are created directly in <strong>Airtable</strong> (table <code>tblqB8b22hKBL4PF1</code>). The Task Manager does not provide a create-task form &mdash; it is a read and update interface only.</p>
-      <div class="info-box warn">
-        <span class="ib-icon">&#x26A0;</span>
-        <span>After creating a task in Airtable, click <strong>Refresh</strong> in the top bar to pull the latest data into the page.</span>
+      <p>You can create tasks on the page. There are four ways in, and every one writes straight to the Tasks table (<code>tblqB8b22hKBL4PF1</code>), so nothing needs re-typing in Airtable afterwards.</p>
+      <table class="label-table">
+        <thead>
+          <tr><th>Route</th><th>Where the button is</th><th>What it does</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>+ Add Task</strong></td>
+            <td>Top bar of the page, the My Day action row, and the right-hand end of the Task List filter bar</td>
+            <td>Creates the task immediately, then opens the <strong>Task Drawer</strong> with the title selected so you type straight over it. Fill in the rest inside the drawer.</td>
+          </tr>
+          <tr>
+            <td><strong>+ Task</strong> (floating button)</td>
+            <td>Bottom-right corner of every page in the platform</td>
+            <td>Jumps to the Tasks page and opens the same Task Drawer. Use it when a task occurs to you while you are somewhere else.</td>
+          </tr>
+          <tr>
+            <td><strong>+ Add Maintenance Task</strong></td>
+            <td>Contractor Tasks tab, above the job list</td>
+            <td>Opens a short form: task name, contractor, description, property and priority (Low or High). Creates a contractor job with the Maintenance Ticket box ticked.</td>
+          </tr>
+          <tr>
+            <td><strong>+ Create Project</strong></td>
+            <td>Projects tab, right-hand end of the Active / Completed / All row</td>
+            <td>Opens the Add Project form. Creates a project, not a task, so you have something to link tasks to.</td>
+          </tr>
+        </tbody>
+      </table>
+      <p style="margin-top:0.75rem;">A task made with <strong>+ Add Task</strong> starts with sensible defaults you can change in the drawer: due today, a 15-minute time estimate, priority Not Urgent, and the assignee set to whoever the team switcher is on, or to you. Status is worked out from the due date, so a due date in the future makes it Upcoming and today's date makes it Today. If you back out with <strong>Cancel</strong>, the placeholder task is deleted for you.</p>
+      <div class="info-box tip">
+        <span class="ib-icon">&#x2714;</span>
+        <span>Go to <strong>Airtable</strong> only for fields the drawer does not cover, such as attachments and less-used linked records. If you do create or edit a task there, click <strong>Refresh</strong> in the top bar to pull it into the page.</span>
       </div>
     </div>
 
@@ -449,7 +479,7 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
       <div class="card-header">Editing task status (in-page)</div>
       <p>Status can be changed without leaving the page in three ways:</p>
       <ol class="steps">
-        <li>In <strong>My Day / timeline</strong>: click the <strong>Status</strong> button on any task card to open a dropdown with all statuses (Today, Upcoming, To do, Approval, Completed, Overdue). Or click <strong>Complete</strong> to jump straight to Completed.</li>
+        <li>In <strong>My Day / timeline</strong>: click the <strong>Status</strong> button on any task card to open a dropdown with the five statuses (Today, Upcoming, Approval, Completed, Overdue). Or click <strong>Complete</strong> to jump straight to Completed.</li>
         <li>In <strong>Task List</strong>: expand a task row, then use the <strong>Change Status</strong> dropdown in the detail panel. The page re-renders immediately after the Airtable PATCH request succeeds.</li>
         <li>In <strong>My Day / card list</strong>: click the <strong>Status</strong> button on a card card, or click <strong>Done</strong> to mark Completed directly.</li>
       </ol>
@@ -819,14 +849,34 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
             <td>Free-text search. Matches against task name, assignee name, description, and business name (case-insensitive).</td>
           </tr>
           <tr>
-            <td>Status filter</td>
-            <td><code>filterStatus</code></td>
-            <td>All Statuses / Today / Overdue / Upcoming / To do / Approval. "Overdue" also matches tasks where <code>isOverdue(t)</code> is true, not just explicit Overdue status.</td>
+            <td>Hard deadline filter</td>
+            <td><code>filterHard</code></td>
+            <td>All Deadlines / Hard only / Soft only. "Hard only" leaves just the tasks with the Hard Deadline box ticked, which are the ones auto-reschedule never moves.</td>
+          </tr>
+          <tr>
+            <td>Time estimate filter</td>
+            <td><code>filterTimeEst</code></td>
+            <td>All Time Est. / No estimate (maintenance) / Has estimate. Contractor and maintenance jobs usually carry no estimate, so "No estimate" is a quick way to pull them out.</td>
           </tr>
           <tr>
             <td>Priority filter</td>
             <td><code>filterPriority</code></td>
-            <td>All Priorities / Urgent / High / Not Urgent. ("Project" is excluded from Task List entirely.)</td>
+            <td>All Priorities / Project / Urgent / Not Urgent. Legacy "High" is not offered here.</td>
+          </tr>
+          <tr>
+            <td>Project filter</td>
+            <td><code>filterProject</code></td>
+            <td>All Projects / No project / then one entry per active project. "No project" shows only tasks that are not linked to any project.</td>
+          </tr>
+          <tr>
+            <td>Owner type filter</td>
+            <td><code>filterOwnerType</code></td>
+            <td>Anyone (people + AI) / AI agents only / People only / Nobody (unassigned). This is the robot-or-person split, and it is the fastest way to see what the AI agents are holding.</td>
+          </tr>
+          <tr>
+            <td>Status filter</td>
+            <td><code>filterStatus</code></td>
+            <td>All Statuses (active) / Today / Overdue / Upcoming / Approval / Completed (history). "Overdue" also matches tasks whose due date has passed, not just the ones explicitly set to Overdue. "Completed (history)" swaps the list over to completed work and reveals a <strong>Completed between</strong> date pair; the <strong>Recent</strong> button next to it goes back to the 300 most recent.</td>
           </tr>
           <tr>
             <td>Business filter</td>
@@ -834,15 +884,23 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
             <td>All Businesses / Real Estate / Operations Director / Personal.</td>
           </tr>
           <tr>
-            <td>Sort</td>
-            <td><code>sortBy</code></td>
-            <td>Due Date (soonest), Due Date (latest), Priority, Status, Name (A-Z), Time Estimate (high-low).</td>
+            <td>Recurring filter</td>
+            <td><code>filterRecurring</code></td>
+            <td>All Recurring / Any recurring / Not recurring / then each frequency (Daily, Weekly, Fortnightly, Monthly, Quarterly, Bi-Annually, Annually).</td>
           </tr>
         </tbody>
       </table>
       <div class="info-box info" style="margin-top:0.75rem;">
         <span class="ib-icon">&#x2139;</span>
-        <span>The base filter before any user selection excludes tasks where <code>someDay</code> is true and tasks with priority "Project". The Airtable fetch itself excludes completed tasks and someday tasks using the formula <code>AND({Status}!="Completed",{Some Day}=FALSE())</code>.</span>
+        <span><strong>Filters stack.</strong> Each one you set narrows what the one before it left, so "AI agents only" plus "Overdue" gives you overdue agent work. <strong>Clear Filters</strong> at the end of the bar resets all eight, the search box and the completed date range in one click.</span>
+      </div>
+      <div class="info-box info" style="margin-top:0.5rem;">
+        <span class="ib-icon">&#x2139;</span>
+        <span>Before you pick anything, the list holds every task that is not a Some Day task and is not Completed. Project-priority tasks are included. The Airtable fetch leaves completed and Some Day tasks out with the formula <code>AND({Status}!="Completed",{Some Day}=FALSE())</code>, which is why choosing "Completed (history)" has to fetch them separately.</span>
+      </div>
+      <div class="info-box info" style="margin-top:0.5rem;">
+        <span class="ib-icon">&#x2139;</span>
+        <span><strong>Sorting is automatic, there is no sort dropdown.</strong> The list runs by due date, soonest first, with undated tasks at the bottom, and tasks sharing a due date are ordered Project, Urgent, then Not Urgent. In "Completed (history)" the order flips to most recently completed first.</span>
       </div>
     </div>
 
@@ -1054,6 +1112,11 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
           </tr>
         </thead>
         <tbody>
+          <tr>
+            <td><strong>1.5</strong></td>
+            <td>3 Sep 2026</td>
+            <td>Corrected against the live page after the daily drift sweep. Section 5 no longer claims the page has no create-task form: it now covers all four ways in (<strong>+ Add Task</strong> in three places, the floating <strong>+ Task</strong> button, <strong>+ Add Maintenance Task</strong> on the Contractor Tasks tab and <strong>+ Create Project</strong> on the Projects tab), with Airtable kept as the route for attachments and less-used fields (findings 20260819-drift-monitor-226 and 20260826-drift-monitor-366). <strong>"To do"</strong> and <strong>"High"</strong> are marked as legacy Airtable values the page displays but never sets, and the status and priority sort orders now match the page (finding 20260819-drift-monitor-223). The Task List does <strong>not</strong> exclude Project-priority tasks, and Completed work is reachable through the status filter's history mode, so sections 3, 4 and 10 were corrected (finding 20260819-drift-monitor-224). Section 10 now lists all <strong>eight</strong> filters, including Project, Recurring, Hard deadline, Time estimate and Owner type, notes that filters stack, and drops the sort dropdown that does not exist (finding 20260819-drift-monitor-228).</td>
+          </tr>
           <tr>
             <td><strong>1.4</strong></td>
             <td>19 Aug 2026</td>

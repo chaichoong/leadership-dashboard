@@ -165,6 +165,68 @@ print(json.dumps([m.company_keys(n) for n in json.loads(sys.argv[1])]))
   });
 });
 
+// 20260814-prospect-daily-run-142. 'Palais' was stored on 13 Aug 2026 with its
+// address inside the Company field and re-found the next day with the same
+// address written 'St' instead of 'Street'. Every key on both sides carried the
+// address, so none of them matched, and the bare stem 'palais' was dropped as a
+// single-token alias. The name gate waved a known duplicate through; only the
+// email axis caught it.
+describe('company_keys — an address is not part of the name', () => {
+  async function all(names) {
+    const py = `
+import importlib.util, json, sys
+spec = importlib.util.spec_from_file_location("pd", ${JSON.stringify(SCRIPT)})
+m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+print(json.dumps([m.company_keys(n) for n in json.loads(sys.argv[1])]))
+`;
+    const { stdout } = await run('python3', ['-c', py, JSON.stringify(names)],
+      { encoding: 'utf8', timeout: 30000 });
+    return JSON.parse(stdout.trim().split('\n').pop());
+  }
+  const overlaps = (a, b) => a.some((k) => b.includes(k));
+
+  it('matches the same company written with two spellings of one address', async () => {
+    const [a, b] = await all([
+      'Palais (8-10 Rhoda Street, London E2 7EF)',
+      'Palais (8-10 Rhoda St, London E2 7EF)',
+    ]);
+    expect(a[0], 'the whole-name keys genuinely differ').not.toBe(b[0]);
+    expect(overlaps(a, b), 'the address-stripped key is missing').toBe(true);
+  });
+
+  it('keeps the single-token name when the bracket is an address', async () => {
+    const [keys] = await all(['Palais (8-10 Rhoda Street, London E2 7EF)']);
+    expect(keys).toContain('palais');
+  });
+
+  // CONTROL: the exception must not swallow the single-token rule. A trading
+  // name in brackets is still a trading name, and 'Smith Group' must not
+  // collapse to 'smith'.
+  it('does not strip a bracket that is a trading name', async () => {
+    const [keys] = await all(['Abbey Antiques & Furnishings Ltd (The Abbey Group)']);
+    expect(keys).toContain('abbey group');
+    expect(keys).not.toContain('abbey antiques furnishings ltd');
+  });
+
+  it('a street word with no number is not an address', async () => {
+    // 'The Park Group' is a company, not a location.
+    const [keys] = await all(['Hillside Ltd (The Park Group)']);
+    expect(keys).not.toContain('hillside');
+  });
+
+  it('two different companies at the same address never match', async () => {
+    // The other half of the same rule. Indexing the address as an alias would
+    // fold every business at one registered office into one prospect.
+    const [a, b] = await all([
+      'Palais (8-10 Rhoda Street, London E2 7EF)',
+      'Bellweather (8-10 Rhoda Street, London E2 7EF)',
+    ]);
+    expect(a).toContain('palais');
+    expect(b).toContain('bellweather');
+    expect(overlaps(a, b), 'they share an address-only key').toBe(false);
+  });
+});
+
 describe('ch_numbers', () => {
   it('finds a number stored only in free-text Notes', async () => {
     expect(await chNumbers('Spoke to owner. Co no 09876543, VAT pending.'))

@@ -176,7 +176,7 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
       <a href="#operational"><span class="toc-num">8</span> 31-Day Operational Metrics</a>
       <a href="#cashflow"><span class="toc-num">9</span> 31-Day Cash Flow Forecast</a>
       <a href="#ai-commentary"><span class="toc-num">10</span> AI Commentary &amp; Credit Card Plan</a>
-      <a href="#balance-calc"><span class="toc-num">11</span> Balance Calculator</a>
+      <a href="#balance-calc"><span class="toc-num">11</span> Forecast What-If Tick Boxes</a>
       <a href="#reconciliation"><span class="toc-num">12</span> Reconciliation Matching Logic</a>
       <a href="#smart-refresh"><span class="toc-num">13</span> Smart Refresh System</a>
       <a href="#apps-script"><span class="toc-num">14</span> Google Apps Script Setup</a>
@@ -197,7 +197,7 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
       <div class="arch-box highlight">
         <div class="arch-icon">&#x1F4CA;</div>
         <div class="arch-title">Airtable</div>
-        <div class="arch-desc">9 tables via REST API + PAT</div>
+        <div class="arch-desc">Tables read and written via REST API + PAT</div>
       </div>
       <div class="arch-connector">&#x27A1;&#xFE0F;</div>
       <div class="arch-box highlight" style="border-color:var(--accent);background:var(--accent-soft)">
@@ -213,6 +213,22 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
       </div>
     </div>
     <p>On load, the dashboard fetches 9 Airtable tables in parallel: <strong>Accounts</strong>, <strong>Fixed Costs</strong>, <strong>Tenancies</strong>, <strong>Transactions</strong>, <strong>Rental Units</strong>, <strong>Tenants</strong>, <strong>Categories</strong>, <strong>Sub-Categories</strong>, and <strong>Businesses</strong>. It also fires non-blocking fetches for invoices, Gmail sync, and Fintable status.</p>
+    <p>Those nine are not the whole list. The same load also reads <strong>Strategic Projects</strong> (<code>tblHrpTMd5LNYn8v1</code>, <code>js/dashboard.js:185</code>), <strong>Tasks</strong> and <strong>Prospects</strong> for the KPI compute (<code>:487</code>, <code>:458</code>), <strong>Team Members</strong> and <strong>AI Agents</strong> for the agent cards, and <strong>AI Recon Audit</strong> for the accuracy score. Opening the page also <strong>writes</strong> to Airtable, in two places: the Strategic KPI automation below, and the recon audit log in section 6.</p>
+  </div>
+
+  <div class="card">
+    <div class="card-header">&#x1F9EE; Strategic KPI Automation (this writes to Airtable)</div>
+    <p>Some Strategic Projects carry their own KPI compute code. It is written by hand and stored in the <strong>KPI Compute Code</strong> field on the project record in Airtable. Opening the dashboard runs that code in your browser and saves the answer back to Airtable. The page is not read-only.</p>
+    <ol class="steps">
+      <li><code>loadDashboard()</code> calls <code>loadStrategicKpis()</code> as its first action (<code>js/dashboard.js:929</code>), which reads the Strategic Projects table (<code>:110</code>, <code>:185</code>).</li>
+      <li>Every open project that has compute code goes to <code>runAutomatedKpis()</code> (<code>:514</code>). Projects with a close date are skipped, so a closed quarter cannot drift away from its snapshot (<code>:519</code>).</li>
+      <li>The code runs in the browser through <code>new Function()</code> (<code>:429</code>). A safety check blocks obvious dangerous wording first (<code>:410</code>), and the note beside it in the code is honest that this is a speed bump rather than a wall. Only put compute code in that field if you wrote it yourself.</li>
+      <li>The answer is saved straight back onto the project record (<code>:611-617</code>): <strong>KPI Current</strong>, <strong>KPI Last Updated</strong>, <strong>KPI Last Updated By</strong>, and a <strong>KPI Detail JSON</strong> blob holding the workings, capped at about 95KB.</li>
+    </ol>
+    <div class="info-box warn">
+      <span class="ib-icon">&#x26A0;&#xFE0F;</span>
+      <div><strong>Every load and every auto-refresh writes.</strong> The 15-minute smart refresh calls <code>loadDashboard()</code> again, so the write repeats all day while the tab is open. The save is fire-and-forget: if Airtable rejects it, the only sign is a line in the browser console (<code>:618</code>), and nothing on screen tells you it failed. If the compute itself fails, the project row shows a red <strong>Compute failed</strong> badge (<code>:709</code>) with the reason on hover.</div>
+    </div>
   </div>
 </div>
 
@@ -516,17 +532,34 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
 
   <div class="card">
     <div class="card-header">&#x1F4CA; Forecast Table Columns</div>
+    <p>The table has seven columns. There is no Net column (<code>js/cashflow.js:719-726</code>).</p>
     <table class="label-table">
       <thead><tr><th>Column</th><th>Description</th></tr></thead>
       <tbody>
         <tr><td><strong>Date</strong></td><td>Calendar date for the row</td></tr>
-        <tr><td><strong>Opening</strong></td><td>Balance at start of day (previous day&rsquo;s closing)</td></tr>
-        <tr><td><strong>In</strong></td><td>Total projected inflows (rent payments)</td></tr>
-        <tr><td><strong>Out</strong></td><td>Total projected outflows (fixed costs)</td></tr>
-        <tr><td><strong>Net</strong></td><td>In minus Out for the day</td></tr>
-        <tr><td><strong>Closing</strong></td><td>Opening + Net; carries forward as next day&rsquo;s Opening</td></tr>
+        <tr><td><strong>Opening</strong></td><td>Balance at the start of the day, with any earlier recommended withdrawals already taken off</td></tr>
+        <tr><td><strong>In</strong></td><td>Money in for the day, leaving out anything already reconciled or unticked</td></tr>
+        <tr><td><strong>Out</strong></td><td>Money out for the day, including the weekly commitments described below</td></tr>
+        <tr><td><strong>Closing</strong></td><td>Opening + In &minus; Out &minus; Withdraw. Carries forward as the next day&rsquo;s Opening</td></tr>
+        <tr><td><strong>Withdraw</strong></td><td>Cash the withdrawal advisor says is safe to take that day</td></tr>
+        <tr><td><strong>Account</strong></td><td>Which accounts the day&rsquo;s items sit on</td></tr>
       </tbody>
     </table>
+    <p>All the money columns are read from the same worked-through series (<code>waProjected</code>, <code>js/cashflow.js:712-714</code>), not from the raw Airtable rows, so each row reconciles exactly: <strong>Opening + In &minus; Out &minus; Withdraw = Closing</strong>. The table prints that same line under its totals row (<code>:770</code>).</p>
+  </div>
+
+  <div class="card">
+    <div class="card-header">&#x1F4B7; Withdrawal Advisor &amp; Weekly Commitments</div>
+    <p>The forecast is not a plain projection of Airtable data. Two things are applied on top of it before the table is drawn.</p>
+    <ol class="steps">
+      <li><strong>Weekly commitments.</strong> Wages of &pound;330 and a Top-up of &pound;140 are added to the Out column every Friday by default (<code>js/cashflow.js:459-465</code>, applied at <code>:491</code>). That is &pound;470 a week, roughly &pound;2,000 a month, and it is <strong>not</strong> held in Airtable. It lives in this browser only, under the <code>localStorage</code> key <code>_wa_settings</code> (<code>:1192</code>). Edit the amounts and days in the controls above the table. A different browser, or a cleared cache, falls back to those defaults.</li>
+      <li><strong>Recommended withdrawals.</strong> The advisor walks the 31 days and, at least three days apart, marks an amount that is safe to take out, in &pound;50 steps (<code>:517-552</code>). It only takes what still leaves the safety floor intact on that day and on every day after it. Once marked, the withdrawal is subtracted from every later Opening and Closing (<code>:546-549</code>), so the Closing balance you are reading already assumes you took that cash. The green <strong>Safe to withdraw (31-day cycle)</strong> figure above the table is the total of them (<code>:629</code>).</li>
+    </ol>
+    <p><strong>Where the safety floor comes from:</strong> the largest single expected payment in, times 30%, scaled by how late payments have actually been running (<code>analysePaymentLag()</code>, <code>:502-508</code>), rounded up to the nearest &pound;50 and never below &pound;500. You can type over it in the floor box, which is also stored in <code>_wa_settings</code>.</p>
+    <div class="info-box info">
+      <span class="ib-icon">&#x2139;&#xFE0F;</span>
+      <div><strong>Why the Opening Balance card and row 1 can disagree.</strong> The Opening Balance KPI card always shows the live Airtable figure (<code>:429</code>), split between Santander and TNT Zempler when the two parts genuinely add up to the total (<code>:519-524</code>). Row 1 of the table shows the balance box above the table, which you can type over (<code>:456</code>). Once edited, your figure drives the whole forecast. A mismatch warning only appears when the two are more than &pound;200 apart (<code>:579</code>), so a smaller gap passes with nothing said.</div>
+    </div>
   </div>
 </div>
 
@@ -547,49 +580,51 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
   </div>
 
   <div class="card">
-    <div class="card-header">&#x1F4B3; Strategic Credit Card Repayment Plan</div>
-    <p>Below the AI commentary, the dashboard calculates a <strong>weekly Friday-based credit card repayment schedule</strong>. Logic is computed inline in <code>renderDashboard()</code> via the <code>ccRepaymentPlan</code> constant:</p>
+    <div class="card-header">&#x1F4B3; Credit Card Payment Strategy</div>
+    <p>Below the AI commentary the dashboard works out how to split one payment across the cards. It is a single-payment allocator, not a weekly schedule. There is no Friday timetable and no &pound;750 buffer any more. The card list is built inline in <code>renderDashboard()</code> (<code>js/dashboard.js:1950-1990</code>) and the split is redrawn by <code>recalcCCStrategy()</code> (<code>:2046</code>).</p>
     <table class="label-table">
-      <thead><tr><th>Card</th><th>Balance Logic</th><th>Payment Due Day</th><th>Min Payment</th></tr></thead>
+      <thead><tr><th>Card</th><th>What counts as owed</th><th>Payment due day</th></tr></thead>
       <tbody>
-        <tr><td><strong>American Express</strong></td><td>Positive balance = owed to bank</td><td>28th</td><td>2% of balance or &pound;25, whichever is greater</td></tr>
-        <tr><td><strong>Santander Credit Card</strong></td><td>&pound;5,500 limit minus available balance = owed</td><td>14th</td><td>Same formula</td></tr>
-        <tr><td><strong>Lloyds Credit Card</strong></td><td>Absolute value of negative balance = owed</td><td>21st</td><td>Same formula</td></tr>
+        <tr><td><strong>American Express</strong></td><td>The balance if it is positive, otherwise nothing (<code>:1958</code>)</td><td>28th</td></tr>
+        <tr><td><strong>Santander Credit Card</strong></td><td>The balance if it is positive, otherwise nothing (<code>:1959</code>). The old &pound;5,500 limit-minus-available sum is gone.</td><td>14th</td></tr>
+        <tr><td><strong>Lloyds Credit Card</strong></td><td>The size of the balance ignoring the minus sign (<code>:1957</code>)</td><td>21st</td></tr>
       </tbody>
     </table>
-    <h4 style="margin-top:1rem">Payment Algorithm</h4>
+    <p>Any card with nothing owed drops out of the list entirely (<code>:1966</code>).</p>
+    <h4 style="margin-top:1rem">How the split is worked out</h4>
     <ol class="steps">
-      <li>Find all <strong>Fridays</strong> within the 31-day forecast window.</li>
-      <li>For each Friday, estimate account balance using the cash flow forecast rows (<code>cashFlowRows</code>), minus already-committed CC payments (<code>cumulativePaid</code>).</li>
-      <li>Apply a <strong>7-day look-ahead</strong>: find the lowest projected balance in the next 7 days. Use whichever is lower &mdash; today&rsquo;s balance or the look-ahead minimum.</li>
-      <li>Subtract the <strong>&pound;750 safety buffer</strong> (<code>MIN_BUFFER = 750</code>) to get the available payment amount.</li>
-      <li><strong>Priority 1:</strong> Cover minimum payments due before the next Friday (flagged with due date badge).</li>
-      <li><strong>Priority 2:</strong> Allocate remaining surplus to the highest-balance card first.</li>
-      <li>If available funds are &lt;&pound;10, output &ldquo;No payment this week&rdquo; with a plain-English reason.</li>
+      <li>The Payment box starts at the low operating cushion figure, rounded down (<code>:1991</code>). You can type any amount over it and the split redraws as you type.</li>
+      <li>Cards are sorted by estimated APR, dearest first (<code>:2049</code>). This is the avalanche method: pay the minimum on everything, then put all the rest against the dearest card.</li>
+      <li>Every card gets its minimum first (<code>:2054</code>). If your figure is below the total of the minimums, the total of the minimums is used instead (<code>:2052</code>).</li>
+      <li>Whatever is left goes to the dearest card until it is cleared, then to the next (<code>:2055-2059</code>).</li>
+      <li>The summary line estimates next month&rsquo;s interest on whatever is still owed after the payment (<code>:2077-2085</code>).</li>
     </ol>
+    <div class="info-box danger">
+      <span class="ib-icon">&#x26A0;&#xFE0F;</span>
+      <div><strong>The APR is a guess from your own transactions, not a rate from the bank.</strong> The dashboard reads the last three months of transactions on each card and picks out any whose description contains the word INTEREST (<code>:1978-1988</code>). It averages those, divides by the balance and multiplies by twelve. If it finds none, the card shows <strong>0% (no interest detected)</strong> and sorts last, even if it is really the dearest card you hold. The minimum payment follows the same fork: 1% of the balance plus the average interest where interest was found, otherwise a flat 2.5% of the balance, and never less than &pound;25 (<code>:1989</code>).</div>
+    </div>
     <div class="info-box info">
       <span class="ib-icon">&#x1F4A1;</span>
-      <div>Each payment week shows: payment date, per-card amounts, balance on that date, payment amount, balance after payment, and the plain-English reason for the recommended amount. After 31 days, any remaining debt is listed.</div>
+      <div><strong>&ldquo;Months to clear&rdquo; is a best case.</strong> Under the cash flow forecast, the Credit Card Balances panel divides each balance by a monthly surplus (<code>js/cashflow.js:914-935</code>). That surplus is the best-case 31-day net change, which counts fixed costs only. Maintenance, wages, the CFV reserve and any cash you withdraw are not in it, and it assumes the same 31 days repeat every month. Treat the number of months as the floor, not the plan.</div>
     </div>
   </div>
 </div>
 
-<!-- ============ 11. BALANCE CALCULATOR ============ -->
+<!-- ============ 11. FORECAST WHAT-IF TICK BOXES ============ -->
 <div class="section" id="balance-calc">
-  <h2 class="section-title"><span class="icon">&#x1F527;</span> 11. Balance Calculator</h2>
+  <h2 class="section-title"><span class="icon">&#x1F527;</span> 11. Forecast What-If Tick Boxes</h2>
   <div class="card">
-    <div class="card-header">&#x1F9EE; Interactive What-If Tool</div>
-    <p>The Balance Calculator is a what-if tool for modelling different scenarios by including or excluding individual forecast items. It is populated by <code>populateCalcFromForecast(cashFlowRows)</code> after the cash flow forecast is built, and the opening balance is pre-filled from the live Airtable balance.</p>
+    <div class="card-header">&#x1F9EE; Including and excluding forecast items</div>
+    <p>The standalone Balance Calculator has gone, along with its own opening balance box and its Select All, Deselect All, Inflows Only and Outflows Only buttons. The what-if tool now sits inside the cash flow forecast itself: open any day in the table and every expected item has a tick box beside it (<code>js/cashflow.js:670-673</code> for money in, <code>:681-684</code> for money out).</p>
     <ol class="steps">
-      <li>Access the Balance Calculator from the dashboard toolbar (wrench icon or calculator section).</li>
-      <li>Each projected inflow and outflow has a <strong>checkbox</strong>. Ticked = included; unticked = excluded from the running total.</li>
-      <li>Use filter buttons: <strong>Select All</strong>, <strong>Deselect All</strong>, <strong>Inflows Only</strong>, or <strong>Outflows Only</strong> to quickly adjust selections.</li>
-      <li>The closing balance updates in real time as you toggle items.</li>
-      <li>The opening balance field (<code>id="calcOpeningBal"</code>) is pre-filled from the live Airtable balance but can be overridden. Once edited by the user (<code>dataset.userEdited</code> flag), auto-fill is disabled for that session.</li>
+      <li>Ticked means the item is still expected and counts towards the forecast. Untick it to take it out.</li>
+      <li>Unticking redraws the table, the totals and the chart straight away (<code>toggleCFExclusion()</code>, <code>:1148</code>).</li>
+      <li>Items already reconciled in Airtable are shown struck through with a <strong>Reconciled</strong> badge and have no tick box. They are already in the bank, so there is nothing to model.</li>
+      <li>The amber dashed <strong>What-If</strong> line on the chart shows the balance with your unticked items removed, and also takes off the wages budget spread evenly across the 31 days (<code>buildWhatIfLine()</code>, <code>:1159-1179</code>). It only appears once something is unticked.</li>
     </ol>
-    <div class="info-box info">
-      <span class="ib-icon">&#x1F4BE;</span>
-      <div>Calculator state is stored in <code>sessionStorage</code> and persists during the browser session. It resets on each new full page load.</div>
+    <div class="info-box danger">
+      <span class="ib-icon">&#x26A0;&#xFE0F;</span>
+      <div><strong>Unticks survive closing the browser.</strong> They are saved in <code>localStorage</code> under the key <code>_cf_exclusions</code> (<code>:1131</code>, <code>:1155</code>), not in <code>sessionStorage</code>, so a reload does not clear them. An untick is only dropped once its date has passed (<code>:1137-1140</code>). Anything you untick today keeps real income or real costs out of the forecast, quietly, for as long as its date is still in the future. If the forecast looks too good or too bad, open the days and look for unticked rows, or clear the <code>_cf_exclusions</code> key.</div>
     </div>
   </div>
 </div>
@@ -613,14 +648,17 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
   </div>
   <div class="grid-2">
     <div class="wf-card">
-      <div class="wf-header"><span class="wf-num" style="background:var(--success)">&#x2191;</span><h3>Inflow Matching (3-Tier)</h3><span class="wf-tag">Income</span></div>
+      <div class="wf-header"><span class="wf-num" style="background:var(--success)">&#x2191;</span><h3>Inflow Matching</h3><span class="wf-tag">Income</span></div>
       <div class="wf-body">
-        <h4>Tier 1: Strong Match</h4>
-        <p>Two or more keywords from the tenant name/reference appear in the transaction description. Highest confidence.</p>
-        <h4>Tier 2: Good Match</h4>
-        <p>One keyword from tenant name + amount within <strong>30%</strong> of expected rent.</p>
-        <h4>Tier 3: Fallback Match</h4>
-        <p>Transaction amount <strong>exactly matches</strong> expected rent (to the penny). Weakest signal — used only when no keyword match found.</p>
+        <h4>Priority 1: Linked tenancy</h4>
+        <p>If the transaction&rsquo;s Tenancy link points at this tenancy, that settles it and nothing else is checked. A transaction linked to a <strong>different</strong> tenancy is barred from clearing this one (<code>js/cashflow.js:132-142</code>, <code>:155</code>).</p>
+        <h4>Priority 2: Strong match</h4>
+        <p>Two or more keywords from the tenant name or reference appear in the transaction description. Highest confidence.</p>
+        <h4>Priority 2: Solid match</h4>
+        <p>One keyword plus an amount within <strong>5p</strong> of the expected rent.</p>
+        <h4>Priority 2: Acceptable match</h4>
+        <p>One keyword plus an amount within <strong>30%</strong> of expected rent, which covers letting agent deductions.</p>
+        <p style="margin-top:0.75rem"><strong>There is no amount-only match any more.</strong> Every path needs at least one word in common (<code>:161-174</code>). A matching amount on its own is not evidence the same tenant paid: several tenancies share the same rent figure, and matching on amount was clearing the wrong tenancy&rsquo;s forecast (<code>:128-131</code>, <code>:175</code>).</p>
       </div>
     </div>
     <div class="wf-card">
@@ -653,7 +691,7 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
     </table>
     <div class="info-box info">
       <span class="ib-icon">&#x1F6E1;&#xFE0F;</span>
-      <div><strong>Non-disruptive:</strong> If you are actively editing the Balance Calculator, reviewing invoices, or typing comments, the refresh defers. It waits until you have been idle for 15 minutes, then fires <code>loadDashboard()</code>.</div>
+      <div><strong>Non-disruptive:</strong> If you are actively ticking items in the cash flow forecast, reviewing invoices, or typing comments, the refresh defers. It waits until you have been idle for 15 minutes, then fires <code>loadDashboard()</code>.</div>
     </div>
   </div>
 </div>
@@ -705,7 +743,7 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
 
     <div class="ts-item">
       <div class="ts-problem">A reconciled payment still appears in the forecast</div>
-      <div class="ts-solution">The matching engine uses a &plusmn;5-day window. If the payment landed more than 5 days early or late relative to the expected due date, it won&rsquo;t match. Check the transaction date in Airtable&rsquo;s Transactions table.</div>
+      <div class="ts-solution">Three things can stop it clearing. <strong>Date:</strong> the matching engine uses a &plusmn;5-day window, so a payment more than 5 days early or late will not match. <strong>Wording:</strong> there must be at least one word in common between the tenant name or reference and the transaction description. A matching amount on its own is never enough (<code>js/cashflow.js:161-174</code>). <strong>Links:</strong> if the transaction is linked to a different tenancy in Airtable, it is barred from clearing this one (<code>:155</code>). Check the date, the description and the Tenancy link on the transaction.</div>
     </div>
 
     <div class="ts-item">
@@ -752,6 +790,11 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
     <table class="label-table">
       <thead><tr><th>Version</th><th>Date</th><th>Changes</th></tr></thead>
       <tbody>
+        <tr>
+          <td><strong>2.94</strong></td>
+          <td>3 Sep 2026</td>
+          <td>Documentation-drift corrections. Added Strategic KPI Automation (the dashboard runs compute code held in Airtable and writes KPI values back on every load and every refresh) and corrected the list of tables touched. Rewrote the credit card section against the live avalanche allocator, including the estimated APR and the best-case &ldquo;months to clear&rdquo;. Replaced the forecast column table with the seven real columns and added the Withdrawal Advisor and weekly commitments. Replaced the retired Balance Calculator with the in-row what-if tick boxes and corrected the storage claim (localStorage, not sessionStorage). Removed the retired amount-only inflow match and added the linked-tenancy priority.</td>
+        </tr>
         <tr>
           <td><strong>2.93</strong></td>
           <td>28 Aug 2026</td>

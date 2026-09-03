@@ -1,0 +1,1316 @@
+{
+  "generatedAt": "2026-09-02T08:20:06.000Z",
+  "cap": null,
+  "worklist": [
+    {
+      "id": "recYajL3GXd92SY1L",
+      "name": "INBOUND: Daily transfer summary for SOCIAL HOUSING HOLDINGS LIMITED",
+      "description": "Subject: Daily transfer summary for SOCIAL HOUSING HOLDINGS LIMITED From: Revolut Business [n***@***.com](mailto:n***@***.com) Stranded in label 12 without an active task. Check what is being asked and draft appropriate response in Kevin voice.\n",
+      "notes": "[01 Sep 2026 \u2014 agent] Lesson applied (26 Aug 2026): Social Housing Holdings is in liquidation, no action needed on Revolut daily transfer notifications. Task does not need Kevin's approval - propose close.",
+      "status": "Today",
+      "dueDate": "2026-08-29",
+      "priority": "High",
+      "urgencyScore": 0,
+      "outcome": "",
+      "feedback": "",
+      "agentOutput": "",
+      "taskType": "Correspondence",
+      "teamMemberIds": [
+        "recJ8J8idWE8d97tH"
+      ],
+      "sentForApprovalByIds": [],
+      "approverEmail": "kevin@runpreneur.org.uk",
+      "agentId": "recJ8J8idWE8d97tH",
+      "agentName": "AI Inbound Comms Response",
+      "localAgent": "inbound-comms-response",
+      "agentRole": "worker",
+      "inboundTask": true,
+      "inboundSourceType": "Gmail",
+      "inboundSender": "n***@***.com",
+      "attachments": [],
+      "tier1": true,
+      "matchedPattern": "social housing holdings",
+      "creditor": false,
+      "tier2Correspondence": false,
+      "kind": "new",
+      "priorIntent": false
+    }
+  ],
+  "reserve": [],
+  "routingNeeded": [
+    {
+      "id": "recD86BeDFZzbdRME",
+      "name": "Warm lane second touch: approve 18 close-the-loop emails (one pass)",
+      "description": "**THE ASK: approve 18 close-the-loop emails to the warm lane in one pass. Nothing has been sent. Approving this task does NOT send: it tells the writer to prepare the individual send tasks.**\n\n**Three things to decide before you approve. Reply on the task if you want any of them changed.**\n\n1. **Sender.** All 18 are set to send from kevinbrittain@gmail.com, the address the first touch actually went from. The OD domain's SPF record lists Hostinger only, not Google, so mail sent from kevin@operationsdirector.co.uk through the Google alias may land in spam. On a close-the-loop email that has to be seen, known-good delivery beats the nicer address. Say the word and I will switch it.\n\n1. **No booking link on any of the 18.** No prospect row shows anyone asking for one, so none is included. Every message ends with a direct question instead.\n\n1. **No postal address in the footer.** PECR wants a postal address on marketing email. I could not find the Operations Director Limited registered address in the brain and I will not invent one. Give me the address and I will add it, or accept the position that these are 1:1 replies to people who gave their details by booking a call, which is soft opt-in.\n\n---\n\n## What I actually found (checked today, 25 Aug 2026)\n\n- **Zero replies.** Gmail search across all 15 sent addresses, last 14 days: nothing back.\n\n- **Neil Gillan bounced.** Google returned \"Address not found\" on 20 Aug: the domain bishopsconstruction.co.uk does not exist. The send ledger records it as sent, so the bounce was invisible. He has NO draft here and cannot be emailed until someone finds a working address.\n\n- **Four people never got the first email at all**, confirmed again today in the send ledger: Agnese Daverio, Jack Duddy, Saqib Javaid and Tory Bloom have an intent row and no send row. Their drafts below are FIRST touches and say nothing about a previous email, because there wasn't one.\n\n- **Real total delivered: 14, not 19.** 14 second touches plus 4 first touches equals 18 drafts.\n\n- Andrew Bizzell is rejected and is not in this batch.\n\n---\n\n## SECOND TOUCH (14) - these people got the 20 Aug email and did not reply\n\n### Luke Field\nTO: l***@***.com\nFROM: kevinbrittain@gmail.com\nSUBJECT: shall I close your file, Luke?\n\nHi Luke,\n\nI emailed last week and heard nothing, so this is me closing the loop.\nWe never did get the call rearranged after parents' evening got in the way.\nDo you still want 30 minutes, or shall I close your file?\n\nBest regards,\nKevin\n\nKevin Brittain, Operations Director\noperationsdirector.co.uk\n\n### Edson Diaz-Fuentes\nTO: e***@***.com\nFROM: kevinbrittain@gmail.com\nSUBJECT: one straight question\n\nHi Edson,\n\nI wrote last week and got no reply, so one straight question before I stop.\nYou booked a call, we never spoke, and your file has sat open ever since.\nDo you want to speak, or shall I close it?\n\nBest regards,\nKevin\n\nKevin Brittain, Operations Director\noperationsdirector.co.uk\n\n### Adesina Okuboyejo\nTO: a***@***.com\nFROM: kevinbrittain@gmail.com\nSUBJECT: it's Kevin, from the call you booked\n\nHi Adesina,\n\nWhen we chased you last year you asked who this was, which was fair enough.\nI'm Kevin. You booked a call with Operations Director, and I emailed again last week.\nReply and I'll find you 30 minutes, or say the word and I'll close your file.\n\nBest regards,\nKevin\n\nKevin Brittain, Operations Director\noperationsdirector.co.uk\n\n### Darren Wolff\nTO: d***@***.com\nFROM: kevinbrittain@gmail.com\nSUBJECT: the Solaris proposal\n\nHi Darren,\n\nLast time we spoke you were reviewing the proposal for Solaris, then it went quiet.\nI emailed again last week with no reply.\nIs there still something here, or shall I close your file?\n\nBest regards,\nKevin\n\nKevin Brittain, Operations Director\noperationsdirector.co.uk\n\n### Jonathan Mottram\nTO: j***@***.co.uk\nFROM: kevinbrittain@gmail.com\nSUBJECT: Fifty5, closing the loop\n\nHi Jonathan,\n\nYou booked a call about Fifty5 and we never got to speak.\nI emailed last week and heard nothing back.\nDo you want 30 minutes, or shall I close your file?\n\nBest regards,\nKevin\n\nKevin Brittain, Operations Director\noperationsdirector.co.uk\n\n### Joyce Tetteh\nTO: j***@***.co.uk\nFROM: kevinbrittain@gmail.com\nSUBJECT: the shareholding option we talked about\n\nHi Joyce,\n\nWhen we spoke you liked the shareholding option, but money was tight at the time.\nI emailed last week and heard nothing, so I'll ask plainly.\nIs now any better, or shall I close your file?\n\nBest regards,\nKevin\n\nKevin Brittain, Operations Director\noperationsdirector.co.uk\n\n### James Anyanwu\nTO: c***@***.com\nFROM: kevinbrittain@gmail.com\nSUBJECT: the instalment plan you asked about\n\nHi James,\n\nYou were keen when we spoke. The sticking point was spreading the cost over twelve months.\nI emailed last week and got no reply.\nIs the money side any easier now, or shall I close your file?\n\nBest regards,\nKevin\n\nKevin Brittain, Operations Director\noperationsdirector.co.uk\n\n### Josephine Ann Wilson\nTO: j***@***.org\nFROM: kevinbrittain@gmail.com\nSUBJECT: the systems for Lighthouse\n\nHi Josephine,\n\nWe had a good call about getting some direction and systems into Lighthouse.\nI emailed last week and heard nothing back.\nDo you still want the help, or shall I close your file?\n\nBest regards,\nKevin\n\nKevin Brittain, Operations Director\noperationsdirector.co.uk\n\n### Gemma Coles\nTO: m***@***.com\nFROM: kevinbrittain@gmail.com\nSUBJECT: two emails, no reply\n\nHi Gemma,\n\nTwo emails from me now and no reply, so I'll stop guessing.\nDo you still want the 30 minutes we never had?\nIf not, say the word and I'll close your file today.\n\nBest regards,\nKevin\n\nKevin Brittain, Operations Director\noperationsdirector.co.uk\n\n### Cassandra Ademola\nTO: c***@***.com\nFROM: kevinbrittain@gmail.com\nSUBJECT: your call from last year\n\nHi Cassandra,\n\nYou booked a call with us last year and we never got to speak.\nI wrote again last week with no reply.\nTell me either way and I'll act on it: book the 30 minutes, or close your file.\n\nBest regards,\nKevin\n\nKevin Brittain, Operations Director\noperationsdirector.co.uk\n\n### Reginald Flint\nTO: r***@***.com\nFROM: kevinbrittain@gmail.com\nSUBJECT: last email from me\n\nHi Reginald,\n\nWe rang you twice and emailed twice since you booked the call, with no answer.\nThis is the last one from me.\nReply if you want the 30 minutes, otherwise I'll close your file this week.\n\nBest regards,\nKevin\n\nKevin Brittain, Operations Director\noperationsdirector.co.uk\n\n### Suyesh Sharma\nTO: s***@***.com\nFROM: kevinbrittain@gmail.com\nSUBJECT: the proposal for Metta\n\nHi Suyesh,\n\nYou asked for a proposal for Metta and wanted to decide at month end. The month came and went.\nI emailed last week and heard nothing.\nDo you want the proposal now, or shall I close your file?\n\nBest regards,\nKevin\n\nKevin Brittain, Operations Director\noperationsdirector.co.uk\n\n### Adrian Cierpikowski\nTO: z***@***.com\nFROM: kevinbrittain@gmail.com\nSUBJECT: closing the loop\n\nHi Adrian,\n\nYour call from last year never happened, and my email last week went unanswered.\nI'd rather have a straight no than leave your file open.\nWhich is it?\n\nBest regards,\nKevin\n\nKevin Brittain, Operations Director\noperationsdirector.co.uk\n\n### Charlie Corless\nTO: i***@***.co.uk\nFROM: kevinbrittain@gmail.com\nSUBJECT: Northbound, one question\n\nHi Charlie,\n\nThe call you booked about Northbound never happened, and my email last week went unanswered.\nNo hard feelings if the timing is wrong.\nSay close and I'll close it, or say when and I'll find 30 minutes.\n\nBest regards,\nKevin\n\nKevin Brittain, Operations Director\noperationsdirector.co.uk\n\n---\n\n## FIRST TOUCH (4) - these people never received anything\n\n### Agnese Daverio\nTO: a***@***.com\nFROM: kevinbrittain@gmail.com\nSUBJECT: your call from last year\n\nHi Agnese,\n\nYou booked a call with Operations Director last year and we never got to speak.\nIt is live now: an AI-run operations department, so the admin and the chasing run themselves.\nDo you want 30 minutes, or shall I close your file?\n\nBest regards,\nKevin\n\nKevin Brittain, Operations Director\noperationsdirector.co.uk\n\n### Jack Duddy\nTO: h***@***.co.uk\nFROM: kevinbrittain@gmail.com\nSUBJECT: the call you booked about Leo Food\n\nHi Jack,\n\nYou booked a call about Leo Food last year and we never got to speak.\nOperations Director is live now: an AI-run operations department, so the admin and the chasing run themselves.\nWorth 30 minutes, or shall I close your file?\n\nBest regards,\nKevin\n\nKevin Brittain, Operations Director\noperationsdirector.co.uk\n\n### Saqib Javaid\nTO: s***@***.com\nFROM: kevinbrittain@gmail.com\nSUBJECT: the call that never happened\n\nHi Saqib,\n\nYou booked a call with Operations Director last year and it never happened.\nIt is live now: an AI-run operations department, so the admin, the follow-ups and the numbers run themselves.\nDo you want 30 minutes, or shall I close your file?\n\nBest regards,\nKevin\n\nKevin Brittain, Operations Director\noperationsdirector.co.uk\n\n### Tory Bloom\nTO: t***@***.co.uk\nFROM: kevinbrittain@gmail.com\nSUBJECT: the proposal from last summer\n\nHi Tory,\n\nWe spoke last summer about Total Tee and left a proposal open, then it went quiet.\nOperations Director is live now, so what was on paper then actually runs.\nDo you want to pick it up, or shall I close your file?\n\nBest regards,\nKevin\n\nKevin Brittain, Operations Director\noperationsdirector.co.uk\n\n---\n\n## BLOCKED (1)\n\n### Neil Gillan\nNo draft. n***@***.co.uk hard bounced on 20 Aug 2026: the domain does not resolve. Needs a working address before any copy is worth writing.\n\n---\n\nDrafted by AI Worker - Writer, 25 Aug 2026, from the call notes held on the 20 Aug first-touch tasks. Personalisation comes from those notes only. Nothing invented.\n",
+      "notes": "Drafted by AI Worker - Writer. 14 second touches + 4 first touches (four people never received the 20 Aug email). Neil Gillan excluded: his address hard bounced. Andrew Bizzell excluded: rejected by Kevin. NOTHING SENT.\n[2026-09-01 18:41] REASSIGNED TO CEO by task-manager cleanse pass: Submitted with an EMPTY Agent Output \u2014 nothing for Kevin to approve. Re-submit the warm-lane second-touch emails as a real deliverable.",
+      "status": "Today",
+      "dueDate": "2026-09-01",
+      "priority": "High",
+      "urgencyScore": 0,
+      "outcome": "",
+      "feedback": "",
+      "agentOutput": "",
+      "taskType": "Drafting",
+      "teamMemberIds": [
+        "reciHUAEcEkbctnZ6"
+      ],
+      "sentForApprovalByIds": [],
+      "approverEmail": "",
+      "agentId": "reciHUAEcEkbctnZ6",
+      "agentName": "AI CEO (Dan Martell)",
+      "localAgent": "od-ceo",
+      "agentRole": "ceo",
+      "inboundTask": false,
+      "inboundSourceType": "",
+      "inboundSender": "",
+      "attachments": [],
+      "tier1": true,
+      "matchedPattern": "creditor lane",
+      "creditor": true,
+      "tier2Correspondence": false
+    },
+    {
+      "id": "recULMakzMmdd57Gi",
+      "name": "INBOUND: Brittain Holdings Limited strike-off warning - withdraw funds before dissolution",
+      "description": "Starling Bank notifies that Brittain Holdings Limited has an active strike-off proposal at Companies House. Action required before dissolution: (1) Withdraw any money from the Starling business account or transfer to another account. (2) Cancel or transfer all Direct Debits and standing orders. Starling will restrict and close the account on dissolution; any remaining funds go to the Crown. Note: if Brittain Holdings is connected to the live legal matter (restraint order, SSL, ACH) escalate urgency - check with your legal team before acting on the account.\n",
+      "notes": "",
+      "status": "Today",
+      "dueDate": "2026-09-02",
+      "priority": "High",
+      "urgencyScore": 0,
+      "outcome": "",
+      "feedback": "",
+      "agentOutput": "",
+      "taskType": "Correspondence",
+      "teamMemberIds": [
+        "reciHUAEcEkbctnZ6"
+      ],
+      "sentForApprovalByIds": [],
+      "approverEmail": "kevin@runpreneur.org.uk",
+      "agentId": "reciHUAEcEkbctnZ6",
+      "agentName": "AI CEO (Dan Martell)",
+      "localAgent": "od-ceo",
+      "agentRole": "ceo",
+      "inboundTask": true,
+      "inboundSourceType": "Gmail",
+      "inboundSender": "d***@***.com",
+      "attachments": [],
+      "tier1": true,
+      "matchedPattern": "restraint order",
+      "creditor": false,
+      "tier2Correspondence": false,
+      "autoTarget": "recJ8J8idWE8d97tH"
+    },
+    {
+      "id": "recf2wx2KHwY326cC",
+      "name": "INBOUND (follow-up): reply to Dan Lawrence - Perform365 coaching pitch",
+      "description": "Earlier tasks: recBcY9dcbNk0jNRL (Completed 26 Aug) and rectIhq0XRRNepe53 (Completed 26 Aug) - both approved and carried out. Dan Lawrence (Perform365 / highperformance365web.com) is following up again offering executive performance coaching (blood work, VO2 max, sports doctors, personalised training). He is offering a small number of spots and asking for a 15-minute call. Kevin needs to decide: accept the call, or send a final polite decline so Dan stops following up. Agents already replied twice via approved tasks.\n",
+      "notes": "",
+      "status": "Today",
+      "dueDate": "2026-09-02",
+      "priority": "High",
+      "urgencyScore": 0,
+      "outcome": "",
+      "feedback": "",
+      "agentOutput": "",
+      "taskType": "Correspondence",
+      "teamMemberIds": [
+        "reciHUAEcEkbctnZ6"
+      ],
+      "sentForApprovalByIds": [],
+      "approverEmail": "kevin@runpreneur.org.uk",
+      "agentId": "reciHUAEcEkbctnZ6",
+      "agentName": "AI CEO (Dan Martell)",
+      "localAgent": "od-ceo",
+      "agentRole": "ceo",
+      "inboundTask": true,
+      "inboundSourceType": "Gmail",
+      "inboundSender": "l***@***.com",
+      "attachments": [],
+      "tier1": false,
+      "matchedPattern": "",
+      "creditor": false,
+      "tier2Correspondence": false,
+      "autoTarget": "recJ8J8idWE8d97tH"
+    },
+    {
+      "id": "rechtlySgvfxxwoEY",
+      "name": "INBOUND: Stripe action required - verify Two Chefs Cambridge business info by 9 Oct 2026",
+      "description": "Stripe requires verification of business owners and directors for Two Chefs Cambridge Limited (Stripe account acct_1OuFItEtPVtMudx2). Deadline: 9 October 2026. Impact: Payouts will be affected if not completed. Kevin needs to log into the Stripe dashboard and verify business information. Action: review task at https://dashboard.stripe.com/b/acct_1OuFItEtPVtMudx2\n",
+      "notes": "",
+      "status": "Today",
+      "dueDate": "2026-10-09",
+      "priority": "High",
+      "urgencyScore": 0,
+      "outcome": "",
+      "feedback": "",
+      "agentOutput": "",
+      "taskType": "Correspondence",
+      "teamMemberIds": [
+        "reciHUAEcEkbctnZ6"
+      ],
+      "sentForApprovalByIds": [],
+      "approverEmail": "kevin@runpreneur.org.uk",
+      "agentId": "reciHUAEcEkbctnZ6",
+      "agentName": "AI CEO (Dan Martell)",
+      "localAgent": "od-ceo",
+      "agentRole": "ceo",
+      "inboundTask": true,
+      "inboundSourceType": "Gmail",
+      "inboundSender": "n***@***.com",
+      "attachments": [],
+      "tier1": false,
+      "matchedPattern": "",
+      "creditor": false,
+      "tier2Correspondence": false,
+      "autoTarget": "recJ8J8idWE8d97tH"
+    }
+  ],
+  "tier1Tasks": [
+    {
+      "id": "recD86BeDFZzbdRME",
+      "name": "Warm lane second touch: approve 18 close-the-loop emails (one pass)",
+      "description": "**THE ASK: approve 18 close-the-loop emails to the warm lane in one pass. Nothing has been sent. Approving this task does NOT send: it tells the writer to prepare the individual send tasks.**\n\n**Three things to decide before you approve. Reply on the task if you want any of them changed.**\n\n1. **Sender.** All 18 are set to send from kevinbrittain@gmail.com, the address the first touch actually went from. The OD domain's SPF record lists Hostinger only, not Google, so mail sent from kevin@operationsdirector.co.uk through the Google alias may land in spam. On a close-the-loop email that has to be seen, known-good delivery beats the nicer address. Say the word and I will switch it.\n\n1. **No booking link on any of the 18.** No prospect row shows anyone asking for one, so none is included. Every message ends with a direct question instead.\n\n1. **No postal address in the footer.** PECR wants a postal address on marketing email. I could not find the Operations Director Limited registered address in the brain and I will not invent one. Give me the address and I will add it, or accept the position that these are 1:1 replies to people who gave their details by booking a call, which is soft opt-in.\n\n---\n\n## What I actually found (checked today, 25 Aug 2026)\n\n- **Zero replies.** Gmail search across all 15 sent addresses, last 14 days: nothing back.\n\n- **Neil Gillan bounced.** Google returned \"Address not found\" on 20 Aug: the domain bishopsconstruction.co.uk does not exist. The send ledger records it as sent, so the bounce was invisible. He has NO draft here and cannot be emailed until someone finds a working address.\n\n- **Four people never got the first email at all**, confirmed again today in the send ledger: Agnese Daverio, Jack Duddy, Saqib Javaid and Tory Bloom have an intent row and no send row. Their drafts below are FIRST touches and say nothing about a previous email, because there wasn't one.\n\n- **Real total delivered: 14, not 19.** 14 second touches plus 4 first touches equals 18 drafts.\n\n- Andrew Bizzell is rejected and is not in this batch.\n\n---\n\n## SECOND TOUCH (14) - these people got the 20 Aug email and did not reply\n\n### Luke Field\nTO: l***@***.com\nFROM: kevinbrittain@gmail.com\nSUBJECT: shall I close your file, Luke?\n\nHi Luke,\n\nI emailed last week and heard nothing, so this is me closing the loop.\nWe never did get the call rearranged after parents' evening got in the way.\nDo you still want 30 minutes, or shall I close your file?\n\nBest regards,\nKevin\n\nKevin Brittain, Operations Director\noperationsdirector.co.uk\n\n### Edson Diaz-Fuentes\nTO: e***@***.com\nFROM: kevinbrittain@gmail.com\nSUBJECT: one straight question\n\nHi Edson,\n\nI wrote last week and got no reply, so one straight question before I stop.\nYou booked a call, we never spoke, and your file has sat open ever since.\nDo you want to speak, or shall I close it?\n\nBest regards,\nKevin\n\nKevin Brittain, Operations Director\noperationsdirector.co.uk\n\n### Adesina Okuboyejo\nTO: a***@***.com\nFROM: kevinbrittain@gmail.com\nSUBJECT: it's Kevin, from the call you booked\n\nHi Adesina,\n\nWhen we chased you last year you asked who this was, which was fair enough.\nI'm Kevin. You booked a call with Operations Director, and I emailed again last week.\nReply and I'll find you 30 minutes, or say the word and I'll close your file.\n\nBest regards,\nKevin\n\nKevin Brittain, Operations Director\noperationsdirector.co.uk\n\n### Darren Wolff\nTO: d***@***.com\nFROM: kevinbrittain@gmail.com\nSUBJECT: the Solaris proposal\n\nHi Darren,\n\nLast time we spoke you were reviewing the proposal for Solaris, then it went quiet.\nI emailed again last week with no reply.\nIs there still something here, or shall I close your file?\n\nBest regards,\nKevin\n\nKevin Brittain, Operations Director\noperationsdirector.co.uk\n\n### Jonathan Mottram\nTO: j***@***.co.uk\nFROM: kevinbrittain@gmail.com\nSUBJECT: Fifty5, closing the loop\n\nHi Jonathan,\n\nYou booked a call about Fifty5 and we never got to speak.\nI emailed last week and heard nothing back.\nDo you want 30 minutes, or shall I close your file?\n\nBest regards,\nKevin\n\nKevin Brittain, Operations Director\noperationsdirector.co.uk\n\n### Joyce Tetteh\nTO: j***@***.co.uk\nFROM: kevinbrittain@gmail.com\nSUBJECT: the shareholding option we talked about\n\nHi Joyce,\n\nWhen we spoke you liked the shareholding option, but money was tight at the time.\nI emailed last week and heard nothing, so I'll ask plainly.\nIs now any better, or shall I close your file?\n\nBest regards,\nKevin\n\nKevin Brittain, Operations Director\noperationsdirector.co.uk\n\n### James Anyanwu\nTO: c***@***.com\nFROM: kevinbrittain@gmail.com\nSUBJECT: the instalment plan you asked about\n\nHi James,\n\nYou were keen when we spoke. The sticking point was spreading the cost over twelve months.\nI emailed last week and got no reply.\nIs the money side any easier now, or shall I close your file?\n\nBest regards,\nKevin\n\nKevin Brittain, Operations Director\noperationsdirector.co.uk\n\n### Josephine Ann Wilson\nTO: j***@***.org\nFROM: kevinbrittain@gmail.com\nSUBJECT: the systems for Lighthouse\n\nHi Josephine,\n\nWe had a good call about getting some direction and systems into Lighthouse.\nI emailed last week and heard nothing back.\nDo you still want the help, or shall I close your file?\n\nBest regards,\nKevin\n\nKevin Brittain, Operations Director\noperationsdirector.co.uk\n\n### Gemma Coles\nTO: m***@***.com\nFROM: kevinbrittain@gmail.com\nSUBJECT: two emails, no reply\n\nHi Gemma,\n\nTwo emails from me now and no reply, so I'll stop guessing.\nDo you still want the 30 minutes we never had?\nIf not, say the word and I'll close your file today.\n\nBest regards,\nKevin\n\nKevin Brittain, Operations Director\noperationsdirector.co.uk\n\n### Cassandra Ademola\nTO: c***@***.com\nFROM: kevinbrittain@gmail.com\nSUBJECT: your call from last year\n\nHi Cassandra,\n\nYou booked a call with us last year and we never got to speak.\nI wrote again last week with no reply.\nTell me either way and I'll act on it: book the 30 minutes, or close your file.\n\nBest regards,\nKevin\n\nKevin Brittain, Operations Director\noperationsdirector.co.uk\n\n### Reginald Flint\nTO: r***@***.com\nFROM: kevinbrittain@gmail.com\nSUBJECT: last email from me\n\nHi Reginald,\n\nWe rang you twice and emailed twice since you booked the call, with no answer.\nThis is the last one from me.\nReply if you want the 30 minutes, otherwise I'll close your file this week.\n\nBest regards,\nKevin\n\nKevin Brittain, Operations Director\noperationsdirector.co.uk\n\n### Suyesh Sharma\nTO: s***@***.com\nFROM: kevinbrittain@gmail.com\nSUBJECT: the proposal for Metta\n\nHi Suyesh,\n\nYou asked for a proposal for Metta and wanted to decide at month end. The month came and went.\nI emailed last week and heard nothing.\nDo you want the proposal now, or shall I close your file?\n\nBest regards,\nKevin\n\nKevin Brittain, Operations Director\noperationsdirector.co.uk\n\n### Adrian Cierpikowski\nTO: z***@***.com\nFROM: kevinbrittain@gmail.com\nSUBJECT: closing the loop\n\nHi Adrian,\n\nYour call from last year never happened, and my email last week went unanswered.\nI'd rather have a straight no than leave your file open.\nWhich is it?\n\nBest regards,\nKevin\n\nKevin Brittain, Operations Director\noperationsdirector.co.uk\n\n### Charlie Corless\nTO: i***@***.co.uk\nFROM: kevinbrittain@gmail.com\nSUBJECT: Northbound, one question\n\nHi Charlie,\n\nThe call you booked about Northbound never happened, and my email last week went unanswered.\nNo hard feelings if the timing is wrong.\nSay close and I'll close it, or say when and I'll find 30 minutes.\n\nBest regards,\nKevin\n\nKevin Brittain, Operations Director\noperationsdirector.co.uk\n\n---\n\n## FIRST TOUCH (4) - these people never received anything\n\n### Agnese Daverio\nTO: a***@***.com\nFROM: kevinbrittain@gmail.com\nSUBJECT: your call from last year\n\nHi Agnese,\n\nYou booked a call with Operations Director last year and we never got to speak.\nIt is live now: an AI-run operations department, so the admin and the chasing run themselves.\nDo you want 30 minutes, or shall I close your file?\n\nBest regards,\nKevin\n\nKevin Brittain, Operations Director\noperationsdirector.co.uk\n\n### Jack Duddy\nTO: h***@***.co.uk\nFROM: kevinbrittain@gmail.com\nSUBJECT: the call you booked about Leo Food\n\nHi Jack,\n\nYou booked a call about Leo Food last year and we never got to speak.\nOperations Director is live now: an AI-run operations department, so the admin and the chasing run themselves.\nWorth 30 minutes, or shall I close your file?\n\nBest regards,\nKevin\n\nKevin Brittain, Operations Director\noperationsdirector.co.uk\n\n### Saqib Javaid\nTO: s***@***.com\nFROM: kevinbrittain@gmail.com\nSUBJECT: the call that never happened\n\nHi Saqib,\n\nYou booked a call with Operations Director last year and it never happened.\nIt is live now: an AI-run operations department, so the admin, the follow-ups and the numbers run themselves.\nDo you want 30 minutes, or shall I close your file?\n\nBest regards,\nKevin\n\nKevin Brittain, Operations Director\noperationsdirector.co.uk\n\n### Tory Bloom\nTO: t***@***.co.uk\nFROM: kevinbrittain@gmail.com\nSUBJECT: the proposal from last summer\n\nHi Tory,\n\nWe spoke last summer about Total Tee and left a proposal open, then it went quiet.\nOperations Director is live now, so what was on paper then actually runs.\nDo you want to pick it up, or shall I close your file?\n\nBest regards,\nKevin\n\nKevin Brittain, Operations Director\noperationsdirector.co.uk\n\n---\n\n## BLOCKED (1)\n\n### Neil Gillan\nNo draft. n***@***.co.uk hard bounced on 20 Aug 2026: the domain does not resolve. Needs a working address before any copy is worth writing.\n\n---\n\nDrafted by AI Worker - Writer, 25 Aug 2026, from the call notes held on the 20 Aug first-touch tasks. Personalisation comes from those notes only. Nothing invented.\n",
+      "notes": "Drafted by AI Worker - Writer. 14 second touches + 4 first touches (four people never received the 20 Aug email). Neil Gillan excluded: his address hard bounced. Andrew Bizzell excluded: rejected by Kevin. NOTHING SENT.\n[2026-09-01 18:41] REASSIGNED TO CEO by task-manager cleanse pass: Submitted with an EMPTY Agent Output \u2014 nothing for Kevin to approve. Re-submit the warm-lane second-touch emails as a real deliverable.",
+      "status": "Today",
+      "dueDate": "2026-09-01",
+      "priority": "High",
+      "urgencyScore": 0,
+      "outcome": "",
+      "feedback": "",
+      "agentOutput": "",
+      "taskType": "Drafting",
+      "teamMemberIds": [
+        "reciHUAEcEkbctnZ6"
+      ],
+      "sentForApprovalByIds": [],
+      "approverEmail": "",
+      "agentId": "reciHUAEcEkbctnZ6",
+      "agentName": "AI CEO (Dan Martell)",
+      "localAgent": "od-ceo",
+      "agentRole": "ceo",
+      "inboundTask": false,
+      "inboundSourceType": "",
+      "inboundSender": "",
+      "attachments": [],
+      "tier1": true,
+      "matchedPattern": "creditor lane",
+      "creditor": true,
+      "tier2Correspondence": false
+    },
+    {
+      "id": "recULMakzMmdd57Gi",
+      "name": "INBOUND: Brittain Holdings Limited strike-off warning - withdraw funds before dissolution",
+      "description": "Starling Bank notifies that Brittain Holdings Limited has an active strike-off proposal at Companies House. Action required before dissolution: (1) Withdraw any money from the Starling business account or transfer to another account. (2) Cancel or transfer all Direct Debits and standing orders. Starling will restrict and close the account on dissolution; any remaining funds go to the Crown. Note: if Brittain Holdings is connected to the live legal matter (restraint order, SSL, ACH) escalate urgency - check with your legal team before acting on the account.\n",
+      "notes": "",
+      "status": "Today",
+      "dueDate": "2026-09-02",
+      "priority": "High",
+      "urgencyScore": 0,
+      "outcome": "",
+      "feedback": "",
+      "agentOutput": "",
+      "taskType": "Correspondence",
+      "teamMemberIds": [
+        "reciHUAEcEkbctnZ6"
+      ],
+      "sentForApprovalByIds": [],
+      "approverEmail": "kevin@runpreneur.org.uk",
+      "agentId": "reciHUAEcEkbctnZ6",
+      "agentName": "AI CEO (Dan Martell)",
+      "localAgent": "od-ceo",
+      "agentRole": "ceo",
+      "inboundTask": true,
+      "inboundSourceType": "Gmail",
+      "inboundSender": "d***@***.com",
+      "attachments": [],
+      "tier1": true,
+      "matchedPattern": "restraint order",
+      "creditor": false,
+      "tier2Correspondence": false,
+      "autoTarget": "recJ8J8idWE8d97tH"
+    },
+    {
+      "id": "recYajL3GXd92SY1L",
+      "name": "INBOUND: Daily transfer summary for SOCIAL HOUSING HOLDINGS LIMITED",
+      "description": "Subject: Daily transfer summary for SOCIAL HOUSING HOLDINGS LIMITED From: Revolut Business [n***@***.com](mailto:n***@***.com) Stranded in label 12 without an active task. Check what is being asked and draft appropriate response in Kevin voice.\n",
+      "notes": "[01 Sep 2026 \u2014 agent] Lesson applied (26 Aug 2026): Social Housing Holdings is in liquidation, no action needed on Revolut daily transfer notifications. Task does not need Kevin's approval - propose close.",
+      "status": "Today",
+      "dueDate": "2026-08-29",
+      "priority": "High",
+      "urgencyScore": 0,
+      "outcome": "",
+      "feedback": "",
+      "agentOutput": "",
+      "taskType": "Correspondence",
+      "teamMemberIds": [
+        "recJ8J8idWE8d97tH"
+      ],
+      "sentForApprovalByIds": [],
+      "approverEmail": "kevin@runpreneur.org.uk",
+      "agentId": "recJ8J8idWE8d97tH",
+      "agentName": "AI Inbound Comms Response",
+      "localAgent": "inbound-comms-response",
+      "agentRole": "worker",
+      "inboundTask": true,
+      "inboundSourceType": "Gmail",
+      "inboundSender": "n***@***.com",
+      "attachments": [],
+      "tier1": true,
+      "matchedPattern": "social housing holdings",
+      "creditor": false,
+      "tier2Correspondence": false,
+      "kind": "new",
+      "priorIntent": false
+    }
+  ],
+  "skippedTier2": [],
+  "creditorLedger": [
+    {
+      "id": "rec61ZkdGJJAQ8aeY",
+      "creditor": "Lex AutoLease Ltd - account QG7149V00480187",
+      "status": "Awaiting response",
+      "monthlyAmount": 0,
+      "lastContact": "2026-08-27",
+      "nextStep": "",
+      "nextStepDate": "",
+      "recentNotes": [
+        "GBP170.68 demanded by SMS. Account ref QG7149V00480187. Last recorded payment GBP168.00 on 22 Jan 2026. Kevin flagged this may relate to Ciara Brittain - Letter of Authority for Ciara prepared 2026-08-27 and submitted for Kevin approval before creditor response can be sent. Task recRTuyFzzRE8Hbw1."
+      ]
+    },
+    {
+      "id": "rec8WW5BJ14i3vtyZ",
+      "creditor": "Utilita Energy (via UK Search Limited) \u2014 ref 5635023",
+      "status": "Awaiting response",
+      "monthlyAmount": 0,
+      "lastContact": "2026-09-01",
+      "nextStep": "",
+      "nextStepDate": "",
+      "recentNotes": [
+        "UK Search ref 5523504 / Utilita ref 9885588822. TNT Management Ltd. GBP25/mo arrangement suspended under restraint order. Freeze request sent 2026-08-27 to u***@***.com. Restraint order pages 1-3 attached. Referenced prior holds on refs 5482505/5482069/5635016. Gmail messageId: 1a0435b19588c194. Task recWhPiKKpr4OUPoQ. Second freeze reiteration sent 2026-08-29 to u***@***.com with restraint order pages 1-3 attached, UK Search ref 5523504. Gmail messageId: 1a04e0dfdc18091b. Task recDh4ZYnNeba0a1I. Third chase received 2026-09-01 (task recoCZVcBisIYGlZ8) - creditor still pursuing despite two freeze letters. Third freeze reiteration being prepared for Kevin approval."
+      ]
+    },
+    {
+      "id": "recDLrBotix7X1zhW",
+      "creditor": "Anglia Revenues Partnership - Further Recovery (Kevin & Ciara Brittain)",
+      "status": "Awaiting response",
+      "monthlyAmount": 0,
+      "lastContact": "2026-08-27",
+      "nextStep": "",
+      "nextStepDate": "",
+      "recentNotes": [
+        "Further Recovery team responded to Kevin email re council tax arrears for Kevin and Ciara Brittain accounts. Restraint-order-first freeze response prepared 2026-08-27 to F***@***.gov.uk, pages 1-3 attached. Awaiting Kevin approval. Ciara accounts noted as separate - she to correspond directly. Account refs to be confirmed on response. Task rech411ETRFKmPOFc."
+      ]
+    },
+    {
+      "id": "recDT6Ran43BxzJ4u",
+      "creditor": "Sefton Council Landlord Licensing",
+      "status": "Awaiting response",
+      "monthlyAmount": 0,
+      "lastContact": "",
+      "nextStep": "",
+      "nextStepDate": "",
+      "recentNotes": [
+        "Final payment warning received 25 Aug 2026 for 23 Viola St, Bootle. Statutory landlord licence fee \u2014 NEW LEGITIMATE PAYABLE lane. Amount unknown \u2014 enquiry email prepared for approval. Legal flag: confirm with solicitor whether restraint order affects payment before proceeding. Task: recr6uHnihXdxm1L5"
+      ]
+    },
+    {
+      "id": "recGUpwD8cnTVCIbA",
+      "creditor": "HM Revenue and Customs (Self Assessment) \u2014 Tax Ref 63731 45560",
+      "status": "Awaiting response",
+      "monthlyAmount": 0,
+      "lastContact": "2026-09-01",
+      "nextStep": "Kevin approves the signed letter at the gate; on approval it posts to HMRC via Pingen",
+      "nextStepDate": "",
+      "recentNotes": [
+        "HMRC Self Assessment late filing penalty reminder dated 30 June 2026. Tax year ended 5 April 2026. Tax Reference 63731 45560. Kevin personally. Restraint-order-first letter prepared for posting to HM Revenue and Customs, Self Assessment, BX9 XXX. HMRC SA penalty notices have no email correspondence route \u2014 letter must be posted. Restraint order pages 1-3 to be enclosed. No payment made. No plan agreed. Task: recKBrrBvzcf8J7FN. Redo approved 2026-08-27: tax reference inserted from attachment, sign-off corrected to Kevin Brittain only.",
+        "2026-09-01: 28 Aug Adobe send stalled as draft and was never sent; automated re-send blocked because Adobe cannot place a signature field on this 4-page letter. Awaiting Kevin's call",
+        "2026-09-01: Letter signed page 1 with Kevin's typed signature on his confirmed instruction, 1 Sep; resubmitted to the gate as a POST"
+      ]
+    },
+    {
+      "id": "recHPEmZ5PikUcuPO",
+      "creditor": "HM Revenue and Customs - Ciara late filing penalty (SA372-60)",
+      "status": "Awaiting response",
+      "monthlyAmount": null,
+      "lastContact": "2026-09-01",
+      "nextStep": "Signed LOA back from Ciara, then post letter + LOA to HMRC via Pingen",
+      "nextStepDate": "2026-09-04",
+      "recentNotes": [
+        "2026-09-01: LOA re-sent via Adobe Sign to c***@***.com, send CONFIRMED 1 Sep (28 Aug send had stalled as an Adobe draft; nothing ever reached her)"
+      ]
+    },
+    {
+      "id": "recNilJCUZGpRWPCM",
+      "creditor": "Orbit Services (for Anglian Water) \u2014 ref 6579487",
+      "status": "Awaiting response",
+      "monthlyAmount": 0,
+      "lastContact": "2026-08-27",
+      "nextStep": "",
+      "nextStepDate": "",
+      "recentNotes": [
+        "Orbit ref 6579487 / Anglian Water account 000XXXXXX281. Property: 13 Chedburgh Place, Haverhill, CB9 XXX. Balance disputed: Orbit states \u00a32,562.44; Anglian Water stated \u00a32,522.44. Restraint-order-first letter sent 2026-08-27 with pages 1-3 of order attached. Full written statement of account requested. No payment made. No plan agreed. Task: rec74ct8YQwMLzaEv."
+      ]
+    },
+    {
+      "id": "recP662eJg310Slf8",
+      "creditor": "Utilita Energy (via UK Search Limited)",
+      "status": "Awaiting response",
+      "monthlyAmount": 0,
+      "lastContact": "2026-08-29",
+      "nextStep": "",
+      "nextStepDate": "",
+      "recentNotes": [
+        "UK Search ref 5523504 / Utilita ref 9885588822. Total debt 457.53 energy supply arrears. Freeze-first approach confirmed correct 26 Aug 2026. No standing order to be set up. Corrected freeze letter in task recWhPiKKpr4OUPoQ awaiting Kevin approval - ATTACH line, FROM line and reference to prior 30-day holds on refs 5482505/5482069/5635016 added 26 Aug. Payment arrangement of 25/month suspended pending restraint order lift. Restraint order pages 1-3 at /Users/kevinbrittain/knowledge-os/attachments/restraint-order-pages-1-3.pdf. rec3PMrsvnGyXoXmv to be closed as duplicate once recWhPiKKpr4OUPoQ approved and sent. Second freeze reiteration prepared 2026-08-29 (task recDh4ZYnNeba0a1I) \u2014 creditor continued chasing after freeze letter of 27 Aug 2026. Restraint order re-attached. Submitted for Kevin approval."
+      ]
+    },
+    {
+      "id": "recSTlIVFZnaRw7vd",
+      "creditor": "British Gas / CreditStyle - Ciara account 3893247",
+      "status": "Awaiting response",
+      "monthlyAmount": null,
+      "lastContact": "2026-09-01",
+      "nextStep": "Signed LOA back from Ciara, then send LOA to British Gas / CreditStyle",
+      "nextStepDate": "2026-09-04",
+      "recentNotes": [
+        "2026-09-01: LOA re-sent via Adobe Sign to c***@***.com, send CONFIRMED 1 Sep (28 Aug send had stalled as an Adobe draft)"
+      ]
+    },
+    {
+      "id": "recTmYTA0M1CVklkP",
+      "creditor": "Utilita Energy",
+      "status": "Awaiting response",
+      "monthlyAmount": 0,
+      "lastContact": "2026-08-27",
+      "nextStep": "",
+      "nextStepDate": "",
+      "recentNotes": [
+        "Account 1496984690, Apt 5 Duckworth Building, Back West Crescent, Lytham St Annes FY8 XXX. Restraint-order notification sent 2026-08-27 to h***@***.co.uk. Pages 1-3 attached. Balance stated GBP 64.69 (letter dated 11 Jun 2026). Task recv9RExemsXhfOA6."
+      ]
+    },
+    {
+      "id": "recUG7rarAp50Vq4j",
+      "creditor": "The MHH Partnership",
+      "status": "Awaiting response",
+      "monthlyAmount": 0,
+      "lastContact": "",
+      "nextStep": "",
+      "nextStepDate": "",
+      "recentNotes": [
+        "Hayden Watson (Director) asked what the restraint order is after Kevin referenced it in context of outstanding accountancy fees. Holding response prepared 2026-08-29: no detail disclosed, information to follow via solicitor/formal channel. Task: recm7FLWmgAzLicHG. Hayden replied 2026-09-01 directing Kevin to speak with Simon Rice before reverting on HMRC disclosure question. Holding reply prepared (task: recfT5cSdax33DXj0)."
+      ]
+    },
+    {
+      "id": "recUTTbPB4AP8skml",
+      "creditor": "Kent Reliance (OneSavings Bank) \u2014 mortgage account 70015483",
+      "status": "Awaiting response",
+      "monthlyAmount": 0,
+      "lastContact": "",
+      "nextStep": "",
+      "nextStepDate": "",
+      "recentNotes": [
+        "22 Newton Street, Burnley, BB12 XXX. Restraint-order-first freeze letter prepared 2026-09-01, submitted for Kevin approval (task recTEnupB6gCgVuk8). PDF letter generated: Ref_Mortgage_Account_70015483.pdf. Address verified at 64mm envelope window. 30-day HMO licence review suspension expires 2026-09-03. Three clarification points from bank letter of 18 Aug 2026 (which balance, total to repay, type of change) remain outstanding \u2014 Kevin to supply the original figures. Parallel tenancy-details task: rec5CNt2t1fooAC3o."
+      ]
+    },
+    {
+      "id": "recVap4DYnk8FAK51",
+      "creditor": "Fylde Borough Council / Lancashire Magistrates Court",
+      "status": "Awaiting response",
+      "monthlyAmount": 0,
+      "lastContact": "2026-08-28",
+      "nextStep": "",
+      "nextStepDate": "",
+      "recentNotes": [
+        "Account 23242388, Flat 3 Duckworth Building, TNT Management Ltd. Prior GBP20/mo arrangement cannot proceed under restraint order. Freeze request sent 2026-08-27 to l***@***.gov.uk. Restraint order pages 1-3 attached. Gmail messageId: 1a04358b9f09e74c. Tasks: recFdEICxHjYCzDkS, recNxOvrwInuCHE5N. 2026-08-27: Fylde acknowledged Kevin's restraint order notification. Logged as CSV-2026-1098. CT dept notified and expected to respond by 1 Sep 2026. No reply needed at this stage. Monitor for CT dept contact by 1 Sep 2026. Ack received 2026-08-27: Fylde logged as CSV-2026-1098, CT dept to contact by 1 Sep 2026. 2026-08-28: Follow-up sent to l***@***.gov.uk (Gmail messageId: 1a047d2ca5f35526). Confirmed restraint order position, requested hold on both accounts 23242388 and 23242374, and asked for written confirmation of no enforcement before 1 Sep 2026 deadline. Task: rec0sqChAfLaRMBUv."
+      ]
+    },
+    {
+      "id": "recVt8n0Qp40C34DZ",
+      "creditor": "Swinton Insurance (all active policies)",
+      "status": "Awaiting response",
+      "monthlyAmount": 0,
+      "lastContact": "2026-08-27",
+      "nextStep": "",
+      "nextStepDate": "",
+      "recentNotes": [
+        "Five active/overdue Swinton policies: RSAP6837602300, BE26ACTP000XXXXXX675, ref 159152794, RPP/821779563, ref 85095196. Three Overdue, two In Payment. Status check email prepared 2026-08-27. Email to be sent once Kevin verifies phone number and Swinton email address. Task rechekV69SPiV1ran."
+      ]
+    },
+    {
+      "id": "recWGVtnAGt5NBUBg",
+      "creditor": "EDF",
+      "status": "Awaiting response",
+      "monthlyAmount": 136.92,
+      "lastContact": "",
+      "nextStep": "",
+      "nextStepDate": "",
+      "recentNotes": [
+        "LIVE SUPPLY \u2014 utility DD spike lane (NOT a debt). Aug 2026 DD spiked to \u00a3544.06 vs normal \u00a3136.92/month (Jan-Jul 2026). Call 033XXXXX950 to renegotiate back to \u00a3136.92 and request breakdown of the spike. Task rec2aKevWjp5L7YHs. Ref A-B6E65B75-001 Mandate 0183."
+      ]
+    },
+    {
+      "id": "recZNBLPqchJarc3P",
+      "creditor": "Advantis Credit Limited (Two Chefs Cambridge Limited)",
+      "status": "Closed - dissolved business",
+      "monthlyAmount": 0,
+      "lastContact": "2026-08-27",
+      "nextStep": "",
+      "nextStepDate": "",
+      "recentNotes": [
+        "Two Chefs Cambridge Limited dissolved. HMRC VAT GBP200. Advantis ref 30471408, client ref DRS001XXXX616. Response sent 2026-08-27 to c***@***.co.uk directing to Companies House / Official Receiver. Gmail messageId: 1a04357a3c4f39c7. Task rec4jTQTmM78wp3Ge. 28 Aug 2026: Email to c***@***.co.uk bounced (5.4.1). Re-sent to a***@***.co.uk. Gmail messageId: 1a047c4f816b46cc. Task recuLyVuPT2TvFNc7. 29 Aug 2026: MHH Partnership forwarded HMRC VAT penalty letter on 25 Aug 2026; dissolution position confirmed by reply to Sue Snooks (S***@***.co.uk) on 2026-08-29. No payment to be made. Task rechBBOyKbuTrV5eW. 29 Aug 2026: Bounce notification reviewed (task recXqhyKJPqgIfJTp). Confirmed a***@***.co.uk is the correct live address (verified advantiscredit.co.uk). Re-send on 28 Aug 2026 already delivered. No further action."
+      ]
+    },
+    {
+      "id": "recf3FTuIJKK604sO",
+      "creditor": "EDF Energy (17 Newington Willingham CB24 XXX)",
+      "status": "Awaiting response",
+      "monthlyAmount": 0,
+      "lastContact": "2026-08-31",
+      "nextStep": "",
+      "nextStepDate": "",
+      "recentNotes": [
+        "Overdue balance demand of \u00a31,379.40 for property at 17 Newington Willingham Cambridge CB24 XXX. EDF states Immediate Action Required, threatening credit default and legal proceedings. Property not found in current Airtable Properties table (26 properties checked). Kevin responded manually to first freeze letter (2026-08-26, task recd104Q7YJqmZhXx rejected by Kevin \u2014 handled himself). EDF followed up 2026-08-30. Second freeze letter prepared for Kevin approval 2026-08-31 (task recmHSqFsag7w521N). Restraint order pages 1-3 attached. Separate from EDF DD spike matter (recWGVtnAGt5NBUBg). Lane: Standard debt correspondence, restraint-order-first."
+      ]
+    },
+    {
+      "id": "recfJQWLuQs4uk4PU",
+      "creditor": "Fylde Council \u2014 Council Tax (Flat 2 Duckworth Building)",
+      "status": "Awaiting response",
+      "monthlyAmount": 0,
+      "lastContact": "2026-08-28",
+      "nextStep": "",
+      "nextStepDate": "",
+      "recentNotes": [
+        "Account 23242374. Council tax summons for Flat 2 Duckworth Building, Back West Crescent, Lytham St Annes FY8. Liability order granted 28 Aug 2026. Fylde offered 12-month payment arrangement. Responded 28 Aug 2026: (1) raised liability dispute \u2014 property occupied by [name redacted] under management agreement since 1 Jan 2026, occupying party should sit above owner in liability hierarchy; (2) restraint order notified, pages 1-3 attached. Requested pause on enforcement while dispute reviewed. Awaiting Fylde response."
+      ]
+    },
+    {
+      "id": "recgqXBto1V8S31jq",
+      "creditor": "SSE Energy Solutions \u2014 account IST 8702010539",
+      "status": "Awaiting response",
+      "monthlyAmount": 0,
+      "lastContact": "2026-08-30",
+      "nextStep": "",
+      "nextStepDate": "",
+      "recentNotes": [
+        "Enforcement visit by Business Resolver 2026-08-26. SSE threatened warrant application at magistrates court. Restraint-order-first response sent 2026-08-27 via B***@***.com (Gmail messageId: 1a042b53f779e4ad), restraint order pages 1-3 attached. 21-day hold on warrant requested. Resend email to c***@***.com prepared 2026-08-27 (M***@***.com bounced). iMessage reply prepared 2026-08-27 re final account demand GBP1,012.33. Both approved and completed. Task rec4jwAr7YN7coe1y (email resend), recIjouDLSOwW6nlb (iMessage). 2026-08-30: SSE sent further automated SMS on 27 Aug 2026 after freeze letter sent. Reiteration email prepared to c***@***.com with restraint order pages 1-3 re-attached. Task recslZYllcLwUDdtm. Submitted for Kevin approval."
+      ]
+    },
+    {
+      "id": "rechpwvt5akoxSKky",
+      "creditor": "Utilita Energy \u2014 account 1496984690",
+      "status": "Awaiting response",
+      "monthlyAmount": 0,
+      "lastContact": "2026-08-27",
+      "nextStep": "",
+      "nextStepDate": "",
+      "recentNotes": [
+        "Utilita account 1496984690. Apartment 5, Duckworth Building, Back West Crescent, Lytham St Annes FY8 XXX. Outstanding balance \u00a364.69 per letter dated 11 June 2026. Restraint-order-first freeze letter prepared 2026-08-27 and submitted for Kevin approval. Restraint order pages 1-3 at /Users/kevinbrittain/knowledge-os/attachments/restraint-order-pages-1-3.pdf. Task recv9RExemsXhfOA6."
+      ]
+    },
+    {
+      "id": "reciN0nCClz8Rvp7A",
+      "creditor": "Burnley Council \u2014 Council Tax (22 Newton Street)",
+      "status": "Awaiting response",
+      "monthlyAmount": 0,
+      "lastContact": "2026-08-28",
+      "nextStep": "",
+      "nextStepDate": "",
+      "recentNotes": [
+        "Account 20005049078. Council tax summons for 22 Newton Street Burnley. Amount: \u00a31,748.45 + \u00a375.00 court costs = \u00a31,823.45. Hearing at Lancashire Magistrates Court 25 Aug 2026 09:15 -- PASSED. Liability order likely granted in absence. Enforcement risk: bailiff instruction may be imminent. Restraint-order-first freeze letter prepared and submitted for Kevin approval 2026-08-26. Restraint order pages 1-3 attached to draft. Task: recPrgjj9kAXuP18r. --- 2026-08-28: Liability order confirmed (ref 20005049078, balance \u00a31,843.45). Restraint-order notification sent to r***@***.gov.uk (cc l***@***.gov.uk) from kevinbrittain@gmail.com with pages 1-3 attached. Enforcement suspension requested. Task: rec9ZtCYgcI5Lzr4m. Gmail message ID: 1a047d40f5c2692a. --- 2026-08-28: Burnley Council Local Taxation sent auto-reply confirming receipt of restraint-order notification (ref 20005049078). Substantive reply expected within 14 days, approx 11 Sep 2026. No response required. Follow-up set for 12 Sep 2026 if no substantive reply received. Task: recQDgL3ZAiniJ5Hh."
+      ]
+    },
+    {
+      "id": "recjUeeMRZaV2IhyN",
+      "creditor": "West Suffolk Council (Anglia Revenues) \u2014 4 Abington Place",
+      "status": "Awaiting response",
+      "monthlyAmount": 0,
+      "lastContact": "2026-08-16",
+      "nextStep": "",
+      "nextStepDate": "",
+      "recentNotes": [
+        "Account 850311200. Council tax arrangement instalment of \u00a3223.86 due 01.07.2026 overdue (7+ weeks). Letter received 16 Aug 2026. If arrangement cancelled, full year becomes due and ARP enforcement resumes. Existing ARP enforcement cost record in Costs: recfDydg8D4ctFhIt (\u00a3100/mo In Payment). MARK FOR PAYMENT lane recommended \u2014 council tax is a statutory ongoing obligation on an active single let property (4 Abington Place, Haverhill, CB9 XXX). Legal flag: Kevin to confirm with solicitor that restraint order permits council tax payments before executing. Task: recZhITYjOGoUWKR2. Prepared 2026-08-26."
+      ]
+    },
+    {
+      "id": "recn7gL60QY7zuI31",
+      "creditor": "Lex AutoLease",
+      "status": "Awaiting response",
+      "monthlyAmount": 0,
+      "lastContact": "2026-09-01",
+      "nextStep": "Signed LOA back from Ciara, then send LOA to Lex AutoLease",
+      "nextStepDate": "2026-09-04",
+      "recentNotes": [
+        "\u00a3170.68 demanded by SMS. Account ref QG7149V00480187. Last recorded payment \u00a3168.00 on 22 Jan 2026. Restraint-order-first letter prepared and submitted for Kevin approval 2026-08-25. Restraint order pages 1-3 attached to draft. Task recRTuyFzzRE8Hbw1.",
+        "2026-09-01: LOA re-sent via Adobe Sign to c***@***.com, send CONFIRMED 1 Sep (28 Aug send had stalled as an Adobe draft). Twin Lex pages exist; oldest updated"
+      ]
+    },
+    {
+      "id": "recpgVF8CbE24Kooo",
+      "creditor": "East Cambridgeshire District Council (ARP) \u2014 Council Tax (18 Northfield Park, Soham)",
+      "status": "Awaiting response",
+      "monthlyAmount": 0,
+      "lastContact": "2026-08-31",
+      "nextStep": "",
+      "nextStepDate": "",
+      "recentNotes": [
+        "Account 101287570. 18 Northfield Park, Soham, Ely CB7 XXX. Second council tax reminder issued 17 Aug 2026. GBP 34.82 outstanding. Deadline 27 Aug 2026 passed. Summons threatened. Council tax managed by Anglia Revenues Partnership (ARP). Restraint-order-first freeze letter prepared 2026-08-31 for Kevin approval. Pages 1-3 of restraint order to be attached. Task: rec6pVJ2N4zHjuKbr."
+      ]
+    },
+    {
+      "id": "recrLzjvIyTpbPG1A",
+      "creditor": "Fylde Council \u2014 Council Tax (Flat 1 Duckworth Building)",
+      "status": "Awaiting response",
+      "monthlyAmount": 0,
+      "lastContact": "2026-08-29",
+      "nextStep": "",
+      "nextStepDate": "",
+      "recentNotes": [
+        "Account 23242360, Flat 1 Duckworth Building, TNT Management Ltd. Restraint order freeze request sent 2026-08-28 to l***@***.gov.uk. Reference CSV-2026-1120 (Fylde assigned at send). Auto-acknowledgement received 2026-08-29; Fylde logged reference CSV-2026-1159. Council will respond within 2 working days (by approx 2 Sep 2026). Requested account hold pending lifting of restraint order. No payment or plan entered. Restraint order pages 1-3 attached. Gmail messageId: 1a047ee38dc1393b. Task: recyfrSQmz9W44ExM."
+      ]
+    },
+    {
+      "id": "recsG1rcGtiy7pUzI",
+      "creditor": "SSE Energy Solutions",
+      "status": "Awaiting response",
+      "monthlyAmount": 0,
+      "lastContact": "2026-08-26",
+      "nextStep": "",
+      "nextStepDate": "",
+      "recentNotes": [
+        "Account ref 8702010539 / BW Legal ref X2186127. Outstanding balance \u00a31,073.08 (grew from \u00a360.75 May, \u00a3773.45 Jun). Threatening field team visit. Restraint-order-first freeze letter prepared and submitted for Kevin approval 2026-08-26. Restraint order pages 1-3 attached. Task rec28HyWB7j1nuffK. Supply address and account number 880000301351 from prior agent context \u2014 unverified in Airtable."
+      ]
+    },
+    {
+      "id": "recuMihlA73Tk5wQ5",
+      "creditor": "Burnley Borough Council Local Taxation",
+      "status": "Awaiting response",
+      "monthlyAmount": 0,
+      "lastContact": "2026-08-27",
+      "nextStep": "",
+      "nextStepDate": "",
+      "recentNotes": [
+        "Council tax account 20005049078. Restraint-order notification sent 2026-08-27 with pages 1-3 of order attached. Task rec8BndJvlPCxrHJA. Holding reply sent 2026-08-27 acknowledging liability order (Ref 20005049078)."
+      ]
+    },
+    {
+      "id": "recvkQ0Dt3JYQFjPA",
+      "creditor": "BW Legal (re Agile Estates Ltd \u2014 Companies House debt)",
+      "status": "Awaiting response",
+      "monthlyAmount": 0,
+      "lastContact": "2026-08-27",
+      "nextStep": "",
+      "nextStepDate": "",
+      "recentNotes": [
+        "Penalty A1940337, Brittain Holdings Limited (11283907). Restraint order evidence sent 2026-08-27 to e***@***.gov.uk. Pages 1-3 attached. Requested hold or reduced plan. Gmail messageId: 1a0435a806e5febd. Task recU0XRxoJAh00WzT."
+      ]
+    },
+    {
+      "id": "recvv7cFM43NKiQqH",
+      "creditor": "Premium Credit",
+      "status": "Awaiting response",
+      "monthlyAmount": 0,
+      "lastContact": "2026-08-28",
+      "nextStep": "",
+      "nextStepDate": "",
+      "recentNotes": [
+        "Credit agreement D460185CRB. Everywhen-SME/Tradesman insurance premiums, policy period 20 March 2025 to 19 March 2026. Annual statement received. Enquiry email sent 2026-08-28 to c***@***.co.uk requesting current status, closing balance, settlement confirmation, and whether a 2026-27 agreement has been set up. Task recPX981SeA90GwCf."
+      ]
+    },
+    {
+      "id": "recwlVOBC3ZTjcjQ5",
+      "creditor": "NatWest MasterCard \u2014 card ending 5204",
+      "status": "Awaiting response",
+      "monthlyAmount": 0,
+      "lastContact": "",
+      "nextStep": "",
+      "nextStepDate": "",
+      "recentNotes": [
+        "Balance \u00a3210.47 as at 8 Aug 2026 statement. Minimum \u00a35.23 due 2 Sep 2026. Previous payments: \u00a36.00 received per statement. NatWest previously waived \u00a312 late fee under cost-of-living support. Restraint-order freeze letter prepared 31 Aug 2026. Task: rec7alvvt370LsEf6."
+      ]
+    },
+    {
+      "id": "recwwQzY3CYP0Q9RY",
+      "creditor": "Premium Credit - 30 BG Insurance - REF 04AFFW8521/010/101",
+      "status": "Awaiting response",
+      "monthlyAmount": 0,
+      "lastContact": "2026-08-27",
+      "nextStep": "",
+      "nextStepDate": "",
+      "recentNotes": [
+        "Cost record recENVuoVNR4u34sE. 41.69/mo, Overdue since June 2026. 30BG property insurance. Status check email prepared 2026-08-27. Email to be sent once Kevin verifies Premium Credit contact email. Task rechekV69SPiV1ran."
+      ]
+    },
+    {
+      "id": "recwzpd88BR3xlLWp",
+      "creditor": "Burnley Borough Council / Lancashire Magistrates Court",
+      "status": "Awaiting response",
+      "monthlyAmount": 0,
+      "lastContact": "2026-08-27",
+      "nextStep": "",
+      "nextStepDate": "",
+      "recentNotes": [
+        "Court summons re council tax 22 Newton Street. Restraint-order freeze letter sent 2026-08-27 with pages 1-3 of order attached. Task rec1ldGtlmrTNnoYM."
+      ]
+    }
+  ],
+  "creditorLedgerError": "",
+  "systemAlerts": [
+    {
+      "id": "rec0QCIMVezkpaKZR",
+      "name": "INBOUND: Invoices Dashboard Apps Script failures",
+      "description": "Google Apps Script Invoices Dashboard script has been failing repeatedly. Similar to the Meetings Intake issue - likely Gmail API quota limits or script errors. Multiple failure emails stranded in label 12. Investigate the Invoices Dashboard Apps Script, reduce trigger frequency or fix the underlying error. Prepare a fix plan for Kevin approval.\n\nUPDATE 2026-08-26: new item folded in by the duplicate gate (one subject = one open task).\nSource: https://mail.google.com/mail/u/0/#all/1a02ac3541a86728\nAdditional failure threads stranded - recurring issue.\n",
+      "notes": "[29 Aug 2026 \u2014 agent-dispatch] Moved off the approval queue: a machine reporting a breakage (matched 'a***@***.com') is work, not a decision. Owned by the builder agent; filed as a finding.",
+      "status": "Today",
+      "dueDate": "2026-08-26",
+      "priority": "High",
+      "urgencyScore": 0,
+      "outcome": "",
+      "feedback": "",
+      "agentOutput": "# Invoices Dashboard Apps Script failures \u2014 what is wrong and the fix\n\n**Task:** rec0QCIMVezkpaKZR \u00b7 26 Aug 2026 \u00b7 Prepare-only, nothing changed yet\n\n## Summary\n\nYour Invoices Dashboard script (the one that copies \"3: to pay\" invoice emails into Airtable) keeps running out of its daily Gmail allowance. It runs every 30 minutes, and most evenings the allowance is gone by about 5pm, so every run after that fails until Google resets the limit early next morning. Google has sent 12 failure summary emails since 30 July. The fix is one setting change: run the script every 2 hours instead of every 30 minutes.\n\n## What is failing (evidence from the failure emails)\n\n- 12 failure summaries from n***@***.com between 30 Jul and 25 Aug 2026, all for script \"Invoices Dashboard\", function `syncGmailToAirtable`, time-based trigger.\n- The run times in every email are :07 and :37 past the hour, which confirms the trigger still fires every 30 minutes. That is 48 runs a day.\n- The dominant error, in every email, is: \"Exception: Service invoked too many times for one day: premium gmail.\" Examples: 9 failed runs on 29 Jul (5:07pm to 9:07pm), 4 on 21 Aug, 8 on 24 Aug. Failures always start late afternoon and repeat every half hour, which is exactly what a used-up daily allowance looks like.\n- Minor extras: one Airtable \"Bandwidth quota exceeded\" on the Invoices table (22 Aug, 7:07pm) and three one-off Google server errors on 24 Aug. These are side effects of running so often, not separate problems.\n\n## Why (the shared root cause)\n\nGoogle gives your account ONE daily pot of Gmail calls, shared by every Apps Script you own. Three scripts are drinking from it: Invoices Dashboard, Meetings Intake and Meetings to Supabase (the two sibling tasks in this run show the same \"premium gmail\" error). Between them the pot empties by late afternoon, then all three fail until the reset. Slowing one script helps all three; slowing all three fixes it.\n\nA fix plan for this exact problem was prepared on 25 Aug (task recsyCXB30AqD0bg8) but that task was Cancelled, so nothing was ever changed.\n\n## Impact\n\nEvenings only: new invoice emails are not copied into the Invoices tab until the next morning's successful run. Nothing is corrupted and nothing is wrongly marked paid; the sync only creates records. This is a delay, not a data problem.\n\n## Fix plan \u2014 recommended option\n\n**Change the trigger from every 30 minutes to every 2 hours.** One setting in the Apps Script Triggers screen, no code change, two minutes of work. It cuts this script's runs from 48 to 12 a day (a 75% cut in its Gmail draw) and also relieves the Airtable bandwidth blip. The dashboard's manual sync button still exists for anything urgent, and invoices do not need 30-minute freshness.\n\nPair it with the sibling fixes for the two Meetings scripts so the shared pot actually lasts the day. Then watch for one week: success is zero \"premium gmail\" failure emails for 7 days.\n\nOptions considered and set aside:\n- 60-minute trigger only: a half measure; with three scripts sharing one pot it may still run dry.\n- Rewriting the script to use fewer Gmail calls: worth doing later, but a code change with test risk, not needed to stop the failures.\n- Moving the sync off Apps Script into daily-ops: biggest change, only justified if the trigger fix fails.\n\n**Carrying this out will involve:** The Invoices Dashboard trigger is changed from every 30 minutes to every 2 hours in the Apps Script Triggers screen (your Google account, no code change), one manual sync is run to catch anything missed, and failure emails are watched for 7 days to confirm zero quota errors.",
+      "taskType": "Admin",
+      "teamMemberIds": [
+        "recQkO6BA4w5zqwZ4"
+      ],
+      "sentForApprovalByIds": [],
+      "approverEmail": "kevin@runpreneur.org.uk",
+      "agentId": "recQkO6BA4w5zqwZ4",
+      "agentName": "AI Worker \u2014 Builder",
+      "localAgent": "worker-builder",
+      "agentRole": "worker",
+      "inboundTask": true,
+      "inboundSourceType": "Gmail",
+      "inboundSender": "n***@***.com",
+      "attachments": [],
+      "tier1": false,
+      "matchedPattern": "",
+      "creditor": false,
+      "tier2Correspondence": false,
+      "alertSource": "a***@***.com"
+    },
+    {
+      "id": "rec0xxPRaE3LP2yAH",
+      "name": "INBOUND: Google Apps Script Meetings Intake failing repeatedly, investigate and fix",
+      "description": "Google reports the Meetings Intake Apps Script has failed repeatedly, roughly fifteen failure summaries a day since 21 August. This is part of the meetings module bridge, so meeting capture may be down. A good outcome reads the failure summary, finds the error, fixes and redeploys the script, and confirms a clean run. Related: the Meetings to Supabase and Invoices Dashboard scripts are also failing and have their own tasks created today.\n",
+      "notes": "[29 Aug 2026 \u2014 agent-dispatch] Moved off the approval queue: a machine reporting a breakage (matched 'a***@***.com') is work, not a decision. Owned by the builder agent; filed as a finding.\n\n[29 Aug 2026 \u2014 agent] Folded from duplicate recPqpTwyBCWs3mPs: 11 failure emails received, script runs on 15-minute time-based trigger hitting Gmail API daily limits.\n\n[29 Aug 2026 \u2014 agent] Dup thread: Gmail quota error detail from twin \u2014 Meetings Intake script failing with Gmail API quota exhaustion. Twin folded in.\n\n[30 Aug 2026 \u2014 agent] twin recPqpTwyBCWs3mPs adds: specific error is Gmail quota error causing Meetings Intake script failures\n\n[30 Aug 2026 \u2014 agent] Twin recPqpTwyBCWs3mPs adds: specific error is Gmail quota error causing Meetings Intake script failures",
+      "status": "Today",
+      "dueDate": "2026-08-26",
+      "priority": "High",
+      "urgencyScore": 0,
+      "outcome": "",
+      "feedback": "",
+      "agentOutput": "# Task: rec0xxPRaE3LP2yAH \u2014 Meetings Intake Apps Script failing\n\n**Status:** PREPARED. Diagnosis confirmed via live test. Awaiting Kevin's approval.\n\n---\n\n## What is actually broken\n\nThe deployed \"Meetings Intake\" Apps Script (project id `1FJlPDhB-xNwrCbIk1IiAjTA3FI3-CAHMDCr3pOZnrQLQUpUs28PtyAe9`) is running every 15 minutes as a time trigger. When the Gmail daily quota is exhausted, `GmailApp.getUserLabelByName()` on line 172 throws the exception:\n\n> `Exception: Service invoked too many times for one day: premium gmail.`\n\nThis was confirmed live by calling `?action=count` on the deployed web app URL \u2014 it returned that exact error right now. The `syncMeetings()` function has no try/catch wrapper around its Gmail calls (lines 229 and 236), so this exception propagates uncaught. Google's trigger runner logs it as a failure and sends a failure summary email.\n\nThe deployed web app health check (`no action` query) responds correctly with `{\"status\":\"ok\",\"message\":\"Gmail Meetings Intake v1\"}`, which confirms the Script Properties and the deployment itself are intact.\n\n---\n\n## Why is the quota being exhausted now?\n\nThe PR #6 fix (June 2026) already dropped the trigger from every-5-min to every-15-min to fix exactly this issue. Something has increased Gmail API usage since then:\n\n**Most likely cause:** The Supabase twin (`gmail-meetings-supabase-script.gs`) was added to the repo on 21 July 2026 and, if deployed as a separate Apps Script project with its own 15-min trigger on the same Gmail account, doubles the Gmail API calls. 96 runs/day x 2 scripts = 192 trigger runs, each calling `GmailApp.getUserLabelByName()` and potentially `GmailApp.getUserLabels()`. This matches the timing of failures starting around 21 August (a month after the Supabase script was available to deploy).\n\nThe inbound triage agent (launched 24 August) also runs Gmail reads, but failures started on 21 August so it is not the trigger.\n\n---\n\n## What needs to be fixed\n\nTwo separate things, in priority order:\n\n### Fix 1 (code fix \u2014 stops Google sending failure emails immediately):\n\nAdd a try/catch around the Gmail calls in `syncMeetings()` so a quota exception is caught and logged rather than thrown. This makes the script fail gracefully and silently instead of generating a failure email on every quota-exceeded run.\n\nIn `/Users/kevinbrittain/Projects/leadership-dashboard/gmail-meetings-script.gs`, replace the two lines at the top of `syncMeetings()` that call Gmail:\n\n```\n  var label = findLabel();\n  if (!label) {\n    var e2 = { error: 'Gmail label \"' + LABEL_NAME + '\" not found', created: 0 };\n    Logger.log('RESULT: ' + JSON.stringify(e2));\n    return e2;\n  }\n\n  var threads = label.getThreads(0, 25);\n```\n\nWith:\n\n```\n  var label, threads;\n  try {\n    label = findLabel();\n    if (!label) {\n      var e2 = { error: 'Gmail label \"' + LABEL_NAME + '\" not found', created: 0 };\n      Logger.log('RESULT: ' + JSON.stringify(e2));\n      return e2;\n    }\n    threads = label.getThreads(0, 25);\n  } catch (gmailErr) {\n    var quota = { skipped: 'gmail_quota', error: String(gmailErr) };\n    Logger.log('RESULT: ' + JSON.stringify(quota));\n    return quota;   // exit cleanly \u2014 no failure summary generated\n  }\n```\n\nThis is the same pattern as the `doGet` wrapper, applied to the time-trigger path.\n\n### Fix 2 (root cause \u2014 reduces Gmail API usage):\n\nCheck whether the \"Meetings to Supabase\" Apps Script project has a 15-min time trigger running against the same Gmail account (`kevin@runpreneur.org.uk`). If it does, **disable or delete that trigger**. The Airtable intake is still the live system of record. The Supabase version should not have an active trigger until the Meetings module migrates.\n\nTo check: go to `script.google.com` \u2192 open the \"Meetings to Supabase\" project \u2192 Triggers (clock icon). If there is a `syncMeetings` trigger set to every 15 minutes, delete it.\n\n---\n\n## Re-deploy steps after the code fix\n\nThe trigger runs at \"Head\" (the saved code), so the fix is live as soon as the code is saved in the Apps Script editor. The versioned `/exec` deployment also needs a bump so the Fix button on the Tasks tab picks up the change:\n\n1. Open `script.google.com/home/projects/1FJlPDhB-xNwrCbIk1IiAjTA3FI3-CAHMDCr3pOZnrQLQUpUs28PtyAe9/edit`\n2. Apply the code change above (use `monaco.editor.getModels()[0].setValue(text)` with the updated source fetched from the raw GitHub URL \u2014 do not use cmd+v, it corrupts UTF-8 characters)\n3. Cmd+S to save (trigger fix goes live immediately)\n4. Deploy > Manage deployments > edit (pencil) > Version = \"New version\" > Deploy (same Deployment ID preserved, so `MEETINGS_SCRIPT_URL` in the app stays valid \u2014 it is now at Version 5)\n5. Wait one 15-min cycle and confirm no new failure emails from Google\n6. Call `?action=count` on the web app URL to confirm it returns `{\"labelCount\":N}` instead of the quota error\n\n---\n\n## What I verified\n\n- Deployed web app health check returns `{\"status\":\"ok\",\"message\":\"Gmail Meetings Intake v1\"}` \u2014 deployment and Script Properties are intact\n- `?action=count` returns the Gmail quota exception right now \u2014 confirms the exact error\n- All Airtable field IDs in the script are valid: Meetings table `tblNodbh9B3WLzCIK`, Tasks `tblqB8b22hKBL4PF1`, Team `tblco0p2OnlLQVAX7` all respond 200 with correct data\n- The Airtable PAT at `~/.config/od/airtable_pat` is valid (200 from meta/whoami)\n- The PAT stored in Script Properties is separate from the local file \u2014 the web app's healthy response confirms it is also set correctly\n- 6 meetings in Airtable, all at status Done, no stuck records\n- The code change is isolated to the Gmail catch path and does not affect any other logic\n\n---\n\n## Files involved\n\n- `/Users/kevinbrittain/Projects/leadership-dashboard/gmail-meetings-script.gs` \u2014 code fix (Fix 1)\n- Apps Script project `1FJlPDhB-xNwrCbIk1IiAjTA3FI3-CAHMDCr3pOZnrQLQUpUs28PtyAe9` \u2014 re-deploy needed after code fix\n- \"Meetings to Supabase\" Apps Script project \u2014 check and disable its trigger (Fix 2, Kevin action)\n\n---\n\n**Carrying this out will involve:** Applying the try/catch patch to gmail-meetings-script.gs, pushing to main, then you paste the updated code into the Apps Script editor (raw GitHub URL method), save, and bump to Version 5. Separately check and disable the Supabase script's trigger.",
+      "taskType": "Analysis",
+      "teamMemberIds": [
+        "recQkO6BA4w5zqwZ4"
+      ],
+      "sentForApprovalByIds": [],
+      "approverEmail": "kevin@runpreneur.org.uk",
+      "agentId": "recQkO6BA4w5zqwZ4",
+      "agentName": "AI Worker \u2014 Builder",
+      "localAgent": "worker-builder",
+      "agentRole": "worker",
+      "inboundTask": true,
+      "inboundSourceType": "Gmail",
+      "inboundSender": "n***@***.com",
+      "attachments": [],
+      "tier1": false,
+      "matchedPattern": "",
+      "creditor": false,
+      "tier2Correspondence": false,
+      "alertSource": "a***@***.com"
+    },
+    {
+      "id": "rec2IEerix5CpWRYm",
+      "name": "INBOUND: Meetings Intake script failing - Gmail quota exceeded again",
+      "description": "Google Apps Script Meetings Intake is failing with: 'Service invoked too many times for one day: premium gmail' (function: syncMeetings, 27 Aug 2026 8:18 PM and 8:33 PM PST). This is the second batch of failures this week (a previous task was created and cancelled). The script hits the Gmail API quota limit, stopping meeting data from syncing. What needs investigating: whether the quota is being exceeded by too-frequent triggers, whether there is a caching issue, or whether this needs a quota increase. Fix should ensure meeting sync runs without exceeding Gmail API daily limits.\n",
+      "notes": "[29 Aug 2026 \u2014 agent-dispatch] Moved off the approval queue: a machine reporting a breakage (matched 'a***@***.com') is work, not a decision. Owned by the builder agent; filed as a finding.",
+      "status": "Today",
+      "dueDate": "2026-08-27",
+      "priority": "High",
+      "urgencyScore": 0,
+      "outcome": "",
+      "feedback": "",
+      "agentOutput": "# Task rec2IEerix5CpWRYm \u2014 Meetings Intake Gmail Quota Exceeded\n## Prepared: 27 August 2026\n\nThis is a Google Apps Script failure notification, not an inbound from a real sender. No outbound email reply is appropriate. This is an internal fix brief.\n\n---\n\n## What is failing\n\nGoogle Apps Script (Meetings Intake, function `syncMeetings`) is hitting the daily Gmail API quota: \"Service invoked too many times for one day: premium gmail\". Failures logged at 8:18 PM and 8:33 PM PST on 27 August. This is the second batch of failures this week.\n\n## What is already known\n\nThe trigger was previously reduced from every 5 minutes to every 15 minutes (PR #6, 26 June 2026) specifically to address Gmail quota. That fix worked at the time. The recurrence suggests either the Gmail API read volume has increased (more meeting summary emails arriving) or the script is re-reading already-processed threads on each run.\n\n## Most likely cause\n\nThe script strips the `15. meeting summary` label from processed threads on each run. If label-stripping fails silently, the script re-reads the same threads on every trigger, multiplying the Gmail API calls. With 96 runs per day at 15-min intervals, even a small number of re-read threads can exhaust the daily quota.\n\n## Fix options (for the builder to investigate)\n\n1. Check the Apps Script execution log for label-stripping errors. If `GmailApp.removeLabel()` is throwing, processed threads stay labelled and get re-read every 15 minutes.\n2. Reduce trigger frequency further (e.g. every 30 minutes) as an immediate mitigation \u2014 halves the API calls without changing the logic.\n3. Add a hard cap: limit `GmailApp.search()` to threads modified in the last X hours only, rather than all threads with the label.\n4. Add explicit error logging for label-strip failures so the cause shows clearly in the next execution.\n\n## No reply needed\n\nThe sender is n***@***.com. Nothing is sent. This brief is for Kevin to route to the builder for a fix session.\n\n**Carrying this out will involve:** Kevin deciding whether to fix this in a build session now or let meeting sync pause until the next natural fix window. The Meetings tab will show incomplete data while this is broken. No external parties are affected.",
+      "taskType": "Research",
+      "teamMemberIds": [
+        "recQkO6BA4w5zqwZ4"
+      ],
+      "sentForApprovalByIds": [],
+      "approverEmail": "kevin@runpreneur.org.uk",
+      "agentId": "recQkO6BA4w5zqwZ4",
+      "agentName": "AI Worker \u2014 Builder",
+      "localAgent": "worker-builder",
+      "agentRole": "worker",
+      "inboundTask": true,
+      "inboundSourceType": "Gmail",
+      "inboundSender": "n***@***.com",
+      "attachments": [],
+      "tier1": false,
+      "matchedPattern": "",
+      "creditor": false,
+      "tier2Correspondence": false,
+      "alertSource": "a***@***.com"
+    },
+    {
+      "id": "recIOogJKMfNFZsI8",
+      "name": "INBOUND: investigate Meetings to Supabase script failure",
+      "description": "Google has notified that the Apps Script named Meetings to Supabase has recently failed to finish successfully. This script handles syncing meetings into the Supabase database. The failure may relate to a deployment issue (Apps Scripts are not redeployed on a git merge). Action needed: investigate the script error details in Google Apps Script console, identify the failure reason, and fix or redeploy. Check if meetings data is falling through as a result.\n",
+      "notes": "[29 Aug 2026 \u2014 agent-dispatch] Moved off the approval queue: a machine reporting a breakage (matched 'a***@***.com') is work, not a decision. Owned by the builder agent; filed as a finding.",
+      "status": "Today",
+      "dueDate": "2026-08-27",
+      "priority": "High",
+      "urgencyScore": 0,
+      "outcome": "",
+      "feedback": "",
+      "agentOutput": "# Brief: \"Meetings to Supabase\" Apps Script failure\n\n**Source:** Automated Google notification (n***@***.com)\n**Date:** 2026-08-27\n**No reply is possible** \u2014 this is an automated sender. This brief is for Kevin's action.\n\n---\n\n## What is this script\n\n`gmail-meetings-supabase-script.gs` is the Supabase-native twin of the Meetings intake\nprocess. It watches Gmail label `15: meeting summary`, parses Zoom/Loom summary emails,\nand writes Meeting rows plus linked Task rows directly into the Supabase Postgres database\n(not Airtable). It runs on a 15-minute time trigger.\n\nIt was committed to the repo on 21 July 2026. That is its only commit \u2014 no fixes have been\napplied to it since, unlike the original Airtable version which received five bug-fix\ncommits between June and July 2026.\n\n---\n\n## What we know about the failure\n\nThe Google notification confirms the script failed to finish. The actual error text is not\nin the notification \u2014 it lives only in the Apps Script execution log.\n\nThree are the most likely causes, in order of probability:\n\n**1. Missing or expired Supabase service key (most likely)**\nThe script reads `SUPABASE_SERVICE_KEY` from Script Properties on every run. If that\nproperty was never set, was cleared, or the key was rotated, the script exits on the first\nline of `syncMeetings()` with: `SUPABASE_URL / SUPABASE_SERVICE_KEY not set in Script\nProperties`. A missing key is logged, not thrown, so Google would still report a failure\nif the run returned an error object rather than completing cleanly.\n\n**2. Execution timeout**\nApps Script has a 6-minute runtime limit per execution. If the meetings queue has a\nbacklog of unprocessed threads, the script times out before it finishes. This produces a\n\"did not finish\" notification rather than a code error.\n\n**3. Supabase schema mismatch**\nMigration `0031_meetings_full_fidelity.sql` added `transcript`, `meeting_uuid`, `zoom_mid`\nand `projects` columns. If that migration was not applied to the live Supabase project, any\ninsert would fail with a PostgREST column error. The script logs the HTTP response code and\nbody on a failed insert, so this would be visible in the execution log.\n\n---\n\n## What we do not know\n\nWe cannot see the actual error from here. The execution log is at:\n`script.google.com/home/projects/` then the project for \"Meetings to Supabase\" under the\n`kevin@runpreneur.org.uk` account.\n\nWe also cannot confirm whether any meeting summaries have been missed as a result, or how\nlong the script has been failing. The notification says \"recently failed\" \u2014 it does not say\nhow many runs failed or since when.\n\n---\n\n## What is not affected\n\nThe original `gmail-meetings-script.gs` (Airtable version) is a separate, independent\nscript. If it is still running, Airtable continues to receive meeting records. The Supabase\nscript is for the migration path only; Airtable remains the system of record until cutover.\n\n---\n\n## Recommended next action\n\nOpen the Apps Script execution log to read the exact error (one minute, read-only). Once\nthe error is identified, the fix will be one of: set the missing Script Property, redeploy\nthe script after checking the Supabase schema is up to date, or clear any label backlog\nthat is causing a timeout.\n\nIf meetings have been missed, the script's `?action=repair` endpoint can recover stuck\nmeetings from stored transcripts without duplicating anything already written.\n\n---\n\n**Carrying this out will involve:** Opening the Apps Script execution log at script.google.com (signed in as kevin@runpreneur.org.uk), reading the exact error, and reporting back so the correct fix can be prepared for Kevin's approval before anything is changed.",
+      "taskType": "Admin",
+      "teamMemberIds": [
+        "recQkO6BA4w5zqwZ4"
+      ],
+      "sentForApprovalByIds": [],
+      "approverEmail": "kevin@runpreneur.org.uk",
+      "agentId": "recQkO6BA4w5zqwZ4",
+      "agentName": "AI Worker \u2014 Builder",
+      "localAgent": "worker-builder",
+      "agentRole": "worker",
+      "inboundTask": true,
+      "inboundSourceType": "Gmail",
+      "inboundSender": "n***@***.com",
+      "attachments": [],
+      "tier1": false,
+      "matchedPattern": "",
+      "creditor": false,
+      "tier2Correspondence": false,
+      "alertSource": "a***@***.com"
+    },
+    {
+      "id": "recPqpTwyBCWs3mPs",
+      "name": "INBOUND: Meetings Intake script failing with Gmail quota error",
+      "description": "Google Apps Script Meetings Intake has been failing repeatedly since early morning with error: Service invoked too many times for one day: premium gmail. The script runs via 15-minute time-based trigger but is hitting Gmail API rate limits. 11 failure emails received. The script is part of the AI Brain meeting sync module. Fix options: reduce trigger frequency, batch API calls, or investigate if the script is calling Gmail API unnecessarily on each run. Prepare a fix plan for Kevin approval before changing the Apps Script.\n\nUPDATE 2026-08-26: new item folded in by the duplicate gate (one subject = one open task).\nSource: https://mail.google.com/mail/u/0/#all/1a02441e0dc0cd3c\nAdditional failure threads stranded - recurring issue.\n",
+      "notes": "[29 Aug 2026 \u2014 agent-dispatch] Moved off the approval queue: a machine reporting a breakage (matched 'a***@***.com') is work, not a decision. Owned by the builder agent; filed as a finding.\n\n[29 Aug 2026 \u2014 agent] Board grouped with Meetings Intake keeper as duplicate on same email thread. Content (11 failures, 15-min trigger) folded into keeper. Close blocked by gate (machine-reported breakage). Left open; content is on the keeper.\n\n[29 Aug 2026 \u2014 agent] Close blocked by dispatch gate: machine-reported breakage cannot go through the approval queue. Content already folded into keeper rec0xxPRaE3LP2yAH. Leaving open for manual close by Kevin once the keeper is resolved.\n\n[30 Aug 2026 \u2014 agent] Gate refused close-propose (apps-script tag). Routing to builder instead. This is a duplicate of the keeper task covering the same Meetings Intake failure. Builder: investigate and consolidate with the keeper task investigation.\n\n[30 Aug 2026 \u2014 agent] Duplicate of keeper rec0xxPRaE3LP2yAH (same Gmail quota error); dispatch blocks gate submission on machine-generated breakage tasks. Content folded into keeper. Leaving open per dispatch guard.\n\n[31 Aug 2026 \u2014 agent] DUPLICATE NOTE: This task is a twin of the keeper task (Google Apps Script Meetings Intake failing repeatedly - rec0xxPRaE3LP2yAH, Status=Today). Both are on the same thread. Dispatch blocks a close submission here - leaving open but flagged. Keeper is assigned to Kevin.\n\n[31 Aug 2026 \u2014 agent] DUPLICATE: board identifies this as a twin of the keeper (INBOUND: Google Apps Script Meetings Intake failing repeatedly). Unique detail (Gmail quota error specifics) already folded into keeper's notes. Dispatch gate refuses close for machine-reported breakage tasks. Leaving open; resolved when keeper is resolved.\n\n[01 Sep 2026 \u2014 agent] 1 Sep 09:00 \u2014 board marks closable (duplicate of rec0xxPRaE3LP2yAH) but gate refuses the close: machine-generated breakage tag blocks submission. Left open. Content already on keeper.\n\n[01 Sep 2026 \u2014 agent] 13 Sep 2026 13:00: duplicate of rec0xxPRaE3LP2yAH; gate refuses submit (auto-email pattern block). Leaving open; keeper holds all content. Finding filed.",
+      "status": "Today",
+      "dueDate": "2026-08-26",
+      "priority": "High",
+      "urgencyScore": 0,
+      "outcome": "",
+      "feedback": "",
+      "agentOutput": "# Meetings Intake failing: Gmail daily quota. Fix plan for approval.\n\n## What is failing\nThe Google Apps Script \"Meetings Intake\" (function `syncMeetings`, 15-minute time trigger, 96 runs a day). Every failed run throws:\n\n> Exception: Service invoked too many times for one day: premium gmail\n\n11 failure emails so far, verified in Gmail: 5 on 24 Aug (16:33 to 17:48 UTC), 5 on 25 Aug (17:48 to 19:03 UTC), plus the earlier example thread. Failures cluster late in the quota day and stop when the quota resets. That pattern means the daily allowance ran out, not that this script has a new bug.\n\n## Why it is failing\n- Google's Apps Script Gmail quota is 50,000 read/write calls a day for a Workspace account (\"premium\" in the error). Verified on Google's quota page. The quota is per USER ACCOUNT, shared by every script running as kevin@runpreneur.org.uk, and resets 24 hours after the first call.\n- Three scripts share this one pool: Meetings Intake, Meetings to Supabase, and Invoices Dashboard. All three have failed with the same error this week. The Invoices Dashboard reconcile walks its entire label backlog (the \"Invoice to Airtable\" label holds around 1,800 threads) and is the likely main burner. That is the sibling task rec0QCIMVezkpaKZR, not this one.\n- Meetings Intake itself is lean right now. I checked the live label: \"15: meeting summary\" currently holds 0 threads, so each run costs only a handful of Gmail calls. This script is mostly the canary, not the cause. But it still polls 96 times a day, and its twin (Meetings to Supabase) polls the SAME label another 96 times a day during the migration parallel run.\n- One real defect found in the code: the script's `LABEL_NAME` is \"15. meeting summary\" (full stop) but the live Gmail label is \"15: meeting summary\" (colon). The exact-name lookup misses every run, forcing a second Gmail call to list all labels, and the fallback prefix match can latch onto the wrong label (\"15. meeting summary/processed\" also starts with \"15.\"). Source: `gmail-meetings-script.gs` line 53 versus the live label list.\n\n## Fix options considered\n1. Reduce trigger frequency. Meeting summaries arrive a few times a day at most. Hourly instead of every 15 minutes cuts this script's runs from 96 to 24 with no real delay cost.\n2. Batch or trim API calls. Only one worthwhile trim exists: fix `LABEL_NAME` to the exact live name so the first lookup hits, saving one Gmail call per run and removing the wrong-label risk.\n3. Investigate unnecessary calls. Done. The backlog re-read trap was already fixed in a previous pass (processed threads get the label stripped). Nothing else inside this script wastes calls.\n\n## Recommended fix (one option)\nDo 1 and 2 together, one visit to the Apps Script editor:\n- Change the `syncMeetings` trigger from every 15 minutes to hourly.\n- Change line 53 `LABEL_NAME` from \"15. meeting summary\" to \"15: meeting summary\".\n- Update the repo copy of `gmail-meetings-script.gs` to match, since merging to the repo never redeploys the live script.\n\nBe clear on the limit of this fix: it cuts this script's quota use by roughly three quarters and stops it grabbing the wrong label, but the quota is account-wide. If the Invoices Dashboard burner (its own task) is not also fixed, Meetings Intake will still fail on days the pool runs dry. The two fixes belong together; this one stands on its own and costs nothing either way.\n\n**Carrying this out will involve:** A session opens script.google.com in your Chrome, sets the Meetings Intake trigger to hourly, fixes the label name in the live script and the repo copy, then watches the next run succeed. No meeting data is touched. Quota errors will only fully stop once the sibling Invoices Dashboard fix also lands.",
+      "taskType": "Admin",
+      "teamMemberIds": [
+        "recQkO6BA4w5zqwZ4"
+      ],
+      "sentForApprovalByIds": [],
+      "approverEmail": "kevin@runpreneur.org.uk",
+      "agentId": "recQkO6BA4w5zqwZ4",
+      "agentName": "AI Worker \u2014 Builder",
+      "localAgent": "worker-builder",
+      "agentRole": "worker",
+      "inboundTask": true,
+      "inboundSourceType": "Gmail",
+      "inboundSender": "n***@***.com",
+      "attachments": [],
+      "tier1": false,
+      "matchedPattern": "",
+      "creditor": false,
+      "tier2Correspondence": false,
+      "alertSource": "a***@***.com"
+    },
+    {
+      "id": "recR6H3i4q8ymUQrc",
+      "name": "INBOUND: Google Apps Script Meetings Intake failing, Gmail quota exceeded",
+      "description": "Google Apps Script Meetings Intake failing three times today (9:33PM, 10:33PM, 10:48PM PST Aug 26). Error: Service invoked too many times for one day: premium gmail. The syncMeetings function is hitting the Gmail API daily quota. Similar failures flagged Aug 24 and 25 (both tasks Cancelled). This suggests the script triggers too frequently or each run makes too many Gmail API calls. Options: (1) reduce the trigger frequency, (2) optimise the syncMeetings function to batch Gmail calls, (3) check if this affects the Meetings module functionality. From: n***@***.com\n",
+      "notes": "[29 Aug 2026 \u2014 agent-dispatch] Moved off the approval queue: a machine reporting a breakage (matched 'a***@***.com') is work, not a decision. Owned by the builder agent; filed as a finding.",
+      "status": "Today",
+      "dueDate": "2026-08-26",
+      "priority": "High",
+      "urgencyScore": 0,
+      "outcome": "",
+      "feedback": "",
+      "agentOutput": "# INBOUND: Google Apps Script Meetings Intake failing, Gmail quota exceeded\n\nTask ID: recR6H3i4q8ymUQrc\nPrepared: 2026-08-26\nSource: n***@***.com (automated)\nTask Type: Research\n\n---\n\n## What is happening\n\nThe Meetings Intake Google Apps Script (`gmail-meetings-script.gs`) is hitting Gmail's\ndaily API read quota. Three failure notifications arrived on 26 Aug (21:33, 22:33, 22:48\nPST). Similar failures were logged on 24 and 25 Aug and the tasks were cancelled rather\nthan fixed.\n\nThe error is: \"Service invoked too many times for one day: premium gmail.\"\n\nThis is not a new problem. It was seen before in June 2026 and was addressed in PR #6 by\nreducing the trigger from every 5 minutes to every 15 minutes. The fix was verified live\non 26 Jun 2026. Something has changed since then.\n\n---\n\n## Why it is failing again\n\nThree likely causes, in order of probability:\n\n1. The trigger interval crept back to 5 minutes (or another short interval).\n   The Apps Script trigger is set in the Google Apps Script project UI, not in the `.gs`\n   file itself. A re-deploy or a manual edit could have reset it. This is the most likely\n   cause because the 15-minute fix was the specific remedy applied in June.\n\n2. The number of Gmail threads being scanned has grown significantly.\n   The `syncMeetings` function reads threads under label `15. meeting summary`. If many\n   threads have accumulated (never stripped after processing), each run reads them all.\n   The script should strip the label from processed threads each run. If this is not\n   happening correctly, the read count compounds over time.\n\n3. The script is being triggered from multiple sources simultaneously.\n   If the web-app `/exec` endpoint is being called externally (e.g. the \"Fix incomplete\"\n   button in the dashboard) at the same time the time-based trigger fires, the daily\n   quota can be hit by the combined calls rather than either alone.\n\n---\n\n## What the Aug 24-25 cancelled tasks mean\n\nThe tasks were cancelled, not completed with a fix. This means the quota issue was not\nresolved. It has been recurring daily for at least three days.\n\n---\n\n## Recommended fix (in priority order)\n\n1. Open the Apps Script project at script.google.com and check the trigger. It should be\n   a time-based trigger firing every 15 minutes. If it is set to every 5 minutes or more\n   frequently, change it back to 15 minutes.\n\n2. Check that processed threads are getting the `15. meeting summary` label removed each\n   run. If threads are accumulating, the scan grows every day. The repair function should\n   also strip labels on Done records.\n\n3. If the quota keeps being exceeded even at 15 minutes, increase the interval to 30\n   minutes. Meeting summaries rarely need sub-30-minute latency.\n\n4. As a diagnostic: check the Apps Script execution log for the last 24 hours to see how\n   many API calls each run is making. A single run making hundreds of calls indicates\n   label accumulation. A normal run should be processing only new threads.\n\n---\n\n## What cannot be verified from here\n\nThe actual trigger interval currently set in the live Apps Script project UI cannot be\nread from this agent. That requires opening script.google.com and checking manually, or\nusing the Chrome browser session to inspect it.\n\n---\n\n## Note on the cancelled Aug 24-25 tasks\n\nThose tasks were marked Cancelled. The brain memory shows the June 2026 fix reduced the\ntrigger to 15 minutes and the script was deployed live. Either the trigger reset\n(re-deploy wipes time triggers and requires them to be recreated), or volume has grown\npast what 15-minute intervals can accommodate.\n\nThis is a worker-builder task. The script file lives in the repo at\n`gmail-meetings-script.gs`. Any code change must also be redeployed into the live Apps\nScript project (merging the PR does NOT deploy the script).\n\n**Carrying this out will involve:** No action taken yet. This is a research summary for Kevin's review. Approving routes this to worker-builder to (1) check the live trigger interval in the Apps Script UI, (2) review the execution log for call volume, and (3) apply the shortest fix needed (reset to 15-min or 30-min trigger).",
+      "taskType": "Analysis",
+      "teamMemberIds": [
+        "recQkO6BA4w5zqwZ4"
+      ],
+      "sentForApprovalByIds": [],
+      "approverEmail": "kevin@runpreneur.org.uk",
+      "agentId": "recQkO6BA4w5zqwZ4",
+      "agentName": "AI Worker \u2014 Builder",
+      "localAgent": "worker-builder",
+      "agentRole": "worker",
+      "inboundTask": true,
+      "inboundSourceType": "Gmail",
+      "inboundSender": "n***@***.com",
+      "attachments": [],
+      "tier1": false,
+      "matchedPattern": "",
+      "creditor": false,
+      "tier2Correspondence": false,
+      "alertSource": "a***@***.com"
+    },
+    {
+      "id": "recYCuBAGGTb0zr35",
+      "name": "INBOUND: Airtable automation someday task checkbox failing today",
+      "description": "Airtable automation 'When a someday task is assigned and voice note is unchecked, then it will removed the someday checkbox' failed on 27 Aug 2026 at 10:47 AM UTC. What needs investigating: review the automation logic in Airtable, check why it is failing (possibly a permission issue, field rename, or trigger condition change), and fix or disable it.\n",
+      "notes": "[29 Aug 2026 \u2014 agent-dispatch] Moved off the approval queue: a machine reporting a breakage (matched 'n***@***.com') is work, not a decision. Owned by the builder agent; filed as a finding.",
+      "status": "Today",
+      "dueDate": "2026-08-27",
+      "priority": "High",
+      "urgencyScore": 0,
+      "outcome": "",
+      "feedback": "",
+      "agentOutput": "# Task recYCuBAGGTb0zr35 \u2014 Airtable Automation: Someday Checkbox Failing\n## Prepared: 27 August 2026\n\nThis is an Airtable automation failure notification from n***@***.com. No outbound reply is needed. This is an internal fix brief.\n\n---\n\n## What is failing\n\nAutomation: \"When a someday task is assigned and voice note is unchecked, then it will remove the someday checkbox\"\nFailed: 27 August 2026 at 10:47 AM UTC.\n\n## Most likely causes\n\nAirtable automations fail for three common reasons:\n\n1. A field referenced in the automation has been renamed or deleted. If the \"someday\" checkbox field or the \"voice note\" checkbox field was renamed at any point, the trigger condition or action will fail silently on the next run.\n2. A permission issue: if the automation is running as a user who no longer has access to the field or table, it will fail.\n3. The trigger condition is no longer firing correctly because the field type was changed (e.g. a checkbox field converted to another type).\n\n## Recommended investigation\n\nOpen the Airtable Operations Director base, go to Automations, find \"When a someday task is assigned and voice note is unchecked\", and check the Run history. The error message in the last failed run will identify which step failed (trigger, condition, or action) and which field it could not read.\n\nIf the field has been renamed: update the automation to reference the new field name.\nIf it is a permission issue: re-authenticate the automation's run-as account.\nIf the automation is no longer needed: disable it rather than leaving it in a failing state.\n\n## No reply needed\n\nThe sender is n***@***.com. Nothing is sent. This is a fix-it brief for the next build or operations session.\n\n**Carrying this out will involve:** Kevin or the builder opening the Airtable automation log for this specific automation, reading the error on the failed run, and either fixing the field reference or disabling the automation. Takes under 10 minutes once the error is read.",
+      "taskType": "Research",
+      "teamMemberIds": [
+        "recQkO6BA4w5zqwZ4"
+      ],
+      "sentForApprovalByIds": [],
+      "approverEmail": "kevin@runpreneur.org.uk",
+      "agentId": "recQkO6BA4w5zqwZ4",
+      "agentName": "AI Worker \u2014 Builder",
+      "localAgent": "worker-builder",
+      "agentRole": "worker",
+      "inboundTask": true,
+      "inboundSourceType": "Gmail",
+      "inboundSender": "n***@***.com",
+      "attachments": [],
+      "tier1": false,
+      "matchedPattern": "",
+      "creditor": false,
+      "tier2Correspondence": false,
+      "alertSource": "n***@***.com"
+    },
+    {
+      "id": "recdPdhnaf6KhpJKt",
+      "name": "INBOUND: Airtable automation Track Previous Assignee failing (x2 today)",
+      "description": "Airtable automation 'Track Previous Assignee' in the Operations Director base failed on 27 Aug 2026 at 10:47 AM UTC and again at 11:35 AM UTC. This automation is responsible for tracking who previously held a task before it was reassigned. What needs investigating: open the Airtable automation failure log, identify the error cause, and fix or disable the automation if it is no longer needed.\n",
+      "notes": "[29 Aug 2026 \u2014 agent-dispatch] Moved off the approval queue: a machine reporting a breakage (matched 'n***@***.com') is work, not a decision. Owned by the builder agent; filed as a finding.",
+      "status": "Today",
+      "dueDate": "2026-08-27",
+      "priority": "High",
+      "urgencyScore": 0,
+      "outcome": "",
+      "feedback": "",
+      "agentOutput": "# Task recdPdhnaf6KhpJKt \u2014 Airtable Automation: Track Previous Assignee Failing\n## Prepared: 27 August 2026\n\nThis is an Airtable automation failure notification from n***@***.com. No outbound reply is needed. Internal fix brief only.\n\n---\n\n## What is failing\n\nAutomation: \"Track Previous Assignee\" in the Operations Director base.\nFailed: 27 August 2026 at 10:47 AM UTC and again at 11:35 AM UTC (two failures within 48 minutes).\n\n## Purpose of this automation\n\nWhen a task is reassigned to a different team member, this automation captures who previously held it. This is used for audit trail and handover context. If it is broken, reassigned tasks lose the previous-assignee record.\n\n## Most likely causes\n\n1. The linked field for Team Member (Assignee) has been updated recently. If the field ID changed, or a new multi-select format was introduced, the automation's \"previous value\" comparison may fail.\n2. The automation is writing to a field that no longer exists or has been renamed (e.g. a \"Previous Assignee\" field that was removed or renamed in a schema change).\n3. The automation is running twice on the same record because a trigger fired twice (some Airtable automation conditions double-fire when a record is updated by another automation).\n\n## Recommended investigation\n\nOpen Airtable Operations Director base, Automations, find \"Track Previous Assignee\", check the Run history for the 10:47 AM UTC failure. The error message will say which step failed. Look for:\n- \"Field not found\" \u2014 field was renamed or deleted\n- \"Invalid value\" \u2014 data type mismatch (e.g. single linked record vs multi-select)\n- \"Permission denied\" \u2014 automation run-as account issue\n\nIf the automation is writing to a text or formula field to capture the previous name, check that field still exists in the Tasks table.\n\n## No reply needed\n\nThe sender is n***@***.com. Nothing is sent. Fix-it brief only.\n\n**Carrying this out will involve:** Kevin or the builder opening the Airtable automation log, reading the specific error on one of today's failed runs, and fixing the broken field reference or trigger condition. Likely a 5-10 minute fix once the error message is read.",
+      "taskType": "Research",
+      "teamMemberIds": [
+        "recQkO6BA4w5zqwZ4"
+      ],
+      "sentForApprovalByIds": [],
+      "approverEmail": "kevin@runpreneur.org.uk",
+      "agentId": "recQkO6BA4w5zqwZ4",
+      "agentName": "AI Worker \u2014 Builder",
+      "localAgent": "worker-builder",
+      "agentRole": "worker",
+      "inboundTask": true,
+      "inboundSourceType": "Gmail",
+      "inboundSender": "n***@***.com",
+      "attachments": [],
+      "tier1": false,
+      "matchedPattern": "",
+      "creditor": false,
+      "tier2Correspondence": false,
+      "alertSource": "n***@***.com"
+    },
+    {
+      "id": "recjDFlwh5At38EcD",
+      "name": "INBOUND: Cloudflare KV at 90 percent daily limit, review usage and consider upgrade",
+      "description": "Cloudflare alert: Workers KV daily free-tier limit is at 90%. If exceeded before reset at 00:00 UTC Aug 27, Workers KV will return 429 errors and workers will fail. Similar alerts arrived Aug 24 and 25 (both tasks Cancelled). Options: (1) wait for midnight UTC reset tonight, (2) upgrade to Workers Paid plan ($5/mo, 10M reads + 1M writes), (3) investigate which worker is generating the high KV call volume. From: n***@***.com\n",
+      "notes": "[29 Aug 2026 \u2014 agent-dispatch] Moved off the approval queue: a machine reporting a breakage (matched 'n***@***.com') is work, not a decision. Owned by the builder agent; filed as a finding.",
+      "status": "Today",
+      "dueDate": "2026-08-26",
+      "priority": "High",
+      "urgencyScore": 0,
+      "outcome": "",
+      "feedback": "",
+      "agentOutput": "# Cloudflare KV at 90% daily limit \u2014 decision required\n\nTask recjDFlwh5At38EcD | Admin | Prepare only | 26 Aug 2026\n\n## Situation\n\nCloudflare emailed to say Workers KV is at 90% of the free daily limit. If it hits 100% before 01:00 BST tonight (00:00 UTC 27 Aug), Workers KV returns 429 errors and workers fail until the reset.\n\nThe same alert fired on 24 and 25 August. Both previous tasks were Cancelled without action, so the underlying issue has not been fixed.\n\n## Culprit: fpl-relay worker, STATS namespace (confirmed)\n\nThe prior task rece5YKNIdBR4EQOI diagnosed this in full. The fpl-relay worker in the Fantasy Football Meta project writes one KV key per page hit (to avoid race conditions). Each hit costs 2 KV operations: one list read plus one write. With hundreds of daily visits, this alone blows through the free tier cap of 1,000 writes per day. The code fix was proposed and approved in that task but has not been deployed.\n\n## Three options\n\nOption A: Wait for tonight's reset (01:00 BST).\nNothing to do now. If the 90% limit is reached before reset, fpl-relay's hit tracking fails for a few hours. Stats for today are incomplete. The problem returns tomorrow.\n\nOption B: Deploy the approved code fix now (free, resolves the root cause).\nTask rece5YKNIdBR4EQOI approved a fix: replace the one-key-per-hit model in relay/worker.js with a counter, reducing STATS writes from hundreds per day to roughly 4 per day. This takes it permanently inside the free cap. Requires a build session and a wrangler deploy. Takes 30-60 minutes.\n\nOption C: Upgrade to Cloudflare Workers Paid plan ($5/month, approximately \u00a34/month).\nRaises the KV write limit from 1,000 to 1,000,000 per day, account-wide. Applies to OD workers too. No code change needed. 2-minute fix in the Cloudflare dashboard. The code fix in Option B can still follow later and would allow a downgrade if you want to reduce the spend.\n\n## Recommendation\n\nOption B first, Option C as a bridge if needed today.\n\nThe code fix is already approved. Deploying it removes the problem permanently at no cost. If you want stats tracking back up and running before the fix is deployed, Option C is the fastest unblock at \u00a34/month. Options B and C are not mutually exclusive.\n\nOption A alone is not a fix. The alert will fire again tomorrow.\n\nThe spend threshold here is under \u00a350/month either way, so this is an act-and-inform decision, not an escalation.\n\n## What is NOT done here\n\nNo code has been changed. No Cloudflare plan has been changed. No worker has been deployed. This is a decision brief only.\n\n**Carrying this out will involve:** If Option B: a build session editing relay/worker.js and deploying via wrangler (30-60 min, approved code change). If Option C: Kevin logging into the Cloudflare dashboard and upgrading to Workers Paid ($5/mo). Both options can run together. Kevin confirms which path to take.",
+      "taskType": "Analysis",
+      "teamMemberIds": [
+        "recQkO6BA4w5zqwZ4"
+      ],
+      "sentForApprovalByIds": [],
+      "approverEmail": "kevin@runpreneur.org.uk",
+      "agentId": "recQkO6BA4w5zqwZ4",
+      "agentName": "AI Worker \u2014 Builder",
+      "localAgent": "worker-builder",
+      "agentRole": "worker",
+      "inboundTask": true,
+      "inboundSourceType": "Gmail",
+      "inboundSender": "n***@***.com",
+      "attachments": [],
+      "tier1": false,
+      "matchedPattern": "",
+      "creditor": false,
+      "tier2Correspondence": false,
+      "alertSource": "n***@***.com"
+    },
+    {
+      "id": "recjXQILkl0GNnhCF",
+      "name": "INBOUND: Invoices Dashboard Apps Script failing again",
+      "description": "Google has notified that the Apps Script named Invoices Dashboard has recently failed to finish successfully. A prior task for this script failure is already in the approval queue (rec0QCIMVezkpaKZR). This new notification indicates the script is still failing. Action: investigate the specific error in the Apps Script console, determine if the fix prepared earlier is still pending or if a different error is now occurring.\n",
+      "notes": "[29 Aug 2026 \u2014 agent-dispatch] Moved off the approval queue: a machine reporting a breakage (matched 'a***@***.com') is work, not a decision. Owned by the builder agent; filed as a finding.",
+      "status": "Today",
+      "dueDate": "2026-08-27",
+      "priority": "High",
+      "urgencyScore": 0,
+      "outcome": "",
+      "feedback": "",
+      "agentOutput": "# INBOUND: Invoices Dashboard Apps Script failing again\n\nTask ID: recjXQILkl0GNnhCF\nDate: 2026-08-27\nSource: Google Apps Script automated notification (n***@***.com)\nAction required: No email reply possible. Brief for Kevin only.\n\n---\n\n## What this is\n\nAnother automated failure notification for the Invoices Dashboard Apps Script. The sender is a Google no-reply address; there is no reply to draft. This notification arrived on 27 Aug, the day after the existing approval task (rec0QCIMVezkpaKZR) was created.\n\n## Status of the existing task\n\nTask rec0QCIMVezkpaKZR (\"INBOUND: Invoices Dashboard Apps Script failures\") is sitting in Approval status as of 26 Aug 2026. It is one day overdue. It contains a full diagnosis and a ready fix plan. Nothing has been changed yet because Kevin has not approved it.\n\nThe fix prepared in that task: change the Invoices Dashboard trigger from every 30 minutes to every 2 hours. One setting in the Apps Script Triggers screen, no code change.\n\n## Why the script is still failing\n\nThe approval has not been actioned. The script is still running at the old 30-minute cadence, exhausting the shared Gmail daily quota every afternoon. This new notification is the same failure, not a new or different problem.\n\n## Recommended next step\n\nAction the existing approval task rec0QCIMVezkpaKZR. The fix plan is already there. If Kevin approves it, the change can be made immediately.\n\nAirtable link: https://airtable.com/appnqjDpqDniH3IRl/tblqB8b22hKBL4PF1/viwiVYnnrBPMW45Tg/rec0QCIMVezkpaKZR\n\n---\n\n**Carrying this out will involve:** Kevin approving the existing task rec0QCIMVezkpaKZR, after which the Invoices Dashboard Apps Script trigger is changed from every 30 minutes to every 2 hours in the Apps Script Triggers screen. No code change. Takes under 2 minutes.",
+      "taskType": "Admin",
+      "teamMemberIds": [
+        "recQkO6BA4w5zqwZ4"
+      ],
+      "sentForApprovalByIds": [],
+      "approverEmail": "kevin@runpreneur.org.uk",
+      "agentId": "recQkO6BA4w5zqwZ4",
+      "agentName": "AI Worker \u2014 Builder",
+      "localAgent": "worker-builder",
+      "agentRole": "worker",
+      "inboundTask": true,
+      "inboundSourceType": "Gmail",
+      "inboundSender": "n***@***.com",
+      "attachments": [],
+      "tier1": false,
+      "matchedPattern": "",
+      "creditor": false,
+      "tier2Correspondence": false,
+      "alertSource": "a***@***.com"
+    },
+    {
+      "id": "recpB3k4VLPaZH78U",
+      "name": "INBOUND: Airtable automation task assignment Slack alert failing (x3 today)",
+      "description": "Airtable automation 'When task is assigned to team member, Then send slack alert to notify team member' failed multiple times (at least 3 times) on 27 Aug 2026. This automation is load-bearing: when Kevin or an agent assigns a task to a team member, it sends them a Slack DM. If it is broken, team members stop receiving task notifications. What needs investigating: check the Airtable automation log for the specific error, check the Slack webhook or connection used, and fix the trigger or action causing failure.\n",
+      "notes": "[29 Aug 2026 \u2014 agent-dispatch] Moved off the approval queue: a machine reporting a breakage (matched 'n***@***.com') is work, not a decision. Owned by the builder agent; filed as a finding.",
+      "status": "Today",
+      "dueDate": "2026-08-27",
+      "priority": "High",
+      "urgencyScore": 0,
+      "outcome": "",
+      "feedback": "",
+      "agentOutput": "# Task recpB3k4VLPaZH78U \u2014 Airtable Automation: Task Assignment Slack Alert Failing\n## Prepared: 27 August 2026\n\nThis is an Airtable automation failure notification from n***@***.com. No outbound reply is needed. Internal fix brief only.\n\n---\n\n## What is failing\n\nAutomation: \"When task is assigned to team member, Then send slack alert to notify team member\"\nFailed at least 3 times on 27 August 2026.\n\n## Why this is load-bearing\n\nWhen Kevin or an agent assigns a task to Roy, Mica, or Ericamae, this automation sends them a Slack DM. If it is broken, team members do not receive task notifications and assigned work sits unseen. Given the agent-only routing introduced 25 August 2026, task assignment volume is higher than before. This needs fixing today.\n\n## Most likely causes\n\n1. The Slack connection in Airtable has expired or been revoked. Airtable's Slack integration requires periodic re-authorisation and the token may have expired.\n2. The Slack webhook URL used by this automation has been invalidated (e.g. if the Slack app was reinstalled or the channel was deleted).\n3. The automation is trying to send to a user or channel that no longer exists in the Slack workspace.\n4. Roy was recently added as a team member (25 August 2026). If the automation looks up Slack user IDs from the Team Members table, Roy's Slack user ID mapping may be missing or incorrect, causing it to fail when tasks are assigned to him.\n\n## Recommended investigation\n\nOpen Airtable Operations Director base, Automations, find \"When task is assigned to team member, Then send slack alert to notify team member\", check the Run history for today's failures. Note:\n- What the error message says (connection failed / invalid token / user not found)\n- Whether the failure is on ALL assignees or just one (if Roy only, the mapping is the issue)\n- Whether the Slack connection in Airtable's app integrations shows as connected or disconnected\n\nIf the Slack connection is expired: re-authorise it in Airtable Settings > Integrations > Slack.\nIf Roy's mapping is missing: add his Slack user ID to the Team Members table in the Slack User ID field (Roy's Slack handle is U0AAN4CTVQQ per contractor-bot.js).\n\n## Interim workaround\n\nUntil fixed, Roy needs to be notified of new task assignments manually (direct Slack message or email). Mica and Ericamae should also be checked \u2014 if they are failing too, the issue is the connection, not Roy's record.\n\n**Carrying this out will involve:** Kevin or the builder checking the Airtable automation failure log today, reconnecting the Slack integration if expired, or adding Roy's Slack user ID if his mapping is missing. Fix should take under 15 minutes once the error message is read.",
+      "taskType": "Research",
+      "teamMemberIds": [
+        "recQkO6BA4w5zqwZ4"
+      ],
+      "sentForApprovalByIds": [],
+      "approverEmail": "kevin@runpreneur.org.uk",
+      "agentId": "recQkO6BA4w5zqwZ4",
+      "agentName": "AI Worker \u2014 Builder",
+      "localAgent": "worker-builder",
+      "agentRole": "worker",
+      "inboundTask": true,
+      "inboundSourceType": "Gmail",
+      "inboundSender": "n***@***.com",
+      "attachments": [],
+      "tier1": false,
+      "matchedPattern": "",
+      "creditor": false,
+      "tier2Correspondence": false,
+      "alertSource": "n***@***.com"
+    },
+    {
+      "id": "recppOU0OBqNDyKKE",
+      "name": "INBOUND: Cloudflare KV put limit exceeded - investigate and fix",
+      "description": "Cloudflare Workers KV hit the free tier limit of 1000 put operations per day. Operations were blocked until midnight UTC 26 Aug 2026. Three alert emails received. KV is used by Fantasy Football Meta Worker and the eBay Arbitrage Engine. Identify which Worker is causing excessive KV puts, then either optimise the code to reduce writes or upgrade to Workers Paid plan at $5/month. Limit has reset now but will recur without a fix. Prepare an investigation and fix plan for Kevin approval.\n\nUPDATE 2026-08-26: new item folded in by the duplicate gate (one subject = one open task).\nSource: https://mail.google.com/mail/u/0/#all/1a03971e5da88765\nAdditional alert: KV daily operation limit 90% reached on earlier date - trend shows repeated hits. Multiple threads stranded.\n\nUPDATE 2026-08-29: new item folded in by the duplicate gate (one subject = one open task).\nSource: https://mail.google.com/mail/u/0/#all/1a03f0fb015faa13\nSubject: [Alert] KV daily operation limit exceeded for account: Kevinbrittain@gmail[.]com's Account From: Cloudflare [n***@***.com](mailto:n***@***.com) Stranded in label 12 without an active task. Check what is being asked and draft appropriate response in Kevin voice.\n",
+      "notes": "[29 Aug 2026 \u2014 agent-dispatch] Moved off the approval queue: a machine reporting a breakage (matched 'n***@***.com') is work, not a decision. Owned by the builder agent; filed as a finding.",
+      "status": "Today",
+      "dueDate": "2026-08-26",
+      "priority": "High",
+      "urgencyScore": 0,
+      "outcome": "",
+      "feedback": "",
+      "agentOutput": "# Cloudflare KV daily write limit \u2014 investigation result and fix plan\n\n## Summary\nThe culprit is neither Fantasy Football Meta nor the eBay engine. It is the OD **sms-email-bridge** Worker. It writes a \"last poll time\" note to KV storage every single minute, 24 hours a day. That is 1,440 writes per day against a free limit of 1,000. The limit is guaranteed to trip at around 16:40 UTC every day, which is why the alerts keep repeating. Recommended fix: a one-line code change, cost \u00a30. No upgrade needed.\n\n## Evidence (from Cloudflare's own usage stats, read-only)\nDaily KV writes per store, 23 to 26 Aug:\n\n| Store (Worker) | 23 Aug | 24 Aug | 25 Aug | 26 Aug (to 12:05) |\n|---|---|---|---|---|\n| SMS_STATE (sms-email-bridge) | 1,440 | 1,439 | 1,440 | 688 |\n| PREDICTIONS (Fantasy Football) | 2 | 2 | 2 | 3 |\n| STATS (Fantasy Football) | 5 | 2 | 1 | 3 |\n| GMAIL_AUTH (drive-upload) | 0 | 2 | 0 | 0 |\n\nFantasy Football writes 2 to 5 times a day. The eBay Arbitrage Engine does not use Cloudflare KV at all; it is a local Python tool on the Mac (checked the whole repo, zero KV code). The task description's assumption about those two Workers was wrong.\n\n## The exact cause\n`workers/sms-email-bridge/worker.js`, line 110. The Worker polls GoHighLevel for new inbound SMS every minute (cron `* * * * *`), and the first thing each poll does is:\n\n`await env.SMS_STATE.put('lastPollTime', new Date().toISOString());`\n\nOne write per minute, whether or not any SMS arrived. The only thing this value feeds is the Worker's own `/test` diagnostic page. Nothing else in the codebase reads it. The two useful writes (last message timestamp, forwarded count) only fire when an SMS actually arrives, which is rare.\n\n## Hidden damage you should know about\nThe write sits BEFORE the error handling. Once the daily limit trips (about 16:40 UTC), the write fails, the whole poll crashes, and **inbound SMS stops being forwarded to your email from roughly 17:40 to 01:00 UK time, every day**. This has likely been happening for at least the last four days.\n\n## Options\n\n**Option A (recommended): fix the code. \u00a30.**\nRemove the every-minute heartbeat write, or throttle it to once an hour. After the fix the whole account uses under 50 KV writes a day against the 1,000 limit, leaving huge headroom. Delivered through the normal /fix build pipeline: edit, test, deploy with wrangler, verify live. Also restores the evening SMS forwarding outage as a side effect.\n\n**Option B: upgrade to Workers Paid. $5/month (about \u00a34).**\nMakes the symptom go away but pays monthly for a heartbeat nobody reads, and hides the design flaw. Not recommended while Option A is a one-line change.\n\n## Recommendation\nOption A. Approve and a /fix task edits `workers/sms-email-bridge/worker.js` (remove or hourly-throttle the line 110 write), redeploys the Worker, and verifies the write count drops in the same usage stats used above. No money committed, no plan change.\n\n**Carrying this out will involve:** A code-fix task is queued: one line changed in the sms-email-bridge Worker to stop the every-minute KV write, then redeploy and verify writes drop below 50/day. No Cloudflare upgrade, no spend. The daily limit alerts and the evening SMS-forwarding outage both stop.",
+      "taskType": "Analysis",
+      "teamMemberIds": [
+        "recQkO6BA4w5zqwZ4"
+      ],
+      "sentForApprovalByIds": [],
+      "approverEmail": "kevin@runpreneur.org.uk",
+      "agentId": "recQkO6BA4w5zqwZ4",
+      "agentName": "AI Worker \u2014 Builder",
+      "localAgent": "worker-builder",
+      "agentRole": "worker",
+      "inboundTask": true,
+      "inboundSourceType": "Gmail",
+      "inboundSender": "n***@***.com",
+      "attachments": [],
+      "tier1": false,
+      "matchedPattern": "",
+      "creditor": false,
+      "tier2Correspondence": false,
+      "alertSource": "n***@***.com"
+    },
+    {
+      "id": "rectxw5masHLdh8Wg",
+      "name": "INBOUND: Meetings to Supabase Apps Script failures",
+      "description": "Google Apps Script Meetings to Supabase script has been failing. Part of the AI Brain data pipeline (meeting data syncing to Supabase). Multiple failure emails stranded in label 12. Investigate the script, identify the error, and prepare a fix. Likely related to the same Gmail quota issue affecting Meetings Intake, or a separate Supabase connection error.\n\nUPDATE 2026-08-26: new item folded in by the duplicate gate (one subject = one open task).\nSource: https://mail.google.com/mail/u/0/#all/1a02aba34bd67f2c\nAdditional failure thread stranded.\n",
+      "notes": "[29 Aug 2026 \u2014 agent-dispatch] Moved off the approval queue: a machine reporting a breakage (matched 'a***@***.com') is work, not a decision. Owned by the builder agent; filed as a finding.",
+      "status": "Today",
+      "dueDate": "2026-08-26",
+      "priority": "High",
+      "urgencyScore": 0,
+      "outcome": "",
+      "feedback": "",
+      "agentOutput": "# Meetings to Supabase \u2014 Apps Script failures: findings and fix plan\n\n## What is failing\nThe Google Apps Script \"Meetings to Supabase\" (function `syncMeetings`, 15-minute time trigger, account kevin@runpreneur.org.uk). It is the Supabase shadow twin of the Meetings Intake script: it reads Gmail label \"15: meeting summary\" and writes meetings and tasks to Supabase. Source: `gmail-meetings-supabase-script.gs` in the leadership-dashboard repo.\n\n## The evidenced error\nI read all four failure emails in label 12. Every single failure, across every email, is the same one line:\n\n`Exception: Service invoked too many times for one day: premium gmail.`\n\n- 19 Aug email: 21 failures (18 Aug 22:12 to 19 Aug 04:27 PST)\n- 21 Aug email: 25 failures (21 Aug 02:12 to 04:12, then 20:12 to 22 Aug 02:12 PST)\n- 22 Aug email: 9 failures (02:27 to 04:27 PST)\n- 25 Aug email: 15 failures (24 Aug 23:57 to 25 Aug 04:27 PST)\n\nThere is no Supabase or connection error anywhere in the four emails. The Supabase write path is not the problem.\n\n## Cause\nThe Gmail service inside Apps Script has a daily call quota shared across EVERY script on the account. \"premium gmail\" is Google naming the paid Workspace tier of that quota. Once the account's daily allowance is used up, this script dies on its first Gmail call each run until the quota window resets. The failure blocks end at almost exactly 04:27 PST every day, which is the reset point; the rest of the day the script runs clean.\n\nThis script's own Gmail draw is small (a handful of calls per run when the label is empty). It is a victim of the shared quota, not the main consumer. The same quota exhaustion is behind the Meetings Intake and Invoices Dashboard failures covered by the sibling tasks this run; the heavy-consumer question belongs to those investigations.\n\n## Impact\nNo meetings are lost. A failed run leaves the trigger label in place, so any meeting summary arriving during the outage window syncs on the first clean run after reset. The damage is a delay of up to several hours overnight, plus daily failure-email noise into label 12.\n\nOne design note worth knowing: both meeting scripts strip the same trigger label after processing. Whichever runs first on a thread removes it, so the other side relies on its own dedupe and processed-label guards. This has not caused the current failures but is worth revisiting at Supabase cutover.\n\n## Fix plan \u2014 recommended option\nChange this script's time trigger from every 15 minutes to every 1 hour.\n\n- One click in the Apps Script console (Triggers, edit, Minutes timer to Hour timer). No code change, no redeploy, fully reversible.\n- Cuts this script's Gmail draw by roughly 75 percent and cuts its failure-email noise by the same.\n- Hourly is plenty for a shadow build: Airtable remains system of record and the Airtable twin keeps its own cadence.\n\nAlternatives considered and not recommended now: (a) wrapping the first Gmail call to swallow quota errors quietly \u2014 hides the signal without reducing the draw; (b) merging the two meeting scripts into one dual-write script \u2014 the right long-term shape, but a code change during migration for a problem the trigger change resolves.\n\nThe real cure for the account-wide exhaustion sits with whichever script is burning the bulk of the quota; that is the sibling tasks' territory. This change fixes what this script controls.\n\n**Carrying this out will involve:** Kevin (or an approved agent session) opening the Meetings to Supabase project in the Apps Script console and switching the syncMeetings trigger from every 15 minutes to hourly. No code or deployment changes. Overnight failure emails for this script should drop sharply from the next quota window.",
+      "taskType": "Admin",
+      "teamMemberIds": [
+        "recQkO6BA4w5zqwZ4"
+      ],
+      "sentForApprovalByIds": [],
+      "approverEmail": "kevin@runpreneur.org.uk",
+      "agentId": "recQkO6BA4w5zqwZ4",
+      "agentName": "AI Worker \u2014 Builder",
+      "localAgent": "worker-builder",
+      "agentRole": "worker",
+      "inboundTask": true,
+      "inboundSourceType": "Gmail",
+      "inboundSender": "n***@***.com",
+      "attachments": [],
+      "tier1": false,
+      "matchedPattern": "",
+      "creditor": false,
+      "tier2Correspondence": false,
+      "alertSource": "a***@***.com"
+    }
+  ],
+  "royLane": [],
+  "unmappedAgent": [],
+  "unclassified": [],
+  "agents": {
+    "reciHUAEcEkbctnZ6": {
+      "name": "AI CEO (Dan Martell)",
+      "agent": "od-ceo",
+      "role": "ceo"
+    },
+    "rec27NaJB7JNLaBB0": {
+      "name": "AI HR & People (Patrick Lencioni)",
+      "agent": "dept-hr",
+      "role": "head"
+    },
+    "recCzAdg2rO8bha9A": {
+      "name": "AI Wealth (Robert Kiyosaki)",
+      "agent": "dept-wealth",
+      "role": "head"
+    },
+    "recFZ1ofn0OuoZNEr": {
+      "name": "AI Strategy (Gary Keller)",
+      "agent": "dept-strategy",
+      "role": "head"
+    },
+    "recGvMnprGf1hr9Z1": {
+      "name": "AI Finance (Greg Crabtree)",
+      "agent": "dept-finance",
+      "role": "head"
+    },
+    "recMKExCwu0ulMBMG": {
+      "name": "AI Productivity (Chris Bailey)",
+      "agent": "dept-productivity",
+      "role": "head"
+    },
+    "recRStFWWEyHgOD6t": {
+      "name": "AI Operations (Gino Wickman)",
+      "agent": "dept-operations",
+      "role": "head"
+    },
+    "recSvV7a47ze9i5X9": {
+      "name": "AI Legal & Compliance (Keith Cunningham)",
+      "agent": "dept-legal-compliance",
+      "role": "head"
+    },
+    "recYD7avVxouIkH5b": {
+      "name": "AI Systemisation (Dave Jenyns)",
+      "agent": "dept-systemisation",
+      "role": "head"
+    },
+    "recZlgKJZn7xsBfoz": {
+      "name": "AI Mindset (John F. DeMartini)",
+      "agent": "dept-mindset",
+      "role": "head"
+    },
+    "reciAJnPnFEbj5FhX": {
+      "name": "AI Marketing (Alex Hormozi)",
+      "agent": "dept-marketing",
+      "role": "head"
+    },
+    "recpCz18pCLCUf3oJ": {
+      "name": "AI Sales (Jordan Belfort)",
+      "agent": "dept-sales",
+      "role": "head"
+    },
+    "recFMVmHmqAOVPAeJ": {
+      "name": "AI Worker \u2014 Writer",
+      "agent": "worker-writer",
+      "role": "worker"
+    },
+    "recPVA1CgGyyGcBd9": {
+      "name": "AI Worker \u2014 Auditor",
+      "agent": "worker-auditor",
+      "role": "worker"
+    },
+    "recQkO6BA4w5zqwZ4": {
+      "name": "AI Worker \u2014 Builder",
+      "agent": "worker-builder",
+      "role": "worker"
+    },
+    "recbHvWqlQBbunF2F": {
+      "name": "AI Worker \u2014 Researcher",
+      "agent": "worker-researcher",
+      "role": "worker"
+    },
+    "recqmKBmq8ZGkxVH9": {
+      "name": "AI Worker \u2014 Analyst",
+      "agent": "worker-analyst",
+      "role": "worker"
+    },
+    "recJ8J8idWE8d97tH": {
+      "name": "AI Inbound Comms Response",
+      "agent": "inbound-comms-response",
+      "role": "worker",
+      "registerRow": "recHfhVDb6BfQYco5"
+    },
+    "recjh6mmaF8KJW8t3": {
+      "name": "AI Creditor Management",
+      "agent": "creditor-management",
+      "role": "worker",
+      "registerRow": "recDvxwDGcC3pFbPa"
+    },
+    "rec1hYELb4zS8pjjO": {
+      "name": "AI Task Manager",
+      "agent": "task-manager",
+      "role": "worker",
+      "registerRow": "reczg8BygPFnJMQnh"
+    },
+    "recCUfsTXzmVZynEI": {
+      "name": "AI Inbound Comms Triage",
+      "agent": "inbound-comms-triage",
+      "role": "worker",
+      "registerRow": "recYy33zkoa099uM2",
+      "dispatch": false
+    }
+  },
+  "roleAgents": {
+    "recjh6mmaF8KJW8t3": {
+      "name": "Creditor Management",
+      "goal": "Freeze payments or agree the lowest possible monthly payments, keeping fixed costs to a minimum.",
+      "status": "Live",
+      "dispatchable": true,
+      "learningLog": "- 2026-08-27: INBOUND: POST: HM Revenue and Customs - HMRC LateTaxReturnPenalty MrsC \u2014 Create me the letter of authority for Ciara, and I can get it signed and provide it to you so that you can submit.\n- 2026-08-27: INBOUND: POST: HM Revenue and Customs - HMRC LateTaxReturnPenalty MrKJ \u2014 Sign off just as my name. Also, the tax reference number is on the attachment of the original email.\n- 2026-08-27: INBOUND: POST: Fylde Council - FyldeCouncil PaymentArrangement Flat1Du \u2014 Send this by email. You should easily find an email address for Fylde Council and ensure the restraint order is attached.\n- 2026-08-27: INBOUND: reply re CreditStyle debt notice for Ciara (iMessage) \u2014 Request they contact Ciara via kevinbrittain@gmail.com\n- 2026-08-27: INBOUND: RE: Your Communication with Companies House, Ref: COH2141692X \u2014 Send from kevinbrittain@gmail.com. Never send from kevin@runpreneur.org.uk unless it's to do with Runpreneur. Revert to sending from kevinbrittain@gmail.com as standard\n- 2026-08-27: INBOUND: Companies House Debt \u2014 In these situations, if you can't read a photo, download it and then read it separately before providing a response.\n- 2026-08-27: INBOUND: reply to SSE Energy Solutions (iMessage) \u2014 Send from kevinbrittain@gmail.com\n- 2026-08-27: INBOUND: POST [LOW]: Utilita Energy - OverduePayment_Apt 5 Duckworth \u2014 Send from kevinbrittain@gmail.com find the reference numbers and stop just adding placeholders and actually find the information when you're giving me things to approve.\n- 2026-08-27: INBOUND: Review Utilita energy arrears payment due 28 Aug (TNT Managem \u2014 Send from kevinbrittain@gmail.com\n- 2026-08-27: INBOUND: POST: Companies House - CompaniesHouse ActionToStrikeOff Soci \u2014 I'd like you to do this for me. Or get it as far as you can and bring it back to my attention when you need me for anything.\n- 2026-08-27: INBOUND: POST: HM Revenue and Customs - HMRC LateTaxReturnPenalty MrKJ \u2014 Create the letter as a PDF with the attachment, ready for sending, and then we use a service called Pingen that we have an account with to send it on our behalf.\n- 2026-08-28: INBOUND: POST: HM Revenue and Customs - HMRC LateTaxReturnPenalty MrsC \u2014 Please convert this into a PDF letter and and fill in all the placeholders, and then upload it to Adobe Sign and send it to c***@***.com so that she can sign and date it. Once we receive it back, we can send it into HMRC Via pingen\n- 2026-08-28: Payment request from Lex AutoLease \u2014 You've put a placeholder for Kevin's home address. You know my address, so update that correctly, please, and then I can approve it.\n- 2026-08-28: INBOUND: POST: HM Revenue and Customs - HMRC LateTaxReturnPenalty MrsC \u2014 Please attach the document I need to approve, as I can't see it."
+    },
+    "recLZ6AlXVa5i4CKt": {
+      "name": "Sales Progressor",
+      "goal": "Follow up with sales call attendees who did not buy; progress them to purchase, a new call, or closed as not proceeding.",
+      "status": "Planned",
+      "dispatchable": false,
+      "learningLog": ""
+    },
+    "recJ8J8idWE8d97tH": {
+      "name": "Inbound Comms Response",
+      "goal": "Respond to all inbound communications needing a response, and complete the admin actions they ask for, within 24 hours.",
+      "status": "Built",
+      "dispatchable": true,
+      "learningLog": "- 2026-08-26: INBOUND: Social Housing Holdings Ltd Revolut failed transfer review \u2014 Social Housing Holdings is currently in liquidation - no action here\n- 2026-08-27: INBOUND: HL secure message for Mrs Brittain, account security notifica \u2014 No need to see tasks relating to this.\n- 2026-08-27: INBOUND: Cloudflare KV daily write limit exceeded, Workers blocked \u2014 Only show me tasks like this if it's a major issue.\n- 2026-08-27: INBOUND: HMRC VAT penalty letter for Two Chefs (accountant) \u2014 As a duplicate task, please ensure you identify these rather than giving me duplication.\n- 2026-08-28: INBOUND: review [name redacted] update on Apt 4 Duckworth - tenant move \u2014 With regards to the email to Vicky, Roy approving maintenance costs is absolutely fine. And apologise for the confusion."
+    },
+    "recRcy1Edas6rGaaF": {
+      "name": "Content Planner",
+      "goal": "Create a rolling 30-day content plan, researching the best topics to cover.",
+      "status": "Planned",
+      "dispatchable": false,
+      "learningLog": ""
+    },
+    "recaowvFj8DVA1jf0": {
+      "name": "Content Runpreneur",
+      "goal": "Publish one piece of content across all platforms every day.",
+      "status": "Planned",
+      "dispatchable": false,
+      "learningLog": ""
+    },
+    "reclqeYRdv9WwnYcK": {
+      "name": "Content Copywriter",
+      "goal": "Write copy for the 30-day content plan using Kevin's tone, voice and style.",
+      "status": "Planned",
+      "dispatchable": false,
+      "learningLog": ""
+    },
+    "recCUfsTXzmVZynEI": {
+      "name": "Inbound Comms Triage",
+      "goal": "Triage all inbound communications to keep the inbox at zero.",
+      "status": "Live",
+      "dispatchable": false,
+      "learningLog": "- 2026-08-29: INBOUND: Revolut failed transfer 13764.44 - Social Housing Holdings (l \u2014 This is stale and no longer applies."
+    },
+    "recwWvBju2ycB63i4": {
+      "name": "Property Compliance",
+      "goal": "Ensure every property has all necessary certifications and insurance.",
+      "status": "Building",
+      "dispatchable": false,
+      "learningLog": ""
+    },
+    "rec0unnz5sNaBoIG2": {
+      "name": "Prospecting",
+      "goal": "Send 15 cold outreach emails per day, generating 5 booked calls per month.",
+      "status": "Built",
+      "dispatchable": false,
+      "learningLog": ""
+    },
+    "recALziFvqKlTM0ix": {
+      "name": "Onboarding Progressor",
+      "goal": "Communicate with and progress new clients through onboarding to their first key milestone.",
+      "status": "Planned",
+      "dispatchable": false,
+      "learningLog": ""
+    },
+    "rec7aHLK1Q8fMLRXH": {
+      "name": "Cash Flow Voids",
+      "goal": "Progress every cash flow void and work with the property manager to collect arrears.",
+      "status": "Building",
+      "dispatchable": false,
+      "learningLog": ""
+    },
+    "reczBKizYEb9XpVOD": {
+      "name": "Property Maintenance",
+      "goal": "Schedule maintenance jobs within the maintenance budget.",
+      "status": "Planned",
+      "dispatchable": false,
+      "learningLog": ""
+    },
+    "recsGbZfMkbXTfQJC": {
+      "name": "Prospect Researcher",
+      "goal": "Research every prospect booked for a call and produce a dossier with buying signals to tailor the call.",
+      "status": "Planned",
+      "dispatchable": false,
+      "learningLog": ""
+    },
+    "recAdy3T0lcr4I9eZ": {
+      "name": "Reconciliation",
+      "goal": "Reach 95% reconciliation accuracy.",
+      "status": "Live",
+      "dispatchable": false,
+      "learningLog": "2026-08-24 - Kevin's ruling: guardrail stays at Approval required until accuracy reaches 95%. He approves every transaction manually each day. The runtime reads this register before any auto run, so the level set here genuinely switches the auto tier on or off (PR #115).\n\n2026-09-01 - Kevin's ruling (Agent Gate re-run): measure first, flip on evidence. A new auto-slice score (accuracy on the exact rows the safe gate would auto-approve, stamped at suggestion time) becomes the flip trigger: when it holds 90%+ over a full 31-day window, Kevin, and only Kevin, flips Guardrail Level to Hybrid escalation. This amends the 24 Aug bar (95% blended) for the auto tier. Approved scope: slice stamp on audit rows, dual score to this row, and the suppression list plus undo log move from localStorage to Airtable (unreadable store = no auto run). Rent income stays out of the auto tier by design."
+    },
+    "rec1hYELb4zS8pjjO": {
+      "name": "Task Manager",
+      "goal": "Keep total open tasks to a minimum through as many completions and progressions as possible.",
+      "status": "Live",
+      "dispatchable": true,
+      "learningLog": ""
+    }
+  },
+  "roleAgentsError": "",
+  "counts": {
+    "openTasksRead": 53,
+    "agentLinkedOpen": 18,
+    "approvedHandbacks": 0,
+    "changesRequested": 0,
+    "deferredRedos": 0,
+    "newWork": 1,
+    "tier2Parked": 0,
+    "systemAlerts": 13,
+    "royLane": 0,
+    "creditorMatters": 1,
+    "routingNeeded": 4,
+    "unclassified": 0,
+    "tier1Open": 3,
+    "tier1InWorklist": 1,
+    "worklist": 1
+  }
+}

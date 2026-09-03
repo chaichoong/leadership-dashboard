@@ -232,7 +232,7 @@
         // Add page-specific context
         try {
             if (tab === 'cfv' && typeof detectCFVs === 'function') {
-                ctx.cfvDetails = detectCFVs().map(e => ({ surname: e.surname, ref: e.ref, rent: e.rent, dueDay: e.dueDay, daysOverdue: e.daysOverdue, status: e.status, propertyName: e.propertyName }));
+                ctx.cfvDetails = detectCFVs({ autoReturn: false }).map(e => ({ surname: e.surname, ref: e.ref, rent: e.rent, dueDay: e.dueDay, daysOverdue: e.daysOverdue, status: e.status, propertyName: e.propertyName }));
             }
             if (tab === 'invoices') {
                 const invoicePanel = document.getElementById('tab-invoices');

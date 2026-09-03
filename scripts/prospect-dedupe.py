@@ -82,6 +82,44 @@ TRADING_AS = re.compile(
 
 PARENTHETICAL = re.compile(r"[(\[{][^)\]}]*[)\]}]")
 
+# An address says WHERE a company is, never WHICH company it is.
+#
+# 20260814-prospect-daily-run-142: 'Palais' was captured on 13 Aug 2026 with its
+# address wedged into the Company field — 'Palais (8-10 Rhoda Street, London E2
+# 7EF)' — and re-found the next day written '8-10 Rhoda St'. Every key on both
+# sides carried the address, 'Street' and 'St' made those keys differ, and the
+# bare stem 'palais' was dropped as a single-token alias. The name gate waved a
+# known duplicate straight through; only the email axis caught it.
+#
+# So a parenthetical that looks like an address is stripped and the remainder is
+# indexed in its own right, single token or not. That is a deliberate exception
+# to the single-token rule: 'palais' here is the WHOLE name with an address
+# removed, not a fragment split off a longer one.
+UK_POSTCODE = re.compile(
+    r"\b[A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2}\b", re.IGNORECASE)
+STREET_TYPES = {
+    "street", "st", "road", "rd", "avenue", "ave", "lane", "ln", "close",
+    "drive", "dr", "way", "place", "pl", "square", "sq", "court", "ct",
+    "crescent", "terrace", "gardens", "grove", "hill", "park", "row",
+    "walk", "wharf", "yard", "mews", "parade", "estate", "industrial",
+    "house", "unit", "suite", "floor", "building",
+}
+
+
+def looks_like_address(text):
+    """True when a bracketed segment is a location, not a trading name."""
+    if not text:
+        return False
+    if UK_POSTCODE.search(text):
+        return True
+    words = re.sub(r"[^a-z0-9]+", " ", str(text).lower()).split()
+    if not words:
+        return False
+    # A street type on its own is enough only when a number sits with it —
+    # 'The Park Group' must not read as an address.
+    has_number = any(re.fullmatch(r"\d+[a-z]?", w) for w in words)
+    return any(w in STREET_TYPES for w in words) and has_number
+
 
 def company_key(name):
     """Normalised company name for dedupe comparison. Both sides of every
@@ -158,17 +196,34 @@ def company_keys(name):
     keys.append(company_key(stem))
 
     # Each bracketed or post-marker segment: the trading name on its own.
+    # An address is never indexed as an alias — two different companies at one
+    # registered-office address are two companies, and folding them would lose
+    # a real prospect (CLAUDE.md: an address says WHERE, not WHICH).
     for inner in re.findall(r"[(\[{]([^)\]}]*)[)\]}]", raw):
+        if looks_like_address(inner):
+            continue
         keys.append(company_key(TRADING_AS.sub(" ", inner)))
     parts = TRADING_AS.split(PARENTHETICAL.sub(" ", raw))
     for part in parts[1:]:
         keys.append(company_key(part))
 
+    # The name with an address parenthetical removed. Kept separate from the
+    # trading-name aliases above because it is allowed past the single-token
+    # filter below.
+    address_stripped = ""
+    if PARENTHETICAL.search(raw):
+        inners = re.findall(r"[(\[{]([^)\]}]*)[)\]}]", raw)
+        if inners and all(looks_like_address(x) for x in inners):
+            address_stripped = company_key(PARENTHETICAL.sub(" ", raw))
+            keys.append(address_stripped)
+
     seen, out = set(), []
     for k in keys:
         # A single-token alias is too blunt to dedupe on ("Smith" would swallow
         # every Smith), so it is dropped rather than indexed.
-        if not k or k in seen or len(k.split()) < 2:
+        if not k or k in seen:
+            continue
+        if len(k.split()) < 2 and k != address_stripped:
             continue
         seen.add(k)
         out.append(k)

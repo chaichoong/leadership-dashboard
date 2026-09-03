@@ -6178,7 +6178,7 @@ function renderProjects(){
     }
     const kpiPct=p.kpiTarget>0?Math.min(100,(headerValue/p.kpiTarget)*100):0;
 
-    const statusTip='Health is auto-calculated from KPI progress vs time elapsed (or task completion if no KPI). Ratios: ≥100% On-Target, 85-100% On-Track, <85% Off-Track. Set status to Completed or Not Started manually in the edit panel to override.';
+    const statusTip='Health is auto-calculated from KPI progress vs time elapsed (or task completion if no KPI). Ratios: ≥100% On-Target, 85-100% On-Track, <85% Off-Track. Set status to Completed in the edit panel to stop the calculation; every other value is worked out for you.';
     // Owner header chip — avatar + name under project title
     let ownerHeader='';
     if(p.owner&&p.owner.email){

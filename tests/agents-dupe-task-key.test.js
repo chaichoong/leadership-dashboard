@@ -229,6 +229,29 @@ ${code}`], { encoding: 'utf8' }));
     expect(verdict(a, b, 'fold').match).toBe(false);
   });
 
+  // 20260901-inbound-comms-triage-427. On 1 Sep 2026 an HMRC compliance-check
+  // task was folded into a Fylde council tax demand and lost, because the
+  // 4-digit reference rule read the YEAR "2026" as a shared reference number
+  // and a shared strong id is proof on its own. Nearly every task name a post
+  // or mail scan produces carries the current year, so the gate was matching
+  // against anything. Back-tested: deleting _is_calendar_year makes the first
+  // expectation below fail.
+  it('a calendar year is never a reference number', () => {
+    expect(verdict(
+      'INBOUND: HMRC compliance check 2026 self assessment',
+      'INBOUND: Fylde Council Tax 2026 demand').match,
+      'two unrelated matters must not fold on the year alone').toBe(false);
+    // CONTROL: a real reference still folds, so the guard has not simply
+    // switched strong ids off.
+    const real = verdict('INBOUND: council tax ref 148778 summons',
+                         'INBOUND: pay summons 148778 arrangement');
+    expect(real.match).toBe(true);
+    expect(real.why).toContain('148778');
+    // A four-digit number that is not a plausible year is still a reference.
+    expect(verdict('INBOUND: account 4821 in arrears',
+                   'INBOUND: arrears on account 4821').match).toBe(true);
+  });
+
   it('the page and the creation gate carry the SAME thresholds and word lists', () => {
     const pySrc = readFileSync(SCRIPT, 'utf8');
     const jsSrc = readFileSync(PAGE, 'utf8');
