@@ -45,3 +45,10 @@ earlier iterations kept for comparison.
   Untested hypothesis: OpenCV and numpy each spin up all cores per process and thrash. Try
   `cv2.setNumThreads(1)` per slice before spending more time here. Half-resolution maps were
   also slower and softer. A 71 s clip is ~7 min, so a 90-clip monthly batch is ~8 machine hours.
+
+## Episode numbering (Kevin, 3 Sep 2026)
+- Day 1 = 1 June 2020, so day = (shoot date - 2020-06-01) + 1. 4 Jul 2026 = 2225.
+- Kevin says the day in his intro and is usually right; render.py reads it and applies
+  `watch.resolve_episode`: match = normal; spoken = date - 1 with no talk clip the day before =
+  catch-up (he missed a day and recorded two the next day); anything else = trust the date and
+  flag it in the record Notes. A clip with under 50 characters of speech is B-roll and is skipped.

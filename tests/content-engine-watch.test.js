@@ -18,9 +18,10 @@ describe('content-engine watch: selftest', () => {
     expect(out.checks).toBeGreaterThanOrEqual(10);
   });
 
-  it('keeps the streak anchor that was read off a real transcript (day 2225 on 4 Jul 2026)', () => {
+  it("counts the streak from Kevin's start date, 1 June 2020 = day 1 (4 Jul 2026 = 2225)", () => {
     const src = readFileSync(WATCH, 'utf8');
-    expect(src).toMatch(/STREAK_ANCHOR = \(dt\.date\(2026, 7, 4\), 2225\)/);
+    expect(src).toMatch(/STREAK_START = dt\.date\(2020, 6, 1\)/);
+    expect(src).toContain('def resolve_episode(date_day, spoken_day');
   });
 
   it('keeps its state outside the public repo and writes it atomically', () => {
@@ -50,18 +51,19 @@ describe('content-engine watch: nightly wiring', () => {
     expect(drive.drive).toContain('Runpreneur - Raw Video');
   });
 
-  it('has a run script that scans, pulls one clip and reports, and never renders', () => {
+  it('has a run script that scans, pulls one clip, renders one clip and reports', () => {
     expect(existsSync(RUN)).toBe(true);
     const run = readFileSync(RUN, 'utf8');
     expect(run).toContain('watch.py scan --create');
     expect(run).toContain('watch.py next');
     expect(run).toContain('watch.py report');
-    expect(run).not.toContain('stab.py');
+    expect(run).toContain('render.py run --limit 1');
+    expect(run).not.toContain('stab.py');   // rendering goes through render.py, never a bare stab call
   });
 
   it('is described on the Automations list (deterministic job, not a register agent)', () => {
     const auto = readFileSync(path.join(ROOT, 'js', 'automations-data.js'), 'utf8');
     expect(auto).toMatch(/key: 'content-engine'/);
-    expect(auto).toContain('Never renders and never publishes');
+    expect(auto).toContain('Never publishes');
   });
 });
