@@ -36,6 +36,56 @@ RECIPE = {   # docs/content-engine-360.md, Kevin-approved 2 Sep 2026; one angle 
     "9:16": ["--proj", "sg", "--dfov", "215", "--tilt", "9", "--level", "--blend", "0.6", "--size", "1080x1920", "--no-raise-cut"],
 }
 STATUS_DONE = "Optimisation and Design Done"
+# The 8 second branded intro Ericamae inserted by hand (SOP: "Intro + Subtitle"). Same rule as her app:
+# after Kevin's sign-off line, else before "welcome back", else at the very start.
+INTRO_CLIP = os.path.join(EDITED_ROOT, "Vlog Intro", "runprenuer-intro_clip.mp4")
+INTRO_SIGNOFF_RE = re.compile(r"keep on (?:watching|listening)|hope you find (?:it|this) useful|stay with me|let'?s go\b", re.I)
+WELCOME_RES = [re.compile(r"welcome back to (?:consecutive )?day", re.I), re.compile(r"consecutive day", re.I)]   # in the app's order
+INTRO_SEARCH_FRACTION = 0.35    # the sign-off lives in the cold open; a "let's go" at 80% is not it
+
+
+def intro_insert_seconds(segments, duration=None):
+    """Where the intro goes: the END of the caption carrying the sign-off phrase, else the START of the
+    'welcome back' caption, else 0. Only the first part of the clip is searched."""
+    if not segments: return 0.0
+    limit = (duration or segments[-1][1]) * INTRO_SEARCH_FRACTION
+    for a, b, text in segments:
+        if a > limit: break
+        if INTRO_SIGNOFF_RE.search(text): return float(b)
+    for rx in WELCOME_RES:              # the specific phrase first, across the whole opening, then the loose one
+        for a, b, text in segments:
+            if a > limit: break
+            if rx.search(text): return float(a)
+    return 0.0
+
+
+def insert_intro(full_path, at, out_path, intro=None):
+    """Splice the intro into the finished (captioned) full episode at `at` seconds. Re-encodes once with the
+    hardware encoder; the intro is scaled to the episode's frame and both audio tracks are made alike."""
+    intro = intro or INTRO_CLIP
+    if not os.path.exists(intro): raise SystemExit("intro clip missing: " + intro)
+    probe = subprocess.run([os.path.expanduser("~/tools/bin/ffprobe"), "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=width,height,r_frame_rate",
+                            "-of", "csv=p=0", full_path], capture_output=True, text=True).stdout.strip().split(",")
+    w, h, fps = int(probe[0]), int(probe[1]), probe[2]
+    au = "aformat=sample_rates=48000:channel_layouts=stereo,asetpts=PTS-STARTPTS"
+    iv = "[1:v]scale=%d:%d:force_original_aspect_ratio=decrease,pad=%d:%d:(ow-iw)/2:(oh-ih)/2,fps=%s,format=yuv420p,setpts=PTS-STARTPTS[iv];[1:a]%s[ia]" % (w, h, w, h, fps, au)
+    if at <= 0.05:
+        fc = iv + ";[0:v]setpts=PTS-STARTPTS[bv];[0:a]%s[ba];[iv][ia][bv][ba]concat=n=2:v=1:a=1[v][a]" % au
+    else:
+        fc = (iv + ";[0:v]trim=0:%.3f,setpts=PTS-STARTPTS[av];[0:a]atrim=0:%.3f,%s[aa];[0:v]trim=%.3f,setpts=PTS-STARTPTS[bv];[0:a]atrim=%.3f,%s[ba];"
+              "[av][aa][iv][ia][bv][ba]concat=n=3:v=1:a=1[v][a]") % (at, at, au, at, at, au)
+    r = subprocess.run([FFMPEG, "-v", "error", "-y", "-i", full_path, "-i", intro, "-filter_complex", fc, "-map", "[v]", "-map", "[a]",
+                        "-c:v", "h264_videotoolbox", "-b:v", "10M", "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "160k", "-movflags", "+faststart", out_path],
+                       capture_output=True, text=True)
+    if r.returncode != 0: raise SystemExit("intro insert failed: " + r.stderr[-300:])
+    return out_path
+
+
+def podcast_audio(full_path, out_mp3):
+    """The podcast is the full episode's sound, as Ericamae uploaded it to Spotify for Creators."""
+    r = subprocess.run([FFMPEG, "-v", "error", "-y", "-i", full_path, "-vn", "-c:a", "libmp3lame", "-b:a", "128k", "-ar", "44100", out_mp3], capture_output=True, text=True)
+    if r.returncode != 0: raise SystemExit("podcast audio failed: " + r.stderr[-300:])
+    return out_mp3
 
 
 # ---------- pure helpers ----------
@@ -47,7 +97,7 @@ def hundreds_folder(day):
 
 
 def output_names(day):
-    return {"full": "Episode_%d_Full_Episode.mp4" % day, "lfmd": "Ep%d_LFMD.mp4" % day, "summary": "Ep%d_Summary.mp4" % day}
+    return {"full": "Episode_%d_Full_Episode.mp4" % day, "lfmd": "Ep%d_LFMD.mp4" % day, "summary": "Ep%d_Summary.mp4" % day, "podcast": "Ep%d_Podcast.mp3" % day}
 
 
 def title_from_transcript(text):
@@ -188,8 +238,12 @@ def build_outputs(masters, srt, day, title, workdir, lfmd=None, role="episode"):
         subprocess.run([sys.executable, ov, "summary", masters["9:16"], caps, paths["summary"], "--day", str(day), "--title", title],
                        check=True, stdout=subprocess.DEVNULL)
         return paths
+    captioned = os.path.join(workdir, "full_captioned.mp4")
+    subprocess.run([sys.executable, ov, "full", masters["16:9"], caps, captioned], check=True, stdout=subprocess.DEVNULL)
     paths["full"] = os.path.join(workdir, names["full"])
-    subprocess.run([sys.executable, ov, "full", masters["16:9"], caps, paths["full"]], check=True, stdout=subprocess.DEVNULL)
+    at = intro_insert_seconds(srt_segments(open(srt).read()))
+    insert_intro(captioned, at, paths["full"])
+    paths["podcast"] = podcast_audio(paths["full"], os.path.join(workdir, names["podcast"]))
     if lfmd:   # the "Learnings from my diary" section only (Kevin, 3 Sep 2026)
         piece = trim(masters["9:16"], lfmd[0], lfmd[1], os.path.join(workdir, "lfmd_master.mp4"))
         lcaps = os.path.join(workdir, "captions_lfmd.srt")
@@ -254,6 +308,7 @@ def process(key, ledger, keep=False):
     title = title_from_transcript(text)
     paths = build_outputs(masters, srt, day, title, workdir, lfmd=window, role=role)
     if role == "episode":
+        e["intro_at"] = intro_insert_seconds(srt_segments(open(srt).read()))
         paths["thumb"], e["thumb_lines"] = make_thumbnail(masters["9:16"], duration, text, day, workdir)
     folder, links = publish_to_drive(paths, day, os.path.join(workdir, "transcript.txt"))
     rid, how = find_or_create_record(day, e.get("drive_id"), key, dt.date.fromisoformat(e["date"]))
@@ -288,7 +343,13 @@ def one(clip, day, out):
 
 def selftest():
     assert hundreds_folder(2049) == "2001-2100" and hundreds_folder(2100) == "2001-2100" and hundreds_folder(2101) == "2101-2200"
-    assert output_names(2225)["full"] == "Episode_2225_Full_Episode.mp4"
+    assert output_names(2225)["full"] == "Episode_2225_Full_Episode.mp4" and output_names(2225)["podcast"] == "Ep2225_Podcast.mp3"
+    segs_i = [(0, 4, "consecutive day 2195 of a diary of a Runpreneur"), (4, 9, "if that resonates with you keep on watching"), (9, 15, "welcome back to consecutive day"), (300, 305, "so let's go")]
+    assert intro_insert_seconds(segs_i, 600) == 9.0, "after the sign-off caption"
+    assert intro_insert_seconds(segs_i[:1] + segs_i[2:], 600) == 9.0, "before the welcome-back caption when there is no sign-off"
+    assert intro_insert_seconds([(0, 5, "just talking"), (300, 305, "let's go")], 600) == 0.0, "a late let's go is not the sign-off"
+    assert intro_insert_seconds([], 10) == 0.0
+    assert INTRO_CLIP.endswith("Vlog Intro/runprenuer-intro_clip.mp4")
     t = title_from_transcript("So consecutive day, 2,225 of a diary of a Runpreneur, and today's episode I talk all about how you can record a video using a structured script to turn that video into an autonomous AI agent, which is going")
     assert "|" in t and "RECORD" in t and len(t) < 90, t
     assert title_from_transcript("nothing useful here") == "DIARY OF A|RUNPRENEUR"
@@ -314,7 +375,7 @@ def selftest():
     srt = "1\n00:00:58,000 --> 00:01:02,000\nA\n\n2\n00:01:02,000 --> 00:01:05,000\nB\n"
     shifted = shift_srt(srt, 60.0, 65.0)
     assert "00:00:00,000 --> 00:00:02,000" in shifted and "00:00:02,000 --> 00:00:05,000" in shifted, shifted
-    print(json.dumps({"checks": 19, "failed": []}))
+    print(json.dumps({"checks": 25, "failed": []}))
 
 
 if __name__ == "__main__":
