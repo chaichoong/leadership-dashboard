@@ -21,7 +21,13 @@
 #   6. approval run  : one approval card per finished episode (video + thumbnail + copy all in),
 #                      through the duplicate gate and agent-dispatch submit, so the 08:00 digest
 #                      counts it and Kevin decides on the AI Agents page (R9).
-#   7. report        : one line for the morning digest.
+#   7. publish sync  : GHL post statuses -> published links on the record; the YouTube link unlocks
+#                      the socials; every post out -> "Published".
+#   8. publish run   : approved episodes only (R10): night one the full episode to YouTube (06:00),
+#                      the night after YouTube publishes the Summary (09:00) and Learnings (17:00)
+#                      clips to every connected social channel, all through GoHighLevel. Holds with a
+#                      digest line until a YouTube account is connected in GHL.
+#   9. report        : one line each for the morning digest.
 set -uo pipefail
 REPO="/Users/kevinbrittain/Projects/leadership-dashboard"
 LOG_DIR="/Users/kevinbrittain/knowledge-os/logs/content-engine"
@@ -33,5 +39,8 @@ python3 scripts/content-engine/render.py run --limit 1 || exit 1
 python3 scripts/content-engine/platform_copy.py run --pending --limit 2 || exit 1
 python3 scripts/content-engine/approval.py sync || exit 1
 python3 scripts/content-engine/approval.py run --pending --limit 2 || exit 1
+python3 scripts/content-engine/publish.py sync || exit 1
+python3 scripts/content-engine/publish.py run --limit 2 || exit 1
 python3 scripts/content-engine/watch.py report
 python3 scripts/content-engine/approval.py report
+python3 scripts/content-engine/publish.py report

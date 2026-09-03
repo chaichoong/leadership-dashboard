@@ -65,6 +65,7 @@ describe('content-engine watch: nightly wiring', () => {
   it('is described on the Automations list (deterministic job, not a register agent)', () => {
     const auto = readFileSync(path.join(ROOT, 'js', 'automations-data.js'), 'utf8');
     expect(auto).toMatch(/key: 'content-engine'/);
-    expect(auto).toContain('Never publishes');
+    // Since R10 (3 Sep 2026) the job DOES schedule, but only episodes Kevin approved on the card.
+    expect(auto).toContain('Nothing is scheduled without his approval on the card');
   });
 });

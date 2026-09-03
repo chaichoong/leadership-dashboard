@@ -101,3 +101,17 @@ Measured against the team's episode 2049 thumbnail at 1280x720: icon 245 px at (
 - `submit` refuses an agent whose register row is not Built or Live; the row was set to Built on 3 Sep 2026.
 - Lessons: both Claude calls in the lane (`platform_copy.ask_claude`, `thumbnail.titles_from_transcript`) append `watch.kevin_lessons()`, the "## Lessons from Kevin" section of `~/.claude/agents/content-engine.md`, so "reject and remember" changes the next episode.
 - State: `~/knowledge-os/logs/content-engine/approvals.json` (episode -> task, record, verdict).
+
+
+## Publishing through GoHighLevel (R10, 3 Sep 2026)
+
+`publish.py` schedules APPROVED episodes only (approvals.json verdict approved, record at "Approved for Publishing" or later) through the GHL Social Planner on the Runpreneur sub-account, the same accounts the team posted to by hand (their last 100 posts: TikTok and Kevin's LinkedIn profile, published around 08:00-09:00 UK, type post).
+
+- Stage 1, the night after approval: the full episode to the GHL YouTube account (type video, public, thumbnail attached, title from the "SEO Title:" line of the YouTube copy, 100 chars max), scheduled 06:00 London.
+- Stage 2, the night after GHL reports the YouTube post published: the link goes onto the record (YouTube Full Link, Date Published (YT)) and into every social copy (the "[ADD YOUTUBE LINK]" line, or appended), then the Summary clip (09:00) and the Learnings clip (17:00) are scheduled to every connected channel with that record's platform copy: TikTok (public, comments/duet/stitch on, as the team's posts), Facebook Page (Summary as a reel, Learnings as a post), LinkedIn page and profile, Instagram (reels) and Threads once they are connected. X is never scheduled (GHL dropped it Dec 2024). Expired account rows are skipped.
+- `sync` every night reads post statuses: published links land in the record's link fields (Link of Tiktok Video, Link of Facebook Reels, Link of Facebook Page Post, Link of Linkedin Post, ...); a failed post is printed; when every post is out the record reads "Published" with Date Published (Other).
+- Media goes into the GHL media library once per file (`/medias/upload-file`, multipart through curl with the key in a mode-600 config file, never an argument; Cloudflare bans Python's default user agent, so every call sends a browser one) and the CDN URL is cached in `publishing.json`.
+- Holds, with a digest line, until a YouTube account is connected in GHL: `publish.py youtube-link` prints the OAuth start URL (Kevin's one click); after consent the account is attached with the same accounts POST used for LinkedIn and Facebook.
+- Proof on 3 Sep 2026: Episode 2195's Summary uploaded to the library and one DRAFT post created on the Runpreneur LinkedIn page (id in publishing.json under proof; a draft publishes nothing).
+
+State: `~/knowledge-os/logs/content-engine/publishing.json` (episode -> media urls, posts with GHL ids/status/link, youtube_link).
