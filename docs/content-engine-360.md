@@ -68,3 +68,13 @@ earlier iterations kept for comparison.
 - A shooting day holds a short teaser (the Summary) and a long episode (Full + LFMD). Clips over
   150 s, or any clip with a diary section, are episodes; the rest are teasers. Only the episode clip
   sets the transcript and the status on the record.
+
+## Copy step (R7 + R8, 3 Sep 2026)
+- `copy.py run --day N` fills the copy fields on the Full, LFMD and Short records (creating LFMD and
+  Short if the render has not). Prompts are the Content Machine's own, byte for byte (`cm_prompts.py`).
+- Model route: `claude -p --system-prompt ... --model sonnet --tools ""` with the OAuth token, like the
+  other headless agents. About 3 minutes and a few pence per record type.
+- Rules check fixes em dashes in place and REPORTS everything else in the record Notes as "REVIEW:":
+  banned phrases, US spellings, Threads > 500 / X > 300 chars, money or thousands figures that are not
+  in the transcript (the mission figures 40,075 km and £1 million are allowed).
+- Status moves to "Copies in Progress" so the team's Copywriting/QC pages pick the records up as before.

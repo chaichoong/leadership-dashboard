@@ -58,6 +58,7 @@ describe('content-engine watch: nightly wiring', () => {
     expect(run).toContain('watch.py next');
     expect(run).toContain('watch.py report');
     expect(run).toContain('render.py run --limit 1');
+    expect(run).toContain('copy.py run --pending');
     expect(run).not.toContain('stab.py');   // rendering goes through render.py, never a bare stab call
   });
 
