@@ -43,7 +43,7 @@ describe('content-engine render', () => {
 
   it('every flag the render passes to stab.py is a flag stab.py accepts (a comment once swallowed --video-only)', () => {
     const out = execFileSync('python3', [path.join(DIR, 'stab.py'), 'render', '--help'], { encoding: 'utf8', cwd: DIR });
-    for (const flag of ['--proj', '--dfov', '--tilt', '--level', '--blend', '--size', '--no-raise-cut', '--workers', '--video-only', '--map']) {
+    for (const flag of ['--proj', '--dfov', '--tilt', '--level', '--blend', '--size', '--no-raise-cut', '--workers', '--video-only', '--map', '--only']) {
       expect(out, flag).toContain(flag);
     }
   });
