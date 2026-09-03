@@ -32,6 +32,8 @@ var AUTOMATIONS = {
           what: 'Rebuilds the list of every outside system the AI is plugged into, on the AI Agents page. Reads the real settings rather than a list someone remembered to update, and refuses to write a shorter list if it cannot read one of its sources properly. When something has genuinely changed it tests its own work and, if it passes, ships the update itself, so the page cannot drift behind your actual setup. If its tests fail it leaves the change waiting for you instead.' },
         { key: 'drift-scan', name: 'Drift Scan', when: '6:20am daily', status: 'on',
           what: 'Reads the code looking for references to things that no longer exist: a field that was renamed, a file that was deleted, a page that was retired. It reports them so a broken link is found before it breaks something.' },
+        { key: 'content-engine', name: 'Content Engine folder watch', when: '2:00am daily', status: 'on',
+          what: 'Looks in the Runpreneur raw video folder on Drive for clips it has not seen, creates one "Episode N Full Episode" record per new shooting day (New Upload) and copies the oldest waiting clip to this Mac ready for the 360 render. Never renders and never publishes.' },
         { key: 'data-invariants', name: 'Data Invariants Check', when: '6:40am daily', status: 'on',
           what: 'Checks the real Airtable data still obeys the rules it is supposed to. Each check has a control, so if the check itself breaks it fails loudly instead of quietly passing. This is the check that would have caught the 8,667 blanked transactions.' },
         { key: 'drive-auth', name: 'Drive Login Check', when: '6:50am daily', status: 'on',
