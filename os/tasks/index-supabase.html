@@ -614,7 +614,7 @@ body.app-busy,body.app-busy *{cursor:progress!important}
 
 <!-- ── Supabase clone: supabase-js + network shim + login gate, loaded BEFORE the app script ── -->
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<script src="supabase-shim.js?v=6"></script>
+<script src="supabase-shim.js?v=7"></script>
 <script src="supabase-boot.js?v=2"></script>
 
 <!-- Model IDs live once in js/ai-models.js. Never hardcode a model ID below. -->
@@ -2084,6 +2084,7 @@ async function updateTaskField(taskId,fieldKey,rawValue){
     }
     if(!_bulkOperation)toast('Saved');
     _saveState.ok++;saveEntry.status='ok';
+    try{ if(typeof logFieldActivity==='function') logFieldActivity(task,fieldKey,oldRaw,rawValue); }catch(e){}
   }catch(e){
     Object.assign(task,prev);
     const msg=(e&&e.message)||'unknown error';
@@ -2120,6 +2121,168 @@ function flushPendingSaves(taskId){
     updateTaskField(p.taskId,p.fieldKey,p.value);
   });
 }
+
+
+// ── Task Activity (audit trail) — ported verbatim from the live Tasks page ──
+const ACTIVITY_TABLE = 'tbl2ZTHBDBPo681UL';
+const AF = { // Activity field IDs
+  activityId: 'fld8L7jkAl0fZTj2v',
+  task:       'fldt6HxujV1G7qciw',
+  taskId:     'fldSnPrhxVjOlrKRO',
+  taskName:   'fldS82AEmQQmp8HX9',
+  actor:      'fldhhv2FNSLxUFK21',
+  actorEmail: 'fld6Sdd4wAuCbGlWB',
+  field:      'fld1ywgv5GDZG7Ke0',
+  summary:    'fldLU5oE32TIZPwEB',
+  from:       'fldWMf3c4Cc7paqHu',
+  to:         'fldVTCAZD87I897Fl',
+  source:     'fldCnAcIDuoNtYLui',
+  at:         'fldUj4SUqAdW4Tl1D',
+};
+// Which task fields are worth an audit entry, and their human label.
+// Freeform text (description, notes) is deliberately excluded to keep the
+// trail signal-heavy — those change often and carry little audit value.
+const ACTIVITY_LABELS = {
+  assignee:'Assignee', dueDate:'Due date', origDueDate:'Original due date',
+  status:'Status', priority:'Priority', priorityLevel:'Priority level',
+  timeEst:'Time estimate', recurring:'Recurring', business:'Business',
+  hardDeadline:'Hard deadline', onHold:'On hold', contractor:'Contractor',
+  maintenance:'Maintenance ticket', name:'Title', someDay:'Someday',
+};
+
+let _activityCache = {};
+// Human-readable value for a raw field value, per field.
+function _activityValLabel(fieldKey,raw){
+  if(raw===null||raw===undefined||raw===''||raw==='__unassigned')return '(none)';
+  if(fieldKey==='assignee'){const m=TEAM.find(x=>x.key===raw);return m?m.name:String(raw)}
+  if(fieldKey==='dueDate'||fieldKey==='origDueDate'){
+    const d=new Date(raw+'T00:00:00');
+    if(!isNaN(d.getTime()))return d.toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'2-digit'});
+    return String(raw);
+  }
+  if(typeof raw==='boolean')return raw?'Yes':'No';
+  return String(raw);
+}
+// Write one activity row. Fire-and-forget: never blocks or breaks a save.
+async function logActivity(task,opts){
+  opts=opts||{};
+  if(!task||!task.id||typeof PAT==='undefined'||!PAT)return null;
+  const auto=opts.source==='automation';
+  const who=opts.actorName||(auto?'Automation':((currentUser&&(currentUser.name||currentUser.email))||'web app'));
+  const email=opts.actorEmail||(auto?'':((currentUser&&currentUser.email)||''));
+  const fields={};
+  fields[AF.activityId]=`${task.id}-${Date.now()}`;
+  fields[AF.task]=[task.id];
+  fields[AF.taskId]=task.id;
+  fields[AF.taskName]=task.name||'';
+  fields[AF.actor]=who;
+  fields[AF.actorEmail]=email;
+  fields[AF.field]=opts.field||'';
+  fields[AF.summary]=opts.summary||'';
+  if(opts.from!==undefined&&opts.from!==null)fields[AF.from]=String(opts.from);
+  if(opts.to!==undefined&&opts.to!==null)fields[AF.to]=String(opts.to);
+  fields[AF.source]=opts.source||'app';
+  fields[AF.at]=new Date().toISOString();
+  try{
+    const res=await fetch(`https://api.airtable.com/v0/${BASE_ID}/${ACTIVITY_TABLE}?returnFieldsByFieldId=true`,{
+      method:'POST',
+      headers:{'Authorization':`Bearer ${PAT}`,'Content-Type':'application/json'},
+      body:JSON.stringify({fields,typecast:true})
+    });
+    if(!res.ok){console.warn('[logActivity] failed',res.status,await res.text().catch(()=>''));return null}
+    const data=await res.json();
+    // If this task's drawer is on screen, refresh the feed so the entry shows
+    // live. Gate on the element (drawerTaskId is nulled by closeDrawer).
+    if(document.getElementById('drwActivityWrap-'+task.id)){_activityCache[task.id]=null;loadActivityIntoDrawer(task.id)}
+    return data;
+  }catch(e){console.warn('[logActivity] error',e);return null}
+}
+// Build + write an activity entry for a single field change. Skips fields
+// not worth auditing and no-op changes (old === new).
+function logFieldActivity(task,fieldKey,oldRaw,newRaw){
+  const label=ACTIVITY_LABELS[fieldKey];
+  if(!label)return;
+  const fromH=_activityValLabel(fieldKey,oldRaw);
+  const toH=_activityValLabel(fieldKey,newRaw);
+  if(fromH===toH)return; // nothing actually changed
+  let summary;
+  if(fieldKey==='assignee'){
+    summary=(fromH==='(none)')?`Assigned to ${toH}`
+      :(toH==='(none)')?`Unassigned (was ${fromH})`
+      :`Reassigned from ${fromH} to ${toH}`;
+  } else {
+    summary=`${label}: ${fromH} → ${toH}`;
+  }
+  return logActivity(task,{field:label,summary,from:fromH,to:toH,source:'app'});
+}
+// Fetch activity rows for one task, newest first.
+async function fetchActivity(taskId){
+  const formula=encodeURIComponent(`{TaskId}='${taskId}'`);
+  const url=`https://api.airtable.com/v0/${BASE_ID}/${ACTIVITY_TABLE}?filterByFormula=${formula}&pageSize=50`;
+  const res=await fetch(url,{headers:{'Authorization':`Bearer ${PAT}`}});
+  if(!res.ok)throw new Error('activity fetch '+res.status);
+  const data=await res.json();
+  return (data.records||[]).map(r=>({
+    id:r.id,
+    actor:r.fields['Actor']||'',
+    actorEmail:r.fields['Actor Email']||'',
+    field:r.fields['Field']||'',
+    summary:r.fields['Summary']||'',
+    source:r.fields['Source']||'app',
+    at:r.fields['At']||r.createdTime,
+  })).sort((a,b)=>new Date(b.at)-new Date(a.at));
+}
+async function loadActivityIntoDrawer(taskId){
+  // Gate on the drawer's per-task element, not the drawerTaskId global —
+  // closeDrawer() (called inside openTaskDrawer) nulls drawerTaskId, so it is
+  // not a reliable "is this drawer open" signal. The wrap element only exists
+  // while this task's drawer is on screen, so its presence is the truth.
+  if(!document.getElementById('drwActivityWrap-'+taskId))return;
+  try{
+    const list=await fetchActivity(taskId);
+    _activityCache[taskId]=list;
+    renderActivityInDrawer(taskId); // self-checks the wrap element still exists
+  }catch(e){
+    console.warn('load activity failed',e);
+    const w=document.getElementById('drwActivityWrap-'+taskId);
+    if(w)w.innerHTML='<div style="color:var(--danger);font-size:var(--fs-sm);padding:8px 0">Could not load activity. It will refresh next time you open this task.</div>';
+  }
+}
+function renderActivityInDrawer(taskId){
+  const wrap=document.getElementById('drwActivityWrap-'+taskId);if(!wrap)return;
+  const list=(_activityCache[taskId]||[]).slice().sort((a,b)=>new Date(b.at)-new Date(a.at));
+  const cnt=document.getElementById('drwActivityCount-'+taskId);
+  if(cnt&&typeof _renderCommentCountBadge==='function')_renderCommentCountBadge(cnt,list.length);
+  if(!list.length){
+    wrap.innerHTML='<div style="color:var(--text-secondary);font-size:var(--fs-sm);padding:8px 0">No activity recorded yet. Changes made from now on appear here.</div>';
+    return;
+  }
+  const items=list.map(a=>{
+    const auto=a.source==='automation';
+    const name=a.actor||(auto?'Automation':'Someone');
+    const init=name.split(' ').map(w=>w[0]||'').join('').slice(0,2).toUpperCase();
+    const avatar=auto
+      ? `<span class="avatar" style="width:24px;height:24px;font-size:12px;flex-shrink:0;background:var(--bg-subtle);color:var(--text-secondary)" title="Automation">⚙</span>`
+      : `<span class="avatar avatar-${collabKeyForEmail(a.actorEmail)}" style="width:24px;height:24px;font-size:10px;flex-shrink:0">${escHtml(init)}</span>`;
+    return `<div style="display:flex;gap:8px;padding:8px 0;border-bottom:1px solid var(--border-subtle)">
+      ${avatar}
+      <div style="flex:1;min-width:0">
+        <div style="font-size:11px;color:var(--text-secondary)"><strong style="color:var(--text-primary)">${escHtml(name)}</strong> &middot; ${escHtml(relTime(a.at))}</div>
+        <div style="font-size:var(--fs-base);color:var(--text-primary);word-wrap:break-word">${escHtml(a.summary)}</div>
+      </div>
+    </div>`;
+  }).join('');
+  wrap.innerHTML=`<div style="max-height:280px;overflow-y:auto">${items}</div>`;
+}
+
+function toggleDrawerActivity(taskId,btn){
+  const wrap=document.getElementById('drwActivityWrap-'+taskId);if(!wrap)return;
+  const hidden=wrap.style.display==='none';
+  wrap.style.display=hidden?'':'none'; // '' restores the stylesheet default
+  if(btn)btn.textContent=hidden?'Hide':'View';
+}
+window.toggleDrawerActivity=toggleDrawerActivity;
+// ── end Task Activity ──
 
 // ===== SHARED RENDER HELPERS =====
 function statusBadge(status){
@@ -2499,6 +2662,7 @@ function openTaskDrawer(taskId){
       <div class="field-row" style="flex-direction:column;align-items:stretch"><label>Collaborators</label><div class="field-val" id="drwCollabWrap">${renderCollaboratorsDrawer(t)}</div></div>
       <div class="field-row" style="flex-direction:column;align-items:stretch"><label>Attachments</label><div class="field-val" id="drwAttachWrap">${renderAttachmentsMarkup(t)}</div></div>
       <div class="field-row" style="flex-direction:column;align-items:stretch"><label>Comments <span id="drwCommentCount-${t.id}" style="display:inline-block;margin-left:6px;padding:1px 8px;border-radius:10px;background:var(--bg-subtle);color:var(--text-secondary);font-size:11px;font-weight:600;font-variant-numeric:tabular-nums">…</span></label><div class="field-val drw-comments-wrap" data-task-id="${t.id}"><div style="color:var(--text-secondary);font-size:var(--fs-sm);padding:8px 0">Loading comments…</div></div></div>
+      <div class="field-row" style="flex-direction:column;align-items:stretch"><label style="display:flex;align-items:center;gap:8px">Activity <span id="drwActivityCount-${t.id}" style="display:inline-block;padding:1px 8px;border-radius:10px;background:var(--bg-subtle);color:var(--text-secondary);font-size:11px;font-weight:600;font-variant-numeric:tabular-nums">…</span> <button class="btn" id="drwActivityToggle-${t.id}" onclick="toggleDrawerActivity('${t.id}',this)" style="padding:1px 8px;font-size:10px;text-transform:none;letter-spacing:0;font-weight:500">View</button> <span style="font-weight:400;color:var(--text-muted);font-size:11px;text-transform:none;letter-spacing:0">audit trail</span></label><div class="field-val" id="drwActivityWrap-${t.id}" style="display:none"><div style="color:var(--text-secondary);font-size:var(--fs-sm);padding:8px 0">Loading activity…</div></div></div>
     </div>
     <div class="drawer-footer">
       <button class="btn" onclick="cancelDrawerEdit('${t.id}')" title="${(typeof window!=='undefined'&&window._draftTaskId===t.id)?'Discard this draft task and close the drawer':'Close the drawer without making changes'}">Cancel</button>
@@ -2510,6 +2674,7 @@ function openTaskDrawer(taskId){
   // Comments render inline and open expanded — this one fetch fills both
   // the list and the count badge.
   loadCommentsIntoDrawer(t.id);
+  loadActivityIntoDrawer(t.id);
 }
 // Fetch comment count and write it into the drawer's badge. Called on
 // drawer open and after every post / delete so the number stays in
