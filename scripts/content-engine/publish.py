@@ -151,6 +151,15 @@ def build_post(platform, account, spec, copy, media_url, thumb_url, schedule_iso
     return body
 
 
+def build_text_post(account, text, schedule_iso, user_id, image_url=None, status="scheduled"):
+    """A text post, optionally with one image, for LinkedIn or a Facebook page. No clip, no video."""
+    body = {"accountIds": [account["id"]], "summary": text, "type": "post", "status": status, "userId": user_id, "createdBy": user_id, "tags": []}
+    if image_url: body["media"] = [{"url": image_url, "type": "image/png"}]
+    if status == "scheduled": body["scheduleDate"] = schedule_iso
+    if account.get("platform") == "facebook": body["facebookPostDetails"] = {"type": "post"}
+    return body
+
+
 def post_key(platform, account_id, clip):
     return "%s|%s|%s" % (platform, clip, account_id)
 
@@ -182,12 +191,62 @@ def save_state(state):
     os.replace(tmp, STATE)
 
 
-def _cfg():
-    return open(KEY_FILE).read().strip(), open(LOC_FILE).read().strip(), open(USER_FILE).read().strip()
+# ---------- brands: one publisher, two brand profiles (Kevin's ruling, 2 Sep 2026) ----------
+# Brand = the record's Category. Each brand has its own GHL sub-account key and an ALLOWLIST of the
+# accounts it may post to; anything not listed is refused by name. Operations Director may reach
+# exactly the Operations Director LinkedIn page and the Operations Director Facebook page (once Kevin
+# connects it in GHL), never Kevin's profile, never a Runpreneur page, never TikTok. "bridge" is the
+# Runpreneur-framed post on Kevin's own profile (Kevin, 3 Sep 2026): Runpreneur brand, profile only.
+BRANDS = {
+    "Runpreneur": {"key": KEY_FILE, "loc": LOC_FILE, "category": "Runpreneur",
+                   "allow": {"episode": None,                                     # None = every active account CHANNELS knows
+                             "bridge": [("linkedin", "profile")]}},
+    "Operations Director": {"key": os.path.expanduser("~/.config/od/ghl_social_key_od"), "loc": os.path.expanduser("~/.config/od/ghl_location_id_od"),
+                            "category": "Operations Director",
+                            "allow": {"post": [("linkedin", "page", "Operations Director"), ("facebook", "page", "Operations Director")]}},
+}
 
 
-def ghl(method, path, body=None):
-    key, _, _ = _cfg()
+def brand_of(record_fields):
+    """The brand a record belongs to, from its Category. Anything else is refused: a record with no
+    brand must never reach a publisher."""
+    cat = (record_fields or {}).get("Category")
+    for b, cfg in BRANDS.items():
+        if cfg["category"] == cat: return b
+    raise SystemExit("brand guard: record Category %r is not a brand this publisher knows" % (cat,))
+
+
+def allowed_accounts(brand, lane, accounts):
+    """The active GHL accounts this brand may use for this lane, or a refusal. A (platform, type[, name])
+    rule matches an account; an account matching no rule is never returned. Names are compared exactly:
+    the OD sub-account also carries the Runpreneur page and Kevin's profile, which OD must never use."""
+    rules = BRANDS[brand]["allow"].get(lane)
+    if rules is None and lane in BRANDS[brand]["allow"]: return [a for a in accounts if a.get("active")]
+    if rules is None: raise SystemExit("brand guard: %s has no lane %r" % (brand, lane))
+    out = []
+    for a in accounts:
+        if not a.get("active"): continue
+        for r in rules:
+            if a.get("platform") == r[0] and a.get("type") == r[1] and (len(r) < 3 or a.get("name") == r[2]):
+                out.append(a); break
+    return out
+
+
+def assert_brand(record_fields, brand):
+    """Refuse a cross-brand publish with a named reason (Kevin's ruling: a test must refuse cross-brand output)."""
+    got = brand_of(record_fields)
+    if got != brand:
+        raise SystemExit("brand guard: record %r is %s, refused by the %s publisher" % ((record_fields or {}).get("Content Name"), got, brand))
+    return True
+
+
+def _cfg(brand="Runpreneur"):
+    b = BRANDS[brand]
+    return open(b["key"]).read().strip(), open(b["loc"]).read().strip(), open(USER_FILE).read().strip()
+
+
+def ghl(method, path, body=None, brand="Runpreneur"):
+    key, _, _ = _cfg(brand)
     req = urllib.request.Request(GHL + path, data=json.dumps(body).encode() if body is not None else None, method=method,
                                  headers={"Authorization": "Bearer " + key, "Version": "2021-07-28", "Accept": "application/json",
                                           "Content-Type": "application/json", "User-Agent": UA})
@@ -197,14 +256,14 @@ def ghl(method, path, body=None):
         raise SystemExit("GHL %s %s -> %s: %s" % (method, path, e.code, e.read().decode()[:400]))
 
 
-def accounts():
-    _, loc, _ = _cfg()
-    return ghl("GET", "/social-media-posting/%s/accounts" % loc)["results"]["accounts"]
+def accounts(brand="Runpreneur"):
+    _, loc, _ = _cfg(brand)
+    return ghl("GET", "/social-media-posting/%s/accounts" % loc, brand=brand)["results"]["accounts"]
 
 
-def upload_media(path):
+def upload_media(path, brand="Runpreneur"):
     """Multipart upload through curl. The key goes in a curl config file (mode 600), never an argument."""
-    key, loc, _ = _cfg()
+    key, loc, _ = _cfg(brand)
     with tempfile.NamedTemporaryFile("w", delete=False, suffix=".curlrc") as fh:
         os.chmod(fh.name, 0o600)
         fh.write('header = "Authorization: Bearer %s"\nheader = "Version: 2021-07-28"\nuser-agent = "%s"\n' % (key, UA))
@@ -252,9 +311,9 @@ def approved_days():
     return sorted(int(d) for d, e in st.items() if e.get("verdict") == "approved")
 
 
-def create_post(body):
-    _, loc, _ = _cfg()
-    r = ghl("POST", "/social-media-posting/%s/posts" % loc, body)
+def create_post(body, brand="Runpreneur"):
+    _, loc, _ = _cfg(brand)
+    r = ghl("POST", "/social-media-posting/%s/posts" % loc, body, brand=brand)
     post = (r.get("results") or r).get("post") or r
     return post.get("_id") or post.get("id")
 
@@ -449,7 +508,29 @@ def selftest():
     open(MODE_FILE, "w").write("anything else"); assert mode() == "test"; os.remove(MODE_FILE); globals()["MODE_FILE"] = old
     u = build_post("youtube", accts[5], spec, "d", "https://cdn/f.mp4", None, "x", "u1", 1, "T", privacy="unlisted")
     assert u["youtubePostDetails"]["privacyLevel"] == "unlisted"
-    print(json.dumps({"checks": 22, "failed": []}))
+    # brand guard (Kevin's ruling 2 Sep 2026: a test must refuse cross-brand output)
+    od_accts = [{"id": "kp", "platform": "linkedin", "type": "profile", "active": True, "name": "Kevin Brittain"},
+                {"id": "odp", "platform": "linkedin", "type": "page", "active": True, "name": "Operations Director"},
+                {"id": "rp", "platform": "linkedin", "type": "page", "active": True, "name": "Runpreneur"},
+                {"id": "tt", "platform": "tiktok", "type": "profile", "active": True, "name": "Kevin Brittain - Runpreneur"},
+                {"id": "odfb", "platform": "facebook", "type": "page", "active": False, "name": "Operations Director"}]
+    assert [a["id"] for a in allowed_accounts("Operations Director", "post", od_accts)] == ["odp"], "OD posts reach the OD page only; the expired FB page waits"
+    od_accts[4]["active"] = True
+    assert [a["id"] for a in allowed_accounts("Operations Director", "post", od_accts)] == ["odp", "odfb"]
+    assert [a["id"] for a in allowed_accounts("Runpreneur", "bridge", od_accts)] == ["kp"], "a bridge post goes to Kevin's profile only"
+    assert brand_of({"Category": "Operations Director"}) == "Operations Director" and brand_of({"Category": "Runpreneur"}) == "Runpreneur"
+    for bad in ({"Category": "Social Housing Group"}, {}, None):
+        try: brand_of(bad); raise AssertionError("brand_of accepted %r" % (bad,))
+        except SystemExit: pass
+    try: assert_brand({"Category": "Runpreneur", "Content Name": "Episode 1 Full Episode"}, "Operations Director"); raise AssertionError("cross-brand accepted")
+    except SystemExit as ex: assert "refused by the Operations Director publisher" in str(ex)
+    try: allowed_accounts("Operations Director", "episode", od_accts); raise AssertionError("OD has no episode lane")
+    except SystemExit: pass
+    assert BRANDS["Operations Director"]["key"] != BRANDS["Runpreneur"]["key"], "two keys, never shared"
+    tp = build_text_post(od_accts[1], "hello", "2026-09-07T07:00:00Z", "u1", "https://cdn/c.png")
+    assert tp["media"] == [{"url": "https://cdn/c.png", "type": "image/png"}] and tp["type"] == "post" and tp["scheduleDate"] == "2026-09-07T07:00:00Z"
+    fbp = build_text_post(od_accts[4], "hello", "x", "u1", status="draft"); assert fbp["facebookPostDetails"] == {"type": "post"} and "media" not in fbp and "scheduleDate" not in fbp
+    print(json.dumps({"checks": 32, "failed": []}))
 
 
 if __name__ == "__main__":

@@ -138,3 +138,203 @@ Measured against her app, her SOPs and the last 15 Published records (see `~/Mov
 - **`runpreneur_sync.py`** replaces the app's Runpreneur Sync page (SOP 62): every run the site has not counted yet -> running total (seeded from the live site's value and day the first time; each run named for its own calendar day with the total as of that run; one activity folded once), day from the calendar (1 Jun 2020 = day 1), donations = the website's live figure at first run + the Stripe growth since (Kevin's continuity rule, 3 Sep 2026: the historic figure is never restated; Stripe lifetime gross of succeeded GBP charges on the Runpreneur account is only ever read for its difference) (read-only key `~/.config/od/stripe_runpreneur_key`; £6,842 over 1,643 charges on 3 Sep 2026, which matches the site's £76,840), progress = km / 40,075. Pushes the four GHL custom values the website's merge tags read (ids pinned; refuses to write if an id changed) and renames the run on Strava with the app's exact caption. Strava credentials: `strava_client_id/secret/refresh_token` in `~/.config/od/`. **Strava's app (Client 162160, "Performance Analysis") sits on a -1 request tier**, so every call returns 429 until Kevin upgrades it on strava.com/settings/api; the nightly run holds harmlessly and says so. Fallback if the tier never changes: the browser lane (`strava` profile, logged in 3 Sep).
 - **`spotify.py`** writes the agent-browser plan for the podcast: Ericamae's episodes are VIDEO episodes (Format: Video in the Episodes list), so the upload is the full episode MP4 with the Podcast Copy title/description and the YouTube link. Wizard: Upload (`#uploadAreaInput`) -> Details -> Review. Test mode ends in "Save as draft"; live presses "Publish now" through `commit`, which needs the episode's approval task Approved. The Details step's selectors are confirmed on the first real episode.
 - `agent-browser.js read` gained `--wait MS` / `--wait-for SELECTOR` because single-page apps paint nothing at domcontentloaded.
+
+
+## Operations Director lane (PLAN, 3 Sep 2026, awaiting Kevin's approval before any build)
+
+The second brand profile of the one Content Engine agent (register row recNaC0N5KiTGBPNy, chain links R3b and
+O1-O6 on its Notes). The Runpreneur lane is in its first full test and is not changed by anything here. This
+section is the plan Kevin asked for before building; every number below was read on 3 Sep 2026 and says where.
+
+### What the lane does, in one paragraph
+
+Every Runpreneur transcript the render step writes is mined for the talk about AI, agents, systems, delegation
+and running a business. The running context is stripped. The moments go into a bank with their verbatim quote
+and episode. Each Sunday night the lane fills the coming week's five weekday slots from the bank (pillar to
+slot), falls back to the playbook's named sources when the bank has nothing for a slot, drafts one LinkedIn
+post per slot in the OD voice, checks the playbook's hard rules, and raises one approval card per post so all
+five land in Monday's 08:00 digest. Approved posts are scheduled through GoHighLevel to the Operations Director
+LinkedIn page only. Test mode makes them planner drafts. The episode itself still publishes on Runpreneur.
+
+### Chen's Content Engine chain, mapped onto ours
+
+Chapter 2 of The AI Automation Playbook: 01 AI Research, 02 AI Draft, 03 AI Polish, 04 AUTO Publish, 05 AI
+Social clips, 06 AUTO Schedule, 07 AUTO Track, optional HUMAN approve before publish. Our links: Research =
+R3b transcript moments plus the O2 brief (Chen's brief rule kept: primary angle, target reader in one sentence,
+three specific points, two angles to avoid). Draft and Polish = O3 as two passes with Chen's polish wording
+("tighten without sacrificing the voice", never "make it punchier"). Approve = Kevin on the card, not optional.
+Publish and Schedule = O6 through GHL. Track = weekly stats onto the record, monthly read that re-weights the
+brief (P6, P7). Chen's voice-drift check (read three recent posts side by side, monthly) is P7's five minutes.
+Chapter 6's Social Repurposing chain becomes R3b inside this agent, which is exactly Chapter 2's step 6, and
+is not a register row of its own (Chen's own two-week rule and the 25 Aug merge verdict).
+
+### Measured before the plan (3 Sep 2026)
+
+- **OD GoHighLevel sub-account** `dgsHwbYbp6xrhRGZr9ik`, accounts read via `/social-media-posting/{loc}/accounts`:
+  LinkedIn profile "Kevin Brittain", LinkedIn page "Operations Director" (account id ending `106232134_page`),
+  LinkedIn page "Runpreneur", TikTok "Kevin Brittain - Runpreneur". All active to Oct 2026 or later. The OD lane
+  may use exactly ONE of these: the Operations Director page. The other three are on the allowlist for nothing.
+- **Content Machine Runpreneur table** `tblEPzZdwBZeSXFRB`: Category options are `Social Housing Group` and
+  `Runpreneur` only (no Operations Director yet); Content Type has `Written`; Platforms has `LinkedIn Post`;
+  the record already carries LinkedIn Copy, Target Publish Date, Link of Linkedin Post, Views/Likes/Comments
+  LinkedIn. Nothing new is needed on the table beyond the one Category option.
+- **Classifier back-test, read-only, the 30 most recent Long Form transcripts with 1,500+ characters sorted by
+  Date Published (YT)** (episodes 1950-1996, scratch files `transcripts30.json`, `od_ai_pass.json`):
+
+  | Pass | Rule | Result on the 30 |
+  |---|---|---|
+  | 1. Keyword gate (free) | OD words per 1,000 words (ai, agent, automat, system, process, delegat, business, founder, team, decision, productiv, ...) at 3 or more | passes 17 of 30; catches all 9 the AI later rated 7+; saves 13 AI calls |
+  | 2. AI score (sonnet, JSON, standard tier) | 0-10 relevance to OD's four pillars, verdict OD at 7+, verbatim 8-25 word quote per moment, running talk excluded by rule | 9 of 30 at 7+ (30%), 6 at 4-6, 15 at 0-3; the 9 support 23 posts by the model's own count; cost $1.08 for all 30, 3.6 cents a transcript |
+
+  A keyword gate alone is not enough: at 7 words per 1,000 it misses episodes 1968, 1977 and 1979 (mindset applied
+  to business, scored 7 by the AI) and passes 1969 and 1964 (scored 3 and 4). So: two passes, gate at 3, AI at 7.
+  Sample moments the AI pulled, quotes verbatim from the transcript: Episode 1992 "you've now got the ability to
+  turn SOPs into AI agents and have a universal SOP agent" (Method); Episode 1979 "I normally look at them over a
+  30 day period and that's where I'll determine whether we're making progress or not" (Method); Episode 1977
+  "remove as much of the emotion from the process as possible, because it's only gonna mask your logic" (Philosophy).
+- **What that means for cadence:** about 2 of 7 weekly episodes carry OD material, worth 2-3 posts each, so the
+  bank supplies roughly 4-5 posts a week at best and 3-4 in a normal week. The remaining slots come from the O2
+  brief on the playbook's named sources. A slot with neither raises a THIN card asking Kevin for one line of
+  context; nothing is invented (playbook rule 1). Transcript-sourced posts are also the cleanest voice source
+  we have: the spoken word is the one corpus of Kevin's that cannot have been written by his AI
+  (`Knowledge/kevin-voice-profile.md`, contamination rule).
+
+### Decisions in this plan (Kevin approves or amends each)
+
+1. **Record home.** Same table, one record per post: Category `Operations Director` (brand = Category, Kevin's
+   ruling), Content Type `Written`, Content Name `OD Post 2026-09-07 Mon Pain - <hook>`, the post in
+   `LinkedIn Copy`, `Target Publish Date`, Platforms `LinkedIn Post`, Responsible `Content Engine (AI)`, Notes
+   holding the source (episode record id and the verbatim quote, or the named playbook source). The Category option
+   is created by the first write with `typecast: true`; if Airtable refuses (the PAT has no schema scope), Kevin adds
+   the option once in the table. Verified in the build with one test record, deleted after.
+2. **Post shape: text only.** No clip reuse. The Learnings clip shows Kevin running in Vibrams under a DAY pill,
+   which is Runpreneur content on an OD channel (playbook rule 4, "no exceptions") and the audience-signal reason
+   in playbook section 2. No carousel (rule 2 on visuals; no asset pipeline). A re-cut OD clip with its own overlay
+   is a later section 13 option once four weeks of text posts have data.
+3. **Cadence and slots.** Sunday night in the existing 02:00 job: mine new transcripts into the bank, then fill
+   Mon Pain, Tue Method, Wed Proof, Thu Contrarian, Fri Offer. Pillar match: Pain moments to Monday, Method to
+   Tuesday, Philosophy to Thursday; Wednesday Proof comes only from the evidence inventory (decision 8); Friday is
+   the week's strongest moment plus the one CTA. Five cards raised together so they sit in Monday's 08:00 digest.
+   Approved posts schedule to the OD page at 08:00 London on their weekday (parameter; the register's trigger says
+   the 06:00 slot opens, the team's own posts went out 08:00-09:00). Test mode: GHL drafts, nothing on the feed.
+4. **Copy prompt** (`od_prompts.py`, new): system prompt built from playbook sections 3 (audience, core message,
+   five hot-buttons), 4 (pillars and third acts), 6 (rules 1-12 including locked pricing £1,500 setup, £350 a
+   month, 30-day trial), plus the person-to-person register of `Knowledge/kevin-voice-profile.md` loaded at run
+   time (never the LinkedIn history, rule 12), plus the agent file's shared "Lessons from Kevin" and a new
+   "Lessons from Kevin (Operations Director)" subsection. Two calls per post (draft, then polish with Chen's
+   wording). Output: one post, 60-220 words, hook as the first line, "you" and "your", no hashtags (rule 12
+   measured 13.4 hashtags a post on the machine-written history; Kevin's real writing carries none), no link and
+   no ask Monday to Thursday. Standard tier, same headless `claude -p` route as `platform_copy.py`.
+5. **Rules check** (`od_rules_check`, modelled on `platform_copy.rules_check`): em dash fixed in place; UK
+   spelling; the master prompt's banned words; a Runpreneur strip list that FAILS the post (run, running, runner,
+   km, streak, barefoot, Vibram, Runpreneur, marathon, charity, children, donate, Strava); every £ figure must be
+   one of the locked three or appear in the source; every other number must appear in the source; a link or a
+   "comment" ask only on Friday; "agent" only for things the evidence inventory calls agents (decision 8). Fail =
+   the card says so and the post is left for Kevin, never silently rewritten (the R8 pattern).
+6. **Brand guard** (`publish.py`, `BRANDS` map): brand -> key file, location file, allowed accounts by platform
+   and type, allowed record Category. Operations Director allows exactly one account, the OD LinkedIn page. The
+   publisher reads the brand from the record's Category and refuses a mismatch. Selftests: a Runpreneur record
+   handed to the OD publisher raises; an OD record whose Category is Runpreneur raises; the OD allowlist contains
+   no profile, no TikTok and no Runpreneur page; an OD post containing a strip-list word fails the rules check; an
+   OD card never names the Runpreneur socials; the Runpreneur publisher never reads the OD key.
+7. **The card.** Task name `CONTENT (OD): Mon 7 Sep, Pain: <hook>`. First line, the ask: "Post this on the
+   Operations Director LinkedIn page on Monday 7 September at 08:00." Then the post exactly as written. Then
+   "Where it came from": episode number and the verbatim quote, or the named source. Then the rules-check line.
+   Then the closing line "**Carrying this out will involve:**" with the test or live wording. Business =
+   Operations Director (`reca9ofzhuw13ZzGE`), Team Member `recRcy1Edas6rGaaF`, type Drafting, created through
+   `create-agent-task.py create --force` (the dupe key strips numbers and dates, so every OD card would fold into
+   one) after an exact-name check with a control, then `agent-dispatch.py submit`. Same queue as the Runpreneur
+   cards, told apart by the `(OD)` prefix; five arrive together on Monday and each reads in about a minute.
+   Verdicts: Approved -> record `Approved for Publishing`; Changes requested -> ONE redo with Kevin's words and a
+   fresh card, a second miss drops the slot and logs it; Rejected with a reason -> the reason lands in the OD
+   lessons subsection (reject and remember), the slot is dropped.
+8. **Proof source needs a refresh (playbook amendment, Kevin's call).** Section 4a was verified 21 Jul 2026 and
+   names two autonomous agents. The register now holds 26 rows with several Live and Built (Inbound Comms
+   Triage, Creditor Management, Task Manager, Property Administration, Content Engine). Proposal: Wednesday Proof
+   posts draw on register rows at Live or Built and their measured facts on the row (for example, 83 of 83
+   labelled threads already had a task on 2 Sep), with the row id in the card's source line. Until Kevin approves
+   this, Wednesday falls back to the THIN card.
+9. **Friday CTA route.** The comment-gated "Comment SYSTEMS" route needs the daily comment-reading pass, which is
+   not built. Friday uses the plain link to the gated Founder to Free magnet first; comment-gating is a later link.
+10. **Measurement.** The register metric is human minutes per published piece, 10 or fewer, both brands. We cannot
+    time Kevin, so the lane logs an estimate per card from the verdict (Approved as-is 2 minutes, minor edits 5,
+    changes requested 10 plus the redo), flagged as an estimate in the weekly digest line ("OD lane: 5 posts, about
+    12 human minutes, 2.4 a post"). GHL statistics (the key has the statistics scope) fill Views, Likes and
+    Comments LinkedIn on the record weekly; missing = blank plus a flag, never 0. Playbook section 9's 90-day gate
+    stands: fewer than 3 attended calls and the lane drops to 2 posts a week.
+
+### Stress inputs (must pass before Live)
+
+1. A week with no OD moments (the June 2026 window had 1 qualifying episode in 3): the slots fill from named
+   sources or raise THIN cards. Nothing invented, no post from an empty brief.
+2. GHL 401 mid-schedule (the 2 Sep live example): retry three times over 30 minutes, alert, never Published. Reused.
+3. A Runpreneur record reaching the OD publisher, or an OD record reaching the Runpreneur one: refused by the
+   brand guard with a named reason. Ten times the volume (the 90-clip batch): the bank grows, the cadence cap
+   holds at five a week, bank items older than 60 days are dropped and time-sensitive words ("this week",
+   "yesterday") are flagged on the card, Chen's rule.
+
+### Build order after approval (one session)
+
+B1 `od_lane.py mine` (two-pass classifier, bank in `~/knowledge-os/logs/content-engine/od-bank.json`, a note on
+the episode record) with `backtest` kept as a read-only command against the live table. B2 `od_lane.py draft`
+(slot fill, `od_prompts.py`, `od_rules_check`, the post records). B3 `approval.py` OD cards. B4 `publish.py`
+`BRANDS` map, OD scheduling, the brand-guard selftests. B5 weekly stats. B6 the two new lines in
+`content-engine-run.sh` (Sunday-gated draft, nightly mine). Selftests on every script as the lane already does;
+the first test week runs in test mode with Kevin reading five drafts in the GHL planner.
+
+### Open questions for Kevin (only the ones that change the build)
+
+Q1 Publish time 08:00 or 06:00. Q2 Five cards (recommended, one verdict each) or one weekly card. Q3 No hashtags
+(recommended). Q4 Approve decision 8 so Wednesday has a source. Q5 Plain link on Friday until comment-gating exists.
+
+
+## Operations Director lane: BUILT (3 Sep 2026, Kevin approved the plan above the same day)
+
+Kevin's four additions to the plan: OD posts go to the Operations Director LinkedIn page AND the Operations
+Director Facebook page (once he connects it in GHL's Social Planner settings; until then the allowlist finds no
+active Facebook page and the post goes to LinkedIn only); two Runpreneur-framed bridge posts a week (Tue Method,
+Wed Proof) on his personal LinkedIn profile, amending the 21 Jul lock; Monday talking points for his runs folded
+into the 09:00 brief by the huddle; the lead magnet as an urgent master-plan task straight after this build.
+Instagram for OD waits until LinkedIn shows a signal; designed quote cards are rendered by code from real words.
+
+- **`od_lane.py`** is the lane. `mine` (nightly, 6 transcripts) runs the two-pass classifier: `gate_density` (OD
+  words per 1,000, free) at 3 or more, then `od_prompts.MINE_SYSTEM` through the same headless `claude -p` route as
+  the copy step, score 7+ = OD; each moment's quote must be verbatim in the transcript (`verbatim`) or it is
+  dropped. The bank is `~/knowledge-os/logs/content-engine/od-bank.json`; an OD episode gets one Notes line. `draft`
+  (nightly, idempotent) fills the coming week's five slots: Pain/Method/Philosophy moments to Mon/Tue/Thu by pillar,
+  Wednesday only from a real Proof moment, Friday the best remaining moment plus the one CTA (the Operations Review
+  Call booking link until the magnet exists); Monday falls back to a playbook hot-button in the customer's words;
+  anything else unsourced becomes a THIN card that asks Kevin for one line. Brief -> draft -> polish (Chen's
+  wording) -> `rules_check` -> one `Written` record per post under Category `Operations Director` (typecast created
+  the option on 3 Sep 2026; the test record was deleted). Two quote cards a week (`od_card.py`, ffmpeg drawtext on
+  the Sage palette, Arial until DM Sans is installed) and two bridge posts. `cards` raises one approval card per
+  post (Business Operations Director, `--force` after an exact-name check with a control, `CONTENT (OD): Mon 7 Sep,
+  Pain: <hook>`). `sync` reads verdicts: Approved -> Approved for Publishing; Changes requested -> ONE redo from
+  Kevin's words and a fresh card, a second miss drops the slot; Rejected with a reason -> a lesson appended to
+  "## Lessons from Kevin (Operations Director)" in the agent file, which every OD call reads. `publish` schedules
+  approved posts 08:00 London on their day to `publish.allowed_accounts("Operations Director", "post", ...)`, the
+  bridge post 12:00 to Kevin's profile on the Runpreneur sub-account; drafts in test mode. `publish-sync` writes
+  LinkedIn Link / Facebook Page Post Link and Published. `points` (Sun/Mon) writes `talking-points.md`.
+- **Brand guard in `publish.py`**: `BRANDS` (key file, location, allowed accounts per lane, record Category),
+  `brand_of`, `allowed_accounts`, `assert_brand`; `ghl`, `accounts`, `upload_media`, `create_post` take a brand and
+  default to Runpreneur so the episode lane is unchanged. OD allows `("linkedin","page","Operations Director")` and
+  `("facebook","page","Operations Director")` and nothing else; names are matched exactly because the OD sub-account
+  also carries Kevin's profile, the Runpreneur page and TikTok. Selftests refuse a Runpreneur record at the OD
+  publisher, an OD record at any other, a profile or TikTok for OD, and check the two keys differ.
+- **Human minutes** are ESTIMATED from verdicts (Approved as-is 2, minor edits 5, changes 10, rejected 3) and
+  reported as such in the digest line. GHL exposes no statistics endpoint we could find (`/statistics` 404,
+  `posts/list` needs account ids), so weekly view counts are a follow-up, not a promise.
+- **Filter lesson from the selftest:** "run" is a business word ("runs without you" is the core message), so the
+  strip list catches only the running senses (my run, running streak, km, Vibrams, Strava, charity, children).
+- **First mine (3 Sep 2026, the 40 most recent transcripts):** 9 episodes OD at score 7+, 18 verbatim moments banked
+  (Method 11, Pain 4, Philosophy 3, Proof 0), 31 not OD. The exact-substring quote check dropped every quote from four
+  OD episodes because a model quoting speech drifts by a comma or an "um"; `verbatim` is now a fuzzy window match
+  (difflib ratio 0.85 or better against the best transcript window, exact substring passes at once) and the four were
+  re-mined. Episode 2003 still lost its three quotes (`moments_dropped`), so it is counted OD with nothing to post.
+- **Slot fill rule added after the first dry run:** an episode already used this week yields to another (the first
+  dry run put Episode 1992 in four of five slots). **Wednesday Proof** falls back to one AI Agents register row at
+  Status Live or Built (`register_proof_source`, Kevin's decision 8): the agent described in the register's own words,
+  rotated over eight weeks, with NO figure because the row carries none; numbers arrive when Kevin states them on
+  camera (the talking points ask for them).
+- Tests: `tests/content-engine-od.test.js` (selftests, playbook pricing and hot-buttons pinned against the
+  prompt, the brand map, the nightly wiring, the business each card lands under).

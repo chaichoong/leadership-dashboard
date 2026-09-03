@@ -27,7 +27,8 @@
 #                      the night after YouTube publishes the Summary (09:00) and Learnings (17:00)
 #                      clips to every connected social channel, all through GoHighLevel. Holds with a
 #                      digest line until a YouTube account is connected in GHL.
-#   9. report        : one line each for the morning digest.
+#   9. OD lane       : Operations Director brand profile (od_lane.py): mine, sync, draft, cards, publish, points.
+#  10. report        : one line each for the morning digest.
 set -uo pipefail
 REPO="/Users/kevinbrittain/Projects/leadership-dashboard"
 LOG_DIR="/Users/kevinbrittain/knowledge-os/logs/content-engine"
@@ -45,7 +46,20 @@ python3 scripts/content-engine/publish.py run --limit 2 || exit 1
 #     numbers onto the website's custom values, the run renamed on Strava (SOP 62 / the app's Runpreneur
 #     Sync page). Holds harmlessly on Strava's quota (the app is on a -1 tier until Kevin upgrades it).
 python3 scripts/content-engine/runpreneur_sync.py run || echo "runpreneur sync: skipped this run (see above)"
+# 9. Operations Director lane (od_lane.py, Kevin-approved plan 3 Sep 2026): mine tonight's new transcripts into the
+#    bank of OD moments; read Kevin's verdicts on OD cards (one redo on "Changes requested"); fill the coming week's
+#    five weekday slots if they are not drafted yet (idempotent, so a missed night costs nothing); one card per
+#    post; approved posts to GoHighLevel on the OD brand (drafts in test mode); Sunday/Monday: talking points for
+#    Kevin's runs. Every step falls through with a line, so the OD lane can never stop the Runpreneur lane.
+python3 scripts/content-engine/od_lane.py mine --limit 6 || echo "od mine: failed this run (see above)"
+python3 scripts/content-engine/od_lane.py sync || echo "od sync: failed this run (see above)"
+python3 scripts/content-engine/od_lane.py draft || echo "od draft: failed this run (see above)"
+python3 scripts/content-engine/od_lane.py cards || echo "od cards: failed this run (see above)"
+python3 scripts/content-engine/od_lane.py publish-sync || echo "od publish sync: failed this run (see above)"
+python3 scripts/content-engine/od_lane.py publish || echo "od publish: failed this run (see above)"
+case "$(TZ=Europe/London date +%u)" in 7|1) python3 scripts/content-engine/od_lane.py points || echo "od points: failed this run (see above)";; esac
 python3 scripts/content-engine/watch.py report
 python3 scripts/content-engine/approval.py report
 python3 scripts/content-engine/publish.py report
 python3 scripts/content-engine/runpreneur_sync.py report
+python3 scripts/content-engine/od_lane.py report
