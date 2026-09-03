@@ -286,3 +286,45 @@ the first test week runs in test mode with Kevin reading five drafts in the GHL 
 
 Q1 Publish time 08:00 or 06:00. Q2 Five cards (recommended, one verdict each) or one weekly card. Q3 No hashtags
 (recommended). Q4 Approve decision 8 so Wednesday has a source. Q5 Plain link on Friday until comment-gating exists.
+
+
+## Operations Director lane: BUILT (3 Sep 2026, Kevin approved the plan above the same day)
+
+Kevin's four additions to the plan: OD posts go to the Operations Director LinkedIn page AND the Operations
+Director Facebook page (once he connects it in GHL's Social Planner settings; until then the allowlist finds no
+active Facebook page and the post goes to LinkedIn only); two Runpreneur-framed bridge posts a week (Tue Method,
+Wed Proof) on his personal LinkedIn profile, amending the 21 Jul lock; Monday talking points for his runs folded
+into the 09:00 brief by the huddle; the lead magnet as an urgent master-plan task straight after this build.
+Instagram for OD waits until LinkedIn shows a signal; designed quote cards are rendered by code from real words.
+
+- **`od_lane.py`** is the lane. `mine` (nightly, 6 transcripts) runs the two-pass classifier: `gate_density` (OD
+  words per 1,000, free) at 3 or more, then `od_prompts.MINE_SYSTEM` through the same headless `claude -p` route as
+  the copy step, score 7+ = OD; each moment's quote must be verbatim in the transcript (`verbatim`) or it is
+  dropped. The bank is `~/knowledge-os/logs/content-engine/od-bank.json`; an OD episode gets one Notes line. `draft`
+  (nightly, idempotent) fills the coming week's five slots: Pain/Method/Philosophy moments to Mon/Tue/Thu by pillar,
+  Wednesday only from a real Proof moment, Friday the best remaining moment plus the one CTA (the Operations Review
+  Call booking link until the magnet exists); Monday falls back to a playbook hot-button in the customer's words;
+  anything else unsourced becomes a THIN card that asks Kevin for one line. Brief -> draft -> polish (Chen's
+  wording) -> `rules_check` -> one `Written` record per post under Category `Operations Director` (typecast created
+  the option on 3 Sep 2026; the test record was deleted). Two quote cards a week (`od_card.py`, ffmpeg drawtext on
+  the Sage palette, Arial until DM Sans is installed) and two bridge posts. `cards` raises one approval card per
+  post (Business Operations Director, `--force` after an exact-name check with a control, `CONTENT (OD): Mon 7 Sep,
+  Pain: <hook>`). `sync` reads verdicts: Approved -> Approved for Publishing; Changes requested -> ONE redo from
+  Kevin's words and a fresh card, a second miss drops the slot; Rejected with a reason -> a lesson appended to
+  "## Lessons from Kevin (Operations Director)" in the agent file, which every OD call reads. `publish` schedules
+  approved posts 08:00 London on their day to `publish.allowed_accounts("Operations Director", "post", ...)`, the
+  bridge post 12:00 to Kevin's profile on the Runpreneur sub-account; drafts in test mode. `publish-sync` writes
+  LinkedIn Link / Facebook Page Post Link and Published. `points` (Sun/Mon) writes `talking-points.md`.
+- **Brand guard in `publish.py`**: `BRANDS` (key file, location, allowed accounts per lane, record Category),
+  `brand_of`, `allowed_accounts`, `assert_brand`; `ghl`, `accounts`, `upload_media`, `create_post` take a brand and
+  default to Runpreneur so the episode lane is unchanged. OD allows `("linkedin","page","Operations Director")` and
+  `("facebook","page","Operations Director")` and nothing else; names are matched exactly because the OD sub-account
+  also carries Kevin's profile, the Runpreneur page and TikTok. Selftests refuse a Runpreneur record at the OD
+  publisher, an OD record at any other, a profile or TikTok for OD, and check the two keys differ.
+- **Human minutes** are ESTIMATED from verdicts (Approved as-is 2, minor edits 5, changes 10, rejected 3) and
+  reported as such in the digest line. GHL exposes no statistics endpoint we could find (`/statistics` 404,
+  `posts/list` needs account ids), so weekly view counts are a follow-up, not a promise.
+- **Filter lesson from the selftest:** "run" is a business word ("runs without you" is the core message), so the
+  strip list catches only the running senses (my run, running streak, km, Vibrams, Strava, charity, children).
+- Tests: `tests/content-engine-od.test.js` (selftests, playbook pricing and hot-buttons pinned against the
+  prompt, the brand map, the nightly wiring, the business each card lands under).
