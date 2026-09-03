@@ -22,10 +22,29 @@
     return d;
   }
 
-  async function start() {
-    let sess = null;
-    try { sess = await window.sbCMSession(); } catch (e) {}
-    if (sess) return;   // shared shell session — the app loads; the shim waits for it too
+  // Content Machine is a PAID ADD-ON. Only a workspace whose org_modules has
+  // content_machine enabled may see it. This gates DIRECT access to the page
+  // (the shell nav already hides it); fail-CLOSED on any error so a client can
+  // never reach a tool they haven't bought.
+  async function isEntitled() {
+    try {
+      const { data } = await window.sbCM().from('org_modules').select('enabled').eq('module_key', 'content_machine').maybeSingle();
+      return !!(data && data.enabled);
+    } catch (e) { return false; }
+  }
+  function moduleGate() {
+    const d = document.createElement('div');
+    d.id = 'sbModuleGate';
+    d.style.cssText = 'position:fixed;inset:0;z-index:99999;background:#141915;display:flex;align-items:center;justify-content:center;font-family:system-ui,sans-serif';
+    d.innerHTML =
+      '<div style="background:#1d241f;border:1px solid #2c352d;border-radius:12px;padding:32px;max-width:420px;text-align:center;box-shadow:0 8px 24px rgba(0,0,0,.35)">' +
+      '<div style="font-size:30px;margin-bottom:10px">🔒</div>' +
+      '<div style="font-size:18px;font-weight:700;color:#EAEFEA;margin-bottom:6px">Content Machine isn’t in your plan</div>' +
+      '<div style="font-size:13px;color:#9aa39b;line-height:1.5">This is a paid add-on. Contact your account manager to add it to your workspace.</div></div>';
+    return d;
+  }
+
+  function showLogin() {
     const ov = overlay();
     document.body.appendChild(ov);
     const err = ov.querySelector('#sbErr');
@@ -39,6 +58,19 @@
     }
     ov.querySelector('#sbGo').addEventListener('click', attempt);
     ov.querySelector('#sbPass').addEventListener('keydown', e => { if (e.key === 'Enter') attempt(); });
+  }
+
+  async function start() {
+    // Opaque cover up-front so the tool never flashes before we know the plan.
+    const cover = document.createElement('div');
+    cover.id = 'sbBootCover';
+    cover.style.cssText = 'position:fixed;inset:0;z-index:99998;background:#141915';
+    (document.body || document.documentElement).appendChild(cover);
+    let sess = null;
+    try { sess = await window.sbCMSession(); } catch (e) {}
+    if (!sess) { cover.remove(); showLogin(); return; }        // no session → login
+    if (!(await isEntitled())) { document.body.appendChild(moduleGate()); cover.remove(); return; }  // not bought → gate
+    cover.remove();   // signed in AND entitled → the app shows
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start);

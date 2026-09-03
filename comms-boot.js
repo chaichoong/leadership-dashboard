@@ -35,10 +35,28 @@
     return d;
   }
 
-  async function start() {
-    let sess = null;
-    try { sess = await window.sbCommsSession(); } catch (e) {}
-    if (sess) return;   // already signed in → let the page's Google auth proceed
+  // Inbound Comms is a PAID ADD-ON. Only a workspace whose org_modules has
+  // inbound_comms enabled may see it. Gate DIRECT access (the shell nav already
+  // hides it); fail-CLOSED so a client can never reach a tool they haven't bought.
+  async function isEntitled() {
+    try {
+      const { data } = await window.sbComms().from('org_modules').select('enabled').eq('module_key', 'inbound_comms').maybeSingle();
+      return !!(data && data.enabled);
+    } catch (e) { return false; }
+  }
+  function moduleGate() {
+    const d = document.createElement('div');
+    d.id = 'sbModuleGate';
+    d.style.cssText = 'position:fixed;inset:0;z-index:100000;background:#F1F3EF;display:flex;align-items:center;justify-content:center;font-family:Inter,system-ui,sans-serif';
+    d.innerHTML =
+      '<div style="background:#fff;border:1px solid #DDE1D9;border-radius:12px;padding:32px;max-width:420px;text-align:center;box-shadow:0 8px 24px rgba(0,0,0,.08)">' +
+      '<div style="font-size:30px;margin-bottom:10px">🔒</div>' +
+      '<div style="font-size:18px;font-weight:700;color:#1C2422;margin-bottom:6px">Inbound Comms isn’t in your plan</div>' +
+      '<div style="font-size:13px;color:#5A6660;line-height:1.5">This is a paid add-on. Contact your account manager to add it to your workspace.</div></div>';
+    return d;
+  }
+
+  function showLogin() {
     const ov = overlay();
     document.body.appendChild(ov);
     const err = ov.querySelector('#sbErr');
@@ -48,10 +66,24 @@
       const pass = ov.querySelector('#sbPass').value;
       const { error } = await window.sbCommsSignIn(email, pass);
       if (error) { err.textContent = error.message; err.style.display = 'block'; return; }
-      ov.remove();   // reveal the page's Google sign-in
+      ov.remove();
+      if (!(await isEntitled())) document.body.appendChild(moduleGate());   // reveal only if bought
     }
     ov.querySelector('#sbGo').addEventListener('click', attempt);
     ov.querySelector('#sbPass').addEventListener('keydown', e => { if (e.key === 'Enter') attempt(); });
+  }
+
+  async function start() {
+    // Opaque cover up-front so the tool never flashes before we know the plan.
+    const cover = document.createElement('div');
+    cover.id = 'sbBootCover';
+    cover.style.cssText = 'position:fixed;inset:0;z-index:99999;background:#F1F3EF';
+    (document.body || document.documentElement).appendChild(cover);
+    let sess = null;
+    try { sess = await window.sbCommsSession(); } catch (e) {}
+    if (!sess) { cover.remove(); showLogin(); return; }        // no session → login
+    if (!(await isEntitled())) { document.body.appendChild(moduleGate()); cover.remove(); return; }  // not bought → gate
+    cover.remove();   // signed in AND entitled → let the page's Google auth proceed
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start);
