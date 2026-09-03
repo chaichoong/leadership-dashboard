@@ -153,15 +153,19 @@ def _airtable(method, url, body=None):
 
 
 def find_record(file_id, day):
-    """Existing record for this clip: by Drive id first, then by episode name. Returns (id, how) or (None, None).
+    """Existing record for this episode: by episode NAME first, then by Drive id (Full Episode records only). Returns (id, how) or (None, None).
     A silent zero on an existence check writes the duplicate the check exists to prevent, so the
     control here is that the table itself must answer (a bad formula raises, it does not return [])."""
-    f1 = 'FIND("%s", {Raw File Link})' % file_id
-    r = _airtable("GET", API + "?maxRecords=1&filterByFormula=" + urllib.parse.quote(f1))
-    if r.get("records"): return r["records"][0]["id"], "raw-link"
+    # NAME FIRST. The episode number is the identity: a catch-up clip resolves to a different day
+    # from the one the scan gave its shooting date, and on 3 Sep 2026 the raw-link match found the
+    # "Episode 2195 Short" record (the copy step copies Raw File Link onto the clip records) and
+    # wrote a whole full episode onto it. The raw-link fallback is now Full Episode records only.
     f2 = '{Content Name}="%s"' % episode_name(day)
     r = _airtable("GET", API + "?maxRecords=1&filterByFormula=" + urllib.parse.quote(f2))
     if r.get("records"): return r["records"][0]["id"], "name"
+    f1 = 'AND(FIND("%s", {Raw File Link}), {Content Type}="Long Form Video")' % file_id
+    r = _airtable("GET", API + "?maxRecords=1&filterByFormula=" + urllib.parse.quote(f1))
+    if r.get("records"): return r["records"][0]["id"], "raw-link"
     return None, None
 
 
