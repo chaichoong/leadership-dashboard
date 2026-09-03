@@ -51,6 +51,14 @@ describe('content-engine publish (GHL)', () => {
     expect(sh).toContain('publish.py report');
   });
 
+  it('starts in TEST mode and can only go live when Kevin writes the mode file: unlisted YouTube, drafts for the socials', () => {
+    const src = readFileSync(PUBLISH, 'utf8');
+    expect(src).toContain('MODE_FILE = os.path.expanduser("~/.config/od/content_engine_mode")');
+    expect(src).toContain('return "live" if m == "live" else "test"');
+    expect(src).toContain('status = "scheduled" if (not test or platform == "youtube") else "draft"');
+    expect(src).toContain('privacy="unlisted" if test else "public"');
+  });
+
   it('X is not a channel and every copy field it reads exists on the record type it reads it from', () => {
     const src = readFileSync(PUBLISH, 'utf8');
     expect(src).toContain('assert "twitter" not in CHANNELS');

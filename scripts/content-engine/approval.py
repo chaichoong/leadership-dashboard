@@ -106,14 +106,27 @@ def build_card(day, full, lfmd=None, short=None, headline=""):
         m = re.search(r"review: (.+)", note)
         if m: review.append(m.group(1).strip())
     checks = ("Rules check flagged: " + " | ".join(review)) if review else "Rules check: nothing flagged (UK English, no em dashes, no figures that are not in the transcript)."
-    closing = ("%s uploading the full episode to YouTube with this thumbnail and copy, and scheduling the Summary and Learnings clips with their copy on %s "
-               "through GoHighLevel. The scheduling step is the next build: until it is live, your approval marks the episode "
-               "\"Approved for Publishing\" and nothing goes out." % (CLOSING, SOCIALS))
+    closing = closing_line(publish_mode())
     out = "\n\n".join([ask, "Watch before you approve:\n" + "\n".join(watch_lines), "Where it goes if you approve:\n" + "\n".join(where),
                        "The copy, as written:\n\n" + "\n\n".join(copy), checks, closing])
     desc = ("Approve Episode %d for publishing. The Content Engine rendered the three videos, wrote the platform copy "
             "and made the thumbnail from the raw 360 clip. Nothing is published until you approve." % day)
     return task_name(day, headline), desc, out
+
+
+def publish_mode():
+    try:
+        import publish; return publish.mode()
+    except Exception: return "test"
+
+
+def closing_line(m):
+    if m == "live":
+        return ("%s uploading the full episode to YouTube with this thumbnail and copy tomorrow at 06:00, then the day after, "
+                "scheduling the Summary and Learnings clips with their copy on %s through GoHighLevel." % (CLOSING, SOCIALS))
+    return ("%s TEST MODE: uploading the full episode to YouTube as UNLISTED (only people with the link can see it) with this thumbnail and copy, "
+            "then creating the Summary and Learnings posts for %s as DRAFTS in the GoHighLevel planner for you to open and check. "
+            "Nothing reaches a public feed until you switch the engine to live." % (CLOSING, SOCIALS))
 
 
 def verdict_patch(outcome, feedback, when):
@@ -251,8 +264,9 @@ def selftest():
     first = out.split("\n")[0]
     assert first.startswith('Publish Episode 2225 of Diary of a Runpreneur "RECORD IT ONCE / AI WORKS FOREVER": the full episode to YouTube'), first
     assert out.rstrip().split("\n")[-1].startswith(CLOSING), "must end with the closing line the queue reads"
+    assert "UNLISTED" in closing_line("test") and "DRAFTS" in closing_line("test") and "06:00" in closing_line("live") and closing_line("live").startswith(CLOSING)
     for s in ("https://drive/full", "https://drive/lfmd", "https://drive/sum", "https://drive/thumb", "yt words", "blog words", "li words", "th words", "fb words",
-              "Youtube Full Post", "Rules check flagged: Threads copy 512 chars", "nothing goes out"):
+              "Youtube Full Post", "Rules check flagged: Threads copy 512 chars", "Nothing reaches a public feed"):
         assert s in out, s
     assert "Nothing is published until you approve" in desc
     _, _, out2 = build_card(2226, {"id": "x", "fields": {"Video Edited URL": "u", "Thumbnail URL": "t", "YouTube Copy": "y"}})
@@ -264,7 +278,7 @@ def selftest():
     p, v = verdict_patch("Rejected", "Not this one", None); assert v == "rejected" and p["Feedback"] == "Not this one" and "Record Status" not in p
     p, v = verdict_patch("Changes requested", "Shorter title", None); assert v == "changes" and p["Feedback"] == "Shorter title"
     assert TASK_TYPE == "Drafting"
-    print(json.dumps({"checks": 14, "failed": []}))
+    print(json.dumps({"checks": 15, "failed": []}))
 
 
 if __name__ == "__main__":
