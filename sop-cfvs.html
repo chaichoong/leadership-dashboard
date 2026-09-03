@@ -103,7 +103,7 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
     <a href="index.html#sitemap" class="header-back">&larr; Back to Site Map</a>
     <h1>Cash Flow Voids (CFVs) &mdash; Standard Operating Procedure</h1>
     <div class="subtitle">Detection, management, chase tracking, auto-return and resolution of missing rent payments</div>
-    <div class="version">Version 1.34 &middot; 26 August 2026 &middot; Owner: Kevin Brittain</div>
+    <div class="version">Version 1.35 &middot; 3 September 2026 &middot; Owner: Kevin Brittain</div>
   </div>
 </div>
 
@@ -127,8 +127,12 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
         <div class="qr-value">Tenancies (<code>tblN51a88qTDB6iMH</code>), Transactions (<code>tbln0gzhCAorFc3zB</code>), Tenants (<code>tblX4elTuu01gwBYh</code>)</div>
       </div>
       <div class="qr-item">
-        <div class="qr-label">Detection Tolerance</div>
-        <div class="qr-value">2 days after rent due date (<code>CFV_TOLERANCE_DAYS = 2</code>)</div>
+        <div class="qr-label">Payment Check</div>
+        <div class="qr-value">Has the current rent cycle been paid? A payment up to 5 days early still counts for that cycle</div>
+      </div>
+      <div class="qr-item">
+        <div class="qr-label">2-Day Tolerance</div>
+        <div class="qr-value">(<code>CFV_TOLERANCE_DAYS = 2</code>) Used for re-flagging and for how long a dismissal lasts. It is <strong>not</strong> a waiting period before a new CFV is spotted</div>
       </div>
       <div class="qr-item">
         <div class="qr-label">Owner</div>
@@ -136,7 +140,7 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
       </div>
       <div class="qr-item">
         <div class="qr-label">Version</div>
-        <div class="qr-value">1.34</div>
+        <div class="qr-value">1.35</div>
       </div>
     </div>
   </div>
@@ -230,25 +234,42 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
 
       <h4 style="margin-top:1rem;font-weight:700;color:var(--text-primary)">Path A &mdash; Existing CFV / CFV Actioned Tenancies</h4>
       <ol class="steps">
-        <li>Check if the tenancy has a <strong>reconciled transaction linked via the Tenancy field</strong> (<code>txTenancy</code>) dated in the current calendar month.</li>
-        <li>If a linked payment exists: add the tenancy to the <strong>auto-return queue</strong> (see Section 6). It will be returned to In Payment automatically.</li>
-        <li>If no linked payment: display the tenancy in the CFV table with its current status.</li>
-        <li>For <strong>CFV Actioned</strong> tenancies: check if the due day has passed again (with 2-day tolerance). If so, mark as <strong>re-flagged</strong> (see Section 10).</li>
+        <li>Run <strong>the payment check</strong> (described below) on the tenancy.</li>
+        <li>If the current rent cycle has been paid: add the tenancy to the <strong>auto-return queue</strong> (see Section 6). It will be returned to In Payment automatically.</li>
+        <li>If the cycle has not been paid: display the tenancy in the CFV table with its current status.</li>
+        <li>For <strong>CFV Actioned</strong> tenancies: if this month&rsquo;s due day has passed by <strong>2 days or more</strong> (<code>CFV_TOLERANCE_DAYS</code>), mark as <strong>re-flagged</strong> (see Section 10). This is the only place a plain days-since-due count is still used.</li>
       </ol>
 
       <h4 style="margin-top:1rem;font-weight:700;color:var(--text-primary)">Path B &mdash; &ldquo;In Payment&rdquo; Tenancies (New CFV Detection)</h4>
       <ol class="steps">
         <li>Skip if tenant status is not <strong>Active</strong> or monthly rent is zero or less.</li>
-        <li>Calculate how many days have passed since the rent due day this month.</li>
-        <li>If fewer than <strong>2 days</strong> (<code>CFV_TOLERANCE_DAYS</code>) have passed since the due date, skip &mdash; the payment may still be processing.</li>
-        <li>Check for a <strong>reconciled transaction linked to this tenancy</strong> in the current month.</li>
-        <li>If a linked payment exists: not a CFV &mdash; skip.</li>
-        <li>If no linked payment: flag as a <strong>Potential CFV</strong> for your review.</li>
+        <li>Run <strong>the payment check</strong> (described below).</li>
+        <li>If the cycle has been paid: not a CFV &mdash; skip.</li>
+        <li>If the cycle has not been paid: flag as a <strong>Potential CFV</strong> for your review.</li>
+      </ol>
+
+      <div class="info-box warn">
+        <span class="ib-icon">&#9888;&#65039;</span>
+        <span><strong>There is no waiting period before a new CFV appears.</strong> Path B does not count days since this month&rsquo;s due day at all. Because the payment check asks for the <em>previous</em> cycle to be paid until this month&rsquo;s due day has passed by 2 days, a tenant who missed last month shows as a Potential CFV <strong>before</strong> this month&rsquo;s due day arrives. That is deliberate: a tenant with a late due day used to stay invisible for most of the month.</span>
+      </div>
+
+      <h4 style="margin-top:1.5rem;font-weight:700;color:var(--text-primary)">The Payment Check &mdash; used by both paths</h4>
+      <ol class="steps">
+        <li><strong>No payment history at all?</strong> If not one reconciled transaction is linked to the tenancy, it counts as unpaid straight away, whatever the dates say. This is why a brand-new tenancy flags immediately.</li>
+        <li>Otherwise, find the <strong>most recent reconciled payment</strong> linked to the tenancy.</li>
+        <li>Work out which cycle has to be paid by now. If this month&rsquo;s due day passed <strong>2 or more days ago</strong>, it is <strong>this month&rsquo;s</strong> cycle. If not, it is <strong>last month&rsquo;s</strong>.</li>
+        <li>That cycle counts as paid when the most recent payment is dated on or after <strong>5 days before</strong> its due day. The 5 days cover standing orders that land early over a weekend or bank holiday.</li>
+        <li>Paid means not a CFV. Not paid means the tenancy is in arrears and is flagged.</li>
       </ol>
 
       <div class="info-box warn">
         <span class="ib-icon">&#9888;&#65039;</span>
         <span><strong>Important:</strong> Payment detection uses the <code>txTenancy</code> linked record field on transactions &mdash; not keyword matching or surname matching. A transaction must be <strong>reconciled</strong> and <strong>linked to the tenancy record</strong> in Airtable for the system to recognise it as payment.</span>
+      </div>
+
+      <div class="info-box info">
+        <span class="ib-icon">&#8505;&#65039;</span>
+        <span>There is one fallback. If the arrears engine (<code>js/arrears.js</code>) fails to load, the check drops back to the old rule: any reconciled linked transaction dated in the current calendar month counts as payment. That older rule both missed early payments and accepted unrelated ones, so it is a safety net, not the live behaviour.</span>
       </div>
     </div>
 
@@ -257,11 +278,11 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
       <div class="flow">
         <div class="flow-step primary"><span class="flow-icon">&#128197;</span>Rent Due Day<span class="flow-sub">Per tenancy</span></div>
         <div class="flow-arrow">&#10132;</div>
-        <div class="flow-step warning"><span class="flow-icon">&#9203;</span>+2 Days<span class="flow-sub">Tolerance period</span></div>
+        <div class="flow-step"><span class="flow-icon">&#128270;</span>Last Linked Payment<span class="flow-sub">txTenancy, reconciled</span></div>
         <div class="flow-arrow">&#10132;</div>
-        <div class="flow-step"><span class="flow-icon">&#128270;</span>Check Linked Tx<span class="flow-sub">txTenancy field</span></div>
+        <div class="flow-step warning"><span class="flow-icon">&#128465;</span>Which Cycle Is Due?<span class="flow-sub">This month or last</span></div>
         <div class="flow-arrow">&#10132;</div>
-        <div class="flow-step" style="background:var(--danger);color:white;border-color:var(--danger)"><span class="flow-icon">&#9888;</span>Potential CFV<span class="flow-sub">No linked payment</span></div>
+        <div class="flow-step" style="background:var(--danger);color:white;border-color:var(--danger)"><span class="flow-icon">&#9888;</span>Potential CFV<span class="flow-sub">That cycle unpaid</span></div>
       </div>
     </div>
   </div>
@@ -288,13 +309,13 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
           <tr><th>Transition</th><th>How It Happens</th><th>Airtable Updated?</th></tr>
         </thead>
         <tbody>
-          <tr><td>In Payment &rarr; <span class="label-badge lb-amber">Potential CFV</span></td><td>Automatic: due day + 2 days passed with no linked reconciled transaction</td><td>No &mdash; display only in dashboard</td></tr>
+          <tr><td>In Payment &rarr; <span class="label-badge lb-amber">Potential CFV</span></td><td>Automatic: the rent cycle that should have been paid by now has no linked reconciled payment (see Section 4)</td><td>No &mdash; display only in dashboard</td></tr>
           <tr><td>Potential CFV &rarr; <span class="label-badge lb-red">CFV</span></td><td>User clicks <strong>&ldquo;Confirm CFV&rdquo;</strong> button</td><td>Yes &mdash; PATCH to set status to CFV</td></tr>
           <tr><td>Potential CFV &rarr; dismissed</td><td>User clicks <strong>&ldquo;Not a CFV&rdquo;</strong> button. Only a <strong>Potential CFV</strong> can be dismissed. The dismissal lasts until the tenancy&rsquo;s <strong>next rent due day plus the 2-day tolerance</strong>, then the tenancy is re-checked.</td><td>Yes &mdash; posts a tagged <code>[CFV-DISMISSED:YYYY-MM-DD]</code> comment on the tenancy, as well as saving it in localStorage</td></tr>
           <tr><td>CFV &rarr; <span class="label-badge lb-amber">CFV Actioned</span></td><td>User clicks <strong>&ldquo;Mark Actioned&rdquo;</strong> button</td><td>Yes &mdash; PATCH to set status to CFV Actioned</td></tr>
           <tr><td>CFV Actioned &rarr; <span class="label-badge lb-green">In Payment</span></td><td>User clicks <strong>&ldquo;In Payment&rdquo;</strong> button, or <strong>automatically</strong> when a reconciled linked transaction is detected</td><td>Yes &mdash; PATCH to set status to In Payment</td></tr>
           <tr><td>CFV Actioned &rarr; <span class="label-badge lb-red">CFV</span></td><td>User clicks <strong>&ldquo;Move to CFV&rdquo;</strong> button, or user confirms a re-flag</td><td>Yes &mdash; PATCH to set status to CFV</td></tr>
-          <tr><td>CFV / CFV Actioned &rarr; <span class="label-badge lb-green">In Payment</span></td><td><strong>Auto-return:</strong> system detects a reconciled transaction linked to this tenancy in the current month</td><td>Yes &mdash; automatic PATCH + audit comment</td></tr>
+          <tr><td>CFV / CFV Actioned &rarr; <span class="label-badge lb-green">In Payment</span></td><td><strong>Auto-return:</strong> the payment check finds the current rent cycle paid by a reconciled transaction linked to this tenancy</td><td>Yes &mdash; automatic PATCH + audit comment</td></tr>
         </tbody>
       </table>
 
@@ -309,11 +330,11 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
   <div class="section" id="auto-return">
     <h2 class="section-title"><span class="icon">&#128260;</span> 6. Auto-Return to In Payment</h2>
     <div class="card">
-      <p>When the system detects that a tenancy currently in <strong>CFV</strong> or <strong>CFV Actioned</strong> status has a reconciled transaction linked to it in the current month, it automatically:</p>
+      <p>When the payment check (Section 4) finds that a tenancy currently in <strong>CFV</strong> or <strong>CFV Actioned</strong> status has cleared its current rent cycle, it automatically:</p>
       <ol class="steps">
         <li>Sets a local flag (<code>cfv_{id}_returned</code>) to prevent the tenancy from re-appearing before Airtable syncs.</li>
         <li>Sends a <strong>PATCH</strong> request to Airtable to update the tenancy&rsquo;s Payment Status to <strong>In Payment</strong>.</li>
-        <li>Clears all chase tracking data from localStorage (chase start date, CFV start date, return dismissal).</li>
+        <li>Clears all chase tracking data from localStorage (chase start date, return dismissal, and the dead legacy start-date key &mdash; see Section 15).</li>
         <li>Updates the local data array so the dashboard reflects the change immediately.</li>
         <li>Adds an audit comment to the Airtable tenancy record: <em>&ldquo;Auto-returned to In Payment &mdash; reconciled transaction linked to this tenancy detected for [Month Year].&rdquo;</em></li>
         <li>Re-renders the CFV tab and updates the sidebar badges.</li>
@@ -349,7 +370,7 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
       <div class="flow">
         <div class="flow-step" style="background:var(--danger);color:white;border-color:var(--danger)"><span class="flow-icon">&#128680;</span>CFV / CFV Actioned</div>
         <div class="flow-arrow">&#10132;</div>
-        <div class="flow-step primary"><span class="flow-icon">&#128270;</span>Linked Tx Found<span class="flow-sub">Reconciled this month</span></div>
+        <div class="flow-step primary"><span class="flow-icon">&#128270;</span>Linked Tx Found<span class="flow-sub">Clears the due cycle</span></div>
         <div class="flow-arrow">&#10132;</div>
         <div class="flow-step warning"><span class="flow-icon">&#128228;</span>PATCH Airtable<span class="flow-sub">Status &rarr; In Payment</span></div>
         <div class="flow-arrow">&#10132;</div>
@@ -375,8 +396,8 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
           <tr><td><strong>Rent</strong></td><td><code>tenRent</code></td><td>Monthly rent amount in &pound;, right-aligned with tabular numerals.</td></tr>
           <tr><td><strong>Due Day</strong></td><td><code>tenDueDay</code></td><td>The day of the month rent is due (e.g. 1, 15, 28).</td></tr>
           <tr><td><strong>Days Overdue</strong></td><td>Calculated</td><td>Days since the rent cycle that the last received payment did NOT cover (see below). Colour-coded: black (0&ndash;3), amber (4&ndash;7), red (8+).</td></tr>
+          <tr><td><strong>Last Payment</strong></td><td>Calculated</td><td>The date and amount of the most recent reconciled transaction linked to this tenancy. This is the figure the Days Overdue count is built from.</td></tr>
           <tr><td><strong>Status</strong></td><td><code>tenPayStatus</code></td><td>Badge: <span class="label-badge lb-amber">Potential CFV</span>, <span class="label-badge lb-red">CFV</span>, <span class="label-badge lb-purple">CFV Actioned</span>, or <span class="label-badge lb-amber">Re-flagged</span></td></tr>
-          <tr><td><strong>Chase</strong></td><td>Calculated</td><td>Chase stage badge (Stage 1 / 2 / 3). Dash for CFV Actioned items.</td></tr>
           <tr><td><strong>Contact</strong></td><td><code>tenantPhone</code> + <code>tenantEmail</code></td><td>Clickable phone (tel:) and email (mailto:) links. Shows warning if no contact info.</td></tr>
           <tr><td><strong>Actions</strong></td><td>&mdash;</td><td>Context-sensitive action buttons (see Section 8).</td></tr>
         </tbody>
@@ -455,7 +476,11 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
   <div class="section" id="chase">
     <h2 class="section-title"><span class="icon">&#128172;</span> 9. Chase Stage Tracking</h2>
     <div class="card">
-      <p>Each CFV is assigned a <strong>chase stage</strong> based on how many days have passed since the chase was initiated. Chase stages are <strong>visual indicators only</strong> &mdash; they do not trigger automated communications.</p>
+      <p>Each CFV is assigned a <strong>chase stage</strong> based on how many days have passed since the chase was initiated. Chase stages never trigger automated communications.</p>
+      <div class="info-box warn">
+        <span class="ib-icon">&#9888;&#65039;</span>
+        <span><strong>There is no Chase column on the table any more.</strong> The stage is still worked out in the background and the clock still starts the first time a tenancy appears as a Potential CFV or CFV, but nothing on screen shows it. Treat the table below as a description of the timings the code uses, not of something you can read off a row. If you want the chase stages back on screen, that is a build request, not a settings change.</span>
+      </div>
       <table class="label-table">
         <thead><tr><th>Stage</th><th>Days Since Chase Start</th><th>Label</th><th>Description</th><th>Badge Colour</th></tr></thead>
         <tbody>
@@ -466,7 +491,7 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
       </table>
       <div class="info-box warn">
         <span class="ib-icon">&#9888;&#65039;</span>
-        <span>The chase stage badge appears only on <strong>Potential CFV</strong> and <strong>CFV</strong> rows. CFV Actioned rows show a dash instead. The chase start date is stored in localStorage (<code>cfv_{id}_chaseStart</code>) and persists across browser sessions.</span>
+        <span>The chase clock starts only for <strong>Potential CFV</strong> and <strong>CFV</strong> tenancies, never for CFV Actioned ones. The chase start date is stored in this browser only, under <code>cfv_{id}_chaseStart</code>, and persists across sessions on that browser. It is the only CFV date that lives in your browser &mdash; Days Overdue does not (see Section 7).</span>
       </div>
     </div>
   </div>
@@ -608,7 +633,7 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
         <tbody>
           <tr><td>Reconciled</td><td><code>fldxKX1IbIFcAOnn5</code></td><td>Checkbox</td><td>Only reconciled transactions count as payment</td></tr>
           <tr><td>Tenancy (link)</td><td><code>fldPmAMmxwqs4SdPa</code></td><td>Link</td><td>Direct link to tenancy record &mdash; this is how payment is matched</td></tr>
-          <tr><td>Date</td><td><code>fldoyQ6Rr9cHp3bgQ</code></td><td>Date</td><td>Must be in the current calendar month</td></tr>
+          <tr><td>Date</td><td><code>fldoyQ6Rr9cHp3bgQ</code></td><td>Date</td><td>Compared against the rent cycle that is due, allowing payment up to 5 days early. Also the date shown in the Last Payment column</td></tr>
         </tbody>
       </table>
     </div>
@@ -664,11 +689,12 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
           <tr><td><code>cfv_{id}_returnDismissed</code></td><td>&ldquo;1&rdquo;</td><td>Legacy flag for dismissing return banners.</td><td>Returned to In Payment</td></tr>
           <tr><td><code>cfv_dismissed_{id}</code></td><td>ISO date string</td><td>Potential CFV dismissed by user. Backed up as a <code>[CFV-DISMISSED:date]</code> comment in Airtable and restored from it on another device.</td><td>Expires at the next rent due day + 2 days, then the system re-checks</td></tr>
           <tr><td><code>cfv_reflag_dismissed_{id}</code></td><td>ISO date string</td><td>Re-flag dismissed by user. Tenancy stays CFV Actioned.</td><td>When user confirms re-flag as CFV</td></tr>
+          <tr><td><code>cfv_{id}_startDate</code></td><td>&mdash;</td><td><strong>Dead legacy key.</strong> It used to hold a frozen CFV start date that drove Days Overdue. Nothing writes it any more; the code only ever deletes it, to clear up leftovers from the old build. Days Overdue is now worked out from the last reconciled payment instead (Section 7).</td><td>Deleted on dismissal, on return to In Payment, and on auto-return</td></tr>
         </tbody>
       </table>
       <div class="info-box warn">
         <span class="ib-icon">&#9888;&#65039;</span>
-        <span>Clearing your browser data or using a different device will reset all localStorage tracking. Days overdue and chase stages will be recalculated from scratch on the next load.</span>
+        <span>Clearing your browser data or using a different device resets the keys above. <strong>Days Overdue is not affected</strong> &mdash; it is worked out live from Airtable payments and reads the same on every device. Chase stages restart, and a dismissal is restored from its Airtable comment (Section 11).</span>
       </div>
     </div>
   </div>
@@ -683,11 +709,11 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
       </div>
       <div class="ts-item">
         <div class="ts-problem">CFV not detected for a known missed payment</div>
-        <div class="ts-solution">Check: (1) Is the tenancy status <strong>In Payment</strong> in Airtable? CFVs are only auto-detected for In Payment tenancies. (2) Is the tenant status <strong>Active</strong> (not Former)? (3) Is the rent amount greater than zero? (4) Has the due day + 2 days passed this month? If all are correct, reload the dashboard to trigger a fresh detection.</div>
+        <div class="ts-solution">Check: (1) Is the tenancy status <strong>In Payment</strong> in Airtable? CFVs are only auto-detected for In Payment tenancies. (2) Is the tenant status <strong>Active</strong> (not Former)? (3) Is the rent amount greater than zero? (4) Does the tenancy have a <strong>start date</strong>, and is that date in the past? The payment check ignores a tenancy with no start date, or one that has not begun. (5) Is a reconciled payment attached to this tenancy that is <strong>newer than you think</strong> &mdash; for example one paid up to 5 days before the due day, which counts for the following cycle? Open the Rent Statements block below the table to see every payment attached. If all are correct, reload the dashboard to trigger a fresh detection.</div>
       </div>
       <div class="ts-item">
         <div class="ts-problem">Auto-return didn&rsquo;t clear a CFV after reconciliation</div>
-        <div class="ts-solution">Auto-return runs whenever CFV detection runs: every dashboard load or refresh, every CFV tab render, and straight after a reconciliation (see section 6). So a plain page reload is enough, on any tab. Check the transaction is <strong>reconciled</strong>, <strong>linked to the tenancy</strong>, and dated within the <strong>current calendar month</strong> &mdash; payments from previous months will not trigger it.</div>
+        <div class="ts-solution">Auto-return runs whenever CFV detection runs: every dashboard load or refresh, every CFV tab render, and straight after a reconciliation (see section 6). So a plain page reload is enough, on any tab. Check the transaction is <strong>reconciled</strong> and <strong>linked to the tenancy</strong>, and that its date clears the rent cycle that is currently due. A payment counts from 5 days before its due day onwards, so a payment that is older than that only clears an earlier cycle and will not return the tenancy to In Payment.</div>
       </div>
       <div class="ts-item">
         <div class="ts-problem">Status update failed &mdash; alert says &ldquo;Failed to update Airtable&rdquo;</div>
@@ -719,6 +745,7 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
       <table class="label-table">
         <thead><tr><th>Version</th><th>Date</th><th>Changes</th></tr></thead>
         <tbody>
+          <tr><td><strong>1.35</strong></td><td>3 Sep 2026</td><td>Drift repair against the live code (findings 035, 055, 170, 171, 276). Rewrote Section 4: detection no longer waits 2 days after the due day and no longer asks whether a payment landed in the current calendar month. Both paths now run one payment check, described in full &mdash; no linked payment at all means unpaid, otherwise the cycle that is due (this month&rsquo;s once the due day has passed by 2 days, last month&rsquo;s until then) must have a payment dated within 5 days before its due day. The calendar-month rule is documented as the fallback it now is. Corrected the same wording in the lifecycle table, Section 6, the flow diagrams, the Transactions field table and troubleshooting. The 2-day tolerance is now described where it is really used: re-flagging and dismissal expiry. Removed the <strong>Chase</strong> column from the Section 7 table (it is gone from the page) and added the <strong>Last Payment</strong> column that replaced it; Section 9 now says the chase stage is computed but not shown. Added the dead <code>cfv_{id}_startDate</code> key to Section 15 and corrected the note that said clearing browser data resets Days Overdue.</td></tr>
           <tr><td><strong>1.34</strong></td><td>26 Aug 2026</td><td>Drift repair against the live code (findings 164&ndash;169, 172). Dismissals expire at the next rent due day + 2 days, not after 25 days, and are backed up as tagged Airtable comments that restore them on another device. Days Overdue is derived from the last reconciled payment with a 5-day early-pay window; the localStorage start date is gone. New section 13 documents the Rent Statements block and its live writes to the Transactions table. Corrected how the tab is opened (dashboard button, not a sidebar item) and where the badges render. Payment Status is PATCHed by NAME, so a renamed option is what breaks it. Added the <code>data.recordComments:write</code> scope; a failed comment now warns on screen instead of failing silently.</td></tr>
           <tr><td><strong>1.6</strong></td><td>16 Apr 2026</td><td>Complete SOP rewrite. Documented: direct tenancy-linked payment detection (replaced keyword matching), auto-return to In Payment, re-flagging logic, sidebar badges, all action buttons per status, comments system via Airtable Comments API, localStorage tracking keys, chase stages (visual only, not automated), all Airtable field IDs and select option IDs.</td></tr>
           <tr><td><strong>1.4</strong></td><td>12 Apr 2026</td><td>Added Potential CFVs section, UC Check section, status IDs reference.</td></tr>

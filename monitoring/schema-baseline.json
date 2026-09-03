@@ -6370,6 +6370,43 @@
   },
   "name": "(Deprecated) Account Statements \u2013 Suppliers"
  },
+ "tblK1aGR7dYYYX2Bo": {
+  "fields": {
+   "fld085RNxSK6XpaT2": {
+    "name": "Total",
+    "type": "number"
+   },
+   "fldA7wfceYI28zIwC": {
+    "name": "Last Built",
+    "type": "singleLineText"
+   },
+   "fldLTwLk0V5ksY8X6": {
+    "name": "Dominant",
+    "type": "singleLineText"
+   },
+   "fldRJHBqB1tKMeMZ0": {
+    "name": "Counts",
+    "type": "multilineText"
+   },
+   "fldbh3eMZ4C4l1G3n": {
+    "name": "Sender",
+    "type": "singleLineText"
+   },
+   "fldfwOBqdtI6Yf7N5": {
+    "name": "Hand Moves",
+    "type": "number"
+   },
+   "fldlD2ZHPMxrrwwYC": {
+    "name": "Human Era",
+    "type": "number"
+   },
+   "fldoVBjVL56AoiSZV": {
+    "name": "Last Seen",
+    "type": "singleLineText"
+   }
+  },
+  "name": "Triage History Book"
+ },
  "tblLPoRHFBl0vqR24": {
   "fields": {
    "fld1cGXzKp8ab5nBr": {
@@ -7936,6 +7973,51 @@
    }
   },
   "name": "Skills List (New)"
+ },
+ "tblPg6Uk8AlmQnofu": {
+  "fields": {
+   "fld8uHHkINZj39dbv": {
+    "name": "Vendor Key",
+    "type": "singleLineText"
+   },
+   "fldByQpyur3xlGwsf": {
+    "name": "Set Fields",
+    "type": "multilineText"
+   },
+   "fldN4D106HHlpz9pX": {
+    "name": "Tx ID",
+    "type": "singleLineText"
+   },
+   "fldSLhjeaBepaBC9w": {
+    "name": "Undone",
+    "type": "checkbox"
+   },
+   "fldXUWKHZXJbboDCz": {
+    "name": "Score",
+    "type": "number"
+   },
+   "fldcE9dWDWIhhbosm": {
+    "name": "Undone At",
+    "type": "dateTime"
+   },
+   "fldful1fmSiNj7Zpu": {
+    "name": "Amount",
+    "type": "number"
+   },
+   "fldoaPh36BVnPVxoU": {
+    "name": "Vendor",
+    "type": "singleLineText"
+   },
+   "fldpB2vgfEC8imEMm": {
+    "name": "Account",
+    "type": "singleLineText"
+   },
+   "fldqS7pN7xB3ZCSWv": {
+    "name": "Match Type",
+    "type": "singleLineText"
+   }
+  },
+  "name": "AI Recon Auto Log"
  },
  "tblQ9sFD7Fs5CaVwG": {
   "fields": {
@@ -11449,6 +11531,10 @@
    "fldm4i2tYHhi4jFJb": {
     "name": "Mismatched Fields",
     "type": "singleLineText"
+   },
+   "fldzAqifUzN5HIQpE": {
+    "name": "Slice",
+    "type": "singleLineText"
    }
   },
   "name": "AI Recon Audit"
@@ -14042,6 +14128,10 @@
     "name": "Lane",
     "type": "singleSelect"
    },
+   "fldKlaHlN00o9mogx": {
+    "name": "Next Step",
+    "type": "singleLineText"
+   },
    "fldOd2BbJC5z2xv6s": {
     "name": "Agreed Date",
     "type": "date"
@@ -14073,6 +14163,10 @@
    "fldoNpdLRrT2gBFxQ": {
     "name": "Status",
     "type": "singleSelect"
+   },
+   "fldrkrv4MNIyJEymH": {
+    "name": "Next Step Date",
+    "type": "date"
    }
   },
   "name": "Creditor Plans"

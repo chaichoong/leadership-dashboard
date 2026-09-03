@@ -505,6 +505,19 @@
         }
     }
 
+    // Statuses that mean an opener has ALREADY gone to this address. Kept
+    // beside the send rather than inside the health check, because a gate that
+    // only reports is not a gate.
+    const PROS_EMAILED_STATUSES = ['Contacted (1:1)', 'In Sequence', 'Replied', 'No Response', 'Call Booked'];
+
+    function alreadyEmailedAddress(rec) {
+        const addr = String(prosField(rec, 'Contact Email') || '').trim().toLowerCase();
+        if (!addr) return false;
+        return (prospectsCache || []).some(r => r.id !== rec.id
+            && String(prosField(r, 'Contact Email') || '').trim().toLowerCase() === addr
+            && PROS_EMAILED_STATUSES.includes(prosStatus(r)));
+    }
+
     // Send the approved opening message as an email through GoHighLevel so the
     // whole conversation lives in GHL (kept out of the team-managed Gmail inbox).
     // Only fires for email routes with a real draft; refuses to send while the
@@ -527,6 +540,18 @@
         const entity = prosField(rec, 'Entity Type');
         if (route !== 'Email reply (they asked)' && entity !== 'Limited Company') {
             if (typeof showToast === 'function') showToast(`Not emailed: entity type is ${entity || 'unknown'}. An unsolicited email is only lawful to a Limited Company — the contact is synced, so message them personally on LinkedIn instead.`, { type: 'warning', duration: 9000 });
+            return;
+        }
+        // ONE ADDRESS, ONE OPENER. Two Prospects rows can carry the same
+        // Contact Email — five such pairs existed on 24 Aug 2026 — and nothing
+        // stopped the second one sending. Tom Hooper at Noble Painting received
+        // two different cold openers, 14 and 16 Aug, both delivered; Kevin had
+        // rejected the other four twins by hand, which is the only reason it
+        // happened once rather than five times. The skill has mandated this
+        // guard for the agent's catch-up pass since 12 Aug; the tab had no
+        // equivalent. Finding 20260824-prospect-daily-run-342.
+        if (alreadyEmailedAddress(rec)) {
+            if (typeof showToast === 'function') showToast('Not sent: another prospect record with this email address has already been emailed. Check the two records and merge them rather than sending a second opener.', { type: 'warning', duration: 9000 });
             return;
         }
         const draft = prosField(rec, 'Draft Message');

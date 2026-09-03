@@ -62,6 +62,13 @@ function runSend(fields) {
     const patchProspectingRecord = async (...a) => { calls.patches.push(a); };
     const renderProspectingTab = () => {};
     const PROSPECT = { status: 'fldS', nextFollowUp: 'fldF' };
+    // The one-address-one-opener guard (20260824-prospect-daily-run-342) has
+    // its own suite in tests/prospect-duplicate-address.test.js; here there is
+    // only ever one record, so nothing to collide with.
+    const prospectsCache = [];
+    ${extractFn('alreadyEmailedAddress')}
+    const PROS_EMAILED_STATUSES = [];
+    const prosStatus = (r) => (r.fields || {}).Status || 'Found';
     const TABLES = { prospects: 'tblP' };
     const fetch = async (url, opts) => {
       calls.fetches.push({ url, opts });

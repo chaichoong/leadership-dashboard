@@ -53,7 +53,8 @@
     function refreshCFVSidebarBadges() {
         if (typeof updateCFVSidebarBadges !== 'function') return;
         if (typeof detectCFVs !== 'function') return;
-        const visible = detectCFVs().filter(cfvIsVisible);
+        // Read-only: a badge count must never write to Airtable.
+        const visible = detectCFVs({ autoReturn: false }).filter(cfvIsVisible);
         updateCFVSidebarBadges(
             visible.filter(e => e.status === 'cfv' || e.status === 'potential').length,
             visible.filter(e => e.status === 'cfv actioned').length
@@ -145,8 +146,23 @@
     }
 
     // Detect CFVs using direct tenancy-linked transactions.
-    // Auto-queues status updates back to In Payment when payment is confirmed.
-    function detectCFVs() {
+    //
+    // WRITES ARE OPT-OUT, NOT AUTOMATIC. When a tenancy turns out to have paid,
+    // the sweep can queue it back to In Payment in Airtable and post an audit
+    // comment. That is right when the CFV tab is on screen or a reconciliation
+    // just finished, and wrong when all the caller wanted was a NUMBER.
+    //
+    // 20260820-queue-fixer-267: counting the sidebar badge and gathering AI
+    // context both ran the full detector, so simply opening the dashboard could
+    // change a tenancy's Payment Status and write a comment — twice on a cold
+    // load, once off the cached render and once off fresh data. The only guard
+    // was a localStorage flag, which another browser or a cleared cache walks
+    // straight past. Pass {autoReturn:false} from any read-only caller.
+    //
+    // The count is identical either way: an auto-returned tenancy is one that
+    // has paid, so it never appears in the returned list on either path.
+    function detectCFVs(opts) {
+        const autoReturn = !(opts && opts.autoReturn === false);
         const today = new Date();
         today.setHours(0, 0, 0, 0);
         const tenantLookup = buildTenantLookup();
@@ -223,7 +239,7 @@
         });
 
         // Process auto-returns in the background (don't block detection)
-        if (autoReturnQueue.length > 0) {
+        if (autoReturn && autoReturnQueue.length > 0) {
             cfvAutoReturnToPayment(autoReturnQueue);
         }
 

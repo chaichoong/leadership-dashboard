@@ -461,6 +461,13 @@
 
     async function sendSkillMessage(skill, systemMsg, userText) {
         _skillBusy = true;
+        // Where this turn starts, so a failure can be unwound cleanly.
+        // The Messages API rejects two user turns in a row with a 400, so a
+        // single network blip used to kill the whole skill run: the failed
+        // user turn stayed in the array, the next message made it [user, user],
+        // and every reply after that failed with what looked like a brand new
+        // error. Finding 20260824-drift-monitor-332.
+        const turnStart = _skillConversation.length;
         _skillConversation.push({ role: 'user', content: userText });
 
         const chatEl = document.getElementById('skill-chat-messages');
@@ -493,6 +500,9 @@
             loadingEl.remove();
             appendSkillBubble('assistant', text);
         } catch (e) {
+            // Drop the turn that failed so the history still alternates and
+            // the next message is a clean retry rather than a guaranteed 400.
+            _skillConversation.length = turnStart;
             loadingEl.remove();
             appendSkillBubble('assistant', 'Error: ' + e.message);
         }

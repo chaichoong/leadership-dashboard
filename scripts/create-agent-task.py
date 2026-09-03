@@ -461,6 +461,16 @@ def _place_tokens(words):
     return place
 
 
+def _is_calendar_year(digits):
+    """True for a plain four-digit year (1900-2099).
+
+    Deliberately narrow: five digits or more is a reference no matter what it
+    reads like, and 1899 or 2100 in a task name is not a date anybody is
+    writing today.
+    """
+    return len(digits) == 4 and 1900 <= int(digits) <= 2099
+
+
 def dupe_signals(name):
     """(lane, strong_ids, distinctive_words) — what identifies this matter.
 
@@ -479,8 +489,18 @@ def dupe_signals(name):
     for digits in re.findall(r"\b\d{4,}\b", raw):
         # A phone number already claimed above must not also register as a
         # plain reference, or one number would count as two agreements.
-        if "tel:" + digits[-9:] not in strong:
-            strong.add("num:" + digits)
+        if "tel:" + digits[-9:] in strong:
+            continue
+        # A YEAR IS NOT A REFERENCE NUMBER. On 1 Sep 2026 an HMRC compliance
+        # task folded into a Fylde council tax demand because both names
+        # carried "2026", which the 4-digit rule read as a shared reference
+        # and treated as proof on its own. Nearly every task name a scan
+        # produces carries the current year, so this fired as a match against
+        # anything. Years are excluded from the STRONG set only; the word
+        # pass below still sees the rest of the name.
+        if _is_calendar_year(digits):
+            continue
+        strong.add("num:" + digits)
     cleaned = re.sub(r"[^a-z0-9\s]", " ", raw.lower())
     words = [
         w for w in cleaned.split()

@@ -17,12 +17,16 @@ import { fileURLToPath } from 'node:url';
 //
 // The real function is pulled out of the page source rather than copied, so
 // this test cannot pass against a fixed copy while the shipped page regresses.
+//
+// 20260823-queue-fixer-330: the fix landed in index.html only, and the Supabase
+// twin sat on the pre-fix shape for four months. Both pages are exercised here,
+// because a shadow build nobody tests is a bug waiting for its cutover.
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const src = readFileSync(resolve(root, 'os/tasks/index.html'), 'utf8');
+const PAGES = ['os/tasks/index.html', 'os/tasks/index-supabase.html'];
 
-function extract(name) {
+function extract(src, page, name) {
   const start = src.indexOf(`async function ${name}(`);
-  if (start === -1) throw new Error(`${name} not found in os/tasks/index.html`);
+  if (start === -1) throw new Error(`${name} not found in ${page}`);
   let i = src.indexOf('{', start), depth = 0, end = -1;
   for (; i < src.length; i++) {
     if (src[i] === '{') depth++;
@@ -35,7 +39,8 @@ function extract(name) {
 const TODAY = '2026-08-19';
 
 // Builds the globals the function reads, and records every patch attempt.
-function harness({ tasks, patchResult }) {
+function harness({ tasks, patchResult, page }) {
+  const src = readFileSync(resolve(root, page), 'utf8');
   const calls = [];
   const scope = {
     currentUser: { key: 'kevin' },
@@ -49,7 +54,7 @@ function harness({ tasks, patchResult }) {
   };
   const names = Object.keys(scope);
   const fn = new Function(...names,
-    `${extract('autoRescheduleOverdue')}; return autoRescheduleOverdue;`)(
+    `${extract(src, page, 'autoRescheduleOverdue')}; return autoRescheduleOverdue;`)(
     ...names.map((n) => scope[n]));
   return { run: fn, calls, tasks };
 }
@@ -65,9 +70,9 @@ function overdueTask(id) {
   };
 }
 
-describe('autoRescheduleOverdue checks the PATCH response', () => {
+PAGES.forEach((page) => describe(`autoRescheduleOverdue checks the PATCH response — ${page}`, () => {
   it('moves a task and counts it when Airtable accepts the patch', async () => {
-    const h = harness({ tasks: [overdueTask('rec1')], patchResult: () => ({ ok: true }) });
+    const h = harness({ page, tasks: [overdueTask('rec1')], patchResult: () => ({ ok: true }) });
     const r = await h.run();
     expect(r.count).toBe(1);
     expect(h.tasks[0].dueDate).toBe(TODAY);
@@ -78,6 +83,7 @@ describe('autoRescheduleOverdue checks the PATCH response', () => {
   // throw. Before the fix this reported count:1 and showed the task as moved.
   it('does NOT report a rejected patch as a move', async () => {
     const h = harness({
+      page,
       tasks: [overdueTask('rec1')],
       patchResult: () => ({ ok: false, status: 422 }),
     });
@@ -88,6 +94,7 @@ describe('autoRescheduleOverdue checks the PATCH response', () => {
 
   it('does NOT move the task in the browser when the write failed', async () => {
     const h = harness({
+      page,
       tasks: [overdueTask('rec1')],
       patchResult: () => ({ ok: false, status: 422 }),
     });
@@ -98,6 +105,7 @@ describe('autoRescheduleOverdue checks the PATCH response', () => {
 
   it('counts only the ones that landed when a batch is mixed', async () => {
     const h = harness({
+      page,
       tasks: ['rec1', 'rec2', 'rec3'].map(overdueTask),
       patchResult: (id) => ({ ok: id !== 'rec2', status: id === 'rec2' ? 500 : 200 }),
     });
@@ -109,6 +117,7 @@ describe('autoRescheduleOverdue checks the PATCH response', () => {
 
   it('survives a patch that throws as well as one that resolves not-ok', async () => {
     const h = harness({
+      page,
       tasks: [overdueTask('rec1')],
       patchResult: () => { throw new Error('network down'); },
     });
@@ -124,6 +133,7 @@ describe('autoRescheduleOverdue checks the PATCH response', () => {
     let inFlight = 0, peak = 0;
     const tasks = Array.from({ length: 25 }, (_, i) => overdueTask(`rec${i}`));
     const h = harness({
+      page,
       tasks,
       patchResult: async () => {
         inFlight++; peak = Math.max(peak, inFlight);
@@ -140,9 +150,9 @@ describe('autoRescheduleOverdue checks the PATCH response', () => {
   it('leaves someDay and hard-deadline tasks alone', async () => {
     const someDay = { ...overdueTask('recS'), someDay: true };
     const hard = { ...overdueTask('recH'), hardDeadline: true };
-    const h = harness({ tasks: [someDay, hard], patchResult: () => ({ ok: true }) });
+    const h = harness({ page, tasks: [someDay, hard], patchResult: () => ({ ok: true }) });
     const r = await h.run();
     expect(r.count).toBe(0);
     expect(h.calls).toHaveLength(0);
   });
-});
+}));
