@@ -23,6 +23,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import watch  # noqa: E402
 import overlays  # noqa: E402
+import thumbnail  # noqa: E402
 
 FFMPEG = os.path.expanduser("~/tools/bin/ffmpeg")
 WHISPER = os.path.expanduser("~/tools/whisper.cpp/main")
@@ -109,7 +110,30 @@ def record_updates(day, links, transcript, reason, clip_name, role="episode"):
     if links.get("full"): fields["Video Edited URL"] = links["full"]; fields["Subtitled Video URL"] = links["full"]
     if links.get("lfmd"): fields["Reframed Video URL"] = links["lfmd"]
     if links.get("summary"): fields["Summary Video URL"] = links["summary"]
+    if links.get("thumb"): fields["Thumbnail URL"] = links["thumb"]
     return fields
+
+
+def thumb_lines(text):
+    """Two title lines for the thumbnail: Claude on the standard tier with the Content Machine's own prompt;
+    if that fails, the banner title split at its bar, so a render never stops for a missing headline."""
+    try:
+        l1, l2 = thumbnail.titles_from_transcript(text)
+        if l1: return l1, l2, "claude"
+    except (SystemExit, subprocess.TimeoutExpired, ValueError) as ex:
+        print("thumbnail titles: claude failed (%s), using the banner title" % str(ex)[:120], file=sys.stderr)
+    parts = title_from_transcript(text).split("|")
+    return parts[0].strip(), (parts[1].strip() if len(parts) > 1 else ""), "banner"
+
+
+def make_thumbnail(master_916, duration, text, day, workdir):
+    """R6: the YouTube thumbnail in the team's layout, from a frame of the 9:16 master (Kevin whole-body, mid-run)."""
+    at = min(12.0, max(0.0, duration / 2))
+    frame = os.path.join(workdir, "thumb_frame.png")
+    subprocess.run([FFMPEG, "-v", "error", "-y", "-ss", "%.2f" % at, "-i", master_916, "-frames:v", "1", frame], check=True)
+    l1, l2, how = thumb_lines(text)
+    out = thumbnail.compose(frame, os.path.join(workdir, "Episode_%d_Thumbnail.png" % day), l1, l2)
+    return out, (l1, l2, how)
 
 
 # ---------- steps ----------
@@ -229,6 +253,8 @@ def process(key, ledger, keep=False):
     masters = render_masters(clip, workdir) if role == "episode" else {"9:16": render_masters(clip, workdir, only="9:16")["9:16"]}
     title = title_from_transcript(text)
     paths = build_outputs(masters, srt, day, title, workdir, lfmd=window, role=role)
+    if role == "episode":
+        paths["thumb"], e["thumb_lines"] = make_thumbnail(masters["9:16"], duration, text, day, workdir)
     folder, links = publish_to_drive(paths, day, os.path.join(workdir, "transcript.txt"))
     rid, how = find_or_create_record(day, e.get("drive_id"), key, dt.date.fromisoformat(e["date"]))
     watch._airtable("PATCH", watch.API + "/" + rid, {"fields": record_updates(day, links, text, reason, key, role)})
@@ -266,8 +292,14 @@ def selftest():
     t = title_from_transcript("So consecutive day, 2,225 of a diary of a Runpreneur, and today's episode I talk all about how you can record a video using a structured script to turn that video into an autonomous AI agent, which is going")
     assert "|" in t and "RECORD" in t and len(t) < 90, t
     assert title_from_transcript("nothing useful here") == "DIARY OF A|RUNPRENEUR"
-    f = record_updates(2225, {"full": "u1", "lfmd": "u2", "summary": "u3"}, "text", "why", "clip")
+    f = record_updates(2225, {"full": "u1", "lfmd": "u2", "summary": "u3", "thumb": "u4"}, "text", "why", "clip")
     assert f["Video Edited URL"] == "u1" and f["Reframed Video URL"] == "u2" and f["Summary Video URL"] == "u3"
+    assert f["Thumbnail URL"] == "u4" and "Thumbnail URL" not in record_updates(2225, {"full": "u1"}, "t", "r", "c")
+    real = thumbnail.titles_from_transcript
+    thumbnail.titles_from_transcript = lambda t: (_ for _ in ()).throw(SystemExit("claude failed: offline"))
+    try: l1, l2, how = thumb_lines("nothing useful here")
+    finally: thumbnail.titles_from_transcript = real
+    assert (l1, l2, how) == ("DIARY OF A", "RUNPRENEUR", "banner"), "a Claude failure falls back to the banner title, never stops the render"
     assert f["Record Status"] == STATUS_DONE and "why" in f["Notes"]
     f2 = record_updates(2225, {"full": None}, "t", "r", "c"); assert "Video Edited URL" not in f2
     f3 = record_updates(2225, {"summary": "u3"}, "t", "r", "c", role="teaser")
@@ -282,7 +314,7 @@ def selftest():
     srt = "1\n00:00:58,000 --> 00:01:02,000\nA\n\n2\n00:01:02,000 --> 00:01:05,000\nB\n"
     shifted = shift_srt(srt, 60.0, 65.0)
     assert "00:00:00,000 --> 00:00:02,000" in shifted and "00:00:02,000 --> 00:00:05,000" in shifted, shifted
-    print(json.dumps({"checks": 17, "failed": []}))
+    print(json.dumps({"checks": 19, "failed": []}))
 
 
 if __name__ == "__main__":

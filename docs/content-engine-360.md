@@ -78,3 +78,15 @@ earlier iterations kept for comparison.
   banned phrases, US spellings, Threads > 500 / X > 300 chars, money or thousands figures that are not
   in the transcript (the mission figures 40,075 km and £1 million are allowed).
 - Status moves to "Copies in Progress" so the team's Copywriting/QC pages pick the records up as before.
+
+## Thumbnail (R6, 3 Sep 2026)
+
+`thumbnail.py` is a port of the Content Machine app's `thDraw()` so the 360 lane's thumbnails look like the team's: orange ground with the deep-orange stripe, navy slash, the photo panel cut on the diagonal, the white accent lines, the icon card top-left, LINE 1 in white Impact with a navy outline, LINE 2 in a navy box, the red WATCH NOW pill, the Runpreneur logo top-right. The app's icon catalogue (290 Lucide paths), its keyword table (838 pairs) and the logo PNG were lifted verbatim into `cm_thumb_assets.py`; `pick_icon` is the app's first-keyword-wins rule, `speech` when nothing matches.
+
+- The photo is a frame of the 9:16 master at 12 s (or half the clip if shorter), scaled to cover the panel's bounding box and cropped a quarter from the top, so the whole slanted cut is filled and Kevin's head stays in view.
+- The two title lines come from Claude on the standard tier with the app's own title prompt (`LINE1:`/`LINE2:`); if that call fails the banner title is split at its bar, so a render never stops for a missing headline. The lines chosen are kept on the ledger entry (`thumb_lines`) with which route produced them.
+- Text is measured by rendering it on a black strip and reading the ink, because this Mac has no PIL and a guessed em-width put a 15-character title at half the team's size. Each line goes through `textfile=`: a title with an apostrophe put through `text='...'` ended the quote and vanished, with ffmpeg returning 0.
+- The path parser handles M L H V C S Q A Z with relative forms and compact arc flags. The catalogue's `rainbow` ends with a six-number arc; browsers draw what they parsed and stop, so does the parser.
+- Output: `Episode_<n>_Thumbnail.png` in the episode's Drive folder, link in `Thumbnail URL` on the episode record. Episode clips only; a teaser has no thumbnail.
+
+Measured against the team's episode 2049 thumbnail at 1280x720: icon 245 px at (127, 55), LINE 1 top at 353 with a 100 px start size that shrinks 4 px at a time until it fits between x=80 and 40 px short of the slash, LINE 2 box top at 434.
