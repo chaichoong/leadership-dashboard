@@ -1,0 +1,67 @@
+// Content Engine R1: the raw-footage folder watch (scripts/content-engine/watch.py) and its
+// nightly Go Signal. The pure parts (clip-name parsing, streak-day arithmetic, record shape,
+// queue order) run through the script's own selftest; the wiring checks below fail if the job
+// is scheduled without being described, or described without being scheduled.
+import { describe, it, expect } from 'vitest';
+import { execFileSync } from 'node:child_process';
+import { readFileSync, existsSync } from 'node:fs';
+import path from 'node:path';
+
+const ROOT = path.resolve(__dirname, '..');
+const WATCH = path.join(ROOT, 'scripts', 'content-engine', 'watch.py');
+const RUN = path.join(ROOT, 'scripts', 'content-engine-run.sh');
+
+describe('content-engine watch: selftest', () => {
+  it('passes its own selftest (clip parsing, streak day, record shape, queue order)', () => {
+    const out = JSON.parse(execFileSync('python3', [WATCH, 'selftest'], { encoding: 'utf8' }));
+    expect(out.failed).toEqual([]);
+    expect(out.checks).toBeGreaterThanOrEqual(10);
+  });
+
+  it('keeps the streak anchor that was read off a real transcript (day 2225 on 4 Jul 2026)', () => {
+    const src = readFileSync(WATCH, 'utf8');
+    expect(src).toMatch(/STREAK_ANCHOR = \(dt\.date\(2026, 7, 4\), 2225\)/);
+  });
+
+  it('keeps its state outside the public repo and writes it atomically', () => {
+    const src = readFileSync(WATCH, 'utf8');
+    expect(src).toMatch(/knowledge-os\/logs\/content-engine\/ledger\.json/);
+    expect(src).toContain('os.replace(tmp, LEDGER)');
+  });
+
+  it('creates one record per shooting day, not per clip, and checks for an existing one first', () => {
+    const src = readFileSync(WATCH, 'utf8');
+    expect(src).toContain('one record per shooting day');
+    expect(src).toContain('def find_record(file_id, day)');
+    expect(src).toMatch(/MAX_PULLED = 2/);
+  });
+});
+
+describe('content-engine watch: nightly wiring', () => {
+  const schedule = JSON.parse(readFileSync(path.join(ROOT, 'scripts', 'job-schedule.json'), 'utf8'));
+  const job = schedule['content-engine'];
+
+  it('is a wrapped, Drive-gated job in job-schedule.json that retries when deferred', () => {
+    expect(job).toBeTruthy();
+    expect(job.mode).toBe('wrapped');
+    expect(job.cron).toBe('0 2 * * *');
+    expect(job.retryWhenDeferred).toBe(true);
+    const drive = job.needs.find((n) => typeof n === 'object' && n.drive);
+    expect(drive.drive).toContain('Runpreneur - Raw Video');
+  });
+
+  it('has a run script that scans, pulls one clip and reports, and never renders', () => {
+    expect(existsSync(RUN)).toBe(true);
+    const run = readFileSync(RUN, 'utf8');
+    expect(run).toContain('watch.py scan --create');
+    expect(run).toContain('watch.py next');
+    expect(run).toContain('watch.py report');
+    expect(run).not.toContain('stab.py');
+  });
+
+  it('is described on the Automations list (deterministic job, not a register agent)', () => {
+    const auto = readFileSync(path.join(ROOT, 'js', 'automations-data.js'), 'utf8');
+    expect(auto).toMatch(/key: 'content-engine'/);
+    expect(auto).toContain('Never renders and never publishes');
+  });
+});
