@@ -7,8 +7,9 @@ What Ericamae's app did by hand (its Runpreneur Sync page, SOP 62), now nightly 
   2. Total distance = last stored total + that run (the app's running total, seeded from the
      website's live value the first time). Total days = the streak day from the DATE (1 Jun 2020
      = day 1), Kevin's ruling, not "last stored + 1".
-  3. Total raised = £70,000 baseline (donations before Stripe) + Stripe lifetime gross of
-     succeeded GBP charges on the Runpreneur account (read-only key in ~/.config/od/).
+  3. Total raised = the figure already on the website + the Stripe DIFFERENCE since the first
+     run (Kevin, 3 Sep 2026: the live figure carries money raised before Stripe and must keep
+     its continuity; the engine only ever adds what Stripe has taken since it started watching).
   4. Progress bar = total distance / 40,075 km, as "43.66%".
   5. Push the four onto the GoHighLevel custom values the website's merge tags read
      (total_of_days, total_disctance [sic], total_raised, progress_bar).
@@ -33,7 +34,8 @@ CFG = os.path.expanduser("~/.config/od")
 STATE = os.path.join(os.path.dirname(watch.LEDGER), "runpreneur_sync.json")
 STREAK_START = dt.date(2020, 6, 1)
 GOAL_KM, GOAL_GBP, DAYS_TARGET = 40075, 1_000_000, 5000
-BASELINE_RAISED = 70000.0          # donations before Stripe; the app's default, matches the live site (76,840 = 70,000 + 6,840)
+# No baseline constant: the first run records the site's live "Total raised" and Stripe's gross at that
+# moment; every later run adds only the Stripe growth since then, so the historic figure is never restated.
 CV = {"total_of_days": "CYXc0eQHefxIgnTibBR3", "total_disctance": "IX7TbNQdQTNQwVrlEq1X", "total_raised": "vF4rXf0z65ZYPlD6sSql", "progress_bar": "uJ11hqWOSE34nj9unf8s"}
 UA = "Mozilla/5.0 od-content-engine"
 
@@ -58,15 +60,23 @@ def progress(km):
     return "%.2f%%" % min(100.0, km / GOAL_KM * 100)
 
 
-def fold(state, activity, today):
-    """Add one activity to the running total once. Returns (new_state, changed)."""
+def run_day(activity):
+    """The streak day a run belongs to: the calendar day it was started (local time)."""
+    return streak_day(dt.date.fromisoformat((activity.get("start_date_local") or "")[:10]))
+
+
+def fold(state, activity, today=None):
+    """Add one run to the running total once. Runs on or before the day the site already counted
+    (recorded at seed time) are never added again. Returns (new_state, changed)."""
     aid = str(activity["id"])
     if aid in state.get("folded", []): return state, False
+    day = run_day(activity)
+    if day <= int(state.get("seeded_from_site", {}).get("days") or 0): return state, False
     km = activity["distance"] / 1000.0
     state["total_km"] = round(state.get("total_km", 0.0) + km, 2)
     state.setdefault("folded", []).append(aid); state["folded"] = state["folded"][-400:]
     state["last_activity"] = {"id": aid, "km": round(km, 2), "start": activity.get("start_date_local"), "name": activity.get("name")}
-    state["day"] = streak_day(today)
+    state["day"] = day
     return state, True
 
 
@@ -103,11 +113,11 @@ def strava(method, path, body=None):
         raise SystemExit("Strava %s %s -> %s (limit %s, usage %s): %s" % (method, path, e.code, lim, usage, e.read().decode()[:160]))
 
 
-def latest_run():
-    acts = strava("GET", "/athlete/activities?per_page=5")
-    runs = [a for a in acts if a.get("type") in ("Run", "TrailRun", "VirtualRun") or a.get("sport_type", "").endswith("Run")]
-    if not runs: raise SystemExit("Strava returned no run in the last five activities")
-    return runs[0]
+def recent_runs():
+    acts = strava("GET", "/athlete/activities?per_page=8")
+    runs = [a for a in acts if a.get("type") in ("Run", "TrailRun", "VirtualRun") or str(a.get("sport_type", "")).endswith("Run")]
+    if not runs: raise SystemExit("Strava returned no run in the last eight activities")
+    return sorted(runs, key=lambda a: a.get("start_date_local") or "")     # oldest first
 
 
 # ---------- Stripe ----------
@@ -167,36 +177,46 @@ def save_state(state):
     json.dump(state, open(tmp, "w"), indent=1); os.replace(tmp, STATE)
 
 
-def seed_from_site():
-    """First run: the running total starts from the live website value, as the app's did."""
+def raised_now(state, gross):
+    """Continuity rule: site figure at seed + (Stripe gross now - Stripe gross at seed)."""
+    seed = state["seeded_from_site"]
+    return float(seed["raised"]) + (gross - float(seed["stripe_gross"]))
+
+
+def seed_from_site(gross):
+    """First run: the running total AND the raised figure start from the live website values, as the app's did."""
     key = open(os.path.join(CFG, "ghl_social_key_runpreneur")).read().strip(); loc = open(os.path.join(CFG, "ghl_location_id_runpreneur")).read().strip()
     live = {v["name"]: v.get("value") for v in ghl_custom_values((key, loc))("GET", "/locations/%s/customValues" % loc).get("customValues", [])}
     km = float(str(live.get("Total Distance", "0")).replace(",", "") or 0)
-    if km <= 0: raise SystemExit("cannot seed: the site's Total Distance is empty")
-    return {"total_km": km, "folded": [], "seeded_from_site": {"km": km, "days": live.get("Total of days"), "at": dt.datetime.now().isoformat(timespec="seconds")}}
+    raised = float(str(live.get("Total raised", "0")).replace(",", "").replace("£", "") or 0)
+    if km <= 0 or raised <= 0: raise SystemExit("cannot seed: the site's Total Distance or Total raised is empty")
+    return {"total_km": km, "folded": [], "seeded_from_site": {"km": km, "raised": raised, "stripe_gross": gross, "days": live.get("Total of days"), "at": dt.datetime.now().isoformat(timespec="seconds")}}
 
 
 def run(dry_run=False, rename=True):
-    state = load_state() or seed_from_site()
-    today = dt.datetime.now(dt.timezone.utc).astimezone().date()
-    act = latest_run()
-    start = (act.get("start_date_local") or "")[:10]
-    if start != today.isoformat():
-        print("latest Strava run is dated %s, not today (%s): nothing folded, values unchanged" % (start, today)); save_state(state); return
-    state, changed = fold(state, act, today)
     gross, n = stripe_lifetime_gross()
-    raised = BASELINE_RAISED + gross
+    state = load_state() or seed_from_site(gross)
+    raised = raised_now(state, gross)
+    new = []
+    for act in recent_runs():                 # every run the site has not counted yet, oldest first, each named for its own day
+        state, changed = fold(state, act)
+        if changed: new.append(act)
+    if not new:
+        print("no new run since day %s; site values unchanged (raised £%s)" % (state.get("day") or state["seeded_from_site"].get("days"), fmt_num(raised))); save_state(state); return
     vals = values(state, raised)
     if dry_run:
-        print("DRY RUN", json.dumps({"activity": state["last_activity"], "values": vals, "stripe_gross": gross, "charges": n}, indent=1)); return
+        print("DRY RUN", json.dumps({"new_runs": [{"id": a["id"], "km": round(a["distance"] / 1000, 2), "day": run_day(a)} for a in new], "values": vals, "stripe_gross": gross, "charges": n}, indent=1)); return
     pushed = push_values(vals)
-    text = caption(state["day"], raised, state["total_km"])
     if rename:
-        strava("PUT", "/activities/%s" % act["id"], {"name": text.split("\n")[0], "description": text})
-    state["last_push"] = {"at": dt.datetime.now().isoformat(timespec="seconds"), "values": vals, "renamed": rename, "stripe_charges": n}
+        km_so_far = state["total_km"] - sum(a["distance"] / 1000.0 for a in new)
+        for act in new:                        # each run gets its own day and the total AS OF that run
+            km_so_far = round(km_so_far + act["distance"] / 1000.0, 2)
+            text = caption(run_day(act), raised, km_so_far)
+            strava("PUT", "/activities/%s" % act["id"], {"name": text.split("\n")[0], "description": text})
+    state["last_push"] = {"at": dt.datetime.now().isoformat(timespec="seconds"), "values": vals, "renamed": rename, "stripe_charges": n, "runs": [str(a["id"]) for a in new]}
     save_state(state)
-    print("day %s: run %s (%.2f km) folded=%s; site now %s; raised £%s (Stripe %d charges); Strava run %s" % (
-        state["day"], act["id"], state["last_activity"]["km"], changed, {k: v[1] for k, v in pushed.items()}, fmt_num(raised), n, "renamed" if rename else "left"))
+    print("day %s: %d new run(s) folded (%s km); site now %s; raised £%s (Stripe %d charges); Strava runs %s" % (
+        state["day"], len(new), ", ".join("%.2f" % (a["distance"] / 1000) for a in new), {k: v[1] for k, v in pushed.items()}, fmt_num(raised), n, "renamed" if rename else "left"))
 
 
 def report():
@@ -210,13 +230,17 @@ def selftest():
     assert streak_day(dt.date(2020, 6, 1)) == 1 and streak_day(dt.date(2026, 9, 3)) == 2286
     assert caption(2286, 76842, 17503.21) == "Day #2,286/5,000 #runpreneurchallenge\nTotal raised so far £76,842/£1,000,000\nTotal distance so far 17,503.21km/40,075km"
     assert progress(17496.06) == "43.66%" and progress(50000) == "100.00%"
-    st = {"total_km": 17496.06, "folded": []}
-    st, ch = fold(st, {"id": 1, "distance": 7150, "start_date_local": "2026-09-03T18:00:00Z", "name": "Evening Run"}, dt.date(2026, 9, 3))
+    st = {"total_km": 17496.06, "folded": [], "seeded_from_site": {"days": "2284", "raised": 76840.0, "stripe_gross": 6842.0}}
+    st, old = fold(st, {"id": 0, "distance": 7150, "start_date_local": "2026-09-01T19:20:00Z"}); assert not old, "a run the site already counted is never re-added"
+    st, ch = fold(st, {"id": 1, "distance": 7150, "start_date_local": "2026-09-03T18:00:00Z", "name": "Evening Run"})
     assert ch and st["total_km"] == 17503.21 and st["day"] == 2286
-    st, ch2 = fold(st, {"id": 1, "distance": 7150}, dt.date(2026, 9, 3)); assert not ch2 and st["total_km"] == 17503.21, "never double-count"
+    st, ch2 = fold(st, {"id": 1, "distance": 7150, "start_date_local": "2026-09-03T18:00:00Z"}); assert not ch2 and st["total_km"] == 17503.21, "never double-count"
     v = values(st, 76842.0); assert v == {"total_of_days": "2286", "total_disctance": "17503.21", "total_raised": "76842", "progress_bar": "43.68%"}, v
     assert set(CV) == {"total_of_days", "total_disctance", "total_raised", "progress_bar"}
-    print(json.dumps({"checks": 9, "failed": []}))
+    seeded = {"seeded_from_site": {"raised": 76840.0, "stripe_gross": 6842.0}}
+    assert raised_now(seeded, 6842.0) == 76840.0, "first run changes nothing"
+    assert raised_now(seeded, 6892.0) == 76890.0, "later runs add only what Stripe took since"
+    print(json.dumps({"checks": 11, "failed": []}))
 
 
 if __name__ == "__main__":
