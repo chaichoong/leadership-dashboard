@@ -12,6 +12,7 @@ import html, json, os, subprocess, tempfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(os.path.dirname(HERE))
 TOKENS = os.path.join(REPO, "css", "tokens.css")
+LOGO = os.path.join(REPO, "assets", "od-logo.png")   # the brand mark; no person's name on any picture (Kevin, 4 Sep 2026)
 RENDER = os.path.join(HERE, "render_infographic.js")
 W, H = 1200, 1500
 TEMPLATES = ("before_after", "steps", "stat", "flow", "checklist")
@@ -22,7 +23,7 @@ BASE_CSS = """
 .kicker{color:var(--accent);font-weight:700;font-size:26px;letter-spacing:.1em;text-transform:uppercase;margin-bottom:28px}
 h1{font-size:62px;line-height:1.12;margin:0 0 44px;font-weight:700;letter-spacing:-.01em}
 .foot{margin-top:auto;padding-top:36px;border-top:3px solid var(--border-default);display:flex;justify-content:space-between;align-items:flex-end;font-size:26px;color:var(--text-secondary)}
-.foot b{color:var(--text-primary);font-weight:700}
+.foot b{color:var(--text-primary);font-weight:700} .foot img.logo{width:96px;height:96px}
 .gold{display:inline-block;width:72px;height:8px;background:var(--accent-gold);margin-bottom:14px}
 ol.steps{list-style:none;padding:0;margin:0;counter-reset:s} ol.steps li{counter-increment:s;display:flex;gap:28px;align-items:flex-start;font-size:38px;line-height:1.3;margin:0 0 26px}
 ol.steps li::before{content:counter(s);flex:0 0 66px;height:66px;border-radius:50%%;background:var(--accent);color:#fff;font-weight:700;font-size:32px;display:flex;align-items:center;justify-content:center}
@@ -43,8 +44,8 @@ def _page(kicker, body, footer_right="operationsdirector.co.uk"):
     return ("<!doctype html><html><head><meta charset='utf-8'><link rel='preconnect' href='https://fonts.googleapis.com'>"
             "<link rel='stylesheet' href='https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;700&display=swap'>"
             "<link rel='stylesheet' href='file://%s'><style>%s</style></head><body><div class='card'><div class='kicker'>%s</div>%s"
-            "<div class='foot'><div><span class='gold'></span><br><b>Kevin Brittain</b><br>Operations Director</div><div>%s</div></div></div></body></html>"
-            % (TOKENS, BASE_CSS, html.escape(kicker), body, html.escape(footer_right)))
+            "<div class='foot'><div><span class='gold'></span><br><b>Operations Director</b><br>%s</div><img class='logo' src='file://%s' alt=''></div></div></body></html>"
+            % (TOKENS, BASE_CSS, html.escape(kicker), body, html.escape(footer_right), LOGO))
 
 
 def _lines(items, n_min, n_max, maxlen):
@@ -97,7 +98,7 @@ def slides_html(spec):
 
 
 def _foot():
-    return "<div class='foot'><div><span class='gold'></span><br><b>Kevin Brittain</b><br>Operations Director</div><div>operationsdirector.co.uk</div></div>"
+    return "<div class='foot'><div><span class='gold'></span><br><b>Operations Director</b><br>operationsdirector.co.uk</div><img class='logo' src='file://%s' alt=''></div>" % LOGO
 
 
 def render(template, spec, out_png, out_pdf=None):
@@ -125,7 +126,7 @@ def render(template, spec, out_png, out_pdf=None):
 
 def selftest():
     h = build_html("steps", {"title": "Hand your first job to an agent", "steps": ["Pick one weekly job", "Record it once", "Write the checklist", "Give the agent the checklist", "Approve ten outputs"]})
-    assert "The method" in h and h.count("<li>") == 5 and "tokens.css" in h and "DM+Sans" in h
+    assert "The method" in h and h.count("<li>") == 5 and "tokens.css" in h and "DM+Sans" in h and "Kevin" not in h and "od-logo.png" in h
     h2 = build_html("before_after", {"title": "T", "before": ["a", "b"], "after": ["c", "d", "e"]}); assert "By hand" in h2 and "With an agent" in h2 and h2.count("<p>") == 5
     h3 = build_html("stat", {"number": "83 of 83", "label": "threads already had a task", "source": "AI Agents register, 2 Sep 2026"}); assert "big small" in h3 and "Source:" in h3
     h4 = build_html("flow", {"title": "T", "boxes": ["New email", "Agent sorts it", "Kevin approves", "Reply sent"], "human": 2}); assert h4.count("box human") == 1 and h4.count("box agent") == 2 and "Trigger" in h4

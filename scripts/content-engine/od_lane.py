@@ -362,7 +362,7 @@ def build_card(post, mode, topics=None):
     parts = [ask]
     if post.get("text"): parts.append("The post, as written:\n\n" + post["text"])
     if post.get("card_url"): parts.append("The picture (attached to the post): %s%s" % (post["card_url"], (" (%s)" % post["picture"]) if post.get("picture") else ""))
-    if post.get("pdf_url"): parts.append("Carousel version (PDF, for a LinkedIn document post once that route is proven): " + post["pdf_url"])
+    if post.get("pdf_url"): parts.append("Carousel version (PDF, attached to this card as a file; for a LinkedIn document post once that route is proven): " + post["pdf_url"])
     if post.get("visual") and not post.get("card_url"): parts.append("The picture: " + json.dumps(post["visual"])[:400])
     parts.append("Where it came from:\n" + (post.get("source_line") or ""))
     u = post.get("usefulness")
@@ -665,21 +665,41 @@ def create_record(p):
     return watch._airtable("POST", watch.API, {"fields": fields, "typecast": True})["id"]
 
 
+WEBSITE_METHOD = ("Operations Director's own method (operationsdirector.co.uk, read 4 Sep 2026). Three steps: 1. Demo call, 30 minutes, we find the work eating your "
+                  "time and map the first three jobs to take off you. 2. We build it: system set up, data connected, first AI workers live; the first real win lands inside two "
+                  "weeks. 3. It runs and improves: AI does the recurring work, the owner sends improvement requests, monthly. The eight-stage path: map current operations and "
+                  "where the time goes; pick the jobs that eat the most time; write the repeating jobs down for the hand-off; connect the numbers, customers, tasks and "
+                  "messages in one place; a live dashboard of cash, sales and team; build the AI workers from the written processes (the engine); monthly improvements from "
+                  "the owner's requests; the owner moves from doing the day-to-day to leading. Pricing if needed: %s." % P.PRICING)
+
+
+def estate_source():
+    """Kevin's own agent estate as source material: the Live and Built rows in the register, in their own words, plus the website's method."""
+    try: rows = register_rows()
+    except Exception: rows = []
+    lines = ["Kevin's own agents, from the AI Agents register (Status, what it does): "] + [
+        "- %s (%s): %s" % (r["fields"].get("Name"), r["fields"].get("Status"), (r["fields"].get("What It Does") or "").strip()[:220]) for r in rows[:14]]
+    return WEBSITE_METHOD + "\n" + "\n".join(lines)
+
+
 def draft_newsletter(state, monday, voice):
     eds = state.setdefault("newsletters", {}); key = monday.isoformat()
     if key in eds: return
     week = [p for d, p in sorted(state.get("posts", {}).items()) if monday.isoformat() <= d <= (monday + dt.timedelta(days=4)).isoformat() and p.get("text")]
     if len(week) < 3: print("od newsletter: fewer than three posts this week, no edition"); return
     material = "\n\n".join("%s (%s), source: %s\n%s" % (p["day"], p["shape"], p.get("source_line", ""), p["text"]) for p in week)
-    theme = week[1]["hook"] if len(week) > 1 else week[0]["hook"]
-    out = _claude(P.NEWSLETTER_SYSTEM + ("\n\n" + voice if voice else ""), P.NEWSLETTER_PROMPT.format(monday=monday, theme=theme, material=material, cta=CTA_LINK))
+    n = len(eds) + 1
+    theme = P.NEWSLETTER_SERIES[(n - 1) % len(P.NEWSLETTER_SERIES)]
+    material += "\n\n" + estate_source()
+    out = _claude(P.NEWSLETTER_SYSTEM + ("\n\n" + voice if voice else ""),
+                  P.NEWSLETTER_PROMPT.format(monday=monday, n=n, theme=theme, edition_brief=(P.EDITION1_BRIEF if n == 1 else ""), material=material, cta=CTA_LINK))
     ed = parse_newsletter(out)
     if not ed: print("od newsletter: the model did not return TITLE/SHARE/BODY"); return
-    body, issues = rules_check(ed["body"], material + " " + CTA_LINK, "Fri", is_friday=True)
+    body, issues = rules_check(ed["body"], material + " " + CTA_LINK, "Fri", is_friday=True, names=library_authors())
     issues = [i for i in issues if not i.startswith(("hook", "ask or link")) and "words" not in i]
-    wc = len(body.split())
-    if wc < 500 or wc > 1200: issues.append("%d words (600-1,000)" % wc)
-    ed.update({"body": body, "issues": issues, "date": (monday + dt.timedelta(days=4)).isoformat(), "n": len(eds) + 1, "created": dt.datetime.now().isoformat(timespec="seconds"),
+    wc = len(body.split()); lo, hi = (900, 1300) if n == 1 else (600, 1100)
+    if wc < lo - 100 or wc > hi: issues.append("%d words (%d-%d)" % (wc, lo, hi))
+    ed.update({"body": body, "issues": issues, "date": (monday + dt.timedelta(days=4)).isoformat(), "n": n, "theme": theme, "created": dt.datetime.now().isoformat(timespec="seconds"),
                "source_line": "This week's %d posts and their sources: %s" % (len(week), "; ".join(p.get("source_line", "")[:80] for p in week))})
     fields = {"Content Name": "OD Newsletter %s - %s" % (ed["date"], ed["title"][:60]), "Category": BRAND, "Content Type": "Written", "Record Status": STATUS_DRAFTED,
               "Responsible": "Content Engine (AI)", "Blog Copy": body, "LinkedIn Copy": ed.get("share", ""), "Target Publish Date": ed["date"], "Platforms": ["LinkedIn Post", "Blog"],
@@ -760,6 +780,17 @@ def topics(dry_run=False):
 
 # ---------- cards (O5) ----------
 
+def attach_files(task_id, paths):
+    """Attach the picture (and the carousel PDF) to the task so they show as files on the card, not only as links (Kevin, 4 Sep 2026)."""
+    paths = [p for p in paths if p and os.path.exists(p)]
+    if not paths: return []
+    cmd = [sys.executable, approval.DISPATCH, "attach", task_id]
+    for p in paths: cmd += ["--file", p]
+    r = subprocess.run(cmd, capture_output=True, text=True)
+    if r.returncode != 0: print("od cards: attach failed for %s: %s" % (task_id, (r.stderr or r.stdout)[-160:])); return []
+    return paths
+
+
 def _raise(name, desc, out, record, note_ref):
     today = dt.date.today().isoformat()
     tid = approval.existing_task(name)
@@ -795,7 +826,8 @@ def raise_cards(dry_run=False):
         name, desc, out = build_card(p, m, tp)
         if dry_run: print(out); print("-----"); continue
         p["task"] = _raise(name, desc, out, p.get("record"), p.get("record")); p["raised"] = dt.datetime.now().isoformat(timespec="seconds")
-        _save(STATE, state); print("od cards: %s -> %s (%s)" % (pid, p["task"], name))
+        p["attached"] = [os.path.basename(x) for x in attach_files(p["task"], [p.get("card_png"), p.get("card_pdf")])]
+        _save(STATE, state); print("od cards: %s -> %s (%s)%s" % (pid, p["task"], name, (" + %d file%s" % (len(p["attached"]), "" if len(p["attached"]) == 1 else "s")) if p["attached"] else ""))
     for key, ed in sorted(state.get("newsletters", {}).items()):
         if ed.get("task") or ed.get("verdict") or ed["date"] < today: continue
         name, desc, out = build_newsletter_card(ed, m, tp)
@@ -1006,12 +1038,13 @@ def selftest():
     ed = {"date": "2026-09-11", "n": 1, "title": "Hand your inbox to an agent", "share": "S", "body": "B", "issues": []}
     n2, d2, o2 = build_newsletter_card(ed, "test", tps); assert n2.startswith("CONTENT (OD): Fri 11 Sep, Newsletter:") and P.NEWSLETTER_NAME in o2 and "Topic one" in o2 and o2.rstrip().split("\n")[-1].startswith(CLOSING) and "DRAFT" in o2
     _, _, o3 = build_newsletter_card(ed, "live"); assert "LinkedIn has no API" in o3 and "paste it yourself" in o3
+    assert attach_files("recX", ["/nonexistent/a.png"]) == [] and "eight-stage" in WEBSITE_METHOD and P.PRICING in WEBSITE_METHOD
     pl = newsletter_plan(ed, True); assert pl["profile"] == "linkedin" and pl["mode"] == "test" and pl["steps"][0]["url"].startswith("https://www.linkedin.com/article/new") and pl["submit"]["text"] == "Publish"
     assert minutes_for("Approved as-is") == 2 and minutes_for("Approved with minor edits") == 5 and minutes_for("Changes requested") == 10
     import tempfile as _tf
     globals()["HOLD_FILE"] = os.path.join(_tf.gettempdir(), "od-hold-test-%d" % os.getpid()); assert not on_hold(); open(HOLD_FILE, "w").write(""); assert on_hold(); os.remove(HOLD_FILE)
     assert BUSINESS_OD != approval.BUSINESS_PERSONAL and publish.BRANDS[BRAND]["category"] == BRAND and AI_THRESHOLD == 6
-    print(json.dumps({"checks": 63, "failed": []}))
+    print(json.dumps({"checks": 64, "failed": []}))
 
 
 if __name__ == "__main__":

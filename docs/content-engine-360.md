@@ -569,3 +569,11 @@ The Summary is not put on YouTube (the full episode is there). The socials carry
   fails the picture outright, and each required line must match at 92% with every word of it present in the transcript. Stat labels
   are capped at 40 characters in the spec, because long labels are where the image model garbles. Verified on the five first-week
   pictures: the bad one was caught and redrawn, the others passed.
+- **Kevin's second review (4 Sep 2026, evening).** Pictures "much better". Three rulings: no person's name on any picture, the
+  Operations Director brand and logo instead (`assets/od-logo.png`, rendered from `od-logo.svg`, stamped bottom-right by ffmpeg after
+  the text check; the template footer carries it too); the carousel PDF must be visible on the card, so pictures and PDFs are now
+  ATTACHED to the task as files (`agent-dispatch.py attach`) as well as linked; and edition 1 of the newsletter must be "a really,
+  really good one", the high-level version of the lead magnet's promise (how to get 90% of day-to-day operations done by AI agents),
+  with each later edition going deeper on one area. `NEWSLETTER_SERIES` (eight themes) and `EDITION1_BRIEF` in the prompts; the
+  website's own three-step and eight-stage method plus the Live/Built register rows are the edition's source material; 900-1,200 words
+  for edition 1.
