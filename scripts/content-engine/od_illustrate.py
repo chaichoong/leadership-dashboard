@@ -14,8 +14,9 @@ import base64, difflib, json, os, re, urllib.error, urllib.request
 
 KEY_FILE = os.path.expanduser("~/.config/od/gemini_api_key")
 API = "https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent"
-IMAGE_MODEL = "gemini-2.5-flash-image"     # "Nano Banana"
-TEXT_MODEL = "gemini-2.5-flash"
+IMAGE_MODELS = ["gemini-3.1-flash-image", "gemini-3-pro-image", "gemini-3-pro-image"]   # attempt 1 flash ("Nano Banana"), retries on Pro, which renders text better (models listed on Kevin's key, 4 Sep 2026)
+IMAGE_MODEL = IMAGE_MODELS[0]
+TEXT_MODEL = "gemini-3.6-flash"   # the current flash text model on Kevin's key (2.5 was retired for new users, 4 Sep 2026)
 PALETTE = "pale sage background #F1F3EF, off-white panels #FBFBF9, forest green #2C6E49 for accents, icons and numbering, gold #C6A15B for one highlight, charcoal #1C2422 text"
 STYLE = ("Clean, modern LinkedIn infographic in flat vector illustration style, the kind top business creators post: generous white space, one bold "
          "heading, clear hierarchy, simple friendly line icons of AI agents (small robot heads or chat bubbles with a spark), arrows and numbered "
@@ -64,17 +65,18 @@ def _post(model, body, k):
     with urllib.request.urlopen(req, timeout=180) as r: return json.load(r)
 
 
-def generate(prompt, k):
+def generate(prompt, k, model=None):
     """One image (PNG bytes) or None."""
+    model = model or IMAGE_MODEL
     body = {"contents": [{"parts": [{"text": prompt}]}], "generationConfig": {"responseModalities": ["IMAGE"], "imageConfig": {"aspectRatio": "4:5"}}}
-    try: r = _post(IMAGE_MODEL, body, k)
+    try: r = _post(model, body, k)
     except urllib.error.HTTPError as e:
         msg = e.read().decode()[:300]
-        if "imageConfig" in msg or "aspectRatio" in msg:      # older API surface: retry without the config
-            body["generationConfig"] = {"responseModalities": ["IMAGE"]}
-            try: r = _post(IMAGE_MODEL, body, k)
-            except urllib.error.HTTPError as e2: raise SystemExit("gemini image: %s %s" % (e2.code, e2.read().decode()[:200]))
-        else: raise SystemExit("gemini image: %s %s" % (e.code, msg))
+        if "imageConfig" in msg or "aspectRatio" in msg or "responseModalities" in msg:      # older API surface: retry without the config
+            body["generationConfig"] = {"responseModalities": ["IMAGE"]} if "responseModalities" not in msg else {}
+            try: r = _post(model, body, k)
+            except urllib.error.HTTPError as e2: raise SystemExit("gemini image (%s): %s %s" % (model, e2.code, e2.read().decode()[:200]))
+        else: raise SystemExit("gemini image (%s): %s %s" % (model, e.code, msg))
     for cand in r.get("candidates", []):
         for part in cand.get("content", {}).get("parts", []):
             data = (part.get("inlineData") or part.get("inline_data") or {}).get("data")
@@ -120,15 +122,16 @@ def illustrate(template, spec, out_png, attempts=3, log=print):
     if template not in LAYOUTS: return None, "no layout for %s" % template
     required = required_lines(template, spec); fixes = None
     for i in range(1, attempts + 1):
+        model = IMAGE_MODELS[min(i - 1, len(IMAGE_MODELS) - 1)]
         try:
-            png = generate(build_prompt(template, spec, fixes), k)
+            png = generate(build_prompt(template, spec, fixes), k, model)
             if not png: log("illustrate: attempt %d returned no image" % i); continue
             bad = check_text(required, transcribe(png, k))
         except SystemExit as ex:
             return None, str(ex)[:200]
         if not bad:
             with open(out_png, "wb") as fh: fh.write(png)
-            return out_png, "Gemini illustration, text verified on attempt %d" % i
+            return out_png, "Gemini illustration (%s), text verified on attempt %d" % (model, i)
         log("illustrate: attempt %d misspelt %d line%s: %s" % (i, len(bad), "" if len(bad) == 1 else "s", "; ".join(bad)[:200]))
         fixes = bad
     return None, "text still wrong after %d attempts" % attempts
