@@ -388,8 +388,9 @@ def schedule_stage(day, entry, recs, acct_map, stage, dry_run=False):
         # the browser lane runs this plan: prepare -> screenshot on the card, commit after approval.
         import spotify
         files = episode_files(day)
-        if os.path.exists(files["full"]):
-            plan_path, ptitle = spotify.write_plan(day, files["full"], ff.get("Podcast Copy"), entry["youtube_link"], test, os.path.dirname(STATE))
+        upload = files["podcast"] if spotify.PODCAST_FORMAT == "audio" and os.path.exists(files["podcast"]) else files["full"]
+        if os.path.exists(upload):
+            plan_path, ptitle = spotify.write_plan(day, upload, ff.get("Podcast Copy"), entry["youtube_link"], test, os.path.dirname(STATE))
             entry.setdefault("podcast", {})["plan"] = plan_path
             what += "; Spotify plan written (%s)" % ("draft, test mode" if test else "publish")
     fields["Notes"] = approval.append_note(full, "%s: %s through GoHighLevel." % (dt.date.today().isoformat(), what))
