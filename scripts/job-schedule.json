@@ -315,6 +315,8 @@
    }
   ],
   "readyWaitMinutes": 15,
+  "retryWhenDeferred": false,
+  "retryWhenDeferredNote": "Deliberately OFF, not forgotten. daily-ops is cooperative and unqueued, so it holds no lock the retry sweep could see: kickstarting it while a session is already mid-run would deliver a second run of a routine that writes code and posts to Slack. daily-ops-guard covers the absence instead, alarming when no phase-1 mark exists by 08:00 London. Revisit only if the guard is retired.",
   "note": "THE one Claude routine. Never skipped for lateness (maxLate 1440) — it IS the daily run, and skipping it means nothing happens at all. Unqueued: it runs for an hour or more and must not hold the lock the short shell jobs need."
  },
  "daily-ops-guard": {
@@ -338,7 +340,8 @@
   "cron": "45 6 * * *",
   "maxLateMinutes": 120,
   "mode": "wrapped",
-  "note": "Kevin's restructure of 26 Aug 2026: role-specific work leaves the daily-ops sequence and runs as its own slot. A wrapped shell job, so it takes the lock and heartbeats — a slot, never a second Claude routine. Allowlisted in scripts/check-routines.py. CEO huddle plus the memory sweep of YESTERDAY, early so the 09:00 CEO brief always has its input — the old phase-2 slot inside a run that reached 6h43 on 26 Aug put that deadline at risk. Weekend hard stop lives in the skill, not the cron (never express a weekday in a cron).",
+  "retryWhenDeferred": true,
+  "note": "28 Aug 2026: opted in to retry-deferred. On 27 Aug this job held on for its full 45-minute ready wait, never ran, and retry-deferred then reported NOT WIRED on eight consecutive hourly sweeps — so the one job the 09:00 CEO brief depends on was the only drive-gated job with no way back. feed-brain, compound-brain, publish-brain and knowledge-os-sort share the identical drive precondition and were already opted in. Kevin's restructure of 26 Aug 2026: role-specific work leaves the daily-ops sequence and runs as its own slot. A wrapped shell job, so it takes the lock and heartbeats — a slot, never a second Claude routine. Allowlisted in scripts/check-routines.py. CEO huddle plus the memory sweep of YESTERDAY, early so the 09:00 CEO brief always has its input — the old phase-2 slot inside a run that reached 6h43 on 26 Aug put that deadline at risk. Weekend hard stop lives in the skill, not the cron (never express a weekday in a cron).",
   "needs": [
    "network",
    {

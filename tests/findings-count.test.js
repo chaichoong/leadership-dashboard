@@ -40,7 +40,7 @@ beforeEach(() => { file = join(ROOT, `q${n++}.jsonl`); });
 describe('findings.py count', () => {
   it('counts what is still owed, not what was ever filed', () => {
     const a = add('r-a'); add('r-b');
-    run('close', a, '--outcome', 'fixed', '--note', 'done');
+    run('close', a, '--outcome', 'fixed', '--note', 'done', '--evidence', 'test fixture');
 
     expect(run('count'), 'a closed finding was still being counted as backlog')
       .toBe('1');
@@ -78,7 +78,7 @@ describe('findings.py count', () => {
   // A count that always returns the same number is the bug, not the fix.
   it('BACKLOG and TOTAL are genuinely different numbers, and labelled', () => {
     const a = add('r-a'); add('r-b'); add('r-c');
-    run('close', a, '--outcome', 'fixed', '--note', 'done');
+    run('close', a, '--outcome', 'fixed', '--note', 'done', '--evidence', 'test fixture');
     const out = run('count', '--breakdown');
     expect(out).toMatch(/^BACKLOG\s+2$/m);
     expect(out).toMatch(/^TOTAL\s+3$/m);

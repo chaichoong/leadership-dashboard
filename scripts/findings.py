@@ -16,7 +16,9 @@ Usage
     findings.py claim <id> --by queue-fixer
     findings.py reopen <id> [--force] | findings.py reopen --stale
     findings.py list --stale
-    findings.py close <id> --outcome fixed|rejected|deferred --note "..."
+    findings.py close <id> --outcome fixed --evidence <sha> --note "..."
+    findings.py close <id> --outcome pending --pr <n> --note "..."
+    findings.py close <id> --outcome rejected|deferred --note "..."
     findings.py count                 # the BACKLOG: open + claimed + pending
     findings.py count --status all    # every finding ever filed
     findings.py count --breakdown     # every status, labelled
@@ -25,6 +27,8 @@ Usage
 import argparse
 import json
 import os
+import re
+import subprocess
 import sys
 import time
 from datetime import datetime
@@ -365,14 +369,114 @@ def cmd_reopen(a):
     return 0
 
 
+# ---------------------------------------------------------------------------
+# evidence on close
+# ---------------------------------------------------------------------------
+# Findings 20260820-agent-dispatch-262 and 20260820-queue-fixer-266.
+#
+# `close --outcome fixed` used to accept any words at all. Findings 201, 203,
+# 204 and 237 were every one of them closed as "fixed" on days when
+# `git log -- scripts/agent_email_format.py scripts/send-email.py` returned ZERO
+# commits, and `grep -rn strip_carry_out_line` returned nothing. Six approved
+# creditor emails then failed to send on three consecutive runs while the queue
+# read clean. The defect was never in any individual fix. It was in the close
+# path, which recorded an outcome and asked for no proof.
+#
+# So `fixed` now needs evidence, and the strongest kind is checked rather than
+# believed: a commit SHA must EXIST and be an ANCESTOR OF origin/main. A SHA
+# that is only on a branch is a fix sitting in an open PR, which is `pending`.
+#
+# Evidence that is not a SHA (an Airtable write, a live invariant, a config
+# change on the Mac) is taken at its word — this is a discipline gate, not a
+# lie detector — but it must be SAID, and it lands in the ledger where the next
+# run can read it.
+
+SHA_RE = re.compile(r"\b[0-9a-f]{7,40}\b")
+
+REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def _git(*args):
+    """(rc, stdout). Never raises: git missing is not proof of anything."""
+    try:
+        p = subprocess.run(["git", "-C", REPO] + list(args),
+                           capture_output=True, text=True, timeout=20)
+        return p.returncode, (p.stdout or "").strip()
+    except Exception:
+        return 127, ""
+
+
+def landed_on_main(sha):
+    """(verdict, detail). verdict is 'landed' | 'branch-only' | 'unknown'."""
+    rc, _ = _git("cat-file", "-e", sha + "^{commit}")
+    if rc == 127:
+        return "unknown", "git unavailable"
+    if rc != 0:
+        return "branch-only", "commit %s does not exist in this repo" % sha
+    _git("fetch", "origin", "main", "--quiet")
+    for ref in ("origin/main", "main"):
+        rc, _ = _git("merge-base", "--is-ancestor", sha, ref)
+        if rc == 0:
+            return "landed", "%s is an ancestor of %s" % (sha, ref)
+    return "branch-only", ("%s exists but is not an ancestor of origin/main — "
+                           "it is on a branch, so the fix has not landed" % sha)
+
+
+def check_evidence(outcome, evidence, note, pr):
+    """(ok, message). The whole gate, pure, so the tests can reach it."""
+    note = (note or "").strip()
+    evidence = (evidence or "").strip()
+
+    if outcome == "pending":
+        if not str(pr or "").strip():
+            return False, ("--outcome pending needs --pr <n>: a fix nobody can "
+                           "find is not a fix. Use `findings.py land --pr <n>` "
+                           "once it merges.")
+        return True, ""
+
+    if outcome in ("rejected", "deferred"):
+        if not note:
+            return False, "--outcome %s needs --note explaining why" % outcome
+        return True, ""
+
+    # outcome == "fixed"
+    if not (evidence or SHA_RE.search(note)):
+        return False, (
+            "--outcome fixed needs --evidence. 'fixed' means LANDED on "
+            "origin/main, so the evidence is normally the commit SHA. If the fix "
+            "is in an open PR use --outcome pending --pr <n> instead. If it is "
+            "not a code change at all (an Airtable write, a live invariant, a "
+            "setting on the Mac), say so in --evidence and it is taken at its "
+            "word."
+        )
+
+    for sha in SHA_RE.findall(evidence) + SHA_RE.findall(note):
+        verdict, detail = landed_on_main(sha)
+        if verdict == "landed":
+            return True, "evidence verified: %s" % detail
+        if verdict == "branch-only":
+            return False, ("%s. Close it as --outcome pending --pr <n> until it "
+                           "merges." % detail)
+    # No SHA anywhere: non-code evidence, recorded and trusted.
+    return True, "evidence recorded (not a commit SHA, taken at its word)"
+
+
 def cmd_close(a):
     state = current_state()
     if a.id not in state:
         print("ERROR: no finding %s" % a.id, file=sys.stderr)
         return 1
+    ok, msg = check_evidence(a.outcome, getattr(a, "evidence", ""), a.note,
+                             getattr(a, "pr", ""))
+    if not ok:
+        print("REFUSED: %s" % msg, file=sys.stderr)
+        return 2
     append({"op": "close", "id": a.id, "ts": iso(),
-            "outcome": a.outcome, "note": a.note, "pr": getattr(a, "pr", "")})
+            "outcome": a.outcome, "note": a.note, "pr": getattr(a, "pr", ""),
+            "evidence": (getattr(a, "evidence", "") or "").strip()})
     print("closed %s as %s" % (a.id, a.outcome))
+    if msg:
+        print("  %s" % msg)
     if a.outcome == "pending":
         print("NOT counted as fixed until the PR merges — run "
               "`findings.py land --pr %s` then." % (getattr(a, "pr", "") or "<n>"),
@@ -474,6 +578,10 @@ def main(argv=None):
                          "PRs were unmerged while 40 findings citing them read "
                          "as fixed.")
     sp.add_argument("--pr", default="", help="PR number carrying the fix")
+    sp.add_argument("--evidence", default="",
+                    help="REQUIRED for --outcome fixed: the commit SHA that "
+                         "landed it (checked against origin/main), or a plain "
+                         "statement of the non-code proof")
     sp.add_argument("--note", default="")
     sp.set_defaults(fn=cmd_close)
 
