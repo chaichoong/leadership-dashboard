@@ -349,3 +349,122 @@ Instagram for OD waits until LinkedIn shows a signal; designed quote cards are r
 - **SEO.** Written into the agent file's Lessons from Kevin, which both Claude calls read: keyword in the first three words of every title and the first sentence of every description, hook + keyword in the first 100 characters of the YouTube description, topic hashtags first.
 - **Podcast.** No jingle: the audio is taken from the captioned episode with the pause between the sign-off and the welcome removed (`podcast_filter`), so it runs straight in.
 - Both 4 June episodes are re-rendered with all of this applied; the records and cards keep their links because the files are overwritten in place.
+
+
+## Operations Director lane, VERSION 2 (PLAN, 4 Sep 2026, awaiting Kevin's approval; the v1 lane is ON HOLD)
+
+Kevin read the first five drafts and stopped the lane (hold file `~/.config/od/content_engine_od_hold`; PR #249). His
+feedback, in his words: the posts were "not genuinely usable or useful to somebody"; he wants Dan Martell's kind of
+LinkedIn content; every post needs a visual and "it can't just be a blank quote", infographic-style; add long-form as a
+LinkedIn newsletter (workshop replay now in the brain: `Learning & Reference/Transcripts/2026-09-04 Richard Woods —
+LinkedIn Newsletters Workshop.md`); use the Runpreneur vlog only where there is gold, never force it, and instead hand
+him a rolling list of about ten episode topics to record; the brief must be crisp: Operations Director is about AI agents
+doing 90% of a business's daily operations, so a workflow, process or system counts only when it is being handed to an
+AI agent. Everything below is the plan for v2. Nothing is built until Kevin approves it.
+
+### The brief, in one paragraph (paste this above every prompt)
+
+Operations Director gets AI agents to do 90% of the everyday work in a founder-led business, so the business runs
+without the founder. Every piece of content teaches one thing a stressed, overwhelmed owner, on whom everything
+bottlenecks, can use this week to hand a real piece of daily work to an AI agent: which task, how you describe it, what
+the agent does, where the human check sits, what changed after. Systemisation matters only as the step before an agent
+takes the work. Mindset, running, motivation and general business advice are out unless they end in an agent doing a
+job. Proof is Kevin's own businesses and his own agent estate, with real numbers he has stated or the register records.
+
+### What Dan Martell's posts do that ours did not (read 4 Sep 2026)
+
+Read through public post pages and a pattern write-up (LinkedIn blocked the logged-in feed read from the automation
+tab). His Content Flywheel post (July 2024, 93 reactions, 92 comments) is a numbered method (1. record everything,
+2. extract soundbites, 3. repurpose into written, 4. the best ideas become long form) with one real number in it (under
+1.5 hours a week of planned creation) and a keyword call to action ("Comment CONTENT"). His hooks are a contrast ("I
+used to think X. Now I know Y."), a problem-and-cost ("Most people do X and it costs them Y"), or a stop-scrolling
+line. Bodies are one idea per short line, heavy "you", a method the reader can copy today, a light directive at the
+end. He posts about eight times a week; the 2026 post "AI Tools for every task" carried 1,500 reactions with a list
+graphic. Our v1 posts were scenes and opinions; his are methods with a visual. That is the gap.
+
+### Sources, in priority order (replaces "mine the vlog first")
+
+1. **Planned episodes.** The engine keeps a rolling list of ten topics it wants Kevin to record on his runs, each with
+   the angle, three points to cover and the one real number to state. Kevin records them in his own words; the
+   transcript is the source and the quotes are his. When one is recorded and mined, the next joins the list. This is
+   Dan Martell's own flywheel (record, extract, repurpose, long form) aimed at OD on purpose instead of by luck.
+2. **The build log.** What actually shipped in Kevin's agent estate: register rows at Live or Built with their measured
+   facts, and the merged pull request titles of this public repo (each one is a dated, checkable record of an agent
+   doing a job). Nothing is more usable or more true than "here is what my agent did this week".
+3. **Research.** Pain language from real founders (the pain-signal posts the prospecting agent harvests, public
+   forums, the five hot-buttons) and frameworks from the brain's Frameworks Library (121 books), each applied to
+   handing work to an agent and credited to its author.
+4. **Vlog gold, only.** The classifier's OD threshold rises to 8 and the pillar must be agent-related (a process, a
+   system or a decision being handed to AI). Mindset alone no longer qualifies. Expected yield at that bar on the
+   first 40 transcripts: 3 to 4 episodes, not 9.
+
+### The five post shapes (Dan Martell's, pointed at agents), each with its infographic
+
+| Day | Shape | What the reader gets | Infographic (code-rendered, Sage palette, DM Sans) |
+|---|---|---|---|
+| Mon | The mistake | A problem-and-cost hook and the one fix: which job to hand to an agent first and why | Before/after two-column card |
+| Tue | The method | A numbered 3-to-7 step way to hand a named task to an agent, copyable today | Numbered steps card, or a 5-slide carousel PDF (LinkedIn document) |
+| Wed | The build log (proof) | What one of Kevin's agents did this week, the real numbers, where the human check sat | Stat card: one big number, its source line |
+| Thu | The workflow | One daily-operations workflow drawn as boxes: what the agent does, where the owner approves | Mini flow diagram, three to five boxes |
+| Fri | The offer | The week's strongest lesson plus the one ask: comment a keyword for the lead magnet | Checklist card ("five signs your business runs on you") |
+
+Rules that stand: no invented evidence, no figure without a source, UK English, no em dashes, no hashtags on LinkedIn to
+start, no ask Monday to Thursday, locked pricing only, no running words, "agent" only for something that runs itself.
+New quality gate before any card: a **usefulness check** (does the post give one thing the reader can do this week, is it
+specifically about an agent doing a job, does it carry a copyable method or a real number). Under 7 out of 10 means one
+redraft, then a THIN card asking Kevin for the missing ingredient. Visuals: rendered from HTML templates with Playwright
+(already in the repo) so they carry the platform's own type and palette; rule 2 holds, an illustration of a method or a
+number, never anything that could read as a screenshot, a person or a result that did not happen. The blank quote card
+is retired.
+
+### The newsletter (long-form, weekly)
+
+- **Where.** Kevin's personal LinkedIn profile, not the company page. The workshop and LinkedIn's own rules both point
+  there: a Page needs 150 followers and recent original posts to be offered a newsletter (the Operations Director page's
+  count could not be read on 4 Sep and is likely below it), and the launch invitation goes to every connection and
+  follower of the author, which for Kevin is 6,093 people. This amends the 21 Jul lock ("no OD on the personal feed")
+  for ONE weekly edition, and the earlier bridge-post idea is dropped: the newsletter is the personal-profile vehicle.
+- **What.** One edition a week, Friday, 600 to 1,000 words: the week's theme as a method, the build-log proof, the
+  workflow picture, one call to action into the lead magnet. Plain title that says what it is, square 300x300 cover in
+  Featured, weekly cadence declared. Same edition becomes the website article (the asset that can rank) and, when OD has
+  a list, the email.
+- **How it publishes.** LinkedIn has no newsletter API and GoHighLevel's planner cannot post articles. The engine drafts
+  the edition and raises the card; publishing is the browser lane (`agent-browser`, a `linkedin` profile Kevin logs into
+  once, the same pattern as Spotify and Adobe) with Kevin's paste as the fallback, about five minutes.
+- **The subscriber routine.** The author-only subscriber list is read weekly through the browser lane; every new
+  subscriber gets a connection note or DM drafted in Kevin's voice: thanks, one light question, no pitch. Cards for
+  the first fortnight, then the autonomy gate applies as for posts. This is where the contact's 2,000 subscribers turned
+  into conversations, and it cannot be done from a Page.
+- **Measured before promising:** the contact's figures (2,000 subscribers, 500 readers a week in four weeks) are his,
+  the workshop's are the speaker's (3,000 subscribers, 32% opens). Kevin's number is unknown until edition three.
+
+### The recording brief (Kevin's ask)
+
+Ten rolling topics, kept in `talking-points.md` and in Monday's 09:00 brief, and shown on the Friday newsletter card so
+they are in front of him weekly. Each: a title, the angle in one line, three points, the real number to state, the day it
+feeds. Chosen from: next week's five shapes, the build log (what shipped that he can explain), pillar gaps in the bank,
+and the newsletter theme. Recorded topics move to the bank when mined; a topic not recorded in three weeks is retired.
+
+### Cadence and Kevin's minutes
+
+Five posts and one newsletter a week, drafted Sunday night, six cards in Monday's 08:00 digest, each about a minute to
+read; the newsletter card three minutes. Publishing: posts through GoHighLevel to the Operations Director LinkedIn page
+and Facebook page at 08:00 London; the newsletter through the browser lane Friday 08:00 after his approval. Test mode
+until Kevin writes live. Autonomy gate as the playbook: two clean weeks above 90%, Monday to Thursday self-publish.
+
+### Build order after approval (two sessions)
+
+B1 tighten `MINE_SYSTEM` (agent-related, threshold 8) and add the two new sources (`build_log_source` from the register
+and merged PR titles; `research_source` from Prospects pain signals and the Frameworks Library). B2 `od_infographic.py`:
+five HTML templates rendered to PNG (and the Tuesday carousel PDF) with Playwright; media through the existing GHL upload.
+B3 new prompts per shape with the brief above, the usefulness check, redraft loop. B4 `od_newsletter.py`: edition
+draft, card, browser-lane publish plan, subscriber read and DM drafts. B5 recording brief generator (ten rolling topics)
+into `talking-points.md`, the brief and the Friday card. B6 retire the bridge posts and the quote card; tests; docs.
+The five v1 cards in Kevin's queue are superseded and should be rejected or withdrawn.
+
+### Open questions for Kevin (only the ones that change the build)
+
+Q1 Newsletter on your personal profile (recommended, the only place it works) or wait for the Page to reach 150 followers.
+Q2 Newsletter name: plain, says what it is; a suggestion is "Run Your Business Without You". Q3 Keyword CTA on Friday
+("Comment AGENT") needs the comment-reading pass, so the lead magnet build includes it; until then the booking link.
+Q4 Withdraw the five v1 cards now.
