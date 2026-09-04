@@ -326,6 +326,8 @@ def schedule_stage(day, entry, recs, acct_map, stage, dry_run=False):
     for platform, cfg in CHANNELS.items():
         if cfg["stage"] != stage or platform not in acct_map: continue
         for spec in cfg["posts"]:
+            if spec["clip"] != "full" and not os.path.exists(episode_files(day)[spec["clip"]]):
+                continue                                   # no Learnings clip this episode (no diary section): nothing to post
             rec = recs.get(spec["record"])
             copy = ((rec or {}).get("fields", {}).get(spec["field"]) or "").strip()
             if not copy:

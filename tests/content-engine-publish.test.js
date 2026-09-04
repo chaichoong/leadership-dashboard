@@ -77,6 +77,11 @@ describe('content-engine publish (GHL)', () => {
     expect(blog).toContain('BLOG_ID = "YvavGIzJ2jDX8gs9CjYZ"');
   });
 
+  it('skips a clip that was never made (no diary section that day) instead of failing the whole stage', () => {
+    const src = readFileSync(PUBLISH, 'utf8');
+    expect(src).toContain('if spec["clip"] != "full" and not os.path.exists(episode_files(day)[spec["clip"]])');
+  });
+
   it('X is not a channel and every copy field it reads exists on the record type it reads it from', () => {
     const src = readFileSync(PUBLISH, 'utf8');
     expect(src).toContain('assert "twitter" not in CHANNELS');

@@ -97,7 +97,10 @@ def split_sections(text, ctype):
 
 
 def rules_check(fields, transcript=""):
-    """Returns (fixed_fields, issues). Em dashes are fixed; everything else is reported."""
+    """Returns (fixed_fields, issues). Em dashes are fixed; everything else is reported. `transcript` is
+    the source text a figure must appear in: the transcript plus the prompt's own inputs (streak day,
+    cumulative km, km remaining), which the copy is told to use and which 4 Sep 2026's first cards
+    flagged as unsourced."""
     fixed = {}; issues = []
     for field, txt in fields.items():
         t = txt.replace(" — ", ", ").replace("—", ", ").replace(" – ", ", ")
@@ -155,7 +158,7 @@ def generate_for(rec, ctype, transcript, day, yt_full_link):
     text, usage, cost = ask_claude(cm_prompts.KEVIN_SYSTEM, prompt)
     fields = split_sections(text, ctype)
     if not fields: raise SystemExit("no sections parsed for %s; first 300 chars: %r" % (name, text[:300]))
-    fields, issues = rules_check(fields, transcript)
+    fields, issues = rules_check(fields, transcript + "\n" + prompt)   # the prompt's own figures (day, km so far, km left) are sourced
     fields.update({"AI Generated": True, "AI Feature": "Copywriting", "AI Last Run": dt.datetime.now(dt.timezone.utc).isoformat(),
                    "Model": MODEL, "AI Input Tokens": int(usage.get("input_tokens", 0) or 0), "AI Output Tokens": int(usage.get("output_tokens", 0) or 0),
                    "Record Status": STATUS_COPIES})
@@ -207,6 +210,8 @@ def selftest():
     fixed2, issues2 = rules_check({"LinkedIn Copy": "raised £2,500 today"}, "we raised two thousand")
     assert any("figure" in i for i in issues2), issues2
     fixed3, issues3 = rules_check({"LinkedIn Copy": "40,075 km and £1M, raising £1 million"}, ""); assert not issues3, issues3
+    p3 = build_prompt("Long Form Video", "t", "Episode 2195 Full Episode", 2195)
+    assert not rules_check({"Blog Copy": "21,950 km done, 18,125 km to go on day 2,195"}, "t\n" + p3)[1], "figures the prompt itself supplies are sourced"
     assert cm_prompts.KEVIN_SYSTEM.startswith("You are Kevin Brittain.") and "#Insta360" in cm_prompts.KEVIN_SYSTEM
     print(json.dumps({"checks": 12, "failed": []}))
 
