@@ -437,3 +437,32 @@ describe('informational outputs are filed, not queued (4 Sep 2026)', () => {
     expect(r.captured.fields ? r.captured.fields[r.fieldMap.status] : 'Approval').not.toBe('Completed');
   });
 });
+
+// Kevin's ruling, 4 Sep 2026 (fix 2): an output that tells him to log in and
+// do it himself is refused at submit. 37 of 233 outputs over 14 days did that.
+// The one sanctioned hand-back is the SIGN-IN NEEDED line the Robot sign-in
+// app turns into a tap.
+describe('hand-backs are refused at submit (4 Sep 2026)', () => {
+  const report = 'Portfolio arrears review.\n' + 'Detail line. '.repeat(30) + '\n';
+  const CARRY = '**Carrying this out will involve:** Kevin reviews the findings and decides.';
+  it.each([
+    'Kevin must log into pingen.com and click Send on letter b8caaaf2.',
+    'You will need to log in to the Stripe dashboard and complete the verification.',
+    'Log into the HL account at hl.co.uk to read the secure message.',
+    'KEVIN ACTION: log into pingen and press send.',
+    'Kevin should call the bank to confirm the balance.',
+  ])('refuses: %s', (line) => {
+    const r = submit({ type: 'Research', output: report + line + '\n\n' + CARRY });
+    expect(r.refused).toBe(true);
+    expect(r.error).toMatch(/hands Kevin a job/);
+  });
+  it('the SIGN-IN NEEDED line is the sanctioned hand-back and passes', () => {
+    const r = submit({ type: 'Research', output: report + 'SIGN-IN NEEDED: Pingen (https://app.pingen.com/)\n\n' + CARRY });
+    expect(r.refused).toBe(false);
+    expect(r.captured.fields[r.fieldMap.status]).toBe('Approval');
+  });
+  it('describing what stays his (payment, security code) is not a hand-back', () => {
+    const r = submit({ type: 'Research', output: report + "Kevin's steps only: the security code and the payment. Everything else is prepared.\n\n" + CARRY });
+    expect(r.refused).toBe(false);
+  });
+});

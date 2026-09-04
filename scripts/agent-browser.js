@@ -113,8 +113,28 @@ const BUILTIN_SITES = {
   // the company from the list and never handles the code.
   'signin.account.gov.uk':      { label: 'GOV.UK One Login',   login: true  },
   'home.account.gov.uk':        { label: 'GOV.UK One Login (account)', login: true },
-  'ewf.companieshouse.gov.uk':  { label: 'Companies House WebFiling (via One Login)', login: true },
-  'tax.service.gov.uk':         { label: 'HMRC',               login: true  },
+  'ewf.companieshouse.gov.uk':  { label: 'Companies House WebFiling (via One Login)', login: true,
+                                  loginUrl: 'https://ewf.companieshouse.gov.uk/seclogin?tc=1' },
+  'tax.service.gov.uk':         { label: 'HMRC',               login: true,
+                                  loginUrl: 'https://www.tax.service.gov.uk/gg/sign-in' },
+  // The sites agents kept handing back to Kevin as "log in and do it yourself"
+  // (37 of 233 outputs, 14 days to 4 Sep 2026). Reading is unlocked; the
+  // credential and payment guards above still refuse every password and card
+  // field in code. `loginUrl` is what the Robot sign-in app opens for him.
+  // Banks and credit files (Starling, AmEx, HL, Equifax) are deliberately NOT
+  // here: holding a bank session in the robot profile is his call to make.
+  'app.pingen.com':             { label: 'Pingen (letters)',   login: true,
+                                  loginUrl: 'https://app.pingen.com/' },
+  'dashboard.stripe.com':       { label: 'Stripe',             login: true,
+                                  loginUrl: 'https://dashboard.stripe.com/login' },
+  'manage.gocardless.com':      { label: 'GoCardless',         login: true,
+                                  loginUrl: 'https://manage.gocardless.com/sign-in' },
+  'studio.youtube.com':         { label: 'YouTube Studio',     login: true,
+                                  loginUrl: 'https://studio.youtube.com/' },
+  'www.linkedin.com':           { label: 'LinkedIn',           login: true,
+                                  loginUrl: 'https://www.linkedin.com/login' },
+  'my.edfenergy.com':           { label: 'EDF Energy',         login: true,
+                                  loginUrl: 'https://my.edfenergy.com/login' },
   // Adobe Acrobat Sign (28 Aug 2026). Two different jobs on two different
   // hosts, and only one of them needs Kevin's account:
   //   acrobat.adobe.com    — SENDING a document out for signature. Needs the
@@ -124,7 +144,8 @@ const BUILTIN_SITES = {
   //                          credential. Proven by opening a live link in a
   //                          browser with no Adobe session and completing a
   //                          signature end to end.
-  'acrobat.adobe.com':          { label: 'Adobe Acrobat Sign', login: true  },
+  'acrobat.adobe.com':          { label: 'Adobe Acrobat Sign', login: true,
+                                  loginUrl: 'https://acrobat.adobe.com/link/documents/agreements/' },
   'documents.adobe.com':        { label: 'Adobe Sign (signing links)', login: false },
   // Loom (29 Aug 2026). Kevin's video archive, so an agent can search what he
   // has already recorded instead of asking him to re-explain something.
@@ -138,7 +159,8 @@ const BUILTIN_SITES = {
   // one-time `login` step. Nothing here can post, share or delete: `read` and
   // `loom-search` only navigate and read text, and any form submit still goes
   // through `commit`, which refuses without an approved task.
-  'loom.com':                   { label: 'Loom (video archive)', login: true  },
+  'loom.com':                   { label: 'Loom (video archive)', login: true,
+                                  loginUrl: 'https://www.loom.com/looms/videos' },
 };
 
 function loadSites() {
