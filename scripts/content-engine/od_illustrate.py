@@ -84,9 +84,15 @@ def generate(prompt, k, model=None):
     return None
 
 
+READ_PROMPT = ("Transcribe every piece of text in this image, one line per text element, EXACTLY as the letters appear. Do not correct spelling, "
+               "do not complete words, do not guess: copy misspellings and nonsense letter for letter, and write [unreadable] for anything you cannot read. "
+               "Then on a final line write VERDICT: CLEAN if every word is a real, correctly spelt English word or a number, or VERDICT: GARBLED "
+               "followed by the garbled fragments if any text is misspelt, jumbled, cut off or nonsensical.")
+
+
 def transcribe(png_bytes, k):
-    body = {"contents": [{"parts": [{"inlineData": {"mimeType": "image/png", "data": base64.b64encode(png_bytes).decode()}},
-                                    {"text": "Transcribe every piece of text in this image, one line per text element, exactly as written. Output the lines only."}]}]}
+    body = {"contents": [{"parts": [{"inlineData": {"mimeType": "image/png", "data": base64.b64encode(png_bytes).decode()}}, {"text": READ_PROMPT}]}],
+            "generationConfig": {"temperature": 0}}
     try: r = _post(TEXT_MODEL, body, k)
     except urllib.error.HTTPError as e: raise SystemExit("gemini read: %s %s" % (e.code, e.read().decode()[:200]))
     out = []
@@ -96,10 +102,23 @@ def transcribe(png_bytes, k):
     return "\n".join(out)
 
 
-def check_text(required, transcript, min_ratio=0.8):
-    """Lines the picture got wrong (missing or misspelt). Compared on normalised words against the best transcript line or window."""
+def garbled_verdict(transcript):
+    """The reader's own judgement line: 'GARBLED ...' or None. A model transcribing tends to auto-correct, so it is also asked to judge."""
+    m = re.search(r"VERDICT:\s*(CLEAN|GARBLED.*)", transcript, re.I | re.S)
+    if not m: return None
+    v = m.group(1).strip()
+    return None if v.upper().startswith("CLEAN") else v[:200]
+
+
+def check_text(required, transcript, min_ratio=0.92):
+    """Lines the picture got wrong (missing or misspelt). Each required line must match a transcript line or window at 92% AND every
+    word of it must appear in the transcript; the reader's GARBLED verdict fails the picture outright. (The first version passed a
+    stat card reading "finshed agent agent ela wort aun" at 80%, 4 Sep 2026.)"""
     norm = lambda s: re.sub(r"[^a-z0-9 ]", "", re.sub(r"\s+", " ", s.lower())).strip()
-    t_lines = [norm(l) for l in transcript.splitlines() if l.strip()]; whole = " ".join(t_lines)
+    g = garbled_verdict(transcript)
+    if g: return ["reader verdict: " + g]
+    transcript = re.sub(r"VERDICT:.*", "", transcript, flags=re.I | re.S)
+    t_lines = [norm(l) for l in transcript.splitlines() if l.strip()]; whole = " ".join(t_lines); words = set(whole.split())
     bad = []
     for line in required:
         q = norm(line)
@@ -111,7 +130,8 @@ def check_text(required, transcript, min_ratio=0.8):
             for i in range(max(1, len(tw) - n + 1)):
                 best = max(best, difflib.SequenceMatcher(None, q, " ".join(tw[i:i + n])).ratio())
                 if best >= min_ratio: break
-        if best < min_ratio: bad.append(line)
+        missing = [w for w in q.split() if len(w) > 2 and w not in words]
+        if best < min_ratio or missing: bad.append(line)
     return bad
 
 
@@ -144,12 +164,14 @@ def selftest():
     assert required_lines("steps", spec) == ["Turn your SOP into an agent", "Pick one task", "Write the SOP as decisions", "Load it into the agent"]
     assert required_lines("stat", {"title": "", "number": "30 min", "label": "how often it checks", "source": "x"}) == ["30 min", "how often it checks"]
     ok = "TURN YOUR SOP INTO AN AGENT\n1 Pick one task\n2 Write the SOP as decisions\n3 Load it into the agent\nKevin Brittain, Operations Director"
-    assert check_text(required_lines("steps", spec), ok) == []
-    bad = check_text(required_lines("steps", spec), ok.replace("decisions", "decsions").replace("Load it into the agent", "Lod the agnt"))
-    assert bad == ["Load it into the agent"], bad
+    assert check_text(required_lines("steps", spec), ok + "\nVERDICT: CLEAN") == []
+    bad = check_text(required_lines("steps", spec), ok.replace("decisions", "decsions").replace("Load it into the agent", "Lod the agnt") + "\nVERDICT: CLEAN")
+    assert bad == ["Write the SOP as decisions", "Load it into the agent"], bad
+    assert check_text(["30 min", "how often the dispatcher checks for finished agent work"], "30 min\nhow often the dispatcher checks for finshed agent agent ela wort aun\nVERDICT: GARBLED finshed, ela wort aun") == ["reader verdict: GARBLED finshed, ela wort aun"]
+    assert check_text(["30 min", "how often the dispatcher checks for finished agent work"], "30 min\nhow often the dispatcher checks for finshed agent agent ela wort aun\nVERDICT: CLEAN") == ["how often the dispatcher checks for finished agent work"], "a wrong CLEAN verdict is still caught by the word check"
     fp = build_prompt("flow", {"title": "T", "boxes": ["Email in", "Agent sorts", "Owner approves", "Reply out"], "human": 2}); assert "(the OWNER's step, gold)" in fp and fp.count("(the agent, green)") == 2
     old = globals()["KEY_FILE"]; globals()["KEY_FILE"] = "/nonexistent/key"; assert illustrate("steps", spec, "/tmp/x.png")[0] is None and "no Gemini key" in illustrate("steps", spec, "/tmp/x.png")[1]; globals()["KEY_FILE"] = old
-    print(json.dumps({"checks": 9, "failed": []}))
+    print(json.dumps({"checks": 11, "failed": []}))
 
 
 if __name__ == "__main__":

@@ -39,7 +39,7 @@ SHAPES = {
             "visual": "steps", "visual_fields": "title (under 60 chars), steps (3 to 7 lines, each under 70 chars, same as the post's steps)"},
     "Wed": {"name": "The build log", "pillar": "Proof",
             "asks": "What one of Kevin's own agents did, in plain words: the job, what it read, what it produced, where Kevin approved. Only numbers that are IN THE SOURCE. If the source has none, say what it does and state no number.",
-            "visual": "stat", "visual_fields": "number (the one figure from the source, or the agent's name if there is none), label (what the number is, under 60 chars), source (where it comes from, under 70 chars)"},
+            "visual": "stat", "visual_fields": "number (the one figure from the source, or the agent's name if there is none), label (what the number is, under 40 chars, plain words), source (where it comes from, under 60 chars)"},
     "Thu": {"name": "The workflow", "pillar": "Method",
             "asks": "One daily-operations workflow as 3 to 5 boxes: trigger, what the agent does, where the owner approves, what goes out. Explain each box in a line. Contrast hook allowed (\"I used to think X. Now I know Y.\").",
             "visual": "flow", "visual_fields": "title (under 60 chars), boxes (3 to 5 labels under 24 chars), human (index of the box the owner does, or -1)"},
