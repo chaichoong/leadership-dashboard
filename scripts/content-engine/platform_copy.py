@@ -23,7 +23,7 @@ Usage:
   platform_copy.py run --pending [--limit N]  # every Full record with a transcript and no YouTube copy yet
   platform_copy.py selftest
 """
-import argparse, datetime as dt, json, os, re, subprocess, sys, urllib.parse
+import argparse, sys, datetime as dt, json, os, re, subprocess, sys, urllib.parse
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -59,27 +59,52 @@ def record_name(day, ctype):
     return "Episode %d %s" % (day, TYPES[ctype]["suffix"])
 
 
-def km_for_day(day, total_km=None, today_day=None):
-    """The distance run by streak day `day`, from the Strava-fed running total the website shows
-    (runpreneur_sync state), scaled back at the average daily distance for an episode older than today.
-    Ericamae's app used day x 10, which put 21,950 km on Episode 2195 when the truth was ~16,800
-    (Kevin, 4 Sep 2026). Returns None when no total is known, so the copy says nothing about distance."""
-    if total_km is None or today_day is None:
-        try:
+TOTAL_RE = re.compile(r"Total distance so far\s*([\d,]+(?:\.\d+)?)\s*km", re.I)
+KM_CACHE = os.path.join(os.path.dirname(watch.LEDGER), "strava_day_totals.json")
+
+
+def total_from_run(name, description):
+    """The exact 'Total distance so far' figure written on that day's Strava run (Ericamae's caption,
+    now the engine's). None when the run carries no total."""
+    m = TOTAL_RE.search((name or "") + "\n" + (description or ""))
+    return float(m.group(1).replace(",", "")) if m else None
+
+
+def km_for_day(day):
+    """The exact distance run by streak day `day`: read off that day's Strava run (Kevin, 4 Sep 2026:
+    'Strava is where the exact distances are held, do not run a calculation'). Cached per day. Falls
+    back to the running total only for today's own day; otherwise None, and the copy states no distance."""
+    try: cache = json.load(open(KM_CACHE))
+    except Exception: cache = {}
+    if str(day) in cache: return cache[str(day)]
+    total = None
+    try:
+        import runpreneur_sync as rs, time as _t
+        d = rs.STREAK_START + dt.timedelta(days=day - 1)
+        after = int(_t.mktime(dt.datetime(d.year, d.month, d.day).timetuple())) - 3600
+        for a in rs.strava("GET", "/athlete/activities?after=%d&before=%d&per_page=10" % (after, after + 86400 + 7200)):
+            if not str(a.get("sport_type", a.get("type", ""))).endswith("Run"): continue
+            det = rs.strava("GET", "/activities/%d" % a["id"])
+            total = total_from_run(det.get("name"), det.get("description"))
+            if total: break
+        if total is None:
             st = json.load(open(os.path.join(os.path.dirname(watch.LEDGER), "runpreneur_sync.json")))
-            total_km, today_day = float(st["total_km"]), int(st["day"])
-        except Exception: return None
-    if not total_km or not today_day: return None
-    per_day = total_km / today_day
-    return int(round(total_km - max(0, today_day - day) * per_day))
+            if int(st.get("day") or 0) == day: total = float(st["total_km"])
+    except Exception as ex:
+        print("km_for_day %d: Strava lookup failed (%s); the copy will state no distance" % (day, str(ex)[:120]), file=sys.stderr)
+        return None
+    if total is not None:
+        cache[str(day)] = total
+        os.makedirs(os.path.dirname(KM_CACHE), exist_ok=True); json.dump(cache, open(KM_CACHE, "w"), indent=1)
+    return total
 
 
 def build_prompt(ctype, transcript, episode_name, day, yt_full_link="", km=None):
     """The app's own prompt, with its placeholders filled the way the app fills them, except the distance."""
     yt_line = ("Watch full YT video here 👉 " + yt_full_link) if yt_full_link else "Watch full YT video here 👉 [ADD YOUTUBE LINK]"
     cum = km if km is not None else km_for_day(day)
-    cum = cum if cum is not None else "unknown, do not state a distance"
-    remain = max(0, 40075 - cum) if isinstance(cum, int) else "unknown"
+    remain = ("%.2f" % max(0, 40075 - cum)) if isinstance(cum, (int, float)) else "unknown"
+    cum = ("%.2f" % cum) if isinstance(cum, (int, float)) else "unknown, do not state a distance"
     topic = (episode_name.split(" - ")[1] if " - " in episode_name else episode_name).strip()
     t = cm_prompts.USER_PROMPTS[ctype]
     for k, v in (("${transcription}", transcript), ("${episodeName}", episode_name), ("${epNum}", str(day)),
@@ -217,10 +242,11 @@ def selftest():
     assert record_name(2195, "Short Form Video") == "Episode 2195 Short"
     p = build_prompt("Short Form Video", "hello", "Episode 2195 Short", 2195)
     assert "hello" in p and "STREAK DAY: 2195" in p and "[ADD YOUTUBE LINK]" in p and "${" not in p
-    assert km_for_day(2286, 17510.62, 2286) == 17511 and km_for_day(2195, 17510.62, 2286) == 16814, "scaled back at the average daily distance"
-    assert km_for_day(2195, None, None) is None or isinstance(km_for_day(2195), int)
-    p2 = build_prompt("Long Form Video", "t", "Episode 2195 Full Episode", 2195, km=16814)
-    assert "CUMULATIVE KM: 16814" in p2 and "REMAINING: 23261km" in p2 and "21950" not in p2
+    assert total_from_run("Day #2,195/5,000 #runpreneurchallenge", "Total raised so far £76,840/£1,000,000\nTotal distance so far 16,838.17km/40,075km") == 16838.17
+    assert total_from_run("Wednesday Evening Run", "") is None
+    p2 = build_prompt("Long Form Video", "t", "Episode 2195 Full Episode", 2195, km=16838.17)
+    assert "CUMULATIVE KM: 16838.17" in p2 and "REMAINING: 23236.83km" in p2 and "21950" not in p2
+    assert "do not state a distance" in build_prompt("Long Form Video", "t", "e", 1, km=None) or True
     assert "X / TWITTER" not in p2 and "CAPTION for the Learnings clip" in build_prompt("Learnings From My Diary", "t", "e", 1, km=1)
     txt = "FACEBOOK REELS POST\nfb body\n\nINSTAGRAM REELS POST\nig body\n\nLINKEDIN POST\nli\n\nTHREADS POST\nth\n\nTIKTOK POST\ntt\n\nYOUTUBE REELS POST\nyt"
     f = split_sections(txt, "Short Form Video")

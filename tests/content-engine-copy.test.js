@@ -15,6 +15,8 @@ describe('content-engine copy', () => {
   it("Kevin's 4 Sep 2026 review: distance from the Strava-fed total, X dropped, TikTok/Shorts are captions not scripts", () => {
     const src = readFileSync(path.join(DIR, 'platform_copy.py'), 'utf8');
     expect(src).toContain('def km_for_day(');
+    expect(src).toContain('Total distance so far');
+    expect(src).not.toContain('per_day = total_km / today_day');
     expect(src).not.toContain('cum = day * 10');
     expect(src).not.toContain('"X / Twitter Copy"');
     const prompts = readFileSync(path.join(DIR, 'cm_prompts.py'), 'utf8');
