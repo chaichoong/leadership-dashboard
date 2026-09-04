@@ -52,7 +52,7 @@ import sys
 import urllib.error
 import urllib.parse
 import urllib.request
-from datetime import date
+from datetime import date, timedelta
 
 BASE_ID = "appnqjDpqDniH3IRl"
 TASKS = "tblqB8b22hKBL4PF1"
@@ -223,6 +223,136 @@ def load_scan_cache():
         return data if isinstance(data, dict) else {}
     except (OSError, ValueError):
         return {}
+
+
+# ─── A HARD DEADLINE IS THE DATE THE LETTER STATES ───────────────────────
+#
+# 4 Sep 2026, finding 20260904-daily-ops-phase2-447. The daily
+# `hard-deadline-passed-still-open` invariant showed nine open tasks past their
+# date, and two of them were not late at all:
+#
+#   "INBOUND: Simarc - pay ground rent GBP 6 by 29 Sep …"   Due Date 2026-09-01
+#   "INBOUND: HMRC formal compliance check … respond by Sep 17"  Due Date 2026-09-01
+#
+# Both carried the day the MAIL ARRIVED, not the deadline the mail states — the
+# deadline was sitting in the task's own name the whole time. Two costs, and the
+# second is the worse one: Kevin is chased about work that is not yet due, and
+# the invariant that exists to catch genuinely missed legal windows fills with
+# false alarms until nobody reads it.
+#
+# The correction is deliberately timid. It only ever moves a due date LATER, and
+# only when the text states one unambiguous date with a real deadline word in
+# front of it. Two different dates in one message means we do not know which is
+# the deadline, so nothing is touched — a wrong hard date is worse than a
+# receipt date, because a hard date is what other code refuses to move.
+MONTHS = {m: i for i, m in enumerate(
+    ["jan", "feb", "mar", "apr", "may", "jun",
+     "jul", "aug", "sep", "oct", "nov", "dec"], start=1)}
+
+# "by 29 Sep", "before 17 September 2026", "no later than 29/09/2026",
+# "due by 2026-09-29", "deadline 17 Sep".
+_LEAD = r"(?:by|before|due(?:\s+by)?|no\s+later\s+than|deadline(?:\s+of|\s+is)?|on\s+or\s+before|not\s+later\s+than)"
+_MON = r"(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*"
+DEADLINE_RES = (
+    # by 29 Sep 2026 / by 29 September
+    re.compile(_LEAD + r"\s+(\d{1,2})(?:st|nd|rd|th)?\s+" + _MON + r"\.?(?:\s+(\d{4}))?", re.I),
+    # by Sep 17 2026 / by September 17th
+    re.compile(_LEAD + r"\s+" + _MON + r"\.?\s+(\d{1,2})(?:st|nd|rd|th)?(?:,?\s+(\d{4}))?", re.I),
+    # by 2026-09-29
+    re.compile(_LEAD + r"\s+(\d{4})-(\d{2})-(\d{2})", re.I),
+    # by 29/09/2026 or 29/09/26 — UK order, which is what every letter here uses
+    re.compile(_LEAD + r"\s+(\d{1,2})/(\d{1,2})/(\d{2,4})", re.I),
+)
+
+
+def _mk(year, month, day):
+    try:
+        return date(year, month, day)
+    except ValueError:
+        return None
+
+
+# A bare "by 29 Sep" has to be given a year, and getting that wrong is how a
+# timid correction turns into a wild one: anchored to the DUE date, "pay by
+# 1 Sep" on a task due 20 Sep resolved to 1 September of the FOLLOWING YEAR.
+# So the year is chosen around TODAY, allowing a recently-passed date (a letter
+# quoting a deadline that has just gone by is ordinary) but not a distant one.
+BACKDATE_GRACE_DAYS = 45
+# And a hard deadline more than half a year past the day the item arrived is a
+# misparse, not a deadline. Nothing in this domain — pay by, respond by, court
+# date, licence renewal chase — lands that far out on a single letter.
+MAX_DEADLINE_HORIZON_DAYS = 180
+
+
+def stated_deadlines(text, today):
+    """Every explicit deadline date the text states, as a sorted list.
+
+    `today` anchors a bare month-and-day: the occurrence nearest to now, which
+    may be up to BACKDATE_GRACE_DAYS in the past but is otherwise in the
+    future."""
+    text = str(text or "")
+    found = set()
+    floor = today - timedelta(days=BACKDATE_GRACE_DAYS)
+
+    def resolve(month, day, year=None):
+        if year:
+            year = int(year)
+            if year < 100:
+                year += 2000
+            return _mk(year, month, day)
+        cands = [d for d in (_mk(y, month, day)
+                             for y in (today.year - 1, today.year, today.year + 1))
+                 if d and d >= floor]
+        return min(cands) if cands else None
+
+    for m in DEADLINE_RES[0].finditer(text):
+        mon = MONTHS.get(m.group(2)[:3].lower())
+        if mon:
+            found.add(resolve(mon, int(m.group(1)), m.group(3)))
+    for m in DEADLINE_RES[1].finditer(text):
+        mon = MONTHS.get(m.group(1)[:3].lower())
+        if mon:
+            found.add(resolve(mon, int(m.group(2)), m.group(3)))
+    for m in DEADLINE_RES[2].finditer(text):
+        found.add(_mk(int(m.group(1)), int(m.group(2)), int(m.group(3))))
+    for m in DEADLINE_RES[3].finditer(text):
+        found.add(resolve(int(m.group(2)), int(m.group(1)), m.group(3)))
+    return sorted(d for d in found if d)
+
+
+def hard_deadline_correction(fields, today):
+    """(iso_date, why) when a hard-deadline Due Date contradicts the date the
+    task's own text states, else None.
+
+    Fires only when ALL of these hold, because each one is a way to be wrong:
+      * the task is marked Hard Deadline and carries a Due Date;
+      * its name or description states EXACTLY ONE deadline date;
+      * that date is LATER than the Due Date given.
+    The last is the whole point: a due date earlier than the stated deadline is
+    the receipt date. A stated date EARLIER than the due date is left alone —
+    that is a date already dealt with, or a date we have misread, and pulling a
+    deadline forward invents an obligation."""
+    if not fields.get(F["hardDeadline"]):
+        return None
+    due = str(fields.get(F["due"]) or "")[:10]
+    if not due:
+        return None
+    try:
+        due_date = date.fromisoformat(due)
+    except ValueError:
+        return None
+    text = "%s\n%s" % (fields.get(F["name"], ""), fields.get(F["desc"], ""))
+    stated = stated_deadlines(text, today)
+    if len(stated) != 1:
+        return None
+    if stated[0] <= due_date:
+        return None
+    if (stated[0] - due_date).days > MAX_DEADLINE_HORIZON_DAYS:
+        return None
+    return (stated[0].isoformat(),
+            "Due Date was %s but the task states a deadline of %s; %s is the "
+            "date the item arrived, not the date it is due"
+            % (due, stated[0].isoformat(), due))
 
 
 def auto_reply_refusal(fields, cache):
@@ -774,6 +904,14 @@ def cmd_create(fields, force=False, dry_run=False):
         print("fields JSON must carry the Task Name field " + F["name"], file=sys.stderr)
         return 1
 
+    # Correct a hard deadline that carries the receipt date BEFORE anything
+    # reads the due date — the fold path in build_update compares due dates and
+    # would otherwise keep the wrong one as "the earlier hard date".
+    corrected = hard_deadline_correction(fields, date.today())
+    if corrected:
+        fields[F["due"]] = corrected[0]
+        print("DUE DATE CORRECTED: %s" % corrected[1], file=sys.stderr)
+
     verdict = {"action": "create", "key": dupe_task_key(fields.get(F["name"], ""))}
     if not force:
         # Refuse BEFORE the board read: an auto-reply is not a matter, so the
@@ -999,6 +1137,47 @@ def selftest():
     unknown = dict(fylde_task, **{F["inboundUrl"]: "https://mail.google.com/mail/u/0/#inbox/deadbeef00"})
     check("an unscanned thread is not assumed to be an auto-reply", auto_reply_refusal(unknown, cache) is None)
     check("a normal task name passes", auto_reply_refusal({F["name"]: "INBOUND: reply to Swinton"}, cache) is None)
+
+    # ── Hard deadline vs receipt date (finding …-447) ───────────────────
+    # The two live tasks that exposed it, verbatim off the board on 4 Sep 2026.
+    T = date(2026, 9, 4)
+
+    def corr(name, due, hard=True, desc=""):
+        f = {F["name"]: name, F["due"]: due, F["desc"]: desc}
+        if hard:
+            f[F["hardDeadline"]] = True
+        got = hard_deadline_correction(f, T)
+        return got[0] if got else None
+
+    check("Simarc: the stated 29 Sep beats the receipt date",
+          corr("INBOUND: Simarc - pay ground rent GBP 6 by 29 Sep, 23 Viola Street Bootle",
+               "2026-09-01") == "2026-09-29")
+    check("HMRC: 'respond by Sep 17' is read month-first too",
+          corr("INBOUND: HMRC formal compliance check Self Assessment - respond by Sep 17",
+               "2026-09-01") == "2026-09-17")
+    check("a UK-order slash date is read day-first",
+          corr("INBOUND: pay by 29/09/2026", "2026-09-01") == "2026-09-29")
+    check("an ISO date in the body is read",
+          corr("INBOUND: hearing", "2026-09-01", desc="attend by 2026-10-02") == "2026-10-02")
+    check("TWO stated dates are ambiguous, so nothing is touched",
+          corr("INBOUND: by 5 Sep and by 29 Sep", "2026-09-01") is None)
+    check("no stated date changes nothing",
+          corr("INBOUND: tenant rang about the boiler", "2026-09-01") is None)
+    check("a SOFT due date is never rewritten",
+          corr("INBOUND: pay by 29 Sep", "2026-09-01", hard=False) is None)
+    # The three ways a timid correction turns into a wild one.
+    check("a stated date EARLIER than the due date is left alone",
+          corr("INBOUND: pay by 1 Sep", "2026-09-20") is None)
+    check("a just-passed date resolves to THIS year, not the next",
+          stated_deadlines("pay by 1 Sep", T) == [date(2026, 9, 1)])
+    check("a task created before it still gets the correction",
+          corr("INBOUND: pay by 1 Sep", "2026-08-25") == "2026-09-01")
+    check("a deadline beyond the horizon is a misparse, not a deadline",
+          corr("INBOUND: renewal by 29 Sep 2027", "2026-09-01") is None)
+    check("a genuine year rollover still resolves",
+          corr("INBOUND: court by 3 Jan", "2026-12-20") == "2027-01-03")
+    check("no due date means nothing to correct",
+          corr("INBOUND: pay by 29 Sep", "") is None)
 
     failed = [label for label, ok in checks if not ok]
     print(json.dumps({"checks": len(checks), "failed": failed}))

@@ -743,7 +743,60 @@ def acquire(job, mode="cooperative", lease_minutes=DEFAULT_LEASE_MIN,
 #
 # So release carries an outcome. Absent means "completed", which keeps every
 # existing caller honest by default; a routine that bailed says so.
-OUTCOMES = ("completed", "halted", "partial")
+# How a run ENDED, as recorded in the queue log. "completed" used to be written
+# for every wrapped run that reached the end of run(), including one whose child
+# had been killed. On 3 Sep 2026 the inbound-triage 13:00 slot was SIGTERMed
+# 2h37m in and the log recorded `finished exit=143` next to `outcome=completed`,
+# so the only durable record of the day said the slot finished normally. A
+# surface that cannot report absence is worse than no surface (see "Trust
+# surfaces must report absence"). The wrapper now names what actually happened.
+OUTCOMES = ("completed", "halted", "partial", "failed", "signalled", "unfinished")
+
+
+def signal_of(code):
+    """The signal that killed a child process, or None.
+
+    Two conventions reach this, and only reading both tells the truth:
+
+      * Popen.wait() returns NEGATIVE N when the process it started was itself
+        killed by signal N (-15 = SIGTERM).
+      * A shell reports its own child's signal death as an ordinary exit of
+        128 + N. Here the direct child is run-job.sh, so the 3 Sep 2026
+        SIGTERM arrived as a plain 143 — which is why reading only the negative
+        form would have missed the exact case this exists for."""
+    if code is None:
+        return None
+    try:
+        code = int(code)
+    except (TypeError, ValueError):
+        return None
+    if code < 0:
+        number = -code
+    elif 128 < code <= 128 + 64:
+        number = code - 128
+    else:
+        return None
+    try:
+        return signal.Signals(number).name
+    except (ValueError, AttributeError):
+        return None
+
+
+def release_outcome(code):
+    """The `outcome` and `reason` a wrapped run should be released with.
+
+    `code` is the child's exit status, or None when the wrapper never saw one
+    (it died first). Only a clean zero is "completed"."""
+    if code is None:
+        return {"outcome": "unfinished",
+                "reason": "the wrapper recorded no child exit status"}
+    sig = signal_of(code)
+    if sig:
+        return {"outcome": "signalled",
+                "reason": "child was killed by %s (exit %s)" % (sig, code)}
+    if code != 0:
+        return {"outcome": "failed", "reason": "child exited %s" % code}
+    return {"outcome": "completed"}
 
 
 def release(job, quiet=False, outcome="completed", reason=None):
@@ -864,7 +917,7 @@ def run(job, cmd, lease_minutes, timeout_minutes, check_stale,
 
     import threading
     stop = threading.Event()
-    running = {"proc": None, "lost": ""}
+    running = {"proc": None, "lost": "", "code": None}
 
     def stop_child(reason):
         # TERM first, KILL only if it lingers. A wrapper script traps TERM and
@@ -933,17 +986,19 @@ def run(job, cmd, lease_minutes, timeout_minutes, check_stale,
         proc = subprocess.Popen(cmd)
         running["proc"] = proc
         code = proc.wait()
+        running["code"] = code
         if running["lost"]:
             print("LOST LOCK: %s was stopped mid-run (%s)"
                   % (job, running["lost"]), file=sys.stderr)
             event(job, "finished", exit=EX_LOSTLOCK, reason=running["lost"])
             return EX_LOSTLOCK
-        event(job, "finished", exit=code)
+        sig = signal_of(code)
+        event(job, "finished", exit=code, **({"signal": sig} if sig else {}))
         return code
     finally:
         stop.set()
         if not running["lost"]:
-            release(job, quiet=True)
+            release(job, quiet=True, **release_outcome(running["code"]))
 
 
 def parse_event_ts(value):

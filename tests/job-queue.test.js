@@ -1386,3 +1386,93 @@ describe('the consolidated schedule', () => {
     expect(wrapped.length).toBeGreaterThan(5);
   });
 });
+
+// ---------------------------------------------------------------------------
+// A KILLED RUN MUST NOT BE LOGGED AS "completed".
+//
+// Finding 20260904-daily-ops-phase2-444. On 3 Sep 2026 the inbound-triage
+// 13:00 slot was SIGTERMed 2h37m in. The queue log recorded:
+//
+//   {"job":"inbound-triage","state":"finished","exit":143}
+//   {"job":"inbound-triage","state":"released","held_seconds":9396.2,
+//    "outcome":"completed"}
+//
+// "completed" next to an exit of 143. The queue log is the only durable record
+// of what ran, and daily-ops reads it, so the day's evidence said the slot had
+// finished normally while no mail had been triaged for 22 hours.
+//
+// (Those two events are also how we know the QUEUE did not send the TERM: the
+// heartbeat's kill path emits `lease-lost`, returns EX_LOSTLOCK rather than the
+// child's code, and deliberately skips the release. Neither appears, so the
+// 2 Sep lock fix held and the signal came from outside job-queue.py.)
+// ---------------------------------------------------------------------------
+describe('the queue log names how a run actually ended', () => {
+  it('reads both signal conventions — Popen returns -N, a shell reports 128+N', () => {
+    // The 3 Sep case arrived as a PLAIN 143, because the direct child is a
+    // bash wrapper reporting its own child's death. Reading only the negative
+    // form would have missed the exact case this exists for.
+    expect(py('m.signal_of(143)')).toBe('SIGTERM');
+    expect(py('m.signal_of(137)')).toBe('SIGKILL');
+    expect(py('m.signal_of(-15)')).toBe('SIGTERM');
+    expect(py('m.signal_of(-9)')).toBe('SIGKILL');
+    // An ordinary exit is not a signal, and must not be dressed up as one.
+    expect(py('m.signal_of(0)')).toBe(null);
+    expect(py('m.signal_of(9)')).toBe(null);
+    expect(py('m.signal_of(None)')).toBe(null);
+    expect(py('m.signal_of("x")')).toBe(null);
+  });
+
+  it('only a clean zero is "completed"', () => {
+    expect(py('m.release_outcome(0)')).toEqual({ outcome: 'completed' });
+    expect(py('m.release_outcome(143)').outcome).toBe('signalled');
+    expect(py('m.release_outcome(143)').reason).toMatch(/SIGTERM/);
+    expect(py('m.release_outcome(9)').outcome).toBe('failed');
+    // The wrapper died before it ever saw a child exit: not completed, and not
+    // a failure we can describe either. Say that, rather than pick one.
+    expect(py('m.release_outcome(None)').outcome).toBe('unfinished');
+  });
+
+  it('a wrapped run whose child is killed is released as signalled, not completed', () => {
+    // Exactly the production shape: a shell child whose OWN child takes the
+    // signal, so the wrapper sees a plain 143. The trailing `exit` matters —
+    // without it bash execs the last command and is REPLACED by it, and the
+    // wrapper sees -15 instead. Both shapes are real; the case below covers
+    // the other one.
+    const r = run(['run', 'killed-job', '--no-stale-check', '--', 'bash', '-c',
+      "python3 -c 'import os, signal; os.kill(os.getpid(), signal.SIGTERM)'; exit $?"]);
+    expect(r.code).toBe(143);
+
+    const mine = events().filter((e) => e.job === 'killed-job');
+    const finished = mine.find((e) => e.state === 'finished');
+    const released = mine.find((e) => e.state === 'released');
+    expect(finished.exit).toBe(143);
+    expect(finished.signal).toBe('SIGTERM');
+    // The regression itself.
+    expect(released.outcome).not.toBe('completed');
+    expect(released.outcome).toBe('signalled');
+    expect(released.reason).toMatch(/SIGTERM/);
+    // And the lock is still freed — an honest outcome must not cost the queue.
+    expect(run(['status']).stdout).toMatch(/FREE/);
+  });
+
+  it('and when the wrapper\'s OWN child takes the signal (Popen reports -15)', () => {
+    // bash execs the single command, so the process job-queue started IS the
+    // one that dies and Popen.wait() returns the negative form.
+    run(['run', 'exec-killed', '--no-stale-check', '--', 'bash', '-c',
+      "python3 -c 'import os, signal; os.kill(os.getpid(), signal.SIGTERM)'"]);
+    const mine = events().filter((e) => e.job === 'exec-killed');
+    expect(mine.find((e) => e.state === 'finished').exit).toBe(-15);
+    const released = mine.find((e) => e.state === 'released');
+    expect(released.outcome).toBe('signalled');
+    expect(released.reason).toMatch(/SIGTERM/);
+  });
+
+  it('an ordinary non-zero exit is released as failed, and a clean one as completed', () => {
+    run(['run', 'bad-exit', '--no-stale-check', '--', 'python3', '-c', 'import sys; sys.exit(9)']);
+    run(['run', 'good-exit', '--no-stale-check', '--', 'python3', '-c', 'pass']);
+    const outcome = (job) => events()
+      .filter((e) => e.job === job && e.state === 'released').pop().outcome;
+    expect(outcome('bad-exit')).toBe('failed');
+    expect(outcome('good-exit')).toBe('completed');
+  });
+});
