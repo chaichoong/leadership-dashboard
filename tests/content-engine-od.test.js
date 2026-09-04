@@ -17,9 +17,9 @@ const selftest = (file, min) => {
 };
 
 describe('content-engine OD lane', () => {
-  it('od_lane selftest: gate, bank pick, rules check, card text, verdict minutes', () => selftest('od_lane.py', 30));
-  it('od_prompts selftest: playbook facts in the prompt, voice profile loader', () => selftest('od_prompts.py', 9));
-  it('od_card selftest: wrap, fit, render', () => selftest('od_card.py', 3));
+  it('od_lane selftest: gate, sources, rules check, usefulness, cards, newsletter, topics', () => selftest('od_lane.py', 52));
+  it('od_prompts selftest: the brief in every prompt, shapes, visual split, voice profile loader', () => selftest('od_prompts.py', 12));
+  it('od_infographic selftest: five templates, escaping, a real render', () => selftest('od_infographic.py', 9), 120000);
   it('publish selftest including the brand guard (cross-brand refused by name)', () => selftest('publish.py', 32));
 
   it('the prompt copies the playbook exactly: locked pricing and the five hot-buttons in the customers\' words', () => {
@@ -32,6 +32,8 @@ describe('content-engine OD lane', () => {
       expect(prompts).toContain(words);
     }
     expect(prompts).toMatch(/Never mention running/);
+    expect(prompts).toMatch(/AI agents to do 90% of the everyday work/);
+    expect(prompts).toMatch(/===VISUAL===/);
     expect(prompts).not.toMatch(/linkedin history as (a )?voice/i);
   });
 
@@ -48,7 +50,7 @@ describe('content-engine OD lane', () => {
 
   it('the nightly job runs the OD lane after the Runpreneur lane and never lets it stop the Runpreneur lane', () => {
     const sh = readFileSync(path.join(ROOT, 'scripts', 'content-engine-run.sh'), 'utf8');
-    for (const step of [' mine --limit', ' sync', ' draft', ' cards', ' publish-sync', ' publish ', ' points', ' report']) {
+    for (const step of [' mine --limit', ' sync', ' draft', ' cards', ' publish-sync', ' publish ', ' newsletter-publish', ' topics', ' report']) {
       expect(sh).toContain('od_lane.py' + step);
     }
     const odLines = sh.split('\n').filter(l => l.includes('od_lane.py') && !l.includes('report') && !l.trim().startsWith('#'));
@@ -62,5 +64,15 @@ describe('content-engine OD lane', () => {
     expect(lane).toContain('BUSINESS_OD = "reca9ofzhuw13ZzGE"');
     expect(appr).toContain('BUSINESS_PERSONAL = "reclAPC2vMx2Umuzb"');
     expect(lane).toMatch(/CONTENT \(OD\):/);
+  });
+
+  it('v2 rulings hold in code: threshold 6 with the agent-only rule, no bridge posts, no blank quote card, newsletter on the personal profile via the browser lane', () => {
+    const lane = readFileSync(path.join(DIR, 'od_lane.py'), 'utf8');
+    expect(lane).toMatch(/AI_THRESHOLD, BANK_DAYS, MAX_MOMENTS, TOPIC_DAYS, TOPIC_COUNT = 3\.0, 6,/);
+    expect(lane).not.toMatch(/bridge_text/);
+    expect(lane).not.toMatch(/od_card/);
+    expect(lane).toMatch(/"profile": "linkedin"/);
+    expect(lane).toMatch(/agent-browser\.js/);
+    expect(readFileSync(path.join(DIR, 'od_infographic.py'), 'utf8')).toMatch(/tokens\.css/);
   });
 });

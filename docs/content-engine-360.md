@@ -489,3 +489,49 @@ Three pieces per episode: the FULL episode (16:9, captions, intro jingle), the L
 | X | nothing | dropped 4 Sep 2026 (8-17 views a post) | X copy no longer generated |
 
 The Summary is not put on YouTube (the full episode is there). The socials carry the YouTube link line so they drive people to the full episode. Distance in every piece of copy comes from the Strava-fed running total scaled to the episode's day, never episode x 10. Hooks: the first line of every caption is the hook; a visual cold-open hook inside the clip is a later editing feature, not built.
+
+## Operations Director lane, VERSION 2: BUILT (4 Sep 2026, Kevin: "let's crack on with this build")
+
+- **`od_prompts.py` v2.** `BRIEF` (the one paragraph above) opens every OD prompt: the post system prompt, the classifier,
+  the topics writer and the newsletter. `SHAPES` maps each weekday to its shape, what it asks the model for, and the
+  infographic template and fields; the model returns the post and a `===VISUAL===` JSON block (`split_visual`).
+  `USEFULNESS_SYSTEM` is the judge (score, usable today, about an agent doing a job, has a method or number, hook names a
+  cost or contrast, reasons). `MINE_SYSTEM` takes the current topic list and returns which topic a transcript covered.
+  Newsletter name "Run Your Business Without You" (Kevin took the suggestion).
+- **`od_infographic.py` + `render_infographic.js`.** Five HTML templates (before/after, numbered steps, stat card, flow with
+  the owner's box in gold, checklist) on `css/tokens.css` with DM Sans from Google Fonts, rendered 1200x1500 by the repo's
+  Playwright Chromium (the node script resolves `playwright` from the main checkout's `node_modules` so a worktree can run
+  it). The Tuesday steps template also emits a slide-per-step PDF for a LinkedIn carousel; the PDF rides on the card as a
+  file until the GHL document-post route is proven, the post itself carries the PNG. Titles and lines are HTML-escaped;
+  a spec the template cannot fill raises and the post goes out without a picture, flagged.
+- **`od_lane.py` v2.** Sources: `pick_moment` (bank, score 8+, one episode per week), `pain_source` (Prospects table
+  `Pain Signal`, the job adverts and posts the prospecting agent harvested, anonymised by instruction, rotated),
+  `framework_source` (Frameworks Library index rows touching agents, AI, systems or delegation, author credited,
+  rotated), `build_log_source` (a Live or Built register row in its own words plus the merged pull requests of the last
+  14 days from `gh pr list`, numbers only if they appear in those words). Slot order: Mon moment or pain or hot-button;
+  Tue moment or framework; Wed Proof moment or build log; Thu moment or a Live agent's workflow; Fri best remaining
+  moment or framework, plus the one ask. `write_post`: shape prompt, polish, usefulness judge, one redraft when under 7
+  (kept only if it scores at least as well), rules check (v2 adds "hook is a question", 90-220 words, stock phrases
+  stripped), visual validated, then rendered. `draft_newsletter`: once three or more posts exist for the week, the
+  Friday edition (TITLE, SHARE, BODY; 600-1,000 words; rules-checked) becomes its own record (Blog Copy) and card.
+  `topics`: the ten-topic recording brief, merged with what is still waiting (unrecorded and under 21 days), written to
+  `talking-points.md`, shown on the Friday cards; `mine` marks a topic recorded when the classifier recognises it.
+  `newsletter_publish`: approved editions due today go to `agent-browser.js` (profile `linkedin`, plan written by
+  `newsletter_plan`; `prepare` in test mode, `commit --task` in live mode); the editor selectors are confirmed on the
+  first real edition, and a failure leaves the text on the record for Kevin to paste. Bridge posts and the quote card are
+  gone. The hold file still stops `draft` and `cards`.
+- **First recording brief written 4 Sep 2026** from the register and the fortnight's merged pull requests: ten topics, all
+  about a named agent doing a real job (inbound triage, property administration, reconciliation learning loop, creditor
+  agent, daily sweep, audiobook processor, Content Engine, process-to-agent, brain feeder), each with the real number to
+  state where one exists.
+- **Measured on the first v2 week (4 Sep 2026).** Classifier over the 40 most recent transcripts: 1 qualifies (Episode 1992,
+  score 6, 3 moments); 39 do not. The vlog is a minor source until the recording brief changes what Kevin says on camera,
+  which is the point of the brief. Week of 7 Sep drafted: Mon from a real Indeed job advert (usefulness 7, the £254 a
+  week figure flagged because it is arithmetic on the advert's 20 hours at £12.71, not a figure in it), Tue from Episode
+  1992 (7, steps card plus carousel PDF), Wed from the Agent Dispatch register row and five merged pull requests (7,
+  redrafted once), Thu from the Audiobook Processor row as a workflow (6, redrafted once, flagged under the bar), Fri from
+  Austin Chen's 3-Tier Decision Framework (7, redrafted once, "90 of 100" flagged). Edition 1 of the newsletter: 700
+  words, one stock phrase stripped. Six cards raised; the judge's reasons are shown on each card. Fixes made on the way:
+  a rejected slot is freed for a redraft; one episode feeds at most one post a week (the first dry run put Episode 1992
+  in three slots); a low usefulness score is a flag on the card, not a THIN slot; em dashes are stripped from the judge's
+  own reasons.
