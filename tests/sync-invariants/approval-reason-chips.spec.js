@@ -112,6 +112,60 @@ test.describe('the approvals gate records WHY', () => {
     await expect(modal).toContainText('does not count against');
   });
 
+  // ─── THE GAP THE CHIPS LEFT (4 Sep 2026) ─────────────────────────
+  //
+  // The red Reject button sits beside the chips and skips them, so a rejection
+  // could be written with Verdict Reason EMPTY. Four of Kevin's on 3 Sep were
+  // (rec6x6sfB3kmL7Vfi, rec7alvvt370LsEf6, rec8Gh5YGCNf332Pg,
+  // recrHeCCTna0WluLl): he typed his own sentence and pressed Reject. Empty
+  // reads exactly like a field that was never written, so nobody saw it for
+  // three days, and the lesson writer had nothing to route.
+  //
+  // Rejecting in his own words stays a first-class route (his ruling, 28 Aug
+  // 2026, guarded in approval-knock-back.spec.js). It now records "Something
+  // else" — he did not say which kind — which scores as a blank always did.
+  test('a reject in his own words records Something else, never a blank', async ({ page }) => {
+    const patches = await mockAgentsPage(page);
+    await loadAgentsPage(page);
+    const card = await openApprovals(page);
+    const taskId = await card.getAttribute('data-apv-card');
+
+    const his = 'I am not interested in this at this moment in time.';
+    await card.locator('.apv-note').fill(his);
+    await card.locator('.apv-actions button.btn-danger').click();
+    await page.locator('button', { hasText: 'Reject and close' }).last().click();
+    await expect.poll(() => patches.some((p) => p.id === taskId)).toBe(true);
+
+    const patch = patches.find((p) => p.id === taskId);
+    expect(patch.fields[TF.approvalOutcome]).toBe('Rejected');
+    // THE load-bearing assertion: never blank, never absent.
+    expect(patch.fields[VERDICT_REASON]).toBe('Something else');
+    expect(String(patch.fields[APPROVAL_FEEDBACK])).toBe(his);
+  });
+
+  test('one tap in the confirm dialog upgrades it to a real reason', async ({ page }) => {
+    const patches = await mockAgentsPage(page);
+    await loadAgentsPage(page);
+    const card = await openApprovals(page);
+    const taskId = await card.getAttribute('data-apv-card');
+
+    await card.locator('.apv-note').fill('Roy is already on this one.');
+    await card.locator('.apv-actions button.btn-danger').click();
+    // The dialog asks once more, where the decision is actually being made.
+    const modal = page.locator('.modal, [role="dialog"]').first();
+    await expect(modal).toContainText('Which kind of no is this?');
+    await modal.locator('.apv-reason', { hasText: 'Roy owns it' }).first().click();
+    // And it stops claiming the rejection counts against the agent.
+    await expect(modal).toContainText('does not count against');
+    await page.locator('button', { hasText: 'Reject and close' }).last().click();
+    await expect.poll(() => patches.some((p) => p.id === taskId)).toBe(true);
+
+    const patch = patches.find((p) => p.id === taskId);
+    expect(patch.fields[VERDICT_REASON]).toBe('Roy owns it');
+    // His own words survive the upgrade — the chip default never lands on top.
+    expect(String(patch.fields[APPROVAL_FEEDBACK])).toBe('Roy is already on this one.');
+  });
+
   test('the approve buttons are untouched — this changed rejection only', async ({ page }) => {
     await mockAgentsPage(page);
     await loadAgentsPage(page);

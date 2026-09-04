@@ -215,6 +215,18 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 .approval-box .apv-work-label{font-size:10px;font-weight:var(--fw-bold);text-transform:uppercase;letter-spacing:.5px;color:var(--text-secondary);margin-bottom:4px}
 .approval-box .apv-work-body{font-size:var(--fs-sm);color:var(--text-primary);white-space:pre-wrap;word-break:break-word;max-height:260px;overflow-y:auto}
 .approval-box .apv-work-empty{border-color:var(--warning);background:var(--warning-bg)}
+.approval-box .apv-reasons{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:8px;
+    padding-top:10px;border-top:1px dashed var(--border-subtle)}
+.approval-box .apv-reasons-label{font-size:var(--fs-xs);color:var(--text-muted);font-weight:var(--fw-semibold);margin-right:2px}
+.approval-box .apv-reason{font-size:var(--fs-xs);font-weight:var(--fw-medium);padding:4px 10px;cursor:pointer;
+    border:1px solid var(--border-default);border-radius:var(--radius-full);
+    background:var(--bg-surface);color:var(--text-secondary);line-height:1.4}
+.approval-box .apv-reason:hover{background:var(--danger-bg);border-color:var(--danger-border);color:var(--danger)}
+/* The one reason that is a judgement on the agent's writing, so it reads as a
+   different KIND of verdict rather than a seventh flavour of the same one. */
+.approval-box .apv-reason-quality{border-style:dashed;color:var(--text-muted)}
+.approval-box .apv-reason-quality:hover{background:var(--warning-bg);border-color:var(--warning-border);color:var(--warning)}
+.approval-box .apv-reason:disabled{opacity:.45;cursor:default}
 .approval-box .apv-actions{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
 .approval-box .apv-actions .btn{font-size:11px;padding:5px 10px}
 .approval-decided{border:1px solid var(--border-default);background:var(--bg-surface-2);border-radius:var(--radius-md);padding:12px 16px;margin-bottom:16px;font-size:var(--fs-sm);color:var(--text-secondary)}
@@ -699,7 +711,7 @@ body.app-busy,body.app-busy *{cursor:progress!important}
 <script src="../../js/ai-models.js?v=1"></script>
 <!-- Agent accuracy scoring + the autonomy threshold. Shared with the
      Leadership Dashboard so both surfaces score identically. -->
-<script src="../../js/agent-accuracy.js?v=1"></script>
+<script src="../../js/agent-accuracy.js?v=2"></script>
 <script>
 // CONFIG
 const BASE_ID = 'appnqjDpqDniH3IRl';
@@ -786,6 +798,11 @@ const F = {
   processedByAI:'fldyVtrxVurMDUOVb', // checkbox — this task was worked by an agent
   sentForApprovalBy:'fld30Yw8SWYVp049g', // multipleRecordLinks → Team Members. WHICH agent raised it, so approval returns to the right one
   approvalOutcome:'fldrHBSr6qoUfaKuZ',   // singleSelect — Kevin's verdict, and the input to accuracy scoring
+  // WHY the verdict went that way. Same field, same seven options, as the AI
+  // Agents gate (os/agents/index.html) and the Slack worker. Until 4 Sep 2026
+  // this drawer did not know the field existed, so every rejection taken here
+  // was stored as "no" with no kind of no attached — see apvDecide.
+  verdictReason:'fldF9Bs4N5mttQvtl',     // singleSelect — which kind of no
   approvedBy:  'fldNntfwSzU5DlYS4',  // singleCollaborator — who decided
   approvedAt:  'fldr4Mvf2RzKvhZhi',  // dateTime — when
   // Slack message ts (epoch seconds, as a string) stamped when the approval was
@@ -890,6 +907,40 @@ const KPI_UNIT_OPTIONS = ['£','%','count','days','items','hours'];
 const APPROVAL_OUTCOMES = AgentAccuracy.APPROVAL_OUTCOMES;
 const APPROVAL_ACCURATE = AgentAccuracy.APPROVAL_ACCURATE;
 const TASK_TYPE_OPTIONS = ['Drafting','Research','Analysis','Build','Audit','Admin','Correspondence'];
+// ── WHICH KIND OF NO (4 Sep 2026) ────────────────────────────────────
+// The AI Agents gate has asked this since 27 Aug: only 'The work is wrong' is
+// a judgement on the agent's draft, and the other six say the task should
+// never have reached Kevin at all. This drawer is the SAME decision on a
+// different screen and had no way to say which — so a rejection taken here
+// (recUE5JNhNW5rqSnF, 1 Sep 2026) landed with Verdict Reason empty and counted
+// against the agent that wrote the draft.
+// The keys MUST stay identical to APV_REASONS in os/agents/index.html, to
+// SLACK_REASON_WORDS in scripts/slack-automation/approvals.js, and to
+// AgentAccuracy.RELEVANCE_REASONS + QUALITY_REASON — tests/approval-write-drift
+// fails if they drift. The note is a DEFAULT: Kevin types over it whenever the
+// specific version is more useful than the rule.
+const APV_REASONS = [
+  { key:'Already done elsewhere', chip:'Already done',
+    note:'This has already been dealt with elsewhere.', countsAgainstDraft:false },
+  { key:'Roy owns it', chip:'Roy owns it',
+    note:'Roy is dealing with this directly.', countsAgainstDraft:false },
+  { key:'Not worth my attention', chip:'Not worth my time',
+    note:'Only bring me something like this if it is a major issue.', countsAgainstDraft:false },
+  { key:'Duplicate', chip:'Duplicate',
+    note:'Duplicate of another task. Spot these before sending them to me.', countsAgainstDraft:false },
+  { key:'Parked for now', chip:'Parked',
+    note:'Not now. Hold this until I say otherwise.', countsAgainstDraft:false },
+  { key:'No longer relevant', chip:'No longer relevant',
+    note:'This is stale and no longer applies.', countsAgainstDraft:false },
+  { key:'The work is wrong', chip:'The work is wrong',
+    note:'', countsAgainstDraft:true },
+];
+const APV_REASON_BY_KEY = Object.fromEntries(APV_REASONS.map(r=>[r.key,r]));
+// "He did not say which kind" — never a blank. From the one module this page,
+// the gate and the report all score against.
+const APV_UNCLASSIFIED = AgentAccuracy.UNCLASSIFIED_REASON;
+// The chip last tapped, per task, so the write agrees with what was chosen.
+let _apvReason = {};
 const ACCURACY_MIN_SAMPLE = AgentAccuracy.THRESHOLD.minSample;
 const ACCURACY_MIN_RATE   = AgentAccuracy.THRESHOLD.minRate;
 const ACCURACY_RECENT_N   = AgentAccuracy.THRESHOLD.recentN;
@@ -3783,7 +3834,7 @@ function renderApprovalBlock(t){
         <option value="">Not set</option>
         ${TASK_TYPE_OPTIONS.map(o=>`<option value="${o}" ${t.taskType===o?'selected':''}>${o}</option>`).join('')}
       </select></div>
-    <textarea id="apvNote" placeholder="What to change, or why you are rejecting. Required for Request changes and both Reject buttons. (In Slack you just reply in the thread — same thing.)"></textarea>
+    <textarea id="apvNote" placeholder="What to change, or why you are rejecting. Required for Request changes and Reject. Tap a chip below and it writes the sentence for you. (In Slack you just reply in the thread — same thing.)"></textarea>
     <label style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--text-secondary);margin:6px 0 2px">
       <input type="checkbox" id="apvRemember" style="margin:0">
       Remember this reason — the agent applies it to every future task
@@ -3792,10 +3843,41 @@ function renderApprovalBlock(t){
       <button class="btn btn-success" data-apv-btn onclick="apvDecide('${t.id}','Approved as-is')">Approve</button>
       <button class="btn" data-apv-btn onclick="apvDecide('${t.id}','Approved with minor edits')" title="Approved, but you tidied it first — still counts as accurate">Approve with minor edits</button>
       <button class="btn" data-apv-btn onclick="apvDecide('${t.id}','Changes requested')" title="Goes back to the agent to redo. Needs a comment.">Request changes</button>
-      <button class="btn btn-danger" data-apv-btn onclick="apvDecide('${t.id}','Rejected')" title="Closed. Tick Remember above if the reason should become a standing rule.">Reject and close</button>
+      <button class="btn btn-danger" data-apv-btn onclick="apvDecide('${t.id}','Rejected')" title="Closed. Pick one of the reason chips below first. Tick Remember above if the reason should become a standing rule.">Reject and close</button>
     </div>
+    ${apvReasonChips(t.id)}
   </div>`;
 }
+
+function apvReasonChips(taskId){
+  return `<div class="apv-reasons" role="group" aria-label="Why are you rejecting this?">
+    <span class="apv-reasons-label">Reject because&hellip;</span>
+    ${APV_REASONS.map(r=>`<button class="apv-reason${r.countsAgainstDraft?' apv-reason-quality':''}"
+       data-apv-btn onclick="apvRejectWithReason('${taskId}','${escHtml(r.key)}')"
+       title="${r.countsAgainstDraft
+         ? 'The only reason that counts against this agent&apos;s draft quality.'
+         : 'The task should not have reached you. Does not count against the agent that wrote it.'}"
+      >${escHtml(r.chip)}</button>`).join('')}
+  </div>`;
+}
+
+// One tap: records the reason, fills the sentence, and rejects. The words stay
+// editable first — a chip NEVER overwrites something already typed, because
+// Kevin's own wording is the more useful version of the rule.
+function apvRejectWithReason(taskId, reasonKey){
+  const r=APV_REASON_BY_KEY[reasonKey];
+  if(!r)return;
+  _apvReason[taskId]=reasonKey;
+  const noteEl=document.getElementById('apvNote');
+  if(noteEl&&!noteEl.value.trim()&&r.note)noteEl.value=r.note;
+  if(r.countsAgainstDraft&&noteEl&&!noteEl.value.trim()){
+    toast('Say what is wrong with it — that is the part the agent can act on.',true);
+    noteEl.focus();
+    return;
+  }
+  apvDecide(taskId,'Rejected');
+}
+window.apvRejectWithReason=apvRejectWithReason;
 
 // Record Kevin's verdict, hand the task back to the agent that raised it, and
 // leave an Airtable comment so the reason is on the record permanently.
@@ -3840,6 +3922,13 @@ async function apvDecide(taskId,outcome,remember){
   // alone is not enough: the Slack worker's Airtable token cannot read comments
   // (403), so the field is the only place both sides can see.
   if(note)payload[F.approvalFeedback]=note;
+  // WHY, recorded as data rather than left in prose nobody can count. This is
+  // what lets accuracy separate "the draft was wrong" from "the task should
+  // not have existed", and what tells the lesson writer which agent the rule
+  // belongs to. Always present on a rejection: the guard above refuses one
+  // without it.
+  if(outcome==='Rejected')payload[F.verdictReason]=_apvReason[taskId]||APV_UNCLASSIFIED;
+  else if(_apvReason[taskId])payload[F.verdictReason]=_apvReason[taskId];
   // The durable copy. Approval Feedback is cleared by the agent's next submit,
   // so without this the words that caused a redo are gone within the hour and
   // the lesson writer has nothing left to read.

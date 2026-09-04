@@ -360,7 +360,7 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 <script src="../../js/ai-models.js?v=1"></script>
 <!-- Shared accuracy scoring (per agent PER TASK TYPE) — same maths as the
      Leadership Dashboard card. Pure IIFE, safe to load here. -->
-<script src="../../js/agent-accuracy.js?v=1"></script>
+<script src="../../js/agent-accuracy.js?v=2"></script>
 <script src="../../js/automations-data.js?v=1"></script>
 <script src="../../js/mcp-tools-data.js?v=1"></script>
 <script src="../../js/sync-bar.js?v=6"></script>
@@ -1606,7 +1606,7 @@ function apvCardHtml(t){
             <button class="btn" data-apv-btn onclick="agDecide('${t.id}','Approved with minor edits')" title="Approved, but you tidied it first. Still counts as accurate.">Approve with minor edits</button>
             <button class="btn" data-apv-btn onclick="agDecide('${t.id}','Changes requested')" title="Goes back to the agent to redo. Needs a comment.">Request changes</button>
             <button class="btn btn-danger" data-apv-btn onclick="agDecide('${t.id}','Rejected')"
-                    title="Closes the task for good. Type your reason in the box above first — or use a chip below if one of them fits.">Reject</button>
+                    title="Closes the task for good. Type your reason in the box above — or tap a chip below, which also tells the score which kind of no it is.">Reject</button>
         </div>
         ${apvReasonChips(t.id)}
         ${apvDeferRow(t.id)}
@@ -1660,6 +1660,10 @@ const APV_REASONS = [
       note: '',                                                   countsAgainstDraft: true },
 ];
 const APV_REASON_BY_KEY = Object.fromEntries(APV_REASONS.map(r => [r.key, r]));
+// "He did not say which kind" — never a blank. Read from the one module the
+// dashboard, this page and the report all score against, so the three can
+// never disagree about what an unclassified rejection is called.
+const APV_UNCLASSIFIED = AgentAccuracy.UNCLASSIFIED_REASON;
 
 // The chip Kevin last clicked per task, so the confirm dialog and the write
 // agree about what he chose. Cleared when the queue reloads.
@@ -1770,8 +1774,18 @@ function agDecide(taskId, outcome, remember){
             : reason.countsAgainstDraft
                 ? `This closes the task and counts against ${esc(agent)}&rsquo;s draft quality. Nothing goes out.`
                 : `This closes the task. Nothing goes out, and it does <strong>not</strong> count against ${esc(agent)} &mdash; the work was fine, the task should not have reached you.`;
+        // NONE OF THE SEVEN FITTED — so ask once more, here, where the
+        // decision is actually being made, and let one tap upgrade it. Not a
+        // wall: rejecting in his own words is a route Kevin asked for, and
+        // the write records "Something else" rather than nothing either way.
+        const kindRow = reason ? '' : `<div class="apv-reasons" id="apvKindRow" style="margin-top:10px">
+                 <span class="apv-reasons-label">Which kind of no is this?</span>
+                 ${APV_REASONS.map(r=>`<button class="apv-reason${r.countsAgainstDraft?' apv-reason-quality':''}"
+                      onclick="agPickConfirmReason('${taskId}','${esc(r.key)}')">${esc(r.chip)}</button>`).join('')}
+             </div>`;
         showModal('Reject this work?',
-            `<p style="font-size:var(--fs-sm);color:var(--text-secondary);line-height:1.6">${scoreLine}${reason?`<br><br><strong>Because:</strong> ${esc(reason.chip)}`:''}<br><br><strong>Reason:</strong> ${esc(note)}</p>
+            `<p id="apvScoreLine" style="font-size:var(--fs-sm);color:var(--text-secondary);line-height:1.6">${scoreLine}${reason?`<br><br><strong>Because:</strong> ${esc(reason.chip)}`:''}<br><br><strong>Reason:</strong> ${esc(note)}</p>
+             ${kindRow}
              <label style="display:flex;gap:8px;align-items:flex-start;margin-top:12px;background:var(--accent-soft);border-radius:var(--radius-md);padding:10px 12px;cursor:pointer">
                <input type="checkbox" id="apvRememberConfirm" ${remember?'checked':''} style="margin:3px 0 0">
                <span style="font-size:var(--fs-sm);color:var(--text-primary);line-height:1.5">Remember this reason. ${esc(Agent)} keeps it in its instructions and applies it to every future task, until you remove it.</span>
@@ -1783,6 +1797,28 @@ function agDecide(taskId, outcome, remember){
     applyApprovalDecision(taskId, outcome, remember);
 }
 window.agDecide = agDecide;
+
+// One tap inside the confirm dialog turns "Something else" into a real
+// classification. It only rewrites the line that was WRONG — the sentence
+// about the score — and leaves Kevin's own words alone.
+function agPickConfirmReason(taskId, reasonKey){
+    const r = APV_REASON_BY_KEY[reasonKey];
+    if(!r) return;
+    _apvReason[taskId] = reasonKey;
+    const t = allApprovals.find(x=>x.id===taskId);
+    const agent = (t && teamName(t.raiserId)) || 'the agent';
+    const line = document.getElementById('apvScoreLine');
+    if(line){
+        const scored = r.countsAgainstDraft
+            ? `This closes the task and counts against ${esc(agent)}&rsquo;s draft quality. Nothing goes out.`
+            : `This closes the task. Nothing goes out, and it does <strong>not</strong> count against ${esc(agent)} &mdash; the work was fine, the task should not have reached you.`;
+        line.innerHTML = line.innerHTML.replace(/^[\s\S]*?(<br><br><strong>Reason:)/,
+            `${scored}<br><br><strong>Because:</strong> ${esc(r.chip)}$1`);
+    }
+    const row = document.getElementById('apvKindRow');
+    if(row) row.remove();
+}
+window.agPickConfirmReason = agPickConfirmReason;
 
 // Read the dialog's own tickbox at the moment of confirming, so changing your
 // mind inside the dialog is what counts — not what was ticked when it opened.
@@ -1847,7 +1883,22 @@ async function applyApprovalDecision(taskId, outcome, remember){
         // This is what lets accuracy separate "the draft was wrong" from "the
         // task should not have existed", and what tells the lesson writer
         // which agent the rule belongs to.
-        if(_apvReason[taskId]) payload[TF.verdictReason] = _apvReason[taskId];
+        // WHICH KIND OF NO, NOT JUST NO (4 Sep 2026). The red Reject button
+        // sits beside the chips and skips them, so four of Kevin's rejections
+        // on 3 Sep landed with Verdict Reason EMPTY (rec6x6sfB3kmL7Vfi,
+        // rec7alvvt370LsEf6, rec8Gh5YGCNf332Pg, recrHeCCTna0WluLl) while the
+        // 33 taken through the chips that same day all recorded theirs. Empty
+        // is indistinguishable from a write that never happened, and the
+        // lesson writer has nothing to route.
+        //
+        // Rejecting in his own words stays a first-class route (his ruling,
+        // 28 Aug) — it just stores APV_UNCLASSIFIED rather than nothing, which
+        // scores exactly as a blank always did and is visible as a choice.
+        if(outcome === 'Rejected'){
+            payload[TF.verdictReason] = _apvReason[taskId] || APV_UNCLASSIFIED;
+        } else if(_apvReason[taskId]){
+            payload[TF.verdictReason] = _apvReason[taskId];
+        }
         // The durable copy. Approval Feedback is cleared by the agent's next
         // submit, so without this the words that caused a redo are gone within
         // the hour and the lesson writer has nothing left to read.
