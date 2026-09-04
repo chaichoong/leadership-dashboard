@@ -338,3 +338,14 @@ Instagram for OD waits until LinkedIn shows a signal; designed quote cards are r
   camera (the talking points ask for them).
 - Tests: `tests/content-engine-od.test.js` (selftests, playbook pricing and hot-buttons pinned against the
   prompt, the brand map, the nightly wiring, the business each card lands under).
+
+
+## Kevin's review of the first two episodes (4 Sep 2026)
+
+- **Jingle timing.** The intro was going in at the END of the sign-off caption, and whisper's caption ran 3 s past his last word on 2194. `find_pause` now finds the real pause after the sign-off with `silencedetect` at an adaptive threshold (-35, -30, -25, -20 dB; outdoor audio only shows the pause at -25/-20), takes the last pause of half a second or more in the caption's window, and cuts 0.15 s into it. The sign-off caption is clipped to the cut before it is burned. On 2194: 34.0 s -> 30.98 s.
+- **Jingle content.** The first second of the intro clip (black, then an indoor shot in a dark top, the "ninja" frame) is trimmed: `INTRO_TRIM_START = 1.0`.
+- **Learnings from my diary on 2195.** Whisper heard "learning through my diary"; the regex only allowed from/for/of. It now allows learn* + from/for/of/through/in/to. And when an episode has no Learnings clip the record's Reframed Video URL is cleared, so a card can never link an older clip (2195's card had linked the spike's).
+- **Subheading on the Learnings banner.** A third, smaller line inside the orange banner says what the episode is about (the banner title with its bar removed), `overlays.py lfmd --subtitle`.
+- **SEO.** Written into the agent file's Lessons from Kevin, which both Claude calls read: keyword in the first three words of every title and the first sentence of every description, hook + keyword in the first 100 characters of the YouTube description, topic hashtags first.
+- **Podcast.** No jingle: the audio is taken from the captioned episode with the pause between the sign-off and the welcome removed (`podcast_filter`), so it runs straight in.
+- Both 4 June episodes are re-rendered with all of this applied; the records and cards keep their links because the files are overwritten in place.

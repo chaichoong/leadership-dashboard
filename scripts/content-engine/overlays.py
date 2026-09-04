@@ -81,19 +81,22 @@ def _subs_filter(srt, aspect):
     return "subtitles=%s:fontsdir=%s:force_style='%s'" % (srt, FONT_DIR, CAPTION_STYLE[aspect])
 
 
-def _banner_filter(line1, line2, day, full_width=False, y=BANNER_Y):
-    """Orange two-line banner with the dark DAY pill, 'Learnings from my Diary' style."""
+def _banner_filter(line1, line2, day, full_width=False, y=BANNER_Y, sub=""):
+    """Orange two-line banner with the dark DAY pill, 'Learnings from my Diary' style. `sub` adds a
+    smaller third line saying what the episode is about (Kevin, 4 Sep 2026)."""
     x0, w = (0, 1080) if full_width else (60, 960)
     tx = x0 + 50
     fs = 54 if max(len(line1), len(line2)) <= 15 else 46
     pill_w = 380; pill_x = x0 + w - pill_w - 60
+    h = 236 if sub else 190
+    sub_line = ["drawtext=fontfile='%s':text='%s':fontsize=30:fontcolor=white:x=%d:y=%d" % (FONT_BOLD, _esc(sub[:44].upper()), tx, y + 186)] if sub else []
     return ",".join([
-        "drawbox=x=%d:y=%d:w=%d:h=190:color=%s@1:t=fill" % (x0, y, w, ORANGE_HEX),
+        "drawbox=x=%d:y=%d:w=%d:h=%d:color=%s@1:t=fill" % (x0, y, w, h, ORANGE_HEX),
         "drawtext=fontfile='%s':text='%s':fontsize=%d:fontcolor=white:x=%d:y=%d" % (FONT_BLACK, line1, fs, tx, y + 25),
         "drawtext=fontfile='%s':text='%s':fontsize=%d:fontcolor=white:x=%d:y=%d" % (FONT_BLACK, line2, fs, tx, y + 95),
         "drawbox=x=%d:y=%d:w=%d:h=66:color=%s@1:t=fill" % (pill_x, y + 98, pill_w, PILL_HEX),
         "drawtext=fontfile='%s':text='DAY %s':fontsize=44:fontcolor=white:x=%d:y=%d" % (FONT_BOLD, day, pill_x + 40, y + 110),
-    ])
+    ] + sub_line)
 
 
 def _run(inp, vf, out, bitrate):
@@ -111,8 +114,8 @@ def build_full(inp, srt, out):
     return _run(inp, _subs_filter(srt, "16:9"), out, "12M")
 
 
-def build_lfmd(inp, srt, out, day):
-    vf = _banner_filter("LEARNINGS FROM", "MY DIARY", day) + "," + _subs_filter(srt, "9:16")
+def build_lfmd(inp, srt, out, day, subtitle=""):
+    vf = _banner_filter("LEARNINGS FROM", "MY DIARY", day, sub=subtitle) + "," + _subs_filter(srt, "9:16")
     return _run(inp, vf, out, "10M")
 
 
@@ -146,12 +149,12 @@ def selftest():
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("mode"); ap.add_argument("args", nargs="*")
-    ap.add_argument("--day", default=""); ap.add_argument("--title", default="")
+    ap.add_argument("--day", default=""); ap.add_argument("--title", default=""); ap.add_argument("--subtitle", default="")
     a = ap.parse_args()
     if a.mode == "selftest": selftest()
     elif a.mode == "captions":
         open(a.args[1], "w").write(rechunk_srt(open(a.args[0]).read())); print("wrote", a.args[1])
     elif a.mode == "full": print(build_full(*a.args[:3]))
-    elif a.mode == "lfmd": print(build_lfmd(*a.args[:3], day=a.day))
+    elif a.mode == "lfmd": print(build_lfmd(*a.args[:3], day=a.day, subtitle=a.subtitle))
     elif a.mode == "summary": print(build_summary(*a.args[:3], day=a.day, title=a.title))
     else: raise SystemExit("unknown mode")

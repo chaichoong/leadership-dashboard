@@ -42,6 +42,66 @@ INTRO_CLIP = os.path.join(EDITED_ROOT, "Vlog Intro", "runprenuer-intro_clip.mp4"
 INTRO_SIGNOFF_RE = re.compile(r"keep on (?:watching|listening)|hope you find (?:it|this) useful|stay with me|let'?s go\b", re.I)
 WELCOME_RES = [re.compile(r"welcome back to (?:consecutive )?day", re.I), re.compile(r"consecutive day", re.I)]   # in the app's order
 INTRO_SEARCH_FRACTION = 0.35    # the sign-off lives in the cold open; a "let's go" at 80% is not it
+INTRO_TRIM_START = 1.0          # Kevin, 4 Sep 2026: the jingle's first second (black, then an indoor shot in a dark top) is cut
+CUT_THRESHOLDS_DB = (-35, -30, -25, -20)   # studio-quiet first; a windy road needs -20 before the pause shows
+CUT_PAUSE_MIN = 0.5             # a pause between sentences, not a gap between words
+CUT_LEAD = 0.15                 # seconds of the pause kept after the last word before the jingle
+
+
+def pick_cut(silences, seg_start, at):
+    """The jingle goes in at the pause after Kevin's last sign-off word, not at the caption's end (Kevin,
+    4 Sep 2026: on 2194 the caption ran 3 s past the last word). `silences` = [(start, end)] in clip
+    seconds. Take the LAST pause of half a second or more that starts at least a second into the
+    sign-off caption and no later than 1.5 s after the caption end. Returns (cut, resume) where resume
+    is where speech starts again, or None when no such pause exists (caller falls back to caption times)."""
+    cands = [(s, e) for s, e in silences if seg_start + 1.0 <= s <= at + 1.5 and e - s >= CUT_PAUSE_MIN]
+    if not cands: return None
+    s, e = cands[-1]
+    return round(s + CUT_LEAD, 2), round(max(s + CUT_LEAD, e - 0.2), 2)
+
+
+def silences(video, start, length, db):
+    """ffmpeg silencedetect over [start, start+length] at `db`, as [(abs_start, abs_end)]."""
+    r = subprocess.run([FFMPEG, "-v", "info", "-ss", "%.3f" % start, "-t", "%.3f" % length, "-i", video, "-af",
+                        "silencedetect=n=%ddB:d=%.2f" % (db, 0.2), "-f", "null", "-"], capture_output=True, text=True)
+    starts = [float(x) for x in re.findall(r"silence_start: ([\d.]+)", r.stderr)]
+    ends = [float(x) for x in re.findall(r"silence_end: ([\d.]+)", r.stderr)]
+    return [(start + s, start + (ends[i] if i < len(ends) else start + length)) for i, s in enumerate(starts)]
+
+
+def find_pause(video, segments, at):
+    """(cut, resume) tightened to the real pause after the sign-off; caption times when none is found.
+    The threshold adapts: the first level (quiet first) that shows a pause of CUT_PAUSE_MIN wins."""
+    later = [s for s in segments if s[0] >= at - 0.05]
+    fallback = (at, round(max(at, later[0][0] - 0.2), 2) if later else at)
+    if at <= 0.05: return fallback
+    seg = [s for s in segments if abs(s[1] - at) < 0.01 or (s[0] < at <= s[1])]
+    seg_start = seg[0][0] if seg else max(0.0, at - 6.0)
+    for db in CUT_THRESHOLDS_DB:
+        got = pick_cut(silences(video, seg_start, (at - seg_start) + 2.0, db), seg_start, at)
+        if got: return got
+    return fallback
+
+
+def clip_caption_at(srt_text, at):
+    """The caption carrying the sign-off must end where the jingle goes in, not run on past it: with the
+    cut tightened the burned caption would otherwise still be on screen after the jingle."""
+    if at <= 0.05: return srt_text
+    out = []
+    for blk in srt_text.strip().split("\n\n"):
+        lines = blk.strip().split("\n")
+        if len(lines) >= 3 and " --> " in lines[1]:
+            a, b = lines[1].split(" --> ")
+            sa, sb = watch_ts(a.strip()), watch_ts(b.strip())
+            if sa < at < sb: lines[1] = "%s --> %s" % (a.strip(), srt_ts(at))
+        out.append("\n".join(lines))
+    return "\n\n".join(out) + "\n"
+
+
+def podcast_filter(at, resume):
+    """The podcast has no jingle: the pause between the sign-off and the welcome is simply removed."""
+    if resume <= at + 0.05: return None
+    return ("[0:a]atrim=0:%.3f,asetpts=PTS-STARTPTS[a];[0:a]atrim=%.3f,asetpts=PTS-STARTPTS[b];[a][b]concat=n=2:v=0:a=1[out]" % (at, resume))
 
 
 def intro_insert_seconds(segments, duration=None):
@@ -68,7 +128,7 @@ def insert_intro(full_path, at, out_path, intro=None):
                             "-of", "csv=p=0", full_path], capture_output=True, text=True).stdout.strip().split(",")
     w, h, fps = int(probe[0]), int(probe[1]), probe[2]
     au = "aformat=sample_rates=48000:channel_layouts=stereo,asetpts=PTS-STARTPTS"
-    iv = "[1:v]scale=%d:%d:force_original_aspect_ratio=decrease,pad=%d:%d:(ow-iw)/2:(oh-ih)/2,fps=%s,format=yuv420p,setpts=PTS-STARTPTS[iv];[1:a]%s[ia]" % (w, h, w, h, fps, au)
+    iv = "[1:v]trim=start=%.2f,scale=%d:%d:force_original_aspect_ratio=decrease,pad=%d:%d:(ow-iw)/2:(oh-ih)/2,fps=%s,format=yuv420p,setpts=PTS-STARTPTS[iv];[1:a]atrim=start=%.2f,%s[ia]" % (INTRO_TRIM_START, w, h, w, h, fps, INTRO_TRIM_START, au)
     if at <= 0.05:
         fc = iv + ";[0:v]setpts=PTS-STARTPTS[bv];[0:a]%s[ba];[iv][ia][bv][ba]concat=n=2:v=1:a=1[v][a]" % au
     else:
@@ -81,9 +141,12 @@ def insert_intro(full_path, at, out_path, intro=None):
     return out_path
 
 
-def podcast_audio(full_path, out_mp3):
-    """The podcast is the full episode's sound, as Ericamae uploaded it to Spotify for Creators."""
-    r = subprocess.run([FFMPEG, "-v", "error", "-y", "-i", full_path, "-vn", "-c:a", "libmp3lame", "-b:a", "128k", "-ar", "44100", out_mp3], capture_output=True, text=True)
+def podcast_audio(captioned_path, out_mp3, at=0.0, resume=0.0):
+    """The podcast is the episode's sound WITHOUT the jingle (Kevin, 4 Sep 2026), the pause after the
+    sign-off cut out so it runs straight into the episode."""
+    fc = podcast_filter(at, resume)
+    args = (["-filter_complex", fc, "-map", "[out]"] if fc else ["-vn"])
+    r = subprocess.run([FFMPEG, "-v", "error", "-y", "-i", captioned_path] + args + ["-c:a", "libmp3lame", "-b:a", "128k", "-ar", "44100", out_mp3], capture_output=True, text=True)
     if r.returncode != 0: raise SystemExit("podcast audio failed: " + r.stderr[-300:])
     return out_mp3
 
@@ -110,7 +173,7 @@ def title_from_transcript(text):
     return " ".join(words[:mid]).upper() + "|" + " ".join(words[mid:]).upper()
 
 
-LFMD_START_RE = re.compile(r"learnings?\s+(?:from|for|of)\s+(?:my|the)\s+diary", re.I)
+LFMD_START_RE = re.compile(r"learn\w*\s+(?:from|for|of|through|in|to)\s+(?:my|the)\s+diary", re.I)   # whisper heard "learning through my diary" on 2195
 SIGNOFF_RE = re.compile(r"thank you as always|stay positive|see you (?:again )?tomorrow", re.I)
 
 
@@ -122,6 +185,11 @@ def srt_segments(srt_text):
         a, b = lines[1].split(" --> ")
         out.append((watch_ts(a.strip()), watch_ts(b.strip()), " ".join(lines[2:]).strip()))
     return out
+
+
+def srt_ts(t):
+    ms = int(round(t * 1000)); h, rem = divmod(ms, 3600000); m, rem = divmod(rem, 60000); sec, ms = divmod(rem, 1000)
+    return "%02d:%02d:%02d,%03d" % (h, m, sec, ms)
 
 
 def watch_ts(s):
@@ -159,6 +227,7 @@ def record_updates(day, links, transcript, reason, clip_name, role="episode"):
         fields["Transcription"] = transcript; fields["Record Status"] = STATUS_DONE
     if links.get("full"): fields["Video Edited URL"] = links["full"]; fields["Subtitled Video URL"] = links["full"]
     if links.get("lfmd"): fields["Reframed Video URL"] = links["lfmd"]
+    elif role == "episode": fields["Reframed Video URL"] = None      # never leave an older clip's link on the card (2195, 4 Sep 2026)
     if links.get("summary"): fields["Summary Video URL"] = links["summary"]
     if links.get("thumb"): fields["Thumbnail URL"] = links["thumb"]
     return fields
@@ -228,6 +297,9 @@ def shift_srt(srt_text, offset, end):
     return "\n".join(out)
 
 
+LAST_CUT = {}
+
+
 def build_outputs(masters, srt, day, title, workdir, lfmd=None, role="episode"):
     ov = os.path.join(HERE, "overlays.py")
     caps = os.path.join(workdir, "captions.srt")
@@ -238,18 +310,22 @@ def build_outputs(masters, srt, day, title, workdir, lfmd=None, role="episode"):
         subprocess.run([sys.executable, ov, "summary", masters["9:16"], caps, paths["summary"], "--day", str(day), "--title", title],
                        check=True, stdout=subprocess.DEVNULL)
         return paths
+    segs = srt_segments(open(srt).read())
+    at, resume = find_pause(masters["16:9"], segs, intro_insert_seconds(segs))     # on the master: same sound, no captions yet
+    LAST_CUT.update({"at": at, "resume": resume})
+    open(caps, "w").write(clip_caption_at(open(caps).read(), at))                   # the sign-off caption ends where the jingle starts
     captioned = os.path.join(workdir, "full_captioned.mp4")
     subprocess.run([sys.executable, ov, "full", masters["16:9"], caps, captioned], check=True, stdout=subprocess.DEVNULL)
     paths["full"] = os.path.join(workdir, names["full"])
-    at = intro_insert_seconds(srt_segments(open(srt).read()))
     insert_intro(captioned, at, paths["full"])
-    paths["podcast"] = podcast_audio(paths["full"], os.path.join(workdir, names["podcast"]))
+    paths["podcast"] = podcast_audio(captioned, os.path.join(workdir, names["podcast"]), at, resume)
     if lfmd:   # the "Learnings from my diary" section only (Kevin, 3 Sep 2026)
         piece = trim(masters["9:16"], lfmd[0], lfmd[1], os.path.join(workdir, "lfmd_master.mp4"))
         lcaps = os.path.join(workdir, "captions_lfmd.srt")
         open(lcaps, "w").write(shift_srt(open(caps).read(), lfmd[0], lfmd[1]))
         paths["lfmd"] = os.path.join(workdir, names["lfmd"])
-        subprocess.run([sys.executable, ov, "lfmd", piece, lcaps, paths["lfmd"], "--day", str(day)], check=True, stdout=subprocess.DEVNULL)
+        subprocess.run([sys.executable, ov, "lfmd", piece, lcaps, paths["lfmd"], "--day", str(day), "--subtitle", title.replace("|", " ").strip()],
+                       check=True, stdout=subprocess.DEVNULL)      # the subheading says what the episode is about (Kevin, 4 Sep 2026)
     return paths
 
 
@@ -308,7 +384,7 @@ def process(key, ledger, keep=False):
     title = title_from_transcript(text)
     paths = build_outputs(masters, srt, day, title, workdir, lfmd=window, role=role)
     if role == "episode":
-        e["intro_at"] = intro_insert_seconds(srt_segments(open(srt).read()))
+        e["intro_at"] = LAST_CUT.get("at"); e["podcast_resume"] = LAST_CUT.get("resume")
         paths["thumb"], e["thumb_lines"] = make_thumbnail(masters["9:16"], duration, text, day, workdir)
     folder, links = publish_to_drive(paths, day, os.path.join(workdir, "transcript.txt"))
     rid, how = find_or_create_record(day, e.get("drive_id"), key, dt.date.fromisoformat(e["date"]))
@@ -349,7 +425,16 @@ def selftest():
     assert intro_insert_seconds(segs_i[:1] + segs_i[2:], 600) == 9.0, "before the welcome-back caption when there is no sign-off"
     assert intro_insert_seconds([(0, 5, "just talking"), (300, 305, "let's go")], 600) == 0.0, "a late let's go is not the sign-off"
     assert intro_insert_seconds([], 10) == 0.0
-    assert INTRO_CLIP.endswith("Vlog Intro/runprenuer-intro_clip.mp4")
+    assert INTRO_CLIP.endswith("Vlog Intro/runprenuer-intro_clip.mp4") and INTRO_TRIM_START == 1.0
+    assert lfmd_window([(0, 5, "intro"), (60, 66, "so anyway, so learning through my diary, running off road"), (66, 90, "one"), (90, 95, "see you again tomorrow")]) == (60.0, 95.0), "2195's wording"
+    assert pick_cut([(4.2, 4.5), (7.9, 9.4)], 4.0, 9.0) == (8.05, 9.2), "the pause after the last sign-off word, speech back at its end"
+    assert pick_cut([(4.2, 4.5), (6.0, 6.3)], 4.0, 9.0) is None, "word gaps under half a second never count"
+    assert pick_cut([(30.83, 33.72)], 28.0, 34.0) == (30.98, 33.52), "2194: the caption ran 3 s past the last word"
+    assert podcast_filter(8.05, 9.4).startswith("[0:a]atrim=0:8.050") and "atrim=9.400" in podcast_filter(8.05, 9.4) and podcast_filter(8.0, 8.0) is None
+    f4 = record_updates(2195, {"full": "u1", "thumb": "t"}, "t", "r", "c"); assert f4["Reframed Video URL"] is None, "no Learnings clip means the old link is cleared"
+    srt_c = "1\n00:00:28,000 --> 00:00:34,000\nhope you find it useful\n\n2\n00:00:34,000 --> 00:00:40,000\nwelcome back\n"
+    assert "00:00:28,000 --> 00:00:30,980" in clip_caption_at(srt_c, 30.98) and "00:00:34,000 --> 00:00:40,000" in clip_caption_at(srt_c, 30.98), clip_caption_at(srt_c, 30.98)
+    assert clip_caption_at(srt_c, 0.0) == srt_c
     t = title_from_transcript("So consecutive day, 2,225 of a diary of a Runpreneur, and today's episode I talk all about how you can record a video using a structured script to turn that video into an autonomous AI agent, which is going")
     assert "|" in t and "RECORD" in t and len(t) < 90, t
     assert title_from_transcript("nothing useful here") == "DIARY OF A|RUNPRENEUR"
@@ -375,7 +460,7 @@ def selftest():
     srt = "1\n00:00:58,000 --> 00:01:02,000\nA\n\n2\n00:01:02,000 --> 00:01:05,000\nB\n"
     shifted = shift_srt(srt, 60.0, 65.0)
     assert "00:00:00,000 --> 00:00:02,000" in shifted and "00:00:02,000 --> 00:00:05,000" in shifted, shifted
-    print(json.dumps({"checks": 25, "failed": []}))
+    print(json.dumps({"checks": 34, "failed": []}))
 
 
 if __name__ == "__main__":
