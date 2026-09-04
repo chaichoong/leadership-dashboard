@@ -2693,6 +2693,65 @@ def signature_watch_registered(task_id):
     return False
 
 
+SIGNED_MARK = "SIGNED COPY BACK:"
+
+
+def signed_handoff_note(stamp, agreement, pdf, then):
+    """The line that turns a signed document into the agent's next job. The
+    marker is what makes the hand-off idempotent: a second poll that sees
+    the same signed row finds the marker and does nothing."""
+    step = {"post": "post it to the recipient the approved letter names "
+                    "(POST output, send-letter.py after approval)",
+            "email": "email it to the recipient the approved letter names "
+                     "(Correspondence output with ATTACH, send-email.py after approval)"
+            }.get(then, f"carry out the '{then}' step the approval named")
+    return (f"[{stamp} — signature-watch] {SIGNED_MARK} {agreement} came back "
+            f"signed. Signed PDF: {pdf}\nNEXT (gate 2): {step}. Prepare it and "
+            f"submit for Kevin's approval; the signed PDF must be the attachment.")
+
+
+def cmd_signed(args):
+    """Gate 2 begins here. Called by signature-watch.js the moment a
+    registered document comes back signed (4 Sep 2026: three letters of
+    authority sat signed in ~/knowledge-os/attachments for a day because
+    the watcher wrote 'next: submit gate 2' to a log and nothing read it;
+    the tasks had been Completed at gate 1, so no agent could ever see
+    them). Reopens the task for the agent that raised it, with the PDF
+    path and the next step in Notes, and clears the gate-1 verdict so the
+    gate-2 submission is judged on its own."""
+    rec = get_task(args.task)
+    tf = rec.get("fields", {}) or {}
+    notes = str(tf.get(AF["notes"]) or "")
+    if SIGNED_MARK in notes and args.agreement in notes:
+        print(json.dumps({"task": args.task, "reopened": False,
+                          "reason": "already handed off"}))
+        return 0
+    if not os.path.exists(args.pdf):
+        sys.exit(f"ERROR: signed PDF not found at {args.pdf}; refusing to "
+                 "hand off a document that is not on disk.")
+    team = links(tf.get(AF["teamMember"])) or links(tf.get(AF["sentForApprovalBy"]))
+    if not team:
+        sys.exit(f"ERROR: {args.task} has no agent on it; a signed document "
+                 "with nobody to carry it is exactly the miss this exists to stop.")
+    stamp = datetime.now(LONDON).strftime("%d %b %Y %H:%M")
+    note = signed_handoff_note(stamp, args.agreement, args.pdf, args.then)
+    patch_task(args.task, {
+        AF["status"]: "Today",
+        AF["dueDate"]: today_london(),
+        AF["teamMember"]: team,
+        AF["assignee"]: None,
+        AF["sentForApprovalBy"]: [],
+        AF["approvalOutcome"]: None,
+        AF["approvalFeedback"]: None,
+        AF["approvedAt"]: None,
+        AF["notes"]: (notes.rstrip() + "\n\n" + note).strip()[-90000:],
+    })
+    print(json.dumps({"task": args.task, "reopened": True,
+                      "agent": ALL_AGENTS.get(team[0], {}).get("agent", team[0]),
+                      "then": args.then, "pdf": args.pdf}))
+    return 0
+
+
 def cmd_complete(args):
     t = task_view(get_task(args.task))
     if t["outcome"] not in APPROVED:
@@ -4809,6 +4868,15 @@ def main():
     lg.add_argument("--entity", help="which entity owes it")
     lg.add_argument("--lane", choices=PLAN_LANES)
 
+    sg = sub.add_parser("signed",
+                        help="gate 2: a registered document came back signed "
+                             "— reopen its task for the raising agent with "
+                             "the signed PDF and the next step")
+    sg.add_argument("task")
+    sg.add_argument("--agreement", required=True)
+    sg.add_argument("--pdf", required=True, help="the signed PDF on disk")
+    sg.add_argument("--then", required=True, help="post | email")
+
     ct = sub.add_parser("certificate",
                         help="file a certificate, licence or insurance policy "
                              "on the Property Certificates table — the ONE "
@@ -4841,7 +4909,7 @@ def main():
             "lessons": cmd_lessons, "revise": cmd_revise,
             "attach": cmd_attach, "outcome": cmd_outcome,
             "reassign": cmd_reassign, "ledger": cmd_ledger,
-            "certificate": cmd_certificate,
+            "signed": cmd_signed, "certificate": cmd_certificate,
             "handover-property": cmd_handover_property,
             "clear-alerts": cmd_clear_alerts}[args.cmd](args) or 0
 

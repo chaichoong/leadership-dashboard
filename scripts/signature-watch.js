@@ -119,7 +119,9 @@ async function cmdRegister(args) {
 async function cmdPoll() {
   const waiting = pending();
   if (!waiting.length) {
-    console.log(JSON.stringify({ pending: 0, ready: [], note: 'nothing registered and unsigned' }, null, 2));
+    const handoff = handOffAll();
+    console.log(JSON.stringify({ pending: 0, ready: [], handoff, note: 'nothing registered and unsigned' }, null, 2));
+    if (handoff.failed) process.exit(1);
     return;
   }
   const ready = await withPage(async (page) => {
@@ -172,13 +174,16 @@ async function cmdPoll() {
     return found;
   });
 
+  const handoff = handOffAll();
   console.log(JSON.stringify({
     pending: waiting.length,
     ready,
-    next: ready.length
-      ? 'Submit gate 2 for each: agent-dispatch.py submit --type Correspondence with a POST or email output naming the signed PDF, then Kevin approves.'
+    handoff,
+    next: ready.length || handoff.handedOff
+      ? 'Each signed document is now an open task for its agent (gate 2): it prepares the POST or email with the signed PDF attached, then Kevin approves.'
       : 'None signed yet. The control passed, so this is a real zero.',
   }, null, 2));
+  if (handoff.failed) process.exit(1);
 }
 
 async function cmdStatus() {
@@ -187,10 +192,37 @@ async function cmdStatus() {
   console.log(JSON.stringify({
     awaitingSignature: waiting.map((w) => ({ task: w.task, agreement: w.agreement, since: w.at })),
     signedAndFiled: signed.map((s) => ({ task: s.task, agreement: s.agreement, pdf: s.pdf })),
+    signedAwaitingHandoff: unhandedSigned(rows()).map((s) => ({ task: s.task, agreement: s.agreement })),
     ledger: LEDGER,
   }, null, 2));
 }
 
+// A signed row is a fact; the hand-off is the work. Until 4 Sep 2026 the poll
+// printed "next: submit gate 2" and stopped, and the three letters of authority
+// it had found sat on disk for a day with their tasks Completed at gate 1, so no
+// agent could ever see them. Now every signed row is handed to the task's agent
+// through `agent-dispatch.py signed` and the ledger records that it was.
+function unhandedSigned(allRows) {
+  const handed = new Set(allRows.filter((r) => r.cmd === 'handoff').map((r) => r.task + '|' + r.agreement));
+  return allRows.filter((r) => r.cmd === 'signed' && !handed.has(r.task + '|' + r.agreement));
+}
+function handOff(row) {
+  const { spawnSync } = require('child_process');
+  const r = spawnSync('python3', [path.join(REPO, 'scripts', 'agent-dispatch.py'), 'signed', row.task,
+    '--agreement', row.agreement, '--pdf', row.pdf, '--then', row.then], { encoding: 'utf8' });
+  if (r.status !== 0) {
+    console.error(`HANDOFF FAILED for ${row.task} (${row.agreement}): ${(r.stderr || r.stdout || '').trim()}`);
+    return false;
+  }
+  append({ cmd: 'handoff', task: row.task, agreement: row.agreement, result: (r.stdout || '').trim().slice(0, 300) });
+  return true;
+}
+function handOffAll() {
+  const todo = unhandedSigned(rows());
+  const done = todo.filter(handOff);
+  return { signedAwaitingHandoff: todo.length, handedOff: done.length,
+           failed: todo.length - done.length, tasks: done.map((r) => r.task) };
+}
 function parseArgs(list) {
   const out = {};
   for (let i = 0; i < list.length; i++) {
@@ -205,8 +237,9 @@ async function main() {
   if (cmd === 'register') return cmdRegister(args);
   if (cmd === 'poll') return cmdPoll();
   if (cmd === 'status') return cmdStatus();
-  die('usage: register --task recXXX --agreement "NAME" --then post|email | poll | status');
+  if (cmd === 'handoff') { const r = handOffAll(); console.log(JSON.stringify(r, null, 2)); if (r.failed) process.exit(1); return; }
+  die('usage: register --task recXXX --agreement "NAME" --then post|email | poll | status | handoff');
 }
 
 if (require.main === module) main().catch((e) => { console.error('ERROR', e.message); process.exit(1); });
-module.exports = { pending, safeName, LEDGER, OUT_DIR, COMPLETED_URL };
+module.exports = { pending, safeName, unhandedSigned, LEDGER, OUT_DIR, COMPLETED_URL };
