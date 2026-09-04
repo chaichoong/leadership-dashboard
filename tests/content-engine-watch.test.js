@@ -72,6 +72,12 @@ describe('content-engine watch: nightly wiring', () => {
     expect(sh).toContain('REPO="$(cd "$(dirname "$0")/.." && pwd)"');
   });
 
+  it("resets a clip left 'pulling' by a dead run, so it is not skipped for ever", () => {
+    const w = readFileSync(path.join(ROOT, 'scripts', 'content-engine', 'watch.py'), 'utf8');
+    expect(w).toContain('def repair_stale_pulls(');
+    expect(w).toContain('stale = repair_stale_pulls(ledger)');
+  });
+
   it('is described on the Automations list (deterministic job, not a register agent)', () => {
     const auto = readFileSync(path.join(ROOT, 'js', 'automations-data.js'), 'utf8');
     expect(auto).toMatch(/key: 'content-engine'/);
