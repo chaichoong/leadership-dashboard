@@ -48,16 +48,17 @@ python3 scripts/content-engine/publish.py run --limit 2 || exit 1
 python3 scripts/content-engine/runpreneur_sync.py run || echo "runpreneur sync: skipped this run (see above)"
 # 9. Operations Director lane (od_lane.py, Kevin-approved plan 3 Sep 2026): mine tonight's new transcripts into the
 #    bank of OD moments; read Kevin's verdicts on OD cards (one redo on "Changes requested"); fill the coming week's
-#    five weekday slots if they are not drafted yet (idempotent, so a missed night costs nothing); one card per
-#    post; approved posts to GoHighLevel on the OD brand (drafts in test mode); Sunday/Monday: talking points for
-#    Kevin's runs. Every step falls through with a line, so the OD lane can never stop the Runpreneur lane.
+#    five weekday shapes and the Friday newsletter if they are not drafted yet (idempotent); one card per piece;
+#    approved posts to GoHighLevel on the OD brand (drafts in test mode); approved editions to the browser lane;
+#    Sunday/Monday: the ten-topic recording brief for Kevin's runs (v2, 4 Sep 2026). Every step falls through with a line, so the OD lane can never stop the Runpreneur lane.
 python3 scripts/content-engine/od_lane.py mine --limit 6 || echo "od mine: failed this run (see above)"
 python3 scripts/content-engine/od_lane.py sync || echo "od sync: failed this run (see above)"
 python3 scripts/content-engine/od_lane.py draft || echo "od draft: failed this run (see above)"
 python3 scripts/content-engine/od_lane.py cards || echo "od cards: failed this run (see above)"
 python3 scripts/content-engine/od_lane.py publish-sync || echo "od publish sync: failed this run (see above)"
 python3 scripts/content-engine/od_lane.py publish || echo "od publish: failed this run (see above)"
-case "$(TZ=Europe/London date +%u)" in 7|1) python3 scripts/content-engine/od_lane.py points || echo "od points: failed this run (see above)";; esac
+python3 scripts/content-engine/od_lane.py newsletter-publish || echo "od newsletter publish: failed this run (see above)"
+case "$(TZ=Europe/London date +%u)" in 7|1) python3 scripts/content-engine/od_lane.py topics || echo "od topics: failed this run (see above)";; esac
 python3 scripts/content-engine/watch.py report
 python3 scripts/content-engine/approval.py report
 python3 scripts/content-engine/publish.py report
