@@ -18,6 +18,12 @@
  * Zero new dependencies, and the layout is CSS rather than hand-computed text
  * positions.
  *
+ * EVERY PAGE, NOT JUST THE FIRST (measured 4 Sep 2026 by trial uploads): Pingen
+ * grades a letter "action_required" when ANY later page has content in the
+ * envelope-window area. A one-page letter passed, the same letter with a blank
+ * second page passed, and with an enclosure page appended it failed until the
+ * enclosure was scaled to 72% and set below the window. Append enclosures that
+ * way (pypdf scale + translate), never at full size.
  * THE 64mm IS LOAD-BEARING — DO NOT "TIDY" IT
  * -------------------------------------------
  * Pingen has NO address parameter. It reads the recipient off the PDF, out of
@@ -49,7 +55,9 @@
  *     "body":      ["First paragraph.", "Second paragraph."],
  *     "signoff":   "Yours faithfully",        // optional
  *     "signatory": "Kevin Brittain",          // optional, defaults from letterhead
- *     "title":     "Director"                 // optional, defaults from letterhead
+ *     "title":     "Director",                // optional, defaults from letterhead
+ *     "compact":   true                       // optional: 10pt and tighter spacing, so an
+ *                                             // approved long letter stays on one page
  *   }
  *
  * The `to` block is what send-letter.py compares against Pingen's own reading,
@@ -116,6 +124,12 @@ function validate(spec) {
 }
 
 function buildHtml(spec) {
+  // "compact": true — a long letter Kevin has already approved word for word
+  // must not be shortened to fit, and Pingen grades THIS template's second
+  // page "action_required" (measured 4 Sep 2026: a one-page letter and a
+  // duplicated page both "valid", the same text flowing onto page 2 refused).
+  // Tighter type and spacing keep every word and keep it on one page.
+  const compact = !!spec.compact;
   const heads = loadLetterheads();
   const head = (spec.from && heads[spec.from]) || {};
   const to = spec.to.map((l) => String(l).trim()).filter(Boolean);
@@ -125,8 +139,8 @@ function buildHtml(spec) {
   return `<!doctype html><meta charset="utf-8"><style>
   @page { size: A4; margin: 0; }
   html, body { margin: 0; padding: 0; }
-  body { font-family: Helvetica, Arial, sans-serif; font-size: 11pt;
-         line-height: 1.45; color: #000; }
+  body { font-family: Helvetica, Arial, sans-serif; font-size: ${compact ? '10pt' : '11pt'};
+         line-height: ${compact ? '1.32' : '1.45'}; color: #000; }
   /* Absolute, because Pingen reads the recipient out of the envelope window
      and this position is measured against the live API. See the header. */
   .to { position: absolute; top: ${ADDRESS_TOP_MM}mm; left: ${ADDRESS_LEFT_MM}mm;
@@ -136,9 +150,9 @@ function buildHtml(spec) {
   .main { padding: 105mm 25mm 30mm 25mm; }
   .date { text-align: right; margin-bottom: 10mm; }
   .ref  { font-weight: bold; margin-bottom: 6mm; }
-  p { margin: 0 0 4.5mm 0; }
-  .sig { margin-top: 14mm; }
-  .sig .name { margin-top: 16mm; }
+  p { margin: 0 0 ${compact ? '3mm' : '4.5mm'} 0; }
+  .sig { margin-top: ${compact ? '8mm' : '14mm'}; }
+  .sig .name { margin-top: ${compact ? '10mm' : '16mm'}; }
   .foot { position: fixed; bottom: 12mm; left: 25mm; right: 25mm;
           text-align: center; font-size: 8pt; color: #444;
           border-top: 0.4pt solid #999; padding-top: 2mm; }
