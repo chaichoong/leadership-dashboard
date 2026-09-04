@@ -166,7 +166,14 @@ const BUILTIN_SITES = {
 function loadSites() {
   let extra = {};
   try { extra = JSON.parse(fs.readFileSync(SITES_FILE, 'utf8')); } catch { /* first run */ }
-  return Object.assign({}, BUILTIN_SITES, extra);
+  // Per-host merge, not per-file: sites.json carries {label, login} written by
+  // `login`, and a whole-entry override silently dropped the builtin's
+  // loginUrl (found 4 Sep 2026 when Adobe vanished from the sign-in picker).
+  const merged = Object.assign({}, BUILTIN_SITES);
+  for (const [host, entry] of Object.entries(extra || {})) {
+    merged[host] = Object.assign({}, BUILTIN_SITES[host] || {}, entry || {});
+  }
+  return merged;
 }
 
 function hostAllowed(url) {

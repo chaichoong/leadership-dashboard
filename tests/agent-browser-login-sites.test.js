@@ -24,3 +24,12 @@ describe('login sites on the allowlist', () => {
     for (const h of Object.keys(sites)) expect(h).not.toMatch(/starling|americanexpress|hl\.co\.uk|equifax/);
   });
 });
+
+describe('loadSites merges sites.json per host', () => {
+  it('a sites.json entry written by `login` does not erase the builtin loginUrl', () => {
+    const src = require_('node:fs').readFileSync(join(ROOT, 'scripts', 'agent-browser.js'), 'utf8');
+    expect(src).toMatch(/Object\.assign\(\{\}, BUILTIN_SITES\[host\] \|\| \{\}, entry \|\| \{\}\)/);
+    // acrobat.adobe.com IS in the live sites.json without a loginUrl; the merged view must still have one.
+    expect(loadSites()['acrobat.adobe.com'].loginUrl).toMatch(/^https:\/\/acrobat\.adobe\.com\//);
+  });
+});
