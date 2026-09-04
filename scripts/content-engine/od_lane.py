@@ -36,6 +36,7 @@ import approval             # noqa: E402
 import publish              # noqa: E402
 import od_prompts as P      # noqa: E402
 import od_infographic       # noqa: E402
+import od_illustrate        # noqa: E402
 
 LONDON = ZoneInfo("Europe/London")
 REPO = os.path.dirname(os.path.dirname(HERE))
@@ -47,8 +48,8 @@ HOLD_FILE = os.path.expanduser("~/.config/od/content_engine_od_hold")
 BRAND = "Operations Director"
 BUSINESS_OD = "reca9ofzhuw13ZzGE"        # Tasks -> Business "Operations Director" (verified 6 Aug 2026, CLAUDE.md)
 OD_SLOT, NEWSLETTER_SLOT = (8, 0), (8, 0)
-GATE_WORDS, AI_THRESHOLD, BANK_DAYS, MAX_MOMENTS, TOPIC_DAYS, TOPIC_COUNT = 3.0, 6, 60, 3, 21, 10
-CTA_LINK = "https://api.leadconnectorhq.com/widget/booking/BcVVhAg1zLaPVEXj5ih0"   # Operations Review Call; the lead magnet replaces it
+GATE_WORDS, AI_THRESHOLD, BANK_DAYS, MAX_MOMENTS, TOPIC_DAYS, TOPIC_COUNT = 3.0, 6, 60, 3, 56, 10   # a topic waits up to 8 weeks: Kevin uploads 4-6 weeks of recordings at a time
+CTA_LINK = "https://operationsdirector.co.uk/book-a-demo/"   # Kevin (4 Sep 2026): the neater booking page, not the raw GHL widget URL; the lead magnet replaces it later
 CLOSING = approval.CLOSING
 STATUS_DRAFTED, STATUS_QC, STATUS_APPROVED, STATUS_SCHEDULED, STATUS_PUBLISHED = "Copies in Progress", "Quality Control", "Approved for Publishing", "Publishing In Progress", "Published"
 MINUTES = {"approved": 2, "minor": 5, "changes": 10, "rejected": 3}    # ESTIMATES per verdict, never presented as measured
@@ -184,8 +185,9 @@ def framework_source(state, text=None):
     used = state.setdefault("used_frameworks", [])
     rows.sort(key=lambda r: (r["name"] in used, r["name"]))
     r = rows[0]; state["used_frameworks"] = (used + [r["name"]])[-40:]
-    src = "Frameworks Library (Kevin's brain): \"%s\" by %s (%s): %s. Apply it to handing ONE daily job to an AI agent; credit the author by name." % (r["name"], r["author"], r["domain"], r["what"])
-    return src, "Frameworks Library: \"%s\" by %s, applied to handing work to an agent" % (r["name"], r["author"])
+    src = ("Frameworks Library (Kevin's brain): \"%s\" (%s): %s. Apply it to handing ONE daily job to an AI agent and write it as Operations Director's OWN method. "
+           "Do NOT name the framework's author (%s) or any other expert unless quoting them word for word in quotation marks (Kevin's rule)." % (r["name"], r["domain"], r["what"], r["author"]))
+    return src, "Frameworks Library: \"%s\" (author %s, not to be named in the post), applied to handing work to an agent" % (r["name"], r["author"])
 
 
 def pain_source(state, rows):
@@ -218,11 +220,51 @@ def build_log_source(state, rows, prs):
     return src, "Build log: agent \"%s\" (register, Status %s) and %d merged pull request%s of the last 14 days" % (name, f.get("Status"), len(rel[:6]), "" if len(rel[:6]) == 1 else "s")
 
 
+def strip_model_ctas(text):
+    """The Friday ask is ours, appended by code with the one approved link. Any call-to-action line or URL the model wrote itself
+    (it has produced the old GHL widget URL from memory) is removed first, so a post never carries two asks or a stale link."""
+    keep = []
+    for line in text.rstrip().split("\n"):
+        if re.search(r"https?://", line) or re.search(r"\bbook (a|your) (free )?(operations review|demo|call)", line, re.I): continue
+        keep.append(line)
+    return re.sub(r"\n{3,}", "\n\n", "\n".join(keep)).rstrip()
+
+
 def strip_tics(text):
     return TICS.sub(lambda m: m.group(2).upper(), text)
 
 
-def rules_check(text, source, day, is_friday=False):
+KNOWN_NAMES = ["Dan Martell", "Austin Chen", "Gino Wickman", "Greg Crabtree", "Patrick Lencioni", "Keith Cunningham", "Alex Hormozi", "John F. DeMartini", "Chris Bailey",
+               "Jordan Belfort", "Gary Keller", "Dave Jenyns", "Robert Kiyosaki", "Andrej Karpathy", "Steve Day", "Dr Steve Day", "Patrick Campbell", "David Skok"]
+
+
+def library_authors(text=None):
+    """Author names from the Frameworks Library index, for the name-dropping check."""
+    if text is None:
+        try: text = open(FRAMEWORKS).read()
+        except OSError: return []
+    names = set()
+    for r in framework_rows(text) + [{"author": c[1]} for c in (tuple(x.strip() for x in l.strip().strip("|").split("|")) for l in text.splitlines() if l.startswith("| ")) if len(c) > 2]:
+        for a in re.split(r"[/,+&]| et al| and ", r.get("author", "")):
+            a = re.sub(r"\(.*?\)", "", a).strip()
+            if len(a.split()) in (2, 3) and a[0].isupper() and not re.search(r"academy|ventures|inc|ltd|group|press|labs|\bthe\b", a, re.I): names.add(a)
+    return sorted(names)
+
+
+def name_drops(text, names):
+    """Expert names used without a direct quote. A name is allowed when a quotation (8+ characters in quote marks) sits within
+    160 characters of it, which is how a verbatim quote is attributed; a bare "X breaks this into three tiers" is not."""
+    out = []
+    for n in names:
+        if not n or n.lower() in ("kevin brittain",): continue
+        for m in re.finditer(r"\b" + re.escape(n) + r"\b", text):
+            window = text[max(0, m.start() - 160): m.end() + 160]
+            if not re.search(r"[\"“][^\"”]{8,}[\"”]", window):
+                out.append(n); break
+    return out
+
+
+def rules_check(text, source, day, is_friday=False, names=None):
     """(fixed_text, issues). Em dashes and stock phrases fixed in place; everything else reported, never rewritten."""
     t = text.replace(" — ", ". ").replace("—", ", ").replace(" – ", ", ").strip()
     issues = ["em dash replaced"] if t != text.strip() else []
@@ -251,6 +293,7 @@ def rules_check(text, source, day, is_friday=False):
         if num == "90%" or (num.rstrip("%") in ("1", "2", "3", "4", "5", "6", "7", "10") and "%" not in num): continue
         if num not in source and num.rstrip("%") not in source: issues.append("number %s not in the source" % num)
     if "runpreneur" in low: issues.append("brand word Runpreneur")
+    for n in name_drops(t, list(KNOWN_NAMES) + list(names or [])): issues.append("names another expert without a direct quote: %s" % n)
     return t, sorted(set(issues))
 
 
@@ -318,7 +361,7 @@ def build_card(post, mode, topics=None):
                "as 'Changes requested' and I will write the post from it. Nothing is written from nothing." % (date.strftime("%A %-d %B"), P.SHAPES[post["day"]]["name"]))
     parts = [ask]
     if post.get("text"): parts.append("The post, as written:\n\n" + post["text"])
-    if post.get("card_url"): parts.append("The picture (attached to the post): " + post["card_url"])
+    if post.get("card_url"): parts.append("The picture (attached to the post): %s%s" % (post["card_url"], (" (%s)" % post["picture"]) if post.get("picture") else ""))
     if post.get("pdf_url"): parts.append("Carousel version (PDF, for a LinkedIn document post once that route is proven): " + post["pdf_url"])
     if post.get("visual") and not post.get("card_url"): parts.append("The picture: " + json.dumps(post["visual"])[:400])
     parts.append("Where it came from:\n" + (post.get("source_line") or ""))
@@ -537,8 +580,8 @@ def write_post(day, date, source, voice, feedback=""):
         if u2["score"] >= u["score"]: text, visual, u = t2, (v2 or visual), u2
         redrafted = True
     if day == "Fri":
-        text = text.rstrip() + "\n\nIf your business only runs when you are in it, book a free Operations Review Call: " + CTA_LINK
-    text, issues = rules_check(text, source, day, is_friday=(day == "Fri"))
+        text = strip_model_ctas(text) + "\n\nIf your business only runs when you are in it, book a free Operations Review Call: " + CTA_LINK
+    text, issues = rules_check(text, source, day, is_friday=(day == "Fri"), names=library_authors())
     hook = text.split("\n")[0].strip()
     try:
         if visual: od_infographic.build_html(shape["visual"], visual)
@@ -549,15 +592,26 @@ def write_post(day, date, source, voice, feedback=""):
 
 
 def render_visual(p):
+    """The picture: Gemini's illustrated infographic first (Kevin, 4 Sep 2026), text-checked; the code-drawn template as the fallback.
+    The post records which one it got so the card can say so."""
     if not p.get("visual"): return
     os.makedirs(CARDS_DIR, exist_ok=True)
+    template = P.SHAPES[p["day"]]["visual"]
     png = os.path.join(CARDS_DIR, "od-%s.png" % p["date"]); pdf = os.path.join(CARDS_DIR, "od-%s.pdf" % p["date"]) if p["day"] == "Tue" else None
-    try:
-        od_infographic.render(P.SHAPES[p["day"]]["visual"], p["visual"], png, pdf)
-        p["card_png"] = png
-        if pdf and os.path.exists(pdf): p["card_pdf"] = pdf
-    except SystemExit as ex:
-        p.setdefault("issues", []).append("picture not rendered"); print("od draft: picture for %s not rendered (%s)" % (p["date"], str(ex)[:120]))
+    for k in ("card_png", "card_pdf", "card_url", "pdf_url"): p.pop(k, None)
+    path, note = od_illustrate.illustrate(template, p["visual"], png)
+    if path:
+        p["card_png"] = path; p["picture"] = note
+    else:
+        p["picture"] = "code-drawn template (%s)" % note
+        try:
+            od_infographic.render(template, p["visual"], png, None); p["card_png"] = png
+        except SystemExit as ex:
+            p.setdefault("issues", []).append("picture not rendered"); print("od draft: picture for %s not rendered (%s)" % (p["date"], str(ex)[:120]))
+    if pdf:
+        try: od_infographic.render(template, p["visual"], png + ".template.png", pdf); os.remove(png + ".template.png"); p["card_pdf"] = pdf
+        except (SystemExit, OSError): pass
+    print("od draft: picture for %s: %s" % (p["date"], p["picture"]))
 
 
 def draft(week=None, dry_run=False):
@@ -637,8 +691,49 @@ def draft_newsletter(state, monday, voice):
 
 # ---------- topics (the recording brief) ----------
 
+BRIEF_PREFIX = "RECORDING BRIEF: "
+STATUS_TOPIC_WAITING, STATUS_TOPIC_RECORDED = "New Upload", "Editing and Optimisation in Progress"
+
+
+def brief_rows():
+    f = 'AND({Category}="%s", {Content Type}="Written", FIND("%s", {Content Name})=1)' % (BRAND, BRIEF_PREFIX)
+    return watch._airtable("GET", watch.API + "?" + urllib.parse.urlencode({"filterByFormula": f, "pageSize": 50}) + "&fields[]=Content+Name&fields[]=Record+Status&fields[]=Notes&fields[]=Feedback").get("records", [])
+
+
+def sync_topics_from_airtable(topics, rows):
+    """Kevin's tick: a brief record moved off New Upload (in the app or in Airtable) means he recorded it. Returns the topics changed."""
+    by_title = {(r["fields"].get("Content Name") or "")[len(BRIEF_PREFIX):].strip().lower(): r for r in rows}
+    changed = []
+    for t in topics:
+        r = by_title.get(t["title"].lower())
+        if r and r["fields"].get("Record Status") != STATUS_TOPIC_WAITING and not t.get("recorded"):
+            t["recorded"] = "kevin"; t["recorded_on"] = dt.date.today().isoformat(); changed.append(t["title"])
+        if r: t["record"] = r["id"]
+    return changed
+
+
+def push_topics_to_airtable(topics, rows, dry_run=False):
+    """One record per waiting topic in the Content Machine table (Category Operations Director, Written, RECORDING BRIEF: title), so the
+    brief shows in the app and Kevin can tick a topic recorded by moving its status. Recorded topics are marked, never deleted."""
+    by_title = {(r["fields"].get("Content Name") or "")[len(BRIEF_PREFIX):].strip().lower(): r for r in rows}
+    made = 0
+    for t in topics:
+        body = "%s\nPoints: %s\nNumber to state: %s\nFeeds: %s" % (t.get("angle", ""), "; ".join(t.get("points", [])), t.get("number", ""), t.get("feeds", ""))
+        r = by_title.get(t["title"].lower())
+        if r is None and not t.get("recorded") and not dry_run:
+            rec = watch._airtable("POST", watch.API, {"fields": {"Content Name": BRIEF_PREFIX + t["title"], "Category": BRAND, "Content Type": "Written", "Record Status": STATUS_TOPIC_WAITING,
+                                                                  "Responsible": "Content Engine (AI)", "Notes": body}, "typecast": True})
+            t["record"] = rec["id"]; made += 1
+        elif r is not None and t.get("recorded") and r["fields"].get("Record Status") == STATUS_TOPIC_WAITING and not dry_run:
+            watch._airtable("PATCH", watch.API + "/" + r["id"], {"fields": {"Record Status": STATUS_TOPIC_RECORDED, "Notes": (r["fields"].get("Notes") or "") + "\nRecorded (%s), mined from the transcript." % t.get("recorded_on", "")}})
+    return made
+
+
 def topics(dry_run=False):
     state = _load(STATE); bank = _load(BANK)
+    try: rows = brief_rows()
+    except Exception as ex: rows = []; print("od topics: brief records unreadable (%s)" % str(ex)[:80])
+    for title in sync_topics_from_airtable(state.get("topics", []), rows): print("od topics: Kevin marked recorded: %s" % title)
     counts = {}
     for e in bank.values():
         if e.get("verdict") == "OD":
@@ -657,9 +752,10 @@ def topics(dry_run=False):
     body = "# Recording brief: %d topics for your runs (written %s)\n\nSay them on camera in your own words; the transcript becomes the source. A topic not recorded in %d days drops off.\n\n" % (len(merged), dt.date.today().isoformat(), TOPIC_DAYS)
     body += "\n".join("%d. %s\n   Angle: %s\n   Points: %s\n   Number to state: %s\n   Feeds: %s\n" % (t["n"], t["title"], t.get("angle", ""), "; ".join(t.get("points", [])), t.get("number", ""), t.get("feeds", "")) for t in merged)
     if dry_run: print(body); return
-    state["topics"] = merged; _save(STATE, state)
+    state["topics"] = merged
+    made = push_topics_to_airtable(merged, rows); _save(STATE, state)
     with open(POINTS, "w") as fh: fh.write(body)
-    print(body)
+    print(body); print("od topics: %d new brief record%s in the Content Machine table" % (made, "" if made == 1 else "s"))
 
 
 # ---------- cards (O5) ----------
@@ -857,7 +953,7 @@ def selftest():
     assert pick_moment(bank, "Method", set(), today, week_episodes={1992, 1979}) is None, "an episode used this week is never used twice"
     lib = "| Framework | Author / Source | Domain | What it does | Source doc |\n|---|---|---|---|---|\n| AGENT (build method) | Dan Martell | AI / Agents | Five steps to build an agent | doc |\n| Level 10 Meeting | Gino Wickman | Operations / Team | Weekly meeting structure | doc |\n| Pricing Triangle | Skok | Pricing | Value metric | doc |\n"
     rows = framework_rows(lib); assert [r["name"] for r in rows] == ["AGENT (build method)", "Level 10 Meeting"], rows
-    st = {}; s1, l1 = framework_source(st, lib); assert "Dan Martell" in s1 and "credit the author" in s1; s2, _ = framework_source(st, lib); assert "Gino Wickman" in s2
+    st = {}; s1, l1 = framework_source(st, lib); assert "Dan Martell" in s1 and "Do NOT name" in s1; s2, _ = framework_source(st, lib); assert "Gino Wickman" in s2
     prow = [{"id": "p1", "fields": {"Pain Signal": "Hiring a part-time bookkeeper, 20 hours, Flint. Jane Whitehouse, founder.", "Signal Source": "Job Ad (Indeed)"}}]
     st2 = {}; s, l = pain_source(st2, prow); assert "NEVER name" in s and "Job Ad" in l and st2["used_pain"] == ["p1"] and pain_source(st2, prow) == (None, None)
     rrows = [{"id": "a", "fields": {"Name": "Inbound Comms Triage", "Status": "Live", "What It Does": "Sorts the inbox.", "Department": "Operations", "Score Metric": "x"}}]
@@ -874,6 +970,13 @@ def selftest():
     t, issues = rules_check(good + " We saved 14 hours.", "saved 14 hours a week", "Mon"); assert issues == [], issues
     t, issues = rules_check(good + " It costs £350 a month. Book a call: https://x", "", "Fri", is_friday=True); assert not any("figure" in i or "ask" in i for i in issues)
     assert strip_tics("Plan it.\n\nThe reality is, a plan in memory is not a plan.") == "Plan it.\n\nA plan in memory is not a plan."
+    assert strip_model_ctas("Five signs.\n\n1. A.\n\nBook a free Operations Review Call: https://api.leadconnectorhq.com/widget/booking/X\n\nLast line.") == "Five signs.\n\n1. A.\n\nLast line."
+    assert name_drops("Austin Chen breaks this into three tiers.", KNOWN_NAMES) == ["Austin Chen"]
+    assert name_drops('As Austin Chen puts it, "the agent owns the work, no check needed". Fine.', KNOWN_NAMES) == [], "a verbatim quote is allowed"
+    t, issues = rules_check(good + " Dan Martell says so.", "", "Mon"); assert any("names another expert" in i for i in issues)
+    assert "Dan Martell" in library_authors(lib) and "Gino Wickman" in library_authors(lib) and "Skok" not in library_authors(lib)
+    assert "not to be named" in framework_source({}, lib)[1] and "Do NOT name" in framework_source({}, lib)[0]
+    assert CTA_LINK.startswith("https://operationsdirector.co.uk/") and TOPIC_DAYS == 56
     u = parse_usefulness('{"score": 8, "usable_today": true, "about_an_agent_doing_a_job": true, "has_method_or_number": true, "hook_names_a_cost_or_contrast": false, "reasons": ["hook is soft — fix it"]}')
     assert u["score"] == 8 and u["flags"]["usable_today"] and u["reasons"] == ["hook is soft, fix it"] and parse_usefulness("nope") is None, "no em dash reaches a card, even from the judge"
     nl = parse_newsletter("TITLE: Hand your inbox to an agent\nSHARE: This week: the inbox.\nBODY:\nPara one.\n\nPara two."); assert nl["title"].startswith("Hand") and nl["body"] == "Para one.\n\nPara two." and parse_newsletter("x") is None
@@ -883,6 +986,9 @@ def selftest():
     fresh = [{"title": "old kept", "angle": "dup"}] + [{"title": "New %d" % i, "angle": "a"} for i in range(12)]
     merged = merge_topics(old, fresh, dt.date(2026, 9, 4)); assert len(merged) == TOPIC_COUNT and merged[0]["title"] == "Old kept" and merged[1]["title"] == "New 0" and [t["n"] for t in merged] == list(range(1, 11))
     assert "1. Old kept" in topics_text(merged) and topics_text([]) == "(no topics yet)"
+    rows = [{"id": "b1", "fields": {"Content Name": BRIEF_PREFIX + "Old kept", "Record Status": STATUS_TOPIC_RECORDED}}, {"id": "b2", "fields": {"Content Name": BRIEF_PREFIX + "New 0", "Record Status": STATUS_TOPIC_WAITING}}]
+    ch = sync_topics_from_airtable(merged, rows); assert ch == ["Old kept"] and merged[0]["recorded"] == "kevin" and merged[1]["record"] == "b2" and not merged[1].get("recorded")
+    assert push_topics_to_airtable(merged, rows, dry_run=True) == 0
     assert record_name(dt.date(2026, 9, 7), "Mon", "Most owners answer every email.") == "OD Post 2026-09-07 Mon The mistake - Most owners answer every email"
     assert task_name(dt.date(2026, 9, 8), "Tue", "Hook.") == "CONTENT (OD): Tue 8 Sep, The method: Hook"
     post = {"date": "2026-09-08", "day": "Tue", "shape": "The method", "episode": 1992, "quote": "q", "text": "Body of post", "hook": "Hook line", "issues": ["stock phrase removed"],
@@ -905,7 +1011,7 @@ def selftest():
     import tempfile as _tf
     globals()["HOLD_FILE"] = os.path.join(_tf.gettempdir(), "od-hold-test-%d" % os.getpid()); assert not on_hold(); open(HOLD_FILE, "w").write(""); assert on_hold(); os.remove(HOLD_FILE)
     assert BUSINESS_OD != approval.BUSINESS_PERSONAL and publish.BRANDS[BRAND]["category"] == BRAND and AI_THRESHOLD == 6
-    print(json.dumps({"checks": 52, "failed": []}))
+    print(json.dumps({"checks": 63, "failed": []}))
 
 
 if __name__ == "__main__":

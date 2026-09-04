@@ -17,9 +17,10 @@ const selftest = (file, min) => {
 };
 
 describe('content-engine OD lane', () => {
-  it('od_lane selftest: gate, sources, rules check, usefulness, cards, newsletter, topics', () => selftest('od_lane.py', 52));
+  it('od_lane selftest: gate, sources, rules check, usefulness, cards, newsletter, topics', () => selftest('od_lane.py', 62));
   it('od_prompts selftest: the brief in every prompt, shapes, visual split, voice profile loader', () => selftest('od_prompts.py', 12));
   it('od_infographic selftest: five templates, escaping, a real render', () => selftest('od_infographic.py', 9), 120000);
+  it('od_illustrate selftest: Gemini prompt, required lines, the text check, no-key fallback', () => selftest('od_illustrate.py', 9));
   it('publish selftest including the brand guard (cross-brand refused by name)', () => selftest('publish.py', 32));
 
   it('the prompt copies the playbook exactly: locked pricing and the five hot-buttons in the customers\' words', () => {
