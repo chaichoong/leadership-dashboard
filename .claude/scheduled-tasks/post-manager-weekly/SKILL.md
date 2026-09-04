@@ -154,15 +154,36 @@ If PDFs are found, process each one through this pipeline:
    deadline at all.
 
    The `Deadline:` line in the email is not decoration: it is the one place
-   the date survives outside the PDF's prose, and the enforcement chain reads
-   it (BUILT 25 Aug 2026). Inbound triage — the inbound-email-triage skill and
-   the Inbound Comms page both — writes it into the task's Due Date and ticks
-   Hard Deadline, which the auto-rescheduler never rolls. From there
-   scripts/loop-health.py reports it under NOT MOVING from 3 days out
-   (rule "deadline"), and the daily `hard-deadline-passed-still-open`
-   invariant in scripts/check-data-invariants.py fails the sweep if the date
-   passes with the task still open. Omit the line and that whole chain goes
-   quiet — which is exactly what happened before 25 Aug 2026.
+   the date survives outside the PDF's prose. Two pieces of code read it, and
+   neither of them asks a model what the deadline is:
+
+   - `parse_deadline_line()` in `scripts/create-agent-task.py` (the agent
+     path). It reads the line off the FULL email body, which
+     `scripts/inbound-triage.py` caches at scan time — the task's own
+     description holds only a truncated Gmail snippet that stops before the
+     line, so that is the only moment the whole body exists. It then sets Due
+     Date and ticks Hard Deadline in the same write, and puts
+     `DEADLINE FROM THE LETTER: <date>` on the task so a human can see it.
+   - `parseDeadlineLine()` in `follow-up.html` (the Inbound Comms page), which
+     does the same for a task Kevin raises by hand.
+
+   Hard Deadline is what the auto-rescheduler never rolls. From there
+   `scripts/loop-health.py` reports it under NOT MOVING from 3 days out (rule
+   "deadline"); the daily `hard-deadline-passed-still-open` invariant fails
+   the sweep if the date passes with the task still open; and
+   `stated-deadline-is-a-hard-deadline` fails it if a stated date ever reaches
+   a task with the box unticked. Omit the line and that whole chain goes quiet.
+
+   What this paragraph used to say, and why it mattered (4 Sep 2026, finding
+   20260904-daily-ops-450): it stated the chain had been BUILT on 25 Aug 2026
+   and that inbound triage wrote the date. Only the browser page ever did. The
+   agent path — which has created every post task since the Gmail labels
+   started routing to agents on 24 Aug — left both fields to the model's
+   judgement, and the model almost never used them. Measured on the live base:
+   448 tasks carried `POST:` in their name, SIX were marked Hard Deadline, and
+   not one of the 448 carried a `Deadline:` line anywhere in its description.
+   A skill that asserts a guard is working is worse than silence, because it
+   stops anyone checking.
 
    You still MUST NOT pay anything, contact a council, or answer a court. Tier 1
    work is prepared for Kevin's approval, never carried out.

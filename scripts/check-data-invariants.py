@@ -284,6 +284,45 @@ INVARIANTS = [
         "fields": ["Task Name", "Status", "Due Date", "Hard Deadline", "Deferred Until"],
     },
     {
+        # THE OTHER HALF OF THE SAME INCIDENT (4 Sep 2026, finding
+        # 20260904-daily-ops-450). The invariant above only ever sees a task
+        # that is already MARKED Hard Deadline — and almost none were. On
+        # 4 Sep 2026, 448 tasks carried `POST:` in their name and SIX had the
+        # box ticked, so the guard above had been reading an empty field and
+        # reporting nothing wrong for two months. The date was never lost in
+        # the letter: the post-manager routine lifts it out and emails it on a
+        # line of its own ("Deadline: 2026-09-29"). Nothing in the agent path
+        # read that line, and the description only ever held a truncated Gmail
+        # snippet that stops before it, so the date never reached Airtable at
+        # all. scripts/create-agent-task.py now parses it and stamps Due Date
+        # and Hard Deadline together; this asserts the stamp actually happened.
+        #
+        # Scope is mail-derived tasks only (POST: / INBOUND:), because there a
+        # stated deadline IS the obligation. The control is deliberately the
+        # honest population — tasks whose description states a date — which is
+        # small and brand new, so `field_probe` keeps an empty day reporting
+        # WAITING rather than BROKEN while still catching a field rename.
+        "name": "stated-deadline-is-a-hard-deadline",
+        "table": TASKS,
+        "incident": "3 Jul – 4 Sep 2026 — the post-manager stated the deadline on every scanned letter; 442 of 448 POST tasks reached Airtable with Hard Deadline empty, so every guard keyed on it stayed silent",
+        "asserts": "mail-derived task whose description states a deadline date => Hard Deadline is ticked",
+        "violation": (
+            "AND(OR(FIND('POST:', {Task Name}) > 0, FIND('INBOUND:', {Task Name}) > 0), "
+            "OR(FIND('Deadline: 20', {Description}) > 0, "
+            "FIND('DEADLINE FROM THE LETTER: 20', {Description}) > 0), "
+            "{Hard Deadline} != 1)"
+        ),
+        "control": (
+            "AND(OR(FIND('POST:', {Task Name}) > 0, FIND('INBOUND:', {Task Name}) > 0), "
+            "OR(FIND('Deadline: 20', {Description}) > 0, "
+            "FIND('DEADLINE FROM THE LETTER: 20', {Description}) > 0))"
+        ),
+        "control_means": "mail-derived tasks whose description states a deadline date (the population this chain must stamp)",
+        "field_probe": ("OR(LEN({Task Name} & '') >= 0, LEN({Description} & '') >= 0, "
+                        "{Hard Deadline} >= 0)"),
+        "fields": ["Task Name", "Due Date", "Hard Deadline"],
+    },
+    {
         # `Completion Date` is a dateTime and `Due Date` is a plain date, which
         # Airtable reads as midnight. So the original formula
         # (`{Completion Date} <= {Due Date}`) scored EVERY task finished on its
