@@ -258,10 +258,18 @@ def digest_append(entry):
 
 
 def write_scan_cache(messages):
-    """id → {sender, subject, threadId, internalDate} for every message the
-    scan returned, so act/note can log context without taking email text as
-    arguments. Merged over the existing cache (multi-cycle runs), trimmed to
-    30 days so it cannot accrete for ever."""
+    """id → {sender, subject, threadId, internalDate, auto_reply, deadline}
+    for every message the scan returned, so act/note can log context without
+    taking email text as arguments. Merged over the existing cache
+    (multi-cycle runs), trimmed to 30 days so it cannot accrete for ever.
+
+    `deadline` is the one field derived from the FULL body, and this is the
+    only moment the full body exists: the task's description carries a
+    truncated snippet that stops before the post-manager's `Deadline:` line,
+    which is why no POST task in the base had ever carried the date
+    (4 Sep 2026, finding 20260904-daily-ops-450). Parsed by the gate's own
+    function — imported, never copied."""
+    parse_deadline = _load_gate().parse_deadline_line
     cutoff_ms = int((datetime.now() - timedelta(days=30)).timestamp() * 1000)
     cache = {k: v for k, v in read_scan_cache().items()
              if (v.get("internalDate") or cutoff_ms) >= cutoff_ms}
@@ -274,6 +282,9 @@ def write_scan_cache(messages):
             # read back by act (lane refusal) and by the task gate (thread
             # refusal) — the reason string, so the digest can say why
             "auto_reply": m.get("auto_reply") or None,
+            # The date the letter itself states. Read back by the task gate,
+            # which stamps Due Date + Hard Deadline from it deterministically.
+            "deadline": parse_deadline(m.get("body", "")),
         }
     d = base_dir()
     d.mkdir(parents=True, exist_ok=True)

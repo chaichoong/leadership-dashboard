@@ -358,6 +358,10 @@ itself:
   passes with the task still open. If the letter's deadline is already past,
   keep it as the Due Date (the invariant alarm firing is CORRECT) and say so
   in the Description. `Deadline: none` or a malformed date = no deadline.
+  Since 4 Sep 2026 the gate does this itself: `create-agent-task.py` parses
+  the line off the full email body and stamps both fields before it writes,
+  and a parsed date always wins. These instructions stay as the fallback for
+  mail that carries no such line — do not stop following them.
 - `flduCtmQGpOA4eWaj` Team Member: `["reciHUAEcEkbctnZ6"]` (AI CEO — the
   dispatch engine picks it up and routes it to the right role agent)
 - NO Assignee — a blank Assignee is the agent-owned convention.

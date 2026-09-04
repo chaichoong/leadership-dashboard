@@ -225,6 +225,116 @@ def load_scan_cache():
         return {}
 
 
+# ─── THE LETTER'S OWN `Deadline:` LINE IS NOT A JUDGEMENT CALL ──────────
+#
+# 4 Sep 2026, finding 20260904-daily-ops-450. The post-manager routine OCRs
+# every scanned letter, lifts the one date that matters out of its prose and
+# emails it to Kevin on a line of its own:
+#
+#     Deadline: 2026-09-29          (or "Deadline: none")
+#
+# Nothing in the AGENT path ever read that line. follow-up.html has read it
+# since 25 Aug 2026 (parseDeadlineLine), but inbound triage — the path that
+# has created every post task since the labels started routing to agents on
+# 24 Aug — left both Due Date and Hard Deadline entirely to the model's
+# judgement. Measured on 4 Sep 2026: 448 tasks carry `POST:` in their name and
+# SIX are marked Hard Deadline, and not one of the 448 has a `Deadline:` line
+# anywhere in its description, because the description only ever held a
+# truncated Gmail snippet that stops before the line. So the date never
+# reached Airtable at all, and every downstream guard that keys on Hard
+# Deadline — loop-health's "deadline" rule, the daily
+# `hard-deadline-passed-still-open` invariant — has been looking at an empty
+# field and reporting nothing wrong.
+#
+# The fix is deterministic on purpose. A stated date is read by regex out of
+# the full email body at scan time and stamped here; the model is not asked.
+# `hard_deadline_correction` below stays as the fallback for mail that carries
+# no such line, and never overrides a parsed one.
+DEADLINE_MARKER = "DEADLINE FROM THE LETTER: "
+
+# The line survives quoting (`> Deadline: …`) and HTML-escaped quoting
+# (`&gt; Deadline: …`), which is the shape it actually arrives in.
+POST_DEADLINE_LINE_RE = re.compile(
+    r"^[>\s]*(?:DEADLINE FROM THE LETTER|Deadline)\s*:\s*(\S+)",
+    re.I | re.M)
+
+# What the post-manager writes when the letter genuinely names no date.
+DEADLINE_NO_DATE_WORDS = {"none", "n/a", "na", "nil", "unknown", "tbc", "-", ""}
+
+
+def _iso_or_none(value):
+    """A whole YYYY-MM-DD date, or None. Anchored at both ends: the
+    post-manager is told to write exactly that, and half-reading something
+    longer ("2026-09-29/2026-10-02") would invent a hard date, which is the
+    one date the rest of the system refuses to move. A missing zero
+    ("2026-9-5") is still unambiguous, so it is read rather than dropped —
+    dropping a real deadline is the bug this whole path exists to fix."""
+    m = re.match(r"^(\d{4})-(\d{1,2})-(\d{1,2})$", str(value or "").strip())
+    return _mk(int(m.group(1)), int(m.group(2)), int(m.group(3))) if m else None
+
+
+def parse_deadline_line(text):
+    """The date stated on a `Deadline:` line, as YYYY-MM-DD, or None.
+
+    Deterministic twin of parseDeadlineLine() in follow-up.html. Returns None
+    for: no line, `Deadline: none`, an unparseable date, and — deliberately —
+    two lines stating DIFFERENT dates, because we then do not know which one
+    the letter meant. A past date is returned like any other: a response
+    window that has already closed is exactly what Kevin must be shown."""
+    body = str(text or "").replace("\r", "").replace("&gt;", ">")
+    found = set()
+    for m in POST_DEADLINE_LINE_RE.finditer(body):
+        value = m.group(1).strip()
+        if value.lower().strip(".,;") in DEADLINE_NO_DATE_WORDS:
+            continue
+        parsed = _iso_or_none(value)
+        if parsed:
+            found.add(parsed)
+    return found.pop().isoformat() if len(found) == 1 else None
+
+
+def deadline_from_letter(fields, cache):
+    """(iso, where it was read) for the deadline this task's mail states.
+
+    Two sources, in order of authority: the task's own name and description
+    (a caller that pasted the letter through), then the triage scan cache,
+    which parses the line out of the FULL Gmail body at scan time — the only
+    moment the whole body exists. The description never holds it, because it
+    carries a truncated snippet."""
+    text = "%s\n%s" % (fields.get(F["name"], ""), fields.get(F["desc"], ""))
+    iso = parse_deadline_line(text)
+    if iso:
+        return (iso, "the task's own text")
+    threads = THREAD_URL_RE.findall(str(fields.get(F["inboundUrl"], "")))
+    found = set()
+    for tid in threads:
+        for v in (cache or {}).values():
+            if isinstance(v, dict) and v.get("threadId") == tid and v.get("deadline"):
+                found.add(str(v["deadline"]))
+    return (found.pop(), "the scanned email body") if len(found) == 1 else None
+
+
+def apply_letter_deadline(fields, cache):
+    """Stamp Due Date and Hard Deadline from the letter's stated deadline.
+
+    Mutates `fields` and returns the explanation, or None when the mail states
+    no date. Both writes happen together: a Due Date without the flag is a
+    date the auto-rescheduler rolls away, and the flag without the date is a
+    guard with nothing to check. The marker line is appended so the date is
+    visible on the task itself, and so the live invariant can see it."""
+    got = deadline_from_letter(fields, cache)
+    if not got:
+        return None
+    iso, source = got
+    fields[F["due"]] = iso
+    fields[F["hardDeadline"]] = True
+    desc = str(fields.get(F["desc"], "") or "")
+    if DEADLINE_MARKER not in desc:
+        fields[F["desc"]] = (desc.rstrip() + "\n\n" + DEADLINE_MARKER + iso).strip()
+    return ("Due Date set to %s and Hard Deadline ticked from the `Deadline:` "
+            "line in %s" % (iso, source))
+
+
 # ─── A HARD DEADLINE IS THE DATE THE LETTER STATES ───────────────────────
 #
 # 4 Sep 2026, finding 20260904-daily-ops-phase2-447. The daily
@@ -904,20 +1014,30 @@ def cmd_create(fields, force=False, dry_run=False):
         print("fields JSON must carry the Task Name field " + F["name"], file=sys.stderr)
         return 1
 
-    # Correct a hard deadline that carries the receipt date BEFORE anything
-    # reads the due date — the fold path in build_update compares due dates and
-    # would otherwise keep the wrong one as "the earlier hard date".
-    corrected = hard_deadline_correction(fields, date.today())
-    if corrected:
-        fields[F["due"]] = corrected[0]
-        print("DUE DATE CORRECTED: %s" % corrected[1], file=sys.stderr)
+    cache = load_scan_cache()
+
+    # The letter's own `Deadline:` line decides the date, in code. Both this
+    # and the correction below run BEFORE the board read, because the fold
+    # path in build_update compares due dates and would otherwise keep the
+    # wrong one as "the earlier hard date".
+    stamped = apply_letter_deadline(fields, cache)
+    if stamped:
+        print("HARD DEADLINE STAMPED: %s" % stamped, file=sys.stderr)
+    else:
+        # Fallback for mail that states no `Deadline:` line: correct a hard
+        # deadline the model set to the receipt date. Never runs over a
+        # parsed date — a stated deadline is not a judgement call.
+        corrected = hard_deadline_correction(fields, date.today())
+        if corrected:
+            fields[F["due"]] = corrected[0]
+            print("DUE DATE CORRECTED: %s" % corrected[1], file=sys.stderr)
 
     verdict = {"action": "create", "key": dupe_task_key(fields.get(F["name"], ""))}
     if not force:
         # Refuse BEFORE the board read: an auto-reply is not a matter, so the
         # duplicate question never arises. --force is the human override and
         # is logged by the caller's own reason.
-        why = auto_reply_refusal(fields, load_scan_cache())
+        why = auto_reply_refusal(fields, cache)
         if why:
             print(json.dumps({"action": "refused", "reason": why,
                               "key": verdict["key"], "dryRun": dry_run}))
@@ -1178,6 +1298,74 @@ def selftest():
           corr("INBOUND: court by 3 Jan", "2026-12-20") == "2027-01-03")
     check("no due date means nothing to correct",
           corr("INBOUND: pay by 29 Sep", "") is None)
+
+    # ── The letter's stated `Deadline:` line (finding …-450) ────────────
+    # The exact shape the post-manager emails, and the exact shape it arrives
+    # in once Gmail has quoted it.
+    POST_MAIL = ("This document was scanned from physical post on 16 August 2026.\n\n"
+                 "Sender: Companies House\n"
+                 "Summary: ACTION TO STRIKE OFF SOCIAL HOUSING ESTATES LIMITED\n"
+                 "Recommended action: file the outstanding accounts\n"
+                 "Urgency: high\n"
+                 "Deadline: 2026-09-29\n\n"
+                 "The PDF is attached.")
+    check("a real date is read off the Deadline line",
+          parse_deadline_line(POST_MAIL) == "2026-09-29")
+    check("the line survives Gmail quoting and HTML escaping",
+          parse_deadline_line("&gt; Urgency: high\n&gt; Deadline: 2026-09-29\n") == "2026-09-29")
+    check("'Deadline: none' is not a date",
+          parse_deadline_line(POST_MAIL.replace("2026-09-29", "none")) is None)
+    check("no Deadline line at all reads as no date",
+          parse_deadline_line("Sender: Fylde Council\nUrgency: low\n") is None)
+    check("a malformed date is refused rather than guessed",
+          parse_deadline_line("Deadline: 2026-13-45\n") is None and
+          parse_deadline_line("Deadline: 29 Sept\n") is None)
+    check("half a date range is never read as the deadline",
+          parse_deadline_line("Deadline: 2026-09-29/2026-10-02\n") is None)
+    check("a missing zero is still an unambiguous date",
+          parse_deadline_line("Deadline: 2026-9-5\n") == "2026-09-05")
+    check("a date already passed is still returned — a closed window is the alarm",
+          parse_deadline_line("Deadline: 2026-08-01\n") == "2026-08-01")
+    check("two lines stating DIFFERENT dates are ambiguous, so neither is used",
+          parse_deadline_line("Deadline: 2026-09-29\nDeadline: 2026-10-02\n") is None)
+    check("the same date stated twice is not ambiguous",
+          parse_deadline_line("Deadline: 2026-09-29\n"
+                              "DEADLINE FROM THE LETTER: 2026-09-29") == "2026-09-29")
+
+    # The stamp itself: Due Date and Hard Deadline move together, or the
+    # guards downstream have nothing to read.
+    post_fields = {F["name"]: "INBOUND: POST: Companies House - ActionToStrikeOff",
+                   F["desc"]: "Review and action inbound email.",
+                   F["due"]: "2026-09-05",
+                   F["inboundUrl"]: "https://mail.google.com/mail/u/0/#all/1a01446d57c3f497"}
+    scan = {"m1": {"threadId": "1a01446d57c3f497", "deadline": "2026-09-29"}}
+    f = dict(post_fields)
+    why = apply_letter_deadline(f, scan)
+    check("the scanned body's deadline becomes Due Date AND Hard Deadline",
+          why and f[F["due"]] == "2026-09-29" and f[F["hardDeadline"]] is True)
+    check("the date is written onto the task where a human can see it",
+          DEADLINE_MARKER + "2026-09-29" in f[F["desc"]])
+    check("stamping twice does not duplicate the marker",
+          apply_letter_deadline(f, scan) and f[F["desc"]].count(DEADLINE_MARKER) == 1)
+    f2 = dict(post_fields, **{F["desc"]: "body says\nDeadline: 2026-10-02"})
+    apply_letter_deadline(f2, scan)
+    check("the task's own text outranks the cache",
+          f2[F["due"]] == "2026-10-02")
+    f3 = dict(post_fields)
+    check("mail with no stated deadline is left entirely alone",
+          apply_letter_deadline(f3, {"m1": {"threadId": "1a01446d57c3f497",
+                                            "deadline": None}}) is None and
+          f3[F["due"]] == "2026-09-05" and F["hardDeadline"] not in f3)
+    f4 = dict(post_fields)
+    check("an unscanned thread stamps nothing",
+          apply_letter_deadline(f4, {}) is None and F["hardDeadline"] not in f4)
+    # The whole point: a parsed date is never a judgement call, so the
+    # receipt-date correction must not get to run over it.
+    f5 = dict(post_fields, **{F["name"]: "INBOUND: POST: pay by 29 Sep",
+                              F["hardDeadline"]: True})
+    apply_letter_deadline(f5, scan)
+    check("a parsed deadline survives the correction path",
+          hard_deadline_correction(f5, T) is None and f5[F["due"]] == "2026-09-29")
 
     failed = [label for label, ok in checks if not ok]
     print(json.dumps({"checks": len(checks), "failed": failed}))

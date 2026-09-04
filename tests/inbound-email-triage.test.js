@@ -477,3 +477,87 @@ print(json.dumps(${expr}))
         expect(script).toMatch(/watermark is NOT advanced/);
     });
 });
+
+// ─── THE LETTER'S STATED DEADLINE (4 Sep 2026, finding …-450) ──────────
+//
+// The post-manager routine reads the one date that matters out of every
+// scanned letter and emails it on a line of its own ("Deadline: 2026-09-29").
+// follow-up.html has parsed that line since 25 Aug 2026, but the AGENT path —
+// which has created every post task since the labels started routing to
+// agents on 24 Aug — left Due Date and Hard Deadline to the model's
+// judgement. Measured on the live base that day: 448 tasks carry `POST:` in
+// their name, SIX are marked Hard Deadline, and NOT ONE carries a `Deadline:`
+// line anywhere in its description, because the description only ever held a
+// truncated Gmail snippet that stops before the line. So the date never
+// reached Airtable, and every guard keyed on Hard Deadline read an empty
+// field and reported nothing wrong.
+describe("the letter's own Deadline line is read in code, not judged", () => {
+    const gate = readFileSync(path.join(root, 'scripts/create-agent-task.py'), 'utf8');
+    const invariants = readFileSync(path.join(root, 'scripts/check-data-invariants.py'), 'utf8');
+    const postSkill = readFileSync(
+        path.join(root, '.claude/scheduled-tasks/post-manager-weekly/SKILL.md'), 'utf8');
+
+    it('the gate owns ONE parser and the scan imports it rather than copying it', () => {
+        expect(gate).toMatch(/def parse_deadline_line\(text\)/);
+        expect(gate).toMatch(/def apply_letter_deadline\(fields, cache\)/);
+        expect(script).toMatch(/_load_gate\(\)\.parse_deadline_line/);
+        expect(script).not.toMatch(/def parse_deadline_line/);
+    });
+
+    it('the scan caches the date off the FULL body — the only place it exists', () => {
+        const cache = script.slice(script.indexOf('def write_scan_cache('),
+                                   script.indexOf('def read_scan_cache('));
+        expect(cache).toMatch(/"deadline": parse_deadline\(m\.get\("body", ""\)\)/);
+    });
+
+    it('the stamp runs before the board read, and the receipt-date correction never overrides it', () => {
+        const create = gate.slice(gate.indexOf('def cmd_create('), gate.indexOf('def cmd_check('));
+        expect(create.indexOf('apply_letter_deadline(')).toBeGreaterThan(-1);
+        // Before the fold path compares due dates, or the wrong date is kept
+        // as "the earlier hard date".
+        expect(create.indexOf('apply_letter_deadline(')).toBeLessThan(create.indexOf('fetch_open_tasks()'));
+        // And the correction sits in the else branch: a stated deadline is
+        // not a judgement call, so nothing gets to run over it.
+        expect(create.indexOf('apply_letter_deadline(')).toBeLessThan(create.indexOf('hard_deadline_correction('));
+        expect(create).toMatch(/else:[\s\S]*hard_deadline_correction\(fields, date\.today\(\)\)/);
+    });
+
+    it('the browser path keeps its own parser — two entry points, both stamped', () => {
+        expect(followUp).toMatch(/function parseDeadlineLine\(text\)/);
+        expect(followUp).toMatch(/hardDeadline\]: true/);
+    });
+
+    it('the gate selftest covers the real date, none, missing, malformed and past', () => {
+        const out = execFileSync('python3', [path.join(root, 'scripts/create-agent-task.py'), 'selftest'],
+            { encoding: 'utf8', env: { ...process.env, INBOUND_TRIAGE_DIR: '/nonexistent-dir-for-test' } });
+        const res = JSON.parse(out.trim().split('\n').pop());
+        expect(res.failed).toEqual([]);
+        const self = gate.slice(gate.indexOf('def selftest('));
+        for (const claim of [
+            'a real date is read off the Deadline line',
+            "'Deadline: none' is not a date",
+            'no Deadline line at all reads as no date',
+            'a malformed date is refused rather than guessed',
+            'a date already passed is still returned',
+            'the scanned body\'s deadline becomes Due Date AND Hard Deadline',
+        ]) expect(self).toContain(claim);
+    });
+
+    it('a live invariant guards the stamp, with a control', () => {
+        expect(invariants).toContain('"name": "stated-deadline-is-a-hard-deadline"');
+        const inv = invariants.slice(invariants.indexOf('"name": "stated-deadline-is-a-hard-deadline"'));
+        const block = inv.slice(0, inv.indexOf('    {'));
+        expect(block).toMatch(/"control":/);
+        expect(block).toMatch(/"control_means":/);
+        expect(block).toMatch(/DEADLINE FROM THE LETTER/);
+    });
+
+    it('the post-manager skill describes the chain that exists, not one that does not', () => {
+        // It claimed the agent path had read the line since 25 Aug 2026. It
+        // never did. A skill that asserts a guard is working is worse than
+        // silence: it stops anyone checking.
+        expect(postSkill).not.toMatch(/inbound-email-triage skill and the Inbound Comms page both/);
+        expect(postSkill).toMatch(/scripts\/create-agent-task\.py/);
+        expect(dailyOpsDoc).not.toMatch(/the enforcement chain reads it \(BUILT 25 Aug 2026\)/);
+    });
+});
