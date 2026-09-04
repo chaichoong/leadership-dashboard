@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import { execFileSync } from 'child_process';
-import { readFileSync } from 'fs';
+import { readFileSync, readdirSync } from 'fs';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 
@@ -219,10 +219,73 @@ describe('the rules are enforced where they cannot be skipped', () => {
     expect(g).toMatch(/FROM:` is now a \*\*required\*\* header/);
   });
 
-  it('the three sending identities live in ONE place', () => {
-    // A second copy is how the sender rule drifts back apart.
+  // A second copy is how the sender rule drifts back apart.
+  //
+  // Rewritten 4 Sep 2026. This used to assert the literal text
+  // "ALLOWED_SENDERS = (PERSONAL_SENDER, BUSINESS_SENDER, RUNPRENEUR_SENDER)",
+  // which pinned the COUNT rather than the property. Two things followed.
+  // It broke on 3 Sep when PROPERTY_SENDER (info@agilelets.co.uk) was added
+  // for the Property Administration agent — the code was right and the test
+  // was wrong, which is the worst way round. And because it only ever read
+  // ONE line of ONE file, it never noticed that scripts/send-email.py had
+  // carried its own byte-identical BUSINESS_SENDER and BUSINESS_BRAND since
+  // 12 Aug 2026 — the exact drift it was written to prevent, sitting in the
+  // open the whole time. Assert the property, never the count.
+  it('every sender constant is reachable by the send gate', () => {
     const fmt = readFileSync(FORMAT, 'utf8');
-    expect(fmt).toMatch(/ALLOWED_SENDERS = \(PERSONAL_SENDER, BUSINESS_SENDER, RUNPRENEUR_SENDER\)/);
+
+    // The tuple is built from NAMES. An address written straight into it is a
+    // definition in a second place, even inside the right file.
+    const tuple = fmt.match(/^ALLOWED_SENDERS = \(([^)]*)\)/m);
+    expect(tuple, 'ALLOWED_SENDERS is no longer a plain tuple').toBeTruthy();
+    expect(tuple[1], 'ALLOWED_SENDERS holds a literal address, not a constant')
+      .not.toMatch(/@/);
+
+    // Every sender defined here is IN it. A fifth added without that line is
+    // an identity the send gate silently refuses at validate time.
+    const defined = [...fmt.matchAll(/^([A-Z_]+_SENDER) = "[^"]+@[^"]+"/gm)].map((m) => m[1]);
+    expect(defined.length, 'no sender constants found — the shape changed').toBeGreaterThanOrEqual(3);
+    const members = tuple[1].split(',').map((x) => x.trim()).filter(Boolean);
+    expect([...members].sort()).toEqual([...defined].sort());
+  });
+
+  it('no other script defines a sending identity of its own', () => {
+    const fmt = readFileSync(FORMAT, 'utf8');
+    const addresses = [...fmt.matchAll(/^[A-Z_]+_SENDER = "([^"]+@[^"]+)"/gm)].map((m) => m[1]);
+    expect(addresses.length, 'CONTROL: no addresses to look for').toBeGreaterThanOrEqual(3);
+
+    // One of the sending identities doubles as Kevin's Google and Airtable
+    // ACCOUNT address, so scripts legitimately hold it under names like
+    // CALENDAR_ACCOUNT and TRIAGE_ACCOUNT — that is which mailbox to read, not
+    // which address to send as. Read the account address from the engine's own
+    // constant rather than hard-coding it here, so this test cannot go stale
+    // the way its predecessor did.
+    const acct = readFileSync(DISPATCH, 'utf8').match(/^KEVIN_AIRTABLE_EMAIL = "([^"]+)"/m);
+    expect(acct, 'CONTROL: KEVIN_AIRTABLE_EMAIL moved or was renamed').toBeTruthy();
+    const accountAddress = acct[1];
+
+    // Two ways to own a sending identity you should be importing:
+    //   1. any constant NAMED as a sender or a from-address (this is exactly
+    //      how scripts/send-email.py carried a second BUSINESS_SENDER from
+    //      12 Aug to 4 Sep 2026), or
+    //   2. any constant at all holding an outbound-only address — one that is
+    //      not also the account Kevin reads mail and calendars from.
+    // Prose and refusal messages are untouched: an assignment only.
+    const offenders = [];
+    for (const f of readdirSync(resolve(ROOT, 'scripts')).filter((n) => n.endsWith('.py'))) {
+      if (f === 'agent_email_format.py') continue;
+      const src = readFileSync(resolve(ROOT, 'scripts', f), 'utf8');
+      for (const addr of addresses) {
+        const re = new RegExp('^\\s*([A-Za-z_]+)\\s*=\\s*["\']' + addr.replace(/[.@+]/g, '\\$&') + '["\']', 'gm');
+        for (const m of src.matchAll(re)) {
+          const namedAsSender = /SENDER|_FROM\b|^FROM_/.test(m[1]);
+          if (namedAsSender || addr !== accountAddress) {
+            offenders.push(`${f}: ${m[1]} = "${addr}"`);
+          }
+        }
+      }
+    }
+    expect(offenders, 'a sending identity is defined outside agent_email_format.py').toEqual([]);
   });
 });
 

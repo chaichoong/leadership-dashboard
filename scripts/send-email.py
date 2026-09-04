@@ -82,7 +82,12 @@ from datetime import datetime, timezone
 # submit validation. Two copies of this parser is how a tier-1 banner came to be
 # prepended by one script and rejected by the other.
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from agent_email_format import EmailFormatError, parse_output as parse_email_output  # noqa: E402
+from agent_email_format import (  # noqa: E402
+    EmailFormatError,
+    parse_output as parse_email_output,
+    BUSINESS_SENDER,
+    BUSINESS_BRAND_RE,
+)
 
 BASE_ID = "appnqjDpqDniH3IRl"
 TASKS = "tblqB8b22hKBL4PF1"
@@ -119,10 +124,12 @@ APPROVED = ("Approved as-is", "Approved with minor edits")
 # So: if the words speak as the business and no FROM was chosen, refuse and name
 # the sender to use. A refusal costs one line in the draft. The alternative is
 # an unrecallable email to a warm prospect from the wrong identity.
-BUSINESS_SENDER = "kevin@operationsdirector.co.uk"
-BUSINESS_BRAND = re.compile(
-    r"operationsdirector\.co\.uk|\bOperations Director\b", re.I
-)
+# BUSINESS_SENDER and BUSINESS_BRAND_RE are IMPORTED above, not defined here.
+# Until 4 Sep 2026 this file carried its own byte-identical copy of both,
+# which is the drift the sender rule exists to prevent — and the test meant
+# to catch it was asserting the CONTENTS of ALLOWED_SENDERS in the other
+# file instead, so it never looked here. It went stale the moment a fourth
+# sender was added on 3 Sep and still missed this copy.
 
 
 def business_identity_mismatch(subject, body, sender):
@@ -134,7 +141,7 @@ def business_identity_mismatch(subject, body, sender):
     """
     if sender:
         return ""
-    hit = BUSINESS_BRAND.search("%s\n%s" % (subject or "", body or ""))
+    hit = BUSINESS_BRAND_RE.search("%s\n%s" % (subject or "", body or ""))
     if not hit:
         return ""
     return (

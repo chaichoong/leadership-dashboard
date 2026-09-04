@@ -932,20 +932,56 @@ function runNotificationCatchup(){
   if(!allTasks||!allTasks.length)return;
   const myEmail=(currentUser&&currentUser.email)||'';
   if(!myEmail)return;
+  // Storage key kept as-is: renaming it would make every browser forget what
+  // it has already sent, which is one duplicate burst per device.
   const LS_KEY='_slack_notified_tasks';
-  let notified;
-  try{notified=new Set(JSON.parse(localStorage.getItem(LS_KEY)||'[]'))}catch(e){notified=new Set()}
   const now=Date.now();
   const CUTOFF=48*60*60*1000;
-  let sent=0;
+  // What has already been DM'd, as id -> the moment that task stops being
+  // sendable. Until 4 Sep 2026 this was a plain array trimmed to its last 500
+  // entries, which drops the OLDEST ids: past 500 remembered tasks the page
+  // would forget one it had already DM'd and send it a second time. Nothing
+  // was wrong with the ids it kept — the list simply could not hold them all.
+  // The board was 232 open tasks when this was found so the cap had never
+  // bitten, but the Q2->Q3 cleanse ran at 303 and Kevin is actively cutting
+  // Slack volume, so a routine that can quietly start repeating itself is the
+  // wrong thing to leave in.
+  //
+  // Evicting by AGE rather than by COUNT cannot resurrect anything: the gate
+  // below refuses any task older than CUTOFF, so once an id is past its expiry
+  // it can never be sent again whether we remember it or not. That makes the
+  // store self-limiting with no cap at all.
+  let seen={};
+  try{
+    const raw=JSON.parse(localStorage.getItem(LS_KEY)||'{}');
+    if(Array.isArray(raw)){
+      // Legacy format, a bare list of ids. First-seen is always at or after
+      // the task's creation, so now+CUTOFF is never EARLIER than the true
+      // expiry: the migration can hold an id too long, never too short.
+      raw.forEach(id=>{seen[id]=now+CUTOFF});
+    }else if(raw&&typeof raw==='object'){
+      // Drop what has expired. A null expiry means the task carried no created
+      // date, so the age gate below can never block it — keep those for ever.
+      Object.keys(raw).forEach(id=>{
+        const exp=raw[id];
+        if(exp===null||exp>now)seen[id]=exp;
+      });
+    }
+  }catch(e){seen={}}
+  // Expiry comes from the TASK's creation, never from when we happened to see
+  // it, so a page opened late cannot extend an id's life past the age gate.
+  const remember=t=>{
+    const c=t.created?new Date(t.created).getTime():NaN;
+    seen[t.id]=isNaN(c)?null:c+CUTOFF;
+  };
   allTasks.forEach(t=>{
-    if(notified.has(t.id))return;
-    if(t.assigneeEmail!==myEmail){notified.add(t.id);return}
+    if(Object.prototype.hasOwnProperty.call(seen,t.id))return;
+    if(t.assigneeEmail!==myEmail){remember(t);return}
     if(t.created){
       const age=now-new Date(t.created).getTime();
-      if(age>CUTOFF){notified.add(t.id);return}
+      if(age>CUTOFF){remember(t);return}
     }
-    if(t.createdByEmail&&t.createdByEmail===myEmail){notified.add(t.id);return}
+    if(t.createdByEmail&&t.createdByEmail===myEmail){remember(t);return}
     // Approval-gate items are NOT new assignments. An agent submitting work
     // sets Assignee to the approver so the task lands in his queue; the 08:00
     // approvals digest (approvals.js) and the Approvals tab already carry it,
@@ -966,7 +1002,7 @@ function runNotificationCatchup(){
     // 4 Sep 2026, control 17 rows WITH a raiser) has no assignee either, so it
     // never reaches the send below. Dead code with a confident comment is
     // worse than no code.
-    if(Array.isArray(t.raisedByIds)&&t.raisedByIds.length){notified.add(t.id);return}
+    if(Array.isArray(t.raisedByIds)&&t.raisedByIds.length){remember(t);return}
     notifyAssigneeSlack({
       recipientEmail:myEmail,
       taskName:t.name,
@@ -975,13 +1011,9 @@ function runNotificationCatchup(){
       skipSelfCheck:true,
       actorNameOverride:t.createdByEmail?'':(t.business||'System'),
     });
-    notified.add(t.id);
-    sent++;
-    console.log('[notification catchup] sent assignment DM for',t.name);
+    remember(t);
   });
-  const arr=[...notified].slice(-500);
-  localStorage.setItem(LS_KEY,JSON.stringify(arr));
-  if(sent)console.log(`[notification catchup] ${sent} catch-up DM(s) dispatched`);
+  localStorage.setItem(LS_KEY,JSON.stringify(seen));
 }
 // Send a known-good Slack DM and surface the worker's HTTP response so
 // the user can see exactly why the pipeline did or didn't deliver.
