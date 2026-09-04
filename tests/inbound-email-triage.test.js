@@ -406,3 +406,74 @@ describe('inbound-triage.py mechanics', () => {
         expect(script).toContain('fldkGxrOlrfuLlH3J');
     });
 });
+
+// ---------------------------------------------------------------------------
+// A GMAIL ERROR MUST NOT COST THE DAY'S TRIAGE.
+//
+// Finding 20260904-daily-ops-phase2-444. The 17:00 slot of 3 Sep 2026 reported:
+//
+//   Status: BROKEN — Gmail quota exceeded (HTTP 403). Watermark NOT advanced.
+//
+// worker_post had no retry, no back-off, and no way to tell a per-second rate
+// limit from the day's quota being gone, so it died on the FIRST Gmail error it
+// met. Together with the 13:00 slot dying separately, no inbound mail was
+// triaged for about 22 hours.
+//
+// The classification is the load-bearing part, and it CANNOT be done on the
+// status code: the worker re-wraps Google's own 403 into a 500 carrying
+// Google's JSON (see gmailList in workers/drive-upload/worker.js). Reading the
+// code alone is what made a transient rate limit look fatal.
+// ---------------------------------------------------------------------------
+describe('inbound-triage: a Gmail error is classified before it is obeyed', () => {
+    const TRIAGE = path.join(root, 'scripts/inbound-triage.py');
+
+    function py(expr) {
+        const src = `
+import importlib.util, json
+spec = importlib.util.spec_from_file_location('t', ${JSON.stringify(TRIAGE)})
+m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+print(json.dumps(${expr}))
+`;
+        return JSON.parse(execFileSync('python3', ['-c', src], { encoding: 'utf8' }).trim());
+    }
+
+    // Google's real error bodies, as the worker forwards them.
+    const DAILY = 'Gmail list failed: {"error":{"code":403,"errors":[{"reason":"dailyLimitExceeded"}]}}';
+    const RATE = 'Gmail list failed: {"error":{"code":403,"errors":[{"reason":"userRateLimitExceeded"}]}}';
+
+    it('stops on the daily quota — back-off cannot cure it and retrying costs tomorrow', () => {
+        expect(py(`m.classify_worker_error(500, ${JSON.stringify(DAILY)})[0]`)).toBe('quota');
+        expect(py(`m.classify_worker_error(403, ${JSON.stringify(DAILY)})[0]`)).toBe('quota');
+        // The ordering rule: the body is read BEFORE the status, or a daily
+        // quota wrapped in a retryable 500 is retried until the day is gone.
+        expect(py('m.classify_worker_error(503, "Quota exceeded for quota metric")[0]')).toBe('quota');
+    });
+
+    it('retries a per-user rate limit instead of losing the slot to it', () => {
+        expect(py(`m.classify_worker_error(500, ${JSON.stringify(RATE)})[0]`)).toBe('retry');
+        expect(py('m.classify_worker_error(429, "slow down")[0]')).toBe('retry');
+        expect(py('m.classify_worker_error(503, "")[0]')).toBe('retry');
+    });
+
+    it('does not burn retries on an error waiting will not fix', () => {
+        expect(py('m.classify_worker_error(409, "Gmail not connected")[0]')).toBe('stop');
+        expect(py('m.classify_worker_error(400, "bad request")[0]')).toBe('stop');
+        expect(py('m.classify_worker_error(401, "unauthorised")[0]')).toBe('stop');
+    });
+
+    it('backs off exponentially, and jitter never shortens the wait', () => {
+        expect(py('[m.backoff_seconds(n, jitter=0) for n in (1, 2, 3, 4)]')).toEqual([2, 4, 8, 16]);
+        expect(py('[m.backoff_seconds(n, jitter=1) for n in (1, 2, 3, 4)]')).toEqual([3, 6, 12, 24]);
+    });
+
+    it('caps the calls one run may make, so one slot cannot spend the whole day', () => {
+        // Three slots share one daily quota. A run that loops used to be able
+        // to take the lot and fail the two after it as well.
+        expect(py('m.MAX_WORKER_CALLS')).toBeLessThanOrEqual(500);
+        expect(script).toContain('GMAIL CALL BUDGET SPENT');
+        // And the quota message has to say the watermark is safe, or the next
+        // slot's operator cannot tell a skipped slot from lost mail.
+        expect(script).toContain('GMAIL DAILY QUOTA EXHAUSTED');
+        expect(script).toMatch(/watermark is NOT advanced/);
+    });
+});

@@ -80,9 +80,11 @@ distinct from the send key by design), Airtable PAT at
 
 import json
 import os
+import random
 import re
 import sys
 import tempfile
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -304,7 +306,69 @@ def read_secret(path, what):
         fail("cannot read %s at %s" % (what, path))
 
 
-def worker_post(path, payload):
+# ─── GMAIL QUOTA AND RATE LIMITS ─────────────────────────────────────────
+#
+# 4 Sep 2026, finding 20260904-daily-ops-phase2-444. The 17:00 slot of 3 Sep
+# died on the FIRST Gmail error it met: "Gmail quota exceeded (HTTP 403).
+# Watermark NOT advanced." No mail was triaged for about 22 hours and nothing
+# retried, because worker_post had no retry, no back-off and no way to tell a
+# per-second rate limit from the day's quota being gone.
+#
+# The two are opposites and must not be treated alike:
+#   * A RATE limit (rateLimitExceeded, userRateLimitExceeded, 429, a 5xx)
+#     clears in seconds. Waiting fixes it; giving up costs the slot for nothing.
+#   * The DAILY quota does not come back before midnight Pacific. Retrying it
+#     burns what little is left and makes the next slot fail too, so the run
+#     must stop at once and say plainly that the day is spent.
+#
+# The worker wraps Google's own error into a 500 carrying Google's JSON text
+# (see gmailList in workers/drive-upload/worker.js), so the STATUS CODE ALONE
+# CANNOT CLASSIFY THIS — the body has to be read. That is exactly why a
+# per-user rate limit read as fatal on 3 Sep.
+DAILY_QUOTA_MARKERS = (
+    "dailylimitexceeded", "quotaexceeded", "quota exceeded for quota metric",
+    "daily limit exceeded",
+)
+RATE_LIMIT_MARKERS = (
+    "ratelimitexceeded", "userratelimitexceeded", "backenderror",
+    "service unavailable", "internal error", "try again",
+)
+RETRY_STATUSES = (429, 500, 502, 503, 504)
+MAX_ATTEMPTS = 4
+BACKOFF_BASE_SECONDS = 2
+
+# A run that loops burns the day's quota for every slot that follows it. Three
+# slots a day share one quota, so no single run may spend the lot: 9 Aug – 3 Sep
+# a healthy slot used well under 200 worker calls.
+MAX_WORKER_CALLS = 400
+_calls = {"n": 0}
+
+
+def classify_worker_error(code, body):
+    """('retry'|'quota'|'stop', why) for a non-200 answer from the worker.
+
+    Pure, so the selftest can cover every branch offline. The body is read
+    before the status because the worker re-wraps Google's 403 as a 500."""
+    text = (body or "").lower()
+    if any(m in text for m in DAILY_QUOTA_MARKERS):
+        return "quota", "Gmail daily quota is exhausted"
+    if code == 409:
+        return "stop", "Gmail not connected on the worker"
+    if any(m in text for m in RATE_LIMIT_MARKERS):
+        return "retry", "Gmail rate limit or transient backend error"
+    if code in RETRY_STATUSES:
+        return "retry", "worker answered %s" % code
+    return "stop", "worker answered %s" % code
+
+
+def backoff_seconds(attempt, jitter=None):
+    """Seconds to wait before attempt N (1-based). Exponential, with jitter so
+    three slots that collide do not retry in lockstep."""
+    base = BACKOFF_BASE_SECONDS * (2 ** max(0, attempt - 1))
+    return round(base + (random.random() if jitter is None else jitter) * base * 0.5, 2)
+
+
+def worker_post(path, payload, sleep=time.sleep):
     key = read_secret(TRIAGE_KEY_FILE, "gmail triage key")
     # Every call names the triage mailbox explicitly — the worker's default
     # account is the SENDER default, which is a different mailbox entirely.
@@ -320,21 +384,48 @@ def worker_post(path, payload):
                  "User-Agent": "od-inbound-triage/1.0"},
         method="POST",
     )
-    try:
-        with urllib.request.urlopen(req, timeout=120) as res:
-            body = res.read().decode()
-    except urllib.error.HTTPError as e:
-        detail = e.read().decode(errors="replace")[:500]
-        if e.code == 409:
-            fail("Gmail not connected on the worker (409). Kevin grants once at "
-                 "%s/auth/gmail — then retry. Detail: %s" % (WORKER_URL, detail))
-        fail("worker %s answered %d: %s" % (path, e.code, detail))
-    except (urllib.error.URLError, TimeoutError) as e:
-        fail("worker %s unreachable: %s" % (path, e))
+    _calls["n"] += 1
+    if _calls["n"] > MAX_WORKER_CALLS:
+        fail("GMAIL CALL BUDGET SPENT: this run has made %d worker calls "
+             "(limit %d). Stopping so the remaining slots today still have "
+             "quota. The watermark is unmoved; nothing is lost, but this run "
+             "is INCOMPLETE." % (_calls["n"], MAX_WORKER_CALLS))
+
+    body = None
+    for attempt in range(1, MAX_ATTEMPTS + 1):
+        try:
+            with urllib.request.urlopen(req, timeout=120) as res:
+                body = res.read().decode()
+            break
+        except urllib.error.HTTPError as e:
+            detail = e.read().decode(errors="replace")[:500]
+            action, why = classify_worker_error(e.code, detail)
+            if action == "quota":
+                # Back-off cannot cure this and retrying makes tomorrow worse.
+                fail("GMAIL DAILY QUOTA EXHAUSTED: %s (worker %s answered %d). "
+                     "The watermark is NOT advanced, so no mail is lost — this "
+                     "slot is skipped and the next one picks up where this left "
+                     "off. Detail: %s" % (why, path, e.code, detail))
+            if action == "stop":
+                if e.code == 409:
+                    fail("Gmail not connected on the worker (409). Kevin grants "
+                         "once at %s/auth/gmail — then retry. Detail: %s"
+                         % (WORKER_URL, detail))
+                fail("worker %s answered %d: %s" % (path, e.code, detail))
+            if attempt == MAX_ATTEMPTS:
+                fail("worker %s still failing after %d attempts (%s): %s"
+                     % (path, MAX_ATTEMPTS, why, detail))
+            sleep(backoff_seconds(attempt))
+        except (urllib.error.URLError, TimeoutError) as e:
+            # A dropped connection is the same kind of thing as a 503.
+            if attempt == MAX_ATTEMPTS:
+                fail("worker %s unreachable after %d attempts: %s"
+                     % (path, MAX_ATTEMPTS, e))
+            sleep(backoff_seconds(attempt))
     try:
         return json.loads(body)
-    except ValueError:
-        fail("worker %s returned non-JSON (%s...)" % (path, body[:120]))
+    except (ValueError, TypeError):
+        fail("worker %s returned non-JSON (%s...)" % (path, str(body)[:120]))
 
 
 def worker_labels():
@@ -1470,6 +1561,37 @@ def selftest():
                                           gate.load_scan_cache()) is None)
         finally:
             del os.environ["INBOUND_TRIAGE_DIR"]
+
+    # ── Gmail quota / rate-limit classification (finding …-444) ─────────
+    # The 3 Sep 17:00 slot died on the first Gmail error it met. These are the
+    # exact shapes the worker forwards: Google's error JSON re-wrapped in a 500.
+    daily = ('Gmail list failed: {"error":{"code":403,"message":"User-rate limit '
+             'exceeded","errors":[{"reason":"dailyLimitExceeded"}]}}')
+    ratel = ('Gmail list failed: {"error":{"code":403,"errors":'
+             '[{"reason":"userRateLimitExceeded"}]}}')
+    check("a daily-quota 403 stops the run rather than retrying",
+          classify_worker_error(500, daily)[0] == "quota")
+    check("a daily-quota answer is caught even when the status is a bare 403",
+          classify_worker_error(403, daily)[0] == "quota")
+    check("a per-user RATE limit retries instead of costing the slot",
+          classify_worker_error(500, ratel)[0] == "retry")
+    check("a 429 retries", classify_worker_error(429, "slow down")[0] == "retry")
+    check("a 503 retries", classify_worker_error(503, "")[0] == "retry")
+    check("a 409 stops and names the re-grant",
+          classify_worker_error(409, "Gmail not connected")[0] == "stop")
+    check("an ordinary 400 stops rather than burning three retries",
+          classify_worker_error(400, "bad request")[0] == "stop")
+    # THE ORDER MATTERS: the quota read must beat the status read, or a daily
+    # quota wrapped in a retryable 500 is retried until the day is gone.
+    check("quota beats a retryable status",
+          classify_worker_error(503, "Quota exceeded for quota metric")[0] == "quota")
+    check("back-off grows and is never zero",
+          backoff_seconds(1, jitter=0) == 2 and backoff_seconds(2, jitter=0) == 4
+          and backoff_seconds(3, jitter=0) == 8)
+    check("jitter never shortens the wait below the base",
+          all(backoff_seconds(n) >= 2 * (2 ** (n - 1)) for n in (1, 2, 3, 4)))
+    check("a run cannot spend a whole day's quota on its own",
+          MAX_WORKER_CALLS <= 500 and MAX_ATTEMPTS >= 3)
 
     if failures:
         print("selftest FAILED: %d" % len(failures))

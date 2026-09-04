@@ -108,3 +108,87 @@ describe('the skills actually route creates through the gate', () => {
     });
   }
 });
+
+// ---------------------------------------------------------------------------
+// A HARD DEADLINE IS THE DATE THE LETTER STATES, NOT THE DAY IT ARRIVED.
+//
+// Finding 20260904-daily-ops-phase2-447. On 4 Sep 2026 the daily
+// `hard-deadline-passed-still-open` invariant showed nine open tasks past
+// their date. Two of them were not late at all — triage had stamped the day
+// the mail arrived while the deadline sat in the task's own name:
+//
+//   "INBOUND: Simarc - pay ground rent GBP 6 by 29 Sep …"     Due 2026-09-01
+//   "INBOUND: HMRC formal compliance check … respond by Sep 17"  Due 2026-09-01
+//
+// The invariant is the alarm for genuinely missed legal windows, so filling it
+// with false alarms is the expensive half of this bug, not the chasing.
+//
+// The correction is deliberately narrow, and the "never" cases below are the
+// point of the test: it only moves a due date LATER, only on one unambiguous
+// stated date, only on a HARD deadline, and only inside a real horizon.
+// ---------------------------------------------------------------------------
+describe('a hard deadline carries the stated date, not the receipt date', () => {
+  const TODAY = 'mod.date(2026, 9, 4)';
+
+  function correct(name, due, { hard = true, desc = '' } = {}) {
+    const got = runPy(`mod.hard_deadline_correction(
+      {mod.F["name"]: arg["name"], mod.F["due"]: arg["due"], mod.F["desc"]: arg["desc"],
+       **({mod.F["hardDeadline"]: True} if arg["hard"] else {})}, ${TODAY})`,
+      { name, due, desc, hard });
+    return got ? got[0] : null;
+  }
+
+  it('takes the deadline the task states over the day the item arrived', () => {
+    expect(correct('INBOUND: Simarc - pay ground rent GBP 6 by 29 Sep, 23 Viola Street Bootle',
+      '2026-09-01')).toBe('2026-09-29');
+    expect(correct('INBOUND: HMRC formal compliance check Self Assessment - respond by Sep 17',
+      '2026-09-01')).toBe('2026-09-17');
+  });
+
+  it('reads the date formats these letters actually use', () => {
+    expect(correct('INBOUND: pay by 29/09/2026', '2026-09-01')).toBe('2026-09-29');
+    expect(correct('INBOUND: respond no later than 17 September 2026', '2026-09-01')).toBe('2026-09-17');
+    expect(correct('INBOUND: hearing', '2026-09-01', { desc: 'attend on or before 2026-10-02' })).toBe('2026-10-02');
+    // A slash date is UK order. Reading 29/09 as month-first would silently
+    // produce no date at all, which reads exactly like "nothing stated".
+    expect(correct('INBOUND: pay by 09/29/2026', '2026-09-01')).toBeNull();
+  });
+
+  it('never guesses: two stated dates, or none, leave the due date alone', () => {
+    expect(correct('INBOUND: by 5 Sep and by 29 Sep', '2026-09-01')).toBeNull();
+    expect(correct('INBOUND: tenant rang about the boiler', '2026-09-01')).toBeNull();
+    // A date with no deadline word in front of it is not a deadline.
+    expect(correct('INBOUND: your statement dated 29 Sep is attached', '2026-09-01')).toBeNull();
+  });
+
+  it('never touches a SOFT due date — only a hard deadline is a real-world date', () => {
+    expect(correct('INBOUND: pay by 29 Sep', '2026-09-01', { hard: false })).toBeNull();
+  });
+
+  it('only ever moves a due date LATER, never earlier', () => {
+    // Pulling a deadline forward invents an obligation. A stated date already
+    // behind the due date is a date dealt with, or one we have misread.
+    expect(correct('INBOUND: pay by 1 Sep', '2026-09-20')).toBeNull();
+  });
+
+  it('refuses a date beyond the horizon, and a bare month/day does not roll a year', () => {
+    // "by 29 Sep 2027" on a letter that arrived on 1 Sep 2026 is a misparse.
+    expect(correct('INBOUND: renewal by 29 Sep 2027', '2026-09-01')).toBeNull();
+    // The wild version of this bug: anchoring the year to the DUE date turned
+    // "pay by 1 Sep" on a task due 20 Sep into 1 September of the NEXT year.
+    expect(runPy(`[d.isoformat() for d in mod.stated_deadlines("pay by 1 Sep", ${TODAY})]`))
+      .toEqual(['2026-09-01']);
+    // A genuine rollover still works: a December letter naming 3 January.
+    expect(correct('INBOUND: court by 3 Jan', '2026-12-20')).toBe('2027-01-03');
+  });
+
+  it('applies the correction before anything reads the due date', () => {
+    // build_update keeps the EARLIER of two hard dates, so a receipt date left
+    // uncorrected would win the fold and outlive the create it came in on.
+    const src = readFileSync(GATE, 'utf8');
+    const fix = src.indexOf('hard_deadline_correction(fields, date.today())');
+    const dupe = src.indexOf('verdict = {"action": "create"');
+    expect(fix).toBeGreaterThan(-1);
+    expect(fix).toBeLessThan(dupe);
+  });
+});
