@@ -668,6 +668,9 @@ const F = {
   priorityLvl: 'fldSsspLUGqzDqJYz',  // singleSelect: High Priority / Low Priority
   property:    'fldZKFvEpJ6NZeFKz',  // multipleRecordLinks to Rental Units
   createdDate: 'fldRpwiBGqEVaN20H',  // date
+  sentForApprovalBy:'fld30Yw8SWYVp049g', // multipleRecordLinks → Team Members. WHICH agent raised
+                                         // it for approval. Read ONLY by runNotificationCatchup, to
+                                         // keep approval-gate items out of Kevin's Slack DMs.
 };
 const TASK_FIELD_IDS = Object.values(F);
 
@@ -943,6 +946,27 @@ function runNotificationCatchup(){
       if(age>CUTOFF){notified.add(t.id);return}
     }
     if(t.createdByEmail&&t.createdByEmail===myEmail){notified.add(t.id);return}
+    // Approval-gate items are NOT new assignments. An agent submitting work
+    // sets Assignee to the approver so the task lands in his queue; the 08:00
+    // approvals digest (approvals.js) and the Approvals tab already carry it,
+    // and the drawer is where he decides it. The Airtable automation was given
+    // this same guard on 21 Aug 2026 after 26 duplicate DMs landed in one
+    // second; this catch-up path never got it, and on 4 Sep 2026 fired 9 more
+    // in 158ms (Slack ts 1788519989.738939 -> .896119). Seven of the nine were
+    // decisions Kevin had ALREADY made, between 11:55 and 12:03.
+    //
+    // Gate on the raiser link, not on status. All three decide surfaces null
+    // the Assignee (os/tasks 3976, os/agents 1982, approvals.js 918) and set
+    // status to Today or Completed, but on 4 Sep seven decided tasks still
+    // reached this sweep with his name on them, so the null had not landed in
+    // the list the page read. A status test would have let all seven through.
+    //
+    // A status test was tried and removed: it matched nothing. The only live
+    // row at Status=Approval without a raiser link (reck9rYvAt5n2vAtf, checked
+    // 4 Sep 2026, control 17 rows WITH a raiser) has no assignee either, so it
+    // never reaches the send below. Dead code with a confident comment is
+    // worse than no code.
+    if(Array.isArray(t.raisedByIds)&&t.raisedByIds.length){notified.add(t.id);return}
     notifyAssigneeSlack({
       recipientEmail:myEmail,
       taskName:t.name,
@@ -1739,6 +1763,7 @@ function parseTask(rec){
     propertyIds:(()=>{const p=gf(rec,F.property)||[];return Array.isArray(p)?p.map(x=>typeof x==='object'?(x.id||''):x).filter(Boolean):[]})(),
     property:(()=>{const p=gf(rec,F.property)||[];return Array.isArray(p)?p.map(x=>{const id=typeof x==='object'?(x.id||''):x;const inlineName=typeof x==='object'?(x.name||''):'';return inlineName||PROPERTY_ID_TO_NAME[id]||id}).filter(Boolean):[]})(),
     createdDate:gf(rec,F.createdDate)||gf(rec,F.created)||'',
+    raisedByIds:(()=>{const v=gf(rec,F.sentForApprovalBy)||[];return Array.isArray(v)?v.map(x=>typeof x==='object'?(x.id||''):x).filter(Boolean):[]})(),
     collaborators,
     _startMin:null, // scheduled start minute of day (for My Day timeline)
   };
