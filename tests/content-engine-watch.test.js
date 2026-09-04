@@ -62,6 +62,16 @@ describe('content-engine watch: nightly wiring', () => {
     expect(run).not.toContain('stab.py');   // rendering goes through render.py, never a bare stab call
   });
 
+  it('streams the raw clip with retries while Drive hydrates it, and a failed pull never kills the run (4 Sep 2026)', () => {
+    const w = readFileSync(path.join(ROOT, 'scripts', 'content-engine', 'watch.py'), 'utf8');
+    expect(w).toContain('DRIVE_RETRY_ERRNOS = (11, 35)');
+    expect(w).toContain('copy_streaming(e["path"], dest + ".part")');
+    expect(w).not.toContain('shutil.copyfile(e["path"]');
+    const sh = readFileSync(path.join(ROOT, 'scripts', 'content-engine-run.sh'), 'utf8');
+    expect(sh).toMatch(/watch\.py next \|\| echo/);
+    expect(sh).toContain('REPO="$(cd "$(dirname "$0")/.." && pwd)"');
+  });
+
   it('is described on the Automations list (deterministic job, not a register agent)', () => {
     const auto = readFileSync(path.join(ROOT, 'js', 'automations-data.js'), 'utf8');
     expect(auto).toMatch(/key: 'content-engine'/);

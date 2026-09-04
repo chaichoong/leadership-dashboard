@@ -30,12 +30,12 @@
 #   9. OD lane       : Operations Director brand profile (od_lane.py): mine, sync, draft, cards, publish, points.
 #  10. report        : one line each for the morning digest.
 set -uo pipefail
-REPO="/Users/kevinbrittain/Projects/leadership-dashboard"
+REPO="$(cd "$(dirname "$0")/.." && pwd)"   # the checkout this script lives in, so a worktree run uses its own code
 LOG_DIR="/Users/kevinbrittain/knowledge-os/logs/content-engine"
 mkdir -p "$LOG_DIR"
 cd "$REPO" || exit 1
 python3 scripts/content-engine/watch.py scan --create || exit 1
-python3 scripts/content-engine/watch.py next || exit 1
+python3 scripts/content-engine/watch.py next || echo "pull: skipped this run (see above); rendering what is already here"
 python3 scripts/content-engine/render.py run --limit 1 || exit 1
 python3 scripts/content-engine/platform_copy.py run --pending --limit 2 || exit 1
 python3 scripts/content-engine/approval.py sync || exit 1
