@@ -2916,6 +2916,125 @@ def cmd_signed(args):
     return 0
 
 
+# ── Sign-ins: the list Kevin sees and the pickup after he signs in ──────────
+# Kevin's ruling, 4 Sep 2026 ("crack on with the build"): a task blocked on a
+# site sign-in is not a decision, it is a wait. The robot leaves ONE line,
+# "SIGN-IN NEEDED: <site> (<url>)", and stops. `signin-waiting` groups those
+# tasks by site for the morning message and the queue page; `signin-done`
+# runs the moment he quits the sign-in window and hands every task waiting
+# on that site straight back to its robot, so the work finishes while his
+# session is live (an hour, for GOV.UK) instead of at the next slot.
+SIGNIN_LINE_RE = re.compile(r"^\s*SIGN-IN NEEDED:\s*(?P<site>[^\n(]+?)\s*(?:\((?P<url>https?://[^\s)]+)\))?\s*$", re.I | re.M)
+SIGNIN_DONE_MARK = "SIGNED IN:"
+
+
+def load_login_sites():
+    """The allowlist as agent-browser.js sees it (builtins + sites.json),
+    read through the script itself so the two never drift."""
+    import subprocess, glob, shutil
+    # launchd and AppleScript's `do shell script` have no nvm on PATH; the
+    # runners export AGENT_NODE_BIN (agent-tools.sh), and the nvm glob is the
+    # same second resort that file uses.
+    node = (os.environ.get("AGENT_NODE_BIN") or shutil.which("node")
+            or (sorted(glob.glob(os.path.expanduser("~/.nvm/versions/node/*/bin/node"))) or [None])[-1])
+    if not node:
+        raise RuntimeError("node not found: no AGENT_NODE_BIN, not on PATH, no nvm install")
+    r = subprocess.run([node, os.path.join(os.path.dirname(os.path.abspath(__file__)), "agent-browser.js"), "sites"],
+                       capture_output=True, text=True)
+    if r.returncode != 0:
+        raise RuntimeError("agent-browser.js sites failed: " + (r.stderr or "")[:200])
+    return json.loads(r.stdout)
+
+
+def signin_site_for(line_site, line_url, sites):
+    """Which allowlist host a SIGN-IN NEEDED line means. URL host first
+    (exact or suffix), then the label, case-insensitive. None when unknown."""
+    host = ""
+    if line_url:
+        try:
+            host = urllib.parse.urlparse(line_url).hostname or ""
+        except Exception:                                   # noqa: BLE001
+            host = ""
+    host = host.lower()
+    # Longest match wins: "ewf.companieshouse.gov.uk" belongs to its own entry,
+    # not to the "gov.uk" family that also happens to allow it.
+    best = None
+    for h in sites:
+        if host and (host == h or host.endswith("." + h)) and (best is None or len(h) > len(best)):
+            best = h
+    if best:
+        return best
+    want = (line_site or "").strip().lower()
+    for h, v in sites.items():
+        lab = str(v.get("label") or "").lower()
+        if want and (want == lab or want in lab or lab.split(" (")[0] == want):
+            return h
+    for h in sites:
+        if want and want.replace(" ", "") in h.replace(".", ""):
+            return h
+    return None
+
+
+def signin_waiting(sites=None):
+    """Every approval-queue task blocked on a sign-in, grouped by site."""
+    sites = sites if sites is not None else load_login_sites()
+    # FIND is case-sensitive; the line is written by an agent, so match on UPPER.
+    recs = query_tasks("AND({Status}='Approval', FIND('SIGN-IN NEEDED', UPPER({Agent Output})))")
+    groups = {}
+    for rec in recs:
+        f = rec.get("fields", {}) or {}
+        m = SIGNIN_LINE_RE.search(str(f.get(AF["agentOutput"]) or ""))
+        if not m:
+            continue
+        host = signin_site_for(m.group("site"), m.group("url"), sites) or "unknown"
+        entry = sites.get(host, {})
+        g = groups.setdefault(host, {"host": host, "label": entry.get("label") or m.group("site").strip(),
+                                     "loginUrl": entry.get("loginUrl") or m.group("url") or "", "tasks": []})
+        g["tasks"].append({"id": rec["id"], "name": f.get(AF["name"], ""),
+                           "agent": ALL_AGENTS.get((links(f.get(AF["teamMember"])) or [None])[0], {}).get("agent", "")})
+    return sorted(groups.values(), key=lambda g: (-len(g["tasks"]), g["label"]))
+
+
+def cmd_signin_waiting(args):
+    print(json.dumps({"sites": signin_waiting(), "at": now_iso()}, indent=2))
+    return 0
+
+
+def cmd_signin_done(args):
+    """Kevin quit the sign-in window for HOST: hand its waiting tasks back."""
+    sites = load_login_sites()
+    host = signin_site_for("", "https://" + args.site + "/", sites) or signin_site_for(args.site, "", sites)
+    if not host:
+        sys.exit(f"ERROR: {args.site!r} is not a login site on the allowlist")
+    stamp = datetime.now(LONDON).strftime("%d %b %Y %H:%M")
+    handed = []
+    for g in signin_waiting(sites):
+        if g["host"] != host:
+            continue
+        for t in g["tasks"]:
+            rec = get_task(t["id"])
+            f = rec.get("fields", {}) or {}
+            team = links(f.get(AF["teamMember"])) or links(f.get(AF["sentForApprovalBy"]))
+            note = (f"[{stamp} — Robot sign-in] {SIGNIN_DONE_MARK} Kevin signed in to "
+                    f"{g['label']}. The session is live now: carry on from where you stopped "
+                    f"and submit the finished work. Do not write SIGN-IN NEEDED again unless "
+                    f"the site is signed out when you look.")
+            patch_task(t["id"], {
+                AF["status"]: "Today",
+                AF["dueDate"]: today_london(),
+                AF["teamMember"]: team,
+                AF["assignee"]: None,
+                AF["sentForApprovalBy"]: [],
+                AF["approvalOutcome"]: None,
+                AF["approvalFeedback"]: None,
+                AF["approvedAt"]: None,
+                AF["notes"]: (str(f.get(AF["notes"]) or "").rstrip() + "\n\n" + note).strip()[-90000:],
+            })
+            handed.append({"task": t["id"], "agent": t["agent"], "name": t["name"][:80]})
+    print(json.dumps({"site": host, "label": sites[host].get("label"), "handedBack": handed}, indent=2))
+    return 0
+
+
 def cmd_complete(args):
     t = task_view(get_task(args.task))
     if t["outcome"] not in APPROVED:
@@ -5032,6 +5151,14 @@ def main():
     lg.add_argument("--entity", help="which entity owes it")
     lg.add_argument("--lane", choices=PLAN_LANES)
 
+    sw = sub.add_parser("signin-waiting",
+                        help="tasks blocked on a site sign-in, grouped by site "
+                             "(the morning list and the queue page strip)")
+    sd = sub.add_parser("signin-done",
+                        help="Kevin quit the sign-in window: hand every task "
+                             "waiting on that site straight back to its robot")
+    sd.add_argument("--site", required=True, help="allowlist host, e.g. app.pingen.com")
+
     sg = sub.add_parser("signed",
                         help="gate 2: a registered document came back signed "
                              "— reopen its task for the raising agent with "
@@ -5073,7 +5200,7 @@ def main():
             "lessons": cmd_lessons, "revise": cmd_revise,
             "attach": cmd_attach, "outcome": cmd_outcome,
             "reassign": cmd_reassign, "ledger": cmd_ledger,
-            "signed": cmd_signed, "certificate": cmd_certificate,
+            "signed": cmd_signed, "signin-waiting": cmd_signin_waiting, "signin-done": cmd_signin_done, "certificate": cmd_certificate,
             "handover-property": cmd_handover_property,
             "clear-alerts": cmd_clear_alerts}[args.cmd](args) or 0
 

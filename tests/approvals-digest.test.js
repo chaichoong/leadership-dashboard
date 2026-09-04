@@ -116,3 +116,27 @@ describe('the 08:00 digest', () => {
         expect(SRC).toContain('os/agents/index.html#tab=approvals');
     });
 });
+
+// Kevin's ruling, 4 Sep 2026: a task waiting on a site sign-in is a wait, not
+// a decision. The morning digest names the sites so the sitting is one visit.
+import { signInsWaiting } from '../scripts/slack-automation/approvals.js';
+describe('the digest names the sign-ins waiting', () => {
+    const tasks = [
+        { agentOutput: 'Verified from the register.\nSIGN-IN NEEDED: Companies House WebFiling (https://ewf.companieshouse.gov.uk/seclogin?tc=1)' },
+        { agentOutput: 'SIGN-IN NEEDED: Pingen (https://app.pingen.com/)\n' },
+        { agentOutput: 'Prepared letter.\nsign-in needed: companies house webfiling' },
+        { agentOutput: 'A normal draft with no sign-in line.' },
+    ];
+    it('groups by site, most waiting first, case-insensitively', () => {
+        expect(signInsWaiting(tasks)).toEqual([{ site: 'Companies House WebFiling', n: 2 }, { site: 'Pingen', n: 1 }]);
+    });
+    it('says how many of the items are sign-ins and names the sites', () => {
+        const text = buildDigestText(4, ['a', 'b', 'c', 'd'], 'https://x', false, signInsWaiting(tasks));
+        expect(text).toMatch(/3 of them just need you signed in/);
+        expect(text).toMatch(/Companies House WebFiling \(2\), Pingen \(1\)/);
+        expect(text).toMatch(/Sign in to all/);
+    });
+    it('says nothing about sign-ins when none are waiting', () => {
+        expect(buildDigestText(2, ['a', 'b'], 'https://x', false, [])).not.toMatch(/signed in/);
+    });
+});
