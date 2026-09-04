@@ -81,7 +81,9 @@ const { execFileSync } = require('child_process');
 const REPO = path.resolve(__dirname, '..');
 const PROFILE_ROOT = path.join(os.homedir(), '.config', 'od', 'agent-browser');
 const LEDGER = path.join(os.homedir(), 'knowledge-os', 'logs', 'agent-browser', 'runs.jsonl');
-const SITES_FILE = path.join(PROFILE_ROOT, 'sites.json');
+// Overridable so a test can prove the per-host merge against its own file
+// instead of whatever ~/.config holds on this Mac.
+const SITES_FILE = process.env.AGENT_BROWSER_SITES_FILE || path.join(PROFILE_ROOT, 'sites.json');
 
 // ── The allowlist ────────────────────────────────────────────────────────────
 // A browser with Kevin's live sessions is the widest capability in the estate.

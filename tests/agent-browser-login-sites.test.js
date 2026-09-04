@@ -27,9 +27,24 @@ describe('login sites on the allowlist', () => {
 
 describe('loadSites merges sites.json per host', () => {
   it('a sites.json entry written by `login` does not erase the builtin loginUrl', () => {
-    const src = require_('node:fs').readFileSync(join(ROOT, 'scripts', 'agent-browser.js'), 'utf8');
-    expect(src).toMatch(/Object\.assign\(\{\}, BUILTIN_SITES\[host\] \|\| \{\}, entry \|\| \{\}\)/);
-    // acrobat.adobe.com IS in the live sites.json without a loginUrl; the merged view must still have one.
-    expect(loadSites()['acrobat.adobe.com'].loginUrl).toMatch(/^https:\/\/acrobat\.adobe\.com\//);
+    // Hermetic: our own sites file, not whatever ~/.config holds on this Mac.
+    const { mkdtempSync, writeFileSync, rmSync } = require_('node:fs');
+    const { tmpdir } = require_('node:os');
+    const dir = mkdtempSync(join(tmpdir(), 'od-sites-'));
+    const file = join(dir, 'sites.json');
+    writeFileSync(file, JSON.stringify({ 'acrobat.adobe.com': { label: 'Adobe Acrobat Sign', login: true } }));
+    const modPath = join(ROOT, 'scripts', 'agent-browser.js');
+    const prev = process.env.AGENT_BROWSER_SITES_FILE;
+    process.env.AGENT_BROWSER_SITES_FILE = file;
+    delete require_.cache[require_.resolve(modPath)];
+    try {
+      const fresh = require_(modPath).loadSites();
+      expect(fresh['acrobat.adobe.com'].login).toBe(true);
+      expect(fresh['acrobat.adobe.com'].loginUrl).toMatch(/^https:\/\/acrobat\.adobe\.com\//);
+    } finally {
+      if (prev === undefined) delete process.env.AGENT_BROWSER_SITES_FILE; else process.env.AGENT_BROWSER_SITES_FILE = prev;
+      delete require_.cache[require_.resolve(modPath)];
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

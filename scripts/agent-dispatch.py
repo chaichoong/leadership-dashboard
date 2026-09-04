@@ -1261,24 +1261,43 @@ def informational_only(output, task_type, tier1=False):
 # (allowlisted site, Kevin's session in the profile), or hand back the ONE
 # line the Robot sign-in app understands — "SIGN-IN NEEDED: <site>" — which
 # costs him a tap, not a task. Phone calls are never his step (ADHD rule).
-HANDBACK_RE = re.compile(
-    r"\b(?:Kevin|you)\s+(?:must|need(?:s)?\s+to|should|will\s+need\s+to|ha(?:s|ve)\s+to|can)\s+"
+# Two patterns, applied by Task Type (second review, 4 Sep 2026): a letter or
+# email BODY legitimately tells its recipient "you must log in to the portal to
+# pay", so on Correspondence only the explicit-Kevin forms count; "you" means
+# Kevin only in the report types, where the agent is talking to him.
+HANDBACK_KEVIN_RE = re.compile(
+    r"\bKevin\s+(?:must|need(?:s)?\s+to|should|will\s+need\s+to|ha(?:s|ve)\s+to)\s+"
     r"(?:manually\s+)?(?:log\s*in(?:to)?|sign\s*in(?:to)?|login|call|phone|ring)\b"
-    r"|\bKEVIN\s+ACTION\s*:\s*(?:log|sign|call|phone)"
-    r"|^\s*(?:please\s+)?(?:log|sign)\s*in(?:to)?\s+(?:to\s+)?(?:your|the)\s+[\w.' -]{2,40}?\s+"
-    r"(?:account|portal|dashboard|app|website|site)\b",
+    r"|\bKevin\s*[,:\-–—]+\s*(?:please\s+)?(?:manually\s+)?(?:log|sign)\s*in(?:to)?\b"
+    r"|\b(?:next\s+step|action|to[- ]do)\s+for\s+Kevin\s*[:\-–—]\s*(?:please\s+)?(?:log|sign)\s*in(?:to)?\b"
+    r"|\bKEVIN\s+ACTION\s*:\s*(?:please\s+)?(?:log|sign|call|phone|ring)\b",
+    re.I,
+)
+HANDBACK_YOU_RE = re.compile(
+    r"\byou(?:'ll|\s+will)?\s+(?:must|need(?:s)?\s+to|should|ha(?:s|ve)\s+to)\s+"
+    r"(?:manually\s+)?(?:log\s*in(?:to)?|sign\s*in(?:to)?|login|call|phone|ring)\b"
+    r"|\byou'?ll\s+need\s+to\s+(?:manually\s+)?(?:log|sign)\s*in(?:to)?\b"
+    r"|^\s*(?:Kevin\s*[,:\-–—]*\s*)?(?:please\s+)?(?:manually\s+)?(?:log|sign)\s*in(?:to)?\s+(?:to\s+)?"
+    r"(?:your|the)\s+[\w.' -]{2,40}?\s+(?:account|portal|dashboard|app|website|site)\b",
     re.I | re.M,
 )
 SIGNIN_NEEDED_RE = re.compile(r"^\s*SIGN-IN NEEDED:\s*\S", re.I | re.M)
 
 
-def handback_problem(output):
-    """Reason this output hands Kevin a job instead of doing it; '' if none."""
+def handback_problem(output, task_type=""):
+    """Reason this output hands Kevin a job instead of doing it; '' if none.
+
+    On Correspondence the text after the headers is the message to its
+    recipient, so only the forms that name Kevin count there.
+    """
     text = (output or "")
-    m = HANDBACK_RE.search(text)
+    m = HANDBACK_KEVIN_RE.search(text)
+    if not m and task_type != "Correspondence":
+        m = HANDBACK_YOU_RE.search(text)
     if not m:
         return ""
-    line = text[text.rfind("\n", 0, m.start()) + 1: text.find("\n", m.end()) if text.find("\n", m.end()) != -1 else len(text)]
+    end_ = text.find("\n", m.end())
+    line = text[text.rfind("\n", 0, m.start()) + 1: end_ if end_ != -1 else len(text)]
     return line.strip()[:160]
 
 
@@ -2089,9 +2108,9 @@ def cmd_submit(args):
             "       is exactly what he asked to stop (11 Aug 2026)."
         )
 
-    # Does the closing line promise a send this Task Type cannot deliver?
-    # Refused here, not discovered at carry-out after Kevin has approved it.
-    handed = handback_problem(output)
+    # A hand-back is refused before anything else is judged: an output that
+    # tells Kevin to do the job is not a submission (his ruling, 4 Sep 2026).
+    handed = handback_problem(output, args.type)
     if handed and not SIGNIN_NEEDED_RE.search(output):
         sys.exit(
             f"ERROR: refusing to submit {args.task} — it hands Kevin a job instead of "
@@ -2105,6 +2124,8 @@ def cmd_submit(args):
             "             and stop. That line is a tap for him (Robot sign-in app), "
             "not a task. Never a phone call.")
 
+    # Does the closing line promise a send this Task Type cannot deliver?
+    # Refused here, not discovered at carry-out after Kevin has approved it.
     promise = send_promise_problem(output, args.type)
     if promise:
         sys.exit(
