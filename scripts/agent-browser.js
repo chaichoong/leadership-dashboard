@@ -100,10 +100,15 @@ const BUILTIN_SITES = {
   // signin.account.gov.uk. Kevin signs in there with `login` (email, password
   // and his security code: every one of those is his step, never an agent's).
   // The session is SHORT: One Login expires one hour after his last
-  // interaction with it, so the agent must check for a live session with
-  // `read https://ewf.companieshouse.gov.uk/` right before it works, and hand
-  // back "SIGN-IN NEEDED: GOV.UK One Login (one-hour window)" when it is the sign-in page
-  // rather than the company list. Kevin adds each company's 6-character
+  // interaction with it. The WebFiling front page ALWAYS shows "Sign in to
+  // WebFiling", so a signed-in check must walk the flow: `prepare` a plan of
+  // goto seclogin?tc=1 -> click Continue -> click "Go to GOV.UK One Login" ->
+  // wait -> and read where it lands. signin.account.gov.uk means signed out:
+  // hand back "SIGN-IN NEEDED: GOV.UK One Login (one-hour window)". A
+  // WebFiling page means signed in. Kevin signs in INSIDE that same flow (the
+  // Robot sign-in app opens the WebFiling entry): a standalone One Login
+  // sign-in did not carry into WebFiling's request, proven 4 Sep 2026 with his
+  // cookies present and readable. Kevin adds each company's 6-character
   // authentication code to his own WebFiling account once; the agent picks
   // the company from the list and never handles the code.
   'signin.account.gov.uk':      { label: 'GOV.UK One Login',   login: true  },
@@ -367,6 +372,14 @@ async function runSteps(page, steps, allowSubmit, confirm) {
         break;
       case 'check':
         await page.check(s.selector, { timeout: 20000 });
+        break;
+      case 'wait':
+        // A click that starts a redirect chain (WebFiling -> GOV.UK One Login ->
+        // back) returns after the FIRST navigation, so the next step or the
+        // screenshot sees a page mid-flight (4 Sep 2026). `ms` pauses; `for`
+        // waits for a selector; both capped so a dead page cannot hang a run.
+        if (s.for) await page.waitForSelector(s.for, { timeout: Math.min(Number(s.ms) || 20000, 60000) });
+        else await page.waitForTimeout(Math.min(Number(s.ms) || 3000, 60000));
         break;
       case 'click':
       case 'submit':
