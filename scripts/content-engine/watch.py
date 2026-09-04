@@ -189,6 +189,9 @@ def list_clips(batch=None, since=DEFAULT_SINCE):
 
 def scan(create=False, batch=None, since=DEFAULT_SINCE):
     ledger = load_ledger()
+    stale = repair_stale_pulls(ledger)
+    for k in stale: print("scan: %s was stuck 'pulling' from a dead run; reset" % k)
+    if stale: save_ledger(ledger)
     clips = list_clips(batch, since)
     if not clips:
         raise SystemExit("scan: no clips found under %s (batch=%s since=%s) - is Drive mounted?" % (RAW_ROOT, batch, since))
@@ -251,6 +254,23 @@ def copy_streaming(src, dst, chunk=8 * 1024 * 1024, max_minutes=PULL_MAX_MINUTES
             except OSError as ex:
                 if ex.errno not in DRIVE_RETRY_ERRNOS or time.time() > deadline: raise
                 out.flush(); sleep(PULL_RETRY_SECONDS)
+
+
+def repair_stale_pulls(ledger, work=WORK):
+    """A run that died mid-copy (4 Sep 2026, Drive's EDEADLK) leaves a clip 'pulling' for ever, and the
+    chooser never looks at it again. Any 'pulling' entry with no complete local file goes back to 'new'."""
+    fixed = []
+    for key, e in ledger.items():
+        if e.get("status") != "pulling": continue
+        dest = os.path.join(work, key)
+        if os.path.exists(dest) and os.path.getsize(dest) == e.get("size"):
+            e["status"] = "pulled"; e["local"] = dest
+        else:
+            for p in (dest, dest + ".part"):
+                if os.path.exists(p): os.remove(p)
+            e["status"] = "new"; e.pop("local", None)
+        fixed.append(key)
+    return fixed
 
 
 def pull(ledger, key, work=WORK):
@@ -317,7 +337,20 @@ def _selftest_copy_retry():
     os.remove(src); os.remove(dst)
 
 
+def _selftest_repair_stale():
+    import tempfile
+    work = tempfile.mkdtemp(prefix="od-pull-")
+    led = {"a.insv": {"status": "pulling", "size": 5}, "b.insv": {"status": "pulling", "size": 3}, "c.insv": {"status": "pulled", "size": 1}}
+    open(os.path.join(work, "a.insv.part"), "wb").write(b"xx")            # died mid-copy
+    open(os.path.join(work, "b.insv"), "wb").write(b"yyy")                 # finished but never marked
+    fixed = repair_stale_pulls(led, work)
+    assert sorted(fixed) == ["a.insv", "b.insv"] and led["a.insv"]["status"] == "new" and led["b.insv"]["status"] == "pulled" and led["c.insv"]["status"] == "pulled"
+    assert not os.path.exists(os.path.join(work, "a.insv.part")), "the dead part-file is removed"
+    shutil.rmtree(work)
+
+
 def selftest():
+    _selftest_repair_stale()
     _selftest_copy_retry()
     assert parse_clip("VID_20260704_105737_00_064.insv") == (dt.date(2026, 7, 4), "105737", 64)
     assert parse_clip("VID_20260704_105737_00_064.lrv") is None and parse_clip("random.insv") is None
