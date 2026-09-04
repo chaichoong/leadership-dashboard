@@ -450,9 +450,9 @@
  },
  "content-engine": {
   "cron": "0 2 * * *",
-  "maxLateMinutes": 600,
+  "maxLateMinutes": 180,
   "mode": "wrapped",
-  "note": "Content Engine 360 lane, R1 (Kevin: spike GO 2 Sep 2026, 'carry on with the folder watch' 3 Sep). Scans the raw Drive folder, one episode record per new shooting day, pulls one clip a night to local disk for the render. Drive-gated on the raw folder because a cold stream stalls for 15 min per GB; 600 min lateness carries a morning mount flap into the afternoon without colliding with the next night.",
+  "note": "Content Engine 360 lane, R1 (Kevin: spike GO 2 Sep 2026, 'carry on with the folder watch' 3 Sep). Scans the raw Drive folder, one episode record per new shooting day, pulls one clip a night to local disk for the render. Drive-gated on the raw folder because a cold stream stalls for 15 min per GB; Lateness capped at 180 min (02:00-05:00) on 4 Sep 2026: at 600 a deferred run could be re-fired by retry-deferred as late as noon, and on 4 Sep that put two renders on the Mac at 11:35 while Kevin was working. content-engine-run.sh also refuses 07:00-21:59 outright, because a manual launch never reads this file.",
   "needs": [
    "network",
    {
