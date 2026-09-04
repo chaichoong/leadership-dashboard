@@ -93,7 +93,7 @@ function taskRecords() {
 
 // Capture what the page sends to the slack-notify worker. Registered AFTER
 // stubExternalHosts so this route wins for workers.dev.
-async function mockTasksPage(page) {
+async function mockTasksPage(page, opts = {}) {
   const dms = [];
   await stubExternalHosts(page);
   await page.route('**/slack-notify.kevinbrittain.workers.dev/**', async (route) => {
@@ -109,14 +109,20 @@ async function mockTasksPage(page) {
     }
     return json({ records: [] });
   });
-  await page.addInitScript((me) => {
+  await page.addInitScript((args) => {
     localStorage.setItem('_dlr_pat', 'pat_test_mock_token_for_playwright');
-    localStorage.setItem('_task_user', JSON.stringify({ key: 'kevin', name: 'Kevin Brittain', email: me }));
+    localStorage.setItem('_task_user', JSON.stringify({ key: 'kevin', name: 'Kevin Brittain', email: args.me }));
     // The catch-up dedupes against this key. Start clean or it no-ops and the
-    // spec passes for the wrong reason.
-    localStorage.removeItem('_slack_notified_tasks');
-  }, ME);
+    // spec passes for the wrong reason. `seed` sets it deliberately instead.
+    if (args.seed === null) localStorage.removeItem('_slack_notified_tasks');
+    else localStorage.setItem('_slack_notified_tasks', JSON.stringify(args.seed));
+  }, { me: ME, seed: opts.seed === undefined ? null : opts.seed });
   return dms;
+}
+
+// Read the dedupe store back out of the page.
+async function readStore(page) {
+  return page.evaluate(() => JSON.parse(localStorage.getItem('_slack_notified_tasks') || 'null'));
 }
 
 // The catch-up runs at the end of loadAllData(). Wait for the task it is
@@ -161,3 +167,75 @@ test.describe('notification catch-up and the approval gate', () => {
     expect(dms.map((d) => d.taskId).sort()).toEqual(['recRealAssignment']);
   });
 });
+
+// ── THE DEDUPE STORE ────────────────────────────────────────────────────────
+//
+// Same routine, second defect, found reviewing the fix above. The store of
+// "already DM'd" ids was an array trimmed to its last 500 entries. It trims
+// from the FRONT, so past 500 remembered tasks the page forgets one it has
+// already sent and sends it again. It also grew for ever inside that cap:
+// every task the sweep skipped was added too, not just the ones it sent.
+//
+// The board was 232 open tasks on 4 Sep 2026 so the cap had never bitten, but
+// the Q2->Q3 cleanse ran at 303. Eviction is now by AGE, using the same 48h
+// cutoff the sweep already applies, which cannot resurrect anything: a task
+// past that age is refused whether or not the store remembers it.
+test.describe('the dedupe store cannot forget and re-send', () => {
+  test('a task already sent is not sent again', async ({ page }) => {
+    const first = await mockTasksPage(page);
+    await loadAndSettle(page, first);
+    const store = await readStore(page);
+    expect(Object.keys(store)).toContain('recRealAssignment');
+
+    // Second visit carrying what the first one learned.
+    const second = await mockTasksPage(page, { seed: store });
+    await page.goto(PAGE);
+    await page.waitForFunction(() => typeof allTasks !== 'undefined' && allTasks.length >= 3, null, { timeout: 20000 });
+    await page.waitForTimeout(1000);
+    expect(second).toEqual([]);
+  });
+
+  test('THE REGRESSION: 600 remembered ids do not evict a live one', async ({ page }) => {
+    // Exactly what .slice(-500) did — recRealAssignment sits at the FRONT, so
+    // the old trim dropped it and the DM went out a second time.
+    const seed = { recRealAssignment: Date.now() + 48 * 3600e3 };
+    for (let i = 0; i < 600; i++) seed['recFiller' + i] = Date.now() + 48 * 3600e3;
+
+    const dms = await mockTasksPage(page, { seed });
+    await page.goto(PAGE);
+    await page.waitForFunction(() => typeof allTasks !== 'undefined' && allTasks.length >= 3, null, { timeout: 20000 });
+    await page.waitForTimeout(1000);
+    expect(dms.map((d) => d.taskId)).not.toContain('recRealAssignment');
+  });
+
+  test('expired entries are dropped, so the store cannot grow for ever', async ({ page }) => {
+    const seed = { recAncient: Date.now() - 1000, recRealAssignment: Date.now() + 48 * 3600e3 };
+    const dms = await mockTasksPage(page, { seed });
+    await loadAndSettle2(page);
+    const store = await readStore(page);
+    expect(Object.keys(store)).not.toContain('recAncient');
+    // CONTROL: an unexpired entry survives the same pass.
+    expect(Object.keys(store)).toContain('recRealAssignment');
+    expect(dms.map((d) => d.taskId)).not.toContain('recRealAssignment');
+  });
+
+  test('the legacy array format migrates instead of re-sending everything', async ({ page }) => {
+    // Every browser holds the old shape on first load after this ships. If the
+    // reader does not understand it, every id is forgotten at once and the
+    // whole 48h window is re-sent — a duplicate burst per device.
+    const dms = await mockTasksPage(page, { seed: ['recRealAssignment'] });
+    await loadAndSettle2(page);
+    expect(dms.map((d) => d.taskId)).not.toContain('recRealAssignment');
+    const store = await readStore(page);
+    expect(Array.isArray(store), 'still the legacy shape — no migration happened').toBe(false);
+    expect(typeof store.recRealAssignment).toBe('number');
+  });
+});
+
+// Load and let the sweep finish, without asserting that anything was sent —
+// these tests seed the store precisely so nothing is.
+async function loadAndSettle2(page) {
+  await page.goto(PAGE);
+  await page.waitForFunction(() => typeof allTasks !== 'undefined' && allTasks.length >= 3, null, { timeout: 20000 });
+  await page.waitForTimeout(1000);
+}

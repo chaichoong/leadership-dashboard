@@ -126,9 +126,26 @@ describe('an email draft says which address it sends from', () => {
     const r = from('TO: a@b.com\nSUBJECT: hello\n---\nYou booked a call with Operations Director');
     expect(r.blocked).toBe(true);
     expect(r.from).toBe('');
-    // and the page's brand test must stay in step with the sender's
-    expect(read('scripts/send-email.py')).toMatch(/operationsdirector\\.co\\.uk\|\\bOperations Director\\b/);
-    expect(PAGE).toMatch(/operationsdirector\\.co\\.uk\|\\bOperations Director\\b/);
+    // The page's brand test must stay in step with the sender's. Read the
+    // pattern from the ONE place it is defined rather than repeating it here,
+    // so changing the pattern cannot leave this assertion behind.
+    //
+    // Rewritten 4 Sep 2026. This used to assert the pattern literal appeared
+    // in scripts/send-email.py, which quietly REQUIRED that file to keep its
+    // own copy of the regex — the test was holding the duplication in place.
+    // send-email.py now imports BUSINESS_BRAND_RE, so what it must prove is
+    // that it imports rather than redefines.
+    const fmt = read('scripts/agent_email_format.py');
+    const brand = fmt.match(/BUSINESS_BRAND_RE = re\.compile\(\s*r"([^"]+)"/);
+    expect(brand, 'CONTROL: BUSINESS_BRAND_RE moved or changed shape').toBeTruthy();
+
+    const send = read('scripts/send-email.py');
+    expect(send, 'send-email.py defines its own brand regex again').not.toMatch(/BUSINESS_BRAND\w* = re\.compile/);
+    expect(send, 'send-email.py no longer imports the shared brand regex').toMatch(/BUSINESS_BRAND_RE/);
+
+    // The page cannot import Python, so its copy is a deliberate mirror, and
+    // this is what keeps the two in step.
+    expect(PAGE, 'the page brand test drifted from the sender rule').toContain(brand[1]);
   });
 
   it('a four-dash divider still separates headers from body', () => {
