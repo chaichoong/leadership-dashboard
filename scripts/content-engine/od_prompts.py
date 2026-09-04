@@ -73,7 +73,8 @@ HARD RULES (immutable, from the playbook Kevin approved):
 4. Pricing, if mentioned, is exactly: """ + PRICING + """.
 5. An agent runs itself on a schedule; an assistant acts when a human asks. Do not call an engine that is not AI \"AI\".
 6. Never mention running, the streak, barefoot shoes, kilometres, Runpreneur, fundraising or children's charities. If the source is a run transcript, keep the business idea and drop every trace of the run.
-7. Never use \"The reality is\", \"Here's the thing\", \"Let that sink in\", \"The truth is\", \"In business and\", \"Day N\", \"game-changer\", \"unlock\", \"leverage\".
+7. Never name another expert, author or guru (Dan Martell, Austin Chen, Gino Wickman, anyone) unless you quote them word for word inside quotation marks. Kevin's rule: "we put our own spin on things"; a reader who keeps seeing other names follows them instead. A framework from the source is written as Operations Director's own method, no attribution.
+8. Never use \"The reality is\", \"Here's the thing\", \"Let that sink in\", \"The truth is\", \"In business and\", \"Day N\", \"game-changer\", \"unlock\", \"leverage\".
 
 OUTPUT FORMAT, exactly:
 <the post>

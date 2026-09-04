@@ -535,3 +535,17 @@ The Summary is not put on YouTube (the full episode is there). The socials carry
   a rejected slot is freed for a redraft; one episode feeds at most one post a week (the first dry run put Episode 1992
   in three slots); a low usefulness score is a flag on the card, not a THIN slot; em dashes are stripped from the judge's
   own reasons.
+- **Kevin's review of the first v2 week (4 Sep 2026, evening).** All six cards "Changes requested". Copy: "really good", "happy with the
+  copy". Pictures: "terrible", on every card; he wants Dan Martell-style infographics and named Gemini ("Nano Banana") as the route. Two
+  copy rules: never name another expert unless quoting them word for word (he does not want readers following the expert instead), and the
+  booking link must be the neater page, not the raw GoHighLevel widget URL. And the recording brief needs a home in the app, updated as he
+  records. Built in response: `od_illustrate.py` (Gemini image model draws the infographic from the post's VISUAL spec in the Sage palette;
+  Gemini's text model transcribes it and every required line must match at 80%, two redraws, then the code template as fallback; needs
+  `~/.config/od/gemini_api_key`, Kevin's one click in AI Studio); rule 7 in the OD prompt plus `name_drops` in the rules check (library authors
+  and the board's names flagged unless a quotation sits within 160 characters); `strip_model_ctas` so the Friday ask is only ever the one
+  the code appends (the model had reproduced the old widget URL from memory); `CTA_LINK` = operationsdirector.co.uk/book-a-demo/ pending
+  Kevin's confirmation; topics live as records in the Content Machine table ("RECORDING BRIEF: <title>", Category Operations Director,
+  Written, New Upload while waiting) and the AI Agents dashboard shows them with a "Recorded" button that moves the status; a topic now
+  waits 56 days, because Kevin uploads four to six weeks of recordings at a time, and the engine marks it recorded from his tick or from the
+  transcript when it finally arrives. Friday redrafted (no names, usefulness 7), the edition's two attributions rewritten, links corrected.
+  The five posts keep their approved copy; their pictures are regenerated and the six cards re-raised once the Gemini key exists.

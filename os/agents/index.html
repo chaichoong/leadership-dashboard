@@ -322,6 +322,15 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
             <div id="ceoBriefBody"><div class="zone-loading"><div class="sop-spinner"></div><span>Loading the CEO brief…</span></div></div>
         </div>
 
+        <div class="zone" id="zoneRecordingBrief">
+            <div class="zone-header">
+                <span class="zone-title">Recording brief for your runs</span>
+                <span class="zone-count" id="briefCount">0</span>
+                <span class="zone-sub">Topics the Content Engine wants you to talk about on camera. Say them in your own words; the transcript becomes the post. Tick one when you have recorded it.</span>
+            </div>
+            <div id="briefBody"><div class="zone-loading"><div class="sop-spinner"></div><span>Loading the recording brief…</span></div></div>
+        </div>
+
         <div class="zone" id="zoneRegister">
             <div class="zone-header">
                 <span class="zone-title">Your AI team</span>
@@ -677,6 +686,7 @@ function switchAgentsView(view){
     // fetch). Without this, a page left open overnight keeps labelling
     // yesterday's brief TODAY, and the approvals waiting-times freeze.
     if(view==='dashboard' && _ceoBriefState==='ready') renderCeoBrief();
+    if(view==='dashboard' && !_briefRows.length) loadRecordingBrief();
     if(view==='approvals' && _approvalsState==='ready') renderApprovals();
     if(view==='checks') loadChecksAndRender();
     window.scrollTo(0,0);
@@ -2213,6 +2223,57 @@ function postApprovalBadge(){
 // tab only READS. Discussion happens in Slack by design (Kevin, 28 Jul
 // 2026) — the tab is the record, Slack is the conversation. Ported from
 // js/ceo-brief.js (deleted) when the brief moved into this page, 25 Aug 2026.
+
+// ── Recording brief (Content Engine, Operations Director lane; Kevin's ask 4 Sep 2026) ──
+// The engine keeps ten topics for Kevin's daily runs as records in the Content Machine
+// table (Category "Operations Director", Content Type "Written", name prefixed
+// "RECORDING BRIEF: "). Waiting = Record Status "New Upload". Kevin ticks one recorded here;
+// the engine reads the status back and refills the list. Kevin uploads 4-6 weeks of
+// recordings at a time, so a ticked topic stays out of the list for weeks before its
+// transcript is mined; that gap is expected and the engine keeps the topic marked.
+const CM_TBL = 'tblEPzZdwBZeSXFRB';
+const BRIEF_PREFIX = 'RECORDING BRIEF: ';
+const BRIEF_STATUS_WAITING = 'New Upload', BRIEF_STATUS_RECORDED = 'Editing and Optimisation in Progress';
+let _briefRows = [];
+async function loadRecordingBrief(){
+    const body = document.getElementById('briefBody'); if(!body) return;
+    try {
+        const formula = `AND({Category}="Operations Director", {Content Type}="Written", FIND("${BRIEF_PREFIX}", {Content Name})=1)`;
+        _briefRows = await atFetchByName(CM_TBL, { filterByFormula: formula, pageSize: '50' });
+        renderRecordingBrief();
+    } catch(e){
+        body.innerHTML = `<div class="zone-empty">Could not read the recording brief (${esc(e.message||e)}). The list is also in talking-points.md.</div>`;
+    }
+}
+function renderRecordingBrief(){
+    const body = document.getElementById('briefBody'), count = document.getElementById('briefCount'); if(!body) return;
+    const waiting = _briefRows.filter(r => (r.fields['Record Status']||'') === BRIEF_STATUS_WAITING)
+        .sort((a,b)=> (a.createdTime||'').localeCompare(b.createdTime||''));
+    if(count) count.textContent = waiting.length;
+    if(!waiting.length){ body.innerHTML = '<div class="zone-empty">Nothing waiting. The engine writes the next ten on Sunday night.</div>'; return; }
+    body.innerHTML = waiting.map((r,i)=>{
+        const title = (r.fields['Content Name']||'').slice(BRIEF_PREFIX.length);
+        const lines = String(r.fields['Notes']||'').split('\n').filter(Boolean);
+        const angle = lines[0]||''; const rest = lines.slice(1);
+        return `<div class="card" style="display:flex;gap:12px;align-items:flex-start;padding:12px 14px;margin-bottom:8px">
+            <div style="flex:0 0 28px;height:28px;border-radius:50%;background:var(--accent);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:var(--fw-semibold);font-size:var(--fs-sm)">${i+1}</div>
+            <div style="flex:1;min-width:0">
+                <div style="font-weight:var(--fw-semibold)">${esc(title)}</div>
+                <div style="color:var(--text-secondary);font-size:var(--fs-sm);margin-top:2px">${esc(angle)}</div>
+                ${rest.map(l=>`<div style="color:var(--text-muted);font-size:var(--fs-xs);margin-top:2px">${esc(l)}</div>`).join('')}
+            </div>
+            <button class="btn" style="flex:0 0 auto" title="I have recorded this one" onclick="markBriefRecorded('${esc(r.id)}')">Recorded ✓</button>
+        </div>`;
+    }).join('');
+}
+async function markBriefRecorded(recId){
+    try {
+        await atUpdate(CM_TBL, recId, { 'Record Status': BRIEF_STATUS_RECORDED });
+        const row = _briefRows.find(r=>r.id===recId); if(row) row.fields['Record Status'] = BRIEF_STATUS_RECORDED;
+        renderRecordingBrief();
+        if(typeof toast==='function') toast('Marked recorded. The engine will look for it when the footage is uploaded.');
+    } catch(e){ if(typeof toast==='function') toast('Could not mark it: '+(e.message||e)); else alert('Could not mark it: '+(e.message||e)); }
+}
 
 async function loadCeoBriefs(){
     _ceoBriefState = 'loading';
