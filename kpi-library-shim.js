@@ -43,8 +43,22 @@
 
   async function readProjects() {
     const cols = ['id'].concat(Object.values(PROJ_MAP));
-    const { data, error } = await sbc().from('v_projects').select(cols.join(','));
-    if (error) throw new Error(error.message);
+    let data;
+    try {
+      // Safety timeout: a slow/hanging view read must NEVER freeze the library
+      // behind its spinner. On timeout/error we fall back to an empty live panel;
+      // the static template library still renders.
+      const q = sbc().from('v_projects').select(cols.join(','));
+      const res = await Promise.race([
+        q,
+        new Promise((_, rej) => setTimeout(() => rej(new Error('v_projects timed out')), 6000)),
+      ]);
+      if (res.error) throw new Error(res.error.message);
+      data = res.data;
+    } catch (e) {
+      console.warn('[kpi-shim] live-KPI read skipped:', e.message);
+      return { records: [] };
+    }
     // Only rows with a KPI name (the page's main filter: {KPI Name} != "").
     const rows = (data || []).filter(r => r.kpi_name != null && String(r.kpi_name).trim() !== '');
     return {
@@ -85,8 +99,12 @@
   window.sbKpiSession = () => sbc().auth.getSession().then(r => r.data.session);
   window.sbKpiIsOwner = async function () {
     try {
-      const { data } = await sbc().auth.getUser();
-      return !!(data && data.user && data.user.email && data.user.email.toLowerCase() === OWNER_LOGIN);
+      // Read the email from the LOCAL session (instant, no network). getUser() makes
+      // a /user network call that can be slow inside an embedded frame and leave the
+      // boot's opaque cover up — a blank page. getSession() is synchronous-fast.
+      const { data } = await sbc().auth.getSession();
+      const email = data && data.session && data.session.user && data.session.user.email;
+      return !!(email && email.toLowerCase() === OWNER_LOGIN);
     } catch (e) { return false; }
   };
   console.log('[kpi-shim] Supabase KPI Library shim active →', SB_URL);

@@ -95,7 +95,7 @@ const BUILTIN_SITES = {
   'companieshouse.gov.uk':      { label: 'Companies House',    login: false },
   'find-and-update.company-information.service.gov.uk':
                                 { label: 'Companies House',    login: false },
-  'gov.uk':                     { label: 'GOV.UK',             login: false },
+  'gov.uk':                     { label: 'GOV.UK',             login: false, shortSession: true },
   // GOV.UK One Login + Companies House WebFiling (4 Sep 2026). WebFiling has
   // signed in through One Login since October 2025, so a confirmation
   // statement (CS01) or any other WebFiling form starts at
@@ -113,11 +113,13 @@ const BUILTIN_SITES = {
   // cookies present and readable. Kevin adds each company's 6-character
   // authentication code to his own WebFiling account once; the agent picks
   // the company from the list and never handles the code.
-  'signin.account.gov.uk':      { label: 'GOV.UK One Login',   login: true  },
-  'home.account.gov.uk':        { label: 'GOV.UK One Login (account)', login: true },
-  'ewf.companieshouse.gov.uk':  { label: 'Companies House WebFiling (via One Login)', login: true,
+  // shortSession: the session dies within the hour and needs Kevin's code every
+  // time, so the daily keep-alive does not try to hold it open.
+  'signin.account.gov.uk':      { label: 'GOV.UK One Login',   login: true, shortSession: true },
+  'home.account.gov.uk':        { label: 'GOV.UK One Login (account)', login: true, shortSession: true },
+  'ewf.companieshouse.gov.uk':  { label: 'Companies House WebFiling (via One Login)', login: true, shortSession: true,
                                   loginUrl: 'https://ewf.companieshouse.gov.uk/seclogin?tc=1' },
-  'tax.service.gov.uk':         { label: 'HMRC',               login: true,
+  'tax.service.gov.uk':         { label: 'HMRC',               login: true, shortSession: true,
                                   loginUrl: 'https://www.tax.service.gov.uk/gg/sign-in' },
   // The sites agents kept handing back to Kevin as "log in and do it yourself"
   // (37 of 233 outputs, 14 days to 4 Sep 2026). Reading is unlocked; the
@@ -135,8 +137,10 @@ const BUILTIN_SITES = {
                                   loginUrl: 'https://studio.youtube.com/' },
   'www.linkedin.com':           { label: 'LinkedIn',           login: true,
                                   loginUrl: 'https://www.linkedin.com/login' },
-  'my.edfenergy.com':           { label: 'EDF Energy',         login: true,
-                                  loginUrl: 'https://my.edfenergy.com/login' },
+  // my.edfenergy.com no longer answers (SSL error, 4 Sep 2026); the account
+  // sign-in lives under the main site.
+  'www.edfenergy.com':          { label: 'EDF Energy',         login: true,
+                                  loginUrl: 'https://www.edfenergy.com/myaccount/login' },
   // Adobe Acrobat Sign (28 Aug 2026). Two different jobs on two different
   // hosts, and only one of them needs Kevin's account:
   //   acrobat.adobe.com    — SENDING a document out for signature. Needs the
@@ -619,7 +623,11 @@ async function main() {
       if (waitFor) await page.waitForSelector(waitFor, { timeout: 60000 }).catch(() => {});
       const text = await page.evaluate(() => document.body.innerText.slice(0, 20000));
       const png = await shoot(page, shot);
-      return { title: await page.title(), text, screenshot: png };
+      // Where the page ENDED UP and whether it is asking for a password: the
+      // two facts the session keep-alive needs to tell "signed in" from "the
+      // login page came back" (4 Sep 2026).
+      const passwordFields = await page.evaluate(() => document.querySelectorAll('input[type=password]').length);
+      return { title: await page.title(), url: page.url(), passwordFields, text, screenshot: png };
     });
     ledger({ cmd: 'read', url, profile, screenshot: res.screenshot });
     console.log(JSON.stringify(res));

@@ -22,8 +22,8 @@
   <!-- supabase-js + shim + owner gate (NON-deferred so window.fetch is overridden
        before any app code runs). -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="kpi-library-shim.js?v=1"></script>
-  <script src="kpi-library-boot.js?v=1"></script>
+  <script src="kpi-library-shim.js?v=2"></script>
+  <script src="kpi-library-boot.js?v=2"></script>
 
   <!-- Minimal helper the app expects from shared.js (we don't load the heavy shell). -->
   <script>
@@ -38,5 +38,41 @@
   <script defer src="js/ai-models.js?v=1"></script>
   <script defer src="js/config.js?v=61"></script>
   <script defer src="js/kpi-library.js?v=2"></script>
+
+  <!-- Safety net + on-page diagnostic. If the boot hasn't populated the library
+       within 3s, force the render; if it still can't, print the exact runtime state
+       so a screenshot pinpoints the cause (rather than a silent blank). -->
+  <script>
+    setTimeout(function () {
+      var el = document.getElementById('tab-kpi-library');
+      if (!el) return;
+      if (el.innerHTML && el.innerHTML.length > 200) return;                // already rendered
+      if (document.getElementById('sbLoginOverlay') || document.getElementById('sbOwnerGate')) return;  // correctly gated
+      var cover = document.getElementById('sbBootCover'); if (cover) cover.remove();  // clear a stuck cover
+      var diag = { step: 'fallback', renderFn: typeof renderKpiLibraryTab, escHtml: typeof escHtml,
+        KPI_LIBRARY: (typeof KPI_LIBRARY !== 'undefined') ? KPI_LIBRARY.length : 'MISSING',
+        KPI_SHAPES: (typeof KPI_SHAPES !== 'undefined') ? KPI_SHAPES.length : 'MISSING',
+        KPI_DEKEVIN: (typeof KPI_DEKEVIN !== 'undefined') ? KPI_DEKEVIN.length : 'MISSING',
+        supabase: typeof window.supabase, sbKpiSession: typeof window.sbKpiSession,
+        renderErr: '' };
+      try {
+        if (typeof renderKpiLibraryTab === 'function') {
+          try { PAT = 'supabase'; } catch (e) {}
+          try { _kpiLibLiveRows = []; } catch (e) {}
+          renderKpiLibraryTab();
+          try {
+            if (typeof kpiLibFetchLive === 'function') {
+              kpiLibFetchLive().then(function (r) { try { _kpiLibLiveRows = r; renderKpiLibraryTab(); } catch (e) {} }).catch(function () {});
+            }
+          } catch (e) {}
+        }
+      } catch (e) { diag.renderErr = String(e && (e.stack || e.message) || e); }
+      // If it still didn't render, show the diagnostic so we can see why.
+      if (!el.innerHTML || el.innerHTML.length < 200) {
+        el.innerHTML = '<div style="padding:16px;font:12px/1.6 ui-monospace,monospace;color:#1C2422;background:#fff;border:1px solid #DDE1D9;border-radius:8px;white-space:pre-wrap;max-width:640px">KPI Library diagnostic (screenshot this for support):\n\n' +
+          JSON.stringify(diag, null, 2) + '</div>';
+      }
+    }, 3000);
+  </script>
 </body>
 </html>

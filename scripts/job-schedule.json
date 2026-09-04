@@ -460,5 +460,12 @@
    }
   ],
   "retryWhenDeferred": true
+ },
+ "session-keepalive": {
+  "cron": "40 6 * * *",
+  "maxLateMinutes": 600,
+  "mode": "wrapped",
+  "retryWhenDeferred": true,
+  "note": "Kevin, 4 Sep 2026: keep the robot signed in. Visits every login site that can hold a session (allowlist entries with a loginUrl and no shortSession flag) so the cookie stays fresh, and raises ONE parked task in the standard SIGN-IN NEEDED form for any site that has signed out, timed for the 08:00 message. GOV.UK and HMRC are skipped: their sessions need his code every time. A run where every site reads unknown FAILS rather than reporting all well."
  }
 }

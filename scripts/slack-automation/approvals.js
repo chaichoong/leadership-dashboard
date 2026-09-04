@@ -715,12 +715,34 @@ export function londonParts(now = new Date()) {
     return { date: `${parts.year}-${parts.month}-${parts.day}`, hour: Number(parts.hour) % 24 };
 }
 
-export function buildDigestText(count, names, dashUrl, capped) {
+// A task blocked on a site sign-in is a wait, not a decision (Kevin's ruling,
+// 4 Sep 2026). The robot leaves ONE line, "SIGN-IN NEEDED: <site> (<url>)".
+// The digest lists those sites so his one sitting is planned before he opens
+// the queue, where each card carries the button that opens the sign-in app.
+const SIGNIN_LINE_RE = /^\s*SIGN-IN NEEDED:\s*(.+?)\s*(?:\((https?:\/\/[^\s)]+)\))?\s*$/im;
+export function signInsWaiting(tasks) {
+    const bySite = {};
+    for (const t of tasks) {
+        const m = SIGNIN_LINE_RE.exec(String(t.agentOutput || ''));
+        if (!m) continue;
+        const site = m[1].trim();
+        bySite[site.toLowerCase()] = bySite[site.toLowerCase()] || { site, n: 0 };
+        bySite[site.toLowerCase()].n++;
+    }
+    return Object.values(bySite).sort((a, b) => b.n - a.n || a.site.localeCompare(b.site));
+}
+export function buildDigestText(count, names, dashUrl, capped, signIns = []) {
     const shown = `${count}${capped ? '+' : ''}`;
     const top = names.slice(0, 3).map(n => `• ${n}`).join('\n');
     const more = count > 3 ? `\n…and ${capped ? 'more' : `${count - 3} more`}.` : '';
+    const waiting = signIns.reduce((a, s) => a + s.n, 0);
+    const signInBlock = waiting
+        ? `\n*${waiting} of them just need you signed in* (not a decision): `
+          + signIns.map(s => `${s.site} (${s.n})`).join(', ')
+          + `.\nOpen the queue and press *Sign in to all*: sites open one after another, sign in, Cmd+Q, and the robots finish the work within minutes.\n`
+        : '';
     return truncate(`*${shown} item${count === 1 && !capped ? '' : 's'} waiting for your approval.*\n`
-        + `${top}${more}\n\n`
+        + `${top}${more}\n${signInBlock}\n`
         + `Decide them here: ${dashUrl}\n`
         + `_This is the only approvals message you get today. Nothing has been sent or actioned._`, 2900);
 }
@@ -761,7 +783,7 @@ async function postKevinDigest(env, log) {
             body: JSON.stringify({
                 channel,
                 text: `${mine.length}${capped ? '+' : ''} approvals waiting`,
-                blocks: [{ type: 'section', text: { type: 'mrkdwn', text: buildDigestText(mine.length, mine.map(t => esc(truncate(t.name, 120))), DASHBOARD_QUEUE_URL, capped) } }],
+                blocks: [{ type: 'section', text: { type: 'mrkdwn', text: buildDigestText(mine.length, mine.map(t => esc(truncate(t.name, 120))), DASHBOARD_QUEUE_URL, capped, signInsWaiting(mine)) } }],
             }),
         });
         if (!res.ok) { log.push(`digest post failed: ${res.error}`); return -1; }

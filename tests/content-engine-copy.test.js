@@ -12,6 +12,17 @@ const COPY = path.join(DIR, 'platform_copy.py');
 const PROMPTS = path.join(DIR, 'cm_prompts.py');
 
 describe('content-engine copy', () => {
+  it("Kevin's 4 Sep 2026 review: distance from the Strava-fed total, X dropped, TikTok/Shorts are captions not scripts", () => {
+    const src = readFileSync(path.join(DIR, 'platform_copy.py'), 'utf8');
+    expect(src).toContain('def km_for_day(');
+    expect(src).not.toContain('cum = day * 10');
+    expect(src).not.toContain('"X / Twitter Copy"');
+    const prompts = readFileSync(path.join(DIR, 'cm_prompts.py'), 'utf8');
+    expect(prompts).not.toContain('X / TWITTER POST');
+    expect(prompts).toContain('CAPTION for the Learnings clip as posted, not a script');
+    expect(prompts).toContain('as a YouTube Short');
+  });
+
   it('passes its own selftest (prompt fill, section split, rules check)', () => {
     const out = JSON.parse(execFileSync('python3', [COPY, 'selftest'], { encoding: 'utf8', cwd: DIR }));
     expect(out.failed).toEqual([]);
@@ -35,7 +46,7 @@ describe('content-engine copy', () => {
   it('writes to the same fields the team\'s Copywriting page reads, per content type', () => {
     const src = readFileSync(COPY, 'utf8');
     for (const f of ['Blog Copy', 'Blog Post Description', 'YouTube Copy', 'Podcast Copy', 'Facebook Post Copy', 'Instagram Post Copy',
-      'LinkedIn Copy', 'Threads Copy', 'X / Twitter Copy', 'TikTok Copy', 'YouTube Reels Copy', 'Facebook Reels Copy', 'Instagram Reels Copy']) {
+      'LinkedIn Copy', 'Threads Copy', 'TikTok Copy', 'YouTube Reels Copy', 'Facebook Reels Copy', 'Instagram Reels Copy']) {
       expect(src, f).toContain(`"${f}"`);
     }
     expect(src).toMatch(/STATUS_COPIES = "Copies in Progress"/);
@@ -52,7 +63,7 @@ describe('content-engine copy', () => {
   it('rules check: em dashes fixed in place, everything else reported for review (never silently rewritten)', () => {
     const src = readFileSync(COPY, 'utf8');
     expect(src).toContain('em dash replaced');
-    expect(src).toContain('LIMITS = {"Threads Copy": 500, "X / Twitter Copy": 300}');
+    expect(src).toContain('LIMITS = {"Threads Copy": 500, "TikTok Copy": 300}');
     expect(src).toContain('REVIEW: ');
   });
 });
