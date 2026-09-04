@@ -123,7 +123,11 @@ def signin_task_fields(host, entry, when):
     label = entry.get("label") or host
     url = entry["loginUrl"]
     stamp = when.strftime("%d %b %Y %H:%M")
-    tomorrow = (when + timedelta(days=1)).strftime("%Y-%m-%d")
+    # Park it for the NEXT 08:00 message: a run before 08:00 (the scheduled
+    # 06:40) means today's message; a run after it means tomorrow's. Found on
+    # the first live dry-run: "tomorrow" from a 06:40 run skipped a whole day.
+    parked_for = when if when.hour < 8 else when + timedelta(days=1)
+    tomorrow = parked_for.strftime("%Y-%m-%d")
     output = (f"SIGN-IN NEEDED: {label} ({url})\n\n"
               f"The robot's login to {label} has lapsed (daily session check, {stamp}). "
               "Nothing is blocked yet; signing in once puts the session back so the next "
@@ -214,8 +218,12 @@ def selftest():
                            datetime(2026, 9, 4, 6, 40))
     if not f[F["agentOutput"]].startswith("SIGN-IN NEEDED: Pingen (letters) (https://app.pingen.com/)"):
         bad.append(("task output line", "SIGN-IN NEEDED first", f[F["agentOutput"]][:60]))
-    if f[F["deferredUntil"]] != "2026-09-05" or "KEEPALIVE CHECK:" not in f[F["notes"]]:
-        bad.append(("task parking", "tomorrow + KEEPALIVE CHECK", (f[F["deferredUntil"]], f[F["notes"]][:40])))
+    if f[F["deferredUntil"]] != "2026-09-04" or "KEEPALIVE CHECK:" not in f[F["notes"]]:
+        bad.append(("task parking (06:40 run -> today's 08:00)", "2026-09-04 + KEEPALIVE CHECK", (f[F["deferredUntil"]], f[F["notes"]][:40])))
+    late = signin_task_fields("app.pingen.com", {"label": "Pingen (letters)", "loginUrl": "https://app.pingen.com/"},
+                              datetime(2026, 9, 4, 15, 50))
+    if late[F["deferredUntil"]] != "2026-09-05":
+        bad.append(("task parking (afternoon run -> tomorrow's 08:00)", "2026-09-05", late[F["deferredUntil"]]))
     if bad:
         for b in bad:
             print("FAIL", b, file=sys.stderr)
