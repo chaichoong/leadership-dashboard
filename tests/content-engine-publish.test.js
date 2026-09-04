@@ -82,6 +82,13 @@ describe('content-engine publish (GHL)', () => {
     expect(src).toContain('if spec["clip"] != "full" and not os.path.exists(episode_files(day)[spec["clip"]])');
   });
 
+  it('posts the Learnings clip to YouTube as a Short with the socials, title from the first copy line', () => {
+    const src = readFileSync(PUBLISH, 'utf8');
+    expect(src).toContain('"youtube-short": {"platform": "youtube"');
+    expect(src).toContain('"yt_type": "short"');
+    expect(src).toContain('("youtube", "lfmd"): ("Link of Youtube Shorts",)');
+  });
+
   it('X is not a channel and every copy field it reads exists on the record type it reads it from', () => {
     const src = readFileSync(PUBLISH, 'utf8');
     expect(src).toContain('assert "twitter" not in CHANNELS');

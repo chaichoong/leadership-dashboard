@@ -225,6 +225,24 @@ def raise_card(day, dry_run=False):
     return tid
 
 
+def refresh_card(day):
+    """Rebuild the write-up from the records as they are now and re-submit it on the existing task, so a
+    card in Kevin's queue shows corrected copy (4 Sep 2026: the distance figure and the X copy)."""
+    state = load_state(); e = state.get(str(day))
+    if not e or not e.get("task"): raise SystemExit("episode %d has no card to refresh" % day)
+    recs = bundle(day); full = recs["Long Form Video"]
+    name, desc, out = build_card(day, full, recs["Learnings From My Diary"], recs["Short Form Video"], headline_for(day, watch.load_ledger()))
+    with tempfile.NamedTemporaryFile("w", suffix=".md", delete=False) as fh:
+        fh.write(out); path = fh.name
+    try:
+        r = subprocess.run([sys.executable, DISPATCH, "submit", e["task"], "--agent", AGENT_TM, "--type", TASK_TYPE, "--output-file", path], capture_output=True, text=True)
+    finally:
+        os.remove(path)
+    if r.returncode != 0: raise SystemExit("approval: refresh failed for %s: %s" % (e["task"], (r.stderr or r.stdout)[-400:]))
+    e["refreshed"] = dt.datetime.now().isoformat(timespec="seconds"); save_state(state)
+    print("episode %d: card %s refreshed" % (day, e["task"]))
+
+
 def sync():
     state = load_state()
     open_cards = {d: e for d, e in state.items() if e.get("task") and not e.get("verdict")}
@@ -293,5 +311,6 @@ if __name__ == "__main__":
         if not days: print("approval: nothing ready for a card")
         for d in days: raise_card(d, dry_run=a.dry_run)
     elif a.mode == "sync": sync()
+    elif a.mode == "refresh": refresh_card(a.day)
     elif a.mode == "report": report()
-    else: raise SystemExit("usage: approval.py run --pending [--limit N] [--dry-run] | run --day N | card --day N | sync | report | selftest")
+    else: raise SystemExit("usage: approval.py run --pending [--limit N] [--dry-run] | run --day N | card --day N | refresh --day N | sync | report | selftest")

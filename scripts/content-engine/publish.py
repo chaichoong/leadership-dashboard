@@ -68,6 +68,9 @@ def mode():
 # GHL platform names (accounts list); "types" narrows by account type.
 CHANNELS = {
     "youtube":   {"types": ("profile", "business", "page"), "stage": 1, "posts": [{"clip": "full", "record": "Long Form Video", "field": "YouTube Copy", "slot": YT_SLOT, "ptype": "post"}]},
+    # the Learnings clip is also a YouTube Short, published with the socials the day after the full episode (Kevin, 4 Sep 2026)
+    "youtube-short": {"platform": "youtube", "types": ("profile", "business", "page"), "stage": 2, "posts": [
+        {"clip": "lfmd", "record": "Learnings From My Diary", "field": "YouTube Reels Copy", "slot": LFMD_SLOT, "ptype": "post", "yt_type": "short"}]},
     "tiktok":    {"types": ("profile", "business"), "stage": 2, "posts": [
         {"clip": "summary", "record": "Short Form Video", "field": "TikTok Copy", "slot": SUMMARY_SLOT, "ptype": "post"},
         {"clip": "lfmd", "record": "Learnings From My Diary", "field": "TikTok Copy", "slot": LFMD_SLOT, "ptype": "post"}]},
@@ -88,7 +91,7 @@ CHANNELS = {
 # Both sets: the "Link of ..." fields and the fields Ericamae filled by hand, which the team's QC and
 # Ready pages read (YouTube Link, TikTok Link, Facebook Post Link, Instagram Post Link, LinkedIn Link,
 # Threads Link). Written on the Full record AND on the clip's own record (Short / Learnings), as she did.
-LINK_FIELDS = {("youtube", "full"): ("YouTube Full Link", "Link of Youtube Video", "YouTube Link"),
+LINK_FIELDS = {("youtube", "full"): ("YouTube Full Link", "Link of Youtube Video", "YouTube Link"), ("youtube", "lfmd"): ("Link of Youtube Shorts",),
                ("tiktok", "summary"): ("Link of Tiktok Video", "TikTok Link"), ("tiktok", "lfmd"): ("TikTok Link",),
                ("facebook", "summary"): ("Link of Facebook Reels", "Facebook Post Link"), ("facebook", "lfmd"): ("Link of Facebook Page Post", "Facebook Post Link"),
                ("instagram", "summary"): ("Link of Instagram Reels", "Instagram Post Link"), ("instagram", "lfmd"): ("Link of Instagram Post", "Instagram Post Link"),
@@ -130,9 +133,10 @@ def with_youtube_link(copy, link):
 def account_map(accounts):
     """Active GHL accounts per channel, X excluded (GHL dropped it Dec 2024). Returns {platform: [account]}."""
     out = {}
+    wanted = {cfg.get("platform", k): cfg["types"] for k, cfg in CHANNELS.items()}
     for a in accounts:
         p = a.get("platform")
-        if p not in CHANNELS or not a.get("active") or a.get("type") not in CHANNELS[p]["types"]: continue
+        if p not in wanted or not a.get("active") or a.get("type") not in wanted[p]: continue
         out.setdefault(p, []).append(a)
     return out
 
@@ -145,7 +149,7 @@ def build_post(platform, account, spec, copy, media_url, thumb_url, schedule_iso
             "userId": user_id, "createdBy": user_id, "tags": []}
     if status == "scheduled": body["scheduleDate"] = schedule_iso
     if platform == "tiktok": body["tiktokPostDetails"] = dict(TIKTOK)
-    if platform == "youtube": body["youtubePostDetails"] = {"title": title or ("Diary of a Runpreneur, Day %d" % day), "privacyLevel": privacy, "type": "video"}
+    if platform == "youtube": body["youtubePostDetails"] = {"title": title or ("Diary of a Runpreneur, Day %d" % day), "privacyLevel": privacy, "type": spec.get("yt_type", "video")}
     if platform == "facebook": body["facebookPostDetails"] = {"type": spec["ptype"]}
     if platform == "instagram": body["instagramPostDetails"] = {"type": spec["ptype"], "showOnFeed": True}
     return body
@@ -323,7 +327,8 @@ def schedule_stage(day, entry, recs, acct_map, stage, dry_run=False):
     full = recs["Long Form Video"]; ff = full["fields"]
     day_london = dt.datetime.now(LONDON).date()
     todo = []
-    for platform, cfg in CHANNELS.items():
+    for key_name, cfg in CHANNELS.items():
+        platform = cfg.get("platform", key_name)
         if cfg["stage"] != stage or platform not in acct_map: continue
         for spec in cfg["posts"]:
             if spec["clip"] != "full" and not os.path.exists(episode_files(day)[spec["clip"]]):
@@ -333,7 +338,10 @@ def schedule_stage(day, entry, recs, acct_map, stage, dry_run=False):
             if not copy:
                 print("episode %d: no %s on the %s record, %s skipped" % (day, spec["field"], spec["record"], platform)); continue
             if stage == 2: copy = with_youtube_link(copy, entry["youtube_link"])
-            title, body_text = youtube_parts(copy, day) if platform == "youtube" else (None, copy)
+            if platform == "youtube" and spec.get("yt_type") == "short":
+                first, _, rest = copy.partition("\n"); title, body_text = first.strip()[:100], rest.strip()   # the Short's title is the first line
+            else:
+                title, body_text = youtube_parts(copy, day) if platform == "youtube" else (None, copy)
             for account in acct_map[platform]:
                 key = post_key(platform, account["id"], spec["clip"])
                 if key in entry.get("posts", {}): continue
@@ -498,6 +506,8 @@ def selftest():
     fb = build_post("facebook", accts[0], CHANNELS["facebook"]["posts"][0], "c", "https://cdn/s.mp4", None, "x", "u1", 1, status="draft")
     assert fb["type"] == "reel" and fb["facebookPostDetails"] == {"type": "reel"} and "scheduleDate" not in fb
     assert all(spec["field"] in dict(pc.TYPES[spec["record"]]["sections"]).values() for c in CHANNELS.values() for spec in c["posts"]), "every copy field exists on its record type"
+    sh = CHANNELS["youtube-short"]["posts"][0]; assert sh["clip"] == "lfmd" and sh["yt_type"] == "short" and CHANNELS["youtube-short"]["stage"] == 2
+    bs = build_post("youtube", accts[5], sh, "desc", "https://cdn/l.mp4", None, "x", "u1", 1, "Short title"); assert bs["youtubePostDetails"]["type"] == "short"
     assert "twitter" not in CHANNELS
     assert "YouTube Link" in LINK_FIELDS[("youtube", "full")] and "TikTok Link" in LINK_FIELDS[("tiktok", "summary")] and "Facebook Post Link" in LINK_FIELDS[("facebook", "summary")]
     assert "LinkedIn Link" in LINK_FIELDS[("linkedin", "summary")] and "Threads Link" in LINK_FIELDS[("threads", "summary")], "the fields Ericamae's pages read"
@@ -532,7 +542,7 @@ def selftest():
     tp = build_text_post(od_accts[1], "hello", "2026-09-07T07:00:00Z", "u1", "https://cdn/c.png")
     assert tp["media"] == [{"url": "https://cdn/c.png", "type": "image/png"}] and tp["type"] == "post" and tp["scheduleDate"] == "2026-09-07T07:00:00Z"
     fbp = build_text_post(od_accts[4], "hello", "x", "u1", status="draft"); assert fbp["facebookPostDetails"] == {"type": "post"} and "media" not in fbp and "scheduleDate" not in fbp
-    print(json.dumps({"checks": 32, "failed": []}))
+    print(json.dumps({"checks": 34, "failed": []}))
 
 
 if __name__ == "__main__":

@@ -41,16 +41,16 @@ TYPES = {
         ("YOUTUBE FULL POST", "YouTube Copy"), ("PODCAST POST", "Podcast Copy")]},
     "Learnings From My Diary": {"suffix": "Learnings from My Diary", "sections": [
         ("FACEBOOK POST", "Facebook Post Copy"), ("INSTAGRAM POST", "Instagram Post Copy"), ("LINKEDIN POST", "LinkedIn Copy"),
-        ("THREADS POST", "Threads Copy"), ("X / TWITTER POST", "X / Twitter Copy"), ("TIKTOK POST", "TikTok Copy"),
+        ("THREADS POST", "Threads Copy"), ("TIKTOK POST", "TikTok Copy"),
         ("YOUTUBE REELS POST", "YouTube Reels Copy")]},
     "Short Form Video": {"suffix": "Short", "sections": [
         ("FACEBOOK REELS POST", "Facebook Reels Copy"), ("INSTAGRAM REELS POST", "Instagram Reels Copy"), ("LINKEDIN POST", "LinkedIn Copy"),
-        ("THREADS POST", "Threads Copy"), ("X / TWITTER POST", "X / Twitter Copy"), ("TIKTOK POST", "TikTok Copy"),
+        ("THREADS POST", "Threads Copy"), ("TIKTOK POST", "TikTok Copy"),
         ("YOUTUBE REELS POST", "YouTube Reels Copy")]},
 }
 BANNED = ["amazing", "incredible journey", "crushing it", "smashing goals"]
 US_SPELLINGS = re.compile(r"\b(realiz\w*|organiz\w*|color|favorite|center|analyz\w*|behavior|optimiz\w*)\b", re.I)
-LIMITS = {"Threads Copy": 500, "X / Twitter Copy": 300}
+LIMITS = {"Threads Copy": 500, "TikTok Copy": 300}
 
 
 # ---------- pure helpers (selftested) ----------
@@ -59,10 +59,27 @@ def record_name(day, ctype):
     return "Episode %d %s" % (day, TYPES[ctype]["suffix"])
 
 
-def build_prompt(ctype, transcript, episode_name, day, yt_full_link=""):
-    """The app's own prompt, with its placeholders filled the way the app fills them."""
+def km_for_day(day, total_km=None, today_day=None):
+    """The distance run by streak day `day`, from the Strava-fed running total the website shows
+    (runpreneur_sync state), scaled back at the average daily distance for an episode older than today.
+    Ericamae's app used day x 10, which put 21,950 km on Episode 2195 when the truth was ~16,800
+    (Kevin, 4 Sep 2026). Returns None when no total is known, so the copy says nothing about distance."""
+    if total_km is None or today_day is None:
+        try:
+            st = json.load(open(os.path.join(os.path.dirname(watch.LEDGER), "runpreneur_sync.json")))
+            total_km, today_day = float(st["total_km"]), int(st["day"])
+        except Exception: return None
+    if not total_km or not today_day: return None
+    per_day = total_km / today_day
+    return int(round(total_km - max(0, today_day - day) * per_day))
+
+
+def build_prompt(ctype, transcript, episode_name, day, yt_full_link="", km=None):
+    """The app's own prompt, with its placeholders filled the way the app fills them, except the distance."""
     yt_line = ("Watch full YT video here 👉 " + yt_full_link) if yt_full_link else "Watch full YT video here 👉 [ADD YOUTUBE LINK]"
-    cum = day * 10; remain = max(0, 40075 - cum)
+    cum = km if km is not None else km_for_day(day)
+    cum = cum if cum is not None else "unknown, do not state a distance"
+    remain = max(0, 40075 - cum) if isinstance(cum, int) else "unknown"
     topic = (episode_name.split(" - ")[1] if " - " in episode_name else episode_name).strip()
     t = cm_prompts.USER_PROMPTS[ctype]
     for k, v in (("${transcription}", transcript), ("${episodeName}", episode_name), ("${epNum}", str(day)),
@@ -155,7 +172,7 @@ def ensure_record(day, ctype, full):
 
 def generate_for(rec, ctype, transcript, day, yt_full_link):
     name = rec["fields"].get("Content Name", record_name(day, ctype))
-    prompt = build_prompt(ctype, transcript, name, day, yt_full_link)
+    prompt = build_prompt(ctype, transcript, name, day, yt_full_link, km_for_day(day))
     text, usage, cost = ask_claude(cm_prompts.KEVIN_SYSTEM, prompt)
     fields = split_sections(text, ctype)
     if not fields: raise SystemExit("no sections parsed for %s; first 300 chars: %r" % (name, text[:300]))
@@ -200,12 +217,15 @@ def selftest():
     assert record_name(2195, "Short Form Video") == "Episode 2195 Short"
     p = build_prompt("Short Form Video", "hello", "Episode 2195 Short", 2195)
     assert "hello" in p and "STREAK DAY: 2195" in p and "[ADD YOUTUBE LINK]" in p and "${" not in p
-    p2 = build_prompt("Long Form Video", "t", "Episode 2195 Full Episode", 2195)
-    assert "CUMULATIVE KM: 21950" in p2 and "REMAINING: 18125km" in p2
-    txt = "FACEBOOK REELS POST\nfb body\n\nINSTAGRAM REELS POST\nig body\n\nLINKEDIN POST\nli\n\nTHREADS POST\nth\n\nX / TWITTER POST\nx\n\nTIKTOK POST\ntt\n\nYOUTUBE REELS POST\nyt"
+    assert km_for_day(2286, 17510.62, 2286) == 17511 and km_for_day(2195, 17510.62, 2286) == 16814, "scaled back at the average daily distance"
+    assert km_for_day(2195, None, None) is None or isinstance(km_for_day(2195), int)
+    p2 = build_prompt("Long Form Video", "t", "Episode 2195 Full Episode", 2195, km=16814)
+    assert "CUMULATIVE KM: 16814" in p2 and "REMAINING: 23261km" in p2 and "21950" not in p2
+    assert "X / TWITTER" not in p2 and "CAPTION for the Learnings clip" in build_prompt("Learnings From My Diary", "t", "e", 1, km=1)
+    txt = "FACEBOOK REELS POST\nfb body\n\nINSTAGRAM REELS POST\nig body\n\nLINKEDIN POST\nli\n\nTHREADS POST\nth\n\nTIKTOK POST\ntt\n\nYOUTUBE REELS POST\nyt"
     f = split_sections(txt, "Short Form Video")
-    assert f["Facebook Reels Copy"] == "fb body" and f["YouTube Reels Copy"] == "yt" and len(f) == 7, f
-    fixed, issues = rules_check({"Threads Copy": "a — b", "X / Twitter Copy": "x" * 301, "LinkedIn Copy": "we realize amazing things"}, "")
+    assert f["Facebook Reels Copy"] == "fb body" and f["YouTube Reels Copy"] == "yt" and len(f) == 6, f
+    fixed, issues = rules_check({"Threads Copy": "a — b", "TikTok Copy": "x" * 301, "LinkedIn Copy": "we realize amazing things"}, "")
     assert fixed["Threads Copy"] == "a, b" and any("em dash" in i for i in issues)
     assert any("limit 300" in i for i in issues) and any("US spelling" in i for i in issues) and any("banned" in i for i in issues)
     fixed2, issues2 = rules_check({"LinkedIn Copy": "raised £2,500 today"}, "we raised two thousand")
