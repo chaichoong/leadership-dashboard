@@ -195,6 +195,9 @@ AF = {
     "verdictReason":     "fldF9Bs4N5mttQvtl",
     "lessonWrittenAt":   "fldFfzXOME9Rh8SyM",
     "feedbackHistory":   "fldOzsq68lhfprKJu",
+    # Knock-back date (28 Aug 2026): the queue and the digest hide a task while
+    # this is after today. Sign-in waits are parked on it until the morning.
+    "deferredUntil":     "fldJ9IHS1yxwYzYSN",
 }
 
 TASK_TYPES = ("Drafting", "Research", "Analysis", "Build",
@@ -1111,6 +1114,10 @@ def links(v):
     if not isinstance(v, list):
         return []
     return [x.get("id") if isinstance(x, dict) else str(x) for x in v if x]
+
+
+def tomorrow_london():
+    return (datetime.now(LONDON) + timedelta(days=1)).strftime("%Y-%m-%d")
 
 
 def today_london():
@@ -2296,6 +2303,11 @@ def cmd_submit(args):
                           "why": "informational output: nothing to approve"}))
         return 0
 
+    # Kevin's ruling, 4 Sep 2026: a sign-in wait must not reach him piecemeal
+    # through the day. It is parked until tomorrow's 08:00 message, which lists
+    # every site in one go, and the card then carries the one-tap link.
+    signin_wait = bool(SIGNIN_NEEDED_RE.search(output))
+
     fields = {
         AF["agentOutput"]: output[:95000],
         AF["taskType"]: args.type,
@@ -2312,6 +2324,8 @@ def cmd_submit(args):
         # every throughput and Completed Month figure as finished work.
         AF["completion"]: None,
     }
+    if signin_wait:
+        fields[AF["deferredUntil"]] = tomorrow_london()
     if archived:
         fields[AF["feedbackHistory"]] = archived
     # RESET THE REMEMBER CYCLE, BUT ONLY ONCE THE LESSON IS SAFE. An agent can
@@ -2924,8 +2938,11 @@ def cmd_signed(args):
 # runs the moment he quits the sign-in window and hands every task waiting
 # on that site straight back to its robot, so the work finishes while his
 # session is live (an hour, for GOV.UK) instead of at the next slot.
-SIGNIN_LINE_RE = re.compile(r"^\s*SIGN-IN NEEDED:\s*(?P<site>[^\n(]+?)\s*(?:\((?P<url>https?://[^\s)]+)\))?\s*$", re.I | re.M)
+# The site label may itself hold brackets ("Pingen (letters)"), so the site is
+# everything up to an optional trailing "(https://…)" group.
+SIGNIN_LINE_RE = re.compile(r"^\s*SIGN-IN NEEDED:\s*(?P<site>.+?)\s*(?:\((?P<url>https?://[^\s)]+)\))?\s*$", re.I | re.M)
 SIGNIN_DONE_MARK = "SIGNED IN:"
+KEEPALIVE_MARK = "KEEPALIVE CHECK:"
 
 
 def load_login_sites():
@@ -3015,6 +3032,19 @@ def cmd_signin_done(args):
             rec = get_task(t["id"])
             f = rec.get("fields", {}) or {}
             team = links(f.get(AF["teamMember"])) or links(f.get(AF["sentForApprovalBy"]))
+            if KEEPALIVE_MARK in str(f.get(AF["notes"]) or ""):
+                # Raised by the keep-alive because the session had lapsed; the
+                # sign-in IS the whole job, so it closes here.
+                patch_task(t["id"], {
+                    AF["status"]: "Completed",
+                    AF["completion"]: now_iso(),
+                    AF["deferredUntil"]: None,
+                    AF["notes"]: (str(f.get(AF["notes"]) or "").rstrip() +
+                                  f"\n\n[{stamp} — Robot sign-in] Kevin signed in to {g['label']}; "
+                                  "the robot's session is back. Nothing else to do.").strip()[-90000:],
+                })
+                handed.append({"task": t["id"], "agent": t["agent"], "name": t["name"][:80], "closed": True})
+                continue
             note = (f"[{stamp} — Robot sign-in] {SIGNIN_DONE_MARK} Kevin signed in to "
                     f"{g['label']}. The session is live now: carry on from where you stopped "
                     f"and submit the finished work. Do not write SIGN-IN NEEDED again unless "
@@ -3028,6 +3058,7 @@ def cmd_signin_done(args):
                 AF["approvalOutcome"]: None,
                 AF["approvalFeedback"]: None,
                 AF["approvedAt"]: None,
+                AF["deferredUntil"]: None,
                 AF["notes"]: (str(f.get(AF["notes"]) or "").rstrip() + "\n\n" + note).strip()[-90000:],
             })
             handed.append({"task": t["id"], "agent": t["agent"], "name": t["name"][:80]})

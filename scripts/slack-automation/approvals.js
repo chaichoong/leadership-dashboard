@@ -719,7 +719,7 @@ export function londonParts(now = new Date()) {
 // 4 Sep 2026). The robot leaves ONE line, "SIGN-IN NEEDED: <site> (<url>)".
 // The digest lists those sites so his one sitting is planned before he opens
 // the queue, where each card carries the button that opens the sign-in app.
-const SIGNIN_LINE_RE = /^\s*SIGN-IN NEEDED:\s*([^\n(]+?)\s*(?:\((https?:\/\/[^\s)]+)\))?\s*$/im;
+const SIGNIN_LINE_RE = /^\s*SIGN-IN NEEDED:\s*(.+?)\s*(?:\((https?:\/\/[^\s)]+)\))?\s*$/im;
 export function signInsWaiting(tasks) {
     const bySite = {};
     for (const t of tasks) {

@@ -28,6 +28,8 @@ var AUTOMATIONS = {
     // ── Scheduled jobs on Kevin's Mac (launchd) ───────────────────────
     // `key` must match the key in scripts/job-schedule.json.
     macJobs: [
+        { key: 'session-keepalive', name: 'Session Keep-alive', when: '6:40am daily', status: 'on',
+          what: 'Visits every website the robot stays logged into, so those logins do not quietly expire from disuse. If one has logged out, it raises a single sign-in item for your 8am message instead of letting a job stall on it later. Government sites are left alone: those need your code every time.' },
         { key: 'mcp-inventory', name: 'Tools & Connections List', when: '6:10am daily', status: 'on',
           what: 'Rebuilds the list of every outside system the AI is plugged into, on the AI Agents page. Reads the real settings rather than a list someone remembered to update, and refuses to write a shorter list if it cannot read one of its sources properly. When something has genuinely changed it tests its own work and, if it passes, ships the update itself, so the page cannot drift behind your actual setup. If its tests fail it leaves the change waiting for you instead.' },
         { key: 'drift-scan', name: 'Drift Scan', when: '6:20am daily', status: 'on',
