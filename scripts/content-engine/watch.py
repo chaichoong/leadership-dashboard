@@ -228,6 +228,29 @@ def scan(create=False, batch=None, since=DEFAULT_SINCE):
 
 
 MAX_PULLED = 2   # local copies waiting for the render; each is 0.3-5 GB and the disk has ~60 GB
+DRIVE_RETRY_ERRNOS = (11, 35)   # EDEADLK / EAGAIN: Drive's file provider says "not downloaded yet, ask again"
+PULL_RETRY_SECONDS = 30
+PULL_MAX_MINUTES = 40
+
+
+def copy_streaming(src, dst, chunk=8 * 1024 * 1024, max_minutes=PULL_MAX_MINUTES, sleep=time.sleep):
+    """Copy a Drive file in chunks, retrying the read while Drive hydrates it. shutil.copyfile uses the
+    kernel fast path, which Drive answers with EDEADLK the moment the file is not local (4 Sep 2026,
+    02:09: the whole nightly run died in one second on clip 006). Returns bytes copied."""
+    deadline = time.time() + max_minutes * 60
+    done = 0
+    with open(dst, "wb") as out:
+        while True:
+            try:
+                with open(src, "rb") as fh:
+                    fh.seek(done)
+                    while True:
+                        buf = fh.read(chunk)
+                        if not buf: return done
+                        out.write(buf); done += len(buf)
+            except OSError as ex:
+                if ex.errno not in DRIVE_RETRY_ERRNOS or time.time() > deadline: raise
+                out.flush(); sleep(PULL_RETRY_SECONDS)
 
 
 def pull(ledger, key, work=WORK):
@@ -242,7 +265,13 @@ def pull(ledger, key, work=WORK):
         raise SystemExit("pull: only %.1f GB free, need %.1f GB for %s" % (free / 1e9, (e["size"] * 2 + 5e9) / 1e9, key))
     t0 = time.time()
     e["status"] = "pulling"; save_ledger(ledger)
-    shutil.copyfile(e["path"], dest + ".part")
+    try:
+        copy_streaming(e["path"], dest + ".part")
+    except OSError as ex:
+        # Drive never delivered it within the window: leave it for the next night, keep the run alive
+        if os.path.exists(dest + ".part"): os.remove(dest + ".part")
+        e["status"] = "new"; e["pull_error"] = "%s (%s)" % (ex.strerror or ex, dt.datetime.now().isoformat(timespec="seconds")); save_ledger(ledger)
+        print("pull: Drive would not deliver %s within %d min (%s) - left as new for the next run" % (key, PULL_MAX_MINUTES, ex.strerror or ex)); return None
     got = os.path.getsize(dest + ".part")
     if got != e["size"]:
         os.remove(dest + ".part"); e["status"] = "new"; save_ledger(ledger)
@@ -262,7 +291,34 @@ def report():
     print("content-engine: " + ", ".join("%d %s" % (n, s) for s, n in sorted(counts.items())) if counts else "content-engine: ledger empty")
 
 
+def _selftest_copy_retry():
+    import tempfile
+    src = os.path.join(tempfile.gettempdir(), "od-pull-src-%d" % os.getpid()); dst = src + ".dst"
+    open(src, "wb").write(b"x" * 1000)
+    real_open = open; calls = {"n": 0}
+    class Flaky:
+        """Raises EDEADLK on the first two reads of the source, like Drive before the file is local."""
+        def __init__(self, fh): self.fh = fh
+        def seek(self, n): self.fh.seek(n)
+        def read(self, n):
+            calls["n"] += 1
+            if calls["n"] <= 2: raise OSError(11, "Resource deadlock avoided")
+            return self.fh.read(n)
+        def __enter__(self): return self
+        def __exit__(self, *a): self.fh.close()
+    import builtins
+    def fake_open(path, mode="r", *a, **k):
+        fh = real_open(path, mode, *a, **k)
+        return Flaky(fh) if path == src and "r" in mode else fh
+    builtins.open = fake_open
+    try: n = copy_streaming(src, dst, chunk=300, sleep=lambda s: None)
+    finally: builtins.open = real_open
+    assert n == 1000 and real_open(dst, "rb").read() == b"x" * 1000, "resumes after Drive's deadlock errors"
+    os.remove(src); os.remove(dst)
+
+
 def selftest():
+    _selftest_copy_retry()
     assert parse_clip("VID_20260704_105737_00_064.insv") == (dt.date(2026, 7, 4), "105737", 64)
     assert parse_clip("VID_20260704_105737_00_064.lrv") is None and parse_clip("random.insv") is None
     assert streak_day(dt.date(2020, 6, 1)) == 1 and streak_day(dt.date(2026, 7, 4)) == 2225
