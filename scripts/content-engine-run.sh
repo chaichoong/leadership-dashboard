@@ -34,6 +34,24 @@ REPO="$(cd "$(dirname "$0")/.." && pwd)"   # the checkout this script lives in, 
 LOG_DIR="/Users/kevinbrittain/knowledge-os/logs/content-engine"
 mkdir -p "$LOG_DIR"
 cd "$REPO" || exit 1
+
+# WORKING-HOURS GUARD (Kevin, 4 Sep 2026)
+# -----------------------------------------------------------------------------
+# A render saturates every core for hours: on 4 Sep two of them ran together from
+# 11:35 and the Mac went to load 47 with 0.2 GB free while Kevin was working. The
+# 02:00 slot is not the problem. The problem is every path that can start a run
+# LATE: retry-deferred re-fires an opted-in job hourly inside maxLateMinutes, and
+# a session can launch this script by hand (one did, at 10:30, straight past the
+# queue). Capping the lateness window alone would fix only the first path, so the
+# refusal lives HERE, where every path passes through.
+#
+# Blocks 07:00-21:59 local. Set CE_ALLOW_DAYTIME=1 to override for a deliberate test.
+HOUR=$(date +%-H)
+if [ "${CE_ALLOW_DAYTIME:-0}" != "1" ] && [ "$HOUR" -ge 7 ] && [ "$HOUR" -lt 22 ]; then
+  echo "SKIPPED: working hours ($(date +%H:%M)). Renders run 22:00-07:00 only."
+  echo "         Next scheduled slot 02:00. Override with CE_ALLOW_DAYTIME=1."
+  exit 0
+fi
 python3 scripts/content-engine/watch.py scan --create || exit 1
 python3 scripts/content-engine/watch.py next || echo "pull: skipped this run (see above); rendering what is already here"
 python3 scripts/content-engine/render.py run --limit 1 || exit 1
