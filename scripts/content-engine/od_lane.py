@@ -391,7 +391,15 @@ def write_post(slot_name, pillar, date, source, voice):
     return {"brief": brief, "text": text, "issues": issues, "hook": (m.group(1).strip() if m else hook)[:120]}
 
 
+HOLD_FILE = os.path.expanduser("~/.config/od/content_engine_od_hold")   # exists = no new drafts or cards (Kevin, 4 Sep 2026: the lane is being re-planned)
+
+
+def on_hold():
+    return os.path.exists(HOLD_FILE)
+
+
 def draft(week=None, dry_run=False):
+    if on_hold(): print("od draft: ON HOLD (%s exists): the lane is being re-planned, nothing drafted" % HOLD_FILE); return
     state = _load(STATE); bank = _load(BANK)
     monday = dt.date.fromisoformat(week) if week else week_monday()
     posts = state.setdefault("posts", {})
@@ -454,6 +462,7 @@ def create_record(p):
 # ---------- cards (O5) ----------
 
 def raise_cards(dry_run=False):
+    if on_hold(): print("od cards: ON HOLD (%s exists), no cards raised" % HOLD_FILE); return
     state = _load(STATE); posts = state.get("posts", {}); m = publish.mode()
     today = dt.date.today().isoformat()
     for pid, p in sorted(posts.items()):
@@ -659,9 +668,12 @@ def selftest():
     assert strip_tics("the reality is what it is") == "the reality is what it is", "mid-sentence use is left alone"
     t, issues = rules_check(good.replace("Every decision", "The reality is, every decision", 1), "", "Pain"); assert "stock phrase removed" in issues and "The reality is" not in t
     assert bridge_check("Episode 1971 this morning. A thought") and not bridge_check("Episode 1971. A thought")
+    import tempfile as _tf
+    globals()["HOLD_FILE"] = os.path.join(_tf.gettempdir(), "od-hold-test-%d" % os.getpid()); assert not on_hold()
+    open(HOLD_FILE, "w").write(""); assert on_hold(); os.remove(HOLD_FILE)
     assert minutes_for("Approved as-is") == 2 and minutes_for("Approved with minor edits") == 5 and minutes_for("Changes requested") == 10
     assert BUSINESS_OD != approval.BUSINESS_PERSONAL and publish.BRANDS[BRAND]["category"] == BRAND
-    print(json.dumps({"checks": 40, "failed": []}))
+    print(json.dumps({"checks": 42, "failed": []}))
 
 
 if __name__ == "__main__":
