@@ -128,3 +128,56 @@ describe('the Robot sign-in app and its link', () => {
     // and not in the scheduled-jobs list either, which is only for jobs on a clock.
   });
 });
+
+// Kevin, 4 Sep 2026: sign-ins arrive once, with the 08:00 message, and the
+// robot keeps sticky sessions alive so they rarely arrive at all.
+describe('sign-in waits are batched to the morning and sessions are kept alive', () => {
+  it('submit parks a SIGN-IN NEEDED output until tomorrow (the queue and digest hide it today)', () => {
+    const out = py(`
+captured = {}
+m.patch_task = lambda t, f: captured.setdefault('fields', f)
+m.get_task = lambda t: {'id': t, 'fields': dict(captured.get('fields', {}))}
+m.supersede_attachments = lambda *a, **k: None
+import tempfile, os
+fh = tempfile.NamedTemporaryFile('w', suffix='.md', delete=False)
+fh.write('Verified from the register. ' * 12 + '\\nSIGN-IN NEEDED: Pingen (https://app.pingen.com/)\\n\\n**Carrying this out will involve:** Nothing until you sign in; then the robot posts the letter.')
+fh.close()
+agent = sorted(m.AGENTS)[0]
+try:
+    m.cmd_submit(types.SimpleNamespace(task='recT1', agent=agent, type='Research', output_file=fh.name, tier1=False))
+    refused = False
+except SystemExit as e:
+    refused = str(e)
+os.unlink(fh.name)
+f = captured.get('fields', {})
+print('---JSON---'); print(json.dumps({'refused': refused, 'status': f.get(m.AF['status']), 'deferred': f.get(m.AF['deferredUntil']), 'tomorrow': m.tomorrow_london()}))`);
+    expect(out.refused).toBe(false);
+    expect(out.status).toBe('Approval');
+    expect(out.deferred).toBe(out.tomorrow);
+  });
+  it('signin-done closes a keep-alive task outright instead of reopening it for a robot', () => {
+    const out = py(`
+sites = {'app.pingen.com': {'label': 'Pingen (letters)', 'login': True, 'loginUrl': 'https://app.pingen.com/'}}
+recs = [{'id': 'recK', 'fields': {m.AF['name']: 'SIGN-IN: Pingen session lapsed', m.AF['agentOutput']: 'SIGN-IN NEEDED: Pingen (letters) (https://app.pingen.com/)', m.AF['teamMember']: ['rec1hYELb4zS8pjjO'], m.AF['notes']: '[x] KEEPALIVE CHECK: Pingen signed out.'}}]
+m.query_tasks = lambda formula, **kw: recs
+m.get_task = lambda tid: recs[0]
+m.load_login_sites = lambda: sites
+patched = {}
+m.patch_task = lambda tid, fields: patched.__setitem__(tid, fields)
+import io, contextlib
+with contextlib.redirect_stdout(io.StringIO()):
+    m.cmd_signin_done(types.SimpleNamespace(site='app.pingen.com'))
+f = patched['recK']
+print('---JSON---'); print(json.dumps({'status': f.get(m.AF['status']), 'completed': bool(f.get(m.AF['completion'])), 'deferred': f.get(m.AF['deferredUntil'], 'unset')}))`);
+    expect(out.status).toBe('Completed');
+    expect(out.completed).toBe(true);
+    expect(out.deferred).toBeNull();
+  });
+  it('the keep-alive selftest passes and it skips the short-session sites', () => {
+    const out = execFileSync('python3', [join(ROOT, 'scripts', 'session-keepalive.py'), 'selftest'], { encoding: 'utf8' });
+    expect(out).toMatch(/selftest OK/);
+    const browser = readFileSync(join(ROOT, 'scripts', 'agent-browser.js'), 'utf8');
+    expect(browser).toMatch(/passwordFields/);
+    expect((browser.match(/shortSession: true/g) || []).length).toBe(5);
+  });
+});

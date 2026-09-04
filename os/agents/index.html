@@ -1540,7 +1540,7 @@ function apvLinkify(text){
 // and offers all of them in one go. The app opens the sites one after another
 // (the robot profile can only be open in one window) and hands each site's
 // tasks back the moment he quits its window.
-const APV_SIGNIN_RE = /^\s*SIGN-IN NEEDED:\s*([^\n(]+?)\s*(?:\((https?:\/\/[^\s)]+)\))?\s*$/im;
+const APV_SIGNIN_RE = /^\s*SIGN-IN NEEDED:\s*(.+?)\s*(?:\((https?:\/\/[^\s)]+)\))?\s*$/im;
 function apvSignInNeeded(output){
     const m = APV_SIGNIN_RE.exec(String(output||''));
     if(!m) return null;
