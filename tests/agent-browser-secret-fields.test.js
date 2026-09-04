@@ -19,3 +19,12 @@ describe('agent-browser credential-name guard', () => {
   it.each(['companyNumber', 'site-search-text', 'email', 'madeUpToDate', 'author', 'authorised-signatory-name'])
     ('allows %s', (name) => { expect(re.test(name)).toBe(false); });
 });
+
+describe('agent-browser plan steps', () => {
+  it('has a wait step so a redirect chain can finish before the next step or the screenshot', () => {
+    const steps = src.slice(src.indexOf('async function runSteps'), src.indexOf('async function runSteps') + 6000);
+    expect(steps).toMatch(/case 'wait':/);
+    expect(steps).toMatch(/waitForSelector\(s\.for/);
+    expect(steps).toMatch(/waitForTimeout\(Math\.min/);
+  });
+});
