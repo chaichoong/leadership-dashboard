@@ -563,3 +563,9 @@ The Summary is not put on YouTube (the full episode is there). The socials carry
   54 models; image models present include `gemini-3.1-flash-image` and `gemini-3-pro-image`; `gemini-2.5-flash` is retired for
   new users, so the text check uses `gemini-3.6-flash`. First illustration (Tuesday's steps card): text verified on attempt 1,
   21 seconds, flash image model. The ladder is flash first, Pro for the two retries.
+- **Picture check tightened (4 Sep 2026, late).** The first Gemini stat card read "how often the dispatcher checks for finshed agent
+  agent ela wort aun" and PASSED the 80% line match, because a model transcribing an image quietly corrects what it reads. Now the
+  reader is told to copy letters exactly, write [unreadable] where it cannot, and end with VERDICT: CLEAN or GARBLED; a GARBLED verdict
+  fails the picture outright, and each required line must match at 92% with every word of it present in the transcript. Stat labels
+  are capped at 40 characters in the spec, because long labels are where the image model garbles. Verified on the five first-week
+  pictures: the bad one was caught and redrawn, the others passed.
