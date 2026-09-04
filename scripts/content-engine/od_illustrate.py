@@ -21,7 +21,7 @@ PALETTE = "pale sage background #F1F3EF, off-white panels #FBFBF9, forest green 
 STYLE = ("Clean, modern LinkedIn infographic in flat vector illustration style, the kind top business creators post: generous white space, one bold "
          "heading, clear hierarchy, simple friendly line icons of AI agents (small robot heads or chat bubbles with a spark), arrows and numbered "
          "markers, a subtle grid. Portrait 4:5. Typeface: a clean geometric sans-serif. " + PALETTE + ". Footer line: 'Kevin Brittain, Operations Director'. "
-         "Every word of text must be spelled EXACTLY as given, in UK English. No photographs, no realistic people or faces, no logos of other "
+         "Every word of text must be spelled EXACTLY as given, in UK English. Use ONLY the text given below: no extra captions, labels, sub-steps or slogans of your own (the Pro model added three invented process boxes on 4 Sep 2026). No photographs, no realistic people or faces, no logos of other "
          "companies, no fake screenshots or dashboards, no charts of invented data, no watermark, nothing that could be mistaken for a real product screen.")
 
 LAYOUTS = {
