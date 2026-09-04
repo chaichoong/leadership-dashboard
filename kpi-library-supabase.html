@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>KPI Library — Operations Director</title>
+  <link rel="stylesheet" href="css/tokens.css?v=1">
+  <link rel="stylesheet" href="css/styles.css?v=23">
+  <style>
+    body { background: var(--bg-app); margin: 0; }
+    .kpi-page { max-width: 1080px; margin: 0 auto; padding: 24px 20px 80px; }
+    .kpi-page h1 { font-size: var(--fs-2xl); color: var(--text-primary); margin: 0 0 4px; }
+  </style>
+</head>
+<body>
+  <main class="kpi-page">
+    <h1>📚 KPI Library</h1>
+    <!-- js/kpi-library.js renders the full library into this element. -->
+    <div class="tab-panel" id="tab-kpi-library"></div>
+  </main>
+
+  <!-- supabase-js + shim + owner gate (NON-deferred so window.fetch is overridden
+       before any app code runs). -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="kpi-library-shim.js?v=1"></script>
+  <script src="kpi-library-boot.js?v=1"></script>
+
+  <!-- Minimal helper the app expects from shared.js (we don't load the heavy shell). -->
+  <script>
+    function escHtml(str) {
+      return String(str == null ? '' : str)
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+    }
+  </script>
+
+  <!-- App scripts (classic, deferred → run in order, share global lexical scope) -->
+  <script defer src="js/ai-models.js?v=1"></script>
+  <script defer src="js/config.js?v=61"></script>
+  <script defer src="js/kpi-library.js?v=2"></script>
+</body>
+</html>

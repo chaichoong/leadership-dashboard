@@ -8,6 +8,6 @@
     { "source": "/login", "destination": "/supabase-app.html" },
     { "source": "/onboarding", "destination": "/onboarding.html" },
     { "source": "/set-password", "destination": "/set-password.html" },
-    { "source": "/(dashboard|strategy|plan-builder|ai-brain|ceo-brief|tasks|crm|operations|comms|systemisation|money|accounts|pnl|wealth|team|sitemap|skills|content-machine|prospecting)", "destination": "/supabase-app.html" }
+    { "source": "/(dashboard|strategy|plan-builder|ai-brain|ceo-brief|tasks|crm|operations|comms|systemisation|money|accounts|pnl|wealth|team|sitemap|skills|content-machine|prospecting|kpi-library)", "destination": "/supabase-app.html" }
   ]
 }
