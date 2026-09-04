@@ -122,4 +122,26 @@ test.describe('the tasks drawer records WHY', () => {
     expect(fields[F.verdictReason]).toBe('Something else');
     expect(String(fields[F.approvalFeedback])).toBe(his);
   });
+
+  // Same default as the gate (Kevin's ruling, 4 Sep 2026). The drawer has no
+  // confirm dialog, so an untouched box reads as the default and an explicit
+  // untick is honoured.
+  test('a rejection is remembered unless the box was unticked by hand', async ({ page }) => {
+    const patches = await mockAirtable(page);
+    await openApprovalDrawer(page);
+    await page.locator('.approval-box .apv-reason', { hasText: 'Roy owns it' }).first().click();
+    await expect.poll(() => patches.length).toBeGreaterThan(0);
+    expect(patches[0].fields['fldZurhdHutYIDKVx']).toBe(true);
+  });
+  test('an explicit untick makes the rejection a one-off', async ({ page }) => {
+    const patches = await mockAirtable(page);
+    await openApprovalDrawer(page);
+    const box = page.locator('#apvRemember');
+    await box.check();
+    await box.uncheck();
+    await page.locator('.approval-box .apv-reason', { hasText: 'Roy owns it' }).first().click();
+    await expect.poll(() => patches.length).toBeGreaterThan(0);
+    expect(patches[0].fields[F.approvalOutcome]).toBe('Rejected');
+    expect(patches[0].fields['fldZurhdHutYIDKVx']).toBeUndefined();
+  });
 });

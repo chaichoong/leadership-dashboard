@@ -3836,8 +3836,8 @@ function renderApprovalBlock(t){
       </select></div>
     <textarea id="apvNote" placeholder="What to change, or why you are rejecting. Required for Request changes and Reject. Tap a chip below and it writes the sentence for you. (In Slack you just reply in the thread — same thing.)"></textarea>
     <label style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--text-secondary);margin:6px 0 2px">
-      <input type="checkbox" id="apvRemember" style="margin:0">
-      Remember this reason — the agent applies it to every future task
+      <input type="checkbox" id="apvRemember" style="margin:0" onchange="this.dataset.touched='1'">
+      Remember this reason — the agent applies it to every future task (on by default for a rejection; untick for a one-off)
     </label>
     <div class="apv-actions">
       <button class="btn btn-success" data-apv-btn onclick="apvDecide('${t.id}','Approved as-is')">Approve</button>
@@ -3893,6 +3893,10 @@ async function apvDecide(taskId,outcome,remember){
   // second Reject button is the same thing with one click instead of two.
   const rememberEl=document.getElementById('apvRemember');
   remember=!!remember||!!(rememberEl&&rememberEl.checked);
+  // A rejection is remembered unless Kevin unticked the box himself (his
+  // ruling, 4 Sep 2026): the drawer has no confirm dialog, so "untouched"
+  // is read as the default, and an explicit untick is honoured.
+  if(outcome==='Rejected'&&rememberEl&&!rememberEl.dataset.touched)remember=true;
   const needsNote=(outcome==='Changes requested'||outcome==='Rejected');
   if(needsNote&&!note){
     toast(outcome==='Rejected'?'Add a reason before rejecting.':'Say what needs changing before sending it back.',true);

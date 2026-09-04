@@ -357,3 +357,83 @@ print(json.dumps(m.parse_output(sys.stdin.read())))
     });
   });
 });
+
+// Kevin's ruling, 4 Sep 2026: a report whose closing line says nothing happens
+// on approval is information, not a decision. Measured over 14 days, 29 of 40
+// "Analysis" outputs were rejected and every one said the task should not have
+// reached him. Such an output is FILED on the task (Completed, report in Agent
+// Output) instead of queued. The agent DECLARES it: the closing line opens with
+// a bare Nothing / None / No action and no clause follows. Two reviews the
+// same day broke two verb-list versions of this rule, so every line they used
+// to break it is a case below. Never for Correspondence: an email whose
+// closing line says "nothing" is a broken email, and the send-format check
+// refuses it.
+describe('informational outputs are filed, not queued (4 Sep 2026)', () => {
+  const report = 'Portfolio arrears review.\n' + 'Detail line. '.repeat(30) + '\n';
+  const CARRY = '**Carrying this out will involve:** ';
+  it.each([
+    'Nothing. This is for your information only.',
+    'None. The report is reference only, no decision needed.',
+    'No action required.',
+    'Nothing. Information only.',
+  ])('the declared form is filed and closed: %s', (tail) => {
+    const r = submit({ type: 'Analysis', output: report + CARRY + tail });
+    expect(r.refused).toBe(false);
+    expect(r.captured.fields[r.fieldMap.status]).toBe('Completed');
+    expect(r.captured.fields[r.fieldMap.completion]).toBeTruthy();
+    expect(r.captured.fields[r.fieldMap.agentOutput]).toContain('Portfolio arrears review');
+    expect(r.captured.fields[r.fieldMap.notes]).toMatch(/FILED, not queued/);
+  });
+  it('a NO ACTION REQUIRED briefing in the declared form is filed', () => {
+    const r = submit({ type: 'Admin', output: 'NO ACTION REQUIRED\n' + report + CARRY + 'Nothing. Information only.' });
+    expect(r.refused).toBe(false);
+    expect(r.captured.fields[r.fieldMap.status]).toBe('Completed');
+  });
+  it.each([
+    'Sending the arrears letter to the tenant at 6 Chedburgh Place.',
+    'Nothing goes out until you approve; then I send the letter to HMRC.',
+    'No payment is made; I email the creditor the plan.',
+    'None of the tenants are contacted; Roy books the inspection.',
+    'No action on the arrears yet, but the reminder is posted today.',
+    'Nothing until Roy confirms; then the notice goes to the tenant.',
+    'No change now — the DD reduction takes effect on the 6th.',
+    'None; the accountant will lodge the return.',
+    'No further action from this agent; the tenant moves out on the 14th.',
+    'None needed today; the direct debit collects automatically next week.',
+    'Nothing to send — the portal takes the payment on its own on the due date.',
+    'No decision needed — the licence renews automatically with the council.',
+    'Nothing from me — Kevin will call the bank himself.',
+    'Kevin reads the briefing.',
+    'Nothing further from me as the notice reaches the tenant tomorrow',
+    'None required because the payment leaves the account on Friday',
+    'No action needed as the eviction proceeds',
+    'Nothing to do now the letter goes out by first class post',
+    'Nothing required as Roy arranges the inspection',
+    'N/A now the contractor is booked for Tuesday',
+  ])('anything else stays on the gate or is refused, never closed as done: %s', (tail) => {
+    const r = submit({ type: 'Analysis', output: report + CARRY + tail });
+    if (r.refused) expect(r.error).toMatch(/refusing to submit/);
+    else expect(r.captured.fields[r.fieldMap.status]).toBe('Approval');
+    expect(r.captured.fields ? r.captured.fields[r.fieldMap.status] : '').not.toBe('Completed');
+  });
+  it('a NO ACTION REQUIRED heading does not override a closing line that names an action', () => {
+    const r = submit({ type: 'Admin', output: 'NO ACTION REQUIRED\n' + report + CARRY + 'Sending the notice to the council.' });
+    expect(r.captured.fields ? r.captured.fields[r.fieldMap.status] : '').not.toBe('Completed');
+  });
+  it.each([
+    'NO ACTION REQUIRED\n\nThe boiler service was booked and completed by the contractor yesterday without incident.',
+    'NO ACTION REQUIRED\n\nThe eviction notice was already served on the tenant this morning as scheduled.',
+  ])('a short output with the heading but no closing line is never filed', (output) => {
+    const r = submit({ type: 'Admin', output });
+    expect(r.captured.fields ? r.captured.fields[r.fieldMap.status] : '').not.toBe('Completed');
+  });
+  it('a tier-1 report is never filed: the banner promises Kevin reads it before anything', () => {
+    const r = submit({ type: 'Analysis', tier1: true, output: report + CARRY + 'Nothing. Information only.' });
+    expect(r.refused).toBe(false);
+    expect(r.captured.fields[r.fieldMap.status]).toBe('Approval');
+  });
+  it('a Correspondence output is never filed on that rule (its own send-format check decides)', () => {
+    const r = submit({ type: 'Correspondence', output: report + CARRY + 'Nothing.' });
+    expect(r.captured.fields ? r.captured.fields[r.fieldMap.status] : 'Approval').not.toBe('Completed');
+  });
+});

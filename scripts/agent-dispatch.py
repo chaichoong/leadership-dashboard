@@ -1179,6 +1179,80 @@ JARGON_RE = re.compile(
     r"|\bfilterByFormula\b|\bcurl\b)")
 
 
+# Kevin's ruling, 4 Sep 2026, measured on 233 decisions over 14 days: 29 of
+# 40 "Analysis" outputs were rejected, and every rejection said the task should
+# not have reached him. A report whose closing line says nothing happens on
+# approval is information, not a decision: it is FILED on the task and the
+# task closes. He reads it if he wants to, and his queue holds only things
+# that act.
+#
+# THE SHAPE OF THE RULE (two reviews on the day it was built): the agent
+# DECLARES it, the code does not infer it. A closing line is informational
+# only when it OPENS with a bare "Nothing" / "No action" / "None" and no
+# further clause follows — no semicolon, dash, colon, "then", "until", "but".
+# Two verb-list versions were tried and both broke: "No payment is made; I
+# email the creditor" and "None; the accountant will lodge the return" read
+# as nothing-to-do. Anything not in the declared form goes to the gate, which
+# is exactly what happened before, so a miss costs Kevin one tap, never a
+# lost action. GUARDRAILS.md tells agents the form.
+NO_ACTION_LEAD_RE = re.compile(
+    r"^\W*(?:nothing|none|n/?a|no\s+(?:further\s+)?action(?:\s+(?:is\s+)?(?:needed|required))?)\b",
+    re.I,
+)
+# WHITELIST, not blacklist (third review, same day): after the opening word
+# only a fixed set of informational phrases may follow. Every blacklist tried
+# was written around ("as the eviction proceeds", "because the payment leaves
+# the account on Friday"). A closed form cannot be: one extra word and the
+# line is not declared, so the task goes to Kevin as it always did.
+INFO_PHRASE_RE = re.compile(
+    r"^(?:[\s.,!:;()-]*(?:(?:this|it|the\s+(?:report|briefing|summary|above))\s+is\s+)?"
+    r"(?:for\s+(?:your\s+)?information(?:\s+only)?|information\s+only|reference\s+only|"
+    r"a\s+(?:briefing|report|summary|status\s+update)|"
+    r"no\s+decision\s+(?:is\s+)?(?:needed|required)(?:\s+here)?|"
+    r"nothing\s+(?:is\s+)?(?:needed|required)|no\s+action\s+(?:is\s+)?(?:needed|required)|"
+    r"(?:is\s+)?needed|(?:is\s+)?required|from\s+(?:me|you|Kevin)|"
+    r"to\s+(?:do|approve|decide|carry\s+out)|(?:at\s+)?this\s+stage|for\s+now|here|today))*"
+    r"[\s.,!:;()-]*$",
+    re.I,
+)
+NO_ACTION_HEAD_RE = re.compile(r"^\W*(?:NO ACTION (?:REQUIRED|NEEDED)|BRIEFING|FOR INFORMATION)\b", re.I)
+NO_ACTION_TAIL_MAX = 120
+
+
+def carry_out_tail(output):
+    """The words after the LAST closing-line marker, or '' when there is none."""
+    matches = list(CARRY_OUT_RE.finditer(output or ""))
+    return (output or "")[matches[-1].end():].strip() if matches else ""
+
+
+def no_action_declared(tail):
+    """True only for the declared form: opens with Nothing/None/No action and
+    what follows, if anything, is drawn from INFO_PHRASE_RE alone."""
+    tail = (tail or "").strip()
+    m = NO_ACTION_LEAD_RE.match(tail)
+    if not m or len(tail) > NO_ACTION_TAIL_MAX:
+        return False
+    return bool(INFO_PHRASE_RE.match(tail[m.end():]))
+
+
+def informational_only(output, task_type, tier1=False):
+    """True when this submission would ask Kevin to approve nothing.
+
+    Never for Correspondence: an email whose closing line says "nothing" is a
+    broken email, and the send-format check downstream is the right refusal.
+    Never for tier 1: the banner promises he reads it before anything, and a
+    private legal or financial matter is his to see even when nothing moves.
+    A closing line is always required: the heading alone declares nothing,
+    and short outputs skip the closing-line check upstream.
+    """
+    if task_type == "Correspondence" or tier1 or TIER1_BANNER in (output or ""):
+        return False
+    tail = carry_out_tail((output or "").strip())
+    if not tail:
+        return False
+    return no_action_declared(tail)
+
+
 def carry_out_problem(output, strict=True):
     """Reason the approval box would have to guess this output's summary.
 
@@ -2131,6 +2205,31 @@ def cmd_submit(args):
     supersede_attachments(args.task, {os.path.basename(p) for p in to_attach})
     for path in to_attach:
         upload_attachment(args.task, path)
+
+    if informational_only(output, args.type, tier1=bool(getattr(args, "tier1", False))):
+        stamp = datetime.now(LONDON).strftime("%d %b %Y %H:%M")
+        note = (f"[{stamp} — agent-dispatch] FILED, not queued: the closing line "
+                f"says nothing happens on approval, so there is no decision here "
+                f"(Kevin's ruling, 4 Sep 2026). The report is in Agent Output.")
+        filed = {
+            AF["agentOutput"]: output[:95000],
+            AF["taskType"]: args.type,
+            AF["status"]: "Completed",
+            AF["completion"]: now_iso(),
+            AF["teamMember"]: [args.agent],
+            AF["sentForApprovalBy"]: [],
+            AF["assignee"]: None,
+            AF["approvalOutcome"]: None,
+            AF["approvalFeedback"]: None,
+            AF["approvedAt"]: None,
+            AF["notes"]: (str(tf.get(AF["notes"]) or "").rstrip() + "\n\n" + note).strip()[-90000:],
+        }
+        # Attachments were uploaded above, once; never again here.
+        patch_task(args.task, filed)
+        print(json.dumps({"submitted": args.task, "filed": True, "status": "Completed",
+                          "type": args.type, "attached": len(to_attach),
+                          "why": "informational output: nothing to approve"}))
+        return 0
 
     fields = {
         AF["agentOutput"]: output[:95000],

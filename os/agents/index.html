@@ -1483,7 +1483,7 @@ function agRejectGroup(taskIds, reasonKey){
            <strong>Because:</strong> ${esc(r.chip)}<br>
            <strong>Reason:</strong> ${esc(r.note)}</p>
          <label style="display:flex;gap:8px;align-items:flex-start;margin-top:12px;background:var(--accent-soft);border-radius:var(--radius-md);padding:10px 12px;cursor:pointer">
-           <input type="checkbox" id="apvGroupRemember" style="margin:3px 0 0">
+           <input type="checkbox" id="apvGroupRemember" checked style="margin:3px 0 0">
            <span style="font-size:var(--fs-sm);color:var(--text-primary);line-height:1.5">Remember this reason, so these stop reaching you.</span>
          </label>`,
         `<button class="btn" onclick="closeModal()">Cancel</button>
@@ -1787,8 +1787,8 @@ function agDecide(taskId, outcome, remember){
             `<p id="apvScoreLine" style="font-size:var(--fs-sm);color:var(--text-secondary);line-height:1.6">${scoreLine}${reason?`<br><br><strong>Because:</strong> ${esc(reason.chip)}`:''}<br><br><strong>Reason:</strong> ${esc(note)}</p>
              ${kindRow}
              <label style="display:flex;gap:8px;align-items:flex-start;margin-top:12px;background:var(--accent-soft);border-radius:var(--radius-md);padding:10px 12px;cursor:pointer">
-               <input type="checkbox" id="apvRememberConfirm" ${remember?'checked':''} style="margin:3px 0 0">
-               <span style="font-size:var(--fs-sm);color:var(--text-primary);line-height:1.5">Remember this reason. ${esc(Agent)} keeps it in its instructions and applies it to every future task, until you remove it.</span>
+               <input type="checkbox" id="apvRememberConfirm" checked style="margin:3px 0 0">
+               <span style="font-size:var(--fs-sm);color:var(--text-primary);line-height:1.5">Remember this reason. ${esc(Agent)} keeps it in its instructions and applies it to every future task, until you remove it. <strong>Untick if this is a one-off.</strong></span>
              </label>`,
             `<button class="btn" onclick="closeModal()">Cancel</button>
              <button class="btn btn-danger" onclick="agConfirmReject('${taskId}')">Reject and close</button>`);
@@ -1822,6 +1822,11 @@ window.agPickConfirmReason = agPickConfirmReason;
 
 // Read the dialog's own tickbox at the moment of confirming, so changing your
 // mind inside the dialog is what counts — not what was ticked when it opened.
+// DEFAULT ON for a rejection (Kevin's ruling, 4 Sep 2026, reversing 26 Aug):
+// measured over 14 days he wrote 132 pieces of feedback and ticked Remember
+// on 18. A rejection is a rule far more often than a one-off ("Roy is dealing
+// with this", "only bring me this if major"), so the box starts ticked and he
+// unticks the one-off, instead of the other way round.
 function agConfirmReject(taskId){
     const box = document.getElementById('apvRememberConfirm');
     const remember = !!(box && box.checked);
