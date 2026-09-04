@@ -94,6 +94,21 @@ const BUILTIN_SITES = {
   'find-and-update.company-information.service.gov.uk':
                                 { label: 'Companies House',    login: false },
   'gov.uk':                     { label: 'GOV.UK',             login: false },
+  // GOV.UK One Login + Companies House WebFiling (4 Sep 2026). WebFiling has
+  // signed in through One Login since October 2025, so a confirmation
+  // statement (CS01) or any other WebFiling form starts at
+  // signin.account.gov.uk. Kevin signs in there with `login` (email, password
+  // and his security code: every one of those is his step, never an agent's).
+  // The session is SHORT: One Login expires one hour after his last
+  // interaction with it, so the agent must check for a live session with
+  // `read https://ewf.companieshouse.gov.uk/` right before it works, and hand
+  // back "SIGN-IN NEEDED: GOV.UK One Login" when the page is the sign-in page
+  // rather than the company list. Kevin adds each company's 6-character
+  // authentication code to his own WebFiling account once; the agent picks
+  // the company from the list and never handles the code.
+  'signin.account.gov.uk':      { label: 'GOV.UK One Login',   login: true  },
+  'home.account.gov.uk':        { label: 'GOV.UK One Login (account)', login: true },
+  'ewf.companieshouse.gov.uk':  { label: 'Companies House WebFiling (via One Login)', login: true },
   'tax.service.gov.uk':         { label: 'HMRC',               login: true  },
   // Adobe Acrobat Sign (28 Aug 2026). Two different jobs on two different
   // hosts, and only one of them needs Kevin's account:
