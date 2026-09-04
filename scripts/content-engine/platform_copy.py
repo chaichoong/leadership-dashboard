@@ -113,7 +113,8 @@ def rules_check(fields, transcript=""):
         if lim and len(t) > lim: issues.append("%s: %d chars, limit %d" % (field, len(t), lim))
         for fig in re.findall(r"£[\d,]+(?:\.\d+)?[MmKk]?|\b\d{1,3}(?:,\d{3})+\b(?!\s*km)", t):
             mission = fig.upper() in ("40,075", "£1M", "£2M") or (fig == "£1" and "£1 million" in t) or (fig == "£2" and "£2 million" in t)
-            if fig not in transcript and not mission:
+            bare = fig.replace(",", "")
+            if fig not in transcript and bare not in transcript.replace(",", "") and not mission:   # "21,950" and "21950" are one figure
                 issues.append("%s: figure %s not in the transcript" % (field, fig))
         fixed[field] = t
     return fixed, issues
