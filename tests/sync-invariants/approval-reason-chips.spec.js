@@ -174,4 +174,31 @@ test.describe('the approvals gate records WHY', () => {
     await expect(card.locator('.apv-actions button', { hasText: 'Approve with minor edits' })).toBeVisible();
     await expect(card.locator('.apv-actions button', { hasText: 'Request changes' })).toBeVisible();
   });
+
+  // Kevin's ruling, 4 Sep 2026, reversing 26 Aug: over 14 days he wrote 132
+  // pieces of feedback and ticked Remember on 18, while nearly every rejection
+  // was a rule ("Roy is dealing with this", "only bring me this if major"). So
+  // a rejection is remembered unless he unticks the box in the dialog.
+  test('a rejection is remembered by default', async ({ page }) => {
+    const patches = await mockAgentsPage(page);
+    await loadAgentsPage(page);
+    const patch = await rejectVia(page, patches, 'Roy owns it');
+    expect(patch.fields[TF.approvalOutcome]).toBe('Rejected');
+    expect(patch.fields['fldZurhdHutYIDKVx']).toBe(true);
+  });
+  test('unticking Remember in the dialog makes the rejection a one-off', async ({ page }) => {
+    const patches = await mockAgentsPage(page);
+    await loadAgentsPage(page);
+    const card = await openApprovals(page);
+    const taskId = await card.getAttribute('data-apv-card');
+    await card.locator('.apv-reason', { hasText: 'Roy owns it' }).first().click();
+    const box = page.locator('#apvRememberConfirm');
+    await expect(box).toBeChecked();
+    await box.uncheck();
+    await page.locator('button', { hasText: 'Reject and close' }).last().click();
+    await expect.poll(() => patches.some((p) => p.id === taskId)).toBe(true);
+    const oneOff = patches.find((p) => p.id === taskId);
+    expect(oneOff.fields[TF.approvalOutcome]).toBe('Rejected');
+    expect(oneOff.fields['fldZurhdHutYIDKVx']).toBeUndefined();
+  });
 });

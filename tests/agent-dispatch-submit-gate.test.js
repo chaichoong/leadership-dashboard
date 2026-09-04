@@ -357,3 +357,36 @@ print(json.dumps(m.parse_output(sys.stdin.read())))
     });
   });
 });
+
+// Kevin's ruling, 4 Sep 2026: a report whose closing line says nothing happens
+// on approval is information, not a decision. Measured over 14 days, 29 of 40
+// "Analysis" outputs were rejected and every one said the task should not have
+// reached him. Such an output is FILED on the task (Completed, report in Agent
+// Output) instead of queued. Never for Correspondence: an email whose closing
+// line says "nothing" is a broken email, and the send-format check refuses it.
+describe('informational outputs are filed, not queued (4 Sep 2026)', () => {
+  const report = 'Portfolio arrears review.\n' + 'Detail line. '.repeat(30) + '\n';
+  it('an Analysis report whose closing line says nothing happens is filed and closed', () => {
+    const r = submit({ type: 'Analysis', output: report + '**Carrying this out will involve:** Nothing. This is for your information only.' });
+    expect(r.refused).toBe(false);
+    expect(r.captured.fields[r.fieldMap.status]).toBe('Completed');
+    expect(r.captured.fields[r.fieldMap.completion]).toBeTruthy();
+    expect(r.captured.fields[r.fieldMap.agentOutput]).toContain('Portfolio arrears review');
+    expect(r.captured.fields[r.fieldMap.notes]).toMatch(/FILED, not queued/);
+  });
+  it('a NO ACTION REQUIRED briefing is filed whatever its closing line says', () => {
+    const r = submit({ type: 'Admin', output: 'NO ACTION REQUIRED\n' + report + '**Carrying this out will involve:** Kevin reads the briefing.' });
+    expect(r.refused).toBe(false);
+    expect(r.captured.fields[r.fieldMap.status]).toBe('Completed');
+  });
+  it('an Analysis output whose closing line names a real action still goes to the gate', () => {
+    const r = submit({ type: 'Analysis', output: report + '**Carrying this out will involve:** Sending the arrears letter to the tenant at 6 Chedburgh Place.' });
+    expect(r.refused).toBe(false);
+    expect(r.captured.fields[r.fieldMap.status]).toBe('Approval');
+  });
+  it('a Correspondence output is never filed on that rule (its own send-format check decides)', () => {
+    const r = submit({ type: 'Correspondence', output: report + '**Carrying this out will involve:** Nothing.' });
+    // Either refused by the send-format check or queued — never silently closed.
+    expect(r.captured.fields ? r.captured.fields[r.fieldMap.status] : 'Approval').not.toBe('Completed');
+  });
+});

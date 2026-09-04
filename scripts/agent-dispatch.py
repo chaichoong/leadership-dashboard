@@ -1179,6 +1179,43 @@ JARGON_RE = re.compile(
     r"|\bfilterByFormula\b|\bcurl\b)")
 
 
+# Kevin's ruling, 4 Sep 2026, measured on 233 decisions over 14 days: 29 of
+# 40 "Analysis" outputs were rejected, and every rejection said the task should
+# not have reached him. A report whose closing line says nothing will happen
+# is information, not a decision. It is FILED on the task and the task closes;
+# he reads it if he wants to, and his queue holds only things that act.
+NO_ACTION_TAIL_RE = re.compile(
+    r"^\W*(?:nothing(?:\s+(?:at\s+all|further|else|to\s+(?:do|send|carry\s+out|approve|action)))?|"
+    r"no\s+(?:action|further\s+action|change|send|email|letter|message|payment|steps?)"
+    r"(?:\s+(?:is\s+)?(?:needed|required|taken|will\s+be\s+taken))?|"
+    r"none|n/?a|for\s+(?:your\s+)?information(?:\s+only)?|information\s+only|"
+    r"read(?:ing)?[\s-]?only|reference\s+only|no\s+decision\s+(?:is\s+)?(?:needed|required))\b",
+    re.I,
+)
+NO_ACTION_HEAD_RE = re.compile(r"^\W*(?:NO ACTION (?:REQUIRED|NEEDED)|BRIEFING|FOR INFORMATION)\b", re.I)
+
+
+def carry_out_tail(output):
+    """The words after the LAST closing-line marker, or '' when there is none."""
+    matches = list(CARRY_OUT_RE.finditer(output or ""))
+    return (output or "")[matches[-1].end():].strip() if matches else ""
+
+
+def informational_only(output, task_type):
+    """True when this submission would ask Kevin to approve nothing.
+
+    Never for Correspondence: an email whose closing line says "nothing" is a
+    broken email, and the send-format check downstream is the right refusal.
+    """
+    if task_type == "Correspondence":
+        return False
+    body = (output or "").replace(TIER1_BANNER, "", 1).strip()
+    if NO_ACTION_HEAD_RE.match(body):
+        return True
+    tail = carry_out_tail(body)
+    return bool(tail) and (bool(NO_ACTION_TAIL_RE.match(tail)) or bool(READ_ONLY_RE.search(tail)))
+
+
 def carry_out_problem(output, strict=True):
     """Reason the approval box would have to guess this output's summary.
 
@@ -2131,6 +2168,33 @@ def cmd_submit(args):
     supersede_attachments(args.task, {os.path.basename(p) for p in to_attach})
     for path in to_attach:
         upload_attachment(args.task, path)
+
+    if informational_only(output, args.type):
+        stamp = datetime.now(LONDON).strftime("%d %b %Y %H:%M")
+        note = (f"[{stamp} — agent-dispatch] FILED, not queued: the closing line "
+                f"says nothing happens on approval, so there is no decision here "
+                f"(Kevin's ruling, 4 Sep 2026). The report is in Agent Output.")
+        filed = {
+            AF["agentOutput"]: output[:95000],
+            AF["taskType"]: args.type,
+            AF["status"]: "Completed",
+            AF["completion"]: now_iso(),
+            AF["teamMember"]: [args.agent],
+            AF["sentForApprovalBy"]: [],
+            AF["assignee"]: None,
+            AF["approvalOutcome"]: None,
+            AF["approvalFeedback"]: None,
+            AF["approvedAt"]: None,
+            AF["notes"]: (str(tf.get(AF["notes"]) or "").rstrip() + "\n\n" + note).strip()[-90000:],
+        }
+        to_attach = list(getattr(args, "attach", None) or [])
+        for path in to_attach:
+            upload_attachment(args.task, path)
+        patch_task(args.task, filed)
+        print(json.dumps({"submitted": args.task, "filed": True, "status": "Completed",
+                          "type": args.type, "attached": len(to_attach),
+                          "why": "informational output: nothing to approve"}))
+        return 0
 
     fields = {
         AF["agentOutput"]: output[:95000],
