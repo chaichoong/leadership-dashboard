@@ -1181,42 +1181,59 @@ JARGON_RE = re.compile(
 
 # Kevin's ruling, 4 Sep 2026, measured on 233 decisions over 14 days: 29 of
 # 40 "Analysis" outputs were rejected, and every rejection said the task should
-# not have reached him. A report whose closing line says nothing will happen
-# is information, not a decision. It is FILED on the task and the task closes;
-# he reads it if he wants to, and his queue holds only things that act.
-NO_ACTION_TAIL_RE = re.compile(
-    r"^\W*(?:nothing(?:\s+(?:at\s+all|further|else|to\s+(?:do|send|carry\s+out|approve|action)))?|"
-    r"no\s+(?:action|further\s+action|change|send|email|letter|message|payment|steps?)"
-    r"(?:\s+(?:is\s+)?(?:needed|required|taken|will\s+be\s+taken))?|"
-    r"none|n/?a|for\s+(?:your\s+)?information(?:\s+only)?|information\s+only|"
-    r"read(?:ing)?[\s-]?only|reference\s+only|no\s+decision\s+(?:is\s+)?(?:needed|required))\b",
+# not have reached him. A report whose closing line says nothing happens on
+# approval is information, not a decision: it is FILED on the task and the
+# task closes. He reads it if he wants to, and his queue holds only things
+# that act.
+#
+# THE SHAPE OF THE RULE (two reviews on the day it was built): the agent
+# DECLARES it, the code does not infer it. A closing line is informational
+# only when it OPENS with a bare "Nothing" / "No action" / "None" and no
+# further clause follows — no semicolon, dash, colon, "then", "until", "but".
+# Two verb-list versions were tried and both broke: "No payment is made; I
+# email the creditor" and "None; the accountant will lodge the return" read
+# as nothing-to-do. Anything not in the declared form goes to the gate, which
+# is exactly what happened before, so a miss costs Kevin one tap, never a
+# lost action. GUARDRAILS.md tells agents the form.
+NO_ACTION_LEAD_RE = re.compile(
+    r"^\W*(?:nothing|none|n/?a|no\s+(?:further\s+)?action(?:\s+(?:is\s+)?(?:needed|required))?)\b",
+    re.I,
+)
+# A second clause after the opening word means something happens after all.
+CLAUSE_BREAK_RE = re.compile(
+    r"[;:—–]|\s-\s|\b(?:then|until|unless|once|after|when|but|so|and\s+(?:then|I|we|Roy|Kevin|the))\b",
+    re.I,
+)
+# Even a single clause can hide a verb; a short net for the obvious ones.
+ACTION_VERB_RE = re.compile(
+    r"\b(?:send(?:s|ing)?|sent|email(?:s|ing|ed)?|post(?:s|ing|ed)?|mail(?:s|ing)?|"
+    r"pay(?:s|ing)?|paid|submit(?:s|ted|ting)?|book(?:s|ed|ing)?|call(?:s|ed|ing)?|"
+    r"phone(?:s|d)?|contact(?:s|ed|ing)?|repl(?:y|ies|ied|ying)|respond(?:s|ed|ing)?|"
+    r"chase(?:s|d)?|instruct(?:s|ed|ing)?|upload(?:s|ed|ing)?|register(?:s|ed|ing)?|"
+    r"cancel(?:s|led|ling)?|reverse(?:s|d)?|transfer(?:s|red|ring)?|lodge(?:s|d)?|"
+    r"goes|go|will|takes?|collects?|renews?|moves?|writ(?:e|es|ing)|sign(?:s|ed|ing)?|"
+    r"creat(?:e|es|ing)|issue(?:s|d)?|arrange(?:s|d)?|order(?:s|ed)?|deliver(?:s|ed)?)\b",
     re.I,
 )
 NO_ACTION_HEAD_RE = re.compile(r"^\W*(?:NO ACTION (?:REQUIRED|NEEDED)|BRIEFING|FOR INFORMATION)\b", re.I)
-# A line that OPENS with a negation is not a no-action line if it goes on to
-# name an action ("Nothing goes out until you approve; then I send the
-# letter", "No payment is made; I email the creditor"). Found in review, 4 Sep
-# 2026: the prefix match alone would have filed those as done and the letter
-# would never have been sent. Any action verb after the opening phrase, or
-# anywhere in the closing line of a NO ACTION REQUIRED briefing, keeps the
-# submission on the gate.
-ACTION_VERB_RE = re.compile(
-    r"\b(?:send(?:s|ing)?|sent|email(?:s|ing|ed)?|post(?:s|ing|ed)?|mail(?:s|ing)?|"
-    r"pay(?:s|ing)?|paid|file(?:s|d|ing)?|submit(?:s|ted|ting)?|book(?:s|ed|ing)?|"
-    r"call(?:s|ed|ing)?|phone(?:s|d)?|ring(?:s|ing)?|contact(?:s|ed|ing)?|"
-    r"repl(?:y|ies|ied|ying)|respond(?:s|ed|ing)?|chase(?:s|d)?|instruct(?:s|ed|ing)?|"
-    r"upload(?:s|ed|ing)?|register(?:s|ed|ing)?|cancel(?:s|led|ling)?|reverse(?:s|d)?|"
-    r"transfer(?:s|red|ring)?|set(?:s|ting)?\s+up|writ(?:e|es|ing)|sign(?:s|ed|ing)?|"
-    r"approv(?:e|es|ing)|update(?:s|d|ing)?|change(?:s|d)?|creat(?:e|es|ing)|"
-    r"issue(?:s|d)?|arrange(?:s|d)?|order(?:s|ed)?|deliver(?:s|ed)?)\b",
-    re.I,
-)
+NO_ACTION_TAIL_MAX = 120
 
 
 def carry_out_tail(output):
     """The words after the LAST closing-line marker, or '' when there is none."""
     matches = list(CARRY_OUT_RE.finditer(output or ""))
     return (output or "")[matches[-1].end():].strip() if matches else ""
+
+
+def no_action_declared(tail):
+    """True only for the declared form: opens with Nothing/None/No action and
+    nothing with a verb or a second clause follows."""
+    tail = (tail or "").strip()
+    m = NO_ACTION_LEAD_RE.match(tail)
+    if not m or len(tail) > NO_ACTION_TAIL_MAX:
+        return False
+    rest = tail[m.end():]
+    return not CLAUSE_BREAK_RE.search(rest) and not ACTION_VERB_RE.search(rest)
 
 
 def informational_only(output, task_type):
@@ -1230,15 +1247,8 @@ def informational_only(output, task_type):
     body = (output or "").replace(TIER1_BANNER, "", 1).strip()
     tail = carry_out_tail(body)
     if NO_ACTION_HEAD_RE.match(body):
-        return not ACTION_VERB_RE.search(tail)
-    if not tail:
-        return False
-    m = NO_ACTION_TAIL_RE.match(tail)
-    if m:
-        return not ACTION_VERB_RE.search(tail[m.end():])
-    if READ_ONLY_RE.search(tail):
-        return not ACTION_VERB_RE.search(tail)
-    return False
+        return not tail or no_action_declared(tail)
+    return no_action_declared(tail)
 
 
 def carry_out_problem(output, strict=True):
