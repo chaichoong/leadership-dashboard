@@ -384,6 +384,25 @@ describe('informational outputs are filed, not queued (4 Sep 2026)', () => {
     expect(r.refused).toBe(false);
     expect(r.captured.fields[r.fieldMap.status]).toBe('Approval');
   });
+  // Found in review, 4 Sep 2026: a closing line that OPENS with a negation but
+  // goes on to name an action must stay on the gate, or the action is lost.
+  it.each([
+    'Nothing goes out until you approve; then I send the letter to HMRC.',
+    'No payment is made; I email the creditor the plan.',
+    'None of the tenants are contacted; Roy books the inspection.',
+    'No action on the arrears yet, but the reminder is posted today.',
+  ])('a negation that goes on to name an action is never filed as done: %s', (tail) => {
+    const r = submit({ type: 'Analysis', output: report + '**Carrying this out will involve:** ' + tail });
+    // Two outcomes are right: refused by the send-promise gate (an Analysis
+    // cannot deliver a send), or queued for Kevin. Closed-as-done never is.
+    if (r.refused) expect(r.error).toMatch(/refusing to submit/);
+    else expect(r.captured.fields[r.fieldMap.status]).toBe('Approval');
+    expect(r.captured.fields ? r.captured.fields[r.fieldMap.status] : '').not.toBe('Completed');
+  });
+  it('a NO ACTION REQUIRED briefing whose closing line names an action is NOT filed', () => {
+    const r = submit({ type: 'Admin', output: 'NO ACTION REQUIRED\n' + report + '**Carrying this out will involve:** Sending the notice to the council.' });
+    expect(r.captured.fields[r.fieldMap.status]).toBe('Approval');
+  });
   it('a Correspondence output is never filed on that rule (its own send-format check decides)', () => {
     const r = submit({ type: 'Correspondence', output: report + '**Carrying this out will involve:** Nothing.' });
     // Either refused by the send-format check or queued — never silently closed.

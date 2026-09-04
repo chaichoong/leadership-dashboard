@@ -1193,6 +1193,24 @@ NO_ACTION_TAIL_RE = re.compile(
     re.I,
 )
 NO_ACTION_HEAD_RE = re.compile(r"^\W*(?:NO ACTION (?:REQUIRED|NEEDED)|BRIEFING|FOR INFORMATION)\b", re.I)
+# A line that OPENS with a negation is not a no-action line if it goes on to
+# name an action ("Nothing goes out until you approve; then I send the
+# letter", "No payment is made; I email the creditor"). Found in review, 4 Sep
+# 2026: the prefix match alone would have filed those as done and the letter
+# would never have been sent. Any action verb after the opening phrase, or
+# anywhere in the closing line of a NO ACTION REQUIRED briefing, keeps the
+# submission on the gate.
+ACTION_VERB_RE = re.compile(
+    r"\b(?:send(?:s|ing)?|sent|email(?:s|ing|ed)?|post(?:s|ing|ed)?|mail(?:s|ing)?|"
+    r"pay(?:s|ing)?|paid|file(?:s|d|ing)?|submit(?:s|ted|ting)?|book(?:s|ed|ing)?|"
+    r"call(?:s|ed|ing)?|phone(?:s|d)?|ring(?:s|ing)?|contact(?:s|ed|ing)?|"
+    r"repl(?:y|ies|ied|ying)|respond(?:s|ed|ing)?|chase(?:s|d)?|instruct(?:s|ed|ing)?|"
+    r"upload(?:s|ed|ing)?|register(?:s|ed|ing)?|cancel(?:s|led|ling)?|reverse(?:s|d)?|"
+    r"transfer(?:s|red|ring)?|set(?:s|ting)?\s+up|writ(?:e|es|ing)|sign(?:s|ed|ing)?|"
+    r"approv(?:e|es|ing)|update(?:s|d|ing)?|change(?:s|d)?|creat(?:e|es|ing)|"
+    r"issue(?:s|d)?|arrange(?:s|d)?|order(?:s|ed)?|deliver(?:s|ed)?)\b",
+    re.I,
+)
 
 
 def carry_out_tail(output):
@@ -1210,10 +1228,17 @@ def informational_only(output, task_type):
     if task_type == "Correspondence":
         return False
     body = (output or "").replace(TIER1_BANNER, "", 1).strip()
-    if NO_ACTION_HEAD_RE.match(body):
-        return True
     tail = carry_out_tail(body)
-    return bool(tail) and (bool(NO_ACTION_TAIL_RE.match(tail)) or bool(READ_ONLY_RE.search(tail)))
+    if NO_ACTION_HEAD_RE.match(body):
+        return not ACTION_VERB_RE.search(tail)
+    if not tail:
+        return False
+    m = NO_ACTION_TAIL_RE.match(tail)
+    if m:
+        return not ACTION_VERB_RE.search(tail[m.end():])
+    if READ_ONLY_RE.search(tail):
+        return not ACTION_VERB_RE.search(tail)
+    return False
 
 
 def carry_out_problem(output, strict=True):
@@ -2187,9 +2212,7 @@ def cmd_submit(args):
             AF["approvedAt"]: None,
             AF["notes"]: (str(tf.get(AF["notes"]) or "").rstrip() + "\n\n" + note).strip()[-90000:],
         }
-        to_attach = list(getattr(args, "attach", None) or [])
-        for path in to_attach:
-            upload_attachment(args.task, path)
+        # Attachments were uploaded above, once; never again here.
         patch_task(args.task, filed)
         print(json.dumps({"submitted": args.task, "filed": True, "status": "Completed",
                           "type": args.type, "attached": len(to_attach),
