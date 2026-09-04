@@ -66,9 +66,9 @@ describe('content-engine OD lane', () => {
     expect(lane).toMatch(/CONTENT \(OD\):/);
   });
 
-  it('v2 rulings hold in code: threshold 8, no bridge posts, no blank quote card, newsletter on the personal profile via the browser lane', () => {
+  it('v2 rulings hold in code: threshold 6 with the agent-only rule, no bridge posts, no blank quote card, newsletter on the personal profile via the browser lane', () => {
     const lane = readFileSync(path.join(DIR, 'od_lane.py'), 'utf8');
-    expect(lane).toMatch(/AI_THRESHOLD, BANK_DAYS, MAX_MOMENTS, TOPIC_DAYS, TOPIC_COUNT = 3\.0, 8,/);
+    expect(lane).toMatch(/AI_THRESHOLD, BANK_DAYS, MAX_MOMENTS, TOPIC_DAYS, TOPIC_COUNT = 3\.0, 6,/);
     expect(lane).not.toMatch(/bridge_text/);
     expect(lane).not.toMatch(/od_card/);
     expect(lane).toMatch(/"profile": "linkedin"/);

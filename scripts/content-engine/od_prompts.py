@@ -112,7 +112,7 @@ A transcript is OD material ONLY if Kevin talks about handing a real business ta
 TOPIC LIST: Kevin has been asked to record these topics. If the transcript clearly covers one, return its number in "topic".
 {topics}
 Answer ONLY with JSON: {"score": 0-10, "verdict": "OD" | "no", "pillar": "Pain|Method|Proof|Philosophy|none", "posts_possible": 0-3, "topic": <number or null>, "moments": [{"quote": "verbatim 8-25 words from the transcript", "angle": "one line, running context stripped", "pillar": "Pain|Method|Proof"}]}.
-score 8+ = clear OD material about an agent or automation doing a job; 5-7 = business talk that is not about handing work to an agent; 0-4 = none. List at most 3 moments, best first."""
+SCORING: 8-10 = Kevin describes a SPECIFIC agent or automation doing a real job (what it does, how he set it up, where he checks it, what changed). 6-7 = clear talk about handing work to AI agents or automation in general (for example turning SOPs into AI agents, what an agent could take off a founder's plate) without a specific set-up story: still OD material, a Method or Pain moment. 3-5 = business talk (routines, focus, decisions, delegation to people) with no agent or automation. 0-2 = none. List at most 3 moments, best first; each moment must itself be about agents, automation or the job being handed over."""
 
 TOPICS_SYSTEM = BRIEF + """
 

@@ -47,7 +47,7 @@ HOLD_FILE = os.path.expanduser("~/.config/od/content_engine_od_hold")
 BRAND = "Operations Director"
 BUSINESS_OD = "reca9ofzhuw13ZzGE"        # Tasks -> Business "Operations Director" (verified 6 Aug 2026, CLAUDE.md)
 OD_SLOT, NEWSLETTER_SLOT = (8, 0), (8, 0)
-GATE_WORDS, AI_THRESHOLD, BANK_DAYS, MAX_MOMENTS, TOPIC_DAYS, TOPIC_COUNT = 3.0, 8, 60, 3, 21, 10
+GATE_WORDS, AI_THRESHOLD, BANK_DAYS, MAX_MOMENTS, TOPIC_DAYS, TOPIC_COUNT = 3.0, 6, 60, 3, 21, 10
 CTA_LINK = "https://api.leadconnectorhq.com/widget/booking/BcVVhAg1zLaPVEXj5ih0"   # Operations Review Call; the lead magnet replaces it
 CLOSING = approval.CLOSING
 STATUS_DRAFTED, STATUS_QC, STATUS_APPROVED, STATUS_SCHEDULED, STATUS_PUBLISHED = "Copies in Progress", "Quality Control", "Approved for Publishing", "Publishing In Progress", "Published"
@@ -836,7 +836,7 @@ def selftest():
     assert not STRIP_WORDS.search("your business runs on you and it should run without you") and STRIP_WORDS.search("on my run this morning") and STRIP_WORDS.search("day 2,195 of the streak")
     pm = parse_mine('```json\n{"score": 8, "pillar": "Method", "posts_possible": 2, "topic": "3", "moments": [{"quote": "one two three four five six", "angle": "a", "pillar": "Method"}, {"quote": "too short", "angle": "b"}]}\n```')
     assert pm["verdict"] == "OD" and pm["topic"] == 3 and len(pm["moments"]) == 1
-    assert parse_mine('{"score": 7, "moments": []}')["verdict"] == "no", "threshold is 8 in v2" ; assert parse_mine("I cannot help") is None
+    assert parse_mine('{"score": 5, "moments": []}')["verdict"] == "no" and parse_mine('{"score": 6, "moments": []}')["verdict"] == "OD", "threshold is 6 in v2: general agent talk counts, mindset does not"; assert parse_mine("I cannot help") is None
     assert verbatim("turn SOPs into AI agents", "you can now turn SOPs, into AI agents and more") and not verbatim("agents into SOPs", "turn SOPs into AI agents")
     assert verbatim("remove as much of the emotion from the process as possible", "so, um, remove as much of the emotion, from the process as possible because")
     assert not verbatim("we doubled revenue in six months", "we ran ten kilometres in the rain and it was cold and the wind was up")
@@ -898,7 +898,7 @@ def selftest():
     assert minutes_for("Approved as-is") == 2 and minutes_for("Approved with minor edits") == 5 and minutes_for("Changes requested") == 10
     import tempfile as _tf
     globals()["HOLD_FILE"] = os.path.join(_tf.gettempdir(), "od-hold-test-%d" % os.getpid()); assert not on_hold(); open(HOLD_FILE, "w").write(""); assert on_hold(); os.remove(HOLD_FILE)
-    assert BUSINESS_OD != approval.BUSINESS_PERSONAL and publish.BRANDS[BRAND]["category"] == BRAND and AI_THRESHOLD == 8
+    assert BUSINESS_OD != approval.BUSINESS_PERSONAL and publish.BRANDS[BRAND]["category"] == BRAND and AI_THRESHOLD == 6
     print(json.dumps({"checks": 52, "failed": []}))
 
 
