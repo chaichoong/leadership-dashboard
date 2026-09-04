@@ -129,7 +129,22 @@ SHARE: <one line, under 200 chars, for the post that announces the edition>
 BODY:
 <the edition, plain text, blank lines between paragraphs>"""
 
-NEWSLETTER_PROMPT = """WEEK OF {monday}. THEME: {theme}.
+# The series (Kevin, 4 Sep 2026): edition 1 is the high-level version of what the lead magnet promises, "how to get 90% of your
+# day-to-day operations completed by AI agents"; every edition after goes one level deeper on one area. Edition numbers past the list wrap.
+NEWSLETTER_SERIES = [
+    "The whole picture: how a founder-led business gets 90% of its day-to-day operations done by AI agents. The map, the order, where the owner still sits.",
+    "The inbox: how incoming email and messages get sorted, answered and turned into tasks by an agent, with the owner approving.",
+    "The task board: how an agent keeps the open-task list small, chases progress and hands the owner only what genuinely needs them.",
+    "The money: bank transactions matched, costs categorised, cash and profit reported daily, by an agent that learns from every correction.",
+    "Creditors and suppliers: how replies are drafted and chased by an agent, with the owner deciding.",
+    "Compliance and renewals: certificates, licences and insurance tracked and renewed ahead of time by an agent.",
+    "Content: how one recording becomes a week of posts and a newsletter with one approval.",
+    "The approval gate: how to trust an agent step by step, from checking every output to letting it run.",
+]
+EDITION1_BRIEF = """THIS IS EDITION 1, THE FLAGSHIP. Kevin's instruction: "the first newsletter should be a high-level version of that, and then we go deeper on each newsletter after". It sits directly under the promise of the lead magnet: how to get 90% of your day-to-day operations completed by AI agents. Give the reader the whole map in one read: (1) what "day-to-day operations" actually are in a founder-led business, named plainly (inbox, tasks, money, suppliers, compliance, content); (2) the order to hand them to agents and why (highest volume and most repeatable first); (3) the three groups every job falls into (the agent does it alone; the agent does it and the owner approves; the owner alone); (4) the eight-stage path Operations Director uses, in the reader's words; (5) what the owner still does in a week when it works (approvals, one improvement request, a monthly read); (6) what it is NOT (not documentation for its own sake, not another dashboard, not a person you hire). 900 to 1,200 words. Every claim about Kevin's own businesses must come from the SOURCE MATERIAL. Write it as our own method, no other expert named. End by telling the reader what next week's edition goes deeper on."""
+
+NEWSLETTER_PROMPT = """WEEK OF {monday}. EDITION {n} OF THE SERIES. THIS EDITION'S THEME: {theme}.
+{edition_brief}
 SOURCE MATERIAL (the week's five approved or drafted posts, with their sources; use only these facts):
 {material}
 CALL TO ACTION LINK: {cta}
@@ -175,7 +190,7 @@ def selftest():
     for s in SHAPES.values(): assert s["visual"] in ("before_after", "steps", "stat", "flow", "checklist") and s["visual_fields"]
     for p in (SHAPE_PROMPT, POLISH_PROMPT, NEWSLETTER_PROMPT, DM_PROMPT): assert "{" in p and "}" in p
     assert "punchier" in POLISH_PROMPT and '"score"' in USEFULNESS_SYSTEM and '"topic"' in MINE_SYSTEM and "{topics}" in MINE_SYSTEM
-    assert NEWSLETTER_NAME in NEWSLETTER_SYSTEM and "TITLE:" in NEWSLETTER_SYSTEM
+    assert NEWSLETTER_NAME in NEWSLETTER_SYSTEM and "TITLE:" in NEWSLETTER_SYSTEM and len(NEWSLETTER_SERIES) == 8 and "90%" in NEWSLETTER_SERIES[0] and "{edition_brief}" in NEWSLETTER_PROMPT and "FLAGSHIP" in EDITION1_BRIEF
     post, vis = split_visual("Hook line.\n\nBody.\n===VISUAL===\n```json\n{\"title\": \"T\", \"steps\": [\"a\", \"b\"]}\n```")
     assert post == "Hook line.\n\nBody." and vis == {"title": "T", "steps": ["a", "b"]}
     assert split_visual("no block") == ("no block", None) and split_visual("x\n===VISUAL===\nnot json")[1] is None

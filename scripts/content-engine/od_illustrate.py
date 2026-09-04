@@ -20,7 +20,7 @@ TEXT_MODEL = "gemini-3.6-flash"   # the current flash text model on Kevin's key 
 PALETTE = "pale sage background #F1F3EF, off-white panels #FBFBF9, forest green #2C6E49 for accents, icons and numbering, gold #C6A15B for one highlight, charcoal #1C2422 text"
 STYLE = ("Clean, modern LinkedIn infographic in flat vector illustration style, the kind top business creators post: generous white space, one bold "
          "heading, clear hierarchy, simple friendly line icons of AI agents (small robot heads or chat bubbles with a spark), arrows and numbered "
-         "markers, a subtle grid. Portrait 4:5. Typeface: a clean geometric sans-serif. " + PALETTE + ". Footer line: 'Kevin Brittain, Operations Director'. "
+         "markers, a subtle grid. Portrait 4:5. Typeface: a clean geometric sans-serif. " + PALETTE + ". Footer line, small, bottom left: 'Operations Director'. No person's name anywhere on the picture, no signature, no headshot: generic and universal. Leave a clear bottom-right corner for the logo. "
          "Every word of text must be spelled EXACTLY as given, in UK English. Use ONLY the text given below: no extra captions, labels, sub-steps or slogans of your own (the Pro model added three invented process boxes on 4 Sep 2026). No photographs, no realistic people or faces, no logos of other "
          "companies, no fake screenshots or dashboards, no charts of invented data, no watermark, nothing that could be mistaken for a real product screen.")
 
@@ -135,6 +135,22 @@ def check_text(required, transcript, min_ratio=0.92):
     return bad
 
 
+FFMPEG = os.path.expanduser("~/tools/bin/ffmpeg")
+LOGO = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "assets", "od-logo.png")
+
+
+def brand(png_path, logo=None, size=110, margin=48):
+    """Stamp the Operations Director logo bottom-right (Kevin: the brand and logo, never his name). In place; returns True when done."""
+    logo = logo or LOGO
+    if not (os.path.exists(FFMPEG) and os.path.exists(logo) and os.path.exists(png_path)): return False
+    import subprocess, tempfile
+    tmp = png_path + ".branded.png"
+    r = subprocess.run([FFMPEG, "-v", "error", "-y", "-i", png_path, "-i", logo, "-filter_complex",
+                        "[1:v]scale=%d:-1[l];[0:v][l]overlay=W-w-%d:H-h-%d" % (size, margin, margin), "-frames:v", "1", tmp], capture_output=True, text=True)
+    if r.returncode != 0 or not os.path.exists(tmp): return False
+    os.replace(tmp, png_path); return True
+
+
 def illustrate(template, spec, out_png, attempts=3, log=print):
     """Draw, check, redraw. Returns (path, note) on success or (None, reason)."""
     k = key()
@@ -151,7 +167,8 @@ def illustrate(template, spec, out_png, attempts=3, log=print):
             return None, str(ex)[:200]
         if not bad:
             with open(out_png, "wb") as fh: fh.write(png)
-            return out_png, "Gemini illustration (%s), text verified on attempt %d" % (model, i)
+            stamped = brand(out_png)
+            return out_png, "Gemini illustration (%s), text verified on attempt %d%s" % (model, i, ", logo stamped" if stamped else "")
         log("illustrate: attempt %d misspelt %d line%s: %s" % (i, len(bad), "" if len(bad) == 1 else "s", "; ".join(bad)[:200]))
         fixes = bad
     return None, "text still wrong after %d attempts" % attempts
@@ -170,8 +187,10 @@ def selftest():
     assert check_text(["30 min", "how often the dispatcher checks for finished agent work"], "30 min\nhow often the dispatcher checks for finshed agent agent ela wort aun\nVERDICT: GARBLED finshed, ela wort aun") == ["reader verdict: GARBLED finshed, ela wort aun"]
     assert check_text(["30 min", "how often the dispatcher checks for finished agent work"], "30 min\nhow often the dispatcher checks for finshed agent agent ela wort aun\nVERDICT: CLEAN") == ["how often the dispatcher checks for finished agent work"], "a wrong CLEAN verdict is still caught by the word check"
     fp = build_prompt("flow", {"title": "T", "boxes": ["Email in", "Agent sorts", "Owner approves", "Reply out"], "human": 2}); assert "(the OWNER's step, gold)" in fp and fp.count("(the agent, green)") == 2
+    assert "Kevin" not in STYLE and "No person's name" in STYLE and "Operations Director" in STYLE
+    assert brand("/nonexistent.png") is False
     old = globals()["KEY_FILE"]; globals()["KEY_FILE"] = "/nonexistent/key"; assert illustrate("steps", spec, "/tmp/x.png")[0] is None and "no Gemini key" in illustrate("steps", spec, "/tmp/x.png")[1]; globals()["KEY_FILE"] = old
-    print(json.dumps({"checks": 11, "failed": []}))
+    print(json.dumps({"checks": 13, "failed": []}))
 
 
 if __name__ == "__main__":
