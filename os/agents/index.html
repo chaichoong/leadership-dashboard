@@ -118,6 +118,10 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 .apv-group-actions{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
 .apv-group-label{font-size:var(--fs-xs);color:var(--text-secondary);font-weight:var(--fw-semibold)}
 .apv-group .apv-card{margin:0 10px 10px}
+.apv-signin-strip{border:1px solid var(--border-default);border-left:4px solid var(--accent);border-radius:var(--radius-md);background:var(--accent-soft);padding:12px 16px;margin-bottom:12px;font-size:var(--fs-sm)}
+.apv-signin{display:flex;gap:10px;align-items:center;flex-wrap:wrap;justify-content:space-between;border:1px solid var(--border-default);border-radius:var(--radius-md);background:var(--accent-soft);padding:8px 12px;margin:6px 0 8px;font-size:var(--fs-sm)}
+.apv-signin-site{display:inline-block;border:1px solid var(--border-default);border-radius:var(--radius-full);padding:3px 10px;background:var(--bg-surface);color:var(--text-primary);text-decoration:none;font-size:var(--fs-xs)}
+.apv-signin-site:hover{border-color:var(--accent)}
 .apv-reasons{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:8px;
     padding-top:10px;border-top:1px dashed var(--border-subtle)}
 .apv-reasons-label{font-size:var(--fs-xs);color:var(--text-muted);font-weight:var(--fw-semibold);margin-right:2px}
@@ -1303,6 +1307,7 @@ function renderApprovals(){
     }
 
     snapshotApprovalDrafts();
+    const signInStrip = apvSignInStripHtml(allApprovals);
 
     // Filter chips per raising agent; the list itself stays FLAT in the
     // queue's importance order (tier 1, then priority, then longest
@@ -1326,7 +1331,7 @@ function renderApprovals(){
     const tier1Count = allApprovals.filter(t=>t.tier1 && inAgent(t)).length;
     const anyFilter = _apvAgentFilter || _apvTier1Only;
 
-    let html = laterHtml + `<div class="apv-filters">
+    let html = laterHtml + signInStrip + `<div class="apv-filters">
         <button class="apv-filter${anyFilter?'':' active'}" onclick="clearApvFilters()">All (${allApprovals.length})</button>
         ${chips.map(g=>{
             const n = g.rows.filter(inTier).length;
@@ -1528,6 +1533,39 @@ function apvLinkify(text){
     return esc(String(text||'')).replace(/(https?:\/\/[^\s<]+)/g,
         '<a href="$1" target="_blank" rel="noopener noreferrer" style="color:var(--accent);text-decoration:underline;word-break:break-all">$1</a>');
 }
+// A task blocked on a site sign-in is a wait, not a decision (Kevin's ruling,
+// 4 Sep 2026). The robot leaves ONE line, "SIGN-IN NEEDED: <site> (<url>)".
+// The card shows a button that opens the Robot sign-in app on his Mac through
+// its robotsignin:// link; the strip above the queue lists every such site
+// and offers all of them in one go. The app opens the sites one after another
+// (the robot profile can only be open in one window) and hands each site's
+// tasks back the moment he quits its window.
+const APV_SIGNIN_RE = /^\s*SIGN-IN NEEDED:\s*([^\n(]+?)\s*(?:\((https?:\/\/[^\s)]+)\))?\s*$/im;
+function apvSignInNeeded(output){
+    const m = APV_SIGNIN_RE.exec(String(output||''));
+    if(!m) return null;
+    let host = '';
+    try{ host = m[2] ? new URL(m[2]).hostname.toLowerCase() : ''; }catch(e){ host = ''; }
+    return { site: m[1].trim(), url: m[2] || '', host };
+}
+function apvSignInLink(need){
+    return need.host ? `robotsignin://site/${encodeURIComponent(need.host)}` : 'robotsignin://all';
+}
+function apvSignInStripHtml(items){
+    const needs = items.map(t => apvSignInNeeded(t.agentOutput)).filter(Boolean);
+    if(!needs.length) return '';
+    const bySite = {};
+    needs.forEach(n => { const k = n.host || n.site.toLowerCase(); (bySite[k] = bySite[k] || { site: n.site, host: n.host, n: 0 }).n++; });
+    const parts = Object.values(bySite).sort((a,b)=>b.n-a.n)
+        .map(g => `<a class="apv-signin-site" href="${esc(apvSignInLink(g))}" title="Opens the Robot sign-in app on your Mac at this site">${esc(g.site)} <span style="color:var(--text-muted)">(${g.n})</span></a>`).join('');
+    return `<div class="apv-signin-strip" data-apv-signin-strip>
+        <div><strong>${needs.length === 1 ? 'One task is' : needs.length + ' tasks are'} waiting on a sign-in.</strong>
+            <span style="color:var(--text-secondary)">Not a decision: sign in once and the robot finishes the work within minutes. Sites open one after another; sign in, then Cmd+Q.</span></div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:6px">
+            <a class="btn btn-success btn-sm" href="robotsignin://all" title="Opens the Robot sign-in app on your Mac and goes through every waiting site in turn">Sign in to all (${needs.length})</a>${parts}
+        </div>
+    </div>`;
+}
 function apvCardHtml(t){
     const raw = apvSummary(t.agentOutput);
     const isAction = raw.endsWith(APV_SUMMARY_IS_ACTION);
@@ -1546,6 +1584,14 @@ function apvCardHtml(t){
     return `<div class="apv-card" data-apv-card="${t.id}">
         ${tier1 ? `<div class="apv-tier1">TIER 1. This touches your private legal and financial matter. An AI agent prepared it. Nothing has been sent, filed, paid or changed anywhere. Read it before you approve.</div>` : ''}
         <div class="apv-ask">${isAction ? `<span class="apv-ask-stem">If you approve, this happens:</span> ` : ''}${esc(ask)}</div>
+        ${(()=>{
+            const need = apvSignInNeeded(t.agentOutput);
+            if(!need) return '';
+            return `<div class="apv-signin" data-apv-signin="${esc(need.host||need.site)}">
+                <span><strong>Waiting on a sign-in:</strong> ${esc(need.site)}. Not a decision. Sign in once and the robot finishes this within minutes.</span>
+                <a class="btn btn-success btn-sm" href="${esc(apvSignInLink(need))}" title="Opens the Robot sign-in app on your Mac at this site. Sign in, then Cmd+Q.">Sign in now</a>
+            </div>`;
+        })()}
         <div class="apv-meta">
             ${t.priority==='Urgent' ? '<span class="apv-chip" style="background:var(--danger-bg);color:var(--danger)">Urgent</span>' : ''}
             <span class="apv-chip">${esc(agent)}</span>
