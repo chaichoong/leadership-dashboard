@@ -33,18 +33,36 @@
   }
 
   function proceed() {
+    let rendered = false;
+    function doRender() {
+      if (rendered) return true;
+      if (typeof renderKpiLibraryTab !== 'function') return false;   // deferred scripts not ready yet
+      rendered = true;
+      // config.js declares a global `let PAT = ''` the live app fills via shared.js
+      // (not loaded here); satisfy the app's PAT guard. The shim routes the one
+      // Projects read to Supabase, so the value is unused.
+      try { PAT = 'supabase'; } catch (e) {}
+      // Render the STATIC template library immediately — pre-set the live-rows cache
+      // so renderKpiLibraryTab does NOT block on (or spin waiting for) the live-KPI
+      // fetch. This guarantees the library shows even if that read is slow.
+      try { _kpiLibLiveRows = []; } catch (e) {}
+      try { renderKpiLibraryTab(); } catch (e) { console.error('[kpi-boot] render failed', e); }
+      // Then fill the "live right now" panel in the background (no spinner, no block).
+      try {
+        if (typeof kpiLibFetchLive === 'function') {
+          kpiLibFetchLive()
+            .then(rows => { try { _kpiLibLiveRows = rows; renderKpiLibraryTab(); } catch (e) {} })
+            .catch(() => {});
+        }
+      } catch (e) {}
+      return true;
+    }
+    if (doRender()) return;
+    // Poll up to ~10s in case the deferred app scripts load slowly, plus a
+    // window-load fallback — so the render can never be silently skipped.
     let tries = 0;
-    (function go() {
-      if (typeof renderKpiLibraryTab === 'function') {
-        // config.js declares a global `let PAT = ''` the live app fills via shared.js
-        // (not loaded here); satisfy the app's PAT guard. The shim routes the one
-        // Projects read to Supabase, so the value is unused.
-        try { PAT = 'supabase'; } catch (e) {}
-        renderKpiLibraryTab();
-        return;
-      }
-      if (tries++ < 40) setTimeout(go, 50);
-    })();
+    const iv = setInterval(() => { if (doRender() || ++tries > 200) clearInterval(iv); }, 50);
+    window.addEventListener('load', doRender);
   }
 
   function showLogin() {
