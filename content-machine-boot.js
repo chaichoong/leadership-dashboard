@@ -28,6 +28,9 @@
   // never reach a tool they haven't bought.
   async function isEntitled() {
     try {
+      // RULE: the main/owner account always has every add-on (incl. new ones).
+      const { data: u } = await window.sbCM().auth.getUser();
+      if (u && u.user && u.user.email && u.user.email.toLowerCase() === 'kevin@operationsdirector.co.uk') return true;
       const { data } = await window.sbCM().from('org_modules').select('enabled').eq('module_key', 'content_machine').maybeSingle();
       return !!(data && data.enabled);
     } catch (e) { return false; }

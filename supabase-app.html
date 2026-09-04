@@ -224,15 +224,31 @@
     // stay hidden.
     const BASE_MODULES = ['strategy','tasks','team','systemisation','ai_assistant','dod_queue','crm'];
     const OPT_OUT_MODULES = ['plan_builder','command_centre','ceo_brief'];
+    // RULE (Kevin, 2026-09-03): the main/owner account ALWAYS sees every module —
+    // including any new one added later — while client accounts see only what they
+    // are entitled to. The owner is identified by their authenticated email (a
+    // client can never authenticate as this address), so this is a menu-visibility
+    // rule only; data stays protected by org-isolation RLS regardless.
+    const OWNER_LOGIN = 'kevin@operationsdirector.co.uk';
+    async function isOwnerAccount() {
+      try { const { data } = await sb.auth.getUser();
+        return !!(data && data.user && data.user.email && data.user.email.toLowerCase() === OWNER_LOGIN);
+      } catch (e) { return false; }
+    }
     async function applyEntitlements() {
       const enabled = new Set([...BASE_MODULES, ...OPT_OUT_MODULES]);
-      try {
-        const { data, error } = await sb.from('org_modules').select('module_key, enabled');
-        if (!error && data) data.forEach(r => {
-          if (r.enabled) enabled.add(r.module_key);
-          else if (OPT_OUT_MODULES.includes(r.module_key)) enabled.delete(r.module_key);
-        });
-      } catch (e) { /* fail safe — base + opt-out features stay visible, add-ons hidden */ }
+      if (await isOwnerAccount()) {
+        // Owner: reveal every module present in the menu (current + future).
+        document.querySelectorAll('.navitem[data-module]').forEach(n => enabled.add(n.dataset.module));
+      } else {
+        try {
+          const { data, error } = await sb.from('org_modules').select('module_key, enabled');
+          if (!error && data) data.forEach(r => {
+            if (r.enabled) enabled.add(r.module_key);
+            else if (OPT_OUT_MODULES.includes(r.module_key)) enabled.delete(r.module_key);
+          });
+        } catch (e) { /* fail safe — base + opt-out features stay visible, add-ons hidden */ }
+      }
       document.querySelectorAll('.navitem[data-module]').forEach(n => {
         n.style.display = enabled.has(n.dataset.module) ? '' : 'none';
       });

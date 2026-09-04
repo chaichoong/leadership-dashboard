@@ -128,6 +128,9 @@
   window.sbProspectingSession = () => sbc().auth.getSession().then(r => r.data.session);
   window.sbProspectingEntitled = async function () {
     try {
+      // RULE: the main/owner account always has every add-on (incl. new ones).
+      const { data: u } = await sbc().auth.getUser();
+      if (u && u.user && u.user.email && u.user.email.toLowerCase() === 'kevin@operationsdirector.co.uk') return true;
       const { data } = await sbc().from('org_modules').select('enabled').eq('module_key', 'prospecting').maybeSingle();
       return !!(data && data.enabled);
     } catch (e) { return false; }   // fail-CLOSED
