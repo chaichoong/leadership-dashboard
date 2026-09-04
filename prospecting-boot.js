@@ -36,7 +36,15 @@
     // Deferred app scripts have run by DOMContentLoaded; poll briefly just in case.
     let tries = 0;
     (function go() {
-      if (typeof loadProspectingTab === 'function') { loadProspectingTab(); return; }
+      if (typeof loadProspectingTab === 'function') {
+        // config.js declares `let PAT = ''`; the live app fills it via shared.js's
+        // login flow, which this twin doesn't load. loadProspectingTab() bails on
+        // `if (!PAT) return`, so satisfy that lexical binding with a truthy dummy
+        // (the shim routes every Airtable call to Supabase — the value is unused).
+        try { PAT = 'supabase'; } catch (e) {}
+        loadProspectingTab();
+        return;
+      }
       if (tries++ < 40) setTimeout(go, 50);
     })();
   }
