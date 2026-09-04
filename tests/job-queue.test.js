@@ -438,7 +438,15 @@ describe('findings queue', () => {
     expect(fin(['count', '--status', 'open']).stdout.trim()).toBe('0');
     expect(fin(['count', '--status', 'claimed']).stdout.trim()).toBe('1');
 
-    expect(fin(['close', id, '--outcome', 'fixed', '--note', 'PR #99']).code).toBe(0);
+    // 'fixed' needs evidence since 28 Aug 2026 (findings 262 / 266): a bare
+    // note is exactly how 201, 203, 204 and 237 were closed as fixed on days
+    // the files they named had zero commits. See
+    // tests/findings-close-evidence.test.js.
+    expect(fin(['close', id, '--outcome', 'fixed', '--note', 'PR #99']).code).not.toBe(0);
+    expect(fin(['count', '--status', 'fixed']).stdout.trim()).toBe('0');
+
+    expect(fin(['close', id, '--outcome', 'fixed', '--note', 'PR #99',
+      '--evidence', 'verified by hand against the live board']).code).toBe(0);
     expect(fin(['count', '--status', 'fixed']).stdout.trim()).toBe('1');
   });
 

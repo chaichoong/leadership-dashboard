@@ -53,7 +53,11 @@ For each finding:
 2. Read the code the finding names. **Verify the finding is real before changing anything.** A routine reported it; that is evidence, not proof. If it does not reproduce, close it `--outcome rejected --note "could not reproduce: ..."` and move on.
 3. Make the smallest change that fixes it.
 4. If the finding matches an entry in the Known Anti-Patterns section of CLAUDE.md, add the regression test in the same change. Pick the layer from the table in that file: a formula or real-data bug needs a live invariant in `scripts/check-data-invariants.py`, not a fixture test.
-5. `python3 scripts/findings.py close <id> --outcome fixed --note "<what you did>"`
+5. Close it. The fix is normally sitting in this run's PR, so that is `--outcome pending --pr <n>`,
+   flipped to fixed by `findings.py land --pr <n>` once the PR merges. `--outcome fixed` is only for
+   something already ON origin/main, and it now REFUSES without `--evidence`: give the commit SHA
+   (checked as an ancestor of origin/main) or, for a non-code fix, a plain statement of the proof.
+   `python3 scripts/findings.py close <id> --outcome pending --pr <n> --note "<what you did>"`
 
 Anything you will not fix, close as `deferred` with the reason. Every finding ends the run in a terminal state, so tomorrow's queue starts clean.
 
