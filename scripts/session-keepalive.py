@@ -57,8 +57,11 @@ def now_london():
 
 
 def node_bin():
-    return (os.environ.get("AGENT_NODE_BIN") or shutil.which("node")
+    node = (os.environ.get("AGENT_NODE_BIN") or shutil.which("node")
             or (sorted(glob.glob(os.path.expanduser("~/.nvm/versions/node/*/bin/node"))) or [None])[-1])
+    if not node:
+        raise RuntimeError("node not found: no AGENT_NODE_BIN, not on PATH, no nvm install")
+    return node
 
 
 def load_sites():
@@ -157,7 +160,12 @@ def cmd_run(dry_run=False):
     when = now_london()
     report = {"at": when.isoformat(), "sites": {}}
     for host, entry in sites.items():
-        res = read_site(host, entry)
+        # One site's failure must never stop the rest being checked, and an
+        # unchecked site must read as unknown, never as fine.
+        try:
+            res = read_site(host, entry)
+        except Exception as e:                              # noqa: BLE001
+            res = {"error": str(e)[:300]}
         state = session_state(res)
         row = {"label": entry.get("label"), "state": state, "landedOn": str(res.get("url") or "")[:120]}
         if state == "signed-out":

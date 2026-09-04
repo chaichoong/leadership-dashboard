@@ -3039,6 +3039,10 @@ def cmd_signin_done(args):
                     AF["status"]: "Completed",
                     AF["completion"]: now_iso(),
                     AF["deferredUntil"]: None,
+                    # Not agent work that skipped its approval: clear the
+                    # submitter link so the daily "completed without approval"
+                    # invariant does not count it (review, 4 Sep 2026).
+                    AF["sentForApprovalBy"]: [],
                     AF["notes"]: (str(f.get(AF["notes"]) or "").rstrip() +
                                   f"\n\n[{stamp} — Robot sign-in] Kevin signed in to {g['label']}; "
                                   "the robot's session is back. Nothing else to do.").strip()[-90000:],

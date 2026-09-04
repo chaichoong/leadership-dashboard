@@ -137,8 +137,10 @@ const BUILTIN_SITES = {
                                   loginUrl: 'https://studio.youtube.com/' },
   'www.linkedin.com':           { label: 'LinkedIn',           login: true,
                                   loginUrl: 'https://www.linkedin.com/login' },
-  'my.edfenergy.com':           { label: 'EDF Energy',         login: true,
-                                  loginUrl: 'https://my.edfenergy.com/login' },
+  // my.edfenergy.com no longer answers (SSL error, 4 Sep 2026); the account
+  // sign-in lives under the main site.
+  'www.edfenergy.com':          { label: 'EDF Energy',         login: true,
+                                  loginUrl: 'https://www.edfenergy.com/myaccount/login' },
   // Adobe Acrobat Sign (28 Aug 2026). Two different jobs on two different
   // hosts, and only one of them needs Kevin's account:
   //   acrobat.adobe.com    — SENDING a document out for signature. Needs the

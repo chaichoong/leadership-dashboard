@@ -13,7 +13,7 @@ const { loadSites } = require_(join(ROOT, 'scripts', 'agent-browser.js'));
 describe('login sites on the allowlist', () => {
   const sites = loadSites();
   it.each(['app.pingen.com', 'dashboard.stripe.com', 'manage.gocardless.com', 'studio.youtube.com',
-           'www.linkedin.com', 'my.edfenergy.com', 'ewf.companieshouse.gov.uk', 'acrobat.adobe.com'])
+           'www.linkedin.com', 'www.edfenergy.com', 'ewf.companieshouse.gov.uk', 'acrobat.adobe.com'])
     ('%s is a login site with a sign-in URL on its own host family', (host) => {
       expect(sites[host] && sites[host].login).toBe(true);
       const u = new URL(sites[host].loginUrl);
