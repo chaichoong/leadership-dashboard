@@ -267,6 +267,29 @@ function assertApproved(taskId) {
   return state;
 }
 
+// ── Session cookies must outlive the sign-in window ──────────────────────────
+// Chrome deletes session-only cookies when it restarts, and GOV.UK One Login
+// binds a sign-in to two of them (proven 4 Sep 2026: Kevin signed in three
+// times in the plain window, the persistent One Login cookie was in the
+// profile at the next launch, and WebFiling's sign-in request still asked
+// for his email, password and code). WebFiling's own session cookie is
+// session-only too. So after the window closes, every session-only cookie on
+// an allowlisted host is given a one-hour expiry, which is One Login's own
+// session length. Values are not read or changed; only the expiry flags are.
+function persistSessionCookies(dir, ttlMs = 60 * 60 * 1000) {
+  const db = path.join(dir, 'Default', 'Cookies');
+  if (!fs.existsSync(db)) return 0;
+  const { spawnSync } = require('child_process');
+  const domains = Object.keys(loadSites());
+  const where = domains.map(d => `host_key = '${d}' OR host_key LIKE '%.${d}'`).join(' OR ');
+  // Chrome epoch: microseconds since 1601-01-01.
+  const exp = Math.round((Date.now() + ttlMs) / 1000 + 11644473600) * 1000000;
+  const sql = `UPDATE cookies SET is_persistent = 1, expires_utc = ${exp} WHERE is_persistent = 0 AND (${where}); SELECT changes();`;
+  const r = spawnSync('sqlite3', [db, sql], { encoding: 'utf8' });
+  if (r.status !== 0) { console.error('WARNING: session cookies not persisted: ' + (r.stderr || '').trim()); return 0; }
+  return Number((r.stdout || '').trim()) || 0;
+}
+
 // ── Browser ──────────────────────────────────────────────────────────────────
 async function withPage(profile, headed, fn) {
   // Resolution chain rather than one hardcoded path: node walks parent
@@ -536,7 +559,9 @@ async function main() {
         if (running) seen = true;
         else if (seen) break;
       }
-      ledger({ cmd: 'login', host, profile, mode: 'plain-chrome-mock-keychain' });
+      const kept = persistSessionCookies(dir);
+      console.log(`Kept ${kept} session cookie(s) alive for one hour.`);
+      ledger({ cmd: 'login', host, profile, mode: 'plain-chrome-mock-keychain', sessionCookiesKept: kept });
       return;
     }
     await withPage(profile, true, async (page) => {
@@ -544,7 +569,7 @@ async function main() {
       console.log(`Signed-in window open for ${host}. Log in, then close the window.`);
       await page.waitForEvent('close', { timeout: 15 * 60 * 1000 }).catch(() => {});
     });
-    ledger({ cmd: 'login', host, profile });
+    ledger({ cmd: 'login', host, profile, sessionCookiesKept: persistSessionCookies(dir) });
     return;
   }
 
@@ -747,4 +772,4 @@ if (require.main === module) {
 }
 
 module.exports = { hostAllowed, runSteps, assertNotCredential, assertApproved, SECRET_NAME_RE, loadSites,
-                   assertUploadable, assertConfirmable, UPLOAD_DIR, UPLOAD_EXTENSIONS };
+                   assertUploadable, assertConfirmable, UPLOAD_DIR, UPLOAD_EXTENSIONS, persistSessionCookies };
