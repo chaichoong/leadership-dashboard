@@ -20,7 +20,7 @@ TEXT_MODEL = "gemini-3.6-flash"   # the current flash text model on Kevin's key 
 PALETTE = "pale sage background #F1F3EF, off-white panels #FBFBF9, forest green #2C6E49 for accents, icons and numbering, gold #C6A15B for one highlight, charcoal #1C2422 text"
 STYLE = ("Clean, modern LinkedIn infographic in flat vector illustration style, the kind top business creators post: generous white space, one bold "
          "heading, clear hierarchy, simple friendly line icons of AI agents (small robot heads or chat bubbles with a spark), arrows and numbered "
-         "markers, a subtle grid. Portrait 4:5. Typeface: a clean geometric sans-serif. " + PALETTE + ". Footer line, small, bottom left: 'Operations Director'. No person's name anywhere on the picture, no signature, no headshot: generic and universal. Leave a clear bottom-right corner for the logo. "
+         "markers, a subtle grid. Portrait 4:5. Typeface: a clean geometric sans-serif. " + PALETTE + ". Footer, small, bottom left, the two words Operations Director with no quotation marks around them. No person's name anywhere on the picture, no signature, no headshot: generic and universal. Leave a clear bottom-right corner for the logo. "
          "Every word of text must be spelled EXACTLY as given, in UK English. Use ONLY the text given below: no extra captions, labels, sub-steps or slogans of your own (the Pro model added three invented process boxes on 4 Sep 2026). No photographs, no realistic people or faces, no logos of other "
          "companies, no fake screenshots or dashboards, no charts of invented data, no watermark, nothing that could be mistaken for a real product screen.")
 
@@ -54,7 +54,9 @@ def build_prompt(template, spec, fixes=None):
     if template == "stat": parts.append("The number: \"%s\". The label: \"%s\". The source line: \"Source: %s\"." % (spec.get("number"), spec.get("label"), spec.get("source", "")))
     if template == "flow":
         boxes = spec.get("boxes", []); h = spec.get("human", -1)
-        parts.append("Boxes in order:\n" + "\n".join("%d. %s%s" % (i + 1, b, " (the OWNER's step, gold)" if i == h else (" (start, grey)" if i == 0 else " (the agent, green)")) for i, b in enumerate(boxes)))
+        parts.append("Boxes in order, these exact words and nothing else inside the boxes:\n" + "\n".join("%d. %s" % (i + 1, b) for i, b in enumerate(boxes)))
+        parts.append("Colour the boxes without writing the colour names: box 1 grey (the trigger); %s; every other box green (the agent's steps). Number the boxes once, in the green markers only, never inside the box text."
+                     % (("box %d gold with a small person icon (the owner's step)" % (h + 1)) if 0 <= h < len(boxes) else "no gold box"))
     if template == "checklist": parts.append("Checklist items, these exact words:\n" + "\n".join("[ ] " + s for s in spec.get("items", [])))
     if fixes: parts.append("The previous attempt misspelt or omitted these lines; render them exactly, letter for letter: " + " | ".join(fixes))
     return "\n\n".join(parts)
@@ -186,7 +188,7 @@ def selftest():
     assert bad == ["Write the SOP as decisions", "Load it into the agent"], bad
     assert check_text(["30 min", "how often the dispatcher checks for finished agent work"], "30 min\nhow often the dispatcher checks for finshed agent agent ela wort aun\nVERDICT: GARBLED finshed, ela wort aun") == ["reader verdict: GARBLED finshed, ela wort aun"]
     assert check_text(["30 min", "how often the dispatcher checks for finished agent work"], "30 min\nhow often the dispatcher checks for finshed agent agent ela wort aun\nVERDICT: CLEAN") == ["how often the dispatcher checks for finished agent work"], "a wrong CLEAN verdict is still caught by the word check"
-    fp = build_prompt("flow", {"title": "T", "boxes": ["Email in", "Agent sorts", "Owner approves", "Reply out"], "human": 2}); assert "(the OWNER's step, gold)" in fp and fp.count("(the agent, green)") == 2
+    fp = build_prompt("flow", {"title": "T", "boxes": ["Email in", "Agent sorts", "Owner approves", "Reply out"], "human": 2}); assert "box 3 gold" in fp and "(start" not in fp and "3. Owner approves" in fp
     assert "Kevin" not in STYLE and "No person's name" in STYLE and "Operations Director" in STYLE
     assert brand("/nonexistent.png") is False
     old = globals()["KEY_FILE"]; globals()["KEY_FILE"] = "/nonexistent/key"; assert illustrate("steps", spec, "/tmp/x.png")[0] is None and "no Gemini key" in illustrate("steps", spec, "/tmp/x.png")[1]; globals()["KEY_FILE"] = old
