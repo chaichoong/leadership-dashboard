@@ -553,3 +553,13 @@ The Summary is not put on YouTube (the full episode is there). The socials carry
   waits 56 days, because Kevin uploads four to six weeks of recordings at a time, and the engine marks it recorded from his tick or from the
   transcript when it finally arrives. Friday redrafted (no names, usefulness 7), the edition's two attributions rewritten, links corrected.
   The five posts keep their approved copy; their pictures are regenerated and the six cards re-raised once the Gemini key exists.
+- **Gemini key, 4 Sep 2026 evening (Kevin: "can you not set up the Gemini API for me?").** Route: `agent-browser.js login --url
+  https://aistudio.google.com/apikey --profile google` (plain Chrome, Kevin signed in and quit the window), then
+  `gemini_key_setup.js`, which drives the saved session and writes the key straight to `~/.config/od/gemini_api_key` (mode 600),
+  printing only its length. Google refused automated key CREATION ("The request is suspicious. Please try again."); that route is
+  not retried, on principle. Kevin already held a key on the Content Machine project (billing Tier 1, prepay), so `--existing`
+  copies it with the row's own "Copy API key" button via the clipboard permission; the value is 53 characters in the 2026
+  "AQ." format, not the classic 39-character "AIza" one, so the pattern accepts both. Verified against the models endpoint:
+  54 models; image models present include `gemini-3.1-flash-image` and `gemini-3-pro-image`; `gemini-2.5-flash` is retired for
+  new users, so the text check uses `gemini-3.6-flash`. First illustration (Tuesday's steps card): text verified on attempt 1,
+  21 seconds, flash image model. The ladder is flash first, Pro for the two retries.
