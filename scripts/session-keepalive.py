@@ -152,8 +152,12 @@ def signin_task_fields(host, entry, when):
 def create_task(fields, dry_run):
     if dry_run:
         return {"dryRun": True}
+    # --force: the duplicate gate's fuzzy pass folded six "SIGN-IN: <site>
+    # session lapsed" tasks into one on the first live run (4 Sep 2026), so
+    # five sites vanished from the morning list. One task per site is the
+    # point; `already_waiting` is the dedupe, per host, before we get here.
     r = subprocess.run([sys.executable, os.path.join(REPO, "scripts", "create-agent-task.py"), "create",
-                        "--fields-json", json.dumps(fields)], capture_output=True, text=True)
+                        "--force", "--fields-json", json.dumps(fields)], capture_output=True, text=True)
     if r.returncode != 0:
         raise RuntimeError("create-agent-task failed: " + (r.stderr or r.stdout)[:300])
     return {"created": True, "out": r.stdout.strip()[:200]}
