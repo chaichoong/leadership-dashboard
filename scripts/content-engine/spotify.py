@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """spotify.py — the podcast episode on Spotify for Creators, through the agent browser lane.
 
-Spotify for Creators has no upload API, and Ericamae uploaded by hand (SOP: podcast). Her
-episodes are VIDEO episodes of the full vlog (the episodes list shows Format: Video, 7-9 min),
-so the upload is the finished full episode MP4, not a separate audio file. Kevin logged the
+Spotify for Creators has no upload API, and Ericamae uploaded by hand (SOP: podcast). Her last
+episodes were VIDEO episodes of the full vlog (the episodes list shows Format: Video, 7-9 min).
+Kevin (4 Sep 2026) expected an audio podcast, so the engine uploads the AUDIO file (the episode's
+sound without the jingle, Ep<N>_Podcast.mp3); PODCAST_FORMAT flips it back to video if he prefers. Kevin logged the
 lane's `spotify` profile in once (3 Sep 2026); this script writes the plan that
 `scripts/agent-browser.js` executes: `prepare` uploads the file and fills the details, then
 screenshots; `commit` presses Publish only when the episode's approval task reads Approved
@@ -17,6 +18,7 @@ selectors for Details are confirmed on the first real episode and pinned here.
 import argparse, json, os, re, sys
 HERE = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, HERE)
 
+PODCAST_FORMAT = "audio"          # "audio" (Ep<N>_Podcast.mp3, no jingle) or "video" (the full episode MP4)
 SHOW_ID = "6hL5SLvsU1VDMHVaWZZ3tO"          # Runpreneur podcast (from the wizard URL, 3 Sep 2026)
 WIZARD = "https://creators.spotify.com/pod/show/%s/episode/wizard" % SHOW_ID
 PROFILE = "spotify"
@@ -68,7 +70,7 @@ def selftest():
     assert p["steps"][2] == {"do": "upload", "selector": "#uploadAreaInput", "path": "/x/Episode_2195_Full_Episode.mp4"}
     assert p["submit"]["text"] == "Save as draft" and p["mode"] == "test" and "youtu.be/x" in p["steps"][5]["value"]
     assert build_plan("/x", "T", "D", "", False)["submit"]["text"] == "Publish now"
-    assert WIZARD.endswith("/episode/wizard") and SHOW_ID in WIZARD
+    assert WIZARD.endswith("/episode/wizard") and SHOW_ID in WIZARD and PODCAST_FORMAT in ("audio", "video")
     print(json.dumps({"checks": 7, "failed": []}))
 
 

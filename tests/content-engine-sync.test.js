@@ -32,6 +32,8 @@ describe('content-engine spotify plan', () => {
     expect(out.failed).toEqual([]);
     const src = readFileSync(path.join(DIR, 'spotify.py'), 'utf8');
     expect(src).toContain('"Publish now" if not test else "Save as draft"');
-    expect(readFileSync(path.join(DIR, 'publish.py'), 'utf8')).toContain('spotify.write_plan(day, files["full"]');
+    expect(src).toContain('PODCAST_FORMAT = "audio"');
+    expect(readFileSync(path.join(DIR, 'publish.py'), 'utf8')).toContain('upload = files["podcast"] if spotify.PODCAST_FORMAT == "audio"');
+    expect(readFileSync(path.join(DIR, 'publish.py'), 'utf8')).toContain('spotify.write_plan(day, upload');
   });
 });
