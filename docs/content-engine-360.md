@@ -468,3 +468,24 @@ Q1 Newsletter on your personal profile (recommended, the only place it works) or
 Q2 Newsletter name: plain, says what it is; a suggestion is "Run Your Business Without You". Q3 Keyword CTA on Friday
 ("Comment AGENT") needs the comment-reading pass, so the lead magnet build includes it; until then the booking link.
 Q4 Withdraw the five v1 cards now.
+
+
+## Where everything goes, each day (the publishing map, Kevin's questions 4 Sep 2026)
+
+Three pieces per episode: the FULL episode (16:9, captions, intro jingle), the LEARNINGS clip (9:16, the diary section, banner with subheading) and the SUMMARY clip (9:16, the teaser). Each platform gets its own copy field.
+
+| Destination | What | When | Copy field |
+|---|---|---|---|
+| YouTube (channel) | Full episode, thumbnail | night after approval, 06:00 | YouTube Copy (SEO Title / Description / Hashtags) |
+| Blog runpreneur.org.uk | Article + thumbnail header | night after the YouTube link exists | Blog Copy, Blog Post Description |
+| Spotify for Creators | Full episode as a video podcast | same night, browser lane | Podcast Copy |
+| YouTube Shorts | Learnings clip | same night, 17:00 | YouTube Reels Copy (first line = title) |
+| TikTok | Summary 09:00 and Learnings 17:00 | same night | TikTok Copy (caption, hook first) |
+| Facebook Page | Summary as a reel 09:00, Learnings as a post 17:00 | same night | Facebook Reels Copy / Facebook Post Copy |
+| Instagram | Summary 09:00 and Learnings 17:00, as reels | same night | Instagram Reels Copy / Instagram Post Copy |
+| LinkedIn (Runpreneur page and Kevin's profile) | Summary 09:00 and Learnings 17:00 | same night | LinkedIn Copy |
+| Threads | Summary 09:00 and Learnings 17:00 | same night | Threads Copy |
+| Kevin's personal Facebook profile | share of the Page post | same night, browser lane (built on the first live post) | none |
+| X | nothing | dropped 4 Sep 2026 (8-17 views a post) | X copy no longer generated |
+
+The Summary is not put on YouTube (the full episode is there). The socials carry the YouTube link line so they drive people to the full episode. Distance in every piece of copy comes from the Strava-fed running total scaled to the episode's day, never episode x 10. Hooks: the first line of every caption is the hook; a visual cold-open hook inside the clip is a later editing feature, not built.
