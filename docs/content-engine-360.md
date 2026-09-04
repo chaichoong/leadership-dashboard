@@ -535,6 +535,10 @@ The Summary is not put on YouTube (the full episode is there). The socials carry
   a rejected slot is freed for a redraft; one episode feeds at most one post a week (the first dry run put Episode 1992
   in three slots); a low usefulness score is a flag on the card, not a THIN slot; em dashes are stripped from the judge's
   own reasons.
+
+
+**Distance, exact (Kevin, 4 Sep 2026 afternoon):** the copy's distance is read off that day's Strava run, the 'Total distance so far' figure in its caption (2194: 16,830.77 km; 2195: 16,838.17 km), cached in `strava_day_totals.json`. No estimate. A day whose run carries no total gets no distance in its copy, except today's own day, which uses the sync's running total.
+
 - **Kevin's review of the first v2 week (4 Sep 2026, evening).** All six cards "Changes requested". Copy: "really good", "happy with the
   copy". Pictures: "terrible", on every card; he wants Dan Martell-style infographics and named Gemini ("Nano Banana") as the route. Two
   copy rules: never name another expert unless quoting them word for word (he does not want readers following the expert instead), and the
