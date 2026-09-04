@@ -437,3 +437,60 @@ describe('informational outputs are filed, not queued (4 Sep 2026)', () => {
     expect(r.captured.fields ? r.captured.fields[r.fieldMap.status] : 'Approval').not.toBe('Completed');
   });
 });
+
+// Kevin's ruling, 4 Sep 2026 (fix 2): an output that tells him to log in and
+// do it himself is refused at submit. 37 of 233 outputs over 14 days did that.
+// The one sanctioned hand-back is the SIGN-IN NEEDED line the Robot sign-in
+// app turns into a tap.
+describe('hand-backs are refused at submit (4 Sep 2026)', () => {
+  const report = 'Portfolio arrears review.\n' + 'Detail line. '.repeat(30) + '\n';
+  const CARRY = '**Carrying this out will involve:** Kevin reviews the findings and decides.';
+  it.each([
+    'Kevin must log into pingen.com and click Send on letter b8caaaf2.',
+    'You will need to log in to the Stripe dashboard and complete the verification.',
+    'Log into the HL account at hl.co.uk to read the secure message.',
+    'KEVIN ACTION: log into pingen and press send.',
+    'Kevin should call the bank to confirm the balance.',
+  ])('refuses: %s', (line) => {
+    const r = submit({ type: 'Research', output: report + line + '\n\n' + CARRY });
+    expect(r.refused).toBe(true);
+    expect(r.error).toMatch(/hands Kevin a job/);
+  });
+  it('the SIGN-IN NEEDED line is the sanctioned hand-back and passes', () => {
+    const r = submit({ type: 'Research', output: report + 'SIGN-IN NEEDED: Pingen (https://app.pingen.com/)\n\n' + CARRY });
+    expect(r.refused).toBe(false);
+    expect(r.captured.fields[r.fieldMap.status]).toBe('Approval');
+  });
+  it.each([
+    'Please log into your Starling app and check the balance.',
+    'Kevin - log in to GoCardless and reinstate the mandate.',
+    'Next step for Kevin: sign in to Stripe.',
+    'Kevin needs to ring HMRC on 0300 200 3310.',
+    'Kevin, please sign into the HMRC portal to submit this.',
+    "You'll need to log in to the EDF account and confirm the meter reading.",
+    'Kevin will have to log in himself to finish this.',
+    'It needs Kevin to sign in to Xero to complete the payment.',
+    'Kevin to log into Stripe and upload ID.',
+  ])('refuses the phrasings the second review found: %s', (line) => {
+    const r = submit({ type: 'Research', output: report + line + '\n\n' + CARRY });
+    expect(r.refused).toBe(true);
+    expect(r.error).toMatch(/hands Kevin a job/);
+  });
+  it.each([
+    "Kevin's steps only: the security code and the payment. Everything else is prepared.",
+    'Once Kevin approves, the letter is posted.',
+    'Kevin can review the attached statement.',
+    'You can see the balance on the attached PDF.',
+    'The tenant must log in to the portal to pay.',
+    'Roy should call the contractor.',
+    'Kevin can call this done once he checks the figures.',
+  ])('is not a hand-back: %s', (line) => {
+    const r = submit({ type: 'Research', output: report + line + '\n\n' + CARRY });
+    expect(r.refused).toBe(false);
+  });
+  it('a letter that tells ITS recipient to log in is not a hand-back to Kevin (second review)', () => {
+    const email = 'TO: tenant@example.com\nFROM: kevinbrittain@gmail.com\nSUBJECT: Rent this month\n---\nDear Sam,\n\nYou must log in to the tenant portal to pay your rent this month. You should call the office if the portal is down.\n\nKind regards\nKevin\n\n**Carrying this out will involve:** Sending this email to the tenant.';
+    const r = submit({ type: 'Correspondence', output: email });
+    expect(r.error || '').not.toMatch(/hands Kevin a job/);
+  });
+});

@@ -1253,6 +1253,55 @@ def informational_only(output, task_type, tier1=False):
     return no_action_declared(tail)
 
 
+# Kevin's ruling, 4 Sep 2026 (fix 2 of the approval-gate work): an output that
+# tells him to log in somewhere and do the job himself is not prepared work,
+# it is a to-do list with his name on it. Measured over 14 days, 37 outputs
+# did exactly that ("Log into the HL account", "Kevin must log into pingen.com
+# and click Send"). The two sanctioned routes: do it in the agent browser
+# (allowlisted site, Kevin's session in the profile), or hand back the ONE
+# line the Robot sign-in app understands — "SIGN-IN NEEDED: <site>" — which
+# costs him a tap, not a task. Phone calls are never his step (ADHD rule).
+# Two patterns, applied by Task Type (second review, 4 Sep 2026): a letter or
+# email BODY legitimately tells its recipient "you must log in to the portal to
+# pay", so on Correspondence only the explicit-Kevin forms count; "you" means
+# Kevin only in the report types, where the agent is talking to him.
+HANDBACK_KEVIN_RE = re.compile(
+    r"\bKevin\s+(?:must|need(?:s)?\s+to|should|will\s+(?:need|have)\s+to|ha(?:s|ve)\s+to|to)\s+"
+    r"(?:manually\s+)?(?:log\s*in(?:to)?|sign\s*in(?:to)?|login|call|phone|ring)\b"
+    r"|\bneeds\s+Kevin\s+to\s+(?:manually\s+)?(?:log|sign)\s*in(?:to)?\b"
+    r"|\bKevin\s*[,:\-–—]+\s*(?:please\s+)?(?:manually\s+)?(?:log|sign)\s*in(?:to)?\b"
+    r"|\b(?:next\s+step|action|to[- ]do)\s+for\s+Kevin\s*[:\-–—]\s*(?:please\s+)?(?:log|sign)\s*in(?:to)?\b"
+    r"|\bKEVIN\s+ACTION\s*:\s*(?:please\s+)?(?:log|sign|call|phone|ring)\b",
+    re.I,
+)
+HANDBACK_YOU_RE = re.compile(
+    r"\byou(?:'ll|\s+will)?\s+(?:must|need(?:s)?\s+to|should|ha(?:s|ve)\s+to)\s+"
+    r"(?:manually\s+)?(?:log\s*in(?:to)?|sign\s*in(?:to)?|login|call|phone|ring)\b"
+    r"|\byou'?ll\s+need\s+to\s+(?:manually\s+)?(?:log|sign)\s*in(?:to)?\b"
+    r"|^\s*(?:Kevin\s*[,:\-–—]*\s*)?(?:please\s+)?(?:manually\s+)?(?:log|sign)\s*in(?:to)?\s+(?:to\s+)?"
+    r"(?:your|the)\s+[\w.' -]{2,40}?\s+(?:account|portal|dashboard|app|website|site)\b",
+    re.I | re.M,
+)
+SIGNIN_NEEDED_RE = re.compile(r"^\s*SIGN-IN NEEDED:\s*\S", re.I | re.M)
+
+
+def handback_problem(output, task_type=""):
+    """Reason this output hands Kevin a job instead of doing it; '' if none.
+
+    On Correspondence the text after the headers is the message to its
+    recipient, so only the forms that name Kevin count there.
+    """
+    text = (output or "")
+    m = HANDBACK_KEVIN_RE.search(text)
+    if not m and task_type != "Correspondence":
+        m = HANDBACK_YOU_RE.search(text)
+    if not m:
+        return ""
+    end_ = text.find("\n", m.end())
+    line = text[text.rfind("\n", 0, m.start()) + 1: end_ if end_ != -1 else len(text)]
+    return line.strip()[:160]
+
+
 def carry_out_problem(output, strict=True):
     """Reason the approval box would have to guess this output's summary.
 
@@ -2059,6 +2108,22 @@ def cmd_submit(args):
             "       summary is guessed from the first line of the report, which\n"
             "       is exactly what he asked to stop (11 Aug 2026)."
         )
+
+    # A hand-back is refused before anything else is judged: an output that
+    # tells Kevin to do the job is not a submission (his ruling, 4 Sep 2026).
+    handed = handback_problem(output, args.type)
+    if handed and not SIGNIN_NEEDED_RE.search(output):
+        sys.exit(
+            f"ERROR: refusing to submit {args.task} — it hands Kevin a job instead of "
+            f"doing it: {handed!r}.\n"
+            "       Kevin's ruling (4 Sep 2026): the gate is a sign-off, not a to-do "
+            "list. Either\n"
+            "         (a) do it in the agent browser (node scripts/agent-browser.js "
+            "read/prepare on an allowlisted site), or\n"
+            "         (b) if the site needs his session, put ONE line in the output:\n"
+            "               SIGN-IN NEEDED: <site name> (<login url>)\n"
+            "             and stop. That line is a tap for him (Robot sign-in app), "
+            "not a task. Never a phone call.")
 
     # Does the closing line promise a send this Task Type cannot deliver?
     # Refused here, not discovered at carry-out after Kevin has approved it.
