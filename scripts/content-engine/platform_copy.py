@@ -164,13 +164,21 @@ def rules_check(fields, transcript=""):
 
 # ---------- IO ----------
 
-def ask_claude(system, user):
+def ask_claude_model(system, user, model, timeout=600):
+    """ask_claude with an explicit model and timeout (the infographic composer writes a long page)."""
+    global MODEL
+    old = MODEL; MODEL = model
+    try: return ask_claude(system, user, timeout=timeout)
+    finally: MODEL = old
+
+
+def ask_claude(system, user, timeout=600):
     lessons = watch.kevin_lessons()
     if lessons: system = system + "\n\n" + lessons
     env = dict(os.environ)
     if os.path.exists(TOKEN_FILE): env["CLAUDE_CODE_OAUTH_TOKEN"] = open(TOKEN_FILE).read().strip()
     r = subprocess.run([CLAUDE, "-p", user, "--system-prompt", system, "--model", MODEL, "--output-format", "json",
-                        "--tools", "", "--max-turns", "1"], capture_output=True, text=True, env=env, timeout=600)
+                        "--tools", "", "--max-turns", "1"], capture_output=True, text=True, env=env, timeout=timeout)
     if r.returncode != 0: raise SystemExit("claude failed: " + r.stderr[-400:])
     d = json.loads(r.stdout)
     return (d.get("result") or "").strip(), d.get("usage", {}), d.get("total_cost_usd")

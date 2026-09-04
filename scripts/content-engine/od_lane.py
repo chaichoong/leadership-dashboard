@@ -37,6 +37,7 @@ import publish              # noqa: E402
 import od_prompts as P      # noqa: E402
 import od_infographic       # noqa: E402
 import od_illustrate        # noqa: E402
+import od_compose           # noqa: E402
 
 LONDON = ZoneInfo("Europe/London")
 REPO = os.path.dirname(os.path.dirname(HERE))
@@ -598,12 +599,18 @@ def render_visual(p):
     os.makedirs(CARDS_DIR, exist_ok=True)
     template = P.SHAPES[p["day"]]["visual"]
     png = os.path.join(CARDS_DIR, "od-%s.png" % p["date"]); pdf = os.path.join(CARDS_DIR, "od-%s.pdf" % p["date"]) if p["day"] == "Tue" else None
-    for k in ("card_png", "card_pdf", "card_url", "pdf_url"): p.pop(k, None)
-    path, note = od_illustrate.illustrate(template, p["visual"], png)
+    for k in ("card_png", "card_pdf", "card_url", "pdf_url", "card_html"): p.pop(k, None)
+    # Kevin's order (4 Sep 2026, option 1): the Epic Infographics method in the Operations Director language first (typed text, preflight
+    # checked), Gemini's drawing second, the code template last. The card says which route made the picture.
+    path, note, html_path = od_compose.compose(template, p["visual"], p.get("text", ""), P.SHAPES[p["day"]]["name"], p["day"], p.get("source_line", ""), png)
     if path:
-        p["card_png"] = path; p["picture"] = note
+        p["card_png"] = path; p["picture"] = note; p["card_html"] = html_path
     else:
-        p["picture"] = "code-drawn template (%s)" % note
+        print("od draft: composer fell through for %s (%s)" % (p["date"], note))
+        path, note2 = od_illustrate.illustrate(template, p["visual"], png)
+        if path: p["card_png"] = path; p["picture"] = note2 + " (composer: %s)" % note
+        else: p["picture"] = "code-drawn template (composer: %s; gemini: %s)" % (note, note2)
+    if not p.get("card_png"):
         try:
             od_infographic.render(template, p["visual"], png, None); p["card_png"] = png
         except SystemExit as ex:
