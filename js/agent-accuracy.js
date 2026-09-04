@@ -54,6 +54,19 @@
     ];
     // The one reason that IS a judgement on the writing.
     var QUALITY_REASON = 'The work is wrong';
+    // ── NONE OF THE SEVEN (4 Sep 2026) ───────────────────────────────
+    // Kevin can always reject in his own words (his ruling, 28 Aug), and until
+    // now those rejections stored NOTHING in Verdict Reason — indistinguishable
+    // from a write that never happened, which is how five of them went unseen
+    // between 1 and 3 Sep. They now store this instead: an explicit "he did not
+    // say which kind", which counts exactly as a blank always did (an unknown,
+    // never a pass) while being visible as a choice rather than a gap.
+    var UNCLASSIFIED_REASON = 'Something else';
+
+    function isUnclassifiedRejection(item) {
+        return item.outcome === 'Rejected'
+            && (!item.reason || item.reason === UNCLASSIFIED_REASON);
+    }
 
     function isRelevanceFailure(item) {
         return item.outcome === 'Rejected'
@@ -131,9 +144,7 @@
             // he is the only one who can tell "Roy owns this" (a rule) from
             // "wrong invoice number" (a one-off). They stay in the total, and
             // this count says how much of the score is therefore unexplained.
-            var unclassified = judged.filter(function (i) {
-                return i.outcome === 'Rejected' && !i.reason;
-            }).length;
+            var unclassified = judged.filter(isUnclassifiedRejection).length;
             // Measured across the JUDGED decisions, not the relevance failures:
             // the question is how long this agent has been doing THIS WORK to
             // this standard, and a rejected-as-irrelevant task is not evidence
@@ -207,7 +218,7 @@
         var all = (history || []).filter(function (h) { return h && h.outcome; });
         var bad = all.filter(isRelevanceFailure).length;
         var classified = all.filter(function (h) {
-            return h.outcome !== 'Rejected' || h.reason;
+            return !isUnclassifiedRejection(h);
         }).length;
         return {
             decisions: all.length,
@@ -225,7 +236,9 @@
         APPROVAL_ACCURATE: APPROVAL_ACCURATE,
         RELEVANCE_REASONS: RELEVANCE_REASONS,
         QUALITY_REASON: QUALITY_REASON,
+        UNCLASSIFIED_REASON: UNCLASSIFIED_REASON,
         isRelevanceFailure: isRelevanceFailure,
+        isUnclassifiedRejection: isUnclassifiedRejection,
         relevanceScore: relevanceScore,
         THRESHOLD: THRESHOLD,
         computeAgentAccuracy: computeAgentAccuracy,

@@ -158,3 +158,109 @@ describe('the remember route survives in the UI', () => {
     expect(WORKER).toMatch(/reaction\.remember\s*&&\s*!replies\.length/);
   });
 });
+
+// ─── WHICH KIND OF NO (4 Sep 2026) ────────────────────────────────────
+//
+// The reason chips shipped on 27 Aug on the AI Agents gate only, and even
+// there the red Reject button sat beside them and skipped them. So a rejection
+// could still be written with Verdict Reason empty, and five were between
+// 1 and 3 Sep — read from Airtable, not from a log:
+//
+//   rec6x6sfB3kmL7Vfi, rec7alvvt370LsEf6, rec8Gh5YGCNf332Pg, recrHeCCTna0WluLl
+//     — Kevin typed his own sentence and pressed Reject on the gate. The same
+//       day, 33 rejections taken through the chips all recorded their reason.
+//   recUE5JNhNW5rqSnF — decided by Mica in the TASKS DRAWER, which did not
+//     know the field existed at all, so no route through it could record one.
+//
+// A reason-less rejection counts against the agent that wrote the draft, and
+// the lesson writer cannot route it, so the learning loop stops compounding on
+// that path while every screen still looks healthy.
+//
+// The guard belongs on the WRITE, not on one button: both browser faces now
+// refuse to send the PATCH at all when no reason is recorded.
+describe.each(FACES)('%s records WHICH KIND of no', (face, src) => {
+  const VERDICT = 'fldF9Bs4N5mttQvtl';
+  const constants = face === 'slack worker' ? WORKER
+    : face === 'tasks drawer' ? TASKS_PAGE : AGENTS_PAGE;
+
+  it('knows the Verdict Reason field id', () => {
+    expect(constants).toContain(VERDICT);
+  });
+
+  it('carries the reason into the write', () => {
+    expect(src).toMatch(/verdictReason|fldF9Bs4N5mttQvtl/);
+  });
+});
+
+// A rejection may never store a BLANK reason on any face. Blank is
+// indistinguishable from a field that was never written, which is exactly how
+// these five went unseen. When Kevin names no kind, the faces store the
+// unclassified value instead — not a guess, and it scores as a blank always
+// did.
+describe.each(FACES)('%s never writes a rejection with a blank reason', (face, src) => {
+  it('falls back to the unclassified value on the reject branch', () => {
+    expect(src).toMatch(/UNCLASSIFIED|APV_UNCLASSIFIED/);
+    // The fallback has to be reached BY the rejection, not sit in dead code.
+    expect(src).toMatch(/outcome\s*===\s*'Rejected'[\s\S]{0,220}(APV_)?UNCLASSIFIED/);
+  });
+});
+
+// The three faces cannot share a module (a Cloudflare Worker imports nothing
+// from js/), so the string is repeated — and repeated strings drift.
+describe('the unclassified value is one string everywhere', () => {
+  const VALUE = "'Something else'";
+  it('js/agent-accuracy.js defines it and both pages read it from there', () => {
+    const accuracy = readFileSync(resolve(__dirname, '../js/agent-accuracy.js'), 'utf8');
+    expect(accuracy).toContain(`UNCLASSIFIED_REASON = ${VALUE}`);
+    expect(accuracy).toMatch(/UNCLASSIFIED_REASON: UNCLASSIFIED_REASON/);
+    for (const page of [AGENTS_PAGE, TASKS_PAGE]) {
+      expect(page).toMatch(/APV_UNCLASSIFIED\s*=\s*AgentAccuracy\.UNCLASSIFIED_REASON/);
+    }
+  });
+
+  it('the slack worker and the python report carry the same literal', () => {
+    expect(WORKER).toContain(`UNCLASSIFIED_REASON = ${VALUE}`);
+    const report = readFileSync(resolve(__dirname, '../scripts/agent-accuracy-report.py'), 'utf8');
+    expect(report).toContain('UNCLASSIFIED_REASON = "Something else"');
+  });
+
+  it('an unclassified rejection still counts as unexplained, not as a pass', () => {
+    // Otherwise the "rejections with no reason" number drops to zero the day
+    // the blanks stop, with nothing having actually improved.
+    const accuracy = readFileSync(resolve(__dirname, '../js/agent-accuracy.js'), 'utf8');
+    expect(accuracy).toMatch(/function isUnclassifiedRejection[\s\S]{0,200}UNCLASSIFIED_REASON/);
+    expect(accuracy).not.toMatch(/RELEVANCE_REASONS\s*=\s*\[[^\]]*Something else/);
+    const report = readFileSync(resolve(__dirname, '../scripts/agent-accuracy-report.py'), 'utf8');
+    expect(report).toMatch(/unclassified = sum\([\s\S]{0,240}UNCLASSIFIED_REASON/);
+  });
+});
+
+// One set of reasons, three faces. If the keys drift, the same rejection is
+// stored under two different names and every accuracy split silently splits
+// the wrong way.
+describe('the reason keys are the same everywhere', () => {
+  function keysOf(source) {
+    const start = source.indexOf('const APV_REASONS');
+    expect(start, 'APV_REASONS not found').toBeGreaterThan(-1);
+    const block = source.slice(start, source.indexOf('];', start));
+    return [...block.matchAll(/key:\s*'([^']+)'/g)].map((m) => m[1]);
+  }
+
+  it('the gate and the drawer offer identical reason keys', () => {
+    const gate = keysOf(AGENTS_PAGE);
+    expect(gate.length).toBe(7);
+    expect(keysOf(TASKS_PAGE)).toEqual(gate);
+  });
+
+  it('the slack worker maps its words to those same keys', () => {
+    for (const key of keysOf(AGENTS_PAGE)) {
+      expect(WORKER, `slack worker cannot record: ${key}`).toContain(`'${key}'`);
+    }
+  });
+
+  it('the drawer offers the chips in the UI, not only in code', () => {
+    expect(TASKS_PAGE).toMatch(/apvReasonChips/);
+    expect(TASKS_PAGE).toMatch(/function apvRejectWithReason/);
+    expect(TASKS_PAGE).toMatch(/Reject because/);
+  });
+});

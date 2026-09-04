@@ -845,6 +845,12 @@ const SLACK_REASON_WORDS = [
     [/^wrong\b[:,.\s-]*/i,    'The work is wrong'],
 ];
 
+// Kevin rejected in his own words and named none of the seven. Same string as
+// AgentAccuracy.UNCLASSIFIED_REASON in js/agent-accuracy.js and the pages'
+// APV_UNCLASSIFIED — a worker cannot import that module, so it is repeated
+// here and tests/approval-write-drift.test.js fails if the two drift.
+const UNCLASSIFIED_REASON = 'Something else';
+
 /** Split a leading reason word off a thread reply.
  *  → { reason, note }. reason is '' when the reply names none. */
 export function splitReason(text) {
@@ -895,7 +901,14 @@ async function applyDecision(env, t, outcome, decidedVia, note, approver, rememb
     if (note) fields[AF.approvalFeedback] = note;
     // WHY, recorded as data. Without it a reject from the phone degrades the
     // score in a way a reject from the desk no longer does.
-    if (reason) fields[AF.verdictReason] = reason;
+    //
+    // A reply naming none of the words still records something (4 Sep 2026):
+    // UNCLASSIFIED, meaning "he did not say which kind", which is not a guess
+    // and scores exactly as the old blank did. A blank was worse than useless
+    // — it looked identical to a field that was never written, which is how
+    // five reason-less rejections sat unnoticed for three days.
+    if (outcome === 'Rejected') fields[AF.verdictReason] = reason || UNCLASSIFIED_REASON;
+    else if (reason) fields[AF.verdictReason] = reason;
     // The durable copy. approvalFeedback is cleared by the next submit, so
     // without this the words that caused a redo are gone within the hour and
     // the lesson writer has nothing left to read.

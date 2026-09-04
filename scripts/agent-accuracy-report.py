@@ -64,6 +64,10 @@ RELEVANCE_REASONS = (
     "No longer relevant",
 )
 QUALITY_REASON = "The work is wrong"
+# None of the seven fitted and Kevin typed his own sentence instead
+# (4 Sep 2026). Stored explicitly so an unexplained rejection can never
+# look identical to a reason that was never written at all.
+UNCLASSIFIED_REASON = "Something else"
 
 
 def is_relevance_failure(d):
@@ -153,8 +157,14 @@ def score(decisions, names):
         # Every decision before 27 Aug 2026 carries no reason, and nothing may
         # guess one on Kevin's behalf. They stay in the total; this says how
         # much of the score is therefore unexplained.
+        # "Something else" is Kevin rejecting in his own words without saying
+        # which KIND of no it is (4 Sep 2026). It counts here exactly as a
+        # blank always did — an unknown, never a pass — or this number would
+        # read zero the day the blanks stopped without anything improving.
         unclassified = sum(1 for d in judged
-                           if d["outcome"] == "Rejected" and not d.get("reason"))
+                           if d["outcome"] == "Rejected"
+                           and (not d.get("reason")
+                                or d.get("reason") == UNCLASSIFIED_REASON))
         rows.append({
             "agent": names.get(agent_id, agent_id),
             "task_type": task_type,
