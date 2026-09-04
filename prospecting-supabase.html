@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Prospecting — Operations Director</title>
+  <!-- tokens FIRST (design system), then the app stylesheet the ported markup uses -->
+  <link rel="stylesheet" href="css/tokens.css?v=1">
+  <link rel="stylesheet" href="css/styles.css?v=23">
+  <style>
+    /* Standalone page frame (no shell around this twin) */
+    body { background: var(--bg-app); margin: 0; }
+    .prospecting-page { max-width: 1080px; margin: 0 auto; padding: 24px 20px 80px; }
+    .prospecting-page .section { background: transparent; }
+  </style>
+</head>
+<body>
+  <main class="prospecting-page">
+    <div class="section">
+      <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:6px">
+        <h2 class="section-title" style="margin-bottom:0">Prospecting</h2>
+        <span id="prospectingAgentStamp" style="font-size:var(--fs-xs);color:var(--text-muted)"></span>
+      </div>
+      <p style="color:var(--text-secondary);font-size:13px;margin-bottom:16px">The daily agent finds founder-led UK businesses posting about overload on LinkedIn, locates a website and contact email, and queues them here. Approve to sync to GoHighLevel; only Limited Companies enter the email sequence (PECR), others route to a manual track.</p>
+
+      <!-- Funnel summary cards -->
+      <div id="prospectingFunnel" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:12px;margin-bottom:24px" aria-live="polite"></div>
+
+      <!-- Review queue -->
+      <h3 style="font-size:var(--fs-md);font-weight:var(--fw-semibold);color:var(--text-primary);margin-bottom:10px">Review queue</h3>
+      <div id="prospectingQueue" aria-live="polite"></div>
+
+      <!-- Pipeline table -->
+      <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin:26px 0 10px">
+        <h3 style="font-size:var(--fs-md);font-weight:var(--fw-semibold);color:var(--text-primary);margin:0">Pipeline</h3>
+        <div id="prospectingFilterBar" style="display:flex;gap:6px;flex-wrap:wrap"></div>
+      </div>
+      <div style="overflow-x:auto">
+        <table class="invoice-table" id="prospectingTable">
+          <thead>
+            <tr>
+              <th>Prospect</th>
+              <th>Company</th>
+              <th>Entity</th>
+              <th>Email</th>
+              <th>Signal</th>
+              <th>Status</th>
+              <th>Found</th>
+            </tr>
+          </thead>
+          <tbody id="prospectingTableBody">
+            <tr><td colspan="7" class="od-empty-state">Loading prospects…</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Keyword manager -->
+      <h3 style="font-size:var(--fs-md);font-weight:var(--fw-semibold);color:var(--text-primary);margin:26px 0 10px">Search keywords</h3>
+      <p style="color:var(--text-secondary);font-size:12px;margin-bottom:10px">The agent runs the active keywords each day. Toggle off any producing weak prospects; add new pain phrases as you spot them.</p>
+      <div id="prospectingKeywords"></div>
+      <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">
+        <input type="text" id="newKeywordInput" placeholder="Add a keyword or pain phrase…" style="flex:1;min-width:220px;padding:8px 12px;border:1px solid var(--border-default);border-radius:var(--radius-md);font-size:var(--fs-sm);background:var(--bg-surface);color:var(--text-primary)" aria-label="New keyword">
+        <select id="newKeywordType" style="padding:8px 12px;border:1px solid var(--border-default);border-radius:var(--radius-md);font-size:var(--fs-sm);background:var(--bg-surface);color:var(--text-primary)" aria-label="Keyword type">
+          <option>Pain Phrase</option>
+          <option>Role Keyword</option>
+          <option>Hashtag</option>
+        </select>
+        <button id="addKeywordBtn" class="od-btn-secondary" onclick="addProspectKeyword()">Add keyword</button>
+      </div>
+    </div>
+  </main>
+
+  <!-- ── supabase-js + shim + gate. NON-deferred so window.fetch is overridden
+       before any app code runs. ────────────────────────────────────────────── -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="prospecting-shim.js?v=1"></script>
+  <script src="prospecting-boot.js?v=1"></script>
+
+  <!-- Minimal helpers the app expects from shared.js (we don't load the heavy
+       shell). Global function declarations, available to the deferred app below. -->
+  <script>
+    function escHtml(str) {
+      return String(str == null ? '' : str)
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+    }
+    function showToast(msg, opts) {
+      try {
+        const type = (opts && opts.type) || 'info';
+        const dur = (opts && opts.duration) || 3200;
+        let host = document.getElementById('sbToastHost');
+        if (!host) {
+          host = document.createElement('div'); host.id = 'sbToastHost';
+          host.style.cssText = 'position:fixed;right:16px;bottom:16px;z-index:100001;display:flex;flex-direction:column;gap:8px;font-family:"DM Sans",system-ui,sans-serif';
+          document.body.appendChild(host);
+        }
+        const bg = { success:'#2C6E49', error:'#B42318', warning:'#C6A15B', info:'#263330' }[type] || '#263330';
+        const t = document.createElement('div');
+        t.style.cssText = `background:${bg};color:#fff;padding:10px 14px;border-radius:8px;font-size:13px;box-shadow:0 6px 18px rgba(0,0,0,.2);max-width:340px`;
+        t.textContent = msg;
+        host.appendChild(t);
+        setTimeout(() => { t.style.transition = 'opacity .3s'; t.style.opacity = '0'; setTimeout(() => t.remove(), 320); }, dur);
+      } catch (e) { console.log('[toast]', msg); }
+    }
+  </script>
+
+  <!-- App scripts (classic, deferred → run in order, share global lexical scope) -->
+  <script defer src="js/ai-models.js?v=1"></script>
+  <script defer src="js/config.js?v=61"></script>
+  <script defer src="js/prospecting.js?v=10"></script>
+</body>
+</html>
