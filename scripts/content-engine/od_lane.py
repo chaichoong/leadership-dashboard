@@ -138,7 +138,7 @@ def slot_dates(monday):
 
 
 def pick_moment(bank, pillar, used, today=None, week_episodes=()):
-    """Best unused moment for a pillar: an episode not already used this week first, then highest score, then newest."""
+    """Best unused moment for a pillar from an episode NOT already used this week, highest score first, then newest."""
     today = today or dt.date.today()
     cands = []
     for rid, e in bank.items():
@@ -147,7 +147,8 @@ def pick_moment(bank, pillar, used, today=None, week_episodes=()):
         for i, m in enumerate(e.get("moments", [])):
             key = "%s#%d" % (rid, i)
             if key in used or (pillar and m.get("pillar") != pillar): continue
-            cands.append((1 if e.get("episode") in week_episodes else 0, -e.get("score", 0), -e.get("episode", 0), key, rid, m))
+            if e.get("episode") in week_episodes: continue          # one episode feeds at most one post a week (Kevin: never force the vlog)
+            cands.append((0, -e.get("score", 0), -e.get("episode", 0), key, rid, m))
     if not cands: return None
     cands.sort(key=lambda c: (c[0], c[1], c[2]))
     _, _, _, key, rid, m = cands[0]
@@ -563,6 +564,10 @@ def draft(week=None, dry_run=False):
     state = _load(STATE); bank = _load(BANK)
     monday = dt.date.fromisoformat(week) if week else week_monday()
     posts = state.setdefault("posts", {})
+    # a slot whose earlier post Kevin rejected (or that was dropped) and that never reached GHL is free again: the old entry is archived
+    for pid in [d for d in list(posts) if monday.isoformat() <= d <= (monday + dt.timedelta(days=4)).isoformat()]:
+        if posts[pid].get("verdict") in ("rejected", "dropped") and not posts[pid].get("ghl"):
+            state.setdefault("archive", []).append(posts.pop(pid)); print("od draft: %s slot freed (earlier post %s)" % (pid, state["archive"][-1].get("verdict")))
     used = {p["moment"] for p in posts.values() if p.get("moment")}
     week_eps = {p["episode"] for d, p in posts.items() if p.get("episode") and monday.isoformat() <= d <= (monday + dt.timedelta(days=4)).isoformat()}
     voice = P.voice_profile(); voice_loaded = bool(voice); made = 0
@@ -849,6 +854,7 @@ def selftest():
     today = dt.date(2026, 9, 5)
     assert pick_moment(bank, "Method", set(), today)["key"] == "r1#0" and pick_moment(bank, "Method", {"r1#0"}, today)["key"] == "r2#0" and pick_moment(bank, "Proof", set(), today) is None
     assert pick_moment(bank, None, {"r1#0", "r1#1", "r2#0"}, today) is None and pick_moment(bank, "Method", set(), today, week_episodes={1992})["key"] == "r2#0"
+    assert pick_moment(bank, "Method", set(), today, week_episodes={1992, 1979}) is None, "an episode used this week is never used twice"
     lib = "| Framework | Author / Source | Domain | What it does | Source doc |\n|---|---|---|---|---|\n| AGENT (build method) | Dan Martell | AI / Agents | Five steps to build an agent | doc |\n| Level 10 Meeting | Gino Wickman | Operations / Team | Weekly meeting structure | doc |\n| Pricing Triangle | Skok | Pricing | Value metric | doc |\n"
     rows = framework_rows(lib); assert [r["name"] for r in rows] == ["AGENT (build method)", "Level 10 Meeting"], rows
     st = {}; s1, l1 = framework_source(st, lib); assert "Dan Martell" in s1 and "credit the author" in s1; s2, _ = framework_source(st, lib); assert "Gino Wickman" in s2
