@@ -257,7 +257,7 @@ def rules_check(text, source, day, is_friday=False):
 def parse_usefulness(result):
     try:
         s = result.strip().strip("`"); s = s[s.find("{"): s.rfind("}") + 1]; d = json.loads(s)
-        return {"score": int(d.get("score", 0)), "reasons": [str(x) for x in (d.get("reasons") or [])][:4],
+        return {"score": int(d.get("score", 0)), "reasons": [str(x).replace(" — ", ", ").replace("—", ", ").replace(" – ", ", ") for x in (d.get("reasons") or [])][:4],
                 "flags": {k: bool(d.get(k)) for k in ("usable_today", "about_an_agent_doing_a_job", "has_method_or_number", "hook_names_a_cost_or_contrast")}}
     except (ValueError, AttributeError, TypeError):
         return None
@@ -544,7 +544,8 @@ def write_post(day, date, source, voice, feedback=""):
         if visual: od_infographic.build_html(shape["visual"], visual)
     except ValueError as ex:
         issues.append("picture spec unusable (%s)" % str(ex)[:60]); visual = None
-    return {"text": text, "visual": visual, "issues": issues, "hook": hook[:120], "usefulness": u, "redrafted": redrafted, "thin": u["score"] < USEFUL_MIN}
+    if u["score"] < USEFUL_MIN: issues.append("usefulness %d, under the bar of %d after a redraft" % (u["score"], USEFUL_MIN))
+    return {"text": text, "visual": visual, "issues": sorted(set(issues)), "hook": hook[:120], "usefulness": u, "redrafted": redrafted, "thin": False}
 
 
 def render_visual(p):
@@ -587,7 +588,6 @@ def draft(week=None, dry_run=False):
             print("od draft: %s %s <- %s" % (pid, day, source_line[:110])); continue
         else:
             w = write_post(day, date, source, voice); post.update(w)
-            if w["thin"]: post["source_line"] += " | usefulness stayed under %d after a redraft" % USEFUL_MIN
             render_visual(post)
             print("od draft: %s %s written, %d words, usefulness %s%s%s" % (pid, day, len(w["text"].split()), w["usefulness"]["score"], " (redrafted)" if w["redrafted"] else "",
                                                                           ("; flagged: " + "; ".join(w["issues"])) if w["issues"] else ""))
@@ -874,8 +874,8 @@ def selftest():
     t, issues = rules_check(good + " We saved 14 hours.", "saved 14 hours a week", "Mon"); assert issues == [], issues
     t, issues = rules_check(good + " It costs £350 a month. Book a call: https://x", "", "Fri", is_friday=True); assert not any("figure" in i or "ask" in i for i in issues)
     assert strip_tics("Plan it.\n\nThe reality is, a plan in memory is not a plan.") == "Plan it.\n\nA plan in memory is not a plan."
-    u = parse_usefulness('{"score": 8, "usable_today": true, "about_an_agent_doing_a_job": true, "has_method_or_number": true, "hook_names_a_cost_or_contrast": false, "reasons": ["hook is soft"]}')
-    assert u["score"] == 8 and u["flags"]["usable_today"] and u["reasons"] == ["hook is soft"] and parse_usefulness("nope") is None
+    u = parse_usefulness('{"score": 8, "usable_today": true, "about_an_agent_doing_a_job": true, "has_method_or_number": true, "hook_names_a_cost_or_contrast": false, "reasons": ["hook is soft — fix it"]}')
+    assert u["score"] == 8 and u["flags"]["usable_today"] and u["reasons"] == ["hook is soft, fix it"] and parse_usefulness("nope") is None, "no em dash reaches a card, even from the judge"
     nl = parse_newsletter("TITLE: Hand your inbox to an agent\nSHARE: This week: the inbox.\nBODY:\nPara one.\n\nPara two."); assert nl["title"].startswith("Hand") and nl["body"] == "Para one.\n\nPara two." and parse_newsletter("x") is None
     tp = parse_topics('{"topics": [{"title": "How the triage agent sorts my inbox", "angle": "a", "points": ["p1", "p2", "p3"], "number": "emails a day", "feeds": "Wed"}]}')
     assert len(tp) == 1 and tp[0]["feeds"] == "Wed" and parse_topics("bad") == []

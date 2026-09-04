@@ -504,3 +504,14 @@ Q4 Withdraw the five v1 cards now.
   about a named agent doing a real job (inbound triage, property administration, reconciliation learning loop, creditor
   agent, daily sweep, audiobook processor, Content Engine, process-to-agent, brain feeder), each with the real number to
   state where one exists.
+- **Measured on the first v2 week (4 Sep 2026).** Classifier over the 40 most recent transcripts: 1 qualifies (Episode 1992,
+  score 6, 3 moments); 39 do not. The vlog is a minor source until the recording brief changes what Kevin says on camera,
+  which is the point of the brief. Week of 7 Sep drafted: Mon from a real Indeed job advert (usefulness 7, the £254 a
+  week figure flagged because it is arithmetic on the advert's 20 hours at £12.71, not a figure in it), Tue from Episode
+  1992 (7, steps card plus carousel PDF), Wed from the Agent Dispatch register row and five merged pull requests (7,
+  redrafted once), Thu from the Audiobook Processor row as a workflow (6, redrafted once, flagged under the bar), Fri from
+  Austin Chen's 3-Tier Decision Framework (7, redrafted once, "90 of 100" flagged). Edition 1 of the newsletter: 700
+  words, one stock phrase stripped. Six cards raised; the judge's reasons are shown on each card. Fixes made on the way:
+  a rejected slot is freed for a redraft; one episode feeds at most one post a week (the first dry run put Episode 1992
+  in three slots); a low usefulness score is a flag on the card, not a THIN slot; em dashes are stripped from the judge's
+  own reasons.
