@@ -102,7 +102,7 @@ const BUILTIN_SITES = {
   // The session is SHORT: One Login expires one hour after his last
   // interaction with it, so the agent must check for a live session with
   // `read https://ewf.companieshouse.gov.uk/` right before it works, and hand
-  // back "SIGN-IN NEEDED: GOV.UK One Login" when the page is the sign-in page
+  // back "SIGN-IN NEEDED: GOV.UK One Login (one-hour window)" when it is the sign-in page
   // rather than the company list. Kevin adds each company's 6-character
   // authentication code to his own WebFiling account once; the agent picks
   // the company from the list and never handles the code.
@@ -172,7 +172,10 @@ function ledger(entry) {
 // Two independent checks, because either alone has a hole: a site can render a
 // password box as type=text, and a value can be a secret on a field that looks
 // innocent.
-const SECRET_NAME_RE = /pass(word|code)|secret|otp|2fa|mfa|cvv|card.?number|sort.?code|security.?(code|answer)|token|api.?key/i;
+// `auth` covers Companies House's company authentication code (4 Sep 2026):
+// it is the company's signature, Kevin enters it into his own WebFiling account
+// once, and an agent never types it. In code, like the rest, not in a prompt.
+const SECRET_NAME_RE = /pass(word|code)|secret|otp|2fa|mfa|cvv|card.?number|sort.?code|security.?(code|answer)|auth(entication)?.?code|token|api.?key/i;
 
 async function assertNotCredential(page, selector, value) {
   const kind = await page.$eval(selector, el => ({
@@ -273,6 +276,16 @@ async function withPage(profile, headed, fn) {
   if (!chromium) die(`playwright not found (tried: ${tried.join(', ')}). Run npm install in ${REPO}.`);
   const dir = path.join(PROFILE_ROOT, profile || 'default');
   fs.mkdirSync(dir, { recursive: true });
+  // The `login` window is a plain Chrome holding this same profile. Launching
+  // on top of it trips Chromium's profile lock with an opaque error, and the
+  // 30-minute hand-back poller can easily fire while Kevin is still signing in
+  // (4 Sep 2026). Say what is actually happening instead.
+  {
+    const { spawnSync } = require('child_process');
+    if (spawnSync('pgrep', ['-f', `user-data-dir=${dir}`]).status === 0) {
+      die(`the profile at ${dir} is open in a sign-in window. Kevin has not quit it yet (Cmd+Q); try again afterwards.`);
+    }
+  }
   // Prefer Kevin's installed Google Chrome over Playwright's bundled test build
   // (2 Sep 2026). The bundled Chromium announces itself as automated
   // (navigator.webdriver = true, "controlled by automated test software"),

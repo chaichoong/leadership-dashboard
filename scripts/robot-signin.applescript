@@ -9,7 +9,7 @@
 -- a plain Chrome window on the robot profile (mock keychain, no automation attached),
 -- exactly as the `login` command does. Sign in, Cmd+Q the window, then approve the task.
 set repo to "/Users/kevinbrittain/Projects/leadership-dashboard"
-set nodeBin to "/Users/kevinbrittain/.nvm/versions/node/v24.15.0/bin/node"
+set nodeBin to do shell script "ls -d /Users/kevinbrittain/.nvm/versions/node/*/bin/node | sort -V | tail -1"
 set cmd to quoted form of nodeBin & " " & quoted form of (repo & "/scripts/agent-browser.js") & " login --url https://signin.account.gov.uk/enter-email"
 display notification "Sign in, then Cmd+Q the Chrome window. Afterwards approve the task: the robot picks it up within 30 minutes." with title "Robot sign-in (GOV.UK One Login)"
 try
