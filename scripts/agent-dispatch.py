@@ -2931,8 +2931,14 @@ SIGNIN_DONE_MARK = "SIGNED IN:"
 def load_login_sites():
     """The allowlist as agent-browser.js sees it (builtins + sites.json),
     read through the script itself so the two never drift."""
-    import subprocess
-    node = os.environ.get("NODE_BIN") or "node"
+    import subprocess, glob, shutil
+    # launchd and AppleScript's `do shell script` have no nvm on PATH; the
+    # runners export AGENT_NODE_BIN (agent-tools.sh), and the nvm glob is the
+    # same second resort that file uses.
+    node = (os.environ.get("AGENT_NODE_BIN") or shutil.which("node")
+            or (sorted(glob.glob(os.path.expanduser("~/.nvm/versions/node/*/bin/node"))) or [None])[-1])
+    if not node:
+        raise RuntimeError("node not found: no AGENT_NODE_BIN, not on PATH, no nvm install")
     r = subprocess.run([node, os.path.join(os.path.dirname(os.path.abspath(__file__)), "agent-browser.js"), "sites"],
                        capture_output=True, text=True)
     if r.returncode != 0:
@@ -2972,7 +2978,8 @@ def signin_site_for(line_site, line_url, sites):
 def signin_waiting(sites=None):
     """Every approval-queue task blocked on a sign-in, grouped by site."""
     sites = sites if sites is not None else load_login_sites()
-    recs = query_tasks("AND({Status}='Approval', FIND('SIGN-IN NEEDED', {Agent Output}))")
+    # FIND is case-sensitive; the line is written by an agent, so match on UPPER.
+    recs = query_tasks("AND({Status}='Approval', FIND('SIGN-IN NEEDED', UPPER({Agent Output})))")
     groups = {}
     for rec in recs:
         f = rec.get("fields", {}) or {}

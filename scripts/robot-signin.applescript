@@ -82,8 +82,13 @@ on run
 end run
 
 -- A link: robotsignin://all opens every waiting site in turn; robotsignin://site/<host> opens one.
+-- "robotsignin://" is 14 characters, so the body starts at 15 (found in review).
+on bodyOf(theURL)
+	return text 15 thru -1 of theURL
+end bodyOf
+
 on open location theURL
-	set body to text 14 thru -1 of theURL -- strip "robotsignin://"
+	set body to bodyOf(theURL)
 	if body starts with "all" then
 		set waiting to waitingSites()
 		if (count of waiting) is 0 then

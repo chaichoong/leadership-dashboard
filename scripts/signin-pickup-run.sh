@@ -50,6 +50,10 @@ Everything else in the skill applies in full: the gate sits BEFORE the action; t
   --permission-mode acceptEdits \
   --allowedTools "${AGENT_ALLOWED_TOOLS[@]}" "Bash(osascript:*)" >> "$LOG" 2>&1
 RC=$?
+__TAIL=$(tail -n +$((__START_LINE + 1)) "$LOG" 2>/dev/null)
+__BAD=$(printf '%s\n' "$__TAIL" | grep -E '"error"|HTTP Error 401|401 Unauthorized|Unauthorized|OAuth access token has expired|BROKEN' || true)
 echo "===== done rc=$RC $(date) =====" >> "$LOG"
+printf '{"at":"%s","site":"%s","label":"%s","tasks":"%s","rc":%s,"errors":%s}\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$HOST" "$LABEL" "$IDS" "$RC" "$([ -n "$__BAD" ] && echo true || echo false)" >> "$LOG_DIR/runs.jsonl"
 if [ ! -f "$RUNDIR/report.json" ]; then echo "ERROR: signin-pickup produced no report.json in $RUNDIR" >&2; exit 1; fi
-[ $RC -eq 0 ] && echo "signin-pickup OK — worked: $IDS" || { echo "signin-pickup FAILED rc=$RC — see $LOG" >&2; exit 1; }
+if [ $RC -ne 0 ] || [ -n "$__BAD" ]; then printf '%s\n' "$__BAD" | head -5 >&2; echo "signin-pickup FAILED (rc=$RC, error text=$([ -n "$__BAD" ] && echo yes || echo no)) — see $LOG" >&2; exit 1; fi
+echo "signin-pickup OK — worked: $IDS"

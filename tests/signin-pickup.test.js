@@ -89,6 +89,24 @@ describe('the Robot sign-in app and its link', () => {
     expect(src).toMatch(/starts with "all"/);
     expect(src).toMatch(/starts with "site\/"/);
   });
+  it('strips the scheme prefix exactly (found in review: text 14 kept the slash), run through osascript', () => {
+    const { mkdtempSync, rmSync } = require('node:fs');
+    const { tmpdir } = require('node:os');
+    const dir = mkdtempSync(join(tmpdir(), 'od-robot-'));
+    try {
+      execFileSync('osacompile', ['-o', join(dir, 'r.scpt'), join(ROOT, 'scripts', 'robot-signin.applescript')]);
+      const out = execFileSync('osascript', ['-e',
+        `set s to (load script POSIX file "${join(dir, 'r.scpt')}")\n` +
+        `return (s's bodyOf("robotsignin://all")) & "|" & (s's bodyOf("robotsignin://site/app.pingen.com"))`],
+        { encoding: 'utf8' }).trim();
+      expect(out).toBe('all|site/app.pingen.com');
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  });
+  it('resolves node the way the runners do, never a bare "node" under launchd', () => {
+    const py = readFileSync(join(ROOT, 'scripts', 'agent-dispatch.py'), 'utf8');
+    expect(py).toMatch(/AGENT_NODE_BIN/);
+    expect(py).toMatch(/UPPER\(\{Agent Output\}\)/);
+  });
   it('opens sites one after another and wakes the pickup run through the job queue after each window closes', () => {
     expect(src).toMatch(/agent-browser\.js login --url/);
     expect(src).toMatch(/job-queue\.py run signin-pickup -- .*signin-pickup-run\.sh/);
