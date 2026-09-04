@@ -1266,8 +1266,9 @@ def informational_only(output, task_type, tier1=False):
 # pay", so on Correspondence only the explicit-Kevin forms count; "you" means
 # Kevin only in the report types, where the agent is talking to him.
 HANDBACK_KEVIN_RE = re.compile(
-    r"\bKevin\s+(?:must|need(?:s)?\s+to|should|will\s+need\s+to|ha(?:s|ve)\s+to)\s+"
+    r"\bKevin\s+(?:must|need(?:s)?\s+to|should|will\s+(?:need|have)\s+to|ha(?:s|ve)\s+to|to)\s+"
     r"(?:manually\s+)?(?:log\s*in(?:to)?|sign\s*in(?:to)?|login|call|phone|ring)\b"
+    r"|\bneeds\s+Kevin\s+to\s+(?:manually\s+)?(?:log|sign)\s*in(?:to)?\b"
     r"|\bKevin\s*[,:\-–—]+\s*(?:please\s+)?(?:manually\s+)?(?:log|sign)\s*in(?:to)?\b"
     r"|\b(?:next\s+step|action|to[- ]do)\s+for\s+Kevin\s*[:\-–—]\s*(?:please\s+)?(?:log|sign)\s*in(?:to)?\b"
     r"|\bKEVIN\s+ACTION\s*:\s*(?:please\s+)?(?:log|sign|call|phone|ring)\b",

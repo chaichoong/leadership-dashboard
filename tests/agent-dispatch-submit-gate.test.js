@@ -468,6 +468,9 @@ describe('hand-backs are refused at submit (4 Sep 2026)', () => {
     'Kevin needs to ring HMRC on 0300 200 3310.',
     'Kevin, please sign into the HMRC portal to submit this.',
     "You'll need to log in to the EDF account and confirm the meter reading.",
+    'Kevin will have to log in himself to finish this.',
+    'It needs Kevin to sign in to Xero to complete the payment.',
+    'Kevin to log into Stripe and upload ID.',
   ])('refuses the phrasings the second review found: %s', (line) => {
     const r = submit({ type: 'Research', output: report + line + '\n\n' + CARRY });
     expect(r.refused).toBe(true);
