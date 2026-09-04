@@ -15,7 +15,7 @@ describe('content-engine render', () => {
   it('passes its own selftest (folder naming, output names, banner title, record fields)', () => {
     const out = JSON.parse(execFileSync('python3', [RENDER, 'selftest'], { encoding: 'utf8', cwd: DIR }));
     expect(out.failed).toEqual([]);
-    expect(out.checks).toBeGreaterThanOrEqual(25);
+    expect(out.checks).toBeGreaterThanOrEqual(34);
   });
 
   it("inserts Ericamae's 8 second branded intro after the sign-off line (her app's rule) and makes the podcast audio", () => {
@@ -23,7 +23,7 @@ describe('content-engine render', () => {
     expect(src).toContain('INTRO_CLIP = os.path.join(EDITED_ROOT, "Vlog Intro", "runprenuer-intro_clip.mp4")');
     expect(src).toContain('def intro_insert_seconds(segments');
     expect(src).toContain('insert_intro(captioned, at, paths["full"])');
-    expect(src).toContain('paths["podcast"] = podcast_audio(paths["full"]');
+    expect(src).toContain('paths["podcast"] = podcast_audio(captioned');
     expect(src).toMatch(/keep on \(\?:watching\|listening\)/);
   });
 
@@ -33,6 +33,18 @@ describe('content-engine render', () => {
     const raw = w.indexOf('FIND("%s", {Raw File Link}), {Content Type}="Long Form Video"');
     expect(name).toBeGreaterThan(-1);
     expect(raw).toBeGreaterThan(name);
+  });
+
+  it("applies Kevin's 4 Sep 2026 feedback: jingle at the real pause, first second of the jingle cut, diary phrase heard loosely, no stale Learnings link, podcast without the jingle", () => {
+    const src = readFileSync(RENDER, 'utf8');
+    expect(src).toContain('INTRO_TRIM_START = 1.0');
+    expect(src).toContain('CUT_THRESHOLDS_DB = (-35, -30, -25, -20)');
+    expect(src).toContain('at, resume = find_pause(masters["16:9"], segs, intro_insert_seconds(segs))');
+    expect(src).toContain('clip_caption_at(open(caps).read(), at)');
+    expect(src).toMatch(/learn\\w\*\\s\+\(\?:from\|for\|of\|through\|in\|to\)/);
+    expect(src).toContain('elif role == "episode": fields["Reframed Video URL"] = None');
+    expect(src).toContain('paths["podcast"] = podcast_audio(captioned, os.path.join(workdir, names["podcast"]), at, resume)');
+    expect(src).toContain('"--subtitle", title.replace("|", " ").strip()');
   });
 
   it('never writes copy from an empty transcript: under 50 characters of speech is B-roll', () => {
@@ -51,7 +63,7 @@ describe('content-engine render', () => {
 
   it("builds the LFMD from the 'Learnings from my diary' section, and the Summary from the teaser clip (Kevin, 3 Sep 2026)", () => {
     const src = readFileSync(RENDER, 'utf8');
-    expect(src).toMatch(/LFMD_START_RE = re\.compile\(r"learnings\?\\s\+\(\?:from\|for\|of\)/);
+    expect(src).toMatch(/LFMD_START_RE = re\.compile\(r"learn\\w\*\\s\+\(\?:from\|for\|of\|through\|in\|to\)/);
     expect(src).toContain('def lfmd_window(segments');
     expect(src).toContain('TEASER_MAX_SECONDS = 150');
     expect(src).toContain('if role == "teaser":');
