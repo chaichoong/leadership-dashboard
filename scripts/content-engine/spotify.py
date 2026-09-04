@@ -3,8 +3,9 @@
 
 Spotify for Creators has no upload API, and Ericamae uploaded by hand (SOP: podcast). Her last
 episodes were VIDEO episodes of the full vlog (the episodes list shows Format: Video, 7-9 min).
-Kevin (4 Sep 2026) expected an audio podcast, so the engine uploads the AUDIO file (the episode's
-sound without the jingle, Ep<N>_Podcast.mp3); PODCAST_FORMAT flips it back to video if he prefers. Kevin logged the
+Kevin (5 Sep 2026) chose to keep it VIDEO: the identical full episode file YouTube gets, jingle
+included, because Spotify plays a video episode as video or as audio and Premium listeners can
+download it. PODCAST_FORMAT = "audio" would upload Ep<N>_Podcast.mp3 instead. Kevin logged the
 lane's `spotify` profile in once (3 Sep 2026); this script writes the plan that
 `scripts/agent-browser.js` executes: `prepare` uploads the file and fills the details, then
 screenshots; `commit` presses Publish only when the episode's approval task reads Approved
@@ -18,7 +19,7 @@ selectors for Details are confirmed on the first real episode and pinned here.
 import argparse, json, os, re, sys
 HERE = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, HERE)
 
-PODCAST_FORMAT = "audio"          # "audio" (Ep<N>_Podcast.mp3, no jingle) or "video" (the full episode MP4)
+PODCAST_FORMAT = "video"          # Kevin, 5 Sep 2026: the same full episode YouTube gets, jingle and all; Spotify plays it as video or audio
 SHOW_ID = "6hL5SLvsU1VDMHVaWZZ3tO"          # Runpreneur podcast (from the wizard URL, 3 Sep 2026)
 WIZARD = "https://creators.spotify.com/pod/show/%s/episode/wizard" % SHOW_ID
 PROFILE = "spotify"
