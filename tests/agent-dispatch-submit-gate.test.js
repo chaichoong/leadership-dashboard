@@ -404,6 +404,12 @@ describe('informational outputs are filed, not queued (4 Sep 2026)', () => {
     'No decision needed — the licence renews automatically with the council.',
     'Nothing from me — Kevin will call the bank himself.',
     'Kevin reads the briefing.',
+    'Nothing further from me as the notice reaches the tenant tomorrow',
+    'None required because the payment leaves the account on Friday',
+    'No action needed as the eviction proceeds',
+    'Nothing to do now the letter goes out by first class post',
+    'Nothing required as Roy arranges the inspection',
+    'N/A now the contractor is booked for Tuesday',
   ])('anything else stays on the gate or is refused, never closed as done: %s', (tail) => {
     const r = submit({ type: 'Analysis', output: report + CARRY + tail });
     if (r.refused) expect(r.error).toMatch(/refusing to submit/);
@@ -413,6 +419,18 @@ describe('informational outputs are filed, not queued (4 Sep 2026)', () => {
   it('a NO ACTION REQUIRED heading does not override a closing line that names an action', () => {
     const r = submit({ type: 'Admin', output: 'NO ACTION REQUIRED\n' + report + CARRY + 'Sending the notice to the council.' });
     expect(r.captured.fields ? r.captured.fields[r.fieldMap.status] : '').not.toBe('Completed');
+  });
+  it.each([
+    'NO ACTION REQUIRED\n\nThe boiler service was booked and completed by the contractor yesterday without incident.',
+    'NO ACTION REQUIRED\n\nThe eviction notice was already served on the tenant this morning as scheduled.',
+  ])('a short output with the heading but no closing line is never filed', (output) => {
+    const r = submit({ type: 'Admin', output });
+    expect(r.captured.fields ? r.captured.fields[r.fieldMap.status] : '').not.toBe('Completed');
+  });
+  it('a tier-1 report is never filed: the banner promises Kevin reads it before anything', () => {
+    const r = submit({ type: 'Analysis', tier1: true, output: report + CARRY + 'Nothing. Information only.' });
+    expect(r.refused).toBe(false);
+    expect(r.captured.fields[r.fieldMap.status]).toBe('Approval');
   });
   it('a Correspondence output is never filed on that rule (its own send-format check decides)', () => {
     const r = submit({ type: 'Correspondence', output: report + CARRY + 'Nothing.' });

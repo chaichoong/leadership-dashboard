@@ -1199,20 +1199,20 @@ NO_ACTION_LEAD_RE = re.compile(
     r"^\W*(?:nothing|none|n/?a|no\s+(?:further\s+)?action(?:\s+(?:is\s+)?(?:needed|required))?)\b",
     re.I,
 )
-# A second clause after the opening word means something happens after all.
-CLAUSE_BREAK_RE = re.compile(
-    r"[;:—–]|\s-\s|\b(?:then|until|unless|once|after|when|but|so|and\s+(?:then|I|we|Roy|Kevin|the))\b",
-    re.I,
-)
-# Even a single clause can hide a verb; a short net for the obvious ones.
-ACTION_VERB_RE = re.compile(
-    r"\b(?:send(?:s|ing)?|sent|email(?:s|ing|ed)?|post(?:s|ing|ed)?|mail(?:s|ing)?|"
-    r"pay(?:s|ing)?|paid|submit(?:s|ted|ting)?|book(?:s|ed|ing)?|call(?:s|ed|ing)?|"
-    r"phone(?:s|d)?|contact(?:s|ed|ing)?|repl(?:y|ies|ied|ying)|respond(?:s|ed|ing)?|"
-    r"chase(?:s|d)?|instruct(?:s|ed|ing)?|upload(?:s|ed|ing)?|register(?:s|ed|ing)?|"
-    r"cancel(?:s|led|ling)?|reverse(?:s|d)?|transfer(?:s|red|ring)?|lodge(?:s|d)?|"
-    r"goes|go|will|takes?|collects?|renews?|moves?|writ(?:e|es|ing)|sign(?:s|ed|ing)?|"
-    r"creat(?:e|es|ing)|issue(?:s|d)?|arrange(?:s|d)?|order(?:s|ed)?|deliver(?:s|ed)?)\b",
+# WHITELIST, not blacklist (third review, same day): after the opening word
+# only a fixed set of informational phrases may follow. Every blacklist tried
+# was written around ("as the eviction proceeds", "because the payment leaves
+# the account on Friday"). A closed form cannot be: one extra word and the
+# line is not declared, so the task goes to Kevin as it always did.
+INFO_PHRASE_RE = re.compile(
+    r"^(?:[\s.,!:;()-]*(?:(?:this|it|the\s+(?:report|briefing|summary|above))\s+is\s+)?"
+    r"(?:for\s+(?:your\s+)?information(?:\s+only)?|information\s+only|reference\s+only|"
+    r"a\s+(?:briefing|report|summary|status\s+update)|"
+    r"no\s+decision\s+(?:is\s+)?(?:needed|required)(?:\s+here)?|"
+    r"nothing\s+(?:is\s+)?(?:needed|required)|no\s+action\s+(?:is\s+)?(?:needed|required)|"
+    r"(?:is\s+)?needed|(?:is\s+)?required|from\s+(?:me|you|Kevin)|"
+    r"to\s+(?:do|approve|decide|carry\s+out)|(?:at\s+)?this\s+stage|for\s+now|here|today))*"
+    r"[\s.,!:;()-]*$",
     re.I,
 )
 NO_ACTION_HEAD_RE = re.compile(r"^\W*(?:NO ACTION (?:REQUIRED|NEEDED)|BRIEFING|FOR INFORMATION)\b", re.I)
@@ -1227,27 +1227,29 @@ def carry_out_tail(output):
 
 def no_action_declared(tail):
     """True only for the declared form: opens with Nothing/None/No action and
-    nothing with a verb or a second clause follows."""
+    what follows, if anything, is drawn from INFO_PHRASE_RE alone."""
     tail = (tail or "").strip()
     m = NO_ACTION_LEAD_RE.match(tail)
     if not m or len(tail) > NO_ACTION_TAIL_MAX:
         return False
-    rest = tail[m.end():]
-    return not CLAUSE_BREAK_RE.search(rest) and not ACTION_VERB_RE.search(rest)
+    return bool(INFO_PHRASE_RE.match(tail[m.end():]))
 
 
-def informational_only(output, task_type):
+def informational_only(output, task_type, tier1=False):
     """True when this submission would ask Kevin to approve nothing.
 
     Never for Correspondence: an email whose closing line says "nothing" is a
     broken email, and the send-format check downstream is the right refusal.
+    Never for tier 1: the banner promises he reads it before anything, and a
+    private legal or financial matter is his to see even when nothing moves.
+    A closing line is always required: the heading alone declares nothing,
+    and short outputs skip the closing-line check upstream.
     """
-    if task_type == "Correspondence":
+    if task_type == "Correspondence" or tier1 or TIER1_BANNER in (output or ""):
         return False
-    body = (output or "").replace(TIER1_BANNER, "", 1).strip()
-    tail = carry_out_tail(body)
-    if NO_ACTION_HEAD_RE.match(body):
-        return not tail or no_action_declared(tail)
+    tail = carry_out_tail((output or "").strip())
+    if not tail:
+        return False
     return no_action_declared(tail)
 
 
@@ -2204,7 +2206,7 @@ def cmd_submit(args):
     for path in to_attach:
         upload_attachment(args.task, path)
 
-    if informational_only(output, args.type):
+    if informational_only(output, args.type, tier1=bool(getattr(args, "tier1", False))):
         stamp = datetime.now(LONDON).strftime("%d %b %Y %H:%M")
         note = (f"[{stamp} — agent-dispatch] FILED, not queued: the closing line "
                 f"says nothing happens on approval, so there is no decision here "
