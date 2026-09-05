@@ -144,29 +144,13 @@ def build_merge_result(pr, base="origin/main"):
     # rather than install: 90 seconds of npm ci per gate run is how a gate
     # becomes something people skip.
     link = os.path.join(path, "node_modules")
-    if not deps_resolve(path) and not os.path.exists(link):
+    if not os.path.exists(link):
         try:
             os.symlink(os.path.join(REPO, "node_modules"), link)
         except OSError as e:
             destroy_merge_result(path)
             return None, "cannot link node_modules: %s" % e
     return path, None
-
-
-def deps_resolve(cwd):
-    """Do the two suites actually resolve from here? node walks UP from cwd, so a
-    worktree inside the repo can borrow the main checkout's node_modules — and a
-    node_modules directory holding only a .vite cache passes os.path.exists while
-    resolving nothing (finding 20260904-queue-fixer-452)."""
-    d = os.path.abspath(cwd)
-    while True:
-        b = os.path.join(d, "node_modules", ".bin")
-        if os.path.exists(os.path.join(b, "vitest")) and os.path.exists(os.path.join(b, "playwright")):
-            return True
-        parent = os.path.dirname(d)
-        if parent == d:
-            return False
-        d = parent
 
 
 def destroy_merge_result(path):
@@ -182,17 +166,8 @@ def destroy_merge_result(path):
 
 def run_gate(cwd):
     """Both halves, against the MERGE RESULT. A green vitest with a red browser
-    suite is not green, and neither is a green run of the wrong tree.
-
-    Returns (ok, out). `ok` is None for CANNOT RUN, which is not the same verdict
-    as False: a missing dependency says nothing about the change, and a false red
-    on the gate is what teaches people to bypass it (5 Sep 2026)."""
+    suite is not green, and neither is a green run of the wrong tree."""
     out = {"testedTree": cwd}
-    if not deps_resolve(cwd):
-        out["cannotRun"] = ("gate could not run: node_modules resolves neither "
-                            "vitest nor playwright from %s. This is NOT a red on "
-                            "the change. Install or link dependencies and re-run." % cwd)
-        return None, out
     v = sh(["npx", "vitest", "run"], cwd=cwd)
     out["vitest"] = {"ok": v.returncode == 0,
                      "tail": (v.stdout or v.stderr or "").strip()[-400:]}
@@ -239,12 +214,6 @@ def cmd_merge(args):
         ok, gate = run_gate(tree)
     finally:
         destroy_merge_result(tree)
-    if ok is None:
-        print(json.dumps({**d, "merged": False, "gate": gate,
-                          "why": "the gate COULD NOT RUN — left open, nothing "
-                                 "merged, and this is not a verdict on the change"},
-                         indent=2))
-        return 0
     if not ok:
         print(json.dumps({**d, "merged": False, "gate": gate,
                           "why": "the gate is RED — left open, nothing merged"},
