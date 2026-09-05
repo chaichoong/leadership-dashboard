@@ -78,6 +78,12 @@ describe('content-engine watch: nightly wiring', () => {
     expect(w).toContain('stale = repair_stale_pulls(ledger)');
   });
 
+  it('retries an Airtable call through a DNS blip, never through a real Airtable error (5 Sep 2026)', () => {
+    const w = readFileSync(path.join(ROOT, 'scripts', 'content-engine', 'watch.py'), 'utf8');
+    expect(w).toContain('AIRTABLE_RETRIES, AIRTABLE_RETRY_SECONDS = 6, 30');
+    expect(w).toContain('except urllib.error.HTTPError:\n            raise');
+  });
+
   it('is described on the Automations list (deterministic job, not a register agent)', () => {
     const auto = readFileSync(path.join(ROOT, 'js', 'automations-data.js'), 'utf8');
     expect(auto).toMatch(/key: 'content-engine'/);

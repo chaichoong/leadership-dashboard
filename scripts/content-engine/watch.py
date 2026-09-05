@@ -144,12 +144,23 @@ def save_ledger(ledger):
     os.replace(tmp, LEDGER)          # atomic: a reader never sees a half-written ledger
 
 
-def _airtable(method, url, body=None):
+AIRTABLE_RETRIES, AIRTABLE_RETRY_SECONDS = 6, 30   # a DNS blip on this Mac lasts a minute or two (5 Sep 2026: it cost a finished render its record)
+
+
+def _airtable(method, url, body=None, _sleep=time.sleep):
     pat = open(PAT_FILE).read().strip()
     req = urllib.request.Request(url, data=json.dumps(body).encode() if body else None, method=method,
                                  headers={"Authorization": "Bearer " + pat, "Content-Type": "application/json"})
-    with urllib.request.urlopen(req, timeout=60) as r:
-        return json.load(r)
+    for attempt in range(AIRTABLE_RETRIES):
+        try:
+            with urllib.request.urlopen(req, timeout=60) as r:
+                return json.load(r)
+        except urllib.error.HTTPError:
+            raise                                                   # a real answer from Airtable: never retried
+        except (urllib.error.URLError, OSError) as ex:              # DNS, socket, timeout: the network, not the request
+            if attempt == AIRTABLE_RETRIES - 1: raise
+            print("airtable: %s (%s); retry %d/%d in %ds" % (method, str(ex)[:80], attempt + 1, AIRTABLE_RETRIES - 1, AIRTABLE_RETRY_SECONDS), file=sys.stderr)
+            _sleep(AIRTABLE_RETRY_SECONDS)
 
 
 def find_record(file_id, day):
@@ -349,7 +360,25 @@ def _selftest_repair_stale():
     shutil.rmtree(work)
 
 
+def _selftest_airtable_retry():
+    calls = {"n": 0}; naps = []
+    real = urllib.request.urlopen
+    def flaky(req, timeout=60):
+        calls["n"] += 1
+        if calls["n"] < 3: raise urllib.error.URLError("nodename nor servname provided")
+        import io
+        class R(io.BytesIO):
+            def __enter__(self): return self
+            def __exit__(self, *a): pass
+        return R(b'{"ok": true}')
+    urllib.request.urlopen = flaky
+    try: out = _airtable("GET", "https://api.airtable.com/v0/x/y", _sleep=naps.append)
+    finally: urllib.request.urlopen = real
+    assert out == {"ok": True} and calls["n"] == 3 and naps == [AIRTABLE_RETRY_SECONDS, AIRTABLE_RETRY_SECONDS], "two DNS failures, then the answer"
+
+
 def selftest():
+    _selftest_airtable_retry()
     _selftest_repair_stale()
     _selftest_copy_retry()
     assert parse_clip("VID_20260704_105737_00_064.insv") == (dt.date(2026, 7, 4), "105737", 64)
