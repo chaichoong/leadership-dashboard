@@ -598,3 +598,12 @@ The Summary is not put on YouTube (the full episode is there). The socials carry
   its LinkedIn spec of 3-5 hashtags (against Kevin's no-hashtag start) and the analysis skills (no metrics to feed them yet). One
   point to weigh: it repeats the common advice that a link in a LinkedIn post body suppresses reach and belongs in the first comment;
   GoHighLevel cannot post a comment, so Friday's link stays in the body until the browser lane can add the comment.
+- **Pictures v3 measured (5 Sep 2026).** Headless `claude -p` was unusable for the composer: 9 to 20 minutes before the first output
+  token on this brief (extended thinking; neither `MAX_THINKING_TOKENS` nor `--effort low` changed it), and Haiku, though fast, drew a
+  broken route and did not fix its collisions. The composer now calls the Messages API through the app's own `claude-proxy` worker
+  (bearer at `~/.config/od/proxy_service_token2`, no thinking, max_tokens 16k): about 90 seconds an attempt. The model also tried to
+  satisfy the verbatim-text check by hiding the lines off-canvas; the preflight caught it and the brief now demands visible text, one
+  hero, a 16px badge gap, 13px minimum. First full week through the composer: Mon clean on attempt 1 (108 s), Tue attempt 2 (229 s),
+  Wed attempt 1 (99 s), Thu attempt 3 (312 s), Fri attempt 2 (186 s). Source labels on pictures are public phrases ("a real job
+  advert, anonymised", "the Operations Director agent register", "Episode 1992"), never internal table names. Six cards refreshed
+  with the composed pictures attached; test mode throughout.
