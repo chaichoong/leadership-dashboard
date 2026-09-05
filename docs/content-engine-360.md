@@ -577,3 +577,24 @@ The Summary is not put on YouTube (the full episode is there). The socials carry
   with each later edition going deeper on one area. `NEWSLETTER_SERIES` (eight themes) and `EDITION1_BRIEF` in the prompts; the
   website's own three-step and eight-stage method plus the Live/Built register rows are the edition's source material; 900-1,200 words
   for edition 1.
+- **Pictures, version 3: the Epic Infographics method (Kevin, 4 Sep 2026, "go with one").** After the Gemini pictures Kevin pointed
+  at OrRon/EpicInfographics (390 stars, MIT): not an image model but a METHOD, a self-contained HTML/CSS+SVG page in one fully
+  specified design language, a mechanical preflight (`check.mjs` measures every glyph for collisions, clipping, size, canvas
+  overflow) and a Playwright render (`render.mjs`). Text is typed, so it cannot be misspelt. The skill's files (SKILL.md,
+  references, scripts, templates, licence) are vendored at `scripts/content-engine/epic/`, no examples, no node_modules: its scripts
+  resolve `playwright` from the repo. Kevin chose option 1, one house language: `references/design-languages/operations-director.md`
+  written in the skill's own template from `css/tokens.css` (sage board paper, forest route with numbered stations, ONE gold owner
+  stop, the agent mark drawn in SVG, placards, a title strip with the logo, DM Sans + DM Mono, no person's name). `od_compose.py`
+  builds the composer prompt (the method's build and review rules, composition, drawing method, skeleton, the language), asks the
+  standard model for the page, checks that every required line is in the page text verbatim, runs the preflight, feeds the report
+  back for up to two repairs, renders 1080x1350 at 2x. `od_lane.render_visual` now tries the composer first, Gemini second, the
+  template last, and the card names the route. First hand-composed trial (Tuesday's post, blueprint language) passed preflight clean
+  and is kept in the session scratch as the reference for what the method produces. The full reference pack pushed one automated call
+  past ten minutes, so the composer's pack is trimmed and the call allowed 25 minutes.
+- **blacktwist/social-media-skills reviewed (4 Sep 2026, Kevin's link).** Fourteen prompt-only skills (no code beyond a validator),
+  MIT, built around a "BlackTwist" publishing MCP we do not use. Harvested into `od_prompts.OD_SYSTEM`: the hook pattern library
+  (contrarian, statistic, list preview, story opener, empathy, bold claim; questions excluded by our rule). Worth a later look: the
+  carousel structure (cover, context, one point per slide, closing CTA) for the Tuesday PDF, and the repurposing matrix. Not adopted:
+  its LinkedIn spec of 3-5 hashtags (against Kevin's no-hashtag start) and the analysis skills (no metrics to feed them yet). One
+  point to weigh: it repeats the common advice that a link in a LinkedIn post body suppresses reach and belongs in the first comment;
+  GoHighLevel cannot post a comment, so Friday's link stays in the body until the browser lane can add the comment.

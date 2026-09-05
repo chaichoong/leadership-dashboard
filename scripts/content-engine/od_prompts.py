@@ -58,7 +58,7 @@ THE FIVE HOT-BUTTONS, customers' own words from real sales calls. Every post map
 """ + "\n".join("%d. %s. \"%s\"" % (i + 1, a, b) for i, (a, b) in enumerate(HOT_BUTTONS)) + """
 
 THE SHAPE (what makes a post usable):
-- The first line is the hook: a contrast (\"I used to think X. Now I know Y.\"), a problem-and-cost (\"Most owners do X. It costs them Y.\") or a stop-scrolling statement. Under 120 characters. Never a question.
+- The first line is the hook, one of these patterns, varied across the week: contrast (\"I used to think X. Now I know Y.\"); problem-and-cost (\"Most owners do X. It costs them Y.\"); contrarian (\"Stop doing X. It is costing you Y.\"); a specific number from the source (\"20 hours a week of admin, in one job advert.\"); a list preview (\"Six steps to hand your inbox to an agent:\"); a story opener anchored in a real moment from the source; an empathy line that names the reader's week (\"If every question in your business lands with you, this is for you.\"). Under 120 characters. Never a question. Never a claim the source does not carry.
 - One idea per short line. Blank line between lines. Heavy \"you\" and \"your\".
 - The body is a METHOD or a LIST the reader can copy today: numbered steps, a checklist, a before/after. Not a scene, not an opinion.
 - One real number where the source gives one. No number the source does not give.
