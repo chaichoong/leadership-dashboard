@@ -20,6 +20,7 @@ LANGUAGE = os.path.join(REFS, "design-languages", "operations-director.md")
 W, H = 1080, 1350
 MODEL = "sonnet"            # AI model spend rule: standard tier; escalate by hand if compositions keep failing preflight
 REPAIRS = 2
+THINKING = 1024              # thinking budget for the composer: the default budget spent ~9 minutes before the first line (5 Sep 2026)
 
 SHAPE_TO_FORM = {
     "steps": "a numbered route with stations (Step flow on the route; the human check, if named in the steps, is the gold owner stop)",
@@ -55,14 +56,18 @@ def system_prompt():
     composition and illustration references, the skeleton, and the design language last. The full pack (charts, data vocabulary,
     motion) pushed one call past ten minutes on 4 Sep 2026."""
     skill = _read(os.path.join(EPIC, "SKILL.md"))
-    core = _section(skill, "### 7. Choose data representations", "### 12. Animate") + "\n" + _section(skill, "## Hard rules")
+    # steps 9-11 tell an agent to run the checker, render and look at the PNG: with tools switched off the headless call tried to and hung
+    # (two 25-minute stalls, 4-5 Sep 2026), so the composer gets steps 7-8 and the hard rules only; this script runs 9-10 for it.
+    core = _section(skill, "### 7. Choose data representations", "### 9. Preflight") + "\n" + _section(skill, "## Hard rules")
+    core = "\n".join(l for l in core.splitlines() if not re.search(r"check\.mjs|render\.mjs|animate\.mjs|run it", l))
     comp = _read(os.path.join(REFS, "composition.md"))
     illus = _section(_read(os.path.join(REFS, "illustration-and-texture.md")), "# Illustration", "## Texture & finish")
     skeleton = _read(os.path.join(EPIC, "templates", "skeleton.html"))
     lang = _read(LANGUAGE)
-    return ("You are producing ONE infographic as a single self-contained HTML file, following the Epic Infographics method below exactly. You are running unattended: "
-            "do not ask questions, do not offer options, do not pitch angles; take the brief and produce the file in one pass. Keep the page lean: one canvas div, inline SVG for the "
-            "drawing, no more than about 250 lines. Output ONLY the HTML document, starting with <!doctype html>, no commentary, no markdown fences.\n\n=== The method (from SKILL.md) ===\n" + core +
+    return ("You are producing ONE infographic as a single self-contained HTML file, following the Epic Infographics method below exactly. You are running unattended and you have NO tools: "
+            "do not run commands, do not read or write files, do not ask questions, do not offer options, do not pitch angles. The preflight check and the render are run for you after you answer. "
+            "Take the brief and write the file in one pass. Keep the page lean: one canvas div, inline SVG for the drawing, no more than about 250 lines. "
+            "Output ONLY the HTML document, starting with <!doctype html>, no commentary, no markdown fences.\n\n=== The method (from SKILL.md) ===\n" + core +
             "\n\n=== composition.md ===\n" + comp + "\n\n=== illustration-and-texture.md (drawing method) ===\n" + illus +
             "\n\n=== templates/skeleton.html ===\n" + skeleton + "\n\n=== THE DESIGN LANGUAGE TO USE, AND THE ONLY ONE: operations-director.md ===\n" + lang)
 
@@ -76,11 +81,19 @@ def user_prompt(template, spec, post_text, shape_name, day, source_line, feedbac
             "THE POST THIS PICTURE ACCOMPANIES (the picture repeats its method or number; it never adds a fact):\n%s\n\n"
             "TEXT THAT MUST APPEAR ON THE PICTURE, EXACTLY THESE WORDS (UK English, sentence case as given), and nothing beyond them except the design language's own chrome "
             "(kicker, station numbers, mono labels such as STATION 01, OWNER APPROVES, the source line, the title strip):\n%s\n\n"
-            "SOURCE LINE for the title strip: %s\n\n"
+            "SOURCE LINE for the title strip, exactly this and nothing more: %s\n\n"
             "HARD RULES: no person's name anywhere; the brand is Operations Director with its logo in the title strip (copy the inline SVG from the design language). No emoji. No invented numbers. "
             "Mark exactly one element data-hero. Every string above must be present in the page text verbatim (the checker compares). Fonts via the Google Fonts link in the design language only.%s"
-            % (W, H, shape_name, day, SHAPE_TO_FORM.get(template, "the route"), post_text, "\n".join("- " + l for l in req), source_line,
+            % (W, H, shape_name, day, SHAPE_TO_FORM.get(template, "the route"), post_text, "\n".join("- " + l for l in req), picture_source(source_line),
                ("\n\nTHE PREVIOUS ATTEMPT FAILED PREFLIGHT. Fix exactly these and change nothing else that works:\n" + feedback) if feedback else ""))
+
+
+def picture_source(source_line):
+    """The source as it may appear ON a picture: the where, never Kevin's name, never a verbatim quote, never a running word."""
+    s = (source_line or "").split(":")[0]
+    s = re.sub(r"Kevin's own words on camera|Kevin's|Kevin|,?\s*verbatim|the run diary|run diary", "", s, flags=re.I)
+    s = re.sub(r"\s+", " ", s).strip(" ,.")
+    return s[:80] or "Operations Director"
 
 
 def strip_html_text(page):
@@ -128,7 +141,7 @@ def compose(template, spec, post_text, shape_name, day, source_line, out_png, ke
     system = system_prompt(); feedback = ""; html_path = keep_html or (out_png[:-4] + ".html")
     for attempt in range(1, REPAIRS + 2):
         env_model = model or MODEL
-        out, usage, cost = pc.ask_claude_model(system, user_prompt(template, spec, post_text, shape_name, day, source_line, feedback), env_model, timeout=1500)
+        out, usage, cost = pc.ask_claude_model(system, user_prompt(template, spec, post_text, shape_name, day, source_line, feedback), env_model, timeout=1200, thinking=THINKING, no_mcp=True)
         page = extract_html(out)
         if "<!doctype html" not in page.lower(): return None, "composer returned no HTML on attempt %d" % attempt, None
         with open(html_path, "w") as fh: fh.write(page)
@@ -149,6 +162,7 @@ def selftest():
     assert os.path.exists(LANGUAGE) and os.path.exists(os.path.join(EPIC, "scripts", "check.mjs")) and os.path.exists(os.path.join(EPIC, "scripts", "render.mjs"))
     lang = _read(LANGUAGE); assert "#2C6E49" in lang and "DM Sans" in lang and "No person" in lang.replace("no person", "No person") and "Runpreneur" in lang
     sp = system_prompt(); assert "operations-director.md" in sp and "Rule zero" in sp and "data-hero" in sp and "Hard rules" in sp and len(sp) < 60000, len(sp)
+    assert "check.mjs" not in sp.split("=== composition.md ===")[0] and "Review your own PNG" not in sp, "the composer must never be told to run tools"
     spec = {"title": "Turn your SOP into an agent", "steps": ["Pick one task", "Write the SOP"]}
     up = user_prompt("steps", spec, "post body", "The method", "Tue", "Episode 1992")
     assert "- Turn your SOP into an agent" in up and "- Write the SOP" in up and "1080x1350" in up and "no person's name" in up and "data-hero" in up
@@ -157,12 +171,15 @@ def selftest():
     assert missing_lines(page, required_lines("steps", spec)) == [] and missing_lines(page, ["Not there"]) == ["Not there"]
     assert extract_html("```html\n<!doctype html><p>x</p>\n```").startswith("<!doctype html") and extract_html("Sure! <!DOCTYPE html><p>").lower().startswith("<!doctype html")
     assert required_lines("stat", {"title": "", "number": "30 min", "label": "checks", "source": "s"}) == ["30 min", "checks"]
+    assert picture_source("Episode 1992, Kevin's own words on camera: \"you've now got the ability\"") == "Episode 1992"
+    assert picture_source("Build log: agent \"Agent Dispatch\" (register, Status Live) and 5 merged pull requests") == "Build log"
+    assert "Kevin" not in user_prompt("steps", spec, "p", "s", "Tue", "Episode 1992, Kevin's own words on camera: \"q\"").split("SOURCE LINE")[1].split("\n")[0]
     # the vendored checker runs on the repo's Playwright: a deliberately clipped page must report an error
     with tempfile.NamedTemporaryFile("w", suffix=".html", delete=False) as fh:
         fh.write("<!doctype html><html><body style='margin:0'><div style='width:1080px;height:1350px;overflow:hidden;position:relative'><p style='position:absolute;left:1060px;top:10px;font-size:20px;white-space:nowrap'>this text is clipped</p><p style='font-size:20px' data-hero>hero</p></div></body></html>"); bad = fh.name
     n, errors, warnings, report = run_check(bad); os.remove(bad)
     assert n >= 1, report[-300:]
-    print(json.dumps({"checks": 9, "failed": []}))
+    print(json.dumps({"checks": 12, "failed": []}))
 
 
 if __name__ == "__main__":
@@ -170,5 +187,5 @@ if __name__ == "__main__":
         st = json.load(open(os.path.expanduser("~/knowledge-os/logs/content-engine/od-lane.json")))
         p = st["posts"][sys.argv[2]]; tpl = P.SHAPES[p["day"]]["visual"]
         out = sys.argv[3] if len(sys.argv) > 3 else "compose-trial.png"
-        print(compose(tpl, p["visual"], p["text"], p["shape"], p["day"], p.get("source_line", ""), out))
+        print(compose(tpl, p["visual"], p["text"], p["shape"], p["day"], p.get("source_line", ""), out, model=(sys.argv[4] if len(sys.argv) > 4 else None)))
     else: selftest()

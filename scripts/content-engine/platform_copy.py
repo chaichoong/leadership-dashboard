@@ -164,21 +164,24 @@ def rules_check(fields, transcript=""):
 
 # ---------- IO ----------
 
-def ask_claude_model(system, user, model, timeout=600):
-    """ask_claude with an explicit model and timeout (the infographic composer writes a long page)."""
+def ask_claude_model(system, user, model, timeout=600, thinking=None, no_mcp=False):
+    """ask_claude with an explicit model, timeout, thinking budget and MCP switch (the infographic composer writes a long page and
+    must not spend ten minutes thinking first: measured 5 Sep 2026, first output token at 520 s with the default budget)."""
     global MODEL
     old = MODEL; MODEL = model
-    try: return ask_claude(system, user, timeout=timeout)
+    try: return ask_claude(system, user, timeout=timeout, thinking=thinking, no_mcp=no_mcp)
     finally: MODEL = old
 
 
-def ask_claude(system, user, timeout=600):
+def ask_claude(system, user, timeout=600, thinking=None, no_mcp=False):
     lessons = watch.kevin_lessons()
     if lessons: system = system + "\n\n" + lessons
     env = dict(os.environ)
+    if thinking is not None: env["MAX_THINKING_TOKENS"] = str(int(thinking))
     if os.path.exists(TOKEN_FILE): env["CLAUDE_CODE_OAUTH_TOKEN"] = open(TOKEN_FILE).read().strip()
-    r = subprocess.run([CLAUDE, "-p", user, "--system-prompt", system, "--model", MODEL, "--output-format", "json",
-                        "--tools", "", "--max-turns", "1"], capture_output=True, text=True, env=env, timeout=timeout)
+    cmd = [CLAUDE, "-p", user, "--system-prompt", system, "--model", MODEL, "--output-format", "json", "--tools", "", "--max-turns", "1"]
+    if no_mcp: cmd += ["--strict-mcp-config", "--mcp-config", '{"mcpServers":{}}']   # a headless writer needs no connectors; skipping them saves the init wait
+    r = subprocess.run(cmd, capture_output=True, text=True, env=env, timeout=timeout)
     if r.returncode != 0: raise SystemExit("claude failed: " + r.stderr[-400:])
     d = json.loads(r.stdout)
     return (d.get("result") or "").strip(), d.get("usage", {}), d.get("total_cost_usd")
