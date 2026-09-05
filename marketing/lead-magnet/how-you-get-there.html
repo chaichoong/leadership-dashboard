@@ -1,0 +1,296 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<title>How you get there</title>
+<!-- Page 2 of the lead magnet. Composition: Editorial spread. A narrow left column holds the towering destination
+     numeral (90%) and the clipboard self-check; the wide right column carries the route down the board, six stations,
+     one move each. The bottom band shows the nine-step method as tiles and the call to action. Design language:
+     operations-director.md. -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,700;1,9..40,400&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+img, svg { display: block; max-width: 100%; }
+
+:root {
+  --canvas-w:1240px; --canvas-h:1754px;
+  --bg:#F1F3EF; --surface:#FBFBF9; --surface-2:#F4F6F1; --subtle:#E5E8E1; --deep:#263330;
+  --ink:#1C2422; --ink-muted:#5A6660; --ink-faint:#8A928C;
+  --accent:#2C6E49; --accent-deep:#1B4A30; --accent-soft:#DDE8DF; --gold:#C6A15B;
+  --chart-1:#2C6E49; --chart-2:#B8933A; --chart-3:#5A86CF; --chart-4:#8B6FAE; --de-emphasis:#DDE1D9;
+  --font-display:'DM Sans',sans-serif; --font-body:'DM Sans',sans-serif; --font-mono:'DM Mono',monospace;
+  --space-1:8px; --space-2:16px; --space-3:24px; --space-4:40px; --space-5:64px;
+  --radius:8px;
+}
+html, body { background:var(--bg); }
+body { width:var(--canvas-w); font-family:var(--font-body); color:var(--ink); }
+h1, .display { font-family:var(--font-display); font-weight:700; letter-spacing:-.01em; line-height:1.02; }
+.mono { font-family:var(--font-mono); text-transform:uppercase; letter-spacing:.06em; }
+
+.canvas {
+  position:relative; width:var(--canvas-w); height:var(--canvas-h); overflow:hidden;
+  background-color:var(--bg);
+  background-image:
+    radial-gradient(ellipse at 50% 8%, rgba(251,251,249,.9) 0%, rgba(251,251,249,0) 55%),
+    linear-gradient(var(--subtle) 1px, transparent 1px),
+    linear-gradient(90deg, var(--subtle) 1px, transparent 1px);
+  background-size:100% 100%, 40px 40px, 40px 40px;
+}
+.abs { position:absolute; }
+.tick { position:absolute; width:16px; height:16px; color:var(--ink-faint); }
+
+/* header */
+.kicker { left:56px; top:52px; font-size:13px; color:var(--ink-faint); }
+h1.title { left:56px; top:82px; width:1128px; font-size:54px; color:var(--ink); }
+h1.title em { font-style:normal; color:var(--accent); }
+.standfirst { left:56px; top:212px; width:1040px; font-size:20px; line-height:1.35; color:var(--ink-muted); }
+.standfirst strong { font-weight:500; color:var(--ink); }
+
+/* left column: destination + clipboard */
+.dest { left:50px; top:326px; width:340px; font-size:166px; line-height:.9; color:var(--accent); }
+.dest-label { left:56px; top:508px; width:300px; font-size:18px; line-height:1.3; color:var(--ink); }
+.dest-src { left:56px; top:612px; width:300px; font-size:13px; line-height:1.5; color:var(--ink-faint); }
+
+.placard { background:var(--surface); border:1.5px solid var(--subtle); border-radius:var(--radius); position:absolute; }
+.placard::before { content:''; position:absolute; left:24px; top:-4px; width:72px; height:8px; background:var(--gold); }
+.plate { box-shadow:6px 6px 0 var(--accent-deep); }
+
+.clip { left:56px; top:690px; width:300px; height:392px; padding:26px 22px 20px; }
+.clip .clip-bar { position:absolute; left:110px; top:-12px; width:80px; height:20px; border-radius:6px; background:var(--accent-deep); }
+.clip h3 { font-size:22px; font-weight:500; line-height:1.15; color:var(--ink); }
+.clip .sub { margin-top:6px; font-size:15px; line-height:1.35; color:var(--ink-muted); }
+.clip ul { list-style:none; margin-top:14px; }
+.clip li { display:flex; align-items:center; gap:10px; height:36px; font-size:15px; color:var(--ink); }
+.clip li .box { width:18px; height:18px; border:1.5px solid var(--ink-muted); border-radius:3px; flex:0 0 18px; }
+.clip .foot { margin-top:10px; font-size:13px; color:var(--ink-faint); }
+
+.keep { left:56px; top:1124px; width:300px; }
+.keep .stop { position:absolute; left:0; top:0; width:44px; height:44px; border-radius:999px; background:var(--gold); box-shadow:0 0 0 3px var(--surface); }
+.keep .fig { position:absolute; left:54px; top:0; width:30px; height:38px; }
+.keep .t { position:absolute; left:96px; top:2px; width:204px; font-size:15px; line-height:1.35; color:var(--ink); }
+.keep .t .mono { display:block; font-size:13px; color:var(--ink-muted); margin-bottom:2px; }
+
+/* right column: the route and six stations */
+.route { left:0; top:0; width:1240px; height:1754px; pointer-events:none; }
+.stop { position:absolute; width:44px; height:44px; border-radius:999px; background:var(--accent); color:var(--surface);
+        font-family:var(--font-mono); font-weight:500; font-size:20px; display:flex; align-items:center; justify-content:center; }
+.station { position:absolute; left:480px; width:704px; height:152px; padding:18px 160px 16px 22px; background:var(--surface);
+           border:1.5px solid var(--subtle); border-radius:var(--radius); }
+.station h3 { font-size:22px; font-weight:500; line-height:1.15; color:var(--ink); }
+.station p { margin-top:8px; font-size:15.5px; line-height:1.4; color:var(--ink-muted); }
+.station p strong { font-weight:500; color:var(--ink); }
+.station .prop { position:absolute; right:18px; top:16px; width:130px; height:120px; color:var(--ink-muted); }
+
+/* bottom band: method tiles + call to action */
+.method-label { left:56px; top:1408px; font-size:13px; color:var(--ink-faint); }
+.tiles { left:56px; top:1432px; width:1128px; display:flex; gap:0; }
+.tile { width:118px; text-align:center; }
+.tile .sq { width:40px; height:40px; margin:0 auto; border-radius:6px; background:var(--accent-soft); border:1.5px solid var(--accent);
+            font-family:var(--font-display); font-weight:700; font-size:20px; color:var(--accent); display:flex; align-items:center; justify-content:center; }
+.tile .sq.on { background:var(--accent); color:var(--surface); }
+.tile .w { margin-top:6px; font-size:13px; color:var(--ink-muted); white-space:nowrap; }
+.method-cap { left:56px; top:1508px; width:1128px; font-size:15px; line-height:1.35; color:var(--ink-muted); }
+.method-cap strong { font-weight:500; color:var(--ink); }
+
+.cta { left:56px; top:1556px; width:1128px; height:88px; padding:0 28px; display:flex; align-items:center; justify-content:space-between; }
+.cta .q { font-size:22px; font-weight:500; color:var(--ink); }
+.cta .a { text-align:right; font-size:13px; line-height:1.6; color:var(--ink-muted); }
+.cta .a strong { color:var(--accent); font-weight:500; }
+
+/* title strip */
+.strip { position:absolute; left:0; right:0; bottom:0; height:96px; background:var(--surface); border-top:1.5px solid var(--subtle);
+         display:flex; align-items:center; justify-content:space-between; padding:0 56px; }
+.strip .brand { display:flex; align-items:center; gap:14px; }
+.strip .wordmark { font-family:var(--font-display); font-weight:700; font-size:22px; color:var(--ink); white-space:nowrap; }
+.strip .src { text-align:right; font-size:13px; line-height:1.6; color:var(--ink-faint); white-space:nowrap; }
+
+.grain { position:absolute; inset:0; pointer-events:none; z-index:50; opacity:.35; mix-blend-mode:multiply;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='240' height='240'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix type='matrix' values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0.6 0.6 0.6 0 0'/%3E%3C/filter%3E%3Crect width='240' height='240' filter='url(%23n)' opacity='0.22'/%3E%3C/svg%3E"); }
+</style>
+</head>
+<body>
+<div class="canvas">
+
+<svg width="0" height="0" style="position:absolute">
+  <defs>
+    <symbol id="agent" viewBox="0 0 40 40">
+      <line x1="20" y1="3" x2="20" y2="9" stroke="var(--accent)" stroke-width="2"/>
+      <circle cx="20" cy="3" r="2.4" fill="var(--accent)"/>
+      <rect x="5" y="9" width="30" height="27" rx="7" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="2"/>
+      <circle cx="14.5" cy="21" r="3" fill="var(--accent)"/>
+      <circle cx="25.5" cy="21" r="3" fill="var(--accent)"/>
+      <path d="M14 28.5 Q20 33 26 28.5" fill="none" stroke="var(--accent)" stroke-width="2" stroke-linecap="round"/>
+    </symbol>
+    <symbol id="person" viewBox="0 0 24 30">
+      <circle cx="12" cy="8" r="6.5"/>
+      <path d="M1 30 v-3 a11 11 0 0 1 22 0 v3 z"/>
+    </symbol>
+  </defs>
+</svg>
+
+<svg class="tick" style="left:24px;top:24px" viewBox="0 0 16 16"><path d="M8 0v16M0 8h16" stroke="currentColor" stroke-width="1.2"/></svg>
+<svg class="tick" style="left:1200px;top:24px" viewBox="0 0 16 16"><path d="M8 0v16M0 8h16" stroke="currentColor" stroke-width="1.2"/></svg>
+
+<!-- header -->
+<div class="abs kicker mono">Operations Director · How it is done · Page 2 of 2</div>
+<h1 class="abs title">How you get there: <em>one job at a time</em>, until the business runs without you</h1>
+<p class="abs standfirst">This is the spine of what an Operations Director does inside your business. <strong>Six moves, in this order.</strong> The detail under each one is our job, not yours. You keep one job: approving.</p>
+
+<!-- left column: the destination -->
+<div class="abs display dest" data-hero>90%</div>
+<div class="abs dest-label">of your day-to-day operations run by AI agents, with you approving. That is the destination, and we do not stop until you are there.</div>
+<div class="abs dest-src mono">Measured in hours, not tasks: the share of your listed weekly hours now run by agents</div>
+
+<!-- clipboard self-check -->
+<div class="placard clip">
+  <div class="clip-bar"></div>
+  <h3>Where would you start?</h3>
+  <div class="sub">Tick what stops if you take two weeks off:</div>
+  <ul>
+    <li><span class="box"></span>Bookkeeping and bank reconciliation</li>
+    <li><span class="box"></span>Replying to customer emails</li>
+    <li><span class="box"></span>Chasing money you are owed</li>
+    <li><span class="box"></span>Posting content every week</li>
+    <li><span class="box"></span>Renewals, licences, compliance</li>
+    <li><span class="box"></span>Knowing where the money is</li>
+  </ul>
+  <div class="foot mono">Bring the ticks to the call</div>
+</div>
+
+<!-- the one job you keep -->
+<div class="abs keep">
+  <div class="stop"></div>
+  <svg class="fig" viewBox="0 0 24 30" fill="var(--ink)"><use href="#person" width="24" height="30"/></svg>
+  <div class="t"><span class="mono">Owner approves</span>The one job you keep. Every yes or no teaches the agent, and every no is remembered.</div>
+</div>
+
+<!-- the route down the board -->
+<svg class="abs route" viewBox="0 0 1240 1754" aria-hidden="true">
+  <path d="M440 300 V1372" fill="none" stroke="var(--accent)" stroke-width="14" stroke-linecap="round"/>
+  <path d="M440 300 V1372" fill="none" stroke="var(--surface)" stroke-width="1.5" stroke-dasharray="14 10"/>
+  <path d="M424 1366 L440 1392 L456 1366 Z" fill="var(--accent)"/>
+  <!-- props of the office: a clock, a paper clip, a tray -->
+  <g fill="none" stroke="var(--ink-muted)" stroke-width="1.5" stroke-linecap="round">
+    <g transform="translate(1146 268)"><circle cx="0" cy="0" r="17"/><path d="M0 -11 V0 L7 4"/><path d="M0 -15 v2 M15 0 h-2 M0 15 v-2 M-15 0 h2"/></g>
+    <g transform="translate(372 1120) rotate(-28)"><path d="M0 0 v34 a7 7 0 0 0 14 0 V6 a4 4 0 0 0 -8 0 v24 a2 2 0 0 0 4 0 V10"/></g>
+    <g transform="translate(300 1236)"><path d="M0 22 h56 l-6 22 h-44 z"/><path d="M8 22 v-8 h40 v8"/></g>
+  </g>
+</svg>
+
+<!-- stations -->
+<div class="stop" style="left:418px;top:328px">01</div>
+<div class="station" style="top:306px">
+  <h3>List every job</h3>
+  <p>Every repeatable job in the business goes on one list: what gets done, how often, and how long it takes. <strong>That list is the denominator of the 90%.</strong> Nothing is automated that is not on it.</p>
+  <svg class="prop" viewBox="0 0 130 120" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
+    <rect x="30" y="8" width="72" height="100" rx="4"/><rect x="54" y="2" width="24" height="10" rx="3" fill="var(--accent-deep)" stroke="none"/>
+    <g><rect x="40" y="26" width="9" height="9" rx="1.5"/><path d="M55 30 h36"/></g>
+    <g><rect x="40" y="44" width="9" height="9" rx="1.5"/><path d="M55 48 h30"/></g>
+    <g><rect x="40" y="62" width="9" height="9" rx="1.5"/><path d="M55 66 h38"/></g>
+    <g><rect x="40" y="80" width="9" height="9" rx="1.5"/><path d="M55 84 h26"/></g>
+    <path d="M42 30 l2.5 2.5 l4.5 -5" stroke="var(--accent)" stroke-width="2"/>
+  </svg>
+</div>
+
+<div class="stop" style="left:418px;top:503px">02</div>
+<div class="station" style="top:481px">
+  <h3>Rank by how often, and how safe</h3>
+  <p>Each job is placed on a simple grid: how often it happens against what a mistake would cost. <strong>The first agents come from the often-and-safe corner</strong>: done every day, easy to undo if wrong.</p>
+  <svg class="prop" viewBox="0 0 130 120" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
+    <rect x="22" y="6" width="96" height="84" rx="2"/><path d="M70 6 V90 M22 48 H118"/>
+    <circle cx="94" cy="69" r="9" fill="var(--gold)" stroke="none"/>
+    <circle cx="44" cy="28" r="3" fill="var(--de-emphasis)" stroke="none"/><circle cx="52" cy="70" r="3" fill="var(--de-emphasis)" stroke="none"/><circle cx="96" cy="24" r="3" fill="var(--de-emphasis)" stroke="none"/>
+    <path d="M22 100 h96 M112 96 l6 4 l-6 4" /><text x="22" y="116" font-family="DM Mono, monospace" font-size="13" fill="var(--ink-faint)" stroke="none">OFTEN</text>
+    <path d="M12 90 V6 M8 12 l4 -6 l4 6"/>
+  </svg>
+</div>
+
+<div class="stop" style="left:418px;top:678px">03</div>
+<div class="station" style="top:656px">
+  <h3>Record it, do not write it</h3>
+  <p>You record a short screen video of yourself doing the job, answering seven on-screen prompts as you go. <strong>That recording becomes the written process and the agent's instructions.</strong> Nobody types a manual.</p>
+  <svg class="prop" viewBox="0 0 130 120" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
+    <rect x="14" y="20" width="102" height="66" rx="6"/><rect x="14" y="20" width="102" height="14" rx="6" fill="var(--surface-2)"/>
+    <circle cx="65" cy="58" r="16"/><circle cx="65" cy="58" r="7" fill="var(--accent-soft)"/>
+    <circle cx="104" cy="27" r="4" fill="var(--gold)" stroke="none"/>
+    <path d="M40 98 h50 M30 108 h70"/>
+  </svg>
+</div>
+
+<div class="stop" style="left:418px;top:853px">04</div>
+<div class="station" style="top:831px">
+  <h3>Build the agent</h3>
+  <p>From the recording we build the agent: when it starts, what it reads, the rules it follows, the tools it uses, what it must never do, and what finished looks like. <strong>Your first agent is live within the first month</strong>, in approve-everything mode.</p>
+  <svg class="prop" viewBox="0 0 130 120">
+    <use href="#agent" x="33" y="8" width="64" height="64"/>
+    <g fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M30 92 h70 M40 104 h50"/></g>
+  </svg>
+</div>
+
+<div class="stop" style="left:418px;top:1028px">05</div>
+<div class="station" style="top:1006px">
+  <h3>Move the gear, when you are ready</h3>
+  <p>Four gears, and you hold the dial: <strong>guardrails set, approve everything, loosen the leash, heartbeat.</strong> It never promotes itself. If its accuracy slips, approvals switch back on by themselves.</p>
+  <svg class="prop" viewBox="0 0 130 120" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
+    <path d="M18 86 A47 47 0 0 1 112 86"/>
+    <path d="M22 76 l6 2 M37 51 l4 5 M65 40 v6 M93 51 l-4 5 M108 76 l-6 2"/>
+    <path d="M65 86 L44 56" stroke="var(--gold)" stroke-width="4"/><circle cx="65" cy="86" r="6" fill="var(--gold)" stroke="none"/>
+    <text x="18" y="108" font-family="DM Mono, monospace" font-size="13" fill="var(--ink-faint)" stroke="none">1</text>
+    <text x="106" y="108" font-family="DM Mono, monospace" font-size="13" fill="var(--ink-faint)" stroke="none">4</text>
+  </svg>
+</div>
+
+<div class="stop" style="left:418px;top:1203px">06</div>
+<div class="station" style="top:1181px">
+  <h3>Measure, then take the next job</h3>
+  <p>One number on your dashboard: the share of your listed hours now run by agents. Watch it climb, take the next job off the list. <strong>Demand comes last</strong>: we do not turn the tap on until the business can take the water.</p>
+  <svg class="prop" viewBox="0 0 130 120" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
+    <rect x="10" y="50" width="110" height="18" rx="3" fill="var(--surface-2)"/>
+    <rect x="10" y="50" width="99" height="18" rx="3" fill="var(--accent-soft)" stroke="none"/>
+    <path d="M109 42 V76" stroke="var(--gold)" stroke-width="3"/>
+    <text x="96" y="34" font-family="DM Mono, monospace" font-size="13" fill="var(--ink)" stroke="none">90%</text>
+    <path d="M10 92 h110 M10 88 v8 M65 88 v8 M120 88 v8"/>
+  </svg>
+</div>
+
+<!-- the full method -->
+<div class="abs method-label mono">The full method · nine steps · this page lives in M and I</div>
+<div class="abs tiles">
+  <div class="tile"><div class="sq">O</div><div class="w">Objective</div></div>
+  <div class="tile"><div class="sq">P</div><div class="w">Priorities</div></div>
+  <div class="tile"><div class="sq">T</div><div class="w">Team</div></div>
+  <div class="tile"><div class="sq">I</div><div class="w">Income</div></div>
+  <div class="tile"><div class="sq on">M</div><div class="w">Methods</div></div>
+  <div class="tile"><div class="sq on">I</div><div class="w">Intelligence</div></div>
+  <div class="tile"><div class="sq">S</div><div class="w">Scoreboards</div></div>
+  <div class="tile"><div class="sq">E</div><div class="w">Exit ready</div></div>
+  <div class="tile"><div class="sq">D</div><div class="w">Demand</div></div>
+</div>
+<div class="abs method-cap">The six moves above sit inside <strong>Methods</strong> and <strong>Intelligence</strong>. The other seven steps keep the whole business honest around them: a clear objective, quarterly priorities, an accountable team, live money numbers, one scoreboard, an exit-ready business, and demand switched on last.</div>
+
+<!-- call to action -->
+<div class="placard plate cta">
+  <div class="q">Want to know which job goes first in your business?</div>
+  <div class="a mono"><strong>Book an Operations Review Call</strong> · 30 minutes · we find the work to take off you<br>operationsdirector.co.uk/book-a-demo</div>
+</div>
+
+<!-- title strip -->
+<div class="strip">
+  <div class="brand">
+    <span class="logo" style="width:48px;height:48px;color:var(--accent);display:inline-block">
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" fill="none" role="img" aria-label="Operations Director" width="100%" height="100%">
+      <path d="M52 20 H20 V84 H72 V32" stroke="currentColor" stroke-width="7" stroke-linecap="butt" stroke-linejoin="miter"/>
+      <path d="M62 32 L72 20 L82 32 Z" fill="currentColor"/>
+      <path d="M 46.00 40.40 L 47.45 40.49 L 49.62 36.93 L 54.10 38.78 L 53.11 42.83 L 54.20 43.80 L 55.17 44.89 L 59.22 43.90 L 61.07 48.38 L 57.51 50.55 L 57.60 52.00 L 57.51 53.45 L 61.07 55.62 L 59.22 60.10 L 55.17 59.11 L 54.20 60.20 L 53.11 61.17 L 54.10 65.22 L 49.62 67.07 L 47.45 63.51 L 46.00 63.60 L 44.55 63.51 L 42.38 67.07 L 37.90 65.22 L 38.89 61.17 L 37.80 60.20 L 36.83 59.11 L 32.78 60.10 L 30.93 55.62 L 34.49 53.45 L 34.40 52.00 L 34.49 50.55 L 30.93 48.38 L 32.78 43.90 L 36.83 44.89 L 37.80 43.80 L 38.89 42.83 L 37.90 38.78 L 42.38 36.93 L 44.55 40.49 Z M 52.60 52.00 A 6.6 6.6 0 1 0 39.40 52.00 A 6.6 6.6 0 1 0 52.60 52.00 Z" fill="currentColor" fill-rule="evenodd"/>
+    </svg></span>
+    <span class="wordmark">Operations Director</span>
+  </div>
+  <div class="src mono">Source · the Operations Director method, as run on our own business · 5 Sep 2026<br>operationsdirector.co.uk</div>
+</div>
+
+<div class="grain"></div>
+</div>
+</body>
+</html>
