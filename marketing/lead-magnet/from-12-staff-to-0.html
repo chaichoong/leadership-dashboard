@@ -1,0 +1,326 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<title>From 12 staff to 0</title>
+<!-- Composition: Big Object. The reader stands over an operations board on a desk: the org chart is drawn as ONE
+     serpentine route with the owner's gold stop first and eleven agent stations along it. The hero placard (the
+     salary bill against the AI bill) sits above the board. Design language: operations-director.md. -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,700;1,9..40,400&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+img, svg { display: block; max-width: 100%; }
+
+:root {
+  --canvas-w:1240px; --canvas-h:1754px;
+  --bg:#F1F3EF; --surface:#FBFBF9; --surface-2:#F4F6F1; --subtle:#E5E8E1; --deep:#263330;
+  --ink:#1C2422; --ink-muted:#5A6660; --ink-faint:#8A928C;
+  --accent:#2C6E49; --accent-deep:#1B4A30; --accent-soft:#DDE8DF; --gold:#C6A15B;
+  --chart-1:#2C6E49; --chart-2:#B8933A; --chart-3:#5A86CF; --chart-4:#8B6FAE; --de-emphasis:#DDE1D9;
+  --font-display:'DM Sans',sans-serif; --font-body:'DM Sans',sans-serif; --font-mono:'DM Mono',monospace;
+  --space-1:8px; --space-2:16px; --space-3:24px; --space-4:40px; --space-5:64px;
+  --radius:8px;
+}
+html, body { background:var(--bg); }
+body { width:var(--canvas-w); font-family:var(--font-body); color:var(--ink); }
+h1, .display { font-family:var(--font-display); font-weight:700; letter-spacing:-.01em; line-height:1.02; }
+.mono { font-family:var(--font-mono); text-transform:uppercase; letter-spacing:.06em; }
+
+.canvas {
+  position:relative; width:var(--canvas-w); height:var(--canvas-h); overflow:hidden;
+  background-color:var(--bg);
+  background-image:
+    radial-gradient(ellipse at 50% 8%, rgba(251,251,249,.9) 0%, rgba(251,251,249,0) 55%),
+    linear-gradient(var(--subtle) 1px, transparent 1px),
+    linear-gradient(90deg, var(--subtle) 1px, transparent 1px);
+  background-size:100% 100%, 40px 40px, 40px 40px;
+}
+.abs { position:absolute; }
+
+/* registration ticks */
+.tick { position:absolute; width:16px; height:16px; color:var(--ink-faint); }
+
+/* header */
+.kicker { left:56px; top:52px; font-size:13px; color:var(--ink-faint); }
+h1.title { left:56px; top:82px; width:800px; font-size:58px; color:var(--ink); }
+h1.title em { font-style:normal; color:var(--accent); }
+.standfirst { left:56px; top:290px; width:790px; font-size:20px; line-height:1.35; color:var(--ink-muted); }
+.standfirst strong { font-weight:500; color:var(--ink); }
+
+/* before / after lanes */
+.lanes { left:896px; top:56px; width:288px; }
+.lane-label { font-size:13px; color:var(--ink-faint); margin-bottom:8px; }
+.lane-then .lane-label { color:var(--ink-faint); }
+.lane-now  .lane-label { color:var(--accent); }
+.lane-then { padding-bottom:6px; }
+.lane-now  { margin-top:4px; }
+
+/* hero placard */
+.placard { background:var(--surface); border:1.5px solid var(--subtle); border-radius:var(--radius); position:absolute; }
+.placard::before { content:''; position:absolute; left:24px; top:-4px; width:72px; height:8px; background:var(--gold); }
+.plate { box-shadow:6px 6px 0 var(--accent-deep); }
+.hero { left:56px; top:398px; width:1128px; height:292px; padding:34px 40px 28px; }
+.hero .big { position:absolute; left:40px; top:26px; font-size:132px; color:var(--accent); line-height:1; }
+.hero .big-label { position:absolute; left:44px; top:168px; width:560px; font-size:18px; line-height:1.3; color:var(--ink); }
+.hero .big-src { position:absolute; left:44px; top:216px; font-size:13px; color:var(--ink-faint); }
+.hero .small { position:absolute; left:740px; top:52px; font-size:72px; color:var(--ink); line-height:1; }
+.hero .small-label { position:absolute; left:742px; top:134px; width:340px; font-size:18px; line-height:1.3; color:var(--ink); }
+.hero .small-src { position:absolute; left:742px; top:186px; width:340px; font-size:13px; line-height:1.5; color:var(--ink-faint); }
+.hero .ratio { position:absolute; left:44px; top:244px; width:1040px; }
+.ratio .row { display:flex; align-items:center; height:18px; margin-top:0; }
+.ratio .row + .row { margin-top:4px; }
+.ratio .lbl { width:96px; font-size:13px; color:var(--ink-muted); }
+.ratio .bar { height:18px; }
+.ratio .bar.pay { width:830px; background:var(--accent); }
+.ratio .bar.ai  { width:5px;   background:var(--gold); }
+.ratio .val { margin-left:8px; font-size:13px; color:var(--ink); font-weight:500; }
+
+/* board: route + stations */
+.route { left:0; top:0; width:1240px; height:1754px; pointer-events:none; }
+.stop { position:absolute; width:44px; height:44px; border-radius:999px; background:var(--accent); color:var(--surface);
+        font-family:var(--font-mono); font-weight:500; font-size:20px; display:flex; align-items:center; justify-content:center; }
+.stop.owner { background:var(--gold); box-shadow:0 0 0 3px var(--surface); }
+.card { position:absolute; width:250px; height:160px; padding:14px 16px 16px; background:var(--surface);
+        border:1.5px solid var(--subtle); border-radius:var(--radius); }
+.card .agent-mark { position:absolute; right:12px; top:12px; width:40px; height:40px; }
+.card .role { width:172px; font-size:20px; font-weight:500; line-height:1.15; color:var(--ink); }
+.card .agents { margin-top:6px; font-size:13px; line-height:1.4; color:var(--ink-faint); width:218px; }
+.card .pay { position:absolute; left:16px; bottom:16px; display:flex; align-items:center; }
+.card .pay .bar { height:18px; background:var(--accent); }
+.card .pay .v { margin-left:8px; font-size:15px; color:var(--ink); }
+.owner-label { position:absolute; left:64px; top:814px; width:200px; font-size:13px; color:var(--ink-muted); line-height:1.5; }
+.owner-figure { position:absolute; left:92px; top:748px; width:44px; height:44px; }
+
+/* props */
+.prop { position:absolute; color:var(--ink-muted); }
+.stamp { position:absolute; left:880px; top:1556px; width:304px; padding:10px 14px; border:2px solid var(--accent);
+         border-radius:4px; color:var(--accent); transform:rotate(-4deg); background:transparent; }
+.stamp .n { font-family:var(--font-display); font-weight:700; font-size:30px; line-height:1.1; }
+.stamp .t { font-size:13px; margin-top:10px; line-height:1.3; }
+
+/* title strip */
+.strip { position:absolute; left:0; right:0; bottom:0; height:96px; background:var(--surface); border-top:1.5px solid var(--subtle);
+         display:flex; align-items:center; justify-content:space-between; padding:0 56px; }
+.strip .brand { display:flex; align-items:center; gap:14px; }
+.strip .wordmark { font-family:var(--font-display); font-weight:700; font-size:22px; color:var(--ink); white-space:nowrap; }
+.strip .src { text-align:right; font-size:13px; line-height:1.6; color:var(--ink-faint); white-space:nowrap; }
+
+.grain { position:absolute; inset:0; pointer-events:none; z-index:50; opacity:.35; mix-blend-mode:multiply;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='240' height='240'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix type='matrix' values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0.6 0.6 0.6 0 0'/%3E%3C/filter%3E%3Crect width='240' height='240' filter='url(%23n)' opacity='0.22'/%3E%3C/svg%3E"); }
+</style>
+</head>
+<body>
+<div class="canvas">
+
+<svg width="0" height="0" style="position:absolute">
+  <defs>
+    <!-- the agent mark: rounded square head, two eyes, antenna, smile -->
+    <symbol id="agent" viewBox="0 0 40 40">
+      <line x1="20" y1="3" x2="20" y2="9" stroke="var(--accent)" stroke-width="2"/>
+      <circle cx="20" cy="3" r="2.4" fill="var(--accent)"/>
+      <rect x="5" y="9" width="30" height="27" rx="7" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="2"/>
+      <circle cx="14.5" cy="21" r="3" fill="var(--accent)"/>
+      <circle cx="25.5" cy="21" r="3" fill="var(--accent)"/>
+      <path d="M14 28.5 Q20 33 26 28.5" fill="none" stroke="var(--accent)" stroke-width="2" stroke-linecap="round"/>
+    </symbol>
+    <!-- a person: head and shoulders -->
+    <symbol id="person" viewBox="0 0 24 30">
+      <circle cx="12" cy="8" r="6.5"/>
+      <path d="M1 30 v-3 a11 11 0 0 1 22 0 v3 z"/>
+    </symbol>
+    <filter id="wobble" x="-10%" y="-10%" width="120%" height="120%">
+      <feTurbulence type="fractalNoise" baseFrequency="0.05" numOctaves="2" result="n"/>
+      <feDisplacementMap in="SourceGraphic" in2="n" scale="1.6"/>
+    </filter>
+  </defs>
+</svg>
+
+<!-- registration ticks -->
+<svg class="tick" style="left:24px;top:24px" viewBox="0 0 16 16"><path d="M8 0v16M0 8h16" stroke="currentColor" stroke-width="1.2"/></svg>
+<svg class="tick" style="left:1200px;top:24px" viewBox="0 0 16 16"><path d="M8 0v16M0 8h16" stroke="currentColor" stroke-width="1.2"/></svg>
+
+<!-- header -->
+<div class="abs kicker mono">Operations Director · Build log · September 2026</div>
+<h1 class="abs title">From 12 staff to <em>0</em>: the 17 AI agents that now do 11 people's jobs for £200 a month</h1>
+<p class="abs standfirst">Every job on the board below used to need a person. Each one is now run by an AI agent, on its own clock, with one human stop: <strong>the owner approves</strong>. The target: <strong>90% of day-to-day operations run by agents</strong>.</p>
+
+<!-- before / after lanes -->
+<div class="abs lanes">
+  <div class="lane-then">
+    <div class="lane-label mono">Then · 12 staff</div>
+    <svg width="288" height="66" viewBox="0 0 288 66" aria-label="12 staff, by hand">
+      <g fill="var(--de-emphasis)" filter="url(#wobble)">
+        <use href="#person" x="0"   y="0"  width="24" height="30"/><use href="#person" x="34"  y="0" width="24" height="30"/>
+        <use href="#person" x="68"  y="0"  width="24" height="30"/><use href="#person" x="102" y="0" width="24" height="30"/>
+        <use href="#person" x="136" y="0"  width="24" height="30"/><use href="#person" x="170" y="0" width="24" height="30"/>
+        <use href="#person" x="0"   y="36" width="24" height="30"/><use href="#person" x="34"  y="36" width="24" height="30"/>
+        <use href="#person" x="68"  y="36" width="24" height="30"/><use href="#person" x="102" y="36" width="24" height="30"/>
+        <use href="#person" x="136" y="36" width="24" height="30"/><use href="#person" x="170" y="36" width="24" height="30"/>
+      </g>
+      <!-- the route crosses from the by-hand lane to the agent lane -->
+      <path d="M240 4 V44" stroke="var(--accent)" stroke-width="14" stroke-linecap="round" fill="none"/>
+      <path d="M240 4 V44" stroke="var(--surface)" stroke-width="1.5" fill="none"/>
+      <path d="M226 40 L240 58 L254 40 Z" fill="var(--accent)"/>
+    </svg>
+  </div>
+  <div class="lane-now">
+    <div class="lane-label mono">Now · 0 staff · 17 agents</div>
+    <svg width="288" height="120" viewBox="0 0 288 120" aria-label="17 AI agents">
+      <use href="#agent" x="0"   y="0"  width="34" height="34"/><use href="#agent" x="42"  y="0" width="34" height="34"/>
+      <use href="#agent" x="84"  y="0"  width="34" height="34"/><use href="#agent" x="126" y="0" width="34" height="34"/>
+      <use href="#agent" x="168" y="0"  width="34" height="34"/><use href="#agent" x="210" y="0" width="34" height="34"/>
+      <use href="#agent" x="0"   y="42" width="34" height="34"/><use href="#agent" x="42"  y="42" width="34" height="34"/>
+      <use href="#agent" x="84"  y="42" width="34" height="34"/><use href="#agent" x="126" y="42" width="34" height="34"/>
+      <use href="#agent" x="168" y="42" width="34" height="34"/><use href="#agent" x="210" y="42" width="34" height="34"/>
+      <use href="#agent" x="0"   y="84" width="34" height="34"/><use href="#agent" x="42"  y="84" width="34" height="34"/>
+      <use href="#agent" x="84"  y="84" width="34" height="34"/><use href="#agent" x="126" y="84" width="34" height="34"/>
+      <use href="#agent" x="168" y="84" width="34" height="34"/>
+    </svg>
+  </div>
+</div>
+
+<!-- hero placard -->
+<div class="placard plate hero" data-hero>
+  <div class="display big">£401,347</div>
+  <div class="big-label">a year: what those 11 jobs cost in salaries alone, before employer National Insurance and pension</div>
+  <div class="big-src mono">UK full-time median gross annual pay · ONS ASHE 2025</div>
+  <div class="display small">£2,400</div>
+  <div class="small-label">a year in AI fees for all 17 agents</div>
+  <div class="small-src mono">£180/month Claude Code subscription + top-ups</div>
+  <div class="ratio">
+    <div class="row"><span class="lbl mono">Salaries</span><span class="bar pay"></span><span class="val">£401,347</span></div>
+    <div class="row"><span class="lbl mono">AI fees</span><span class="bar ai"></span><span class="val">£2,400 · 167 times less</span></div>
+  </div>
+</div>
+
+<!-- the route: one serpentine path with a road marking down its middle -->
+<svg class="abs route" viewBox="0 0 1240 1754" aria-hidden="true">
+  <path id="routePath" d="M160 790 H1130 a40 40 0 0 1 40 40 V1030 a40 40 0 0 1 -40 40 H110 a40 40 0 0 0 -40 40 V1310 a40 40 0 0 0 40 40 H1120"
+        fill="none" stroke="var(--accent)" stroke-width="14" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M160 790 H1130 a40 40 0 0 1 40 40 V1030 a40 40 0 0 1 -40 40 H110 a40 40 0 0 0 -40 40 V1310 a40 40 0 0 0 40 40 H1120"
+        fill="none" stroke="var(--surface)" stroke-width="1.5" stroke-dasharray="14 10"/>
+  <path d="M1118 1334 L1142 1350 L1118 1366 Z" fill="var(--accent)"/>
+  <!-- props: a clock face, a paper clip, a tray, a folder -->
+  <g fill="none" stroke="var(--ink-muted)" stroke-width="1.5" stroke-linecap="round">
+    <g transform="translate(1146 352)"><circle cx="0" cy="0" r="17"/><path d="M0 -11 V0 L7 4"/><path d="M0 -15 v2 M15 0 h-2 M0 15 v-2 M-15 0 h2"/></g>
+    <g transform="translate(1136 386) rotate(-28)"><path d="M0 0 v34 a7 7 0 0 0 14 0 V6 a4 4 0 0 0 -8 0 v24 a2 2 0 0 0 4 0 V10"/></g>
+    <g transform="translate(70 1572)"><path d="M0 22 h84 l-8 30 h-68 z"/><path d="M10 22 v-8 h64 v8"/><path d="M18 14 v-6 h48 v6"/></g>
+    <g transform="translate(560 1580)"><path d="M0 8 h26 l8 8 h50 v40 h-84 z"/><path d="M0 24 h84"/></g>
+    <g transform="translate(1176 1060)"><rect x="-18" y="-10" width="36" height="20" rx="3"/><path d="M-12 -4 h24 M-12 0 h24 M-12 4 h16"/></g>
+  </g>
+</svg>
+
+<!-- owner stop -->
+<div class="stop owner" style="left:138px;top:768px"></div>
+<svg class="owner-figure" viewBox="0 0 24 30" fill="var(--ink)"><use href="#person" width="24" height="30"/></svg>
+<div class="owner-label mono">Owner approves<br><span style="text-transform:none;letter-spacing:0;font-family:var(--font-body);color:var(--ink-faint)">the only human step on the board</span></div>
+
+<!-- row 1 -->
+<div class="stop" style="left:418px;top:768px">01</div>
+<div class="card" style="left:315px;top:808px">
+  <svg class="agent-mark"><use href="#agent"/></svg>
+  <div class="role">Personal assistant</div>
+  <div class="agents mono">Inbound Comms Triage · Inbound Comms Response</div>
+  <div class="pay"><span class="bar" style="width:91px"></span><span class="v mono">£34,954</span></div>
+</div>
+<div class="stop" style="left:698px;top:768px">02</div>
+<div class="card" style="left:595px;top:808px">
+  <svg class="agent-mark"><use href="#agent"/></svg>
+  <div class="role">Office manager</div>
+  <div class="agents mono">Task Manager</div>
+  <div class="pay"><span class="bar" style="width:101px"></span><span class="v mono">£38,630</span></div>
+</div>
+<div class="stop" style="left:978px;top:768px">03</div>
+<div class="card" style="left:875px;top:808px">
+  <svg class="agent-mark"><use href="#agent"/></svg>
+  <div class="role">Bookkeeper</div>
+  <div class="agents mono">Reconciliation</div>
+  <div class="pay"><span class="bar" style="width:82px"></span><span class="v mono">£31,560</span></div>
+</div>
+
+<!-- row 2 (right to left) -->
+<div class="stop" style="left:978px;top:1048px">04</div>
+<div class="card" style="left:875px;top:1088px">
+  <svg class="agent-mark"><use href="#agent"/></svg>
+  <div class="role">Credit controller</div>
+  <div class="agents mono">Creditor Management</div>
+  <div class="pay"><span class="bar" style="width:74px"></span><span class="v mono">£28,532</span></div>
+</div>
+<div class="stop" style="left:698px;top:1048px">05</div>
+<div class="card" style="left:595px;top:1088px">
+  <svg class="agent-mark"><use href="#agent"/></svg>
+  <div class="role">Property officer</div>
+  <div class="agents mono">Property Administration</div>
+  <div class="pay"><span class="bar" style="width:90px"></span><span class="v mono">£34,688</span></div>
+</div>
+<div class="stop" style="left:418px;top:1048px">06</div>
+<div class="card" style="left:315px;top:1088px">
+  <svg class="agent-mark"><use href="#agent"/></svg>
+  <div class="role">Data analyst</div>
+  <div class="agents mono">CEO Brief · AI Assistant</div>
+  <div class="pay"><span class="bar" style="width:100px"></span><span class="v mono">£38,572</span></div>
+</div>
+<div class="stop" style="left:138px;top:1048px">07</div>
+<div class="card" style="left:35px;top:1088px">
+  <svg class="agent-mark"><use href="#agent"/></svg>
+  <div class="role">Records clerk</div>
+  <div class="agents mono">Brain Feeder · Brain Compounder · Audiobook Processor</div>
+  <div class="pay"><span class="bar" style="width:75px"></span><span class="v mono">£28,656</span></div>
+</div>
+
+<!-- row 3 -->
+<div class="stop" style="left:138px;top:1328px">08</div>
+<div class="card" style="left:35px;top:1368px">
+  <svg class="agent-mark"><use href="#agent"/></svg>
+  <div class="role">Technical author</div>
+  <div class="agents mono">SOP AI Field Generator</div>
+  <div class="pay"><span class="bar" style="width:103px"></span><span class="v mono">£39,459</span></div>
+</div>
+<div class="stop" style="left:418px;top:1328px">09</div>
+<div class="card" style="left:315px;top:1368px">
+  <svg class="agent-mark"><use href="#agent"/></svg>
+  <div class="role">IT operations technician</div>
+  <div class="agents mono">Daily Sweep · Production Sweep · Agent Dispatch</div>
+  <div class="pay"><span class="bar" style="width:92px"></span><span class="v mono">£35,259</span></div>
+</div>
+<div class="stop" style="left:698px;top:1328px">10</div>
+<div class="card" style="left:595px;top:1368px">
+  <svg class="agent-mark"><use href="#agent"/></svg>
+  <div class="role">Content and social producer</div>
+  <div class="agents mono">Content Engine</div>
+  <div class="pay"><span class="bar" style="width:87px"></span><span class="v mono">£33,412</span></div>
+</div>
+<div class="stop" style="left:978px;top:1328px">11</div>
+<div class="card" style="left:875px;top:1368px">
+  <svg class="agent-mark"><use href="#agent"/></svg>
+  <div class="role">Business development manager</div>
+  <div class="agents mono">Prospecting</div>
+  <div class="pay"><span class="bar" style="width:150px"></span><span class="v mono">£57,625</span></div>
+</div>
+
+<!-- the stamp: a measured figure from the task board -->
+<div class="stamp">
+  <div class="n">296 tasks</div>
+  <div class="t mono">by agents since 1 June 2026</div>
+</div>
+
+<!-- title strip -->
+<div class="strip">
+  <div class="brand">
+    <span class="logo" style="width:48px;height:48px;color:var(--accent);display:inline-block">
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" fill="none" role="img" aria-label="Operations Director" width="100%" height="100%">
+      <path d="M52 20 H20 V84 H72 V32" stroke="currentColor" stroke-width="7" stroke-linecap="butt" stroke-linejoin="miter"/>
+      <path d="M62 32 L72 20 L82 32 Z" fill="currentColor"/>
+      <path d="M 46.00 40.40 L 47.45 40.49 L 49.62 36.93 L 54.10 38.78 L 53.11 42.83 L 54.20 43.80 L 55.17 44.89 L 59.22 43.90 L 61.07 48.38 L 57.51 50.55 L 57.60 52.00 L 57.51 53.45 L 61.07 55.62 L 59.22 60.10 L 55.17 59.11 L 54.20 60.20 L 53.11 61.17 L 54.10 65.22 L 49.62 67.07 L 47.45 63.51 L 46.00 63.60 L 44.55 63.51 L 42.38 67.07 L 37.90 65.22 L 38.89 61.17 L 37.80 60.20 L 36.83 59.11 L 32.78 60.10 L 30.93 55.62 L 34.49 53.45 L 34.40 52.00 L 34.49 50.55 L 30.93 48.38 L 32.78 43.90 L 36.83 44.89 L 37.80 43.80 L 38.89 42.83 L 37.90 38.78 L 42.38 36.93 L 44.55 40.49 Z M 52.60 52.00 A 6.6 6.6 0 1 0 39.40 52.00 A 6.6 6.6 0 1 0 52.60 52.00 Z" fill="currentColor" fill-rule="evenodd"/>
+    </svg></span>
+    <span class="wordmark">Operations Director</span>
+  </div>
+  <div class="src mono">Source · ONS ASHE 2025, full-time median pay · AI Agents register, 5 Sep 2026<br>operationsdirector.co.uk</div>
+</div>
+
+<div class="grain"></div>
+</div>
+</body>
+</html>
