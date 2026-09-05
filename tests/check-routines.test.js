@@ -90,6 +90,51 @@ beforeEach(() => {
                  'uc-check', 'prod-sweep-weekly']);
 });
 
+// 4 Sep 2026 (finding 20260905-exceptions-464): four role-agent slot runs never
+// happened with the Mac awake, and nothing raised it. An absent run leaves no
+// event, so only the SCHEDULE knows how many there should have been.
+describe('slot attendance', () => {
+  beforeEach(() => writeRoutines(['daily-ops']));
+
+  it('counts what each approved slot should have run against what it did, without calling it stacking', () => {
+    // inbound-triage fires 3x a day; only one run in the window.
+    writeFileSync(schedulePath, JSON.stringify({
+      'inbound-triage': { cron: '0 9,13,17 * * *', mode: 'wrapped' },
+      'task-manager': { cron: '0 9,13,17 * * *', mode: 'wrapped' },
+      'ceo-agent': { cron: '45 6 * * *', mode: 'wrapped' },
+      prospecting: { cron: '15 9 * * *', mode: 'wrapped' },
+      'prod-sweep-weekly': { cron: '0 11 * * *', mode: 'wrapped' },
+    }, null, 2));
+    writeEvents([{ job: 'daily-ops', state: 'mark' }, { job: 'inbound-triage' }]);
+    const { code, res } = guard();
+    expect(code).toBe(0);                       // nothing stacked, and a miss must not pretend it did
+    expect(res.slot_attendance['inbound-triage'].ran).toBe(1);
+    expect(res.slot_attendance['inbound-triage'].expected).toBeGreaterThanOrEqual(2);
+    expect(res.slot_shortfalls).toContain('inbound-triage');
+    expect(res.slot_shortfalls).toContain('prospecting');
+    expect(res.missed_slot_runs).toMatch(/inbound-triage 1 of/);
+  });
+
+  it('reports no shortfall when every expected firing produced a run', () => {
+    writeFileSync(schedulePath, JSON.stringify({
+      'inbound-triage': { cron: '0 9,13,17 * * *', mode: 'wrapped' },
+      'task-manager': { cron: '0 9,13,17 * * *', mode: 'wrapped' },
+      'ceo-agent': { cron: '45 6 * * *', mode: 'wrapped' },
+      prospecting: { cron: '15 9 * * *', mode: 'wrapped' },
+      'prod-sweep-weekly': { cron: '0 11 * * *', mode: 'wrapped' },
+    }, null, 2));
+    const rows = [{ job: 'daily-ops', state: 'mark' }];
+    for (const n of ['inbound-triage', 'task-manager', 'ceo-agent', 'prospecting', 'prod-sweep-weekly']) {
+      for (let i = 0; i < 4; i += 1) rows.push({ job: n, ts: hoursAgo(3 + i) });
+    }
+    writeEvents(rows);
+    const { code, res } = guard();
+    expect(code).toBe(0);
+    expect(res.slot_shortfalls).toEqual([]);
+    expect(res.missed_slot_runs).toBeUndefined();
+  });
+});
+
 describe('only daily-ops may actually run', () => {
   beforeEach(() => writeRoutines(
     ['daily-ops', 'drift-monitor', 'prod-e2e-sweep', 'ceo-huddle', 'uc-check-slack-notifier']));

@@ -628,6 +628,36 @@ def prune_dead_tickets():
                 pass
 
 
+# Why acquire() last refused, so a wrapped run can say so in the job's OWN log.
+#
+# 4 Sep 2026: four role-agent slot runs never happened with the Mac awake and
+# nothing anywhere raised it. launchd fired, job-queue.py refused, run() returned
+# the code — and the job's runs.log said nothing at all, which is indistinguishable
+# from never being scheduled. A refusal is now written where the job's own history
+# is kept (finding 20260905-exceptions-464).
+LAST_REFUSAL = {}
+
+
+def note_refusal(job, code, reason):
+    LAST_REFUSAL.clear()
+    LAST_REFUSAL.update({"job": job, "code": code, "reason": reason})
+    return code
+
+
+def log_skipped_run(job, code, reason):
+    """Append a SKIPPED line to the job's runs.log. Never raises: a logging
+    failure must not change what the queue does."""
+    label = {EX_SKIPPED: "SKIPPED", EX_BUSY: "SKIPPED (queue busy)",
+             EX_NOTREADY: "SKIPPED (not ready)"}.get(code, "SKIPPED (exit %s)" % code)
+    try:
+        d = os.path.join(HOME, "knowledge-os/logs", job)
+        os.makedirs(d, exist_ok=True)
+        with open(os.path.join(d, "runs.log"), "a") as fh:
+            fh.write("=== %s %s: %s ===\n" % (iso(), label, reason or "no reason recorded"))
+    except OSError:
+        pass
+
+
 def acquire(job, mode="cooperative", lease_minutes=DEFAULT_LEASE_MIN,
             timeout_minutes=DEFAULT_TIMEOUT_MIN, check_stale=True, quiet=False,
             ready_wait_minutes=None):
@@ -641,14 +671,15 @@ def acquire(job, mode="cooperative", lease_minutes=DEFAULT_LEASE_MIN,
             event(job, "skipped-stale", minutes_late=late, reason=reason)
             if not quiet:
                 print("SKIPPED %s: %s" % (job, reason))
-            return EX_SKIPPED
+            return note_refusal(job, EX_SKIPPED, reason)
 
     # Deliberately BEFORE the lock: a job waiting for the network must not hold
     # the queue shut while it waits.
     if ready_wait_minutes is None:
         ready_wait_minutes = cfg.get("readyWaitMinutes", DEFAULT_READY_WAIT_MIN)
     if not wait_for_preconditions(job, cfg, ready_wait_minutes, quiet=quiet):
-        return EX_NOTREADY
+        return note_refusal(job, EX_NOTREADY,
+                            "preconditions not met after waiting %s min" % ready_wait_minutes)
 
     # Fixed-width timestamp so plain lexical sort is true arrival order.
     ticket_name = "%017.6f-%d" % (now(), os.getpid())
@@ -696,7 +727,8 @@ def acquire(job, mode="cooperative", lease_minutes=DEFAULT_LEASE_MIN,
                     if not quiet:
                         print("NOT READY %s: ready before the queue wait, not "
                               "after %ss — deferred, not failed" % (job, waited))
-                    return EX_NOTREADY
+                    return note_refusal(job, EX_NOTREADY,
+                                        "preconditions lapsed during a %ss queue wait" % waited)
 
                 event(job, "acquired", mode=mode, waited_seconds=waited,
                       queue_depth=len(waiting) - 1, lease_minutes=lease_minutes)
@@ -723,7 +755,8 @@ def acquire(job, mode="cooperative", lease_minutes=DEFAULT_LEASE_MIN,
                 if not quiet:
                     print("BUSY %s: gave up after %s min behind %s" %
                           (job, timeout_minutes, holder.get("job", "?")))
-                return EX_BUSY
+                return note_refusal(job, EX_BUSY, "gave up after %s min behind %s"
+                                    % (timeout_minutes, holder.get("job", "?")))
 
             time.sleep(POLL_SECONDS)
     finally:
@@ -903,6 +936,10 @@ def run(job, cmd, lease_minutes, timeout_minutes, check_stale,
                    timeout_minutes=timeout_minutes, check_stale=check_stale,
                    ready_wait_minutes=ready_wait_minutes)
     if code != EX_OK:
+        # The wrapper never starts, so nothing else would write to the job's own
+        # log and the day would look like it was never scheduled (4 Sep 2026).
+        log_skipped_run(job, code, LAST_REFUSAL.get("reason")
+                        if LAST_REFUSAL.get("job") == job else None)
         return code
 
     def _passthrough(signum, _frame):

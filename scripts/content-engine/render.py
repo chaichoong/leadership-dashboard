@@ -314,23 +314,52 @@ def shift_srt(srt_text, offset, end):
 LAST_CUT = {}
 
 
+def srt_cue_count(text):
+    """Cues in an SRT body. Zero means ffmpeg's subtitles filter has nothing to burn in and aborts."""
+    return len([b for b in re.split(r"\n\s*\n", text.strip()) if "-->" in b])
+
+
+def check_captions(path, what):
+    """A caption file must exist and hold at least one cue BEFORE ffmpeg sees it.
+
+    5 Sep 2026: the nightly run died inside overlays.py 'full' with a filter error and took the
+    whole run with it, because captions.srt had been emptied. An empty or unparseable SRT is now
+    refused here, naming the clip, instead of surfacing as an ffmpeg traceback.
+    """
+    if not os.path.exists(path):
+        raise RuntimeError("captions file missing for %s: %s" % (what, path))
+    n = srt_cue_count(open(path).read())
+    if n < 1:
+        raise RuntimeError("captions for %s are empty or unparseable (%s): ffmpeg would abort" % (what, path))
+    return n
+
+
+def overlay(ov, args, what):
+    """Run overlays.py and, on failure, raise with its stderr instead of swallowing it."""
+    r = subprocess.run([sys.executable, ov] + args, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
+    if r.returncode != 0:
+        tail = "\n".join((r.stderr or "").strip().splitlines()[-15:])
+        raise RuntimeError("overlays %s failed for %s (exit %d)\n%s" % (args[0], what, r.returncode, tail))
+
+
 def build_outputs(masters, srt, day, title, workdir, lfmd=None, role="episode"):
     ov = os.path.join(HERE, "overlays.py")
     caps = os.path.join(workdir, "captions.srt")
-    subprocess.run([sys.executable, ov, "captions", srt, caps], check=True, stdout=subprocess.DEVNULL)
+    overlay(ov, ["captions", srt, caps], "episode %s" % day)
+    check_captions(caps, "episode %s" % day)
     names = output_names(day); paths = {}
     if role == "teaser":
         paths["summary"] = os.path.join(workdir, names["summary"])
-        subprocess.run([sys.executable, ov, "summary", masters["9:16"], caps, paths["summary"], "--day", str(day), "--title", title],
-                       check=True, stdout=subprocess.DEVNULL)
+        overlay(ov, ["summary", masters["9:16"], caps, paths["summary"], "--day", str(day), "--title", title], "episode %s summary" % day)
         return paths
     segs = srt_segments(open(srt).read())
     at, resume = find_pause(masters["16:9"], segs, intro_insert_seconds(segs))     # on the master: same sound, no captions yet
     LAST_CUT.update({"at": at, "resume": resume})
     clipped = clip_caption_at(open(caps).read(), at)                                 # READ before the write opens the file (5 Sep 2026: open(w) first truncated it to nothing)
     with open(caps, "w") as fh: fh.write(clipped)
+    check_captions(caps, "episode %s full" % day)
     captioned = os.path.join(workdir, "full_captioned.mp4")
-    subprocess.run([sys.executable, ov, "full", masters["16:9"], caps, captioned], check=True, stdout=subprocess.DEVNULL)
+    overlay(ov, ["full", masters["16:9"], caps, captioned], "episode %s full" % day)
     paths["full"] = os.path.join(workdir, names["full"])
     insert_intro(captioned, at, paths["full"])
     paths["podcast"] = podcast_audio(captioned, os.path.join(workdir, names["podcast"]), at, resume)
@@ -338,9 +367,10 @@ def build_outputs(masters, srt, day, title, workdir, lfmd=None, role="episode"):
         piece = trim(masters["9:16"], lfmd[0], lfmd[1], os.path.join(workdir, "lfmd_master.mp4"))
         lcaps = os.path.join(workdir, "captions_lfmd.srt")
         open(lcaps, "w").write(shift_srt(open(caps).read(), lfmd[0], lfmd[1]))
+        check_captions(lcaps, "episode %s LFMD" % day)
         paths["lfmd"] = os.path.join(workdir, names["lfmd"])
-        subprocess.run([sys.executable, ov, "lfmd", piece, lcaps, paths["lfmd"], "--day", str(day), "--subtitle", title.replace("|", " ").strip()],
-                       check=True, stdout=subprocess.DEVNULL)      # the subheading says what the episode is about (Kevin, 4 Sep 2026)
+        # the subheading says what the episode is about (Kevin, 4 Sep 2026)
+        overlay(ov, ["lfmd", piece, lcaps, paths["lfmd"], "--day", str(day), "--subtitle", title.replace("|", " ").strip()], "episode %s LFMD" % day)
     return paths
 
 
@@ -419,8 +449,19 @@ def run(limit=1, keep=False):
     keys = sorted(keys, key=lambda k: (ledger[k]["date"], ledger[k].get("size", 0)))[:limit]
     if not keys:
         print("render: nothing pulled"); return
+    failed = []
     for k in keys:
-        process(k, ledger, keep)
+        try:
+            process(k, ledger, keep)
+        except Exception as exc:   # one bad clip must never take the rest of the night with it (5 Sep 2026)
+            failed.append(k)
+            ledger = watch.load_ledger()
+            if k in ledger:
+                ledger[k]["status"] = "failed"; ledger[k]["error"] = str(exc)[:500]
+                watch.save_ledger(ledger)
+            print("render FAILED for %s: %s" % (k, exc), file=sys.stderr)
+    print("render: %d of %d clips done, %d failed%s" % (len(keys) - len(failed), len(keys), len(failed),
+          (" (" + ", ".join(failed) + ")") if failed else ""))
 
 
 def one(clip, day, out):
@@ -481,7 +522,18 @@ def selftest():
     srt = "1\n00:00:58,000 --> 00:01:02,000\nA\n\n2\n00:01:02,000 --> 00:01:05,000\nB\n"
     shifted = shift_srt(srt, 60.0, 65.0)
     assert "00:00:00,000 --> 00:00:02,000" in shifted and "00:00:02,000 --> 00:00:05,000" in shifted, shifted
-    print(json.dumps({"checks": 36, "failed": []}))
+    # 5 Sep 2026: an empty captions.srt aborted overlays.py 'full' and killed the whole nightly run
+    assert srt_cue_count(srt) == 2 and srt_cue_count("") == 0 and srt_cue_count("   \n\n  ") == 0
+    assert srt_cue_count("1\nnot a cue\n") == 0, "a block with no timing line is not a cue"
+    import tempfile
+    with tempfile.TemporaryDirectory() as td:
+        empty = os.path.join(td, "captions.srt"); open(empty, "w").write("")
+        for bad, why in ((empty, "empty"), (os.path.join(td, "gone.srt"), "missing")):
+            try: check_captions(bad, "test"); raise AssertionError("%s SRT must be refused" % why)
+            except RuntimeError as exc: assert "test" in str(exc), str(exc)
+        good = os.path.join(td, "ok.srt"); open(good, "w").write(srt)
+        assert check_captions(good, "test") == 2
+    print(json.dumps({"checks": 40, "failed": []}))
 
 
 if __name__ == "__main__":

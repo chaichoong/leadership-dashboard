@@ -156,3 +156,14 @@ finally:
     expect(existsSync(out.path), 'the throwaway worktree was left behind').toBe(false);
   });
 });
+
+// A workspace that cannot run the gate is what teaches people to bypass it
+// (finding 20260904-queue-fixer-452). The gate's own half of that fix touches
+// scripts/fixer-merge.py, which the auto-merge gate protects, so it is NOT in
+// this change — only the workspace half is.
+describe('every worktree can run the gate', () => {
+  it('a new worktree gets node_modules linked from the main checkout', () => {
+    const wt = readFileSync(join(ROOT, 'scripts/worktree.sh'), 'utf8');
+    expect(wt).toContain('ln -s "$MAIN_ROOT/node_modules" "$path/node_modules"');
+  });
+});

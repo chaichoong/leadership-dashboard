@@ -110,6 +110,14 @@ Run './scripts/worktree.sh done $topic' first, or pick another topic."
     git worktree add -q --no-track "$path" -b "$branch" origin/main
     ok "Created $path on $branch (from origin/main, no upstream until you push)"
 
+    # Both test suites need node_modules, and a workspace that cannot run the gate
+    # is exactly what teaches people to bypass it (finding 20260904-queue-fixer-452).
+    # Link rather than install: npm ci per workspace is 90 seconds nobody spends.
+    if [ ! -e "$path/node_modules" ] && [ -d "$MAIN_ROOT/node_modules" ]; then
+        ln -s "$MAIN_ROOT/node_modules" "$path/node_modules" \
+            && note "Linked node_modules from the main checkout, so the test gate runs here."
+    fi
+
     local cfg name port
     if cfg="$(claim_config "$topic")"; then
         name="${cfg%% *}"; port="${cfg##* }"

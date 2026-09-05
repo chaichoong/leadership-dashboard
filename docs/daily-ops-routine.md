@@ -334,6 +334,8 @@ python3 scripts/check-routines.py
 
 Exit 0 means only you and your approved slots ran. **Anything else goes at the TOP of your report to Kevin.** Do not disable it yourself: somebody added it to solve a real problem. Say which job, and say that the right answer is a script if it is mechanical, a slot if it belongs to a role, and a phase here only if it belongs to nobody.
 
+A **MISSED SLOT RUNS** line can appear at ANY exit code, including 0: an approved slot ran fewer times than its own cron implies in the window (added 5 Sep 2026, after four role-agent slot runs vanished on 4 Sep with the Mac awake and nothing raised it). Exit 0 still means nothing is stacking; a missing run is a different problem. Put the numbers in your report as "ran N of M".
+
 Exit 2 means the guard **could not verify**, which is not a pass. The likeliest cause is the allowlist and the register disagreeing. Report it as broken.
 
 ## Phase 2 — Exceptions
