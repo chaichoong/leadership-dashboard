@@ -90,12 +90,19 @@ def user_prompt(template, spec, post_text, shape_name, day, source_line, feedbac
                ("\n\nTHE PREVIOUS ATTEMPT FAILED PREFLIGHT. Fix exactly these and change nothing else that works:\n" + feedback) if feedback else ""))
 
 
+PUBLIC_SOURCES = [(r"prospects table|job ad", "a real job advert, anonymised"), (r"build log|register", "the Operations Director agent register"),
+                  (r"frameworks library", "the Operations Director method"), (r"hot-button|playbook", "real sales conversations"), (r"episode (\d+)", "Episode \\1")]
+
+
 def picture_source(source_line):
-    """The source as it may appear ON a picture: the where, never Kevin's name, never a verbatim quote, never a running word."""
-    s = (source_line or "").split(":")[0]
-    s = re.sub(r"Kevin's own words on camera|Kevin's|Kevin|,?\s*verbatim|the run diary|run diary", "", s, flags=re.I)
-    s = re.sub(r"\s+", " ", s).strip(" ,.")
-    return s[:80] or "Operations Director"
+    """The source as it may appear ON a picture: a public-facing phrase, never an internal table name, never Kevin's name, never a
+    verbatim quote, never a running word."""
+    s = (source_line or "")
+    for pat, label in PUBLIC_SOURCES:
+        m = re.search(pat, s, re.I)
+        if m: return re.sub(pat, label, m.group(0), flags=re.I)[:80]
+    s = re.sub(r"Kevin's own words on camera|Kevin's|Kevin|,?\s*verbatim|the run diary|run diary", "", s.split(":")[0], flags=re.I)
+    return re.sub(r"\s+", " ", s).strip(" ,.")[:80] or "Operations Director"
 
 
 # ---------- the model call: the app's Claude proxy (Messages API, no extended thinking), the CLI as fallback ----------
@@ -214,14 +221,16 @@ def selftest():
     assert required_lines("stat", {"title": "", "number": "30 min", "label": "checks", "source": "s"}) == ["30 min", "checks"]
     assert api_model().startswith("claude-") and PROXY.startswith("https://claude-proxy.")
     assert picture_source("Episode 1992, Kevin's own words on camera: \"you've now got the ability\"") == "Episode 1992"
-    assert picture_source("Build log: agent \"Agent Dispatch\" (register, Status Live) and 5 merged pull requests") == "Build log"
+    assert picture_source("Build log: agent \"Agent Dispatch\" (register, Status Live) and 5 merged pull requests") == "the Operations Director agent register"
+    assert picture_source("Prospects table: a real Job Ad (Indeed) harvested by the prospecting agent, anonymised") == "a real job advert, anonymised"
+    assert picture_source("Frameworks Library: \"3-Tier\" (author Austin Chen, not to be named), applied") == "the Operations Director method"
     assert "Kevin" not in user_prompt("steps", spec, "p", "s", "Tue", "Episode 1992, Kevin's own words on camera: \"q\"").split("SOURCE LINE")[1].split("\n")[0]
     # the vendored checker runs on the repo's Playwright: a deliberately clipped page must report an error
     with tempfile.NamedTemporaryFile("w", suffix=".html", delete=False) as fh:
         fh.write("<!doctype html><html><body style='margin:0'><div style='width:1080px;height:1350px;overflow:hidden;position:relative'><p style='position:absolute;left:1060px;top:10px;font-size:20px;white-space:nowrap'>this text is clipped</p><p style='font-size:20px' data-hero>hero</p></div></body></html>"); bad = fh.name
     n, errors, warnings, report = run_check(bad); os.remove(bad)
     assert n >= 1, report[-300:]
-    print(json.dumps({"checks": 13, "failed": []}))
+    print(json.dumps({"checks": 15, "failed": []}))
 
 
 if __name__ == "__main__":
