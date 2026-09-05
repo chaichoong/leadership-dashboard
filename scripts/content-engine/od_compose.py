@@ -19,7 +19,7 @@ REFS = os.path.join(EPIC, "references")
 LANGUAGE = os.path.join(REFS, "design-languages", "operations-director.md")
 W, H = 1080, 1350
 MODEL = "sonnet"            # AI model spend rule: standard tier; escalate by hand if compositions keep failing preflight
-REPAIRS = 2
+REPAIRS = 3
 THINKING = 1024              # thinking budget for the composer: the default budget spent ~9 minutes before the first line (5 Sep 2026)
 
 SHAPE_TO_FORM = {
@@ -83,7 +83,9 @@ def user_prompt(template, spec, post_text, shape_name, day, source_line, feedbac
             "(kicker, station numbers, mono labels such as STATION 01, OWNER APPROVES, the source line, the title strip):\n%s\n\n"
             "SOURCE LINE for the title strip, exactly this and nothing more: %s\n\n"
             "HARD RULES: no person's name anywhere; the brand is Operations Director with its logo in the title strip (copy the inline SVG from the design language). No emoji. No invented numbers. "
-            "Mark exactly one element data-hero. Every string above must be present in the page text verbatim (the checker compares). Fonts via the Google Fonts link in the design language only.%s"
+            "Mark exactly ONE element data-hero (the route or the placard), never two. Every string above must be present as VISIBLE text on the canvas, in HTML or SVG <text>, exactly once: "
+            "never hidden, never off-canvas, never display:none, opacity 0 or a duplicate copy for the checker; hidden text is a preflight error and fails the picture. No text smaller than 13px. "
+            "A station number badge must sit beside its text, never on it: leave 16px between a badge and the label. Fonts via the Google Fonts link in the design language only.%s"
             % (W, H, shape_name, day, SHAPE_TO_FORM.get(template, "the route"), post_text, "\n".join("- " + l for l in req), picture_source(source_line),
                ("\n\nTHE PREVIOUS ATTEMPT FAILED PREFLIGHT. Fix exactly these and change nothing else that works:\n" + feedback) if feedback else ""))
 
@@ -94,6 +96,40 @@ def picture_source(source_line):
     s = re.sub(r"Kevin's own words on camera|Kevin's|Kevin|,?\s*verbatim|the run diary|run diary", "", s, flags=re.I)
     s = re.sub(r"\s+", " ", s).strip(" ,.")
     return s[:80] or "Operations Director"
+
+
+# ---------- the model call: the app's Claude proxy (Messages API, no extended thinking), the CLI as fallback ----------
+PROXY = "https://claude-proxy.kevinbrittain.workers.dev"
+PROXY_TOKEN_FILE = os.path.expanduser("~/.config/od/proxy_service_token2")
+UA = "Mozilla/5.0 od-content-engine"       # Cloudflare's edge blocks Python's default user agent (error 1010) before the worker sees the request
+MAX_TOKENS = 16000
+
+
+def api_model():
+    """The app's default model id from js/ai-models.js (the one source of model ids), else the known standard-tier id."""
+    try:
+        js = open(os.path.join(os.path.dirname(os.path.dirname(HERE)), "js", "ai-models.js")).read()
+        m = re.search(r"\bdefault:\s*['\"]([^'\"]+)['\"]", js)      # js/ai-models.js: `default: 'claude-…'`
+        if m: return m.group(1)
+    except OSError: pass
+    return "claude-sonnet-4-6"
+
+
+def ask_api(system, user, model=None, max_tokens=MAX_TOKENS, timeout=900):
+    """One Messages API call through the proxy: no tools, no extended thinking, a hard max_tokens. Measured 5 Sep 2026: the headless CLI
+    spent 9-20 minutes thinking before its first token on this brief; a plain API call writes the page in a few minutes."""
+    import urllib.request, urllib.error
+    try: token = open(PROXY_TOKEN_FILE).read().strip()
+    except OSError: raise SystemExit("no proxy token at %s" % PROXY_TOKEN_FILE)
+    body = {"model": model or api_model(), "max_tokens": max_tokens, "system": system, "messages": [{"role": "user", "content": user}]}
+    req = urllib.request.Request(PROXY, data=json.dumps(body).encode(), method="POST",
+                                 headers={"Content-Type": "application/json", "Authorization": "Bearer " + token, "User-Agent": UA})
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r: d = json.load(r)
+    except urllib.error.HTTPError as e: raise SystemExit("proxy %s: %s" % (e.code, e.read().decode()[:300]))
+    text = "".join(part.get("text", "") for part in d.get("content", []) if part.get("type") == "text")
+    usage = d.get("usage", {})
+    return text, usage, None
 
 
 def strip_html_text(page):
@@ -141,7 +177,12 @@ def compose(template, spec, post_text, shape_name, day, source_line, out_png, ke
     system = system_prompt(); feedback = ""; html_path = keep_html or (out_png[:-4] + ".html")
     for attempt in range(1, REPAIRS + 2):
         env_model = model or MODEL
-        out, usage, cost = pc.ask_claude_model(system, user_prompt(template, spec, post_text, shape_name, day, source_line, feedback), env_model, timeout=1200, thinking=THINKING, no_mcp=True)
+        prompt = user_prompt(template, spec, post_text, shape_name, day, source_line, feedback)
+        try:
+            out, usage, cost = ask_api(system, prompt, model=(model if model and model.startswith("claude-") else None))
+        except SystemExit as ex:
+            log("compose: proxy call failed (%s); falling back to the CLI" % str(ex)[:120])
+            out, usage, cost = pc.ask_claude_model(system, prompt, env_model, timeout=1200, thinking=THINKING, no_mcp=True)
         page = extract_html(out)
         if "<!doctype html" not in page.lower(): return None, "composer returned no HTML on attempt %d" % attempt, None
         with open(html_path, "w") as fh: fh.write(page)
@@ -152,7 +193,7 @@ def compose(template, spec, post_text, shape_name, day, source_line, out_png, ke
             return out_png, "composed with the Epic Infographics method (operations-director language), preflight clean on attempt %d%s" % (attempt, (", %d warning%s" % (len(warnings), "" if len(warnings) == 1 else "s")) if warnings else ""), html_path
         problems = []
         if miss: problems.append("These required lines are missing or altered in the page text: " + " | ".join(miss))
-        if n_err: problems.append("Preflight report:\n" + (json.dumps(errors)[:1500] if errors else report))
+        if n_err: problems.append("Preflight report (every line is a defect to fix; do not hide text to pass, move or shrink it):\n" + ("\n".join(errors)[:3000] if errors else report))
         feedback = "\n".join(problems)
         log("compose: attempt %d failed (%d missing line%s, %d preflight error%s)" % (attempt, len(miss), "" if len(miss) == 1 else "s", n_err, "" if n_err == 1 else "s"))
     return None, "preflight or text check still failing after %d attempts" % (REPAIRS + 1), html_path
@@ -166,11 +207,12 @@ def selftest():
     spec = {"title": "Turn your SOP into an agent", "steps": ["Pick one task", "Write the SOP"]}
     up = user_prompt("steps", spec, "post body", "The method", "Tue", "Episode 1992")
     assert "- Turn your SOP into an agent" in up and "- Write the SOP" in up and "1080x1350" in up and "no person's name" in up and "data-hero" in up
-    assert "PREVIOUS ATTEMPT FAILED" in user_prompt("steps", spec, "p", "s", "Tue", "src", feedback="fix x")
+    assert "PREVIOUS ATTEMPT FAILED" in user_prompt("steps", spec, "p", "s", "Tue", "src", feedback="fix x") and "never hidden" in up and REPAIRS == 3
     page = "<!doctype html><html><head><style>.x{}</style></head><body><h1>Turn your SOP into an agent</h1><p>Pick one task</p><p>Write the SOP</p></body></html>"
     assert missing_lines(page, required_lines("steps", spec)) == [] and missing_lines(page, ["Not there"]) == ["Not there"]
     assert extract_html("```html\n<!doctype html><p>x</p>\n```").startswith("<!doctype html") and extract_html("Sure! <!DOCTYPE html><p>").lower().startswith("<!doctype html")
     assert required_lines("stat", {"title": "", "number": "30 min", "label": "checks", "source": "s"}) == ["30 min", "checks"]
+    assert api_model().startswith("claude-") and PROXY.startswith("https://claude-proxy.")
     assert picture_source("Episode 1992, Kevin's own words on camera: \"you've now got the ability\"") == "Episode 1992"
     assert picture_source("Build log: agent \"Agent Dispatch\" (register, Status Live) and 5 merged pull requests") == "Build log"
     assert "Kevin" not in user_prompt("steps", spec, "p", "s", "Tue", "Episode 1992, Kevin's own words on camera: \"q\"").split("SOURCE LINE")[1].split("\n")[0]
@@ -179,7 +221,7 @@ def selftest():
         fh.write("<!doctype html><html><body style='margin:0'><div style='width:1080px;height:1350px;overflow:hidden;position:relative'><p style='position:absolute;left:1060px;top:10px;font-size:20px;white-space:nowrap'>this text is clipped</p><p style='font-size:20px' data-hero>hero</p></div></body></html>"); bad = fh.name
     n, errors, warnings, report = run_check(bad); os.remove(bad)
     assert n >= 1, report[-300:]
-    print(json.dumps({"checks": 12, "failed": []}))
+    print(json.dumps({"checks": 13, "failed": []}))
 
 
 if __name__ == "__main__":
