@@ -15,7 +15,7 @@ describe('content-engine render', () => {
   it('passes its own selftest (folder naming, output names, banner title, record fields)', () => {
     const out = JSON.parse(execFileSync('python3', [RENDER, 'selftest'], { encoding: 'utf8', cwd: DIR }));
     expect(out.failed).toEqual([]);
-    expect(out.checks).toBeGreaterThanOrEqual(34);
+    expect(out.checks).toBeGreaterThanOrEqual(36);
   });
 
   it("inserts Ericamae's 8 second branded intro after the sign-off line (her app's rule) and makes the podcast audio", () => {
@@ -45,6 +45,14 @@ describe('content-engine render', () => {
     expect(src).toContain('elif role == "episode": fields["Reframed Video URL"] = None');
     expect(src).toContain('paths["podcast"] = podcast_audio(captioned, os.path.join(workdir, names["podcast"]), at, resume)');
     expect(src).toContain('"--subtitle", title.replace("|", " ").strip()');
+  });
+
+  it('writes the clipped caption file safely and reuses finished masters after a crash (5 Sep 2026)', () => {
+    const src = readFileSync(RENDER, 'utf8');
+    expect(src).toContain('clipped = clip_caption_at(open(caps).read(), at)');
+    expect(src).not.toContain('open(caps, "w").write(clip_caption_at(open(caps).read(), at))');
+    expect(src).toContain('def master_complete(');
+    expect(src).toContain('render: reusing finished %s master');
   });
 
   it('never writes copy from an empty transcript: under 50 characters of speech is B-roll', () => {

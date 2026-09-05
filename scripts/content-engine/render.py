@@ -268,11 +268,25 @@ def transcribe(clip, workdir):
     return overlays.fix_brand(text), base + ".srt"
 
 
+def master_complete(dest, clip):
+    """A master already in the work folder counts if it runs to the clip's length (a crash later in the
+    run must not cost the two hours the masters took: 5 Sep 2026)."""
+    if not os.path.exists(dest): return False
+    pr = os.path.expanduser("~/tools/bin/ffprobe")
+    try:
+        d1 = float(subprocess.run([pr, "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", dest], capture_output=True, text=True).stdout or 0)
+        d0 = float(subprocess.run([pr, "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", clip], capture_output=True, text=True).stdout or 0)
+    except ValueError: return False
+    return d0 > 0 and abs(d1 - d0) < 2.0
+
+
 def render_masters(clip, workdir, only=None):
     out = {}
     for aspect, args in RECIPE.items():
         if only and aspect != only: continue
         dest = os.path.join(workdir, "master_%s.mp4" % aspect.replace(":", "x"))
+        if master_complete(dest, clip):
+            print("render: reusing finished %s master" % aspect); out[aspect] = dest; continue
         subprocess.run([sys.executable, os.path.join(HERE, "stab.py"), "render", clip, dest, "--map", "z-yx"] + args,
                        check=True, stdout=subprocess.DEVNULL)
         out[aspect] = dest
@@ -313,7 +327,8 @@ def build_outputs(masters, srt, day, title, workdir, lfmd=None, role="episode"):
     segs = srt_segments(open(srt).read())
     at, resume = find_pause(masters["16:9"], segs, intro_insert_seconds(segs))     # on the master: same sound, no captions yet
     LAST_CUT.update({"at": at, "resume": resume})
-    open(caps, "w").write(clip_caption_at(open(caps).read(), at))                   # the sign-off caption ends where the jingle starts
+    clipped = clip_caption_at(open(caps).read(), at)                                 # READ before the write opens the file (5 Sep 2026: open(w) first truncated it to nothing)
+    with open(caps, "w") as fh: fh.write(clipped)
     captioned = os.path.join(workdir, "full_captioned.mp4")
     subprocess.run([sys.executable, ov, "full", masters["16:9"], caps, captioned], check=True, stdout=subprocess.DEVNULL)
     paths["full"] = os.path.join(workdir, names["full"])
@@ -435,6 +450,12 @@ def selftest():
     srt_c = "1\n00:00:28,000 --> 00:00:34,000\nhope you find it useful\n\n2\n00:00:34,000 --> 00:00:40,000\nwelcome back\n"
     assert "00:00:28,000 --> 00:00:30,980" in clip_caption_at(srt_c, 30.98) and "00:00:34,000 --> 00:00:40,000" in clip_caption_at(srt_c, 30.98), clip_caption_at(srt_c, 30.98)
     assert clip_caption_at(srt_c, 0.0) == srt_c
+    import tempfile
+    tf = os.path.join(tempfile.gettempdir(), "od-caps-%d.srt" % os.getpid()); open(tf, "w").write(srt_c)
+    clipped = clip_caption_at(open(tf).read(), 30.98)
+    with open(tf, "w") as fh: fh.write(clipped)
+    assert len(open(tf).read()) > 50 and "00:00:30,980" in open(tf).read(), "the clipped caption file is written, never emptied"; os.remove(tf)
+    assert master_complete("/nonexistent/master.mp4", "/nonexistent/clip.insv") is False
     t = title_from_transcript("So consecutive day, 2,225 of a diary of a Runpreneur, and today's episode I talk all about how you can record a video using a structured script to turn that video into an autonomous AI agent, which is going")
     assert "|" in t and "RECORD" in t and len(t) < 90, t
     assert title_from_transcript("nothing useful here") == "DIARY OF A|RUNPRENEUR"
@@ -460,7 +481,7 @@ def selftest():
     srt = "1\n00:00:58,000 --> 00:01:02,000\nA\n\n2\n00:01:02,000 --> 00:01:05,000\nB\n"
     shifted = shift_srt(srt, 60.0, 65.0)
     assert "00:00:00,000 --> 00:00:02,000" in shifted and "00:00:02,000 --> 00:00:05,000" in shifted, shifted
-    print(json.dumps({"checks": 34, "failed": []}))
+    print(json.dumps({"checks": 36, "failed": []}))
 
 
 if __name__ == "__main__":
