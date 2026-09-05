@@ -172,6 +172,58 @@ def read_events(window_hours):
     return rows, None
 
 
+# A slot that never ran leaves no event, and an absent row is exactly what nobody
+# notices. On 4 Sep 2026 four role-agent slot runs were skipped with the Mac awake
+# and nothing raised it (finding 20260905-exceptions-464). So the check now counts
+# what each slot's own cron implies against what actually ran, and reports the gap.
+#
+# The cron reader is job-queue.py's, imported rather than copied: this codebase has
+# already lost a week of CEO briefs to a second, subtly different day-of-week rule.
+SETTLE_MINUTES = 90   # a firing this recent may still be in progress, so it is not yet a miss
+
+
+def _queue_module():
+    import importlib.util
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "job-queue.py")
+    spec = importlib.util.spec_from_file_location("job_queue_attendance", path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def expected_firings(cron, window_hours, ref=None, settle_minutes=SETTLE_MINUTES):
+    """How many times this cron should have fired inside the window, counting only
+    firings old enough to have finished. Local time, minute by minute."""
+    jq = _queue_module()
+    now_local = ref or datetime.now()
+    start = (now_local - timedelta(hours=window_hours)).replace(second=0, microsecond=0)
+    end = now_local - timedelta(minutes=settle_minutes)
+    n, cur = 0, start
+    while cur <= end:
+        if jq.cron_matches(cron, cur):
+            n += 1
+        cur += timedelta(minutes=1)
+    return n
+
+
+def slot_attendance(ran, schedule, window_hours, ref=None):
+    """{slot: {cron, expected, ran, shortfall}} for every approved slot with a cron."""
+    out = {}
+    for name in sorted(APPROVED_SLOTS):
+        cfg = (schedule or {}).get(name) or {}
+        cron = cfg.get("cron")
+        if not cron or cfg.get("enabled") is False:
+            continue
+        try:
+            exp = expected_firings(cron, window_hours, ref=ref)
+        except Exception:
+            continue          # an unreadable cron is the register's problem, not a missed run
+        got = len(ran.get(name, []))
+        out[name] = {"cron": cron, "expected": exp, "ran": got,
+                     "shortfall": max(0, exp - got)}
+    return out
+
+
 def check(window_hours=DEFAULT_WINDOW_HOURS):
     routines = known_routines()
     if routines is None:
@@ -226,7 +278,17 @@ def check(window_hours=DEFAULT_WINDOW_HOURS):
                     if n != THE_ROUTINE and n not in APPROVED_SLOTS)
     slots_that_ran = sorted(n for n in ran if n in APPROVED_SLOTS)
 
+    try:
+        with open(SCHEDULE_FILE) as f:
+            schedule_cfg = json.load(f)
+    except (OSError, ValueError):
+        schedule_cfg = {}
+    attendance = slot_attendance(ran, schedule_cfg, window_hours)
+    shortfalls = {n: v for n, v in attendance.items() if v["shortfall"]}
+
     result = {
+        "slot_attendance": attendance,
+        "slot_shortfalls": sorted(shortfalls),
         "events_log": EVENTS,
         "window_hours": window_hours,
         "events_in_window": len(rows),
@@ -260,6 +322,13 @@ def check(window_hours=DEFAULT_WINDOW_HOURS):
         return 1, result
 
     result["ok"] = True
+    if shortfalls:
+        result["missed_slot_runs"] = (
+            "%d approved slot(s) ran fewer times than their schedule implies in "
+            "the last %dh: %s. Nothing is stacking, but those runs did not happen."
+            % (len(shortfalls), window_hours,
+               ", ".join("%s %d of %d" % (n, v["ran"], v["expected"])
+                         for n, v in sorted(shortfalls.items()))))
     result["reason"] = (
         "only %s and its approved slots ran in the last %dh (%d queue events "
         "seen; slots: %s)"
@@ -275,14 +344,30 @@ def main():
     a = p.parse_args()
 
     code, result = check(a.window_hours)
+    missed = result.get("missed_slot_runs")
+    if not missed and result.get("slot_shortfalls"):
+        att = result.get("slot_attendance", {})
+        missed = ("%d approved slot(s) ran fewer times than their schedule implies: %s"
+                  % (len(result["slot_shortfalls"]),
+                     ", ".join("%s %d of %d" % (n, att[n]["ran"], att[n]["expected"])
+                               for n in result["slot_shortfalls"])))
     if a.json:
         print(json.dumps(result, indent=2))
     elif code == 0:
         print("OK: %s" % result["reason"])
         print("    %d routines known, %d other job(s) also used the queue"
               % (result["routines_known"], len(result["non_routine_jobs_that_ran"])))
+        for name, v in sorted(result.get("slot_attendance", {}).items()):
+            print("    slot %s: %d of %d expected runs" % (name, v["ran"], v["expected"]))
+        # Exit 0 still means "nothing is stacking". A slot that did not run is a
+        # DIFFERENT problem, so it is said in its own words rather than folded
+        # into the stacking verdict (5 Sep 2026).
+        if missed:
+            print("MISSED SLOT RUNS: %s" % missed, file=sys.stderr)
     else:
         print("ROUTINE STACKING: %s" % result["reason"], file=sys.stderr)
+        if missed:
+            print("MISSED SLOT RUNS: %s" % missed, file=sys.stderr)
         if result.get("detail"):
             print("    %s" % result["detail"], file=sys.stderr)
         if result.get("when"):

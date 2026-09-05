@@ -18,6 +18,21 @@ describe('content-engine render', () => {
     expect(out.checks).toBeGreaterThanOrEqual(36);
   });
 
+  // 5 Sep 2026 (finding 20260905-exceptions-462): the nightly run died inside overlays.py 'full'
+  // with an ffmpeg filter error, the stderr was thrown away by stdout=DEVNULL, and the one bad clip
+  // took every other clip of the night with it.
+  it('refuses an empty or missing captions file by name, surfaces overlays stderr, and keeps rendering after a failed clip', () => {
+    const src = readFileSync(RENDER, 'utf8');
+    expect(src).toContain('def check_captions(path, what)');
+    expect(src).toContain('check_captions(caps, "episode %s full" % day)');
+    expect(src).toContain('stderr=subprocess.PIPE');
+    // no overlays call may go back to swallowing its stderr
+    expect(src).not.toMatch(/subprocess\.run\(\[sys\.executable, ov, "/);
+    // a failed clip is recorded and the loop continues
+    expect(src).toContain('ledger[k]["status"] = "failed"');
+    expect(src).toMatch(/render: %d of %d clips done, %d failed/);
+  });
+
   it("inserts Ericamae's 8 second branded intro after the sign-off line (her app's rule) and makes the podcast audio", () => {
     const src = readFileSync(RENDER, 'utf8');
     expect(src).toContain('INTRO_CLIP = os.path.join(EDITED_ROOT, "Vlog Intro", "runprenuer-intro_clip.mp4")');

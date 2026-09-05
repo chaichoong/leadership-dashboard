@@ -185,6 +185,23 @@ describe('staleness cut-off', () => {
     expect(states).not.toContain('acquired');
     expect(events().every((e) => e.ok !== true)).toBe(true);
   });
+
+  // 4 Sep 2026 (finding 20260905-exceptions-464): four role-agent slot runs never
+  // happened with the Mac awake. launchd fired, the queue refused, and the job's
+  // OWN runs.log said nothing — indistinguishable from never being scheduled.
+  it('writes a SKIPPED line with the reason into the job\'s runs.log when a wrapped run is refused', () => {
+    const fakeHome = mkdtempSync(join(ROOT, 'home-'));
+    writeFileSync(schedulePath, JSON.stringify({
+      'always-stale': { cron: '0 2 * * *', maxLateMinutes: 0, mode: 'wrapped' },
+    }));
+    const r = run(['run', 'always-stale', '--', 'true'], { env: { HOME: fakeHome } });
+    expect(r.code).toBe(3);
+    const log = join(fakeHome, 'knowledge-os', 'logs', 'always-stale', 'runs.log');
+    expect(existsSync(log)).toBe(true);
+    const line = readFileSync(log, 'utf8');
+    expect(line).toContain('SKIPPED');
+    expect(line).toMatch(/late|stale|min/i);        // the reason, not just the fact
+  });
 });
 
 // ---------------------------------------------------------------------------

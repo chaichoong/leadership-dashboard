@@ -156,3 +156,44 @@ finally:
     expect(existsSync(out.path), 'the throwaway worktree was left behind').toBe(false);
   });
 });
+
+// A missing dependency is not a verdict on the change.
+//
+// 4 Sep 2026 (finding 20260904-queue-fixer-452): the gate went RED in a fresh
+// worktree because node_modules resolved nothing. A false red on the gate is the
+// shortest route to someone bypassing it, and bypassing it is how an unreviewed
+// change to the approval loop reaches production.
+describe('cannot run is not the same as red', () => {
+  it('reports CANNOT RUN, not a failure, when neither suite resolves', () => {
+    const box = mkdtempSync(join(tmpdir(), 'nodeps-'));
+    const out = JSON.parse(execFileSync('python3', ['-c', `
+import importlib.util, json
+spec = importlib.util.spec_from_file_location('fm', ${JSON.stringify(GATE)})
+m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+ok, gate = m.run_gate(${JSON.stringify(box)})
+print(json.dumps({"ok": ok, "gate": gate}))
+`], { encoding: 'utf8' }).trim());
+    rmSync(box, { recursive: true, force: true });
+    expect(out.ok).toBeNull();                       // None, never False
+    expect(out.gate.cannotRun).toMatch(/could not run/);
+    expect(out.gate.cannotRun).toMatch(/NOT a red/);
+    expect(out.gate.vitest).toBeUndefined();         // nothing was actually tested
+  });
+
+  it('a merge run distinguishes the two in what it prints, and merges on neither', () => {
+    expect(SRC).toContain('if ok is None:');
+    expect(SRC).toContain('the gate COULD NOT RUN');
+    expect(SRC).toContain('the gate is RED');
+  });
+
+  it('deps_resolve walks up, so a node_modules holding only a cache does not count', () => {
+    expect(SRC).toContain('def deps_resolve(cwd)');
+    expect(SRC).toMatch(/os\.path\.join\(b, "vitest"\)/);
+    expect(SRC).toMatch(/os\.path\.join\(b, "playwright"\)/);
+  });
+
+  it('a new worktree gets node_modules linked so the gate can run there at all', () => {
+    const wt = readFileSync(join(ROOT, 'scripts/worktree.sh'), 'utf8');
+    expect(wt).toContain('ln -s "$MAIN_ROOT/node_modules" "$path/node_modules"');
+  });
+});
