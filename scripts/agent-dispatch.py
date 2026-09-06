@@ -291,13 +291,13 @@ REASSIGN_MAX = 2          # bounces before a task becomes Kevin's decision
 # *_REGISTER_ROW names below are derived aliases, kept so the many existing
 # readers (and their tests) stay true — never redefine them by hand.
 ROLE_AGENTS = {
-    "recJ8J8idWE8d97tH": {"name": "AI Inbound Comms Response",
+    "recJ8J8idWE8d97tH": {"name": "AI Inbox Response",
                           "agent": "inbound-comms-response", "role": "worker",
                           "registerRow": "recHfhVDb6BfQYco5"},
-    "recjh6mmaF8KJW8t3": {"name": "AI Creditor Management",
+    "recjh6mmaF8KJW8t3": {"name": "AI Supplier and Creditor Manager",
                           "agent": "creditor-management", "role": "worker",
                           "registerRow": "recDvxwDGcC3pFbPa"},
-    "rec1hYELb4zS8pjjO": {"name": "AI Task Manager",
+    "rec1hYELb4zS8pjjO": {"name": "AI Task Board Manager",
                           "agent": "task-manager", "role": "worker",
                           "registerRow": "reczg8BygPFnJMQnh"},
     # Property Administration (build session 2 Sep 2026; was Property
@@ -325,7 +325,7 @@ ROLE_AGENTS = {
     # (09:00/13:00/17:00 via inbound-triage-run.sh) and must never be handed
     # work by the CEO pass — being in this dict would otherwise make it
     # dispatchable the moment its register row reads Live, which it does.
-    "recCUfsTXzmVZynEI": {"name": "AI Inbound Comms Triage",
+    "recCUfsTXzmVZynEI": {"name": "AI Inbox Triage",
                           "agent": "inbound-comms-triage", "role": "worker",
                           "registerRow": "recYy33zkoa099uM2",
                           "dispatch": False},
@@ -335,7 +335,7 @@ ROLE_AGENTS = {
     # in this dict; `dispatch: False` because the CEO pass must never hand it
     # work — its work arrives as raw clips, not tasks. Lessons land in
     # ~/.claude/agents/content-engine.md and both of its Claude calls read them.
-    "recRcy1Edas6rGaaF": {"name": "AI Content Engine",
+    "recRcy1Edas6rGaaF": {"name": "AI Content Producer",
                           "agent": "content-engine", "role": "worker",
                           "registerRow": "recNaC0N5KiTGBPNy",
                           "dispatch": False},
@@ -3604,8 +3604,8 @@ def raise_engine_task(name, team_rec_id, estimate, desc, due=None,
 # the AI Agents page's "Daily logs" check reads: without it an agent's runs
 # are invisible and the page can only report a wiring gap (found 26 Aug 2026
 # — four Built/Live agents had never logged once).
-SCORE_AGENT_NAMES = {"response": "Inbound Comms Response",
-                     "creditor": "Creditor Management",
+SCORE_AGENT_NAMES = {"response": "Inbox Response",
+                     "creditor": "Supplier and Creditor Manager",
                      "property": "Property Administration"}
 
 

@@ -45,9 +45,9 @@ ACTIVITY_TABLE = "tbl2ZTHBDBPo681UL"
 AGENTS_TABLE = "tbl9msVjyQWslLOIZ"
 DAILY_LOG_TABLE = "tbl6VQKVMnK0Q7hbJ"
 
-AGENT_NAME = "Task Manager"
+AGENT_NAME = "Task Board Manager"
 TASKMGR_REGISTER_ROW = "reczg8BygPFnJMQnh"   # AI Agents register
-TASKMGR_TEAM_REC = "rec1hYELb4zS8pjjO"       # Team Members "AI Task Manager"
+TASKMGR_TEAM_REC = "rec1hYELb4zS8pjjO"       # Team Members "AI Task Board Manager"
 METRIC_SCORE_FIELD = "fldkGxrOlrfuLlH3J"
 KEVIN_REC = "recHEt2VPYothaqTd"
 KEVIN_EMAIL = "kevin@runpreneur.org.uk"

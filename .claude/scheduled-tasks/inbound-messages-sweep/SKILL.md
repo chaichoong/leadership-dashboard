@@ -98,7 +98,7 @@ and say in the Description that this is a tier-1 matter to be PREPARED only,
 following the creditor process. If the message is a creditor or someone
 chasing payment (money Kevin owes), START the Description with the line
 `CREDITOR MATTER` — the dispatch engine routes on that marker to the
-Creditor Management agent (25 Aug 2026). When unsure, treat it as tier 1.
+Supplier and Creditor Manager agent (25 Aug 2026). When unsure, treat it as tier 1.
 
 Everything else: Priority `High`.
 

@@ -43,7 +43,7 @@
         // AI Agents (Leadership) — ADMIN ONLY, like KPI Library. Approvals,
         // checks and the workforce register in one place (Kevin's ruling,
         // 24 Aug 2026; moved out of the Systemisation page).
-        { id: 'agents', name: 'AI Agents', icon: '🤖', pageVer: '1.56', sopFile: 'sop-ai-agents.html', sopVer: '1.42', standalone: 'os/agents/index.html', adminOnly: true },
+        { id: 'agents', name: 'AI Agents', icon: '🤖', pageVer: '1.57', sopFile: 'sop-ai-agents.html', sopVer: '1.42', standalone: 'os/agents/index.html', adminOnly: true },
         { id: 'fintable',  name: 'Accounts',                       icon: '🏦', pageVer: '1.19', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#fintable' },
         { id: 'systemisation', name: 'Systemisation',              icon: '⚙️', pageVer: '1.19', sopFile: 'guides/systemisation.html',    sopVer: '1.11', standalone: 'os/systemisation/index.html' },
         { id: 'os-team',    name: 'Team Members',                  icon: '👥', pageVer: '1.29', sopFile: '',                            sopVer: '1.1', standalone: 'os/team/index.html' },
@@ -351,7 +351,7 @@
     // (AGENTIC "C — Conclusion & Score"): after each accuracy refresh the runtime
     // writes its current 31-day reading to its own register row.
     const AGENT_RECON = {
-        recordId:    'recyrN5YCQFssAniE',  // "Reconciliation" row in AI Agents (TABLES.aiAgents)
+        recordId:    'recyrN5YCQFssAniE',  // "Bookkeeper" row in AI Agents (was "Reconciliation" until 6 Sep 2026) (TABLES.aiAgents)
         metricScore: 'fldkGxrOlrfuLlH3J',  // singleLineText — current reading vs the 95% target
         guardrail:   'fldWgqxMFmaAAvUHC',  // singleSelect — Autonomous | Approval required | Hybrid escalation
     };

@@ -46,14 +46,14 @@ print(json.dumps({"agent": e.get("agent"), "dispatch": e.get("dispatch", True), 
 
   it('can hand in its own work while never being handed work: submit passes on Built, dispatch still refuses', () => {
     const r = py(`
-ad.fetch_role_roster = lambda: {${JSON.stringify(CONTENT_TM)}: {"name": "AI Content Engine", "status": "Built", "dispatchable": False}}
+ad.fetch_role_roster = lambda: {${JSON.stringify(CONTENT_TM)}: {"name": "AI Content Producer", "status": "Built", "dispatchable": False}}
 out = {}
 for verb in ("submit", "dispatch"):
     try:
         ad.require_role_agent_live(${JSON.stringify(CONTENT_TM)}, verb); out[verb] = "ok"
     except SystemExit as e:
         out[verb] = "refused"
-ad.fetch_role_roster = lambda: {${JSON.stringify(CONTENT_TM)}: {"name": "AI Content Engine", "status": "Paused", "dispatchable": False}}
+ad.fetch_role_roster = lambda: {${JSON.stringify(CONTENT_TM)}: {"name": "AI Content Producer", "status": "Paused", "dispatchable": False}}
 try:
     ad.require_role_agent_live(${JSON.stringify(CONTENT_TM)}, "submit"); out["paused"] = "ok"
 except SystemExit:

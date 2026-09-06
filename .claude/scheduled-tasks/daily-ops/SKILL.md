@@ -31,8 +31,8 @@ half no arrivals list can show: **saying when one did not run.**
 
 | Slot | launchd label | When | Ruled in |
 |---|---|---|---|
-| Inbound Comms Triage | `com.kevinbrittain.inbound-triage` | 09:00 / 13:00 / 17:00 | Kevin, 24 Aug 2026 |
-| Task Manager board pass | `com.kevinbrittain.task-manager` | 09:00 / 13:00 / 17:00 | Kevin, 25 Aug 2026 |
+| Inbox Triage | `com.kevinbrittain.inbound-triage` | 09:00 / 13:00 / 17:00 | Kevin, 24 Aug 2026 |
+| Task Board Manager board pass | `com.kevinbrittain.task-manager` | 09:00 / 13:00 / 17:00 | Kevin, 25 Aug 2026 |
 | CEO huddle + memory sweep | `com.kevinbrittain.ceo-agent` | 06:45 | Kevin, 26 Aug 2026 |
 | Prospecting | `com.kevinbrittain.prospecting` | 09:15 | Kevin, 26 Aug 2026 |
 | Production sweep (full walk) | `com.kevinbrittain.prod-sweep-weekly` | Sundays 11:00 | Kevin, 26 Aug 2026 |

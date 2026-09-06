@@ -68,7 +68,7 @@ Before returning that line, write the agent's daily log (this is how the AI
 Agents page sees the run — added 26 Aug 2026; skipped runs log too, honestly):
 
     python3 scripts/agent_daily_log.py publish --agent-row recbQr4hq0hkVVVNE \
-        --name "Prospecting" \
+        --name "Lead Finder" \
         --summary "<the same one line: found X, synced Y, keywords used>" \
         --decisions "<a few lines: which keywords, notable qualify/reject calls, any warnings>"
 

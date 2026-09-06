@@ -4,9 +4,9 @@
 <meta charset="utf-8">
 <title>How you get there</title>
 <!-- Page 2 of the lead magnet. Composition: Editorial spread. A narrow left column holds the towering destination
-     numeral (90%) and the clipboard self-check; the wide right column carries the route down the board, six stations,
-     one move each. The bottom band shows the nine-step method as tiles and the call to action. Design language:
-     operations-director.md. -->
+     numeral (90%), the then-and-now lanes and the owner's gold stop; the wide right column carries the route down
+     the board with seven stations, one move each, in the order we made them on our own business. One call to action
+     at the foot. Design language: operations-director.md. -->
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,700;1,9..40,400&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
@@ -48,53 +48,42 @@ h1.title em { font-style:normal; color:var(--accent); }
 .standfirst { left:56px; top:212px; width:1040px; font-size:20px; line-height:1.35; color:var(--ink-muted); }
 .standfirst strong { font-weight:500; color:var(--ink); }
 
-/* left column: destination + clipboard */
+/* left column: destination, then and now, the owner's stop */
 .dest { left:50px; top:326px; width:340px; font-size:166px; line-height:.9; color:var(--accent); }
 .dest-label { left:56px; top:508px; width:300px; font-size:18px; line-height:1.3; color:var(--ink); }
-.dest-src { left:56px; top:612px; width:300px; font-size:13px; line-height:1.5; color:var(--ink-faint); }
+.dest-src { left:56px; top:614px; width:300px; font-size:13px; line-height:1.5; color:var(--ink-faint); }
 
 .placard { background:var(--surface); border:1.5px solid var(--subtle); border-radius:var(--radius); position:absolute; }
 .placard::before { content:''; position:absolute; left:24px; top:-4px; width:72px; height:8px; background:var(--gold); }
 .plate { box-shadow:6px 6px 0 var(--accent-deep); }
 
-.clip { left:56px; top:690px; width:300px; height:392px; padding:26px 22px 20px; }
-.clip .clip-bar { position:absolute; left:110px; top:-12px; width:80px; height:20px; border-radius:6px; background:var(--accent-deep); }
-.clip h3 { font-size:22px; font-weight:500; line-height:1.15; color:var(--ink); }
-.clip .sub { margin-top:6px; font-size:15px; line-height:1.35; color:var(--ink-muted); }
-.clip ul { list-style:none; margin-top:14px; }
-.clip li { display:flex; align-items:center; gap:10px; height:36px; font-size:15px; color:var(--ink); }
-.clip li .box { width:18px; height:18px; border:1.5px solid var(--ink-muted); border-radius:3px; flex:0 0 18px; }
-.clip .foot { margin-top:10px; font-size:13px; color:var(--ink-faint); }
+.lanes { left:56px; top:700px; width:300px; height:330px; padding:22px 22px 18px; }
+.lanes .lane-label { font-size:13px; color:var(--ink-faint); margin-bottom:8px; }
+.lanes .lane-now .lane-label { color:var(--accent); }
+.lanes .lane-text { margin-top:8px; font-size:15px; line-height:1.35; color:var(--ink-muted); }
+.lanes .lane-text strong { font-weight:500; color:var(--ink); }
+.lanes .lane-now { margin-top:14px; }
 
-.keep { left:56px; top:1124px; width:300px; }
+.keep { left:56px; top:1080px; width:300px; }
 .keep .stop { position:absolute; left:0; top:0; width:44px; height:44px; border-radius:999px; background:var(--gold); box-shadow:0 0 0 3px var(--surface); }
 .keep .fig { position:absolute; left:54px; top:0; width:30px; height:38px; }
 .keep .t { position:absolute; left:96px; top:2px; width:204px; font-size:15px; line-height:1.35; color:var(--ink); }
 .keep .t .mono { display:block; font-size:13px; color:var(--ink-muted); margin-bottom:2px; }
 
-/* right column: the route and six stations */
+/* right column: the route and seven stations */
 .route { left:0; top:0; width:1240px; height:1754px; pointer-events:none; }
 .stop { position:absolute; width:44px; height:44px; border-radius:999px; background:var(--accent); color:var(--surface);
         font-family:var(--font-mono); font-weight:500; font-size:20px; display:flex; align-items:center; justify-content:center; }
-.station { position:absolute; left:480px; width:704px; height:152px; padding:18px 160px 16px 22px; background:var(--surface);
+.station { position:absolute; left:480px; width:704px; height:150px; padding:16px 156px 14px 22px; background:var(--surface);
            border:1.5px solid var(--subtle); border-radius:var(--radius); }
 .station h3 { font-size:22px; font-weight:500; line-height:1.15; color:var(--ink); }
-.station p { margin-top:8px; font-size:15.5px; line-height:1.4; color:var(--ink-muted); }
+.station p { margin-top:7px; font-size:15px; line-height:1.38; color:var(--ink-muted); }
 .station p strong { font-weight:500; color:var(--ink); }
-.station .prop { position:absolute; right:18px; top:16px; width:130px; height:120px; color:var(--ink-muted); }
+.station .prop { position:absolute; right:18px; top:14px; width:124px; height:120px; color:var(--ink-muted); }
+.station.first { background:var(--surface-2); border-style:dashed; }
 
-/* bottom band: method tiles + call to action */
-.method-label { left:56px; top:1408px; font-size:13px; color:var(--ink-faint); }
-.tiles { left:56px; top:1432px; width:1128px; display:flex; gap:0; }
-.tile { width:118px; text-align:center; }
-.tile .sq { width:40px; height:40px; margin:0 auto; border-radius:6px; background:var(--accent-soft); border:1.5px solid var(--accent);
-            font-family:var(--font-display); font-weight:700; font-size:20px; color:var(--accent); display:flex; align-items:center; justify-content:center; }
-.tile .sq.on { background:var(--accent); color:var(--surface); }
-.tile .w { margin-top:6px; font-size:13px; color:var(--ink-muted); white-space:nowrap; }
-.method-cap { left:56px; top:1508px; width:1128px; font-size:15px; line-height:1.35; color:var(--ink-muted); }
-.method-cap strong { font-weight:500; color:var(--ink); }
-
-.cta { left:56px; top:1556px; width:1128px; height:88px; padding:0 28px; display:flex; align-items:center; justify-content:space-between; }
+/* call to action */
+.cta { left:56px; top:1548px; width:1128px; height:88px; padding:0 28px; display:flex; align-items:center; justify-content:space-between; }
 .cta .q { font-size:22px; font-weight:500; color:var(--ink); }
 .cta .a { text-align:right; font-size:13px; line-height:1.6; color:var(--ink-muted); }
 .cta .a strong { color:var(--accent); font-weight:500; }
@@ -127,6 +116,10 @@ h1.title em { font-style:normal; color:var(--accent); }
       <circle cx="12" cy="8" r="6.5"/>
       <path d="M1 30 v-3 a11 11 0 0 1 22 0 v3 z"/>
     </symbol>
+    <filter id="wobble" x="-10%" y="-10%" width="120%" height="120%">
+      <feTurbulence type="fractalNoise" baseFrequency="0.05" numOctaves="2" result="n"/>
+      <feDisplacementMap in="SourceGraphic" in2="n" scale="1.6"/>
+    </filter>
   </defs>
 </svg>
 
@@ -135,28 +128,36 @@ h1.title em { font-style:normal; color:var(--accent); }
 
 <!-- header -->
 <div class="abs kicker mono">Operations Director · How it is done · Page 2 of 2</div>
-<h1 class="abs title">How you get there: <em>one job at a time</em>, until the business runs without you</h1>
-<p class="abs standfirst">This is the spine of what an Operations Director does inside your business. <strong>Six moves, in this order.</strong> The detail under each one is our job, not yours. You keep one job: approving.</p>
+<h1 class="abs title">How you get there: from <em>drowning in the business</em> to agents running 90% of the day</h1>
+<p class="abs standfirst"><strong>Seven moves, in the order we made them on our own business.</strong> The detail under each one is our job inside yours. You keep one job: approving.</p>
 
 <!-- left column: the destination -->
 <div class="abs display dest" data-hero>90%</div>
-<div class="abs dest-label">of your day-to-day operations run by AI agents, with you approving. That is the destination, and we do not stop until you are there.</div>
+<div class="abs dest-label">of day-to-day operations run by AI agents, with you approving. That is the destination. We do not stop until you are there.</div>
 <div class="abs dest-src mono">Measured in hours, not tasks: the share of your listed weekly hours now run by agents</div>
 
-<!-- clipboard self-check -->
-<div class="placard clip">
-  <div class="clip-bar"></div>
-  <h3>Where would you start?</h3>
-  <div class="sub">Tick what stops if you take two weeks off:</div>
-  <ul>
-    <li><span class="box"></span>Bookkeeping and bank reconciliation</li>
-    <li><span class="box"></span>Replying to customer emails</li>
-    <li><span class="box"></span>Chasing money you are owed</li>
-    <li><span class="box"></span>Posting content every week</li>
-    <li><span class="box"></span>Renewals, licences, compliance</li>
-    <li><span class="box"></span>Knowing where the money is</li>
-  </ul>
-  <div class="foot mono">Bring the ticks to the call</div>
+<!-- then and now -->
+<div class="placard lanes">
+  <div class="lane-then">
+    <div class="lane-label mono">Then · one founder, everything</div>
+    <svg width="256" height="34" viewBox="0 0 256 34" aria-label="one founder surrounded by the work">
+      <use href="#person" x="0" y="2" width="24" height="30" fill="var(--ink)"/>
+      <g fill="none" stroke="var(--de-emphasis)" stroke-width="1.5" stroke-linecap="round" filter="url(#wobble)">
+        <path d="M40 8 h60 M40 17 h84 M40 26 h48"/><path d="M140 8 h70 M140 17 h50 M140 26 h96"/>
+      </g>
+    </svg>
+    <div class="lane-text">Every inbox, every invoice, every decision through one person. <strong>The business stopped when the founder stopped.</strong></div>
+  </div>
+  <div class="lane-now">
+    <div class="lane-label mono">Now · agents run the day</div>
+    <svg width="256" height="34" viewBox="0 0 256 34" aria-label="agents at work, owner approving">
+      <use href="#agent" x="0" y="0" width="32" height="32"/><use href="#agent" x="38" y="0" width="32" height="32"/>
+      <use href="#agent" x="76" y="0" width="32" height="32"/><use href="#agent" x="114" y="0" width="32" height="32"/>
+      <use href="#agent" x="152" y="0" width="32" height="32"/>
+      <circle cx="226" cy="16" r="11" fill="var(--gold)" stroke="var(--surface)" stroke-width="2"/>
+    </svg>
+    <div class="lane-text">Each job has its own agent on its own clock. <strong>The owner keeps one gold stop: approve.</strong></div>
+  </div>
 </div>
 
 <!-- the one job you keep -->
@@ -168,107 +169,100 @@ h1.title em { font-style:normal; color:var(--accent); }
 
 <!-- the route down the board -->
 <svg class="abs route" viewBox="0 0 1240 1754" aria-hidden="true">
-  <path d="M440 300 V1372" fill="none" stroke="var(--accent)" stroke-width="14" stroke-linecap="round"/>
-  <path d="M440 300 V1372" fill="none" stroke="var(--surface)" stroke-width="1.5" stroke-dasharray="14 10"/>
-  <path d="M424 1366 L440 1392 L456 1366 Z" fill="var(--accent)"/>
+  <path d="M440 300 V1508" fill="none" stroke="var(--accent)" stroke-width="14" stroke-linecap="round"/>
+  <path d="M440 300 V1508" fill="none" stroke="var(--surface)" stroke-width="1.5" stroke-dasharray="14 10"/>
+  <path d="M424 1502 L440 1528 L456 1502 Z" fill="var(--accent)"/>
   <!-- props of the office: a clock, a paper clip, a tray -->
   <g fill="none" stroke="var(--ink-muted)" stroke-width="1.5" stroke-linecap="round">
     <g transform="translate(1146 268)"><circle cx="0" cy="0" r="17"/><path d="M0 -11 V0 L7 4"/><path d="M0 -15 v2 M15 0 h-2 M0 15 v-2 M-15 0 h2"/></g>
-    <g transform="translate(372 1120) rotate(-28)"><path d="M0 0 v34 a7 7 0 0 0 14 0 V6 a4 4 0 0 0 -8 0 v24 a2 2 0 0 0 4 0 V10"/></g>
-    <g transform="translate(300 1236)"><path d="M0 22 h56 l-6 22 h-44 z"/><path d="M8 22 v-8 h40 v8"/></g>
+    <g transform="translate(372 690) rotate(-28)"><path d="M0 0 v34 a7 7 0 0 0 14 0 V6 a4 4 0 0 0 -8 0 v24 a2 2 0 0 0 4 0 V10"/></g>
+    <g transform="translate(290 1190)"><path d="M0 22 h56 l-6 22 h-44 z"/><path d="M8 22 v-8 h40 v8"/></g>
+    <g transform="translate(120 1420)"><path d="M0 8 h22 l7 7 h43 v34 h-72 z"/><path d="M0 22 h72"/></g>
   </g>
 </svg>
 
-<!-- stations -->
+<!-- stations: the seven moves -->
 <div class="stop" style="left:418px;top:328px">01</div>
-<div class="station" style="top:306px">
-  <h3>List every job</h3>
-  <p>Every repeatable job in the business goes on one list: what gets done, how often, and how long it takes. <strong>That list is the denominator of the 90%.</strong> Nothing is automated that is not on it.</p>
-  <svg class="prop" viewBox="0 0 130 120" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
-    <rect x="30" y="8" width="72" height="100" rx="4"/><rect x="54" y="2" width="24" height="10" rx="3" fill="var(--accent-deep)" stroke="none"/>
-    <g><rect x="40" y="26" width="9" height="9" rx="1.5"/><path d="M55 30 h36"/></g>
-    <g><rect x="40" y="44" width="9" height="9" rx="1.5"/><path d="M55 48 h30"/></g>
-    <g><rect x="40" y="62" width="9" height="9" rx="1.5"/><path d="M55 66 h38"/></g>
-    <g><rect x="40" y="80" width="9" height="9" rx="1.5"/><path d="M55 84 h26"/></g>
-    <path d="M42 30 l2.5 2.5 l4.5 -5" stroke="var(--accent)" stroke-width="2"/>
+<div class="station first" style="top:306px">
+  <h3>Start where you are: overwhelmed</h3>
+  <p>Everything ran through one person: eleven staff, every inbox, every invoice, every decision. <strong>The business stopped when the founder stopped.</strong> Nothing about this is unusual. This is where most owners live.</p>
+  <svg class="prop" viewBox="0 0 124 120" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
+    <use href="#person" x="50" y="40" width="24" height="30" fill="var(--ink)" stroke="none"/>
+    <g stroke="var(--ink-faint)"><path d="M14 20 L44 44 M110 20 L80 44 M14 100 L44 72 M110 100 L80 72 M62 6 V32 M62 112 V84 M10 60 H40 M114 60 H84"/></g>
+    <g stroke="var(--ink-faint)"><path d="M44 44 l-3 -8 M44 44 l-8 -3 M80 44 l3 -8 M80 44 l8 -3 M44 72 l-3 8 M44 72 l-8 3 M80 72 l3 8 M80 72 l8 3"/></g>
   </svg>
 </div>
 
-<div class="stop" style="left:418px;top:503px">02</div>
-<div class="station" style="top:481px">
-  <h3>Rank by how often, and how safe</h3>
-  <p>Each job is placed on a simple grid: how often it happens against what a mistake would cost. <strong>The first agents come from the often-and-safe corner</strong>: done every day, easy to undo if wrong.</p>
-  <svg class="prop" viewBox="0 0 130 120" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
-    <rect x="22" y="6" width="96" height="84" rx="2"/><path d="M70 6 V90 M22 48 H118"/>
-    <circle cx="94" cy="69" r="9" fill="var(--gold)" stroke="none"/>
-    <circle cx="44" cy="28" r="3" fill="var(--de-emphasis)" stroke="none"/><circle cx="52" cy="70" r="3" fill="var(--de-emphasis)" stroke="none"/><circle cx="96" cy="24" r="3" fill="var(--de-emphasis)" stroke="none"/>
-    <path d="M22 100 h96 M112 96 l6 4 l-6 4" /><text x="22" y="116" font-family="DM Mono, monospace" font-size="13" fill="var(--ink-faint)" stroke="none">OFTEN</text>
-    <path d="M12 90 V6 M8 12 l4 -6 l4 6"/>
+<div class="stop" style="left:418px;top:498px">02</div>
+<div class="station" style="top:476px">
+  <h3>Get the business into one place</h3>
+  <p>Tasks, money, customers and properties moved into one system everyone reads, out of heads, inboxes and spreadsheets. <strong>An agent cannot run a job it cannot see.</strong> This is the foundation, and most businesses skip it.</p>
+  <svg class="prop" viewBox="0 0 124 120" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
+    <ellipse cx="62" cy="30" rx="34" ry="11"/><path d="M28 30 V86 a34 11 0 0 0 68 0 V30"/><path d="M28 58 a34 11 0 0 0 68 0"/>
+    <path d="M8 14 l14 8 M116 14 l-14 8 M8 106 l14 -8 M116 106 l-14 -8" stroke="var(--ink-faint)"/>
+    <circle cx="8" cy="12" r="3" fill="var(--de-emphasis)" stroke="none"/><circle cx="116" cy="12" r="3" fill="var(--de-emphasis)" stroke="none"/>
+    <circle cx="8" cy="108" r="3" fill="var(--de-emphasis)" stroke="none"/><circle cx="116" cy="108" r="3" fill="var(--de-emphasis)" stroke="none"/>
   </svg>
 </div>
 
-<div class="stop" style="left:418px;top:678px">03</div>
-<div class="station" style="top:656px">
-  <h3>Record it, do not write it</h3>
-  <p>You record a short screen video of yourself doing the job, answering seven on-screen prompts as you go. <strong>That recording becomes the written process and the agent's instructions.</strong> Nobody types a manual.</p>
-  <svg class="prop" viewBox="0 0 130 120" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
-    <rect x="14" y="20" width="102" height="66" rx="6"/><rect x="14" y="20" width="102" height="14" rx="6" fill="var(--surface-2)"/>
-    <circle cx="65" cy="58" r="16"/><circle cx="65" cy="58" r="7" fill="var(--accent-soft)"/>
-    <circle cx="104" cy="27" r="4" fill="var(--gold)" stroke="none"/>
-    <path d="M40 98 h50 M30 108 h70"/>
+<div class="stop" style="left:418px;top:668px">03</div>
+<div class="station" style="top:646px">
+  <h3>Capture how each job is done</h3>
+  <p>You record a short screen video of yourself doing the job, talking as you go. <strong>That recording becomes the written process.</strong> Nobody types a manual, and nothing lives only in your head any more.</p>
+  <svg class="prop" viewBox="0 0 124 120" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
+    <rect x="12" y="20" width="100" height="66" rx="6"/><rect x="12" y="20" width="100" height="14" rx="6" fill="var(--surface-2)"/>
+    <circle cx="62" cy="58" r="16"/><circle cx="62" cy="58" r="7" fill="var(--accent-soft)"/>
+    <circle cx="100" cy="27" r="4" fill="var(--gold)" stroke="none"/>
+    <path d="M38 98 h48 M28 108 h68"/>
   </svg>
 </div>
 
-<div class="stop" style="left:418px;top:853px">04</div>
-<div class="station" style="top:831px">
-  <h3>Build the agent</h3>
-  <p>From the recording we build the agent: when it starts, what it reads, the rules it follows, the tools it uses, what it must never do, and what finished looks like. <strong>Your first agent is live within the first month</strong>, in approve-everything mode.</p>
-  <svg class="prop" viewBox="0 0 130 120">
-    <use href="#agent" x="33" y="8" width="64" height="64"/>
-    <g fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M30 92 h70 M40 104 h50"/></g>
+<div class="stop" style="left:418px;top:838px">04</div>
+<div class="station" style="top:816px">
+  <h3>Give the AI your business's memory</h3>
+  <p>Decisions, people, preferences and meetings feed a business brain every night. <strong>An agent with no context is a temp on day one.</strong> An agent with your memory works like someone who has been there for years.</p>
+  <svg class="prop" viewBox="0 0 124 120" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
+    <rect x="20" y="16" width="84" height="88" rx="4"/><path d="M34 16 V104"/><path d="M44 34 h46 M44 48 h34 M44 62 h42 M44 76 h28"/>
+    <circle cx="90" cy="76" r="5" fill="var(--accent-soft)" stroke="var(--accent)"/><circle cx="90" cy="48" r="5" fill="var(--accent-soft)" stroke="var(--accent)"/>
+    <path d="M90 53 V71" stroke="var(--accent)"/><path d="M78 48 h7 M86 76 h-4" stroke="var(--accent)"/>
   </svg>
 </div>
 
-<div class="stop" style="left:418px;top:1028px">05</div>
-<div class="station" style="top:1006px">
-  <h3>Move the gear, when you are ready</h3>
-  <p>Four gears, and you hold the dial: <strong>guardrails set, approve everything, loosen the leash, heartbeat.</strong> It never promotes itself. If its accuracy slips, approvals switch back on by themselves.</p>
-  <svg class="prop" viewBox="0 0 130 120" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
-    <path d="M18 86 A47 47 0 0 1 112 86"/>
-    <path d="M22 76 l6 2 M37 51 l4 5 M65 40 v6 M93 51 l-4 5 M108 76 l-6 2"/>
-    <path d="M65 86 L44 56" stroke="var(--gold)" stroke-width="4"/><circle cx="65" cy="86" r="6" fill="var(--gold)" stroke="none"/>
-    <text x="18" y="108" font-family="DM Mono, monospace" font-size="13" fill="var(--ink-faint)" stroke="none">1</text>
-    <text x="106" y="108" font-family="DM Mono, monospace" font-size="13" fill="var(--ink-faint)" stroke="none">4</text>
+<div class="stop" style="left:418px;top:1008px">05</div>
+<div class="station" style="top:986px">
+  <h3>One agent, safest job first</h3>
+  <p>The first agent takes a job that happens every day and is easy to undo if wrong. <strong>Ours was bank reconciliation.</strong> It proposed, the owner approved every line, and it was live inside the first month.</p>
+  <svg class="prop" viewBox="0 0 124 120">
+    <use href="#agent" x="30" y="6" width="64" height="64"/>
+    <g fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><rect x="22" y="80" width="80" height="26" rx="3"/><path d="M32 93 h30"/><circle cx="90" cy="93" r="6" fill="var(--gold)" stroke="none"/></g>
   </svg>
 </div>
 
-<div class="stop" style="left:418px;top:1203px">06</div>
-<div class="station" style="top:1181px">
-  <h3>Measure, then take the next job</h3>
-  <p>One number on your dashboard: the share of your listed hours now run by agents. Watch it climb, take the next job off the list. <strong>Demand comes last</strong>: we do not turn the tap on until the business can take the water.</p>
-  <svg class="prop" viewBox="0 0 130 120" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
-    <rect x="10" y="50" width="110" height="18" rx="3" fill="var(--surface-2)"/>
-    <rect x="10" y="50" width="99" height="18" rx="3" fill="var(--accent-soft)" stroke="none"/>
-    <path d="M109 42 V76" stroke="var(--gold)" stroke-width="3"/>
-    <text x="96" y="34" font-family="DM Mono, monospace" font-size="13" fill="var(--ink)" stroke="none">90%</text>
-    <path d="M10 92 h110 M10 88 v8 M65 88 v8 M120 88 v8"/>
+<div class="stop" style="left:418px;top:1178px">06</div>
+<div class="station" style="top:1156px">
+  <h3>Approve, correct, remember</h3>
+  <p>Every yes or no is scored. Every no is remembered, so the same mistake is not made twice. <strong>Accuracy earns autonomy: you move the gear, the agent never promotes itself.</strong> If accuracy slips, approvals switch back on.</p>
+  <svg class="prop" viewBox="0 0 124 120" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
+    <path d="M15 86 A47 47 0 0 1 109 86"/>
+    <path d="M19 76 l6 2 M34 51 l4 5 M62 40 v6 M90 51 l-4 5 M105 76 l-6 2"/>
+    <path d="M62 86 L41 56" stroke="var(--gold)" stroke-width="4"/><circle cx="62" cy="86" r="6" fill="var(--gold)" stroke="none"/>
+    <text x="15" y="108" font-family="DM Mono, monospace" font-size="13" fill="var(--ink-faint)" stroke="none">1</text>
+    <text x="103" y="108" font-family="DM Mono, monospace" font-size="13" fill="var(--ink-faint)" stroke="none">4</text>
   </svg>
 </div>
 
-<!-- the full method -->
-<div class="abs method-label mono">The full method · nine steps · this page lives in M and I</div>
-<div class="abs tiles">
-  <div class="tile"><div class="sq">O</div><div class="w">Objective</div></div>
-  <div class="tile"><div class="sq">P</div><div class="w">Priorities</div></div>
-  <div class="tile"><div class="sq">T</div><div class="w">Team</div></div>
-  <div class="tile"><div class="sq">I</div><div class="w">Income</div></div>
-  <div class="tile"><div class="sq on">M</div><div class="w">Methods</div></div>
-  <div class="tile"><div class="sq on">I</div><div class="w">Intelligence</div></div>
-  <div class="tile"><div class="sq">S</div><div class="w">Scoreboards</div></div>
-  <div class="tile"><div class="sq">E</div><div class="w">Exit ready</div></div>
-  <div class="tile"><div class="sq">D</div><div class="w">Demand</div></div>
+<div class="stop" style="left:418px;top:1348px">07</div>
+<div class="station" style="top:1326px">
+  <h3>An agent for every job, measured in hours</h3>
+  <p>Each repeatable job gets its own agent with a goal, a clock and a guardrail. <strong>One number on the dashboard: the share of listed hours now run by agents.</strong> Watch it climb, take the next job off the list, and keep going until it reads 90%.</p>
+  <svg class="prop" viewBox="0 0 124 120" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
+    <rect x="8" y="50" width="108" height="18" rx="3" fill="var(--surface-2)"/>
+    <rect x="8" y="50" width="97" height="18" rx="3" fill="var(--accent-soft)" stroke="none"/>
+    <path d="M105 42 V76" stroke="var(--gold)" stroke-width="3"/>
+    <text x="92" y="34" font-family="DM Mono, monospace" font-size="13" fill="var(--ink)" stroke="none">90%</text>
+    <path d="M8 92 h108 M8 88 v8 M62 88 v8 M116 88 v8"/>
+  </svg>
 </div>
-<div class="abs method-cap">The six moves above sit inside <strong>Methods</strong> and <strong>Intelligence</strong>. The other seven steps keep the whole business honest around them: a clear objective, quarterly priorities, an accountable team, live money numbers, one scoreboard, an exit-ready business, and demand switched on last.</div>
 
 <!-- call to action -->
 <div class="placard plate cta">
@@ -287,7 +281,7 @@ h1.title em { font-style:normal; color:var(--accent); }
     </svg></span>
     <span class="wordmark">Operations Director</span>
   </div>
-  <div class="src mono">Source · the Operations Director method, as run on our own business · 5 Sep 2026<br>operationsdirector.co.uk</div>
+  <div class="src mono">Source · the seven moves as made on our own business, Jun to Sep 2026<br>operationsdirector.co.uk</div>
 </div>
 
 <div class="grain"></div>

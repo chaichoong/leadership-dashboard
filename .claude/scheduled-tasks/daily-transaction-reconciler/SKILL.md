@@ -5,11 +5,11 @@ description: Run the transaction reconciler skill to categorise and reconcile un
 
 Run the /transaction-reconciler skill to reconcile all unreconciled transactions in the Operations Director Airtable base. Process both Santander and TNT Mgt Zempler accounts. After completion, report how many transactions were reconciled.
 
-Then write the Reconciliation agent's daily log (this is how the AI Agents
+Then write the Bookkeeper agent's daily log (register name until 6 Sep 2026: Reconciliation) (this is how the AI Agents
 page sees the run — added 26 Aug 2026; a zero-transaction day logs too):
 
     python3 scripts/agent_daily_log.py publish --agent-row recyrN5YCQFssAniE \
-        --name "Reconciliation" \
+        --name "Bookkeeper" \
         --summary "<one line: X reconciled, Y held for review, accounts processed>" \
         --decisions "<a few lines: notable categorisation calls, anything held and why>"
 

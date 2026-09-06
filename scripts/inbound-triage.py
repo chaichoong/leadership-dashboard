@@ -105,9 +105,9 @@ AIRTABLE_PAT_FILE = Path.home() / ".config/od/airtable_pat"
 
 AIRTABLE_BASE = "appnqjDpqDniH3IRl"
 AGENTS_TABLE = "tbl9msVjyQWslLOIZ"
-TRIAGE_AGENT_ROW = "recYy33zkoa099uM2"   # "Inbound Comms Triage" in AI Agents
+TRIAGE_AGENT_ROW = "recYy33zkoa099uM2"   # "Inbox Triage" in AI Agents
 METRIC_SCORE_FIELD = "fldkGxrOlrfuLlH3J"  # singleLineText — current reading
-AGENT_NAME = "Inbound Comms Triage"
+AGENT_NAME = "Inbox Triage"
 
 # AI Agent Daily Log — one row per agent per day so Kevin can check the
 # decisions from the agent's panel (Systemisation → AI Agents) or leave them.
