@@ -107,6 +107,14 @@ DEFER_STATES = ("deferred-not-ready", "deferred-stale-precondition")
 # not a decision, it is an omission, and that is the only thing this fails on.
 
 
+# WIDENED 6 Sep 2026 (finding 20260906-daily-ops-476). The check only ever
+# looked at the DRIVE probe, because Drive was what bit in August. A network
+# probe fails transiently for exactly the same reason and costs exactly the same
+# day: on 4 and 5 Sep 2026 a DNS blip on api.airtable.com deferred `prospecting`
+# twice, and both times this sweep printed "NOT WIRED" every hour and exited 0.
+# Any precondition that can fail for a reason that later clears belongs here.
+
+
 def drive_gated(cfg):
     """True when this job's preconditions include a Google Drive probe."""
     for need in (cfg.get("needs") or []):
@@ -115,15 +123,33 @@ def drive_gated(cfg):
     return False
 
 
+def network_gated(cfg):
+    """True when this job's preconditions include a network probe."""
+    for need in (cfg.get("needs") or []):
+        if need == "network" or (isinstance(need, dict) and "network" in need):
+            return True
+    return False
+
+
+def transient_gated(cfg):
+    """True when a precondition can fail now and pass later.
+
+    Drive (mount wakes lazily) and network (DNS/route flaps) are both transient.
+    A job gated on either can be DEFERRED for a reason that has cleared by the
+    next hourly sweep, which is precisely the case retryWhenDeferred exists for.
+    """
+    return drive_gated(cfg) or network_gated(cfg)
+
+
 def undeclared_retry_jobs(schedule):
-    """Job names gated on Drive that never say whether they may be retried."""
+    """Enabled jobs on a transient precondition that never declare a retry."""
     out = []
     for job, cfg in sorted((schedule or {}).items()):
         if job.startswith("_") or not isinstance(cfg, dict) or not cfg.get("cron"):
             continue
         if cfg.get("enabled") is False:
             continue
-        if drive_gated(cfg) and "retryWhenDeferred" not in cfg:
+        if transient_gated(cfg) and "retryWhenDeferred" not in cfg:
             out.append(job)
     return out
 
@@ -133,12 +159,14 @@ def check_wiring(schedule):
     bad = undeclared_retry_jobs(schedule)
     if not bad:
         gated = [j for j, c in (schedule or {}).items()
-                 if isinstance(c, dict) and drive_gated(c)]
-        return 0, ["wiring: %d drive-gated job(s) all declare retryWhenDeferred "
-                   "(%s)" % (len(gated), ", ".join(sorted(gated)) or "none")]
-    lines = ["WIRING FAILURE: %d drive-gated job(s) declare no retryWhenDeferred. "
-             "A drive precondition without one means a deferred run is a lost "
-             "day with no way back." % len(bad)]
+                 if isinstance(c, dict) and c.get("cron")
+                 and c.get("enabled") is not False and transient_gated(c)]
+        return 0, ["wiring: %d job(s) on a transient precondition all declare "
+                   "retryWhenDeferred (%s)"
+                   % (len(gated), ", ".join(sorted(gated)) or "none")]
+    lines = ["WIRING FAILURE: %d job(s) on a transient precondition (drive or "
+             "network) declare no retryWhenDeferred. Such a precondition without "
+             "one means a deferred run is a lost day with no way back." % len(bad)]
     for job in bad:
         lines.append('  UNDECLARED %-20s add "retryWhenDeferred": true (or false '
                      "with a reason) to its job-schedule.json entry" % job)
@@ -582,16 +610,30 @@ def selftest():
                            "needs": ["network", {"drive": "~/vault"}]},
             "daily-ops": {"cron": "0 7 * * *", "retryWhenDeferred": False,
                           "needs": [{"drive": "~/vault"}]},
+            "prospecting": {"cron": "15 9 * * *", "retryWhenDeferred": True,
+                            "needs": ["network"]},
+            "uc-check": {"cron": "0 8 * * *", "enabled": False,
+                         "needs": ["network"]},
             "job-digest": {"cron": "0 8 * * *"}}
     broken = json.loads(json.dumps(good))
     del broken["feed-brain"]["retryWhenDeferred"]
+    # Finding 476: the network half. A DNS blip defers a network-gated job for a
+    # reason that clears within the hour, and until this run the check ignored it.
+    net_broken = json.loads(json.dumps(good))
+    del net_broken["prospecting"]["retryWhenDeferred"]
     cases = cases + [
         ("wiring: all declared -> pass", "pass" if check_wiring(good)[0] == 0 else "fail", "pass"),
         ("wiring: explicit false counts as declared",
          "pass" if "daily-ops" not in undeclared_retry_jobs(good) else "fail", "pass"),
         ("wiring: flag removed -> FAILS (back-test)",
          "fail" if check_wiring(broken)[0] == 1 else "pass", "fail"),
-        ("wiring: no drive probe, no flag needed",
+        ("wiring: NETWORK-gated flag removed -> FAILS (back-test, finding 476)",
+         "fail" if check_wiring(net_broken)[0] == 1 else "pass", "fail"),
+        ("wiring: network-gated job named in the failure",
+         "pass" if "prospecting" in undeclared_retry_jobs(net_broken) else "fail", "pass"),
+        ("wiring: disabled job never needs a flag",
+         "pass" if "uc-check" not in undeclared_retry_jobs(net_broken) else "fail", "pass"),
+        ("wiring: no transient probe, no flag needed",
          "pass" if "job-digest" not in undeclared_retry_jobs(broken) else "fail", "pass"),
     ]
 

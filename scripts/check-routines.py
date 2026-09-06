@@ -123,6 +123,33 @@ SCHEDULE_FILE = os.environ.get(
     os.path.join(os.path.dirname(os.path.abspath(__file__)), "job-schedule.json"),
 )
 
+# ─── LANE RESULTS: A SLOT THAT FIRED IS NOT A SLOT THAT WORKED ───────
+#
+# Finding 20260906-daily-ops-477. Attendance above counts queue EVENTS, which is
+# the right evidence for "did the job get going". It is the wrong evidence for
+# "did the job do anything". On 5 Sep 2026 the inbound-triage 13:00 and 17:00
+# slots both fired, both scanned ZERO emails on a Gmail quota 403, and both left
+# a normal `acquired` event — so this check reported "inbound-triage 3 of 3"
+# while no mail had been triaged since 3 Sep.
+#
+# A slot that can fail one lane while succeeding at others now writes a
+# machine-readable verdict per lane, and it is graded on THAT. The file's
+# absence is UNCHECKED, never clean: a slot whose results file cannot be read is
+# reported as unverifiable rather than passed.
+# INBOUND_TRIAGE_DIR is the SAME env var inbound-triage.py's base_dir() reads,
+# deliberately: one override moves the writer and the reader together, so a test
+# can never grade a real file while writing a fixture one.
+LANE_RESULT_FILES = {
+    "inbound-triage": os.path.join(
+        os.environ.get("INBOUND_TRIAGE_DIR",
+                       os.path.join(HOME, "knowledge-os/logs/inbound-triage")),
+        "slot-results.jsonl"),
+}
+
+# Matches inbound-triage.py's ESCALATE_AFTER_BROKEN. Two consecutive broken
+# slots is not bad luck — the three slots share one daily Gmail quota.
+LANE_BROKEN_ESCALATE = 2
+
 # A full day plus the slack for a late wake. daily-ops itself runs an hour or two.
 DEFAULT_WINDOW_HOURS = 26
 
@@ -224,6 +251,93 @@ def slot_attendance(ran, schedule, window_hours, ref=None):
     return out
 
 
+def read_lane_results(path, window_hours, ref=None):
+    """Rows inside the window, oldest-first. None means the file exists but
+    cannot be read — UNCHECKED, which must never be reported as clean."""
+    if not os.path.exists(path):
+        return []            # nothing written yet is not the same as unreadable
+    cutoff = ((ref or datetime.now().astimezone()) -
+              timedelta(hours=window_hours))
+    rows = []
+    try:
+        with open(path) as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    rec = json.loads(line)
+                except ValueError:
+                    continue      # one torn line must not blind the check
+                try:
+                    ts = datetime.fromisoformat(rec.get("ts", ""))
+                except ValueError:
+                    continue
+                if ts.tzinfo is None:
+                    ts = ts.astimezone()
+                if ts >= cutoff:
+                    rows.append(rec)
+    except OSError:
+        return None
+    return rows
+
+
+def lane_health(window_hours, ref=None):
+    """{job: {lane: {slots, ok, broken, consecutive_broken, reasons}}}.
+
+    A lane with no rows at all is reported as `unchecked`, so a results file
+    that stops being written reads as a gap rather than as silence.
+    """
+    out = {}
+    for job, path in sorted(LANE_RESULT_FILES.items()):
+        rows = read_lane_results(path, window_hours, ref=ref)
+        if rows is None:
+            out[job] = {"unreadable": path}
+            continue
+        lanes = {}
+        for rec in rows:
+            lane = rec.get("lane") or "unknown"
+            v = lanes.setdefault(lane, {"slots": 0, "ok": 0, "broken": 0,
+                                        "reasons": [], "consecutive_broken": 0})
+            v["slots"] += 1
+            if rec.get("ok"):
+                v["ok"] += 1
+                v["consecutive_broken"] = 0
+            else:
+                v["broken"] += 1
+                v["consecutive_broken"] += 1
+                r = rec.get("reason") or "unspecified"
+                if r not in v["reasons"]:
+                    v["reasons"].append(r)
+        out[job] = lanes or {"unchecked": {"file": path}}
+    return out
+
+
+def broken_lanes(health):
+    """Lines naming every lane that is failing, worst first. Empty when clean."""
+    lines = []
+    for job, lanes in sorted((health or {}).items()):
+        if "unreadable" in lanes:
+            lines.append("%s: lane results UNREADABLE at %s — cannot verify the "
+                         "lanes worked, so treat as broken"
+                         % (job, lanes["unreadable"]))
+            continue
+        if "unchecked" in lanes:
+            lines.append("%s: no lane results written in the window — UNCHECKED, "
+                         "not clean (%s)" % (job, lanes["unchecked"]["file"]))
+            continue
+        for lane, v in sorted(lanes.items()):
+            if v["broken"]:
+                lines.append("%s %s lane: %d of %d slots worked, %d broken (%s)%s"
+                             % (job, lane, v["ok"], v["slots"], v["broken"],
+                                ", ".join(v["reasons"]),
+                                " — ESCALATE, %d slots broken in a row"
+                                % v["consecutive_broken"]
+                                if v["consecutive_broken"] >= LANE_BROKEN_ESCALATE
+                                else ""))
+    return lines
+
+
 def check(window_hours=DEFAULT_WINDOW_HOURS):
     routines = known_routines()
     if routines is None:
@@ -285,10 +399,15 @@ def check(window_hours=DEFAULT_WINDOW_HOURS):
         schedule_cfg = {}
     attendance = slot_attendance(ran, schedule_cfg, window_hours)
     shortfalls = {n: v for n, v in attendance.items() if v["shortfall"]}
+    # A slot that fired is not a slot that worked (finding 477).
+    lanes = lane_health(window_hours)
+    lane_problems = broken_lanes(lanes)
 
     result = {
         "slot_attendance": attendance,
         "slot_shortfalls": sorted(shortfalls),
+        "lane_health": lanes,
+        "broken_lanes": lane_problems,
         "events_log": EVENTS,
         "window_hours": window_hours,
         "events_in_window": len(rows),
@@ -364,10 +483,14 @@ def main():
         # into the stacking verdict (5 Sep 2026).
         if missed:
             print("MISSED SLOT RUNS: %s" % missed, file=sys.stderr)
+        for line in result.get("broken_lanes", []):
+            print("BROKEN LANE: %s" % line, file=sys.stderr)
     else:
         print("ROUTINE STACKING: %s" % result["reason"], file=sys.stderr)
         if missed:
             print("MISSED SLOT RUNS: %s" % missed, file=sys.stderr)
+        for line in result.get("broken_lanes", []):
+            print("BROKEN LANE: %s" % line, file=sys.stderr)
         if result.get("detail"):
             print("    %s" % result["detail"], file=sys.stderr)
         if result.get("when"):

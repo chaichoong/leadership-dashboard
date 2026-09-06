@@ -193,7 +193,8 @@
   "mode": "wrapped",
   "needs": [
    "network"
-  ]
+  ],
+  "retryWhenDeferred": true
  },
  "masterplan-sync": {
   "cron": "0 7 * * *",
@@ -210,7 +211,8 @@
   "mode": "wrapped",
   "needs": [
    "network"
-  ]
+  ],
+  "retryWhenDeferred": true
  },
  "knowledge-os-sort": {
   "note": "Drive-gated. maxLateMinutes raised 480 -> 600 on 29 Aug 2026 (findings 394/397) for the same reason as the three brain jobs: a morning mount flap must not cost the day. 09:00 + 600 reaches 19:00, still the same working day.",
@@ -240,7 +242,8 @@
   "mode": "wrapped",
   "needs": [
    "network"
-  ]
+  ],
+  "retryWhenDeferred": true
  },
  "feed-brain": {
   "note": "Drive-gated. maxLateMinutes raised 29 Aug 2026 (findings 394/397): a morning Drive-mount flap used to cost the whole day. feed/compound/publish fire at 22:45-23:20, so 720 min expired at ~11:00 — on 28 Aug the mount cleared at 10:06 and they were marked MISSED at 11:06 anyway. 960 carries them to mid-afternoon, which is still worth doing; beyond that they would collide with the next night's run, so the window stops there rather than becoming never-skipped.",
@@ -287,7 +290,8 @@
   "mode": "wrapped",
   "needs": [
    "network"
-  ]
+  ],
+  "retryWhenDeferred": true
  },
  "mac-guard": {
   "cron": "0 * * * *",
@@ -334,7 +338,8 @@
   "note": "the Inbound Comms Triage agent's own Go Signal (Kevin, 24 Aug 2026): both lanes at three fixed slots. NOT a daily-ops phase by explicit ruling; a headless claude run, so the generous lateness keeps a wake-delayed slot worth running",
   "needs": [
    "network"
-  ]
+  ],
+  "retryWhenDeferred": true
  },
  "ceo-agent": {
   "cron": "45 6 * * *",
@@ -366,7 +371,8 @@
   "note": "Kevin's restructure of 26 Aug 2026: role-specific work leaves the daily-ops sequence and runs as its own slot. A wrapped shell job, so it takes the lock and heartbeats — a slot, never a second Claude routine. Allowlisted in scripts/check-routines.py. The Prospecting agent (register row: status Built). Runs after the 09:00 slots so a prospect task it creates is picked up by the same morning's board pass.",
   "needs": [
    "network"
-  ]
+  ],
+  "retryWhenDeferred": true
  },
  "prod-sweep-weekly": {
   "cron": "0 11 * * *",
@@ -375,7 +381,8 @@
   "note": "Kevin's restructure of 26 Aug 2026: role-specific work leaves the daily-ops sequence and runs as its own slot. A wrapped shell job, so it takes the lock and heartbeats — a slot, never a second Claude routine. Allowlisted in scripts/check-routines.py. The FULL 28-page authenticated browser walk, Sundays only — the day check is in the skill, never in the cron. 11:00 keeps it clear of the 07:00 daily-ops run, which does not take the lock and so cannot be serialised against. Daily coverage is now scripts/check-data-invariants.py via the data-invariants job, which is the part with teeth: 28 pages passed clean every day 22-26 Aug while the invariants caught 7 tasks past their hard deadlines.",
   "needs": [
    "network"
-  ]
+  ],
+  "retryWhenDeferred": true
  },
  "data-invariants": {
   "cron": "40 6 * * *",
@@ -384,7 +391,8 @@
   "note": "Kevin's restructure of 26 Aug 2026: the live Airtable invariants run as a plain script every morning, with no Claude in the loop. Each invariant carries a control that fails the run rather than passing on an empty population. daily-ops reads the result and only applies judgement when it FAILED.",
   "needs": [
    "network"
-  ]
+  ],
+  "retryWhenDeferred": true
  },
  "drift-scan": {
   "cron": "20 6 * * *",
@@ -393,7 +401,8 @@
   "note": "Kevin's restructure of 26 Aug 2026: the schema snapshot and dead-reference scan are a diff, not a judgement, so they run as a script. It exits 0 when nothing changed and writes an exceptions file only when it did. The old Claude drift phase was the single largest source of findings (68 open) and its own report called the SOP metric 'red every day and carries no signal'.",
   "needs": [
    "network"
-  ]
+  ],
+  "retryWhenDeferred": true
  },
  "drive-auth": {
   "cron": "50 6 * * *",
@@ -402,7 +411,8 @@
   "note": "Kevin's restructure of 26 Aug 2026: scripts/drive-auth-check.py was already a script with its own selftest control. It no longer needs a Claude phase to run it.",
   "needs": [
    "network"
-  ]
+  ],
+  "retryWhenDeferred": true
  },
  "task-manager": {
   "cron": "0 9,13,17 * * *",
@@ -411,7 +421,8 @@
   "note": "the Task Manager agent's own Go Signal (Kevin, 25 Aug 2026): board pass at the same three slots as inbound-triage. NOT a daily-ops phase by explicit ruling (same pattern as inbound-triage); a headless claude run, so the generous lateness keeps a wake-delayed slot worth running. The queue lock stops it running at the same time as the triage slot job; order within the hour is whichever launchd starts first, and the board pass tolerates either order (dispatch's in-flight tasks are subtracted in code).",
   "needs": [
    "network"
-  ]
+  ],
+  "retryWhenDeferred": true
  },
  "handback-poll": {
   "cron": "*/30 * * * *",
@@ -420,7 +431,9 @@
   "note": "Kevin's call, 26 Aug 2026, after measuring the approval loop: the agent's own work on a hand-back is a median of FIVE MINUTES, but he waited a median of 3.6 hours over 1-26 Aug because nothing opened the queue between daily-ops (07:00) and the three triage slots. This checks every half hour and wakes a headless claude run ONLY when a hand-back is actually waiting; a quiet tick is one Airtable read and costs no tokens. HAND-BACKS ONLY (carry_out and redo) — new work, routing and escalation stay in the daily slots. Lateness is deliberately tight: a tick more than 20 minutes late is covered by the next one, so a wake-stampede must not run six of these back to back. The job name is NOT a skill folder name, so check-routines.py sees a registered shell job rather than a second Claude routine.",
   "needs": [
    "network"
-  ]
+  ],
+  "retryWhenDeferred": false,
+  "retryWhenDeferredNote": "Deliberately OFF, not forgotten. handback-poll runs every 30 minutes, so a deferred slot is picked up by the next one 30 minutes later \u2014 re-firing it would add a duplicate poll, not rescue a lost day. Revisit only if the cadence drops below hourly."
  },
  "retry-deferred": {
   "cron": "20 * * * *",
@@ -436,7 +449,8 @@
   "note": "Regenerates js/mcp-tools-data.js, the Tools & Connections list on the AI Agents page, from the real MCP configuration (28 Aug 2026). A pure read of local config files plus one `claude mcp list` health check; no AI, no judgement, nothing written outside the repo. Every source has a floor and the run FAILS rather than writing a shorter list, because a list that quietly shrank would read as a smaller estate instead of a broken read. maxLateMinutes is deliberately huge: this Mac sleeps, and the first manual run SKIPPED at 249 minutes late under the original 240. An inventory of what we are connected to is just as true at 4pm as at 6am, so a late refresh beats no refresh. Runs with --publish: when the list genuinely changes it opens a PR carrying the one file, assembled with git plumbing against a throwaway index so it can never disturb another session's uncommitted work in this shared checkout. It never pushes to main. Before publishing it runs the list's own data-shape tests against the candidate and merges only if they pass; a failure leaves the PR open and exits non-zero so the digest catches it.",
   "needs": [
    "network"
-  ]
+  ],
+  "retryWhenDeferred": true
  },
  "signature-watch": {
   "cron": "20 9,12,15,18 * * *",
@@ -446,7 +460,8 @@
   "needs": [
    "network"
   ],
-  "enabled": true
+  "enabled": true,
+  "retryWhenDeferred": true
  },
  "content-engine": {
   "cron": "0 2 * * *",
