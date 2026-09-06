@@ -27,17 +27,17 @@ Median was chosen over mean because the mean is pulled up by a few high earners.
 
 | Station | Role on the page | ONS SOC 2020 | ONS occupation title | Median £ | Agents | Register status |
 |---|---|---|---|---|---|---|
-| 01 | Personal assistant | 4215 | Personal assistants and other secretaries | 34,954 | Inbound Comms Triage, Inbound Comms Response | Live, Built (Ready) |
-| 02 | Office manager | 4141 | Office managers | 38,630 | Task Manager | Live |
-| 03 | Bookkeeper | 4122 | Book-keepers, payroll managers and wages clerks | 31,560 | Reconciliation | Live |
-| 04 | Credit controller | 4121 | Credit controllers | 28,532 | Creditor Management | Live |
+| 01 | Personal assistant | 4215 | Personal assistants and other secretaries | 34,954 | Inbox Triage, Inbox Response | Live, Built (Ready) |
+| 02 | Office manager | 4141 | Office managers | 38,630 | Task Board Manager | Live |
+| 03 | Bookkeeper | 4122 | Book-keepers, payroll managers and wages clerks | 31,560 | Bookkeeper | Live |
+| 04 | Credit controller | 4121 | Credit controllers | 28,532 | Supplier and Creditor Manager | Live |
 | 05 | Property officer | 3223 | Housing officers | 34,688 | Property Administration | Built (Ready) |
-| 06 | Data analyst | 3544 | Data analysts | 38,572 | CEO Brief, AI Assistant | Live, Live |
-| 07 | Records clerk | 4131 | Records clerks and assistants | 28,656 | Brain Feeder, Brain Compounder, Audiobook Processor | Live x3 |
-| 08 | Technical author | 3412 | Authors, writers and translators | 39,459 | SOP AI Field Generator | Live |
-| 09 | IT operations technician | 3131 | IT operations technicians | 35,259 | Daily Sweep, Production Sweep, Agent Dispatch | Live x3 |
-| 10 | Content and social producer | 3554 | Marketing associate professionals | 33,412 | Content Engine | Built (Draft, test mode) |
-| 11 | Business development manager | 3556 | Sales accounts and business development managers | 57,625 | Prospecting | Built (Draft; 148 emails sent, 0 replies at 22 Aug) |
+| 06 | Data analyst | 3544 | Data analysts | 38,572 | CEO Brief, Business Analysis | Live, Live |
+| 07 | Records clerk | 4131 | Records clerks and assistants | 28,656 | Knowledge Base Manager (Meetings), Knowledge Base Manager (Tidy), Learning and Resources Manager | Live x3 |
+| 08 | Technical author | 3412 | Authors, writers and translators | 39,459 | Process Writer | Live |
+| 09 | IT operations technician | 3131 | IT operations technicians | 35,259 | Systems Check, Site Tester, Work Dispatcher | Live x3 |
+| 10 | Content and social producer | 3554 | Marketing associate professionals | 33,412 | Content Producer | Built (Draft, test mode) |
+| 11 | Business development manager | 3556 | Sales accounts and business development managers | 57,625 | Lead Finder | Built (Draft; 148 emails sent, 0 replies at 22 Aug) |
 | | **Total** | | | **401,347** | 17 agents | |
 
 Conservative choices: Property Administration is priced as a housing officer (£34,688), not a property manager (SOC 1251, £43,365). The knowledge agents are priced as a records clerk (£28,656), not a librarian (£38,068). Business development manager is the one role priced above the others; the agent is the least proven of the 17.
@@ -64,3 +64,45 @@ Every statement on page 2 is drawn from Operations Director's own recorded metho
 | Call to action: Operations Review Call, 30 minutes, operationsdirector.co.uk/book-a-demo | Call name per Kevin's 31 Jul 2026 ruling; booking page and "30 minutes, we find the work to take off you" read from operationsdirector.co.uk on 5 Sep 2026 |
 
 Flag: the website home page still says "Demo call" and "first AI worker live in two weeks"; the plan says "Operations Review Call" and "within 30 days of kick-off". The page follows the plan. One of the two needs changing so a prospect reads the same promise everywhere.
+
+## Agent names (renamed 6 Sep 2026, Kevin's ruling: universal names on the magnet AND in the register)
+
+| Old register name | New name |
+|---|---|
+| Inbound Comms Triage | Inbox Triage |
+| Inbound Comms Response | Inbox Response |
+| Task Manager | Task Board Manager |
+| Reconciliation | Bookkeeper |
+| Creditor Management | Supplier and Creditor Manager |
+| Property Administration | Property Administration (unchanged) |
+| CEO Brief | CEO Brief (unchanged) |
+| AI Assistant | Business Analysis |
+| Brain Feeder | Knowledge Base Manager (Meetings) |
+| Brain Compounder | Knowledge Base Manager (Tidy) |
+| Audiobook Processor | Learning and Resources Manager |
+| SOP AI Field Generator | Process Writer |
+| Daily Sweep | Systems Check |
+| Production Sweep | Site Tester |
+| Agent Dispatch | Work Dispatcher |
+| Content Engine | Content Producer |
+| Prospecting | Lead Finder |
+| Sales Progressor (Planned) | Sales Follow-up |
+| Onboarding Progressor (Planned) | Client Onboarding |
+
+Kevin named Brain Feeder and Brain Compounder both "Knowledge Base Manager". Two register rows cannot share one name (the register page and the daily-log key group by name), so they carry a bracket each. Merging them into one row is the cleaner end state and is a follow-on for Kevin.
+
+## Next on the board (page 1 strip, planned and not built)
+
+Invoice and Payment Chaser, Sales Follow-up, Client Onboarding, Quote and Proposal Drafter. Kevin's pick on 6 Sep 2026. Sales Follow-up and Client Onboarding are existing Planned register rows (renamed). Invoice and Payment Chaser and Quote and Proposal Drafter have no register row yet: each goes through agent-gate before a row is created (GUARDRAILS build-gate rule).
+
+## Page 2 (rebuilt 6 Sep 2026)
+
+The seven moves, in the order they were made on our own business, each traced to the record:
+1. Overwhelmed founder: eleven staff (Kevin's stated peak, 5 Sep 2026), everything through one person.
+2. One place: Airtable as system of record for tasks, money, tenancies and customers (js/config.js TABLES).
+3. Capture: Loom to SOP via the SOP AI Field Generator (register row recCFcGeFw9kGwr3T).
+4. Memory: the AI Brain vault plus nightly Brain Feeder and Brain Compounder (register rows recOEspMZBba1CL6j, rec45V2cGBBotFXGL).
+5. First agent: Reconciliation, approve-every-line (register row recyrN5YCQFssAniE; memory project_process_to_agent_pipeline).
+6. Approve, correct, remember: the approval gate with reason required and Remember default on (memory project_agent_learning_loop, project_agent_accuracy_and_approval); the four gears and never-auto-promote (memory project_od_agent_trust_ramp).
+7. An agent per job, measured in hours: the AI Agents register (26 rows) and the Work Done by AI KPI (loadAiShareKpi in js/dashboard.js).
+The measured climb (2.9% on 9 Aug, 37.9% on 28 Aug, 48.6% on 5 Sep 2026) is NOT printed on the page: Kevin's ruling, 90% only. The OPTIMISED tiles and the clipboard self-check were removed on 6 Sep 2026 on Kevin's call: the page answers one question only, how you get to 90%.

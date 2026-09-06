@@ -55,13 +55,13 @@ describe('the four silent runtimes are actually wired', () => {
     expect(gateAt, 'change gate present (control)').toBeGreaterThan(-1);
     expect(publishAt).toBeLessThan(gateAt);
     // Both scored role agents get a display name for the Log Day key.
-    expect(dispatch).toMatch(/"response": "Inbound Comms Response"/);
-    expect(dispatch).toMatch(/"creditor": "Creditor Management"/);
+    expect(dispatch).toMatch(/"response": "Inbox Response"/);
+    expect(dispatch).toMatch(/"creditor": "Supplier and Creditor Manager"/);
   });
 
   const SKILL_PINS = [
-    ['.claude/scheduled-tasks/prospect-daily-run/SKILL.md', 'recbQr4hq0hkVVVNE', 'Prospecting'],
-    ['.claude/scheduled-tasks/daily-transaction-reconciler/SKILL.md', 'recyrN5YCQFssAniE', 'Reconciliation'],
+    ['.claude/scheduled-tasks/prospect-daily-run/SKILL.md', 'recbQr4hq0hkVVVNE', 'Lead Finder'],
+    ['.claude/scheduled-tasks/daily-transaction-reconciler/SKILL.md', 'recyrN5YCQFssAniE', 'Bookkeeper'],
   ];
   for (const [rel, row, name] of SKILL_PINS) {
     it(`${rel} publishes for ${name} with its register row`, () => {

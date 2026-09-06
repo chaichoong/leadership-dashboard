@@ -152,7 +152,7 @@ describe("the Go Signal is the agent's own 9/1/5 slot job (Kevin, 25 Aug 2026)",
 
 describe('the wiring names one identity everywhere', () => {
     it('dispatch ROLE_AGENTS carries the Task Manager team rec', () => {
-        expect(dispatch).toContain(`"${TASKMGR_TEAM_REC}": {"name": "AI Task Manager"`);
+        expect(dispatch).toContain(`"${TASKMGR_TEAM_REC}": {"name": "AI Task Board Manager"`);
         // Since the 25 Aug 2026 table refactor the register row lives INSIDE
         // the ROLE_AGENTS entry (single identity source) and the constant is
         // a derived alias — assert both halves of that shape.

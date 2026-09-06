@@ -4804,10 +4804,10 @@ function registerAgentsSyncBar(){
                 }
             },
             {
-                name: 'Inbound Comms Response metric fresh', kind: 'automation', run: () => {
+                name: 'Inbox Response metric fresh', kind: 'automation', run: () => {
                     if(_agentsRegisterState !== 'ready') return { status:'warn', detail:'Register not loaded yet' };
-                    const row = allAgents.find(a=>String(gf(a,AG.name)||'').toLowerCase().includes('inbound comms response'));
-                    if(!row) return { status:'fail', detail:'No "Inbound Comms Response" row in the register — the agent lost its home row' };
+                    const row = allAgents.find(a=>String(gf(a,AG.name)||'').toLowerCase().includes('inbox response'));
+                    if(!row) return { status:'fail', detail:'No "Inbox Response" row in the register — the agent lost its home row' };
                     const score = gf(row,AG.metricScore);
                     if(!score) return { status:'fail', detail:'Metric Score is empty — the agent\'s runtime has stopped publishing its score' };
                     return { status:'pass', detail:'Metric Score: '+String(score).split('\n')[0].slice(0,120) };

@@ -100,6 +100,15 @@ h1.title em { font-style:normal; color:var(--accent); }
 .stamp .n { font-family:var(--font-display); font-weight:700; font-size:30px; line-height:1.1; }
 .stamp .t { font-size:13px; margin-top:10px; line-height:1.3; }
 
+
+/* next on the board: planned agents, drawn as ghost stations */
+.next { position:absolute; left:56px; top:1566px; width:800px; height:76px; border:1.5px dashed var(--ink-faint); border-radius:var(--radius); padding:10px 16px 0; }
+.next .nl { font-size:13px; color:var(--ink-faint); }
+.next .items { display:flex; margin-top:6px; gap:14px; }
+.next .it { display:flex; align-items:center; gap:8px; width:186px; }
+.next .ghost { width:26px; height:26px; flex:0 0 26px; border-radius:999px; border:1.5px dashed var(--accent); background:var(--surface-2); }
+.next .nm { font-size:13px; line-height:1.25; color:var(--ink-muted); }
+
 /* title strip */
 .strip { position:absolute; left:0; right:0; bottom:0; height:96px; background:var(--surface); border-top:1.5px solid var(--subtle);
          display:flex; align-items:center; justify-content:space-between; padding:0 56px; }
@@ -206,8 +215,6 @@ h1.title em { font-style:normal; color:var(--accent); }
   <g fill="none" stroke="var(--ink-muted)" stroke-width="1.5" stroke-linecap="round">
     <g transform="translate(1146 352)"><circle cx="0" cy="0" r="17"/><path d="M0 -11 V0 L7 4"/><path d="M0 -15 v2 M15 0 h-2 M0 15 v-2 M-15 0 h2"/></g>
     <g transform="translate(1136 386) rotate(-28)"><path d="M0 0 v34 a7 7 0 0 0 14 0 V6 a4 4 0 0 0 -8 0 v24 a2 2 0 0 0 4 0 V10"/></g>
-    <g transform="translate(70 1572)"><path d="M0 22 h84 l-8 30 h-68 z"/><path d="M10 22 v-8 h64 v8"/><path d="M18 14 v-6 h48 v6"/></g>
-    <g transform="translate(560 1580)"><path d="M0 8 h26 l8 8 h50 v40 h-84 z"/><path d="M0 24 h84"/></g>
     <g transform="translate(1176 1060)"><rect x="-18" y="-10" width="36" height="20" rx="3"/><path d="M-12 -4 h24 M-12 0 h24 M-12 4 h16"/></g>
   </g>
 </svg>
@@ -222,21 +229,21 @@ h1.title em { font-style:normal; color:var(--accent); }
 <div class="card" style="left:315px;top:808px">
   <svg class="agent-mark"><use href="#agent"/></svg>
   <div class="role">Personal assistant</div>
-  <div class="agents mono">Inbound Comms Triage · Inbound Comms Response</div>
+  <div class="agents mono">Inbox Triage · Inbox Response</div>
   <div class="pay"><span class="bar" style="width:91px"></span><span class="v mono">£34,954</span></div>
 </div>
 <div class="stop" style="left:698px;top:768px">02</div>
 <div class="card" style="left:595px;top:808px">
   <svg class="agent-mark"><use href="#agent"/></svg>
   <div class="role">Office manager</div>
-  <div class="agents mono">Task Manager</div>
+  <div class="agents mono">Task Board Manager</div>
   <div class="pay"><span class="bar" style="width:101px"></span><span class="v mono">£38,630</span></div>
 </div>
 <div class="stop" style="left:978px;top:768px">03</div>
 <div class="card" style="left:875px;top:808px">
   <svg class="agent-mark"><use href="#agent"/></svg>
   <div class="role">Bookkeeper</div>
-  <div class="agents mono">Reconciliation</div>
+  <div class="agents mono">Bookkeeper</div>
   <div class="pay"><span class="bar" style="width:82px"></span><span class="v mono">£31,560</span></div>
 </div>
 
@@ -245,7 +252,7 @@ h1.title em { font-style:normal; color:var(--accent); }
 <div class="card" style="left:875px;top:1088px">
   <svg class="agent-mark"><use href="#agent"/></svg>
   <div class="role">Credit controller</div>
-  <div class="agents mono">Creditor Management</div>
+  <div class="agents mono">Supplier and Creditor Manager</div>
   <div class="pay"><span class="bar" style="width:74px"></span><span class="v mono">£28,532</span></div>
 </div>
 <div class="stop" style="left:698px;top:1048px">05</div>
@@ -259,14 +266,14 @@ h1.title em { font-style:normal; color:var(--accent); }
 <div class="card" style="left:315px;top:1088px">
   <svg class="agent-mark"><use href="#agent"/></svg>
   <div class="role">Data analyst</div>
-  <div class="agents mono">CEO Brief · AI Assistant</div>
+  <div class="agents mono">CEO Brief · Business Analysis</div>
   <div class="pay"><span class="bar" style="width:100px"></span><span class="v mono">£38,572</span></div>
 </div>
 <div class="stop" style="left:138px;top:1048px">07</div>
 <div class="card" style="left:35px;top:1088px">
   <svg class="agent-mark"><use href="#agent"/></svg>
   <div class="role">Records clerk</div>
-  <div class="agents mono">Brain Feeder · Brain Compounder · Audiobook Processor</div>
+  <div class="agents mono">Knowledge Base Manager (x2) · Learning and Resources Manager</div>
   <div class="pay"><span class="bar" style="width:75px"></span><span class="v mono">£28,656</span></div>
 </div>
 
@@ -275,29 +282,40 @@ h1.title em { font-style:normal; color:var(--accent); }
 <div class="card" style="left:35px;top:1368px">
   <svg class="agent-mark"><use href="#agent"/></svg>
   <div class="role">Technical author</div>
-  <div class="agents mono">SOP AI Field Generator</div>
+  <div class="agents mono">Process Writer</div>
   <div class="pay"><span class="bar" style="width:103px"></span><span class="v mono">£39,459</span></div>
 </div>
 <div class="stop" style="left:418px;top:1328px">09</div>
 <div class="card" style="left:315px;top:1368px">
   <svg class="agent-mark"><use href="#agent"/></svg>
   <div class="role">IT operations technician</div>
-  <div class="agents mono">Daily Sweep · Production Sweep · Agent Dispatch</div>
+  <div class="agents mono">Systems Check · Site Tester · Work Dispatcher</div>
   <div class="pay"><span class="bar" style="width:92px"></span><span class="v mono">£35,259</span></div>
 </div>
 <div class="stop" style="left:698px;top:1328px">10</div>
 <div class="card" style="left:595px;top:1368px">
   <svg class="agent-mark"><use href="#agent"/></svg>
   <div class="role">Content and social producer</div>
-  <div class="agents mono">Content Engine</div>
+  <div class="agents mono">Content Producer</div>
   <div class="pay"><span class="bar" style="width:87px"></span><span class="v mono">£33,412</span></div>
 </div>
 <div class="stop" style="left:978px;top:1328px">11</div>
 <div class="card" style="left:875px;top:1368px">
   <svg class="agent-mark"><use href="#agent"/></svg>
   <div class="role">Business development manager</div>
-  <div class="agents mono">Prospecting</div>
+  <div class="agents mono">Lead Finder</div>
   <div class="pay"><span class="bar" style="width:150px"></span><span class="v mono">£57,625</span></div>
+</div>
+
+<!-- next on the board: planned, not yet built -->
+<div class="next">
+  <div class="nl mono">Next on the board · planned, not yet built</div>
+  <div class="items">
+    <div class="it"><span class="ghost"></span><span class="nm">Invoice and Payment Chaser</span></div>
+    <div class="it"><span class="ghost"></span><span class="nm">Sales Follow-up</span></div>
+    <div class="it"><span class="ghost"></span><span class="nm">Client Onboarding</span></div>
+    <div class="it"><span class="ghost"></span><span class="nm">Quote and Proposal Drafter</span></div>
+  </div>
 </div>
 
 <!-- the stamp: a measured figure from the task board -->
