@@ -120,6 +120,48 @@ cd "$REPO" || { echo "ERROR: repo not found at $REPO" >&2; exit 1; }
 /usr/bin/python3 "$REPO/scripts/agent-dispatch.py" clear-alerts \
   > "$SCRATCH/cleared-alerts.json" 2>&1 || true
 
+# GMAIL HEALTH PROBE (6 Sep 2026, finding 20260906-daily-ops-477). The three
+# slots share ONE daily Gmail quota. On 3 and 5 Sep the quota ran out, the
+# agent's scan died on a 403, zero email was triaged for three days, and every
+# slot still left a normal queue event — so check-routines graded the day
+# "3 of 3" and nothing anywhere said the email lane was dead.
+#
+# Two things change here. The probe is ONE `labels` call, the smallest the
+# worker exposes, made BEFORE the agent starts: probing with a scan would spend
+# the quota it is checking for. And the verdict is written to
+# slot-results.jsonl as a machine-readable line per lane, which is what
+# check-routines.py grades on now — the mere existence of a run marker no
+# longer counts as a slot that worked.
+#
+# When the lane is broken the slot is NOT burned: the agent is told to skip
+# skill 1 entirely (so it spends no quota and moves no watermark) and to run
+# the iMessage and dispatch lanes, which are independent and still valuable.
+GMAIL_HEALTH="$(/usr/bin/python3 "$REPO/scripts/inbound-triage.py" health 2>/dev/null)"
+GMAIL_OK=$(printf '%s' "$GMAIL_HEALTH" | /usr/bin/python3 -c 'import json,sys
+try: print("1" if json.loads(sys.stdin.read() or "{}").get("ok") else "0")
+except Exception: print("0")')
+GMAIL_KIND=$(printf '%s' "$GMAIL_HEALTH" | /usr/bin/python3 -c 'import json,sys
+try: print(json.loads(sys.stdin.read() or "{}").get("kind") or "error")
+except Exception: print("error")')
+
+if [ "$GMAIL_OK" = "1" ]; then
+  EMAIL_LANE_NOTE="Gmail answered the pre-flight probe — run skill 1 in full."
+else
+  EMAIL_LANE_NOTE="GMAIL IS BROKEN THIS SLOT ($GMAIL_KIND): SKIP skill 1 entirely. Do not scan, do not mark, do not publish an email digest, and do NOT move the watermark. Say 'email lane BROKEN ($GMAIL_KIND)' in your report and carry on with skills 2 and 3, which do not touch Gmail."
+  echo "EMAIL LANE BROKEN ($GMAIL_KIND) — skill 1 skipped this slot: $GMAIL_HEALTH" >> "$LOG"
+fi
+
+# Record it BEFORE the agent runs, so a slot that dies mid-run still leaves the
+# lane verdict behind. Exit 3 means this lane has now been broken for two slots
+# running, which is not bad luck — the day is going the way 3-5 Sep did.
+/usr/bin/python3 "$REPO/scripts/inbound-triage.py" slot-record \
+  --slot "$SLOT_LABEL" --lane email \
+  --status "$([ "$GMAIL_OK" = "1" ] && echo ok || echo broken)" \
+  --reason "$GMAIL_KIND" >> "$LOG" 2>&1
+if [ $? -eq 3 ]; then
+  echo "ESCALATE: inbound-triage email lane BROKEN for 2+ consecutive slots ($GMAIL_KIND). No mail has been triaged since the last ok slot — see slot-results.jsonl." | tee -a "$LOG" >&2
+fi
+
 # THE HISTORY BOOK + OPEN MATTERS (1 Sep 2026, agent-gate EXTEND verdict —
 # the approved chain map lives on the register row recYy33zkoa099uM2). Two
 # pre-reads on the same contract as gmail-sent.json: produced HERE because a
@@ -153,6 +195,7 @@ fi
 # fails if this path stops being named here.
 "$CLAUDE" -p "You are the Inbound Comms Triage agent's scheduled run. THIS RUN IS THE $SLOT_LABEL SLOT — that is the wall clock at run start, read for you. Head your report with exactly '$SLOT_LABEL slot' and never substitute a slot you worked out yourself.
 0. FIRST read /Users/kevinbrittain/.claude/agents/inbound-comms-triage.md — that file is your standing instructions, including the '## Lessons from Kevin' section, which is where every rule he has asked you to remember lives. Apply every lesson in it to the decisions you make below. If a lesson conflicts with a skill step, say so in your report rather than guessing which wins.
+EMAIL LANE STATUS FOR THIS SLOT: $EMAIL_LANE_NOTE
 Then do these three skills in order, each in full:
 1. /Users/kevinbrittain/.claude/scheduled-tasks/inbound-email-triage/SKILL.md — BEFORE creating a task for any email thread, check \$SCRATCH/gmail-sent.json: if that thread id already has a send NEWER than the incoming message, it has been answered — file it, do not create a task. If that file carries an \"error\" key or \"truncated\": true, treat every thread as UNCHECKED and say so in your report; never read a failed check as \"nothing was answered\". Report how many you suppressed this way. Two more pre-reads on the same contract: \$SCRATCH/history-book.json is where each sender's mail has HISTORICALLY been filed by humans (the skill's Step 2 history-book rule — the skill's rules WIN over the book, and a disagreement goes in your --reason), and \$SCRATCH/open-matters.json is every open agent task plus 14 days of completed ones (the skill's Step 3b matter check — one matter, one task). An \"error\" key in either file means that check is UNCHECKED this run: say so and fall back to the rules and the per-thread dedupe alone. Report how many decisions the book steered and how many threads JOINED an existing matter.
 2. /Users/kevinbrittain/.claude/scheduled-tasks/inbound-messages-sweep/SKILL.md — IMPORTANT: in this context chat.db reads are DENIED to you; the fresh pre-read dumps at $SCRATCH/imessage-scan.json and $SCRATCH/imessage-sent.json are your scan and sent-check data, per the skill's pre-dump rules.

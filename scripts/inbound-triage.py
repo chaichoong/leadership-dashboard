@@ -305,8 +305,20 @@ def read_scan_cache():
 # Transport
 # ---------------------------------------------------------------------------
 
-def fail(msg):
-    print(json.dumps({"error": msg}))
+# The reason a run died, kept as a MACHINE-READABLE class alongside the prose
+# (finding 20260906-daily-ops-477). "Gmail quota exhausted" and "Gmail not
+# connected" need opposite responses — one waits for midnight Pacific, the other
+# needs Kevin at a browser — and until now the only difference between them was
+# wording inside a sentence nothing parsed. `health` reads this.
+_last_fail = {}
+_fail_quiet = {"on": False}
+
+
+def fail(msg, kind="error"):
+    _last_fail.clear()
+    _last_fail.update({"kind": kind, "message": msg})
+    if not _fail_quiet["on"]:
+        print(json.dumps({"error": msg, "kind": kind}))
     sys.exit(2)
 
 
@@ -416,12 +428,13 @@ def worker_post(path, payload, sleep=time.sleep):
                 fail("GMAIL DAILY QUOTA EXHAUSTED: %s (worker %s answered %d). "
                      "The watermark is NOT advanced, so no mail is lost — this "
                      "slot is skipped and the next one picks up where this left "
-                     "off. Detail: %s" % (why, path, e.code, detail))
+                     "off. Detail: %s" % (why, path, e.code, detail),
+                     kind="quota")
             if action == "stop":
                 if e.code == 409:
                     fail("Gmail not connected on the worker (409). Kevin grants "
                          "once at %s/auth/gmail — then retry. Detail: %s"
-                         % (WORKER_URL, detail))
+                         % (WORKER_URL, detail), kind="auth")
                 fail("worker %s answered %d: %s" % (path, e.code, detail))
             if attempt == MAX_ATTEMPTS:
                 fail("worker %s still failing after %d attempts (%s): %s"
@@ -1604,6 +1617,45 @@ def selftest():
     check("a run cannot spend a whole day's quota on its own",
           MAX_WORKER_CALLS <= 500 and MAX_ATTEMPTS >= 3)
 
+    # ── per-slot lane result (finding 20260906-daily-ops-477) ───────────
+    # Back-tested against 5 Sep 2026: both that day's slots fired, both
+    # scanned zero email on a quota 403, and both must grade as FAILED.
+    sep5 = [{"slot": "09:00", "lane": "email", "ok": True, "scanned": 12},
+            {"slot": "13:00", "lane": "email", "ok": False, "reason": "quota"},
+            {"slot": "17:00", "lane": "email", "ok": False, "reason": "quota"}]
+    check("5 Sep back-test: two quota slots read as two consecutive breaks",
+          consecutive_broken(sep5, "email") == 2)
+    check("5 Sep back-test: two breaks reach the escalation threshold",
+          consecutive_broken(sep5, "email") >= ESCALATE_AFTER_BROKEN)
+    check("one good slot after the breaks clears the run",
+          consecutive_broken(sep5 + [{"slot": "09:00", "lane": "email",
+                                      "ok": True}], "email") == 0)
+    check("a break in ANOTHER lane never counts toward the email run",
+          consecutive_broken([{"lane": "email", "ok": True},
+                              {"lane": "imessage", "ok": False}], "email") == 0)
+    check("no rows at all is zero breaks, never an escalation",
+          consecutive_broken([], "email") == 0)
+    # The file's ABSENCE must never read as a clean lane. An empty list is what
+    # a fresh install returns; None is what an unreadable file returns, and the
+    # callers branch on that difference.
+    import tempfile as _tf
+    with _tf.TemporaryDirectory() as _d:
+        _f = Path(_d) / "slot-results.jsonl"
+        check("a missing results file reads as empty, not as broken",
+              read_slot_results(_f) == [])
+        rc1 = cmd_slot_record("09:00", "email", False, "quota", path=_f)
+        rc2 = cmd_slot_record("13:00", "email", False, "quota", path=_f)
+        check("first broken slot does not escalate", rc1 == 0)
+        check("second consecutive broken slot escalates (exit 3)", rc2 == 3)
+        rc3 = cmd_slot_record("17:00", "email", True, "", scanned=9, path=_f)
+        check("a working slot stops the escalation", rc3 == 0)
+        check("every line is machine-readable JSON with the lane and verdict",
+              all({"slot", "lane", "ok", "ts"} <= set(r)
+                  for r in read_slot_results(_f)))
+        _f.write_text(_f.read_text() + "{not json\n")
+        check("a torn line is skipped, never fatal",
+              len(read_slot_results(_f)) == 3)
+
     if failures:
         print("selftest FAILED: %d" % len(failures))
         sys.exit(1)
@@ -1611,6 +1663,106 @@ def selftest():
 
 
 # ---------------------------------------------------------------------------
+
+# ─── PER-SLOT LANE RESULT (finding 20260906-daily-ops-477) ───────────────
+#
+# On 5 Sep 2026 the 13:00 and 17:00 slots both fired, both scanned ZERO emails
+# because the Gmail daily quota was gone, and both left a normal queue event.
+# check-routines.py graded the day "inbound-triage 3 of 3" off those events, and
+# no email had been triaged since 3 Sep. A slot that fired and did nothing must
+# not count as a slot that worked.
+#
+# So each slot now writes a MACHINE-READABLE line per lane. Not prose in
+# runs.log — prose is what nothing could grade. The file is append-only JSONL,
+# one line per lane per slot, and its ABSENCE is UNCHECKED rather than fine.
+SLOT_RESULTS_FILE = "slot-results.jsonl"
+
+# Two consecutive broken slots is not bad luck: the three slots share one daily
+# Gmail quota, so a second broken slot means the whole day is going the way the
+# 3rd-5th Sep did.
+ESCALATE_AFTER_BROKEN = 2
+
+
+def slot_results_path():
+    return base_dir() / SLOT_RESULTS_FILE
+
+
+def read_slot_results(path=None, keep=400):
+    """Rows oldest-first. A torn line is skipped, never fatal; an unreadable
+    file returns None (UNCHECKED), which is not the same as an empty list."""
+    p = Path(path) if path else slot_results_path()
+    if not p.exists():
+        return []
+    rows = []
+    try:
+        for line in p.read_text().splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                rows.append(json.loads(line))
+            except ValueError:
+                continue
+    except OSError:
+        return None
+    return rows[-keep:]
+
+
+def consecutive_broken(rows, lane="email"):
+    """How many of the MOST RECENT slots for this lane graded broken in a row."""
+    n = 0
+    for r in reversed(rows or []):
+        if r.get("lane") != lane:
+            continue
+        if r.get("ok"):
+            break
+        n += 1
+    return n
+
+
+def cmd_slot_record(slot, lane, ok, reason, scanned=None, path=None):
+    """Append this slot's verdict for one lane. Exit 3 once the lane has been
+    broken for ESCALATE_AFTER_BROKEN slots running, so the wrapper can say so
+    loudly instead of writing BROKEN into a log nobody grades."""
+    row = {"ts": datetime.now().astimezone().isoformat(timespec="seconds"),
+           "date": datetime.now().strftime("%Y-%m-%d"),
+           "slot": slot, "lane": lane, "ok": bool(ok), "reason": reason or ""}
+    if scanned is not None:
+        row["scanned"] = int(scanned)
+    p = Path(path) if path else slot_results_path()
+    p.parent.mkdir(parents=True, exist_ok=True)
+    with open(p, "a") as f:
+        f.write(json.dumps(row) + "\n")
+    rows = read_slot_results(path) or []
+    run = consecutive_broken(rows, lane)
+    print(json.dumps({"recorded": row, "consecutive_broken": run,
+                      "escalate": run >= ESCALATE_AFTER_BROKEN}))
+    return 3 if run >= ESCALATE_AFTER_BROKEN else 0
+
+
+def cmd_health():
+    """ONE cheap worker call, before the agent spends the slot.
+
+    Returns a lane verdict the wrapper can branch on: ok, or a KIND (quota /
+    auth / error) that says which response is right. Deliberately `labels`,
+    the smallest call the worker exposes — probing with a scan would spend the
+    quota this is checking for.
+    """
+    _fail_quiet["on"] = True
+    try:
+        labels = worker_labels()
+    except SystemExit:
+        out = {"ok": False, "lane": "email",
+               "kind": _last_fail.get("kind", "error"),
+               "reason": _last_fail.get("message", "Gmail probe failed")}
+        print(json.dumps(out))
+        return 2
+    finally:
+        _fail_quiet["on"] = False
+    print(json.dumps({"ok": True, "lane": "email", "kind": "ok",
+                      "reason": "Gmail answered (%d labels)" % len(labels)}))
+    return 0
+
 
 def cmd_search(q, limit):
     """Read-only Gmail search for the role agents (Property Administration
@@ -1686,6 +1838,26 @@ def main(argv):
         return cmd_matters()
     elif cmd == "search":
         cmd_search(opt("--q"), int(opt("--limit", "20")))
+    elif cmd == "health":
+        return cmd_health()
+    elif cmd == "slot-record":
+        lane = opt("--lane", "email")
+        status = opt("--status")
+        if status not in ("ok", "broken"):
+            fail("slot-record needs --status ok|broken")
+        scanned = opt("--scanned")
+        return cmd_slot_record(opt("--slot", "unknown"), lane, status == "ok",
+                               opt("--reason", ""),
+                               int(scanned) if scanned is not None else None,
+                               opt("--file"))
+    elif cmd == "slot-results":
+        rows = read_slot_results(opt("--file"))
+        if rows is None:
+            fail("cannot read %s — UNCHECKED, not clean" % slot_results_path())
+        print(json.dumps({"file": str(opt("--file") or slot_results_path()),
+                          "rows": rows,
+                          "consecutive_broken_email":
+                              consecutive_broken(rows, "email")}, indent=1))
     elif cmd == "selftest":
         selftest()
     else:
