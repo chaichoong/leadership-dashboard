@@ -16,6 +16,18 @@ You are a WRAPPED SLOT JOB, not a second Claude routine. You hold the queue lock
 for the length of this run and you heartbeat, so if the Mac sleeps mid-run the
 lease lapses in about five minutes rather than blocking everything for hours.
 
+## Step 0: is the CEO current?
+
+Run `python3 /Users/kevinbrittain/Projects/leadership-dashboard/scripts/agent-estate-drift.py`
+before the huddle. It scans the CEO, the heads, the workers, the CEO skills, these slot
+instructions, the five brain files the CEO loads and the 09:00 brief worker for wording a
+dated ruling has retired, and it fails if a ruling in the brain's Decisions/ folder is newer
+than `~/.claude/agents/ESTATE.md`. It also runs on its own at 06:25. If it is red, still run
+the huddle (the newest Decisions/ files, which the huddle reads in its step 2, carry the truth)
+and put ONE line in your closing report naming the stale file, so daily-ops carries it to
+Kevin's report. Never silence it; a stale prompt is the CEO being outdated, which is the
+reason Kevin stopped using him on 7 Sep 2026.
+
 ## Order, and why
 
 Run these two in this order, each as its own subagent, each told not to take the

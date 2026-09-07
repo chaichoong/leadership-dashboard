@@ -36,6 +36,7 @@ MODE="${1:---dry-run}"
 # Cloudflare, and that ambiguity cost this platform every Friday for a week.
 JOBS=(
   "drift-scan|6:20|/usr/bin/python3 $REPO/scripts/drift-scan.py"
+  "estate-drift|6:25|/usr/bin/python3 $REPO/scripts/agent-estate-drift.py"
   "data-invariants|6:40|/usr/bin/python3 $REPO/scripts/check-data-invariants.py"
   "drive-auth|6:50|/usr/bin/python3 $REPO/scripts/drive-auth-check.py"
   "ceo-agent|6:45|/bin/bash $SLOT ceo-agent $TASKS/ceo-agent/SKILL.md"

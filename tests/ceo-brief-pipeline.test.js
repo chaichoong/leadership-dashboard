@@ -182,3 +182,24 @@ describe('no stale defaults or local clocks', () => {
     expect(WORKER.split('\n').slice(0, 12).join('\n')).not.toMatch(/Cron: Mon–Fri 09:00/);
   });
 });
+
+describe('the brief never routes work to Mica or Ericamae (Kevin, 25 Aug 2026)', () => {
+  // On 4 Sep 2026 the 09:00 brief handed "Mica — pay credit card due 5 September" to
+  // Mica, because the prompt still listed her and Ericamae as delegation destinations
+  // 2 and 3. The ruling of 25 Aug is AI agents only, Roy for property residue, Kevin
+  // last and prepared. Found in the 7 Sep 2026 estate audit.
+  const system = WORKER.match(/const system = `([\s\S]*?)`;/)[1];
+  it('the delegation list has no human destination except Roy', () => {
+    expect(system).not.toMatch(/^\s*\d\.\s+Mica\s+[—-]/m);
+    expect(system).not.toMatch(/^\s*\d\.\s+Ericamae\s+[—-]/m);
+    expect(system).toMatch(/^\s*2\.\s+Roy\s+—/m);
+  });
+  it('it names the role agents, not only the five workers', () => {
+    for (const a of ['Inbox Response', 'Supplier and Creditor Manager', 'Property Administration'])
+      expect(system).toContain(a);
+  });
+  it('it says the tap happens in the dashboard queue, not Slack (1 Sep 2026 contract)', () => {
+    expect(system).not.toMatch(/one tap in Slack/);
+    expect(system).toMatch(/one tap in the approval queue/);
+  });
+});
