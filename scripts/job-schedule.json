@@ -433,7 +433,7 @@
    "network"
   ],
   "retryWhenDeferred": false,
-  "retryWhenDeferredNote": "Deliberately OFF, not forgotten. handback-poll runs every 30 minutes, so a deferred slot is picked up by the next one 30 minutes later \u2014 re-firing it would add a duplicate poll, not rescue a lost day. Revisit only if the cadence drops below hourly."
+  "retryWhenDeferredNote": "Deliberately OFF, not forgotten. handback-poll runs every 30 minutes, so a deferred slot is picked up by the next one 30 minutes later — re-firing it would add a duplicate poll, not rescue a lost day. Revisit only if the cadence drops below hourly."
  },
  "retry-deferred": {
   "cron": "20 * * * *",
@@ -482,5 +482,17 @@
   "mode": "wrapped",
   "retryWhenDeferred": true,
   "note": "Kevin, 4 Sep 2026: keep the robot signed in. Visits every login site that can hold a session (allowlist entries with a loginUrl and no shortSession flag) so the cookie stays fresh, and raises ONE parked task in the standard SIGN-IN NEEDED form for any site that has signed out, timed for the 08:00 message. GOV.UK and HMRC are skipped: their sessions need his code every time. A run where every site reads unknown FAILS rather than reporting all well."
+ },
+ "estate-drift": {
+  "cron": "25 6 * * *",
+  "maxLateMinutes": 600,
+  "mode": "wrapped",
+  "retryWhenDeferred": true,
+  "needs": [
+   {
+    "drive": "~/Library/CloudStorage/GoogleDrive-kevin@runpreneur.org.uk/My Drive/00 AI Context"
+   }
+  ],
+  "note": "Kevin, 7 Sep 2026: 'I felt that he [the CEO] is outdated.' Scans the CEO, the eleven heads, the five workers, the /ceo and /huddle skills, the CEO slot instructions, the five brain files the CEO loads first and the 09:00 brief worker for wording a dated ruling retired, and fails if a Decisions/ file newer than ~/.claude/agents/ESTATE.md's As at stamp touches the estate. Red means a prompt is lying about how the estate works. Fewer than 20 readable surfaces exits 2, never 0."
  }
 }

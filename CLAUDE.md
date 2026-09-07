@@ -328,6 +328,24 @@ Do NOT ask the user to:
 
 If any of these are needed, do them yourself. The user's role is to describe what they want and review the working result.
 
+## Agent estate sync (Kevin, 7 Sep 2026)
+
+`~/.claude/agents/ESTATE.md` is the one dated page saying how the AI workforce, the approval
+gate, Kevin's surfaces and the clocks fit together. The CEO, every head, every worker, the
+`/ceo` and `/huddle` skills and the 06:45 CEO slot read it first. Kevin stopped using his CEO
+on 7 Sep 2026 because the files around him had drifted: eight heads, the `/ceo` skill, four
+brain files and the 09:00 brief worker still routed work to Mica, quoted £50/£250 and
+described Slack cards weeks after each was retired.
+
+- **Any ruling that changes routing, autonomy levels, the money rule, where Kevin decides, the
+  workforce shape or the clocks** goes to the brain's `Decisions/` AND into `ESTATE.md` with
+  its `As at` date bumped, in the same session. Wording the ruling retires is added to
+  `RETIRED` in `scripts/agent-estate-drift.py`.
+- `python3 scripts/agent-estate-drift.py` is the check (daily 06:25 as the wrapped job
+  `estate-drift`, and before every huddle). Red is fixed the same day, never silenced.
+- Never state a register count or a persona list in a prompt; the register is read live and
+  the eleven heads are the `dept-*` files.
+
 ## Deployment
 
 The git repo IS the source of truth. Edit files directly here.
