@@ -1260,6 +1260,153 @@ def informational_only(output, task_type, tier1=False):
     return no_action_declared(tail)
 
 
+# ─── THE REDO RECEIPT (Kevin, 7 Sep 2026) ─────────────────────────────
+#
+# Measured that day: of 132 tasks Kevin gave feedback on since 27 Aug, 30 went
+# round two or more times for real (13 of them three or more). His words: "I've
+# requested changes and given feedback but those changes haven't been
+# understood." An agent could resubmit anything after a Changes requested and
+# nothing checked it had read his words at all — the EICR quote came back twice
+# with the bedroom count still wrong.
+#
+# So a redo now carries a RECEIPT: one line per point he made, each saying what
+# changed (or why it could not). `submit` refuses a redo without one, refuses
+# a receipt with fewer lines than his points, and refuses a redo whose text is
+# identical to the one he sent back. The receipt goes into Notes, and his card
+# leads with it, so he sees at a glance whether he was understood before he
+# reads a word of the draft.
+RECEIPT_MARK = "FEEDBACK ANSWERED"
+RECEIPT_LINE_RE = re.compile(r"^\s*[-*]\s*(?P<point>.+?)\s*(?:→|->)\s*(?P<change>.+?)\s*$")
+RECEIPT_MIN_WORDS = 6      # a sentence shorter than this is not a point on its own
+RECEIPT_MAX_POINTS = 6
+
+
+def feedback_points(feedback):
+    """Kevin's feedback split into the points a receipt must answer."""
+    text = re.sub(r"^\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}\]\s*", "", str(feedback or ""), flags=re.M)
+    parts = re.split(r"(?<=[.!?])\s+|\n+", text)
+    points = [p.strip() for p in parts if len(p.split()) >= RECEIPT_MIN_WORDS]
+    return points[:RECEIPT_MAX_POINTS]
+
+
+def receipt_lines(receipt):
+    out = []
+    for line in str(receipt or "").splitlines():
+        m = RECEIPT_LINE_RE.match(line)
+        if m and m.group("point").strip() and m.group("change").strip():
+            out.append((m.group("point").strip(), m.group("change").strip()))
+    return out
+
+
+def receipt_problem(receipt, feedback, old_output, new_output):
+    """Why this redo may not be submitted, or '' when the receipt holds."""
+    lines = receipt_lines(receipt)
+    points = feedback_points(feedback)
+    if not lines:
+        return ("no receipt: a redo must carry one line per point Kevin made, "
+                "in the form `- <his point> → <what changed, or cannot: why>`")
+    if len(lines) < len(points):
+        return (f"the receipt answers {len(lines)} point(s) but Kevin made "
+                f"{len(points)}: every point gets a line, including the ones you "
+                "could not do (`→ cannot: <why>`)")
+    if " ".join(str(new_output or "").split()) == " ".join(str(old_output or "").split()):
+        return "nothing changed: the new text is identical to the one Kevin sent back"
+    return ""
+
+
+def receipt_block(receipt, round_no, stamp):
+    lines = receipt_lines(receipt)
+    body = "\n".join(f"- {pt} → {ch}" for pt, ch in lines)
+    return f"[{stamp} — agent-dispatch] {RECEIPT_MARK} (round {round_no}):\n{body}"
+
+
+def feedback_archived(history, text):
+    """True when this feedback text is already in the archive, stamps ignored.
+
+    Three surfaces write Feedback History at decision time and submit archived
+    Approval Feedback again with a fresh stamp: 84 of 262 blocks (32%) were
+    exact duplicates on 7 Sep 2026, which made the history unreadable to the
+    agent redoing the work and to anyone counting rounds.
+    """
+    want = " ".join(str(text or "").split())
+    if not want:
+        return True
+    blocks = re.split(r"^\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}\]\s*", str(history or ""), flags=re.M)
+    return any(" ".join(b.split()) == want for b in blocks)
+
+
+# ─── THE REPORT GATE (Kevin, 7 Sep 2026) ──────────────────────────────
+#
+# 61% of reports reaching the gate between 20 Aug and 7 Sep were rejected, and
+# every one for a question the agent could have answered: already handled,
+# Roy's, a machine, an open task, not worth his time. Reports on inbound items
+# were arriving at 10 a day. So a report on an INBOUND task now opens with one
+# line that shows the five questions were asked, and names the trigger that
+# makes it Kevin's:
+#
+#   CHECKED: handled=no; roy=no; machine=no; open-task=no; trigger=deadline
+#
+# A `yes` on any of the first four means it is not a report (it is a close, a
+# handover or a board item) and is refused. `trigger=none` means nothing needs
+# deciding and the report FILES itself, exactly like the Nothing line. No line
+# at all is refused: the agent looks, or the card does not exist.
+CHECKED_RE = re.compile(r"^\s*CHECKED:\s*(?P<body>[^\n]+)$", re.I | re.M)
+CHECK_KEYS = ("handled", "roy", "machine", "open-task", "trigger")
+CHECK_TRIGGERS = ("money", "data-request", "legal", "deadline", "obligation",
+                  "unknown-sender", "kevin-asked", "none")
+REPORT_TYPES = ("Analysis", "Research", "Admin", "Drafting", "Audit", "Build")
+CHECK_EXEMPT_RE = re.compile(
+    r"^\s*(CLOSE PROPOSAL:|PASS TO ROY:|CALENDAR:|MARK FOR PAYMENT|DOCUMENT:|POST:)", re.I)
+
+
+def checked_parse(output):
+    m = CHECKED_RE.search(output or "")
+    if not m:
+        return None
+    out = {}
+    for part in re.split(r"[;|,]\s*", m.group("body")):
+        if "=" in part:
+            k, v = part.split("=", 1)
+            out[k.strip().lower()] = v.strip().lower()
+    return out
+
+
+def checked_problem(output, task_type, inbound):
+    """Why a report on an inbound item may not be submitted, or ''."""
+    if not inbound or task_type not in REPORT_TYPES:
+        return ""
+    out = (output or "").strip()
+    if CHECK_EXEMPT_RE.match(out) or SIGNIN_NEEDED_RE.search(out):
+        return ""
+    c = checked_parse(out)
+    if c is None:
+        return ("a report on an inbound item must open with the five questions "
+                "answered: `CHECKED: handled=no; roy=no; machine=no; open-task=no; "
+                "trigger=<money|data-request|legal|deadline|obligation|unknown-sender"
+                "|kevin-asked|none>`. trigger=none files it; a yes on any of the "
+                "first four means it is a close, a handover or a board item, not a report")
+    missing = [k for k in CHECK_KEYS if k not in c]
+    if missing:
+        return f"the CHECKED line is missing {', '.join(missing)}"
+    for k in CHECK_KEYS[:4]:
+        if c[k] == "yes":
+            what = {"handled": "already handled: propose the close with the Completed task cited",
+                    "roy": "Roy's: PASS TO ROY",
+                    "machine": "a machine reporting a breakage: leave it on the board (annotate)",
+                    "open-task": "an open task already holds it: annotate that task, then propose the close"}[k]
+            return f"CHECKED says {k}=yes, so this is not a report; it is {what}"
+    trig = c["trigger"]
+    if not (trig in CHECK_TRIGGERS or trig.startswith("other:")):
+        return (f"trigger={trig!r} is not one of {', '.join(CHECK_TRIGGERS)} "
+                "(or other:<why>)")
+    return ""
+
+
+def checked_trigger(output):
+    c = checked_parse(output)
+    return c.get("trigger") if c else None
+
+
 # ─── AUTONOMY LEVELS (Kevin's ruling, 7 Sep 2026; Chen Book 4, ch 5) ─────
 #
 # Measured before the change: 260 decisions in 586 active minutes since
@@ -2117,7 +2264,7 @@ def cmd_reassign(args):
     if prior:
         hist = str(tf.get(AF["feedbackHistory"]) or "")
         block = f"[{stamp}] {prior}"
-        if block not in hist:
+        if not feedback_archived(hist, prior):
             fields[AF["feedbackHistory"]] = (hist.rstrip() + "\n\n" + block).strip()
     patch_task(args.task, fields)
     print(json.dumps({"reassigned": args.task, "to": "AI CEO (Dan Martell)",
@@ -2397,6 +2544,18 @@ def cmd_submit(args):
             "             and stop. That line is a tap for him (Robot sign-in app), "
             "not a task. Never a phone call.")
 
+    # THE REPORT GATE (Kevin, 7 Sep 2026): a report on an inbound item shows
+    # the five questions were asked and names its trigger, or it is refused.
+    # Read early so a report with nothing to decide can file itself below.
+    tf_early = (get_task(args.task).get("fields", {}) or {})
+    is_inbound = bool(tf_early.get(AF["inboundTask"]))
+    checked = checked_problem(output, args.type, is_inbound)
+    if checked:
+        sys.exit(f"ERROR: refusing to submit {args.task} — {checked}.\n"
+                 "       61% of reports reaching Kevin between 20 Aug and 7 Sep 2026 "
+                 "were rejected for one of the five questions. Look first; if nothing "
+                 "needs deciding, write trigger=none and it files itself.")
+
     # Does the closing line promise a send this Task Type cannot deliver?
     # Refused here, not discovered at carry-out after Kevin has approved it.
     promise = send_promise_problem(output, args.type)
@@ -2530,8 +2689,40 @@ def cmd_submit(args):
         hist = str(tf.get(AF["feedbackHistory"]) or "")
         stamp = datetime.now(LONDON).strftime("%Y-%m-%d %H:%M")
         block = f"[{stamp}] {prior}"
-        if block not in hist:
+        # Stamps ignored: the decision surface already archived these words.
+        if not feedback_archived(hist, prior):
             archived = (hist.rstrip() + "\n\n" + block).strip()
+
+    # THE REDO RECEIPT (Kevin, 7 Sep 2026). A resubmission after Changes
+    # requested must answer his points one by one, and must differ from the
+    # text he sent back. The receipt lands in Notes; his card leads with it.
+    stored_outcome = sel(tf.get(AF["approvalOutcome"]))
+    stored_output = str(tf.get(AF["agentOutput"]) or "")
+    if stored_outcome == "Changes requested" and prior:
+        receipt_text = ""
+        rpath = getattr(args, "receipt", None)
+        if rpath:
+            with open(rpath) as fh:
+                receipt_text = fh.read()
+        problem = receipt_problem(receipt_text, prior, stored_output, output)
+        if problem:
+            sys.exit(
+                f"ERROR: refusing to resubmit {args.task} — {problem}.\n"
+                "       Kevin's words were:\n"
+                + "".join(f"         · {pt}\n" for pt in feedback_points(prior))
+                + "       Write one line per point to a file and pass it with --receipt:\n"
+                "         - <his point> → <what changed>\n"
+                "         - <his point> → cannot: <why>\n"
+                "       His card shows these lines first, so he sees he was understood "
+                "before he reads the draft (30 of 132 feedback tasks went round twice, "
+                "7 Sep 2026).")
+        round_no = str(tf.get(AF["notes"]) or "").count(RECEIPT_MARK) + 1
+        rb = receipt_block(receipt_text, round_no,
+                           datetime.now(LONDON).strftime("%d %b %Y %H:%M"))
+        # Written into the local copy so every write path below (filed,
+        # handled, card) carries it as part of "existing" Notes.
+        tf[AF["notes"]] = (str(tf.get(AF["notes"]) or "").rstrip() + "\n\n" + rb).strip()
+        tf["_receiptAdded"] = True
 
     # The files go up FIRST. If one is refused the run stops here with the
     # task still unsubmitted — better than an approval card promising a
@@ -2544,11 +2735,19 @@ def cmd_submit(args):
     for path in to_attach:
         upload_attachment(args.task, path)
 
-    if informational_only(output, args.type, tier1=bool(getattr(args, "tier1", False))):
+    files_itself = informational_only(output, args.type, tier1=bool(getattr(args, "tier1", False)))
+    if not files_itself and is_inbound and args.type in REPORT_TYPES \
+            and checked_trigger(output) == "none" and not is_tier1:
+        files_itself = True
+    if files_itself:
         stamp = datetime.now(LONDON).strftime("%d %b %Y %H:%M")
-        note = (f"[{stamp} — agent-dispatch] FILED, not queued: the closing line "
-                f"says nothing happens on approval, so there is no decision here "
-                f"(Kevin's ruling, 4 Sep 2026). The report is in Agent Output.")
+        note = (f"[{stamp} — agent-dispatch] FILED, not queued: "
+                + ("the CHECKED line says trigger=none, so nothing needs deciding "
+                   "(the report gate, 7 Sep 2026). "
+                   if checked_trigger(output) == "none" and not informational_only(output, args.type)
+                   else "the closing line says nothing happens on approval, so there is "
+                        "no decision here (Kevin's ruling, 4 Sep 2026). ")
+                + "The report is in Agent Output.")
         filed = {
             AF["agentOutput"]: output[:95000],
             AF["taskType"]: args.type,
@@ -2607,6 +2806,8 @@ def cmd_submit(args):
         fields[AF["deferredUntil"]] = tomorrow_london()
     if archived:
         fields[AF["feedbackHistory"]] = archived
+    if tf.get("_receiptAdded"):
+        fields[AF["notes"]] = str(tf.get(AF["notes"]) or "")[-90000:]
     # RESET THE REMEMBER CYCLE, BUT ONLY ONCE THE LESSON IS SAFE. An agent can
     # redo and resubmit inside the 30-minute lesson poll, so clearing the flag
     # unconditionally would drop exactly the lessons from the fastest redos.
@@ -5376,6 +5577,10 @@ def main():
     s.add_argument("--agent", required=True)
     s.add_argument("--type", required=True)
     s.add_argument("--output-file", required=True)
+    s.add_argument("--receipt", metavar="PATH",
+                   help="redo only: one line per point Kevin made, "
+                        "`- <point> → <what changed>`; refused without it after "
+                        "Changes requested (7 Sep 2026)")
     s.add_argument("--attach", action="append", metavar="PATH",
                    help="attach a file to this approval so Kevin can open it "
                         "before deciding (repeat for several): a prepared "
