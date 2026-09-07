@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """Rebuild the "Capture" Apple Shortcut (watch Action button -> Apple Notes).
 
-What it does on the watch: dictate, then append the text as a new line to the
-"Captures" note in the Apple Notes "Brain" folder (iCloud). That folder is pulled
-into the AI brain inbox every night at 22:40 by ~/knowledge-os/apple_notes_bridge.py,
-so a capture reaches the brain without any further plumbing.
+What it does on the watch: dictate, then add the text as a reminder on the
+"Captures" list in Apple Reminders (iCloud). The watch cannot write into Apple Notes
+(Find Note / Append to Note only run on iPhone and Mac; tried 7 Sep 2026), but it can
+add a reminder. ~/knowledge-os/apple_notes_bridge.sh pulls that list into the AI brain
+inbox every night at 22:40 alongside the Apple Notes "Brain" folder.
 
 On the Mac the same shortcut accepts text input instead of dictating, which is how
 it is tested without a microphone:
@@ -22,7 +23,7 @@ import plistlib
 import sys
 import uuid
 
-NOTE_NAME = "Captures"
+LIST_NAME = "Captures"
 
 
 def build():
@@ -44,24 +45,13 @@ def build():
             "UUID": dictate_id, "WFDictateTextStopListening": "After Pause"}},
         {"WFWorkflowActionIdentifier": "is.workflow.actions.conditional", "WFWorkflowActionParameters": {
             "GroupingIdentifier": group, "WFControlFlowMode": 2, "UUID": end_if}},
-        # Find the one note called "Captures" ...
-        {"WFWorkflowActionIdentifier": "is.workflow.actions.filter.notes", "WFWorkflowActionParameters": {
+        # Add the text as a reminder on the "Captures" list.
+        {"WFWorkflowActionIdentifier": "is.workflow.actions.addnewreminder", "WFWorkflowActionParameters": {
             "UUID": find_id,
-            "WFContentItemFilter": {"Value": {
-                "WFActionParameterFilterPrefix": 1,
-                "WFActionParameterFilterTemplates": [{"Operator": 4, "Property": "Name", "Removable": True,
-                                                      "Values": {"String": NOTE_NAME, "Unit": 4}}],
-                "WFContentPredicateBoundedDate": False},
-                "WFSerializationType": "WFContentPredicateTableTemplate"},
-            "WFContentItemLimitEnabled": True, "WFContentItemLimitNumber": 1}},
-        # ... and append the captured text to it.
-        {"WFWorkflowActionIdentifier": "is.workflow.actions.appendnote", "WFWorkflowActionParameters": {
-            "UUID": append_id,
-            "WFNote": {"Value": {"OutputName": "Notes", "OutputUUID": find_id, "Type": "ActionOutput"},
-                       "WFSerializationType": "WFTextTokenAttachment"},
-            "WFInput": {"Value": {"attachmentsByRange": {"{0, 1}": {"OutputName": "If Result", "OutputUUID": end_if, "Type": "ActionOutput"}},
-                                  "string": "￼"},
-                        "WFSerializationType": "WFTextTokenString"}}},
+            "WFCalendarItemTitle": {"Value": {"attachmentsByRange": {"{0, 1}": {"OutputName": "If Result", "OutputUUID": end_if, "Type": "ActionOutput"}},
+                                              "string": "￼"},
+                                    "WFSerializationType": "WFTextTokenString"},
+            "WFCalendarItemCalendar": LIST_NAME}},
     ]
     return {
         "WFWorkflowClientVersion": "2607.0.3",
