@@ -88,6 +88,20 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 .loading{text-align:center;padding:60px 20px;color:var(--text-muted);font-size:var(--fs-sm)}
 .zone-loading{display:flex;align-items:center;gap:10px;padding:16px;color:var(--text-muted);font-size:var(--fs-sm)}
 .zone-error{padding:12px 16px;border:1px solid var(--danger);border-radius:var(--radius-md);background:var(--danger-bg);color:var(--danger);font-size:var(--fs-sm)}
+/* The 15-Minute Dashboard (7 Sep 2026) */
+.f15-block{border:1px solid var(--border-default);border-radius:var(--radius-lg);background:var(--bg-surface);padding:12px 16px;margin-bottom:10px;box-shadow:var(--shadow-sm)}
+.f15-head{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;font-size:var(--fs-md);font-weight:var(--fw-bold);margin-bottom:8px}
+.f15-big{font-size:var(--fs-2xl);font-weight:var(--fw-bold);color:var(--accent)}
+.f15-sub{font-size:var(--fs-xs);font-weight:var(--fw-regular);color:var(--text-secondary);flex-basis:100%}
+.f15-table{width:100%;border-collapse:collapse;font-size:var(--fs-xs);margin-top:4px}
+.f15-table th{text-align:left;color:var(--text-muted);font-weight:var(--fw-semibold);padding:4px 8px;border-bottom:1px solid var(--border-subtle);background:var(--bg-subtle)}
+.f15-table td{padding:5px 8px;border-bottom:1px solid var(--border-subtle);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:280px}
+.f15-table tr.f15-lv-A td:first-child{border-left:3px solid var(--success)}
+.f15-table tr.f15-lv-C td:first-child{border-left:3px solid var(--danger)}
+.f15-muted{font-size:var(--fs-xs);color:var(--text-muted);margin-top:6px}
+.f15-candidates{margin:6px 0 8px}
+.f15-cand{font-size:var(--fs-sm);background:var(--success-bg);color:var(--success);border-radius:var(--radius-md);padding:6px 10px;margin-bottom:4px}
+.f15-flow{display:flex;gap:16px;flex-wrap:wrap;font-size:var(--fs-sm);color:var(--text-primary)}
 
 /* Approval cards (Zone A) */
 .apv-card{border:1px solid var(--border-default);border-left:4px solid var(--warning);border-radius:var(--radius-md);background:var(--bg-surface);padding:14px 16px;margin-bottom:12px}
@@ -179,6 +193,7 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 /* Check list (Zone B) */
 .chk-item{display:flex;gap:10px;align-items:flex-start;border:1px solid var(--border-default);border-left:4px solid var(--warning);border-radius:var(--radius-md);background:var(--bg-surface);padding:10px 14px;margin-bottom:8px}
 .chk-item.danger{border-left-color:var(--danger)}
+.chk-item.info{border-left-color:var(--info)}
 .chk-lane{flex-shrink:0;font-size:var(--fs-xs);font-weight:var(--fw-bold);color:var(--text-secondary);background:var(--bg-subtle);padding:2px 8px;border-radius:var(--radius-full);white-space:nowrap;margin-top:1px}
 .chk-text{font-size:var(--fs-sm);color:var(--text-primary);line-height:1.5}
 .chk-detail{font-size:var(--fs-xs);color:var(--text-secondary);margin-top:2px}
@@ -331,6 +346,15 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
             <div id="briefBody"><div class="zone-loading"><div class="sop-spinner"></div><span>Loading the recording brief…</span></div></div>
         </div>
 
+        <div class="zone" id="zoneFifteen" data-fifteen>
+            <div class="zone-header">
+                <span class="zone-title">Your 15-minute review</span>
+                <span class="zone-count" id="fifteenCount">&mdash;</span>
+                <span class="zone-sub">Five things, in order: how much ran without you, quality, what the agents learned, which categories are ready to run alone, and whether the handoffs are flowing. Last 30 days.</span>
+            </div>
+            <div id="fifteenBody"><div class="zone-loading"><div class="sop-spinner"></div><span>Measuring the last 30 days…</span></div></div>
+        </div>
+
         <div class="zone" id="zoneRegister">
             <div class="zone-header">
                 <span class="zone-title">Your AI team</span>
@@ -373,7 +397,7 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 <script src="../../js/ai-models.js?v=1"></script>
 <!-- Shared accuracy scoring (per agent PER TASK TYPE) — same maths as the
      Leadership Dashboard card. Pure IIFE, safe to load here. -->
-<script src="../../js/agent-accuracy.js?v=2"></script>
+<script src="../../js/agent-accuracy.js?v=3"></script>
 <script src="../../js/automations-data.js?v=1"></script>
 <script src="../../js/mcp-tools-data.js?v=1"></script>
 <script src="../../js/sync-bar.js?v=6"></script>
@@ -422,7 +446,18 @@ const TF = {
     // js/config.js for why this is a date on the task rather than a queue
     // somewhere else.
     deferredUntil:    'fldJ9IHS1yxwYzYSN',
+    // The learning loop's idempotency stamp (26 Aug 2026): set once the lesson
+    // is in the agent's file. The 15-Minute Dashboard counts it, never writes it.
+    lessonWrittenAt:  'fldFfzXOME9Rh8SyM',
 };
+
+// ─── AUTONOMY LEVELS (Kevin's ruling, 7 Sep 2026) ────────────────────────
+// scripts/agent-dispatch.py carries a Level A submission out at submit and
+// stamps this marker into Notes. Everything on this page that says "handled
+// without you" reads that stamp; nothing here decides a level itself.
+const HANDLED_MARK = (window.AgentAccuracy && window.AgentAccuracy.HANDLED_MARK) || 'HANDLED WITHOUT YOU';
+const HANDLED_NOTE_RE = /\[(\d{1,2} \w{3} \d{4} \d{2}:\d{2}) [^\]]*agent-dispatch\] HANDLED WITHOUT YOU \(([^)]+)\):\s*([^\n]*)/;
+const HANDLED_WINDOW_DAYS = 7;
 
 // This page is admin-only (Kevin's build). Decisions are stamped with the
 // same identity the Slack loop uses (APPROVERS.kevin in approvals.js).
@@ -596,6 +631,9 @@ let ceoBriefRecords = null;     // CEO Briefs rows, newest first
 let _ceoBriefState = 'idle';
 let allOpenTasks = [];          // all non-Completed/non-Cancelled tasks (Check zone feeds)
 let _openTasksState = 'idle';
+let allHandled = [];            // Level A carry-outs in the last 7 days (the HANDLED marker)
+let _handledState = 'idle';
+let _agentHistoryRecs = [];     // the accuracy/workload read, kept for the 15-Minute Dashboard
 let allAgents = [];             // rows from AGENTS_TBL
 let allTeam = [];               // every Team Members row (names for raiser lookup)
 let allTeamAgents = [];         // Team Members rows with Is AI Agent (strategic layer + wiring)
@@ -2453,6 +2491,76 @@ async function loadOpenTasks(){
     }
 }
 
+// Level A carry-outs (Kevin's ruling, 7 Sep 2026): everything an agent did
+// WITHOUT a card in the last week, read from the marker agent-dispatch.py
+// leaves in Notes. This list is the whole safety of letting agents act — a
+// queue that hides things and reports nothing cannot be told from one that
+// loses them — so it is fetched on its own and its failure is its own error.
+async function loadHandled(){
+    _handledState = 'loading';
+    try {
+        allHandled = await atFetch(TASKS_TBL,
+            [TF.name, TF.status, TF.notes, TF.teamMember, TF.completionDate, TF.taskType, TF.lmt, TF.agentOutput],
+            { filterByFormula: `AND(FIND('${HANDLED_MARK}', {Notes}), IS_AFTER(LAST_MODIFIED_TIME(), DATEADD(TODAY(), -${HANDLED_WINDOW_DAYS}, 'days')))` });
+        _handledState = 'ready';
+    } catch(e){
+        if(e.message==='auth') throw e;
+        _handledState = 'error: ' + (e.message||'load failed');
+    }
+}
+
+// Reverse a Level A action from the list (the 24-hour window is a promise,
+// not a lock: the button works for as long as the item is listed). A closed
+// task reopens on today's board under the agent that closed it, with a note
+// saying Kevin reversed it; the agent's next run sees it as fresh work.
+async function apvReverseHandled(taskId){
+    const rec = allHandled.find(r=>r.id===taskId);
+    if(!rec) return;
+    const name = gf(rec,TF.name)||'(Untitled)';
+    const status = selName(gf(rec,TF.status));
+    if(status !== 'Completed'){
+        toast('This one is not a close. Reopen it from the task board, or delete the diary entry by hand.');
+        return;
+    }
+    if(!confirm(`Reopen "${name}"?\n\nIt goes back on today's board for the agent that closed it, and this reversal is noted on the task.`)) return;
+    const stamp = new Date().toLocaleString('en-GB', { timeZone:'Europe/London', day:'2-digit', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit' });
+    const notes = String(gf(rec,TF.notes)||'').replace(/\s+$/,'');
+    try {
+        await atUpdate(TASKS_TBL, taskId, {
+            [TF.status]: 'Today',
+            [TF.completionDate]: null,
+            [TF.dueDate]: todayStr(),
+            [TF.notes]: (notes + `\n\n[${stamp} — Kevin] REVERSED from Handled without you: reopened for a second look.`).trim(),
+        });
+        toast(`Reopened "${name}".`);
+        await Promise.all([loadHandled(), loadOpenTasks()]);
+        loadChecksAndRender();
+        renderFifteen();
+    } catch(e){
+        toast('Could not reopen it: ' + (e.message||e));
+    }
+}
+window.apvReverseHandled = apvReverseHandled;
+
+function handledItemView(r){
+    const notes = String(gf(r,TF.notes)||'');
+    // The LAST marker wins: a task handled, reversed and handled again shows
+    // its newest reason.
+    let m = null, re = new RegExp(HANDLED_NOTE_RE.source, 'g'), x;
+    while((x = re.exec(notes))) m = x;
+    const reversed = /REVERSED from Handled without you/.test(notes.slice(m ? m.index : 0));
+    return {
+        id: r.id,
+        name: gf(r,TF.name)||'(Untitled)',
+        status: selName(gf(r,TF.status))||'',
+        category: m ? m[2] : 'unknown',
+        evidence: m ? m[3].replace(/\s*Level A, Kevin's ruling.*$/,'').trim() : '',
+        agentId: (gf(r,TF.teamMember)||[])[0]||'',
+        at: gf(r,TF.lmt)||gf(r,TF.completionDate)||r.createdTime,
+        reversed,
+    };
+}
+
 // Recent AI Agent Daily Log rows — feeds the "agent wrote nothing today" lane
 // and the per-agent Daily decisions panel. Sorted newest first server-side;
 // link matching is done CLIENT-side (matching a link field by record id inside
@@ -2604,6 +2712,25 @@ function computeCheckLanes(){
                         + (n >= 3 ? ' Three or more of the same thing means nobody has fixed it.' : ''),
             };
         }) });
+    }
+
+    // 3c. HANDLED WITHOUT YOU (Kevin's ruling, 7 Sep 2026). Level A actions
+    // the agents carried out with no card: closed duplicates, already-handled
+    // closes, diary entries, Roy handovers. Built in the SAME change as the
+    // suppression, like the lane above. Every item names its evidence and a
+    // close can be reversed from here.
+    if(String(_handledState).indexOf('error') === 0){
+        lanes.push({ lane:'Handled without you', error: String(_handledState).slice(7) });
+    } else {
+        const names = {};
+        allTeamAgents.forEach(t=>{ names[t.id] = gf(t,TM_NAME)||'an agent'; });
+        lanes.push({ lane:'Handled without you', items: allHandled.map(handledItemView).filter(h=>!h.reversed).map(h=>({
+            severity: 'info',
+            at: h.at,
+            text: `${names[h.agentId]||'An agent'} handled "${h.name}" without you (${h.category}).`,
+            detail: (h.evidence ? h.evidence + ' ' : '') + (h.status === 'Completed' ? 'Closed. Reverse it here if that was wrong.' : `Now ${h.status||'in progress'}.`),
+            action: h.status === 'Completed' ? { label:'Reverse', onclick:`apvReverseHandled('${h.id}')`, attr:`data-handled-reverse="${h.id}"` } : null,
+        })) });
     }
 
     // 4. Built/Live agents that wrote nothing to the AI Agent Daily Log today.
@@ -2913,10 +3040,11 @@ function loadChecksAndRender(){
         html += `<div style="font-size:var(--fs-xs);color:var(--text-muted);margin-bottom:10px">Oldest first. Each item disappears the moment the thing it points at moves — so a shrinking top band means the backlog is clearing.</div>`;
         bands.forEach(b=>{
             html += `<div class="chk-divider">${esc(b.label)} <span class="zone-count${b.order<=1?' hot':''}">${b.items.length}</span></div>`;
-            html += b.items.map(i=>`<div class="chk-item${i.severity==='danger'?' danger':''}">
+            html += b.items.map(i=>`<div class="chk-item${i.severity==='danger'?' danger':''}${i.severity==='info'?' info':''}">
                 <span class="chk-lane">${esc(i.lane)}</span>
-                <div><div class="chk-text">${esc(i.text)}</div>
+                <div style="flex:1"><div class="chk-text">${esc(i.text)}</div>
                 ${i.detail?`<div class="chk-detail">${esc(i.detail)}</div>`:''}</div>
+                ${i.action?`<button type="button" class="btn btn-sm" ${i.action.attr||''} onclick="${i.action.onclick}">${esc(i.action.label)}</button>`:''}
             </div>`).join('');
         });
     } else if(!errors.length){
@@ -3010,8 +3138,12 @@ async function loadAgentsRegister(force){
 // matched on the outcome itself, so a decided task with only a Team Member
 // link still counts (same population as the Leadership Dashboard card).
 function fetchAgentTaskRecords(){
-    const fields = [TF.teamMember, TF.sentForApprovalBy, TF.approvalOutcome, TF.approvedAt, TF.taskType, TF.status, TF.completionDate];
-    const formula = "OR(AND(NOT({Team Member}=''),{Status}!='Completed'),AND(NOT({Team Member}=''),IS_AFTER({Completion Date},DATEADD(TODAY(),-7,'days'))),LEN({Approval Outcome}&'')>0)";
+    // 30 days of completions (was 7) so the 15-Minute Dashboard can measure
+    // the exception rate on the same window the migration bar uses. The 7-day
+    // workload figures are still cut client-side from the same read.
+    const fields = [TF.teamMember, TF.sentForApprovalBy, TF.approvalOutcome, TF.approvedAt, TF.taskType, TF.status, TF.completionDate,
+                    TF.name, TF.agentOutput, TF.notes, TF.verdictReason, TF.lessonWrittenAt];
+    const formula = "OR(AND(NOT({Team Member}=''),{Status}!='Completed'),AND(NOT({Team Member}=''),IS_AFTER({Completion Date},DATEADD(TODAY(),-30,'days'))),LEN({Approval Outcome}&'')>0)";
     return atFetch(TASKS_TBL, fields, { filterByFormula: formula });
 }
 
@@ -3019,6 +3151,7 @@ function computeAgentTaskStats(recs){
     // Control: agents have had linked tasks for weeks. Zero rows means the
     // query broke (field rename), not a quiet week — show "unavailable", never 0.
     _agentTaskStatsOk = recs.length > 0;
+    _agentHistoryRecs = recs;
     const hist = [];
     const statsMap = {};
     const day = 86400000;
@@ -3029,11 +3162,18 @@ function computeAgentTaskStats(recs){
         const status = selName(f[TF.status]);
         const comp = f[TF.completionDate];
         (f[TF.teamMember]||[]).forEach(id=>{
-            const st = statsMap[id] = statsMap[id]||{open:0,doneToday:0,done7:0};
+            const st = statsMap[id] = statsMap[id]||{open:0,doneToday:0,done7:0,done30:0,through30:0,handled30:0};
             if(status==='Completed'){
                 // The approval-history branch of the formula has NO date bound,
                 // so the 7-day window must be enforced here, never assumed.
                 if(comp && (Date.now()-Date.parse(comp)) < 7*day){ st.done7++; if(localDay(comp)===today) st.doneToday++; }
+                // The exception rate (Chen's 15-Minute Dashboard): of what this
+                // agent finished in 30 days, how much passed through Kevin.
+                if(comp && (Date.now()-Date.parse(comp)) < 30*day){
+                    st.done30++;
+                    if(selName(f[TF.approvalOutcome]) || f[TF.approvedAt]) st.through30++;
+                    if(String(f[TF.notes]||'').indexOf(HANDLED_MARK) !== -1) st.handled30++;
+                }
             } else if(status && status!=='Cancelled') st.open++;
         });
         // Accuracy history — SAME mapping as js/dashboard.js loadAgentApprovalKpi:
@@ -4982,6 +5122,7 @@ async function loadEverything(){
         loadApprovals(),
         loadDeferred(),
         loadOpenTasks(),
+        loadHandled(),
         loadDailyLogs(),
         loadWorkflowData(),
         loadCeoBriefs(),
@@ -4994,6 +5135,128 @@ function renderAllZones(){
     loadChecksAndRender();
     renderRegister();
     renderCeoBrief();
+    renderFifteen();
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// THE 15-MINUTE DASHBOARD (Chen Book 4 ch 7; Kevin's ruling, 7 Sep 2026)
+// Five categories reviewed in sequence: exception rates, quality, the
+// learning loop, trust-level status with migration candidates, and
+// cross-function health. Every number comes from the reads this page already
+// makes; nothing here is a new score, and nothing here promotes an agent —
+// candidates are named and Kevin clicks.
+// ═══════════════════════════════════════════════════════════════════════
+function fifteenAgentName(id){
+    const t = allTeamAgents.find(a=>a.id===id);
+    return t ? (gf(t,TM_NAME)||'Agent') : 'Agent';
+}
+function fifteenStats(){
+    const day = 86400000, now = Date.now();
+    const A = window.AgentAccuracy || {};
+    // 1. Exception rate per agent: finished in 30 days, how much never needed a card.
+    const agents = Object.keys(_agentTaskStats||{}).map(id=>{
+        const st = _agentTaskStats[id];
+        const without = st.done30 - st.through30;
+        return { id, name: fifteenAgentName(id), done30: st.done30, through30: st.through30, without, handled30: st.handled30,
+                 rate: st.done30 ? without/st.done30 : null };
+    }).filter(a=>a.done30 > 0).sort((a,b)=>b.done30-a.done30);
+    const totalDone = agents.reduce((n,a)=>n+a.done30,0);
+    const totalWithout = agents.reduce((n,a)=>n+a.without,0);
+    // 2. Quality: draft accuracy per agent (judged rate) and the relevance score.
+    const hist = [];
+    (_agentHistoryRecs||[]).forEach(r=>{
+        const f = r.fields||{};
+        const outcome = selName(f[TF.approvalOutcome]);
+        const agentId = (f[TF.sentForApprovalBy]||[])[0] || (f[TF.teamMember]||[])[0];
+        if(!outcome || !agentId) return;
+        const at = String(f[TF.approvedAt]||'');
+        hist.push({ agentId, taskType: selName(f[TF.taskType])||'Unclassified', outcome, at,
+                    reason: selName(f[TF.verdictReason])||'',
+                    category: A.decisionCategory ? A.decisionCategory(f[TF.agentOutput], selName(f[TF.taskType]), f[TF.name]) : 'report' });
+    });
+    const rows = _agentAccuracyRows || [];
+    const relevance = A.relevanceScore ? A.relevanceScore(hist) : null;
+    // 3. Learning loop: lessons written and verdict reasons, last 7 days.
+    const lessons7 = {};
+    let lessonsTotal = 0;
+    (_agentHistoryRecs||[]).forEach(r=>{
+        const f = r.fields||{};
+        const w = f[TF.lessonWrittenAt];
+        if(w && (now - Date.parse(w)) < 7*day){
+            const id = (f[TF.sentForApprovalBy]||[])[0] || (f[TF.teamMember]||[])[0] || '?';
+            lessons7[id] = (lessons7[id]||0)+1; lessonsTotal++;
+        }
+    });
+    const reasons7 = {};
+    hist.forEach(h=>{ if(h.outcome==='Rejected' && h.at && (now - Date.parse(h.at)) < 7*day) reasons7[h.reason||'no reason given'] = (reasons7[h.reason||'no reason given']||0)+1; });
+    // 4. Trust levels: the category table, plus candidates on the bar.
+    const categories = A.categoryCandidates ? A.categoryCandidates(hist) : [];
+    const agentCandidates = A.agentAutonomyRecommendations ? A.agentAutonomyRecommendations(rows) : [];
+    // 5. Cross-function health: the handoffs between chains, from what this page holds.
+    const inbound7 = allOpenTasks.filter(r=>gf(r,TF.inboundTask) && (now - Date.parse(r.createdTime)) < 7*day).length;
+    const replies7 = (_agentHistoryRecs||[]).filter(r=>{ const f=r.fields||{}; return selName(f[TF.status])==='Completed' && selName(f[TF.taskType])==='Correspondence' && f[TF.completionDate] && (now-Date.parse(f[TF.completionDate]))<7*day; }).length;
+    const signIns = allApprovals.filter(r=>/^\s*SIGN-IN NEEDED:/im.test(String(gf(r,TF.agentOutput)||''))).length;
+    const handled7 = allHandled.map(handledItemView).filter(h=>!h.reversed).length;
+    const reversed7 = allHandled.map(handledItemView).filter(h=>h.reversed).length;
+    return { agents, totalDone, totalWithout, rows, relevance, lessons7, lessonsTotal, reasons7, categories, agentCandidates,
+             inbound7, replies7, signIns, handled7, reversed7, queue: allApprovals.length };
+}
+function renderFifteen(){
+    const body = document.getElementById('fifteenBody');
+    const countEl = document.getElementById('fifteenCount');
+    if(!body) return;
+    if(String(_agentsRegisterState).indexOf('error') === 0 || !_agentTaskStatsOk){
+        body.innerHTML = `<div class="zone-error">The 30-day task read is unavailable, so none of these numbers can be trusted today. ${_agentsRegisterState && String(_agentsRegisterState).indexOf('error')===0 ? esc(String(_agentsRegisterState).slice(7)) : 'The read returned no rows.'}</div>`;
+        if(countEl) countEl.textContent = '?';
+        return;
+    }
+    const s = fifteenStats();
+    const pct = x => x === null || isNaN(x) ? '—' : Math.round(x*100)+'%';
+    const A = window.AgentAccuracy || {};
+    const LEVELS = A.AUTONOMY_LEVELS || {};
+    const levelName = { A:'A — runs without you', B:'B — you approve', C:'C — yours only' };
+    const overall = s.totalDone ? s.totalWithout/s.totalDone : null;
+    if(countEl) countEl.textContent = pct(overall) + ' without you';
+    let html = '';
+    // 1. Exception rates
+    html += `<div class="f15-block" data-f15="exceptions"><div class="f15-head">1. Exception rate <span class="f15-big">${pct(overall)}</span><span class="f15-sub">of ${s.totalDone} tasks finished in 30 days ran without a card from you (${s.totalWithout}). Higher is the goal; every card you did not have to tap.</span></div>`;
+    if(s.agents.length){
+        html += `<table class="f15-table"><thead><tr><th>Agent</th><th>Finished</th><th>Through you</th><th>Without you</th><th>Rate</th></tr></thead><tbody>`
+            + s.agents.map(a=>`<tr><td>${esc(a.name)}</td><td>${a.done30}</td><td>${a.through30}</td><td>${a.without}${a.handled30?` <span class="f15-muted">(${a.handled30} Level A)</span>`:''}</td><td><b>${pct(a.rate)}</b></td></tr>`).join('')
+            + `</tbody></table>`;
+    } else html += `<div class="f15-muted">No agent finished a task in the last 30 days.</div>`;
+    html += `</div>`;
+    // 2. Quality
+    const worst = s.rows.filter(r=>r.total>=5).sort((a,b)=>a.rate-b.rate).slice(0,3);
+    html += `<div class="f15-block" data-f15="quality"><div class="f15-head">2. Quality <span class="f15-big">${s.relevance && s.relevance.classified ? pct(s.relevance.rate) : '—'}</span><span class="f15-sub">of your classified decisions were worth your time (${s.relevance ? s.relevance.relevanceFailures : 0} of ${s.relevance ? s.relevance.classified : 0} were noise: already done, Roy's, duplicate, stale). Draft quality is scored per agent and job type below.</span></div>`;
+    html += worst.length ? `<div class="f15-muted">Weakest job types with 5+ judged pieces: ${worst.map(r=>`${esc(r.agentName)} / ${esc(r.taskType)} ${pct(r.rate)} (${r.total})`).join(' · ')}</div>` : `<div class="f15-muted">No job type has 5 judged pieces yet.</div>`;
+    html += `</div>`;
+    // 3. Learning loop
+    const lessonAgents = Object.keys(s.lessons7).sort((a,b)=>s.lessons7[b]-s.lessons7[a]);
+    const reasonKeys = Object.keys(s.reasons7).sort((a,b)=>s.reasons7[b]-s.reasons7[a]);
+    html += `<div class="f15-block" data-f15="learning"><div class="f15-head">3. Learning loop <span class="f15-big">${s.lessonsTotal}</span><span class="f15-sub">lessons written into agent files this week${lessonAgents.length?': '+lessonAgents.map(id=>`${esc(fifteenAgentName(id))} ${s.lessons7[id]}`).join(', '):''}. ${reasonKeys.length ? 'Why you rejected things this week: ' + reasonKeys.map(k=>`${esc(k)} ${s.reasons7[k]}`).join(', ') + '.' : 'No rejections this week.'}</span></div></div>`;
+    // 4. Trust levels + candidates
+    const cats = s.categories.filter(c=>c.total>0);
+    const candidates = cats.filter(c=>c.candidate);
+    html += `<div class="f15-block" data-f15="levels"><div class="f15-head">4. Trust levels <span class="f15-big">${candidates.length}</span><span class="f15-sub">categor${candidates.length===1?'y':'ies'} ready to move from "you approve" to "runs without you" (20+ decisions, 90%+, 30 days, clean last 10). Your click, never automatic: say so in a session and the dispatcher's table changes.</span></div>`;
+    if(candidates.length) html += `<div class="f15-candidates" data-f15-candidates>${candidates.map(c=>`<div class="f15-cand">Candidate: <b>${esc(c.category)}</b> — ${pct(c.rate)} over ${c.total} decisions across ${c.spanDays} days, none rejected in the last 10.</div>`).join('')}</div>`;
+    if(s.agentCandidates.length) html += `<div class="f15-candidates">${s.agentCandidates.map(t=>`<div class="f15-cand">${esc(t)}</div>`).join('')}</div>`;
+    html += `<table class="f15-table"><thead><tr><th>Decision category</th><th>Level</th><th>Decided</th><th>Approved</th><th>Noise</th><th>Span</th></tr></thead><tbody>`
+        + Object.keys(LEVELS).map(cat=>{
+            const c = cats.find(x=>x.category===cat) || { total:0, rate:null, relevanceFailures:0, spanDays:0 };
+            const lv = LEVELS[cat].level;
+            return `<tr class="f15-lv-${lv}"><td>${esc(cat)}</td><td>${esc(levelName[lv]||lv)}${LEVELS[cat].since?` <span class="f15-muted">since ${esc(LEVELS[cat].since)}</span>`:''}</td><td>${c.total}</td><td>${c.total?pct(c.rate):'—'}</td><td>${c.relevanceFailures||0}</td><td>${c.spanDays||0}d</td></tr>`;
+        }).join('') + `</tbody></table></div>`;
+    // 5. Cross-function health
+    html += `<div class="f15-block" data-f15="health"><div class="f15-head">5. Cross-function health</div>
+        <div class="f15-flow">
+            <span>Inbound → tasks: <b>${s.inbound7}</b> new inbound tasks this week</span>
+            <span>Drafts → sent: <b>${s.replies7}</b> replies went out this week</span>
+            <span>Queue now: <b>${s.queue}</b>${s.signIns?` (${s.signIns} just need a sign-in)`:''}</span>
+            <span>Handled without you: <b>${s.handled7}</b> this week${s.reversed7?`, ${s.reversed7} reversed`:''}</span>
+        </div>
+        <div class="f15-muted">A handoff that stops flowing shows here first: inbound with no tasks, drafts with no sends, a queue that only grows. Reverse any Level A action from Check these → Handled without you.</div></div>`;
+    body.innerHTML = html;
 }
 
 async function refreshAll(){

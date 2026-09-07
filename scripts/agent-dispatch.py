@@ -1260,6 +1260,271 @@ def informational_only(output, task_type, tier1=False):
     return no_action_declared(tail)
 
 
+# ─── AUTONOMY LEVELS (Kevin's ruling, 7 Sep 2026; Chen Book 4, ch 5) ─────
+#
+# Measured before the change: 260 decisions in 586 active minutes since
+# 20 Aug 2026, 135 seconds each, and not one rejection was a bad draft. 42 of
+# 42 close proposals were the Task Manager asking Kevin to rubber-stamp a fold
+# or an already-handled close (39 approved as-is), and 61% of reports were
+# rejected because nothing in them needed deciding. He was the noise filter.
+#
+# So a submission now sits at one of three LEVELS, decided per CATEGORY of
+# decision from the output's shape — and, the part that makes it safe, the
+# evidence is VERIFIED here before anything is carried out. A close proposal
+# naming a keeper that does not exist, is newer, or is this very task is not a
+# duplicate fold; it is a card, exactly as before. Nothing here trusts the
+# agent's word.
+#
+# The word "tier" is deliberately NOT used: TIER1_PATTERNS already means the
+# private legal matter, and Chen's "Tier 1" means the opposite (fully
+# delegated). Levels A / B / C avoid the collision. Anything the tier-1 matter
+# touches is Level C whatever its shape.
+AUTONOMY_ACT = "A"       # the agent acts; Kevin sees it on "Handled without you"
+AUTONOMY_APPROVE = "B"   # drafted, Kevin approves
+AUTONOMY_KEVIN = "C"     # Kevin only
+
+# The money rule (Kevin, 7 Sep 2026), lowered from £50/£250 while the card
+# balances are paid down. Declared on the output as `SPEND: £80`, or
+# `SPEND: £80/month` for anything recurring. Under `log` the agent acts and
+# logs it; up to `inform` it acts and the 08:00 message names it; above, a
+# card; recurring, always Kevin. GUARDRAILS.md and the role-agent files quote
+# these two numbers, and tests/constant-drift.test.js keeps them in step.
+DECISION_MONEY = {"log": 25, "inform": 100}
+SPEND_LINE_RE = re.compile(
+    r"^\s*SPEND:\s*£?\s*(?P<amount>[0-9][0-9,]*(?:\.[0-9]{1,2})?)\s*"
+    r"(?P<recurring>(?:/|per\s+|a\s+|each\s+|every\s+)?"
+    r"(?:month|week|year|quarter|annum|recurring|monthly|weekly|annually|yearly)\b)?",
+    re.I | re.M)
+
+# The Notes marker every Level A carry-out leaves. The AI Agents page's
+# "Handled without you" lane and the 08:00 message both key on it.
+HANDLED_MARK = "HANDLED WITHOUT YOU"
+
+CLOSE_DUPLICATE_RE = re.compile(
+    r"^\s*CLOSE PROPOSAL:\s*duplicate of\s+(rec[A-Za-z0-9]{14})\b", re.I)
+CLOSE_HANDLED_RE = re.compile(
+    r"^\s*CLOSE PROPOSAL:\s*(?:already (?:handled|done|dealt with)|done already|handled)\b"
+    r"[^\n]*?\b(rec[A-Za-z0-9]{14})\b", re.I)
+PASS_TO_ROY_RE = re.compile(r"^\s*PASS TO ROY:", re.I)
+
+
+def spend_declared(output):
+    """(amount, recurring) from a SPEND: line, or (None, False) when absent."""
+    m = SPEND_LINE_RE.search(output or "")
+    if not m:
+        return None, False
+    try:
+        amount = float(m.group("amount").replace(",", ""))
+    except ValueError:
+        return None, False
+    return amount, bool(m.group("recurring"))
+
+
+def money_level(amount, recurring=False):
+    """'log' | 'inform' | 'card' | 'kevin' for a declared commitment."""
+    if amount is None:
+        return "log"          # nothing declared, nothing to gate on
+    if recurring:
+        return "kevin"        # a subscription compounds; always his
+    if amount < DECISION_MONEY["log"]:
+        return "log"
+    if amount <= DECISION_MONEY["inform"]:
+        return "inform"
+    return "card"
+
+
+def decision_level(output, task_type, task_rec, fetch=None):
+    """Which level this submission sits at, with the evidence VERIFIED.
+
+    Returns a dict: level (A/B/C), category, carry ('close' | 'calendar' |
+    'roy' | ''), evidence (what was checked, for the Notes stamp), why (for
+    a card), money ('log' | 'inform' | 'card' | 'kevin'), amount, recurring.
+    `fetch` is injectable so the tests never touch Airtable.
+    """
+    fetch = fetch or get_task
+    out = (output or "").strip()
+    tf = task_rec.get("fields", {}) or {}
+    task_id = task_rec.get("id", "")
+    name = tf.get(AF["name"], "") or ""
+    desc = tf.get(AF["description"], "") or ""
+    notes = tf.get(AF["notes"], "") or ""
+    amount, recurring = spend_declared(out)
+    money = money_level(amount, recurring)
+    base = {"category": "other", "carry": "", "evidence": "", "money": money,
+            "amount": amount, "recurring": recurring, "why": ""}
+
+    def card(category, why):
+        return {**base, "level": AUTONOMY_APPROVE, "category": category, "why": why}
+
+    def act(category, carry, evidence):
+        return {**base, "level": AUTONOMY_ACT, "category": category,
+                "carry": carry, "evidence": evidence}
+
+    # The private matter never moves at Level A, whatever the shape.
+    hit = tier_match(TIER1_PATTERNS, name, desc, notes)
+    if TIER1_BANNER in out or hit:
+        return {**base, "level": AUTONOMY_KEVIN, "category": "tier-1 matter",
+                "why": f"tier-1 matter ({hit or 'banner'}): Kevin only"}
+    if money == "kevin":
+        return card("spend", f"SPEND £{amount:,.2f} recurring: a recurring "
+                             "commitment is always Kevin's, whatever the amount")
+    if money == "card":
+        return card("spend", f"SPEND £{amount:,.2f} is over the money rule "
+                             f"(£{DECISION_MONEY['inform']}): a card with the figure")
+
+    m = CLOSE_DUPLICATE_RE.match(out)
+    if m:
+        keeper_id = m.group(1)
+        if keeper_id == task_id:
+            return card("close: duplicate", "the keeper cited is this very task")
+        try:
+            keeper = fetch(keeper_id) or {}
+        except Exception as exc:                          # noqa: BLE001
+            return card("close: duplicate",
+                        f"keeper {keeper_id} could not be read ({str(exc)[:80]})")
+        kf = keeper.get("fields", {}) or {}
+        if not kf:
+            return card("close: duplicate", f"keeper {keeper_id} does not exist")
+        kstatus = sel(kf.get(AF["status"])) or "?"
+        if kstatus == "Cancelled":
+            return card("close: duplicate", f"keeper {keeper_id} is Cancelled")
+        this_created = task_rec.get("createdTime") or ""
+        keeper_created = keeper.get("createdTime") or ""
+        if this_created and keeper_created and keeper_created > this_created:
+            return card("close: duplicate",
+                        f"keeper {keeper_id} is NEWER than this task; the older "
+                        "task keeps and the newer one folds")
+        kname = str(kf.get(AF["name"]) or "")[:60]
+        return act("close: duplicate", "close",
+                   f"folded into keeper {keeper_id} \"{kname}\" ({kstatus}, "
+                   f"created {keeper_created[:10] or '?'})")
+
+    m = CLOSE_HANDLED_RE.match(out)
+    if m:
+        cited = m.group(1)
+        if cited == task_id:
+            return card("close: already handled", "the task cited is this very task")
+        try:
+            done = fetch(cited) or {}
+        except Exception as exc:                          # noqa: BLE001
+            return card("close: already handled",
+                        f"cited task {cited} could not be read ({str(exc)[:80]})")
+        df = done.get("fields", {}) or {}
+        if not df:
+            return card("close: already handled", f"cited task {cited} does not exist")
+        dstatus = sel(df.get(AF["status"])) or "?"
+        if dstatus != "Completed":
+            return card("close: already handled",
+                        f"cited task {cited} is {dstatus}, not Completed")
+        dname = str(df.get(AF["name"]) or "")[:60]
+        return act("close: already handled", "close",
+                   f"already handled by Completed task {cited} \"{dname}\"")
+
+    if out.upper().startswith("CLOSE PROPOSAL:"):
+        return card("close: judgement",
+                    "no verifiable evidence cited: a duplicate names its keeper "
+                    "(CLOSE PROPOSAL: duplicate of recXXX), an already-handled close "
+                    "names the Completed task (CLOSE PROPOSAL: already handled — see recXXX)")
+
+    if PASS_TO_ROY_RE.match(out):
+        why = roy_match(name, desc, notes)
+        if not why:
+            return card("pass to Roy",
+                        "the task NAME does not match the property lane, or a veto "
+                        "word is present (money, law, insurance, mortgage, sale, "
+                        "Kevin's own home)")
+        return act("pass to Roy", "roy", f"name matched {why!r}, nothing vetoed; "
+                                        "Roy's standing approval")
+
+    if task_type == "Admin" and out.upper().startswith("CALENDAR:") \
+            and not calendar_submit_problem(out, task_type):
+        return act("calendar entry", "calendar",
+                   "a diary entry, no attendees; calendar-write.py refuses a past time")
+
+    return card("other", "a card by default")
+
+
+def handle_without_kevin(args, output, task_rec, level, attached):
+    """Carry a Level A submission out at submit and leave the marker.
+
+    The marker is the safety: the page's "Handled without you" lane and the
+    08:00 message both read it, and a close reverses from that lane. A
+    carry-out that cannot leave its marker is refused, not assumed.
+    """
+    tf = task_rec.get("fields", {}) or {}
+    stamp = datetime.now(LONDON).strftime("%d %b %Y %H:%M")
+    inform = level["money"] == "inform"
+    note = (f"[{stamp} — agent-dispatch] {HANDLED_MARK} ({level['category']}): "
+            f"{level['evidence']}. Level A, Kevin's ruling 7 Sep 2026."
+            + (f" SPEND £{level['amount']:,.2f}: named in the 08:00 message."
+               if inform else "")
+            + " Reverse it within 24 hours from Check these → Handled without you.")
+    existing = str(tf.get(AF["notes"]) or "").rstrip()
+    fields = {
+        AF["agentOutput"]: output[:95000],
+        AF["taskType"]: args.type,
+        AF["teamMember"]: [args.agent],
+        AF["sentForApprovalBy"]: [],
+        AF["approvalOutcome"]: None,
+        AF["approvalFeedback"]: None,
+        AF["approvedAt"]: None,
+        AF["notes"]: (existing + "\n\n" + note).strip()[-90000:],
+    }
+    carry = level["carry"]
+    status = None
+    if carry == "close":
+        fields.update({AF["status"]: "Completed", AF["completion"]: now_iso(),
+                       AF["assignee"]: None})
+        patch_task(args.task, fields)
+        status = "Completed"
+    elif carry == "roy":
+        patch_task(args.task, fields)
+        cmd_handover(argparse.Namespace(
+            task=args.task, to=ROY_EMAIL,
+            reason=f"PASS TO ROY at Level A: {level['evidence']}"))
+        status = sel((get_task(args.task).get("fields", {}) or {}).get(AF["status"]))
+    elif carry == "calendar":
+        patch_task(args.task, fields)       # the marker first: calendar-write checks it
+        proc = subprocess.run(
+            [sys.executable, os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                          "calendar-write.py"),
+             "create", args.task, "--handled"],
+            capture_output=True, text=True)
+        if proc.returncode != 0:
+            # The diary write failed, so there IS a decision now: fall back to
+            # the card rather than pretend. Kevin sees why on the task.
+            err = (proc.stderr or proc.stdout or "").strip()[-300:]
+            patch_task(args.task, {
+                AF["status"]: "Approval",
+                AF["sentForApprovalBy"]: [args.agent],
+                AF["assignee"]: {"email": KEVIN_AIRTABLE_EMAIL},
+                AF["dueDate"]: today_london(),
+                AF["notes"]: (existing + "\n\n" + note + "\n\n"
+                              f"[{stamp} — agent-dispatch] The diary write FAILED, so this "
+                              f"went to the queue instead: {err}").strip()[-90000:],
+            })
+            print(json.dumps({"submitted": args.task, "handled": False,
+                              "fellBackToCard": True, "level": AUTONOMY_APPROVE,
+                              "error": err}))
+            return 0
+        patch_task(args.task, {AF["status"]: "Completed", AF["completion"]: now_iso()})
+        status = "Completed"
+    else:
+        sys.exit(f"ERROR: Level A category {level['category']!r} has no carry-out")
+
+    check = get_task(args.task).get("fields", {}) or {}
+    if HANDLED_MARK not in str(check.get(AF["notes"]) or ""):
+        sys.exit(f"ERROR: Level A carry-out of {args.task} left NO marker in Notes — "
+                 "the action may have happened with nothing to show Kevin. "
+                 "Reopen the task by hand and check.")
+    ledger_append(args.task, "handled")
+    print(json.dumps({"submitted": args.task, "handled": True, "level": AUTONOMY_ACT,
+                      "category": level["category"], "carry": carry,
+                      "evidence": level["evidence"], "inform": inform,
+                      "attached": len(attached), "status": status}))
+    return 0
+
+
 # Kevin's ruling, 4 Sep 2026 (fix 2 of the approval-gate work): an output that
 # tells him to log in somewhere and do the job himself is not prepared work,
 # it is a to-do list with his name on it. Measured over 14 days, 37 outputs
@@ -2230,7 +2495,8 @@ def cmd_submit(args):
     # Read once and reuse: the approver decision and the feedback archive below
     # both need the stored record, and two fetches of the same task can
     # disagree if a decision lands between them.
-    tf = (get_task(args.task).get("fields", {}) or {})
+    trec = get_task(args.task)
+    tf = (trec.get("fields", {}) or {})
     approver_email = KEVIN_AIRTABLE_EMAIL
     is_tier1 = bool(args.tier1) or TIER1_BANNER in output
     if not is_tier1:
@@ -2302,6 +2568,19 @@ def cmd_submit(args):
                           "type": args.type, "attached": len(to_attach),
                           "why": "informational output: nothing to approve"}))
         return 0
+
+    # ─── LEVEL A: the agent acts (Kevin's ruling, 7 Sep 2026) ────────────
+    # Decided from the output's shape with the evidence verified; a tier-1
+    # matter (banner or pattern, checked above) never takes this branch.
+    level = decision_level(output, args.type, trec)
+    if level["level"] == AUTONOMY_ACT and not is_tier1:
+        return handle_without_kevin(args, output, trec, level, to_attach)
+    if level["level"] == AUTONOMY_APPROVE and level["category"] not in ("other",):
+        # Say WHY a shaped output still became a card, so a Task Manager that
+        # cited a bad keeper learns it from the run, not from Kevin's tap.
+        print(json.dumps({"task": args.task, "level": AUTONOMY_APPROVE,
+                          "category": level["category"], "why": level["why"]}),
+              file=sys.stderr)
 
     # Kevin's ruling, 4 Sep 2026: a sign-in wait must not reach him piecemeal
     # through the day. It is parked until tomorrow's 08:00 message, which lists

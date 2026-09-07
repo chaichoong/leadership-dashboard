@@ -231,7 +231,117 @@
         };
     }
 
+    // ─── AUTONOMY LEVELS (Kevin's ruling, 7 Sep 2026; Chen Book 4 ch 5) ──
+    //
+    // Every decision an agent makes sits at one of three levels, decided per
+    // CATEGORY of decision, never per agent. A = the agent acts (Kevin sees it
+    // on "Handled without you"), B = drafted and Kevin approves, C = Kevin
+    // only. The word "tier" is avoided: tier 1 already means the private legal
+    // matter. scripts/agent-dispatch.py decides the level at submit and
+    // VERIFIES the evidence; this table is the page's read-only copy for the
+    // 15-Minute Dashboard, and tests/constant-drift.test.js keeps the two in
+    // step.
+    var AUTONOMY_LEVELS = {
+        'close: duplicate':        { level: 'A', since: '2026-09-07' },
+        'close: already handled':  { level: 'A', since: '2026-09-07' },
+        'information only':        { level: 'A', since: '2026-09-04' },
+        'calendar entry':          { level: 'A', since: '2026-09-07' },
+        'pass to Roy':             { level: 'A', since: '2026-09-07' },
+        'close: judgement':        { level: 'B' },
+        'email: reply':            { level: 'B' },
+        'email: quote request':    { level: 'B' },
+        'email: OD outbound':      { level: 'B' },
+        'content card':            { level: 'B' },
+        'report':                  { level: 'B' },
+        'recommendation':          { level: 'B' },
+        'sign document':           { level: 'C' },
+        'post letter':             { level: 'C' },
+        'tier-1 matter':           { level: 'C' },
+        'spend over the rule':     { level: 'C' },
+    };
+    // The money rule. Mirrors DECISION_MONEY in scripts/agent-dispatch.py.
+    var DECISION_MONEY = { log: 25, inform: 100 };
+
+    // The Notes marker agent-dispatch.py leaves on every Level A carry-out.
+    var HANDLED_MARK = 'HANDLED WITHOUT YOU';
+
+    // Shape-only classification of a decided task, for the dashboard's
+    // per-category evidence. Same shapes the dispatcher's decision_level reads,
+    // minus the evidence checks (a page cannot fetch the keeper). Returns one
+    // of the AUTONOMY_LEVELS keys.
+    function decisionCategory(output, taskType, name) {
+        var raw = String(output || '');
+        var nm = String(name || '');
+        // Drop the tier-1 banner lines so the shape underneath is judged, but
+        // remember it: a tier-1 matter is Level C whatever the shape.
+        var tier1 = /(:rotating_light:|\u{1F6A8})\s*TIER\s*1\b/iu.test(raw) || /^\s*🚨?\s*TIER 1\./m.test(raw);
+        var lines = raw.split('\n');
+        var i = 0;
+        while (i < lines.length && (!lines[i].trim() || (i < 3 && /TIER\s*1/i.test(lines[i])))) i++;
+        var out = lines.slice(i).join('\n').trim();
+        var up = out.toUpperCase();
+        if (tier1) return 'tier-1 matter';
+        // Money before shape: a PASS TO ROY over the rule is a card whatever its shape.
+        if (/^\s*SPEND:\s*£?\s*[\d,]+(?:\.\d+)?\s*(?:\/|per\s|a\s|each\s|every\s)?(?:month|week|year|quarter|annum|recurring|monthly|weekly|annually|yearly)\b/im.test(out)) return 'spend over the rule';
+        var spend = /^\s*SPEND:\s*£?\s*([\d,]+(?:\.\d+)?)/im.exec(out);
+        if (spend && parseFloat(spend[1].replace(/,/g, '')) > DECISION_MONEY.inform) return 'spend over the rule';
+        if (/^SIGN-IN:/i.test(nm) || /^\s*SIGN-IN NEEDED:/im.test(out)) return 'information only';
+        if (/^CLOSE PROPOSAL:\s*duplicate of\s+rec[A-Za-z0-9]{14}\b/i.test(out)) return 'close: duplicate';
+        if (/^CLOSE PROPOSAL:\s*(?:already (?:handled|done|dealt with)|done already|handled)\b[^\n]*?\brec[A-Za-z0-9]{14}\b/i.test(out)) return 'close: already handled';
+        if (up.indexOf('CLOSE PROPOSAL:') === 0) return 'close: judgement';
+        if (up.indexOf('PASS TO ROY:') === 0) return 'pass to Roy';
+        if (/^CONTENT/i.test(nm)) return 'content card';
+        if (up.indexOf('CALENDAR:') === 0) return 'calendar entry';
+        if (up.indexOf('DOCUMENT:') === 0) return 'sign document';
+        if (up.indexOf('POST:') === 0) return 'post letter';
+        if (/^(TO|FROM|CC|SUBJECT):/i.test(out)) {
+            if (/^(COMPLIANCE|CORRESPONDENCE)/i.test(nm)) return 'email: quote request';
+            if (/^(INBOUND|Chase)/i.test(nm)) return 'email: reply';
+            return 'email: OD outbound';
+        }
+        if (/\*\*Carrying this out will involve:\*\*\s*Nothing\.?\s*(Information only\.?)?\s*$/i.test(out)) return 'information only';
+        if (/RECOMMEND/i.test(out.slice(0, 1000))) return 'recommendation';
+        if (taskType === 'Correspondence') return 'email: reply';
+        return 'report';
+    }
+
+    // A Level B category becomes a Level A CANDIDATE on the same bar an agent
+    // does (Chen's 90/100, Kevin's 20 sample + rolling 30 days + clean last
+    // 10). Kevin clicks; nothing promotes itself. history items carry
+    // { category, outcome, at }.
+    function categoryCandidates(history) {
+        var buckets = {};
+        (history || []).forEach(function (h) {
+            if (!h || !h.category || !h.outcome) return;
+            (buckets[h.category] = buckets[h.category] || []).push(h);
+        });
+        return Object.keys(buckets).map(function (cat) {
+            var items = buckets[cat].slice().sort(function (a, c) {
+                return String(c.at || '').localeCompare(String(a.at || ''));
+            });
+            var judged = items.filter(function (i) { return !isRelevanceFailure(i); });
+            var total = judged.length;
+            var accurate = judged.filter(function (i) { return APPROVAL_ACCURATE.indexOf(i.outcome) !== -1; }).length;
+            var recentRejections = judged.slice(0, THRESHOLD.recentN).filter(function (i) { return i.outcome === 'Rejected'; }).length;
+            var days = spanDays(judged);
+            var rate = total ? accurate / total : 0;
+            var lvl = (AUTONOMY_LEVELS[cat] || {}).level || 'B';
+            return {
+                category: cat, level: lvl, total: total, accurate: accurate, rate: rate,
+                spanDays: days, recentRejections: recentRejections,
+                relevanceFailures: items.length - total,
+                candidate: lvl === 'B' && total >= THRESHOLD.minSample && rate >= THRESHOLD.minRate
+                           && recentRejections === 0 && days >= THRESHOLD.minDays,
+            };
+        }).sort(function (a, c) { return c.total - a.total; });
+    }
+
     var api = {
+        AUTONOMY_LEVELS: AUTONOMY_LEVELS,
+        DECISION_MONEY: DECISION_MONEY,
+        HANDLED_MARK: HANDLED_MARK,
+        decisionCategory: decisionCategory,
+        categoryCandidates: categoryCandidates,
         APPROVAL_OUTCOMES: APPROVAL_OUTCOMES,
         APPROVAL_ACCURATE: APPROVAL_ACCURATE,
         RELEVANCE_REASONS: RELEVANCE_REASONS,

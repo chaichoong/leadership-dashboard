@@ -57,7 +57,10 @@ AF = {
     "approvalOutcome": "fldrHBSr6qoUfaKuZ",
     "agentOutput":     "fldzswp8fx6PqpLQ5",
     "taskType":        "fldZ2moDV2041Sobc",
+    "notes":           "fldR7apBzSp3oxFxz",
 }
+# Mirrors HANDLED_MARK in scripts/agent-dispatch.py (tests/constant-drift keeps them equal).
+HANDLED_MARK = "HANDLED WITHOUT YOU"
 
 APPROVED = ("Approved as-is", "Approved with minor edits")
 
@@ -184,11 +187,19 @@ def cmd_create(args):
     ttype = sel(f.get(AF["taskType"]))
     output = f.get(AF["agentOutput"], "") or ""
 
-    if outcome not in APPROVED:
+    # Level A (Kevin's ruling, 7 Sep 2026): a diary entry is carried out at
+    # submit without a card. The gate is still a gate — agent-dispatch.py
+    # leaves its HANDLED marker naming the calendar category on the task
+    # BEFORE calling this with --handled, and nothing else writes that marker.
+    handled = bool(getattr(args, "handled", False)) and \
+        HANDLED_MARK in str(f.get(AF["notes"]) or "") and \
+        "(calendar entry)" in str(f.get(AF["notes"]) or "")
+    if outcome not in APPROVED and not handled:
         sys.exit(
             f"REFUSED: task {task_id} ({name}) is not approved.\n"
             f"         Approval Outcome = {outcome or '(empty)'}.\n"
-            "         Nothing reaches the diary until Kevin approves it.")
+            "         Nothing reaches the diary until Kevin approves it, or "
+            "agent-dispatch.py marks it handled at Level A (--handled).")
     if ttype != "Admin":
         sys.exit(f"REFUSED: task {task_id} is Task Type {ttype or '(empty)'}, "
                  "not Admin. Calendar entries submit as Admin.")
@@ -298,6 +309,9 @@ def main(argv):
     sub = p.add_subparsers(dest="cmd", required=True)
     c = sub.add_parser("create", help="create the approved entry for a task")
     c.add_argument("task")
+    c.add_argument("--handled", action="store_true",
+                   help="Level A: accept the HANDLED marker agent-dispatch left "
+                        "in Notes in place of an approval")
     c.set_defaults(fn=cmd_create)
     t = sub.add_parser("test", help="worker + consent health")
     t.set_defaults(fn=cmd_test)

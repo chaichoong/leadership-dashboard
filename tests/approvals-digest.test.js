@@ -11,7 +11,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { londonParts, buildDigestText } from '../scripts/slack-automation/approvals.js';
+import { londonParts, buildDigestText, handledLine, HANDLED_FORMULA } from '../scripts/slack-automation/approvals.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const SRC = readFileSync(join(ROOT, 'scripts/slack-automation/approvals.js'), 'utf8');
@@ -138,5 +138,29 @@ describe('the digest names the sign-ins waiting', () => {
     });
     it('says nothing about sign-ins when none are waiting', () => {
         expect(buildDigestText(2, ['a', 'b'], 'https://x', false, [])).not.toMatch(/signed in/);
+    });
+});
+
+// Level A (Kevin's ruling, 7 Sep 2026): what ran without a card is NAMED in
+// the same message, so a suppression is never silent. The count comes from
+// the dispatcher's Notes marker, modified in the last 24 hours.
+describe('the digest counts what was handled without Kevin', () => {
+    it('reads the dispatcher\'s marker over the last 24 hours', () => {
+        expect(HANDLED_FORMULA).toContain("FIND('HANDLED WITHOUT YOU', {Notes})");
+        expect(HANDLED_FORMULA).toMatch(/LAST_MODIFIED_TIME\(\), DATEADD\(NOW\(\), -24, 'hours'\)/);
+        expect(SRC).toMatch(/handled = \(await queryTasks\(env, HANDLED_FORMULA, DIGEST_MAX\)\)\.length/);
+    });
+    it('names the count and where to reverse them', () => {
+        const text = buildDigestText(2, ['a', 'b'], 'https://x', false, [], 3);
+        expect(text).toMatch(/\*3 things handled without you\*/);
+        expect(text).toMatch(/#tab=checks/);
+        expect(handledLine(1)).toMatch(/1 thing handled/);
+    });
+    it('says nothing when nothing was handled', () => {
+        expect(buildDigestText(2, ['a', 'b'], 'https://x', false, [])).not.toMatch(/handled without you/);
+        expect(handledLine(0)).toBe('');
+    });
+    it('a failed count is logged as unknown, never as a clean zero', () => {
+        expect(SRC).toMatch(/handled-without-you count FAILED/);
     });
 });
