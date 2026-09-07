@@ -1260,6 +1260,107 @@ def informational_only(output, task_type, tier1=False):
     return no_action_declared(tail)
 
 
+# ─── THE COVERAGE CHECK on quote requests (Kevin, 7 Sep 2026) ───────────
+#
+# "We're not emailing somebody a property address that's not within their
+# location, because that just looks clueless from our perspective. Double and
+# treble check the geographic location of the contractor." Also: three quotes
+# per job, and one request may cover several properties ONLY when the
+# contractor covers every one of them.
+#
+# So a quote-related email on a property task carries a coverage file:
+#
+#   PROPERTY: 6 Chedburgh Place, Haverhill, CB9 0AB
+#   PROPERTY: 13 Chedburgh Place, Haverhill, CB9 0AB
+#   CONTRACTOR: AC1 Electrical Services covers CB9, CB8, IP33 (source: https://...)
+#
+# `submit` refuses without it, refuses a contractor line with no source, refuses
+# any property whose postcode district is not in what the contractor says it
+# covers, and refuses an email body that names a postcode the file did not
+# declare. What passed is stamped into Notes and the card shows it.
+COVERAGE_MARK = "COVERAGE CHECKED"
+COVERAGE_PROPERTY_RE = re.compile(r"^\s*PROPERTY:\s*(?P<addr>.+?)\s*$", re.I | re.M)
+COVERAGE_CONTRACTOR_RE = re.compile(
+    r"^\s*CONTRACTOR:\s*(?P<name>.+?)\s+covers\s+(?P<areas>.+?)\s*\((?:source|from):\s*(?P<src>https?://\S+)\)\s*$",
+    re.I | re.M)
+UK_POSTCODE_RE = re.compile(r"\b([A-Z]{1,2}\d{1,2}[A-Z]?)\s*(\d[A-Z]{2})\b", re.I)
+QUOTE_WORDS_RE = re.compile(
+    r"\bquot|certificat|\bEICR\b|gas safety|\bGSC\b|\bEPC\b|fire alarm|emergency lighting|"
+    r"\binspection\b|\bboiler\b|\belectrician|\bplumb|\bengineer", re.I)
+PROPERTY_LANE_RE = re.compile(r"^\s*(COMPLIANCE|CORRESPONDENCE|MAINTENANCE)\s*:", re.I)
+
+
+def postcode_district(text):
+    m = UK_POSTCODE_RE.search(str(text or ""))
+    return m.group(1).upper() if m else ""
+
+
+def coverage_parse(text):
+    props = [m.group("addr").strip() for m in COVERAGE_PROPERTY_RE.finditer(text or "")]
+    contractors = []
+    for m in COVERAGE_CONTRACTOR_RE.finditer(text or ""):
+        areas = [a.strip().upper() for a in re.split(r"[,;/]|\band\b", m.group("areas"), flags=re.I) if a.strip()]
+        contractors.append({"name": m.group("name").strip(), "areas": areas, "source": m.group("src")})
+    return props, contractors
+
+
+def area_covers(areas, address):
+    """True when the contractor's stated areas include this property."""
+    district = postcode_district(address)
+    letters = re.match(r"[A-Z]+", district).group(0) if district else ""
+    addr_up = str(address or "").upper()
+    for a in areas:
+        if a in ("NATIONWIDE", "NATIONAL", "UK-WIDE", "UK WIDE"):
+            return True
+        if district and a == district:
+            return True
+        if letters and a == letters:
+            return True            # an area code: "CB" covers CB9
+        if len(a) >= 4 and not re.match(r"^[A-Z]{1,2}\d", a) and a in addr_up:
+            return True            # a town named in the address
+    return False
+
+
+def coverage_problem(coverage_text, output, task_name, task_type):
+    """Why a quote-related email may not go, or '' when every property is covered."""
+    if task_type != "Correspondence" or not PROPERTY_LANE_RE.match(task_name or ""):
+        return ""
+    if not QUOTE_WORDS_RE.search(output or ""):
+        return ""
+    props, contractors = coverage_parse(coverage_text)
+    if not props or not contractors:
+        return ("a quote-related email on a property task needs a coverage file "
+                "(--coverage): `PROPERTY: <address with postcode>` per property and "
+                "`CONTRACTOR: <name> covers <districts, towns or nationwide> (source: <url>)`. "
+                "Kevin's rule, 7 Sep 2026: never write to a tradesperson about an address "
+                "outside their area")
+    for pr in props:
+        if not postcode_district(pr):
+            return f"PROPERTY line has no postcode: {pr!r}"
+    for c in contractors:
+        for pr in props:
+            if not area_covers(c["areas"], pr):
+                return (f"{c['name']} covers {', '.join(c['areas'])} but {pr!r} is "
+                        f"{postcode_district(pr)}: outside their area, so this email must "
+                        "not name that property. Find a tradesperson who covers it, or drop "
+                        "the property from this request")
+    # Every postcode the email itself names must be a declared property.
+    body = (output or "").split("\n---", 1)[-1]
+    declared = {postcode_district(pr) for pr in props}
+    for m in UK_POSTCODE_RE.finditer(body):
+        if m.group(1).upper() not in declared:
+            return (f"the email names postcode {m.group(0)} but no PROPERTY line declares "
+                    "it: every address in the email is checked, or none is")
+    return ""
+
+
+def coverage_stamp(coverage_text, stamp):
+    props, contractors = coverage_parse(coverage_text)
+    who = "; ".join(f"{c['name']} covers {', '.join(c['areas'])} ({c['source']})" for c in contractors)
+    where = ", ".join(f"{postcode_district(pr)} ({pr.split(',')[0].strip()})" for pr in props)
+    return f"[{stamp} — agent-dispatch] {COVERAGE_MARK}: {where} within {who}."
+
+
 # ─── THE REDO RECEIPT (Kevin, 7 Sep 2026) ─────────────────────────────
 #
 # Measured that day: of 132 tasks Kevin gave feedback on since 27 Aug, 30 went
@@ -2556,6 +2657,17 @@ def cmd_submit(args):
                  "were rejected for one of the five questions. Look first; if nothing "
                  "needs deciding, write trigger=none and it files itself.")
 
+    # THE COVERAGE CHECK (Kevin, 7 Sep 2026): a quote-related email on a
+    # property task names only addresses the tradesperson covers.
+    coverage_text = ""
+    cpath = getattr(args, "coverage", None)
+    if cpath:
+        with open(cpath) as fh:
+            coverage_text = fh.read()
+    cov = coverage_problem(coverage_text, output, tf_early.get(AF["name"], "") or "", args.type)
+    if cov:
+        sys.exit(f"ERROR: refusing to submit {args.task} — {cov}.")
+
     # Does the closing line promise a send this Task Type cannot deliver?
     # Refused here, not discovered at carry-out after Kevin has approved it.
     promise = send_promise_problem(output, args.type)
@@ -2723,6 +2835,10 @@ def cmd_submit(args):
         # handled, card) carries it as part of "existing" Notes.
         tf[AF["notes"]] = (str(tf.get(AF["notes"]) or "").rstrip() + "\n\n" + rb).strip()
         tf["_receiptAdded"] = True
+    if coverage_text and coverage_parse(coverage_text)[0]:
+        cs = coverage_stamp(coverage_text, datetime.now(LONDON).strftime("%d %b %Y %H:%M"))
+        tf[AF["notes"]] = (str(tf.get(AF["notes"]) or "").rstrip() + "\n\n" + cs).strip()
+        tf["_receiptAdded"] = True   # the same "write Notes on the card path" switch
 
     # The files go up FIRST. If one is refused the run stops here with the
     # task still unsubmitted — better than an approval card promising a
@@ -5577,6 +5693,9 @@ def main():
     s.add_argument("--agent", required=True)
     s.add_argument("--type", required=True)
     s.add_argument("--output-file", required=True)
+    s.add_argument("--coverage", metavar="PATH",
+                   help="quote emails on property tasks: PROPERTY: and CONTRACTOR: ... "
+                        "covers ... (source: url) lines; refused without it (7 Sep 2026)")
     s.add_argument("--receipt", metavar="PATH",
                    help="redo only: one line per point Kevin made, "
                         "`- <point> → <what changed>`; refused without it after "
