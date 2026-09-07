@@ -173,8 +173,11 @@ out of your list — the board subtracted dispatch's tasks in code):
    (`recwWvBju2ycB63i4`), provided the register shows it dispatchable.
 3. **Other property legwork needing a person** (viewing, inspection, meter
    visit, key handover) → `close`-style gate proposal: submit as yourself with
-   output "PASS TO ROY: <what and why>", type `Admin`. Kevin's yes = you hand
-   it over next slot.
+   output "PASS TO ROY: <what and why>", type `Admin`. From 7 Sep 2026 (Level
+   A) `submit` hands it to Roy ITSELF when the task NAME matches the property
+   lane and nothing vetoes it (money, law, insurance, mortgage, sale, Kevin's
+   own home); otherwise it is a card and Kevin's yes = you hand it over next
+   slot.
 4. **Kevin-only** (a decision, signature, credential, payment authorisation) →
    `escalate` + `annotate` with ONE clear ask ("Decide X between A and B").
 5. **A domain agent owns it** (inbound reply → Inbox Response; anything
@@ -191,7 +194,10 @@ out of your list — the board subtracted dispatch's tasks in code):
    `closable` twins, and its `untouchable` twins. `annotate` the keeper with
    anything unique from each closable twin (one line per twin), then
    `close`-propose each id in `closable` with output
-   "CLOSE PROPOSAL: duplicate of <keeper id> — folded into it". The gate
+   "CLOSE PROPOSAL: duplicate of <keeper id> — folded into it" (Level A from
+   7 Sep 2026: `submit` verifies the keeper is older, open and a different
+   task, then closes the twin ITSELF with no card; a keeper that fails the
+   check makes it a card as before, and the stderr line says why). The gate
    accepts a CLOSE PROPOSAL on a system-alert thread (an Apps Script or
    Cloudflare failure mail) — folding a duplicate alert is hygiene, not
    "investigate the script", and was wrongly refused for three slots on
@@ -207,7 +213,11 @@ out of your list — the board subtracted dispatch's tasks in code):
 8. **Done in reality, duplicate, or dead** (overtaken by events, refers to
    something closed, 300+ days still with no deadline) → `close`: submit as
    yourself, output "CLOSE PROPOSAL: <done already | dead — reason>", type
-   `Admin`. Kevin's yes = complete it on hand-back.
+   `Admin`. Kevin's yes = complete it on hand-back. **Cite the evidence and
+   it needs no yes (Level A, Kevin's ruling 7 Sep 2026):** "CLOSE PROPOSAL:
+   already handled — see <rec id of the Completed task>" is carried out by
+   `submit` itself once it verifies that task is Completed. Dead and stale
+   closes have nothing to cite and stay cards.
 9. **Small generic admin you can finish now** (under 15 minutes, internal, no
    external send) → `finish` in-house: do the work, submit the result through
    the gate as your own output, type `Admin`.

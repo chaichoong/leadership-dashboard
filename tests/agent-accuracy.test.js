@@ -261,3 +261,86 @@ describe('relevance is its own score, owned by whatever created the task', () =>
     expect(relevanceScore(null).decisions).toBe(0);
   });
 });
+
+// ─── AUTONOMY LEVELS per decision CATEGORY (Kevin's ruling, 7 Sep 2026) ───
+//
+// Chen's 3-Tier Decision Framework applied per category, not per agent. The
+// classifier here is shape-only (a page cannot fetch a keeper); the dispatcher
+// verifies evidence before acting. What these guard: the shapes the dispatcher
+// acts on classify the same way here, the private matter is Level C whatever
+// the shape, money beats shape, and a candidate needs the same bar an agent
+// does — including the rolling 30 days.
+const { decisionCategory, categoryCandidates, AUTONOMY_LEVELS, DECISION_MONEY, HANDLED_MARK } = require(resolve(ROOT, 'js/agent-accuracy.js'));
+
+describe('decisionCategory — the shapes the dispatcher acts on', () => {
+  it('reads the five Level A shapes', () => {
+    expect(decisionCategory('CLOSE PROPOSAL: duplicate of recKEEPER00000001 — folded', 'Admin', 'INBOUND: x')).toBe('close: duplicate');
+    expect(decisionCategory('CLOSE PROPOSAL: already handled — see recDONE0000000001', 'Admin', 'x')).toBe('close: already handled');
+    expect(decisionCategory('Findings.\n\n**Carrying this out will involve:** Nothing. Information only.', 'Analysis', 'x')).toBe('information only');
+    expect(decisionCategory('CALENDAR:\nTITLE: Dentist', 'Admin', 'x')).toBe('calendar entry');
+    expect(decisionCategory('PASS TO ROY: boiler', 'Admin', 'MAINTENANCE: boiler')).toBe('pass to Roy');
+  });
+  it('a close with nothing to cite is judgement, and stays Level B', () => {
+    expect(decisionCategory('CLOSE PROPOSAL: dead — 300 days', 'Admin', 'x')).toBe('close: judgement');
+    expect(AUTONOMY_LEVELS['close: judgement'].level).toBe('B');
+  });
+  it('the tier-1 banner wins over every shape', () => {
+    expect(decisionCategory('🚨 TIER 1. This touches your private legal and financial matter.\nCLOSE PROPOSAL: duplicate of recKEEPER00000001', 'Admin', 'x')).toBe('tier-1 matter');
+    expect(AUTONOMY_LEVELS['tier-1 matter'].level).toBe('C');
+  });
+  it('money beats shape: over the rule or recurring is a card', () => {
+    expect(decisionCategory('PASS TO ROY: x\nSPEND: £180', 'Admin', 'MAINTENANCE: x')).toBe('spend over the rule');
+    expect(decisionCategory('PASS TO ROY: x\nSPEND: £20/month', 'Admin', 'MAINTENANCE: x')).toBe('spend over the rule');
+    expect(decisionCategory('PASS TO ROY: x\nSPEND: £80', 'Admin', 'MAINTENANCE: x')).toBe('pass to Roy');
+    expect(DECISION_MONEY).toEqual({ log: 25, inform: 100 });
+  });
+  it('emails split by lane, and every email shape is Level B', () => {
+    expect(decisionCategory('TO: a@b.com\nFROM: k@g.com\nSUBJECT: x\n---\nhi', 'Correspondence', 'INBOUND: reply')).toBe('email: reply');
+    expect(decisionCategory('TO: a@b.com\nSUBJECT: x\n---\nhi', 'Correspondence', 'COMPLIANCE: EICR quote')).toBe('email: quote request');
+    expect(decisionCategory('TO: a@b.com\nSUBJECT: x\n---\nhi', 'Correspondence', 'Warm lane second touch')).toBe('email: OD outbound');
+    ['email: reply', 'email: quote request', 'email: OD outbound'].forEach(c => expect(AUTONOMY_LEVELS[c].level).toBe('B'));
+  });
+  it('documents and letters are Level C', () => {
+    expect(decisionCategory('DOCUMENT: ~/x.pdf\nSIGNERS: a@b.com\n---\nwhat', 'Correspondence', 'x')).toBe('sign document');
+    expect(decisionCategory('POST:\nHMRC\nBX9 1AX\nDOCUMENT: x.pdf\n---\nletter', 'Correspondence', 'x')).toBe('post letter');
+    expect(AUTONOMY_LEVELS['sign document'].level).toBe('C');
+    expect(AUTONOMY_LEVELS['post letter'].level).toBe('C');
+  });
+  it('every level in the table is A, B or C and the marker is the dispatcher\'s', () => {
+    Object.values(AUTONOMY_LEVELS).forEach(v => expect(['A', 'B', 'C']).toContain(v.level));
+    expect(HANDLED_MARK).toBe('HANDLED WITHOUT YOU');
+  });
+});
+
+describe('categoryCandidates — a category earns Level A on the agent bar', () => {
+  function cat(category, outcomes) {
+    return outcomes.map((outcome, i) => ({
+      category, outcome,
+      at: new Date(Date.UTC(2026, 6, 31, 12, 0, 0) - i * SEED_STEP_MS).toISOString(),
+    }));
+  }
+  it('20 clean approvals over 30+ days on a Level B category is a candidate', () => {
+    const rows = categoryCandidates(cat('close: judgement', Array(20).fill(APPROVE)));
+    expect(rows).toHaveLength(1);
+    expect(rows[0].candidate).toBe(true);
+    expect(rows[0].level).toBe('B');
+  });
+  it('19 is not enough, and a recent rejection blocks it', () => {
+    expect(categoryCandidates(cat('close: judgement', Array(19).fill(APPROVE)))[0].candidate).toBe(false);
+    expect(categoryCandidates(cat('close: judgement', ['Rejected'].concat(Array(20).fill(APPROVE))))[0].candidate).toBe(false);
+  });
+  it('a category already at Level A or C is never a candidate, however clean', () => {
+    expect(categoryCandidates(cat('close: duplicate', Array(30).fill(APPROVE)))[0].candidate).toBe(false);
+    expect(categoryCandidates(cat('post letter', Array(30).fill(APPROVE)))[0].candidate).toBe(false);
+  });
+  it('a burst inside three days fails the 30-day span (Kevin, 28 Aug 2026)', () => {
+    const burst = Array(25).fill(APPROVE).map((outcome, i) => ({ category: 'email: reply', outcome, at: new Date(Date.UTC(2026, 7, 27, 9, i)).toISOString() }));
+    expect(categoryCandidates(burst)[0].candidate).toBe(false);
+  });
+  it('relevance rejections leave the bucket rather than counting against it', () => {
+    const rows = categoryCandidates(cat('email: reply', Array(20).fill(APPROVE)).concat([{ category: 'email: reply', outcome: 'Rejected', reason: 'Roy owns it', at: '2026-07-01T00:00:00Z' }]));
+    expect(rows[0].total).toBe(20);
+    expect(rows[0].relevanceFailures).toBe(1);
+    expect(rows[0].candidate).toBe(true);
+  });
+});

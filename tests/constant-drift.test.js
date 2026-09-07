@@ -487,3 +487,50 @@ describe('auto-bump trigger list does not drift from the auto-bump mapping', () 
     ).toEqual([]);
   });
 });
+
+describe('the money rule does not drift between the dispatcher, the page and the prompts', () => {
+  // Kevin's ruling, 7 Sep 2026: £25 act and log, £100 act and inform, above a
+  // card, recurring always his. The dispatcher enforces it, the AI Agents page
+  // shows it, and GUARDRAILS.md plus the role-agent prompts quote it. A prompt
+  // that says £250 while the code says £100 sends an agent to a card it was
+  // told it could act on — or the reverse.
+  const DISPATCH = read('scripts/agent-dispatch.py');
+  const ACCURACY = read('js/agent-accuracy.js');
+  const GUARDRAILS = readFileSync(resolve(process.env.HOME, '.claude/agents/GUARDRAILS.md'), 'utf8');
+  const py = DISPATCH.match(/^DECISION_MONEY = \{"log": (\d+), "inform": (\d+)\}/m);
+  const js = ACCURACY.match(/var DECISION_MONEY = \{ log: (\d+), inform: (\d+) \};/);
+
+  it('parses both sources (control — guards against a vacuous pass)', () => {
+    expect(py).not.toBeNull();
+    expect(js).not.toBeNull();
+    expect(GUARDRAILS.length).toBeGreaterThan(1000);
+  });
+  it('the dispatcher and the page agree', () => {
+    expect([js[1], js[2]]).toEqual([py[1], py[2]]);
+  });
+  it('GUARDRAILS quotes the same two figures', () => {
+    expect(GUARDRAILS).toMatch(new RegExp(`Under £${py[1]}`));
+    expect(GUARDRAILS).toMatch(new RegExp(`£${py[1]} to £${py[2]}`));
+    expect(GUARDRAILS).toMatch(new RegExp(`Over £${py[2]}`));
+  });
+  it('no role-agent prompt still carries the old £250 escalation threshold', () => {
+    const dir = resolve(process.env.HOME, '.claude/agents');
+    const files = execFileSync('ls', [dir]).toString().split('\n').filter(f => f.endsWith('.md'));
+    expect(files.length).toBeGreaterThan(10);
+    const offenders = files.filter(f => /over £250 is escalated|spending over £250,/.test(readFileSync(resolve(dir, f), 'utf8')));
+    expect(offenders).toEqual([]);
+  });
+  it('every role-agent prompt has its decision criteria', () => {
+    const dir = resolve(process.env.HOME, '.claude/agents');
+    for (const f of ['inbound-comms-response.md', 'creditor-management.md', 'task-manager.md', 'property-administration.md', 'inbound-comms-triage.md', 'content-engine.md']) {
+      expect(readFileSync(resolve(dir, f), 'utf8'), f).toMatch(/## Decision criteria \(Kevin's ruling, 7 Sep 2026\)/);
+    }
+  });
+  it('the HANDLED marker is one string in four places', () => {
+    const mark = DISPATCH.match(/^HANDLED_MARK = "([^"]+)"/m)[1];
+    expect(read('scripts/calendar-write.py')).toContain(`HANDLED_MARK = "${mark}"`);
+    expect(ACCURACY).toContain(`var HANDLED_MARK = '${mark}'`);
+    expect(read('scripts/slack-automation/approvals.js')).toContain(`export const HANDLED_MARK = '${mark}'`);
+    expect(read('os/agents/index.html')).toContain(`|| '${mark}'`);
+  });
+});

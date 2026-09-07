@@ -47,6 +47,8 @@ const TF = {
   slackBaseline: 'fldxsqj9JSRBGNyT9',
   feedbackHistory: 'fldOzsq68lhfprKJu',
   deferredUntil: 'fldJ9IHS1yxwYzYSN',
+  verdictReason: 'fldF9Bs4N5mttQvtl',
+  lessonWrittenAt: 'fldFfzXOME9Rh8SyM',
 };
 const TM = { name: 'flds7xoRFQhcRTnbB', active: 'fld2YLfcPqSe6b60u', isAi: 'fldKGsz9kTpFypeOr' };
 const AG = {
@@ -162,6 +164,8 @@ function defaultFixtures() {
     // queue exactly as it did before this feature; the knock-back specs
     // override it.
     deferred: [],
+    // Level A carry-outs. Empty by default; agents-fifteen-minute.spec.js fills it.
+    handled: [],
     workflows: [],
     steps: [],
     businesses: [],
@@ -203,6 +207,9 @@ function defaultFixtures() {
 // the live approval fixtures, which looks like a passing test of a feature
 // that is doing the opposite of its job.
 const TASK_QUERY_MARKERS = [
+  // Level A carry-outs (7 Sep 2026): the dispatcher's Notes marker. First,
+  // because its formula shares nothing with the others.
+  { marker: 'HANDLED WITHOUT YOU', key: 'handled' },
   { marker: ', IS_AFTER({Deferred Until}', key: 'deferred' },
   { marker: 'Sent For Approval By', key: 'approvals' },
   { marker: 'Approval Outcome', key: 'taskHistory' },
@@ -232,7 +239,7 @@ async function mockAgentsPage(page, overrides = {}) {
       // Single-record read (the stale-approval guard re-reads one task).
       const one = url.match(new RegExp(`${TABLES.tasks}/(rec[A-Za-z0-9]+)`));
       if (one) {
-        const all = [...fixtures.approvals, ...fixtures.deferred, ...fixtures.openTasks, ...fixtures.taskHistory];
+        const all = [...fixtures.approvals, ...fixtures.deferred, ...fixtures.openTasks, ...fixtures.taskHistory, ...(fixtures.handled || [])];
         const rec = all.find((r) => r.id === one[1]);
         return rec ? json(rec) : json({ error: 'NOT_FOUND' }, 404);
       }

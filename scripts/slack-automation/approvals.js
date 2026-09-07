@@ -731,7 +731,20 @@ export function signInsWaiting(tasks) {
     }
     return Object.values(bySite).sort((a, b) => b.n - a.n || a.site.localeCompare(b.site));
 }
-export function buildDigestText(count, names, dashUrl, capped, signIns = []) {
+// Level A (Kevin's ruling, 7 Sep 2026): what the agents carried out WITHOUT a
+// card since yesterday's message — closed duplicates, already-handled closes,
+// diary entries, Roy handovers. agent-dispatch.py stamps HANDLED_MARK into
+// Notes on every one; this counts the stamps modified in the last 24 hours.
+// Named in the digest so a suppression is never silent: the number he can
+// check is the whole safety of letting agents act.
+export const HANDLED_MARK = 'HANDLED WITHOUT YOU';
+export const HANDLED_FORMULA = `AND(FIND('${HANDLED_MARK}', {Notes}), IS_AFTER(LAST_MODIFIED_TIME(), DATEADD(NOW(), -24, 'hours')))`;
+const DASHBOARD_CHECKS_URL = 'https://chaichoong.github.io/leadership-dashboard/os/agents/index.html#tab=checks';
+export function handledLine(handled) {
+    if (!handled) return '';
+    return `\n*${handled} thing${handled === 1 ? '' : 's'} handled without you* since yesterday's message (closed duplicates, already-handled closes, diary entries, Roy handovers). Check or reverse them here: ${DASHBOARD_CHECKS_URL}\n`;
+}
+export function buildDigestText(count, names, dashUrl, capped, signIns = [], handled = 0) {
     const shown = `${count}${capped ? '+' : ''}`;
     const top = names.slice(0, 3).map(n => `• ${n}`).join('\n');
     const more = count > 3 ? `\n…and ${capped ? 'more' : `${count - 3} more`}.` : '';
@@ -742,7 +755,7 @@ export function buildDigestText(count, names, dashUrl, capped, signIns = []) {
           + `.\nOpen the queue and press *Sign in to all*: sites open one after another, sign in, Cmd+Q, and the robots finish the work within minutes.\n`
         : '';
     return truncate(`*${shown} item${count === 1 && !capped ? '' : 's'} waiting for your approval.*\n`
-        + `${top}${more}\n${signInBlock}\n`
+        + `${top}${more}\n${signInBlock}${handledLine(handled)}\n`
         + `Decide them here: ${dashUrl}\n`
         + `_This is the only approvals message you get today. Nothing has been sent or actioned._`, 2900);
 }
@@ -774,6 +787,17 @@ async function postKevinDigest(env, log) {
         return !e || e === KEVIN_AIRTABLE_EMAIL;
     });
 
+    // Counted, never trusted: a failed read logs and reports 0 with the log
+    // line saying so, rather than pretending nothing was handled.
+    let handled = 0;
+    try {
+        handled = (await queryTasks(env, HANDLED_FORMULA, DIGEST_MAX)).length;
+        log.push(`digest: ${handled} handled without Kevin in the last 24h`);
+    } catch (e) {
+        log.push(`digest: handled-without-you count FAILED (${e && e.message ? e.message : e}) — reported as unknown, not zero`);
+        handled = 0;
+    }
+
     if (mine.length) {
         const channel = await openDm(env, KEVIN_SLACK_ID);
         if (!channel) { log.push('digest DM open failed'); return -1; }
@@ -783,7 +807,7 @@ async function postKevinDigest(env, log) {
             body: JSON.stringify({
                 channel,
                 text: `${mine.length}${capped ? '+' : ''} approvals waiting`,
-                blocks: [{ type: 'section', text: { type: 'mrkdwn', text: buildDigestText(mine.length, mine.map(t => esc(truncate(t.name, 120))), DASHBOARD_QUEUE_URL, capped, signInsWaiting(mine)) } }],
+                blocks: [{ type: 'section', text: { type: 'mrkdwn', text: buildDigestText(mine.length, mine.map(t => esc(truncate(t.name, 120))), DASHBOARD_QUEUE_URL, capped, signInsWaiting(mine), handled) } }],
             }),
         });
         if (!res.ok) { log.push(`digest post failed: ${res.error}`); return -1; }
