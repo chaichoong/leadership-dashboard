@@ -98,13 +98,25 @@ describe('agent-estate-drift', () => {
     expect(r.json.hits.map((h) => h.line)).toEqual([3]);
   });
 
-  it('a Lessons line and a line quoting the old rule as history are exempt', () => {
+  it('a Lessons line and a line quoting the old rule as history are exempt, even with retired wording', () => {
+    // Both lines carry a RETIRED pattern ("under £50 act", "over £250 escalate"), so
+    // this fails if either exemption is deleted (review finding, 7 Sep 2026: the
+    // first fixture matched no pattern and could not fail).
     const e = estate();
     writeFileSync(join(e.agents, 'dept-4.md'),
       '# dept\n## Lessons from Kevin\n- 2026-08-27: something — under £50 act\n' +
-      'The money rule was lowered from £50/£250 while the cards are paid down.\n');
+      'Previous rule, kept for history: under £50 act; over £250 escalate.\n');
     const r = run(e);
     expect(r.code, JSON.stringify(r.json && r.json.hits)).toBe(0);
+  });
+
+  it('a history word AFTER a stale rule does not exempt it', () => {
+    const e = estate();
+    writeFileSync(join(e.agents, 'dept-5.md'),
+      '# dept\nDelegation: AI first, then Mica or Ericamae, then Kevin (Slack cards retired 1 Sep).\n');
+    const r = run(e);
+    expect(r.code).toBe(1);
+    expect(r.json.hits.map((h) => h.line)).toEqual([2]);
   });
 
   it('a ruling in Decisions/ newer than the stamp that touches the estate fires', () => {
@@ -117,10 +129,32 @@ describe('agent-estate-drift', () => {
     expect(r.json.rulings_behind).toEqual(['2026-09-06 Approval gate change.md']);
   });
 
-  it('a ruling dated on the stamp day itself does not fire', () => {
+  it('a ruling dated on the stamp day fires unless ESTATE.md names it as absorbed', () => {
+    // A day-granular stamp cannot see a second ruling written later the same day
+    // (review finding, 7 Sep 2026). Naming the file is the proof it was folded in.
     const e = estate({ stamp: '2026-09-07' });
     writeFileSync(join(e.brain, 'Decisions', '2026-09-07 Agent levels.md'), '# agents\nlevels\n');
+    const before = run(e);
+    expect(before.code).toBe(1);
+    expect(before.json.rulings_behind).toEqual(['2026-09-07 Agent levels.md']);
+    writeFileSync(join(e.agents, 'ESTATE.md'),
+      '# Estate\n\nAs at: 2026-09-07\nAbsorbed today: 2026-09-07 Agent levels\n');
     expect(run(e).code).toBe(0);
+  });
+
+  it('CONTROL: an absent brain (Drive unmounted) exits 2, never "0 rulings behind"', () => {
+    const e = estate();
+    rmSync(e.brain, { recursive: true, force: true });
+    const r = run(e);
+    expect(r.code).toBe(2);
+    expect(r.stderr).toMatch(/CANNOT VERIFY/);
+    expect(r.stderr).toMatch(/founder-profile/);
+  });
+
+  it('CONTROL: a missing Decisions/ folder alone exits 2', () => {
+    const e = estate();
+    rmSync(join(e.brain, 'Decisions'), { recursive: true, force: true });
+    expect(run(e).code).toBe(2);
   });
 
   it('a missing ESTATE.md is an exception, never a pass', () => {

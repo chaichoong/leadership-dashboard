@@ -433,7 +433,7 @@
    "network"
   ],
   "retryWhenDeferred": false,
-  "retryWhenDeferredNote": "Deliberately OFF, not forgotten. handback-poll runs every 30 minutes, so a deferred slot is picked up by the next one 30 minutes later — re-firing it would add a duplicate poll, not rescue a lost day. Revisit only if the cadence drops below hourly."
+  "retryWhenDeferredNote": "Deliberately OFF, not forgotten. handback-poll runs every 30 minutes, so a deferred slot is picked up by the next one 30 minutes later \u2014 re-firing it would add a duplicate poll, not rescue a lost day. Revisit only if the cadence drops below hourly."
  },
  "retry-deferred": {
   "cron": "20 * * * *",

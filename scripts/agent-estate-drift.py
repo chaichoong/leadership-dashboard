@@ -27,7 +27,9 @@ This script is the mechanical half of the fix. Two checks:
 CONTROLS, because a scan that sees nothing looks exactly like a clean scan:
 - fewer than MIN_FILES readable surfaces exits 2 (cannot verify), never 0;
 - the retired list must fire on the built-in fixture (`--selftest`);
-- a missing or unstamped ESTATE.md is an exception, not a pass.
+- a missing or unstamped ESTATE.md is an exception, not a pass;
+- any unreadable surface, or a missing Decisions/ folder (the Drive mount is
+  sometimes absent), exits 2. "0 rulings behind" off an empty folder is not a pass.
 
 Exit 0 clean, 1 drift found (listed on stdout, summary on stderr), 2 cannot verify.
 Runs daily as the wrapped launchd job `estate-drift` (06:25), and by hand:
@@ -124,15 +126,24 @@ def surfaces(agents=AGENTS, skills=SKILLS, tasks=TASKS, brain=BRAIN, repo=REPO):
 
 
 def scan_text(text, path, retired=RETIRED):
+    """Every line of `text` against RETIRED. A Lessons line is exempt outright.
+    A history word exempts a match only when it comes BEFORE the match on the
+    line ("lowered from £50/£250"); a stale rule followed by an unrelated
+    "retired" later in the sentence still fires (review finding, 7 Sep 2026)."""
     hits = []
     for n, line in enumerate(text.splitlines(), 1):
-        if LESSON.match(line) or HISTORY.search(line):
+        if LESSON.match(line):
             continue
+        hist = HISTORY.search(line)
         for pat, since, fix in retired:
-            if re.search(pat, line):
-                hits.append({"file": path, "line": n, "pattern": pat,
-                             "retired": since, "fix": fix,
-                             "text": line.strip()[:140]})
+            m = re.search(pat, line)
+            if not m:
+                continue
+            if hist and hist.start() < m.start():
+                continue
+            hits.append({"file": path, "line": n, "pattern": pat,
+                         "retired": since, "fix": fix,
+                         "text": line.strip()[:140]})
     return hits
 
 
@@ -146,13 +157,19 @@ def stamp_of(estate_path):
     return m.group(1) if m else None
 
 
-def rulings_after(stamp, decisions_dir):
-    """Decisions files dated after the stamp whose text touches the estate."""
+def rulings_after(stamp, decisions_dir, estate_text=""):
+    """Decisions files dated after the stamp whose text touches the estate,
+    plus files dated ON the stamp day that ESTATE.md does not name. A stamp
+    has day granularity, so a ruling written later the same day would otherwise
+    be invisible for ever (review finding, 7 Sep 2026); naming the file in
+    ESTATE.md is the proof it was absorbed."""
     out = []
     for p in sorted(glob.glob(os.path.join(decisions_dir, "*.md"))):
         name = os.path.basename(p)
         m = re.match(r"(\d{4}-\d{2}-\d{2})", name)
-        if not m or m.group(1) <= stamp:
+        if not m or m.group(1) < stamp:
+            continue
+        if m.group(1) == stamp and name[:-3] in estate_text:
             continue
         try:
             with open(p) as f:
@@ -179,6 +196,18 @@ def run(agents=AGENTS, skills=SKILLS, tasks=TASKS, brain=BRAIN, repo=REPO):
     if res["files_scanned"] < MIN_FILES:
         return 2, dict(res, reason="only %d surfaces readable (floor %d)"
                        % (res["files_scanned"], MIN_FILES))
+    # A surface that cannot be read is a scan that cannot see it. The brain
+    # lives on a Drive mount that is sometimes absent; with it gone the five
+    # brain files and Decisions/ vanish and the old version printed
+    # "0 rulings behind" and exited 0 (review finding, 7 Sep 2026).
+    decisions = os.path.join(brain, "Decisions")
+    if res["files_missing"] or not os.path.isdir(decisions):
+        missing = list(res["files_missing"])
+        if not os.path.isdir(decisions):
+            missing.append(decisions)
+        return 2, dict(res, reason="%d surface(s) unreadable: %s"
+                       % (len(missing), ", ".join(
+                           m.replace(HOME, "~") for m in missing)))
     estate = os.path.join(agents, "ESTATE.md")
     res["stamp"] = stamp_of(estate)
     if not res["stamp"]:
@@ -186,29 +215,37 @@ def run(agents=AGENTS, skills=SKILLS, tasks=TASKS, brain=BRAIN, repo=REPO):
                             "retired": "", "fix": "ESTATE.md missing or has no "
                             "'As at: YYYY-MM-DD' stamp", "text": ""})
     else:
-        res["rulings_behind"] = rulings_after(res["stamp"],
-                                              os.path.join(brain, "Decisions"))
+        try:
+            with open(estate) as f:
+                estate_text = f.read()
+        except OSError:
+            estate_text = ""
+        res["rulings_behind"] = rulings_after(res["stamp"], decisions, estate_text)
     code = 1 if (res["hits"] or res["rulings_behind"]) else 0
     return code, res
 
 
 FIXTURE = """# fixture
-- 2026-08-27: INBOUND: something — Send from kevinbrittain@gmail.com
-The money rule was lowered from £50/£250 while the cards are paid down.
+- 2026-08-27: INBOUND: something — under £50 act, said Kevin
+Previous rule, kept for history: under £50 act; over £250 escalate.
 Delegation order: AI first, then Mica or Ericamae, then Kevin.
 Verify the card posted by reading #agent-approvals.
 Spending over £250 escalate.
+Delegation: AI first, then Mica or Ericamae, then Kevin (Slack cards retired 1 Sep).
 """
 
 
 def selftest():
     hits = scan_text(FIXTURE, "fixture")
-    lines = sorted(h["line"] for h in hits)
-    # Line 2 is a lesson, line 3 is history: both exempt. 4, 5, 6 must fire.
-    assert lines == [4, 5, 6], "selftest: expected hits on lines 4,5,6 got %s" % lines
+    lines = sorted(set(h["line"] for h in hits))
+    # Line 2 is a lesson and line 3 quotes the old rule after a history word:
+    # both exempt even though both contain retired wording. 4, 5, 6 fire. Line
+    # 7 fires too: its history word comes AFTER the stale rule.
+    assert lines == [4, 5, 6, 7], "selftest: expected hits on 4,5,6,7 got %s" % lines
     assert not scan_text("Route to the Supplier and Creditor Manager agent.", "x")
     assert stamp_of(os.devnull) is None
-    print("selftest ok: %d retired patterns, fixture fires on lines 4, 5, 6"
+    assert rulings_after("2026-09-07", os.devnull) == []
+    print("selftest ok: %d retired patterns, fixture fires on lines 4, 5, 6, 7"
           % len(RETIRED))
     return 0
 
