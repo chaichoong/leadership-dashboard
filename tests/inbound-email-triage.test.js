@@ -446,7 +446,21 @@ print(json.dumps(${expr}))
         expect(py(`m.classify_worker_error(403, ${JSON.stringify(DAILY)})[0]`)).toBe('quota');
         // The ordering rule: the body is read BEFORE the status, or a daily
         // quota wrapped in a retryable 500 is retried until the day is gone.
-        expect(py('m.classify_worker_error(503, "Quota exceeded for quota metric")[0]')).toBe('quota');
+        expect(py(`m.classify_worker_error(503, "Quota exceeded for quota metric 'Queries per day'")[0]`)).toBe('quota');
+    });
+
+    // EXPECTATION CHANGED 7 Sep 2026, finding 20260907-daily-ops-488. This case
+    // used to assert that the bare sentence "Quota exceeded for quota metric"
+    // meant the DAY was gone. Google uses that same sentence for its PER-MINUTE
+    // metric, so the 3, 5 and 6 Sep slots each abandoned the email lane over a
+    // limit that refills in sixty seconds, and four days of mail went untriaged.
+    // The metric NAME decides now; the daily cases above are unchanged.
+    it('waits out a per-minute metric rather than reading it as the day being over', () => {
+        const PER_MINUTE = "Quota exceeded for quota metric 'Gmail API units per minute per user'";
+        expect(py(`m.classify_worker_error(500, ${JSON.stringify(PER_MINUTE)})[0]`)).toBe('slowdown');
+        // No window named at all: still a wait, because Gmail's per-day cap is
+        // ~1e9 units and spending the slot on that guess is what cost four days.
+        expect(py('m.classify_worker_error(500, "quotaExceeded")[0]')).toBe('slowdown');
     });
 
     it('retries a per-user rate limit instead of losing the slot to it', () => {
