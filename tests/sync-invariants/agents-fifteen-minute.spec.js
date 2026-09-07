@@ -131,6 +131,18 @@ test.describe('the 15-Minute Dashboard', () => {
     await expect(h).toContainText('Handled without you: 2 this week, 1 reversed');
     await expect(h).toContainText('Queue now: 3');
   });
+  test('the withdrawal tracker names the week and phase and compares actual with target', async ({ page }) => {
+    await mockAgentsPage(page, withHandled());
+    await loadAgentsPage(page);
+    const w = page.locator('[data-f15="withdrawal"]');
+    await expect(w).toBeVisible();
+    await expect(w).toContainText(/Withdrawal: week \d+, (Measure|Route away|Every other day|Weekly review)/);
+    // 8 decisions in the last 7 days from the fixtures, on 6 distinct days.
+    await expect(w).toContainText('Cards a day: 1.1 against');
+    await expect(w).toContainText('8 decisions over 7 days');
+    await expect(w).toContainText('Rejected: 13%');
+    await expect(w).toContainText('baseline 26%');
+  });
   test('a broken 30-day read shows an error, never zeros', async ({ page }) => {
     const fx = withHandled();
     fx.taskHistory = [];

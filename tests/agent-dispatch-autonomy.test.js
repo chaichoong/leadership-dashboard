@@ -178,7 +178,7 @@ describe('calendar entries and everything else', () => {
 
 describe('submit wires the level in, and the carry-out leaves its marker', () => {
   it('cmd_submit consults decision_level after the informational branch and only when not tier 1', () => {
-    const i = SRC.indexOf('if informational_only(output, args.type');
+    const i = SRC.indexOf('files_itself = informational_only(output, args.type');
     const j = SRC.indexOf('level = decision_level(output, args.type, trec)');
     const k = SRC.indexOf('if level["level"] == AUTONOMY_ACT and not is_tier1:');
     expect(i).toBeGreaterThan(0);

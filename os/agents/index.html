@@ -102,6 +102,9 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 .f15-candidates{margin:6px 0 8px}
 .f15-cand{font-size:var(--fs-sm);background:var(--success-bg);color:var(--success);border-radius:var(--radius-md);padding:6px 10px;margin-bottom:4px}
 .f15-flow{display:flex;gap:16px;flex-wrap:wrap;font-size:var(--fs-sm);color:var(--text-primary)}
+.f15-withdrawal{border-color:var(--accent);border-width:2px}
+.f15-ok b{color:var(--success)}
+.f15-over b{color:var(--danger)}
 
 /* Approval cards (Zone A) */
 .apv-card{border:1px solid var(--border-default);border-left:4px solid var(--warning);border-radius:var(--radius-md);background:var(--bg-surface);padding:14px 16px;margin-bottom:12px}
@@ -194,6 +197,14 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 .chk-item{display:flex;gap:10px;align-items:flex-start;border:1px solid var(--border-default);border-left:4px solid var(--warning);border-radius:var(--radius-md);background:var(--bg-surface);padding:10px 14px;margin-bottom:8px}
 .chk-item.danger{border-left-color:var(--danger)}
 .chk-item.info{border-left-color:var(--info)}
+.apv-receipt{border:1px solid var(--accent);background:var(--accent-soft);border-radius:var(--radius-md);padding:8px 12px;margin-bottom:8px}
+.apv-receipt-head{font-size:var(--fs-xs);font-weight:var(--fw-bold);color:var(--accent-hover);margin-bottom:4px}
+.apv-receipt-line{display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);gap:6px;font-size:var(--fs-sm);padding:2px 0;align-items:start}
+.apv-receipt-point{color:var(--text-secondary);font-style:italic;word-break:break-word}
+.apv-receipt-arrow{color:var(--text-muted)}
+.apv-receipt-change{color:var(--text-primary);word-break:break-word}
+.apv-receipt-change.cannot{color:var(--danger)}
+.apv-chip-why{background:var(--warning-bg);color:var(--warning)}
 .chk-lane{flex-shrink:0;font-size:var(--fs-xs);font-weight:var(--fw-bold);color:var(--text-secondary);background:var(--bg-subtle);padding:2px 8px;border-radius:var(--radius-full);white-space:nowrap;margin-top:1px}
 .chk-text{font-size:var(--fs-sm);color:var(--text-primary);line-height:1.5}
 .chk-detail{font-size:var(--fs-xs);color:var(--text-secondary);margin-top:2px}
@@ -1614,6 +1625,34 @@ function apvSignInStripHtml(items){
         </div>
     </div>`;
 }
+// THE REDO RECEIPT (Kevin, 7 Sep 2026). After "Changes requested" the agent's
+// resubmit must answer his points one by one; agent-dispatch.py writes them
+// into Notes under FEEDBACK ANSWERED. The card leads with the newest one, so
+// he sees whether he was understood before he reads the draft.
+const APV_RECEIPT_RE = /\[([^\]]*agent-dispatch)\] FEEDBACK ANSWERED \(round (\d+)\):\n((?:\s*[-*] .*(?:\n|$))+)/g;
+function apvReceipt(notes){
+    let m, last = null;
+    const re = new RegExp(APV_RECEIPT_RE.source, 'g');
+    while((m = re.exec(String(notes||'')))) last = m;
+    if(!last) return null;
+    const lines = last[3].split('\n').map(l=>l.trim()).filter(l=>/^[-*] /.test(l)).map(l=>{
+        const parts = l.replace(/^[-*]\s*/,'').split(/\s*(?:→|->)\s*/);
+        return { point: parts[0]||'', change: parts.slice(1).join(' → ')||'' };
+    });
+    return { round: Number(last[2]), lines };
+}
+// THE REPORT GATE (7 Sep 2026): a report on an inbound item opens with the
+// five questions answered and the trigger that makes it Kevin's.
+const APV_TRIGGER_WORDS = { money:'money is involved', 'data-request':'they want data or a credential', legal:'a legal or enforcement word', deadline:'a deadline with a cost', obligation:'a new obligation', 'unknown-sender':'an unknown sender asking for something', 'kevin-asked':'you asked for this' };
+function apvTrigger(raw){
+    const m = /^\s*CHECKED:\s*([^\n]+)$/im.exec(String(raw||''));
+    if(!m) return null;
+    const t = /trigger\s*=\s*([^;|,]+)/i.exec(m[1]);
+    if(!t) return null;
+    const key = t[1].trim().toLowerCase();
+    return APV_TRIGGER_WORDS[key] || (key.indexOf('other:') === 0 ? key.slice(6).trim() : key);
+}
+
 function apvCardHtml(t){
     const raw = apvSummary(t.agentOutput);
     const isAction = raw.endsWith(APV_SUMMARY_IS_ACTION);
@@ -1631,6 +1670,14 @@ function apvCardHtml(t){
     const work = String(t.agentOutput||'').trim();
     return `<div class="apv-card" data-apv-card="${t.id}">
         ${tier1 ? `<div class="apv-tier1">TIER 1. This touches your private legal and financial matter. An AI agent prepared it. Nothing has been sent, filed, paid or changed anywhere. Read it before you approve.</div>` : ''}
+        ${(()=>{
+            const r = apvReceipt(t.notes);
+            if(!r || !r.lines.length) return '';
+            return `<div class="apv-receipt" data-apv-receipt="${r.round}">
+                <div class="apv-receipt-head">Your feedback, answered (round ${r.round})</div>
+                ${r.lines.map(l=>`<div class="apv-receipt-line"><span class="apv-receipt-point">${esc(l.point)}</span><span class="apv-receipt-arrow">&rarr;</span><span class="apv-receipt-change${/^cannot\b/i.test(l.change)?' cannot':''}">${esc(l.change)}</span></div>`).join('')}
+            </div>`;
+        })()}
         <div class="apv-ask">${isAction ? `<span class="apv-ask-stem">If you approve, this happens:</span> ` : ''}${esc(ask)}</div>
         ${(()=>{
             const need = apvSignInNeeded(t.agentOutput);
@@ -1644,6 +1691,7 @@ function apvCardHtml(t){
             ${t.priority==='Urgent' ? '<span class="apv-chip" style="background:var(--danger-bg);color:var(--danger)">Urgent</span>' : ''}
             <span class="apv-chip">${esc(agent)}</span>
             ${t.taskType ? `<span class="apv-chip">${esc(t.taskType)}</span>` : ''}
+            ${(()=>{ const w = apvTrigger(t.agentOutput); return w ? `<span class="apv-chip apv-chip-why" data-apv-why title="The agent checked: not already handled, not Roy's, not a machine, no open task. This is the reason it is yours.">Why you: ${esc(w)}</span>` : ''; })()}
             <span class="apv-age${late?' late':''}" title="Measured from when it was posted for approval (or last changed, if it has not been posted yet)">waiting ${esc(agoText(t.submittedAt))}</span>
             ${linksHtml}
         </div>
@@ -5199,7 +5247,51 @@ function fifteenStats(){
     const handled7 = allHandled.map(handledItemView).filter(h=>!h.reversed).length;
     const reversed7 = allHandled.map(handledItemView).filter(h=>h.reversed).length;
     return { agents, totalDone, totalWithout, rows, relevance, lessons7, lessonsTotal, reasons7, categories, agentCandidates,
-             inbound7, replies7, signIns, handled7, reversed7, queue: allApprovals.length };
+             inbound7, replies7, signIns, handled7, reversed7, queue: allApprovals.length, withdrawal: withdrawalStats(hist) };
+}
+
+// THE GRADUAL WITHDRAWAL PROTOCOL (Chen Book 4 ch 8; started 7 Sep 2026).
+// Reduce Kevin's involvement by evidence, not willpower. The week number comes
+// from the start date; the targets are his (10 cards a day at 90 seconds was
+// the number he gave on 27 Aug); the actuals come from Approved At over the
+// last 7 days, sittings split on a 30-minute gap exactly as the 7 Sep
+// baseline was measured (260 decisions, 586 minutes, 135 s each).
+const WITHDRAWAL_START = '2026-09-07';
+const WITHDRAWAL_PHASES = [
+    { from:1, to:2,  name:'Measure',        cards:10, seconds:90,  cadence:'daily',             note:'Nothing changes. Measure which cards needed you specifically.' },
+    { from:3, to:4,  name:'Route away',     cards:8,  seconds:90,  cadence:'daily',             note:'Promote the first candidates. Attention-only items stop reaching you.' },
+    { from:5, to:8,  name:'Every other day',cards:5,  seconds:90,  cadence:'every other day',   note:'Open the queue every other day. Non-critical items are delegated.' },
+    { from:9, to:99, name:'Weekly review',  cards:5,  seconds:90,  cadence:'weekly',            note:'Strategic focus. One weekly review of the dashboard.' },
+];
+function withdrawalStats(hist){
+    const day = 86400000, now = Date.now();
+    const week = Math.max(1, Math.floor((now - Date.parse(WITHDRAWAL_START + 'T00:00:00')) / (7*day)) + 1);
+    const phase = WITHDRAWAL_PHASES.find(p=>week >= p.from && week <= p.to) || WITHDRAWAL_PHASES[WITHDRAWAL_PHASES.length-1];
+    const recent = hist.filter(h=>h.at && (now - Date.parse(h.at)) < 7*day).sort((a,b)=>String(a.at).localeCompare(String(b.at)));
+    // Sittings: a gap over 30 minutes starts a new one; a sitting of 1 or 2
+    // decisions has no measurable duration, so seconds per decision is taken
+    // across sittings of 3 or more, as the baseline was.
+    const sittings = [];
+    let cur = [];
+    recent.forEach(h=>{
+        const t = Date.parse(h.at);
+        if(cur.length && t - cur[cur.length-1] > 30*60000){ sittings.push(cur); cur = []; }
+        cur.push(t);
+    });
+    if(cur.length) sittings.push(cur);
+    let n = 0, ms = 0;
+    sittings.filter(sx=>sx.length >= 3).forEach(sx=>{ n += sx.length; ms += sx[sx.length-1] - sx[0]; });
+    const days = new Set(recent.map(h=>String(h.at).slice(0,10))).size;
+    const rejected = recent.filter(h=>h.outcome === 'Rejected').length;
+    return {
+        week, phase, decisions7: recent.length,
+        perDay: recent.length / 7,
+        perSitting: days ? recent.length / days : 0,
+        sittingDays: days,
+        secondsEach: n > 1 ? Math.round(ms / 1000 / (n - 1)) : null,
+        minutesPerDay: n > 1 ? Math.round(ms / 60000 / 7) : null,
+        rejectRate: recent.length ? rejected / recent.length : null,
+    };
 }
 function renderFifteen(){
     const body = document.getElementById('fifteenBody');
@@ -5218,6 +5310,16 @@ function renderFifteen(){
     const overall = s.totalDone ? s.totalWithout/s.totalDone : null;
     if(countEl) countEl.textContent = pct(overall) + ' without you';
     let html = '';
+    // 0. Withdrawal: where Kevin is on the 12-week protocol, target against actual.
+    const w = s.withdrawal;
+    const okCards = w.perDay <= w.phase.cards, okSecs = w.secondsEach === null || w.secondsEach <= w.phase.seconds;
+    html += `<div class="f15-block f15-withdrawal" data-f15="withdrawal" data-f15-week="${w.week}"><div class="f15-head">Withdrawal: week ${w.week}, ${esc(w.phase.name)} <span class="f15-sub">${esc(w.phase.note)} Queue cadence for this phase: ${esc(w.phase.cadence)}.</span></div>
+        <div class="f15-flow">
+            <span class="${okCards?'f15-ok':'f15-over'}">Cards a day: <b>${w.perDay.toFixed(1)}</b> against ${w.phase.cards} (${w.decisions7} decisions over 7 days, on ${w.sittingDays} day${w.sittingDays===1?'':'s'})</span>
+            <span class="${okSecs?'f15-ok':'f15-over'}">Seconds each: <b>${w.secondsEach === null ? '—' : w.secondsEach}</b> against ${w.phase.seconds}${w.minutesPerDay !== null ? ` (about ${w.minutesPerDay} min a day)` : ' (no sitting of 3+ yet)'}</span>
+            <span>Rejected: <b>${w.rejectRate === null ? '—' : Math.round(w.rejectRate*100)+'%'}</b> (baseline 26%)</span>
+        </div>
+        <div class="f15-muted">Baseline on 7 Sep 2026: 26 arrivals a day, 135 seconds each, 26% rejected. The protocol has four phases: measure (weeks 1 to 2), route away (3 to 4), every other day (5 to 8), weekly (9 on).</div></div>`;
     // 1. Exception rates
     html += `<div class="f15-block" data-f15="exceptions"><div class="f15-head">1. Exception rate <span class="f15-big">${pct(overall)}</span><span class="f15-sub">of ${s.totalDone} tasks finished in 30 days ran without a card from you (${s.totalWithout}). Higher is the goal; every card you did not have to tap.</span></div>`;
     if(s.agents.length){
