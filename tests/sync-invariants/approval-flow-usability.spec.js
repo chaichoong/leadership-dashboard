@@ -140,3 +140,36 @@ test.describe('the Slack link works every time', () => {
     await expect(page.locator('#view-dashboard')).toBeVisible();
   });
 });
+
+// THE COVERAGE CHECK and three quotes per job (Kevin, 7 Sep 2026).
+test.describe('quote emails batch by property and show the coverage that passed', () => {
+  function withQuotes() {
+    const fx = defaultFixtures();
+    const now = new Date().toISOString();
+    const AGENT_A = 'recTmCreditorMgmt';
+    ['AC1 Electrical', 'ELECSI', 'Spark Bros'].forEach((who, i) => fx.approvals.push({ id: 'recQuote' + i, createdTime: now, fields: {
+      [TF.name]: `COMPLIANCE: EICR quote request - ${who} - 6 Chedburgh Place`, [TF.status]: 'Approval', [TF.priority]: 'Medium',
+      [TF.agentOutput]: `TO: quotes@${who.toLowerCase().replace(/\s+/g, '')}.example\nFROM: info@agilelets.co.uk\nSUBJECT: EICR quote, 6 Chedburgh Place\n---\nPlease quote for an EICR at 6 Chedburgh Place, CB9 0AB.\n\n**Carrying this out will involve:** sending this quote request to ${who}.`,
+      [TF.notes]: `[07 Sep 2026 13:00 — agent-dispatch] COVERAGE CHECKED: CB9 (6 Chedburgh Place) within ${who} covers CB9, CB8 (https://${who.toLowerCase().replace(/\s+/g, '')}.example/areas).`,
+      [TF.sentForApprovalBy]: [AGENT_A], [TF.teamMember]: [AGENT_A], [TF.lmt]: now, [TF.taskType]: 'Correspondence',
+    } }));
+    return fx;
+  }
+  test('three requests to three tradespeople about one property are one strip', async ({ page }) => {
+    await mockAgentsPage(page, withQuotes());
+    await loadAgentsPage(page);
+    await openApprovals(page);
+    const strip = page.locator('[data-apv-batch-group]', { hasText: '6 Chedburgh Place' });
+    await expect(strip).toHaveCount(1);
+    await expect(strip).toContainText('3 alike: Creditor Management · Correspondence for 6 Chedburgh Place');
+    await expect(strip.locator('.apv-batch-list div')).toHaveCount(3);
+  });
+  test('the card says which districts the tradesperson covers', async ({ page }) => {
+    await mockAgentsPage(page, withQuotes());
+    await loadAgentsPage(page);
+    await openApprovals(page);
+    const chip = page.locator('[data-apv-card="recQuote0"] [data-apv-coverage]');
+    await expect(chip).toContainText('Covers CB9');
+    await expect(chip).toHaveAttribute('title', /AC1 Electrical covers CB9, CB8/);
+  });
+});

@@ -227,6 +227,7 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 .apv-receipt-change{color:var(--text-primary);word-break:break-word}
 .apv-receipt-change.cannot{color:var(--danger)}
 .apv-chip-why{background:var(--warning-bg);color:var(--warning)}
+.apv-chip-ok{background:var(--success-bg);color:var(--success)}
 .chk-lane{flex-shrink:0;font-size:var(--fs-xs);font-weight:var(--fw-bold);color:var(--text-secondary);background:var(--bg-subtle);padding:2px 8px;border-radius:var(--radius-full);white-space:nowrap;margin-top:1px}
 .chk-text{font-size:var(--fs-sm);color:var(--text-primary);line-height:1.5}
 .chk-detail{font-size:var(--fs-xs);color:var(--text-secondary);margin-top:2px}
@@ -1538,7 +1539,15 @@ function apvLikeKey(t){
     if(t.tier1 || apvSignInNeeded(t.agentOutput)) return '';
     if(!t.raiserId || !t.taskType) return '';
     let where = '';
-    if(t.taskType === 'Correspondence'){
+    // Three quotes for one job are three emails to three tradespeople about ONE
+    // property (Kevin, 7 Sep 2026): they batch by the property in the task name
+    // ("COMPLIANCE: GSC quote request - CJ Plumbing - 6 Chedburgh Place"), so
+    // he reads three lines and taps once. Every other email batches by the
+    // recipient's domain.
+    const prop = apvPropertyKey(t.name);
+    if(t.taskType === 'Correspondence' && prop){
+        where = 'property:' + prop;
+    } else if(t.taskType === 'Correspondence'){
         const e = apvEmailFrom(t.agentOutput);
         const m = e && /@([^\s>]+)/.exec(String(e.to||''));
         if(!m) return '';
@@ -1548,6 +1557,13 @@ function apvLikeKey(t){
         where = k ? k.split('|')[0] : '';
     }
     return `${t.raiserId}|${t.taskType}|${where}`;
+}
+function apvPropertyKey(name){
+    const n = String(name||'');
+    if(!/^\s*(COMPLIANCE|CORRESPONDENCE|MAINTENANCE)\s*:/i.test(n)) return '';
+    const parts = n.split(/\s+[-–—]\s+/);
+    if(parts.length < 2) return '';
+    return parts[parts.length-1].toLowerCase().replace(/[^a-z0-9]+/g,' ').trim();
 }
 function apvBatches(rows){
     const by = {};
@@ -1561,7 +1577,8 @@ function apvBatchStripHtml(rows){
         const t0 = g[0];
         const ids = JSON.stringify(g.map(t=>t.id)).replace(/"/g,'&quot;');
         const e = t0.taskType === 'Correspondence' ? apvEmailFrom(t0.agentOutput) : null;
-        const where = e ? ` to ${esc((/@([^\s>]+)/.exec(String(e.to||''))||[])[1]||'')}` : '';
+        const propKey = apvPropertyKey(t0.name);
+        const where = propKey ? ` for ${esc(String(t0.name).split(/\s+[-–—]\s+/).pop())}` : (e ? ` to ${esc((/@([^\s>]+)/.exec(String(e.to||''))||[])[1]||'')}` : '');
         return `<div class="apv-batch" data-apv-batch-group>
             <div class="apv-batch-head"><span>${g.length} alike: ${esc(teamName(t0.raiserId)||'agent')} &middot; ${esc(t0.taskType)}${where}</span>
                 <button class="btn btn-success btn-sm" data-apv-batch-approve onclick="agApproveBatch(${ids})">Approve all ${g.length} as-is</button>
@@ -1754,6 +1771,19 @@ function apvAskLine(t){
     return { askLine: line, isAction: isAction || (!summary && /carrying this out will involve/i.test(work)), summary, signIn, work };
 }
 
+// THE COVERAGE CHECK (Kevin, 7 Sep 2026): a quote email on a property task
+// passed submit only if the tradesperson covers every address it names. The
+// stamp says which districts, within what the contractor stated, with source.
+function apvCoverage(notes){
+    let m, last = null;
+    const re = /agent-dispatch\] COVERAGE CHECKED:\s*([^\n]+)/g;
+    while((m = re.exec(String(notes||'')))) last = m;
+    if(!last) return null;
+    const full = last[1].trim();
+    const districts = (full.split(' within ')[0].match(/\b[A-Z]{1,2}\d{1,2}[A-Z]?\b/g) || []);
+    return { full, short: Array.from(new Set(districts)).join(', ') || 'checked' };
+}
+
 function apvCardHtml(t){
     const askBits = apvAskLine(t);
     const isAction = askBits.isAction;
@@ -1796,6 +1826,7 @@ function apvCardHtml(t){
             <span class="apv-chip">${esc(agent)}</span>
             ${t.taskType ? `<span class="apv-chip">${esc(t.taskType)}</span>` : ''}
             ${(()=>{ const w = apvTrigger(t.agentOutput); return w ? `<span class="apv-chip apv-chip-why" data-apv-why title="The agent checked: not already handled, not Roy's, not a machine, no open task. This is the reason it is yours.">Why you: ${esc(w)}</span>` : ''; })()}
+            ${(()=>{ const c = apvCoverage(t.notes); return c ? `<span class="apv-chip apv-chip-ok" data-apv-coverage title="${esc(c.full)}">Covers ${esc(c.short)} &#10003;</span>` : ''; })()}
             <span class="apv-age${late?' late':''}" title="Measured from when it was posted for approval (or last changed, if it has not been posted yet)">waiting ${esc(agoText(t.submittedAt))}</span>
             ${linksHtml}
         </div>
