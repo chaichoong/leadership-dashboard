@@ -348,10 +348,27 @@ def read_secret(path, what):
 # (see gmailList in workers/drive-upload/worker.js), so the STATUS CODE ALONE
 # CANNOT CLASSIFY THIS — the body has to be read. That is exactly why a
 # per-user rate limit read as fatal on 3 Sep.
+#
+# 7 Sep 2026, finding 20260907-daily-ops-488. The fix above went too wide.
+# "quota exceeded for quota metric" was treated as the DAY being spent, but
+# Google uses that same sentence for its PER-MINUTE metric:
+#
+#   Quota exceeded for quota metric 'Gmail API units per minute per user'
+#   ... of service '<the Gmail API host>' for consumer 'project_number:815949…'
+#
+# Gmail has no small per-day cap to hit — the default is a billion units a day
+# against 250 units/second/user — so in practice this sentence almost always
+# names a per-MINUTE or per-SECOND limit, which clears on its own in about a
+# minute. Reading it as fatal cost the 3, 5 and 6 Sep slots and left four days
+# of mail untriaged. The metric NAME decides: "per minute"/"per second" is a
+# slowdown, and only an explicitly daily limit stops the run.
 DAILY_QUOTA_MARKERS = (
-    "dailylimitexceeded", "quotaexceeded", "quota exceeded for quota metric",
-    "daily limit exceeded",
+    "dailylimitexceeded", "daily limit exceeded", "per day",
 )
+# Same sentence, a metric that refills by itself. Waiting is the whole cure, but
+# it needs a MINUTE, not the seconds an ordinary rate-limit back-off waits.
+SHORT_WINDOW_MARKERS = ("per minute", "per second")
+QUOTA_SENTENCE_MARKERS = ("quotaexceeded", "quota exceeded for quota metric")
 RATE_LIMIT_MARKERS = (
     "ratelimitexceeded", "userratelimitexceeded", "backenderror",
     "service unavailable", "internal error", "try again",
@@ -359,6 +376,14 @@ RATE_LIMIT_MARKERS = (
 RETRY_STATUSES = (429, 500, 502, 503, 504)
 MAX_ATTEMPTS = 4
 BACKOFF_BASE_SECONDS = 2
+# A per-minute metric refills on a minute boundary, so anything shorter than one
+# is a retry that is certain to fail. Five seconds of headroom for clock skew.
+SHORT_WINDOW_WAIT_SECONDS = 65
+# A slot must not become an hour of sleeping. Every call could hit the same full
+# minute-metric, so cap what the whole RUN may spend waiting on it; past that the
+# day really is not going to work and the slot says so.
+MAX_SLOWDOWN_SECONDS = 600
+_slowdown = {"waited": 0}
 
 # A run that loops burns the day's quota for every slot that follows it. Three
 # slots a day share one quota, so no single run may spend the lot: 9 Aug – 3 Sep
@@ -368,13 +393,25 @@ _calls = {"n": 0}
 
 
 def classify_worker_error(code, body):
-    """('retry'|'quota'|'stop', why) for a non-200 answer from the worker.
+    """('retry'|'slowdown'|'quota'|'stop', why) for a non-200 from the worker.
 
     Pure, so the selftest can cover every branch offline. The body is read
-    before the status because the worker re-wraps Google's 403 as a 500."""
+    before the status because the worker re-wraps Google's 403 as a 500.
+
+    `slowdown` is a quota-shaped error naming a PER-MINUTE or PER-SECOND metric.
+    It reads like the day being over and is nothing of the kind — it clears in
+    about a minute (finding 20260907-daily-ops-488)."""
     text = (body or "").lower()
+    quota_shaped = any(m in text for m in QUOTA_SENTENCE_MARKERS)
     if any(m in text for m in DAILY_QUOTA_MARKERS):
         return "quota", "Gmail daily quota is exhausted"
+    if quota_shaped and any(m in text for m in SHORT_WINDOW_MARKERS):
+        return "slowdown", "Gmail short-window rate metric; it refills in about a minute"
+    if quota_shaped:
+        # Quota-shaped but the metric is not named. Google's per-day cap is a
+        # billion units, so the odds favour a short window — but this run cannot
+        # prove it, so wait the minute rather than spending the slot on a guess.
+        return "slowdown", "Gmail quota error with no metric window named; waiting a minute"
     if code == 409:
         return "stop", "Gmail not connected on the worker"
     if any(m in text for m in RATE_LIMIT_MARKERS):
@@ -430,6 +467,19 @@ def worker_post(path, payload, sleep=time.sleep):
                      "slot is skipped and the next one picks up where this left "
                      "off. Detail: %s" % (why, path, e.code, detail),
                      kind="quota")
+            if action == "slowdown":
+                # NOT the day gone. Wait past the metric window and try again;
+                # only if it survives every attempt does the slot give up.
+                if (attempt == MAX_ATTEMPTS
+                        or _slowdown["waited"] + SHORT_WINDOW_WAIT_SECONDS
+                        > MAX_SLOWDOWN_SECONDS):
+                    fail("GMAIL RATE METRIC STILL FULL after %ds of waiting "
+                         "(%s). The watermark is NOT advanced, so no mail is "
+                         "lost — the next slot picks up from here. Detail: %s"
+                         % (_slowdown["waited"], why, detail), kind="rate")
+                _slowdown["waited"] += SHORT_WINDOW_WAIT_SECONDS
+                sleep(SHORT_WINDOW_WAIT_SECONDS)
+                continue
             if action == "stop":
                 if e.code == 409:
                     fail("Gmail not connected on the worker (409). Kevin grants "
@@ -596,6 +646,12 @@ def cmd_scan(back_hours):
     # freezes the floor; only `mark` moves it after a full drain.
     if first_run:
         state["watermark_ms"] = wm
+    # A COMPLETED SCAN, STAMPED (finding 20260907-daily-ops-487). The pre-flight
+    # probe is a `labels` call, which is cheap enough to survive a quota that a
+    # full scan then dies on — so on 6 Sep both slots recorded ok:true and no
+    # mail was triaged. The only honest evidence that the email lane WORKED is a
+    # scan that reached the end of this function, so record when that happened.
+    state["last_scan_ok_ms"] = int(datetime.now().timestamp() * 1000)
     write_state(state)
 
     print(json.dumps({
@@ -1608,7 +1664,31 @@ def selftest():
     # THE ORDER MATTERS: the quota read must beat the status read, or a daily
     # quota wrapped in a retryable 500 is retried until the day is gone.
     check("quota beats a retryable status",
-          classify_worker_error(503, "Quota exceeded for quota metric")[0] == "quota")
+          classify_worker_error(503, "dailyLimitExceeded")[0] == "quota")
+
+    # ── per-MINUTE is not per-DAY (finding 20260907-daily-ops-488) ──────
+    # The exact sentence Google returned on 3, 5 and 6 Sep 2026. It was read as
+    # the day being spent, the run stopped, and four days of mail went untriaged
+    # — while the metric it names refills every sixty seconds.
+    minute = ('Gmail list failed: {"error":{"code":403,"message":"Quota exceeded '
+              "for quota metric 'Gmail API units per minute per user' and limit "
+              "'Gmail API units per minute per user' of service "
+              "'gmail.%s' for consumer 'project_number:815949125083'" % "googleapis.com"
+              '"}}')
+    check("BACK-TEST 3-6 Sep: the per-minute metric is a slowdown, NOT the day gone",
+          classify_worker_error(500, minute)[0] == "slowdown")
+    check("a per-second metric is a slowdown too",
+          classify_worker_error(403, "Quota exceeded for quota metric "
+                                     "'queries per second per user')")[0] == "slowdown")
+    check("CONTROL: an explicitly DAILY limit still stops the run",
+          classify_worker_error(500, "Quota exceeded for quota metric "
+                                     "'Queries per day'")[0] == "quota")
+    check("CONTROL: dailyLimitExceeded still stops the run",
+          classify_worker_error(500, daily)[0] == "quota")
+    check("a quota error naming no window waits rather than spending the slot",
+          classify_worker_error(500, "quotaExceeded")[0] == "slowdown")
+    check("the slowdown wait is longer than one metric window",
+          SHORT_WINDOW_WAIT_SECONDS > 60)
     check("back-off grows and is never zero",
           backoff_seconds(1, jitter=0) == 2 and backoff_seconds(2, jitter=0) == 4
           and backoff_seconds(3, jitter=0) == 8)
@@ -1655,6 +1735,63 @@ def selftest():
         _f.write_text(_f.read_text() + "{not json\n")
         check("a torn line is skipped, never fatal",
               len(read_slot_results(_f)) == 3)
+
+    # ── the pre-flight verdict is a FORECAST (finding 20260907-daily-ops-487) ──
+    # 6 Sep 2026: the `labels` probe passed on both slots, the scan then died on
+    # a Gmail 403, no digest has been written since 3 Sep, and check-routines
+    # graded the lane clean off the very file built to stop that.
+    _six = [{"date": "2026-09-06", "slot": "13:00", "lane": "email", "ok": True, "reason": "ok"},
+            {"date": "2026-09-06", "slot": "17:00", "lane": "email", "ok": True, "reason": "ok"}]
+    check("6 Sep as recorded: the file says the lane worked twice",
+          consecutive_broken(_six, "email") == 0)
+    _corrected = _six + [
+        {"date": "2026-09-06", "slot": "13:00", "lane": "email", "ok": False,
+         "reason": "scan-did-not-complete"},
+        {"date": "2026-09-06", "slot": "17:00", "lane": "email", "ok": False,
+         "reason": "scan-did-not-complete"}]
+    check("6 Sep corrected: a superseding row replaces the slot, never adds one",
+          len(collapse_slots(_corrected)) == 2)
+    check("6 Sep corrected: both slots now read as broken, and that escalates",
+          consecutive_broken(_corrected, "email") == 2)
+    check("collapsing keeps slots from different DAYS apart",
+          len(collapse_slots([{"date": "2026-09-06", "slot": "13:00", "lane": "email", "ok": True},
+                              {"date": "2026-09-07", "slot": "13:00", "lane": "email", "ok": True}])) == 2)
+
+    with _tf.TemporaryDirectory() as _d:
+        _prev = os.environ.get("INBOUND_TRIAGE_DIR")
+        os.environ["INBOUND_TRIAGE_DIR"] = _d
+        try:
+            _f = Path(_d) / "slot-results.jsonl"
+            _start = 1_000_000
+            # The probe passed, the scan never completed: the verdict must flip.
+            cmd_slot_record("13:00", "email", True, "ok", path=_f)
+            write_state({"last_scan_ok_ms": _start - 60_000})   # last scan was BEFORE this slot
+            rc = cmd_slot_verify("13:00", "email", _start, path=_f)
+            _rows = read_slot_results(_f)
+            check("an ok slot whose scan never completed is superseded as broken",
+                  collapse_slots(_rows)[-1]["ok"] is False)
+            check("the correction names why", any(
+                r.get("reason") == "scan-did-not-complete" for r in _rows))
+            check("the optimistic line is kept, never rewritten", len(_rows) == 2)
+            check("one corrected slot alone does not escalate", rc == 0)
+            # A slot whose scan DID complete must be left exactly as it is.
+            cmd_slot_record("17:00", "email", True, "ok", path=_f)
+            write_state({"last_scan_ok_ms": _start + 60_000})
+            rc2 = cmd_slot_verify("17:00", "email", _start, path=_f)
+            check("a slot with a completed scan is left alone",
+                  len(read_slot_results(_f)) == 3 and rc2 == 0)
+            # And with no stamp at all — a machine that has never scanned — the
+            # verdict is broken, not silently confirmed.
+            cmd_slot_record("09:00", "email", True, "ok", path=_f)
+            write_state({})
+            cmd_slot_verify("09:00", "email", _start, path=_f)
+            check("no completed-scan stamp at all reads as broken, not as fine",
+                  collapse_slots(read_slot_results(_f))[-1]["ok"] is False)
+        finally:
+            if _prev is None:
+                os.environ.pop("INBOUND_TRIAGE_DIR", None)
+            else:
+                os.environ["INBOUND_TRIAGE_DIR"] = _prev
 
     if failures:
         print("selftest FAILED: %d" % len(failures))
@@ -1708,10 +1845,41 @@ def read_slot_results(path=None, keep=400):
     return rows[-keep:]
 
 
+def slot_key(r):
+    """What identifies one slot's verdict for one lane. `date` is absent on the
+    fixtures the selftest uses, so fall back to the timestamp's date."""
+    return (r.get("date") or (r.get("ts") or "")[:10], r.get("slot"), r.get("lane"))
+
+
+def collapse_slots(rows):
+    """One verdict per (date, slot, lane) — the LAST one written wins.
+
+    The file is append-only, so a verdict can be SUPERSEDED but never edited.
+    The pre-flight probe writes ok before the agent starts; `slot-verify` writes
+    the truth after it finishes. Without collapsing, a slot that was optimistic
+    then corrected would count twice and the ok half would still be in the
+    numerator (finding 20260907-daily-ops-487).
+    """
+    latest = {}
+    for r in rows or []:
+        latest[slot_key(r)] = r
+    # Preserve file order of the winning rows, so "most recent" still means it.
+    seen = set()
+    out = []
+    for r in reversed(rows or []):
+        k = slot_key(r)
+        if k in seen:
+            continue
+        seen.add(k)
+        out.append(latest[k])
+    out.reverse()
+    return out
+
+
 def consecutive_broken(rows, lane="email"):
     """How many of the MOST RECENT slots for this lane graded broken in a row."""
     n = 0
-    for r in reversed(rows or []):
+    for r in reversed(collapse_slots(rows)):
         if r.get("lane") != lane:
             continue
         if r.get("ok"):
@@ -1738,6 +1906,60 @@ def cmd_slot_record(slot, lane, ok, reason, scanned=None, path=None):
     print(json.dumps({"recorded": row, "consecutive_broken": run,
                       "escalate": run >= ESCALATE_AFTER_BROKEN}))
     return 3 if run >= ESCALATE_AFTER_BROKEN else 0
+
+
+def cmd_slot_verify(slot, lane="email", since_ms=None, path=None):
+    """AFTER the agent: did the lane the probe passed actually do any work?
+
+    Finding 20260907-daily-ops-487. The pre-flight probe (`health`) makes ONE
+    `labels` call. That is deliberately the smallest call the worker exposes, and
+    it is small enough to succeed on a day whose remaining quota cannot carry a
+    full scan. On 6 Sep 2026 both the 13:00 and 17:00 slots therefore recorded
+    `ok: true`, the scan then died on a 403 mid-run, and no digest has been
+    written since 3 Sep — while check-routines graded the lane clean off exactly
+    the file built to stop that.
+
+    A verdict written BEFORE the work is a forecast. This writes the outcome: if
+    the slot claimed ok but no scan completed since the slot began, append a
+    SUPERSEDING broken row. Append-only, so the optimistic line stays visible as
+    what the probe believed. Exit 3 when the lane has now been broken for
+    ESCALATE_AFTER_BROKEN slots running, same contract as slot-record.
+    """
+    rows = read_slot_results(path)
+    if rows is None:
+        print(json.dumps({"verified": False,
+                          "reason": "slot results UNREADABLE — UNCHECKED, not clean"}))
+        return 0
+    today = datetime.now().strftime("%Y-%m-%d")
+    current = None
+    for r in collapse_slots(rows):
+        if r.get("lane") == lane and r.get("slot") == slot and \
+                (r.get("date") or (r.get("ts") or "")[:10]) == today:
+            current = r
+    if current is None:
+        print(json.dumps({"verified": False,
+                          "reason": "no %s verdict recorded for the %s slot" % (lane, slot)}))
+        return 0
+    if not current.get("ok"):
+        print(json.dumps({"verified": True, "changed": False,
+                          "reason": "already recorded broken (%s)" % (current.get("reason") or "")}))
+        return 0
+    if lane != "email":
+        # Only the email lane has a completed-scan stamp to check against. Say so
+        # rather than silently confirming a lane nothing measured.
+        print(json.dumps({"verified": False,
+                          "reason": "no completion signal exists for the %s lane" % lane}))
+        return 0
+    last_ok = read_state().get("last_scan_ok_ms")
+    since = int(since_ms) if since_ms else 0
+    if last_ok and int(last_ok) >= since:
+        print(json.dumps({"verified": True, "changed": False,
+                          "reason": "a scan completed at %d, after the slot began at %d"
+                                    % (int(last_ok), since)}))
+        return 0
+    return cmd_slot_record(
+        slot, lane, False, "scan-did-not-complete",
+        path=path)
 
 
 def cmd_health():
@@ -1850,6 +2072,10 @@ def main(argv):
                                opt("--reason", ""),
                                int(scanned) if scanned is not None else None,
                                opt("--file"))
+    elif cmd == "slot-verify":
+        since = opt("--since-ms")
+        return cmd_slot_verify(opt("--slot", "unknown"), opt("--lane", "email"),
+                               int(since) if since else None, opt("--file"))
     elif cmd == "slot-results":
         rows = read_slot_results(opt("--file"))
         if rows is None:

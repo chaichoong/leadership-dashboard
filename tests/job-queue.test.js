@@ -972,6 +972,82 @@ print(json.dumps(list(m.drive_ready(${JSON.stringify(VAULT())}))))
     expect(why).toMatch(/deadlock/i);
   });
 
+  // Finding 20260907-daily-ops-486. The probe used to RETURN on the first plain
+  // file os.listdir handed back. In "Runpreneur - Raw Video" that was a 1.6GB
+  // Insta360 installer nothing reads; while it sat un-hydrated it raised EDEADLK
+  // and the whole mount read as dead, so content-engine did not run on 5, 6 or
+  // 7 Sep 2026. Back-tested: restoring the early `return False` fails both.
+  it('keeps probing after one unreadable file and reports the mount ready', () => {
+    mkdirSync(VAULT(), { recursive: true });
+    // Deliberately the SMALLEST file, so size ordering puts it first and the
+    // only thing that can save the probe is carrying on to the next candidate.
+    writeFileSync(join(VAULT(), 'Insta360Studio.exe'), 'x');
+    writeFileSync(join(VAULT(), 'founder-profile.md'), 'x'.repeat(4096));
+    const src = `
+import importlib.util, json, builtins, errno
+spec = importlib.util.spec_from_file_location('jq', ${JSON.stringify(QUEUE)})
+m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+real = builtins.open
+def boom(path, *a, **k):
+    if str(path).endswith('.exe'):
+        raise OSError(errno.EDEADLK, 'Resource deadlock avoided')
+    return real(path, *a, **k)
+builtins.open = boom
+print(json.dumps(list(m.drive_ready(${JSON.stringify(VAULT())}))))
+`;
+    const [ok, why] = JSON.parse(execFileSync('python3', ['-c', src], { encoding: 'utf8', env: env() }).trim());
+    expect(ok).toBe(true);
+    expect(why).toMatch(/founder-profile\.md/);
+  });
+
+  it('only reports not ready once EVERY candidate has failed, and says how many', () => {
+    mkdirSync(VAULT(), { recursive: true });
+    writeFileSync(join(VAULT(), 'a.md'), 'a');
+    writeFileSync(join(VAULT(), 'b.md'), 'b');
+    writeFileSync(join(VAULT(), 'c.md'), 'c');
+    const src = `
+import importlib.util, json, builtins, errno
+spec = importlib.util.spec_from_file_location('jq', ${JSON.stringify(QUEUE)})
+m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+real = builtins.open
+def boom(path, *a, **k):
+    if str(path).endswith('.md'):
+        raise OSError(errno.EDEADLK, 'Resource deadlock avoided')
+    return real(path, *a, **k)
+builtins.open = boom
+print(json.dumps(list(m.drive_ready(${JSON.stringify(VAULT())}))))
+`;
+    const [ok, why] = JSON.parse(execFileSync('python3', ['-c', src], { encoding: 'utf8', env: env() }).trim());
+    expect(ok).toBe(false);
+    expect(why).toMatch(/all 3 candidates unreadable/);
+  });
+
+  it('probes the smallest file first, never a multi-gigabyte placeholder', () => {
+    // A yes/no readability question must not open a 1.6GB file. Records which
+    // path the probe actually opened.
+    mkdirSync(VAULT(), { recursive: true });
+    writeFileSync(join(VAULT(), 'huge.exe'), 'x'.repeat(200000));
+    writeFileSync(join(VAULT(), 'tiny.md'), 'x');
+    const src = `
+import importlib.util, json, builtins
+spec = importlib.util.spec_from_file_location('jq', ${JSON.stringify(QUEUE)})
+m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+opened = []
+real = builtins.open
+def spy(path, *a, **k):
+    opened.append(str(path))
+    return real(path, *a, **k)
+builtins.open = spy
+ok, why = m.drive_ready(${JSON.stringify(VAULT())})
+builtins.open = real
+print(json.dumps([ok, opened]))
+`;
+    const [ok, opened] = JSON.parse(execFileSync('python3', ['-c', src], { encoding: 'utf8', env: env() }).trim());
+    expect(ok).toBe(true);
+    expect(opened).toHaveLength(1);
+    expect(opened[0]).toMatch(/tiny\.md$/);
+  });
+
   it('does NOT defer on a permission error, which waiting never fixes', () => {
     // A process without the macOS privacy grant for CloudStorage gets EPERM no
     // matter how long it waits. Deferring would turn a loud failure silent.

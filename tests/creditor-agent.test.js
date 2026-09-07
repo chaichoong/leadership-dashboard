@@ -352,7 +352,9 @@ describe('skills and agent definitions stay in step (local machine only)', () =>
 
   it.skipIf(!existsSync(skill))('the dispatch skill keys creditor dispatch on the ROUTED agent, not the flag', () => {
     const s = readFileSync(skill, 'utf8');
-    expect(s).toMatch(/Creditor Management agent/);
+    // Renamed to the universal name on 6 Sep 2026 (PR #279); the register slug
+    // is unchanged. The guard is the wiring, not the wording.
+    expect(s).toMatch(/Supplier and Creditor Manager agent/);
     // The flag stays true while the pause lever is on; dispatching on it
     // alone bypasses the lever or fails the submit (review, 25 Aug 2026).
     expect(s).toMatch(/ROUTED agent/);
@@ -395,7 +397,7 @@ describe('skills and agent definitions stay in step (local machine only)', () =>
   });
 
   it.skipIf(!existsSync(responseDef))('the Response agent hands creditor matters to the specialist', () => {
-    expect(readFileSync(responseDef, 'utf8')).toMatch(/Creditor Management agent/);
+    expect(readFileSync(responseDef, 'utf8')).toMatch(/Supplier and Creditor Manager agent/);
   });
 
   it.skipIf(!existsSync(responseDef) || !existsSync(agentDef))(

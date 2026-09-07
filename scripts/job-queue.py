@@ -350,6 +350,13 @@ def network_ready(host="api.airtable.com", port=443, timeout=4):
     return False, "cannot reach %s:%s" % (host, port)
 
 
+# Drive probe limits (finding 20260907-daily-ops-486). A readability check must
+# never open a multi-gigabyte file: 4MB is far more than the one byte it reads,
+# and 25 candidates is plenty of evidence that a mount is dead.
+PROBE_MAX_BYTES = 4 * 1024 * 1024
+PROBE_MAX_CANDIDATES = 25
+
+
 def drive_ready(path, timeout=4):
     """Is this Google Drive folder actually readable?
 
@@ -364,6 +371,20 @@ def drive_ready(path, timeout=4):
     long it waits, so deferring on it would convert a loud daily failure into a
     job that silently never runs again. Waiting is only correct for conditions
     that actually pass with time.
+
+    ONE FILE MUST NEVER DECIDE THE MOUNT (finding 20260907-daily-ops-486).
+    Until 7 Sep 2026 this loop RETURNED on the first plain file it met, so the
+    verdict for the whole folder was whatever os.listdir happened to hand back
+    first. In "Runpreneur - Raw Video" that was a 1.6GB Windows installer the
+    render job never touches; while that single placeholder sat un-hydrated it
+    raised EDEADLK, every probe declared the mount dead, and content-engine did
+    not run on 5, 6 or 7 Sep — three nights lost to a file nothing reads.
+
+    So: try every candidate, return True the moment ANY of them reads, and only
+    return False once they have all failed, saying how many were tried. Probe
+    the SMALLEST files first (and skip anything over PROBE_MAX_BYTES when a
+    smaller candidate exists) because a yes/no question should never open a
+    multi-gigabyte placeholder.
     """
     if not os.path.isdir(path):
         return False, "%s does not exist" % path
@@ -377,21 +398,46 @@ def drive_ready(path, timeout=4):
         return False, "cannot list: %s" % e
     if not names:
         return False, "folder is empty, Drive has not populated it"
-    for name in names[:25]:
+
+    # Smallest first. os.stat on an un-hydrated placeholder still answers (it is
+    # the OPEN that deadlocks), but treat a stat failure as "unknown size" and
+    # sort it last rather than letting it end the probe.
+    candidates = []
+    for name in names:
         full = os.path.join(path, name)
-        if not os.path.isfile(full):
-            continue
+        try:
+            if not os.path.isfile(full):
+                continue
+            size = os.path.getsize(full)
+        except OSError:
+            size = float("inf")
+        candidates.append((size, name, full))
+    candidates.sort(key=lambda c: c[0])
+    # Big files go to the back of the queue rather than out of it: a folder that
+    # holds nothing but large files must still be probeable.
+    small = [c for c in candidates if c[0] <= PROBE_MAX_BYTES]
+    large = [c for c in candidates if c[0] > PROBE_MAX_BYTES]
+    candidates = (small + large)[:PROBE_MAX_CANDIDATES]
+
+    tried, last = 0, None
+    for _size, name, full in candidates:
+        tried += 1
         try:
             with open(full, "rb") as f:
                 f.read(1)
-            return True, "readable"
+            return True, "readable (%s, probe %d of %d)" % (name, tried, len(candidates))
         except PermissionError as e:
             return True, "cannot probe (%s); letting the job run" % e
         except OSError as e:
             if e.errno == errno.EPERM:
                 return True, "cannot probe (%s); letting the job run" % e
             # EDEADLK (errno 11) lands here: Drive is mounted but not serving.
-            return False, "cannot read %s: %s" % (name, e)
+            # Keep going — the NEXT file may well read, and until 7 Sep 2026
+            # this is exactly where the probe gave up.
+            last = "cannot read %s: %s" % (name, e)
+            continue
+    if tried:
+        return False, "%s (all %d candidates unreadable)" % (last, tried)
     return True, "folder lists, no plain file to probe"
 
 

@@ -282,6 +282,29 @@ def read_lane_results(path, window_hours, ref=None):
     return rows
 
 
+def collapse_slots(rows):
+    """One verdict per (date, slot, lane) — the LAST written wins, in file order.
+
+    Mirrors inbound-triage.py's collapse_slots deliberately: the writer and the
+    grader must agree on what a slot is, or a corrected verdict grades as a
+    second slot.
+    """
+    def key(r):
+        return (r.get("date") or (r.get("ts") or "")[:10], r.get("slot"), r.get("lane"))
+    latest = {}
+    for r in rows or []:
+        latest[key(r)] = r
+    seen, out = set(), []
+    for r in reversed(rows or []):
+        k = key(r)
+        if k in seen:
+            continue
+        seen.add(k)
+        out.append(latest[k])
+    out.reverse()
+    return out
+
+
 def lane_health(window_hours, ref=None):
     """{job: {lane: {slots, ok, broken, consecutive_broken, reasons}}}.
 
@@ -295,7 +318,11 @@ def lane_health(window_hours, ref=None):
             out[job] = {"unreadable": path}
             continue
         lanes = {}
-        for rec in rows:
+        # ONE VERDICT PER SLOT, THE LAST ONE WRITTEN (finding 20260907-daily-ops-487).
+        # The file is append-only, so the pre-flight probe's optimistic `ok` and
+        # the post-run correction both sit in it. Grading every line counted the
+        # same slot twice and kept the wrong half in the numerator.
+        for rec in collapse_slots(rows):
             lane = rec.get("lane") or "unknown"
             v = lanes.setdefault(lane, {"slots": 0, "ok": 0, "broken": 0,
                                         "reasons": [], "consecutive_broken": 0})

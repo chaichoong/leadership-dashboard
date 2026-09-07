@@ -154,6 +154,14 @@ fi
 # Record it BEFORE the agent runs, so a slot that dies mid-run still leaves the
 # lane verdict behind. Exit 3 means this lane has now been broken for two slots
 # running, which is not bad luck — the day is going the way 3-5 Sep did.
+#
+# BUT A PRE-FLIGHT VERDICT IS A FORECAST (finding 20260907-daily-ops-487). The
+# probe is one `labels` call, small enough to pass on a day whose remaining
+# quota cannot carry a full scan — which is exactly what happened on 6 Sep, when
+# both slots wrote ok:true, the scan died on a 403 mid-run, and check-routines
+# graded the lane clean off this very file. `slot-verify` below runs AFTER the
+# agent and supersedes this line when no scan actually completed.
+__SLOT_START_MS=$(/usr/bin/python3 -c 'import time; print(int(time.time()*1000))')
 /usr/bin/python3 "$REPO/scripts/inbound-triage.py" slot-record \
   --slot "$SLOT_LABEL" --lane email \
   --status "$([ "$GMAIL_OK" = "1" ] && echo ok || echo broken)" \
@@ -204,6 +212,17 @@ Rules for the whole run: this is real mail — when unsure between outcomes choo
   --permission-mode acceptEdits \
   --allowedTools "${AGENT_ALLOWED_TOOLS[@]}" >> "$LOG" 2>&1
 RC=$?
+
+# THE OUTCOME, NOT THE FORECAST (finding 20260907-daily-ops-487). If the email
+# lane was recorded ok before the agent started but no scan reached the end of
+# cmd_scan since then, supersede the verdict with a broken one. Runs whatever
+# the agent's exit code was — a slot that died mid-run is precisely the case
+# the pre-flight line gets wrong. Exit 3 is the two-slots-broken escalation.
+/usr/bin/python3 "$REPO/scripts/inbound-triage.py" slot-verify \
+  --slot "$SLOT_LABEL" --lane email --since-ms "$__SLOT_START_MS" >> "$LOG" 2>&1
+if [ $? -eq 3 ]; then
+  echo "ESCALATE: inbound-triage email lane BROKEN for 2+ consecutive slots. No mail has been triaged since the last ok slot — see slot-results.jsonl." | tee -a "$LOG" >&2
+fi
 
 # Shared epilogue (finding 20260827-phase-2-381): privacy sweep, done line,
 # and exit-code semantics live in ONE place now — scripts/slot-postrun.sh.
