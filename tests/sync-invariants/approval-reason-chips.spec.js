@@ -36,12 +36,14 @@ async function openApprovals(page) {
   return page.locator('.apv-card').first();
 }
 
-/** Click through the reject confirm dialog and return the PATCH sent. */
+/** "No", then one chip. No dialog since 7 Sep 2026: the chip IS the rejection,
+ *  with a five-second Undo in place of a confirm. Returns the PATCH sent. */
 async function rejectVia(page, patches, chipText) {
   const card = await openApprovals(page);
   const taskId = await card.getAttribute('data-apv-card');
+  await card.locator('.apv-actions button', { hasText: /^No$/ }).click();
   await card.locator('.apv-reason', { hasText: chipText }).first().click();
-  await page.locator('button', { hasText: 'Reject and close' }).last().click();
+  await expect(page.locator('button', { hasText: 'Reject and close' })).toHaveCount(0);
   await expect.poll(() => patches.some((p) => p.id === taskId)).toBe(true);
   return patches.find((p) => p.id === taskId);
 }
@@ -51,6 +53,7 @@ test.describe('the approvals gate records WHY', () => {
     await mockAgentsPage(page);
     await loadAgentsPage(page);
     const card = await openApprovals(page);
+    await card.locator('.apv-actions button', { hasText: /^No$/ }).click();
     // Derived from classifying all 58 of his rejections. If a chip goes
     // missing he goes back to typing, which is the cost this removes.
     for (const label of ['Already done', 'Roy owns it', 'Not worth my time',
@@ -80,9 +83,10 @@ test.describe('the approvals gate records WHY', () => {
     const taskId = await card.getAttribute('data-apv-card');
 
     const mine = 'Roy owns 1406 Oldham Road specifically, not the whole portfolio.';
-    await card.locator('.apv-note').fill(mine);
+    await card.locator('.apv-more').click();
+    await card.locator('#apvNote-' + taskId).fill(mine);
+    await card.locator('.apv-actions button', { hasText: /^No$/ }).click();
     await card.locator('.apv-reason', { hasText: 'Roy owns it' }).first().click();
-    await page.locator('button', { hasText: 'Reject and close' }).last().click();
     await expect.poll(() => patches.some((p) => p.id === taskId)).toBe(true);
 
     const patch = patches.find((p) => p.id === taskId);
@@ -94,22 +98,37 @@ test.describe('the approvals gate records WHY', () => {
     await mockAgentsPage(page);
     await loadAgentsPage(page);
     const card = await openApprovals(page);
+    const taskId = await card.getAttribute('data-apv-card');
+    await card.locator('.apv-actions button', { hasText: /^No$/ }).click();
     await card.locator('.apv-reason', { hasText: 'The work is wrong' }).first().click();
     // No dialog: it is the one reason an agent can act on, so it needs words.
+    // The note opens in place, focused, with its own Reject button.
     await expect(page.locator('button', { hasText: 'Reject and close' })).toHaveCount(0);
-    await expect(card.locator('.apv-note')).toBeFocused();
+    await expect(card.locator('#apvNote2-' + taskId)).toBeFocused();
   });
 
-  test('the dialog tells the truth about the score, per reason', async ({ page }) => {
-    await mockAgentsPage(page);
+  test('a relevance chip closes in one tap, says Saved in place, and can be undone for five seconds', async ({ page }) => {
+    const patches = await mockAgentsPage(page);
     await loadAgentsPage(page);
     const card = await openApprovals(page);
+    const taskId = await card.getAttribute('data-apv-card');
+    // The chip title carries the truth about the score: the old dialog said
+    // every rejection counted against the agent, which was true of none of
+    // the 58 he had made.
+    await card.locator('.apv-actions button', { hasText: /^No$/ }).click();
+    await expect(card.locator('.apv-reason', { hasText: 'Already done' }).first()).toHaveAttribute('title', /does not count against/);
     await card.locator('.apv-reason', { hasText: 'Already done' }).first().click();
-    const modal = page.locator('.modal, [role="dialog"]').first();
-    // The old wording said every rejection counted against the agent. That was
-    // true of none of the 58 he had made, and telling him so was telling him
-    // something false.
-    await expect(modal).toContainText('does not count against');
+    await expect(card.locator('[data-apv-state="saved"]')).toContainText('Closed');
+    await expect(page.locator('.modal, [role="dialog"]')).toHaveCount(0);
+    // The card is still where it was; nothing else on the page was rebuilt.
+    await expect(page.locator('.apv-card')).toHaveCount(3);
+    await card.locator('[data-apv-undo]').click();
+    await expect.poll(() => patches.filter((p) => p.id === taskId).length).toBe(2);
+    const undo = patches.filter((p) => p.id === taskId)[1];
+    expect(undo.fields[TF.status]).toBe('Approval');
+    expect(undo.fields[TF.approvalOutcome]).toBeNull();
+    expect(undo.fields[VERDICT_REASON]).toBeNull();
+    await expect(card.locator('.apv-actions button', { hasText: /^Approve$/ })).toBeVisible();
   });
 
   // ─── THE GAP THE CHIPS LEFT (4 Sep 2026) ─────────────────────────
@@ -131,9 +150,10 @@ test.describe('the approvals gate records WHY', () => {
     const taskId = await card.getAttribute('data-apv-card');
 
     const his = 'I am not interested in this at this moment in time.';
-    await card.locator('.apv-note').fill(his);
-    await card.locator('.apv-actions button.btn-danger').click();
-    await page.locator('button', { hasText: 'Reject and close' }).last().click();
+    await card.locator('.apv-actions button', { hasText: /^No$/ }).click();
+    await card.locator('.apv-reason', { hasText: 'Something else' }).first().click();
+    await card.locator('#apvNote2-' + taskId).fill(his);
+    await card.locator('#apvRejectNote-' + taskId + ' button', { hasText: 'Reject' }).click();
     await expect.poll(() => patches.some((p) => p.id === taskId)).toBe(true);
 
     const patch = patches.find((p) => p.id === taskId);
@@ -143,27 +163,21 @@ test.describe('the approvals gate records WHY', () => {
     expect(String(patch.fields[APPROVAL_FEEDBACK])).toBe(his);
   });
 
-  test('one tap in the confirm dialog upgrades it to a real reason', async ({ page }) => {
+  test('a failed write stays on the card with Try again, never a vanishing toast', async ({ page }) => {
     const patches = await mockAgentsPage(page);
+    await page.route('**/api.airtable.com/**', async (route) => {
+      if (route.request().method() === 'PATCH') return route.fulfill({ status: 500, contentType: 'application/json', body: '{"error":{"message":"server"}}' });
+      return route.fallback();
+    });
     await loadAgentsPage(page);
     const card = await openApprovals(page);
-    const taskId = await card.getAttribute('data-apv-card');
-
-    await card.locator('.apv-note').fill('Roy is already on this one.');
-    await card.locator('.apv-actions button.btn-danger').click();
-    // The dialog asks once more, where the decision is actually being made.
-    const modal = page.locator('.modal, [role="dialog"]').first();
-    await expect(modal).toContainText('Which kind of no is this?');
-    await modal.locator('.apv-reason', { hasText: 'Roy owns it' }).first().click();
-    // And it stops claiming the rejection counts against the agent.
-    await expect(modal).toContainText('does not count against');
-    await page.locator('button', { hasText: 'Reject and close' }).last().click();
-    await expect.poll(() => patches.some((p) => p.id === taskId)).toBe(true);
-
-    const patch = patches.find((p) => p.id === taskId);
-    expect(patch.fields[VERDICT_REASON]).toBe('Roy owns it');
-    // His own words survive the upgrade — the chip default never lands on top.
-    expect(String(patch.fields[APPROVAL_FEEDBACK])).toBe('Roy is already on this one.');
+    await card.locator('.apv-actions button', { hasText: /^Approve$/ }).click();
+    const strip = card.locator('[data-apv-state="failed"]');
+    await expect(strip).toContainText('Not saved');
+    await expect(strip.locator('[data-apv-retry]')).toBeVisible();
+    // The card is untouched and still decidable.
+    await expect(card.locator('.apv-actions button', { hasText: /^Approve$/ })).toBeEnabled();
+    expect(patches.length).toBe(0);
   });
 
   test('the approve buttons are untouched — this changed rejection only', async ({ page }) => {
@@ -171,8 +185,11 @@ test.describe('the approvals gate records WHY', () => {
     await loadAgentsPage(page);
     const card = await openApprovals(page);
     await expect(card.locator('.apv-actions button', { hasText: /^Approve$/ })).toBeVisible();
-    await expect(card.locator('.apv-actions button', { hasText: 'Approve with minor edits' })).toBeVisible();
-    await expect(card.locator('.apv-actions button', { hasText: 'Request changes' })).toBeVisible();
+    // The two slower approvals live behind "More" (7 Sep 2026): two buttons
+    // on the card, everything else one tap away.
+    await card.locator('.apv-more').click();
+    await expect(card.locator('.apv-panel button', { hasText: 'Approve with minor edits' })).toBeVisible();
+    await expect(card.locator('.apv-panel button', { hasText: 'Request changes' })).toBeVisible();
   });
 
   // Kevin's ruling, 4 Sep 2026, reversing 26 Aug: over 14 days he wrote 132
@@ -186,16 +203,18 @@ test.describe('the approvals gate records WHY', () => {
     expect(patch.fields[TF.approvalOutcome]).toBe('Rejected');
     expect(patch.fields['fldZurhdHutYIDKVx']).toBe(true);
   });
-  test('unticking Remember in the dialog makes the rejection a one-off', async ({ page }) => {
+  test('unticking Remember on the card makes the rejection a one-off', async ({ page }) => {
     const patches = await mockAgentsPage(page);
     await loadAgentsPage(page);
     const card = await openApprovals(page);
     const taskId = await card.getAttribute('data-apv-card');
-    await card.locator('.apv-reason', { hasText: 'Roy owns it' }).first().click();
-    const box = page.locator('#apvRememberConfirm');
+    await card.locator('.apv-actions button', { hasText: /^No$/ }).click();
+    // ONE Remember box, beside the reasons, at the moment of commitment.
+    const box = card.locator('#apvRemember-' + taskId);
     await expect(box).toBeChecked();
+    await expect(page.locator('#apvRememberConfirm')).toHaveCount(0);
     await box.uncheck();
-    await page.locator('button', { hasText: 'Reject and close' }).last().click();
+    await card.locator('.apv-reason', { hasText: 'Roy owns it' }).first().click();
     await expect.poll(() => patches.some((p) => p.id === taskId)).toBe(true);
     const oneOff = patches.find((p) => p.id === taskId);
     expect(oneOff.fields[TF.approvalOutcome]).toBe('Rejected');

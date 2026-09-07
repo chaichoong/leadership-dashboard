@@ -77,13 +77,17 @@ test.describe('AI Agents page tabs', () => {
     // rejections Kevin had ever made were classified that day and not one was
     // about the draft, so the card asks which kind it is and records the answer
     // — the same close, one tap instead of a typed paragraph.
+    // Since 7 Sep 2026 the reasons open on "No" and one tap on a reason IS the
+    // close: no dialog, a "Saved" line in place, and a five-second Undo.
     const first = page.locator('.apv-card').first();
-    await expect(first.locator('.apv-reason')).toHaveCount(7);
-    await expect(first.locator('.apv-reasons')).toContainText('Reject because');
-    // Kevin's wording (25 Aug 2026) survives on the button that actually closes
-    // the task, which is now in the confirm dialog.
+    await expect(first.locator('.apv-reasons')).toBeHidden();
+    await first.locator('.apv-actions button', { hasText: /^No$/ }).click();
+    // Seven kinds of no plus "Something else" for his own words.
+    await expect(first.locator('.apv-reason')).toHaveCount(8);
+    await expect(first.locator('.apv-reasons')).toContainText('No, because');
     await first.locator('.apv-reason', { hasText: 'Already done' }).first().click();
-    await expect(page.locator('button', { hasText: 'Reject and close' })).toHaveCount(1);
+    await expect(page.locator('button', { hasText: 'Reject and close' })).toHaveCount(0);
+    await expect(first.locator('[data-apv-state="saved"]')).toContainText('Closed');
   });
 
   test('an approval links to its email only when there is one a browser can open', async ({ page }) => {

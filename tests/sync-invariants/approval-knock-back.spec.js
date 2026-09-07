@@ -45,6 +45,8 @@ async function knockBack(page, patches, label = 'A week', why = '') {
   await openApprovals(page);
   const card = page.locator('.apv-card').first();
   const taskId = await card.getAttribute('data-apv-card');
+  // Knock-back lives behind "More" since 7 Sep 2026 (two buttons on the card).
+  await card.locator('.apv-more').click();
   await card.locator('.apv-defer-btn', { hasText: label }).first().click();
   if (why) await page.locator('#apvDeferWhy').fill(why);
   await page.locator('button', { hasText: 'Knock it back' }).last().click();
@@ -61,6 +63,7 @@ test.describe('knocking an approval back', () => {
     const n = await cards.count();
     expect(n).toBeGreaterThan(0);
     for (let i = 0; i < n; i++) {
+      await cards.nth(i).locator('.apv-more').click();
       await expect(cards.nth(i).locator('.apv-defer-btn', { hasText: 'A week' }).first()).toBeVisible();
     }
   });
@@ -136,6 +139,7 @@ test.describe('knocking an approval back', () => {
     await openApprovals(page);
     const card = page.locator('.apv-card').first();
     const taskId = await card.getAttribute('data-apv-card');
+    await card.locator('.apv-more').click();
     await card.locator('#apvDeferDate-' + taskId).fill(isoPlus(-3));
     await card.locator('.apv-defer-btn', { hasText: 'Go' }).click();
     // No confirm dialog, no write: a "defer" that leaves the task exactly
@@ -231,14 +235,19 @@ test.describe('nothing is hidden without being reported', () => {
 });
 
 test.describe('the reject option Kevin asked for', () => {
-  test('there is a Reject button, not only the seven chips', async ({ page }) => {
+  test('"No" opens the reasons, and his own words are one of them', async ({ page }) => {
     // Before this, the ONLY route to a rejection was one of seven preset
     // reasons. If none of them fitted, there was no way to reject at all.
+    // Since 7 Sep 2026 the card has two buttons; "No" opens the reasons and
+    // "Something else" is the route for his own words.
     await mockAgentsPage(page);
     await loadAgentsPage(page);
     await openApprovals(page);
-    await expect(page.locator('.apv-card').first()
-      .locator('.apv-actions button', { hasText: /^Reject$/ })).toBeVisible();
+    const card = page.locator('.apv-card').first();
+    await expect(card.locator('.apv-actions button', { hasText: /^No$/ })).toBeVisible();
+    await expect(card.locator('.apv-reasons')).toBeHidden();
+    await card.locator('.apv-actions button', { hasText: /^No$/ }).click();
+    await expect(card.locator('.apv-reason', { hasText: 'Something else' })).toBeVisible();
   });
 
   test('it rejects with his own words, and still demands a reason', async ({ page }) => {
@@ -250,13 +259,14 @@ test.describe('the reject option Kevin asked for', () => {
 
     // Empty first: an unexplained rejection counts against the agent with
     // nothing to learn from, which is what the chips were built to stop.
-    await card.locator('.apv-actions button', { hasText: /^Reject$/ }).click();
-    await expect(page.locator('button', { hasText: 'Reject and close' })).toHaveCount(0);
+    await card.locator('.apv-actions button', { hasText: /^No$/ }).click();
+    await card.locator('.apv-reason', { hasText: 'Something else' }).first().click();
+    await expect(card.locator('#apvNote2-' + taskId)).toBeVisible();
+    await card.locator('#apvRejectNote-' + taskId + ' button', { hasText: 'Reject' }).click();
     expect(patches.filter((p) => p.id === taskId)).toHaveLength(0);
 
-    await card.locator('#apvNote-' + taskId).fill('Companies House changed the form, this whole approach is dead.');
-    await card.locator('.apv-actions button', { hasText: /^Reject$/ }).click();
-    await page.locator('button', { hasText: 'Reject and close' }).last().click();
+    await card.locator('#apvNote2-' + taskId).fill('Companies House changed the form, this whole approach is dead.');
+    await card.locator('#apvRejectNote-' + taskId + ' button', { hasText: 'Reject' }).click();
     await expect.poll(() => patches.some((p) => p.id === taskId)).toBe(true);
     const patch = patches.find((p) => p.id === taskId);
     expect(patch.fields[APPROVAL_OUTCOME]).toBe('Rejected');
