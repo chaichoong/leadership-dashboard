@@ -414,7 +414,13 @@ def landed_on_main(sha):
     if rc != 0:
         return "branch-only", "commit %s does not exist in this repo" % sha
     _git("fetch", "origin", "main", "--quiet")
-    for ref in ("origin/main", "main"):
+    # Only the remote counts. Local `main` is whatever the last session left
+    # behind, and a commit sitting on it unpushed is exactly the "written but
+    # not landed" case this gate exists to refuse. Fall back to local main only
+    # when there is no remote to ask (a bare clone with no origin).
+    has_remote, _ = _git("rev-parse", "--verify", "--quiet", "origin/main")
+    refs = ("origin/main",) if has_remote == 0 else ("main",)
+    for ref in refs:
         rc, _ = _git("merge-base", "--is-ancestor", sha, ref)
         if rc == 0:
             return "landed", "%s is an ancestor of %s" % (sha, ref)
