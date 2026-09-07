@@ -285,12 +285,15 @@ describe('apvDeferReasonFrom — the note to his future self', () => {
 });
 
 describe('the card offers both missing verdicts', () => {
-  it('has an explicit Reject button, not only the reason chips', () => {
-    // Before this change the ONLY route to a rejection was one of seven chips.
-    // If none of them fitted, there was no way to reject at all — which is
-    // what Kevin was asking for when he said "can I also have an option to
-    // reject".
-    expect(agentsPage).toMatch(/data-apv-btn onclick="agDecide\('\$\{t\.id\}','Rejected'\)"/);
+  it('has a "No" button that opens the reasons, with "Something else" for his own words', () => {
+    // Before 27 Aug the ONLY route to a rejection was one of seven chips; Kevin
+    // asked for an explicit reject ("can I also have an option to reject").
+    // Since 7 Sep 2026 the card carries two buttons (usability audit: 16 was
+    // the count before): "No" opens the reasons in place and "Something else"
+    // is the route for his own words. The bare Reject button is gone.
+    expect(agentsPage).toMatch(/onclick="apvToggle\('\$\{t\.id\}','reasons'\)"[^>]*>No<\/button>/);
+    expect(agentsPage).toMatch(/agRejectWithReason\('\$\{taskId\}','\$\{esc\(APV_UNCLASSIFIED\)\}'\)[^>]*>Something else<\/button>/);
+    expect(agentsPage).not.toMatch(/data-apv-btn onclick="agDecide\('\$\{t\.id\}','Rejected'\)"/);
   });
 
   it('still forces a typed reason on that button', () => {
