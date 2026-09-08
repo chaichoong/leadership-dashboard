@@ -607,3 +607,22 @@ The Summary is not put on YouTube (the full episode is there). The socials carry
   Wed attempt 1 (99 s), Thu attempt 3 (312 s), Fri attempt 2 (186 s). Source labels on pictures are public phrases ("a real job
   advert, anonymised", "the Operations Director agent register", "Episode 1992"), never internal table names. Six cards refreshed
   with the composed pictures attached; test mode throughout.
+
+
+## Operations Director pictures, VERSION 4: the board renderer (8 Sep 2026)
+
+Kevin's verdict on the composed pictures: "just so substandard, glitchy bits, text overlapping"; the bar is the lead magnet page
+(`marketing/lead-magnet/how-you-get-there.html`). Diagnosis: that page hit the bar because a strong writer laid it out by hand in the
+Operations Director language and then looked at it; the nightly composer had neither, and the skill's mechanical preflight only sees
+text-on-text (a prop on a line, a ghosted numeral, an empty third all pass it). Measured 8 Sep: the premium composer with the lead
+magnet's scaffold and a rendered-picture review still failed Friday after six attempts (required lines rewritten, middle third empty).
+
+Decision: fix, not replace. The layouts are now CODE. `od_board.py` builds the five boards from the lead magnet's own components
+(`epic/templates/od-scaffold.html`: its CSS, route, stations, placards, lanes, the owner's gold stop, the strip with the logo) with
+the model contributing only the words. Positions are computed from the content: stations spread to fill the board, lanes side by side
+with the route arrow between, the stat placard content-sized beside the then-and-now lanes, the checklist rows spread across the card,
+the post's own numbered steps as a second placard, the owner's stop and three office props as the closing row. Nothing a model places,
+so nothing can overlap text. Gate: the skill's preflight, then `od_compose.review` (a standard-tier model reads the rendered picture
+against the skill's step-11 list and fails anything touching text, empty or glitchy). Route order in `od_lane.render_visual`: board,
+then the model composer (opt-in, `COMPOSE_ENABLED`), then Gemini with the text check, then the plain template. Composer changes kept:
+premium model through the proxy, scaffold as the mandatory start, review-and-repair rounds, public source labels.

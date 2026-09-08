@@ -38,6 +38,7 @@ import od_prompts as P      # noqa: E402
 import od_infographic       # noqa: E402
 import od_illustrate        # noqa: E402
 import od_compose           # noqa: E402
+import od_board           # noqa: E402
 
 LONDON = ZoneInfo("Europe/London")
 REPO = os.path.dirname(os.path.dirname(HERE))
@@ -59,6 +60,7 @@ PROSPECTS_API = "https://api.airtable.com/v0/%s/tbljHVGJoKJf8acy3" % watch.BASE
 FRAMEWORKS = os.path.expanduser("~/Library/CloudStorage/GoogleDrive-kevin@runpreneur.org.uk/My Drive/00 AI Context/Knowledge/frameworks-library.md")
 AGENT_BROWSER = os.path.join(REPO, "scripts", "agent-browser.js")
 USEFUL_MIN = 7
+COMPOSE_ENABLED = False   # the model composer (od_compose) is opt-in: the board renderer is the house route (Kevin, 8 Sep 2026)
 
 OD_WORDS = [r"\bai\b", r"\bagents?\b", r"\bautomat\w*", r"\bsystem\w*", r"\bprocess\w*", r"\boperations?\b", r"\bdelegat\w*", r"\bworkflow\w*",
             r"\bsops?\b", r"\bbusiness(es)?\b", r"\bfounder\w*", r"\bentrepreneur\w*", r"\bclaude\b", r"\bdashboard\w*", r"\bairtable\b", r"\bprofit\w*",
@@ -593,28 +595,36 @@ def write_post(day, date, source, voice, feedback=""):
 
 
 def render_visual(p):
-    """The picture: Gemini's illustrated infographic first (Kevin, 4 Sep 2026), text-checked; the code-drawn template as the fallback.
-    The post records which one it got so the card can say so."""
+    """The picture (v4, Kevin 8 Sep 2026: the bar is the lead magnet). Route 1: the BOARD renderer, code-drawn from the lead magnet's own
+    components (nothing a model places, so nothing can overlap text), gated by the skill's preflight and a rendered-picture review.
+    Route 2: the model composer (opt-in, COMPOSE_ENABLED). Route 3: Gemini's drawing with the text check. Route 4: the plain template.
+    The post records which route made it so the card can say so."""
     if not p.get("visual"): return
     os.makedirs(CARDS_DIR, exist_ok=True)
     template = P.SHAPES[p["day"]]["visual"]
     png = os.path.join(CARDS_DIR, "od-%s.png" % p["date"]); pdf = os.path.join(CARDS_DIR, "od-%s.pdf" % p["date"]) if p["day"] == "Tue" else None
-    for k in ("card_png", "card_pdf", "card_url", "pdf_url", "card_html"): p.pop(k, None)
-    # Kevin's order (4 Sep 2026, option 1): the Epic Infographics method in the Operations Director language first (typed text, preflight
-    # checked), Gemini's drawing second, the code template last. The card says which route made the picture.
-    path, note, html_path = od_compose.compose(template, p["visual"], p.get("text", ""), P.SHAPES[p["day"]]["name"], p["day"], p.get("source_line", ""), png)
-    if path:
-        p["card_png"] = path; p["picture"] = note; p["card_html"] = html_path
-    else:
-        print("od draft: composer fell through for %s (%s)" % (p["date"], note))
-        path, note2 = od_illustrate.illustrate(template, p["visual"], png)
-        if path: p["card_png"] = path; p["picture"] = note2 + " (composer: %s)" % note
-        else: p["picture"] = "code-drawn template (composer: %s; gemini: %s)" % (note, note2)
+    for k in ("card_png", "card_pdf", "card_url", "pdf_url"): p.pop(k, None)
+    source = od_compose.picture_source(p.get("source_line", ""))
+    try:
+        od_board.render(template, p["visual"], p.get("text", ""), source, p["day"], png)
+        passed, issues = od_compose.review(png, od_compose.required_lines(template, p["visual"]))
+        if passed or passed is None:
+            p["card_png"] = png; p["picture"] = "board renderer (lead magnet components), preflight clean, picture review %s" % ("passed" if passed else "unavailable")
+        else:
+            p["picture_board_issues"] = issues; print("od draft: board for %s failed the picture review: %s" % (p["date"], "; ".join(issues)[:160]))
+    except SystemExit as ex:
+        print("od draft: board for %s failed (%s)" % (p["date"], str(ex)[:140]))
+    if not p.get("card_png") and COMPOSE_ENABLED:
+        path, note, _ = od_compose.compose(template, p["visual"], p.get("text", ""), p.get("shape", ""), p["day"], p.get("source_line", ""), png)
+        if path: p["card_png"] = path; p["picture"] = note
+        else: print("od draft: composer fell through for %s (%s)" % (p["date"], note[:140]))
     if not p.get("card_png"):
-        try:
-            od_infographic.render(template, p["visual"], png, None); p["card_png"] = png
-        except SystemExit as ex:
-            p.setdefault("issues", []).append("picture not rendered"); print("od draft: picture for %s not rendered (%s)" % (p["date"], str(ex)[:120]))
+        path, note = od_illustrate.illustrate(template, p["visual"], png)
+        if path: p["card_png"] = path; p["picture"] = note
+        else:
+            p["picture"] = "code-drawn template (%s)" % note
+            try: od_infographic.render(template, p["visual"], png, None); p["card_png"] = png
+            except SystemExit as ex: p.setdefault("issues", []).append("picture not rendered"); print("od draft: picture for %s not rendered (%s)" % (p["date"], str(ex)[:120]))
     if pdf:
         try: od_infographic.render(template, p["visual"], png + ".template.png", pdf); os.remove(png + ".template.png"); p["card_pdf"] = pdf
         except (SystemExit, OSError): pass
