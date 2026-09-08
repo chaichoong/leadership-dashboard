@@ -360,6 +360,17 @@ def build_outputs(masters, srt, day, title, workdir, lfmd=None, role="episode"):
         paths["summary"] = os.path.join(workdir, names["summary"])
         overlay(ov, ["summary", masters["9:16"], caps, paths["summary"], "--day", str(day), "--title", title], "episode %s summary" % day)
         return paths
+    if role == "lfmd-only":
+        # The Learnings clip alone (redo --only lfmd): no intro, no full render, and no 16:9 master to look for the
+        # sign-off pause in. 8 Sep 2026, 22:00: this branch sat AFTER the pause search and the 2196 rebuild died on
+        # masters["16:9"]. The diary section ends before the sign-off, so the unclipped captions are the right ones.
+        assert_has_video(masters["9:16"], "episode %s 9:16 master" % day)
+        piece = trim(masters["9:16"], lfmd[0], lfmd[1], os.path.join(workdir, "lfmd_master.mp4")); assert_has_video(piece, "episode %s Learnings cut" % day)
+        lcaps = os.path.join(workdir, "captions_lfmd.srt"); open(lcaps, "w").write(shift_srt(open(caps).read(), lfmd[0], lfmd[1]))
+        check_captions(lcaps, "episode %s LFMD" % day)
+        paths["lfmd"] = os.path.join(workdir, names["lfmd"])
+        overlay(ov, ["lfmd", piece, lcaps, paths["lfmd"], "--day", str(day), "--subtitle", title.replace("|", " ").strip()], "episode %s LFMD" % day)
+        assert_has_video(paths["lfmd"], "episode %s lfmd" % day); return paths
     segs = srt_segments(open(srt).read())
     at, resume = find_pause(masters["16:9"], segs, intro_insert_seconds(segs))     # on the master: same sound, no captions yet
     LAST_CUT.update({"at": at, "resume": resume})
@@ -368,12 +379,6 @@ def build_outputs(masters, srt, day, title, workdir, lfmd=None, role="episode"):
     check_captions(caps, "episode %s full" % day)
     captioned = os.path.join(workdir, "full_captioned.mp4")
     overlay(ov, ["full", masters["16:9"], caps, captioned], "episode %s full" % day)
-    if role == "lfmd-only":
-        piece = trim(masters["9:16"], lfmd[0], lfmd[1], os.path.join(workdir, "lfmd_master.mp4")); assert_has_video(piece, "episode %s Learnings cut" % day)
-        lcaps = os.path.join(workdir, "captions_lfmd.srt"); open(lcaps, "w").write(shift_srt(open(caps).read(), lfmd[0], lfmd[1]))
-        paths["lfmd"] = os.path.join(workdir, names["lfmd"])
-        overlay(ov, ["lfmd", piece, lcaps, paths["lfmd"], "--day", str(day), "--subtitle", title.replace("|", " ").strip()], "episode %s LFMD" % day)
-        assert_has_video(paths["lfmd"], "episode %s lfmd" % day); return paths
     paths["full"] = os.path.join(workdir, names["full"])
     insert_intro(captioned, at, paths["full"])
     paths["podcast"] = podcast_audio(captioned, os.path.join(workdir, names["podcast"]), at, resume)
