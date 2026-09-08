@@ -34,7 +34,10 @@ STATE_DIR = os.path.dirname(watch.LEDGER)
 ACTIVITIES = os.path.join(STATE_DIR, "strava_activities.json")
 SYNC_STATE = os.path.join(STATE_DIR, "runpreneur_sync.json")
 REPO_ROOT = os.path.dirname(os.path.dirname(HERE))
-COUNTRIES = os.path.join(REPO_ROOT, "runpreneur-map", "data", "countries.geojson")
+COUNTRIES = os.path.join(REPO_ROOT, "runpreneur-map", "data", "countries.geojson")          # 110m: what the page draws
+OUTLINES_50M = os.path.join(STATE_DIR, "countries_50m.geojson")                                # 50m: what the engine matches against (Malta, the islands)
+OUTLINES_50M_URL = "https://raw.githubusercontent.com/nvkelso/natural-earth-vector/master/geojson/ne_50m_admin_0_countries.geojson"
+NEAREST_KM = 30.0     # a run that starts on a beach or a pier lands just outside every outline; the nearest coast within 30 km owns it
 PROGRESS_PATH = "runpreneur-map/data/progress.json"
 GH_REPO = "chaichoong/leadership-dashboard"
 GH = os.path.expanduser("~/tools/bin/gh")
@@ -103,6 +106,28 @@ NAME_MAP = {"Turkish Republic of Northern Cyprus": "Northern Cyprus", "United St
             "Czechia": "Czech Republic", "Republic of Serbia": "Serbia"}
 
 
+def _rings(geom):
+    polys = geom["coordinates"] if geom["type"] == "MultiPolygon" else [geom["coordinates"]]
+    for poly in polys:
+        for ring in poly: yield ring
+
+
+def nearest_country(lat, lon, features, limit_km=NEAREST_KM):
+    """The country whose outline comes closest, when the point is in the sea (8 Sep 2026: 65 streak runs
+    started on beaches, piers and small islands the outlines miss: Gran Canaria, Malta, a Greek island,
+    Blackpool, the Norfolk coast). Only within `limit_km`, so an ocean point stays unmatched."""
+    best, best_km = None, limit_km
+    for f in features:
+        for ring in _rings(f["geometry"]):
+            for x, y in ring[::max(1, len(ring) // 2000)]:           # sample very long rings; 50m outlines carry a vertex every few km
+                if abs(y - lat) > 0.5 or abs(x - lon) > 0.7: continue
+                d = haversine(lat, lon, y, x)
+                if d < best_km: best, best_km = f, d
+    if not best: return None
+    name = best["properties"].get("NAME_EN") or best["properties"].get("NAME")
+    return NAME_MAP.get(name, name)
+
+
 def country_of(lat, lon, features, cache={}):
     key = (round(lat, 2), round(lon, 2))
     if key in cache: return cache[key]
@@ -110,8 +135,16 @@ def country_of(lat, lon, features, cache={}):
     for f in features:
         if point_in_geom(lon, lat, f["geometry"]):
             name = f["properties"].get("NAME_EN") or f["properties"].get("NAME"); name = NAME_MAP.get(name, name); break
+    if name is None: name = nearest_country(lat, lon, features)
     cache[key] = name
     return name
+
+
+def matching_outlines():
+    """The 50m outlines for matching, fetched once into the state folder (not the repo: 4.6 MB the page never needs)."""
+    if not os.path.exists(OUTLINES_50M):
+        import urllib.request; urllib.request.urlretrieve(OUTLINES_50M_URL, OUTLINES_50M)
+    return json.load(open(OUTLINES_50M))["features"]
 
 
 # ---------- facts (pure) ----------
@@ -203,7 +236,7 @@ def publish(progress):
 
 def run(publish_it=True):
     added = fetch_new_runs() if publish_it else 0
-    features = json.load(open(COUNTRIES))["features"]
+    features = matching_outlines()
     total_km, raised, days = site_counters()
     progress = compute(load_runs(), total_km, raised, days, features)
     local = os.path.join(REPO_ROOT, PROGRESS_PATH)
@@ -224,6 +257,7 @@ def selftest():
     assert point_in_geom(2, 2, square) and not point_in_geom(5, 5, square) and not point_in_geom(12, 2, square), "ring with a hole"
     feats = [{"properties": {"NAME_EN": "Squareland"}, "geometry": square}]
     assert country_of(2, 2, feats, cache={}) == "Squareland" and country_of(50, 50, feats, cache={}) is None
+    assert country_of(10.1, 10.05, feats, cache={}) == "Squareland" and nearest_country(12, 5, feats) is None, "a beach start within 30 km of the outline belongs to it; 220 km out to sea does not"
     assert equivalent(17539) == "Cambridge to Tasmania" and equivalent(100) == "London to Paris" and equivalent(45000) == "once round the world"
     assert next_milestone(17539.77, 2290) == (18000, 2300)
     runs = [{"date": "2026-09-01", "km": 7.4, "latlng": [2, 2]}, {"date": "2019-01-01", "km": 42.2, "latlng": [2, 2]}, {"date": "2026-09-02", "km": 12.1, "latlng": None}]
