@@ -65,7 +65,7 @@ describe('content-engine watch: nightly wiring', () => {
   it('streams the raw clip with retries while Drive hydrates it, and a failed pull never kills the run (4 Sep 2026)', () => {
     const w = readFileSync(path.join(ROOT, 'scripts', 'content-engine', 'watch.py'), 'utf8');
     expect(w).toContain('DRIVE_RETRY_ERRNOS = (11, 35)');
-    expect(w).toContain('copy_streaming(e["path"], dest + ".part")');
+    expect(w).toContain('copy_streaming(e["path"], dest + ".part", max_minutes=window)');
     expect(w).not.toContain('shutil.copyfile(e["path"]');
     const sh = readFileSync(path.join(ROOT, 'scripts', 'content-engine-run.sh'), 'utf8');
     expect(sh).toMatch(/watch\.py next --day "\$day" \|\| break/);
