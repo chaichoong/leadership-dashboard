@@ -266,7 +266,15 @@ describe('wrangler.toml and worker hygiene', () => {
   const WORKER = read('workers/ceo-brief-tenants/worker.js');
   const LIB = read('workers/ceo-brief-tenants/lib.mjs');
   const crons = () => [...(TOML.match(/crons\s*=\s*\[([^\]]*)\]/) || ['', ''])[1].matchAll(/"([^"]+)"/g)].map(m => m[1]);
-  it('has at least one cron (control)', () => { expect(crons().length).toBeGreaterThan(0); });
+  // The cron was removed on 8 Sep 2026 (PR #310): this worker belongs to the
+  // PARKED Supabase client build and the free plan's five-trigger cap was
+  // rejecting the schedule on every deploy. While parked, the toml must SAY so
+  // next to the empty list; the hour checks below only apply once a cron is back.
+  const parked = crons().length === 0;
+  it('has at least one cron, or an explicit parked note next to the empty list (control)', () => {
+    if (parked) expect(TOML).toMatch(/Cron removed[^\n]*\n(?:[^\n]*\n){0,4}crons\s*=\s*\[\s*\]/);
+    else expect(crons().length).toBeGreaterThan(0);
+  });
   it('fires every day: day-of-month, month and day-of-week are all *', () => {
     for (const c of crons()) {
       const f = c.trim().split(/\s+/);
@@ -274,6 +282,7 @@ describe('wrangler.toml and worker hygiene', () => {
     }
   });
   it('covers 09:00 London in both BST and GMT', () => {
+    if (parked) return; // no schedule to cover while the client build is parked
     const hours = new Set();
     for (const c of crons()) { const [a, b] = c.split(/\s+/)[1].split('-').map(Number); for (let h = a; h <= (b ?? a); h++) hours.add(h); }
     expect(hours.has(8)).toBe(true);
