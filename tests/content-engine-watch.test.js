@@ -84,6 +84,18 @@ describe('content-engine watch: nightly wiring', () => {
     expect(w).toContain('except urllib.error.HTTPError:\n            raise');
   });
 
+  it("starts at Kevin's takeover day and renders the configured number of episodes a night (8 Sep 2026)", () => {
+    const w = readFileSync(path.join(ROOT, 'scripts', 'content-engine', 'watch.py'), 'utf8');
+    expect(w).toContain('START_DAY_FILE = os.path.expanduser("~/.config/od/content_engine_start_day")');
+    expect(w).toContain('since = since or since_for_start_day()');
+    const sh = readFileSync(path.join(ROOT, 'scripts', 'content-engine-run.sh'), 'utf8');
+    expect(sh).toContain('content_engine_episodes_per_night');
+    expect(sh).toMatch(/for i in \$\(seq 1 "\$EPISODES"\); do/);
+    const p = readFileSync(path.join(ROOT, 'scripts', 'content-engine', 'publish.py'), 'utf8');
+    expect(p).toContain('def staggered(slot, index)');
+    expect(p).toContain('staggered(spec["slot"], index)');
+  });
+
   it('is described on the Automations list (deterministic job, not a register agent)', () => {
     const auto = readFileSync(path.join(ROOT, 'js', 'automations-data.js'), 'utf8');
     expect(auto).toMatch(/key: 'content-engine'/);
