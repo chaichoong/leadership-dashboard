@@ -26,6 +26,7 @@ on:
       - 'crm-supabase.html'
       - 'follow-up.html'
       - 'how-it-works.html'
+      - 'property-manager/index.html'
       - 'js/agent-accuracy.js'
       - 'js/ar-variable.js'
       - 'js/arrears.js'

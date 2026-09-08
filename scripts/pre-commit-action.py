@@ -46,6 +46,7 @@ FILE_TO_PAGE = {
     # when the SOP is updated to match the page (see CLAUDE.md Version Tracking).
     'os/agents/index.html':        'agents',
     'os/team/index.html':          'os-team',
+    'property-manager/index.html': 'property-manager',
     'how-it-works.html':           'how-it-works',
     # Previously-unmapped registered pages (their versions never bumped)
     'js/money.js':          'money',
