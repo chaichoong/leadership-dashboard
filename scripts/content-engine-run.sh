@@ -75,6 +75,12 @@ for day in $DAYS; do
 done
 python3 scripts/content-engine/platform_copy.py run --pending --limit 2 || exit 1
 python3 scripts/content-engine/approval.py sync || exit 1
+# 5b. Performance read (Kevin, 8 Sep 2026: once a month, last 30 days, three recommendations that become lessons).
+#     Every night: his verdict on an open read -> lessons. Mondays: GoHighLevel's 7-day platform totals stored
+#     (the API answers for seven days only). The 1st: the month's read as ONE card. Never stops the lane.
+python3 scripts/content-engine/performance.py sync || echo "performance sync: skipped this run (see above)"
+[ "$(date +%u)" = "1" ] && { python3 scripts/content-engine/performance.py snapshot || echo "performance snapshot: skipped (see above)"; }
+[ "$(date +%d)" = "01" ] && { python3 scripts/content-engine/performance.py run || echo "performance read: skipped (see above)"; }
 python3 scripts/content-engine/approval.py run --pending --limit 2 || exit 1
 python3 scripts/content-engine/publish.py sync || exit 1
 python3 scripts/content-engine/publish.py run --limit 2 || exit 1
