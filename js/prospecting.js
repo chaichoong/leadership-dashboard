@@ -179,12 +179,69 @@
     function renderProspectingTab() {
         const records = prospectsCache || [];
         renderProspectingFunnel(records);
+        renderProspectingGhlBar();
         renderProspectingQueue(records);
         renderProspectingPipeline(records);
         renderProspectingKeywords(prospectKeywordsCache || []);
         updateProspectingBadge(records);
         renderProspectingAgentStamp(records);
         registerProspectingSyncBar(records, prospectKeywordsCache || []);
+    }
+
+    // GoHighLevel connection for THIS browser. Keys live in localStorage, which is
+    // per origin: the move to app.operationsdirector.co.uk (8 Sep 2026) started
+    // every browser from empty, and until then the prospecting key had only ever
+    // been set by hand. Prospects belong to the "Operations Director" sub-account,
+    // never the Runpreneur one Inbound Comms uses, so this never writes ghl_api_key.
+    const OD_GHL_LOCATION_DEFAULT = 'dgsHwbYbp6xrhRGZr9ik'; // Operations Director sub-account (a location id, not a secret)
+    function renderProspectingGhlBar() {
+        const el = document.getElementById('prospectingGhlBar');
+        if (!el) return;
+        const key = localStorage.getItem('od_prospecting_ghl_key');
+        const loc = localStorage.getItem('od_prospecting_ghl_location');
+        const ok = !!(key && loc);
+        const status = ok
+            ? 'GoHighLevel connected in this browser: approving a prospect sends the email now.'
+            : 'GoHighLevel is not connected in this browser. Approving queues the prospect for the daily agent instead of sending now.';
+        el.innerHTML =
+            '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:16px;padding:10px 12px;border:1px solid var(--border-subtle);border-radius:var(--radius-md);background:var(--bg-surface)">' +
+              '<span style="font-size:var(--fs-sm);color:' + (ok ? 'var(--success)' : 'var(--warning)') + ';flex:1;min-width:220px">' + escHtml(status) + '</span>' +
+              '<button type="button" class="od-btn-secondary" id="prosGhlToggle">' + (ok ? 'Change key' : 'Connect GoHighLevel') + '</button>' +
+              '<form id="prosGhlForm" style="display:none;flex-basis:100%;gap:8px;flex-wrap:wrap;align-items:center;margin-top:4px" autocomplete="off">' +
+                '<input type="password" id="prosGhlKey" placeholder="Private Integration key (pit-…)" autocomplete="off" style="flex:2;min-width:260px;font-family:monospace;font-size:12px;padding:6px 8px;border:1px solid var(--border-default);border-radius:var(--radius-sm)">' +
+                '<input type="text" id="prosGhlLoc" placeholder="Location ID" value="' + escHtml(loc || OD_GHL_LOCATION_DEFAULT) + '" style="flex:1;min-width:200px;font-family:monospace;font-size:12px;padding:6px 8px;border:1px solid var(--border-default);border-radius:var(--radius-sm)">' +
+                '<button type="submit" class="od-btn-primary">Save</button>' +
+                '<span style="font-size:var(--fs-xs);color:var(--text-muted);flex-basis:100%">Stored in this browser only. Use the Operations Director sub-account key, never the Runpreneur one.</span>' +
+              '</form>' +
+            '</div>';
+        const form = el.querySelector('#prosGhlForm');
+        el.querySelector('#prosGhlToggle').addEventListener('click', () => {
+            const open = form.style.display !== 'none';
+            form.style.display = open ? 'none' : 'flex';
+            if (!open) el.querySelector('#prosGhlKey').focus();
+        });
+        form.addEventListener('submit', (ev) => {
+            ev.preventDefault();
+            const k = (el.querySelector('#prosGhlKey').value || '').trim();
+            const l = (el.querySelector('#prosGhlLoc').value || '').trim();
+            if (!/^pit-[A-Za-z0-9-]{20,}$/.test(k)) {
+                if (typeof showToast === 'function') showToast('That does not look like a GoHighLevel Private Integration key (it starts pit-).', { type: 'error' });
+                return;
+            }
+            if (l.length < 10) {
+                if (typeof showToast === 'function') showToast('Location ID looks too short.', { type: 'error' });
+                return;
+            }
+            try {
+                localStorage.setItem('od_prospecting_ghl_key', k);
+                localStorage.setItem('od_prospecting_ghl_location', l);
+            } catch (e) {
+                if (typeof showToast === 'function') showToast('Could not save in this browser: ' + ((e && e.message) || 'storage blocked'), { type: 'error' });
+                return;
+            }
+            if (typeof showToast === 'function') showToast('GoHighLevel connected for prospecting in this browser.', { type: 'success' });
+            renderProspectingGhlBar();
+        });
     }
 
     function renderProspectingAgentStamp(records) {
@@ -465,7 +522,7 @@
         const ghlKey = localStorage.getItem('od_prospecting_ghl_key') || localStorage.getItem('ghl_api_key');
         const ghlLoc = localStorage.getItem('od_prospecting_ghl_location');
         if (!ghlKey || !ghlLoc) {
-            if (typeof showToast === 'function') showToast('Approved. GHL keys not set in this browser (Inbound Comms → Settings) — the daily agent will sync it instead', { type: 'info', duration: 6000 });
+            if (typeof showToast === 'function') showToast('Approved. GoHighLevel is not connected in this browser (use Connect GoHighLevel above): the daily agent will sync it instead.', { type: 'info', duration: 6000 });
             return;
         }
         try {
