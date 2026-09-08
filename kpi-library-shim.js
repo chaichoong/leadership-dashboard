@@ -21,7 +21,15 @@
 
   let _sb = null;
   function sbc() {
-    if (!_sb) _sb = window.supabase.createClient(SB_URL, SB_ANON, { auth: { persistSession: true, storageKey: '_dlr_sb_app' } });
+    if (!_sb) _sb = window.supabase.createClient(SB_URL, SB_ANON, { auth: {
+      persistSession: true, storageKey: '_dlr_sb_app',
+      // No-op lock: supabase-js's default auth lock uses the browser Web Locks API,
+      // which DEADLOCKS the main thread here — the shell (another tab / this session)
+      // holds the same '_dlr_sb_app' lock, so this client's getSession() freezes the
+      // renderer on a session that needs a token refresh (the page stays blank, no
+      // scripts run). Passing a pass-through lock skips Web Locks entirely.
+      lock: (name, acquireTimeout, fn) => fn(),
+    } });
     return _sb;
   }
   window.sbKpi = sbc;

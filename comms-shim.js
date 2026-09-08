@@ -11,7 +11,7 @@
   const SB_ANON = window.SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InB0a3loemxzdmlqY3d5b3Zncmd2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzYzMzIxNzgsImV4cCI6MjA5MTkwODE3OH0.U5ZdIjw--_UgJlYi75JTjpb2doBTjO4W8LUZPnZzkFU';
   const BASE = 'appnqjDpqDniH3IRl';
   let _sb = null;
-  function sbc() { if (!_sb) _sb = window.supabase.createClient(SB_URL, SB_ANON, { auth:{ persistSession:true, storageKey:'_dlr_sb_app' } }); return _sb; }
+  function sbc() { if (!_sb) _sb = window.supabase.createClient(SB_URL, SB_ANON, { auth:{ persistSession:true, storageKey:'_dlr_sb_app', lock:(n,a,fn)=>fn() } }); return _sb; }
   window.sbComms = sbc;
 
   const TASKS='tblqB8b22hKBL4PF1', PROPS='tbl6f0OkAmTC2jbuG', TENANCIES='tblN51a88qTDB6iMH',

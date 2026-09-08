@@ -148,7 +148,7 @@
     const SUPABASE_URL = 'https://ptkyhzlsvijcwyovgrgv.supabase.co';
     const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InB0a3loemxzdmlqY3d5b3Zncmd2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzYzMzIxNzgsImV4cCI6MjA5MTkwODE3OH0.U5ZdIjw--_UgJlYi75JTjpb2doBTjO4W8LUZPnZzkFU';
     // Shared storageKey so the iframes (same shim key) reuse this one login.
-    const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { auth: { persistSession: true, storageKey: '_dlr_sb_app' } });
+    const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { auth: { persistSession: true, storageKey: '_dlr_sb_app', lock: (n, a, fn) => fn() } });
 
     const PAGES = {
       'ceo-brief': 'ceo-brief-supabase.html?v=1',

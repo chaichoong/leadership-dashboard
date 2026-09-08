@@ -11,7 +11,7 @@
   const BASE = 'appnqjDpqDniH3IRl';
   const TABLE = 'tblEPzZdwBZeSXFRB';
   let _sb = null;
-  function sbc() { if (!_sb) _sb = window.supabase.createClient(SB_URL, SB_ANON, { auth: { persistSession: true, storageKey: '_dlr_sb_app' } }); return _sb; }
+  function sbc() { if (!_sb) _sb = window.supabase.createClient(SB_URL, SB_ANON, { auth: { persistSession: true, storageKey: '_dlr_sb_app', lock: (n, a, fn) => fn() } }); return _sb; }
   window.sbCM = sbc;
   let _sessReady = null;
   function ensureSession() { if (!_sessReady) _sessReady = sbc().auth.getSession().catch(() => {}); return _sessReady; }

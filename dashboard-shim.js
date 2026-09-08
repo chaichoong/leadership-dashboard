@@ -15,7 +15,7 @@
   // window.fetch un-overridden and the app would fall through to Airtable.
   let _sb = null;
   function sbc() {
-    if (!_sb) _sb = window.supabase.createClient(SB_URL, SB_ANON, { auth: { persistSession: true, storageKey: '_dlr_sb_app' } });
+    if (!_sb) _sb = window.supabase.createClient(SB_URL, SB_ANON, { auth: { persistSession: true, storageKey: '_dlr_sb_app', lock: (n, a, fn) => fn() } });
     return _sb;
   }
   window.sbDash = sbc;
