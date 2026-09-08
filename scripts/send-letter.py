@@ -89,6 +89,7 @@ from datetime import datetime, timezone
 # path disagreeing about what a valid Correspondence output is, so an approved
 # action could not be carried out.
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from adobe_audit import audit_problem  # noqa: E402
 from agent_email_format import (  # noqa: E402
     EmailFormatError,
     parse_post_output,
@@ -292,7 +293,35 @@ def load_document(path, task_id):
     if size > DOC_MAX_BYTES:
         sys.exit(f"REFUSED: task {task_id} DOCUMENT is {size} bytes — over the "
                  f"{DOC_MAX_BYTES} cap.")
+    # Kevin's rule (8 Sep 2026): a document that came back signed through
+    # Adobe Sign goes out with the audit report at the back, from 9 Sep 2026.
+    signed_on = signed_via_adobe(task_id, real)
+    if signed_on is not False:
+        problem = audit_problem(real, signed_on)
+        if problem:
+            sys.exit(f"REFUSED: task {task_id} — {problem}")
     return real, size
+
+
+SIGNED_STAMP_RE = re.compile(r"^\[(\d{1,2} \w{3} \d{4})(?: \d{2}:\d{2})?[^\]]*\]\s*SIGNED COPY BACK:", re.M)
+
+
+def signed_via_adobe(task_id, real, notes=None):
+    """False when the document was never signed through Adobe; otherwise the
+    signing date (a 'dd Mon yyyy' string, or None when it cannot be told).
+    Two signals: signature-watch names its downloads signed_<task>_…, and
+    the hand-off stamps SIGNED COPY BACK on the task's Notes."""
+    if notes is None:
+        try:
+            notes = (get_task(task_id).get("fields", {}) or {}).get(AF["notes"]) or ""
+        except SystemExit:
+            notes = ""
+    stamps = SIGNED_STAMP_RE.findall(str(notes or ""))
+    if stamps:
+        return stamps[-1]
+    if os.path.basename(real).startswith("signed_"):
+        return None
+    return False
 
 
 def load_approved(task_id, require_approval=True):

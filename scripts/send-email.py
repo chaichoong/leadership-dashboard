@@ -82,6 +82,7 @@ from datetime import datetime, timezone
 # submit validation. Two copies of this parser is how a tier-1 banner came to be
 # prepended by one script and rejected by the other.
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from adobe_audit import audit_problem  # noqa: E402
 from agent_email_format import (  # noqa: E402
     EmailFormatError,
     parse_output as parse_email_output,
@@ -342,6 +343,25 @@ ATTACH_MIME = {".pdf": "application/pdf", ".png": "image/png",
                ".jpg": "image/jpeg", ".jpeg": "image/jpeg"}
 
 
+SIGNED_STAMP_RE = re.compile(r"^\[(\d{1,2} \w{3} \d{4})(?: \d{2}:\d{2})?[^\]]*\]\s*SIGNED COPY BACK:", re.M)
+
+
+def signed_via_adobe(task_id, real, notes=None):
+    """False when never signed through Adobe; else the signing date string
+    ('dd Mon yyyy') or None when unknown. Mirrors send-letter.py."""
+    if notes is None:
+        try:
+            notes = (get_task(task_id).get("fields", {}) or {}).get(AF["notes"]) or ""
+        except SystemExit:
+            notes = ""
+    stamps = SIGNED_STAMP_RE.findall(str(notes or ""))
+    if stamps:
+        return stamps[-1]
+    if os.path.basename(real).startswith("signed_"):
+        return None
+    return False
+
+
 def load_attachment(attach, task_id):
     """Path from the approved ATTACH header → worker payload dict, or refuse."""
     import base64
@@ -363,6 +383,14 @@ def load_attachment(attach, task_id):
     if size > ATTACH_MAX_BYTES:
         sys.exit(f"REFUSED: task {task_id} ATTACH is {size} bytes — over the "
                  f"{ATTACH_MAX_BYTES} cap.")
+    # Kevin's rule (8 Sep 2026): a signed document goes out with Adobe's
+    # audit report at the back, from 9 Sep 2026 (see scripts/adobe_audit.py).
+    if ext == ".pdf":
+        signed_on = signed_via_adobe(task_id, real)
+        if signed_on is not False:
+            problem = audit_problem(real, signed_on)
+            if problem:
+                sys.exit(f"REFUSED: task {task_id} — {problem}")
     with open(real, "rb") as fh:
         data = fh.read()
     return {"filename": name, "mimeType": ATTACH_MIME[ext],
