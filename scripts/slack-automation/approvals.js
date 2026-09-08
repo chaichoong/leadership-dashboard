@@ -739,7 +739,7 @@ export function signInsWaiting(tasks) {
 // check is the whole safety of letting agents act.
 export const HANDLED_MARK = 'HANDLED WITHOUT YOU';
 export const HANDLED_FORMULA = `AND(FIND('${HANDLED_MARK}', {Notes}), IS_AFTER(LAST_MODIFIED_TIME(), DATEADD(NOW(), -24, 'hours')))`;
-const DASHBOARD_CHECKS_URL = 'https://chaichoong.github.io/leadership-dashboard/os/agents/index.html#tab=checks';
+const DASHBOARD_CHECKS_URL = 'https://app.operationsdirector.co.uk/os/agents/index.html#tab=checks';
 export function handledLine(handled) {
     if (!handled) return '';
     return `\n*${handled} thing${handled === 1 ? '' : 's'} handled without you* since yesterday's message (closed duplicates, already-handled closes, diary entries, Roy handovers). Check or reverse them here: ${DASHBOARD_CHECKS_URL}\n`;
@@ -760,7 +760,7 @@ export function buildDigestText(count, names, dashUrl, capped, signIns = [], han
         + `_This is the only approvals message you get today. Nothing has been sent or actioned._`, 2900);
 }
 
-const DASHBOARD_QUEUE_URL = 'https://chaichoong.github.io/leadership-dashboard/os/agents/index.html#tab=approvals';
+const DASHBOARD_QUEUE_URL = 'https://app.operationsdirector.co.uk/os/agents/index.html#tab=approvals';
 const DIGEST_MAX = 500;
 
 async function openDm(env, slackId) {

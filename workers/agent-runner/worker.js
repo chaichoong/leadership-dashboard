@@ -22,7 +22,7 @@ const CLAUDE_PROXY = 'https://claude-proxy.kevinbrittain.workers.dev';
 // read off `env` at the call site. Never hardcode one here: a module-scope const
 // cannot see `env`, which is exactly how the old literal got stranded.
 const MAX_TOOL_TURNS = 16;
-const ALLOWED_ORIGINS = ['https://chaichoong.github.io'];
+const ALLOWED_ORIGINS = ['https://app.operationsdirector.co.uk', 'https://chaichoong.github.io'];
 
 // Workflow-table field IDs (match os/systemisation/index.html WF constants)
 const WF_NAME = 'fldsaS0jeoSRuJN28';

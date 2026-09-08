@@ -97,6 +97,7 @@ const SEND_AS_ALIASES = {
 };
 
 const ALLOWED_ORIGINS = [
+    'https://app.operationsdirector.co.uk',
     'https://chaichoong.github.io',
     'http://localhost:8765', // local preview
 ];
