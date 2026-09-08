@@ -51,6 +51,12 @@ STATUS_SOCIALS = "Publishing In Progress"
 STATUS_PUBLISHED = "Published"
 PUBLISHABLE = (STATUS_APPROVED, STATUS_YT, STATUS_SOCIALS)
 YT_SLOT, SUMMARY_SLOT, LFMD_SLOT = (6, 0), (9, 0), (17, 0)     # London hours; the team posted around 08:00-09:00 UK
+STAGGER_HOURS = 6     # a second episode the same day goes six hours later, a third twelve (catch-up, 8 Sep 2026)
+
+
+def staggered(slot, index):
+    """(hour, minute) for the index-th episode published the same day: 06:00, 12:00, 18:00 for YouTube."""
+    return ((slot[0] + STAGGER_HOURS * index) % 24, slot[1])
 PLACEHOLDER = "[ADD YOUTUBE LINK]"
 MODE_FILE = os.path.expanduser("~/.config/od/content_engine_mode")   # "test" (default) or "live"; Kevin flips it
 
@@ -332,7 +338,7 @@ def create_post(body, brand="Runpreneur"):
     return post.get("_id") or post.get("id")
 
 
-def schedule_stage(day, entry, recs, acct_map, stage, dry_run=False):
+def schedule_stage(day, entry, recs, acct_map, stage, dry_run=False, index=0):
     _, _, user = _cfg()
     full = recs["Long Form Video"]; ff = full["fields"]
     day_london = dt.datetime.now(LONDON).date()
@@ -371,7 +377,7 @@ def schedule_stage(day, entry, recs, acct_map, stage, dry_run=False):
         left = placeholder_left(text) or placeholder_left(title or "")
         if left:
             print("episode %d: %s %s REFUSED, placeholder %s still in the copy" % (day, spec["clip"], platform, left)); continue
-        when = slot_iso(day_london, spec["slot"])
+        when = slot_iso(day_london, staggered(spec["slot"], index))
         # Test mode: YouTube still goes up (unlisted, so the link exists) but every social post is a DRAFT.
         status = "scheduled" if (not test or platform == "youtube") else "draft"
         body = build_post(platform, account, spec, text, media[spec["clip"]], media.get("thumb"), when, user, day, title,
@@ -413,11 +419,11 @@ def schedule_stage(day, entry, recs, acct_map, stage, dry_run=False):
     return len(todo)
 
 
-def run(dry_run=False, limit=2):
+def run(dry_run=False, limit=3):
     state = load_state(); days = approved_days()
     if not days: print("publish: no approved episodes"); return
     acct_map = account_map(accounts()); yt_ok = "youtube" in acct_map
-    done = 0
+    done = 0; per_stage = {1: 0, 2: 0}
     for day in days:
         entry = state.setdefault(str(day), {})
         recs = bundle(day)
@@ -432,7 +438,9 @@ def run(dry_run=False, limit=2):
         if stage == "done":
             continue
         if done >= limit: break
-        n = schedule_stage(day, entry, recs, acct_map, 1 if stage == "youtube" else 2, dry_run)
+        st_no = 1 if stage == "youtube" else 2
+        n = schedule_stage(day, entry, recs, acct_map, st_no, dry_run, index=per_stage[st_no])
+        if n: per_stage[st_no] += 1
         done += 1 if n else 0
         if not dry_run: save_state(state)
 
@@ -526,6 +534,7 @@ def selftest():
     assert all(spec["field"] in dict(pc.TYPES[spec["record"]]["sections"]).values() for c in CHANNELS.values() for spec in c["posts"]), "every copy field exists on its record type"
     sh = CHANNELS["youtube-short"]["posts"][0]; assert sh["clip"] == "lfmd" and sh["yt_type"] == "short" and CHANNELS["youtube-short"]["stage"] == 2
     bs = build_post("youtube", accts[5], sh, "desc", "https://cdn/l.mp4", None, "x", "u1", 1, "Short title"); assert bs["youtubePostDetails"]["type"] == "short"
+    assert staggered((6, 0), 0) == (6, 0) and staggered((6, 0), 1) == (12, 0) and staggered((6, 0), 2) == (18, 0) and staggered((17, 0), 2) == (5, 0)
     assert "twitter" not in CHANNELS
     assert "YouTube Link" in LINK_FIELDS[("youtube", "full")] and "TikTok Link" in LINK_FIELDS[("tiktok", "summary")] and "Facebook Post Link" in LINK_FIELDS[("facebook", "summary")]
     assert "LinkedIn Link" in LINK_FIELDS[("linkedin", "summary")] and "Threads Link" in LINK_FIELDS[("threads", "summary")], "the fields Ericamae's pages read"
@@ -560,12 +569,12 @@ def selftest():
     tp = build_text_post(od_accts[1], "hello", "2026-09-07T07:00:00Z", "u1", "https://cdn/c.png")
     assert tp["media"] == [{"url": "https://cdn/c.png", "type": "image/png"}] and tp["type"] == "post" and tp["scheduleDate"] == "2026-09-07T07:00:00Z"
     fbp = build_text_post(od_accts[4], "hello", "x", "u1", status="draft"); assert fbp["facebookPostDetails"] == {"type": "post"} and "media" not in fbp and "scheduleDate" not in fbp
-    print(json.dumps({"checks": 34, "failed": []}))
+    print(json.dumps({"checks": 35, "failed": []}))
 
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
-    ap.add_argument("mode"); ap.add_argument("--day", type=int, default=0); ap.add_argument("--limit", type=int, default=2); ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("mode"); ap.add_argument("--day", type=int, default=0); ap.add_argument("--limit", type=int, default=3); ap.add_argument("--dry-run", action="store_true")
     a = ap.parse_args()
     if a.mode == "selftest": selftest()
     elif a.mode == "run": run(dry_run=a.dry_run, limit=a.limit)
