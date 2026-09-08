@@ -120,4 +120,40 @@ test.describe('KPI Library (Supabase twin)', () => {
     await expect(page.locator('#sbLoginOverlay')).toBeVisible();
     await expect(page.locator('#tab-kpi-library')).toBeEmpty();
   });
+
+  // The twin must read its live rows from Supabase and never from Airtable. The shim
+  // overrides window.fetch: the one Projects read is answered from v_projects, every
+  // other Airtable call is answered empty, and no request ever leaves for
+  // api.airtable.com. Recorded at the network layer, so a shim that quietly fell
+  // through to the real fetch would fail here even though the page still rendered.
+  test('the live KPI rows come from Supabase v_projects and nothing is asked of Airtable', async ({ page }) => {
+    // page.on('request') sees every request, including ones a route later fulfils.
+    const requests = [];
+    page.on('request', r => requests.push(r.url()));
+    let served = 0;
+    await stubExternalHosts(page);
+    await page.route('**cdn.jsdelivr.net/**', route =>
+      route.fulfill({ status: 200, contentType: 'application/javascript', body: SUPABASE_SHIM }));
+    await page.route(SB_HOST, route => {
+      if (route.request().url().includes('/rest/v1/v_projects')) {
+        served += 1;
+        return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify([LIVE_ROW]) });
+      }
+      return route.fulfill({ status: 200, contentType: 'application/json', body: '{}' });
+    });
+    await page.addInitScript(([k, v]) => localStorage.setItem(k, v), [STORAGE_KEY, JSON.stringify({
+      access_token: 'test-token', refresh_token: 'test-refresh', expires_at: Math.floor(Date.now() / 1000) + 3600,
+      token_type: 'bearer', user: { id: 'u1', email: OWNER },
+    })]);
+    await page.goto('/kpi-library-supabase.html');
+    // The row on screen is the one Supabase served.
+    await expect(page.locator('#tab-kpi-library table').nth(0)).toContainText('Q3 Launch');
+    expect(served).toBeGreaterThan(0);
+    const supabaseReads = requests.filter(u => u.includes('supabase.co/rest/v1/v_projects'));
+    const airtableReads = requests.filter(u => u.includes('api.airtable.com'));
+    expect(supabaseReads.length).toBeGreaterThan(0);
+    expect(airtableReads).toEqual([]);
+    // Belt and braces: the app's Airtable token is the shim's placeholder, not a real PAT.
+    expect(await page.evaluate(() => PAT)).toBe('supabase');
+  });
 });
