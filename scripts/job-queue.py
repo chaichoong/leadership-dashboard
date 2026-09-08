@@ -355,6 +355,14 @@ def network_ready(host="api.airtable.com", port=443, timeout=4):
 # and 25 candidates is plenty of evidence that a mount is dead.
 PROBE_MAX_BYTES = 4 * 1024 * 1024
 PROBE_MAX_CANDIDATES = 25
+# ONE CANDIDATE IS NOT A FALLBACK (finding 20260907-daily-ops-490). The 486 fix
+# tries every candidate in the folder — but "Runpreneur - Raw Video" holds
+# exactly ONE plain file at the top level, a 366MB Windows installer, and every
+# other entry is a directory. So the list it fell back through had length one
+# and the probe was still decided by the single file nothing reads. Below this
+# many small candidates, descend one level and collect from the subfolders too.
+PROBE_MIN_CANDIDATES = 3
+PROBE_MAX_SUBDIRS = 12
 
 
 def drive_ready(path, timeout=4):
@@ -402,16 +410,42 @@ def drive_ready(path, timeout=4):
     # Smallest first. os.stat on an un-hydrated placeholder still answers (it is
     # the OPEN that deadlocks), but treat a stat failure as "unknown size" and
     # sort it last rather than letting it end the probe.
-    candidates = []
-    for name in names:
-        full = os.path.join(path, name)
+    def collect(folder, prefix=""):
+        found, subdirs = [], []
         try:
-            if not os.path.isfile(full):
-                continue
-            size = os.path.getsize(full)
+            entries = [n for n in os.listdir(folder) if not n.startswith(".")]
         except OSError:
-            size = float("inf")
-        candidates.append((size, name, full))
+            return found, subdirs
+        for name in entries:
+            full = os.path.join(folder, name)
+            try:
+                if os.path.isdir(full):
+                    subdirs.append(full)
+                    continue
+                if not os.path.isfile(full):
+                    continue
+                size = os.path.getsize(full)
+            except OSError:
+                size = float("inf")
+            found.append((size, prefix + name, full))
+        return found, subdirs
+
+    candidates, subdirs = collect(path)
+    # Descend exactly one level when the top level cannot offer a real choice.
+    # One level, newest subfolders first, and a hard cap: this runs before every
+    # scheduled job and must stay a cheap yes/no, never a tree walk.
+    small_now = [c for c in candidates if c[0] <= PROBE_MAX_BYTES]
+    if len(small_now) < PROBE_MIN_CANDIDATES and subdirs:
+        try:
+            subdirs.sort(key=lambda d: os.path.getmtime(d), reverse=True)
+        except OSError:
+            pass
+        for sub in subdirs[:PROBE_MAX_SUBDIRS]:
+            deeper, _ = collect(sub, os.path.basename(sub) + "/")
+            candidates += deeper
+            if len([c for c in candidates
+                    if c[0] <= PROBE_MAX_BYTES]) >= PROBE_MIN_CANDIDATES:
+                break
     candidates.sort(key=lambda c: c[0])
     # Big files go to the back of the queue rather than out of it: a folder that
     # holds nothing but large files must still be probeable.

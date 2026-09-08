@@ -79,7 +79,10 @@ describe('THE REGRESSION: a keep-open carry-out must not close the task', () => 
     // Without this the next run sees an open intent and could re-execute an
     // action that already happened — the crash-safety rule cmd_intent exists for.
     const branch = SRC.match(/if args\.keep_open:([\s\S]*?)\n\n    patch_task/)[1];
-    expect(branch).toContain('ledger_append(args.task, "done")');
+    expect(branch).toContain('ledger_append(args.task, "done"');
+    // …and WHICH decision it was, so the same approval is never carried out
+    // twice (findings 468/470/481/482/484/485, 5-6 Sep 2026).
+    expect(branch).toContain('keptOpenFor');
   });
 
   it('the Notes marker is a fixed machine-readable string, not prose', () => {

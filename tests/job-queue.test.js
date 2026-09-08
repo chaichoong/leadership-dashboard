@@ -1000,6 +1000,61 @@ print(json.dumps(list(m.drive_ready(${JSON.stringify(VAULT())}))))
     expect(why).toMatch(/founder-profile\.md/);
   });
 
+  // Finding 20260907-daily-ops-490. The 486 fix above tries every candidate —
+  // but "Runpreneur - Raw Video" holds exactly ONE plain file at the top level
+  // (a 366MB Insta360 installer) and fifteen directories, so the list it fell
+  // back through had length one and the verdict was still that single file's.
+  // Measured against the live folder on 8 Sep 2026: the old probe reported
+  // "probe 1 of 1" on the .exe; the fixed one reports 25 candidates and opens a
+  // small clip from a dated subfolder.
+  it('descends one level when the top level offers no real choice', () => {
+    mkdirSync(VAULT(), { recursive: true });
+    writeFileSync(join(VAULT(), 'Insta360Studio.exe'), 'x');
+    mkdirSync(join(VAULT(), '4 June 26 - 19 July 26'), { recursive: true });
+    writeFileSync(join(VAULT(), '4 June 26 - 19 July 26', 'LRV_0001.lrv'), 'x'.repeat(4096));
+    const src = `
+import importlib.util, json, builtins, errno
+spec = importlib.util.spec_from_file_location('jq', ${JSON.stringify(QUEUE)})
+m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+real = builtins.open
+def boom(path, *a, **k):
+    if str(path).endswith('.exe'):
+        raise OSError(errno.EDEADLK, 'Resource deadlock avoided')
+    return real(path, *a, **k)
+builtins.open = boom
+print(json.dumps(list(m.drive_ready(${JSON.stringify(VAULT())}))))
+`;
+    const [ok, why] = JSON.parse(execFileSync('python3', ['-c', src], { encoding: 'utf8', env: env() }).trim());
+    expect(ok).toBe(true);
+    expect(why, 'the fallback must come from a SUBFOLDER, not the one top-level file').toMatch(/LRV_0001\.lrv/);
+  });
+
+  it('does NOT descend when the top level already has enough candidates', () => {
+    // The descent runs before every scheduled job. It must stay a cheap yes/no,
+    // never a tree walk of a video archive.
+    mkdirSync(VAULT(), { recursive: true });
+    for (const n of ['a.md', 'b.md', 'c.md']) writeFileSync(join(VAULT(), n), 'x');
+    mkdirSync(join(VAULT(), 'deep'), { recursive: true });
+    writeFileSync(join(VAULT(), 'deep', 'buried.md'), 'x');
+    const src = `
+import importlib.util, json, os
+spec = importlib.util.spec_from_file_location('jq', ${JSON.stringify(QUEUE)})
+m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+listed = []
+real = os.listdir
+def spy(p):
+    listed.append(str(p))
+    return real(p)
+os.listdir = spy
+ok, why = m.drive_ready(${JSON.stringify(VAULT())})
+os.listdir = real
+print(json.dumps([ok, listed]))
+`;
+    const [ok, listed] = JSON.parse(execFileSync('python3', ['-c', src], { encoding: 'utf8', env: env() }).trim());
+    expect(ok).toBe(true);
+    expect(listed.some((p) => p.endsWith('deep')), 'must not walk into subfolders it does not need').toBe(false);
+  });
+
   it('only reports not ready once EVERY candidate has failed, and says how many', () => {
     mkdirSync(VAULT(), { recursive: true });
     writeFileSync(join(VAULT(), 'a.md'), 'a');
