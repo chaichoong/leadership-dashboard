@@ -67,11 +67,17 @@ async function setup(page, { email = OWNER, projects = [] } = {}) {
 }
 
 const LIVE_ROW = { id: 'p1', created_at: '2026-07-01', name: 'Q3 Launch', kpi_name: 'Cash collected',
-  kpi_unit: '£', kpi_target: 5000, kpi_current: 1200, kpi_compute_code: 'return 1;' };
+  kpi_unit: '£', kpi_target: 5000, kpi_current: 1200, kpi_compute_code: 'return 1;',
+  kpi_last_updated: '2026-09-08T12:14:07.518Z', end_date: '2099-12-31' };
+// A closed quarter. Airtable's page filters {Closed On} = BLANK(); v_projects has no such
+// column, so the shim treats end_date before today as closed. This row must NOT appear.
+const CLOSED_ROW = { id: 'p0', created_at: '2026-04-01', name: 'Q2 Launch', kpi_name: 'Monthly Recurring Revenue',
+  kpi_unit: '£', kpi_target: 249, kpi_current: 0, kpi_compute_code: 'return 0;',
+  kpi_last_updated: '2026-09-04T09:27:39.029Z', end_date: '2026-06-30' };
 
 test.describe('KPI Library (Supabase twin)', () => {
   test('the owner sees the library on screen, not a blank page', async ({ page }) => {
-    await setup(page, { projects: [LIVE_ROW] });
+    await setup(page, { projects: [CLOSED_ROW, LIVE_ROW] });
     const panel = page.locator('#tab-kpi-library');
     // Visibility, not innerHTML: the bug rendered everything into a hidden element.
     await expect(panel).toBeVisible();
@@ -86,6 +92,9 @@ test.describe('KPI Library (Supabase twin)', () => {
     await expect(panel.locator('table').nth(0)).toContainText('Cash collected');
     await expect(panel.locator('table').nth(0)).toContainText('Q3 Launch');
     await expect(panel.locator('table').nth(0)).toContainText('£1,200 / £5,000');
+    await expect(panel.locator('table').nth(0)).toContainText('2026-09-08');    // Last moved
+    await expect(panel.locator('table').nth(0)).not.toContainText('Q2 Launch');  // closed quarter excluded
+    await expect(panel.locator('.kpi-card').nth(3)).toContainText('1');          // automated live count
     // No gate, no login, no diagnostic fallback, one heading only.
     await expect(page.locator('#sbLoginOverlay')).toHaveCount(0);
     await expect(page.locator('#sbOwnerGate')).toHaveCount(0);
