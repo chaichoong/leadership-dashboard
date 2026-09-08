@@ -144,12 +144,16 @@ def ask_api(system, user, model=None, max_tokens=MAX_TOKENS, timeout=900):
 
 
 REVIEW_PROMPT = """You are reviewing a rendered LinkedIn infographic for Operations Director against the bar set by its lead magnet: calm sage board, one clear hero,
-a route or placard carrying the content, props that never touch text, every zone used. Check ruthlessly and answer ONLY with JSON:
-{"pass": true|false, "issues": ["one line each: what is wrong and where (top-left, centre, bottom third...)"], "hero_clear": true|false}
-FAIL the picture if ANY of these is true: a shape, icon, line or ghosted numeral overlaps or touches any text; text is clipped, cut off, colliding or widowed;
-a line of the REQUIRED TEXT is missing or altered; a person's name appears; an emoji appears; a zone of roughly a third of the canvas is empty grid with nothing on it;
-the bottom edge is jammed or half-empty; the layout is rounded cards in a symmetric grid on a flat ground; anything looks glitchy, misdrawn or accidental
-(stray marks, broken shapes, mismatched numbering, duplicated labels). PASS only if a careful designer would publish it as is.
+a route or placard carrying the content, props that never touch text, every zone used. Answer ONLY with JSON, every field present:
+{"text_overlap": true|false, "text_clipped": true|false, "text_missing_or_altered": true|false, "person_name": true|false, "glitch": true|false,
+ "pass": true|false, "issues": ["one line each, what and where"]}
+Definitions, judge each strictly and literally:
+- text_overlap: a shape, icon, line, box edge or ghosted numeral overlaps or touches any letter of any text (an icon sitting NEXT to text inside its card, with clear space, is NOT overlap).
+- text_clipped: text is cut off by an edge or a box, or two pieces of text collide.
+- text_missing_or_altered: a line of the REQUIRED TEXT is absent or its words differ.
+- person_name: a person's name appears anywhere.
+- glitch: a shape is broken, misdrawn, duplicated, mismatched or accidental (stray marks, wrong numbering).
+- pass: true only if none of the five faults is true AND a careful designer would publish it as is. Layout taste (an empty zone, a quiet bottom, sparse props) goes in issues and may make pass false, but is NOT one of the five faults.
 REQUIRED TEXT:
 {required}"""
 
@@ -172,12 +176,21 @@ def review(png_path, required, model=None, timeout=180):
     return parse_review(text)
 
 
+FAULTS = ("text_overlap", "text_clipped", "text_missing_or_altered", "person_name", "glitch")
+
+
 def parse_review(text):
+    """(passed, issues). `issues` carries the fault names first ("fault:text_overlap") so a caller can tell a hard fault from a taste note."""
     try:
         s = text.strip().strip("`"); s = s[s.find("{"): s.rfind("}") + 1]; d = json.loads(s)
-        return bool(d.get("pass")), [str(x) for x in (d.get("issues") or [])][:8]
+        faults = ["fault:" + f for f in FAULTS if d.get(f) is True]
+        return bool(d.get("pass")), faults + [str(x) for x in (d.get("issues") or [])][:8]
     except (ValueError, AttributeError):
         return None, ["review did not answer in shape"]
+
+
+def hard_faults(issues):
+    return [i for i in (issues or []) if i.startswith("fault:")]
 
 
 def strip_html_text(page):
@@ -271,7 +284,8 @@ def selftest():
     assert extract_html("```html\n<!doctype html><p>x</p>\n```").startswith("<!doctype html") and extract_html("Sure! <!DOCTYPE html><p>").lower().startswith("<!doctype html")
     assert required_lines("stat", {"title": "", "number": "30 min", "label": "checks", "source": "s"}) == ["30 min", "checks"]
     assert api_model().startswith("claude-") and PROXY.startswith("https://claude-proxy.") and COMPOSER_MODEL.startswith("claude-opus")
-    assert parse_review('{"pass": false, "issues": ["ghost numeral over item B"], "hero_clear": true}') == (False, ["ghost numeral over item B"])
+    assert parse_review('{"pass": false, "text_overlap": true, "issues": ["ghost numeral over item B"]}') == (False, ["fault:text_overlap", "ghost numeral over item B"])
+    assert hard_faults(["fault:glitch", "empty bottom"]) == ["fault:glitch"] and hard_faults(["empty bottom"]) == []
     assert parse_review("```json\n{\"pass\": true, \"issues\": []}\n```") == (True, []) and parse_review("nope")[0] is None
     assert ".station" in _read(os.path.join(EPIC, "templates", "od-scaffold.html")) and "SCAFFOLD YOU MUST START FROM" in system_prompt() and "REQUIRED TEXT" in REVIEW_PROMPT
     assert picture_source("Episode 1992, Kevin's own words on camera: \"you've now got the ability\"") == "Episode 1992"

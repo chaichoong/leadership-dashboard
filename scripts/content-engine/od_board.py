@@ -172,7 +172,7 @@ def build(template, spec, post_text, source, day):
         parts.append(points_placard(56, y2, W - 112, min(h2, 220), "From the post", post_points(post_text), hook=hook))
         y3 = y2 + h2 + 30
         parts.append(keep_block(56, y3 + 10))
-        parts.append(side_props([(620, y3 + 20), (760, y3 + 20), (900, y3 + 20)]))
+        parts.append('<div class="abs" style="left:%dpx;top:%dpx;width:%dpx;border-top:1.5px solid var(--subtle)"></div>' % (400, y3 + 30, W - 456))
     elif template == "stat":
         number = str(spec.get("number", "")).strip(); label = str(spec.get("label", "")).strip()
         page_title = title or hook or label
@@ -191,7 +191,7 @@ def build(template, spec, post_text, source, day):
             parts.append(points_placard(56, y2, W - 112, min(h2, 200), "From the post: this week, before building anything", pts))
             y2 = y2 + h2 + 30
         parts.append(keep_block(56, y2 + 10))
-        parts.append(side_props([(620, y2 + 20), (760, y2 + 20), (900, y2 + 20)]))
+        parts.append('<div class="abs" style="left:%dpx;top:%dpx;width:%dpx;border-top:1.5px solid var(--subtle)"></div>' % (400, y2 + 40, W - 456))
     else:  # checklist
         items = [str(x) for x in spec.get("items", [])][:6]
         hd, body_top = header(kicker, title, hook if hook and hook.lower() != title.lower() else None); parts.append(hd)
@@ -205,7 +205,7 @@ def build(template, spec, post_text, source, day):
         parts.append('<div class="placard plate" style="left:56px;top:%dpx;width:968px;height:%dpx;padding:28px 34px 20px" data-hero><div class="mono" style="font-size:12px;color:var(--ink-faint)">Score yourself</div>%s</div>' % (body_top, ph, "".join(rows)))
         y2 = body_top + ph + 34
         parts.append(keep_block(56, y2))
-        parts.append(side_props([(760, y2 + 4), (900, y2 + 4)]))
+        parts.append('<div class="abs" style="left:%dpx;top:%dpx;width:%dpx;border-top:1.5px solid var(--subtle)"></div>' % (400, y2 + 30, W - 456))
     parts.append(strip(source)); parts.append('<div class="grain"></div>')
     page = head + "<body>\n<div class=\"canvas\">\n" + "\n".join(parts) + "\n</div>\n</body>\n</html>\n"
     page = page.replace("<title>Operations Director picture</title>", "<title>%s</title>" % esc(title or shape_name))

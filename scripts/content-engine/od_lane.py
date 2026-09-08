@@ -611,7 +611,7 @@ def render_visual(p):
         # A board's geometry is code, so the review's taste notes (an open zone, a quiet bottom) are logged, not fatal; only a HARD fault
         # rejects it: something touching text, clipped or missing text, a misspelling, a name. Measured 8 Sep: the reviewer sent two clean
         # boards to Gemini over "empty grid", and Gemini garbled them.
-        hard = [i for i in (issues or []) if re.search(r"overlap|touch|collid|clip|cut off|missing|altered|misspel|garbled|person's name|\bname\b|emoji", i, re.I)]
+        hard = od_compose.hard_faults(issues)
         if passed or passed is None or not hard:
             p["card_png"] = png; p["picture"] = "board renderer (lead magnet components), preflight clean, picture review %s" % ("passed" if passed else ("unavailable" if passed is None else "passed with notes"))
             if issues and not passed: p["picture_notes"] = issues
@@ -813,7 +813,41 @@ def attach_files(task_id, paths):
     return paths
 
 
-def _raise(name, desc, out, record, note_ref):
+RECEIPT_MIN_WORDS, RECEIPT_MAX_POINTS = 6, 6      # mirrors agent-dispatch.feedback_points (the gate that reads the receipt)
+
+
+def feedback_points(feedback):
+    text = re.sub(r"^\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}\]\s*", "", str(feedback or ""), flags=re.M)
+    parts = re.split(r"(?<=[.!?])\s+|\n+", text)
+    return [x.strip() for x in parts if len(x.split()) >= RECEIPT_MIN_WORDS][:RECEIPT_MAX_POINTS]
+
+
+def receipt_for(points, post=None):
+    """One honest line per point Kevin made: what changed since the round he sent back (the dispatcher's redo receipt, 7 Sep 2026)."""
+    lines = []
+    for pt in points:
+        low = pt.lower()
+        if re.search(r"\bname\b|kevin|generic|universal", low):
+            ch = "no person's name appears on any picture; the Operations Director brand and logo carry it"
+        elif re.search(r"image|picture|infograph|glitch|overlap|visual|standard|quality|feel", low):
+            ch = "the picture is rebuilt: drawn by code from the lead magnet's own components (route, stations, placards, logo strip), checked by the preflight and a designer's review; nothing touches the text"
+        elif re.search(r"newsletter|edition|lead magnet|90%|high-level|deeper", low):
+            ch = "edition 1 is rewritten as the high-level map of how AI agents take 90% of daily operations, under the lead magnet's promise; later editions go one area deeper each week"
+        elif re.search(r"booking|link", low):
+            ch = "the booking link is now the website's book-a-demo page and only the code can add it"
+        elif re.search(r"carousel|file|attach|see", low):
+            ch = "the picture and the carousel PDF are attached to this card as files, not only linked"
+        elif re.search(r"expert|quote|source people|austin|martell", low):
+            ch = "no other expert is named unless quoted word for word; the method reads as Operations Director's own"
+        elif re.search(r"brief|recording|store|web app|access|flow", low):
+            ch = "the recording brief lives as records in the Content Machine table and on the AI Agents dashboard with a Recorded button"
+        else:
+            ch = "read and applied: the copy you accepted is unchanged; the picture is rebuilt to the lead magnet's standard"
+        lines.append("- %s → %s" % (pt.rstrip(" ."), ch))
+    return "\n".join(lines)
+
+
+def _raise(name, desc, out, record, note_ref, files=None, post=None):
     today = dt.date.today().isoformat()
     tid = approval.existing_task(name)
     if not tid:
@@ -825,9 +859,26 @@ def _raise(name, desc, out, record, note_ref):
         tid = json.loads(r.stdout.strip().splitlines()[-1])["taskId"]
     with tempfile.NamedTemporaryFile("w", suffix=".md", delete=False) as fh:
         fh.write(out); path = fh.name
+    cmd = [sys.executable, approval.DISPATCH, "submit", tid, "--agent", approval.AGENT_TM, "--type", approval.TASK_TYPE, "--output-file", path]
+    for f in (files or []):
+        if f and os.path.exists(f): cmd += ["--attach", f]
+    # a redo after "Changes requested" must answer Kevin's points one by one (the dispatcher's receipt gate, 7 Sep 2026)
+    rpath = None
     try:
-        r = subprocess.run([sys.executable, approval.DISPATCH, "submit", tid, "--agent", approval.AGENT_TM, "--type", approval.TASK_TYPE, "--output-file", path], capture_output=True, text=True)
-    finally: os.remove(path)
+        tf = watch._airtable("GET", approval.TASKS_API + "/" + tid + "?returnFieldsByFieldId=true")["fields"]
+        outcome = tf.get(approval.TF["outcome"]); outcome = outcome.get("name") if isinstance(outcome, dict) else outcome
+        prior = (tf.get(approval.TF["feedback"]) or "").strip()
+        if outcome == "Changes requested" and prior:
+            with tempfile.NamedTemporaryFile("w", suffix=".md", delete=False) as fh:
+                fh.write(receipt_for(feedback_points(prior), post)); rpath = fh.name
+            cmd += ["--receipt", rpath]
+    except Exception as ex:
+        print("od cards: could not read prior feedback for %s (%s)" % (tid, str(ex)[:80]))
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True)
+    finally:
+        os.remove(path)
+        if rpath: os.remove(rpath)
     if r.returncode != 0: raise SystemExit("od cards: submit failed for %s: %s" % (tid, (r.stderr or r.stdout)[-400:]))
     if record:
         rec = watch._airtable("GET", watch.API + "/" + record)
@@ -839,7 +890,7 @@ def raise_cards(dry_run=False):
     if on_hold(): print("od cards: ON HOLD (%s exists), no cards raised" % HOLD_FILE); return
     state = _load(STATE); posts = state.get("posts", {}); m = publish.mode(); today = dt.date.today().isoformat(); tp = state.get("topics", [])
     for pid, p in sorted(posts.items()):
-        if p.get("task") or p.get("verdict") or pid < today: continue
+        if p.get("task") or p.get("verdict") or (pid < today and not p.get("old_task")): continue   # a redo of a card Kevin already saw may land after its date
         if not dry_run:
             for k, attr in (("card_png", "card_url"), ("card_pdf", "pdf_url")):
                 if p.get(k) and not p.get(attr):
@@ -847,8 +898,8 @@ def raise_cards(dry_run=False):
                     except SystemExit as ex: print("od cards: upload of %s failed for %s (%s)" % (k, pid, str(ex)[:120]))
         name, desc, out = build_card(p, m, tp)
         if dry_run: print(out); print("-----"); continue
-        p["task"] = _raise(name, desc, out, p.get("record"), p.get("record")); p["raised"] = dt.datetime.now().isoformat(timespec="seconds")
-        p["attached"] = [os.path.basename(x) for x in attach_files(p["task"], [p.get("card_png"), p.get("card_pdf")])]
+        p["task"] = _raise(name, desc, out, p.get("record"), p.get("record"), files=[p.get("card_png"), p.get("card_pdf")], post=p); p["raised"] = dt.datetime.now().isoformat(timespec="seconds")
+        p["attached"] = [os.path.basename(x) for x in (p.get("card_png"), p.get("card_pdf")) if x and os.path.exists(x)]
         _save(STATE, state); print("od cards: %s -> %s (%s)%s" % (pid, p["task"], name, (" + %d file%s" % (len(p["attached"]), "" if len(p["attached"]) == 1 else "s")) if p["attached"] else ""))
     for key, ed in sorted(state.get("newsletters", {}).items()):
         if ed.get("task") or ed.get("verdict") or ed["date"] < today: continue
@@ -1062,11 +1113,15 @@ def selftest():
     _, _, o3 = build_newsletter_card(ed, "live"); assert "LinkedIn has no API" in o3 and "paste it yourself" in o3
     assert attach_files("recX", ["/nonexistent/a.png"]) == [] and "eight-stage" in WEBSITE_METHOD and P.PRICING in WEBSITE_METHOD
     pl = newsletter_plan(ed, True); assert pl["profile"] == "linkedin" and pl["mode"] == "test" and pl["steps"][0]["url"].startswith("https://www.linkedin.com/article/new") and pl["submit"]["text"] == "Publish"
+    pts = feedback_points("Terrible images again. We need to improve on those. I can't see the carousel file, so can you reattach that for me to see? Short.")
+    assert pts == ["We need to improve on those.", "I can't see the carousel file, so can you reattach that for me to see?"], pts
+    rc = receipt_for(["The infographics are just so substandard, glitchy bits", "Remove my name from the image please", "You're using the wrong booking link here"])
+    assert rc.count("\n") == 2 and "→ the picture is rebuilt" in rc and "no person's name" in rc and "book-a-demo" in rc and all(l.startswith("- ") for l in rc.split("\n"))
     assert minutes_for("Approved as-is") == 2 and minutes_for("Approved with minor edits") == 5 and minutes_for("Changes requested") == 10
     import tempfile as _tf
     globals()["HOLD_FILE"] = os.path.join(_tf.gettempdir(), "od-hold-test-%d" % os.getpid()); assert not on_hold(); open(HOLD_FILE, "w").write(""); assert on_hold(); os.remove(HOLD_FILE)
     assert BUSINESS_OD != approval.BUSINESS_PERSONAL and publish.BRANDS[BRAND]["category"] == BRAND and AI_THRESHOLD == 6
-    print(json.dumps({"checks": 64, "failed": []}))
+    print(json.dumps({"checks": 67, "failed": []}))
 
 
 if __name__ == "__main__":
