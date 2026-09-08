@@ -83,7 +83,7 @@
   document.getElementById('countries').innerHTML = p.countries.map(c => '<span class="chip">' + esc(c.name) + '<span>' + c.runs + (c.runs === 1 ? ' run' : ' runs') + '</span></span>').join('');
 
   const map = L.map('map', { worldCopyJump: false, scrollWheelZoom: false, attributionControl: true }).setView([20, 40], 2);
-  L.tileLayer('https://{s}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}{r}.png', { attribution: '&copy; OpenStreetMap contributors &copy; CARTO', maxZoom: 8 }).addTo(map);
+  L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '&copy; OpenStreetMap contributors', maxZoom: 8, opacity: 0.8 }).addTo(map);
   // countries run in, from Natural Earth outlines
   try {
     const g = await (await fetch('data/countries.geojson')).json();
