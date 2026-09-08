@@ -1496,9 +1496,16 @@ function apvGroupTasks(rows){
     const parent = {}, reason = {};
     const find = (x)=>{ while(parent[x] !== x){ parent[x] = parent[parent[x]]; x = parent[x]; } return x; };
     rows.forEach(t=>{ parent[t.id] = t.id; });
+    // A sign-in wait is not a decision, so it never joins a group: on 8 Sep
+    // 2026 six "SIGN-IN: <site> session lapsed" cards (six different sites)
+    // folded into "6 tasks, one thing" with a Reject-all strip, because the
+    // key saw "sign, session, lapsed" and treated the site name as noise.
+    const isWait = {};
+    rows.forEach(t=>{ isWait[t.id] = !!apvSignInNeeded(t.agentOutput); });
     for(let i = 0; i < rows.length; i++){
         for(let j = i + 1; j < rows.length; j++){
             const a = rows[i], b = rows[j];
+            if(isWait[a.id] || isWait[b.id]) continue;
             // Fall back to the id so two NAMELESS tasks can never collide — an
             // empty key would merge unrelated work into one verdict.
             const ka = dupeTaskKey(a.name || '') || ('id:' + a.id);
@@ -1755,6 +1762,8 @@ function apvTrigger(raw){
     const t = /trigger\s*=\s*([^;|,]+)/i.exec(m[1]);
     if(!t) return null;
     const key = t[1].trim().toLowerCase();
+    // trigger=none means nothing made it his; a "Why you: none" chip is noise.
+    if(key === 'none' || key === '') return null;
     return APV_TRIGGER_WORDS[key] || (key.indexOf('other:') === 0 ? key.slice(6).trim() : key);
 }
 

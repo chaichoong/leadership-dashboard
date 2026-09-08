@@ -1791,7 +1791,13 @@ HANDBACK_KEVIN_RE = re.compile(
     r"|\bneeds\s+Kevin\s+to\s+(?:manually\s+)?(?:log|sign)\s*in(?:to)?\b"
     r"|\bKevin\s*[,:\-–—]+\s*(?:please\s+)?(?:manually\s+)?(?:log|sign)\s*in(?:to)?\b"
     r"|\b(?:next\s+step|action|to[- ]do)\s+for\s+Kevin\s*[:\-–—]\s*(?:please\s+)?(?:log|sign)\s*in(?:to)?\b"
-    r"|\bKEVIN\s+ACTION\s*:\s*(?:please\s+)?(?:log|sign|call|phone|ring)\b",
+    r"|\bKEVIN\s+ACTION\s*:\s*(?:please\s+)?(?:log|sign|call|phone|ring)\b"
+    # The carry-out line's own grammar (8 Sep 2026, five live cards): "Kevin
+    # logging into Google AdSense and completing tax information", "Kevin
+    # signing into TopCashback, clicking ... and buying", "Kevin calling EE on
+    # 150". Gerunds slipped past every form above.
+    r"|\bKevin\s+(?:manually\s+)?(?:logging|signing)\s+in(?:to)?\b"
+    r"|\bKevin\s+(?:calling|phoning|ringing)\b",
     re.I,
 )
 HANDBACK_YOU_RE = re.compile(

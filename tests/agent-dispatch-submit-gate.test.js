@@ -477,7 +477,18 @@ describe('hand-backs are refused at submit (4 Sep 2026)', () => {
     expect(r.error).toMatch(/hands Kevin a job/);
   });
   it.each([
+    'Kevin logging into Google AdSense at adsense.google.com and completing tax information plus bank details.',
+    'Kevin signing into TopCashback, clicking Everywhen, Swinton and British Gas in turn, and buying the cheapest.',
+    'Kevin calling EE on 150 or logging into discover.ee.co.uk before 20 Sep 2026 to select a new plan.',
+  ])('refuses the carry-out gerunds of 8 Sep 2026: %s', (line) => {
+    const r = submit({ type: 'Research', output: report + line + '\n\n' + CARRY });
+    expect(r.refused).toBe(true);
+    expect(r.error).toMatch(/hands Kevin a job/);
+  });
+  it.each([
     "Kevin's steps only: the security code and the payment. Everything else is prepared.",
+    'Kevin signing the attached statement if the content is accurate.',
+    'Kevin paying EUR 45 at www.amendes.gouv.fr using reference 3866676730.',
     'Once Kevin approves, the letter is posted.',
     'Kevin can review the attached statement.',
     'You can see the balance on the attached PDF.',
