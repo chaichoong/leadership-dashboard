@@ -123,4 +123,13 @@ describe('content-engine render', () => {
     }
     expect(src).toMatch(/STATUS_DONE = "Optimisation and Design Done"/);
   });
+
+  it('the Learnings-only rebuild never touches the 16:9 master: its branch comes before the sign-off pause search (8 Sep 2026, 2196 rebuild died on masters["16:9"])', () => {
+    const r = readFileSync(path.join(DIR, 'render.py'), 'utf8');
+    const branch = r.indexOf('if role == "lfmd-only":');
+    const pause = r.indexOf('find_pause(masters["16:9"]');
+    expect(branch).toBeGreaterThan(0);
+    expect(pause).toBeGreaterThan(branch);
+    expect(r.indexOf('if role == "lfmd-only":', branch + 1)).toBe(-1); // one branch, not a second copy after the full render
+  });
 });
