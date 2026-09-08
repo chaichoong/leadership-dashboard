@@ -434,6 +434,20 @@ def cmd_send(args):
                    "subject": mail["subject"], "taskName": mail["taskName"],
                    "messageId": result.get("id"),
                    "threadId": result.get("threadId")})
+    # The dated trail (Kevin, 8 Sep 2026): a send that only lives in a local
+    # ledger is invisible on the next card, and a payment-plan draft followed
+    # a restraint-order letter nobody could see had gone. One stamped line.
+    try:
+        stamp = datetime.now().strftime("%d %b %Y %H:%M")
+        att = f" with {attachment['filename']}" if attachment else ""
+        line = (f"[{stamp} — send-email] SENT: email to {', '.join(mail['to'])} "
+                f"\"{mail['subject']}\"{att} (message {result.get('id') or '?'})")
+        live = get_task(args.task).get("fields", {}) or {}
+        notes = (str(live.get(AF["notes"]) or "").rstrip() + "\n\n" + line).strip()[-90000:]
+        api("PATCH", f"https://api.airtable.com/v0/{BASE_ID}/{TASKS}/{args.task}",
+            {"fields": {AF["notes"]: notes}})
+    except SystemExit as e:
+        print(f"WARNING: sent, but the SENT stamp could not be written: {e}", file=sys.stderr)
     print(json.dumps({"sent": args.task, "to": mail["to"], "cc": mail["cc"],
                       "subject": mail["subject"],
                       "messageId": result.get("id")}))

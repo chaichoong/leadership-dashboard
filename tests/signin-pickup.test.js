@@ -299,7 +299,7 @@ m.get_task = lambda t: {'id': t, 'fields': dict(captured.get('fields', {}))}
 m.supersede_attachments = lambda *a, **k: None
 import tempfile, os
 fh = tempfile.NamedTemporaryFile('w', suffix='.md', delete=False)
-fh.write('Verified from the register. ' * 12 + '\\nSIGN-IN NEEDED: Pingen (https://app.pingen.com/)\\n\\n**Carrying this out will involve:** Nothing until you sign in; then the robot posts the letter.')
+fh.write('TRACK RECORD: none found (searched tasks + Gmail for email hmrc@example.com)\\n\\n' + 'Verified from the register. ' * 12 + '\\nSIGN-IN NEEDED: Pingen (https://app.pingen.com/)\\n\\n**Carrying this out will involve:** Nothing until you sign in; then the robot posts the letter.')
 fh.close()
 agent = sorted(m.AGENTS)[0]
 try:

@@ -69,6 +69,7 @@ F = {
     "desc":         "fldRGhBQViKZKtkQ6",
     "inboundSender": "fldzf4xlbrQuktx0i",
     "inboundUrl":   "fldXf1p0vtHqOZcKl",
+    "notes":        "fldR7apBzSp3oxFxz",
 }
 
 PRIORITY_RANK = {"Low": 0, "Medium": 1, "High": 2, "Urgent": 3}
@@ -1062,6 +1063,7 @@ def cmd_create(fields, force=False, dry_run=False):
                          "Duplicate gate: folded a new item into this task instead of "
                          "creating a sibling (one subject = one open task). "
                          "New item: " + str(fields.get(F["name"], "")))
+            write_track_record(task_id, fields)
         print(json.dumps({"action": "updated", "taskId": task_id,
                           "matchedName": verdict.get("matchedName", ""),
                           "key": verdict.get("key", ""), "dryRun": dry_run}))
@@ -1070,6 +1072,7 @@ def cmd_create(fields, force=False, dry_run=False):
     if not dry_run:
         created = _request("POST", f"/{TASKS}", {"typecast": True, "fields": fields})
         task_id = created.get("id", "")
+        write_track_record(task_id, fields)
     else:
         task_id = "(dry run)"
     out = {"action": "created", "taskId": task_id, "key": verdict.get("key", ""),
@@ -1078,6 +1081,46 @@ def cmd_create(fields, force=False, dry_run=False):
         out["note"] = verdict["note"]
     print(json.dumps(out))
     return 0
+
+
+def track_record_for(fields, task_id=None, runner=None):
+    """The TRACK RECORD block for a new task: every past task and email with
+    the same sender, and any reference-like token in the name or description.
+    Kevin's decision (8 Sep 2026): retrieval is a tool the triage step runs
+    at creation, so every downstream agent inherits the same record. Returns
+    the block text; a failure returns a line that SAYS it failed, so absence
+    is visible on the card rather than silent."""
+    import subprocess
+    sender = str(fields.get(F["inboundSender"]) or "").strip().lower()
+    text = " ".join(str(fields.get(k) or "") for k in (F["name"], F["desc"]))
+    cmd = [sys.executable, os.path.join(os.path.dirname(os.path.abspath(__file__)), "agent-dispatch.py"),
+           "history", "--text", "--from-text", text[:2000]]
+    if task_id and task_id != "(dry run)":
+        cmd += ["--task", task_id]
+    if sender and "@" in sender:
+        cmd += ["--email", sender]
+    run = runner or (lambda c: subprocess.run(c, capture_output=True, text=True, timeout=120))
+    try:
+        r = run(cmd)
+    except Exception as e:                                   # noqa: BLE001
+        return f"TRACK RECORD: not built ({str(e)[:120]})"
+    if getattr(r, "returncode", 1) != 0 or not (r.stdout or "").strip():
+        return "TRACK RECORD: not built (" + ((r.stderr or "").strip().splitlines() or ["history failed"])[-1][:160] + ")"
+    return r.stdout.strip()
+
+
+def write_track_record(task_id, fields):
+    """Append the TRACK RECORD to the task's Notes, dated, so the card and
+    every agent see it. Never raises: a task with no record beats no task."""
+    try:
+        block = track_record_for(fields, task_id)
+        live = _request("GET", f"/{TASKS}/{task_id}?returnFieldsByFieldId=true").get("fields", {}) or {}
+        stamp = date.today().strftime("%d %b %Y")
+        notes = (str(live.get(F["notes"]) or "").rstrip() + f"\n\n[{stamp} — create-agent-task] " + block).strip()[-90000:]
+        _request("PATCH", f"/{TASKS}/{task_id}", {"typecast": True, "fields": {F["notes"]: notes}})
+        print("TRACK RECORD written: %s" % block.splitlines()[0][:120], file=sys.stderr)
+    except Exception as e:                                   # noqa: BLE001
+        print("TRACK RECORD not written: %s" % str(e)[:200], file=sys.stderr)
 
 
 def cmd_check(name):

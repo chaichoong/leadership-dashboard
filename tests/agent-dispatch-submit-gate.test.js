@@ -95,7 +95,11 @@ print(json.dumps(out))
 // character under SUMMARY_MIN_CHARS (280) once the tier-1 banner was
 // prepended, so adding any header at all silently flipped that test into
 // a different code path. A realistic submission has both.
-const GOOD_EMAIL = 'TO: someone@example.com\nFROM: kevinbrittain@gmail.com\nSUBJECT: A subject\n---\nThe body of the email.\n\n**Carrying this out will involve:** sending this email to someone@example.com.';
+// Every Correspondence item carries the dated record of past dealings with the
+// contact (Kevin, 8 Sep 2026); it sits above the headers and never reaches
+// the email. Fixtures carry the empty form.
+const TRACK = 'TRACK RECORD: none found (searched tasks + Gmail for email someone@example.com)\n\n';
+const GOOD_EMAIL = TRACK + 'TO: someone@example.com\nFROM: kevinbrittain@gmail.com\nSUBJECT: A subject\n---\nThe body of the email.\n\n**Carrying this out will involve:** sending this email to someone@example.com.';
 
 // A long deliverable — the shape that gets a derived summary in Kevin's approval
 // box. Anything under 280 characters is shown whole, so the mandate below does
@@ -129,7 +133,7 @@ describe('agent-dispatch submit gate', () => {
   it('refuses a Correspondence output the send gate cannot parse (085)', () => {
     const r = submit({
       type: 'Correspondence',
-      output: '## THE EMAIL, word for word\n\nDear Fylde Council, I am writing about...',
+      output: TRACK + '## THE EMAIL, word for word\n\nDear Fylde Council, I am writing about...',
     });
     expect(r.refused, 'prose submitted as Correspondence was accepted').toBe(true);
     expect(r.error).toMatch(/Correspondence/);
@@ -228,7 +232,7 @@ describe('agent-dispatch submit gate', () => {
       const email = ['TO: council@example.com', 'FROM: kevinbrittain@gmail.com', 'SUBJECT: Account 123', '---',
         'Dear Sir,', '', 'x'.repeat(300), '',
         "**Carrying this out will involve:** sending the email to the council from Kevin's Gmail."].join('\n');
-      const r = submit({ type: 'Correspondence', output: email });
+      const r = submit({ type: 'Correspondence', output: TRACK + email });
       expect(r.refused, r.error).toBe(false);
     });
 
@@ -505,7 +509,7 @@ describe('hand-backs are refused at submit (4 Sep 2026)', () => {
   });
   it('a letter that tells ITS recipient to log in is not a hand-back to Kevin (second review)', () => {
     const email = 'TO: tenant@example.com\nFROM: kevinbrittain@gmail.com\nSUBJECT: Rent this month\n---\nDear Sam,\n\nYou must log in to the tenant portal to pay your rent this month. You should call the office if the portal is down.\n\nKind regards\nKevin\n\n**Carrying this out will involve:** Sending this email to the tenant.';
-    const r = submit({ type: 'Correspondence', output: email });
+    const r = submit({ type: 'Correspondence', output: TRACK + email });
     expect(r.error || '').not.toMatch(/hands Kevin a job/);
   });
 });

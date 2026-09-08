@@ -1059,11 +1059,13 @@ def supersede_attachments(task_id, filenames):
     leaves two identically-named links on the approval card and no way to
     tell which one is current."""
     if not filenames:
-        return
+        return []
     atts = (get_task(task_id).get("fields", {}) or {}).get(AF["attachments"]) or []
     keep = [{"id": a["id"]} for a in atts if a.get("filename") not in filenames]
+    dropped = [a.get("filename") for a in atts if a.get("filename") in filenames]
     if len(keep) != len(atts):
         patch_task(task_id, {AF["attachments"]: keep})
+    return dropped
 
 
 def patch_task(task_id, fields):
@@ -2604,9 +2606,13 @@ def cmd_handover_property(args):
 
 
 def cmd_attach(args):
-    supersede_attachments(args.task, {os.path.basename(p) for p in args.file})
+    dropped = supersede_attachments(args.task, {os.path.basename(p) for p in args.file}) or []
     names = [upload_attachment(args.task, p) for p in args.file]
-    print(json.dumps({"task": args.task, "attached": names}))
+    purpose = (getattr(args, "purpose", "") or "").strip() or "attached for the approval"
+    notes = (get_task(args.task).get("fields", {}) or {}).get(AF["notes"])
+    stamps = [superseded_stamp(n) for n in dropped] + [attached_stamp(n, purpose) for n in names]
+    patch_task(args.task, {AF["notes"]: append_notes(notes, *stamps)})
+    print(json.dumps({"task": args.task, "attached": names, "superseded": dropped}))
 
 
 def cmd_submit(args):
@@ -2668,6 +2674,20 @@ def cmd_submit(args):
     # Read early so a report with nothing to decide can file itself below.
     tf_early = (get_task(args.task).get("fields", {}) or {})
     is_inbound = bool(tf_early.get(AF["inboundTask"]))
+
+    # THE FILE GATE (Kevin, 8 Sep 2026): the document the action uses is on
+    # the card, from this round, or the submit is refused.
+    attach_names = {os.path.basename(p) for p in (getattr(args, "attach", None) or [])}
+    problem = document_action_problem(output, args.type, tf_early.get(AF["notes"]), attach_names)
+    if problem:
+        sys.exit(f"ERROR: refusing to submit {args.task} — {problem}")
+
+    # THE TRACK RECORD GATE (Kevin, 8 Sep 2026): a reply, a creditor item or
+    # an inbound matter states what has already passed with this contact.
+    creditor = ALL_AGENTS.get(args.agent, {}).get("agent") == "creditor-management"
+    problem = track_record_problem(output, args.type == "Correspondence" or creditor or is_inbound)
+    if problem:
+        sys.exit(f"ERROR: refusing to submit {args.task} — {problem}")
     checked = checked_problem(output, args.type, is_inbound)
     if checked:
         sys.exit(f"ERROR: refusing to submit {args.task} — {checked}.\n"
@@ -2865,9 +2885,16 @@ def cmd_submit(args):
     # seventeen tests and any internal caller, none of which know about a flag
     # added later. A new optional flag must never make an existing caller crash.
     to_attach = list(getattr(args, "attach", None) or [])
-    supersede_attachments(args.task, {os.path.basename(p) for p in to_attach})
-    for path in to_attach:
-        upload_attachment(args.task, path)
+    # `or []`: internal callers and tests stub supersede_attachments to None.
+    dropped = supersede_attachments(args.task, {os.path.basename(p) for p in to_attach}) or []
+    uploaded = [upload_attachment(args.task, path) for path in to_attach]
+    # The trail: which file came with which round, and that a submit happened.
+    round_no = submitted_round(tf.get(AF["notes"]))
+    stamps = ([superseded_stamp(n) for n in dropped]
+              + [attached_stamp(n, f"with this submission (round {round_no})") for n in uploaded]
+              + [submitted_stamp(round_no, args.type, uploaded)])
+    tf[AF["notes"]] = append_notes(tf.get(AF["notes"]), *stamps)
+    tf["_receiptAdded"] = True
 
     files_itself = informational_only(output, args.type, tier1=bool(getattr(args, "tier1", False)))
     if not files_itself and is_inbound and args.type in REPORT_TYPES \
@@ -3541,6 +3568,285 @@ def cmd_signed(args):
     print(json.dumps({"task": args.task, "reopened": True,
                       "agent": ALL_AGENTS.get(team[0], {}).get("agent", team[0]),
                       "then": args.then, "pdf": args.pdf}))
+    return 0
+
+
+# ── The dated trail (Kevin, 8 Sep 2026) ─────────────────────────────────────
+# Kevin's ask: "I need to see the latest attachment before I approve, and a
+# date-ordered record of what has actually happened, including whether the
+# letter has already gone." Airtable stores no date on an attachment and the
+# card showed only the newest Agent Output, so a task could come back "done"
+# still wearing last week's file, and a payment-plan draft could follow a
+# restraint-order letter nobody had recorded. Every event now lands in Notes
+# as one stamped line the AI Agents page parses into "What has happened so
+# far": files attached and superseded, every submit, every send, and the
+# TRACK RECORD of past dealings with the same contact or reference.
+ATTACHED_MARK = "ATTACHED:"
+SUPERSEDED_MARK = "SUPERSEDED:"
+SUBMITTED_MARK = "SUBMITTED"
+SENT_MARK = "SENT:"
+TRACK_RECORD_MARK = "TRACK RECORD:"
+NOTE_STAMP_RE = re.compile(r"^\[(?P<day>\d{1,2} \w{3} \d{4})(?: (?P<time>\d{2}:\d{2}))?\s*[—–-]\s*(?P<who>[^\]]+)\]\s*(?P<text>.*)$", re.M)
+TRACK_RECORD_LINE_RE = re.compile(r"^\s*[-*]\s*(?P<day>\d{1,2} \w{3} \d{4}|\d{4}-\d{2}-\d{2})\b", re.M)
+TRACK_RECORD_NONE_RE = re.compile(r"^\s*TRACK RECORD:\s*none found\b.*\(searched[^)]*\)", re.I | re.M)
+ATTACH_WORD_RE = re.compile(r"\b(attached|attachment|attachments|enclosed)\b", re.I)
+
+
+def note_stamp():
+    return datetime.now(LONDON).strftime("%d %b %Y %H:%M")
+
+
+def note_line(who, text):
+    return f"[{note_stamp()} — {who}] {text}"
+
+
+def append_notes(existing, *lines):
+    lines = [l for l in lines if l]
+    if not lines:
+        return str(existing or "")
+    return (str(existing or "").rstrip() + "\n\n" + "\n".join(lines)).strip()[-90000:]
+
+
+def attached_stamp(filename, purpose, who="agent"):
+    return note_line(who, f"{ATTACHED_MARK} {filename} — {purpose}")
+
+
+def superseded_stamp(filename):
+    return note_line("agent-dispatch", f"{SUPERSEDED_MARK} {filename} replaced by a newer copy with the same name")
+
+
+def submitted_round(notes):
+    return len(re.findall(r"\] " + SUBMITTED_MARK + r" \(round \d+\)", str(notes or ""))) + 1
+
+
+def submitted_stamp(round_no, task_type, files):
+    tail = (" with " + ", ".join(files)) if files else " with no new file"
+    return note_line("agent-dispatch", f"{SUBMITTED_MARK} (round {round_no}) as {task_type}{tail}")
+
+
+def files_this_round(notes):
+    """Filenames ATTACHED since the last SUBMITTED stamp (this round's files)."""
+    text = str(notes or "")
+    last = -1
+    for m in re.finditer(r"\] " + SUBMITTED_MARK + r" \(round \d+\)", text):
+        last = m.end()
+    names = set()
+    for m in NOTE_STAMP_RE.finditer(text):
+        if m.start() < last:
+            continue
+        t = m.group("text")
+        if t.startswith(ATTACHED_MARK):
+            names.add(t[len(ATTACHED_MARK):].split(" — ")[0].strip())
+    return names
+
+
+def carry_out_line(output):
+    m = re.search(r"\*{0,2}carrying this out will involve:?\*{0,2}\s*([^\n]+)", str(output or ""), re.I)
+    return m.group(1).strip() if m else ""
+
+
+def document_action_problem(output, task_type, notes, attached_now):
+    """Why this submission promises a file Kevin cannot see; '' when fine.
+
+    Two shapes. A Correspondence output with an ATTACH header sends that
+    file, so the same filename must be on the task from THIS round. Any
+    output whose carry-out line says the work goes with something attached
+    or enclosed needs a file attached this round. Earlier rounds do not
+    count: that is the "old attachment still on the card" Kevin described.
+    """
+    fresh = set(attached_now or set()) | files_this_round(notes)
+    m = re.search(r"^ATTACH:\s*(.+?)\s*$", str(output or ""), re.M)
+    if m:
+        name = os.path.basename(m.group(1).strip())
+        if name not in fresh:
+            return (f"the email's ATTACH header names {name!r} but that file is not on the task "
+                    f"from this round (on the task this round: {sorted(fresh) or 'nothing'}). "
+                    "Kevin approves the file he can open: pass --attach with the same file "
+                    "in the same submit, so the card carries the copy that will be sent.")
+    line = carry_out_line(output)
+    if line and ATTACH_WORD_RE.search(line) and not fresh:
+        return ("its carry-out line promises something attached or enclosed, but no file was "
+                "attached in this round. Kevin's rule (8 Sep 2026): when the action involves a "
+                "document, the exact document goes on the gate with the same submit "
+                "(--attach PATH), never a copy from an earlier round.")
+    return ""
+
+
+def track_record_problem(output, required):
+    """Why the output lacks the dated record of past dealings; '' when fine."""
+    if not required:
+        return ""
+    text = str(output or "")
+    if TRACK_RECORD_NONE_RE.search(text):
+        return ""
+    i = text.find(TRACK_RECORD_MARK)
+    if i == -1:
+        return ("it carries no TRACK RECORD. Kevin's ruling (8 Sep 2026): a reply, a creditor "
+                "item or any inbound matter states what has already passed with this contact, "
+                "reference or property, in date order, before he is asked to decide. Build it with\n"
+                "         python3 scripts/agent-dispatch.py history --task <id> --email <addr> "
+                "--ref <reference> --text\n"
+                "       and paste the block into the output (a 'TRACK RECORD: none found "
+                "(searched ...)' line counts).")
+    after = text[i:]
+    if not TRACK_RECORD_LINE_RE.search(after):
+        return ("its TRACK RECORD block has no dated lines. Each line starts with a date "
+                "(dd Mon yyyy) and says what was sent, received or agreed; use "
+                "'TRACK RECORD: none found (searched ...)' when the search was empty.")
+    return ""
+
+
+# ── history: the dated record of everything with a contact or reference ──
+REF_TOKEN_RE = re.compile(r"\b(?=[A-Z0-9-]{5,}\b)(?:[A-Z]*\d[A-Z0-9-]*)\b")
+
+
+def history_terms(emails=(), refs=(), properties=()):
+    terms = []
+    for e in emails:
+        e = (e or "").strip().lower()
+        if e:
+            terms.append(("email", e))
+    for r in refs:
+        r = (r or "").strip()
+        if len(r) >= 3:
+            terms.append(("ref", r))
+    for p in properties:
+        p = (p or "").strip()
+        if len(p) >= 4:
+            terms.append(("property", p))
+    return terms
+
+
+def _airtable_quote(v):
+    return "'" + str(v).replace("\\", "\\\\").replace("'", "\\'") + "'"
+
+
+def history_formula(terms):
+    fields = ["Task Name", "Description", "Notes", "Agent Output", "Feedback History", "Inbound Sender"]
+    parts = []
+    for _kind, term in terms:
+        q = _airtable_quote(term.lower())
+        parts.append("OR(" + ",".join(f"FIND({q}, LOWER({{{f}}}&''))" for f in fields) + ")")
+    return "OR(" + ",".join(parts) + ")" if parts else ""
+
+
+def history_entries_from_task(rec, exclude_id=None):
+    """The dated events one task contributes: its creation, every Notes stamp,
+    every feedback stamp, its completion. Dates are ISO for sorting."""
+    f = rec.get("fields", {}) or {}
+    if exclude_id and rec.get("id") == exclude_id:
+        return []
+    name = str(f.get(AF["name"]) or "").strip()[:90]
+    status = sel(f.get(AF["status"]))
+    out = []
+    created = str(rec.get("createdTime") or "")[:10]
+    if created:
+        out.append({"date": created, "source": "task", "text": f"task opened: {name} ({status})", "task": rec.get("id")})
+    for m in NOTE_STAMP_RE.finditer(str(f.get(AF["notes"]) or "")):
+        iso = _stamp_to_iso(m.group("day"), m.group("time"))
+        text = m.group("text").strip()
+        if not text or text.startswith(TRACK_RECORD_MARK):
+            continue
+        out.append({"date": iso, "source": m.group("who").strip(), "text": text[:220], "task": rec.get("id")})
+    for m in re.finditer(r"^\[(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2})[^\]]*\]\s*(.+)$", str(f.get(AF["feedbackHistory"]) or ""), re.M):
+        out.append({"date": f"{m.group(1)} {m.group(2)}", "source": "Kevin", "text": m.group(3).strip()[:220], "task": rec.get("id")})
+    comp = str(f.get(AF["completion"]) or "")[:10]
+    if comp and status == "Completed":
+        line = carry_out_line(f.get(AF["agentOutput"]))
+        out.append({"date": comp, "source": "task", "text": f"completed: {name}" + (f" — {line[:160]}" if line else ""), "task": rec.get("id")})
+    return out
+
+
+def _stamp_to_iso(day, time_):
+    try:
+        d = datetime.strptime(day, "%d %b %Y").strftime("%Y-%m-%d")
+    except ValueError:
+        return day
+    return d + (" " + time_ if time_ else "")
+
+
+def history_gmail(terms, days):
+    """Dated email events for the terms through the triage worker's Gmail
+    listing. Returns (entries, note); the note says what was NOT searched."""
+    import importlib.util
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "inbound-triage.py")
+    try:
+        spec = importlib.util.spec_from_file_location("inbound_triage", path)
+        it = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(it)
+    except Exception as e:                                   # noqa: BLE001
+        return [], f"Gmail not searched ({str(e)[:80]})"
+    q_parts = []
+    for kind, term in terms:
+        if kind == "email":
+            q_parts.append(f"(from:{term} OR to:{term})")
+        else:
+            q_parts.append('"' + term.replace('"', "") + '"')
+    if not q_parts:
+        return [], "Gmail not searched (no terms)"
+    q = "(" + " OR ".join(q_parts) + f") newer_than:{max(1, int(days))}d"
+    try:
+        msgs, truncated = it.worker_list(q=q, max_pages=3)
+    except SystemExit as e:
+        return [], f"Gmail not searched ({str(e)[:80]})"
+    except Exception as e:                                   # noqa: BLE001
+        return [], f"Gmail not searched ({str(e)[:80]})"
+    out = []
+    for m in msgs:
+        h = m.get("headers") or {}
+        ts = int(m.get("internalDate") or 0) / 1000
+        date = datetime.fromtimestamp(ts, LONDON).strftime("%Y-%m-%d %H:%M") if ts else ""
+        sender = str(h.get("from") or "")[:80]
+        out.append({"date": date, "source": "email", "text": f"{sender}: {str(h.get('subject') or '')[:120]}", "id": m.get("id")})
+    note = "Gmail listing truncated (more than shown)" if truncated else ""
+    return out, note
+
+
+def history(emails=(), refs=(), properties=(), days=730, exclude_task=None, gmail=True):
+    terms = history_terms(emails, refs, properties)
+    searched = ["tasks"] + (["Gmail"] if gmail else [])
+    entries, notes = [], []
+    formula = history_formula(terms)
+    if formula:
+        for rec in query_tasks(formula, max_records=60):
+            entries.extend(history_entries_from_task(rec, exclude_id=exclude_task))
+        if gmail:
+            g, note = history_gmail(terms, days)
+            entries.extend(g)
+            if note:
+                notes.append(note)
+    entries.sort(key=lambda e: e.get("date") or "")
+    return {"terms": [f"{k} {v}" for k, v in terms], "searched": searched, "entries": entries, "notes": notes, "at": now_iso()}
+
+
+def history_text(result):
+    """The block an agent pastes into its output."""
+    terms = ", ".join(result.get("terms") or []) or "nothing"
+    searched = " + ".join(result.get("searched") or ["tasks"])
+    tail = ("; " + "; ".join(result["notes"])) if result.get("notes") else ""
+    if not result.get("entries"):
+        return f"{TRACK_RECORD_MARK} none found (searched {searched} for {terms}{tail})"
+    lines = [f"{TRACK_RECORD_MARK} (searched {searched} for {terms}{tail})"]
+    for e in result["entries"]:
+        day = e.get("date") or "undated"
+        try:
+            day = datetime.strptime(day[:10], "%Y-%m-%d").strftime("%d %b %Y") + (day[10:] if len(day) > 10 else "")
+        except ValueError:
+            pass
+        lines.append(f"- {day} — {e.get('source', '')}: {e.get('text', '')}")
+    return "\n".join(lines)
+
+
+def cmd_history(args):
+    refs = list(args.ref or [])
+    for text in (args.from_text or []):
+        refs.extend(t for t in REF_TOKEN_RE.findall(text.upper()) if not t.isalpha())
+    result = history(emails=args.email or [], refs=refs, properties=args.property or [],
+                     days=args.days, exclude_task=args.task, gmail=not args.no_gmail)
+    if args.text:
+        print(history_text(result))
+    else:
+        print(json.dumps(result, indent=2))
     return 0
 
 
@@ -5847,6 +6153,19 @@ def main():
                              "approval")
     at.add_argument("task")
     at.add_argument("--file", required=True, action="append", metavar="PATH")
+    at.add_argument("--purpose", default="", help="what the file is for, stamped in Notes with the date")
+    hi = sub.add_parser("history",
+                        help="the dated record of everything with a contact, reference or "
+                             "property: past tasks and Gmail, oldest first (the TRACK RECORD)")
+    hi.add_argument("--task", default=None, help="the task being worked (left out of the results)")
+    hi.add_argument("--email", action="append", help="contact email (repeatable)")
+    hi.add_argument("--ref", action="append", help="reference, policy or account number (repeatable)")
+    hi.add_argument("--property", action="append", help="property name or first line (repeatable)")
+    hi.add_argument("--from-text", action="append", dest="from_text", metavar="TEXT",
+                    help="pull reference-like tokens out of this text (a subject, a letter)")
+    hi.add_argument("--days", type=int, default=730)
+    hi.add_argument("--no-gmail", action="store_true")
+    hi.add_argument("--text", action="store_true", help="print the TRACK RECORD block to paste")
 
     an = sub.add_parser("annotate")
     an.add_argument("task")
@@ -5967,7 +6286,7 @@ def main():
             "lessons": cmd_lessons, "revise": cmd_revise,
             "attach": cmd_attach, "outcome": cmd_outcome,
             "reassign": cmd_reassign, "ledger": cmd_ledger,
-            "signed": cmd_signed, "signin-waiting": cmd_signin_waiting, "signin-done": cmd_signin_done, "signin-site": cmd_signin_site, "certificate": cmd_certificate,
+            "signed": cmd_signed, "signin-waiting": cmd_signin_waiting, "signin-done": cmd_signin_done, "signin-site": cmd_signin_site, "history": cmd_history, "certificate": cmd_certificate,
             "handover-property": cmd_handover_property,
             "clear-alerts": cmd_clear_alerts}[args.cmd](args) or 0
 
