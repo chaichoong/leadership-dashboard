@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<title>Operations Director picture</title>
+<!-- OD SCAFFOLD (from the lead magnet page that set the bar, Sep 2026). Composition: <name the pattern here>.
+     Rules for the composer: keep every class below as written; position components with inline left/top/width; put every
+     required line in .station h3/p, .lane-text, .dest or .cta; props live ONLY inside .station .prop or in the .route svg
+     where no text sits; nothing decorative behind or across a line of text; every zone of the canvas used, no empty third;
+     one data-hero; the strip and grain stay last. -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,700;1,9..40,400&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+img, svg { display: block; max-width: 100%; }
+
+:root {
+  --canvas-w:1080px; --canvas-h:1350px;
+  --bg:#F1F3EF; --surface:#FBFBF9; --surface-2:#F4F6F1; --subtle:#E5E8E1; --deep:#263330;
+  --ink:#1C2422; --ink-muted:#5A6660; --ink-faint:#8A928C;
+  --accent:#2C6E49; --accent-deep:#1B4A30; --accent-soft:#DDE8DF; --gold:#C6A15B;
+  --chart-1:#2C6E49; --chart-2:#B8933A; --chart-3:#5A86CF; --chart-4:#8B6FAE; --de-emphasis:#DDE1D9;
+  --font-display:'DM Sans',sans-serif; --font-body:'DM Sans',sans-serif; --font-mono:'DM Mono',monospace;
+  --space-1:8px; --space-2:16px; --space-3:24px; --space-4:40px; --space-5:64px;
+  --radius:8px;
+}
+html, body { background:var(--bg); }
+body { width:var(--canvas-w); font-family:var(--font-body); color:var(--ink); }
+h1, .display { font-family:var(--font-display); font-weight:700; letter-spacing:-.01em; line-height:1.02; }
+.mono { font-family:var(--font-mono); text-transform:uppercase; letter-spacing:.06em; }
+
+.canvas {
+  position:relative; width:var(--canvas-w); height:var(--canvas-h); overflow:hidden;
+  background-color:var(--bg);
+  background-image:
+    radial-gradient(ellipse at 50% 8%, rgba(251,251,249,.9) 0%, rgba(251,251,249,0) 55%),
+    linear-gradient(var(--subtle) 1px, transparent 1px),
+    linear-gradient(90deg, var(--subtle) 1px, transparent 1px);
+  background-size:100% 100%, 40px 40px, 40px 40px;
+}
+.abs { position:absolute; }
+.tick { position:absolute; width:16px; height:16px; color:var(--ink-faint); }
+
+/* header: the composer sets left/top/width per picture */
+.kicker { font-size:13px; color:var(--ink-faint); }
+h1.title { font-size:56px; color:var(--ink); }
+h1.title em { font-style:normal; color:var(--accent); }
+.standfirst { font-size:19px; line-height:1.35; color:var(--ink-muted); }
+.standfirst strong { font-weight:500; color:var(--ink); }
+.dest { font-size:150px; line-height:.9; color:var(--accent); }
+.dest-label { font-size:18px; line-height:1.3; color:var(--ink); }
+.dest-src { font-size:13px; line-height:1.5; color:var(--ink-faint); }
+
+.placard { background:var(--surface); border:1.5px solid var(--subtle); border-radius:var(--radius); position:absolute; }
+.placard::before { content:''; position:absolute; left:24px; top:-4px; width:72px; height:8px; background:var(--gold); }
+.plate { box-shadow:6px 6px 0 var(--accent-deep); }
+
+.lanes { padding:22px 22px 18px; }
+.lanes .lane-label { font-size:13px; color:var(--ink-faint); margin-bottom:8px; }
+.lanes .lane-now .lane-label { color:var(--accent); }
+.lanes .lane-text { margin-top:8px; font-size:15px; line-height:1.35; color:var(--ink-muted); }
+.lanes .lane-text strong { font-weight:500; color:var(--ink); }
+.lanes .lane-now { margin-top:14px; }
+
+.keep { width:300px; }
+.keep .stop { position:absolute; left:0; top:0; width:44px; height:44px; border-radius:999px; background:var(--gold); box-shadow:0 0 0 3px var(--surface); }
+.keep .fig { position:absolute; left:54px; top:0; width:30px; height:38px; }
+.keep .t { position:absolute; left:96px; top:2px; width:204px; font-size:15px; line-height:1.35; color:var(--ink); }
+.keep .t .mono { display:block; font-size:13px; color:var(--ink-muted); margin-bottom:2px; }
+
+/* right column: the route and seven stations */
+.route { left:0; top:0; width:1080px; height:1350px; pointer-events:none; }
+.stop { position:absolute; width:44px; height:44px; border-radius:999px; background:var(--accent); color:var(--surface);
+        font-family:var(--font-mono); font-weight:500; font-size:20px; display:flex; align-items:center; justify-content:center; }
+.station { position:absolute; width:640px; min-height:104px; padding:16px 156px 14px 22px; background:var(--surface);
+           border:1.5px solid var(--subtle); border-radius:var(--radius); }
+.station h3 { font-size:22px; font-weight:500; line-height:1.15; color:var(--ink); }
+.station p { margin-top:7px; font-size:15px; line-height:1.38; color:var(--ink-muted); }
+.station p strong { font-weight:500; color:var(--ink); }
+.station .prop { position:absolute; right:18px; top:14px; width:124px; height:120px; color:var(--ink-muted); }
+.station.first { background:var(--surface-2); border-style:dashed; }
+
+/* call to action */
+.cta { width:968px; height:88px; padding:0 28px; display:flex; align-items:center; justify-content:space-between; }
+.cta .q { font-size:22px; font-weight:500; color:var(--ink); }
+.cta .a { text-align:right; font-size:13px; line-height:1.6; color:var(--ink-muted); }
+.cta .a strong { color:var(--accent); font-weight:500; }
+
+/* title strip */
+.strip { position:absolute; left:0; right:0; bottom:0; height:96px; background:var(--surface); border-top:1.5px solid var(--subtle);
+         display:flex; align-items:center; justify-content:space-between; padding:0 56px; }
+.strip .brand { display:flex; align-items:center; gap:14px; }
+.strip .wordmark { font-family:var(--font-display); font-weight:700; font-size:22px; color:var(--ink); white-space:nowrap; }
+.strip .src { text-align:right; font-size:13px; line-height:1.6; color:var(--ink-faint); white-space:nowrap; }
+
+.grain { position:absolute; inset:0; pointer-events:none; z-index:50; opacity:.35; mix-blend-mode:multiply;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='240' height='240'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix type='matrix' values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0.6 0.6 0.6 0 0'/%3E%3C/filter%3E%3Crect width='240' height='240' filter='url(%23n)' opacity='0.22'/%3E%3C/svg%3E"); }
+</style>
+</head>
+<body>
+<div class="canvas">
+
+<svg width="0" height="0" style="position:absolute">
+  <defs>
+    <symbol id="agent" viewBox="0 0 40 40">
+      <line x1="20" y1="3" x2="20" y2="9" stroke="var(--accent)" stroke-width="2"/>
+      <circle cx="20" cy="3" r="2.4" fill="var(--accent)"/>
+      <rect x="5" y="9" width="30" height="27" rx="7" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="2"/>
+      <circle cx="14.5" cy="21" r="3" fill="var(--accent)"/>
+      <circle cx="25.5" cy="21" r="3" fill="var(--accent)"/>
+      <path d="M14 28.5 Q20 33 26 28.5" fill="none" stroke="var(--accent)" stroke-width="2" stroke-linecap="round"/>
+    </symbol>
+    <symbol id="person" viewBox="0 0 24 30">
+      <circle cx="12" cy="8" r="6.5"/>
+      <path d="M1 30 v-3 a11 11 0 0 1 22 0 v3 z"/>
+    </symbol>
+    <filter id="wobble" x="-10%" y="-10%" width="120%" height="120%">
+      <feTurbulence type="fractalNoise" baseFrequency="0.05" numOctaves="2" result="n"/>
+      <feDisplacementMap in="SourceGraphic" in2="n" scale="1.6"/>
+    </filter>
+  </defs>
+</svg>
+
+<svg class="tick" style="left:24px;top:24px" viewBox="0 0 16 16"><path d="M8 0v16M0 8h16" stroke="currentColor" stroke-width="1.2"/></svg>
+<svg class="tick" style="left:1040px;top:24px" viewBox="0 0 16 16"><path d="M8 0v16M0 8h16" stroke="currentColor" stroke-width="1.2"/></svg>
+
+<!-- HEADER: kicker (mono), title (h1.title, an <em> for the sage phrase), optional standfirst -->
+<div class="abs kicker mono" style="left:56px;top:48px">Operations Director · SHAPE NAME</div>
+<h1 class="abs title" style="left:56px;top:76px;width:820px">TITLE LINE, exactly as required</h1>
+
+<!-- BODY: build the scene here with .route (svg), .stop (numbered), .station (h3 + p + .prop), .placard.plate (hero number
+     or checklist), .lanes (before/after), .keep (the owner's gold stop). Each station's text is one required line. -->
+
+<!-- TITLE STRIP: always last before the grain; the wordmark and logo, the source line on the right -->
+<div class="strip">
+  <div class="brand">
+    <span class="logo" style="width:48px;height:48px;color:var(--accent);display:inline-block">
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" fill="none" role="img" aria-label="Operations Director" width="100%" height="100%">
+      <path d="M52 20 H20 V84 H72 V32" stroke="currentColor" stroke-width="7" stroke-linecap="butt" stroke-linejoin="miter"/>
+      <path d="M62 32 L72 20 L82 32 Z" fill="currentColor"/>
+      <path d="M 46.00 40.40 L 47.45 40.49 L 49.62 36.93 L 54.10 38.78 L 53.11 42.83 L 54.20 43.80 L 55.17 44.89 L 59.22 43.90 L 61.07 48.38 L 57.51 50.55 L 57.60 52.00 L 57.51 53.45 L 61.07 55.62 L 59.22 60.10 L 55.17 59.11 L 54.20 60.20 L 53.11 61.17 L 54.10 65.22 L 49.62 67.07 L 47.45 63.51 L 46.00 63.60 L 44.55 63.51 L 42.38 67.07 L 37.90 65.22 L 38.89 61.17 L 37.80 60.20 L 36.83 59.11 L 32.78 60.10 L 30.93 55.62 L 34.49 53.45 L 34.40 52.00 L 34.49 50.55 L 30.93 48.38 L 32.78 43.90 L 36.83 44.89 L 37.80 43.80 L 38.89 42.83 L 37.90 38.78 L 42.38 36.93 L 44.55 40.49 Z M 52.60 52.00 A 6.6 6.6 0 1 0 39.40 52.00 A 6.6 6.6 0 1 0 52.60 52.00 Z" fill="currentColor" fill-rule="evenodd"/>
+    </svg></span>
+    <span class="wordmark">Operations Director</span>
+  </div>
+  <div class="src mono">Source · SOURCE LINE<br>operationsdirector.co.uk</div>
+</div>
+
+<div class="grain"></div>
+</div>
+</body>
+</html>
