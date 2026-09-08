@@ -1,0 +1,29 @@
+name: Sync projects (Airtable → Supabase)
+# Mirrors the Airtable Projects table into Supabase `projects` (read through v_projects
+# by the KPI Library "live right now" panel, the Tasks & Projects twin and the Strategy
+# twin). Airtable is the system of record; the KPI compute runs there daily, so this
+# keeps kpi_current / kpi_last_updated fresh on the Supabase side. Full run each time:
+# the table is ~26 rows, and --full closes any gap an incremental window would leave.
+on:
+  schedule:
+    - cron: '41 * * * *'   # hourly
+  workflow_dispatch: {}
+permissions:
+  contents: read
+concurrency:
+  group: sync-projects
+  cancel-in-progress: false
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Mirror the Projects table
+        env:
+          AIRTABLE_PAT: ${{ secrets.AIRTABLE_PAT }}
+          SUPABASE_URL: 'https://ptkyhzlsvijcwyovgrgv.supabase.co'
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+        run: python3 scripts/sync-airtable-mirror.py --full --only projects

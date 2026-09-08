@@ -43,14 +43,17 @@
     fldaI0voHia91SYZz: 'kpi_target',
     fldB1QJDUsukxKzjQ: 'kpi_current',
     fldA7vPiLnbgEoKh1: 'kpi_compute_code',
-    // kpiLastUpdated + closedOn have no v_projects column → omitted (last-updated
-    // shows blank; the closed filter is approximated by "kpi_name present" below).
+    fldNk2U74jBxZ6esJ: 'kpi_last_updated',
+    // Airtable's "Closed On" (fldzGI0ywBTpOK2dy) has no v_projects column. Closed
+    // quarters are approximated in readProjects by end_date < today; on 8 Sep 2026
+    // that matched Airtable exactly (3 closed, all ending 2026-06-30; 5 open, all
+    // ending 2026-09-30).
   };
 
   const json = (o, s = 200) => new Response(JSON.stringify(o), { status: s, headers: { 'Content-Type': 'application/json' } });
 
   async function readProjects() {
-    const cols = ['id'].concat(Object.values(PROJ_MAP));
+    const cols = ['id', 'end_date'].concat(Object.values(PROJ_MAP));
     let data;
     try {
       // Safety timeout: a slow/hanging view read must NEVER freeze the library
@@ -67,8 +70,11 @@
       console.warn('[kpi-shim] live-KPI read skipped:', e.message);
       return { records: [] };
     }
-    // Only rows with a KPI name (the page's main filter: {KPI Name} != "").
-    const rows = (data || []).filter(r => r.kpi_name != null && String(r.kpi_name).trim() !== '');
+    // The page's filter is AND({KPI Name} != "", {Closed On} = BLANK()): rows with a
+    // KPI name, minus closed quarters (end_date before today, London date — see PROJ_MAP).
+    const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/London' }).format(new Date());
+    const rows = (data || []).filter(r => r.kpi_name != null && String(r.kpi_name).trim() !== ''
+      && !(r.end_date && String(r.end_date).slice(0, 10) < today));
     return {
       records: rows.map(r => {
         const fields = {};
