@@ -1455,6 +1455,52 @@ describe('a sleeping job cannot hold the lock', () => {
     expect(events().some((e) => e.state === 'lease-lost' && e.job === 'sleeper')).toBe(false);
   });
 
+  // Finding 20260904-content-engine-459. proc.terminate() signalled the
+  // immediate child only — the wrapper shell. Everything it had spawned (the
+  // Claude agent, an ffmpeg render) survived and kept writing with no lock at
+  // all, which is the exact collision this file exists to prevent, arriving
+  // through the door marked "stopped".
+  //
+  // Deliberately NOT tested by spawning a real runaway tree: a test that can
+  // orphan a process is a test that can take the pre-push gate down with it,
+  // and a red gate for an unrelated reason is what teaches people to reach for
+  // SKIP_SYNC_TESTS=1.
+  it('gives the child its own process group so the whole tree is killable', () => {
+    const src = readFileSync(QUEUE, 'utf8');
+    expect(src, 'Popen must start a new session, or killpg has no group to hit')
+      .toContain('subprocess.Popen(cmd, start_new_session=True)');
+  });
+
+  it('stop_child signals the GROUP, and TERM before KILL', () => {
+    const src = readFileSync(QUEUE, 'utf8');
+    const body = src.match(/def stop_child\(reason\):([\s\S]*?)\n    def /)[1];
+    expect(body).toContain('signal_group(signal.SIGTERM)');
+    expect(body).toContain('signal_group(signal.SIGKILL)');
+    expect(body, 'a bare terminate() only reaches the wrapper')
+      .not.toContain('proc.terminate()');
+    // TERM must come first, or a wrapper never writes its done line.
+    expect(body.indexOf('signal_group(signal.SIGTERM)'))
+      .toBeLessThan(body.indexOf('signal_group(signal.SIGKILL)'));
+  });
+
+  it('the interrupt handler passes the signal on to the child', () => {
+    // With its own session the child no longer receives the terminal signal by
+    // itself, so a handler that only released the lock would orphan the work.
+    const src = readFileSync(QUEUE, 'utf8');
+    const body = src.match(/def _passthrough\(signum, _frame\):([\s\S]*?)\n\n/)[1];
+    expect(body).toContain('signal_group(signal.SIGTERM)');
+    expect(body).toContain('release(job');
+  });
+
+  it('signal_group falls back to the single child rather than signalling nothing', () => {
+    // If start_new_session ever fails, killpg raises and the old behaviour must
+    // still happen — half a kill beats none.
+    const src = readFileSync(QUEUE, 'utf8');
+    const body = src.match(/def signal_group\(sig\):([\s\S]*?)\n    def /)[1];
+    expect(body).toContain('os.killpg(os.getpgid(proc.pid), sig)');
+    expect(body).toContain('proc.send_signal(sig)');
+  });
+
   it('stops a displaced child with TERM first, so its wrapper can write a done line', async () => {
     const marker = join(stateDir, 'term-seen.txt');
     const body = `import signal, sys, time

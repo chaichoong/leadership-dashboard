@@ -1022,7 +1022,42 @@ def run(job, cmd, lease_minutes, timeout_minutes, check_stale,
                         if LAST_REFUSAL.get("job") == job else None)
         return code
 
+    # ─── THE WHOLE TREE, NOT JUST THE WRAPPER (finding 20260904-content-engine-459)
+    #
+    # `proc.terminate()` signals the immediate child only — the wrapper shell.
+    # Everything it spawned (the Claude agent, an ffmpeg render) survived, so a
+    # run stopped on LOST LOCK left its real work running with no lock at all,
+    # writing alongside whoever now held the queue. That is the exact collision
+    # this file exists to prevent, arriving through the door marked "stopped".
+    #
+    # So the child gets its own process group (start_new_session below) and the
+    # signal goes to the GROUP. TERM first so a wrapper can trap it and write
+    # its done line, KILL after the grace, exactly as before.
+    running = {"proc": None, "lost": "", "code": None}
+
+    def signal_group(sig):
+        """Signal the child's whole process group. Never raises: the group is
+        already gone in the ordinary case, and that is a success, not an error."""
+        proc = running["proc"]
+        if proc is None:
+            return False
+        try:
+            os.killpg(os.getpgid(proc.pid), sig)
+            return True
+        except (OSError, ProcessLookupError):
+            # No group (start_new_session failed) — fall back to the one child
+            # rather than signalling nothing at all.
+            try:
+                proc.send_signal(sig)
+                return True
+            except OSError:
+                return False
+
     def _passthrough(signum, _frame):
+        # The child is in its own session now, so it no longer receives the
+        # terminal's signal by itself. Pass it on, or the wrapper exits and
+        # leaves the work orphaned and unlocked.
+        signal_group(signal.SIGTERM)
         release(job, quiet=True)
         sys.exit(128 + signum)
 
@@ -1034,27 +1069,24 @@ def run(job, cmd, lease_minutes, timeout_minutes, check_stale,
 
     import threading
     stop = threading.Event()
-    running = {"proc": None, "lost": "", "code": None}
 
     def stop_child(reason):
         # TERM first, KILL only if it lingers. A wrapper script traps TERM and
         # writes its "done" line and log summary before dying; SIGKILL is
         # untrappable, so the 13:00 task-manager slot of 2 Sep 2026 died with
         # no done line, no score and no report — invisible to every monitor.
+        #
+        # Signalled to the GROUP so the wrapper's own children go with it
+        # (finding 20260904-content-engine-459).
         proc = running["proc"]
         if proc is None:
             return
-        try:
-            proc.terminate()
-        except OSError:
+        if not signal_group(signal.SIGTERM):
             return
         try:
             proc.wait(timeout=STOP_GRACE_SECONDS)
         except subprocess.TimeoutExpired:
-            try:
-                proc.kill()
-            except OSError:
-                pass
+            signal_group(signal.SIGKILL)
 
     def beat():
         # Re-arm well inside the lease so an ordinary scheduling hiccup does not
@@ -1100,7 +1132,8 @@ def run(job, cmd, lease_minutes, timeout_minutes, check_stale,
     ticker = threading.Thread(target=beat, daemon=True)
     ticker.start()
     try:
-        proc = subprocess.Popen(cmd)
+        # Its own process group, so stop_child can take the whole tree down.
+        proc = subprocess.Popen(cmd, start_new_session=True)
         running["proc"] = proc
         code = proc.wait()
         running["code"] = code
