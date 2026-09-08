@@ -53,8 +53,12 @@ if [ "${CE_ALLOW_DAYTIME:-0}" != "1" ] && [ "$HOUR" -ge 7 ] && [ "$HOUR" -lt 22 
   exit 0
 fi
 python3 scripts/content-engine/watch.py scan --create || exit 1
-python3 scripts/content-engine/watch.py next || echo "pull: skipped this run (see above); rendering what is already here"
-python3 scripts/content-engine/render.py run --limit 1 || exit 1
+# Episodes a night (Kevin, 8 Sep 2026): three during the catch-up from day 2054, one once we are a month behind.
+EPISODES="${CE_EPISODES_PER_NIGHT:-$(cat "$HOME/.config/od/content_engine_episodes_per_night" 2>/dev/null || echo 1)}"
+for i in $(seq 1 "$EPISODES"); do
+  python3 scripts/content-engine/watch.py next || echo "pull: skipped (see above); rendering what is already here"
+  python3 scripts/content-engine/render.py run --limit 1 || exit 1
+done
 python3 scripts/content-engine/platform_copy.py run --pending --limit 2 || exit 1
 python3 scripts/content-engine/approval.py sync || exit 1
 python3 scripts/content-engine/approval.py run --pending --limit 2 || exit 1

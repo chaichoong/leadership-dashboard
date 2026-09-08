@@ -52,6 +52,19 @@ STREAK_START = dt.date(2020, 6, 1)      # day 1
 SKIP_DIRS = ("Image", "Footage to be filed", "Time Urgency")
 CLIP_RE = re.compile(r"^VID_(\d{4})(\d{2})(\d{2})_(\d{6})_00_(\d{3})\.insv$", re.I)
 DEFAULT_SINCE = dt.date(2026, 6, 4)     # the batch Kevin approved the spike on; older batches are the team's
+START_DAY_FILE = os.path.expanduser("~/.config/od/content_engine_start_day")   # the takeover point, Kevin's (8 Sep 2026: 2054)
+
+
+def start_day():
+    """The first streak day the engine owns. Ericamae published up to 2053 on 8 Sep 2026; everything from
+    this day onward, in order, is the engine's. Nothing older is scanned, so her work is never duplicated."""
+    try: return int(open(START_DAY_FILE).read().strip())
+    except (OSError, ValueError): return None
+
+
+def since_for_start_day():
+    d = start_day()
+    return STREAK_START + dt.timedelta(days=d - 1) if d else DEFAULT_SINCE
 
 
 # ---------- pure helpers (selftested) ----------
@@ -191,25 +204,30 @@ def find_record(file_id, day):
     return None, None
 
 
-def list_clips(batch=None, since=DEFAULT_SINCE):
+def list_clips(batch=None, since=None, root=None):
+    """Every clip under the raw folder, however deep: the 2026 batches sit under "2026/", the 2025 months
+    under "2025/<month>/Ep NNNN - date/" (8 Sep 2026). `batch` matches the folder path relative to the root."""
+    since = since or since_for_start_day()
+    root = root or RAW_ROOT
     out = []
-    for folder in sorted(os.listdir(RAW_ROOT)):
-        fp = os.path.join(RAW_ROOT, folder)
-        if not os.path.isdir(fp) or any(s in folder for s in SKIP_DIRS): continue
-        if batch and folder != batch: continue
-        for name in os.listdir(fp):
+    for dirpath, dirs, files in os.walk(root):
+        rel = os.path.relpath(dirpath, root)
+        dirs[:] = sorted(d for d in dirs if not any(s in d for s in SKIP_DIRS))
+        if rel != "." and any(s in rel for s in SKIP_DIRS): continue
+        if batch and rel != batch and not rel.startswith(batch + os.sep): continue
+        for name in files:
             p = parse_clip(name)
             if not p: continue
             date, hms, seq = p
             if since and date < since: continue
-            path = os.path.join(fp, name)
+            path = os.path.join(dirpath, name)
             try: size = os.path.getsize(path)
             except OSError: continue
-            out.append({"path": path, "name": name, "batch": folder, "date": date.isoformat(), "hms": hms, "seq": seq, "size": size})
+            out.append({"path": path, "name": name, "batch": rel, "date": date.isoformat(), "hms": hms, "seq": seq, "size": size})
     return sorted(out, key=lambda c: (c["date"], c["hms"]))
 
 
-def scan(create=False, batch=None, since=DEFAULT_SINCE):
+def scan(create=False, batch=None, since=None):
     ledger = load_ledger()
     stale = repair_stale_pulls(ledger)
     for k in stale: print("scan: %s was stuck 'pulling' from a dead run; reset" % k)
@@ -392,6 +410,18 @@ def selftest():
     _selftest_airtable_retry()
     assert parse_clip("2053 Full.insv") == (dt.date(2026, 1, 13), "001000", 1) and parse_clip("2053 summary.insv")[0] == dt.date(2026, 1, 13)
     assert parse_clip("2071 Full Part 2.insv") == (dt.date(2026, 1, 31), "002000", 2) and parse_clip("2071 Full - Part 1.insv")[2] == 1
+    globals()["START_DAY_FILE"] = "/nonexistent/od-start-day"; assert since_for_start_day() == DEFAULT_SINCE
+    import tempfile; tf = os.path.join(tempfile.gettempdir(), "od-start-%d" % os.getpid()); open(tf, "w").write("2054\n"); globals()["START_DAY_FILE"] = tf
+    assert start_day() == 2054 and since_for_start_day() == dt.date(2026, 1, 14), since_for_start_day(); os.remove(tf)
+    import tempfile, shutil as _sh
+    root = tempfile.mkdtemp(prefix="od-raw-")
+    for rel in ("2026/28 December 2025 - 25 January 2026/2054 Full.insv", "2026/28 December 2025 - 25 January 2026/2054 summary.insv",
+                "2025/25_05(May 2025)/Ep 1799 - May 4/VID_20250504_162936_00_022.insv", "4 June 26 - 19 July 26/VID_20260604_172435_00_001.insv", "Image/VID_20260604_000000_00_099.insv"):
+        os.makedirs(os.path.dirname(os.path.join(root, rel)), exist_ok=True); open(os.path.join(root, rel), "wb").write(b"x")
+    got = list_clips(since=dt.date(2025, 1, 1), root=root)
+    assert [c["name"] for c in got] == ["VID_20250504_162936_00_022.insv", "2054 Full.insv", "2054 summary.insv", "VID_20260604_172435_00_001.insv"], [c["name"] for c in got]
+    assert got[1]["batch"].startswith("2026/") and "Image" not in str(got), "walks every depth, skips the Image folder"
+    _sh.rmtree(root)
     assert parse_clip("notes.txt") is None and parse_clip("2053 Full.insv")[1] < parse_clip("2053 summary.insv")[1], "full sorts before summary"
     _selftest_repair_stale()
     _selftest_copy_retry()
@@ -415,7 +445,7 @@ def selftest():
            "c": {"date": "2026-07-04", "seq": 1, "size": 4000, "status": "new"}}
     assert choose_next(led) == "b", "oldest date then smallest clip"
     assert choose_next({"x": {"date": "2026-01-01", "seq": 1, "status": "pulled"}}) is None
-    print(json.dumps({"checks": 18, "failed": []}))
+    print(json.dumps({"checks": 23, "failed": []}))
 
 
 if __name__ == "__main__":

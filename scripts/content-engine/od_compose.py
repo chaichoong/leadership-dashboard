@@ -18,7 +18,10 @@ EPIC = os.path.join(HERE, "epic")
 REFS = os.path.join(EPIC, "references")
 LANGUAGE = os.path.join(REFS, "design-languages", "operations-director.md")
 W, H = 1080, 1350
-MODEL = "sonnet"            # AI model spend rule: standard tier; escalate by hand if compositions keep failing preflight
+MODEL = "sonnet"            # CLI fallback tier only
+COMPOSER_MODEL = "claude-opus-4-6"   # premium tier: the spend rule allows it for agent-pipeline GENERATION, and the standard tier's pictures failed Kevin's bar (8 Sep 2026)
+REVIEW_MODEL = None                  # the app's default (standard) tier reads the rendered picture; cheap and enough to spot a prop on a line of text
+REVIEW_ROUNDS = 2                    # rendered-picture reviews with repairs; a picture that still fails goes to the fallback, never to Kevin
 REPAIRS = 3
 THINKING = 1024              # thinking budget for the composer: the default budget spent ~9 minutes before the first line (5 Sep 2026)
 
@@ -62,14 +65,15 @@ def system_prompt():
     core = "\n".join(l for l in core.splitlines() if not re.search(r"check\.mjs|render\.mjs|animate\.mjs|run it", l))
     comp = _read(os.path.join(REFS, "composition.md"))
     illus = _section(_read(os.path.join(REFS, "illustration-and-texture.md")), "# Illustration", "## Texture & finish")
-    skeleton = _read(os.path.join(EPIC, "templates", "skeleton.html"))
+    skeleton = _read(os.path.join(EPIC, "templates", "od-scaffold.html")) or _read(os.path.join(EPIC, "templates", "skeleton.html"))
     lang = _read(LANGUAGE)
     return ("You are producing ONE infographic as a single self-contained HTML file, following the Epic Infographics method below exactly. You are running unattended and you have NO tools: "
             "do not run commands, do not read or write files, do not ask questions, do not offer options, do not pitch angles. The preflight check and the render are run for you after you answer. "
             "Take the brief and write the file in one pass. Keep the page lean: one canvas div, inline SVG for the drawing, no more than about 250 lines. "
             "Output ONLY the HTML document, starting with <!doctype html>, no commentary, no markdown fences.\n\n=== The method (from SKILL.md) ===\n" + core +
             "\n\n=== composition.md ===\n" + comp + "\n\n=== illustration-and-texture.md (drawing method) ===\n" + illus +
-            "\n\n=== templates/skeleton.html ===\n" + skeleton + "\n\n=== THE DESIGN LANGUAGE TO USE, AND THE ONLY ONE: operations-director.md ===\n" + lang)
+            "\n\n=== THE SCAFFOLD YOU MUST START FROM (templates/od-scaffold.html, lifted from the page that set the quality bar). Keep its CSS and classes; "
+            "position components with inline left/top/width; write the required lines into its components; props only inside .station .prop or in the .route svg where no text sits ===\n" + skeleton + "\n\n=== THE DESIGN LANGUAGE TO USE, AND THE ONLY ONE: operations-director.md ===\n" + lang)
 
 
 def user_prompt(template, spec, post_text, shape_name, day, source_line, feedback=""):
@@ -139,6 +143,56 @@ def ask_api(system, user, model=None, max_tokens=MAX_TOKENS, timeout=900):
     return text, usage, None
 
 
+REVIEW_PROMPT = """You are reviewing a rendered LinkedIn infographic for Operations Director against the bar set by its lead magnet: calm sage board, one clear hero,
+a route or placard carrying the content, props that never touch text, every zone used. Answer ONLY with JSON, every field present:
+{"text_overlap": true|false, "text_clipped": true|false, "text_missing_or_altered": true|false, "person_name": true|false, "glitch": true|false,
+ "pass": true|false, "issues": ["one line each, what and where"]}
+Definitions, judge each strictly and literally:
+- text_overlap: a shape, icon, line, box edge or ghosted numeral overlaps or touches any letter of any text (an icon sitting NEXT to text inside its card, with clear space, is NOT overlap).
+- text_clipped: text is cut off by an edge or a box, or two pieces of text collide.
+- text_missing_or_altered: a line of the REQUIRED TEXT is absent or its words differ.
+- person_name: a person's name appears anywhere.
+- glitch: a shape is broken, misdrawn, duplicated, mismatched or accidental (stray marks, wrong numbering).
+- pass: true only if none of the five faults is true AND a careful designer would publish it as is. Layout taste (an empty zone, a quiet bottom, sparse props) goes in issues and may make pass false, but is NOT one of the five faults.
+REQUIRED TEXT:
+{required}"""
+
+
+def review(png_path, required, model=None, timeout=180):
+    """Look at the rendered picture the way the skill's step 11 demands (a person did this for the lead magnet; nobody did it for the posts).
+    Returns (passed, issues); passed is None when the review itself could not run."""
+    import base64, urllib.request, urllib.error
+    try: token = open(PROXY_TOKEN_FILE).read().strip()
+    except OSError: return None, ["no proxy token"]
+    data = base64.b64encode(open(png_path, "rb").read()).decode()
+    body = {"model": model or REVIEW_MODEL or api_model(), "max_tokens": 600, "messages": [{"role": "user", "content": [
+        {"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": data}},
+        {"type": "text", "text": REVIEW_PROMPT.replace("{required}", "\n".join("- " + l for l in required))}]}]}
+    req = urllib.request.Request(PROXY, data=json.dumps(body).encode(), method="POST", headers={"Content-Type": "application/json", "Authorization": "Bearer " + token, "User-Agent": UA})
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r: d = json.load(r)
+    except urllib.error.HTTPError as e: return None, ["review call failed: %s" % e.code]
+    text = "".join(part.get("text", "") for part in d.get("content", []) if part.get("type") == "text")
+    return parse_review(text)
+
+
+FAULTS = ("text_overlap", "text_clipped", "text_missing_or_altered", "person_name", "glitch")
+
+
+def parse_review(text):
+    """(passed, issues). `issues` carries the fault names first ("fault:text_overlap") so a caller can tell a hard fault from a taste note."""
+    try:
+        s = text.strip().strip("`"); s = s[s.find("{"): s.rfind("}") + 1]; d = json.loads(s)
+        faults = ["fault:" + f for f in FAULTS if d.get(f) is True]
+        return bool(d.get("pass")), faults + [str(x) for x in (d.get("issues") or [])][:8]
+    except (ValueError, AttributeError):
+        return None, ["review did not answer in shape"]
+
+
+def hard_faults(issues):
+    return [i for i in (issues or []) if i.startswith("fault:")]
+
+
 def strip_html_text(page):
     t = re.sub(r"<(script|style)[^>]*>.*?</\1>", " ", page, flags=re.S | re.I)
     t = re.sub(r"<[^>]+>", " ", t); t = html.unescape(t)
@@ -181,12 +235,12 @@ def compose(template, spec, post_text, shape_name, day, source_line, out_png, ke
     """Compose -> preflight (repairs) -> render -> verify text. Returns (png or None, note, html_path or None)."""
     if not os.path.exists(os.path.join(EPIC, "scripts", "check.mjs")): return None, "epic skill not vendored", None
     required = required_lines(template, spec)
-    system = system_prompt(); feedback = ""; html_path = keep_html or (out_png[:-4] + ".html")
-    for attempt in range(1, REPAIRS + 2):
+    system = system_prompt(); feedback = ""; html_path = keep_html or (out_png[:-4] + ".html"); reviews_done = 0
+    for attempt in range(1, REPAIRS + REVIEW_ROUNDS + 2):
         env_model = model or MODEL
         prompt = user_prompt(template, spec, post_text, shape_name, day, source_line, feedback)
         try:
-            out, usage, cost = ask_api(system, prompt, model=(model if model and model.startswith("claude-") else None))
+            out, usage, cost = ask_api(system, prompt, model=(model if model and model.startswith("claude-") else COMPOSER_MODEL))
         except SystemExit as ex:
             log("compose: proxy call failed (%s); falling back to the CLI" % str(ex)[:120])
             out, usage, cost = pc.ask_claude_model(system, prompt, env_model, timeout=1200, thinking=THINKING, no_mcp=True)
@@ -197,7 +251,17 @@ def compose(template, spec, post_text, shape_name, day, source_line, out_png, ke
         n_err, errors, warnings, report = run_check(html_path)
         if not miss and n_err == 0:
             run_render(html_path, out_png)
-            return out_png, "composed with the Epic Infographics method (operations-director language), preflight clean on attempt %d%s" % (attempt, (", %d warning%s" % (len(warnings), "" if len(warnings) == 1 else "s")) if warnings else ""), html_path
+            passed, issues = review(out_png, required)
+            if passed or (passed is None and reviews_done >= REVIEW_ROUNDS):
+                return out_png, "composed with the Epic Infographics method (operations-director language, %s), preflight clean on attempt %d, picture review %s%s" % (
+                    COMPOSER_MODEL, attempt, "passed" if passed else "unavailable", (", %d warning%s" % (len(warnings), "" if len(warnings) == 1 else "s")) if warnings else ""), html_path
+            reviews_done += 1
+            if reviews_done > REVIEW_ROUNDS:
+                log("compose: picture review still failing after %d rounds: %s" % (REVIEW_ROUNDS, "; ".join(issues)[:200]))
+                return None, "picture review failed after %d rounds: %s" % (REVIEW_ROUNDS, "; ".join(issues)[:160]), html_path
+            feedback = "THE RENDERED PICTURE WAS REVIEWED BY A DESIGNER AND FAILED. Fix exactly these, keep everything else: " + " | ".join(issues)
+            log("compose: attempt %d rendered but failed the picture review (%s)" % (attempt, "; ".join(issues)[:160]))
+            continue
         problems = []
         if miss: problems.append("These required lines are missing or altered in the page text: " + " | ".join(miss))
         if n_err: problems.append("Preflight report (every line is a defect to fix; do not hide text to pass, move or shrink it):\n" + ("\n".join(errors)[:3000] if errors else report))
@@ -219,7 +283,11 @@ def selftest():
     assert missing_lines(page, required_lines("steps", spec)) == [] and missing_lines(page, ["Not there"]) == ["Not there"]
     assert extract_html("```html\n<!doctype html><p>x</p>\n```").startswith("<!doctype html") and extract_html("Sure! <!DOCTYPE html><p>").lower().startswith("<!doctype html")
     assert required_lines("stat", {"title": "", "number": "30 min", "label": "checks", "source": "s"}) == ["30 min", "checks"]
-    assert api_model().startswith("claude-") and PROXY.startswith("https://claude-proxy.")
+    assert api_model().startswith("claude-") and PROXY.startswith("https://claude-proxy.") and COMPOSER_MODEL.startswith("claude-opus")
+    assert parse_review('{"pass": false, "text_overlap": true, "issues": ["ghost numeral over item B"]}') == (False, ["fault:text_overlap", "ghost numeral over item B"])
+    assert hard_faults(["fault:glitch", "empty bottom"]) == ["fault:glitch"] and hard_faults(["empty bottom"]) == []
+    assert parse_review("```json\n{\"pass\": true, \"issues\": []}\n```") == (True, []) and parse_review("nope")[0] is None
+    assert ".station" in _read(os.path.join(EPIC, "templates", "od-scaffold.html")) and "SCAFFOLD YOU MUST START FROM" in system_prompt() and "REQUIRED TEXT" in REVIEW_PROMPT
     assert picture_source("Episode 1992, Kevin's own words on camera: \"you've now got the ability\"") == "Episode 1992"
     assert picture_source("Build log: agent \"Agent Dispatch\" (register, Status Live) and 5 merged pull requests") == "the Operations Director agent register"
     assert picture_source("Prospects table: a real Job Ad (Indeed) harvested by the prospecting agent, anonymised") == "a real job advert, anonymised"
@@ -230,7 +298,7 @@ def selftest():
         fh.write("<!doctype html><html><body style='margin:0'><div style='width:1080px;height:1350px;overflow:hidden;position:relative'><p style='position:absolute;left:1060px;top:10px;font-size:20px;white-space:nowrap'>this text is clipped</p><p style='font-size:20px' data-hero>hero</p></div></body></html>"); bad = fh.name
     n, errors, warnings, report = run_check(bad); os.remove(bad)
     assert n >= 1, report[-300:]
-    print(json.dumps({"checks": 15, "failed": []}))
+    print(json.dumps({"checks": 18, "failed": []}))
 
 
 if __name__ == "__main__":
