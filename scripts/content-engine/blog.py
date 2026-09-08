@@ -67,6 +67,8 @@ def publish_blog(day, full, entry, thumb_url, youtube_link, test):
     f = full["fields"]
     body = build_post(loc, day, f.get("Blog Copy"), f.get("Blog Post Description"), thumb_url, youtube_link, "DRAFT" if test else "PUBLISHED")
     if not f.get("Blog Copy"): raise SystemExit("episode %d has no Blog Copy" % day)
+    left = publish.placeholder_left(body["rawHTML"]) or publish.placeholder_left(body["title"])
+    if left: raise SystemExit("episode %d: blog REFUSED, placeholder %s still in the article" % (day, left))
     exists = publish.ghl("GET", "/blogs/posts/url-slug-exists?locationId=%s&urlSlug=%s" % (loc, body["urlSlug"]))
     if (exists.get("exists") if isinstance(exists, dict) else False):
         body["urlSlug"] += "-%s" % dt.date.today().strftime("%d%m")

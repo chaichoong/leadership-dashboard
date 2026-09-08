@@ -28,7 +28,7 @@ describe('content-engine publish (GHL)', () => {
 
   it('the socials wait for the YouTube link, and a missing YouTube account holds with a digest line', () => {
     const src = readFileSync(PUBLISH, 'utf8');
-    expect(src).toContain('if stage == 2: copy = with_youtube_link(copy, entry["youtube_link"])');
+    expect(src).toContain('copy = with_youtube_link(copy, entry["youtube_link"])');
     expect(src).toContain('"wait-youtube-account"');
     expect(src).toContain('"wait-youtube-link"');
     expect(src).toMatch(/waiting for a YouTube account in GoHighLevel/);
@@ -87,6 +87,14 @@ describe('content-engine publish (GHL)', () => {
     expect(src).toContain('"youtube-short": {"platform": "youtube"');
     expect(src).toContain('"yt_type": "short"');
     expect(src).toContain('("youtube", "lfmd"): ("Link of Youtube Shorts",)');
+  });
+
+  it("refuses any post or article still carrying a placeholder like [ADD YOUTUBE LINK] (Kevin, 8 Sep 2026)", () => {
+    const src = readFileSync(PUBLISH, 'utf8');
+    expect(src).toContain('def placeholder_left(');
+    expect(src).toContain('REFUSED, placeholder %s still in the copy');
+    expect(src).toContain('stage 2 without a YouTube link');
+    expect(readFileSync(path.join(DIR, 'blog.py'), 'utf8')).toContain('blog REFUSED, placeholder');
   });
 
   it('X is not a channel and every copy field it reads exists on the record type it reads it from', () => {
