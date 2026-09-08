@@ -72,6 +72,31 @@ test.describe('sign-ins waiting are a tap, not a decision', () => {
     }
     await expect(page.locator('[data-apv-card="recApvA2"] [data-apv-why]')).toHaveCount(0);
   });
+  test('after he signs in, the cards clear without the Refresh button (8 Sep 2026)', async ({ page }) => {
+    const fx = withSignIns();
+    await mockAgentsPage(page, fx);
+    await loadAgentsPage(page);
+    await page.click('#ptab-approvals');
+    await expect(page.locator('[data-apv-signin]')).toHaveCount(2);
+    // Tapping a sign-in link arms the watch (the link itself is a Mac URL scheme, so stop the navigation).
+    const armed = await page.evaluate(() => {
+      const a = document.querySelector('[data-apv-signin-strip] a');
+      a.addEventListener('click', (e) => e.preventDefault());
+      a.click();
+      return _apvSignInClickedAt > 0;
+    });
+    expect(armed).toBe(true);
+    // The Robot sign-in app hands one site's task back: it leaves the Approval status.
+    // In place: the mock keeps a reference to this array and reads it per request.
+    fx.approvals.splice(fx.approvals.findIndex((r) => r.id === 'recApvA2'), 1);
+    const changed = await page.evaluate(() => window.apvSilentRefresh());
+    expect(changed).toBe(true);
+    await expect(page.locator('[data-apv-signin]')).toHaveCount(1);
+    await expect(page.locator('[data-apv-card="recApvA2"]')).toHaveCount(0);
+    await expect(page.locator('[data-apv-signin-strip]')).toContainText('One task is waiting');
+    // Nothing changed: no redraw (open panels and scroll survive).
+    expect(await page.evaluate(() => window.apvSilentRefresh())).toBe(false);
+  });
   test('no strip and no button when nothing waits on a sign-in', async ({ page }) => {
     await mockAgentsPage(page);
     await loadAgentsPage(page);

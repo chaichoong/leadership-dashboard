@@ -934,6 +934,7 @@ async function loadApprovals(){
             return !ap || !ap.email || ap.email === APPROVER_EMAIL;
         });
         _apvReason = {};
+        _apvLastQueueLoad = Date.now();
         allApprovals = mine.map(r=>({
             id: r.id,
             name: gf(r,TF.name)||'(Untitled)',
@@ -1688,6 +1689,50 @@ async function agConfirmRejectGroup(taskIds, reasonKey){
 }
 window.agConfirmRejectGroup = agConfirmRejectGroup;
 
+// THE PAGE KEEPS UP WITH THE SIGN-IN CHAIN (Kevin, 8 Sep 2026). He signed in
+// to seven sites, every task was handed back within seconds, and the queue
+// still showed "Sign in now" on all of them because nothing here ever
+// re-read Airtable without the Refresh button. While sign-in cards are
+// showing, and for twenty minutes after a sign-in link is tapped, the queue
+// re-reads every 30 s and whenever the tab comes back into view, and redraws
+// only when the set of cards or their sign-in state has changed.
+let _apvSignInClickedAt = 0, _apvLastQueueLoad = 0;
+const APV_SIGNIN_WATCH_MS = 20 * 60 * 1000;
+function apvQueueSignature(){
+    return allApprovals.map(t => t.id + ':' + (apvSignInNeeded(t.agentOutput) ? 'w' : 'd')).join(',');
+}
+function apvSignInsWaiting(){ return allApprovals.some(t => apvSignInNeeded(t.agentOutput)); }
+function apvWatchingSignIns(){ return apvSignInsWaiting() || (Date.now() - _apvSignInClickedAt) < APV_SIGNIN_WATCH_MS; }
+async function apvSilentRefresh(){
+    if(_approvalsState === 'loading') return false;
+    const before = apvQueueSignature();
+    try { await loadApprovals(); }
+    catch(e){ if(e.message === 'auth') throw e; return false; }
+    _apvLastQueueLoad = Date.now();
+    if(String(_approvalsState).indexOf('error') === 0) return false;
+    if(apvQueueSignature() === before) return false;
+    renderApprovals();
+    return true;
+}
+window.apvSilentRefresh = apvSilentRefresh;
+document.addEventListener('click', (ev) => {
+    const a = ev.target && ev.target.closest ? ev.target.closest('a[href^="robotsignin://"]') : null;
+    if(!a) return;
+    _apvSignInClickedAt = Date.now();
+    toast('Opening the Robot sign-in app. This page updates itself as each site is handed back.');
+});
+setInterval(() => {
+    if(_agentsView !== 'approvals' || document.visibilityState === 'hidden') return;
+    if(apvWatchingSignIns()) apvSilentRefresh().catch(() => {});
+}, 30000);
+document.addEventListener('visibilitychange', () => {
+    if(document.visibilityState !== 'visible') return;
+    if(Date.now() - _apvLastQueueLoad > 30000 && apvWatchingSignIns()) apvSilentRefresh().catch(() => {});
+});
+window.addEventListener('focus', () => {
+    if(Date.now() - _apvLastQueueLoad > 30000 && apvWatchingSignIns()) apvSilentRefresh().catch(() => {});
+});
+
 // Links in the agent's work must open: a video the Content Engine asks Kevin to watch is a
 // Drive URL, and esc() alone left it as dead text. Escape first, then anchor. The body is
 // pre-wrap, so newlines stay as they are. Mirrors linkifyUrls in os/tasks/index.html.
@@ -1731,7 +1776,7 @@ function apvSignInStripHtml(items){
         .map(g => `<a class="apv-signin-site" href="${esc(apvSignInLink(g))}" title="Opens the Robot sign-in app on your Mac at this site">${esc(g.site)} <span style="color:var(--text-muted)">(${g.n})</span></a>`).join('');
     return `<div class="apv-signin-strip" data-apv-signin-strip>
         <div><strong>${needs.length === 1 ? 'One task is' : needs.length + ' tasks are'} waiting on a sign-in.</strong>
-            <span style="color:var(--text-secondary)">Not a decision. Each site opens in turn: sign in, press Cmd+Q, the next opens. When the last one closes, the robots start on the work.</span></div>
+            <span style="color:var(--text-secondary)">Not a decision. Each site opens in turn: sign in, press Cmd+Q, the next opens. When the last one closes, the robots start on the work. This page updates itself as each site is handed back.</span></div>
         <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:6px">
             <a class="btn btn-success btn-sm" href="robotsignin://all" title="Opens the Robot sign-in app on your Mac and goes through every waiting site in turn">Sign in to all (${needs.length})</a>${parts}
         </div>
