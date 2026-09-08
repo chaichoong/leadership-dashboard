@@ -50,6 +50,13 @@ sites.update(json.loads(sys.argv[1]))
 print('---JSON---'); print(json.dumps([m.signin_site_for('Companies House', '', sites), m.signin_domain('www.topcashback.co.uk'), m.signin_domain('app.pingen.com')]))`, SITES);
     expect(out).toEqual(['ewf.companieshouse.gov.uk', 'topcashback.co.uk', 'pingen.com']);
   });
+  it('a One Login task folds onto the WebFiling door, so one chain never opens it twice (review, 8 Sep 2026)', () => {
+    const out = py(`
+sites = json.loads(sys.argv[1])
+sites['signin.account.gov.uk'] = {'label': 'GOV.UK One Login', 'login': True, 'shortSession': True, 'loginUrl': 'https://ewf.companieshouse.gov.uk/seclogin?tc=1'}
+print('---JSON---'); print(json.dumps([m.signin_site_for('GOV.UK One Login', '', sites), m.signin_site_for('', 'https://signin.account.gov.uk/enter-email', sites)]))`, SITES);
+    expect(out).toEqual(['ewf.companieshouse.gov.uk', 'ewf.companieshouse.gov.uk']);
+  });
   it('reads the login URL from anywhere on the line and the site from the text before it (the four live lines of 8 Sep 2026)', () => {
     const out = py(`
 lines = [
@@ -205,6 +212,9 @@ describe('the Robot sign-in app and its link', () => {
     // Never the shell's own "&": that is what held the app's pipe for a whole run.
     expect(src).not.toMatch(/2>&1 &"/);
     expect(src).not.toMatch(/nohup/);
+    // stderr is what do shell script reports as the error; never hide it.
+    expect(src).not.toMatch(/login --url[^\n]*2>&1/);
+    expect(src).not.toMatch(/signin-done --site[^\n]*2>\/dev\/null/);
     // Every window failure is a notification and the chain carries on.
     expect(src).toMatch(/Could not open the window/);
     expect(src).toMatch(/cannot sign into/);
@@ -223,6 +233,9 @@ describe('the Robot sign-in app and its link', () => {
     expect(b.sessionVerdict('https://app.pingen.com/dashboard', 1).signedIn).toBe(false);
     expect(b.sessionVerdict('https://app.pingen.com/dashboard', 0).signedIn).toBe(true);
     expect(b.sessionVerdict('https://www.tax.service.gov.uk/gg/sign-in', 0).signedIn).toBe(false);
+    // A hyphenated landing is not the door (review, 8 Sep 2026).
+    expect(b.sessionVerdict('https://app.pingen.com/login-success', 0).signedIn).toBe(true);
+    expect(b.sessionVerdict('https://app.pingen.com/auth-callback?ok=1', 0).signedIn).toBe(true);
     const run = readFileSync(join(ROOT, 'scripts', 'signin-pickup-run.sh'), 'utf8');
     expect(run).toMatch(/agent-browser\.js session --site/);
     expect(run).toMatch(/Never run agent-browser\.js login/);

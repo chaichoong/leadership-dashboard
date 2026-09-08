@@ -2872,7 +2872,7 @@ async function loadOpenTasks(){
     _openTasksState = 'loading';
     try {
         allOpenTasks = await atFetch(TASKS_TBL,
-            [TF.name, TF.status, TF.dueDate, TF.teamMember, TF.lmt, TF.inboundTask],
+            [TF.name, TF.status, TF.dueDate, TF.teamMember, TF.lmt, TF.inboundTask, TF.agentOutput],
             { filterByFormula: "AND({Status}!='Completed', {Status}!='Cancelled')" });
         // CONTROL: the board carries ~250-300 open tasks at all times. Zero
         // rows means the query broke, not an empty business — fail loudly.
@@ -3211,7 +3211,9 @@ function computeCheckLanes(){
         const owned = allOpenTasks.filter(r=>
             linkIds(gf(r,TF.teamMember)).some(id=>aiAgentIds.has(id)));
         const items = [];
-        apvGroupTasks(owned.map(r=>({ id:r.id, name: gf(r,TF.name)||'', _row:r })))
+        // agentOutput travels too, so a sign-in wait stays out of this lane's
+        // groups exactly as it does in the queue (review, 8 Sep 2026).
+        apvGroupTasks(owned.map(r=>({ id:r.id, name: gf(r,TF.name)||'', agentOutput: gf(r,TF.agentOutput)||'', _row:r })))
           .forEach(g=>{
             if(g.rows.length < 2) return;
             const rows = g.rows.map(x=>x._row);

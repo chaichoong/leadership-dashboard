@@ -488,6 +488,10 @@ describe('hand-backs are refused at submit (4 Sep 2026)', () => {
   it.each([
     "Kevin's steps only: the security code and the payment. Everything else is prepared.",
     'Kevin signing the attached statement if the content is accurate.',
+    'Kevin signing in wet ink and posting the form back.',
+    'Kevin signing in person at the branch.',
+    'Nothing more without Kevin calling it off.',
+    'Kevin calling the meeting to order.',
     'Kevin paying EUR 45 at www.amendes.gouv.fr using reference 3866676730.',
     'Once Kevin approves, the letter is posted.',
     'Kevin can review the attached statement.',

@@ -348,7 +348,7 @@ function persistSessionCookies(dir, ttlMs = 60 * 60 * 1000) {
 function sessionVerdict(url, passwordFields) {
   let host = '';
   try { host = new URL(url).hostname.toLowerCase(); } catch { host = ''; }
-  const atDoor = /oauthSignIn|seclogin|\/(?:log-?in|sign-?in|signin|login|auth)(?:\b|\/|\?|$)/i.test(url);
+  const atDoor = /oauthSignIn|seclogin|\/(?:log-?in|sign-?in|signin|login|auth)(?:\/|\?|$)/i.test(url);
   const atOneLogin = /(^|\.)account\.gov\.uk$/i.test(host);
   return { signedIn: Number(passwordFields) === 0 && !atOneLogin && !atDoor, atDoor, atOneLogin };
 }
@@ -681,6 +681,12 @@ async function main() {
         await page.waitForLoadState('domcontentloaded', { timeout: 30000 }).catch(() => {});
         await page.waitForTimeout(6000);
         clicked.push({ label, found: true, url: page.url() });
+      }
+      // One Login's bounce back to the service can be slow; a verdict taken
+      // while still on account.gov.uk would read "signed out" for a live
+      // session (review, 8 Sep 2026). Give it up to 20 s more to land.
+      for (let i = 0; i < 10 && sessionVerdict(page.url(), 0).atOneLogin; i++) {
+        await page.waitForTimeout(2000);
       }
       const url = page.url();
       const passwordFields = await page.evaluate(() => document.querySelectorAll('input[type=password]').length);

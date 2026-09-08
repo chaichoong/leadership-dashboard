@@ -71,7 +71,9 @@ on signInTo(theLine)
 	set theLabel to fieldOf(theLine, 1)
 	display notification "Sign in, then press Cmd+Q on the Chrome window." with title "Robot sign-in: " & theLabel
 	try
-		sh(quoted form of nodeBin() & " scripts/agent-browser.js login --url " & quoted form of theUrl & " > /dev/null 2>&1")
+		-- stdout only to /dev/null: `do shell script` reports stderr as the error
+		-- text, and that is what the notification below shows.
+		sh(quoted form of nodeBin() & " scripts/agent-browser.js login --url " & quoted form of theUrl & " > /dev/null")
 	on error errMsg
 		display notification "Could not open the window: " & errMsg with title "Robot sign-in: " & theLabel
 		return -1
@@ -79,7 +81,7 @@ on signInTo(theLine)
 	-- Hand this site's waiting tasks back to their robots now (Airtable only,
 	-- seconds). The pickup run itself starts once every window has closed.
 	try
-		set n to sh("/usr/bin/python3 scripts/agent-dispatch.py signin-done --site " & quoted form of theHost & " 2>/dev/null | /usr/bin/python3 -c 'import json,sys; print(len(json.load(sys.stdin).get(\"handedBack\", [])))'")
+		set n to sh("/usr/bin/python3 scripts/agent-dispatch.py signin-done --site " & quoted form of theHost & " | /usr/bin/python3 -c 'import json,sys; print(len(json.load(sys.stdin).get(\"handedBack\", [])))'")
 		set n to n as integer
 		if n is 0 then
 			display notification "Signed in. Nothing was waiting on this site." with title "Robot sign-in: " & theLabel
@@ -123,7 +125,7 @@ on runChain(theLines)
 	end if
 	if handed > 0 then
 		if startPickup() then
-			display notification "All signed in. The robots are working on " & handed & " task(s) now." & tail with title "Robot sign-in"
+			display notification "All signed in. Pickup queued for " & handed & " task(s); the robots start when the queue is free." & tail with title "Robot sign-in"
 		else
 			display notification "Signed in; the 30-minute poller will pick the " & handed & " task(s) up." & tail with title "Robot sign-in"
 		end if

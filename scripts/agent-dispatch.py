@@ -1796,8 +1796,11 @@ HANDBACK_KEVIN_RE = re.compile(
     # logging into Google AdSense and completing tax information", "Kevin
     # signing into TopCashback, clicking ... and buying", "Kevin calling EE on
     # 150". Gerunds slipped past every form above.
-    r"|\bKevin\s+(?:manually\s+)?(?:logging|signing)\s+in(?:to)?\b"
-    r"|\bKevin\s+(?:calling|phoning|ringing)\b",
+    # Review, same day: "signing in wet ink", "calling it off" and "calling the
+    # meeting to order" must pass, so a sign-in needs a site preposition and a
+    # phone verb needs a named party or a number after it.
+    r"|\bKevin\s+(?:manually\s+)?(?:logging\s+in(?:to)?|signing\s+into|signing\s+in\s+(?:to|at|on))\b"
+    r"|\bKevin\s+(?:calling|phoning|ringing)\s+(?=(?-i:[A-Z0-9]))",
     re.I,
 )
 HANDBACK_YOU_RE = re.compile(
@@ -3631,6 +3634,22 @@ def signin_line_problem(output, sites=None):
             f"{m['site']}.' Never tell him to log in and do it himself.")
 
 
+def signin_door_host(host, sites):
+    """The site whose door actually opens for HOST. One Login has no page of
+    its own: its entries carry WebFiling's loginUrl, so a queue naming both
+    "GOV.UK One Login" and "Companies House WebFiling" opened the same door
+    twice (review, 8 Sep 2026). Fold onto the host that owns the door."""
+    entry = sites.get(host) or {}
+    url = entry.get("loginUrl") or ""
+    try:
+        door = (urllib.parse.urlparse(url).hostname or "").lower()
+    except Exception:                                   # noqa: BLE001
+        door = ""
+    if door and door != host and sites.get(door, {}).get("login"):
+        return door
+    return host
+
+
 def signin_site_for(line_site, line_url, sites):
     """Which allowlist host a SIGN-IN NEEDED line means. URL host first
     (exact or suffix), then the label, case-insensitive. None when unknown."""
@@ -3648,7 +3667,7 @@ def signin_site_for(line_site, line_url, sites):
         if host and (host == h or host.endswith("." + h)) and (best is None or len(h) > len(best)):
             best = h
     if best:
-        return best
+        return signin_door_host(best, sites)
     # Same registrable domain: "www.pingen.com/en/login" is Pingen even though
     # the robot's entry is app.pingen.com. Only a site that can be signed into
     # counts here; a login: false entry (gov.uk) must not swallow a stranger.
@@ -3656,7 +3675,7 @@ def signin_site_for(line_site, line_url, sites):
         dom = signin_domain(host)
         for h, v in sites.items():
             if v.get("login") and signin_domain(h) == dom:
-                return h
+                return signin_door_host(h, sites)
     want = (line_site or "").strip().lower()
     # By label, sites the robot can sign into first: "Companies House" must
     # land on WebFiling (login: true, has a login page), not on the public
@@ -3665,10 +3684,10 @@ def signin_site_for(line_site, line_url, sites):
     for h, v in ordered:
         lab = str(v.get("label") or "").lower()
         if want and (want == lab or want in lab or lab.split(" (")[0] == want):
-            return h
+            return signin_door_host(h, sites)
     for h, _v in ordered:
         if want and want.replace(" ", "") in h.replace(".", ""):
-            return h
+            return signin_door_host(h, sites)
     return None
 
 
