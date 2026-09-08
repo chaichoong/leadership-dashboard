@@ -3780,11 +3780,27 @@ def history_entries_from_task(rec, exclude_id=None):
         out.append({"date": iso, "source": m.group("who").strip(), "text": text[:220], "task": rec.get("id"), "link": link})
     for m in re.finditer(r"^\[(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2})[^\]]*\]\s*(.+)$", str(f.get(AF["feedbackHistory"]) or ""), re.M):
         out.append({"date": f"{m.group(1)} {m.group(2)}", "source": "Kevin", "text": m.group(3).strip()[:220], "task": rec.get("id"), "link": link})
+    # Files on that task, with their links: a document the estate already has
+    # (a restraint order, a signed LOA) is fetched from here and re-attached,
+    # never asked of Kevin (8 Sep 2026: an agent could not find the restraint
+    # order PDF and asked him to attach it, while it sat on another task).
+    for a in (f.get(AF["attachments"]) or []):
+        fname = str(a.get("filename") or "").strip()
+        if not fname:
+            continue
+        kb = int(a.get("size") or 0) // 1024
+        out.append({"date": created or comp_or_blank(f), "source": "file",
+                    "text": f"file on that task: {fname}" + (f" ({kb} KB)" if kb else "") + f" — from \"{name}\"",
+                    "task": rec.get("id"), "link": str(a.get("url") or "")})
     comp = str(f.get(AF["completion"]) or "")[:10]
     if comp and status == "Completed":
         line = carry_out_line(f.get(AF["agentOutput"]))
         out.append({"date": comp, "source": "task", "text": f"completed: {name}" + (f" — {line[:160]}" if line else ""), "task": rec.get("id"), "link": link})
     return out
+
+
+def comp_or_blank(f):
+    return str(f.get(AF["completion"]) or "")[:10]
 
 
 def _stamp_to_iso(day, time_):
