@@ -846,6 +846,8 @@ if (tabId === 'comms') lazyLoadFrame('commsFrame', 'follow-up');
             if (typeof renderKpiLibraryTab === 'function') renderKpiLibraryTab();
         }
         if (tabId === 'os-team') lazyLoadFrame('osTeamFrame', 'team');
+        // Property Manager (Operations) — Roy Lavin's page, fed by the property-manager Worker.
+        if (tabId === 'property-manager') lazyLoadFrame('propertyManagerFrame', 'property-manager');
         // Content Machine (Marketing) lazy-load — standalone app loaded via iframe,
         // cache-busted so its Pages deploys are picked up without a hard refresh.
         if (tabId === 'content-machine') lazyLoadFrame('contentMachineFrame', 'content');

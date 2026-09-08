@@ -1,0 +1,442 @@
+<!DOCTYPE html>
+<html lang="en-GB">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="robots" content="noindex, nofollow">
+<title>Property Manager · Operations Director</title>
+<link rel="stylesheet" href="../css/tokens.css?v=1">
+<link rel="stylesheet" href="../css/sync-bar.css?v=3">
+<style>
+  /* Property Manager — Roy Lavin's single page. Every figure comes from the
+     property-manager Worker; this file only renders. Tokens only, no hex. */
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg-app); color: var(--text-primary); }
+  .pm-wrap { max-width: 1240px; margin: 0 auto; padding: var(--space-5) var(--space-5) var(--space-10); }
+  .pm-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); flex-wrap: wrap; margin-bottom: var(--space-3); }
+  .pm-head h1 { font-size: var(--fs-2xl); font-weight: var(--fw-bold); margin: 0; letter-spacing: -0.01em; }
+  .pm-head .sub { color: var(--text-secondary); font-size: var(--fs-sm); margin-top: 2px; }
+  .pm-actions { display: flex; gap: var(--space-2); align-items: center; flex-wrap: wrap; }
+  .btn { border: 1px solid var(--border-default); background: var(--bg-surface); color: var(--text-primary); border-radius: var(--radius-md); padding: 7px 14px; font: inherit; font-size: var(--fs-sm); font-weight: var(--fw-medium); cursor: pointer; }
+  .btn:hover { background: var(--bg-surface-2); }
+  .btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .btn:disabled { opacity: .55; cursor: default; }
+  .btn-primary { background: var(--accent); border-color: var(--accent); color: var(--accent-on); }
+  .btn-primary:hover { background: var(--accent-hover); }
+  .btn-ghost { border-color: transparent; color: var(--text-secondary); }
+  section.card { background: var(--bg-surface); border: 1px solid var(--border-default); border-radius: var(--radius-lg); padding: var(--space-5); margin-top: var(--space-4); box-shadow: var(--shadow-sm); }
+  section.card h2 { margin: 0 0 var(--space-1); font-size: var(--fs-lg); font-weight: var(--fw-semibold); }
+  section.card .hint { color: var(--text-secondary); font-size: var(--fs-sm); margin: 0 0 var(--space-4); }
+  .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: var(--space-3); }
+  .kpi { background: var(--bg-surface-2); border: 1px solid var(--border-subtle); border-radius: var(--radius-md); padding: var(--space-3) var(--space-4); min-width: 0; }
+  .kpi .l { color: var(--text-secondary); font-size: var(--fs-xs); font-weight: var(--fw-medium); text-transform: uppercase; letter-spacing: .04em; }
+  .kpi .v { font-size: var(--fs-2xl); font-weight: var(--fw-bold); margin-top: 4px; font-variant-numeric: tabular-nums; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .kpi .d { color: var(--text-muted); font-size: var(--fs-xs); margin-top: 2px; }
+  .kpi.good .v { color: var(--success); } .kpi.warn .v { color: var(--warning); } .kpi.bad .v { color: var(--danger); }
+  .bar { height: 6px; background: var(--bg-subtle); border-radius: var(--radius-full); margin-top: 8px; overflow: hidden; }
+  .bar > i { display: block; height: 100%; background: var(--accent); border-radius: var(--radius-full); }
+  .bar.over > i { background: var(--danger); }
+  .two { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-4); }
+  @media (max-width: 900px) { .two { grid-template-columns: 1fr; } }
+  .tbl-wrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: var(--fs-sm); }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border-subtle); white-space: nowrap; }
+  th { background: var(--bg-subtle); color: var(--text-secondary); font-weight: var(--fw-semibold); font-size: var(--fs-xs); text-transform: uppercase; letter-spacing: .04em; position: sticky; top: 0; }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+  td.wrap { white-space: normal; max-width: 360px; overflow: hidden; text-overflow: ellipsis; }
+  tr.total td { font-weight: var(--fw-bold); border-top: 2px solid var(--border-default); }
+  tr.muted td { color: var(--text-muted); }
+  .neg { color: var(--danger); } .pos { color: var(--success); }
+  .pill { display: inline-block; padding: 1px 8px; border-radius: var(--radius-full); font-size: var(--fs-xs); font-weight: var(--fw-medium); background: var(--bg-subtle); color: var(--text-secondary); }
+  .pill.uc { background: var(--info-bg); color: var(--info); }
+  .pill.paid { background: var(--success-bg); color: var(--success); }
+  .pill.behind { background: var(--danger-bg); color: var(--danger); }
+  .pill.maint { background: var(--accent-soft); color: var(--accent); }
+  .pill.over { background: var(--danger-bg); color: var(--danger); }
+  .planned { display: grid; grid-template-columns: 1fr auto; gap: 6px 24px; max-width: 460px; font-size: var(--fs-md); }
+  .planned .amt { text-align: right; font-variant-numeric: tabular-nums; font-weight: var(--fw-semibold); }
+  .planned .leaves { border-top: 1px solid var(--border-default); padding-top: 6px; font-weight: var(--fw-bold); }
+  .seg { display: inline-flex; border: 1px solid var(--border-default); border-radius: var(--radius-md); overflow: hidden; }
+  .seg button { border: 0; background: var(--bg-surface); padding: 5px 12px; font: inherit; font-size: var(--fs-sm); cursor: pointer; color: var(--text-secondary); }
+  .seg button[aria-pressed="true"] { background: var(--accent); color: var(--accent-on); }
+  .seg button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+  .row-head { display: flex; justify-content: space-between; align-items: center; gap: var(--space-3); flex-wrap: wrap; margin-bottom: var(--space-3); }
+  .task { display: grid; grid-template-columns: 1fr auto; gap: 4px 12px; padding: 10px 12px; border: 1px solid var(--border-subtle); border-radius: var(--radius-md); background: var(--bg-surface); cursor: pointer; margin-bottom: 8px; }
+  .task:hover { background: var(--bg-surface-2); }
+  .task:focus-visible { outline: 2px solid var(--accent); }
+  .task .t { font-weight: var(--fw-medium); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .task .m { color: var(--text-secondary); font-size: var(--fs-xs); display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .task.overdue { border-color: var(--danger); }
+  .empty { color: var(--text-muted); font-size: var(--fs-sm); padding: var(--space-3) 0; }
+  .err { background: var(--danger-bg); color: var(--danger); border-radius: var(--radius-md); padding: var(--space-3) var(--space-4); margin-top: var(--space-3); font-size: var(--fs-sm); }
+  .loading { color: var(--text-secondary); font-size: var(--fs-sm); padding: var(--space-6); text-align: center; }
+  /* Login */
+  .login { max-width: 400px; margin: 12vh auto; background: var(--bg-surface); border: 1px solid var(--border-default); border-radius: var(--radius-lg); padding: var(--space-6); box-shadow: var(--shadow-md); }
+  .login h1 { font-size: var(--fs-xl); margin: 0 0 var(--space-2); }
+  .login p { color: var(--text-secondary); font-size: var(--fs-sm); margin: 0 0 var(--space-4); }
+  .login input { width: 100%; padding: 10px 12px; border: 1px solid var(--border-default); border-radius: var(--radius-md); font: inherit; font-size: var(--fs-md); background: var(--bg-surface); color: var(--text-primary); }
+  .login input:focus-visible { outline: 2px solid var(--accent); }
+  .login .btn { width: 100%; margin-top: var(--space-3); padding: 10px; }
+  /* Drawer */
+  .backdrop { position: fixed; inset: 0; background: rgba(28,36,34,0.5); /* same dim as the shell's modal overlay in css/styles.css; tokens.css has no overlay token and bumping it means re-versioning 65 pages */ display: none; z-index: 40; }
+  .backdrop.open { display: block; }
+  .drawer { position: fixed; top: 0; right: 0; bottom: 0; width: min(520px, 100%); background: var(--bg-surface); border-left: 1px solid var(--border-default); box-shadow: var(--shadow-lg); transform: translateX(100%); transition: transform .2s ease; z-index: 50; display: flex; flex-direction: column; }
+  .drawer.open { transform: none; }
+  .drawer header { padding: var(--space-4) var(--space-5); border-bottom: 1px solid var(--border-subtle); display: flex; justify-content: space-between; gap: var(--space-3); align-items: flex-start; }
+  .drawer header h3 { margin: 0; font-size: var(--fs-lg); word-break: break-word; }
+  .drawer .body { padding: var(--space-4) var(--space-5); overflow-y: auto; flex: 1; }
+  .drawer label { display: block; font-size: var(--fs-xs); color: var(--text-secondary); font-weight: var(--fw-semibold); text-transform: uppercase; letter-spacing: .04em; margin: var(--space-4) 0 6px; }
+  .drawer select, .drawer textarea { width: 100%; font: inherit; font-size: var(--fs-sm); padding: 8px 10px; border: 1px solid var(--border-default); border-radius: var(--radius-md); background: var(--bg-surface); color: var(--text-primary); }
+  .drawer textarea { min-height: 90px; resize: vertical; }
+  .drawer .pre { white-space: pre-wrap; word-break: break-word; font-size: var(--fs-sm); color: var(--text-primary); background: var(--bg-surface-2); border-radius: var(--radius-md); padding: 10px 12px; max-height: 240px; overflow: auto; }
+  .drawer footer { padding: var(--space-3) var(--space-5); border-top: 1px solid var(--border-subtle); display: flex; gap: var(--space-2); justify-content: flex-end; }
+  .toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); background: var(--bg-sidebar); color: var(--text-inverse); padding: 10px 16px; border-radius: var(--radius-md); font-size: var(--fs-sm); box-shadow: var(--shadow-lg); z-index: 60; opacity: 0; transition: opacity .2s; pointer-events: none; }
+  .toast.show { opacity: 1; }
+  .toast.bad { background: var(--danger); }
+  @media print { .pm-actions, .drawer, .backdrop, [data-sync-bar] { display: none !important; } section.card { break-inside: avoid; box-shadow: none; } }
+</style>
+</head>
+<body>
+
+<div id="loginView" class="login" hidden>
+  <h1>Property Manager</h1>
+  <p>Enter your passcode to open the property dashboard.</p>
+  <form id="loginForm">
+    <input id="passcode" type="password" autocomplete="current-password" placeholder="Passcode" aria-label="Passcode" required>
+    <button class="btn btn-primary" type="submit" id="loginBtn">Open dashboard</button>
+  </form>
+  <div id="loginErr" class="err" hidden role="alert"></div>
+</div>
+
+<div id="app" class="pm-wrap" hidden>
+  <div class="pm-head">
+    <div>
+      <h1>Property Manager</h1>
+      <div class="sub" id="whoLine">Real Estate · property figures only</div>
+    </div>
+    <div class="pm-actions">
+      <button class="btn" id="refreshBtn" type="button">Refresh</button>
+      <button class="btn btn-ghost" id="logoutBtn" type="button">Sign out</button>
+    </div>
+  </div>
+  <div data-sync-bar="property-manager"></div>
+  <div id="loadErr" class="err" hidden role="alert"></div>
+  <div id="content"><div class="loading">Loading the property figures…</div></div>
+</div>
+
+<div class="backdrop" id="backdrop"></div>
+<aside class="drawer" id="drawer" role="dialog" aria-modal="true" aria-labelledby="drawerTitle" aria-hidden="true">
+  <header>
+    <div>
+      <h3 id="drawerTitle"></h3>
+      <div id="drawerMeta" style="color:var(--text-secondary);font-size:var(--fs-xs);margin-top:4px"></div>
+    </div>
+    <button class="btn btn-ghost" id="drawerClose" type="button" aria-label="Close">✕</button>
+  </header>
+  <div class="body">
+    <label>What needs doing</label>
+    <div class="pre" id="drawerDesc"></div>
+    <label>Notes so far</label>
+    <div class="pre" id="drawerNotes"></div>
+    <label for="statusSel">Status</label>
+    <select id="statusSel">
+      <option value="__keep" id="statusKeep" hidden></option>
+      <option value="Upcoming">Upcoming</option>
+      <option value="Today">Today</option>
+      <option value="Completed">Completed</option>
+    </select>
+    <label for="noteTxt">Add a note</label>
+    <textarea id="noteTxt" placeholder="What you did, what you found, what happens next…" maxlength="2000"></textarea>
+  </div>
+  <footer>
+    <button class="btn" id="drawerCancel" type="button">Cancel</button>
+    <button class="btn btn-primary" id="drawerSave" type="button">Save</button>
+  </footer>
+</aside>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<script src="../js/sync-bar.js?v=6"></script>
+<script>
+(function () {
+  'use strict';
+  const API = 'https://property-manager.kevinbrittain.workers.dev';
+  const TOKEN_KEY = 'pm_token';
+  const WHO_KEY = 'pm_who';
+  const TAB = 'property-manager';
+
+  const $ = (id) => document.getElementById(id);
+  // Local helpers on purpose: js/shared.js carries the Airtable key flow and must
+  // never load on Roy's page, so escHtml and the £ formatter are re-declared here.
+  const escHtml = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const gbp = (n) => (Number(n) < 0 ? '−' : '') + '£' + Math.abs(Number(n) || 0).toLocaleString('en-GB', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+  const dateGB = (k) => { if (!k) return '—'; const [y, m, d] = k.split('-').map(Number); return new Date(y, m - 1, d).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' }); };
+  const signed = (n) => `<span class="${n < 0 ? 'neg' : 'pos'}">${gbp(n)}</span>`;
+
+  let token = '', who = '', data = null, tasks = [], pnlMonths = 3, taskFilter = 'all', openTask = null, loading = false;
+  try { token = localStorage.getItem(TOKEN_KEY) || ''; who = localStorage.getItem(WHO_KEY) || ''; } catch (e) { token = ''; }
+
+  // ── Toast ──
+  let toastTimer = null;
+  function toast(msg, bad) {
+    const t = $('toast'); t.textContent = msg; t.className = 'toast show' + (bad ? ' bad' : '');
+    clearTimeout(toastTimer); toastTimer = setTimeout(() => { t.className = 'toast'; }, 3500);
+  }
+
+  // ── API ──
+  async function api(path, opts = {}) {
+    const res = await fetch(API + path, { ...opts, headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: 'Bearer ' + token } : {}), ...(opts.headers || {}) } });
+    let body = null;
+    try { body = await res.json(); } catch (e) { body = null; }
+    if (res.status === 401 && path !== '/login') { signOut(false); throw new Error('Your session has ended. Sign in again.'); }
+    if (!res.ok) throw new Error((body && body.error) || `Request failed (${res.status})`);
+    return body;
+  }
+
+  // ── Auth ──
+  function showLogin(msg) {
+    $('app').hidden = true; $('loginView').hidden = false;
+    const e = $('loginErr'); e.hidden = !msg; e.textContent = msg || '';
+    setTimeout(() => $('passcode').focus(), 50);
+  }
+  function signOut(clearMsg) {
+    token = ''; who = '';
+    if (openTask) closeDrawer();
+    try { localStorage.removeItem(TOKEN_KEY); localStorage.removeItem(WHO_KEY); } catch (e) { /* storage blocked */ }
+    showLogin(clearMsg === false ? 'Your session has ended. Sign in again.' : '');
+  }
+  $('loginForm').addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    const btn = $('loginBtn'); btn.disabled = true;
+    try {
+      const r = await api('/login', { method: 'POST', body: JSON.stringify({ passcode: $('passcode').value }) });
+      token = r.token; who = r.who;
+      try { localStorage.setItem(TOKEN_KEY, token); localStorage.setItem(WHO_KEY, who); } catch (e) { /* storage blocked */ }
+      $('passcode').value = '';
+      $('loginErr').hidden = true;
+      $('loginView').hidden = true; $('app').hidden = false;
+      await loadAll(false);
+    } catch (e) {
+      $('loginErr').hidden = false; $('loginErr').textContent = e.message;
+    } finally { btn.disabled = false; }
+  });
+  $('logoutBtn').addEventListener('click', () => signOut(true));
+  $('refreshBtn').addEventListener('click', () => loadAll(true));
+
+  // ── Load ──
+  async function loadAll(refresh) {
+    if (loading) return;
+    loading = true;
+    $('refreshBtn').disabled = true;
+    $('loadErr').hidden = true;
+    if (!data) $('content').innerHTML = '<div class="loading">Loading the property figures… first load reads a year of transactions and takes a few seconds.</div>';
+    if (typeof markTabRefreshing === 'function') markTabRefreshing(TAB);
+    try {
+      const [d, t] = await Promise.all([api('/data' + (refresh ? '?refresh=1' : '')), api('/tasks')]);
+      data = d; tasks = t.tasks || []; who = t.who || who;
+      render();
+      registerHealth();
+      if (typeof markTabSynced === 'function') markTabSynced(TAB);
+    } catch (e) {
+      $('loadErr').hidden = false; $('loadErr').textContent = e.message;
+      if (!data) $('content').innerHTML = '<div class="empty">Nothing to show until the data loads. Use Refresh to try again.</div>';
+    } finally { loading = false; $('refreshBtn').disabled = false; }
+  }
+
+  // ── Render ──
+  function render() {
+    if (!data) return;
+    $('whoLine').textContent = `${who ? who + ' · ' : ''}Real Estate · property figures only · updated ${new Date(data.generatedAt).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}`;
+    $('content').innerHTML = [
+      renderPortfolio(data.portfolio),
+      renderTenancies(data.tenancies),
+      renderLast31(data.last31, data.planned),
+      renderRentDue(data.rentDue, data.planned),
+      renderPnl(),
+      renderTasks(),
+    ].join('');
+    wirePnlToggle(); wireTaskList();
+  }
+
+  function kpi(label, value, detail, tone) {
+    return `<div class="kpi ${tone || ''}"><div class="l">${escHtml(label)}</div><div class="v">${value}</div>${detail ? `<div class="d">${detail}</div>` : ''}</div>`;
+  }
+
+  function renderPortfolio(p) {
+    const voids = p.voids.length
+      ? `<div class="tbl-wrap"><table><thead><tr><th>Void unit</th><th>Property</th></tr></thead><tbody>${p.voids.map(v => `<tr><td>${escHtml(v.unit)}</td><td>${escHtml(v.property)}</td></tr>`).join('')}</tbody></table></div>`
+      : '<div class="empty">No void units. Every unit is let.</div>';
+    return `<section class="card" aria-labelledby="h-portfolio"><h2 id="h-portfolio">Portfolio</h2><p class="hint">Every unit across the properties. A void is an empty unit earning nothing.</p>
+      <div class="kpis">
+        ${kpi('Properties', p.properties)}
+        ${kpi('Units', p.units)}
+        ${kpi('Occupied', p.occupied, `${p.occupancyPct}% occupancy`, p.occupancyPct >= 95 ? 'good' : p.occupancyPct >= 90 ? 'warn' : 'bad')}
+        ${kpi('Void', p.void, (p.empty.rentReady || p.empty.notReady) ? `${p.empty.rentReady} rent ready · ${p.empty.notReady} not ready` : '', p.void === 0 ? 'good' : p.void <= 2 ? 'warn' : 'bad')}
+      </div>
+      <div style="margin-top:var(--space-4)">${voids}</div></section>`;
+  }
+
+  function renderTenancies(t) {
+    const rows = t.behindList.length
+      ? `<div class="tbl-wrap"><table><thead><tr><th>Tenant</th><th>Unit</th><th class="num">Rent / month</th><th>Status</th><th class="num">Days overdue</th></tr></thead><tbody>${t.behindList.map(r => `<tr><td>${escHtml(r.tenant)}</td><td>${escHtml(r.unit || r.property)}</td><td class="num">${gbp(r.rent)}</td><td><span class="pill behind">${escHtml(r.status || 'Behind')}</span></td><td class="num">${r.daysOverdue || '—'}</td></tr>`).join('')}</tbody></table></div>`
+      : '<div class="empty">Nobody is behind on rent.</div>';
+    return `<section class="card" aria-labelledby="h-ten"><h2 id="h-ten">Tenancies</h2><p class="hint">Live tenancies and who is behind. Exposure is the monthly rent of everyone behind.</p>
+      <div class="kpis">
+        ${kpi('Live tenancies', t.active)}
+        ${kpi('Paying on time', t.inPayment, `${t.active ? Math.round(t.inPayment / t.active * 100) : 0}% of live`, 'good')}
+        ${kpi('Behind on rent', t.behind, '', t.behind === 0 ? 'good' : t.behind <= 3 ? 'warn' : 'bad')}
+        ${kpi('Exposure', gbp(t.exposure), 'rent at risk each month', t.exposure === 0 ? 'good' : t.exposure <= 1500 ? 'warn' : 'bad')}
+      </div>
+      <div style="margin-top:var(--space-4)">${rows}</div></section>`;
+  }
+
+  function budgetKpi(label, spent, target) {
+    const pct = target ? Math.min(100, Math.round(spent / target * 100)) : 0;
+    const over = spent > target;
+    return `<div class="kpi ${over ? 'bad' : 'good'}"><div class="l">${escHtml(label)}</div><div class="v">${gbp(spent)}</div><div class="d">budget ${gbp(target)} · ${over ? gbp(spent - target) + ' over' : gbp(target - spent) + ' left'}</div><div class="bar ${over ? 'over' : ''}"><i style="width:${pct}%"></i></div></div>`;
+  }
+
+  function renderLast31(l, planned) {
+    return `<section class="card" aria-labelledby="h-31"><h2 id="h-31">Actual · last 31 days</h2><p class="hint">Real money in and out, ${dateGB(l.from)} to ${dateGB(l.to)}. Property transactions only.</p>
+      <div class="kpis">
+        ${kpi('Rent collected', gbp(l.rentIn), 'cash that arrived', 'good')}
+        ${budgetKpi('Maintenance spend', l.maintenance, l.maintTarget)}
+        ${budgetKpi('Wages spend', l.wages, l.wagesTarget)}
+        ${kpi('Exposure', gbp(l.exposure), 'rent of tenants behind', l.exposure === 0 ? 'good' : 'warn')}
+        ${kpi('Property profit', gbp(l.profit), `${gbp(l.income)} in − ${gbp(l.costs)} out`, l.profit >= 0 ? 'good' : 'bad')}
+      </div>
+      <h2 style="margin-top:var(--space-5)">Planned · a normal month</h2><p class="hint">What the tenancies should bring in, against the fixed running costs of the property business. Planned and actual differ when tenants pay late or agents net maintenance off the rent.</p>
+      <div class="planned">
+        <div>Expected rent</div><div class="amt">${gbp(planned.expectedRent)}</div>
+        <div>Running costs (${planned.costCount} fixed costs)</div><div class="amt">${gbp(planned.runningCosts)}</div>
+        <div class="leaves">Leaves</div><div class="amt leaves ${planned.leaves < 0 ? 'neg' : ''}">${gbp(planned.leaves)}</div>
+      </div></section>`;
+  }
+
+  function renderRentDue(rd, planned) {
+    const rows = rd.rows.length
+      ? rd.rows.map(r => `<tr class="${r.paid ? 'muted' : ''}"><td>${dateGB(r.due)}</td><td>${escHtml(r.tenant)}</td><td>${escHtml(r.unit || r.property)}</td><td class="num">${gbp(r.amount)}</td><td>${r.isUC ? '<span class="pill uc">UC</span> ' : ''}${r.paid ? '<span class="pill paid">Paid</span>' : ''}</td></tr>`).join('')
+      : '<tr><td colspan="5" class="empty">No rent falls due in the next 31 days.</td></tr>';
+    return `<section class="card" aria-labelledby="h-due"><h2 id="h-due">Rent due · next 31 days</h2><p class="hint">Who should pay and when. UC means the rent comes from Universal Credit. Grey rows are already paid this month.</p>
+      <div class="tbl-wrap"><table><thead><tr><th>Due</th><th>Tenant</th><th>Unit</th><th class="num">Amount</th><th></th></tr></thead><tbody>${rows}
+      <tr class="total"><td colspan="3">Rent due in the window</td><td class="num">${gbp(rd.total)}</td><td></td></tr>
+      <tr class="total muted"><td colspan="3">Running costs going out this month</td><td class="num">${gbp(planned.runningCosts)}</td><td></td></tr></tbody></table></div></section>`;
+  }
+
+  function renderPnl() {
+    const p = data.pnl[String(pnlMonths)];
+    const rows = p.rows.length
+      ? p.rows.map(r => `<tr class="${r.property === 'Unallocated' ? 'muted' : ''}"><td>${r.property === 'Unallocated' ? 'Not linked to a property (mortgages, insurance, wages…)' : escHtml(r.property)}</td><td class="num">${gbp(r.rentIn)}</td><td class="num">${gbp(r.maintenance)}</td><td class="num">${gbp(r.otherCosts)}</td><td class="num">${signed(r.profit)}</td></tr>`).join('')
+      : '<tr><td colspan="5" class="empty">No property transactions in this window.</td></tr>';
+    return `<section class="card" aria-labelledby="h-pnl"><div class="row-head"><div><h2 id="h-pnl">Profit by property</h2><p class="hint" style="margin:0">Rent in, minus maintenance, minus every other property cost. Costs that belong to the whole business, not one property, sit on the grey row. The newest month is part-month to today.</p></div>
+      <div class="seg" role="group" aria-label="Window">${[1, 3, 12].map(m => `<button type="button" data-months="${m}" aria-pressed="${m === pnlMonths}">${m === 1 ? 'This month' : m + ' months'}</button>`).join('')}</div></div>
+      <div class="tbl-wrap"><table><thead><tr><th>Property</th><th class="num">Rent in</th><th class="num">Maintenance</th><th class="num">Other costs</th><th class="num">Profit</th></tr></thead><tbody>${rows}
+      <tr class="total"><td>${escHtml(p.total.property)}</td><td class="num">${gbp(p.total.rentIn)}</td><td class="num">${gbp(p.total.maintenance)}</td><td class="num">${gbp(p.total.otherCosts)}</td><td class="num">${signed(p.total.profit)}</td></tr></tbody></table></div></section>`;
+  }
+  function wirePnlToggle() {
+    document.querySelectorAll('.seg [data-months]').forEach(b => b.addEventListener('click', () => { pnlMonths = Number(b.dataset.months); render(); }));
+  }
+
+  function visibleTasks() {
+    return tasks.filter(t => taskFilter === 'all' || (taskFilter === 'mine' && t.mine) || (taskFilter === 'maint' && t.maintenance));
+  }
+  function renderTasks() {
+    const list = visibleTasks();
+    const items = list.length ? list.map(t => `<div class="task ${t.overdue ? 'overdue' : ''}" role="button" tabindex="0" data-task="${escHtml(t.id)}" aria-haspopup="dialog">
+        <div class="t">${escHtml(t.name)}</div>
+        <div class="m">${t.overdue ? '<span class="pill over">Overdue</span>' : `<span class="pill">${escHtml(t.status)}</span>`}</div>
+        <div class="m">${t.maintenance ? '<span class="pill maint">Maintenance</span>' : ''}${t.properties.length ? `<span>${escHtml(t.properties.join(', '))}</span>` : ''}${t.contractor ? `<span>· ${escHtml(t.contractor)}</span>` : ''}${t.priorityLevel === 'High Priority' || t.priority === 'Urgent' ? '<span class="pill over">High</span>' : ''}</div>
+        <div class="m">${t.due ? 'Due ' + dateGB(t.due) : 'No date'}</div>
+      </div>`).join('') : '<div class="empty">Nothing open in this list.</div>';
+    const counts = { all: tasks.length, mine: tasks.filter(t => t.mine).length, maint: tasks.filter(t => t.maintenance).length };
+    return `<section class="card" aria-labelledby="h-tasks"><div class="row-head"><div><h2 id="h-tasks">Tasks</h2><p class="hint" style="margin:0">Your open tasks and every maintenance job. Click one to update it.</p></div>
+      <div class="seg" role="group" aria-label="Task filter">${[['all', 'All'], ['mine', 'Mine'], ['maint', 'Maintenance']].map(([k, l]) => `<button type="button" data-filter="${k}" aria-pressed="${taskFilter === k}">${l} (${counts[k]})</button>`).join('')}</div></div>
+      <div id="taskList" aria-live="polite">${items}</div></section>`;
+  }
+  function wireTaskList() {
+    document.querySelectorAll('.seg [data-filter]').forEach(b => b.addEventListener('click', () => { taskFilter = b.dataset.filter; render(); }));
+    document.querySelectorAll('.task[data-task]').forEach(el => {
+      const open = () => openDrawer(el.dataset.task);
+      el.addEventListener('click', open);
+      el.addEventListener('keydown', (ev) => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); open(); } });
+    });
+  }
+
+  // ── Drawer ──
+  let drawerReturnFocus = null;
+  const SETTABLE = ['Upcoming', 'Today', 'Completed'];
+  function openDrawer(id) {
+    openTask = tasks.find(t => t.id === id);
+    if (!openTask) return;
+    drawerReturnFocus = document.activeElement;
+    $('drawerTitle').textContent = openTask.name;
+    $('drawerMeta').textContent = [openTask.properties.join(', '), openTask.contractor, openTask.due ? 'Due ' + dateGB(openTask.due) : ''].filter(Boolean).join(' · ');
+    $('drawerDesc').textContent = openTask.description || 'No description.';
+    $('drawerNotes').textContent = openTask.notes || 'No notes yet.';
+    // A status outside the three Roy can set (Approval, To do, Overdue…) stays
+    // exactly as it is unless he picks another: a note must never move a task
+    // out of Kevin's approval gate.
+    const keep = $('statusKeep');
+    if (SETTABLE.includes(openTask.status)) { keep.hidden = true; $('statusSel').value = openTask.status; }
+    else { keep.hidden = false; keep.textContent = `${openTask.status || 'No status'} (unchanged)`; $('statusSel').value = '__keep'; }
+    $('noteTxt').value = '';
+    $('drawer').classList.add('open'); $('backdrop').classList.add('open');
+    $('drawer').setAttribute('aria-hidden', 'false');
+    $('app').setAttribute('inert', '');
+    setTimeout(() => $('statusSel').focus(), 50);
+  }
+  function closeDrawer() {
+    $('drawer').classList.remove('open'); $('backdrop').classList.remove('open');
+    $('drawer').setAttribute('aria-hidden', 'true');
+    $('app').removeAttribute('inert');
+    openTask = null;
+    if (drawerReturnFocus && typeof drawerReturnFocus.focus === 'function') drawerReturnFocus.focus();
+    drawerReturnFocus = null;
+  }
+  $('drawerClose').addEventListener('click', closeDrawer);
+  $('drawerCancel').addEventListener('click', closeDrawer);
+  $('backdrop').addEventListener('click', closeDrawer);
+  document.addEventListener('keydown', (ev) => { if (ev.key === 'Escape' && openTask) closeDrawer(); });
+  $('drawerSave').addEventListener('click', async () => {
+    if (!openTask) return;
+    const status = $('statusSel').value;
+    const note = $('noteTxt').value.trim();
+    const changedStatus = status !== '__keep' && status !== openTask.status;
+    if (!changedStatus && !note) { toast('Nothing changed.'); return; }
+    const btn = $('drawerSave'); btn.disabled = true; btn.textContent = 'Saving…';
+    try {
+      const body = {}; if (changedStatus) body.status = status; if (note) body.note = note;
+      const r = await api('/task/' + encodeURIComponent(openTask.id), { method: 'POST', body: JSON.stringify(body) });
+      // Local mutate then full re-render so counts and rows stay in step.
+      if (r.task.status === 'Completed') tasks = tasks.filter(t => t.id !== openTask.id);
+      else tasks = tasks.map(t => (t.id === openTask.id ? { ...t, status: r.task.status, notes: r.task.notes } : t));
+      closeDrawer(); render();
+      toast(r.task.status === 'Completed' ? 'Task completed.' : 'Saved.');
+    } catch (e) {
+      toast(e.message, true);
+    } finally { btn.disabled = false; btn.textContent = 'Save'; }
+  });
+
+  // ── Health checks (sync bar) ──
+  function registerHealth() {
+    if (typeof registerSyncBar !== 'function' || !data) return;
+    const h = data.health || {};
+    registerSyncBar(TAB, {
+      refreshFn: () => loadAll(true),
+      checks: [
+        { name: 'Property transactions loaded', kind: 'sync', run: () => ({ status: h.txCount > 0 ? 'pass' : 'fail', detail: `${h.txCount || 0} Real Estate transactions in the last 13 months` }) },
+        { name: 'Tenancies and units loaded', kind: 'sync', run: () => ({ status: h.tenancyCount > 0 && h.unitCount > 0 ? 'pass' : 'fail', detail: `${h.tenancyCount || 0} tenancies · ${h.unitCount || 0} units` }) },
+        { name: 'Personal costs stripped', kind: 'sync', run: () => { const x = h.costsExcluded || {}; return { status: 'pass', detail: `${x.personal || 0} personal and ${x.otherBusiness || 0} other-business cost rows kept out of the running-cost line` }; } },
+        { name: 'Rent collected has a source', kind: 'sync', run: () => ({ status: data.last31.txCount > 0 ? 'pass' : 'warn', detail: `${data.last31.txCount} transactions in the 31-day window` }) },
+        { name: 'Profit by property allocates', kind: 'sync', run: () => { const u = h.unallocatedTx12m || {}; const pct = data.pnl['12'].total.rentIn ? Math.round(Math.abs(u.rentIn || 0) / data.pnl['12'].total.rentIn * 100) : 0; return { status: pct <= 10 ? 'pass' : 'warn', detail: `${pct}% of 12-month rent has no property link (Unallocated row)` }; } },
+        { name: 'Task list matches the board', kind: 'sync', run: () => ({ status: 'pass', detail: `${tasks.length} open tasks on the property lane` }) },
+        { name: 'Feed is fresh', kind: 'automation', run: () => { const age = (Date.now() - new Date(data.generatedAt).getTime()) / 60000; return { status: age < 30 ? 'pass' : 'warn', detail: `computed ${Math.round(age)} min ago${data.cached ? ' (served from cache)' : ''}` }; } },
+      ],
+    });
+  }
+
+  // ── Boot ──
+  if (token) { $('app').hidden = false; loadAll(false); } else { showLogin(''); }
+})();
+</script>
+</body>
+</html>
