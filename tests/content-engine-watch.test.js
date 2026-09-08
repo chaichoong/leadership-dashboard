@@ -68,7 +68,7 @@ describe('content-engine watch: nightly wiring', () => {
     expect(w).toContain('copy_streaming(e["path"], dest + ".part")');
     expect(w).not.toContain('shutil.copyfile(e["path"]');
     const sh = readFileSync(path.join(ROOT, 'scripts', 'content-engine-run.sh'), 'utf8');
-    expect(sh).toMatch(/watch\.py next \|\| echo/);
+    expect(sh).toMatch(/watch\.py next --day "\$day" \|\| break/);
     expect(sh).toContain('REPO="$(cd "$(dirname "$0")/.." && pwd)"');
   });
 
@@ -84,13 +84,28 @@ describe('content-engine watch: nightly wiring', () => {
     expect(w).toContain('except urllib.error.HTTPError:\n            raise');
   });
 
+  it("night order: slot 1 continues the run, the other slots take the oldest missing days that fit the disk; gap days publish outside the cursor (Kevin, 8 Sep 2026)", () => {
+    const w = readFileSync(path.join(ROOT, 'scripts', 'content-engine', 'watch.py'), 'utf8');
+    expect(w).toContain('GAP_DAYS_FILE = os.path.expanduser("~/.config/od/content_engine_gap_days")');
+    expect(w).toContain('def plan(ledger, slots, gaps=None, free=None, start=None)');
+    expect(w).toContain('if since and date < since and streak_day(date) not in gaps: continue');
+    expect(w).toContain('def day_fits(ledger, day, free)');
+    const sh = readFileSync(path.join(ROOT, 'scripts', 'content-engine-run.sh'), 'utf8');
+    expect(sh).toMatch(/for day in \$DAYS; do/);
+    const p = readFileSync(path.join(ROOT, 'scripts', 'content-engine', 'publish.py'), 'utf8');
+    expect(p).toContain('def may_go_to_youtube(day, gaps, state, ledger, approved)');
+    expect(p).toContain('moves_cursor(day, gaps): state[CURSOR_KEY] = day');
+    expect(p).toContain('d > cursor(state) + 1 and d not in gaps');
+  });
+
   it("starts at Kevin's takeover day and renders the configured number of episodes a night (8 Sep 2026)", () => {
     const w = readFileSync(path.join(ROOT, 'scripts', 'content-engine', 'watch.py'), 'utf8');
     expect(w).toContain('START_DAY_FILE = os.path.expanduser("~/.config/od/content_engine_start_day")');
     expect(w).toContain('since = since or since_for_start_day()');
     const sh = readFileSync(path.join(ROOT, 'scripts', 'content-engine-run.sh'), 'utf8');
     expect(sh).toContain('content_engine_episodes_per_night');
-    expect(sh).toMatch(/for i in \$\(seq 1 "\$EPISODES"\); do/);
+    expect(sh).toMatch(/watch\.py plan --slots "\$EPISODES"/);
+    expect(w).toContain('ap.add_argument("--since", default=None'); // the CLI default used to pin the scan to 4 June 2026, hiding day 2054 from the takeover
     const p = readFileSync(path.join(ROOT, 'scripts', 'content-engine', 'publish.py'), 'utf8');
     expect(p).toContain('def staggered(slot, index');
     expect(p).toContain('when_for(platform, spec["clip"], index)');
