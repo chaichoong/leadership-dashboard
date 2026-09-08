@@ -180,7 +180,10 @@ describe('agents can attach a deliverable to an approval', () => {
     // showing the letter or form the agent produced, and Kevin approves blind.
     expect(page).toMatch(/APV_QUEUE_FIELDS = \(\) => \[[^\]]*TF\.attachments/s);   // fetched
     expect(page).toMatch(/files: \(gf\(r,TF\.attachments\)\|\|\[\]\)/); // mapped
-    expect(page).toMatch(/open before you decide/);                 // shown
+    // Since 8 Sep 2026 the card names the document the agent will use on one
+    // line and lists every other file in the dated trail with an Open button.
+    expect(page).toMatch(/The document the agent will use:/);        // shown
+    expect(page).toMatch(/Came with the task: /);                    // sender files, in the trail
     // Only real http(s) urls become links — same scheme guard as the email links.
     expect(page).toMatch(/filter\(a=>\/\^https\?:/);
   });
@@ -208,7 +211,7 @@ describe('the Attachments field is shared, and the surfaces say so', () => {
     // field id on the same task, and Kevin's feedback files land there too.
     // Verified: follow-up.html AIRTABLE_FIELDS.attachments === fldEbs9cscRr8elcw.
     expect(read('follow-up.html')).toMatch(/attachments:\s*'fldEbs9cscRr8elcw'/);
-    expect(page).toMatch(/File on this task|files on this task/);
+    expect(page).toMatch(/Came with the task: /);          // a sender file is named as such, in the trail
     expect(page).not.toMatch(/File from the agent|files from the agent/);
   });
 
