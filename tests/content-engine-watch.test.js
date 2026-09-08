@@ -90,6 +90,9 @@ describe('content-engine watch: nightly wiring', () => {
     expect(w).toContain('def plan(ledger, slots, gaps=None, free=None, start=None)');
     expect(w).toContain('if since and date < since and streak_day(date) not in gaps: continue');
     expect(w).toContain('def day_fits(ledger, day, free)');
+    expect(w).toContain('def pull_window_minutes(size)'); // 40 min per 4 GB: an 18 GB gap clip is not abandoned at 40 min every night
+    expect(w).toContain('max_minutes=window)');
+    expect(w).toContain('def disk_line(ledger, free=None)'); // the morning line says SHORT before a night pulls nothing
     const sh = readFileSync(path.join(ROOT, 'scripts', 'content-engine-run.sh'), 'utf8');
     expect(sh).toMatch(/for day in \$DAYS; do/);
     const p = readFileSync(path.join(ROOT, 'scripts', 'content-engine', 'publish.py'), 'utf8');
