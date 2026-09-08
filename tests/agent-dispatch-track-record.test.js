@@ -151,9 +151,10 @@ rec = {'id': 'recX', 'createdTime': '2026-06-25T09:00:00.000Z', 'fields': {
   m.AF['feedbackHistory']: '[2026-09-04 11:02] Too soft, ask for a freeze',
   m.AF['agentOutput']: 'Draft\\n\\n**Carrying this out will involve:** sending the freeze request.'}}
 ev = m.history_entries_from_task(rec)
-print('---JSON---'); print(json.dumps({'ev': [[e['date'], e['source'], e['text'][:40].rstrip()] for e in ev], 'excluded': m.history_entries_from_task(rec, exclude_id='recX')}))`, NOTES);
+print('---JSON---'); print(json.dumps({'ev': [[e['date'], e['source'], e['text'][:40].rstrip()] for e in ev], 'links': [e.get('link') for e in ev], 'excluded': m.history_entries_from_task(rec, exclude_id='recX')}))`, NOTES);
     expect(out.excluded).toEqual([]);
     expect(out.ev[0]).toEqual(['2026-06-25', 'task', 'task opened: INBOUND: Outstanding Arrear']);
+    expect(out.links.every((l) => l === 'https://airtable.com/appnqjDpqDniH3IRl/tblqB8b22hKBL4PF1/recX')).toBe(true);
     expect(out.ev).toContainEqual(['2026-09-05 09:00', 'send-letter', 'SENT: letter 123 posted via Pingen to HM']);
     expect(out.ev).toContainEqual(['2026-09-04 11:02', 'Kevin', 'Too soft, ask for a freeze']);
     expect(out.ev).toContainEqual(['2026-07-03', 'task', 'completed: INBOUND: Outstanding Arrears']);
@@ -170,6 +171,11 @@ print('---JSON---'); print(json.dumps([m.history_text(r), m.history_text({'terms
       '- 03 Jul 2026 — task: completed: X',
       '- 05 Sep 2026 09:00 — send-letter: SENT: letter',
     ]);
+    // A link rides at the end in brackets (the card makes it an Open button).
+    const linked = py(`
+r = {'terms': ['email a@b.com'], 'searched': ['tasks'], 'notes': [], 'entries': [{'date': '2026-07-03', 'source': 'email', 'text': 'Kevin: Re: arrears', 'link': 'https://mail.google.com/mail/u/0/#all/1a02'}]}
+print('---JSON---'); print(json.dumps(m.history_text(r)))`);
+    expect(linked.split('\n')[1]).toBe('- 03 Jul 2026 — email: Kevin: Re: arrears (https://mail.google.com/mail/u/0/#all/1a02)');
     expect(out[1]).toBe('TRACK RECORD: none found (searched tasks for ref 12345; Gmail not searched (no key))');
   });
   it('the printed block passes the gate it was built for', () => {

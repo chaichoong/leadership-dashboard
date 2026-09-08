@@ -236,6 +236,11 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 .apv-trail-who.kevin{color:var(--accent-gold)}
 .apv-trail-who.sent{color:var(--success)}
 .apv-trail-more{font-size:var(--fs-xs);color:var(--text-muted);margin-top:4px}
+.apv-trail-open{font-size:var(--fs-xs);font-weight:var(--fw-semibold);color:var(--accent);margin-left:6px;white-space:nowrap;text-decoration:none;border:1px solid var(--border-default);border-radius:var(--radius-full);padding:0 7px;background:var(--bg-surface)}
+.apv-trail-open:hover{border-color:var(--accent);text-decoration:underline}
+.apv-doc-line{font-size:var(--fs-sm);font-weight:var(--fw-semibold);color:var(--accent-hover);margin:6px 0 4px;padding:8px 10px;background:var(--accent-soft);border-radius:var(--radius-md)}
+.apv-doc-line .apv-agent-file{margin-left:4px}
+.apv-doc-missing{color:var(--danger);background:var(--danger-bg)}
 .apv-receipt-line{display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);gap:6px;font-size:var(--fs-sm);padding:2px 0;align-items:start}
 .apv-receipt-point{color:var(--text-secondary);font-style:italic;word-break:break-word}
 .apv-receipt-arrow{color:var(--text-muted)}
@@ -491,6 +496,7 @@ const TF = {
     rememberThis:     'fldZurhdHutYIDKVx',
     verdictReason:    'fldF9Bs4N5mttQvtl',
     feedbackHistory:  'fldOzsq68lhfprKJu',
+    inboundSender:    'fldzf4xlbrQuktx0i',
     // Knock it back (28 Aug 2026) — see TASK_FIELDS.deferredUntil in
     // js/config.js for why this is a date on the task rather than a queue
     // somewhere else.
@@ -932,7 +938,7 @@ const APV_QUEUE_FIELDS = () => [
     TF.name, TF.status, TF.description, TF.notes, TF.dueDate, TF.taskType,
     TF.agentOutput, TF.sentForApprovalBy, TF.teamMember, TF.lmt, TF.slackBaseline,
     TF.approver, TF.priority, TF.inboundUrl, TF.attachments, TF.deferredUntil,
-    TF.feedbackHistory];
+    TF.feedbackHistory, TF.inboundSender];
 
 async function loadApprovals(){
     _approvalsState = 'loading';
@@ -958,9 +964,11 @@ async function loadApprovals(){
             description: gf(r,TF.description)||'',
             notes: gf(r,TF.notes)||'',
             feedbackHistory: gf(r,TF.feedbackHistory)||'',
+            created: r.createdTime||'',
             priority: selName(gf(r,TF.priority)),
             tier1: isTier1Output(gf(r,TF.agentOutput)||''),
             emailLinks: apvEmailLinks(gf(r,TF.inboundUrl)),
+            inboundSender: gf(r,TF.inboundSender)||'',
             // Files already ON the task — normally the agent's own work
             // (a drafted letter of authority, a filled form) attached with
             // `agent-dispatch.py submit --attach`, so Kevin can open and
@@ -1772,23 +1780,70 @@ function apvDayLabel(iso){
 }
 // Every dated line in the task: Notes stamps, Kevin's feedback rounds, and the
 // dated lines of any TRACK RECORD block (in Notes or in the Agent Output).
+// A link at the end of a line, "(https://…)", becomes the row's Open button.
+const APV_TRAIL_LINK_RE = /\s*\((https?:\/\/[^\s)]+)\)\s*$/;
+function apvSplitLink(text){
+    const m = APV_TRAIL_LINK_RE.exec(text||'');
+    return m ? { text: text.slice(0, m.index).trim(), link: m[1] } : { text: text||'', link: '' };
+}
+// Plain words for a 13-year-old (Kevin, 8 Sep 2026): the stamps are written
+// for machines; the rows are read by him.
+const APV_WHO_WORDS = { 'agent-dispatch':'system', 'send-email':'sent', 'send-letter':'posted', 'create-agent-task':'triage', 'track record':'history', 'robot sign-in':'sign-in', 'fix, claude':'Claude', 'claude':'Claude' };
+function apvWhoWord(who){ return APV_WHO_WORDS[String(who||'').toLowerCase()] || who; }
+function apvPlainEvent(text){
+    let m;
+    if((m = /^ATTACHED:\s*(.+?)\s*(?:—\s*(.*))?$/.exec(text))) return { text: `File added: ${m[1]}${m[2] ? ' — ' + m[2] : ''}`, file: m[1].trim() };
+    if((m = /^SUPERSEDED:\s*(.+?)\s+replaced\b/.exec(text))) return { text: `File replaced with a newer copy: ${m[1]}` };
+    if((m = /^SUBMITTED \(round (\d+)\) as (\S+)(?: with (.+))?$/.exec(text))) return { text: `Sent for your approval (round ${m[1]}, ${m[2]})${m[3] && !/^no new file/.test(m[3]) ? ' with ' + m[3] : ''}` };
+    if((m = /^SENT:\s*email to (.+?)\s+"([^"]*)"(.*?)(?:\(message ([A-Za-z0-9]+)\))?\s*$/.exec(text))) return { text: `Email sent to ${m[1]}: "${m[2]}"${m[3].trim() ? ' ' + m[3].trim() : ''}`, link: m[4] ? `https://mail.google.com/mail/u/0/#all/${m[4]}` : '' };
+    if((m = /^SENT:\s*letter (\S+) posted via Pingen to (.+?)(?: \(.*)?$/.exec(text))) return { text: `Letter posted to ${m[2]} (Pingen letter ${m[1]})` };
+    if((m = /^SIGNED IN:\s*(.*)$/.exec(text))) return { text: m[1] };
+    if((m = /^TRACK RECORD:\s*\(searched (.+?)\)\s*$/.exec(text))) return { text: `Searched ${m[1]}` };
+    if((m = /^TRACK RECORD:\s*none found \(searched (.+?)\)\s*$/.exec(text))) return { text: `Searched ${m[1]}: nothing earlier found` };
+    if((m = /^TRACK RECORD:\s*not built\s*\((.*)\)\s*$/.exec(text))) return { text: `History could not be built (${m[1]})` };
+    if((m = /^FEEDBACK ANSWERED \(round (\d+)\):?\s*(.*)$/.exec(text))) return { text: `Your feedback answered (round ${m[1]})${m[2] ? ': ' + m[2] : ''}` };
+    if((m = /^FILED, not queued:\s*(.*)$/.exec(text))) return { text: `Filed without asking you: ${m[1]}` };
+    if((m = /^CARRIED OUT \(task left open\):\s*(.*)$/.exec(text))) return { text: `Carried out: ${m[1]}` };
+    return { text };
+}
 function apvTrailEvents(t){
     const ev = [];
     const seen = new Set();
     const push = (e)=>{ const k = e.day+'|'+e.time+'|'+e.text.slice(0,80); if(seen.has(k)) return; seen.add(k); ev.push(e); };
+    const fileUrl = {};
+    (t.files||[]).forEach(f=>{ fileUrl[f.filename] = f.url; });
+    const meta = apvFileMeta(t);
+    // Where it started: the email or message this task came from, and any
+    // file that came with it, dated when the task was opened.
+    // London time, like every stamp (review: UTC put an evening task on the day before).
+    let openedDay = '', openedTime = '';
+    if(t.created){
+        try {
+            const parts = new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/London', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }).formatToParts(new Date(t.created));
+            const g = (k)=> (parts.find(p=>p.type===k)||{}).value || '';
+            openedDay = `${g('year')}-${g('month')}-${g('day')}`; openedTime = `${g('hour')}:${g('minute')}`;
+        } catch(e){ openedDay = String(t.created).slice(0,10); openedTime = String(t.created).slice(11,16); }
+    }
+    if(openedDay){
+        (t.emailLinks||[]).forEach((u,i)=>push({ day: openedDay, time: openedTime, who: 'email', text: (t.emailLinks.length>1?`Email ${i+1} received`:'Email received') + (t.inboundSender?` from ${t.inboundSender}`:''), link: u, kind: 'email' }));
+        (t.files||[]).forEach(f=>{ if(!meta[f.filename]) push({ day: openedDay, time: '', who: 'file', text: `Came with the task: ${f.filename}`, link: f.url, file: f.filename, kind: 'file' }); });
+    }
     String(t.notes||'').split('\n').forEach(line=>{
         const m = APV_STAMP_RE.exec(line.trim());
         if(!m) return;
         const day = apvIsoDay(m[1], m[2], m[3]);
         if(!day) return;
-        const text = m[6].trim();
-        if(!text) return;
-        push({ day, time: m[4]||'', who: m[5].trim(), text, kind: apvEventKind(text) });
+        const raw = m[6].trim();
+        if(!raw) return;
+        const kind = apvEventKind(raw);
+        const split = apvSplitLink(raw);
+        const plain = apvPlainEvent(split.text);
+        push({ day, time: m[4]||'', who: apvWhoWord(m[5].trim()), text: plain.text, link: plain.link || split.link || (plain.file ? fileUrl[plain.file] || '' : ''), file: plain.file||'', kind });
     });
     String(t.feedbackHistory||'').split('\n').forEach(line=>{
         const m = APV_FEEDBACK_RE.exec(line.trim());
         if(!m) return;
-        push({ day: `${m[1]}-${m[2]}-${m[3]}`, time: m[4], who: 'Kevin', text: m[5].trim(), kind: 'kevin' });
+        push({ day: `${m[1]}-${m[2]}-${m[3]}`, time: m[4], who: 'you', text: m[5].trim(), kind: 'kevin' });
     });
     [t.notes, t.agentOutput].forEach(src=>{
         const text = String(src||'');
@@ -1800,7 +1855,8 @@ function apvTrailEvents(t){
                 if(!m){ if(raw.trim()==='' ) continue; if(!/^\s*[-*]/.test(raw)) break; continue; }
                 const day = m[4] ? `${m[4]}-${m[5]}-${m[6]}` : apvIsoDay(m[1], m[2], m[3]);
                 if(!day) continue;
-                push({ day, time: m[7]||'', who: 'track record', text: m[8].trim(), kind: 'record' });
+                const split = apvSplitLink(m[8].trim());
+                push({ day, time: m[7]||'', who: 'history', text: split.text, link: split.link, kind: 'record' });
             }
             at = text.indexOf('TRACK RECORD:', at + 13);
         }
@@ -1841,20 +1897,29 @@ function apvFileMeta(t){
     });
     return meta;
 }
-function apvFilesHtml(t){
-    const files = t.files || [];
-    if(!files.length) return '';
+// ONE line above the buttons: the document the action will use, from this
+// round, with an Open button. Everything else about files lives in the trail
+// (Kevin, 8 Sep 2026: "just have it in the track record ... rather than
+// cluttering up the interface"). If the promise involves a document and no
+// file came this round, say so in red rather than showing nothing.
+function apvDocumentLineHtml(t, askLine){
     const meta = apvFileMeta(t);
-    const rows = files.map(f=>Object.assign({}, f, meta[f.filename] || { day:'', time:'', who:'', purpose:'', thisRound:false, unstamped:true }));
-    rows.sort((a,b)=> (b.thisRound?1:0)-(a.thisRound?1:0) || (b.day+b.time).localeCompare(a.day+a.time));
-    const latest = rows.filter(r=>r.thisRound).length;
-    const label = latest ? `${latest === 1 ? 'The file this round uses' : latest + ' files this round uses'}` : `${files.length === 1 ? 'File on this task' : files.length + ' files on this task'}`;
-    return `<div class="apv-agent-files" data-apv-files>
-        <span class="apv-agent-files-label">&#128206; ${label} — open before you decide</span>
-        ${rows.map(f=>`<a class="apv-agent-file${f.thisRound?'':' apv-file-earlier'}" data-apv-file="${esc(f.filename)}" data-apv-file-round="${f.thisRound?'latest':(f.unstamped?'unknown':'earlier')}" href="${esc(f.url)}" target="_blank" rel="noopener noreferrer"
-            onclick="return apvOpenAttachment(event,'${t.id}',this.dataset.apvFile)"
-            title="${esc(f.unstamped ? 'No stamp: from the sender, from you, or attached before the trail existed.' : `${f.who} attached this on ${apvDayLabel(f.day)}${f.time?' at '+f.time:''}${f.purpose?': '+f.purpose:''}`)}">${esc(f.filename)}${f.size ? ` <span class="apv-file-meta">${Math.max(1, Math.round(f.size/1024))} KB</span>` : ''}${f.thisRound ? '<span class="apv-file-latest">Latest, this round</span>' : `<span class="apv-file-meta"> · ${f.unstamped ? 'from the sender or earlier' : 'earlier, ' + apvDayLabel(f.day)}</span>`}</a>`).join('')}
-    </div>`;
+    const files = (t.files||[]).filter(f => meta[f.filename] && meta[f.filename].thisRound);
+    if(files.length){
+        return `<div class="apv-doc-line" data-apv-doc-line>&#128206; ${files.length===1 ? 'The document the agent will use:' : 'The documents the agent will use:'} ${files.map(f=>`<a class="apv-agent-file" data-apv-file="${esc(f.filename)}" data-apv-file-round="latest" href="${esc(f.url)}" target="_blank" rel="noopener noreferrer" onclick="return apvOpenAttachment(event,'${t.id}',this.dataset.apvFile)" title="Attached this round${meta[f.filename].purpose ? ': ' + esc(meta[f.filename].purpose) : ''}">${esc(f.filename)} &#8599;</a>`).join(' ')}</div>`;
+    }
+    // The same promise shape as the submit gate (ATTACH_PROMISE_RE in
+    // scripts/agent-dispatch.py): a promise to send something, never a
+    // mention of the sender's file or "no attachment needed" (review).
+    const promise = /\b(?:attaching|enclosing|uploading|posting)\b|\bwith\b[^.;\n]{0,80}\b(?:attached|enclosed)\b|\b(?:attached|enclosed)\b[^.;\n]{0,40}\b(?:letter|pdf|form|statement|document|copy|file|invoice|report)\b/i;
+    const negation = /\b(?:no|not|without|never)\b[^.;\n]{0,20}\b(?:attach|enclos|letter needed|file needed)/i;
+    if(!(promise.test(askLine||'') && !negation.test(askLine||''))) return '';
+    const earlier = (t.files||[]).filter(f => !(meta[f.filename] && meta[f.filename].thisRound));
+    if(earlier.length){
+        // Files from before the stamps existed, or from an earlier round: shown, but not claimed as this round's.
+        return `<div class="apv-doc-line" data-apv-doc-line data-apv-doc-earlier>&#128206; Uses a file from an earlier round: ${earlier.map(f=>`<a class="apv-agent-file" data-apv-file="${esc(f.filename)}" data-apv-file-round="earlier" href="${esc(f.url)}" target="_blank" rel="noopener noreferrer" onclick="return apvOpenAttachment(event,'${t.id}',this.dataset.apvFile)" title="Not attached this round: check it is the current copy before you approve">${esc(f.filename)} &#8599;</a>`).join(' ')} <span class="apv-file-meta">(check it is the current copy)</span></div>`;
+    }
+    return `<div class="apv-doc-line apv-doc-missing" data-apv-doc-line data-apv-doc-missing>&#9888; No document was attached this round. Do not approve blind: use More &rarr; Request changes and ask for the file.</div>`;
 }
 const APV_TRAIL_MAX = 80;
 function apvTrailHtml(t){
@@ -1868,10 +1933,11 @@ function apvTrailHtml(t){
     ev.forEach(e=>{
         if(e.day !== day){ day = e.day; out += `<div class="apv-trail-day${day===lastDay?' latest':''}">${esc(apvDayLabel(day))}${day===lastDay?' · latest':''}</div>`; }
         const whoClass = e.kind==='kevin' ? ' kevin' : (e.kind==='sent' ? ' sent' : '');
-        out += `<div class="apv-trail-row${day===lastDay?' latest':''}" data-apv-trail-kind="${e.kind}"><span class="apv-trail-time">${esc(e.time||'')}</span><span class="apv-trail-who${whoClass}" title="${esc(e.who)}">${esc(e.who)}</span><span>${apvLinkify(e.text)}</span></div>`;
+        const open = e.link ? ` <a class="apv-trail-open" href="${esc(e.link)}" target="_blank" rel="noopener noreferrer"${e.file ? ` data-apv-file="${esc(e.file)}" onclick="return apvOpenAttachment(event,'${t.id}',this.dataset.apvFile)"` : ''} title="Opens in a new tab">Open &#8599;</a>` : '';
+        out += `<div class="apv-trail-row${day===lastDay?' latest':''}" data-apv-trail-kind="${e.kind}"><span class="apv-trail-time">${esc(e.time||'')}</span><span class="apv-trail-who${whoClass}" title="${esc(e.who)}">${esc(e.who)}</span><span>${apvLinkify(e.text)}${open}</span></div>`;
     });
     return `<details class="apv-trail" data-apv-trail${_apvOpen.trail.has(t.id)?' open':''} ontoggle="if(this.open)_apvOpen.trail.add('${t.id}');else _apvOpen.trail.delete('${t.id}')">
-        <summary>What has happened so far · ${all.length} ${all.length===1?'event':'events'} <span class="apv-trail-last">· last: ${esc(apvDayLabel(last.day))}, ${esc(last.who)}: ${esc(last.text.slice(0,70))}${last.text.length>70?'…':''}</span></summary>
+        <summary>The story so far · ${all.length} ${all.length===1?'step':'steps'}, each with a link <span class="apv-trail-last">· latest: ${esc(apvDayLabel(last.day))}, ${esc(last.who)}: ${esc(last.text.slice(0,70))}${last.text.length>70?'…':''}</span></summary>
         ${hidden ? `<div class="apv-trail-more">${hidden} earlier ${hidden===1?'event':'events'} not shown (open the agent’s full work and the task in Airtable for all of it).</div>` : ''}
         ${out}
     </details>`;
@@ -2019,7 +2085,7 @@ function apvCardHtml(t){
                 ${r.lines.map(l=>`<div class="apv-receipt-line"><span class="apv-receipt-point">${esc(l.point)}</span><span class="apv-receipt-arrow">&rarr;</span><span class="apv-receipt-change${/^cannot\b/i.test(l.change)?' cannot':''}">${esc(l.change)}</span></div>`).join('')}
             </div>`;
         })()}
-        <div class="apv-ask">${isAction ? `<span class="apv-ask-stem">If you approve, this happens:</span> ` : ''}${esc(askLine)}</div>
+        <div class="apv-ask">${isAction ? `<span class="apv-ask-stem">If you approve, the agent will:</span> ` : ''}${esc(askLine)}</div>
         ${(()=>{
             const need = apvSignInNeeded(t.agentOutput);
             if(!need) return '';
@@ -2058,7 +2124,7 @@ function apvCardHtml(t){
                 : `<div class="apv-body">The agent left its work empty, so there is nothing here to judge. Do not approve it blind. Use Request changes and tell it to show its work.</div>`}
             ${t.description ? `<div style="font-size:var(--fs-xs);font-weight:var(--fw-semibold);color:var(--text-secondary);margin-top:8px">The task it was given</div><div class="apv-body">${esc(t.description)}</div>` : ''}
         </details>
-        ${apvFilesHtml(t)}
+        ${apvDocumentLineHtml(t, askLine)}
         ${apvTrailHtml(t)}
         ${signIn ? `<div class="apv-actions" data-apv-signin-actions>
             <a class="btn btn-success" href="${esc(apvSignInLink(signIn))}" title="Opens the Robot sign-in app on your Mac at this site. Sign in, then Cmd+Q.">Sign in now</a>

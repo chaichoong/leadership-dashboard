@@ -3769,20 +3769,21 @@ def history_entries_from_task(rec, exclude_id=None):
     status = sel(f.get(AF["status"]))
     out = []
     created = str(rec.get("createdTime") or "")[:10]
+    link = f"https://airtable.com/{BASE_ID}/{TASKS}/{rec.get('id')}"
     if created:
-        out.append({"date": created, "source": "task", "text": f"task opened: {name} ({status})", "task": rec.get("id")})
+        out.append({"date": created, "source": "task", "text": f"task opened: {name} ({status})", "task": rec.get("id"), "link": link})
     for m in NOTE_STAMP_RE.finditer(str(f.get(AF["notes"]) or "")):
         iso = _stamp_to_iso(m.group("day"), m.group("time"))
         text = m.group("text").strip()
         if not text or text.startswith(TRACK_RECORD_MARK):
             continue
-        out.append({"date": iso, "source": m.group("who").strip(), "text": text[:220], "task": rec.get("id")})
+        out.append({"date": iso, "source": m.group("who").strip(), "text": text[:220], "task": rec.get("id"), "link": link})
     for m in re.finditer(r"^\[(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2})[^\]]*\]\s*(.+)$", str(f.get(AF["feedbackHistory"]) or ""), re.M):
-        out.append({"date": f"{m.group(1)} {m.group(2)}", "source": "Kevin", "text": m.group(3).strip()[:220], "task": rec.get("id")})
+        out.append({"date": f"{m.group(1)} {m.group(2)}", "source": "Kevin", "text": m.group(3).strip()[:220], "task": rec.get("id"), "link": link})
     comp = str(f.get(AF["completion"]) or "")[:10]
     if comp and status == "Completed":
         line = carry_out_line(f.get(AF["agentOutput"]))
-        out.append({"date": comp, "source": "task", "text": f"completed: {name}" + (f" — {line[:160]}" if line else ""), "task": rec.get("id")})
+        out.append({"date": comp, "source": "task", "text": f"completed: {name}" + (f" — {line[:160]}" if line else ""), "task": rec.get("id"), "link": link})
     return out
 
 
@@ -3830,7 +3831,8 @@ def history_gmail(terms, days):
         ts = int(m.get("internalDate") or 0) / 1000
         date = datetime.fromtimestamp(ts, LONDON).strftime("%Y-%m-%d %H:%M") if ts else ""
         sender = str(h.get("from") or "")[:80]
-        out.append({"date": date, "source": "email", "text": f"{sender}: {str(h.get('subject') or '')[:120]}", "id": m.get("id")})
+        out.append({"date": date, "source": "email", "text": f"{sender}: {str(h.get('subject') or '')[:120]}", "id": m.get("id"),
+                    "link": f"https://mail.google.com/mail/u/0/#all/{m.get('id')}" if m.get("id") else ""})
     note = "Gmail listing truncated (more than shown)" if truncated else ""
     return out, note
 
@@ -3866,7 +3868,11 @@ def history_text(result):
             day = datetime.strptime(day[:10], "%Y-%m-%d").strftime("%d %b %Y") + (day[10:] if len(day) > 10 else "")
         except ValueError:
             pass
-        lines.append(f"- {day} — {e.get('source', '')}: {e.get('text', '')}")
+        # The link rides at the end in brackets: the card turns it into an
+        # "Open" button, and the raw text still reads (Kevin, 8 Sep 2026:
+        # "a clickable link so it opens, so I can see the full audit trail").
+        tail = f" ({e['link']})" if e.get("link") else ""
+        lines.append(f"- {day} — {e.get('source', '')}: {e.get('text', '')}{tail}")
     return "\n".join(lines)
 
 
