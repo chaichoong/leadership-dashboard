@@ -84,7 +84,11 @@ async function mockAttachmentHost(page) {
 async function attachmentLink(page) {
   await page.click('#ptab-approvals');
   await expect(page.locator('#view-approvals')).toBeVisible();
-  const link = page.locator(`[data-apv-card="${TASK_ID}"] .apv-agent-file`, { hasText: FILENAME });
+  // Since 8 Sep 2026 a file with no stamp lives in the trail ("Came with the
+  // task"), one Open button per file; the trail opens on a click.
+  const card = page.locator(`[data-apv-card="${TASK_ID}"]`);
+  await card.locator('[data-apv-trail] summary').click();
+  const link = card.locator(`[data-apv-file="${FILENAME}"]`);
   await expect(link, 'the card must offer the agent’s file').toBeVisible();
   return link;
 }
