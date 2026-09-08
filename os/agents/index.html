@@ -1815,9 +1815,17 @@ function apvTrailEvents(t){
     const meta = apvFileMeta(t);
     // Where it started: the email or message this task came from, and any
     // file that came with it, dated when the task was opened.
-    const openedDay = String(t.created||'').slice(0,10);
+    // London time, like every stamp (review: UTC put an evening task on the day before).
+    let openedDay = '', openedTime = '';
+    if(t.created){
+        try {
+            const parts = new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/London', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }).formatToParts(new Date(t.created));
+            const g = (k)=> (parts.find(p=>p.type===k)||{}).value || '';
+            openedDay = `${g('year')}-${g('month')}-${g('day')}`; openedTime = `${g('hour')}:${g('minute')}`;
+        } catch(e){ openedDay = String(t.created).slice(0,10); openedTime = String(t.created).slice(11,16); }
+    }
     if(openedDay){
-        (t.emailLinks||[]).forEach((u,i)=>push({ day: openedDay, time: String(t.created||'').slice(11,16), who: 'email', text: (t.emailLinks.length>1?`Email ${i+1} received`:'Email received') + (t.inboundSender?` from ${t.inboundSender}`:''), link: u, kind: 'email' }));
+        (t.emailLinks||[]).forEach((u,i)=>push({ day: openedDay, time: openedTime, who: 'email', text: (t.emailLinks.length>1?`Email ${i+1} received`:'Email received') + (t.inboundSender?` from ${t.inboundSender}`:''), link: u, kind: 'email' }));
         (t.files||[]).forEach(f=>{ if(!meta[f.filename]) push({ day: openedDay, time: '', who: 'file', text: `Came with the task: ${f.filename}`, link: f.url, file: f.filename, kind: 'file' }); });
     }
     String(t.notes||'').split('\n').forEach(line=>{
@@ -1900,10 +1908,18 @@ function apvDocumentLineHtml(t, askLine){
     if(files.length){
         return `<div class="apv-doc-line" data-apv-doc-line>&#128206; ${files.length===1 ? 'The document the agent will use:' : 'The documents the agent will use:'} ${files.map(f=>`<a class="apv-agent-file" data-apv-file="${esc(f.filename)}" data-apv-file-round="latest" href="${esc(f.url)}" target="_blank" rel="noopener noreferrer" onclick="return apvOpenAttachment(event,'${t.id}',this.dataset.apvFile)" title="Attached this round${meta[f.filename].purpose ? ': ' + esc(meta[f.filename].purpose) : ''}">${esc(f.filename)} &#8599;</a>`).join(' ')}</div>`;
     }
-    if(/\b(attached|attaching|enclosed|enclosing|upload(?:ing)?|post(?:ing)?|print(?:ing)?)\b/i.test(askLine||'') && /\b(pdf|letter|document|form|statement|file|copy)\b/i.test(askLine||'')){
-        return `<div class="apv-doc-line apv-doc-missing" data-apv-doc-line data-apv-doc-missing>&#9888; No document was attached this round. Do not approve blind: use More &rarr; Request changes and ask for the file.</div>`;
+    // The same promise shape as the submit gate (ATTACH_PROMISE_RE in
+    // scripts/agent-dispatch.py): a promise to send something, never a
+    // mention of the sender's file or "no attachment needed" (review).
+    const promise = /\b(?:attaching|enclosing|uploading|posting)\b|\bwith\b[^.;\n]{0,80}\b(?:attached|enclosed)\b|\b(?:attached|enclosed)\b[^.;\n]{0,40}\b(?:letter|pdf|form|statement|document|copy|file|invoice|report)\b/i;
+    const negation = /\b(?:no|not|without|never)\b[^.;\n]{0,20}\b(?:attach|enclos|letter needed|file needed)/i;
+    if(!(promise.test(askLine||'') && !negation.test(askLine||''))) return '';
+    const earlier = (t.files||[]).filter(f => !(meta[f.filename] && meta[f.filename].thisRound));
+    if(earlier.length){
+        // Files from before the stamps existed, or from an earlier round: shown, but not claimed as this round's.
+        return `<div class="apv-doc-line" data-apv-doc-line data-apv-doc-earlier>&#128206; Uses a file from an earlier round: ${earlier.map(f=>`<a class="apv-agent-file" data-apv-file="${esc(f.filename)}" data-apv-file-round="earlier" href="${esc(f.url)}" target="_blank" rel="noopener noreferrer" onclick="return apvOpenAttachment(event,'${t.id}',this.dataset.apvFile)" title="Not attached this round: check it is the current copy before you approve">${esc(f.filename)} &#8599;</a>`).join(' ')} <span class="apv-file-meta">(check it is the current copy)</span></div>`;
     }
-    return '';
+    return `<div class="apv-doc-line apv-doc-missing" data-apv-doc-line data-apv-doc-missing>&#9888; No document was attached this round. Do not approve blind: use More &rarr; Request changes and ask for the file.</div>`;
 }
 const APV_TRAIL_MAX = 80;
 function apvTrailHtml(t){

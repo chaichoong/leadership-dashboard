@@ -55,6 +55,21 @@ test.describe('the file this round uses, and the dated trail', () => {
     await expect(page.locator('[data-apv-card="recApvA2"] [data-apv-doc-missing]')).toContainText('No document was attached this round');
   });
 
+  test('a mention of the sender\'s file or "no attachment needed" never warns; an unstamped file is offered as an earlier one', async ({ page }) => {
+    const fx = defaultFixtures();
+    fx.approvals[1].fields[TF.agentOutput] = 'Reply ready.\n\n**Carrying this out will involve:** emailing HMRC a reply; no attachment is needed, the statement they attached is on file.';
+    fx.approvals[2].fields[TF.agentOutput] = 'Letter ready.\n\n**Carrying this out will involve:** posting the letter with the LOA attached.';
+    fx.approvals[2].fields[TF.attachments] = [{ id: 'attOld', filename: 'loa.pdf', url: 'https://example.com/loa.pdf', size: 500, type: 'application/pdf' }];
+    await mockAgentsPage(page, fx);
+    await loadAgentsPage(page);
+    await page.click('#ptab-approvals');
+    await expect(page.locator('[data-apv-card="recApvA2"] [data-apv-doc-line]')).toHaveCount(0);
+    const earlier = page.locator('[data-apv-card="recApvB1"] [data-apv-doc-earlier]');
+    await expect(earlier).toContainText('Uses a file from an earlier round');
+    await expect(earlier.locator('[data-apv-file="loa.pdf"]')).toBeVisible();
+    await expect(page.locator('[data-apv-card="recApvB1"] [data-apv-doc-missing]')).toHaveCount(0);
+  });
+
   test('the trail lists every dated event oldest first, shows the SENT letter and the track record, and marks the latest day', async ({ page }) => {
     await mockAgentsPage(page, withTrail());
     await loadAgentsPage(page);
