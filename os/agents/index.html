@@ -1496,9 +1496,16 @@ function apvGroupTasks(rows){
     const parent = {}, reason = {};
     const find = (x)=>{ while(parent[x] !== x){ parent[x] = parent[parent[x]]; x = parent[x]; } return x; };
     rows.forEach(t=>{ parent[t.id] = t.id; });
+    // A sign-in wait is not a decision, so it never joins a group: on 8 Sep
+    // 2026 six "SIGN-IN: <site> session lapsed" cards (six different sites)
+    // folded into "6 tasks, one thing" with a Reject-all strip, because the
+    // key saw "sign, session, lapsed" and treated the site name as noise.
+    const isWait = {};
+    rows.forEach(t=>{ isWait[t.id] = !!apvSignInNeeded(t.agentOutput); });
     for(let i = 0; i < rows.length; i++){
         for(let j = i + 1; j < rows.length; j++){
             const a = rows[i], b = rows[j];
+            if(isWait[a.id] || isWait[b.id]) continue;
             // Fall back to the id so two NAMELESS tasks can never collide — an
             // empty key would merge unrelated work into one verdict.
             const ka = dupeTaskKey(a.name || '') || ('id:' + a.id);
@@ -1695,13 +1702,22 @@ function apvLinkify(text){
 // and offers all of them in one go. The app opens the sites one after another
 // (the robot profile can only be open in one window) and hands each site's
 // tasks back the moment he quits its window.
-const APV_SIGNIN_RE = /^\s*SIGN-IN NEEDED:\s*(.+?)\s*(?:\((https?:\/\/[^\s)]+)\))?\s*$/im;
+// Agents do not keep to the form: "SIGN-IN NEEDED: pingen.com (https://…/login) — to
+// send the letter" put the whole sentence in the site and lost the URL (8 Sep 2026).
+// The URL is taken from anywhere on the line; the site is the text before it.
+// Mirrors parse_signin_line in scripts/agent-dispatch.py.
+const APV_SIGNIN_RE = /^\s*SIGN-IN NEEDED:\s*(.+?)\s*$/im;
 function apvSignInNeeded(output){
     const m = APV_SIGNIN_RE.exec(String(output||''));
     if(!m) return null;
+    const rest = m[1].trim();
+    const u = /https?:\/\/[^\s)>\]]+/i.exec(rest);
+    const url = u ? u[0].replace(/[.,;:]+$/, '') : '';
+    let site = (u ? rest.slice(0, u.index) : rest).split(/\s+[—–-]\s+/)[0].replace(/[\s(:\-—–]+$/, '').trim();
+    if(!u) site = site.replace(/\s*\((?!https?:\/\/)[^)]*\)\s*$/, '').trim() || site;
     let host = '';
-    try{ host = m[2] ? new URL(m[2]).hostname.toLowerCase() : ''; }catch(e){ host = ''; }
-    return { site: m[1].trim(), url: m[2] || '', host };
+    try{ host = url ? new URL(url).hostname.toLowerCase() : ''; }catch(e){ host = ''; }
+    return { site, url, host };
 }
 function apvSignInLink(need){
     return need.host ? `robotsignin://site/${encodeURIComponent(need.host)}` : 'robotsignin://all';
@@ -1715,7 +1731,7 @@ function apvSignInStripHtml(items){
         .map(g => `<a class="apv-signin-site" href="${esc(apvSignInLink(g))}" title="Opens the Robot sign-in app on your Mac at this site">${esc(g.site)} <span style="color:var(--text-muted)">(${g.n})</span></a>`).join('');
     return `<div class="apv-signin-strip" data-apv-signin-strip>
         <div><strong>${needs.length === 1 ? 'One task is' : needs.length + ' tasks are'} waiting on a sign-in.</strong>
-            <span style="color:var(--text-secondary)">Not a decision: sign in once and the robot finishes the work within minutes. Sites open one after another; sign in, then Cmd+Q.</span></div>
+            <span style="color:var(--text-secondary)">Not a decision. Each site opens in turn: sign in, press Cmd+Q, the next opens. When the last one closes, the robots start on the work.</span></div>
         <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:6px">
             <a class="btn btn-success btn-sm" href="robotsignin://all" title="Opens the Robot sign-in app on your Mac and goes through every waiting site in turn">Sign in to all (${needs.length})</a>${parts}
         </div>
@@ -1746,6 +1762,8 @@ function apvTrigger(raw){
     const t = /trigger\s*=\s*([^;|,]+)/i.exec(m[1]);
     if(!t) return null;
     const key = t[1].trim().toLowerCase();
+    // trigger=none means nothing made it his; a "Why you: none" chip is noise.
+    if(key === 'none' || key === '') return null;
     return APV_TRIGGER_WORDS[key] || (key.indexOf('other:') === 0 ? key.slice(6).trim() : key);
 }
 
@@ -2854,7 +2872,7 @@ async function loadOpenTasks(){
     _openTasksState = 'loading';
     try {
         allOpenTasks = await atFetch(TASKS_TBL,
-            [TF.name, TF.status, TF.dueDate, TF.teamMember, TF.lmt, TF.inboundTask],
+            [TF.name, TF.status, TF.dueDate, TF.teamMember, TF.lmt, TF.inboundTask, TF.agentOutput],
             { filterByFormula: "AND({Status}!='Completed', {Status}!='Cancelled')" });
         // CONTROL: the board carries ~250-300 open tasks at all times. Zero
         // rows means the query broke, not an empty business — fail loudly.
@@ -3193,7 +3211,9 @@ function computeCheckLanes(){
         const owned = allOpenTasks.filter(r=>
             linkIds(gf(r,TF.teamMember)).some(id=>aiAgentIds.has(id)));
         const items = [];
-        apvGroupTasks(owned.map(r=>({ id:r.id, name: gf(r,TF.name)||'', _row:r })))
+        // agentOutput travels too, so a sign-in wait stays out of this lane's
+        // groups exactly as it does in the queue (review, 8 Sep 2026).
+        apvGroupTasks(owned.map(r=>({ id:r.id, name: gf(r,TF.name)||'', agentOutput: gf(r,TF.agentOutput)||'', _row:r })))
           .forEach(g=>{
             if(g.rows.length < 2) return;
             const rows = g.rows.map(x=>x._row);

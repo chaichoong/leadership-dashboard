@@ -1791,7 +1791,16 @@ HANDBACK_KEVIN_RE = re.compile(
     r"|\bneeds\s+Kevin\s+to\s+(?:manually\s+)?(?:log|sign)\s*in(?:to)?\b"
     r"|\bKevin\s*[,:\-–—]+\s*(?:please\s+)?(?:manually\s+)?(?:log|sign)\s*in(?:to)?\b"
     r"|\b(?:next\s+step|action|to[- ]do)\s+for\s+Kevin\s*[:\-–—]\s*(?:please\s+)?(?:log|sign)\s*in(?:to)?\b"
-    r"|\bKEVIN\s+ACTION\s*:\s*(?:please\s+)?(?:log|sign|call|phone|ring)\b",
+    r"|\bKEVIN\s+ACTION\s*:\s*(?:please\s+)?(?:log|sign|call|phone|ring)\b"
+    # The carry-out line's own grammar (8 Sep 2026, five live cards): "Kevin
+    # logging into Google AdSense and completing tax information", "Kevin
+    # signing into TopCashback, clicking ... and buying", "Kevin calling EE on
+    # 150". Gerunds slipped past every form above.
+    # Review, same day: "signing in wet ink", "calling it off" and "calling the
+    # meeting to order" must pass, so a sign-in needs a site preposition and a
+    # phone verb needs a named party or a number after it.
+    r"|\bKevin\s+(?:manually\s+)?(?:logging\s+in(?:to)?|signing\s+into|signing\s+in\s+(?:to|at|on))\b"
+    r"|\bKevin\s+(?:calling|phoning|ringing)\s+(?=(?-i:[A-Z0-9]))",
     re.I,
 )
 HANDBACK_YOU_RE = re.compile(
@@ -2644,6 +2653,15 @@ def cmd_submit(args):
             "               SIGN-IN NEEDED: <site name> (<login url>)\n"
             "             and stop. That line is a tap for him (Robot sign-in app), "
             "not a task. Never a phone call.")
+
+    # A SIGN-IN NEEDED line is a tap on the Robot sign-in app, so it must name
+    # a site that app can open. On 8 Sep 2026 two tasks said "SIGN-IN NEEDED:
+    # Namecheap"; Namecheap is not on the robot's list, the app had nothing to
+    # open, and the card promised "the robot finishes this within minutes" for
+    # work no robot could do. Refused here, with what to write instead.
+    problem = signin_line_problem(output)
+    if problem:
+        sys.exit(f"ERROR: refusing to submit {args.task} — {problem}")
 
     # THE REPORT GATE (Kevin, 7 Sep 2026): a report on an inbound item shows
     # the five questions were asked and names its trigger, or it is refused.
@@ -3536,9 +3554,47 @@ def cmd_signed(args):
 # session is live (an hour, for GOV.UK) instead of at the next slot.
 # The site label may itself hold brackets ("Pingen (letters)"), so the site is
 # everything up to an optional trailing "(https://…)" group.
-SIGNIN_LINE_RE = re.compile(r"^\s*SIGN-IN NEEDED:\s*(?P<site>.+?)\s*(?:\((?P<url>https?://[^\s)]+)\))?\s*$", re.I | re.M)
+SIGNIN_LINE_RE = re.compile(r"^\s*SIGN-IN NEEDED:\s*(?P<rest>.+?)\s*$", re.I | re.M)
+SIGNIN_URL_RE = re.compile(r"https?://[^\s)>\]]+", re.I)
 SIGNIN_DONE_MARK = "SIGNED IN:"
 KEEPALIVE_MARK = "KEEPALIVE CHECK:"
+SIGNIN_PICKUP_DIR = os.environ.get("SIGNIN_PICKUP_DIR") or os.path.expanduser("~/knowledge-os/logs/signin-pickup")
+
+
+def parse_signin_line(text):
+    """The site and login URL a SIGN-IN NEEDED line names, or None.
+
+    Agents do not keep to the form. On 8 Sep 2026 four live tasks read
+    "SIGN-IN NEEDED: pingen.com (https://www.pingen.com/en/login) — to send the
+    letter ..." and the strict "<site> (<url>)$" pattern took the whole sentence
+    as the site and found no URL, so the Robot sign-in app never opened them.
+    The URL is now taken from anywhere on the line and the site is the text
+    before it, with a trailing "(one-hour window)" style aside removed.
+    """
+    m = SIGNIN_LINE_RE.search(str(text or ""))
+    if not m:
+        return None
+    rest = m.group("rest").strip()
+    u = SIGNIN_URL_RE.search(rest)
+    url = u.group(0).rstrip(".,;:") if u else ""
+    site = rest[:u.start()] if u else rest
+    site = re.split(r"\s+[—–-]\s+", site, maxsplit=1)[0]
+    site = site.rstrip(" (:-—–").strip()
+    if not u:
+        # "GOV.UK One Login (one-hour window)" — an aside, not part of the name.
+        # A label like "Pingen (letters)" survives because it is matched on
+        # the part before the bracket too.
+        site = re.sub(r"\s*\((?!https?://)[^)]*\)\s*$", "", site).strip() or site
+    return {"site": site, "url": url}
+
+
+def signin_domain(host):
+    """The registrable domain of a host: app.pingen.com -> pingen.com,
+    www.topcashback.co.uk -> topcashback.co.uk."""
+    parts = [p for p in str(host or "").lower().split(".") if p]
+    if len(parts) >= 3 and len(parts[-1]) == 2 and parts[-2] in {"co", "gov", "org", "ac", "net", "ltd", "plc", "me", "sch", "nhs"}:
+        return ".".join(parts[-3:])
+    return ".".join(parts[-2:]) if len(parts) >= 2 else ".".join(parts)
 
 
 def load_login_sites():
@@ -3559,6 +3615,41 @@ def load_login_sites():
     return json.loads(r.stdout)
 
 
+def signin_line_problem(output, sites=None):
+    """Why a SIGN-IN NEEDED line could not be acted on; '' when fine or absent."""
+    m = parse_signin_line(output)
+    if not m:
+        return ""
+    sites = sites if sites is not None else load_login_sites()
+    host = signin_site_for(m["site"], m["url"], sites)
+    entry = sites.get(host or "", {})
+    if host and entry.get("login") and (entry.get("loginUrl") or m["url"]):
+        return ""
+    can = ", ".join(sorted(str(v.get("label") or h) for h, v in sites.items() if v.get("login") and v.get("loginUrl")))
+    return (f"its SIGN-IN NEEDED line names {m['site']!r}, which is not a site the robot can "
+            f"sign into (its list: {can}).\n"
+            "       A sign-in line is a tap for Kevin on the Robot sign-in app; for a site off "
+            "that list there is nothing to tap. Write the decision instead: what you prepared, "
+            "what Kevin is choosing between, and one line 'The robot has no access to "
+            f"{m['site']}.' Never tell him to log in and do it himself.")
+
+
+def signin_door_host(host, sites):
+    """The site whose door actually opens for HOST. One Login has no page of
+    its own: its entries carry WebFiling's loginUrl, so a queue naming both
+    "GOV.UK One Login" and "Companies House WebFiling" opened the same door
+    twice (review, 8 Sep 2026). Fold onto the host that owns the door."""
+    entry = sites.get(host) or {}
+    url = entry.get("loginUrl") or ""
+    try:
+        door = (urllib.parse.urlparse(url).hostname or "").lower()
+    except Exception:                                   # noqa: BLE001
+        door = ""
+    if door and door != host and sites.get(door, {}).get("login"):
+        return door
+    return host
+
+
 def signin_site_for(line_site, line_url, sites):
     """Which allowlist host a SIGN-IN NEEDED line means. URL host first
     (exact or suffix), then the label, case-insensitive. None when unknown."""
@@ -3576,15 +3667,27 @@ def signin_site_for(line_site, line_url, sites):
         if host and (host == h or host.endswith("." + h)) and (best is None or len(h) > len(best)):
             best = h
     if best:
-        return best
+        return signin_door_host(best, sites)
+    # Same registrable domain: "www.pingen.com/en/login" is Pingen even though
+    # the robot's entry is app.pingen.com. Only a site that can be signed into
+    # counts here; a login: false entry (gov.uk) must not swallow a stranger.
+    if host:
+        dom = signin_domain(host)
+        for h, v in sites.items():
+            if v.get("login") and signin_domain(h) == dom:
+                return signin_door_host(h, sites)
     want = (line_site or "").strip().lower()
-    for h, v in sites.items():
+    # By label, sites the robot can sign into first: "Companies House" must
+    # land on WebFiling (login: true, has a login page), not on the public
+    # register entry that merely shares the name (found 8 Sep 2026).
+    ordered = sorted(sites.items(), key=lambda kv: (not kv[1].get("login"), not kv[1].get("loginUrl")))
+    for h, v in ordered:
         lab = str(v.get("label") or "").lower()
         if want and (want == lab or want in lab or lab.split(" (")[0] == want):
-            return h
-    for h in sites:
+            return signin_door_host(h, sites)
+    for h, _v in ordered:
         if want and want.replace(" ", "") in h.replace(".", ""):
-            return h
+            return signin_door_host(h, sites)
     return None
 
 
@@ -3596,21 +3699,34 @@ def signin_waiting(sites=None):
     groups = {}
     for rec in recs:
         f = rec.get("fields", {}) or {}
-        m = SIGNIN_LINE_RE.search(str(f.get(AF["agentOutput"]) or ""))
+        m = parse_signin_line(f.get(AF["agentOutput"]))
         if not m:
             continue
-        host = signin_site_for(m.group("site"), m.group("url"), sites) or "unknown"
+        host = signin_site_for(m["site"], m["url"], sites) or "unknown"
         entry = sites.get(host, {})
-        g = groups.setdefault(host, {"host": host, "label": entry.get("label") or m.group("site").strip(),
-                                     "loginUrl": entry.get("loginUrl") or m.group("url") or "", "tasks": []})
+        # A site the robot cannot sign into gets its own group per name, so two
+        # strangers (Namecheap, Xero) are never folded under the first one's label.
+        key = host if host != "unknown" else "unknown:" + m["site"].lower()
+        g = groups.setdefault(key, {"host": host, "label": entry.get("label") or m["site"],
+                                    "loginUrl": entry.get("loginUrl") or m["url"] or "",
+                                    "shortSession": bool(entry.get("shortSession")), "tasks": []})
         g["tasks"].append({"id": rec["id"], "name": f.get(AF["name"], ""),
                            "agent": ALL_AGENTS.get((links(f.get(AF["teamMember"])) or [None])[0], {}).get("agent", "")})
-    return sorted(groups.values(), key=lambda g: (-len(g["tasks"]), g["label"]))
+    # Short-session sites first (a GOV.UK session lasts an hour, so it is signed
+    # into last-but-worked first), then the site with the most waiting.
+    return sorted(groups.values(), key=lambda g: (not g["shortSession"], -len(g["tasks"]), g["label"]))
 
 
 def cmd_signin_waiting(args):
     print(json.dumps({"sites": signin_waiting(), "at": now_iso()}, indent=2))
     return 0
+
+
+def cmd_signin_site(args):
+    """Print the allowlist host a name or URL means, or 'unknown' (exit 1)."""
+    host = signin_site_for(args.site, args.url, load_login_sites())
+    print(host or "unknown")
+    return 0 if host else 1
 
 
 def cmd_signin_done(args):
@@ -3662,6 +3778,14 @@ def cmd_signin_done(args):
                 AF["notes"]: (str(f.get(AF["notes"]) or "").rstrip() + "\n\n" + note).strip()[-90000:],
             })
             handed.append({"task": t["id"], "agent": t["agent"], "name": t["name"][:80]})
+    # The pickup run reads this file (and takes it over by rename) once Kevin
+    # has quit the last window, so one run works every site he signed into.
+    reopened = [h["task"] for h in handed if not h.get("closed")]
+    if reopened:
+        os.makedirs(SIGNIN_PICKUP_DIR, exist_ok=True)
+        with open(os.path.join(SIGNIN_PICKUP_DIR, "pending.jsonl"), "a") as fh:
+            fh.write(json.dumps({"at": now_iso(), "host": host, "label": sites[host].get("label"),
+                                 "tasks": reopened}) + "\n")
     print(json.dumps({"site": host, "label": sites[host].get("label"), "handedBack": handed}, indent=2))
     return 0
 
@@ -5796,6 +5920,11 @@ def main():
                         help="Kevin quit the sign-in window: hand every task "
                              "waiting on that site straight back to its robot")
     sd.add_argument("--site", required=True, help="allowlist host, e.g. app.pingen.com")
+    ss = sub.add_parser("signin-site",
+                        help="which allowlist host a site name or URL means "
+                             "(the Robot sign-in app resolves a card's link with it)")
+    ss.add_argument("--url", default="", help="a login URL, e.g. https://www.pingen.com/en/login")
+    ss.add_argument("--site", default="", help="a site name, e.g. Companies House")
 
     sg = sub.add_parser("signed",
                         help="gate 2: a registered document came back signed "
@@ -5838,7 +5967,7 @@ def main():
             "lessons": cmd_lessons, "revise": cmd_revise,
             "attach": cmd_attach, "outcome": cmd_outcome,
             "reassign": cmd_reassign, "ledger": cmd_ledger,
-            "signed": cmd_signed, "signin-waiting": cmd_signin_waiting, "signin-done": cmd_signin_done, "certificate": cmd_certificate,
+            "signed": cmd_signed, "signin-waiting": cmd_signin_waiting, "signin-done": cmd_signin_done, "signin-site": cmd_signin_site, "certificate": cmd_certificate,
             "handover-property": cmd_handover_property,
             "clear-alerts": cmd_clear_alerts}[args.cmd](args) or 0
 

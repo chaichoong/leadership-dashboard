@@ -44,6 +44,7 @@
  *
  * USAGE
  *   node scripts/agent-browser.js login   --url URL [--profile NAME]
+ *   node scripts/agent-browser.js session --site HOST [--shot PATH]   is the robot signed in there? (walks the door)
  *   node scripts/agent-browser.js read    --url URL [--shot OUT.png] [--wait MS] [--wait-for SELECTOR]
  *   node scripts/agent-browser.js loom-search --query "..." [--limit 20]
  *   node scripts/agent-browser.js prepare --plan PLAN.json --shot OUT.png
@@ -115,10 +116,26 @@ const BUILTIN_SITES = {
   // the company from the list and never handles the code.
   // shortSession: the session dies within the hour and needs Kevin's code every
   // time, so the daily keep-alive does not try to hold it open.
-  'signin.account.gov.uk':      { label: 'GOV.UK One Login',   login: true, shortSession: true },
-  'home.account.gov.uk':        { label: 'GOV.UK One Login (account)', login: true, shortSession: true },
+  // One Login has no sign-in page of its own to open: Kevin reaches it from
+  // the service that needs it, so a task that names "GOV.UK One Login" opens
+  // the WebFiling door (8 Sep 2026; before this the Robot sign-in app had
+  // nothing to open for that wording and skipped the task in silence).
+  // sessionWalk: what `session` clicks after the door to learn whether the
+  // session is live. The WebFiling entry ALWAYS shows "Sign in to WebFiling"
+  // with a Continue button; with a live One Login session the two clicks land
+  // back on a WebFiling page without asking for anything. On 8 Sep 2026 the
+  // pickup run clicked once, saw the same entry page, and wrote "session
+  // expired" 5 minutes after Kevin had signed in, with 20 minutes still on
+  // the One Login clock. The walk is code now, not an agent's plan.
+  'signin.account.gov.uk':      { label: 'GOV.UK One Login',   login: true, shortSession: true,
+                                  loginUrl: 'https://ewf.companieshouse.gov.uk/seclogin?tc=1',
+                                  sessionWalk: ['Continue', 'Go to GOV.UK One Login'] },
+  'home.account.gov.uk':        { label: 'GOV.UK One Login (account)', login: true, shortSession: true,
+                                  loginUrl: 'https://ewf.companieshouse.gov.uk/seclogin?tc=1',
+                                  sessionWalk: ['Continue', 'Go to GOV.UK One Login'] },
   'ewf.companieshouse.gov.uk':  { label: 'Companies House WebFiling (via One Login)', login: true, shortSession: true,
-                                  loginUrl: 'https://ewf.companieshouse.gov.uk/seclogin?tc=1' },
+                                  loginUrl: 'https://ewf.companieshouse.gov.uk/seclogin?tc=1',
+                                  sessionWalk: ['Continue', 'Go to GOV.UK One Login'] },
   'tax.service.gov.uk':         { label: 'HMRC',               login: true, shortSession: true,
                                   loginUrl: 'https://www.tax.service.gov.uk/gg/sign-in' },
   // The sites agents kept handing back to Kevin as "log in and do it yourself"
@@ -325,7 +342,33 @@ function persistSessionCookies(dir, ttlMs = 60 * 60 * 1000) {
   return Number((r.stdout || '').trim()) || 0;
 }
 
+// Signed out: a password box, GOV.UK One Login's own pages, or a URL that is
+// still a door (WebFiling's oauthSignIn/seclogin, any /login-shaped path).
+// Signed in: none of those, on a page of the site itself.
+function sessionVerdict(url, passwordFields) {
+  let host = '';
+  try { host = new URL(url).hostname.toLowerCase(); } catch { host = ''; }
+  const atDoor = /oauthSignIn|seclogin|\/(?:log-?in|sign-?in|signin|login|auth)(?:\/|\?|$)/i.test(url);
+  const atOneLogin = /(^|\.)account\.gov\.uk$/i.test(host);
+  return { signedIn: Number(passwordFields) === 0 && !atOneLogin && !atDoor, atDoor, atOneLogin };
+}
+
 // ── Browser ──────────────────────────────────────────────────────────────────
+// The robot profile can be open in ONE place: a sign-in window or a headless
+// run, never both (Chromium's profile lock, an opaque error). Poll until it is
+// free, for up to maxMs, then die with the caller's message.
+async function waitForProfile(dir, maxMs, message) {
+  const { spawnSync } = require('child_process');
+  const busy = () => spawnSync('pgrep', ['-f', `user-data-dir=${dir}`]).status === 0;
+  if (!busy()) return;
+  const deadline = Date.now() + maxMs;
+  while (Date.now() < deadline) {
+    await new Promise(r => setTimeout(r, 2000));
+    if (!busy()) return;
+  }
+  die(message);
+}
+
 async function withPage(profile, headed, fn) {
   // Resolution chain rather than one hardcoded path: node walks parent
   // directories, so a worktree under .claude/worktrees/ finds the main
@@ -343,12 +386,11 @@ async function withPage(profile, headed, fn) {
   // on top of it trips Chromium's profile lock with an opaque error, and the
   // 30-minute hand-back poller can easily fire while Kevin is still signing in
   // (4 Sep 2026). Say what is actually happening instead.
-  {
-    const { spawnSync } = require('child_process');
-    if (spawnSync('pgrep', ['-f', `user-data-dir=${dir}`]).status === 0) {
-      die(`the profile at ${dir} is open in a sign-in window. Kevin has not quit it yet (Cmd+Q); try again afterwards.`);
-    }
-  }
+  // Wait for it rather than fail (8 Sep 2026): the Robot sign-in app opens
+  // the waiting sites one after another, a chain of a few minutes, and a
+  // scheduled slot that dies the instant it meets that window loses its run.
+  await waitForProfile(dir, 10 * 60 * 1000,
+    `the profile at ${dir} is open in a sign-in window. Kevin has not quit it yet (Cmd+Q); try again afterwards.`);
   // Prefer Kevin's installed Google Chrome over Playwright's bundled test build
   // (2 Sep 2026). The bundled Chromium announces itself as automated
   // (navigator.webdriver = true, "controlled by automated test software"),
@@ -581,8 +623,10 @@ async function main() {
     if (fs.existsSync('/Applications/Google Chrome.app')) {
       fs.mkdirSync(dir, { recursive: true });
       const { spawnSync, spawn } = require('child_process');
-      const busy = spawnSync('pgrep', ['-f', `user-data-dir=${dir}`]).status === 0;
-      if (busy) die(`the profile at ${dir} is already open in another Chrome. Quit it (Cmd+Q) first.`);
+      // A headless robot step on this profile lasts seconds to a minute;
+      // wait it out rather than refuse the window (8 Sep 2026).
+      await waitForProfile(dir, 3 * 60 * 1000,
+        `the profile at ${dir} is already open in another Chrome. Quit it (Cmd+Q) first.`);
       spawn('open', ['-na', 'Google Chrome', '--args', `--user-data-dir=${dir}`,
         '--use-mock-keychain', '--no-first-run', url], { stdio: 'ignore' }).unref();
       console.log(`Plain Chrome window open for ${host} (no automation attached). Log in, then Cmd+Q that window.`);
@@ -605,6 +649,54 @@ async function main() {
       await page.waitForEvent('close', { timeout: 15 * 60 * 1000 }).catch(() => {});
     });
     ledger({ cmd: 'login', host, profile, sessionCookiesKept: persistSessionCookies(dir) });
+    return;
+  }
+
+  // ── session ────────────────────────────────────────────────────────────────
+  // Is the robot signed in to SITE right now? Opens the site's door, walks its
+  // sessionWalk (the clicks a live session sails through and a dead one stops
+  // at), and reports where it landed. The verdict is code, so a pickup run
+  // and the keep-alive read the same answer instead of judging a screenshot.
+  if (cmd === 'session') {
+    const site = String(arg(rest, 'site', '')).toLowerCase();
+    const sites = loadSites();
+    const entry = sites[site];
+    if (!entry || !entry.login) die(`${site || '(no --site)'} is not a login site on the allowlist.`);
+    const start = arg(rest, 'url') || entry.loginUrl;
+    if (!start) die(`${site} has no login page to open (no loginUrl).`);
+    if (!hostAllowed(start)) die(`${start} is not on the allowlist.`);
+    const shot = arg(rest, 'shot');
+    const walk = Array.isArray(entry.sessionWalk) ? entry.sessionWalk : [];
+    const res = await withPage(profile, false, async (page) => {
+      await page.goto(start, { waitUntil: 'domcontentloaded', timeout: 45000 });
+      await page.waitForTimeout(3000);
+      const clicked = [];
+      for (const label of walk) {
+        const re = new RegExp('^\\s*' + String(label).replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\s*$', 'i');
+        const loc = page.getByRole('button', { name: re }).or(page.getByRole('link', { name: re })).first();
+        if (!(await loc.count())) { clicked.push({ label, found: false, url: page.url() }); break; }
+        await loc.click({ timeout: 20000 });
+        // A click that starts a redirect chain returns after the FIRST hop;
+        // give One Login's bounce back to WebFiling time to finish.
+        await page.waitForLoadState('domcontentloaded', { timeout: 30000 }).catch(() => {});
+        await page.waitForTimeout(6000);
+        clicked.push({ label, found: true, url: page.url() });
+      }
+      // One Login's bounce back to the service can be slow; a verdict taken
+      // while still on account.gov.uk would read "signed out" for a live
+      // session (review, 8 Sep 2026). Give it up to 20 s more to land.
+      for (let i = 0; i < 10 && sessionVerdict(page.url(), 0).atOneLogin; i++) {
+        await page.waitForTimeout(2000);
+      }
+      const url = page.url();
+      const passwordFields = await page.evaluate(() => document.querySelectorAll('input[type=password]').length);
+      const text = await page.evaluate(() => document.body.innerText.slice(0, 600));
+      const verdict = sessionVerdict(url, passwordFields);
+      const png = await shoot(page, shot);
+      return { site, signedIn: verdict.signedIn, url, title: await page.title(), passwordFields, walked: clicked, text, screenshot: png };
+    });
+    ledger({ cmd: 'session', site, url: res.url, signedIn: res.signedIn, profile });
+    console.log(JSON.stringify(res));
     return;
   }
 
@@ -810,5 +902,5 @@ if (require.main === module) {
   main().catch(e => { console.error('BROWSER ERROR: ' + (e && e.stack || e)); process.exit(1); });
 }
 
-module.exports = { hostAllowed, runSteps, assertNotCredential, assertApproved, SECRET_NAME_RE, loadSites,
+module.exports = { hostAllowed, runSteps, assertNotCredential, assertApproved, SECRET_NAME_RE, loadSites, sessionVerdict,
                    assertUploadable, assertConfirmable, UPLOAD_DIR, UPLOAD_EXTENSIONS, persistSessionCookies };
