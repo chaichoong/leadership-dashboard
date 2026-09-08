@@ -34,6 +34,11 @@ REPO="$(cd "$(dirname "$0")/.." && pwd)"   # the checkout this script lives in, 
 LOG_DIR="/Users/kevinbrittain/knowledge-os/logs/content-engine"
 mkdir -p "$LOG_DIR"
 cd "$REPO" || exit 1
+# The runtime checkout is a worktree kept on main (the main checkout is often on a session's branch):
+# take the latest merged code before every run, never anything uncommitted.
+if [ "$(git -C "$REPO" branch --show-current 2>/dev/null)" = "main" ] && [ -z "$(git -C "$REPO" status --porcelain 2>/dev/null)" ]; then
+  git -C "$REPO" pull -q --ff-only origin main 2>/dev/null || echo "runtime: could not fast-forward main, running what is here"
+fi
 
 # WORKING-HOURS GUARD (Kevin, 4 Sep 2026)
 # -----------------------------------------------------------------------------

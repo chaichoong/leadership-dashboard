@@ -97,6 +97,20 @@ describe('content-engine publish (GHL)', () => {
     expect(readFileSync(path.join(DIR, 'blog.py'), 'utf8')).toContain('blog REFUSED, placeholder');
   });
 
+  it('publishes in strict day order behind a cursor, same day, with per-platform slots, and a light hourly daytime job (8 Sep 2026)', () => {
+    const src = readFileSync(PUBLISH, 'utf8');
+    expect(src).toContain('def next_publishable(state, ledger, approved)');
+    expect(src).toContain('state[CURSOR_KEY] = day');
+    expect(src).toContain('def when_for(platform, clip, index, now=None)');
+    expect(src).toContain('"tiktok": {"summary": (13, 0), "lfmd": (19, 30)}');
+    const sh = readFileSync(path.join(ROOT, 'scripts', 'content-engine-publish.sh'), 'utf8');
+    expect(sh).toContain('publish.py run --limit 3');
+    expect(sh).not.toContain('render.py');
+    const sched = JSON.parse(readFileSync(path.join(ROOT, 'scripts', 'job-schedule.json'), 'utf8'));
+    expect(sched['content-engine-publish'].cron).toBe('15 7-20 * * *');
+    expect(readFileSync(path.join(ROOT, 'js', 'automations-data.js'), 'utf8')).toContain("key: 'content-engine-publish'");
+  });
+
   it('X is not a channel and every copy field it reads exists on the record type it reads it from', () => {
     const src = readFileSync(PUBLISH, 'utf8');
     expect(src).toContain('assert "twitter" not in CHANNELS');

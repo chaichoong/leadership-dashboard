@@ -50,13 +50,33 @@ STATUS_YT = "YT Publishing & SEO in Progress"
 STATUS_SOCIALS = "Publishing In Progress"
 STATUS_PUBLISHED = "Published"
 PUBLISHABLE = (STATUS_APPROVED, STATUS_YT, STATUS_SOCIALS)
-YT_SLOT, SUMMARY_SLOT, LFMD_SLOT = (6, 0), (9, 0), (17, 0)     # London hours; the team posted around 08:00-09:00 UK
-STAGGER_HOURS = 6     # a second episode the same day goes six hours later, a third twelve (catch-up, 8 Sep 2026)
+YT_SLOT, SUMMARY_SLOT, LFMD_SLOT = (6, 0), (9, 0), (17, 0)     # kept for the specs; the real times come from PLATFORM_SLOTS
+STAGGER_HOURS = 6     # YouTube: a second episode the same day goes six hours later, a third twelve (catch-up, 8 Sep 2026)
+STAGGER_SOCIAL_HOURS = 2
+# Same-day publishing (Kevin, 8 Sep 2026): YouTube first thing, the clips later the same day when each
+# platform is busiest in the UK. LinkedIn is a lunchtime and end-of-day read; Facebook and Instagram
+# lunchtime and early evening; TikTok evening; Threads with Instagram.
+PLATFORM_SLOTS = {"youtube": {"full": (6, 0)},
+                  "linkedin": {"summary": (12, 0), "lfmd": (17, 30)}, "facebook": {"summary": (12, 30), "lfmd": (18, 0)},
+                  "instagram": {"summary": (12, 30), "lfmd": (18, 0)}, "threads": {"summary": (12, 0), "lfmd": (18, 0)},
+                  "tiktok": {"summary": (13, 0), "lfmd": (19, 30)}}
+SOON_MINUTES = 5
 
 
-def staggered(slot, index):
+def staggered(slot, index, hours=STAGGER_HOURS):
     """(hour, minute) for the index-th episode published the same day: 06:00, 12:00, 18:00 for YouTube."""
-    return ((slot[0] + STAGGER_HOURS * index) % 24, slot[1])
+    return ((slot[0] + hours * index) % 24, slot[1])
+
+
+def when_for(platform, clip, index, now=None):
+    """The UTC ISO time a post goes out: today's slot for that platform and clip, moved along for the
+    index-th episode of the day; if the slot has already passed, a few minutes from now. Same day, never tomorrow."""
+    now = now or dt.datetime.now(LONDON)
+    base = PLATFORM_SLOTS.get(platform, {}).get(clip) or (SUMMARY_SLOT if clip == "summary" else LFMD_SLOT if clip == "lfmd" else YT_SLOT)
+    h, m = staggered(base, index, STAGGER_HOURS if platform == "youtube" else STAGGER_SOCIAL_HOURS)
+    slot = now.replace(hour=h, minute=m, second=0, microsecond=0)
+    if slot < now + dt.timedelta(minutes=SOON_MINUTES): slot = now + dt.timedelta(minutes=SOON_MINUTES)
+    return slot.astimezone(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 PLACEHOLDER = "[ADD YOUTUBE LINK]"
 MODE_FILE = os.path.expanduser("~/.config/od/content_engine_mode")   # "test" (default) or "live"; Kevin flips it
 
@@ -377,7 +397,7 @@ def schedule_stage(day, entry, recs, acct_map, stage, dry_run=False, index=0):
         left = placeholder_left(text) or placeholder_left(title or "")
         if left:
             print("episode %d: %s %s REFUSED, placeholder %s still in the copy" % (day, spec["clip"], platform, left)); continue
-        when = slot_iso(day_london, staggered(spec["slot"], index))
+        when = when_for(platform, spec["clip"], index)
         # Test mode: YouTube still goes up (unlisted, so the link exists) but every social post is a DRAFT.
         status = "scheduled" if (not test or platform == "youtube") else "draft"
         body = build_post(platform, account, spec, text, media[spec["clip"]], media.get("thumb"), when, user, day, title,
@@ -419,11 +439,43 @@ def schedule_stage(day, entry, recs, acct_map, stage, dry_run=False, index=0):
     return len(todo)
 
 
+CURSOR_KEY = "_cursor"
+
+
+def cursor(state):
+    """The last day put on YouTube, in order. Starts one below Kevin's takeover day (2053 when start_day is 2054)."""
+    if CURSOR_KEY in state: return int(state[CURSOR_KEY])
+    sd = watch.start_day()
+    return (sd - 1) if sd else 0
+
+
+def day_was_recorded(day, ledger):
+    return any(v.get("episode") == day for v in ledger.values())
+
+
+def next_publishable(state, ledger, approved):
+    """Strict order (Kevin, 8 Sep 2026: keep the day numbers in order): only cursor+1 may go to YouTube. A day
+    that was never recorded (no clip in the ledger while later days exist) is stepped over and noted; a day
+    that exists but is not yet approved holds everything behind it. Returns (day or None, reason)."""
+    c = cursor(state)
+    later = max((v.get("episode") or 0 for v in ledger.values()), default=0)
+    while True:
+        nxt = c + 1
+        if nxt in approved: return nxt, "in order"
+        if not day_was_recorded(nxt, ledger) and later > nxt:
+            state.setdefault("_skipped_days", []).append(nxt); state[CURSOR_KEY] = nxt; c = nxt
+            print("publish: day %d has no recording; stepping over it" % nxt, file=sys.stderr); continue
+        return None, ("day %d is not approved yet, so %s wait behind it" % (nxt, ", ".join(str(d) for d in approved if d > nxt) or "nothing else")) if approved else "nothing approved"
+
+
 def run(dry_run=False, limit=3):
     state = load_state(); days = approved_days()
     if not days: print("publish: no approved episodes"); return
     acct_map = account_map(accounts()); yt_ok = "youtube" in acct_map
+    ledger = watch.load_ledger()
     done = 0; per_stage = {1: 0, 2: 0}
+    held = [d for d in days if d > cursor(state) + 1]
+    if held: print("publish: held for order (behind day %d): %s" % (cursor(state) + 1, ", ".join(str(d) for d in held)))
     for day in days:
         entry = state.setdefault(str(day), {})
         recs = bundle(day)
@@ -431,6 +483,10 @@ def run(dry_run=False, limit=3):
         if not full or full["fields"].get("Record Status") not in PUBLISHABLE:
             continue
         stage = stage_for(entry, yt_ok)
+        if stage == "youtube":
+            nxt, why = next_publishable(state, ledger, set(days))
+            if nxt != day:
+                continue
         if stage == "wait-youtube-account":
             print("episode %d: approved, waiting for a YouTube account in GoHighLevel (Kevin's click: publish.py youtube-link)" % day); continue
         if stage == "wait-youtube-link":
@@ -441,6 +497,7 @@ def run(dry_run=False, limit=3):
         st_no = 1 if stage == "youtube" else 2
         n = schedule_stage(day, entry, recs, acct_map, st_no, dry_run, index=per_stage[st_no])
         if n: per_stage[st_no] += 1
+        if n and st_no == 1 and not dry_run: state[CURSOR_KEY] = day
         done += 1 if n else 0
         if not dry_run: save_state(state)
 
@@ -535,6 +592,14 @@ def selftest():
     sh = CHANNELS["youtube-short"]["posts"][0]; assert sh["clip"] == "lfmd" and sh["yt_type"] == "short" and CHANNELS["youtube-short"]["stage"] == 2
     bs = build_post("youtube", accts[5], sh, "desc", "https://cdn/l.mp4", None, "x", "u1", 1, "Short title"); assert bs["youtubePostDetails"]["type"] == "short"
     assert staggered((6, 0), 0) == (6, 0) and staggered((6, 0), 1) == (12, 0) and staggered((6, 0), 2) == (18, 0) and staggered((17, 0), 2) == (5, 0)
+    t = dt.datetime(2026, 9, 9, 8, 30, tzinfo=LONDON)
+    assert when_for("youtube", "full", 0, t) == "2026-09-09T07:35:00Z", "06:00 has passed at 08:30: a few minutes from now, same day"
+    assert when_for("linkedin", "summary", 0, t) == "2026-09-09T11:00:00Z" and when_for("tiktok", "lfmd", 0, t) == "2026-09-09T18:30:00Z"
+    assert when_for("facebook", "summary", 1, t) == "2026-09-09T13:30:00Z", "second episode of the day two hours later"
+    led = {"a": {"episode": 2054}, "b": {"episode": 2056}}
+    st = {}; assert next_publishable(st, led, {2054, 2056}) == (2054, "in order") or watch.start_day() != 2054
+    st = {CURSOR_KEY: 2054}; assert next_publishable(st, led, {2056}) == (2056, "in order") and st["_skipped_days"] == [2055], "an unrecorded day is stepped over"
+    st = {CURSOR_KEY: 2054}; assert next_publishable(st, {"a": {"episode": 2054}, "c": {"episode": 2055}, "b": {"episode": 2056}}, {2056})[0] is None, "a recorded, unapproved day holds the line"
     assert "twitter" not in CHANNELS
     assert "YouTube Link" in LINK_FIELDS[("youtube", "full")] and "TikTok Link" in LINK_FIELDS[("tiktok", "summary")] and "Facebook Post Link" in LINK_FIELDS[("facebook", "summary")]
     assert "LinkedIn Link" in LINK_FIELDS[("linkedin", "summary")] and "Threads Link" in LINK_FIELDS[("threads", "summary")], "the fields Ericamae's pages read"
@@ -569,7 +634,7 @@ def selftest():
     tp = build_text_post(od_accts[1], "hello", "2026-09-07T07:00:00Z", "u1", "https://cdn/c.png")
     assert tp["media"] == [{"url": "https://cdn/c.png", "type": "image/png"}] and tp["type"] == "post" and tp["scheduleDate"] == "2026-09-07T07:00:00Z"
     fbp = build_text_post(od_accts[4], "hello", "x", "u1", status="draft"); assert fbp["facebookPostDetails"] == {"type": "post"} and "media" not in fbp and "scheduleDate" not in fbp
-    print(json.dumps({"checks": 35, "failed": []}))
+    print(json.dumps({"checks": 41, "failed": []}))
 
 
 if __name__ == "__main__":
