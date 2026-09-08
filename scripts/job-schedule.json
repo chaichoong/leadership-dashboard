@@ -463,6 +463,17 @@
   "enabled": true,
   "retryWhenDeferred": true
  },
+ "content-engine-publish": {
+  "cron": "15 7-20 * * *",
+  "maxLateMinutes": 20,
+  "mode": "wrapped",
+  "note": "Content Engine daytime publisher (Kevin, 8 Sep 2026: an episode approved in the morning must go out the same day, socials included). Light API work only: verdict sync, GHL post sync, the next episode in strict day order to YouTube, its clips to the socials, blog and podcast later the same day. Never renders; the night job does that. Hourly so a morning approval is on YouTube within the hour.",
+  "needs": [
+   "network"
+  ],
+  "retryWhenDeferred": false,
+  "retryWhenDeferredNote": "Hourly: the next tick covers a deferred one."
+ },
  "content-engine": {
   "cron": "0 2 * * *",
   "maxLateMinutes": 180,

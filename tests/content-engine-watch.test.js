@@ -92,8 +92,8 @@ describe('content-engine watch: nightly wiring', () => {
     expect(sh).toContain('content_engine_episodes_per_night');
     expect(sh).toMatch(/for i in \$\(seq 1 "\$EPISODES"\); do/);
     const p = readFileSync(path.join(ROOT, 'scripts', 'content-engine', 'publish.py'), 'utf8');
-    expect(p).toContain('def staggered(slot, index)');
-    expect(p).toContain('staggered(spec["slot"], index)');
+    expect(p).toContain('def staggered(slot, index');
+    expect(p).toContain('when_for(platform, spec["clip"], index)');
   });
 
   it('is described on the Automations list (deterministic job, not a register agent)', () => {
