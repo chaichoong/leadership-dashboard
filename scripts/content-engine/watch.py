@@ -326,7 +326,14 @@ def scan(create=False, batch=None, since=None):
 MAX_PULLED = 2   # local copies waiting for the render; each is 0.3-5 GB and the disk has ~60 GB
 DRIVE_RETRY_ERRNOS = (11, 35)   # EDEADLK / EAGAIN: Drive's file provider says "not downloaded yet, ask again"
 PULL_RETRY_SECONDS = 30
-PULL_MAX_MINUTES = 40
+PULL_MAX_MINUTES = 40           # for a clip of PULL_WINDOW_GB; bigger clips get proportionally longer
+PULL_WINDOW_GB = 4              # 8 Sep 2026: Drive delivered a 4.7 GB clip in 3.7 h one night and a 2.6 GB one in 5 min; an 18 GB gap clip needs hours, not 40 min
+
+
+def pull_window_minutes(size):
+    """How long a pull may wait on Drive: 40 minutes per 4 GB, never less than 40. An 18 GB 2025 recording gets
+    about three hours instead of being abandoned at 40 minutes every night (the capacity question, 8 Sep 2026)."""
+    return max(PULL_MAX_MINUTES, int(PULL_MAX_MINUTES * size / (PULL_WINDOW_GB * 1024 ** 3)))
 
 
 def copy_streaming(src, dst, chunk=8 * 1024 * 1024, max_minutes=PULL_MAX_MINUTES, sleep=time.sleep):
@@ -379,12 +386,13 @@ def pull(ledger, key, work=WORK):
     t0 = time.time()
     e["status"] = "pulling"; save_ledger(ledger)
     try:
-        copy_streaming(e["path"], dest + ".part")
+        window = pull_window_minutes(e["size"])
+        copy_streaming(e["path"], dest + ".part", max_minutes=window)
     except OSError as ex:
         # Drive never delivered it within the window: leave it for the next night, keep the run alive
         if os.path.exists(dest + ".part"): os.remove(dest + ".part")
         e["status"] = "new"; e["pull_error"] = "%s (%s)" % (ex.strerror or ex, dt.datetime.now().isoformat(timespec="seconds")); save_ledger(ledger)
-        print("pull: Drive would not deliver %s within %d min (%s) - left as new for the next run" % (key, PULL_MAX_MINUTES, ex.strerror or ex)); return None
+        print("pull: Drive would not deliver %s within %d min (%s) - left as new for the next run" % (key, window, ex.strerror or ex)); return None
     got = os.path.getsize(dest + ".part")
     if got != e["size"]:
         os.remove(dest + ".part"); e["status"] = "new"; save_ledger(ledger)
@@ -402,6 +410,19 @@ def report():
     counts = {}
     for v in ledger.values(): counts[v.get("status", "?")] = counts.get(v.get("status", "?"), 0) + 1
     print("content-engine: " + ", ".join("%d %s" % (n, s) for s, n in sorted(counts.items())) if counts else "content-engine: ledger empty")
+    print("content-engine: " + disk_line(ledger))
+
+
+def disk_line(ledger, free=None):
+    """Free disk against the biggest clip still waiting, so a shortfall is read in the morning line, never
+    discovered by a night that pulled nothing (Kevin, 8 Sep 2026: no capacity surprises every night)."""
+    free = shutil.disk_usage(WORK if os.path.isdir(WORK) else os.path.expanduser("~")).free if free is None else free
+    waiting = [v for v in ledger.values() if v.get("status") == "new"]
+    if not waiting: return "%.0f GB free, nothing waiting" % (free / 1e9)
+    big = max(waiting, key=lambda v: v.get("size", 0))
+    need = pull_needs(big.get("size", 0))
+    if need <= free: return "%.0f GB free; the biggest waiting clip (day %s, %.0f GB) fits" % (free / 1e9, big.get("day"), big.get("size", 0) / 1e9)
+    return "%.0f GB free; day %s's %.0f GB clip needs %.0f GB, SHORT by %.0f GB" % (free / 1e9, big.get("day"), big.get("size", 0) / 1e9, need / 1e9, (need - free) / 1e9)
 
 
 def _selftest_copy_retry():
@@ -499,7 +520,11 @@ def selftest():
     assert choose_next(led) == "b", "oldest date then smallest clip"
     assert choose_next({"x": {"date": "2026-01-01", "seq": 1, "status": "pulled"}}) is None
     _selftest_gap_order()
-    print(json.dumps({"checks": 30, "failed": []}))
+    gb = 1024 ** 3
+    assert pull_window_minutes(2 * gb) == 40 and pull_window_minutes(4 * gb) == 40 and pull_window_minutes(18 * gb) == 180, "40 min per 4 GB, floor 40"
+    led = {"g": {"day": 1799, "size": 18 * gb, "status": "new"}, "c": {"day": 2054, "size": 4 * gb, "status": "new"}}
+    assert "SHORT by" in disk_line(led, 30 * gb) and "day 1799" in disk_line(led, 30 * gb) and "fits" in disk_line(led, 60 * gb) and "nothing waiting" in disk_line({}, 60 * gb)
+    print(json.dumps({"checks": 34, "failed": []}))
 
 
 def _selftest_gap_order():
