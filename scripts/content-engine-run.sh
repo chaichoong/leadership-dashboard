@@ -81,6 +81,7 @@ python3 scripts/content-engine/od_lane.py publish-sync || echo "od publish sync:
 python3 scripts/content-engine/od_lane.py publish || echo "od publish: failed this run (see above)"
 python3 scripts/content-engine/od_lane.py newsletter-publish || echo "od newsletter publish: failed this run (see above)"
 case "$(TZ=Europe/London date +%u)" in 7|1) python3 scripts/content-engine/od_lane.py topics || echo "od topics: failed this run (see above)";; esac
+python3 scripts/content-engine/runpreneur_map.py run || echo "map: not updated tonight (see above)"
 python3 scripts/content-engine/watch.py report
 python3 scripts/content-engine/approval.py report
 python3 scripts/content-engine/publish.py report
