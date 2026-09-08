@@ -39,6 +39,8 @@ AGENT_SLUG = "content-engine"
 CARD_TYPE = "Analysis"
 STAT_FIELDS = {"views": "👀 Views (YT)", "likes": "👍🏻 Likes (YT)"}   # the set "Engagements Total" sums (read 8 Sep 2026)
 PLATFORMS = ("youtube", "facebook", "instagram", "linkedin", "threads", "tiktok")
+GA_PROPERTY = "p553283476"     # Google Analytics "Runpreneur website", created by Kevin on 8 Sep 2026 under kevin@runpreneur.org.uk (tag G-VSEK293KRE)
+AGENT_BROWSER = os.path.join(os.path.dirname(os.path.dirname(HERE)), "scripts", "agent-browser.js")
 CLOSING = approval.CLOSING
 
 
@@ -110,7 +112,36 @@ def parse_recommendations(text):
     return recs[:3] if len(recs) >= 3 else []
 
 
-def build_card(start, end, summary, totals, weeks_count, recs, note=""):
+def parse_ga_text(text):
+    """Active users / views / new users out of the Google Analytics reports-snapshot text the robot browser reads.
+    The page renders each metric as a label line followed by the number line. None when the page said nothing."""
+    out = {}
+    lines = [l.strip() for l in (text or "").splitlines()]
+    for label, key in (("Active users", "active_users"), ("Views", "views"), ("New users", "new_users"), ("Event count", "events")):
+        for i, l in enumerate(lines[:-1]):
+            if l == label and re.fullmatch(r"[\d,\.]+[KM]?", lines[i + 1]):
+                n = lines[i + 1]; mult = 1000 if n.endswith("K") else 1000000 if n.endswith("M") else 1
+                out[key] = int(float(n.rstrip("KM").replace(",", "")) * mult); break
+    return out or None
+
+
+def ga_url(start, end):
+    return ("https://analytics.google.com/analytics/web/#/%s/reports/reportinghub?params=_u..nav%%3Dmaui%%26_u.date00%%3D%s%%26_u.date01%%3D%s"
+            % (GA_PROPERTY, start.strftime("%Y%m%d"), end.strftime("%Y%m%d")))
+
+
+def ga_traffic(start, end):
+    """Site traffic for the window, read off the Google Analytics page in the robot browser (the property owner's
+    login; there is no API key to keep). Returns a dict or None, never raises: absence is reported on the card."""
+    try:
+        r = subprocess.run(["node", AGENT_BROWSER, "read", "--url", ga_url(start, end), "--wait", "20000"], capture_output=True, text=True, timeout=180)
+        d = json.loads(r.stdout.strip().splitlines()[-1]) if r.returncode == 0 and r.stdout.strip() else {}
+        return parse_ga_text(d.get("text", ""))
+    except Exception as ex:
+        print("ga: not read (%s)" % str(ex)[:100], file=sys.stderr); return None
+
+
+def build_card(start, end, summary, totals, weeks_count, recs, note="", ga=None):
     name = "CONTENT: Performance read %s to %s (Runpreneur)" % (start.strftime("%-d %b"), end.strftime("%-d %b %Y"))
     lines = ["Performance read for the Runpreneur channels, %s to %s. Approve to turn the three recommendations into lessons the engine applies from the next episode; reject with your reason and it keeps that instead." % (start.strftime("%-d %B"), end.strftime("%-d %B %Y")), ""]
     if summary.get("count"):
@@ -133,6 +164,12 @@ def build_card(start, end, summary, totals, weeks_count, recs, note=""):
         if weeks_count < 4: lines.append("- Fewer than four weeks stored, so these are partial: the weekly snapshot started on 8 Sep 2026.")
     else:
         lines.append("**Other platforms:** no weekly GoHighLevel snapshots inside the window yet (the first is taken the Monday after 8 Sep 2026). Nothing to report, so nothing is claimed.")
+    lines.append("")
+    if ga:
+        lines.append("**Website (Google Analytics, runpreneur.org.uk):** %s active users, %s page views, %s new users." % (
+            f"{ga.get('active_users', 0):,}", f"{ga.get('views', 0):,}", f"{ga.get('new_users', 0):,}"))
+    else:
+        lines.append("**Website:** Google Analytics gave no figures for the window (the property started on 8 Sep 2026, or the page could not be read). Nothing is claimed.")
     lines.append("")
     lines.append("**Three recommendations (each becomes a lesson if you approve)**")
     lines += ["%d. %s" % (i + 1, r) for i, r in enumerate(recs)]
@@ -260,9 +297,10 @@ def run(days=30, dry_run=False, no_records=False):
     weeks = weeks_in_window(state["snapshots"], start, end)
     totals = platform_totals(weeks)
     written = 0 if (dry_run or no_records) else write_record_stats(vids)
-    recs = recommend(summary, totals)
+    ga = ga_traffic(start, end)
+    recs = recommend(summary, dict(totals, website=ga) if ga else totals)
     note = ("Stats written onto %d episode records (the table's own views and likes fields)." % written) if written else ""
-    name, out = build_card(start, end, summary, totals, len(weeks), recs, note)
+    name, out = build_card(start, end, summary, totals, len(weeks), recs, note, ga)
     if dry_run:
         print(name); print(out); return
     tid = approval.existing_task(name)
@@ -356,7 +394,13 @@ def selftest():
     _, out2 = build_card(s, e, {"count": 0}, {}, 0, ["R1", "R2", "R3"])
     assert "no videos with a publish date inside the window" in out2 and "no weekly GoHighLevel snapshots" in out2, "absence is reported, never a zero dressed as a number"
     assert STAT_FIELDS["views"] == "👀 Views (YT)", "the field set Engagements Total sums"
-    print(json.dumps({"checks": 24, "failed": []}))
+    ga = parse_ga_text("Home\nActive users\n1.2K\nEvent count\n34\nNew users\n7\nViews\n2,345\nfoo")
+    assert ga == {"active_users": 1200, "views": 2345, "new_users": 7, "events": 34}, ga
+    assert parse_ga_text("No data received from your website yet.") is None and parse_ga_text("") is None
+    assert "p553283476" in ga_url(s, e) and "date00%3D20260809" in ga_url(s, e) and "date01%3D20260907" in ga_url(s, e)
+    _, out3 = build_card(s, e, sm, tot, 2, ["R1", "R2", "R3"], ga={"active_users": 12, "views": 40, "new_users": 9})
+    assert "12 active users, 40 page views, 9 new users" in out3 and "gave no figures" in out, "the website line reports a number or its absence"
+    print(json.dumps({"checks": 30, "failed": []}))
 
 
 if __name__ == "__main__":
