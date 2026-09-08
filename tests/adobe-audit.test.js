@@ -24,11 +24,13 @@ sys.path.insert(0, ${JSON.stringify(join(ROOT, 'scripts'))})
 spec = importlib.util.spec_from_file_location('s', ${JSON.stringify(join(ROOT, 'scripts', script))})
 m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
 print(json.dumps([
-  m.signed_via_adobe('r', '/x/loa.pdf', notes='[03 Sep 2026 10:00 — agent-dispatch] SIGNED COPY BACK: LOA via Adobe'),
+  m.signed_via_adobe('r', '/x/loa.pdf', notes='[03 Sep 2026 10:00 — signature-watch] SIGNED COPY BACK: LOA came back signed. Signed PDF: /Users/k/attachments/loa.pdf\\nNEXT (gate 2): post it'),
   m.signed_via_adobe('r', '/x/signed_recX_LOA.pdf', notes=''),
   m.signed_via_adobe('r', '/x/loa.pdf', notes='nothing here'),
+  m.signed_via_adobe('r', '/x/restraint-order-pages-1-3.pdf', notes='[03 Sep 2026 10:00 — signature-watch] SIGNED COPY BACK: LOA came back signed. Signed PDF: /Users/k/attachments/loa.pdf'),
 ]))`], { encoding: 'utf8' });
-      expect(JSON.parse(out)).toEqual(['03 Sep 2026', null, false]);
+      // The stamped file is signed; a different file on the same task is not.
+      expect(JSON.parse(out)).toEqual(['03 Sep 2026', null, false, false]);
       const src = readFileSync(join(ROOT, 'scripts', script), 'utf8');
       expect(src).toMatch(/from adobe_audit import audit_problem/);
       expect(src).toMatch(/problem = audit_problem\(real, signed_on\)/);

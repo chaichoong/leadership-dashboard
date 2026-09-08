@@ -303,7 +303,10 @@ def load_document(path, task_id):
     return real, size
 
 
-SIGNED_STAMP_RE = re.compile(r"^\[(\d{1,2} \w{3} \d{4})(?: \d{2}:\d{2})?[^\]]*\]\s*SIGNED COPY BACK:", re.M)
+# The hand-off stamp names the file: "SIGNED COPY BACK: <agreement> came back
+# signed. Signed PDF: <path>". Only THAT file is the signed one; a restraint
+# order attached to the same task later is not (review, 8 Sep 2026).
+SIGNED_STAMP_RE = re.compile(r"^\[(\d{1,2} \w{3} \d{4})(?: \d{2}:\d{2})?[^\]]*\]\s*SIGNED COPY BACK:[^\n]*?Signed PDF:\s*(\S+)", re.M)
 
 
 def signed_via_adobe(task_id, real, notes=None):
@@ -316,10 +319,11 @@ def signed_via_adobe(task_id, real, notes=None):
             notes = (get_task(task_id).get("fields", {}) or {}).get(AF["notes"]) or ""
         except SystemExit:
             notes = ""
-    stamps = SIGNED_STAMP_RE.findall(str(notes or ""))
-    if stamps:
-        return stamps[-1]
-    if os.path.basename(real).startswith("signed_"):
+    base = os.path.basename(real)
+    for day, pdf in SIGNED_STAMP_RE.findall(str(notes or "")):
+        if os.path.basename(pdf.strip()) == base:
+            return day
+    if base.startswith("signed_"):
         return None
     return False
 
