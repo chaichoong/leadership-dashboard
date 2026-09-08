@@ -198,6 +198,26 @@ print(json.dumps([f.parse_output(above)['body'], f.parse_output(below)['body']])
   });
 });
 
+describe('a postal letter with the record above it is still a letter', () => {
+  // Found by another session on 8 Sep 2026: _head_and_body did not strip the
+  // block, detect_kind saw "TRACK RECORD:" before "POST:" and called it an
+  // email, and every letter submit was refused with "header line is not
+  // KEY: value". parse_output and _head_and_body must strip the same things.
+  it('detect_kind and parse_any read the POST format through a TRACK RECORD block', () => {
+    const out = execFileSync('python3', ['-c', `
+import sys, json; sys.path.insert(0, ${JSON.stringify(join(ROOT, 'scripts'))})
+import agent_email_format as f
+post = 'TRACK RECORD: none found (searched tasks + Gmail for ref 1234567890)\\n\\nPOST:\\nHM Revenue and Customs\\nSelf Assessment\\nBX9 1AS\\nDOCUMENT: ~/knowledge-os/attachments/hmrc.pdf\\nDELIVERY: cheap\\n---\\nDear Sir\\n\\nBody.\\n\\n**Carrying this out will involve:** posting this letter.'
+r = f.parse_any(post)
+print(json.dumps([f.detect_kind(post), r.get('kind'), r.get('body'), r.get('address')]))`], { encoding: 'utf8' });
+    const r = JSON.parse(out);
+    expect(r[0]).toBe('post');
+    expect(r[2]).toBe('Dear Sir\n\nBody.');
+    expect(r[3]).toEqual(['HM Revenue and Customs', 'Self Assessment', 'BX9 1AS']);
+    expect(r[1]).toBe('post');
+  });
+});
+
 describe('the writers of the trail', () => {
   it('both send paths stamp SENT on the task, and the create gate writes the record at creation and on a fold', () => {
     const email = readFileSync(join(ROOT, 'scripts', 'send-email.py'), 'utf8');

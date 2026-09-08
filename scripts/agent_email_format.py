@@ -444,7 +444,7 @@ DELIVERY_PRODUCTS = ("cheap", "fast", "bulk", "premium", "registered")
 
 
 def _head_and_body(output):
-    text = strip_tier1_banner(output or "")
+    text = strip_track_record(strip_tier1_banner(output or ""))
     if not text.strip():
         raise EmailFormatError("Agent Output is empty")
     if "---" not in text:
