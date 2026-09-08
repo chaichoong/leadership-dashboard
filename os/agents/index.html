@@ -1852,7 +1852,7 @@ function apvFilesHtml(t){
     return `<div class="apv-agent-files" data-apv-files>
         <span class="apv-agent-files-label">&#128206; ${label} — open before you decide</span>
         ${rows.map(f=>`<a class="apv-agent-file${f.thisRound?'':' apv-file-earlier'}" data-apv-file="${esc(f.filename)}" data-apv-file-round="${f.thisRound?'latest':(f.unstamped?'unknown':'earlier')}" href="${esc(f.url)}" target="_blank" rel="noopener noreferrer"
-            onclick="return apvOpenAttachment(event,'${t.id}','${esc(f.filename)}')"
+            onclick="return apvOpenAttachment(event,'${t.id}',this.dataset.apvFile)"
             title="${esc(f.unstamped ? 'No stamp: from the sender, from you, or attached before the trail existed.' : `${f.who} attached this on ${apvDayLabel(f.day)}${f.time?' at '+f.time:''}${f.purpose?': '+f.purpose:''}`)}">${esc(f.filename)}${f.size ? ` <span class="apv-file-meta">${Math.max(1, Math.round(f.size/1024))} KB</span>` : ''}${f.thisRound ? '<span class="apv-file-latest">Latest, this round</span>' : `<span class="apv-file-meta"> · ${f.unstamped ? 'from the sender or earlier' : 'earlier, ' + apvDayLabel(f.day)}</span>`}</a>`).join('')}
     </div>`;
 }

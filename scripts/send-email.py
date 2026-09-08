@@ -446,7 +446,7 @@ def cmd_send(args):
         notes = (str(live.get(AF["notes"]) or "").rstrip() + "\n\n" + line).strip()[-90000:]
         api("PATCH", f"https://api.airtable.com/v0/{BASE_ID}/{TASKS}/{args.task}",
             {"fields": {AF["notes"]: notes}})
-    except SystemExit as e:
+    except (SystemExit, Exception) as e:                     # noqa: BLE001
         print(f"WARNING: sent, but the SENT stamp could not be written: {e}", file=sys.stderr)
     print(json.dumps({"sent": args.task, "to": mail["to"], "cc": mail["cc"],
                       "subject": mail["subject"],

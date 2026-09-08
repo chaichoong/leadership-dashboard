@@ -147,8 +147,11 @@ def parse_addresses(raw, field):
     return out
 
 
+# The header line plus ONLY the dated bullets under it. A body bullet
+# ("- please pay by Friday") and the `---` separator survive (review, 8 Sep
+# 2026: the first version ate both).
 TRACK_RECORD_RE = re.compile(
-    r"^[ \t]*TRACK RECORD:[^\n]*\n(?:[ \t]*(?:[-*][^\n]*)?\n?)*", re.M)
+    r"^[ \t]*TRACK RECORD:[^\n]*\n?(?:[ \t]*[-*][ \t]+(?:\d{1,2} \w{3,4} \d{4}|\d{4}-\d{2}-\d{2})[^\n]*\n?|[ \t]*\n(?=[ \t]*[-*][ \t]+(?:\d{1,2} \w{3,4} \d{4}|\d{4}-\d{2}-\d{2})))*", re.M)
 
 
 def strip_track_record(text):

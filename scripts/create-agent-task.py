@@ -1109,14 +1109,31 @@ def track_record_for(fields, task_id=None, runner=None):
     return r.stdout.strip()
 
 
+TRACK_BLOCK_RE = re.compile(
+    r"^\[[^\]\n]*— create-agent-task\] TRACK RECORD:[^\n]*\n?"
+    r"(?:[ \t]*[-*][ \t]+(?:\d{1,2} \w{3,4} \d{4}|\d{4}-\d{2}-\d{2})[^\n]*\n?)*", re.M)
+
+
+def merge_track_record(notes, block, stamp):
+    """One TRACK RECORD block per task: the newest replaces the one this gate
+    wrote before (a subject that re-arrives five times must not stack five),
+    and the length cap cuts on a line, never mid-stamp (review, 8 Sep 2026)."""
+    kept = TRACK_BLOCK_RE.sub("", str(notes or "")).rstrip()
+    merged = (kept + f"\n\n[{stamp} — create-agent-task] " + block).strip()
+    if len(merged) > 90000:
+        merged = merged[-90000:]
+        cut = merged.find("\n")
+        merged = merged[cut + 1:] if cut != -1 else merged
+    return merged
+
+
 def write_track_record(task_id, fields):
-    """Append the TRACK RECORD to the task's Notes, dated, so the card and
+    """Put the TRACK RECORD on the task's Notes, dated, so the card and
     every agent see it. Never raises: a task with no record beats no task."""
     try:
         block = track_record_for(fields, task_id)
         live = _request("GET", f"/{TASKS}/{task_id}?returnFieldsByFieldId=true").get("fields", {}) or {}
-        stamp = date.today().strftime("%d %b %Y")
-        notes = (str(live.get(F["notes"]) or "").rstrip() + f"\n\n[{stamp} — create-agent-task] " + block).strip()[-90000:]
+        notes = merge_track_record(live.get(F["notes"]), block, date.today().strftime("%d %b %Y"))
         _request("PATCH", f"/{TASKS}/{task_id}", {"typecast": True, "fields": {F["notes"]: notes}})
         print("TRACK RECORD written: %s" % block.splitlines()[0][:120], file=sys.stderr)
     except Exception as e:                                   # noqa: BLE001

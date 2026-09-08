@@ -55,7 +55,7 @@ describe('the file gate: the document the action uses is on the card, from this 
   it('an ATTACH header must be matched by the same file attached in this submit', () => {
     const out = py(`
 notes = json.loads(sys.argv[1])
-out = 'Letter ready.\\nTO: a@b.com\\nSUBJECT: x\\nATTACH: /tmp/x/loa.pdf\\n---\\nDear A\\n\\n**Carrying this out will involve:** sending this email with the LOA attached.'
+out = 'Letter ready.\\nTO: a@b.com\\nFROM: kevinbrittain@gmail.com\\nSUBJECT: x\\nATTACH: /tmp/x/loa.pdf\\n---\\nDear A\\n\\n**Carrying this out will involve:** sending this email with the LOA attached.'
 print('---JSON---'); print(json.dumps([
   bool(m.document_action_problem(out, 'Correspondence', notes, set())),          # loa.pdf is from round 1: refused
   bool(m.document_action_problem(out, 'Correspondence', notes, {'loa.pdf'})),    # attached again now: fine
@@ -223,5 +223,97 @@ print(json.dumps({'ok': ok, 'bad': bad, 'cmd': seen['cmd']}))`], { encoding: 'ut
     expect(r.cmd).toContain('hmrc@example.com');
     expect(r.cmd).toContain('--task');
     expect(r.cmd).toContain('--from-text');
+  });
+});
+
+// The review of 8 Sep 2026 found nine gaps in the first cut; each one is pinned here.
+describe('review findings, pinned', () => {
+  it('a mention of the sender\'s attachment, or "no attachment", is not a promise (3)', () => {
+    const out = py(`
+lines = [
+  "sending this reply; no attachment is needed.",
+  "replying about the attachment they sent.",
+  "the enclosed cheque was banked yesterday.",
+  "posting the letter with the signed LOA attached.",
+  "attaching the statement and sending it to the council.",
+  "sending the enclosed form to HMRC.",
+]
+print('---JSON---'); print(json.dumps([bool(m.document_action_problem('x\\n\\n**Carrying this out will involve:** ' + l, 'Admin', '', set())) for l in lines]))`);
+    expect(out).toEqual([false, false, false, true, true, true]);
+  });
+  it('the submit stamp names a file put on with a separate attach before the submit (4)', () => {
+    const out = py(`
+captured = {}
+m.patch_task = lambda t, f: captured.setdefault('fields', f)
+notes = '[08 Sep 2026 08:00 — agent] ATTACHED: loa.pdf — signed LOA'
+m.get_task = lambda t: {'id': t, 'fields': {m.AF['notes']: notes, **dict(captured.get('fields', {}))}}
+m.supersede_attachments = lambda *a, **k: []
+m.upload_attachment = lambda *a, **k: 'x'
+m.load_login_sites = lambda: {}
+import tempfile, os, io, contextlib
+fh = tempfile.NamedTemporaryFile('w', suffix='.md', delete=False)
+fh.write('TRACK RECORD: none found (searched tasks)\\n\\nTO: a@b.com\\nFROM: kevinbrittain@gmail.com\\nSUBJECT: x\\nATTACH: /tmp/x/loa.pdf\\n---\\nDear A\\n\\n**Carrying this out will involve:** sending this email with the LOA attached.')
+fh.close()
+agent = sorted(m.AGENTS)[0]
+with contextlib.redirect_stdout(io.StringIO()):
+    m.cmd_submit(types.SimpleNamespace(task='recT1', agent=agent, type='Correspondence', output_file=fh.name, tier1=False))
+os.unlink(fh.name)
+print('---JSON---'); print(json.dumps(captured['fields'].get(m.AF['notes'], '')))`);
+    expect(out).toMatch(/SUBMITTED \(round 1\) as Correspondence with loa\.pdf/);
+  });
+  it('Kevin\'s own addresses, ISO dates and repeats never become search terms (5, 6)', () => {
+    const out = py(`
+print('---JSON---'); print(json.dumps({
+  'terms': m.history_terms(emails=['kevinbrittain@gmail.com', 'Karlo@Example.com', 'karlo@example.com'], refs=['2026-07-29', '12345', '12345']),
+  'tokens': m.reference_tokens('Ref 447538631747 dated 2026-07-29, again 447538631747, policy AB12345, ' + ' '.join(str(100000 + i) for i in range(20))),
+}))`);
+    expect(out.terms).toEqual([['email', 'karlo@example.com'], ['ref', '12345']]);
+    expect(out.tokens.slice(0, 2)).toEqual(['447538631747', 'AB12345']);
+    expect(out.tokens).not.toContain('2026-07-29');
+    expect(out.tokens.length).toBeLessThanOrEqual(8);
+  });
+  it('the email format strips only dated record lines: body bullets and the separator survive (2)', () => {
+    const out = execFileSync('python3', ['-c', `
+import sys, json; sys.path.insert(0, ${JSON.stringify(join(ROOT, 'scripts'))})
+import agent_email_format as f
+between = 'TO: a@b.com\\nSUBJECT: Hi\\nTRACK RECORD: none found (searched tasks)\\n---\\nDear A,\\n\\n- please pay by Friday\\n- or call us\\n\\nRegards\\n\\n**Carrying this out will involve:** sending this email.'
+body = 'TRACK RECORD: (searched tasks)\\n- 03 Jul 2026 — email: earlier reply\\n\\nTO: a@b.com\\nSUBJECT: Hi\\n---\\nDear A,\\n\\n- please pay by Friday\\n\\nRegards\\n\\n**Carrying this out will involve:** sending this email.'
+print(json.dumps([f.parse_output(between)['body'], f.parse_output(body)['body']]))`], { encoding: 'utf8' });
+    expect(JSON.parse(out)).toEqual(['Dear A,\n\n- please pay by Friday\n- or call us\n\nRegards', 'Dear A,\n\n- please pay by Friday\n\nRegards']);
+  });
+  it('the create gate replaces its previous block and cuts the cap on a line (9)', () => {
+    const out = execFileSync('python3', ['-c', `
+import importlib.util, json
+spec = importlib.util.spec_from_file_location('c', ${JSON.stringify(join(ROOT, 'scripts', 'create-agent-task.py'))})
+c = importlib.util.module_from_spec(spec); spec.loader.exec_module(c)
+notes = '[01 Sep 2026 10:00 — agent] ATTACHED: a.pdf — x\\n\\n[02 Sep 2026 — create-agent-task] TRACK RECORD: (searched tasks)\\n- 01 Jul 2026 — task: old line\\n\\n[03 Sep 2026 10:00 — agent-dispatch] SUBMITTED (round 1) as Admin with a.pdf'
+merged = c.merge_track_record(notes, 'TRACK RECORD: (searched tasks)\\n- 05 Sep 2026 — task: new line', '08 Sep 2026')
+big = c.merge_track_record('x' * 89990 + '\\n[01 Sep 2026 — agent] keep me', 'TRACK RECORD: none found (searched tasks)', '08 Sep 2026')
+print(json.dumps({'merged': merged, 'bigStartsClean': big.startswith('['), 'bigLen': len(big)}))`], { encoding: 'utf8' });
+    const r = JSON.parse(out);
+    expect(r.merged.match(/TRACK RECORD:/g)).toHaveLength(1);
+    expect(r.merged).toContain('new line');
+    expect(r.merged).not.toContain('old line');
+    expect(r.merged).toContain('SUBMITTED (round 1)');
+    expect(r.bigStartsClean).toBe(true);
+    expect(r.bigLen).toBeLessThanOrEqual(90000);
+  });
+  it('a failed Gmail lane leaves no JSON in the record and names the reason (1)', () => {
+    const out = py(`
+import os
+os.environ['HOME'] = '/nonexistent-home'
+entries, note = m.history_gmail([('email', 'a@b.com')], 30)
+print('---JSON---'); print(json.dumps({'entries': entries, 'note': note}))`);
+    expect(out.entries).toEqual([]);
+    expect(out.note).toMatch(/Gmail not searched \(cannot read/);
+  });
+  it('the send scripts survive any error after the send and the file link never interpolates the name (7, 8)', () => {
+    const email = readFileSync(join(ROOT, 'scripts', 'send-email.py'), 'utf8');
+    const letter = readFileSync(join(ROOT, 'scripts', 'send-letter.py'), 'utf8');
+    const html = readFileSync(join(ROOT, 'os', 'agents', 'index.html'), 'utf8');
+    expect(email).toMatch(/except \(SystemExit, Exception\) as e:[^\n]*\n\s+print\(f"WARNING: sent/);
+    expect(letter).toMatch(/except \(SystemExit, Exception\) as e:[^\n]*\n\s+print\(f"WARNING: posted/);
+    expect(html).toContain("apvOpenAttachment(event,'${t.id}',this.dataset.apvFile)");
+    expect(html).not.toContain("apvOpenAttachment(event,'${t.id}','${esc(f.filename)}')");
   });
 });

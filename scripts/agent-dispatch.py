@@ -2890,9 +2890,12 @@ def cmd_submit(args):
     uploaded = [upload_attachment(args.task, path) for path in to_attach]
     # The trail: which file came with which round, and that a submit happened.
     round_no = submitted_round(tf.get(AF["notes"]))
+    # The stamp names EVERY file of the round, including one put on with a
+    # separate `attach` before this submit; the card reads the round from it.
+    round_files = uploaded + sorted(files_this_round(tf.get(AF["notes"])) - set(uploaded))
     stamps = ([superseded_stamp(n) for n in dropped]
               + [attached_stamp(n, f"with this submission (round {round_no})") for n in uploaded]
-              + [submitted_stamp(round_no, args.type, uploaded)])
+              + [submitted_stamp(round_no, args.type, round_files)])
     tf[AF["notes"]] = append_notes(tf.get(AF["notes"]), *stamps)
     tf["_receiptAdded"] = True
 
@@ -3589,7 +3592,16 @@ TRACK_RECORD_MARK = "TRACK RECORD:"
 NOTE_STAMP_RE = re.compile(r"^\[(?P<day>\d{1,2} \w{3} \d{4})(?: (?P<time>\d{2}:\d{2}))?\s*[—–-]\s*(?P<who>[^\]]+)\]\s*(?P<text>.*)$", re.M)
 TRACK_RECORD_LINE_RE = re.compile(r"^\s*[-*]\s*(?P<day>\d{1,2} \w{3} \d{4}|\d{4}-\d{2}-\d{2})\b", re.M)
 TRACK_RECORD_NONE_RE = re.compile(r"^\s*TRACK RECORD:\s*none found\b.*\(searched[^)]*\)", re.I | re.M)
-ATTACH_WORD_RE = re.compile(r"\b(attached|attachment|attachments|enclosed)\b", re.I)
+# A PROMISE to send something, not a mention of the sender's file: "with the
+# LOA attached", "attaching the statement", "enclosing the form". "No
+# attachment is needed" and "the attachment they sent" are not promises
+# (review, 8 Sep 2026).
+ATTACH_PROMISE_RE = re.compile(
+    r"\b(?:attaching|enclosing)\b|\bwith\b[^.;\n]{0,80}\b(?:attached|enclosed)\b|\b(?:attached|enclosed)\b[^.;\n]{0,40}\b(?:letter|pdf|form|statement|document|copy|file|invoice|report)\b",
+    re.I)
+ATTACH_NEGATION_RE = re.compile(r"\b(?:no|not|without|never)\b[^.;\n]{0,20}\b(?:attach|enclos)", re.I)
+OWN_ADDRESSES = {"kevinbrittain@gmail.com", "kevin@runpreneur.org.uk", "kevin@operationsdirector.co.uk",
+                 "info@agilelets.co.uk", KEVIN_AIRTABLE_EMAIL.lower()}
 
 
 def note_stamp():
@@ -3664,7 +3676,7 @@ def document_action_problem(output, task_type, notes, attached_now):
                     "Kevin approves the file he can open: pass --attach with the same file "
                     "in the same submit, so the card carries the copy that will be sent.")
     line = carry_out_line(output)
-    if line and ATTACH_WORD_RE.search(line) and not fresh:
+    if line and ATTACH_PROMISE_RE.search(line) and not ATTACH_NEGATION_RE.search(line) and not fresh:
         return ("its carry-out line promises something attached or enclosed, but no file was "
                 "attached in this round. Kevin's rule (8 Sep 2026): when the action involves a "
                 "document, the exact document goes on the gate with the same submit "
@@ -3698,21 +3710,38 @@ def track_record_problem(output, required):
 
 # ── history: the dated record of everything with a contact or reference ──
 REF_TOKEN_RE = re.compile(r"\b(?=[A-Z0-9-]{5,}\b)(?:[A-Z]*\d[A-Z0-9-]*)\b")
+ISO_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+HISTORY_MAX_REFS = 8
+
+
+def reference_tokens(text):
+    """Reference-like tokens in free text: five or more characters carrying a
+    digit, never a plain date, each once (review, 8 Sep 2026: one letter
+    yielded 18 tokens, seven of them the same number, and dates matched
+    thirteen unrelated tasks)."""
+    out = []
+    for t in REF_TOKEN_RE.findall(str(text or "").upper()):
+        if t.isalpha() or ISO_DATE_RE.match(t) or t in out:
+            continue
+        out.append(t)
+    return out[:HISTORY_MAX_REFS]
 
 
 def history_terms(emails=(), refs=(), properties=()):
     terms = []
     for e in emails:
         e = (e or "").strip().lower()
-        if e:
+        # Kevin's own address is on forwarded post and every SMS lane task:
+        # searching it would be the whole mailbox (85 of 563 inbound tasks).
+        if e and e not in OWN_ADDRESSES and ("email", e) not in terms:
             terms.append(("email", e))
     for r in refs:
         r = (r or "").strip()
-        if len(r) >= 3:
+        if len(r) >= 3 and not ISO_DATE_RE.match(r) and ("ref", r) not in terms:
             terms.append(("ref", r))
     for p in properties:
         p = (p or "").strip()
-        if len(p) >= 4:
+        if len(p) >= 4 and ("property", p) not in terms:
             terms.append(("property", p))
     return terms
 
@@ -3774,6 +3803,9 @@ def history_gmail(terms, days):
         spec = importlib.util.spec_from_file_location("inbound_triage", path)
         it = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(it)
+        # Its fail() prints a JSON error line to stdout before exiting; here
+        # that line would become the first line of the record (review).
+        it._fail_quiet["on"] = True
     except Exception as e:                                   # noqa: BLE001
         return [], f"Gmail not searched ({str(e)[:80]})"
     q_parts = []
@@ -3788,7 +3820,8 @@ def history_gmail(terms, days):
     try:
         msgs, truncated = it.worker_list(q=q, max_pages=3)
     except SystemExit as e:
-        return [], f"Gmail not searched ({str(e)[:80]})"
+        why = (getattr(it, "_last_fail", {}) or {}).get("message") or str(e)
+        return [], f"Gmail not searched ({str(why)[:80]})"
     except Exception as e:                                   # noqa: BLE001
         return [], f"Gmail not searched ({str(e)[:80]})"
     out = []
@@ -3840,7 +3873,7 @@ def history_text(result):
 def cmd_history(args):
     refs = list(args.ref or [])
     for text in (args.from_text or []):
-        refs.extend(t for t in REF_TOKEN_RE.findall(text.upper()) if not t.isalpha())
+        refs.extend(reference_tokens(text))
     result = history(emails=args.email or [], refs=refs, properties=args.property or [],
                      days=args.days, exclude_task=args.task, gmail=not args.no_gmail)
     if args.text:
