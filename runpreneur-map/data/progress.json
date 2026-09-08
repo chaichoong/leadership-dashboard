@@ -2,20 +2,24 @@
  "as_at": "2026-09-08",
  "outline_names": {
   "United Kingdom": "United Kingdom",
-  "France": "France",
   "Spain": "Spain",
+  "France": "France",
   "Bulgaria": "Bulgaria",
+  "Andorra": "Andorra",
   "Northern Cyprus": "Turkish Republic of Northern Cyprus",
+  "Malta": "Malta",
+  "Italy": "Italy",
   "Austria": "Austria",
   "Netherlands": "Netherlands",
   "Montenegro": "Montenegro",
-  "Malaysia": "Malaysia",
-  "Italy": "Italy",
+  "Greece": "Greece",
   "Vietnam": "Vietnam",
   "Germany": "Germany",
   "Croatia": "Croatia",
+  "Malaysia": "Malaysia",
+  "Ireland": "Ireland",
   "United States": "United States of America",
-  "Switzerland": "Switzerland"
+  "Singapore": "Singapore"
  },
  "days": 2290,
  "total_km": 17539.77,
@@ -26,27 +30,39 @@
  "raise_target": 1000000,
  "avg_km_per_day": 7.66,
  "runs_counted": 2387,
- "countries_count": 15,
+ "countries_count": 19,
  "countries": [
   {
    "name": "United Kingdom",
-   "runs": 2136
-  },
-  {
-   "name": "France",
-   "runs": 27
+   "runs": 2162
   },
   {
    "name": "Spain",
-   "runs": 25
+   "runs": 40
+  },
+  {
+   "name": "France",
+   "runs": 14
   },
   {
    "name": "Bulgaria",
    "runs": 14
   },
   {
+   "name": "Andorra",
+   "runs": 13
+  },
+  {
    "name": "Northern Cyprus",
    "runs": 13
+  },
+  {
+   "name": "Malta",
+   "runs": 11
+  },
+  {
+   "name": "Italy",
+   "runs": 10
   },
   {
    "name": "Austria",
@@ -61,12 +77,8 @@
    "runs": 8
   },
   {
-   "name": "Malaysia",
+   "name": "Greece",
    "runs": 8
-  },
-  {
-   "name": "Italy",
-   "runs": 7
   },
   {
    "name": "Vietnam",
@@ -81,11 +93,19 @@
    "runs": 6
   },
   {
+   "name": "Malaysia",
+   "runs": 5
+  },
+  {
+   "name": "Ireland",
+   "runs": 5
+  },
+  {
    "name": "United States",
    "runs": 4
   },
   {
-   "name": "Switzerland",
+   "name": "Singapore",
    "runs": 3
   }
  ],
