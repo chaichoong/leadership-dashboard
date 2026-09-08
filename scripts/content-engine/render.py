@@ -334,6 +334,14 @@ def check_captions(path, what):
     return n
 
 
+def assert_has_video(path, what):
+    """An output with no video stream is not an output (5 Sep 2026: Episode 2196's Learnings clip was audio only,
+    cut from a 9:16 master whose picture ended early). Fails the run rather than filing sound as a video."""
+    pr = os.path.expanduser("~/tools/bin/ffprobe")
+    kinds = subprocess.run([pr, "-v", "error", "-show_entries", "stream=codec_type", "-of", "csv=p=0", path], capture_output=True, text=True).stdout.split()
+    if "video" not in kinds: raise RuntimeError("%s has no video stream (%s): refusing to file it" % (what, path))
+
+
 def overlay(ov, args, what):
     """Run overlays.py and, on failure, raise with its stderr instead of swallowing it."""
     r = subprocess.run([sys.executable, ov] + args, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
@@ -360,17 +368,27 @@ def build_outputs(masters, srt, day, title, workdir, lfmd=None, role="episode"):
     check_captions(caps, "episode %s full" % day)
     captioned = os.path.join(workdir, "full_captioned.mp4")
     overlay(ov, ["full", masters["16:9"], caps, captioned], "episode %s full" % day)
+    if role == "lfmd-only":
+        piece = trim(masters["9:16"], lfmd[0], lfmd[1], os.path.join(workdir, "lfmd_master.mp4")); assert_has_video(piece, "episode %s Learnings cut" % day)
+        lcaps = os.path.join(workdir, "captions_lfmd.srt"); open(lcaps, "w").write(shift_srt(open(caps).read(), lfmd[0], lfmd[1]))
+        paths["lfmd"] = os.path.join(workdir, names["lfmd"])
+        overlay(ov, ["lfmd", piece, lcaps, paths["lfmd"], "--day", str(day), "--subtitle", title.replace("|", " ").strip()], "episode %s LFMD" % day)
+        assert_has_video(paths["lfmd"], "episode %s lfmd" % day); return paths
     paths["full"] = os.path.join(workdir, names["full"])
     insert_intro(captioned, at, paths["full"])
     paths["podcast"] = podcast_audio(captioned, os.path.join(workdir, names["podcast"]), at, resume)
     if lfmd:   # the "Learnings from my diary" section only (Kevin, 3 Sep 2026)
+        assert_has_video(masters["9:16"], "episode %s 9:16 master" % day)
         piece = trim(masters["9:16"], lfmd[0], lfmd[1], os.path.join(workdir, "lfmd_master.mp4"))
+        assert_has_video(piece, "episode %s Learnings cut" % day)
         lcaps = os.path.join(workdir, "captions_lfmd.srt")
         open(lcaps, "w").write(shift_srt(open(caps).read(), lfmd[0], lfmd[1]))
         check_captions(lcaps, "episode %s LFMD" % day)
         paths["lfmd"] = os.path.join(workdir, names["lfmd"])
         # the subheading says what the episode is about (Kevin, 4 Sep 2026)
         overlay(ov, ["lfmd", piece, lcaps, paths["lfmd"], "--day", str(day), "--subtitle", title.replace("|", " ").strip()], "episode %s LFMD" % day)
+    for kind, p in paths.items():
+        if p.endswith(".mp4"): assert_has_video(p, "episode %s %s" % (day, kind))
     return paths
 
 
@@ -441,6 +459,37 @@ def process(key, ledger, keep=False):
     watch.save_ledger(ledger)
     print("%s -> Episode %d %s (%s) in %d s; record %s (%s); links %s" % (key, day, role, reason, e["render_seconds"], rid, how,
           {k: ("ok" if v else "NO DRIVE ID YET") for k, v in links.items()}))
+
+
+def redo_lfmd(day):
+    """Rebuild one episode's Learnings clip only: re-pull the clip if it is gone, transcribe, render the 9:16
+    master (reused when complete), cut the diary section, file it, update the record and refresh the card."""
+    ledger = watch.load_ledger()
+    keys = [k for k, v in ledger.items() if v.get("episode") == day and v.get("role") == "episode"]
+    if not keys: raise SystemExit("no episode clip for day %d in the ledger" % day)
+    key = keys[0]; e = ledger[key]
+    clip = e.get("local") or ""
+    if not clip or not os.path.exists(clip):
+        e["status"] = "new"; watch.save_ledger(ledger)
+        clip = watch.pull(ledger, key)
+        if not clip: raise SystemExit("could not pull %s again" % key)
+        e = ledger[key]
+    workdir = os.path.join(os.path.dirname(clip), "render_" + key.replace(".insv", ""))
+    os.makedirs(workdir, exist_ok=True)
+    text, srt = transcribe(clip, workdir)
+    window = lfmd_window(srt_segments(open(srt).read()))
+    if not window: raise SystemExit("episode %d has no diary section in its transcript" % day)
+    masters = render_masters(clip, workdir, only="9:16")
+    title = title_from_transcript(text)
+    paths = build_outputs(masters, srt, day, title, workdir, lfmd=window, role="lfmd-only")
+    folder, links = publish_to_drive({"lfmd": paths["lfmd"]}, day, os.path.join(workdir, "transcript.txt"))
+    rid, how = find_or_create_record(day, e.get("drive_id"), key, dt.date.fromisoformat(e["date"]))
+    if links.get("lfmd"): watch._airtable("PATCH", watch.API + "/" + rid, {"fields": {"Reframed Video URL": links["lfmd"]}})
+    e["lfmd_window"] = window; e["lfmd_redone"] = dt.datetime.now().isoformat(timespec="seconds"); e["status"] = "rendered"; e["local"] = clip
+    watch.save_ledger(ledger)
+    print("episode %d: Learnings clip rebuilt -> %s (record %s)" % (day, "ok" if links.get("lfmd") else "NO DRIVE ID YET", rid))
+    import approval; approval.refresh_card(day)
+    return paths["lfmd"]
 
 
 def run(limit=1, keep=False):
@@ -538,11 +587,12 @@ def selftest():
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
-    ap.add_argument("mode"); ap.add_argument("clip", nargs="?"); ap.add_argument("--day", type=int, default=0)
+    ap.add_argument("mode"); ap.add_argument("clip", nargs="?"); ap.add_argument("--day", type=int, default=0); ap.add_argument("--only", default="")
     ap.add_argument("--out", default=os.path.expanduser("~/knowledge-os/logs/content-engine/manual"))
     ap.add_argument("--limit", type=int, default=1); ap.add_argument("--keep", action="store_true")
     a = ap.parse_args()
     if a.mode == "selftest": selftest()
     elif a.mode == "run": run(a.limit, a.keep)
+    elif a.mode == "redo" and a.only == "lfmd": redo_lfmd(a.day)
     elif a.mode == "one": one(a.clip, a.day, a.out)
     else: raise SystemExit("unknown mode")

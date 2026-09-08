@@ -56,12 +56,23 @@ DEFAULT_SINCE = dt.date(2026, 6, 4)     # the batch Kevin approved the spike on;
 
 # ---------- pure helpers (selftested) ----------
 
+DAY_NAMED_RE = re.compile(r"^(\d{4})\s+(full|summary)(?:\s*-?\s*part\s*(\d))?\.insv$", re.I)
+
+
 def parse_clip(name):
-    """VID_20260704_105737_00_064.insv -> (date, '105737', 64) or None."""
+    """VID_20260704_105737_00_064.insv -> (date, '105737', 64) or None.
+    Ericamae's Dec 2025 - Feb 2026 batches are named by streak day instead ("2053 Full.insv",
+    "2053 summary.insv", "2071 Full Part 2.insv"): the day gives the date, 'full' sorts before
+    'summary' the way the camera's sequence would, a part number rides along."""
     m = CLIP_RE.match(name)
+    if m:
+        y, mo, d, hms, seq = m.groups()
+        return dt.date(int(y), int(mo), int(d)), hms, int(seq)
+    m = DAY_NAMED_RE.match(name.strip())
     if not m: return None
-    y, mo, d, hms, seq = m.groups()
-    return dt.date(int(y), int(mo), int(d)), hms, int(seq)
+    day, kind, part = int(m.group(1)), m.group(2).lower(), int(m.group(3) or 1)
+    date = STREAK_START + dt.timedelta(days=day - 1)
+    return date, ("%02d%d000" % (0 if kind == "full" else 1, part)), part
 
 
 def streak_day(date):
@@ -379,6 +390,9 @@ def _selftest_airtable_retry():
 
 def selftest():
     _selftest_airtable_retry()
+    assert parse_clip("2053 Full.insv") == (dt.date(2026, 1, 13), "001000", 1) and parse_clip("2053 summary.insv")[0] == dt.date(2026, 1, 13)
+    assert parse_clip("2071 Full Part 2.insv") == (dt.date(2026, 1, 31), "002000", 2) and parse_clip("2071 Full - Part 1.insv")[2] == 1
+    assert parse_clip("notes.txt") is None and parse_clip("2053 Full.insv")[1] < parse_clip("2053 summary.insv")[1], "full sorts before summary"
     _selftest_repair_stale()
     _selftest_copy_retry()
     assert parse_clip("VID_20260704_105737_00_064.insv") == (dt.date(2026, 7, 4), "105737", 64)

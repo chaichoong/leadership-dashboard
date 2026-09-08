@@ -15,7 +15,7 @@ describe('content-engine render', () => {
   it('passes its own selftest (folder naming, output names, banner title, record fields)', () => {
     const out = JSON.parse(execFileSync('python3', [RENDER, 'selftest'], { encoding: 'utf8', cwd: DIR }));
     expect(out.failed).toEqual([]);
-    expect(out.checks).toBeGreaterThanOrEqual(36);
+    expect(out.checks).toBeGreaterThanOrEqual(40);
   });
 
   // 5 Sep 2026 (finding 20260905-exceptions-462): the nightly run died inside overlays.py 'full'
@@ -68,6 +68,15 @@ describe('content-engine render', () => {
     expect(src).not.toContain('open(caps, "w").write(clip_caption_at(open(caps).read(), at))');
     expect(src).toContain('def master_complete(');
     expect(src).toContain('render: reusing finished %s master');
+  });
+
+  it('files no output without a video stream, and can rebuild one Learnings clip on its own (5-8 Sep 2026)', () => {
+    const src = readFileSync(RENDER, 'utf8');
+    expect(src).toContain('def assert_has_video(');
+    expect(src).toContain('if p.endswith(".mp4"): assert_has_video(p');
+    expect(src).toContain('def redo_lfmd(day)');
+    const w = readFileSync(WATCH, 'utf8');
+    expect(w).toContain('DAY_NAMED_RE');
   });
 
   it('never writes copy from an empty transcript: under 50 characters of speech is B-roll', () => {

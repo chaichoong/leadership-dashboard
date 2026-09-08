@@ -122,6 +122,16 @@ def youtube_parts(youtube_copy, day):
     return title, body.strip()
 
 
+PLACEHOLDER_RE = re.compile(r"\[[A-Z][A-Z /_-]{2,}\]")   # [ADD YOUTUBE LINK], [LINK], [INSERT ...]
+
+
+def placeholder_left(text):
+    """Any bracketed ALL-CAPS token still in the text. Kevin, 8 Sep 2026: copy with an unfilled placeholder
+    must never reach a platform, so this is checked on every post and every article before it is created."""
+    m = PLACEHOLDER_RE.search(text or "")
+    return m.group(0) if m else None
+
+
 def with_youtube_link(copy, link):
     """Fill the placeholder line, or add the link if the copy never had one. Never leaves the placeholder in a post."""
     text = (copy or "").strip()
@@ -337,7 +347,9 @@ def schedule_stage(day, entry, recs, acct_map, stage, dry_run=False):
             copy = ((rec or {}).get("fields", {}).get(spec["field"]) or "").strip()
             if not copy:
                 print("episode %d: no %s on the %s record, %s skipped" % (day, spec["field"], spec["record"], platform)); continue
-            if stage == 2: copy = with_youtube_link(copy, entry["youtube_link"])
+            if stage == 2:
+                if not entry.get("youtube_link"): raise SystemExit("episode %d: stage 2 without a YouTube link" % day)
+                copy = with_youtube_link(copy, entry["youtube_link"])
             if platform == "youtube" and spec.get("yt_type") == "short":
                 first, _, rest = copy.partition("\n"); title, body_text = first.strip()[:100], rest.strip()   # the Short's title is the first line
             else:
@@ -356,6 +368,9 @@ def schedule_stage(day, entry, recs, acct_map, stage, dry_run=False):
     media = media_for(day, entry, kinds)
     m = mode(); test = m == "test"
     for platform, account, spec, text, title, key in todo:
+        left = placeholder_left(text) or placeholder_left(title or "")
+        if left:
+            print("episode %d: %s %s REFUSED, placeholder %s still in the copy" % (day, spec["clip"], platform, left)); continue
         when = slot_iso(day_london, spec["slot"])
         # Test mode: YouTube still goes up (unlisted, so the link exists) but every social post is a DRAFT.
         status = "scheduled" if (not test or platform == "youtube") else "draft"
@@ -489,6 +504,8 @@ def selftest():
     assert youtube_parts("", 7)[0] == "Diary of a Runpreneur, Day 7" and len(youtube_parts("SEO Title: " + "x" * 200, 1)[0]) == 100
     assert with_youtube_link("Watch full YT video here 👉 [ADD YOUTUBE LINK]\n#a", "https://youtu.be/x") == "Watch full YT video here 👉 https://youtu.be/x\n#a"
     assert with_youtube_link("no line", "https://youtu.be/x").endswith("Watch the full episode: https://youtu.be/x")
+    assert placeholder_left("see [ADD YOUTUBE LINK] here") == "[ADD YOUTUBE LINK]" and placeholder_left("[LINK]") == "[LINK]"
+    assert placeholder_left("fine copy [2026] #tag") is None and placeholder_left(with_youtube_link("x [ADD YOUTUBE LINK]", "https://youtu.be/a")) is None
     accts = [{"id": "fb", "platform": "facebook", "type": "page", "active": True, "name": "Runpreneur"}, {"id": "fbx", "platform": "facebook", "type": "page", "active": False, "name": "old"},
              {"id": "tw", "platform": "twitter", "type": "profile", "active": True, "name": "x"}, {"id": "li", "platform": "linkedin", "type": "page", "active": True, "name": "Runpreneur"},
              {"id": "tt", "platform": "tiktok", "type": "profile", "active": True, "name": "tt"}, {"id": "yt", "platform": "youtube", "type": "profile", "active": True, "name": "yt"}]

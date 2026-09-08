@@ -108,7 +108,8 @@ def build_card(day, full, lfmd=None, short=None, headline=""):
     checks = ("Rules check flagged: " + " | ".join(review)) if review else "Rules check: nothing flagged (UK English, no em dashes, no figures that are not in the transcript)."
     closing = closing_line(publish_mode())
     out = "\n\n".join([ask, "Watch before you approve:\n" + "\n".join(watch_lines), "Where it goes if you approve:\n" + "\n".join(where),
-                       "The copy, as written:\n\n" + "\n\n".join(copy), checks, closing])
+                       "The copy, as written (where it shows [ADD YOUTUBE LINK], the engine writes the YouTube link there once the video is up; "
+                       "a post still carrying a placeholder is refused, never published):\n\n" + "\n\n".join(copy), checks, closing])
     desc = ("Approve Episode %d for publishing. The Content Engine rendered the three videos, wrote the platform copy "
             "and made the thumbnail from the raw 360 clip. Nothing is published until you approve." % day)
     return task_name(day, headline), desc, out
