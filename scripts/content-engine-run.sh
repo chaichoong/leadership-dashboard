@@ -60,9 +60,18 @@ fi
 python3 scripts/content-engine/watch.py scan --create || exit 1
 # Episodes a night (Kevin, 8 Sep 2026): three during the catch-up from day 2054, one once we are a month behind.
 EPISODES="${CE_EPISODES_PER_NIGHT:-$(cat "$HOME/.config/od/content_engine_episodes_per_night" 2>/dev/null || echo 1)}"
-for i in $(seq 1 "$EPISODES"); do
-  python3 scripts/content-engine/watch.py next || echo "pull: skipped (see above); rendering what is already here"
-  python3 scripts/content-engine/render.py run --limit 1 || exit 1
+# Kevin's night order (8 Sep 2026): slot 1 continues the run from where Ericamae stopped; the other slots take
+# the oldest days missing from YouTube (the gap list, ~/.config/od/content_engine_gap_days), or the next
+# continuity days when no gap day fits on the disk. Each slot is a whole DAY: every clip of that day is pulled
+# and rendered before the next slot starts, so the episode, its summary and its Learnings clip all exist together.
+DAYS="$(python3 scripts/content-engine/watch.py plan --slots "$EPISODES")" || DAYS=""
+[ -z "$DAYS" ] && echo "plan: nothing waiting to render"
+for day in $DAYS; do
+  echo "== day $day"
+  for i in 1 2 3 4 5 6; do
+    python3 scripts/content-engine/watch.py next --day "$day" || break    # exit 3: the day is done; anything else: the pull was refused, move on
+    python3 scripts/content-engine/render.py run --limit 1 || exit 1
+  done
 done
 python3 scripts/content-engine/platform_copy.py run --pending --limit 2 || exit 1
 python3 scripts/content-engine/approval.py sync || exit 1

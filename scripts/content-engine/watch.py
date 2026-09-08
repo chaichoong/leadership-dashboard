@@ -67,6 +67,56 @@ def since_for_start_day():
     return STREAK_START + dt.timedelta(days=d - 1) if d else DEFAULT_SINCE
 
 
+GAP_DAYS_FILE = os.path.expanduser("~/.config/od/content_engine_gap_days")   # Kevin's catch-up list (8 Sep 2026): one day number per line
+
+
+def gap_days(path=None):
+    """Streak days missing from YouTube whose footage still exists on Drive (the 8 Sep 2026 audit: 1799, 1808, 1841).
+    They are older than the takeover day, so the scan would never see them; this list lets them in."""
+    try: return {int(t) for t in re.findall(r"\d{3,4}", open(path or GAP_DAYS_FILE).read())}
+    except OSError: return set()
+
+
+PULL_HEADROOM = 5 * 1024 ** 3
+
+
+def pull_needs(size):
+    """Disk a clip needs before it is pulled: the copy, the render's masters, and 5 GB of headroom."""
+    return size * 2 + PULL_HEADROOM
+
+
+def day_fits(ledger, day, free):
+    """Every waiting clip of the day fits on the disk. A gap day is an episode only if its long clip renders,
+    so a day whose 18 GB recording cannot be pulled is skipped whole rather than published as a fragment."""
+    clips = [v for v in ledger.values() if v.get("day") == day and v.get("status") == "new"]
+    return bool(clips) and all(pull_needs(v.get("size", 0)) <= free for v in clips)
+
+
+def plan(ledger, slots, gaps=None, free=None, start=None):
+    """The night's order (Kevin, 8 Sep 2026): "the first one is the one that continues the continuity, and then
+    the second two are the two oldest ones that are missing". Slot 1 is the oldest waiting day from the takeover
+    day on; every other slot is the oldest gap day whose clips all fit on the disk. When the gap list is used up
+    (or nothing fits), the slot goes to the next continuity day instead. Returns (days, notes)."""
+    gaps = gap_days() if gaps is None else gaps
+    free = shutil.disk_usage(WORK if os.path.isdir(WORK) else os.path.expanduser("~")).free if free is None else free
+    start = start_day() if start is None else start
+    waiting = sorted({v["day"] for v in ledger.values() if v.get("status") == "new"})
+    cont = [d for d in waiting if d not in gaps and (not start or d >= start)]
+    gap_ok, notes = [], []
+    for d in sorted(d for d in waiting if d in gaps):
+        if day_fits(ledger, d, free): gap_ok.append(d)
+        else:
+            biggest = max(v.get("size", 0) for v in ledger.values() if v.get("day") == d and v.get("status") == "new")
+            notes.append("gap day %d skipped: its %.0f GB clip needs %.0f GB free, %.0f GB free" % (d, biggest / 1e9, pull_needs(biggest) / 1e9, free / 1e9))
+    days = []
+    for slot in range(slots):
+        if slot == 0 and cont: days.append(cont.pop(0)); notes.append("slot 1: day %d continues the run" % days[-1]); continue
+        if gap_ok: days.append(gap_ok.pop(0)); notes.append("slot %d: gap day %d (oldest missing)" % (slot + 1, days[-1])); continue
+        if cont: days.append(cont.pop(0)); notes.append("slot %d: day %d (no gap day fits, so the run moves on)" % (slot + 1, days[-1])); continue
+        break
+    return days, notes
+
+
 # ---------- pure helpers (selftested) ----------
 
 DAY_NAMED_RE = re.compile(r"^(\d{4})\s+(full|summary)(?:\s*-?\s*part\s*(\d))?\.insv$", re.I)
@@ -138,10 +188,11 @@ def record_fields(day, clip_names, file_id, clip_date):
     }
 
 
-def choose_next(ledger):
+def choose_next(ledger, day=None):
     """Oldest day first, then the SMALLEST clip of that day: the talk-to-camera clip is the short
     one (0.2-0.6 GB, 25-70 s) and the 4 GB ones are long run footage, so the episodes flow sooner."""
-    cands = [(v["date"], v.get("size", 0), v["seq"], k) for k, v in ledger.items() if v.get("status") == "new"]
+    cands = [(v["date"], v.get("size", 0), v["seq"], k) for k, v in ledger.items()
+             if v.get("status") == "new" and (day is None or v.get("day") == day)]
     return sorted(cands)[0][3] if cands else None
 
 
@@ -204,11 +255,13 @@ def find_record(file_id, day):
     return None, None
 
 
-def list_clips(batch=None, since=None, root=None):
+def list_clips(batch=None, since=None, root=None, gaps=None):
     """Every clip under the raw folder, however deep: the 2026 batches sit under "2026/", the 2025 months
-    under "2025/<month>/Ep NNNN - date/" (8 Sep 2026). `batch` matches the folder path relative to the root."""
+    under "2025/<month>/Ep NNNN - date/" (8 Sep 2026). `batch` matches the folder path relative to the root.
+    Clips older than `since` are skipped unless their day is on Kevin's gap list."""
     since = since or since_for_start_day()
     root = root or RAW_ROOT
+    gaps = gap_days() if gaps is None else gaps
     out = []
     for dirpath, dirs, files in os.walk(root):
         rel = os.path.relpath(dirpath, root)
@@ -219,7 +272,7 @@ def list_clips(batch=None, since=None, root=None):
             p = parse_clip(name)
             if not p: continue
             date, hms, seq = p
-            if since and date < since: continue
+            if since and date < since and streak_day(date) not in gaps: continue
             path = os.path.join(dirpath, name)
             try: size = os.path.getsize(path)
             except OSError: continue
@@ -321,8 +374,8 @@ def pull(ledger, key, work=WORK):
     os.makedirs(work, exist_ok=True)
     dest = os.path.join(work, key)
     free = shutil.disk_usage(work).free
-    if free < e["size"] * 2 + 5 * 1024 ** 3:
-        raise SystemExit("pull: only %.1f GB free, need %.1f GB for %s" % (free / 1e9, (e["size"] * 2 + 5e9) / 1e9, key))
+    if free < pull_needs(e["size"]):
+        raise SystemExit("pull: only %.1f GB free, need %.1f GB for %s" % (free / 1e9, pull_needs(e["size"]) / 1e9, key))
     t0 = time.time()
     e["status"] = "pulling"; save_ledger(ledger)
     try:
@@ -445,19 +498,65 @@ def selftest():
            "c": {"date": "2026-07-04", "seq": 1, "size": 4000, "status": "new"}}
     assert choose_next(led) == "b", "oldest date then smallest clip"
     assert choose_next({"x": {"date": "2026-01-01", "seq": 1, "status": "pulled"}}) is None
-    print(json.dumps({"checks": 23, "failed": []}))
+    _selftest_gap_order()
+    print(json.dumps({"checks": 30, "failed": []}))
+
+
+def _selftest_gap_order():
+    """Kevin's night order (8 Sep 2026): slot 1 continues the run, the other slots take the oldest missing days."""
+    import tempfile
+    gb = 1024 ** 3
+    led = {"a": {"day": 2054, "date": "2026-01-14", "seq": 1, "size": 1 * gb, "status": "new"},
+           "b": {"day": 2054, "date": "2026-01-14", "seq": 2, "size": 4 * gb, "status": "new"},
+           "c": {"day": 2055, "date": "2026-01-15", "seq": 1, "size": 1 * gb, "status": "new"},
+           "d": {"day": 2056, "date": "2026-01-16", "seq": 1, "size": 1 * gb, "status": "new"},
+           "g1": {"day": 1799, "date": "2025-05-04", "seq": 1, "size": 18 * gb, "status": "new"},
+           "g1s": {"day": 1799, "date": "2025-05-04", "seq": 2, "size": 1 * gb, "status": "new"},
+           "g2": {"day": 1808, "date": "2025-05-13", "seq": 1, "size": 18 * gb, "status": "new"},
+           "g3": {"day": 1841, "date": "2025-06-15", "seq": 1, "size": 10 * gb, "status": "new"},
+           "old": {"day": 2053, "date": "2026-01-13", "seq": 1, "size": 1 * gb, "status": "new"}}
+    gaps = {1799, 1808, 1841}
+    days, notes = plan(led, 3, gaps=gaps, free=100 * gb, start=2054)
+    assert days == [2054, 1799, 1808], days
+    days, _ = plan(led, 3, gaps=gaps, free=33 * gb, start=2054)
+    assert days == [2054, 1841, 2055], "18 GB clips need 41 GB free: those days wait whole, the slot moves on"
+    assert any("1799 skipped" in n for n in _), _
+    days, _ = plan(led, 3, gaps=set(), free=100 * gb, start=2054)
+    assert days == [2054, 2055, 2056], "no gap list: three continuity days"
+    assert 2053 not in plan(led, 9, gaps=gaps, free=100 * gb, start=2054)[0], "nothing older than the takeover day is a continuity day"
+    assert choose_next(led, day=2054) == "a" and choose_next(led, day=1808) == "g2" and choose_next(led, day=1900) is None
+    assert not day_fits(led, 1799, 33 * gb) and day_fits(led, 1841, 33 * gb) and not day_fits(led, 1900, 100 * gb)
+    tf = os.path.join(tempfile.gettempdir(), "od-gaps-%d" % os.getpid()); open(tf, "w").write("1799\n1808 1841\n")
+    assert gap_days(tf) == gaps; os.remove(tf); assert gap_days("/nonexistent/od-gaps") == set()
+    # the scan lets a gap day through the since filter, and only that day
+    import shutil as _sh
+    root = tempfile.mkdtemp(prefix="od-raw-")
+    for rel in ("2025/25_05(May 2025)/Ep 1799 - May 4/VID_20250504_162936_00_022.insv", "2025/25_05(May 2025)/Ep 1800 - May 5/VID_20250505_162936_00_024.insv",
+                "2026/28 December 2025 - 25 January 2026/2054 full.insv"):
+        os.makedirs(os.path.dirname(os.path.join(root, rel)), exist_ok=True); open(os.path.join(root, rel), "wb").write(b"x")
+    got = [c["name"] for c in list_clips(since=dt.date(2026, 1, 14), root=root, gaps={1799})]
+    assert got == ["VID_20250504_162936_00_022.insv", "2054 full.insv"], got
+    assert [c["name"] for c in list_clips(since=dt.date(2026, 1, 14), root=root, gaps=set())] == ["2054 full.insv"]
+    _sh.rmtree(root)
 
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("mode"); ap.add_argument("--create", action="store_true"); ap.add_argument("--batch", default=None)
-    ap.add_argument("--since", default=DEFAULT_SINCE.isoformat()); ap.add_argument("--work", default=WORK)
+    ap.add_argument("--since", default=None, help="scan: clips from this date (default: the takeover day, plus the gap list)")
+    ap.add_argument("--work", default=WORK)
+    ap.add_argument("--day", type=int, default=None, help="next: pull the next waiting clip of this day only (exit 3 when the day is done)")
+    ap.add_argument("--slots", type=int, default=1, help="plan: how many days tonight")
     a = ap.parse_args()
     if a.mode == "selftest": selftest()
-    elif a.mode == "scan": scan(a.create, a.batch, dt.date.fromisoformat(a.since))
+    elif a.mode == "scan": scan(a.create, a.batch, dt.date.fromisoformat(a.since) if a.since else None)
+    elif a.mode == "plan":
+        days, notes = plan(load_ledger(), a.slots)
+        for n in notes: print("plan: " + n, file=sys.stderr)
+        print(" ".join(str(d) for d in days))
     elif a.mode == "next":
-        ledger = load_ledger(); key = choose_next(ledger)
-        if not key: print("next: nothing waiting"); sys.exit(0)
+        ledger = load_ledger(); key = choose_next(ledger, a.day)
+        if not key: print("next: nothing waiting" + (" for day %d" % a.day if a.day else "")); sys.exit(3 if a.day else 0)
         pull(ledger, key, a.work)
     elif a.mode == "report": report()
     else: raise SystemExit("unknown mode")

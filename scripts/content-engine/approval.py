@@ -285,8 +285,9 @@ def selftest():
     assert out.rstrip().split("\n")[-1].startswith(CLOSING), "must end with the closing line the queue reads"
     assert "UNLISTED" in closing_line("test") and "DRAFTS" in closing_line("test") and "06:00" in closing_line("live") and closing_line("live").startswith(CLOSING)
     for s in ("https://drive/full", "https://drive/lfmd", "https://drive/sum", "https://drive/thumb", "yt words", "blog words", "li words", "th words", "fb words",
-              "Youtube Full Post", "Rules check flagged: Threads copy 512 chars", "Nothing reaches a public feed"):
+              "Youtube Full Post", "Rules check flagged: Threads copy 512 chars"):
         assert s in out, s
+    assert ("Nothing reaches a public feed" in out) == (publish_mode() != "live"), "the closing line follows the engine's mode (live since 8 Sep 2026)"
     assert "Nothing is published until you approve" in desc
     _, _, out2 = build_card(2226, {"id": "x", "fields": {"Video Edited URL": "u", "Thumbnail URL": "t", "YouTube Copy": "y"}})
     assert "no teaser clip was recorded" in out2 and "no clip" in out2 and "No copy written yet." in out2 and "nothing flagged" in out2

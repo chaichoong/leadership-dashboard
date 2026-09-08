@@ -468,13 +468,26 @@ def next_publishable(state, ledger, approved):
         return None, ("day %d is not approved yet, so %s wait behind it" % (nxt, ", ".join(str(d) for d in approved if d > nxt) or "nothing else")) if approved else "nothing approved"
 
 
+def may_go_to_youtube(day, gaps, state, ledger, approved):
+    """A gap day (Kevin's catch-up list) goes the moment it is approved: it fills an old hole and never queues
+    behind the cursor. Every other day goes only when it is the cursor's next, in strict order."""
+    if day in gaps: return True
+    nxt, _ = next_publishable(state, ledger, set(approved) - set(gaps))
+    return nxt == day
+
+
+def moves_cursor(day, gaps):
+    return day not in gaps
+
+
 def run(dry_run=False, limit=3):
     state = load_state(); days = approved_days()
     if not days: print("publish: no approved episodes"); return
     acct_map = account_map(accounts()); yt_ok = "youtube" in acct_map
     ledger = watch.load_ledger()
     done = 0; per_stage = {1: 0, 2: 0}
-    held = [d for d in days if d > cursor(state) + 1]
+    gaps = watch.gap_days()   # Kevin's catch-up days (8 Sep 2026): they fill old holes, so they never wait for, or move, the cursor
+    held = [d for d in days if d > cursor(state) + 1 and d not in gaps]
     if held: print("publish: held for order (behind day %d): %s" % (cursor(state) + 1, ", ".join(str(d) for d in held)))
     for day in days:
         entry = state.setdefault(str(day), {})
@@ -483,10 +496,8 @@ def run(dry_run=False, limit=3):
         if not full or full["fields"].get("Record Status") not in PUBLISHABLE:
             continue
         stage = stage_for(entry, yt_ok)
-        if stage == "youtube":
-            nxt, why = next_publishable(state, ledger, set(days))
-            if nxt != day:
-                continue
+        if stage == "youtube" and not may_go_to_youtube(day, gaps, state, ledger, days):
+            continue
         if stage == "wait-youtube-account":
             print("episode %d: approved, waiting for a YouTube account in GoHighLevel (Kevin's click: publish.py youtube-link)" % day); continue
         if stage == "wait-youtube-link":
@@ -497,7 +508,7 @@ def run(dry_run=False, limit=3):
         st_no = 1 if stage == "youtube" else 2
         n = schedule_stage(day, entry, recs, acct_map, st_no, dry_run, index=per_stage[st_no])
         if n: per_stage[st_no] += 1
-        if n and st_no == 1 and not dry_run: state[CURSOR_KEY] = day
+        if n and st_no == 1 and not dry_run and moves_cursor(day, gaps): state[CURSOR_KEY] = day
         done += 1 if n else 0
         if not dry_run: save_state(state)
 
@@ -600,6 +611,11 @@ def selftest():
     st = {}; assert next_publishable(st, led, {2054, 2056}) == (2054, "in order") or watch.start_day() != 2054
     st = {CURSOR_KEY: 2054}; assert next_publishable(st, led, {2056}) == (2056, "in order") and st["_skipped_days"] == [2055], "an unrecorded day is stepped over"
     st = {CURSOR_KEY: 2054}; assert next_publishable(st, {"a": {"episode": 2054}, "c": {"episode": 2055}, "b": {"episode": 2056}}, {2056})[0] is None, "a recorded, unapproved day holds the line"
+    # Kevin's catch-up days (8 Sep 2026): a gap day publishes when approved and never moves the cursor; the continuity day still waits its turn
+    led = {"a": {"episode": 2054}, "b": {"episode": 2055}, "g": {"episode": 1799}}; gaps = {1799, 1808, 1841}
+    st = {CURSOR_KEY: 2053}; assert may_go_to_youtube(1799, gaps, st, led, {1799, 2055}) and not may_go_to_youtube(2055, gaps, st, led, {1799, 2055})
+    assert may_go_to_youtube(2054, gaps, st, led, {1799, 2054}) and st[CURSOR_KEY] == 2053, "a gap day in the approved set does not disturb the order"
+    assert not moves_cursor(1799, gaps) and moves_cursor(2054, gaps)
     assert "twitter" not in CHANNELS
     assert "YouTube Link" in LINK_FIELDS[("youtube", "full")] and "TikTok Link" in LINK_FIELDS[("tiktok", "summary")] and "Facebook Post Link" in LINK_FIELDS[("facebook", "summary")]
     assert "LinkedIn Link" in LINK_FIELDS[("linkedin", "summary")] and "Threads Link" in LINK_FIELDS[("threads", "summary")], "the fields Ericamae's pages read"
