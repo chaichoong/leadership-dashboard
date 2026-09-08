@@ -149,15 +149,20 @@ rec = {'id': 'recX', 'createdTime': '2026-06-25T09:00:00.000Z', 'fields': {
   m.AF['name']: 'INBOUND: Outstanding Arrears', m.AF['status']: {'name': 'Completed'},
   m.AF['completion']: '2026-07-03', m.AF['notes']: json.loads(sys.argv[1]),
   m.AF['feedbackHistory']: '[2026-09-04 11:02] Too soft, ask for a freeze',
-  m.AF['agentOutput']: 'Draft\\n\\n**Carrying this out will involve:** sending the freeze request.'}}
+  m.AF['agentOutput']: 'Draft\\n\\n**Carrying this out will involve:** sending the freeze request.',
+  m.AF['attachments']: [{'id': 'att1', 'filename': 'restraint-order-pages-1-3.pdf', 'size': 204800, 'url': 'https://v5.airtableusercontent.com/x/restraint.pdf'}]}}
 ev = m.history_entries_from_task(rec)
-print('---JSON---'); print(json.dumps({'ev': [[e['date'], e['source'], e['text'][:40].rstrip()] for e in ev], 'links': [e.get('link') for e in ev], 'excluded': m.history_entries_from_task(rec, exclude_id='recX')}))`, NOTES);
+print('---JSON---'); print(json.dumps({'ev': [[e['date'], e['source'], e['text'][:40].rstrip()] for e in ev], 'links': [e.get('link') for e in ev if e['source'] != 'file'], 'fileLink': next(e['link'] for e in ev if e['source'] == 'file'), 'excluded': m.history_entries_from_task(rec, exclude_id='recX')}))`, NOTES);
     expect(out.excluded).toEqual([]);
     expect(out.ev[0]).toEqual(['2026-06-25', 'task', 'task opened: INBOUND: Outstanding Arrear']);
     expect(out.links.every((l) => l === 'https://airtable.com/appnqjDpqDniH3IRl/tblqB8b22hKBL4PF1/recX')).toBe(true);
     expect(out.ev).toContainEqual(['2026-09-05 09:00', 'send-letter', 'SENT: letter 123 posted via Pingen to HM']);
     expect(out.ev).toContainEqual(['2026-09-04 11:02', 'Kevin', 'Too soft, ask for a freeze']);
     expect(out.ev).toContainEqual(['2026-07-03', 'task', 'completed: INBOUND: Outstanding Arrears']);
+    // A file on that task is a step with a link, so the next agent fetches it
+    // instead of asking Kevin for it (8 Sep 2026).
+    expect(out.ev).toContainEqual(['2026-06-25', 'file', 'file on that task: restraint-order-pages']);
+    expect(out.fileLink).toBe('https://v5.airtableusercontent.com/x/restraint.pdf');
   });
   it('prints the block oldest first, and the empty form names what was searched', () => {
     const out = py(`
