@@ -22,7 +22,7 @@ import {
 const SERVICE = 'ceo-brief-tenants';
 const CLAUDE_PROXY = 'https://claude-proxy.kevinbrittain.workers.dev';
 const MODULE_KEY = 'ceo_brief';
-const ALLOWED_ORIGINS = ['https://chaichoong.github.io'];
+const ALLOWED_ORIGINS = ['https://app.operationsdirector.co.uk', 'https://chaichoong.github.io'];
 
 // The ONLY place this worker logs. Server-side, never a secret or a webhook URL.
 function log(orgId, msg) {

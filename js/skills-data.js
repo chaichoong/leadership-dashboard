@@ -5906,8 +5906,8 @@ Ensure the entry in \`js/config.js\` has:
 
 Add the new page and its SOP to \`sitemap.xml\`:
 \`\`\`xml
-<url><loc>https://chaichoong.github.io/leadership-dashboard/[page-path]</loc></url>
-<url><loc>https://chaichoong.github.io/leadership-dashboard/[sop-path]</loc></url>
+<url><loc>https://app.operationsdirector.co.uk/[page-path]</loc></url>
+<url><loc>https://app.operationsdirector.co.uk/[sop-path]</loc></url>
 \`\`\`
 
 ### 8d. Update robots.txt (if needed)

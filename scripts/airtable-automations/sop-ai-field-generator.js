@@ -79,7 +79,7 @@ if (!rawSummary || rawSummary.includes(GENERIC_PHRASE)) {
 // A stale hardcoded ID is an app-wide AI outage; this reads the live value and
 // only falls back when the network is down, saying loudly which it used.
 const MODEL_FALLBACK = "claude-sonnet-4-6";
-const MODELS_URL = "https://chaichoong.github.io/leadership-dashboard/js/ai-models.js";
+const MODELS_URL = "https://app.operationsdirector.co.uk/js/ai-models.js";
 
 async function resolveModel() {
     try {

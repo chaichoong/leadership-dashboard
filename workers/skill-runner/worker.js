@@ -16,6 +16,7 @@
 // Optional vars:    ALLOWED_ORIGINS_EXTRA (comma-separated extra origins)
 
 const ALLOWED_ORIGINS = [
+    'https://app.operationsdirector.co.uk',
     'https://chaichoong.github.io',
     'http://localhost:8765', // local preview
 ];
