@@ -180,6 +180,18 @@ async function handleData(request, env, ctx, origin) {
   if (!refresh && dataMemo && Date.now() - dataMemo.at < DATA_TTL_MS) {
     return json({ ...dataMemo.body, cached: true }, 200, origin);
   }
+  // Edge cache (works only on the custom domain). Memo above covers the isolate;
+  // this covers every isolate in the colo for DATA_TTL_MS.
+  const cache = typeof caches !== 'undefined' ? caches.default : null;
+  const cacheKey = new Request('https://pm.operationsdirector.co.uk/__cache/data');
+  if (!refresh && cache) {
+    const hit = await cache.match(cacheKey);
+    if (hit) {
+      const body = await hit.json();
+      dataMemo = { at: Date.now(), body };
+      return json({ ...body, cached: true }, 200, origin);
+    }
+  }
   const data = await loadData(env);
   // CONTROL: the transaction filter matches a display name ("Real Estate"). A
   // rename returns zero rows with 200 OK, and a dashboard of zeros looks like a
@@ -188,6 +200,7 @@ async function handleData(request, env, ctx, origin) {
   const computed = computeAll(data, londonNow());
   computed.version = VERSION;
   dataMemo = { at: Date.now(), body: computed };
+  if (cache) ctx.waitUntil(cache.put(cacheKey, new Response(JSON.stringify(computed), { headers: { 'Content-Type': 'application/json', 'Cache-Control': `s-maxage=${Math.floor(DATA_TTL_MS / 1000)}` } })));
   return json({ ...computed, cached: false }, 200, origin);
 }
 

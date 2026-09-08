@@ -17,6 +17,16 @@ name = "property-manager"
 main = "worker.js"
 compatibility_date = "2024-09-01"
 
+# Custom domain: caches.default is a NO-OP on *.workers.dev, so the 10-minute
+# data cache never hit there (found in review, 8 Sep 2026). Cloudflare creates
+# the DNS record for a custom_domain route on deploy.
+routes = [
+  { pattern = "pm.operationsdirector.co.uk", custom_domain = true }
+]
+# Keep the workers.dev host alive too: a custom domain switches it off by
+# default, which would break any page still pointing at the old host mid-deploy.
+workers_dev = true
+
 [observability]
 enabled = true
 
