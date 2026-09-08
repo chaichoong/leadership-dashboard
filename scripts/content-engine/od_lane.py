@@ -608,10 +608,15 @@ def render_visual(p):
     try:
         od_board.render(template, p["visual"], p.get("text", ""), source, p["day"], png)
         passed, issues = od_compose.review(png, od_compose.required_lines(template, p["visual"]))
-        if passed or passed is None:
-            p["card_png"] = png; p["picture"] = "board renderer (lead magnet components), preflight clean, picture review %s" % ("passed" if passed else "unavailable")
+        # A board's geometry is code, so the review's taste notes (an open zone, a quiet bottom) are logged, not fatal; only a HARD fault
+        # rejects it: something touching text, clipped or missing text, a misspelling, a name. Measured 8 Sep: the reviewer sent two clean
+        # boards to Gemini over "empty grid", and Gemini garbled them.
+        hard = [i for i in (issues or []) if re.search(r"overlap|touch|collid|clip|cut off|missing|altered|misspel|garbled|person's name|\bname\b|emoji", i, re.I)]
+        if passed or passed is None or not hard:
+            p["card_png"] = png; p["picture"] = "board renderer (lead magnet components), preflight clean, picture review %s" % ("passed" if passed else ("unavailable" if passed is None else "passed with notes"))
+            if issues and not passed: p["picture_notes"] = issues
         else:
-            p["picture_board_issues"] = issues; print("od draft: board for %s failed the picture review: %s" % (p["date"], "; ".join(issues)[:160]))
+            p["picture_board_issues"] = issues; print("od draft: board for %s failed the picture review on a hard fault: %s" % (p["date"], "; ".join(hard)[:160]))
     except SystemExit as ex:
         print("od draft: board for %s failed (%s)" % (p["date"], str(ex)[:140]))
     if not p.get("card_png") and COMPOSE_ENABLED:
