@@ -95,7 +95,9 @@ describe('the action line has to be plain English', () => {
   });
 
   it('the card shows the line as a sentence, not a fragment', () => {
-    expect(PAGE).toMatch(/If you approve, this happens:/);
+    // Since 8 Sep 2026 the stem says who acts (a Pingen card once read as if
+    // Kevin had to upload the document himself).
+    expect(PAGE).toMatch(/If you approve, the agent will:/);
   });
 
   it('the stem appears ONLY when the summary really is the action line', () => {
