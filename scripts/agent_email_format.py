@@ -41,7 +41,11 @@ secret out.
 
 A tier-1 banner may sit above the headers, and the mandatory "Carrying this
 out will involve:" closing line may sit below the body. Both are written for
-Kevin's approval box. Both are stripped here and never reach the email.
+Kevin's approval box. Both are stripped here and never reach the email. So is
+the TRACK RECORD block (Kevin, 8 Sep 2026): the dated record of past dealings
+with the contact that `submit` requires on every Correspondence item. Put it
+ABOVE the headers, after the banner; it is for Kevin and the card, never for
+the recipient, and it is stripped wherever it sits.
 
 Errors raise EmailFormatError. Callers decide whether that is a sys.exit (the
 send path) or a refused submit (the dispatch path). Strict on purpose: a
@@ -143,12 +147,25 @@ def parse_addresses(raw, field):
     return out
 
 
+# The header line plus ONLY the dated bullets under it. A body bullet
+# ("- please pay by Friday") and the `---` separator survive (review, 8 Sep
+# 2026: the first version ate both).
+TRACK_RECORD_RE = re.compile(
+    r"^[ \t]*TRACK RECORD:[^\n]*\n?(?:[ \t]*[-*][ \t]+(?:\d{1,2} \w{3,4} \d{4}|\d{4}-\d{2}-\d{2})[^\n]*\n?|[ \t]*\n(?=[ \t]*[-*][ \t]+(?:\d{1,2} \w{3,4} \d{4}|\d{4}-\d{2}-\d{2})))*", re.M)
+
+
+def strip_track_record(text):
+    """Remove every TRACK RECORD block: the header line and the dated
+    bullet lines under it, wherever it sits. It is addressed to Kevin."""
+    return TRACK_RECORD_RE.sub("", text or "")
+
+
 def parse_output(output):
     """Turn a Correspondence Agent Output into headers plus body.
 
     Raises EmailFormatError on anything that would not send cleanly.
     """
-    text = strip_tier1_banner(output or "")
+    text = strip_track_record(strip_tier1_banner(output or ""))
     if not text.strip():
         raise EmailFormatError("Agent Output is empty")
     if "---" not in text:

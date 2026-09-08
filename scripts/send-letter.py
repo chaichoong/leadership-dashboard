@@ -511,6 +511,18 @@ def cmd_send(args):
                    "outcome": letter["outcome"], "address": letter["address"],
                    "delivery": letter["delivery"], "status": a2.get("status"),
                    "price": f"{a2.get('price_currency')} {a2.get('price_value')}"})
+    # The dated trail (Kevin, 8 Sep 2026): the post goes on the task, dated.
+    try:
+        stamp = datetime.now().strftime("%d %b %Y %H:%M")
+        line = (f"[{stamp} — send-letter] SENT: letter {letter_id} posted via Pingen to "
+                f"{(letter['address'] or ['?'])[0]} ({letter['delivery']}, "
+                f"{a2.get('price_currency')} {a2.get('price_value')})")
+        live = get_task(args.task).get("fields", {}) or {}
+        notes = (str(live.get(AF["notes"]) or "").rstrip() + "\n\n" + line).strip()[-90000:]
+        airtable("PATCH", f"https://api.airtable.com/v0/{BASE_ID}/{TASKS}/{args.task}",
+                 {"fields": {AF["notes"]: notes}})
+    except (SystemExit, Exception) as e:                     # noqa: BLE001
+        print(f"WARNING: posted, but the SENT stamp could not be written: {e}", file=sys.stderr)
     print(f"Posted. Letter {letter_id} is now {a2.get('status')}.")
     print(f"  to     : {'; '.join(letter['address'])}")
     print(f"  cost   : {a2.get('price_currency')} {a2.get('price_value')}")
