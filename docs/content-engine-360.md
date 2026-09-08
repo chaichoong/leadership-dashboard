@@ -626,3 +626,8 @@ so nothing can overlap text. Gate: the skill's preflight, then `od_compose.revie
 against the skill's step-11 list and fails anything touching text, empty or glitchy). Route order in `od_lane.render_visual`: board,
 then the model composer (opt-in, `COMPOSE_ENABLED`), then Gemini with the text check, then the plain template. Composer changes kept:
 premium model through the proxy, scaffold as the mandatory start, review-and-repair rounds, public source labels.
+
+
+## The map page (8 Sep 2026)
+
+`runpreneur-map/index.html` on GitHub Pages replaces the hand-drawn Footpath frame on runpreneur.org.uk/how-far-ive-run. `scripts/content-engine/runpreneur_map.py run` (nightly, after the Strava sync) fetches new runs into `strava_activities.json`, works out the country of every streak run offline against Natural Earth outlines (`runpreneur-map/data/countries.geojson`), computes the facts (average per day, longest run, the city pair the total matches, next milestones, lap finish estimate) and the point reached on a lap-of-the-world route through named waypoints scaled to 40,075 km, and writes `runpreneur-map/data/progress.json` into main through the GitHub API, so it never depends on the local checkout's branch. The headline numbers come from the sync's running total, so the map never disagrees with the counters beside it. Privacy: only the country of each run is published, never a start point. Embed on the website: `<iframe src="https://chaichoong.github.io/leadership-dashboard/runpreneur-map/" style="width:100%;height:900px;border:0"></iframe>`.
