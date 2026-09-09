@@ -36,7 +36,9 @@ STREAK_START = dt.date(2020, 6, 1)
 GOAL_KM, GOAL_GBP, DAYS_TARGET = 40075, 1_000_000, 5000
 # No baseline constant: the first run records the site's live "Total raised" and Stripe's gross at that
 # moment; every later run adds only the Stripe growth since then, so the historic figure is never restated.
-CV = {"total_of_days": "CYXc0eQHefxIgnTibBR3", "total_disctance": "IX7TbNQdQTNQwVrlEq1X", "total_raised": "vF4rXf0z65ZYPlD6sSql", "progress_bar": "uJ11hqWOSE34nj9unf8s"}
+CV = {"total_of_days": "CYXc0eQHefxIgnTibBR3", "total_disctance": "IX7TbNQdQTNQwVrlEq1X", "total_raised": "vF4rXf0z65ZYPlD6sSql", "progress_bar": "uJ11hqWOSE34nj9unf8s",
+      "equivalent_journey": "ftIbWVbuwbZa7zH2VB3z"}   # "Equivalent journey" (created 9 Sep 2026): the 'same as running Cambridge to Tasmania' line, so the site text moves on with the distance
+CV_NAMES = {"total_of_days": "Total of days", "total_disctance": "Total Distance", "total_raised": "Total raised", "progress_bar": "Progress Bar", "equivalent_journey": "Equivalent journey"}
 UA = "Mozilla/5.0 od-content-engine"
 
 
@@ -82,7 +84,8 @@ def fold(state, activity, today=None):
 
 def values(state, raised):
     km = state["total_km"]
-    return {"total_of_days": str(state["day"]), "total_disctance": "%.2f" % km, "total_raised": "%d" % round(raised), "progress_bar": progress(km)}
+    from runpreneur_map import equivalent
+    return {"total_of_days": str(state["day"]), "total_disctance": "%.2f" % km, "total_raised": "%d" % round(raised), "progress_bar": progress(km), "equivalent_journey": equivalent(km)}
 
 
 # ---------- Strava ----------
@@ -157,7 +160,7 @@ def push_values(vals, dry_run=False):
     live = {v["name"]: v for v in call("GET", "/locations/%s/customValues" % loc).get("customValues", [])}
     out = {}
     for name, cid in CV.items():
-        cur = live.get({"total_of_days": "Total of days", "total_disctance": "Total Distance", "total_raised": "Total raised", "progress_bar": "Progress Bar"}[name], {})
+        cur = live.get(CV_NAMES[name], {})
         if cur.get("id") and cur["id"] != cid: raise SystemExit("custom value %s id changed (%s vs %s); refusing to write blind" % (name, cur["id"], cid))
         out[name] = (cur.get("value"), vals[name])
         if not dry_run and cur.get("value") != vals[name]:
@@ -235,7 +238,7 @@ def selftest():
     st, ch = fold(st, {"id": 1, "distance": 7150, "start_date_local": "2026-09-03T18:00:00Z", "name": "Evening Run"})
     assert ch and st["total_km"] == 17503.21 and st["day"] == 2286
     st, ch2 = fold(st, {"id": 1, "distance": 7150, "start_date_local": "2026-09-03T18:00:00Z"}); assert not ch2 and st["total_km"] == 17503.21, "never double-count"
-    v = values(st, 76842.0); assert v == {"total_of_days": "2286", "total_disctance": "17503.21", "total_raised": "76842", "progress_bar": "43.68%"}, v
+    v = values(st, 76842.0); assert v == {"total_of_days": "2286", "total_disctance": "17503.21", "total_raised": "76842", "progress_bar": "43.68%", "equivalent_journey": "Cambridge to Tasmania"}, v
     assert set(CV) == {"total_of_days", "total_disctance", "total_raised", "progress_bar"}
     seeded = {"seeded_from_site": {"raised": 76840.0, "stripe_gross": 6842.0}}
     assert raised_now(seeded, 6842.0) == 76840.0, "first run changes nothing"
