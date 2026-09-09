@@ -1,0 +1,220 @@
+// Real Estate Growth Plan (growth-plan.html) — renders from mocked Airtable, prices the
+// levers from the model, and writes back the four things it is allowed to write.
+const { test, expect } = require('@playwright/test');
+const { MOCK_PAT, stubExternalHosts, loadDashboard } = require('./helpers');
+
+// Field IDs mirror js/config.js GP (the page reads by field ID).
+const P = { name: 'fldqMbR329TNY974G', type: 'fldOySSrZBYkOLLTX', beds: 'fldeXUMcC6O4AcvRG', agent: 'fldEUrWVhSp3NY8Hh', ctNote: 'fldt7zY1TPihahH6H', area: 'fldYLRz2GgVojKaq9', postcode: 'fld6ebSQgD7eRsobd', active: 'fldBUeSJQZZSnFrFW', lettableRooms: 'fldzV9YbHhNUUxwmA', payg: 'fldkBSgcELtpGZhjV', ctPayer: 'fldwWcSfkdtSbVhdj' };
+const U = { tenants: 'fldQO09UAFRf07V7q', type: 'fldsItq0vU3sHv7n9', number: 'fld3nPlpdXSExxDuq', property: 'fldUJNRGgzgyAwwjt', status: 'fldBvqysXBm9rIm0E', incomeType: 'fldPrhfntWO9aHl58', rent: 'fldQZEjNzhU4UDUW9' };
+const T = { name: 'fldxBKW7QnujSDWqA', status: 'fldAXzP9SGIHiAhrv', dob: 'fldv7FKsqXYswyCFE', payType: 'fldZbrk8Xw5Dcwxhi', notes: 'fldfwxEf7I3XQDVtR', capExemption: 'fldOOi3d1P4vDedm6' };
+const C = { tenants: 'fld1i5bDoHL3B6rUf', unit: 'fld7cjLLEHKAx49OK', rent: 'fldDMyfZLFMeONPq8' };
+const K = { name: 'fldS6FYfpkhu6tJG0', expected: 'fld9JibXkMpTeMcxw', payStatus: 'fldXZNI96v8HgjuSh', property: 'fld7nikJBPz3BoZJG', frequency: 'fldvozTHvs5VH3lNi' };
+const S = { key: 'fldiyJqkTQ9i2p2Wc', value: 'fldye89gwAzXWDphp', label: 'fldqN8fc8vk8qBeom', note: 'fldRtEN92vZUZKjBU' };
+const PLAN = { key: 'fldhurLB2tXHqXOdg', status: 'fldDKDIgcekYZSFp7', tasks: 'fldJKJ9XiXSfLT5Vq', title: 'fldbjOfQOnUnpFmkZ' };
+const TBL = { properties: 'tbl6f0OkAmTC2jbuG', units: 'tblM3mZCR5kiEdWMj', tenants: 'tblX4elTuu01gwBYh', tenancies: 'tblN51a88qTDB6iMH', costs: 'tblx5kvhzNEI5TFlS', plan: 'tblHqr2kyiL15a8LN', settings: 'tbl6hJaGOijdcvRdw', tasks: 'tblqB8b22hKBL4PF1' };
+
+function fixtures() {
+  return {
+    [TBL.properties]: [
+      { id: 'recProp1', fields: { [P.name]: ['18 Test Park'], [P.type]: 'HMO', [P.beds]: 3, [P.agent]: 'Property Portfolio', [P.postcode]: 'CB9 0AJ', [P.area]: 'Haverhill', [P.ctNote]: '£135.00', [P.active]: [true] } },
+      { id: 'recProp2', fields: { [P.name]: ['13 Far Street'], [P.type]: 'Single Let', [P.beds]: 2, [P.agent]: 'Simon Collins', [P.postcode]: 'BB5 5PT', [P.active]: [true] } },
+    ],
+    [TBL.units]: [
+      { id: 'recU1', fields: { [U.property]: ['recProp1'], [U.number]: 1, [U.type]: 'Room', [U.status]: 'Occupied', [U.rent]: 524.90, [U.incomeType]: 'Universal Credit', [U.tenants]: ['recT1'] } },
+      { id: 'recU2', fields: { [U.property]: ['recProp1'], [U.number]: 2, [U.type]: 'Flat-Let', [U.status]: 'Occupied', [U.rent]: 897.52, [U.incomeType]: 'Universal Credit', [U.tenants]: ['recT2'] } },
+      { id: 'recU3', fields: { [U.property]: ['recProp1'], [U.number]: 3, [U.type]: 'Room', [U.status]: 'Occupied', [U.rent]: 524.90, [U.incomeType]: 'Universal Credit', [U.tenants]: ['recT3'] } },
+      { id: 'recU4', fields: { [U.property]: ['recProp2'], [U.number]: 1, [U.type]: 'Whole Property', [U.status]: 'Occupied', [U.rent]: 257, [U.incomeType]: 'Working', [U.tenants]: ['recT4'] } },
+    ],
+    [TBL.tenants]: [
+      { id: 'recT1', fields: { [T.name]: 'Adam Older', [T.status]: 'Active', [T.dob]: '1988-11-24', [T.payType]: 'Universal Credit', [T.capExemption]: 'Unknown' } },
+      { id: 'recT2', fields: { [T.name]: 'Paul Flat', [T.status]: 'Active', [T.dob]: '1974-01-01', [T.payType]: 'Universal Credit', [T.capExemption]: 'LCWRA' } },
+      { id: 'recT3', fields: { [T.name]: 'Gary Unknown', [T.status]: 'Active', [T.payType]: 'Universal Credit' } },
+      { id: 'recT4', fields: { [T.name]: 'Simon Collins', [T.status]: 'Active', [T.payType]: 'Working' } },
+    ],
+    [TBL.tenancies]: [
+      { id: 'recC1', fields: { [C.tenants]: ['recT1'], [C.unit]: ['recU1'], [C.rent]: 524.90 } },
+      { id: 'recC2', fields: { [C.tenants]: ['recT2'], [C.unit]: ['recU2'], [C.rent]: 897.52 } },
+      { id: 'recC3', fields: { [C.tenants]: ['recT3'], [C.unit]: ['recU3'], [C.rent]: 524.90 } },
+      { id: 'recC4', fields: { [C.tenants]: ['recT4'], [C.unit]: ['recU4'], [C.rent]: 257 } },
+    ],
+    [TBL.costs]: [{ id: 'recK1', fields: { [K.name]: 'West Suffolk Council - 18TP CT', [K.expected]: 135, [K.payStatus]: 'In Payment', [K.property]: ['recProp1'], [K.frequency]: 'Monthly' } }],
+    [TBL.plan]: [],
+    [TBL.settings]: ['lha_room:526.33', 'lha_1bed:900', 'utilities_per_tenant:75', 'council_tax_default:145', 'room_prep_cost:1500', 'void_weeks_new_room:4', 'siddows_market_rent:850', 'collins_margin_per_property:250', 'ct_credit_share:100', 'benefit_cap_single:1229.42', 'benefit_cap_family:1835', 'uc_standard_single_25:424.90'].map((kv, i) => { const [k, v] = kv.split(':'); return { id: 'recS' + i, fields: { [S.key]: k, [S.value]: Number(v), [S.label]: k, [S.note]: 'test' } }; }),
+    [TBL.tasks]: [],
+  };
+}
+
+async function openPage(page, fx) {
+  await page.addInitScript(pat => { localStorage.setItem('airtable_pat', pat); }, MOCK_PAT);
+  await stubExternalHosts(page);
+  const writes = [];
+  let nextId = 900;
+  await page.route('**/api.airtable.com/v0/**', async route => {
+    const req = route.request(); const url = req.url(); const method = req.method();
+    const tableId = (url.match(/\/v0\/[^/]+\/([^?/]+)/) || [])[1];
+    if (method === 'POST' || method === 'PATCH') {
+      const body = req.postDataJSON();
+      writes.push({ method, tableId, records: body.records });
+      const records = body.records.map(r => ({ id: r.id || ('recNew' + (nextId++)), fields: r.fields }));
+      if (method === 'POST' && tableId === TBL.plan) fx[TBL.plan].push(...records);
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ records }) });
+      return;
+    }
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ records: fx[tableId] || [] }) });
+  });
+  await page.goto('/growth-plan.html');
+  await expect(page.locator('#dashboard')).toBeVisible({ timeout: 20000 });
+  await expect(page.locator('#leverBody tr').first()).toBeVisible();
+  return writes;
+}
+
+test.describe('Growth Plan page', () => {
+  test('prices the levers from the mocked portfolio and names the next action', async ({ page }) => {
+    await openPage(page, fixtures());
+    const kpis = page.locator('#kpis .kpi');
+    await expect(kpis.nth(0)).toContainText('£2,204');            // 524.90 + 897.52 + 524.90 + 257
+    await expect(page.locator('#nextAction')).toContainText('Adam Older');
+    await expect(page.locator('#nextAction')).toContainText('UC statement');
+    const rows = page.locator('#leverBody tr.lever');
+    await expect(rows.first()).toContainText('room rate to 1-bed rate (age 37)');
+    await expect(rows.first()).toContainText('+£279.62');
+    await expect(rows.first()).toContainText('+£375.10');           // if exempt
+    await expect(page.locator('#leverBody')).toContainText('1 more room let');   // Paul's flat-let frees a room
+    await expect(page.locator('#leverBody')).toContainText('13 Far Street: take back');
+    // Agent-held rows are hidden until asked for; done/dropped likewise.
+    await expect(page.locator('#showAgent')).not.toBeChecked();
+  });
+
+  test('lists the unknown age and writes a date of birth back to the tenant', async ({ page }) => {
+    const writes = await openPage(page, fixtures());
+    await expect(page.locator('#facts')).toContainText('Gary Unknown');
+    await expect(page.locator('#facts')).toContainText('+£279.62 if 35 or over');
+    await page.locator('#facts input[data-dob="recT3"]').fill('1980-06-01');
+    await page.locator('#facts button[data-act="save-dob"][data-tenant="recT3"]').click();
+    await expect(page.locator('#toast')).toContainText('Date of birth saved');
+    const w = writes.find(x => x.tableId === TBL.tenants);
+    expect(w.method).toBe('PATCH');
+    expect(w.records[0].id).toBe('recT3');
+    expect(w.records[0].fields[T.dob]).toBe('1980-06-01');
+    expect(w.records[0].fields[T.notes]).toMatch(/Growth Plan page/);
+    // The plan re-prices: Gary (46) is now an uplift lever, not an unknown.
+    await expect(page.locator('#leverBody')).toContainText('Gary Unknown: room rate to 1-bed rate (age 46)');
+    await expect(page.locator('#facts')).not.toContainText('Gary Unknown');
+  });
+
+  test('refuses an implausible date of birth without writing', async ({ page }) => {
+    const writes = await openPage(page, fixtures());
+    await page.locator('#facts input[data-dob="recT3"]').fill('2019-06-01');
+    await page.locator('#facts button[data-act="save-dob"][data-tenant="recT3"]').click();
+    await expect(page.locator('#toast')).toContainText('does not look like');
+    expect(writes.filter(x => x.tableId === TBL.tenants)).toEqual([]);
+  });
+
+  test('recording an exemption lifts the uplift to the full 1-bed rate', async ({ page }) => {
+    const writes = await openPage(page, fixtures());
+    await page.locator('select[data-exempt="recT1"]').selectOption('PIP or DLA');
+    await expect(page.locator('#toast')).toContainText('PIP or DLA saved');
+    expect(writes.find(x => x.tableId === TBL.tenants).records[0].fields[T.capExemption]).toBe('PIP or DLA');
+    await expect(page.locator('#leverBody tr.lever').first()).toContainText('+£375.10');
+  });
+
+  test('adopting a lever creates a Growth Plan row and a task links to it', async ({ page }) => {
+    const writes = await openPage(page, fixtures());
+    const first = page.locator('#leverBody tr.lever').first();
+    await first.locator('button[data-act="adopt"]').click();
+    await expect(page.locator('#toast')).toContainText('Adopted');
+    const planWrite = writes.find(x => x.tableId === TBL.plan);
+    expect(planWrite.method).toBe('POST');
+    expect(planWrite.records[0].fields[PLAN.key]).toBe('uplift:recT1');
+    expect(planWrite.records[0].fields[PLAN.status]).toBe('Adopted');
+    await expect(page.locator('#leverBody tr.lever').first()).toContainText('Adopted');
+
+    await page.locator('#leverBody tr.lever').first().locator('button[data-act="task"]').click();
+    await expect(page.locator('#toast')).toContainText('Task created for Kevin Brittain');
+    const taskWrite = writes.find(x => x.tableId === TBL.tasks);
+    expect(taskWrite.method).toBe('POST');
+    const tf = taskWrite.records[0].fields;
+    expect(tf['fldgFjGBw6bTKJFCD']).toMatch(/^Growth plan: Adam Older/);
+    expect(tf['fldx4qCw17UfrKpaN']).toBe('Upcoming');
+    expect(tf['fldLu1Y4GzyWcDoxr']).toEqual(['recoGcXRXCniyJsTz']);
+    const linkWrite = writes.filter(x => x.tableId === TBL.plan).pop();
+    expect(linkWrite.method).toBe('PATCH');
+    expect(linkWrite.records[0].fields[PLAN.tasks]).toEqual(['recNew901']); // 900 was the plan row created by Adopt
+    await expect(page.locator('#leverBody tr.lever').first()).toContainText('In progress');
+  });
+
+  test('a works lever sends its task to Roy', async ({ page }) => {
+    const writes = await openPage(page, fixtures());
+    const rooms = page.locator('#leverBody tr.lever', { hasText: '1 more room let' });
+    await rooms.locator('button[data-act="task"]').click();
+    await expect(page.locator('#toast')).toContainText('Task created for Roy Lavin');
+    const tf = writes.find(x => x.tableId === TBL.tasks).records[0].fields;
+    expect(tf['flduCtmQGpOA4eWaj']).toEqual(['reclbdjfVev3bqNHS']);
+  });
+
+  test('property card fields write to Properties and re-price the plan', async ({ page }) => {
+    const writes = await openPage(page, fixtures());
+    await page.locator('[data-prop-card="recProp1"] select[data-prop-field="payg"]').selectOption('Yes');
+    await expect(page.locator('#toast')).toContainText('Saved');
+    expect(writes.find(x => x.tableId === TBL.properties).records[0].fields[P.payg]).toBe('Yes');
+    // Utilities no longer come off the new let: 804.52 instead of 729.52
+    await expect(page.locator('#leverBody tr.lever', { hasText: '1 more room let' })).toContainText('+£804.52');
+    await page.locator('[data-prop-card="recProp1"] input[data-prop-field="lettableRooms"]').fill('6');
+    await page.locator('[data-prop-card="recProp1"] input[data-prop-field="lettableRooms"]').dispatchEvent('change');
+    await expect(page.locator('#leverBody')).toContainText('3 more rooms let');   // 6 lettable - 4 in use + 1 released
+  });
+
+  test('benefit cap calculator: £900 rent caps a single over-35 unless exempt', async ({ page }) => {
+    await openPage(page, fixtures());
+    await expect(page.locator('#calcOut')).toContainText('Capped: £95.48 short');
+    await expect(page.locator('#calcOut')).toContainText('£804.52');
+    await page.locator('#c-pip').check();
+    await expect(page.locator('#calcOut')).toContainText('Not capped');
+    await page.locator('#c-pip').uncheck();
+    await page.locator('#c-earnings').fill('881');
+    await expect(page.locator('#calcOut')).toContainText('Not capped');
+  });
+
+  test('a stored Done row drops out of the totals and stays hidden until asked for', async ({ page }) => {
+    const fx = fixtures();
+    fx[TBL.plan].push({ id: 'recPlanDone', fields: { [PLAN.key]: 'uplift:recT1', [PLAN.status]: 'Done', [PLAN.title]: 'old' } });
+    await openPage(page, fx);
+    await expect(page.locator('#leverBody')).not.toContainText('Adam Older');
+    await page.locator('#showDone').check();
+    await expect(page.locator('#leverBody')).toContainText('Adam Older');
+    await expect(page.locator('#leverBody tr.lever', { hasText: 'Adam Older' })).toContainText('Done');
+  });
+
+  test('shows the empty state and no crash when nothing loads', async ({ page }) => {
+    const fx = fixtures(); Object.keys(fx).forEach(k => { fx[k] = []; });
+    await page.addInitScript(pat => { localStorage.setItem('airtable_pat', pat); }, MOCK_PAT);
+    await stubExternalHosts(page);
+    await page.route('**/api.airtable.com/v0/**', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ records: [] }) }));
+    const errors = [];
+    page.on('pageerror', e => errors.push(e.message));
+    await page.goto('/growth-plan.html');
+    await expect(page.locator('#dashboard')).toBeVisible({ timeout: 20000 });
+    await expect(page.locator('#leverBody')).toContainText('No levers match');
+    await expect(page.locator('#props')).toContainText('No properties loaded');
+    expect(errors).toEqual([]);
+  });
+
+  test('a refused token clears both stores and shows the sign-in box', async ({ page }) => {
+    await page.addInitScript(pat => { localStorage.setItem('airtable_pat', pat); }, MOCK_PAT);
+    await stubExternalHosts(page);
+    await page.route('**/api.airtable.com/v0/**', route => route.fulfill({ status: 401, contentType: 'application/json', body: '{"error":"AUTHENTICATION_REQUIRED"}' }));
+    await page.goto('/growth-plan.html');
+    await expect(page.locator('#authScreen')).toBeVisible();
+    await expect(page.locator('#authError')).toBeVisible();
+    expect(await page.evaluate(() => localStorage.getItem('airtable_pat'))).toBeNull();
+  });
+});
+
+test('the shell lists Growth Plan under Leadership and lazy-loads the page into its tab', async ({ page }) => {
+  await loadDashboard(page);
+  const item = page.locator('.sidebar-item', { hasText: 'Growth Plan' });
+  await expect(item).toBeVisible();
+  await item.click();
+  await expect(page.locator('#tab-growth-plan')).toHaveClass(/active/);
+  await expect(page.locator('#growthPlanFrame')).toHaveAttribute('src', /growth-plan\.html/);
+});

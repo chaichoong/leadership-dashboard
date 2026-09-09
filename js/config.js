@@ -33,6 +33,7 @@
         { id: 'transactions', name: 'Transactions',                icon: '🔍', pageVer: '1.1', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#transactions' },
         { id: 'coa',        name: 'Chart of Accounts',             icon: '📒', pageVer: '1.3', sopFile: 'sop-coa.html',                sopVer: '1.1', standalone: 'index.html#coa' },
         { id: 'comms',      name: 'Inbound Comms',                 icon: '📨', pageVer: '2.82', sopFile: 'inbound-comms-sop.html',      sopVer: '2.60', standalone: 'follow-up.html' },
+        { id: 'growth-plan', name: 'Growth Plan',                    icon: '📈', pageVer: '1.0', sopFile: 'sop-growth-plan.html',        sopVer: '1.0', standalone: 'growth-plan.html' },
         { id: 'compliance', name: 'Property Compliance',            icon: '✅', pageVer: '1.15', sopFile: 'sop-compliance.html',         sopVer: '1.14', standalone: 'compliance.html' },
         // Property Manager (Operations) — Roy Lavin's single page. Standalone at
         // property-manager/ behind its own passcode; the property-manager Worker
@@ -108,6 +109,41 @@
         prospects:     'tbljHVGJoKJf8acy3', // Prospects — cold outbound pipeline (Prospecting tab)
         prospectKeywords: 'tblB5tZrXNaKFe02j', // Prospect Keywords — LinkedIn search strings the daily agent runs
         ceoBriefs:     'tblIxbzDSOCI5hqJn', // CEO Briefs — one row per weekday, written by the 09:00 money-daily worker
+        growthPlan:         'tblHqr2kyiL15a8LN', // Growth Plan — one row per adopted revenue opportunity (growth-plan.html)
+        growthPlanSettings: 'tbl6hJaGOijdcvRdw', // Growth Plan Settings — the page's editable assumptions, one row per key
+    };
+
+    // ── Real Estate Growth Plan (growth-plan.html, Leadership) — 9 Sep 2026 ──
+    // The page reads the portfolio by field ID and writes four things back:
+    // Date of Birth and Benefit Cap Exemption on Tenants, the three plan fields
+    // on Properties, and its own two tables. Table IDs above; field IDs here.
+    const GP = {
+        plan: {
+            title:     'fldbjOfQOnUnpFmkZ', key:      'fldhurLB2tXHqXOdg', lever:  'fldcpnAHgAxQeHAgT',
+            property:  'fldYjvuoYHNlumtHd', tenant:   'flduU9L39LqachtLZ', unit:   'flddfpEZqcrxBIlf2',
+            monthly:   'fld4Vc3jGATM4d9C4', oneOff:   'fld8wc4N6yYMMy9Bd', effort: 'fldfew0jSmQiB52z8',
+            status:    'fldDKDIgcekYZSFp7', evidence: 'fld7DrrXzaTS4Jy6D', notes:  'fldUmCxbSfb4clrjp',
+            tasks:     'fldJKJ9XiXSfLT5Vq', adoptedOn:'fldF6bWNVgMAaaXBc', doneOn: 'fldaNRU9sf1IopbHQ',
+        },
+        settings: { key: 'fldiyJqkTQ9i2p2Wc', value: 'fldye89gwAzXWDphp', label: 'fldqN8fc8vk8qBeom', note: 'fldRtEN92vZUZKjBU' },
+        prop: {
+            name: 'fldqMbR329TNY974G',  // Property Name (Short) — formula
+            fullName: 'fldy2t735TV5e1DIL', type: 'fldOySSrZBYkOLLTX', beds: 'fldeXUMcC6O4AcvRG',
+            agent: 'fldEUrWVhSp3NY8Hh', ctNote: 'fldt7zY1TPihahH6H', area: 'fldYLRz2GgVojKaq9', postcode: 'fld6ebSQgD7eRsobd',
+            units: 'fldLoWcv40Ag5sHRF', active: 'fldBUeSJQZZSnFrFW',
+            lettableRooms: 'fldzV9YbHhNUUxwmA', payg: 'fldkBSgcELtpGZhjV', ctPayer: 'fldwWcSfkdtSbVhdj', // added 9 Sep 2026
+        },
+        unit: { name: 'fldr8sliyu8h2jw9t', tenants: 'fldQO09UAFRf07V7q', type: 'fldsItq0vU3sHv7n9', number: 'fld3nPlpdXSExxDuq', property: 'fldUJNRGgzgyAwwjt', status: 'fldBvqysXBm9rIm0E', incomeType: 'fldPrhfntWO9aHl58', rent: 'fldQZEjNzhU4UDUW9' },
+        tenant: { name: 'fldxBKW7QnujSDWqA', status: 'fldAXzP9SGIHiAhrv', dob: 'fldv7FKsqXYswyCFE', payType: 'fldZbrk8Xw5Dcwxhi', notes: 'fldfwxEf7I3XQDVtR', capExemption: 'fldOOi3d1P4vDedm6' /* added 9 Sep 2026 */ },
+        tenancy: { tenants: 'fld1i5bDoHL3B6rUf', unit: 'fld7cjLLEHKAx49OK', rent: 'fldDMyfZLFMeONPq8', status: 'fldlh5JAeYW2Ei2e6', endDate: 'fldwHhhKAq4f1nY9e' },
+        cost: { name: 'fldS6FYfpkhu6tJG0', expected: 'fld9JibXkMpTeMcxw', payStatus: 'fldXZNI96v8HgjuSh', property: 'fld7nikJBPz3BoZJG', frequency: 'fldvozTHvs5VH3lNi' },
+        realEstateBusinessId: 'recoGcXRXCniyJsTz', // Businesses → "Real Estate" (read 9 Sep 2026)
+        // Who a Growth Plan task goes to: paper and legal levers to Kevin, works and lettings to Roy
+        // (head of property from 25 Aug 2026). Team Members rows read 9 Sep 2026.
+        owners: {
+            kevin: { teamMember: 'recHEt2VPYothaqTd', email: 'kevin@runpreneur.org.uk', name: 'Kevin Brittain' },
+            roy:   { teamMember: 'reclbdjfVev3bqNHS', email: 'roy.lavin1978@gmail.com', name: 'Roy Lavin' },
+        },
     };
 
     // ── Prospects field IDs (Airtable table: Prospects / tbljHVGJoKJf8acy3) ──
