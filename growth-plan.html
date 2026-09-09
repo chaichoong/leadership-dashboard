@@ -114,6 +114,20 @@
   .calc .out .ok { color: var(--success); } .calc .out .bad { color: var(--danger); }
   .clause { background: var(--bg-surface-2); border: 1px solid var(--border-subtle); border-radius: var(--radius-md); padding: var(--space-4); font-size: var(--fs-sm); white-space: pre-wrap; line-height: 1.5; }
   .two { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-5); }
+  .strategies { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--space-4); }
+  .strat { background: var(--bg-surface-2); border: 1px solid var(--border-subtle); border-radius: var(--radius-md); padding: var(--space-3) var(--space-4); }
+  .strat h4 { margin: 0 0 6px; font-size: var(--fs-md); font-weight: var(--fw-semibold); }
+  .strat ul { margin: 0; padding-left: 18px; font-size: var(--fs-sm); }
+  .strat li { margin: 3px 0; }
+  @media (max-width: 900px) { .strategies { grid-template-columns: 1fr; } }
+  .kpis.level { grid-template-columns: repeat(4, 1fr); }
+  .kpis.level .kpi { display: grid; grid-template-rows: 2.2em 1.6em 2.8em; align-items: start; }
+  .kpis.level .kpi .l { min-height: 2.2em; }
+  .kpis.level .kpi .d { overflow: hidden; }
+  @media (max-width: 900px) { .kpis.level { grid-template-columns: repeat(2, 1fr); } }
+  .todo { margin: var(--space-3) 0 0; padding-left: 22px; }
+  .todo li { margin: 4px 0; font-size: var(--fs-sm); }
+  .todo .who { color: var(--text-muted); font-size: var(--fs-xs); }
   @media (max-width: 900px) { .two { grid-template-columns: 1fr; } }
   .settings-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 8px 16px; }
   .setting { display: grid; grid-template-columns: 1fr 110px; gap: 6px; align-items: center; font-size: var(--fs-sm); padding: 4px 0; border-bottom: 1px solid var(--border-subtle); }
@@ -170,32 +184,40 @@
   <div id="errorBox" class="error-box" style="display:none"></div>
 
   <section class="card" id="gp-workflow">
-    <h2>How we work each one</h2>
-    <p class="hint">The same steps every time, so nothing is missed while you are with the tenant. Per house first, then per tenant in that house.</p>
-    <div class="two">
-      <div><h4 class="small muted">Per property</h4><ol class="stages">
-        <li><b>Check the card below:</b> strategy set (Joint tenancy, Add tenants or Hold), lettable rooms, who pays council tax today, PAYG meters. Fix anything blank before booking.</li>
-        <li><b>Prepare the paperwork from Drive:</b> rent change letters at the LHA Direct rate; for a joint tenancy the joint AST, the council tax side letter and the plain-English note; the authority letter for every tenant.</li>
-        <li><b>Book one visit for the whole house</b> (Roy), with every tenant present in turn. Take ID copies and the UC statements they were asked for in advance.</li>
-        <li><b>Add tenants houses:</b> fire-safe the freed or spare room first, then list it (marketing section) and run the flow from enquiry to move-in.</li>
-        <li><b>After the visit:</b> Airtable updated the same day (dates of birth, NI numbers, cap position, strategy), the plan row marked In progress, renewal dates diarised for any CRF award.</li>
-      </ol></div>
-      <div><h4 class="small muted">Per tenant, at the meeting</h4><ol class="stages">
-        <li><b>Identity and facts:</b> photo ID, date of birth, National Insurance number, mobile and email that match the UC account. Enter them in Airtable there and then.</li>
-        <li><b>Rent:</b> sign the rent change to the full 1-bed rate (or the joint tenancy). Never a lower rent because of the cap.</li>
-        <li><b>Universal Credit:</b> the tenant reports the housing costs change in their journal, with you beside them; request the managed payment to landlord if not already in place.</li>
-        <li><b>Benefit cap:</b> read the UC statement. LCWRA, carer element, PIP or DLA, or earnings of £881+ means exempt: record it. Otherwise submit the CRF Housing Payment form (household income and spending, two months' statements, payment to landlord) for the shortfall the calculator shows.</li>
-        <li><b>Council tax</b> (joint tenancies): submit the Council Tax Reduction claim (or rely on the UC claim if made in the last two months); give them the side letter; tell the council the liability has changed.</li>
-        <li><b>Sign the authority letter</b> so you can chase both council claims, and give the tenant copies of everything.</li>
-      </ol></div>
+    <h2>The three strategies, and what each needs</h2>
+    <p class="hint">Every self-managed house is one of these. A rent uplift follows the strategy of the house the tenant lives in.</p>
+    <div class="strategies">
+      <div class="strat"><h4>Joint tenancy</h4><ul>
+        <li>Joint tenancy agreement signed (ast_joint_template.md in Drive): it stipulates the tenants are liable for council tax</li>
+        <li>Proof of address document (existing template)</li>
+        <li>Universal Credit details: name, phone, email, date of birth, payment date; change reported in the UC journal, managed payment to landlord requested</li>
+        <li>Council Tax Reduction form: NI number, everyone in the house, income, capital, benefits; backdated to the tenancy start; the tenant's email and a password to save it</li>
+        <li>Anything the form asks for on top: ID, UC statement, bank statements</li>
+        <li>CRF Housing Payment (Discretionary Housing) application: household income, weekly spending, two months' bank statements, payment to landlord; the shortfall from the calculator</li>
+      </ul></div>
+      <div class="strat"><h4>HMO</h4><ul>
+        <li>Individual AST for each tenant (ast_template.md in Drive)</li>
+        <li>Proof of address document (existing template)</li>
+        <li>Universal Credit details as for a joint tenancy: name, phone, email, date of birth, payment date; journal change, managed payment</li>
+        <li>No Council Tax Reduction form: the owner keeps council tax on an HMO</li>
+        <li>CRF Housing Payment (Discretionary Housing) application where the cap bites</li>
+        <li>New rooms: fire-safe first (£400 a room), then let through the channels below</li>
+      </ul></div>
+      <div class="strat"><h4>Leave as is</h4><ul>
+        <li>No change to the agreement or the household</li>
+        <li>Rent uplifts still apply where a tenant qualifies, using the HMO or joint tenancy list above depending on the house</li>
+        <li>Details still collected when you are there: date of birth, NI number, phone, email, cap position</li>
+      </ul></div>
     </div>
+    <p class="hint" style="margin-top:var(--space-3)">Rent is always the full 1-bed rate; a benefit cap shortfall is met by the CRF Housing Payment, never by a lower rent. Signed authority letter (authority_to_act_template.md) from every tenant so you can chase both council claims.</p>
   </section>
 
   <section class="card" id="gp-headline" aria-live="polite">
     <h2>Where the money is</h2>
-    <p class="hint">Every rent is priced at the full LHA rate (LHA Direct, September 2026). Where the benefit cap bites, the housing element paid to you falls short; the tenant keeps their standard allowance and the shortfall is applied for as a Crisis and Resilience Fund Housing Payment (the council payment that replaced Discretionary Housing Payments on 1 April 2026), paid to you.</p>
-    <div class="kpis" id="kpis"></div>
-    <div class="next" id="nextAction"></div>
+    <p class="hint">Every rent is priced at the full 1-bed rate (LHA Direct, September 2026); a benefit cap shortfall is met by the CRF Housing Payment, never by a lower rent. Rent now is the expected rent of every live tenancy as if all were paid; cash flow voids are not deducted.</p>
+    <div class="kpis level" id="kpis"></div>
+    <h4 class="small muted" style="margin:var(--space-4) 0 0">Things to do, in order</h4>
+    <ol class="todo" id="todo"></ol>
   </section>
 
   <section class="card" id="gp-facts">
@@ -400,6 +422,7 @@
         postcode: r.fields[P.postcode] || '', area: r.fields[P.area] || '', ctNote: r.fields[P.ctNote] || '',
         lettableRooms: r.fields[P.lettableRooms] == null ? null : r.fields[P.lettableRooms], payg: sel(r.fields[P.payg]) || 'Unknown', ctPayer: sel(r.fields[P.ctPayer]) || 'Unknown',
         strategy: sel(r.fields[P.strategy]) || '', plannedExtra: r.fields[P.plannedExtra] == null ? null : r.fields[P.plannedExtra],
+        owner: sel(r.fields[P.owner]) || '', ctBand: sel(r.fields[P.ctBand]) || '', ctAnnual: r.fields[P.ctAnnual] || 0,
       })),
       units: raw.units.map(r => ({ id: r.id, propertyId: link(r.fields[U.property])[0], number: r.fields[U.number], type: sel(r.fields[U.type]), status: sel(r.fields[U.status]), rent: r.fields[U.rent], incomeType: sel(r.fields[U.incomeType]), tenantIds: link(r.fields[U.tenants]) })),
       tenants: raw.tenants.map(r => ({ id: r.id, name: r.fields[T.name] || '', status: sel(r.fields[T.status]), dob: r.fields[T.dob] || '', payType: sel(r.fields[T.payType]), capExemption: sel(r.fields[T.capExemption]) || 'Unknown', notes: r.fields[T.notes] || '', phone: r.fields[T.phone] || '', email: r.fields[T.email] || '', ni: r.fields[T.ni] || '' })),
@@ -417,24 +440,22 @@
     const t = state.plan.totals;
     const kpi = (l, v, d, cls = '') => `<div class="kpi ${cls}"><div class="l">${esc(l)}</div><div class="v">${v}</div><div class="d">${esc(d)}</div></div>`;
     $('kpis').innerHTML = [
-      kpi('Rent now', gbp(t.rentNow), 'a month, every active unit (rental unit rollup)'),
-      kpi('Paper trail', '+' + gbp(t.paper), 'rent uplifts and joint tenancies, no works', 'good'),
-      kpi('With works', '+' + gbp(t.works + t.remoteWorks), `rooms added per your strategy, ${gbp(t.oneOff)} one-off`, 'good'),
-      kpi('Voids and take-backs', '+' + gbp(t.voids + t.remoteVoids), `incl. ${gbp(t.remoteVoids)} away from Haverhill`, 'good'),
-      kpi('Ages to confirm', '+' + gbp(t.unknownAge + t.check), 'UC room tenants with no date of birth on file, if 35 or over', 'gold'),
-      kpi('CRF payments to apply for', gbp(t.crfShortfall), `${t.crfCount} application${t.crfCount === 1 ? '' : 's'} a month of benefit cap shortfall, paid to you`, 'gold'),
-      kpi('Agent-held', '+' + gbp(t.agentHeld), 'Roc Immo houses at the 1-bed rate: potential only', 'muted'),
-      kpi('Maximum', gbp(t.rentNow + t.maximum), `a month if every lever lands (+${gbp(t.maximum)})`),
+      kpi('Rent now', gbp(t.rentNow), 'expected rent, every live tenancy, as if paid'),
+      kpi('Paper trail', '+' + gbp(t.paper), 'rent uplifts and joint tenancy council tax', 'good'),
+      kpi('With works', '+' + gbp(t.works + t.remoteWorks), `rooms added per strategy, ${gbp(t.oneOff)} one-off at £400 a room`, 'good'),
+      kpi('Voids and take-backs', '+' + gbp(t.voids + t.remoteVoids), 'Siddows let and the Collins houses', 'good'),
+      kpi('CRF payments to apply for', gbp(t.crfShortfall), `${t.crfCount} application${t.crfCount === 1 ? '' : 's'}, benefit cap shortfall paid to you`, 'gold'),
+      kpi('Agent-held potential', '+' + gbp(t.agentHeld), 'agent houses taken back as joint tenancies', 'muted'),
+      kpi('Total potential increase', '+' + gbp(t.potentialIncrease), 'every lever including agent-held', 'good'),
+      kpi('Maximum rent', gbp(t.rentNow + t.potentialIncrease), 'a month if every lever lands'),
     ].join('');
-    const n = state.plan.next;
-    $('nextAction').innerHTML = n
-      ? `<div><div class="k">Next single action</div><div class="t">${esc(n.firstStep)}</div><div class="s">${esc(n.title)} · +${gbp(n.monthly, 2)} a month${n.capShortfall ? ` · CRF Housing Payment ${gbp(n.capShortfall, 2)} a month` : ''} · ${esc(n.effort)}</div></div><div class="row-actions"><button class="btn btn-primary" data-act="task" data-key="${esc(n.key)}">Create the task</button><button class="btn" data-act="open" data-key="${esc(n.key)}">Show evidence</button></div>`
-      : '<div><div class="k">Next single action</div><div class="t">Nothing left to do on the current data</div></div>';
+    const todo = state.plan.todo || [];
+    $('todo').innerHTML = todo.length ? todo.map(x => `<li><span>${esc(x.text)}</span> <span class="who">${esc(x.property)} · ${esc(x.owner)}${x.status !== 'Candidate' ? ' · ' + esc(x.status) : ''}</span></li>`).join('') : '<li class="muted">Nothing to do on the current data</li>';
   }
 
   function renderFacts() {
     const p = state.plan; const items = [];
-    p.unknownAge.forEach(u => items.push(`<div class="ten"><span class="n">${esc(u.tenant)} <span class="muted small">${esc(u.property)}, unit ${esc(u.unit)}</span></span><span class="r">+${gbp(u.upliftIfOver35, 2)} if 35 or over</span><span class="m">Date of birth: <span class="inl"><input class="sm" type="date" data-dob="${esc(u.tenantId)}" aria-label="Date of birth for ${esc(u.tenant)}"><button class="btn btn-sm" data-act="save-dob" data-tenant="${esc(u.tenantId)}">Save</button></span></span></div>`));
+    p.unknownAge.forEach(u => items.push(`<div class="ten"><span class="n">${esc(u.tenant)} <span class="muted small">${esc(u.property)}, unit ${esc(u.unit)}</span></span><span class="r">age to confirm</span><span class="m">Date of birth: <span class="inl"><input class="sm" type="date" data-dob="${esc(u.tenantId)}" aria-label="Date of birth for ${esc(u.tenant)}"><button class="btn btn-sm" data-act="save-dob" data-tenant="${esc(u.tenantId)}">Save</button></span></span></div>`));
     const unknownEx = []; p.properties.forEach(v => v.tenants.forEach(t => { if (t.uc && t.capExemption === 'Unknown' && v.mgmt === 'kevin') unknownEx.push({ t, v }); }));
     if (unknownEx.length) items.push(`<div class="ten"><span class="n">Benefit cap position unknown for ${unknownEx.length} UC tenant${unknownEx.length > 1 ? 's' : ''}</span><span class="r">${gbp(p.totals.crfShortfall, 2)} a month of CRF claims</span><span class="m">Set it on each tenant in the property cards. LCWRA, a carer element, PIP or DLA, or earnings of £881+ means no cap and no CRF form. Otherwise the CRF Housing Payment covers the shortfall.</span></div>`);
     const noNi = []; p.properties.forEach(v => v.tenants.forEach(t => { const raw = state.data.tenants.find(x => x.id === t.id) || {}; if (t.uc && v.mgmt === 'kevin' && !raw.ni) noNi.push(t.name); }));
@@ -502,14 +523,15 @@
           ${t.uc && v.mgmt === 'kevin' ? `<span class="inl">cap: <select class="sm" data-exempt="${esc(t.id)}" aria-label="Benefit cap exemption for ${esc(t.name)}">${exOpts.map(o => `<option ${o === t.capExemption ? 'selected' : ''}>${esc(o)}</option>`).join('')}</select></span>` : ''}
         </span>${t.note ? `<span class="note">${esc(t.note)}</span>` : ''}</div>`).join('');
       const fields = v.mgmt === 'kevin' ? `<div class="prop-fields">
-        <label>Strategy<select class="sm" data-prop-field="strategy" data-prop="${esc(v.id)}">${['', 'Joint tenancy', 'Add tenants', 'Hold'].map(o => `<option value="${o}" ${o === v.strategy ? 'selected' : ''}>${o || 'Not set'}</option>`).join('')}</select></label>
-        <label>Extra tenants planned<input class="sm" type="number" min="0" max="6" data-prop-field="plannedExtra" data-prop="${esc(v.id)}" value="${v.plannedExtra ? esc(v.plannedExtra) : ''}" placeholder="0"></label>
+        <label>Strategy<select class="sm" data-prop-field="strategy" data-prop="${esc(v.id)}">${['', 'Joint tenancy', 'HMO', 'Leave as is'].map(o => `<option value="${o}" ${o === v.strategy ? 'selected' : ''}>${o || 'Not set'}</option>`).join('')}</select></label>
+        <label>Extra tenants (HMO)<input class="sm" type="number" min="0" max="6" data-prop-field="plannedExtra" data-prop="${esc(v.id)}" value="${v.plannedExtra ? esc(v.plannedExtra) : ''}" placeholder="0"></label>
+        <label>Tasks go to<select class="sm" data-prop-field="owner" data-prop="${esc(v.id)}">${['', 'Roy', 'Kevin'].map(o => `<option value="${o}" ${o === v.owner ? 'selected' : ''}>${o || 'Default'}</option>`).join('')}</select></label>
         <label>Lettable rooms<input class="sm" type="number" min="1" max="12" data-prop-field="lettableRooms" data-prop="${esc(v.id)}" value="${v.lettable == null ? '' : esc(v.lettable)}" placeholder="${esc(v.roomsInUse)} in use"></label>
         <label>PAYG meters<select class="sm" data-prop-field="payg" data-prop="${esc(v.id)}">${['Unknown', 'Yes', 'No'].map(o => `<option ${o === v.payg ? 'selected' : ''}>${o}</option>`).join('')}</select></label>
         <label>Council tax payer<select class="sm" data-prop-field="ctPayer" data-prop="${esc(v.id)}">${['Unknown', 'Owner', 'Tenants'].map(o => `<option ${o === v.ctPayer ? 'selected' : ''}>${o}</option>`).join('')}</select></label></div>` : '';
       const levers = v.levers.filter(l => l.status !== 'Dropped').map(l => `<div class="lev">${esc(l.lever)}: <b>${l.monthly ? '+' + gbp(l.monthly, 2) : (l.monthlyIfExempt ? '+' + gbp(l.monthlyIfExempt, 2) + ' if exempt' : '—')}</b> <span class="muted">${esc(l.status)}</span></div>`).join('');
       return `<div class="prop ${v.local ? '' : 'remote'}" data-prop-card="${esc(v.id)}"><h3><span>${esc(v.name)}</span><span class="rent">${gbp(v.rentNow)}</span></h3>
-        <div class="meta">${esc(v.type || '')}${v.area ? ' · ' + esc(v.area) : ''}${v.brma ? ' · ' + esc(v.brma) + ' BRMA' : ''}${v.mgmt === 'kevin' ? (v.strategy ? ' · <b>' + esc(v.strategy) + (v.strategy === 'Add tenants' && v.plannedExtra ? ' (+' + v.plannedExtra + ')' : '') + '</b>' : ' · strategy not set') : ' · ' + esc(v.agent || 'agent')}${v.ctLive ? ` · council tax ${gbp(v.ctLive)} live` : ''}</div>
+        <div class="meta">${esc(v.type || '')}${v.area ? ' · ' + esc(v.area) : ''}${v.brma ? ' · ' + esc(v.brma) + ' BRMA' : ''}${v.mgmt === 'kevin' ? (v.strategy ? ' · <b>' + esc(v.strategy) + (v.strategy === 'HMO' && v.plannedExtra ? ' (+' + v.plannedExtra + ')' : '') + '</b>' : ' · strategy not set') : ' · ' + esc(v.agent || 'agent')}${v.ctBand ? ` · band ${esc(v.ctBand)} ${gbp(v.ctBandMonthly)}/mo` : ''}${v.ctLive ? ` · paying ${gbp(v.ctLive)}` : ''}${v.owner ? ' · tasks to ' + esc(v.owner) : ''}</div>
         ${v.mgmt === 'kevin' ? `<div class="rooms" title="${used} rooms in use of ${v.lettableEff} lettable"><i class="used" style="width:${(used / total) * 100}%"></i><i class="free" style="width:${(free / total) * 100}%"></i></div><div class="small muted">${v.roomsInUse} room${v.roomsInUse === 1 ? '' : 's'} in use · ${v.lettable == null ? 'lettable rooms not set' : v.lettableEff + ' lettable'}${free ? ` · ${free} free` : ''}</div>` : ''}
         ${tenants || '<div class="empty">No active tenant</div>'}${fields}${levers}${v.flags.map(f => `<div class="flag">${esc(f)}</div>`).join('')}${v.brmaNote ? `<div class="flag">${esc(v.brmaNote)}</div>` : ''}</div>`;
     }).join('');
@@ -646,7 +668,7 @@ BEFORE THE FIRST ONE IS SIGNED (all in writing)
   async function createTask(key) {
     const l = leverByKey(key); if (!l) return;
     await withBusy(key, async () => {
-      const owner = (l.effort === 'Works' || l.effort === 'Light') ? GP.owners.roy : GP.owners.kevin;
+      const owner = l.owner === 'Roy' ? GP.owners.roy : GP.owners.kevin;
       const due = new Date(); due.setDate(due.getDate() + 7);
       const dueISO = `${due.getFullYear()}-${String(due.getMonth() + 1).padStart(2, '0')}-${String(due.getDate()).padStart(2, '0')}`;
       const desc = [`First step: ${l.firstStep}`, '', `Worth +£${Number(l.monthly).toFixed(2)} a month${l.monthlyIfExempt > l.monthly ? ` (+£${Number(l.monthlyIfExempt).toFixed(2)} if the tenant is exempt from the benefit cap)` : ''}${l.oneOff ? `, one-off £${Number(l.oneOff).toFixed(0)}` : ''}.`, '', 'Evidence:', ...l.evidence.map(e => '- ' + e)]
@@ -681,7 +703,7 @@ BEFORE THE FIRST ONE IS SIGNED (all in writing)
     });
   }
   async function savePropField(propId, field, value) {
-    const map = { lettableRooms: GP.prop.lettableRooms, payg: GP.prop.payg, ctPayer: GP.prop.ctPayer, strategy: GP.prop.strategy, plannedExtra: GP.prop.plannedExtra };
+    const map = { lettableRooms: GP.prop.lettableRooms, payg: GP.prop.payg, ctPayer: GP.prop.ctPayer, strategy: GP.prop.strategy, plannedExtra: GP.prop.plannedExtra, owner: GP.prop.owner };
     const numeric = field === 'lettableRooms' || field === 'plannedExtra';
     await withBusy('prop:' + propId + field, async () => {
       const v = numeric ? (value === '' ? null : Number(value)) : (value || null);
@@ -742,7 +764,8 @@ BEFORE THE FIRST ONE IS SIGNED (all in writing)
         { name: 'Every property has a postcode', kind: 'sync', run: () => { const p = (g().plan || {}).properties || []; const miss = p.filter(v => !v.postcode); return miss.length ? { status: 'warn', detail: `${miss.length} without a postcode: ${miss.map(v => v.name).join(', ')} — no LHA rate can be applied` } : { status: 'pass', detail: `All ${p.length} properties carry a postcode` }; } },
         { name: 'Ages known for UC room tenants', kind: 'sync', run: () => { const u = (g().plan || {}).unknownAge || []; return u.length ? { status: 'warn', detail: `${u.length} UC room tenant${u.length > 1 ? 's' : ''} with no date of birth: ${u.map(x => x.tenant).join(', ')}` } : { status: 'pass', detail: 'Every UC room tenant has a date of birth' }; } },
         { name: 'Benefit cap positions recorded', kind: 'sync', run: () => { const p = (g().plan || {}).properties || []; let uc = 0, known = 0; p.forEach(v => v.tenants.forEach(t => { if (t.uc && v.mgmt === 'kevin') { uc++; if (t.capExemption !== 'Unknown') known++; } })); return known < uc ? { status: 'warn', detail: `${known} of ${uc} UC tenants have a recorded cap position; the rest are shown as CRF Housing Payment claims` } : { status: 'pass', detail: `${uc} UC tenants, all with a recorded cap position` }; } },
-        { name: 'Strategy set on every house you manage', kind: 'sync', run: () => { const p = ((g().plan || {}).properties || []).filter(v => v.mgmt === 'kevin'); const miss = p.filter(v => !v.strategy); return miss.length ? { status: 'warn', detail: `${miss.length} without a strategy: ${miss.map(v => v.name).join(', ')}` } : { status: 'pass', detail: `All ${p.length} houses carry a strategy` }; } },
+        { name: 'Strategy set on every house you manage', kind: 'sync', run: () => { const p = ((g().plan || {}).properties || []).filter(v => v.mgmt === 'kevin'); const miss = p.filter(v => !v.strategy); return miss.length ? { status: 'warn', detail: `${miss.length} without a strategy: ${miss.map(v => v.name).join(', ')}` } : { status: 'pass', detail: `All ${p.length} houses carry a strategy (joint tenancy, HMO or leave as is)` }; } },
+        { name: 'Council tax band on every joint tenancy house', kind: 'sync', run: () => { const p = ((g().plan || {}).properties || []).filter(v => v.mgmt === 'kevin' && v.strategy === 'Joint tenancy'); const miss = p.filter(v => !v.ctBandMonthly && !v.ctLive); return miss.length ? { status: 'warn', detail: `${miss.length} joint tenancy house${miss.length > 1 ? 's' : ''} with no band or live cost: ${miss.map(v => v.name).join(', ')}` } : { status: 'pass', detail: `${p.length} joint tenancy houses priced from a band or a live cost` }; } },
         { name: 'Plan rows match a live lever', kind: 'automation', run: () => { const rows = (g().data || {}).planRows || []; const keys = new Set(((g().plan || {}).levers || []).map(l => l.key)); const orphans = rows.filter(r => !keys.has(r.key)); return orphans.length ? { status: 'warn', detail: `${orphans.length} Growth Plan row${orphans.length > 1 ? 's' : ''} no longer match a lever (tenant moved or data changed): ${orphans.map(r => r.key).join(', ')}` } : { status: 'pass', detail: `${rows.length} Growth Plan rows, all matched to a live lever` }; } },
         { name: 'Totals reconcile', kind: 'automation', run: () => { const t = (g().plan || {}).totals || {}; const sum = Math.round((t.paper + t.works + t.voids + t.remote) * 100) / 100; return Math.abs(sum - t.actionable) < 0.01 ? { status: 'pass', detail: `Actionable £${t.actionable} = paper + works + voids + away` } : { status: 'fail', detail: `Actionable £${t.actionable} does not equal the buckets (£${sum})` }; } },
       ],

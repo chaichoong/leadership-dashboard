@@ -4,7 +4,7 @@ const { test, expect } = require('@playwright/test');
 const { MOCK_PAT, stubExternalHosts, loadDashboard } = require('./helpers');
 
 // Field IDs mirror js/config.js GP (the page reads by field ID).
-const P = { strategy: 'fldivZ9UbAACwv7Yh', plannedExtra: 'fldFd4scZaJsXQ0n7', name: 'fldqMbR329TNY974G', type: 'fldOySSrZBYkOLLTX', beds: 'fldeXUMcC6O4AcvRG', agent: 'fldEUrWVhSp3NY8Hh', ctNote: 'fldt7zY1TPihahH6H', area: 'fldYLRz2GgVojKaq9', postcode: 'fld6ebSQgD7eRsobd', active: 'fldBUeSJQZZSnFrFW', lettableRooms: 'fldzV9YbHhNUUxwmA', payg: 'fldkBSgcELtpGZhjV', ctPayer: 'fldwWcSfkdtSbVhdj' };
+const P = { strategy: 'fldivZ9UbAACwv7Yh', plannedExtra: 'fldFd4scZaJsXQ0n7', owner: 'flduloaYTsuvMxvF7', ctBand: 'fldNzUqbTNzTeNJqN', ctAnnual: 'fldZsLDNeEvghtFDJ', name: 'fldqMbR329TNY974G', type: 'fldOySSrZBYkOLLTX', beds: 'fldeXUMcC6O4AcvRG', agent: 'fldEUrWVhSp3NY8Hh', ctNote: 'fldt7zY1TPihahH6H', area: 'fldYLRz2GgVojKaq9', postcode: 'fld6ebSQgD7eRsobd', active: 'fldBUeSJQZZSnFrFW', lettableRooms: 'fldzV9YbHhNUUxwmA', payg: 'fldkBSgcELtpGZhjV', ctPayer: 'fldwWcSfkdtSbVhdj' };
 const U = { tenants: 'fldQO09UAFRf07V7q', type: 'fldsItq0vU3sHv7n9', number: 'fld3nPlpdXSExxDuq', property: 'fldUJNRGgzgyAwwjt', status: 'fldBvqysXBm9rIm0E', incomeType: 'fldPrhfntWO9aHl58', rent: 'fldQZEjNzhU4UDUW9' };
 const T = { ni: 'fld1rHf1qZ60qK95l', phone: 'fldraHUkWfqo4olLF', email: 'fldybEduFY3DWWTfT', name: 'fldxBKW7QnujSDWqA', status: 'fldAXzP9SGIHiAhrv', dob: 'fldv7FKsqXYswyCFE', payType: 'fldZbrk8Xw5Dcwxhi', notes: 'fldfwxEf7I3XQDVtR', capExemption: 'fldOOi3d1P4vDedm6' };
 const C = { tenants: 'fld1i5bDoHL3B6rUf', unit: 'fld7cjLLEHKAx49OK', rent: 'fldDMyfZLFMeONPq8' };
@@ -16,7 +16,7 @@ const TBL = { properties: 'tbl6f0OkAmTC2jbuG', units: 'tblM3mZCR5kiEdWMj', tenan
 function fixtures() {
   return {
     [TBL.properties]: [
-      { id: 'recProp1', fields: { [P.name]: ['18 Test Park'], [P.type]: 'HMO', [P.beds]: 3, [P.agent]: 'Property Portfolio', [P.postcode]: 'CB9 0AJ', [P.area]: 'Haverhill', [P.ctNote]: '£135.00', [P.active]: [true], [P.strategy]: 'Add tenants', [P.plannedExtra]: 1 } },
+      { id: 'recProp1', fields: { [P.name]: ['18 Test Park'], [P.type]: 'HMO', [P.beds]: 3, [P.agent]: 'Property Portfolio', [P.postcode]: 'CB9 0AJ', [P.area]: 'Haverhill', [P.ctNote]: '£135.00', [P.active]: [true], [P.strategy]: 'HMO', [P.plannedExtra]: 1 } },
       { id: 'recProp2', fields: { [P.name]: ['13 Far Street'], [P.type]: 'Single Let', [P.beds]: 2, [P.agent]: 'Simon Collins', [P.postcode]: 'BB5 5PT', [P.active]: [true] } },
     ],
     [TBL.units]: [
@@ -73,8 +73,11 @@ test.describe('Growth Plan page', () => {
     await openPage(page, fixtures());
     const kpis = page.locator('#kpis .kpi');
     await expect(kpis.nth(0)).toContainText('£2,204');            // 524.90 + 897.52 + 524.90 + 257
-    await expect(page.locator('#nextAction')).toContainText('Adam Older');
-    await expect(page.locator('#nextAction')).toContainText('UC journal');
+    await expect(page.locator('#todo li').first()).toContainText('Adam Older');
+    await expect(page.locator('#todo li').first()).toContainText('Kevin');
+    await expect(page.locator('#kpis .kpi')).toHaveCount(8);
+    await expect(page.locator('#gp-workflow')).toContainText('Joint tenancy');
+    await expect(page.locator('#gp-workflow')).toContainText('Leave as is');
     const rows = page.locator('#leverBody tr.lever');
     await expect(rows.first()).toContainText('room rate to 1-bed rate (age 37)');
     await expect(rows.first()).toContainText('+£372.62');          // full 1-bed rate, never lowered for the cap
@@ -88,7 +91,8 @@ test.describe('Growth Plan page', () => {
   test('lists the unknown age and writes a date of birth back to the tenant', async ({ page }) => {
     const writes = await openPage(page, fixtures());
     await expect(page.locator('#facts')).toContainText('Gary Unknown');
-    await expect(page.locator('#facts')).toContainText('+£372.62 if 35 or over');
+    await expect(page.locator('#facts')).toContainText('age to confirm');
+    await expect(page.locator('#leverBody')).toContainText('Gary Unknown: room rate to 1-bed rate (age to confirm)');
     await page.locator('#facts input[data-dob="recT3"]').fill('1980-06-01');
     await page.locator('#facts button[data-act="save-dob"][data-tenant="recT3"]').click();
     await expect(page.locator('#toast')).toContainText('Date of birth saved');
@@ -146,13 +150,17 @@ test.describe('Growth Plan page', () => {
     await expect(page.locator('#leverBody tr.lever').first()).toContainText('In progress');
   });
 
-  test('a works lever sends its task to Roy', async ({ page }) => {
+  test('a works lever sends its task to Roy, unless the house says tasks go to Kevin', async ({ page }) => {
     const writes = await openPage(page, fixtures());
     const rooms = page.locator('#leverBody tr.lever', { hasText: '1 more room let' });
     await rooms.locator('button[data-act="task"]').click();
     await expect(page.locator('#toast')).toContainText('Task created for Roy Lavin');
     const tf = writes.find(x => x.tableId === TBL.tasks).records[0].fields;
     expect(tf['flduCtmQGpOA4eWaj']).toEqual(['reclbdjfVev3bqNHS']);
+    await page.locator('[data-prop-card="recProp1"] select[data-prop-field="owner"]').selectOption('Kevin');
+    await expect(page.locator('#toast')).toContainText('Saved');
+    expect(writes.filter(x => x.tableId === TBL.properties).pop().records[0].fields[P.owner]).toBe('Kevin');
+    await expect(page.locator('#todo')).toContainText('Kevin');
   });
 
   test('property card fields write to Properties and re-price the plan', async ({ page }) => {
@@ -166,7 +174,7 @@ test.describe('Growth Plan page', () => {
     await page.locator('[data-prop-card="recProp1"] input[data-prop-field="plannedExtra"]').dispatchEvent('change');
     expect(writes.filter(x => x.tableId === TBL.properties).pop().records[0].fields[P.plannedExtra]).toBe(3);
     await expect(page.locator('#leverBody')).toContainText('3 more rooms let');
-    await page.locator('[data-prop-card="recProp1"] select[data-prop-field="strategy"]').selectOption('Hold');
+    await page.locator('[data-prop-card="recProp1"] select[data-prop-field="strategy"]').selectOption('Leave as is');
     await expect(page.locator('#leverBody')).not.toContainText('more rooms let');   // Hold: no house lever
   });
 
