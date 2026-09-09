@@ -42,6 +42,7 @@ import argparse
 import errno
 import json
 import os
+import re
 import shutil
 import signal
 import subprocess
@@ -126,6 +127,23 @@ READY_POLL_MAX = 60
 # sleeping-Mac problem and must both stay: the wait rescues a job whose network
 # has not woken yet, the lease releases the lock when a job never wakes at all.
 WRAPPED_LEASE_MIN = 5
+# Grace for a wrapped holder whose process is DEMONSTRABLY still alive.
+#
+# WHY (finding 20260904-content-engine-458). A lapsed lease used to break the
+# lock on its own, even for a wrapped job we can see is still running. On
+# 4 Sep 2026 content-engine was mid-render at load 47 with 0.2 GB free; its
+# heartbeat thread got no CPU, the lease lapsed, the lock was broken twice
+# (10:11, 10:29), and at 10:34 prod-sweep-weekly took it and the live render was
+# killed with EX_LOSTLOCK. The queue log shows the giveaway: `lock-broken` at
+# 10:11, then `lock-retaken` 88 seconds later by the same job — the process had
+# never gone anywhere.
+#
+# The lease still has to win eventually, because the failure it was built for is
+# the Mac SLEEPING, where the process stays alive and nothing progresses
+# (drift-monitor held the lock 4h54m asleep on 8 Aug 2026). So a live wrapped
+# holder gets extra time, not immunity: long enough that a starved heartbeat
+# recovers, far short of the hours a sleeping job used to cost.
+WRAPPED_ALIVE_GRACE_MIN = float(os.environ.get("JOB_QUEUE_ALIVE_GRACE", "15"))
 HEARTBEAT_SECONDS = float(os.environ.get("JOB_QUEUE_HEARTBEAT", "60"))
 # How long a displaced wrapped job gets to write its own done line after TERM
 # before it is killed outright.
@@ -441,6 +459,35 @@ def drive_ready(path, timeout=4):
     return True, "folder lists, no plain file to probe"
 
 
+def disk_ready(min_gb, path=None):
+    """Is there enough free disk for this job to finish what it starts?
+
+    WHY (finding 20260909-daily-ops-exceptions-503, 9 Sep 2026). content-engine
+    pulls one raw clip to local disk and renders it. On 9 Sep the Mac had 27 GB
+    free and the queued clip needed about 42 GB of working space. The job took
+    the queue lock at 02:16, could not finish, and was still holding it at 07:13
+    — four hours fifty minutes — which wiped out the entire morning check block:
+    no drift scan, no data invariants, no drive auth, no CEO brief.
+
+    A job that cannot possibly finish must never take the lock. Disk is a
+    precondition exactly like the network: it is checked BEFORE the lock, it is
+    re-probed after a long queue wait, and failing it DEFERS the run with a
+    reason a human can read, rather than converting a full disk into a silent
+    four-hour stall in everything else.
+    """
+    target = os.path.expanduser(path or "/")
+    try:
+        usage = shutil.disk_usage(target)
+    except OSError as e:
+        # Unknown is not "not ready": refusing to run for ever on an unreadable
+        # path is worse than running and reporting for itself.
+        return True, "cannot measure free space on %s (%s); letting the job run" % (target, e)
+    free_gb = usage.free / (1024.0 ** 3)
+    if free_gb < min_gb:
+        return False, "%.1f GB free on %s, needs %s GB" % (free_gb, target, min_gb)
+    return True, "%.1f GB free (needs %s GB)" % (free_gb, min_gb)
+
+
 def preconditions_met(cfg):
     """(ok, reason). Declared per job as `needs` in job-schedule.json."""
     for need in cfg.get("needs", []) or []:
@@ -452,6 +499,10 @@ def preconditions_met(cfg):
             ok, why = drive_ready(os.path.expanduser(need["drive"]))
             if not ok:
                 return False, "google drive: %s" % why
+        elif isinstance(need, dict) and need.get("diskGB") is not None:
+            ok, why = disk_ready(need["diskGB"], need.get("path"))
+            if not ok:
+                return False, "disk: %s" % why
         else:
             return False, "unknown precondition %r" % (need,)
     return True, "ready"
@@ -562,6 +613,12 @@ def write_holder(holder):
     os.replace(tmp, HOLDER_FILE)
 
 
+# One grace line per holder per waiting process. break_stale_lock runs on every
+# poll of the acquire loop (every 2s), so an unguarded event would write
+# thousands of lines an hour into the log the morning digest reads.
+_GRACE_ANNOUNCED = set()
+
+
 def break_stale_lock():
     """Release a lock whose owner cannot still be working.
 
@@ -605,7 +662,24 @@ def break_stale_lock():
 
     reason = None
     if now() > holder.get("lease_until", 0):
-        reason = "lease expired"
+        over = now() - holder.get("lease_until", 0)
+        alive = (holder.get("mode") == "wrapped"
+                 and pid_alive(holder.get("pid", -1)))
+        if alive and over <= WRAPPED_ALIVE_GRACE_MIN * 60:
+            # Still running, just not beating. Leave it alone (finding 458).
+            key = (holder.get("job"), holder.get("acquired_at"))
+            if key not in _GRACE_ANNOUNCED and over > 60:
+                _GRACE_ANNOUNCED.add(key)
+                event(holder.get("job", "unknown"), "lease-grace",
+                      reason="lease lapsed %.1f min ago but pid %s is alive; "
+                             "waiting up to %s min before calling it stale"
+                             % (over / 60.0, holder.get("pid"),
+                                WRAPPED_ALIVE_GRACE_MIN),
+                      held_seconds=round(now() - holder.get("acquired_at", now())))
+            return None
+        reason = ("lease expired %.1f min ago, past the %s min grace, pid %s"
+                  % (over / 60.0, WRAPPED_ALIVE_GRACE_MIN, holder.get("pid"))) \
+            if alive else "lease expired"
     elif holder.get("mode") == "wrapped" and not pid_alive(holder.get("pid", -1)):
         reason = "holder pid %s is gone" % holder.get("pid")
 
@@ -727,6 +801,36 @@ def acquire(job, mode="cooperative", lease_minutes=DEFAULT_LEASE_MIN,
         return note_refusal(job, EX_NOTREADY,
                             "preconditions not met after waiting %s min" % ready_wait_minutes)
 
+    # THE LANE THAT CANNOT BE STARVED (finding 20260909-daily-ops-exceptions-502)
+    # -------------------------------------------------------------------------
+    # One global lock serialises writers, and that is right: two routines
+    # committing to one checkout is the collision this file exists to prevent.
+    # But a READ-ONLY check writes nothing anyone can collide with, and putting
+    # it behind the same lock means one long render can delete the whole morning.
+    #
+    # On 9 Sep 2026 content-engine held the lock from 02:16 to past 07:13. Behind
+    # it, in order: mcp-inventory, drift-scan, estate-drift, session-keepalive,
+    # data-invariants, project-status-sync, ceo-agent, drive-auth, masterplan-sync
+    # — ten jobs deep, and the four scans that tell Kevin the platform is intact
+    # never ran. Measured medians for the whole block are 2.1s, 109.5s, 1.0s and
+    # 0.3s: together under two minutes of machine time, starved by four hours of
+    # ffmpeg. A priority tier would not have saved them either, because the lock
+    # was HELD, not queued — nothing short of preempting a live render jumps that,
+    # and preempting a live render is finding 458.
+    #
+    # So a job that only READS opts out of the lock entirely with
+    # `"lockExempt": true` in job-schedule.json. It still checks staleness, still
+    # waits for its preconditions, still writes its queue events, and still shows
+    # up in attendance. It simply never queues. Only add a job here once you have
+    # checked it makes no git commit, no Airtable write and no file write outside
+    # its own report — the exemption is the whole safety argument.
+    if cfg.get("lockExempt"):
+        event(job, "ran-unlocked", mode=mode,
+              reason="lockExempt: read-only check, never queues")
+        if not quiet:
+            print("UNLOCKED %s: read-only check, runs without the queue lock" % job)
+        return EX_OK
+
     # Fixed-width timestamp so plain lexical sort is true arrival order.
     ticket_name = "%017.6f-%d" % (now(), os.getpid())
     ticket_path = os.path.join(TICKET_DIR, ticket_name)
@@ -796,13 +900,22 @@ def acquire(job, mode="cooperative", lease_minutes=DEFAULT_LEASE_MIN,
 
             if now() >= deadline:
                 holder = read_holder() or {}
+                # Name the blocker AND how long it has been blocking. Until now
+                # the record said only "behind content-engine", so nine separate
+                # timeouts on 9 Sep read as nine unrelated jobs being unlucky
+                # rather than as one job holding the machine for five hours.
+                held_min = None
+                if holder.get("acquired_at"):
+                    held_min = round((now() - holder["acquired_at"]) / 60.0, 1)
                 event(job, "queue-timeout", waited_seconds=round(now() - started),
-                      behind=holder.get("job"))
+                      behind=holder.get("job"), holder_held_minutes=held_min)
+                blocker = "%s (holding %s min)" % (holder.get("job", "?"), held_min) \
+                    if held_min is not None else holder.get("job", "?")
                 if not quiet:
                     print("BUSY %s: gave up after %s min behind %s" %
-                          (job, timeout_minutes, holder.get("job", "?")))
+                          (job, timeout_minutes, blocker))
                 return note_refusal(job, EX_BUSY, "gave up after %s min behind %s"
-                                    % (timeout_minutes, holder.get("job", "?")))
+                                    % (timeout_minutes, blocker))
 
             time.sleep(POLL_SECONDS)
     finally:
@@ -879,6 +992,16 @@ def release_outcome(code):
 
 
 def release(job, quiet=False, outcome="completed", reason=None):
+    # A lock-exempt job never took the lock, so it has nothing to give back.
+    # Without this it would fall through to the "you are not the holder" branch
+    # and exit 64, which every caller reads as a failed run.
+    if (load_schedule().get(job) or {}).get("lockExempt"):
+        event(job, "release-noop", note="lockExempt: never held the lock",
+              outcome=outcome)
+        if not quiet:
+            print("NOTE %s: lock-exempt, nothing to release" % job)
+        return EX_OK
+
     holder = read_holder()
     if holder is None:
         if os.path.isdir(LOCK_DIR):
@@ -1002,6 +1125,12 @@ def run(job, cmd, lease_minutes, timeout_minutes, check_stale,
     stop = threading.Event()
     running = {"proc": None, "lost": "", "code": None}
 
+    # A lock-exempt job holds no lease, so there is nothing to keep alive — and
+    # a heartbeat here would be actively dangerous: it would read the CURRENT
+    # holder (some other job, quite legitimately), call that a lost lock, and
+    # SIGKILL a child that never had one. Run the command, record it, done.
+    exempt = bool((load_schedule().get(job) or {}).get("lockExempt"))
+
     def stop_child(reason):
         # TERM first, KILL only if it lingers. A wrapper script traps TERM and
         # writes its "done" line and log summary before dying; SIGKILL is
@@ -1063,8 +1192,10 @@ def run(job, cmd, lease_minutes, timeout_minutes, check_stale,
                 if write_failures == 1:
                     event(job, "heartbeat-write-failed", reason=str(exc))
 
-    ticker = threading.Thread(target=beat, daemon=True)
-    ticker.start()
+    ticker = None
+    if not exempt:
+        ticker = threading.Thread(target=beat, daemon=True)
+        ticker.start()
     try:
         proc = subprocess.Popen(cmd)
         running["proc"] = proc
@@ -1121,6 +1252,43 @@ def read_events():
         return
 
 
+# A mark that CLOSES the day, in the words routines actually use.
+#
+# Regression origin: 8 Sep 2026 (finding 20260908-daily-ops-497). completed_today
+# matched a note of exactly "end" and nothing else, so every descriptive close
+# silently did not count. Read straight off the live queue log, the marks written
+# by real runs were:
+#
+#   "end"                                                        counted
+#   "end: report written, phases 1-5 complete"                    DID NOT
+#   "daily-ops complete: 5 phases, 2 PRs merged, main restored"    DID NOT
+#   "daily-ops finished: 5 phases, PR #286 open on protected path" DID NOT
+#
+# Three of the four days that finished cleanly left the double-run guard open,
+# and the guard exists precisely because a second full run started ten minutes
+# after the first on 19 Aug 2026.
+#
+# The rule is deliberately narrow: strip the job's own name off the front, then
+# the FIRST word must be one of these. "phase 1, 10 Aug run; mark added..." — a
+# real start mark in the same log — still does not close the day.
+END_WORDS = frozenset((
+    "end", "ends", "ended", "finish", "finished",
+    "complete", "completed", "done",
+))
+
+
+def is_end_mark(job, note):
+    """Does this mark note close the day for `job`?"""
+    text = (note or "").strip().lower()
+    if not text:
+        return False
+    name = (job or "").strip().lower()
+    if name and text.startswith(name):
+        text = text[len(name):].lstrip(" :,-\u2014")
+    first = re.split(r"[^a-z]+", text, maxsplit=1)[0]
+    return first in END_WORDS
+
+
 def completed_today(job, ref=None):
     """The London-local time `job` last stamped an END mark today, or None.
 
@@ -1138,7 +1306,7 @@ def completed_today(job, ref=None):
     for rec in read_events():
         if rec.get("job") != job or rec.get("state") != "mark":
             continue
-        if (rec.get("note") or "") != "end":
+        if not is_end_mark(job, rec.get("note")):
             continue
         ts = parse_event_ts(rec.get("ts"))
         if ts is None or ts > ref:
@@ -1268,6 +1436,11 @@ def main(argv=None):
     sp = sub.add_parser("mark")
     sp.add_argument("job")
     sp.add_argument("--note", default="")
+    # Finding 20260905-daily-ops-467: there was no way to say "this run is
+    # finished" except by knowing that the note had to be the bare word "end".
+    sp.add_argument("--end", action="store_true",
+                    help="close the day: prefixes the note so the double-run "
+                         "guard counts it")
 
     # The other half of `mark`: refuse a second full run on a day that already
     # finished one. Exits EX_SKIPPED (3), which the caller reads as "nothing
@@ -1332,14 +1505,19 @@ def main(argv=None):
         print("%s: no end mark today, safe to start" % a.job)
         return EX_OK
     if a.cmd == "mark":
-        rec = event(a.job, "mark", note=a.note)
+        note = a.note
+        if getattr(a, "end", False) and not is_end_mark(a.job, note):
+            note = ("end: %s" % note) if note else "end"
+        rec = event(a.job, "mark", note=note)
+        a.note = note
         # THE NOTE DECIDES THE WORDING (finding 387, 28 Aug 2026). The event was
         # always right — {state: mark, note: "end"} — but the console said
         # "marked as running" for it, so an END stamp read as a START. A later
         # run trusting the console instead of the log would conclude the end mark
         # failed and re-stamp, or treat a finished day as unfinished.
         print("%s: marked as %s at %s"
-              % (a.job, "FINISHED" if a.note == "end" else "running", rec["ts"]))
+              % (a.job, "FINISHED" if is_end_mark(a.job, a.note) else "running",
+                 rec["ts"]))
         return EX_OK
     return EX_USAGE
 
