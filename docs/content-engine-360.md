@@ -640,3 +640,22 @@ premium model through the proxy, scaffold as the mandatory start, review-and-rep
 - **Daytime publisher.** `content-engine-publish.sh` (job `content-engine-publish`, hourly 07:15 to 20:15, light API work, no rendering): verdicts, GHL post links, the next episode to YouTube, its clips and article and podcast the same day once the link exists. The night job keeps rendering and carding.
 - **Runtime checkout.** Both jobs run from `.claude/worktrees/content-engine-runtime`, a worktree kept on `main` that fast-forwards itself before each run, because the main checkout is frequently on another session's branch.
 - Mode: `~/.config/od/content_engine_mode` = live since 8 Sep 2026 (Kevin: "we need something published tomorrow").
+
+
+## Operations Director pictures, VERSION 5: the dense board (9 Sep 2026)
+
+Kevin knocked back every card again (9 Sep): the pictures were not visible or clickable on the cards, and the boards were "just not up
+to standard"; the reference is Dan Martell's LinkedIn infographics and the lead magnet page, "the quality that all of our content needs
+to be at". Two facts found first: a second session's approval refresh had re-submitted the cards at 13:55 on 8 Sep with its own
+`infographic.png` and a card text carrying no link (so what Kevin saw was not the v4 board), and Dan Martell's boards (read on his own
+LinkedIn feed) are dense cheat sheets: a bold banner with one highlighted phrase, an italic standfirst, two-column panels with pill
+headers, an icon plus a short headline plus a one-line explanation on every row, a formula box, a numbered guide band.
+
+Built: `od_prompts.ENRICH_SYSTEM` asks the model for the WORDS of that board from the finished post (headline and detail per item, a
+hero value and label, the rule, the guide, panel labels; no new facts, em dashes stripped and the next letter capitalised);
+`od_lane.enrich_visual` stores them on the post; `od_board.build_rich` draws the board in the Operations Director language: banner with
+highlight, rows that grow to fill the height, a hero pill that carries the owner's stop, the rule box, the guide band, the strip. The
+stat board uses the post's numbered steps as its rows when the spec has fewer than three items. The card now leads with "OPEN THE PICTURE
+FIRST" and the permanent link, the PNG and PDF ride on the same submit (`--attach`), and a redo answers Kevin's points line by line
+(`--receipt`). `od_lane.py repicture` redraws every unpublished post and clears it for re-raise. All five shapes reviewed by eye against
+the lead magnet before any card went up.
