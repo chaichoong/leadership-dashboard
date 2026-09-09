@@ -649,8 +649,15 @@ def render_visual(p):
     source = od_compose.picture_source(p.get("source_line", ""))
     try:
         if not p.get("rich"): enrich_visual(p)
-        od_board.render(template, p["visual"], p.get("text", ""), source, p["day"], png, rich=p.get("rich"))
-        passed, issues = od_compose.review(png, od_compose.required_lines(template, p["visual"]))
+        rich = p.get("rich")
+        od_board.render(template, p["visual"], p.get("text", ""), source, p["day"], png, rich=rich)
+        # the dense board is judged on ITS words (the enriched headlines), not on the plain spec it was written from
+        required = ([rich.get("title", "")] + [i.get("head", "") for i in rich.get("items", [])]) if rich else od_compose.required_lines(template, p["visual"])
+        passed, issues = od_compose.review(png, [r for r in required if r])
+        if rich and od_compose.hard_faults(issues):
+            print("od draft: dense board for %s failed on %s; trying the plain board" % (p["date"], ", ".join(od_compose.hard_faults(issues))))
+            od_board.render(template, p["visual"], p.get("text", ""), source, p["day"], png, rich=None)
+            passed, issues = od_compose.review(png, od_compose.required_lines(template, p["visual"]))
         # A board's geometry is code, so the review's taste notes (an open zone, a quiet bottom) are logged, not fatal; only a HARD fault
         # rejects it: something touching text, clipped or missing text, a misspelling, a name. Measured 8 Sep: the reviewer sent two clean
         # boards to Gemini over "empty grid", and Gemini garbled them.
