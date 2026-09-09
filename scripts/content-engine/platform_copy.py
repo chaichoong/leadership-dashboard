@@ -185,7 +185,7 @@ def rules_check(fields, transcript="", km=None):
         if m: issues.append("%s: US spelling '%s'" % (field, m.group(0)))
         lim = LIMITS.get(field)
         if lim and len(t) > lim: issues.append("%s: %d chars, limit %d" % (field, len(t), lim))
-        for fig in re.findall(r"£[\d,]+(?:\.\d+)?[MmKk]?|\b\d{1,3}(?:,\d{3})+\b(?!\s*km)", t):
+        for fig in re.findall(r"£[\d,]+(?:\.\d+)?[MmKk]?|\b\d{1,3}(?:,\d{3})+\b(?!\s*km)(?!\.\d+\s*km)", t):   # km figures are check_km's
             mission = fig.upper() in ("40,075", "£1M", "£2M") or (fig == "£1" and "£1 million" in t) or (fig == "£2" and "£2 million" in t)
             bare = fig.replace(",", "")
             if fig not in transcript and bare not in transcript.replace(",", "") and not mission:   # "21,950" and "21950" are one figure
