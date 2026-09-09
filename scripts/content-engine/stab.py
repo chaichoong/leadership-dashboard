@@ -174,7 +174,48 @@ def calib(clip, out_png, times=(5.0, 20.0, 35.0), size=(320, 180), dfov=200, gai
     print("wrote", out_png, "order (row-major, %d per row):" % cols, names)
 
 
-def plan_views(t, Rs, n_frames, offset, smooth_s, blend, tilt_deg, level, raise_cut=True):
+def parse_pans(spec):
+    """'t:yaw:pitch:seconds;...' -> list of (t, yaw_deg, pitch_deg, seconds). Empty or None -> []."""
+    out = []
+    for part in (spec or "").split(";"):
+        if not part.strip(): continue
+        t, yaw, pitch, sec = (float(x) for x in part.split(":"))
+        out.append((t, yaw, pitch, sec))
+    return out
+
+
+def pan_weight(u, ease=0.2):
+    """0..1 over the pan: ease in over the first `ease` of it, hold, ease out over the last `ease`. Smooth (cosine)."""
+    if u <= 0 or u >= 1: return 0.0
+    if u < ease: return 0.5 - 0.5 * math.cos(math.pi * u / ease)
+    if u > 1 - ease: return 0.5 - 0.5 * math.cos(math.pi * (1 - u) / ease)
+    return 1.0
+
+
+def pan_target(F, yaw_deg, pitch_deg):
+    """The view direction turned by yaw about world-up (positive = to the viewer's right) and pitched up."""
+    B = basis(F)
+    Ft = skew_exp(UP_WORLD * math.radians(yaw_deg)) @ F
+    Bt = basis(Ft)
+    Ft = skew_exp(Bt[:, 0] * math.radians(pitch_deg)) @ Ft
+    return Ft / np.linalg.norm(Ft)
+
+
+def apply_pans(F_sm, pans, fps=FPS):
+    """Blend the planned view toward each pan target and back (Kevin, 9 Sep 2026: pan to what he points at, then return)."""
+    F = F_sm.copy(); n = len(F)
+    for (t0, yaw, pitch, sec) in pans:
+        i0, i1 = int(round(t0 * fps)), int(round((t0 + sec) * fps))
+        for i in range(max(i0, 0), min(i1, n)):
+            w = pan_weight((i - i0) / max(i1 - i0, 1))
+            if w <= 0: continue
+            T = pan_target(F_sm[i], yaw, pitch)
+            v = (1 - w) * F_sm[i] + w * T
+            F[i] = v / np.linalg.norm(v)
+    return F
+
+
+def plan_views(t, Rs, n_frames, offset, smooth_s, blend, tilt_deg, level, raise_cut=True, pans=None):
     """Per-frame (R, F) pairs plus a mode flag. Mode 'body' = third-person along the stick;
     'face' = the camera has been raised (stick direction pitched up), so look at Kevin's face."""
     Rf = per_frame_R(t, Rs, n_frames, offset=offset)
@@ -208,7 +249,25 @@ def plan_views(t, Rs, n_frames, offset, smooth_s, blend, tilt_deg, level, raise_
         for i in range(n_frames):
             if mode[i] == "face":
                 F_sm[i] = F_face[i]
+    if pans:
+        F_sm = apply_pans(F_sm, pans)
     return Rf, F_sm, mode
+
+
+def preview_frame(clip, t_sec, map_name="z-yx", size=(480, 270), dfov=200.0, proj="sg", hfov=120.0, tilt_deg=11.0, level=True, gain=0.0003, cache={}):
+    """One small body-view frame at t_sec, the way the master would show it: what the pointing detector looks at.
+    The IMU integration is cached per clip so a handful of previews cost one integration."""
+    key = (clip, map_name)
+    if key not in cache:
+        t, gyro, acc = load_imu(clip); M = mapping_matrices()[map_name]
+        cache[key] = (t, integrate(t, gyro, acc, M, gain=gain))
+    t, Rs = cache[key]
+    n = int(round(t_sec * FPS)) + 1
+    Rf, F_sm, mode = plan_views(t, Rs, n, 0.0, 1.0, 0.6, tilt_deg, level, raise_cut=False)
+    w, h = size
+    vd = view_dirs(w, h, dfov, proj, hfov)
+    front = insta.decode_frame(clip, t_sec, insta.FRONT); back = insta.decode_frame(clip, t_sec, insta.BACK)
+    return render_frame(front, back, Rf[n - 1], F_sm[n - 1], vd, w, h, True)
 
 
 def _render_one(args):
@@ -219,7 +278,7 @@ def _render_one(args):
 
 def render(clip, out_mp4, map_name, dfov, start, end, size, smooth_s=1.0, tilt_deg=0.0, roll_lock=True,
            gain=0.0003, offset=0.0, blend=0.5, still=None, proj="sg", hfov=120.0, level=False,
-           workers=1, raise_cut=True, video_only=False):
+           workers=1, raise_cut=True, video_only=False, pans=None):
     t, gyro, acc = load_imu(clip)
     M = mapping_matrices()[map_name]
     Rs = integrate(t, gyro, acc, M, gain=gain)
@@ -227,7 +286,7 @@ def render(clip, out_mp4, map_name, dfov, start, end, size, smooth_s=1.0, tilt_d
                                 "format=duration", "-of", "csv=p=0", clip], capture_output=True, text=True).stdout)
     end = min(end if end else dur, dur)
     n0, n1 = int(round(start * FPS)), int(round(end * FPS))
-    Rf, F_sm, mode = plan_views(t, Rs, n1, offset, smooth_s, blend, tilt_deg, level, raise_cut)
+    Rf, F_sm, mode = plan_views(t, Rs, n1, offset, smooth_s, blend, tilt_deg, level, raise_cut, pans=parse_pans(pans))
     w, h = size
     vd_body = view_dirs(w, h, dfov, proj, hfov)
     vd_face = view_dirs(w, h, 120.0, "flat", 100.0)     # tighter, natural view for the raised-camera sign-off
@@ -252,6 +311,7 @@ def render(clip, out_mp4, map_name, dfov, start, end, size, smooth_s=1.0, tilt_d
                    "--blend", str(blend), "--proj", proj, "--hfov", str(hfov), "--workers", "1", "--video-only"]
             if level: cmd.append("--level")
             if not raise_cut: cmd.append("--no-raise-cut")
+            if pans: cmd += ["--pans", pans]
             procs.append(subprocess.Popen(cmd, stdout=subprocess.DEVNULL))
         for p in procs:
             if p.wait() != 0: raise SystemExit("a render slice failed")
@@ -308,7 +368,21 @@ def sync(clip, map_name, start=5.0, end=15.0, gain=0.0003, offsets=None, lens=72
     return best
 
 
+def _selftest_pans():
+    assert parse_pans("253.56:75.0:18.0:3.5;400:-75:9:3.5") == [(253.56, 75.0, 18.0, 3.5), (400.0, -75.0, 9.0, 3.5)] and parse_pans("") == []
+    assert pan_weight(0.0) == 0.0 and pan_weight(0.5) == 1.0 and pan_weight(1.0) == 0.0 and 0 < pan_weight(0.1) < 1
+    F = np.array([0.0, 0.0, 1.0], np.float32)
+    T = pan_target(F, 90.0, 0.0); assert abs(np.dot(T, F)) < 1e-4 and abs(T[1]) < 1e-4, "90 deg yaw about world-up stays level and turns a right angle"
+    Tp = pan_target(F, 0.0, 30.0); assert Tp[1] < -0.4 and abs(np.degrees(np.arccos(np.clip(np.dot(Tp, F), -1, 1))) - 30) < 0.5, "pitch up = towards world-up (y down in this frame)"
+    Fs = np.tile(F, (int(FPS * 10), 1)).astype(np.float32)
+    out = apply_pans(Fs, [(2.0, 90.0, 0.0, 3.5)])
+    mid = out[int(FPS * 3.75)]; assert abs(np.dot(mid, F)) < 0.05, "held view at the pan's middle is the target"
+    assert np.allclose(out[int(FPS * 1.0)], F) and np.allclose(out[int(FPS * 6.0)], F), "untouched before and after"
+    assert np.allclose(np.linalg.norm(out, axis=1), 1.0, atol=1e-5)
+
+
 def selftest():
+    _selftest_pans()
     maps = mapping_matrices(); assert len(maps) == 24 and "z-yx" in maps
     M = maps["z-yx"]; assert round(float(np.linalg.det(M))) == 1
     vd = view_dirs(96, 54, 200); assert vd.shape == (96 * 54, 3) and abs(float(np.linalg.norm(vd, axis=1).max()) - 1) < 1e-5
@@ -341,7 +415,7 @@ if __name__ == "__main__":
     ap.add_argument("--start", type=float, default=0.0); ap.add_argument("--end", type=float, default=None)
     ap.add_argument("--size", default="1920x1080"); ap.add_argument("--smooth", type=float, default=1.0)
     ap.add_argument("--tilt", type=float, default=0.0); ap.add_argument("--times", default="5,20,35")
-    ap.add_argument("--no-roll-lock", action="store_true"); ap.add_argument("--gain", type=float, default=0.0003); ap.add_argument("--offset", type=float, default=0.0); ap.add_argument("--blend", type=float, default=0.5); ap.add_argument("--still", type=float, default=None); ap.add_argument("--proj", default="sg"); ap.add_argument("--hfov", type=float, default=120.0); ap.add_argument("--level", action="store_true"); ap.add_argument("--workers", type=int, default=1); ap.add_argument("--no-raise-cut", action="store_true"); ap.add_argument("--video-only", action="store_true"); ap.add_argument("--only", default=None)
+    ap.add_argument("--no-roll-lock", action="store_true"); ap.add_argument("--gain", type=float, default=0.0003); ap.add_argument("--offset", type=float, default=0.0); ap.add_argument("--blend", type=float, default=0.5); ap.add_argument("--still", type=float, default=None); ap.add_argument("--proj", default="sg"); ap.add_argument("--hfov", type=float, default=120.0); ap.add_argument("--level", action="store_true"); ap.add_argument("--workers", type=int, default=1); ap.add_argument("--no-raise-cut", action="store_true"); ap.add_argument("--video-only", action="store_true"); ap.add_argument("--only", default=None); ap.add_argument("--pans", default=None, help="t:yaw:pitch:seconds;... pans to what Kevin points at")
     # --no-raise-cut: Kevin (3 Sep 2026), no close-up at the raised camera; one angle throughout
     a = ap.parse_args()
     if a.mode == "calib":
@@ -350,4 +424,4 @@ if __name__ == "__main__":
         sync(a.clip, a.map, start=a.start, end=(a.end or a.start + 10), gain=a.gain, dfov=a.dfov, smooth_s=a.smooth)
     else:
         w, h = (int(x) for x in a.size.split("x"))
-        render(a.clip, a.out, a.map, a.dfov, a.start, a.end, (w, h), a.smooth, a.tilt, not a.no_roll_lock, a.gain, a.offset, a.blend, a.still, a.proj, a.hfov, a.level, a.workers, not a.no_raise_cut, a.video_only)
+        render(a.clip, a.out, a.map, a.dfov, a.start, a.end, (w, h), a.smooth, a.tilt, not a.no_roll_lock, a.gain, a.offset, a.blend, a.still, a.proj, a.hfov, a.level, a.workers, not a.no_raise_cut, a.video_only, a.pans)

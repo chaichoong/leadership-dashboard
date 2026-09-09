@@ -82,7 +82,17 @@ def copy_block(label, fields, sections):
     return ("%s\n\n%s" % (label, "\n\n".join(lines))) if lines else "%s\nNo copy written yet." % label
 
 
-def build_card(day, full, lfmd=None, short=None, headline=""):
+def pans_for(day, ledger):
+    """The camera pans the render planned for this episode, for the card (Kevin, 9 Sep 2026: "confirm it in the
+    approvals card so that I can look out for what you've done")."""
+    import pointing
+    for e in ledger.values():
+        if e.get("episode") == day and e.get("role") == "episode":
+            return pointing.card_lines(e.get("pans") or [], model_present=os.path.exists(pointing.MODEL))
+    return pointing.card_lines([], model_present=os.path.exists(pointing.MODEL))
+
+
+def build_card(day, full, lfmd=None, short=None, headline="", pans_lines=None):
     """The write-up. Kevin's rule: the ask in one line first, everything else after, and the
     closing 'Carrying this out will involve:' line so the queue can show what approval does."""
     f = full.get("fields", {}); lf = (lfmd or {}).get("fields", {}); sf = (short or {}).get("fields", {})
@@ -107,7 +117,8 @@ def build_card(day, full, lfmd=None, short=None, headline=""):
         if m: review.append(m.group(1).strip())
     checks = ("Rules check flagged: " + " | ".join(review)) if review else "Rules check: nothing flagged (UK English, no em dashes, no figures that are not in the transcript)."
     closing = closing_line(publish_mode())
-    out = "\n\n".join([ask, "Watch before you approve:\n" + "\n".join(watch_lines), "Where it goes if you approve:\n" + "\n".join(where),
+    pans_block = "\n".join(pans_lines) if pans_lines else ""
+    out = "\n\n".join([ask, "Watch before you approve:\n" + "\n".join(watch_lines)] + ([pans_block] if pans_block else []) + ["Where it goes if you approve:\n" + "\n".join(where),
                        "The copy, as written (where it shows [ADD YOUTUBE LINK], the engine writes the YouTube link there once the video is up; "
                        "a post still carrying a placeholder is refused, never published):\n\n" + "\n\n".join(copy), checks, closing])
     desc = ("Approve Episode %d for publishing. The Content Engine rendered the three videos, wrote the platform copy "
@@ -194,8 +205,8 @@ def raise_card(day, dry_run=False):
     recs = bundle(day)
     full = recs["Long Form Video"]
     if not full: raise SystemExit("no Full record for episode %d" % day)
-    headline = headline_for(day, watch.load_ledger())
-    name, desc, out = build_card(day, full, recs["Learnings From My Diary"], recs["Short Form Video"], headline)
+    ledger = watch.load_ledger(); headline = headline_for(day, ledger)
+    name, desc, out = build_card(day, full, recs["Learnings From My Diary"], recs["Short Form Video"], headline, pans_for(day, ledger))
     state = load_state()
     if str(day) in state and state[str(day)].get("task"):
         print("episode %d already has card %s" % (day, state[str(day)]["task"])); return None
@@ -232,7 +243,8 @@ def refresh_card(day):
     state = load_state(); e = state.get(str(day))
     if not e or not e.get("task"): raise SystemExit("episode %d has no card to refresh" % day)
     recs = bundle(day); full = recs["Long Form Video"]
-    name, desc, out = build_card(day, full, recs["Learnings From My Diary"], recs["Short Form Video"], headline_for(day, watch.load_ledger()))
+    ledger = watch.load_ledger()
+    name, desc, out = build_card(day, full, recs["Learnings From My Diary"], recs["Short Form Video"], headline_for(day, ledger), pans_for(day, ledger))
     with tempfile.NamedTemporaryFile("w", suffix=".md", delete=False) as fh:
         fh.write(out); path = fh.name
     try:
@@ -289,6 +301,8 @@ def selftest():
         assert s in out, s
     assert ("Nothing reaches a public feed" in out) == (publish_mode() != "live"), "the closing line follows the engine's mode (live since 8 Sep 2026)"
     assert "Nothing is published until you approve" in desc
+    _, _, outp = build_card(2225, full, lfmd, short, "A / B", ["Camera pans (the engine saw you point and heard you talk about the surroundings):", "- 4:13, to the right of you for 4 s: \"over there at the sun setting\""])
+    assert "Camera pans" in outp and outp.index("Camera pans") < outp.index("Where it goes if you approve"), "pans are listed before the destinations"
     _, _, out2 = build_card(2226, {"id": "x", "fields": {"Video Edited URL": "u", "Thumbnail URL": "t", "YouTube Copy": "y"}})
     assert "no teaser clip was recorded" in out2 and "no clip" in out2 and "No copy written yet." in out2 and "nothing flagged" in out2
     assert task_name(2226) == "CONTENT: Publish Episode 2226 of Diary of a Runpreneur"

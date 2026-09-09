@@ -132,4 +132,20 @@ describe('content-engine render', () => {
     expect(pause).toBeGreaterThan(branch);
     expect(r.indexOf('if role == "lfmd-only":', branch + 1)).toBe(-1); // one branch, not a second copy after the full render
   });
+
+  it("pans to what Kevin points at: speech cue + raised arm -> a planned pan in the reframer, listed on the card; the sign was proven on 2054 (9 Sep 2026)", () => {
+    const pt = readFileSync(path.join(DIR, 'pointing.py'), 'utf8');
+    expect(pt).toContain('yaw = -PAN_YAW if side == "right" else PAN_YAW');
+    expect(pt).toContain('if not os.path.exists(MODEL): return []'); // no model, no pan, and the card says so
+    const st = readFileSync(path.join(DIR, 'stab.py'), 'utf8');
+    expect(st).toContain('def apply_pans(F_sm, pans, fps=FPS)');
+    expect(st).toContain('ap.add_argument("--pans"');
+    expect(st).toContain('if pans: cmd += ["--pans", pans]'); // slices carry it
+    const r = readFileSync(path.join(DIR, 'render.py'), 'utf8');
+    expect(r).toContain('pans = find_pans_for(clip, srt); e["pans"] = pans');
+    expect(r).toContain('if master_complete(dest, clip) and had == (pans or ""):'); // a master without the pans is not reused
+    const a = readFileSync(path.join(DIR, 'approval.py'), 'utf8');
+    expect(a).toContain('def pans_for(day, ledger)');
+    expect(a).toMatch(/build_card\(day, full, recs\["Learnings From My Diary"\], recs\["Short Form Video"\], headline, pans_for\(day, ledger\)\)/);
+  });
 });
