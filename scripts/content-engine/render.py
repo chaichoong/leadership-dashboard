@@ -283,15 +283,29 @@ def master_complete(dest, clip):
     return d0 > 0 and abs(d1 - d0) < 2.0
 
 
-def render_masters(clip, workdir, only=None):
+def find_pans_for(clip, srt):
+    """Where Kevin points at his surroundings while talking about them (pointing.py). Never stops a render:
+    any failure means no pan, said on stderr, and the card says none were planned."""
+    try:
+        import pointing, stab
+        return pointing.find_pans(clip, open(srt).read(), preview=lambda t: stab.preview_frame(clip, t))
+    except Exception as ex:
+        print("pointing: skipped (%s)" % str(ex)[:120], file=sys.stderr); return []
+
+
+def render_masters(clip, workdir, only=None, pans=""):
     out = {}
     for aspect, args in RECIPE.items():
         if only and aspect != only: continue
         dest = os.path.join(workdir, "master_%s.mp4" % aspect.replace(":", "x"))
-        if master_complete(dest, clip):
+        side = dest + ".pans"
+        had = open(side).read() if os.path.exists(side) else ""
+        if master_complete(dest, clip) and had == (pans or ""):
             print("render: reusing finished %s master" % aspect); out[aspect] = dest; continue
-        subprocess.run([sys.executable, os.path.join(HERE, "stab.py"), "render", clip, dest, "--map", "z-yx"] + args,
+        extra = ["--pans", pans] if pans else []
+        subprocess.run([sys.executable, os.path.join(HERE, "stab.py"), "render", clip, dest, "--map", "z-yx"] + args + extra,
                        check=True, stdout=subprocess.DEVNULL)
+        open(side, "w").write(pans or "")
         out[aspect] = dest
     return out
 
@@ -471,7 +485,13 @@ def process(key, ledger, keep=False):
                                      "-of", "csv=p=0", clip], capture_output=True, text=True).stdout or 0)
     role = clip_role(duration, bool(window))
     e["lfmd_window"] = window; e["role"] = role; e["duration"] = round(duration, 1); watch.save_ledger(ledger)
-    masters = render_masters(clip, workdir) if role == "episode" else {"9:16": render_masters(clip, workdir, only="9:16")["9:16"]}
+    if role == "episode":
+        import pointing
+        pans = find_pans_for(clip, srt); e["pans"] = pans; watch.save_ledger(ledger)
+        if pans: print("pointing: %d pan(s) planned: %s" % (len(pans), pointing.pans_arg(pans)))
+        masters = render_masters(clip, workdir, pans=pointing.pans_arg(pans))
+    else:
+        masters = {"9:16": render_masters(clip, workdir, only="9:16")["9:16"]}
     title = title_from_transcript(text)
     paths = build_outputs(masters, srt, day, title, workdir, lfmd=window, role=role)
     if role == "episode":
