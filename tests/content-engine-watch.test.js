@@ -45,7 +45,7 @@ describe('content-engine watch: nightly wiring', () => {
   it('is a wrapped, Drive-gated job in job-schedule.json that retries when deferred', () => {
     expect(job).toBeTruthy();
     expect(job.mode).toBe('wrapped');
-    expect(job.cron).toBe('0 2 * * *');
+    expect(job.cron).toBe('0 22 * * *');
     expect(job.retryWhenDeferred).toBe(true);
     const drive = job.needs.find((n) => typeof n === 'object' && n.drive);
     expect(drive.drive).toContain('Runpreneur - Raw Video');

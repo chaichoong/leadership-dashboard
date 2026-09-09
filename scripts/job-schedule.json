@@ -482,10 +482,10 @@
   "retryWhenDeferredNote": "Hourly: the next tick covers a deferred one."
  },
  "content-engine": {
-  "cron": "0 2 * * *",
+  "cron": "0 22 * * *",
   "maxLateMinutes": 180,
   "mode": "wrapped",
-  "note": "Content Engine 360 lane, R1 (Kevin: spike GO 2 Sep 2026, 'carry on with the folder watch' 3 Sep). Scans the raw Drive folder, one episode record per new shooting day, pulls one clip a night to local disk for the render. Drive-gated on the raw folder because a cold stream stalls for 15 min per GB; Lateness capped at 180 min (02:00-05:00) on 4 Sep 2026: at 600 a deferred run could be re-fired by retry-deferred as late as noon, and on 4 Sep that put two renders on the Mac at 11:35 while Kevin was working. content-engine-run.sh also refuses 07:00-21:59 outright, because a manual launch never reads this file. Disk precondition added 9 Sep 2026 (finding 20260909-daily-ops-exceptions-503): 27 GB free against a clip needing ~42 GB of working space, so the render could not finish and held the queue for 4h50m. 60 GB is the working figure from this script's own header (clips 0.3-5 GB, renders and intermediates on top). Below that the run DEFERS with a readable reason instead of taking the lock and stalling everything behind it.",
+  "note": "Start moved 02:00 -> 22:00 on 9 Sep 2026 (Kevin): a full episode takes about 2.2 h to render the first time, so three a night is about 7 h and must start at 22:00 to finish before 07:00; the 02:00 run on 9 Sep was killed at the queue limit. Content Engine 360 lane, R1 (Kevin: spike GO 2 Sep 2026, 'carry on with the folder watch' 3 Sep). Scans the raw Drive folder, one episode record per new shooting day, pulls one clip a night to local disk for the render. Drive-gated on the raw folder because a cold stream stalls for 15 min per GB; Lateness capped at 180 min (02:00-05:00) on 4 Sep 2026: at 600 a deferred run could be re-fired by retry-deferred as late as noon, and on 4 Sep that put two renders on the Mac at 11:35 while Kevin was working. content-engine-run.sh also refuses 07:00-21:59 outright, because a manual launch never reads this file. Disk precondition added 9 Sep 2026 (finding 20260909-daily-ops-exceptions-503): 27 GB free against a clip needing ~42 GB of working space, so the render could not finish and held the queue for 4h50m. 60 GB is the working figure from this script's own header (clips 0.3-5 GB, renders and intermediates on top). Below that the run DEFERS with a readable reason instead of taking the lock and stalling everything behind it.",
   "needs": [
    "network",
    {
