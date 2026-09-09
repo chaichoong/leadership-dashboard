@@ -173,7 +173,10 @@ def title_from_transcript(text):
     return " ".join(words[:mid]).upper() + "|" + " ".join(words[mid:]).upper()
 
 
-LFMD_START_RE = re.compile(r"learn\w*\s+(?:from|for|of|through|in|to)\s+(?:my|the)\s+diary", re.I)   # whisper heard "learning through my diary" on 2195
+# Whisper mishears the phrase: "learning through my diary" (2195), "the learnings from my diet" (2054, Kevin 9 Sep 2026:
+# "you need to have a little bit of flexibility... pretty much every day I do the learnings from my diary").
+# learn*/lesson* + a joining word + my/the + any word starting dia/die/dai (diary, diaries, diet, dairy).
+LFMD_START_RE = re.compile(r"(?:learn\w*|lesson\w*)\s+(?:from|for|of|through|in|to)\s+(?:my|the)\s+d(?:ia|ie|ai)\w*", re.I)
 SIGNOFF_RE = re.compile(r"thank you as always|stay positive|see you (?:again )?tomorrow", re.I)
 
 
@@ -537,6 +540,9 @@ def selftest():
     assert intro_insert_seconds([], 10) == 0.0
     assert INTRO_CLIP.endswith("Vlog Intro/runprenuer-intro_clip.mp4") and INTRO_TRIM_START == 1.0
     assert lfmd_window([(0, 5, "intro"), (60, 66, "so anyway, so learning through my diary, running off road"), (66, 90, "one"), (90, 95, "see you again tomorrow")]) == (60.0, 95.0), "2195's wording"
+    assert lfmd_window([(0, 5, "intro"), (60, 66, "So I suppose the learnings from my diet today"), (66, 90, "one"), (90, 95, "see you again tomorrow")]) == (60.0, 95.0), "2054: whisper heard diet"
+    assert lfmd_window([(0, 5, "intro"), (60, 66, "the lessons from the dairy are"), (66, 90, "one"), (90, 95, "see you again tomorrow")]) == (60.0, 95.0), "lessons / dairy"
+    assert lfmd_window([(0, 5, "I learned a lot on this diet plan"), (5, 40, "more")]) is None, "not a diary section"
     assert pick_cut([(4.2, 4.5), (7.9, 9.4)], 4.0, 9.0) == (8.05, 9.2), "the pause after the last sign-off word, speech back at its end"
     assert pick_cut([(4.2, 4.5), (6.0, 6.3)], 4.0, 9.0) is None, "word gaps under half a second never count"
     assert pick_cut([(30.83, 33.72)], 28.0, 34.0) == (30.98, 33.52), "2194: the caption ran 3 s past the last word"
