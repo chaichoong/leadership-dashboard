@@ -185,6 +185,14 @@ describe('buildPlan levers', () => {
         expect(p.levers.find(x => x.key === 'rooms:p1')).toBeUndefined();
         expect(p.totals.paper).toBe(372.62 + 135);
     });
+    it('a joint tenancy on a house where Kevin pays no council tax today is worth £0 and says so', () => {
+        const f = fixture(); f.units.pop(); f.tenants.pop(); f.tenancies.pop(); f.costs = [];
+        f.properties[0].strategy = 'Joint tenancy';
+        const ct = M.buildPlan(f, S, TODAY).levers.find(x => x.key === 'ct:p1');
+        expect(ct.monthly).toBe(0);
+        expect(ct.counted).toBe('now');
+        expect(ct.evidence[0]).toMatch(/No council tax paid by you/);
+    });
     it('Add tenants strategy drops the joint tenancy lever', () => {
         const f = fixture(); f.units.pop(); f.tenants.pop(); f.tenancies.pop();
         f.properties[0].strategy = 'Add tenants'; f.properties[0].plannedExtra = 1;

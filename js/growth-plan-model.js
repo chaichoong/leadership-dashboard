@@ -365,15 +365,18 @@
                 }
                 // Stage 2: council tax. Two tenants on one joint agreement makes them liable.
                 if (occupants === 2 && view.tenants.every(t => t.uc || t.hb) && prop.ctPayer !== 'Tenants' && strategy !== 'Add tenants' && strategy !== 'Hold') {
-                    const residual = round2(ctMonthly * s('ct_residual_pct', 0) / 100);
+                    // Only council tax Kevin pays TODAY counts as a saving (a live Costs row, which the bank
+                    // feed reconciles). Where nothing is paid, the joint tenancy is protection: it stops the
+                    // owner being billed for a house let by the room, and the row shows £0.
+                    const residual = round2(ctLive * s('ct_residual_pct', 0) / 100);
                     const credit = round2(residual * s('ct_credit_share', 100) / 100);
-                    const saving = round2(ctMonthly - credit);
-                    if (saving > 0) levers.push(lever({
+                    const saving = round2(ctLive - credit);
+                    levers.push(lever({
                         key: `ct:${prop.id}`, lever: 'Council tax', propertyId: prop.id, property: prop.name,
                         title: `${prop.name}: joint tenancy for ${view.tenants.map(t => t.name).join(' and ')}, council tax moves to them`,
                         monthly: saving, monthlyIfExempt: saving, oneOff: 0, effort: 'Paper',
                         counted: strategy === 'Joint tenancy' ? 'now' : 'check', alternative: !strategy && newLets > 0,
-                        evidence: [`Council tax ${ownerPaysCt ? 'paid by owner' : 'payer not recorded, assumed owner'}: £${ctMonthly.toFixed(2)} a month${ctLive ? ' (live cost)' : ' (estimate)'}`,
+                        evidence: [ctLive ? `Council tax paid by you today: £${ctLive.toFixed(2)} a month (live cost, bank-fed)` : 'No council tax paid by you on this house today (no live cost row; bank feed checked Jun 2025 to Sep 2026), so the saving is £0 and the joint tenancy is protection against the owner being billed for a room-by-room let',
                             strategy === 'Joint tenancy' ? "Kevin's strategy: joint tenancy, no extra tenant here" : 'No strategy set: shown as a candidate',
                             'One agreement of 6+ months for the whole house makes the tenants liable (SI 2023/1175)',
                             'Each joint renter keeps their own 1-bed LHA up to their share, so rent is unchanged',
