@@ -548,6 +548,7 @@ def sync():
     """GHL post statuses -> links on the record; the YouTube link unlocks stage 2; all published -> Published."""
     state = load_state(); _, loc, _ = _cfg()
     for day, entry in state.items():
+        if not str(day).isdigit() or not isinstance(entry, dict): continue   # _cursor, _skipped_days, held_posts live beside the episodes (9 Sep 2026: the first live cursor crashed sync)
         posts = entry.get("posts", {})
         if not posts: continue
         changed = False; links = {}; clip_links = {}
@@ -645,6 +646,7 @@ def selftest():
     # Kevin's catch-up days (8 Sep 2026): a gap day publishes when approved and never moves the cursor; the continuity day still waits its turn
     led = {"a": {"episode": 2054}, "b": {"episode": 2055}, "g": {"episode": 1799}}; gaps = {1799, 1808, 1841}
     st = {CURSOR_KEY: 2053}; assert may_go_to_youtube(1799, gaps, st, led, {1799, 2055}) and not may_go_to_youtube(2055, gaps, st, led, {1799, 2055})
+    import inspect; src = inspect.getsource(sync); assert 'if not str(day).isdigit() or not isinstance(entry, dict): continue' in src, "sync skips the cursor and the held posts"
     assert may_go_to_youtube(2054, gaps, st, led, {1799, 2054}) and st[CURSOR_KEY] == 2053, "a gap day in the approved set does not disturb the order"
     assert not moves_cursor(1799, gaps) and moves_cursor(2054, gaps)
     assert "twitter" not in CHANNELS
