@@ -39,7 +39,7 @@ a { color: var(--accent); }
   <a class="header-back" href="growth-plan.html">&larr; Back to the Growth Plan</a>
   <h1>Real Estate Growth Plan</h1>
   <div class="subtitle">How the page finds money in the portfolio, what it writes to Airtable, and how to work it.</div>
-  <div class="version">SOP v1.0 &middot; page v1.0 &middot; 9 September 2026</div>
+  <div class="version">SOP v1.1 &middot; page v1.1 &middot; 9 September 2026</div>
 </div></div>
 <div class="container">
   <div class="quick">
@@ -48,28 +48,28 @@ a { color: var(--accent); }
   </div>
 
   <div class="section"><h2>1. Why the page exists</h2><div class="card">
-    <p>Universal Credit pays a single claimant aged 35 or over the 1-bed Local Housing Allowance rate even when they rent one room in a shared house (Universal Credit Regulations 2013, Schedule 4, paragraph 2B). Housing Benefit does not, which is why the portfolio used to give an over-35 two rooms. In Haverhill the difference is £526.33 a month (room rate) against £900.00 (1-bed rate). The page reads every tenant, unit and property in Airtable and prices every lever that follows from that rule, plus council tax, voids and head-lease take-backs, then ranks them by money per unit of effort.</p>
+    <p>Universal Credit pays a single claimant aged 35 or over the 1-bed Local Housing Allowance rate even when they rent one room in a shared house (Universal Credit Regulations 2013, Schedule 4, paragraph 2B). Housing Benefit does not, which is why the portfolio used to give an over-35 two rooms. In Haverhill the difference is £524.90 a month (room rate, £121.13 a week) against £897.52 (1-bed rate, £207.12 a week), read from LHA Direct in September 2026. The page reads every tenant, unit and property in Airtable and prices every lever that follows from that rule, plus council tax, voids and head-lease take-backs, then ranks them by money per unit of effort.</p>
   </div></div>
 
   <div class="section"><h2>2. The levers, in stage order</h2><div class="card">
     <table><thead><tr><th>Stage</th><th>Lever</th><th>Rule</th><th>Effort</th></tr></thead><tbody>
       <tr><td>1 Paper trail</td><td>Rent uplift</td><td>UC tenant, aged 35+, in a Room, below the 1-bed rate.</td><td>Paper</td></tr>
       <tr><td>1 Paper trail</td><td>Rate refresh</td><td>UC tenant below the 2026-27 rate for their unit type. Refreshes under £10 are folded into one portfolio row.</td><td>Paper</td></tr>
-      <tr><td>2 Council tax</td><td>Council tax</td><td>Two UC tenants in a house where the owner pays council tax. One joint agreement of 6+ months makes them liable; they claim Council Tax Reduction and the residual is credited back.</td><td>Paper</td></tr>
-      <tr><td>3 Rooms</td><td>Room release / New room let</td><td>An over-35 UC tenant in a two-room flat-let keeps the 1-bed rate in one room, so the second room lets again. Plus any lettable room not in use.</td><td>Works</td></tr>
+      <tr><td>2 Council tax</td><td>Council tax</td><td>A two-tenant house with Growth Strategy = Joint tenancy. One agreement of 6+ months makes the tenants liable; they claim Council Tax Reduction and any residual is paid by you to the council under the side letter.</td><td>Paper</td></tr>
+      <tr><td>3 Rooms</td><td>Room release / New room let</td><td>A house with Growth Strategy = Add tenants: the planned number of new lets at the 1-bed rate, bills with the tenants, council tax staying with the owner.</td><td>Works</td></tr>
       <tr><td>4 Voids</td><td>Void let</td><td>A unit with status Void, priced from the settings row for that property (18 Siddows Avenue: family let at market rent).</td><td>Light</td></tr>
       <tr><td>4 Take-backs</td><td>Take-back</td><td>The five Collins head-lease houses at £250 a month each. Q4 only, after the legal question set (ruling 31 July 2026).</td><td>Legal</td></tr>
       <tr><td>5 Potential</td><td>Agent-held</td><td>The four Roc Immo houses at the 1-bed rate. Shown for scale, hidden by default, no action generated.</td><td>&mdash;</td></tr>
     </tbody></table>
-    <div class="note"><strong>Either/or.</strong> A joint tenancy of the whole house rules out a third room let. Where both apply to one house the page counts the larger and marks the other "either/or".</div>
+    <div class="note"><strong>Strategy per house.</strong> Kevin sets Growth Strategy on each house (Joint tenancy, Add tenants, Hold). Joint tenancy shows the council tax lever only; Add tenants shows the rooms lever only; Hold shows neither. A house with no strategy shows both as candidates, either/or, and neither is counted.</div>
   </div></div>
 
-  <div class="section"><h2>3. The benefit cap, and why every rent is "cap-safe" first</h2><div class="card">
-    <p>The cap for a single adult outside London is £1,229.42 a month (2026-27). A single over-35 on the standard allowance of £424.90 plus £900 housing costs is £95.48 over it, and pays that shortfall from their own allowance. So the page prices every uplift and new let at the <strong>safe rent</strong> (£804.52 in Haverhill) unless the tenant's record says why the cap does not apply. The full rate appears in the "If exempt" column.</p>
+  <div class="section"><h2>3. The benefit cap, and the CRF Housing Payment</h2><div class="card">
+    <p>The cap for a single adult outside London is £1,229.42 a month (2026-27). A single over-35 on the standard allowance of £424.90 plus £897.52 housing costs is £93.00 over it. The housing element paid to the landlord is what gets cut; the tenant keeps their standard allowance. Kevin's ruling (9 September 2026): the rent is always the full LHA rate, and the shortfall is applied for as a <strong>Crisis and Resilience Fund Housing Payment</strong> from Anglia Revenues Partnership (the payment that replaced Discretionary Housing Payments on 1 April 2026), with the payment option set to landlord. The "CRF a month" column is that figure.</p>
     <ul>
-      <li><strong>Exemptions that lift the cap:</strong> LCWRA element, PIP or DLA in payment, a carer element, or household earnings of £881+ a month.</li>
-      <li><strong>Record it</strong> on the tenant (property card, "cap" dropdown) once you have seen the UC statement or award letter. The plan re-prices at once.</li>
-      <li><strong>Use the calculator</strong> for anyone new: household, age, rent, LCWRA, earnings. If it says capped, the rent is the safe rent, from day one.</li>
+      <li><strong>Exemptions that lift the cap:</strong> LCWRA element, PIP or DLA in payment, a carer element, or household earnings of £881+ a month. Record it on the tenant (property card, "cap" dropdown) once seen on the UC statement; the CRF figure drops to nil.</li>
+      <li><strong>CRF awards are short term or one-off.</strong> Diarise the renewal; the shortfall returns when an award ends.</li>
+      <li><strong>Use the calculator</strong> for anyone new: household, age, rent, LCWRA, earnings. It gives the CRF amount to put on the form.</li>
     </ul>
     <div class="warn">Housing Benefit claimants keep the shared rate in a shared house at any age. The page never uplifts an HB tenant in a room.</div>
   </div></div>
@@ -80,7 +80,8 @@ a { color: var(--accent); }
       <li><strong>Facts the plan still needs:</strong> dates of birth, cap exemptions, lettable rooms, council tax payer. Each one writes straight to Airtable and re-prices the plan.</li>
       <li><strong>Strategic order:</strong> click a row for the evidence and the first step. <em>Adopt</em> records it in the Growth Plan table. <em>Task</em> creates an Airtable task (paper and legal to Kevin, works and lettings to Roy) and links it to the row. <em>Done</em> and <em>Drop</em> take it out of the totals; "Show done and dropped" brings it back.</li>
       <li><strong>Property cards:</strong> rooms in use against lettable rooms, each tenant's rent against their rate, and the three fields the plan needs per house.</li>
-      <li><strong>Joint tenancies:</strong> the candidate houses, the tenancy clause and the side letter. The AI Legal and Compliance head reviewed the wording on 9 September 2026: the landlord's payment goes to the council under a side letter, never through the rent account, and a solicitor's hour is needed before the first one is signed.</li>
+      <li><strong>Joint tenancies:</strong> the candidate houses, the tenancy clause and the side letter. The AI Legal and Compliance head reviewed the wording on 9 September 2026: the landlord's payment goes to the council under a side letter, never through the rent account. Templates ast_joint_template.md and council_tax_side_letter_template.md sit in Drive beside the standard AST.</li>
+      <li><strong>One meeting per tenant:</strong> for each tenant the plan touches, what changes, which forms go in (UC journal change, Council Tax Reduction, CRF Housing Payment) and what is still to collect (date of birth, NI number, phone, email).</li>
       <li><strong>Finding tenants:</strong> where the last 254 applicants came from and what each channel is worth now.</li>
       <li><strong>Assumptions:</strong> every figure not read from a live record. Edit here; it saves to Airtable. Update the LHA and benefit rows each April.</li>
     </ol>
@@ -88,9 +89,9 @@ a { color: var(--accent); }
 
   <div class="section"><h2>5. What the page reads and writes</h2><div class="card">
     <table><thead><tr><th>Table</th><th>Reads</th><th>Writes</th></tr></thead><tbody>
-      <tr><td>Properties</td><td>name, type, bedrooms, agent, postcode, area, council tax note</td><td>Lettable Rooms, PAYG Meters, Council Tax Payer</td></tr>
+      <tr><td>Properties</td><td>name, type, bedrooms, agent, postcode, area, council tax note</td><td>Growth Strategy, Planned Extra Tenants, Lettable Rooms, PAYG Meters, Council Tax Payer</td></tr>
       <tr><td>Rental Units</td><td>type, number, status, income type, expected rent, tenants</td><td>&mdash;</td></tr>
-      <tr><td>Tenants</td><td>name, status, date of birth, payment type, cap exemption</td><td>Date of Birth (with a dated note), Benefit Cap Exemption</td></tr>
+      <tr><td>Tenants</td><td>name, status, date of birth, payment type, cap exemption, phone, email, NI number</td><td>Date of Birth (with a dated note), Benefit Cap Exemption</td></tr>
       <tr><td>Tenancies (active)</td><td>tenant, unit, expected monthly rent</td><td>&mdash;</td></tr>
       <tr><td>Costs</td><td>live council tax rows (In Payment or Overdue, name contains "council" or "CT")</td><td>&mdash;</td></tr>
       <tr><td>Growth Plan</td><td>status and tasks per lever key</td><td>one row per adopted lever</td></tr>
@@ -114,7 +115,8 @@ a { color: var(--accent); }
 
   <div class="section"><h2>7. Sources</h2><div class="card"><ul>
     <li><a href="https://england.shelter.org.uk/professional_resources/legal/benefits/universal_credit/size-related_criteria_for_universal_credit_housing_costs_element" target="_blank" rel="noopener">Shelter Legal: size criteria for the UC housing costs element</a> (35+ rule; joint renters)</li>
-    <li><a href="https://assets.publishing.service.gov.uk/media/697a2043005d288bf850dec9/england-rates-2026-to-2027.csv" target="_blank" rel="noopener">LHA rates 2026 to 2027, gov.uk</a></li>
+    <li><a href="https://lha-direct.voa.gov.uk/" target="_blank" rel="noopener">LHA Direct (VOA): weekly rates by postcode</a>, read for every portfolio postcode in September 2026</li>
+    <li><a href="https://www.angliarevenues.gov.uk/services/housing-benefits/discretionary/index.cfm" target="_blank" rel="noopener">Anglia Revenues Partnership: CRF Housing Payment</a> and <a href="https://www.angliarevenues.gov.uk/services/housing-benefits/apply//?council=westsuffolk" target="_blank" rel="noopener">apply for Council Tax Reduction (West Suffolk)</a></li>
     <li><a href="https://www.legislation.gov.uk/uksi/2023/1175/introduction/made" target="_blank" rel="noopener">SI 2023/1175: council tax, HMOs and owner liability</a></li>
     <li><a href="https://www.citizensadvice.org.uk/benefits/universal-credit/claiming/check-how-universal-credit-is-changing-in-2026/" target="_blank" rel="noopener">Citizens Advice: UC standard allowance and LCWRA from April 2026</a></li>
     <li>Benefit cap and earnings threshold: gov.uk benefit and pension rates 2026-27.</li>

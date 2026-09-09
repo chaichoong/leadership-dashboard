@@ -29,27 +29,31 @@
     'use strict';
 
     const LHA_VALID_TO = '2027-03-31';
-    // Monthly UC amounts per BRMA, 2026-27. Only the BRMAs the portfolio sits in.
-    const LHA_2026_27 = {
-        'Cambridge':                  { sar: 526.33, b1: 900.00, b2: 950.00, b3: 1125.00, b4: 1450.00 },
-        'Central Greater Manchester': { sar: 411.58, b1: 775.00, b2: 875.00, b3: 950.00,  b4: 1350.00 },
-        'Greater Liverpool':          { sar: 344.36, b1: 500.00, b2: 595.00, b3: 650.00,  b4: 875.00 },
-        'Fylde Coast':                { sar: 350.88, b1: 400.00, b2: 542.00, b3: 625.00,  b4: 742.50 },
-        'East Lancs':                 { sar: 291.50, b1: 425.00, b2: 475.00, b3: 595.00,  b4: 795.00 },
-        'Central Lancs':              { sar: 304.17, b1: 450.00, b2: 575.00, b3: 650.00,  b4: 925.00 },
-        'Hull and East Riding':       { sar: 335.83, b1: 380.00, b2: 475.00, b3: 550.00,  b4: 700.00 },
-        'Sunderland':                 { sar: 321.33, b1: 425.00, b2: 475.00, b3: 550.00,  b4: 700.00 },
-        'Barrow-in-Furness':          { sar: 395.42, b1: 475.00, b2: 500.00, b3: 635.00,  b4: 807.50 },
-        'Colchester':                 { sar: 401.33, b1: 625.00, b2: 795.00, b3: 975.00,  b4: 1250.00 },
+    // WEEKLY LHA rates read from lha-direct.voa.gov.uk on 9 Sep 2026 (September 2026 search,
+    // one postcode per BRMA). Monthly = weekly × 52 / 12, which is how UC states them: the
+    // Cambridge 1-bed is £207.12 a week = £897.52 a month. A downloaded "2026-27" CSV had
+    // different figures (£900.00) and was wrong; the lookup is the source. Kevin checked.
+    const LHA_WEEKLY = {
+        'Cambridge':                  { sar: 121.13, b1: 207.12, b2: 218.63, b3: 258.90, b4: 333.70 },
+        'Central Greater Manchester': { sar: 94.72,  b1: 178.36, b2: 201.37, b3: 218.63, b4: 310.68 },
+        'Greater Liverpool':          { sar: 79.25,  b1: 115.07, b2: 136.93, b3: 149.59, b4: 201.37 },
+        'Fylde Coast':                { sar: 80.75,  b1: 92.05,  b2: 124.73, b3: 143.84, b4: 170.88 },
+        'West Pennine':               { sar: 71.50,  b1: 92.05,  b2: 103.56, b3: 116.22, b4: 175.48 },
+        'East Lancs':                 { sar: 67.08,  b1: 97.81,  b2: 109.32, b3: 136.93, b4: 182.96 },
+        'East Riding':                { sar: 77.29,  b1: 87.45,  b2: 109.32, b3: 126.58, b4: 161.10 },
+        'Sunderland':                 { sar: 73.95,  b1: 97.81,  b2: 109.32, b3: 126.58, b4: 161.10 },
+        'Furness':                    { sar: 91.00,  b1: 109.32, b2: 115.07, b3: 146.14, b4: 185.84 },
+        'Colchester':                 { sar: 92.36,  b1: 143.84, b2: 182.96, b3: 224.38, b4: 287.67 },
     };
-    // Postcode outward code → BRMA. Haverhill and Soham are both Cambridge BRMA
-    // (Uttlesford BRMA map). BB7 2NX (Clitheroe) and SR8 4QQ (Peterlee) were looked up
-    // on lha-direct.voa.gov.uk on 9 Sep 2026: East Lancs and Sunderland respectively.
+    const weeklyToMonthly = w => Math.round(w * 52 / 12 * 100) / 100;
+    const LHA_2026_27 = {};
+    Object.keys(LHA_WEEKLY).forEach(k => { const w = LHA_WEEKLY[k]; LHA_2026_27[k] = { sar: weeklyToMonthly(w.sar), b1: weeklyToMonthly(w.b1), b2: weeklyToMonthly(w.b2), b3: weeklyToMonthly(w.b3), b4: weeklyToMonthly(w.b4) }; });
+    // Postcode outward code → BRMA, each looked up on LHA Direct on 9 Sep 2026.
     const BRMA_BY_OUTWARD = {
         CB9: 'Cambridge', CB7: 'Cambridge', M40: 'Central Greater Manchester',
         L4: 'Greater Liverpool', L20: 'Greater Liverpool', FY8: 'Fylde Coast',
-        BB12: 'East Lancs', BB5: 'East Lancs', BB7: 'East Lancs', HU3: 'Hull and East Riding',
-        SR8: 'Sunderland', LA13: 'Barrow-in-Furness', CO12: 'Colchester',
+        BB12: 'West Pennine', BB5: 'East Lancs', BB7: 'East Lancs', HU3: 'East Riding',
+        SR8: 'Sunderland', LA13: 'Furness', CO12: 'Colchester',
     };
     const BRMA_UNCERTAIN = {}; // outward codes still to confirm on LHA Direct; none as at 9 Sep 2026
     const LOCAL_OUTWARD = new Set(['CB9', 'CB7']); // the estate Kevin manages in person
@@ -163,15 +167,16 @@
         }
     }
 
-    // The rent a single UC tenant can carry without the cap biting, given what
-    // we know about their exemption. Unknown is treated as capped (conservative):
-    // the plan then shows the extra available once the exemption is evidenced.
-    function safeRentFor(exemptionValue, lhaRate, settings) {
+    // Kevin's ruling, 9 Sep 2026: rent is always set at the full LHA rate. Where the benefit
+    // cap bites, the housing element paid to the landlord falls short and the shortfall is
+    // covered by a Crisis and Resilience Fund Housing Payment (the council payment that
+    // replaced Discretionary Housing Payments on 1 April 2026), applied for with the tenant.
+    // So this reports the shortfall to apply for, never a lower rent.
+    function capPosition(exemptionValue, lhaRate, settings) {
         const ex = exemptionInput(exemptionValue);
-        if (ex.exempt) return { rent: lhaRate, ifExempt: lhaRate, known: ex.known, exempt: true };
+        if (ex.exempt) return { rent: lhaRate, known: true, exempt: true, shortfall: 0 };
         const calc = benefitCap({ single: true, age: 35, housing: lhaRate }, settings);
-        const rent = Math.min(lhaRate, calc.safeRent);
-        return { rent: round2(rent), ifExempt: lhaRate, known: ex.known, exempt: false };
+        return { rent: lhaRate, known: ex.known, exempt: false, shortfall: calc.shortfall };
     }
 
     function isUc(tenant, unit) {
@@ -251,7 +256,7 @@
                 id: prop.id, name: prop.name, type: prop.type, postcode: prop.postcode || '', area: prop.area || '',
                 brma: rates ? rates.brma : null, brmaNote: BRMA_UNCERTAIN[ow] || '', local, mgmt, agent: prop.agent || '',
                 rentNow: round2(propRent), ctLive: round2(ctLive), ctMonthly: round2(ctMonthly), ownerPaysCt, ctPayer: prop.ctPayer || 'Unknown',
-                payg: prop.payg || 'Unknown', beds: num(prop.beds), lettable, lettableEff, roomsInUse,
+                payg: prop.payg || 'Unknown', beds: num(prop.beds), lettable, lettableEff, roomsInUse, strategy: prop.strategy || '', plannedExtra: num(prop.plannedExtra),
                 rates, units: [], tenants: [], levers: [], flags: [],
             };
             if (!rates && prop.postcode) view.flags.push('No LHA table for this postcode');
@@ -279,51 +284,38 @@
                         const rate = entitled1Bed ? rates.b1 : rates.sar;
                         tv.rateNow = rate;
                         if (roomUnit && uc && age == null) {
-                            const safe = safeRentFor(tv.capExemption, rates.b1, settings);
-                            unknownAge.push({ tenantId: t.id, tenant: t.name, propertyId: prop.id, property: prop.name, unit: u.number, rent: tv.rent, upliftIfOver35: round2(Math.max(0, safe.rent - rent)), upliftIfExempt: round2(Math.max(0, rates.b1 - rent)) });
+                            unknownAge.push({ tenantId: t.id, tenant: t.name, propertyId: prop.id, property: prop.name, unit: u.number, rent: tv.rent, upliftIfOver35: round2(Math.max(0, rates.b1 - rent)), upliftIfExempt: round2(Math.max(0, rates.b1 - rent)) });
                             tv.note = 'Age unknown: if 35 or over, entitled to the 1-bed rate';
                         } else if (uc) {
-                            const safe = safeRentFor(tv.capExemption, rate, settings);
-                            tv.target = safe.rent;
+                            const cap = capPosition(tv.capExemption, rate, settings);
+                            tv.target = rate;
+                            tv.capShortfall = cap.shortfall;
+                            tv.capKnown = cap.known;
                             const leverName = (roomUnit && entitled1Bed) ? 'Rent uplift' : 'Rate refresh';
-                            const gap = round2(safe.rent - rent);
-                            const gapIfExempt = round2(rate - rent);
+                            const gap = round2(rate - rent);
                             if (gap > 0.5) {
+                                const crfNeed = cap.exempt ? [] : [`${cap.known ? 'Benefit cap bites' : 'Benefit cap likely bites'}: apply for a CRF Housing Payment of £${cap.shortfall.toFixed(2)} a month paid to the landlord, or record the exemption`];
                                 levers.push(lever({
                                     key: `${leverName === 'Rent uplift' ? 'uplift' : 'refresh'}:${t.id}`, lever: leverName, propertyId: prop.id, property: prop.name,
                                     tenantId: t.id, tenant: t.name, unitId: u.id, unit: u.number,
                                     title: leverName === 'Rent uplift'
                                         ? `${t.name}: room rate to 1-bed rate (age ${age})`
-                                        : `${t.name}: rent to the 2026-27 ${entitled1Bed ? '1-bed' : 'room'} rate`,
-                                    monthly: gap, monthlyIfExempt: gapIfExempt, oneOff: 0, effort: 'Paper', counted: 'now',
+                                        : `${t.name}: rent to the ${rates.brma} ${entitled1Bed ? '1-bed' : 'room'} rate`,
+                                    monthly: gap, monthlyIfExempt: gap, oneOff: 0, effort: 'Paper', counted: 'now',
+                                    capShortfall: cap.exempt ? 0 : cap.shortfall,
                                     evidence: [
                                         `Rent now £${rent.toFixed(2)} (tenancy record)`,
-                                        `${rates.brma} ${entitled1Bed ? '1-bed' : 'room'} rate 2026-27 £${rate.toFixed(2)}`,
+                                        `${rates.brma} ${entitled1Bed ? '1-bed' : 'room'} rate £${rate.toFixed(2)} a month (LHA Direct, Sep 2026)`,
                                         age != null ? `Age ${age} (DOB ${t.dob})` : 'Age not needed for this unit type',
-                                        safe.exempt ? `Benefit cap: exempt (${tv.capExemption})` : `Benefit cap: ${safe.known ? 'NOT exempt' : 'exemption unknown'} — safe rent £${safe.rent.toFixed(2)} (cap £${capSingle.cap} less standard allowance £${capSingle.standard})`,
+                                        cap.exempt ? `Benefit cap: exempt (${tv.capExemption})` : `Benefit cap: ${cap.known ? 'not exempt' : 'exemption unknown'}; at £${rate.toFixed(2)} the housing element is £${cap.shortfall.toFixed(2)} short (cap £${capSingle.cap} less standard allowance £${capSingle.standard})`,
                                     ],
-                                    needs: safe.exempt ? [] : [`Confirm benefit cap exemption: +£${(gapIfExempt - gap).toFixed(2)} a month more if exempt`],
-                                    firstStep: safe.exempt
-                                        ? `Serve the rent increase notice for ${t.name} at £${rate.toFixed(2)} and update the UC housing costs`
-                                        : `Ask ${t.name} for their UC statement: LCWRA, PIP or earnings on it lifts the cap`,
+                                    needs: crfNeed,
+                                    firstStep: `Meet ${t.name}: sign the rent change to £${rate.toFixed(2)}, report it in the UC journal${cap.exempt ? '' : ', submit the CRF Housing Payment form'}`,
                                 }, planByKey));
-                            } else if (gapIfExempt > 0.5 && !safe.known) {
-                                // Rent already sits above the cap-safe figure. Nothing to add until the
-                                // exemption is evidenced; the extra to the full rate is shown as upside.
-                                tv.note = 'Cap check needed: rent is above the safe rent unless an exemption applies';
-                                levers.push(lever({
-                                    key: `refresh:${t.id}`, lever: 'Rate refresh', propertyId: prop.id, property: prop.name,
-                                    tenantId: t.id, tenant: t.name, unitId: u.id, unit: u.number,
-                                    title: `${t.name}: to the 2026-27 ${entitled1Bed ? '1-bed' : 'room'} rate once the cap exemption is confirmed`,
-                                    monthly: 0, monthlyIfExempt: gapIfExempt, oneOff: 0, effort: 'Paper', counted: 'now', capCheck: true,
-                                    evidence: [`Rent now £${rent.toFixed(2)} (tenancy record)`, `${rates.brma} ${entitled1Bed ? '1-bed' : 'room'} rate 2026-27 £${rate.toFixed(2)}`,
-                                        `Benefit cap: exemption unknown — safe rent £${safe.rent.toFixed(2)}, so the rent is already £${(-gap).toFixed(2)} over it`],
-                                    needs: [`Confirm benefit cap exemption before any increase: +£${gapIfExempt.toFixed(2)} a month if exempt`],
-                                    firstStep: `Ask ${t.name} for their UC statement: LCWRA, PIP or earnings on it lifts the cap`,
-                                }, planByKey));
-                            } else if (gap < -0.5 && safe.known && !safe.exempt) {
-                                tv.note = `Capped: rent £${rent.toFixed(2)} is £${(-gap).toFixed(2)} above the safe rent`;
-                                view.flags.push(`${t.name} is over the benefit cap by £${(-gap).toFixed(2)} a month at the current rent`);
+                            } else if (gap <= 0.5 && cap.known && !cap.exempt && cap.shortfall > 0) {
+                                tv.note = `Capped: housing element £${cap.shortfall.toFixed(2)} short at this rent; CRF Housing Payment to apply for`;
+                            } else if (!cap.exempt && cap.shortfall > 0 && !cap.known) {
+                                tv.note = `Cap check: £${cap.shortfall.toFixed(2)} a month short unless exempt; CRF Housing Payment if not`;
                             }
                         }
                     }
@@ -334,58 +326,60 @@
             });
 
             if (mgmt === 'kevin' && rates) {
-                // Stage 3: rooms. A Flat-Let holds two rooms; an over-35 UC tenant keeps the
-                // 1-bed rate in one room, so the second room can be let again.
+                // Kevin's strategy per house (Properties → Growth Strategy, 9 Sep 2026) decides
+                // which of the two house levers applies. Joint tenancy: council tax to the
+                // tenants, no extra tenant. Add tenants: fill the planned rooms, owner keeps
+                // council tax. Hold: neither. Blank: both are shown as candidates to decide.
+                const strategy = prop.strategy || '';
+                view.strategy = strategy;
                 const releasable = view.tenants.filter(t => t.unitType === 'Flat-Let' && t.uc && t.age != null && t.age >= 35);
                 const spare = Math.max(0, lettableEff - roomsInUse);
-                const newLets = releasable.length + spare;
+                const computedLets = releasable.length + spare;
+                const newLets = strategy === 'Add tenants' ? (num(prop.plannedExtra) || computedLets) : (strategy ? 0 : computedLets);
                 const occupants = view.tenants.length;
                 if (newLets > 0) {
-                    const safe = safeRentFor('Unknown', rates.b1, settings);
-                    const utilities = prop.payg === 'Yes' ? 0 : s('utilities_per_tenant', 75);
+                    const capNew = capPosition('Unknown', rates.b1, settings);
+                    const utilities = prop.payg === 'No' ? s('utilities_per_tenant', 75) : 0; // bills sit with the tenants unless Kevin has taken them on
                     const ctExtra = ownerPaysCt ? 0 : ctMonthly; // becoming a shared house makes the owner liable
-                    const gross = newLets * safe.rent, grossExempt = newLets * rates.b1;
+                    const gross = newLets * rates.b1;
                     const net = round2(gross - newLets * utilities - ctExtra);
-                    const netExempt = round2(grossExempt - newLets * utilities - ctExtra);
                     const evidence = [
-                        `Rooms in use ${roomsInUse} of ${lettableEff} lettable${lettable == null ? ' (lettable rooms not set — using rooms in use)' : ''}`,
+                        strategy === 'Add tenants' ? `Kevin's strategy: add ${newLets} tenant${newLets > 1 ? 's' : ''} here` : `Rooms in use ${roomsInUse} of ${lettableEff} lettable${lettable == null ? ' (lettable rooms not set — using rooms in use)' : ''}`,
                         releasable.length ? `${releasable.map(t => `${t.name} (${t.age})`).join(', ')} hold a two-room flat-let each and keep the 1-bed rate in one room` : 'No flat-let to shrink',
-                        spare ? `${spare} room${spare > 1 ? 's' : ''} not let at all` : 'No spare room beyond the flat-lets',
-                        `New let at £${safe.rent.toFixed(2)} (cap-safe) or £${rates.b1.toFixed(2)} if the tenant is exempt`,
-                        utilities ? `Utilities £${utilities} per new tenant (PAYG Meters: ${prop.payg || 'Unknown'})` : 'PAYG meters: tenants carry utilities',
+                        `New let at £${rates.b1.toFixed(2)} (1-bed rate); a capped tenant is £${capNew.shortfall.toFixed(2)} short, covered by a CRF Housing Payment or by choosing an exempt tenant`,
+                        utilities ? `Utilities £${utilities} per new tenant (you have taken the bills on)` : 'Bills stay with the tenants (PAYG)',
                         ctExtra ? `Council tax £${ctMonthly.toFixed(2)} a month falls on the owner once the house is shared` : `Council tax already with the owner (£${ctMonthly.toFixed(2)})`,
                     ];
                     const needs = [];
-                    if (lettable == null) needs.push('Set Lettable Rooms on this property (receptions data in Airtable is unreliable)');
-                    if (prop.payg !== 'Yes') needs.push('Fit PAYG meters, or budget the utilities');
+                    if (!strategy) needs.push('Set Growth Strategy on this house (Add tenants / Joint tenancy / Hold)');
+                    if (strategy === 'Add tenants' && lettable != null && lettableEff < roomsInUse + newLets - releasable.length) needs.push(`Lettable rooms (${lettableEff}) do not fit ${occupants + newLets} tenants`);
                     if (occupants + newLets >= 5) needs.push(`${occupants + newLets} occupants: mandatory HMO licence (5+ people)`);
                     levers.push(lever({
                         key: `rooms:${prop.id}`, lever: releasable.length ? 'Room release' : 'New room let', propertyId: prop.id, property: prop.name,
                         title: `${prop.name}: ${newLets} more room${newLets > 1 ? 's' : ''} let to over-35 UC tenants`,
-                        monthly: net, monthlyIfExempt: netExempt, oneOff: round2(newLets * s('room_prep_cost', 1500)), effort: 'Works', counted: local ? 'now' : 'remote',
+                        monthly: net, monthlyIfExempt: net, oneOff: round2(newLets * s('room_prep_cost', 1500)), effort: 'Works', counted: strategy ? (local ? 'now' : 'remote') : 'check',
+                        capShortfall: round2(newLets * capNew.shortfall),
                         count: newLets, evidence, needs,
                         firstStep: releasable.length ? `Agree with ${releasable[0].name} to move to one room at the same rent, then fire-safe the freed room` : 'Fire-safe the spare room (door, alarm, lock) and list it',
                     }, planByKey));
                 }
                 // Stage 2: council tax. Two tenants on one joint agreement makes them liable.
-                if (occupants === 2 && view.tenants.every(t => t.uc || t.hb) && prop.ctPayer !== 'Tenants') {
+                if (occupants === 2 && view.tenants.every(t => t.uc || t.hb) && prop.ctPayer !== 'Tenants' && strategy !== 'Add tenants' && strategy !== 'Hold') {
                     const residual = round2(ctMonthly * s('ct_residual_pct', 0) / 100);
                     const credit = round2(residual * s('ct_credit_share', 100) / 100);
                     const saving = round2(ctMonthly - credit);
-                    const payerKnown = ownerPaysCt;
-                    const roomsLever = newLets > 0;
                     if (saving > 0) levers.push(lever({
                         key: `ct:${prop.id}`, lever: 'Council tax', propertyId: prop.id, property: prop.name,
                         title: `${prop.name}: joint tenancy for ${view.tenants.map(t => t.name).join(' and ')}, council tax moves to them`,
                         monthly: saving, monthlyIfExempt: saving, oneOff: 0, effort: 'Paper',
-                        counted: payerKnown ? 'now' : 'check', alternative: roomsLever,
-                        evidence: [`Council tax ${payerKnown ? 'paid by owner' : 'payer not recorded'}: £${ctMonthly.toFixed(2)} a month${ctLive ? ' (live cost)' : ' (estimate)'}`,
-                            roomsLever ? 'EITHER/OR with the rooms lever: a joint tenancy of the whole house rules out a third room let' : 'No spare room here, so this does not compete with a room let',
+                        counted: strategy === 'Joint tenancy' ? 'now' : 'check', alternative: !strategy && newLets > 0,
+                        evidence: [`Council tax ${ownerPaysCt ? 'paid by owner' : 'payer not recorded, assumed owner'}: £${ctMonthly.toFixed(2)} a month${ctLive ? ' (live cost)' : ' (estimate)'}`,
+                            strategy === 'Joint tenancy' ? "Kevin's strategy: joint tenancy, no extra tenant here" : 'No strategy set: shown as a candidate',
                             'One agreement of 6+ months for the whole house makes the tenants liable (SI 2023/1175)',
-                            `Each joint renter keeps their own 1-bed LHA up to their share, so rent is unchanged`,
-                            `Tenants claim council tax reduction (West Suffolk: up to 100% for low income); residual £${residual.toFixed(2)} credited back at ${s('ct_credit_share', 100)}%`],
-                        needs: (payerKnown ? [] : ['Confirm who pays council tax today (set Council Tax Payer on the card)']).concat(['New joint AST with the council tax credit clause', 'Tell the council the liability has changed']),
-                        firstStep: `Draft the joint AST for ${prop.name} with the council tax clause (template on this page)`,
+                            'Each joint renter keeps their own 1-bed LHA up to their share, so rent is unchanged',
+                            `Tenants claim Council Tax Reduction (West Suffolk: up to 100% for low income); any residual paid by you to the council under the side letter`],
+                        needs: ['Joint AST from ast_joint_template.md plus the council tax side letter', 'Council Tax Reduction claim for the tenants at the same meeting', 'Tell the council the liability has changed'],
+                        firstStep: `Prepare the joint AST and side letter for ${prop.name} (templates in Drive), then book the tenant meeting`,
                     }, planByKey));
                 } else if (ownerPaysCt && occupants >= 3) {
                     view.flags.push(`Council tax stays with the owner while ${occupants} tenants are let by the room`);
@@ -468,6 +462,8 @@
             remoteVoids: sum(levers.filter(l => l.counted === 'remote' && active(l) && STAGE[l.lever] === 4)),
             exemptUpside: sum(levers.filter(l => l.counted !== 'agent' && active(l)), l => Math.max(0, l.monthlyIfExempt - l.monthly)),
             unknownAge: round2(unknownAge.reduce((n, u) => n + u.upliftIfOver35, 0)),
+            crfShortfall: sum(levers.filter(l => l.counted !== 'agent' && active(l)), l => num(l.capShortfall)),
+            crfCount: levers.filter(l => l.counted !== 'agent' && active(l) && num(l.capShortfall) > 0).length,
             check: sum(levers.filter(l => l.counted === 'check' && active(l))),
             agentHeld: sum(levers.filter(l => l.counted === 'agent')),
             done: sum(levers.filter(l => l.status === 'Done')),
@@ -484,5 +480,5 @@
         return Object.assign({ status: row ? (row.status || 'Candidate') : 'Candidate', planId: row ? row.id : null, taskIds: row ? (row.taskIds || []) : [], stage: STAGE[o.lever] || 5 }, o);
     }
 
-    return { LHA_2026_27, LHA_VALID_TO, BRMA_BY_OUTWARD, BRMA_UNCERTAIN, STAGE, STAGE_NAMES, EFFORT_WEIGHT, monthlyFromFrequency, ageOn, outward, brmaFor, isLocal, ratesFor, lhaStale, benefitCap, exemptionInput, safeRentFor, isUc, isHb, managementOf, buildPlan };
+    return { LHA_WEEKLY, LHA_2026_27, LHA_VALID_TO, weeklyToMonthly, BRMA_BY_OUTWARD, BRMA_UNCERTAIN, STAGE, STAGE_NAMES, EFFORT_WEIGHT, monthlyFromFrequency, ageOn, outward, brmaFor, isLocal, ratesFor, lhaStale, benefitCap, exemptionInput, capPosition, isUc, isHb, managementOf, buildPlan };
 });
