@@ -160,7 +160,48 @@ def hundreds_folder(day):
 
 
 def output_names(day):
-    return {"full": "Episode_%d_Full_Episode.mp4" % day, "lfmd": "Ep%d_LFMD.mp4" % day, "summary": "Ep%d_Summary.mp4" % day, "podcast": "Ep%d_Podcast.mp3" % day}
+    """The _YT pair (Kevin, 9 Sep 2026, after 2054 showed two sets of captions on YouTube): the full episode and the
+    Short WITHOUT burnt-in captions, each with its caption file, for the direct YouTube upload. The socials keep the
+    burnt-in versions."""
+    return {"full": "Episode_%d_Full_Episode.mp4" % day, "lfmd": "Ep%d_LFMD.mp4" % day, "summary": "Ep%d_Summary.mp4" % day, "podcast": "Ep%d_Podcast.mp3" % day,
+            "full_yt": "Episode_%d_Full_Episode_YT.mp4" % day, "full_srt": "Episode_%d_Full_Episode_YT.srt" % day,
+            "lfmd_yt": "Ep%d_LFMD_YT.mp4" % day, "lfmd_srt": "Ep%d_LFMD_YT.srt" % day}
+
+
+INTRO_SECONDS_FALLBACK = 7.0    # the jingle clip is 8.0 s (ffprobe, 9 Sep 2026) minus INTRO_TRIM_START
+
+
+def intro_seconds(intro=None):
+    """How much the jingle pushes later captions back, read from the clip; the measured constant when the mount is off."""
+    intro = intro or INTRO_CLIP
+    try:
+        out = subprocess.run([os.path.expanduser("~/tools/bin/ffprobe"), "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", intro],
+                             capture_output=True, text=True, timeout=60).stdout.strip()
+        d = float(out) - INTRO_TRIM_START
+        return d if d > 0 else INTRO_SECONDS_FALLBACK
+    except Exception:
+        return INTRO_SECONDS_FALLBACK
+
+
+def shift_after(srt_text, at, delta):
+    """Caption cues at or after `at` seconds move later by `delta`: the YouTube caption file must line up with the
+    episode once the jingle has been spliced in at `at`. Cues before the cut are untouched."""
+    out = []
+    for blk in srt_text.strip().split("\n\n"):
+        lines = blk.split("\n")
+        if len(lines) >= 2 and "-->" in lines[1]:
+            a, _, b = lines[1].partition("-->")
+            sa, sb = _srt_seconds(a.strip()), _srt_seconds(b.strip())
+            if at > 0.05 and sa >= at - 0.05: sa, sb = sa + delta, sb + delta
+            elif at <= 0.05: sa, sb = sa + delta, sb + delta
+            lines[1] = "%s --> %s" % (srt_ts(sa), srt_ts(sb))
+        out.append("\n".join(lines))
+    return "\n\n".join(out) + "\n"
+
+
+def _srt_seconds(ts):
+    h, m, rest = ts.split(":"); sec, _, ms = rest.partition(",")
+    return int(h) * 3600 + int(m) * 60 + int(sec) + (int(ms) if ms else 0) / 1000.0
 
 
 def title_from_transcript(text):
@@ -387,6 +428,7 @@ def build_outputs(masters, srt, day, title, workdir, lfmd=None, role="episode"):
         check_captions(lcaps, "episode %s LFMD" % day)
         paths["lfmd"] = os.path.join(workdir, names["lfmd"])
         overlay(ov, ["lfmd", piece, lcaps, paths["lfmd"], "--day", str(day), "--subtitle", title.replace("|", " ").strip()], "episode %s LFMD" % day)
+        clean_short(ov, piece, lcaps, paths, names, workdir, day, title)
         assert_has_video(paths["lfmd"], "episode %s lfmd" % day); return paths
     segs = srt_segments(open(srt).read())
     at, resume = find_pause(masters["16:9"], segs, intro_insert_seconds(segs))     # on the master: same sound, no captions yet
@@ -399,6 +441,11 @@ def build_outputs(masters, srt, day, title, workdir, lfmd=None, role="episode"):
     paths["full"] = os.path.join(workdir, names["full"])
     insert_intro(captioned, at, paths["full"])
     paths["podcast"] = podcast_audio(captioned, os.path.join(workdir, names["podcast"]), at, resume)
+    # YouTube gets the same cut without burnt-in captions, plus the caption file lined up with the jingle
+    paths["full_yt"] = insert_intro(masters["16:9"], at, os.path.join(workdir, names["full_yt"]))
+    paths["full_srt"] = os.path.join(workdir, names["full_srt"])
+    with open(paths["full_srt"], "w") as fh: fh.write(shift_after(clipped, at, intro_seconds()))
+    check_captions(paths["full_srt"], "episode %s YouTube captions" % day)
     if lfmd:   # the "Learnings from my diary" section only (Kevin, 3 Sep 2026)
         assert_has_video(masters["9:16"], "episode %s 9:16 master" % day)
         piece = trim(masters["9:16"], lfmd[0], lfmd[1], os.path.join(workdir, "lfmd_master.mp4"))
@@ -409,9 +456,17 @@ def build_outputs(masters, srt, day, title, workdir, lfmd=None, role="episode"):
         paths["lfmd"] = os.path.join(workdir, names["lfmd"])
         # the subheading says what the episode is about (Kevin, 4 Sep 2026)
         overlay(ov, ["lfmd", piece, lcaps, paths["lfmd"], "--day", str(day), "--subtitle", title.replace("|", " ").strip()], "episode %s LFMD" % day)
+        clean_short(ov, piece, lcaps, paths, names, workdir, day, title)
     for kind, p in paths.items():
         if p.endswith(".mp4"): assert_has_video(p, "episode %s %s" % (day, kind))
     return paths
+
+
+def clean_short(ov, piece, lcaps, paths, names, workdir, day, title):
+    """The YouTube Short: banner, no burnt-in captions, caption file beside it."""
+    paths["lfmd_yt"] = os.path.join(workdir, names["lfmd_yt"])
+    overlay(ov, ["lfmd", piece, lcaps, paths["lfmd_yt"], "--day", str(day), "--subtitle", title.replace("|", " ").strip(), "--no-captions"], "episode %s LFMD (YouTube)" % day)
+    paths["lfmd_srt"] = os.path.join(workdir, names["lfmd_srt"]); shutil.copyfile(lcaps, paths["lfmd_srt"])
 
 
 def publish_via_api(paths, day, transcript_txt):
@@ -423,7 +478,7 @@ def publish_via_api(paths, day, transcript_txt):
         fid = drive_api.folder_id(drive_api.EDITED_PATH + [hundreds_folder(day), str(day)], create=True)
         links = {}
         for kind, p in paths.items():
-            mime = "video/mp4" if p.endswith(".mp4") else "audio/mpeg" if p.endswith(".mp3") else "image/png" if p.endswith(".png") else "application/octet-stream"
+            mime = "video/mp4" if p.endswith(".mp4") else "audio/mpeg" if p.endswith(".mp3") else "image/png" if p.endswith(".png") else "application/x-subrip" if p.endswith(".srt") else "application/octet-stream"
             links[kind] = drive_api.link(drive_api.upload(p, fid, mime=mime))
         drive_api.upload(transcript_txt, fid, name="Ep%d_transcript.txt" % day, mime="text/plain")
         return links
@@ -573,6 +628,13 @@ def one(clip, day, out):
 def selftest():
     assert hundreds_folder(2049) == "2001-2100" and hundreds_folder(2100) == "2001-2100" and hundreds_folder(2101) == "2101-2200"
     assert output_names(2225)["full"] == "Episode_2225_Full_Episode.mp4" and output_names(2225)["podcast"] == "Ep2225_Podcast.mp3"
+    assert output_names(2225)["full_yt"] == "Episode_2225_Full_Episode_YT.mp4" and output_names(2225)["lfmd_srt"] == "Ep2225_LFMD_YT.srt"
+    s3 = "1\n00:00:01,000 --> 00:00:03,000\nbefore\n\n2\n00:00:10,000 --> 00:00:12,500\nafter\n"
+    sh = shift_after(s3, 5.0, 7.0)
+    assert "00:00:01,000 --> 00:00:03,000" in sh and "00:00:17,000 --> 00:00:19,500" in sh, sh
+    assert "00:00:08,000 --> 00:00:10,000" in shift_after(s3, 0.0, 7.0), "a jingle at the very start moves every cue"
+    assert INTRO_SECONDS_FALLBACK == 7.0 and intro_seconds("/nonexistent.mp4") == 7.0
+    import inspect as _i; bo = _i.getsource(build_outputs); assert 'paths["full_yt"] = insert_intro(masters["16:9"]' in bo and bo.count("clean_short(") == 2, "both YouTube variants are built"
     segs_i = [(0, 4, "consecutive day 2195 of a diary of a Runpreneur"), (4, 9, "if that resonates with you keep on watching"), (9, 15, "welcome back to consecutive day"), (300, 305, "so let's go")]
     assert intro_insert_seconds(segs_i, 600) == 9.0, "after the sign-off caption"
     assert intro_insert_seconds(segs_i[:1] + segs_i[2:], 600) == 9.0, "before the welcome-back caption when there is no sign-off"

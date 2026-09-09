@@ -126,7 +126,9 @@ LINK_FIELDS = {("youtube", "full"): ("YouTube Full Link", "Link of Youtube Video
                ("threads", "summary"): ("Link of Threads Post", "Threads Link"), ("threads", "lfmd"): ("Threads Link",)}
 CLIP_RECORD = {"summary": "Short Form Video", "lfmd": "Learnings From My Diary", "full": "Long Form Video"}
 CLIP_FILES = {"full": "Episode_%d_Full_Episode.mp4", "lfmd": "Ep%d_LFMD.mp4", "summary": "Ep%d_Summary.mp4", "thumb": "Episode_%d_Thumbnail.png",
-              "podcast": "Ep%d_Podcast.mp3"}
+              "podcast": "Ep%d_Podcast.mp3",
+              # clean YouTube pair (no burnt-in captions) with caption files, for the direct upload route (9 Sep 2026)
+              "full_yt": "Episode_%d_Full_Episode_YT.mp4", "full_srt": "Episode_%d_Full_Episode_YT.srt", "lfmd_yt": "Ep%d_LFMD_YT.mp4", "lfmd_srt": "Ep%d_LFMD_YT.srt"}
 TIKTOK = {"privacyLevel": "PUBLIC_TO_EVERYONE", "promoteOtherBrand": False, "enableComment": True, "enableDuet": True, "enableStitch": True,
           "videoDisclosure": False, "promoteYourBrand": False}
 
