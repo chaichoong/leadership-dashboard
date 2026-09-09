@@ -544,6 +544,34 @@ def run(dry_run=False, limit=3):
         if not dry_run: save_state(state)
 
 
+YTDLP = os.path.expanduser("~/Library/Python/3.9/bin/yt-dlp")
+CHANNEL_URL = "https://www.youtube.com/@runpreneur/videos"
+YT_GRACE_MINUTES = 20
+
+
+def title_is_episode(title, day):
+    """The channel title names the day: 'Episode 2054', 'Ep2054', 'Ep 2054/5000', 'Day 2,054'."""
+    t = title or ""
+    return bool(re.search(r"\b(?:Episode|Ep\.?)\s?%d\b" % day, t, re.I) or re.search(r"\bDay\s?%s\b" % "{:,}".format(day), t, re.I) or re.search(r"\bDay\s?%d\b" % day, t, re.I))
+
+
+def youtube_link_from_channel(day, scheduled_iso, now=None, listing=None):
+    """https://youtu.be/<id> for the day's video on the channel, once the slot is YT_GRACE_MINUTES past; else None."""
+    now = now or dt.datetime.now(dt.timezone.utc)
+    try: due = dt.datetime.strptime(scheduled_iso, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=dt.timezone.utc)
+    except (TypeError, ValueError): return None
+    if now < due + dt.timedelta(minutes=YT_GRACE_MINUTES): return None
+    if listing is None:
+        try:
+            r = subprocess.run([YTDLP, "--flat-playlist", "-j", "--no-warnings", "--playlist-end", "6", CHANNEL_URL], capture_output=True, text=True, timeout=120)
+            listing = [json.loads(l) for l in r.stdout.splitlines() if l.strip()]
+        except Exception as ex:
+            print("youtube: channel listing failed (%s)" % str(ex)[:80], file=sys.stderr); return None
+    for item in listing:
+        if item.get("id") and title_is_episode(item.get("title"), day): return "https://youtu.be/" + item["id"]
+    return None
+
+
 def sync():
     """GHL post statuses -> links on the record; the YouTube link unlocks stage 2; all published -> Published."""
     state = load_state(); _, loc, _ = _cfg()
@@ -562,6 +590,11 @@ def sync():
             st = post.get("status"); link = post.get("previewLink") or ""
             if st != p.get("status"): p["status"] = st; changed = True
             if st == "failed": p["error"] = str(post.get("error"))[:200]; print("episode %s: %s post FAILED: %s" % (day, p["platform"], p["error"]))
+            if st == "scheduled" and p["platform"] == "youtube" and p["clip"] == "full" and not link:
+                # 9 Sep 2026: episode 2054 was live on YouTube at 15:24 and GoHighLevel never flipped its own post from
+                # 'scheduled' (no error either). Twenty minutes past the slot, the channel itself is the source of truth.
+                found = youtube_link_from_channel(int(day), p.get("scheduled"))
+                if found: st, link = "published", found; p["status"] = st; p["note"] = "link read from the channel listing; GHL never updated its post"; print("episode %s: YouTube live as %s (GHL post still says scheduled)" % (day, found))
             if st == "published" and link:
                 p["link"] = link; changed = True
                 if p["platform"] == "youtube" and not entry.get("youtube_link"): entry["youtube_link"] = link
@@ -654,6 +687,13 @@ def selftest():
     assert "YouTube Link" in LINK_FIELDS[("youtube", "full")] and "TikTok Link" in LINK_FIELDS[("tiktok", "summary")] and "Facebook Post Link" in LINK_FIELDS[("facebook", "summary")]
     assert "LinkedIn Link" in LINK_FIELDS[("linkedin", "summary")] and "Threads Link" in LINK_FIELDS[("threads", "summary")], "the fields Ericamae's pages read"
     assert CLIP_FILES["podcast"] == "Ep%d_Podcast.mp3"
+    assert title_is_episode("Coping With Stress on Day 2,054 of My Running Streak | Runpreneur Episode 2054", 2054) and title_is_episode("Why 9 out of 10 | Runpreneur Ep1857/4292", 1857)
+    assert not title_is_episode("How Excitement Kills Forecasting | Runpreneur Ep2053/5000", 2054), "the day before is not this episode"
+    lst = [{"id": "AT0l-Ri5ZJ0", "title": "Coping With Stress on Day 2,054 | Runpreneur Episode 2054"}, {"id": "x", "title": "Ep2053"}]
+    t0 = dt.datetime(2026, 9, 9, 14, 24, 17, tzinfo=dt.timezone.utc)
+    assert youtube_link_from_channel(2054, "2026-09-09T14:24:17Z", now=t0 + dt.timedelta(minutes=10), listing=lst) is None, "inside the grace period GHL gets its chance"
+    assert youtube_link_from_channel(2054, "2026-09-09T14:24:17Z", now=t0 + dt.timedelta(minutes=30), listing=lst) == "https://youtu.be/AT0l-Ri5ZJ0"
+    assert youtube_link_from_channel(2055, "2026-09-09T14:24:17Z", now=t0 + dt.timedelta(minutes=30), listing=lst) is None, "not on the channel yet: no link"
     assert fit_bitrate_kbps(300 * 1024 * 1024, 600) is None, "fits already"
     kb = fit_bitrate_kbps(740 * 1024 * 1024, 639.3); assert 5000 < kb < 5700, kb   # 2054: 740 MB, 10.7 min -> about 5.3 Mbps video
     assert fit_bitrate_kbps(10 ** 10, 60) == 1500 or fit_bitrate_kbps(10 ** 10, 60) > 1500, "never below the floor"
