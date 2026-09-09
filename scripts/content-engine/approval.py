@@ -237,23 +237,34 @@ def raise_card(day, dry_run=False):
     return tid
 
 
-def refresh_card(day):
+def refresh_card(day, receipt=None):
     """Rebuild the write-up from the records as they are now and re-submit it on the existing task, so a
-    card in Kevin's queue shows corrected copy (4 Sep 2026: the distance figure and the X copy)."""
+    card in Kevin's queue shows corrected copy (4 Sep 2026: the distance figure and the X copy).
+    After Kevin sent the card back, the submit gate demands a RECEIPT: one `- <his point> → <what changed>` line per
+    point of his feedback (9 Sep 2026: 2054's refresh failed three times without one). Pass the file with --receipt;
+    on success the card's old verdict is forgotten here, so the next sync reads his new answer instead of the old one."""
     state = load_state(); e = state.get(str(day))
     if not e or not e.get("task"): raise SystemExit("episode %d has no card to refresh" % day)
+    if e.get("verdict") == "changes" and not receipt:
+        raise SystemExit("episode %d: Kevin sent this card back (%s); the resubmission needs --receipt FILE with one '- <his point> → <what changed>' line per point of his feedback" % (day, e.get("feedback", "")[:120]))
     recs = bundle(day); full = recs["Long Form Video"]
     ledger = watch.load_ledger()
     name, desc, out = build_card(day, full, recs["Learnings From My Diary"], recs["Short Form Video"], headline_for(day, ledger), pans_for(day, ledger))
     with tempfile.NamedTemporaryFile("w", suffix=".md", delete=False) as fh:
         fh.write(out); path = fh.name
+    cmd = [sys.executable, DISPATCH, "submit", e["task"], "--agent", AGENT_TM, "--type", TASK_TYPE, "--output-file", path]
+    if receipt: cmd += ["--receipt", receipt]
     try:
-        r = subprocess.run([sys.executable, DISPATCH, "submit", e["task"], "--agent", AGENT_TM, "--type", TASK_TYPE, "--output-file", path], capture_output=True, text=True)
+        r = subprocess.run(cmd, capture_output=True, text=True)
     finally:
         os.remove(path)
     if r.returncode != 0: raise SystemExit("approval: refresh failed for %s: %s" % (e["task"], (r.stderr or r.stdout)[-400:]))
-    e["refreshed"] = dt.datetime.now().isoformat(timespec="seconds"); save_state(state)
-    print("episode %d: card %s refreshed" % (day, e["task"]))
+    e["refreshed"] = dt.datetime.now().isoformat(timespec="seconds")
+    if e.get("verdict") == "changes":
+        for k in ("verdict", "outcome", "synced", "feedback"): e.pop(k, None)   # his next answer is a new one
+        e["resent"] = e["refreshed"]
+    save_state(state)
+    print("episode %d: card %s refreshed%s" % (day, e["task"], " with receipt, verdict cleared" if receipt else ""))
 
 
 def sync():
@@ -301,6 +312,8 @@ def selftest():
         assert s in out, s
     assert ("Nothing reaches a public feed" in out) == (publish_mode() != "live"), "the closing line follows the engine's mode (live since 8 Sep 2026)"
     assert "Nothing is published until you approve" in desc
+    import inspect; src = inspect.getsource(refresh_card)
+    assert 'if e.get("verdict") == "changes" and not receipt:' in src and 'for k in ("verdict", "outcome", "synced", "feedback"): e.pop(k, None)' in src, "a sent-back card needs a receipt and forgets the old verdict once resubmitted (9 Sep 2026)"
     _, _, outp = build_card(2225, full, lfmd, short, "A / B", ["Camera pans (the engine saw you point and heard you talk about the surroundings):", "- 4:13, to the right of you for 4 s: \"over there at the sun setting\""])
     assert "Camera pans" in outp and outp.index("Camera pans") < outp.index("Where it goes if you approve"), "pans are listed before the destinations"
     _, _, out2 = build_card(2226, {"id": "x", "fields": {"Video Edited URL": "u", "Thumbnail URL": "t", "YouTube Copy": "y"}})
@@ -317,7 +330,7 @@ def selftest():
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
-    ap.add_argument("mode"); ap.add_argument("--day", type=int, default=0); ap.add_argument("--pending", action="store_true")
+    ap.add_argument("mode"); ap.add_argument("--day", type=int, default=0); ap.add_argument("--pending", action="store_true"); ap.add_argument("--receipt", default=None, help="refresh: file of '- <his point> → <what changed>' lines after Kevin sent the card back")
     ap.add_argument("--limit", type=int, default=2); ap.add_argument("--dry-run", action="store_true")
     a = ap.parse_args()
     if a.mode == "selftest": selftest()
@@ -327,6 +340,6 @@ if __name__ == "__main__":
         if not days: print("approval: nothing ready for a card")
         for d in days: raise_card(d, dry_run=a.dry_run)
     elif a.mode == "sync": sync()
-    elif a.mode == "refresh": refresh_card(a.day)
+    elif a.mode == "refresh": refresh_card(a.day, a.receipt)
     elif a.mode == "report": report()
     else: raise SystemExit("usage: approval.py run --pending [--limit N] [--dry-run] | run --day N | card --day N | refresh --day N | sync | report | selftest")

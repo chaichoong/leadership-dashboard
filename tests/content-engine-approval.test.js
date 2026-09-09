@@ -109,4 +109,11 @@ print(json.dumps(out))
     expect(out).toContain('&lt;b&gt;x&lt;/b&gt;');
     expect(out).not.toContain('<b>');
   });
+
+  it("a card Kevin sent back is resubmitted with a receipt and its old verdict is forgotten, so his re-approval is read (9 Sep 2026)", () => {
+    const a = readFileSync(path.join(DIR, 'approval.py'), 'utf8');
+    expect(a).toContain('def refresh_card(day, receipt=None)');
+    expect(a).toContain('if receipt: cmd += ["--receipt", receipt]');
+    expect(a).toContain('for k in ("verdict", "outcome", "synced", "feedback"): e.pop(k, None)');
+  });
 });
