@@ -486,7 +486,14 @@ async function runSteps(page, steps, allowSubmit, confirm) {
         // back) returns after the FIRST navigation, so the next step or the
         // screenshot sees a page mid-flight (4 Sep 2026). `ms` pauses; `for`
         // waits for a selector; both capped so a dead page cannot hang a run.
-        if (s.for) await page.waitForSelector(s.for, { timeout: Math.min(Number(s.ms) || 20000, 60000) });
+        // A wait on the PAGE (`for` appears, `gone` disappears) may run up to ten
+        // minutes: the Spotify wizard uploads a 740 MB episode in about two
+        // (9 Sep 2026, stalled at 23% under the old 60 s cap). A blind pause stays
+        // capped at 60 s because nothing on the page can end it early.
+        const pageWait = Math.min(Number(s.ms) || 20000, 600000);
+        // `state: "attached"` accepts a hidden element (a file input the page keeps off-screen).
+        if (s.for) await page.waitForSelector(s.for, { state: s.state === 'attached' ? 'attached' : 'visible', timeout: pageWait });
+        else if (s.gone) await page.waitForSelector(s.gone, { state: 'hidden', timeout: pageWait });
         else await page.waitForTimeout(Math.min(Number(s.ms) || 3000, 60000));
         break;
       case 'click':

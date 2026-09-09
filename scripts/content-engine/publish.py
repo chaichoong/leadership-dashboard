@@ -463,11 +463,35 @@ def schedule_stage(day, entry, recs, acct_map, stage, dry_run=False, index=0):
         upload = files["podcast"] if spotify.PODCAST_FORMAT == "audio" and os.path.exists(files["podcast"]) else files["full"]
         if os.path.exists(upload):
             plan_path, ptitle = spotify.write_plan(day, upload, ff.get("Podcast Copy"), entry["youtube_link"], test, os.path.dirname(STATE))
-            entry.setdefault("podcast", {})["plan"] = plan_path
-            what += "; Spotify plan written (%s)" % ("draft, test mode" if test else "publish")
+            pod = entry.setdefault("podcast", {}); pod["plan"] = plan_path; pod["title"] = ptitle
+            what += "; " + run_spotify(day, full["id"], plan_path, ptitle, test, pod)
     fields["Notes"] = approval.append_note(full, "%s: %s through GoHighLevel." % (dt.date.today().isoformat(), what))
     watch._airtable("PATCH", watch.API + "/" + full["id"], {"fields": fields})
     return len(todo)
+
+
+def run_spotify(day, task_id, plan_path, title, test, pod):
+    """Runs the Spotify plan through the browser lane right after the socials (9 Sep 2026, first automatic
+    episode was 2054 by hand). Live: `commit`, which re-reads the approval itself, presses Publish and
+    then checks the episodes list; a video shows as Draft for a few minutes while Spotify processes it,
+    so 'processing' is recorded and the public link is filled in by sync. Test: `prepare` stops at Review."""
+    import spotify
+    shot = os.path.join(os.path.dirname(STATE), "spotify_%d_%s.png" % (day, "review" if test else "published"))
+    try:
+        spotify.run_plan(plan_path, task_id, test, shot)
+    except SystemExit as ex:
+        pod["status"] = "failed"; pod["error"] = str(ex)[-300:]
+        print("episode %d: Spotify upload FAILED: %s" % (day, str(ex)[-300:]), file=sys.stderr)
+        return "Spotify upload FAILED (%s)" % str(ex)[-120:]
+    pod["shot"] = shot
+    if test:
+        pod["status"] = "reviewed"; return "Spotify episode filled to the Review step (test mode, not published)"
+    status, snippet = spotify.verify_published(title)
+    pod["status"] = status; pod["list_snippet"] = snippet
+    link = spotify.public_link(title) if status == "published" else ""
+    if link: pod["link"] = link
+    print("episode %d: Spotify %s%s" % (day, status, (" " + link) if link else ""))
+    return "Spotify episode %s%s" % ("published" if status == "published" else "uploaded and processing", (" " + link) if link else "")
 
 
 CURSOR_KEY = "_cursor"
@@ -577,6 +601,20 @@ def sync():
     state = load_state(); _, loc, _ = _cfg()
     for day, entry in state.items():
         if not str(day).isdigit() or not isinstance(entry, dict): continue   # _cursor, _skipped_days, held_posts live beside the episodes (9 Sep 2026: the first live cursor crashed sync)
+        pod = entry.get("podcast") or {}
+        if pod.get("status") == "processing" and pod.get("title"):
+            # the public link arrives once Spotify has processed the video (a few minutes after Publish)
+            import spotify
+            link = spotify.public_link(pod["title"])
+            if link:
+                pod["status"] = "published"; pod["link"] = link; save_state(state)
+                print("episode %s: Spotify episode is live %s" % (day, link))
+                try:
+                    import platform_copy as pc
+                    full = pc.find_by_name(pc.record_name(int(day), "Long Form Video"))
+                    if full: watch._airtable("PATCH", watch.API + "/" + full["id"], {"fields": {"Notes": approval.append_note(
+                        full, "%s: Spotify episode live %s" % (dt.date.today().isoformat(), link))}})
+                except Exception as ex: print("episode %s: could not note the Spotify link (%s)" % (day, str(ex)[:120]))
         posts = entry.get("posts", {})
         if not posts: continue
         changed = False; links = {}; clip_links = {}
