@@ -399,3 +399,69 @@ print(json.dumps({"slots": sorted(m.APPROVED_SLOTS), "registered": sorted(m.regi
     for (const s of slots) expect(registered).toContain(s);
   });
 });
+
+// ---------------------------------------------------------------------------
+// A DAY GATE THAT LIVES IN THE SKILL MUST STILL BE VISIBLE TO ATTENDANCE
+//
+// Regression origin: 5 Sep 2026 (finding 20260905-daily-ops-466). prod-sweep-weekly
+// fires on "0 11 * * *" — daily on purpose, because this codebase forbids a weekday
+// in a cron after losing a week of Friday CEO briefs to one — and works on Sundays
+// only. Attendance did not know, so it expected a run every day and printed MISSED
+// SLOT RUNS six days out of seven. An alarm that is wrong most of the time is an
+// alarm nobody reads.
+// ---------------------------------------------------------------------------
+describe('a slot whose day gate is in the skill', () => {
+  beforeEach(() => writeRoutines(['daily-ops']));
+
+  function attendance(runsOnDays, ref) {
+    const src = `
+import importlib.util, json, datetime
+spec = importlib.util.spec_from_file_location('cr', ${JSON.stringify(GUARD)})
+m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+sched = {"prod-sweep-weekly": {"cron": "0 11 * * *", "mode": "wrapped"${runsOnDays ? ', "runsOnDays": [7]' : ''}}}
+print(json.dumps(m.slot_attendance({}, sched, 26, ref=datetime.datetime.fromisoformat(${JSON.stringify(ref)}))))
+`;
+    return JSON.parse(execFileSync('python3', ['-c', src], { encoding: 'utf8' }).trim());
+  }
+
+  const WEDNESDAY = '2026-09-09T15:00:00';
+  const MONDAY = '2026-09-14T09:00:00';   // the morning after a Sunday run, still inside the 26h window
+
+  it('BACK-TEST: without runsOnDays the Sunday-only sweep reads as missed on a Wednesday', () => {
+    expect(attendance(false, WEDNESDAY)['prod-sweep-weekly'].shortfall).toBe(1);
+  });
+
+  it('expects nothing on a day the job does not work', () => {
+    expect(attendance(true, WEDNESDAY)['prod-sweep-weekly'].expected).toBe(0);
+    expect(attendance(true, WEDNESDAY)['prod-sweep-weekly'].shortfall).toBe(0);
+  });
+
+  it('still expects the Sunday run, so a genuinely missed sweep is still caught', () => {
+    expect(attendance(true, MONDAY)['prod-sweep-weekly'].expected).toBe(1);
+    expect(attendance(true, MONDAY)['prod-sweep-weekly'].shortfall).toBe(1);
+  });
+
+  it('the real schedule declares it, so the daily false alarm is actually gone', () => {
+    const real = JSON.parse(readFileSync(resolve(__dirname, '../scripts/job-schedule.json'), 'utf8'));
+    expect(real['prod-sweep-weekly'].runsOnDays).toEqual([7]);
+    expect(real['prod-sweep-weekly'].cron).toBe('0 11 * * *');   // still no weekday in the cron
+  });
+});
+
+// A lock-exempt read-only check never writes `acquired`, because it never takes
+// the lock (finding 20260909-daily-ops-exceptions-502). If this guard did not
+// count `ran-unlocked`, exempting them would turn "starved" into "never ran".
+describe('lock-exempt checks still count as having run', () => {
+  beforeEach(() => writeRoutines(['daily-ops']));
+
+  it('treats ran-unlocked as evidence the job got going', () => {
+    writeSchedule(['inbound-triage', 'task-manager', 'ceo-agent', 'prospecting', 'prod-sweep-weekly']);
+    writeEvents([
+      { job: 'daily-ops', state: 'mark' },
+      { job: 'drift-scan', state: 'ran-unlocked' },
+    ]);
+    const { code, res } = guard();
+    expect(code).toBe(0);
+    expect(res.non_routine_jobs_that_ran).toContain('drift-scan');
+  });
+});

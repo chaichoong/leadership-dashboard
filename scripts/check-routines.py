@@ -156,7 +156,11 @@ DEFAULT_WINDOW_HOURS = 26
 # States that mean a job genuinely got going. `mark` is what daily-ops writes in
 # phase 1, because it deliberately does NOT take the lock (holding it for two
 # hours would block every short shell job behind it).
-RAN_STATES = ("acquired", "started", "mark")
+# `ran-unlocked` joins them on 9 Sep 2026: a lock-exempt read-only check (see
+# lockExempt in job-schedule.json) never takes the lock and so never writes
+# `acquired`. Without this line the four morning scans exempted that day would
+# have gone from "starved" to "apparently never ran", which is a worse lie.
+RAN_STATES = ("acquired", "started", "mark", "ran-unlocked")
 
 
 def known_routines():
@@ -218,16 +222,28 @@ def _queue_module():
     return mod
 
 
-def expected_firings(cron, window_hours, ref=None, settle_minutes=SETTLE_MINUTES):
+def expected_firings(cron, window_hours, ref=None, settle_minutes=SETTLE_MINUTES,
+                     runs_on_days=None):
     """How many times this cron should have fired inside the window, counting only
-    firings old enough to have finished. Local time, minute by minute."""
+    firings old enough to have finished. Local time, minute by minute.
+
+    `runs_on_days` is a list of ISO weekdays (Mon=1 .. Sun=7) for a job whose day
+    gate lives in the SKILL rather than in the cron. That split is deliberate and
+    stays: Cloudflare and standard cron disagree about which day is 0, so this
+    codebase forbids a weekday in a cron and decides the day in the code. What
+    was missing is that attendance never knew (finding 20260905-daily-ops-466).
+    prod-sweep-weekly fires on "0 11 * * *" and works on Sundays only, so this
+    check expected one run a day and shouted MISSED SLOT RUNS six days a week —
+    an alarm that is wrong most of the time is an alarm nobody reads.
+    """
     jq = _queue_module()
     now_local = ref or datetime.now()
     start = (now_local - timedelta(hours=window_hours)).replace(second=0, microsecond=0)
     end = now_local - timedelta(minutes=settle_minutes)
+    days = set(runs_on_days or ())
     n, cur = 0, start
     while cur <= end:
-        if jq.cron_matches(cron, cur):
+        if jq.cron_matches(cron, cur) and (not days or cur.isoweekday() in days):
             n += 1
         cur += timedelta(minutes=1)
     return n
@@ -242,7 +258,8 @@ def slot_attendance(ran, schedule, window_hours, ref=None):
         if not cron or cfg.get("enabled") is False:
             continue
         try:
-            exp = expected_firings(cron, window_hours, ref=ref)
+            exp = expected_firings(cron, window_hours, ref=ref,
+                                   runs_on_days=cfg.get("runsOnDays"))
         except Exception:
             continue          # an unreadable cron is the register's problem, not a missed run
         got = len(ran.get(name, []))

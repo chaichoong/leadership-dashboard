@@ -161,9 +161,22 @@ describe('every `needs` entry is a form preconditions_met actually understands',
         if (typeof need === 'string') {
           if (!VALID_STRINGS.includes(need)) bad.push(`${job}: bare "${need}"`);
         } else if (need && typeof need === 'object') {
-          if (!('drive' in need)) bad.push(`${job}: object without a drive key`);
-          else if (typeof need.drive !== 'string' || !need.drive.includes('CloudStorage')) {
-            bad.push(`${job}: drive is not a CloudStorage path`);
+          // Object preconditions the queue can evaluate. `diskGB` joined `drive`
+          // on 9 Sep 2026 (finding 20260909-daily-ops-exceptions-503): a render
+          // that cannot fit on the disk must defer rather than take the lock and
+          // stall for hours. Add a key here only when preconditions_met branches
+          // on it — the whole point of this test is that an unknown key defers
+          // the job for ever and nothing says so.
+          if ('drive' in need) {
+            if (typeof need.drive !== 'string' || !need.drive.includes('CloudStorage')) {
+              bad.push(`${job}: drive is not a CloudStorage path`);
+            }
+          } else if ('diskGB' in need) {
+            if (typeof need.diskGB !== 'number' || need.diskGB <= 0) {
+              bad.push(`${job}: diskGB is not a positive number`);
+            }
+          } else {
+            bad.push(`${job}: object with no key the queue understands`);
           }
         } else {
           bad.push(`${job}: ${JSON.stringify(need)}`);
@@ -181,6 +194,9 @@ describe('every `needs` entry is a form preconditions_met actually understands',
     const fn = jq.match(/def preconditions_met\(cfg\)[\s\S]*?\n    return True/);
     expect(fn, 'preconditions_met (control)').not.toBeNull();
     for (const s of VALID_STRINGS) expect(fn[0]).toContain(`need == "${s}"`);
+    // Same for the object forms: this test's allowlist above is only honest if
+    // preconditions_met really branches on each key it permits.
+    for (const k of ['drive', 'diskGB']) expect(fn[0]).toContain(`need.get("${k}")`);
   });
 });
 

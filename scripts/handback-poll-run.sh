@@ -111,6 +111,21 @@ cp "$QJSON" "$RUNDIR/queue.json"
 __START_LINE=$( { wc -l < "$LOG"; } 2>/dev/null || echo 0)
 echo "===== handback-poll run $(date) — $REASON =====" >> "$LOG"
 
+# A TICK MUST NOT OUTLAST ITS OWN CADENCE (finding 20260905-content-engine-460)
+# -----------------------------------------------------------------------------
+# This job holds the queue lock for its whole run. Measured over 510 runs from
+# 26 Aug to 9 Sep 2026 the median hold is 6.3 minutes — and the tail is 75, 92,
+# 159 and 201 minutes. It fires every 30 minutes, so any of those is a tick that
+# outlived its own cadence while everything else on the Mac waited behind it;
+# content-engine timed out behind it twice on 4-5 Sep.
+#
+# 45 minutes is seven times the median and shorter than every one of those four.
+# TERM first, KILL only if it lingers, so the run gets the chance to finish the
+# step it is on and write its report. Nothing is lost by stopping: the approval
+# gate sits BEFORE the action, so an unworked hand-back is simply still waiting,
+# and the next tick is thirty minutes away.
+HANDBACK_MAX_MINUTES="${HANDBACK_MAX_MINUTES:-45}"
+
 "$CLAUDE" -p "You are a HAND-BACK-ONLY run of the agent dispatch engine, triggered because Kevin has just decided something and an agent owes him the action. Follow /Users/kevinbrittain/.claude/scheduled-tasks/agent-dispatch/SKILL.md, with these differences, which override it:
 
 RUNDIR is $RUNDIR and STEP 1 IS ALREADY DONE — $RUNDIR/queue.json was written moments ago by the same command. Do NOT re-run the queue subcommand and do NOT write queue2.json.
@@ -123,8 +138,25 @@ Step 5: write $RUNDIR/report.json exactly as the skill specifies, copying queueC
 
 Do not take the queue lock — this run already holds it. Do not edit, commit or push code; file anything needing a code change via scripts/findings.py. Working and temp files go under $RUNDIR/TASKID/ only, never in monitoring/ and never anywhere else in the repo. Close with at most ten lines of counts only: no message content, no sender names, no record IDs." \
   --permission-mode acceptEdits \
-  --allowedTools "${AGENT_ALLOWED_TOOLS[@]}" "Bash(osascript:*)" >> "$LOG" 2>&1
+  --allowedTools "${AGENT_ALLOWED_TOOLS[@]}" "Bash(osascript:*)" >> "$LOG" 2>&1 &
+__CLAUDE_PID=$!
+(
+  sleep $((HANDBACK_MAX_MINUTES * 60))
+  if kill -0 "$__CLAUDE_PID" 2>/dev/null; then
+    echo "===== handback-poll OVERRAN ${HANDBACK_MAX_MINUTES}m, stopping it (finding 460) =====" >> "$LOG"
+    kill -TERM "$__CLAUDE_PID" 2>/dev/null
+    sleep 20
+    kill -KILL "$__CLAUDE_PID" 2>/dev/null
+  fi
+) &
+__WATCHDOG_PID=$!
+wait "$__CLAUDE_PID"
 RC=$?
+kill "$__WATCHDOG_PID" 2>/dev/null
+wait "$__WATCHDOG_PID" 2>/dev/null
+if [ "$RC" -ge 128 ]; then
+  echo "handback-poll: the run was stopped after ${HANDBACK_MAX_MINUTES} minutes (signal $((RC - 128))). Unworked hand-backs stay queued for the next tick." >&2
+fi
 
 __TAIL=$(tail -n +$((__START_LINE + 1)) "$LOG" 2>/dev/null)
 __BAD=$(printf '%s\n' "$__TAIL" | grep -E '"error"|HTTP Error 401|401 Unauthorized|Unauthorized|OAuth access token has expired|BROKEN' || true)
