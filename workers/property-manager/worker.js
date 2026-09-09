@@ -199,7 +199,7 @@ async function handleData(request, env, ctx, origin) {
   // rename returns zero rows with 200 OK, and a dashboard of zeros looks like a
   // quiet month. Refuse to serve it.
   if (!data.transactions.length) throw new Error('Transaction read returned zero rows: check the Real Estate business name in TX_FILTER');
-  const computed = computeAll(data, londonNow());
+  const computed = computeAll(data, londonNow(), new Date().toISOString());
   computed.version = VERSION;
   dataMemo = { at: Date.now(), body: computed };
   if (cache) ctx.waitUntil(cache.put(cacheKey, new Response(JSON.stringify(computed), { headers: { 'Content-Type': 'application/json', 'Cache-Control': `s-maxage=${Math.floor(DATA_TTL_MS / 1000)}` } })));
