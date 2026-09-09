@@ -464,7 +464,7 @@ def schedule_stage(day, entry, recs, acct_map, stage, dry_run=False, index=0):
         files = episode_files(day)
         upload = files["podcast"] if spotify.PODCAST_FORMAT == "audio" and os.path.exists(files["podcast"]) else files["full"]
         if os.path.exists(upload):
-            plan_path, ptitle = spotify.write_plan(day, upload, ff.get("Podcast Copy"), entry["youtube_link"], test, os.path.dirname(STATE))
+            plan_path, ptitle = spotify.write_plan(day, upload, ff.get("Podcast Copy"), entry["youtube_link"], test, os.path.dirname(STATE), thumb=files.get("thumb", ""))
             pod = entry.setdefault("podcast", {}); pod["plan"] = plan_path; pod["title"] = ptitle
             what += "; " + run_spotify(day, full["id"], plan_path, ptitle, test, pod)
         # Kevin's personal Facebook profile gets the episode link (Kevin, 9 Sep 2026: "needs to be part of the process")
