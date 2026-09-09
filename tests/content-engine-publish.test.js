@@ -71,6 +71,10 @@ describe('content-engine publish (GHL)', () => {
     expect(src).toContain('pid, url = blog.publish_blog(day, full, entry, media.get("thumb"), entry["youtube_link"], test)');
     expect(src).toContain('fields["Blog Link"] = url');
     const out = JSON.parse(execFileSync('python3', [path.join(DIR, 'blog.py'), 'selftest'], { encoding: 'utf8', cwd: DIR }));
+    const fb = JSON.parse(execFileSync('python3', [path.join(DIR, 'facebook_share.py'), 'selftest'], { encoding: 'utf8', cwd: DIR }));
+    expect(fb.failed).toEqual([]);
+    const sp = JSON.parse(execFileSync('python3', [path.join(DIR, 'spotify.py'), 'selftest'], { encoding: 'utf8', cwd: DIR }));
+    expect(sp.failed).toEqual([]);
     expect(out.failed).toEqual([]);
     const blog = readFileSync(path.join(DIR, 'blog.py'), 'utf8');
     expect(blog).toContain('"DRAFT" if test else "PUBLISHED"');
