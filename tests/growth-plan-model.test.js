@@ -85,6 +85,10 @@ describe('ages, BRMAs and rates', () => {
         expect(M.brmaFor('cb7 5uz')).toBe('Cambridge');
         expect(M.brmaFor('M40 1EZ')).toBe('Central Greater Manchester');
         expect(M.brmaFor('SA5 7JW')).toBe(null);
+        // Looked up on LHA Direct, 9 Sep 2026
+        expect(M.brmaFor('BB7 2NX')).toBe('East Lancs');
+        expect(M.brmaFor('SR8 4QQ')).toBe('Sunderland');
+        expect(M.ratesFor('SR8 4QQ', S).b1).toBe(425);
     });
     it('Cambridge room and 1-bed rates come from settings when set, gov.uk figures otherwise', () => {
         expect(M.ratesFor('CB9 0AJ', S)).toMatchObject({ sar: 526.33, b1: 900 });

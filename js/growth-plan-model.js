@@ -38,23 +38,20 @@
         'East Lancs':                 { sar: 291.50, b1: 425.00, b2: 475.00, b3: 595.00,  b4: 795.00 },
         'Central Lancs':              { sar: 304.17, b1: 450.00, b2: 575.00, b3: 650.00,  b4: 925.00 },
         'Hull and East Riding':       { sar: 335.83, b1: 380.00, b2: 475.00, b3: 550.00,  b4: 700.00 },
-        'Durham':                     { sar: 393.25, b1: 393.25, b2: 400.00, b3: 475.00,  b4: 659.87 },
+        'Sunderland':                 { sar: 321.33, b1: 425.00, b2: 475.00, b3: 550.00,  b4: 700.00 },
         'Barrow-in-Furness':          { sar: 395.42, b1: 475.00, b2: 500.00, b3: 635.00,  b4: 807.50 },
         'Colchester':                 { sar: 401.33, b1: 625.00, b2: 795.00, b3: 975.00,  b4: 1250.00 },
     };
     // Postcode outward code → BRMA. Haverhill and Soham are both Cambridge BRMA
-    // (Uttlesford BRMA map). The two flagged ones sit near a boundary: confirm at
-    // lha-direct.voa.gov.uk before a rent is set on them.
+    // (Uttlesford BRMA map). BB7 2NX (Clitheroe) and SR8 4QQ (Peterlee) were looked up
+    // on lha-direct.voa.gov.uk on 9 Sep 2026: East Lancs and Sunderland respectively.
     const BRMA_BY_OUTWARD = {
         CB9: 'Cambridge', CB7: 'Cambridge', M40: 'Central Greater Manchester',
         L4: 'Greater Liverpool', L20: 'Greater Liverpool', FY8: 'Fylde Coast',
         BB12: 'East Lancs', BB5: 'East Lancs', BB7: 'East Lancs', HU3: 'Hull and East Riding',
-        SR8: 'Durham', LA13: 'Barrow-in-Furness', CO12: 'Colchester',
+        SR8: 'Sunderland', LA13: 'Barrow-in-Furness', CO12: 'Colchester',
     };
-    const BRMA_UNCERTAIN = {
-        BB7: 'Clitheroe sits near the East Lancs / Central Lancs boundary — confirm on LHA Direct',
-        SR8: 'Peterlee sits near the Durham / Sunderland boundary — confirm on LHA Direct',
-    };
+    const BRMA_UNCERTAIN = {}; // outward codes still to confirm on LHA Direct; none as at 9 Sep 2026
     const LOCAL_OUTWARD = new Set(['CB9', 'CB7']); // the estate Kevin manages in person
     const ROOMS_PER_UNIT = { 'Room': 1, 'Flat-Let': 2 }; // Flat-Let = bedroom + own living room
 
