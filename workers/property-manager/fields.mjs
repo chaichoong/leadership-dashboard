@@ -34,6 +34,8 @@ export const F = {
   tenStatus:       'fldgWAyha1Uij1SZP', // Status (rollup from Tenants)
   tenEndDate:      'fldwHhhKAq4f1nY9e', // Tenancy End Date
   tenLinkedTenant: 'fld1i5bDoHL3B6rUf', // Customers (link → Tenants)
+  tenUnit:         'fld7cjLLEHKAx49OK', // Rental Unit (link)
+  tenStartDate:    'fld2rPXwwV8dXb1zF', // Tenancy Start Date
   tenNextDueDate:  'fldSPslO6Wh5IUSK3', // Next Rent Due Date (formula)
   tenPaidThisMonth:'fldSNk1LWWcu517CA', // Paid This Month? (formula 0/1)
   tenDaysOverdue:  'fldrb4NVHdLefslPo', // Number of Days Overdue (formula)
@@ -41,6 +43,7 @@ export const F = {
   unitStatus:      'fldBvqysXBm9rIm0E', // Unit Status
   unitPropName:    'fld7NBHkhjqfbcxk7', // Property Name (Short) (lookup)
   unitName:        'fldr8sliyu8h2jw9t', // Rental Unit (formula)
+  unitType:        'fldsItq0vU3sHv7n9', // Unit Type (Room | Flat-Let | Flat | Whole Property)
   // Tenants
   tenantPayType:   'fldZbrk8Xw5Dcwxhi', // Rent Payment Type
   // Costs
@@ -59,6 +62,8 @@ export const F = {
   txTenancy:       'fldPmAMmxwqs4SdPa', // Tenancy (link)
   txUnit:          'fldJGIhSbgXNIEW4a', // Unit (link)
   txBusiness:      'fldX1aFlJyzpXGhbF', // Business (For Reports) (link)
+  txName:          'fldsbuAJCTsXHug4C', // *Name (bank descriptor)
+  txVendor:        'fld0Xr8sboQ0ekJQJ', // *Vendor
   // Chart of Accounts
   subCatName:      'fldO4BTJhFv5EsN6i', // Sub-Categories primary
   catName:         'fldii4oUzSfmplihO', // Category Name (Categories primary)

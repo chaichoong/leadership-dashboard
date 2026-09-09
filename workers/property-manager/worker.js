@@ -10,7 +10,9 @@
 //   POST /login        { passcode }            → { token, exp, who }
 //   GET  /data         Bearer token            → computed dashboard (cached 10 min; ?refresh=1 bypasses)
 //   GET  /tasks        Bearer token            → Roy-scope open tasks (never cached)
-//   POST /task/:id     Bearer token { status?, note? } → { ok, task }
+//   POST /task/:id     Bearer token { status?, note?, due?, reopen? } → { ok, task }
+//                      due = YYYY-MM-DD (or "" to clear) and the status follows it the
+//                      way the Tasks page does; reopen = undo a Complete within 15 min
 //   GET  /health                               → { ok, version }
 //
 // Secrets (wrangler secret put):
@@ -20,7 +22,7 @@
 //   PM_SESSION_SECRET   - HMAC key for session tokens
 // Bindings: LOGIN_LIMIT (ratelimit, optional) — 5 attempts per minute per IP.
 
-import { computeAll, shapeTasks, isRoyScope, isTaskOpen, appendNote, buildNameMap } from './compute.mjs';
+import { computeAll, shapeTasks, isRoyScope, isTaskOpen, appendNote, buildNameMap, statusForDue, dateKey } from './compute.mjs';
 import { BASE, TABLES, F, NAMES, REAL_ESTATE_NAME, ROY_STATUS_ALLOW } from './fields.mjs';
 
 const VERSION = '1.0';
@@ -33,11 +35,11 @@ const ALLOWED_ORIGINS = ['https://app.operationsdirector.co.uk', 'https://chaich
 const DEV_ORIGIN = /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/;
 
 const READ_FIELDS = {
-  tenancies: [F.tenPayStatus, F.tenRent, F.tenDueDay, F.tenPayFreq, F.tenSurname, F.tenUnitRef, F.tenProperty, F.tenStatus, F.tenEndDate, F.tenLinkedTenant, F.tenNextDueDate, F.tenPaidThisMonth, F.tenDaysOverdue],
-  rentalUnits: [F.unitStatus, F.unitPropName, F.unitName],
+  tenancies: [F.tenPayStatus, F.tenRent, F.tenDueDay, F.tenPayFreq, F.tenSurname, F.tenUnitRef, F.tenProperty, F.tenStatus, F.tenEndDate, F.tenLinkedTenant, F.tenUnit, F.tenNextDueDate, F.tenDaysOverdue],
+  rentalUnits: [F.unitStatus, F.unitPropName, F.unitName, F.unitType],
   tenants: [F.tenantPayType],
   costs: [F.costName, F.costExpected, F.costPayStatus, F.costInactive, F.costBusiness, F.costSubCategory, F.costCategory],
-  transactions: [F.txDate, F.txReportAmount, F.txSubCategory, F.txProperty, F.txTenancy, F.txUnit],
+  transactions: [F.txDate, F.txReportAmount, F.txSubCategory, F.txProperty, F.txTenancy, F.txUnit, F.txName, F.txVendor],
   subCategories: [F.subCatName],
   categories: [F.catName],
   properties: [F.propShortName, F.propName],
@@ -215,24 +217,47 @@ async function handleTaskWrite(request, env, origin, taskId, who) {
   if (!/^rec[A-Za-z0-9]{14}$/.test(taskId)) return err('Bad task id', 400, origin);
   let body;
   try { body = await request.json(); } catch { return err('Bad request', 400, origin); }
-  const status = body && body.status != null ? String(body.status) : '';
+  let status = body && body.status != null ? String(body.status) : '';
   const note = body && body.note != null ? String(body.note).trim() : '';
-  if (!status && !note) return err('Nothing to save', 400, origin);
+  const hasDue = body && body.due !== undefined;
+  const due = hasDue ? String(body.due || '') : null;
+  const reopen = !!(body && body.reopen);
+  if (!status && !note && !hasDue) return err('Nothing to save', 400, origin);
   if (status && !ROY_STATUS_ALLOW.includes(status)) return err(`Status must be one of ${ROY_STATUS_ALLOW.join(', ')}`, 400, origin);
+  if (hasDue && due && !/^\d{4}-\d{2}-\d{2}$/.test(due)) return err('Due date must be YYYY-MM-DD', 400, origin);
   if (note.length > 2000) return err('Note is too long (2,000 characters max)', 400, origin);
 
   // Scope guard: read the task first; refuse anything outside Roy's lane.
   const task = await airtableRequest(env, `${TABLES.tasks}/${taskId}?returnFieldsByFieldId=true`);
   if (!isRoyScope(task)) return err('That task is not on the property lane.', 403, origin);
+  const now = londonNow();
+  const todayKey = dateKey(now);
+  const stored = String(task.fields[F.taskStatus] || '');
   // A closed task is never rewritten: re-completing would overwrite the original
-  // Completion Date the AI-share KPI is time-weighted on.
-  if (!isTaskOpen(task)) return err('That task is already closed.', 409, origin);
+  // Completion Date the AI-share KPI is time-weighted on. The one exception is
+  // an undo: a Complete from this page can be taken back within 15 minutes.
+  if (!isTaskOpen(task)) {
+    const completedAt = Date.parse(task.fields[F.taskCompletion] || '');
+    const recent = Number.isFinite(completedAt) && Date.now() - completedAt < 15 * 60 * 1000;
+    if (!(reopen && stored === 'Completed' && recent && status && status !== 'Completed')) return err('That task is already closed.', 409, origin);
+  }
 
   const fields = {};
-  const now = londonNow();
+  if (hasDue) {
+    fields[F.taskDueDate] = due || null;
+    // Status follows the date, exactly as the Tasks page does; an explicit
+    // Completed in the same save still wins.
+    if (status !== 'Completed') status = statusForDue(due, stored, todayKey);
+  }
+  if (reopen && !hasDue) {
+    // Undo of a Complete: the task goes back to where its date puts it
+    // (Overdue if the date has passed), never to a status it did not have.
+    status = statusForDue(String(task.fields[F.taskDueDate] || '').slice(0, 10), '', todayKey);
+  }
   if (status) {
     fields[F.taskStatus] = status;
     if (status === 'Completed') fields[F.taskCompletion] = now.toISOString();
+    else if (reopen) fields[F.taskCompletion] = null;
   }
   if (note) fields[F.taskNotes] = appendNote(task.fields[F.taskNotes], note, who, now);
   // Airtable keys a PATCH response by field NAME whatever the query says, so
@@ -240,8 +265,8 @@ async function handleTaskWrite(request, env, origin, taskId, who) {
   await airtableRequest(env, `${TABLES.tasks}/${taskId}`, { method: 'PATCH', body: JSON.stringify({ fields, typecast: false }) });
   // Audit line, deliberate (decision 8 Sep 2026): every write Roy's page makes
   // is visible in the Worker logs. Carries the task id and the signer, no secret.
-  console.log(JSON.stringify({ event: 'task-write', taskId, who, status: status || undefined, noteChars: note.length || undefined }));
-  return json({ ok: true, task: { id: taskId, status: status || String(task.fields[F.taskStatus] || ''), notes: fields[F.taskNotes] != null ? fields[F.taskNotes] : String(task.fields[F.taskNotes] || '') } }, 200, origin);
+  console.log(JSON.stringify({ event: 'task-write', taskId, who, status: status || undefined, due: hasDue ? (due || 'cleared') : undefined, reopen: reopen || undefined, noteChars: note.length || undefined }));
+  return json({ ok: true, task: { id: taskId, status: status || stored, due: hasDue ? due : String(task.fields[F.taskDueDate] || '').slice(0, 10), notes: fields[F.taskNotes] != null ? fields[F.taskNotes] : String(task.fields[F.taskNotes] || '') } }, 200, origin);
 }
 
 export default {

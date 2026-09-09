@@ -76,6 +76,41 @@ describe('task writes', () => {
   });
 });
 
+describe('due date and undo', () => {
+  let auth;
+  beforeEach(async () => { auth = { Authorization: 'Bearer ' + (await login('roy-pass'))[1].token }; });
+  const write = (id, body) => call(req('/task/' + id, { method: 'POST', headers: auth, body: JSON.stringify(body) }));
+  const stub = (fields) => { airtable['tblqB8b22hKBL4PF1/recAAAAAAAAAAAAAA'] = (u, init) => (init && init.method === 'PATCH') ? { id: 'recAAAAAAAAAAAAAA', fields: {} } : { id: 'recAAAAAAAAAAAAAA', fields }; };
+  const sentFields = () => JSON.parse(globalThis.fetch.mock.calls.find(([, init]) => init && init.method === 'PATCH')[1].body).fields;
+
+  it('a new due date sets the status the way the Tasks page does', async () => {
+    stub({ [F.taskStatus]: 'Today', [F.taskMaintenance]: true, [F.taskDueDate]: '2026-09-08' });
+    const r = await write('recAAAAAAAAAAAAAA', { due: '2099-01-01' });
+    expect(r.status).toBe(200);
+    expect(sentFields()).toMatchObject({ [F.taskDueDate]: '2099-01-01', [F.taskStatus]: 'Upcoming' });
+    expect((await r.json()).task).toMatchObject({ status: 'Upcoming', due: '2099-01-01' });
+  });
+  it('a past due date becomes Overdue; Approval stays Approval; a bad date is refused', async () => {
+    stub({ [F.taskStatus]: 'Upcoming', [F.taskMaintenance]: true });
+    await write('recAAAAAAAAAAAAAA', { due: '2020-01-01' });
+    expect(sentFields()[F.taskStatus]).toBe('Overdue');
+    globalThis.fetch.mockClear();
+    stub({ [F.taskStatus]: 'Approval', [F.taskMaintenance]: true });
+    await write('recAAAAAAAAAAAAAA', { due: '2020-01-01' });
+    expect(sentFields()[F.taskStatus]).toBe('Approval');
+    expect((await write('recAAAAAAAAAAAAAA', { due: '01/02/2026' })).status).toBe(400);
+  });
+  it('undo reopens a task completed in the last 15 minutes and clears its Completion Date, nothing older', async () => {
+    stub({ [F.taskStatus]: 'Completed', [F.taskMaintenance]: true, [F.taskDueDate]: '2020-01-01', [F.taskCompletion]: new Date(Date.now() - 60 * 1000).toISOString() });
+    const r = await write('recAAAAAAAAAAAAAA', { status: 'Today', reopen: true });
+    expect(r.status).toBe(200);
+    // Back to where its date puts it, not to the status the page guessed.
+    expect(sentFields()).toEqual({ [F.taskStatus]: 'Overdue', [F.taskCompletion]: null });
+    stub({ [F.taskStatus]: 'Completed', [F.taskMaintenance]: true, [F.taskCompletion]: new Date(Date.now() - 60 * 60 * 1000).toISOString() });
+    expect((await write('recAAAAAAAAAAAAAA', { status: 'Today', reopen: true })).status).toBe(409);
+  });
+});
+
 describe('/data boundary', () => {
   it('fails loudly on zero transactions and never ships personal £ totals', async () => {
     const auth = { Authorization: 'Bearer ' + (await login('roy-pass'))[1].token };
@@ -89,9 +124,12 @@ describe('/data boundary', () => {
     r = await call(req('/data?refresh=1', { headers: auth }));
     expect(r.status).toBe(200);
     const body = await r.json();
-    expect(body.health.costsExcluded).toEqual({ personal: 1, otherBusiness: 0 });
-    expect(JSON.stringify(body)).not.toContain('999');
-    expect(body.planned.runningCosts).toBe(0);
+    // Running costs are the FULL fixed-cost total (Kevin, 9 Sep 2026): the £ is
+    // in, the personal row itself is not.
+    expect(body.planned.runningCosts).toBe(999);
+    expect(body.planned.nonPropertyCount).toBe(1);
+    expect(JSON.stringify(body)).not.toContain(REC.bizPersonal);
+    expect(JSON.stringify(body)).not.toContain('"c1"');
   });
 });
 
