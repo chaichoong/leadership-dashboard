@@ -239,7 +239,7 @@ def selftest():
     assert ch and st["total_km"] == 17503.21 and st["day"] == 2286
     st, ch2 = fold(st, {"id": 1, "distance": 7150, "start_date_local": "2026-09-03T18:00:00Z"}); assert not ch2 and st["total_km"] == 17503.21, "never double-count"
     v = values(st, 76842.0); assert v == {"total_of_days": "2286", "total_disctance": "17503.21", "total_raised": "76842", "progress_bar": "43.68%", "equivalent_journey": "Cambridge to Tasmania"}, v
-    assert set(CV) == {"total_of_days", "total_disctance", "total_raised", "progress_bar"}
+    assert set(CV) == {"total_of_days", "total_disctance", "total_raised", "progress_bar", "equivalent_journey"}
     seeded = {"seeded_from_site": {"raised": 76840.0, "stripe_gross": 6842.0}}
     assert raised_now(seeded, 6842.0) == 76840.0, "first run changes nothing"
     assert raised_now(seeded, 6892.0) == 76890.0, "later runs add only what Stripe took since"
