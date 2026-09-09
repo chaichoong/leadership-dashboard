@@ -4,9 +4,9 @@ const { test, expect } = require('@playwright/test');
 const { MOCK_PAT, stubExternalHosts, loadDashboard } = require('./helpers');
 
 // Field IDs mirror js/config.js GP (the page reads by field ID).
-const P = { name: 'fldqMbR329TNY974G', type: 'fldOySSrZBYkOLLTX', beds: 'fldeXUMcC6O4AcvRG', agent: 'fldEUrWVhSp3NY8Hh', ctNote: 'fldt7zY1TPihahH6H', area: 'fldYLRz2GgVojKaq9', postcode: 'fld6ebSQgD7eRsobd', active: 'fldBUeSJQZZSnFrFW', lettableRooms: 'fldzV9YbHhNUUxwmA', payg: 'fldkBSgcELtpGZhjV', ctPayer: 'fldwWcSfkdtSbVhdj' };
+const P = { strategy: 'fldivZ9UbAACwv7Yh', plannedExtra: 'fldFd4scZaJsXQ0n7', name: 'fldqMbR329TNY974G', type: 'fldOySSrZBYkOLLTX', beds: 'fldeXUMcC6O4AcvRG', agent: 'fldEUrWVhSp3NY8Hh', ctNote: 'fldt7zY1TPihahH6H', area: 'fldYLRz2GgVojKaq9', postcode: 'fld6ebSQgD7eRsobd', active: 'fldBUeSJQZZSnFrFW', lettableRooms: 'fldzV9YbHhNUUxwmA', payg: 'fldkBSgcELtpGZhjV', ctPayer: 'fldwWcSfkdtSbVhdj' };
 const U = { tenants: 'fldQO09UAFRf07V7q', type: 'fldsItq0vU3sHv7n9', number: 'fld3nPlpdXSExxDuq', property: 'fldUJNRGgzgyAwwjt', status: 'fldBvqysXBm9rIm0E', incomeType: 'fldPrhfntWO9aHl58', rent: 'fldQZEjNzhU4UDUW9' };
-const T = { name: 'fldxBKW7QnujSDWqA', status: 'fldAXzP9SGIHiAhrv', dob: 'fldv7FKsqXYswyCFE', payType: 'fldZbrk8Xw5Dcwxhi', notes: 'fldfwxEf7I3XQDVtR', capExemption: 'fldOOi3d1P4vDedm6' };
+const T = { ni: 'fld1rHf1qZ60qK95l', phone: 'fldraHUkWfqo4olLF', email: 'fldybEduFY3DWWTfT', name: 'fldxBKW7QnujSDWqA', status: 'fldAXzP9SGIHiAhrv', dob: 'fldv7FKsqXYswyCFE', payType: 'fldZbrk8Xw5Dcwxhi', notes: 'fldfwxEf7I3XQDVtR', capExemption: 'fldOOi3d1P4vDedm6' };
 const C = { tenants: 'fld1i5bDoHL3B6rUf', unit: 'fld7cjLLEHKAx49OK', rent: 'fldDMyfZLFMeONPq8' };
 const K = { name: 'fldS6FYfpkhu6tJG0', expected: 'fld9JibXkMpTeMcxw', payStatus: 'fldXZNI96v8HgjuSh', property: 'fld7nikJBPz3BoZJG', frequency: 'fldvozTHvs5VH3lNi' };
 const S = { key: 'fldiyJqkTQ9i2p2Wc', value: 'fldye89gwAzXWDphp', label: 'fldqN8fc8vk8qBeom', note: 'fldRtEN92vZUZKjBU' };
@@ -16,7 +16,7 @@ const TBL = { properties: 'tbl6f0OkAmTC2jbuG', units: 'tblM3mZCR5kiEdWMj', tenan
 function fixtures() {
   return {
     [TBL.properties]: [
-      { id: 'recProp1', fields: { [P.name]: ['18 Test Park'], [P.type]: 'HMO', [P.beds]: 3, [P.agent]: 'Property Portfolio', [P.postcode]: 'CB9 0AJ', [P.area]: 'Haverhill', [P.ctNote]: '£135.00', [P.active]: [true] } },
+      { id: 'recProp1', fields: { [P.name]: ['18 Test Park'], [P.type]: 'HMO', [P.beds]: 3, [P.agent]: 'Property Portfolio', [P.postcode]: 'CB9 0AJ', [P.area]: 'Haverhill', [P.ctNote]: '£135.00', [P.active]: [true], [P.strategy]: 'Add tenants', [P.plannedExtra]: 1 } },
       { id: 'recProp2', fields: { [P.name]: ['13 Far Street'], [P.type]: 'Single Let', [P.beds]: 2, [P.agent]: 'Simon Collins', [P.postcode]: 'BB5 5PT', [P.active]: [true] } },
     ],
     [TBL.units]: [
@@ -39,7 +39,7 @@ function fixtures() {
     ],
     [TBL.costs]: [{ id: 'recK1', fields: { [K.name]: 'West Suffolk Council - 18TP CT', [K.expected]: 135, [K.payStatus]: 'In Payment', [K.property]: ['recProp1'], [K.frequency]: 'Monthly' } }],
     [TBL.plan]: [],
-    [TBL.settings]: ['lha_room:526.33', 'lha_1bed:900', 'utilities_per_tenant:75', 'council_tax_default:145', 'room_prep_cost:1500', 'void_weeks_new_room:4', 'siddows_market_rent:850', 'collins_margin_per_property:250', 'ct_credit_share:100', 'benefit_cap_single:1229.42', 'benefit_cap_family:1835', 'uc_standard_single_25:424.90'].map((kv, i) => { const [k, v] = kv.split(':'); return { id: 'recS' + i, fields: { [S.key]: k, [S.value]: Number(v), [S.label]: k, [S.note]: 'test' } }; }),
+    [TBL.settings]: ['lha_room:524.90', 'lha_1bed:897.52', 'utilities_per_tenant:75', 'council_tax_default:145', 'room_prep_cost:1500', 'void_weeks_new_room:4', 'siddows_market_rent:850', 'collins_margin_per_property:250', 'ct_credit_share:100', 'benefit_cap_single:1229.42', 'benefit_cap_family:1835', 'uc_standard_single_25:424.90'].map((kv, i) => { const [k, v] = kv.split(':'); return { id: 'recS' + i, fields: { [S.key]: k, [S.value]: Number(v), [S.label]: k, [S.note]: 'test' } }; }),
     [TBL.tasks]: [],
   };
 }
@@ -74,11 +74,11 @@ test.describe('Growth Plan page', () => {
     const kpis = page.locator('#kpis .kpi');
     await expect(kpis.nth(0)).toContainText('£2,204');            // 524.90 + 897.52 + 524.90 + 257
     await expect(page.locator('#nextAction')).toContainText('Adam Older');
-    await expect(page.locator('#nextAction')).toContainText('UC statement');
+    await expect(page.locator('#nextAction')).toContainText('UC journal');
     const rows = page.locator('#leverBody tr.lever');
     await expect(rows.first()).toContainText('room rate to 1-bed rate (age 37)');
-    await expect(rows.first()).toContainText('+£279.62');
-    await expect(rows.first()).toContainText('+£375.10');           // if exempt
+    await expect(rows.first()).toContainText('+£372.62');          // full 1-bed rate, never lowered for the cap
+    await expect(rows.first()).toContainText('£93.00');            // CRF Housing Payment to apply for
     await expect(page.locator('#leverBody')).toContainText('1 more room let');   // Paul's flat-let frees a room
     await expect(page.locator('#leverBody')).toContainText('13 Far Street: take back');
     // Agent-held rows are hidden until asked for; done/dropped likewise.
@@ -88,7 +88,7 @@ test.describe('Growth Plan page', () => {
   test('lists the unknown age and writes a date of birth back to the tenant', async ({ page }) => {
     const writes = await openPage(page, fixtures());
     await expect(page.locator('#facts')).toContainText('Gary Unknown');
-    await expect(page.locator('#facts')).toContainText('+£279.62 if 35 or over');
+    await expect(page.locator('#facts')).toContainText('+£372.62 if 35 or over');
     await page.locator('#facts input[data-dob="recT3"]').fill('1980-06-01');
     await page.locator('#facts button[data-act="save-dob"][data-tenant="recT3"]').click();
     await expect(page.locator('#toast')).toContainText('Date of birth saved');
@@ -99,7 +99,7 @@ test.describe('Growth Plan page', () => {
     expect(w.records[0].fields[T.notes]).toMatch(/Growth Plan page/);
     // The plan re-prices: Gary (46) is now an uplift lever, not an unknown.
     await expect(page.locator('#leverBody')).toContainText('Gary Unknown: room rate to 1-bed rate (age 46)');
-    await expect(page.locator('#facts')).not.toContainText('Gary Unknown');
+    await expect(page.locator('#facts input[data-dob="recT3"]')).toHaveCount(0);   // no longer an unknown age
   });
 
   test('refuses an implausible date of birth without writing', async ({ page }) => {
@@ -110,12 +110,15 @@ test.describe('Growth Plan page', () => {
     expect(writes.filter(x => x.tableId === TBL.tenants)).toEqual([]);
   });
 
-  test('recording an exemption lifts the uplift to the full 1-bed rate', async ({ page }) => {
+  test('recording an exemption removes the CRF shortfall from the uplift row', async ({ page }) => {
     const writes = await openPage(page, fixtures());
+    await expect(page.locator('#leverBody tr.lever').first()).toContainText('£93.00');
     await page.locator('select[data-exempt="recT1"]').selectOption('PIP or DLA');
     await expect(page.locator('#toast')).toContainText('PIP or DLA saved');
     expect(writes.find(x => x.tableId === TBL.tenants).records[0].fields[T.capExemption]).toBe('PIP or DLA');
-    await expect(page.locator('#leverBody tr.lever').first()).toContainText('+£375.10');
+    const first = page.locator('#leverBody tr.lever').first();
+    await expect(first).toContainText('+£372.62');
+    await expect(first).not.toContainText('£93.00');
   });
 
   test('adopting a lever creates a Growth Plan row and a task links to it', async ({ page }) => {
@@ -154,20 +157,23 @@ test.describe('Growth Plan page', () => {
 
   test('property card fields write to Properties and re-price the plan', async ({ page }) => {
     const writes = await openPage(page, fixtures());
-    await page.locator('[data-prop-card="recProp1"] select[data-prop-field="payg"]').selectOption('Yes');
+    await expect(page.locator('#leverBody tr.lever', { hasText: '1 more room let' })).toContainText('+£897.52'); // bills with the tenant
+    await page.locator('[data-prop-card="recProp1"] select[data-prop-field="payg"]').selectOption('No');
     await expect(page.locator('#toast')).toContainText('Saved');
-    expect(writes.find(x => x.tableId === TBL.properties).records[0].fields[P.payg]).toBe('Yes');
-    // Utilities no longer come off the new let: 804.52 instead of 729.52
-    await expect(page.locator('#leverBody tr.lever', { hasText: '1 more room let' })).toContainText('+£804.52');
-    await page.locator('[data-prop-card="recProp1"] input[data-prop-field="lettableRooms"]').fill('6');
-    await page.locator('[data-prop-card="recProp1"] input[data-prop-field="lettableRooms"]').dispatchEvent('change');
-    await expect(page.locator('#leverBody')).toContainText('3 more rooms let');   // 6 lettable - 4 in use + 1 released
+    expect(writes.find(x => x.tableId === TBL.properties).records[0].fields[P.payg]).toBe('No');
+    await expect(page.locator('#leverBody tr.lever', { hasText: '1 more room let' })).toContainText('+£822.52'); // Kevin took the bills on: £75 off
+    await page.locator('[data-prop-card="recProp1"] input[data-prop-field="plannedExtra"]').fill('3');
+    await page.locator('[data-prop-card="recProp1"] input[data-prop-field="plannedExtra"]').dispatchEvent('change');
+    expect(writes.filter(x => x.tableId === TBL.properties).pop().records[0].fields[P.plannedExtra]).toBe(3);
+    await expect(page.locator('#leverBody')).toContainText('3 more rooms let');
+    await page.locator('[data-prop-card="recProp1"] select[data-prop-field="strategy"]').selectOption('Hold');
+    await expect(page.locator('#leverBody')).not.toContainText('more rooms let');   // Hold: no house lever
   });
 
-  test('benefit cap calculator: £900 rent caps a single over-35 unless exempt', async ({ page }) => {
+  test('benefit cap calculator: £900 rent caps a single over-35 unless exempt, and names the CRF amount', async ({ page }) => {
     await openPage(page, fixtures());
     await expect(page.locator('#calcOut')).toContainText('Capped: £95.48 short');
-    await expect(page.locator('#calcOut')).toContainText('£804.52');
+    await expect(page.locator('#calcOut')).toContainText('CRF Housing Payment to apply for');
     await page.locator('#c-pip').check();
     await expect(page.locator('#calcOut')).toContainText('Not capped');
     await page.locator('#c-pip').uncheck();
@@ -183,6 +189,17 @@ test.describe('Growth Plan page', () => {
     await page.locator('#showDone').check();
     await expect(page.locator('#leverBody')).toContainText('Adam Older');
     await expect(page.locator('#leverBody tr.lever', { hasText: 'Adam Older' })).toContainText('Done');
+  });
+
+  test('the meeting pack lists what each tenant needs and what is still missing', async ({ page }) => {
+    await openPage(page, fixtures());
+    const pack = page.locator('#packs');
+    await expect(pack).toContainText('Adam Older');
+    await expect(pack).toContainText('Rent to £897.52 (+£372.62)');
+    await expect(pack).toContainText('CRF Housing Payment £93.00 a month to landlord');
+    await expect(pack).toContainText('Still to collect: NI number, phone, email');
+    await expect(pack).toContainText('Gary Unknown');
+    await expect(pack).toContainText('Confirm date of birth first');
   });
 
   test('shows the empty state and no crash when nothing loads', async ({ page }) => {
