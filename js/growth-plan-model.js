@@ -464,13 +464,16 @@
                     potentialRent = round2(2 * rates.b1);
                     how = `joint tenancy of two × £${rates.b1.toFixed(2)}`;
                 }
-                const potential = round2(potentialRent - propRent);
+                // A void house is compared against what the plan lets it for (the void lever), not its old rent.
                 const voidHere = pUnits.some(u => u.status === 'Void');
+                const voidLever = voidHere ? levers.find(l => l.propertyId === prop.id && l.lever === 'Void let') : null;
+                const baseline = voidLever ? voidLever.monthly : propRent;
+                const potential = round2(potentialRent - baseline);
                 levers.push(lever({
                     key: `agent:${prop.id}`, lever: 'Agent-held', propertyId: prop.id, property: prop.name,
                     title: `${prop.name}: ${leaveAsIs ? 're-let' : 'take back and let'} to over-35 UC tenants at the 1-bed rate (${roomsCap ? roomsCap + ' rooms' : flats.length ? flats.length + ' flats' : num(prop.beds) === 1 ? 'one tenant' : 'joint tenancy of two'})`,
                     monthly: potential, monthlyIfExempt: potential, oneOff: 0, effort: 'Legal', counted: 'agent',
-                    evidence: [`Rent now £${propRent.toFixed(2)} a month${mgmt === 'kevin' ? '' : ' via ' + (prop.agent || 'the agent')}${voidHere ? ' (void; the plan lets it to a family)' : ''}`, `${how} (${rates.brma} 1-bed) = £${potentialRent.toFixed(2)} a month, before council tax and management`, potential < 0 ? 'The current rent is higher than the LHA figure: no gain' : (roomsCap ? 'Council tax and licensing would sit with the owner as an HMO' : 'Council tax would sit with the tenants')],
+                    evidence: [voidLever ? `Void: the plan lets it to a family at £${voidLever.monthly.toFixed(2)} a month, so that is the comparison` : `Rent now £${propRent.toFixed(2)} a month${mgmt === 'kevin' ? '' : ' via ' + (prop.agent || 'the agent')}`, `${how} (${rates.brma} 1-bed) = £${potentialRent.toFixed(2)} a month, before council tax and management`, potential < 0 ? 'The current rent is higher than the LHA figure: no gain' : (roomsCap ? 'Council tax and licensing would sit with the owner as an HMO' : 'Council tax would sit with the tenants')],
                     needs: ['Potential only: no action generated'],
                     firstStep: 'None: potential only',
                 }, planByKey));
