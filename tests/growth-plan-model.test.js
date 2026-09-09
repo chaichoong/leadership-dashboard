@@ -363,6 +363,14 @@ describe('buildPlan levers', () => {
         expect(p.totals.remoteWorks).toBeGreaterThan(0);
         expect(p.totals.remote).toBe(Math.round((p.totals.remoteWorks + p.totals.remoteVoids) * 100) / 100);
     });
+    it('a void house compares its further potential against the planned family let, not its old rent', () => {
+        const f = fixture(); f.properties[0].strategy = 'Leave as is'; f.tenants = []; f.tenancies = [];
+        f.units = [{ id: 'u5', propertyId: 'p1', number: 1, type: 'Whole Property', status: 'Void', rent: 499.70, tenantIds: [] }];
+        const p = M.buildPlan(f, { void_rent_18_test_park: 850 }, TODAY);
+        const l = p.levers.find(x => x.key === 'agent:p1');
+        expect(l.monthly).toBe(Math.round((2 * 897.52 - (850 + 135)) * 100) / 100); // void lever = rent + council tax saving
+        expect(l.evidence[0]).toMatch(/lets it to a family/);
+    });
     it('a void unit becomes a Void let priced from settings', () => {
         const f = fixture(); f.units.push({ id: 'u5', propertyId: 'p1', number: 5, type: 'Whole Property', status: 'Void', rent: 0, tenantIds: [] });
         const l = M.buildPlan(f, { void_rent_18_test_park: 700 }, TODAY).levers.find(x => x.key === 'void:u5');
