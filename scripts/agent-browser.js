@@ -274,6 +274,12 @@ const UPLOAD_DIR = realpathOrResolve(process.env.AGENT_UPLOAD_DIR ||
   path.join(os.homedir(), 'knowledge-os', 'attachments'));
 const UPLOAD_EXTENSIONS = new Set(['.pdf', '.png', '.jpg', '.jpeg']);
 const UPLOAD_MAX_BYTES = 20 * 1024 * 1024;
+// The Content Engine's own finished videos go up to Spotify for Creators through the wizard (9 Sep 2026). Only files it
+// writes under attachments/content-engine may be video or audio, and only up to 2 GB; everything else keeps the
+// document-only guard above, because that guard is the exfiltration control.
+const ENGINE_UPLOAD_DIR = path.join(UPLOAD_DIR, 'content-engine');
+const ENGINE_EXTENSIONS = new Set(['.mp4', '.mp3', '.m4a']);
+const ENGINE_MAX_BYTES = 2 * 1024 * 1024 * 1024;
 
 function assertUploadable(files) {
   const list = (Array.isArray(files) ? files : [files]).filter(Boolean);
@@ -287,12 +293,14 @@ function assertUploadable(files) {
           'Agents upload only from there — write the file to it first.');
     }
     const ext = path.extname(resolved).toLowerCase();
-    if (!UPLOAD_EXTENSIONS.has(ext)) {
+    const engineFile = resolved.startsWith(ENGINE_UPLOAD_DIR + path.sep) && ENGINE_EXTENSIONS.has(ext);
+    if (!UPLOAD_EXTENSIONS.has(ext) && !engineFile) {
       die(`upload type ${ext || '(none)'} is not allowed. Allowed: ` +
-          `${[...UPLOAD_EXTENSIONS].sort().join(', ')}`);
+          `${[...UPLOAD_EXTENSIONS].sort().join(', ')} (video/audio only from ${ENGINE_UPLOAD_DIR})`);
     }
     const size = fs.statSync(resolved).size;
-    if (size > UPLOAD_MAX_BYTES) die(`${path.basename(resolved)} is ${size} bytes — over the ${UPLOAD_MAX_BYTES} cap`);
+    const cap = engineFile ? ENGINE_MAX_BYTES : UPLOAD_MAX_BYTES;
+    if (size > cap) die(`${path.basename(resolved)} is ${size} bytes — over the ${cap} cap`);
     return resolved;
   });
 }
