@@ -1,0 +1,659 @@
+<!DOCTYPE html>
+<html lang="en-GB">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="robots" content="noindex, nofollow">
+<title>Growth Plan · Real Estate</title>
+<link rel="stylesheet" href="css/tokens.css?v=1">
+<link rel="stylesheet" href="css/sync-bar.css?v=3">
+<style>
+  /* Real Estate Growth Plan — Leadership. Tokens only, no hex. The maths lives in
+     js/growth-plan-model.js; this file fetches, normalises, renders and writes back. */
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg-app); color: var(--text-primary); }
+  .gp-wrap { max-width: 1280px; margin: 0 auto; padding: var(--space-5) var(--space-5) var(--space-10); }
+  .gp-head { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--space-4); flex-wrap: wrap; margin-bottom: var(--space-3); }
+  .gp-head h1 { font-size: var(--fs-2xl); font-weight: var(--fw-bold); margin: 0; letter-spacing: -0.01em; }
+  .gp-head .sub { color: var(--text-secondary); font-size: var(--fs-sm); margin-top: 2px; max-width: 760px; }
+  .gp-actions { display: flex; gap: var(--space-2); align-items: center; flex-wrap: wrap; }
+  .btn { border: 1px solid var(--border-default); background: var(--bg-surface); color: var(--text-primary); border-radius: var(--radius-md); padding: 7px 14px; font: inherit; font-size: var(--fs-sm); cursor: pointer; }
+  .btn:hover { background: var(--bg-surface-2); }
+  .btn:focus-visible, .kpi:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .btn:disabled { opacity: .55; cursor: default; }
+  .btn-primary { background: var(--accent); border-color: var(--accent); color: var(--accent-on); }
+  .btn-primary:hover { background: var(--accent-hover); }
+  .btn-sm { padding: 3px 9px; font-size: var(--fs-xs); }
+  .btn-ghost { border-color: transparent; color: var(--text-secondary); }
+  .btn-danger { color: var(--danger); border-color: var(--danger-bg); background: var(--danger-bg); }
+  section.card { background: var(--bg-surface); border: 1px solid var(--border-default); border-radius: var(--radius-lg); padding: var(--space-5); margin-top: var(--space-4); }
+  section.card h2 { margin: 0 0 var(--space-1); font-size: var(--fs-lg); font-weight: var(--fw-semibold); display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; }
+  section.card .hint { color: var(--text-secondary); font-size: var(--fs-sm); margin: 0 0 var(--space-4); max-width: 900px; }
+  .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: var(--space-3); }
+  .kpi { background: var(--bg-surface-2); border: 1px solid var(--border-subtle); border-radius: var(--radius-md); padding: var(--space-3) var(--space-4); min-width: 0; }
+  .kpi .l { color: var(--text-secondary); font-size: var(--fs-xs); font-weight: var(--fw-medium); text-transform: uppercase; letter-spacing: .04em; }
+  .kpi .v { font-size: var(--fs-2xl); font-weight: var(--fw-bold); margin-top: 4px; font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .kpi .d { color: var(--text-muted); font-size: var(--fs-xs); margin-top: 2px; }
+  .kpi.good .v { color: var(--success); } .kpi.gold .v { color: var(--accent-gold); } .kpi.muted .v { color: var(--text-muted); }
+  .next { margin-top: var(--space-4); border: 1px solid var(--accent); background: var(--accent-soft); border-radius: var(--radius-md); padding: var(--space-4); display: grid; grid-template-columns: 1fr auto; gap: var(--space-3); align-items: center; }
+  .next .k { font-size: var(--fs-xs); text-transform: uppercase; letter-spacing: .04em; color: var(--accent); font-weight: var(--fw-semibold); }
+  .next .t { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 2px 0; }
+  .next .s { color: var(--text-secondary); font-size: var(--fs-sm); }
+  .tbl-wrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: var(--fs-sm); }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border-subtle); vertical-align: top; }
+  th { background: var(--bg-subtle); color: var(--text-secondary); font-weight: var(--fw-semibold); font-size: var(--fs-xs); text-transform: uppercase; letter-spacing: .04em; white-space: nowrap; }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  td.title { min-width: 260px; max-width: 460px; word-break: break-word; }
+  tr.lever { cursor: pointer; }
+  button.linkish { background: none; border: 0; padding: 0; font: inherit; color: inherit; text-align: left; cursor: pointer; }
+  button.linkish:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 2px; }
+  tr.lever:hover td { background: var(--bg-surface-2); }
+  tr.lever.open td { background: var(--accent-soft); }
+  tr.lever.dim td { color: var(--text-muted); }
+  tr.detail td { background: var(--bg-surface-2); white-space: normal; }
+  .detail-grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-4); }
+  @media (max-width: 900px) { .detail-grid { grid-template-columns: 1fr; } .next { grid-template-columns: 1fr; } }
+  .detail-grid h4 { margin: 0 0 4px; font-size: var(--fs-xs); text-transform: uppercase; letter-spacing: .04em; color: var(--text-secondary); }
+  .detail-grid ul { margin: 0; padding-left: 18px; }
+  .detail-grid li { margin: 2px 0; }
+  .pill { display: inline-block; padding: 1px 8px; border-radius: var(--radius-full); font-size: var(--fs-xs); font-weight: var(--fw-medium); background: var(--bg-subtle); color: var(--text-secondary); white-space: nowrap; }
+  .pill.paper { background: var(--success-bg); color: var(--success); }
+  .pill.light { background: var(--info-bg); color: var(--info); }
+  .pill.works { background: var(--warning-bg); color: var(--warning); }
+  .pill.legal { background: var(--danger-bg); color: var(--danger); }
+  .pill.st-adopted, .pill.st-in-progress { background: var(--accent-soft); color: var(--accent); }
+  .pill.st-done { background: var(--success-bg); color: var(--success); }
+  .pill.st-dropped { background: var(--bg-subtle); color: var(--text-muted); text-decoration: line-through; }
+  .pill.stage { background: var(--bg-subtle); color: var(--text-primary); }
+  .pill.check { background: var(--warning-bg); color: var(--warning); }
+  .pill.uc { background: var(--info-bg); color: var(--info); }
+  .pill.age { background: var(--accent-soft); color: var(--accent); }
+  .pill.age.young { background: var(--bg-subtle); color: var(--text-muted); }
+  .pill.age.unknown { background: var(--warning-bg); color: var(--warning); }
+  .row-actions { display: flex; gap: 4px; flex-wrap: wrap; }
+  .filters { display: flex; gap: var(--space-2); align-items: center; flex-wrap: wrap; margin-bottom: var(--space-3); }
+  .seg { display: inline-flex; border: 1px solid var(--border-default); border-radius: var(--radius-md); overflow: hidden; flex-wrap: wrap; }
+  .seg button { border: 0; background: var(--bg-surface); padding: 5px 12px; font: inherit; font-size: var(--fs-sm); cursor: pointer; color: var(--text-secondary); }
+  .seg button[aria-pressed="true"] { background: var(--accent); color: var(--accent-on); }
+  .seg button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+  label.chk { font-size: var(--fs-sm); color: var(--text-secondary); display: inline-flex; gap: 6px; align-items: center; }
+  .props { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: var(--space-3); }
+  .prop { border: 1px solid var(--border-default); border-radius: var(--radius-md); padding: var(--space-3) var(--space-4); background: var(--bg-surface); min-width: 0; }
+  .prop.remote { border-style: dashed; }
+  .prop h3 { margin: 0; font-size: var(--fs-md); font-weight: var(--fw-semibold); display: flex; justify-content: space-between; gap: 8px; align-items: baseline; }
+  .prop h3 .rent { font-variant-numeric: tabular-nums; font-weight: var(--fw-bold); white-space: nowrap; }
+  .prop .meta { color: var(--text-muted); font-size: var(--fs-xs); margin: 2px 0 8px; }
+  .rooms { height: 8px; background: var(--bg-subtle); border-radius: var(--radius-full); overflow: hidden; display: flex; margin: 6px 0; }
+  .rooms i { display: block; height: 100%; }
+  .rooms i.used { background: var(--accent); } .rooms i.free { background: var(--accent-gold); }
+  .ten { display: grid; grid-template-columns: 1fr auto; gap: 2px 8px; padding: 6px 0; border-top: 1px solid var(--border-subtle); font-size: var(--fs-sm); align-items: center; }
+  .ten .n { font-weight: var(--fw-medium); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ten .r { font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .ten .m { grid-column: 1 / -1; color: var(--text-muted); font-size: var(--fs-xs); display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+  .ten .note { grid-column: 1 / -1; font-size: var(--fs-xs); color: var(--warning); }
+  .inl { display: inline-flex; gap: 4px; align-items: center; }
+  input.sm, select.sm { font: inherit; font-size: var(--fs-xs); padding: 2px 6px; border: 1px solid var(--border-default); border-radius: var(--radius-sm); background: var(--bg-surface); color: var(--text-primary); max-width: 150px; }
+  input.sm:focus-visible, select.sm:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .prop-fields { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border-subtle); }
+  .prop-fields label { display: flex; flex-direction: column; gap: 2px; font-size: var(--fs-xs); color: var(--text-secondary); min-width: 0; }
+  .prop-fields select.sm, .prop-fields input.sm { max-width: 100%; width: 100%; }
+  .prop .flag { font-size: var(--fs-xs); color: var(--warning); margin-top: 6px; }
+  .prop .lev { font-size: var(--fs-xs); color: var(--text-secondary); margin-top: 6px; }
+  .prop .lev b { color: var(--text-primary); font-variant-numeric: tabular-nums; }
+  .calc { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-5); }
+  @media (max-width: 900px) { .calc { grid-template-columns: 1fr; } .props { grid-template-columns: 1fr; } .prop-fields { grid-template-columns: 1fr; } }
+  .calc .form { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 12px; }
+  .calc .form label { display: flex; flex-direction: column; gap: 3px; font-size: var(--fs-xs); color: var(--text-secondary); }
+  .calc .form input, .calc .form select { font: inherit; font-size: var(--fs-sm); padding: 5px 8px; border: 1px solid var(--border-default); border-radius: var(--radius-sm); background: var(--bg-surface); color: var(--text-primary); }
+  .calc .form label.wide { grid-column: 1 / -1; }
+  .calc .out { background: var(--bg-surface-2); border: 1px solid var(--border-subtle); border-radius: var(--radius-md); padding: var(--space-4); }
+  .calc .out .big { font-size: var(--fs-2xl); font-weight: var(--fw-bold); font-variant-numeric: tabular-nums; }
+  .calc .out .line { display: flex; justify-content: space-between; gap: 12px; padding: 3px 0; border-bottom: 1px dashed var(--border-subtle); font-size: var(--fs-sm); }
+  .calc .out .line.total { border-bottom: 0; font-weight: var(--fw-semibold); }
+  .calc .out .ok { color: var(--success); } .calc .out .bad { color: var(--danger); }
+  .clause { background: var(--bg-surface-2); border: 1px solid var(--border-subtle); border-radius: var(--radius-md); padding: var(--space-4); font-size: var(--fs-sm); white-space: pre-wrap; line-height: 1.5; }
+  .two { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-5); }
+  @media (max-width: 900px) { .two { grid-template-columns: 1fr; } }
+  .settings-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 8px 16px; }
+  .setting { display: grid; grid-template-columns: 1fr 110px; gap: 6px; align-items: center; font-size: var(--fs-sm); padding: 4px 0; border-bottom: 1px solid var(--border-subtle); }
+  .setting .lbl { color: var(--text-primary); min-width: 0; }
+  .setting .note { color: var(--text-muted); font-size: var(--fs-xs); display: block; }
+  .setting input { font: inherit; font-size: var(--fs-sm); padding: 3px 6px; border: 1px solid var(--border-default); border-radius: var(--radius-sm); text-align: right; width: 100%; background: var(--bg-surface); color: var(--text-primary); }
+  ol.stages { padding-left: 20px; margin: 0; }
+  ol.stages li { margin: 4px 0; }
+  .muted { color: var(--text-muted); } .small { font-size: var(--fs-xs); }
+  .empty { color: var(--text-muted); font-size: var(--fs-sm); padding: var(--space-3) 0; }
+  .src { color: var(--text-muted); font-size: var(--fs-xs); margin-top: var(--space-3); }
+  .src a { color: var(--accent); }
+  /* Auth + loading (same contract as compliance.html: PAT shared via localStorage airtable_pat) */
+  .auth-screen { display: flex; align-items: center; justify-content: center; min-height: 80vh; flex-direction: column; padding: var(--space-5); }
+  .auth-box { background: var(--bg-surface); border: 1px solid var(--border-default); border-radius: var(--radius-lg); padding: 40px; max-width: 440px; width: 100%; box-shadow: var(--shadow-md); text-align: center; }
+  .auth-box h2 { font-size: var(--fs-2xl); margin: 0 0 8px; }
+  .auth-box p { font-size: var(--fs-base); color: var(--text-muted); margin: 0 0 24px; }
+  .auth-input { width: 100%; padding: 12px 16px; border: 1px solid var(--border-default); border-radius: var(--radius-lg); font-size: var(--fs-md); margin-bottom: 16px; }
+  .auth-btn { width: 100%; padding: 12px; background: var(--accent); color: var(--accent-on); border: none; border-radius: var(--radius-lg); font-size: var(--fs-md); font-weight: var(--fw-semibold); cursor: pointer; }
+  .auth-error { color: var(--danger); font-size: var(--fs-sm); margin-top: 8px; display: none; }
+  #loadingOverlay { display: flex; align-items: center; justify-content: center; gap: 12px; min-height: 60vh; color: var(--text-secondary); font-size: var(--fs-md); flex-direction: column; }
+  .spinner { width: 28px; height: 28px; border: 3px solid var(--border-default); border-top-color: var(--accent); border-radius: 50%; animation: spin .8s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  #toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); background: var(--bg-sidebar); color: var(--accent-on); padding: 10px 18px; border-radius: var(--radius-md); font-size: var(--fs-sm); box-shadow: var(--shadow-lg); opacity: 0; pointer-events: none; transition: opacity .2s; z-index: 50; max-width: 90vw; }
+  #toast.show { opacity: 1; }
+  #toast.err { background: var(--danger); }
+  .error-box { background: var(--danger-bg); color: var(--danger); border: 1px solid var(--danger); border-radius: var(--radius-md); padding: var(--space-4); margin-top: var(--space-4); }
+  @media print { .gp-actions, .row-actions, .filters, [data-sync-bar], .btn, input, select, #gp-settings, #gp-calc { display: none !important; } section.card { break-inside: avoid; border: 0; } }
+</style>
+</head>
+<body>
+<div id="authScreen" class="auth-screen" style="display:none">
+  <div class="auth-box">
+    <h2>Growth Plan</h2>
+    <p>Enter the Airtable token to load the portfolio.</p>
+    <input id="patInput" class="auth-input" type="password" placeholder="pat…" autocomplete="off" aria-label="Airtable token">
+    <button class="auth-btn" id="authBtn" type="button">Open</button>
+    <div id="authError" class="auth-error">That token was refused. Check it and try again.</div>
+  </div>
+</div>
+<div id="loadingOverlay"><div class="spinner" aria-hidden="true"></div><div id="loadingText">Loading the portfolio…</div></div>
+<div id="dashboard" class="gp-wrap" style="display:none">
+  <div class="gp-head">
+    <div>
+      <h1>Real Estate Growth Plan</h1>
+      <div class="sub">Every rent, council tax and room lever in the portfolio, priced against the 2026-27 Local Housing Allowance and the benefit cap, ranked by money per unit of effort. Work the list top down.</div>
+    </div>
+    <div class="gp-actions">
+      <button class="btn" id="refreshBtn" type="button">Refresh</button>
+      <a class="btn" href="sop-growth-plan.html" target="_blank" rel="noopener">Guide</a>
+    </div>
+  </div>
+  <div data-sync-bar="growth-plan"></div>
+  <div id="errorBox" class="error-box" style="display:none"></div>
+
+  <section class="card" id="gp-headline" aria-live="polite">
+    <h2>Where the money is</h2>
+    <p class="hint">Conservative figures: every new or uplifted rent is capped at what a single claimant can carry under the benefit cap unless an exemption is on file. The exempt upside is shown separately.</p>
+    <div class="kpis" id="kpis"></div>
+    <div class="next" id="nextAction"></div>
+  </section>
+
+  <section class="card" id="gp-facts">
+    <h2>Facts the plan still needs</h2>
+    <p class="hint">Each of these changes a number above. Fill them here; they write straight to Airtable.</p>
+    <div id="facts"></div>
+  </section>
+
+  <section class="card" id="gp-order">
+    <h2>Strategic order</h2>
+    <p class="hint">Stage 1 is paper only. Stage 2 moves council tax. Stage 3 needs works. Stage 4 is voids and take-backs. Click a row for the evidence and the first step. Adopt what you will do; create the task from here.</p>
+    <div class="filters">
+      <div class="seg" role="group" aria-label="Stage filter" id="stageSeg"></div>
+      <label class="chk"><input type="checkbox" id="showAgent"> Show agent-held potential</label>
+      <label class="chk"><input type="checkbox" id="showDone"> Show done and dropped</label>
+    </div>
+    <div class="tbl-wrap"><table id="leverTable" aria-label="Levers ranked by money per unit of effort"><thead><tr><th>#</th><th>Stage</th><th>Lever</th><th class="title">What</th><th class="num">A month</th><th class="num">If exempt</th><th class="num">One-off</th><th>Effort</th><th>Status</th><th>Actions</th></tr></thead><tbody id="leverBody"></tbody></table></div>
+  </section>
+
+  <section class="card" id="gp-props">
+    <h2>Property by property</h2>
+    <p class="hint">Rooms in use against rooms you could let. Set Lettable Rooms, PAYG Meters and Council Tax Payer on each card; the plan re-prices as you do.</p>
+    <div class="filters">
+      <div class="seg" role="group" aria-label="Property filter" id="propSeg"><button type="button" data-prop-filter="kevin" aria-pressed="true">Managed by you</button><button type="button" data-prop-filter="all" aria-pressed="false">Whole portfolio</button></div>
+    </div>
+    <div class="props" id="props"></div>
+  </section>
+
+  <section class="card" id="gp-calc">
+    <h2>Benefit cap calculator</h2>
+    <p class="hint">Run this before any rent is set. If the cap bites, the safe rent is the most the tenant can carry without paying the shortfall from their own allowance.</p>
+    <div class="calc">
+      <div class="form" id="calcForm">
+        <label>Household<select id="c-single"><option value="single">Single</option><option value="couple">Couple</option></select></label>
+        <label>Age<input id="c-age" type="number" min="18" max="100" value="35"></label>
+        <label>Children<input id="c-children" type="number" min="0" max="8" value="0"></label>
+        <label>Proposed rent a month (£)<input id="c-housing" type="number" min="0" step="0.01" value="900"></label>
+        <label>LCWRA<select id="c-lcwra"><option value="none">No</option><option value="existing">Yes, claim before Apr 2026</option><option value="new">Yes, new claim (Apr 2026 on)</option></select></label>
+        <label>Earnings a month after tax (£)<input id="c-earnings" type="number" min="0" step="1" value="0"></label>
+        <label class="chk wide"><input type="checkbox" id="c-pip"> Gets PIP or DLA</label>
+        <label class="chk wide"><input type="checkbox" id="c-carer"> Carer element in the award</label>
+      </div>
+      <div class="out" id="calcOut"></div>
+    </div>
+  </section>
+
+  <section class="card" id="gp-ct">
+    <h2>Joint tenancies and council tax</h2>
+    <div class="two">
+      <div>
+        <p class="hint">A house let by the room is an HMO for council tax and the owner pays (from 1 December 2023). Let the whole house to two tenants on one agreement of six months or more and they become liable. They claim Council Tax Reduction from the council (West Suffolk gives up to 100% on low income); any balance left is credited back to them so they are not out of pocket. Their Universal Credit housing costs do not change: each joint renter keeps their own 1-bed rate up to their share of the rent.</p>
+        <h4 class="small muted">Houses where this applies</h4>
+        <div id="ctList"></div>
+      </div>
+      <div>
+        <h4 class="small muted">Clause for the joint tenancy agreement (draft for the AI Legal and Compliance head to check before use)</h4>
+        <div class="clause" id="ctClause"></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="card" id="gp-marketing">
+    <h2>Finding over-35 Universal Credit tenants</h2>
+    <p class="hint">Where the last 254 applicants came from (Agile Lets application form, 2017 to 2021), and what a full pipeline is worth.</p>
+    <div class="two">
+      <div class="tbl-wrap"><table aria-label="Applicant sources"><thead><tr><th>Channel</th><th class="num">Applicants</th><th>What to do now</th></tr></thead><tbody id="mktBody"></tbody></table></div>
+      <div id="mktFigures"></div>
+    </div>
+  </section>
+
+  <section class="card" id="gp-settings">
+    <h2>Assumptions</h2>
+    <p class="hint">Every figure the plan uses that is not read from a live record. Edit here; saved to Airtable so the same numbers show on every device. Rates change each April.</p>
+    <div class="settings-grid" id="settings"></div>
+    <div class="src" id="sources"></div>
+  </section>
+</div>
+<div id="toast" role="status" aria-live="polite"></div>
+
+<script src="js/ai-models.js?v=1"></script>
+<script src="js/config.js?v=61"></script>
+<script src="js/sync-bar.js?v=6"></script>
+<script src="js/growth-plan-model.js?v=1"></script>
+<script>
+(function () {
+  'use strict';
+  const M = window.GrowthPlanModel;
+  const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const gbp = (n, dp = 0) => '£' + Number(n || 0).toLocaleString('en-GB', { minimumFractionDigits: dp, maximumFractionDigits: dp });
+  const todayISO = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
+  const $ = id => document.getElementById(id);
+
+  let PAT = '';
+  const state = { raw: null, data: null, settings: {}, settingRows: {}, plan: null, ui: { stage: 'all', showAgent: false, showDone: false, propFilter: 'kevin', openLever: null }, busy: new Set() };
+
+  // ── Auth (shared key with compliance.html and the Inbound Comms tracker) ──
+  function showAuth(err) {
+    $('authScreen').style.display = 'flex'; $('loadingOverlay').style.display = 'none'; $('dashboard').style.display = 'none';
+    $('authError').style.display = err ? 'block' : 'none';
+  }
+  function authenticate() {
+    const v = $('patInput').value.trim(); if (!v) return;
+    PAT = v; sessionStorage.setItem('_dlr_pat', v); localStorage.setItem('airtable_pat', v);
+    $('authScreen').style.display = 'none'; $('loadingOverlay').style.display = 'flex';
+    loadData();
+  }
+  $('authBtn').addEventListener('click', authenticate);
+  $('patInput').addEventListener('keydown', e => { if (e.key === 'Enter') authenticate(); });
+  $('refreshBtn').addEventListener('click', () => loadData());
+
+  // ── Airtable ──
+  async function apiFetch(url, opts, attempt = 0) {
+    const resp = await fetch(url, opts);
+    if (resp.status === 429 && attempt < 4) { await new Promise(r => setTimeout(r, 600 * Math.pow(2, attempt))); return apiFetch(url, opts, attempt + 1); }
+    if (resp.status === 401 || resp.status === 403) {
+      sessionStorage.removeItem('_dlr_pat'); localStorage.removeItem('airtable_pat');
+      showAuth(true); throw new Error('Auth failed');
+    }
+    if (!resp.ok) { let msg = ''; try { msg = (await resp.json()).error?.message || ''; } catch (e) { /* body unreadable: status is enough */ } throw new Error(`Airtable ${resp.status}${msg ? ': ' + msg : ''}`); }
+    return resp.json();
+  }
+  async function airtableFetch(tableId, params = {}) {
+    const records = []; let offset = null;
+    do {
+      const url = new URL(`https://api.airtable.com/v0/${BASE_ID}/${tableId}`);
+      url.searchParams.set('returnFieldsByFieldId', 'true');
+      Object.entries(params).forEach(([k, v]) => { if (Array.isArray(v)) v.forEach(x => url.searchParams.append(k, x)); else url.searchParams.append(k, v); });
+      if (offset) url.searchParams.set('offset', offset);
+      const data = await apiFetch(url, { headers: { Authorization: `Bearer ${PAT}` } });
+      records.push(...(data.records || [])); offset = data.offset || null;
+    } while (offset);
+    return records;
+  }
+  // Write responses come back keyed by field NAME unless asked otherwise; everything here reads by ID.
+  function airtableWrite(method, tableId, body) {
+    return apiFetch(`https://api.airtable.com/v0/${BASE_ID}/${tableId}`, { method, headers: { Authorization: `Bearer ${PAT}`, 'Content-Type': 'application/json' }, body: JSON.stringify(Object.assign({ returnFieldsByFieldId: true }, body)) });
+  }
+  const link = v => Array.isArray(v) ? v.map(x => typeof x === 'string' ? x : (x && x.id) || x) : [];
+  const sel = v => (v && typeof v === 'object') ? (v.name || '') : (v || '');
+  const first = v => Array.isArray(v) ? v[0] : v;
+
+  async function loadData() {
+    $('errorBox').style.display = 'none';
+    if (typeof markTabRefreshing === 'function') markTabRefreshing('growth-plan');
+    $('loadingText').textContent = 'Loading the portfolio…';
+    const slow = setTimeout(() => { $('loadingText').textContent = 'Still loading: seven tables, one moment…'; }, 3000);
+    try {
+      const P = GP.prop, U = GP.unit, T = GP.tenant, C = GP.tenancy, K = GP.cost;
+      const [props, units, tenants, tenancies, costs, planRows, settingRows] = await Promise.all([
+        airtableFetch(TABLES.properties, { 'fields[]': Object.values(P) }),
+        airtableFetch(TABLES.rentalUnits, { 'fields[]': Object.values(U) }),
+        airtableFetch(TABLES.tenants, { 'fields[]': Object.values(T) }),
+        airtableFetch(TABLES.tenancies, { 'fields[]': Object.values(C), filterByFormula: "{Tenancy Status}='Live'" }),
+        airtableFetch(TABLES.costs, { 'fields[]': Object.values(K), filterByFormula: "AND(OR({Payment Status}='In Payment',{Payment Status}='Overdue'),OR(FIND('ouncil',{Cost Name}),FIND(' CT',{Cost Name})),NOT(FIND('Bin',{Cost Name})),NOT(FIND('Debt',{Cost Name})),NOT(FIND('Enforcement',{Cost Name})))" }),
+        airtableFetch(TABLES.growthPlan, { 'fields[]': Object.values(GP.plan) }),
+        airtableFetch(TABLES.growthPlanSettings, { 'fields[]': Object.values(GP.settings) }),
+      ]);
+      clearTimeout(slow);
+      state.raw = { props, units, tenants, tenancies, costs, planRows, settingRows };
+      state.settings = {}; state.settingRows = {};
+      settingRows.forEach(r => { const k = r.fields[GP.settings.key]; if (!k) return; state.settings[k] = r.fields[GP.settings.value]; state.settingRows[k] = { id: r.id, label: r.fields[GP.settings.label] || k, note: r.fields[GP.settings.note] || '' }; });
+      state.data = normalise(state.raw);
+      recompute();
+      $('loadingOverlay').style.display = 'none'; $('dashboard').style.display = 'block';
+      renderAll();
+      registerChecks();
+      if (typeof markTabSynced === 'function') markTabSynced('growth-plan');
+    } catch (e) {
+      clearTimeout(slow);
+      if (e.message === 'Auth failed') return;
+      $('loadingOverlay').style.display = 'none'; $('dashboard').style.display = 'block';
+      $('errorBox').style.display = 'block'; $('errorBox').textContent = 'The portfolio could not be loaded: ' + e.message + '. Click Refresh to try again.';
+    }
+  }
+
+  function normalise(raw) {
+    const P = GP.prop, U = GP.unit, T = GP.tenant, C = GP.tenancy, K = GP.cost;
+    return {
+      properties: raw.props.filter(r => { const a = r.fields[P.active]; return !Array.isArray(a) || a.length === 0 || a.some(Boolean); }).map(r => ({
+        id: r.id, name: first(r.fields[P.name]) || r.fields[P.fullName] || r.id, type: sel(r.fields[P.type]), beds: r.fields[P.beds], agent: r.fields[P.agent] || '',
+        postcode: r.fields[P.postcode] || '', area: r.fields[P.area] || '', ctNote: r.fields[P.ctNote] || '',
+        lettableRooms: r.fields[P.lettableRooms] == null ? null : r.fields[P.lettableRooms], payg: sel(r.fields[P.payg]) || 'Unknown', ctPayer: sel(r.fields[P.ctPayer]) || 'Unknown',
+      })),
+      units: raw.units.map(r => ({ id: r.id, propertyId: link(r.fields[U.property])[0], number: r.fields[U.number], type: sel(r.fields[U.type]), status: sel(r.fields[U.status]), rent: r.fields[U.rent], incomeType: sel(r.fields[U.incomeType]), tenantIds: link(r.fields[U.tenants]) })),
+      tenants: raw.tenants.map(r => ({ id: r.id, name: r.fields[T.name] || '', status: sel(r.fields[T.status]), dob: r.fields[T.dob] || '', payType: sel(r.fields[T.payType]), capExemption: sel(r.fields[T.capExemption]) || 'Unknown', notes: r.fields[T.notes] || '' })),
+      tenancies: raw.tenancies.map(r => ({ id: r.id, tenantIds: link(r.fields[C.tenants]), unitId: link(r.fields[C.unit])[0], rent: r.fields[C.rent] })),
+      costs: raw.costs.filter(r => link(r.fields[K.property]).length).map(r => ({ propertyId: link(r.fields[K.property])[0], shared: link(r.fields[K.property]).length > 1, name: r.fields[K.name] || '', monthly: M.monthlyFromFrequency(r.fields[K.expected], sel(r.fields[K.frequency])) })),
+      planRows: raw.planRows.map(r => ({ id: r.id, key: r.fields[GP.plan.key] || '', status: sel(r.fields[GP.plan.status]) || 'Candidate', taskIds: link(r.fields[GP.plan.tasks]) })),
+    };
+  }
+  function recompute() { state.plan = M.buildPlan(state.data, state.settings, todayISO()); window._growthPlan = state; }
+
+  // ── Render ──
+  function renderAll() { renderHeadline(); renderFacts(); renderStageSeg(); renderLevers(); renderProps(); renderCalc(); renderCt(); renderMarketing(); renderSettings(); }
+
+  function renderHeadline() {
+    const t = state.plan.totals;
+    const kpi = (l, v, d, cls = '') => `<div class="kpi ${cls}"><div class="l">${esc(l)}</div><div class="v">${v}</div><div class="d">${esc(d)}</div></div>`;
+    $('kpis').innerHTML = [
+      kpi('Rent now', gbp(t.rentNow), 'a month, every active unit (rental unit rollup)'),
+      kpi('Paper trail', '+' + gbp(t.paper), 'stages 1 and 2, no works, no void', 'good'),
+      kpi('With works', '+' + gbp(t.works + t.remoteWorks), `rooms freed or added (${gbp(t.remoteWorks)} away from Haverhill), ${gbp(t.oneOff)} one-off`, 'good'),
+      kpi('Voids and take-backs', '+' + gbp(t.voids + t.remoteVoids), `incl. ${gbp(t.remoteVoids)} away from Haverhill`, 'good'),
+      kpi('If exemptions confirmed', '+' + gbp(t.exemptUpside + t.unknownAge + t.check), 'ages, cap exemptions and council tax payers to check', 'gold'),
+      kpi('Agent-held', '+' + gbp(t.agentHeld), 'Roc Immo houses at the 1-bed rate: potential only', 'muted'),
+      kpi('Maximum', gbp(t.rentNow + t.maximum), `a month if every lever lands (+${gbp(t.maximum)})`),
+    ].join('');
+    const n = state.plan.next;
+    $('nextAction').innerHTML = n
+      ? `<div><div class="k">Next single action</div><div class="t">${esc(n.firstStep)}</div><div class="s">${esc(n.title)} · +${gbp(n.monthly, 2)} a month${n.monthlyIfExempt > n.monthly ? ` (+${gbp(n.monthlyIfExempt, 2)} if exempt)` : ''} · ${esc(n.effort)}</div></div><div class="row-actions"><button class="btn btn-primary" data-act="task" data-key="${esc(n.key)}">Create the task</button><button class="btn" data-act="open" data-key="${esc(n.key)}">Show evidence</button></div>`
+      : '<div><div class="k">Next single action</div><div class="t">Nothing left to do on the current data</div></div>';
+  }
+
+  function renderFacts() {
+    const p = state.plan; const items = [];
+    p.unknownAge.forEach(u => items.push(`<div class="ten"><span class="n">${esc(u.tenant)} <span class="muted small">${esc(u.property)}, unit ${esc(u.unit)}</span></span><span class="r">+${gbp(u.upliftIfOver35, 2)} if 35 or over</span><span class="m">Date of birth: <span class="inl"><input class="sm" type="date" data-dob="${esc(u.tenantId)}" aria-label="Date of birth for ${esc(u.tenant)}"><button class="btn btn-sm" data-act="save-dob" data-tenant="${esc(u.tenantId)}">Save</button></span></span></div>`));
+    const unknownEx = []; p.properties.forEach(v => v.tenants.forEach(t => { if (t.uc && t.capExemption === 'Unknown' && v.mgmt === 'kevin') unknownEx.push({ t, v }); }));
+    if (unknownEx.length) items.push(`<div class="ten"><span class="n">Benefit cap exemption unknown for ${unknownEx.length} UC tenant${unknownEx.length > 1 ? 's' : ''}</span><span class="r">+${gbp(p.totals.exemptUpside, 2)} if exempt</span><span class="m">Set it on each tenant in the property cards below. Evidence: the UC statement shows LCWRA, a carer element or earnings; PIP or DLA letters count too.</span></div>`);
+    const noRooms = p.properties.filter(v => v.mgmt === 'kevin' && v.lettable == null);
+    if (noRooms.length) items.push(`<div class="ten"><span class="n">Lettable rooms not set on ${noRooms.length} propert${noRooms.length > 1 ? 'ies' : 'y'}</span><span class="r">hides extra rooms</span><span class="m">${esc(noRooms.map(v => v.name).join(', '))}. Bedrooms plus any reception that can be a bedroom. Set on the cards below.</span></div>`);
+    const noCt = p.properties.filter(v => v.mgmt === 'kevin' && v.ctPayer === 'Unknown' && v.tenants.length === 2);
+    if (noCt.length) items.push(`<div class="ten"><span class="n">Council tax payer unknown on ${noCt.length} two-tenant house${noCt.length > 1 ? 's' : ''}</span><span class="r">+${gbp(p.totals.check, 2)} if you pay it today</span><span class="m">${esc(noCt.map(v => v.name).join(', '))}. Set Council Tax Payer on the card.</span></div>`);
+    $('facts').innerHTML = items.length ? items.join('') : '<div class="empty">Nothing missing. Every figure above rests on a recorded fact.</div>';
+  }
+
+  function renderStageSeg() {
+    const names = state.plan.stageNames;
+    $('stageSeg').innerHTML = [['all', 'All']].concat(Object.keys(names).filter(k => k !== '5').map(k => [k, `${k} ${names[k]}`])).map(([k, l]) => `<button type="button" data-stage="${k}" aria-pressed="${state.ui.stage === k}">${esc(l)}</button>`).join('');
+  }
+
+  function visibleLevers() {
+    return state.plan.levers.filter(l => {
+      if (!state.ui.showAgent && l.counted === 'agent') return false;
+      if (!state.ui.showDone && (l.status === 'Done' || l.status === 'Dropped')) return false;
+      if (state.ui.stage !== 'all' && String(l.stage) !== state.ui.stage) return false;
+      return true;
+    });
+  }
+  function renderLevers() {
+    const rows = visibleLevers();
+    if (!rows.length) { $('leverBody').innerHTML = '<tr><td colspan="10" class="empty">No levers match this filter.</td></tr>'; return; }
+    $('leverBody').innerHTML = rows.map((l, i) => {
+      const open = state.ui.openLever === l.key;
+      const countedPill = l.counted === 'check' ? '<span class="pill check">fact needed</span>' : l.counted === 'alternative' ? '<span class="pill">either/or</span>' : l.counted === 'remote' ? '<span class="pill">away</span>' : l.counted === 'agent' ? '<span class="pill">agent-held</span>' : '';
+      const busy = state.busy.has(l.key) ? 'disabled' : '';
+      const actions = l.counted === 'agent' ? '' : [
+        l.status === 'Candidate' ? `<button class="btn btn-sm" data-act="adopt" data-key="${esc(l.key)}" ${busy}>Adopt</button>` : '',
+        (l.status !== 'Done' && l.status !== 'Dropped') ? `<button class="btn btn-sm btn-primary" data-act="task" data-key="${esc(l.key)}" ${busy}>Task</button>` : '',
+        (l.status === 'Adopted' || l.status === 'In progress') ? `<button class="btn btn-sm" data-act="done" data-key="${esc(l.key)}" ${busy}>Done</button>` : '',
+        (l.status !== 'Done' && l.status !== 'Dropped') ? `<button class="btn btn-sm btn-ghost" data-act="drop" data-key="${esc(l.key)}" ${busy}>Drop</button>` : '',
+        (l.status === 'Done' || l.status === 'Dropped') ? `<button class="btn btn-sm btn-ghost" data-act="reopen" data-key="${esc(l.key)}" ${busy}>Reopen</button>` : '',
+      ].join('');
+      const main = `<tr class="lever ${open ? 'open' : ''} ${(l.status === 'Done' || l.status === 'Dropped' || l.counted === 'alternative') ? 'dim' : ''}" data-key="${esc(l.key)}">
+        <td class="num">${i + 1}</td><td><span class="pill stage">${l.stage} ${esc(state.plan.stageNames[l.stage])}</span></td><td>${esc(l.lever)} ${countedPill}</td>
+        <td class="title"><button type="button" class="linkish" data-toggle="${esc(l.key)}" aria-expanded="${open}" aria-controls="lever-detail-${i}">${esc(l.title)}</button></td><td class="num">${l.monthly ? '+' + gbp(l.monthly, 2) : '—'}</td><td class="num muted">${l.monthlyIfExempt > l.monthly ? '+' + gbp(l.monthlyIfExempt, 2) : ''}</td><td class="num">${l.oneOff ? gbp(l.oneOff) : '—'}</td>
+        <td><span class="pill ${esc(l.effort.toLowerCase())}">${esc(l.effort)}</span></td><td><span class="pill st-${esc(l.status.toLowerCase().replace(/\s+/g, '-'))}">${esc(l.status)}</span>${l.taskIds && l.taskIds.length ? ` <span class="pill">${l.taskIds.length} task${l.taskIds.length > 1 ? 's' : ''}</span>` : ''}</td><td><div class="row-actions">${actions}</div></td></tr>`;
+      const detail = open ? `<tr class="detail" id="lever-detail-${i}"><td colspan="10"><div class="detail-grid"><div><h4>Evidence</h4><ul>${l.evidence.map(e => `<li>${esc(e)}</li>`).join('')}</ul></div><div><h4>First step</h4><div>${esc(l.firstStep)}</div>${l.needs.length ? `<h4 style="margin-top:8px">Before it lands</h4><ul>${l.needs.map(e => `<li>${esc(e)}</li>`).join('')}</ul>` : ''}</div></div></td></tr>` : '';
+      return main + detail;
+    }).join('');
+  }
+
+  function agePill(t) {
+    if (t.age == null) return '<span class="pill age unknown">age unknown</span>';
+    return `<span class="pill age ${t.age < 35 ? 'young' : ''}">${t.age}</span>`;
+  }
+  function renderProps() {
+    const views = state.plan.properties.filter(v => state.ui.propFilter === 'all' || v.mgmt === 'kevin').sort((a, b) => (a.mgmt === 'kevin' ? 0 : 1) - (b.mgmt === 'kevin' ? 0 : 1) || b.rentNow - a.rentNow);
+    document.querySelectorAll('#propSeg button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.propFilter === state.ui.propFilter)));
+    if (!views.length) { $('props').innerHTML = '<div class="empty">No properties loaded.</div>'; return; }
+    const exOpts = ['Unknown', 'None (capped)', 'LCWRA', 'PIP or DLA', 'Carer', 'Earnings over threshold', 'Not on UC'];
+    $('props').innerHTML = views.map(v => {
+      const used = Math.min(v.roomsInUse, Math.max(v.lettableEff, 1)), free = Math.max(0, v.lettableEff - v.roomsInUse), total = Math.max(v.lettableEff, v.roomsInUse, 1);
+      const tenants = v.tenants.map(t => `<div class="ten"><span class="n">${esc(t.name)}</span><span class="r">${gbp(t.rent, 2)}${t.rateNow ? ` <span class="muted small">/ ${gbp(t.rateNow, 2)} rate</span>` : ''}</span>
+        <span class="m">${esc(t.unitType)} ${t.uc ? '<span class="pill uc">UC</span>' : t.hb ? '<span class="pill uc">HB</span>' : `<span class="pill">${esc(t.payType || '—')}</span>`} ${agePill(t)}
+          ${t.age == null && v.mgmt === 'kevin' ? `<span class="inl"><input class="sm" type="date" data-dob="${esc(t.id)}" aria-label="Date of birth for ${esc(t.name)}"><button class="btn btn-sm" data-act="save-dob" data-tenant="${esc(t.id)}">Save</button></span>` : ''}
+          ${t.uc && v.mgmt === 'kevin' ? `<span class="inl">cap: <select class="sm" data-exempt="${esc(t.id)}" aria-label="Benefit cap exemption for ${esc(t.name)}">${exOpts.map(o => `<option ${o === t.capExemption ? 'selected' : ''}>${esc(o)}</option>`).join('')}</select></span>` : ''}
+        </span>${t.note ? `<span class="note">${esc(t.note)}</span>` : ''}</div>`).join('');
+      const fields = v.mgmt === 'kevin' ? `<div class="prop-fields">
+        <label>Lettable rooms<input class="sm" type="number" min="1" max="12" data-prop-field="lettableRooms" data-prop="${esc(v.id)}" value="${v.lettable == null ? '' : esc(v.lettable)}" placeholder="${esc(v.roomsInUse)} in use"></label>
+        <label>PAYG meters<select class="sm" data-prop-field="payg" data-prop="${esc(v.id)}">${['Unknown', 'Yes', 'No'].map(o => `<option ${o === v.payg ? 'selected' : ''}>${o}</option>`).join('')}</select></label>
+        <label>Council tax payer<select class="sm" data-prop-field="ctPayer" data-prop="${esc(v.id)}">${['Unknown', 'Owner', 'Tenants'].map(o => `<option ${o === v.ctPayer ? 'selected' : ''}>${o}</option>`).join('')}</select></label></div>` : '';
+      const levers = v.levers.filter(l => l.status !== 'Dropped').map(l => `<div class="lev">${esc(l.lever)}: <b>${l.monthly ? '+' + gbp(l.monthly, 2) : (l.monthlyIfExempt ? '+' + gbp(l.monthlyIfExempt, 2) + ' if exempt' : '—')}</b> <span class="muted">${esc(l.status)}</span></div>`).join('');
+      return `<div class="prop ${v.local ? '' : 'remote'}" data-prop-card="${esc(v.id)}"><h3><span>${esc(v.name)}</span><span class="rent">${gbp(v.rentNow)}</span></h3>
+        <div class="meta">${esc(v.type || '')}${v.area ? ' · ' + esc(v.area) : ''}${v.brma ? ' · ' + esc(v.brma) + ' BRMA' : ''}${v.mgmt === 'kevin' ? '' : ' · ' + esc(v.agent || 'agent')}${v.ctLive ? ` · council tax ${gbp(v.ctLive)} live` : ''}</div>
+        ${v.mgmt === 'kevin' ? `<div class="rooms" title="${used} rooms in use of ${v.lettableEff} lettable"><i class="used" style="width:${(used / total) * 100}%"></i><i class="free" style="width:${(free / total) * 100}%"></i></div><div class="small muted">${v.roomsInUse} room${v.roomsInUse === 1 ? '' : 's'} in use · ${v.lettable == null ? 'lettable rooms not set' : v.lettableEff + ' lettable'}${free ? ` · ${free} free` : ''}</div>` : ''}
+        ${tenants || '<div class="empty">No active tenant</div>'}${fields}${levers}${v.flags.map(f => `<div class="flag">${esc(f)}</div>`).join('')}${v.brmaNote ? `<div class="flag">${esc(v.brmaNote)}</div>` : ''}</div>`;
+    }).join('');
+  }
+
+  function renderCalc() {
+    const r = M.benefitCap({
+      single: $('c-single').value === 'single', age: Number($('c-age').value), children: Number($('c-children').value), housing: Number($('c-housing').value),
+      lcwra: $('c-lcwra').value === 'none' ? '' : $('c-lcwra').value, earnings: Number($('c-earnings').value), pipDla: $('c-pip').checked, carer: $('c-carer').checked,
+    }, state.settings);
+    const line = (k, v, cls = '') => `<div class="line ${cls}"><span>${esc(k)}</span><span>${v}</span></div>`;
+    $('calcOut').innerHTML = `<div class="big ${r.capped ? 'bad' : 'ok'}">${r.exempt ? 'Not capped' : r.capped ? `Capped: ${gbp(r.shortfall, 2)} short a month` : 'Under the cap'}</div>
+      <div class="small muted" style="margin-bottom:8px">${esc(r.exempt ? r.exemptReason : r.capped ? 'The tenant would pay this from their standard allowance unless the rent is lowered.' : `${gbp(r.cap - r.ucBeforeCap, 2)} of headroom below the cap`)}</div>
+      ${line('Standard allowance', gbp(r.standard, 2))}${r.elements ? line('Elements: ' + r.elementParts.join(', '), gbp(r.elements, 2)) : ''}${line('Housing costs (rent)', gbp(r.housing, 2))}${r.taperDeduction ? line('Less earnings taper', '−' + gbp(r.taperDeduction, 2)) : ''}
+      ${line('UC before the cap', gbp(r.ucBeforeCap, 2), 'total')}${line('Benefit cap', gbp(r.cap, 2))}${line('Safe rent (the most the cap allows)', gbp(r.safeRent, 2), 'total ' + (r.capped ? 'bad' : 'ok'))}`;
+  }
+
+  function renderCt() {
+    const cands = state.plan.levers.filter(l => l.lever === 'Council tax');
+    $('ctList').innerHTML = cands.length ? cands.map(l => `<div class="ten"><span class="n">${esc(l.property)}</span><span class="r">+${gbp(l.monthly, 2)}</span><span class="m">${esc(l.title.replace(l.property + ': ', ''))}${l.counted === 'alternative' ? ' · either/or with the rooms lever, which pays more' : ''}${l.counted === 'check' ? ' · confirm who pays council tax today' : ''}</span></div>`).join('') : '<div class="empty">No two-tenant house is on a room-by-room let with council tax on the owner.</div>';
+    const share = state.settings.ct_credit_share == null ? 100 : Number(state.settings.ct_credit_share);
+    $('ctClause').textContent = `Council tax. The Tenants are jointly and severally liable for council tax on the Property for the whole of the Term. The Tenants will apply for any Council Tax Reduction and discount they are entitled to and will give the Landlord a copy of each council tax bill within 14 days of receiving it.
+
+Council tax credit. Where a balance remains payable by the Tenants after every reduction and discount has been applied, the Landlord will credit ${share}% of that balance to the Tenants' rent account within 14 days of receiving the bill. The credit is a concession from the Landlord, is not a reduction of the Rent, and does not change the Rent payable under this Agreement or reported to any benefit authority. The Landlord may review the credit on each anniversary of the start of the Term on giving one month's written notice.
+
+Universal Credit. Each Tenant is responsible for reporting their share of the Rent to the Department for Work and Pensions. The Rent is ${'£[total]'} a month for the whole Property, payable jointly and severally.`;
+  }
+
+  const MARKETING = [ // Agile Lets application form, 254 rows, 2017 to 2021, read 9 Sep 2026
+    ['DSS Move (dssmove.co.uk)', 28, 'Re-list every room as "35+ UC welcome, 1-bed rate paid direct". Free listing.'],
+    ['SpareRoom', 38, 'Paid Bold ad for Haverhill; say the rent matches the UC 1-bed rate so no top-up.'],
+    ['Jimmy\'s Cambridge (night shelter move-on)', 17, 'Email the move-on worker: rooms for over-35s, LCWRA or PIP claimants preferred.'],
+    ['Friends, partners and previous tenants', 16, 'Text current tenants: £50 credit for a referral that signs.'],
+    ['Councils: East Cambs, Braintree, Huntingdonshire, Cambridge, West Suffolk', 10, 'Housing options teams place single over-35s; send one email with the room list.'],
+    ['Rob Saggs (local referrer)', 7, 'One message: "rooms free again for over-35s on UC".'],
+    ['Website and online', 5, 'A one-page "rooms for over-35s" page with the benefit cap explained.'],
+    ['Probation, Inclusion, mental health teams', 4, 'Support workers in the applicant file; a room with a named support contact lets faster.'],
+  ];
+  function renderMarketing() {
+    $('mktBody').innerHTML = MARKETING.map(([c, n, d]) => `<tr><td>${esc(c)}</td><td class="num">${n}</td><td class="wrap">${esc(d)}</td></tr>`).join('');
+    const t = state.plan.totals; const roomLevers = state.plan.levers.filter(l => (l.lever === 'Room release' || l.lever === 'New room let') && l.status !== 'Dropped');
+    const rooms = roomLevers.reduce((n, l) => n + (l.count || 0), 0);
+    $('mktFigures').innerHTML = `<div class="kpis"><div class="kpi"><div class="l">Rooms to fill</div><div class="v">${rooms}</div><div class="d">across ${roomLevers.length} house${roomLevers.length === 1 ? '' : 's'} once freed</div></div><div class="kpi good"><div class="l">Worth a month</div><div class="v">+${gbp(t.works + t.remoteWorks)}</div><div class="d">net of utilities and council tax</div></div><div class="kpi gold"><div class="l">Target tenant</div><div class="v">35+, UC</div><div class="d">LCWRA or PIP on the award means no cap: 1 in 3 past applicants had ESA or PIP</div></div></div>
+      <p class="hint" style="margin-top:12px">From ${gbp(t.rentNow)} a month now to ${gbp(t.rentNow + t.actionable)} with every actionable lever, and ${gbp(t.rentNow + t.maximum)} if every unknown lands your way. Fill rooms in stage order: paper trail first so the rate is right before a new tenant signs.</p>`;
+  }
+
+  function renderSettings() {
+    const keys = Object.keys(state.settingRows).sort();
+    $('settings').innerHTML = keys.length ? keys.map(k => `<div class="setting"><span class="lbl">${esc(state.settingRows[k].label)}<span class="note">${esc(state.settingRows[k].note)}</span></span><input type="number" step="0.01" data-setting="${esc(k)}" value="${esc(state.settings[k])}" aria-label="${esc(state.settingRows[k].label)}"></div>`).join('') : '<div class="empty">No settings rows found in Airtable.</div>';
+    $('sources').innerHTML = `Sources: <a href="https://assets.publishing.service.gov.uk/media/697a2043005d288bf850dec9/england-rates-2026-to-2027.csv" target="_blank" rel="noopener">LHA rates 2026-27 (gov.uk)</a> · <a href="https://england.shelter.org.uk/professional_resources/legal/benefits/universal_credit/size-related_criteria_for_universal_credit_housing_costs_element" target="_blank" rel="noopener">Shelter Legal: size criteria and the 35+ rule</a> · <a href="https://www.legislation.gov.uk/uksi/2023/1175/introduction/made" target="_blank" rel="noopener">SI 2023/1175 council tax and HMOs</a> · <a href="https://www.citizensadvice.org.uk/benefits/universal-credit/claiming/check-how-universal-credit-is-changing-in-2026/" target="_blank" rel="noopener">Citizens Advice: UC rates from April 2026</a>. LHA table valid to ${esc(M.LHA_VALID_TO)}.`;
+  }
+
+  // ── Actions ──
+  function toast(msg, err) { const t = $('toast'); t.textContent = msg; t.className = 'show' + (err ? ' err' : ''); clearTimeout(t._h); t._h = setTimeout(() => { t.className = ''; }, err ? 6000 : 3500); }
+  function leverByKey(key) { return state.plan.levers.find(l => l.key === key); }
+  function planRowFields(l, status) {
+    const f = { [GP.plan.title]: l.title, [GP.plan.key]: l.key, [GP.plan.lever]: l.lever, [GP.plan.monthly]: Number(l.monthly), [GP.plan.oneOff]: Number(l.oneOff || 0), [GP.plan.effort]: l.effort, [GP.plan.status]: status, [GP.plan.evidence]: l.evidence.join('\n'), [GP.plan.notes]: (l.needs || []).join('\n') };
+    if (l.propertyId) f[GP.plan.property] = [l.propertyId];
+    if (l.tenantId) f[GP.plan.tenant] = [l.tenantId];
+    if (l.unitId) f[GP.plan.unit] = [l.unitId];
+    return f;
+  }
+  async function upsertPlanRow(l, status, extra = {}) {
+    const fields = Object.assign(planRowFields(l, status), extra);
+    if (status === 'Adopted' && !l.planId) fields[GP.plan.adoptedOn] = todayISO();
+    if (status === 'Done') fields[GP.plan.doneOn] = todayISO();
+    const body = l.planId ? { records: [{ id: l.planId, fields }] } : { records: [{ fields }] };
+    const res = await airtableWrite(l.planId ? 'PATCH' : 'POST', TABLES.growthPlan, body);
+    const rec = res.records[0];
+    const taskIds = fields[GP.plan.tasks] ? fields[GP.plan.tasks].slice() : link((rec.fields || {})[GP.plan.tasks]);
+    const existing = state.data.planRows.find(r => r.key === l.key);
+    if (existing) { existing.status = status; existing.id = rec.id; existing.taskIds = taskIds.length ? taskIds : existing.taskIds; }
+    else state.data.planRows.push({ id: rec.id, key: l.key, status, taskIds });
+    return rec;
+  }
+  async function withBusy(key, fn) {
+    if (state.busy.has(key)) return;
+    state.busy.add(key); renderLevers();
+    try { await fn(); } catch (e) { toast('Not saved: ' + e.message, true); }
+    finally { state.busy.delete(key); recompute(); renderAll(); }
+  }
+  async function setStatus(key, status) {
+    const l = leverByKey(key); if (!l) return;
+    await withBusy(key, async () => { await upsertPlanRow(l, status); toast(`${status}: ${l.title}`); });
+  }
+  async function createTask(key) {
+    const l = leverByKey(key); if (!l) return;
+    await withBusy(key, async () => {
+      const owner = (l.effort === 'Works' || l.effort === 'Light') ? GP.owners.roy : GP.owners.kevin;
+      const due = new Date(); due.setDate(due.getDate() + 7);
+      const dueISO = `${due.getFullYear()}-${String(due.getMonth() + 1).padStart(2, '0')}-${String(due.getDate()).padStart(2, '0')}`;
+      const desc = [`First step: ${l.firstStep}`, '', `Worth +£${Number(l.monthly).toFixed(2)} a month${l.monthlyIfExempt > l.monthly ? ` (+£${Number(l.monthlyIfExempt).toFixed(2)} if the tenant is exempt from the benefit cap)` : ''}${l.oneOff ? `, one-off £${Number(l.oneOff).toFixed(0)}` : ''}.`, '', 'Evidence:', ...l.evidence.map(e => '- ' + e)]
+        .concat(l.needs.length ? ['', 'Before it lands:', ...l.needs.map(e => '- ' + e)] : [])
+        .concat(['', 'Raised from the Growth Plan page (growth-plan.html). Nothing is sent to a tenant or council from the page: this task is the send.']).join('\n');
+      const fields = { [TASK_FIELDS.name]: `Growth plan: ${l.title}`, [TASK_FIELDS.status]: 'Upcoming', [TASK_FIELDS.description]: desc, [TASK_FIELDS.business]: [GP.realEstateBusinessId], [TASK_FIELDS.dueDate]: dueISO, [TASK_FIELDS.assignee]: { email: owner.email }, [TASK_FIELDS.teamMember]: [owner.teamMember] };
+      const res = await airtableWrite('POST', TABLES.tasks, { records: [{ fields }] });
+      const taskId = res.records[0].id;
+      const status = (l.status === 'Candidate' || l.status === 'Adopted') ? 'In progress' : l.status;
+      await upsertPlanRow(l, status, { [GP.plan.tasks]: (l.taskIds || []).concat([taskId]) });
+      toast(`Task created for ${owner.name}: ${l.title}`);
+    });
+  }
+  async function saveDob(tenantId, btn) {
+    const holder = btn && btn.closest('.inl');
+    const input = (holder && holder.querySelector('input[data-dob]')) || document.querySelector(`input[data-dob="${tenantId}"]`); const v = input && input.value;
+    if (!v) { toast('Enter a date of birth first', true); return; }
+    const y = Number(v.slice(0, 4)); if (y < 1920 || y > 2010) { toast('That date does not look like a tenant\'s date of birth', true); return; }
+    await withBusy('dob:' + tenantId, async () => {
+      const t = state.data.tenants.find(x => x.id === tenantId);
+      const note = ((t && t.notes) || '').trim(); const stamp = `DOB ${v} entered on the Growth Plan page, ${todayISO()}.`;
+      await airtableWrite('PATCH', TABLES.tenants, { records: [{ id: tenantId, fields: { [GP.tenant.dob]: v, [GP.tenant.notes]: note ? note + '\n' + stamp : stamp } }] });
+      if (t) { t.dob = v; t.notes = note ? note + '\n' + stamp : stamp; }
+      toast(`Date of birth saved for ${t ? t.name : 'tenant'}`);
+    });
+  }
+  async function saveExemption(tenantId, value) {
+    await withBusy('ex:' + tenantId, async () => {
+      await airtableWrite('PATCH', TABLES.tenants, { records: [{ id: tenantId, fields: { [GP.tenant.capExemption]: value } }] });
+      const t = state.data.tenants.find(x => x.id === tenantId); if (t) t.capExemption = value;
+      toast(`Benefit cap: ${value} saved for ${t ? t.name : 'tenant'}`);
+    });
+  }
+  async function savePropField(propId, field, value) {
+    const map = { lettableRooms: GP.prop.lettableRooms, payg: GP.prop.payg, ctPayer: GP.prop.ctPayer };
+    await withBusy('prop:' + propId + field, async () => {
+      const fields = { [map[field]]: field === 'lettableRooms' ? (value === '' ? null : Number(value)) : value };
+      await airtableWrite('PATCH', TABLES.properties, { records: [{ id: propId, fields }] });
+      const p = state.data.properties.find(x => x.id === propId); if (p) p[field] = field === 'lettableRooms' ? (value === '' ? null : Number(value)) : value;
+      toast('Saved');
+    });
+  }
+  async function saveSetting(key, value) {
+    const row = state.settingRows[key]; if (!row) return;
+    const n = Number(value); if (!Number.isFinite(n)) { toast('Enter a number', true); return; }
+    await withBusy('set:' + key, async () => {
+      await airtableWrite('PATCH', TABLES.growthPlanSettings, { records: [{ id: row.id, fields: { [GP.settings.value]: n } }] });
+      state.settings[key] = n; toast(`${row.label}: ${n}`);
+    });
+  }
+
+  document.addEventListener('click', e => {
+    const b = e.target.closest('[data-act]');
+    if (b) {
+      const act = b.dataset.act, key = b.dataset.key;
+      if (act === 'adopt') return setStatus(key, 'Adopted');
+      if (act === 'done') return setStatus(key, 'Done');
+      if (act === 'drop') return setStatus(key, 'Dropped');
+      if (act === 'reopen') return setStatus(key, 'Adopted');
+      if (act === 'task') return createTask(key);
+      if (act === 'save-dob') return saveDob(b.dataset.tenant, b);
+      if (act === 'open') { state.ui.openLever = key; state.ui.stage = 'all'; state.ui.showDone = true; $('showDone').checked = true; renderStageSeg(); renderLevers(); const row = document.querySelector(`tr.lever[data-key="${key}"]`); if (row) row.scrollIntoView({ behavior: 'smooth', block: 'center' }); return; }
+    }
+    const tog = e.target.closest('button[data-toggle]');
+    if (tog) { state.ui.openLever = state.ui.openLever === tog.dataset.toggle ? null : tog.dataset.toggle; renderLevers(); const nb = document.querySelector(`button[data-toggle="${state.ui.openLever || tog.dataset.toggle}"]`); if (nb) nb.focus(); return; }
+    const row = e.target.closest('tr.lever');
+    if (row && !e.target.closest('button')) { state.ui.openLever = state.ui.openLever === row.dataset.key ? null : row.dataset.key; renderLevers(); return; }
+    const st = e.target.closest('#stageSeg button'); if (st) { state.ui.stage = st.dataset.stage; renderStageSeg(); renderLevers(); return; }
+    const pf = e.target.closest('#propSeg button'); if (pf) { state.ui.propFilter = pf.dataset.propFilter; renderProps(); }
+  });
+  document.addEventListener('change', e => {
+    const t = e.target;
+    if (t.matches('select[data-exempt]')) return saveExemption(t.dataset.exempt, t.value);
+    if (t.matches('[data-prop-field]')) return savePropField(t.dataset.prop, t.dataset.propField, t.value);
+    if (t.matches('input[data-setting]')) return saveSetting(t.dataset.setting, t.value);
+    if (t.id === 'showAgent') { state.ui.showAgent = t.checked; renderLevers(); return; }
+    if (t.id === 'showDone') { state.ui.showDone = t.checked; renderLevers(); return; }
+    if (t.closest('#calcForm')) renderCalc();
+  });
+  document.addEventListener('input', e => { if (e.target.closest('#calcForm')) renderCalc(); });
+
+  // ── Health checks ──
+  function registerChecks() {
+    if (typeof registerSyncBar !== 'function') return;
+    const g = () => (window._growthPlan || {});
+    registerSyncBar('growth-plan', {
+      refreshFn: () => loadData(),
+      checks: [
+        { name: 'Portfolio tables fetched', kind: 'sync', run: () => { const d = g().data || {}; const n = ['properties', 'units', 'tenants', 'tenancies'].map(k => (d[k] || []).length); if (n.some(x => x === 0)) return { status: 'fail', detail: `properties ${n[0]} · units ${n[1]} · tenants ${n[2]} · tenancies ${n[3]} — a zero here is a failed fetch or a bad filter` }; return { status: 'pass', detail: `${n[0]} properties · ${n[1]} units · ${n[2]} tenants · ${n[3]} active tenancies` }; } },
+        { name: 'Settings rows present', kind: 'sync', run: () => { const k = Object.keys(g().settings || {}); if (k.length < 10) return { status: 'fail', detail: `${k.length} settings rows; the plan falls back to built-in defaults` }; return { status: 'pass', detail: `${k.length} assumptions read from Airtable` }; } },
+        { name: 'LHA table in date', kind: 'automation', run: () => M.lhaStale(todayISO()) ? { status: 'warn', detail: `LHA figures are for 2026-27 (to ${M.LHA_VALID_TO}); update js/growth-plan-model.js and the settings rows` } : { status: 'pass', detail: `2026-27 rates, valid to ${M.LHA_VALID_TO}` } },
+        { name: 'Every property has a postcode', kind: 'sync', run: () => { const p = (g().plan || {}).properties || []; const miss = p.filter(v => !v.postcode); return miss.length ? { status: 'warn', detail: `${miss.length} without a postcode: ${miss.map(v => v.name).join(', ')} — no LHA rate can be applied` } : { status: 'pass', detail: `All ${p.length} properties carry a postcode` }; } },
+        { name: 'Ages known for UC room tenants', kind: 'sync', run: () => { const u = (g().plan || {}).unknownAge || []; return u.length ? { status: 'warn', detail: `${u.length} UC room tenant${u.length > 1 ? 's' : ''} with no date of birth: ${u.map(x => x.tenant).join(', ')}` } : { status: 'pass', detail: 'Every UC room tenant has a date of birth' }; } },
+        { name: 'Benefit cap exemptions recorded', kind: 'sync', run: () => { const p = (g().plan || {}).properties || []; let uc = 0, known = 0; p.forEach(v => v.tenants.forEach(t => { if (t.uc && v.mgmt === 'kevin') { uc++; if (t.capExemption !== 'Unknown') known++; } })); return known < uc ? { status: 'warn', detail: `${known} of ${uc} UC tenants have a recorded exemption; the rest are priced at the cap-safe rent` } : { status: 'pass', detail: `${uc} UC tenants, all with a recorded cap position` }; } },
+        { name: 'Plan rows match a live lever', kind: 'automation', run: () => { const rows = (g().data || {}).planRows || []; const keys = new Set(((g().plan || {}).levers || []).map(l => l.key)); const orphans = rows.filter(r => !keys.has(r.key)); return orphans.length ? { status: 'warn', detail: `${orphans.length} Growth Plan row${orphans.length > 1 ? 's' : ''} no longer match a lever (tenant moved or data changed): ${orphans.map(r => r.key).join(', ')}` } : { status: 'pass', detail: `${rows.length} Growth Plan rows, all matched to a live lever` }; } },
+        { name: 'Totals reconcile', kind: 'automation', run: () => { const t = (g().plan || {}).totals || {}; const sum = Math.round((t.paper + t.works + t.voids + t.remote) * 100) / 100; return Math.abs(sum - t.actionable) < 0.01 ? { status: 'pass', detail: `Actionable £${t.actionable} = paper + works + voids + away` } : { status: 'fail', detail: `Actionable £${t.actionable} does not equal the buckets (£${sum})` }; } },
+      ],
+    });
+  }
+
+  // ── Boot ──
+  (function init() {
+    const saved = localStorage.getItem('airtable_pat') || sessionStorage.getItem('_dlr_pat');
+    if (saved) { PAT = saved; sessionStorage.setItem('_dlr_pat', saved); loadData(); }
+    else showAuth(false);
+  })();
+})();
+</script>
+</body>
+</html>

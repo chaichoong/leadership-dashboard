@@ -30,6 +30,8 @@ FILE_TO_PAGE = {
     'js/sitemap.js':        'sitemap',
     'follow-up.html':       'comms',
     'compliance.html':      'compliance',
+    'growth-plan.html':     'growth-plan',
+    'js/growth-plan-model.js': 'growth-plan',
     'os/tasks/index.html':  'tasks',
     # Agent accuracy scoring is shared by the Task OS (AI Agents tab) and the
     # Leadership Dashboard (Agent Approvals card), so a change bumps both.
