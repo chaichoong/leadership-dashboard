@@ -262,7 +262,7 @@
   $('refreshBtn').addEventListener('click', () => loadAll(true));
 
   // ── Load ──
-  async function loadAll(refresh) {
+  let loadAll = async function (refresh) {
     if (loading) return;
     loading = true;
     $('refreshBtn').disabled = true;
@@ -573,6 +573,18 @@
       ],
     });
   }
+
+  // ── Keep it live, the same way the leadership dashboard does ──
+  // REFRESH_INTERVAL there is 15 minutes; a tab that comes back after more
+  // than 2 minutes away re-syncs at once. The Worker caches money data for 10
+  // minutes and never caches tasks, so a refresh is cheap.
+  const REFRESH_MS = 15 * 60 * 1000;
+  const RETURN_STALE_MS = 2 * 60 * 1000;
+  let lastLoadAt = 0;
+  const origLoad = loadAll;
+  loadAll = async function (refresh) { await origLoad(refresh); if (data) lastLoadAt = Date.now(); };
+  setInterval(() => { if (token && !document.hidden && !openTask) loadAll(false); }, REFRESH_MS);
+  document.addEventListener('visibilitychange', () => { if (!document.hidden && token && !openTask && Date.now() - lastLoadAt > RETURN_STALE_MS) loadAll(false); });
 
   // ── Boot ──
   if (token) { $('app').hidden = false; loadAll(false); } else { showLogin(''); }

@@ -381,7 +381,9 @@ export function appendNote(existing, text, who, now) {
 }
 
 // ── Assemble ──
-export function computeAll(data, today) {
+// `today` is London wall-clock (drives every window); `nowIso` is the real
+// instant the figures were computed, for the page's freshness stamp.
+export function computeAll(data, today, nowIso) {
   const coaNames = { ...buildNameMap(data.subCategories, F.subCatName), ...buildNameMap(data.categories, F.catName) };
   const ctx = buildTxContext(data);
   const payments = paymentsByTenancy(data.transactions);
@@ -392,7 +394,7 @@ export function computeAll(data, today) {
   const pnl = {};
   for (const w of PNL_WINDOWS) pnl[w] = pnlByProperty(data.transactions, ctx, pnlWindowKeys(w, today), today);
   return {
-    generatedAt: today.toISOString(),
+    generatedAt: nowIso || today.toISOString(),
     business: REAL_ESTATE_NAME,
     portfolio: portfolio(data.rentalUnits, data.tenancies, today),
     tenancies: ten,
