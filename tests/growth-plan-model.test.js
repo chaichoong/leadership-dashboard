@@ -122,12 +122,60 @@ describe('buildPlan levers', () => {
         expect(l.capShortfall).toBe(0);
         expect(l.needs).toEqual([]);
     });
-    it('never uplifts an under-35 in a room, and lists an unknown age separately', () => {
+    it('never uplifts an under-35 in a room; an unknown age is counted as 35+ with a confirm-first need', () => {
         const f = fixture(); f.tenants[2].dob = '';
         const p = M.buildPlan(f, S, TODAY);
-        expect(p.levers.find(x => x.key === 'uplift:t3')).toBeUndefined();
+        const l = p.levers.find(x => x.key === 'uplift:t3');
+        expect(l).toBeTruthy();
+        expect(l.ageToConfirm).toBe(true);
+        expect(l.monthly).toBe(372.62);
+        expect(l.needs[0]).toMatch(/Confirm the date of birth/);
         expect(p.unknownAge.map(u => u.tenant)).toEqual(['Travis Young']);
-        expect(p.unknownAge[0].upliftIfOver35).toBe(372.62);
+        expect(p.totals.paper).toBe(372.62 + 372.62);
+    });
+    it('old strategy names still read (Add tenants = HMO, Hold = Leave as is)', () => {
+        expect(M.normaliseStrategy('Add tenants')).toBe('HMO');
+        expect(M.normaliseStrategy('Hold')).toBe('Leave as is');
+        expect(M.normaliseStrategy('Joint tenancy')).toBe('Joint tenancy');
+    });
+    it('HMO strategy with no planned extra tenants produces no rooms lever', () => {
+        const f = fixture(); f.properties[0].strategy = 'HMO'; f.properties[0].plannedExtra = 0;
+        expect(M.buildPlan(f, S, TODAY).levers.find(x => x.key === 'rooms:p1')).toBeUndefined();
+    });
+    it('a joint tenancy house with no live cost is priced from its council tax band', () => {
+        const f = fixture(); f.units.pop(); f.tenants.pop(); f.tenancies.pop(); f.costs = [];
+        f.properties[0].strategy = 'Joint tenancy'; f.properties[0].ctBand = 'B'; f.properties[0].ctAnnual = 1900.86;
+        const ct = M.buildPlan(f, S, TODAY).levers.find(x => x.key === 'ct:p1');
+        expect(ct.monthly).toBe(158.41);
+        expect(ct.evidence[0]).toMatch(/Band B: £1900.86 a year = £158.41 a month/);
+    });
+    it('tasks for a house go to its Growth Plan Owner, else paper to Kevin and works to Roy', () => {
+        const f = fixture(); f.properties[0].strategy = 'HMO'; f.properties[0].plannedExtra = 1;
+        let p = M.buildPlan(f, S, TODAY);
+        expect(p.levers.find(x => x.key === 'uplift:t1').owner).toBe('Kevin');
+        expect(p.levers.find(x => x.key === 'rooms:p1').owner).toBe('Roy');
+        f.properties[0].owner = 'Kevin';
+        p = M.buildPlan(f, S, TODAY);
+        expect(p.levers.find(x => x.key === 'rooms:p1').owner).toBe('Kevin');
+    });
+    it('every agent-run property shows a take-back as joint tenancies of two over-35s; only gains count', () => {
+        const f = fixture();
+        f.properties.push({ id: 'p3', name: '28 Chedburgh Place', agent: 'Roc Immo', postcode: 'CB9 0AJ' });
+        f.units.push({ id: 'u9', propertyId: 'p3', number: 1, type: 'Room', status: 'Occupied', rent: 350, tenantIds: [] });
+        f.properties.push({ id: 'p4', name: '42 Elmdon Place', agent: 'Roc Immo', postcode: 'CB9 0AH' });
+        f.units.push({ id: 'u10', propertyId: 'p4', number: 1, type: 'Room', status: 'Occupied', rent: 3350, tenantIds: [] });
+        const p = M.buildPlan(f, S, TODAY);
+        expect(p.levers.find(x => x.key === 'agent:p3').monthly).toBe(1445.04); // 2 × 897.52 − 350
+        expect(p.levers.find(x => x.key === 'agent:p4').monthly).toBe(-1554.96);
+        expect(p.totals.agentHeld).toBe(1445.04);
+        expect(p.totals.potentialIncrease).toBeCloseTo(p.totals.actionable + 1445.04, 2);
+    });
+    it('the to-do list carries every counted lever with its owner, in stage order', () => {
+        const f = fixture(); f.properties[0].strategy = 'HMO'; f.properties[0].plannedExtra = 1;
+        const p = M.buildPlan(f, S, TODAY);
+        expect(p.todo.length).toBeGreaterThan(1);
+        expect(p.todo[0].owner).toBe('Kevin');
+        expect(p.todo.map(t => t.stage)).toEqual([...p.todo.map(t => t.stage)].sort());
     });
     it('Housing Benefit in a shared room keeps the shared rate at any age', () => {
         const f = fixture(); f.units[0].incomeType = 'Housing Benefit'; f.tenants[0].payType = 'Working';
@@ -145,7 +193,7 @@ describe('buildPlan levers', () => {
         expect(l.oneOff).toBe(1500);
     });
     it('Add tenants strategy counts the planned number of new lets as now', () => {
-        const f = fixture(); f.properties[0].strategy = 'Add tenants'; f.properties[0].plannedExtra = 2;
+        const f = fixture(); f.properties[0].strategy = 'HMO'; f.properties[0].plannedExtra = 2;
         const l = M.buildPlan(f, S, TODAY).levers.find(x => x.key === 'rooms:p1');
         expect(l.count).toBe(2);
         expect(l.counted).toBe('now');
@@ -153,18 +201,18 @@ describe('buildPlan levers', () => {
         expect(l.capShortfall).toBe(186);
     });
     it('Hold strategy produces no house lever; uplifts still show', () => {
-        const f = fixture(); f.properties[0].strategy = 'Hold';
+        const f = fixture(); f.properties[0].strategy = 'Leave as is';
         const p = M.buildPlan(f, S, TODAY);
         expect(p.levers.find(x => x.key === 'rooms:p1')).toBeUndefined();
         expect(p.levers.find(x => x.key === 'ct:p1')).toBeUndefined();
         expect(p.levers.find(x => x.key === 'uplift:t1')).toBeTruthy();
     });
     it('utilities only come off a new let when Kevin has taken the bills on (PAYG = No)', () => {
-        const f = fixture(); f.properties[0].strategy = 'Add tenants'; f.properties[0].plannedExtra = 1; f.properties[0].payg = 'No';
+        const f = fixture(); f.properties[0].strategy = 'HMO'; f.properties[0].plannedExtra = 1; f.properties[0].payg = 'No';
         expect(M.buildPlan(f, S, TODAY).levers.find(x => x.key === 'rooms:p1').monthly).toBe(897.52 - 75);
     });
     it('adds council tax to a new let when the house is not already owner-liable', () => {
-        const f = fixture(); f.costs = []; f.properties[0].ctNote = ''; f.properties[0].strategy = 'Add tenants'; f.properties[0].plannedExtra = 1;
+        const f = fixture(); f.costs = []; f.properties[0].ctNote = ''; f.properties[0].strategy = 'HMO'; f.properties[0].plannedExtra = 1;
         expect(M.buildPlan(f, S, TODAY).levers.find(x => x.key === 'rooms:p1').monthly).toBe(897.52 - 145);
     });
     it('with no strategy, a two-tenant house shows the joint tenancy as a candidate, either/or with the room let', () => {
@@ -185,32 +233,27 @@ describe('buildPlan levers', () => {
         expect(p.levers.find(x => x.key === 'rooms:p1')).toBeUndefined();
         expect(p.totals.paper).toBe(372.62 + 135);
     });
-    it('a joint tenancy on a house where Kevin pays no council tax today is worth £0 and says so', () => {
+    it('a joint tenancy house with neither a live cost nor a band is £0 and asks for the band', () => {
         const f = fixture(); f.units.pop(); f.tenants.pop(); f.tenancies.pop(); f.costs = [];
         f.properties[0].strategy = 'Joint tenancy';
         const ct = M.buildPlan(f, S, TODAY).levers.find(x => x.key === 'ct:p1');
         expect(ct.monthly).toBe(0);
         expect(ct.counted).toBe('now');
-        expect(ct.evidence[0]).toMatch(/No council tax paid by you/);
+        expect(ct.evidence[0]).toMatch(/set Council Tax Band and Council Tax Annual/);
     });
     it('Add tenants strategy drops the joint tenancy lever', () => {
         const f = fixture(); f.units.pop(); f.tenants.pop(); f.tenancies.pop();
-        f.properties[0].strategy = 'Add tenants'; f.properties[0].plannedExtra = 1;
+        f.properties[0].strategy = 'HMO'; f.properties[0].plannedExtra = 1;
         const p = M.buildPlan(f, S, TODAY);
         expect(p.levers.find(x => x.key === 'ct:p1')).toBeUndefined();
         expect(p.levers.find(x => x.key === 'rooms:p1').counted).toBe('now');
     });
-    it('prices a Collins property as a take-back and a Roc Immo house as agent-held', () => {
+    it('prices a Collins property as a £250 take-back and keeps it out of the agent-held potential', () => {
         const f = fixture();
         f.properties.push({ id: 'p2', name: '13 John Street', agent: 'Simon Collins', postcode: 'BB5 5PT' });
-        f.properties.push({ id: 'p3', name: '28 Chedburgh Place', agent: 'Roc Immo', postcode: 'CB9 0AJ' });
-        f.units.push({ id: 'u9', propertyId: 'p3', number: 1, type: 'Room', status: 'Occupied', rent: 350, tenantIds: [] });
         const p = M.buildPlan(f, S, TODAY);
         expect(p.levers.find(x => x.key === 'takeback:p2').monthly).toBe(250);
-        const a = p.levers.find(x => x.key === 'agent:p3');
-        expect(a.monthly).toBe(547.52);
-        expect(a.counted).toBe('agent');
-        expect(p.totals.agentHeld).toBe(547.52);
+        expect(p.levers.find(x => x.key === 'agent:p2')).toBeUndefined();
         expect(p.totals.actionable).toBe(p.totals.paper + p.totals.works + p.totals.voids + p.totals.remote);
     });
     it('a whole-house let to one household is not priced (household size unknown)', () => {
@@ -249,7 +292,7 @@ describe('buildPlan levers', () => {
         expect(p.properties[0].tenants[0].note).toMatch(/CRF Housing Payment/);
     });
     it('the CRF total adds up the shortfall behind every counted lever', () => {
-        const f = fixture(); f.properties[0].strategy = 'Add tenants'; f.properties[0].plannedExtra = 1;
+        const f = fixture(); f.properties[0].strategy = 'HMO'; f.properties[0].plannedExtra = 1;
         const p = M.buildPlan(f, S, TODAY);
         expect(p.totals.crfShortfall).toBe(93 + 93); // Adam's uplift and one new let
         expect(p.totals.crfCount).toBe(2);
@@ -274,7 +317,7 @@ describe('buildPlan levers', () => {
         expect(M.monthlyFromFrequency(135, 'Monthly')).toBe(135);
     });
     it('remote levers split into works and voids', () => {
-        const f = fixture(); f.properties[0].postcode = 'M40 1EZ'; f.properties[0].strategy = 'Add tenants'; f.properties[0].plannedExtra = 1;
+        const f = fixture(); f.properties[0].postcode = 'M40 1EZ'; f.properties[0].strategy = 'HMO'; f.properties[0].plannedExtra = 1;
         f.units.push({ id: 'u5', propertyId: 'p1', number: 5, type: 'Whole Property', status: 'Void', rent: 0, tenantIds: [] });
         const p = M.buildPlan(f, S, TODAY);
         expect(p.totals.remoteVoids).toBeGreaterThan(0);
@@ -295,7 +338,7 @@ describe('buildPlan levers', () => {
         expect(p.totals.remote).toBe(0);
     });
     it('remote houses are priced but kept out of the local totals', () => {
-        const f = fixture(); f.properties[0].postcode = 'M40 1EZ'; f.properties[0].strategy = 'Add tenants'; f.properties[0].plannedExtra = 1;
+        const f = fixture(); f.properties[0].postcode = 'M40 1EZ'; f.properties[0].strategy = 'HMO'; f.properties[0].plannedExtra = 1;
         const p = M.buildPlan(f, S, TODAY);
         const l = p.levers.find(x => x.key === 'rooms:p1');
         expect(l.counted).toBe('remote');
@@ -306,8 +349,8 @@ describe('buildPlan levers', () => {
         const p = M.buildPlan(fixture(), S, TODAY);
         const stages = p.levers.filter(l => l.counted !== 'agent').map(l => l.stage);
         expect(stages).toEqual([...stages].sort());
-        expect(p.next.key).toBe('uplift:t1');
-        expect(p.next.firstStep).toMatch(/UC journal/);
+        expect(p.todo[0].key).toBe('uplift:t1');
+        expect(p.todo[0].text).toMatch(/UC journal/);
     });
     it('carries Growth Plan row status onto the lever and drops Done rows from the totals', () => {
         const f = fixture({ planRows: [{ id: 'recPlan1', key: 'uplift:t1', status: 'Done' }] });
