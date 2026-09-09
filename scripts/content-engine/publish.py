@@ -584,7 +584,8 @@ def sync():
 
 
 def report():
-    state = {k: v for k, v in load_state().items() if str(k).isdigit() and isinstance(v, dict)}   # episodes only: _cursor and held_posts live beside them; days = approved_days()
+    days = approved_days()
+    state = {k: v for k, v in load_state().items() if str(k).isdigit() and isinstance(v, dict)}   # episodes only: _cursor and held_posts live beside them
     print("content publishing mode: %s%s" % (mode().upper(), " (YouTube unlisted, socials as drafts; write 'live' to ~/.config/od/content_engine_mode to go live)" if mode() == "test" else ""))
     waiting = [d for d in days if not state.get(str(d), {}).get("posts")]
     scheduled = sum(1 for e in state.values() for p in e.get("posts", {}).values() if p.get("status") == "scheduled")
