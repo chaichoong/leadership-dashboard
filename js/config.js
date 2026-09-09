@@ -33,7 +33,7 @@
         { id: 'transactions', name: 'Transactions',                icon: '🔍', pageVer: '1.1', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#transactions' },
         { id: 'coa',        name: 'Chart of Accounts',             icon: '📒', pageVer: '1.3', sopFile: 'sop-coa.html',                sopVer: '1.1', standalone: 'index.html#coa' },
         { id: 'comms',      name: 'Inbound Comms',                 icon: '📨', pageVer: '2.82', sopFile: 'inbound-comms-sop.html',      sopVer: '2.60', standalone: 'follow-up.html' },
-        { id: 'growth-plan', name: 'Growth Plan',                    icon: '📈', pageVer: '1.8', sopFile: 'sop-growth-plan.html',        sopVer: '1.2', standalone: 'growth-plan.html' },
+        { id: 'growth-plan', name: 'Growth Plan',                    icon: '📈', pageVer: '1.8', sopFile: 'sop-growth-plan.html',        sopVer: '1.3', standalone: 'growth-plan.html' },
         { id: 'compliance', name: 'Property Compliance',            icon: '✅', pageVer: '1.15', sopFile: 'sop-compliance.html',         sopVer: '1.14', standalone: 'compliance.html' },
         // Property Manager (Operations) — Roy Lavin's single page. Standalone at
         // property-manager/ behind its own passcode; the property-manager Worker
@@ -135,10 +135,15 @@
             strategy: 'fldivZ9UbAACwv7Yh', plannedExtra: 'fldFd4scZaJsXQ0n7', // Growth Strategy (Joint tenancy / HMO / Leave as is), Planned Extra Tenants (Kevin's per-house call, 9 Sep 2026)
             owner: 'flduloaYTsuvMxvF7', ctBand: 'fldNzUqbTNzTeNJqN', ctAnnual: 'fldZsLDNeEvghtFDJ', // Growth Plan Owner, Council Tax Band, Council Tax Annual (9 Sep 2026)
         },
-        unit: { name: 'fldr8sliyu8h2jw9t', tenants: 'fldQO09UAFRf07V7q', type: 'fldsItq0vU3sHv7n9', number: 'fld3nPlpdXSExxDuq', property: 'fldUJNRGgzgyAwwjt', status: 'fldBvqysXBm9rIm0E', incomeType: 'fldPrhfntWO9aHl58', rent: 'fldQZEjNzhU4UDUW9' },
+        unit: { name: 'fldr8sliyu8h2jw9t', beds: 'fldGMguNbV7GvzsHs', tenants: 'fldQO09UAFRf07V7q', type: 'fldsItq0vU3sHv7n9', number: 'fld3nPlpdXSExxDuq', property: 'fldUJNRGgzgyAwwjt', status: 'fldBvqysXBm9rIm0E', incomeType: 'fldPrhfntWO9aHl58', rent: 'fldQZEjNzhU4UDUW9' },
         tenant: { name: 'fldxBKW7QnujSDWqA', status: 'fldAXzP9SGIHiAhrv', dob: 'fldv7FKsqXYswyCFE', payType: 'fldZbrk8Xw5Dcwxhi', notes: 'fldfwxEf7I3XQDVtR', capExemption: 'fldOOi3d1P4vDedm6', /* added 9 Sep 2026 */
-                  phone: 'fldraHUkWfqo4olLF', email: 'fldybEduFY3DWWTfT', ni: 'fld1rHf1qZ60qK95l' /* National Insurance Number, added 9 Sep 2026 */ },
-        tenancy: { tenants: 'fld1i5bDoHL3B6rUf', unit: 'fld7cjLLEHKAx49OK', rent: 'fldDMyfZLFMeONPq8', status: 'fldlh5JAeYW2Ei2e6', endDate: 'fldwHhhKAq4f1nY9e' },
+                  phone: 'fldraHUkWfqo4olLF', email: 'fldybEduFY3DWWTfT', ni: 'fld1rHf1qZ60qK95l', /* National Insurance Number, added 9 Sep 2026 */
+                  dueDay: 'fldWjCUbAOQmTKfFP', // Due Date of the Month (rent)
+                  // Tenant meeting form (growth-plan.html), fields added 9 Sep 2026
+                  over35: 'flddQ2HnQEf4HBeRn', meetingDate: 'fldTz5BU7jxA2mc1B', ucPayDay: 'fldjTG9xdCLpbwOwC', household: 'fldjrOSBkhWeFJvVU',
+                  otherAdults: 'fldeKCUmwpmWv7pad', idSeen: 'fldbLxdhEqeuUZI4U', ucStatementSeen: 'fldfrhDLmb443AmfF', weeklyIncome: 'fldbiAag5eoEW23e0',
+                  weeklySpending: 'fldlZr8tUocCYzGPT', bankStatements: 'fldZeN4OxwDstqZhy', authoritySigned: 'fldHPe9YQ6GmlrKBt', ctAccount: 'fldlquVIzyesTrI1d', meetingNotes: 'fld9IbA3CNxa2KBBE' },
+        tenancy: { tenants: 'fld1i5bDoHL3B6rUf', unit: 'fld7cjLLEHKAx49OK', rent: 'fldDMyfZLFMeONPq8', actual: 'fldzrqp2fHRaBBnnc' /* Actual Rent rollup */, status: 'fldlh5JAeYW2Ei2e6', endDate: 'fldwHhhKAq4f1nY9e' },
         cost: { name: 'fldS6FYfpkhu6tJG0', expected: 'fld9JibXkMpTeMcxw', payStatus: 'fldXZNI96v8HgjuSh', property: 'fld7nikJBPz3BoZJG', frequency: 'fldvozTHvs5VH3lNi' },
         realEstateBusinessId: 'recoGcXRXCniyJsTz', // Businesses → "Real Estate" (read 9 Sep 2026)
         // Who a Growth Plan task goes to: paper and legal levers to Kevin, works and lettings to Roy
