@@ -119,8 +119,11 @@ def build_full(inp, srt, out):
     return _run(inp, _subs_filter(srt, "16:9"), out, "12M")
 
 
-def build_lfmd(inp, srt, out, day, subtitle=""):
-    vf = _banner_filter("LEARNINGS FROM", "MY DIARY", day, sub=subtitle) + "," + _subs_filter(srt, "9:16")
+def build_lfmd(inp, srt, out, day, subtitle="", captions=True):
+    """captions=False is the YouTube Short (Kevin, 9 Sep 2026): banner only, our caption file rides alongside
+    and YouTube's own captions stay switchable, so viewers never see two sets at once."""
+    vf = _banner_filter("LEARNINGS FROM", "MY DIARY", day, sub=subtitle)
+    if captions: vf += "," + _subs_filter(srt, "9:16")
     return _run(inp, vf, out, "10M")
 
 
@@ -154,6 +157,8 @@ def selftest():
     ys = [int(m) for m in _re.findall(r"drawtext=[^,]*?:y=(\d+)", f)]
     pill_y = int(_re.search(r"drawbox=x=\d+:y=(\d+):w=300", f).group(1))
     assert ys[0] < ys[1] < pill_y < ys[3] and pill_y >= ys[1] + 60, (ys, pill_y)
+    import inspect as _i
+    src = _i.getsource(build_lfmd); assert "if captions:" in src and "_subs_filter" in src, "the YouTube Short renders without burnt-in captions"
     print("overlays selftest ok")
 
 
@@ -161,11 +166,12 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("mode"); ap.add_argument("args", nargs="*")
     ap.add_argument("--day", default=""); ap.add_argument("--title", default=""); ap.add_argument("--subtitle", default="")
+    ap.add_argument("--no-captions", action="store_true", help="banner only (the YouTube Short; our caption file is attached separately)")
     a = ap.parse_args()
     if a.mode == "selftest": selftest()
     elif a.mode == "captions":
         open(a.args[1], "w").write(rechunk_srt(open(a.args[0]).read())); print("wrote", a.args[1])
     elif a.mode == "full": print(build_full(*a.args[:3]))
-    elif a.mode == "lfmd": print(build_lfmd(*a.args[:3], day=a.day, subtitle=a.subtitle))
+    elif a.mode == "lfmd": print(build_lfmd(*a.args[:3], day=a.day, subtitle=a.subtitle, captions=not a.no_captions))
     elif a.mode == "summary": print(build_summary(*a.args[:3], day=a.day, title=a.title))
     else: raise SystemExit("unknown mode")
