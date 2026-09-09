@@ -29,12 +29,12 @@
  "raised": 76840.0,
  "raise_target": 1000000,
  "avg_km_per_day": 7.66,
- "runs_counted": 2388,
+ "runs_counted": 2389,
  "countries_count": 19,
  "countries": [
   {
    "name": "United Kingdom",
-   "runs": 2163
+   "runs": 2164
   },
   {
    "name": "Spain",
@@ -215,5 +215,23 @@
    "lat": 52.2053,
    "lon": 0.1218
   }
- ]
+ ],
+ "outline_parts": {
+  "United States of America": [
+   0
+  ],
+  "France": [
+   1
+  ],
+  "Italy": [
+   0
+  ],
+  "United Kingdom": [
+   0,
+   1
+  ],
+  "Malaysia": [
+   0
+  ]
+ }
 }
