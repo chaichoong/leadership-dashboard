@@ -160,7 +160,25 @@ def next_milestone(total_km, days):
     return km_next, day_next
 
 
-def compute(runs, total_km, raised, days, features, today=None):
+def outline_parts(runs, page_features):
+    """For each drawn country with more than one polygon part, the indices of the parts a streak run started in.
+    Natural Earth's France carries French Guiana (9 Sep 2026: France lit up in South America); the page draws only
+    these parts. Indices only: no run point leaves the Mac."""
+    out = {}
+    pts = [(r["latlng"][0], r["latlng"][1]) for r in runs if r.get("latlng") and r["date"] >= STREAK_START.isoformat()]
+    for f in page_features:
+        g = f["geometry"]
+        if g["type"] != "MultiPolygon" or len(g["coordinates"]) < 2: continue
+        hit = set()
+        for lat, lon in pts:
+            for i, poly in enumerate(g["coordinates"]):
+                if i in hit: continue
+                if point_in_geom(lon, lat, {"type": "Polygon", "coordinates": poly}): hit.add(i); break
+        if hit: out[f["properties"].get("NAME_EN") or f["properties"].get("NAME")] = sorted(hit)
+    return out
+
+
+def compute(runs, total_km, raised, days, features, today=None, page_features=None):
     """runs: streak runs [{date, km, latlng}] on or after 1 Jun 2020. total_km/raised/days: the website's
     own counters (the sync's running total), so the map never disagrees with the number beside it."""
     today = today or dt.date.today()
@@ -189,6 +207,7 @@ def compute(runs, total_km, raised, days, features, today=None):
         "lap_finish_estimate": (today + dt.timedelta(days=math.ceil((LAP_KM - total_km) / avg))).isoformat() if avg else None,
         "marker": {"lat": round(lat, 4), "lon": round(lon, 4), "leg": leg},
         "route": [{"name": n, "lat": la, "lon": lo} for n, la, lo in ROUTE],
+        "outline_parts": outline_parts(streak, page_features or []),
     }
 
 
@@ -238,7 +257,7 @@ def run(publish_it=True):
     added = fetch_new_runs() if publish_it else 0
     features = matching_outlines()
     total_km, raised, days = site_counters()
-    progress = compute(load_runs(), total_km, raised, days, features)
+    progress = compute(load_runs(), total_km, raised, days, features, page_features=json.load(open(COUNTRIES))["features"])
     local = os.path.join(REPO_ROOT, PROGRESS_PATH)
     os.makedirs(os.path.dirname(local), exist_ok=True); json.dump(progress, open(local, "w"), indent=1)
     line = "runpreneur map: day %d, %.2f km (%.1f%% of the lap), %d countries, %d new runs" % (days, total_km, progress["lap_pct"], progress["countries_count"], added)
@@ -261,7 +280,12 @@ def selftest():
     assert equivalent(17539) == "Cambridge to Tasmania" and equivalent(100) == "London to Paris" and equivalent(45000) == "once round the world"
     assert next_milestone(17539.77, 2290) == (18000, 2300)
     runs = [{"date": "2026-09-01", "km": 7.4, "latlng": [2, 2]}, {"date": "2019-01-01", "km": 42.2, "latlng": [2, 2]}, {"date": "2026-09-02", "km": 12.1, "latlng": None}]
-    p = compute(runs, 17539.77, 76860.0, 2290, feats, today=dt.date(2026, 9, 8))
+    two = {"type": "MultiPolygon", "coordinates": [[[[0, 0], [10, 0], [10, 10], [0, 10], [0, 0]]], [[[50, 50], [60, 50], [60, 60], [50, 60], [50, 50]]]]}
+    pf = [{"properties": {"NAME_EN": "Twoland"}, "geometry": two}, {"properties": {"NAME_EN": "Oneland"}, "geometry": square}]
+    op = outline_parts([{"date": "2026-01-01", "latlng": [5, 5]}, {"date": "2019-01-01", "latlng": [55, 55]}], pf)
+    assert op == {"Twoland": [0]}, "only the part a streak run started in, and a pre-streak run does not count: %r" % op
+    p = compute(runs, 17539.77, 76860.0, 2290, feats, today=dt.date(2026, 9, 8), page_features=pf)
+    assert "outline_parts" in p
     assert p["runs_counted"] == 2 and p["countries"] == [{"name": "Squareland", "runs": 1}] and p["longest_run"]["km"] == 12.1, "pre-streak runs never count"
     assert p["lap_pct"] == 43.77 and p["equivalent"] == "Cambridge to Tasmania" and p["next_km_milestone"] == 18000 and p["date_of_next_day_milestone"] == "2026-09-18"
     assert p["marker"]["leg"] and len(p["route"]) == len(ROUTE) and p["avg_km_per_day"] == 7.66

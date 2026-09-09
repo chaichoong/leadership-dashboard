@@ -88,6 +88,11 @@
   try {
     const g = await (await fetch('data/countries.geojson')).json();
     const outline = p.outline_names || {};
+    const parts = p.outline_parts || {};   // only the parts of a country where a run started (France is not in South America)
+    for (const f of g.features) {
+      const n = f.properties.NAME_EN || f.properties.NAME;
+      if (parts[n] && f.geometry.type === 'MultiPolygon') f.geometry.coordinates = f.geometry.coordinates.filter((_, i) => parts[n].includes(i));
+    }
     const ran = new Set(p.countries.map(c => outline[c.name] || c.name));
     const runsOf = Object.fromEntries(p.countries.map(c => [outline[c.name] || c.name, c.runs]));
     L.geoJSON(g, {
