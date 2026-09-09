@@ -431,6 +431,18 @@ def schedule_stage(day, entry, recs, acct_map, stage, dry_run=False, index=0):
         if left:
             print("episode %d: %s %s REFUSED, placeholder %s still in the copy" % (day, spec["clip"], platform, left)); continue
         when = when_for(platform, spec["clip"], index)
+        if platform == "youtube" and youtube_direct_ready():
+            # Straight to the channel through Google's API (Kevin, 9 Sep 2026): full quality, English, our caption
+            # file attached, no burnt-in captions on the YouTube copy, link known at once. GoHighLevel is the fallback.
+            try:
+                post = youtube_direct(day, spec["clip"], title, text, when, test)
+            except SystemExit as ex:
+                print("episode %d: direct YouTube upload of %s FAILED (%s); GoHighLevel will carry it" % (day, spec["clip"], str(ex)[-200:]), file=sys.stderr)
+            else:
+                entry.setdefault("posts", {})[key] = post
+                if spec["clip"] == "full" and not entry.get("youtube_link"): entry["youtube_link"] = post["link"]
+                print("episode %d [%s]: %s youtube -> channel %s %s (%s)" % (day, m.upper(), spec["clip"], post["status"], when, post["link"]))
+                continue
         # Test mode: YouTube still goes up (unlisted, so the link exists) but every social post is a DRAFT.
         status = "scheduled" if (not test or platform == "youtube") else "draft"
         body = build_post(platform, account, spec, text, media[spec["clip"]], media.get("thumb"), when, user, day, title,
@@ -472,6 +484,27 @@ def schedule_stage(day, entry, recs, acct_map, stage, dry_run=False, index=0):
     fields["Notes"] = approval.append_note(full, "%s: %s through GoHighLevel." % (dt.date.today().isoformat(), what))
     watch._airtable("PATCH", watch.API + "/" + full["id"], {"fields": fields})
     return len(todo)
+
+
+def youtube_direct_ready():
+    """The API route exists once Kevin's consent token and the app's client file are on disk (10 Sep 2026)."""
+    import youtube_api
+    return os.path.exists(youtube_api.TOKEN_FILE) and os.path.exists(youtube_api.CLIENT_FILE)
+
+
+def youtube_direct(day, clip, title, text, when, test):
+    """Upload the clean render (no burnt-in captions) with its caption file and the thumbnail. Live: private now,
+    public at the slot (YouTube's own scheduler). Test: unlisted at once. Returns the post record for the state."""
+    import youtube_api
+    files = episode_files(day)
+    path = files.get(clip + "_yt") if os.path.exists(files.get(clip + "_yt", "")) else files[clip]
+    srt = files.get(clip + "_srt") if os.path.exists(files.get(clip + "_srt", "")) else None
+    thumb = files.get("thumb") if os.path.exists(files.get("thumb", "")) else None
+    vid = youtube_api.upload(path, title or ("Diary of a Runpreneur, Day %d" % day), text, privacy="unlisted" if test else "private",
+                             publish_at=None if test else when, thumbnail=thumb, srt=srt)
+    link = "https://youtu.be/" + vid
+    return {"id": vid, "platform": "youtube", "route": "api", "account": "Runpreneur", "clip": clip, "scheduled": None if test else when,
+            "status": "published" if test else "scheduled", "link": link, "mode": mode(), "file": os.path.basename(path), "captions": bool(srt)}
 
 
 def run_spotify(day, task_id, plan_path, title, test, pod):
@@ -659,6 +692,12 @@ def sync():
         changed = False; links = {}; clip_links = {}
         for key, p in posts.items():
             if p.get("status") in ("published", "draft"): continue     # a draft (test mode) never moves on its own
+            if p.get("route") == "api":                                # uploaded straight to YouTube: the slot passing is the publish
+                if p.get("scheduled") and dt.datetime.now(dt.timezone.utc) >= dt.datetime.fromisoformat(p["scheduled"].replace("Z", "+00:00")):
+                    p["status"] = "published"; changed = True
+                    for f in LINK_FIELDS.get(("youtube", p["clip"]), ()): links.setdefault(f, p["link"])
+                    if p["clip"] == "full" and not entry.get("youtube_link"): entry["youtube_link"] = p["link"]
+                continue
             try:
                 g = ghl("GET", "/social-media-posting/%s/posts/%s" % (loc, p["id"]))
             except SystemExit as ex:
@@ -764,6 +803,9 @@ def selftest():
     assert "YouTube Link" in LINK_FIELDS[("youtube", "full")] and "TikTok Link" in LINK_FIELDS[("tiktok", "summary")] and "Facebook Post Link" in LINK_FIELDS[("facebook", "summary")]
     assert "LinkedIn Link" in LINK_FIELDS[("linkedin", "summary")] and "Threads Link" in LINK_FIELDS[("threads", "summary")], "the fields Ericamae's pages read"
     assert CLIP_FILES["podcast"] == "Ep%d_Podcast.mp3"
+    import inspect as _i2; src2 = _i2.getsource(schedule_stage); assert "youtube_direct_ready()" in src2 and src2.index("youtube_direct_ready()") < src2.index("create_post(body)"), "the API route is tried before GoHighLevel"
+    ys = _i2.getsource(youtube_direct); assert 'files[clip]' in ys and '"_srt"' in ys and 'privacy="unlisted" if test else "private"' in ys and "publish_at=None if test else when" in ys
+    ss = _i2.getsource(sync); assert 'p.get("route") == "api"' in ss and 'p["status"] = "published"' in ss, "API uploads flip to published on their slot without asking GoHighLevel"
     import inspect as _i; assert "run_facebook(day, full[\"id\"]" in _i.getsource(schedule_stage) and "signin-needed" in _i.getsource(run_facebook), "the personal Facebook share runs at stage 2 and waits for sign-in"
     assert title_is_episode("Coping With Stress on Day 2,054 of My Running Streak | Runpreneur Episode 2054", 2054) and title_is_episode("Why 9 out of 10 | Runpreneur Ep1857/4292", 1857)
     assert not title_is_episode("How Excitement Kills Forecasting | Runpreneur Ep2053/5000", 2054), "the day before is not this episode"
