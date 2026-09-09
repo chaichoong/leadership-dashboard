@@ -1401,6 +1401,18 @@ def receipt_lines(receipt):
     return out
 
 
+def od_picture_problem(task_name, output):
+    """A CONTENT (OD) post card must carry its picture as a permanent link (Kevin, 9 Sep 2026: cards arrived with no link he could open,
+    after another process re-submitted them with its own file). THIN cards and newsletter cards carry no picture and pass."""
+    name = str(task_name or "")
+    if not name.startswith("CONTENT (OD):") or "Newsletter:" in name: return ""
+    text = str(output or "")
+    if text.lstrip().upper().startswith("THIN SLOT"): return ""
+    if re.search(r"https://assets\.cdn\.filesafe\.space/\S+\.(png|jpg|jpeg)", text, re.I): return ""
+    return ("an Operations Director post card must carry its picture as a permanent link (assets.cdn.filesafe.space ...png) so Kevin can open "
+            "it; re-run the lane's `cards` step rather than re-submitting the text alone")
+
+
 def receipt_problem(receipt, feedback, old_output, new_output):
     """Why this redo may not be submitted, or '' when the receipt holds."""
     lines = receipt_lines(receipt)
@@ -2681,6 +2693,11 @@ def cmd_submit(args):
     problem = document_action_problem(output, args.type, tf_early.get(AF["notes"]), attach_names)
     if problem:
         sys.exit(f"ERROR: refusing to submit {args.task} — {problem}")
+
+    # THE PICTURE GATE (Kevin, 9 Sep 2026): an Operations Director post card without an openable picture link is refused.
+    odp = od_picture_problem(tf_early.get(AF["name"], "") or "", output)
+    if odp:
+        sys.exit(f"ERROR: refusing to submit {args.task} — {odp}")
 
     # THE TRACK RECORD GATE (Kevin, 8 Sep 2026): a reply, a creditor item or
     # an inbound matter states what has already passed with this contact.
