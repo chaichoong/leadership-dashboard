@@ -39,7 +39,7 @@ a { color: var(--accent); }
   <a class="header-back" href="growth-plan.html">&larr; Back to the Growth Plan</a>
   <h1>Real Estate Growth Plan</h1>
   <div class="subtitle">How the page finds money in the portfolio, what it writes to Airtable, and how to work it.</div>
-  <div class="version">SOP v1.2 &middot; page v1.2 &middot; 9 September 2026</div>
+  <div class="version">SOP v1.3 &middot; page v1.3 &middot; 9 September 2026</div>
 </div></div>
 <div class="container">
   <div class="quick">
@@ -53,7 +53,8 @@ a { color: var(--accent); }
 
   <div class="section"><h2>2. The levers, in stage order</h2><div class="card">
     <table><thead><tr><th>Stage</th><th>Lever</th><th>Rule</th><th>Effort</th></tr></thead><tbody>
-      <tr><td>1 Paper trail</td><td>Rent uplift</td><td>UC tenant in a Room below the 1-bed rate, aged 35+ or with no date of birth on file (counted as 35+ with "confirm first").</td><td>Paper</td></tr>
+      <tr><td>1 Paper trail</td><td>Rent uplift</td><td>UC tenant in a Room below the 1-bed rate, aged 35+ by date of birth or confirmed 35+ on the tenant record. No date of birth and no confirmation means out of the plan and on the facts list.</td><td>Paper</td></tr>
+      <tr><td>1 Paper trail</td><td>CRF top-up</td><td>UC tenant already at the rate whose received amount (Actual Rent rollup) is short by more than £10: the gap is a CRF Housing Payment claim.</td><td>Paper</td></tr>
       <tr><td>1 Paper trail</td><td>Rate refresh</td><td>UC tenant below the 2026-27 rate for their unit type. Refreshes under £10 are folded into one portfolio row.</td><td>Paper</td></tr>
       <tr><td>2 Council tax</td><td>Council tax</td><td>A two-tenant house with Growth Strategy = Joint tenancy. One agreement of 6+ months makes the tenants liable; they claim Council Tax Reduction and any residual is paid by you to the council under the side letter.</td><td>Paper</td></tr>
       <tr><td>3 Rooms</td><td>Room release / New room let</td><td>A house with Growth Strategy = Add tenants: the planned number of new lets at the 1-bed rate, bills with the tenants, council tax staying with the owner.</td><td>Works</td></tr>
@@ -61,7 +62,7 @@ a { color: var(--accent); }
       <tr><td>4 Take-backs</td><td>Take-back</td><td>The five Collins head-lease houses at £250 a month each. Q4 only, after the legal question set (ruling 31 July 2026).</td><td>Legal</td></tr>
       <tr><td>5 Potential</td><td>Agent-held</td><td>The four Roc Immo houses at the 1-bed rate. Shown for scale, hidden by default, no action generated.</td><td>&mdash;</td></tr>
     </tbody></table>
-    <div class="note"><strong>Strategy per house.</strong> Kevin sets Growth Strategy on each self-managed house: <em>Joint tenancy</em> (one agreement, council tax to the tenants, no extra tenant), <em>HMO</em> (individual ASTs, the planned number of extra tenants, owner keeps council tax) or <em>Leave as is</em>. Joint tenancy shows the council tax lever; HMO shows the rooms lever when extra tenants are planned; Leave as is shows neither. Rent uplifts apply under any strategy. Agent-run houses show what a take-back as joint tenancies of two over-35 UC tenants would bring; the Collins houses keep their £250 take-back.</div>
+    <div class="note"><strong>Strategy per house.</strong> Kevin sets Growth Strategy on each self-managed house: <em>Joint tenancy</em> (one agreement, council tax to the tenants, no extra tenant), <em>HMO</em> (individual ASTs, the planned number of extra tenants, owner keeps council tax) or <em>Leave as is</em>. Joint tenancy shows the council tax lever; HMO shows the rooms lever when extra tenants are planned; Leave as is shows neither. Rent uplifts apply under any strategy. Agent-run properties show what a take-back at the 1-bed rate would bring: two over-35s in a house or a 2-bed flat, one in a 1-bed flat (Duckworth: 4 two-beds and 5 one-beds); the Collins houses keep their £250 take-back.</div>
     <div class="note"><strong>Council tax on a joint tenancy house.</strong> Counted at the live cost where you pay today, otherwise at the band figure (VOA band, this year's charge), because the owner is liable for a room-by-room let until the joint tenancy and a backdated Council Tax Reduction are in place. Bands looked up on 9 September 2026: every Haverhill house Band B (£1,900.86 a year with the town precept), 18 Northfield Band B (East Cambs), 1406 Oldham Road Band A (Manchester).</div>
     <div class="note"><strong>Who gets the task.</strong> Paper and legal to Kevin, works and lettings to Roy, unless the house's Growth Plan Owner says otherwise. 4 Abington Place goes to Kevin: Rob deals with Jason Smith, Roy with Paul Murcutt.</div>
   </div></div>
@@ -78,7 +79,9 @@ a { color: var(--accent); }
 
   <div class="section"><h2>4. Working the page</h2><div class="card">
     <ol>
+      <li><strong>Metric cards:</strong> click any card to see the rows that make it up, with the same figures the card adds up.</li>
       <li><strong>Things to do, in order:</strong> the first step of every counted lever with who it goes to.</li>
+      <li><strong>Tenant meeting form:</strong> pick the tenant, fill it in with them, Save writes every field to the tenant's Airtable record (date of birth, NI number, contact, UC payment day, household, cap position, ID and statements seen, weekly income and spending, authority signed, meeting date and notes). Bank account numbers are never stored.</li>
       <li><strong>Facts the plan still needs:</strong> dates of birth, cap exemptions, lettable rooms, council tax payer. Each one writes straight to Airtable and re-prices the plan.</li>
       <li><strong>Strategic order:</strong> click a row for the evidence and the first step. <em>Adopt</em> records it in the Growth Plan table. <em>Task</em> creates an Airtable task (paper and legal to Kevin, works and lettings to Roy) and links it to the row. <em>Done</em> and <em>Drop</em> take it out of the totals; "Show done and dropped" brings it back.</li>
       <li><strong>Property cards:</strong> rooms in use against lettable rooms, each tenant's rent against their rate, and the three fields the plan needs per house.</li>

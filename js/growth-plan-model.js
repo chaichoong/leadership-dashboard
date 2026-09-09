@@ -62,7 +62,7 @@
     const EFFORT_WEIGHT = { Paper: 1, Light: 2, Works: 4, Legal: 6 };
     const STAGE = {
         'Rent uplift': 1, 'Rate refresh': 1, 'Council tax': 2, 'Room release': 3, 'New room let': 3,
-        'Void let': 4, 'Take-back': 4, 'Agent-held': 5,
+        'CRF top-up': 1, 'Void let': 4, 'Take-back': 4, 'Agent-held': 5,
     };
     const STAGE_NAMES = { 1: 'Paper trail', 2: 'Council tax', 3: 'Rooms', 4: 'Voids and take-backs', 5: 'Agent-held potential' };
 
@@ -214,9 +214,9 @@
         // A tenant can carry more than one tenancy row; take the one on the unit being priced,
         // and share a joint tenancy's rent between its tenants.
         const tenanciesByTenant = {}; (data.tenancies || []).forEach(tc => { (tc.tenantIds || []).forEach(id => { (tenanciesByTenant[id] = tenanciesByTenant[id] || []).push(tc); }); });
+        const tenancyFor = (tenantId, unit) => { const list = tenanciesByTenant[tenantId] || []; return list.find(x => x.unitId === unit.id) || list[list.length - 1] || null; };
         const rentFor = (tenantId, unit, fallback) => {
-            const list = tenanciesByTenant[tenantId] || [];
-            const tc = list.find(x => x.unitId === unit.id) || list[list.length - 1];
+            const tc = tenancyFor(tenantId, unit);
             if (!tc) return fallback;
             return num(tc.rent) / Math.max(1, (tc.tenantIds || []).length);
         };
@@ -271,6 +271,7 @@
                 const uView = { id: u.id, number: u.number, type: u.type, status: u.status, rent: round2(num(u.rent)), incomeType: u.incomeType || '', tenants: [] };
                 uTenants.forEach(t => {
                     const age = ageOn(t.dob, T);
+                    const over35Known = age != null ? age >= 35 : !!t.over35Confirmed; // Kevin/Roy can confirm 35+ without a date of birth
                     const rent = rentFor(t.id, u, num(u.rent) / Math.max(1, uTenants.length));
                     const uc = isUc(t, u), hb = isHb(t, u);
                     const tv = { id: t.id, name: t.name, dob: t.dob || '', age, payType: t.payType || '', uc, hb, rent: round2(rent), capExemption: t.capExemption || 'Unknown', unitId: u.id, unitType: u.type, rateNow: null, target: null, note: '' };
@@ -283,24 +284,15 @@
                     if (mgmt === 'kevin' && rates && (uc || hb) && wholeShared) {
                         const roomUnit = u.type === 'Room';
                         // HB keeps the shared rate in a shared house at any age; UC does not.
-                        const entitled1Bed = !roomUnit || (uc && age != null && age >= 35);
+                        const entitled1Bed = !roomUnit || (uc && over35Known);
                         const rate = entitled1Bed ? rates.b1 : rates.sar;
                         tv.rateNow = rate;
-                        if (roomUnit && uc && age == null) {
+                        if (roomUnit && uc && age == null && !t.over35Confirmed) {
+                            // Kevin, 9 Sep 2026: no date of birth and not confirmed 35+ means OUT of the plan;
+                            // the tenant stays on the facts list until the date of birth is known.
                             const gapU = round2(Math.max(0, rates.b1 - rent));
                             unknownAge.push({ tenantId: t.id, tenant: t.name, propertyId: prop.id, property: prop.name, unit: u.number, rent: tv.rent, upliftIfOver35: gapU, upliftIfExempt: gapU });
-                            tv.note = 'Age to confirm: counted as 35 or over until the date of birth says otherwise';
-                            const capU = capPosition(tv.capExemption, rates.b1, settings);
-                            if (gapU > 0.5) levers.push(lever({
-                                key: `uplift:${t.id}`, lever: 'Rent uplift', propertyId: prop.id, property: prop.name, tenantId: t.id, tenant: t.name, unitId: u.id, unit: u.number,
-                                title: `${t.name}: room rate to 1-bed rate (age to confirm)`,
-                                monthly: gapU, monthlyIfExempt: gapU, oneOff: 0, effort: 'Paper', counted: 'now', ageToConfirm: true,
-                                capShortfall: capU.exempt ? 0 : capU.shortfall,
-                                evidence: [`Rent now £${rent.toFixed(2)} (tenancy record)`, `${rates.brma} 1-bed rate £${rates.b1.toFixed(2)} a month (LHA Direct, Sep 2026)`, 'No date of birth on file: counted as 35 or over until confirmed',
-                                    capU.exempt ? `Benefit cap: exempt (${tv.capExemption})` : `Benefit cap: at £${rates.b1.toFixed(2)} the housing element is £${capU.shortfall.toFixed(2)} short unless exempt`],
-                                needs: ['Confirm the date of birth (35 or over) before the rent change'].concat(capU.exempt ? [] : [`Apply for a CRF Housing Payment of £${capU.shortfall.toFixed(2)} a month, or record the exemption`]),
-                                firstStep: `Confirm ${t.name}'s date of birth, then sign the rent change to £${rates.b1.toFixed(2)} and report it in the UC journal`,
-                            }, planByKey));
+                            tv.note = 'Age unknown: not in the plan until the date of birth is on file (or 35+ is confirmed)';
                         } else if (uc) {
                             const cap = capPosition(tv.capExemption, rate, settings);
                             tv.target = rate;
@@ -314,20 +306,35 @@
                                     key: `${leverName === 'Rent uplift' ? 'uplift' : 'refresh'}:${t.id}`, lever: leverName, propertyId: prop.id, property: prop.name,
                                     tenantId: t.id, tenant: t.name, unitId: u.id, unit: u.number,
                                     title: leverName === 'Rent uplift'
-                                        ? `${t.name}: room rate to 1-bed rate (age ${age})`
+                                        ? `${t.name}: room rate to 1-bed rate (${age != null ? 'age ' + age : '35+ confirmed'})`
                                         : `${t.name}: rent to the ${rates.brma} ${entitled1Bed ? '1-bed' : 'room'} rate`,
                                     monthly: gap, monthlyIfExempt: gap, oneOff: 0, effort: 'Paper', counted: 'now',
                                     capShortfall: cap.exempt ? 0 : cap.shortfall,
                                     evidence: [
                                         `Rent now £${rent.toFixed(2)} (tenancy record)`,
                                         `${rates.brma} ${entitled1Bed ? '1-bed' : 'room'} rate £${rate.toFixed(2)} a month (LHA Direct, Sep 2026)`,
-                                        age != null ? `Age ${age} (DOB ${t.dob})` : 'Age not needed for this unit type',
+                                        age != null ? `Age ${age} (DOB ${t.dob})` : (t.over35Confirmed && roomUnit ? '35 or over confirmed by Kevin (no date of birth on file yet)' : 'Age not needed for this unit type'),
                                         cap.exempt ? `Benefit cap: exempt (${tv.capExemption})` : `Benefit cap: ${cap.known ? 'not exempt' : 'exemption unknown'}; at £${rate.toFixed(2)} the housing element is £${cap.shortfall.toFixed(2)} short (cap £${capSingle.cap} less standard allowance £${capSingle.standard})`,
                                     ],
                                     needs: crfNeed,
                                     firstStep: `Meet ${t.name}: sign the rent change to £${rate.toFixed(2)}, report it in the UC journal${cap.exempt ? '' : ', submit the CRF Housing Payment form'}`,
                                 }, planByKey));
-                            } else if (gap <= 0.5 && cap.known && !cap.exempt && cap.shortfall > 0) {
+                            }
+                            const tc = tenancyFor(t.id, u);
+                            const received = tc && tc.actual != null ? num(tc.actual) / Math.max(1, (tc.tenantIds || []).length) : null;
+                            if (gap <= 0.5 && received != null && received > 0 && rent - received > 10) {
+                                const short = round2(rent - received);
+                                tv.received = round2(received);
+                                levers.push(lever({
+                                    key: `topup:${t.id}`, lever: 'CRF top-up', propertyId: prop.id, property: prop.name, tenantId: t.id, tenant: t.name, unitId: u.id, unit: u.number,
+                                    title: `${t.name}: £${received.toFixed(2)} received against £${rent.toFixed(2)} due; CRF Housing Payment for the gap`,
+                                    monthly: short, monthlyIfExempt: short, oneOff: 0, effort: 'Paper', counted: 'now', capShortfall: short,
+                                    evidence: [`Rent due £${rent.toFixed(2)} (tenancy record), latest amount received £${received.toFixed(2)} (Actual Rent rollup)`, `Gap £${short.toFixed(2)} a month: the benefit cap is taking the housing element down`, `${rates.brma} 1-bed rate £${rate.toFixed(2)}: the rent is already right`],
+                                    needs: [`Apply for a CRF Housing Payment of £${short.toFixed(2)} a month paid to the landlord, or record the exemption if the UC statement shows one`],
+                                    firstStep: `Meet ${t.name}: read the UC statement, submit the CRF Housing Payment form for £${short.toFixed(2)} a month`,
+                                }, planByKey));
+                            }
+                            if (gap <= 0.5 && cap.known && !cap.exempt && cap.shortfall > 0) {
                                 tv.note = `Capped: housing element £${cap.shortfall.toFixed(2)} short at this rent; CRF Housing Payment to apply for`;
                             } else if (!cap.exempt && cap.shortfall > 0 && !cap.known) {
                                 tv.note = `Cap check: £${cap.shortfall.toFixed(2)} a month short unless exempt; CRF Housing Payment if not`;
@@ -437,14 +444,19 @@
             if ((mgmt === 'rocimmo' || mgmt === 'agent') && rates) {
                 // Kevin, 9 Sep 2026: for every agent-run property, what two over-35 UC tenants on a joint
                 // tenancy at the 1-bed rate would bring in (per flat in a block). Shown, not actioned.
-                const homes = prop.type === 'Block' ? Math.max(1, pUnits.filter(u => u.type === 'Flat').length) : 1;
-                const potentialRent = round2(homes * 2 * rates.b1);
+                // A 2-bed flat takes a joint tenancy of two over-35s (2 × 1-bed rate); a 1-bed flat takes one
+                // tenant at the 1-bed rate; a house takes two. (Kevin, 9 Sep 2026: Duckworth is 4 two-beds and 5 one-beds.)
+                const flats = prop.type === 'Block' ? pUnits.filter(u => u.type === 'Flat') : [];
+                const homes = flats.length || 1;
+                const perFlat = f => (num(f.beds) >= 2 ? 2 : 1) * rates.b1;
+                const potentialRent = round2(flats.length ? flats.reduce((n, f) => n + perFlat(f), 0) : 2 * rates.b1);
                 const potential = round2(potentialRent - propRent);
+                const flatMix = flats.length ? `${flats.filter(f => num(f.beds) >= 2).length} two-bed flats × 2 × £${rates.b1.toFixed(2)} + ${flats.filter(f => num(f.beds) < 2).length} one-bed flats × £${rates.b1.toFixed(2)}` : '';
                 levers.push(lever({
                     key: `agent:${prop.id}`, lever: 'Agent-held', propertyId: prop.id, property: prop.name,
-                    title: `${prop.name}: take back as ${homes > 1 ? homes + ' joint tenancies' : 'a joint tenancy'} of two over-35 UC tenants at the 1-bed rate`,
+                    title: `${prop.name}: take back and let to over-35 UC tenants at the 1-bed rate${homes > 1 ? ` (${homes} flats)` : ' (joint tenancy of two)'}`,
                     monthly: potential, monthlyIfExempt: potential, oneOff: 0, effort: 'Legal', counted: 'agent',
-                    evidence: [`Rent now £${propRent.toFixed(2)} a month via ${prop.agent || 'the agent'}`, `${homes > 1 ? homes + ' flats × ' : ''}2 × £${rates.b1.toFixed(2)} (${rates.brma} 1-bed) = £${potentialRent.toFixed(2)} a month, before council tax and management`, potential < 0 ? 'The agent rent is higher than two 1-bed rates: no gain from a take-back' : 'Council tax would sit with the joint tenants'],
+                    evidence: [`Rent now £${propRent.toFixed(2)} a month via ${prop.agent || 'the agent'}`, `${flatMix || '2 × £' + rates.b1.toFixed(2)} (${rates.brma} 1-bed) = £${potentialRent.toFixed(2)} a month, before council tax and management`, potential < 0 ? 'The agent rent is higher than the LHA figure: no gain from a take-back' : 'Council tax would sit with the tenants'],
                     needs: ['Potential only: no action generated'],
                     firstStep: 'None: agent-held',
                 }, planByKey));

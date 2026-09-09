@@ -122,16 +122,44 @@ describe('buildPlan levers', () => {
         expect(l.capShortfall).toBe(0);
         expect(l.needs).toEqual([]);
     });
-    it('never uplifts an under-35 in a room; an unknown age is counted as 35+ with a confirm-first need', () => {
+    it('an unknown age is OUT of the plan (facts only) unless 35+ is confirmed', () => {
         const f = fixture(); f.tenants[2].dob = '';
-        const p = M.buildPlan(f, S, TODAY);
-        const l = p.levers.find(x => x.key === 'uplift:t3');
-        expect(l).toBeTruthy();
-        expect(l.ageToConfirm).toBe(true);
-        expect(l.monthly).toBe(372.62);
-        expect(l.needs[0]).toMatch(/Confirm the date of birth/);
+        let p = M.buildPlan(f, S, TODAY);
+        expect(p.levers.find(x => x.key === 'uplift:t3')).toBeUndefined();
         expect(p.unknownAge.map(u => u.tenant)).toEqual(['Travis Young']);
+        expect(p.totals.paper).toBe(372.62);
+        f.tenants[2].over35Confirmed = true;
+        p = M.buildPlan(f, S, TODAY);
+        const l = p.levers.find(x => x.key === 'uplift:t3');
+        expect(l.monthly).toBe(372.62);
+        expect(l.title).toMatch(/35\+ confirmed/);
+        expect(l.evidence.join(' ')).toMatch(/confirmed by Kevin/);
+        expect(p.unknownAge).toEqual([]);
         expect(p.totals.paper).toBe(372.62 + 372.62);
+    });
+    it('a tenant already at the rate but receiving less gets a CRF top-up for the gap', () => {
+        const f = fixture(); f.tenancies[1].actual = 836.52; // Paul: due 897.52, received 836.52
+        const p = M.buildPlan(f, S, TODAY);
+        const l = p.levers.find(x => x.key === 'topup:t2');
+        expect(l.lever).toBe('CRF top-up');
+        expect(l.monthly).toBe(61);
+        expect(l.capShortfall).toBe(61);
+        expect(l.stage).toBe(1);
+        expect(p.totals.paper).toBe(372.62 + 61);
+    });
+    it('no top-up when the received amount matches, or when nothing has been received yet', () => {
+        const f = fixture(); f.tenancies[1].actual = 897.52; f.tenancies[0].actual = 0;
+        const p = M.buildPlan(f, S, TODAY);
+        expect(p.levers.find(x => x.lever === 'CRF top-up')).toBeUndefined();
+    });
+    it('a block is priced flat by flat: two over-35s in a 2-bed, one in a 1-bed', () => {
+        const f = fixture();
+        f.properties.push({ id: 'p5', name: 'Duckworth Building', type: 'Block', agent: 'Intus Lettings', postcode: 'FY8 1SQ' });
+        f.units.push({ id: 'f1', propertyId: 'p5', number: 1, type: 'Flat', status: 'Occupied', rent: 500, beds: 2, tenantIds: [] });
+        f.units.push({ id: 'f2', propertyId: 'p5', number: 2, type: 'Flat', status: 'Occupied', rent: 600, beds: 1, tenantIds: [] });
+        const l = M.buildPlan(f, S, TODAY).levers.find(x => x.key === 'agent:p5');
+        expect(l.monthly).toBe(Math.round((2 * 398.88 + 398.88 - 1100) * 100) / 100); // 96.64
+        expect(l.evidence[1]).toMatch(/1 two-bed flats × 2 × £398.88 \+ 1 one-bed flats × £398.88/);
     });
     it('old strategy names still read (Add tenants = HMO, Hold = Leave as is)', () => {
         expect(M.normaliseStrategy('Add tenants')).toBe('HMO');
