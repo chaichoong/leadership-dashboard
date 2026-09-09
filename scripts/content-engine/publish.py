@@ -465,6 +465,8 @@ def schedule_stage(day, entry, recs, acct_map, stage, dry_run=False, index=0):
             plan_path, ptitle = spotify.write_plan(day, upload, ff.get("Podcast Copy"), entry["youtube_link"], test, os.path.dirname(STATE))
             pod = entry.setdefault("podcast", {}); pod["plan"] = plan_path; pod["title"] = ptitle
             what += "; " + run_spotify(day, full["id"], plan_path, ptitle, test, pod)
+        # Kevin's personal Facebook profile gets the episode link (Kevin, 9 Sep 2026: "needs to be part of the process")
+        what += "; " + run_facebook(day, full["id"], ff.get("YouTube Copy"), entry["youtube_link"], test, entry)
     fields["Notes"] = approval.append_note(full, "%s: %s through GoHighLevel." % (dt.date.today().isoformat(), what))
     watch._airtable("PATCH", watch.API + "/" + full["id"], {"fields": fields})
     return len(todo)
@@ -492,6 +494,29 @@ def run_spotify(day, task_id, plan_path, title, test, pod):
     if link: pod["link"] = link
     print("episode %d: Spotify %s%s" % (day, status, (" " + link) if link else ""))
     return "Spotify episode %s%s" % ("published" if status == "published" else "uploaded and processing", (" " + link) if link else "")
+
+
+def run_facebook(day, task_id, youtube_copy, youtube_link, test, entry):
+    """The YouTube link shared from Kevin's own Facebook profile through the browser lane. A signed-out
+    profile is recorded as 'signin-needed' (the hourly sync retries once Kevin has used the Robot sign-in
+    app) rather than guessed at; the lane's commit gate re-reads the approval before it presses Post."""
+    import facebook_share
+    fb = entry.setdefault("facebook_share", {})
+    plan_path, text = facebook_share.write_plan(day, youtube_copy, youtube_link, test, os.path.dirname(STATE))
+    fb["plan"] = plan_path; fb["text"] = text; fb["task"] = task_id; fb["test"] = bool(test)
+    if not facebook_share.signed_in():
+        fb["status"] = "signin-needed"
+        print("episode %d: Facebook profile share waits: SIGN-IN NEEDED www.facebook.com (https://www.facebook.com/login)" % day, file=sys.stderr)
+        return "Facebook profile share waiting for your sign-in (Robot sign-in app: Facebook)"
+    shot = os.path.join(os.path.dirname(STATE), "facebook_share_%d.png" % day)
+    try:
+        facebook_share.run_plan(plan_path, task_id, test, shot)
+    except SystemExit as ex:
+        fb["status"] = "failed"; fb["error"] = str(ex)[-300:]
+        print("episode %d: Facebook profile share FAILED: %s" % (day, str(ex)[-300:]), file=sys.stderr)
+        return "Facebook profile share FAILED (%s)" % str(ex)[-120:]
+    fb["status"] = "reviewed" if test else "posted"; fb["shot"] = shot
+    return "Facebook profile share %s" % ("filled, not posted (test mode)" if test else "posted")
 
 
 CURSOR_KEY = "_cursor"
@@ -601,6 +626,18 @@ def sync():
     state = load_state(); _, loc, _ = _cfg()
     for day, entry in state.items():
         if not str(day).isdigit() or not isinstance(entry, dict): continue   # _cursor, _skipped_days, held_posts live beside the episodes (9 Sep 2026: the first live cursor crashed sync)
+        fb = entry.get("facebook_share") or {}
+        if fb.get("status") == "signin-needed" and fb.get("plan") and fb.get("task"):
+            import facebook_share
+            if facebook_share.signed_in():
+                shot = os.path.join(os.path.dirname(STATE), "facebook_share_%s.png" % day)
+                try:
+                    facebook_share.run_plan(fb["plan"], fb["task"], fb.get("test", False), shot)
+                    fb["status"] = "reviewed" if fb.get("test") else "posted"; fb["shot"] = shot
+                    print("episode %s: Facebook profile share %s after sign-in" % (day, fb["status"]))
+                except SystemExit as ex:
+                    fb["status"] = "failed"; fb["error"] = str(ex)[-300:]; print("episode %s: Facebook profile share FAILED: %s" % (day, str(ex)[-200:]))
+                save_state(state)
         pod = entry.get("podcast") or {}
         if pod.get("status") == "processing" and pod.get("title"):
             # the public link arrives once Spotify has processed the video (a few minutes after Publish)
@@ -725,6 +762,7 @@ def selftest():
     assert "YouTube Link" in LINK_FIELDS[("youtube", "full")] and "TikTok Link" in LINK_FIELDS[("tiktok", "summary")] and "Facebook Post Link" in LINK_FIELDS[("facebook", "summary")]
     assert "LinkedIn Link" in LINK_FIELDS[("linkedin", "summary")] and "Threads Link" in LINK_FIELDS[("threads", "summary")], "the fields Ericamae's pages read"
     assert CLIP_FILES["podcast"] == "Ep%d_Podcast.mp3"
+    import inspect as _i; assert "run_facebook(day, full[\"id\"]" in _i.getsource(schedule_stage) and "signin-needed" in _i.getsource(run_facebook), "the personal Facebook share runs at stage 2 and waits for sign-in"
     assert title_is_episode("Coping With Stress on Day 2,054 of My Running Streak | Runpreneur Episode 2054", 2054) and title_is_episode("Why 9 out of 10 | Runpreneur Ep1857/4292", 1857)
     assert not title_is_episode("How Excitement Kills Forecasting | Runpreneur Ep2053/5000", 2054), "the day before is not this episode"
     lst = [{"id": "AT0l-Ri5ZJ0", "title": "Coping With Stress on Day 2,054 | Runpreneur Episode 2054"}, {"id": "x", "title": "Ep2053"}]
