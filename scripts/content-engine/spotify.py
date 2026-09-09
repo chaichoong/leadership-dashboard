@@ -35,44 +35,149 @@ def podcast_parts(podcast_copy, day, fallback_title=""):
     return title, body[:4000]
 
 
+ATTACH_DIR = os.path.expanduser("~/knowledge-os/attachments/content-engine")   # the only folder the lane uploads video from
+UPLOAD_WAIT_MS = 600000        # a 740 MB episode uploads in about two minutes (9 Sep 2026); ten is the lane's ceiling
+NEXT_ENABLED = "button:has-text('Next'):not([disabled])"
+PUBLISH_ENABLED = "button:has-text('Publish'):not([disabled])"
+PUBLISHED_PROOF = "text=/published|is live|now live/i"
+EPISODES = "https://creators.spotify.com/pod/show/%s/episodes" % SHOW_ID
+
+
+def stage_file(video_path):
+    """The lane refuses uploads from anywhere but ATTACH_DIR, so the episode is copied (hard-linked when
+    the volume allows) under its own name. Returns the staged path."""
+    os.makedirs(ATTACH_DIR, exist_ok=True)
+    dst = os.path.join(ATTACH_DIR, os.path.basename(video_path))
+    if os.path.abspath(video_path) == os.path.abspath(dst): return dst
+    if os.path.exists(dst) and os.path.getsize(dst) == os.path.getsize(video_path): return dst
+    if os.path.exists(dst): os.remove(dst)
+    try: os.link(video_path, dst)
+    except OSError:
+        import shutil; shutil.copyfile(video_path, dst)
+    return dst
+
+
 def build_plan(video_path, title, description, youtube_link, test):
+    """The wizard moves to Details on its own once a file is chosen, so the copy is typed while the upload
+    runs; Next stays disabled until the upload and Spotify's processing finish. Live plans end with the
+    `submit` step the lane only presses after the approval reads Approved; test plans stop at Review."""
     desc = description + ("\n\nWatch the full episode: " + youtube_link if youtube_link else "")
     steps = [
         {"do": "goto", "url": WIZARD},
-        {"do": "wait", "ms": 8000},
-        {"do": "upload", "selector": "#uploadAreaInput", "path": video_path},
-        {"do": "wait", "ms": 20000},
+        {"do": "wait", "for": "#uploadAreaInput", "state": "attached", "ms": 60000},   # the input is hidden off-screen
+        {"do": "upload", "selector": "#uploadAreaInput", "file": video_path},
+        {"do": "wait", "for": "text=Uploading", "ms": 60000},
         {"do": "fill", "selector": "input[name='title'], input[aria-label*='Title'], input[placeholder*='title' i]", "value": title},
         {"do": "fill", "selector": "textarea[name='description'], [contenteditable='true'], textarea", "value": desc},
-        {"do": "click", "text": "Next"},
-        {"do": "wait", "ms": 4000},
+        {"do": "wait", "gone": "text=Uploading", "ms": UPLOAD_WAIT_MS},
+        {"do": "wait", "gone": "text=Processing", "ms": UPLOAD_WAIT_MS},
+        {"do": "wait", "for": NEXT_ENABLED, "ms": UPLOAD_WAIT_MS},
+        {"do": "click", "selector": NEXT_ENABLED},
+        {"do": "wait", "ms": 6000},
+        # Review: "Now" is pre-selected; Publish stays greyed out while "Generating preview" spins
+        {"do": "click", "selector": "label[for='publish-date-now']"},   # the publish-date radio starts unticked and Publish refuses without it; the input itself is visually hidden (9 Sep 2026)
+        {"do": "wait", "gone": "text=Generating preview", "ms": UPLOAD_WAIT_MS},
+        {"do": "wait", "for": PUBLISH_ENABLED, "ms": UPLOAD_WAIT_MS},
     ]
+    if not test: steps.append({"do": "submit", "selector": PUBLISH_ENABLED})
     plan = {"profile": PROFILE, "label": "Spotify for Creators: %s" % title[:60], "steps": steps,
-            "submit": {"do": "click", "text": "Publish now" if not test else "Save as draft"},
-            "confirm": {"selector": "text=Episode published" if not test else "text=Draft", "proof": "the episode appears in the Episodes list"},
+            "confirm": {"selector": PUBLISHED_PROOF, "timeoutMs": 120000, "proof": "the wizard says the episode is published"},
             "mode": "test" if test else "live"}
     return plan
 
 
+def with_day(title, day):
+    """Ericamae's episodes read 'Episode 2053 - ...'; a Podcast Copy title without the day gets the same prefix."""
+    return title if re.search(r"\b%d\b" % day, title) else ("Episode %d - %s" % (day, title))[:200]
+
+
+def run_plan(plan_path, task_id, test, shot):
+    """prepare (test: fills, screenshots, never publishes) or commit (live: the lane's own gate re-reads the
+    approval). Returns the lane's JSON result; raises SystemExit with the lane's message on failure."""
+    import subprocess
+    lane = os.path.join(os.path.dirname(os.path.dirname(HERE)), "agent-browser.js")
+    cmd = ["node", lane, "prepare" if test else "commit", "--plan", plan_path, "--profile", PROFILE, "--shot", shot]
+    if not test: cmd += ["--task", task_id]
+    r = subprocess.run(cmd, capture_output=True, text=True, timeout=1500)
+    out = r.stdout.strip()
+    if r.returncode != 0: raise SystemExit((r.stderr.strip() or out)[-600:])
+    try: return json.loads(out[out.index("{"):])
+    except Exception: raise SystemExit("unreadable lane output: " + out[-300:])
+
+
 def write_plan(day, video_path, podcast_copy, youtube_link, test, out_dir):
     title, desc = podcast_parts(podcast_copy, day)
-    plan = build_plan(video_path, title, desc, youtube_link, test)
+    title = with_day(title, day)
+    plan = build_plan(stage_file(video_path), title, desc, youtube_link, test)
     os.makedirs(out_dir, exist_ok=True)
     path = os.path.join(out_dir, "spotify_plan_%d.json" % day)
     with open(path, "w") as fh: json.dump(plan, fh, indent=1)
     return path, title
 
 
+def verify_published(title):
+    """The real proof, read from the episodes list: 'published' when the title's row says Published,
+    'processing' when it still says Draft (Spotify shows a freshly published video as Draft for a few
+    minutes while it processes: 9 Sep 2026, episode 2054), 'missing' otherwise. Returns (status, snippet)."""
+    import subprocess
+    lane = os.path.join(os.path.dirname(os.path.dirname(HERE)), "agent-browser.js")
+    r = subprocess.run(["node", lane, "read", "--url", EPISODES, "--profile", PROFILE, "--wait", "9000"],
+                       capture_output=True, text=True, timeout=180)
+    out = r.stdout
+    try: text = json.loads(out[out.index("{"):]).get("text") or ""
+    except Exception: return "missing", "unreadable episodes page"
+    return list_status(text, title)
+
+
+def list_status(text, title):
+    key = title[:60]; best = "missing"; snippet = "title not in the first page of episodes"
+    for i in [m.start() for m in re.finditer(re.escape(key), text)]:
+        after = " ".join(text[i + len(key):i + 200].split())
+        status = after.split()[0] if after.split() else ""
+        if status == "Published": return "published", " ".join(text[i:i + 160].split())
+        if status == "Draft": best, snippet = "processing", " ".join(text[i:i + 160].split())
+    return best, snippet
+
+
+def public_link(title):
+    """The open.spotify.com link once the episode is out: read from the show's public embed page (no login)."""
+    import urllib.request
+    try:
+        req = urllib.request.Request("https://open.spotify.com/embed/show/%s" % SHOW_ID, headers={"User-Agent": "Mozilla/5.0"})
+        html = urllib.request.urlopen(req, timeout=30).read().decode("utf8", "ignore")
+    except Exception: return ""
+    m = re.search(r'<script id="__NEXT_DATA__"[^>]*>(.*?)</script>', html, re.S)
+    if not m: return ""
+    data = json.loads(m.group(1)); key = title[:50]
+    def walk(o):
+        if isinstance(o, dict):
+            if str(o.get("uri", "")).startswith("spotify:episode:") and key in str(o.get("name", "")): yield o["uri"]
+            for v in o.values(): yield from walk(v)
+        elif isinstance(o, list):
+            for v in o: yield from walk(v)
+    for uri in walk(data): return "https://open.spotify.com/episode/" + uri.split(":")[-1]
+    return ""
+
+
 def selftest():
     t, d = podcast_parts("Title: Day 2195 running off-road\nDescription: Six years in.\n\nMore.\nHashtags: #a #b", 2195)
     assert t == "Day 2195 running off-road" and d.startswith("Six years in.") and "#a #b" in d and "Title:" not in d, (t, d)
     assert podcast_parts("", 7)[0] == "Diary of a Runpreneur, Day 7"
+    assert with_day("Coping With Stress", 2054) == "Episode 2054 - Coping With Stress" and with_day(t, 2195) == t
     p = build_plan("/x/Episode_2195_Full_Episode.mp4", "T", "D", "https://youtu.be/x", True)
-    assert p["steps"][2] == {"do": "upload", "selector": "#uploadAreaInput", "path": "/x/Episode_2195_Full_Episode.mp4"}
-    assert p["submit"]["text"] == "Save as draft" and p["mode"] == "test" and "youtu.be/x" in p["steps"][5]["value"]
-    assert build_plan("/x", "T", "D", "", False)["submit"]["text"] == "Publish now"
+    assert p["steps"][2] == {"do": "upload", "selector": "#uploadAreaInput", "file": "/x/Episode_2195_Full_Episode.mp4"}
+    assert p["mode"] == "test" and "youtu.be/x" in p["steps"][5]["value"] and not any(s["do"] == "submit" for s in p["steps"])
+    waits = [s for s in p["steps"] if s["do"] == "wait" and (s.get("gone") or s.get("for"))]
+    assert all(s["ms"] <= 600000 for s in waits) and any(s.get("gone") == "text=Uploading" for s in waits)
+    live = build_plan("/x", "T", "D", "", False)
+    assert live["steps"][-1]["do"] == "submit" and live["confirm"]["selector"] and live["mode"] == "live"
+    assert live["steps"][-2] == {"do": "wait", "for": PUBLISH_ENABLED, "ms": UPLOAD_WAIT_MS}
+    assert any(s.get("selector") == "label[for='publish-date-now']" for s in live["steps"])
+    lst = "Title\n\nEpisode 9 - A\n\t\nDraft\n\t\n9/9/26\n\tVideo\t09:41\n\nEpisode 9 - A\n\t\nPublished\n\t\n9/9/26\n"
+    assert list_status(lst, "Episode 9 - A")[0] == "published" and list_status(lst.split("Published")[0], "Episode 9 - A")[0] == "processing"
+    assert list_status(lst, "Episode 8 - B")[0] == "missing"
     assert WIZARD.endswith("/episode/wizard") and SHOW_ID in WIZARD and PODCAST_FORMAT in ("audio", "video")
-    print(json.dumps({"checks": 7, "failed": []}))
+    print(json.dumps({"checks": 13, "failed": []}))
 
 
 if __name__ == "__main__":
