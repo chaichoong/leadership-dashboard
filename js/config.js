@@ -37,7 +37,7 @@
         // Property Manager (Operations) — Roy Lavin's single page. Standalone at
         // property-manager/ behind its own passcode; the property-manager Worker
         // holds the Airtable key and strips personal money server-side (8 Sep 2026).
-        { id: 'property-manager', name: 'Property Manager',            icon: '🏠', pageVer: '1.2', sopFile: 'sop-property-manager.html',   sopVer: '1.0', standalone: 'property-manager/index.html' },
+        { id: 'property-manager', name: 'Property Manager',            icon: '🏠', pageVer: '1.2', sopFile: 'sop-property-manager.html',   sopVer: '1.2', standalone: 'property-manager/index.html' },
         { id: 'operations',  name: 'Operations',                    icon: '🏢', pageVer: '1.47', sopFile: '',                            sopVer: '1.0', standalone: 'os/operations/index.html' },
         // KPI Library (Leadership section) — ADMIN ONLY. Never rendered in a
         // client tenant's shell; the adminOnly flag is the contract the Supabase
@@ -778,6 +778,7 @@
         unitPropName:     'fld7NBHkhjqfbcxk7',  // Property Name (Short) lookup
         unitName:         'fldr8sliyu8h2jw9t',   // Rental Unit (primary field — formula)
         unitNumber:       'fld3nPlpdXSExxDuq',   // Unit Number (number field)
+        unitType:         'fldsItq0vU3sHv7n9',  // Unit Type (Room | Flat-Let | Flat | Whole Property) — read by the Property Manager Worker
         // Tenants
         tenantStatus:     'fldAXzP9SGIHiAhrv',
         tenantName:       'fldxBKW7QnujSDWqA',

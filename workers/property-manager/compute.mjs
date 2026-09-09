@@ -2,8 +2,10 @@
 // function takes its inputs and `today` so vitest can pin them.
 //
 // What leaves this module is what Roy sees. Nothing here touches bank
-// balances, debt, or a Personal-business row: the transaction feed is already
-// Business = Real Estate at the query, and costs are stripped below.
+// balances, debt, or a Personal-business transaction: the transaction feed is
+// already Business = Real Estate at the query. Running costs are the FULL
+// fixed-cost total on purpose (Kevin, 9 Sep 2026): some of his own fixed costs
+// sit inside it and Roy needs the true cash-flow figure, never the breakdown.
 
 import { F, REC, ROY_EMAIL, REAL_ESTATE_NAME, PNL_SECTIONS, MAINT_TARGET_GBP, WAGES_TARGET_GBP } from './fields.mjs';
 
@@ -12,6 +14,7 @@ const num = (v) => { const n = Number(v); return Number.isFinite(n) ? n : 0; };
 const round2 = (n) => Math.round(n * 100) / 100;
 const firstText = (v) => (Array.isArray(v) ? (v.length ? String(v[0]) : '') : (v == null ? '' : String(v)));
 const linkIds = (v) => (Array.isArray(v) ? v.map(x => (typeof x === 'string' ? x : x && x.id)).filter(Boolean) : []);
+const selName = (v) => (v == null ? '' : (typeof v === 'string' ? v : (v.name || String(v))));
 export const isPersonalCoaName = (name) => /^personal\b/i.test(String(name || '').trim());
 
 export function dateKey(d) {
@@ -21,6 +24,7 @@ export function parseDay(s) {
   const m = String(s || '').match(/^(\d{4})-(\d{2})-(\d{2})/);
   return m ? new Date(+m[1], +m[2] - 1, +m[3]) : null;
 }
+function addDays(d, n) { const x = new Date(d); x.setDate(x.getDate() + n); return x; }
 function addMonthsClamped(d, n) {
   const day = d.getDate();
   const t = new Date(d.getFullYear(), d.getMonth() + n, 1);
@@ -36,9 +40,10 @@ export function monthKeys(n, today) {
   }
   return out;
 }
+export function lastMonthKey(today) { return monthKeys(2, today)[0]; }
 
 // ── Tenancy status (mirrors js/shared.js) ──
-const statusName = (v) => (v == null ? '' : (typeof v === 'string' ? v : (v.name || String(v)))).trim().toLowerCase();
+const statusName = (v) => selName(v).trim().toLowerCase();
 export const isTenancyActive = (t) => ['in payment', 'cfv actioned', 'cfv'].includes(statusName(f(t, F.tenPayStatus)));
 export const isTenancyIncome = (t) => ['in payment', 'cfv actioned'].includes(statusName(f(t, F.tenPayStatus)));
 export const isTenancyBehind = (t) => ['cfv actioned', 'cfv'].includes(statusName(f(t, F.tenPayStatus)));
@@ -51,14 +56,11 @@ export function isTenantStatusActive(t, today) {
 }
 export const isUnitVoid = (u) => statusName(f(u, F.unitStatus)).startsWith('void');
 
-// ── Costs: the personal strip ──
-// A cost is Roy's running cost when it is active (LEGACY Payment Status, the
-// field the app filters on), its Business is Real Estate or blank, and neither
-// its category nor sub-category carries the "Personal" prefix.
+// ── Costs ──
+// Active = the LEGACY Payment Status rule the whole app filters on.
 export function isCostActive(c) {
   if (f(c, F.costInactive)) return false;
-  const s = f(c, F.costPayStatus);
-  const name = typeof s === 'string' ? s : (s && s.name) || '';
+  const name = selName(f(c, F.costPayStatus));
   return name === 'In Payment' || name === 'Overdue';
 }
 export function classifyCost(c, coaNames) {
@@ -70,18 +72,19 @@ export function classifyCost(c, coaNames) {
   if (biz.length && !biz.includes(REC.bizRealEstate)) return 'other-business';
   return 'property';
 }
+// Full fixed-cost total (every active cost, any business), plus how much of it
+// is not property so the page can SAY so without listing it.
 export function runningCosts(costs, coaNames) {
-  const out = { total: 0, count: 0, excluded: { personal: 0, personalGbp: 0, otherBusiness: 0, otherBusinessGbp: 0 } };
+  const out = { total: 0, count: 0, propertyTotal: 0, propertyCount: 0, nonPropertyCount: 0 };
   for (const c of costs) {
     const cls = classifyCost(c, coaNames);
+    if (cls === 'inactive') continue;
     const amt = num(f(c, F.costExpected));
-    if (cls === 'property') { out.total += amt; out.count += 1; }
-    else if (cls === 'personal') { out.excluded.personal += 1; out.excluded.personalGbp += amt; }
-    else if (cls === 'other-business') { out.excluded.otherBusiness += 1; out.excluded.otherBusinessGbp += amt; }
+    out.total += amt; out.count += 1;
+    if (cls === 'property') { out.propertyTotal += amt; out.propertyCount += 1; }
+    else out.nonPropertyCount += 1;
   }
-  out.total = round2(out.total);
-  out.excluded.personalGbp = round2(out.excluded.personalGbp);
-  out.excluded.otherBusinessGbp = round2(out.excluded.otherBusinessGbp);
+  out.total = round2(out.total); out.propertyTotal = round2(out.propertyTotal);
   return out;
 }
 
@@ -91,121 +94,164 @@ export function buildNameMap(records, fieldId) {
   for (const r of records || []) { const n = f(r, fieldId); if (n != null && n !== '') out[r.id] = firstText(n); }
   return out;
 }
+const txLabel = (tx) => firstText(f(tx, F.txVendor)) || firstText(f(tx, F.txName)) || 'Transaction';
+
+// Rental-income transactions per tenancy, newest first: [{date, amount}].
+export function paymentsByTenancy(transactions) {
+  const out = {};
+  for (const tx of transactions) {
+    if (linkIds(f(tx, F.txSubCategory))[0] !== REC.subRentalInc) continue;
+    const tenId = linkIds(f(tx, F.txTenancy))[0];
+    if (!tenId) continue;
+    const date = String(f(tx, F.txDate) || '').slice(0, 10);
+    if (!date) continue;
+    (out[tenId] = out[tenId] || []).push({ date, amount: round2(num(f(tx, F.txReportAmount))) });
+  }
+  for (const k of Object.keys(out)) out[k].sort((a, b) => b.date.localeCompare(a.date));
+  return out;
+}
 
 // ── Portfolio ──
-export function portfolio(units) {
+export function portfolio(units, tenancies, today) {
   const byProp = {};
   const voids = [];
   const empty = { rentReady: 0, notReady: 0 };
+  // Current tenant per unit (live tenancy) and last ended tenancy per unit.
+  const currentByUnit = {}, lastEndedByUnit = {};
+  for (const t of tenancies || []) {
+    const unitId = linkIds(f(t, F.tenUnit))[0];
+    if (!unitId) continue;
+    if (isTenancyActive(t) && isTenantStatusActive(t, today)) currentByUnit[unitId] = t;
+    const end = String(f(t, F.tenEndDate) || '').slice(0, 10);
+    if (end && (!lastEndedByUnit[unitId] || end > lastEndedByUnit[unitId].end)) lastEndedByUnit[unitId] = { end, tenant: firstText(f(t, F.tenSurname)) || 'Unknown' };
+  }
   for (const u of units) {
     const prop = firstText(f(u, F.unitPropName)) || 'Unallocated';
-    byProp[prop] = byProp[prop] || { property: prop, units: 0, void: 0 };
-    byProp[prop].units += 1;
+    const row = (byProp[prop] = byProp[prop] || { property: prop, units: 0, void: 0, occupied: 0, rows: [] });
+    row.units += 1;
     const st = statusName(f(u, F.unitStatus));
-    if (isUnitVoid(u)) { byProp[prop].void += 1; voids.push({ unit: firstText(f(u, F.unitName)), property: prop }); }
-    else if (st === 'rent ready') empty.rentReady += 1;
-    else if (st === 'not ready') empty.notReady += 1;
+    const cur = currentByUnit[u.id];
+    const unitRow = { unit: firstText(f(u, F.unitName)), status: selName(f(u, F.unitStatus)) || '', unitType: selName(f(u, F.unitType)), tenant: cur ? (firstText(f(cur, F.tenSurname)) || 'Unknown') : '', rent: cur ? num(f(cur, F.tenRent)) : 0 };
+    row.rows.push(unitRow);
+    if (isUnitVoid(u)) {
+      row.void += 1;
+      const last = lastEndedByUnit[u.id];
+      voids.push({ unit: unitRow.unit, property: prop, unitType: unitRow.unitType, lastTenant: last ? last.tenant : '', endedOn: last ? last.end : '' });
+    } else {
+      row.occupied += 1;
+      if (st === 'rent ready') empty.rentReady += 1;
+      else if (st === 'not ready') empty.notReady += 1;
+    }
   }
   const total = units.length;
   const voidCount = voids.length;
   voids.sort((a, b) => a.property.localeCompare(b.property) || a.unit.localeCompare(b.unit));
+  const byProperty = Object.values(byProp).map(r => ({ ...r, rows: r.rows.sort((a, b) => a.unit.localeCompare(b.unit)) })).sort((a, b) => b.void - a.void || a.property.localeCompare(b.property));
   return {
-    properties: Object.keys(byProp).filter(p => p !== 'Unallocated').length,
-    units: total,
-    occupied: total - voidCount,
-    void: voidCount,
+    properties: byProperty.filter(p => p.property !== 'Unallocated').length,
+    units: total, occupied: total - voidCount, void: voidCount,
     occupancyPct: total ? Math.round(((total - voidCount) / total) * 1000) / 10 : 0,
-    empty,
-    voids,
-    byProperty: Object.values(byProp).sort((a, b) => b.void - a.void || a.property.localeCompare(b.property)),
+    empty, voids, byProperty,
   };
 }
 
 // ── Tenancies ──
-export function tenancyMetrics(tenancies, today) {
-  const live = tenancies.filter(t => isTenancyActive(t) && isTenantStatusActive(t, today));
-  const behind = live.filter(isTenancyBehind);
-  const rows = behind.map(t => ({
+function tenancyRow(t, payments) {
+  const hist = payments[t.id] || [];
+  return {
     id: t.id,
     tenant: firstText(f(t, F.tenSurname)) || 'Unknown',
     unit: firstText(f(t, F.tenUnitRef)),
     property: firstText(f(t, F.tenProperty)),
     rent: num(f(t, F.tenRent)),
-    status: (typeof f(t, F.tenPayStatus) === 'string') ? f(t, F.tenPayStatus) : '',
+    status: selName(f(t, F.tenPayStatus)),
+    dueDay: num(f(t, F.tenDueDay)) || null,
     daysOverdue: num(f(t, F.tenDaysOverdue)),
-  })).sort((a, b) => b.daysOverdue - a.daysOverdue || b.rent - a.rent);
+    lastPaid: hist[0] || null,
+  };
+}
+export function tenancyMetrics(tenancies, payments, today) {
+  const live = tenancies.filter(t => isTenancyActive(t) && isTenantStatusActive(t, today));
+  const rows = live.map(t => tenancyRow(t, payments)).sort((a, b) => a.property.localeCompare(b.property) || a.unit.localeCompare(b.unit));
+  const behind = live.filter(isTenancyBehind);
+  const behindList = behind.map(t => ({ ...tenancyRow(t, payments), history: (payments[t.id] || []).slice(0, 24) }))
+    .sort((a, b) => b.daysOverdue - a.daysOverdue || b.rent - a.rent);
   return {
     active: live.length,
     inPayment: live.filter(t => statusName(f(t, F.tenPayStatus)) === 'in payment').length,
     behind: behind.length,
     exposure: round2(behind.reduce((s, t) => s + num(f(t, F.tenRent)), 0)),
     expectedRent: round2(live.filter(isTenancyIncome).reduce((s, t) => s + num(f(t, F.tenRent)), 0)),
-    behindList: rows,
+    live: rows,
+    behindList,
   };
 }
 
-// ── Rent due, next 31 days ──
+// ── Rent due: 3 days back, 31 days forward ──
 // Anchor = Airtable's own Next Rent Due Date formula (built off Due Day of
-// Month, the one maintained input), stepped forward by Payment Frequency.
-export function rentDue(tenancies, tenants, today, windowDays = 31) {
+// Month, the one maintained input), stepped by Payment Frequency. "Paid" comes
+// from the bank feed only: a rental-income transaction for that tenancy dated
+// from three days before the due date up to today. A future due date can
+// never read as paid.
+export const RENT_DUE_LOOKBACK_DAYS = 3;
+export function rentDue(tenancies, tenants, payments, today, windowDays = 31) {
   const uc = new Set();
-  for (const t of tenants || []) {
-    const pt = f(t, F.tenantPayType);
-    const n = typeof pt === 'string' ? pt : (pt && pt.name) || '';
-    if (n.toLowerCase().includes('universal credit')) uc.add(t.id);
-  }
-  const start = new Date(today.getFullYear(), today.getMonth(), today.getDate());
-  const end = new Date(start); end.setDate(end.getDate() + windowDays);
+  for (const t of tenants || []) if (selName(f(t, F.tenantPayType)).toLowerCase().includes('universal credit')) uc.add(t.id);
+  const todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  const start = addDays(todayStart, -RENT_DUE_LOOKBACK_DAYS);
+  const end = addDays(todayStart, windowDays);
+  const todayKey = dateKey(todayStart);
   const rows = [];
-  let total = 0;
+  let total = 0, paidTotal = 0;
   for (const t of tenancies) {
     if (!isTenancyIncome(t) || !isTenantStatusActive(t, today)) continue;
     const rent = num(f(t, F.tenRent));
     if (rent <= 0) continue;
+    const freq = String(f(t, F.tenPayFreq) || 'Monthly').toLowerCase();
+    const step = (x, n = 1) => {
+      if (freq === 'weekly') return addDays(x, 7 * n);
+      if (freq === 'fortnightly') return addDays(x, 14 * n);
+      if (freq === '4-weekly') return addDays(x, 28 * n);
+      if (freq === 'quarterly') return addMonthsClamped(x, 3 * n);
+      return addMonthsClamped(x, n);
+    };
     let d = parseDay(f(t, F.tenNextDueDate));
     if (!d) {
       const day = Math.min(Math.max(1, num(f(t, F.tenDueDay)) || 1), 28);
-      d = new Date(start.getFullYear(), start.getMonth(), day);
-      if (d < start) d = addMonthsClamped(d, 1);
+      d = new Date(todayStart.getFullYear(), todayStart.getMonth(), day);
     }
-    const freq = String(f(t, F.tenPayFreq) || 'Monthly').toLowerCase();
-    const step = (x) => {
-      if (freq === 'weekly') { const y = new Date(x); y.setDate(y.getDate() + 7); return y; }
-      if (freq === 'fortnightly') { const y = new Date(x); y.setDate(y.getDate() + 14); return y; }
-      if (freq === '4-weekly') { const y = new Date(x); y.setDate(y.getDate() + 28); return y; }
-      if (freq === 'quarterly') return addMonthsClamped(x, 3);
-      return addMonthsClamped(x, 1);
-    };
-    // Walk back so an anchor in the past still yields the first future date.
+    // Walk to the first occurrence inside the window (the anchor may sit a
+    // cycle ahead of a due date that fell in the 3-day look-back, or behind).
     let guard = 0;
+    while (d > start && step(d, -1) >= start && guard++ < 60) d = step(d, -1);
+    guard = 0;
     while (d < start && guard++ < 60) d = step(d);
+    const hist = payments[t.id] || [];
     const tenantIds = linkIds(f(t, F.tenLinkedTenant));
     const isUC = tenantIds.some(id => uc.has(id));
-    const paidThisMonth = !!num(f(t, F.tenPaidThisMonth));
-    let first = true;
     guard = 0;
     while (d <= end && guard++ < 10) {
-      const paid = first && paidThisMonth && d.getMonth() === start.getMonth() && d.getFullYear() === start.getFullYear();
+      const due = dateKey(d);
+      const paidFrom = dateKey(addDays(d, -RENT_DUE_LOOKBACK_DAYS));
+      const hit = due <= todayKey ? hist.find(h => h.date >= paidFrom && h.date <= todayKey) : null;
       rows.push({
         tenancyId: t.id,
         tenant: firstText(f(t, F.tenSurname)) || 'Unknown',
         unit: firstText(f(t, F.tenUnitRef)),
         property: firstText(f(t, F.tenProperty)),
-        amount: rent,
-        due: dateKey(d),
-        isUC,
-        paid,
+        amount: rent, due, isUC,
+        paid: !!hit, paidOn: hit ? hit.date : '', paidAmount: hit ? hit.amount : 0,
+        lastPaid: hist[0] || null,
       });
-      total += rent;
-      first = false;
+      total += rent; if (hit) paidTotal += rent;
       d = step(d);
     }
   }
   rows.sort((a, b) => a.due.localeCompare(b.due) || a.property.localeCompare(b.property));
-  return { rows, total: round2(total) };
+  return { from: dateKey(start), to: dateKey(end), today: todayKey, rows, total: round2(total), paidTotal: round2(paidTotal) };
 }
 
-// ── Transactions: last 31 days + P&L by property ──
+// ── Transactions ──
 function txPropertyName(tx, ctx) {
   const direct = linkIds(f(tx, F.txProperty))[0];
   if (direct && ctx.propNames[direct]) return ctx.propNames[direct];
@@ -215,13 +261,13 @@ function txPropertyName(tx, ctx) {
   if (unitId && ctx.unitProp[unitId]) return ctx.unitProp[unitId];
   return '';
 }
-export function buildTxContext({ properties, tenancies, units, subCategories }) {
+export function buildTxContext({ properties, tenancies, rentalUnits, units, subCategories }) {
   const propNames = {};
   for (const p of properties || []) propNames[p.id] = firstText(f(p, F.propShortName)) || firstText(f(p, F.propName));
   const tenancyProp = {};
   for (const t of tenancies || []) tenancyProp[t.id] = firstText(f(t, F.tenProperty));
   const unitProp = {};
-  for (const u of units || []) unitProp[u.id] = firstText(f(u, F.unitPropName));
+  for (const u of (rentalUnits || units || [])) unitProp[u.id] = firstText(f(u, F.unitPropName));
   const subNames = buildNameMap(subCategories, F.subCatName);
   const subSection = {};
   for (const sec of PNL_SECTIONS) for (const s of sec.subs) subSection[s] = sec.name;
@@ -230,38 +276,40 @@ export function buildTxContext({ properties, tenancies, units, subCategories }) 
 
 export function last31(transactions, ctx, today) {
   const end = dateKey(today);
-  const s = new Date(today); s.setDate(s.getDate() - 30);
-  const start = dateKey(s);
-  const out = { rentIn: 0, maintenance: 0, wages: 0, income: 0, costs: 0, profit: 0, from: start, to: end, maintTarget: MAINT_TARGET_GBP, wagesTarget: WAGES_TARGET_GBP, txCount: 0 };
+  const start = dateKey(addDays(today, -30));
+  const out = { rentIn: 0, maintenance: 0, wages: 0, income: 0, costs: 0, profit: 0, from: start, to: end, maintTarget: MAINT_TARGET_GBP, wagesTarget: WAGES_TARGET_GBP, txCount: 0, detail: { rentIn: [], maintenance: [], wages: [], otherCosts: [] } };
   for (const tx of transactions) {
     const d = String(f(tx, F.txDate) || '').slice(0, 10);
     if (!d || d < start || d > end) continue;
     const amt = num(f(tx, F.txReportAmount));
     const subId = linkIds(f(tx, F.txSubCategory))[0];
-    const section = ctx.subSection[ctx.subNames[subId] || ''];
+    const subName = ctx.subNames[subId] || '';
+    const section = ctx.subSection[subName];
     if (!section) continue;
     out.txCount += 1;
-    if (subId === REC.subRentalInc) out.rentIn += amt;
-    if (subId === REC.subMaint) out.maintenance += -amt;
-    if (subId === REC.subOpexLabour || subId === REC.subCOGSLabour) out.wages += -amt;
+    const line = { date: d, name: txLabel(tx), amount: round2(Math.abs(amt)), property: txPropertyName(tx, ctx), sub: subName };
+    if (subId === REC.subRentalInc) { out.rentIn += amt; out.detail.rentIn.push(line); }
+    if (subId === REC.subMaint) { out.maintenance += -amt; out.detail.maintenance.push(line); }
+    else if (subId === REC.subOpexLabour || subId === REC.subCOGSLabour) { out.wages += -amt; out.detail.wages.push(line); }
+    else if (section !== 'Revenue') out.detail.otherCosts.push(line);
     if (section === 'Revenue') out.income += amt; else out.costs += -amt;
   }
   out.profit = out.income - out.costs;
   for (const k of ['rentIn', 'maintenance', 'wages', 'income', 'costs', 'profit']) out[k] = round2(out[k]);
+  for (const k of Object.keys(out.detail)) out.detail[k].sort((a, b) => b.date.localeCompare(a.date));
   return out;
 }
 
-export function pnlByProperty(transactions, ctx, months, today) {
-  const keys = new Set(monthKeys(months, today));
+export function pnlByProperty(transactions, ctx, keysList, today) {
+  const keys = new Set(keysList);
   const rows = {};
   const row = (p) => (rows[p] = rows[p] || { property: p, rentIn: 0, maintenance: 0, otherCosts: 0, profit: 0 });
-  const total = { property: 'Whole business', rentIn: 0, maintenance: 0, otherCosts: 0, profit: 0, revenue: 0 };
+  const total = { property: 'Whole business', rentIn: 0, maintenance: 0, otherCosts: 0, profit: 0 };
   for (const tx of transactions) {
     const d = String(f(tx, F.txDate) || '');
     if (!keys.has(d.slice(0, 7))) continue;
     const subId = linkIds(f(tx, F.txSubCategory))[0];
-    const subName = ctx.subNames[subId] || '';
-    const section = ctx.subSection[subName];
+    const section = ctx.subSection[ctx.subNames[subId] || ''];
     if (!section) continue;
     const amt = num(f(tx, F.txReportAmount));
     const r = row(txPropertyName(tx, ctx) || 'Unallocated');
@@ -272,9 +320,14 @@ export function pnlByProperty(transactions, ctx, months, today) {
   const list = Object.values(rows).map(r => ({ ...r, rentIn: round2(r.rentIn), maintenance: round2(r.maintenance), otherCosts: round2(r.otherCosts), profit: round2(r.rentIn - r.maintenance - r.otherCosts) }));
   list.sort((a, b) => (a.property === 'Unallocated') - (b.property === 'Unallocated') || b.profit - a.profit);
   total.profit = round2(total.rentIn - total.maintenance - total.otherCosts);
-  delete total.revenue;
   for (const k of ['rentIn', 'maintenance', 'otherCosts']) total[k] = round2(total[k]);
-  return { months, keys: [...keys], rows: list, total };
+  return { keys: keysList, rows: list, total };
+}
+export const PNL_WINDOWS = ['this', 'last', '3', '6', '12'];
+export function pnlWindowKeys(win, today) {
+  if (win === 'this') return monthKeys(1, today);
+  if (win === 'last') return [lastMonthKey(today)];
+  return monthKeys(Number(win), today);
 }
 
 // ── Tasks ──
@@ -285,6 +338,16 @@ export function isRoyScope(task) {
   return !!f(task, F.taskMaintenance);
 }
 export const isTaskOpen = (task) => !['Completed', 'Cancelled'].includes(String(f(task, F.taskStatus) || ''));
+
+// Mirrors deriveTaskStatus() in os/tasks/index.html: Completed and Approval
+// are manual terminal states; everything else follows the due date.
+export function statusForDue(due, storedStatus, todayKey) {
+  if (storedStatus === 'Completed' || storedStatus === 'Approval') return storedStatus;
+  if (!due) return 'Upcoming';
+  if (due < todayKey) return 'Overdue';
+  if (due === todayKey) return 'Today';
+  return 'Upcoming';
+}
 
 export function shapeTasks(tasks, propNames, today) {
   const todayKey = dateKey(today);
@@ -306,7 +369,7 @@ export function shapeTasks(tasks, propNames, today) {
       notes: String(f(t, F.taskNotes) || ''),
       mine: String((f(t, F.taskAssignee) || {}).email || '').toLowerCase() === ROY_EMAIL || linkIds(f(t, F.taskTeamMember)).includes(REC.roy),
     };
-  }).sort((a, b) => (b.overdue - a.overdue) || ((a.due || '9999') .localeCompare(b.due || '9999')) || a.name.localeCompare(b.name));
+  }).sort((a, b) => (b.overdue - a.overdue) || ((a.due || '9999').localeCompare(b.due || '9999')) || a.name.localeCompare(b.name));
 }
 
 // Append a dated, signed line to the Notes field. Never overwrites.
@@ -321,28 +384,33 @@ export function appendNote(existing, text, who, now) {
 export function computeAll(data, today) {
   const coaNames = { ...buildNameMap(data.subCategories, F.subCatName), ...buildNameMap(data.categories, F.catName) };
   const ctx = buildTxContext(data);
-  const ten = tenancyMetrics(data.tenancies, today);
+  const payments = paymentsByTenancy(data.transactions);
+  const ten = tenancyMetrics(data.tenancies, payments, today);
   const costs = runningCosts(data.costs, coaNames);
   const l31 = last31(data.transactions, ctx, today);
   l31.exposure = ten.exposure;
+  const pnl = {};
+  for (const w of PNL_WINDOWS) pnl[w] = pnlByProperty(data.transactions, ctx, pnlWindowKeys(w, today), today);
   return {
     generatedAt: today.toISOString(),
     business: REAL_ESTATE_NAME,
-    portfolio: portfolio(data.rentalUnits),
+    portfolio: portfolio(data.rentalUnits, data.tenancies, today),
     tenancies: ten,
     last31: l31,
-    planned: { expectedRent: ten.expectedRent, runningCosts: costs.total, leaves: round2(ten.expectedRent - costs.total), costCount: costs.count },
-    rentDue: rentDue(data.tenancies, data.tenants, today),
-    pnl: { 1: pnlByProperty(data.transactions, ctx, 1, today), 3: pnlByProperty(data.transactions, ctx, 3, today), 12: pnlByProperty(data.transactions, ctx, 12, today) },
-    // Health facts for the page's checks. Counts only — no personal rows leave.
+    planned: {
+      expectedRent: ten.expectedRent,
+      runningCosts: costs.total, costCount: costs.count,
+      nonPropertyCount: costs.nonPropertyCount,
+      leaves: round2(ten.expectedRent - costs.total),
+    },
+    rentDue: rentDue(data.tenancies, data.tenants, payments, today),
+    pnl,
     health: {
       txCount: data.transactions.length,
       tenancyCount: data.tenancies.length,
       unitCount: data.rentalUnits.length,
-      // Counts only. The £ totals of Kevin's personal and other-business costs
-      // stay in the Worker: they are exactly what Roy must not see.
-      costsExcluded: { personal: costs.excluded.personal, otherBusiness: costs.excluded.otherBusiness },
-      unallocatedTx12m: (pnlByProperty(data.transactions, ctx, 12, today).rows.find(r => r.property === 'Unallocated') || { rentIn: 0, maintenance: 0, otherCosts: 0 }),
+      costCount: costs.count,
+      unallocatedTx12m: (pnl['12'].rows.find(r => r.property === 'Unallocated') || { rentIn: 0, maintenance: 0, otherCosts: 0 }),
     },
   };
 }

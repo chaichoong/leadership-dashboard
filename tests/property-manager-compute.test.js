@@ -55,15 +55,17 @@ describe('running costs strip personal money', () => {
     expect(C.classifyCost(rec('c', { [F.costPayStatus]: 'Paused', [F.costExpected]: 100 }), coa)).toBe('inactive');
     expect(C.classifyCost(rec('c', { [F.costPayStatus]: 'In Payment', [F.costInactive]: true }), coa)).toBe('inactive');
   });
-  it('totals only the property costs and reports what it excluded', () => {
+  it('running costs = EVERY active fixed cost (Kevin, 9 Sep 2026), with the property share alongside', () => {
     const r = C.runningCosts([
       active({ [F.costBusiness]: [REC.bizRealEstate] }),
       active({ [F.costBusiness]: [REC.bizPersonal], [F.costExpected]: 55.5 }),
       active({ [F.costBusiness]: ['recOD'], [F.costExpected]: 9 }),
+      rec('c', { [F.costPayStatus]: 'Paused', [F.costExpected]: 1000 }),
     ], coa);
-    expect(r.total).toBe(100);
-    expect(r.count).toBe(1);
-    expect(r.excluded).toEqual({ personal: 1, personalGbp: 55.5, otherBusiness: 1, otherBusinessGbp: 9 });
+    expect(r.total).toBe(164.5);
+    expect(r.count).toBe(3);
+    expect(r.propertyTotal).toBe(100);
+    expect(r.nonPropertyCount).toBe(2);
   });
   it('word boundary: "Personalisation" is not personal', () => {
     expect(C.isPersonalCoaName('Personalisation Software')).toBe(false);
@@ -81,34 +83,50 @@ describe('tenancy metrics', () => {
       t('c', 'In Payment', 500, { [F.tenEndDate]: '2026-09-01' }),
       t('d', 'CFV', 400),
       t('e', 'CFV Actioned', 300),
-    ], TODAY);
+    ], { d: [{ date: '2026-07-01', amount: 400 }, { date: '2026-06-01', amount: 400 }] }, TODAY);
     expect(m.active).toBe(3);
     expect(m.inPayment).toBe(1);
     expect(m.behind).toBe(2);
     expect(m.exposure).toBe(700);
     expect(m.expectedRent).toBe(800); // In Payment + CFV Actioned, never plain CFV
     expect(m.behindList.map(r => r.tenant)).toEqual(['d', 'e']);
+    expect(m.behindList[0].lastPaid).toEqual({ date: '2026-07-01', amount: 400 });
+    expect(m.behindList[0].history).toHaveLength(2);
+    expect(m.live).toHaveLength(3);
   });
 });
 
 // ── Rent due ─────────────────────────────────────────────────────────────────
 describe('rent due next 31 days', () => {
   const t = (id, extra) => rec(id, { [F.tenPayStatus]: 'In Payment', [F.tenRent]: 600, [F.tenStatus]: ['Active'], [F.tenSurname]: id, [F.tenPayFreq]: 'Monthly', ...extra });
-  it('uses the Airtable next-due anchor and marks a paid month', () => {
-    const r = C.rentDue([t('a', { [F.tenNextDueDate]: '2026-09-22', [F.tenPaidThisMonth]: 1 })], [], TODAY);
-    expect(r.rows).toHaveLength(1);
-    expect(r.rows[0]).toMatchObject({ due: '2026-09-22', paid: true, amount: 600 });
-    expect(r.total).toBe(600);
+  it('a future due date is never Paid; a past one is Paid only when the bank shows the rent', () => {
+    const pay = { a: [{ date: '2026-09-21', amount: 600 }] };
+    let r = C.rentDue([t('a', { [F.tenNextDueDate]: '2026-09-22' })], [], pay, TODAY);
+    expect(r.rows[0]).toMatchObject({ due: '2026-09-22', paid: false, amount: 600 });
+    expect(r.rows[0].lastPaid).toEqual({ date: '2026-09-21', amount: 600 });
+    // Same tenancy, due yesterday (inside the 3-day look-back), paid 3 days before due.
+    r = C.rentDue([t('a', { [F.tenNextDueDate]: '2026-10-07' })], [], { a: [{ date: '2026-09-04', amount: 600 }] }, TODAY);
+    expect(r.rows[0]).toMatchObject({ due: '2026-09-07', paid: true, paidOn: '2026-09-04' });
+    expect(r.paidTotal).toBe(600);
+    // Due yesterday, nothing in the bank → not paid.
+    r = C.rentDue([t('a', { [F.tenNextDueDate]: '2026-10-07' })], [], {}, TODAY);
+    expect(r.rows[0]).toMatchObject({ due: '2026-09-07', paid: false });
+  });
+  it('the window runs from 3 days back to 31 days ahead', () => {
+    const r = C.rentDue([], [], {}, TODAY);
+    expect(r.from).toBe('2026-09-05');
+    expect(r.to).toBe('2026-10-09');
+    expect(r.today).toBe('2026-09-08');
   });
   it('steps a past anchor forward and a weekly tenancy many times', () => {
-    const r = C.rentDue([t('w', { [F.tenNextDueDate]: '2026-09-01', [F.tenPayFreq]: 'Weekly', [F.tenRent]: 100 })], [], TODAY);
+    const r = C.rentDue([t('w', { [F.tenNextDueDate]: '2026-09-01', [F.tenPayFreq]: 'Weekly', [F.tenRent]: 100 })], [], {}, TODAY);
     expect(r.rows.map(x => x.due)).toEqual(['2026-09-08', '2026-09-15', '2026-09-22', '2026-09-29', '2026-10-06']);
   });
   it('flags Universal Credit through the linked tenant and skips plain CFV', () => {
     const r = C.rentDue([
       t('u', { [F.tenNextDueDate]: '2026-09-10', [F.tenLinkedTenant]: ['tenUC'] }),
       t('c', { [F.tenNextDueDate]: '2026-09-10', [F.tenPayStatus]: 'CFV' }),
-    ], [rec('tenUC', { [F.tenantPayType]: 'Universal Credit' })], TODAY);
+    ], [rec('tenUC', { [F.tenantPayType]: 'Universal Credit' })], {}, TODAY);
     expect(r.rows).toHaveLength(1);
     expect(r.rows[0].isUC).toBe(true);
   });
@@ -141,7 +159,7 @@ describe('last 31 days and profit by property', () => {
     expect(l).toMatchObject({ rentIn: 800, maintenance: 150, wages: 200, income: 800, costs: 470, profit: 330, txCount: 5 });
   });
   it('attributes via property, tenancy, then unit; whole-business costs sit on Unallocated', () => {
-    const p = C.pnlByProperty(txs, ctx, 3, TODAY);
+    const p = C.pnlByProperty(txs, ctx, C.monthKeys(3, TODAY), TODAY);
     const by = Object.fromEntries(p.rows.map(r => [r.property, r]));
     expect(by['13 Chedburgh Place']).toMatchObject({ rentIn: 1500, profit: 1500 });
     expect(by['42 Elmdon Place']).toMatchObject({ maintenance: 150, profit: -150 });
@@ -155,10 +173,53 @@ describe('last 31 days and profit by property', () => {
   });
   it('month keys are trailing whole months including the current part-month', () => {
     expect(C.monthKeys(3, TODAY)).toEqual(['2026-07', '2026-08', '2026-09']);
+    expect(C.pnlWindowKeys('last', TODAY)).toEqual(['2026-08']);
+    expect(C.pnlWindowKeys('this', TODAY)).toEqual(['2026-09']);
+    expect(C.pnlWindowKeys('6', TODAY)).toHaveLength(6);
+  });
+  it('31-day detail lists the transactions behind each figure', () => {
+    const l = C.last31(txs, ctx, TODAY);
+    expect(l.detail.rentIn).toHaveLength(1);
+    expect(l.detail.maintenance[0]).toMatchObject({ amount: 150, property: '42 Elmdon Place' });
+    expect(l.detail.wages).toHaveLength(1);
+    expect(l.detail.otherCosts).toHaveLength(2);
+  });
+  it('payment history per tenancy comes only from Rental Income links, newest first', () => {
+    const p = C.paymentsByTenancy([
+      tx('2026-08-01', 500, REC.subRentalInc, { [F.txTenancy]: ['t9'] }),
+      tx('2026-09-01', 500, REC.subRentalInc, { [F.txTenancy]: ['t9'] }),
+      tx('2026-09-02', -40, REC.subMaint, { [F.txTenancy]: ['t9'] }),
+    ]);
+    expect(p.t9.map(h => h.date)).toEqual(['2026-09-01', '2026-08-01']);
   });
 });
 
 // ── Tasks: the scope guard ───────────────────────────────────────────────────
+describe('portfolio', () => {
+  it('void units carry type, last tenant and when that tenancy ended; occupied units carry the current tenant', () => {
+    const units = [rec('u1', { [F.unitName]: 'Unit 1 – X', [F.unitPropName]: ['X'], [F.unitStatus]: 'Void', [F.unitType]: 'Room' }), rec('u2', { [F.unitName]: 'Unit 2 – X', [F.unitPropName]: ['X'], [F.unitStatus]: 'Occupied' })];
+    const tens = [
+      rec('t1', { [F.tenUnit]: ['u1'], [F.tenSurname]: 'Old', [F.tenEndDate]: '2026-06-30', [F.tenPayStatus]: 'In Payment', [F.tenStatus]: ['Former'] }),
+      rec('t2', { [F.tenUnit]: ['u2'], [F.tenSurname]: 'Now', [F.tenPayStatus]: 'In Payment', [F.tenStatus]: ['Active'], [F.tenRent]: 700 }),
+    ];
+    const p = C.portfolio(units, tens, TODAY);
+    expect(p).toMatchObject({ properties: 1, units: 2, occupied: 1, void: 1 });
+    expect(p.voids[0]).toMatchObject({ unit: 'Unit 1 – X', unitType: 'Room', lastTenant: 'Old', endedOn: '2026-06-30' });
+    expect(p.byProperty[0].rows.find(r => r.unit === 'Unit 2 – X')).toMatchObject({ tenant: 'Now', rent: 700 });
+  });
+});
+
+describe('status follows the due date (mirrors os/tasks deriveTaskStatus)', () => {
+  it('past → Overdue, today → Today, later → Upcoming, blank → Upcoming, terminal states untouched', () => {
+    expect(C.statusForDue('2026-09-07', 'Today', '2026-09-08')).toBe('Overdue');
+    expect(C.statusForDue('2026-09-08', 'Upcoming', '2026-09-08')).toBe('Today');
+    expect(C.statusForDue('2026-09-09', 'Overdue', '2026-09-08')).toBe('Upcoming');
+    expect(C.statusForDue('', 'Today', '2026-09-08')).toBe('Upcoming');
+    expect(C.statusForDue('2026-09-01', 'Approval', '2026-09-08')).toBe('Approval');
+    expect(C.statusForDue('2026-09-01', 'Completed', '2026-09-08')).toBe('Completed');
+  });
+});
+
 describe('Roy task scope', () => {
   it('in scope by assignee email, by Team Member link, or by Maintenance Ticket', () => {
     expect(C.isRoyScope(rec('a', { [F.taskAssignee]: { email: 'Roy.Lavin1978@gmail.com' } }))).toBe(true);
