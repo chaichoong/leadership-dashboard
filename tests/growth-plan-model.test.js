@@ -207,6 +207,58 @@ describe('buildPlan levers', () => {
         expect(p.properties[0].levers.map(l => l.key)).not.toContain('refresh:t1');
         expect(p.levers.find(l => l.key === 'refresh:small')).toBeTruthy();
     });
+    it('a known capped tenant above the safe rent is flagged, never asked to "confirm" an exemption', () => {
+        const f = fixture(); f.tenants[0].dob = '1986-01-01'; f.tenancies[0].rent = 850; f.tenants[0].capExemption = 'None (capped)';
+        const p = M.buildPlan(f, S, TODAY);
+        expect(p.levers.find(l => l.tenantId === 't1')).toBeUndefined();
+        expect(p.properties[0].flags.join(' ')).toMatch(/Adam Older is over the benefit cap by £45.48/);
+        const rooms = p.levers.find(l => l.key === 'rooms:p1');
+        expect(p.totals.exemptUpside).toBe(Math.round((rooms.monthlyIfExempt - rooms.monthly) * 100) / 100); // only the new let's upside; nothing for t1
+    });
+    it('an either/or council tax lever that loses to the rooms lever leaves every total, even from the check bucket', () => {
+        const f = fixture(); f.units.pop(); f.tenants.pop(); f.tenancies.pop(); f.costs = []; f.properties[0].ctNote = '';
+        const p = M.buildPlan(f, S, TODAY);
+        const ct = p.levers.find(x => x.key === 'ct:p1');
+        expect(ct.counted).toBe('alternative');
+        expect(p.totals.check).toBe(0);
+        expect(p.totals.maximum).toBe(p.totals.actionable + p.totals.exemptUpside + p.totals.unknownAge + p.totals.agentHeld);
+    });
+    it('when the council tax saving beats the rooms lever, the rooms lever steps aside', () => {
+        const f = fixture(); f.units.pop(); f.tenants.pop(); f.tenancies.pop(); f.properties[0].ctPayer = 'Owner';
+        const p = M.buildPlan(f, { council_tax_default: 145, utilities_per_tenant: 75, lha_1bed: 500 }, TODAY); // new let nets 500-75... still > 135; push CT up instead
+        const q = M.buildPlan(Object.assign(f, { costs: [{ propertyId: 'p1', name: 'CT', monthly: 900 }] }), S, TODAY);
+        expect(q.levers.find(x => x.key === 'ct:p1').counted).toBe('now');
+        expect(q.levers.find(x => x.key === 'rooms:p1').counted).toBe('alternative');
+        expect(q.totals.works).toBe(0);
+        expect(p.totals.actionable).toBeGreaterThan(0);
+    });
+    it('a joint tenancy shares its rent between the tenants', () => {
+        const f = fixture(); f.units.pop(); f.tenants.pop(); f.tenancies = [{ id: 'c1', tenantIds: ['t1', 't2'], unitId: 'u1', rent: 1600 }];
+        f.units[0].tenantIds = ['t1', 't2']; f.units[1].tenantIds = [];
+        const p = M.buildPlan(f, S, TODAY);
+        expect(p.properties[0].tenants.map(t => t.rent)).toEqual([800, 800]);
+    });
+    it('prices a tenant from the tenancy on the unit being priced, not a stale second row', () => {
+        const f = fixture(); f.tenancies.push({ id: 'c9', tenantIds: ['t1'], unitId: 'u9', rent: 300 });
+        expect(M.buildPlan(f, S, TODAY).properties[0].tenants[0].rent).toBe(524.90);
+    });
+    it('bins and shared multi-property rows are not the council tax bill; frequencies convert to monthly', () => {
+        const f = fixture(); f.costs.push({ propertyId: 'p1', name: 'Fylde Council Bin', monthly: 19 }, { propertyId: 'p1', name: 'CT', monthly: 50, shared: true });
+        expect(M.buildPlan(f, S, TODAY).properties[0].ctLive).toBe(135);
+        expect(M.monthlyFromFrequency(12, 'Weekly')).toBe(52);
+        expect(M.monthlyFromFrequency(120, '4-Weekly')).toBe(130);
+        expect(M.monthlyFromFrequency(300, 'Quarterly')).toBe(100);
+        expect(M.monthlyFromFrequency(1200, 'Annually')).toBe(100);
+        expect(M.monthlyFromFrequency(135, 'Monthly')).toBe(135);
+    });
+    it('remote levers split into works and voids', () => {
+        const f = fixture(); f.properties[0].postcode = 'M40 1EZ';
+        f.units.push({ id: 'u5', propertyId: 'p1', number: 5, type: 'Whole Property', status: 'Void', rent: 0, tenantIds: [] });
+        const p = M.buildPlan(f, S, TODAY);
+        expect(p.totals.remoteVoids).toBeGreaterThan(0);
+        expect(p.totals.remoteWorks).toBeGreaterThan(0);
+        expect(p.totals.remote).toBe(Math.round((p.totals.remoteWorks + p.totals.remoteVoids) * 100) / 100);
+    });
     it('a void unit becomes a Void let priced from settings', () => {
         const f = fixture(); f.units.push({ id: 'u5', propertyId: 'p1', number: 5, type: 'Whole Property', status: 'Void', rent: 0, tenantIds: [] });
         const l = M.buildPlan(f, { void_rent_18_test_park: 700 }, TODAY).levers.find(x => x.key === 'void:u5');

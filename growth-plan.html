@@ -19,7 +19,7 @@
   .gp-actions { display: flex; gap: var(--space-2); align-items: center; flex-wrap: wrap; }
   .btn { border: 1px solid var(--border-default); background: var(--bg-surface); color: var(--text-primary); border-radius: var(--radius-md); padding: 7px 14px; font: inherit; font-size: var(--fs-sm); cursor: pointer; }
   .btn:hover { background: var(--bg-surface-2); }
-  .btn:focus-visible, .kpi:focus-visible, tr.lever:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .btn:focus-visible, .kpi:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   .btn:disabled { opacity: .55; cursor: default; }
   .btn-primary { background: var(--accent); border-color: var(--accent); color: var(--accent-on); }
   .btn-primary:hover { background: var(--accent-hover); }
@@ -46,6 +46,8 @@
   td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
   td.title { min-width: 260px; max-width: 460px; word-break: break-word; }
   tr.lever { cursor: pointer; }
+  button.linkish { background: none; border: 0; padding: 0; font: inherit; color: inherit; text-align: left; cursor: pointer; }
+  button.linkish:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 2px; }
   tr.lever:hover td { background: var(--bg-surface-2); }
   tr.lever.open td { background: var(--accent-soft); }
   tr.lever.dim td { color: var(--text-muted); }
@@ -129,7 +131,7 @@
   .auth-box { background: var(--bg-surface); border: 1px solid var(--border-default); border-radius: var(--radius-lg); padding: 40px; max-width: 440px; width: 100%; box-shadow: var(--shadow-md); text-align: center; }
   .auth-box h2 { font-size: var(--fs-2xl); margin: 0 0 8px; }
   .auth-box p { font-size: var(--fs-base); color: var(--text-muted); margin: 0 0 24px; }
-  .auth-input { width: 100%; padding: 12px 16px; border: 1px solid var(--border-default); border-radius: var(--radius-lg); font-size: var(--fs-md); margin-bottom: 16px; font-family: monospace; }
+  .auth-input { width: 100%; padding: 12px 16px; border: 1px solid var(--border-default); border-radius: var(--radius-lg); font-size: var(--fs-md); margin-bottom: 16px; }
   .auth-btn { width: 100%; padding: 12px; background: var(--accent); color: var(--accent-on); border: none; border-radius: var(--radius-lg); font-size: var(--fs-md); font-weight: var(--fw-semibold); cursor: pointer; }
   .auth-error { color: var(--danger); font-size: var(--fs-sm); margin-top: 8px; display: none; }
   #loadingOverlay { display: flex; align-items: center; justify-content: center; gap: 12px; min-height: 60vh; color: var(--text-secondary); font-size: var(--fs-md); flex-direction: column; }
@@ -305,8 +307,9 @@
     } while (offset);
     return records;
   }
+  // Write responses come back keyed by field NAME unless asked otherwise; everything here reads by ID.
   function airtableWrite(method, tableId, body) {
-    return apiFetch(`https://api.airtable.com/v0/${BASE_ID}/${tableId}`, { method, headers: { Authorization: `Bearer ${PAT}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    return apiFetch(`https://api.airtable.com/v0/${BASE_ID}/${tableId}`, { method, headers: { Authorization: `Bearer ${PAT}`, 'Content-Type': 'application/json' }, body: JSON.stringify(Object.assign({ returnFieldsByFieldId: true }, body)) });
   }
   const link = v => Array.isArray(v) ? v.map(x => typeof x === 'string' ? x : (x && x.id) || x) : [];
   const sel = v => (v && typeof v === 'object') ? (v.name || '') : (v || '');
@@ -323,8 +326,8 @@
         airtableFetch(TABLES.properties, { 'fields[]': Object.values(P) }),
         airtableFetch(TABLES.rentalUnits, { 'fields[]': Object.values(U) }),
         airtableFetch(TABLES.tenants, { 'fields[]': Object.values(T) }),
-        airtableFetch(TABLES.tenancies, { 'fields[]': Object.values(C), filterByFormula: "OR({Tenancy Status}='Active',{Status}='Active')" }),
-        airtableFetch(TABLES.costs, { 'fields[]': Object.values(K), filterByFormula: "AND(OR({Payment Status}='In Payment',{Payment Status}='Overdue'),OR(FIND('ouncil',{Cost Name}),FIND(' CT',{Cost Name})))" }),
+        airtableFetch(TABLES.tenancies, { 'fields[]': Object.values(C), filterByFormula: "{Tenancy Status}='Live'" }),
+        airtableFetch(TABLES.costs, { 'fields[]': Object.values(K), filterByFormula: "AND(OR({Payment Status}='In Payment',{Payment Status}='Overdue'),OR(FIND('ouncil',{Cost Name}),FIND(' CT',{Cost Name})),NOT(FIND('Bin',{Cost Name})),NOT(FIND('Debt',{Cost Name})),NOT(FIND('Enforcement',{Cost Name})))" }),
         airtableFetch(TABLES.growthPlan, { 'fields[]': Object.values(GP.plan) }),
         airtableFetch(TABLES.growthPlanSettings, { 'fields[]': Object.values(GP.settings) }),
       ]);
@@ -357,7 +360,7 @@
       units: raw.units.map(r => ({ id: r.id, propertyId: link(r.fields[U.property])[0], number: r.fields[U.number], type: sel(r.fields[U.type]), status: sel(r.fields[U.status]), rent: r.fields[U.rent], incomeType: sel(r.fields[U.incomeType]), tenantIds: link(r.fields[U.tenants]) })),
       tenants: raw.tenants.map(r => ({ id: r.id, name: r.fields[T.name] || '', status: sel(r.fields[T.status]), dob: r.fields[T.dob] || '', payType: sel(r.fields[T.payType]), capExemption: sel(r.fields[T.capExemption]) || 'Unknown', notes: r.fields[T.notes] || '' })),
       tenancies: raw.tenancies.map(r => ({ id: r.id, tenantIds: link(r.fields[C.tenants]), unitId: link(r.fields[C.unit])[0], rent: r.fields[C.rent] })),
-      costs: raw.costs.filter(r => link(r.fields[K.property]).length).map(r => ({ propertyId: link(r.fields[K.property])[0], name: r.fields[K.name] || '', monthly: sel(r.fields[K.frequency]) === 'Weekly' ? Number(r.fields[K.expected] || 0) * 52 / 12 : Number(r.fields[K.expected] || 0) })),
+      costs: raw.costs.filter(r => link(r.fields[K.property]).length).map(r => ({ propertyId: link(r.fields[K.property])[0], shared: link(r.fields[K.property]).length > 1, name: r.fields[K.name] || '', monthly: M.monthlyFromFrequency(r.fields[K.expected], sel(r.fields[K.frequency])) })),
       planRows: raw.planRows.map(r => ({ id: r.id, key: r.fields[GP.plan.key] || '', status: sel(r.fields[GP.plan.status]) || 'Candidate', taskIds: link(r.fields[GP.plan.tasks]) })),
     };
   }
@@ -372,8 +375,8 @@
     $('kpis').innerHTML = [
       kpi('Rent now', gbp(t.rentNow), 'a month, every active unit (rental unit rollup)'),
       kpi('Paper trail', '+' + gbp(t.paper), 'stages 1 and 2, no works, no void', 'good'),
-      kpi('With works', '+' + gbp(t.works), `rooms freed or added, ${gbp(t.oneOff)} one-off`, 'good'),
-      kpi('Voids and take-backs', '+' + gbp(t.voids + t.remote), `incl. ${gbp(t.remote)} away from Haverhill`, 'good'),
+      kpi('With works', '+' + gbp(t.works + t.remoteWorks), `rooms freed or added (${gbp(t.remoteWorks)} away from Haverhill), ${gbp(t.oneOff)} one-off`, 'good'),
+      kpi('Voids and take-backs', '+' + gbp(t.voids + t.remoteVoids), `incl. ${gbp(t.remoteVoids)} away from Haverhill`, 'good'),
       kpi('If exemptions confirmed', '+' + gbp(t.exemptUpside + t.unknownAge + t.check), 'ages, cap exemptions and council tax payers to check', 'gold'),
       kpi('Agent-held', '+' + gbp(t.agentHeld), 'Roc Immo houses at the 1-bed rate: potential only', 'muted'),
       kpi('Maximum', gbp(t.rentNow + t.maximum), `a month if every lever lands (+${gbp(t.maximum)})`),
@@ -423,11 +426,11 @@
         (l.status !== 'Done' && l.status !== 'Dropped') ? `<button class="btn btn-sm btn-ghost" data-act="drop" data-key="${esc(l.key)}" ${busy}>Drop</button>` : '',
         (l.status === 'Done' || l.status === 'Dropped') ? `<button class="btn btn-sm btn-ghost" data-act="reopen" data-key="${esc(l.key)}" ${busy}>Reopen</button>` : '',
       ].join('');
-      const main = `<tr class="lever ${open ? 'open' : ''} ${(l.status === 'Done' || l.status === 'Dropped' || l.counted === 'alternative') ? 'dim' : ''}" data-key="${esc(l.key)}" tabindex="0" role="button" aria-expanded="${open}">
+      const main = `<tr class="lever ${open ? 'open' : ''} ${(l.status === 'Done' || l.status === 'Dropped' || l.counted === 'alternative') ? 'dim' : ''}" data-key="${esc(l.key)}">
         <td class="num">${i + 1}</td><td><span class="pill stage">${l.stage} ${esc(state.plan.stageNames[l.stage])}</span></td><td>${esc(l.lever)} ${countedPill}</td>
-        <td class="title">${esc(l.title)}</td><td class="num">${l.monthly ? '+' + gbp(l.monthly, 2) : '—'}</td><td class="num muted">${l.monthlyIfExempt > l.monthly ? '+' + gbp(l.monthlyIfExempt, 2) : ''}</td><td class="num">${l.oneOff ? gbp(l.oneOff) : '—'}</td>
+        <td class="title"><button type="button" class="linkish" data-toggle="${esc(l.key)}" aria-expanded="${open}" aria-controls="lever-detail-${i}">${esc(l.title)}</button></td><td class="num">${l.monthly ? '+' + gbp(l.monthly, 2) : '—'}</td><td class="num muted">${l.monthlyIfExempt > l.monthly ? '+' + gbp(l.monthlyIfExempt, 2) : ''}</td><td class="num">${l.oneOff ? gbp(l.oneOff) : '—'}</td>
         <td><span class="pill ${esc(l.effort.toLowerCase())}">${esc(l.effort)}</span></td><td><span class="pill st-${esc(l.status.toLowerCase().replace(/\s+/g, '-'))}">${esc(l.status)}</span>${l.taskIds && l.taskIds.length ? ` <span class="pill">${l.taskIds.length} task${l.taskIds.length > 1 ? 's' : ''}</span>` : ''}</td><td><div class="row-actions">${actions}</div></td></tr>`;
-      const detail = open ? `<tr class="detail"><td colspan="10"><div class="detail-grid"><div><h4>Evidence</h4><ul>${l.evidence.map(e => `<li>${esc(e)}</li>`).join('')}</ul></div><div><h4>First step</h4><div>${esc(l.firstStep)}</div>${l.needs.length ? `<h4 style="margin-top:8px">Before it lands</h4><ul>${l.needs.map(e => `<li>${esc(e)}</li>`).join('')}</ul>` : ''}</div></div></td></tr>` : '';
+      const detail = open ? `<tr class="detail" id="lever-detail-${i}"><td colspan="10"><div class="detail-grid"><div><h4>Evidence</h4><ul>${l.evidence.map(e => `<li>${esc(e)}</li>`).join('')}</ul></div><div><h4>First step</h4><div>${esc(l.firstStep)}</div>${l.needs.length ? `<h4 style="margin-top:8px">Before it lands</h4><ul>${l.needs.map(e => `<li>${esc(e)}</li>`).join('')}</ul>` : ''}</div></div></td></tr>` : '';
       return main + detail;
     }).join('');
   }
@@ -497,7 +500,7 @@ Universal Credit. Each Tenant is responsible for reporting their share of the Re
     $('mktBody').innerHTML = MARKETING.map(([c, n, d]) => `<tr><td>${esc(c)}</td><td class="num">${n}</td><td class="wrap">${esc(d)}</td></tr>`).join('');
     const t = state.plan.totals; const roomLevers = state.plan.levers.filter(l => (l.lever === 'Room release' || l.lever === 'New room let') && l.status !== 'Dropped');
     const rooms = roomLevers.reduce((n, l) => n + (l.count || 0), 0);
-    $('mktFigures').innerHTML = `<div class="kpis"><div class="kpi"><div class="l">Rooms to fill</div><div class="v">${rooms}</div><div class="d">across ${roomLevers.length} house${roomLevers.length === 1 ? '' : 's'} once freed</div></div><div class="kpi good"><div class="l">Worth a month</div><div class="v">+${gbp(t.works + t.remote)}</div><div class="d">net of utilities and council tax</div></div><div class="kpi gold"><div class="l">Target tenant</div><div class="v">35+, UC</div><div class="d">LCWRA or PIP on the award means no cap: 1 in 3 past applicants had ESA or PIP</div></div></div>
+    $('mktFigures').innerHTML = `<div class="kpis"><div class="kpi"><div class="l">Rooms to fill</div><div class="v">${rooms}</div><div class="d">across ${roomLevers.length} house${roomLevers.length === 1 ? '' : 's'} once freed</div></div><div class="kpi good"><div class="l">Worth a month</div><div class="v">+${gbp(t.works + t.remoteWorks)}</div><div class="d">net of utilities and council tax</div></div><div class="kpi gold"><div class="l">Target tenant</div><div class="v">35+, UC</div><div class="d">LCWRA or PIP on the award means no cap: 1 in 3 past applicants had ESA or PIP</div></div></div>
       <p class="hint" style="margin-top:12px">From ${gbp(t.rentNow)} a month now to ${gbp(t.rentNow + t.actionable)} with every actionable lever, and ${gbp(t.rentNow + t.maximum)} if every unknown lands your way. Fill rooms in stage order: paper trail first so the rate is right before a new tenant signs.</p>`;
   }
 
@@ -524,9 +527,10 @@ Universal Credit. Each Tenant is responsible for reporting their share of the Re
     const body = l.planId ? { records: [{ id: l.planId, fields }] } : { records: [{ fields }] };
     const res = await airtableWrite(l.planId ? 'PATCH' : 'POST', TABLES.growthPlan, body);
     const rec = res.records[0];
+    const taskIds = fields[GP.plan.tasks] ? fields[GP.plan.tasks].slice() : link((rec.fields || {})[GP.plan.tasks]);
     const existing = state.data.planRows.find(r => r.key === l.key);
-    if (existing) { existing.status = status; existing.id = rec.id; existing.taskIds = link(rec.fields[GP.plan.tasks]); }
-    else state.data.planRows.push({ id: rec.id, key: l.key, status, taskIds: link(rec.fields[GP.plan.tasks]) });
+    if (existing) { existing.status = status; existing.id = rec.id; existing.taskIds = taskIds.length ? taskIds : existing.taskIds; }
+    else state.data.planRows.push({ id: rec.id, key: l.key, status, taskIds });
     return rec;
   }
   async function withBusy(key, fn) {
@@ -544,19 +548,21 @@ Universal Credit. Each Tenant is responsible for reporting their share of the Re
     await withBusy(key, async () => {
       const owner = (l.effort === 'Works' || l.effort === 'Light') ? GP.owners.roy : GP.owners.kevin;
       const due = new Date(); due.setDate(due.getDate() + 7);
+      const dueISO = `${due.getFullYear()}-${String(due.getMonth() + 1).padStart(2, '0')}-${String(due.getDate()).padStart(2, '0')}`;
       const desc = [`First step: ${l.firstStep}`, '', `Worth +£${Number(l.monthly).toFixed(2)} a month${l.monthlyIfExempt > l.monthly ? ` (+£${Number(l.monthlyIfExempt).toFixed(2)} if the tenant is exempt from the benefit cap)` : ''}${l.oneOff ? `, one-off £${Number(l.oneOff).toFixed(0)}` : ''}.`, '', 'Evidence:', ...l.evidence.map(e => '- ' + e)]
         .concat(l.needs.length ? ['', 'Before it lands:', ...l.needs.map(e => '- ' + e)] : [])
         .concat(['', 'Raised from the Growth Plan page (growth-plan.html). Nothing is sent to a tenant or council from the page: this task is the send.']).join('\n');
-      const fields = { [TASK_FIELDS.name]: `Growth plan: ${l.title}`, [TASK_FIELDS.status]: 'Upcoming', [TASK_FIELDS.description]: desc, [TASK_FIELDS.business]: [GP.realEstateBusinessId], [TASK_FIELDS.dueDate]: due.toISOString().slice(0, 10), [TASK_FIELDS.assignee]: { email: owner.email }, [TASK_FIELDS.teamMember]: [owner.teamMember] };
+      const fields = { [TASK_FIELDS.name]: `Growth plan: ${l.title}`, [TASK_FIELDS.status]: 'Upcoming', [TASK_FIELDS.description]: desc, [TASK_FIELDS.business]: [GP.realEstateBusinessId], [TASK_FIELDS.dueDate]: dueISO, [TASK_FIELDS.assignee]: { email: owner.email }, [TASK_FIELDS.teamMember]: [owner.teamMember] };
       const res = await airtableWrite('POST', TABLES.tasks, { records: [{ fields }] });
       const taskId = res.records[0].id;
-      const status = (l.status === 'Candidate') ? 'In progress' : (l.status === 'Adopted' ? 'In progress' : l.status);
+      const status = (l.status === 'Candidate' || l.status === 'Adopted') ? 'In progress' : l.status;
       await upsertPlanRow(l, status, { [GP.plan.tasks]: (l.taskIds || []).concat([taskId]) });
       toast(`Task created for ${owner.name}: ${l.title}`);
     });
   }
-  async function saveDob(tenantId) {
-    const input = document.querySelector(`input[data-dob="${tenantId}"]`); const v = input && input.value;
+  async function saveDob(tenantId, btn) {
+    const holder = btn && btn.closest('.inl');
+    const input = (holder && holder.querySelector('input[data-dob]')) || document.querySelector(`input[data-dob="${tenantId}"]`); const v = input && input.value;
     if (!v) { toast('Enter a date of birth first', true); return; }
     const y = Number(v.slice(0, 4)); if (y < 1920 || y > 2010) { toast('That date does not look like a tenant\'s date of birth', true); return; }
     await withBusy('dob:' + tenantId, async () => {
@@ -601,17 +607,15 @@ Universal Credit. Each Tenant is responsible for reporting their share of the Re
       if (act === 'drop') return setStatus(key, 'Dropped');
       if (act === 'reopen') return setStatus(key, 'Adopted');
       if (act === 'task') return createTask(key);
-      if (act === 'save-dob') return saveDob(b.dataset.tenant);
+      if (act === 'save-dob') return saveDob(b.dataset.tenant, b);
       if (act === 'open') { state.ui.openLever = key; state.ui.stage = 'all'; state.ui.showDone = true; $('showDone').checked = true; renderStageSeg(); renderLevers(); const row = document.querySelector(`tr.lever[data-key="${key}"]`); if (row) row.scrollIntoView({ behavior: 'smooth', block: 'center' }); return; }
     }
+    const tog = e.target.closest('button[data-toggle]');
+    if (tog) { state.ui.openLever = state.ui.openLever === tog.dataset.toggle ? null : tog.dataset.toggle; renderLevers(); const nb = document.querySelector(`button[data-toggle="${state.ui.openLever || tog.dataset.toggle}"]`); if (nb) nb.focus(); return; }
     const row = e.target.closest('tr.lever');
     if (row && !e.target.closest('button')) { state.ui.openLever = state.ui.openLever === row.dataset.key ? null : row.dataset.key; renderLevers(); return; }
     const st = e.target.closest('#stageSeg button'); if (st) { state.ui.stage = st.dataset.stage; renderStageSeg(); renderLevers(); return; }
     const pf = e.target.closest('#propSeg button'); if (pf) { state.ui.propFilter = pf.dataset.propFilter; renderProps(); }
-  });
-  document.addEventListener('keydown', e => {
-    const row = e.target.closest && e.target.closest('tr.lever');
-    if (row && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); state.ui.openLever = state.ui.openLever === row.dataset.key ? null : row.dataset.key; renderLevers(); const r = document.querySelector(`tr.lever[data-key="${row.dataset.key}"]`); if (r) r.focus(); }
   });
   document.addEventListener('change', e => {
     const t = e.target;

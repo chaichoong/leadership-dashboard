@@ -65,6 +65,17 @@
     };
     const STAGE_NAMES = { 1: 'Paper trail', 2: 'Council tax', 3: 'Rooms', 4: 'Voids and take-backs', 5: 'Agent-held potential' };
 
+    function monthlyFromFrequency(amount, frequency) {
+        const a = Number(amount) || 0;
+        switch (String(frequency || 'Monthly')) {
+            case 'Weekly': return a * 52 / 12;
+            case 'Fortnightly': return a * 26 / 12;
+            case '4-Weekly': return a * 13 / 12;
+            case 'Quarterly': return a / 3;
+            case 'Annually': case 'Yearly': case 'Annual': return a / 12;
+            default: return a;
+        }
+    }
     function num(v, d = 0) { const n = Number(v); return Number.isFinite(n) ? n : d; }
     function round2(v) { return Math.round(v * 100) / 100; }
     function setting(settings, key, fallback) {
@@ -163,7 +174,7 @@
         if (ex.exempt) return { rent: lhaRate, ifExempt: lhaRate, known: ex.known, exempt: true };
         const calc = benefitCap({ single: true, age: 35, housing: lhaRate }, settings);
         const rent = Math.min(lhaRate, calc.safeRent);
-        return { rent: round2(rent), ifExempt: lhaRate, known: ex.known, exempt: false, shortfallAtRate: round2(lhaRate - rent) };
+        return { rent: round2(rent), ifExempt: lhaRate, known: ex.known, exempt: false };
     }
 
     function isUc(tenant, unit) {
@@ -196,9 +207,17 @@
         const unitsByProp = {};
         units.forEach(u => { (unitsByProp[u.propertyId] = unitsByProp[u.propertyId] || []).push(u); });
         const tenantById = {}; (data.tenants || []).forEach(t => { tenantById[t.id] = t; });
-        const tenancyByTenant = {}; (data.tenancies || []).forEach(tc => { (tc.tenantIds || []).forEach(id => { tenancyByTenant[id] = tc; }); });
+        // A tenant can carry more than one tenancy row; take the one on the unit being priced,
+        // and share a joint tenancy's rent between its tenants.
+        const tenanciesByTenant = {}; (data.tenancies || []).forEach(tc => { (tc.tenantIds || []).forEach(id => { (tenanciesByTenant[id] = tenanciesByTenant[id] || []).push(tc); }); });
+        const rentFor = (tenantId, unit, fallback) => {
+            const list = tenanciesByTenant[tenantId] || [];
+            const tc = list.find(x => x.unitId === unit.id) || list[list.length - 1];
+            if (!tc) return fallback;
+            return num(tc.rent) / Math.max(1, (tc.tenantIds || []).length);
+        };
         const ctByProp = {}; (data.costs || []).forEach(c => {
-            if (!c.propertyId || /debt|arrears|enforcement|bailiff/i.test(String(c.name || ''))) return; // a repayment plan is not the bill
+            if (!c.propertyId || c.shared || /debt|arrears|enforcement|bailiff|\bbin\b|bins\b|garden waste/i.test(String(c.name || ''))) return; // a repayment plan or a bin charge is not the bill
             ctByProp[c.propertyId] = (ctByProp[c.propertyId] || 0) + num(c.monthly);
         });
         const planByKey = {}; (data.planRows || []).forEach(r => { if (r.key) planByKey[r.key] = r; });
@@ -247,8 +266,7 @@
                 const uView = { id: u.id, number: u.number, type: u.type, status: u.status, rent: round2(num(u.rent)), incomeType: u.incomeType || '', tenants: [] };
                 uTenants.forEach(t => {
                     const age = ageOn(t.dob, T);
-                    const tc = tenancyByTenant[t.id];
-                    const rent = tc ? num(tc.rent) : num(u.rent) / Math.max(1, uTenants.length);
+                    const rent = rentFor(t.id, u, num(u.rent) / Math.max(1, uTenants.length));
                     const uc = isUc(t, u), hb = isHb(t, u);
                     const tv = { id: t.id, name: t.name, dob: t.dob || '', age, payType: t.payType || '', uc, hb, rent: round2(rent), capExemption: t.capExemption || 'Unknown', unitId: u.id, unitType: u.type, rateNow: null, target: null, note: '' };
                     const wholeShared = u.type !== 'Whole Property' || occupied.filter(x => x.type === 'Whole Property').length >= 2;
@@ -292,26 +310,23 @@
                                         ? `Serve the rent increase notice for ${t.name} at £${rate.toFixed(2)} and update the UC housing costs`
                                         : `Ask ${t.name} for their UC statement: LCWRA, PIP or earnings on it lifts the cap`,
                                 }, planByKey));
-                            } else if (gapIfExempt > 0.5 && !safe.exempt) {
+                            } else if (gapIfExempt > 0.5 && !safe.known) {
                                 // Rent already sits above the cap-safe figure. Nothing to add until the
                                 // exemption is evidenced; the extra to the full rate is shown as upside.
-                                tv.note = safe.known ? `Capped: rent £${rent.toFixed(2)} is £${(-gap).toFixed(2)} above the safe rent` : 'Cap check needed: rent is above the safe rent unless an exemption applies';
-                                if (safe.known) view.flags.push(`${t.name} is over the benefit cap by £${(-gap).toFixed(2)} a month at the current rent`);
+                                tv.note = 'Cap check needed: rent is above the safe rent unless an exemption applies';
                                 levers.push(lever({
                                     key: `refresh:${t.id}`, lever: 'Rate refresh', propertyId: prop.id, property: prop.name,
                                     tenantId: t.id, tenant: t.name, unitId: u.id, unit: u.number,
                                     title: `${t.name}: to the 2026-27 ${entitled1Bed ? '1-bed' : 'room'} rate once the cap exemption is confirmed`,
                                     monthly: 0, monthlyIfExempt: gapIfExempt, oneOff: 0, effort: 'Paper', counted: 'now', capCheck: true,
                                     evidence: [`Rent now £${rent.toFixed(2)} (tenancy record)`, `${rates.brma} ${entitled1Bed ? '1-bed' : 'room'} rate 2026-27 £${rate.toFixed(2)}`,
-                                        `Benefit cap: ${safe.known ? 'NOT exempt' : 'exemption unknown'} — safe rent £${safe.rent.toFixed(2)}, so the rent is already £${(-gap).toFixed(2)} over it`],
+                                        `Benefit cap: exemption unknown — safe rent £${safe.rent.toFixed(2)}, so the rent is already £${(-gap).toFixed(2)} over it`],
                                     needs: [`Confirm benefit cap exemption before any increase: +£${gapIfExempt.toFixed(2)} a month if exempt`],
                                     firstStep: `Ask ${t.name} for their UC statement: LCWRA, PIP or earnings on it lifts the cap`,
                                 }, planByKey));
                             } else if (gap < -0.5 && safe.known && !safe.exempt) {
                                 tv.note = `Capped: rent £${rent.toFixed(2)} is £${(-gap).toFixed(2)} above the safe rent`;
                                 view.flags.push(`${t.name} is over the benefit cap by £${(-gap).toFixed(2)} a month at the current rent`);
-                            } else if (gap < -0.5 && !safe.known) {
-                                tv.note = 'Cap check needed: rent is above the safe rent unless an exemption applies';
                             }
                         }
                     }
@@ -439,7 +454,9 @@
         // An either/or council tax lever only counts when it beats the rooms lever on the same house.
         levers.filter(l => l.alternative).forEach(ct => {
             const rooms = levers.find(r => r.propertyId === ct.propertyId && (r.lever === 'Room release' || r.lever === 'New room let'));
-            if (rooms && rooms.monthly >= ct.monthly) ct.counted = ct.counted === 'now' ? 'alternative' : 'check';
+            if (!rooms) return;
+            if (rooms.monthly >= ct.monthly) { ct.counted = 'alternative'; ct.loser = true; }
+            else { rooms.counted = 'alternative'; rooms.loser = true; }
         });
         properties.forEach(v => { v.levers = levers.filter(l => l.propertyId === v.id); });
         const sum = (arr, f) => round2(arr.reduce((n, l) => n + (f ? f(l) : l.monthly), 0));
@@ -450,6 +467,8 @@
             works: sum(now.filter(l => STAGE[l.lever] === 3)),
             voids: sum(now.filter(l => STAGE[l.lever] === 4)),
             remote: sum(levers.filter(l => l.counted === 'remote' && active(l))),
+            remoteWorks: sum(levers.filter(l => l.counted === 'remote' && active(l) && STAGE[l.lever] === 3)),
+            remoteVoids: sum(levers.filter(l => l.counted === 'remote' && active(l) && STAGE[l.lever] === 4)),
             exemptUpside: sum(levers.filter(l => l.counted !== 'agent' && active(l)), l => Math.max(0, l.monthlyIfExempt - l.monthly)),
             unknownAge: round2(unknownAge.reduce((n, u) => n + u.upliftIfOver35, 0)),
             check: sum(levers.filter(l => l.counted === 'check' && active(l))),
@@ -468,5 +487,5 @@
         return Object.assign({ status: row ? (row.status || 'Candidate') : 'Candidate', planId: row ? row.id : null, taskIds: row ? (row.taskIds || []) : [], stage: STAGE[o.lever] || 5 }, o);
     }
 
-    return { LHA_2026_27, LHA_VALID_TO, BRMA_BY_OUTWARD, BRMA_UNCERTAIN, STAGE, STAGE_NAMES, EFFORT_WEIGHT, ageOn, outward, brmaFor, isLocal, ratesFor, lhaStale, benefitCap, exemptionInput, safeRentFor, isUc, isHb, managementOf, buildPlan };
+    return { LHA_2026_27, LHA_VALID_TO, BRMA_BY_OUTWARD, BRMA_UNCERTAIN, STAGE, STAGE_NAMES, EFFORT_WEIGHT, monthlyFromFrequency, ageOn, outward, brmaFor, isLocal, ratesFor, lhaStale, benefitCap, exemptionInput, safeRentFor, isUc, isHb, managementOf, buildPlan };
 });
