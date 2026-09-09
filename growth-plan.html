@@ -251,7 +251,7 @@
     <p class="hint">Stage 1 is paper only. Stage 2 moves council tax. Stage 3 needs works. Stage 4 is voids and take-backs. "CRF a month" is the benefit cap shortfall to apply for alongside the change. Click a row for the evidence and the first step. Adopt what you will do; create the task from here.</p>
     <div class="filters">
       <div class="seg" role="group" aria-label="Stage filter" id="stageSeg"></div>
-      <label class="chk"><input type="checkbox" id="showAgent"> Show agent-held potential</label>
+      <label class="chk"><input type="checkbox" id="showAgent"> Show further potential (properties outside the plan)</label>
       <label class="chk"><input type="checkbox" id="showDone"> Show done and dropped</label>
     </div>
     <div class="tbl-wrap"><table id="leverTable" aria-label="Levers ranked by money per unit of effort"><thead><tr><th>#</th><th>Stage</th><th>Lever</th><th class="title">What</th><th class="num">A month</th><th class="num">CRF a month</th><th class="num">One-off</th><th>Effort</th><th>Status</th><th>Actions</th></tr></thead><tbody id="leverBody"></tbody></table></div>
@@ -542,8 +542,8 @@
       kpi('works', 'With works', '+' + gbp(t.works + t.remoteWorks), `rooms added per strategy, ${gbp(t.oneOff)} one-off at £400 a room`, 'good'),
       kpi('voids', 'Voids and take-backs', '+' + gbp(t.voids + t.remoteVoids), 'Siddows let and the Collins houses', 'good'),
       kpi('crf', 'CRF payments to apply for', gbp(t.crfShortfall), `${t.crfCount} application${t.crfCount === 1 ? '' : 's'}, benefit cap shortfall paid to you`, 'gold'),
-      kpi('agent', 'Agent-held potential', '+' + gbp(t.agentHeld), 'agent properties taken back at the 1-bed rate', 'muted'),
-      kpi('potential', 'Total potential increase', '+' + gbp(t.potentialIncrease), 'every lever including agent-held', 'good'),
+      kpi('agent', 'Further potential', '+' + gbp(t.agentHeld), 'every property outside the plan at the 1-bed rate', 'muted'),
+      kpi('potential', 'Total potential increase', '+' + gbp(t.potentialIncrease), 'the plan plus the further potential', 'good'),
       kpi('maximum', 'Maximum rent', gbp(t.rentNow + t.potentialIncrease), 'a month if every lever lands'),
     ].join('');
     renderKpiDetail();
@@ -562,8 +562,8 @@
       case 'works': return { title: 'With works: rooms added under the HMO strategy', rows: L(l => (l.counted === 'now' || l.counted === 'remote') && l.stage === 3), total: t.works + t.remoteWorks };
       case 'voids': return { title: 'Voids and take-backs', rows: L(l => (l.counted === 'now' || l.counted === 'remote') && l.stage === 4), total: t.voids + t.remoteVoids };
       case 'crf': return { title: 'CRF Housing Payments to apply for (benefit cap shortfall, paid to you)', rows: p.levers.filter(l => live(l) && l.counted !== 'agent' && l.capShortfall > 0).map(l => ({ name: l.title, amount: l.capShortfall, extra: '' })), total: t.crfShortfall };
-      case 'agent': return { title: 'Agent-held potential: what a take-back at the 1-bed rate would bring (gains count, losses shown)', rows: p.levers.filter(l => l.counted === 'agent').map(l => ({ name: l.title, amount: l.monthly, extra: l.monthly > 0 ? 'counted' : 'not counted', sub: l.evidence[1] })), total: t.agentHeld };
-      case 'potential': return { title: 'Total potential increase', rows: [{ name: 'Paper trail', amount: t.paper }, { name: 'With works', amount: t.works + t.remoteWorks }, { name: 'Voids and take-backs', amount: t.voids + t.remoteVoids }, { name: 'Agent-held potential', amount: t.agentHeld }], total: t.potentialIncrease };
+      case 'agent': return { title: 'Further potential: every property outside the plan at the 1-bed rate, by its own capacity (gains count, losses shown)', rows: p.levers.filter(l => l.counted === 'agent').map(l => ({ name: l.title, amount: l.monthly, extra: l.monthly > 0 ? 'counted' : 'not counted', sub: l.evidence[1] })), total: t.agentHeld };
+      case 'potential': return { title: 'Total potential increase', rows: [{ name: 'Paper trail', amount: t.paper }, { name: 'With works', amount: t.works + t.remoteWorks }, { name: 'Voids and take-backs', amount: t.voids + t.remoteVoids }, { name: 'Further potential', amount: t.agentHeld }], total: t.potentialIncrease };
       case 'maximum': return { title: 'Maximum rent a month', rows: [{ name: 'Rent now', amount: t.rentNow }, { name: 'Total potential increase', amount: t.potentialIncrease }], total: t.rentNow + t.potentialIncrease };
       default: return null;
     }
@@ -609,7 +609,7 @@
     if (!rows.length) { $('leverBody').innerHTML = '<tr><td colspan="10" class="empty">No levers match this filter.</td></tr>'; return; }
     $('leverBody').innerHTML = rows.map((l, i) => {
       const open = state.ui.openLever === l.key;
-      const countedPill = l.counted === 'check' ? '<span class="pill check">fact needed</span>' : l.counted === 'alternative' ? '<span class="pill">either/or</span>' : l.counted === 'remote' ? '<span class="pill">away</span>' : l.counted === 'agent' ? '<span class="pill">agent-held</span>' : '';
+      const countedPill = l.counted === 'check' ? '<span class="pill check">fact needed</span>' : l.counted === 'alternative' ? '<span class="pill">either/or</span>' : l.counted === 'remote' ? '<span class="pill">away</span>' : l.counted === 'agent' ? '<span class="pill">potential</span>' : '';
       const busy = state.busy.has(l.key) ? 'disabled' : '';
       const actions = l.counted === 'agent' ? '' : [
         l.status === 'Candidate' ? `<button class="btn btn-sm" data-act="adopt" data-key="${esc(l.key)}" ${busy}>Adopt</button>` : '',

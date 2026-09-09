@@ -44,6 +44,8 @@
         'Sunderland':                 { sar: 73.95,  b1: 97.81,  b2: 109.32, b3: 126.58, b4: 161.10 },
         'Furness':                    { sar: 91.00,  b1: 109.32, b2: 115.07, b3: 146.14, b4: 185.84 },
         'Colchester':                 { sar: 92.36,  b1: 143.84, b2: 182.96, b3: 224.38, b4: 287.67 },
+        'South Lanarkshire':          { sar: 86.30,  b1: 103.56, b2: 132.33, b3: 164.74, b4: 254.76 },
+        'Swansea':                    { sar: 86.30,  b1: 120.82, b2: 126.58, b3: 138.08, b4: 188.71 },
     };
     const weeklyToMonthly = w => Math.round(w * 52 / 12 * 100) / 100;
     const LHA_2026_27 = {};
@@ -53,7 +55,7 @@
         CB9: 'Cambridge', CB7: 'Cambridge', M40: 'Central Greater Manchester',
         L4: 'Greater Liverpool', L20: 'Greater Liverpool', FY8: 'Fylde Coast',
         BB12: 'West Pennine', BB5: 'East Lancs', BB7: 'East Lancs', HU3: 'East Riding',
-        SR8: 'Sunderland', LA13: 'Furness', CO12: 'Colchester',
+        SR8: 'Sunderland', LA13: 'Furness', CO12: 'Colchester', ML3: 'South Lanarkshire', SA5: 'Swansea',
     };
     const BRMA_UNCERTAIN = {}; // outward codes still to confirm on LHA Direct; none as at 9 Sep 2026
     const LOCAL_OUTWARD = new Set(['CB9', 'CB7']); // the estate Kevin manages in person
@@ -441,24 +443,36 @@
                     firstStep: 'Check the legal question set on approaching sub-tenants has an answer',
                 }, planByKey));
             }
-            if ((mgmt === 'rocimmo' || mgmt === 'agent') && rates) {
-                // Kevin, 9 Sep 2026: for every agent-run property, what two over-35 UC tenants on a joint
-                // tenancy at the 1-bed rate would bring in (per flat in a block). Shown, not actioned.
-                // A 2-bed flat takes a joint tenancy of two over-35s (2 × 1-bed rate); a 1-bed flat takes one
-                // tenant at the 1-bed rate; a house takes two. (Kevin, 9 Sep 2026: Duckworth is 4 two-beds and 5 one-beds.)
+            const leaveAsIs = mgmt === 'kevin' && normaliseStrategy(prop.strategy) === 'Leave as is';
+            if ((mgmt === 'rocimmo' || mgmt === 'agent' || leaveAsIs) && rates) {
+                // Kevin, 9 Sep 2026: what each property outside the plan could bring at the 1-bed rate.
+                // Lettable Rooms of 3+ = an HMO of over-35s (rooms × 1-bed); a 1-bed home = one tenant;
+                // a block = per flat (two in a 2-bed, one in a 1-bed); anything else = a joint tenancy of two.
                 const flats = prop.type === 'Block' ? pUnits.filter(u => u.type === 'Flat') : [];
-                const homes = flats.length || 1;
-                const perFlat = f => (num(f.beds) >= 2 ? 2 : 1) * rates.b1;
-                const potentialRent = round2(flats.length ? flats.reduce((n, f) => n + perFlat(f), 0) : 2 * rates.b1);
+                const roomsCap = lettable != null && lettable >= 3 ? lettable : 0;
+                let potentialRent, how;
+                if (flats.length) {
+                    potentialRent = round2(flats.reduce((n, f) => n + (num(f.beds) >= 2 ? 2 : 1) * rates.b1, 0));
+                    how = `${flats.filter(f => num(f.beds) >= 2).length} two-bed flats × 2 × £${rates.b1.toFixed(2)} + ${flats.filter(f => num(f.beds) < 2).length} one-bed flats × £${rates.b1.toFixed(2)}`;
+                } else if (roomsCap) {
+                    potentialRent = round2(roomsCap * rates.b1);
+                    how = `${roomsCap} rentable rooms × £${rates.b1.toFixed(2)} (HMO of over-35s)`;
+                } else if (num(prop.beds) === 1) {
+                    potentialRent = round2(rates.b1);
+                    how = `one tenant × £${rates.b1.toFixed(2)} (1-bed home)`;
+                } else {
+                    potentialRent = round2(2 * rates.b1);
+                    how = `joint tenancy of two × £${rates.b1.toFixed(2)}`;
+                }
                 const potential = round2(potentialRent - propRent);
-                const flatMix = flats.length ? `${flats.filter(f => num(f.beds) >= 2).length} two-bed flats × 2 × £${rates.b1.toFixed(2)} + ${flats.filter(f => num(f.beds) < 2).length} one-bed flats × £${rates.b1.toFixed(2)}` : '';
+                const voidHere = pUnits.some(u => u.status === 'Void');
                 levers.push(lever({
                     key: `agent:${prop.id}`, lever: 'Agent-held', propertyId: prop.id, property: prop.name,
-                    title: `${prop.name}: take back and let to over-35 UC tenants at the 1-bed rate${homes > 1 ? ` (${homes} flats)` : ' (joint tenancy of two)'}`,
+                    title: `${prop.name}: ${leaveAsIs ? 're-let' : 'take back and let'} to over-35 UC tenants at the 1-bed rate (${roomsCap ? roomsCap + ' rooms' : flats.length ? flats.length + ' flats' : num(prop.beds) === 1 ? 'one tenant' : 'joint tenancy of two'})`,
                     monthly: potential, monthlyIfExempt: potential, oneOff: 0, effort: 'Legal', counted: 'agent',
-                    evidence: [`Rent now £${propRent.toFixed(2)} a month via ${prop.agent || 'the agent'}`, `${flatMix || '2 × £' + rates.b1.toFixed(2)} (${rates.brma} 1-bed) = £${potentialRent.toFixed(2)} a month, before council tax and management`, potential < 0 ? 'The agent rent is higher than the LHA figure: no gain from a take-back' : 'Council tax would sit with the tenants'],
+                    evidence: [`Rent now £${propRent.toFixed(2)} a month${mgmt === 'kevin' ? '' : ' via ' + (prop.agent || 'the agent')}${voidHere ? ' (void; the plan lets it to a family)' : ''}`, `${how} (${rates.brma} 1-bed) = £${potentialRent.toFixed(2)} a month, before council tax and management`, potential < 0 ? 'The current rent is higher than the LHA figure: no gain' : (roomsCap ? 'Council tax and licensing would sit with the owner as an HMO' : 'Council tax would sit with the tenants')],
                     needs: ['Potential only: no action generated'],
-                    firstStep: 'None: agent-held',
+                    firstStep: 'None: potential only',
                 }, planByKey));
             }
             properties.push(view);
