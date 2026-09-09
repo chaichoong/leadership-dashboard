@@ -38,6 +38,7 @@ import approval  # noqa: E402
 
 LONDON = ZoneInfo("Europe/London")
 GHL = "https://services.leadconnectorhq.com"
+FFMPEG = os.path.expanduser("~/tools/bin/ffmpeg"); FFPROBE = os.path.expanduser("~/tools/bin/ffprobe")
 KEY_FILE = os.path.expanduser("~/.config/od/ghl_social_key_runpreneur")
 LOC_FILE = os.path.expanduser("~/.config/od/ghl_location_id_runpreneur")
 USER_FILE = os.path.expanduser("~/.config/od/ghl_user_id_kevin")
@@ -330,6 +331,34 @@ def approval_hundreds(day):
     return render.hundreds_folder(day)
 
 
+MEDIA_MAX_BYTES = 450 * 1024 * 1024   # 9 Sep 2026: GoHighLevel's edge answered 413 to a 740 MB episode that would have gone through a week earlier; 449 MB still goes
+MEDIA_AUDIO_KBPS = 160
+
+
+def fit_bitrate_kbps(size_bytes, duration_s, limit=MEDIA_MAX_BYTES, audio_kbps=MEDIA_AUDIO_KBPS, margin=0.92):
+    """Video bitrate (kbps) that lands a file of `duration_s` under the upload limit with the audio track kept.
+    None when the file already fits."""
+    if size_bytes <= limit or duration_s <= 0: return None
+    total_kbps = (limit * margin * 8 / 1000.0) / duration_s
+    return max(int(total_kbps - audio_kbps), 1500)
+
+
+def fit_for_upload(path, limit=MEDIA_MAX_BYTES):
+    """The file to upload: the original when it fits, otherwise a transcode under the limit in the work folder.
+    The Drive archive keeps the full-quality file; YouTube re-encodes whatever it gets anyway."""
+    size = os.path.getsize(path)
+    if size <= limit or not path.endswith(".mp4"): return path
+    dur = float(subprocess.run([FFPROBE, "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", path], capture_output=True, text=True).stdout or 0)
+    kbps = fit_bitrate_kbps(size, dur, limit)
+    out = os.path.join(watch.WORK, "upload_" + os.path.basename(path))
+    subprocess.run([FFMPEG, "-v", "error", "-y", "-i", path, "-c:v", "h264_videotoolbox", "-b:v", "%dk" % kbps, "-maxrate", "%dk" % int(kbps * 1.15), "-bufsize", "%dk" % (kbps * 2),
+                    "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "%dk" % MEDIA_AUDIO_KBPS, "-movflags", "+faststart", out], check=True)
+    got = os.path.getsize(out)
+    if got > limit: raise SystemExit("upload copy of %s is still %d MB after transcoding at %d kbps" % (os.path.basename(path), got // 1048576, kbps))
+    print("publish: %s is %d MB, over the %d MB upload limit; uploading a %d MB copy at %d kbps (the Drive file is untouched)" % (os.path.basename(path), size // 1048576, limit // 1048576, got // 1048576, kbps))
+    return out
+
+
 def media_for(day, entry, kinds):
     files = episode_files(day); media = entry.setdefault("media", {})
     for k in kinds:
@@ -337,7 +366,9 @@ def media_for(day, entry, kinds):
         if not os.path.exists(files[k]):
             if k in ("thumb", "podcast"): continue
             raise SystemExit("episode %d: %s is not in the edited folder (%s)" % (day, k, files[k]))
-        media[k] = upload_media(files[k])
+        src = fit_for_upload(files[k])
+        media[k] = upload_media(src)
+        if src != files[k] and os.path.exists(src): os.remove(src)
         print("episode %d: uploaded %s" % (day, k))
     return media
 
@@ -620,6 +651,9 @@ def selftest():
     assert "YouTube Link" in LINK_FIELDS[("youtube", "full")] and "TikTok Link" in LINK_FIELDS[("tiktok", "summary")] and "Facebook Post Link" in LINK_FIELDS[("facebook", "summary")]
     assert "LinkedIn Link" in LINK_FIELDS[("linkedin", "summary")] and "Threads Link" in LINK_FIELDS[("threads", "summary")], "the fields Ericamae's pages read"
     assert CLIP_FILES["podcast"] == "Ep%d_Podcast.mp3"
+    assert fit_bitrate_kbps(300 * 1024 * 1024, 600) is None, "fits already"
+    kb = fit_bitrate_kbps(740 * 1024 * 1024, 639.3); assert 5000 < kb < 5700, kb   # 2054: 740 MB, 10.7 min -> about 5.3 Mbps video
+    assert fit_bitrate_kbps(10 ** 10, 60) == 1500 or fit_bitrate_kbps(10 ** 10, 60) > 1500, "never below the floor"
     old = MODE_FILE
     import tempfile as _tf
     globals()["MODE_FILE"] = os.path.join(_tf.gettempdir(), "od-mode-test-%d" % os.getpid())
