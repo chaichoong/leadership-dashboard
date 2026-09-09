@@ -363,8 +363,8 @@ def build_card(post, mode, topics=None):
         ask = ("THIN SLOT: %s (%s) has no sourced material. Give me one line of context (a real number, a process you handed to an agent, a decision this week) "
                "as 'Changes requested' and I will write the post from it. Nothing is written from nothing." % (date.strftime("%A %-d %B"), P.SHAPES[post["day"]]["name"]))
     parts = [ask]
+    if post.get("card_url"): parts.append("OPEN THE PICTURE FIRST (a permanent link, also attached below as a file): %s%s" % (post["card_url"], (" (%s)" % post["picture"]) if post.get("picture") else ""))
     if post.get("text"): parts.append("The post, as written:\n\n" + post["text"])
-    if post.get("card_url"): parts.append("The picture (attached to the post): %s%s" % (post["card_url"], (" (%s)" % post["picture"]) if post.get("picture") else ""))
     if post.get("pdf_url"): parts.append("Carousel version (PDF, attached to this card as a file; for a LinkedIn document post once that route is proven): " + post["pdf_url"])
     if post.get("visual") and not post.get("card_url"): parts.append("The picture: " + json.dumps(post["visual"])[:400])
     parts.append("Where it came from:\n" + (post.get("source_line") or ""))
@@ -594,6 +594,48 @@ def write_post(day, date, source, voice, feedback=""):
     return {"text": text, "visual": visual, "issues": sorted(set(issues)), "hook": hook[:120], "usefulness": u, "redrafted": redrafted, "thin": False}
 
 
+def parse_enriched(text):
+    try:
+        t = text.strip().strip("`"); t = t[t.find("{"): t.rfind("}") + 1]; d = json.loads(t)
+        fix = lambda v: re.sub(r"(\. )([a-z])", lambda m: m.group(1) + m.group(2).upper(), strip_tics(str(v).replace(" — ", ". ").replace("—", ", ").replace(" – ", ", ")).strip())
+        d = {k: (fix(v) if isinstance(v, str) else v) for k, v in d.items()}
+        items = [{"head": fix(i.get("head", ""))[:60], "detail": fix(i.get("detail", ""))[:110], "icon": str(i.get("icon", "")).strip().lower()[:12]} for i in (d.get("items") or []) if str(i.get("head", "")).strip()]
+        d["guide"] = [fix(g) for g in (d.get("guide") or [])]; d["hero"] = {k: fix(v) for k, v in (d.get("hero") or {}).items()}
+        if not items or not str(d.get("title", "")).strip(): return None
+        return {"title": str(d.get("title", "")).strip()[:70], "highlight": str(d.get("highlight", "")).strip()[:40], "standfirst": str(d.get("standfirst", "")).strip()[:120], "items": items[:8],
+                "hero": {"value": str((d.get("hero") or {}).get("value", "")).strip()[:28], "label": str((d.get("hero") or {}).get("label", "")).strip()[:60]},
+                "rule": str(d.get("rule", "")).strip()[:140], "guide": [str(g).strip()[:80] for g in (d.get("guide") or []) if str(g).strip()][:5],
+                "left_label": str(d.get("left_label", "")).strip()[:24], "right_label": str(d.get("right_label", "")).strip()[:24]}
+    except (ValueError, AttributeError, TypeError):
+        return None
+
+
+def enrich_visual(p):
+    """The board's words: a headline and a detail line per item, a hero, the rule, the guide, all drawn from the post (one cheap call).
+    Stored on the post as `rich`; the board falls back to the plain spec when the call fails."""
+    if not p.get("visual") or not p.get("text"): return None
+    user = "POST:\n%s\n\nPICTURE SPEC (keep its items, order and count):\n%s" % (p["text"], json.dumps(p["visual"]))
+    try: out, _, _ = od_compose.ask_api(P.ENRICH_SYSTEM, user, max_tokens=1800, timeout=180)
+    except SystemExit as ex: print("od draft: enrich failed for %s (%s)" % (p.get("date"), str(ex)[:100])); return None
+    rich = parse_enriched(out)
+    if rich:
+        rich, _ = _rich_checked(rich, p)
+        p["rich"] = rich
+    return rich
+
+
+def _rich_checked(rich, p):
+    """No person's name, no running word, no invented figure in the enriched words (the same rules as the post)."""
+    issues = []
+    for key in ("title", "standfirst", "rule"):
+        v = rich.get(key, "")
+        if STRIP_WORDS.search(v) or re.search(r"kevin", v, re.I): issues.append(key)
+    src = (p.get("text") or "") + " " + json.dumps(p.get("visual") or {})
+    for fig in re.findall(r"£[\d,]+(?:\.\d+)?", json.dumps(rich)):
+        if fig not in src: issues.append("figure " + fig)
+    return rich, issues
+
+
 def render_visual(p):
     """The picture (v4, Kevin 8 Sep 2026: the bar is the lead magnet). Route 1: the BOARD renderer, code-drawn from the lead magnet's own
     components (nothing a model places, so nothing can overlap text), gated by the skill's preflight and a rendered-picture review.
@@ -606,7 +648,8 @@ def render_visual(p):
     for k in ("card_png", "card_pdf", "card_url", "pdf_url"): p.pop(k, None)
     source = od_compose.picture_source(p.get("source_line", ""))
     try:
-        od_board.render(template, p["visual"], p.get("text", ""), source, p["day"], png)
+        if not p.get("rich"): enrich_visual(p)
+        od_board.render(template, p["visual"], p.get("text", ""), source, p["day"], png, rich=p.get("rich"))
         passed, issues = od_compose.review(png, od_compose.required_lines(template, p["visual"]))
         # A board's geometry is code, so the review's taste notes (an open zone, a quiet bottom) are logged, not fatal; only a HARD fault
         # rejects it: something touching text, clipped or missing text, a misspelling, a name. Measured 8 Sep: the reviewer sent two clean
@@ -1117,11 +1160,15 @@ def selftest():
     assert pts == ["We need to improve on those.", "I can't see the carousel file, so can you reattach that for me to see?"], pts
     rc = receipt_for(["The infographics are just so substandard, glitchy bits", "Remove my name from the image please", "You're using the wrong booking link here"])
     assert rc.count("\n") == 2 and "→ the picture is rebuilt" in rc and "no person's name" in rc and "book-a-demo" in rc and all(l.startswith("- ") for l in rc.split("\n"))
+    r = parse_enriched('{"title": "Hire an agent before you hire a person", "highlight": "before you hire", "standfirst": "s", "items": [{"head": "Reads every email", "detail": "Each morning, before you do", "icon": "inbox"}], "hero": {"value": "£254", "label": "a week"}, "rule": "Try the agent first.", "guide": ["Pick one job", "Record it"]}')
+    assert r and r["items"][0]["icon"] == "inbox" and r["hero"]["value"] == "£254" and parse_enriched("no") is None
+    e = parse_enriched('{"title": "A — b", "items": [{"head": "x — y", "detail": "z"}], "rule": "p — q", "guide": ["m — n"]}'); assert "—" not in json.dumps(e) and e["title"] == "A. B" and e["rule"] == "p. Q", e
+    rr, iss = _rich_checked(dict(r, title="Kevin's rule on my run"), {"text": "It costs them £254 a week", "visual": {}}); assert iss == ["title"], iss
     assert minutes_for("Approved as-is") == 2 and minutes_for("Approved with minor edits") == 5 and minutes_for("Changes requested") == 10
     import tempfile as _tf
     globals()["HOLD_FILE"] = os.path.join(_tf.gettempdir(), "od-hold-test-%d" % os.getpid()); assert not on_hold(); open(HOLD_FILE, "w").write(""); assert on_hold(); os.remove(HOLD_FILE)
     assert BUSINESS_OD != approval.BUSINESS_PERSONAL and publish.BRANDS[BRAND]["category"] == BRAND and AI_THRESHOLD == 6
-    print(json.dumps({"checks": 67, "failed": []}))
+    print(json.dumps({"checks": 70, "failed": []}))
 
 
 if __name__ == "__main__":
@@ -1139,5 +1186,12 @@ if __name__ == "__main__":
     elif a.mode == "publish-sync": publish_sync()
     elif a.mode == "newsletter-publish": newsletter_publish(a.dry_run)
     elif a.mode in ("points",): topics(a.dry_run)
+    elif a.mode == "repicture":
+        st = _load(STATE); dates = [d for d in sorted(st.get("posts", {})) if (not a.week or d >= a.week)]
+        for d in dates:
+            pp = st["posts"][d]
+            if not pp.get("visual") or pp.get("ghl"): continue
+            pp.pop("rich", None); render_visual(pp); pp["verdict"] = None; pp["task"] = None; _save(STATE, st)
+        print("od repicture: %d post%s redrawn; run cards next" % (len(dates), "" if len(dates) == 1 else "s"))
     elif a.mode == "report": report()
     else: raise SystemExit("usage: od_lane.py mine|topics|draft|cards|sync|publish|publish-sync|newsletter-publish|backtest|report|selftest")

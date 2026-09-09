@@ -138,6 +138,131 @@ def points_placard(x, y, w, h, kicker, items, hook=None, plate=False):
     return '<div class="placard%s" style="left:%dpx;top:%dpx;width:%dpx;min-height:%dpx;padding:26px 32px 30px"><div class="mono" style="font-size:12px;color:var(--ink-faint)">%s</div>%s</div>' % (" plate" if plate else "", x, y, w, h, esc(kicker), body)
 
 
+ICONS = {"tick": '<path d="M28 62 l22 22 l46 -50" stroke="var(--accent)" stroke-width="10" stroke-linecap="round" stroke-linejoin="round"/>',
+         "cross": '<path d="M34 34 l56 56 M90 34 l-56 56" stroke="var(--ink-faint)" stroke-width="9" stroke-linecap="round"/>'}
+
+
+def icon_svg(name, size=44, colour="var(--ink-muted)"):
+    body = ICONS.get(name) or PROPS.get(name) or PROPS["clock"]
+    if name == "person": body = '<use href="#person" x="40" y="20" width="44" height="56" fill="var(--ink)" stroke="none"/>'
+    if name == "agent": body = '<use href="#agent" x="22" y="10" width="80" height="80"/>'
+    return '<svg style="width:%dpx;height:%dpx;flex:0 0 %dpx;color:%s" viewBox="0 0 124 120" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">%s</svg>' % (size, size, size, colour, body)
+
+
+def banner(kicker, title, highlight="", standfirst=""):
+    """The Dan Martell title: bold, one phrase highlighted, an italic standfirst on a rule under it. Returns (html, bottom_y)."""
+    t = esc(title)
+    if highlight and highlight.lower() in title.lower():
+        i = title.lower().index(highlight.lower()); h = title[i:i + len(highlight)]
+        t = esc(title[:i]) + '<span style="background:var(--accent-soft);padding:0 10px;margin:0 2px;border-radius:6px;color:var(--accent);box-decoration-break:clone;-webkit-box-decoration-break:clone">%s</span>' % esc(h) + esc(title[i + len(highlight):])
+    size = 60 if len(title) <= 30 else (52 if len(title) <= 44 else 44)
+    per_line = max(1, int(968 / (size * 0.47))); lines = max(1, -(-len(title) // per_line))
+    y = 76 + int(size * 1.05 * lines) + 14
+    out = ['<div class="abs kicker mono" style="left:56px;top:48px">%s</div>' % esc(kicker),
+           '<h1 class="abs title" style="left:56px;top:76px;width:968px;font-size:%dpx;line-height:1.05">%s</h1>' % (size, t)]
+    if standfirst:
+        out.append('<div class="abs" style="left:56px;top:%dpx;width:968px;padding:10px 0;border-top:2px solid var(--subtle);border-bottom:2px solid var(--subtle);font-size:20px;font-style:italic;color:var(--ink-muted)">%s</div>' % (y, esc(standfirst)))
+        y += 64
+    return "\n".join(out), y + 16
+
+
+def pill(text, x, y, colour="accent"):
+    return '<div class="abs mono" style="left:%dpx;top:%dpx;padding:6px 16px;border-radius:999px;background:var(--%s);color:%s;font-size:13px;font-weight:500">%s</div>' % (x, y, "accent" if colour == "accent" else "gold", "var(--surface)", esc(text))
+
+
+def rows_panel(x, y, w, items, icon_default, numbered=False, row_h=None, tone="surface"):
+    """Rows of icon + headline + detail on a placard. Returns (html, height)."""
+    n = max(1, len(items)); rh = row_h or 96
+    rows = []
+    for i, it in enumerate(items):
+        head = esc(it.get("head") or it.get("text") or ""); det = esc(it.get("detail", ""))
+        ic = it.get("icon") or icon_default
+        num = '<span class="stop" style="position:static;width:30px;height:30px;font-size:14px;flex:0 0 30px">%02d</span>' % (i + 1) if numbered else ""
+        rows.append('<div style="display:flex;gap:16px;align-items:center;height:%dpx;border-bottom:1px dashed var(--subtle)">%s%s<div style="min-width:0"><div style="font-size:%dpx;font-weight:700;line-height:1.15;color:var(--ink)">%s</div>%s</div></div>'
+                    % (rh, num, icon_svg(ic, 44), 21 if len(head) <= 34 else 18, head, ('<div style="font-size:15px;line-height:1.3;color:var(--ink-muted);font-style:italic;margin-top:3px">%s</div>' % det) if det else ""))
+    h = 26 + n * rh + 18
+    return ('<div class="placard" style="left:%dpx;top:%dpx;width:%dpx;height:%dpx;padding:14px 22px 10px;background:var(--%s)">%s</div>' % (x, y, w, h, tone, "".join(rows))), h
+
+
+def formula_box(x, y, w, label, text):
+    return ('<div class="abs" style="left:%dpx;top:%dpx;width:%dpx">%s<div class="placard plate" style="position:relative;width:%dpx;padding:30px 34px 26px;margin-top:16px;background:var(--surface)">'
+            '<div class="display" style="font-size:%dpx;line-height:1.2;color:var(--ink)">%s</div></div></div>'
+            % (x, y, w, '<div class="mono" style="display:inline-block;padding:6px 16px;background:var(--deep);color:var(--surface);font-size:13px;border-radius:6px">%s</div>' % esc(label), w, 30 if len(text) <= 70 else (26 if len(text) <= 100 else 22), esc(text)))
+
+
+def guide_band(x, y, w, label, steps):
+    cells = "".join('<div style="flex:1;min-width:0;display:flex;gap:10px;align-items:flex-start"><span class="stop" style="position:static;width:28px;height:28px;font-size:13px;flex:0 0 28px">%d</span><span style="font-size:15px;line-height:1.3;color:var(--ink)">%s</span></div>' % (i + 1, esc(t)) for i, t in enumerate(steps))
+    return ('<div class="abs" style="left:%dpx;top:%dpx;width:%dpx">%s<div class="placard" style="position:relative;width:%dpx;margin-top:16px;padding:20px 22px;display:flex;gap:18px;background:var(--surface-2)">%s</div></div>'
+            % (x, y, w, '<div class="mono" style="display:inline-block;padding:6px 16px;background:var(--accent);color:var(--surface);font-size:13px;border-radius:6px">%s</div>' % esc(label), w, cells))
+
+
+def hero_pill(x, y, value, label, note="", h=None):
+    return ('<div class="placard plate" style="left:%dpx;top:%dpx;width:300px;%spadding:22px 22px 18px;display:flex;flex-direction:column;justify-content:center"><div class="display" style="font-size:%dpx;line-height:1.02;color:var(--accent)">%s</div><div class="mono" style="margin-top:10px;font-size:12px;color:var(--ink-faint)">%s</div>%s</div>'
+            % (x, y, ("height:%dpx;" % h) if h else "", 60 if len(value) <= 7 else (38 if len(value) <= 14 else 26), esc(value), esc(label),
+               ('<div style="margin-top:22px;padding-top:14px;border-top:1.5px solid var(--subtle);display:flex;gap:10px;align-items:center"><span class="stop" style="position:static;width:26px;height:26px;background:var(--gold);flex:0 0 26px"></span><span class="mono" style="font-size:12px;color:var(--gold)">%s</span></div>' % esc(note)) if note else ""))
+
+
+def build_rich(template, spec, rich, post_text, source, day):
+    """The dense board: banner, panels of icon + headline + detail, a hero, the formula box, the guide band, the strip."""
+    base = open(SCAFFOLD).read(); head_html = base.split("<body>")[0]; symbols = base.split('<svg width="0" height="0" style="position:absolute">')[1].split("</svg>")[0]
+    shape_name = {"steps": "The method", "before_after": "The mistake", "stat": "The build log", "flow": "The workflow", "checklist": "The checklist"}[template]
+    parts = ['<svg width="0" height="0" style="position:absolute">%s</svg>' % symbols,
+             '<svg class="tick" style="left:24px;top:24px" viewBox="0 0 16 16"><path d="M8 0v16M0 8h16" stroke="currentColor" stroke-width="1.2"/></svg>',
+             '<svg class="tick" style="left:1040px;top:24px" viewBox="0 0 16 16"><path d="M8 0v16M0 8h16" stroke="currentColor" stroke-width="1.2"/></svg>']
+    hd, y = banner("Operations Director · " + shape_name, rich.get("title") or spec.get("title", ""), rich.get("highlight", ""), rich.get("standfirst", "")); parts.append(hd)
+    items = rich.get("items") or []; hero = rich.get("hero") or {}; rule = rich.get("rule", ""); guide = rich.get("guide") or []
+    bottom_limit = STRIP_TOP - 36
+    if template == "before_after":
+        n_b = len(spec.get("before") or []); left, right = items[:n_b] or items[: len(items) // 2], items[n_b:] if n_b else items[len(items) // 2:]
+        parts.append(pill(rich.get("left_label") or "By hand", 56, y)); parts.append(pill(rich.get("right_label") or "With an agent", 56 + 496, y))
+        yp = y + 44
+        space = bottom_limit - yp - (170 if rule else 0) - (176 if guide else 0) - 28
+        rh = max(84, min(150, (space - 44) // max(1, max(len(left), len(right)))))
+        lh, h1 = rows_panel(56, yp, 472, [dict(i, icon=i.get("icon") if i.get("icon") in ("cross", "tick") else "cross") for i in left], "cross", row_h=rh, tone="surface-2")
+        rhh, h2 = rows_panel(56 + 496, yp, 472, [dict(i, icon=i.get("icon") if i.get("icon") in ("cross", "tick") else "tick") for i in right], "tick", row_h=rh)
+        parts.append(lh); parts.append(rhh.replace('class="placard"', 'class="placard plate" data-hero', 1))
+        parts.append('<svg class="abs" style="left:%dpx;top:%dpx;width:64px;height:44px" viewBox="0 0 64 44"><path d="M4 22 H44" stroke="var(--accent)" stroke-width="8" stroke-linecap="round"/><path d="M36 6 L58 22 L36 38 Z" fill="var(--accent)"/></svg>' % (56 + 472 - 20, yp + max(h1, h2) // 2 - 22))
+        y = yp + max(h1, h2) + 28
+    elif template in ("steps", "flow", "checklist"):
+        numbered = template != "checklist"
+        gold = -1
+        if template == "flow":
+            try: gold = int(spec.get("human", -1))
+            except (TypeError, ValueError): gold = -1
+        elif template == "steps": gold = next((i for i, t in enumerate(spec.get("steps", [])) if re.search(r"human check|owner|approve|you review", str(t), re.I)), -1)
+        show_guide = bool(guide) and template != "steps"
+        space = bottom_limit - y - (170 if rule else 0) - (176 if show_guide else 0) - 28
+        rh = max(76, min(150, (space - 44) // max(1, len(items))))
+        rows = [dict(i, icon=("tick" if template == "checklist" and not i.get("icon") else i.get("icon"))) for i in items]
+        if gold >= 0 and gold < len(rows): rows[gold] = dict(rows[gold], head=rows[gold]["head"], icon="person")
+        ph, h = rows_panel(56, y, 968 if not hero.get("value") else 640, rows, "checklist" if template == "checklist" else "agent", numbered=numbered, row_h=rh)
+        parts.append(ph.replace('class="placard"', 'class="placard" data-hero', 1))
+        note = ("Owner approves at step %02d" % (gold + 1)) if gold >= 0 else ""
+        if hero.get("value"): parts.append(hero_pill(56 + 640 + 28, y, hero["value"], hero.get("label", ""), note=note, h=min(h, 360)))
+        elif note: parts.append('<div class="abs mono" style="left:56px;top:%dpx;font-size:12px;color:var(--gold)">%s</div>' % (y + h + 8, note))
+        y += h + 28
+    else:  # stat
+        number = str(spec.get("number") or hero.get("value") or "").strip(); label = str(spec.get("label") or hero.get("label") or "").strip()
+        rows = items if len(items) >= 3 else [{"head": g, "icon": "agent"} for g in guide] or items
+        used_guide = rows is not items
+        space = bottom_limit - y - (170 if rule else 0) - (176 if (guide and not used_guide) else 0) - 28
+        rh = max(76, min(150, (space - 44) // max(1, len(rows))))
+        ph, h = rows_panel(56 + 448, y, 520, rows, "agent", numbered=True, row_h=rh)
+        nsize = max(56, min(120, int(360 / (0.6 * max(1, len(number))))))
+        parts.append('<div class="placard plate" style="left:56px;top:%dpx;width:420px;height:%dpx;padding:28px 30px;display:flex;flex-direction:column;justify-content:center" data-hero><div class="display" style="font-size:%dpx;line-height:.95;color:var(--accent);white-space:nowrap">%s</div><div style="margin-top:18px;font-size:22px;line-height:1.25;color:var(--ink);font-weight:500">%s</div><div class="mono" style="margin-top:14px;font-size:12px;color:var(--ink-faint)">Measured on our own business</div>'
+                     '<svg style="margin-top:26px;width:260px;height:34px" viewBox="0 0 260 34">%s<circle cx="226" cy="16" r="11" fill="var(--gold)" stroke="var(--surface)" stroke-width="2"/></svg></div>'
+                     % (y, h, nsize, esc(number), esc(label), "".join('<use href="#agent" x="%d" y="0" width="32" height="32"/>' % (i * 40) for i in range(5))))
+        parts.append(ph); y += h + 28
+        if used_guide: guide = []
+    if rule and y + 130 <= bottom_limit:
+        parts.append(formula_box(56, y, 968, "The rule", rule)); y += 170
+    if guide and y + 120 <= bottom_limit and template != "steps":
+        parts.append(guide_band(56, y, 968, "%d-step guide" % len(guide), guide)); y += 176
+    parts.append(strip(source)); parts.append('<div class="grain"></div>')
+    page = head_html + "<body>\n<div class=\"canvas\">\n" + "\n".join(parts) + "\n</div>\n</body>\n</html>\n"
+    return page.replace("<title>Operations Director picture</title>", "<title>%s</title>" % esc(rich.get("title") or spec.get("title") or shape_name))
+
+
 def build(template, spec, post_text, source, day):
     """The whole page for one shape. Every position is fixed; only words vary."""
     base = open(SCAFFOLD).read()
@@ -215,8 +340,8 @@ def build(template, spec, post_text, source, day):
 LOGO_SVG = open(SCAFFOLD).read().split('<span class="logo"')[1].split("</span>")[0].split(">", 1)[1] if os.path.exists(SCAFFOLD) else ""
 
 
-def render(template, spec, post_text, source, day, out_png, scale=2):
-    page = build(template, spec, post_text, source, day)
+def render(template, spec, post_text, source, day, out_png, scale=2, rich=None):
+    page = build_rich(template, spec, rich, post_text, source, day) if rich else build(template, spec, post_text, source, day)
     html_path = out_png[:-4] + ".html"
     with open(html_path, "w") as fh: fh.write(page)
     r = subprocess.run(["node", os.path.join(EPIC, "scripts", "check.mjs"), html_path, "--width", str(W), "--height", str(H)], capture_output=True, text=True, timeout=180)
@@ -238,13 +363,19 @@ def selftest():
         pg = build(tpl, sp, "Hook line.\n\nbody", "the Operations Director agent register", "Wed").split("<body>")[1]
         assert pg.count("data-hero") == 1 and "Operations Director" in pg and '<div class="strip">' in pg, tpl
     fl = build("flow", {"title": "T", "boxes": ["a", "b", "c", "d"], "human": 3}, "h", "s", "Thu"); assert "Trigger" in fl and fl.count("Owner approves") == 1
+    rich = {"title": "Turn your SOP into an agent", "highlight": "into an agent", "standfirst": "Six stations, one human check.", "items": [{"head": "Pick one task", "detail": "The one you still answer weekly", "icon": "inbox"}, {"head": "Write the SOP as decisions", "detail": "Not explanations", "icon": "notebook"}, {"head": "Load it into the agent", "detail": "", "icon": "agent"}, {"head": "Run one live example", "detail": "Compare to your output", "icon": "person"}],
+            "hero": {"value": "3 clean runs", "label": "then step out"}, "rule": "The SOP without the agent is a document you still follow yourself.", "guide": ["Pick", "Write", "Load", "Run"]}
+    rp = build_rich("steps", spec, rich, "The SOP is not the finish line.", "Episode 1992", "Tue").split("<body>")[1]
+    assert rp.count("data-hero") == 1 and "into an agent" in rp and "The rule" in rp and "Kevin" not in rp and rp.count("dashed") == 4
+    ba = build_rich("before_after", {"title": "T", "before": ["a", "b"], "after": ["c", "d"]}, {"title": "Hire an agent before you hire a person", "highlight": "before you hire", "items": [{"head": "a"}, {"head": "b"}, {"head": "c"}, {"head": "d"}], "rule": "R", "guide": ["1", "2", "3"], "left_label": "By hand", "right_label": "With an agent"}, "hook", "s", "Mon").split("<body>")[1]
+    assert ba.count("data-hero") == 1 and "3-step guide" in ba and "By hand" in ba
     assert "<script" not in page and esc("<b>x</b>") == "&lt;b&gt;x&lt;/b&gt;"
     assert post_points("Hook.\n\n1. First thing.\n2. Second thing.\nText\n3) Third") == ["First thing.", "Second thing.", "Third"] and post_points("no numbers") == []
     checks = 8
     if os.path.exists(os.path.join(EPIC, "scripts", "render.mjs")):
         out = os.path.join(tempfile.gettempdir(), "od-board-selftest.png"); render("steps", spec, "The SOP is not the finish line.", "Episode 1992", "Tue", out, scale=1)
         assert os.path.getsize(out) > 20000; os.remove(out); os.remove(out[:-4] + ".html"); checks += 1
-    print(json.dumps({"checks": checks + 1, "failed": []}))
+    print(json.dumps({"checks": checks + 3, "failed": []}))
 
 
 if __name__ == "__main__":
