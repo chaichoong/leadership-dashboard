@@ -131,6 +131,34 @@ def sample(front, back, d, feather_deg=8.0, fov=LENS_FOV, shape=None):
 
 
 FRONT_PRIORITY = os.environ.get("CE_FRONT_PRIORITY", "1") == "1"   # see _sample_cv
+# The seam (Kevin via Ericamae, 9 Sep 2026: "a very faint horizontal line across the middle of the screen where the two
+# cameras join"). Two causes, two fixes: the front lens won with a 3 deg ramp at its rim (a hard step in a 10 deg
+# overlap), and the two lenses expose differently, so the join also had a brightness step. The ramp now spans the
+# overlap, and the back lens is gain-matched to the front on the pixels both lenses see, per frame and per channel.
+SEAM_RAMP_DEG = float(os.environ.get("CE_SEAM_RAMP", "8"))
+SEAM_GAIN = os.environ.get("CE_SEAM_GAIN", "1") == "1"
+SEAM_GAIN_LIMIT = (0.8, 1.25)
+SEAM_GAIN_FADE_DEG = 30.0        # the gain is full at the rim and gone this many degrees inside the back lens
+SEAM_DEBUG = os.environ.get("CE_SEAM_DEBUG", "0") == "1"   # tint the blend band red to see where the join runs
+SEAM_HARD_DEG = 2.0              # the ramp where the lenses disagree (close things: Kevin), so nothing ghosts
+SEAM_AGREE_MIN, SEAM_AGREE_MAX = 12.0, 40.0   # mean colour difference below MIN = far background (wide blend), above MAX = close (sharp)
+SEAM_AGREE_BLUR = 21             # box blur on the difference map so single pixels never flip the choice
+
+
+def seam_gain(front_px, back_px, weights_f, weights_b):
+    """One brightness gain that makes the back lens match the front where BOTH lenses contribute (the blend band).
+    Brightness only: a per-channel match dragged the sky's blue onto the road (9 Sep 2026). Clamped so a bad frame
+    can never blow out."""
+    band = (weights_f > 0.05) & (weights_b > 0.05)
+    if band.sum() < 200: return 1.0
+    lf = front_px[band].reshape(-1, 3).mean(); lb = back_px[band].reshape(-1, 3).mean()
+    if lb < 1.0: return 1.0
+    return float(np.clip(lf / lb, SEAM_GAIN_LIMIT[0], SEAM_GAIN_LIMIT[1]))
+
+
+def seam_fade(theta_back, half, fade_deg=SEAM_GAIN_FADE_DEG):
+    """0 deep inside the back lens, 1 at its rim: how much of the seam gain a pixel gets."""
+    return np.clip((theta_back - (half - np.deg2rad(fade_deg))) / np.deg2rad(fade_deg), 0, 1)
 MAP_SCALE = 1   # half-res maps were measured slower and softer (3 Sep 2026); keep full res
 
 
@@ -146,21 +174,38 @@ def _sample_cv(front, back, d, feather_deg, fov, shape):
     half = np.deg2rad(fov / 2.0)
     wf = np.clip((half - thf) / np.deg2rad(feather_deg), 0, 1)
     wb = np.clip((half - thb) / np.deg2rad(feather_deg), 0, 1)
-    if FRONT_PRIORITY:
-        # Anything near Kevin (the front-lens side) is seen whole by the front lens; blending it with
-        # the back lens' edge turns a close hand into a ghost. So the front lens wins everywhere it
-        # covers (to its own edge, with a short ramp) and the back lens fills only beyond it. The seam
-        # moves to the front lens' rim, which is behind Kevin, not on him.
-        ramp = np.clip((half - thf) / np.deg2rad(3.0), 0, 1)
-        wf = np.maximum(wf, ramp); wb = wb * (1 - ramp)
-    ssum = wf + wb; ssum[ssum == 0] = 1.0
     def up(a):
         a = a.reshape(hs, ws).astype(np.float32)
         return a if MAP_SCALE == 1 else cv2.resize(a, (w, h), interpolation=cv2.INTER_LINEAR)
-    wf = up(wf / ssum)[:, :, None]; wb = up(wb / ssum)[:, :, None]
+    def priority(ramp_deg):
+        # The front lens wins everywhere it covers, to its own rim, with a ramp of `ramp_deg`; the back lens
+        # fills beyond. Kevin sits ON the seam (the stick is in it, which is what makes the stick invisible), so
+        # the ramp width is a trade: wide hides the line on the background, narrow keeps his close body from ghosting.
+        ramp = np.clip((half - thf) / np.deg2rad(ramp_deg), 0, 1)
+        f = np.maximum(wf, ramp); b = wb * (1 - ramp)
+        ssum = f + b; ssum[ssum == 0] = 1.0
+        return up(f / ssum), up(b / ssum)
     ff = cv2.remap(front, up(uf), up(vf), cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE)
     bb = cv2.remap(back, up(ub), up(vb), cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE)
-    out = ff.astype(np.float32) * wf + bb.astype(np.float32) * wb
+    fff = ff.astype(np.float32); bbf = bb.astype(np.float32)
+    if FRONT_PRIORITY:
+        wf_wide, wb_wide = priority(SEAM_RAMP_DEG)
+        if SEAM_GAIN:
+            g = seam_gain(fff, bbf, wf_wide, wb_wide)
+            if g != 1.0:
+                bbf = bbf * (1.0 + (g - 1.0) * up(seam_fade(thb, half))[:, :, None])
+        wf_hard, wb_hard = priority(SEAM_HARD_DEG)
+        # agreement: where the two lenses show the same thing (far away) blend wide; where they differ (close, parallax) stay sharp
+        diff = cv2.blur(np.abs(fff - bbf).mean(axis=2), (SEAM_AGREE_BLUR, SEAM_AGREE_BLUR))
+        agree = np.clip((SEAM_AGREE_MAX - diff) / (SEAM_AGREE_MAX - SEAM_AGREE_MIN), 0, 1)
+        wf = (agree * wf_wide + (1 - agree) * wf_hard)[:, :, None]; wb = (agree * wb_wide + (1 - agree) * wb_hard)[:, :, None]
+    else:
+        ssum = wf + wb; ssum[ssum == 0] = 1.0
+        wf = up(wf / ssum)[:, :, None]; wb = up(wb / ssum)[:, :, None]
+    out = fff * wf + bbf * wb
+    if SEAM_DEBUG:
+        band = ((wf[:, :, 0] > 0.02) & (wb[:, :, 0] > 0.02))[:, :, None]
+        out = np.where(band, out * np.array([1.0, 0.3, 0.3], np.float32)[None, None, :] + np.array([90.0, 0, 0], np.float32), out)
     return np.clip(out, 0, 255).astype(np.uint8)
 
 
