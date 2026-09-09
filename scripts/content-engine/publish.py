@@ -61,7 +61,7 @@ PLATFORM_SLOTS = {"youtube": {"full": (6, 0)},
                   "linkedin": {"summary": (12, 0), "lfmd": (17, 30)}, "facebook": {"summary": (12, 30), "lfmd": (18, 0)},
                   "instagram": {"summary": (12, 30), "lfmd": (18, 0)}, "threads": {"summary": (12, 0), "lfmd": (18, 0)},
                   "tiktok": {"summary": (13, 0), "lfmd": (19, 30)}}
-SOON_MINUTES = 5
+SOON_MINUTES = 15   # GoHighLevel refused a post 5 minutes out with "Schedule Date must be after current date" (9 Sep 2026); 15 clears its own minimum
 
 
 def staggered(slot, index, hours=STAGGER_HOURS):
@@ -635,7 +635,7 @@ def selftest():
     bs = build_post("youtube", accts[5], sh, "desc", "https://cdn/l.mp4", None, "x", "u1", 1, "Short title"); assert bs["youtubePostDetails"]["type"] == "short"
     assert staggered((6, 0), 0) == (6, 0) and staggered((6, 0), 1) == (12, 0) and staggered((6, 0), 2) == (18, 0) and staggered((17, 0), 2) == (5, 0)
     t = dt.datetime(2026, 9, 9, 8, 30, tzinfo=LONDON)
-    assert when_for("youtube", "full", 0, t) == "2026-09-09T07:35:00Z", "06:00 has passed at 08:30: a few minutes from now, same day"
+    assert when_for("youtube", "full", 0, t) == "2026-09-09T07:45:00Z", "06:00 has passed at 08:30: fifteen minutes from now, same day"
     assert when_for("linkedin", "summary", 0, t) == "2026-09-09T11:00:00Z" and when_for("tiktok", "lfmd", 0, t) == "2026-09-09T18:30:00Z"
     assert when_for("facebook", "summary", 1, t) == "2026-09-09T13:30:00Z", "second episode of the day two hours later"
     led = {"a": {"episode": 2054}, "b": {"episode": 2056}}
