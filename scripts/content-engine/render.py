@@ -400,8 +400,28 @@ def build_outputs(masters, srt, day, title, workdir, lfmd=None, role="episode"):
     return paths
 
 
+def publish_via_api(paths, day, transcript_txt):
+    """Finished videos straight up to the shared drive through the API (Kevin, 9 Sep 2026): the Mac's Drive cache
+    never holds a copy. Returns links by kind, or None when the API is not set up or fails (the mount copy then runs)."""
+    try:
+        import drive_api
+        if not os.path.exists(drive_api.KEY_FILE): return None
+        fid = drive_api.folder_id(drive_api.EDITED_PATH + [hundreds_folder(day), str(day)], create=True)
+        links = {}
+        for kind, p in paths.items():
+            mime = "video/mp4" if p.endswith(".mp4") else "audio/mpeg" if p.endswith(".mp3") else "image/png" if p.endswith(".png") else "application/octet-stream"
+            links[kind] = drive_api.link(drive_api.upload(p, fid, mime=mime))
+        drive_api.upload(transcript_txt, fid, name="Ep%d_transcript.txt" % day, mime="text/plain")
+        return links
+    except Exception as ex:
+        print("publish: Drive API upload failed for episode %d (%s); using the mounted folder" % (day, str(ex)[:120]), file=sys.stderr)
+        return None
+
+
 def publish_to_drive(paths, day, transcript_txt):
     folder = os.path.join(EDITED_ROOT, hundreds_folder(day), str(day))
+    links = publish_via_api(paths, day, transcript_txt)
+    if links: return folder, links
     os.makedirs(folder, exist_ok=True)
     links = {}
     for kind, p in paths.items():

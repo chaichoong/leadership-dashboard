@@ -356,6 +356,22 @@ def copy_streaming(src, dst, chunk=8 * 1024 * 1024, max_minutes=PULL_MAX_MINUTES
                 out.flush(); sleep(PULL_RETRY_SECONDS)
 
 
+def pull_via_api(e, part):
+    """Download the clip by its Drive id through the API into `part`. Returns True on success; False (with a line)
+    when the API is not set up or refuses, so the mount copy takes over. The API path keeps Drive for desktop's
+    cache from growing: it never sees the bytes."""
+    try:
+        import drive_api
+        if not os.path.exists(drive_api.KEY_FILE): return False
+        got = drive_api.download(e["drive_id"], part, size=e.get("size"))
+        e["pulled_via"] = "api"
+        return got == e.get("size")
+    except Exception as ex:
+        print("pull: Drive API failed for %s (%s); falling back to the mounted folder" % (e.get("name"), str(ex)[:120]), file=sys.stderr)
+        if os.path.exists(part): os.remove(part)
+        return False
+
+
 def repair_stale_pulls(ledger, work=WORK):
     """A run that died mid-copy (4 Sep 2026, Drive's EDEADLK) leaves a clip 'pulling' for ever, and the
     chooser never looks at it again. Any 'pulling' entry with no complete local file goes back to 'new'."""
@@ -387,7 +403,10 @@ def pull(ledger, key, work=WORK):
     e["status"] = "pulling"; save_ledger(ledger)
     try:
         window = pull_window_minutes(e["size"])
-        copy_streaming(e["path"], dest + ".part", max_minutes=window)
+        if e.get("drive_id") and pull_via_api(e, dest + ".part"):
+            pass                                                    # streamed through the Drive API: nothing lands in the Mac's Drive cache (Kevin, 9 Sep 2026)
+        else:
+            copy_streaming(e["path"], dest + ".part", max_minutes=window)
     except OSError as ex:
         # Drive never delivered it within the window: leave it for the next night, keep the run alive
         if os.path.exists(dest + ".part"): os.remove(dest + ".part")

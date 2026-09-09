@@ -120,4 +120,18 @@ describe('content-engine watch: nightly wiring', () => {
     // Since R10 (3 Sep 2026) the job DOES schedule, but only episodes Kevin approved on the card.
     expect(auto).toContain('Nothing is scheduled without his approval on the card');
   });
+
+  it('raw clips come down and finished videos go up through the Drive API, with the mounted folder as the fallback (Kevin, 9 Sep 2026)', () => {
+    const d = readFileSync(path.join(ROOT, 'scripts', 'content-engine', 'drive_api.py'), 'utf8');
+    expect(d).toContain('KEY_FILE = os.path.expanduser("~/.config/od/gdrive_service_account.json")');
+    expect(d).toContain('def download(file_id, dest, size=None');
+    expect(d).toContain('uploadType=resumable&supportsAllDrives=true');
+    expect(d).not.toMatch(/private_key["']?\s*[:=]\s*["']-----/); // never a key in the repo
+    const w = readFileSync(path.join(ROOT, 'scripts', 'content-engine', 'watch.py'), 'utf8');
+    expect(w).toContain('if e.get("drive_id") and pull_via_api(e, dest + ".part"):');
+    expect(w).toContain('copy_streaming(e["path"], dest + ".part", max_minutes=window)'); // the fallback stays
+    const r = readFileSync(path.join(ROOT, 'scripts', 'content-engine', 'render.py'), 'utf8');
+    expect(r).toContain('links = publish_via_api(paths, day, transcript_txt)');
+    expect(r).toContain('drive_api.folder_id(drive_api.EDITED_PATH + [hundreds_folder(day), str(day)], create=True)');
+  });
 });
