@@ -57,7 +57,10 @@ def stage_file(video_path):
     return dst
 
 
-def build_plan(video_path, title, description, youtube_link, test):
+THUMB_INPUT = "input[type='file'][accept^='image/']#uploadAreaInput"   # the Details step's Thumbnails "Upload" (9 Sep 2026: sets at once, no crop dialog)
+
+
+def build_plan(video_path, title, description, youtube_link, test, thumb=""):
     """The wizard moves to Details on its own once a file is chosen, so the copy is typed while the upload
     runs; Next stays disabled until the upload and Spotify's processing finish. Live plans end with the
     `submit` step the lane only presses after the approval reads Approved; test plans stop at Review."""
@@ -69,6 +72,10 @@ def build_plan(video_path, title, description, youtube_link, test):
         {"do": "wait", "for": "text=Uploading", "ms": 60000},
         {"do": "fill", "selector": "input[name='title'], input[aria-label*='Title'], input[placeholder*='title' i]", "value": title},
         {"do": "fill", "selector": "textarea[name='description'], [contenteditable='true'], textarea", "value": desc},
+    ]
+    if thumb:   # the branded 16:9 thumbnail is what the Episodes list and the mobile app show (Kevin, 9 Sep 2026: 2054 showed a raw frame)
+        steps += [{"do": "upload", "selector": THUMB_INPUT, "file": thumb}, {"do": "wait", "ms": 6000}]
+    steps += [
         {"do": "wait", "gone": "text=Uploading", "ms": UPLOAD_WAIT_MS},
         {"do": "wait", "gone": "text=Processing", "ms": UPLOAD_WAIT_MS},
         {"do": "wait", "for": NEXT_ENABLED, "ms": UPLOAD_WAIT_MS},
@@ -105,10 +112,10 @@ def run_plan(plan_path, task_id, test, shot):
     except Exception: raise SystemExit("unreadable lane output: " + out[-300:])
 
 
-def write_plan(day, video_path, podcast_copy, youtube_link, test, out_dir):
+def write_plan(day, video_path, podcast_copy, youtube_link, test, out_dir, thumb=""):
     title, desc = podcast_parts(podcast_copy, day)
     title = with_day(title, day)
-    plan = build_plan(stage_file(video_path), title, desc, youtube_link, test)
+    plan = build_plan(stage_file(video_path), title, desc, youtube_link, test, stage_file(thumb) if thumb and os.path.exists(thumb) else "")
     os.makedirs(out_dir, exist_ok=True)
     path = os.path.join(out_dir, "spotify_plan_%d.json" % day)
     with open(path, "w") as fh: json.dump(plan, fh, indent=1)
@@ -167,6 +174,11 @@ def selftest():
     p = build_plan("/x/Episode_2195_Full_Episode.mp4", "T", "D", "https://youtu.be/x", True)
     assert p["steps"][2] == {"do": "upload", "selector": "#uploadAreaInput", "file": "/x/Episode_2195_Full_Episode.mp4"}
     assert p["mode"] == "test" and "youtu.be/x" in p["steps"][5]["value"] and not any(s["do"] == "submit" for s in p["steps"])
+    assert not any(s.get("selector") == THUMB_INPUT for s in p["steps"]), "no thumbnail step without a thumbnail"
+    pt = build_plan("/x/v.mp4", "T", "D", "", True, thumb="/x/Episode_1_Thumbnail.png")
+    ups = [s for s in pt["steps"] if s["do"] == "upload"]
+    assert ups[0]["selector"] == "#uploadAreaInput" and ups[1] == {"do": "upload", "selector": THUMB_INPUT, "file": "/x/Episode_1_Thumbnail.png"}
+    assert pt["steps"].index(ups[1]) > pt["steps"].index([s for s in pt["steps"] if s["do"] == "fill"][1]), "thumbnail after the copy, before the upload wait"
     waits = [s for s in p["steps"] if s["do"] == "wait" and (s.get("gone") or s.get("for"))]
     assert all(s["ms"] <= 600000 for s in waits) and any(s.get("gone") == "text=Uploading" for s in waits)
     live = build_plan("/x", "T", "D", "", False)
@@ -177,7 +189,7 @@ def selftest():
     assert list_status(lst, "Episode 9 - A")[0] == "published" and list_status(lst.split("Published")[0], "Episode 9 - A")[0] == "processing"
     assert list_status(lst, "Episode 8 - B")[0] == "missing"
     assert WIZARD.endswith("/episode/wizard") and SHOW_ID in WIZARD and PODCAST_FORMAT in ("audio", "video")
-    print(json.dumps({"checks": 13, "failed": []}))
+    print(json.dumps({"checks": 16, "failed": []}))
 
 
 if __name__ == "__main__":
