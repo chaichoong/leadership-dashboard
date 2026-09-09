@@ -513,6 +513,15 @@ async function runSteps(page, steps, allowSubmit, confirm) {
         // wins. `s.input` overrides the input selector for a page with several.
         const files = assertUploadable(s.files || s.file);
         const inputSel = s.input || 'input[type=file]';
+        //  (c) THE SELECTOR IS THE INPUT. Spotify for Creators keeps a permanent hidden
+        //      <input type=file id=uploadAreaInput> (9 Sep 2026); clicking it can only
+        //      time out. Set the files on it and move on.
+        const direct = await page.locator(s.selector).first()
+          .evaluate((el) => el.tagName === 'INPUT' && el.type === 'file').catch(() => false);
+        if (direct) {
+          await page.locator(s.selector).first().setInputFiles(files);
+          break;
+        }
         const before = await page.locator(inputSel).count();
         const upWait = Math.min(Number(s.timeoutMs) || 30000, 60000);
         const chooserP = page.waitForEvent('filechooser', { timeout: upWait })
