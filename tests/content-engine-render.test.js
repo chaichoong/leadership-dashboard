@@ -136,7 +136,8 @@ describe('content-engine render', () => {
   it("pans to what Kevin points at: speech cue + raised arm -> a planned pan in the reframer, listed on the card; the sign was proven on 2054 (9 Sep 2026)", () => {
     const pt = readFileSync(path.join(DIR, 'pointing.py'), 'utf8');
     expect(pt).toContain('yaw = -PAN_YAW if side == "right" else PAN_YAW');
-    expect(pt).toContain('if not os.path.exists(MODEL): return []'); // no model, no pan, and the card says so
+    expect(pt).toContain('if not pose_available(): return []'); // no pose library, no pan, and the card says so
+    expect(pt).toContain('mp.solutions.pose.Pose(static_image_mode=True'); // mediapipe 0.10 CPU solution: 1.0 aborts wanting Metal from a headless process
     const st = readFileSync(path.join(DIR, 'stab.py'), 'utf8');
     expect(st).toContain('def apply_pans(F_sm, pans, fps=FPS)');
     expect(st).toContain('ap.add_argument("--pans"');
