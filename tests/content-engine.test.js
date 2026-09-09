@@ -55,4 +55,13 @@ describe('content-engine: overlays.py (captions + banners)', () => {
     const lfmd = src.slice(src.indexOf('def build_lfmd'), src.indexOf('def build_summary'));
     expect(lfmd).toContain('_subs_filter');
   });
+
+  it("hides the lens seam: wide blend where the lenses agree, sharp where they differ, brightness matched at the join (Kevin via Ericamae, 9 Sep 2026)", () => {
+    const src = readFileSync(path.join(__dirname, '..', 'scripts', 'content-engine', 'insta.py'), 'utf8');
+    expect(src).toContain('SEAM_RAMP_DEG = float(os.environ.get("CE_SEAM_RAMP", "8"))');
+    expect(src).toContain('SEAM_HARD_DEG = 2.0');
+    expect(src).toContain('def seam_gain(front_px, back_px, weights_f, weights_b)');
+    expect(src).toContain('return float(np.clip(lf / lb, SEAM_GAIN_LIMIT[0], SEAM_GAIN_LIMIT[1]))'); // brightness only, clamped
+    expect(src).toContain('agree = np.clip((SEAM_AGREE_MAX - diff) / (SEAM_AGREE_MAX - SEAM_AGREE_MIN), 0, 1)');
+  });
 });
