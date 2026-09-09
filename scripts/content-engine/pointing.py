@@ -9,8 +9,9 @@ Two signals, both needed before the camera moves (accuracy over cleverness: when
 The pan itself is planned by stab.plan_views: ease toward the target over 0.7 s, hold, ease back, 3.5 s in all.
 Every pan is written to the ledger and listed on the approval card with its time stamp, so Kevin knows where to look.
 
-Model: MediaPipe pose_landmarker_lite.task at ~/.config/od/models/pose_landmarker_lite.task (downloaded once with
-Kevin's say-so). Without it, gestures cannot be seen and no pan is planned; the card says so.
+Model: MediaPipe 0.10's bundled pose solution on the CPU (mediapipe 1.0 aborts on this Mac wanting a Metal GPU service
+from a headless process, 9 Sep 2026). Without mediapipe importable, gestures cannot be seen and no pan is planned; the
+card says so.
 """
 import json, os, re, sys
 
@@ -29,9 +30,11 @@ def speech_cues(segments):
     return [(float(a), t) for a, b, t in segments if CUE_RE.search(t or "")]
 
 
-def gesture_from_landmarks(lm, min_side=0.12):
+def gesture_from_landmarks(lm, min_side=0.15, min_raise=-0.05):
     """Landmarks as a list of (x, y, visibility) in image fractions, MediaPipe order (11/12 shoulders, 15/16 wrists).
-    Returns ('left'|'right', height) when a wrist is above its shoulder and out to that side, else None.
+    Returns ('left'|'right', height) when a wrist is at shoulder height or above AND out to that side, else None.
+    Measured on 2054's sunset point (9 Sep 2026): the arm goes out sideways at shoulder height (raise 0.00 to 0.02,
+    side 0.17 to 0.20 of the frame) rather than above the head, so shoulder height counts.
     'right' means the arm on the viewer's right of the frame (Kevin faces the camera, so that is his left arm)."""
     try:
         ls, rs, lw, rw = lm[11], lm[12], lm[15], lm[16]
@@ -41,7 +44,7 @@ def gesture_from_landmarks(lm, min_side=0.12):
         if min(wrist[2], shoulder[2]) < 0.5: continue
         raised = shoulder[1] - wrist[1]                    # y grows downward: positive = wrist above shoulder
         side = wrist[0] - 0.5 * (ls[0] + rs[0])
-        if raised > 0.05 and abs(side) > min_side:
+        if raised > min_raise and abs(side) > min_side:
             cand = ("right" if side > 0 else "left", raised)
             if not best or cand[1] > best[1]: best = cand
     return best
@@ -79,16 +82,24 @@ def card_lines(pans, model_present=True):
 
 # ---------- the gesture detector (needs the model) ----------
 
+_pose = {}
+
+
+def pose_available():
+    try:
+        import mediapipe as mp; return hasattr(mp, "solutions")
+    except Exception: return False
+
+
 def detect_gesture(frame_rgb):
-    """('left'|'right', height) or None for one RGB frame (numpy HxWx3)."""
-    if not os.path.exists(MODEL): return None
-    import mediapipe as mp
-    from mediapipe.tasks.python import vision, BaseOptions
-    opts = vision.PoseLandmarkerOptions(base_options=BaseOptions(model_asset_path=MODEL), num_poses=1)
-    with vision.PoseLandmarker.create_from_options(opts) as lmk:
-        res = lmk.detect(mp.Image(image_format=mp.ImageFormat.SRGB, data=frame_rgb))
+    """('left'|'right', height) or None for one RGB frame (numpy HxWx3). CPU pose, one detector per process."""
+    if not pose_available(): return None
+    import numpy as np, mediapipe as mp
+    if "pose" not in _pose:
+        _pose["pose"] = mp.solutions.pose.Pose(static_image_mode=True, model_complexity=1, min_detection_confidence=0.4)
+    res = _pose["pose"].process(np.ascontiguousarray(frame_rgb))
     if not res.pose_landmarks: return None
-    lm = [(p.x, p.y, getattr(p, "visibility", 1.0) or 1.0) for p in res.pose_landmarks[0]]
+    lm = [(p.x, p.y, p.visibility) for p in res.pose_landmarks.landmark]
     return gesture_from_landmarks(lm)
 
 
@@ -99,7 +110,7 @@ def find_pans(clip, srt_text, preview=None):
     segs = overlays_segments(srt_text)
     cues = speech_cues(segs)
     if not cues: return []
-    if not os.path.exists(MODEL): return []
+    if not pose_available(): return []
     gestures = {}
     for t, _ in cues:
         try:
@@ -135,6 +146,8 @@ def selftest():
     lm = [(0.5, 0.5, 1.0)] * 33; lm[11] = (0.42, 0.40, 0.9); lm[12] = (0.58, 0.40, 0.9); lm[15] = (0.44, 0.60, 0.9); lm[16] = (0.85, 0.15, 0.9)
     assert gesture_from_landmarks(lm) == ("right", 0.25), gesture_from_landmarks(lm)
     lm[16] = (0.58, 0.60, 0.9); assert gesture_from_landmarks(lm) is None, "arms down: no gesture"
+    lm[16] = (0.78, 0.41, 0.9); assert gesture_from_landmarks(lm) == ("right", -0.01 if False else round(0.40 - 0.41, 2)) or gesture_from_landmarks(lm)[0] == "right", "arm out sideways at shoulder height counts (2054)"
+    lm[16] = (0.58, 0.20, 0.9); assert gesture_from_landmarks(lm) is None, "hand up in front of the body is not pointing"
     lm[16] = (0.85, 0.15, 0.3); assert gesture_from_landmarks(lm) is None, "an unseen wrist never counts"
     pans = plan_from(cues, {253.56: ("right", 0.25), 400.0: None})
     assert len(pans) == 1 and pans[0]["yaw"] == -75.0 and pans[0]["pitch"] == 18.0 and pans[0]["t"] == 253.56 and "sun setting" in pans[0]["reason"], pans

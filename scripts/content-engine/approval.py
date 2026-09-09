@@ -88,8 +88,8 @@ def pans_for(day, ledger):
     import pointing
     for e in ledger.values():
         if e.get("episode") == day and e.get("role") == "episode":
-            return pointing.card_lines(e.get("pans") or [], model_present=os.path.exists(pointing.MODEL))
-    return pointing.card_lines([], model_present=os.path.exists(pointing.MODEL))
+            return pointing.card_lines(e.get("pans") or [], model_present=pointing.pose_available())
+    return pointing.card_lines([], model_present=pointing.pose_available())
 
 
 def build_card(day, full, lfmd=None, short=None, headline="", pans_lines=None):
