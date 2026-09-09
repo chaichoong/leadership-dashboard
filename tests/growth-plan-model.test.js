@@ -84,7 +84,8 @@ describe('ages, BRMAs and rates', () => {
         expect(M.brmaFor('CB9 0AJ')).toBe('Cambridge');
         expect(M.brmaFor('cb7 5uz')).toBe('Cambridge');
         expect(M.brmaFor('M40 1EZ')).toBe('Central Greater Manchester');
-        expect(M.brmaFor('SA5 7JW')).toBe(null);
+        expect(M.brmaFor('SA5 7JW')).toBe('Swansea');
+        expect(M.brmaFor('ZZ1 1AA')).toBe(null);
         // Looked up on LHA Direct, 9 Sep 2026
         expect(M.brmaFor('BB7 2NX')).toBe('East Lancs');
         expect(M.brmaFor('SR8 4QQ')).toBe('Sunderland');
@@ -186,17 +187,27 @@ describe('buildPlan levers', () => {
         p = M.buildPlan(f, S, TODAY);
         expect(p.levers.find(x => x.key === 'rooms:p1').owner).toBe('Kevin');
     });
-    it('every agent-run property shows a take-back as joint tenancies of two over-35s; only gains count', () => {
+    it('further potential follows each property: rooms × rate for an HMO, two for a house, one for a 1-bed; gains count', () => {
         const f = fixture();
-        f.properties.push({ id: 'p3', name: '28 Chedburgh Place', agent: 'Roc Immo', postcode: 'CB9 0AJ' });
-        f.units.push({ id: 'u9', propertyId: 'p3', number: 1, type: 'Room', status: 'Occupied', rent: 350, tenantIds: [] });
-        f.properties.push({ id: 'p4', name: '42 Elmdon Place', agent: 'Roc Immo', postcode: 'CB9 0AH' });
-        f.units.push({ id: 'u10', propertyId: 'p4', number: 1, type: 'Room', status: 'Occupied', rent: 3350, tenantIds: [] });
+        f.properties.push({ id: 'p3', name: '28 Chedburgh Place', agent: 'Roc Immo', postcode: 'CB9 0AJ', lettableRooms: 5 });
+        f.units.push({ id: 'u9', propertyId: 'p3', number: 1, type: 'Room', status: 'Occupied', rent: 1750, tenantIds: [] });
+        f.properties.push({ id: 'p4', name: '22 Newton Street', agent: 'Staycay', postcode: 'BB12 0LG', beds: 3 });
+        f.units.push({ id: 'u10', propertyId: 'p4', number: 1, type: 'Whole Property', status: 'Occupied', rent: 1800, tenantIds: [] });
+        f.properties.push({ id: 'p6', name: '30 Burnbank Gardens', agent: 'Mears', postcode: 'ML3 9HD', beds: 1 });
+        f.units.push({ id: 'u11', propertyId: 'p6', number: 1, type: 'Whole Property', status: 'Occupied', rent: 540, tenantIds: [] });
         const p = M.buildPlan(f, S, TODAY);
-        expect(p.levers.find(x => x.key === 'agent:p3').monthly).toBe(1445.04); // 2 × 897.52 − 350
-        expect(p.levers.find(x => x.key === 'agent:p4').monthly).toBe(-1554.96);
-        expect(p.totals.agentHeld).toBe(1445.04);
-        expect(p.totals.potentialIncrease).toBeCloseTo(p.totals.actionable + 1445.04, 2);
+        expect(p.levers.find(x => x.key === 'agent:p3').monthly).toBe(2737.6);   // 5 × 897.52 − 1750
+        expect(p.levers.find(x => x.key === 'agent:p4').monthly).toBe(-1002.24); // 2 × 398.88 − 1800
+        expect(p.levers.find(x => x.key === 'agent:p6').monthly).toBe(-91.24);   // 448.76 − 540 (South Lanarkshire 1-bed)
+        expect(p.totals.agentHeld).toBe(2737.6);
+    });
+    it('a Leave-as-is house you manage also shows its further potential, uncounted in the plan', () => {
+        const f = fixture(); f.properties[0].strategy = 'Leave as is'; f.properties[0].lettableRooms = 4;
+        const p = M.buildPlan(f, S, TODAY);
+        const l = p.levers.find(x => x.key === 'agent:p1');
+        expect(l.counted).toBe('agent');
+        expect(l.monthly).toBe(Math.round((4 * 897.52 - (524.90 + 897.52 + 524.90)) * 100) / 100);
+        expect(l.title).toMatch(/re-let/);
     });
     it('the to-do list carries every counted lever with its owner, in stage order', () => {
         const f = fixture(); f.properties[0].strategy = 'HMO'; f.properties[0].plannedExtra = 1;
