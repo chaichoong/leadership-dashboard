@@ -22,6 +22,7 @@ HERE = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, HERE)
 PROFILE = "default"                       # the profile the Robot sign-in app signs into
 PAGE_ID = "61594022462166"                # the Runpreneur page (facebook.com/people/Runpreneur/<id>)
 PAGE_URL = "https://www.facebook.com/%s" % PAGE_ID
+POSTS_URL = PAGE_URL + "/reels"           # where the page's own posts are listed (they publish as reels)
 SHARE_BUTTON = "div[role='button'][aria-label='Share'], span[role='button'][aria-label='Share']"
 SHARE_BOX = "[role='dialog'] [contenteditable='true'], [role='dialog'] [role='textbox']"
 SHARE_NOW = "[role='dialog'] [aria-label='Share now'], [role='dialog'] div[role='button']:has-text('Share now')"
@@ -102,20 +103,22 @@ const { chromium } = require('%(pw)s');
   const dir = path.join(os.homedir(), '.config', 'od', 'agent-browser', '%(profile)s');
   const ctx = await chromium.launchPersistentContext(dir, { headless: true, viewport: { width: 1280, height: 1000 }, channel: 'chrome', ignoreDefaultArgs: ['--enable-automation'] });
   const page = ctx.pages()[0] || await ctx.newPage();
-  await page.goto(%(url)s, { waitUntil: 'domcontentloaded' });
-  await page.waitForTimeout(9000);
-  for (let i = 0; i < 4; i++) { await page.mouse.wheel(0, 2500); await page.waitForTimeout(2500); }
   const key = %(key)s.toLowerCase();
-  const hit = await page.evaluate((key) => {
-    const links = Array.from(document.querySelectorAll('a[href*="/reel/"], a[href*="/posts/"], a[href*="/videos/"]'));
-    for (const a of links) {
-      let el = a, txt = '';
-      for (let j = 0; j < 8 && el; j++) { el = el.parentElement; if (el) txt = el.innerText || ''; if (txt.length > 120) break; }
-      if (txt.toLowerCase().replace(/\\s+/g, ' ').includes(key)) return { url: a.href, text: txt.replace(/\\s+/g, ' ').slice(0, 160) };
-    }
-    return null;
-  }, key);
-  console.log(JSON.stringify(hit ? { found: true, url: hit.url.split('?')[0], text: hit.text } : { found: false, url: page.url() }));
+  await page.goto(%(list_url)s, { waitUntil: 'domcontentloaded' });
+  await page.waitForTimeout(8000);
+  await page.mouse.wheel(0, 2000); await page.waitForTimeout(2500);
+  const urls = await page.evaluate(() => Array.from(document.querySelectorAll('a[href*="/reel/"], a[href*="/posts/"], a[href*="/videos/"]'))
+    .map(a => a.href.split('?')[0].replace(/\\/$/, ''))
+    .filter(h => /\\/(reel|posts|videos)\\/\\d+/.test(h))
+    .filter((v, i, arr) => arr.indexOf(v) === i).slice(0, 6));
+  let hit = null;
+  for (const u of urls) {
+    await page.goto(u, { waitUntil: 'domcontentloaded' });
+    await page.waitForTimeout(6000);
+    const txt = (await page.evaluate(() => document.body.innerText || '')).toLowerCase().replace(/\\s+/g, ' ');
+    if (txt.includes(key)) { hit = u; break; }
+  }
+  console.log(JSON.stringify(hit ? { found: true, url: hit, seen: urls.length } : { found: false, seen: urls.length, urls: urls }));
   await ctx.close(); process.exit(0);
 })().catch(e => { console.log(JSON.stringify({ found: false, error: e.message.slice(0, 200) })); process.exit(0); });
 """
@@ -127,7 +130,7 @@ def find_page_post(copy, url=None):
     """The page post carrying this episode's caption. Returns its URL, or None."""
     key = match_key(copy)
     if not key: return None
-    js = FIND_JS % {"pw": PW, "profile": PROFILE, "url": json.dumps(url or PAGE_URL), "key": json.dumps(key)}
+    js = FIND_JS % {"pw": PW, "profile": PROFILE, "list_url": json.dumps(url or POSTS_URL), "key": json.dumps(key)}
     try: r = _browser(js)
     except SystemExit as ex: print("facebook: page read failed (%s)" % str(ex)[:160], file=sys.stderr); return None
     return r.get("url") if r.get("found") else None
@@ -196,7 +199,8 @@ def selftest():
     assert live["steps"][-1] == {"do": "submit", "selector": SHARE_NOW} and live["confirm"]["state"] == "hidden"
     assert [s["do"] for s in live["steps"]][:4] == ["goto", "wait", "click", "wait"], "open the post, wait for Share, click it, wait for the dialog"
     assert post_id("https://www.facebook.com/reel/2551081102055515") == "2551081102055515" and post_id("https://x/") == ""
-    assert PAGE_ID in PAGE_URL and "aria-label='Share now'" in SHARE_NOW
+    assert PAGE_ID in PAGE_URL and POSTS_URL.endswith("/reels") and "aria-label='Share now'" in SHARE_NOW
+    assert "for (const u of urls)" in FIND_JS and "txt.includes(key)" in FIND_JS, "each recent post is opened and matched on its caption"
     print(json.dumps({"checks": 9, "failed": []}))
 
 
