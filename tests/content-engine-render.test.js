@@ -36,7 +36,7 @@ describe('content-engine render', () => {
   it("inserts Ericamae's 8 second branded intro after the sign-off line (her app's rule) and makes the podcast audio", () => {
     const src = readFileSync(RENDER, 'utf8');
     expect(src).toContain('INTRO_CLIP = os.path.join(EDITED_ROOT, "Vlog Intro", "runprenuer-intro_clip.mp4")');
-    expect(src).toContain('def intro_insert_seconds(segments');
+    expect(src).toContain('def intro_window(segments, duration=None)');   // replaced intro_insert_seconds: the gap, not the caption end (10 Sep 2026)
     expect(src).toContain('insert_intro(captioned, at, paths["full"])');
     expect(src).toContain('paths["podcast"] = podcast_audio(captioned');
     expect(src).toMatch(/keep on \(\?:watching\|listening\)/);
@@ -54,7 +54,9 @@ describe('content-engine render', () => {
     const src = readFileSync(RENDER, 'utf8');
     expect(src).toContain('INTRO_TRIM_START = 1.0');
     expect(src).toContain('CUT_THRESHOLDS_DB = (-35, -30, -25, -20)');
-    expect(src).toContain('at, resume = find_pause(masters["16:9"], segs, intro_insert_seconds(segs))');
+    expect(src).toContain('at, resume = find_pause(masters["16:9"], cap_segs, srt_segments(open(srt).read())[-1][1])');  // the five-word chunks, so the jingle lands in Kevin's gap (10 Sep 2026)
+    expect(src).toContain('def intro_window(segments, duration=None)');
+    expect(src).toContain('def quiet_point(');
     expect(src).toContain('clip_caption_at(open(caps).read(), at)');
     expect(src).toContain('LFMD_START_RE = re.compile(r"(?:\\w+\\s+)?(?:from|for|of|through|in|to)\\s+(?:my|the)\\s+d(?:ia|ie|ai)\\w*"'); // any lead word: learnings/lessons/latest (2056, 10 Sep 2026) + diary/diet/dairy (2054)
     expect(src).toContain('elif role == "episode": fields["Reframed Video URL"] = None');

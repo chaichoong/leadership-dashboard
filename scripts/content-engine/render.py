@@ -46,18 +46,90 @@ INTRO_TRIM_START = 1.0          # Kevin, 4 Sep 2026: the jingle's first second (
 CUT_THRESHOLDS_DB = (-35, -30, -25, -20)   # studio-quiet first; a windy road needs -20 before the pause shows
 CUT_PAUSE_MIN = 0.5             # a pause between sentences, not a gap between words
 CUT_LEAD = 0.15                 # seconds of the pause kept after the last word before the jingle
+QUIET_PAD = 0.35                # how far either side of the sign-off/welcome boundary the gap is looked for
+QUIET_RISE_DB = 6.0             # the gap runs while the level stays within this of its quietest frame
 
 
-def pick_cut(silences, seg_start, at):
-    """The jingle goes in at the pause after Kevin's last sign-off word, not at the caption's end (Kevin,
-    4 Sep 2026: on 2194 the caption ran 3 s past the last word). `silences` = [(start, end)] in clip
-    seconds. Take the LAST pause of half a second or more that starts at least a second into the
-    sign-off caption and no later than 1.5 s after the caption end. Returns (cut, resume) where resume
-    is where speech starts again, or None when no such pause exists (caller falls back to caption times)."""
-    cands = [(s, e) for s, e in silences if seg_start + 1.0 <= s <= at + 1.5 and e - s >= CUT_PAUSE_MIN]
-    if not cands: return None
-    s, e = cands[-1]
-    return round(s + CUT_LEAD, 2), round(max(s + CUT_LEAD, e - 0.2), 2)
+def flat_captions(segments):
+    """The caption chunks as one string, with a mapper from character position back to clip time. Whisper's
+    five-word chunks split the sign-off in half ("keep on listening, hope" / "you find it useful."), so the
+    phrases are matched across the join and the time interpolated inside the chunk that carries the match."""
+    text = ""; spans = []
+    for a, b, t in segments:
+        t = (t or "").strip()
+        if not t: continue
+        if text: text += " "
+        spans.append((len(text), len(text) + len(t), a, b))
+        text += t
+    def when(pos):
+        if not spans: return 0.0
+        for c0, c1, a, b in spans:
+            if pos <= c1:
+                if pos <= c0: return a
+                return a + (b - a) * ((pos - c0) / float(max(c1 - c0, 1)))
+        return spans[-1][3]
+    return text, when
+
+
+def intro_window(segments, duration=None):
+    """(start, end) of the gap Kevin leaves between his cold-open sign-off and "welcome back to day N".
+    The sign-off taken is the LAST one before the welcome: on 2057 he says "keep on listening" and then
+    "hope you find it useful", and the jingle belongs after the second (Kevin, 10 Sep 2026)."""
+    if not segments: return None
+    limit = (duration or segments[-1][1]) * INTRO_SEARCH_FRACTION
+    segs = [s for s in segments if s[0] <= limit] or segments[:1]
+    text, when = flat_captions(segs)
+    if not text: return None
+    we_pos = None
+    for rx in WELCOME_RES:
+        m = rx.search(text)
+        if m: we_pos = m.start(); break
+    so_pos = None
+    for m in INTRO_SIGNOFF_RE.finditer(text):
+        if we_pos is not None and m.end() > we_pos: break
+        so_pos = m.end()
+    if so_pos is None and we_pos is None: return None
+    so = when(so_pos) if so_pos is not None else max(0.0, when(we_pos) - 1.0)
+    we = when(we_pos) if we_pos is not None else so + 1.0
+    if we <= so: we = so + 1.0
+    return (round(so, 2), round(we, 2))
+
+
+def loudness(video, start, length, frame=0.05):
+    """[(t, dB)] for the audio in [start, start+length], one reading per `frame` seconds."""
+    r = subprocess.run([FFMPEG, "-v", "error", "-ss", "%.3f" % start, "-t", "%.3f" % length, "-i", video, "-map", "0:a:0",
+                        "-af", "astats=metadata=1:reset=1:length=%.3f,ametadata=print:key=lavfi.astats.Overall.RMS_level:file=-" % frame,
+                        "-f", "null", "-"], capture_output=True, text=True)
+    out = []
+    for t, v in re.findall(r"pts_time:([\d.]+)[\s\S]{0,150}?RMS_level=(-?[\d.]+|-inf)", r.stdout):
+        out.append((start + float(t), -120.0 if v == "-inf" else float(v)))
+    return out
+
+
+def quiet_point(video, w0, w1, pad=QUIET_PAD):
+    """The quietest moment between the sign-off and the welcome, as (cut, resume). Road noise, wind and
+    breathing mean the gap is rarely silent, so the quietest FRAME is found and then widened while the
+    level stays within QUIET_RISE_DB of it: that pair of times is the gap Kevin leaves."""
+    a0 = max(0.0, w0 - pad); length = max(0.3, (w1 + pad) - a0)
+    rows = loudness(video, a0, length)
+    if len(rows) < 4: return None
+    lo = min(range(len(rows)), key=lambda i: rows[i][1])
+    floor = rows[lo][1] + QUIET_RISE_DB
+    i = lo
+    while i > 0 and rows[i - 1][1] <= floor: i -= 1
+    j = lo
+    while j < len(rows) - 1 and rows[j + 1][1] <= floor: j += 1
+    g0, g1 = rows[i][0], rows[j][0]
+    cut = g0 + min(CUT_LEAD, max(0.0, (g1 - g0) / 2))
+    return round(cut, 2), round(max(cut, g1), 2)
+
+
+def pick_cut(sils, w0, w1):
+    """A real silence inside the gap, when there is one: the longest that overlaps [w0, w1]."""
+    hits = [(s, e) for s, e in sils if e >= w0 - 0.4 and s <= w1 + 0.4 and e - s >= CUT_PAUSE_MIN]
+    if not hits: return None
+    s, e = max(hits, key=lambda se: se[1] - se[0])
+    return round(max(s, max(0.0, w0 - 0.4)) + CUT_LEAD, 2), round(max(s + CUT_LEAD, e - 0.2), 2)
 
 
 def silences(video, start, length, db):
@@ -69,18 +141,19 @@ def silences(video, start, length, db):
     return [(start + s, start + (ends[i] if i < len(ends) else start + length)) for i, s in enumerate(starts)]
 
 
-def find_pause(video, segments, at):
-    """(cut, resume) tightened to the real pause after the sign-off; caption times when none is found.
-    The threshold adapts: the first level (quiet first) that shows a pause of CUT_PAUSE_MIN wins."""
-    later = [s for s in segments if s[0] >= at - 0.05]
-    fallback = (at, round(max(at, later[0][0] - 0.2), 2) if later else at)
-    if at <= 0.05: return fallback
-    seg = [s for s in segments if abs(s[1] - at) < 0.01 or (s[0] < at <= s[1])]
-    seg_start = seg[0][0] if seg else max(0.0, at - 6.0)
+def find_pause(video, segments, duration=None):
+    """(cut, resume): where the jingle goes and where speech starts again. The window is the gap between
+    Kevin's cold-open sign-off and his "welcome back"; inside it a real silence wins, otherwise the quietest
+    quarter-second. (0, 0) when neither phrase is in the opening, so the jingle leads the episode."""
+    win = intro_window(segments, duration)
+    if not win: return 0.0, 0.0
+    w0, w1 = win
     for db in CUT_THRESHOLDS_DB:
-        got = pick_cut(silences(video, seg_start, (at - seg_start) + 2.0, db), seg_start, at)
+        got = pick_cut(silences(video, max(0.0, w0 - 1.0), (w1 - w0) + 2.0, db), w0, w1)
         if got: return got
-    return fallback
+    got = quiet_point(video, w0, w1)
+    if got: return got
+    return round(w0, 2), round(w1, 2)
 
 
 def clip_caption_at(srt_text, at):
@@ -102,24 +175,6 @@ def podcast_filter(at, resume):
     """The podcast has no jingle: the pause between the sign-off and the welcome is simply removed."""
     if resume <= at + 0.05: return None
     return ("[0:a]atrim=0:%.3f,asetpts=PTS-STARTPTS[a];[0:a]atrim=%.3f,asetpts=PTS-STARTPTS[b];[a][b]concat=n=2:v=0:a=1[out]" % (at, resume))
-
-
-def intro_insert_seconds(segments, duration=None):
-    """Where the intro goes: the END of the caption carrying the sign-off phrase, else the START of the
-    'welcome back' caption, else 0. Only the first part of the clip is searched."""
-    if not segments: return 0.0
-    limit = (duration or segments[-1][1]) * INTRO_SEARCH_FRACTION
-    for a, b, text in segments:
-        if a > limit: break
-        if INTRO_SIGNOFF_RE.search(text): return float(b)
-    for rx in WELCOME_RES:              # the specific phrase first, across the whole opening, then the loose one
-        for a, b, text in segments:
-            if a > limit: break
-            if rx.search(text): return float(a)
-    return 0.0
-
-
-INTRO_LOCAL = os.path.join(os.path.dirname(watch.LEDGER), "intro_clip.mp4")   # one API copy; the mount lied twice (10 Sep 2026)
 
 
 def media_seconds(path):
@@ -495,8 +550,10 @@ def build_outputs(masters, srt, day, title, workdir, lfmd=None, role="episode"):
         overlay(ov, ["lfmd", piece, lcaps, paths["lfmd"], "--day", str(day), "--subtitle", title.replace("|", " ").strip()], "episode %s LFMD" % day)
         clean_short(ov, piece, lcaps, paths, names, workdir, day, title)
         assert_has_video(paths["lfmd"], "episode %s lfmd" % day); return paths
-    segs = srt_segments(open(srt).read())
-    at, resume = find_pause(masters["16:9"], segs, intro_insert_seconds(segs))     # on the master: same sound, no captions yet
+    # the five-word caption chunks, not whisper's ten-second segments: the sign-off and the "welcome back"
+    # share one segment, so only the chunks can put the cut in Kevin's gap (10 Sep 2026)
+    cap_segs = srt_segments(open(caps).read())
+    at, resume = find_pause(masters["16:9"], cap_segs, srt_segments(open(srt).read())[-1][1])
     LAST_CUT.update({"at": at, "resume": resume})
     clipped = clip_caption_at(open(caps).read(), at)                                 # READ before the write opens the file (5 Sep 2026: open(w) first truncated it to nothing)
     with open(caps, "w") as fh: fh.write(clipped)
@@ -760,11 +817,17 @@ def selftest():
     assert INTRO_SECONDS_FALLBACK == 7.0 and intro_seconds("/nonexistent.mp4") == 7.0
     import inspect as _i; bo = _i.getsource(build_outputs); assert 'paths["full_yt"] = insert_intro(masters["16:9"]' in bo and bo.count("clean_short(") == 2, "both YouTube variants are built"
     segs_i = [(0, 4, "consecutive day 2195 of a diary of a Runpreneur"), (4, 9, "if that resonates with you keep on watching"), (9, 15, "welcome back to consecutive day"), (300, 305, "so let's go")]
-    assert intro_insert_seconds(segs_i, 600) == 9.0, "after the sign-off caption"
-    assert intro_insert_seconds(segs_i[:1] + segs_i[2:], 600) == 9.0, "before the welcome-back caption when there is no sign-off"
-    assert intro_insert_seconds([(0, 5, "just talking"), (300, 305, "let's go")], 600) == 0.0, "a late let's go is not the sign-off"
-    assert intro_insert_seconds([], 10) == 0.0
     assert INTRO_CLIP.endswith("Vlog Intro/runprenuer-intro_clip.mp4") and INTRO_TRIM_START == 1.0
+    segs_c = [(0, 2.2, "So today I want to"), (19.9, 22.2, "So keep in mind,"), (22.2, 24.5, "keep on listening, hope"),
+              (24.5, 26.8, "you find it useful."), (26.8, 28.6, "Welcome back to consecutive"), (28.6, 30.4, "day, 2057, with a")]
+    txt, when = flat_captions(segs_c)
+    assert "listening, hope you find it useful." in txt, "the chunks join, so a phrase split across them still matches"
+    assert abs(when(txt.index("Welcome")) - 26.8) < 0.2, when(txt.index("Welcome"))
+    w = intro_window(segs_c, 500)
+    assert w and 26.3 < w[0] <= 26.9 and abs(w[1] - 26.8) < 0.3, ("the LAST sign-off before the welcome, not the first", w)
+    assert intro_window([(0, 5, "just talking"), (300, 305, "let us go")], 600) is None, "no sign-off, no welcome: the jingle leads"
+    assert intro_window([(0, 3, "welcome back to consecutive day 9")], 100)[0] >= 0.0
+    assert pick_cut([(10.0, 10.9)], 10.2, 10.6) == (10.15, 10.7) and pick_cut([(1.0, 1.9)], 10.2, 10.6) is None
     led = {"a full.insv": {"date": "2026-09-10", "size": 3000, "status": "pulled"}, "a sum.insv": {"date": "2026-09-10", "size": 500, "status": "pulled"},
            "b sum.insv": {"date": "2026-09-11", "size": 500, "status": "pulled"}}
     assert teaser_waits("a sum.insv", led) and not teaser_waits("a full.insv", led) and not teaser_waits("b sum.insv", led), "a teaser waits only while its day's long clip is unfinished"
