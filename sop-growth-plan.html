@@ -39,7 +39,7 @@ a { color: var(--accent); }
   <a class="header-back" href="growth-plan.html">&larr; Back to the Growth Plan</a>
   <h1>Real Estate Growth Plan</h1>
   <div class="subtitle">How the page finds money in the portfolio, what it writes to Airtable, and how to work it.</div>
-  <div class="version">SOP v1.3 &middot; page v1.3 &middot; 9 September 2026</div>
+  <div class="version">SOP v1.4 &middot; page v1.4 &middot; 9 September 2026</div>
 </div></div>
 <div class="container">
   <div class="quick">
@@ -80,13 +80,14 @@ a { color: var(--accent); }
   <div class="section"><h2>4. Working the page</h2><div class="card">
     <ol>
       <li><strong>Metric cards:</strong> click any card to see the rows that make it up, with the same figures the card adds up.</li>
-      <li><strong>Things to do, in order:</strong> the first step of every counted lever with who it goes to.</li>
+      <li><strong>The work, property by property:</strong> one pack per property, in the order to do them, so a single visit closes a whole house. Open a pack for what to take (<em>Before you go</em>), each tenant with what they sign, what to collect from them and what gets submitted (<em>At the property</em>), any works, what happens <em>Afterwards</em>, the levers with their Adopt and Task buttons, and the property's own settings (strategy, extra tenants, lettable rooms, meters, council tax payer, who the tasks go to).</li>
+      <li><strong>How to raise it with a tenant:</strong> what to say, what never to say, and the honest answers when they push back. Read it before the first visit.</li>
       <li><strong>Tenant meeting form:</strong> pick the tenant, fill it in with them, Save writes every field to the tenant's Airtable record (date of birth, NI number, contact, UC payment day, household, cap position, ID and statements seen, weekly income and spending, authority signed, meeting date and notes). Bank account numbers are never stored.</li>
       <li><strong>Facts the plan still needs:</strong> dates of birth, cap exemptions, lettable rooms, council tax payer. Each one writes straight to Airtable and re-prices the plan.</li>
       <li><strong>Strategic order:</strong> click a row for the evidence and the first step. <em>Adopt</em> records it in the Growth Plan table. <em>Task</em> creates an Airtable task (paper and legal to Kevin, works and lettings to Roy) and links it to the row. <em>Done</em> and <em>Drop</em> take it out of the totals; "Show done and dropped" brings it back.</li>
       <li><strong>Property cards:</strong> rooms in use against lettable rooms, each tenant's rent against their rate, and the three fields the plan needs per house.</li>
+      <li><strong>Documents:</strong> scanned ID, bank statements and screen grabs attach to the tenant's Airtable record straight from the form, up to 3.7MB each, so whoever fills in a council form has them to hand.</li>
       <li><strong>Joint tenancies:</strong> the candidate houses, the tenancy clause and the side letter. The AI Legal and Compliance head reviewed the wording on 9 September 2026: the landlord's payment goes to the council under a side letter, never through the rent account. Templates ast_joint_template.md and council_tax_side_letter_template.md sit in Drive beside the standard AST.</li>
-      <li><strong>One meeting per tenant:</strong> for each tenant the plan touches, what changes, which forms go in (UC journal change, Council Tax Reduction, CRF Housing Payment) and what is still to collect (date of birth, NI number, phone, email).</li>
       <li><strong>Finding tenants:</strong> where the last 254 applicants came from and what each channel is worth now.</li>
       <li><strong>Assumptions:</strong> every figure not read from a live record. Edit here; it saves to Airtable. Update the LHA and benefit rows each April.</li>
     </ol>
@@ -96,7 +97,7 @@ a { color: var(--accent); }
     <table><thead><tr><th>Table</th><th>Reads</th><th>Writes</th></tr></thead><tbody>
       <tr><td>Properties</td><td>name, type, bedrooms, agent, postcode, area, council tax note</td><td>Growth Strategy, Planned Extra Tenants, Lettable Rooms, PAYG Meters, Council Tax Payer</td></tr>
       <tr><td>Rental Units</td><td>type, number, status, income type, expected rent, tenants</td><td>&mdash;</td></tr>
-      <tr><td>Tenants</td><td>name, status, date of birth, payment type, cap exemption, phone, email, NI number</td><td>Date of Birth (with a dated note), Benefit Cap Exemption</td></tr>
+      <tr><td>Tenants</td><td>name, status, date of birth, payment type, cap exemption, phone, email, NI number, meeting fields</td><td>Every meeting-form field, and Documents (scanned attachments)</td></tr>
       <tr><td>Tenancies (active)</td><td>tenant, unit, expected monthly rent</td><td>&mdash;</td></tr>
       <tr><td>Costs</td><td>live council tax rows (In Payment or Overdue, name contains "council" or "CT")</td><td>&mdash;</td></tr>
       <tr><td>Growth Plan</td><td>status and tasks per lever key</td><td>one row per adopted lever</td></tr>

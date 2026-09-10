@@ -209,6 +209,65 @@ describe('buildPlan levers', () => {
         expect(l.monthly).toBe(Math.round((4 * 897.52 - (524.90 + 897.52 + 524.90)) * 100) / 100);
         expect(l.title).toMatch(/re-let/);
     });
+    it('a property pack carries everything for one visit: prep, tenants, works, afterwards', () => {
+        const f = fixture(); f.properties[0].strategy = 'HMO'; f.properties[0].plannedExtra = 1;
+        const p = M.buildPlan(f, S, TODAY);
+        expect(p.packs).toHaveLength(1);
+        const pk = p.packs[0];
+        expect(pk.name).toBe('18 Test Park');
+        expect(pk.monthly).toBe(Math.round((372.62 + 897.52) * 100) / 100);
+        expect(pk.crf).toBe(93 + 93);
+        expect(pk.oneOff).toBe(1500);
+        expect(pk.before.join(' ')).toMatch(/Rent change letter/);
+        expect(pk.before.join(' ')).toMatch(/Authority to act/);
+        expect(pk.tenants.map(t => t.name)).toContain('Adam Older');
+        const adam = pk.tenants.find(t => t.name === 'Adam Older');
+        expect(adam.sign).toContain('Rent change letter');
+        expect(adam.forms.join(' ')).toMatch(/UC journal: report the housing costs change to £897.52/);
+        expect(adam.forms.join(' ')).toMatch(/CRF Housing Payment, £93.00 a month to landlord/);
+        expect(adam.collect).toContain('National Insurance number');
+        expect(pk.works.join(' ')).toMatch(/Fire-safe/);
+        expect(pk.after.join(' ')).toMatch(/Diarise the CRF renewal/);
+    });
+    it('a tenant giving up a room is in the pack, with the rent-does-not-change line', () => {
+        const f = fixture(); f.properties[0].strategy = 'HMO'; f.properties[0].plannedExtra = 1;
+        const p = M.buildPlan(f, S, TODAY);   // Paul Flat (52) holds a two-room flat-let
+        const pk = p.packs[0];
+        const paul = pk.tenants.find(t => t.name === 'Paul Flat');
+        expect(paul).toBeTruthy();
+        expect(paul.givesUpRoom).toBe(true);
+        expect(paul.sign).toContain('Tenancy variation: one room instead of two, at the same rent');
+        expect(paul.note).toMatch(/rent does not change/);
+    });
+    it('a joint tenancy pack asks for the agreement, the side letter and the CTR claim', () => {
+        const f = fixture(); f.units.pop(); f.tenants.pop(); f.tenancies.pop();
+        f.properties[0].strategy = 'Joint tenancy';
+        const pk = M.buildPlan(f, S, TODAY).packs[0];
+        expect(pk.before.join(' ')).toMatch(/Joint tenancy agreement for the whole house/);
+        expect(pk.before.join(' ')).toMatch(/Council tax side letter/);
+        pk.tenants.forEach(t => expect(t.sign).toContain('Joint tenancy agreement'));
+        expect(pk.tenants.some(t => t.forms.some(x => /Council Tax Reduction claim, backdated/.test(x)))).toBe(true);
+        expect(pk.after.join(' ')).toMatch(/Tell the council/);
+    });
+    it('packs come in strategic order and a blocked tenant is shown but not counted', () => {
+        const f = fixture(); f.tenants[2].dob = '';
+        f.properties.push({ id: 'p2', name: '13 Far Street', agent: 'Simon Collins', postcode: 'BB5 5PT' });
+        const p = M.buildPlan(f, S, TODAY);
+        expect(p.packs.map(x => x.name)).toEqual(['18 Test Park', '13 Far Street']);
+        expect(p.packs[0].stage).toBe(1);
+        expect(p.packs[1].stage).toBe(4);
+        const blocked = p.packs[0].tenants.find(t => t.name === 'Travis Young');
+        expect(blocked.blocked).toBe(true);
+        expect(blocked.uplift).toBe(0);
+        expect(blocked.note).toMatch(/Not in the plan until the date of birth/);
+    });
+    it('a pack keeps its finished levers but leaves them out of the total', () => {
+        const f = fixture({ planRows: [{ id: 'recPlan1', key: 'uplift:t1', status: 'Done' }] });
+        const pk = M.buildPlan(f, S, TODAY).packs[0];
+        expect(pk.levers.some(l => l.status === 'Done')).toBe(true);
+        expect(pk.openCount).toBe(pk.levers.length - 1);
+        expect(pk.monthly).toBe(Math.round((pk.levers.filter(l => l.status !== 'Done').reduce((n, l) => n + l.monthly, 0)) * 100) / 100);
+    });
     it('the to-do list carries every counted lever with its owner, in stage order', () => {
         const f = fixture(); f.properties[0].strategy = 'HMO'; f.properties[0].plannedExtra = 1;
         const p = M.buildPlan(f, S, TODAY);
@@ -318,12 +377,6 @@ describe('buildPlan levers', () => {
         const f = fixture(); f.costs.push({ propertyId: 'p1', name: 'ARP Enforcement Agency - CT Debt', monthly: 100 });
         expect(M.buildPlan(f, S, TODAY).properties[0].ctLive).toBe(135);
     });
-    it('property cards never list a refresh the table folded away', () => {
-        const f = fixture(); f.tenants[0].dob = '1996-01-01'; f.tenancies[0].rent = 520; f.tenants[2].dob = '1997-01-01'; f.tenancies[2].rent = 521;
-        const p = M.buildPlan(f, S, TODAY);
-        expect(p.properties[0].levers.map(l => l.key)).not.toContain('refresh:t1');
-        expect(p.levers.find(l => l.key === 'refresh:small')).toBeTruthy();
-    });
     it('a known capped tenant already at the full rate is noted for a CRF claim, with no lever', () => {
         const f = fixture(); f.tenants[0].dob = '1986-01-01'; f.tenancies[0].rent = 897.52; f.tenants[0].capExemption = 'None (capped)';
         const p = M.buildPlan(f, S, TODAY);
@@ -406,14 +459,16 @@ describe('buildPlan levers', () => {
         expect(p.totals.paper).toBe(0); // nothing else on the house is above 0.5
         expect(p.totals.done).toBe(372.62);
     });
-    it('folds refreshes under £10 into one portfolio row', () => {
+    it('every refresh stays on its own tenant, however small, so its property pack shows it', () => {
         const f = fixture();
-        f.tenants[0].dob = '1996-01-01'; f.tenancies[0].rent = 520; // under 35: room rate, £4.90 short
+        f.tenants[0].dob = '1996-01-01'; f.tenancies[0].rent = 520;   // under 35: room rate, £4.90 short
         f.tenants[2].dob = '1997-01-01'; f.tenancies[2].rent = 521;
+        f.properties[0].strategy = 'HMO'; f.properties[0].plannedExtra = 1;
         const p = M.buildPlan(f, S, TODAY);
-        const small = p.levers.find(x => x.key === 'refresh:small');
-        expect(small).toBeTruthy();
-        expect(small.monthly).toBe(8.8); // 4.90 + 3.90
-        expect(p.levers.filter(x => x.lever === 'Rate refresh' && x.key !== 'refresh:small')).toEqual([]);
+        expect(p.levers.find(x => x.key === 'refresh:small')).toBeUndefined();
+        expect(p.levers.filter(x => x.lever === 'Rate refresh').map(x => x.monthly).sort()).toEqual([3.9, 4.9]);
+        const pk = p.packs.find(x => x.id === 'p1');
+        expect(pk.tenants.map(t => t.name)).toEqual(expect.arrayContaining(['Adam Older', 'Travis Young']));
+        expect(pk.monthly).toBeCloseTo(p.totals.paper + p.totals.works, 2);
     });
 });

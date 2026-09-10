@@ -44,19 +44,7 @@
   th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border-subtle); vertical-align: top; }
   th { background: var(--bg-subtle); color: var(--text-secondary); font-weight: var(--fw-semibold); font-size: var(--fs-xs); text-transform: uppercase; letter-spacing: .04em; white-space: nowrap; }
   td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
-  td.title { min-width: 260px; max-width: 460px; word-break: break-word; }
-  tr.lever { cursor: pointer; }
-  button.linkish { background: none; border: 0; padding: 0; font: inherit; color: inherit; text-align: left; cursor: pointer; }
-  button.linkish:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 2px; }
-  tr.lever:hover td { background: var(--bg-surface-2); }
-  tr.lever.open td { background: var(--accent-soft); }
-  tr.lever.dim td { color: var(--text-muted); }
   tr.detail td { background: var(--bg-surface-2); white-space: normal; }
-  .detail-grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-4); }
-  @media (max-width: 900px) { .detail-grid { grid-template-columns: 1fr; } .next { grid-template-columns: 1fr; } }
-  .detail-grid h4 { margin: 0 0 4px; font-size: var(--fs-xs); text-transform: uppercase; letter-spacing: .04em; color: var(--text-secondary); }
-  .detail-grid ul { margin: 0; padding-left: 18px; }
-  .detail-grid li { margin: 2px 0; }
   .pill { display: inline-block; padding: 1px 8px; border-radius: var(--radius-full); font-size: var(--fs-xs); font-weight: var(--fw-medium); background: var(--bg-subtle); color: var(--text-secondary); white-space: nowrap; }
   .pill.paper { background: var(--success-bg); color: var(--success); }
   .pill.light { background: var(--info-bg); color: var(--info); }
@@ -67,10 +55,6 @@
   .pill.st-dropped { background: var(--bg-subtle); color: var(--text-muted); text-decoration: line-through; }
   .pill.stage { background: var(--bg-subtle); color: var(--text-primary); }
   .pill.check { background: var(--warning-bg); color: var(--warning); }
-  .pill.uc { background: var(--info-bg); color: var(--info); }
-  .pill.age { background: var(--accent-soft); color: var(--accent); }
-  .pill.age.young { background: var(--bg-subtle); color: var(--text-muted); }
-  .pill.age.unknown { background: var(--warning-bg); color: var(--warning); }
   .row-actions { display: flex; gap: 4px; flex-wrap: wrap; }
   .filters { display: flex; gap: var(--space-2); align-items: center; flex-wrap: wrap; margin-bottom: var(--space-3); }
   .seg { display: inline-flex; border: 1px solid var(--border-default); border-radius: var(--radius-md); overflow: hidden; flex-wrap: wrap; }
@@ -78,15 +62,6 @@
   .seg button[aria-pressed="true"] { background: var(--accent); color: var(--accent-on); }
   .seg button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
   label.chk { font-size: var(--fs-sm); color: var(--text-secondary); display: inline-flex; gap: 6px; align-items: center; }
-  .props { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: var(--space-3); }
-  .prop { border: 1px solid var(--border-default); border-radius: var(--radius-md); padding: var(--space-3) var(--space-4); background: var(--bg-surface); min-width: 0; }
-  .prop.remote { border-style: dashed; }
-  .prop h3 { margin: 0; font-size: var(--fs-md); font-weight: var(--fw-semibold); display: flex; justify-content: space-between; gap: 8px; align-items: baseline; }
-  .prop h3 .rent { font-variant-numeric: tabular-nums; font-weight: var(--fw-bold); white-space: nowrap; }
-  .prop .meta { color: var(--text-muted); font-size: var(--fs-xs); margin: 2px 0 8px; }
-  .rooms { height: 8px; background: var(--bg-subtle); border-radius: var(--radius-full); overflow: hidden; display: flex; margin: 6px 0; }
-  .rooms i { display: block; height: 100%; }
-  .rooms i.used { background: var(--accent); } .rooms i.free { background: var(--accent-gold); }
   .ten { display: grid; grid-template-columns: 1fr auto; gap: 2px 8px; padding: 6px 0; border-top: 1px solid var(--border-subtle); font-size: var(--fs-sm); align-items: center; }
   .ten .n { font-weight: var(--fw-medium); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .ten .r { font-variant-numeric: tabular-nums; white-space: nowrap; }
@@ -98,11 +73,8 @@
   .prop-fields { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border-subtle); }
   .prop-fields label { display: flex; flex-direction: column; gap: 2px; font-size: var(--fs-xs); color: var(--text-secondary); min-width: 0; }
   .prop-fields select.sm, .prop-fields input.sm { max-width: 100%; width: 100%; }
-  .prop .flag { font-size: var(--fs-xs); color: var(--warning); margin-top: 6px; }
-  .prop .lev { font-size: var(--fs-xs); color: var(--text-secondary); margin-top: 6px; }
-  .prop .lev b { color: var(--text-primary); font-variant-numeric: tabular-nums; }
   .calc { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-5); }
-  @media (max-width: 900px) { .calc { grid-template-columns: 1fr; } .props { grid-template-columns: 1fr; } .prop-fields { grid-template-columns: 1fr; } }
+  @media (max-width: 900px) { .calc { grid-template-columns: 1fr; } .prop-fields { grid-template-columns: 1fr; } }
   .calc .form { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 12px; }
   .calc .form label { display: flex; flex-direction: column; gap: 3px; font-size: var(--fs-xs); color: var(--text-secondary); }
   .calc .form input, .calc .form select { font: inherit; font-size: var(--fs-sm); padding: 5px 8px; border: 1px solid var(--border-default); border-radius: var(--radius-sm); background: var(--bg-surface); color: var(--text-primary); }
@@ -120,6 +92,48 @@
   .mform input, .mform select, .mform textarea { font: inherit; font-size: var(--fs-sm); padding: 5px 8px; border: 1px solid var(--border-default); border-radius: var(--radius-sm); background: var(--bg-surface); color: var(--text-primary); }
   .mform input:focus-visible, .mform select:focus-visible, .mform textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
   @media (max-width: 900px) { .mform fieldset { grid-template-columns: 1fr; } }
+  /* Property work packs */
+  .pack { border: 1px solid var(--border-default); border-radius: var(--radius-md); margin-bottom: var(--space-2); background: var(--bg-surface); overflow: hidden; }
+  .pack.open { border-color: var(--accent); box-shadow: var(--shadow-sm); }
+  .pack-head { display: grid; grid-template-columns: 1fr auto 20px; gap: var(--space-3); align-items: center; padding: var(--space-3) var(--space-4); cursor: pointer; }
+  .pack-head:hover { background: var(--bg-surface-2); }
+  .pack-head:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+  .pack-n { display: flex; gap: var(--space-3); align-items: baseline; min-width: 0; }
+  .pack-n .idx { display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; flex: 0 0 22px; border-radius: var(--radius-full); background: var(--bg-subtle); color: var(--text-secondary); font-size: var(--fs-xs); font-weight: var(--fw-semibold); }
+  .pack-meta { display: flex; gap: 4px; flex-wrap: wrap; margin-top: 4px; }
+  .pack-fig { text-align: right; white-space: nowrap; }
+  .pack-fig b { display: block; font-size: var(--fs-lg); color: var(--success); font-variant-numeric: tabular-nums; }
+  .pack .chev { color: var(--text-muted); transition: transform .15s; }
+  .pack.open .chev { transform: rotate(90deg); color: var(--accent); }
+  .pack-body { padding: 0 var(--space-4) var(--space-4); border-top: 1px solid var(--border-subtle); }
+  .pack-block { margin-top: var(--space-4); }
+  .pack-block h4 { margin: 0 0 6px; font-size: var(--fs-xs); text-transform: uppercase; letter-spacing: .04em; color: var(--text-secondary); }
+  .pack-block > ul { margin: 0; padding-left: 18px; font-size: var(--fs-sm); }
+  .pack-block > ul li { margin: 3px 0; }
+  .pack-block .prop-fields { border-top: 0; padding-top: 0; grid-template-columns: repeat(6, 1fr); }
+  @media (max-width: 900px) { .pack-block .prop-fields { grid-template-columns: 1fr 1fr; } }
+  .pt { border: 1px solid var(--border-subtle); border-radius: var(--radius-md); padding: var(--space-3); margin-bottom: var(--space-2); background: var(--bg-surface-2); }
+  .pt.blocked { border-style: dashed; opacity: .85; }
+  .pt-h { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+  .pt-up { margin-left: auto; color: var(--success); font-weight: var(--fw-semibold); font-variant-numeric: tabular-nums; }
+  .pt-note { font-size: var(--fs-xs); color: var(--warning); margin-top: 2px; }
+  .pt-cols { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--space-3); margin-top: 8px; }
+  .pt-cols h5 { margin: 0 0 2px; font-size: var(--fs-xs); text-transform: uppercase; letter-spacing: .04em; color: var(--text-muted); font-weight: var(--fw-semibold); }
+  .pt-cols ul { margin: 0; padding-left: 16px; font-size: var(--fs-sm); }
+  .pt-cols li { margin: 2px 0; }
+  .pt .row-actions { margin-top: 8px; }
+  @media (max-width: 900px) { .pt-cols { grid-template-columns: 1fr; } .pack-head { grid-template-columns: 1fr auto; } }
+  tr.dim td { color: var(--text-muted); }
+  #setupAll { margin-top: var(--space-4); border-top: 1px solid var(--border-subtle); padding-top: var(--space-3); }
+  #setupAll summary { cursor: pointer; font-size: var(--fs-sm); font-weight: var(--fw-semibold); color: var(--accent); }
+  #setupTable td, #setupTable th { padding: 4px 8px; }
+  #setupTable select.sm, #setupTable input.sm { max-width: 100%; width: 100%; }
+  ul.approach { margin: 0; padding-left: 18px; font-size: var(--fs-sm); }
+  ul.approach li { margin: 6px 0; }
+  .doclist { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+  .doclist .doc { display: inline-flex; gap: 6px; align-items: baseline; border: 1px solid var(--border-default); border-radius: var(--radius-md); padding: 4px 10px; font-size: var(--fs-sm); color: var(--text-primary); text-decoration: none; background: var(--bg-surface); }
+  .doclist .doc:hover { border-color: var(--accent); }
+  #docInput { font-size: var(--fs-sm); }
   .clause { background: var(--bg-surface-2); border: 1px solid var(--border-subtle); border-radius: var(--radius-md); padding: var(--space-4); font-size: var(--fs-sm); white-space: pre-wrap; line-height: 1.5; }
   .two { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-5); }
   .strategies { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--space-4); }
@@ -144,9 +158,6 @@
   .neg { color: var(--danger); }
   td.wrap { white-space: normal; }
   @media (max-width: 900px) { .kpis.level { grid-template-columns: repeat(2, 1fr); } }
-  .todo { margin: var(--space-3) 0 0; padding-left: 22px; }
-  .todo li { margin: 4px 0; font-size: var(--fs-sm); }
-  .todo .who { color: var(--text-muted); font-size: var(--fs-xs); }
   @media (max-width: 900px) { .two { grid-template-columns: 1fr; } }
   .settings-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 8px 16px; }
   .setting { display: grid; grid-template-columns: 1fr 110px; gap: 6px; align-items: center; font-size: var(--fs-sm); padding: 4px 0; border-bottom: 1px solid var(--border-subtle); }
@@ -230,96 +241,65 @@
     </div>
     <p class="hint" style="margin-top:var(--space-3)">Rent is always the full 1-bed rate; a benefit cap shortfall is met by the CRF Housing Payment, never by a lower rent. Signed authority letter (authority_to_act_template.md) from every tenant so you can chase both council claims.</p>
   </section>
-
   <section class="card" id="gp-headline" aria-live="polite">
     <h2>Where the money is</h2>
-    <p class="hint">Every rent is priced at the full 1-bed rate (LHA Direct, September 2026); a benefit cap shortfall is met by the CRF Housing Payment, never by a lower rent. Rent now is the expected rent of every live tenancy as if all were paid; cash flow voids are not deducted.</p>
+    <p class="hint">Every rent is priced at the full 1-bed rate (LHA Direct, September 2026); a benefit cap shortfall is met by the CRF Housing Payment, never by a lower rent. Rent now is the expected rent of every live tenancy as if all were paid; cash flow voids are not deducted. Click any card for the rows behind it. The work itself is below, one pack per property.</p>
     <div class="kpis level" id="kpis"></div>
     <div class="detail" id="kpiDetail" hidden></div>
-    <h4 class="small muted" style="margin:var(--space-4) 0 0">Things to do, in order</h4>
-    <ol class="todo" id="todo"></ol>
   </section>
-
   <section class="card" id="gp-facts">
     <h2>Facts the plan still needs</h2>
     <p class="hint">Each of these changes a number above. Fill them here; they write straight to Airtable.</p>
     <div id="facts"></div>
   </section>
-
-  <section class="card" id="gp-order">
-    <h2>Strategic order</h2>
-    <p class="hint">Stage 1 is paper only. Stage 2 moves council tax. Stage 3 needs works. Stage 4 is voids and take-backs. "CRF a month" is the benefit cap shortfall to apply for alongside the change. Click a row for the evidence and the first step. Adopt what you will do; create the task from here.</p>
+  <section class="card" id="gp-packs">
+    <h2>The work, property by property</h2>
+    <p class="hint">In the order to do them. One visit closes a whole house: what to take, what happens with each tenant, what works are needed, what is submitted afterwards. Click a property to open its pack.</p>
     <div class="filters">
       <div class="seg" role="group" aria-label="Stage filter" id="stageSeg"></div>
-      <label class="chk"><input type="checkbox" id="showAgent"> Show further potential (properties outside the plan)</label>
       <label class="chk"><input type="checkbox" id="showDone"> Show done and dropped</label>
     </div>
-    <div class="tbl-wrap"><table id="leverTable" aria-label="Levers ranked by money per unit of effort"><thead><tr><th>#</th><th>Stage</th><th>Lever</th><th class="title">What</th><th class="num">A month</th><th class="num">CRF a month</th><th class="num">One-off</th><th>Effort</th><th>Status</th><th>Actions</th></tr></thead><tbody id="leverBody"></tbody></table></div>
+    <div id="packs"></div>
+    <details id="setupAll">
+      <summary>Set up every property (strategy, rooms, meters, council tax, who the tasks go to)</summary>
+      <p class="hint">Every property in the portfolio, including the ones with no work today and the agent-run ones. Lettable rooms is what drives the further potential figure on an agent-run house.</p>
+      <div class="tbl-wrap"><table id="setupTable"><thead><tr><th>Property</th><th>Strategy</th><th class="num">Extra</th><th class="num">Rooms</th><th>PAYG</th><th>Council tax</th><th>Tasks to</th></tr></thead><tbody id="setupBody"></tbody></table></div>
+    </details>
   </section>
-
-  <section class="card" id="gp-props">
-    <h2>Property by property</h2>
-    <p class="hint">Rooms in use against rooms you could let. Set Lettable Rooms, PAYG Meters and Council Tax Payer on each card; the plan re-prices as you do.</p>
-    <div class="filters">
-      <div class="seg" role="group" aria-label="Property filter" id="propSeg"><button type="button" data-prop-filter="kevin" aria-pressed="true">Managed by you</button><button type="button" data-prop-filter="all" aria-pressed="false">Whole portfolio</button></div>
-    </div>
-    <div class="props" id="props"></div>
-  </section>
-
-  <section class="card" id="gp-calc">
-    <h2>Benefit cap calculator</h2>
-    <p class="hint">Run this for any tenant going onto the 1-bed rate. The rent stays at the full rate; if the cap bites, this is the Crisis and Resilience Fund Housing Payment to apply for with them.</p>
-    <div class="calc">
-      <div class="form" id="calcForm">
-        <label>Household<select id="c-single"><option value="single">Single</option><option value="couple">Couple</option></select></label>
-        <label>Age<input id="c-age" type="number" min="18" max="100" value="35"></label>
-        <label>Children<input id="c-children" type="number" min="0" max="8" value="0"></label>
-        <label>Proposed rent a month (£)<input id="c-housing" type="number" min="0" step="0.01" value="900"></label>
-        <label>LCWRA<select id="c-lcwra"><option value="none">No</option><option value="existing">Yes, claim before Apr 2026</option><option value="new">Yes, new claim (Apr 2026 on)</option></select></label>
-        <label>Earnings a month after tax (£)<input id="c-earnings" type="number" min="0" step="1" value="0"></label>
-        <label class="chk wide"><input type="checkbox" id="c-pip"> Gets PIP or DLA</label>
-        <label class="chk wide"><input type="checkbox" id="c-carer"> Carer element in the award</label>
-      </div>
-      <div class="out" id="calcOut"></div>
-    </div>
-  </section>
-
-  <section class="card" id="gp-ct">
-    <h2>Joint tenancies and council tax</h2>
+  <section class="card" id="gp-approach">
+    <h2>How to raise it with a tenant</h2>
+    <p class="hint">Nothing here costs the tenant money, and the opening line has to say so before anything else. Read the honest bits too: on a joint tenancy there is a real change in what they are signing, and hiding it is what would spook them later.</p>
     <div class="two">
       <div>
-        <p class="hint">A house let by the room is an HMO for council tax and the owner pays (from 1 December 2023). Let the whole house to two tenants on one agreement of six months or more and they become liable. They claim Council Tax Reduction from West Suffolk (run by Anglia Revenues Partnership; up to 100% for a working-age household on UC and not working); any balance left, you pay straight to the council on their account under the side letter. Their Universal Credit housing costs do not change: each joint renter keeps their own 1-bed rate up to their share of the rent. Templates: ast_joint_template.md and council_tax_side_letter_template.md in Drive, beside the standard AST.</p>
-        <h4 class="small muted">Houses where this applies</h4>
-        <div id="ctList"></div>
+        <h4 class="small muted">Say this</h4>
+        <ul class="approach">
+          <li><b>Open with the money.</b> "This will not cost you anything, and it is not about arrears. Your rent is being put on the correct Universal Credit rate for your age, and Universal Credit pays the difference straight to us."</li>
+          <li><b>Why now.</b> "The rules changed. Someone 35 or over on Universal Credit gets the one-bedroom rate even in a room. You have been on the lower rate, and you should not have been."</li>
+          <li><b>What they do.</b> "One journal entry with me sitting next to you, and I fill in the forms. That is the whole job."</li>
+          <li><b>The cap, if it bites.</b> "There is a cap on total benefits. If it catches you, we apply to the council for a housing payment that comes to us, not to you. You keep your standard allowance either way."</li>
+          <li><b>Joint tenancy only.</b> "You two would go on one agreement for the whole house instead of a room each. Council tax then sits with you, you claim the reduction, and I pay anything left straight to the council."</li>
+          <li><b>Close on their gain.</b> "You get the whole house on the agreement, the paperwork done for you, and nothing more to pay."</li>
+        </ul>
       </div>
       <div>
-        <h4 class="small muted">Clause and side letter (reviewed by the AI Legal and Compliance head, 9 Sep 2026; a solicitor's hour before the first signature)</h4>
-        <div class="clause" id="ctClause"></div>
+        <h4 class="small muted">Do not say this</h4>
+        <ul class="approach">
+          <li><b>Never "your rent is going up"</b> with no second half of the sentence. That is the sentence that gets a tenant on the phone to Shelter.</li>
+          <li><b>Never imply it is conditional</b> on them signing today, or that anything happens to their tenancy if they say no.</li>
+          <li><b>Do not gloss the joint tenancy.</b> Tell them plainly: both names on one agreement means each is liable for the whole rent if the other stops paying, and if one leaves, both sign a surrender before anything changes. Ask them if they are happy sharing with that person before you produce a pen.</li>
+          <li><b>Do not promise a CRF award.</b> It is a council decision and short term. Say "we apply", not "you will get".</li>
+          <li><b>Do not ask for bank details or a payment.</b> Nothing on this plan takes money from a tenant.</li>
+        </ul>
+        <h4 class="small muted" style="margin-top:var(--space-3)">If they push back</h4>
+        <ul class="approach">
+          <li>"Will I owe anything?" — No. The housing element rises with the rent; where the cap bites we claim the shortfall from the council, paid to us.</li>
+          <li>"Why do you need my National Insurance number?" — The council forms will not submit without it. It goes on the forms and nowhere else.</li>
+          <li>"What if I say no?" — Nothing changes. Your tenancy carries on as it is.</li>
+          <li>"Is this a trick to raise rent later?" — The rent is the published rate for the area, set by the government each April. It is on the form we fill in together.</li>
+        </ul>
       </div>
     </div>
   </section>
-
-  <section class="card" id="gp-pack">
-    <h2>One meeting per tenant: everything submitted in one go</h2>
-    <p class="hint">For each tenant the plan touches: what changes, what to bring, and which forms go in the same sitting. Universal Credit changes are reported by the tenant in their journal with you beside them; the two council forms are online through Anglia Revenues Partnership and can be completed with the tenant and paid to you.</p>
-    <div id="packs"></div>
-    <div class="two" style="margin-top:var(--space-4)">
-      <div><h4 class="small muted">Collect at the meeting (every tenant)</h4><ul class="small" style="margin:0;padding-left:18px">
-        <li>Date of birth and National Insurance number (both go into Airtable that day)</li>
-        <li>Photo ID and the latest UC statement (shows LCWRA, carer element, earnings: the cap exemptions)</li>
-        <li>Mobile number and email that match the UC account</li>
-        <li>Signed rent change (or the joint AST and side letter) and a copy for them</li>
-        <li>Bank details for the council forms; last two months' statements if the form asks</li>
-        <li>Signed authority letter so you can speak to Anglia Revenues about their claim</li>
-      </ul></div>
-      <div><h4 class="small muted">Submit in the same sitting</h4><ul class="small" style="margin:0;padding-left:18px">
-        <li><b>Universal Credit:</b> tenant reports "change to housing costs" in the journal with the new rent and date; you request the managed payment to landlord (UC47 route) if not already in place</li>
-        <li><b>Council Tax Reduction</b> (joint tenancies only): the Anglia Revenues <a href="https://www.angliarevenues.gov.uk/westsuffolk/index.cfm" target="_blank" rel="noopener">"Apply for Housing Benefit and/or Council Tax Reduction"</a> form. It asks about the tenant and everyone living with them: income, capital and other benefits; it saves against the tenant's email and a password with a reference code, so bring both. If the tenant applied for UC in the last two months and ticked Council Tax Reduction, no form is needed. When UC changes later, the "Rapid reclaim Council Tax Reduction" form (UC claimants only) is the quick route. Tell the council the liability changed.</li>
-        <li><b>CRF Housing Payment</b> (capped tenants only): the Anglia Revenues "Apply for CRF Housing Payment and/or Exceptional Hardship Payment" form (same portal). It asks for all household income and weekly expenditure, and the last two months' bank statements; the payment option lets it go to the landlord. Awards are short term or one-off, so diarise the renewal. Take the shortfall figure from the calculator and the signed authority letter (authority_to_act_template.md in Drive).</li>
-      </ul></div>
-    </div>
-  </section>
-
   <section class="card" id="gp-form">
     <h2>Tenant meeting form</h2>
     <p class="hint">Fill this in with the tenant. Save writes every field to the tenant's record in Airtable, so the rent change, Council Tax Reduction and CRF forms can be completed from one place. Bank account numbers are not stored here: the council forms take them directly.</p>
@@ -354,8 +334,64 @@
       </fieldset>
       <div class="row-actions"><button type="submit" class="btn btn-primary" id="meetingSave">Save to the tenant's record</button><span class="small muted" id="meetingStatus"></span></div>
     </form>
-  </section>
+    <div id="docsBox" hidden>
+      <h4 class="small muted" style="margin-top:var(--space-4)">Scanned documents on this tenant's record</h4>
+      <p class="hint">Photo ID, bank statements, UC statement screen grabs, signed pages. They attach to the tenant in Airtable, so whoever fills a form has them to hand. Up to 3.7MB each.</p>
+      <div class="row-actions">
+        <input type="file" id="docInput" multiple accept="image/*,application/pdf" aria-label="Documents to attach">
+        <button type="button" class="btn" id="docUpload">Attach to the record</button>
+        <span class="small muted" id="docStatus"></span>
+      </div>
+      <div id="docList" class="doclist"></div>
+    </div>
+    <div class="two" style="margin-top:var(--space-4)">
+      <div><h4 class="small muted">Collect at the meeting (every tenant)</h4><ul class="small" style="margin:0;padding-left:18px">
+        <li>Date of birth and National Insurance number (both go into Airtable that day)</li>
+        <li>Photo ID and the latest UC statement (shows LCWRA, carer element, earnings: the cap exemptions)</li>
+        <li>Mobile number and email that match the UC account</li>
+        <li>Signed rent change (or the joint AST and side letter) and a copy for them</li>
+        <li>Bank details for the council forms; last two months' statements if the form asks</li>
+        <li>Signed authority letter so you can speak to Anglia Revenues about their claim</li>
+      </ul></div>
+      <div><h4 class="small muted">Submit in the same sitting</h4><ul class="small" style="margin:0;padding-left:18px">
+        <li><b>Universal Credit:</b> tenant reports "change to housing costs" in the journal with the new rent and date; you request the managed payment to landlord (UC47 route) if not already in place</li>
+        <li><b>Council Tax Reduction</b> (joint tenancies only): the Anglia Revenues <a href="https://www.angliarevenues.gov.uk/westsuffolk/index.cfm" target="_blank" rel="noopener">"Apply for Housing Benefit and/or Council Tax Reduction"</a> form. It asks about the tenant and everyone living with them: income, capital and other benefits; it saves against the tenant's email and a password with a reference code, so bring both. If the tenant applied for UC in the last two months and ticked Council Tax Reduction, no form is needed. When UC changes later, the "Rapid reclaim Council Tax Reduction" form (UC claimants only) is the quick route. Tell the council the liability changed.</li>
+        <li><b>CRF Housing Payment</b> (capped tenants only): the Anglia Revenues "Apply for CRF Housing Payment and/or Exceptional Hardship Payment" form (same portal). It asks for all household income and weekly expenditure, and the last two months' bank statements; the payment option lets it go to the landlord. Awards are short term or one-off, so diarise the renewal. Take the shortfall figure from the calculator and the signed authority letter (authority_to_act_template.md in Drive).</li>
+      </ul></div>
+    </div>
 
+  </section>
+  <section class="card" id="gp-ct">
+    <h2>Joint tenancies and council tax</h2>
+    <div class="two">
+      <div>
+        <p class="hint">A house let by the room is an HMO for council tax and the owner pays (from 1 December 2023). Let the whole house to two tenants on one agreement of six months or more and they become liable. They claim Council Tax Reduction from West Suffolk (run by Anglia Revenues Partnership; up to 100% for a working-age household on UC and not working); any balance left, you pay straight to the council on their account under the side letter. Their Universal Credit housing costs do not change: each joint renter keeps their own 1-bed rate up to their share of the rent. Templates: ast_joint_template.md and council_tax_side_letter_template.md in Drive, beside the standard AST.</p>
+        <h4 class="small muted">Houses where this applies</h4>
+        <div id="ctList"></div>
+      </div>
+      <div>
+        <h4 class="small muted">Clause and side letter (reviewed by the AI Legal and Compliance head, 9 Sep 2026; a solicitor's hour before the first signature)</h4>
+        <div class="clause" id="ctClause"></div>
+      </div>
+    </div>
+  </section>
+  <section class="card" id="gp-calc">
+    <h2>Benefit cap calculator</h2>
+    <p class="hint">Run this for any tenant going onto the 1-bed rate. The rent stays at the full rate; if the cap bites, this is the Crisis and Resilience Fund Housing Payment to apply for with them.</p>
+    <div class="calc">
+      <div class="form" id="calcForm">
+        <label>Household<select id="c-single"><option value="single">Single</option><option value="couple">Couple</option></select></label>
+        <label>Age<input id="c-age" type="number" min="18" max="100" value="35"></label>
+        <label>Children<input id="c-children" type="number" min="0" max="8" value="0"></label>
+        <label>Proposed rent a month (£)<input id="c-housing" type="number" min="0" step="0.01" value="900"></label>
+        <label>LCWRA<select id="c-lcwra"><option value="none">No</option><option value="existing">Yes, claim before Apr 2026</option><option value="new">Yes, new claim (Apr 2026 on)</option></select></label>
+        <label>Earnings a month after tax (£)<input id="c-earnings" type="number" min="0" step="1" value="0"></label>
+        <label class="chk wide"><input type="checkbox" id="c-pip"> Gets PIP or DLA</label>
+        <label class="chk wide"><input type="checkbox" id="c-carer"> Carer element in the award</label>
+      </div>
+      <div class="out" id="calcOut"></div>
+    </div>
+  </section>
   <section class="card" id="gp-marketing">
     <h2>Finding over-35 Universal Credit tenants</h2>
     <p class="hint">Where the last 254 applicants came from (Agile Lets application form, 2017 to 2021), the channels that still work now, and the flow from enquiry to move-in.</p>
@@ -364,7 +400,6 @@
       <div id="mktFigures"></div>
     </div>
   </section>
-
   <section class="card" id="gp-settings">
     <h2>Assumptions</h2>
     <p class="hint">Every figure the plan uses that is not read from a live record. Edit here; saved to Airtable so the same numbers show on every device. Rates change each April.</p>
@@ -375,9 +410,9 @@
 <div id="toast" role="status" aria-live="polite"></div>
 
 <script src="js/ai-models.js?v=1"></script>
-<script src="js/config.js?v=61"></script>
+<script src="js/config.js?v=62"></script>
 <script src="js/sync-bar.js?v=6"></script>
-<script src="js/growth-plan-model.js?v=1"></script>
+<script src="js/growth-plan-model.js?v=2"></script>
 <script>
 (function () {
   'use strict';
@@ -388,7 +423,7 @@
   const $ = id => document.getElementById(id);
 
   let PAT = '';
-  const state = { raw: null, data: null, settings: {}, settingRows: {}, plan: null, ui: { stage: 'all', showAgent: false, showDone: false, propFilter: 'kevin', openLever: null, openKpi: null, formTenant: '' }, busy: new Set() };
+  const state = { raw: null, data: null, settings: {}, settingRows: {}, plan: null, ui: { stage: 'all', showDone: false, openPack: null, openKpi: null, formTenant: '' }, busy: new Set() };
 
   // ── Auth (shared key with compliance.html and the Inbound Comms tracker) ──
   function showAuth(err) {
@@ -483,7 +518,8 @@
       units: raw.units.map(r => ({ id: r.id, propertyId: link(r.fields[U.property])[0], number: r.fields[U.number], type: sel(r.fields[U.type]), status: sel(r.fields[U.status]), rent: r.fields[U.rent], beds: r.fields[U.beds], incomeType: sel(r.fields[U.incomeType]), tenantIds: link(r.fields[U.tenants]) })),
       tenants: raw.tenants.map(r => ({ id: r.id, name: r.fields[T.name] || '', status: sel(r.fields[T.status]), dob: r.fields[T.dob] || '', payType: sel(r.fields[T.payType]), capExemption: sel(r.fields[T.capExemption]) || 'Unknown', notes: r.fields[T.notes] || '', phone: r.fields[T.phone] || '', email: r.fields[T.email] || '', ni: r.fields[T.ni] || '',
         over35Confirmed: !!r.fields[T.over35], dueDay: sel(r.fields[T.dueDay]) || '', meetingDate: r.fields[T.meetingDate] || '', ucPayDay: r.fields[T.ucPayDay] || '', household: sel(r.fields[T.household]) || '', otherAdults: r.fields[T.otherAdults] || '',
-        idSeen: sel(r.fields[T.idSeen]) || '', ucStatementSeen: !!r.fields[T.ucStatementSeen], weeklyIncome: r.fields[T.weeklyIncome] || '', weeklySpending: r.fields[T.weeklySpending] || '', bankStatements: !!r.fields[T.bankStatements], authoritySigned: !!r.fields[T.authoritySigned], ctAccount: r.fields[T.ctAccount] || '', meetingNotes: r.fields[T.meetingNotes] || '' })),
+        idSeen: sel(r.fields[T.idSeen]) || '', ucStatementSeen: !!r.fields[T.ucStatementSeen], weeklyIncome: r.fields[T.weeklyIncome] || '', weeklySpending: r.fields[T.weeklySpending] || '', bankStatements: !!r.fields[T.bankStatements], authoritySigned: !!r.fields[T.authoritySigned], ctAccount: r.fields[T.ctAccount] || '', meetingNotes: r.fields[T.meetingNotes] || '',
+        documents: (r.fields[T.documents] || []).map(a => ({ id: a.id, filename: a.filename, url: a.url, size: a.size })) })),
       tenancies: raw.tenancies.map(r => ({ id: r.id, tenantIds: link(r.fields[C.tenants]), unitId: link(r.fields[C.unit])[0], rent: r.fields[C.rent], actual: r.fields[C.actual] })),
       costs: raw.costs.filter(r => link(r.fields[K.property]).length).map(r => ({ propertyId: link(r.fields[K.property])[0], shared: link(r.fields[K.property]).length > 1, name: r.fields[K.name] || '', monthly: M.monthlyFromFrequency(r.fields[K.expected], sel(r.fields[K.frequency])) })),
       planRows: raw.planRows.map(r => ({ id: r.id, key: r.fields[GP.plan.key] || '', status: sel(r.fields[GP.plan.status]) || 'Candidate', taskIds: link(r.fields[GP.plan.tasks]) })),
@@ -492,7 +528,7 @@
   function recompute() { state.plan = M.buildPlan(state.data, state.settings, todayISO()); window._growthPlan = state; }
 
   // ── Render ──
-  function renderAll() { renderHeadline(); renderFacts(); renderStageSeg(); renderLevers(); renderProps(); renderCalc(); renderCt(); renderPacks(); renderMeetingForm(); renderMarketing(); renderSettings(); }
+  function renderAll() { renderHeadline(); renderFacts(); renderStageSeg(); renderPacks(); renderSetupAll(); renderCalc(); renderCt(); renderMeetingForm(); renderMarketing(); renderSettings(); }
 
   // ── Tenant meeting form ──
   const FORM_FIELDS = ['dob', 'ni', 'phone', 'email', 'idSeen', 'over35', 'ucPayDay', 'dueDay', 'household', 'capExemption', 'ucStatementSeen', 'otherAdults', 'ctAccount', 'weeklyIncome', 'weeklySpending', 'bankStatements', 'authoritySigned', 'meetingDate', 'meetingNotes'];
@@ -504,7 +540,7 @@
     sel.innerHTML = '<option value="">Choose a tenant…</option>' + tenants.map(t => `<option value="${esc(t.id)}" ${t.id === state.ui.formTenant ? 'selected' : ''}>${esc(t.label)}</option>`).join('');
     const form = $('meetingForm');
     const t = state.data.tenants.find(x => x.id === state.ui.formTenant);
-    form.hidden = !t;
+    form.hidden = !t; $('docsBox').hidden = !t;
     if (!t) return;
     const map = { dob: t.dob, ni: t.ni, phone: t.phone, email: t.email, idSeen: t.idSeen, over35: t.over35Confirmed, ucPayDay: t.ucPayDay, dueDay: t.dueDay, household: t.household, capExemption: t.capExemption || 'Unknown', ucStatementSeen: t.ucStatementSeen, otherAdults: t.otherAdults, ctAccount: t.ctAccount, weeklyIncome: t.weeklyIncome, weeklySpending: t.weeklySpending, bankStatements: t.bankStatements, authoritySigned: t.authoritySigned, meetingDate: t.meetingDate || todayISO(), meetingNotes: t.meetingNotes };
     FORM_FIELDS.forEach(k => { const el = form.elements[k]; if (!el) return; if (el.type === 'checkbox') el.checked = !!map[k]; else el.value = map[k] == null ? '' : map[k]; });
@@ -547,8 +583,6 @@
       kpi('maximum', 'Maximum rent', gbp(t.rentNow + t.potentialIncrease), 'a month if every lever lands'),
     ].join('');
     renderKpiDetail();
-    const todo = state.plan.todo || [];
-    $('todo').innerHTML = todo.length ? todo.map(x => `<li><span>${esc(x.text)}</span> <span class="who">${esc(x.property)} · ${esc(x.owner)}${x.status !== 'Candidate' ? ' · ' + esc(x.status) : ''}</span></li>`).join('') : '<li class="muted">Nothing to do on the current data</li>';
   }
 
   // What each metric is made of: the rows behind it, with the same numbers the card adds up.
@@ -579,84 +613,22 @@
     const p = state.plan; const items = [];
     p.unknownAge.forEach(u => items.push(`<div class="ten"><span class="n">${esc(u.tenant)} <span class="muted small">${esc(u.property)}, unit ${esc(u.unit)}</span></span><span class="r">age to confirm</span><span class="m">Date of birth: <span class="inl"><input class="sm" type="date" data-dob="${esc(u.tenantId)}" aria-label="Date of birth for ${esc(u.tenant)}"><button class="btn btn-sm" data-act="save-dob" data-tenant="${esc(u.tenantId)}">Save</button></span> · or <button class="btn btn-sm" data-act="confirm-35" data-tenant="${esc(u.tenantId)}">Confirm 35 or over</button> · not in the plan until one of these is done</span></div>`));
     const unknownEx = []; p.properties.forEach(v => v.tenants.forEach(t => { if (t.uc && t.capExemption === 'Unknown' && v.mgmt === 'kevin') unknownEx.push({ t, v }); }));
-    if (unknownEx.length) items.push(`<div class="ten"><span class="n">Benefit cap position unknown for ${unknownEx.length} UC tenant${unknownEx.length > 1 ? 's' : ''}</span><span class="r">${gbp(p.totals.crfShortfall, 2)} a month of CRF claims</span><span class="m">Set it on each tenant in the property cards. LCWRA, a carer element, PIP or DLA, or earnings of £881+ means no cap and no CRF form. Otherwise the CRF Housing Payment covers the shortfall.</span></div>`);
+    if (unknownEx.length) items.push(`<div class="ten"><span class="n">Benefit cap position unknown for ${unknownEx.length} UC tenant${unknownEx.length > 1 ? 's' : ''}</span><span class="r">${gbp(p.totals.crfShortfall, 2)} a month of CRF claims</span><span class="m">Set it on the tenant meeting form below. LCWRA, a carer element, PIP or DLA, or earnings of £881+ means no cap and no CRF form. Otherwise the CRF Housing Payment covers the shortfall.</span></div>`);
     const noNi = []; p.properties.forEach(v => v.tenants.forEach(t => { const raw = state.data.tenants.find(x => x.id === t.id) || {}; if (t.uc && v.mgmt === 'kevin' && !raw.ni) noNi.push(t.name); }));
     if (noNi.length) items.push(`<div class="ten"><span class="n">National Insurance number missing for ${noNi.length} UC tenant${noNi.length > 1 ? 's' : ''}</span><span class="r">needed on every form</span><span class="m">${esc(noNi.join(', '))}. Collect at the tenant meeting; enter it in Airtable (Tenants → National Insurance Number).</span></div>`);
     const noStrat = p.properties.filter(v => v.mgmt === 'kevin' && !v.strategy);
-    if (noStrat.length) items.push(`<div class="ten"><span class="n">Strategy not set on ${noStrat.length} house${noStrat.length > 1 ? 's' : ''}</span><span class="r">candidates only</span><span class="m">${esc(noStrat.map(v => v.name).join(', '))}. Pick Joint tenancy, Add tenants or Hold on the card.</span></div>`);
+    if (noStrat.length) items.push(`<div class="ten"><span class="n">Strategy not set on ${noStrat.length} house${noStrat.length > 1 ? 's' : ''}</span><span class="r">candidates only</span><span class="m">${esc(noStrat.map(v => v.name).join(', '))}. Pick Joint tenancy, HMO or Leave as is in the setup table above.</span></div>`);
     const noRooms = p.properties.filter(v => v.mgmt === 'kevin' && v.lettable == null);
-    if (noRooms.length) items.push(`<div class="ten"><span class="n">Lettable rooms not set on ${noRooms.length} propert${noRooms.length > 1 ? 'ies' : 'y'}</span><span class="r">hides extra rooms</span><span class="m">${esc(noRooms.map(v => v.name).join(', '))}. Bedrooms plus any reception that can be a bedroom. Set on the cards below.</span></div>`);
+    if (noRooms.length) items.push(`<div class="ten"><span class="n">Lettable rooms not set on ${noRooms.length} propert${noRooms.length > 1 ? 'ies' : 'y'}</span><span class="r">hides extra rooms</span><span class="m">${esc(noRooms.map(v => v.name).join(', '))}. Bedrooms plus any reception that can be a bedroom. Set it on the property, in the setup table above.</span></div>`);
     const noCt = p.properties.filter(v => v.mgmt === 'kevin' && v.ctPayer === 'Unknown' && v.tenants.length === 2);
-    if (noCt.length) items.push(`<div class="ten"><span class="n">Council tax payer unknown on ${noCt.length} two-tenant house${noCt.length > 1 ? 's' : ''}</span><span class="r">+${gbp(p.totals.check, 2)} if you pay it today</span><span class="m">${esc(noCt.map(v => v.name).join(', '))}. Set Council Tax Payer on the card.</span></div>`);
+    if (noCt.length) items.push(`<div class="ten"><span class="n">Council tax payer unknown on ${noCt.length} two-tenant house${noCt.length > 1 ? 's' : ''}</span><span class="r">+${gbp(p.totals.check, 2)} if you pay it today</span><span class="m">${esc(noCt.map(v => v.name).join(', '))}. Set Council Tax Payer in the setup table above.</span></div>`);
     $('facts').innerHTML = items.length ? items.join('') : '<div class="empty">Nothing missing. Every figure above rests on a recorded fact.</div>';
   }
 
   function renderStageSeg() {
     const names = state.plan.stageNames;
-    $('stageSeg').innerHTML = [['all', 'All']].concat(Object.keys(names).filter(k => k !== '5').map(k => [k, `${k} ${names[k]}`])).map(([k, l]) => `<button type="button" data-stage="${k}" aria-pressed="${state.ui.stage === k}">${esc(l)}</button>`).join('');
-  }
-
-  function visibleLevers() {
-    return state.plan.levers.filter(l => {
-      if (!state.ui.showAgent && l.counted === 'agent') return false;
-      if (!state.ui.showDone && (l.status === 'Done' || l.status === 'Dropped')) return false;
-      if (state.ui.stage !== 'all' && String(l.stage) !== state.ui.stage) return false;
-      return true;
-    });
-  }
-  function renderLevers() {
-    const rows = visibleLevers();
-    if (!rows.length) { $('leverBody').innerHTML = '<tr><td colspan="10" class="empty">No levers match this filter.</td></tr>'; return; }
-    $('leverBody').innerHTML = rows.map((l, i) => {
-      const open = state.ui.openLever === l.key;
-      const countedPill = l.counted === 'check' ? '<span class="pill check">fact needed</span>' : l.counted === 'alternative' ? '<span class="pill">either/or</span>' : l.counted === 'remote' ? '<span class="pill">away</span>' : l.counted === 'agent' ? '<span class="pill">potential</span>' : '';
-      const busy = state.busy.has(l.key) ? 'disabled' : '';
-      const actions = l.counted === 'agent' ? '' : [
-        l.status === 'Candidate' ? `<button class="btn btn-sm" data-act="adopt" data-key="${esc(l.key)}" ${busy}>Adopt</button>` : '',
-        (l.status !== 'Done' && l.status !== 'Dropped') ? `<button class="btn btn-sm btn-primary" data-act="task" data-key="${esc(l.key)}" ${busy}>Task</button>` : '',
-        (l.status === 'Adopted' || l.status === 'In progress') ? `<button class="btn btn-sm" data-act="done" data-key="${esc(l.key)}" ${busy}>Done</button>` : '',
-        (l.status !== 'Done' && l.status !== 'Dropped') ? `<button class="btn btn-sm btn-ghost" data-act="drop" data-key="${esc(l.key)}" ${busy}>Drop</button>` : '',
-        (l.status === 'Done' || l.status === 'Dropped') ? `<button class="btn btn-sm btn-ghost" data-act="reopen" data-key="${esc(l.key)}" ${busy}>Reopen</button>` : '',
-      ].join('');
-      const main = `<tr class="lever ${open ? 'open' : ''} ${(l.status === 'Done' || l.status === 'Dropped' || l.counted === 'alternative') ? 'dim' : ''}" data-key="${esc(l.key)}">
-        <td class="num">${i + 1}</td><td><span class="pill stage">${l.stage} ${esc(state.plan.stageNames[l.stage])}</span></td><td>${esc(l.lever)} ${countedPill}</td>
-        <td class="title"><button type="button" class="linkish" data-toggle="${esc(l.key)}" aria-expanded="${open}" aria-controls="lever-detail-${i}">${esc(l.title)}</button></td><td class="num">${l.monthly ? '+' + gbp(l.monthly, 2) : '—'}</td><td class="num muted">${l.capShortfall ? gbp(l.capShortfall, 2) : ''}</td><td class="num">${l.oneOff ? gbp(l.oneOff) : '—'}</td>
-        <td><span class="pill ${esc(l.effort.toLowerCase())}">${esc(l.effort)}</span></td><td><span class="pill st-${esc(l.status.toLowerCase().replace(/\s+/g, '-'))}">${esc(l.status)}</span>${l.taskIds && l.taskIds.length ? ` <span class="pill">${l.taskIds.length} task${l.taskIds.length > 1 ? 's' : ''}</span>` : ''}</td><td><div class="row-actions">${actions}</div></td></tr>`;
-      const detail = open ? `<tr class="detail" id="lever-detail-${i}"><td colspan="10"><div class="detail-grid"><div><h4>Evidence</h4><ul>${l.evidence.map(e => `<li>${esc(e)}</li>`).join('')}</ul></div><div><h4>First step</h4><div>${esc(l.firstStep)}</div>${l.needs.length ? `<h4 style="margin-top:8px">Before it lands</h4><ul>${l.needs.map(e => `<li>${esc(e)}</li>`).join('')}</ul>` : ''}</div></div></td></tr>` : '';
-      return main + detail;
-    }).join('');
-  }
-
-  function agePill(t) {
-    if (t.age == null) return '<span class="pill age unknown">age unknown</span>';
-    return `<span class="pill age ${t.age < 35 ? 'young' : ''}">${t.age}</span>`;
-  }
-  function renderProps() {
-    const views = state.plan.properties.filter(v => state.ui.propFilter === 'all' || v.mgmt === 'kevin').sort((a, b) => (a.mgmt === 'kevin' ? 0 : 1) - (b.mgmt === 'kevin' ? 0 : 1) || b.rentNow - a.rentNow);
-    document.querySelectorAll('#propSeg button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.propFilter === state.ui.propFilter)));
-    if (!views.length) { $('props').innerHTML = '<div class="empty">No properties loaded.</div>'; return; }
-    const exOpts = ['Unknown', 'None (capped)', 'LCWRA', 'PIP or DLA', 'Carer', 'Earnings over threshold', 'Not on UC'];
-    $('props').innerHTML = views.map(v => {
-      const used = Math.min(v.roomsInUse, Math.max(v.lettableEff, 1)), free = Math.max(0, v.lettableEff - v.roomsInUse), total = Math.max(v.lettableEff, v.roomsInUse, 1);
-      const tenants = v.tenants.map(t => `<div class="ten"><span class="n">${esc(t.name)}</span><span class="r">${gbp(t.rent, 2)}${t.rateNow ? ` <span class="muted small">/ ${gbp(t.rateNow, 2)} rate</span>` : ''}</span>
-        <span class="m">${esc(t.unitType)} ${t.uc ? '<span class="pill uc">UC</span>' : t.hb ? '<span class="pill uc">HB</span>' : `<span class="pill">${esc(t.payType || '—')}</span>`} ${agePill(t)}
-          ${(() => { const raw = state.data.tenants.find(x => x.id === t.id) || {}; return v.mgmt === 'kevin' && t.uc ? `<span class="pill ${raw.ni ? '' : 'unknown age'}" title="National Insurance number">${raw.ni ? 'NI on file' : 'no NI'}</span>` : ''; })()}
-          ${t.age == null && v.mgmt === 'kevin' ? `<span class="inl"><input class="sm" type="date" data-dob="${esc(t.id)}" aria-label="Date of birth for ${esc(t.name)}"><button class="btn btn-sm" data-act="save-dob" data-tenant="${esc(t.id)}">Save</button></span>` : ''}
-          ${t.uc && v.mgmt === 'kevin' ? `<span class="inl">cap: <select class="sm" data-exempt="${esc(t.id)}" aria-label="Benefit cap exemption for ${esc(t.name)}">${exOpts.map(o => `<option ${o === t.capExemption ? 'selected' : ''}>${esc(o)}</option>`).join('')}</select></span>` : ''}
-        </span>${t.note ? `<span class="note">${esc(t.note)}</span>` : ''}</div>`).join('');
-      const fields = v.mgmt === 'kevin' ? `<div class="prop-fields">
-        <label>Strategy<select class="sm" data-prop-field="strategy" data-prop="${esc(v.id)}">${['', 'Joint tenancy', 'HMO', 'Leave as is'].map(o => `<option value="${o}" ${o === v.strategy ? 'selected' : ''}>${o || 'Not set'}</option>`).join('')}</select></label>
-        <label>Extra tenants (HMO)<input class="sm" type="number" min="0" max="6" data-prop-field="plannedExtra" data-prop="${esc(v.id)}" value="${v.plannedExtra ? esc(v.plannedExtra) : ''}" placeholder="0"></label>
-        <label>Tasks go to<select class="sm" data-prop-field="owner" data-prop="${esc(v.id)}">${['', 'Roy', 'Kevin'].map(o => `<option value="${o}" ${o === v.owner ? 'selected' : ''}>${o || 'Default'}</option>`).join('')}</select></label>
-        <label>Lettable rooms<input class="sm" type="number" min="1" max="12" data-prop-field="lettableRooms" data-prop="${esc(v.id)}" value="${v.lettable == null ? '' : esc(v.lettable)}" placeholder="${esc(v.roomsInUse)} in use"></label>
-        <label>PAYG meters<select class="sm" data-prop-field="payg" data-prop="${esc(v.id)}">${['Unknown', 'Yes', 'No'].map(o => `<option ${o === v.payg ? 'selected' : ''}>${o}</option>`).join('')}</select></label>
-        <label>Council tax payer<select class="sm" data-prop-field="ctPayer" data-prop="${esc(v.id)}">${['Unknown', 'Owner', 'Tenants'].map(o => `<option ${o === v.ctPayer ? 'selected' : ''}>${o}</option>`).join('')}</select></label></div>` : '';
-      const levers = v.levers.filter(l => l.status !== 'Dropped').map(l => `<div class="lev">${esc(l.lever)}: <b>${l.monthly ? '+' + gbp(l.monthly, 2) : (l.monthlyIfExempt ? '+' + gbp(l.monthlyIfExempt, 2) + ' if exempt' : '—')}</b> <span class="muted">${esc(l.status)}</span></div>`).join('');
-      return `<div class="prop ${v.local ? '' : 'remote'}" data-prop-card="${esc(v.id)}"><h3><span>${esc(v.name)}</span><span class="rent">${gbp(v.rentNow)}</span></h3>
-        <div class="meta">${esc(v.type || '')}${v.area ? ' · ' + esc(v.area) : ''}${v.brma ? ' · ' + esc(v.brma) + ' BRMA' : ''}${v.mgmt === 'kevin' ? (v.strategy ? ' · <b>' + esc(v.strategy) + (v.strategy === 'HMO' && v.plannedExtra ? ' (+' + v.plannedExtra + ')' : '') + '</b>' : ' · strategy not set') : ' · ' + esc(v.agent || 'agent')}${v.ctBand ? ` · band ${esc(v.ctBand)} ${gbp(v.ctBandMonthly)}/mo` : ''}${v.ctLive ? ` · paying ${gbp(v.ctLive)}` : ''}${v.owner ? ' · tasks to ' + esc(v.owner) : ''}</div>
-        ${v.mgmt === 'kevin' ? `<div class="rooms" title="${used} rooms in use of ${v.lettableEff} lettable"><i class="used" style="width:${(used / total) * 100}%"></i><i class="free" style="width:${(free / total) * 100}%"></i></div><div class="small muted">${v.roomsInUse} room${v.roomsInUse === 1 ? '' : 's'} in use · ${v.lettable == null ? 'lettable rooms not set' : v.lettableEff + ' lettable'}${free ? ` · ${free} free` : ''}</div>` : ''}
-        ${tenants || '<div class="empty">No active tenant</div>'}${fields}${levers}${v.flags.map(f => `<div class="flag">${esc(f)}</div>`).join('')}${v.brmaNote ? `<div class="flag">${esc(v.brmaNote)}</div>` : ''}</div>`;
-    }).join('');
+    const have = new Set((state.plan.packs || []).map(pk => String(pk.stage)));
+    $('stageSeg').innerHTML = [['all', 'All']].concat(Object.keys(names).filter(k => k !== '5' && have.has(k)).map(k => [k, `${k} ${names[k]}`])).map(([k, l]) => `<button type="button" data-stage="${k}" aria-pressed="${state.ui.stage === k}">${esc(l)}</button>`).join('');
   }
 
   function renderCalc() {
@@ -715,35 +687,125 @@ BEFORE THE FIRST ONE IS SIGNED (all in writing)
     ['later', 'Councils: East Cambs, Braintree, Huntingdonshire, Cambridge', 0, 'Housing options teams outside West Suffolk; one email with the room list.'],
   ];
   const FLOW = ['Enquiry arrives (any channel) and is logged as a task', 'Screen in writing: 35 or over, on UC, single, household size; ask for the latest UC statement', 'Cap check on this page: exempt (LCWRA, carer, PIP, earnings) or CRF Housing Payment needed', 'Roy shows the room; ID and references collected', 'Tenant meeting: rent at the 1-bed rate, UC journal change, managed payment request, CRF form if capped', 'Move in: PAYG meters in the tenant\'s name, keys, Airtable updated (DOB, NI, phone, email)'];
-  function renderPacks() {
-    const rows = [];
-    state.plan.properties.filter(v => v.mgmt === 'kevin').forEach(v => {
-      const ctLever = v.levers.find(l => l.lever === 'Council tax' && l.status !== 'Dropped' && l.counted !== 'agent');
-      v.tenants.forEach(t => {
-        if (!t.uc && !t.hb) return;
-        const raw = state.data.tenants.find(x => x.id === t.id) || {};
-        const up = v.levers.find(l => l.tenantId === t.id && l.status !== 'Dropped');
-        const ageUnknown = t.age == null;
-        const joint = !!ctLever && v.strategy === 'Joint tenancy';
-        const crf = up ? (up.capShortfall || 0) : 0;
-        const capNote = t.capExemption !== 'Unknown' ? t.capExemption : (t.capShortfall ? `unknown; ${gbp(t.capShortfall, 2)} short at the full rate` : 'unknown');
-        if (!up && !joint && !ageUnknown) return;
-        const changes = [];
-        if (up) changes.push(`Rent to ${gbp(t.target || t.rateNow, 2)} (+${gbp(up.monthly, 2)})`);
-        if (ageUnknown) changes.push('Confirm date of birth first: 1-bed rate if 35 or over');
-        if (joint) changes.push('Joint tenancy of the whole house with ' + v.tenants.filter(x => x.id !== t.id).map(x => x.name).join(', '));
-        const forms = ['UC journal: housing costs change' + (up ? '' : ' (if the rent changes)')];
-        if (joint) forms.push('Council Tax Reduction claim');
-        if (crf) forms.push(`CRF Housing Payment ${gbp(crf, 2)} a month to landlord`);
-        const missing = [];
-        if (!raw.dob) missing.push('date of birth'); if (!raw.ni) missing.push('NI number'); if (!raw.phone) missing.push('phone'); if (!raw.email) missing.push('email');
-        rows.push(`<div class="ten"><span class="n">${esc(t.name)} <span class="muted small">${esc(v.name)}</span></span><span class="r">${up ? '+' + gbp(up.monthly, 2) : ''}</span>
-          <span class="m"><b>Changes:</b> ${changes.map(esc).join(' · ')}</span>
-          <span class="m"><b>Forms:</b> ${forms.map(esc).join(' · ')} · <b>Cap:</b> ${esc(capNote)}</span>
-          ${missing.length ? `<span class="note">Still to collect: ${esc(missing.join(', '))}</span>` : '<span class="m muted">Details complete</span>'}</div>`);
-      });
+  function visiblePacks() {
+    return (state.plan.packs || []).filter(pk => {
+      if (state.ui.stage !== 'all' && String(pk.stage) !== state.ui.stage) return false;
+      if (!state.ui.showDone && !pk.openCount && !(pk.decide || []).length) return false;
+      return true;
     });
-    $('packs').innerHTML = rows.length ? rows.join('') : '<div class="empty">No tenant meetings needed on the current plan.</div>';
+  }
+  function renderSetupAll() {
+    const rows = (state.plan.properties || []).slice().sort((a, b) => (a.mgmt === 'kevin' ? 0 : 1) - (b.mgmt === 'kevin' ? 0 : 1) || a.name.localeCompare(b.name));
+    const sel = (id, field, opts, val, label) => `<select class="sm" data-prop-field="${field}" data-prop="${esc(id)}" aria-label="${esc(label)}">${opts.map(o => `<option value="${esc(o)}" ${o === val ? 'selected' : ''}>${esc(o || 'Not set')}</option>`).join('')}</select>`;
+    $('setupBody').innerHTML = rows.map(v => `<tr><td class="wrap">${esc(v.name)}<div class="small muted">${esc(v.mgmt === 'kevin' ? (v.area || 'you manage this') : (v.agent || 'agent-run'))}</div></td>
+      <td>${v.mgmt === 'kevin' ? sel(v.id, 'strategy', ['', 'Joint tenancy', 'HMO', 'Leave as is'], v.strategy, `Strategy at ${v.name}`) : '<span class="muted small">agent-run</span>'}</td>
+      <td class="num">${v.mgmt === 'kevin' ? `<input class="sm" type="number" min="0" max="6" data-prop-field="plannedExtra" data-prop="${esc(v.id)}" value="${v.plannedExtra ? esc(v.plannedExtra) : ''}" placeholder="0" aria-label="Extra tenants at ${esc(v.name)}">` : ''}</td>
+      <td class="num"><input class="sm" type="number" min="1" max="12" data-prop-field="lettableRooms" data-prop="${esc(v.id)}" value="${v.lettable == null ? '' : esc(v.lettable)}" placeholder="${esc(v.roomsInUse || '')}" aria-label="Lettable rooms at ${esc(v.name)}"></td>
+      <td>${sel(v.id, 'payg', ['Unknown', 'Yes', 'No'], v.payg, `PAYG meters at ${v.name}`)}</td>
+      <td>${sel(v.id, 'ctPayer', ['Unknown', 'Owner', 'Tenants'], v.ctPayer, `Council tax payer at ${v.name}`)}</td>
+      <td>${v.mgmt === 'kevin' ? sel(v.id, 'owner', ['', 'Roy', 'Kevin'], v.owner, `Tasks go to at ${v.name}`) : ''}</td></tr>`).join('');
+  }
+
+  function renderPacks() {
+    const packs = visiblePacks();
+    if (!packs.length) { $('packs').innerHTML = '<div class="empty">No property has work outstanding on this filter.</div>'; return; }
+    const li = (arr, cls) => arr.map(x => `<li class="${cls || ''}">${esc(x)}</li>`).join('');
+    $('packs').innerHTML = packs.map((pk, i) => {
+      const open = state.ui.openPack === pk.id;
+      const busy = k => state.busy.has(k) ? 'disabled' : '';
+      const done = pk.levers.filter(l => l.status === 'Done').length;
+      const inProgress = pk.levers.some(l => l.status === 'In progress');
+      const head = `<div class="pack-head" role="button" tabindex="0" data-pack="${esc(pk.id)}" aria-expanded="${open}">
+        <div class="pack-n"><span class="idx">${i + 1}</span><span><b>${esc(pk.name)}</b>${pk.area ? ` <span class="muted small">${esc(pk.area)}</span>` : ''}
+          <div class="pack-meta"><span class="pill stage">${pk.stage} ${esc(state.plan.stageNames[pk.stage] || '')}</span> <span class="pill">${esc(pk.strategy)}</span> <span class="pill">${esc(pk.owner)}</span>${inProgress ? ' <span class="pill st-in-progress">In progress</span>' : ''}${done ? ` <span class="pill st-done">${done} done</span>` : ''}${pk.local === false ? ' <span class="pill">away</span>' : ''}${(pk.flags || []).length ? ` <span class="pill check">${esc(pk.flags.length)} to check</span>` : ''}</div></span></div>
+        <div class="pack-fig"><b>+${gbp(pk.monthly, 2)}</b><span class="muted small">a month${pk.oneOff ? ` · ${gbp(pk.oneOff)} one-off` : ''}${pk.crf ? ` · CRF ${gbp(pk.crf, 2)}` : ''}</span></div>
+        <span class="chev" aria-hidden="true">▸</span></div>`;
+      if (!open) return `<div class="pack">${head}</div>`;
+      const tenants = pk.tenants.map(t => `<div class="pt ${t.blocked ? 'blocked' : ''}">
+        <div class="pt-h"><b>${esc(t.name)}</b> <span class="muted small">${t.age != null ? 'age ' + t.age : (t.over35Confirmed ? '35+ confirmed' : 'age unknown')}${t.rentNow ? ' · ' + gbp(t.rentNow, 2) : ''}${t.target ? ' → ' + gbp(t.target, 2) : ''}</span>${t.uplift ? `<span class="pt-up">+${gbp(t.uplift, 2)}</span>` : ''}</div>
+        ${t.note ? `<div class="pt-note">${esc(t.note)}</div>` : ''}
+        <div class="pt-cols">
+          <div><h5>Sign</h5><ul>${t.sign.length ? li(t.sign) : '<li class="muted">Nothing to sign</li>'}</ul></div>
+          <div><h5>Collect</h5><ul>${t.collect.length ? li(t.collect) : '<li class="muted">Details complete</li>'}</ul></div>
+          <div><h5>Submit</h5><ul>${t.forms.length ? li(t.forms) : '<li class="muted">No forms</li>'}</ul></div>
+        </div>
+        <div class="row-actions"><button class="btn btn-sm" data-act="open-form" data-tenant="${esc(t.id)}">Open the meeting form</button></div></div>`).join('');
+      const block = (title, arr) => arr.length ? `<div class="pack-block"><h4>${title}</h4><ul>${li(arr)}</ul></div>` : '';
+      const shown = pk.levers.filter(l => state.ui.showDone || (l.status !== 'Done' && l.status !== 'Dropped'));
+      const levers = `<div class="pack-block"><h4>Levers on this property</h4><div class="tbl-wrap"><table><tbody>${shown.map(l => `<tr class="${l.status === 'Done' || l.status === 'Dropped' ? 'dim' : ''}">
+        <td class="wrap">${esc(l.title)}<div class="small muted">${esc(l.evidence[0] || '')}</div>${l.needs && l.needs.length ? `<div class="small note">${esc(l.needs.join(' · '))}</div>` : ''}</td>
+        <td><span class="pill ${esc(l.effort.toLowerCase())}">${esc(l.effort)}</span> <span class="pill st-${esc(l.status.toLowerCase().replace(/\s+/g, '-'))}">${esc(l.status)}</span></td>
+        <td class="num">${l.monthly ? '+' + gbp(l.monthly, 2) : '—'}${l.capShortfall ? `<div class="small muted">CRF ${gbp(l.capShortfall, 2)}</div>` : ''}</td>
+        <td><div class="row-actions">${l.status === 'Candidate' ? `<button class="btn btn-sm" data-act="adopt" data-key="${esc(l.key)}" ${busy(l.key)}>Adopt</button>` : ''}${(l.status !== 'Done' && l.status !== 'Dropped') ? `<button class="btn btn-sm btn-primary" data-act="task" data-key="${esc(l.key)}" ${busy(l.key)}>Task</button>` : ''}${(l.status === 'Adopted' || l.status === 'In progress') ? `<button class="btn btn-sm" data-act="done" data-key="${esc(l.key)}" ${busy(l.key)}>Done</button>` : ''}${(l.status !== 'Done' && l.status !== 'Dropped') ? `<button class="btn btn-sm btn-ghost" data-act="drop" data-key="${esc(l.key)}" ${busy(l.key)}>Drop</button>` : `<button class="btn btn-sm btn-ghost" data-act="reopen" data-key="${esc(l.key)}" ${busy(l.key)}>Reopen</button>`}</div></td></tr>`).join('')}</tbody></table></div></div>`;
+      const v = state.plan.properties.find(x => x.id === pk.id) || {};
+      const fields = v.mgmt === 'kevin' ? `<div class="pack-block"><h4>How this property is set up</h4><div class="prop-fields">
+        <label>Strategy<select class="sm" data-prop-field="strategy" data-prop="${esc(pk.id)}">${['', 'Joint tenancy', 'HMO', 'Leave as is'].map(o => `<option value="${o}" ${o === v.strategy ? 'selected' : ''}>${o || 'Not set'}</option>`).join('')}</select></label>
+        <label>Extra tenants (HMO)<input class="sm" type="number" min="0" max="6" data-prop-field="plannedExtra" data-prop="${esc(pk.id)}" value="${v.plannedExtra ? esc(v.plannedExtra) : ''}" placeholder="0"></label>
+        <label>Lettable rooms<input class="sm" type="number" min="1" max="12" data-prop-field="lettableRooms" data-prop="${esc(pk.id)}" value="${v.lettable == null ? '' : esc(v.lettable)}" placeholder="${esc(v.roomsInUse || '')}"></label>
+        <label>PAYG meters<select class="sm" data-prop-field="payg" data-prop="${esc(pk.id)}">${['Unknown', 'Yes', 'No'].map(o => `<option ${o === v.payg ? 'selected' : ''}>${o}</option>`).join('')}</select></label>
+        <label>Council tax payer<select class="sm" data-prop-field="ctPayer" data-prop="${esc(pk.id)}">${['Unknown', 'Owner', 'Tenants'].map(o => `<option ${o === v.ctPayer ? 'selected' : ''}>${o}</option>`).join('')}</select></label>
+        <label>Tasks go to<select class="sm" data-prop-field="owner" data-prop="${esc(pk.id)}">${['', 'Roy', 'Kevin'].map(o => `<option value="${o}" ${o === v.owner ? 'selected' : ''}>${o || 'Default'}</option>`).join('')}</select></label>
+        </div>${pk.ctBand ? `<div class="small muted" style="margin-top:4px">Council tax band ${esc(pk.ctBand)}, ${gbp(pk.ctBandMonthly, 2)} a month${pk.ctLive ? ` · you pay ${gbp(pk.ctLive, 2)} today` : ' · nothing paid today'}</div>` : ''}</div>` : '';
+      return `<div class="pack open">${head}<div class="pack-body">
+        ${(pk.flags || []).length ? `<div class="pack-block"><h4>Check this first</h4><ul>${pk.flags.map(x => `<li class="note">${esc(x)}</li>`).join('')}</ul></div>` : ''}
+        ${block('Before you go', pk.before)}
+        <div class="pack-block"><h4>At the property</h4>${tenants || '<div class="empty">No tenant meeting needed here</div>'}</div>
+        ${block('Works', pk.works)}
+        ${block('Afterwards', pk.after)}
+        ${pk.decide && pk.decide.length ? `<div class="pack-block"><h4>To decide</h4><ul>${pk.decide.map(d => `<li>${esc(d.title)} <b>+${gbp(d.monthly, 2)}</b>${d.counted === 'alternative' ? ' <span class="muted">either/or with the work above, which pays more</span>' : ''}${d.needs && d.needs.length ? `<div class="small note">${esc(d.needs.join(' · '))}</div>` : ''}</li>`).join('')}</ul></div>` : ''}
+        ${levers}
+        ${fields}
+      </div></div>`;
+    }).join('');
+  }
+  // Scanned documents attach to the tenant's Airtable record via the content API
+  // (base64, 5MB a file). Kept on the tenant, never in the repo or the browser.
+  function renderDocs() {
+    const box = $('docsBox'); const t = state.data.tenants.find(x => x.id === state.ui.formTenant);
+    box.hidden = !t;
+    if (!t) return;
+    const docs = t.documents || [];
+    $('docList').innerHTML = docs.length
+      ? docs.map(d => d.url
+          ? `<a class="doc" href="${esc(d.url)}" target="_blank" rel="noopener">${esc(d.filename)}<span class="muted small">${d.size ? Math.round(d.size / 1024) + ' KB' : ''}</span></a>`
+          : `<span class="doc">${esc(d.filename)}<span class="muted small">on the record; refresh to open</span></span>`).join('')
+      : '<div class="empty">Nothing attached yet</div>';
+    $('docStatus').textContent = docs.length ? `${docs.length} on file` : '';
+  }
+  async function uploadDocs() {
+    const t = state.data.tenants.find(x => x.id === state.ui.formTenant); if (!t) return;
+    const files = Array.from($('docInput').files || []);
+    if (!files.length) { toast('Choose a file first', true); return; }
+    // Airtable caps the whole request at 5MB and base64 inflates a file by about a third,
+    // so the real ceiling on the file itself is ~3.7MB.
+    const LIMIT = 3.7 * 1024 * 1024;
+    const tooBig = files.find(f => f.size > LIMIT);
+    if (tooBig) { toast(`${tooBig.name} is over 3.7MB: split it or photograph it smaller`, true); return; }
+    $('docUpload').disabled = true;
+    const doneNames = new Set();
+    try {
+      for (const f of files) {
+        $('docStatus').textContent = `Uploading ${f.name}…`;
+        const b64 = await new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(String(r.result).split(',')[1]); r.onerror = () => rej(new Error('could not read ' + f.name)); r.readAsDataURL(f); });
+        const resp = await fetch(`https://content.airtable.com/v0/${BASE_ID}/${t.id}/${GP.tenant.documents}/uploadAttachment`, {
+          method: 'POST', headers: { Authorization: `Bearer ${PAT}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ contentType: f.type || 'application/octet-stream', file: b64, filename: f.name }),
+        });
+        if (!resp.ok) { let m = ''; try { m = (await resp.json()).error?.message || ''; } catch (e) { /* body unreadable: status is enough */ } throw new Error(`${f.name}: ${resp.status}${m ? ' ' + m : ''}`); }
+        const out = await resp.json();
+        const fld = (out.fields || {})[GP.tenant.documents];
+        doneNames.add(f.name);
+        if (Array.isArray(fld)) t.documents = fld.map(a => ({ id: a.id, filename: a.filename, url: a.url, size: a.size }));
+        else t.documents = (t.documents || []).concat([{ id: '', filename: f.name, url: '', size: f.size }]);
+      }
+      toast(`Attached to ${t.name}'s record`);
+    } catch (e) {
+      // Whatever went up stays up: name the ones that did so a retry cannot double them.
+      toast(`Not attached: ${e.message}${doneNames.size ? `. Already on the record: ${Array.from(doneNames).join(', ')}` : ''}`, true);
+    } finally {
+      $('docInput').value = '';
+      $('docUpload').disabled = false; renderDocs();
+    }
   }
 
   function renderMarketing() {
@@ -787,7 +849,7 @@ BEFORE THE FIRST ONE IS SIGNED (all in writing)
   }
   async function withBusy(key, fn) {
     if (state.busy.has(key)) return;
-    state.busy.add(key); renderLevers();
+    state.busy.add(key); renderPacks();
     try { await fn(); } catch (e) { toast('Not saved: ' + e.message, true); }
     finally { state.busy.delete(key); recompute(); renderAll(); }
   }
@@ -832,13 +894,6 @@ BEFORE THE FIRST ONE IS SIGNED (all in writing)
       toast(`${t ? t.name : 'Tenant'} recorded as 35 or over`);
     });
   }
-  async function saveExemption(tenantId, value) {
-    await withBusy('ex:' + tenantId, async () => {
-      await airtableWrite('PATCH', TABLES.tenants, { records: [{ id: tenantId, fields: { [GP.tenant.capExemption]: value } }] });
-      const t = state.data.tenants.find(x => x.id === tenantId); if (t) t.capExemption = value;
-      toast(`Benefit cap: ${value} saved for ${t ? t.name : 'tenant'}`);
-    });
-  }
   async function savePropField(propId, field, value) {
     const map = { lettableRooms: GP.prop.lettableRooms, payg: GP.prop.payg, ctPayer: GP.prop.ctPayer, strategy: GP.prop.strategy, plannedExtra: GP.prop.plannedExtra, owner: GP.prop.owner };
     const numeric = field === 'lettableRooms' || field === 'plannedExtra';
@@ -869,31 +924,31 @@ BEFORE THE FIRST ONE IS SIGNED (all in writing)
       if (act === 'task') return createTask(key);
       if (act === 'save-dob') return saveDob(b.dataset.tenant, b);
       if (act === 'confirm-35') return confirm35(b.dataset.tenant);
-      if (act === 'open') { state.ui.openLever = key; state.ui.stage = 'all'; state.ui.showDone = true; $('showDone').checked = true; renderStageSeg(); renderLevers(); const row = document.querySelector(`tr.lever[data-key="${key}"]`); if (row) row.scrollIntoView({ behavior: 'smooth', block: 'center' }); return; }
+      if (act === 'open-form') { state.ui.formTenant = b.dataset.tenant; renderMeetingForm(); renderDocs(); $('gp-form').scrollIntoView({ behavior: 'smooth', block: 'start' }); return; }
     }
-    const tog = e.target.closest('button[data-toggle]');
-    if (tog) { state.ui.openLever = state.ui.openLever === tog.dataset.toggle ? null : tog.dataset.toggle; renderLevers(); const nb = document.querySelector(`button[data-toggle="${state.ui.openLever || tog.dataset.toggle}"]`); if (nb) nb.focus(); return; }
-    const row = e.target.closest('tr.lever');
-    if (row && !e.target.closest('button')) { state.ui.openLever = state.ui.openLever === row.dataset.key ? null : row.dataset.key; renderLevers(); return; }
-    const st = e.target.closest('#stageSeg button'); if (st) { state.ui.stage = st.dataset.stage; renderStageSeg(); renderLevers(); return; }
-    const pf = e.target.closest('#propSeg button'); if (pf) { state.ui.propFilter = pf.dataset.propFilter; renderProps(); return; }
+    const ph = e.target.closest('.pack-head');
+    if (ph && !e.target.closest('button')) { state.ui.openPack = state.ui.openPack === ph.dataset.pack ? null : ph.dataset.pack; renderPacks(); const nh = document.querySelector(`.pack-head[data-pack="${ph.dataset.pack}"]`); if (nh) nh.focus(); return; }
+    const st = e.target.closest('#stageSeg button'); if (st) { state.ui.stage = st.dataset.stage; renderStageSeg(); renderPacks(); return; }
     const card = e.target.closest('.kpi[data-kpi]'); if (card) { state.ui.openKpi = state.ui.openKpi === card.dataset.kpi ? null : card.dataset.kpi; renderHeadline(); }
   });
   document.addEventListener('keydown', e => {
+    if (e.key !== 'Enter' && e.key !== ' ') return;
     const card = e.target.closest && e.target.closest('.kpi[data-kpi]');
-    if (card && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); state.ui.openKpi = state.ui.openKpi === card.dataset.kpi ? null : card.dataset.kpi; renderHeadline(); const c = document.querySelector(`.kpi[data-kpi="${card.dataset.kpi}"]`); if (c) c.focus(); }
+    if (card) { e.preventDefault(); state.ui.openKpi = state.ui.openKpi === card.dataset.kpi ? null : card.dataset.kpi; renderHeadline(); const c = document.querySelector(`.kpi[data-kpi="${card.dataset.kpi}"]`); if (c) c.focus(); return; }
+    const ph = e.target.closest && e.target.closest('.pack-head');
+    if (ph) { e.preventDefault(); state.ui.openPack = state.ui.openPack === ph.dataset.pack ? null : ph.dataset.pack; renderPacks(); const nh = document.querySelector(`.pack-head[data-pack="${ph.dataset.pack}"]`); if (nh) nh.focus(); }
   });
   document.addEventListener('change', e => {
     const t = e.target;
-    if (t.matches('select[data-exempt]')) return saveExemption(t.dataset.exempt, t.value);
     if (t.matches('[data-prop-field]')) return savePropField(t.dataset.prop, t.dataset.propField, t.value);
     if (t.matches('input[data-setting]')) return saveSetting(t.dataset.setting, t.value);
-    if (t.id === 'showAgent') { state.ui.showAgent = t.checked; renderLevers(); return; }
-    if (t.id === 'showDone') { state.ui.showDone = t.checked; renderLevers(); return; }
+    
+    if (t.id === 'showDone') { state.ui.showDone = t.checked; recompute(); renderPacks(); return; }
     if (t.closest('#calcForm')) renderCalc();
   });
   document.addEventListener('input', e => { if (e.target.closest('#calcForm')) renderCalc(); });
-  $('formTenant').addEventListener('change', e => { state.ui.formTenant = e.target.value; renderMeetingForm(); });
+  $('formTenant').addEventListener('change', e => { state.ui.formTenant = e.target.value; renderMeetingForm(); renderDocs(); });
+  $('docUpload').addEventListener('click', uploadDocs);
   $('meetingForm').addEventListener('submit', e => { e.preventDefault(); saveMeetingForm(); });
 
   // ── Health checks ──
