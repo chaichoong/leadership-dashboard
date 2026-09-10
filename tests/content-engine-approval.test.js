@@ -29,6 +29,8 @@ ${code}
 describe('content-engine approval card', () => {
   it('passes its own selftest (ask first, links, copy, closing line, readiness, verdicts)', () => {
     const out = JSON.parse(execFileSync('python3', [APPROVAL, 'selftest'], { encoding: 'utf8', cwd: DIR }));
+    const qa = JSON.parse(execFileSync('python3', [path.join(DIR, 'qa.py'), 'selftest'], { encoding: 'utf8', cwd: DIR }));
+    expect(qa.failed).toEqual([]);   // the output gate (10 Sep 2026): no card until the files prove themselves
     expect(out.failed).toEqual([]);
     expect(out.checks).toBeGreaterThanOrEqual(14);
   });

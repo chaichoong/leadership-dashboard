@@ -147,6 +147,6 @@ describe('content-engine render', () => {
     expect(r).toContain('if master_complete(dest, clip) and had == (pans or ""):'); // a master without the pans is not reused
     const a = readFileSync(path.join(DIR, 'approval.py'), 'utf8');
     expect(a).toContain('def pans_for(day, ledger)');
-    expect(a).toMatch(/build_card\(day, full, recs\["Learnings From My Diary"\], recs\["Short Form Video"\], headline, pans_for\(day, ledger\)\)/);
+    expect(a).toMatch(/build_card\(day, full, recs\["Learnings From My Diary"\], recs\["Short Form Video"\], headline, pans_for\(day, ledger\), proof\)/);  // pans and the output gate's proof (10 Sep 2026)
   });
 });
