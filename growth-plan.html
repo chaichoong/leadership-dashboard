@@ -44,13 +44,7 @@
   th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border-subtle); vertical-align: top; }
   th { background: var(--bg-subtle); color: var(--text-secondary); font-weight: var(--fw-semibold); font-size: var(--fs-xs); text-transform: uppercase; letter-spacing: .04em; white-space: nowrap; }
   td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
-  td.title { min-width: 260px; max-width: 460px; word-break: break-word; }
   tr.detail td { background: var(--bg-surface-2); white-space: normal; }
-  .detail-grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-4); }
-  @media (max-width: 900px) { .detail-grid { grid-template-columns: 1fr; } .next { grid-template-columns: 1fr; } }
-  .detail-grid h4 { margin: 0 0 4px; font-size: var(--fs-xs); text-transform: uppercase; letter-spacing: .04em; color: var(--text-secondary); }
-  .detail-grid ul { margin: 0; padding-left: 18px; }
-  .detail-grid li { margin: 2px 0; }
   .pill { display: inline-block; padding: 1px 8px; border-radius: var(--radius-full); font-size: var(--fs-xs); font-weight: var(--fw-medium); background: var(--bg-subtle); color: var(--text-secondary); white-space: nowrap; }
   .pill.paper { background: var(--success-bg); color: var(--success); }
   .pill.light { background: var(--info-bg); color: var(--info); }
@@ -61,10 +55,6 @@
   .pill.st-dropped { background: var(--bg-subtle); color: var(--text-muted); text-decoration: line-through; }
   .pill.stage { background: var(--bg-subtle); color: var(--text-primary); }
   .pill.check { background: var(--warning-bg); color: var(--warning); }
-  .pill.uc { background: var(--info-bg); color: var(--info); }
-  .pill.age { background: var(--accent-soft); color: var(--accent); }
-  .pill.age.young { background: var(--bg-subtle); color: var(--text-muted); }
-  .pill.age.unknown { background: var(--warning-bg); color: var(--warning); }
   .row-actions { display: flex; gap: 4px; flex-wrap: wrap; }
   .filters { display: flex; gap: var(--space-2); align-items: center; flex-wrap: wrap; margin-bottom: var(--space-3); }
   .seg { display: inline-flex; border: 1px solid var(--border-default); border-radius: var(--radius-md); overflow: hidden; flex-wrap: wrap; }
@@ -72,15 +62,6 @@
   .seg button[aria-pressed="true"] { background: var(--accent); color: var(--accent-on); }
   .seg button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
   label.chk { font-size: var(--fs-sm); color: var(--text-secondary); display: inline-flex; gap: 6px; align-items: center; }
-  .props { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: var(--space-3); }
-  .prop { border: 1px solid var(--border-default); border-radius: var(--radius-md); padding: var(--space-3) var(--space-4); background: var(--bg-surface); min-width: 0; }
-  .prop.remote { border-style: dashed; }
-  .prop h3 { margin: 0; font-size: var(--fs-md); font-weight: var(--fw-semibold); display: flex; justify-content: space-between; gap: 8px; align-items: baseline; }
-  .prop h3 .rent { font-variant-numeric: tabular-nums; font-weight: var(--fw-bold); white-space: nowrap; }
-  .prop .meta { color: var(--text-muted); font-size: var(--fs-xs); margin: 2px 0 8px; }
-  .rooms { height: 8px; background: var(--bg-subtle); border-radius: var(--radius-full); overflow: hidden; display: flex; margin: 6px 0; }
-  .rooms i { display: block; height: 100%; }
-  .rooms i.used { background: var(--accent); } .rooms i.free { background: var(--accent-gold); }
   .ten { display: grid; grid-template-columns: 1fr auto; gap: 2px 8px; padding: 6px 0; border-top: 1px solid var(--border-subtle); font-size: var(--fs-sm); align-items: center; }
   .ten .n { font-weight: var(--fw-medium); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .ten .r { font-variant-numeric: tabular-nums; white-space: nowrap; }
@@ -92,11 +73,8 @@
   .prop-fields { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border-subtle); }
   .prop-fields label { display: flex; flex-direction: column; gap: 2px; font-size: var(--fs-xs); color: var(--text-secondary); min-width: 0; }
   .prop-fields select.sm, .prop-fields input.sm { max-width: 100%; width: 100%; }
-  .prop .flag { font-size: var(--fs-xs); color: var(--warning); margin-top: 6px; }
-  .prop .lev { font-size: var(--fs-xs); color: var(--text-secondary); margin-top: 6px; }
-  .prop .lev b { color: var(--text-primary); font-variant-numeric: tabular-nums; }
   .calc { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-5); }
-  @media (max-width: 900px) { .calc { grid-template-columns: 1fr; } .props { grid-template-columns: 1fr; } .prop-fields { grid-template-columns: 1fr; } }
+  @media (max-width: 900px) { .calc { grid-template-columns: 1fr; } .prop-fields { grid-template-columns: 1fr; } }
   .calc .form { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 12px; }
   .calc .form label { display: flex; flex-direction: column; gap: 3px; font-size: var(--fs-xs); color: var(--text-secondary); }
   .calc .form input, .calc .form select { font: inherit; font-size: var(--fs-sm); padding: 5px 8px; border: 1px solid var(--border-default); border-radius: var(--radius-sm); background: var(--bg-surface); color: var(--text-primary); }
@@ -358,7 +336,7 @@
     </form>
     <div id="docsBox" hidden>
       <h4 class="small muted" style="margin-top:var(--space-4)">Scanned documents on this tenant's record</h4>
-      <p class="hint">Photo ID, bank statements, UC statement screen grabs, signed pages. They attach to the tenant in Airtable, so whoever fills a form has them to hand. Up to 5MB each.</p>
+      <p class="hint">Photo ID, bank statements, UC statement screen grabs, signed pages. They attach to the tenant in Airtable, so whoever fills a form has them to hand. Up to 3.7MB each.</p>
       <div class="row-actions">
         <input type="file" id="docInput" multiple accept="image/*,application/pdf" aria-label="Documents to attach">
         <button type="button" class="btn" id="docUpload">Attach to the record</button>
@@ -432,9 +410,9 @@
 <div id="toast" role="status" aria-live="polite"></div>
 
 <script src="js/ai-models.js?v=1"></script>
-<script src="js/config.js?v=61"></script>
+<script src="js/config.js?v=62"></script>
 <script src="js/sync-bar.js?v=6"></script>
-<script src="js/growth-plan-model.js?v=1"></script>
+<script src="js/growth-plan-model.js?v=2"></script>
 <script>
 (function () {
   'use strict';
@@ -635,15 +613,15 @@
     const p = state.plan; const items = [];
     p.unknownAge.forEach(u => items.push(`<div class="ten"><span class="n">${esc(u.tenant)} <span class="muted small">${esc(u.property)}, unit ${esc(u.unit)}</span></span><span class="r">age to confirm</span><span class="m">Date of birth: <span class="inl"><input class="sm" type="date" data-dob="${esc(u.tenantId)}" aria-label="Date of birth for ${esc(u.tenant)}"><button class="btn btn-sm" data-act="save-dob" data-tenant="${esc(u.tenantId)}">Save</button></span> · or <button class="btn btn-sm" data-act="confirm-35" data-tenant="${esc(u.tenantId)}">Confirm 35 or over</button> · not in the plan until one of these is done</span></div>`));
     const unknownEx = []; p.properties.forEach(v => v.tenants.forEach(t => { if (t.uc && t.capExemption === 'Unknown' && v.mgmt === 'kevin') unknownEx.push({ t, v }); }));
-    if (unknownEx.length) items.push(`<div class="ten"><span class="n">Benefit cap position unknown for ${unknownEx.length} UC tenant${unknownEx.length > 1 ? 's' : ''}</span><span class="r">${gbp(p.totals.crfShortfall, 2)} a month of CRF claims</span><span class="m">Set it on each tenant in the property cards. LCWRA, a carer element, PIP or DLA, or earnings of £881+ means no cap and no CRF form. Otherwise the CRF Housing Payment covers the shortfall.</span></div>`);
+    if (unknownEx.length) items.push(`<div class="ten"><span class="n">Benefit cap position unknown for ${unknownEx.length} UC tenant${unknownEx.length > 1 ? 's' : ''}</span><span class="r">${gbp(p.totals.crfShortfall, 2)} a month of CRF claims</span><span class="m">Set it on the tenant meeting form below. LCWRA, a carer element, PIP or DLA, or earnings of £881+ means no cap and no CRF form. Otherwise the CRF Housing Payment covers the shortfall.</span></div>`);
     const noNi = []; p.properties.forEach(v => v.tenants.forEach(t => { const raw = state.data.tenants.find(x => x.id === t.id) || {}; if (t.uc && v.mgmt === 'kevin' && !raw.ni) noNi.push(t.name); }));
     if (noNi.length) items.push(`<div class="ten"><span class="n">National Insurance number missing for ${noNi.length} UC tenant${noNi.length > 1 ? 's' : ''}</span><span class="r">needed on every form</span><span class="m">${esc(noNi.join(', '))}. Collect at the tenant meeting; enter it in Airtable (Tenants → National Insurance Number).</span></div>`);
     const noStrat = p.properties.filter(v => v.mgmt === 'kevin' && !v.strategy);
-    if (noStrat.length) items.push(`<div class="ten"><span class="n">Strategy not set on ${noStrat.length} house${noStrat.length > 1 ? 's' : ''}</span><span class="r">candidates only</span><span class="m">${esc(noStrat.map(v => v.name).join(', '))}. Pick Joint tenancy, Add tenants or Hold on the card.</span></div>`);
+    if (noStrat.length) items.push(`<div class="ten"><span class="n">Strategy not set on ${noStrat.length} house${noStrat.length > 1 ? 's' : ''}</span><span class="r">candidates only</span><span class="m">${esc(noStrat.map(v => v.name).join(', '))}. Pick Joint tenancy, HMO or Leave as is in the setup table above.</span></div>`);
     const noRooms = p.properties.filter(v => v.mgmt === 'kevin' && v.lettable == null);
-    if (noRooms.length) items.push(`<div class="ten"><span class="n">Lettable rooms not set on ${noRooms.length} propert${noRooms.length > 1 ? 'ies' : 'y'}</span><span class="r">hides extra rooms</span><span class="m">${esc(noRooms.map(v => v.name).join(', '))}. Bedrooms plus any reception that can be a bedroom. Set on the cards below.</span></div>`);
+    if (noRooms.length) items.push(`<div class="ten"><span class="n">Lettable rooms not set on ${noRooms.length} propert${noRooms.length > 1 ? 'ies' : 'y'}</span><span class="r">hides extra rooms</span><span class="m">${esc(noRooms.map(v => v.name).join(', '))}. Bedrooms plus any reception that can be a bedroom. Set it on the property, in the setup table above.</span></div>`);
     const noCt = p.properties.filter(v => v.mgmt === 'kevin' && v.ctPayer === 'Unknown' && v.tenants.length === 2);
-    if (noCt.length) items.push(`<div class="ten"><span class="n">Council tax payer unknown on ${noCt.length} two-tenant house${noCt.length > 1 ? 's' : ''}</span><span class="r">+${gbp(p.totals.check, 2)} if you pay it today</span><span class="m">${esc(noCt.map(v => v.name).join(', '))}. Set Council Tax Payer on the card.</span></div>`);
+    if (noCt.length) items.push(`<div class="ten"><span class="n">Council tax payer unknown on ${noCt.length} two-tenant house${noCt.length > 1 ? 's' : ''}</span><span class="r">+${gbp(p.totals.check, 2)} if you pay it today</span><span class="m">${esc(noCt.map(v => v.name).join(', '))}. Set Council Tax Payer in the setup table above.</span></div>`);
     $('facts').innerHTML = items.length ? items.join('') : '<div class="empty">Nothing missing. Every figure above rests on a recorded fact.</div>';
   }
 
@@ -712,20 +690,20 @@ BEFORE THE FIRST ONE IS SIGNED (all in writing)
   function visiblePacks() {
     return (state.plan.packs || []).filter(pk => {
       if (state.ui.stage !== 'all' && String(pk.stage) !== state.ui.stage) return false;
-      if (!state.ui.showDone && !pk.openCount) return false;
+      if (!state.ui.showDone && !pk.openCount && !(pk.decide || []).length) return false;
       return true;
     });
   }
   function renderSetupAll() {
     const rows = (state.plan.properties || []).slice().sort((a, b) => (a.mgmt === 'kevin' ? 0 : 1) - (b.mgmt === 'kevin' ? 0 : 1) || a.name.localeCompare(b.name));
-    const sel = (id, field, opts, val) => `<select class="sm" data-prop-field="${field}" data-prop="${esc(id)}">${opts.map(o => `<option value="${esc(o)}" ${o === val ? 'selected' : ''}>${esc(o || 'Not set')}</option>`).join('')}</select>`;
+    const sel = (id, field, opts, val, label) => `<select class="sm" data-prop-field="${field}" data-prop="${esc(id)}" aria-label="${esc(label)}">${opts.map(o => `<option value="${esc(o)}" ${o === val ? 'selected' : ''}>${esc(o || 'Not set')}</option>`).join('')}</select>`;
     $('setupBody').innerHTML = rows.map(v => `<tr><td class="wrap">${esc(v.name)}<div class="small muted">${esc(v.mgmt === 'kevin' ? (v.area || 'you manage this') : (v.agent || 'agent-run'))}</div></td>
-      <td>${v.mgmt === 'kevin' ? sel(v.id, 'strategy', ['', 'Joint tenancy', 'HMO', 'Leave as is'], v.strategy) : '<span class="muted small">agent-run</span>'}</td>
+      <td>${v.mgmt === 'kevin' ? sel(v.id, 'strategy', ['', 'Joint tenancy', 'HMO', 'Leave as is'], v.strategy, `Strategy at ${v.name}`) : '<span class="muted small">agent-run</span>'}</td>
       <td class="num">${v.mgmt === 'kevin' ? `<input class="sm" type="number" min="0" max="6" data-prop-field="plannedExtra" data-prop="${esc(v.id)}" value="${v.plannedExtra ? esc(v.plannedExtra) : ''}" placeholder="0" aria-label="Extra tenants at ${esc(v.name)}">` : ''}</td>
       <td class="num"><input class="sm" type="number" min="1" max="12" data-prop-field="lettableRooms" data-prop="${esc(v.id)}" value="${v.lettable == null ? '' : esc(v.lettable)}" placeholder="${esc(v.roomsInUse || '')}" aria-label="Lettable rooms at ${esc(v.name)}"></td>
-      <td>${sel(v.id, 'payg', ['Unknown', 'Yes', 'No'], v.payg)}</td>
-      <td>${sel(v.id, 'ctPayer', ['Unknown', 'Owner', 'Tenants'], v.ctPayer)}</td>
-      <td>${v.mgmt === 'kevin' ? sel(v.id, 'owner', ['', 'Roy', 'Kevin'], v.owner) : ''}</td></tr>`).join('');
+      <td>${sel(v.id, 'payg', ['Unknown', 'Yes', 'No'], v.payg, `PAYG meters at ${v.name}`)}</td>
+      <td>${sel(v.id, 'ctPayer', ['Unknown', 'Owner', 'Tenants'], v.ctPayer, `Council tax payer at ${v.name}`)}</td>
+      <td>${v.mgmt === 'kevin' ? sel(v.id, 'owner', ['', 'Roy', 'Kevin'], v.owner, `Tasks go to at ${v.name}`) : ''}</td></tr>`).join('');
   }
 
   function renderPacks() {
@@ -739,7 +717,7 @@ BEFORE THE FIRST ONE IS SIGNED (all in writing)
       const inProgress = pk.levers.some(l => l.status === 'In progress');
       const head = `<div class="pack-head" role="button" tabindex="0" data-pack="${esc(pk.id)}" aria-expanded="${open}">
         <div class="pack-n"><span class="idx">${i + 1}</span><span><b>${esc(pk.name)}</b>${pk.area ? ` <span class="muted small">${esc(pk.area)}</span>` : ''}
-          <div class="pack-meta"><span class="pill stage">${pk.stage} ${esc(state.plan.stageNames[pk.stage] || '')}</span> <span class="pill">${esc(pk.strategy)}</span> <span class="pill">${esc(pk.owner)}</span>${inProgress ? ' <span class="pill st-in-progress">In progress</span>' : ''}${done ? ` <span class="pill st-done">${done} done</span>` : ''}${pk.local === false ? ' <span class="pill">away</span>' : ''}</div></span></div>
+          <div class="pack-meta"><span class="pill stage">${pk.stage} ${esc(state.plan.stageNames[pk.stage] || '')}</span> <span class="pill">${esc(pk.strategy)}</span> <span class="pill">${esc(pk.owner)}</span>${inProgress ? ' <span class="pill st-in-progress">In progress</span>' : ''}${done ? ` <span class="pill st-done">${done} done</span>` : ''}${pk.local === false ? ' <span class="pill">away</span>' : ''}${(pk.flags || []).length ? ` <span class="pill check">${esc(pk.flags.length)} to check</span>` : ''}</div></span></div>
         <div class="pack-fig"><b>+${gbp(pk.monthly, 2)}</b><span class="muted small">a month${pk.oneOff ? ` · ${gbp(pk.oneOff)} one-off` : ''}${pk.crf ? ` · CRF ${gbp(pk.crf, 2)}` : ''}</span></div>
         <span class="chev" aria-hidden="true">▸</span></div>`;
       if (!open) return `<div class="pack">${head}</div>`;
@@ -769,6 +747,7 @@ BEFORE THE FIRST ONE IS SIGNED (all in writing)
         <label>Tasks go to<select class="sm" data-prop-field="owner" data-prop="${esc(pk.id)}">${['', 'Roy', 'Kevin'].map(o => `<option value="${o}" ${o === v.owner ? 'selected' : ''}>${o || 'Default'}</option>`).join('')}</select></label>
         </div>${pk.ctBand ? `<div class="small muted" style="margin-top:4px">Council tax band ${esc(pk.ctBand)}, ${gbp(pk.ctBandMonthly, 2)} a month${pk.ctLive ? ` · you pay ${gbp(pk.ctLive, 2)} today` : ' · nothing paid today'}</div>` : ''}</div>` : '';
       return `<div class="pack open">${head}<div class="pack-body">
+        ${(pk.flags || []).length ? `<div class="pack-block"><h4>Check this first</h4><ul>${pk.flags.map(x => `<li class="note">${esc(x)}</li>`).join('')}</ul></div>` : ''}
         ${block('Before you go', pk.before)}
         <div class="pack-block"><h4>At the property</h4>${tenants || '<div class="empty">No tenant meeting needed here</div>'}</div>
         ${block('Works', pk.works)}

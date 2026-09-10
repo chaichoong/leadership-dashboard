@@ -536,7 +536,7 @@
             const all = levers.filter(l => l.propertyId === v.id && (l.counted === 'now' || l.counted === 'remote'));
             const own = all.filter(active);
             const decide = levers.filter(l => l.propertyId === v.id && active(l) && (l.counted === 'check' || l.counted === 'alternative'))
-                .map(l => ({ key: l.key, title: l.title, monthly: l.monthly, counted: l.counted, needs: l.needs, evidence: l.evidence }));
+                .map(l => ({ key: l.key, lever: l.lever, stage: l.stage, title: l.title, monthly: l.monthly, counted: l.counted, needs: l.needs, evidence: l.evidence }));
             if (!all.length && !decide.length) return;
             const joint = v.strategy === 'Joint tenancy' && own.some(l => l.lever === 'Council tax');
             const roomLever = own.find(l => l.lever === 'Room release' || l.lever === 'New room let');
@@ -553,7 +553,7 @@
             if (own.some(l => l.lever === 'Rent uplift' || l.lever === 'Rate refresh')) {
                 before.push('Rent change letter for each tenant going up, at the ' + (v.rates ? v.rates.brma : 'local') + ' 1-bed rate');
             }
-            if (!takeBack && !voidLet) before.push('Authority to act letter for every tenant (authority_to_act_template.md)');
+            if (!takeBack && v.tenants.length) before.push('Authority to act letter for every tenant (authority_to_act_template.md)');
             if (own.some(l => l.capShortfall > 0)) before.push('CRF Housing Payment details: the shortfall figure per tenant, and their last two months of bank statements');
 
             const releasing = new Set((roomLever && roomLever.releasableIds) || []);
@@ -606,14 +606,15 @@
 
             packs.push({
                 id: v.id, name: v.name, strategy: v.strategy || (v.mgmt === 'kevin' ? 'Not set' : 'Agent-managed'),
-                owner: (own[0] || all[0] || { owner: 'Kevin' }).owner, area: v.area, local: v.local, mgmt: v.mgmt,
-                stage: Math.min.apply(null, (own.length ? own : (all.length ? all : [{ stage: 2 }])).map(l => l.stage)),
+                owner: (own[0] || all[0] || {}).owner || v.owner || 'Kevin', area: v.area, local: v.local, mgmt: v.mgmt,
+                stage: Math.min.apply(null, (own.length ? own : (all.length ? all : decide)).map(l => l.stage || 2)),
                 monthly: round2(own.reduce((n, l) => n + num(l.monthly), 0)),
                 oneOff: round2(own.reduce((n, l) => n + num(l.oneOff), 0)),
                 crf: round2(own.reduce((n, l) => n + num(l.capShortfall), 0)),
                 openCount: own.length,
                 ctBand: v.ctBand, ctBandMonthly: v.ctBandMonthly, ctLive: v.ctLive,
                 before, tenants, works, after, decide,
+                flags: (v.flags || []).concat(v.brmaNote ? [v.brmaNote] : []),
                 openCountAll: all.length,
                 levers: all.map(l => ({ key: l.key, lever: l.lever, title: l.title, monthly: l.monthly, oneOff: l.oneOff, effort: l.effort, status: l.status, capShortfall: l.capShortfall || 0, evidence: l.evidence, needs: l.needs })),
             });
