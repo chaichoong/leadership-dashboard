@@ -21,6 +21,18 @@ This workflow eliminates those by making every step explicit.
 
 ---
 
+## THE HARD RULE: read-only until the Phase 2d gate
+
+From the start of this workflow until Kevin approves at the Phase 2d gate, you are **read-only**.
+
+You MAY: read files, grep, run read-only Airtable queries, read git history, load a page in the browser to look at it.
+
+You MAY NOT: create, edit or delete any file, write to Airtable, send anything, commit, push, or deploy.
+
+This is the reason the brief is worth writing. Kevin gets to change the plan while changing it is still free. If you catch yourself thinking "I will just quickly try it and see", that is the rule doing its job. Stop and finish the plan.
+
+---
+
 ## Phase 0: BILD PROMPT (restructure Kevin's input)
 
 Kevin talks conversationally. Before doing anything else, restructure his input into a precise BILD prompt. This eliminates the #1 source of rework: misunderstanding what to build.
@@ -44,6 +56,8 @@ Before asking Kevin questions, check what you can answer yourself:
 - Look at git history for recent changes and patterns
 - Read the most similar existing feature's code
 
+**Cite what you read.** Every factual claim in the Background carries its source: a code fact carries `file:line`, a data fact carries the record ID or the filter formula. Anything you could not verify is written as `ASSUMPTION:` in plain sight, so Kevin can shoot it down at the gate. Never state a field name, table ID, record count or status value you have not actually read. This project's worst bugs all started as a plausible guess.
+
 ### 0c. Ask targeted questions (maximum one round)
 
 Use AskUserQuestion to fill remaining gaps. Batch into a single call (max 4 questions). Only ask where the answer materially changes the output.
@@ -55,7 +69,7 @@ Use AskUserQuestion to fill remaining gaps. Batch into a single call (max 4 ques
 
 Skip questions you can answer from context. One round maximum. Work with what you have.
 
-### 0d. Present the BILD prompt
+### 0d. Draft the BILD prompt (do not present it yet)
 
 Format:
 
@@ -65,6 +79,7 @@ Format:
 
 ## I — Instruction
 [The task. 1-2 sentences, imperative voice. Priority stated if multi-part.]
+Fork: [the genuine alternative you considered] — recommend [choice], because [reason].
 
 ## L — Limitations
 - [Constraint 1]
@@ -75,9 +90,11 @@ Format:
 - [How to verify it works]
 ```
 
-Ask: "Should I build this as-is, or adjust anything?"
+Include the Fork line whenever the change is structural: a new tab, a new page, an architecture decision, a workflow redesign or a data model change. One sentence, no essay. If Kevin says go ahead, do not raise it again.
 
-On approval, the BILD prompt becomes the instruction set for the rest of this workflow. Proceed to Phase 1.
+**Do not ask for approval yet.** Hold the draft brief. Kevin approves it once, together with the implementation plan, at the single gate in Phase 2d. Two approval stops for one build is one too many, and a brief approved before the code has been read is a brief approved on guesswork.
+
+Proceed to Phase 1.
 
 ---
 
@@ -112,7 +129,7 @@ Kevin often describes what the finished result looks like. Capture:
 - **Existing patterns** — is there a similar feature already built that this should mirror?
 - **Airtable field names** — get EXACT field names (including capitalisation and spaces). Read `js/config.js` for existing field maps. If new fields are needed, confirm them before coding.
 
-### 1d. Confirm the plan in one message
+### 1d. Draft the plan summary (do not present it yet)
 
 Present a short summary back to Kevin:
 
@@ -126,7 +143,7 @@ Actions: [list]
 Health checks: [what sync bar will verify]
 ```
 
-Wait for Kevin's "yes" or corrections before proceeding. This single confirmation replaces 3-4 mid-build check-ins.
+**Do not ask yet.** Hold this summary alongside the brief. Both go to Kevin at the single gate in Phase 2d, once the code has actually been read and the plan is real rather than intended.
 
 ---
 
@@ -172,6 +189,47 @@ Before writing fetch/write code:
 - Note which fields are linked records (need record ID filtering, not ARRAYJOIN)
 - Note which fields are computed/formula (read-only)
 - Plan pagination if the table could exceed 100 records
+
+### 2d. THE ONE GATE (the only place this workflow stops)
+
+Everything above was read-only research. Now show Kevin the whole thing in one message and ask once.
+
+```
+## B — Background
+[Context with sources. 2-5 sentences.]
+
+## I — Instruction
+[The task. 1-2 sentences, imperative voice. Priority stated if multi-part.]
+Fork: [alternative considered] — recommend [choice], because [reason].
+
+## L — Limitations
+- [Constraint 1]
+- [Constraint 2]
+
+## D — Deliverable
+- [Output with success criteria]
+- [How to verify it works]
+
+## Steps
+1. [file] — [change, anchored to what you read]
+2. [file] — [change]
+
+Not touching: [files and areas that stay untouched]
+Verified by: [the checks that prove it works]
+
+## Assumptions  (omit if none)
+- ASSUMPTION: [anything you could not verify]
+```
+
+Three rules for the Steps block:
+
+- **Each step names a real file you have already read**, with the line you are anchoring to where possible. A step you cannot anchor is a step you have not researched.
+- **"Not touching" is compulsory.** Naming what stays untouched is how Kevin spots a build about to sprawl, and it is the half of scope that constraints alone never capture.
+- **Verification is stated before the build, not invented after it.** If you cannot say how it will be proved, the deliverable is not testable yet, so sharpen D.
+
+Ask once: "Should I build this as-is, or adjust anything?"
+
+The read-only rule lifts on Kevin's yes. The brief and the steps become the instruction set for the rest of this workflow. If reality contradicts a step once you start building, say so in one line and carry on. Do not silently build something else.
 
 ---
 
