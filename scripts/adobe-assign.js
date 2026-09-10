@@ -369,6 +369,16 @@ async function run({ document: doc, signers, fields, page: pageNo, shot }) {
       let opened = false;
       for (let attempt = 1; attempt <= 3 && !opened; attempt++) {
         const handles = await orderedFieldHandles(page);
+        // THE HANDLE LIST MUST LINE UP WITH THE FIELD LIST, or handles[i] is a
+        // different field from the one the map is about to reassign, and the
+        // document goes out with somebody else's signature box. A field paints
+        // several nested elements at one spot, so this count is the thing most
+        // likely to drift.
+        if (handles.length !== found.length) {
+          die(`Adobe shows ${found.length} fields but ${handles.length} clickable ` +
+              'field bodies, so they cannot be lined up and a reassignment would ' +
+              'move the wrong one. Nothing has been sent.');
+        }
         const h = handles[i];
         if (h) {
           await h.click({ timeout: 10000 }).catch(async () => {
@@ -432,7 +442,19 @@ async function run({ document: doc, signers, fields, page: pageNo, shot }) {
       const f = found[i];
       await page.keyboard.press('Escape');
       await page.waitForTimeout(1200);
-      await page.mouse.click(f.x + f.w / 2, f.y + f.h / 2);
+      // Select it the same way the assignment did. This step used to click a
+      // remembered point, which is the weaker of the two paths and the one that
+      // failed: on a joint agreement every field read back as "none", meaning
+      // the click never selected anything and the wrapper never appeared. A
+      // correct document was refused for it.
+      const vh = await orderedFieldHandles(page);
+      if (vh.length === found.length && vh[i]) {
+        await vh[i].click({ timeout: 10000 }).catch(async () => {
+          await page.mouse.click(f.x + f.w / 2, f.y + f.h / 2);
+        });
+      } else {
+        await page.mouse.click(f.x + f.w / 2, f.y + f.h / 2);
+      }
       await page.waitForTimeout(1800);
       const c = await page.evaluate((sel) => {
         const el = document.querySelector(sel);
@@ -458,6 +480,10 @@ async function run({ document: doc, signers, fields, page: pageNo, shot }) {
       const sN = map[i];
       if (!byS.has(sN)) byS.set(sN, new Set());
       byS.get(sN).add(colours[i]);
+    }
+    if (colours.every((c) => c === 'none')) {
+      die('none of the fields could be read back, so the assignment could not be ' +
+          `checked. Nothing has been sent. See ${png}.`);
     }
     for (const [sN, set] of byS) {
       if (set.size !== 1) {
