@@ -225,14 +225,23 @@ async function main(argv) {
         footer: `${name} — joint tenancy — not valid until signed by all three parties`,
         markdown: fill('ast_joint_template.md', map),
       }, dry));
-      made.push(renderPdf({
-        name: `Council_Tax_Side_Letter_${name.replace(/[^A-Za-z0-9]+/g, '_')}`,
-        title: 'Council tax: side letter',
-        reference: `${address} — separate from the tenancy agreement`,
-        footer: `${name} — council tax side letter`,
-        markdown: fill('council_tax_side_letter_template.md', map),
-      }, dry));
       console.log(`   joint tenancy from ${termStart} (${b.name} moved in), rent ${gbp(total)} = 2 x ${rates.brma} 1-bed ${gbp(oneBed)}`);
+      // The earlier period: one tenant, whole property, from their own move-in.
+      // Same clauses, singular, at what they were actually paying.
+      if (a.start && a.start < termStart) {
+        made.push(renderPdf({
+          name: `AST_Whole_${a.name.replace(/[^A-Za-z0-9]+/g, '_')}_${name.replace(/[^A-Za-z0-9]+/g, '_')}`,
+          title: 'Assured shorthold tenancy agreement',
+          reference: `${a.name} — ${address} — whole property, term from ${longDate(a.start)}`,
+          footer: `${name} — ${a.name} — earlier term — not valid until signed by both parties`,
+          markdown: fill('ast_whole_single_template.md', {
+            'Agreement date': longDate(TODAY), 'Term start date': longDate(a.start),
+            'First payment date': longDate(a.start), 'Tenant Name': a.name,
+            'Property address': address, 'Total rent': gbp(a.rent || oneBed),
+          }),
+        }, dry));
+        console.log(`   earlier term ${a.name} alone from ${a.start} at ${gbp(a.rent || oneBed)}`);
+      }
     }
 
     for (const person of people) {
@@ -245,13 +254,16 @@ async function main(argv) {
       // tenants have no utility bill in their name, so Agile Lets confirms it.
       // Every tenant in a pack gets one, whatever else they are signing.
       if (uc) {
+        // No title or reference line: this is the letter Agile Lets already sends,
+        // and Kevin wants it to look like the one Universal Credit has seen before.
+        const addrLines = String(address).split(',').map((x) => x.trim()).filter(Boolean);
         made.push(renderPdf({
           name: `Proof_of_Residency_${person.name.replace(/[^A-Za-z0-9]+/g, '_')}`,
-          title: 'Proof of residency',
-          reference: `${person.name} — ${address}`,
           footer: `${person.name} — proof of residency — Agile Lets Limited`,
           markdown: fill('proof_of_residency_template.md', {
             'Tenant Name': person.name, 'Property address': address,
+            'Property line 1': addrLines[0] || '', 'Property line 2': addrLines[1] || '',
+            'Property line 3': addrLines[2] || '', 'Property line 4': addrLines[3] || '',
             Date: longDate(TODAY),
             'Tenancy start': longDate(strategy === 'Joint tenancy' ? people[people.length - 1].start : person.start),
           }),

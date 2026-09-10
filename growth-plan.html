@@ -345,7 +345,7 @@
         <li>Date of birth and National Insurance number (both go into Airtable that day)</li>
         <li>Photo ID and the latest UC statement (shows LCWRA, carer element, earnings: the cap exemptions)</li>
         <li>Mobile number and email that match the UC account</li>
-        <li>Signed rent change (or the joint AST and side letter) and a copy for them</li>
+        <li>Signed tenancy agreement and a copy for them</li>
         <li>Bank details for the council forms; last two months' statements if the form asks</li>
         <li>Signed authority letter so you can speak to Anglia Revenues about their claim</li>
       </ul></div>
@@ -361,12 +361,12 @@
     <h2>Joint tenancies and council tax</h2>
     <div class="two">
       <div>
-        <p class="hint">A house let by the room is an HMO for council tax and the owner pays (from 1 December 2023). Let the whole house to two tenants on one agreement of six months or more and they become liable. They claim Council Tax Reduction from West Suffolk (run by Anglia Revenues Partnership; up to 100% for a working-age household on UC and not working); any balance left, you pay straight to the council on their account under the side letter. Their Universal Credit housing costs do not change: each joint renter keeps their own 1-bed rate up to their share of the rent. Templates: ast_joint_template.md and council_tax_side_letter_template.md in Drive, beside the standard AST.</p>
+        <p class="hint">A house let by the room is an HMO for council tax and the owner pays (from 1 December 2023). Let the whole house to two tenants on one agreement of six months or more and they become liable. They claim Council Tax Reduction from West Suffolk (run by Anglia Revenues Partnership; up to 100% for a working-age household on UC and not working) on an online form completed with them at the meeting, which the signed authority to act lets Roy or Kevin submit. Their Universal Credit housing costs do not change: each joint renter keeps their own 1-bed rate up to their share of the rent. Templates: ast_joint_template.md in ~/knowledge-os/templates, beside the standard AST.</p>
         <h4 class="small muted">Houses where this applies</h4>
         <div id="ctList"></div>
       </div>
       <div>
-        <h4 class="small muted">Clause and side letter (reviewed by the AI Legal and Compliance head, 9 Sep 2026; a solicitor's hour before the first signature)</h4>
+        <h4 class="small muted">Council tax clause in the joint tenancy agreement (reviewed by the AI Legal and Compliance head, 9 Sep 2026)</h4>
         <div class="clause" id="ctClause"></div>
       </div>
     </div>
@@ -408,7 +408,7 @@
 <script src="js/ai-models.js?v=1"></script>
 <script src="js/config.js?v=62"></script>
 <script src="js/sync-bar.js?v=6"></script>
-<script src="js/growth-plan-model.js?v=2"></script>
+<script src="js/growth-plan-model.js?v=3"></script>
 <script>
 (function () {
   'use strict';
@@ -626,24 +626,24 @@
   function renderCt() {
     const cands = state.plan.levers.filter(l => l.lever === 'Council tax');
     $('ctList').innerHTML = cands.length ? cands.map(l => `<div class="ten"><span class="n">${esc(l.property)}</span><span class="r">+${gbp(l.monthly, 2)}</span><span class="m">${esc(l.title.replace(l.property + ': ', ''))}${l.counted === 'alternative' ? ' · either/or with the rooms lever, which pays more' : ''}${l.counted === 'check' ? ' · confirm who pays council tax today' : ''}</span></div>`).join('') : '<div class="empty">No two-tenant house is on a room-by-room let with council tax on the owner.</div>';
-    // Wording per the AI Legal and Compliance head's review, 9 Sep 2026: the credit must NOT sit
-    // inside the tenancy (a guaranteed monthly credit reads to DWP as rent reduced), so the AST
-    // carries liability only and the landlord's payment goes to the council under a side letter.
-    $('ctClause').textContent = `IN THE TENANCY AGREEMENT
+    // The side letter is retired (Kevin, 10 Sep 2026): Council Tax Reduction is an
+    // online form completed outside the tenancy, so the agreement carries liability
+    // and nothing about the rent is touched, which is what the Legal head asked for.
+    $('ctClause').textContent = `IN THE TENANCY AGREEMENT (clause 4.1.3)
 
-Council tax. The Tenants are jointly and severally liable for council tax on the Property throughout the Term and will apply for every reduction and discount they are entitled to.
+The Tenants are jointly and severally liable for council tax on the Premises throughout the Term and will apply for every reduction and discount they are entitled to.
 
-SIDE LETTER (separate from the tenancy, signed the same day)
+HOW THE REDUCTION IS CLAIMED
 
-The Landlord will pay any council tax balance that remains after all reductions directly to West Suffolk Council on the Tenants' account within 14 days of receiving a copy of the bill. This is a voluntary payment by the Landlord to the council, not to the Tenants, and forms no part of the tenancy. The Landlord may end it on one month's written notice.
+Council Tax Reduction is an online form with Anglia Revenues Partnership, completed with the tenant at the meeting and outside the tenancy agreement. A working-age household on Universal Credit and not working can receive up to 100%. The signed authority to act is what lets Roy or Kevin submit it and chase it.
 
 BEFORE THE FIRST ONE IS SIGNED (all in writing)
-1. West Suffolk benefits team confirms a joint tenancy of the whole house leaves the owner-liable class, and how a landlord's direct payment is treated under their Council Tax Reduction scheme.
+1. West Suffolk benefits team confirms a joint tenancy of the whole house leaves the owner-liable class, and how far back the claim can be backdated.
 2. Each tenant reports the joint rent and the other tenant's name in their UC journal and sends a copy.
-3. Each tenant signs a plain-English note accepting joint and several liability and the rule when one leaves (written surrender, new tenancy, deposit re-protected).
+3. Each tenant understands joint and several liability and the rule when one leaves (written surrender, new tenancy, deposit re-protected).
 4. Mortgage lender and insurer accept one joint tenancy in place of room lets.
 5. The old room tenancies end by written surrender; one deposit, protected jointly within 30 days.
-6. One hour of a property solicitor over the tenancy and side letter (no retainer exists; a decision for Kevin).`;
+6. One hour of a property solicitor over the agreement (no retainer exists; a decision for Kevin).`;
   }
 
   // Channels for over-35 Universal Credit tenants. Applicant counts are from the Agile Lets
