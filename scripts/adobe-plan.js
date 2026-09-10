@@ -112,6 +112,23 @@ function parseSigners(raw) {
     // harmless; with several it silently gives one person all the fields and
     // the others none, and the agreement goes out wrong. Refuse rather than
     // send something Kevin would have to unpick.
+    //
+    // RE-MEASURED 10 Sep 2026 and still true, so this refusal is current
+    // rather than inherited. A two-recipient agreement was built live
+    // (tenant, then landlord) and Adobe reported it in its own words:
+    // "Fields automatically added and assigned to kevin@runpreneur.org...".
+    // The tenant got nothing. Adobe offers a manual route instead, a banner
+    // reading "Select the suggested areas to quickly assign fields to
+    // recipients", but that means clicking each detected field on the page,
+    // which a selector-based plan cannot express. Lifting this refusal means
+    // building per-field assignment, not deleting the check.
+    //
+    // The multi-recipient MECHANICS are solved and proven, for whoever picks
+    // that up: [data-testid="recipient-action-menu-button"] opens a menu with
+    // recipient-action-menu-addRecipient and -addYourself; each new row is
+    // filled through the same RECIPIENT_BOX and committed with Enter.
+    // Auto-place itself is [data-testid="auto-place-ffd-button"], and Send is
+    // [data-testid="review-send-button"].
     die(`${list.length} signers. Auto-place assigns every field to one recipient, so a ` +
         'multi-signer agreement would go out with the fields on the wrong person. ' +
         'Send those by hand until the plan places fields per signer.');
