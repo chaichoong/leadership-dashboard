@@ -62,6 +62,7 @@ PLATFORM_SLOTS = {"youtube": {"full": (6, 0)},
                   "instagram": {"summary": (12, 30), "lfmd": (18, 0)}, "threads": {"summary": (12, 0), "lfmd": (18, 0)},
                   "tiktok": {"summary": (13, 0), "lfmd": (19, 30)}}
 SOON_MINUTES = 15   # GoHighLevel refused a post 5 minutes out with "Schedule Date must be after current date" (9 Sep 2026); 15 clears its own minimum
+SOCIAL_LEAD_MINUTES = 30   # a social post carries the YouTube link, so it never goes out before the video is public + this
 
 
 def staggered(slot, index, hours=STAGGER_HOURS):
@@ -69,15 +70,30 @@ def staggered(slot, index, hours=STAGGER_HOURS):
     return ((slot[0] + hours * index) % 24, slot[1])
 
 
-def when_for(platform, clip, index, now=None):
+def when_for(platform, clip, index, now=None, youtube_at=None):
     """The UTC ISO time a post goes out: today's slot for that platform and clip, moved along for the
-    index-th episode of the day; if the slot has already passed, a few minutes from now. Same day, never tomorrow."""
+    index-th episode of the day; if the slot has already passed, a few minutes from now. Same day, never
+    tomorrow (Kevin, 10 Sep 2026: "YouTube in the morning and then the social media and everything else in
+    the afternoon... we weren't going to do day one and day two"). A social post carries the YouTube link, so
+    it is never earlier than the video going public plus SOCIAL_LEAD_MINUTES either."""
     now = now or dt.datetime.now(LONDON)
     base = PLATFORM_SLOTS.get(platform, {}).get(clip) or (SUMMARY_SLOT if clip == "summary" else LFMD_SLOT if clip == "lfmd" else YT_SLOT)
     h, m = staggered(base, index, STAGGER_HOURS if platform == "youtube" else STAGGER_SOCIAL_HOURS)
     slot = now.replace(hour=h, minute=m, second=0, microsecond=0)
     if slot < now + dt.timedelta(minutes=SOON_MINUTES): slot = now + dt.timedelta(minutes=SOON_MINUTES)
+    if platform != "youtube" and youtube_at:
+        try: yt = dt.datetime.strptime(youtube_at, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=dt.timezone.utc).astimezone(LONDON)
+        except (TypeError, ValueError): yt = None
+        if yt and slot < yt + dt.timedelta(minutes=SOCIAL_LEAD_MINUTES): slot = yt + dt.timedelta(minutes=SOCIAL_LEAD_MINUTES)
     return slot.astimezone(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def youtube_at(entry):
+    """When this episode's YouTube video goes public, from the post the engine already made."""
+    for k, p in (entry.get("posts") or {}).items():
+        if k.startswith("youtube|") and p.get("clip") == "full":
+            return p.get("scheduled") or p.get("published_at")
+    return None
 PLACEHOLDER = "[ADD YOUTUBE LINK]"
 MODE_FILE = os.path.expanduser("~/.config/od/content_engine_mode")   # "test" (default) or "live"; Kevin flips it
 
@@ -430,7 +446,7 @@ def schedule_stage(day, entry, recs, acct_map, stage, dry_run=False, index=0):
         left = placeholder_left(text) or placeholder_left(title or "")
         if left:
             print("episode %d: %s %s REFUSED, placeholder %s still in the copy" % (day, spec["clip"], platform, left)); continue
-        when = when_for(platform, spec["clip"], index)
+        when = when_for(platform, spec["clip"], index, youtube_at=youtube_at(entry))
         if platform == "youtube" and youtube_direct_ready():
             # Straight to the channel through Google's API (Kevin, 9 Sep 2026): full quality, English, our caption
             # file attached, no burnt-in captions on the YouTube copy, link known at once. GoHighLevel is the fallback.
@@ -479,8 +495,6 @@ def schedule_stage(day, entry, recs, acct_map, stage, dry_run=False, index=0):
             plan_path, ptitle = spotify.write_plan(day, upload, ff.get("Podcast Copy"), entry["youtube_link"], test, os.path.dirname(STATE), thumb=files.get("thumb", ""))
             pod = entry.setdefault("podcast", {}); pod["plan"] = plan_path; pod["title"] = ptitle
             what += "; " + run_spotify(day, full["id"], plan_path, ptitle, test, pod)
-        # Kevin's personal Facebook profile gets the episode link (Kevin, 9 Sep 2026: "needs to be part of the process")
-        what += "; " + run_facebook(day, full["id"], ff.get("YouTube Copy"), entry["youtube_link"], test, entry)
     fields["Notes"] = approval.append_note(full, "%s: %s through GoHighLevel." % (dt.date.today().isoformat(), what))
     watch._airtable("PATCH", watch.API + "/" + full["id"], {"fields": fields})
     return len(todo)
@@ -531,27 +545,53 @@ def run_spotify(day, task_id, plan_path, title, test, pod):
     return "Spotify episode %s%s" % ("published" if status == "published" else "uploaded and processing", (" " + link) if link else "")
 
 
-def run_facebook(day, task_id, youtube_copy, youtube_link, test, entry):
-    """The YouTube link shared from Kevin's own Facebook profile through the browser lane. A signed-out
-    profile is recorded as 'signin-needed' (the hourly sync retries once Kevin has used the Robot sign-in
-    app) rather than guessed at; the lane's commit gate re-reads the approval before it presses Post."""
+def share_to_facebook_profile(day, entry, state):
+    """Kevin's own profile gets the PAGE's post, shared (Kevin, 10 Sep 2026: "it should just be shared from the
+    Facebook page to the Facebook profile"), once that page post is live. The page post URL is read off the page
+    itself, because GoHighLevel never returns one. Signed out, or the post not up yet: recorded, retried hourly."""
     import facebook_share
     fb = entry.setdefault("facebook_share", {})
-    plan_path, text = facebook_share.write_plan(day, youtube_copy, youtube_link, test, os.path.dirname(STATE))
-    fb["plan"] = plan_path; fb["text"] = text; fb["task"] = task_id; fb["test"] = bool(test)
+    if fb.get("status") in ("shared", "reviewed"): return False
+    page = [p for k, p in (entry.get("posts") or {}).items() if p.get("platform") == "facebook" and p.get("clip") == "summary"]
+    if not page: return False
+    post = page[0]
+    if post.get("status") not in ("published", "scheduled"): return False
+    if post.get("scheduled"):
+        try:
+            due = dt.datetime.fromisoformat(post["scheduled"].replace("Z", "+00:00"))
+            if dt.datetime.now(dt.timezone.utc) < due + dt.timedelta(minutes=10): return False   # the page post is not out yet
+        except ValueError: pass
     if not facebook_share.signed_in():
         fb["status"] = "signin-needed"
-        print("episode %d: Facebook profile share waits: SIGN-IN NEEDED www.facebook.com (https://www.facebook.com/login)" % day, file=sys.stderr)
-        return "Facebook profile share waiting for your sign-in (Robot sign-in app: Facebook)"
-    shot = os.path.join(os.path.dirname(STATE), "facebook_share_%d.png" % day)
+        print("episode %s: Facebook profile share waits: SIGN-IN NEEDED www.facebook.com (Robot sign-in app)" % day, file=sys.stderr)
+        return True
+    recs = bundle(int(day))
+    copy = ((recs.get("Short Form Video") or {}).get("fields", {}).get("Facebook Reels Copy") or "").strip()
+    url = fb.get("post_url") or facebook_share.find_page_post(copy)
+    if not url:
+        fb["status"] = "page-post-not-found"
+        print("episode %s: the page post is not on the Facebook page yet; looking again next run" % day)
+        return True
+    fb["post_url"] = url
+    test = mode() == "test"
+    plan_path, text = facebook_share.write_plan(int(day), url, copy, entry.get("youtube_link", ""), test, os.path.dirname(STATE))
+    shot = os.path.join(os.path.dirname(STATE), "facebook_share_%s.png" % day)
+    task = (approval.load_state().get(str(day)) or {}).get("task", "")
+    fb.update({"plan": plan_path, "text": text})
     try:
-        facebook_share.run_plan(plan_path, task_id, test, shot)
+        facebook_share.run_plan(plan_path, task, test, shot)
     except SystemExit as ex:
         fb["status"] = "failed"; fb["error"] = str(ex)[-300:]
-        print("episode %d: Facebook profile share FAILED: %s" % (day, str(ex)[-300:]), file=sys.stderr)
-        return "Facebook profile share FAILED (%s)" % str(ex)[-120:]
-    fb["status"] = "reviewed" if test else "posted"; fb["shot"] = shot
-    return "Facebook profile share %s" % ("filled, not posted (test mode)" if test else "posted")
+        print("episode %s: Facebook profile share FAILED: %s" % (day, str(ex)[-200:]), file=sys.stderr)
+        return True
+    fb.update({"status": "reviewed" if test else "shared", "shot": shot,
+               "shared_at": dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")})
+    if not test and not facebook_share.verify_shared(url):
+        fb["status"] = "unconfirmed"
+        print("episode %s: pressed Share but the post is not on the profile yet" % day, file=sys.stderr)
+    else:
+        print("episode %s: the page post is shared to Kevin's profile (%s)" % (day, url))
+    return True
 
 
 CURSOR_KEY = "_cursor"
@@ -626,6 +666,12 @@ def run(dry_run=False, limit=3):
         if n and st_no == 1 and not dry_run and moves_cursor(day, gaps): state[CURSOR_KEY] = day
         done += 1 if n else 0
         if not dry_run: save_state(state)
+        # Same day, not the day after (Kevin, 10 Sep 2026). The direct upload hands back the YouTube link at
+        # once, so the socials, the blog, the podcast and Spotify go out this afternoon instead of tomorrow.
+        if st_no == 1 and n and stage_for(entry, yt_ok) == "socials":
+            if schedule_stage(day, entry, recs, acct_map, 2, dry_run, index=per_stage[2]):
+                per_stage[2] += 1
+                if not dry_run: save_state(state)
 
 
 YTDLP = os.path.expanduser("~/Library/Python/3.9/bin/yt-dlp")
@@ -661,18 +707,7 @@ def sync():
     state = load_state(); _, loc, _ = _cfg()
     for day, entry in state.items():
         if not str(day).isdigit() or not isinstance(entry, dict): continue   # _cursor, _skipped_days, held_posts live beside the episodes (9 Sep 2026: the first live cursor crashed sync)
-        fb = entry.get("facebook_share") or {}
-        if fb.get("status") == "signin-needed" and fb.get("plan") and fb.get("task"):
-            import facebook_share
-            if facebook_share.signed_in():
-                shot = os.path.join(os.path.dirname(STATE), "facebook_share_%s.png" % day)
-                try:
-                    facebook_share.run_plan(fb["plan"], fb["task"], fb.get("test", False), shot)
-                    fb["status"] = "reviewed" if fb.get("test") else "posted"; fb["shot"] = shot
-                    print("episode %s: Facebook profile share %s after sign-in" % (day, fb["status"]))
-                except SystemExit as ex:
-                    fb["status"] = "failed"; fb["error"] = str(ex)[-300:]; print("episode %s: Facebook profile share FAILED: %s" % (day, str(ex)[-200:]))
-                save_state(state)
+        if share_to_facebook_profile(day, entry, state): save_state(state)
         pod = entry.get("podcast") or {}
         if pod.get("status") == "processing" and pod.get("title"):
             # the public link arrives once Spotify has processed the video (a few minutes after Publish)
@@ -693,7 +728,7 @@ def sync():
             if p.get("status") in ("published", "draft"): continue     # a draft (test mode) never moves on its own
             if p.get("route") == "api":                                # uploaded straight to YouTube: the slot passing is the publish
                 if p.get("scheduled") and dt.datetime.now(dt.timezone.utc) >= dt.datetime.fromisoformat(p["scheduled"].replace("Z", "+00:00")):
-                    p["status"] = "published"; changed = True
+                    p["status"] = "published"; p.setdefault("published_at", p["scheduled"]); changed = True
                     for f in LINK_FIELDS.get(("youtube", p["clip"]), ()): links.setdefault(f, p["link"])
                     if p["clip"] == "full" and not entry.get("youtube_link"): entry["youtube_link"] = p["link"]
                 continue
@@ -711,7 +746,7 @@ def sync():
                 found = youtube_link_from_channel(int(day), p.get("scheduled"))
                 if found: st, link = "published", found; p["status"] = st; p["note"] = "link read from the channel listing; GHL never updated its post"; print("episode %s: YouTube live as %s (GHL post still says scheduled)" % (day, found))
             if st == "published" and link:
-                p["link"] = link; changed = True
+                p["link"] = link; p.setdefault("published_at", dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")); changed = True
                 if p["platform"] == "youtube" and not entry.get("youtube_link"): entry["youtube_link"] = link
                 for f in LINK_FIELDS.get((p["platform"], p["clip"]), ()):
                     links.setdefault(f, link)                      # first account wins (the Runpreneur page before the profile)
@@ -729,6 +764,43 @@ def sync():
                 if rec: watch._airtable("PATCH", watch.API + "/" + rec["id"], {"fields": {k: v for k, v in cl.items() if not k.startswith("Link of")}})
             print("episode %s: %s" % (day, ", ".join(sorted(fields))))
         if changed: save_state(state)
+
+
+CHANNEL_NAMES = {("youtube", "full"): "YouTube full episode", ("youtube-short", "lfmd"): "YouTube Short",
+                 ("facebook", "summary"): "Facebook page (teaser)", ("facebook", "lfmd"): "Facebook page (Learnings)",
+                 ("instagram", "summary"): "Instagram (teaser)", ("instagram", "lfmd"): "Instagram (Learnings)",
+                 ("threads", "summary"): "Threads (teaser)", ("threads", "lfmd"): "Threads (Learnings)",
+                 ("linkedin", "summary"): "LinkedIn (teaser)", ("linkedin", "lfmd"): "LinkedIn (Learnings)",
+                 ("tiktok", "summary"): "TikTok (teaser)", ("tiktok", "lfmd"): "TikTok (Learnings)"}
+
+
+def published_rows(day, entry):
+    """One row per destination for an episode: channel, account, state, when, link. The spine of the
+    publishing report Kevin asked for (10 Sep 2026), built from what the engine actually did."""
+    rows = []
+    for key, p in sorted((entry.get("posts") or {}).items()):
+        name = CHANNEL_NAMES.get((p.get("platform"), p.get("clip")), "%s (%s)" % (p.get("platform"), p.get("clip")))
+        rows.append({"channel": name, "account": p.get("account", ""), "status": p.get("status", "?"),
+                     "when": p.get("published_at") or p.get("scheduled") or "", "link": p.get("link") or "",
+                     "route": p.get("route", "ghl")})
+    blog = entry.get("blog") or {}
+    if blog.get("url") or entry.get("blog_url"): rows.append({"channel": "Blog article", "account": "runpreneur.org.uk", "status": "published", "when": blog.get("at", ""), "link": blog.get("url") or entry.get("blog_url", ""), "route": "ghl"})
+    pod = entry.get("podcast") or {}
+    if pod: rows.append({"channel": "Spotify podcast", "account": "Runpreneur", "status": pod.get("status", "?"), "when": pod.get("shared_at", ""), "link": pod.get("link", ""), "route": "browser"})
+    fb = entry.get("facebook_share") or {}
+    if fb: rows.append({"channel": "Facebook profile (shared)", "account": "Kevin Brittain", "status": fb.get("status", "?"), "when": fb.get("shared_at", ""), "link": fb.get("post_url", ""), "route": "browser"})
+    return rows
+
+
+def published(day=0):
+    state = load_state()
+    days = [str(day)] if day else sorted([d for d in state if str(d).isdigit()], key=int)[-3:]
+    for d in days:
+        entry = state.get(d) or {}
+        rows = published_rows(d, entry)
+        print("episode %s: %d destination%s" % (d, len(rows), "" if len(rows) == 1 else "s"))
+        for r in rows:
+            print("  %-28s %-18s %-11s %-20s %s" % (r["channel"][:28], r["account"][:18], r["status"], r["when"], r["link"][:60]))
 
 
 def report():
@@ -806,7 +878,18 @@ def selftest():
     import inspect as _i2; src2 = _i2.getsource(schedule_stage); assert "youtube_direct_ready()" in src2 and src2.index("youtube_direct_ready()") < src2.index("create_post(body)"), "the API route is tried before GoHighLevel"
     ys = _i2.getsource(youtube_direct); assert 'files[clip]' in ys and '"_srt"' in ys and 'privacy="unlisted" if test else "private"' in ys and "publish_at=None if test else when" in ys
     ss = _i2.getsource(sync); assert 'p.get("route") == "api"' in ss and 'p["status"] = "published"' in ss, "API uploads flip to published on their slot without asking GoHighLevel"
-    import inspect as _i; assert "run_facebook(day, full[\"id\"]" in _i.getsource(schedule_stage) and "signin-needed" in _i.getsource(run_facebook), "the personal Facebook share runs at stage 2 and waits for sign-in"
+    import inspect as _i
+    assert "share_to_facebook_profile(day, entry, state)" in _i.getsource(sync) and "signin-needed" in _i.getsource(share_to_facebook_profile), "the profile share runs from sync, on the page post, and waits for sign-in"
+    fsrc = _i.getsource(share_to_facebook_profile); assert "find_page_post" in fsrc and "verify_shared" in fsrc, "it shares the page post and checks the profile afterwards"
+    rsrc = _i.getsource(run); assert 'stage_for(entry, yt_ok) == "socials"' in rsrc and rsrc.count("schedule_stage(") == 2, "both stages run the same day"
+    t0 = dt.datetime(2026, 9, 10, 9, 0, tzinfo=LONDON)
+    assert when_for("youtube", "full", 0, now=t0) == "2026-09-10T08:15:00Z", "the 06:00 slot has passed: 15 minutes from now, same morning"
+    assert when_for("linkedin", "summary", 0, now=t0) == "2026-09-10T11:00:00Z", "socials keep their afternoon slot"
+    assert when_for("linkedin", "summary", 0, now=t0, youtube_at="2026-09-10T13:00:00Z") == "2026-09-10T13:30:00Z", "never before the video is public + 30 min"
+    assert youtube_at({"posts": {"youtube|a|full": {"clip": "full", "scheduled": "2026-09-10T08:15:00Z"}}}) == "2026-09-10T08:15:00Z" and youtube_at({}) is None
+    rows = published_rows("9", {"posts": {"youtube|a|full": {"platform": "youtube", "clip": "full", "account": "Runpreneur", "status": "published", "published_at": "2026-09-10T08:15:00Z", "link": "https://youtu.be/x", "route": "api"}},
+                                "podcast": {"status": "published", "link": "https://open.spotify.com/episode/y"}, "facebook_share": {"status": "shared", "post_url": "https://www.facebook.com/reel/1"}})
+    assert [r["channel"] for r in rows] == ["YouTube full episode", "Spotify podcast", "Facebook profile (shared)"] and rows[0]["when"] == "2026-09-10T08:15:00Z"
     assert title_is_episode("Coping With Stress on Day 2,054 of My Running Streak | Runpreneur Episode 2054", 2054) and title_is_episode("Why 9 out of 10 | Runpreneur Ep1857/4292", 1857)
     assert not title_is_episode("How Excitement Kills Forecasting | Runpreneur Ep2053/5000", 2054), "the day before is not this episode"
     lst = [{"id": "AT0l-Ri5ZJ0", "title": "Coping With Stress on Day 2,054 | Runpreneur Episode 2054"}, {"id": "x", "title": "Ep2053"}]
@@ -847,7 +930,7 @@ def selftest():
     tp = build_text_post(od_accts[1], "hello", "2026-09-07T07:00:00Z", "u1", "https://cdn/c.png")
     assert tp["media"] == [{"url": "https://cdn/c.png", "type": "image/png"}] and tp["type"] == "post" and tp["scheduleDate"] == "2026-09-07T07:00:00Z"
     fbp = build_text_post(od_accts[4], "hello", "x", "u1", status="draft"); assert fbp["facebookPostDetails"] == {"type": "post"} and "media" not in fbp and "scheduleDate" not in fbp
-    print(json.dumps({"checks": 41, "failed": []}))
+    print(json.dumps({"checks": 46, "failed": []}))
 
 
 if __name__ == "__main__":
@@ -863,6 +946,7 @@ if __name__ == "__main__":
             e2 = dict(entry); e2.setdefault("youtube_link", "https://youtu.be/PENDING")
             schedule_stage(a.day, e2, recs, am, stage, dry_run=True)
     elif a.mode == "sync": sync()
+    elif a.mode == "published": published(a.day)
     elif a.mode == "report": report()
     elif a.mode == "youtube-link": youtube_link()
     else: raise SystemExit("usage: publish.py run [--dry-run] [--limit N] | plan --day N | sync | report | youtube-link | selftest")

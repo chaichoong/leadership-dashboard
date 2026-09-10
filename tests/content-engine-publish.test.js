@@ -105,7 +105,7 @@ describe('content-engine publish (GHL)', () => {
     const src = readFileSync(PUBLISH, 'utf8');
     expect(src).toContain('def next_publishable(state, ledger, approved)');
     expect(src).toContain('state[CURSOR_KEY] = day');
-    expect(src).toContain('def when_for(platform, clip, index, now=None)');
+    expect(src).toContain('def when_for(platform, clip, index, now=None, youtube_at=None)');   // same-day, and never before the video is public (10 Sep 2026)
     expect(src).toContain('"tiktok": {"summary": (13, 0), "lfmd": (19, 30)}');
     const sh = readFileSync(path.join(ROOT, 'scripts', 'content-engine-publish.sh'), 'utf8');
     expect(sh).toContain('publish.py run --limit 3');

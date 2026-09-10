@@ -334,12 +334,13 @@ def thumb_lines(text):
     return parts[0].strip(), (parts[1].strip() if len(parts) > 1 else ""), "banner"
 
 
-def make_thumbnail(master_916, duration, text, day, workdir):
-    """R6: the YouTube thumbnail in the team's layout, from a frame of the 9:16 master (Kevin whole-body, mid-run)."""
+def make_thumbnail(master_916, duration, text, day, workdir, lines=None):
+    """R6: the YouTube thumbnail in the team's layout, from a frame of the 9:16 master (Kevin whole-body, mid-run).
+    `lines` is the headline the banner already used, so Claude writes it once per episode."""
     at = min(12.0, max(0.0, duration / 2))
     frame = os.path.join(workdir, "thumb_frame.png")
     subprocess.run([FFMPEG, "-v", "error", "-y", "-ss", "%.2f" % at, "-i", master_916, "-frames:v", "1", frame], check=True)
-    l1, l2, how = thumb_lines(text)
+    l1, l2, how = lines or thumb_lines(text)
     out = thumbnail.compose(frame, os.path.join(workdir, "Episode_%d_Thumbnail.png" % day), l1, l2)
     return out, (l1, l2, how)
 
@@ -612,13 +613,20 @@ def process(key, ledger, keep=False):
     else:
         masters = {"9:16": render_masters(clip, workdir, only="9:16")["9:16"]}
     title = title_from_transcript(text)
+    lines = None
+    if role == "episode":
+        # one headline for the whole episode: the banner said "TAKING MOST OUT | TEAM FOR" while the thumbnail
+        # said "GET YOUR TEAM / ALL IN" (2056, Kevin 10 Sep 2026). Claude writes it once, both use it.
+        l1, l2, how = thumb_lines(text)
+        lines = (l1, l2, how)
+        if how == "claude" and l1: title = (l1 + "|" + l2).upper()
     if role == "teaser":
         title = episode_title_for(day, ledger) or title      # the long clip's title on the teaser banner (Kevin, 10 Sep 2026)
     paths = build_outputs(masters, srt, day, title, workdir, lfmd=window, role=role)
     e["horizon"] = horizon_for(masters); e["source_fps"] = source_fps(clip)
     if role == "episode":
         e["intro_at"] = LAST_CUT.get("at"); e["podcast_resume"] = LAST_CUT.get("resume")
-        paths["thumb"], e["thumb_lines"] = make_thumbnail(masters["9:16"], duration, text, day, workdir)
+        paths["thumb"], e["thumb_lines"] = make_thumbnail(masters["9:16"], duration, text, day, workdir, lines=lines)
     folder, links = publish_to_drive(paths, day, os.path.join(workdir, "transcript.txt"))
     rid, how = find_or_create_record(day, e.get("drive_id"), key, dt.date.fromisoformat(e["date"]))
     watch._airtable("PATCH", watch.API + "/" + rid, {"fields": record_updates(day, links, text, reason, key, role)})
@@ -763,6 +771,7 @@ def selftest():
     led["a full.insv"].update({"status": "rendered", "episode": 2056, "role": "episode", "title": "GET YOUR TEAM|ALL IN"})
     assert not teaser_waits("a sum.insv", led) and episode_title_for(2056, led) == "GET YOUR TEAM|ALL IN" and episode_title_for(2057, led) is None
     import inspect as _i4; pr = _i4.getsource(process); assert "episode_title_for(day, ledger) or title" in pr, "the teaser banner carries the episode title"
+    assert 'lines = (l1, l2, how)' in pr and 'title = (l1 + "|" + l2).upper()' in pr and "make_thumbnail(masters[\"9:16\"], duration, text, day, workdir, lines=lines)" in pr, "one headline: banner and thumbnail agree"
     assert 'e["horizon"] = horizon_for(masters)' in pr and source_fps("/nonexistent") is None and horizon_for({"16:9": "/nonexistent"}) is None
     assert lfmd_window([(0, 5, "hello"), (200, 210, "So the latest in my diary is that you should"), (240, 250, "stay positive, see you tomorrow")]) == (200, 250), "whisper's 'latest in my diary' (2056)"
     assert lfmd_window([(0, 5, "the learnings from my diary today"), (30, 40, "thank you as always")]) == (0, 40)
