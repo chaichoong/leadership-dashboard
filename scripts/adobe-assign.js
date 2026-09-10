@@ -123,13 +123,48 @@ function parseSigners(raw) {
 
 /**
  * Which signer each field belongs to, reading DOWN THE PAGE.
- * "auto" assumes the common shape: an equal block of fields per signer, in the
- * same order the signers were added. It refuses rather than guessing when the
- * fields do not divide evenly, because a wrong guess is a document sent to the
- * wrong person with no error anywhere.
+ *
+ * "blocks" (the default) reads the shape of a signature block rather than
+ * counting. Each SIGNATURE goes to the next signer in order, each DATE belongs
+ * to the signature above it, and any other detected box is a data blank that
+ * belongs to the first signer, who is the tenant and the person who fills it.
+ *
+ * Counting was the obvious rule and it is wrong. The authority to act carries
+ * blanks for date of birth, National Insurance number and council tax account,
+ * and Adobe detects an empty line as a field exactly like a signature line. We
+ * hold those details for some tenants and not others, so the SAME template
+ * produces a different number of fields per tenant, and an even split would
+ * quietly hand one person's signature box to another.
+ *
+ * "auto" keeps the old even split for a document known to have nothing but
+ * signature lines. An explicit list always wins.
  */
-function parseFieldMap(raw, fieldCount, signerCount) {
-  if (String(raw || 'auto') === 'auto') {
+function parseFieldMap(raw, fields, signerCount) {
+  const fieldCount = Array.isArray(fields) ? fields.length : fields;
+  const kinds = Array.isArray(fields) ? fields.map((f) => String(f.label || '')) : null;
+  const mode = String(raw || 'blocks');
+
+  if (mode === 'blocks') {
+    if (!kinds) die('the blocks rule needs the field labels, not just a count');
+    const map = [];
+    let signer = 0;
+    for (const k of kinds) {
+      if (/signature/i.test(k)) { signer += 1; map.push(Math.min(signer, signerCount)); }
+      else if (/date-of-signing/i.test(k)) { map.push(Math.min(Math.max(signer, 1), signerCount)); }
+      else map.push(1);
+    }
+    if (signer > signerCount) {
+      die(`the document has ${signer} signature lines but only ${signerCount} signers ` +
+          'were given. Nothing has been sent.');
+    }
+    if (signer < signerCount) {
+      die(`${signerCount} signers were given but the document has only ${signer} ` +
+          'signature lines, so somebody would have nothing to sign. Nothing has been sent.');
+    }
+    return map;
+  }
+
+  if (mode === 'auto') {
     if (fieldCount % signerCount !== 0) {
       die(`${fieldCount} fields do not divide evenly between ${signerCount} signers, ` +
           'so --fields auto cannot tell which belongs to whom. Pass the map ' +
@@ -138,6 +173,7 @@ function parseFieldMap(raw, fieldCount, signerCount) {
     const per = fieldCount / signerCount;
     return Array.from({ length: fieldCount }, (_, i) => Math.floor(i / per) + 1);
   }
+
   const map = String(raw).split(/[,\s]+/).filter(Boolean).map(Number);
   if (map.length !== fieldCount) {
     die(`--fields lists ${map.length} entries but the document has ${fieldCount} fields`);
@@ -204,6 +240,14 @@ async function run({ document: doc, signers, fields, page: pageNo, shot }) {
     }
     log(`${rows} recipients on the agreement`);
 
+    // Auto-place only appears when Adobe detected something to place. A
+    // document whose signature line it does not recognise offers no button at
+    // all, and the run should say that plainly rather than time out.
+    if (!(await page.locator(SEL.autoPlace).count())) {
+      die('Adobe offered no Auto-place on this document, so it detected no ' +
+          'fields to assign. Nothing has been sent. The signature line needs to ' +
+          'be one Adobe recognises; that is a fix in how the PDF is generated.');
+    }
     await page.locator(SEL.autoPlace).click();
     await page.waitForTimeout(WAIT.fields);
 
@@ -248,7 +292,7 @@ async function run({ document: doc, signers, fields, page: pageNo, shot }) {
 
     let found = await read();
     if (!found.length) die('Auto-place placed no fields on page ' + target);
-    const map = parseFieldMap(fields, found.length, signers.length);
+    const map = parseFieldMap(fields, found, signers.length);
     checkEverySignerHasAField(map, signers.length, signers);
     log(`${found.length} fields, map ${map.join(',')}`);
 
@@ -362,7 +406,7 @@ async function main() {
   if (rest.includes('--selftest')) return selftest();
   const doc = resolveDocument(arg(rest, 'document'));
   const signers = parseSigners(arg(rest, 'signers'));
-  const fields = arg(rest, 'fields', 'auto');
+  const fields = arg(rest, 'fields', 'blocks');
   const pageNo = Number(arg(rest, 'page', 0)) || 0;
   const shot = arg(rest, 'shot');
   if (rest.includes('--dry')) {
@@ -379,10 +423,29 @@ function selftest() {
   const check = (n, f) => { try { cases.push([n, !!f()]); } catch (e) { cases.push([n, false]); } };
   const refuses = (f) => { try { f(); return false; } catch { return true; } };
 
+  const F = (...labels) => labels.map((label) => ({ label }));
+  const SIG = 'signature-form-field, Signature Field';
+  const DTE = 'date-of-signing-form-field, Date of Signing';
+  const TXT = 'text-form-field, Text Field';
+
+  check('blocks: signature then date, twice, splits between two signers',
+    () => parseFieldMap('blocks', F(SIG, DTE, SIG, DTE), 2).join(',') === '1,1,2,2');
+  check('blocks: three signature-and-date pairs split between three signers',
+    () => parseFieldMap('blocks', F(SIG, DTE, SIG, DTE, SIG, DTE), 3).join(',') === '1,1,2,2,3,3');
+  check('blocks: bare signatures with no dates still go one per signer',
+    () => parseFieldMap('blocks', F(SIG, SIG, SIG), 3).join(',') === '1,2,3');
+  // The authority carries blanks for date of birth and National Insurance
+  // number. Adobe detects an empty line as a field, so the count varies per
+  // tenant and an even split would move somebody's signature to the wrong person.
+  check('blocks: data blanks above the signatures go to the tenant, not by count',
+    () => parseFieldMap('blocks', F(TXT, TXT, SIG, DTE, SIG, DTE, SIG, DTE), 3).join(',')
+          === '1,1,1,1,2,2,3,3');
+  check('blocks refuses a document with fewer signature lines than signers',
+    () => refuses(() => parseFieldMap('blocks', F(SIG, DTE), 2)));
+  check('blocks refuses a document with more signature lines than signers',
+    () => refuses(() => parseFieldMap('blocks', F(SIG, SIG, SIG), 2)));
   check('auto splits four fields evenly between two signers',
     () => parseFieldMap('auto', 4, 2).join(',') === '1,1,2,2');
-  check('auto splits six fields between three signers',
-    () => parseFieldMap('auto', 6, 3).join(',') === '1,1,2,2,3,3');
   check('auto refuses when the fields do not divide evenly',
     () => refuses(() => parseFieldMap('auto', 5, 2)));
   check('an explicit map is taken as given',
