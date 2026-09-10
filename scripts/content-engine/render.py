@@ -396,6 +396,25 @@ def render_masters(clip, workdir, only=None, pans=""):
     return out
 
 
+def horizon_for(masters):
+    """The stabiliser's settle report for the wide master (or the tall one), from its sidecar."""
+    for aspect in ("16:9", "9:16"):
+        side = (masters.get(aspect) or "") + ".horizon.json"
+        if masters.get(aspect) and os.path.exists(side):
+            try: return json.load(open(side))
+            except Exception: return None
+    return None
+
+
+def source_fps(clip):
+    try:
+        r = subprocess.run([os.path.expanduser("~/tools/bin/ffprobe"), "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=r_frame_rate", "-of", "csv=p=0", clip],
+                           capture_output=True, text=True, timeout=60).stdout.strip().split("\n")[0]
+        a, _, b = r.partition("/"); return round(float(a) / float(b or 1), 3)
+    except Exception:
+        return None
+
+
 def trim(src, start, end, dest):
     """Cut [start, end) of a master, re-encoded so the cut is frame-exact."""
     subprocess.run([FFMPEG, "-v", "error", "-y", "-ss", "%.3f" % start, "-to", "%.3f" % end, "-i", src,
@@ -596,6 +615,7 @@ def process(key, ledger, keep=False):
     if role == "teaser":
         title = episode_title_for(day, ledger) or title      # the long clip's title on the teaser banner (Kevin, 10 Sep 2026)
     paths = build_outputs(masters, srt, day, title, workdir, lfmd=window, role=role)
+    e["horizon"] = horizon_for(masters); e["source_fps"] = source_fps(clip)
     if role == "episode":
         e["intro_at"] = LAST_CUT.get("at"); e["podcast_resume"] = LAST_CUT.get("resume")
         paths["thumb"], e["thumb_lines"] = make_thumbnail(masters["9:16"], duration, text, day, workdir)
@@ -743,6 +763,7 @@ def selftest():
     led["a full.insv"].update({"status": "rendered", "episode": 2056, "role": "episode", "title": "GET YOUR TEAM|ALL IN"})
     assert not teaser_waits("a sum.insv", led) and episode_title_for(2056, led) == "GET YOUR TEAM|ALL IN" and episode_title_for(2057, led) is None
     import inspect as _i4; pr = _i4.getsource(process); assert "episode_title_for(day, ledger) or title" in pr, "the teaser banner carries the episode title"
+    assert 'e["horizon"] = horizon_for(masters)' in pr and source_fps("/nonexistent") is None and horizon_for({"16:9": "/nonexistent"}) is None
     assert lfmd_window([(0, 5, "hello"), (200, 210, "So the latest in my diary is that you should"), (240, 250, "stay positive, see you tomorrow")]) == (200, 250), "whisper's 'latest in my diary' (2056)"
     assert lfmd_window([(0, 5, "the learnings from my diary today"), (30, 40, "thank you as always")]) == (0, 40)
     assert lfmd_window([(0, 5, "I wrote it in my dairy today"), (30, 40, "see you tomorrow")]) == (0, 40), "the mis-spelt diary still counts"

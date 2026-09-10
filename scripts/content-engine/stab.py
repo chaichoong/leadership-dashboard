@@ -96,6 +96,19 @@ def integrate_warm(t, gyro, acc, M, gain=0.003):
     return integrate(t, gyro, acc, M, gain=gain, R0=warm_start(t, gyro, acc, M, gain))
 
 
+def horizon_report(t, Rs, acc, M, secs=(1, 5, 10, 60), win=3.0):
+    """How far the estimated 'up' is from measured gravity (degrees, 3 s windows) at a few times: the proof the
+    horizon lock settled. Written beside every master as <master>.horizon.json and read by the output gate."""
+    acs = acc @ M.T; rate = len(t) / max(t[-1] - t[0], 1e-6); out = {}
+    for sec in secs:
+        if t[0] + sec > t[-1]: continue
+        i = min(int(np.searchsorted(t, t[0] + sec)), len(t) - 1); lo, hi = max(0, int(i - win * rate / 2)), min(len(t), int(i + win * rate / 2))
+        g = np.einsum("nij,nj->ni", Rs[lo:hi], acs[lo:hi]).mean(0); n = np.linalg.norm(g)
+        if n < 1e-9: continue
+        out[str(sec)] = round(math.degrees(math.acos(float(np.clip(np.dot(g / n, UP_WORLD), -1, 1)))), 1)
+    return out
+
+
 def per_frame_R(t, Rs, n_frames, fps=FPS, offset=0.0):
     ft = np.arange(n_frames) / fps + offset
     idx = np.clip(np.searchsorted(t, ft), 0, len(t) - 1)
@@ -307,6 +320,10 @@ def render(clip, out_mp4, map_name, dfov, start, end, size, smooth_s=1.0, tilt_d
     t, gyro, acc = load_imu(clip)
     M = mapping_matrices()[map_name]
     Rs = integrate_warm(t, gyro, acc, M, gain=gain)
+    try:
+        json.dump(horizon_report(t, Rs, acc, M), open(out_mp4 + ".horizon.json", "w"))
+    except Exception as ex:
+        print("horizon report skipped: %s" % str(ex)[:120], file=sys.stderr)
     dur = float(subprocess.run([os.path.expanduser("~/tools/bin/ffprobe"), "-v", "error", "-show_entries",
                                 "format=duration", "-of", "csv=p=0", clip], capture_output=True, text=True).stdout)
     end = min(end if end else dur, dur)
@@ -422,6 +439,7 @@ def selftest():
     assert err(warm, 0) < 5.0 and err(warm, 6000) < 5.0, (err(warm, 0), err(warm, 6000))
     assert err(cold, 0) > 15.0, "the cold start must be fooled by the swing for this test to mean anything (%.1f)" % err(cold, 0)
     assert warm_start(t[:50], gyro[:50], acc[:50], M, 0.0003) is None, "too short a lead: fall back to the cold start"
+    hr = horizon_report(t, warm, acc, M, secs=(1, 5)); assert set(hr) == {"1", "5"} and hr["5"] < 5.0, hr
     _selftest_pans()
     maps = mapping_matrices(); assert len(maps) == 24 and "z-yx" in maps
     M = maps["z-yx"]; assert round(float(np.linalg.det(M))) == 1
