@@ -93,12 +93,10 @@ test.describe('Growth Plan page', () => {
 
   test('lists the unknown age and writes a date of birth back to the tenant', async ({ page }) => {
     const writes = await openPage(page, fixtures());
-    await expect(page.locator('#facts')).toContainText('Gary Unknown');
-    await expect(page.locator('#facts')).toContainText('age to confirm');
     await page.locator('#packs .pack').first().locator('.pack-head').click();
     await expect(page.locator('#packs .pack.open')).toContainText('Paul Flat: £836.52 received against £897.52 due');
-    await page.locator('#facts input[data-dob="recT3"]').fill('1980-06-01');
-    await page.locator('#facts button[data-act="save-dob"][data-tenant="recT3"]').click();
+    await page.locator('#packs .pack.open input[data-dob="recT3"]').fill('1980-06-01');
+    await page.locator('#packs .pack.open button[data-act="save-dob"][data-tenant="recT3"]').click();
     await expect(page.locator('#toast')).toContainText('Date of birth saved');
     const w = writes.find(x => x.tableId === TBL.tenants);
     expect(w.method).toBe('PATCH');
@@ -107,13 +105,14 @@ test.describe('Growth Plan page', () => {
     expect(w.records[0].fields[T.notes]).toMatch(/Growth Plan page/);
     // The plan re-prices in the pack that is already open: Gary (46) is now an uplift.
     await expect(page.locator('#packs .pack.open')).toContainText('Gary Unknown: room rate to 1-bed rate (age 46)');
-    await expect(page.locator('#facts input[data-dob="recT3"]')).toHaveCount(0);   // no longer an unknown age
+    await expect(page.locator('#packs .pack.open input[data-dob="recT3"]')).toHaveCount(0);   // no longer an unknown age
   });
 
   test('refuses an implausible date of birth without writing', async ({ page }) => {
     const writes = await openPage(page, fixtures());
-    await page.locator('#facts input[data-dob="recT3"]').fill('2019-06-01');
-    await page.locator('#facts button[data-act="save-dob"][data-tenant="recT3"]').click();
+    await page.locator('#packs .pack').first().locator('.pack-head').click();
+    await page.locator('#packs .pack.open input[data-dob="recT3"]').fill('2019-06-01');
+    await page.locator('#packs .pack.open button[data-act="save-dob"][data-tenant="recT3"]').click();
     await expect(page.locator('#toast')).toContainText('does not look like');
     expect(writes.filter(x => x.tableId === TBL.tenants)).toEqual([]);
   });
@@ -223,10 +222,11 @@ test.describe('Growth Plan page', () => {
 
   test('confirming 35+ from the facts list brings the tenant into the plan', async ({ page }) => {
     const writes = await openPage(page, fixtures());
-    await page.locator('#facts button[data-act="confirm-35"][data-tenant="recT3"]').click();
+    await page.locator('#packs .pack').first().locator('.pack-head').click();
+    await page.locator('#packs .pack.open button[data-act="confirm-35"][data-tenant="recT3"]').click();
     await expect(page.locator('#toast')).toContainText('recorded as 35 or over');
     expect(writes.find(x => x.tableId === TBL.tenants).records[0].fields[T.over35]).toBe(true);
-    await page.locator('#packs .pack').first().locator('.pack-head').click();
+    // the pack stays open through the re-render and Gary is now a lever, not a block
     await expect(page.locator('#packs .pack.open')).toContainText('Gary Unknown: room rate to 1-bed rate (35+ confirmed)');
   });
 
