@@ -593,6 +593,8 @@ def process(key, ledger, keep=False):
     else:
         masters = {"9:16": render_masters(clip, workdir, only="9:16")["9:16"]}
     title = title_from_transcript(text)
+    if role == "teaser":
+        title = episode_title_for(day, ledger) or title      # the long clip's title on the teaser banner (Kevin, 10 Sep 2026)
     paths = build_outputs(masters, srt, day, title, workdir, lfmd=window, role=role)
     if role == "episode":
         e["intro_at"] = LAST_CUT.get("at"); e["podcast_resume"] = LAST_CUT.get("resume")
@@ -662,12 +664,32 @@ def redo_full(day, keep=False):
     return key
 
 
+def teaser_waits(key, ledger):
+    """A short clip renders AFTER the day's long one so its banner can carry the episode title (1841's teaser
+    said 'Diary of a Runpreneur', Kevin 10 Sep 2026). It waits while a bigger clip of the same day is still
+    new, pulled or rendering; a day with no bigger clip, or one whose long clip failed, renders at once."""
+    e = ledger[key]
+    bigger = [v for k2, v in ledger.items() if k2 != key and v.get("date") == e.get("date") and (v.get("size") or 0) > (e.get("size") or 0)]
+    return any(v.get("status") in ("new", "pulled", "rendering") for v in bigger)
+
+
+def episode_title_for(day, ledger):
+    """The banner title the day's long clip produced, if it has rendered."""
+    for v in ledger.values():
+        if v.get("episode") == day and v.get("role") == "episode" and v.get("status") == "rendered" and v.get("title"):
+            return v["title"]
+    return None
+
+
 def run(limit=1, keep=False):
     ledger = watch.load_ledger()
     keys = [k for k, v in ledger.items() if v.get("status") == "pulled" and v.get("local") and os.path.exists(v["local"])]
-    keys = sorted(keys, key=lambda k: (ledger[k]["date"], ledger[k].get("size", 0)))[:limit]
+    keys = sorted(keys, key=lambda k: (ledger[k]["date"], -(ledger[k].get("size") or 0)))     # the long clip of a day first
+    waiting = [k for k in keys if teaser_waits(k, ledger)]
+    keys = [k for k in keys if k not in waiting][:limit]
+    for k in waiting: print("render: %s waits for the day's long clip (title first)" % k)
     if not keys:
-        print("render: nothing pulled"); return
+        print("render: nothing pulled" + (" (%d waiting)" % len(waiting) if waiting else "")); return
     failed = []
     for k in keys:
         try:
@@ -681,6 +703,13 @@ def run(limit=1, keep=False):
             print("render FAILED for %s: %s" % (k, exc), file=sys.stderr)
     print("render: %d of %d clips done, %d failed%s" % (len(keys) - len(failed), len(keys), len(failed),
           (" (" + ", ".join(failed) + ")") if failed else ""))
+    ledger = watch.load_ledger()
+    for k in waiting:                                    # the short clips whose long clip has just finished
+        if k in ledger and ledger[k].get("status") == "pulled" and not teaser_waits(k, ledger):
+            try: process(k, ledger, keep); print("render: %s rendered after its episode" % k)
+            except Exception as exc:
+                ledger = watch.load_ledger(); ledger[k]["status"] = "failed"; ledger[k]["error"] = str(exc)[:500]; watch.save_ledger(ledger)
+                print("render FAILED for %s: %s" % (k, exc), file=sys.stderr)
 
 
 def one(clip, day, out):
@@ -708,6 +737,12 @@ def selftest():
     assert intro_insert_seconds([(0, 5, "just talking"), (300, 305, "let's go")], 600) == 0.0, "a late let's go is not the sign-off"
     assert intro_insert_seconds([], 10) == 0.0
     assert INTRO_CLIP.endswith("Vlog Intro/runprenuer-intro_clip.mp4") and INTRO_TRIM_START == 1.0
+    led = {"a full.insv": {"date": "2026-09-10", "size": 3000, "status": "pulled"}, "a sum.insv": {"date": "2026-09-10", "size": 500, "status": "pulled"},
+           "b sum.insv": {"date": "2026-09-11", "size": 500, "status": "pulled"}}
+    assert teaser_waits("a sum.insv", led) and not teaser_waits("a full.insv", led) and not teaser_waits("b sum.insv", led), "a teaser waits only while its day's long clip is unfinished"
+    led["a full.insv"].update({"status": "rendered", "episode": 2056, "role": "episode", "title": "GET YOUR TEAM|ALL IN"})
+    assert not teaser_waits("a sum.insv", led) and episode_title_for(2056, led) == "GET YOUR TEAM|ALL IN" and episode_title_for(2057, led) is None
+    import inspect as _i4; pr = _i4.getsource(process); assert "episode_title_for(day, ledger) or title" in pr, "the teaser banner carries the episode title"
     assert lfmd_window([(0, 5, "hello"), (200, 210, "So the latest in my diary is that you should"), (240, 250, "stay positive, see you tomorrow")]) == (200, 250), "whisper's 'latest in my diary' (2056)"
     assert lfmd_window([(0, 5, "the learnings from my diary today"), (30, 40, "thank you as always")]) == (0, 40)
     assert lfmd_window([(0, 5, "I wrote it in my dairy today"), (30, 40, "see you tomorrow")]) == (0, 40), "the mis-spelt diary still counts"

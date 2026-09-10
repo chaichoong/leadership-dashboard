@@ -25,7 +25,7 @@ MAX_WORDS = 5
 
 # whisper.cpp base.en mis-hears the brand; fix at caption time (never in the transcript file)
 BRAND_FIXES = [
-    (re.compile(r"\b[Rr]umpren(?:er|eur)\b|\b[Rr]umpener\b|\b[Rr]unprinter\b|\b[Rr]on ?[Pp]renner\b|\b[Rr]un ?preneur\b|\b[Rr]unpreneurs?\b"), "Runpreneur"),
+    (re.compile(r"\b[Rr]umpren(?:er|eur)\b|\b[Rr]umpener\b|\b[Rr]unprinter\b|\b[Rr]on ?[Pp]renner\b|\b[Rr]on ?preneur\b|\b[Rr]un ?preneur\b|\b[Rr]unpreneurs?\b"), "Runpreneur"),
 ]
 
 # libass measures in a 288-line space whatever the video height
@@ -145,6 +145,7 @@ def selftest():
     assert fix_brand("rumpener and Run preneur") == "Runpreneur and Runpreneur"
     assert fix_brand("a diary of a runprinter") == "a diary of a Runpreneur"
     assert fix_brand("the diary of a Ron Prenner") == "the diary of a Runpreneur"
+    assert fix_brand("a diary of a ronpreneur,") == "a diary of a Runpreneur,", "1841's caption (10 Sep 2026)"
     srt = "1\n00:00:00,000 --> 00:00:04,000\nSo consecutive day two of a rumpener diary\n\n2\n00:00:04,000 --> 00:00:06,000\n[BLANK_AUDIO]\n"
     out = rechunk_srt(srt)
     assert "[BLANK" not in out and "Runpreneur" in out and out.count("-->") == 2, out

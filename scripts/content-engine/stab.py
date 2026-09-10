@@ -49,13 +49,21 @@ def skew_exp(w):
     return np.eye(3) + math.sin(th) * K + (1 - math.cos(th)) * (K @ K)
 
 
-def integrate(t, gyro, acc, M, gain=0.003):
-    """Complementary filter. Returns R_world_from_cam at every IMU sample (N,3,3)."""
+WARM_LEAD_S = 30.0    # the filter is settled by here; that orientation is carried back to t0 through the gyro alone
+
+
+def integrate(t, gyro, acc, M, gain=0.003, R0=None):
+    """Complementary filter. Returns R_world_from_cam at every IMU sample (N,3,3).
+    Start: the first three seconds of accelerometer give a rough 'up'; with the slow gain the estimate
+    then took eight seconds to settle, so every episode opened leaning over (2055 and 2056, Kevin
+    10 Sep 2026). warm_start() fixes that: run the lead, walk the gyro back to t0, start from there."""
     gs = gyro @ M.T; acs = acc @ M.T
-    # initial orientation: align measured up with UP_WORLD
-    up0 = acs[:200].mean(0); up0 /= np.linalg.norm(up0)
-    v = np.cross(up0, UP_WORLD); s = np.linalg.norm(v); c = float(np.dot(up0, UP_WORLD))
-    R = skew_exp(v / s * math.atan2(s, c)) if s > 1e-9 else np.eye(3)
+    if R0 is None:
+        # initial orientation: align measured up with UP_WORLD
+        up0 = acs[:3000].mean(0); up0 /= np.linalg.norm(up0)
+        v = np.cross(up0, UP_WORLD); s = np.linalg.norm(v); c = float(np.dot(up0, UP_WORLD))
+        R0 = skew_exp(v / s * math.atan2(s, c)) if s > 1e-9 else np.eye(3)
+    R = R0
     Rs = np.empty((len(t), 3, 3))
     for i in range(len(t)):
         if i > 0:
@@ -69,6 +77,23 @@ def integrate(t, gyro, acc, M, gain=0.003):
                 R = skew_exp(corr * gain) @ R
         Rs[i] = R
     return Rs
+
+
+def warm_start(t, gyro, acc, M, gain, lead_s=WARM_LEAD_S):
+    """Orientation at t0 that agrees with the settled filter: integrate the lead forward, then carry the
+    settled orientation back to t0 with the gyro only (no gravity pull, so no bounce). Measured on 2056:
+    gravity error in the first ten seconds fell from 26 to 51 degrees down to 2 to 7 degrees."""
+    n = int(np.searchsorted(t, t[0] + lead_s))
+    if n < 100: return None
+    Rs = integrate(t[:n], gyro[:n], acc[:n], M, gain=gain)
+    R = Rs[-1]; gs = gyro[:n] @ M.T; dts = np.diff(t[:n], prepend=t[0])
+    for i in range(n - 1, -1, -1):
+        R = R @ skew_exp(-gs[i] * dts[i])
+    return R
+
+
+def integrate_warm(t, gyro, acc, M, gain=0.003):
+    return integrate(t, gyro, acc, M, gain=gain, R0=warm_start(t, gyro, acc, M, gain))
 
 
 def per_frame_R(t, Rs, n_frames, fps=FPS, offset=0.0):
@@ -150,7 +175,7 @@ def calib(clip, out_png, times=(5.0, 20.0, 35.0), size=(320, 180), dfov=200, gai
     vd = view_dirs(size[0], size[1], dfov)
     rows = []
     for name, M in maps.items():
-        Rs = integrate(t, gyro, acc, M, gain=gain)
+        Rs = integrate_warm(t, gyro, acc, M, gain=gain)
         tiles = []
         for tt in times:
             i = np.clip(np.searchsorted(t, tt), 0, len(t) - 1)
@@ -260,7 +285,7 @@ def preview_frame(clip, t_sec, map_name="z-yx", size=(480, 270), dfov=200.0, pro
     key = (clip, map_name)
     if key not in cache:
         t, gyro, acc = load_imu(clip); M = mapping_matrices()[map_name]
-        cache[key] = (t, integrate(t, gyro, acc, M, gain=gain))
+        cache[key] = (t, integrate_warm(t, gyro, acc, M, gain=gain))
     t, Rs = cache[key]
     n = int(round(t_sec * FPS)) + 1
     Rf, F_sm, mode = plan_views(t, Rs, n, 0.0, 1.0, 0.6, tilt_deg, level, raise_cut=False)
@@ -281,7 +306,7 @@ def render(clip, out_mp4, map_name, dfov, start, end, size, smooth_s=1.0, tilt_d
            workers=1, raise_cut=True, video_only=False, pans=None):
     t, gyro, acc = load_imu(clip)
     M = mapping_matrices()[map_name]
-    Rs = integrate(t, gyro, acc, M, gain=gain)
+    Rs = integrate_warm(t, gyro, acc, M, gain=gain)
     dur = float(subprocess.run([os.path.expanduser("~/tools/bin/ffprobe"), "-v", "error", "-show_entries",
                                 "format=duration", "-of", "csv=p=0", clip], capture_output=True, text=True).stdout)
     end = min(end if end else dur, dur)
@@ -331,8 +356,8 @@ def render(clip, out_mp4, map_name, dfov, start, end, size, smooth_s=1.0, tilt_d
                     "-c:v", "h264_videotoolbox", "-b:v", "12M", "-pix_fmt", "yuv420p",
                     "-c:a", "aac", "-b:a", "160k", "-movflags", "+faststart", out_mp4]
     enc = subprocess.Popen(enc_cmd, stdin=subprocess.PIPE)
-    fr = insta.frame_stream(clip, insta.FRONT, start=start, end=end)
-    bk = insta.frame_stream(clip, insta.BACK, start=start, end=end)
+    fr = insta.frame_stream(clip, insta.FRONT, start=start, end=end, fps=FPS)   # any source rate -> FPS (1841's 29.97 fps clip, 10 Sep 2026)
+    bk = insta.frame_stream(clip, insta.BACK, start=start, end=end, fps=FPS)
     n = n0; faces = 0
     for front, back in zip(fr, bk):
         if n >= n1: break
@@ -348,8 +373,8 @@ def sync(clip, map_name, start=5.0, end=15.0, gain=0.0003, offsets=None, lens=72
     offsets = offsets if offsets is not None else [round(x, 3) for x in np.arange(-0.12, 0.121, 0.02)]
     t, gyro, acc = load_imu(clip)
     Rs = integrate(t, gyro, acc, mapping_matrices()[map_name], gain=gain)
-    fr = list(insta.frame_stream(clip, insta.FRONT, w=lens, h=lens, start=start, end=end))
-    bk = list(insta.frame_stream(clip, insta.BACK, w=lens, h=lens, start=start, end=end))
+    fr = list(insta.frame_stream(clip, insta.FRONT, w=lens, h=lens, start=start, end=end, fps=FPS))
+    bk = list(insta.frame_stream(clip, insta.BACK, w=lens, h=lens, start=start, end=end, fps=FPS))
     n0 = int(round(start * FPS)); n = min(len(fr), len(bk))
     vd = view_dirs(size[0], size[1], dfov)
     results = []
@@ -382,6 +407,21 @@ def _selftest_pans():
 
 
 def selftest():
+
+    # warm start (10 Sep 2026): a camera held 40 degrees off level with a wobble in the first two seconds must
+    # read level from the first sample, not eight seconds in
+    rng = np.random.default_rng(1); n = 8000; t = np.arange(n) / 1000.0
+    tilt = skew_exp(np.array([math.radians(40.0), 0.0, 0.0]))
+    swing = skew_exp(np.array([0.0, 0.0, math.radians(45.0)]))                      # a hand swing for the first three seconds fools the cold start
+    acc = np.tile(tilt.T @ UP_WORLD, (n, 1)); acc[t < 2.0] = swing.T @ acc[0]
+    acc = acc + rng.normal(0, 0.05, (n, 3))
+    gyro = np.zeros((n, 3)); M = np.eye(3)
+    cold = integrate(t, gyro, acc, M, gain=0.001); warm = integrate_warm(t, gyro, acc, M, gain=0.001)
+    g_true = tilt.T @ UP_WORLD
+    def err(Rs, k): g = Rs[k] @ g_true; return math.degrees(math.acos(float(np.clip(np.dot(g, UP_WORLD), -1, 1))))
+    assert err(warm, 0) < 5.0 and err(warm, 6000) < 5.0, (err(warm, 0), err(warm, 6000))
+    assert err(cold, 0) > 15.0, "the cold start must be fooled by the swing for this test to mean anything (%.1f)" % err(cold, 0)
+    assert warm_start(t[:50], gyro[:50], acc[:50], M, 0.0003) is None, "too short a lead: fall back to the cold start"
     _selftest_pans()
     maps = mapping_matrices(); assert len(maps) == 24 and "z-yx" in maps
     M = maps["z-yx"]; assert round(float(np.linalg.det(M))) == 1
