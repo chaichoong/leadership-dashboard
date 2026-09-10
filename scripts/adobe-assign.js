@@ -380,12 +380,23 @@ async function run({ document: doc, signers, fields, page: pageNo, shot }) {
               'move the wrong one. Nothing has been sent.');
         }
         const h = handles[i];
-        if (h) {
-          await h.click({ timeout: 10000 }).catch(async () => {
-            await page.mouse.click(f.x + f.w / 2, f.y + f.h / 2);
-          });
-        } else {
-          await page.mouse.click(f.x + f.w / 2, f.y + f.h / 2);
+        // NEVER FALL BACK TO A REMEMBERED POINT. Coordinates were read at one
+        // scroll position and the viewer scrolls as it works, so a stale click
+        // lands on blank paper and the failure looks like the field refusing to
+        // open. That masked the real error for several runs on the authority to
+        // act, where the fallback fired and hit nothing. Ask the element where
+        // it is NOW, and if even that fails, say why instead of guessing.
+        if (!h) die(`field ${i + 1} has no clickable body on the page. Nothing has been sent.`);
+        try {
+          await h.click({ timeout: 10000 });
+        } catch (e) {
+          await h.scrollIntoViewIfNeeded().catch(() => {});
+          const box = await h.boundingBox();
+          if (!box) {
+            log(`field ${i + 1}: no box after scrolling (${String(e.message).slice(0, 60)})`);
+          } else {
+            await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+          }
         }
         await page.waitForTimeout(WAIT.settle);
         opened = await page.locator(SEL.changeRecipients)
@@ -448,12 +459,21 @@ async function run({ document: doc, signers, fields, page: pageNo, shot }) {
       // the click never selected anything and the wrapper never appeared. A
       // correct document was refused for it.
       const vh = await orderedFieldHandles(page);
-      if (vh.length === found.length && vh[i]) {
-        await vh[i].click({ timeout: 10000 }).catch(async () => {
-          await page.mouse.click(f.x + f.w / 2, f.y + f.h / 2);
-        });
+      // Same rule as the assignment step, and for the same reason: a remembered
+      // point is meaningless once the viewer has scrolled. Reading back through
+      // a stale click reports "none" for a field that is perfectly well
+      // assigned, and a correct document gets refused.
+      const h = (vh.length === found.length) ? vh[i] : null;
+      if (h) {
+        try {
+          await h.click({ timeout: 10000 });
+        } catch {
+          await h.scrollIntoViewIfNeeded().catch(() => {});
+          const box = await h.boundingBox();
+          if (box) await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+        }
       } else {
-        await page.mouse.click(f.x + f.w / 2, f.y + f.h / 2);
+        log(`field ${i + 1}: could not be selected to read back`);
       }
       await page.waitForTimeout(1800);
       const c = await page.evaluate((sel) => {
