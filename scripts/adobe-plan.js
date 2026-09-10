@@ -114,14 +114,20 @@ function parseSigners(raw) {
     // send something Kevin would have to unpick.
     //
     // RE-MEASURED 10 Sep 2026 and still true, so this refusal is current
-    // rather than inherited. A two-recipient agreement was built live
-    // (tenant, then landlord) and Adobe reported it in its own words:
-    // "Fields automatically added and assigned to kevin@runpreneur.org...".
-    // The tenant got nothing. Adobe offers a manual route instead, a banner
-    // reading "Select the suggested areas to quickly assign fields to
-    // recipients", but that means clicking each detected field on the page,
-    // which a selector-based plan cannot express. Lifting this refusal means
-    // building per-field assignment, not deleting the check.
+    // rather than inherited. A two-recipient agreement was built live, tenant
+    // first and landlord second, and Adobe reported in its own words that it
+    // had assigned every field to the SECOND RECIPIENT. The tenant got none.
+    // (The address in that message is the recipient the test supplied, not the
+    // sending account: agreements always go out from info@agilelets.co.uk,
+    // shown to signers as "Agile Lets".)
+    //
+    // This is not unsolvable, it is unautomated. The manual cure is written
+    // down in the adobe-sign-field-setup skill and has been used on real
+    // tenancy agreements before: left-click a field, choose "Change
+    // recipients" from the context menu, pick the right signer, and the
+    // border changes colour (purple signer 1, green signer 2, pink signer 3).
+    // Lifting this refusal means teaching the plan that click sequence, not
+    // deleting the check.
     //
     // The multi-recipient MECHANICS are solved and proven, for whoever picks
     // that up: [data-testid="recipient-action-menu-button"] opens a menu with
