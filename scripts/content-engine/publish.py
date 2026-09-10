@@ -682,7 +682,6 @@ def sync():
                 pod["status"] = "published"; pod["link"] = link; save_state(state)
                 print("episode %s: Spotify episode is live %s" % (day, link))
                 try:
-                    import platform_copy as pc
                     full = pc.find_by_name(pc.record_name(int(day), "Long Form Video"))
                     if full: watch._airtable("PATCH", watch.API + "/" + full["id"], {"fields": {"Notes": approval.append_note(
                         full, "%s: Spotify episode live %s" % (dt.date.today().isoformat(), link))}})
@@ -796,7 +795,8 @@ def selftest():
     # Kevin's catch-up days (8 Sep 2026): a gap day publishes when approved and never moves the cursor; the continuity day still waits its turn
     led = {"a": {"episode": 2054}, "b": {"episode": 2055}, "g": {"episode": 1799}}; gaps = {1799, 1808, 1841}
     st = {CURSOR_KEY: 2053}; assert may_go_to_youtube(1799, gaps, st, led, {1799, 2055}) and not may_go_to_youtube(2055, gaps, st, led, {1799, 2055})
-    import inspect; src = inspect.getsource(sync); assert 'if not str(day).isdigit() or not isinstance(entry, dict): continue' in src, "sync skips the cursor and the held posts"
+    import inspect; src = inspect.getsource(sync); assert "import platform_copy" not in src, "sync must use the module-level pc: an import inside the function made pc a local and crashed every sync (10 Sep 2026, 07:15)"
+    assert 'if not str(day).isdigit() or not isinstance(entry, dict): continue' in src, "sync skips the cursor and the held posts"
     assert may_go_to_youtube(2054, gaps, st, led, {1799, 2054}) and st[CURSOR_KEY] == 2053, "a gap day in the approved set does not disturb the order"
     assert not moves_cursor(1799, gaps) and moves_cursor(2054, gaps)
     assert "twitter" not in CHANNELS
