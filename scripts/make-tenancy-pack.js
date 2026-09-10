@@ -37,6 +37,26 @@ const { execFileSync } = require('child_process');
 // putting the Cambridge number on a Manchester agreement would be a false rent.
 const MODEL = require(path.join(__dirname, '..', 'js', 'growth-plan-model.js'));
 
+// WHO NEEDS WHAT (Kevin, 10 Sep 2026, reviewing the first full list)
+//
+// PROOF OF RESIDENCY is a derived rule, not a list: Universal Credit only asks
+// for one when the tenancy it is verifying is NEW or CHANGED. A tenant whose
+// rent and agreement are untouched has nothing for UC to re-verify, so no
+// proof. That rule reproduces every call Kevin made, so it is coded rather
+// than listed, and it keeps working as tenants come and go.
+//
+// AUTHORITY TO ACT could not be derived. Kevin dropped it at 5 Dalham Place and
+// for David Pinder, and kept it everywhere else, including tenants with no rent
+// change at 55 Elmdon Place and 13 Chedburgh Place. The exceptions are listed
+// here with his name and the date on them, so every gap is attributable and
+// nothing is silently inferred.
+const NO_AUTHORITY_PROPERTY = ['5 Dalham Place'];
+const NO_AUTHORITY_TENANT = ['David Pinder'];
+// Tristram Guthrie has no date of birth on file, so the age test could not put
+// him on the one-bed rate. Kevin's instruction to raise his agreement at that
+// rate IS the confirmation that he is 35 or over. His rent is £524.52 today.
+const CONFIRMED_OVER_35 = ['Tristram Guthrie'];
+
 const BASE = 'appnqjDpqDniH3IRl';
 const TPL = path.join(os.homedir(), 'knowledge-os', 'templates');
 const OUT = path.join(os.homedir(), 'knowledge-os', 'attachments');
@@ -247,12 +267,18 @@ async function main(argv) {
       if (wantedTenant && person.name.toLowerCase() !== wantedTenant.toLowerCase()) continue;
       const f = person.f;
       const age = MODEL.ageOn(f['Date of Birth'], TODAY);
-      const over35 = age != null ? age >= 35 : !!f['Aged 35 or Over (confirmed)'];
+      const over35 = CONFIRMED_OVER_35.includes(person.name)
+        || (age != null ? age >= 35 : !!f['Aged 35 or Over (confirmed)']);
       const uc = f['Rent Payment Type'] === 'Universal Credit';
+      // Decide the agreement FIRST, because the proof of residency depends on it.
+      const raisesAst = strategy !== 'Joint tenancy' && uc && over35
+        && person.rent > 0 && person.rent < oneBed - 0.5;
+      const signsNewTenancy = raisesAst || strategy === 'Joint tenancy';
       // Proof of residency: Universal Credit asks for a proof of address and these
       // tenants have no utility bill in their name, so Agile Lets confirms it.
-      // Every tenant in a pack gets one, whatever else they are signing.
-      if (uc) {
+      // Only where the tenancy is new or changed (Kevin, 10 Sep 2026): a tenant
+      // whose agreement and rent are untouched has nothing for UC to re-verify.
+      if (uc && signsNewTenancy) {
         // No title or reference line: this is the letter Agile Lets already sends,
         // and Kevin wants it to look like the one Universal Credit has seen before.
         const addrLines = String(address).split(',').map((x) => x.trim()).filter(Boolean);
@@ -273,7 +299,7 @@ async function main(argv) {
       // Tax Reduction form and any CRF Housing Payment, and the gaps are
       // filled in at the meeting. Age does not decide it: two tenants have no
       // date of birth on file, and a joint claim is made in both names.
-      if (uc) {
+      if (uc && !NO_AUTHORITY_PROPERTY.includes(name) && !NO_AUTHORITY_TENANT.includes(person.name)) {
         made.push(renderPdf({
           name: `Authority_${person.name.replace(/[^A-Za-z0-9]+/g, '_')}_${name.replace(/[^A-Za-z0-9]+/g, '_')}`,
           title: 'Authority to act: council tax reduction and housing payment',
@@ -293,7 +319,7 @@ async function main(argv) {
       // The HMO tenant signs the standard agreement at the new rate, with the
       // single-room clause: the old "two rooms above £897.52" wording is gone,
       // because the whole point is that one room now earns the one-bed rate.
-      if (strategy !== 'Joint tenancy' && uc && over35 && person.rent > 0 && person.rent < oneBed - 0.5) {
+      if (raisesAst) {
         made.push(renderPdf({
           name: `AST_${person.name.replace(/[^A-Za-z0-9]+/g, '_')}_${name.replace(/[^A-Za-z0-9]+/g, '_')}`,
           title: 'Assured shorthold tenancy agreement',
