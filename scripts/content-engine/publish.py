@@ -766,7 +766,7 @@ def sync():
         if changed: save_state(state)
 
 
-CHANNEL_NAMES = {("youtube", "full"): "YouTube full episode", ("youtube-short", "lfmd"): "YouTube Short",
+CHANNEL_NAMES = {("youtube", "full"): "YouTube full episode", ("youtube", "lfmd"): "YouTube Short",
                  ("facebook", "summary"): "Facebook page (teaser)", ("facebook", "lfmd"): "Facebook page (Learnings)",
                  ("instagram", "summary"): "Instagram (teaser)", ("instagram", "lfmd"): "Instagram (Learnings)",
                  ("threads", "summary"): "Threads (teaser)", ("threads", "lfmd"): "Threads (Learnings)",
@@ -889,6 +889,7 @@ def selftest():
     assert youtube_at({"posts": {"youtube|a|full": {"clip": "full", "scheduled": "2026-09-10T08:15:00Z"}}}) == "2026-09-10T08:15:00Z" and youtube_at({}) is None
     rows = published_rows("9", {"posts": {"youtube|a|full": {"platform": "youtube", "clip": "full", "account": "Runpreneur", "status": "published", "published_at": "2026-09-10T08:15:00Z", "link": "https://youtu.be/x", "route": "api"}},
                                 "podcast": {"status": "published", "link": "https://open.spotify.com/episode/y"}, "facebook_share": {"status": "shared", "post_url": "https://www.facebook.com/reel/1"}})
+    assert published_rows("9", {"posts": {"y|a|lfmd": {"platform": "youtube", "clip": "lfmd", "status": "scheduled"}}})[0]["channel"] == "YouTube Short"
     assert [r["channel"] for r in rows] == ["YouTube full episode", "Spotify podcast", "Facebook profile (shared)"] and rows[0]["when"] == "2026-09-10T08:15:00Z"
     assert title_is_episode("Coping With Stress on Day 2,054 of My Running Streak | Runpreneur Episode 2054", 2054) and title_is_episode("Why 9 out of 10 | Runpreneur Ep1857/4292", 1857)
     assert not title_is_episode("How Excitement Kills Forecasting | Runpreneur Ep2053/5000", 2054), "the day before is not this episode"
