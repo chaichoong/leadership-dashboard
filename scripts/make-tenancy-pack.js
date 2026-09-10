@@ -100,14 +100,11 @@ async function main(argv) {
     ['Customers', 'Property', 'Tenancy Start Date', 'Expected Monthly Rent', 'Tenancy Status']);
   const byId = Object.fromEntries(tenants.map((t) => [t.id, t.fields]));
 
-  // Parked by Kevin on 10 Sep 2026: no council tax is billed there, so the joint
-  // tenancy buys nothing yet. Named explicitly on the command line, it still builds.
-  const PARKED = ['1406 Oldham Road'];
   const targets = props.filter((p) => {
     const n = p.fields['Property Name (Short)'];
     const strat = p.fields['Growth Strategy'];
     if (wanted) return n === wanted;
-    return (strat === 'Joint tenancy' || strat === 'HMO') && !PARKED.includes(n);
+    return strat === 'Joint tenancy' || strat === 'HMO';
   });
   if (!targets.length) die('no property matched');
 
@@ -169,6 +166,22 @@ async function main(argv) {
       const age = MODEL.ageOn(f['Date of Birth'], TODAY);
       const over35 = age != null ? age >= 35 : !!f['Aged 35 or Over (confirmed)'];
       const uc = f['Rent Payment Type'] === 'Universal Credit';
+      // Proof of residency: Universal Credit asks for a proof of address and these
+      // tenants have no utility bill in their name, so Agile Lets confirms it.
+      // Every tenant in a pack gets one, whatever else they are signing.
+      if (uc) {
+        made.push(renderPdf({
+          name: `Proof_of_Residency_${person.name.replace(/[^A-Za-z0-9]+/g, '_')}`,
+          title: 'Proof of residency',
+          reference: `${person.name} — ${address}`,
+          footer: `${person.name} — proof of residency — Agile Lets Limited`,
+          markdown: fill('proof_of_residency_template.md', {
+            'Tenant Name': person.name, 'Property address': address,
+            Date: longDate(TODAY),
+            'Tenancy start': longDate(strategy === 'Joint tenancy' ? people[people.length - 1].start : person.start),
+          }),
+        }, dry));
+      }
       // Both joint tenants need an authority whatever we hold on them: the claim
       // is made in both names, and the gaps are filled at the meeting.
       if (uc && (over35 || strategy === 'Joint tenancy')) {
@@ -188,21 +201,23 @@ async function main(argv) {
           }),
         }, dry));
       }
-      // A rent change letter only where the rent actually moves and no joint
-      // agreement is carrying the change instead.
+      // A rent rise is a NEW TENANCY, not a letter about one (Kevin, 10 Sep 2026).
+      // The HMO tenant signs the standard agreement at the new rate, with the
+      // single-room clause: the old "two rooms above £897.52" wording is gone,
+      // because the whole point is that one room now earns the one-bed rate.
       if (strategy !== 'Joint tenancy' && uc && over35 && person.rent > 0 && person.rent < oneBed - 0.5) {
         made.push(renderPdf({
-          name: `Rent_Change_${person.name.replace(/[^A-Za-z0-9]+/g, '_')}`,
-          title: 'Rent change',
-          reference: `${person.name} — ${address}`,
-          footer: `${person.name} — rent change from ${longDate(TODAY)}`,
-          markdown: fill('rent_change_letter_template.md', {
-            Date: longDate(TODAY), 'Tenant Name': person.name, 'Tenant first name': person.name.split(' ')[0],
-            'Property address': address, 'old rent': gbp(person.rent), 'new rent': gbp(oneBed),
-            'effective date': longDate(TODAY),
+          name: `AST_${person.name.replace(/[^A-Za-z0-9]+/g, '_')}_${name.replace(/[^A-Za-z0-9]+/g, '_')}`,
+          title: 'Assured shorthold tenancy agreement',
+          reference: `${person.name} — ${address} — one room, ${gbp(oneBed)} a month from ${longDate(TODAY)}`,
+          footer: `${person.name} — ${name} — not valid until signed by both parties`,
+          markdown: fill('ast_single_template.md', {
+            'Agreement date': longDate(TODAY), 'Term start date': longDate(TODAY),
+            'First payment date': longDate(TODAY), 'Tenant Name': person.name,
+            'Property address': address, Rent: gbp(oneBed),
           }),
         }, dry));
-        console.log(`   rent change ${person.name}: ${gbp(person.rent)} -> ${gbp(oneBed)} (${rates.brma}, age ${age != null ? age : '35+ confirmed'})`);
+        console.log(`   new AST ${person.name}: ${gbp(person.rent)} -> ${gbp(oneBed)} (${rates.brma}, age ${age != null ? age : '35+ confirmed'})`);
       }
     }
   }

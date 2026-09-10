@@ -117,6 +117,7 @@
   .pt-h { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
   .pt-up { margin-left: auto; color: var(--success); font-weight: var(--fw-semibold); font-variant-numeric: tabular-nums; }
   .pt-note { font-size: var(--fs-xs); color: var(--warning); margin-top: 2px; }
+  .pt-fix { margin-top: 6px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; font-size: var(--fs-xs); color: var(--text-secondary); }
   .pt-cols { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--space-3); margin-top: 8px; }
   .pt-cols h5 { margin: 0 0 2px; font-size: var(--fs-xs); text-transform: uppercase; letter-spacing: .04em; color: var(--text-muted); font-weight: var(--fw-semibold); }
   .pt-cols ul { margin: 0; padding-left: 16px; font-size: var(--fs-sm); }
@@ -246,11 +247,6 @@
     <p class="hint">Every rent is priced at the full 1-bed rate (LHA Direct, September 2026); a benefit cap shortfall is met by the CRF Housing Payment, never by a lower rent. Rent now is the expected rent of every live tenancy as if all were paid; cash flow voids are not deducted. Click any card for the rows behind it. The work itself is below, one pack per property.</p>
     <div class="kpis level" id="kpis"></div>
     <div class="detail" id="kpiDetail" hidden></div>
-  </section>
-  <section class="card" id="gp-facts">
-    <h2>Facts the plan still needs</h2>
-    <p class="hint">Each of these changes a number above. Fill them here; they write straight to Airtable.</p>
-    <div id="facts"></div>
   </section>
   <section class="card" id="gp-packs">
     <h2>The work, property by property</h2>
@@ -528,7 +524,7 @@
   function recompute() { state.plan = M.buildPlan(state.data, state.settings, todayISO()); window._growthPlan = state; }
 
   // ── Render ──
-  function renderAll() { renderHeadline(); renderFacts(); renderStageSeg(); renderPacks(); renderSetupAll(); renderCalc(); renderCt(); renderMeetingForm(); renderMarketing(); renderSettings(); }
+  function renderAll() { renderHeadline(); renderStageSeg(); renderPacks(); renderSetupAll(); renderCalc(); renderCt(); renderMeetingForm(); renderMarketing(); renderSettings(); }
 
   // ── Tenant meeting form ──
   const FORM_FIELDS = ['dob', 'ni', 'phone', 'email', 'idSeen', 'over35', 'ucPayDay', 'dueDay', 'household', 'capExemption', 'ucStatementSeen', 'otherAdults', 'ctAccount', 'weeklyIncome', 'weeklySpending', 'bankStatements', 'authoritySigned', 'meetingDate', 'meetingNotes'];
@@ -607,22 +603,6 @@
     if (!d) { box.hidden = true; box.innerHTML = ''; return; }
     box.hidden = false;
     box.innerHTML = `<h3>${esc(d.title)}<span>${gbp(d.total, 2)}</span></h3><div class="tbl-wrap"><table><tbody>${d.rows.length ? d.rows.map(r => `<tr><td class="wrap">${esc(r.name)}${r.sub ? `<div class="small muted">${esc(r.sub)}</div>` : ''}</td><td class="muted">${esc(r.extra || '')}</td><td class="num ${r.amount < 0 ? 'neg' : ''}">${r.amount < 0 ? '−' : ''}${gbp(Math.abs(r.amount), 2)}</td></tr>`).join('') : '<tr><td class="empty">Nothing in this bucket</td></tr>'}</tbody></table></div>`;
-  }
-
-  function renderFacts() {
-    const p = state.plan; const items = [];
-    p.unknownAge.forEach(u => items.push(`<div class="ten"><span class="n">${esc(u.tenant)} <span class="muted small">${esc(u.property)}, unit ${esc(u.unit)}</span></span><span class="r">age to confirm</span><span class="m">Date of birth: <span class="inl"><input class="sm" type="date" data-dob="${esc(u.tenantId)}" aria-label="Date of birth for ${esc(u.tenant)}"><button class="btn btn-sm" data-act="save-dob" data-tenant="${esc(u.tenantId)}">Save</button></span> · or <button class="btn btn-sm" data-act="confirm-35" data-tenant="${esc(u.tenantId)}">Confirm 35 or over</button> · not in the plan until one of these is done</span></div>`));
-    const unknownEx = []; p.properties.forEach(v => v.tenants.forEach(t => { if (t.uc && t.capExemption === 'Unknown' && v.mgmt === 'kevin') unknownEx.push({ t, v }); }));
-    if (unknownEx.length) items.push(`<div class="ten"><span class="n">Benefit cap position unknown for ${unknownEx.length} UC tenant${unknownEx.length > 1 ? 's' : ''}</span><span class="r">${gbp(p.totals.crfShortfall, 2)} a month of CRF claims</span><span class="m">Set it on the tenant meeting form below. LCWRA, a carer element, PIP or DLA, or earnings of £881+ means no cap and no CRF form. Otherwise the CRF Housing Payment covers the shortfall.</span></div>`);
-    const noNi = []; p.properties.forEach(v => v.tenants.forEach(t => { const raw = state.data.tenants.find(x => x.id === t.id) || {}; if (t.uc && v.mgmt === 'kevin' && !raw.ni) noNi.push(t.name); }));
-    if (noNi.length) items.push(`<div class="ten"><span class="n">National Insurance number missing for ${noNi.length} UC tenant${noNi.length > 1 ? 's' : ''}</span><span class="r">needed on every form</span><span class="m">${esc(noNi.join(', '))}. Collect at the tenant meeting; enter it in Airtable (Tenants → National Insurance Number).</span></div>`);
-    const noStrat = p.properties.filter(v => v.mgmt === 'kevin' && !v.strategy);
-    if (noStrat.length) items.push(`<div class="ten"><span class="n">Strategy not set on ${noStrat.length} house${noStrat.length > 1 ? 's' : ''}</span><span class="r">candidates only</span><span class="m">${esc(noStrat.map(v => v.name).join(', '))}. Pick Joint tenancy, HMO or Leave as is in the setup table above.</span></div>`);
-    const noRooms = p.properties.filter(v => v.mgmt === 'kevin' && v.lettable == null);
-    if (noRooms.length) items.push(`<div class="ten"><span class="n">Lettable rooms not set on ${noRooms.length} propert${noRooms.length > 1 ? 'ies' : 'y'}</span><span class="r">hides extra rooms</span><span class="m">${esc(noRooms.map(v => v.name).join(', '))}. Bedrooms plus any reception that can be a bedroom. Set it on the property, in the setup table above.</span></div>`);
-    const noCt = p.properties.filter(v => v.mgmt === 'kevin' && v.ctPayer === 'Unknown' && v.tenants.length === 2);
-    if (noCt.length) items.push(`<div class="ten"><span class="n">Council tax payer unknown on ${noCt.length} two-tenant house${noCt.length > 1 ? 's' : ''}</span><span class="r">+${gbp(p.totals.check, 2)} if you pay it today</span><span class="m">${esc(noCt.map(v => v.name).join(', '))}. Set Council Tax Payer in the setup table above.</span></div>`);
-    $('facts').innerHTML = items.length ? items.join('') : '<div class="empty">Nothing missing. Every figure above rests on a recorded fact.</div>';
   }
 
   function renderStageSeg() {
@@ -724,6 +704,7 @@ BEFORE THE FIRST ONE IS SIGNED (all in writing)
       const tenants = pk.tenants.map(t => `<div class="pt ${t.blocked ? 'blocked' : ''}">
         <div class="pt-h"><b>${esc(t.name)}</b> <span class="muted small">${t.age != null ? 'age ' + t.age : (t.over35Confirmed ? '35+ confirmed' : 'age unknown')}${t.rentNow ? ' · ' + gbp(t.rentNow, 2) : ''}${t.target ? ' → ' + gbp(t.target, 2) : ''}</span>${t.uplift ? `<span class="pt-up">+${gbp(t.uplift, 2)}</span>` : ''}</div>
         ${t.note ? `<div class="pt-note">${esc(t.note)}</div>` : ''}
+        ${t.blocked ? `<div class="pt-fix"><span class="inl">Date of birth: <input class="sm" type="date" data-dob="${esc(t.id)}" aria-label="Date of birth for ${esc(t.name)}"><button class="btn btn-sm" data-act="save-dob" data-tenant="${esc(t.id)}">Save</button></span> <span class="muted">or</span> <button class="btn btn-sm" data-act="confirm-35" data-tenant="${esc(t.id)}">Confirm 35 or over</button></div>` : ''}
         <div class="pt-cols">
           <div><h5>Sign</h5><ul>${t.sign.length ? li(t.sign) : '<li class="muted">Nothing to sign</li>'}</ul></div>
           <div><h5>Collect</h5><ul>${t.collect.length ? li(t.collect) : '<li class="muted">Details complete</li>'}</ul></div>
