@@ -16,7 +16,7 @@ The wizard (creators.spotify.com/pod/show/<show>/episode/wizard) has three steps
 (file input #uploadAreaInput), Details (title, description), Review (Publish). Field
 selectors for Details are confirmed on the first real episode and pinned here.
 """
-import argparse, json, os, re, sys
+import argparse, json, os, re, sys, time
 HERE = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, HERE)
 
 PODCAST_FORMAT = "video"          # Kevin, 5 Sep 2026: the same full episode YouTube gets, jingle and all; Spotify plays it as video or audio
@@ -102,8 +102,7 @@ def run_plan(plan_path, task_id, test, shot):
     """prepare (test: fills, screenshots, never publishes) or commit (live: the lane's own gate re-reads the
     approval). Returns the lane's JSON result; raises SystemExit with the lane's message on failure."""
     import subprocess
-    lane = os.path.join(os.path.dirname(HERE), "agent-browser.js")   # scripts/agent-browser.js, not the repo root (10 Sep 2026: MODULE_NOT_FOUND on 2055)
-    cmd = ["node", lane, "prepare" if test else "commit", "--plan", plan_path, "--profile", PROFILE, "--shot", shot]
+    cmd = ["node", lane(), "prepare" if test else "commit", "--plan", plan_path, "--profile", PROFILE, "--shot", shot]
     if not test: cmd += ["--task", task_id]
     r = subprocess.run(cmd, capture_output=True, text=True, timeout=1500)
     out = r.stdout.strip()
@@ -122,28 +121,42 @@ def write_plan(day, video_path, podcast_copy, youtube_link, test, out_dir, thumb
     return path, title
 
 
-def verify_published(title):
+def lane():
+    return os.path.join(os.path.dirname(HERE), "agent-browser.js")   # scripts/agent-browser.js, not the repo root
+
+
+def verify_published(title, tries=3, wait=20, sleep=time.sleep):
     """The real proof, read from the episodes list: 'published' when the title's row says Published,
-    'processing' when it still says Draft (Spotify shows a freshly published video as Draft for a few
-    minutes while it processes: 9 Sep 2026, episode 2054), 'missing' otherwise. Returns (status, snippet)."""
+    'processing' while it still says Draft (Spotify shows a freshly published video as Draft for a few
+    minutes), 'missing' otherwise. The list lags the upload, so it is read more than once (10 Sep 2026:
+    2055 was live and the first read still said missing)."""
     import subprocess
-    lane = os.path.join(os.path.dirname(HERE), "agent-browser.js")   # scripts/agent-browser.js, not the repo root (10 Sep 2026: MODULE_NOT_FOUND on 2055)
-    r = subprocess.run(["node", lane, "read", "--url", EPISODES, "--profile", PROFILE, "--wait", "9000"],
-                       capture_output=True, text=True, timeout=180)
-    out = r.stdout
-    try: text = json.loads(out[out.index("{"):]).get("text") or ""
-    except Exception: return "missing", "unreadable episodes page"
-    return list_status(text, title)
+    last = ("missing", "the episodes list was not readable")
+    for n in range(max(1, tries)):
+        r = subprocess.run(["node", lane(), "read", "--url", EPISODES, "--profile", PROFILE, "--wait", "9000"],
+                           capture_output=True, text=True, timeout=240)
+        out = r.stdout
+        try: text = json.loads(out[out.index("{"):]).get("text") or ""
+        except Exception: text = ""
+        if text:
+            last = list_status(text, title)
+            if last[0] == "published": return last
+        if n < tries - 1: sleep(wait)
+    return last
 
 
 def list_status(text, title):
-    key = title[:60]; best = "missing"; snippet = "title not in the first page of episodes"
-    for i in [m.start() for m in re.finditer(re.escape(key), text)]:
-        after = " ".join(text[i + len(key):i + 200].split())
-        status = after.split()[0] if after.split() else ""
-        if status == "Published": return "published", " ".join(text[i:i + 160].split())
-        if status == "Draft": best, snippet = "processing", " ".join(text[i:i + 160].split())
-    return best, snippet
+    """The row's status word, taken as the first Published/Draft/Scheduled after the title, not the next
+    word: the title is matched on its first 60 characters, so the words right after it are still the title."""
+    key = title[:60]
+    best = ("missing", "title not in the first page of episodes")
+    for m in re.finditer(re.escape(key), text):
+        after = " ".join(text[m.start():m.start() + 400].split())
+        st = re.search(r"\b(Published|Draft|Scheduled)\b", after)
+        if not st: continue
+        if st.group(1) == "Published": return "published", after[:160]
+        if st.group(1) in ("Draft", "Scheduled"): best = ("processing", after[:160])
+    return best
 
 
 def public_link(title):
@@ -185,9 +198,13 @@ def selftest():
     assert live["steps"][-1]["do"] == "submit" and live["confirm"]["selector"] and live["mode"] == "live"
     assert live["steps"][-2] == {"do": "wait", "for": PUBLISH_ENABLED, "ms": UPLOAD_WAIT_MS}
     assert any(s.get("selector") == "label[for='publish-date-now']" for s in live["steps"])
-    lst = "Title\n\nEpisode 9 - A\n\t\nDraft\n\t\n9/9/26\n\tVideo\t09:41\n\nEpisode 9 - A\n\t\nPublished\n\t\n9/9/26\n"
-    assert list_status(lst, "Episode 9 - A")[0] == "published" and list_status(lst.split("Published")[0], "Episode 9 - A")[0] == "processing"
+    lst = "Title\n\nEpisode 9 - A long title that runs past sixty characters for the row\n\t\nDraft\n\t\n9/9/26\n\nEpisode 9 - A long title that runs past sixty characters for the row\n\t\nPublished\n\t\n9/9/26\n"
+    long_title = "Episode 9 - A long title that runs past sixty characters for the row"
+    assert list_status(lst, long_title)[0] == "published", list_status(lst, long_title)
+    assert list_status(lst.split("Published")[0], long_title)[0] == "processing", "still processing while the row says Draft"
     assert list_status(lst, "Episode 8 - B")[0] == "missing"
+    calls = []
+    assert verify_published.__defaults__[0] >= 2, "the list lags the upload, so it is read more than once"
     assert os.path.exists(os.path.join(os.path.dirname(HERE), "agent-browser.js")), "the browser lane path must resolve (2055 failed with MODULE_NOT_FOUND)"
     assert WIZARD.endswith("/episode/wizard") and SHOW_ID in WIZARD and PODCAST_FORMAT in ("audio", "video")
     print(json.dumps({"checks": 16, "failed": []}))
