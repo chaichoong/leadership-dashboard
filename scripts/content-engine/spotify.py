@@ -102,7 +102,7 @@ def run_plan(plan_path, task_id, test, shot):
     """prepare (test: fills, screenshots, never publishes) or commit (live: the lane's own gate re-reads the
     approval). Returns the lane's JSON result; raises SystemExit with the lane's message on failure."""
     import subprocess
-    lane = os.path.join(os.path.dirname(os.path.dirname(HERE)), "agent-browser.js")
+    lane = os.path.join(os.path.dirname(HERE), "agent-browser.js")   # scripts/agent-browser.js, not the repo root (10 Sep 2026: MODULE_NOT_FOUND on 2055)
     cmd = ["node", lane, "prepare" if test else "commit", "--plan", plan_path, "--profile", PROFILE, "--shot", shot]
     if not test: cmd += ["--task", task_id]
     r = subprocess.run(cmd, capture_output=True, text=True, timeout=1500)
@@ -127,7 +127,7 @@ def verify_published(title):
     'processing' when it still says Draft (Spotify shows a freshly published video as Draft for a few
     minutes while it processes: 9 Sep 2026, episode 2054), 'missing' otherwise. Returns (status, snippet)."""
     import subprocess
-    lane = os.path.join(os.path.dirname(os.path.dirname(HERE)), "agent-browser.js")
+    lane = os.path.join(os.path.dirname(HERE), "agent-browser.js")   # scripts/agent-browser.js, not the repo root (10 Sep 2026: MODULE_NOT_FOUND on 2055)
     r = subprocess.run(["node", lane, "read", "--url", EPISODES, "--profile", PROFILE, "--wait", "9000"],
                        capture_output=True, text=True, timeout=180)
     out = r.stdout
@@ -188,6 +188,7 @@ def selftest():
     lst = "Title\n\nEpisode 9 - A\n\t\nDraft\n\t\n9/9/26\n\tVideo\t09:41\n\nEpisode 9 - A\n\t\nPublished\n\t\n9/9/26\n"
     assert list_status(lst, "Episode 9 - A")[0] == "published" and list_status(lst.split("Published")[0], "Episode 9 - A")[0] == "processing"
     assert list_status(lst, "Episode 8 - B")[0] == "missing"
+    assert os.path.exists(os.path.join(os.path.dirname(HERE), "agent-browser.js")), "the browser lane path must resolve (2055 failed with MODULE_NOT_FOUND)"
     assert WIZARD.endswith("/episode/wizard") and SHOW_ID in WIZARD and PODCAST_FORMAT in ("audio", "video")
     print(json.dumps({"checks": 16, "failed": []}))
 
