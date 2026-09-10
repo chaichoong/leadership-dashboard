@@ -91,6 +91,11 @@ const SEL = {
   recipientOption: '[data-testid="ctx-recipient-option"]',
   send: '[data-testid="review-send-button"]',
   selectionCount: '[data-testid="num-fields-selected"]',
+  toastClose: '[data-testid="rsp-Toast-closeButton"]',
+  // The highlight wrapper exists ONLY while its field is selected. These inner
+  // elements are in the page the whole time, so they are what a click aims at.
+  fieldBody: '[data-testid$="-form-field"], [data-testid$="-field"]',
+  addSignature: '[data-testid="menu-item-signature-form-field"]',
 };
 
 let THROW_ON_REFUSE = require.main !== module;
@@ -196,6 +201,31 @@ function checkEverySignerHasAField(map, signerCount, signers) {
   }
 }
 
+/**
+ * The clickable field bodies, ordered DOWN THE PAGE. Adobe's DOM order does not
+ * follow the visual order, so position decides, the same rule the map uses.
+ */
+async function orderedFieldHandles(page) {
+  const all = await page.locator(SEL.fieldBody).elementHandles();
+  const withBoxes = [];
+  for (const h of all) {
+    const b = await h.boundingBox();
+    // Skip the panel's own buttons on the left and anything with no size.
+    if (!b || b.width < 20 || b.height < 8 || b.x < 300) continue;
+    withBoxes.push({ h, y: b.y, x: b.x, w: b.width, h2: b.height });
+  }
+  // A field paints several nested elements at the same spot; keep the outermost
+  // one per position so a click is not aimed at a label inside a field.
+  const seen = [];
+  const kept = [];
+  for (const f of withBoxes.sort((a, b) => a.y - b.y || b.w - a.w)) {
+    if (seen.some((s) => Math.abs(s.y - f.y) < 6 && Math.abs(s.x - f.x) < 40)) continue;
+    seen.push(f);
+    kept.push(f.h);
+  }
+  return kept;
+}
+
 async function run({ document: doc, signers, fields, page: pageNo, shot }) {
   const { chromium } = require('playwright');
   const ctx = await chromium.launchPersistentContext(PROFILE, {
@@ -243,13 +273,38 @@ async function run({ document: doc, signers, fields, page: pageNo, shot }) {
     // Auto-place only appears when Adobe detected something to place. A
     // document whose signature line it does not recognise offers no button at
     // all, and the run should say that plainly rather than time out.
-    if (!(await page.locator(SEL.autoPlace).count())) {
+    if (await page.locator(SEL.autoPlace).count()) {
+      await page.locator(SEL.autoPlace).click();
+      await page.waitForTimeout(WAIT.fields);
+    } else if (signers.length === 1) {
+      // Auto-place only appears when Adobe recognised something to place. The
+      // proof of residency draws its signature line as a rule rather than a
+      // run of underscores, so Adobe sees nothing and offers no button. With a
+      // single signer there is nothing to assign anyway: place one signature
+      // field and it belongs to the only recipient.
+      log('no Auto-place offered; placing one signature field for the sole signer');
+      await page.locator(SEL.addSignature).click();
+      await page.waitForTimeout(WAIT.fields);
+    } else {
       die('Adobe offered no Auto-place on this document, so it detected no ' +
-          'fields to assign. Nothing has been sent. The signature line needs to ' +
-          'be one Adobe recognises; that is a fix in how the PDF is generated.');
+          'fields to assign, and there is more than one signer to assign them ' +
+          'to. Nothing has been sent. The signature line needs to be one Adobe ' +
+          'recognises; that is a fix in how the PDF is generated.');
     }
-    await page.locator(SEL.autoPlace).click();
-    await page.waitForTimeout(WAIT.fields);
+
+    // CLOSE THE NOTIFICATION BANNERS FIRST. Adobe stacks two toasts across the
+    // bottom of the viewer after Auto-place ("Form fields are detected" and
+    // "Fields automatically added and assigned to ..."). On a one-page document
+    // the signature block sits exactly there, so a click aimed at a field lands
+    // on the banner instead and no menu opens. Measured on a real authority to
+    // act: field 5 of 7 failed three times running, and the retry could not
+    // help because nothing about waiting moves a banner.
+    const toasts = await page.locator(SEL.toastClose).count();
+    for (let i = 0; i < toasts; i++) {
+      await page.locator(SEL.toastClose).first().click({ timeout: 5000 }).catch(() => {});
+      await page.waitForTimeout(1200);
+    }
+    if (toasts) log(`closed ${toasts} notification banner(s) covering the page`);
 
     // The signature block lives on the last page of these documents.
     const total = Number(await page.locator(SEL.pageTotal).innerText().catch(() => '0')) || 0;
@@ -305,8 +360,38 @@ async function run({ document: doc, signers, fields, page: pageNo, shot }) {
     for (let i = 0; i < found.length; i++) {
       const want = signers[map[i] - 1];
       const f = found[i];
-      await page.mouse.click(f.x + f.w / 2, f.y + f.h / 2);
-      await page.waitForTimeout(WAIT.settle);
+      // AIM AT THE FIELD, NOT AT A REMEMBERED POINT ON THE SCREEN. Coordinates
+      // are read once, before anything moves; reassigning a field can resize it
+      // and shift the ones below, so a later click lands on the wrong thing or
+      // on nothing. On a real authority to act, field 5 of 7 failed three times
+      // running that way while fields 1 to 4 had gone through cleanly. Handles
+      // are resolved fresh each time and Playwright scrolls them into view.
+      let opened = false;
+      for (let attempt = 1; attempt <= 3 && !opened; attempt++) {
+        const handles = await orderedFieldHandles(page);
+        const h = handles[i];
+        if (h) {
+          await h.click({ timeout: 10000 }).catch(async () => {
+            await page.mouse.click(f.x + f.w / 2, f.y + f.h / 2);
+          });
+        } else {
+          await page.mouse.click(f.x + f.w / 2, f.y + f.h / 2);
+        }
+        await page.waitForTimeout(WAIT.settle);
+        opened = await page.locator(SEL.changeRecipients)
+          .waitFor({ state: 'visible', timeout: 6000 }).then(() => true).catch(() => false);
+        if (!opened) {
+          log(`field ${i + 1}: no menu on attempt ${attempt}, retrying`);
+          await page.keyboard.press('Escape');
+          await page.waitForTimeout(2000);
+        }
+      }
+      if (!opened) {
+        const png = shot || path.join(os.tmpdir(), path.basename(doc, '.pdf') + '-stuck.png');
+        await page.screenshot({ path: png });
+        die(`field ${i + 1} would not open its menu after three tries. ` +
+            `Nothing has been sent. See ${png}.`);
+      }
       // Adobe can re-select the whole auto-placed group on a click. Reassigning
       // then moves EVERY field, and the last write wins, which looks exactly
       // like nothing having happened. Insist on one field before touching the
