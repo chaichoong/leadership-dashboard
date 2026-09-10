@@ -948,6 +948,24 @@ HISTORY_BUILD_PAGES = 20      # per label; the worker returns 25 a page
 HISTORY_MIN_SENDERS = 20      # control: the human era alone holds hundreds
 HISTORY_MIN_TOTAL = 3         # a sender votes only with 3+ filings...
 HISTORY_MIN_SHARE = 0.8       # ...and 80% agreement on one outcome
+# A FAILED REBUILD MUST NOT RETRY EVERY SLOT (finding 20260910-daily-ops-513).
+#
+# The rebuild walks up to HISTORY_BUILD_PAGES pages per lane across ten lanes —
+# by far the most expensive Gmail read this file makes. When it dies on the
+# per-minute quota it writes nothing, so `history_built_ms` never advances, so
+# the very next slot sees "stale" and spends the whole MAX_SLOWDOWN_SECONDS
+# budget on it again. Measured 9 Sep 2026: all three slots recorded
+# `{"stale": true, "built_ms": 1788263430621}` (1 Sep) followed by "GMAIL RATE
+# METRIC STILL FULL after 585s", three times, while the agent's own scan then
+# had to fight the same metric for what quota was left. Nine failed rebuilds
+# between 8 and 10 Sep, each ~10 minutes of the serial queue lock, none of them
+# ever able to succeed, and behind them task-manager and prospecting exited 75.
+#
+# A build that just failed on quota does not become possible an hour later. So
+# a failure is REMEMBERED and the rebuild is skipped until the cooldown passes.
+# The history book is a WEEKLY artefact (HISTORY_STALE_DAYS = 7); one attempt a
+# day is still fourteen times more often than it needs to be rebuilt.
+HISTORY_RETRY_COOLDOWN_HOURS = 24
 
 TEAM_TABLE = "tblco0p2OnlLQVAX7"
 TM_NAME_FIELDS = ("fldFyTZu3vu1a7X3a", "fld1DYEbtyVsO2GVP")  # Preferred, Legal
@@ -1279,16 +1297,65 @@ def _airtable_get_all(path_base, params):
             return records
 
 
+def history_rebuild_decision(built, failed, now_ms,
+                             cooldown_hours=HISTORY_RETRY_COOLDOWN_HOURS,
+                             stale_days=HISTORY_STALE_DAYS):
+    """(stale, cooling, cooldown_remaining_seconds) — pure, so the selftest can
+    replay 9 Sep 2026 offline.
+
+    `cooling` is the half that was missing: the book IS stale and the rebuild is
+    still refused, because the last attempt failed inside the cooldown window
+    and nothing about the quota has changed since."""
+    stale = built is None or (now_ms - built) > stale_days * 86400 * 1000
+    if not stale or not failed:
+        return stale, False, 0
+    age_s = (now_ms - failed) / 1000.0
+    window_s = cooldown_hours * 3600
+    if age_s < 0 or age_s >= window_s:
+        return stale, False, 0
+    return stale, True, int(window_s - age_s)
+
+
 def cmd_history_stale():
     state = read_state()
     built = state.get("history_built_ms")
+    failed = state.get("history_build_failed_ms")
     now_ms = int(datetime.now().timestamp() * 1000)
-    stale = built is None or (now_ms - built) > HISTORY_STALE_DAYS * 86400 * 1000
-    print(json.dumps({"stale": stale, "built_ms": built}))
-    return 0 if stale else 1
+    stale, cooling, remaining = history_rebuild_decision(built, failed, now_ms)
+    out = {"stale": stale, "built_ms": built}
+    if failed:
+        out["last_failed_ms"] = failed
+    if cooling:
+        out["cooldown"] = True
+        out["retry_in_seconds"] = remaining
+        out["reason"] = ("the last rebuild failed and the cooldown has not "
+                         "passed; skipping it leaves the slot's Gmail quota "
+                         "for the scan that actually triages mail")
+    print(json.dumps(out))
+    # Exit 0 means "rebuild now". A stale book inside the cooldown is exit 1:
+    # still stale, deliberately not rebuilt, and SAID so rather than silently.
+    return 0 if (stale and not cooling) else 1
 
 
 def cmd_history_build(pages):
+    """Wrapper that REMEMBERS a failure (finding 20260910-daily-ops-513).
+
+    Without this the failure is invisible to the next slot: the book stays
+    stale, the rebuild runs again, and it spends the same ten minutes of the
+    serial queue lock and the same Gmail quota to fail the same way."""
+    try:
+        return _history_build(pages)
+    except BaseException:
+        try:
+            st = read_state()
+            st["history_build_failed_ms"] = int(datetime.now().timestamp() * 1000)
+            write_state(st)
+        except Exception:
+            pass          # never let the bookkeeping mask the real failure
+        raise
+
+
+def _history_build(pages):
     labels = worker_labels()
     agent_ids = collect_agent_ids()
     stats, sampled, truncated = {}, {}, {}
@@ -1343,6 +1410,9 @@ def cmd_history_build(pages):
         }, "history book upsert")
     state = read_state()
     state["history_built_ms"] = int(datetime.now().timestamp() * 1000)
+    # A success clears the cooldown, so a transient quota blip never costs a
+    # whole day of rebuilds once the quota is back.
+    state.pop("history_build_failed_ms", None)
     write_state(state)
     # Counts only — runs.log must never carry sender addresses.
     print(json.dumps({"built": now_iso, "senders": len(stats),
@@ -1697,6 +1767,69 @@ def selftest():
     check("a run cannot spend a whole day's quota on its own",
           MAX_WORKER_CALLS <= 500 and MAX_ATTEMPTS >= 3)
 
+    # ── a failed rebuild backs off (finding 20260910-daily-ops-513) ──────
+    # Back-tested against 9 Sep 2026, when all three slots read
+    # {"stale": true, "built_ms": 1788263430621} and then spent 585s each
+    # failing the same rebuild on the same per-minute metric.
+    _sep9_built = 1788263430621                      # 1 Sep, genuinely stale
+    _sep9_0900 = 1788946894398                       # the 09:00 slot
+    _sep9_1300 = 1788959885000                       # ~3.6h later
+    _stale, _cool, _ = history_rebuild_decision(_sep9_built, None, _sep9_0900)
+    check("9 Sep back-test: with no failure recorded the 09:00 slot rebuilds",
+          _stale is True and _cool is False)
+    _stale, _cool, _rem = history_rebuild_decision(
+        _sep9_built, _sep9_0900, _sep9_1300)
+    check("9 Sep back-test: 13:00 sees 09:00's failure and does NOT rebuild",
+          _stale is True and _cool is True and _rem > 0)
+    check("the book is still reported stale while cooling, never as fresh",
+          history_rebuild_decision(_sep9_built, _sep9_0900, _sep9_1300)[0] is True)
+    check("once the cooldown passes the rebuild is allowed again",
+          history_rebuild_decision(
+              _sep9_built, _sep9_0900,
+              _sep9_0900 + HISTORY_RETRY_COOLDOWN_HOURS * 3600 * 1000 + 1
+          )[1] is False)
+    check("a FRESH book never cools — the cooldown only gates a rebuild",
+          history_rebuild_decision(_sep9_1300, _sep9_0900, _sep9_1300)[1] is False)
+    check("a clock that went backwards does not trap the rebuild for ever",
+          history_rebuild_decision(_sep9_built, _sep9_1300, _sep9_0900)[1] is False)
+    import tempfile as _tf0
+    with _tf0.TemporaryDirectory() as _d:
+        _prev = os.environ.get("INBOUND_TRIAGE_DIR")
+        os.environ["INBOUND_TRIAGE_DIR"] = _d
+        try:
+            write_state({"history_built_ms": _sep9_built})
+            check("stale with no prior failure exits 0 (rebuild now)",
+                  cmd_history_stale() == 0)
+            # Exactly what a quota death must leave behind.
+            def _boom(_pages):
+                fail("GMAIL RATE METRIC STILL FULL", kind="rate")
+            _real, globals()["_history_build"] = _history_build, _boom
+            _fail_quiet["on"] = True
+            try:
+                cmd_history_build(1)
+            except SystemExit:
+                pass
+            finally:
+                globals()["_history_build"] = _real
+                _fail_quiet["on"] = False
+            check("a failed rebuild is remembered in state",
+                  isinstance(read_state().get("history_build_failed_ms"), int))
+            check("the next slot refuses the rebuild (exit 1), not exit 0",
+                  cmd_history_stale() == 1)
+            # And a success must clear it, so one bad hour is not a lost day.
+            _st = read_state()
+            _st.pop("history_build_failed_ms")
+            _st["history_built_ms"] = int(datetime.now().timestamp() * 1000)
+            write_state(_st)
+            check("a fresh book stops asking for a rebuild at all",
+                  cmd_history_stale() == 1
+                  and read_state().get("history_build_failed_ms") is None)
+        finally:
+            if _prev is None:
+                os.environ.pop("INBOUND_TRIAGE_DIR", None)
+            else:
+                os.environ["INBOUND_TRIAGE_DIR"] = _prev
+
     # ── per-slot lane result (finding 20260906-daily-ops-477) ───────────
     # Back-tested against 5 Sep 2026: both that day's slots fired, both
     # scanned zero email on a quota 403, and both must grade as FAILED.
@@ -1787,6 +1920,22 @@ def selftest():
             cmd_slot_verify("09:00", "email", _start, path=_f)
             check("no completed-scan stamp at all reads as broken, not as fine",
                   collapse_slots(read_slot_results(_f))[-1]["ok"] is False)
+            # ── a completed scan is not a completed slot (finding 494) ──
+            # 9 Sep 13:00: the scan finished, the agent was TERMed four hours
+            # later mid-dispatch, and the stamp graded the whole slot clean.
+            cmd_slot_record("13:00", "email", True, "ok", path=_f)
+            write_state({"last_scan_ok_ms": _start + 60_000})
+            cmd_slot_verify("13:00", "email", _start, path=_f, agent_rc=143)
+            check("a dead agent overrules a completed scan stamp",
+                  collapse_slots(read_slot_results(_f))[-1]["ok"] is False)
+            check("and the correction names the exit code",
+                  any(r.get("reason") == "agent-exited-143"
+                      for r in read_slot_results(_f)))
+            cmd_slot_record("17:00", "email", True, "ok", path=_f)
+            write_state({"last_scan_ok_ms": _start + 60_000})
+            cmd_slot_verify("17:00", "email", _start, path=_f, agent_rc=0)
+            check("rc 0 with a completed scan is still left alone",
+                  collapse_slots(read_slot_results(_f))[-1]["ok"] is True)
         finally:
             if _prev is None:
                 os.environ.pop("INBOUND_TRIAGE_DIR", None)
@@ -1908,7 +2057,7 @@ def cmd_slot_record(slot, lane, ok, reason, scanned=None, path=None):
     return 3 if run >= ESCALATE_AFTER_BROKEN else 0
 
 
-def cmd_slot_verify(slot, lane="email", since_ms=None, path=None):
+def cmd_slot_verify(slot, lane="email", since_ms=None, path=None, agent_rc=None):
     """AFTER the agent: did the lane the probe passed actually do any work?
 
     Finding 20260907-daily-ops-487. The pre-flight probe (`health`) makes ONE
@@ -1924,6 +2073,13 @@ def cmd_slot_verify(slot, lane="email", since_ms=None, path=None):
     SUPERSEDING broken row. Append-only, so the optimistic line stays visible as
     what the probe believed. Exit 3 when the lane has now been broken for
     ESCALATE_AFTER_BROKEN slots running, same contract as slot-record.
+
+    `agent_rc` is the exit code of the agent process (finding
+    20260908-daily-ops-494). A COMPLETED SCAN IS NOT A COMPLETED SLOT: the
+    email scan is skill 1 of three, so a run that scanned mail at 10:50 and
+    was then killed at 14:46 mid-dispatch still carried a `last_scan_ok_ms`
+    newer than the slot start and verified clean. A non-zero rc means the run
+    did not finish, and no scan stamp may overrule that.
     """
     rows = read_slot_results(path)
     if rows is None:
@@ -1950,6 +2106,12 @@ def cmd_slot_verify(slot, lane="email", since_ms=None, path=None):
         print(json.dumps({"verified": False,
                           "reason": "no completion signal exists for the %s lane" % lane}))
         return 0
+    # The agent died. Whatever the scan stamp says, the slot did not finish —
+    # and this is checked BEFORE the stamp, because the stamp is exactly what
+    # made the 9 Sep 13:00 slot read clean.
+    if agent_rc not in (None, 0):
+        return cmd_slot_record(
+            slot, lane, False, "agent-exited-%s" % agent_rc, path=path)
     last_ok = read_state().get("last_scan_ok_ms")
     since = int(since_ms) if since_ms else 0
     if last_ok and int(last_ok) >= since:
@@ -2074,8 +2236,10 @@ def main(argv):
                                opt("--file"))
     elif cmd == "slot-verify":
         since = opt("--since-ms")
+        rc = opt("--agent-rc")
         return cmd_slot_verify(opt("--slot", "unknown"), opt("--lane", "email"),
-                               int(since) if since else None, opt("--file"))
+                               int(since) if since else None, opt("--file"),
+                               int(rc) if rc not in (None, "") else None)
     elif cmd == "slot-results":
         rows = read_slot_results(opt("--file"))
         if rows is None:

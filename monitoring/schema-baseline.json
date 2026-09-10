@@ -2127,6 +2127,10 @@
     "name": "Screenshot",
     "type": "multipleAttachments"
    },
+   "fldFd4scZaJsXQ0n7": {
+    "name": "Planned Extra Tenants",
+    "type": "number"
+   },
    "fldGTnPSMfq5JA0bv": {
     "name": "\ud83d\udcb8 Annual Profit (PP)",
     "type": "currency"
@@ -2259,6 +2263,10 @@
     "name": "\ud83c\udd7f\ufe0f Allocated Parking",
     "type": "number"
    },
+   "fldNzUqbTNzTeNJqN": {
+    "name": "Council Tax Band",
+    "type": "singleSelect"
+   },
    "fldOB19k9ig2PQRfN": {
     "name": "Internal Photos",
     "type": "multipleAttachments"
@@ -2347,6 +2355,10 @@
     "name": "Revenue Week to Date",
     "type": "currency"
    },
+   "fldSwTbfFT0WXExIa": {
+    "name": "Growth Plan",
+    "type": "multipleRecordLinks"
+   },
    "fldTGN2Q5Ir5VEH4l": {
     "name": "Transactions copy",
     "type": "multipleRecordLinks"
@@ -2433,6 +2445,10 @@
    },
    "fldZlvSJxbuEyS2tP": {
     "name": "Revenue Previous Month",
+    "type": "currency"
+   },
+   "fldZsLDNeEvghtFDJ": {
+    "name": "Council Tax Annual",
     "type": "currency"
    },
    "flda9jLO35YWU2s0p": {
@@ -2591,6 +2607,10 @@
     "name": "\ud83d\udcb8 Sale Price Annual Rent Paid Out",
     "type": "currency"
    },
+   "fldivZ9UbAACwv7Yh": {
+    "name": "Growth Strategy",
+    "type": "singleSelect"
+   },
    "fldj6CbscKqleKz2g": {
     "name": "Date the property is expected to be vacant",
     "type": "date"
@@ -2614,6 +2634,10 @@
    "fldk2CSlb1i3KK1Kb": {
     "name": "Added Previous Month?",
     "type": "multilineText"
+   },
+   "fldkBSgcELtpGZhjV": {
+    "name": "PAYG Meters",
+    "type": "singleSelect"
    },
    "fldkCKAuSl2JoBaVo": {
     "name": "Annual Profit (SHG)",
@@ -2719,6 +2743,10 @@
     "name": "**GBP Rollup (from Transactions) 2",
     "type": "currency"
    },
+   "flduloaYTsuvMxvF7": {
+    "name": "Growth Plan Owner",
+    "type": "singleSelect"
+   },
    "fldvRhUGsL0o14hIW": {
     "name": "\ud83d\udcb8 Sale Price Total Profit",
     "type": "number"
@@ -2746,6 +2774,10 @@
    "fldwT3zWUFvhPVcDK": {
     "name": "Mortgage Broker Email",
     "type": "email"
+   },
+   "fldwWcSfkdtSbVhdj": {
+    "name": "Council Tax Payer",
+    "type": "singleSelect"
    },
    "fldwwaAMldCKyQEQr": {
     "name": "Landlord Contract Signed",
@@ -2787,6 +2819,10 @@
     "name": "Gross Profit Margin YTD",
     "type": "percent"
    },
+   "fldzV9YbHhNUUxwmA": {
+    "name": "Lettable Rooms",
+    "type": "number"
+   },
    "fldzrDSl4CHz2dy2k": {
     "name": "\ud83c\udfe6 Equity",
     "type": "currency"
@@ -2797,6 +2833,27 @@
    }
   },
   "name": "Properties"
+ },
+ "tbl6hJaGOijdcvRdw": {
+  "fields": {
+   "fldRtEN92vZUZKjBU": {
+    "name": "Note",
+    "type": "multilineText"
+   },
+   "fldiyJqkTQ9i2p2Wc": {
+    "name": "Key",
+    "type": "singleLineText"
+   },
+   "fldqN8fc8vk8qBeom": {
+    "name": "Label",
+    "type": "singleLineText"
+   },
+   "fldye89gwAzXWDphp": {
+    "name": "Value",
+    "type": "number"
+   }
+  },
+  "name": "Growth Plan Settings"
  },
  "tbl7cX0hhlsWbHcLs": {
   "fields": {
@@ -5760,6 +5817,71 @@
   },
   "name": "Roles"
  },
+ "tblHqr2kyiL15a8LN": {
+  "fields": {
+   "fld4Vc3jGATM4d9C4": {
+    "name": "Monthly Uplift",
+    "type": "currency"
+   },
+   "fld7DrrXzaTS4Jy6D": {
+    "name": "Evidence",
+    "type": "multilineText"
+   },
+   "fld8wc4N6yYMMy9Bd": {
+    "name": "One-off Cost",
+    "type": "currency"
+   },
+   "fldDKDIgcekYZSFp7": {
+    "name": "Status",
+    "type": "singleSelect"
+   },
+   "fldF6bWNVgMAaaXBc": {
+    "name": "Adopted On",
+    "type": "date"
+   },
+   "fldJKJ9XiXSfLT5Vq": {
+    "name": "Tasks",
+    "type": "multipleRecordLinks"
+   },
+   "fldUmCxbSfb4clrjp": {
+    "name": "Notes",
+    "type": "multilineText"
+   },
+   "fldYjvuoYHNlumtHd": {
+    "name": "Property",
+    "type": "multipleRecordLinks"
+   },
+   "fldaNRU9sf1IopbHQ": {
+    "name": "Done On",
+    "type": "date"
+   },
+   "fldbjOfQOnUnpFmkZ": {
+    "name": "Title",
+    "type": "singleLineText"
+   },
+   "fldcpnAHgAxQeHAgT": {
+    "name": "Lever",
+    "type": "singleSelect"
+   },
+   "flddfpEZqcrxBIlf2": {
+    "name": "Rental Unit",
+    "type": "multipleRecordLinks"
+   },
+   "fldfew0jSmQiB52z8": {
+    "name": "Effort",
+    "type": "singleSelect"
+   },
+   "fldhurLB2tXHqXOdg": {
+    "name": "Key",
+    "type": "singleLineText"
+   },
+   "flduU9L39LqachtLZ": {
+    "name": "Tenant",
+    "type": "multipleRecordLinks"
+   }
+  },
+  "name": "Growth Plan"
+ },
  "tblHrpTMd5LNYn8v1": {
   "fields": {
    "fld0AADplYm28v2L2": {
@@ -6894,6 +7016,10 @@
    "fldml8dL9Woq93zXZ": {
     "name": "Tenancy Start Date",
     "type": "date"
+   },
+   "fldmoBuUl8IbM9U4k": {
+    "name": "Growth Plan",
+    "type": "multipleRecordLinks"
    },
    "fldmpIYp1cN0eQgWt": {
     "name": "Tenancies copy",
@@ -9875,6 +10001,14 @@
  },
  "tblX4elTuu01gwBYh": {
   "fields": {
+   "fld1rHf1qZ60qK95l": {
+    "name": "National Insurance Number",
+    "type": "singleLineText"
+   },
+   "fld9IbA3CNxa2KBBE": {
+    "name": "Meeting Notes",
+    "type": "multilineText"
+   },
    "fldAXzP9SGIHiAhrv": {
     "name": "Tenant Status",
     "type": "singleSelect"
@@ -9887,6 +10021,10 @@
     "name": "Record ID",
     "type": "formula"
    },
+   "fldHPe9YQ6GmlrKBt": {
+    "name": "Authority Signed",
+    "type": "checkbox"
+   },
    "fldLAJImUvwOA6lNO": {
     "name": "Tasks",
     "type": "multipleRecordLinks"
@@ -9894,6 +10032,14 @@
    "fldLTEvR8WmAWKfQB": {
     "name": "Tenancies copy",
     "type": "multipleRecordLinks"
+   },
+   "fldOOi3d1P4vDedm6": {
+    "name": "Benefit Cap Exemption",
+    "type": "singleSelect"
+   },
+   "fldTz5BU7jxA2mc1B": {
+    "name": "Meeting Date",
+    "type": "date"
    },
    "fldWijr5nOIcKJMP4": {
     "name": "Tenancies",
@@ -9907,9 +10053,33 @@
     "name": "Rent Payment Type",
     "type": "singleSelect"
    },
+   "fldZeN4OxwDstqZhy": {
+    "name": "Bank Statements Provided",
+    "type": "checkbox"
+   },
+   "fldbLxdhEqeuUZI4U": {
+    "name": "ID Seen",
+    "type": "singleSelect"
+   },
+   "fldbiAag5eoEW23e0": {
+    "name": "Weekly Income",
+    "type": "currency"
+   },
+   "flddQ2HnQEf4HBeRn": {
+    "name": "Aged 35 or Over (confirmed)",
+    "type": "checkbox"
+   },
+   "fldeKCUmwpmWv7pad": {
+    "name": "Other Adults in Home",
+    "type": "singleLineText"
+   },
    "fldeLsZYqbKS77S2V": {
     "name": "Current Unit",
     "type": "multipleRecordLinks"
+   },
+   "fldfrhDLmb443AmfF": {
+    "name": "UC Statement Seen",
+    "type": "checkbox"
    },
    "fldfwxEf7I3XQDVtR": {
     "name": "Notes",
@@ -9919,9 +10089,29 @@
     "name": "Tenant Surname",
     "type": "formula"
    },
+   "fldjTG9xdCLpbwOwC": {
+    "name": "UC Payment Day",
+    "type": "number"
+   },
+   "fldjrOSBkhWeFJvVU": {
+    "name": "Household",
+    "type": "singleSelect"
+   },
+   "fldlZr8tUocCYzGPT": {
+    "name": "Weekly Spending",
+    "type": "currency"
+   },
+   "fldlquVIzyesTrI1d": {
+    "name": "Council Tax Account Number",
+    "type": "singleLineText"
+   },
    "fldraHUkWfqo4olLF": {
     "name": "Contact Number",
     "type": "phoneNumber"
+   },
+   "flduUleT9KdyrR0yl": {
+    "name": "Growth Plan",
+    "type": "multipleRecordLinks"
    },
    "fldv7FKsqXYswyCFE": {
     "name": "Date of Birth",
@@ -17178,6 +17368,10 @@
    "fldfA3gatzKbwCfUv": {
     "name": "Urgency Score",
     "type": "number"
+   },
+   "fldfAyObJ7VCHAau3": {
+    "name": "Growth Plan",
+    "type": "multipleRecordLinks"
    },
    "fldfEEFJwU2Gz8hmE": {
     "name": "Tenant Name",

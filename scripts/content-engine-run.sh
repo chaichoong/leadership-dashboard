@@ -36,9 +36,59 @@ mkdir -p "$LOG_DIR"
 cd "$REPO" || exit 1
 # The runtime checkout is a worktree kept on main (the main checkout is often on a session's branch):
 # take the latest merged code before every run, never anything uncommitted.
-if [ "$(git -C "$REPO" branch --show-current 2>/dev/null)" = "main" ] && [ -z "$(git -C "$REPO" status --porcelain 2>/dev/null)" ]; then
-  git -C "$REPO" pull -q --ff-only origin main 2>/dev/null || echo "runtime: could not fast-forward main, running what is here"
+#
+# THE UPDATE MUST NEVER SKIP SILENTLY (finding 20260909-queue-fixer-504).
+# The old gate refused to pull whenever `git status --porcelain` printed
+# ANYTHING. The engine writes `runpreneur-map/data/progress.json` as it runs, so
+# that file is permanently modified in the runtime worktree — which meant the
+# self-update had been switched off by the engine's own working file, silently,
+# for as long as that file had been dirty. Measured 9 Sep 2026: the worktree read
+# `main...origin/main [behind 5]` while every queue fix of that day, including the
+# diskGB precondition written FOR this job, sat unreachable on origin.
+#
+# So: no blanket dirty-tree veto. `--ff-only` already refuses to clobber a local
+# change it would have to overwrite, which is the protection that was actually
+# wanted. And whichever way it goes, the run SAYS so — a checkout running stale
+# code is the failure this whole queue exists to catch, and it must not be quiet.
+# --- runtime-update-block (extracted verbatim by tests/content-engine-runtime-update.test.js) ---
+if [ "$(git -C "$REPO" branch --show-current 2>/dev/null)" = "main" ]; then
+  git -C "$REPO" fetch -q origin main 2>/dev/null || true
+  BEHIND=$(git -C "$REPO" rev-list --count HEAD..origin/main 2>/dev/null || echo 0)
+  if [ "${BEHIND:-0}" -gt 0 ]; then
+    if git -C "$REPO" pull -q --ff-only origin main 2>/dev/null; then
+      echo "runtime: fast-forwarded $BEHIND commit(s) onto origin/main"
+    else
+      # THE ONE CASE THAT IS SAFE TO CLEAR, AND THE ONE THAT KEEPS HAPPENING.
+      # The blocker is almost always a generated file the engine rewrote to
+      # EXACTLY what origin already holds — on 10 Sep 2026 that was
+      # runpreneur-map/data/progress.json, regenerated locally to the same
+      # figures a committed [auto] commit already carried. Discarding a working
+      # copy that is byte-identical to origin's version loses nothing at all, so
+      # restore only those paths and try once more. Anything with real local
+      # content is left alone and the run says so.
+      RESTORED=0
+      while IFS= read -r f; do
+        [ -z "$f" ] && continue
+        if git -C "$REPO" show "origin/main:$f" 2>/dev/null | cmp -s - "$REPO/$f"; then
+          git -C "$REPO" checkout -- "$f" 2>/dev/null && RESTORED=$((RESTORED + 1))
+        fi
+      done <<EOF
+$(git -C "$REPO" diff --name-only 2>/dev/null)
+EOF
+      if [ "$RESTORED" -gt 0 ] && git -C "$REPO" pull -q --ff-only origin main 2>/dev/null; then
+        echo "runtime: fast-forwarded $BEHIND commit(s) after restoring $RESTORED generated file(s) already identical to origin"
+      else
+        echo "RUNTIME CHECKOUT IS $BEHIND COMMIT(S) BEHIND origin/main and could not fast-forward — this run is executing STALE code:" >&2
+        git -C "$REPO" status --porcelain 2>/dev/null | head -5 >&2
+      fi
+    fi
+  else
+    echo "runtime: up to date with origin/main"
+  fi
+else
+  echo "RUNTIME CHECKOUT IS NOT ON main ($(git -C "$REPO" branch --show-current 2>/dev/null)) — running whatever is here, unupdated" >&2
 fi
+# --- end runtime-update-block ---
 
 # WORKING-HOURS GUARD (Kevin, 4 Sep 2026)
 # -----------------------------------------------------------------------------
