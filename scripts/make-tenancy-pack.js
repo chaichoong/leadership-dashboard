@@ -194,7 +194,6 @@ async function main(argv) {
           'Council benefits team': team, Council: council, 'Tenant Name': newName,
           DOB: '________________', NI: '________________',
           'Property address': address, 'CT account': '________________',
-          'Landlord email': 'kevin@runpreneur.org.uk',
         }),
       }, dry));
       console.log(`   HMO pack for ${newName}: agreement at ${gbp(oneBed)} from ${newStart}, proof of residency, authority`);
@@ -269,9 +268,12 @@ async function main(argv) {
           }),
         }, dry));
       }
-      // Both joint tenants need an authority whatever we hold on them: the claim
-      // is made in both names, and the gaps are filled at the meeting.
-      if (uc && (over35 || strategy === 'Joint tenancy')) {
+      // Every tenant Roy sees signs an authority, whatever we hold on them
+      // (Kevin, 10 Sep 2026). It is what lets Roy or Kevin submit the Council
+      // Tax Reduction form and any CRF Housing Payment, and the gaps are
+      // filled in at the meeting. Age does not decide it: two tenants have no
+      // date of birth on file, and a joint claim is made in both names.
+      if (uc) {
         made.push(renderPdf({
           name: `Authority_${person.name.replace(/[^A-Za-z0-9]+/g, '_')}_${name.replace(/[^A-Za-z0-9]+/g, '_')}`,
           title: 'Authority to act: council tax reduction and housing payment',
@@ -284,8 +286,7 @@ async function main(argv) {
             NI: f['National Insurance Number'] || '________________',
             'Property address': address,
             'CT account': f['Council Tax Account Number'] || '________________',
-            'Landlord email': 'kevin@runpreneur.org.uk',
-          }),
+            }),
         }, dry));
       }
       // A rent rise is a NEW TENANCY, not a letter about one (Kevin, 10 Sep 2026).
