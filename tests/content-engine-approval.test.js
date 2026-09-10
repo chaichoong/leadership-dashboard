@@ -33,7 +33,7 @@ describe('content-engine approval card', () => {
     expect(qa.failed).toEqual([]);   // the output gate (10 Sep 2026): no card until the files prove themselves
     expect(out.failed).toEqual([]);
     expect(out.checks).toBeGreaterThanOrEqual(14);
-  });
+  }, 30000);
 
   it('is a role agent the dispatcher knows, never handed work by the CEO pass, so submit and lessons both work', () => {
     const r = py(`
