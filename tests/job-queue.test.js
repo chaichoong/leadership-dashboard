@@ -1695,7 +1695,16 @@ describe('disk precondition', () => {
     const real = JSON.parse(readFileSync(resolve(__dirname, '../scripts/job-schedule.json'), 'utf8'));
     const disk = (real['content-engine'].needs || []).filter((n) => n && n.diskGB);
     expect(disk.length).toBe(1);
-    expect(disk[0].diskGB).toBeGreaterThanOrEqual(42);
+    // 30 GB, Kevin's call on 9 Sep 2026 (PR #355): watch.py already sizes the
+    // room it needs per clip, and the old 60 GB floor held the 22:00 run back
+    // with 39 GB free. The assertion used to demand >= 42 and was left red on
+    // main by that merge (finding 20260910-queue-fixer-517), which blocks every
+    // fixer PR behind it — the gate tests origin/main MERGED WITH the branch, so
+    // a red main is a red gate for work that did not break anything.
+    //
+    // Pinned to the exact figure so a future change is a deliberate edit here
+    // with a reason, not a silent drift in either direction.
+    expect(disk[0].diskGB).toBe(30);
   });
 });
 

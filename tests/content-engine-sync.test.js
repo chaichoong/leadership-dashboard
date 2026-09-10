@@ -31,7 +31,26 @@ describe('content-engine spotify plan', () => {
     const out = JSON.parse(execFileSync('python3', [path.join(DIR, 'spotify.py'), 'selftest'], { encoding: 'utf8', cwd: DIR }));
     expect(out.failed).toEqual([]);
     const src = readFileSync(path.join(DIR, 'spotify.py'), 'utf8');
-    expect(src).toContain('"Publish now" if not test else "Save as draft"');
+    // TEST MODE MUST NOT BE ABLE TO PUBLISH — asserted on the PLAN the script
+    // actually builds, not on a string in the source. The old assertion pinned
+    // the literal `"Publish now" if not test else "Save as draft"`, which
+    // described a wizard Spotify has since replaced; PRs #354 and #361 moved
+    // the gate to a `submit` step appended only when test is false, and left
+    // this test red on main from 9 Sep 2026 (finding 20260910-queue-fixer-517).
+    // A test that pins a sentence rots the day the sentence is reworded; a test
+    // that builds the plan and looks for the publish step does not.
+    const plan = (test) => JSON.parse(execFileSync('python3', ['-c',
+      `import json,sys; sys.path.insert(0, ${JSON.stringify(DIR)}); import spotify;` +
+      `print(json.dumps(spotify.build_plan('/tmp/x.mp4','Episode 9 - A','body','',${test})))`,
+    ], { encoding: 'utf8', cwd: DIR }));
+    const testPlan = plan('True'), livePlan = plan('False');
+    expect(testPlan.mode).toBe('test');
+    expect(testPlan.steps.some((s) => s.do === 'submit')).toBe(false);
+    // It still WAITS for the enabled Publish button — that is the Review step
+    // it is meant to reach and stop at — it simply never presses it.
+    expect(testPlan.steps.some((s) => /Publish/.test(s.for || s.selector || ''))).toBe(true);
+    expect(livePlan.mode).toBe('live');
+    expect(livePlan.steps.some((s) => s.do === 'submit')).toBe(true);
     expect(src).toContain('PODCAST_FORMAT = "video"');
     expect(readFileSync(path.join(DIR, 'publish.py'), 'utf8')).toContain('upload = files["podcast"] if spotify.PODCAST_FORMAT == "audio"');
     expect(readFileSync(path.join(DIR, 'publish.py'), 'utf8')).toContain('spotify.write_plan(day, upload');
