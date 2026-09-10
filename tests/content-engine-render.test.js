@@ -58,7 +58,7 @@ describe('content-engine render', () => {
     expect(src).toContain('def intro_window(segments, duration=None)');
     expect(src).toContain('def quiet_point(');
     expect(src).toContain('clip_caption_at(open(caps).read(), at)');
-    expect(src).toContain('LFMD_START_RE = re.compile(r"(?:\\w+\\s+)?(?:from|for|of|through|in|to)\\s+(?:my|the)\\s+d(?:ia|ie|ai)\\w*"'); // any lead word: learnings/lessons/latest (2056, 10 Sep 2026) + diary/diet/dairy (2054)
+    expect(src).toContain('LFMD_START_RE = re.compile(r"(?:\\w+\\s+)?(?:from|for|of|through|in|to)\\s+(?:my|the)\\s+d(?:ia|ie|ai)\\w*"');  // + "learning story for today" (1841, 10 Sep 2026)
     expect(src).toContain('elif role == "episode": fields["Reframed Video URL"] = None');
     expect(src).toContain('paths["podcast"] = podcast_audio(captioned, os.path.join(workdir, names["podcast"]), at, resume)');
     expect(src).toContain('"--subtitle", title.replace("|", " ").strip()');
@@ -97,7 +97,7 @@ describe('content-engine render', () => {
 
   it("builds the LFMD from the 'Learnings from my diary' section, and the Summary from the teaser clip (Kevin, 3 Sep 2026)", () => {
     const src = readFileSync(RENDER, 'utf8');
-    expect(src).toContain('LFMD_START_RE = re.compile(r"(?:\\w+\\s+)?(?:from|for|of|through|in|to)\\s+(?:my|the)\\s+d(?:ia|ie|ai)\\w*"'); // whisper heard "the latest in my diary" on 2056 (10 Sep 2026)
+    expect(src).toContain('LFMD_START_RE = re.compile(r"(?:\\w+\\s+)?(?:from|for|of|through|in|to)\\s+(?:my|the)\\s+d(?:ia|ie|ai)\\w*"');  // + "learning story for today" (1841, 10 Sep 2026)
     expect(src).toContain('def lfmd_window(segments');
     expect(src).toContain('TEASER_MAX_SECONDS = 150');
     expect(src).toContain('if role == "teaser":');

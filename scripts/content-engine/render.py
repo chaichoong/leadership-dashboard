@@ -317,7 +317,8 @@ def title_from_transcript(text):
 # "you need to have a little bit of flexibility... pretty much every day I do the learnings from my diary").
 # learn*/lesson* + a joining word + my/the + any word starting dia/die/dai (diary, diaries, diet, dairy).
 # "Learnings from my diary" as whisper hears it: learnings/lessons/latest/learning ... from/in/for my diary (2056, 10 Sep 2026: "the latest in my diary")
-LFMD_START_RE = re.compile(r"(?:\w+\s+)?(?:from|for|of|through|in|to)\s+(?:my|the)\s+d(?:ia|ie|ai)\w*", re.I)
+LFMD_START_RE = re.compile(r"(?:\w+\s+)?(?:from|for|of|through|in|to)\s+(?:my|the)\s+d(?:ia|ie|ai)\w*"
+                           r"|(?:learn\w*|lesson\w*)(?:\s+\w+){0,2}\s+(?:for|of)\s+(?:today|the day)", re.I)
 SIGNOFF_RE = re.compile(r"thank you as always|stay positive|see you (?:again )?tomorrow", re.I)
 
 
@@ -840,6 +841,8 @@ def selftest():
     assert lfmd_window([(0, 5, "the learnings from my diary today"), (30, 40, "thank you as always")]) == (0, 40)
     assert lfmd_window([(0, 5, "I wrote it in my dairy today"), (30, 40, "see you tomorrow")]) == (0, 40), "the mis-spelt diary still counts"
     assert lfmd_window([(0, 5, "a diary of a Runpreneur"), (30, 40, "see you tomorrow")]) is None, "the show's name is not the section"
+    assert lfmd_window([(0, 5, "So I think the learning story for today is"), (30, 40, "see you tomorrow")]) == (0, 40), "1841 (2025): he says 'the learning story for today'"
+    assert lfmd_window([(0, 5, "the lessons for today"), (30, 40, "stay positive")]) == (0, 40)
     import inspect as _i3; ii = _i3.getsource(insert_intro); assert "intro_clip()" in ii and "check_intro_length(" in ii, "the jingle comes from the API copy and the output length is proved"
     try: check_intro_length("/nonexistent", "/nonexistent", "/nonexistent"); ok = True
     except SystemExit: ok = False
