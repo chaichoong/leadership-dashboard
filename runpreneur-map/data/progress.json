@@ -1,5 +1,5 @@
 {
- "as_at": "2026-09-09",
+ "as_at": "2026-09-10",
  "outline_names": {
   "United Kingdom": "United Kingdom",
   "Spain": "Spain",
@@ -117,8 +117,8 @@
  "next_km_milestone": 18000,
  "days_to_next_km_milestone": 59,
  "next_day_milestone": 2300,
- "date_of_next_day_milestone": "2026-09-17",
- "lap_finish_estimate": "2034-09-28",
+ "date_of_next_day_milestone": "2026-09-18",
+ "lap_finish_estimate": "2034-09-29",
  "marker": {
   "lat": -41.6086,
   "lon": 153.1182,
