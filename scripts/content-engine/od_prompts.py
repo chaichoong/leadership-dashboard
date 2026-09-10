@@ -162,8 +162,10 @@ You turn a finished LinkedIn post and its picture spec into the WORDS for a dens
  "hero": {"value": "a number or a 2-4 word phrase from the post or spec", "label": "what it is, under 40 chars"},
  "rule": "the one-line rule the reader can keep, under 110 chars, from the post",
  "guide": ["3-5 short steps from the post, each under 60 chars"],
- "left_label": "for a comparison only: 3 words", "right_label": "for a comparison only: 3 words"}
-Rules: keep the items in the spec's order and count, one row each, the headline carrying the item's meaning and the detail its consequence or how; if the spec is a comparison keep the before items on the left (icon cross) and the after items on the right (icon tick); if the post has numbered steps they are the guide; if there is no real number, the hero is the strongest phrase."""
+ "left_label": "for a comparison only: 3 words", "right_label": "for a comparison only: 3 words",
+ "figure": "what KIND of thing this post is, exactly one of: comparison (two ways of covering the same work), decision (one moment, two roads), sequence (steps that build to an end state, done once), cycle (something that goes round again every time), phases (the reader sets it up once, then the agent runs it), interval (a reading such as a time or a rate), share (a part of a whole, a percentage or N of M), pipeline (work moving through stages in order), fan_in (several sources feeding one agent), classification (sorting things into named groups), scored_list (signs the reader scores themselves against), list (a set of equal points in no order)"}
+Rules: keep the items in the spec's order and count, one row each, the headline carrying the item's meaning and the detail its consequence or how; if the spec is a comparison keep the before items on the left (icon cross) and the after items on the right (icon tick); if the post has numbered steps they are the guide; if there is no real number, the hero is the strongest phrase.
+The FIGURE decides which infographic layout the picture gets, so answer it from what the post actually is, never from what would look good. Code checks your answer against the words and ignores it when they cannot carry it: "share" needs a percentage or an N of M, "fan_in" needs the post to name several sources, "classification" needs it to name the groups, "cycle" needs it to say the thing happens every time. When in doubt, say what the post most plainly is."""
 
 TALKING_POINTS_SYSTEM = TOPICS_SYSTEM   # kept for od_lane's older call site
 
@@ -202,7 +204,7 @@ def selftest():
     for s in SHAPES.values(): assert s["visual"] in ("before_after", "steps", "stat", "flow", "checklist") and s["visual_fields"]
     for p in (SHAPE_PROMPT, POLISH_PROMPT, NEWSLETTER_PROMPT, DM_PROMPT): assert "{" in p and "}" in p
     assert "punchier" in POLISH_PROMPT and '"score"' in USEFULNESS_SYSTEM and '"topic"' in MINE_SYSTEM and "{topics}" in MINE_SYSTEM
-    assert NEWSLETTER_NAME in NEWSLETTER_SYSTEM and "TITLE:" in NEWSLETTER_SYSTEM and '"items"' in ENRICH_SYSTEM and "Dan Martell" in ENRICH_SYSTEM and len(NEWSLETTER_SERIES) == 8 and "90%" in NEWSLETTER_SERIES[0] and "{edition_brief}" in NEWSLETTER_PROMPT and "FLAGSHIP" in EDITION1_BRIEF
+    assert NEWSLETTER_NAME in NEWSLETTER_SYSTEM and "TITLE:" in NEWSLETTER_SYSTEM and '"items"' in ENRICH_SYSTEM and '"figure"' in ENRICH_SYSTEM and "fan_in" in ENRICH_SYSTEM and "Dan Martell" in ENRICH_SYSTEM and len(NEWSLETTER_SERIES) == 8 and "90%" in NEWSLETTER_SERIES[0] and "{edition_brief}" in NEWSLETTER_PROMPT and "FLAGSHIP" in EDITION1_BRIEF
     post, vis = split_visual("Hook line.\n\nBody.\n===VISUAL===\n```json\n{\"title\": \"T\", \"steps\": [\"a\", \"b\"]}\n```")
     assert post == "Hook line.\n\nBody." and vis == {"title": "T", "steps": ["a", "b"]}
     assert split_visual("no block") == ("no block", None) and split_visual("x\n===VISUAL===\nnot json")[1] is None

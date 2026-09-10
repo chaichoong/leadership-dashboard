@@ -39,6 +39,7 @@ import od_infographic       # noqa: E402
 import od_illustrate        # noqa: E402
 import od_compose           # noqa: E402
 import od_board           # noqa: E402
+import od_templates       # noqa: E402
 
 LONDON = ZoneInfo("Europe/London")
 REPO = os.path.dirname(os.path.dirname(HERE))
@@ -605,7 +606,8 @@ def parse_enriched(text):
         return {"title": str(d.get("title", "")).strip()[:70], "highlight": str(d.get("highlight", "")).strip()[:40], "standfirst": str(d.get("standfirst", "")).strip()[:120], "items": items[:8],
                 "hero": {"value": str((d.get("hero") or {}).get("value", "")).strip()[:28], "label": str((d.get("hero") or {}).get("label", "")).strip()[:60]},
                 "rule": str(d.get("rule", "")).strip()[:140], "guide": [str(g).strip()[:80] for g in (d.get("guide") or []) if str(g).strip()][:5],
-                "left_label": str(d.get("left_label", "")).strip()[:24], "right_label": str(d.get("right_label", "")).strip()[:24]}
+                "left_label": str(d.get("left_label", "")).strip()[:24], "right_label": str(d.get("right_label", "")).strip()[:24],
+                "figure": str(d.get("figure", "")).strip().lower()[:16] if str(d.get("figure", "")).strip().lower() in od_templates.FIGURES else ""}
     except (ValueError, AttributeError, TypeError):
         return None
 

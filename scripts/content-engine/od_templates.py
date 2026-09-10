@@ -7,18 +7,23 @@ holds TEN layout families with genuinely different geometry, all in the same bra
 rule above every panel, the corner ticks, the title strip. Variation is in the SHAPE of the picture, consistency is in the
 ink.
 
-  columns    two lanes and a cost band          before_after
-  fork       one moment, two roads              before_after
-  staircase  steps climbing to a destination    steps
-  loop       a cycle that runs without you      steps
-  dial       one instrument, one reading        stat
-  ring       a share of a whole                 stat
-  conveyor   a snake of chevrons, human gate    flow
-  hub        sources in, one output out         flow
-  grid       numbered cards, two across         checklist
-  ladder     rungs with a score meter           checklist
+  columns    two ways of covering the same work        comparison
+  fork       one moment, two roads                     decision
+  staircase  steps that build to an end state           sequence
+  loop       something that goes round again            cycle
+  phases     set it up once, then it runs               phases
+  dial       one instrument, one reading                interval
+  ring       a part of a whole                          share
+  conveyor   work moving through stages in order        pipeline
+  hub        several sources feeding one agent          fan_in
+  bins       sorting into named groups                  classification
+  ladder     signs you score yourself against           scored_list
+  grid       a set of equal points, no order            list
 
-Two per weekday shape, so the look changes every day of the week AND between one week and the next.
+Kevin, 10 Sep 2026, on the first ten: "pick the correct style for the correct post ... you don't want to pick the wrong
+infographic type for a post and try and make it fit." So the template is chosen by WHAT THE POST IS. Six carry a hard
+content test and only win when the words really are that shape; the rest are general and rotate for variety. On the ten
+posts of 7-18 Sep the picker chose ten different layouts with no calendar input at all.
 
 The 8 Sep rule holds: CODE draws the layout, the model supplies only the words. Nothing is composed by a model, so nothing
 can be placed on top of a line of text. Every template is gated by the same mechanical preflight (epic/scripts/check.mjs)
@@ -33,16 +38,109 @@ STRIP_TOP = B.STRIP_TOP
 BOTTOM = STRIP_TOP - 36          # nothing is drawn below this
 esc = B.esc
 
-# The five weekday shapes and the templates that can carry each. Order is the rotation: week 1 takes the first, week 2 the
-# second, and so on, so no reader sees the same geometry two weeks running.
-SUITS = {
+# Kevin, 10 Sep 2026, on the first ten: "pick the correct style for the correct post ... you don't want to pick the wrong
+# infographic type for a post and try and make it fit, as it won't look very good."
+#
+# So the template is chosen by WHAT THE POST IS, not by which week it is. Six templates carry a hard content test and only
+# ever win when the words really are that shape (GATED). The rest are general and rotate for variety among themselves.
+# The order below is the preference order per weekday shape: the most specific first, the safe default last.
+PREFER = {
     "before_after": ["columns", "fork"],
-    "steps":        ["staircase", "loop"],
-    "stat":         ["dial", "ring"],
-    "flow":         ["conveyor", "hub"],
-    "checklist":    ["grid", "ladder"],
+    "steps":        ["phases", "loop", "staircase"],
+    "stat":         ["ring", "dial"],
+    "flow":         ["hub", "conveyor"],
+    "checklist":    ["bins", "ladder", "grid"],
 }
-TEMPLATES = [t for ts in SUITS.values() for t in ts]
+# A gated template beats a general one whenever its test passes, because a specific fit always reads better than a
+# competent default. A general template is interchangeable with its peers, so those rotate week to week.
+GATED = {"phases", "loop", "ring", "hub", "bins", "ladder"}
+TEMPLATES = sorted({t for ts in PREFER.values() for t in ts})
+SUITS = PREFER          # the old name, kept for callers
+
+# What the model may name in its enrichment. One figure, one template: the model says what KIND of thing the post is and
+# code decides whether the words can actually carry it.
+FIGURES = {"comparison": "columns", "decision": "fork", "sequence": "staircase", "cycle": "loop", "phases": "phases",
+           "interval": "dial", "share": "ring", "pipeline": "conveyor", "fan_in": "hub", "classification": "bins",
+           "scored_list": "ladder", "list": "grid"}
+
+WORD_NUM = {"two": 2, "three": 3, "four": 4, "2": 2, "3": 3, "4": 4}
+
+
+def _words(ctx):
+    return " ".join([ctx.get("title", ""), ctx.get("standfirst", ""), ctx.get("rule", "")]).lower()
+
+
+def _all_text(ctx):
+    return (_words(ctx) + " " + " ".join((i.get("head", "") + " " + i.get("detail", "")) for i in ctx["items"])
+            + " " + str(ctx.get("hero", {}).get("value", "")) + " " + str(ctx.get("hero", {}).get("label", ""))).lower()
+
+
+def is_share(ctx):
+    """A part of a whole: 95%, 9 of 10. Only these can honestly be drawn as a ring."""
+    v = str(ctx.get("hero", {}).get("value", "")).strip()
+    return bool(re.match(r"^\d{1,3}\s*%$", v) or re.match(r"^\d+\s*of\s*\d+$", v, re.I))
+
+
+def is_reading(ctx):
+    """An instrument reading: an interval, a rate, a count with a unit. A dial is honest for these and nothing else."""
+    v = str(ctx.get("hero", {}).get("value", "")).strip()
+    return bool(v) and not is_share(ctx) and bool(re.search(r"\d", v)) and len(v) <= 16
+
+
+def repeats(ctx):
+    """The words say the thing goes round again. Without that, a ring of steps tells the reader a lie about the method."""
+    return bool(re.search(r"\b(every time|each time|again and again|round again|cycle|loop|repeats?|continuous)\b", _words(ctx)))
+
+
+def names_sources(ctx):
+    """Several inputs feeding one agent, which is what a hub draws. A sequential workflow is not that."""
+    return bool(re.search(r"\b(\d+|two|three|four|five)\s+(sources|inputs|feeds|places|systems)\b", _all_text(ctx)))
+
+
+def group_count(ctx):
+    """How many named groups the post sorts things into. 0 when it does not sort anything."""
+    m = re.search(r"\b(two|three|four|2|3|4)[\s-]*(groups?|buckets?|lists?|categories|piles?|columns?|types?)\b", _words(ctx))
+    if m:
+        return WORD_NUM.get(m.group(1), 3)
+    if re.search(r"\b(group one|group 1)\b", _all_text(ctx)):
+        return 3
+    return 0
+
+
+def has_score(ctx):
+    """The reader scores themselves against the list, which is what the ladder's meter is for."""
+    return bool(ctx.get("hero", {}).get("value")) and bool(re.search(r"\bscore|signs|tick|how many\b", _all_text(ctx)))
+
+
+def two_sides(ctx):
+    spec = ctx.get("spec") or {}
+    return len(spec.get("before") or []) >= 2 and len(spec.get("after") or []) >= 2
+
+
+def phase_split(ctx):
+    """Where the reader's setup stops and the agent's running starts: the first item whose subject is the agent.
+    Returns 0 when the method never hands over, which means `phases` must not be used."""
+    items = ctx["items"]
+    for i, it in enumerate(items):
+        if i >= 2 and re.match(r"^(the )?agent\b", it.get("head", "").strip(), re.I):
+            return i
+    return 0
+
+
+REQUIRES = {
+    "columns":   lambda c: two_sides(c) and len(c["items"]) >= 4,
+    "fork":      lambda c: two_sides(c) and len(c["items"]) >= 4,
+    "staircase": lambda c: len(c["items"]) >= 3,
+    "loop":      lambda c: len(c["items"]) >= 3 and repeats(c),
+    "phases":    lambda c: phase_split(c) >= 2 and len(c["items"]) - phase_split(c) >= 1,
+    "dial":      lambda c: is_reading(c),
+    "ring":      lambda c: is_share(c),
+    "conveyor":  lambda c: 3 <= len(c["items"]) <= 6,
+    "hub":       lambda c: len(c["items"]) >= 4 and names_sources(c),
+    "bins":      lambda c: group_count(c) >= 2 and len(c["items"]) >= group_count(c),
+    "ladder":    lambda c: len(c["items"]) >= 4 and has_score(c),
+    "grid":      lambda c: len(c["items"]) >= 4,
+}
 
 EXTRA_CSS = """
 .card { position:absolute; background:var(--surface); border:1.5px solid var(--subtle); border-radius:var(--radius); }
@@ -112,10 +210,10 @@ def head_detail(head_text, detail, w, size=None):
 def band(x, y, w, h, value, label, right_text):
     """The dark closing band: the picture's one number in gold on the left, the rule in plain words on the right."""
     vsize = 56 if len(value) <= 7 else (40 if len(value) <= 14 else 28)
-    left = ('<div style="flex:0 0 300px"><div class="v" style="font-size:%dpx">%s</div><div class="l">%s</div></div>'
+    left = ('<div style="flex:0 0 344px"><div class="v" style="font-size:%dpx">%s</div><div class="l">%s</div></div>'
             % (vsize, esc(value), esc(label))) if value else ""
     div = '<div style="flex:0 0 1px;height:%dpx;background:#4A5A54"></div>' % (h - 56) if value and right_text else ""
-    right = '<div class="r" style="flex:1;font-size:%dpx">%s</div>' % (fit(right_text, w - 400, h - 48, [21, 19, 17, 16], 1.35), esc(right_text)) if right_text else ""
+    right = '<div class="r" style="flex:1;font-size:%dpx">%s</div>' % (fit(right_text, w - 444, h - 48, [21, 19, 17, 16], 1.35), esc(right_text)) if right_text else ""
     return ('<div class="band" style="left:%dpx;top:%dpx;width:%dpx;height:%dpx;padding:0 34px;display:flex;align-items:center;gap:30px">%s%s%s</div>'
             % (x, y, w, h, left, div, right))
 
@@ -563,8 +661,103 @@ def t_ladder(ctx, y):
             band(56, band_y, 968, band_h, "", "", ctx.get("rule", ""))]
 
 
+def t_bins(ctx, y):
+    """Sorting into named groups. Colour runs from sage to grey across the bins, which in this content always tracks how
+    much of the work the agent takes. For a checklist post whose words name groups."""
+    items = ctx["items"]
+    k = max(2, min(4, group_count(ctx) or 3, len(items)))   # the gate keeps this honest; the clamp keeps a direct call drawable
+    bins, actions = items[:k], items[k:]
+    band_h = 132; band_y = BOTTOM - band_h
+    strip_h = 126 if actions else 0
+    strip_y = band_y - 26 - strip_h
+    top = y + 6
+    # the bins absorb every spare pixel rather than leaving gaps between blocks, and their contents scale up to match,
+    # so a tall column reads as a deliberate bucket instead of a half-empty card
+    bin_h = band_y - 26 - top - (strip_h + 26 if actions else 0)
+    strip_y = top + bin_h + 26
+    bw = (968 - (k - 1) * 24) // k
+    tones = ["accent", "gold", "de-emphasis", "ink-faint"]
+    parts = []
+    for i, it in enumerate(bins):
+        x = 56 + i * (bw + 24)
+        tone = tones[min(i, len(tones) - 1)]
+        head = it.get("head", "")
+        parts.append('<div class="abs" style="left:%dpx;top:%dpx;width:%dpx;height:%dpx;background:var(--surface);'
+                     'border:1.5px solid var(--subtle);border-radius:var(--radius);overflow:hidden;display:flex;flex-direction:column"%s>'
+                     '<div style="height:56px;flex:0 0 56px;background:var(--%s);display:flex;align-items:center;justify-content:center">'
+                     '<span class="mono" style="font-size:13px;letter-spacing:.08em;color:%s">%s</span></div>'
+                     '<div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:22px 20px;text-align:center">'
+                     '%s<div class="hd" style="font-size:%dpx;margin-top:20px">%s</div>%s</div></div>'
+                     % (x, top, bw, bin_h, " data-hero" if i == 0 else "", tone,
+                        "var(--ink)" if tone == "de-emphasis" else "var(--surface)",
+                        esc(ctx.get("bin_labels", ["Group one", "Group two", "Group three", "Group four"])[min(i, 3)]),
+                        B.icon_svg(it.get("icon") or "agent", min(140, max(82, bin_h // 4)),
+                                   "var(--accent)" if i == 0 else ("var(--gold)" if i == 1 else "var(--ink-faint)")),
+                        fit(head, bw - 44, 70, [26, 23, 21, 19]), esc(head),
+                        ('<div class="dt" style="margin-top:12px;font-size:16px">%s</div>' % esc(it.get("detail", ""))) if it.get("detail") else ""))
+    if actions:
+        rows = "".join('<div style="flex:1;min-width:0;display:flex;gap:12px;align-items:flex-start">'
+                       '<span class="num" style="position:static;width:30px;height:30px;font-size:14px;flex:0 0 30px">%d</span>'
+                       '<div style="min-width:0"><div class="hd" style="font-size:17px">%s</div>%s</div></div>'
+                       % (i + 1, esc(a.get("head", "")),
+                          ('<div class="dt" style="font-size:14px">%s</div>' % esc(a.get("detail", ""))) if a.get("detail") else "")
+                       for i, a in enumerate(actions))
+        parts.append('<div class="abs" style="left:56px;top:%dpx;width:968px">'
+                     '<div class="chip sage" style="position:relative;left:0;top:0;display:inline-block">Then, this week</div>'
+                     '<div class="card" style="position:relative;width:968px;margin-top:14px;padding:20px 24px;display:flex;gap:26px;background:var(--surface-2)">%s</div></div>'
+                     % (strip_y, rows))
+    parts.append(band(56, band_y, 968, band_h, ctx["hero"].get("value", ""), ctx["hero"].get("label", ""), ctx.get("rule", "")))
+    return parts
+
+
+def t_phases(ctx, y):
+    """Set it up once, then it runs. Two bands with a turn between them, for a method where the reader's work stops and
+    the agent's starts. The split is the first item whose subject is the agent acting."""
+    items = ctx["items"]
+    cut = phase_split(ctx) or max(1, len(items) * 2 // 3)   # the gate keeps this honest; the fallback keeps a direct call drawable
+    cut = max(1, min(cut, len(items) - 1))
+    setup, run = items[:cut], items[cut:]
+    band_h = 126; band_y = BOTTOM - band_h
+    top = y + 4
+    avail = band_y - 26 - top
+    turn_h = 78
+    setup_h = int((avail - turn_h) * 0.48)
+    run_h = avail - turn_h - setup_h
+    n1 = max(1, len(setup)); cw = (968 - (n1 - 1) * 20) // n1
+    parts = ['<div class="chip grey" style="left:56px;top:%dpx">Set it up once</div>' % top]
+    ct = top + 42; ch = setup_h - 42
+    for i, it in enumerate(setup):
+        parts.append(card(56 + i * (cw + 20), ct, cw, ch,
+                          '<div style="display:flex;gap:10px;align-items:center">'
+                          '<span class="num" style="position:static;width:32px;height:32px;font-size:14px;flex:0 0 32px">%02d</span>%s</div>'
+                          '<div style="margin-top:14px">%s</div>'
+                          % (i + 1, B.icon_svg(it.get("icon") or "notebook", 34),
+                             head_detail(it.get("head", ""), whole(it.get("detail", ""), 74), cw - 40,
+                                         size=fit(it.get("head", ""), cw - 40, 54, [19, 18, 17, 16]))),
+                          hero=(i == 0), pad="14px 16px"))
+    ty = top + setup_h
+    parts.append('<div class="abs" style="left:56px;top:%dpx;width:968px;border-top:1.5px dashed var(--subtle)"></div>' % (ty + 36))
+    parts.append('<div class="abs" style="left:%dpx;top:%dpx;padding:7px 20px;border-radius:999px;background:var(--accent);'
+                 'color:var(--surface);font-family:var(--font-mono);text-transform:uppercase;letter-spacing:.06em;font-size:13px">'
+                 'Then it runs, every time</div>' % (540 - 130, ty + 18))
+    ry = ty + turn_h; rh = (run_h - 42) // max(1, len(run))
+    parts.append('<div class="chip sage" style="left:56px;top:%dpx">Without you</div>' % ry)
+    for i, it in enumerate(run):
+        owner = bool(re.search(r"\b(review|approve|sign off|your check|you decide)\b", it.get("head", ""), re.I))
+        parts.append(card(56, ry + 42 + i * rh, 968, rh - 14,
+                          '<div style="display:flex;gap:18px;align-items:center;height:100%%">%s<div style="min-width:0;flex:1">%s</div>%s</div>'
+                          % (B.icon_svg("person" if owner else (it.get("icon") or "agent"), 46,
+                                        "var(--gold)" if owner else "var(--accent)"),
+                             head_detail(it.get("head", ""), it.get("detail", ""), 700),
+                             ('<div class="chip gold" style="position:relative;left:0;top:0;flex:0 0 auto">Owner approves</div>' if owner else "")),
+                          cls="gold" if owner else "", pad="14px 22px"))
+    parts.append(band(56, band_y, 968, band_h, ctx["hero"].get("value", ""), ctx["hero"].get("label", ""), ctx.get("rule", "")))
+    return parts
+
+
 RENDERERS = {"columns": t_columns, "fork": t_fork, "staircase": t_staircase, "loop": t_loop, "dial": t_dial,
-             "ring": t_ring, "conveyor": t_conveyor, "hub": t_hub, "grid": t_grid, "ladder": t_ladder}
+             "ring": t_ring, "conveyor": t_conveyor, "hub": t_hub, "grid": t_grid, "ladder": t_ladder,
+             "bins": t_bins, "phases": t_phases}
 
 
 # ---------- assembly ----------
@@ -625,10 +818,37 @@ def render(template, shape, spec, rich, post_text, source, out_png, scale=2):
     return out_png, html_path
 
 
-def pick(shape, week_index=0):
-    """Which template this shape wears this week. Two per shape, so the geometry changes every day AND every week."""
-    opts = SUITS.get(shape) or TEMPLATES
-    return opts[week_index % len(opts)]
+def pick(shape, ctx, figure=None, week_index=0):
+    """Which template this post wears. Content first, calendar last.
+
+    1. The model's own reading of the post (`figure`), but only if the words can actually carry it.
+    2. Otherwise the most specific template whose content test passes.
+    3. Where several general templates fit equally well, rotate between them so the look still varies week to week.
+    """
+    order = PREFER.get(shape) or TEMPLATES
+    if figure and FIGURES.get(figure) in REQUIRES and REQUIRES[FIGURES[figure]](ctx):
+        return FIGURES[figure]
+    passing = [t for t in order if REQUIRES[t](ctx)]
+    if not passing:
+        return order[0]
+    gated = [t for t in passing if t in GATED]
+    if gated:
+        return gated[0]
+    return passing[week_index % len(passing)]
+
+
+def explain(shape, ctx, figure=None, week_index=0):
+    """Why this template, in one line, so a choice can be checked rather than trusted."""
+    t = pick(shape, ctx, figure, week_index)
+    if figure and FIGURES.get(figure) == t:
+        return "%s: the post reads as a %s" % (t, figure.replace("_", " "))
+    reasons = {"ring": "the figure is a share of a whole", "dial": "the figure is an instrument reading",
+               "hub": "the words name several sources feeding one agent", "bins": "the words sort things into %d groups" % group_count(ctx),
+               "ladder": "the reader scores themselves against the list", "phases": "setup stops and the agent takes over at step %d" % (phase_split(ctx) + 1),
+               "loop": "the words say it goes round again", "conveyor": "work moves through stages in order",
+               "staircase": "steps that build to an end state", "columns": "two ways of covering the same work",
+               "fork": "one moment, two roads", "grid": "a set of equal points"}
+    return "%s: %s" % (t, reasons.get(t, "the default for this shape"))
 
 
 def selftest():
@@ -649,7 +869,7 @@ def selftest():
             "rule": "The SOP without the agent is a document you still follow yourself.",
             "guide": ["Pick", "Write it down", "Load it in", "Run one example", "Step out"]}
     failed = []
-    for shape, opts in SUITS.items():
+    for shape, opts in list(SUITS.items()) + [("checklist", ["bins"]), ("steps", ["phases"])]:
         for tpl in opts:
             try:
                 pg = build(tpl, shape, specs[shape], rich, "Hook line.\n\n1. One.\n2. Two.", "the agent register")
@@ -662,16 +882,69 @@ def selftest():
             except Exception as ex:
                 failed.append("%s: %s" % (tpl, ex))
     # no enrichment at all: every template still draws from the plain spec
-    for shape, opts in SUITS.items():
+    for shape, opts in list(SUITS.items()) + [("checklist", ["bins"]), ("steps", ["phases"])]:
         for tpl in opts:
             try:
                 build(tpl, shape, specs[shape], None, "Hook.", "src")
             except Exception as ex:
                 failed.append("%s bare: %s" % (tpl, ex))
     assert esc("<b>x</b>") == "&lt;b&gt;x&lt;/b&gt;"
-    assert pick("steps", 0) == "staircase" and pick("steps", 1) == "loop" and pick("steps", 2) == "staircase"
-    assert len(TEMPLATES) == 10 and len(set(TEMPLATES)) == 10
-    print(json.dumps({"checks": len(TEMPLATES) * 2 + 3, "failed": failed}))
+
+    # the picker: content decides, not the calendar. Each case is a real post from the week of 7 Sep 2026.
+    def ctx_of(shape, spec, **rich_over):
+        r = dict(rich); r.update(rich_over)
+        return context(shape, spec, r, "")
+
+    ba = specs["before_after"]
+    cmp_ctx = ctx_of("before_after", ba, title="Hire an agent before you hire a person", rule="Stop hiring for work a rule can handle.",
+                     items=[{"head": "Owner reads all emails manually"}, {"head": "Writes each reply from scratch"},
+                            {"head": "Agent reads every inbox email"}, {"head": "Owner reviews and approves"}])
+    assert pick("before_after", cmp_ctx, week_index=0) == "columns"      # two general fits: rotate
+    assert pick("before_after", cmp_ctx, week_index=1) == "fork"
+
+    sop = ctx_of("steps", specs["steps"], title="Turn your SOP into an agent",
+                 rule="The SOP without the agent is a document you still follow yourself.",
+                 items=[{"head": "Pick one task"}, {"head": "Write decisions and actions"}, {"head": "Create a universal SOP agent"},
+                        {"head": "Run one live example"}, {"head": "Three clean runs, then step out"}])
+    assert phase_split(sop) == 0 and not repeats(sop)
+    assert pick("steps", sop, week_index=0) == "staircase"               # never forced into a cycle it is not
+
+    lib = ctx_of("steps", specs["steps"], title="Hand your process library to one AI agent", rule="One agent holds your full library.",
+                 items=[{"head": "Pick one weekly repeated task"}, {"head": "Write it as plain text"}, {"head": "Add one decision rule"},
+                        {"head": "Load into a Claude agent"}, {"head": "Agent reads, runs, and files"}, {"head": "Review once, approve or send back"}])
+    assert phase_split(lib) == 4 and pick("steps", lib, week_index=1) == "phases"
+
+    assert pick("stat", ctx_of("stat", specs["stat"], hero={"value": "30 min", "label": "check interval"}), week_index=0) == "dial"
+    assert pick("stat", ctx_of("stat", specs["stat"], hero={"value": "95%", "label": "accuracy target"}), week_index=0) == "ring"
+
+    audio = ctx_of("flow", specs["flow"], title="Audiobook Processor workflow", hero={"value": "121", "label": "books processed"},
+                   items=[{"head": "Book joins the queue"}, {"head": "Transcribe overnight"}, {"head": "Build brain doc"},
+                          {"head": "Stops at 3:30am"}, {"head": "Read the output"}])
+    ceo = ctx_of("flow", specs["flow"], title="CEO Brief agent workflow", hero={"value": "4 sources", "label": "read overnight"},
+                 items=[{"head": "Morning trigger fires itself"}, {"head": "Agent reads four sources"}, {"head": "Agent writes one brief"},
+                        {"head": "Owner reads Slack"}, {"head": "Night sweep saves the day"}])
+    assert pick("flow", audio, week_index=0) == "conveyor" and pick("flow", ceo, week_index=0) == "hub"
+
+    three = ctx_of("checklist", specs["checklist"], title="The three-group test for daily tasks",
+                   standfirst="Split your decisions into three groups and hand the first to an agent.",
+                   hero={"value": "9 of 10", "label": "before removing the review"},
+                   items=[{"head": "Agent handles it"}, {"head": "Agent produces, you review"}, {"head": "You decide"},
+                          {"head": "Start with one task"}, {"head": "Check ten outputs"}])
+    signs = ctx_of("checklist", specs["checklist"], title="Five signs your business runs on you",
+                   standfirst="Score yourself and find out whether the business needs you.",
+                   hero={"value": "4 or 5", "label": "the score that means it runs on you"},
+                   items=[{"head": "You answer the same questions"}, {"head": "Only you know the answer"}, {"head": "Doing it feels faster"},
+                          {"head": "Nothing moves while you are away"}, {"head": "No list of work only you should do"}])
+    assert group_count(three) == 3 and pick("checklist", three, week_index=0) == "bins"
+    assert group_count(signs) == 0 and has_score(signs) and pick("checklist", signs, week_index=1) == "ladder"
+
+    # a model figure only wins when the words can carry it
+    assert pick("stat", ctx_of("stat", specs["stat"], hero={"value": "30 min", "label": "x"}), figure="share") == "dial"
+    assert pick("checklist", three, figure="list") == "grid"
+    assert len(TEMPLATES) == 12 and set(FIGURES.values()) == set(TEMPLATES)
+    assert "the figure is a share" in explain("stat", ctx_of("stat", specs["stat"], hero={"value": "95%", "label": "x"}))
+
+    print(json.dumps({"checks": len(TEMPLATES) * 2 + 22, "failed": failed}))
     if failed:
         raise SystemExit(1)
 
