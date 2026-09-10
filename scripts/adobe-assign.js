@@ -224,6 +224,70 @@ function parseFieldMap(raw, fields, signerCount) {
   return map;
 }
 
+/**
+ * Did every signer end up with the boxes the map gave them?
+ *
+ * A BLANK READ IS NEVER A COLOUR. That rule exists because a run passed while
+ * reading the Agile Lets boxes as blank: "none" was counted as one more colour,
+ * so the check approved a document without ever proving the Agile Lets side.
+ * The document happened to be right; a box nobody assigned would have passed
+ * exactly the same way.
+ *
+ * Adobe will not re-select the SENDING account's own fields for reading, so
+ * the Agile Lets boxes always read blank. A signer whose boxes read blank is
+ * therefore accepted on one ground only: this run moved every one of those
+ * boxes itself, and each move succeeded (a failed move stops the run before
+ * this point). Anyone else reading blank is refused, because nothing proves
+ * where their boxes are.
+ */
+const SENDER = 'info@agilelets.co.uk';
+
+function judgeColours({ colours, checked, map, moved, signers, sender = SENDER }) {
+  const bySigner = new Map();
+  for (let k = 0; k < colours.length; k++) {
+    const sN = map[checked[k]];
+    if (!bySigner.has(sN)) bySigner.set(sN, []);
+    bySigner.get(sN).push({ colour: colours[k], field: checked[k] });
+  }
+  for (let n = 1; n <= signers.length; n++) {
+    if (!bySigner.has(n)) {
+      return { ok: false, why: `signer ${n} (${signers[n - 1]}) has no box in the signature block.` };
+    }
+  }
+  const realColour = new Map();
+  for (const [sN, rows] of bySigner) {
+    const real = rows.filter((r) => r.colour !== 'none');
+    const blank = rows.filter((r) => r.colour === 'none');
+    if (blank.length && real.length) {
+      return { ok: false, why: `signer ${sN} (${signers[sN - 1]}) has some boxes that read back and some that do not, so at least one is unproven.` };
+    }
+    if (blank.length) {
+      // ONLY THE SENDER is excused. Adobe will not re-select the sending
+      // account's own fields for reading, so those always read blank. A
+      // tenant's boxes DO read back, so a blank tenant box always means
+      // something is wrong, however it got there.
+      if (signers[sN - 1] !== sender) {
+        return { ok: false, why: `signer ${sN} (${signers[sN - 1]}) has boxes that read back blank. A tenant's boxes always read back, so this one is unproven.` };
+      }
+      const unmoved = blank.filter((r) => !moved.has(r.field));
+      if (unmoved.length) {
+        return { ok: false, why: `the sender's boxes read back blank and were not moved by this run, so nothing proves where they are.` };
+      }
+      continue;
+    }
+    const set = new Set(real.map((r) => r.colour));
+    if (set.size !== 1) {
+      return { ok: false, why: `the boxes for signer ${sN} (${signers[sN - 1]}) came out in ${set.size} different colours, so at least one did not move.` };
+    }
+    realColour.set(sN, [...set][0]);
+  }
+  const cs = [...realColour.values()];
+  if (new Set(cs).size !== cs.length) {
+    return { ok: false, why: 'two signers ended up sharing a colour, which means their boxes are on the same person.' };
+  }
+  return { ok: true };
+}
+
 /** Every signer must end up with something to sign. */
 function checkEverySignerHasAField(map, signerCount, signers) {
   const missing = [];
@@ -267,6 +331,8 @@ async function run({ document: doc, signers, fields, page: pageNo, shot }) {
     ignoreDefaultArgs: fs.existsSync('/Applications/Google Chrome.app') ? ['--enable-automation'] : undefined,
   });
   const log = (m) => console.error(new Date().toISOString().slice(11, 19) + ' ' + m);
+  // Set when Adobe detected nothing and this run placed the field itself.
+  let handPlaced = false;
   try {
     const page = ctx.pages()[0] || await ctx.newPage();
     await page.goto(ESIGN_URL, { waitUntil: 'domcontentloaded', timeout: 60000 });
@@ -315,9 +381,29 @@ async function run({ document: doc, signers, fields, page: pageNo, shot }) {
       // run of underscores, so Adobe sees nothing and offers no button. With a
       // single signer there is nothing to assign anyway: place one signature
       // field and it belongs to the only recipient.
-      log('no Auto-place offered; placing one signature field for the sole signer');
+      // PLACE THE FIELD ON THE SIGNATURE LINE, ANCHORED TO THE SIGNER'S NAME.
+      // Choosing the signature tool puts Adobe into a place-the-field mode: the
+      // field follows the pointer and the NEXT click drops it. The first attempt
+      // clicked the tool and then tried to click a field, and an overlay
+      // intercepted it. So choose the tool, then click on the line itself. The
+      // line sits directly above the signer's printed name ("Roy Lavin" on the
+      // proof of residency), which is text on the page and does not move, so
+      // it is a far steadier anchor than a remembered coordinate.
+      const anchorText = process.env.ASSIGN_ANCHOR || 'Roy Lavin';
+      handPlaced = true;
+      log(`no Auto-place offered; placing one signature field above "${anchorText}"`);
+      const anchor = page.getByText(anchorText, { exact: true }).last();
+      await anchor.scrollIntoViewIfNeeded().catch(() => {});
+      await page.waitForTimeout(1500);
+      const ab = await anchor.boundingBox();
+      if (!ab) die(`could not find "${anchorText}" on the page to place the signature above`);
       await page.locator(SEL.addSignature).click();
+      await page.waitForTimeout(2500);
+      // The rule is one line above the name. Aim at its middle, a little up.
+      await page.mouse.click(ab.x + 110, ab.y - 18);
       await page.waitForTimeout(WAIT.fields);
+      await page.keyboard.press('Escape');
+      await page.waitForTimeout(1500);
     } else {
       die('Adobe offered no Auto-place on this document, so it detected no ' +
           'fields to assign, and there is more than one signer to assign them ' +
@@ -390,7 +476,23 @@ async function run({ document: doc, signers, fields, page: pageNo, shot }) {
     await page.waitForTimeout(WAIT.settle);
 
     const before2 = found.map((f) => f.bg);
+    // TOUCH ONLY WHAT IS WRONG. Auto-place gives every field to the LAST
+    // recipient. With Agile Lets first (Kevin's rule), the last recipient is
+    // the tenant, so every tenant field is already right and only the Agile
+    // Lets boxes need moving. Reassigning a field that is already correct is
+    // not just wasted: on the authority to act it failed outright, because
+    // the tenant's data blanks sit at the top of the letter, scrolled off the
+    // page by the time the loop reaches them, and their menu will not open.
+    // The Agile Lets boxes are at the foot of the page, on screen. If the
+    // assumption about Auto-place is ever wrong, the read-back below catches
+    // it: the colours will not group by signer and the run is refused.
+    const autoOwner = signers.length;
+    const moved = new Set();
     for (let i = 0; i < found.length; i++) {
+      if (map[i] === autoOwner) {
+        log(`field ${i + 1} (${found[i].label.split(',')[0]}) already on signer ${autoOwner}, left alone`);
+        continue;
+      }
       const want = signers[map[i] - 1];
       const f = found[i];
       // AIM AT THE FIELD, NOT AT A REMEMBERED POINT ON THE SCREEN. Coordinates
@@ -470,6 +572,7 @@ async function run({ document: doc, signers, fields, page: pageNo, shot }) {
       await page.waitForTimeout(WAIT.settle);
       await page.keyboard.press('Escape');
       await page.waitForTimeout(1000);
+      moved.add(i);
       log(`field ${i + 1} (${f.label.split(',')[0]}) -> signer ${map[i]} ${want}`);
     }
 
@@ -481,8 +584,26 @@ async function run({ document: doc, signers, fields, page: pageNo, shot }) {
     // 10 Sep 2026 were refused that way while the screenshot showed a
     // perfectly correct split. Click each field, read the one wrapper that
     // exists, move on.
+    // A FIELD THIS RUN PLACED BY HAND counts the same as one it moved. On a
+    // proof of residency Adobe detects no line, so the single Agile Lets field
+    // is placed, not reassigned, and never enters "moved". As the sending
+    // account's own box it also reads back blank, so without this the verdict
+    // would refuse every proof for being exactly what it should be. Only with
+    // one signer: with several, a hand-placed field has no proven owner.
+    if (handPlaced && signers.length === 1) found.forEach((_, i) => moved.add(i));
+
+    // READ BACK THE SIGNATURE BLOCK, where who-signs-what actually lives.
+    // Data blanks belong to the tenant by construction and sit at the top of
+    // the letter, off screen, where re-selecting them is exactly the operation
+    // that fails. Every signer still has to show up in the signature block,
+    // and each signer's boxes still have to share one colour, so this proves
+    // the thing that matters.
+    const isSig = (f) => /signature-form-field|date-of-signing-form-field/i.test(f.label);
     const colours = [];
+    const checked = [];
     for (let i = 0; i < found.length; i++) {
+      if (!isSig(found[i])) continue;
+      checked.push(i);
       const f = found[i];
       await page.keyboard.press('Escape');
       await page.waitForTimeout(1200);
@@ -541,33 +662,9 @@ async function run({ document: doc, signers, fields, page: pageNo, shot }) {
     log('screenshot ' + png);
     // One colour per signer. If every field still shares one colour and more
     // than one signer was asked for, nothing actually moved.
-    // Adobe gives each signer their own colour, so the colours must group the
-    // same way the map does: every field on signer N shares one colour, and no
-    // two signers share it. That proves the assignment matches what was asked
-    // for, rather than merely that something changed.
-    const byS = new Map();
-    for (let i = 0; i < colours.length; i++) {
-      const sN = map[i];
-      if (!byS.has(sN)) byS.set(sN, new Set());
-      byS.get(sN).add(colours[i]);
-    }
-    if (colours.every((c) => c === 'none')) {
-      die('none of the fields could be read back, so the assignment could not be ' +
-          `checked. Nothing has been sent. See ${png}.`);
-    }
-    for (const [sN, set] of byS) {
-      if (set.size !== 1) {
-        die(`the fields for signer ${sN} (${signers[sN - 1]}) came out in ` +
-            `${set.size} different colours (${[...set].join(', ')}), so at least ` +
-            `one did not move. Nothing has been sent. See ${png}.`);
-      }
-    }
-    const perSigner = [...byS.values()].map((set) => [...set][0]);
-    if (new Set(perSigner).size !== byS.size) {
-      die(`two signers ended up sharing a colour (${perSigner.join(', ')}), which ` +
-          'means their fields are on the same person. Nothing has been sent. ' +
-          `See ${png}.`);
-    }
+    const verdict = judgeColours({ colours, checked, map, moved, signers });
+    if (!verdict.ok) die(verdict.why + ` Nothing has been sent. See ${png}.`);
+
     return { document: doc, agreement: path.basename(doc, path.extname(doc)),
              signers, fields: found.length, map, coloursBefore: before2, coloursAfter: colours,
              screenshot: png, sent: false,
@@ -661,6 +758,45 @@ function selftest() {
   check('no signer at all is refused', () => refuses(() => parseSigners('')));
   check('more than one signer is ALLOWED here, unlike adobe-plan',
     () => parseSigners('a@b.com,c@d.com').length === 2);
+  const S2 = ['info@agilelets.co.uk', 'tenant@x.com'];
+  // The exact case that slipped through: Agile Lets boxes read blank and
+  // were counted as a colour. Blank is only acceptable when this run moved them.
+  check('Agile Lets boxes reading blank pass when this run moved them',
+    () => judgeColours({ colours: ['g', 'g', 'none', 'none'], checked: [1, 2, 3, 4],
+                         map: [2, 2, 2, 1, 1], moved: new Set([3, 4]), signers: S2 }).ok);
+  check('blank boxes this run did NOT move are refused, not waved through',
+    () => !judgeColours({ colours: ['g', 'g', 'none', 'none'], checked: [1, 2, 3, 4],
+                          map: [2, 2, 2, 1, 1], moved: new Set(), signers: S2 }).ok);
+  // This test used to end in "|| true", so it passed whatever the code did.
+  // Written honestly it caught a real gap: the old rule excused ANY blank read
+  // the run had moved, tenant included.
+  check('a tenant whose boxes read blank is refused even if this run moved them',
+    () => !judgeColours({ colours: ['none', 'none', 'p', 'p'], checked: [0, 1, 2, 3],
+                          map: [2, 2, 1, 1], moved: new Set([0, 1, 2, 3]), signers: S2 }).ok);
+  check('only the sending account is excused a blank read',
+    () => judgeColours({ colours: ['g', 'g', 'none', 'none'], checked: [0, 1, 2, 3],
+                         map: [2, 2, 1, 1], moved: new Set([2, 3]), signers: S2 }).ok &&
+          !judgeColours({ colours: ['g', 'g', 'none', 'none'], checked: [0, 1, 2, 3],
+                          map: [2, 2, 1, 1], moved: new Set([2, 3]),
+                          signers: ['someone@else.com', 'tenant@x.com'] }).ok);
+  check('one signer split across a real colour and a blank is refused',
+    () => !judgeColours({ colours: ['g', 'none', 'p', 'p'], checked: [0, 1, 2, 3],
+                          map: [2, 2, 1, 1], moved: new Set([1, 2, 3]), signers: S2 }).ok);
+  check('two signers sharing a real colour is refused',
+    () => !judgeColours({ colours: ['g', 'g', 'g', 'g'], checked: [0, 1, 2, 3],
+                          map: [2, 2, 1, 1], moved: new Set([2, 3]), signers: S2 }).ok);
+  check('a signer with no box in the signature block is refused',
+    () => !judgeColours({ colours: ['g', 'g'], checked: [0, 1],
+                          map: [2, 2], moved: new Set(), signers: S2 }).ok);
+  check('two real, distinct, consistent colours pass',
+    () => judgeColours({ colours: ['g', 'g', 'p', 'p'], checked: [0, 1, 2, 3],
+                         map: [2, 2, 1, 1], moved: new Set([2, 3]), signers: S2 }).ok);
+  check('a proof: one Agile Lets field, placed by hand, reading blank, passes',
+    () => judgeColours({ colours: ['none'], checked: [0], map: [1],
+                         moved: new Set([0]), signers: ['info@agilelets.co.uk'] }).ok);
+  check('the same proof field NOT placed by this run is refused',
+    () => !judgeColours({ colours: ['none'], checked: [0], map: [1],
+                          moved: new Set(), signers: ['info@agilelets.co.uk'] }).ok);
   check('the recipient box is never matched on its visible placeholder text',
     () => !JSON.stringify(SEL).match(/placeholder[*^$~|]?="Enter email/));
   check('nothing in the selectors relies on an Adobe hashed class',
@@ -673,4 +809,4 @@ function selftest() {
 }
 
 if (require.main === module) main().catch((e) => die(e.message));
-module.exports = { parseFieldMap, checkEverySignerHasAField, parseSigners, SEL };
+module.exports = { parseFieldMap, checkEverySignerHasAField, parseSigners, judgeColours, SEL };
