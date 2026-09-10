@@ -149,22 +149,55 @@ function parseFieldMap(raw, fields, signerCount) {
   const kinds = Array.isArray(fields) ? fields.map((f) => String(f.label || '')) : null;
   const mode = String(raw || 'blocks');
 
-  if (mode === 'blocks') {
+  if (mode === 'blocks' || /^blocks:/.test(mode)) {
     if (!kinds) die('the blocks rule needs the field labels, not just a count');
+    // THE ORDER ON THE PAGE IS NOT THE ORDER OF THE SIGNERS. Kevin's rule from
+    // 10 Sep 2026: info@agilelets.co.uk must always be the FIRST recipient, so
+    // it signs before the tenant. The tenant's signature block is still printed
+    // first on the page, so the two orders differ and mapping them positionally
+    // would put the tenant's box on Agile Lets. "blocks:2,1" says the first
+    // block on the page belongs to signer 2 and the second to signer 1.
+    const order = /^blocks:/.test(mode)
+      ? mode.slice(7).split(/[,\s]+/).filter(Boolean).map(Number)
+      : null;
     const map = [];
-    let signer = 0;
+    let block = 0;
+    const forBlock = (b) => {
+      if (!order) return Math.min(b, signerCount);
+      if (b > order.length) die(`the document has more signature blocks than --fields lists`);
+      return order[b - 1];
+    };
     for (const k of kinds) {
-      if (/signature/i.test(k)) { signer += 1; map.push(Math.min(signer, signerCount)); }
-      else if (/date-of-signing/i.test(k)) { map.push(Math.min(Math.max(signer, 1), signerCount)); }
-      else map.push(1);
+      if (/signature/i.test(k)) { block += 1; map.push(forBlock(block)); }
+      else if (/date-of-signing/i.test(k)) { map.push(forBlock(Math.max(block, 1))); }
+      // A data blank belongs to whoever owns the FIRST block, which is the
+      // tenant on every one of these templates: they are the details the tenant
+      // fills in.
+      else map.push(forBlock(1));
     }
-    if (signer > signerCount) {
-      die(`the document has ${signer} signature lines but only ${signerCount} signers ` +
+    if (order && order.length !== block) {
+      die(`--fields lists ${order.length} signature blocks but the document has ${block}. ` +
+          'Nothing has been sent.');
+    }
+    // Without an explicit order, one block per signer. WITH one, more blocks
+    // than signers is legitimate: two brothers sharing one address sign one
+    // block each from the same inbox (Kevin, 10 Sep 2026), and Adobe will not
+    // take the same address twice as separate recipients.
+    if (!order && block > signerCount) {
+      die(`the document has ${block} signature blocks but only ${signerCount} signers ` +
           'were given. Nothing has been sent.');
     }
-    if (signer < signerCount) {
-      die(`${signerCount} signers were given but the document has only ${signer} ` +
-          'signature lines, so somebody would have nothing to sign. Nothing has been sent.');
+    if (order) {
+      for (const n of order) {
+        if (!Number.isInteger(n) || n < 1 || n > signerCount) {
+          die(`--fields block entry ${n} is not a signer between 1 and ${signerCount}`);
+        }
+      }
+    }
+    for (let n = 1; n <= signerCount; n++) {
+      if (!map.includes(n)) {
+        die(`signer ${n} would have nothing to sign. Nothing has been sent.`);
+      }
     }
     return map;
   }
@@ -476,10 +509,27 @@ async function run({ document: doc, signers, fields, page: pageNo, shot }) {
         log(`field ${i + 1}: could not be selected to read back`);
       }
       await page.waitForTimeout(1800);
-      const c = await page.evaluate((sel) => {
+      let c = await page.evaluate((sel) => {
         const el = document.querySelector(sel);
         return el ? getComputedStyle(el).backgroundColor : 'none';
       }, SEL.field);
+      // Re-selecting a field to read it back is not reliable first time,
+      // especially a signature field: it reports nothing while being perfectly
+      // well assigned, and a correct document gets refused. Try again before
+      // believing it.
+      for (let t = 0; t < 3 && c === 'none'; t++) {
+        await page.keyboard.press('Escape');
+        await page.waitForTimeout(1200);
+        const again = await orderedFieldHandles(page);
+        if (again.length === found.length && again[i]) {
+          await again[i].click({ timeout: 8000 }).catch(() => {});
+          await page.waitForTimeout(1800);
+          c = await page.evaluate((sel) => {
+            const el = document.querySelector(sel);
+            return el ? getComputedStyle(el).backgroundColor : 'none';
+          }, SEL.field);
+        }
+      }
       colours.push(c);
       log(`field ${i + 1} reads ${c}`);
     }
@@ -561,6 +611,21 @@ function selftest() {
 
   check('blocks: signature then date, twice, splits between two signers',
     () => parseFieldMap('blocks', F(SIG, DTE, SIG, DTE), 2).join(',') === '1,1,2,2');
+  // Kevin's rule: info@agilelets.co.uk signs FIRST, while its signature block is
+  // printed SECOND. The two orders differ and the map has to say so.
+  check('blocks:2,1 gives the page-first block to the second signer',
+    () => parseFieldMap('blocks:2,1', F(SIG, DTE, SIG, DTE), 2).join(',') === '2,2,1,1');
+  check('blocks:2,3,1 handles a joint agreement with Agile Lets signing first',
+    () => parseFieldMap('blocks:2,3,1', F(SIG, SIG, SIG), 3).join(',') === '2,3,1');
+  check('blocks:2,1 puts the tenant data blanks on the tenant, not on Agile Lets',
+    () => parseFieldMap('blocks:2,1', F(TXT, TXT, SIG, DTE, SIG, DTE), 2).join(',')
+          === '2,2,2,2,1,1');
+  check('blocks:2,2,1 lets two tenants sharing an address sign one block each',
+    () => parseFieldMap('blocks:2,2,1', F(SIG, SIG, SIG), 2).join(',') === '2,2,1');
+  check('a blocks list that does not match the document is refused',
+    () => refuses(() => parseFieldMap('blocks:2,1', F(SIG, SIG, SIG), 2)));
+  check('a blocks list leaving a signer with nothing is refused',
+    () => refuses(() => parseFieldMap('blocks:2,2', F(SIG, SIG), 2)));
   check('blocks: three signature-and-date pairs split between three signers',
     () => parseFieldMap('blocks', F(SIG, DTE, SIG, DTE, SIG, DTE), 3).join(',') === '1,1,2,2,3,3');
   check('blocks: bare signatures with no dates still go one per signer',

@@ -56,6 +56,13 @@ const NO_AUTHORITY_TENANT = ['David Pinder'];
 // him on the one-bed rate. Kevin's instruction to raise his agreement at that
 // rate IS the confirmation that he is 35 or over. His rent is £524.52 today.
 const CONFIRMED_OVER_35 = ['Tristram Guthrie'];
+// WHO HOLDS THE EARLIER-TERM AGREEMENT (Kevin, 10 Sep 2026). By default it is
+// whoever moved in first. At 1406 Oldham Road Kevin says it is William Aiton,
+// not Neil Huggins, and deleted the Neil Huggins draft. Airtable records Neil
+// from 12 Dec 2019 and William from 3 Jan 2025, so the record and the instruction
+// disagree; the instruction wins, and the term date still comes from the
+// property's first tenancy, which is what the backdated council tax covers.
+const EARLIER_TERM_HOLDER = { '1406 Oldham Road': 'William Aiton' };
 
 const BASE = 'appnqjDpqDniH3IRl';
 const TPL = path.join(os.homedir(), 'knowledge-os', 'templates');
@@ -247,19 +254,21 @@ async function main(argv) {
       console.log(`   joint tenancy from ${termStart} (${b.name} moved in), rent ${gbp(total)} = 2 x ${rates.brma} 1-bed ${gbp(oneBed)}`);
       // The earlier period: one tenant, whole property, from their own move-in.
       // Same clauses, singular, at what they were actually paying.
+      const holderName = EARLIER_TERM_HOLDER[name];
+      const holder = holderName ? (people.find((p) => p.name === holderName) || a) : a;
       if (a.start && a.start < termStart) {
         made.push(renderPdf({
-          name: `AST_Whole_${a.name.replace(/[^A-Za-z0-9]+/g, '_')}_${name.replace(/[^A-Za-z0-9]+/g, '_')}`,
+          name: `AST_Whole_${holder.name.replace(/[^A-Za-z0-9]+/g, '_')}_${name.replace(/[^A-Za-z0-9]+/g, '_')}`,
           title: 'Assured shorthold tenancy agreement',
-          reference: `${a.name} — ${address} — whole property, term from ${longDate(a.start)}`,
-          footer: `${name} — ${a.name} — earlier term — not valid until signed by both parties`,
+          reference: `${holder.name} — ${address} — whole property, term from ${longDate(a.start)}`,
+          footer: `${name} — ${holder.name} — earlier term — not valid until signed by both parties`,
           markdown: fill('ast_whole_single_template.md', {
             'Agreement date': longDate(TODAY), 'Term start date': longDate(a.start),
-            'First payment date': longDate(a.start), 'Tenant Name': a.name,
+            'First payment date': longDate(a.start), 'Tenant Name': holder.name,
             'Property address': address, 'Total rent': gbp(a.rent || oneBed),
           }),
         }, dry));
-        console.log(`   earlier term ${a.name} alone from ${a.start} at ${gbp(a.rent || oneBed)}`);
+        console.log(`   earlier term ${holder.name} alone from ${a.start} at ${gbp(a.rent || oneBed)}`);
       }
     }
 
