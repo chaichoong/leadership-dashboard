@@ -181,8 +181,21 @@ out a different one per workspace and **reserves the first for the main checkout
 servers never share a port. Never edit `launch.json` per session — it is tracked and shared,
 so the edit shows up in every worktree.
 
-**The main checkout stays on `main`** for quick fixes, the daily sweep and deploy verification.
-Reach for a workspace when the work is multi-file or will run for a while.
+**The main checkout does NOT hold `main`, and cannot.** `.claude/worktrees/content-engine-runtime`
+is checked out on `main` on purpose: the nightly `content-engine` and daytime
+`content-engine-publish` launchd jobs run from it and fast-forward it before every run. Git allows
+one worktree per branch, so `main` is taken. **Never remove, detach or `worktree.sh done` that
+worktree** to free the name; it breaks both jobs and raises no error.
+
+**The main checkout lives on a working branch cut from `origin/main`** (currently
+`chore/main-checkout`) for quick fixes, the daily sweep and deploy verification. Refresh it with
+`git fetch origin && git reset --keep origin/main`. Reach for a workspace when the work is
+multi-file or will run for a while.
+
+A checkout left on a stale topic branch is the normal failure here. Before assuming that branch
+holds unique work, prove it with `git cherry -v origin/main HEAD` and a read of
+`git diff origin/main...HEAD`; tag it (`git tag archive/<branch>`) before closing it. Note that a
+stale branch never reverts main on merge, because git merges by change, not by snapshot.
 
 If a checkout genuinely must be shared: commit before EVERY context switch, never `git stash`
 work you did not write (leave it and say so), and run `git status -sb` before assuming which
