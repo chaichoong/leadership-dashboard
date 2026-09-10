@@ -65,6 +65,17 @@ const EMAIL_RE = /^[^@\s,;<>]+@[^@\s,;<>]+\.[^@\s,;<>]+$/;
 const WAIT = { load: 15000, settle: 8000, upload: 12000, panel: 15000,
                afterPanel: 12000, chip: 5000, fields: 15000 };
 
+// THE RECIPIENT BOX (measured 10 Sep 2026, and it had been failing silently).
+// This was `input[placeholder="Enter email..."]` with three ASCII dots. Adobe
+// renders a Unicode ellipsis, so the selector matched NOTHING and every plan
+// died at the first recipient. Worse, `input[placeholder^="Enter email"]` also
+// matched nothing, so the visible text is not the attribute either. What does
+// work, driven live against the account, is the attribute's presence alone: the
+// panel carries exactly one placeholder input at that step. If Adobe ever adds a
+// second, Playwright's strict mode raises rather than typing into the wrong one,
+// which is the failure we want. Never go back to matching the visible string.
+const RECIPIENT_BOX = 'input[placeholder]';
+
 // Refusals EXIT when this runs as a command and THROW when required as a module
 // or exercised by the selftest, so a test can assert on the refusal instead of
 // the runner being killed by the guard it is testing. Same shape as
@@ -122,9 +133,9 @@ function buildPlan({ document: doc, signers }) {
     { do: 'wait', ms: WAIT.afterPanel },
   ];
   for (const signer of signers) {
-    steps.push({ do: 'fill', selector: 'input[placeholder="Enter email..."]', value: signer });
+    steps.push({ do: 'fill', selector: RECIPIENT_BOX, value: signer });
     // Without this the address is loose text and Send goes nowhere, silently.
-    steps.push({ do: 'press', selector: 'input[placeholder="Enter email..."]', key: 'Enter' });
+    steps.push({ do: 'press', selector: RECIPIENT_BOX, key: 'Enter' });
     steps.push({ do: 'wait', ms: WAIT.chip });
   }
   steps.push({ do: 'click', selector: 'button:has-text("Auto-place fields")' });
@@ -187,6 +198,10 @@ function selftest() {
   check('has exactly one submit', () => dos.filter((d) => d === 'submit').length === 1);
   check('uses text-scoped selectors, never Adobe hashed classes',
     () => !JSON.stringify(plan).match(/Card__container|react-aria/));
+  // The regression that broke every plan: Adobe's placeholder is "Enter email…"
+  // with a Unicode ellipsis, so any selector quoting that string matches nothing.
+  check('never matches the recipient box on its visible placeholder text',
+    () => !JSON.stringify(plan).match(/placeholder[*^$~|]?="Enter email/));
   check('refuses more than one signer while auto-place misassigns',
     () => refuses(() => parseSigners('a@b.com, c@d.com')));
   check('refuses something that is not an email', () => refuses(() => parseSigners('nope')));
