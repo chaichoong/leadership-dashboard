@@ -239,12 +239,14 @@ describe('buildPlan levers', () => {
         expect(paul.sign).toContain('Tenancy variation: one room instead of two, at the same rent');
         expect(paul.note).toMatch(/rent does not change/);
     });
-    it('a joint tenancy pack asks for the agreement, the side letter and the CTR claim', () => {
+    it('a joint tenancy pack asks for both agreements and the CTR claim, and no side letter', () => {
         const f = fixture(); f.units.pop(); f.tenants.pop(); f.tenancies.pop();
         f.properties[0].strategy = 'Joint tenancy';
         const pk = M.buildPlan(f, S, TODAY).packs[0];
         expect(pk.before.join(' ')).toMatch(/Joint tenancy agreement for the whole house/);
-        expect(pk.before.join(' ')).toMatch(/Council tax side letter/);
+        expect(pk.before.join(' ')).toMatch(/Earlier-term agreement for the first tenant alone/);
+        expect(pk.before.every(x => typeof x === 'string')).toBe(true);
+        expect(JSON.stringify(pk)).not.toMatch(/side letter/i);
         pk.tenants.forEach(t => expect(t.sign).toContain('Joint tenancy agreement'));
         expect(pk.tenants.some(t => t.forms.some(x => /Council Tax Reduction claim, backdated/.test(x)))).toBe(true);
         expect(pk.after.join(' ')).toMatch(/Tell the council/);

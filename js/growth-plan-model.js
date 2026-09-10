@@ -411,9 +411,9 @@
                             strategy === 'Joint tenancy' ? "Kevin's strategy: joint tenancy, no extra tenant here" : 'No strategy set: shown as a candidate',
                             'One agreement of 6+ months for the whole house makes the tenants liable (SI 2023/1175)',
                             'Each joint renter keeps their own 1-bed LHA up to their share, so rent is unchanged',
-                            `Tenants claim Council Tax Reduction (West Suffolk: up to 100% for low income); any residual paid by you to the council under the side letter`],
-                        needs: ['Joint AST from ast_joint_template.md plus the council tax side letter', 'Council Tax Reduction claim for the tenants at the same meeting, backdated to the tenancy start', 'Tell the council the liability has changed'],
-                        firstStep: `Prepare the joint AST and side letter for ${prop.name} (templates in Drive), then book the tenant meeting`,
+                            `Tenants claim Council Tax Reduction on the Anglia Revenues online form (up to 100% for a working-age household on UC and not working), which the signed authority lets Roy or Kevin submit`],
+                        needs: ['Joint tenancy agreement from ast_joint_template.md', 'Council Tax Reduction claim for the tenants at the same meeting, backdated to the tenancy start', 'Tell the council the liability has changed'],
+                        firstStep: `Prepare the joint tenancy agreement for ${prop.name}, then book the tenant meeting`,
                     }, planByKey));
                 } else if (ownerPaysCt && occupants >= 3) {
                     view.flags.push(`Council tax stays with the owner while ${occupants} tenants are let by the room`);
@@ -547,8 +547,7 @@
             const before = [];
             if (joint) {
                 before.push('Joint tenancy agreement for the whole house (ast_joint_template.md in Drive), naming ' + names.join(' and '));
-                before.push('Council tax side letter (council_tax_side_letter_template.md), signed the same day');
-                before.push('Plain-English note for each tenant: joint and several liability, and what happens if one leaves');
+                before.push('Earlier-term agreement for the first tenant alone (ast_whole_single_template.md), from the date they moved in, at the 1-bed rate, so the backdated council tax liability is covered');
             }
             if (own.some(l => l.lever === 'Rent uplift' || l.lever === 'Rate refresh')) {
                 before.push('Rent change letter for each tenant going up, at the ' + (v.rates ? v.rates.brma : 'local') + ' 1-bed rate');
@@ -564,7 +563,7 @@
                 const givesUpRoom = releasing.has(t.id);
                 if (!up && !joint && !ageUnknown && !givesUpRoom) return;
                 const sign = [];
-                if (joint) sign.push('Joint tenancy agreement', 'Council tax side letter', 'Plain-English note');
+                if (joint) sign.push('Joint tenancy agreement');
                 else if (up && (up.lever === 'Rent uplift' || up.lever === 'Rate refresh')) sign.push('Rent change letter');
                 if (givesUpRoom) sign.push('Tenancy variation: one room instead of two, at the same rent');
                 if (!takeBack) sign.push('Authority to act');
@@ -598,7 +597,7 @@
             if (voidLet) works.push(voidLet.firstStep);
 
             const after = [];
-            if (joint) after.push('Tell the council the council tax liability has changed, and send the copy bill route in the side letter');
+            if (joint) after.push('Tell the council the council tax liability has changed, and submit the Council Tax Reduction form online with the signed authority');
             if (own.some(l => l.capShortfall > 0)) after.push('Diarise the CRF renewal: awards are short term and the shortfall returns when one ends');
             if (own.some(l => l.lever === 'Rent uplift' || l.lever === 'Rate refresh' || l.lever === 'CRF top-up')) after.push('Check the next UC payment lands at the new figure, and that the managed payment to landlord is still in place');
             if (tenants.some(t => t.collect.length)) after.push('Enter everything collected on the tenant meeting form the same day');
