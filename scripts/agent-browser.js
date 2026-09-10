@@ -572,7 +572,9 @@ async function runSteps(page, steps, allowSubmit, confirm) {
   if (submitted && confirm && confirm.selector) {
     const timeout = Math.min(Number(confirm.timeoutMs) || 30000, 120000);
     try {
-      await page.waitForSelector(confirm.selector, { timeout });
+      // `state: "hidden"` is a proof of DISAPPEARANCE: Facebook's share dialog closing is what says the
+      // share landed (10 Sep 2026). Everything else proves by something appearing.
+      await page.waitForSelector(confirm.selector, { state: confirm.state === 'hidden' ? 'hidden' : 'visible', timeout });
     } catch {
       throw new Error(
         `SUBMIT NOT CONFIRMED: pressed submit but the page never showed the declared proof ` +
