@@ -16,6 +16,14 @@
  * USAGE
  *   node scripts/make-tenancy-pack.js --property "6 Chedburgh Place" [--dry]
  *   node scripts/make-tenancy-pack.js --all [--dry]
+ *   node scripts/make-tenancy-pack.js --tenant "Gary Walker" [--dry]
+ *   node scripts/make-tenancy-pack.js --new --name "Jane Doe" --property "5 Dalham Place" \
+ *                                     [--start 2026-10-01] [--dry]
+ *
+ * THE POINT OF --new (Kevin, 10 Sep 2026): every time a room is let, one command
+ * produces that tenant's whole pack, so nobody is assembling paperwork by hand and
+ * nobody forgets the proof of residency. The property's own strategy decides which
+ * pack: a joint tenancy house gets the joint agreement, an HMO gets the single one.
  */
 'use strict';
 
@@ -88,8 +96,20 @@ function councilFor(area, postcode) {
 
 async function main(argv) {
   const dry = argv.includes('--dry');
-  const wanted = argv.includes('--property') ? argv[argv.indexOf('--property') + 1] : null;
-  if (!wanted && !argv.includes('--all')) die('usage: --property "6 Chedburgh Place" | --all [--dry]');
+  const arg = (flag) => (argv.includes(flag) ? argv[argv.indexOf(flag) + 1] : null);
+  const wantedTenant = arg('--tenant');
+  const isNew = argv.includes('--new');
+  const newName = arg('--name');
+  const newStart = arg('--start') || TODAY;
+  let wanted = arg('--property');
+  if (isNew) {
+    if (!newName) die('--new needs --name "Their Name"');
+    if (!wanted) die('--new needs --property "5 Dalham Place"');
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(newStart)) die('--start must be YYYY-MM-DD');
+  }
+  if (!wanted && !wantedTenant && !argv.includes('--all')) {
+    die('usage: --property "6 Chedburgh Place" | --tenant "Gary Walker" | --new --name N --property P | --all [--dry]');
+  }
 
   const props = await all('tbl6f0OkAmTC2jbuG',
     ['Property Name (Short)', 'Property', '📮 Postcode', '🏙️ Area', 'Growth Strategy', 'Planned Extra Tenants']);
@@ -100,6 +120,15 @@ async function main(argv) {
     ['Customers', 'Property', 'Tenancy Start Date', 'Expected Monthly Rent', 'Tenancy Status']);
   const byId = Object.fromEntries(tenants.map((t) => [t.id, t.fields]));
 
+  if (wantedTenant) {
+    const t = tenants.find((x) => (x.fields['Tenant Name'] || '').toLowerCase() === wantedTenant.toLowerCase());
+    if (!t) die(`no tenant called "${wantedTenant}"`);
+    const tc = tenancies.find((x) => (x.fields.Customers || []).includes(t.id) && x.fields['Tenancy Status'] === 'Live');
+    if (!tc) die(`${wantedTenant} has no live tenancy`);
+    wanted = (tc.fields.Property || [])[0];
+    if (!wanted) die(`${wantedTenant}'s tenancy has no property`);
+    console.log(`${wantedTenant} lives at ${wanted}`);
+  }
   const targets = props.filter((p) => {
     const n = p.fields['Property Name (Short)'];
     const strat = p.fields['Growth Strategy'];
@@ -126,6 +155,51 @@ async function main(argv) {
       rent: t.fields['Expected Monthly Rent'] || 0,
       start: t.fields['Tenancy Start Date'],
     })).filter((x) => x.id);
+
+    if (isNew) {
+      // Nobody is in Airtable yet, so the pack comes from the flags plus the
+      // property's own strategy and LHA rate.
+      console.log(`\n== ${name} (${strategy || 'no strategy'}) — new tenant ${newName}, ${council}`);
+      if (strategy === 'Joint tenancy') {
+        die('this property is on a joint tenancy: a new tenant needs the joint agreement, ' +
+            'which names both people. Run --property "' + name + '" once both are known.');
+      }
+      made.push(renderPdf({
+        name: `AST_${newName.replace(/[^A-Za-z0-9]+/g, '_')}_${name.replace(/[^A-Za-z0-9]+/g, '_')}`,
+        title: 'Assured shorthold tenancy agreement',
+        reference: `${newName} — ${address} — one room, ${gbp(oneBed)} a month from ${longDate(newStart)}`,
+        footer: `${newName} — ${name} — not valid until signed by both parties`,
+        markdown: fill('ast_single_template.md', {
+          'Agreement date': longDate(TODAY), 'Term start date': longDate(newStart),
+          'First payment date': longDate(newStart), 'Tenant Name': newName,
+          'Property address': address, Rent: gbp(oneBed),
+        }),
+      }, dry));
+      made.push(renderPdf({
+        name: `Proof_of_Residency_${newName.replace(/[^A-Za-z0-9]+/g, '_')}`,
+        title: 'Proof of residency', reference: `${newName} — ${address}`,
+        footer: `${newName} — proof of residency — Agile Lets Limited`,
+        markdown: fill('proof_of_residency_template.md', {
+          'Tenant Name': newName, 'Property address': address,
+          Date: longDate(TODAY), 'Tenancy start': longDate(newStart),
+        }),
+      }, dry));
+      made.push(renderPdf({
+        name: `Authority_${newName.replace(/[^A-Za-z0-9]+/g, '_')}_${name.replace(/[^A-Za-z0-9]+/g, '_')}`,
+        title: 'Authority to act: council tax reduction and housing payment',
+        reference: `${newName} — ${address}`,
+        footer: `${newName} — authority to act — ${council}`,
+        allowPlaceholders: true,
+        markdown: fill('authority_to_act_template.md', {
+          'Council benefits team': team, Council: council, 'Tenant Name': newName,
+          DOB: '________________', NI: '________________',
+          'Property address': address, 'CT account': '________________',
+          'Landlord email': 'kevin@runpreneur.org.uk',
+        }),
+      }, dry));
+      console.log(`   HMO pack for ${newName}: agreement at ${gbp(oneBed)} from ${newStart}, proof of residency, authority`);
+      continue;
+    }
 
     console.log(`\n== ${name} (${strategy || 'no strategy'}) — ${people.length} live tenant(s), ${council}`);
     if (!people.length) { console.log('   no live tenancy: skipped'); continue; }
@@ -162,6 +236,7 @@ async function main(argv) {
     }
 
     for (const person of people) {
+      if (wantedTenant && person.name.toLowerCase() !== wantedTenant.toLowerCase()) continue;
       const f = person.f;
       const age = MODEL.ageOn(f['Date of Birth'], TODAY);
       const over35 = age != null ? age >= 35 : !!f['Aged 35 or Over (confirmed)'];
