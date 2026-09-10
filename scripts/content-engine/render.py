@@ -119,10 +119,44 @@ def intro_insert_seconds(segments, duration=None):
     return 0.0
 
 
+INTRO_LOCAL = os.path.join(os.path.dirname(watch.LEDGER), "intro_clip.mp4")   # one API copy; the mount lied twice (10 Sep 2026)
+
+
+def media_seconds(path):
+    try:
+        return float(subprocess.run([os.path.expanduser("~/tools/bin/ffprobe"), "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", path],
+                                    capture_output=True, text=True, timeout=60).stdout.strip() or 0)
+    except Exception:
+        return 0.0
+
+
+def intro_clip():
+    """The jingle from a LOCAL copy fetched once through the Drive API. On 9 and 10 Sep 2026 the mounted copy
+    handed ffmpeg an empty stream at night: episodes 2055 and 2056 shipped with no jingle while every step
+    reported ok. The mount is only a fallback, and a copy that ffprobe cannot read is thrown away."""
+    if os.path.exists(INTRO_LOCAL) and media_seconds(INTRO_LOCAL) > INTRO_TRIM_START + 1: return INTRO_LOCAL
+    try:
+        import drive_api
+        fid = drive_api.folder_id(drive_api.EDITED_PATH + ["Vlog Intro"])
+        hits = [f for f in drive_api.list_folder(fid) if f.get("name") == os.path.basename(INTRO_CLIP)]
+        if hits:
+            tmp = INTRO_LOCAL + ".part"
+            if os.path.exists(tmp): os.remove(tmp)
+            drive_api.download(hits[0]["id"], tmp, size=int(hits[0].get("size") or 0) or None)
+            if media_seconds(tmp) > INTRO_TRIM_START + 1: os.replace(tmp, INTRO_LOCAL); return INTRO_LOCAL
+            os.remove(tmp)
+    except Exception as ex:
+        print("intro: Drive API copy failed (%s); using the mounted clip" % str(ex)[:120], file=sys.stderr)
+    if os.path.exists(INTRO_CLIP) and media_seconds(INTRO_CLIP) > INTRO_TRIM_START + 1: return INTRO_CLIP
+    raise SystemExit("intro clip unreadable: neither %s nor %s plays" % (INTRO_LOCAL, INTRO_CLIP))
+
+
 def insert_intro(full_path, at, out_path, intro=None):
     """Splice the intro into the finished (captioned) full episode at `at` seconds. Re-encodes once with the
-    hardware encoder; the intro is scaled to the episode's frame and both audio tracks are made alike."""
-    intro = intro or INTRO_CLIP
+    hardware encoder; the intro is scaled to the episode's frame and both audio tracks are made alike.
+    The output must be longer than the input by the jingle, or the render fails here rather than shipping
+    a jingle-less episode that reads ok (2055 and 2056, 10 Sep 2026)."""
+    intro = intro or intro_clip()
     if not os.path.exists(intro): raise SystemExit("intro clip missing: " + intro)
     probe = subprocess.run([os.path.expanduser("~/tools/bin/ffprobe"), "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=width,height,r_frame_rate",
                             "-of", "csv=p=0", full_path], capture_output=True, text=True).stdout.strip().split(",")
@@ -138,7 +172,17 @@ def insert_intro(full_path, at, out_path, intro=None):
                         "-c:v", "h264_videotoolbox", "-b:v", "10M", "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "160k", "-movflags", "+faststart", out_path],
                        capture_output=True, text=True)
     if r.returncode != 0: raise SystemExit("intro insert failed: " + r.stderr[-300:])
+    check_intro_length(full_path, out_path, intro)
     return out_path
+
+
+def check_intro_length(src, out, intro):
+    """The proof the jingle is in: out = src + (intro - trim), within a second. Missing frames from a flaky
+    input do not fail ffmpeg; they fail here."""
+    want = media_seconds(src) + max(0.0, media_seconds(intro) - INTRO_TRIM_START)
+    got = media_seconds(out)
+    if got < want - 1.0:
+        raise SystemExit("intro insert produced %.1f s but %.1f s was expected (%.1f s of jingle missing): %s" % (got, want, want - got, out))
 
 
 def podcast_audio(captioned_path, out_mp3, at=0.0, resume=0.0):
@@ -217,7 +261,8 @@ def title_from_transcript(text):
 # Whisper mishears the phrase: "learning through my diary" (2195), "the learnings from my diet" (2054, Kevin 9 Sep 2026:
 # "you need to have a little bit of flexibility... pretty much every day I do the learnings from my diary").
 # learn*/lesson* + a joining word + my/the + any word starting dia/die/dai (diary, diaries, diet, dairy).
-LFMD_START_RE = re.compile(r"(?:learn\w*|lesson\w*)\s+(?:from|for|of|through|in|to)\s+(?:my|the)\s+d(?:ia|ie|ai)\w*", re.I)
+# "Learnings from my diary" as whisper hears it: learnings/lessons/latest/learning ... from/in/for my diary (2056, 10 Sep 2026: "the latest in my diary")
+LFMD_START_RE = re.compile(r"(?:\w+\s+)?(?:from|for|of|through|in|to)\s+(?:my|the)\s+d(?:ia|ie|ai)\w*", re.I)
 SIGNOFF_RE = re.compile(r"thank you as always|stay positive|see you (?:again )?tomorrow", re.I)
 
 
@@ -595,6 +640,28 @@ def redo_lfmd(day):
     return paths["lfmd"]
 
 
+def redo_full(day, keep=False):
+    """Rebuild one episode's whole output set (Kevin sent 2056 back on 10 Sep 2026: no jingle, no Learnings clip):
+    re-pull the clip if it is gone, then run the normal render; the Drive uploads replace the day's files."""
+    ledger = watch.load_ledger()
+    keys = [k for k, v in ledger.items() if v.get("episode") == day and v.get("role") == "episode"]
+    if not keys: raise SystemExit("no episode clip for day %d in the ledger" % day)
+    key = keys[0]; e = ledger[key]
+    clip = e.get("local") or ""
+    if not clip or not os.path.exists(clip):
+        e["status"] = "new"; watch.save_ledger(ledger)
+        clip = watch.pull(ledger, key)
+        if not clip: raise SystemExit("could not pull %s again" % key)
+        ledger = watch.load_ledger()
+    ledger[key]["status"] = "pulled"; ledger[key]["local"] = clip; ledger[key]["redo"] = dt.datetime.now().isoformat(timespec="seconds")
+    ledger[key].pop("outputs", None); watch.save_ledger(ledger)
+    process(key, ledger, keep=keep)
+    import approval
+    if str(day) in approval.load_state():      # a card already exists: refresh it (a sent-back card needs --receipt, see approval.py)
+        approval.refresh_card(day, receipt=os.environ.get("CE_RECEIPT") or None)
+    return key
+
+
 def run(limit=1, keep=False):
     ledger = watch.load_ledger()
     keys = [k for k, v in ledger.items() if v.get("status") == "pulled" and v.get("local") and os.path.exists(v["local"])]
@@ -641,6 +708,14 @@ def selftest():
     assert intro_insert_seconds([(0, 5, "just talking"), (300, 305, "let's go")], 600) == 0.0, "a late let's go is not the sign-off"
     assert intro_insert_seconds([], 10) == 0.0
     assert INTRO_CLIP.endswith("Vlog Intro/runprenuer-intro_clip.mp4") and INTRO_TRIM_START == 1.0
+    assert lfmd_window([(0, 5, "hello"), (200, 210, "So the latest in my diary is that you should"), (240, 250, "stay positive, see you tomorrow")]) == (200, 250), "whisper's 'latest in my diary' (2056)"
+    assert lfmd_window([(0, 5, "the learnings from my diary today"), (30, 40, "thank you as always")]) == (0, 40)
+    assert lfmd_window([(0, 5, "I wrote it in my dairy today"), (30, 40, "see you tomorrow")]) == (0, 40), "the mis-spelt diary still counts"
+    assert lfmd_window([(0, 5, "a diary of a Runpreneur"), (30, 40, "see you tomorrow")]) is None, "the show's name is not the section"
+    import inspect as _i3; ii = _i3.getsource(insert_intro); assert "intro_clip()" in ii and "check_intro_length(" in ii, "the jingle comes from the API copy and the output length is proved"
+    try: check_intro_length("/nonexistent", "/nonexistent", "/nonexistent"); ok = True
+    except SystemExit: ok = False
+    assert ok, "unreadable paths measure 0 and pass the arithmetic; the real guard is on real files"
     assert lfmd_window([(0, 5, "intro"), (60, 66, "so anyway, so learning through my diary, running off road"), (66, 90, "one"), (90, 95, "see you again tomorrow")]) == (60.0, 95.0), "2195's wording"
     assert lfmd_window([(0, 5, "intro"), (60, 66, "So I suppose the learnings from my diet today"), (66, 90, "one"), (90, 95, "see you again tomorrow")]) == (60.0, 95.0), "2054: whisper heard diet"
     assert lfmd_window([(0, 5, "intro"), (60, 66, "the lessons from the dairy are"), (66, 90, "one"), (90, 95, "see you again tomorrow")]) == (60.0, 95.0), "lessons / dairy"
@@ -707,5 +782,6 @@ if __name__ == "__main__":
     if a.mode == "selftest": selftest()
     elif a.mode == "run": run(a.limit, a.keep)
     elif a.mode == "redo" and a.only == "lfmd": redo_lfmd(a.day)
+    elif a.mode == "redo": redo_full(a.day, keep=a.keep if hasattr(a, "keep") else False)
     elif a.mode == "one": one(a.clip, a.day, a.out)
     else: raise SystemExit("unknown mode")
