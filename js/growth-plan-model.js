@@ -483,18 +483,6 @@
             properties.push(view);
         });
 
-        // Fold the pennies: refreshes under £10 a month become one portfolio row.
-        const tiny = levers.filter(l => l.lever === 'Rate refresh' && Math.max(l.monthly, l.monthlyIfExempt) < 10);
-        if (tiny.length > 1) {
-            tiny.forEach(l => { levers.splice(levers.indexOf(l), 1); });
-            levers.push(lever({
-                key: 'refresh:small', lever: 'Rate refresh', propertyId: null, property: 'Portfolio',
-                title: `${tiny.length} tenants: small 2026-27 rate refreshes`, monthly: round2(tiny.reduce((n, l) => n + l.monthly, 0)),
-                monthlyIfExempt: round2(tiny.reduce((n, l) => n + l.monthlyIfExempt, 0)), oneOff: 0, effort: 'Paper', counted: 'now',
-                evidence: tiny.map(l => `${l.tenant} (${l.property}): +£${l.monthly.toFixed(2)}${l.capCheck ? ` (+£${l.monthlyIfExempt.toFixed(2)} once the cap exemption is confirmed)` : ''}`), needs: tiny.some(l => l.capCheck) ? ['Cap exemption to confirm for the ones marked'] : [],
-                firstStep: 'Do these with the next UC housing-costs update for each tenant, not as a separate job',
-            }, planByKey));
-        }
         // Rank: money per unit of effort, then money.
         levers.forEach(l => { l.score = round2(l.monthly / (EFFORT_WEIGHT[l.effort] || 1)); });
         const active = l => l.status !== 'Dropped' && l.status !== 'Done';
@@ -547,7 +535,9 @@
         properties.forEach(v => {
             const all = levers.filter(l => l.propertyId === v.id && (l.counted === 'now' || l.counted === 'remote'));
             const own = all.filter(active);
-            if (!all.length) return;
+            const decide = levers.filter(l => l.propertyId === v.id && active(l) && (l.counted === 'check' || l.counted === 'alternative'))
+                .map(l => ({ key: l.key, title: l.title, monthly: l.monthly, counted: l.counted, needs: l.needs, evidence: l.evidence }));
+            if (!all.length && !decide.length) return;
             const joint = v.strategy === 'Joint tenancy' && own.some(l => l.lever === 'Council tax');
             const roomLever = own.find(l => l.lever === 'Room release' || l.lever === 'New room let');
             const takeBack = own.find(l => l.lever === 'Take-back');
@@ -570,7 +560,7 @@
             const tenants = [];
             v.tenants.forEach(t => {
                 const up = own.find(l => l.tenantId === t.id);
-                const ageUnknown = t.age == null && !t.over35Confirmed;
+                const ageUnknown = t.age == null && !t.over35Confirmed && t.uc && t.unitType === 'Room' && v.mgmt === 'kevin';
                 const givesUpRoom = releasing.has(t.id);
                 if (!up && !joint && !ageUnknown && !givesUpRoom) return;
                 const sign = [];
@@ -616,14 +606,15 @@
 
             packs.push({
                 id: v.id, name: v.name, strategy: v.strategy || (v.mgmt === 'kevin' ? 'Not set' : 'Agent-managed'),
-                owner: (own[0] || all[0]).owner, area: v.area, local: v.local, mgmt: v.mgmt,
-                stage: Math.min.apply(null, (own.length ? own : all).map(l => l.stage)),
+                owner: (own[0] || all[0] || { owner: 'Kevin' }).owner, area: v.area, local: v.local, mgmt: v.mgmt,
+                stage: Math.min.apply(null, (own.length ? own : (all.length ? all : [{ stage: 2 }])).map(l => l.stage)),
                 monthly: round2(own.reduce((n, l) => n + num(l.monthly), 0)),
                 oneOff: round2(own.reduce((n, l) => n + num(l.oneOff), 0)),
                 crf: round2(own.reduce((n, l) => n + num(l.capShortfall), 0)),
                 openCount: own.length,
                 ctBand: v.ctBand, ctBandMonthly: v.ctBandMonthly, ctLive: v.ctLive,
-                before, tenants, works, after,
+                before, tenants, works, after, decide,
+                openCountAll: all.length,
                 levers: all.map(l => ({ key: l.key, lever: l.lever, title: l.title, monthly: l.monthly, oneOff: l.oneOff, effort: l.effort, status: l.status, capShortfall: l.capShortfall || 0, evidence: l.evidence, needs: l.needs })),
             });
         });

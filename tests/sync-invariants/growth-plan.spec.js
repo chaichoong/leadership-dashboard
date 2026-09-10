@@ -252,6 +252,29 @@ test.describe('Growth Plan page', () => {
     await expect(page.locator('#packs .pack.open')).not.toContainText('CRF Housing Payment, £93.00'); // exemption recorded
   });
 
+  test('every property stays editable in the setup table, even with no work today', async ({ page }) => {
+    const writes = await openPage(page, fixtures());
+    await page.locator('#setupAll summary').click();
+    await expect(page.locator('#setupAll')).toHaveAttribute('open', '');
+    await expect(page.locator('#setupBody')).toContainText('18 Test Park');
+    await expect(page.locator('#setupBody')).toContainText('13 Far Street');   // agent-run, no pack of its own
+    // Set the only working house to Leave as is: its pack goes, the setup row does not.
+    // The table re-renders under the control, so drive the change event rather than
+    // Playwright's actionability loop, which re-verifies against the detached node.
+    const pick = async (value) => page.locator('#setupBody select[data-prop-field="strategy"]').first()
+      .evaluate((el, v) => { el.value = v; el.dispatchEvent(new Event('change', { bubbles: true })); }, value);
+    const testPark = page.locator('#packs .pack', { hasText: '18 Test Park' });
+    await expect(testPark).toContainText('+£1,331.14');            // uplift + top-up + the room let
+    await pick('Leave as is');
+    await expect(page.locator('#toast')).toContainText('Saved');
+    expect(writes.filter(x => x.tableId === TBL.properties).pop().records[0].fields[P.strategy]).toBe('Leave as is');
+    await expect(testPark).toContainText('+£433.62');               // the room let is gone, the paper trail remains
+    await expect(page.locator('#setupAll')).toHaveAttribute('open', '');           // the panel survives the re-render
+    await expect(page.locator('#setupBody select[data-prop-field="strategy"]').first()).toHaveValue('Leave as is');
+    await pick('HMO');                                              // and it can be put back
+    await expect(testPark).toContainText('+£1,331.14');
+  });
+
   test('a pack says what to collect, and its tenant button opens that tenant on the form', async ({ page }) => {
     await openPage(page, fixtures());
     await page.locator('#packs .pack').first().locator('.pack-head').click();

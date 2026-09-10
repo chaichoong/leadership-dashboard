@@ -377,12 +377,6 @@ describe('buildPlan levers', () => {
         const f = fixture(); f.costs.push({ propertyId: 'p1', name: 'ARP Enforcement Agency - CT Debt', monthly: 100 });
         expect(M.buildPlan(f, S, TODAY).properties[0].ctLive).toBe(135);
     });
-    it('property cards never list a refresh the table folded away', () => {
-        const f = fixture(); f.tenants[0].dob = '1996-01-01'; f.tenancies[0].rent = 520; f.tenants[2].dob = '1997-01-01'; f.tenancies[2].rent = 521;
-        const p = M.buildPlan(f, S, TODAY);
-        expect(p.properties[0].levers.map(l => l.key)).not.toContain('refresh:t1');
-        expect(p.levers.find(l => l.key === 'refresh:small')).toBeTruthy();
-    });
     it('a known capped tenant already at the full rate is noted for a CRF claim, with no lever', () => {
         const f = fixture(); f.tenants[0].dob = '1986-01-01'; f.tenancies[0].rent = 897.52; f.tenants[0].capExemption = 'None (capped)';
         const p = M.buildPlan(f, S, TODAY);
@@ -465,14 +459,98 @@ describe('buildPlan levers', () => {
         expect(p.totals.paper).toBe(0); // nothing else on the house is above 0.5
         expect(p.totals.done).toBe(372.62);
     });
-    it('folds refreshes under £10 into one portfolio row', () => {
+    it('every refresh stays on its own tenant, however small, so its property pack shows it', () => {
         const f = fixture();
-        f.tenants[0].dob = '1996-01-01'; f.tenancies[0].rent = 520; // under 35: room rate, £4.90 short
+        f.tenants[0].dob = '1996-01-01'; f.tenancies[0].rent = 520;   // under 35: room rate, £4.90 short
         f.tenants[2].dob = '1997-01-01'; f.tenancies[2].rent = 521;
+        f.properties[0].strategy = 'HMO'; f.properties[0].plannedExtra = 1;
         const p = M.buildPlan(f, S, TODAY);
-        const small = p.levers.find(x => x.key === 'refresh:small');
-        expect(small).toBeTruthy();
-        expect(small.monthly).toBe(8.8); // 4.90 + 3.90
-        expect(p.levers.filter(x => x.lever === 'Rate refresh' && x.key !== 'refresh:small')).toEqual([]);
+        expect(p.levers.find(x => x.key === 'refresh:small')).toBeUndefined();
+        expect(p.levers.filter(x => x.lever === 'Rate refresh').map(x => x.monthly).sort()).toEqual([3.9, 4.9]);
+        const pk = p.packs.find(x => x.id === 'p1');
+        expect(pk.tenants.map(t => t.name)).toEqual(expect.arrayContaining(['Adam Older', 'Travis Young']));
+        expect(pk.monthly).toBeCloseTo(p.totals.paper + p.totals.works, 2);
+    });
+    it('a known capped tenant already at the full rate is noted for a CRF claim, with no lever', () => {
+        const f = fixture(); f.tenants[0].dob = '1986-01-01'; f.tenancies[0].rent = 897.52; f.tenants[0].capExemption = 'None (capped)';
+        const p = M.buildPlan(f, S, TODAY);
+        expect(p.levers.find(l => l.tenantId === 't1')).toBeUndefined();
+        expect(p.properties[0].tenants[0].note).toMatch(/CRF Housing Payment/);
+    });
+    it('the CRF total adds up the shortfall behind every counted lever', () => {
+        const f = fixture(); f.properties[0].strategy = 'HMO'; f.properties[0].plannedExtra = 1;
+        const p = M.buildPlan(f, S, TODAY);
+        expect(p.totals.crfShortfall).toBe(93 + 93); // Adam's uplift and one new let
+        expect(p.totals.crfCount).toBe(2);
+    });
+    it('a joint tenancy shares its rent between the tenants', () => {
+        const f = fixture(); f.units.pop(); f.tenants.pop(); f.tenancies = [{ id: 'c1', tenantIds: ['t1', 't2'], unitId: 'u1', rent: 1600 }];
+        f.units[0].tenantIds = ['t1', 't2']; f.units[1].tenantIds = [];
+        const p = M.buildPlan(f, S, TODAY);
+        expect(p.properties[0].tenants.map(t => t.rent)).toEqual([800, 800]);
+    });
+    it('prices a tenant from the tenancy on the unit being priced, not a stale second row', () => {
+        const f = fixture(); f.tenancies.push({ id: 'c9', tenantIds: ['t1'], unitId: 'u9', rent: 300 });
+        expect(M.buildPlan(f, S, TODAY).properties[0].tenants[0].rent).toBe(524.90);
+    });
+    it('bins and shared multi-property rows are not the council tax bill; frequencies convert to monthly', () => {
+        const f = fixture(); f.costs.push({ propertyId: 'p1', name: 'Fylde Council Bin', monthly: 19 }, { propertyId: 'p1', name: 'CT', monthly: 50, shared: true });
+        expect(M.buildPlan(f, S, TODAY).properties[0].ctLive).toBe(135);
+        expect(M.monthlyFromFrequency(12, 'Weekly')).toBe(52);
+        expect(M.monthlyFromFrequency(120, '4-Weekly')).toBe(130);
+        expect(M.monthlyFromFrequency(300, 'Quarterly')).toBe(100);
+        expect(M.monthlyFromFrequency(1200, 'Annually')).toBe(100);
+        expect(M.monthlyFromFrequency(135, 'Monthly')).toBe(135);
+    });
+    it('remote levers split into works and voids', () => {
+        const f = fixture(); f.properties[0].postcode = 'M40 1EZ'; f.properties[0].strategy = 'HMO'; f.properties[0].plannedExtra = 1;
+        f.units.push({ id: 'u5', propertyId: 'p1', number: 5, type: 'Whole Property', status: 'Void', rent: 0, tenantIds: [] });
+        const p = M.buildPlan(f, S, TODAY);
+        expect(p.totals.remoteVoids).toBeGreaterThan(0);
+        expect(p.totals.remoteWorks).toBeGreaterThan(0);
+        expect(p.totals.remote).toBe(Math.round((p.totals.remoteWorks + p.totals.remoteVoids) * 100) / 100);
+    });
+    it('a void house compares its further potential against the planned family let, not its old rent', () => {
+        const f = fixture(); f.properties[0].strategy = 'Leave as is'; f.tenants = []; f.tenancies = [];
+        f.units = [{ id: 'u5', propertyId: 'p1', number: 1, type: 'Whole Property', status: 'Void', rent: 499.70, tenantIds: [] }];
+        const p = M.buildPlan(f, { void_rent_18_test_park: 850 }, TODAY);
+        const l = p.levers.find(x => x.key === 'agent:p1');
+        expect(l.monthly).toBe(Math.round((2 * 897.52 - (850 + 135)) * 100) / 100); // void lever = rent + council tax saving
+        expect(l.evidence[0]).toMatch(/lets it to a family/);
+    });
+    it('a void unit becomes a Void let priced from settings', () => {
+        const f = fixture(); f.units.push({ id: 'u5', propertyId: 'p1', number: 5, type: 'Whole Property', status: 'Void', rent: 0, tenantIds: [] });
+        const l = M.buildPlan(f, { void_rent_18_test_park: 700 }, TODAY).levers.find(x => x.key === 'void:u5');
+        expect(l.monthly).toBe(700 + 135);
+    });
+    it('a remote house with no strategy is a candidate, not counted', () => {
+        const f = fixture(); f.properties[0].postcode = 'M40 1EZ';
+        const p = M.buildPlan(f, S, TODAY);
+        const l = p.levers.find(x => x.key === 'rooms:p1');
+        expect(l.counted).toBe('check');
+        expect(p.totals.works).toBe(0);
+        expect(p.totals.remote).toBe(0);
+    });
+    it('remote houses are priced but kept out of the local totals', () => {
+        const f = fixture(); f.properties[0].postcode = 'M40 1EZ'; f.properties[0].strategy = 'HMO'; f.properties[0].plannedExtra = 1;
+        const p = M.buildPlan(f, S, TODAY);
+        const l = p.levers.find(x => x.key === 'rooms:p1');
+        expect(l.counted).toBe('remote');
+        expect(p.totals.works).toBe(0);
+        expect(p.totals.remote).toBe(l.monthly);
+    });
+    it('ranks paper trail before council tax before works, and names the next action', () => {
+        const p = M.buildPlan(fixture(), S, TODAY);
+        const stages = p.levers.filter(l => l.counted !== 'agent').map(l => l.stage);
+        expect(stages).toEqual([...stages].sort());
+        expect(p.todo[0].key).toBe('uplift:t1');
+        expect(p.todo[0].text).toMatch(/UC journal/);
+    });
+    it('carries Growth Plan row status onto the lever and drops Done rows from the totals', () => {
+        const f = fixture({ planRows: [{ id: 'recPlan1', key: 'uplift:t1', status: 'Done' }] });
+        const p = M.buildPlan(f, S, TODAY);
+        expect(p.levers.find(x => x.key === 'uplift:t1').status).toBe('Done');
+        expect(p.totals.paper).toBe(0); // nothing else on the house is above 0.5
+        expect(p.totals.done).toBe(372.62);
     });
 });

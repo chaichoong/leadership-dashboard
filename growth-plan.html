@@ -45,12 +45,6 @@
   th { background: var(--bg-subtle); color: var(--text-secondary); font-weight: var(--fw-semibold); font-size: var(--fs-xs); text-transform: uppercase; letter-spacing: .04em; white-space: nowrap; }
   td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
   td.title { min-width: 260px; max-width: 460px; word-break: break-word; }
-  tr.lever { cursor: pointer; }
-  button.linkish { background: none; border: 0; padding: 0; font: inherit; color: inherit; text-align: left; cursor: pointer; }
-  button.linkish:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 2px; }
-  tr.lever:hover td { background: var(--bg-surface-2); }
-  tr.lever.open td { background: var(--accent-soft); }
-  tr.lever.dim td { color: var(--text-muted); }
   tr.detail td { background: var(--bg-surface-2); white-space: normal; }
   .detail-grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-4); }
   @media (max-width: 900px) { .detail-grid { grid-template-columns: 1fr; } .next { grid-template-columns: 1fr; } }
@@ -152,6 +146,10 @@
   .pt .row-actions { margin-top: 8px; }
   @media (max-width: 900px) { .pt-cols { grid-template-columns: 1fr; } .pack-head { grid-template-columns: 1fr auto; } }
   tr.dim td { color: var(--text-muted); }
+  #setupAll { margin-top: var(--space-4); border-top: 1px solid var(--border-subtle); padding-top: var(--space-3); }
+  #setupAll summary { cursor: pointer; font-size: var(--fs-sm); font-weight: var(--fw-semibold); color: var(--accent); }
+  #setupTable td, #setupTable th { padding: 4px 8px; }
+  #setupTable select.sm, #setupTable input.sm { max-width: 100%; width: 100%; }
   ul.approach { margin: 0; padding-left: 18px; font-size: var(--fs-sm); }
   ul.approach li { margin: 6px 0; }
   .doclist { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
@@ -284,6 +282,11 @@
       <label class="chk"><input type="checkbox" id="showDone"> Show done and dropped</label>
     </div>
     <div id="packs"></div>
+    <details id="setupAll">
+      <summary>Set up every property (strategy, rooms, meters, council tax, who the tasks go to)</summary>
+      <p class="hint">Every property in the portfolio, including the ones with no work today and the agent-run ones. Lettable rooms is what drives the further potential figure on an agent-run house.</p>
+      <div class="tbl-wrap"><table id="setupTable"><thead><tr><th>Property</th><th>Strategy</th><th class="num">Extra</th><th class="num">Rooms</th><th>PAYG</th><th>Council tax</th><th>Tasks to</th></tr></thead><tbody id="setupBody"></tbody></table></div>
+    </details>
   </section>
   <section class="card" id="gp-approach">
     <h2>How to raise it with a tenant</h2>
@@ -547,7 +550,7 @@
   function recompute() { state.plan = M.buildPlan(state.data, state.settings, todayISO()); window._growthPlan = state; }
 
   // ── Render ──
-  function renderAll() { renderHeadline(); renderFacts(); renderStageSeg(); renderPacks(); renderCalc(); renderCt(); renderMeetingForm(); renderMarketing(); renderSettings(); }
+  function renderAll() { renderHeadline(); renderFacts(); renderStageSeg(); renderPacks(); renderSetupAll(); renderCalc(); renderCt(); renderMeetingForm(); renderMarketing(); renderSettings(); }
 
   // ── Tenant meeting form ──
   const FORM_FIELDS = ['dob', 'ni', 'phone', 'email', 'idSeen', 'over35', 'ucPayDay', 'dueDay', 'household', 'capExemption', 'ucStatementSeen', 'otherAdults', 'ctAccount', 'weeklyIncome', 'weeklySpending', 'bankStatements', 'authoritySigned', 'meetingDate', 'meetingNotes'];
@@ -713,13 +716,25 @@ BEFORE THE FIRST ONE IS SIGNED (all in writing)
       return true;
     });
   }
+  function renderSetupAll() {
+    const rows = (state.plan.properties || []).slice().sort((a, b) => (a.mgmt === 'kevin' ? 0 : 1) - (b.mgmt === 'kevin' ? 0 : 1) || a.name.localeCompare(b.name));
+    const sel = (id, field, opts, val) => `<select class="sm" data-prop-field="${field}" data-prop="${esc(id)}">${opts.map(o => `<option value="${esc(o)}" ${o === val ? 'selected' : ''}>${esc(o || 'Not set')}</option>`).join('')}</select>`;
+    $('setupBody').innerHTML = rows.map(v => `<tr><td class="wrap">${esc(v.name)}<div class="small muted">${esc(v.mgmt === 'kevin' ? (v.area || 'you manage this') : (v.agent || 'agent-run'))}</div></td>
+      <td>${v.mgmt === 'kevin' ? sel(v.id, 'strategy', ['', 'Joint tenancy', 'HMO', 'Leave as is'], v.strategy) : '<span class="muted small">agent-run</span>'}</td>
+      <td class="num">${v.mgmt === 'kevin' ? `<input class="sm" type="number" min="0" max="6" data-prop-field="plannedExtra" data-prop="${esc(v.id)}" value="${v.plannedExtra ? esc(v.plannedExtra) : ''}" placeholder="0" aria-label="Extra tenants at ${esc(v.name)}">` : ''}</td>
+      <td class="num"><input class="sm" type="number" min="1" max="12" data-prop-field="lettableRooms" data-prop="${esc(v.id)}" value="${v.lettable == null ? '' : esc(v.lettable)}" placeholder="${esc(v.roomsInUse || '')}" aria-label="Lettable rooms at ${esc(v.name)}"></td>
+      <td>${sel(v.id, 'payg', ['Unknown', 'Yes', 'No'], v.payg)}</td>
+      <td>${sel(v.id, 'ctPayer', ['Unknown', 'Owner', 'Tenants'], v.ctPayer)}</td>
+      <td>${v.mgmt === 'kevin' ? sel(v.id, 'owner', ['', 'Roy', 'Kevin'], v.owner) : ''}</td></tr>`).join('');
+  }
+
   function renderPacks() {
     const packs = visiblePacks();
     if (!packs.length) { $('packs').innerHTML = '<div class="empty">No property has work outstanding on this filter.</div>'; return; }
     const li = (arr, cls) => arr.map(x => `<li class="${cls || ''}">${esc(x)}</li>`).join('');
     $('packs').innerHTML = packs.map((pk, i) => {
       const open = state.ui.openPack === pk.id;
-      const busy = state.busy.has(pk.id) ? 'disabled' : '';
+      const busy = k => state.busy.has(k) ? 'disabled' : '';
       const done = pk.levers.filter(l => l.status === 'Done').length;
       const inProgress = pk.levers.some(l => l.status === 'In progress');
       const head = `<div class="pack-head" role="button" tabindex="0" data-pack="${esc(pk.id)}" aria-expanded="${open}">
@@ -743,7 +758,7 @@ BEFORE THE FIRST ONE IS SIGNED (all in writing)
         <td class="wrap">${esc(l.title)}<div class="small muted">${esc(l.evidence[0] || '')}</div>${l.needs && l.needs.length ? `<div class="small note">${esc(l.needs.join(' · '))}</div>` : ''}</td>
         <td><span class="pill ${esc(l.effort.toLowerCase())}">${esc(l.effort)}</span> <span class="pill st-${esc(l.status.toLowerCase().replace(/\s+/g, '-'))}">${esc(l.status)}</span></td>
         <td class="num">${l.monthly ? '+' + gbp(l.monthly, 2) : '—'}${l.capShortfall ? `<div class="small muted">CRF ${gbp(l.capShortfall, 2)}</div>` : ''}</td>
-        <td><div class="row-actions">${l.status === 'Candidate' ? `<button class="btn btn-sm" data-act="adopt" data-key="${esc(l.key)}" ${busy}>Adopt</button>` : ''}${(l.status !== 'Done' && l.status !== 'Dropped') ? `<button class="btn btn-sm btn-primary" data-act="task" data-key="${esc(l.key)}" ${busy}>Task</button>` : ''}${(l.status === 'Adopted' || l.status === 'In progress') ? `<button class="btn btn-sm" data-act="done" data-key="${esc(l.key)}" ${busy}>Done</button>` : ''}${(l.status !== 'Done' && l.status !== 'Dropped') ? `<button class="btn btn-sm btn-ghost" data-act="drop" data-key="${esc(l.key)}" ${busy}>Drop</button>` : `<button class="btn btn-sm btn-ghost" data-act="reopen" data-key="${esc(l.key)}" ${busy}>Reopen</button>`}</div></td></tr>`).join('')}</tbody></table></div></div>`;
+        <td><div class="row-actions">${l.status === 'Candidate' ? `<button class="btn btn-sm" data-act="adopt" data-key="${esc(l.key)}" ${busy(l.key)}>Adopt</button>` : ''}${(l.status !== 'Done' && l.status !== 'Dropped') ? `<button class="btn btn-sm btn-primary" data-act="task" data-key="${esc(l.key)}" ${busy(l.key)}>Task</button>` : ''}${(l.status === 'Adopted' || l.status === 'In progress') ? `<button class="btn btn-sm" data-act="done" data-key="${esc(l.key)}" ${busy(l.key)}>Done</button>` : ''}${(l.status !== 'Done' && l.status !== 'Dropped') ? `<button class="btn btn-sm btn-ghost" data-act="drop" data-key="${esc(l.key)}" ${busy(l.key)}>Drop</button>` : `<button class="btn btn-sm btn-ghost" data-act="reopen" data-key="${esc(l.key)}" ${busy(l.key)}>Reopen</button>`}</div></td></tr>`).join('')}</tbody></table></div></div>`;
       const v = state.plan.properties.find(x => x.id === pk.id) || {};
       const fields = v.mgmt === 'kevin' ? `<div class="pack-block"><h4>How this property is set up</h4><div class="prop-fields">
         <label>Strategy<select class="sm" data-prop-field="strategy" data-prop="${esc(pk.id)}">${['', 'Joint tenancy', 'HMO', 'Leave as is'].map(o => `<option value="${o}" ${o === v.strategy ? 'selected' : ''}>${o || 'Not set'}</option>`).join('')}</select></label>
@@ -758,6 +773,7 @@ BEFORE THE FIRST ONE IS SIGNED (all in writing)
         <div class="pack-block"><h4>At the property</h4>${tenants || '<div class="empty">No tenant meeting needed here</div>'}</div>
         ${block('Works', pk.works)}
         ${block('Afterwards', pk.after)}
+        ${pk.decide && pk.decide.length ? `<div class="pack-block"><h4>To decide</h4><ul>${pk.decide.map(d => `<li>${esc(d.title)} <b>+${gbp(d.monthly, 2)}</b>${d.counted === 'alternative' ? ' <span class="muted">either/or with the work above, which pays more</span>' : ''}${d.needs && d.needs.length ? `<div class="small note">${esc(d.needs.join(' · '))}</div>` : ''}</li>`).join('')}</ul></div>` : ''}
         ${levers}
         ${fields}
       </div></div>`;
@@ -771,7 +787,9 @@ BEFORE THE FIRST ONE IS SIGNED (all in writing)
     if (!t) return;
     const docs = t.documents || [];
     $('docList').innerHTML = docs.length
-      ? docs.map(d => `<a class="doc" href="${esc(d.url)}" target="_blank" rel="noopener">${esc(d.filename)}<span class="muted small">${d.size ? Math.round(d.size / 1024) + ' KB' : ''}</span></a>`).join('')
+      ? docs.map(d => d.url
+          ? `<a class="doc" href="${esc(d.url)}" target="_blank" rel="noopener">${esc(d.filename)}<span class="muted small">${d.size ? Math.round(d.size / 1024) + ' KB' : ''}</span></a>`
+          : `<span class="doc">${esc(d.filename)}<span class="muted small">on the record; refresh to open</span></span>`).join('')
       : '<div class="empty">Nothing attached yet</div>';
     $('docStatus').textContent = docs.length ? `${docs.length} on file` : '';
   }
@@ -779,9 +797,13 @@ BEFORE THE FIRST ONE IS SIGNED (all in writing)
     const t = state.data.tenants.find(x => x.id === state.ui.formTenant); if (!t) return;
     const files = Array.from($('docInput').files || []);
     if (!files.length) { toast('Choose a file first', true); return; }
-    const tooBig = files.find(f => f.size > 5 * 1024 * 1024);
-    if (tooBig) { toast(`${tooBig.name} is over 5MB: split it or photograph it smaller`, true); return; }
+    // Airtable caps the whole request at 5MB and base64 inflates a file by about a third,
+    // so the real ceiling on the file itself is ~3.7MB.
+    const LIMIT = 3.7 * 1024 * 1024;
+    const tooBig = files.find(f => f.size > LIMIT);
+    if (tooBig) { toast(`${tooBig.name} is over 3.7MB: split it or photograph it smaller`, true); return; }
     $('docUpload').disabled = true;
+    const doneNames = new Set();
     try {
       for (const f of files) {
         $('docStatus').textContent = `Uploading ${f.name}…`;
@@ -793,14 +815,16 @@ BEFORE THE FIRST ONE IS SIGNED (all in writing)
         if (!resp.ok) { let m = ''; try { m = (await resp.json()).error?.message || ''; } catch (e) { /* body unreadable: status is enough */ } throw new Error(`${f.name}: ${resp.status}${m ? ' ' + m : ''}`); }
         const out = await resp.json();
         const fld = (out.fields || {})[GP.tenant.documents];
+        doneNames.add(f.name);
         if (Array.isArray(fld)) t.documents = fld.map(a => ({ id: a.id, filename: a.filename, url: a.url, size: a.size }));
         else t.documents = (t.documents || []).concat([{ id: '', filename: f.name, url: '', size: f.size }]);
       }
-      $('docInput').value = '';
       toast(`Attached to ${t.name}'s record`);
     } catch (e) {
-      toast('Not attached: ' + e.message, true);
+      // Whatever went up stays up: name the ones that did so a retry cannot double them.
+      toast(`Not attached: ${e.message}${doneNames.size ? `. Already on the record: ${Array.from(doneNames).join(', ')}` : ''}`, true);
     } finally {
+      $('docInput').value = '';
       $('docUpload').disabled = false; renderDocs();
     }
   }
@@ -891,13 +915,6 @@ BEFORE THE FIRST ONE IS SIGNED (all in writing)
       toast(`${t ? t.name : 'Tenant'} recorded as 35 or over`);
     });
   }
-  async function saveExemption(tenantId, value) {
-    await withBusy('ex:' + tenantId, async () => {
-      await airtableWrite('PATCH', TABLES.tenants, { records: [{ id: tenantId, fields: { [GP.tenant.capExemption]: value } }] });
-      const t = state.data.tenants.find(x => x.id === tenantId); if (t) t.capExemption = value;
-      toast(`Benefit cap: ${value} saved for ${t ? t.name : 'tenant'}`);
-    });
-  }
   async function savePropField(propId, field, value) {
     const map = { lettableRooms: GP.prop.lettableRooms, payg: GP.prop.payg, ctPayer: GP.prop.ctPayer, strategy: GP.prop.strategy, plannedExtra: GP.prop.plannedExtra, owner: GP.prop.owner };
     const numeric = field === 'lettableRooms' || field === 'plannedExtra';
@@ -944,7 +961,6 @@ BEFORE THE FIRST ONE IS SIGNED (all in writing)
   });
   document.addEventListener('change', e => {
     const t = e.target;
-    if (t.matches('select[data-exempt]')) return saveExemption(t.dataset.exempt, t.value);
     if (t.matches('[data-prop-field]')) return savePropField(t.dataset.prop, t.dataset.propField, t.value);
     if (t.matches('input[data-setting]')) return saveSetting(t.dataset.setting, t.value);
     
