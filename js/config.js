@@ -33,7 +33,7 @@
         { id: 'transactions', name: 'Transactions',                icon: '🔍', pageVer: '1.1', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#transactions' },
         { id: 'coa',        name: 'Chart of Accounts',             icon: '📒', pageVer: '1.3', sopFile: 'sop-coa.html',                sopVer: '1.1', standalone: 'index.html#coa' },
         { id: 'comms',      name: 'Inbound Comms',                 icon: '📨', pageVer: '2.82', sopFile: 'inbound-comms-sop.html',      sopVer: '2.60', standalone: 'follow-up.html' },
-        { id: 'growth-plan', name: 'Growth Plan',                    icon: '📈', pageVer: '1.11', sopFile: 'sop-growth-plan.html',        sopVer: '1.3', standalone: 'growth-plan.html' },
+        { id: 'growth-plan', name: 'Growth Plan',                    icon: '📈', pageVer: '1.12', sopFile: 'sop-growth-plan.html',        sopVer: '1.4', standalone: 'growth-plan.html' },
         { id: 'compliance', name: 'Property Compliance',            icon: '✅', pageVer: '1.15', sopFile: 'sop-compliance.html',         sopVer: '1.14', standalone: 'compliance.html' },
         // Property Manager (Operations) — Roy Lavin's single page. Standalone at
         // property-manager/ behind its own passcode; the property-manager Worker
@@ -142,7 +142,8 @@
                   // Tenant meeting form (growth-plan.html), fields added 9 Sep 2026
                   over35: 'flddQ2HnQEf4HBeRn', meetingDate: 'fldTz5BU7jxA2mc1B', ucPayDay: 'fldjTG9xdCLpbwOwC', household: 'fldjrOSBkhWeFJvVU',
                   otherAdults: 'fldeKCUmwpmWv7pad', idSeen: 'fldbLxdhEqeuUZI4U', ucStatementSeen: 'fldfrhDLmb443AmfF', weeklyIncome: 'fldbiAag5eoEW23e0',
-                  weeklySpending: 'fldlZr8tUocCYzGPT', bankStatements: 'fldZeN4OxwDstqZhy', authoritySigned: 'fldHPe9YQ6GmlrKBt', ctAccount: 'fldlquVIzyesTrI1d', meetingNotes: 'fld9IbA3CNxa2KBBE' },
+                  weeklySpending: 'fldlZr8tUocCYzGPT', bankStatements: 'fldZeN4OxwDstqZhy', authoritySigned: 'fldHPe9YQ6GmlrKBt', ctAccount: 'fldlquVIzyesTrI1d', meetingNotes: 'fld9IbA3CNxa2KBBE',
+                  documents: 'flduPLQdNRKBmsSmr' /* Documents (attachments) — scanned ID, statements, signed pages; added 10 Sep 2026 */ },
         tenancy: { tenants: 'fld1i5bDoHL3B6rUf', unit: 'fld7cjLLEHKAx49OK', rent: 'fldDMyfZLFMeONPq8', actual: 'fldzrqp2fHRaBBnnc' /* Actual Rent rollup */, status: 'fldlh5JAeYW2Ei2e6', endDate: 'fldwHhhKAq4f1nY9e' },
         cost: { name: 'fldS6FYfpkhu6tJG0', expected: 'fld9JibXkMpTeMcxw', payStatus: 'fldXZNI96v8HgjuSh', property: 'fld7nikJBPz3BoZJG', frequency: 'fldvozTHvs5VH3lNi' },
         realEstateBusinessId: 'recoGcXRXCniyJsTz', // Businesses → "Real Estate" (read 9 Sep 2026)

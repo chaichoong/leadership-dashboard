@@ -64,7 +64,7 @@ async function openPage(page, fx) {
   });
   await page.goto('/growth-plan.html');
   await expect(page.locator('#dashboard')).toBeVisible({ timeout: 20000 });
-  await expect(page.locator('#leverBody tr').first()).toBeVisible();
+  await expect(page.locator('#packs .pack').first()).toBeVisible();
   return writes;
 }
 
@@ -73,27 +73,30 @@ test.describe('Growth Plan page', () => {
     await openPage(page, fixtures());
     const kpis = page.locator('#kpis .kpi');
     await expect(kpis.nth(0)).toContainText('£2,204');            // 524.90 + 897.52 + 524.90 + 257
-    await expect(page.locator('#todo li').first()).toContainText('Adam Older');
-    await expect(page.locator('#todo li').first()).toContainText('Kevin');
     await expect(page.locator('#kpis .kpi')).toHaveCount(8);
     await expect(page.locator('#gp-workflow')).toContainText('Joint tenancy');
     await expect(page.locator('#gp-workflow')).toContainText('Leave as is');
-    const rows = page.locator('#leverBody tr.lever');
-    await expect(rows.first()).toContainText('room rate to 1-bed rate (age 37)');
-    await expect(rows.first()).toContainText('+£372.62');          // full 1-bed rate, never lowered for the cap
-    await expect(rows.first()).toContainText('£93.00');            // CRF Housing Payment to apply for
-    await expect(page.locator('#leverBody')).toContainText('1 more room let');   // Paul's flat-let frees a room
-    await expect(page.locator('#leverBody')).toContainText('13 Far Street: take back');
-    // Agent-held rows are hidden until asked for; done/dropped likewise.
-    await expect(page.locator('#showAgent')).not.toBeChecked();
+    // One pack per property, in order, carrying the whole property's value.
+    const packs = page.locator('#packs .pack');
+    await expect(packs.first()).toContainText('18 Test Park');
+    await expect(packs.nth(1)).toContainText('13 Far Street');
+    await packs.first().locator('.pack-head').click();
+    const open = page.locator('#packs .pack.open');
+    await expect(open).toContainText('Before you go');
+    await expect(open).toContainText('At the property');
+    await expect(open).toContainText('Adam Older');
+    await expect(open).toContainText('Rent change letter');
+    await expect(open).toContainText('CRF Housing Payment, £93.00 a month to landlord');
+    await expect(open).toContainText('Fire-safe each new room');
+    await expect(open).toContainText('Afterwards');
   });
 
   test('lists the unknown age and writes a date of birth back to the tenant', async ({ page }) => {
     const writes = await openPage(page, fixtures());
     await expect(page.locator('#facts')).toContainText('Gary Unknown');
     await expect(page.locator('#facts')).toContainText('age to confirm');
-    await expect(page.locator('#leverBody')).not.toContainText('Gary Unknown');   // out of the plan until the age is known
-    await expect(page.locator('#leverBody')).toContainText('Paul Flat: £836.52 received against £897.52 due');
+    await page.locator('#packs .pack').first().locator('.pack-head').click();
+    await expect(page.locator('#packs .pack.open')).toContainText('Paul Flat: £836.52 received against £897.52 due');
     await page.locator('#facts input[data-dob="recT3"]').fill('1980-06-01');
     await page.locator('#facts button[data-act="save-dob"][data-tenant="recT3"]').click();
     await expect(page.locator('#toast')).toContainText('Date of birth saved');
@@ -102,8 +105,8 @@ test.describe('Growth Plan page', () => {
     expect(w.records[0].id).toBe('recT3');
     expect(w.records[0].fields[T.dob]).toBe('1980-06-01');
     expect(w.records[0].fields[T.notes]).toMatch(/Growth Plan page/);
-    // The plan re-prices: Gary (46) is now an uplift lever, not an unknown.
-    await expect(page.locator('#leverBody')).toContainText('Gary Unknown: room rate to 1-bed rate (age 46)');
+    // The plan re-prices in the pack that is already open: Gary (46) is now an uplift.
+    await expect(page.locator('#packs .pack.open')).toContainText('Gary Unknown: room rate to 1-bed rate (age 46)');
     await expect(page.locator('#facts input[data-dob="recT3"]')).toHaveCount(0);   // no longer an unknown age
   });
 
@@ -117,27 +120,31 @@ test.describe('Growth Plan page', () => {
 
   test('recording an exemption removes the CRF shortfall from the uplift row', async ({ page }) => {
     const writes = await openPage(page, fixtures());
-    await expect(page.locator('#leverBody tr.lever').first()).toContainText('£93.00');
-    await page.locator('select[data-exempt="recT1"]').selectOption('PIP or DLA');
-    await expect(page.locator('#toast')).toContainText('PIP or DLA saved');
-    expect(writes.find(x => x.tableId === TBL.tenants).records[0].fields[T.capExemption]).toBe('PIP or DLA');
-    const first = page.locator('#leverBody tr.lever').first();
-    await expect(first).toContainText('+£372.62');
-    await expect(first).not.toContainText('£93.00');
+    await page.locator('#packs .pack').first().locator('.pack-head').click();
+    await expect(page.locator('#packs .pack.open')).toContainText('£93.00');
+    await page.locator('#formTenant').selectOption('recT1');
+    await page.locator('#meetingForm select[name="capExemption"]').selectOption('PIP or DLA');
+    await page.locator('#meetingSave').click();
+    await expect(page.locator('#toast')).toContainText('Meeting saved');
+    expect(writes.filter(x => x.tableId === TBL.tenants).pop().records[0].fields[T.capExemption]).toBe('PIP or DLA');
+    // the pack stayed open through the re-render
+    await expect(page.locator('#packs .pack.open')).toContainText('Adam Older');
+    await expect(page.locator('#packs .pack.open')).not.toContainText('CRF Housing Payment, £93.00');
   });
 
   test('adopting a lever creates a Growth Plan row and a task links to it', async ({ page }) => {
     const writes = await openPage(page, fixtures());
-    const first = page.locator('#leverBody tr.lever').first();
+    await page.locator('#packs .pack').first().locator('.pack-head').click();
+    const first = page.locator('#packs .pack.open tr', { hasText: 'room rate to 1-bed rate' });
     await first.locator('button[data-act="adopt"]').click();
     await expect(page.locator('#toast')).toContainText('Adopted');
     const planWrite = writes.find(x => x.tableId === TBL.plan);
     expect(planWrite.method).toBe('POST');
     expect(planWrite.records[0].fields[PLAN.key]).toBe('uplift:recT1');
     expect(planWrite.records[0].fields[PLAN.status]).toBe('Adopted');
-    await expect(page.locator('#leverBody tr.lever').first()).toContainText('Adopted');
+    await expect(page.locator('#packs .pack.open tr', { hasText: 'room rate to 1-bed rate' })).toContainText('Adopted');
 
-    await page.locator('#leverBody tr.lever').first().locator('button[data-act="task"]').click();
+    await page.locator('#packs .pack.open tr', { hasText: 'room rate to 1-bed rate' }).locator('button[data-act="task"]').click();
     await expect(page.locator('#toast')).toContainText('Task created for Kevin Brittain');
     const taskWrite = writes.find(x => x.tableId === TBL.tasks);
     expect(taskWrite.method).toBe('POST');
@@ -148,35 +155,36 @@ test.describe('Growth Plan page', () => {
     const linkWrite = writes.filter(x => x.tableId === TBL.plan).pop();
     expect(linkWrite.method).toBe('PATCH');
     expect(linkWrite.records[0].fields[PLAN.tasks]).toEqual(['recNew901']); // 900 was the plan row created by Adopt
-    await expect(page.locator('#leverBody tr.lever').first()).toContainText('In progress');
+    await expect(page.locator('#packs .pack.open tr', { hasText: 'room rate to 1-bed rate' })).toContainText('In progress');
   });
 
   test('a works lever sends its task to Roy, unless the house says tasks go to Kevin', async ({ page }) => {
     const writes = await openPage(page, fixtures());
-    const rooms = page.locator('#leverBody tr.lever', { hasText: '1 more room let' });
-    await rooms.locator('button[data-act="task"]').click();
+    await page.locator('#packs .pack').first().locator('.pack-head').click();
+    await page.locator('#packs .pack.open tr', { hasText: 'more room' }).locator('button[data-act="task"]').click();
     await expect(page.locator('#toast')).toContainText('Task created for Roy Lavin');
     const tf = writes.find(x => x.tableId === TBL.tasks).records[0].fields;
     expect(tf['flduCtmQGpOA4eWaj']).toEqual(['reclbdjfVev3bqNHS']);
-    await page.locator('[data-prop-card="recProp1"] select[data-prop-field="owner"]').selectOption('Kevin');
+    await page.locator('#packs .pack.open select[data-prop-field="owner"]').selectOption('Kevin');
     await expect(page.locator('#toast')).toContainText('Saved');
     expect(writes.filter(x => x.tableId === TBL.properties).pop().records[0].fields[P.owner]).toBe('Kevin');
-    await expect(page.locator('#todo')).toContainText('Kevin');
+    await expect(page.locator('#packs .pack').first()).toContainText('Kevin');
   });
 
   test('property card fields write to Properties and re-price the plan', async ({ page }) => {
     const writes = await openPage(page, fixtures());
-    await expect(page.locator('#leverBody tr.lever', { hasText: '1 more room let' })).toContainText('+£897.52'); // bills with the tenant
-    await page.locator('[data-prop-card="recProp1"] select[data-prop-field="payg"]').selectOption('No');
+    await page.locator('#packs .pack').first().locator('.pack-head').click();
+    await expect(page.locator('#packs .pack.open tr', { hasText: 'more room' })).toContainText('+£897.52'); // bills with the tenant
+    await page.locator('#packs .pack.open select[data-prop-field="payg"]').selectOption('No');
     await expect(page.locator('#toast')).toContainText('Saved');
     expect(writes.find(x => x.tableId === TBL.properties).records[0].fields[P.payg]).toBe('No');
-    await expect(page.locator('#leverBody tr.lever', { hasText: '1 more room let' })).toContainText('+£822.52'); // Kevin took the bills on: £75 off
-    await page.locator('[data-prop-card="recProp1"] input[data-prop-field="plannedExtra"]').fill('3');
-    await page.locator('[data-prop-card="recProp1"] input[data-prop-field="plannedExtra"]').dispatchEvent('change');
+    await expect(page.locator('#packs .pack.open tr', { hasText: 'more room' })).toContainText('+£822.52'); // Kevin took the bills on: £75 off
+    await page.locator('#packs .pack.open input[data-prop-field="plannedExtra"]').fill('3');
+    await page.locator('#packs .pack.open input[data-prop-field="plannedExtra"]').dispatchEvent('change');
     expect(writes.filter(x => x.tableId === TBL.properties).pop().records[0].fields[P.plannedExtra]).toBe(3);
-    await expect(page.locator('#leverBody')).toContainText('3 more rooms let');
-    await page.locator('[data-prop-card="recProp1"] select[data-prop-field="strategy"]').selectOption('Leave as is');
-    await expect(page.locator('#leverBody')).not.toContainText('more rooms let');   // Hold: no house lever
+    await expect(page.locator('#packs .pack.open')).toContainText('3 more rooms let');
+    await page.locator('#packs .pack.open select[data-prop-field="strategy"]').selectOption('Leave as is');
+    await expect(page.locator('#packs .pack.open')).not.toContainText('more rooms let');   // Leave as is: no house lever
   });
 
   test('benefit cap calculator: £900 rent caps a single over-35 unless exempt, and names the CRF amount', async ({ page }) => {
@@ -194,10 +202,10 @@ test.describe('Growth Plan page', () => {
     const fx = fixtures();
     fx[TBL.plan].push({ id: 'recPlanDone', fields: { [PLAN.key]: 'uplift:recT1', [PLAN.status]: 'Done', [PLAN.title]: 'old' } });
     await openPage(page, fx);
-    await expect(page.locator('#leverBody')).not.toContainText('Adam Older');
+    await expect(page.locator('#packs')).not.toContainText('Adam Older');
     await page.locator('#showDone').check();
-    await expect(page.locator('#leverBody')).toContainText('Adam Older');
-    await expect(page.locator('#leverBody tr.lever', { hasText: 'Adam Older' })).toContainText('Done');
+    await page.locator('#packs .pack').first().locator('.pack-head').click();
+    await expect(page.locator('#packs .pack.open tr', { hasText: 'Adam Older' })).toContainText('Done');
   });
 
   test('metric cards expand to show the rows behind them', async ({ page }) => {
@@ -218,7 +226,8 @@ test.describe('Growth Plan page', () => {
     await page.locator('#facts button[data-act="confirm-35"][data-tenant="recT3"]').click();
     await expect(page.locator('#toast')).toContainText('recorded as 35 or over');
     expect(writes.find(x => x.tableId === TBL.tenants).records[0].fields[T.over35]).toBe(true);
-    await expect(page.locator('#leverBody')).toContainText('Gary Unknown: room rate to 1-bed rate (35+ confirmed)');
+    await page.locator('#packs .pack').first().locator('.pack-head').click();
+    await expect(page.locator('#packs .pack.open')).toContainText('Gary Unknown: room rate to 1-bed rate (35+ confirmed)');
   });
 
   test('the tenant meeting form loads a tenant and saves every field to the record', async ({ page }) => {
@@ -239,21 +248,25 @@ test.describe('Growth Plan page', () => {
     expect(w.records[0].fields[T.ucPayDay]).toBe(14);
     expect(w.records[0].fields[T.capExemption]).toBe('PIP or DLA');
     expect(w.records[0].fields[T.meetingDate]).toBe('2026-09-16');
-    await expect(page.locator('#leverBody tr.lever').first()).not.toContainText('£93.00'); // exemption recorded: no CRF on Adam
+    await page.locator('#packs .pack').first().locator('.pack-head').click();
+    await expect(page.locator('#packs .pack.open')).not.toContainText('CRF Housing Payment, £93.00'); // exemption recorded
   });
 
-  test('the meeting pack lists what each tenant needs and what is still missing', async ({ page }) => {
+  test('a pack says what to collect, and its tenant button opens that tenant on the form', async ({ page }) => {
     await openPage(page, fixtures());
-    const pack = page.locator('#packs');
+    await page.locator('#packs .pack').first().locator('.pack-head').click();
+    const pack = page.locator('#packs .pack.open');
     await expect(pack).toContainText('Adam Older');
-    await expect(pack).toContainText('Rent to £897.52 (+£372.62)');
-    await expect(pack).toContainText('CRF Housing Payment £93.00 a month to landlord');
-    await expect(pack).toContainText('Still to collect: NI number, phone, email');
+    await expect(pack).toContainText('National Insurance number');
+    await expect(pack).toContainText('photo ID');
+    await pack.locator('button[data-act="open-form"]').first().click();
+    await expect(page.locator('#meetingForm')).toBeVisible();
+    await expect(page.locator('#formTenant')).toHaveValue('recT1');
     await expect(page.locator('#mktBody')).toContainText('Use now, as soon as a room opens');
     await expect(page.locator('#mktBody')).toContainText('When we need more leads');
     await expect(page.locator('#mktBody')).not.toContainText('DSS Move');
     await expect(pack).toContainText('Gary Unknown');
-    await expect(pack).toContainText('Confirm date of birth first');
+    await expect(pack).toContainText('Not in the plan until the date of birth is on file');
   });
 
   test('shows the empty state and no crash when nothing loads', async ({ page }) => {
@@ -265,8 +278,8 @@ test.describe('Growth Plan page', () => {
     page.on('pageerror', e => errors.push(e.message));
     await page.goto('/growth-plan.html');
     await expect(page.locator('#dashboard')).toBeVisible({ timeout: 20000 });
-    await expect(page.locator('#leverBody')).toContainText('No levers match');
-    await expect(page.locator('#props')).toContainText('No properties loaded');
+    await expect(page.locator('#packs')).toContainText('No property has work outstanding');
+
     expect(errors).toEqual([]);
   });
 

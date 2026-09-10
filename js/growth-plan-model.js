@@ -276,7 +276,8 @@
                     const over35Known = age != null ? age >= 35 : !!t.over35Confirmed; // Kevin/Roy can confirm 35+ without a date of birth
                     const rent = rentFor(t.id, u, num(u.rent) / Math.max(1, uTenants.length));
                     const uc = isUc(t, u), hb = isHb(t, u);
-                    const tv = { id: t.id, name: t.name, dob: t.dob || '', age, payType: t.payType || '', uc, hb, rent: round2(rent), capExemption: t.capExemption || 'Unknown', unitId: u.id, unitType: u.type, rateNow: null, target: null, note: '' };
+                    const tv = { id: t.id, name: t.name, dob: t.dob || '', age, payType: t.payType || '', uc, hb, rent: round2(rent), capExemption: t.capExemption || 'Unknown', unitId: u.id, unitType: u.type, rateNow: null, target: null, note: '',
+                        over35Confirmed: !!t.over35Confirmed, ni: t.ni || '', phone: t.phone || '', email: t.email || '', idSeen: t.idSeen || '', ucStatementSeen: !!t.ucStatementSeen };
                     const wholeShared = u.type !== 'Whole Property' || occupied.filter(x => x.type === 'Whole Property').length >= 2;
                     if (mgmt === 'kevin' && rates && (uc || hb) && !wholeShared) {
                         // One household renting the whole house: the LHA rate depends on who lives
@@ -381,6 +382,7 @@
                     if (occupants + newLets >= 5) needs.push(`${occupants + newLets} occupants: mandatory HMO licence (5+ people)`);
                     levers.push(lever({
                         key: `rooms:${prop.id}`, lever: releasable.length ? 'Room release' : 'New room let', propertyId: prop.id, property: prop.name,
+                        releasableIds: releasable.map(t => t.id),
                         title: `${prop.name}: ${newLets} more room${newLets > 1 ? 's' : ''} let to over-35 UC tenants`,
                         monthly: net, monthlyIfExempt: net, oneOff: round2(newLets * s('room_prep_cost', 1500)), effort: 'Works', counted: strategy ? (local ? 'now' : 'remote') : 'check',
                         capShortfall: round2(newLets * capNew.shortfall),
@@ -531,7 +533,102 @@
         totals.maximum = round2(totals.potentialIncrease + totals.check);
         const next = levers.find(l => l.counted === 'now' && active(l) && l.status !== 'In progress') || levers.find(l => l.counted === 'now' && active(l)) || null;
         const todo = levers.filter(l => (l.counted === 'now' || l.counted === 'remote') && active(l)).map(l => ({ key: l.key, stage: l.stage, text: l.firstStep, owner: l.owner, property: l.property, monthly: l.monthly, status: l.status }));
-        return { today: T, levers, properties, unknownAge, totals, next, todo, safeSingle, capSingle, lhaStale: lhaStale(T), stageNames: STAGE_NAMES, stageOf: l => STAGE[l.lever] || 5 };
+        const packs = buildPacks(properties, levers, active);
+        return { today: T, levers, properties, unknownAge, totals, next, todo, packs, safeSingle, capSingle, lhaStale: lhaStale(T), stageNames: STAGE_NAMES, stageOf: l => STAGE[l.lever] || 5 };
+    }
+
+    // ── Property work packs ─────────────────────────────────────────────
+    // Kevin, 10 Sep 2026: the plan is worked property by property, not tenant by
+    // tenant, so one visit closes a whole house. Each pack is everything Roy (or
+    // Kevin) needs for that address: what to take, what happens with each tenant,
+    // what works are needed, what is submitted afterwards.
+    function buildPacks(properties, levers, active) {
+        const packs = [];
+        properties.forEach(v => {
+            const all = levers.filter(l => l.propertyId === v.id && (l.counted === 'now' || l.counted === 'remote'));
+            const own = all.filter(active);
+            if (!all.length) return;
+            const joint = v.strategy === 'Joint tenancy' && own.some(l => l.lever === 'Council tax');
+            const roomLever = own.find(l => l.lever === 'Room release' || l.lever === 'New room let');
+            const takeBack = own.find(l => l.lever === 'Take-back');
+            const voidLet = own.find(l => l.lever === 'Void let');
+            const names = v.tenants.map(t => t.name);
+
+            const before = [];
+            if (joint) {
+                before.push('Joint tenancy agreement for the whole house (ast_joint_template.md in Drive), naming ' + names.join(' and '));
+                before.push('Council tax side letter (council_tax_side_letter_template.md), signed the same day');
+                before.push('Plain-English note for each tenant: joint and several liability, and what happens if one leaves');
+            }
+            if (own.some(l => l.lever === 'Rent uplift' || l.lever === 'Rate refresh')) {
+                before.push('Rent change letter for each tenant going up, at the ' + (v.rates ? v.rates.brma : 'local') + ' 1-bed rate');
+            }
+            if (!takeBack && !voidLet) before.push('Authority to act letter for every tenant (authority_to_act_template.md)');
+            if (own.some(l => l.capShortfall > 0)) before.push('CRF Housing Payment details: the shortfall figure per tenant, and their last two months of bank statements');
+
+            const releasing = new Set((roomLever && roomLever.releasableIds) || []);
+            const tenants = [];
+            v.tenants.forEach(t => {
+                const up = own.find(l => l.tenantId === t.id);
+                const ageUnknown = t.age == null && !t.over35Confirmed;
+                const givesUpRoom = releasing.has(t.id);
+                if (!up && !joint && !ageUnknown && !givesUpRoom) return;
+                const sign = [];
+                if (joint) sign.push('Joint tenancy agreement', 'Council tax side letter', 'Plain-English note');
+                else if (up && (up.lever === 'Rent uplift' || up.lever === 'Rate refresh')) sign.push('Rent change letter');
+                if (givesUpRoom) sign.push('Tenancy variation: one room instead of two, at the same rent');
+                if (!takeBack) sign.push('Authority to act');
+                const collect = [];
+                if (!t.dob) collect.push('date of birth');
+                if (!t.ni) collect.push('National Insurance number');
+                if (!t.phone) collect.push('mobile');
+                if (!t.email) collect.push('email');
+                if (!t.idSeen) collect.push('photo ID');
+                if (!t.ucStatementSeen) collect.push('latest UC statement');
+                const forms = [];
+                if (up && up.lever !== 'CRF top-up') forms.push('UC journal: report the housing costs change to £' + num(up.target || t.target || t.rateNow).toFixed(2));
+                else if (joint) forms.push('UC journal: report the joint tenancy and the other tenant');
+                if (joint) forms.push('Council Tax Reduction claim, backdated to the tenancy start');
+                if (up && up.capShortfall > 0) forms.push('CRF Housing Payment, £' + num(up.capShortfall).toFixed(2) + ' a month to landlord');
+                tenants.push({
+                    id: t.id, name: t.name, age: t.age, over35Confirmed: !!t.over35Confirmed, uc: t.uc,
+                    rentNow: t.rent, target: up && up.lever !== 'CRF top-up' ? (t.target || t.rateNow) : null,
+                    uplift: up ? up.monthly : 0, crf: up ? (up.capShortfall || 0) : 0,
+                    capExemption: t.capExemption, blocked: ageUnknown, givesUpRoom, sign, collect, forms,
+                    note: ageUnknown ? 'Not in the plan until the date of birth is on file, or 35 or over is confirmed'
+                        : (givesUpRoom ? 'Keeps the 1-bed rate in one room, so the second room is let again. Their rent does not change: say that first.' : (t.note || '')),
+                });
+            });
+
+            const works = [];
+            if (roomLever) {
+                works.push(roomLever.firstStep);
+                works.push('Fire-safe each new room (door, alarm, lock) and list it: £' + num(roomLever.oneOff).toFixed(0) + ' one-off');
+            }
+            if (voidLet) works.push(voidLet.firstStep);
+
+            const after = [];
+            if (joint) after.push('Tell the council the council tax liability has changed, and send the copy bill route in the side letter');
+            if (own.some(l => l.capShortfall > 0)) after.push('Diarise the CRF renewal: awards are short term and the shortfall returns when one ends');
+            if (own.some(l => l.lever === 'Rent uplift' || l.lever === 'Rate refresh' || l.lever === 'CRF top-up')) after.push('Check the next UC payment lands at the new figure, and that the managed payment to landlord is still in place');
+            if (tenants.some(t => t.collect.length)) after.push('Enter everything collected on the tenant meeting form the same day');
+            if (takeBack) after.push('Nothing is said to the head tenant or the sub-tenants until the legal question set comes back');
+
+            packs.push({
+                id: v.id, name: v.name, strategy: v.strategy || (v.mgmt === 'kevin' ? 'Not set' : 'Agent-managed'),
+                owner: (own[0] || all[0]).owner, area: v.area, local: v.local, mgmt: v.mgmt,
+                stage: Math.min.apply(null, (own.length ? own : all).map(l => l.stage)),
+                monthly: round2(own.reduce((n, l) => n + num(l.monthly), 0)),
+                oneOff: round2(own.reduce((n, l) => n + num(l.oneOff), 0)),
+                crf: round2(own.reduce((n, l) => n + num(l.capShortfall), 0)),
+                openCount: own.length,
+                ctBand: v.ctBand, ctBandMonthly: v.ctBandMonthly, ctLive: v.ctLive,
+                before, tenants, works, after,
+                levers: all.map(l => ({ key: l.key, lever: l.lever, title: l.title, monthly: l.monthly, oneOff: l.oneOff, effort: l.effort, status: l.status, capShortfall: l.capShortfall || 0, evidence: l.evidence, needs: l.needs })),
+            });
+        });
+        packs.sort((a, b) => a.stage - b.stage || b.monthly - a.monthly);
+        return packs;
     }
 
     function lever(o, planByKey) {
@@ -546,5 +643,5 @@
         return (l.effort === 'Works' || l.effort === 'Light') ? 'Roy' : 'Kevin';
     }
 
-    return { LHA_WEEKLY, LHA_2026_27, LHA_VALID_TO, weeklyToMonthly, normaliseStrategy, taskOwnerFor, BRMA_BY_OUTWARD, BRMA_UNCERTAIN, STAGE, STAGE_NAMES, EFFORT_WEIGHT, monthlyFromFrequency, ageOn, outward, brmaFor, isLocal, ratesFor, lhaStale, benefitCap, exemptionInput, capPosition, isUc, isHb, managementOf, buildPlan };
+    return { LHA_WEEKLY, LHA_2026_27, LHA_VALID_TO, weeklyToMonthly, normaliseStrategy, taskOwnerFor, buildPacks, BRMA_BY_OUTWARD, BRMA_UNCERTAIN, STAGE, STAGE_NAMES, EFFORT_WEIGHT, monthlyFromFrequency, ageOn, outward, brmaFor, isLocal, ratesFor, lhaStale, benefitCap, exemptionInput, capPosition, isUc, isHb, managementOf, buildPlan };
 });
