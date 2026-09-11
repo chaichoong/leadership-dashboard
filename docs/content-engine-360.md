@@ -607,3 +607,55 @@ The Summary is not put on YouTube (the full episode is there). The socials carry
   Wed attempt 1 (99 s), Thu attempt 3 (312 s), Fri attempt 2 (186 s). Source labels on pictures are public phrases ("a real job
   advert, anonymised", "the Operations Director agent register", "Episode 1992"), never internal table names. Six cards refreshed
   with the composed pictures attached; test mode throughout.
+
+
+## Operations Director pictures, VERSION 4: the board renderer (8 Sep 2026)
+
+Kevin's verdict on the composed pictures: "just so substandard, glitchy bits, text overlapping"; the bar is the lead magnet page
+(`marketing/lead-magnet/how-you-get-there.html`). Diagnosis: that page hit the bar because a strong writer laid it out by hand in the
+Operations Director language and then looked at it; the nightly composer had neither, and the skill's mechanical preflight only sees
+text-on-text (a prop on a line, a ghosted numeral, an empty third all pass it). Measured 8 Sep: the premium composer with the lead
+magnet's scaffold and a rendered-picture review still failed Friday after six attempts (required lines rewritten, middle third empty).
+
+Decision: fix, not replace. The layouts are now CODE. `od_board.py` builds the five boards from the lead magnet's own components
+(`epic/templates/od-scaffold.html`: its CSS, route, stations, placards, lanes, the owner's gold stop, the strip with the logo) with
+the model contributing only the words. Positions are computed from the content: stations spread to fill the board, lanes side by side
+with the route arrow between, the stat placard content-sized beside the then-and-now lanes, the checklist rows spread across the card,
+the post's own numbered steps as a second placard, the owner's stop and three office props as the closing row. Nothing a model places,
+so nothing can overlap text. Gate: the skill's preflight, then `od_compose.review` (a standard-tier model reads the rendered picture
+against the skill's step-11 list and fails anything touching text, empty or glitchy). Route order in `od_lane.render_visual`: board,
+then the model composer (opt-in, `COMPOSE_ENABLED`), then Gemini with the text check, then the plain template. Composer changes kept:
+premium model through the proxy, scaffold as the mandatory start, review-and-repair rounds, public source labels.
+
+
+## The map page (8 Sep 2026)
+
+`runpreneur-map/index.html` on GitHub Pages replaces the hand-drawn Footpath frame on runpreneur.org.uk/how-far-ive-run. `scripts/content-engine/runpreneur_map.py run` (nightly, after the Strava sync) fetches new runs into `strava_activities.json`, works out the country of every streak run offline against Natural Earth outlines (`runpreneur-map/data/countries.geojson`), computes the facts (average per day, longest run, the city pair the total matches, next milestones, lap finish estimate) and the point reached on a lap-of-the-world route through named waypoints scaled to 40,075 km, and writes `runpreneur-map/data/progress.json` into main through the GitHub API, so it never depends on the local checkout's branch. The headline numbers come from the sync's running total, so the map never disagrees with the counters beside it. Privacy: only the country of each run is published, never a start point. Embed on the website: `<iframe src="https://chaichoong.github.io/leadership-dashboard/runpreneur-map/" style="width:100%;height:900px;border:0"></iframe>`.
+
+
+## Live publishing, same day, in order (Kevin, 8 Sep 2026)
+
+- **Order.** A cursor in `publishing.json` holds the last day put on YouTube (starts at start day minus one). Only the next day in sequence may go to YouTube; an approved later day waits ("held for order"). A day with no recording at all, while later days exist, is stepped over and listed under `_skipped_days`. This is what keeps 2194 to 2196 (June, already approved) parked until the catch-up reaches them.
+- **Same day.** `when_for(platform, clip, index)` gives each post a slot today: YouTube 06:00 (12:00, 18:00 for the second and third episode), LinkedIn 12:00 and 17:30, Facebook and Instagram 12:30 and 18:00, Threads 12:00 and 18:00, TikTok 13:00 and 19:30; a second episode's clips go two hours later. A slot already passed becomes five minutes from now, never tomorrow.
+- **Daytime publisher.** `content-engine-publish.sh` (job `content-engine-publish`, hourly 07:15 to 20:15, light API work, no rendering): verdicts, GHL post links, the next episode to YouTube, its clips and article and podcast the same day once the link exists. The night job keeps rendering and carding.
+- **Runtime checkout.** Both jobs run from `.claude/worktrees/content-engine-runtime`, a worktree kept on `main` that fast-forwards itself before each run, because the main checkout is frequently on another session's branch.
+- Mode: `~/.config/od/content_engine_mode` = live since 8 Sep 2026 (Kevin: "we need something published tomorrow").
+
+
+## Operations Director pictures, VERSION 5: the dense board (9 Sep 2026)
+
+Kevin knocked back every card again (9 Sep): the pictures were not visible or clickable on the cards, and the boards were "just not up
+to standard"; the reference is Dan Martell's LinkedIn infographics and the lead magnet page, "the quality that all of our content needs
+to be at". Two facts found first: a second session's approval refresh had re-submitted the cards at 13:55 on 8 Sep with its own
+`infographic.png` and a card text carrying no link (so what Kevin saw was not the v4 board), and Dan Martell's boards (read on his own
+LinkedIn feed) are dense cheat sheets: a bold banner with one highlighted phrase, an italic standfirst, two-column panels with pill
+headers, an icon plus a short headline plus a one-line explanation on every row, a formula box, a numbered guide band.
+
+Built: `od_prompts.ENRICH_SYSTEM` asks the model for the WORDS of that board from the finished post (headline and detail per item, a
+hero value and label, the rule, the guide, panel labels; no new facts, em dashes stripped and the next letter capitalised);
+`od_lane.enrich_visual` stores them on the post; `od_board.build_rich` draws the board in the Operations Director language: banner with
+highlight, rows that grow to fill the height, a hero pill that carries the owner's stop, the rule box, the guide band, the strip. The
+stat board uses the post's numbered steps as its rows when the spec has fewer than three items. The card now leads with "OPEN THE PICTURE
+FIRST" and the permanent link, the PNG and PDF ride on the same submit (`--attach`), and a redo answers Kevin's points line by line
+(`--receipt`). `od_lane.py repicture` redraws every unpublished post and clears it for re-raise. All five shapes reviewed by eye against
+the lead magnet before any card went up.

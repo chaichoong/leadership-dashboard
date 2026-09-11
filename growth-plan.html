@@ -1,0 +1,965 @@
+<!DOCTYPE html>
+<html lang="en-GB">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="robots" content="noindex, nofollow">
+<title>Growth Plan · Real Estate</title>
+<link rel="stylesheet" href="css/tokens.css?v=1">
+<link rel="stylesheet" href="css/sync-bar.css?v=3">
+<style>
+  /* Real Estate Growth Plan — Leadership. Tokens only, no hex. The maths lives in
+     js/growth-plan-model.js; this file fetches, normalises, renders and writes back. */
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg-app); color: var(--text-primary); }
+  .gp-wrap { max-width: 1280px; margin: 0 auto; padding: var(--space-5) var(--space-5) var(--space-10); }
+  .gp-head { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--space-4); flex-wrap: wrap; margin-bottom: var(--space-3); }
+  .gp-head h1 { font-size: var(--fs-2xl); font-weight: var(--fw-bold); margin: 0; letter-spacing: -0.01em; }
+  .gp-head .sub { color: var(--text-secondary); font-size: var(--fs-sm); margin-top: 2px; max-width: 760px; }
+  .gp-actions { display: flex; gap: var(--space-2); align-items: center; flex-wrap: wrap; }
+  .btn { border: 1px solid var(--border-default); background: var(--bg-surface); color: var(--text-primary); border-radius: var(--radius-md); padding: 7px 14px; font: inherit; font-size: var(--fs-sm); cursor: pointer; }
+  .btn:hover { background: var(--bg-surface-2); }
+  .btn:focus-visible, .kpi:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .btn:disabled { opacity: .55; cursor: default; }
+  .btn-primary { background: var(--accent); border-color: var(--accent); color: var(--accent-on); }
+  .btn-primary:hover { background: var(--accent-hover); }
+  .btn-sm { padding: 3px 9px; font-size: var(--fs-xs); }
+  .btn-ghost { border-color: transparent; color: var(--text-secondary); }
+  .btn-danger { color: var(--danger); border-color: var(--danger-bg); background: var(--danger-bg); }
+  section.card { background: var(--bg-surface); border: 1px solid var(--border-default); border-radius: var(--radius-lg); padding: var(--space-5); margin-top: var(--space-4); }
+  section.card h2 { margin: 0 0 var(--space-1); font-size: var(--fs-lg); font-weight: var(--fw-semibold); display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; }
+  section.card .hint { color: var(--text-secondary); font-size: var(--fs-sm); margin: 0 0 var(--space-4); max-width: 900px; }
+  .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: var(--space-3); }
+  .kpi { background: var(--bg-surface-2); border: 1px solid var(--border-subtle); border-radius: var(--radius-md); padding: var(--space-3) var(--space-4); min-width: 0; }
+  .kpi .l { color: var(--text-secondary); font-size: var(--fs-xs); font-weight: var(--fw-medium); text-transform: uppercase; letter-spacing: .04em; }
+  .kpi .v { font-size: var(--fs-2xl); font-weight: var(--fw-bold); margin-top: 4px; font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .kpi .d { color: var(--text-muted); font-size: var(--fs-xs); margin-top: 2px; }
+  .kpi.good .v { color: var(--success); } .kpi.gold .v { color: var(--accent-gold); } .kpi.muted .v { color: var(--text-muted); }
+  .next { margin-top: var(--space-4); border: 1px solid var(--accent); background: var(--accent-soft); border-radius: var(--radius-md); padding: var(--space-4); display: grid; grid-template-columns: 1fr auto; gap: var(--space-3); align-items: center; }
+  .next .k { font-size: var(--fs-xs); text-transform: uppercase; letter-spacing: .04em; color: var(--accent); font-weight: var(--fw-semibold); }
+  .next .t { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 2px 0; }
+  .next .s { color: var(--text-secondary); font-size: var(--fs-sm); }
+  .tbl-wrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: var(--fs-sm); }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border-subtle); vertical-align: top; }
+  th { background: var(--bg-subtle); color: var(--text-secondary); font-weight: var(--fw-semibold); font-size: var(--fs-xs); text-transform: uppercase; letter-spacing: .04em; white-space: nowrap; }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  tr.detail td { background: var(--bg-surface-2); white-space: normal; }
+  .pill { display: inline-block; padding: 1px 8px; border-radius: var(--radius-full); font-size: var(--fs-xs); font-weight: var(--fw-medium); background: var(--bg-subtle); color: var(--text-secondary); white-space: nowrap; }
+  .pill.paper { background: var(--success-bg); color: var(--success); }
+  .pill.light { background: var(--info-bg); color: var(--info); }
+  .pill.works { background: var(--warning-bg); color: var(--warning); }
+  .pill.legal { background: var(--danger-bg); color: var(--danger); }
+  .pill.st-adopted, .pill.st-in-progress { background: var(--accent-soft); color: var(--accent); }
+  .pill.st-done { background: var(--success-bg); color: var(--success); }
+  .pill.st-dropped { background: var(--bg-subtle); color: var(--text-muted); text-decoration: line-through; }
+  .pill.stage { background: var(--bg-subtle); color: var(--text-primary); }
+  .pill.check { background: var(--warning-bg); color: var(--warning); }
+  .row-actions { display: flex; gap: 4px; flex-wrap: wrap; }
+  .filters { display: flex; gap: var(--space-2); align-items: center; flex-wrap: wrap; margin-bottom: var(--space-3); }
+  .seg { display: inline-flex; border: 1px solid var(--border-default); border-radius: var(--radius-md); overflow: hidden; flex-wrap: wrap; }
+  .seg button { border: 0; background: var(--bg-surface); padding: 5px 12px; font: inherit; font-size: var(--fs-sm); cursor: pointer; color: var(--text-secondary); }
+  .seg button[aria-pressed="true"] { background: var(--accent); color: var(--accent-on); }
+  .seg button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+  label.chk { font-size: var(--fs-sm); color: var(--text-secondary); display: inline-flex; gap: 6px; align-items: center; }
+  .ten { display: grid; grid-template-columns: 1fr auto; gap: 2px 8px; padding: 6px 0; border-top: 1px solid var(--border-subtle); font-size: var(--fs-sm); align-items: center; }
+  .ten .n { font-weight: var(--fw-medium); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ten .r { font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .ten .m { grid-column: 1 / -1; color: var(--text-muted); font-size: var(--fs-xs); display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+  .ten .note { grid-column: 1 / -1; font-size: var(--fs-xs); color: var(--warning); }
+  .inl { display: inline-flex; gap: 4px; align-items: center; }
+  input.sm, select.sm { font: inherit; font-size: var(--fs-xs); padding: 2px 6px; border: 1px solid var(--border-default); border-radius: var(--radius-sm); background: var(--bg-surface); color: var(--text-primary); max-width: 150px; }
+  input.sm:focus-visible, select.sm:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .prop-fields { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border-subtle); }
+  .prop-fields label { display: flex; flex-direction: column; gap: 2px; font-size: var(--fs-xs); color: var(--text-secondary); min-width: 0; }
+  .prop-fields select.sm, .prop-fields input.sm { max-width: 100%; width: 100%; }
+  .calc { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-5); }
+  @media (max-width: 900px) { .calc { grid-template-columns: 1fr; } .prop-fields { grid-template-columns: 1fr; } }
+  .calc .form { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 12px; }
+  .calc .form label { display: flex; flex-direction: column; gap: 3px; font-size: var(--fs-xs); color: var(--text-secondary); }
+  .calc .form input, .calc .form select { font: inherit; font-size: var(--fs-sm); padding: 5px 8px; border: 1px solid var(--border-default); border-radius: var(--radius-sm); background: var(--bg-surface); color: var(--text-primary); }
+  .calc .form label.wide { grid-column: 1 / -1; }
+  .calc .out { background: var(--bg-surface-2); border: 1px solid var(--border-subtle); border-radius: var(--radius-md); padding: var(--space-4); }
+  .calc .out .big { font-size: var(--fs-2xl); font-weight: var(--fw-bold); font-variant-numeric: tabular-nums; }
+  .calc .out .line { display: flex; justify-content: space-between; gap: 12px; padding: 3px 0; border-bottom: 1px dashed var(--border-subtle); font-size: var(--fs-sm); }
+  .calc .out .line.total { border-bottom: 0; font-weight: var(--fw-semibold); }
+  .calc .out .ok { color: var(--success); } .calc .out .bad { color: var(--danger); }
+  .mform fieldset { border: 1px solid var(--border-subtle); border-radius: var(--radius-md); padding: var(--space-3) var(--space-4); margin: 0 0 var(--space-3); display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px 14px; }
+  .mform legend { font-size: var(--fs-xs); text-transform: uppercase; letter-spacing: .04em; color: var(--text-secondary); padding: 0 6px; }
+  .mform label { display: flex; flex-direction: column; gap: 3px; font-size: var(--fs-xs); color: var(--text-secondary); min-width: 0; }
+  .mform label.chk { flex-direction: row; align-items: center; align-self: end; color: var(--text-primary); font-size: var(--fs-sm); }
+  .mform label.wide { grid-column: 1 / -1; }
+  .mform input, .mform select, .mform textarea { font: inherit; font-size: var(--fs-sm); padding: 5px 8px; border: 1px solid var(--border-default); border-radius: var(--radius-sm); background: var(--bg-surface); color: var(--text-primary); }
+  .mform input:focus-visible, .mform select:focus-visible, .mform textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  @media (max-width: 900px) { .mform fieldset { grid-template-columns: 1fr; } }
+  /* Property work packs */
+  .pack { border: 1px solid var(--border-default); border-radius: var(--radius-md); margin-bottom: var(--space-2); background: var(--bg-surface); overflow: hidden; }
+  .pack.open { border-color: var(--accent); box-shadow: var(--shadow-sm); }
+  .pack-head { display: grid; grid-template-columns: 1fr auto 20px; gap: var(--space-3); align-items: center; padding: var(--space-3) var(--space-4); cursor: pointer; }
+  .pack-head:hover { background: var(--bg-surface-2); }
+  .pack-head:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+  .pack-n { display: flex; gap: var(--space-3); align-items: baseline; min-width: 0; }
+  .pack-n .idx { display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; flex: 0 0 22px; border-radius: var(--radius-full); background: var(--bg-subtle); color: var(--text-secondary); font-size: var(--fs-xs); font-weight: var(--fw-semibold); }
+  .pack-meta { display: flex; gap: 4px; flex-wrap: wrap; margin-top: 4px; }
+  .pack-fig { text-align: right; white-space: nowrap; }
+  .pack-fig b { display: block; font-size: var(--fs-lg); color: var(--success); font-variant-numeric: tabular-nums; }
+  .pack .chev { color: var(--text-muted); transition: transform .15s; }
+  .pack.open .chev { transform: rotate(90deg); color: var(--accent); }
+  .pack-body { padding: 0 var(--space-4) var(--space-4); border-top: 1px solid var(--border-subtle); }
+  .pack-block { margin-top: var(--space-4); }
+  .pack-block h4 { margin: 0 0 6px; font-size: var(--fs-xs); text-transform: uppercase; letter-spacing: .04em; color: var(--text-secondary); }
+  .pack-block > ul { margin: 0; padding-left: 18px; font-size: var(--fs-sm); }
+  .pack-block > ul li { margin: 3px 0; }
+  .pack-block .prop-fields { border-top: 0; padding-top: 0; grid-template-columns: repeat(6, 1fr); }
+  @media (max-width: 900px) { .pack-block .prop-fields { grid-template-columns: 1fr 1fr; } }
+  .pt { border: 1px solid var(--border-subtle); border-radius: var(--radius-md); padding: var(--space-3); margin-bottom: var(--space-2); background: var(--bg-surface-2); }
+  .pt.blocked { border-style: dashed; opacity: .85; }
+  .pt-h { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+  .pt-up { margin-left: auto; color: var(--success); font-weight: var(--fw-semibold); font-variant-numeric: tabular-nums; }
+  .pt-note { font-size: var(--fs-xs); color: var(--warning); margin-top: 2px; }
+  .pt-fix { margin-top: 6px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; font-size: var(--fs-xs); color: var(--text-secondary); }
+  .pt-cols { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--space-3); margin-top: 8px; }
+  .pt-cols h5 { margin: 0 0 2px; font-size: var(--fs-xs); text-transform: uppercase; letter-spacing: .04em; color: var(--text-muted); font-weight: var(--fw-semibold); }
+  .pt-cols ul { margin: 0; padding-left: 16px; font-size: var(--fs-sm); }
+  .pt-cols li { margin: 2px 0; }
+  .pt .row-actions { margin-top: 8px; }
+  @media (max-width: 900px) { .pt-cols { grid-template-columns: 1fr; } .pack-head { grid-template-columns: 1fr auto; } }
+  tr.dim td { color: var(--text-muted); }
+  #setupAll { margin-top: var(--space-4); border-top: 1px solid var(--border-subtle); padding-top: var(--space-3); }
+  #setupAll summary { cursor: pointer; font-size: var(--fs-sm); font-weight: var(--fw-semibold); color: var(--accent); }
+  #setupTable td, #setupTable th { padding: 4px 8px; }
+  #setupTable select.sm, #setupTable input.sm { max-width: 100%; width: 100%; }
+  ul.approach { margin: 0; padding-left: 18px; font-size: var(--fs-sm); }
+  ul.approach li { margin: 6px 0; }
+  .doclist { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+  .doclist .doc { display: inline-flex; gap: 6px; align-items: baseline; border: 1px solid var(--border-default); border-radius: var(--radius-md); padding: 4px 10px; font-size: var(--fs-sm); color: var(--text-primary); text-decoration: none; background: var(--bg-surface); }
+  .doclist .doc:hover { border-color: var(--accent); }
+  #docInput { font-size: var(--fs-sm); }
+  .clause { background: var(--bg-surface-2); border: 1px solid var(--border-subtle); border-radius: var(--radius-md); padding: var(--space-4); font-size: var(--fs-sm); white-space: pre-wrap; line-height: 1.5; }
+  .two { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-5); }
+  .strategies { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--space-4); }
+  .strat { background: var(--bg-surface-2); border: 1px solid var(--border-subtle); border-radius: var(--radius-md); padding: var(--space-3) var(--space-4); }
+  .strat h4 { margin: 0 0 6px; font-size: var(--fs-md); font-weight: var(--fw-semibold); }
+  .strat ul { margin: 0; padding-left: 18px; font-size: var(--fs-sm); }
+  .strat li { margin: 3px 0; }
+  @media (max-width: 900px) { .strategies { grid-template-columns: 1fr; } }
+  .kpis.level { grid-template-columns: repeat(4, 1fr); }
+  .kpis.level .kpi { display: flex; flex-direction: column; min-height: 132px; }
+  .kpis.level .kpi .l { min-height: 2.4em; align-items: flex-start; }
+  .kpis.level .kpi .v { line-height: 1.15; margin-top: 6px; }
+  .kpis.level .kpi .d { margin-top: auto; padding-top: 6px; min-height: 2.6em; }
+  .kpi.clickable { cursor: pointer; transition: border-color .12s, box-shadow .12s; }
+  .kpi.clickable:hover { border-color: var(--accent); }
+  .kpi.clickable.expanded { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
+  .kpi .l { display: flex; justify-content: space-between; gap: 6px; }
+  .kpi .l .chev { transition: transform .15s; color: var(--text-muted); }
+  .kpi.expanded .l .chev { transform: rotate(90deg); color: var(--accent); }
+  .detail { margin-top: var(--space-4); border-top: 1px dashed var(--border-default); padding-top: var(--space-3); }
+  .detail h3 { margin: 0 0 var(--space-2); font-size: var(--fs-md); font-weight: var(--fw-semibold); display: flex; justify-content: space-between; }
+  .neg { color: var(--danger); }
+  td.wrap { white-space: normal; }
+  @media (max-width: 900px) { .kpis.level { grid-template-columns: repeat(2, 1fr); } }
+  @media (max-width: 900px) { .two { grid-template-columns: 1fr; } }
+  .settings-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 8px 16px; }
+  .setting { display: grid; grid-template-columns: 1fr 110px; gap: 6px; align-items: center; font-size: var(--fs-sm); padding: 4px 0; border-bottom: 1px solid var(--border-subtle); }
+  .setting .lbl { color: var(--text-primary); min-width: 0; }
+  .setting .note { color: var(--text-muted); font-size: var(--fs-xs); display: block; }
+  .setting input { font: inherit; font-size: var(--fs-sm); padding: 3px 6px; border: 1px solid var(--border-default); border-radius: var(--radius-sm); text-align: right; width: 100%; background: var(--bg-surface); color: var(--text-primary); }
+  ol.stages { padding-left: 20px; margin: 0; }
+  ol.stages li { margin: 4px 0; }
+  .muted { color: var(--text-muted); } .small { font-size: var(--fs-xs); }
+  .empty { color: var(--text-muted); font-size: var(--fs-sm); padding: var(--space-3) 0; }
+  .src { color: var(--text-muted); font-size: var(--fs-xs); margin-top: var(--space-3); }
+  .src a { color: var(--accent); }
+  /* Auth + loading (same contract as compliance.html: PAT shared via localStorage airtable_pat) */
+  .auth-screen { display: flex; align-items: center; justify-content: center; min-height: 80vh; flex-direction: column; padding: var(--space-5); }
+  .auth-box { background: var(--bg-surface); border: 1px solid var(--border-default); border-radius: var(--radius-lg); padding: 40px; max-width: 440px; width: 100%; box-shadow: var(--shadow-md); text-align: center; }
+  .auth-box h2 { font-size: var(--fs-2xl); margin: 0 0 8px; }
+  .auth-box p { font-size: var(--fs-base); color: var(--text-muted); margin: 0 0 24px; }
+  .auth-input { width: 100%; padding: 12px 16px; border: 1px solid var(--border-default); border-radius: var(--radius-lg); font-size: var(--fs-md); margin-bottom: 16px; }
+  .auth-btn { width: 100%; padding: 12px; background: var(--accent); color: var(--accent-on); border: none; border-radius: var(--radius-lg); font-size: var(--fs-md); font-weight: var(--fw-semibold); cursor: pointer; }
+  .auth-error { color: var(--danger); font-size: var(--fs-sm); margin-top: 8px; display: none; }
+  #loadingOverlay { display: flex; align-items: center; justify-content: center; gap: 12px; min-height: 60vh; color: var(--text-secondary); font-size: var(--fs-md); flex-direction: column; }
+  .spinner { width: 28px; height: 28px; border: 3px solid var(--border-default); border-top-color: var(--accent); border-radius: 50%; animation: spin .8s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  #toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); background: var(--bg-sidebar); color: var(--accent-on); padding: 10px 18px; border-radius: var(--radius-md); font-size: var(--fs-sm); box-shadow: var(--shadow-lg); opacity: 0; pointer-events: none; transition: opacity .2s; z-index: 50; max-width: 90vw; }
+  #toast.show { opacity: 1; }
+  #toast.err { background: var(--danger); }
+  .error-box { background: var(--danger-bg); color: var(--danger); border: 1px solid var(--danger); border-radius: var(--radius-md); padding: var(--space-4); margin-top: var(--space-4); }
+  @media print { .gp-actions, .row-actions, .filters, [data-sync-bar], .btn, input, select, #gp-settings, #gp-calc { display: none !important; } section.card { break-inside: avoid; border: 0; } }
+</style>
+</head>
+<body>
+<div id="authScreen" class="auth-screen" style="display:none">
+  <div class="auth-box">
+    <h2>Growth Plan</h2>
+    <p>Enter the Airtable token to load the portfolio.</p>
+    <input id="patInput" class="auth-input" type="password" placeholder="pat…" autocomplete="off" aria-label="Airtable token">
+    <button class="auth-btn" id="authBtn" type="button">Open</button>
+    <div id="authError" class="auth-error">That token was refused. Check it and try again.</div>
+  </div>
+</div>
+<div id="loadingOverlay"><div class="spinner" aria-hidden="true"></div><div id="loadingText">Loading the portfolio…</div></div>
+<div id="dashboard" class="gp-wrap" style="display:none">
+  <div class="gp-head">
+    <div>
+      <h1>Real Estate Growth Plan</h1>
+      <div class="sub">Every rent, council tax and room lever in the portfolio, priced against the 2026-27 Local Housing Allowance and the benefit cap, ranked by money per unit of effort. Work the list top down.</div>
+    </div>
+    <div class="gp-actions">
+      <button class="btn" id="refreshBtn" type="button">Refresh</button>
+      <a class="btn" href="sop-growth-plan.html" target="_blank" rel="noopener">Guide</a>
+    </div>
+  </div>
+  <div data-sync-bar="growth-plan"></div>
+  <div id="errorBox" class="error-box" style="display:none"></div>
+
+  <section class="card" id="gp-workflow">
+    <h2>The three strategies, and what each needs</h2>
+    <p class="hint">Every self-managed house is one of these. A rent uplift follows the strategy of the house the tenant lives in.</p>
+    <div class="strategies">
+      <div class="strat"><h4>Joint tenancy</h4><ul>
+        <li>Joint tenancy agreement signed (ast_joint_template.md in Drive): it stipulates the tenants are liable for council tax</li>
+        <li>Proof of address document (existing template)</li>
+        <li>Universal Credit details: name, phone, email, date of birth, payment date; change reported in the UC journal, managed payment to landlord requested</li>
+        <li>Council Tax Reduction form: NI number, everyone in the house, income, capital, benefits; backdated to the tenancy start; the tenant's email and a password to save it</li>
+        <li>Anything the form asks for on top: ID, UC statement, bank statements</li>
+        <li>CRF Housing Payment (Discretionary Housing) application: household income, weekly spending, two months' bank statements, payment to landlord; the shortfall from the calculator</li>
+      </ul></div>
+      <div class="strat"><h4>HMO</h4><ul>
+        <li>Individual AST for each tenant (ast_template.md in Drive)</li>
+        <li>Proof of address document (existing template)</li>
+        <li>Universal Credit details as for a joint tenancy: name, phone, email, date of birth, payment date; journal change, managed payment</li>
+        <li>No Council Tax Reduction form: the owner keeps council tax on an HMO</li>
+        <li>CRF Housing Payment (Discretionary Housing) application where the cap bites</li>
+        <li>New rooms: fire-safe first (£400 a room), then let through the channels below</li>
+      </ul></div>
+      <div class="strat"><h4>Leave as is</h4><ul>
+        <li>No change to the agreement or the household</li>
+        <li>Rent uplifts still apply where a tenant qualifies, using the HMO or joint tenancy list above depending on the house</li>
+        <li>Details still collected when you are there: date of birth, NI number, phone, email, cap position</li>
+      </ul></div>
+    </div>
+    <p class="hint" style="margin-top:var(--space-3)">Rent is always the full 1-bed rate; a benefit cap shortfall is met by the CRF Housing Payment, never by a lower rent. Signed authority letter (authority_to_act_template.md) from every tenant so you can chase both council claims.</p>
+  </section>
+  <section class="card" id="gp-headline" aria-live="polite">
+    <h2>Where the money is</h2>
+    <p class="hint">Every rent is priced at the full 1-bed rate (LHA Direct, September 2026); a benefit cap shortfall is met by the CRF Housing Payment, never by a lower rent. Rent now is the expected rent of every live tenancy as if all were paid; cash flow voids are not deducted. Click any card for the rows behind it. The work itself is below, one pack per property.</p>
+    <div class="kpis level" id="kpis"></div>
+    <div class="detail" id="kpiDetail" hidden></div>
+  </section>
+  <section class="card" id="gp-packs">
+    <h2>The work, property by property</h2>
+    <p class="hint">In the order to do them. One visit closes a whole house: what to take, what happens with each tenant, what works are needed, what is submitted afterwards. Click a property to open its pack.</p>
+    <div class="filters">
+      <div class="seg" role="group" aria-label="Stage filter" id="stageSeg"></div>
+      <label class="chk"><input type="checkbox" id="showDone"> Show done and dropped</label>
+    </div>
+    <div id="packs"></div>
+    <details id="setupAll">
+      <summary>Set up every property (strategy, rooms, meters, council tax, who the tasks go to)</summary>
+      <p class="hint">Every property in the portfolio, including the ones with no work today and the agent-run ones. Lettable rooms is what drives the further potential figure on an agent-run house.</p>
+      <div class="tbl-wrap"><table id="setupTable"><thead><tr><th>Property</th><th>Strategy</th><th class="num">Extra</th><th class="num">Rooms</th><th>PAYG</th><th>Council tax</th><th>Tasks to</th></tr></thead><tbody id="setupBody"></tbody></table></div>
+    </details>
+  </section>
+  <section class="card" id="gp-approach">
+    <h2>How to raise it with a tenant</h2>
+    <p class="hint">Nothing here costs the tenant money, and the opening line has to say so before anything else. Read the honest bits too: on a joint tenancy there is a real change in what they are signing, and hiding it is what would spook them later.</p>
+    <div class="two">
+      <div>
+        <h4 class="small muted">Say this</h4>
+        <ul class="approach">
+          <li><b>Open with the money.</b> "This will not cost you anything, and it is not about arrears. Your rent is being put on the correct Universal Credit rate for your age, and Universal Credit pays the difference straight to us."</li>
+          <li><b>Why now.</b> "The rules changed. Someone 35 or over on Universal Credit gets the one-bedroom rate even in a room. You have been on the lower rate, and you should not have been."</li>
+          <li><b>What they do.</b> "One journal entry with me sitting next to you, and I fill in the forms. That is the whole job."</li>
+          <li><b>The cap, if it bites.</b> "There is a cap on total benefits. If it catches you, we apply to the council for a housing payment that comes to us, not to you. You keep your standard allowance either way."</li>
+          <li><b>Joint tenancy only.</b> "You two would go on one agreement for the whole house instead of a room each. Council tax then sits with you, you claim the reduction, and I pay anything left straight to the council."</li>
+          <li><b>Close on their gain.</b> "You get the whole house on the agreement, the paperwork done for you, and nothing more to pay."</li>
+        </ul>
+      </div>
+      <div>
+        <h4 class="small muted">Do not say this</h4>
+        <ul class="approach">
+          <li><b>Never "your rent is going up"</b> with no second half of the sentence. That is the sentence that gets a tenant on the phone to Shelter.</li>
+          <li><b>Never imply it is conditional</b> on them signing today, or that anything happens to their tenancy if they say no.</li>
+          <li><b>Do not gloss the joint tenancy.</b> Tell them plainly: both names on one agreement means each is liable for the whole rent if the other stops paying, and if one leaves, both sign a surrender before anything changes. Ask them if they are happy sharing with that person before you produce a pen.</li>
+          <li><b>Do not promise a CRF award.</b> It is a council decision and short term. Say "we apply", not "you will get".</li>
+          <li><b>Do not ask for bank details or a payment.</b> Nothing on this plan takes money from a tenant.</li>
+        </ul>
+        <h4 class="small muted" style="margin-top:var(--space-3)">If they push back</h4>
+        <ul class="approach">
+          <li>"Will I owe anything?" — No. The housing element rises with the rent; where the cap bites we claim the shortfall from the council, paid to us.</li>
+          <li>"Why do you need my National Insurance number?" — The council forms will not submit without it. It goes on the forms and nowhere else.</li>
+          <li>"What if I say no?" — Nothing changes. Your tenancy carries on as it is.</li>
+          <li>"Is this a trick to raise rent later?" — The rent is the published rate for the area, set by the government each April. It is on the form we fill in together.</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+  <section class="card" id="gp-form">
+    <h2>Tenant meeting form</h2>
+    <p class="hint">Fill this in with the tenant. Save writes every field to the tenant's record in Airtable, so the rent change, Council Tax Reduction and CRF forms can be completed from one place. Bank account numbers are not stored here: the council forms take them directly.</p>
+    <div class="filters"><label class="chk">Tenant <select class="sm" id="formTenant" style="max-width:320px"><option value="">Choose a tenant…</option></select></label></div>
+    <form id="meetingForm" class="mform" hidden autocomplete="off">
+      <fieldset><legend>Identity and contact</legend>
+        <label>Date of birth<input type="date" name="dob"></label>
+        <label>National Insurance number<input type="text" name="ni" placeholder="AA 12 34 56 A" maxlength="13"></label>
+        <label>Mobile<input type="tel" name="phone"></label>
+        <label>Email (matches the UC account)<input type="email" name="email"></label>
+        <label>ID seen<select name="idSeen"><option value="">—</option><option>Passport</option><option>Driving licence</option><option>Biometric residence permit</option><option>Other</option><option>None</option></select></label>
+        <label class="chk"><input type="checkbox" name="over35"> Aged 35 or over (confirmed)</label>
+      </fieldset>
+      <fieldset><legend>Universal Credit</legend>
+        <label>UC payment day (1 to 31)<input type="number" name="ucPayDay" min="1" max="31"></label>
+        <label>Rent due day<select name="dueDay"><option value="">—</option><option>1</option><option>2</option><option>3</option><option>4</option><option>5</option><option>6</option><option>7</option><option>8</option><option>9</option><option>10</option><option>11</option><option>12</option><option>13</option><option>14</option><option>15</option><option>16</option><option>17</option><option>18</option><option>19</option><option>20</option><option>21</option><option>22</option><option>23</option><option>24</option><option>25</option><option>26</option><option>27</option><option>28</option><option>29</option><option>30</option><option>31</option></select></label>
+        <label>Household<select name="household"><option value="">—</option><option>Single</option><option>Couple</option><option>With children</option></select></label>
+        <label>Benefit cap position<select name="capExemption"><option>Unknown</option><option>None (capped)</option><option>LCWRA</option><option>PIP or DLA</option><option>Carer</option><option>Earnings over threshold</option><option>Not on UC</option></select></label>
+        <label class="chk"><input type="checkbox" name="ucStatementSeen"> UC statement seen</label>
+      </fieldset>
+      <fieldset><legend>Council Tax Reduction and CRF Housing Payment</legend>
+        <label>Other adults in the home<input type="text" name="otherAdults"></label>
+        <label>Council tax account number<input type="text" name="ctAccount"></label>
+        <label>Household income a week (£)<input type="number" name="weeklyIncome" step="0.01" min="0"></label>
+        <label>Household spending a week (£)<input type="number" name="weeklySpending" step="0.01" min="0"></label>
+        <label class="chk"><input type="checkbox" name="bankStatements"> Two months' bank statements provided</label>
+        <label class="chk"><input type="checkbox" name="authoritySigned"> Authority to act signed</label>
+      </fieldset>
+      <fieldset><legend>Meeting</legend>
+        <label>Meeting date<input type="date" name="meetingDate"></label>
+        <label class="wide">Notes<textarea name="meetingNotes" rows="3"></textarea></label>
+      </fieldset>
+      <div class="row-actions"><button type="submit" class="btn btn-primary" id="meetingSave">Save to the tenant's record</button><span class="small muted" id="meetingStatus"></span></div>
+    </form>
+    <div id="docsBox" hidden>
+      <h4 class="small muted" style="margin-top:var(--space-4)">Scanned documents on this tenant's record</h4>
+      <p class="hint">Photo ID, bank statements, UC statement screen grabs, signed pages. They attach to the tenant in Airtable, so whoever fills a form has them to hand. Up to 3.7MB each.</p>
+      <div class="row-actions">
+        <input type="file" id="docInput" multiple accept="image/*,application/pdf" aria-label="Documents to attach">
+        <button type="button" class="btn" id="docUpload">Attach to the record</button>
+        <span class="small muted" id="docStatus"></span>
+      </div>
+      <div id="docList" class="doclist"></div>
+    </div>
+    <div class="two" style="margin-top:var(--space-4)">
+      <div><h4 class="small muted">Collect at the meeting (every tenant)</h4><ul class="small" style="margin:0;padding-left:18px">
+        <li>Date of birth and National Insurance number (both go into Airtable that day)</li>
+        <li>Photo ID and the latest UC statement (shows LCWRA, carer element, earnings: the cap exemptions)</li>
+        <li>Mobile number and email that match the UC account</li>
+        <li>Signed tenancy agreement and a copy for them</li>
+        <li>Bank details for the council forms; last two months' statements if the form asks</li>
+        <li>Signed authority letter so you can speak to Anglia Revenues about their claim</li>
+      </ul></div>
+      <div><h4 class="small muted">Submit in the same sitting</h4><ul class="small" style="margin:0;padding-left:18px">
+        <li><b>Universal Credit:</b> tenant reports "change to housing costs" in the journal with the new rent and date; you request the managed payment to landlord (UC47 route) if not already in place</li>
+        <li><b>Council Tax Reduction</b> (joint tenancies only): the Anglia Revenues <a href="https://www.angliarevenues.gov.uk/westsuffolk/index.cfm" target="_blank" rel="noopener">"Apply for Housing Benefit and/or Council Tax Reduction"</a> form. It asks about the tenant and everyone living with them: income, capital and other benefits; it saves against the tenant's email and a password with a reference code, so bring both. If the tenant applied for UC in the last two months and ticked Council Tax Reduction, no form is needed. When UC changes later, the "Rapid reclaim Council Tax Reduction" form (UC claimants only) is the quick route. Tell the council the liability changed.</li>
+        <li><b>CRF Housing Payment</b> (capped tenants only): the Anglia Revenues "Apply for CRF Housing Payment and/or Exceptional Hardship Payment" form (same portal). It asks for all household income and weekly expenditure, and the last two months' bank statements; the payment option lets it go to the landlord. Awards are short term or one-off, so diarise the renewal. Take the shortfall figure from the calculator and the signed authority letter (authority_to_act_template.md in Drive).</li>
+      </ul></div>
+    </div>
+
+  </section>
+  <section class="card" id="gp-ct">
+    <h2>Joint tenancies and council tax</h2>
+    <div class="two">
+      <div>
+        <p class="hint">A house let by the room is an HMO for council tax and the owner pays (from 1 December 2023). Let the whole house to two tenants on one agreement of six months or more and they become liable. They claim Council Tax Reduction from West Suffolk (run by Anglia Revenues Partnership; up to 100% for a working-age household on UC and not working) on an online form completed with them at the meeting, which the signed authority to act lets Roy or Kevin submit. Their Universal Credit housing costs do not change: each joint renter keeps their own 1-bed rate up to their share of the rent. Templates: ast_joint_template.md in ~/knowledge-os/templates, beside the standard AST.</p>
+        <h4 class="small muted">Houses where this applies</h4>
+        <div id="ctList"></div>
+      </div>
+      <div>
+        <h4 class="small muted">Council tax clause in the joint tenancy agreement (reviewed by the AI Legal and Compliance head, 9 Sep 2026)</h4>
+        <div class="clause" id="ctClause"></div>
+      </div>
+    </div>
+  </section>
+  <section class="card" id="gp-calc">
+    <h2>Benefit cap calculator</h2>
+    <p class="hint">Run this for any tenant going onto the 1-bed rate. The rent stays at the full rate; if the cap bites, this is the Crisis and Resilience Fund Housing Payment to apply for with them.</p>
+    <div class="calc">
+      <div class="form" id="calcForm">
+        <label>Household<select id="c-single"><option value="single">Single</option><option value="couple">Couple</option></select></label>
+        <label>Age<input id="c-age" type="number" min="18" max="100" value="35"></label>
+        <label>Children<input id="c-children" type="number" min="0" max="8" value="0"></label>
+        <label>Proposed rent a month (£)<input id="c-housing" type="number" min="0" step="0.01" value="900"></label>
+        <label>LCWRA<select id="c-lcwra"><option value="none">No</option><option value="existing">Yes, claim before Apr 2026</option><option value="new">Yes, new claim (Apr 2026 on)</option></select></label>
+        <label>Earnings a month after tax (£)<input id="c-earnings" type="number" min="0" step="1" value="0"></label>
+        <label class="chk wide"><input type="checkbox" id="c-pip"> Gets PIP or DLA</label>
+        <label class="chk wide"><input type="checkbox" id="c-carer"> Carer element in the award</label>
+      </div>
+      <div class="out" id="calcOut"></div>
+    </div>
+  </section>
+  <section class="card" id="gp-marketing">
+    <h2>Finding over-35 Universal Credit tenants</h2>
+    <p class="hint">Where the last 254 applicants came from (Agile Lets application form, 2017 to 2021), the channels that still work now, and the flow from enquiry to move-in.</p>
+    <div class="two">
+      <div class="tbl-wrap"><table aria-label="Applicant sources"><thead><tr><th>Channel</th><th class="num">Past applicants</th><th>What to do</th></tr></thead><tbody id="mktBody"></tbody></table></div>
+      <div id="mktFigures"></div>
+    </div>
+  </section>
+  <section class="card" id="gp-settings">
+    <h2>Assumptions</h2>
+    <p class="hint">Every figure the plan uses that is not read from a live record. Edit here; saved to Airtable so the same numbers show on every device. Rates change each April.</p>
+    <div class="settings-grid" id="settings"></div>
+    <div class="src" id="sources"></div>
+  </section>
+</div>
+<div id="toast" role="status" aria-live="polite"></div>
+
+<script src="js/ai-models.js?v=1"></script>
+<script src="js/config.js?v=62"></script>
+<script src="js/sync-bar.js?v=6"></script>
+<script src="js/growth-plan-model.js?v=3"></script>
+<script>
+(function () {
+  'use strict';
+  const M = window.GrowthPlanModel;
+  const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const gbp = (n, dp = 0) => '£' + Number(n || 0).toLocaleString('en-GB', { minimumFractionDigits: dp, maximumFractionDigits: dp });
+  const todayISO = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
+  const $ = id => document.getElementById(id);
+
+  let PAT = '';
+  const state = { raw: null, data: null, settings: {}, settingRows: {}, plan: null, ui: { stage: 'all', showDone: false, openPack: null, openKpi: null, formTenant: '' }, busy: new Set() };
+
+  // ── Auth (shared key with compliance.html and the Inbound Comms tracker) ──
+  function showAuth(err) {
+    $('authScreen').style.display = 'flex'; $('loadingOverlay').style.display = 'none'; $('dashboard').style.display = 'none';
+    $('authError').style.display = err ? 'block' : 'none';
+  }
+  function authenticate() {
+    const v = $('patInput').value.trim(); if (!v) return;
+    PAT = v; sessionStorage.setItem('_dlr_pat', v); localStorage.setItem('airtable_pat', v);
+    $('authScreen').style.display = 'none'; $('loadingOverlay').style.display = 'flex';
+    loadData();
+  }
+  $('authBtn').addEventListener('click', authenticate);
+  $('patInput').addEventListener('keydown', e => { if (e.key === 'Enter') authenticate(); });
+  $('refreshBtn').addEventListener('click', () => loadData());
+
+  // ── Airtable ──
+  async function apiFetch(url, opts, attempt = 0) {
+    const resp = await fetch(url, opts);
+    if (resp.status === 429 && attempt < 4) { await new Promise(r => setTimeout(r, 600 * Math.pow(2, attempt))); return apiFetch(url, opts, attempt + 1); }
+    if (resp.status === 401 || resp.status === 403) {
+      sessionStorage.removeItem('_dlr_pat'); localStorage.removeItem('airtable_pat');
+      showAuth(true); throw new Error('Auth failed');
+    }
+    if (!resp.ok) { let msg = ''; try { msg = (await resp.json()).error?.message || ''; } catch (e) { /* body unreadable: status is enough */ } throw new Error(`Airtable ${resp.status}${msg ? ': ' + msg : ''}`); }
+    return resp.json();
+  }
+  async function airtableFetch(tableId, params = {}) {
+    const records = []; let offset = null;
+    do {
+      const url = new URL(`https://api.airtable.com/v0/${BASE_ID}/${tableId}`);
+      url.searchParams.set('returnFieldsByFieldId', 'true');
+      Object.entries(params).forEach(([k, v]) => { if (Array.isArray(v)) v.forEach(x => url.searchParams.append(k, x)); else url.searchParams.append(k, v); });
+      if (offset) url.searchParams.set('offset', offset);
+      const data = await apiFetch(url, { headers: { Authorization: `Bearer ${PAT}` } });
+      records.push(...(data.records || [])); offset = data.offset || null;
+    } while (offset);
+    return records;
+  }
+  // Write responses come back keyed by field NAME unless asked otherwise; everything here reads by ID.
+  function airtableWrite(method, tableId, body) {
+    return apiFetch(`https://api.airtable.com/v0/${BASE_ID}/${tableId}`, { method, headers: { Authorization: `Bearer ${PAT}`, 'Content-Type': 'application/json' }, body: JSON.stringify(Object.assign({ returnFieldsByFieldId: true }, body)) });
+  }
+  const link = v => Array.isArray(v) ? v.map(x => typeof x === 'string' ? x : (x && x.id) || x) : [];
+  const sel = v => (v && typeof v === 'object') ? (v.name || '') : (v || '');
+  const first = v => Array.isArray(v) ? v[0] : v;
+
+  async function loadData() {
+    $('errorBox').style.display = 'none';
+    if (typeof markTabRefreshing === 'function') markTabRefreshing('growth-plan');
+    $('loadingText').textContent = 'Loading the portfolio…';
+    const slow = setTimeout(() => { $('loadingText').textContent = 'Still loading: seven tables, one moment…'; }, 3000);
+    try {
+      const P = GP.prop, U = GP.unit, T = GP.tenant, C = GP.tenancy, K = GP.cost;
+      const [props, units, tenants, tenancies, costs, planRows, settingRows] = await Promise.all([
+        airtableFetch(TABLES.properties, { 'fields[]': Object.values(P) }),
+        airtableFetch(TABLES.rentalUnits, { 'fields[]': Object.values(U) }),
+        airtableFetch(TABLES.tenants, { 'fields[]': Object.values(T) }),
+        airtableFetch(TABLES.tenancies, { 'fields[]': Object.values(C), filterByFormula: "{Tenancy Status}='Live'" }),
+        airtableFetch(TABLES.costs, { 'fields[]': Object.values(K), filterByFormula: "AND(OR({Payment Status}='In Payment',{Payment Status}='Overdue'),OR(FIND('ouncil',{Cost Name}),FIND(' CT',{Cost Name})),NOT(FIND('Bin',{Cost Name})),NOT(FIND('Debt',{Cost Name})),NOT(FIND('Enforcement',{Cost Name})))" }),
+        airtableFetch(TABLES.growthPlan, { 'fields[]': Object.values(GP.plan) }),
+        airtableFetch(TABLES.growthPlanSettings, { 'fields[]': Object.values(GP.settings) }),
+      ]);
+      clearTimeout(slow);
+      state.raw = { props, units, tenants, tenancies, costs, planRows, settingRows };
+      state.settings = {}; state.settingRows = {};
+      settingRows.forEach(r => { const k = r.fields[GP.settings.key]; if (!k) return; state.settings[k] = r.fields[GP.settings.value]; state.settingRows[k] = { id: r.id, label: r.fields[GP.settings.label] || k, note: r.fields[GP.settings.note] || '' }; });
+      state.data = normalise(state.raw);
+      recompute();
+      $('loadingOverlay').style.display = 'none'; $('dashboard').style.display = 'block';
+      renderAll();
+      registerChecks();
+      if (typeof markTabSynced === 'function') markTabSynced('growth-plan');
+    } catch (e) {
+      clearTimeout(slow);
+      if (e.message === 'Auth failed') return;
+      $('loadingOverlay').style.display = 'none'; $('dashboard').style.display = 'block';
+      $('errorBox').style.display = 'block'; $('errorBox').textContent = 'The portfolio could not be loaded: ' + e.message + '. Click Refresh to try again.';
+    }
+  }
+
+  function normalise(raw) {
+    const P = GP.prop, U = GP.unit, T = GP.tenant, C = GP.tenancy, K = GP.cost;
+    return {
+      properties: raw.props.filter(r => { const a = r.fields[P.active]; return !Array.isArray(a) || a.length === 0 || a.some(Boolean); }).map(r => ({
+        id: r.id, name: first(r.fields[P.name]) || r.fields[P.fullName] || r.id, type: sel(r.fields[P.type]), beds: r.fields[P.beds], agent: r.fields[P.agent] || '',
+        postcode: r.fields[P.postcode] || '', area: r.fields[P.area] || '', ctNote: r.fields[P.ctNote] || '',
+        lettableRooms: r.fields[P.lettableRooms] == null ? null : r.fields[P.lettableRooms], payg: sel(r.fields[P.payg]) || 'Unknown', ctPayer: sel(r.fields[P.ctPayer]) || 'Unknown',
+        strategy: sel(r.fields[P.strategy]) || '', plannedExtra: r.fields[P.plannedExtra] == null ? null : r.fields[P.plannedExtra],
+        owner: sel(r.fields[P.owner]) || '', ctBand: sel(r.fields[P.ctBand]) || '', ctAnnual: r.fields[P.ctAnnual] || 0,
+      })),
+      units: raw.units.map(r => ({ id: r.id, propertyId: link(r.fields[U.property])[0], number: r.fields[U.number], type: sel(r.fields[U.type]), status: sel(r.fields[U.status]), rent: r.fields[U.rent], beds: r.fields[U.beds], incomeType: sel(r.fields[U.incomeType]), tenantIds: link(r.fields[U.tenants]) })),
+      tenants: raw.tenants.map(r => ({ id: r.id, name: r.fields[T.name] || '', status: sel(r.fields[T.status]), dob: r.fields[T.dob] || '', payType: sel(r.fields[T.payType]), capExemption: sel(r.fields[T.capExemption]) || 'Unknown', notes: r.fields[T.notes] || '', phone: r.fields[T.phone] || '', email: r.fields[T.email] || '', ni: r.fields[T.ni] || '',
+        over35Confirmed: !!r.fields[T.over35], dueDay: sel(r.fields[T.dueDay]) || '', meetingDate: r.fields[T.meetingDate] || '', ucPayDay: r.fields[T.ucPayDay] || '', household: sel(r.fields[T.household]) || '', otherAdults: r.fields[T.otherAdults] || '',
+        idSeen: sel(r.fields[T.idSeen]) || '', ucStatementSeen: !!r.fields[T.ucStatementSeen], weeklyIncome: r.fields[T.weeklyIncome] || '', weeklySpending: r.fields[T.weeklySpending] || '', bankStatements: !!r.fields[T.bankStatements], authoritySigned: !!r.fields[T.authoritySigned], ctAccount: r.fields[T.ctAccount] || '', meetingNotes: r.fields[T.meetingNotes] || '',
+        documents: (r.fields[T.documents] || []).map(a => ({ id: a.id, filename: a.filename, url: a.url, size: a.size })) })),
+      tenancies: raw.tenancies.map(r => ({ id: r.id, tenantIds: link(r.fields[C.tenants]), unitId: link(r.fields[C.unit])[0], rent: r.fields[C.rent], actual: r.fields[C.actual] })),
+      costs: raw.costs.filter(r => link(r.fields[K.property]).length).map(r => ({ propertyId: link(r.fields[K.property])[0], shared: link(r.fields[K.property]).length > 1, name: r.fields[K.name] || '', monthly: M.monthlyFromFrequency(r.fields[K.expected], sel(r.fields[K.frequency])) })),
+      planRows: raw.planRows.map(r => ({ id: r.id, key: r.fields[GP.plan.key] || '', status: sel(r.fields[GP.plan.status]) || 'Candidate', taskIds: link(r.fields[GP.plan.tasks]) })),
+    };
+  }
+  function recompute() { state.plan = M.buildPlan(state.data, state.settings, todayISO()); window._growthPlan = state; }
+
+  // ── Render ──
+  function renderAll() { renderHeadline(); renderStageSeg(); renderPacks(); renderSetupAll(); renderCalc(); renderCt(); renderMeetingForm(); renderMarketing(); renderSettings(); }
+
+  // ── Tenant meeting form ──
+  const FORM_FIELDS = ['dob', 'ni', 'phone', 'email', 'idSeen', 'over35', 'ucPayDay', 'dueDay', 'household', 'capExemption', 'ucStatementSeen', 'otherAdults', 'ctAccount', 'weeklyIncome', 'weeklySpending', 'bankStatements', 'authoritySigned', 'meetingDate', 'meetingNotes'];
+  function renderMeetingForm() {
+    const sel = $('formTenant');
+    const tenants = [];
+    state.plan.properties.filter(v => v.mgmt === 'kevin').forEach(v => v.tenants.forEach(t => tenants.push({ id: t.id, label: `${t.name} (${v.name})` })));
+    tenants.sort((a, b) => a.label.localeCompare(b.label));
+    sel.innerHTML = '<option value="">Choose a tenant…</option>' + tenants.map(t => `<option value="${esc(t.id)}" ${t.id === state.ui.formTenant ? 'selected' : ''}>${esc(t.label)}</option>`).join('');
+    const form = $('meetingForm');
+    const t = state.data.tenants.find(x => x.id === state.ui.formTenant);
+    form.hidden = !t; $('docsBox').hidden = !t;
+    if (!t) return;
+    const map = { dob: t.dob, ni: t.ni, phone: t.phone, email: t.email, idSeen: t.idSeen, over35: t.over35Confirmed, ucPayDay: t.ucPayDay, dueDay: t.dueDay, household: t.household, capExemption: t.capExemption || 'Unknown', ucStatementSeen: t.ucStatementSeen, otherAdults: t.otherAdults, ctAccount: t.ctAccount, weeklyIncome: t.weeklyIncome, weeklySpending: t.weeklySpending, bankStatements: t.bankStatements, authoritySigned: t.authoritySigned, meetingDate: t.meetingDate || todayISO(), meetingNotes: t.meetingNotes };
+    FORM_FIELDS.forEach(k => { const el = form.elements[k]; if (!el) return; if (el.type === 'checkbox') el.checked = !!map[k]; else el.value = map[k] == null ? '' : map[k]; });
+    $('meetingStatus').textContent = t.meetingDate ? `Last saved meeting: ${t.meetingDate}` : 'No meeting saved yet';
+  }
+  async function saveMeetingForm() {
+    const t = state.data.tenants.find(x => x.id === state.ui.formTenant); if (!t) return;
+    const form = $('meetingForm'); const T = GP.tenant;
+    const v = k => { const el = form.elements[k]; return el.type === 'checkbox' ? el.checked : el.value.trim(); };
+    const ni = v('ni').replace(/\s+/g, '').toUpperCase();
+    if (ni && !/^[A-Z]{2}\d{6}[A-D]$/.test(ni)) { toast('National Insurance number should look like AA 12 34 56 A', true); return; }
+    const dob = v('dob'); if (dob) { const y = Number(dob.slice(0, 4)); if (y < 1920 || y > 2010) { toast('That date does not look like a tenant\'s date of birth', true); return; } }
+    const fields = {
+      [T.dob]: dob || null, [T.ni]: ni || null, [T.phone]: v('phone') || null, [T.email]: v('email') || null, [T.idSeen]: v('idSeen') || null, [T.over35]: v('over35'),
+      [T.ucPayDay]: v('ucPayDay') ? Number(v('ucPayDay')) : null, [T.dueDay]: v('dueDay') || null, [T.household]: v('household') || null, [T.capExemption]: v('capExemption') || 'Unknown', [T.ucStatementSeen]: v('ucStatementSeen'),
+      [T.otherAdults]: v('otherAdults') || null, [T.ctAccount]: v('ctAccount') || null, [T.weeklyIncome]: v('weeklyIncome') ? Number(v('weeklyIncome')) : null, [T.weeklySpending]: v('weeklySpending') ? Number(v('weeklySpending')) : null,
+      [T.bankStatements]: v('bankStatements'), [T.authoritySigned]: v('authoritySigned'), [T.meetingDate]: v('meetingDate') || null, [T.meetingNotes]: v('meetingNotes') || null,
+    };
+    await withBusy('meeting:' + t.id, async () => {
+      $('meetingSave').disabled = true;
+      await airtableWrite('PATCH', TABLES.tenants, { records: [{ id: t.id, fields }] });
+      Object.assign(t, { dob: dob, ni, phone: v('phone'), email: v('email'), idSeen: v('idSeen'), over35Confirmed: v('over35'), ucPayDay: v('ucPayDay'), dueDay: v('dueDay'), household: v('household'), capExemption: v('capExemption') || 'Unknown', ucStatementSeen: v('ucStatementSeen'), otherAdults: v('otherAdults'), ctAccount: v('ctAccount'), weeklyIncome: v('weeklyIncome'), weeklySpending: v('weeklySpending'), bankStatements: v('bankStatements'), authoritySigned: v('authoritySigned'), meetingDate: v('meetingDate'), meetingNotes: v('meetingNotes') });
+      toast(`Meeting saved to ${t.name}'s record`);
+    });
+    $('meetingSave').disabled = false;
+  }
+
+  function renderHeadline() {
+    const t = state.plan.totals;
+    const open = state.ui.openKpi;
+    const kpi = (key, l, v, d, cls = '') => `<div class="kpi clickable ${cls} ${open === key ? 'expanded' : ''}" role="button" tabindex="0" aria-expanded="${open === key}" data-kpi="${key}"><div class="l"><span>${esc(l)}</span><span class="chev" aria-hidden="true">▸</span></div><div class="v">${v}</div><div class="d">${esc(d)}</div></div>`;
+    $('kpis').innerHTML = [
+      kpi('rentNow', 'Rent now', gbp(t.rentNow), 'expected rent, every live tenancy, as if paid'),
+      kpi('paper', 'Paper trail', '+' + gbp(t.paper), 'rent uplifts and joint tenancy council tax', 'good'),
+      kpi('works', 'With works', '+' + gbp(t.works + t.remoteWorks), `rooms added per strategy, ${gbp(t.oneOff)} one-off at £400 a room`, 'good'),
+      kpi('voids', 'Voids and take-backs', '+' + gbp(t.voids + t.remoteVoids), 'Siddows let and the Collins houses', 'good'),
+      kpi('crf', 'CRF payments to apply for', gbp(t.crfShortfall), `${t.crfCount} application${t.crfCount === 1 ? '' : 's'}, benefit cap shortfall paid to you`, 'gold'),
+      kpi('agent', 'Further potential', '+' + gbp(t.agentHeld), 'every property outside the plan at the 1-bed rate', 'muted'),
+      kpi('potential', 'Total potential increase', '+' + gbp(t.potentialIncrease), 'the plan plus the further potential', 'good'),
+      kpi('maximum', 'Maximum rent', gbp(t.rentNow + t.potentialIncrease), 'a month if every lever lands'),
+    ].join('');
+    renderKpiDetail();
+  }
+
+  // What each metric is made of: the rows behind it, with the same numbers the card adds up.
+  function kpiRows(key) {
+    const p = state.plan, t = p.totals;
+    const live = l => l.status !== 'Dropped' && l.status !== 'Done';
+    const L = f => p.levers.filter(l => live(l) && f(l)).map(l => ({ name: l.title, amount: l.monthly, extra: l.capShortfall ? `CRF ${gbp(l.capShortfall, 2)}` : '' }));
+    switch (key) {
+      case 'rentNow': return { title: 'Rent now, by property (expected rent of every live tenancy)', rows: p.properties.filter(v => v.rentNow).sort((a, b) => b.rentNow - a.rentNow).map(v => ({ name: v.name, amount: v.rentNow, extra: v.mgmt === 'kevin' ? '' : (v.agent || 'agent') })), total: t.rentNow };
+      case 'paper': return { title: 'Paper trail: rent uplifts, top-ups and joint tenancy council tax', rows: L(l => l.counted === 'now' && l.stage <= 2), total: t.paper };
+      case 'works': return { title: 'With works: rooms added under the HMO strategy', rows: L(l => (l.counted === 'now' || l.counted === 'remote') && l.stage === 3), total: t.works + t.remoteWorks };
+      case 'voids': return { title: 'Voids and take-backs', rows: L(l => (l.counted === 'now' || l.counted === 'remote') && l.stage === 4), total: t.voids + t.remoteVoids };
+      case 'crf': return { title: 'CRF Housing Payments to apply for (benefit cap shortfall, paid to you)', rows: p.levers.filter(l => live(l) && l.counted !== 'agent' && l.capShortfall > 0).map(l => ({ name: l.title, amount: l.capShortfall, extra: '' })), total: t.crfShortfall };
+      case 'agent': return { title: 'Further potential: every property outside the plan at the 1-bed rate, by its own capacity (gains count, losses shown)', rows: p.levers.filter(l => l.counted === 'agent').map(l => ({ name: l.title, amount: l.monthly, extra: l.monthly > 0 ? 'counted' : 'not counted', sub: l.evidence[1] })), total: t.agentHeld };
+      case 'potential': return { title: 'Total potential increase', rows: [{ name: 'Paper trail', amount: t.paper }, { name: 'With works', amount: t.works + t.remoteWorks }, { name: 'Voids and take-backs', amount: t.voids + t.remoteVoids }, { name: 'Further potential', amount: t.agentHeld }], total: t.potentialIncrease };
+      case 'maximum': return { title: 'Maximum rent a month', rows: [{ name: 'Rent now', amount: t.rentNow }, { name: 'Total potential increase', amount: t.potentialIncrease }], total: t.rentNow + t.potentialIncrease };
+      default: return null;
+    }
+  }
+  function renderKpiDetail() {
+    const box = $('kpiDetail'); const d = state.ui.openKpi ? kpiRows(state.ui.openKpi) : null;
+    if (!d) { box.hidden = true; box.innerHTML = ''; return; }
+    box.hidden = false;
+    box.innerHTML = `<h3>${esc(d.title)}<span>${gbp(d.total, 2)}</span></h3><div class="tbl-wrap"><table><tbody>${d.rows.length ? d.rows.map(r => `<tr><td class="wrap">${esc(r.name)}${r.sub ? `<div class="small muted">${esc(r.sub)}</div>` : ''}</td><td class="muted">${esc(r.extra || '')}</td><td class="num ${r.amount < 0 ? 'neg' : ''}">${r.amount < 0 ? '−' : ''}${gbp(Math.abs(r.amount), 2)}</td></tr>`).join('') : '<tr><td class="empty">Nothing in this bucket</td></tr>'}</tbody></table></div>`;
+  }
+
+  function renderStageSeg() {
+    const names = state.plan.stageNames;
+    const have = new Set((state.plan.packs || []).map(pk => String(pk.stage)));
+    $('stageSeg').innerHTML = [['all', 'All']].concat(Object.keys(names).filter(k => k !== '5' && have.has(k)).map(k => [k, `${k} ${names[k]}`])).map(([k, l]) => `<button type="button" data-stage="${k}" aria-pressed="${state.ui.stage === k}">${esc(l)}</button>`).join('');
+  }
+
+  function renderCalc() {
+    const r = M.benefitCap({
+      single: $('c-single').value === 'single', age: Number($('c-age').value), children: Number($('c-children').value), housing: Number($('c-housing').value),
+      lcwra: $('c-lcwra').value === 'none' ? '' : $('c-lcwra').value, earnings: Number($('c-earnings').value), pipDla: $('c-pip').checked, carer: $('c-carer').checked,
+    }, state.settings);
+    const line = (k, v, cls = '') => `<div class="line ${cls}"><span>${esc(k)}</span><span>${v}</span></div>`;
+    $('calcOut').innerHTML = `<div class="big ${r.capped ? 'bad' : 'ok'}">${r.exempt ? 'Not capped' : r.capped ? `Capped: ${gbp(r.shortfall, 2)} short a month` : 'Under the cap'}</div>
+      <div class="small muted" style="margin-bottom:8px">${esc(r.exempt ? r.exemptReason : r.capped ? 'The housing element paid to you is cut by this amount; the tenant keeps their standard allowance. Apply for a CRF Housing Payment of this amount, paid to you, at the tenant meeting.' : `${gbp(r.cap - r.ucBeforeCap, 2)} of headroom below the cap`)}</div>
+      ${line('Standard allowance', gbp(r.standard, 2))}${r.elements ? line('Elements: ' + r.elementParts.join(', '), gbp(r.elements, 2)) : ''}${line('Housing costs (rent)', gbp(r.housing, 2))}${r.taperDeduction ? line('Less earnings taper', '−' + gbp(r.taperDeduction, 2)) : ''}
+      ${line('UC before the cap', gbp(r.ucBeforeCap, 2), 'total')}${line('Benefit cap', gbp(r.cap, 2))}${line('CRF Housing Payment to apply for', gbp(r.exempt ? 0 : r.shortfall, 2), 'total ' + (r.capped ? 'bad' : 'ok'))}`;
+  }
+
+  function renderCt() {
+    const cands = state.plan.levers.filter(l => l.lever === 'Council tax');
+    $('ctList').innerHTML = cands.length ? cands.map(l => `<div class="ten"><span class="n">${esc(l.property)}</span><span class="r">+${gbp(l.monthly, 2)}</span><span class="m">${esc(l.title.replace(l.property + ': ', ''))}${l.counted === 'alternative' ? ' · either/or with the rooms lever, which pays more' : ''}${l.counted === 'check' ? ' · confirm who pays council tax today' : ''}</span></div>`).join('') : '<div class="empty">No two-tenant house is on a room-by-room let with council tax on the owner.</div>';
+    // The side letter is retired (Kevin, 10 Sep 2026): Council Tax Reduction is an
+    // online form completed outside the tenancy, so the agreement carries liability
+    // and nothing about the rent is touched, which is what the Legal head asked for.
+    $('ctClause').textContent = `IN THE TENANCY AGREEMENT (clause 4.1.3)
+
+The Tenants are jointly and severally liable for council tax on the Premises throughout the Term and will apply for every reduction and discount they are entitled to.
+
+HOW THE REDUCTION IS CLAIMED
+
+Council Tax Reduction is an online form with Anglia Revenues Partnership, completed with the tenant at the meeting and outside the tenancy agreement. A working-age household on Universal Credit and not working can receive up to 100%. The signed authority to act is what lets Roy or Kevin submit it and chase it.
+
+BEFORE THE FIRST ONE IS SIGNED (all in writing)
+1. West Suffolk benefits team confirms a joint tenancy of the whole house leaves the owner-liable class, and how far back the claim can be backdated.
+2. Each tenant reports the joint rent and the other tenant's name in their UC journal and sends a copy.
+3. Each tenant understands joint and several liability and the rule when one leaves (written surrender, new tenancy, deposit re-protected).
+4. Mortgage lender and insurer accept one joint tenancy in place of room lets.
+5. The old room tenancies end by written surrender; one deposit, protected jointly within 30 days.
+6. One hour of a property solicitor over the agreement (no retainer exists; a decision for Kevin).`;
+  }
+
+  // Channels for over-35 Universal Credit tenants. Applicant counts are from the Agile Lets
+  // application form (254 rows, 2017 to 2021). DSS Move is dormant (registrations fail,
+  // listings stale; checked 9 Sep 2026) so it is out. Every channel below is a written route.
+  // Channels for over-35 Universal Credit tenants (Kevin, 9 Sep 2026). "Now" is what we use as
+  // soon as a room opens; "when we need more" is the reserve. DSS Move is dormant and out.
+  // Applicant counts are from the Agile Lets application form (254 rows, 2017 to 2021).
+  const MARKETING = [
+    ['now', 'SpareRoom', 38, 'One Bold ad per house: "35+ on Universal Credit welcome, rent matches the 1-bed rate, paid direct". Renew weekly.'],
+    ['now', 'OpenRent', 5, 'Free listing, "benefits welcome" ticked; feeds Rightmove and Zoopla.'],
+    ['now', 'Gumtree', 0, 'Room post with the rent and "35+ UC welcome".'],
+    ['now', 'Facebook Marketplace and Haverhill community groups', 0, 'Word of mouth fills rooms fastest; one post per room, repost weekly.'],
+    ['now', 'West Suffolk housing options (homelessness prevention)', 10, 'One email with the room list and criteria; they place single over-35s and can pay deposits and rent in advance.'],
+    ['now', 'Jimmy\'s Cambridge (night shelter move-on)', 17, 'Email the move-on worker: rooms for over-35s, LCWRA or PIP claimants preferred (no cap).'],
+    ['later', 'Find My Move and MakeUrMove benefits lists', 0, 'Free landlord registration; both aggregate benefits-friendly lets.'],
+    ['later', 'Emmaus, Cambridge Cyrenians, Wintercomfort (move-on)', 0, 'Email each move-on worker with the same brief as Jimmy\'s.'],
+    ['later', 'Current tenants, friends and previous tenants', 16, 'Text every current tenant: £50 credit for a referral that signs.'],
+    ['later', 'Probation, mental health and support teams', 4, 'Support workers in the applicant file; a room with a named support contact lets faster and stays let.'],
+    ['later', 'Local referrers (Rob Saggs and the like)', 7, 'One message: "rooms free again for over-35s on UC".'],
+    ['later', 'Councils: East Cambs, Braintree, Huntingdonshire, Cambridge', 0, 'Housing options teams outside West Suffolk; one email with the room list.'],
+  ];
+  const FLOW = ['Enquiry arrives (any channel) and is logged as a task', 'Screen in writing: 35 or over, on UC, single, household size; ask for the latest UC statement', 'Cap check on this page: exempt (LCWRA, carer, PIP, earnings) or CRF Housing Payment needed', 'Roy shows the room; ID and references collected', 'Tenant meeting: rent at the 1-bed rate, UC journal change, managed payment request, CRF form if capped', 'Move in: PAYG meters in the tenant\'s name, keys, Airtable updated (DOB, NI, phone, email)'];
+  function visiblePacks() {
+    return (state.plan.packs || []).filter(pk => {
+      if (state.ui.stage !== 'all' && String(pk.stage) !== state.ui.stage) return false;
+      if (!state.ui.showDone && !pk.openCount && !(pk.decide || []).length) return false;
+      return true;
+    });
+  }
+  function renderSetupAll() {
+    const rows = (state.plan.properties || []).slice().sort((a, b) => (a.mgmt === 'kevin' ? 0 : 1) - (b.mgmt === 'kevin' ? 0 : 1) || a.name.localeCompare(b.name));
+    const sel = (id, field, opts, val, label) => `<select class="sm" data-prop-field="${field}" data-prop="${esc(id)}" aria-label="${esc(label)}">${opts.map(o => `<option value="${esc(o)}" ${o === val ? 'selected' : ''}>${esc(o || 'Not set')}</option>`).join('')}</select>`;
+    $('setupBody').innerHTML = rows.map(v => `<tr><td class="wrap">${esc(v.name)}<div class="small muted">${esc(v.mgmt === 'kevin' ? (v.area || 'you manage this') : (v.agent || 'agent-run'))}</div></td>
+      <td>${v.mgmt === 'kevin' ? sel(v.id, 'strategy', ['', 'Joint tenancy', 'HMO', 'Leave as is'], v.strategy, `Strategy at ${v.name}`) : '<span class="muted small">agent-run</span>'}</td>
+      <td class="num">${v.mgmt === 'kevin' ? `<input class="sm" type="number" min="0" max="6" data-prop-field="plannedExtra" data-prop="${esc(v.id)}" value="${v.plannedExtra ? esc(v.plannedExtra) : ''}" placeholder="0" aria-label="Extra tenants at ${esc(v.name)}">` : ''}</td>
+      <td class="num"><input class="sm" type="number" min="1" max="12" data-prop-field="lettableRooms" data-prop="${esc(v.id)}" value="${v.lettable == null ? '' : esc(v.lettable)}" placeholder="${esc(v.roomsInUse || '')}" aria-label="Lettable rooms at ${esc(v.name)}"></td>
+      <td>${sel(v.id, 'payg', ['Unknown', 'Yes', 'No'], v.payg, `PAYG meters at ${v.name}`)}</td>
+      <td>${sel(v.id, 'ctPayer', ['Unknown', 'Owner', 'Tenants'], v.ctPayer, `Council tax payer at ${v.name}`)}</td>
+      <td>${v.mgmt === 'kevin' ? sel(v.id, 'owner', ['', 'Roy', 'Kevin'], v.owner, `Tasks go to at ${v.name}`) : ''}</td></tr>`).join('');
+  }
+
+  function renderPacks() {
+    const packs = visiblePacks();
+    if (!packs.length) { $('packs').innerHTML = '<div class="empty">No property has work outstanding on this filter.</div>'; return; }
+    const li = (arr, cls) => arr.map(x => `<li class="${cls || ''}">${esc(x)}</li>`).join('');
+    $('packs').innerHTML = packs.map((pk, i) => {
+      const open = state.ui.openPack === pk.id;
+      const busy = k => state.busy.has(k) ? 'disabled' : '';
+      const done = pk.levers.filter(l => l.status === 'Done').length;
+      const inProgress = pk.levers.some(l => l.status === 'In progress');
+      const head = `<div class="pack-head" role="button" tabindex="0" data-pack="${esc(pk.id)}" aria-expanded="${open}">
+        <div class="pack-n"><span class="idx">${i + 1}</span><span><b>${esc(pk.name)}</b>${pk.area ? ` <span class="muted small">${esc(pk.area)}</span>` : ''}
+          <div class="pack-meta"><span class="pill stage">${pk.stage} ${esc(state.plan.stageNames[pk.stage] || '')}</span> <span class="pill">${esc(pk.strategy)}</span> <span class="pill">${esc(pk.owner)}</span>${inProgress ? ' <span class="pill st-in-progress">In progress</span>' : ''}${done ? ` <span class="pill st-done">${done} done</span>` : ''}${pk.local === false ? ' <span class="pill">away</span>' : ''}${(pk.flags || []).length ? ` <span class="pill check">${esc(pk.flags.length)} to check</span>` : ''}</div></span></div>
+        <div class="pack-fig"><b>+${gbp(pk.monthly, 2)}</b><span class="muted small">a month${pk.oneOff ? ` · ${gbp(pk.oneOff)} one-off` : ''}${pk.crf ? ` · CRF ${gbp(pk.crf, 2)}` : ''}</span></div>
+        <span class="chev" aria-hidden="true">▸</span></div>`;
+      if (!open) return `<div class="pack">${head}</div>`;
+      const tenants = pk.tenants.map(t => `<div class="pt ${t.blocked ? 'blocked' : ''}">
+        <div class="pt-h"><b>${esc(t.name)}</b> <span class="muted small">${t.age != null ? 'age ' + t.age : (t.over35Confirmed ? '35+ confirmed' : 'age unknown')}${t.rentNow ? ' · ' + gbp(t.rentNow, 2) : ''}${t.target ? ' → ' + gbp(t.target, 2) : ''}</span>${t.uplift ? `<span class="pt-up">+${gbp(t.uplift, 2)}</span>` : ''}</div>
+        ${t.note ? `<div class="pt-note">${esc(t.note)}</div>` : ''}
+        ${t.blocked ? `<div class="pt-fix"><span class="inl">Date of birth: <input class="sm" type="date" data-dob="${esc(t.id)}" aria-label="Date of birth for ${esc(t.name)}"><button class="btn btn-sm" data-act="save-dob" data-tenant="${esc(t.id)}">Save</button></span> <span class="muted">or</span> <button class="btn btn-sm" data-act="confirm-35" data-tenant="${esc(t.id)}">Confirm 35 or over</button></div>` : ''}
+        <div class="pt-cols">
+          <div><h5>Sign</h5><ul>${t.sign.length ? li(t.sign) : '<li class="muted">Nothing to sign</li>'}</ul></div>
+          <div><h5>Collect</h5><ul>${t.collect.length ? li(t.collect) : '<li class="muted">Details complete</li>'}</ul></div>
+          <div><h5>Submit</h5><ul>${t.forms.length ? li(t.forms) : '<li class="muted">No forms</li>'}</ul></div>
+        </div>
+        <div class="row-actions"><button class="btn btn-sm" data-act="open-form" data-tenant="${esc(t.id)}">Open the meeting form</button></div></div>`).join('');
+      const block = (title, arr) => arr.length ? `<div class="pack-block"><h4>${title}</h4><ul>${li(arr)}</ul></div>` : '';
+      const shown = pk.levers.filter(l => state.ui.showDone || (l.status !== 'Done' && l.status !== 'Dropped'));
+      const levers = `<div class="pack-block"><h4>Levers on this property</h4><div class="tbl-wrap"><table><tbody>${shown.map(l => `<tr class="${l.status === 'Done' || l.status === 'Dropped' ? 'dim' : ''}">
+        <td class="wrap">${esc(l.title)}<div class="small muted">${esc(l.evidence[0] || '')}</div>${l.needs && l.needs.length ? `<div class="small note">${esc(l.needs.join(' · '))}</div>` : ''}</td>
+        <td><span class="pill ${esc(l.effort.toLowerCase())}">${esc(l.effort)}</span> <span class="pill st-${esc(l.status.toLowerCase().replace(/\s+/g, '-'))}">${esc(l.status)}</span></td>
+        <td class="num">${l.monthly ? '+' + gbp(l.monthly, 2) : '—'}${l.capShortfall ? `<div class="small muted">CRF ${gbp(l.capShortfall, 2)}</div>` : ''}</td>
+        <td><div class="row-actions">${l.status === 'Candidate' ? `<button class="btn btn-sm" data-act="adopt" data-key="${esc(l.key)}" ${busy(l.key)}>Adopt</button>` : ''}${(l.status !== 'Done' && l.status !== 'Dropped') ? `<button class="btn btn-sm btn-primary" data-act="task" data-key="${esc(l.key)}" ${busy(l.key)}>Task</button>` : ''}${(l.status === 'Adopted' || l.status === 'In progress') ? `<button class="btn btn-sm" data-act="done" data-key="${esc(l.key)}" ${busy(l.key)}>Done</button>` : ''}${(l.status !== 'Done' && l.status !== 'Dropped') ? `<button class="btn btn-sm btn-ghost" data-act="drop" data-key="${esc(l.key)}" ${busy(l.key)}>Drop</button>` : `<button class="btn btn-sm btn-ghost" data-act="reopen" data-key="${esc(l.key)}" ${busy(l.key)}>Reopen</button>`}</div></td></tr>`).join('')}</tbody></table></div></div>`;
+      const v = state.plan.properties.find(x => x.id === pk.id) || {};
+      const fields = v.mgmt === 'kevin' ? `<div class="pack-block"><h4>How this property is set up</h4><div class="prop-fields">
+        <label>Strategy<select class="sm" data-prop-field="strategy" data-prop="${esc(pk.id)}">${['', 'Joint tenancy', 'HMO', 'Leave as is'].map(o => `<option value="${o}" ${o === v.strategy ? 'selected' : ''}>${o || 'Not set'}</option>`).join('')}</select></label>
+        <label>Extra tenants (HMO)<input class="sm" type="number" min="0" max="6" data-prop-field="plannedExtra" data-prop="${esc(pk.id)}" value="${v.plannedExtra ? esc(v.plannedExtra) : ''}" placeholder="0"></label>
+        <label>Lettable rooms<input class="sm" type="number" min="1" max="12" data-prop-field="lettableRooms" data-prop="${esc(pk.id)}" value="${v.lettable == null ? '' : esc(v.lettable)}" placeholder="${esc(v.roomsInUse || '')}"></label>
+        <label>PAYG meters<select class="sm" data-prop-field="payg" data-prop="${esc(pk.id)}">${['Unknown', 'Yes', 'No'].map(o => `<option ${o === v.payg ? 'selected' : ''}>${o}</option>`).join('')}</select></label>
+        <label>Council tax payer<select class="sm" data-prop-field="ctPayer" data-prop="${esc(pk.id)}">${['Unknown', 'Owner', 'Tenants'].map(o => `<option ${o === v.ctPayer ? 'selected' : ''}>${o}</option>`).join('')}</select></label>
+        <label>Tasks go to<select class="sm" data-prop-field="owner" data-prop="${esc(pk.id)}">${['', 'Roy', 'Kevin'].map(o => `<option value="${o}" ${o === v.owner ? 'selected' : ''}>${o || 'Default'}</option>`).join('')}</select></label>
+        </div>${pk.ctBand ? `<div class="small muted" style="margin-top:4px">Council tax band ${esc(pk.ctBand)}, ${gbp(pk.ctBandMonthly, 2)} a month${pk.ctLive ? ` · you pay ${gbp(pk.ctLive, 2)} today` : ' · nothing paid today'}</div>` : ''}</div>` : '';
+      return `<div class="pack open">${head}<div class="pack-body">
+        ${(pk.flags || []).length ? `<div class="pack-block"><h4>Check this first</h4><ul>${pk.flags.map(x => `<li class="note">${esc(x)}</li>`).join('')}</ul></div>` : ''}
+        ${block('Before you go', pk.before)}
+        <div class="pack-block"><h4>At the property</h4>${tenants || '<div class="empty">No tenant meeting needed here</div>'}</div>
+        ${block('Works', pk.works)}
+        ${block('Afterwards', pk.after)}
+        ${pk.decide && pk.decide.length ? `<div class="pack-block"><h4>To decide</h4><ul>${pk.decide.map(d => `<li>${esc(d.title)} <b>+${gbp(d.monthly, 2)}</b>${d.counted === 'alternative' ? ' <span class="muted">either/or with the work above, which pays more</span>' : ''}${d.needs && d.needs.length ? `<div class="small note">${esc(d.needs.join(' · '))}</div>` : ''}</li>`).join('')}</ul></div>` : ''}
+        ${levers}
+        ${fields}
+      </div></div>`;
+    }).join('');
+  }
+  // Scanned documents attach to the tenant's Airtable record via the content API
+  // (base64, 5MB a file). Kept on the tenant, never in the repo or the browser.
+  function renderDocs() {
+    const box = $('docsBox'); const t = state.data.tenants.find(x => x.id === state.ui.formTenant);
+    box.hidden = !t;
+    if (!t) return;
+    const docs = t.documents || [];
+    $('docList').innerHTML = docs.length
+      ? docs.map(d => d.url
+          ? `<a class="doc" href="${esc(d.url)}" target="_blank" rel="noopener">${esc(d.filename)}<span class="muted small">${d.size ? Math.round(d.size / 1024) + ' KB' : ''}</span></a>`
+          : `<span class="doc">${esc(d.filename)}<span class="muted small">on the record; refresh to open</span></span>`).join('')
+      : '<div class="empty">Nothing attached yet</div>';
+    $('docStatus').textContent = docs.length ? `${docs.length} on file` : '';
+  }
+  async function uploadDocs() {
+    const t = state.data.tenants.find(x => x.id === state.ui.formTenant); if (!t) return;
+    const files = Array.from($('docInput').files || []);
+    if (!files.length) { toast('Choose a file first', true); return; }
+    // Airtable caps the whole request at 5MB and base64 inflates a file by about a third,
+    // so the real ceiling on the file itself is ~3.7MB.
+    const LIMIT = 3.7 * 1024 * 1024;
+    const tooBig = files.find(f => f.size > LIMIT);
+    if (tooBig) { toast(`${tooBig.name} is over 3.7MB: split it or photograph it smaller`, true); return; }
+    $('docUpload').disabled = true;
+    const doneNames = new Set();
+    try {
+      for (const f of files) {
+        $('docStatus').textContent = `Uploading ${f.name}…`;
+        const b64 = await new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(String(r.result).split(',')[1]); r.onerror = () => rej(new Error('could not read ' + f.name)); r.readAsDataURL(f); });
+        const resp = await fetch(`https://content.airtable.com/v0/${BASE_ID}/${t.id}/${GP.tenant.documents}/uploadAttachment`, {
+          method: 'POST', headers: { Authorization: `Bearer ${PAT}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ contentType: f.type || 'application/octet-stream', file: b64, filename: f.name }),
+        });
+        if (!resp.ok) { let m = ''; try { m = (await resp.json()).error?.message || ''; } catch (e) { /* body unreadable: status is enough */ } throw new Error(`${f.name}: ${resp.status}${m ? ' ' + m : ''}`); }
+        const out = await resp.json();
+        const fld = (out.fields || {})[GP.tenant.documents];
+        doneNames.add(f.name);
+        if (Array.isArray(fld)) t.documents = fld.map(a => ({ id: a.id, filename: a.filename, url: a.url, size: a.size }));
+        else t.documents = (t.documents || []).concat([{ id: '', filename: f.name, url: '', size: f.size }]);
+      }
+      toast(`Attached to ${t.name}'s record`);
+    } catch (e) {
+      // Whatever went up stays up: name the ones that did so a retry cannot double them.
+      toast(`Not attached: ${e.message}${doneNames.size ? `. Already on the record: ${Array.from(doneNames).join(', ')}` : ''}`, true);
+    } finally {
+      $('docInput').value = '';
+      $('docUpload').disabled = false; renderDocs();
+    }
+  }
+
+  function renderMarketing() {
+    const group = (g, label) => `<tr class="agent-group"><td colspan="3"><b>${label}</b></td></tr>` + MARKETING.filter(m => m[0] === g).map(([, c, n, d]) => `<tr><td>${esc(c)}</td><td class="num">${n || '—'}</td><td class="wrap">${esc(d)}</td></tr>`).join('');
+    $('mktBody').innerHTML = group('now', 'Use now, as soon as a room opens') + group('later', 'When we need more leads') + `<tr><td colspan="3" class="wrap"><b>Flow when a room opens:</b> ${FLOW.map((f, i) => `${i + 1}. ${esc(f)}`).join(' → ')}</td></tr>`;
+    const t = state.plan.totals; const roomLevers = state.plan.levers.filter(l => (l.lever === 'Room release' || l.lever === 'New room let') && l.status !== 'Dropped');
+    const rooms = roomLevers.reduce((n, l) => n + (l.count || 0), 0);
+    $('mktFigures').innerHTML = `<div class="kpis"><div class="kpi"><div class="l">Rooms to fill</div><div class="v">${rooms}</div><div class="d">across ${roomLevers.length} house${roomLevers.length === 1 ? '' : 's'} once freed</div></div><div class="kpi good"><div class="l">Worth a month</div><div class="v">+${gbp(t.works + t.remoteWorks)}</div><div class="d">net of utilities and council tax</div></div><div class="kpi gold"><div class="l">Target tenant</div><div class="v">35+, UC</div><div class="d">LCWRA or PIP on the award means no cap and no CRF form: 1 in 3 past applicants had ESA or PIP</div></div></div>
+      <p class="hint" style="margin-top:12px">From ${gbp(t.rentNow)} a month now to ${gbp(t.rentNow + t.actionable)} with every actionable lever, and ${gbp(t.rentNow + t.maximum)} if every unknown lands your way. Fill rooms in stage order: paper trail first so the rate is right before a new tenant signs.</p>`;
+  }
+
+  function renderSettings() {
+    const keys = Object.keys(state.settingRows).sort();
+    $('settings').innerHTML = keys.length ? keys.map(k => `<div class="setting"><span class="lbl">${esc(state.settingRows[k].label)}<span class="note">${esc(state.settingRows[k].note)}</span></span><input type="number" step="0.01" data-setting="${esc(k)}" value="${esc(state.settings[k])}" aria-label="${esc(state.settingRows[k].label)}"></div>`).join('') : '<div class="empty">No settings rows found in Airtable.</div>';
+    $('sources').innerHTML = `Sources: <a href="https://lha-direct.voa.gov.uk/" target="_blank" rel="noopener">LHA rates by postcode (LHA Direct, read September 2026)</a> · <a href="https://england.shelter.org.uk/professional_resources/legal/benefits/universal_credit/size-related_criteria_for_universal_credit_housing_costs_element" target="_blank" rel="noopener">Shelter Legal: size criteria and the 35+ rule</a> · <a href="https://www.legislation.gov.uk/uksi/2023/1175/introduction/made" target="_blank" rel="noopener">SI 2023/1175 council tax and HMOs</a> · <a href="https://www.citizensadvice.org.uk/benefits/universal-credit/claiming/check-how-universal-credit-is-changing-in-2026/" target="_blank" rel="noopener">Citizens Advice: UC rates from April 2026</a> · <a href="https://www.angliarevenues.gov.uk/services/housing-benefits/discretionary/index.cfm" target="_blank" rel="noopener">Anglia Revenues: CRF Housing Payment</a> · <a href="https://www.angliarevenues.gov.uk/services/housing-benefits/apply//?council=westsuffolk" target="_blank" rel="noopener">Anglia Revenues: apply for Council Tax Reduction</a>. LHA table valid to ${esc(M.LHA_VALID_TO)}.`;
+  }
+
+  // ── Actions ──
+  function toast(msg, err) { const t = $('toast'); t.textContent = msg; t.className = 'show' + (err ? ' err' : ''); clearTimeout(t._h); t._h = setTimeout(() => { t.className = ''; }, err ? 6000 : 3500); }
+  function leverByKey(key) { return state.plan.levers.find(l => l.key === key); }
+  function planRowFields(l, status) {
+    const f = { [GP.plan.title]: l.title, [GP.plan.key]: l.key, [GP.plan.lever]: l.lever, [GP.plan.monthly]: Number(l.monthly), [GP.plan.oneOff]: Number(l.oneOff || 0), [GP.plan.effort]: l.effort, [GP.plan.status]: status, [GP.plan.evidence]: l.evidence.join('\n'), [GP.plan.notes]: (l.needs || []).join('\n') };
+    if (l.propertyId) f[GP.plan.property] = [l.propertyId];
+    if (l.tenantId) f[GP.plan.tenant] = [l.tenantId];
+    if (l.unitId) f[GP.plan.unit] = [l.unitId];
+    return f;
+  }
+  async function upsertPlanRow(l, status, extra = {}) {
+    const fields = Object.assign(planRowFields(l, status), extra);
+    if (status === 'Adopted' && !l.planId) fields[GP.plan.adoptedOn] = todayISO();
+    if (status === 'Done') fields[GP.plan.doneOn] = todayISO();
+    // typecast lets a new Lever name (e.g. "CRF top-up") create its select option instead of failing.
+    const body = l.planId ? { records: [{ id: l.planId, fields }], typecast: true } : { records: [{ fields }], typecast: true };
+    const res = await airtableWrite(l.planId ? 'PATCH' : 'POST', TABLES.growthPlan, body);
+    const rec = res.records[0];
+    const taskIds = fields[GP.plan.tasks] ? fields[GP.plan.tasks].slice() : link((rec.fields || {})[GP.plan.tasks]);
+    const existing = state.data.planRows.find(r => r.key === l.key);
+    if (existing) { existing.status = status; existing.id = rec.id; existing.taskIds = taskIds.length ? taskIds : existing.taskIds; }
+    else state.data.planRows.push({ id: rec.id, key: l.key, status, taskIds });
+    return rec;
+  }
+  async function withBusy(key, fn) {
+    if (state.busy.has(key)) return;
+    state.busy.add(key); renderPacks();
+    try { await fn(); } catch (e) { toast('Not saved: ' + e.message, true); }
+    finally { state.busy.delete(key); recompute(); renderAll(); }
+  }
+  async function setStatus(key, status) {
+    const l = leverByKey(key); if (!l) return;
+    await withBusy(key, async () => { await upsertPlanRow(l, status); toast(`${status}: ${l.title}`); });
+  }
+  async function createTask(key) {
+    const l = leverByKey(key); if (!l) return;
+    await withBusy(key, async () => {
+      const owner = l.owner === 'Roy' ? GP.owners.roy : GP.owners.kevin;
+      const due = new Date(); due.setDate(due.getDate() + 7);
+      const dueISO = `${due.getFullYear()}-${String(due.getMonth() + 1).padStart(2, '0')}-${String(due.getDate()).padStart(2, '0')}`;
+      const desc = [`First step: ${l.firstStep}`, '', `Worth +£${Number(l.monthly).toFixed(2)} a month${l.monthlyIfExempt > l.monthly ? ` (+£${Number(l.monthlyIfExempt).toFixed(2)} if the tenant is exempt from the benefit cap)` : ''}${l.oneOff ? `, one-off £${Number(l.oneOff).toFixed(0)}` : ''}.`, '', 'Evidence:', ...l.evidence.map(e => '- ' + e)]
+        .concat(l.needs.length ? ['', 'Before it lands:', ...l.needs.map(e => '- ' + e)] : [])
+        .concat(['', 'Raised from the Growth Plan page (growth-plan.html). Nothing is sent to a tenant or council from the page: this task is the send.']).join('\n');
+      const fields = { [TASK_FIELDS.name]: `Growth plan: ${l.title}`, [TASK_FIELDS.status]: 'Upcoming', [TASK_FIELDS.description]: desc, [TASK_FIELDS.business]: [GP.realEstateBusinessId], [TASK_FIELDS.dueDate]: dueISO, [TASK_FIELDS.assignee]: { email: owner.email }, [TASK_FIELDS.teamMember]: [owner.teamMember] };
+      const res = await airtableWrite('POST', TABLES.tasks, { records: [{ fields }] });
+      const taskId = res.records[0].id;
+      const status = (l.status === 'Candidate' || l.status === 'Adopted') ? 'In progress' : l.status;
+      await upsertPlanRow(l, status, { [GP.plan.tasks]: (l.taskIds || []).concat([taskId]) });
+      toast(`Task created for ${owner.name}: ${l.title}`);
+    });
+  }
+  async function saveDob(tenantId, btn) {
+    const holder = btn && btn.closest('.inl');
+    const input = (holder && holder.querySelector('input[data-dob]')) || document.querySelector(`input[data-dob="${tenantId}"]`); const v = input && input.value;
+    if (!v) { toast('Enter a date of birth first', true); return; }
+    const y = Number(v.slice(0, 4)); if (y < 1920 || y > 2010) { toast('That date does not look like a tenant\'s date of birth', true); return; }
+    await withBusy('dob:' + tenantId, async () => {
+      const t = state.data.tenants.find(x => x.id === tenantId);
+      const note = ((t && t.notes) || '').trim(); const stamp = `DOB ${v} entered on the Growth Plan page, ${todayISO()}.`;
+      await airtableWrite('PATCH', TABLES.tenants, { records: [{ id: tenantId, fields: { [GP.tenant.dob]: v, [GP.tenant.notes]: note ? note + '\n' + stamp : stamp } }] });
+      if (t) { t.dob = v; t.notes = note ? note + '\n' + stamp : stamp; }
+      toast(`Date of birth saved for ${t ? t.name : 'tenant'}`);
+    });
+  }
+  async function confirm35(tenantId) {
+    await withBusy('c35:' + tenantId, async () => {
+      await airtableWrite('PATCH', TABLES.tenants, { records: [{ id: tenantId, fields: { [GP.tenant.over35]: true } }] });
+      const t = state.data.tenants.find(x => x.id === tenantId); if (t) t.over35Confirmed = true;
+      toast(`${t ? t.name : 'Tenant'} recorded as 35 or over`);
+    });
+  }
+  async function savePropField(propId, field, value) {
+    const map = { lettableRooms: GP.prop.lettableRooms, payg: GP.prop.payg, ctPayer: GP.prop.ctPayer, strategy: GP.prop.strategy, plannedExtra: GP.prop.plannedExtra, owner: GP.prop.owner };
+    const numeric = field === 'lettableRooms' || field === 'plannedExtra';
+    await withBusy('prop:' + propId + field, async () => {
+      const v = numeric ? (value === '' ? null : Number(value)) : (value || null);
+      await airtableWrite('PATCH', TABLES.properties, { records: [{ id: propId, fields: { [map[field]]: v } }] });
+      const p = state.data.properties.find(x => x.id === propId); if (p) p[field] = numeric ? v : (v || '');
+      toast('Saved');
+    });
+  }
+  async function saveSetting(key, value) {
+    const row = state.settingRows[key]; if (!row) return;
+    const n = Number(value); if (!Number.isFinite(n)) { toast('Enter a number', true); return; }
+    await withBusy('set:' + key, async () => {
+      await airtableWrite('PATCH', TABLES.growthPlanSettings, { records: [{ id: row.id, fields: { [GP.settings.value]: n } }] });
+      state.settings[key] = n; toast(`${row.label}: ${n}`);
+    });
+  }
+
+  document.addEventListener('click', e => {
+    const b = e.target.closest('[data-act]');
+    if (b) {
+      const act = b.dataset.act, key = b.dataset.key;
+      if (act === 'adopt') return setStatus(key, 'Adopted');
+      if (act === 'done') return setStatus(key, 'Done');
+      if (act === 'drop') return setStatus(key, 'Dropped');
+      if (act === 'reopen') return setStatus(key, 'Adopted');
+      if (act === 'task') return createTask(key);
+      if (act === 'save-dob') return saveDob(b.dataset.tenant, b);
+      if (act === 'confirm-35') return confirm35(b.dataset.tenant);
+      if (act === 'open-form') { state.ui.formTenant = b.dataset.tenant; renderMeetingForm(); renderDocs(); $('gp-form').scrollIntoView({ behavior: 'smooth', block: 'start' }); return; }
+    }
+    const ph = e.target.closest('.pack-head');
+    if (ph && !e.target.closest('button')) { state.ui.openPack = state.ui.openPack === ph.dataset.pack ? null : ph.dataset.pack; renderPacks(); const nh = document.querySelector(`.pack-head[data-pack="${ph.dataset.pack}"]`); if (nh) nh.focus(); return; }
+    const st = e.target.closest('#stageSeg button'); if (st) { state.ui.stage = st.dataset.stage; renderStageSeg(); renderPacks(); return; }
+    const card = e.target.closest('.kpi[data-kpi]'); if (card) { state.ui.openKpi = state.ui.openKpi === card.dataset.kpi ? null : card.dataset.kpi; renderHeadline(); }
+  });
+  document.addEventListener('keydown', e => {
+    if (e.key !== 'Enter' && e.key !== ' ') return;
+    const card = e.target.closest && e.target.closest('.kpi[data-kpi]');
+    if (card) { e.preventDefault(); state.ui.openKpi = state.ui.openKpi === card.dataset.kpi ? null : card.dataset.kpi; renderHeadline(); const c = document.querySelector(`.kpi[data-kpi="${card.dataset.kpi}"]`); if (c) c.focus(); return; }
+    const ph = e.target.closest && e.target.closest('.pack-head');
+    if (ph) { e.preventDefault(); state.ui.openPack = state.ui.openPack === ph.dataset.pack ? null : ph.dataset.pack; renderPacks(); const nh = document.querySelector(`.pack-head[data-pack="${ph.dataset.pack}"]`); if (nh) nh.focus(); }
+  });
+  document.addEventListener('change', e => {
+    const t = e.target;
+    if (t.matches('[data-prop-field]')) return savePropField(t.dataset.prop, t.dataset.propField, t.value);
+    if (t.matches('input[data-setting]')) return saveSetting(t.dataset.setting, t.value);
+    
+    if (t.id === 'showDone') { state.ui.showDone = t.checked; recompute(); renderPacks(); return; }
+    if (t.closest('#calcForm')) renderCalc();
+  });
+  document.addEventListener('input', e => { if (e.target.closest('#calcForm')) renderCalc(); });
+  $('formTenant').addEventListener('change', e => { state.ui.formTenant = e.target.value; renderMeetingForm(); renderDocs(); });
+  $('docUpload').addEventListener('click', uploadDocs);
+  $('meetingForm').addEventListener('submit', e => { e.preventDefault(); saveMeetingForm(); });
+
+  // ── Health checks ──
+  function registerChecks() {
+    if (typeof registerSyncBar !== 'function') return;
+    const g = () => (window._growthPlan || {});
+    registerSyncBar('growth-plan', {
+      refreshFn: () => loadData(),
+      checks: [
+        { name: 'Portfolio tables fetched', kind: 'sync', run: () => { const d = g().data || {}; const n = ['properties', 'units', 'tenants', 'tenancies'].map(k => (d[k] || []).length); if (n.some(x => x === 0)) return { status: 'fail', detail: `properties ${n[0]} · units ${n[1]} · tenants ${n[2]} · tenancies ${n[3]} — a zero here is a failed fetch or a bad filter` }; return { status: 'pass', detail: `${n[0]} properties · ${n[1]} units · ${n[2]} tenants · ${n[3]} active tenancies` }; } },
+        { name: 'Settings rows present', kind: 'sync', run: () => { const k = Object.keys(g().settings || {}); if (k.length < 10) return { status: 'fail', detail: `${k.length} settings rows; the plan falls back to built-in defaults` }; return { status: 'pass', detail: `${k.length} assumptions read from Airtable` }; } },
+        { name: 'LHA table in date', kind: 'automation', run: () => M.lhaStale(todayISO()) ? { status: 'warn', detail: `LHA figures are for 2026-27 (to ${M.LHA_VALID_TO}); update js/growth-plan-model.js and the settings rows` } : { status: 'pass', detail: `2026-27 rates, valid to ${M.LHA_VALID_TO}` } },
+        { name: 'Every property has a postcode', kind: 'sync', run: () => { const p = (g().plan || {}).properties || []; const miss = p.filter(v => !v.postcode); return miss.length ? { status: 'warn', detail: `${miss.length} without a postcode: ${miss.map(v => v.name).join(', ')} — no LHA rate can be applied` } : { status: 'pass', detail: `All ${p.length} properties carry a postcode` }; } },
+        { name: 'Ages known for UC room tenants', kind: 'sync', run: () => { const u = (g().plan || {}).unknownAge || []; return u.length ? { status: 'warn', detail: `${u.length} UC room tenant${u.length > 1 ? 's' : ''} with no date of birth: ${u.map(x => x.tenant).join(', ')}` } : { status: 'pass', detail: 'Every UC room tenant has a date of birth' }; } },
+        { name: 'Benefit cap positions recorded', kind: 'sync', run: () => { const p = (g().plan || {}).properties || []; let uc = 0, known = 0; p.forEach(v => v.tenants.forEach(t => { if (t.uc && v.mgmt === 'kevin') { uc++; if (t.capExemption !== 'Unknown') known++; } })); return known < uc ? { status: 'warn', detail: `${known} of ${uc} UC tenants have a recorded cap position; the rest are shown as CRF Housing Payment claims` } : { status: 'pass', detail: `${uc} UC tenants, all with a recorded cap position` }; } },
+        { name: 'Strategy set on every house you manage', kind: 'sync', run: () => { const p = ((g().plan || {}).properties || []).filter(v => v.mgmt === 'kevin'); const miss = p.filter(v => !v.strategy); return miss.length ? { status: 'warn', detail: `${miss.length} without a strategy: ${miss.map(v => v.name).join(', ')}` } : { status: 'pass', detail: `All ${p.length} houses carry a strategy (joint tenancy, HMO or leave as is)` }; } },
+        { name: 'Council tax band on every joint tenancy house', kind: 'sync', run: () => { const p = ((g().plan || {}).properties || []).filter(v => v.mgmt === 'kevin' && v.strategy === 'Joint tenancy'); const miss = p.filter(v => !v.ctBandMonthly && !v.ctLive); return miss.length ? { status: 'warn', detail: `${miss.length} joint tenancy house${miss.length > 1 ? 's' : ''} with no band or live cost: ${miss.map(v => v.name).join(', ')}` } : { status: 'pass', detail: `${p.length} joint tenancy houses priced from a band or a live cost` }; } },
+        { name: 'Plan rows match a live lever', kind: 'automation', run: () => { const rows = (g().data || {}).planRows || []; const keys = new Set(((g().plan || {}).levers || []).map(l => l.key)); const orphans = rows.filter(r => !keys.has(r.key)); return orphans.length ? { status: 'warn', detail: `${orphans.length} Growth Plan row${orphans.length > 1 ? 's' : ''} no longer match a lever (tenant moved or data changed): ${orphans.map(r => r.key).join(', ')}` } : { status: 'pass', detail: `${rows.length} Growth Plan rows, all matched to a live lever` }; } },
+        { name: 'Totals reconcile', kind: 'automation', run: () => { const t = (g().plan || {}).totals || {}; const sum = Math.round((t.paper + t.works + t.voids + t.remote) * 100) / 100; return Math.abs(sum - t.actionable) < 0.01 ? { status: 'pass', detail: `Actionable £${t.actionable} = paper + works + voids + away` } : { status: 'fail', detail: `Actionable £${t.actionable} does not equal the buckets (£${sum})` }; } },
+      ],
+    });
+  }
+
+  // ── Boot ──
+  (function init() {
+    const saved = localStorage.getItem('airtable_pat') || sessionStorage.getItem('_dlr_pat');
+    if (saved) { PAT = saved; sessionStorage.setItem('_dlr_pat', saved); loadData(); }
+    else showAuth(false);
+  })();
+})();
+</script>
+</body>
+</html>

@@ -29,9 +29,11 @@ ${code}
 describe('content-engine approval card', () => {
   it('passes its own selftest (ask first, links, copy, closing line, readiness, verdicts)', () => {
     const out = JSON.parse(execFileSync('python3', [APPROVAL, 'selftest'], { encoding: 'utf8', cwd: DIR }));
+    const qa = JSON.parse(execFileSync('python3', [path.join(DIR, 'qa.py'), 'selftest'], { encoding: 'utf8', cwd: DIR }));
+    expect(qa.failed).toEqual([]);   // the output gate (10 Sep 2026): no card until the files prove themselves
     expect(out.failed).toEqual([]);
     expect(out.checks).toBeGreaterThanOrEqual(14);
-  });
+  }, 30000);
 
   it('is a role agent the dispatcher knows, never handed work by the CEO pass, so submit and lessons both work', () => {
     const r = py(`
@@ -108,5 +110,12 @@ print(json.dumps(out))
     expect(out).toContain('<a href="https://drive.google.com/file/d/abc/view"');
     expect(out).toContain('&lt;b&gt;x&lt;/b&gt;');
     expect(out).not.toContain('<b>');
+  });
+
+  it("a card Kevin sent back is resubmitted with a receipt and its old verdict is forgotten, so his re-approval is read (9 Sep 2026)", () => {
+    const a = readFileSync(path.join(DIR, 'approval.py'), 'utf8');
+    expect(a).toContain('def refresh_card(day, receipt=None)');
+    expect(a).toContain('if receipt: cmd += ["--receipt", receipt]');
+    expect(a).toContain('for k in ("verdict", "outcome", "synced", "feedback"): e.pop(k, None)');
   });
 });

@@ -65,6 +65,17 @@ const EMAIL_RE = /^[^@\s,;<>]+@[^@\s,;<>]+\.[^@\s,;<>]+$/;
 const WAIT = { load: 15000, settle: 8000, upload: 12000, panel: 15000,
                afterPanel: 12000, chip: 5000, fields: 15000 };
 
+// THE RECIPIENT BOX (measured 10 Sep 2026, and it had been failing silently).
+// This was `input[placeholder="Enter email..."]` with three ASCII dots. Adobe
+// renders a Unicode ellipsis, so the selector matched NOTHING and every plan
+// died at the first recipient. Worse, `input[placeholder^="Enter email"]` also
+// matched nothing, so the visible text is not the attribute either. What does
+// work, driven live against the account, is the attribute's presence alone: the
+// panel carries exactly one placeholder input at that step. If Adobe ever adds a
+// second, Playwright's strict mode raises rather than typing into the wrong one,
+// which is the failure we want. Never go back to matching the visible string.
+const RECIPIENT_BOX = 'input[placeholder]';
+
 // Refusals EXIT when this runs as a command and THROW when required as a module
 // or exercised by the selftest, so a test can assert on the refusal instead of
 // the runner being killed by the guard it is testing. Same shape as
@@ -101,6 +112,29 @@ function parseSigners(raw) {
     // harmless; with several it silently gives one person all the fields and
     // the others none, and the agreement goes out wrong. Refuse rather than
     // send something Kevin would have to unpick.
+    //
+    // RE-MEASURED 10 Sep 2026 and still true, so this refusal is current
+    // rather than inherited. A two-recipient agreement was built live, tenant
+    // first and landlord second, and Adobe reported in its own words that it
+    // had assigned every field to the SECOND RECIPIENT. The tenant got none.
+    // (The address in that message is the recipient the test supplied, not the
+    // sending account: agreements always go out from info@agilelets.co.uk,
+    // shown to signers as "Agile Lets".)
+    //
+    // This is not unsolvable, it is unautomated. The manual cure is written
+    // down in the adobe-sign-field-setup skill and has been used on real
+    // tenancy agreements before: left-click a field, choose "Change
+    // recipients" from the context menu, pick the right signer, and the
+    // border changes colour (purple signer 1, green signer 2, pink signer 3).
+    // Lifting this refusal means teaching the plan that click sequence, not
+    // deleting the check.
+    //
+    // The multi-recipient MECHANICS are solved and proven, for whoever picks
+    // that up: [data-testid="recipient-action-menu-button"] opens a menu with
+    // recipient-action-menu-addRecipient and -addYourself; each new row is
+    // filled through the same RECIPIENT_BOX and committed with Enter.
+    // Auto-place itself is [data-testid="auto-place-ffd-button"], and Send is
+    // [data-testid="review-send-button"].
     die(`${list.length} signers. Auto-place assigns every field to one recipient, so a ` +
         'multi-signer agreement would go out with the fields on the wrong person. ' +
         'Send those by hand until the plan places fields per signer.');
@@ -122,9 +156,9 @@ function buildPlan({ document: doc, signers }) {
     { do: 'wait', ms: WAIT.afterPanel },
   ];
   for (const signer of signers) {
-    steps.push({ do: 'fill', selector: 'input[placeholder="Enter email..."]', value: signer });
+    steps.push({ do: 'fill', selector: RECIPIENT_BOX, value: signer });
     // Without this the address is loose text and Send goes nowhere, silently.
-    steps.push({ do: 'press', selector: 'input[placeholder="Enter email..."]', key: 'Enter' });
+    steps.push({ do: 'press', selector: RECIPIENT_BOX, key: 'Enter' });
     steps.push({ do: 'wait', ms: WAIT.chip });
   }
   steps.push({ do: 'click', selector: 'button:has-text("Auto-place fields")' });
@@ -187,6 +221,10 @@ function selftest() {
   check('has exactly one submit', () => dos.filter((d) => d === 'submit').length === 1);
   check('uses text-scoped selectors, never Adobe hashed classes',
     () => !JSON.stringify(plan).match(/Card__container|react-aria/));
+  // The regression that broke every plan: Adobe's placeholder is "Enter email…"
+  // with a Unicode ellipsis, so any selector quoting that string matches nothing.
+  check('never matches the recipient box on its visible placeholder text',
+    () => !JSON.stringify(plan).match(/placeholder[*^$~|]?="Enter email/));
   check('refuses more than one signer while auto-place misassigns',
     () => refuses(() => parseSigners('a@b.com, c@d.com')));
   check('refuses something that is not an email', () => refuses(() => parseSigners('nope')));

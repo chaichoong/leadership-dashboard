@@ -1,0 +1,237 @@
+{
+ "as_at": "2026-09-10",
+ "outline_names": {
+  "United Kingdom": "United Kingdom",
+  "Spain": "Spain",
+  "France": "France",
+  "Bulgaria": "Bulgaria",
+  "Andorra": "Andorra",
+  "Northern Cyprus": "Turkish Republic of Northern Cyprus",
+  "Malta": "Malta",
+  "Italy": "Italy",
+  "Austria": "Austria",
+  "Netherlands": "Netherlands",
+  "Montenegro": "Montenegro",
+  "Greece": "Greece",
+  "Vietnam": "Vietnam",
+  "Germany": "Germany",
+  "Croatia": "Croatia",
+  "Malaysia": "Malaysia",
+  "Ireland": "Ireland",
+  "United States": "United States of America",
+  "Singapore": "Singapore"
+ },
+ "days": 2292,
+ "total_km": 17553.99,
+ "lap_km": 40075.0,
+ "lap_pct": 43.8,
+ "km_left": 22521.01,
+ "raised": 76840.0,
+ "raise_target": 1000000,
+ "avg_km_per_day": 7.66,
+ "runs_counted": 2389,
+ "countries_count": 19,
+ "countries": [
+  {
+   "name": "United Kingdom",
+   "runs": 2164
+  },
+  {
+   "name": "Spain",
+   "runs": 40
+  },
+  {
+   "name": "France",
+   "runs": 14
+  },
+  {
+   "name": "Bulgaria",
+   "runs": 14
+  },
+  {
+   "name": "Andorra",
+   "runs": 13
+  },
+  {
+   "name": "Northern Cyprus",
+   "runs": 13
+  },
+  {
+   "name": "Malta",
+   "runs": 11
+  },
+  {
+   "name": "Italy",
+   "runs": 10
+  },
+  {
+   "name": "Austria",
+   "runs": 9
+  },
+  {
+   "name": "Netherlands",
+   "runs": 9
+  },
+  {
+   "name": "Montenegro",
+   "runs": 8
+  },
+  {
+   "name": "Greece",
+   "runs": 8
+  },
+  {
+   "name": "Vietnam",
+   "runs": 7
+  },
+  {
+   "name": "Germany",
+   "runs": 7
+  },
+  {
+   "name": "Croatia",
+   "runs": 6
+  },
+  {
+   "name": "Malaysia",
+   "runs": 5
+  },
+  {
+   "name": "Ireland",
+   "runs": 5
+  },
+  {
+   "name": "United States",
+   "runs": 4
+  },
+  {
+   "name": "Singapore",
+   "runs": 3
+  }
+ ],
+ "longest_run": {
+  "km": 42.762,
+  "date": "2021-10-03"
+ },
+ "equivalent": "Cambridge to Tasmania",
+ "next_km_milestone": 18000,
+ "days_to_next_km_milestone": 59,
+ "next_day_milestone": 2300,
+ "date_of_next_day_milestone": "2026-09-18",
+ "lap_finish_estimate": "2034-09-29",
+ "marker": {
+  "lat": -41.6086,
+  "lon": 153.1182,
+  "leg": "Hobart, Tasmania to Auckland"
+ },
+ "route": [
+  {
+   "name": "Cambridge, UK",
+   "lat": 52.2053,
+   "lon": 0.1218
+  },
+  {
+   "name": "Paris",
+   "lat": 48.8566,
+   "lon": 2.3522
+  },
+  {
+   "name": "Rome",
+   "lat": 41.9028,
+   "lon": 12.4964
+  },
+  {
+   "name": "Athens",
+   "lat": 37.9838,
+   "lon": 23.7275
+  },
+  {
+   "name": "Istanbul",
+   "lat": 41.0082,
+   "lon": 28.9784
+  },
+  {
+   "name": "Tehran",
+   "lat": 35.6892,
+   "lon": 51.389
+  },
+  {
+   "name": "Delhi",
+   "lat": 28.6139,
+   "lon": 77.209
+  },
+  {
+   "name": "Bangkok",
+   "lat": 13.7563,
+   "lon": 100.5018
+  },
+  {
+   "name": "Singapore",
+   "lat": 1.3521,
+   "lon": 103.8198
+  },
+  {
+   "name": "Perth",
+   "lat": -31.9505,
+   "lon": 115.8605
+  },
+  {
+   "name": "Hobart, Tasmania",
+   "lat": -42.8821,
+   "lon": 147.3272
+  },
+  {
+   "name": "Auckland",
+   "lat": -36.8485,
+   "lon": 174.7633
+  },
+  {
+   "name": "Honolulu",
+   "lat": 21.3069,
+   "lon": -157.8583
+  },
+  {
+   "name": "Los Angeles",
+   "lat": 34.0522,
+   "lon": -118.2437
+  },
+  {
+   "name": "Mexico City",
+   "lat": 19.4326,
+   "lon": -99.1332
+  },
+  {
+   "name": "New York",
+   "lat": 40.7128,
+   "lon": -74.006
+  },
+  {
+   "name": "Reykjavik",
+   "lat": 64.1466,
+   "lon": -21.9426
+  },
+  {
+   "name": "Cambridge, UK",
+   "lat": 52.2053,
+   "lon": 0.1218
+  }
+ ],
+ "outline_parts": {
+  "United States of America": [
+   0
+  ],
+  "France": [
+   1
+  ],
+  "Italy": [
+   0
+  ],
+  "United Kingdom": [
+   0,
+   1
+  ],
+  "Malaysia": [
+   0
+  ]
+ }
+}

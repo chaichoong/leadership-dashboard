@@ -20,7 +20,10 @@ compatibility_date = "2024-09-01"
 # code per tenant timezone (lib.mjs isSendWindow). Never put a day-of-week here:
 # Cloudflare counts Sunday as 1, so "1-5" runs Sun to Thu.
 [triggers]
-crons = ["0 5-12 * * *"]
+# Cron removed 8 Sep 2026: this worker belongs to the PARKED Supabase client build (Kevin's ruling, Decisions 2026-09-08).
+# The account is on the free plan (5 cron triggers) and this schedule was being rejected on every deploy
+# ("trigger configuration only partially updated"). Re-add "0 5-12 * * *" when the client brief is unparked.
+crons = []
 
 [observability]
 enabled = true

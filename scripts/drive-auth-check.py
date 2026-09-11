@@ -65,7 +65,7 @@ EXPECTED_FOLDER_NAME = 'Operations Director SOPs'
 # agent with a non-JSON 403 "error code: 1010" before the worker ever runs, which
 # looks nothing like a Drive problem but would still stop the check working.
 HEADERS = {
-    'Origin': 'https://chaichoong.github.io',
+    'Origin': 'https://app.operationsdirector.co.uk',
     'Sec-Fetch-Mode': 'cors',
     'Sec-Fetch-Site': 'cross-site',
     'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 '

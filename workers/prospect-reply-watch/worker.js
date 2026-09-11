@@ -37,7 +37,7 @@ const KEVIN_SLACK_EMAIL = 'kevin@runpreneur.org.uk';
 const SLACK_NOTIFY_URL = 'https://slack-notify.kevinbrittain.workers.dev/';
 // slack-notify is origin-allowlisted to the web app's origin; worker-to-worker
 // calls must present it explicitly.
-const NOTIFY_ORIGIN = 'https://chaichoong.github.io';
+const NOTIFY_ORIGIN = 'https://app.operationsdirector.co.uk';
 
 // Field IDs mirror js/config.js (PROSPECT + TASK_FIELDS). IDs, not names, so a
 // field rename cannot silently break the write path.

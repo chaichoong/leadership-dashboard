@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>How far I've run | Runpreneur</title>
+<meta name="robots" content="noindex">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<style>
+  /* Runpreneur brand, not the OD app palette: this page is embedded on runpreneur.org.uk. */
+  :root { --orange:#EC7B27; --orange-deep:#D86619; --navy:#2C4E5E; --red:#E32D24; --ink:#1C2422; --muted:#5A6660; --paper:#FFFFFF; --sand:#FFF4EA; }
+  html, body { margin:0; padding:0; background:var(--paper); color:var(--ink); font-family: Arial, Helvetica, sans-serif; }
+  .wrap { max-width: 1100px; margin: 0 auto; padding: 12px; }
+  .head { display:flex; flex-wrap:wrap; gap:10px; align-items:baseline; justify-content:space-between; margin-bottom:8px; }
+  .head h1 { font-size: 22px; margin:0; color:var(--navy); }
+  .head .asat { color:var(--muted); font-size: 13px; }
+  .bar { height: 14px; background:#eee; border-radius: 8px; overflow:hidden; margin: 6px 0 10px; }
+  .bar > div { height:100%; background: linear-gradient(90deg, var(--orange), var(--red)); width:0; transition: width 1.2s ease; }
+  .tiles { display:grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap:10px; margin-bottom: 12px; }
+  .tile { background:var(--sand); border-radius:10px; padding:10px 12px; }
+  .tile .n { font-size: 24px; font-weight: bold; color:var(--navy); line-height:1.1; }
+  .tile .l { font-size: 12px; color:var(--muted); margin-top:3px; }
+  #map { height: 420px; border-radius: 12px; border: 2px solid var(--navy); }
+  .facts { display:grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap:10px; margin-top:12px; }
+  .fact { border-left: 4px solid var(--orange); padding: 6px 10px; font-size: 14px; }
+  .fact b { color:var(--navy); }
+  .countries { margin-top: 12px; display:flex; flex-wrap:wrap; gap:6px; }
+  .chip { background:var(--navy); color:#fff; border-radius: 999px; padding: 4px 10px; font-size: 13px; }
+  .chip span { opacity: .75; margin-left: 4px; }
+  .foot { color:var(--muted); font-size: 12px; margin-top: 10px; }
+  .leaflet-container { background:#dfeef7; }
+  @media (max-width: 600px) { #map { height: 320px; } .tile .n { font-size: 20px; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="head">
+    <h1>How far I've run</h1>
+    <div class="asat" id="asat">Loading the latest figures…</div>
+  </div>
+  <div class="bar"><div id="bar"></div></div>
+  <div class="tiles">
+    <div class="tile"><div class="n" id="km">–</div><div class="l">kilometres run, of 40,075: once round the Earth at the equator</div></div>
+    <div class="tile"><div class="n" id="pct">–</div><div class="l">of the lap complete</div></div>
+    <div class="tile"><div class="n" id="days">–</div><div class="l">consecutive days of running</div></div>
+    <div class="tile"><div class="n" id="raised">–</div><div class="l">raised for children's causes, of £1,000,000</div></div>
+  </div>
+  <div id="map"></div>
+  <div class="facts" id="facts"></div>
+  <div class="countries" id="countries"></div>
+  <div class="foot">The target, 40,075 km, is the distance once round the Earth at the equator. The route is that lap drawn over land and sea through the places the mission passes, and the marker shows how far along it the total would have carried Kevin. Countries are every place a run has started since the streak began on 1 June 2020, read from Strava; only the country is shown, never where the run started. Everything here is recalculated every night.</div>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script>
+(async function () {
+  const fmt = (n, d = 0) => Number(n).toLocaleString('en-GB', { minimumFractionDigits: d, maximumFractionDigits: d });
+  const esc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  let p;
+  try {
+    const r = await fetch('data/progress.json?t=' + Math.floor(Date.now() / 3600000));
+    p = await r.json();
+  } catch (e) {
+    document.getElementById('asat').textContent = 'The figures could not be loaded right now. Please try again shortly.';
+    return;
+  }
+  document.getElementById('asat').textContent = 'As at ' + new Date(p.as_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
+  document.getElementById('km').textContent = fmt(p.total_km, 2);
+  document.getElementById('pct').textContent = fmt(p.lap_pct, 1) + '%';
+  document.getElementById('days').textContent = fmt(p.days);
+  document.getElementById('raised').textContent = '£' + fmt(p.raised);
+  requestAnimationFrame(() => { document.getElementById('bar').style.width = Math.min(100, p.lap_pct) + '%'; });
+
+  const facts = [
+    ['<b>' + fmt(p.total_km) + ' km</b> is the same as running <b>' + esc(p.equivalent) + '</b>.'],
+    ['An average of <b>' + fmt(p.avg_km_per_day, 1) + ' km a day</b> over ' + fmt(p.days) + ' days, from ' + fmt(p.runs_counted) + ' runs.'],
+    ['Runs in <b>' + p.countries_count + ' countries</b> so far, most of them at home in the UK.'],
+    p.longest_run ? ['Longest single run: <b>' + fmt(p.longest_run.km, 1) + ' km</b> on ' + new Date(p.longest_run.date).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' }) + '.'] : null,
+    ['Next milestone: <b>' + fmt(p.next_km_milestone) + ' km</b>' + (p.days_to_next_km_milestone ? ', about ' + p.days_to_next_km_milestone + ' days away at this pace' : '') + '. Day <b>' + fmt(p.next_day_milestone) + '</b> lands on ' + new Date(p.date_of_next_day_milestone).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' }) + '.'],
+    p.lap_finish_estimate ? ['At this pace the lap of the world completes in <b>' + new Date(p.lap_finish_estimate).getFullYear() + '</b>. Still ' + fmt(p.km_left) + ' km to go.'] : null,
+    ['On the map today: <b>' + esc(p.marker.leg) + '</b>.']
+  ].filter(Boolean);
+  document.getElementById('facts').innerHTML = facts.map(f => '<div class="fact">' + f[0] + '</div>').join('');
+  document.getElementById('countries').innerHTML = p.countries.map(c => '<span class="chip">' + esc(c.name) + '<span>' + c.runs + (c.runs === 1 ? ' run' : ' runs') + '</span></span>').join('');
+
+  const map = L.map('map', { worldCopyJump: false, scrollWheelZoom: false, attributionControl: true }).setView([20, 40], 2);
+  L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '&copy; OpenStreetMap contributors', maxZoom: 8, opacity: 0.8 }).addTo(map);
+  // countries run in, from Natural Earth outlines
+  try {
+    const g = await (await fetch('data/countries.geojson')).json();
+    const outline = p.outline_names || {};
+    const parts = p.outline_parts || {};   // only the parts of a country where a run started (France is not in South America)
+    for (const f of g.features) {
+      const n = f.properties.NAME_EN || f.properties.NAME;
+      if (parts[n] && f.geometry.type === 'MultiPolygon') f.geometry.coordinates = f.geometry.coordinates.filter((_, i) => parts[n].includes(i));
+    }
+    const ran = new Set(p.countries.map(c => outline[c.name] || c.name));
+    const runsOf = Object.fromEntries(p.countries.map(c => [outline[c.name] || c.name, c.runs]));
+    L.geoJSON(g, {
+      filter: f => ran.has(f.properties.NAME_EN || f.properties.NAME),
+      style: () => ({ color: '#D86619', weight: 1, fillColor: '#EC7B27', fillOpacity: 0.55 }),
+      onEachFeature: (f, layer) => { const n = f.properties.NAME_EN || f.properties.NAME; layer.bindTooltip(n + ': ' + runsOf[n] + (runsOf[n] === 1 ? ' run' : ' runs')); }
+    }).addTo(map);
+  } catch (e) { /* the route and marker still draw without the outlines */ }
+  // the lap of the world, and where Kevin is on it
+  const pts = p.route.map(r => [r.lat, r.lon]);
+  L.polyline(pts, { color: '#2C4E5E', weight: 2, dashArray: '6 6', opacity: 0.7 }).addTo(map);
+  // the part already run, solid
+  const done = []; let acc = 0; const legsKm = []; const R = 6371.0088;
+  const hav = (a, b) => { const p1 = a[0] * Math.PI / 180, p2 = b[0] * Math.PI / 180, dl = (b[1] - a[1]) * Math.PI / 180, dp = p2 - p1; const h = Math.sin(dp / 2) ** 2 + Math.cos(p1) * Math.cos(p2) * Math.sin(dl / 2) ** 2; return 2 * R * Math.asin(Math.sqrt(h)); };
+  for (let i = 0; i < pts.length - 1; i++) legsKm.push(hav(pts[i], pts[i + 1]));
+  const scale = p.lap_km / legsKm.reduce((a, b) => a + b, 0);
+  let left = p.total_km;
+  for (let i = 0; i < pts.length - 1; i++) {
+    const d = legsKm[i] * scale; done.push(pts[i]);
+    if (left <= d) { const f = left / d; done.push([pts[i][0] + (pts[i + 1][0] - pts[i][0]) * f, pts[i][1] + (pts[i + 1][1] - pts[i][1]) * f]); break; }
+    left -= d;
+  }
+  L.polyline(done, { color: '#E32D24', weight: 4, opacity: 0.9 }).addTo(map);
+  p.route.forEach(r => L.circleMarker([r.lat, r.lon], { radius: 3, color: '#2C4E5E', fillColor: '#fff', fillOpacity: 1, weight: 1.5 }).addTo(map).bindTooltip(r.name));
+  const runner = L.divIcon({ className: '', html: '<div style="font-size:26px;line-height:26px;filter:drop-shadow(0 1px 2px rgba(0,0,0,.4))">🏃</div>', iconSize: [26, 26], iconAnchor: [13, 13] });
+  L.marker([p.marker.lat, p.marker.lon], { icon: runner }).addTo(map).bindPopup('<b>' + fmt(p.total_km) + ' km</b> into the lap of the world<br>' + esc(p.marker.leg));
+})();
+</script>
+</body>
+</html>

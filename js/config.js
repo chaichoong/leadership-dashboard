@@ -20,7 +20,7 @@
     // ── Page & SOP Version Registry ──
     const PAGE_REGISTRY = [
         { id: 'overview',    name: 'Leadership Dashboard',           icon: '📊', pageVer: '2.100', sopFile: 'sop.html',                   sopVer: '2.94', standalone: 'index.html#overview' },
-        { id: 'os-strategy', name: 'Objective & Strategy',           icon: '🎯', pageVer: '1.51', sopFile: 'os/strategy/sop.html',       sopVer: '1.1', standalone: 'os/strategy/index.html' },
+        { id: 'os-strategy', name: 'Objective & Strategy',           icon: '🎯', pageVer: '1.54', sopFile: 'os/strategy/sop.html',       sopVer: '1.1', standalone: 'os/strategy/index.html' },
         { id: 'tasks',       name: 'Tasks & Projects',   icon: '✅', pageVer: '1.167', sopFile: 'os/tasks/sop.html',             sopVer: '1.4', standalone: 'os/tasks/index.html' },
         { id: 'cfv',        name: 'CFVs',                          icon: '🚨', pageVer: '1.40', sopFile: 'sop-cfvs.html',               sopVer: '1.34', standalone: 'index.html#cfv' },
         { id: 'money',      name: 'Money Confidence',              icon: '🧭', pageVer: '1.1', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#money' },
@@ -33,7 +33,12 @@
         { id: 'transactions', name: 'Transactions',                icon: '🔍', pageVer: '1.1', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#transactions' },
         { id: 'coa',        name: 'Chart of Accounts',             icon: '📒', pageVer: '1.3', sopFile: 'sop-coa.html',                sopVer: '1.1', standalone: 'index.html#coa' },
         { id: 'comms',      name: 'Inbound Comms',                 icon: '📨', pageVer: '2.82', sopFile: 'inbound-comms-sop.html',      sopVer: '2.60', standalone: 'follow-up.html' },
+        { id: 'growth-plan', name: 'Growth Plan',                    icon: '📈', pageVer: '1.20', sopFile: 'sop-growth-plan.html',        sopVer: '1.5', standalone: 'growth-plan.html' },
         { id: 'compliance', name: 'Property Compliance',            icon: '✅', pageVer: '1.15', sopFile: 'sop-compliance.html',         sopVer: '1.14', standalone: 'compliance.html' },
+        // Property Manager (Operations) — Roy Lavin's single page. Standalone at
+        // property-manager/ behind its own passcode; the property-manager Worker
+        // holds the Airtable key and strips personal money server-side (8 Sep 2026).
+        { id: 'property-manager', name: 'Property Manager',            icon: '🏠', pageVer: '1.5', sopFile: 'sop-property-manager.html',   sopVer: '1.2', standalone: 'property-manager/index.html' },
         { id: 'operations',  name: 'Operations',                    icon: '🏢', pageVer: '1.47', sopFile: '',                            sopVer: '1.0', standalone: 'os/operations/index.html' },
         // KPI Library (Leadership section) — ADMIN ONLY. Never rendered in a
         // client tenant's shell; the adminOnly flag is the contract the Supabase
@@ -43,20 +48,20 @@
         // AI Agents (Leadership) — ADMIN ONLY, like KPI Library. Approvals,
         // checks and the workforce register in one place (Kevin's ruling,
         // 24 Aug 2026; moved out of the Systemisation page).
-        { id: 'agents', name: 'AI Agents', icon: '🤖', pageVer: '1.65', sopFile: 'sop-ai-agents.html', sopVer: '1.42', standalone: 'os/agents/index.html', adminOnly: true },
+        { id: 'agents', name: 'AI Agents', icon: '🤖', pageVer: '1.79', sopFile: 'sop-ai-agents.html', sopVer: '1.42', standalone: 'os/agents/index.html', adminOnly: true },
         { id: 'fintable',  name: 'Accounts',                       icon: '🏦', pageVer: '1.19', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#fintable' },
         { id: 'systemisation', name: 'Systemisation',              icon: '⚙️', pageVer: '1.19', sopFile: 'guides/systemisation.html',    sopVer: '1.11', standalone: 'os/systemisation/index.html' },
-        { id: 'os-team',    name: 'Team Members',                  icon: '👥', pageVer: '1.29', sopFile: '',                            sopVer: '1.1', standalone: 'os/team/index.html' },
+        { id: 'os-team',    name: 'Team Members',                  icon: '👥', pageVer: '1.32', sopFile: '',                            sopVer: '1.1', standalone: 'os/team/index.html' },
         // pageVer corrected by hand 2026-08-06: the auto-bump never fired for this page
         // (crm-supabase.html was missing from the workflow `paths:` filter), so 1.0 was
         // stale — the CRM gained a 14-step interactive walkthrough on 2026-08-04 (319b438).
         // guides/crm.html still describes the page without it, so sopVer stays at 1.0 and
         // this now reads as the version gap it always was.
-        { id: 'crm',        name: 'CRM',                           icon: '👥', pageVer: '1.1', sopFile: 'guides/crm.html',             sopVer: '1.0', standalone: 'crm-supabase.html' },
+        { id: 'crm',        name: 'CRM',                           icon: '👥', pageVer: '1.3', sopFile: 'guides/crm.html',             sopVer: '1.0', standalone: 'crm-supabase.html' },
         { id: 'content-machine', name: 'Content Machine',           icon: '🎬', pageVer: '1.0', sopFile: '',                            sopVer: '1.0', standalone: 'https://chaichoong.github.io/content-machine/' },
-        { id: 'prospecting', name: 'Prospecting',                   icon: '🧲', pageVer: '1.18', sopFile: 'sop-prospecting.html',        sopVer: '1.5', standalone: 'index.html#prospecting' },
+        { id: 'prospecting', name: 'Prospecting',                   icon: '🧲', pageVer: '1.21', sopFile: 'sop-prospecting.html',        sopVer: '1.5', standalone: 'index.html#prospecting' },
         { id: 'sitemap',    name: 'Site Map & Guides',             icon: '🔗', pageVer: '1.24', sopFile: 'sop-sitemap.html',            sopVer: '1.19', standalone: 'index.html#sitemap' },
-        { id: 'skills',     name: 'Skills Library',                icon: '🧠', pageVer: '1.19', sopFile: 'guides/skills.html',           sopVer: '1.0', standalone: 'index.html#skills' },
+        { id: 'skills',     name: 'Skills Library',                icon: '🧠', pageVer: '1.22', sopFile: 'guides/skills.html',           sopVer: '1.0', standalone: 'index.html#skills' },
         { id: 'ai-brain',  name: 'AI Brain',                       icon: '💭', pageVer: '1.0', sopFile: 'guides/ai-brain.html',         sopVer: '1.0', standalone: 'ai-brain.html' },
         { id: 'how-it-works', name: 'How It Works',               icon: '🗺️', pageVer: '2.2', sopFile: '',                             sopVer: '1.0', standalone: 'how-it-works.html' },
     ];
@@ -104,6 +109,50 @@
         prospects:     'tbljHVGJoKJf8acy3', // Prospects — cold outbound pipeline (Prospecting tab)
         prospectKeywords: 'tblB5tZrXNaKFe02j', // Prospect Keywords — LinkedIn search strings the daily agent runs
         ceoBriefs:     'tblIxbzDSOCI5hqJn', // CEO Briefs — one row per weekday, written by the 09:00 money-daily worker
+        growthPlan:         'tblHqr2kyiL15a8LN', // Growth Plan — one row per adopted revenue opportunity (growth-plan.html)
+        growthPlanSettings: 'tbl6hJaGOijdcvRdw', // Growth Plan Settings — the page's editable assumptions, one row per key
+    };
+
+    // ── Real Estate Growth Plan (growth-plan.html, Leadership) — 9 Sep 2026 ──
+    // The page reads the portfolio by field ID and writes four things back:
+    // Date of Birth and Benefit Cap Exemption on Tenants, the three plan fields
+    // on Properties, and its own two tables. Table IDs above; field IDs here.
+    const GP = {
+        plan: {
+            title:     'fldbjOfQOnUnpFmkZ', key:      'fldhurLB2tXHqXOdg', lever:  'fldcpnAHgAxQeHAgT',
+            property:  'fldYjvuoYHNlumtHd', tenant:   'flduU9L39LqachtLZ', unit:   'flddfpEZqcrxBIlf2',
+            monthly:   'fld4Vc3jGATM4d9C4', oneOff:   'fld8wc4N6yYMMy9Bd', effort: 'fldfew0jSmQiB52z8',
+            status:    'fldDKDIgcekYZSFp7', evidence: 'fld7DrrXzaTS4Jy6D', notes:  'fldUmCxbSfb4clrjp',
+            tasks:     'fldJKJ9XiXSfLT5Vq', adoptedOn:'fldF6bWNVgMAaaXBc', doneOn: 'fldaNRU9sf1IopbHQ',
+        },
+        settings: { key: 'fldiyJqkTQ9i2p2Wc', value: 'fldye89gwAzXWDphp', label: 'fldqN8fc8vk8qBeom', note: 'fldRtEN92vZUZKjBU' },
+        prop: {
+            name: 'fldqMbR329TNY974G',  // Property Name (Short) — formula
+            fullName: 'fldy2t735TV5e1DIL', type: 'fldOySSrZBYkOLLTX', beds: 'fldeXUMcC6O4AcvRG',
+            agent: 'fldEUrWVhSp3NY8Hh', ctNote: 'fldt7zY1TPihahH6H', area: 'fldYLRz2GgVojKaq9', postcode: 'fld6ebSQgD7eRsobd',
+            units: 'fldLoWcv40Ag5sHRF', active: 'fldBUeSJQZZSnFrFW',
+            lettableRooms: 'fldzV9YbHhNUUxwmA', payg: 'fldkBSgcELtpGZhjV', ctPayer: 'fldwWcSfkdtSbVhdj', // added 9 Sep 2026
+            strategy: 'fldivZ9UbAACwv7Yh', plannedExtra: 'fldFd4scZaJsXQ0n7', // Growth Strategy (Joint tenancy / HMO / Leave as is), Planned Extra Tenants (Kevin's per-house call, 9 Sep 2026)
+            owner: 'flduloaYTsuvMxvF7', ctBand: 'fldNzUqbTNzTeNJqN', ctAnnual: 'fldZsLDNeEvghtFDJ', // Growth Plan Owner, Council Tax Band, Council Tax Annual (9 Sep 2026)
+        },
+        unit: { name: 'fldr8sliyu8h2jw9t', beds: 'fldGMguNbV7GvzsHs', tenants: 'fldQO09UAFRf07V7q', type: 'fldsItq0vU3sHv7n9', number: 'fld3nPlpdXSExxDuq', property: 'fldUJNRGgzgyAwwjt', status: 'fldBvqysXBm9rIm0E', incomeType: 'fldPrhfntWO9aHl58', rent: 'fldQZEjNzhU4UDUW9' },
+        tenant: { name: 'fldxBKW7QnujSDWqA', status: 'fldAXzP9SGIHiAhrv', dob: 'fldv7FKsqXYswyCFE', payType: 'fldZbrk8Xw5Dcwxhi', notes: 'fldfwxEf7I3XQDVtR', capExemption: 'fldOOi3d1P4vDedm6', /* added 9 Sep 2026 */
+                  phone: 'fldraHUkWfqo4olLF', email: 'fldybEduFY3DWWTfT', ni: 'fld1rHf1qZ60qK95l', /* National Insurance Number, added 9 Sep 2026 */
+                  dueDay: 'fldWjCUbAOQmTKfFP', // Due Date of the Month (rent)
+                  // Tenant meeting form (growth-plan.html), fields added 9 Sep 2026
+                  over35: 'flddQ2HnQEf4HBeRn', meetingDate: 'fldTz5BU7jxA2mc1B', ucPayDay: 'fldjTG9xdCLpbwOwC', household: 'fldjrOSBkhWeFJvVU',
+                  otherAdults: 'fldeKCUmwpmWv7pad', idSeen: 'fldbLxdhEqeuUZI4U', ucStatementSeen: 'fldfrhDLmb443AmfF', weeklyIncome: 'fldbiAag5eoEW23e0',
+                  weeklySpending: 'fldlZr8tUocCYzGPT', bankStatements: 'fldZeN4OxwDstqZhy', authoritySigned: 'fldHPe9YQ6GmlrKBt', ctAccount: 'fldlquVIzyesTrI1d', meetingNotes: 'fld9IbA3CNxa2KBBE',
+                  documents: 'flduPLQdNRKBmsSmr' /* Documents (attachments) — scanned ID, statements, signed pages; added 10 Sep 2026 */ },
+        tenancy: { tenants: 'fld1i5bDoHL3B6rUf', unit: 'fld7cjLLEHKAx49OK', rent: 'fldDMyfZLFMeONPq8', actual: 'fldzrqp2fHRaBBnnc' /* Actual Rent rollup */, status: 'fldlh5JAeYW2Ei2e6', endDate: 'fldwHhhKAq4f1nY9e' },
+        cost: { name: 'fldS6FYfpkhu6tJG0', expected: 'fld9JibXkMpTeMcxw', payStatus: 'fldXZNI96v8HgjuSh', property: 'fld7nikJBPz3BoZJG', frequency: 'fldvozTHvs5VH3lNi' },
+        realEstateBusinessId: 'recoGcXRXCniyJsTz', // Businesses → "Real Estate" (read 9 Sep 2026)
+        // Who a Growth Plan task goes to: paper and legal levers to Kevin, works and lettings to Roy
+        // (head of property from 25 Aug 2026). Team Members rows read 9 Sep 2026.
+        owners: {
+            kevin: { teamMember: 'recHEt2VPYothaqTd', email: 'kevin@runpreneur.org.uk', name: 'Kevin Brittain' },
+            roy:   { teamMember: 'reclbdjfVev3bqNHS', email: 'roy.lavin1978@gmail.com', name: 'Roy Lavin' },
+        },
     };
 
     // ── Prospects field IDs (Airtable table: Prospects / tbljHVGJoKJf8acy3) ──
@@ -243,6 +292,10 @@
         deferredUntil:   'fldJ9IHS1yxwYzYSN', // date — hidden from every approval surface until then
         // ── AI share of work (9 Aug 2026) ──
         completionDate:  'fldFOi1SwEKuJRmdN', // dateTime — when the task was actually completed
+        // ── Property lane (8 Sep 2026) — previously only in os/tasks/index.html ──
+        maintenance:     'fldSEUvVA98as1HW6', // checkbox — Maintenance Ticket (routes to Roy under standing approval)
+        properties:      'fldZKFvEpJ6NZeFKz', // link → Properties
+        contractor:      'fldgmzcr3jHALsdYD', // singleSelect — Gary Marsh | Roy Lavin | Rob Jackson
         estimatedMinutes:'fldTK51tSz6vH3LYp', // formula — Time Estimate select converted to minutes
     };
 
@@ -770,6 +823,7 @@
         unitPropName:     'fld7NBHkhjqfbcxk7',  // Property Name (Short) lookup
         unitName:         'fldr8sliyu8h2jw9t',   // Rental Unit (primary field — formula)
         unitNumber:       'fld3nPlpdXSExxDuq',   // Unit Number (number field)
+        unitType:         'fldsItq0vU3sHv7n9',  // Unit Type (Room | Flat-Let | Flat | Whole Property) — read by the Property Manager Worker
         // Tenants
         tenantStatus:     'fldAXzP9SGIHiAhrv',
         tenantName:       'fldxBKW7QnujSDWqA',

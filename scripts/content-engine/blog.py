@@ -15,6 +15,8 @@ HERE = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, HERE)
 BLOG_ID = "YvavGIzJ2jDX8gs9CjYZ"           # "Runprenuer Blog" (GET /blogs/site/all, 3 Sep 2026)
 AUTHOR_ID = "664c9f4ffb724c00fb3e5f15"     # Kevin Brittain (GET /blogs/authors)
 CATEGORY_ID = "68343b9b51b930b70127261a"   # "Runpreneur Episodes" (GET /blogs/categories)
+LISTING_CATEGORY_ID = "664ca0075ea021884eb54b99"   # "Episodes": the only category the site's /blog listing page shows (9 Sep 2026: 2054 had no card until it was added)
+CATEGORY_IDS = [LISTING_CATEGORY_ID, CATEGORY_ID]
 SITE = "https://runpreneur.org.uk/blog/b/"
 TAGS = ["Runpreneur", "Diary of a Runpreneur"]
 
@@ -54,7 +56,7 @@ def build_post(loc, day, blog_copy, description, thumb_url, youtube_link, status
         html += '\n<p>Watch the full episode: <a href="%s">%s</a></p>' % (youtube_link, youtube_link)
     desc = (description or first or title).strip()[:300]
     return {"title": title, "locationId": loc, "blogId": BLOG_ID, "imageUrl": thumb_url or "", "imageAltText": title,
-            "description": desc, "rawHTML": html, "status": status, "categories": [CATEGORY_ID], "tags": TAGS,
+            "description": desc, "rawHTML": html, "status": status, "categories": CATEGORY_IDS, "tags": TAGS,
             "author": AUTHOR_ID, "urlSlug": slug_for(title, day),
             "publishedAt": (when or dt.datetime.now(dt.timezone.utc)).strftime("%Y-%m-%dT%H:%M:%S.000Z")}
 
@@ -67,6 +69,8 @@ def publish_blog(day, full, entry, thumb_url, youtube_link, test):
     f = full["fields"]
     body = build_post(loc, day, f.get("Blog Copy"), f.get("Blog Post Description"), thumb_url, youtube_link, "DRAFT" if test else "PUBLISHED")
     if not f.get("Blog Copy"): raise SystemExit("episode %d has no Blog Copy" % day)
+    left = publish.placeholder_left(body["rawHTML"]) or publish.placeholder_left(body["title"])
+    if left: raise SystemExit("episode %d: blog REFUSED, placeholder %s still in the article" % (day, left))
     exists = publish.ghl("GET", "/blogs/posts/url-slug-exists?locationId=%s&urlSlug=%s" % (loc, body["urlSlug"]))
     if (exists.get("exists") if isinstance(exists, dict) else False):
         body["urlSlug"] += "-%s" % dt.date.today().strftime("%d%m")
@@ -86,7 +90,7 @@ def selftest():
     assert slug_for("Running Off-Road at Pace (Day 2195)", 2195) == "running-off-road-at-pace-day-2195"
     assert slug_for("Kids & work: try this!", 3) == "kids-work-try-this-day-3"
     b = build_post("loc1", 2195, copy, "A short description.", "https://cdn/t.png", "https://youtu.be/x", "DRAFT")
-    assert b["status"] == "DRAFT" and b["categories"] == [CATEGORY_ID] and b["author"] == AUTHOR_ID and b["blogId"] == BLOG_ID
+    assert b["status"] == "DRAFT" and b["categories"] == [LISTING_CATEGORY_ID, CATEGORY_ID] and b["author"] == AUTHOR_ID and b["blogId"] == BLOG_ID
     assert 'href="https://youtu.be/x"' in b["rawHTML"] and b["imageUrl"] == "https://cdn/t.png" and b["description"] == "A short description."
     assert "<script" not in build_post("l", 1, "SEO Title: x\n\n<script>alert(1)</script>", "", "", "", "DRAFT")["rawHTML"], "copy is escaped"
     assert b["publishedAt"].endswith("Z")

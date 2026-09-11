@@ -138,22 +138,54 @@ def split_sections(text, ctype):
     return out
 
 
-def rules_check(fields, transcript=""):
-    """Returns (fixed_fields, issues). Em dashes are fixed; everything else is reported. `transcript` is
-    the source text a figure must appear in: the transcript plus the prompt's own inputs (streak day,
-    cumulative km, km remaining), which the copy is told to use and which 4 Sep 2026's first cards
-    flagged as unsourced."""
+KM_RE = re.compile(r"(\d[\d,]*(?:\.\d+)?)\s?km\b", re.I)
+MISSION_KM = 40075.0
+
+
+def fmt_km(v, like):
+    """The corrected figure in the style the copy used: '15,899.70km' if it had decimals, else '15,899km'."""
+    return ("{:,.2f}" if "." in like else "{:,.0f}").format(v) + "km"
+
+
+def check_km(t, cum, transcript=""):
+    """Every 'N km' in the copy must be the day's Strava total, the km left of 40,075, the mission itself, or a
+    figure the transcript says. Anything else is REWRITTEN to the right figure and reported. 9 Sep 2026: the
+    Learnings and Short copy for 2054 said '20,540km in, 19,535km to go' (2054 x 10, invented) on eight live
+    posts; the old check skipped every figure followed by km."""
+    issues = []
+    if cum is None: return t, issues
+    left = MISSION_KM - cum
+    def fix(m):
+        raw = m.group(1); bare = raw.replace(",", "")
+        try: v = float(bare)
+        except ValueError: return m.group(0)
+        if abs(v - MISSION_KM) < 1 or abs(v - cum) < 1 or abs(v - left) < 1: return m.group(0)
+        if bare in transcript.replace(",", "") or raw in transcript: return m.group(0)
+        tail = re.split(r"[.!?\n]", t[m.end():m.end() + 60], 1)[0].lower()            # this sentence only: the next one may say "to go"
+        head = re.split(r"[.!?\n]", t[max(0, m.start() - 60):m.start()][::-1], 1)[0][::-1].lower()
+        want = left if re.search(r"to go|left|remain|still", tail + " " + head) else cum
+        issues.append("distance %skm is not the day's Strava figure; corrected to %s" % (raw, fmt_km(want, raw)))
+        return fmt_km(want, raw)
+    return KM_RE.sub(fix, t), issues
+
+
+def rules_check(fields, transcript="", km=None):
+    """Returns (fixed_fields, issues). Em dashes are fixed; distances are corrected (check_km); everything else is
+    reported. `transcript` is the source text a figure must appear in: the transcript plus the prompt's own inputs
+    (streak day, cumulative km, km remaining), which the copy is told to use and which 4 Sep 2026's first cards
+    flagged as unsourced. `km` is the day's Strava total, the only distance the copy may state."""
     fixed = {}; issues = []
     for field, txt in fields.items():
         t = txt.replace(" — ", ", ").replace("—", ", ").replace(" – ", ", ")
         if t != txt: issues.append("%s: em dash replaced" % field)
+        t, km_issues = check_km(t, km, transcript); issues += ["%s: %s" % (field, i) for i in km_issues]
         for b in BANNED:
             if b in t.lower(): issues.append("%s: banned phrase '%s'" % (field, b))
         m = US_SPELLINGS.search(t)
         if m: issues.append("%s: US spelling '%s'" % (field, m.group(0)))
         lim = LIMITS.get(field)
         if lim and len(t) > lim: issues.append("%s: %d chars, limit %d" % (field, len(t), lim))
-        for fig in re.findall(r"£[\d,]+(?:\.\d+)?[MmKk]?|\b\d{1,3}(?:,\d{3})+\b(?!\s*km)", t):
+        for fig in re.findall(r"£[\d,]+(?:\.\d+)?[MmKk]?|\b\d{1,3}(?:,\d{3})+\b(?!\s*km)(?!\.\d+\s*km)", t):   # km figures are check_km's
             mission = fig.upper() in ("40,075", "£1M", "£2M") or (fig == "£1" and "£1 million" in t) or (fig == "£2" and "£2 million" in t)
             bare = fig.replace(",", "")
             if fig not in transcript and bare not in transcript.replace(",", "") and not mission:   # "21,950" and "21950" are one figure
@@ -208,11 +240,12 @@ def ensure_record(day, ctype, full):
 
 def generate_for(rec, ctype, transcript, day, yt_full_link):
     name = rec["fields"].get("Content Name", record_name(day, ctype))
-    prompt = build_prompt(ctype, transcript, name, day, yt_full_link, km_for_day(day))
+    km = km_for_day(day)
+    prompt = build_prompt(ctype, transcript, name, day, yt_full_link, km)
     text, usage, cost = ask_claude(cm_prompts.KEVIN_SYSTEM, prompt)
     fields = split_sections(text, ctype)
     if not fields: raise SystemExit("no sections parsed for %s; first 300 chars: %r" % (name, text[:300]))
-    fields, issues = rules_check(fields, transcript + "\n" + prompt)   # the prompt's own figures (day, km so far, km left) are sourced
+    fields, issues = rules_check(fields, transcript + "\n" + prompt, km)   # the prompt's own figures (day, km so far, km left) are sourced; any other distance is corrected
     fields.update({"AI Generated": True, "AI Feature": "Copywriting", "AI Last Run": dt.datetime.now(dt.timezone.utc).isoformat(),
                    "Model": MODEL, "AI Input Tokens": int(usage.get("input_tokens", 0) or 0), "AI Output Tokens": int(usage.get("output_tokens", 0) or 0),
                    "Record Status": STATUS_COPIES})
@@ -270,6 +303,12 @@ def selftest():
     fixed3, issues3 = rules_check({"LinkedIn Copy": "40,075 km and £1M, raising £1 million"}, ""); assert not issues3, issues3
     p3 = build_prompt("Long Form Video", "t", "Episode 2195 Full Episode", 2195)
     assert not rules_check({"Blog Copy": "21,950 km done, 18,125 km to go on day 2,195"}, "t\n" + p3)[1], "figures the prompt itself supplies are sourced"
+    # 9 Sep 2026: an invented distance is corrected, not just flagged
+    f4, i4 = rules_check({"LinkedIn Copy": "Day 2054. 20,540km in. 19,535km still to go to 40,075km. I ran 8km today."}, "I ran 8km today", km=15899.70)
+    assert f4["LinkedIn Copy"] == "Day 2054. 15,900km in. 24,175km still to go to 40,075km. I ran 8km today.", f4
+    assert len(i4) == 2 and "20,540km" in i4[0] and "19,535km" in i4[1], i4
+    f5, i5 = rules_check({"Facebook Post Copy": "15,899.70km logged of 40,075km"}, "", km=15899.70); assert not i5 and f5["Facebook Post Copy"].startswith("15,899.70km"), "the right figure passes untouched"
+    assert rules_check({"X": "20,540km"}, "", km=None)[1] == [], "no Strava figure known: nothing to correct against (the prompt then says do not state a distance)"
     assert cm_prompts.KEVIN_SYSTEM.startswith("You are Kevin Brittain.") and "#Insta360" in cm_prompts.KEVIN_SYSTEM
     print(json.dumps({"checks": 12, "failed": []}))
 

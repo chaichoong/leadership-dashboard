@@ -25,7 +25,7 @@ MAX_WORDS = 5
 
 # whisper.cpp base.en mis-hears the brand; fix at caption time (never in the transcript file)
 BRAND_FIXES = [
-    (re.compile(r"\b[Rr]umpren(?:er|eur)\b|\b[Rr]umpener\b|\b[Rr]unprinter\b|\b[Rr]on ?[Pp]renner\b|\b[Rr]un ?preneur\b|\b[Rr]unpreneurs?\b"), "Runpreneur"),
+    (re.compile(r"\b[Rr]umpren(?:er|eur)\b|\b[Rr]umpener\b|\b[Rr]unprinter\b|\b[Rr]on ?[Pp]renner\b|\b[Rr]on ?preneur\b|\b[Rr]un ?preneur\b|\b[Rr]unpreneurs?\b"), "Runpreneur"),
 ]
 
 # libass measures in a 288-line space whatever the video height
@@ -81,21 +81,26 @@ def _subs_filter(srt, aspect):
     return "subtitles=%s:fontsdir=%s:force_style='%s'" % (srt, FONT_DIR, CAPTION_STYLE[aspect])
 
 
+PILL_ROW_Y, BANNER_H, BANNER_H_SUB, SUB_ROW_Y = 170, 250, 300, 248   # rows: titles (25, 95), DAY pill (170), subtitle (248)
+
+
 def _banner_filter(line1, line2, day, full_width=False, y=BANNER_Y, sub=""):
     """Orange two-line banner with the dark DAY pill, 'Learnings from my Diary' style. `sub` adds a
     smaller third line saying what the episode is about (Kevin, 4 Sep 2026)."""
+    # Layout (Kevin, 9 Sep 2026: "the day number overlapping the title... no overlaying"): the two title lines,
+    # then the DAY pill on its OWN row, then the subtitle. Nothing shares a row, so no width can collide.
     x0, w = (0, 1080) if full_width else (60, 960)
     tx = x0 + 50
     fs = 54 if max(len(line1), len(line2)) <= 15 else 46
-    pill_w = 380; pill_x = x0 + w - pill_w - 60
-    h = 236 if sub else 190
-    sub_line = ["drawtext=fontfile='%s':text='%s':fontsize=30:fontcolor=white:x=%d:y=%d" % (FONT_BOLD, _esc(sub[:44].upper()), tx, y + 186)] if sub else []
+    pill_w = 300; pill_x = tx; pill_y = y + PILL_ROW_Y
+    h = BANNER_H_SUB if sub else BANNER_H
+    sub_line = ["drawtext=fontfile='%s':text='%s':fontsize=30:fontcolor=white:x=%d:y=%d" % (FONT_BOLD, _esc(sub[:44].upper()), tx, y + SUB_ROW_Y)] if sub else []
     return ",".join([
         "drawbox=x=%d:y=%d:w=%d:h=%d:color=%s@1:t=fill" % (x0, y, w, h, ORANGE_HEX),
         "drawtext=fontfile='%s':text='%s':fontsize=%d:fontcolor=white:x=%d:y=%d" % (FONT_BLACK, line1, fs, tx, y + 25),
         "drawtext=fontfile='%s':text='%s':fontsize=%d:fontcolor=white:x=%d:y=%d" % (FONT_BLACK, line2, fs, tx, y + 95),
-        "drawbox=x=%d:y=%d:w=%d:h=66:color=%s@1:t=fill" % (pill_x, y + 98, pill_w, PILL_HEX),
-        "drawtext=fontfile='%s':text='DAY %s':fontsize=44:fontcolor=white:x=%d:y=%d" % (FONT_BOLD, day, pill_x + 40, y + 110),
+        "drawbox=x=%d:y=%d:w=%d:h=58:color=%s@1:t=fill" % (pill_x, pill_y, pill_w, PILL_HEX),
+        "drawtext=fontfile='%s':text='DAY %s':fontsize=40:fontcolor=white:x=%d:y=%d" % (FONT_BOLD, day, pill_x + 30, pill_y + 9),
     ] + sub_line)
 
 
@@ -114,8 +119,11 @@ def build_full(inp, srt, out):
     return _run(inp, _subs_filter(srt, "16:9"), out, "12M")
 
 
-def build_lfmd(inp, srt, out, day, subtitle=""):
-    vf = _banner_filter("LEARNINGS FROM", "MY DIARY", day, sub=subtitle) + "," + _subs_filter(srt, "9:16")
+def build_lfmd(inp, srt, out, day, subtitle="", captions=True):
+    """captions=False is the YouTube Short (Kevin, 9 Sep 2026): banner only, our caption file rides alongside
+    and YouTube's own captions stay switchable, so viewers never see two sets at once."""
+    vf = _banner_filter("LEARNINGS FROM", "MY DIARY", day, sub=subtitle)
+    if captions: vf += "," + _subs_filter(srt, "9:16")
     return _run(inp, vf, out, "10M")
 
 
@@ -137,12 +145,21 @@ def selftest():
     assert fix_brand("rumpener and Run preneur") == "Runpreneur and Runpreneur"
     assert fix_brand("a diary of a runprinter") == "a diary of a Runpreneur"
     assert fix_brand("the diary of a Ron Prenner") == "the diary of a Runpreneur"
+    assert fix_brand("a diary of a ronpreneur,") == "a diary of a Runpreneur,", "1841's caption (10 Sep 2026)"
     srt = "1\n00:00:00,000 --> 00:00:04,000\nSo consecutive day two of a rumpener diary\n\n2\n00:00:04,000 --> 00:00:06,000\n[BLANK_AUDIO]\n"
     out = rechunk_srt(srt)
     assert "[BLANK" not in out and "Runpreneur" in out and out.count("-->") == 2, out
     assert "00:00:02,000 --> 00:00:04,000" in out
     assert "MarginV=28" in CAPTION_STYLE["16:9"] and "MarginV=34" in CAPTION_STYLE["9:16"]
     assert "DAY 2225" in _banner_filter("A", "B", "2225")
+    # the DAY pill sits below both title lines, never beside line 2 (2054's "STRESS BETTER" ran under it, Kevin 9 Sep 2026)
+    import re as _re
+    f = _banner_filter("COPE WITH", "STRESS BETTER", "2054", sub="what it is about")
+    ys = [int(m) for m in _re.findall(r"drawtext=[^,]*?:y=(\d+)", f)]
+    pill_y = int(_re.search(r"drawbox=x=\d+:y=(\d+):w=300", f).group(1))
+    assert ys[0] < ys[1] < pill_y < ys[3] and pill_y >= ys[1] + 60, (ys, pill_y)
+    import inspect as _i
+    src = _i.getsource(build_lfmd); assert "if captions:" in src and "_subs_filter" in src, "the YouTube Short renders without burnt-in captions"
     print("overlays selftest ok")
 
 
@@ -150,11 +167,12 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("mode"); ap.add_argument("args", nargs="*")
     ap.add_argument("--day", default=""); ap.add_argument("--title", default=""); ap.add_argument("--subtitle", default="")
+    ap.add_argument("--no-captions", action="store_true", help="banner only (the YouTube Short; our caption file is attached separately)")
     a = ap.parse_args()
     if a.mode == "selftest": selftest()
     elif a.mode == "captions":
         open(a.args[1], "w").write(rechunk_srt(open(a.args[0]).read())); print("wrote", a.args[1])
     elif a.mode == "full": print(build_full(*a.args[:3]))
-    elif a.mode == "lfmd": print(build_lfmd(*a.args[:3], day=a.day, subtitle=a.subtitle))
+    elif a.mode == "lfmd": print(build_lfmd(*a.args[:3], day=a.day, subtitle=a.subtitle, captions=not a.no_captions))
     elif a.mode == "summary": print(build_summary(*a.args[:3], day=a.day, title=a.title))
     else: raise SystemExit("unknown mode")

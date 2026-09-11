@@ -12,7 +12,7 @@
 
 import { describe, it, expect, beforeEach, afterAll } from 'vitest';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
@@ -124,5 +124,66 @@ describe('collect-routine-reports', () => {
 
   it('says so plainly when there is nothing waiting', () => {
     expect(collect(worktree)).toContain('No uncommitted reports');
+  });
+
+  // Finding 20260910-queue-fixer-516. On 8-10 Sep 2026 the collector took
+  // everything git called untracked, so an agent's dispatch queue dump (859
+  // email addresses), a folder of per-task drafts and two *-tmp.json files were
+  // candidates for a PUBLIC repo, with only regex masking in the way.
+  it('REFUSES agent working files, collecting only report-shaped names', () => {
+    writeFileSync(join(main, 'monitoring/daily-ops-2026-09-10.md'), '# ops\n');
+    writeFileSync(join(main, 'monitoring/queue-1300-tmp.json'), '{"a":1}\n');
+    writeFileSync(join(main, 'monitoring/dispatch-report-1300.json'), '{"a":1}\n');
+    writeFileSync(join(main, 'monitoring/recMTcV6AEYbqx7L2.md'), 'draft\n');
+    writeFileSync(join(main, 'monitoring/ep2195_revised.md'), 'draft\n');
+    mkdirSync(join(main, 'monitoring/dispatch-0900-20260909'), { recursive: true });
+    writeFileSync(join(main, 'monitoring/dispatch-0900-20260909/queue.json'), '{"a":1}\n');
+
+    const out = collect(worktree);
+
+    expect(out).toContain('COLLECTED monitoring/daily-ops-2026-09-10.md');
+    for (const rel of ['monitoring/queue-1300-tmp.json', 'monitoring/dispatch-report-1300.json',
+      'monitoring/recMTcV6AEYbqx7L2.md', 'monitoring/ep2195_revised.md',
+      'monitoring/dispatch-0900-20260909/queue.json']) {
+      expect(out).toContain(`REFUSED (not a report shape; agent working files never enter a public repo): ${rel}`);
+      expect(existsSync(join(worktree, rel)), `${rel} reached the worktree`).toBe(false);
+    }
+    expect(out).toMatch(/REFUSED 5 file\(s\)/);
+  });
+
+  it('still collects every report shape that is in git history', () => {
+    const names = ['task-sweep-2026-08-09b.md', 'daily-ops-2026-08-10.17slot.md',
+      'inbound-triage-09slot-2026-08-24.json', 'e2e-sweep-2026-08-06.md',
+      'drift-exceptions-2026-08-20.json', 'ceo-brief-cron-findings.md'];
+    for (const n of names) writeFileSync(join(main, 'monitoring', n), '# r\n');
+
+    const out = collect(worktree);
+
+    for (const n of names) expect(out).toContain(`COLLECTED monitoring/${n}`);
+    expect(out).not.toContain('REFUSED');
+  });
+
+  it('APPENDS to a report the worktree already holds, never overwrites it', () => {
+    const rel = 'monitoring/daily-ops-2026-09-10.md';
+    // The worktree's copy is from origin/main and can be newer than the main
+    // checkout's, which is often a stale session branch.
+    writeFileSync(join(worktree, rel), 'phase 5 from origin\n');
+    writeFileSync(join(main, rel), 'phase 1 from this morning\n');
+
+    const out = collect(worktree);
+
+    expect(out).toContain(`APPENDED ${rel}`);
+    const text = readFileSync(join(worktree, rel), 'utf8');
+    expect(text).toContain('phase 5 from origin');
+    expect(text).toContain('phase 1 from this morning');
+  });
+
+  it('writes nothing when the worktree already holds that report', () => {
+    const rel = 'monitoring/daily-ops-2026-09-10.md';
+    writeFileSync(join(worktree, rel), 'same\n');
+    writeFileSync(join(main, rel), 'same\n');
+
+    expect(collect(worktree)).toContain(`ALREADY HERE ${rel}`);
+    expect(readFileSync(join(worktree, rel), 'utf8')).toBe('same\n');
   });
 });

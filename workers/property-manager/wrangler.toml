@@ -1,0 +1,40 @@
+# property-manager — Roy Lavin's Property Manager dashboard feed.
+#
+# Holds Kevin's Airtable key server-side so Roy never does. Filters
+# transactions to Business = Real Estate at the query and strips Personal
+# costs before anything leaves. See worker.js for the endpoint list.
+#
+# Secrets (set via `wrangler secret put <NAME>`):
+#   AIRTABLE_PAT        - Airtable token: read property tables, write Tasks
+#   PM_PASSCODE         - Roy's passcode
+#   PM_PASSCODE_KEVIN   - Kevin's passcode (same page, notes sign as him)
+#   PM_SESSION_SECRET   - HMAC key for 12-hour session tokens
+#
+# Deploy: `npx wrangler deploy -c workers/property-manager/wrangler.toml`
+# (merging to main does NOT deploy a Worker).
+
+name = "property-manager"
+main = "worker.js"
+compatibility_date = "2024-09-01"
+
+# Custom domain: caches.default is a NO-OP on *.workers.dev, so the 10-minute
+# data cache never hit there (found in review, 8 Sep 2026). Cloudflare creates
+# the DNS record for a custom_domain route on deploy.
+routes = [
+  { pattern = "pm.operationsdirector.co.uk", custom_domain = true }
+]
+# Keep the workers.dev host alive too: a custom domain switches it off by
+# default, which would break any page still pointing at the old host mid-deploy.
+workers_dev = true
+
+[observability]
+enabled = true
+
+# Login brute-force guard: 5 attempts per minute per client IP.
+# Sessions are signed tokens, deliberately NOT KV: KV free-tier writes are
+# account-wide (1,000/day) and starve the other Workers.
+[[unsafe.bindings]]
+name = "LOGIN_LIMIT"
+type = "ratelimit"
+namespace_id = "2101"
+simple = { limit = 5, period = 60 }

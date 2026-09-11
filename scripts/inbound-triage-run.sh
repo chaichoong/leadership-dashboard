@@ -65,9 +65,44 @@ echo "===== inbound-triage run [$SLOT_LABEL slot] $(date) =====" >> "$LOG"
 # any abnormal exit so those at least always write a done line. A SIGKILL
 # remains untrappable by anything.
 __POSTRUN_DONE=0
+# THE LANE VERDICT MUST SURVIVE AN ABNORMAL EXIT (finding 20260910-daily-ops-514).
+#
+# The email lane verdict is written OPTIMISTICALLY before the agent starts (see
+# slot-record below) and superseded afterwards by slot-verify. On 9 Sep 2026 the
+# 13:00 slot recorded ok:true, hit "GMAIL RATE METRIC STILL FULL after 585s",
+# and was then TERMinated at 14:46 — "ABNORMAL: wrapper terminated before
+# postrun". slot-verify never ran, so the forecast stood as the record. Result:
+# slot-results.jsonl says the email lane worked at 09:00, 13:00 and 17:00 on
+# 9 Sep while no mail was triaged in the 13:00 slot at all, consecutive_broken
+# stayed at 0, and the two-slots-broken escalation could never fire.
+#
+# So the verify runs from the EXIT trap as well as inline, guarded so it runs
+# exactly once. A slot that dies mid-run is precisely the case the pre-flight
+# line gets wrong, which makes it the last case that should be allowed to skip
+# the correction.
+__SLOT_VERIFIED=0
+# $1 is the agent's exit code, or empty when it never got that far. A COMPLETED
+# SCAN IS NOT A COMPLETED SLOT (finding 20260908-daily-ops-494): the email scan
+# is skill 1 of three, so a slot that scanned at 10:50 and was killed at 14:46
+# mid-dispatch still had a scan stamp newer than the slot start and graded
+# clean. A non-zero rc overrules the stamp.
+__verify_slot() {
+  [ "$__SLOT_VERIFIED" -eq 1 ] && return 0
+  __SLOT_VERIFIED=1
+  [ -z "${__SLOT_START_MS:-}" ] && return 0   # died before the slot was recorded
+  /usr/bin/python3 "$REPO/scripts/inbound-triage.py" slot-verify \
+    --slot "$SLOT_LABEL" --lane email --since-ms "$__SLOT_START_MS" \
+    --agent-rc "${1:-143}" >> "$LOG" 2>&1
+  if [ $? -eq 3 ]; then
+    echo "ESCALATE: inbound-triage email lane BROKEN for 2+ consecutive slots. No mail has been triaged since the last ok slot — see slot-results.jsonl." | tee -a "$LOG" >&2
+  fi
+  return 0
+}
 __on_exit() {
   __rc=$?
   if [ "$__POSTRUN_DONE" -eq 0 ]; then
+    # No rc of its own: the wrapper died, so the run did not finish either way.
+    __verify_slot "${RC:-$__rc}"
     echo "===== done rc=$__rc (ABNORMAL: wrapper terminated before postrun) $(date) =====" >> "$LOG"
     echo "inbound-triage run DIED before completing (rc=$__rc) — see $LOG" >&2
   fi
@@ -210,7 +245,10 @@ Then do these three skills in order, each in full:
 3. /Users/kevinbrittain/.claude/scheduled-tasks/agent-dispatch/SKILL.md (Kevin's ruling, 24 Aug 2026: dispatch runs in every slot so the work triaged above reaches the approval queue in the same slot)
 Rules for the whole run: this is real mail — when unsure between outcomes choose the agent-lane task; when unsure about archiving, do not archive; never send, reply, or delete anything yourself (dispatch prepares and submits through its own gated script only). Working and temp files go ONLY under $SCRATCH — NEVER under the repo, and never in monitoring/, because monitoring/ is committed to a public repository and scan output carries full email bodies. Counts-only reports in monitoring/ are fine. A broken read (Gmail or iMessage) is reported loudly, never treated as a quiet day. Do not take the queue lock (this run already holds it). Do not edit, commit, or push code; file anything needing a code change via scripts/findings.py. Complete each skill's closing steps in full (watermark, score, publish; dispatch's verify step). End with at most twenty lines of counts only — never message content, sender names, or record IDs." \
   --permission-mode acceptEdits \
-  --allowedTools "${AGENT_ALLOWED_TOOLS[@]}" >> "$LOG" 2>&1
+  --allowedTools "${AGENT_ALLOWED_TOOLS[@]}" < /dev/null >> "$LOG" 2>&1
+# stdin is /dev/null on purpose (finding 20260911-daily-ops-phase-2-522): a tool
+# call that waits on a terminal read has no terminal here and waits for ever. The
+# queue's maxRuntimeMinutes ceiling is the backstop if anything else hangs.
 RC=$?
 
 # THE OUTCOME, NOT THE FORECAST (finding 20260907-daily-ops-487). If the email
@@ -218,11 +256,7 @@ RC=$?
 # cmd_scan since then, supersede the verdict with a broken one. Runs whatever
 # the agent's exit code was — a slot that died mid-run is precisely the case
 # the pre-flight line gets wrong. Exit 3 is the two-slots-broken escalation.
-/usr/bin/python3 "$REPO/scripts/inbound-triage.py" slot-verify \
-  --slot "$SLOT_LABEL" --lane email --since-ms "$__SLOT_START_MS" >> "$LOG" 2>&1
-if [ $? -eq 3 ]; then
-  echo "ESCALATE: inbound-triage email lane BROKEN for 2+ consecutive slots. No mail has been triaged since the last ok slot — see slot-results.jsonl." | tee -a "$LOG" >&2
-fi
+__verify_slot "$RC"
 
 # Shared epilogue (finding 20260827-phase-2-381): privacy sweep, done line,
 # and exit-code semantics live in ONE place now — scripts/slot-postrun.sh.

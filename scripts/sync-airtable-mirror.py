@@ -98,6 +98,34 @@ COLUMNAR = {
         "fldrHJGXyIVyPlqCA": ("recording", "scalar"),
         "fldAmaevMBxmpezx2": ("source", "scalar"),
     }),
+    # ---- os/tasks/supabase-shim.js (Projects). Read through v_projects by the KPI
+    #      Library twin's "live right now" panel, the Tasks & Projects twin and the
+    #      Strategy twin. Until 8 Sep 2026 nothing mirrored this table, so Supabase held
+    #      a one-off import that had drifted from Airtable. Rollup columns (total_tasks
+    #      etc.) live on the VIEW and are not mapped. Airtable's "Closed On" has no
+    #      Supabase column yet; kpi-library-shim.js treats end_date < today as closed. ----
+    "projects": ("tblHrpTMd5LNYn8v1", {
+        "fldiMZICg1KOORpte": ("name", "scalar"),
+        "fldZ0SpReVaDS1VXb": ("status", "scalar"),
+        "fldGIlsn0cSEpnj18": ("start_date", "date"),
+        "fldU0cJparnkvOUsV": ("end_date", "date"),
+        "flduh2IybVmweI6lD": ("deliverable", "scalar"),
+        "fldgjzVEnfnZowrBD": ("definition_of_done", "scalar"),
+        "fldABYFMf2yBKWdlD": ("kpi_name", "scalar"),
+        "fldaI0voHia91SYZz": ("kpi_target", "num"),
+        "fldB1QJDUsukxKzjQ": ("kpi_current", "num"),
+        "fldrYZEghROXYf6w0": ("kpi_unit", "scalar"),
+        "fld2wYB5ZEn9WRcjN": ("kpi_tracking", "scalar"),
+        "fldtdJTFkMtldxEVf": ("business_id", "link"),
+        "fldXUAPrpStGwc2V9": ("owner", "collab"),
+        "fldN5l2H4WCsM0S3x": ("collaborators", "json"),
+        "fldU7tTf8aRgG60wI": ("kpi_automated", "bool"),
+        "fldic3mgIRLLu2Sre": ("kpi_source", "scalar"),
+        "fldNk2U74jBxZ6esJ": ("kpi_last_updated", "datetime"),
+        "fldIgmO8OqA3a7K5o": ("kpi_last_updated_by", "scalar"),
+        "fldA7vPiLnbgEoKh1": ("kpi_compute_code", "scalar"),
+        "fldeGDKEg6HEXCUh4": ("kpi_detail_json", "scalar"),
+    }),
     # ---- dashboard-shim.js ----
     "accounts": ("tbl1nr0EcX2T62KME", {
         "fldqr09KqLGGYCYkC": ("name", "scalar"),
@@ -289,6 +317,10 @@ JSONB = {
 # so a stale shim map can never produce a 400 on an unknown/generated column.
 WRITABLE = {
     "meetings": {"name","date","status","attendees","ext_attendees","summary","action_points","tasks","recording","source"},
+    "projects": {"name","status","start_date","end_date","deliverable","definition_of_done",
+                 "kpi_name","kpi_target","kpi_current","kpi_unit","kpi_tracking","business_id","owner",
+                 "collaborators","kpi_automated","kpi_source","kpi_last_updated","kpi_last_updated_by",
+                 "kpi_compute_code","kpi_detail_json"},
     "accounts": {"name","gbp","last_update","account_alias","business_id"},
     "costs": {"name","expected","due_day","frequency","pay_status_legacy","inactive",
               "due_date_next","sub_category_id","category_id","business_id","property_id"},
@@ -336,7 +368,7 @@ NOTNULL_BOOL = {("businesses","active"), ("team_members","active"),
 # Parent-before-child order (best-effort; a rental_units↔tenants↔tenancies cycle means
 # one direction of links may be nulled on the very first --full load and filled next run).
 ORDER = ["businesses","coa_categories","coa_sub_categories","departments","roles","team_members",
-         "properties","rental_units","tenants","tenancies","property_valuations","accounts","costs",
+         "projects","properties","rental_units","tenants","tenancies","property_valuations","accounts","costs",
          "sops","achievements","main_methods","sys_workflows","workflow_steps",
          "objectives_strategy","net_worth_by_month","income_buckets","personal_budgets"]
 

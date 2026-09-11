@@ -1059,11 +1059,13 @@ def supersede_attachments(task_id, filenames):
     leaves two identically-named links on the approval card and no way to
     tell which one is current."""
     if not filenames:
-        return
+        return []
     atts = (get_task(task_id).get("fields", {}) or {}).get(AF["attachments"]) or []
     keep = [{"id": a["id"]} for a in atts if a.get("filename") not in filenames]
+    dropped = [a.get("filename") for a in atts if a.get("filename") in filenames]
     if len(keep) != len(atts):
         patch_task(task_id, {AF["attachments"]: keep})
+    return dropped
 
 
 def patch_task(task_id, fields):
@@ -1443,6 +1445,18 @@ def receipt_lines(receipt):
         if m and m.group("point").strip() and m.group("change").strip():
             out.append((m.group("point").strip(), m.group("change").strip()))
     return out
+
+
+def od_picture_problem(task_name, output):
+    """A CONTENT (OD) post card must carry its picture as a permanent link (Kevin, 9 Sep 2026: cards arrived with no link he could open,
+    after another process re-submitted them with its own file). THIN cards and newsletter cards carry no picture and pass."""
+    name = str(task_name or "")
+    if not name.startswith("CONTENT (OD):") or "Newsletter:" in name: return ""
+    text = str(output or "")
+    if text.lstrip().upper().startswith("THIN SLOT"): return ""
+    if re.search(r"https://assets\.cdn\.filesafe\.space/\S+\.(png|jpg|jpeg)", text, re.I): return ""
+    return ("an Operations Director post card must carry its picture as a permanent link (assets.cdn.filesafe.space ...png) so Kevin can open "
+            "it; re-run the lane's `cards` step rather than re-submitting the text alone")
 
 
 def receipt_problem(receipt, feedback, old_output, new_output):
@@ -1837,7 +1851,16 @@ HANDBACK_KEVIN_RE = re.compile(
     r"|\bneeds\s+Kevin\s+to\s+(?:manually\s+)?(?:log|sign)\s*in(?:to)?\b"
     r"|\bKevin\s*[,:\-–—]+\s*(?:please\s+)?(?:manually\s+)?(?:log|sign)\s*in(?:to)?\b"
     r"|\b(?:next\s+step|action|to[- ]do)\s+for\s+Kevin\s*[:\-–—]\s*(?:please\s+)?(?:log|sign)\s*in(?:to)?\b"
-    r"|\bKEVIN\s+ACTION\s*:\s*(?:please\s+)?(?:log|sign|call|phone|ring)\b",
+    r"|\bKEVIN\s+ACTION\s*:\s*(?:please\s+)?(?:log|sign|call|phone|ring)\b"
+    # The carry-out line's own grammar (8 Sep 2026, five live cards): "Kevin
+    # logging into Google AdSense and completing tax information", "Kevin
+    # signing into TopCashback, clicking ... and buying", "Kevin calling EE on
+    # 150". Gerunds slipped past every form above.
+    # Review, same day: "signing in wet ink", "calling it off" and "calling the
+    # meeting to order" must pass, so a sign-in needs a site preposition and a
+    # phone verb needs a named party or a number after it.
+    r"|\bKevin\s+(?:manually\s+)?(?:logging\s+in(?:to)?|signing\s+into|signing\s+in\s+(?:to|at|on))\b"
+    r"|\bKevin\s+(?:calling|phoning|ringing)\s+(?=(?-i:[A-Z0-9]))",
     re.I,
 )
 HANDBACK_YOU_RE = re.compile(
@@ -2659,9 +2682,13 @@ def cmd_handover_property(args):
 
 
 def cmd_attach(args):
-    supersede_attachments(args.task, {os.path.basename(p) for p in args.file})
+    dropped = supersede_attachments(args.task, {os.path.basename(p) for p in args.file}) or []
     names = [upload_attachment(args.task, p) for p in args.file]
-    print(json.dumps({"task": args.task, "attached": names}))
+    purpose = (getattr(args, "purpose", "") or "").strip() or "attached for the approval"
+    notes = (get_task(args.task).get("fields", {}) or {}).get(AF["notes"])
+    stamps = [superseded_stamp(n) for n in dropped] + [attached_stamp(n, purpose) for n in names]
+    patch_task(args.task, {AF["notes"]: append_notes(notes, *stamps)})
+    print(json.dumps({"task": args.task, "attached": names, "superseded": dropped}))
 
 
 def cmd_submit(args):
@@ -2709,11 +2736,39 @@ def cmd_submit(args):
             "             and stop. That line is a tap for him (Robot sign-in app), "
             "not a task. Never a phone call.")
 
+    # A SIGN-IN NEEDED line is a tap on the Robot sign-in app, so it must name
+    # a site that app can open. On 8 Sep 2026 two tasks said "SIGN-IN NEEDED:
+    # Namecheap"; Namecheap is not on the robot's list, the app had nothing to
+    # open, and the card promised "the robot finishes this within minutes" for
+    # work no robot could do. Refused here, with what to write instead.
+    problem = signin_line_problem(output)
+    if problem:
+        sys.exit(f"ERROR: refusing to submit {args.task} — {problem}")
+
     # THE REPORT GATE (Kevin, 7 Sep 2026): a report on an inbound item shows
     # the five questions were asked and names its trigger, or it is refused.
     # Read early so a report with nothing to decide can file itself below.
     tf_early = (get_task(args.task).get("fields", {}) or {})
     is_inbound = bool(tf_early.get(AF["inboundTask"]))
+
+    # THE FILE GATE (Kevin, 8 Sep 2026): the document the action uses is on
+    # the card, from this round, or the submit is refused.
+    attach_names = {os.path.basename(p) for p in (getattr(args, "attach", None) or [])}
+    problem = document_action_problem(output, args.type, tf_early.get(AF["notes"]), attach_names)
+    if problem:
+        sys.exit(f"ERROR: refusing to submit {args.task} — {problem}")
+
+    # THE PICTURE GATE (Kevin, 9 Sep 2026): an Operations Director post card without an openable picture link is refused.
+    odp = od_picture_problem(tf_early.get(AF["name"], "") or "", output)
+    if odp:
+        sys.exit(f"ERROR: refusing to submit {args.task} — {odp}")
+
+    # THE TRACK RECORD GATE (Kevin, 8 Sep 2026): a reply, a creditor item or
+    # an inbound matter states what has already passed with this contact.
+    creditor = ALL_AGENTS.get(args.agent, {}).get("agent") == "creditor-management"
+    problem = track_record_problem(output, args.type == "Correspondence" or creditor or is_inbound)
+    if problem:
+        sys.exit(f"ERROR: refusing to submit {args.task} — {problem}")
     checked = checked_problem(output, args.type, is_inbound)
     if checked:
         sys.exit(f"ERROR: refusing to submit {args.task} — {checked}.\n"
@@ -2911,9 +2966,19 @@ def cmd_submit(args):
     # seventeen tests and any internal caller, none of which know about a flag
     # added later. A new optional flag must never make an existing caller crash.
     to_attach = list(getattr(args, "attach", None) or [])
-    supersede_attachments(args.task, {os.path.basename(p) for p in to_attach})
-    for path in to_attach:
-        upload_attachment(args.task, path)
+    # `or []`: internal callers and tests stub supersede_attachments to None.
+    dropped = supersede_attachments(args.task, {os.path.basename(p) for p in to_attach}) or []
+    uploaded = [upload_attachment(args.task, path) for path in to_attach]
+    # The trail: which file came with which round, and that a submit happened.
+    round_no = submitted_round(tf.get(AF["notes"]))
+    # The stamp names EVERY file of the round, including one put on with a
+    # separate `attach` before this submit; the card reads the round from it.
+    round_files = uploaded + sorted(files_this_round(tf.get(AF["notes"])) - set(uploaded))
+    stamps = ([superseded_stamp(n) for n in dropped]
+              + [attached_stamp(n, f"with this submission (round {round_no})") for n in uploaded]
+              + [submitted_stamp(round_no, args.type, round_files)])
+    tf[AF["notes"]] = append_notes(tf.get(AF["notes"]), *stamps)
+    tf["_receiptAdded"] = True
 
     files_itself = informational_only(output, args.type, tier1=bool(getattr(args, "tier1", False)))
     if not files_itself and is_inbound and args.type in REPORT_TYPES \
@@ -3590,6 +3655,337 @@ def cmd_signed(args):
     return 0
 
 
+# ── The dated trail (Kevin, 8 Sep 2026) ─────────────────────────────────────
+# Kevin's ask: "I need to see the latest attachment before I approve, and a
+# date-ordered record of what has actually happened, including whether the
+# letter has already gone." Airtable stores no date on an attachment and the
+# card showed only the newest Agent Output, so a task could come back "done"
+# still wearing last week's file, and a payment-plan draft could follow a
+# restraint-order letter nobody had recorded. Every event now lands in Notes
+# as one stamped line the AI Agents page parses into "What has happened so
+# far": files attached and superseded, every submit, every send, and the
+# TRACK RECORD of past dealings with the same contact or reference.
+ATTACHED_MARK = "ATTACHED:"
+SUPERSEDED_MARK = "SUPERSEDED:"
+SUBMITTED_MARK = "SUBMITTED"
+SENT_MARK = "SENT:"
+TRACK_RECORD_MARK = "TRACK RECORD:"
+NOTE_STAMP_RE = re.compile(r"^\[(?P<day>\d{1,2} \w{3} \d{4})(?: (?P<time>\d{2}:\d{2}))?\s*[—–-]\s*(?P<who>[^\]]+)\]\s*(?P<text>.*)$", re.M)
+TRACK_RECORD_LINE_RE = re.compile(r"^\s*[-*]\s*(?P<day>\d{1,2} \w{3} \d{4}|\d{4}-\d{2}-\d{2})\b", re.M)
+TRACK_RECORD_NONE_RE = re.compile(r"^\s*TRACK RECORD:\s*none found\b.*\(searched[^)]*\)", re.I | re.M)
+# A PROMISE to send something, not a mention of the sender's file: "with the
+# LOA attached", "attaching the statement", "enclosing the form". "No
+# attachment is needed" and "the attachment they sent" are not promises
+# (review, 8 Sep 2026).
+ATTACH_PROMISE_RE = re.compile(
+    r"\b(?:attaching|enclosing)\b|\bwith\b[^.;\n]{0,80}\b(?:attached|enclosed)\b|\b(?:attached|enclosed)\b[^.;\n]{0,40}\b(?:letter|pdf|form|statement|document|copy|file|invoice|report)\b",
+    re.I)
+ATTACH_NEGATION_RE = re.compile(r"\b(?:no|not|without|never)\b[^.;\n]{0,20}\b(?:attach|enclos)", re.I)
+OWN_ADDRESSES = {"kevinbrittain@gmail.com", "kevin@runpreneur.org.uk", "kevin@operationsdirector.co.uk",
+                 "info@agilelets.co.uk", KEVIN_AIRTABLE_EMAIL.lower()}
+
+
+def note_stamp():
+    return datetime.now(LONDON).strftime("%d %b %Y %H:%M")
+
+
+def note_line(who, text):
+    return f"[{note_stamp()} — {who}] {text}"
+
+
+def append_notes(existing, *lines):
+    lines = [l for l in lines if l]
+    if not lines:
+        return str(existing or "")
+    return (str(existing or "").rstrip() + "\n\n" + "\n".join(lines)).strip()[-90000:]
+
+
+def attached_stamp(filename, purpose, who="agent"):
+    return note_line(who, f"{ATTACHED_MARK} {filename} — {purpose}")
+
+
+def superseded_stamp(filename):
+    return note_line("agent-dispatch", f"{SUPERSEDED_MARK} {filename} replaced by a newer copy with the same name")
+
+
+def submitted_round(notes):
+    return len(re.findall(r"\] " + SUBMITTED_MARK + r" \(round \d+\)", str(notes or ""))) + 1
+
+
+def submitted_stamp(round_no, task_type, files):
+    tail = (" with " + ", ".join(files)) if files else " with no new file"
+    return note_line("agent-dispatch", f"{SUBMITTED_MARK} (round {round_no}) as {task_type}{tail}")
+
+
+def files_this_round(notes):
+    """Filenames ATTACHED since the last SUBMITTED stamp (this round's files)."""
+    text = str(notes or "")
+    last = -1
+    for m in re.finditer(r"\] " + SUBMITTED_MARK + r" \(round \d+\)", text):
+        last = m.end()
+    names = set()
+    for m in NOTE_STAMP_RE.finditer(text):
+        if m.start() < last:
+            continue
+        t = m.group("text")
+        if t.startswith(ATTACHED_MARK):
+            names.add(t[len(ATTACHED_MARK):].split(" — ")[0].strip())
+    return names
+
+
+def carry_out_line(output):
+    m = re.search(r"\*{0,2}carrying this out will involve:?\*{0,2}\s*([^\n]+)", str(output or ""), re.I)
+    return m.group(1).strip() if m else ""
+
+
+def document_action_problem(output, task_type, notes, attached_now):
+    """Why this submission promises a file Kevin cannot see; '' when fine.
+
+    Two shapes. A Correspondence output with an ATTACH header sends that
+    file, so the same filename must be on the task from THIS round. Any
+    output whose carry-out line says the work goes with something attached
+    or enclosed needs a file attached this round. Earlier rounds do not
+    count: that is the "old attachment still on the card" Kevin described.
+    """
+    fresh = set(attached_now or set()) | files_this_round(notes)
+    m = re.search(r"^ATTACH:\s*(.+?)\s*$", str(output or ""), re.M)
+    if m:
+        name = os.path.basename(m.group(1).strip())
+        if name not in fresh:
+            return (f"the email's ATTACH header names {name!r} but that file is not on the task "
+                    f"from this round (on the task this round: {sorted(fresh) or 'nothing'}). "
+                    "Kevin approves the file he can open: pass --attach with the same file "
+                    "in the same submit, so the card carries the copy that will be sent.")
+    line = carry_out_line(output)
+    if line and ATTACH_PROMISE_RE.search(line) and not ATTACH_NEGATION_RE.search(line) and not fresh:
+        return ("its carry-out line promises something attached or enclosed, but no file was "
+                "attached in this round. Kevin's rule (8 Sep 2026): when the action involves a "
+                "document, the exact document goes on the gate with the same submit "
+                "(--attach PATH), never a copy from an earlier round.")
+    return ""
+
+
+def track_record_problem(output, required):
+    """Why the output lacks the dated record of past dealings; '' when fine."""
+    if not required:
+        return ""
+    text = str(output or "")
+    if TRACK_RECORD_NONE_RE.search(text):
+        return ""
+    i = text.find(TRACK_RECORD_MARK)
+    if i == -1:
+        return ("it carries no TRACK RECORD. Kevin's ruling (8 Sep 2026): a reply, a creditor "
+                "item or any inbound matter states what has already passed with this contact, "
+                "reference or property, in date order, before he is asked to decide. Build it with\n"
+                "         python3 scripts/agent-dispatch.py history --task <id> --email <addr> "
+                "--ref <reference> --text\n"
+                "       and paste the block into the output (a 'TRACK RECORD: none found "
+                "(searched ...)' line counts).")
+    after = text[i:]
+    if not TRACK_RECORD_LINE_RE.search(after):
+        return ("its TRACK RECORD block has no dated lines. Each line starts with a date "
+                "(dd Mon yyyy) and says what was sent, received or agreed; use "
+                "'TRACK RECORD: none found (searched ...)' when the search was empty.")
+    return ""
+
+
+# ── history: the dated record of everything with a contact or reference ──
+REF_TOKEN_RE = re.compile(r"\b(?=[A-Z0-9-]{5,}\b)(?:[A-Z]*\d[A-Z0-9-]*)\b")
+ISO_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+HISTORY_MAX_REFS = 8
+
+
+def reference_tokens(text):
+    """Reference-like tokens in free text: five or more characters carrying a
+    digit, never a plain date, each once (review, 8 Sep 2026: one letter
+    yielded 18 tokens, seven of them the same number, and dates matched
+    thirteen unrelated tasks)."""
+    out = []
+    for t in REF_TOKEN_RE.findall(str(text or "").upper()):
+        if t.isalpha() or ISO_DATE_RE.match(t) or t in out:
+            continue
+        out.append(t)
+    return out[:HISTORY_MAX_REFS]
+
+
+def history_terms(emails=(), refs=(), properties=()):
+    terms = []
+    for e in emails:
+        e = (e or "").strip().lower()
+        # Kevin's own address is on forwarded post and every SMS lane task:
+        # searching it would be the whole mailbox (85 of 563 inbound tasks).
+        if e and e not in OWN_ADDRESSES and ("email", e) not in terms:
+            terms.append(("email", e))
+    for r in refs:
+        r = (r or "").strip()
+        if len(r) >= 3 and not ISO_DATE_RE.match(r) and ("ref", r) not in terms:
+            terms.append(("ref", r))
+    for p in properties:
+        p = (p or "").strip()
+        if len(p) >= 4 and ("property", p) not in terms:
+            terms.append(("property", p))
+    return terms
+
+
+def _airtable_quote(v):
+    return "'" + str(v).replace("\\", "\\\\").replace("'", "\\'") + "'"
+
+
+def history_formula(terms):
+    fields = ["Task Name", "Description", "Notes", "Agent Output", "Feedback History", "Inbound Sender"]
+    parts = []
+    for _kind, term in terms:
+        q = _airtable_quote(term.lower())
+        parts.append("OR(" + ",".join(f"FIND({q}, LOWER({{{f}}}&''))" for f in fields) + ")")
+    return "OR(" + ",".join(parts) + ")" if parts else ""
+
+
+def history_entries_from_task(rec, exclude_id=None):
+    """The dated events one task contributes: its creation, every Notes stamp,
+    every feedback stamp, its completion. Dates are ISO for sorting."""
+    f = rec.get("fields", {}) or {}
+    if exclude_id and rec.get("id") == exclude_id:
+        return []
+    name = str(f.get(AF["name"]) or "").strip()[:90]
+    status = sel(f.get(AF["status"]))
+    out = []
+    created = str(rec.get("createdTime") or "")[:10]
+    link = f"https://airtable.com/{BASE_ID}/{TASKS}/{rec.get('id')}"
+    if created:
+        out.append({"date": created, "source": "task", "text": f"task opened: {name} ({status})", "task": rec.get("id"), "link": link})
+    for m in NOTE_STAMP_RE.finditer(str(f.get(AF["notes"]) or "")):
+        iso = _stamp_to_iso(m.group("day"), m.group("time"))
+        text = m.group("text").strip()
+        if not text or text.startswith(TRACK_RECORD_MARK):
+            continue
+        out.append({"date": iso, "source": m.group("who").strip(), "text": text[:220], "task": rec.get("id"), "link": link})
+    for m in re.finditer(r"^\[(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2})[^\]]*\]\s*(.+)$", str(f.get(AF["feedbackHistory"]) or ""), re.M):
+        out.append({"date": f"{m.group(1)} {m.group(2)}", "source": "Kevin", "text": m.group(3).strip()[:220], "task": rec.get("id"), "link": link})
+    # Files on that task, with their links: a document the estate already has
+    # (a restraint order, a signed LOA) is fetched from here and re-attached,
+    # never asked of Kevin (8 Sep 2026: an agent could not find the restraint
+    # order PDF and asked him to attach it, while it sat on another task).
+    for a in (f.get(AF["attachments"]) or []):
+        fname = str(a.get("filename") or "").strip()
+        if not fname:
+            continue
+        kb = int(a.get("size") or 0) // 1024
+        out.append({"date": created or comp_or_blank(f), "source": "file",
+                    "text": f"file on that task: {fname}" + (f" ({kb} KB)" if kb else "") + f" — from \"{name}\"",
+                    "task": rec.get("id"), "link": str(a.get("url") or "")})
+    comp = str(f.get(AF["completion"]) or "")[:10]
+    if comp and status == "Completed":
+        line = carry_out_line(f.get(AF["agentOutput"]))
+        out.append({"date": comp, "source": "task", "text": f"completed: {name}" + (f" — {line[:160]}" if line else ""), "task": rec.get("id"), "link": link})
+    return out
+
+
+def comp_or_blank(f):
+    return str(f.get(AF["completion"]) or "")[:10]
+
+
+def _stamp_to_iso(day, time_):
+    try:
+        d = datetime.strptime(day, "%d %b %Y").strftime("%Y-%m-%d")
+    except ValueError:
+        return day
+    return d + (" " + time_ if time_ else "")
+
+
+def history_gmail(terms, days):
+    """Dated email events for the terms through the triage worker's Gmail
+    listing. Returns (entries, note); the note says what was NOT searched."""
+    import importlib.util
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "inbound-triage.py")
+    try:
+        spec = importlib.util.spec_from_file_location("inbound_triage", path)
+        it = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(it)
+        # Its fail() prints a JSON error line to stdout before exiting; here
+        # that line would become the first line of the record (review).
+        it._fail_quiet["on"] = True
+    except Exception as e:                                   # noqa: BLE001
+        return [], f"Gmail not searched ({str(e)[:80]})"
+    q_parts = []
+    for kind, term in terms:
+        if kind == "email":
+            q_parts.append(f"(from:{term} OR to:{term})")
+        else:
+            q_parts.append('"' + term.replace('"', "") + '"')
+    if not q_parts:
+        return [], "Gmail not searched (no terms)"
+    q = "(" + " OR ".join(q_parts) + f") newer_than:{max(1, int(days))}d"
+    try:
+        msgs, truncated = it.worker_list(q=q, max_pages=3)
+    except SystemExit as e:
+        why = (getattr(it, "_last_fail", {}) or {}).get("message") or str(e)
+        return [], f"Gmail not searched ({str(why)[:80]})"
+    except Exception as e:                                   # noqa: BLE001
+        return [], f"Gmail not searched ({str(e)[:80]})"
+    out = []
+    for m in msgs:
+        h = m.get("headers") or {}
+        ts = int(m.get("internalDate") or 0) / 1000
+        date = datetime.fromtimestamp(ts, LONDON).strftime("%Y-%m-%d %H:%M") if ts else ""
+        sender = str(h.get("from") or "")[:80]
+        out.append({"date": date, "source": "email", "text": f"{sender}: {str(h.get('subject') or '')[:120]}", "id": m.get("id"),
+                    "link": f"https://mail.google.com/mail/u/0/#all/{m.get('id')}" if m.get("id") else ""})
+    note = "Gmail listing truncated (more than shown)" if truncated else ""
+    return out, note
+
+
+def history(emails=(), refs=(), properties=(), days=730, exclude_task=None, gmail=True):
+    terms = history_terms(emails, refs, properties)
+    searched = ["tasks"] + (["Gmail"] if gmail else [])
+    entries, notes = [], []
+    formula = history_formula(terms)
+    if formula:
+        for rec in query_tasks(formula, max_records=60):
+            entries.extend(history_entries_from_task(rec, exclude_id=exclude_task))
+        if gmail:
+            g, note = history_gmail(terms, days)
+            entries.extend(g)
+            if note:
+                notes.append(note)
+    entries.sort(key=lambda e: e.get("date") or "")
+    return {"terms": [f"{k} {v}" for k, v in terms], "searched": searched, "entries": entries, "notes": notes, "at": now_iso()}
+
+
+def history_text(result):
+    """The block an agent pastes into its output."""
+    terms = ", ".join(result.get("terms") or []) or "nothing"
+    searched = " + ".join(result.get("searched") or ["tasks"])
+    tail = ("; " + "; ".join(result["notes"])) if result.get("notes") else ""
+    if not result.get("entries"):
+        return f"{TRACK_RECORD_MARK} none found (searched {searched} for {terms}{tail})"
+    lines = [f"{TRACK_RECORD_MARK} (searched {searched} for {terms}{tail})"]
+    for e in result["entries"]:
+        day = e.get("date") or "undated"
+        try:
+            day = datetime.strptime(day[:10], "%Y-%m-%d").strftime("%d %b %Y") + (day[10:] if len(day) > 10 else "")
+        except ValueError:
+            pass
+        # The link rides at the end in brackets: the card turns it into an
+        # "Open" button, and the raw text still reads (Kevin, 8 Sep 2026:
+        # "a clickable link so it opens, so I can see the full audit trail").
+        tail = f" ({e['link']})" if e.get("link") else ""
+        lines.append(f"- {day} — {e.get('source', '')}: {e.get('text', '')}{tail}")
+    return "\n".join(lines)
+
+
+def cmd_history(args):
+    refs = list(args.ref or [])
+    for text in (args.from_text or []):
+        refs.extend(reference_tokens(text))
+    result = history(emails=args.email or [], refs=refs, properties=args.property or [],
+                     days=args.days, exclude_task=args.task, gmail=not args.no_gmail)
+    if args.text:
+        print(history_text(result))
+    else:
+        print(json.dumps(result, indent=2))
+    return 0
+
+
 # ── Sign-ins: the list Kevin sees and the pickup after he signs in ──────────
 # Kevin's ruling, 4 Sep 2026 ("crack on with the build"): a task blocked on a
 # site sign-in is not a decision, it is a wait. The robot leaves ONE line,
@@ -3600,9 +3996,47 @@ def cmd_signed(args):
 # session is live (an hour, for GOV.UK) instead of at the next slot.
 # The site label may itself hold brackets ("Pingen (letters)"), so the site is
 # everything up to an optional trailing "(https://…)" group.
-SIGNIN_LINE_RE = re.compile(r"^\s*SIGN-IN NEEDED:\s*(?P<site>.+?)\s*(?:\((?P<url>https?://[^\s)]+)\))?\s*$", re.I | re.M)
+SIGNIN_LINE_RE = re.compile(r"^\s*SIGN-IN NEEDED:\s*(?P<rest>.+?)\s*$", re.I | re.M)
+SIGNIN_URL_RE = re.compile(r"https?://[^\s)>\]]+", re.I)
 SIGNIN_DONE_MARK = "SIGNED IN:"
 KEEPALIVE_MARK = "KEEPALIVE CHECK:"
+SIGNIN_PICKUP_DIR = os.environ.get("SIGNIN_PICKUP_DIR") or os.path.expanduser("~/knowledge-os/logs/signin-pickup")
+
+
+def parse_signin_line(text):
+    """The site and login URL a SIGN-IN NEEDED line names, or None.
+
+    Agents do not keep to the form. On 8 Sep 2026 four live tasks read
+    "SIGN-IN NEEDED: pingen.com (https://www.pingen.com/en/login) — to send the
+    letter ..." and the strict "<site> (<url>)$" pattern took the whole sentence
+    as the site and found no URL, so the Robot sign-in app never opened them.
+    The URL is now taken from anywhere on the line and the site is the text
+    before it, with a trailing "(one-hour window)" style aside removed.
+    """
+    m = SIGNIN_LINE_RE.search(str(text or ""))
+    if not m:
+        return None
+    rest = m.group("rest").strip()
+    u = SIGNIN_URL_RE.search(rest)
+    url = u.group(0).rstrip(".,;:") if u else ""
+    site = rest[:u.start()] if u else rest
+    site = re.split(r"\s+[—–-]\s+", site, maxsplit=1)[0]
+    site = site.rstrip(" (:-—–").strip()
+    if not u:
+        # "GOV.UK One Login (one-hour window)" — an aside, not part of the name.
+        # A label like "Pingen (letters)" survives because it is matched on
+        # the part before the bracket too.
+        site = re.sub(r"\s*\((?!https?://)[^)]*\)\s*$", "", site).strip() or site
+    return {"site": site, "url": url}
+
+
+def signin_domain(host):
+    """The registrable domain of a host: app.pingen.com -> pingen.com,
+    www.topcashback.co.uk -> topcashback.co.uk."""
+    parts = [p for p in str(host or "").lower().split(".") if p]
+    if len(parts) >= 3 and len(parts[-1]) == 2 and parts[-2] in {"co", "gov", "org", "ac", "net", "ltd", "plc", "me", "sch", "nhs"}:
+        return ".".join(parts[-3:])
+    return ".".join(parts[-2:]) if len(parts) >= 2 else ".".join(parts)
 
 
 def load_login_sites():
@@ -3623,6 +4057,41 @@ def load_login_sites():
     return json.loads(r.stdout)
 
 
+def signin_line_problem(output, sites=None):
+    """Why a SIGN-IN NEEDED line could not be acted on; '' when fine or absent."""
+    m = parse_signin_line(output)
+    if not m:
+        return ""
+    sites = sites if sites is not None else load_login_sites()
+    host = signin_site_for(m["site"], m["url"], sites)
+    entry = sites.get(host or "", {})
+    if host and entry.get("login") and (entry.get("loginUrl") or m["url"]):
+        return ""
+    can = ", ".join(sorted(str(v.get("label") or h) for h, v in sites.items() if v.get("login") and v.get("loginUrl")))
+    return (f"its SIGN-IN NEEDED line names {m['site']!r}, which is not a site the robot can "
+            f"sign into (its list: {can}).\n"
+            "       A sign-in line is a tap for Kevin on the Robot sign-in app; for a site off "
+            "that list there is nothing to tap. Write the decision instead: what you prepared, "
+            "what Kevin is choosing between, and one line 'The robot has no access to "
+            f"{m['site']}.' Never tell him to log in and do it himself.")
+
+
+def signin_door_host(host, sites):
+    """The site whose door actually opens for HOST. One Login has no page of
+    its own: its entries carry WebFiling's loginUrl, so a queue naming both
+    "GOV.UK One Login" and "Companies House WebFiling" opened the same door
+    twice (review, 8 Sep 2026). Fold onto the host that owns the door."""
+    entry = sites.get(host) or {}
+    url = entry.get("loginUrl") or ""
+    try:
+        door = (urllib.parse.urlparse(url).hostname or "").lower()
+    except Exception:                                   # noqa: BLE001
+        door = ""
+    if door and door != host and sites.get(door, {}).get("login"):
+        return door
+    return host
+
+
 def signin_site_for(line_site, line_url, sites):
     """Which allowlist host a SIGN-IN NEEDED line means. URL host first
     (exact or suffix), then the label, case-insensitive. None when unknown."""
@@ -3640,15 +4109,27 @@ def signin_site_for(line_site, line_url, sites):
         if host and (host == h or host.endswith("." + h)) and (best is None or len(h) > len(best)):
             best = h
     if best:
-        return best
+        return signin_door_host(best, sites)
+    # Same registrable domain: "www.pingen.com/en/login" is Pingen even though
+    # the robot's entry is app.pingen.com. Only a site that can be signed into
+    # counts here; a login: false entry (gov.uk) must not swallow a stranger.
+    if host:
+        dom = signin_domain(host)
+        for h, v in sites.items():
+            if v.get("login") and signin_domain(h) == dom:
+                return signin_door_host(h, sites)
     want = (line_site or "").strip().lower()
-    for h, v in sites.items():
+    # By label, sites the robot can sign into first: "Companies House" must
+    # land on WebFiling (login: true, has a login page), not on the public
+    # register entry that merely shares the name (found 8 Sep 2026).
+    ordered = sorted(sites.items(), key=lambda kv: (not kv[1].get("login"), not kv[1].get("loginUrl")))
+    for h, v in ordered:
         lab = str(v.get("label") or "").lower()
         if want and (want == lab or want in lab or lab.split(" (")[0] == want):
-            return h
-    for h in sites:
+            return signin_door_host(h, sites)
+    for h, _v in ordered:
         if want and want.replace(" ", "") in h.replace(".", ""):
-            return h
+            return signin_door_host(h, sites)
     return None
 
 
@@ -3660,21 +4141,34 @@ def signin_waiting(sites=None):
     groups = {}
     for rec in recs:
         f = rec.get("fields", {}) or {}
-        m = SIGNIN_LINE_RE.search(str(f.get(AF["agentOutput"]) or ""))
+        m = parse_signin_line(f.get(AF["agentOutput"]))
         if not m:
             continue
-        host = signin_site_for(m.group("site"), m.group("url"), sites) or "unknown"
+        host = signin_site_for(m["site"], m["url"], sites) or "unknown"
         entry = sites.get(host, {})
-        g = groups.setdefault(host, {"host": host, "label": entry.get("label") or m.group("site").strip(),
-                                     "loginUrl": entry.get("loginUrl") or m.group("url") or "", "tasks": []})
+        # A site the robot cannot sign into gets its own group per name, so two
+        # strangers (Namecheap, Xero) are never folded under the first one's label.
+        key = host if host != "unknown" else "unknown:" + m["site"].lower()
+        g = groups.setdefault(key, {"host": host, "label": entry.get("label") or m["site"],
+                                    "loginUrl": entry.get("loginUrl") or m["url"] or "",
+                                    "shortSession": bool(entry.get("shortSession")), "tasks": []})
         g["tasks"].append({"id": rec["id"], "name": f.get(AF["name"], ""),
                            "agent": ALL_AGENTS.get((links(f.get(AF["teamMember"])) or [None])[0], {}).get("agent", "")})
-    return sorted(groups.values(), key=lambda g: (-len(g["tasks"]), g["label"]))
+    # Short-session sites first (a GOV.UK session lasts an hour, so it is signed
+    # into last-but-worked first), then the site with the most waiting.
+    return sorted(groups.values(), key=lambda g: (not g["shortSession"], -len(g["tasks"]), g["label"]))
 
 
 def cmd_signin_waiting(args):
     print(json.dumps({"sites": signin_waiting(), "at": now_iso()}, indent=2))
     return 0
+
+
+def cmd_signin_site(args):
+    """Print the allowlist host a name or URL means, or 'unknown' (exit 1)."""
+    host = signin_site_for(args.site, args.url, load_login_sites())
+    print(host or "unknown")
+    return 0 if host else 1
 
 
 def cmd_signin_done(args):
@@ -3726,6 +4220,14 @@ def cmd_signin_done(args):
                 AF["notes"]: (str(f.get(AF["notes"]) or "").rstrip() + "\n\n" + note).strip()[-90000:],
             })
             handed.append({"task": t["id"], "agent": t["agent"], "name": t["name"][:80]})
+    # The pickup run reads this file (and takes it over by rename) once Kevin
+    # has quit the last window, so one run works every site he signed into.
+    reopened = [h["task"] for h in handed if not h.get("closed")]
+    if reopened:
+        os.makedirs(SIGNIN_PICKUP_DIR, exist_ok=True)
+        with open(os.path.join(SIGNIN_PICKUP_DIR, "pending.jsonl"), "a") as fh:
+            fh.write(json.dumps({"at": now_iso(), "host": host, "label": sites[host].get("label"),
+                                 "tasks": reopened}) + "\n")
     print(json.dumps({"site": host, "label": sites[host].get("label"), "handedBack": handed}, indent=2))
     return 0
 
@@ -5796,6 +6298,19 @@ def main():
                              "approval")
     at.add_argument("task")
     at.add_argument("--file", required=True, action="append", metavar="PATH")
+    at.add_argument("--purpose", default="", help="what the file is for, stamped in Notes with the date")
+    hi = sub.add_parser("history",
+                        help="the dated record of everything with a contact, reference or "
+                             "property: past tasks and Gmail, oldest first (the TRACK RECORD)")
+    hi.add_argument("--task", default=None, help="the task being worked (left out of the results)")
+    hi.add_argument("--email", action="append", help="contact email (repeatable)")
+    hi.add_argument("--ref", action="append", help="reference, policy or account number (repeatable)")
+    hi.add_argument("--property", action="append", help="property name or first line (repeatable)")
+    hi.add_argument("--from-text", action="append", dest="from_text", metavar="TEXT",
+                    help="pull reference-like tokens out of this text (a subject, a letter)")
+    hi.add_argument("--days", type=int, default=730)
+    hi.add_argument("--no-gmail", action="store_true")
+    hi.add_argument("--text", action="store_true", help="print the TRACK RECORD block to paste")
 
     an = sub.add_parser("annotate")
     an.add_argument("task")
@@ -5869,6 +6384,11 @@ def main():
                         help="Kevin quit the sign-in window: hand every task "
                              "waiting on that site straight back to its robot")
     sd.add_argument("--site", required=True, help="allowlist host, e.g. app.pingen.com")
+    ss = sub.add_parser("signin-site",
+                        help="which allowlist host a site name or URL means "
+                             "(the Robot sign-in app resolves a card's link with it)")
+    ss.add_argument("--url", default="", help="a login URL, e.g. https://www.pingen.com/en/login")
+    ss.add_argument("--site", default="", help="a site name, e.g. Companies House")
 
     sg = sub.add_parser("signed",
                         help="gate 2: a registered document came back signed "
@@ -5911,7 +6431,7 @@ def main():
             "lessons": cmd_lessons, "revise": cmd_revise,
             "attach": cmd_attach, "outcome": cmd_outcome,
             "reassign": cmd_reassign, "ledger": cmd_ledger,
-            "signed": cmd_signed, "signin-waiting": cmd_signin_waiting, "signin-done": cmd_signin_done, "certificate": cmd_certificate,
+            "signed": cmd_signed, "signin-waiting": cmd_signin_waiting, "signin-done": cmd_signin_done, "signin-site": cmd_signin_site, "history": cmd_history, "certificate": cmd_certificate,
             "handover-property": cmd_handover_property,
             "clear-alerts": cmd_clear_alerts}[args.cmd](args) or 0
 

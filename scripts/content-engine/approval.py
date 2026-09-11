@@ -82,7 +82,17 @@ def copy_block(label, fields, sections):
     return ("%s\n\n%s" % (label, "\n\n".join(lines))) if lines else "%s\nNo copy written yet." % label
 
 
-def build_card(day, full, lfmd=None, short=None, headline=""):
+def pans_for(day, ledger):
+    """The camera pans the render planned for this episode, for the card (Kevin, 9 Sep 2026: "confirm it in the
+    approvals card so that I can look out for what you've done")."""
+    import pointing
+    for e in ledger.values():
+        if e.get("episode") == day and e.get("role") == "episode":
+            return pointing.card_lines(e.get("pans") or [], model_present=pointing.pose_available())
+    return pointing.card_lines([], model_present=pointing.pose_available())
+
+
+def build_card(day, full, lfmd=None, short=None, headline="", pans_lines=None, proof_lines=None):
     """The write-up. Kevin's rule: the ask in one line first, everything else after, and the
     closing 'Carrying this out will involve:' line so the queue can show what approval does."""
     f = full.get("fields", {}); lf = (lfmd or {}).get("fields", {}); sf = (short or {}).get("fields", {})
@@ -107,8 +117,11 @@ def build_card(day, full, lfmd=None, short=None, headline=""):
         if m: review.append(m.group(1).strip())
     checks = ("Rules check flagged: " + " | ".join(review)) if review else "Rules check: nothing flagged (UK English, no em dashes, no figures that are not in the transcript)."
     closing = closing_line(publish_mode())
-    out = "\n\n".join([ask, "Watch before you approve:\n" + "\n".join(watch_lines), "Where it goes if you approve:\n" + "\n".join(where),
-                       "The copy, as written:\n\n" + "\n\n".join(copy), checks, closing])
+    pans_block = "\n".join(pans_lines) if pans_lines else ""
+    proof_block = "\n".join(proof_lines) if proof_lines else ""     # the output gate's checks (qa.py, 10 Sep 2026): proof, not a promise
+    out = "\n\n".join([ask, "Watch before you approve:\n" + "\n".join(watch_lines)] + ([pans_block] if pans_block else []) + ["Where it goes if you approve:\n" + "\n".join(where),
+                       "The copy, as written (where it shows [ADD YOUTUBE LINK], the engine writes the YouTube link there once the video is up; "
+                       "a post still carrying a placeholder is refused, never published):\n\n" + "\n\n".join(copy), checks] + ([proof_block] if proof_block else []) + [closing])
     desc = ("Approve Episode %d for publishing. The Content Engine rendered the three videos, wrote the platform copy "
             "and made the thumbnail from the raw 360 clip. Nothing is published until you approve." % day)
     return task_name(day, headline), desc, out
@@ -189,13 +202,29 @@ def append_note(rec, line):
     return ((old + "\n" + line).strip())[:2000]
 
 
+def output_gate(day, ledger, state):
+    """qa.py's verdict on the files. A hard failure blocks the card, is written to the state for the morning
+    report, and the reasons go on the record's Notes so nobody wonders why the card never came."""
+    import qa
+    ok, failures, passed = qa.gate(day, ledger)
+    if not ok:
+        state.setdefault(str(day), {})["qa_blocked"] = {"at": dt.datetime.now().isoformat(timespec="seconds"), "failures": ["%s: %s" % f for f in failures]}
+        save_state(state)
+        print("episode %d: card BLOCKED by the output gate: %s" % (day, "; ".join("%s (%s)" % f for f in failures)))
+        return None
+    state.get(str(day), {}).pop("qa_blocked", None)
+    return qa.card_lines(passed)
+
+
 def raise_card(day, dry_run=False):
     recs = bundle(day)
     full = recs["Long Form Video"]
     if not full: raise SystemExit("no Full record for episode %d" % day)
-    headline = headline_for(day, watch.load_ledger())
-    name, desc, out = build_card(day, full, recs["Learnings From My Diary"], recs["Short Form Video"], headline)
+    ledger = watch.load_ledger(); headline = headline_for(day, ledger)
     state = load_state()
+    proof = output_gate(day, ledger, state)
+    if proof is None: return None
+    name, desc, out = build_card(day, full, recs["Learnings From My Diary"], recs["Short Form Video"], headline, pans_for(day, ledger), proof)
     if str(day) in state and state[str(day)].get("task"):
         print("episode %d already has card %s" % (day, state[str(day)]["task"])); return None
     if dry_run:
@@ -225,22 +254,36 @@ def raise_card(day, dry_run=False):
     return tid
 
 
-def refresh_card(day):
+def refresh_card(day, receipt=None):
     """Rebuild the write-up from the records as they are now and re-submit it on the existing task, so a
-    card in Kevin's queue shows corrected copy (4 Sep 2026: the distance figure and the X copy)."""
+    card in Kevin's queue shows corrected copy (4 Sep 2026: the distance figure and the X copy).
+    After Kevin sent the card back, the submit gate demands a RECEIPT: one `- <his point> → <what changed>` line per
+    point of his feedback (9 Sep 2026: 2054's refresh failed three times without one). Pass the file with --receipt;
+    on success the card's old verdict is forgotten here, so the next sync reads his new answer instead of the old one."""
     state = load_state(); e = state.get(str(day))
     if not e or not e.get("task"): raise SystemExit("episode %d has no card to refresh" % day)
+    if e.get("verdict") == "changes" and not receipt:
+        raise SystemExit("episode %d: Kevin sent this card back (%s); the resubmission needs --receipt FILE with one '- <his point> → <what changed>' line per point of his feedback" % (day, e.get("feedback", "")[:120]))
     recs = bundle(day); full = recs["Long Form Video"]
-    name, desc, out = build_card(day, full, recs["Learnings From My Diary"], recs["Short Form Video"], headline_for(day, watch.load_ledger()))
+    ledger = watch.load_ledger()
+    proof = output_gate(day, ledger, state)
+    if proof is None: raise SystemExit("episode %d: the output gate blocked the refresh; fix the files first (qa.py check --day %d)" % (day, day))
+    name, desc, out = build_card(day, full, recs["Learnings From My Diary"], recs["Short Form Video"], headline_for(day, ledger), pans_for(day, ledger), proof)
     with tempfile.NamedTemporaryFile("w", suffix=".md", delete=False) as fh:
         fh.write(out); path = fh.name
+    cmd = [sys.executable, DISPATCH, "submit", e["task"], "--agent", AGENT_TM, "--type", TASK_TYPE, "--output-file", path]
+    if receipt: cmd += ["--receipt", receipt]
     try:
-        r = subprocess.run([sys.executable, DISPATCH, "submit", e["task"], "--agent", AGENT_TM, "--type", TASK_TYPE, "--output-file", path], capture_output=True, text=True)
+        r = subprocess.run(cmd, capture_output=True, text=True)
     finally:
         os.remove(path)
     if r.returncode != 0: raise SystemExit("approval: refresh failed for %s: %s" % (e["task"], (r.stderr or r.stdout)[-400:]))
-    e["refreshed"] = dt.datetime.now().isoformat(timespec="seconds"); save_state(state)
-    print("episode %d: card %s refreshed" % (day, e["task"]))
+    e["refreshed"] = dt.datetime.now().isoformat(timespec="seconds")
+    if e.get("verdict") == "changes":
+        for k in ("verdict", "outcome", "synced", "feedback"): e.pop(k, None)   # his next answer is a new one
+        e["resent"] = e["refreshed"]
+    save_state(state)
+    print("episode %d: card %s refreshed%s" % (day, e["task"], " with receipt, verdict cleared" if receipt else ""))
 
 
 def sync():
@@ -266,8 +309,14 @@ def report():
     state = load_state()
     waiting = [d for d, e in state.items() if e.get("task") and not e.get("verdict")]
     approved = [d for d, e in state.items() if e.get("verdict") == "approved"]
+    blocked = {d: e["qa_blocked"] for d, e in state.items() if isinstance(e, dict) and e.get("qa_blocked")}
     print("content approvals: %d card%s waiting for Kevin%s; %d approved and waiting for the publishing step" % (
         len(waiting), "" if len(waiting) == 1 else "s", (" (episodes " + ", ".join(sorted(waiting)) + ")") if waiting else "", len(approved)))
+    if blocked:
+        print("content output gate: %d episode%s BLOCKED, no card until the files pass: %s" % (
+            len(blocked), "" if len(blocked) == 1 else "s", "; ".join("%s (%s)" % (d, "; ".join(b["failures"])[:160]) for d, b in sorted(blocked.items()))))
+    else:
+        print("content output gate: nothing blocked")
 
 
 def selftest():
@@ -284,9 +333,14 @@ def selftest():
     assert out.rstrip().split("\n")[-1].startswith(CLOSING), "must end with the closing line the queue reads"
     assert "UNLISTED" in closing_line("test") and "DRAFTS" in closing_line("test") and "06:00" in closing_line("live") and closing_line("live").startswith(CLOSING)
     for s in ("https://drive/full", "https://drive/lfmd", "https://drive/sum", "https://drive/thumb", "yt words", "blog words", "li words", "th words", "fb words",
-              "Youtube Full Post", "Rules check flagged: Threads copy 512 chars", "Nothing reaches a public feed"):
+              "Youtube Full Post", "Rules check flagged: Threads copy 512 chars"):
         assert s in out, s
+    assert ("Nothing reaches a public feed" in out) == (publish_mode() != "live"), "the closing line follows the engine's mode (live since 8 Sep 2026)"
     assert "Nothing is published until you approve" in desc
+    import inspect; src = inspect.getsource(refresh_card)
+    assert 'if e.get("verdict") == "changes" and not receipt:' in src and 'for k in ("verdict", "outcome", "synced", "feedback"): e.pop(k, None)' in src, "a sent-back card needs a receipt and forgets the old verdict once resubmitted (9 Sep 2026)"
+    _, _, outp = build_card(2225, full, lfmd, short, "A / B", ["Camera pans (the engine saw you point and heard you talk about the surroundings):", "- 4:13, to the right of you for 4 s: \"over there at the sun setting\""])
+    assert "Camera pans" in outp and outp.index("Camera pans") < outp.index("Where it goes if you approve"), "pans are listed before the destinations"
     _, _, out2 = build_card(2226, {"id": "x", "fields": {"Video Edited URL": "u", "Thumbnail URL": "t", "YouTube Copy": "y"}})
     assert "no teaser clip was recorded" in out2 and "no clip" in out2 and "No copy written yet." in out2 and "nothing flagged" in out2
     assert task_name(2226) == "CONTENT: Publish Episode 2226 of Diary of a Runpreneur"
@@ -296,12 +350,17 @@ def selftest():
     p, v = verdict_patch("Rejected", "Not this one", None); assert v == "rejected" and p["Feedback"] == "Not this one" and "Record Status" not in p
     p, v = verdict_patch("Changes requested", "Shorter title", None); assert v == "changes" and p["Feedback"] == "Shorter title"
     assert TASK_TYPE == "Drafting"
-    print(json.dumps({"checks": 15, "failed": []}))
+    _, _, outp2 = build_card(2225, full, lfmd, short, "A / B", None, ["Checks the engine ran:", "- jingle: 7.0 s"])
+    assert "- jingle: 7.0 s" in outp2 and outp2.index("- jingle: 7.0 s") < outp2.index(CLOSING), "the proof block sits just before the closing line"
+    import inspect as _iq; rc = _iq.getsource(raise_card); rf = _iq.getsource(refresh_card)
+    assert "output_gate(day, ledger, state)" in rc and rc.index("output_gate(") < rc.index("build_card(") and "output_gate(day, ledger, state)" in rf, "no card, new or refreshed, without the output gate"
+    assert "qa_blocked" in _iq.getsource(report)
+    print(json.dumps({"checks": 18, "failed": []}))
 
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
-    ap.add_argument("mode"); ap.add_argument("--day", type=int, default=0); ap.add_argument("--pending", action="store_true")
+    ap.add_argument("mode"); ap.add_argument("--day", type=int, default=0); ap.add_argument("--pending", action="store_true"); ap.add_argument("--receipt", default=None, help="refresh: file of '- <his point> → <what changed>' lines after Kevin sent the card back")
     ap.add_argument("--limit", type=int, default=2); ap.add_argument("--dry-run", action="store_true")
     a = ap.parse_args()
     if a.mode == "selftest": selftest()
@@ -311,6 +370,6 @@ if __name__ == "__main__":
         if not days: print("approval: nothing ready for a card")
         for d in days: raise_card(d, dry_run=a.dry_run)
     elif a.mode == "sync": sync()
-    elif a.mode == "refresh": refresh_card(a.day)
+    elif a.mode == "refresh": refresh_card(a.day, a.receipt)
     elif a.mode == "report": report()
     else: raise SystemExit("usage: approval.py run --pending [--limit N] [--dry-run] | run --day N | card --day N | refresh --day N | sync | report | selftest")

@@ -221,6 +221,26 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 .chk-item.info{border-left-color:var(--info)}
 .apv-receipt{border:1px solid var(--accent);background:var(--accent-soft);border-radius:var(--radius-md);padding:8px 12px;margin-bottom:8px}
 .apv-receipt-head{font-size:var(--fs-xs);font-weight:var(--fw-bold);color:var(--accent-hover);margin-bottom:4px}
+.apv-file-meta{font-size:var(--fs-xs);color:var(--text-muted);font-weight:var(--fw-regular)}
+.apv-file-latest{font-size:var(--fs-xs);font-weight:var(--fw-bold);color:var(--bg-surface);background:var(--accent);border-radius:var(--radius-full);padding:1px 7px;margin-left:4px}
+.apv-file-earlier{opacity:.75}
+.apv-trail{margin:6px 0 4px}
+.apv-trail summary{cursor:pointer;font-size:var(--fs-xs);font-weight:var(--fw-semibold);color:var(--text-secondary)}
+.apv-trail-last{color:var(--text-primary);font-weight:var(--fw-regular)}
+.apv-trail-day{font-size:var(--fs-xs);font-weight:var(--fw-bold);color:var(--text-secondary);margin:8px 0 2px;padding-bottom:2px;border-bottom:1px solid var(--border-subtle)}
+.apv-trail-day.latest{color:var(--accent-hover)}
+.apv-trail-row{display:grid;grid-template-columns:44px 118px minmax(0,1fr);gap:8px;font-size:var(--fs-sm);padding:3px 0;align-items:start;word-break:break-word}
+.apv-trail-row.latest{background:var(--accent-soft);border-radius:var(--radius-sm);padding:3px 4px}
+.apv-trail-time{color:var(--text-muted);font-size:var(--fs-xs)}
+.apv-trail-who{font-size:var(--fs-xs);font-weight:var(--fw-semibold);color:var(--accent);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.apv-trail-who.kevin{color:var(--accent-gold)}
+.apv-trail-who.sent{color:var(--success)}
+.apv-trail-more{font-size:var(--fs-xs);color:var(--text-muted);margin-top:4px}
+.apv-trail-open{font-size:var(--fs-xs);font-weight:var(--fw-semibold);color:var(--accent);margin-left:6px;white-space:nowrap;text-decoration:none;border:1px solid var(--border-default);border-radius:var(--radius-full);padding:0 7px;background:var(--bg-surface)}
+.apv-trail-open:hover{border-color:var(--accent);text-decoration:underline}
+.apv-doc-line{font-size:var(--fs-sm);font-weight:var(--fw-semibold);color:var(--accent-hover);margin:6px 0 4px;padding:8px 10px;background:var(--accent-soft);border-radius:var(--radius-md)}
+.apv-doc-line .apv-agent-file{margin-left:4px}
+.apv-doc-missing{color:var(--danger);background:var(--danger-bg)}
 .apv-receipt-line{display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);gap:6px;font-size:var(--fs-sm);padding:2px 0;align-items:start}
 .apv-receipt-point{color:var(--text-secondary);font-style:italic;word-break:break-word}
 .apv-receipt-arrow{color:var(--text-muted)}
@@ -476,6 +496,7 @@ const TF = {
     rememberThis:     'fldZurhdHutYIDKVx',
     verdictReason:    'fldF9Bs4N5mttQvtl',
     feedbackHistory:  'fldOzsq68lhfprKJu',
+    inboundSender:    'fldzf4xlbrQuktx0i',
     // Knock it back (28 Aug 2026) — see TASK_FIELDS.deferredUntil in
     // js/config.js for why this is a date on the task rather than a queue
     // somewhere else.
@@ -917,7 +938,7 @@ const APV_QUEUE_FIELDS = () => [
     TF.name, TF.status, TF.description, TF.notes, TF.dueDate, TF.taskType,
     TF.agentOutput, TF.sentForApprovalBy, TF.teamMember, TF.lmt, TF.slackBaseline,
     TF.approver, TF.priority, TF.inboundUrl, TF.attachments, TF.deferredUntil,
-    TF.feedbackHistory];
+    TF.feedbackHistory, TF.inboundSender];
 
 async function loadApprovals(){
     _approvalsState = 'loading';
@@ -934,6 +955,7 @@ async function loadApprovals(){
             return !ap || !ap.email || ap.email === APPROVER_EMAIL;
         });
         _apvReason = {};
+        _apvLastQueueLoad = Date.now();
         allApprovals = mine.map(r=>({
             id: r.id,
             name: gf(r,TF.name)||'(Untitled)',
@@ -941,9 +963,12 @@ async function loadApprovals(){
             agentOutput: gf(r,TF.agentOutput)||'',
             description: gf(r,TF.description)||'',
             notes: gf(r,TF.notes)||'',
+            feedbackHistory: gf(r,TF.feedbackHistory)||'',
+            created: r.createdTime||'',
             priority: selName(gf(r,TF.priority)),
             tier1: isTier1Output(gf(r,TF.agentOutput)||''),
             emailLinks: apvEmailLinks(gf(r,TF.inboundUrl)),
+            inboundSender: gf(r,TF.inboundSender)||'',
             // Files already ON the task — normally the agent's own work
             // (a drafted letter of authority, a filled form) attached with
             // `agent-dispatch.py submit --attach`, so Kevin can open and
@@ -1496,9 +1521,16 @@ function apvGroupTasks(rows){
     const parent = {}, reason = {};
     const find = (x)=>{ while(parent[x] !== x){ parent[x] = parent[parent[x]]; x = parent[x]; } return x; };
     rows.forEach(t=>{ parent[t.id] = t.id; });
+    // A sign-in wait is not a decision, so it never joins a group: on 8 Sep
+    // 2026 six "SIGN-IN: <site> session lapsed" cards (six different sites)
+    // folded into "6 tasks, one thing" with a Reject-all strip, because the
+    // key saw "sign, session, lapsed" and treated the site name as noise.
+    const isWait = {};
+    rows.forEach(t=>{ isWait[t.id] = !!apvSignInNeeded(t.agentOutput); });
     for(let i = 0; i < rows.length; i++){
         for(let j = i + 1; j < rows.length; j++){
             const a = rows[i], b = rows[j];
+            if(isWait[a.id] || isWait[b.id]) continue;
             // Fall back to the id so two NAMELESS tasks can never collide — an
             // empty key would merge unrelated work into one verdict.
             const ka = dupeTaskKey(a.name || '') || ('id:' + a.id);
@@ -1681,6 +1713,236 @@ async function agConfirmRejectGroup(taskIds, reasonKey){
 }
 window.agConfirmRejectGroup = agConfirmRejectGroup;
 
+// THE PAGE KEEPS UP WITH THE SIGN-IN CHAIN (Kevin, 8 Sep 2026). He signed in
+// to seven sites, every task was handed back within seconds, and the queue
+// still showed "Sign in now" on all of them because nothing here ever
+// re-read Airtable without the Refresh button. While sign-in cards are
+// showing, and for twenty minutes after a sign-in link is tapped, the queue
+// re-reads every 30 s and whenever the tab comes back into view, and redraws
+// only when the set of cards or their sign-in state has changed.
+let _apvSignInClickedAt = 0, _apvLastQueueLoad = 0;
+const APV_SIGNIN_WATCH_MS = 20 * 60 * 1000;
+function apvQueueSignature(){
+    return allApprovals.map(t => t.id + ':' + (apvSignInNeeded(t.agentOutput) ? 'w' : 'd')).join(',');
+}
+function apvSignInsWaiting(){ return allApprovals.some(t => apvSignInNeeded(t.agentOutput)); }
+function apvWatchingSignIns(){ return apvSignInsWaiting() || (Date.now() - _apvSignInClickedAt) < APV_SIGNIN_WATCH_MS; }
+async function apvSilentRefresh(){
+    if(_approvalsState === 'loading') return false;
+    const before = apvQueueSignature();
+    try { await loadApprovals(); }
+    catch(e){ if(e.message === 'auth') throw e; return false; }
+    _apvLastQueueLoad = Date.now();
+    if(String(_approvalsState).indexOf('error') === 0) return false;
+    if(apvQueueSignature() === before) return false;
+    renderApprovals();
+    return true;
+}
+window.apvSilentRefresh = apvSilentRefresh;
+document.addEventListener('click', (ev) => {
+    const a = ev.target && ev.target.closest ? ev.target.closest('a[href^="robotsignin://"]') : null;
+    if(!a) return;
+    _apvSignInClickedAt = Date.now();
+    toast('Opening the Robot sign-in app. This page updates itself as each site is handed back.');
+});
+setInterval(() => {
+    if(_agentsView !== 'approvals' || document.visibilityState === 'hidden') return;
+    if(apvWatchingSignIns()) apvSilentRefresh().catch(() => {});
+}, 30000);
+document.addEventListener('visibilitychange', () => {
+    if(document.visibilityState !== 'visible') return;
+    if(Date.now() - _apvLastQueueLoad > 30000 && apvWatchingSignIns()) apvSilentRefresh().catch(() => {});
+});
+window.addEventListener('focus', () => {
+    if(Date.now() - _apvLastQueueLoad > 30000 && apvWatchingSignIns()) apvSilentRefresh().catch(() => {});
+});
+
+// THE DATED TRAIL (Kevin, 8 Sep 2026). Airtable stores no date on a file and
+// the card showed only the newest Agent Output, so a task came back "done"
+// still wearing last week's attachment, and a payment-plan draft followed a
+// restraint-order letter nobody could see had gone. Every event now lands in
+// Notes as one stamped line (agent-dispatch.py: ATTACHED, SUPERSEDED,
+// SUBMITTED, SENT, the TRACK RECORD of past dealings with the contact), and
+// this parses them, with Kevin's own feedback rounds, into one list by date.
+const APV_MONTHS = { jan:'01', feb:'02', mar:'03', apr:'04', may:'05', jun:'06', jul:'07', aug:'08', sep:'09', sept:'09', oct:'10', nov:'11', dec:'12' };
+const APV_STAMP_RE = /^\[(\d{1,2}) (\w{3,4}) (\d{4})(?: (\d{2}:\d{2}))?\s*[—–-]\s*([^\]]+)\]\s*(.*)$/;
+const APV_FEEDBACK_RE = /^\[(\d{4})-(\d{2})-(\d{2})[ T](\d{2}:\d{2})[^\]]*\]\s*(.+)$/;
+const APV_TRACK_LINE_RE = /^\s*[-*]\s*(?:(\d{1,2}) (\w{3,4}) (\d{4})|(\d{4})-(\d{2})-(\d{2}))(?: (\d{2}:\d{2}))?\s*[—–-]?\s*(.*)$/;
+function apvIsoDay(d, mon, y){
+    const mm = APV_MONTHS[String(mon).toLowerCase()];
+    return mm ? `${y}-${mm}-${String(d).padStart(2,'0')}` : '';
+}
+function apvDayLabel(iso){
+    const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso||'');
+    if(!m) return iso || 'undated';
+    const names = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    return `${Number(m[3])} ${names[Number(m[2])-1] || m[2]} ${m[1]}`;
+}
+// Every dated line in the task: Notes stamps, Kevin's feedback rounds, and the
+// dated lines of any TRACK RECORD block (in Notes or in the Agent Output).
+// A link at the end of a line, "(https://…)", becomes the row's Open button.
+const APV_TRAIL_LINK_RE = /\s*\((https?:\/\/[^\s)]+)\)\s*$/;
+function apvSplitLink(text){
+    const m = APV_TRAIL_LINK_RE.exec(text||'');
+    return m ? { text: text.slice(0, m.index).trim(), link: m[1] } : { text: text||'', link: '' };
+}
+// Plain words for a 13-year-old (Kevin, 8 Sep 2026): the stamps are written
+// for machines; the rows are read by him.
+const APV_WHO_WORDS = { 'agent-dispatch':'system', 'send-email':'sent', 'send-letter':'posted', 'create-agent-task':'triage', 'track record':'history', 'robot sign-in':'sign-in', 'fix, claude':'Claude', 'claude':'Claude' };
+function apvWhoWord(who){ return APV_WHO_WORDS[String(who||'').toLowerCase()] || who; }
+function apvPlainEvent(text){
+    let m;
+    if((m = /^ATTACHED:\s*(.+?)\s*(?:—\s*(.*))?$/.exec(text))) return { text: `File added: ${m[1]}${m[2] ? ' — ' + m[2] : ''}`, file: m[1].trim() };
+    if((m = /^SUPERSEDED:\s*(.+?)\s+replaced\b/.exec(text))) return { text: `File replaced with a newer copy: ${m[1]}` };
+    if((m = /^SUBMITTED \(round (\d+)\) as (\S+)(?: with (.+))?$/.exec(text))) return { text: `Sent for your approval (round ${m[1]}, ${m[2]})${m[3] && !/^no new file/.test(m[3]) ? ' with ' + m[3] : ''}` };
+    if((m = /^SENT:\s*email to (.+?)\s+"([^"]*)"(.*?)(?:\(message ([A-Za-z0-9]+)\))?\s*$/.exec(text))) return { text: `Email sent to ${m[1]}: "${m[2]}"${m[3].trim() ? ' ' + m[3].trim() : ''}`, link: m[4] ? `https://mail.google.com/mail/u/0/#all/${m[4]}` : '' };
+    if((m = /^SENT:\s*letter (\S+) posted via Pingen to (.+?)(?: \(.*)?$/.exec(text))) return { text: `Letter posted to ${m[2]} (Pingen letter ${m[1]})` };
+    if((m = /^SIGNED IN:\s*(.*)$/.exec(text))) return { text: m[1] };
+    if((m = /^TRACK RECORD:\s*\(searched (.+?)\)\s*$/.exec(text))) return { text: `Searched ${m[1]}` };
+    if((m = /^TRACK RECORD:\s*none found \(searched (.+?)\)\s*$/.exec(text))) return { text: `Searched ${m[1]}: nothing earlier found` };
+    if((m = /^TRACK RECORD:\s*not built\s*\((.*)\)\s*$/.exec(text))) return { text: `History could not be built (${m[1]})` };
+    if((m = /^FEEDBACK ANSWERED \(round (\d+)\):?\s*(.*)$/.exec(text))) return { text: `Your feedback answered (round ${m[1]})${m[2] ? ': ' + m[2] : ''}` };
+    if((m = /^FILED, not queued:\s*(.*)$/.exec(text))) return { text: `Filed without asking you: ${m[1]}` };
+    if((m = /^CARRIED OUT \(task left open\):\s*(.*)$/.exec(text))) return { text: `Carried out: ${m[1]}` };
+    return { text };
+}
+function apvTrailEvents(t){
+    const ev = [];
+    const seen = new Set();
+    const push = (e)=>{ const k = e.day+'|'+e.time+'|'+e.text.slice(0,80); if(seen.has(k)) return; seen.add(k); ev.push(e); };
+    const fileUrl = {};
+    (t.files||[]).forEach(f=>{ fileUrl[f.filename] = f.url; });
+    const meta = apvFileMeta(t);
+    // Where it started: the email or message this task came from, and any
+    // file that came with it, dated when the task was opened.
+    // London time, like every stamp (review: UTC put an evening task on the day before).
+    let openedDay = '', openedTime = '';
+    if(t.created){
+        try {
+            const parts = new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/London', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }).formatToParts(new Date(t.created));
+            const g = (k)=> (parts.find(p=>p.type===k)||{}).value || '';
+            openedDay = `${g('year')}-${g('month')}-${g('day')}`; openedTime = `${g('hour')}:${g('minute')}`;
+        } catch(e){ openedDay = String(t.created).slice(0,10); openedTime = String(t.created).slice(11,16); }
+    }
+    if(openedDay){
+        (t.emailLinks||[]).forEach((u,i)=>push({ day: openedDay, time: openedTime, who: 'email', text: (t.emailLinks.length>1?`Email ${i+1} received`:'Email received') + (t.inboundSender?` from ${t.inboundSender}`:''), link: u, kind: 'email' }));
+        (t.files||[]).forEach(f=>{ if(!meta[f.filename]) push({ day: openedDay, time: '', who: 'file', text: `Came with the task: ${f.filename}`, link: f.url, file: f.filename, kind: 'file' }); });
+    }
+    String(t.notes||'').split('\n').forEach(line=>{
+        const m = APV_STAMP_RE.exec(line.trim());
+        if(!m) return;
+        const day = apvIsoDay(m[1], m[2], m[3]);
+        if(!day) return;
+        const raw = m[6].trim();
+        if(!raw) return;
+        const kind = apvEventKind(raw);
+        const split = apvSplitLink(raw);
+        const plain = apvPlainEvent(split.text);
+        push({ day, time: m[4]||'', who: apvWhoWord(m[5].trim()), text: plain.text, link: plain.link || split.link || (plain.file ? fileUrl[plain.file] || '' : ''), file: plain.file||'', kind });
+    });
+    String(t.feedbackHistory||'').split('\n').forEach(line=>{
+        const m = APV_FEEDBACK_RE.exec(line.trim());
+        if(!m) return;
+        push({ day: `${m[1]}-${m[2]}-${m[3]}`, time: m[4], who: 'you', text: m[5].trim(), kind: 'kevin' });
+    });
+    [t.notes, t.agentOutput].forEach(src=>{
+        const text = String(src||'');
+        let at = text.indexOf('TRACK RECORD:');
+        while(at !== -1){
+            const lines = text.slice(at).split('\n').slice(1);
+            for(const raw of lines){
+                const m = APV_TRACK_LINE_RE.exec(raw);
+                if(!m){ if(raw.trim()==='' ) continue; if(!/^\s*[-*]/.test(raw)) break; continue; }
+                const day = m[4] ? `${m[4]}-${m[5]}-${m[6]}` : apvIsoDay(m[1], m[2], m[3]);
+                if(!day) continue;
+                const split = apvSplitLink(m[8].trim());
+                push({ day, time: m[7]||'', who: 'history', text: split.text, link: split.link, kind: 'record' });
+            }
+            at = text.indexOf('TRACK RECORD:', at + 13);
+        }
+    });
+    ev.sort((a,b)=> (a.day+' '+(a.time||'00:00')).localeCompare(b.day+' '+(b.time||'00:00')));
+    return ev;
+}
+function apvEventKind(text){
+    if(/^SENT:/.test(text)) return 'sent';
+    if(/^(ATTACHED|SUPERSEDED):/.test(text)) return 'file';
+    if(/^SUBMITTED \(round/.test(text)) return 'submit';
+    if(/^TRACK RECORD:/.test(text)) return 'record';
+    return 'note';
+}
+// Which files came with this round (ATTACHED after the last SUBMITTED stamp),
+// and what each file is, from the stamps. Mirrors files_this_round in
+// scripts/agent-dispatch.py.
+function apvFileMeta(t){
+    // The current round is the files the LAST submit carried ("SUBMITTED
+    // (round n) ... with a.pdf, b.pdf") plus anything attached after it.
+    const meta = {};
+    let lastSubmit = -1, withFiles = new Set();
+    const lines = String(t.notes||'').split('\n');
+    lines.forEach((line, i)=>{
+        const m = /\] SUBMITTED \(round \d+\) as [^\n]*? with (.+)$/.exec(line.trim());
+        if(!m) return;
+        lastSubmit = i;
+        withFiles = new Set(/^no new file\b/.test(m[1]) ? [] : m[1].split(',').map(x=>x.trim()).filter(Boolean));
+    });
+    lines.forEach((line, i)=>{
+        const m = APV_STAMP_RE.exec(line.trim());
+        if(!m) return;
+        const text = m[6].trim();
+        const a = /^ATTACHED:\s*(.+?)\s*(?:—\s*(.*))?$/.exec(text);
+        if(!a) return;
+        const name = a[1].trim();
+        meta[name] = { day: apvIsoDay(m[1], m[2], m[3]), time: m[4]||'', who: m[5].trim(), purpose: (a[2]||'').trim(), thisRound: i > lastSubmit || withFiles.has(name) };
+    });
+    return meta;
+}
+// ONE line above the buttons: the document the action will use, from this
+// round, with an Open button. Everything else about files lives in the trail
+// (Kevin, 8 Sep 2026: "just have it in the track record ... rather than
+// cluttering up the interface"). If the promise involves a document and no
+// file came this round, say so in red rather than showing nothing.
+function apvDocumentLineHtml(t, askLine){
+    const meta = apvFileMeta(t);
+    const files = (t.files||[]).filter(f => meta[f.filename] && meta[f.filename].thisRound);
+    if(files.length){
+        return `<div class="apv-doc-line" data-apv-doc-line>&#128206; ${files.length===1 ? 'The document the agent will use:' : 'The documents the agent will use:'} ${files.map(f=>`<a class="apv-agent-file" data-apv-file="${esc(f.filename)}" data-apv-file-round="latest" href="${esc(f.url)}" target="_blank" rel="noopener noreferrer" onclick="return apvOpenAttachment(event,'${t.id}',this.dataset.apvFile)" title="Attached this round${meta[f.filename].purpose ? ': ' + esc(meta[f.filename].purpose) : ''}">${esc(f.filename)} &#8599;</a>`).join(' ')}</div>`;
+    }
+    // The same promise shape as the submit gate (ATTACH_PROMISE_RE in
+    // scripts/agent-dispatch.py): a promise to send something, never a
+    // mention of the sender's file or "no attachment needed" (review).
+    const promise = /\b(?:attaching|enclosing|uploading|posting)\b|\bwith\b[^.;\n]{0,80}\b(?:attached|enclosed)\b|\b(?:attached|enclosed)\b[^.;\n]{0,40}\b(?:letter|pdf|form|statement|document|copy|file|invoice|report)\b/i;
+    const negation = /\b(?:no|not|without|never)\b[^.;\n]{0,20}\b(?:attach|enclos|letter needed|file needed)/i;
+    if(!(promise.test(askLine||'') && !negation.test(askLine||''))) return '';
+    const earlier = (t.files||[]).filter(f => !(meta[f.filename] && meta[f.filename].thisRound));
+    if(earlier.length){
+        // Files from before the stamps existed, or from an earlier round: shown, but not claimed as this round's.
+        return `<div class="apv-doc-line" data-apv-doc-line data-apv-doc-earlier>&#128206; Uses a file from an earlier round: ${earlier.map(f=>`<a class="apv-agent-file" data-apv-file="${esc(f.filename)}" data-apv-file-round="earlier" href="${esc(f.url)}" target="_blank" rel="noopener noreferrer" onclick="return apvOpenAttachment(event,'${t.id}',this.dataset.apvFile)" title="Not attached this round: check it is the current copy before you approve">${esc(f.filename)} &#8599;</a>`).join(' ')} <span class="apv-file-meta">(check it is the current copy)</span></div>`;
+    }
+    return `<div class="apv-doc-line apv-doc-missing" data-apv-doc-line data-apv-doc-missing>&#9888; No document was attached this round. Do not approve blind: use More &rarr; Request changes and ask for the file.</div>`;
+}
+const APV_TRAIL_MAX = 80;
+function apvTrailHtml(t){
+    const all = apvTrailEvents(t);
+    if(!all.length) return '';
+    const hidden = Math.max(0, all.length - APV_TRAIL_MAX);
+    const ev = all.slice(hidden);
+    const lastDay = ev[ev.length-1].day;
+    const last = ev[ev.length-1];
+    let out = '', day = '';
+    ev.forEach(e=>{
+        if(e.day !== day){ day = e.day; out += `<div class="apv-trail-day${day===lastDay?' latest':''}">${esc(apvDayLabel(day))}${day===lastDay?' · latest':''}</div>`; }
+        const whoClass = e.kind==='kevin' ? ' kevin' : (e.kind==='sent' ? ' sent' : '');
+        const open = e.link ? ` <a class="apv-trail-open" href="${esc(e.link)}" target="_blank" rel="noopener noreferrer"${e.file ? ` data-apv-file="${esc(e.file)}" onclick="return apvOpenAttachment(event,'${t.id}',this.dataset.apvFile)"` : ''} title="Opens in a new tab">Open &#8599;</a>` : '';
+        out += `<div class="apv-trail-row${day===lastDay?' latest':''}" data-apv-trail-kind="${e.kind}"><span class="apv-trail-time">${esc(e.time||'')}</span><span class="apv-trail-who${whoClass}" title="${esc(e.who)}">${esc(e.who)}</span><span>${apvLinkify(e.text)}${open}</span></div>`;
+    });
+    return `<details class="apv-trail" data-apv-trail${_apvOpen.trail.has(t.id)?' open':''} ontoggle="if(this.open)_apvOpen.trail.add('${t.id}');else _apvOpen.trail.delete('${t.id}')">
+        <summary>The story so far · ${all.length} ${all.length===1?'step':'steps'}, each with a link <span class="apv-trail-last">· latest: ${esc(apvDayLabel(last.day))}, ${esc(last.who)}: ${esc(last.text.slice(0,70))}${last.text.length>70?'…':''}</span></summary>
+        ${hidden ? `<div class="apv-trail-more">${hidden} earlier ${hidden===1?'event':'events'} not shown (open the agent’s full work and the task in Airtable for all of it).</div>` : ''}
+        ${out}
+    </details>`;
+}
+
 // Links in the agent's work must open: a video the Content Engine asks Kevin to watch is a
 // Drive URL, and esc() alone left it as dead text. Escape first, then anchor. The body is
 // pre-wrap, so newlines stay as they are. Mirrors linkifyUrls in os/tasks/index.html.
@@ -1695,13 +1957,22 @@ function apvLinkify(text){
 // and offers all of them in one go. The app opens the sites one after another
 // (the robot profile can only be open in one window) and hands each site's
 // tasks back the moment he quits its window.
-const APV_SIGNIN_RE = /^\s*SIGN-IN NEEDED:\s*(.+?)\s*(?:\((https?:\/\/[^\s)]+)\))?\s*$/im;
+// Agents do not keep to the form: "SIGN-IN NEEDED: pingen.com (https://…/login) — to
+// send the letter" put the whole sentence in the site and lost the URL (8 Sep 2026).
+// The URL is taken from anywhere on the line; the site is the text before it.
+// Mirrors parse_signin_line in scripts/agent-dispatch.py.
+const APV_SIGNIN_RE = /^\s*SIGN-IN NEEDED:\s*(.+?)\s*$/im;
 function apvSignInNeeded(output){
     const m = APV_SIGNIN_RE.exec(String(output||''));
     if(!m) return null;
+    const rest = m[1].trim();
+    const u = /https?:\/\/[^\s)>\]]+/i.exec(rest);
+    const url = u ? u[0].replace(/[.,;:]+$/, '') : '';
+    let site = (u ? rest.slice(0, u.index) : rest).split(/\s+[—–-]\s+/)[0].replace(/[\s(:\-—–]+$/, '').trim();
+    if(!u) site = site.replace(/\s*\((?!https?:\/\/)[^)]*\)\s*$/, '').trim() || site;
     let host = '';
-    try{ host = m[2] ? new URL(m[2]).hostname.toLowerCase() : ''; }catch(e){ host = ''; }
-    return { site: m[1].trim(), url: m[2] || '', host };
+    try{ host = url ? new URL(url).hostname.toLowerCase() : ''; }catch(e){ host = ''; }
+    return { site, url, host };
 }
 function apvSignInLink(need){
     return need.host ? `robotsignin://site/${encodeURIComponent(need.host)}` : 'robotsignin://all';
@@ -1715,7 +1986,7 @@ function apvSignInStripHtml(items){
         .map(g => `<a class="apv-signin-site" href="${esc(apvSignInLink(g))}" title="Opens the Robot sign-in app on your Mac at this site">${esc(g.site)} <span style="color:var(--text-muted)">(${g.n})</span></a>`).join('');
     return `<div class="apv-signin-strip" data-apv-signin-strip>
         <div><strong>${needs.length === 1 ? 'One task is' : needs.length + ' tasks are'} waiting on a sign-in.</strong>
-            <span style="color:var(--text-secondary)">Not a decision: sign in once and the robot finishes the work within minutes. Sites open one after another; sign in, then Cmd+Q.</span></div>
+            <span style="color:var(--text-secondary)">Not a decision. Each site opens in turn: sign in, press Cmd+Q, the next opens. When the last one closes, the robots start on the work. This page updates itself as each site is handed back.</span></div>
         <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:6px">
             <a class="btn btn-success btn-sm" href="robotsignin://all" title="Opens the Robot sign-in app on your Mac and goes through every waiting site in turn">Sign in to all (${needs.length})</a>${parts}
         </div>
@@ -1746,6 +2017,8 @@ function apvTrigger(raw){
     const t = /trigger\s*=\s*([^;|,]+)/i.exec(m[1]);
     if(!t) return null;
     const key = t[1].trim().toLowerCase();
+    // trigger=none means nothing made it his; a "Why you: none" chip is noise.
+    if(key === 'none' || key === '') return null;
     return APV_TRIGGER_WORDS[key] || (key.indexOf('other:') === 0 ? key.slice(6).trim() : key);
 }
 
@@ -1812,7 +2085,7 @@ function apvCardHtml(t){
                 ${r.lines.map(l=>`<div class="apv-receipt-line"><span class="apv-receipt-point">${esc(l.point)}</span><span class="apv-receipt-arrow">&rarr;</span><span class="apv-receipt-change${/^cannot\b/i.test(l.change)?' cannot':''}">${esc(l.change)}</span></div>`).join('')}
             </div>`;
         })()}
-        <div class="apv-ask">${isAction ? `<span class="apv-ask-stem">If you approve, this happens:</span> ` : ''}${esc(askLine)}</div>
+        <div class="apv-ask">${isAction ? `<span class="apv-ask-stem">If you approve, the agent will:</span> ` : ''}${esc(askLine)}</div>
         ${(()=>{
             const need = apvSignInNeeded(t.agentOutput);
             if(!need) return '';
@@ -1851,12 +2124,8 @@ function apvCardHtml(t){
                 : `<div class="apv-body">The agent left its work empty, so there is nothing here to judge. Do not approve it blind. Use Request changes and tell it to show its work.</div>`}
             ${t.description ? `<div style="font-size:var(--fs-xs);font-weight:var(--fw-semibold);color:var(--text-secondary);margin-top:8px">The task it was given</div><div class="apv-body">${esc(t.description)}</div>` : ''}
         </details>
-        ${(t.files||[]).length ? `<div class="apv-agent-files">
-            <span class="apv-agent-files-label">&#128206; ${t.files.length === 1 ? 'File on this task' : t.files.length + ' files on this task'} — open before you decide</span>
-            ${t.files.map(f=>`<a class="apv-agent-file" href="${esc(f.url)}" target="_blank" rel="noopener noreferrer"
-                onclick="return apvOpenAttachment(event,'${t.id}','${esc(f.filename)}')"
-                title="Opens in a new tab. Could be the agent's own work, a document from the sender, or a file you attached — this field holds all three.">${esc(f.filename)}${f.size ? ` <span style="color:var(--text-muted)">${Math.max(1, Math.round(f.size/1024))} KB</span>` : ''}</a>`).join('')}
-        </div>` : ''}
+        ${apvDocumentLineHtml(t, askLine)}
+        ${apvTrailHtml(t)}
         ${signIn ? `<div class="apv-actions" data-apv-signin-actions>
             <a class="btn btn-success" href="${esc(apvSignInLink(signIn))}" title="Opens the Robot sign-in app on your Mac at this site. Sign in, then Cmd+Q.">Sign in now</a>
             <button class="apv-more" type="button" onclick="apvToggle('${t.id}','panel')" title="Knock it back, or send it back to the agent">More &#9662;</button>
@@ -1953,7 +2222,7 @@ let _apvReason = {};
 const APV_LEGACY_REJECT_DIALOG = false;
 // Open "Read the agent's full work" panels and open More panels, by task id,
 // so a decision on one card never snaps the others shut (finding 4).
-const _apvOpen = { work: new Set(), panel: new Set(), reasons: new Set() };
+const _apvOpen = { work: new Set(), panel: new Set(), reasons: new Set(), trail: new Set() };
 
 // ONE TAP, NO DIALOG (Kevin, 7 Sep 2026, usability audit finding 7): a reason
 // chip IS the rejection. The Remember box lives here, at the moment of
@@ -2854,7 +3123,7 @@ async function loadOpenTasks(){
     _openTasksState = 'loading';
     try {
         allOpenTasks = await atFetch(TASKS_TBL,
-            [TF.name, TF.status, TF.dueDate, TF.teamMember, TF.lmt, TF.inboundTask],
+            [TF.name, TF.status, TF.dueDate, TF.teamMember, TF.lmt, TF.inboundTask, TF.agentOutput],
             { filterByFormula: "AND({Status}!='Completed', {Status}!='Cancelled')" });
         // CONTROL: the board carries ~250-300 open tasks at all times. Zero
         // rows means the query broke, not an empty business — fail loudly.
@@ -3193,7 +3462,9 @@ function computeCheckLanes(){
         const owned = allOpenTasks.filter(r=>
             linkIds(gf(r,TF.teamMember)).some(id=>aiAgentIds.has(id)));
         const items = [];
-        apvGroupTasks(owned.map(r=>({ id:r.id, name: gf(r,TF.name)||'', _row:r })))
+        // agentOutput travels too, so a sign-in wait stays out of this lane's
+        // groups exactly as it does in the queue (review, 8 Sep 2026).
+        apvGroupTasks(owned.map(r=>({ id:r.id, name: gf(r,TF.name)||'', agentOutput: gf(r,TF.agentOutput)||'', _row:r })))
           .forEach(g=>{
             if(g.rows.length < 2) return;
             const rows = g.rows.map(x=>x._row);

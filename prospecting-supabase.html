@@ -73,7 +73,7 @@
   <!-- ── supabase-js + shim + gate. NON-deferred so window.fetch is overridden
        before any app code runs. ────────────────────────────────────────────── -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="prospecting-shim.js?v=2"></script>
+  <script src="prospecting-shim.js?v=3"></script>
   <script src="prospecting-boot.js?v=2"></script>
 
   <!-- Minimal helpers the app expects from shared.js (we don't load the heavy
@@ -106,7 +106,7 @@
 
   <!-- App scripts (classic, deferred → run in order, share global lexical scope) -->
   <script defer src="js/ai-models.js?v=1"></script>
-  <script defer src="js/config.js?v=61"></script>
-  <script defer src="js/prospecting.js?v=10"></script>
+  <script defer src="js/config.js?v=62"></script>
+  <script defer src="js/prospecting.js?v=11"></script>
 </body>
 </html>

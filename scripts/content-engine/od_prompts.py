@@ -153,6 +153,18 @@ Write the edition."""
 DM_SYSTEM = """You write a short LinkedIn connection note or message from Kevin Brittain to someone who has just subscribed to his newsletter \"""" + NEWSLETTER_NAME + """\". 25 to 60 words. Thank them, ask ONE light question about what they run or what eats their week, no pitch, no link, no hashtags, UK English, no em dashes, Kevin's plain voice. Output the message only."""
 DM_PROMPT = "Subscriber: {name}, {headline}. Write the note."
 
+ENRICH_SYSTEM = BRIEF + """
+
+You turn a finished LinkedIn post and its picture spec into the WORDS for a dense board in the style of Dan Martell's cheat sheets: a banner title with one highlighted phrase, an italic standfirst, one row per item with a short bold headline and a one-line explanation, a formula box, and a short numbered guide. You add no facts: every word comes from the post or the spec. UK English, no em dashes, no emojis, no person's name. Answer ONLY with JSON:
+{"title": "the title, under 48 chars", "highlight": "2-4 words of the title to highlight, verbatim from it",
+ "standfirst": "one italic line under 90 chars, the promise of the picture",
+ "items": [{"head": "under 7 words, sentence case", "detail": "one line under 80 chars, plain", "icon": "one of: inbox, screen, agent, checklist, notebook, database, gauge, meter, clock, folder, person, tick, cross"}],
+ "hero": {"value": "a number or a 2-4 word phrase from the post or spec", "label": "what it is, under 40 chars"},
+ "rule": "the one-line rule the reader can keep, under 110 chars, from the post",
+ "guide": ["3-5 short steps from the post, each under 60 chars"],
+ "left_label": "for a comparison only: 3 words", "right_label": "for a comparison only: 3 words"}
+Rules: keep the items in the spec's order and count, one row each, the headline carrying the item's meaning and the detail its consequence or how; if the spec is a comparison keep the before items on the left (icon cross) and the after items on the right (icon tick); if the post has numbered steps they are the guide; if there is no real number, the hero is the strongest phrase."""
+
 TALKING_POINTS_SYSTEM = TOPICS_SYSTEM   # kept for od_lane's older call site
 
 
@@ -190,7 +202,7 @@ def selftest():
     for s in SHAPES.values(): assert s["visual"] in ("before_after", "steps", "stat", "flow", "checklist") and s["visual_fields"]
     for p in (SHAPE_PROMPT, POLISH_PROMPT, NEWSLETTER_PROMPT, DM_PROMPT): assert "{" in p and "}" in p
     assert "punchier" in POLISH_PROMPT and '"score"' in USEFULNESS_SYSTEM and '"topic"' in MINE_SYSTEM and "{topics}" in MINE_SYSTEM
-    assert NEWSLETTER_NAME in NEWSLETTER_SYSTEM and "TITLE:" in NEWSLETTER_SYSTEM and len(NEWSLETTER_SERIES) == 8 and "90%" in NEWSLETTER_SERIES[0] and "{edition_brief}" in NEWSLETTER_PROMPT and "FLAGSHIP" in EDITION1_BRIEF
+    assert NEWSLETTER_NAME in NEWSLETTER_SYSTEM and "TITLE:" in NEWSLETTER_SYSTEM and '"items"' in ENRICH_SYSTEM and "Dan Martell" in ENRICH_SYSTEM and len(NEWSLETTER_SERIES) == 8 and "90%" in NEWSLETTER_SERIES[0] and "{edition_brief}" in NEWSLETTER_PROMPT and "FLAGSHIP" in EDITION1_BRIEF
     post, vis = split_visual("Hook line.\n\nBody.\n===VISUAL===\n```json\n{\"title\": \"T\", \"steps\": [\"a\", \"b\"]}\n```")
     assert post == "Hook line.\n\nBody." and vis == {"title": "T", "steps": ["a", "b"]}
     assert split_visual("no block") == ("no block", None) and split_visual("x\n===VISUAL===\nnot json")[1] is None

@@ -46,18 +46,90 @@ INTRO_TRIM_START = 1.0          # Kevin, 4 Sep 2026: the jingle's first second (
 CUT_THRESHOLDS_DB = (-35, -30, -25, -20)   # studio-quiet first; a windy road needs -20 before the pause shows
 CUT_PAUSE_MIN = 0.5             # a pause between sentences, not a gap between words
 CUT_LEAD = 0.15                 # seconds of the pause kept after the last word before the jingle
+QUIET_PAD = 0.35                # how far either side of the sign-off/welcome boundary the gap is looked for
+QUIET_RISE_DB = 6.0             # the gap runs while the level stays within this of its quietest frame
 
 
-def pick_cut(silences, seg_start, at):
-    """The jingle goes in at the pause after Kevin's last sign-off word, not at the caption's end (Kevin,
-    4 Sep 2026: on 2194 the caption ran 3 s past the last word). `silences` = [(start, end)] in clip
-    seconds. Take the LAST pause of half a second or more that starts at least a second into the
-    sign-off caption and no later than 1.5 s after the caption end. Returns (cut, resume) where resume
-    is where speech starts again, or None when no such pause exists (caller falls back to caption times)."""
-    cands = [(s, e) for s, e in silences if seg_start + 1.0 <= s <= at + 1.5 and e - s >= CUT_PAUSE_MIN]
-    if not cands: return None
-    s, e = cands[-1]
-    return round(s + CUT_LEAD, 2), round(max(s + CUT_LEAD, e - 0.2), 2)
+def flat_captions(segments):
+    """The caption chunks as one string, with a mapper from character position back to clip time. Whisper's
+    five-word chunks split the sign-off in half ("keep on listening, hope" / "you find it useful."), so the
+    phrases are matched across the join and the time interpolated inside the chunk that carries the match."""
+    text = ""; spans = []
+    for a, b, t in segments:
+        t = (t or "").strip()
+        if not t: continue
+        if text: text += " "
+        spans.append((len(text), len(text) + len(t), a, b))
+        text += t
+    def when(pos):
+        if not spans: return 0.0
+        for c0, c1, a, b in spans:
+            if pos <= c1:
+                if pos <= c0: return a
+                return a + (b - a) * ((pos - c0) / float(max(c1 - c0, 1)))
+        return spans[-1][3]
+    return text, when
+
+
+def intro_window(segments, duration=None):
+    """(start, end) of the gap Kevin leaves between his cold-open sign-off and "welcome back to day N".
+    The sign-off taken is the LAST one before the welcome: on 2057 he says "keep on listening" and then
+    "hope you find it useful", and the jingle belongs after the second (Kevin, 10 Sep 2026)."""
+    if not segments: return None
+    limit = (duration or segments[-1][1]) * INTRO_SEARCH_FRACTION
+    segs = [s for s in segments if s[0] <= limit] or segments[:1]
+    text, when = flat_captions(segs)
+    if not text: return None
+    we_pos = None
+    for rx in WELCOME_RES:
+        m = rx.search(text)
+        if m: we_pos = m.start(); break
+    so_pos = None
+    for m in INTRO_SIGNOFF_RE.finditer(text):
+        if we_pos is not None and m.end() > we_pos: break
+        so_pos = m.end()
+    if so_pos is None and we_pos is None: return None
+    so = when(so_pos) if so_pos is not None else max(0.0, when(we_pos) - 1.0)
+    we = when(we_pos) if we_pos is not None else so + 1.0
+    if we <= so: we = so + 1.0
+    return (round(so, 2), round(we, 2))
+
+
+def loudness(video, start, length, frame=0.05):
+    """[(t, dB)] for the audio in [start, start+length], one reading per `frame` seconds."""
+    r = subprocess.run([FFMPEG, "-v", "error", "-ss", "%.3f" % start, "-t", "%.3f" % length, "-i", video, "-map", "0:a:0",
+                        "-af", "astats=metadata=1:reset=1:length=%.3f,ametadata=print:key=lavfi.astats.Overall.RMS_level:file=-" % frame,
+                        "-f", "null", "-"], capture_output=True, text=True)
+    out = []
+    for t, v in re.findall(r"pts_time:([\d.]+)[\s\S]{0,150}?RMS_level=(-?[\d.]+|-inf)", r.stdout):
+        out.append((start + float(t), -120.0 if v == "-inf" else float(v)))
+    return out
+
+
+def quiet_point(video, w0, w1, pad=QUIET_PAD):
+    """The quietest moment between the sign-off and the welcome, as (cut, resume). Road noise, wind and
+    breathing mean the gap is rarely silent, so the quietest FRAME is found and then widened while the
+    level stays within QUIET_RISE_DB of it: that pair of times is the gap Kevin leaves."""
+    a0 = max(0.0, w0 - pad); length = max(0.3, (w1 + pad) - a0)
+    rows = loudness(video, a0, length)
+    if len(rows) < 4: return None
+    lo = min(range(len(rows)), key=lambda i: rows[i][1])
+    floor = rows[lo][1] + QUIET_RISE_DB
+    i = lo
+    while i > 0 and rows[i - 1][1] <= floor: i -= 1
+    j = lo
+    while j < len(rows) - 1 and rows[j + 1][1] <= floor: j += 1
+    g0, g1 = rows[i][0], rows[j][0]
+    cut = g0 + min(CUT_LEAD, max(0.0, (g1 - g0) / 2))
+    return round(cut, 2), round(max(cut, g1), 2)
+
+
+def pick_cut(sils, w0, w1):
+    """A real silence inside the gap, when there is one: the longest that overlaps [w0, w1]."""
+    hits = [(s, e) for s, e in sils if e >= w0 - 0.4 and s <= w1 + 0.4 and e - s >= CUT_PAUSE_MIN]
+    if not hits: return None
+    s, e = max(hits, key=lambda se: se[1] - se[0])
+    return round(max(s, max(0.0, w0 - 0.4)) + CUT_LEAD, 2), round(max(s + CUT_LEAD, e - 0.2), 2)
 
 
 def silences(video, start, length, db):
@@ -69,18 +141,19 @@ def silences(video, start, length, db):
     return [(start + s, start + (ends[i] if i < len(ends) else start + length)) for i, s in enumerate(starts)]
 
 
-def find_pause(video, segments, at):
-    """(cut, resume) tightened to the real pause after the sign-off; caption times when none is found.
-    The threshold adapts: the first level (quiet first) that shows a pause of CUT_PAUSE_MIN wins."""
-    later = [s for s in segments if s[0] >= at - 0.05]
-    fallback = (at, round(max(at, later[0][0] - 0.2), 2) if later else at)
-    if at <= 0.05: return fallback
-    seg = [s for s in segments if abs(s[1] - at) < 0.01 or (s[0] < at <= s[1])]
-    seg_start = seg[0][0] if seg else max(0.0, at - 6.0)
+def find_pause(video, segments, duration=None):
+    """(cut, resume): where the jingle goes and where speech starts again. The window is the gap between
+    Kevin's cold-open sign-off and his "welcome back"; inside it a real silence wins, otherwise the quietest
+    quarter-second. (0, 0) when neither phrase is in the opening, so the jingle leads the episode."""
+    win = intro_window(segments, duration)
+    if not win: return 0.0, 0.0
+    w0, w1 = win
     for db in CUT_THRESHOLDS_DB:
-        got = pick_cut(silences(video, seg_start, (at - seg_start) + 2.0, db), seg_start, at)
+        got = pick_cut(silences(video, max(0.0, w0 - 1.0), (w1 - w0) + 2.0, db), w0, w1)
         if got: return got
-    return fallback
+    got = quiet_point(video, w0, w1)
+    if got: return got
+    return round(w0, 2), round(w1, 2)
 
 
 def clip_caption_at(srt_text, at):
@@ -104,25 +177,41 @@ def podcast_filter(at, resume):
     return ("[0:a]atrim=0:%.3f,asetpts=PTS-STARTPTS[a];[0:a]atrim=%.3f,asetpts=PTS-STARTPTS[b];[a][b]concat=n=2:v=0:a=1[out]" % (at, resume))
 
 
-def intro_insert_seconds(segments, duration=None):
-    """Where the intro goes: the END of the caption carrying the sign-off phrase, else the START of the
-    'welcome back' caption, else 0. Only the first part of the clip is searched."""
-    if not segments: return 0.0
-    limit = (duration or segments[-1][1]) * INTRO_SEARCH_FRACTION
-    for a, b, text in segments:
-        if a > limit: break
-        if INTRO_SIGNOFF_RE.search(text): return float(b)
-    for rx in WELCOME_RES:              # the specific phrase first, across the whole opening, then the loose one
-        for a, b, text in segments:
-            if a > limit: break
-            if rx.search(text): return float(a)
-    return 0.0
+def media_seconds(path):
+    try:
+        return float(subprocess.run([os.path.expanduser("~/tools/bin/ffprobe"), "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", path],
+                                    capture_output=True, text=True, timeout=60).stdout.strip() or 0)
+    except Exception:
+        return 0.0
+
+
+def intro_clip():
+    """The jingle from a LOCAL copy fetched once through the Drive API. On 9 and 10 Sep 2026 the mounted copy
+    handed ffmpeg an empty stream at night: episodes 2055 and 2056 shipped with no jingle while every step
+    reported ok. The mount is only a fallback, and a copy that ffprobe cannot read is thrown away."""
+    if os.path.exists(INTRO_LOCAL) and media_seconds(INTRO_LOCAL) > INTRO_TRIM_START + 1: return INTRO_LOCAL
+    try:
+        import drive_api
+        fid = drive_api.folder_id(drive_api.EDITED_PATH + ["Vlog Intro"])
+        hits = [f for f in drive_api.list_folder(fid) if f.get("name") == os.path.basename(INTRO_CLIP)]
+        if hits:
+            tmp = INTRO_LOCAL + ".part"
+            if os.path.exists(tmp): os.remove(tmp)
+            drive_api.download(hits[0]["id"], tmp, size=int(hits[0].get("size") or 0) or None)
+            if media_seconds(tmp) > INTRO_TRIM_START + 1: os.replace(tmp, INTRO_LOCAL); return INTRO_LOCAL
+            os.remove(tmp)
+    except Exception as ex:
+        print("intro: Drive API copy failed (%s); using the mounted clip" % str(ex)[:120], file=sys.stderr)
+    if os.path.exists(INTRO_CLIP) and media_seconds(INTRO_CLIP) > INTRO_TRIM_START + 1: return INTRO_CLIP
+    raise SystemExit("intro clip unreadable: neither %s nor %s plays" % (INTRO_LOCAL, INTRO_CLIP))
 
 
 def insert_intro(full_path, at, out_path, intro=None):
     """Splice the intro into the finished (captioned) full episode at `at` seconds. Re-encodes once with the
-    hardware encoder; the intro is scaled to the episode's frame and both audio tracks are made alike."""
-    intro = intro or INTRO_CLIP
+    hardware encoder; the intro is scaled to the episode's frame and both audio tracks are made alike.
+    The output must be longer than the input by the jingle, or the render fails here rather than shipping
+    a jingle-less episode that reads ok (2055 and 2056, 10 Sep 2026)."""
+    intro = intro or intro_clip()
     if not os.path.exists(intro): raise SystemExit("intro clip missing: " + intro)
     probe = subprocess.run([os.path.expanduser("~/tools/bin/ffprobe"), "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=width,height,r_frame_rate",
                             "-of", "csv=p=0", full_path], capture_output=True, text=True).stdout.strip().split(",")
@@ -138,7 +227,17 @@ def insert_intro(full_path, at, out_path, intro=None):
                         "-c:v", "h264_videotoolbox", "-b:v", "10M", "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "160k", "-movflags", "+faststart", out_path],
                        capture_output=True, text=True)
     if r.returncode != 0: raise SystemExit("intro insert failed: " + r.stderr[-300:])
+    check_intro_length(full_path, out_path, intro)
     return out_path
+
+
+def check_intro_length(src, out, intro):
+    """The proof the jingle is in: out = src + (intro - trim), within a second. Missing frames from a flaky
+    input do not fail ffmpeg; they fail here."""
+    want = media_seconds(src) + max(0.0, media_seconds(intro) - INTRO_TRIM_START)
+    got = media_seconds(out)
+    if got < want - 1.0:
+        raise SystemExit("intro insert produced %.1f s but %.1f s was expected (%.1f s of jingle missing): %s" % (got, want, want - got, out))
 
 
 def podcast_audio(captioned_path, out_mp3, at=0.0, resume=0.0):
@@ -160,7 +259,48 @@ def hundreds_folder(day):
 
 
 def output_names(day):
-    return {"full": "Episode_%d_Full_Episode.mp4" % day, "lfmd": "Ep%d_LFMD.mp4" % day, "summary": "Ep%d_Summary.mp4" % day, "podcast": "Ep%d_Podcast.mp3" % day}
+    """The _YT pair (Kevin, 9 Sep 2026, after 2054 showed two sets of captions on YouTube): the full episode and the
+    Short WITHOUT burnt-in captions, each with its caption file, for the direct YouTube upload. The socials keep the
+    burnt-in versions."""
+    return {"full": "Episode_%d_Full_Episode.mp4" % day, "lfmd": "Ep%d_LFMD.mp4" % day, "summary": "Ep%d_Summary.mp4" % day, "podcast": "Ep%d_Podcast.mp3" % day,
+            "full_yt": "Episode_%d_Full_Episode_YT.mp4" % day, "full_srt": "Episode_%d_Full_Episode_YT.srt" % day,
+            "lfmd_yt": "Ep%d_LFMD_YT.mp4" % day, "lfmd_srt": "Ep%d_LFMD_YT.srt" % day}
+
+
+INTRO_SECONDS_FALLBACK = 7.0    # the jingle clip is 8.0 s (ffprobe, 9 Sep 2026) minus INTRO_TRIM_START
+
+
+def intro_seconds(intro=None):
+    """How much the jingle pushes later captions back, read from the clip; the measured constant when the mount is off."""
+    intro = intro or INTRO_CLIP
+    try:
+        out = subprocess.run([os.path.expanduser("~/tools/bin/ffprobe"), "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", intro],
+                             capture_output=True, text=True, timeout=60).stdout.strip()
+        d = float(out) - INTRO_TRIM_START
+        return d if d > 0 else INTRO_SECONDS_FALLBACK
+    except Exception:
+        return INTRO_SECONDS_FALLBACK
+
+
+def shift_after(srt_text, at, delta):
+    """Caption cues at or after `at` seconds move later by `delta`: the YouTube caption file must line up with the
+    episode once the jingle has been spliced in at `at`. Cues before the cut are untouched."""
+    out = []
+    for blk in srt_text.strip().split("\n\n"):
+        lines = blk.split("\n")
+        if len(lines) >= 2 and "-->" in lines[1]:
+            a, _, b = lines[1].partition("-->")
+            sa, sb = _srt_seconds(a.strip()), _srt_seconds(b.strip())
+            if at > 0.05 and sa >= at - 0.05: sa, sb = sa + delta, sb + delta
+            elif at <= 0.05: sa, sb = sa + delta, sb + delta
+            lines[1] = "%s --> %s" % (srt_ts(sa), srt_ts(sb))
+        out.append("\n".join(lines))
+    return "\n\n".join(out) + "\n"
+
+
+def _srt_seconds(ts):
+    h, m, rest = ts.split(":"); sec, _, ms = rest.partition(",")
+    return int(h) * 3600 + int(m) * 60 + int(sec) + (int(ms) if ms else 0) / 1000.0
 
 
 def title_from_transcript(text):
@@ -173,7 +313,12 @@ def title_from_transcript(text):
     return " ".join(words[:mid]).upper() + "|" + " ".join(words[mid:]).upper()
 
 
-LFMD_START_RE = re.compile(r"learn\w*\s+(?:from|for|of|through|in|to)\s+(?:my|the)\s+diary", re.I)   # whisper heard "learning through my diary" on 2195
+# Whisper mishears the phrase: "learning through my diary" (2195), "the learnings from my diet" (2054, Kevin 9 Sep 2026:
+# "you need to have a little bit of flexibility... pretty much every day I do the learnings from my diary").
+# learn*/lesson* + a joining word + my/the + any word starting dia/die/dai (diary, diaries, diet, dairy).
+# "Learnings from my diary" as whisper hears it: learnings/lessons/latest/learning ... from/in/for my diary (2056, 10 Sep 2026: "the latest in my diary")
+LFMD_START_RE = re.compile(r"(?:\w+\s+)?(?:from|for|of|through|in|to)\s+(?:my|the)\s+d(?:ia|ie|ai)\w*"
+                           r"|(?:learn\w*|lesson\w*)(?:\s+\w+){0,2}\s+(?:for|of)\s+(?:today|the day)", re.I)
 SIGNOFF_RE = re.compile(r"thank you as always|stay positive|see you (?:again )?tomorrow", re.I)
 
 
@@ -245,12 +390,13 @@ def thumb_lines(text):
     return parts[0].strip(), (parts[1].strip() if len(parts) > 1 else ""), "banner"
 
 
-def make_thumbnail(master_916, duration, text, day, workdir):
-    """R6: the YouTube thumbnail in the team's layout, from a frame of the 9:16 master (Kevin whole-body, mid-run)."""
+def make_thumbnail(master_916, duration, text, day, workdir, lines=None):
+    """R6: the YouTube thumbnail in the team's layout, from a frame of the 9:16 master (Kevin whole-body, mid-run).
+    `lines` is the headline the banner already used, so Claude writes it once per episode."""
     at = min(12.0, max(0.0, duration / 2))
     frame = os.path.join(workdir, "thumb_frame.png")
     subprocess.run([FFMPEG, "-v", "error", "-y", "-ss", "%.2f" % at, "-i", master_916, "-frames:v", "1", frame], check=True)
-    l1, l2, how = thumb_lines(text)
+    l1, l2, how = lines or thumb_lines(text)
     out = thumbnail.compose(frame, os.path.join(workdir, "Episode_%d_Thumbnail.png" % day), l1, l2)
     return out, (l1, l2, how)
 
@@ -280,17 +426,50 @@ def master_complete(dest, clip):
     return d0 > 0 and abs(d1 - d0) < 2.0
 
 
-def render_masters(clip, workdir, only=None):
+def find_pans_for(clip, srt):
+    """Where Kevin points at his surroundings while talking about them (pointing.py). Never stops a render:
+    any failure means no pan, said on stderr, and the card says none were planned."""
+    try:
+        import pointing, stab
+        return pointing.find_pans(clip, open(srt).read(), preview=lambda t: stab.preview_frame(clip, t))
+    except Exception as ex:
+        print("pointing: skipped (%s)" % str(ex)[:120], file=sys.stderr); return []
+
+
+def render_masters(clip, workdir, only=None, pans=""):
     out = {}
     for aspect, args in RECIPE.items():
         if only and aspect != only: continue
         dest = os.path.join(workdir, "master_%s.mp4" % aspect.replace(":", "x"))
-        if master_complete(dest, clip):
+        side = dest + ".pans"
+        had = open(side).read() if os.path.exists(side) else ""
+        if master_complete(dest, clip) and had == (pans or ""):
             print("render: reusing finished %s master" % aspect); out[aspect] = dest; continue
-        subprocess.run([sys.executable, os.path.join(HERE, "stab.py"), "render", clip, dest, "--map", "z-yx"] + args,
+        extra = ["--pans", pans] if pans else []
+        subprocess.run([sys.executable, os.path.join(HERE, "stab.py"), "render", clip, dest, "--map", "z-yx"] + args + extra,
                        check=True, stdout=subprocess.DEVNULL)
+        open(side, "w").write(pans or "")
         out[aspect] = dest
     return out
+
+
+def horizon_for(masters):
+    """The stabiliser's settle report for the wide master (or the tall one), from its sidecar."""
+    for aspect in ("16:9", "9:16"):
+        side = (masters.get(aspect) or "") + ".horizon.json"
+        if masters.get(aspect) and os.path.exists(side):
+            try: return json.load(open(side))
+            except Exception: return None
+    return None
+
+
+def source_fps(clip):
+    try:
+        r = subprocess.run([os.path.expanduser("~/tools/bin/ffprobe"), "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=r_frame_rate", "-of", "csv=p=0", clip],
+                           capture_output=True, text=True, timeout=60).stdout.strip().split("\n")[0]
+        a, _, b = r.partition("/"); return round(float(a) / float(b or 1), 3)
+    except Exception:
+        return None
 
 
 def trim(src, start, end, dest):
@@ -334,6 +513,14 @@ def check_captions(path, what):
     return n
 
 
+def assert_has_video(path, what):
+    """An output with no video stream is not an output (5 Sep 2026: Episode 2196's Learnings clip was audio only,
+    cut from a 9:16 master whose picture ended early). Fails the run rather than filing sound as a video."""
+    pr = os.path.expanduser("~/tools/bin/ffprobe")
+    kinds = subprocess.run([pr, "-v", "error", "-show_entries", "stream=codec_type", "-of", "csv=p=0", path], capture_output=True, text=True).stdout.split()
+    if "video" not in kinds: raise RuntimeError("%s has no video stream (%s): refusing to file it" % (what, path))
+
+
 def overlay(ov, args, what):
     """Run overlays.py and, on failure, raise with its stderr instead of swallowing it."""
     r = subprocess.run([sys.executable, ov] + args, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
@@ -352,8 +539,22 @@ def build_outputs(masters, srt, day, title, workdir, lfmd=None, role="episode"):
         paths["summary"] = os.path.join(workdir, names["summary"])
         overlay(ov, ["summary", masters["9:16"], caps, paths["summary"], "--day", str(day), "--title", title], "episode %s summary" % day)
         return paths
-    segs = srt_segments(open(srt).read())
-    at, resume = find_pause(masters["16:9"], segs, intro_insert_seconds(segs))     # on the master: same sound, no captions yet
+    if role == "lfmd-only":
+        # The Learnings clip alone (redo --only lfmd): no intro, no full render, and no 16:9 master to look for the
+        # sign-off pause in. 8 Sep 2026, 22:00: this branch sat AFTER the pause search and the 2196 rebuild died on
+        # masters["16:9"]. The diary section ends before the sign-off, so the unclipped captions are the right ones.
+        assert_has_video(masters["9:16"], "episode %s 9:16 master" % day)
+        piece = trim(masters["9:16"], lfmd[0], lfmd[1], os.path.join(workdir, "lfmd_master.mp4")); assert_has_video(piece, "episode %s Learnings cut" % day)
+        lcaps = os.path.join(workdir, "captions_lfmd.srt"); open(lcaps, "w").write(shift_srt(open(caps).read(), lfmd[0], lfmd[1]))
+        check_captions(lcaps, "episode %s LFMD" % day)
+        paths["lfmd"] = os.path.join(workdir, names["lfmd"])
+        overlay(ov, ["lfmd", piece, lcaps, paths["lfmd"], "--day", str(day), "--subtitle", title.replace("|", " ").strip()], "episode %s LFMD" % day)
+        clean_short(ov, piece, lcaps, paths, names, workdir, day, title)
+        assert_has_video(paths["lfmd"], "episode %s lfmd" % day); return paths
+    # the five-word caption chunks, not whisper's ten-second segments: the sign-off and the "welcome back"
+    # share one segment, so only the chunks can put the cut in Kevin's gap (10 Sep 2026)
+    cap_segs = srt_segments(open(caps).read())
+    at, resume = find_pause(masters["16:9"], cap_segs, srt_segments(open(srt).read())[-1][1])
     LAST_CUT.update({"at": at, "resume": resume})
     clipped = clip_caption_at(open(caps).read(), at)                                 # READ before the write opens the file (5 Sep 2026: open(w) first truncated it to nothing)
     with open(caps, "w") as fh: fh.write(clipped)
@@ -363,19 +564,56 @@ def build_outputs(masters, srt, day, title, workdir, lfmd=None, role="episode"):
     paths["full"] = os.path.join(workdir, names["full"])
     insert_intro(captioned, at, paths["full"])
     paths["podcast"] = podcast_audio(captioned, os.path.join(workdir, names["podcast"]), at, resume)
+    # YouTube gets the same cut without burnt-in captions, plus the caption file lined up with the jingle
+    paths["full_yt"] = insert_intro(masters["16:9"], at, os.path.join(workdir, names["full_yt"]))
+    paths["full_srt"] = os.path.join(workdir, names["full_srt"])
+    with open(paths["full_srt"], "w") as fh: fh.write(shift_after(clipped, at, intro_seconds()))
+    check_captions(paths["full_srt"], "episode %s YouTube captions" % day)
     if lfmd:   # the "Learnings from my diary" section only (Kevin, 3 Sep 2026)
+        assert_has_video(masters["9:16"], "episode %s 9:16 master" % day)
         piece = trim(masters["9:16"], lfmd[0], lfmd[1], os.path.join(workdir, "lfmd_master.mp4"))
+        assert_has_video(piece, "episode %s Learnings cut" % day)
         lcaps = os.path.join(workdir, "captions_lfmd.srt")
         open(lcaps, "w").write(shift_srt(open(caps).read(), lfmd[0], lfmd[1]))
         check_captions(lcaps, "episode %s LFMD" % day)
         paths["lfmd"] = os.path.join(workdir, names["lfmd"])
         # the subheading says what the episode is about (Kevin, 4 Sep 2026)
         overlay(ov, ["lfmd", piece, lcaps, paths["lfmd"], "--day", str(day), "--subtitle", title.replace("|", " ").strip()], "episode %s LFMD" % day)
+        clean_short(ov, piece, lcaps, paths, names, workdir, day, title)
+    for kind, p in paths.items():
+        if p.endswith(".mp4"): assert_has_video(p, "episode %s %s" % (day, kind))
     return paths
+
+
+def clean_short(ov, piece, lcaps, paths, names, workdir, day, title):
+    """The YouTube Short: banner, no burnt-in captions, caption file beside it."""
+    paths["lfmd_yt"] = os.path.join(workdir, names["lfmd_yt"])
+    overlay(ov, ["lfmd", piece, lcaps, paths["lfmd_yt"], "--day", str(day), "--subtitle", title.replace("|", " ").strip(), "--no-captions"], "episode %s LFMD (YouTube)" % day)
+    paths["lfmd_srt"] = os.path.join(workdir, names["lfmd_srt"]); shutil.copyfile(lcaps, paths["lfmd_srt"])
+
+
+def publish_via_api(paths, day, transcript_txt):
+    """Finished videos straight up to the shared drive through the API (Kevin, 9 Sep 2026): the Mac's Drive cache
+    never holds a copy. Returns links by kind, or None when the API is not set up or fails (the mount copy then runs)."""
+    try:
+        import drive_api
+        if not os.path.exists(drive_api.KEY_FILE): return None
+        fid = drive_api.folder_id(drive_api.EDITED_PATH + [hundreds_folder(day), str(day)], create=True)
+        links = {}
+        for kind, p in paths.items():
+            mime = "video/mp4" if p.endswith(".mp4") else "audio/mpeg" if p.endswith(".mp3") else "image/png" if p.endswith(".png") else "application/x-subrip" if p.endswith(".srt") else "application/octet-stream"
+            links[kind] = drive_api.link(drive_api.upload(p, fid, mime=mime))
+        drive_api.upload(transcript_txt, fid, name="Ep%d_transcript.txt" % day, mime="text/plain")
+        return links
+    except Exception as ex:
+        print("publish: Drive API upload failed for episode %d (%s); using the mounted folder" % (day, str(ex)[:120]), file=sys.stderr)
+        return None
 
 
 def publish_to_drive(paths, day, transcript_txt):
     folder = os.path.join(EDITED_ROOT, hundreds_folder(day), str(day))
+    links = publish_via_api(paths, day, transcript_txt)
+    if links: return folder, links
     os.makedirs(folder, exist_ok=True)
     links = {}
     for kind, p in paths.items():
@@ -425,12 +663,28 @@ def process(key, ledger, keep=False):
                                      "-of", "csv=p=0", clip], capture_output=True, text=True).stdout or 0)
     role = clip_role(duration, bool(window))
     e["lfmd_window"] = window; e["role"] = role; e["duration"] = round(duration, 1); watch.save_ledger(ledger)
-    masters = render_masters(clip, workdir) if role == "episode" else {"9:16": render_masters(clip, workdir, only="9:16")["9:16"]}
+    if role == "episode":
+        import pointing
+        pans = find_pans_for(clip, srt); e["pans"] = pans; watch.save_ledger(ledger)
+        if pans: print("pointing: %d pan(s) planned: %s" % (len(pans), pointing.pans_arg(pans)))
+        masters = render_masters(clip, workdir, pans=pointing.pans_arg(pans))
+    else:
+        masters = {"9:16": render_masters(clip, workdir, only="9:16")["9:16"]}
     title = title_from_transcript(text)
+    lines = None
+    if role == "episode":
+        # one headline for the whole episode: the banner said "TAKING MOST OUT | TEAM FOR" while the thumbnail
+        # said "GET YOUR TEAM / ALL IN" (2056, Kevin 10 Sep 2026). Claude writes it once, both use it.
+        l1, l2, how = thumb_lines(text)
+        lines = (l1, l2, how)
+        if how == "claude" and l1: title = (l1 + "|" + l2).upper()
+    if role == "teaser":
+        title = episode_title_for(day, ledger) or title      # the long clip's title on the teaser banner (Kevin, 10 Sep 2026)
     paths = build_outputs(masters, srt, day, title, workdir, lfmd=window, role=role)
+    e["horizon"] = horizon_for(masters); e["source_fps"] = source_fps(clip)
     if role == "episode":
         e["intro_at"] = LAST_CUT.get("at"); e["podcast_resume"] = LAST_CUT.get("resume")
-        paths["thumb"], e["thumb_lines"] = make_thumbnail(masters["9:16"], duration, text, day, workdir)
+        paths["thumb"], e["thumb_lines"] = make_thumbnail(masters["9:16"], duration, text, day, workdir, lines=lines)
     folder, links = publish_to_drive(paths, day, os.path.join(workdir, "transcript.txt"))
     rid, how = find_or_create_record(day, e.get("drive_id"), key, dt.date.fromisoformat(e["date"]))
     watch._airtable("PATCH", watch.API + "/" + rid, {"fields": record_updates(day, links, text, reason, key, role)})
@@ -443,12 +697,85 @@ def process(key, ledger, keep=False):
           {k: ("ok" if v else "NO DRIVE ID YET") for k, v in links.items()}))
 
 
+def redo_lfmd(day):
+    """Rebuild one episode's Learnings clip only: re-pull the clip if it is gone, transcribe, render the 9:16
+    master (reused when complete), cut the diary section, file it, update the record and refresh the card."""
+    ledger = watch.load_ledger()
+    keys = [k for k, v in ledger.items() if v.get("episode") == day and v.get("role") == "episode"]
+    if not keys: raise SystemExit("no episode clip for day %d in the ledger" % day)
+    key = keys[0]; e = ledger[key]
+    clip = e.get("local") or ""
+    if not clip or not os.path.exists(clip):
+        e["status"] = "new"; watch.save_ledger(ledger)
+        clip = watch.pull(ledger, key)
+        if not clip: raise SystemExit("could not pull %s again" % key)
+        e = ledger[key]
+    workdir = os.path.join(os.path.dirname(clip), "render_" + key.replace(".insv", ""))
+    os.makedirs(workdir, exist_ok=True)
+    text, srt = transcribe(clip, workdir)
+    window = lfmd_window(srt_segments(open(srt).read()))
+    if not window: raise SystemExit("episode %d has no diary section in its transcript" % day)
+    masters = render_masters(clip, workdir, only="9:16")
+    title = title_from_transcript(text)
+    paths = build_outputs(masters, srt, day, title, workdir, lfmd=window, role="lfmd-only")
+    folder, links = publish_to_drive({"lfmd": paths["lfmd"]}, day, os.path.join(workdir, "transcript.txt"))
+    rid, how = find_or_create_record(day, e.get("drive_id"), key, dt.date.fromisoformat(e["date"]))
+    if links.get("lfmd"): watch._airtable("PATCH", watch.API + "/" + rid, {"fields": {"Reframed Video URL": links["lfmd"]}})
+    e["lfmd_window"] = window; e["lfmd_redone"] = dt.datetime.now().isoformat(timespec="seconds"); e["status"] = "rendered"; e["local"] = clip
+    watch.save_ledger(ledger)
+    print("episode %d: Learnings clip rebuilt -> %s (record %s)" % (day, "ok" if links.get("lfmd") else "NO DRIVE ID YET", rid))
+    import approval; approval.refresh_card(day)
+    return paths["lfmd"]
+
+
+def redo_full(day, keep=False):
+    """Rebuild one episode's whole output set (Kevin sent 2056 back on 10 Sep 2026: no jingle, no Learnings clip):
+    re-pull the clip if it is gone, then run the normal render; the Drive uploads replace the day's files."""
+    ledger = watch.load_ledger()
+    keys = [k for k, v in ledger.items() if v.get("episode") == day and v.get("role") == "episode"]
+    if not keys: raise SystemExit("no episode clip for day %d in the ledger" % day)
+    key = keys[0]; e = ledger[key]
+    clip = e.get("local") or ""
+    if not clip or not os.path.exists(clip):
+        e["status"] = "new"; watch.save_ledger(ledger)
+        clip = watch.pull(ledger, key)
+        if not clip: raise SystemExit("could not pull %s again" % key)
+        ledger = watch.load_ledger()
+    ledger[key]["status"] = "pulled"; ledger[key]["local"] = clip; ledger[key]["redo"] = dt.datetime.now().isoformat(timespec="seconds")
+    ledger[key].pop("outputs", None); watch.save_ledger(ledger)
+    process(key, ledger, keep=keep)
+    import approval
+    if str(day) in approval.load_state():      # a card already exists: refresh it (a sent-back card needs --receipt, see approval.py)
+        approval.refresh_card(day, receipt=os.environ.get("CE_RECEIPT") or None)
+    return key
+
+
+def teaser_waits(key, ledger):
+    """A short clip renders AFTER the day's long one so its banner can carry the episode title (1841's teaser
+    said 'Diary of a Runpreneur', Kevin 10 Sep 2026). It waits while a bigger clip of the same day is still
+    new, pulled or rendering; a day with no bigger clip, or one whose long clip failed, renders at once."""
+    e = ledger[key]
+    bigger = [v for k2, v in ledger.items() if k2 != key and v.get("date") == e.get("date") and (v.get("size") or 0) > (e.get("size") or 0)]
+    return any(v.get("status") in ("new", "pulled", "rendering") for v in bigger)
+
+
+def episode_title_for(day, ledger):
+    """The banner title the day's long clip produced, if it has rendered."""
+    for v in ledger.values():
+        if v.get("episode") == day and v.get("role") == "episode" and v.get("status") == "rendered" and v.get("title"):
+            return v["title"]
+    return None
+
+
 def run(limit=1, keep=False):
     ledger = watch.load_ledger()
     keys = [k for k, v in ledger.items() if v.get("status") == "pulled" and v.get("local") and os.path.exists(v["local"])]
-    keys = sorted(keys, key=lambda k: (ledger[k]["date"], ledger[k].get("size", 0)))[:limit]
+    keys = sorted(keys, key=lambda k: (ledger[k]["date"], -(ledger[k].get("size") or 0)))     # the long clip of a day first
+    waiting = [k for k in keys if teaser_waits(k, ledger)]
+    keys = [k for k in keys if k not in waiting][:limit]
+    for k in waiting: print("render: %s waits for the day's long clip (title first)" % k)
     if not keys:
-        print("render: nothing pulled"); return
+        print("render: nothing pulled" + (" (%d waiting)" % len(waiting) if waiting else "")); return
     failed = []
     for k in keys:
         try:
@@ -462,6 +789,13 @@ def run(limit=1, keep=False):
             print("render FAILED for %s: %s" % (k, exc), file=sys.stderr)
     print("render: %d of %d clips done, %d failed%s" % (len(keys) - len(failed), len(keys), len(failed),
           (" (" + ", ".join(failed) + ")") if failed else ""))
+    ledger = watch.load_ledger()
+    for k in waiting:                                    # the short clips whose long clip has just finished
+        if k in ledger and ledger[k].get("status") == "pulled" and not teaser_waits(k, ledger):
+            try: process(k, ledger, keep); print("render: %s rendered after its episode" % k)
+            except Exception as exc:
+                ledger = watch.load_ledger(); ledger[k]["status"] = "failed"; ledger[k]["error"] = str(exc)[:500]; watch.save_ledger(ledger)
+                print("render FAILED for %s: %s" % (k, exc), file=sys.stderr)
 
 
 def one(clip, day, out):
@@ -476,13 +810,47 @@ def one(clip, day, out):
 def selftest():
     assert hundreds_folder(2049) == "2001-2100" and hundreds_folder(2100) == "2001-2100" and hundreds_folder(2101) == "2101-2200"
     assert output_names(2225)["full"] == "Episode_2225_Full_Episode.mp4" and output_names(2225)["podcast"] == "Ep2225_Podcast.mp3"
+    assert output_names(2225)["full_yt"] == "Episode_2225_Full_Episode_YT.mp4" and output_names(2225)["lfmd_srt"] == "Ep2225_LFMD_YT.srt"
+    s3 = "1\n00:00:01,000 --> 00:00:03,000\nbefore\n\n2\n00:00:10,000 --> 00:00:12,500\nafter\n"
+    sh = shift_after(s3, 5.0, 7.0)
+    assert "00:00:01,000 --> 00:00:03,000" in sh and "00:00:17,000 --> 00:00:19,500" in sh, sh
+    assert "00:00:08,000 --> 00:00:10,000" in shift_after(s3, 0.0, 7.0), "a jingle at the very start moves every cue"
+    assert INTRO_SECONDS_FALLBACK == 7.0 and intro_seconds("/nonexistent.mp4") == 7.0
+    import inspect as _i; bo = _i.getsource(build_outputs); assert 'paths["full_yt"] = insert_intro(masters["16:9"]' in bo and bo.count("clean_short(") == 2, "both YouTube variants are built"
     segs_i = [(0, 4, "consecutive day 2195 of a diary of a Runpreneur"), (4, 9, "if that resonates with you keep on watching"), (9, 15, "welcome back to consecutive day"), (300, 305, "so let's go")]
-    assert intro_insert_seconds(segs_i, 600) == 9.0, "after the sign-off caption"
-    assert intro_insert_seconds(segs_i[:1] + segs_i[2:], 600) == 9.0, "before the welcome-back caption when there is no sign-off"
-    assert intro_insert_seconds([(0, 5, "just talking"), (300, 305, "let's go")], 600) == 0.0, "a late let's go is not the sign-off"
-    assert intro_insert_seconds([], 10) == 0.0
     assert INTRO_CLIP.endswith("Vlog Intro/runprenuer-intro_clip.mp4") and INTRO_TRIM_START == 1.0
+    segs_c = [(0, 2.2, "So today I want to"), (19.9, 22.2, "So keep in mind,"), (22.2, 24.5, "keep on listening, hope"),
+              (24.5, 26.8, "you find it useful."), (26.8, 28.6, "Welcome back to consecutive"), (28.6, 30.4, "day, 2057, with a")]
+    txt, when = flat_captions(segs_c)
+    assert "listening, hope you find it useful." in txt, "the chunks join, so a phrase split across them still matches"
+    assert abs(when(txt.index("Welcome")) - 26.8) < 0.2, when(txt.index("Welcome"))
+    w = intro_window(segs_c, 500)
+    assert w and 26.3 < w[0] <= 26.9 and abs(w[1] - 26.8) < 0.3, ("the LAST sign-off before the welcome, not the first", w)
+    assert intro_window([(0, 5, "just talking"), (300, 305, "let us go")], 600) is None, "no sign-off, no welcome: the jingle leads"
+    assert intro_window([(0, 3, "welcome back to consecutive day 9")], 100)[0] >= 0.0
+    assert pick_cut([(10.0, 10.9)], 10.2, 10.6) == (10.15, 10.7) and pick_cut([(1.0, 1.9)], 10.2, 10.6) is None
+    led = {"a full.insv": {"date": "2026-09-10", "size": 3000, "status": "pulled"}, "a sum.insv": {"date": "2026-09-10", "size": 500, "status": "pulled"},
+           "b sum.insv": {"date": "2026-09-11", "size": 500, "status": "pulled"}}
+    assert teaser_waits("a sum.insv", led) and not teaser_waits("a full.insv", led) and not teaser_waits("b sum.insv", led), "a teaser waits only while its day's long clip is unfinished"
+    led["a full.insv"].update({"status": "rendered", "episode": 2056, "role": "episode", "title": "GET YOUR TEAM|ALL IN"})
+    assert not teaser_waits("a sum.insv", led) and episode_title_for(2056, led) == "GET YOUR TEAM|ALL IN" and episode_title_for(2057, led) is None
+    import inspect as _i4; pr = _i4.getsource(process); assert "episode_title_for(day, ledger) or title" in pr, "the teaser banner carries the episode title"
+    assert 'lines = (l1, l2, how)' in pr and 'title = (l1 + "|" + l2).upper()' in pr and "make_thumbnail(masters[\"9:16\"], duration, text, day, workdir, lines=lines)" in pr, "one headline: banner and thumbnail agree"
+    assert 'e["horizon"] = horizon_for(masters)' in pr and source_fps("/nonexistent") is None and horizon_for({"16:9": "/nonexistent"}) is None
+    assert lfmd_window([(0, 5, "hello"), (200, 210, "So the latest in my diary is that you should"), (240, 250, "stay positive, see you tomorrow")]) == (200, 250), "whisper's 'latest in my diary' (2056)"
+    assert lfmd_window([(0, 5, "the learnings from my diary today"), (30, 40, "thank you as always")]) == (0, 40)
+    assert lfmd_window([(0, 5, "I wrote it in my dairy today"), (30, 40, "see you tomorrow")]) == (0, 40), "the mis-spelt diary still counts"
+    assert lfmd_window([(0, 5, "a diary of a Runpreneur"), (30, 40, "see you tomorrow")]) is None, "the show's name is not the section"
+    assert lfmd_window([(0, 5, "So I think the learning story for today is"), (30, 40, "see you tomorrow")]) == (0, 40), "1841 (2025): he says 'the learning story for today'"
+    assert lfmd_window([(0, 5, "the lessons for today"), (30, 40, "stay positive")]) == (0, 40)
+    import inspect as _i3; ii = _i3.getsource(insert_intro); assert "intro_clip()" in ii and "check_intro_length(" in ii, "the jingle comes from the API copy and the output length is proved"
+    try: check_intro_length("/nonexistent", "/nonexistent", "/nonexistent"); ok = True
+    except SystemExit: ok = False
+    assert ok, "unreadable paths measure 0 and pass the arithmetic; the real guard is on real files"
     assert lfmd_window([(0, 5, "intro"), (60, 66, "so anyway, so learning through my diary, running off road"), (66, 90, "one"), (90, 95, "see you again tomorrow")]) == (60.0, 95.0), "2195's wording"
+    assert lfmd_window([(0, 5, "intro"), (60, 66, "So I suppose the learnings from my diet today"), (66, 90, "one"), (90, 95, "see you again tomorrow")]) == (60.0, 95.0), "2054: whisper heard diet"
+    assert lfmd_window([(0, 5, "intro"), (60, 66, "the lessons from the dairy are"), (66, 90, "one"), (90, 95, "see you again tomorrow")]) == (60.0, 95.0), "lessons / dairy"
+    assert lfmd_window([(0, 5, "I learned a lot on this diet plan"), (5, 40, "more")]) is None, "not a diary section"
     assert pick_cut([(4.2, 4.5), (7.9, 9.4)], 4.0, 9.0) == (8.05, 9.2), "the pause after the last sign-off word, speech back at its end"
     assert pick_cut([(4.2, 4.5), (6.0, 6.3)], 4.0, 9.0) is None, "word gaps under half a second never count"
     assert pick_cut([(30.83, 33.72)], 28.0, 34.0) == (30.98, 33.52), "2194: the caption ran 3 s past the last word"
@@ -538,11 +906,13 @@ def selftest():
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
-    ap.add_argument("mode"); ap.add_argument("clip", nargs="?"); ap.add_argument("--day", type=int, default=0)
+    ap.add_argument("mode"); ap.add_argument("clip", nargs="?"); ap.add_argument("--day", type=int, default=0); ap.add_argument("--only", default="")
     ap.add_argument("--out", default=os.path.expanduser("~/knowledge-os/logs/content-engine/manual"))
     ap.add_argument("--limit", type=int, default=1); ap.add_argument("--keep", action="store_true")
     a = ap.parse_args()
     if a.mode == "selftest": selftest()
     elif a.mode == "run": run(a.limit, a.keep)
+    elif a.mode == "redo" and a.only == "lfmd": redo_lfmd(a.day)
+    elif a.mode == "redo": redo_full(a.day, keep=a.keep if hasattr(a, "keep") else False)
     elif a.mode == "one": one(a.clip, a.day, a.out)
     else: raise SystemExit("unknown mode")

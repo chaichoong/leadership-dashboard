@@ -36,7 +36,7 @@
         // Launch Plan, etc.) — a dashboard reload blows through the loading
         // overlay and drops any in-flight wizard/form state.
         const activeTab = (window.location.hash || '#overview').slice(1);
-        const iframeTabs = ['os-strategy', 'tasks', 'comms', 'operations', 'systemisation', 'agents', 'os-team', 'ai-brain'];
+        const iframeTabs = ['os-strategy', 'tasks', 'comms', 'operations', 'systemisation', 'agents', 'os-team', 'ai-brain', 'growth-plan'];
         if (iframeTabs.includes(activeTab)) {
             refreshPending = true;
             scheduleIdleRefresh();
@@ -846,12 +846,16 @@ if (tabId === 'comms') lazyLoadFrame('commsFrame', 'follow-up');
             if (typeof renderKpiLibraryTab === 'function') renderKpiLibraryTab();
         }
         if (tabId === 'os-team') lazyLoadFrame('osTeamFrame', 'team');
+        // Property Manager (Operations) — Roy Lavin's page, fed by the property-manager Worker.
+        if (tabId === 'property-manager') lazyLoadFrame('propertyManagerFrame', 'property-manager');
         // Content Machine (Marketing) lazy-load — standalone app loaded via iframe,
         // cache-busted so its Pages deploys are picked up without a hard refresh.
         if (tabId === 'content-machine') lazyLoadFrame('contentMachineFrame', 'content');
         // AI Brain (Operations) lazy-load — standalone module page via iframe,
         // cache-busted so Pages deploys are picked up without a hard refresh.
         if (tabId === 'ai-brain') lazyLoadFrame('aiBrainFrame', 'ai-brain');
+        // Real Estate Growth Plan (Leadership) — standalone page, same PAT as the shell.
+        if (tabId === 'growth-plan') lazyLoadFrame('growthPlanFrame', 'growth-plan');
 
         // Refresh data on tab switch — but only if cache is stale.
         // Re-fetching on every tab switch was hammering Airtable and causing the

@@ -163,10 +163,16 @@ async function cmdPoll() {
       // task, and Adobe's name is not ours to depend on.
       const out = path.join(OUT_DIR, `signed_${item.task}_${safeName(item.agreement)}.pdf`);
       await download.saveAs(out);
+      // Kevin's rule (8 Sep 2026): the audit report goes out at the back of
+      // every signed document. Adobe offers it as its own download; fetch it
+      // and append it here, so gate 2 sees one file. If Adobe's page does not
+      // offer it, say so in the ledger: send-letter/send-email refuse without it.
+      const audit = await downloadAuditReport(page, item, out);
       const bytes = fs.statSync(out).size;
       append({ cmd: 'signed', task: item.task, agreement: item.agreement,
-               then: item.then, pdf: out, bytes });
-      found.push({ task: item.task, agreement: item.agreement, then: item.then, pdf: out, bytes });
+               then: item.then, pdf: out, bytes, audit: audit.ok, auditNote: audit.note });
+      if (!audit.ok) console.error(`WARNING: ${item.agreement}: ${audit.note}`);
+      found.push({ task: item.task, agreement: item.agreement, then: item.then, pdf: out, bytes, audit: audit.ok });
 
       await page.goto(COMPLETED_URL, { waitUntil: 'domcontentloaded' });
       await page.waitForTimeout(16000);
@@ -184,6 +190,43 @@ async function cmdPoll() {
       : 'None signed yet. The control passed, so this is a real zero.',
   }, null, 2));
   if (handoff.failed) process.exit(1);
+}
+
+// The audit report: Adobe's agreement view offers "Download Audit Report"
+// (under the document's actions, sometimes behind a "…" menu). Best effort
+// and honest: ok:false with the reason when it cannot be found, never a
+// silent skip. The append runs through scripts/adobe_audit.py (pypdf).
+async function downloadAuditReport(page, item, signedPdf) {
+  const { spawnSync } = require('child_process');
+  const candidates = ['text=Download Audit Report', 'text=Audit Report', '[aria-label*="Audit Report"]'];
+  let loc = null;
+  for (const sel of candidates) {
+    const l = page.locator(sel).first();
+    if (await l.count()) { loc = l; break; }
+  }
+  if (!loc) {
+    const more = page.locator('button[aria-label*="More"], button:has-text("More"), [aria-label="More actions"]').first();
+    if (await more.count()) {
+      await more.click().catch(() => {});
+      await page.waitForTimeout(2000);
+      for (const sel of candidates) {
+        const l = page.locator(sel).first();
+        if (await l.count()) { loc = l; break; }
+      }
+    }
+  }
+  if (!loc) return { ok: false, note: 'no Download Audit Report action found on the agreement page; fetch it by hand and run adobe_audit.py append' };
+  let auditPath;
+  try {
+    const [dl] = await Promise.all([page.waitForEvent('download', { timeout: 60000 }), loc.click()]);
+    auditPath = signedPdf.replace(/\.pdf$/i, '') + '_audit.pdf';
+    await dl.saveAs(auditPath);
+  } catch (e) {
+    return { ok: false, note: 'audit report download failed: ' + (e.message || e) };
+  }
+  const r = spawnSync('python3', [path.join(REPO, 'scripts', 'adobe_audit.py'), 'append', signedPdf, auditPath], { encoding: 'utf8' });
+  if (r.status !== 0) return { ok: false, note: 'audit report saved but not appended: ' + (r.stderr || r.stdout || '').trim().slice(0, 200) };
+  return { ok: true, note: (r.stdout || '').trim() };
 }
 
 async function cmdStatus() {

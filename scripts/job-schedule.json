@@ -287,6 +287,8 @@
  "audiobook-backfill": {
   "cron": "0 0 * * *",
   "maxLateMinutes": 300,
+  "maxRuntimeMinutes": 600,
+  "maxRuntimeNote": "11 Sep 2026 (finding 20260911-daily-ops-phase-2-522): above the 480 default because one run on the queue log held for 514 min.",
   "mode": "wrapped",
   "needs": [
    "network"
@@ -335,7 +337,8 @@
   "cron": "0 9,13,17 * * *",
   "maxLateMinutes": 150,
   "mode": "wrapped",
-  "note": "the Inbound Comms Triage agent's own Go Signal (Kevin, 24 Aug 2026): both lanes at three fixed slots. NOT a daily-ops phase by explicit ruling; a headless claude run, so the generous lateness keeps a wake-delayed slot worth running",
+  "note": "the Inbound Comms Triage agent's own Go Signal (Kevin, 24 Aug 2026): both lanes at three fixed slots. NOT a daily-ops phase by explicit ruling; a headless claude run, so the generous lateness keeps a wake-delayed slot worth running. maxRuntimeMinutes 150 added 11 Sep 2026 (finding 20260911-daily-ops-phase-2-522): a hung claude tool call held the queue for 833 min on 10-11 Sep while healthy slots run at p95 88 min (51 runs on the queue log).",
+  "maxRuntimeMinutes": 150,
   "needs": [
    "network"
   ],
@@ -378,41 +381,48 @@
   "cron": "0 11 * * *",
   "maxLateMinutes": 300,
   "mode": "wrapped",
-  "note": "Kevin's restructure of 26 Aug 2026: role-specific work leaves the daily-ops sequence and runs as its own slot. A wrapped shell job, so it takes the lock and heartbeats — a slot, never a second Claude routine. Allowlisted in scripts/check-routines.py. The FULL 28-page authenticated browser walk, Sundays only — the day check is in the skill, never in the cron. 11:00 keeps it clear of the 07:00 daily-ops run, which does not take the lock and so cannot be serialised against. Daily coverage is now scripts/check-data-invariants.py via the data-invariants job, which is the part with teeth: 28 pages passed clean every day 22-26 Aug while the invariants caught 7 tasks past their hard deadlines.",
+  "note": "Kevin's restructure of 26 Aug 2026: role-specific work leaves the daily-ops sequence and runs as its own slot. A wrapped shell job, so it takes the lock and heartbeats — a slot, never a second Claude routine. Allowlisted in scripts/check-routines.py. The FULL 28-page authenticated browser walk, Sundays only — the day check is in the skill, never in the cron. 11:00 keeps it clear of the 07:00 daily-ops run, which does not take the lock and so cannot be serialised against. Daily coverage is now scripts/check-data-invariants.py via the data-invariants job, which is the part with teeth: 28 pages passed clean every day 22-26 Aug while the invariants caught 7 tasks past their hard deadlines. runsOnDays [7] added 9 Sep 2026 (finding 20260905-daily-ops-466): the cron is daily on purpose — never express a weekday in a cron — but the job only works on Sundays, so slot attendance expected one run a day and reported MISSED SLOT RUNS six days a week. This field is read ONLY by check-routines.py attendance; it is not a schedule and fires nothing.",
   "needs": [
    "network"
   ],
-  "retryWhenDeferred": true
+  "retryWhenDeferred": true,
+  "runsOnDays": [
+   7
+  ]
  },
  "data-invariants": {
   "cron": "40 6 * * *",
   "maxLateMinutes": 180,
   "mode": "wrapped",
-  "note": "Kevin's restructure of 26 Aug 2026: the live Airtable invariants run as a plain script every morning, with no Claude in the loop. Each invariant carries a control that fails the run rather than passing on an empty population. daily-ops reads the result and only applies judgement when it FAILED.",
+  "note": "Kevin's restructure of 26 Aug 2026: the live Airtable invariants run as a plain script every morning, with no Claude in the loop. Each invariant carries a control that fails the run rather than passing on an empty population. daily-ops reads the result and only applies judgement when it FAILED. LOCK-EXEMPT (9 Sep 2026, finding 20260909-daily-ops-exceptions-502): read-only — it makes no git commit, no Airtable write and no file write outside its own snapshot/report, so it never queues. On 9 Sep content-engine held the lock 02:16 to past 07:13 and the whole morning check block was starved ten deep. Under two minutes of machine time between them, lost to four hours of ffmpeg.",
   "needs": [
    "network"
   ],
-  "retryWhenDeferred": true
+  "retryWhenDeferred": true,
+  "lockExempt": true
  },
  "drift-scan": {
   "cron": "20 6 * * *",
   "maxLateMinutes": 180,
   "mode": "wrapped",
-  "note": "Kevin's restructure of 26 Aug 2026: the schema snapshot and dead-reference scan are a diff, not a judgement, so they run as a script. It exits 0 when nothing changed and writes an exceptions file only when it did. The old Claude drift phase was the single largest source of findings (68 open) and its own report called the SOP metric 'red every day and carries no signal'.",
+  "note": "Kevin's restructure of 26 Aug 2026: the schema snapshot and dead-reference scan are a diff, not a judgement, so they run as a script. It exits 0 when nothing changed and writes an exceptions file only when it did. The old Claude drift phase was the single largest source of findings (68 open) and its own report called the SOP metric 'red every day and carries no signal'. LOCK-EXEMPT (9 Sep 2026, finding 20260909-daily-ops-exceptions-502): read-only — it makes no git commit, no Airtable write and no file write outside its own snapshot/report, so it never queues. On 9 Sep content-engine held the lock 02:16 to past 07:13 and the whole morning check block was starved ten deep. Under two minutes of machine time between them, lost to four hours of ffmpeg.",
   "needs": [
    "network"
   ],
-  "retryWhenDeferred": true
+  "retryWhenDeferred": true,
+  "lockExempt": true
  },
  "drive-auth": {
   "cron": "50 6 * * *",
   "maxLateMinutes": 240,
   "mode": "wrapped",
-  "note": "Kevin's restructure of 26 Aug 2026: scripts/drive-auth-check.py was already a script with its own selftest control. It no longer needs a Claude phase to run it.",
+  "note": "Kevin's restructure of 26 Aug 2026: scripts/drive-auth-check.py was already a script with its own selftest control. It no longer needs a Claude phase to run it. LOCK-EXEMPT (9 Sep 2026, finding 20260909-daily-ops-exceptions-502): read-only — it makes no git commit, no Airtable write and no file write outside its own snapshot/report, so it never queues. On 9 Sep content-engine held the lock 02:16 to past 07:13 and the whole morning check block was starved ten deep. Under two minutes of machine time between them, lost to four hours of ffmpeg. leaseMinutes 25 added 9 Sep 2026 (finding 20260901-daily-ops-424): the wrapped default is 5, but drive-auth-check.py retries up to 13 times and took 17.5 minutes on 1 Sep, so a perfectly healthy run looked like a hung one. Now lock-exempt as well, so the lease only bounds its own reporting.",
   "needs": [
    "network"
   ],
-  "retryWhenDeferred": true
+  "retryWhenDeferred": true,
+  "lockExempt": true,
+  "leaseMinutes": 25
  },
  "task-manager": {
   "cron": "0 9,13,17 * * *",
@@ -433,7 +443,7 @@
    "network"
   ],
   "retryWhenDeferred": false,
-  "retryWhenDeferredNote": "Deliberately OFF, not forgotten. handback-poll runs every 30 minutes, so a deferred slot is picked up by the next one 30 minutes later \u2014 re-firing it would add a duplicate poll, not rescue a lost day. Revisit only if the cadence drops below hourly."
+  "retryWhenDeferredNote": "Deliberately OFF, not forgotten. handback-poll runs every 30 minutes, so a deferred slot is picked up by the next one 30 minutes later — re-firing it would add a duplicate poll, not rescue a lost day. Revisit only if the cadence drops below hourly."
  },
  "retry-deferred": {
   "cron": "20 * * * *",
@@ -463,15 +473,30 @@
   "enabled": true,
   "retryWhenDeferred": true
  },
+ "content-engine-publish": {
+  "cron": "15 7-20 * * *",
+  "maxLateMinutes": 20,
+  "mode": "wrapped",
+  "note": "Content Engine daytime publisher (Kevin, 8 Sep 2026: an episode approved in the morning must go out the same day, socials included). Light API work only: verdict sync, GHL post sync, the next episode in strict day order to YouTube, its clips to the socials, blog and podcast later the same day. Never renders; the night job does that. Hourly so a morning approval is on YouTube within the hour.",
+  "needs": [
+   "network"
+  ],
+  "retryWhenDeferred": false,
+  "retryWhenDeferredNote": "Hourly: the next tick covers a deferred one."
+ },
  "content-engine": {
-  "cron": "0 2 * * *",
+  "cron": "0 22 * * *",
   "maxLateMinutes": 180,
   "mode": "wrapped",
-  "note": "Content Engine 360 lane, R1 (Kevin: spike GO 2 Sep 2026, 'carry on with the folder watch' 3 Sep). Scans the raw Drive folder, one episode record per new shooting day, pulls one clip a night to local disk for the render. Drive-gated on the raw folder because a cold stream stalls for 15 min per GB; Lateness capped at 180 min (02:00-05:00) on 4 Sep 2026: at 600 a deferred run could be re-fired by retry-deferred as late as noon, and on 4 Sep that put two renders on the Mac at 11:35 while Kevin was working. content-engine-run.sh also refuses 07:00-21:59 outright, because a manual launch never reads this file.",
+  "note": "Start moved 02:00 -> 22:00 on 9 Sep 2026 (Kevin): a full episode takes about 2.2 h to render the first time, so three a night is about 7 h and must start at 22:00 to finish before 07:00; the 02:00 run on 9 Sep was killed at the queue limit. Content Engine 360 lane, R1 (Kevin: spike GO 2 Sep 2026, 'carry on with the folder watch' 3 Sep). Scans the raw Drive folder, one episode record per new shooting day, pulls one clip a night to local disk for the render. Drive-gated on the raw folder because a cold stream stalls for 15 min per GB; Lateness capped at 180 min (02:00-05:00) on 4 Sep 2026: at 600 a deferred run could be re-fired by retry-deferred as late as noon, and on 4 Sep that put two renders on the Mac at 11:35 while Kevin was working. content-engine-run.sh also refuses 07:00-21:59 outright, because a manual launch never reads this file. Disk precondition added 9 Sep 2026 (finding 20260909-daily-ops-exceptions-503): 27 GB free against a clip needing ~42 GB of working space, so the render could not finish and held the queue for 4h50m. 60 GB is the working figure from this script's own header (clips 0.3-5 GB, renders and intermediates on top). Below that the run DEFERS with a readable reason instead of taking the lock and stalling everything behind it. maxRuntimeMinutes 540 (11 Sep 2026, finding 20260911-daily-ops-phase-2-522): the 22:00-07:00 window, above the 480 default because three renders take about 7 h.",
+  "maxRuntimeMinutes": 540,
   "needs": [
    "network",
    {
     "drive": "~/Library/CloudStorage/GoogleDrive-kevin@runpreneur.org.uk/Shared drives/Marketing/Runpreneur/Runpreneur - Raw Video"
+   },
+   {
+    "diskGB": 30
    }
   ],
   "retryWhenDeferred": true
@@ -493,6 +518,7 @@
     "drive": "~/Library/CloudStorage/GoogleDrive-kevin@runpreneur.org.uk/My Drive/00 AI Context"
    }
   ],
-  "note": "Kevin, 7 Sep 2026: 'I felt that he [the CEO] is outdated.' Scans the CEO, the eleven heads, the five workers, the /ceo and /huddle skills, the CEO slot instructions, the five brain files the CEO loads first and the 09:00 brief worker for wording a dated ruling retired, and fails if a Decisions/ file newer than ~/.claude/agents/ESTATE.md's As at stamp touches the estate. Red means a prompt is lying about how the estate works. Fewer than 20 readable surfaces exits 2, never 0."
+  "note": "Kevin, 7 Sep 2026: 'I felt that he [the CEO] is outdated.' Scans the CEO, the eleven heads, the five workers, the /ceo and /huddle skills, the CEO slot instructions, the five brain files the CEO loads first and the 09:00 brief worker for wording a dated ruling retired, and fails if a Decisions/ file newer than ~/.claude/agents/ESTATE.md's As at stamp touches the estate. Red means a prompt is lying about how the estate works. Fewer than 20 readable surfaces exits 2, never 0. LOCK-EXEMPT (9 Sep 2026, finding 20260909-daily-ops-exceptions-502): read-only — it makes no git commit, no Airtable write and no file write outside its own snapshot/report, so it never queues. On 9 Sep content-engine held the lock 02:16 to past 07:13 and the whole morning check block was starved ten deep. Under two minutes of machine time between them, lost to four hours of ffmpeg.",
+  "lockExempt": true
  }
 }

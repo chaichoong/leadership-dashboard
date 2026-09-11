@@ -248,6 +248,21 @@
             if (tab === 'comms') {
                 ctx.commsPage = 'Inbound communications tracker (loaded as iframe)';
             }
+            if (tab === 'growth-plan') {
+                // The Growth Plan page (growth-plan.html, same origin) leaves its computed plan on
+                // its own window; read the headline, the next action and the ranked levers so
+                // "what is the biggest uplift" or "why is Adam's rent capped" is answerable here.
+                ctx.growthPlanPage = 'Real Estate Growth Plan: every LHA, council tax and room lever priced against 2026-27 rates and the benefit cap, ranked by money per unit of effort (loaded as iframe)';
+                try {
+                    const gp = document.getElementById('growthPlanFrame')?.contentWindow?._growthPlan;
+                    if (gp && gp.plan) {
+                        ctx.growthPlanTotals = gp.plan.totals;
+                        ctx.growthPlanNext = gp.plan.next ? { title: gp.plan.next.title, firstStep: gp.plan.next.firstStep, monthly: gp.plan.next.monthly } : null;
+                        ctx.growthPlanLevers = gp.plan.levers.slice(0, 25).map(l => ({ stage: l.stage, lever: l.lever, title: l.title, monthly: l.monthly, ifExempt: l.monthlyIfExempt, oneOff: l.oneOff, effort: l.effort, status: l.status, counted: l.counted, needs: l.needs }));
+                        ctx.growthPlanUnknownAge = gp.plan.unknownAge.map(u => `${u.tenant} (${u.property})`);
+                    }
+                } catch (e) { ctx.growthPlanError = 'Plan not readable: ' + e.message; }
+            }
             if (tab === 'coa' && typeof coaLinkBreakdown === 'function') {
                 // Names plus how much is coded to each, so "what is Marketing used
                 // for" and "which lines are dead" are answerable without a fetch.

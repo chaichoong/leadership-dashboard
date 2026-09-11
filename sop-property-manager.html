@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="robots" content="noindex, nofollow">
+<title>Property Manager &mdash; Standard Operating Procedure</title>
+<link rel="stylesheet" href="css/tokens.css?v=1">
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+body { line-height: 1.6; color: var(--text-primary); background: var(--bg-app); }
+.header { background: var(--accent); color: white; padding: 2.5rem 2rem 2rem; }
+.header-inner { max-width: 1000px; margin: 0 auto; }
+.header-back { display: inline-block; font-size: 0.82rem; opacity: 0.75; color: white; text-decoration: none; margin-bottom: 1rem; }
+.header h1 { font-size: 2rem; font-weight: 700; letter-spacing: -0.5px; }
+.header .subtitle { opacity: 0.85; margin-top: 0.3rem; }
+.header .version { font-size: 0.85rem; opacity: 0.65; margin-top: 0.5rem; }
+.container { max-width: 1000px; margin: 0 auto; padding: 0 1.5rem 4rem; }
+.section { margin-top: 2.25rem; }
+.section-title { font-size: 1.35rem; font-weight: 700; color: var(--accent); padding-bottom: 0.4rem; border-bottom: 3px solid var(--accent-soft); margin-bottom: 1rem; }
+.card { background: var(--bg-surface); border-radius: var(--radius-xl); box-shadow: var(--shadow-sm); padding: 1.25rem 1.5rem; margin-bottom: 1rem; border: 1px solid var(--border-default); }
+.card h3 { font-size: 1.05rem; margin-bottom: 0.5rem; }
+.card p, .card li { font-size: 0.93rem; color: var(--text-primary); }
+.card ul, .card ol { padding-left: 1.3rem; margin-top: 0.4rem; }
+.card li { margin-bottom: 0.3rem; }
+table { width: 100%; border-collapse: collapse; font-size: 0.9rem; margin-top: 0.5rem; }
+th, td { text-align: left; padding: 0.5rem 0.6rem; border-bottom: 1px solid var(--border-subtle); vertical-align: top; }
+th { background: var(--bg-subtle); color: var(--text-secondary); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.04em; }
+code { background: var(--bg-subtle); padding: 0.1rem 0.35rem; border-radius: 4px; font-size: 0.85em; }
+.note { background: var(--warning-bg); color: var(--warning); border-radius: var(--radius-md); padding: 0.75rem 1rem; font-size: 0.9rem; margin-top: 0.75rem; }
+</style>
+</head>
+<body>
+<div class="header"><div class="header-inner">
+  <a class="header-back" href="index.html#property-manager">&larr; Back to Operations Director</a>
+  <h1>Property Manager</h1>
+  <div class="subtitle">Roy Lavin's single page: the numbers he needs to bring the rent in and keep maintenance down.</div>
+  <div class="version">SOP version 1.1 &middot; page version 1.1 &middot; 9 September 2026</div>
+</div></div>
+
+<div class="container">
+
+<div class="section"><h2 class="section-title">1. Purpose</h2>
+<div class="card">
+<p>Roy is head of the property business. His two levers are rent in and maintenance spend out. This page gives him only what those two levers need: the portfolio, who is behind, the last 31 days of real money, a planned month, rent falling due, profit by property, and his tasks. Kevin's personal money, bank balances, debt, wealth and the AI agents never appear.</p>
+<p>Live at <code>https://app.operationsdirector.co.uk/property-manager/</code>. Kevin sees the same page in the sidebar under Operations.</p>
+</div></div>
+
+<div class="section"><h2 class="section-title">2. How the page gets its data</h2>
+<div class="card">
+<h3>The Worker is the boundary</h3>
+<p>The page never talks to Airtable. A Cloudflare Worker (<code>workers/property-manager/</code>) holds the Airtable key server-side, reads only the property tables, and returns totals plus the task list. Two rules are enforced in the Worker, not the page:</p>
+<ul>
+  <li><strong>Transactions</strong> are filtered at the query to Business (For Reports) = Real Estate. Personal and Operations Director transactions never reach the Worker's memory.</li>
+  <li><strong>Running costs</strong> is the FULL fixed-cost total, the same set as the Leadership Dashboard's Monthly Costs (Kevin's ruling, 9 Sep 2026): some of Kevin's own fixed costs sit inside it and Roy needs the true cash-flow figure. The page says how many of the costs are not property costs. It never lists them.</li>
+</ul>
+<h3>Sign in</h3>
+<p>Roy and Kevin each have their own passcode, held as Worker secrets. A passcode gives a 12-hour signed session. Five wrong attempts a minute per address are refused. The passcodes live only at <code>~/.config/od/property_manager_passcode_*</code> on Kevin's Mac and in the Worker. They are never in the repo.</p>
+</div></div>
+
+<div class="section"><h2 class="section-title">3. What each block means</h2>
+<div class="card">
+<table>
+<tr><th>Block</th><th>Source</th><th>Reading it</th></tr>
+<tr><td>Portfolio</td><td>Rental Units: Unit Status, Property Name (Short), Unit Type; Tenancies for the current and last tenant</td><td>Void = status begins "Void", the same rule as the Leadership Dashboard. Click a number to open the list behind it: every property, every unit, occupied units, or void units with type, last tenant and when that tenancy ended.</td></tr>
+<tr><td>Tenancies</td><td>Tenancies: Payment Status (Unified), Expected Monthly Rent, tenant Status rollup, Tenancy End Date</td><td>Live = In Payment, CFV or CFV Actioned with an Active tenant and no past end date. Behind = CFV or CFV Actioned. Exposure = their monthly rent added up. Click a number for the tenancies behind it, each with its last payment; click a tenant who is behind for their payment history over 13 months (Rental Income transactions linked to that tenancy).</td></tr>
+<tr><td>Actual, last 31 days</td><td>Transactions: Report Amount by sub-category</td><td>Rent collected = Rental Income. Maintenance = COGS Property Reactive Maintenance against the £1,000 budget. Wages = Opex Labour + COGS Labour against £1,500. Profit = every P&amp;L revenue line minus every P&amp;L cost line, cash basis. Click a figure to see the transactions behind it.</td></tr>
+<tr><td>Planned, a normal month</td><td>Tenancies (Expected Monthly Rent) and Costs (Expected Cost)</td><td>Expected rent counts In Payment and CFV Actioned only. Running costs is one line on purpose and is the full fixed-cost total (see section 2). Planned and actual are always shown together (Kevin's ruling, 31 Jul 2026).</td></tr>
+<tr><td>Rent due, 3 days back to 31 days ahead</td><td>Tenancies: Next Rent Due Date, Payment Frequency; Tenants: Rent Payment Type; Transactions linked to the tenancy</td><td>Anchor is Airtable's own next-due formula, stepped by frequency. Paid comes from the bank feed only: a rental-income transaction for that tenancy dated from three days before the due date up to today. A future due date never reads as paid; a past one with nothing in reads Not yet. Each row shows the last payment date and amount. UC = Universal Credit.</td></tr>
+<tr><td>Profit by property</td><td>Transactions linked to a Property, else through the Tenancy, else through the Unit</td><td>Windows: this month, last month (the default), 3, 6 and 12 months. Whole-business costs with no property link (mortgages, insurance, wages) sit on the grey row so the total still ties to the Profit &amp; Loss tab for Real Estate.</td></tr>
+<tr><td>Tasks</td><td>Tasks: Assignee, Team Member, Maintenance Ticket, Properties, Contractor</td><td>Open tasks assigned to Roy plus every open Maintenance Ticket. Completed and Cancelled are hidden.</td></tr>
+</table>
+</div></div>
+
+<div class="section"><h2 class="section-title">4. Updating a task</h2>
+<div class="card">
+<ol>
+  <li>Click a task. The drawer shows the brief, the notes so far, the due date and the status.</li>
+  <li>Change the due date, the status (Upcoming, Today or Completed) and/or add a note. Or press the green Complete button, on the card or in the drawer.</li>
+  <li>Save. The Worker checks the task is on the property lane before writing. Anything else is refused.</li>
+</ol>
+<p>A new due date sets the status the way the Tasks page does: past is Overdue, today is Today, later is Upcoming; Approval and Completed are left alone. Notes are appended with a date and the name of whoever saved them. Complete stamps the Completion Date from the Worker's clock and shows an Undo for eight seconds; Undo within fifteen minutes puts the task back where its date puts it and clears the stamp. After that a completed task cannot be reopened from this page.</p>
+</div></div>
+
+<div class="section"><h2 class="section-title">5. Health checks</h2>
+<div class="card">
+<p>The strip at the top of the page runs seven checks after every load:</p>
+<ul>
+  <li>Property transactions loaded (fails at zero: a zero here is a broken query, never an empty month)</li>
+  <li>Tenancies and units loaded</li>
+  <li>Running costs use the dashboard rule (active fixed costs, same set as the Leadership Dashboard)</li>
+  <li>Rent collected has a source (transactions inside the 31-day window)</li>
+  <li>Profit by property allocates (warns when more than 10% of rent has no property link)</li>
+  <li>Task list matches the board (open property-lane tasks)</li>
+  <li>Feed is fresh (computed under 30 minutes ago; the Worker caches for 10)</li>
+</ul>
+</div></div>
+
+<div class="section"><h2 class="section-title">6. Troubleshooting</h2>
+<div class="card">
+<table>
+<tr><th>Symptom</th><th>Cause</th><th>Fix</th></tr>
+<tr><td>"Something went wrong reading the data"</td><td>Airtable refused the Worker (rate limit or key)</td><td>Refresh once. If it persists, check the Worker logs in the Cloudflare dashboard and the <code>AIRTABLE_PAT</code> secret.</td></tr>
+<tr><td>"That passcode is not recognised"</td><td>Wrong passcode, or the secret was rotated</td><td>Read the current one from <code>~/.config/od/property_manager_passcode_roy</code>. To rotate: write a new value there, then <code>wrangler secret put PM_PASSCODE</code>.</td></tr>
+<tr><td>Figures look stale</td><td>The Worker caches the money data for 10 minutes</td><td>Refresh bypasses the cache. Tasks are never cached.</td></tr>
+<tr><td>A property is missing from Profit by property</td><td>Its transactions carry no Property, Tenancy or Unit link</td><td>Link them in the Transactions tab; the grey row shrinks as links are added.</td></tr>
+<tr><td>A task Roy should see is missing</td><td>Not assigned to him, not linked to his Team Member row, and not a Maintenance Ticket</td><td>Set one of the three on the Tasks page.</td></tr>
+</table>
+<div class="note">Merging code does not deploy the Worker. After any change under <code>workers/property-manager/</code> run <code>npx wrangler deploy -c workers/property-manager/wrangler.toml</code>.</div>
+</div></div>
+
+</div>
+</body>
+</html>

@@ -49,13 +49,21 @@ def skew_exp(w):
     return np.eye(3) + math.sin(th) * K + (1 - math.cos(th)) * (K @ K)
 
 
-def integrate(t, gyro, acc, M, gain=0.003):
-    """Complementary filter. Returns R_world_from_cam at every IMU sample (N,3,3)."""
+WARM_LEAD_S = 30.0    # the filter is settled by here; that orientation is carried back to t0 through the gyro alone
+
+
+def integrate(t, gyro, acc, M, gain=0.003, R0=None):
+    """Complementary filter. Returns R_world_from_cam at every IMU sample (N,3,3).
+    Start: the first three seconds of accelerometer give a rough 'up'; with the slow gain the estimate
+    then took eight seconds to settle, so every episode opened leaning over (2055 and 2056, Kevin
+    10 Sep 2026). warm_start() fixes that: run the lead, walk the gyro back to t0, start from there."""
     gs = gyro @ M.T; acs = acc @ M.T
-    # initial orientation: align measured up with UP_WORLD
-    up0 = acs[:200].mean(0); up0 /= np.linalg.norm(up0)
-    v = np.cross(up0, UP_WORLD); s = np.linalg.norm(v); c = float(np.dot(up0, UP_WORLD))
-    R = skew_exp(v / s * math.atan2(s, c)) if s > 1e-9 else np.eye(3)
+    if R0 is None:
+        # initial orientation: align measured up with UP_WORLD
+        up0 = acs[:3000].mean(0); up0 /= np.linalg.norm(up0)
+        v = np.cross(up0, UP_WORLD); s = np.linalg.norm(v); c = float(np.dot(up0, UP_WORLD))
+        R0 = skew_exp(v / s * math.atan2(s, c)) if s > 1e-9 else np.eye(3)
+    R = R0
     Rs = np.empty((len(t), 3, 3))
     for i in range(len(t)):
         if i > 0:
@@ -69,6 +77,36 @@ def integrate(t, gyro, acc, M, gain=0.003):
                 R = skew_exp(corr * gain) @ R
         Rs[i] = R
     return Rs
+
+
+def warm_start(t, gyro, acc, M, gain, lead_s=WARM_LEAD_S):
+    """Orientation at t0 that agrees with the settled filter: integrate the lead forward, then carry the
+    settled orientation back to t0 with the gyro only (no gravity pull, so no bounce). Measured on 2056:
+    gravity error in the first ten seconds fell from 26 to 51 degrees down to 2 to 7 degrees."""
+    n = int(np.searchsorted(t, t[0] + lead_s))
+    if n < 100: return None
+    Rs = integrate(t[:n], gyro[:n], acc[:n], M, gain=gain)
+    R = Rs[-1]; gs = gyro[:n] @ M.T; dts = np.diff(t[:n], prepend=t[0])
+    for i in range(n - 1, -1, -1):
+        R = R @ skew_exp(-gs[i] * dts[i])
+    return R
+
+
+def integrate_warm(t, gyro, acc, M, gain=0.003):
+    return integrate(t, gyro, acc, M, gain=gain, R0=warm_start(t, gyro, acc, M, gain))
+
+
+def horizon_report(t, Rs, acc, M, secs=(1, 5, 10, 60), win=3.0):
+    """How far the estimated 'up' is from measured gravity (degrees, 3 s windows) at a few times: the proof the
+    horizon lock settled. Written beside every master as <master>.horizon.json and read by the output gate."""
+    acs = acc @ M.T; rate = len(t) / max(t[-1] - t[0], 1e-6); out = {}
+    for sec in secs:
+        if t[0] + sec > t[-1]: continue
+        i = min(int(np.searchsorted(t, t[0] + sec)), len(t) - 1); lo, hi = max(0, int(i - win * rate / 2)), min(len(t), int(i + win * rate / 2))
+        g = np.einsum("nij,nj->ni", Rs[lo:hi], acs[lo:hi]).mean(0); n = np.linalg.norm(g)
+        if n < 1e-9: continue
+        out[str(sec)] = round(math.degrees(math.acos(float(np.clip(np.dot(g / n, UP_WORLD), -1, 1)))), 1)
+    return out
 
 
 def per_frame_R(t, Rs, n_frames, fps=FPS, offset=0.0):
@@ -150,7 +188,7 @@ def calib(clip, out_png, times=(5.0, 20.0, 35.0), size=(320, 180), dfov=200, gai
     vd = view_dirs(size[0], size[1], dfov)
     rows = []
     for name, M in maps.items():
-        Rs = integrate(t, gyro, acc, M, gain=gain)
+        Rs = integrate_warm(t, gyro, acc, M, gain=gain)
         tiles = []
         for tt in times:
             i = np.clip(np.searchsorted(t, tt), 0, len(t) - 1)
@@ -174,7 +212,48 @@ def calib(clip, out_png, times=(5.0, 20.0, 35.0), size=(320, 180), dfov=200, gai
     print("wrote", out_png, "order (row-major, %d per row):" % cols, names)
 
 
-def plan_views(t, Rs, n_frames, offset, smooth_s, blend, tilt_deg, level, raise_cut=True):
+def parse_pans(spec):
+    """'t:yaw:pitch:seconds;...' -> list of (t, yaw_deg, pitch_deg, seconds). Empty or None -> []."""
+    out = []
+    for part in (spec or "").split(";"):
+        if not part.strip(): continue
+        t, yaw, pitch, sec = (float(x) for x in part.split(":"))
+        out.append((t, yaw, pitch, sec))
+    return out
+
+
+def pan_weight(u, ease=0.2):
+    """0..1 over the pan: ease in over the first `ease` of it, hold, ease out over the last `ease`. Smooth (cosine)."""
+    if u <= 0 or u >= 1: return 0.0
+    if u < ease: return 0.5 - 0.5 * math.cos(math.pi * u / ease)
+    if u > 1 - ease: return 0.5 - 0.5 * math.cos(math.pi * (1 - u) / ease)
+    return 1.0
+
+
+def pan_target(F, yaw_deg, pitch_deg):
+    """The view direction turned by yaw about world-up (positive = to the viewer's right) and pitched up."""
+    B = basis(F)
+    Ft = skew_exp(UP_WORLD * math.radians(yaw_deg)) @ F
+    Bt = basis(Ft)
+    Ft = skew_exp(Bt[:, 0] * math.radians(pitch_deg)) @ Ft
+    return Ft / np.linalg.norm(Ft)
+
+
+def apply_pans(F_sm, pans, fps=FPS):
+    """Blend the planned view toward each pan target and back (Kevin, 9 Sep 2026: pan to what he points at, then return)."""
+    F = F_sm.copy(); n = len(F)
+    for (t0, yaw, pitch, sec) in pans:
+        i0, i1 = int(round(t0 * fps)), int(round((t0 + sec) * fps))
+        for i in range(max(i0, 0), min(i1, n)):
+            w = pan_weight((i - i0) / max(i1 - i0, 1))
+            if w <= 0: continue
+            T = pan_target(F_sm[i], yaw, pitch)
+            v = (1 - w) * F_sm[i] + w * T
+            F[i] = v / np.linalg.norm(v)
+    return F
+
+
+def plan_views(t, Rs, n_frames, offset, smooth_s, blend, tilt_deg, level, raise_cut=True, pans=None):
     """Per-frame (R, F) pairs plus a mode flag. Mode 'body' = third-person along the stick;
     'face' = the camera has been raised (stick direction pitched up), so look at Kevin's face."""
     Rf = per_frame_R(t, Rs, n_frames, offset=offset)
@@ -208,7 +287,25 @@ def plan_views(t, Rs, n_frames, offset, smooth_s, blend, tilt_deg, level, raise_
         for i in range(n_frames):
             if mode[i] == "face":
                 F_sm[i] = F_face[i]
+    if pans:
+        F_sm = apply_pans(F_sm, pans)
     return Rf, F_sm, mode
+
+
+def preview_frame(clip, t_sec, map_name="z-yx", size=(480, 270), dfov=200.0, proj="sg", hfov=120.0, tilt_deg=11.0, level=True, gain=0.0003, cache={}):
+    """One small body-view frame at t_sec, the way the master would show it: what the pointing detector looks at.
+    The IMU integration is cached per clip so a handful of previews cost one integration."""
+    key = (clip, map_name)
+    if key not in cache:
+        t, gyro, acc = load_imu(clip); M = mapping_matrices()[map_name]
+        cache[key] = (t, integrate_warm(t, gyro, acc, M, gain=gain))
+    t, Rs = cache[key]
+    n = int(round(t_sec * FPS)) + 1
+    Rf, F_sm, mode = plan_views(t, Rs, n, 0.0, 1.0, 0.6, tilt_deg, level, raise_cut=False)
+    w, h = size
+    vd = view_dirs(w, h, dfov, proj, hfov)
+    front = insta.decode_frame(clip, t_sec, insta.FRONT); back = insta.decode_frame(clip, t_sec, insta.BACK)
+    return render_frame(front, back, Rf[n - 1], F_sm[n - 1], vd, w, h, True)
 
 
 def _render_one(args):
@@ -219,15 +316,19 @@ def _render_one(args):
 
 def render(clip, out_mp4, map_name, dfov, start, end, size, smooth_s=1.0, tilt_deg=0.0, roll_lock=True,
            gain=0.0003, offset=0.0, blend=0.5, still=None, proj="sg", hfov=120.0, level=False,
-           workers=1, raise_cut=True, video_only=False):
+           workers=1, raise_cut=True, video_only=False, pans=None):
     t, gyro, acc = load_imu(clip)
     M = mapping_matrices()[map_name]
-    Rs = integrate(t, gyro, acc, M, gain=gain)
+    Rs = integrate_warm(t, gyro, acc, M, gain=gain)
+    try:
+        json.dump(horizon_report(t, Rs, acc, M), open(out_mp4 + ".horizon.json", "w"))
+    except Exception as ex:
+        print("horizon report skipped: %s" % str(ex)[:120], file=sys.stderr)
     dur = float(subprocess.run([os.path.expanduser("~/tools/bin/ffprobe"), "-v", "error", "-show_entries",
                                 "format=duration", "-of", "csv=p=0", clip], capture_output=True, text=True).stdout)
     end = min(end if end else dur, dur)
     n0, n1 = int(round(start * FPS)), int(round(end * FPS))
-    Rf, F_sm, mode = plan_views(t, Rs, n1, offset, smooth_s, blend, tilt_deg, level, raise_cut)
+    Rf, F_sm, mode = plan_views(t, Rs, n1, offset, smooth_s, blend, tilt_deg, level, raise_cut, pans=parse_pans(pans))
     w, h = size
     vd_body = view_dirs(w, h, dfov, proj, hfov)
     vd_face = view_dirs(w, h, 120.0, "flat", 100.0)     # tighter, natural view for the raised-camera sign-off
@@ -252,6 +353,7 @@ def render(clip, out_mp4, map_name, dfov, start, end, size, smooth_s=1.0, tilt_d
                    "--blend", str(blend), "--proj", proj, "--hfov", str(hfov), "--workers", "1", "--video-only"]
             if level: cmd.append("--level")
             if not raise_cut: cmd.append("--no-raise-cut")
+            if pans: cmd += ["--pans", pans]
             procs.append(subprocess.Popen(cmd, stdout=subprocess.DEVNULL))
         for p in procs:
             if p.wait() != 0: raise SystemExit("a render slice failed")
@@ -271,8 +373,8 @@ def render(clip, out_mp4, map_name, dfov, start, end, size, smooth_s=1.0, tilt_d
                     "-c:v", "h264_videotoolbox", "-b:v", "12M", "-pix_fmt", "yuv420p",
                     "-c:a", "aac", "-b:a", "160k", "-movflags", "+faststart", out_mp4]
     enc = subprocess.Popen(enc_cmd, stdin=subprocess.PIPE)
-    fr = insta.frame_stream(clip, insta.FRONT, start=start, end=end)
-    bk = insta.frame_stream(clip, insta.BACK, start=start, end=end)
+    fr = insta.frame_stream(clip, insta.FRONT, start=start, end=end, fps=FPS)   # any source rate -> FPS (1841's 29.97 fps clip, 10 Sep 2026)
+    bk = insta.frame_stream(clip, insta.BACK, start=start, end=end, fps=FPS)
     n = n0; faces = 0
     for front, back in zip(fr, bk):
         if n >= n1: break
@@ -288,8 +390,8 @@ def sync(clip, map_name, start=5.0, end=15.0, gain=0.0003, offsets=None, lens=72
     offsets = offsets if offsets is not None else [round(x, 3) for x in np.arange(-0.12, 0.121, 0.02)]
     t, gyro, acc = load_imu(clip)
     Rs = integrate(t, gyro, acc, mapping_matrices()[map_name], gain=gain)
-    fr = list(insta.frame_stream(clip, insta.FRONT, w=lens, h=lens, start=start, end=end))
-    bk = list(insta.frame_stream(clip, insta.BACK, w=lens, h=lens, start=start, end=end))
+    fr = list(insta.frame_stream(clip, insta.FRONT, w=lens, h=lens, start=start, end=end, fps=FPS))
+    bk = list(insta.frame_stream(clip, insta.BACK, w=lens, h=lens, start=start, end=end, fps=FPS))
     n0 = int(round(start * FPS)); n = min(len(fr), len(bk))
     vd = view_dirs(size[0], size[1], dfov)
     results = []
@@ -308,7 +410,37 @@ def sync(clip, map_name, start=5.0, end=15.0, gain=0.0003, offsets=None, lens=72
     return best
 
 
+def _selftest_pans():
+    assert parse_pans("253.56:75.0:18.0:3.5;400:-75:9:3.5") == [(253.56, 75.0, 18.0, 3.5), (400.0, -75.0, 9.0, 3.5)] and parse_pans("") == []
+    assert pan_weight(0.0) == 0.0 and pan_weight(0.5) == 1.0 and pan_weight(1.0) == 0.0 and 0 < pan_weight(0.1) < 1
+    F = np.array([0.0, 0.0, 1.0], np.float32)
+    T = pan_target(F, 90.0, 0.0); assert abs(np.dot(T, F)) < 1e-4 and abs(T[1]) < 1e-4, "90 deg yaw about world-up stays level and turns a right angle"
+    Tp = pan_target(F, 0.0, 30.0); assert Tp[1] < -0.4 and abs(np.degrees(np.arccos(np.clip(np.dot(Tp, F), -1, 1))) - 30) < 0.5, "pitch up = towards world-up (y down in this frame)"
+    Fs = np.tile(F, (int(FPS * 10), 1)).astype(np.float32)
+    out = apply_pans(Fs, [(2.0, 90.0, 0.0, 3.5)])
+    mid = out[int(FPS * 3.75)]; assert abs(np.dot(mid, F)) < 0.05, "held view at the pan's middle is the target"
+    assert np.allclose(out[int(FPS * 1.0)], F) and np.allclose(out[int(FPS * 6.0)], F), "untouched before and after"
+    assert np.allclose(np.linalg.norm(out, axis=1), 1.0, atol=1e-5)
+
+
 def selftest():
+
+    # warm start (10 Sep 2026): a camera held 40 degrees off level with a wobble in the first two seconds must
+    # read level from the first sample, not eight seconds in
+    rng = np.random.default_rng(1); n = 8000; t = np.arange(n) / 1000.0
+    tilt = skew_exp(np.array([math.radians(40.0), 0.0, 0.0]))
+    swing = skew_exp(np.array([0.0, 0.0, math.radians(45.0)]))                      # a hand swing for the first three seconds fools the cold start
+    acc = np.tile(tilt.T @ UP_WORLD, (n, 1)); acc[t < 2.0] = swing.T @ acc[0]
+    acc = acc + rng.normal(0, 0.05, (n, 3))
+    gyro = np.zeros((n, 3)); M = np.eye(3)
+    cold = integrate(t, gyro, acc, M, gain=0.001); warm = integrate_warm(t, gyro, acc, M, gain=0.001)
+    g_true = tilt.T @ UP_WORLD
+    def err(Rs, k): g = Rs[k] @ g_true; return math.degrees(math.acos(float(np.clip(np.dot(g, UP_WORLD), -1, 1))))
+    assert err(warm, 0) < 5.0 and err(warm, 6000) < 5.0, (err(warm, 0), err(warm, 6000))
+    assert err(cold, 0) > 15.0, "the cold start must be fooled by the swing for this test to mean anything (%.1f)" % err(cold, 0)
+    assert warm_start(t[:50], gyro[:50], acc[:50], M, 0.0003) is None, "too short a lead: fall back to the cold start"
+    hr = horizon_report(t, warm, acc, M, secs=(1, 5)); assert set(hr) == {"1", "5"} and hr["5"] < 5.0, hr
+    _selftest_pans()
     maps = mapping_matrices(); assert len(maps) == 24 and "z-yx" in maps
     M = maps["z-yx"]; assert round(float(np.linalg.det(M))) == 1
     vd = view_dirs(96, 54, 200); assert vd.shape == (96 * 54, 3) and abs(float(np.linalg.norm(vd, axis=1).max()) - 1) < 1e-5
@@ -341,7 +473,7 @@ if __name__ == "__main__":
     ap.add_argument("--start", type=float, default=0.0); ap.add_argument("--end", type=float, default=None)
     ap.add_argument("--size", default="1920x1080"); ap.add_argument("--smooth", type=float, default=1.0)
     ap.add_argument("--tilt", type=float, default=0.0); ap.add_argument("--times", default="5,20,35")
-    ap.add_argument("--no-roll-lock", action="store_true"); ap.add_argument("--gain", type=float, default=0.0003); ap.add_argument("--offset", type=float, default=0.0); ap.add_argument("--blend", type=float, default=0.5); ap.add_argument("--still", type=float, default=None); ap.add_argument("--proj", default="sg"); ap.add_argument("--hfov", type=float, default=120.0); ap.add_argument("--level", action="store_true"); ap.add_argument("--workers", type=int, default=1); ap.add_argument("--no-raise-cut", action="store_true"); ap.add_argument("--video-only", action="store_true"); ap.add_argument("--only", default=None)
+    ap.add_argument("--no-roll-lock", action="store_true"); ap.add_argument("--gain", type=float, default=0.0003); ap.add_argument("--offset", type=float, default=0.0); ap.add_argument("--blend", type=float, default=0.5); ap.add_argument("--still", type=float, default=None); ap.add_argument("--proj", default="sg"); ap.add_argument("--hfov", type=float, default=120.0); ap.add_argument("--level", action="store_true"); ap.add_argument("--workers", type=int, default=1); ap.add_argument("--no-raise-cut", action="store_true"); ap.add_argument("--video-only", action="store_true"); ap.add_argument("--only", default=None); ap.add_argument("--pans", default=None, help="t:yaw:pitch:seconds;... pans to what Kevin points at")
     # --no-raise-cut: Kevin (3 Sep 2026), no close-up at the raised camera; one angle throughout
     a = ap.parse_args()
     if a.mode == "calib":
@@ -350,4 +482,4 @@ if __name__ == "__main__":
         sync(a.clip, a.map, start=a.start, end=(a.end or a.start + 10), gain=a.gain, dfov=a.dfov, smooth_s=a.smooth)
     else:
         w, h = (int(x) for x in a.size.split("x"))
-        render(a.clip, a.out, a.map, a.dfov, a.start, a.end, (w, h), a.smooth, a.tilt, not a.no_roll_lock, a.gain, a.offset, a.blend, a.still, a.proj, a.hfov, a.level, a.workers, not a.no_raise_cut, a.video_only)
+        render(a.clip, a.out, a.map, a.dfov, a.start, a.end, (w, h), a.smooth, a.tilt, not a.no_roll_lock, a.gain, a.offset, a.blend, a.still, a.proj, a.hfov, a.level, a.workers, not a.no_raise_cut, a.video_only, a.pans)

@@ -17,7 +17,7 @@
   const WORKFLOWS = 'tblLPoRHFBl0vqR24';
   const ACTIVE_KEY = 'active_skill_ids';   // app_settings row key
   let _sb = null;
-  function sbc() { if (!_sb) _sb = window.supabase.createClient(SB_URL, SB_ANON, { auth: { persistSession: true, storageKey: '_dlr_sb_app' } }); return _sb; }
+  function sbc() { if (!_sb) _sb = window.supabase.createClient(SB_URL, SB_ANON, { auth: { persistSession: true, storageKey: '_dlr_sb_app', lock: (n, a, fn) => fn() } }); return _sb; }
   window.sbSkills = sbc;
 
   const json = (obj, status = 200) => new Response(JSON.stringify(obj), { status, headers: { 'Content-Type': 'application/json' } });

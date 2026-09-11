@@ -120,6 +120,27 @@ drain rate of zero and everything you write today is theatre."
 Do not merge with a bare `gh pr merge`. The gate is the point, and skipping it is how an
 unreviewed change to the approval loop reaches production.
 
+## STEP 5b — Tear the workspace down after the merge
+
+A merged workspace is debris, and it does not stay harmless: 19 of them had piled
+up in `.claude/worktrees/` by 8 Sep 2026, some dating to 22 Aug, one on a detached
+HEAD (finding 20260908-daily-ops-496). They confuse `worktree.sh list`, they hold
+branches that are already on origin, and every one of them is a checkout something
+could be run from by mistake — which is exactly finding 20260909-queue-fixer-504,
+where content-engine ran from a worktree five commits behind main.
+
+From the MAIN checkout, never from inside the workspace:
+
+```
+./scripts/worktree.sh done queue-fixes-{date}
+```
+
+Run it unconditionally after a successful merge. It already REFUSES while anything
+would be lost — uncommitted files, commits that exist nowhere else, or a branch not
+yet merged into origin/main — so a refusal is information, not a problem to force
+past. If the merge did NOT happen (red gate, or a protected-path refusal), leave the
+workspace exactly where it is: the PR is still open and the branch is still needed.
+
 ## STEP 6 — Release, always
 
 ```

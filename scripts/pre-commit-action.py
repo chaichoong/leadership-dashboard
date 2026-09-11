@@ -30,6 +30,8 @@ FILE_TO_PAGE = {
     'js/sitemap.js':        'sitemap',
     'follow-up.html':       'comms',
     'compliance.html':      'compliance',
+    'growth-plan.html':     'growth-plan',
+    'js/growth-plan-model.js': 'growth-plan',
     'os/tasks/index.html':  'tasks',
     # Agent accuracy scoring is shared by the Task OS (AI Agents tab) and the
     # Leadership Dashboard (Agent Approvals card), so a change bumps both.
@@ -46,6 +48,7 @@ FILE_TO_PAGE = {
     # when the SOP is updated to match the page (see CLAUDE.md Version Tracking).
     'os/agents/index.html':        'agents',
     'os/team/index.html':          'os-team',
+    'property-manager/index.html': 'property-manager',
     'how-it-works.html':           'how-it-works',
     # Previously-unmapped registered pages (their versions never bumped)
     'js/money.js':          'money',

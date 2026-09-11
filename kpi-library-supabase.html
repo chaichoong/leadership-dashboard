@@ -14,15 +14,14 @@
 </head>
 <body>
   <main class="kpi-page">
-    <h1>📚 KPI Library</h1>
     <!-- js/kpi-library.js renders the full library into this element. -->
-    <div class="tab-panel" id="tab-kpi-library"></div>
+    <div class="tab-panel" id="tab-kpi-library" style="display:block"></div>
   </main>
 
   <!-- supabase-js + shim + owner gate (NON-deferred so window.fetch is overridden
        before any app code runs). -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="kpi-library-shim.js?v=2"></script>
+  <script src="kpi-library-shim.js?v=4"></script>
   <script src="kpi-library-boot.js?v=2"></script>
 
   <!-- Minimal helper the app expects from shared.js (we don't load the heavy shell). -->
@@ -36,7 +35,7 @@
 
   <!-- App scripts (classic, deferred → run in order, share global lexical scope) -->
   <script defer src="js/ai-models.js?v=1"></script>
-  <script defer src="js/config.js?v=61"></script>
+  <script defer src="js/config.js?v=62"></script>
   <script defer src="js/kpi-library.js?v=2"></script>
 
   <!-- Safety net + on-page diagnostic. If the boot hasn't populated the library

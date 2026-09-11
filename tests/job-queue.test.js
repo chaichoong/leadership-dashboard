@@ -1341,11 +1341,25 @@ describe('a sleeping job cannot hold the lock', () => {
   it('lets the lease lapse when the heartbeat stops, which is what sleep does', async () => {
     // Same setup, heartbeat disabled: the lock MUST become stealable. This is
     // the back-test — without it the case above could pass for the wrong reason.
+    //
+    // TIGHTENED 9 Sep 2026 with the lease-grace fix (finding 458). The child used
+    // to sleep 6s while the test waited 4s, so the lock could equally be free
+    // because the holder had FINISHED — and after the grace landed, that is
+    // exactly why it still passed. A back-test that passes for the wrong reason
+    // is worse than no back-test. The child now outlives the whole observation
+    // window, so the only way the lock frees is the lease.
     const slow = runAsync(['run', 'frozen', '--no-stale-check', '--lease', '0.05',
-      '--', 'python3', '-c', 'import time; time.sleep(6)'],
+      '--', 'python3', '-c', 'import time; time.sleep(30)'],
       { env: { JOB_QUEUE_HEARTBEAT: '600' } });
     await new Promise((r) => setTimeout(r, 4000));
-    const stolen = run(['acquire', 'nextday', '--no-stale-check', '--timeout', '0.05']);
+
+    // Inside the grace, a holder we can SEE is alive keeps the lock (finding 458:
+    // this is where a live render used to be killed by a starved heartbeat).
+    expect(run(['acquire', 'nextday', '--no-stale-check', '--timeout', '0.05']).code).toBe(75);
+
+    // Past the grace — which is what a sleeping Mac looks like — it must go.
+    const stolen = run(['acquire', 'nextday', '--no-stale-check', '--timeout', '0.05'],
+      { env: { JOB_QUEUE_ALIVE_GRACE: '0' } });
     expect(stolen.code, 'a dead holder still blocked the queue').toBe(0);
     run(['release', 'nextday']);
     await slow;
@@ -1522,6 +1536,58 @@ time.sleep(8)`;
     rmSync(join(stateDir, 'lock'), { recursive: true, force: true });
   });
 
+  // Finding 20260911-daily-ops-phase-2-522. A headless `claude -p` tool call
+  // hung inside inbound-triage on 10-11 Sep 2026. The wrapper's heartbeat kept
+  // renewing the lease, so the lease never lapsed and the queue was held for 14
+  // hours: a live, beating, never-finishing job had no ceiling at all.
+  it('stops a job that runs past its ceiling, TERM first, and frees the queue', async () => {
+    const marker = join(stateDir, 'ceiling-term.txt');
+    const body = `import signal, sys, time
+def bye(*a):
+    open(${JSON.stringify(marker)}, 'w').write('term')
+    sys.exit(143)
+signal.signal(signal.SIGTERM, bye)
+time.sleep(40)`;
+    const started = Date.now();
+    const r = await runAsync(['run', 'hung', '--no-stale-check', '--', 'python3', '-c', body],
+      { env: { JOB_QUEUE_MAX_RUNTIME_MIN: '0.03', JOB_QUEUE_HEARTBEAT: '0.3' } });
+    expect(r.code, 'a run stopped at its ceiling must say so with 124').toBe(124);
+    expect(r.stderr).toMatch(/MAX RUNTIME: hung/);
+    expect(Date.now() - started, 'the ceiling did not fire; the child slept its full 40 s').toBeLessThan(30000);
+    expect(existsSync(marker), 'the child was killed before it could write its done line').toBe(true);
+    expect(run(['status']).stdout).toMatch(/FREE/);
+    const events = readFileSync(join(stateDir, 'queue-events.jsonl'), 'utf8');
+    expect(events).toMatch(/"max-runtime"/);
+  });
+
+  it('a child that ignores TERM still dies by KILL after the grace', async () => {
+    const body = `import signal, time
+signal.signal(signal.SIGTERM, signal.SIG_IGN)
+time.sleep(40)`;
+    const started = Date.now();
+    const r = await runAsync(['run', 'stubborn', '--no-stale-check', '--', 'python3', '-c', body],
+      { env: { JOB_QUEUE_MAX_RUNTIME_MIN: '0.02', JOB_QUEUE_STOP_GRACE: '0.5' } });
+    expect(r.code).toBe(124);
+    expect(Date.now() - started).toBeLessThan(30000);
+    expect(run(['status']).stdout).toMatch(/FREE/);
+  });
+
+  it("a job's own maxRuntimeMinutes in the schedule wins over the default", async () => {
+    const sched = JSON.parse(readFileSync(schedulePath, 'utf8'));
+    sched['short-leash'] = { cron: '0 2 * * *', maxLateMinutes: 60, mode: 'wrapped', maxRuntimeMinutes: 0.02 };
+    writeFileSync(schedulePath, JSON.stringify(sched));
+    const r = await runAsync(['run', 'short-leash', '--no-stale-check', '--', 'python3', '-c', 'import time; time.sleep(40)'],
+      { env: { JOB_QUEUE_MAX_RUNTIME_MIN: '480' } });
+    expect(r.code).toBe(124);
+  });
+
+  it('a job that finishes inside its ceiling is untouched', () => {
+    const r = run(['run', 'quick', '--no-stale-check', '--', 'python3', '-c', 'print("ok")'],
+      { env: { JOB_QUEUE_MAX_RUNTIME_MIN: '0.5' } });
+    expect(r.code).toBe(0);
+    expect(r.stdout).toContain('ok');
+  });
+
   it('heartbeat reports a lost lock with its own exit code, not a usage error', () => {
     run(['acquire', 'holder-a', '--no-stale-check', '--lease', '30']);
     // 70, never 64: a caller that reads 64 as "I passed bad arguments" carries on.
@@ -1676,5 +1742,266 @@ describe('the queue log names how a run actually ended', () => {
       .filter((e) => e.job === job && e.state === 'released').pop().outcome;
     expect(outcome('bad-exit')).toBe('failed');
     expect(outcome('good-exit')).toBe('completed');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// THE MORNING BLOCK MUST NOT BE STARVABLE
+//
+// Regression origin: 9 Sep 2026 (finding 20260909-daily-ops-exceptions-502).
+// content-engine took the lock at 02:16 and still held it past 07:13. Behind it,
+// ten deep: mcp-inventory, drift-scan, estate-drift, session-keepalive,
+// data-invariants, project-status-sync, ceo-agent, drive-auth, masterplan-sync.
+// The four read-only morning scans that tell Kevin the platform is intact never
+// ran at all, and nothing anywhere said so in those words.
+//
+// A read-only check writes nothing another job can collide with, so it opts out
+// of the lock entirely rather than queueing behind a four-hour render.
+// ---------------------------------------------------------------------------
+describe('lock-exempt read-only checks', () => {
+  function exemptSchedule() {
+    writeFileSync(schedulePath, JSON.stringify({
+      'long-render': { cron: '* * * * *', maxLateMinutes: 600, mode: 'wrapped' },
+      'read-only-check': { cron: '* * * * *', maxLateMinutes: 600, mode: 'wrapped', lockExempt: true },
+      'ordinary-job': { cron: '* * * * *', maxLateMinutes: 600, mode: 'cooperative' },
+    }));
+  }
+
+  it('runs while another job holds the lock, instead of queueing behind it', () => {
+    exemptSchedule();
+    expect(run(['acquire', 'long-render', '--lease', '90']).code).toBe(0);
+
+    // The control: an ordinary job in the same position gives up on BUSY.
+    expect(run(['acquire', 'ordinary-job', '--timeout', '0']).code).toBe(75);
+
+    // The exempt one goes straight through.
+    const got = run(['acquire', 'read-only-check', '--timeout', '0']);
+    expect(got.code).toBe(0);
+    expect(got.stdout).toMatch(/UNLOCKED/);
+
+    // ...and it did NOT take the lock off the holder.
+    const holder = JSON.parse(readFileSync(join(stateDir, 'lock', 'holder.json'), 'utf8'));
+    expect(holder.job).toBe('long-render');
+  });
+
+  it('leaves evidence that it ran, so absence is still detectable', () => {
+    exemptSchedule();
+    run(['acquire', 'read-only-check', '--timeout', '0']);
+    const e = events().filter((r) => r.job === 'read-only-check');
+    expect(e.map((r) => r.state)).toContain('ran-unlocked');
+  });
+
+  it('releasing is a no-op, never a refusal that reads as a failed run', () => {
+    exemptSchedule();
+    run(['acquire', 'long-render', '--lease', '90']);
+    run(['acquire', 'read-only-check', '--timeout', '0']);
+    const rel = run(['release', 'read-only-check']);
+    expect(rel.code).toBe(0);                       // not 64 (EX_USAGE)
+    // The other job still holds it.
+    const holder = JSON.parse(readFileSync(join(stateDir, 'lock', 'holder.json'), 'utf8'));
+    expect(holder.job).toBe('long-render');
+  });
+
+  it('the real schedule exempts only checks that write nothing shared', () => {
+    const real = JSON.parse(readFileSync(resolve(__dirname, '../scripts/job-schedule.json'), 'utf8'));
+    const exempt = Object.keys(real).filter((k) => real[k] && real[k].lockExempt);
+    expect(exempt.sort()).toEqual(['data-invariants', 'drift-scan', 'drive-auth', 'estate-drift']);
+    // content-engine must never be exempt: it renders and writes.
+    expect(real['content-engine'].lockExempt).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// A JOB THAT CANNOT FINISH MUST NEVER TAKE THE LOCK
+//
+// Regression origin: 9 Sep 2026 (finding 20260909-daily-ops-exceptions-503).
+// 27 GB free, a queued clip needing about 42 GB. The render could not complete,
+// and the run it could not complete is what held the queue for 4h50m.
+// ---------------------------------------------------------------------------
+describe('disk precondition', () => {
+  it('defers instead of taking the lock when the disk cannot hold the work', () => {
+    writeFileSync(schedulePath, JSON.stringify({
+      'needs-a-lot': {
+        cron: '* * * * *', maxLateMinutes: 600, mode: 'wrapped',
+        needs: [{ diskGB: 100000000 }],   // no Mac has 100 PB free
+        readyWaitMinutes: 0,
+      },
+    }));
+    const got = run(['acquire', 'needs-a-lot', '--timeout', '0']);
+    expect(got.code).toBe(69);                       // EX_NOTREADY, a deferral
+    expect(got.stdout).toMatch(/NOT READY/);
+    expect(existsSync(join(stateDir, 'lock'))).toBe(false);
+    const reasons = events().filter((r) => r.state === 'deferred-not-ready').map((r) => r.reason);
+    expect(reasons.join(' ')).toMatch(/disk: .*GB free/);
+  });
+
+  it('passes when the free space is there, and says how much', () => {
+    expect(py(`m.disk_ready(0)[0]`)).toBe(true);
+    expect(py(`m.disk_ready(0)[1]`)).toMatch(/GB free/);
+  });
+
+  it('an unmeasurable path lets the job run rather than blocking it for ever', () => {
+    expect(py(`m.disk_ready(10, '/no/such/path/anywhere')[0]`)).toBe(true);
+  });
+
+  it('content-engine declares it, so a full disk defers rather than stalls the queue', () => {
+    const real = JSON.parse(readFileSync(resolve(__dirname, '../scripts/job-schedule.json'), 'utf8'));
+    const disk = (real['content-engine'].needs || []).filter((n) => n && n.diskGB);
+    expect(disk.length).toBe(1);
+    // 30 GB, Kevin's call on 9 Sep 2026 (PR #355): watch.py already sizes the
+    // room it needs per clip, and the old 60 GB floor held the 22:00 run back
+    // with 39 GB free. The assertion used to demand >= 42 and was left red on
+    // main by that merge (finding 20260910-queue-fixer-517), which blocks every
+    // fixer PR behind it — the gate tests origin/main MERGED WITH the branch, so
+    // a red main is a red gate for work that did not break anything.
+    //
+    // Pinned to the exact figure so a future change is a deliberate edit here
+    // with a reason, not a silent drift in either direction.
+    expect(disk[0].diskGB).toBe(30);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// THE DOUBLE-RUN GUARD MUST RECOGNISE THE WORDS ROUTINES ACTUALLY WRITE
+//
+// Regression origin: 8 Sep 2026 (finding 20260908-daily-ops-497). The guard
+// matched a note of exactly "end". Three of the four real closes in the live
+// queue log were descriptive and none of them counted, so the day never closed.
+// The notes below are copied verbatim from ~/knowledge-os/logs/queue.
+// ---------------------------------------------------------------------------
+describe('end mark recognition', () => {
+  it('counts every close daily-ops has actually written', () => {
+    expect(py(`[
+      m.is_end_mark('daily-ops', 'end'),
+      m.is_end_mark('daily-ops', 'end: report written, phases 1-5 complete'),
+      m.is_end_mark('daily-ops', 'daily-ops complete: 5 phases, 2 PRs merged, main restored green'),
+      m.is_end_mark('daily-ops', 'daily-ops finished: 5 phases, PR #286 open on protected path')
+    ]`)).toEqual([true, true, true, true]);
+  });
+
+  it('still refuses a start mark, which is the whole point of the guard', () => {
+    expect(py(`[
+      m.is_end_mark('daily-ops', ''),
+      m.is_end_mark('daily-ops', 'phase 1, 10 Aug run; mark added same day as the guard rewrite'),
+      m.is_end_mark('daily-ops', 'ending soon'),
+      m.is_end_mark('daily-ops', 'starting phase 1')
+    ]`)).toEqual([false, false, false, false]);
+  });
+
+  it('rantoday refuses a second run after a descriptive close', () => {
+    writeFileSync(schedulePath, JSON.stringify({ 'daily-ops': { maxLateMinutes: 600 } }));
+    run(['mark', 'daily-ops', '--note', 'phase 1']);
+    expect(run(['rantoday', 'daily-ops']).code).toBe(0);      // start alone never closes the day
+    const marked = run(['mark', 'daily-ops', '--note', 'daily-ops finished: 5 phases, report written']);
+    expect(marked.stdout).toMatch(/FINISHED/);
+    expect(run(['rantoday', 'daily-ops']).code).toBe(3);      // EX_SKIPPED: do not start
+  });
+
+  it('--end closes the day without the caller having to know the magic word', () => {
+    writeFileSync(schedulePath, JSON.stringify({ 'daily-ops': { maxLateMinutes: 600 } }));
+    const marked = run(['mark', 'daily-ops', '--end', '--note', 'report written']);
+    expect(marked.stdout).toMatch(/FINISHED/);
+    expect(run(['rantoday', 'daily-ops']).code).toBe(3);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// A TIMEOUT MUST NAME THE BLOCKER AND HOW LONG IT HAS BLOCKED
+//
+// Nine separate queue-timeouts on 9 Sep 2026 each said only "behind
+// content-engine", which reads as nine unlucky jobs rather than one job holding
+// the machine for five hours.
+// ---------------------------------------------------------------------------
+describe('queue-timeout evidence', () => {
+  it('records how long the holder has held the lock', () => {
+    writeFileSync(schedulePath, JSON.stringify({
+      'holder-job': { cron: '* * * * *', maxLateMinutes: 600, mode: 'cooperative' },
+      'waiter-job': { cron: '* * * * *', maxLateMinutes: 600, mode: 'cooperative' },
+    }));
+    run(['acquire', 'holder-job', '--lease', '90']);
+    expect(run(['acquire', 'waiter-job', '--timeout', '0']).code).toBe(75);
+    const t = events().filter((r) => r.state === 'queue-timeout' && r.job === 'waiter-job');
+    expect(t.length).toBe(1);
+    expect(t[0].behind).toBe('holder-job');
+    expect(typeof t[0].holder_held_minutes).toBe('number');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// A LIVE RENDER MUST NOT LOSE ITS LOCK TO A STARVED HEARTBEAT
+//
+// Regression origin: 4 Sep 2026 (finding 20260904-content-engine-458).
+// content-engine was mid-render at load 47. Its heartbeat thread got no CPU, the
+// 5-minute lease lapsed, the lock was broken at 10:11 and again at 10:29, and at
+// 10:34 prod-sweep-weekly took it — killing a live render with EX_LOSTLOCK. The
+// tell in the log is `lock-broken` at 10:11 followed by `lock-retaken` by the
+// SAME job 88 seconds later: the process had never gone anywhere.
+//
+// The lease must still win eventually, because the failure it was built for is
+// the Mac sleeping, where the process stays alive and nothing progresses.
+// ---------------------------------------------------------------------------
+describe('a lapsed lease on a job that is provably still running', () => {
+  function holderFile() { return join(stateDir, 'lock', 'holder.json'); }
+
+  /** Put a lock in place by hand with a chosen mode, pid and lease age. */
+  function plantLock({ mode, pid, lapsedMinutes }) {
+    mkdirSync(join(stateDir, 'lock'), { recursive: true });
+    const nowS = Date.now() / 1000;
+    writeFileSync(holderFile(), JSON.stringify({
+      job: 'long-render', pid, mode,
+      acquired_at: nowS - 3600, acquired_iso: new Date().toISOString(),
+      lease_until: nowS - lapsedMinutes * 60,
+    }));
+  }
+
+  function sweepStale(env = {}) {
+    const src = `
+import importlib.util, json
+spec = importlib.util.spec_from_file_location('jq', ${JSON.stringify(QUEUE)})
+m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+print(json.dumps(m.break_stale_lock()))
+`;
+    return JSON.parse(execFileSync('python3', ['-c', src],
+      { encoding: 'utf8', env: { ...process.env, JOB_QUEUE_DIR: stateDir, JOB_QUEUE_SCHEDULE: schedulePath, ...env } }).trim());
+  }
+
+  it('leaves the lock alone while the wrapped holder is alive and inside the grace', () => {
+    plantLock({ mode: 'wrapped', pid: process.pid, lapsedMinutes: 3 });
+    expect(sweepStale()).toBe(null);
+    expect(existsSync(holderFile())).toBe(true);
+  });
+
+  it('BACK-TEST: with no grace, that same live render loses its lock', () => {
+    plantLock({ mode: 'wrapped', pid: process.pid, lapsedMinutes: 3 });
+    expect(sweepStale({ JOB_QUEUE_ALIVE_GRACE: '0' })).toMatch(/lease expired/);
+    expect(existsSync(holderFile())).toBe(false);
+  });
+
+  it('still frees the lock once the grace is past, so a sleeping Mac cannot hold it for hours', () => {
+    plantLock({ mode: 'wrapped', pid: process.pid, lapsedMinutes: 60 });
+    expect(sweepStale()).toMatch(/lease expired/);
+    expect(existsSync(holderFile())).toBe(false);
+  });
+
+  it('gives no grace to a cooperative holder, whose shell exited by design', () => {
+    plantLock({ mode: 'cooperative', pid: process.pid, lapsedMinutes: 3 });
+    expect(sweepStale()).toBe('lease expired');
+    expect(existsSync(holderFile())).toBe(false);
+  });
+
+  it('gives no grace to a wrapped holder whose process is gone', () => {
+    plantLock({ mode: 'wrapped', pid: 2147480000, lapsedMinutes: 3 });
+    expect(sweepStale()).toMatch(/pid .* is gone|lease expired/);
+    expect(existsSync(holderFile())).toBe(false);
+  });
+
+  it('a waiter does not steal the lock from a live holder mid-grace', () => {
+    writeFileSync(schedulePath, JSON.stringify({
+      'long-render': { cron: '* * * * *', maxLateMinutes: 600, mode: 'wrapped' },
+      'waiter-job': { cron: '* * * * *', maxLateMinutes: 600, mode: 'cooperative' },
+    }));
+    plantLock({ mode: 'wrapped', pid: process.pid, lapsedMinutes: 3 });
+    expect(run(['acquire', 'waiter-job', '--timeout', '0']).code).toBe(75);
+    expect(JSON.parse(readFileSync(holderFile(), 'utf8')).job).toBe('long-render');
   });
 });

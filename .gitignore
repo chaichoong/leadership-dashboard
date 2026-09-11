@@ -34,3 +34,21 @@ _tmp_*
 _tm_*
 _triage_*
 _dispatch_*
+
+# The same problem, the patterns the last rule missed (finding 20260901-queue-fixer-426).
+# On 9 Sep 2026 there were 169 untracked files in this checkout and not one of the four
+# rules above matched a single one of them. Agents name their scratch by convention, not
+# by prefix: a helper dropped in scripts/ is underscore-prefixed (_creditor_updates.py,
+# _send_eicr_gsc_emails.py, _hmrc_accountant_briefing_memo.md — 46 of them), a close-out
+# proposal is close-<something>.txt, and per-record working files are named after the
+# Airtable record id. All three carry live business data — creditor matters, HMRC working
+# files, tenant names — and this repo is PUBLIC.
+#
+# No tracked file matches any of these patterns (checked with git ls-files, 9 Sep 2026),
+# so nothing already committed is affected. A real script that belongs in the repo must
+# not be underscore-prefixed; `git add -f` if you ever genuinely mean to commit one.
+scripts/_*
+close-*.txt
+rec[A-Za-z0-9]*-revised.md
+rec[A-Za-z0-9]*-letter-*
+rec[A-Za-z0-9]*-merged.pdf

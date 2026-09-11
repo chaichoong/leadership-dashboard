@@ -15,7 +15,7 @@ describe('content-engine render', () => {
   it('passes its own selftest (folder naming, output names, banner title, record fields)', () => {
     const out = JSON.parse(execFileSync('python3', [RENDER, 'selftest'], { encoding: 'utf8', cwd: DIR }));
     expect(out.failed).toEqual([]);
-    expect(out.checks).toBeGreaterThanOrEqual(36);
+    expect(out.checks).toBeGreaterThanOrEqual(40);
   });
 
   // 5 Sep 2026 (finding 20260905-exceptions-462): the nightly run died inside overlays.py 'full'
@@ -36,7 +36,7 @@ describe('content-engine render', () => {
   it("inserts Ericamae's 8 second branded intro after the sign-off line (her app's rule) and makes the podcast audio", () => {
     const src = readFileSync(RENDER, 'utf8');
     expect(src).toContain('INTRO_CLIP = os.path.join(EDITED_ROOT, "Vlog Intro", "runprenuer-intro_clip.mp4")');
-    expect(src).toContain('def intro_insert_seconds(segments');
+    expect(src).toContain('def intro_window(segments, duration=None)');   // replaced intro_insert_seconds: the gap, not the caption end (10 Sep 2026)
     expect(src).toContain('insert_intro(captioned, at, paths["full"])');
     expect(src).toContain('paths["podcast"] = podcast_audio(captioned');
     expect(src).toMatch(/keep on \(\?:watching\|listening\)/);
@@ -54,9 +54,11 @@ describe('content-engine render', () => {
     const src = readFileSync(RENDER, 'utf8');
     expect(src).toContain('INTRO_TRIM_START = 1.0');
     expect(src).toContain('CUT_THRESHOLDS_DB = (-35, -30, -25, -20)');
-    expect(src).toContain('at, resume = find_pause(masters["16:9"], segs, intro_insert_seconds(segs))');
+    expect(src).toContain('at, resume = find_pause(masters["16:9"], cap_segs, srt_segments(open(srt).read())[-1][1])');  // the five-word chunks, so the jingle lands in Kevin's gap (10 Sep 2026)
+    expect(src).toContain('def intro_window(segments, duration=None)');
+    expect(src).toContain('def quiet_point(');
     expect(src).toContain('clip_caption_at(open(caps).read(), at)');
-    expect(src).toMatch(/learn\\w\*\\s\+\(\?:from\|for\|of\|through\|in\|to\)/);
+    expect(src).toContain('LFMD_START_RE = re.compile(r"(?:\\w+\\s+)?(?:from|for|of|through|in|to)\\s+(?:my|the)\\s+d(?:ia|ie|ai)\\w*"');  // + "learning story for today" (1841, 10 Sep 2026)
     expect(src).toContain('elif role == "episode": fields["Reframed Video URL"] = None');
     expect(src).toContain('paths["podcast"] = podcast_audio(captioned, os.path.join(workdir, names["podcast"]), at, resume)');
     expect(src).toContain('"--subtitle", title.replace("|", " ").strip()');
@@ -68,6 +70,15 @@ describe('content-engine render', () => {
     expect(src).not.toContain('open(caps, "w").write(clip_caption_at(open(caps).read(), at))');
     expect(src).toContain('def master_complete(');
     expect(src).toContain('render: reusing finished %s master');
+  });
+
+  it('files no output without a video stream, and can rebuild one Learnings clip on its own (5-8 Sep 2026)', () => {
+    const src = readFileSync(RENDER, 'utf8');
+    expect(src).toContain('def assert_has_video(');
+    expect(src).toContain('if p.endswith(".mp4"): assert_has_video(p');
+    expect(src).toContain('def redo_lfmd(day)');
+    const w = readFileSync(WATCH, 'utf8');
+    expect(w).toContain('DAY_NAMED_RE');
   });
 
   it('never writes copy from an empty transcript: under 50 characters of speech is B-roll', () => {
@@ -86,7 +97,7 @@ describe('content-engine render', () => {
 
   it("builds the LFMD from the 'Learnings from my diary' section, and the Summary from the teaser clip (Kevin, 3 Sep 2026)", () => {
     const src = readFileSync(RENDER, 'utf8');
-    expect(src).toMatch(/LFMD_START_RE = re\.compile\(r"learn\\w\*\\s\+\(\?:from\|for\|of\|through\|in\|to\)/);
+    expect(src).toContain('LFMD_START_RE = re.compile(r"(?:\\w+\\s+)?(?:from|for|of|through|in|to)\\s+(?:my|the)\\s+d(?:ia|ie|ai)\\w*"');  // + "learning story for today" (1841, 10 Sep 2026)
     expect(src).toContain('def lfmd_window(segments');
     expect(src).toContain('TEASER_MAX_SECONDS = 150');
     expect(src).toContain('if role == "teaser":');
@@ -113,5 +124,31 @@ describe('content-engine render', () => {
       expect(src).toContain(f);
     }
     expect(src).toMatch(/STATUS_DONE = "Optimisation and Design Done"/);
+  });
+
+  it('the Learnings-only rebuild never touches the 16:9 master: its branch comes before the sign-off pause search (8 Sep 2026, 2196 rebuild died on masters["16:9"])', () => {
+    const r = readFileSync(path.join(DIR, 'render.py'), 'utf8');
+    const branch = r.indexOf('if role == "lfmd-only":');
+    const pause = r.indexOf('find_pause(masters["16:9"]');
+    expect(branch).toBeGreaterThan(0);
+    expect(pause).toBeGreaterThan(branch);
+    expect(r.indexOf('if role == "lfmd-only":', branch + 1)).toBe(-1); // one branch, not a second copy after the full render
+  });
+
+  it("pans to what Kevin points at: speech cue + raised arm -> a planned pan in the reframer, listed on the card; the sign was proven on 2054 (9 Sep 2026)", () => {
+    const pt = readFileSync(path.join(DIR, 'pointing.py'), 'utf8');
+    expect(pt).toContain('yaw = -PAN_YAW if side == "right" else PAN_YAW');
+    expect(pt).toContain('if not pose_available(): return []'); // no pose library, no pan, and the card says so
+    expect(pt).toContain('mp.solutions.pose.Pose(static_image_mode=True'); // mediapipe 0.10 CPU solution: 1.0 aborts wanting Metal from a headless process
+    const st = readFileSync(path.join(DIR, 'stab.py'), 'utf8');
+    expect(st).toContain('def apply_pans(F_sm, pans, fps=FPS)');
+    expect(st).toContain('ap.add_argument("--pans"');
+    expect(st).toContain('if pans: cmd += ["--pans", pans]'); // slices carry it
+    const r = readFileSync(path.join(DIR, 'render.py'), 'utf8');
+    expect(r).toContain('pans = find_pans_for(clip, srt); e["pans"] = pans');
+    expect(r).toContain('if master_complete(dest, clip) and had == (pans or ""):'); // a master without the pans is not reused
+    const a = readFileSync(path.join(DIR, 'approval.py'), 'utf8');
+    expect(a).toContain('def pans_for(day, ledger)');
+    expect(a).toMatch(/build_card\(day, full, recs\["Learnings From My Diary"\], recs\["Short Form Video"\], headline, pans_for\(day, ledger\), proof\)/);  // pans and the output gate's proof (10 Sep 2026)
   });
 });

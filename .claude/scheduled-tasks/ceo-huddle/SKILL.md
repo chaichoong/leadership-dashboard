@@ -100,11 +100,30 @@ STEPS
 2c. Review the AI workforce (Kevin's instruction, 25 Aug 2026): the whole
    workforce, every morning, as part of this check-in. Three reads, all via curl
    with the PAT:
-   - The AI Agents register `tbl9msVjyQWslLOIZ`: Status `fld71vXWqcxhdljac`,
-     Guardrail Level `fldWgqxMFmaAAvUHC`, Metric Score `fldkGxrOlrfuLlH3J`,
-     Learning Log `fldBdnKB1U4jZM0Jj`. Flag: any agent whose Learning Log gained
-     an "auto-tightened" line since yesterday, and any Live/Built agent whose
-     Metric Score is empty or clearly off its Score Metric target.
+   - The AI Agents register `tbl9msVjyQWslLOIZ`. **Read it by FIELD NAME**:
+     `fields[]=Status`, `fields[]=Guardrail Level`, `fields[]=Metric Score`,
+     `fields[]=Learning Log`. That is the convention the rest of the codebase
+     uses, and it is the one that works here.
+     The field IDs are `fld71vXWqcxhdljac` (Status), `fldWgqxMFmaAAvUHC`
+     (Guardrail Level), `fldkGxrOlrfuLlH3J` (Metric Score), `fldBdnKB1U4jZM0Jj`
+     (Learning Log). They are documentation, not what you type into the query.
+     **If you do use an ID, you must pass `returnFieldsByFieldId=true` AND read
+     the response back by ID.** Airtable accepts `fields[]=fld...` without that
+     flag and answers with keys by NAME, so code looking for `fields["fld71v..."]`
+     finds nothing and every row reads empty. This is the mirror image of the
+     `returnFieldsByFieldId` anti-pattern in CLAUDE.md.
+     **CONTROL, and it is not optional: Status empty or "?" on EVERY row is a
+     BROKEN READ, never field drift.** Say "the register read failed" and read it
+     again by name before reporting anything about the workforce. Verified
+     10 Sep 2026 against the live table: by name returns `{"Status": "Live"}`,
+     ID-without-flag returns `{"Status": "Live"}`, ID-with-flag returns
+     `{"fld71vXWqcxhdljac": "Live"}` — the ID has not drifted. The 10 Sep 06:45
+     CEO slot reported "Status field ID returning '?' for all 26 rows. Possible
+     field ID drift" and filed it as an unknown; it was this read bug, and a
+     wrong diagnosis in the closing report is worse than no line at all.
+     Flag: any agent whose Learning Log gained an "auto-tightened" line since
+     yesterday, and any Live/Built agent whose Metric Score is empty or clearly
+     off its Score Metric target.
    - Stuck approvals: Tasks where `{Status}='Approval'` AND Sent For Approval By
      is set AND created more than 24 hours ago. CONTROL: run the same query
      without the age clause; if THAT is zero but dispatch reported submissions

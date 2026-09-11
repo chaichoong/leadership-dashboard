@@ -9,6 +9,20 @@ Kevin describes a problem or amendment conversationally. Claude restructures it,
 
 ---
 
+## THE HARD RULE: read-only until the cause is proved
+
+Until you have either (a) Kevin's approval at the Phase 1d gate, or (b) for a clear bug taking the fast path, a confirmed root cause stated with the evidence that proves it, you are **read-only**.
+
+You MAY: read files, grep, run read-only Airtable queries, read git history and diffs, load the page in the browser, inspect the DOM, read the console and network requests.
+
+You MAY NOT: edit a file, write to Airtable, send anything, commit, push, or deploy.
+
+The one carve-out is the temporary diagnostic logging allowed in Phase 2b. Remove it before the fix ships.
+
+Diagnosis is cheap. A fix aimed at the wrong cause is not, because it leaves the real bug in place and adds a second change to unpick.
+
+---
+
 ## Phase 1: BILD PROMPT (restructure Kevin's input)
 
 Kevin talks conversationally about the problem. Before touching any code, restructure his input into a focused BILD prompt.
@@ -29,6 +43,8 @@ Before asking Kevin:
 - Read git log for recent changes that may have caused the issue
 - Check CLAUDE.md for file ownership and conventions
 
+**Cite what you read.** Every factual claim in the Background carries its source: a code fact carries `file:line`, a data fact carries the record ID or the filter formula. Anything you could not verify is written as `ASSUMPTION:` so Kevin can shoot it down. Never state a field name, table ID, record count or status value you have not actually read.
+
 ### 1c. Ask targeted questions (only if essential)
 
 Most bug fixes do not need questions. The bug report plus the code gives you enough. Only ask if:
@@ -48,6 +64,7 @@ Format:
 
 ## I — Instruction
 [What to fix. 1 sentence, imperative voice.]
+Fork: [the genuine alternative you considered] — recommend [choice], because [reason].
 
 ## L — Limitations
 - [File scope]
@@ -59,6 +76,8 @@ Format:
 ```
 
 For straightforward bugs (clear error message, obvious root cause), skip presenting the BILD prompt and proceed directly to diagnosis. State what you found and what you are fixing. Kevin does not need to approve a plan for a clear bug fix.
+
+Include the Fork line only when the fix genuinely has two valid approaches (patch the symptom at the render layer or fix the source data, for example). One sentence, no essay. If Kevin says go ahead, do not raise it again. Omit the line for a bug with one sane fix.
 
 For ambiguous problems or amendments that change behaviour, present the BILD prompt and ask: "Should I fix this as described, or adjust?"
 
