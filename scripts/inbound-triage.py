@@ -774,23 +774,76 @@ def cmd_note(msg_id, action, reason):
 # rather than returning an empty map. See feedback_a_running_job_is_not_a_working_job.
 SENTCHECK_MIN_DAYS_FOR_CONTROL = 3
 
+# ─── A MESSAGE CANNOT ANSWER ITSELF (finding 20260904-daily-ops-454) ──
+#
+# Scanned post produced ZERO tasks for 17 days and nothing errored. The post
+# manager emails Kevin FROM Kevin, so Gmail files that one message with a SENT
+# label and no INBOX label, and `id == threadId` because it is the only message
+# on the thread. This check then recorded the thread as having a send, the
+# triage agent read "already answered", and every piece of scanned post — a
+# Companies House strike-off notice, a council tax summons, a credit limit cut —
+# was filed silently.
+#
+# Measured on the live mailbox, 8 Sep 2026: `subject:POST newer_than:25d`
+# returned 68 messages; the POST ones all carry SENT, no INBOX, and from == to
+# == kevinbrittain@gmail.com.
+#
+# Two rules, and both are needed. A self-addressed message is dropped from the
+# map entirely — it is a note to self, never an answer to anything. And the
+# newest send's message ID is published alongside its timestamp, so the reader
+# can require the answer to be a DIFFERENT message from the one it is judging.
+# A thread id alone can never express that.
+EMAIL_RE = re.compile(r"[\w.+-]+@[\w-]+\.[\w.-]+")
+
+
+def self_addressed(headers):
+    """True when a message's only recipients are its own sender.
+
+    Machine signal, not judgement: the From address, compared against every
+    address in To/Cc/Bcc. No recipients at all counts as self-addressed too —
+    it cannot have answered anyone.
+    """
+    headers = headers or {}
+    sender = EMAIL_RE.findall(str(headers.get("from") or "").lower())
+    if not sender:
+        return False
+    to = set()
+    for field in ("to", "cc", "bcc"):
+        to.update(EMAIL_RE.findall(str(headers.get(field) or "").lower()))
+    return to.issubset(set(sender))
+
 
 def cmd_sentcheck(days):
     """thread id -> newest sent timestamp (ms), for the last `days` days."""
     days = max(1, int(days))
     messages, truncated = worker_list(q="in:sent newer_than:%dd" % days)
-    threads = {}
+    threads, sends, self_sent = {}, {}, 0
     for m in messages:
         tid = m.get("threadId")
         if not tid:
             continue
+        if self_addressed(m.get("headers")):
+            self_sent += 1
+            continue
         ts = int(m.get("internalDate") or 0)
         if ts > threads.get(tid, 0):
             threads[tid] = ts
+            sends[tid] = {"id": m.get("id") or "", "ts": ts}
     out = {
         "days": days,
         "sentMessages": len(messages),
         "threads": threads,
+        # The newest genuine send per thread, WITH its message id. A send only
+        # answers an incoming message when it is a different message and
+        # strictly newer — a thread id on its own cannot say that.
+        "threadSends": sends,
+        # Self-addressed mail excluded from the map above. The scanned-post
+        # lane is entirely this shape, so a zero here on a day post arrived
+        # means the exclusion has stopped working.
+        "selfAddressedExcluded": self_sent,
+        "rule": ("a thread counts as answered only when threadSends[tid].id is "
+                 "a DIFFERENT message from the one being judged AND "
+                 "threadSends[tid].ts is strictly greater than its internalDate"),
         # The agent MUST know when the listing was cut short: a truncated sent
         # folder means "not found here" no longer implies "not answered".
         "truncated": truncated,

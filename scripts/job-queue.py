@@ -148,6 +148,23 @@ HEARTBEAT_SECONDS = float(os.environ.get("JOB_QUEUE_HEARTBEAT", "60"))
 # How long a displaced wrapped job gets to write its own done line after TERM
 # before it is killed outright.
 STOP_GRACE_SECONDS = float(os.environ.get("JOB_QUEUE_STOP_GRACE", "10"))
+# A CEILING THAT IS NOT THE LEASE (finding 20260911-daily-ops-phase-2-522).
+#
+# The lease frees the queue when a job STOPS beating: the Mac slept, the process
+# died. It does nothing for a job that is awake, beating, and never finishing.
+# On 10-11 Sep 2026 a headless `claude -p` tool call hung inside inbound-triage;
+# the wrapper's heartbeat thread kept renewing the lease, and the queue was held
+# for 14 hours with every job behind it skipped for lateness. Nothing errored.
+#
+# So every wrapped run also gets a ceiling on how long it may RUN: past it, the
+# child's whole group gets TERM (so its wrapper writes its own done line), then
+# KILL after STOP_GRACE_SECONDS, and the run ends EX_MAXRUNTIME. A job may set
+# its own `maxRuntimeMinutes` in job-schedule.json; everything else gets this
+# default, which is deliberately longer than any healthy run on the queue log.
+# Measured with time.monotonic, so hours the Mac spends asleep never count:
+# the lease already owns that failure.
+DEFAULT_MAX_RUNTIME_MIN = float(os.environ.get("JOB_QUEUE_MAX_RUNTIME_MIN", "480"))
+EX_MAXRUNTIME = 124   # the coreutils `timeout` convention
 POLL_SECONDS = float(os.environ.get("JOB_QUEUE_POLL", "2"))
 
 
@@ -373,6 +390,14 @@ def network_ready(host="api.airtable.com", port=443, timeout=4):
 # and 25 candidates is plenty of evidence that a mount is dead.
 PROBE_MAX_BYTES = 4 * 1024 * 1024
 PROBE_MAX_CANDIDATES = 25
+# ONE CANDIDATE IS NOT A FALLBACK (finding 20260907-daily-ops-490). The 486 fix
+# tries every candidate in the folder — but "Runpreneur - Raw Video" holds
+# exactly ONE plain file at the top level, a 366MB Windows installer, and every
+# other entry is a directory. So the list it fell back through had length one
+# and the probe was still decided by the single file nothing reads. Below this
+# many small candidates, descend one level and collect from the subfolders too.
+PROBE_MIN_CANDIDATES = 3
+PROBE_MAX_SUBDIRS = 12
 
 
 def drive_ready(path, timeout=4):
@@ -420,16 +445,42 @@ def drive_ready(path, timeout=4):
     # Smallest first. os.stat on an un-hydrated placeholder still answers (it is
     # the OPEN that deadlocks), but treat a stat failure as "unknown size" and
     # sort it last rather than letting it end the probe.
-    candidates = []
-    for name in names:
-        full = os.path.join(path, name)
+    def collect(folder, prefix=""):
+        found, subdirs = [], []
         try:
-            if not os.path.isfile(full):
-                continue
-            size = os.path.getsize(full)
+            entries = [n for n in os.listdir(folder) if not n.startswith(".")]
         except OSError:
-            size = float("inf")
-        candidates.append((size, name, full))
+            return found, subdirs
+        for name in entries:
+            full = os.path.join(folder, name)
+            try:
+                if os.path.isdir(full):
+                    subdirs.append(full)
+                    continue
+                if not os.path.isfile(full):
+                    continue
+                size = os.path.getsize(full)
+            except OSError:
+                size = float("inf")
+            found.append((size, prefix + name, full))
+        return found, subdirs
+
+    candidates, subdirs = collect(path)
+    # Descend exactly one level when the top level cannot offer a real choice.
+    # One level, newest subfolders first, and a hard cap: this runs before every
+    # scheduled job and must stay a cheap yes/no, never a tree walk.
+    small_now = [c for c in candidates if c[0] <= PROBE_MAX_BYTES]
+    if len(small_now) < PROBE_MIN_CANDIDATES and subdirs:
+        try:
+            subdirs.sort(key=lambda d: os.path.getmtime(d), reverse=True)
+        except OSError:
+            pass
+        for sub in subdirs[:PROBE_MAX_SUBDIRS]:
+            deeper, _ = collect(sub, os.path.basename(sub) + "/")
+            candidates += deeper
+            if len([c for c in candidates
+                    if c[0] <= PROBE_MAX_BYTES]) >= PROBE_MIN_CANDIDATES:
+                break
     candidates.sort(key=lambda c: c[0])
     # Big files go to the back of the queue rather than out of it: a folder that
     # holds nothing but large files must still be probeable.
@@ -991,6 +1042,19 @@ def release_outcome(code):
     return {"outcome": "completed"}
 
 
+def max_runtime_minutes(job):
+    """The job's own ceiling from the schedule, else the default. 0 or less
+    switches the ceiling off for that job; an unreadable value falls back to the
+    default rather than to no ceiling at all."""
+    val = (load_schedule().get(job) or {}).get("maxRuntimeMinutes")
+    if val is None:
+        return DEFAULT_MAX_RUNTIME_MIN
+    try:
+        return float(val)
+    except (TypeError, ValueError):
+        return DEFAULT_MAX_RUNTIME_MIN
+
+
 def release(job, quiet=False, outcome="completed", reason=None):
     # A lock-exempt job never took the lock, so it has nothing to give back.
     # Without this it would fall through to the "you are not the holder" branch
@@ -1111,7 +1175,42 @@ def run(job, cmd, lease_minutes, timeout_minutes, check_stale,
                         if LAST_REFUSAL.get("job") == job else None)
         return code
 
+    # ─── THE WHOLE TREE, NOT JUST THE WRAPPER (finding 20260904-content-engine-459)
+    #
+    # `proc.terminate()` signals the immediate child only — the wrapper shell.
+    # Everything it spawned (the Claude agent, an ffmpeg render) survived, so a
+    # run stopped on LOST LOCK left its real work running with no lock at all,
+    # writing alongside whoever now held the queue. That is the exact collision
+    # this file exists to prevent, arriving through the door marked "stopped".
+    #
+    # So the child gets its own process group (start_new_session below) and the
+    # signal goes to the GROUP. TERM first so a wrapper can trap it and write
+    # its done line, KILL after the grace, exactly as before.
+    running = {"proc": None, "lost": "", "code": None, "ceiling": ""}
+
+    def signal_group(sig):
+        """Signal the child's whole process group. Never raises: the group is
+        already gone in the ordinary case, and that is a success, not an error."""
+        proc = running["proc"]
+        if proc is None:
+            return False
+        try:
+            os.killpg(os.getpgid(proc.pid), sig)
+            return True
+        except (OSError, ProcessLookupError):
+            # No group (start_new_session failed) — fall back to the one child
+            # rather than signalling nothing at all.
+            try:
+                proc.send_signal(sig)
+                return True
+            except OSError:
+                return False
+
     def _passthrough(signum, _frame):
+        # The child is in its own session now, so it no longer receives the
+        # terminal's signal by itself. Pass it on, or the wrapper exits and
+        # leaves the work orphaned and unlocked.
+        signal_group(signal.SIGTERM)
         release(job, quiet=True)
         sys.exit(128 + signum)
 
@@ -1123,7 +1222,6 @@ def run(job, cmd, lease_minutes, timeout_minutes, check_stale,
 
     import threading
     stop = threading.Event()
-    running = {"proc": None, "lost": "", "code": None}
 
     # A lock-exempt job holds no lease, so there is nothing to keep alive — and
     # a heartbeat here would be actively dangerous: it would read the CURRENT
@@ -1136,20 +1234,18 @@ def run(job, cmd, lease_minutes, timeout_minutes, check_stale,
         # writes its "done" line and log summary before dying; SIGKILL is
         # untrappable, so the 13:00 task-manager slot of 2 Sep 2026 died with
         # no done line, no score and no report — invisible to every monitor.
+        #
+        # Signalled to the GROUP so the wrapper's own children go with it
+        # (finding 20260904-content-engine-459).
         proc = running["proc"]
         if proc is None:
             return
-        try:
-            proc.terminate()
-        except OSError:
+        if not signal_group(signal.SIGTERM):
             return
         try:
             proc.wait(timeout=STOP_GRACE_SECONDS)
         except subprocess.TimeoutExpired:
-            try:
-                proc.kill()
-            except OSError:
-                pass
+            signal_group(signal.SIGKILL)
 
     def beat():
         # Re-arm well inside the lease so an ordinary scheduling hiccup does not
@@ -1192,15 +1288,37 @@ def run(job, cmd, lease_minutes, timeout_minutes, check_stale,
                 if write_failures == 1:
                     event(job, "heartbeat-write-failed", reason=str(exc))
 
+    ceiling_min = max_runtime_minutes(job)
+
+    def watchdog():
+        # Event.wait runs on the monotonic clock, so a sleeping Mac does not
+        # use up the ceiling. Set by `stop` the moment the child exits.
+        if stop.wait(ceiling_min * 60):
+            return
+        running["ceiling"] = "ran past its %g-minute ceiling" % ceiling_min
+        event(job, "max-runtime", reason=running["ceiling"])
+        stop_child(running["ceiling"])
+
     ticker = None
     if not exempt:
         ticker = threading.Thread(target=beat, daemon=True)
         ticker.start()
     try:
-        proc = subprocess.Popen(cmd)
+        # Its own process group, so stop_child can take the whole tree down.
+        proc = subprocess.Popen(cmd, start_new_session=True)
         running["proc"] = proc
+        # Started only once the child exists, so it can never fire at nothing.
+        # Covers lock-exempt jobs too: a hung exempt job holds no lock, but it
+        # still holds the Mac.
+        if ceiling_min > 0:
+            threading.Thread(target=watchdog, daemon=True).start()
         code = proc.wait()
         running["code"] = code
+        if running["ceiling"]:
+            print("MAX RUNTIME: %s was stopped (%s)" % (job, running["ceiling"]),
+                  file=sys.stderr)
+            event(job, "finished", exit=EX_MAXRUNTIME, reason=running["ceiling"])
+            return EX_MAXRUNTIME
         if running["lost"]:
             print("LOST LOCK: %s was stopped mid-run (%s)"
                   % (job, running["lost"]), file=sys.stderr)
@@ -1211,7 +1329,9 @@ def run(job, cmd, lease_minutes, timeout_minutes, check_stale,
         return code
     finally:
         stop.set()
-        if not running["lost"]:
+        if running["ceiling"]:
+            release(job, quiet=True, outcome="failed", reason=running["ceiling"])
+        elif not running["lost"]:
             release(job, quiet=True, **release_outcome(running["code"]))
 
 

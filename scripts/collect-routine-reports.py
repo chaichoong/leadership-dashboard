@@ -71,7 +71,7 @@ An empty roster fails the selftest rather than reading as "no names present".
 
 import argparse
 import os
-import shutil
+import re
 import subprocess
 import sys
 
@@ -90,6 +90,54 @@ REPORT_DIR = "monitoring"
 # should ever be collected. A binary or unknown type arriving here is not
 # something to guess at, so it is refused rather than copied unread.
 SCRUBBABLE = (".md", ".txt", ".json")
+
+# WHAT A REPORT LOOKS LIKE (finding 20260910-queue-fixer-516).
+#
+# Git's untracked list says which files MAY travel, not which files ARE reports.
+# Agents drop working files in monitoring/ too, and on 8-10 Sep 2026 this script
+# collected a dispatch queue dump with 859 email addresses in it, a folder of
+# per-task drafts, and two `queue-*-tmp.json` files. Masking got most of it,
+# but masking is a mitigation, not a boundary: those files should never have
+# been candidates. So a file is collected only when its NAME has the shape every
+# routine report in git history has: top level of monitoring/, a routine name,
+# a date, an optional letter or `.NNslot` suffix, .md or .json. Anything else is
+# REFUSED and listed, never masked through.
+REPORT_NAME = re.compile(
+    r"^[a-z][a-z0-9]*(?:-[a-z0-9]+)*-\d{4}-\d{2}-\d{2}(?:[a-z]|\.[0-9]{2}slot)?\.(?:md|json)$")
+# Undated reports that are tracked on purpose.
+NAMED_REPORTS = {"schema-baseline.json", "reference-map.json", "ceo-brief-cron-findings.md"}
+# A dated name can still be a working file (queue-2026-09-10.json).
+WORKING_WORDS = ("tmp", "queue", "worklist", "draft", "scratch")
+
+
+def is_report(rel):
+    parts = rel.split("/")
+    if len(parts) != 2 or parts[0] != REPORT_DIR:
+        return False          # a subfolder is an agent's working set, never a report
+    name = parts[1]
+    if name in NAMED_REPORTS:
+        return True
+    return bool(REPORT_NAME.match(name)) and not any(w in name for w in WORKING_WORDS)
+
+
+def merge_into(dst, cleaned):
+    """What to write at `dst`, never losing what the worktree already holds.
+
+    Returns (text, verb). text None means nothing to write. The worktree copy
+    comes from origin/main and can be NEWER than the main checkout's (which is
+    often a stale session branch), so a plain overwrite could revert a report.
+    """
+    if not os.path.isfile(dst):
+        return cleaned, "COLLECTED"
+    with open(dst, encoding="utf-8") as fh:
+        existing = fh.read()
+    if cleaned == existing or cleaned in existing:
+        return None, "ALREADY HERE"
+    if cleaned.startswith(existing):
+        return cleaned, "COLLECTED"        # the source only grew
+    return (existing.rstrip("\n")
+            + "\n\n<!-- appended by collect-routine-reports: the main checkout's copy differed -->\n\n"
+            + cleaned), "APPENDED"
 
 
 def run(args, cwd):
@@ -217,6 +265,7 @@ def main():
         print("No uncommitted reports in %s/%s" % (source, REPORT_DIR))
         return 0
 
+    refused = []
     for rel in files:
         # Defence in depth: never step outside monitoring/, never take an ignored file.
         if not rel.startswith(REPORT_DIR + "/"):
@@ -236,6 +285,12 @@ def main():
             print("SKIP (not a text report, cannot be scrubbed): %s" % rel)
             continue
 
+        if not is_report(rel):
+            refused.append(rel)
+            print("REFUSED (not a report shape; agent working files never enter "
+                  "a public repo): %s" % rel)
+            continue
+
         with open(src, encoding="utf-8") as fh:
             original = fh.read()
         cleaned, hits = scrub(original)
@@ -245,11 +300,19 @@ def main():
                   % (rel, _hit_summary(hits)))
             continue
 
+        text, verb = merge_into(dst, cleaned)
+        if text is None:
+            print("%s %s" % (verb, rel))
+            continue
         os.makedirs(os.path.dirname(dst), exist_ok=True)
         with open(dst, "w", encoding="utf-8") as fh:
-            fh.write(cleaned)
-        shutil.copystat(src, dst)
-        print("COLLECTED %s%s" % (rel, _hit_summary(hits)))
+            fh.write(text)
+        print("%s %s%s" % (verb, rel, _hit_summary(hits)))
+
+    if refused:
+        print("REFUSED %d file(s) in %s/%s that are not reports. Move them out "
+              "of monitoring/ or file a finding; do not rename them to pass."
+              % (len(refused), source, REPORT_DIR))
 
     if args.check:
         print("WOULD REFRESH %s from the newest local snapshot" % SCHEMA_BASELINE)
