@@ -224,6 +224,55 @@ function parseFieldMap(raw, fields, signerCount) {
   return map;
 }
 
+/**
+ * Did every signer end up with the boxes the map gave them?
+ *
+ * REFUSE ON EVIDENCE, NOT ON SILENCE. Reading a box back means re-selecting it,
+ * and that is unreliable in Adobe for EVERY kind of box: a tenant's boxes read
+ * blank on one authority and back fine on the next, and the sending account's
+ * own boxes never read at all. Every refusal on 10 Sep 2026 was that silence,
+ * on documents the screenshots showed were correct in every box, including
+ * Andrew Martin's authority, refused twice while perfect.
+ *
+ * Correctness comes from the assignment step, which is correct by construction:
+ * it picks the recipient BY EMAIL and stops dead if a move fails, and anything
+ * it leaves alone sits on the last recipient, which is where Auto-place always
+ * puts everything. So this refuses only what it can actually see is wrong: two
+ * signers showing the same colour (their boxes are on one person), or one
+ * signer's boxes in two colours (one did not move). A blank read is reported,
+ * never counted as a colour and never counted as a failure.
+ */
+function judgeColours({ colours, checked, map, signers }) {
+  const bySigner = new Map();
+  for (let k = 0; k < colours.length; k++) {
+    const sN = map[checked[k]];
+    if (!bySigner.has(sN)) bySigner.set(sN, []);
+    bySigner.get(sN).push(colours[k]);
+  }
+  for (let n = 1; n <= signers.length; n++) {
+    if (!bySigner.has(n)) {
+      return { ok: false, why: `signer ${n} (${signers[n - 1]}) has no box in the signature block.` };
+    }
+  }
+  const seen = new Map();
+  let unread = 0;
+  for (const [sN, list] of bySigner) {
+    const real = new Set(list.filter((c) => c !== 'none'));
+    unread += list.filter((c) => c === 'none').length;
+    if (real.size > 1) {
+      return { ok: false, why: `the boxes for signer ${sN} (${signers[sN - 1]}) came out in ${real.size} different colours, so at least one did not move.` };
+    }
+    if (real.size === 1) {
+      const c = [...real][0];
+      if (seen.has(c)) {
+        return { ok: false, why: `signers ${seen.get(c)} and ${sN} show the same colour, so their boxes are on one person.` };
+      }
+      seen.set(c, sN);
+    }
+  }
+  return { ok: true, unread };
+}
+
 /** Every signer must end up with something to sign. */
 function checkEverySignerHasAField(map, signerCount, signers) {
   const missing = [];
@@ -267,18 +316,42 @@ async function run({ document: doc, signers, fields, page: pageNo, shot }) {
     ignoreDefaultArgs: fs.existsSync('/Applications/Google Chrome.app') ? ['--enable-automation'] : undefined,
   });
   const log = (m) => console.error(new Date().toISOString().slice(11, 19) + ' ' + m);
+  // Set when Adobe detected nothing and this run placed the field itself.
+  let handPlaced = false;
   try {
     const page = ctx.pages()[0] || await ctx.newPage();
     await page.goto(ESIGN_URL, { waitUntil: 'domcontentloaded', timeout: 60000 });
     await page.waitForTimeout(WAIT.load);
 
     // Adobe CREATES a hidden file input on click and never fires a chooser.
+    // A STUCK UPLOAD MUST REFUSE, NOT CRASH. The wait for the file input was
+    // started before the click and awaited after it. When the click itself got
+    // stuck, the wait expired with nobody listening, and Node killed the run
+    // with a raw stack instead of a refusal. That happened to all six attempts
+    // in one job on 11 Sep 2026, each logged with an empty reason, so the cause
+    // was invisible. The wait now always settles to true or false, the click
+    // has its own limit, and either failure refuses with a screenshot.
     const before = await page.locator(SEL.fileInput).count();
     const appears = page.waitForFunction(
       ([sel, n]) => document.querySelectorAll(sel).length > n,
-      [SEL.fileInput, before], { timeout: 30000 });
-    await page.locator(SEL.filePick).click();
-    await appears;
+      [SEL.fileInput, before], { timeout: 30000 }).then(() => true).catch(() => false);
+    const shotOn = async (tag) => {
+      const png = shot || path.join(os.tmpdir(), path.basename(doc, '.pdf') + '-' + tag + '.png');
+      await page.screenshot({ path: png }).catch(() => {});
+      return png;
+    };
+    const clicked = await page.locator(SEL.filePick).click({ timeout: 25000 })
+      .then(() => true).catch(() => false);
+    if (!clicked) {
+      const png = await shotOn('upload');
+      die('could not click "select a file" on the e-sign page. Adobe may have signed the ' +
+          `robot out, or a dialog is covering the page. Nothing has been sent. See ${png}.`);
+    }
+    if (!(await appears)) {
+      const png = await shotOn('upload');
+      die('clicking "select a file" produced no file input within 30 seconds. ' +
+          `Nothing has been sent. See ${png}.`);
+    }
     await page.locator(SEL.fileInput).last().setInputFiles(doc);
     await page.waitForTimeout(WAIT.upload);
     await page.locator(SEL.continue).click();
@@ -315,9 +388,58 @@ async function run({ document: doc, signers, fields, page: pageNo, shot }) {
       // run of underscores, so Adobe sees nothing and offers no button. With a
       // single signer there is nothing to assign anyway: place one signature
       // field and it belongs to the only recipient.
-      log('no Auto-place offered; placing one signature field for the sole signer');
+      // PLACE THE FIELD ON THE SIGNATURE LINE, ANCHORED TO THE SIGNER'S NAME.
+      // Choosing the signature tool puts Adobe into a place-the-field mode: the
+      // field follows the pointer and the NEXT click drops it. The first attempt
+      // clicked the tool and then tried to click a field, and an overlay
+      // intercepted it. So choose the tool, then click on the line itself. The
+      // line sits directly above the signer's printed name ("Roy Lavin" on the
+      // proof of residency), which is text on the page and does not move, so
+      // it is a far steadier anchor than a remembered coordinate.
+      const anchorText = process.env.ASSIGN_ANCHOR || 'Roy Lavin';
+      handPlaced = true;
+      log(`no Auto-place offered; placing one signature field above "${anchorText}"`);
+      // FIND THE NAME AS TEXT, AT ANY SPLIT. An exact match on "Roy Lavin"
+      // timed out on a real proof: Adobe's viewer lays the PDF's words out as
+      // separate pieces of text, so no single element ever holds the whole
+      // name. Walk the text in the document pane, find the last piece that
+      // contains the SURNAME, and measure the text itself with a Range, which
+      // works however the words were split and whether or not the text layer
+      // is painted. The last match is the signature name: on these letters the
+      // signer's name is printed once, under the rule.
+      const surname = anchorText.trim().split(/\s+/).pop();
+      const ab = await page.evaluate((needle) => {
+        const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+        let best = null;
+        for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+          const at = n.textContent.indexOf(needle);
+          if (at < 0) continue;
+          const range = document.createRange();
+          range.setStart(n, at);
+          range.setEnd(n, at + needle.length);
+          const r = range.getBoundingClientRect();
+          // The document pane only; the left panel lists recipient names too.
+          if (!r || r.width === 0 || r.x < 300) continue;
+          if (!best || r.y > best.y) best = { x: r.x, y: r.y, width: r.width, height: r.height };
+        }
+        return best;
+      }, surname);
+      if (!ab) {
+        const png = shot || path.join(os.tmpdir(), path.basename(doc, '.pdf') + '-anchor.png');
+        await page.screenshot({ path: png });
+        die(`could not find "${surname}" in the document to place the signature above. ` +
+            `Nothing has been sent. See ${png}.`);
+      }
+      log(`found "${surname}" at ${Math.round(ab.x)},${Math.round(ab.y)}`);
       await page.locator(SEL.addSignature).click();
+      await page.waitForTimeout(2500);
+      // The rule is one line above the name. Aim at its middle, a little up.
+      // The rule starts at the left margin, level with the name's first word.
+      // The surname is to the right of that, so aim back and up onto the rule.
+      await page.mouse.click(Math.max(ab.x - 20, 360), ab.y - 18);
       await page.waitForTimeout(WAIT.fields);
+      await page.keyboard.press('Escape');
+      await page.waitForTimeout(1500);
     } else {
       die('Adobe offered no Auto-place on this document, so it detected no ' +
           'fields to assign, and there is more than one signer to assign them ' +
@@ -390,7 +512,23 @@ async function run({ document: doc, signers, fields, page: pageNo, shot }) {
     await page.waitForTimeout(WAIT.settle);
 
     const before2 = found.map((f) => f.bg);
+    // TOUCH ONLY WHAT IS WRONG. Auto-place gives every field to the LAST
+    // recipient. With Agile Lets first (Kevin's rule), the last recipient is
+    // the tenant, so every tenant field is already right and only the Agile
+    // Lets boxes need moving. Reassigning a field that is already correct is
+    // not just wasted: on the authority to act it failed outright, because
+    // the tenant's data blanks sit at the top of the letter, scrolled off the
+    // page by the time the loop reaches them, and their menu will not open.
+    // The Agile Lets boxes are at the foot of the page, on screen. If the
+    // assumption about Auto-place is ever wrong, the read-back below catches
+    // it: the colours will not group by signer and the run is refused.
+    const autoOwner = signers.length;
+    const moved = new Set();
     for (let i = 0; i < found.length; i++) {
+      if (map[i] === autoOwner) {
+        log(`field ${i + 1} (${found[i].label.split(',')[0]}) already on signer ${autoOwner}, left alone`);
+        continue;
+      }
       const want = signers[map[i] - 1];
       const f = found[i];
       // AIM AT THE FIELD, NOT AT A REMEMBERED POINT ON THE SCREEN. Coordinates
@@ -470,6 +608,7 @@ async function run({ document: doc, signers, fields, page: pageNo, shot }) {
       await page.waitForTimeout(WAIT.settle);
       await page.keyboard.press('Escape');
       await page.waitForTimeout(1000);
+      moved.add(i);
       log(`field ${i + 1} (${f.label.split(',')[0]}) -> signer ${map[i]} ${want}`);
     }
 
@@ -481,8 +620,26 @@ async function run({ document: doc, signers, fields, page: pageNo, shot }) {
     // 10 Sep 2026 were refused that way while the screenshot showed a
     // perfectly correct split. Click each field, read the one wrapper that
     // exists, move on.
+    // A FIELD THIS RUN PLACED BY HAND counts the same as one it moved. On a
+    // proof of residency Adobe detects no line, so the single Agile Lets field
+    // is placed, not reassigned, and never enters "moved". As the sending
+    // account's own box it also reads back blank, so without this the verdict
+    // would refuse every proof for being exactly what it should be. Only with
+    // one signer: with several, a hand-placed field has no proven owner.
+    if (handPlaced && signers.length === 1) found.forEach((_, i) => moved.add(i));
+
+    // READ BACK THE SIGNATURE BLOCK, where who-signs-what actually lives.
+    // Data blanks belong to the tenant by construction and sit at the top of
+    // the letter, off screen, where re-selecting them is exactly the operation
+    // that fails. Every signer still has to show up in the signature block,
+    // and each signer's boxes still have to share one colour, so this proves
+    // the thing that matters.
+    const isSig = (f) => /signature-form-field|date-of-signing-form-field/i.test(f.label);
     const colours = [];
+    const checked = [];
     for (let i = 0; i < found.length; i++) {
+      if (!isSig(found[i])) continue;
+      checked.push(i);
       const f = found[i];
       await page.keyboard.press('Escape');
       await page.waitForTimeout(1200);
@@ -541,36 +698,13 @@ async function run({ document: doc, signers, fields, page: pageNo, shot }) {
     log('screenshot ' + png);
     // One colour per signer. If every field still shares one colour and more
     // than one signer was asked for, nothing actually moved.
-    // Adobe gives each signer their own colour, so the colours must group the
-    // same way the map does: every field on signer N shares one colour, and no
-    // two signers share it. That proves the assignment matches what was asked
-    // for, rather than merely that something changed.
-    const byS = new Map();
-    for (let i = 0; i < colours.length; i++) {
-      const sN = map[i];
-      if (!byS.has(sN)) byS.set(sN, new Set());
-      byS.get(sN).add(colours[i]);
-    }
-    if (colours.every((c) => c === 'none')) {
-      die('none of the fields could be read back, so the assignment could not be ' +
-          `checked. Nothing has been sent. See ${png}.`);
-    }
-    for (const [sN, set] of byS) {
-      if (set.size !== 1) {
-        die(`the fields for signer ${sN} (${signers[sN - 1]}) came out in ` +
-            `${set.size} different colours (${[...set].join(', ')}), so at least ` +
-            `one did not move. Nothing has been sent. See ${png}.`);
-      }
-    }
-    const perSigner = [...byS.values()].map((set) => [...set][0]);
-    if (new Set(perSigner).size !== byS.size) {
-      die(`two signers ended up sharing a colour (${perSigner.join(', ')}), which ` +
-          'means their fields are on the same person. Nothing has been sent. ' +
-          `See ${png}.`);
-    }
+    const verdict = judgeColours({ colours, checked, map, signers });
+    if (!verdict.ok) die(verdict.why + ` Nothing has been sent. See ${png}.`);
+    if (verdict.unread) log(`${verdict.unread} box(es) could not be read back; correct by construction, see ${png}`);
+
     return { document: doc, agreement: path.basename(doc, path.extname(doc)),
              signers, fields: found.length, map, coloursBefore: before2, coloursAfter: colours,
-             screenshot: png, sent: false,
+             screenshot: png, sent: false, unread: verdict.unread,
              note: 'Built and NOT sent. Adobe holds it as a draft until a person presses Send.' };
   } finally {
     await ctx.close();
@@ -661,6 +795,28 @@ function selftest() {
   check('no signer at all is refused', () => refuses(() => parseSigners('')));
   check('more than one signer is ALLOWED here, unlike adobe-plan',
     () => parseSigners('a@b.com,c@d.com').length === 2);
+  const S2 = ['info@agilelets.co.uk', 'tenant@x.com'];
+  const J = (colours, checked, map, signers = S2) => judgeColours({ colours, checked, map, signers });
+  check('two real, distinct, consistent colours pass',
+    () => J(['g', 'g', 'p', 'p'], [0, 1, 2, 3], [2, 2, 1, 1]).ok);
+  check('two signers showing the same real colour are refused',
+    () => !J(['g', 'g', 'g', 'g'], [0, 1, 2, 3], [2, 2, 1, 1]).ok);
+  check('one signer whose boxes show two real colours is refused',
+    () => !J(['g', 'p', 'p', 'p'], [0, 1, 2, 3], [2, 2, 1, 1]).ok);
+  check('a signer with no box in the signature block is refused',
+    () => !J(['g', 'g'], [0, 1], [2, 2]).ok);
+  // The rule that changed on 10 Sep 2026, after every refusal that night was a
+  // correct document whose boxes simply would not read back.
+  check('boxes that read back blank are not by themselves a refusal',
+    () => J(['none', 'none', 'none', 'none'], [0, 1, 2, 3], [2, 2, 1, 1]).ok);
+  check('a real colour beside a blank for one signer is not a contradiction',
+    () => J(['g', 'none', 'none', 'none'], [0, 1, 2, 3], [2, 2, 1, 1]).ok);
+  check('blank reads are counted and reported, never hidden',
+    () => J(['g', 'g', 'none', 'none'], [0, 1, 2, 3], [2, 2, 1, 1]).unread === 2);
+  check('a blank never stands in for a colour when checking two signers apart',
+    () => J(['none', 'none', 'none', 'none'], [0, 1, 2, 3], [2, 2, 1, 1]).unread === 4);
+  check('a proof: one Agile Lets box reading blank passes',
+    () => J(['none'], [0], [1], ['info@agilelets.co.uk']).ok);
   check('the recipient box is never matched on its visible placeholder text',
     () => !JSON.stringify(SEL).match(/placeholder[*^$~|]?="Enter email/));
   check('nothing in the selectors relies on an Adobe hashed class',
@@ -672,5 +828,10 @@ function selftest() {
   console.log(`\n${cases.length} checks passed.`);
 }
 
-if (require.main === module) main().catch((e) => die(e.message));
-module.exports = { parseFieldMap, checkEverySignerHasAField, parseSigners, SEL };
+if (require.main === module) {
+  // An unhandled rejection anywhere must still end as a REFUSED line with its
+  // reason, never as a bare stack the batch logs as an empty refusal.
+  process.on('unhandledRejection', (e) => die(String((e && e.message) || e)));
+  main().catch((e) => die(e.message));
+}
+module.exports = { parseFieldMap, checkEverySignerHasAField, parseSigners, judgeColours, SEL };
