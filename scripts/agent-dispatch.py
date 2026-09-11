@@ -1153,11 +1153,13 @@ CARRIED_OUT_MARK = "CARRIED OUT (task left open):"
 EDITS_APPLIED_MARK = "EDITS APPLIED:"
 
 
-def ledger_append(task_id, event):
+def ledger_append(task_id, event, meta=None):
     os.makedirs(STATE_DIR, exist_ok=True)
+    rec = {"task": task_id, "ts": now_iso(), "event": event}
+    if meta:
+        rec.update(meta)
     with open(INTENT_LEDGER, "a") as fh:
-        fh.write(json.dumps({"task": task_id, "ts": now_iso(),
-                             "event": event}) + "\n")
+        fh.write(json.dumps(rec) + "\n")
 
 
 def open_intents():
@@ -1175,6 +1177,50 @@ def open_intents():
     except FileNotFoundError:
         pass
     return {t for t, e in state.items() if e == "intent"}
+
+
+# ─── A KEPT-OPEN CARRY-OUT IS NOT UNFINISHED WORK ────────────────────
+#
+# 5-6 Sep 2026, findings 468, 470, 481, 482, 484 and 485 — the same bug filed
+# six times in two days, which is what a loop looks like from the outside.
+# `complete --keep-open` deliberately leaves Status and Approval Outcome alone
+# so the obligation keeps its reminder. But the queue classifies an APPROVED
+# task as a carry_out, so every 30-minute tick re-dispatched work that had
+# already been carried out: compliance renewals cycled for ever and each pass
+# stamped another CARRIED OUT line into Notes.
+#
+# The obvious fix — clear Approval Outcome — was recommended in five of the six
+# findings and is WRONG. An outcome-less task with no agent owner falls into
+# `new_work` (see build_queue), so the agent would re-draft it and ask Kevin to
+# approve the very thing he already approved. It also destroys the record of
+# his decision.
+#
+# So the ledger remembers WHICH decision was carried out. Approval Outcome and
+# Notes are untouched; the run records Kevin's decision timestamp (approvedAt,
+# stamped by approvals.js on every decide) alongside the done marker. A task
+# whose live approvedAt still matches is finished work and skips the worklist.
+# The moment Kevin decides again, approvedAt moves and it flows exactly as
+# before — no permanent suppression, and no schema change.
+def kept_open_decisions():
+    """{task_id: approvedAt} for carry-outs already done and left open.
+
+    Only the LAST ledger entry per task counts: a later intent/done pair for a
+    fresh decision must win over an older keep-open stamp.
+    """
+    state = {}
+    try:
+        with open(INTENT_LEDGER) as fh:
+            for line in fh:
+                try:
+                    rec = json.loads(line)
+                except ValueError:
+                    continue
+                state[rec.get("task")] = rec
+    except FileNotFoundError:
+        pass
+    return {t: str(r.get("keptOpenFor") or "")
+            for t, r in state.items()
+            if r.get("event") == "done" and r.get("keptOpenFor")}
 
 
 # Machine detail that means nothing to Kevin: a script path, a filename with
@@ -1945,6 +1991,10 @@ def task_view(rec):
         "priority": sel(f.get(AF["priority"])),
         "urgencyScore": f.get(AF["urgencyScore"]) or 0,
         "outcome": sel(f.get(AF["approvalOutcome"])),
+        # Kevin's decision timestamp. Identifies WHICH decision an approval is,
+        # so a carry-out already done for it is not done again (see
+        # kept_open_decisions).
+        "approvedAt": str(f.get(AF["approvedAt"]) or ""),
         # Expanded here so a REDO gets the spoken instruction, not a bare URL.
         # No Loom link means no network call — this is a regex miss on almost
         # every task.
@@ -2018,6 +2068,8 @@ def build_queue(args=None):
     system_alerts = []
     roy_lane = []
     approved_hb, changes_hb, new_work, routing = [], [], [], []
+    kept_open = []
+    kept_open_for = kept_open_decisions()
     creditor_ok = bool(role_roster.get(CREDITOR_REC_ID, {}).get("dispatchable"))
     creditor_count = 0
     # The property lane needs BOTH the register lever and a readable book:
@@ -2113,6 +2165,14 @@ def build_queue(args=None):
         # hand-backs: the drawer's decide path sets both, but an approved task
         # missing Sent For Approval By must still be carried out, not lost.
         if t["outcome"] in APPROVED and t["agentId"]:
+            # Already carried out for THIS decision and deliberately left
+            # open (findings 468/470/481/482/484/485). Not work; not dropped
+            # either — counted and listed so a stuck one is still visible.
+            if (kept_open_for.get(t["id"])
+                    and kept_open_for[t["id"]] == t["approvedAt"]
+                    and CARRIED_OUT_MARK in (t["notes"] or "")):
+                kept_open.append(t)
+                continue
             approved_hb.append(t)
         elif t["outcome"] == "Changes requested":
             changes_hb.append(t)
@@ -2234,6 +2294,9 @@ def build_queue(args=None):
         # acted on here: cmd_queue is a read. `handover-property` does the
         # writing, so one command owns the change.
         "royLane": roy_lane,
+        # Approved, carried out, and left open on purpose. Listed so nothing
+        # vanishes, but never dispatched again for the same decision.
+        "keptOpen": kept_open,
         "unmappedAgent": unmapped,
         "unclassified": unclassified,  # states the buckets cannot place — eyes, not silence
         "agents": ALL_AGENTS,          # the roster the CEO routes against
@@ -2261,6 +2324,7 @@ def build_queue(args=None):
             "tier2Parked": len(skipped_tier2),
             "systemAlerts": len(system_alerts),
             "royLane": len(roy_lane),
+            "keptOpen": len(kept_open),
             # Creditor-lane keyword matches across the whole agent-linked
             # read, hand-backs included (routing floor, not judgement). Zero
             # with the register row Built/Live and creditor mail known to be
@@ -4235,7 +4299,12 @@ def cmd_complete(args):
                 "Left OPEN deliberately: the approval said so.")
         existing = t["notes"] or ""
         patch_task(args.task, {AF["notes"]: (existing + "\n\n" + mark).strip()})
-        ledger_append(args.task, "done")
+        # WHICH decision this carried out. The queue reads it back so the same
+        # approval is never dispatched twice, and a NEW decision (approvedAt
+        # moves) flows normally. Approval Outcome is left alone on purpose:
+        # clearing it would drop the task into new work and re-ask Kevin for
+        # an approval he has already given.
+        ledger_append(args.task, "done", {"keptOpenFor": t["approvedAt"]})
         print(json.dumps({"carriedOut": args.task, "keptOpen": True,
                           "status": t["status"]}))
         return
@@ -4260,7 +4329,11 @@ def cmd_verify(args):
         sys.exit(1)
 
     problems = []
-    counts = report.get("queueCounts", {})
+    # `.get(k, {})` returns None when the key EXISTS and is null, which is
+    # exactly what a failed queue read writes. Every `in` test below then
+    # raised TypeError and verify died before it could report the blind run
+    # (finding 20260906-agent-dispatch-475). `or {}` is the whole fix.
+    counts = report.get("queueCounts") or {}
     actions = report.get("actions", [])
     ok_actions = [a for a in actions if a.get("ok")]
     failed = [a for a in actions if not a.get("ok")]
