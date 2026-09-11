@@ -27,7 +27,10 @@ const os = require('os');
 const fs = require('fs');
 
 const PROFILE = path.join(os.homedir(), '.config', 'od', 'agent-browser', 'default');
-const DRAFTS_URL = 'https://acrobat.adobe.com/link/documents/agreements/?agreement_type=draft';
+// The side-panel filters are an invisible mirror of a dropdown, so clicking them
+// does nothing (two runs on 11 Sep 2026 read signed agreements). Adobe filters by
+// ADDRESS, the same way signature-watch reaches Completed.
+const DRAFTS_URL = 'https://acrobat.adobe.com/link/documents/agreements/#agreement_type=agreement&agreement_state=draft';
 const WAIT = { load: 25000, menu: 2500, act: 4000, settle: 2000 };
 
 let THROW_ON_REFUSE = require.main !== module;
@@ -83,47 +86,101 @@ async function withPage(fn) {
  * reading the row gives each name twice, once forwards and once a letter per
  * line.
  */
+/**
+ * Read one screenful of rows. Each row paints its title twice, once forwards
+ * and once rotated a letter per line, so the title is the forwards line that
+ * looks like a document name, not simply the longest line: a recipient list
+ * can be longer.
+ */
 const readVisible = (page) => page.evaluate(() => {
   const out = [];
   document.querySelectorAll('[role="row"]').forEach((el) => {
     const r = el.getBoundingClientRect();
     if (r.width === 0 || r.height === 0) return;
-    const raw = el.innerText || '';
-    // Collapse the rotated duplicate: the list paints every title twice, once
-    // forwards and once a letter per line for its narrow layout, so the row's
-    // own text holds each name in both forms. The longest single line is the
-    // readable one.
-    const lines = raw.split('\n').map((x) => x.trim()).filter((x) => x.length > 3);
-    const title = lines.sort((a, b) => b.length - a.length)[0] || '';
-    if (!title || title === 'RECIPIENTS') return;
-    out.push({ title, y: Math.round(r.y) });
+    const lines = (el.innerText || '').split('\n').map((x) => x.trim()).filter(Boolean);
+    const doc = lines.find((l) => l.length > 8 && /(AST_|Authority_|Proof_of_Residency_|ProofofResidency|ZZ_|-agreement|\.pdf)/.test(l));
+    const title = doc || lines.filter((l) => l.length > 3 && l !== 'RECIPIENTS').sort((a, b) => b.length - a.length)[0] || '';
+    if (!title || /^(RECIPIENTS|SENDER|TITLE|STATUS|MODIFIED)$/.test(title)) return;
+    const date = lines.find((l) => /\d{1,2}\/\d{1,2}\/\d{2,4}|Today|Yesterday|\d{1,2}:\d{2}/.test(l)) || '';
+    const status = lines.find((l) => /^(Draft|Signed|Out for signature|Waiting|Cancelled|Expired|Completed|In progress)/i.test(l)) || '';
+    out.push({ title, date, status, raw: lines.slice(0, 12) });
   });
-  return out.sort((a, b) => a.y - b.y);
+  return out;
 });
 
 /**
- * THE LIST IS VIRTUALISED. Only the rows on screen exist in the page, so a
- * single read returned 11 of 48 and looked complete. Scroll and accumulate
- * until nothing new appears.
+ * THE LIST IS VIRTUALISED AND SCROLLS INSIDE ITS OWN PANEL. Only the rows on
+ * screen exist in the page, and scrolling the WINDOW (or wheeling wherever the
+ * pointer happens to sit) moves nothing, which is how a read returned 11 of 48
+ * and looked complete. Find the rows' own scrolling panel and step it down,
+ * collecting rows in Adobe's order, until three steps in a row add nothing.
  */
 const readRows = async (page) => {
-  const byTitle = new Map();
+  const seen = new Map();
+  const steps = [];
   let idle = 0;
-  for (let i = 0; i < 40 && idle < 3; i++) {
-    const seen = await readVisible(page);
-    const before = byTitle.size;
-    seen.forEach((r) => { if (!byTitle.has(r.title)) byTitle.set(r.title, r); });
-    idle = byTitle.size === before ? idle + 1 : 0;
-    await page.mouse.wheel(0, 600);
-    await page.waitForTimeout(900);
+  for (let i = 0; i < 80 && idle < 4; i++) {
+    const rows = await readVisible(page);
+    const before = seen.size;
+    rows.forEach((r) => { if (!seen.has(r.title)) seen.set(r.title, { ...r, order: seen.size }); });
+    idle = seen.size === before ? idle + 1 : 0;
+    // Scroll the way a person does: pointer over the last visible row, then
+    // the wheel. Whatever element Adobe scrolls, a wheel over the rows reaches
+    // it. The panel is also stepped directly, and each step is logged, so a
+    // short read says WHY instead of looking complete.
+    const last = page.locator('[role="row"]').last();
+    const lb = await last.boundingBox().catch(() => null);
+    if (lb) {
+      await page.mouse.move(lb.x + lb.width / 2, lb.y + lb.height / 2);
+      await page.mouse.wheel(0, 700);
+    }
+    const moved = await page.evaluate(() => {
+      const row = document.querySelector('[role="row"]');
+      let el = row && row.parentElement;
+      while (el && el !== document.body) {
+        const cs = getComputedStyle(el);
+        if (/(auto|scroll)/.test(cs.overflowY) && el.scrollHeight > el.clientHeight + 4) break;
+        el = el.parentElement;
+      }
+      if (!el || el === document.body) { window.scrollBy(0, 600); return 'window'; }
+      const top = el.scrollTop;
+      el.scrollTop = top + Math.max(200, el.clientHeight * 0.8);
+      return el.scrollTop === top ? 'bottom' : 'panel';
+    });
+    await page.waitForTimeout(1200);
+    steps.push({ step: i, rowsSeen: seen.size, moved });
   }
-  return [...byTitle.values()];
+  readRows.steps = steps;
+  return [...seen.values()].sort((a, b) => a.order - b.order);
 };
 
 async function list() {
   return withPage(async (page) => {
+    // Filter to drafts from the side panel; the ?agreement_type=draft address
+    // alone showed the ALL view, signed agreements included.
+    // Measured 11 Sep 2026: the side panel's Drafts item carries data-testid
+    // "draft"; the text selectors tried first matched nothing and the run read
+    // the ALL view, signed agreements included.
+    const drafts = page.locator('[data-testid="draft"]').or(page.getByText(/^Drafts \(\d+\)$/)).first();
+    const filtered = await drafts.click({ timeout: 15000 }).then(() => true).catch(() => false);
+    await page.waitForTimeout(9000);
+    const sort = await page.evaluate(() => {
+      const h = [...document.querySelectorAll('[role="columnheader"]')].find((x) => /modified/i.test(x.innerText || ''));
+      return h ? (h.getAttribute('aria-sort') || 'unstated') : 'no MODIFIED column found';
+    });
+    const header = await page.evaluate(() => {
+      const t = document.body.innerText.match(/Drafts\s*\((\d+)\)/);
+      return t ? Number(t[1]) : null;
+    });
     const rows = await readRows(page);
-    return { count: rows.length, drafts: rows.map((r) => r.title) };
+    const nonDraft = rows.filter((r) => r.status && !/^Draft/i.test(r.status)).length;
+    if (rows.length && nonDraft) {
+      die(`${nonDraft} of ${rows.length} rows are not drafts, so the list is not filtered to ` +
+          'drafts and any keep-or-delete call made from it would be wrong.');
+    }
+    return { filteredToDrafts: rows.length > 0 && nonDraft === 0, clicked: filtered,
+             adobeSaysDrafts: header, modifiedSort: sort,
+             count: rows.length, steps: readRows.steps, drafts: rows };
   });
 }
 
