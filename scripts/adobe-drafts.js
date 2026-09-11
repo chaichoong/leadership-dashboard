@@ -97,29 +97,29 @@ const readVisible = (page) => page.evaluate(() => {
   document.querySelectorAll('[role="row"]').forEach((el) => {
     const r = el.getBoundingClientRect();
     if (r.width === 0 || r.height === 0) return;
-    const lines = (el.innerText || '').split('\n').map((x) => x.trim()).filter(Boolean);
-    const doc = lines.find((l) => l.length > 8 && /(AST_|Authority_|Proof_of_Residency_|ProofofResidency|ZZ_|-agreement|\.pdf)/.test(l));
-    const title = doc || lines.filter((l) => l.length > 3 && l !== 'RECIPIENTS').sort((a, b) => b.length - a.length)[0] || '';
-    if (!title || /^(RECIPIENTS|SENDER|TITLE|STATUS|MODIFIED)$/.test(title)) return;
-    const date = lines.find((l) => /\d{1,2}\/\d{1,2}\/\d{2,4}|Today|Yesterday|\d{1,2}:\d{2}/.test(l)) || '';
-    const status = lines.find((l) => /^(Draft|Signed|Out for signature|Waiting|Cancelled|Expired|Completed|In progress)/i.test(l)) || '';
-    out.push({ title, date, status, raw: lines.slice(0, 12) });
+    // THE FULL NAME IS IN THE TITLE ATTRIBUTE. The drawn column is truncated:
+    // "Authority_Daniel_Gathercole_55" loses the "(2)" that tells copies apart.
+    // Measured 11 Sep 2026: title="AST- Jason Smith-agreement (1).pdf".
+    const t = [...el.querySelectorAll('[title]')].map((x) => x.getAttribute('title'))
+      .find((v) => v && /\.pdf$|-agreement/i.test(v));
+    const lines = (el.innerText || '').split('\n').map((x) => x.trim()).filter((l) => l.length > 1);
+    const title = t || lines.find((l) => /\.pdf$/i.test(l)) || '';
+    if (!title) return;
+    // The fullest date line: the drawn copy is cut ("22 De", "Today,").
+    const dates = lines.filter((l) => /(\d{1,2} [A-Z][a-z]{2} \d{4})|(Today|Yesterday)|(\d{1,2}:\d{2})/.test(l));
+    const date = dates.sort((a, b) => b.length - a.length)[0] || '';
+    // "Agreement Draft", not "Draft": the old anchored match read every one blank.
+    const status = lines.find((l) => /draft|signed|out for signature|cancelled|expired|completed/i.test(l)) || '';
+    out.push({ title, date, status });
   });
   return out;
 });
 
-/**
- * THE LIST IS VIRTUALISED AND SCROLLS INSIDE ITS OWN PANEL. Only the rows on
- * screen exist in the page, and scrolling the WINDOW (or wheeling wherever the
- * pointer happens to sit) moves nothing, which is how a read returned 11 of 48
- * and looked complete. Find the rows' own scrolling panel and step it down,
- * collecting rows in Adobe's order, until three steps in a row add nothing.
- */
 const readRows = async (page) => {
   const seen = new Map();
   const steps = [];
   let idle = 0;
-  for (let i = 0; i < 80 && idle < 4; i++) {
+  for (let i = 0; i < 120 && idle < 6; i++) {
     const rows = await readVisible(page);
     const before = seen.size;
     rows.forEach((r) => { if (!seen.has(r.title)) seen.set(r.title, { ...r, order: seen.size }); });
@@ -135,19 +135,21 @@ const readRows = async (page) => {
       await page.mouse.wheel(0, 700);
     }
     const moved = await page.evaluate(() => {
+      // The scroller is not always an ancestor of the rows: search every
+      // element that can scroll and holds a row.
       const row = document.querySelector('[role="row"]');
-      let el = row && row.parentElement;
-      while (el && el !== document.body) {
+      const cands = [...document.querySelectorAll('*')].filter((el) => {
         const cs = getComputedStyle(el);
-        if (/(auto|scroll)/.test(cs.overflowY) && el.scrollHeight > el.clientHeight + 4) break;
-        el = el.parentElement;
-      }
-      if (!el || el === document.body) { window.scrollBy(0, 600); return 'window'; }
+        return /(auto|scroll|overlay)/.test(cs.overflowY) && el.scrollHeight > el.clientHeight + 40 &&
+               row && el.contains(row);
+      });
+      const el = cands.sort((a, b) => a.clientHeight - b.clientHeight)[0];
+      if (!el) { window.scrollBy(0, 700); return 'window'; }
       const top = el.scrollTop;
-      el.scrollTop = top + Math.max(200, el.clientHeight * 0.8);
+      el.scrollTop = top + Math.max(250, el.clientHeight * 0.8);
       return el.scrollTop === top ? 'bottom' : 'panel';
     });
-    await page.waitForTimeout(1200);
+    await page.waitForTimeout(2500);
     steps.push({ step: i, rowsSeen: seen.size, moved });
   }
   readRows.steps = steps;
@@ -173,7 +175,7 @@ async function list() {
       return t ? Number(t[1]) : null;
     });
     const rows = await readRows(page);
-    const nonDraft = rows.filter((r) => r.status && !/^Draft/i.test(r.status)).length;
+    const nonDraft = rows.filter((r) => !/draft/i.test(r.status || '')).length;
     if (rows.length && nonDraft) {
       die(`${nonDraft} of ${rows.length} rows are not drafts, so the list is not filtered to ` +
           'drafts and any keep-or-delete call made from it would be wrong.');
@@ -218,6 +220,53 @@ async function remove(patterns, dry) {
   });
 }
 
+/**
+ * When was this draft last modified, as a sortable number? "Today, 17:30" and
+ * "Yesterday, 09:05" carry a time; "22 Dec 2025" carries only a day, so two
+ * copies from the same day cannot be told apart and are flagged, never guessed.
+ */
+function whenModified(txt, now = new Date()) {
+  const s = String(txt || '');
+  const tm = s.match(/(\d{1,2}):(\d{2})/);
+  const at = (d) => { if (tm) d.setHours(Number(tm[1]), Number(tm[2]), 0, 0); return d.getTime(); };
+  if (/today/i.test(s)) return { t: at(new Date(now)), exact: !!tm };
+  if (/yesterday/i.test(s)) { const d = new Date(now); d.setDate(d.getDate() - 1); return { t: at(d), exact: !!tm }; }
+  const m = s.match(/(\d{1,2}) ([A-Z][a-z]{2}) (\d{4})/);
+  if (m) return { t: at(new Date(`${m[2]} ${m[1]}, ${m[3]}`)), exact: !!tm };
+  return { t: 0, exact: false };
+}
+
+/** "Authority_X-agreement (2).pdf" and "Authority_X-agreement.pdf" are copies of one document. */
+function baseName(title) {
+  return String(title || '').replace(/\.pdf$/i, '').replace(/ \(\d+\)$/, '').replace(/-agreement$/i, '').trim();
+}
+
+/**
+ * For each document with more than one draft, keep the most recently modified
+ * and mark the rest to delete. A bracket number is NOT recency: the first upload
+ * has none and later ones count up, so where an early attempt failed and a later
+ * one passed, the good copy is the numbered one (Adam Bishop-Bridges' authority
+ * is "(2)").
+ */
+function planDuplicates(rows, now) {
+  const groups = new Map();
+  for (const r of rows) {
+    const k = baseName(r.title);
+    if (!groups.has(k)) groups.set(k, []);
+    groups.get(k).push({ ...r, when: whenModified(r.date, now) });
+  }
+  const plan = [];
+  for (const [doc, list] of groups) {
+    if (list.length < 2) continue;
+    list.sort((a, b) => b.when.t - a.when.t);
+    const tie = list.length > 1 && list[0].when.t === list[1].when.t && !list[0].when.exact;
+    plan.push({ doc, keep: tie ? null : list[0].title,
+                delete: tie ? [] : list.slice(1).map((x) => x.title),
+                unsure: tie ? list.map((x) => `${x.title} (${x.date})`) : [] });
+  }
+  return plan.sort((a, b) => a.doc.localeCompare(b.doc));
+}
+
 function arg(list, name, dflt) {
   const i = list.indexOf('--' + name);
   return i >= 0 ? list[i + 1] : dflt;
@@ -227,6 +276,11 @@ async function main() {
   const rest = process.argv.slice(2);
   if (rest.includes('--selftest')) return selftest();
   if (rest.includes('--list')) return console.log(JSON.stringify(await list(), null, 2));
+  if (rest.includes('--dupes')) {
+    const l = await list();
+    return console.log(JSON.stringify({ read: l.count, adobeSays: l.adobeSaysDrafts,
+                                        plan: planDuplicates(l.drafts) }, null, 2));
+  }
   const pat = arg(rest, 'delete');
   if (!pat) die('use --list, or --delete "name,name"');
   const res = await remove(parsePatterns(pat), rest.includes('--dry'));
@@ -253,6 +307,25 @@ function selftest() {
   check('british-gas-loa-ciara is left alone too',
     () => !matches('british-gas-loa-ciara', ['AST_Tristram', 'ZZ_TagProbe']));
 
+  const NOW = new Date('2026-09-11T03:00:00');
+  check('copies with and without a bracket number are one document',
+    () => baseName('Authority_Adam-agreement (2).pdf') === baseName('Authority_Adam-agreement.pdf'));
+  // The rule Kevin nearly used: "the bracketed ones are the duplicates". It is
+  // wrong whenever an early attempt failed and a later one passed.
+  check('the newest copy is kept even when it is the bracketed one',
+    () => { const p = planDuplicates([
+      { title: 'Auth_A-agreement.pdf', date: 'Today, 01:10' },
+      { title: 'Auth_A-agreement (2).pdf', date: 'Today, 02:40' }], NOW);
+      return p[0].keep === 'Auth_A-agreement (2).pdf' && p[0].delete[0] === 'Auth_A-agreement.pdf'; });
+  check('same-day copies with no time are flagged, never guessed',
+    () => { const p = planDuplicates([
+      { title: 'X-agreement.pdf', date: '22 Dec 2025' },
+      { title: 'X-agreement (1).pdf', date: '22 Dec 2025' }], NOW);
+      return p[0].keep === null && p[0].unsure.length === 2 && p[0].delete.length === 0; });
+  check('a document with one draft is not touched',
+    () => planDuplicates([{ title: 'Solo-agreement.pdf', date: 'Today, 01:00' }], NOW).length === 0);
+  check('Today and Yesterday are ordered by their times',
+    () => whenModified('Today, 01:00', NOW).t > whenModified('Yesterday, 23:00', NOW).t);
   cases.forEach(([n, ok]) => console.log((ok ? 'PASS ' : 'FAIL ') + n));
   const bad = cases.filter(([, ok]) => !ok).map(([n]) => n);
   if (bad.length) { console.error(`selftest FAILED: ${bad.join(', ')}`); process.exit(1); }
@@ -260,4 +333,4 @@ function selftest() {
 }
 
 if (require.main === module) main().catch((e) => die(e.message));
-module.exports = { parsePatterns, matches };
+module.exports = { parsePatterns, matches, whenModified, baseName, planDuplicates };
