@@ -1000,6 +1000,61 @@ print(json.dumps(list(m.drive_ready(${JSON.stringify(VAULT())}))))
     expect(why).toMatch(/founder-profile\.md/);
   });
 
+  // Finding 20260907-daily-ops-490. The 486 fix above tries every candidate —
+  // but "Runpreneur - Raw Video" holds exactly ONE plain file at the top level
+  // (a 366MB Insta360 installer) and fifteen directories, so the list it fell
+  // back through had length one and the verdict was still that single file's.
+  // Measured against the live folder on 8 Sep 2026: the old probe reported
+  // "probe 1 of 1" on the .exe; the fixed one reports 25 candidates and opens a
+  // small clip from a dated subfolder.
+  it('descends one level when the top level offers no real choice', () => {
+    mkdirSync(VAULT(), { recursive: true });
+    writeFileSync(join(VAULT(), 'Insta360Studio.exe'), 'x');
+    mkdirSync(join(VAULT(), '4 June 26 - 19 July 26'), { recursive: true });
+    writeFileSync(join(VAULT(), '4 June 26 - 19 July 26', 'LRV_0001.lrv'), 'x'.repeat(4096));
+    const src = `
+import importlib.util, json, builtins, errno
+spec = importlib.util.spec_from_file_location('jq', ${JSON.stringify(QUEUE)})
+m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+real = builtins.open
+def boom(path, *a, **k):
+    if str(path).endswith('.exe'):
+        raise OSError(errno.EDEADLK, 'Resource deadlock avoided')
+    return real(path, *a, **k)
+builtins.open = boom
+print(json.dumps(list(m.drive_ready(${JSON.stringify(VAULT())}))))
+`;
+    const [ok, why] = JSON.parse(execFileSync('python3', ['-c', src], { encoding: 'utf8', env: env() }).trim());
+    expect(ok).toBe(true);
+    expect(why, 'the fallback must come from a SUBFOLDER, not the one top-level file').toMatch(/LRV_0001\.lrv/);
+  });
+
+  it('does NOT descend when the top level already has enough candidates', () => {
+    // The descent runs before every scheduled job. It must stay a cheap yes/no,
+    // never a tree walk of a video archive.
+    mkdirSync(VAULT(), { recursive: true });
+    for (const n of ['a.md', 'b.md', 'c.md']) writeFileSync(join(VAULT(), n), 'x');
+    mkdirSync(join(VAULT(), 'deep'), { recursive: true });
+    writeFileSync(join(VAULT(), 'deep', 'buried.md'), 'x');
+    const src = `
+import importlib.util, json, os
+spec = importlib.util.spec_from_file_location('jq', ${JSON.stringify(QUEUE)})
+m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+listed = []
+real = os.listdir
+def spy(p):
+    listed.append(str(p))
+    return real(p)
+os.listdir = spy
+ok, why = m.drive_ready(${JSON.stringify(VAULT())})
+os.listdir = real
+print(json.dumps([ok, listed]))
+`;
+    const [ok, listed] = JSON.parse(execFileSync('python3', ['-c', src], { encoding: 'utf8', env: env() }).trim());
+    expect(ok).toBe(true);
+    expect(listed.some((p) => p.endsWith('deep')), 'must not walk into subfolders it does not need').toBe(false);
+  });
+
   it('only reports not ready once EVERY candidate has failed, and says how many', () => {
     mkdirSync(VAULT(), { recursive: true });
     writeFileSync(join(VAULT(), 'a.md'), 'a');
@@ -1414,6 +1469,52 @@ describe('a sleeping job cannot hold the lock', () => {
     expect(events().some((e) => e.state === 'lease-lost' && e.job === 'sleeper')).toBe(false);
   });
 
+  // Finding 20260904-content-engine-459. proc.terminate() signalled the
+  // immediate child only — the wrapper shell. Everything it had spawned (the
+  // Claude agent, an ffmpeg render) survived and kept writing with no lock at
+  // all, which is the exact collision this file exists to prevent, arriving
+  // through the door marked "stopped".
+  //
+  // Deliberately NOT tested by spawning a real runaway tree: a test that can
+  // orphan a process is a test that can take the pre-push gate down with it,
+  // and a red gate for an unrelated reason is what teaches people to reach for
+  // SKIP_SYNC_TESTS=1.
+  it('gives the child its own process group so the whole tree is killable', () => {
+    const src = readFileSync(QUEUE, 'utf8');
+    expect(src, 'Popen must start a new session, or killpg has no group to hit')
+      .toContain('subprocess.Popen(cmd, start_new_session=True)');
+  });
+
+  it('stop_child signals the GROUP, and TERM before KILL', () => {
+    const src = readFileSync(QUEUE, 'utf8');
+    const body = src.match(/def stop_child\(reason\):([\s\S]*?)\n    def /)[1];
+    expect(body).toContain('signal_group(signal.SIGTERM)');
+    expect(body).toContain('signal_group(signal.SIGKILL)');
+    expect(body, 'a bare terminate() only reaches the wrapper')
+      .not.toContain('proc.terminate()');
+    // TERM must come first, or a wrapper never writes its done line.
+    expect(body.indexOf('signal_group(signal.SIGTERM)'))
+      .toBeLessThan(body.indexOf('signal_group(signal.SIGKILL)'));
+  });
+
+  it('the interrupt handler passes the signal on to the child', () => {
+    // With its own session the child no longer receives the terminal signal by
+    // itself, so a handler that only released the lock would orphan the work.
+    const src = readFileSync(QUEUE, 'utf8');
+    const body = src.match(/def _passthrough\(signum, _frame\):([\s\S]*?)\n\n/)[1];
+    expect(body).toContain('signal_group(signal.SIGTERM)');
+    expect(body).toContain('release(job');
+  });
+
+  it('signal_group falls back to the single child rather than signalling nothing', () => {
+    // If start_new_session ever fails, killpg raises and the old behaviour must
+    // still happen — half a kill beats none.
+    const src = readFileSync(QUEUE, 'utf8');
+    const body = src.match(/def signal_group\(sig\):([\s\S]*?)\n    def /)[1];
+    expect(body).toContain('os.killpg(os.getpgid(proc.pid), sig)');
+    expect(body).toContain('proc.send_signal(sig)');
+  });
+
   it('stops a displaced child with TERM first, so its wrapper can write a done line', async () => {
     const marker = join(stateDir, 'term-seen.txt');
     const body = `import signal, sys, time
@@ -1433,6 +1534,58 @@ time.sleep(8)`;
     expect(r.code).toBe(70);
     expect(existsSync(marker), 'the child was SIGKILLed before it could record its own death').toBe(true);
     rmSync(join(stateDir, 'lock'), { recursive: true, force: true });
+  });
+
+  // Finding 20260911-daily-ops-phase-2-522. A headless `claude -p` tool call
+  // hung inside inbound-triage on 10-11 Sep 2026. The wrapper's heartbeat kept
+  // renewing the lease, so the lease never lapsed and the queue was held for 14
+  // hours: a live, beating, never-finishing job had no ceiling at all.
+  it('stops a job that runs past its ceiling, TERM first, and frees the queue', async () => {
+    const marker = join(stateDir, 'ceiling-term.txt');
+    const body = `import signal, sys, time
+def bye(*a):
+    open(${JSON.stringify(marker)}, 'w').write('term')
+    sys.exit(143)
+signal.signal(signal.SIGTERM, bye)
+time.sleep(40)`;
+    const started = Date.now();
+    const r = await runAsync(['run', 'hung', '--no-stale-check', '--', 'python3', '-c', body],
+      { env: { JOB_QUEUE_MAX_RUNTIME_MIN: '0.03', JOB_QUEUE_HEARTBEAT: '0.3' } });
+    expect(r.code, 'a run stopped at its ceiling must say so with 124').toBe(124);
+    expect(r.stderr).toMatch(/MAX RUNTIME: hung/);
+    expect(Date.now() - started, 'the ceiling did not fire; the child slept its full 40 s').toBeLessThan(30000);
+    expect(existsSync(marker), 'the child was killed before it could write its done line').toBe(true);
+    expect(run(['status']).stdout).toMatch(/FREE/);
+    const events = readFileSync(join(stateDir, 'queue-events.jsonl'), 'utf8');
+    expect(events).toMatch(/"max-runtime"/);
+  });
+
+  it('a child that ignores TERM still dies by KILL after the grace', async () => {
+    const body = `import signal, time
+signal.signal(signal.SIGTERM, signal.SIG_IGN)
+time.sleep(40)`;
+    const started = Date.now();
+    const r = await runAsync(['run', 'stubborn', '--no-stale-check', '--', 'python3', '-c', body],
+      { env: { JOB_QUEUE_MAX_RUNTIME_MIN: '0.02', JOB_QUEUE_STOP_GRACE: '0.5' } });
+    expect(r.code).toBe(124);
+    expect(Date.now() - started).toBeLessThan(30000);
+    expect(run(['status']).stdout).toMatch(/FREE/);
+  });
+
+  it("a job's own maxRuntimeMinutes in the schedule wins over the default", async () => {
+    const sched = JSON.parse(readFileSync(schedulePath, 'utf8'));
+    sched['short-leash'] = { cron: '0 2 * * *', maxLateMinutes: 60, mode: 'wrapped', maxRuntimeMinutes: 0.02 };
+    writeFileSync(schedulePath, JSON.stringify(sched));
+    const r = await runAsync(['run', 'short-leash', '--no-stale-check', '--', 'python3', '-c', 'import time; time.sleep(40)'],
+      { env: { JOB_QUEUE_MAX_RUNTIME_MIN: '480' } });
+    expect(r.code).toBe(124);
+  });
+
+  it('a job that finishes inside its ceiling is untouched', () => {
+    const r = run(['run', 'quick', '--no-stale-check', '--', 'python3', '-c', 'print("ok")'],
+      { env: { JOB_QUEUE_MAX_RUNTIME_MIN: '0.5' } });
+    expect(r.code).toBe(0);
+    expect(r.stdout).toContain('ok');
   });
 
   it('heartbeat reports a lost lock with its own exit code, not a usage error', () => {

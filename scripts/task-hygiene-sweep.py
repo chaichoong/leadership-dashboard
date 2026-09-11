@@ -237,18 +237,42 @@ def load_schema(token):
         raise SystemExit(f"FAIL: Tasks table {TASKS} not found in base {BASE_ID}")
     by_name = {f["name"]: f for f in table["fields"]}
     problems = []
+    extra_choices = {}
     for key, (name, fid) in FIELDS.items():
         field = by_name.get(name)
         if not field:
             problems.append(f"field '{name}' ({key}) missing from Tasks")
         elif field["id"] != fid:
             problems.append(f"field '{name}' is {field['id']}, expected {fid} — renamed or replaced")
+    # AN ADDED OPTION IS NOT A BREAKAGE (finding 20260907-task-manager-board-492).
+    # This was a set EQUALITY test, so somebody adding a choice in the Airtable
+    # grid killed the entire sweep with SystemExit — even though every value the
+    # sweep writes was still perfectly valid. Measured on the live base, 8 Sep
+    # 2026: Time Estimate had gained '3 hours', '20 min' and '1 hour', two of
+    # them re-wordings of options that already existed, and the sweep had
+    # stopped running.
+    #
+    # The asymmetry is the whole point. A REMOVED option is dangerous: the sweep
+    # would write a value Airtable rejects, which is what this check exists for,
+    # so that still fails. An ADDED option cannot hurt a writer that only ever
+    # writes from EXPECTED_CHOICES — it is reported for Kevin to tidy, and the
+    # sweep carries on.
     for key, expected in EXPECTED_CHOICES.items():
         field = by_name.get(FIELDS[key][0])
         if field and field.get("type") == "singleSelect":
             live = [c["name"] for c in field["options"]["choices"]]
-            if set(live) != set(expected):
-                problems.append(f"'{FIELDS[key][0]}' options changed: live={live} expected={expected}")
+            gone = [c for c in expected if c not in live]
+            if gone:
+                problems.append(
+                    f"'{FIELDS[key][0]}' options REMOVED: {gone} — the sweep "
+                    f"would write a value Airtable rejects (live={live})")
+            added = [c for c in live if c not in expected]
+            if added:
+                extra_choices[FIELDS[key][0]] = added
+                print(f"  SCHEMA NOTE: '{FIELDS[key][0]}' has options the sweep "
+                      f"never writes: {added}. Not a failure — the sweep writes "
+                      f"only {expected}. Worth tidying in the base if any are "
+                      "re-wordings of an option that already exists.")
     if problems:
         for p in problems:
             print(f"  SCHEMA DRIFT: {p}")

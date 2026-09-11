@@ -452,8 +452,16 @@ def schedule_stage(day, entry, recs, acct_map, stage, dry_run=False, index=0):
             # file attached, no burnt-in captions on the YouTube copy, link known at once. GoHighLevel is the fallback.
             try:
                 post = youtube_direct(day, spec["clip"], title, text, when, test)
-            except SystemExit as ex:
-                print("episode %d: direct YouTube upload of %s FAILED (%s); GoHighLevel will carry it" % (day, spec["clip"], str(ex)[-200:]), file=sys.stderr)
+            except (SystemExit, OSError, RuntimeError) as ex:
+                # Not just SystemExit (finding 20260911-daily-ops-phase-2-523): a PermissionError reading the Drive
+                # file, or youtube_api's own RuntimeError, used to escape here and end the whole run, so no other
+                # episode or platform was published that hour. One clip failing is one line, not a traceback.
+                why = str(ex)[-200:]
+                if isinstance(ex, PermissionError):
+                    why = ("macOS refused this scheduled job read access to %s. The launchd python needs Full Disk "
+                           "Access for the Google Drive folder (Kevin's call), or the file must be staged locally"
+                           % os.path.basename(getattr(ex, "filename", None) or "the Drive file"))
+                print("episode %d: direct YouTube upload of %s FAILED (%s); GoHighLevel will carry it" % (day, spec["clip"], why), file=sys.stderr)
             else:
                 entry.setdefault("posts", {})[key] = post
                 if spec["clip"] == "full" and not entry.get("youtube_link"): entry["youtube_link"] = post["link"]

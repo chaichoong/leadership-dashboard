@@ -111,7 +111,10 @@ describe('content-engine watch: nightly wiring', () => {
     expect(w).toContain('ap.add_argument("--since", default=None'); // the CLI default used to pin the scan to 4 June 2026, hiding day 2054 from the takeover
     const p = readFileSync(path.join(ROOT, 'scripts', 'content-engine', 'publish.py'), 'utf8');
     expect(p).toContain('def staggered(slot, index');
-    expect(p).toContain('when_for(platform, spec["clip"], index)');
+    // No closing bracket: PR #369 (10 Sep 2026) added youtube_at= after index,
+    // and the exact-call match turned main red. What matters is that the index
+    // still reaches when_for, so each clip gets its own staggered slot.
+    expect(p).toContain('when_for(platform, spec["clip"], index');
   });
 
   it('is described on the Automations list (deterministic job, not a register agent)', () => {
