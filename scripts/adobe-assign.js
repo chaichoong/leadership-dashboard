@@ -324,12 +324,34 @@ async function run({ document: doc, signers, fields, page: pageNo, shot }) {
     await page.waitForTimeout(WAIT.load);
 
     // Adobe CREATES a hidden file input on click and never fires a chooser.
+    // A STUCK UPLOAD MUST REFUSE, NOT CRASH. The wait for the file input was
+    // started before the click and awaited after it. When the click itself got
+    // stuck, the wait expired with nobody listening, and Node killed the run
+    // with a raw stack instead of a refusal. That happened to all six attempts
+    // in one job on 11 Sep 2026, each logged with an empty reason, so the cause
+    // was invisible. The wait now always settles to true or false, the click
+    // has its own limit, and either failure refuses with a screenshot.
     const before = await page.locator(SEL.fileInput).count();
     const appears = page.waitForFunction(
       ([sel, n]) => document.querySelectorAll(sel).length > n,
-      [SEL.fileInput, before], { timeout: 30000 });
-    await page.locator(SEL.filePick).click();
-    await appears;
+      [SEL.fileInput, before], { timeout: 30000 }).then(() => true).catch(() => false);
+    const shotOn = async (tag) => {
+      const png = shot || path.join(os.tmpdir(), path.basename(doc, '.pdf') + '-' + tag + '.png');
+      await page.screenshot({ path: png }).catch(() => {});
+      return png;
+    };
+    const clicked = await page.locator(SEL.filePick).click({ timeout: 25000 })
+      .then(() => true).catch(() => false);
+    if (!clicked) {
+      const png = await shotOn('upload');
+      die('could not click "select a file" on the e-sign page. Adobe may have signed the ' +
+          `robot out, or a dialog is covering the page. Nothing has been sent. See ${png}.`);
+    }
+    if (!(await appears)) {
+      const png = await shotOn('upload');
+      die('clicking "select a file" produced no file input within 30 seconds. ' +
+          `Nothing has been sent. See ${png}.`);
+    }
     await page.locator(SEL.fileInput).last().setInputFiles(doc);
     await page.waitForTimeout(WAIT.upload);
     await page.locator(SEL.continue).click();
@@ -806,5 +828,10 @@ function selftest() {
   console.log(`\n${cases.length} checks passed.`);
 }
 
-if (require.main === module) main().catch((e) => die(e.message));
+if (require.main === module) {
+  // An unhandled rejection anywhere must still end as a REFUSED line with its
+  // reason, never as a bare stack the batch logs as an empty refusal.
+  process.on('unhandledRejection', (e) => die(String((e && e.message) || e)));
+  main().catch((e) => die(e.message));
+}
 module.exports = { parseFieldMap, checkEverySignerHasAField, parseSigners, judgeColours, SEL };
