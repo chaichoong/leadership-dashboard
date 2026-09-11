@@ -66,7 +66,10 @@ async function withPage(fn) {
   const { chromium } = require('playwright');
   const chrome = fs.existsSync('/Applications/Google Chrome.app');
   const ctx = await chromium.launchPersistentContext(PROFILE, {
-    headless: true, viewport: { width: 1400, height: 900 },
+    // A TALL WINDOW DRAWS THE WHOLE LIST. Adobe's list only draws the rows that
+    // fit on screen and stopped advancing on scroll at 30 of 66 (11 Sep 2026).
+    // Given room for every row, it has nothing to hide.
+    headless: true, viewport: { width: 1400, height: Number(process.env.DRAFTS_VIEWPORT_H) || 8000 },
     channel: chrome ? 'chrome' : undefined,
     ignoreDefaultArgs: chrome ? ['--enable-automation'] : undefined,
   });
