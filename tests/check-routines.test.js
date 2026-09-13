@@ -46,6 +46,7 @@ function writeEvents(rows) {
   mkdirSync(join(box, 'queue'), { recursive: true });
   writeFileSync(eventsPath, rows.map((r) => JSON.stringify({
     ts: r.ts ?? hoursAgo(2), job: r.job, state: r.state ?? 'acquired',
+    ...(r.exit !== undefined ? { exit: r.exit } : {}),
   })).join('\n') + '\n');
 }
 
@@ -66,6 +67,7 @@ print(json.dumps({"code": code, "res": res}))
       JOB_QUEUE_EVENTS: eventsPath,
       CLAUDE_ROUTINE_DIR: routineDir,
       JOB_SCHEDULE_FILE: schedulePath,
+      SLOT_RUNS_LOG_DIR: join(box, 'logs'),
     },
   }).trim());
 }
@@ -463,5 +465,89 @@ describe('lock-exempt checks still count as having run', () => {
     const { code, res } = guard();
     expect(code).toBe(0);
     expect(res.non_routine_jobs_that_ran).toContain('drift-scan');
+  });
+});
+
+
+// 12-13 Sep 2026 (finding 20260913-daily-ops-526): the Claude usage cap was hit
+// and every slot printed "You've hit your limit" and exited 1 within seconds. Each
+// still wrote `acquired`, so attendance read "task-manager 3 of 3" for a day in
+// which nothing ran. The runs.log below is the real shape of that day.
+describe('a slot that died is not a slot that ran', () => {
+  beforeEach(() => writeRoutines(['daily-ops']));
+
+  function slotSchedule() {
+    writeFileSync(schedulePath, JSON.stringify({
+      'inbound-triage': { cron: '0 9,13,17 * * *', mode: 'wrapped', enabled: false },
+      'task-manager': { cron: '0 0-23 * * *', mode: 'wrapped' },
+      'ceo-agent': { cron: '45 6 * * *', mode: 'wrapped', enabled: false },
+      prospecting: { cron: '15 9 * * *', mode: 'wrapped', enabled: false },
+      'prod-sweep-weekly': { cron: '0 11 * * *', mode: 'wrapped', enabled: false },
+    }, null, 2));
+  }
+
+  function runsLog(blocks) {
+    mkdirSync(join(box, 'logs', 'task-manager'), { recursive: true });
+    writeFileSync(join(box, 'logs', 'task-manager', 'runs.log'), blocks.join('\n') + '\n');
+  }
+
+  const CAP = [
+    '===== task-manager run [13:00 slot] Sun Sep 13 13:00:45 BST 2026 =====',
+    "You've hit your limit · resets 7pm (Europe/London)",
+    'TASK-MANAGER VERIFY FAIL: verify never ran this slot',
+    '===== done rc=1 Sun Sep 13 13:00:46 BST 2026 =====',
+  ].join('\n');
+  const OK = '===== task-manager run [09:00 slot] =====\nscored 91\n===== done rc=0 Sun Sep 13 09:10:00 BST 2026 =====';
+  const BROKE = '===== task-manager run [11:00 slot] =====\nTraceback: boom\n===== done rc=2 Sun Sep 13 11:00:03 BST 2026 =====';
+
+  function runs(exits) {
+    const rows = [{ job: 'daily-ops', state: 'mark' }];
+    exits.forEach((e, i) => {
+      rows.push({ job: 'task-manager', ts: hoursAgo(10 - i) });
+      if (e !== null) rows.push({ job: 'task-manager', state: 'finished', exit: e, ts: hoursAgo(10 - i) });
+    });
+    return rows;
+  }
+
+  it('BACK-TEST: a usage-cap death is counted as died, named as the allowance, and is a shortfall', () => {
+    slotSchedule();
+    runsLog(['old history', OK, CAP, CAP]);
+    writeEvents(runs([0, 1, 1]));
+    const { code, res } = guard();
+    expect(code).toBe(0);
+    const v = res.slot_attendance['task-manager'];
+    expect(v.ran).toBe(3);
+    expect(v.died).toBe(2);
+    expect(v.worked).toBe(1);
+    expect(v.causes).toEqual({ 'usage-cap': 2 });
+    expect(res.slot_shortfalls).toContain('task-manager');
+    expect(res.missed_slot_runs).toMatch(/task-manager worked 1 of/);
+    expect(res.missed_slot_runs).toMatch(/2 died: the AI allowance ran out x2/);
+  });
+
+  it('names a non-cap death by its exit code, not as the allowance', () => {
+    slotSchedule();
+    runsLog([BROKE]);
+    writeEvents(runs([2]));
+    const v = guard().res.slot_attendance['task-manager'];
+    expect(v.died).toBe(1);
+    expect(v.causes).toEqual({ 'exit 2': 1 });
+  });
+
+  it('a run still in progress (no finished event) is not dead', () => {
+    slotSchedule();
+    runsLog([OK]);
+    writeEvents(runs([0, null]));
+    const v = guard().res.slot_attendance['task-manager'];
+    expect(v.died).toBe(0);
+    expect(v.worked).toBe(2);
+  });
+
+  it('an unreadable runs.log still counts the death, and says it could not read the cause', () => {
+    slotSchedule();
+    writeEvents(runs([1]));
+    const v = guard().res.slot_attendance['task-manager'];
+    expect(v.died).toBe(1);
+    expect(v.causes).toEqual({ 'exit 1 (runs.log unreadable)': 1 });
   });
 });
