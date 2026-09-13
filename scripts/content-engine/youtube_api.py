@@ -159,6 +159,28 @@ def set_language(video_id, language=LANGUAGE):
     return request("PUT", API + "/videos?part=snippet", {"id": video_id, "snippet": keep})
 
 
+def recent_uploads(limit=15):
+    """The channel's newest uploads INCLUDING private and scheduled ones (the owner's view), as
+    [{"id", "title", "published"}]. The publisher uses it to find a video a crashed run already uploaded,
+    so the retry adopts it instead of uploading a second copy (10 Sep 2026: 2195's Short went up four times)."""
+    ch = request("GET", API + "/channels?part=contentDetails&mine=true")
+    items = ch.get("items") or []
+    if not items: return []
+    pl = items[0]["contentDetails"]["relatedPlaylists"]["uploads"]
+    r = request("GET", API + "/playlistItems?part=snippet,status&maxResults=%d&playlistId=%s" % (min(int(limit), 50), pl))
+    return [{"id": it["snippet"]["resourceId"]["videoId"], "title": it["snippet"].get("title", ""),
+             "published": it["snippet"].get("publishedAt", ""), "privacy": (it.get("status") or {}).get("privacyStatus", "")}
+            for it in r.get("items", [])]
+
+
+def find_upload(title, uploads=None):
+    """The id of an upload whose title matches exactly (case and spacing ignored), or None."""
+    want = " ".join((title or "").lower().split())
+    for u in (uploads if uploads is not None else recent_uploads()):
+        if " ".join(u["title"].lower().split()) == want: return u["id"]
+    return None
+
+
 def whoami():
     r = request("GET", API + "/channels?part=snippet&mine=true")
     for c in r.get("items", []): print(c["id"], c["snippet"]["title"])
@@ -172,7 +194,9 @@ def selftest():
     v, c = pkce(); assert len(v) >= 43 and len(c) == 43
     u = consent_url("cid", "chal", "st"); assert "code_challenge=chal" in u and "access_type=offline" in u and "youtube.upload" in urllib.parse.unquote(u) and "localhost%3A8765" in u
     assert watch_link("x") == "https://youtu.be/x" and CHUNK % (256 * 1024) == 0
-    print(json.dumps({"checks": 7, "failed": []}))
+    ups = [{"id": "a1", "title": "Episode 1841 -  Running  day after", "published": "", "privacy": "private"}, {"id": "b2", "title": "Other", "published": "", "privacy": "public"}]
+    assert find_upload("episode 1841 - running day after", ups) == "a1" and find_upload("Nope", ups) is None
+    print(json.dumps({"checks": 8, "failed": []}))
 
 
 if __name__ == "__main__":

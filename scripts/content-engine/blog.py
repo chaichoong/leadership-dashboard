@@ -64,7 +64,8 @@ def build_post(loc, day, blog_copy, description, thumb_url, youtube_link, status
 def publish_blog(day, full, entry, thumb_url, youtube_link, test):
     """Create the post through GHL; returns (post id, public url). Idempotent through entry['blog']."""
     import publish
-    if entry.get("blog", {}).get("id"): return entry["blog"]["id"], entry["blog"]["url"]
+    b = entry.get("blog") or {}
+    if b.get("id") or b.get("url"): return b.get("id", ""), b.get("url", "")   # GHL returned no id on 10 Sep 2026, so the url counts too
     _, loc, _ = publish._cfg()
     f = full["fields"]
     body = build_post(loc, day, f.get("Blog Copy"), f.get("Blog Post Description"), thumb_url, youtube_link, "DRAFT" if test else "PUBLISHED")
@@ -73,7 +74,11 @@ def publish_blog(day, full, entry, thumb_url, youtube_link, test):
     if left: raise SystemExit("episode %d: blog REFUSED, placeholder %s still in the article" % (day, left))
     exists = publish.ghl("GET", "/blogs/posts/url-slug-exists?locationId=%s&urlSlug=%s" % (loc, body["urlSlug"]))
     if (exists.get("exists") if isinstance(exists, dict) else False):
-        body["urlSlug"] += "-%s" % dt.date.today().strftime("%d%m")
+        # The article is already there: this episode was published before (10 Sep 2026: a crashed run's retry added
+        # "-1009" to the address and posted 2195's article three more times). Adopt it, never write a second copy.
+        url = SITE + body["urlSlug"]
+        entry["blog"] = {"id": "", "url": url, "status": body["status"], "adopted": dt.datetime.now().isoformat(timespec="seconds")}
+        return "", url
     r = publish.ghl("POST", "/blogs/posts", body)
     post = (r.get("data") or r)
     pid = post.get("_id") or post.get("id") or ""
@@ -89,6 +94,9 @@ def selftest():
     assert blog_parts("", 7)[0] == "Diary of a Runpreneur, Day 7"
     assert slug_for("Running Off-Road at Pace (Day 2195)", 2195) == "running-off-road-at-pace-day-2195"
     assert slug_for("Kids & work: try this!", 3) == "kids-work-try-this-day-3"
+    import inspect as _ib; src = _ib.getsource(publish_blog)
+    assert 'dt.date.today().strftime("%d%m")' not in src and '"adopted"' in src, "an existing address means already published: adopt it, never add a date and post again"
+    assert 'b.get("id") or b.get("url")' in src, "the url alone proves it was published (GHL returned no id)"
     b = build_post("loc1", 2195, copy, "A short description.", "https://cdn/t.png", "https://youtu.be/x", "DRAFT")
     assert b["status"] == "DRAFT" and b["categories"] == [LISTING_CATEGORY_ID, CATEGORY_ID] and b["author"] == AUTHOR_ID and b["blogId"] == BLOG_ID
     assert 'href="https://youtu.be/x"' in b["rawHTML"] and b["imageUrl"] == "https://cdn/t.png" and b["description"] == "A short description."
