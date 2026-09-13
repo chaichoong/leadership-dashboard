@@ -46,6 +46,10 @@ export const F = {
   unitType:        'fldsItq0vU3sHv7n9', // Unit Type (Room | Flat-Let | Flat | Whole Property)
   // Tenants
   tenantPayType:   'fldZbrk8Xw5Dcwxhi', // Rent Payment Type
+  tenantName:      'fldxBKW7QnujSDWqA', // Tenant Name
+  tenantPhone:     'fldraHUkWfqo4olLF', // Contact Number
+  tenantEmail:     'fldybEduFY3DWWTfT', // Email Address
+  tenantStatus:    'fldAXzP9SGIHiAhrv', // Tenant Status
   // Costs
   costName:        'fldS6FYfpkhu6tJG0',
   costExpected:    'fld9JibXkMpTeMcxw', // Expected Cost (monthly equivalent)

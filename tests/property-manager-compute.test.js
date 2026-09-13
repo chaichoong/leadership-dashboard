@@ -248,3 +248,72 @@ describe('Roy task scope', () => {
     expect(C.appendNote('old line', ' second ', 'Kevin Brittain', now)).toBe('old line\n[2026-09-08 14:05 Kevin Brittain] second');
   });
 });
+
+// ── Round three (Kevin, 13 Sep 2026) ─────────────────────────────────────────
+describe('rolling average profit over whole months', () => {
+  const T = new Date(2026, 8, 13); // 13 Sep 2026
+  const subs = [rec(REC.subRentalInc, { [F.subCatName]: 'Rental Income' }), rec(REC.subMaint, { [F.subCatName]: 'COGS Property Reactive Maintenance' })];
+  const ctx = C.buildTxContext({ properties: [rec('p1', { [F.propShortName]: 'A House' })], tenancies: [], rentalUnits: [], subCategories: subs });
+  const tx = (date, amt, sub) => rec('x' + date + amt, { [F.txDate]: date, [F.txReportAmount]: amt, [F.txSubCategory]: [sub], [F.txProperty]: ['p1'] });
+
+  it('whole months only, oldest first, never the current part-month', () => {
+    expect(C.completeMonthKeys(3, T)).toEqual(['2026-06', '2026-07', '2026-08']);
+    expect(C.completeMonthKeys(12, T)[0]).toBe('2025-09');
+  });
+  it('the transaction read reaches the first day of the oldest whole month', () => {
+    // On 13 Sep the 12-month average starts 1 Sep 2025, so the read must include it.
+    expect(C.txWindowStart(T)).toBe('2025-08-31');
+    expect(C.txWindowStart(new Date(2026, 0, 5))).toBe('2024-12-31');
+  });
+  it('divides by N even when a month earned nothing, and ignores this month', () => {
+    const txs = [
+      tx('2026-08-10', 900, REC.subRentalInc), tx('2026-08-20', -300, REC.subMaint), // Aug profit 600
+      tx('2026-07-10', 900, REC.subRentalInc),                                      // Jul profit 900
+      // June: nothing at all → counts as £0
+      tx('2026-01-10', 1200, REC.subRentalInc),                                     // inside 12m only
+      tx('2026-09-05', 5000, REC.subRentalInc),                                     // current month: excluded
+      tx('2025-08-15', 7000, REC.subRentalInc),                                     // before the 12m window: excluded
+    ];
+    const a = C.pnlAverages(txs, ctx, T);
+    expect(a.byProperty['A House']).toEqual({ avg3: 500, avg6: 250, avg12: 225 });
+    expect(a.total).toEqual({ avg3: 500, avg6: 250, avg12: 225 });
+    expect(a.months).toHaveLength(12);
+  });
+});
+
+describe('tenant contact list', () => {
+  const T = new Date(2026, 8, 13);
+  it('lists live tenancies only, with every linked tenant\'s phone and email', () => {
+    const tenants = [
+      rec('n1', { [F.tenantName]: 'Jo Smith', [F.tenantPhone]: '07700 900001', [F.tenantEmail]: 'jo@example.com', [F.tenantPayType]: 'Universal Credit' }),
+      rec('n2', { [F.tenantName]: 'Sam Smith', [F.tenantPhone]: '07700 900002' }),
+      rec('n3', { [F.tenantName]: 'Gone Away', [F.tenantPhone]: '07700 900003' }),
+    ];
+    const tenancies = [
+      rec('t1', { [F.tenPayStatus]: 'In Payment', [F.tenStatus]: ['Active'], [F.tenLinkedTenant]: ['n1', 'n2'], [F.tenUnitRef]: ['Unit 1 – A'], [F.tenProperty]: ['A'], [F.tenRent]: 800, [F.tenDueDay]: '5', [F.tenStartDate]: '2025-02-01' }),
+      rec('t2', { [F.tenPayStatus]: 'In Payment', [F.tenStatus]: ['Former'], [F.tenLinkedTenant]: ['n3'] }),
+      rec('t3', { [F.tenPayStatus]: 'In Payment', [F.tenStatus]: ['Active'], [F.tenEndDate]: '2026-09-01', [F.tenLinkedTenant]: ['n3'] }),
+    ];
+    const list = C.tenantList(tenancies, tenants, { t1: [{ date: '2026-09-05', amount: 800 }] }, T);
+    expect(list).toHaveLength(1);
+    expect(list[0].people.map(p => p.name)).toEqual(['Jo Smith', 'Sam Smith']);
+    expect(list[0]).toMatchObject({ unit: 'Unit 1 – A', rent: 800, dueDay: 5, start: '2025-02-01', isUC: true, lastPaid: { date: '2026-09-05', amount: 800 } });
+    expect(list[0].people[0]).toMatchObject({ phone: '07700 900001', email: 'jo@example.com' });
+  });
+  it('a tenant marked Former drops off a shared tenancy; the tenancy stays', () => {
+    const tenants = [rec('n1', { [F.tenantName]: 'Stays', [F.tenantStatus]: 'Active' }), rec('n2', { [F.tenantName]: 'Moved Out', [F.tenantStatus]: 'Former' })];
+    const tenancies = [rec('t1', { [F.tenPayStatus]: 'In Payment', [F.tenStatus]: ['Active'], [F.tenLinkedTenant]: ['n1', 'n2'] })];
+    expect(C.tenantList(tenancies, tenants, {}, T)[0].people.map(p => p.name)).toEqual(['Stays']);
+    // A former tenant's Universal Credit no longer marks the tenancy UC.
+    const ucGone = [rec('n1', { [F.tenantName]: 'Stays', [F.tenantPayType]: 'Working' }), rec('n2', { [F.tenantName]: 'Moved Out', [F.tenantStatus]: 'Former', [F.tenantPayType]: 'Universal Credit' })];
+    expect(C.tenantList(tenancies, ucGone, {}, T)[0].isUC).toBe(false);
+  });
+  it('the tenant count matches the Live tenancies figure', () => {
+    const tenancies = [
+      rec('a', { [F.tenPayStatus]: 'In Payment', [F.tenStatus]: ['Active'] }),
+      rec('b', { [F.tenPayStatus]: 'CFV', [F.tenStatus]: ['Active'] }),
+      rec('c', { [F.tenPayStatus]: 'Ended', [F.tenStatus]: ['Active'] }),
+    ];
+    expect(C.tenantList(tenancies, [], {}, T)).toHaveLength(C.tenancyMetrics(tenancies, {}, T).active);
+  });
+});

@@ -5,7 +5,7 @@ import { F, REC, ROY_EMAIL } from '../workers/property-manager/fields.mjs';
 // The handler end to end with Airtable stubbed: the scope guard, the status
 // allow-list, the closed-task refusal, and what leaves the Worker in /data.
 const ORIGIN = 'https://app.operationsdirector.co.uk';
-const env = { AIRTABLE_PAT: 'pat-test', PM_PASSCODE: 'roy-pass', PM_PASSCODE_KEVIN: 'kev-pass', PM_SESSION_SECRET: 'secret-123' };
+const env = { AIRTABLE_PAT: 'pat-test', PM_PASSCODE: 'roy-pass', PM_PASSCODE_KEVIN: 'kev-pass', PM_SESSION_SECRET: 'secret-123', PM_KEVIN_AIRTABLE_ID: 'usrKEVIN0000000001' };
 const ctx = { waitUntil: () => {} };
 const req = (path, init = {}, origin = ORIGIN) => new Request('https://pm.test' + path, { ...init, headers: { Origin: origin, 'Content-Type': 'application/json', ...(init.headers || {}) } });
 const call = (r) => worker.fetch(r, env, ctx);
@@ -40,6 +40,53 @@ describe('login and origin', () => {
     expect(body.who).toBe('Kevin Brittain');
     expect((await call(req('/data'))).status).toBe(401);
     expect((await call(req('/data', { headers: { Authorization: 'Bearer ' + body.token + 'x' } }))).status).toBe(401);
+  });
+});
+
+describe('sign-in with the OD app\'s Airtable key (13 Sep 2026)', () => {
+  const loginKey = (pat) => call(req('/login-airtable', { method: 'POST', body: JSON.stringify({ pat }) }));
+  // map: key → owner id. baseKeys: the keys that can read the base.
+  const stubWhoami = (map, baseKeys = Object.keys(map)) => {
+    globalThis.fetch = vi.fn(async (url, init) => {
+      const key = String((init && init.headers && init.headers.Authorization) || '').replace('Bearer ', '');
+      if (String(url).endsWith('/v0/meta/whoami')) {
+        return map[key] ? new Response(JSON.stringify({ id: map[key], email: 'x@y.z' }), { status: 200 }) : new Response('{}', { status: 401 });
+      }
+      if (String(url).includes('/tblqB8b22hKBL4PF1?maxRecords=1')) {
+        return baseKeys.includes(key) ? new Response('{"records":[]}', { status: 200 }) : new Response('{}', { status: 403 });
+      }
+      return new Response('{}', { status: 404 });
+    });
+  };
+  it('signs Kevin in when Airtable says the key is his, and the token opens /tasks auth', async () => {
+    stubWhoami({ 'kevins-key': 'usrKEVIN0000000001' });
+    const r = await loginKey('kevins-key');
+    expect(r.status).toBe(200);
+    const body = await r.json();
+    expect(body.who).toBe('Kevin Brittain');
+    expect(body.token).toMatch(/\./);
+  });
+  it('refuses a key that belongs to someone else, a key Airtable rejects, and an empty key', async () => {
+    stubWhoami({ 'someone-elses-key': 'usrOTHER00000000001' });
+    expect((await loginKey('someone-elses-key')).status).toBe(401);
+    expect((await loginKey('revoked-key')).status).toBe(401);
+    expect((await loginKey('')).status).toBe(401);
+  });
+  it('refuses a key Kevin owns that cannot read the property base (review, 13 Sep 2026)', async () => {
+    stubWhoami({ 'kevins-narrow-key': 'usrKEVIN0000000001' }, []);
+    const r = await loginKey('kevins-narrow-key');
+    expect(r.status).toBe(401);
+    expect((await r.json()).error).toMatch(/cannot read/);
+  });
+  it('never sends the key anywhere but Airtable', async () => {
+    stubWhoami({ 'kevins-key': 'usrKEVIN0000000001' });
+    await loginKey('kevins-key');
+    for (const [url] of globalThis.fetch.mock.calls) expect(String(url)).toMatch(/^https:\/\/api\.airtable\.com\//);
+  });
+  it('never lets the key sign in when the allowed owner is not configured', async () => {
+    stubWhoami({ 'kevins-key': 'usrKEVIN0000000001' });
+    const r = await worker.fetch(req('/login-airtable', { method: 'POST', body: JSON.stringify({ pat: 'kevins-key' }) }), { ...env, PM_KEVIN_AIRTABLE_ID: '' }, ctx);
+    expect(r.status).toBe(401);
   });
 });
 

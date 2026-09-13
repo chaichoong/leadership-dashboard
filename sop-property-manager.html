@@ -35,7 +35,7 @@ code { background: var(--bg-subtle); padding: 0.1rem 0.35rem; border-radius: 4px
   <a class="header-back" href="index.html#property-manager">&larr; Back to Operations Director</a>
   <h1>Property Manager</h1>
   <div class="subtitle">Roy Lavin's single page: the numbers he needs to bring the rent in and keep maintenance down.</div>
-  <div class="version">SOP version 1.1 &middot; page version 1.1 &middot; 9 September 2026</div>
+  <div class="version">SOP version 1.5 &middot; 13 September 2026</div>
 </div></div>
 
 <div class="container">
@@ -55,7 +55,8 @@ code { background: var(--bg-subtle); padding: 0.1rem 0.35rem; border-radius: 4px
   <li><strong>Running costs</strong> is the FULL fixed-cost total, the same set as the Leadership Dashboard's Monthly Costs (Kevin's ruling, 9 Sep 2026): some of Kevin's own fixed costs sit inside it and Roy needs the true cash-flow figure. The page says how many of the costs are not property costs. It never lists them.</li>
 </ul>
 <h3>Sign in</h3>
-<p>Roy and Kevin each have their own passcode, held as Worker secrets. A passcode gives a 12-hour signed session. Five wrong attempts a minute per address are refused. The passcodes live only at <code>~/.config/od/property_manager_passcode_*</code> on Kevin's Mac and in the Worker. They are never in the repo.</p>
+<p><strong>Kevin inside the OD app signs in automatically.</strong> The app already holds his Airtable key; the page sends it to the Worker, which asks Airtable whose key it is and signs in only when the owner is Kevin's Airtable account (secret <code>PM_KEVIN_AIRTABLE_ID</code>). The key is never stored or logged. A key for any other account, a revoked key or an Airtable outage falls back to the passcode screen.</p>
+<p>Roy and Kevin each also have their own passcode, held as Worker secrets. Roy has no Airtable key, so he always uses his. A passcode gives a 12-hour signed session. Five wrong attempts a minute per address are refused. The passcodes live only at <code>~/.config/od/property_manager_passcode_*</code> on Kevin's Mac and in the Worker. They are never in the repo.</p>
 </div></div>
 
 <div class="section"><h2 class="section-title">3. What each block means</h2>
@@ -67,7 +68,8 @@ code { background: var(--bg-subtle); padding: 0.1rem 0.35rem; border-radius: 4px
 <tr><td>Actual, last 31 days</td><td>Transactions: Report Amount by sub-category</td><td>Rent collected = Rental Income. Maintenance = COGS Property Reactive Maintenance against the £1,000 budget. Wages = Opex Labour + COGS Labour against £1,500. Profit = every P&amp;L revenue line minus every P&amp;L cost line, cash basis. Click a figure to see the transactions behind it.</td></tr>
 <tr><td>Planned, a normal month</td><td>Tenancies (Expected Monthly Rent) and Costs (Expected Cost)</td><td>Expected rent counts In Payment and CFV Actioned only. Running costs is one line on purpose and is the full fixed-cost total (see section 2). Planned and actual are always shown together (Kevin's ruling, 31 Jul 2026).</td></tr>
 <tr><td>Rent due, 3 days back to 31 days ahead</td><td>Tenancies: Next Rent Due Date, Payment Frequency; Tenants: Rent Payment Type; Transactions linked to the tenancy</td><td>Anchor is Airtable's own next-due formula, stepped by frequency. Paid comes from the bank feed only: a rental-income transaction for that tenancy dated from three days before the due date up to today. A future due date never reads as paid; a past one with nothing in reads Not yet. Each row shows the last payment date and amount. UC = Universal Credit.</td></tr>
-<tr><td>Profit by property</td><td>Transactions linked to a Property, else through the Tenancy, else through the Unit</td><td>Windows: this month, last month (the default), 3, 6 and 12 months. Whole-business costs with no property link (mortgages, insurance, wages) sit on the grey row so the total still ties to the Profit &amp; Loss tab for Real Estate.</td></tr>
+<tr><td>Profit by property</td><td>Transactions linked to a Property, else through the Tenancy, else through the Unit</td><td>Windows: this month, last month (the default), 3, 6 and 12 months. The three average columns show profit per month over the last 3, 6 and 12 <em>whole</em> months, whatever window is picked; the current part-month is never included, and a month with no transactions counts as £0 so the average never flatters a property that earned nothing. Whole-business costs with no property link (mortgages, insurance, wages) sit on the grey row so the total still ties to the Profit &amp; Loss tab for Real Estate.</td></tr>
+<tr><td>Tenants tab</td><td>Tenancies (live only) linked to Tenants: Tenant Name, Contact Number, Email Address, Rent Payment Type</td><td>One row per live tenancy with every linked tenant's phone (tap to call) and email (tap to mail), unit, property, rent, due day, start date, status and last payment. The count always equals Live tenancies on the dashboard. Search filters the list as you type. "No phone" or "no email" means the Tenants record is blank: fix it in Airtable.</td></tr>
 <tr><td>Tasks</td><td>Tasks: Assignee, Team Member, Maintenance Ticket, Properties, Contractor</td><td>Open tasks assigned to Roy plus every open Maintenance Ticket. Completed and Cancelled are hidden.</td></tr>
 </table>
 </div></div>

@@ -75,6 +75,17 @@
   .seg button { border: 0; background: var(--bg-surface); padding: 5px 12px; font: inherit; font-size: var(--fs-sm); cursor: pointer; color: var(--text-secondary); }
   .seg button[aria-pressed="true"] { background: var(--accent); color: var(--accent-on); }
   .seg button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+  .tabs { display: flex; gap: var(--space-1); border-bottom: 1px solid var(--border-default); margin: var(--space-2) 0 var(--space-3); }
+  .tabs button { border: 0; background: transparent; padding: 10px 16px; font: inherit; font-size: var(--fs-md); font-weight: var(--fw-medium); color: var(--text-secondary); cursor: pointer; border-bottom: 3px solid transparent; margin-bottom: -1px; }
+  .tabs button[aria-selected="true"] { color: var(--accent); border-bottom-color: var(--accent); font-weight: var(--fw-semibold); }
+  .tabs button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+  .search { width: 100%; max-width: 360px; padding: 8px 12px; border: 1px solid var(--border-default); border-radius: var(--radius-md); font: inherit; font-size: var(--fs-sm); background: var(--bg-surface); color: var(--text-primary); }
+  .search:focus-visible { outline: 2px solid var(--accent); }
+  .contact { display: flex; flex-direction: column; gap: 2px; }
+  .contact a { color: var(--accent); text-decoration: none; }
+  .contact a:hover { text-decoration: underline; }
+  td.avg { color: var(--text-secondary); }
+  th.avg { background: var(--accent-soft); color: var(--accent); }
   .row-head { display: flex; justify-content: space-between; align-items: center; gap: var(--space-3); flex-wrap: wrap; margin-bottom: var(--space-3); }
   .task { display: grid; grid-template-columns: 1fr auto auto; gap: 4px 12px; align-items: center; padding: 10px 12px; border: 1px solid var(--border-subtle); border-radius: var(--radius-md); background: var(--bg-surface); cursor: pointer; margin-bottom: 8px; }
   .task:hover { background: var(--bg-surface-2); }
@@ -139,8 +150,12 @@
     </div>
   </div>
   <div data-sync-bar="property-manager"></div>
+  <div class="tabs" role="tablist" aria-label="Views">
+    <button type="button" role="tab" id="tabDash" data-view="dashboard" aria-selected="true" aria-controls="content" tabindex="0">Dashboard</button>
+    <button type="button" role="tab" id="tabTenants" data-view="tenants" aria-selected="false" aria-controls="content" tabindex="-1">Tenants</button>
+  </div>
   <div id="loadErr" class="err" hidden role="alert"></div>
-  <div id="content"><div class="loading">Loading the property figures…</div></div>
+  <div id="content" role="tabpanel" aria-labelledby="tabDash"><div class="loading">Loading the property figures…</div></div>
 </div>
 
 <div class="backdrop" id="backdrop"></div>
@@ -208,6 +223,8 @@
   const ordinal = (n) => n ? `${n}${[, 'st', 'nd', 'rd'][(n % 100 >> 3 ^ 1 && n % 10) || 0] || 'th'}` : '—';
 
   let token = '', who = '', data = null, tasks = [], pnlWin = 'last', taskFilter = 'all', openTask = null, loading = false;
+  let view = 'dashboard';
+  try { if (localStorage.getItem('pm_view') === 'tenants') view = 'tenants'; } catch (e) { view = 'dashboard'; }
   const expanded = {}; // section → card key currently open
   let openHistory = null; // tenancy id with history shown
   try { token = localStorage.getItem(TOKEN_KEY) || ''; who = localStorage.getItem(WHO_KEY) || ''; } catch (e) { token = ''; }
@@ -222,16 +239,52 @@
   $('toastUndo').addEventListener('click', () => { const fn = undoFn; undoFn = null; $('toast').className = 'toast'; if (fn) fn(); });
 
   // ── API ──
-  async function api(path, opts = {}) {
+  async function api(path, opts = {}, retried = false) {
     const res = await fetch(API + path, { ...opts, headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: 'Bearer ' + token } : {}), ...(opts.headers || {}) } });
     let body = null;
     try { body = await res.json(); } catch (e) { body = null; }
-    if (res.status === 401 && path !== '/login') { signOut(false); throw new Error('Your session has ended. Sign in again.'); }
+    if (res.status === 401 && !path.startsWith('/login')) {
+      // Inside the OD app Kevin's session renews itself from the app's key. A
+      // passcode session (Roy's) never does: it must not come back as Kevin.
+      if (!retried && who === 'Kevin Brittain' && await signInWithAppKey()) return api(path, opts, true);
+      signOut(false); throw new Error('Your session has ended. Sign in again.');
+    }
     if (!res.ok) throw new Error((body && body.error) || `Request failed (${res.status})`);
     return body;
   }
 
   // ── Auth ──
+  // Kevin inside the OD app already holds an Airtable key (the shell keeps it
+  // in window.PAT and localStorage _dlr_pat, same origin). The Worker asks
+  // Airtable whose key it is and signs in only its allowed owner, so no
+  // passcode is needed. Roy has no key and keeps his passcode.
+  const NO_AUTO_KEY = 'pm_no_auto';
+  const autoAllowed = () => { try { return localStorage.getItem(NO_AUTO_KEY) !== '1'; } catch (e) { return true; } };
+  function appKey() {
+    try { if (window.parent && window.parent !== window && window.parent.PAT) return String(window.parent.PAT); } catch (e) { /* not the shell */ }
+    try { return localStorage.getItem('_dlr_pat') || ''; } catch (e) { return ''; }
+  }
+  function keepSession(r) {
+    token = r.token; who = r.who;
+    try { localStorage.setItem(TOKEN_KEY, token); localStorage.setItem(WHO_KEY, who); } catch (e) { /* storage blocked */ }
+  }
+  // One attempt in flight at a time: boot and the parallel /data + /tasks 401s
+  // must not each spend a slot of the Worker's sign-in rate limit (finding 3).
+  let appKeyAttempt = null;
+  function signInWithAppKey() {
+    const pat = appKey();
+    if (!pat || !autoAllowed()) return Promise.resolve(false);
+    if (appKeyAttempt) return appKeyAttempt;
+    appKeyAttempt = (async () => {
+      try {
+        const res = await fetch(API + '/login-airtable', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pat }), signal: AbortSignal.timeout(8000) });
+        if (!res.ok) return false;
+        keepSession(await res.json());
+        return true;
+      } catch (e) { return false; }
+    })().finally(() => { appKeyAttempt = null; });
+    return appKeyAttempt;
+  }
   function showLogin(msg) {
     $('app').hidden = true; $('loginView').hidden = false;
     const e = $('loginErr'); e.hidden = !msg; e.textContent = msg || '';
@@ -248,8 +301,8 @@
     const btn = $('loginBtn'); btn.disabled = true;
     try {
       const r = await api('/login', { method: 'POST', body: JSON.stringify({ passcode: $('passcode').value }) });
-      token = r.token; who = r.who;
-      try { localStorage.setItem(TOKEN_KEY, token); localStorage.setItem(WHO_KEY, who); } catch (e) { /* storage blocked */ }
+      keepSession(r);
+      try { localStorage.removeItem(NO_AUTO_KEY); } catch (e) { /* storage blocked */ }
       $('passcode').value = '';
       $('loginErr').hidden = true;
       $('loginView').hidden = true; $('app').hidden = false;
@@ -258,7 +311,12 @@
       $('loginErr').hidden = false; $('loginErr').textContent = e.message;
     } finally { btn.disabled = false; }
   });
-  $('logoutBtn').addEventListener('click', () => signOut(true));
+  // Sign out means signed out: no silent sign-in with the app key until the
+  // passcode is used again.
+  $('logoutBtn').addEventListener('click', () => {
+    try { localStorage.setItem(NO_AUTO_KEY, '1'); } catch (e) { /* storage blocked */ }
+    signOut(true);
+  });
   $('refreshBtn').addEventListener('click', () => loadAll(true));
 
   // ── Load ──
@@ -285,6 +343,12 @@
   function render() {
     if (!data) return;
     $('whoLine').textContent = `${who ? who + ' · ' : ''}Real Estate · property figures only · updated ${new Date(data.generatedAt).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}`;
+    document.querySelectorAll('.tabs [data-view]').forEach(b => { const on = b.dataset.view === view; b.setAttribute('aria-selected', String(on)); b.tabIndex = on ? 0 : -1; });
+    $('content').setAttribute('aria-labelledby', view === 'tenants' ? 'tabTenants' : 'tabDash');
+    if (view === 'tenants') {
+      const focused = !!document.activeElement && document.activeElement.id === 'tenantSearch';
+      $('content').innerHTML = renderTenantsView(); wireTenantSearch(focused); return;
+    }
     $('content').innerHTML = [
       renderPortfolio(data.portfolio),
       renderTenancies(data.tenancies),
@@ -294,6 +358,51 @@
       renderTasks(),
     ].join('');
     wireCards(); wirePnlToggle(); wireTaskList(); wireHistoryRows();
+  }
+  function showView(v, focus) {
+    view = v;
+    try { localStorage.setItem('pm_view', view); } catch (e) { /* storage blocked */ }
+    render();
+    if (focus) $(v === 'tenants' ? 'tabTenants' : 'tabDash').focus();
+  }
+  document.querySelectorAll('.tabs [data-view]').forEach(b => {
+    b.addEventListener('click', () => showView(b.dataset.view));
+    b.addEventListener('keydown', (ev) => {
+      if (ev.key === 'ArrowRight' || ev.key === 'ArrowLeft') { ev.preventDefault(); showView(view === 'tenants' ? 'dashboard' : 'tenants', true); }
+    });
+  });
+
+  // ── Tenants view: every live tenancy with the tenant's contact details ──
+  function renderTenantsView() {
+    const list = data.tenantList || [];
+    const rows = list.map(r => {
+      const people = r.people.map(p => `<div class="contact" style="margin-bottom:6px"><strong>${escHtml(p.name || 'Unknown')}</strong>${p.phone ? `<a href="tel:${escHtml(p.phone.replace(/[^+\d]/g, ''))}">${escHtml(p.phone)}</a>` : '<span><span class="pill late">no phone</span></span>'}${p.email ? `<a href="mailto:${escHtml(p.email)}">${escHtml(p.email)}</a>` : '<span><span class="pill">no email</span></span>'}</div>`).join('');
+      const haystack = [r.property, r.unit, ...r.people.flatMap(p => [p.name, p.phone, p.email])].join(' ').toLowerCase();
+      return `<tr data-search="${escHtml(haystack)}"><td class="wrap">${people}</td><td>${escHtml(r.unit || '—')}</td><td>${escHtml(r.property || '—')}</td><td class="num">${gbp(r.rent)}</td><td>${ordinal(r.dueDay)}${r.frequency && r.frequency !== 'Monthly' ? ' · ' + escHtml(r.frequency) : ''}</td><td>${dateShort(r.start)}</td><td>${r.isUC ? '<span class="pill uc">UC</span> ' : ''}<span class="pill ${/cfv/i.test(r.status) ? 'behind' : 'paid'}">${escHtml(r.status || '—')}</span></td><td>${lastPaidCell(r.lastPaid)}</td></tr>`;
+    }).join('');
+    return `<section class="card" aria-labelledby="h-tenants"><div class="row-head"><div><h2 id="h-tenants">Tenants</h2><p class="hint" style="margin:0">Every live tenancy with the tenant's phone and email. Tap a number to call, or an address to email.</p></div>
+      <input class="search" id="tenantSearch" type="search" placeholder="Search name, phone, email, property…" aria-label="Search tenants"></div>
+      <div class="hint" id="tenantCount" aria-live="polite">${list.length} live tenancies</div>
+      ${list.length ? `<div class="tbl-wrap"><table><thead><tr><th>Tenant and contact</th><th>Unit</th><th>Property</th><th class="num">Rent</th><th>Due</th><th>Started</th><th>Status</th><th>Last payment</th></tr></thead><tbody>${rows}</tbody></table></div>` : '<div class="empty">No live tenancies.</div>'}</section>`;
+  }
+  // Filters rows in place so typing never loses focus. The text is kept across
+  // the 15-minute auto-refresh, which re-renders the whole view.
+  let tenantQuery = '';
+  function wireTenantSearch(hadFocus) {
+    const box = $('tenantSearch');
+    if (!box) return;
+    const apply = () => {
+      tenantQuery = box.value;
+      const q = tenantQuery.trim().toLowerCase();
+      let shown = 0;
+      document.querySelectorAll('tr[data-search]').forEach(tr => { const hit = !q || tr.dataset.search.includes(q); tr.hidden = !hit; if (hit) shown += 1; });
+      const total = (data.tenantList || []).length;
+      $('tenantCount').textContent = q ? `${shown} of ${total} live tenancies` : `${total} live tenancies`;
+    };
+    box.value = tenantQuery;
+    box.addEventListener('input', apply);
+    if (tenantQuery) apply();
+    if (hadFocus) box.focus();
   }
 
   // A clickable KPI card. `section` + `key` identify which detail it opens.
@@ -433,15 +542,29 @@
   }
 
   // ── P&L by property ──
+  function monthRange(keys) {
+    if (!keys || !keys.length) return '';
+    const lab = (k) => { const [y, m] = k.split('-').map(Number); return new Date(y, m - 1, 1).toLocaleDateString('en-GB', { month: 'short', year: '2-digit' }); };
+    return `${lab(keys[0])} to ${lab(keys[keys.length - 1])}`;
+  }
   function renderPnl() {
     const p = data.pnl[pnlWin];
-    const rows = p.rows.length
-      ? p.rows.map(r => `<tr class="${r.property === 'Unallocated' ? 'muted' : ''}"><td>${r.property === 'Unallocated' ? 'Not linked to a property (mortgages, insurance, wages…)' : escHtml(r.property)}</td><td class="num">${gbp(r.rentIn)}</td><td class="num">${gbp(r.maintenance)}</td><td class="num">${gbp(r.otherCosts)}</td><td class="num">${signed(r.profit)}</td></tr>`).join('')
-      : '<tr><td colspan="5" class="empty">No property transactions in this window.</td></tr>';
-    return `<section class="card" aria-labelledby="h-pnl"><div class="row-head"><div><h2 id="h-pnl">Profit by property</h2><p class="hint" style="margin:0">Rent in, minus maintenance, minus every other property cost. Costs that belong to the whole business sit on the grey row. This month is part-month to today.</p></div>
+    const av = data.pnlAverages || { months: [], byProperty: {}, total: {} };
+    const zero = { avg3: 0, avg6: 0, avg12: 0 };
+    // Every property that has a figure in the window OR in the averages.
+    const byName = {};
+    p.rows.forEach(r => { byName[r.property] = r; });
+    Object.keys(av.byProperty).forEach(name => { if (!byName[name]) byName[name] = { property: name, rentIn: 0, maintenance: 0, otherCosts: 0, profit: 0 }; });
+    const allRows = Object.values(byName).sort((a, b) => (a.property === 'Unallocated') - (b.property === 'Unallocated') || b.profit - a.profit);
+    const avgCells = (a) => ['avg3', 'avg6', 'avg12'].map(k => `<td class="num avg">${signed((a || zero)[k] || 0)}</td>`).join('');
+    const rows = allRows.length
+      ? allRows.map(r => `<tr class="${r.property === 'Unallocated' ? 'muted' : ''}"><td>${r.property === 'Unallocated' ? 'Not linked to a property (mortgages, insurance, wages…)' : escHtml(r.property)}</td><td class="num">${gbp(r.rentIn)}</td><td class="num">${gbp(r.maintenance)}</td><td class="num">${gbp(r.otherCosts)}</td><td class="num">${signed(r.profit)}</td>${avgCells(av.byProperty[r.property])}</tr>`).join('')
+      : '<tr><td colspan="8" class="empty">No property transactions in this window.</td></tr>';
+    const m = av.months || [];
+    return `<section class="card" aria-labelledby="h-pnl"><div class="row-head"><div><h2 id="h-pnl">Profit by property</h2><p class="hint" style="margin:0">Rent in, minus maintenance, minus every other property cost. Costs that belong to the whole business sit on the grey row. This month is part-month to today. The three average columns are profit per month over the last 3, 6 and 12 whole months${m.length ? ` (${monthRange(m.slice(-12))})` : ''}, whichever window you pick above.</p></div>
       <div class="seg" role="group" aria-label="Window">${Object.keys(PNL_LABELS).map(w => `<button type="button" data-win="${w}" aria-pressed="${w === pnlWin}">${PNL_LABELS[w]}</button>`).join('')}</div></div>
-      <div class="tbl-wrap"><table><thead><tr><th>Property</th><th class="num">Rent in</th><th class="num">Maintenance</th><th class="num">Other costs</th><th class="num">Profit</th></tr></thead><tbody>${rows}
-      <tr class="total"><td>${escHtml(p.total.property)} · ${escHtml(PNL_LABELS[pnlWin])}</td><td class="num">${gbp(p.total.rentIn)}</td><td class="num">${gbp(p.total.maintenance)}</td><td class="num">${gbp(p.total.otherCosts)}</td><td class="num">${signed(p.total.profit)}</td></tr></tbody></table></div></section>`;
+      <div class="tbl-wrap"><table><thead><tr><th>Property</th><th class="num">Rent in</th><th class="num">Maintenance</th><th class="num">Other costs</th><th class="num">Profit</th><th class="num avg" title="Average profit per month, ${escHtml(monthRange(m.slice(-3)))}">Avg / month 3m</th><th class="num avg" title="Average profit per month, ${escHtml(monthRange(m.slice(-6)))}">6m</th><th class="num avg" title="Average profit per month, ${escHtml(monthRange(m.slice(-12)))}">12m</th></tr></thead><tbody>${rows}
+      <tr class="total"><td>${escHtml(p.total.property)} · ${escHtml(PNL_LABELS[pnlWin])}</td><td class="num">${gbp(p.total.rentIn)}</td><td class="num">${gbp(p.total.maintenance)}</td><td class="num">${gbp(p.total.otherCosts)}</td><td class="num">${signed(p.total.profit)}</td>${avgCells(av.total)}</tr></tbody></table></div></section>`;
   }
   function wirePnlToggle() {
     document.querySelectorAll('.seg [data-win]').forEach(b => b.addEventListener('click', () => { pnlWin = b.dataset.win; render(); }));
@@ -587,7 +710,14 @@
   document.addEventListener('visibilitychange', () => { if (!document.hidden && token && !openTask && Date.now() - lastLoadAt > RETURN_STALE_MS) loadAll(false); });
 
   // ── Boot ──
-  if (token) { $('app').hidden = false; loadAll(false); } else { showLogin(''); }
+  (async () => {
+    if (!token && appKey() && autoAllowed()) {
+      $('app').hidden = false;
+      $('content').innerHTML = '<div class="loading">Signing you in…</div>';
+      await signInWithAppKey();
+    }
+    if (token) { $('app').hidden = false; loadAll(false); } else { showLogin(''); }
+  })();
 })();
 </script>
 </body>
