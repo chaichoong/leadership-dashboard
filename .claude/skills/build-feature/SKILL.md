@@ -229,7 +229,9 @@ Three rules for the Steps block:
 
 Ask once: "Should I build this as-is, or adjust anything?"
 
-The read-only rule lifts on Kevin's yes. The brief and the steps become the instruction set for the rest of this workflow. If reality contradicts a step once you start building, say so in one line and carry on. Do not silently build something else.
+The read-only rule lifts on Kevin's yes. **The first line of the reply after his yes is the paste-ready `/goal` line**, built from "Verified by": the end state, each check with how it is proved (a test exit code, the deploy poll printing the new pageVer, a screenshot posted), the "Not touching" constraint, and `or stop after 20 turns`. Rules and an example: `~/.claude/skills/goal-line/SKILL.md`. Kevin pastes it and Claude Code's built-in evaluator holds the session open until the proof is on screen. Never put the close-out or any Kevin decision inside it.
+
+The brief and the steps become the instruction set for the rest of this workflow. If reality contradicts a step once you start building, say so in one line and carry on. Do not silently build something else.
 
 ---
 
