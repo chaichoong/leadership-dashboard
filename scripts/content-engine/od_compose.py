@@ -94,7 +94,11 @@ def user_prompt(template, spec, post_text, shape_name, day, source_line, feedbac
                ("\n\nTHE PREVIOUS ATTEMPT FAILED PREFLIGHT. Fix exactly these and change nothing else that works:\n" + feedback) if feedback else ""))
 
 
-PUBLIC_SOURCES = [(r"prospects table|job ad", "a real job advert, anonymised"), (r"build log|register", "the Operations Director agent register"),
+# First match wins, so the specific kind of prospect source comes before the table name. Until 13 Sep 2026 "prospects table"
+# alone mapped to "a real job advert", which printed that on a picture whose source was a Facebook group post.
+PUBLIC_SOURCES = [(r"job ad", "a real job advert, anonymised"), (r"facebook group post", "a real Facebook group post, anonymised"),
+                  (r"linkedin post", "a real LinkedIn post, anonymised"), (r"prospects table", "a real business, anonymised"),
+                  (r"build log|register", "the Operations Director agent register"),
                   (r"frameworks library", "the Operations Director method"), (r"hot-button|playbook", "real sales conversations"), (r"episode (\d+)", "Episode \\1")]
 
 
@@ -291,6 +295,9 @@ def selftest():
     assert picture_source("Episode 1992, Kevin's own words on camera: \"you've now got the ability\"") == "Episode 1992"
     assert picture_source("Build log: agent \"Agent Dispatch\" (register, Status Live) and 5 merged pull requests") == "the Operations Director agent register"
     assert picture_source("Prospects table: a real Job Ad (Indeed) harvested by the prospecting agent, anonymised") == "a real job advert, anonymised"
+    assert picture_source("Prospects table: a real Facebook Group Post harvested by the prospecting agent, anonymised") == "a real Facebook group post, anonymised"
+    assert picture_source("Prospects table: a real LinkedIn post by a founder") == "a real LinkedIn post, anonymised"
+    assert picture_source("Prospects table: a company record") == "a real business, anonymised"
     assert picture_source("Frameworks Library: \"3-Tier\" (author Austin Chen, not to be named), applied") == "the Operations Director method"
     assert "Kevin" not in user_prompt("steps", spec, "p", "s", "Tue", "Episode 1992, Kevin's own words on camera: \"q\"").split("SOURCE LINE")[1].split("\n")[0]
     # the vendored checker runs on the repo's Playwright: a deliberately clipped page must report an error
