@@ -32,6 +32,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import watch  # noqa: E402
 import platform_copy as pc  # noqa: E402
+from youtube_studio import RATING_CATEGORIES  # noqa: E402  (the card states exactly what the robot will answer on YouTube)
 
 REPO = os.path.dirname(os.path.dirname(HERE))
 GATE = os.path.join(REPO, "scripts", "create-agent-task.py")
@@ -118,10 +119,12 @@ def build_card(day, full, lfmd=None, short=None, headline="", pans_lines=None, p
     checks = ("Rules check flagged: " + " | ".join(review)) if review else "Rules check: nothing flagged (UK English, no em dashes, no figures that are not in the transcript)."
     closing = closing_line(publish_mode())
     pans_block = "\n".join(pans_lines) if pans_lines else ""
-    proof_block = "\n".join(proof_lines) if proof_lines else ""     # the output gate's checks (qa.py, 10 Sep 2026): proof, not a promise
+    proof_block = "\n".join(proof_lines) if proof_lines else ""
+    rating_block = ("YouTube content rating: approving this card also tells YouTube the episode contains none of: " + ", ".join(RATING_CATEGORIES).lower()
+                    + ". That answer cannot be changed afterwards, so send the card back if any of these is in the episode.")     # the output gate's checks (qa.py, 10 Sep 2026): proof, not a promise
     out = "\n\n".join([ask, "Watch before you approve:\n" + "\n".join(watch_lines)] + ([pans_block] if pans_block else []) + ["Where it goes if you approve:\n" + "\n".join(where),
                        "The copy, as written (where it shows [ADD YOUTUBE LINK], the engine writes the YouTube link there once the video is up; "
-                       "a post still carrying a placeholder is refused, never published):\n\n" + "\n\n".join(copy), checks] + ([proof_block] if proof_block else []) + [closing])
+                       "a post still carrying a placeholder is refused, never published):\n\n" + "\n\n".join(copy), checks] + ([proof_block] if proof_block else []) + [rating_block, closing])
     desc = ("Approve Episode %d for publishing. The Content Engine rendered the three videos, wrote the platform copy "
             "and made the thumbnail from the raw 360 clip. Nothing is published until you approve." % day)
     return task_name(day, headline), desc, out
@@ -352,6 +355,7 @@ def selftest():
     assert TASK_TYPE == "Drafting"
     _, _, outp2 = build_card(2225, full, lfmd, short, "A / B", None, ["Checks the engine ran:", "- jingle: 7.0 s"])
     assert "- jingle: 7.0 s" in outp2 and outp2.index("- jingle: 7.0 s") < outp2.index(CLOSING), "the proof block sits just before the closing line"
+    assert "YouTube content rating: approving this card also tells YouTube" in outp2 and "controversial issues" in outp2 and outp2.index("YouTube content rating") < outp2.index(CLOSING), "the card says what approving declares to YouTube"
     import inspect as _iq; rc = _iq.getsource(raise_card); rf = _iq.getsource(refresh_card)
     assert "output_gate(day, ledger, state)" in rc and rc.index("output_gate(") < rc.index("build_card(") and "output_gate(day, ledger, state)" in rf, "no card, new or refreshed, without the output gate"
     assert "qa_blocked" in _iq.getsource(report)

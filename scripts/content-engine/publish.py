@@ -653,14 +653,15 @@ def monetise_long_video(day, entry):
     posts = [p for k, p in (entry.get("posts") or {}).items() if k.startswith("youtube|") and p.get("clip") == "full" and p.get("id") and p.get("route") == "api"]
     if not posts: return False
     p = posts[0]
-    if p.get("monetisation") == "On": return False
+    if p.get("monetisation") == "On": return False      # "Checking" (YouTube reviewing the rating) is re-read until it says On
     last = p.get("monetisation_checked")
     if last:
         try:
             if dt.datetime.now(dt.timezone.utc) - dt.datetime.fromisoformat(last.replace("Z", "+00:00")) < dt.timedelta(hours=MONETISE_RECHECK_HOURS): return False
         except ValueError: pass
     import youtube_studio
-    res = youtube_studio.monetise(p["id"])
+    approved = (approval.load_state().get(str(day)) or {}).get("verdict") == "approved"
+    res = youtube_studio.monetise(p["id"], certify_none=approved)     # approving the card is Kevin's content rating (13 Sep 2026)
     p["monetisation"] = res.get("status") or "unknown"; p["monetisation_checked"] = now_utc()
     if res.get("error"): p["monetisation_error"] = res["error"][-200:]
     print("episode %s: YouTube monetisation %s" % (day, p["monetisation"]))
@@ -1169,6 +1170,7 @@ def selftest():
     _selftest_once_only()
     import inspect as _i5; ss = _i5.getsource(sync); assert ss.index("monetise_long_video(day, entry)") < ss.index("share_to_facebook_profile(day, entry, state)"), "monetisation is checked every sync"
     ms = _i5.getsource(monetise_long_video); assert "MONETISE_RECHECK_HOURS" in ms and "needs-rating" in ms, "a video waiting for the rating is re-checked, not hammered"
+    assert 'certify_none=approved' in ms and '.get("verdict") == "approved"' in ms, "the rating is answered only for an approved card"
     rp = _i5.getsource(report); assert "content monetisation:" in rp and "content posts to check once:" in rp, "the morning report shows both"
     print(json.dumps({"checks": 47, "failed": []}))
 

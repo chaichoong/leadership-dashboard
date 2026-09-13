@@ -17,11 +17,16 @@ PW = "/Users/kevinbrittain/Projects/leadership-dashboard/node_modules/playwright
 UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36"
 EARN_URL = "https://studio.youtube.com/video/%s/monetization/ads"
 HEADING = "Watch page ads and YouTube Premium"
+# YouTube's content rating, word for word as the form listed it on 13 Sep 2026. Kevin's ruling the same day:
+# approving the episode's card confirms the video contains none of these, so the robot answers "None of the above".
+RATING_CATEGORIES = ["Inappropriate language", "Adult content", "Violence", "Shocking content", "Harmful acts and unreliable claims",
+                     "Recreational drugs content", "Enabling dishonest behaviour", "Hateful and derogatory content",
+                     "Firearms-related content", "Sensitive events", "Controversial issues"]
 
 JS = r"""
 const path = require('path'), os = require('os');
 const { chromium } = require(%(pw)s);
-const VID = %(vid)s, ACT = %(act)s, HEADING = %(heading)s;
+const VID = %(vid)s, ACT = %(act)s, HEADING = %(heading)s, CERTIFY = %(certify)s;
 (async () => {
   const dir = path.join(os.homedir(), '.config', 'od', 'agent-browser', %(profile)s);
   // Studio shows "unsupported browser" to headless Chrome's own agent string (10 Sep 2026), so a normal one is set.
@@ -41,12 +46,12 @@ const VID = %(vid)s, ACT = %(act)s, HEADING = %(heading)s;
   const read = async () => page.evaluate((h) => {
     const t = document.body.innerText.replace(/\s+/g, ' '); const i = t.indexOf(h);
     if (i < 0) return 'unknown';
-    const m = t.slice(i, i + 220).match(/\b(On|Off)\b/); return m ? m[1] : 'unknown';
+    const m = t.slice(i, i + 220).match(/\b(On|Off|Checking)\b/); return m ? m[1] : 'unknown';
   }, HEADING);
   try {
     await open();
     out.before = await read();
-    if (ACT === 'monetise' && out.before === 'Off') {
+    if (ACT === 'monetise' && out.before === 'Off') {  // Checking means already submitted: never rate twice
       await page.locator('[aria-label="Edit video monetisation status"]').first().click({ timeout: 20000 });
       await page.waitForTimeout(2000);
       // the dialog holds two radio buttons (#radio-on / #radio-off) and a Done button (#save-button), 13 Sep 2026;
@@ -58,11 +63,30 @@ const VID = %(vid)s, ACT = %(act)s, HEADING = %(heading)s;
       // The first time a video is switched On, YouTube asks for the content rating ("Tell us what's in your video")
       // and says the answers cannot be changed once submitted. That is Kevin's declaration: never answered here.
       if (await page.getByText("Tell us what's in your video", { exact: true }).count()) {
-        await page.screenshot({ path: %(shot)s });
-        const c = page.locator('ytcp-button:has-text("Cancel"):visible').last();
-        if (await c.count()) { await c.click().catch(() => {}); await page.waitForTimeout(1500); }
-        out.needs_rating = true; out.status = 'needs-rating';
-        console.log(JSON.stringify(out)); await finish();
+        const dlg = page.locator('ytcp-dialog:visible, tp-yt-paper-dialog:visible').filter({ hasText: "Tell us what's in your video" }).first();
+        const listed = await dlg.evaluate((e) => e.innerText);
+        const expected = %(categories)s;
+        const missing = expected.filter((c) => !listed.includes(c));
+        if (!CERTIFY || missing.length) {
+          // Kevin's declaration: answered only for an approved card, and only when the form asks exactly what the card said
+          await page.screenshot({ path: %(shot)s });
+          const c = dlg.locator('ytcp-button:has-text("Cancel")').last();
+          if (await c.count()) { await c.click().catch(() => {}); await page.waitForTimeout(1500); }
+          out.needs_rating = true; out.status = 'needs-rating'; if (missing.length) out.form_changed = missing;
+          console.log(JSON.stringify(out)); await finish();
+        }
+        // the tick is the ytcp-checkbox-lit's own #checkbox, scrolled into view and clicked with the mouse (13 Sep 2026)
+        const lit = dlg.locator('ytcp-checkbox-lit').filter({ hasText: 'None of the above' }).last();
+        await lit.scrollIntoViewIfNeeded();
+        const box = lit.locator('#checkbox').first();
+        const nb = await box.boundingBox();
+        await page.mouse.click(nb.x + nb.width / 2, nb.y + nb.height / 2); await page.waitForTimeout(1500);
+        if ((await box.getAttribute('aria-checked')) !== 'true') throw new Error('None of the above did not tick');
+        const submit = dlg.locator('ytcp-button:has-text("Submit"):not([disabled])').last();
+        await submit.waitFor({ timeout: 20000 });
+        await page.screenshot({ path: %(shot)s.replace('.png', '_rating.png') });
+        await submit.click({ timeout: 20000 }); await page.waitForTimeout(6000);
+        out.rated = 'none of the above';
       }
       const save = page.locator('ytcp-button#save:not([disabled])').first();
       await save.click({ timeout: 30000 }); await page.waitForTimeout(8000);
@@ -86,11 +110,12 @@ def _node():
     return "node"
 
 
-def _run(video_id, act, shot=None):
+def _run(video_id, act, shot=None, certify=False):
     if not re.fullmatch(r"[A-Za-z0-9_-]{11}", video_id or ""): raise SystemExit("not a YouTube video id: %r" % video_id)
     shot = shot or os.path.join(tempfile.gettempdir(), "yt_earn_%s.png" % video_id)
     js = JS % {"pw": json.dumps(PW), "vid": json.dumps(video_id), "act": json.dumps(act), "heading": json.dumps(HEADING),
-               "profile": json.dumps(PROFILE), "ua": json.dumps(UA), "url": json.dumps(EARN_URL % video_id), "shot": json.dumps(shot)}
+               "profile": json.dumps(PROFILE), "ua": json.dumps(UA), "url": json.dumps(EARN_URL % video_id), "shot": json.dumps(shot),
+               "certify": "true" if certify else "false", "categories": json.dumps(RATING_CATEGORIES)}
     with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False) as fh:
         fh.write(js); path = fh.name
     try:
@@ -107,9 +132,11 @@ def status(video_id):
     return _run(video_id, "status")
 
 
-def monetise(video_id):
-    """Switch it On if it is Off. Returns the result dict; res['status'] == 'On' is the proof."""
-    return _run(video_id, "monetise")
+def monetise(video_id, certify_none=False):
+    """Switch it On if it is Off. `certify_none` answers YouTube's content rating with "None of the above", and is
+    passed only for an episode whose card Kevin approved (his ruling, 13 Sep 2026). Returns the result dict;
+    res['status'] == 'On' is the proof."""
+    return _run(video_id, "monetise", certify=certify_none)
 
 
 def selftest():
@@ -120,15 +147,18 @@ def selftest():
     assert "open();" in JS and "out.after = await read();" in JS, "the switch is read back from a fresh page"
     assert "#radio-on" in JS and "#save-button" in JS, "the On radio and the dialog's Done button are the proven controls (13 Sep 2026)"
     assert "runBeforeUnload: false" in JS and "watchdog" in JS, "a dirty form can never hang the close"
-    assert "Tell us what's in your video" in JS and "needs-rating" in JS and "Submit" not in JS, "the content rating is Kevin's declaration: detected and cancelled, never submitted"
+    assert "On|Off|Checking" in JS, "after the rating YouTube shows Checking before On (13 Sep 2026)"
+    assert "lit.locator('#checkbox')" in JS and "did not tick" in JS, "the tick is proved before Submit"
+    assert "if (!CERTIFY || missing.length)" in JS, "the rating is answered only for an approved card, and only when YouTube asks exactly the listed questions"
+    assert len(RATING_CATEGORIES) == 11 and "Controversial issues" in RATING_CATEGORIES
     assert os.path.basename(_node()) == "node", "a node binary is found even under launchd's bare PATH"
-    print(json.dumps({"checks": 7, "failed": []}))
+    print(json.dumps({"checks": 9, "failed": []}))
 
 
 if __name__ == "__main__":
-    ap = argparse.ArgumentParser(); ap.add_argument("mode"); ap.add_argument("--video", default="")
+    ap = argparse.ArgumentParser(); ap.add_argument("mode"); ap.add_argument("--video", default=""); ap.add_argument("--certify", action="store_true", help="answer the content rating 'None of the above' (approved cards only)")
     a = ap.parse_args()
     if a.mode == "selftest": selftest()
     elif a.mode == "status": print(json.dumps(status(a.video)))
-    elif a.mode == "monetise": print(json.dumps(monetise(a.video)))
+    elif a.mode == "monetise": print(json.dumps(monetise(a.video, certify_none=a.certify)))
     else: raise SystemExit("usage: youtube_studio.py status|monetise --video ID | selftest")
