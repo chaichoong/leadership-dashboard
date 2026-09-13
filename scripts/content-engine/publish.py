@@ -407,7 +407,22 @@ def create_post(body, brand="Runpreneur"):
     return post.get("_id") or post.get("id")
 
 
-def schedule_stage(day, entry, recs, acct_map, stage, dry_run=False, index=0):
+def now_utc():
+    return dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def definitely_not_created(ex):
+    """True only when the platform answered with a refusal (HTTP 4xx): then nothing exists and the post may be
+    tried again. A timeout, a dropped connection or a 5xx may have created it, so those are NEVER retried."""
+    return isinstance(ex, SystemExit) and bool(re.search(r"-> 4\d\d:", str(ex)))
+
+
+def schedule_stage(day, entry, recs, acct_map, stage, dry_run=False, index=0, save=None):
+    """Posts one stage for one episode, AT MOST ONCE per channel (Kevin, 13 Sep 2026: 2195 went out four times).
+    Each post is written to the state as 'creating' and saved BEFORE the call that creates it, then saved again
+    with its id. A run that dies half way leaves 'creating' behind, and the next run never posts that channel
+    again: it adopts the video it can find, or reports the post as unconfirmed for a human to check."""
+    save = save or (lambda: None)
     _, _, user = _cfg()
     full = recs["Long Form Video"]; ff = full["fields"]
     day_london = dt.datetime.now(LONDON).date()
@@ -431,7 +446,14 @@ def schedule_stage(day, entry, recs, acct_map, stage, dry_run=False, index=0):
                 title, body_text = youtube_parts(copy, day) if platform == "youtube" else (None, copy)
             for account in acct_map[platform]:
                 key = post_key(platform, account["id"], spec["clip"])
-                if key in entry.get("posts", {}): continue
+                have = entry.get("posts", {}).get(key)
+                if have:
+                    if have.get("status") in ("creating", "unconfirmed"):
+                        adopted = adopt_youtube(entry, key, have) if platform == "youtube" else False
+                        if not adopted:
+                            have["status"] = "unconfirmed"
+                            print("episode %d: %s %s was being created when a run stopped; NOT posting again (check it once)" % (day, spec["clip"], platform), file=sys.stderr)
+                    continue
                 todo.append((platform, account, spec, body_text, title, key))
     if not todo:
         print("episode %d: nothing to schedule at stage %d" % (day, stage)); return 0
@@ -450,9 +472,16 @@ def schedule_stage(day, entry, recs, acct_map, stage, dry_run=False, index=0):
         if platform == "youtube" and youtube_direct_ready():
             # Straight to the channel through Google's API (Kevin, 9 Sep 2026): full quality, English, our caption
             # file attached, no burnt-in captions on the YouTube copy, link known at once. GoHighLevel is the fallback.
+            entry.setdefault("posts", {})[key] = {"status": "creating", "platform": "youtube", "clip": spec["clip"], "account": account["name"],
+                                                  "title": title or "", "started": now_utc(), "route": "api", "mode": m}
+            save()
             try:
                 post = youtube_direct(day, spec["clip"], title, text, when, test)
-            except (SystemExit, OSError, RuntimeError) as ex:
+            except Exception as ex:
+                if adopt_youtube(entry, key, entry["posts"][key]):
+                    save(); print("episode %d: the %s upload raised (%s) but the video is on the channel; adopted it" % (day, spec["clip"], str(ex)[-120:]), file=sys.stderr)
+                    continue
+                entry["posts"].pop(key, None); save()   # nothing is on the channel: safe to try again next run
                 # Not just SystemExit (finding 20260911-daily-ops-phase-2-523): a PermissionError reading the Drive
                 # file, or youtube_api's own RuntimeError, used to escape here and end the whole run, so no other
                 # episode or platform was published that hour. One clip failing is one line, not a traceback.
@@ -463,17 +492,29 @@ def schedule_stage(day, entry, recs, acct_map, stage, dry_run=False, index=0):
                            % os.path.basename(getattr(ex, "filename", None) or "the Drive file"))
                 print("episode %d: direct YouTube upload of %s FAILED (%s); GoHighLevel will carry it" % (day, spec["clip"], why), file=sys.stderr)
             else:
-                entry.setdefault("posts", {})[key] = post
-                if spec["clip"] == "full" and not entry.get("youtube_link"): entry["youtube_link"] = post["link"]
+                entry.setdefault("posts", {})[key] = post; save()
+                if spec["clip"] == "full" and not entry.get("youtube_link"): entry["youtube_link"] = post["link"]; save()
                 print("episode %d [%s]: %s youtube -> channel %s %s (%s)" % (day, m.upper(), spec["clip"], post["status"], when, post["link"]))
                 continue
         # Test mode: YouTube still goes up (unlisted, so the link exists) but every social post is a DRAFT.
         status = "scheduled" if (not test or platform == "youtube") else "draft"
         body = build_post(platform, account, spec, text, media[spec["clip"]], media.get("thumb"), when, user, day, title,
                           status=status, privacy="unlisted" if test else "public")
-        pid = create_post(body)
-        entry.setdefault("posts", {})[key] = {"id": pid, "platform": platform, "account": account["name"], "clip": spec["clip"], "scheduled": when if status == "scheduled" else None,
-                                              "status": status, "mode": m}
+        entry.setdefault("posts", {})[key] = {"status": "creating", "platform": platform, "account": account["name"], "clip": spec["clip"], "started": now_utc(), "mode": m}
+        save()
+        try:
+            pid = create_post(body)
+        except Exception as ex:
+            if definitely_not_created(ex):
+                entry["posts"].pop(key, None); save()
+                print("episode %d: %s %s refused by the platform (%s); will try again next run" % (day, spec["clip"], platform, str(ex)[-160:]), file=sys.stderr)
+            else:
+                entry["posts"][key]["status"] = "unconfirmed"; entry["posts"][key]["error"] = str(ex)[-200:]; save()
+                print("episode %d: %s %s may or may not have posted (%s); NOT retrying, check it once" % (day, spec["clip"], platform, str(ex)[-160:]), file=sys.stderr)
+            continue
+        entry["posts"][key] = {"id": pid, "platform": platform, "account": account["name"], "clip": spec["clip"], "scheduled": when if status == "scheduled" else None,
+                               "status": status, "mode": m}
+        save()
         print("episode %d [%s]: %s %s -> %s %s %s (post %s)" % (day, m.upper(), spec["clip"], platform, account["name"], status, when if status == "scheduled" else "", pid))
     status = STATUS_YT if stage == 1 else STATUS_SOCIALS
     what = ("full episode to YouTube%s" % (" (UNLISTED, test mode)" if test else "")) if stage == 1 else ("Summary and Learnings clips to the socials%s" % (" as DRAFTS (test mode)" if test else ""))
@@ -481,31 +522,80 @@ def schedule_stage(day, entry, recs, acct_map, stage, dry_run=False, index=0):
     if stage == 1:
         yt_title = youtube_parts(ff.get("YouTube Copy"), day)[0]
         fields["Video Title"] = yt_title; fields["Target Publish Date"] = day_london.isoformat()
-    if stage == 2:
-        # the article and the podcast audio ride with the socials: same approval, same night
-        import blog
-        media = media_for(day, entry, ["thumb", "podcast"])
-        try:
-            pid, url = blog.publish_blog(day, full, entry, media.get("thumb"), entry["youtube_link"], test)
-            fields["Blog Link"] = url
-            what += "; blog article %s" % ("saved as a DRAFT (test mode)" if test else "published")
-            print("episode %d [%s]: blog %s -> %s (post %s)" % (day, m.upper(), "draft" if test else "published", url, pid))
-        except SystemExit as ex:
-            print("episode %d: blog not published (%s)" % (day, str(ex)[:160]))
-        if media.get("podcast"):
-            entry.setdefault("podcast", {})["audio_url"] = media["podcast"]
-        # Spotify for Creators takes the full episode VIDEO (Ericamae's episodes are video episodes);
-        # the browser lane runs this plan: prepare -> screenshot on the card, commit after approval.
-        import spotify
-        files = episode_files(day)
-        upload = files["podcast"] if spotify.PODCAST_FORMAT == "audio" and os.path.exists(files["podcast"]) else files["full"]
-        if os.path.exists(upload):
-            plan_path, ptitle = spotify.write_plan(day, upload, ff.get("Podcast Copy"), entry["youtube_link"], test, os.path.dirname(STATE), thumb=files.get("thumb", ""))
-            pod = entry.setdefault("podcast", {}); pod["plan"] = plan_path; pod["title"] = ptitle
-            what += "; " + run_spotify(day, full["id"], plan_path, ptitle, test, pod)
-    fields["Notes"] = approval.append_note(full, "%s: %s through GoHighLevel." % (dt.date.today().isoformat(), what))
-    watch._airtable("PATCH", watch.API + "/" + full["id"], {"fields": fields})
+    fields["Notes"] = approval.append_note(full, "%s: %s." % (dt.date.today().isoformat(), what))
+    try: watch._airtable("PATCH", watch.API + "/" + full["id"], {"fields": fields})
+    except Exception as ex: print("episode %d: record note not written (%s); the posts are saved" % (day, str(ex)[-120:]), file=sys.stderr)
     return len(todo)
+
+
+def adopt_youtube(entry, key, have):
+    """A YouTube post left as 'creating': if the channel already holds a video with that title, record it and
+    return True, so the retry never uploads a second copy."""
+    try:
+        import youtube_api
+        vid = youtube_api.find_upload(have.get("title") or "")
+    except Exception as ex:
+        print("youtube: could not read the channel to check for a half-finished upload (%s)" % str(ex)[-120:], file=sys.stderr)
+        return False
+    if not vid: return False
+    entry["posts"][key] = dict(have, id=vid, link="https://youtu.be/" + vid, status="scheduled", adopted=now_utc())
+    if have.get("clip") == "full" and not entry.get("youtube_link"): entry["youtube_link"] = "https://youtu.be/" + vid
+    return True
+
+
+def finish_extras(day, entry, recs, test, save):
+    """The blog article, the podcast audio and Spotify, once each, after the socials. Each has its own status and is
+    marked BEFORE the call that publishes it, so a run that dies never repeats it (13 Sep 2026: 2195's blog went out
+    four times), and a failure in one is recorded and retried next hour without touching anything else."""
+    full = recs["Long Form Video"]; ff = full["fields"]; m = mode(); done = []
+    if not entry.get("youtube_link"): return done
+    b = entry.setdefault("blog", {})
+    if not (b.get("url") or b.get("id")) and b.get("status") not in ("creating", "unconfirmed"):
+        b.update({"status": "creating", "started": now_utc()}); save()
+        try:
+            import blog
+            media = media_for(day, entry, ["thumb"])
+            pid, url = blog.publish_blog(day, full, entry, media.get("thumb"), entry["youtube_link"], test)
+            entry["blog"].update({"status": "DRAFT" if test else "PUBLISHED"}); save()
+            done.append("blog article %s" % url)
+            print("episode %d [%s]: blog %s -> %s" % (day, m.upper(), "draft" if test else "published", url))
+            try: watch._airtable("PATCH", watch.API + "/" + full["id"], {"fields": {"Blog Link": url}})
+            except Exception as ex: print("episode %d: Blog Link not written (%s)" % (day, str(ex)[-100:]), file=sys.stderr)
+        except Exception as ex:
+            if definitely_not_created(ex) or "has no Blog Copy" in str(ex) or "REFUSED" in str(ex):
+                entry["blog"] = {"status": "failed", "error": str(ex)[-200:]}
+            else:
+                entry["blog"].update({"status": "unconfirmed", "error": str(ex)[-200:]})
+            save(); print("episode %d: blog not published (%s)" % (day, str(ex)[-160:]), file=sys.stderr)
+    elif b.get("status") == "failed":
+        entry["blog"] = {}; save()                    # a refused article is tried again next hour
+    try:
+        media = media_for(day, entry, ["podcast"])
+        if media.get("podcast"): entry.setdefault("podcast", {})["audio_url"] = media["podcast"]; save()
+    except Exception as ex:
+        print("episode %d: podcast audio not uploaded (%s)" % (day, str(ex)[-120:]), file=sys.stderr)
+    pod = entry.setdefault("podcast", {})
+    if pod.get("status") in (None, "", "failed"):
+        try:
+            import spotify
+            files = episode_files(day)
+            upload = files["podcast"] if spotify.PODCAST_FORMAT == "audio" and os.path.exists(files["podcast"]) else files["full"]
+            if os.path.exists(upload):
+                plan_path, ptitle = spotify.write_plan(day, upload, ff.get("Podcast Copy"), entry["youtube_link"], test, os.path.dirname(STATE), thumb=files.get("thumb", ""))
+                pod.update({"plan": plan_path, "title": ptitle, "status": "uploading", "started": now_utc()}); save()
+                done.append(run_spotify(day, full["id"], plan_path, ptitle, test, pod)); save()
+        except Exception as ex:
+            pod.update({"status": "failed", "error": str(ex)[-200:]}); save()
+            print("episode %d: Spotify step failed (%s); retried next run" % (day, str(ex)[-160:]), file=sys.stderr)
+    elif pod.get("status") == "uploading":
+        # a run died during the upload: look before trying again, so a published episode is never uploaded twice
+        try:
+            import spotify
+            status, _ = spotify.verify_published(pod.get("title") or "", tries=1)
+            pod["status"] = status if status in ("published", "processing") else "failed"; save()
+        except Exception as ex:
+            print("episode %d: could not check Spotify after a stopped upload (%s)" % (day, str(ex)[-120:]), file=sys.stderr)
+    return done
 
 
 def youtube_direct_ready():
@@ -538,7 +628,7 @@ def run_spotify(day, task_id, plan_path, title, test, pod):
     shot = os.path.join(os.path.dirname(STATE), "spotify_%d_%s.png" % (day, "review" if test else "published"))
     try:
         spotify.run_plan(plan_path, task_id, test, shot)
-    except SystemExit as ex:
+    except Exception as ex:          # not just SystemExit: a missing node or a timeout ended whole runs (10 Sep 2026)
         pod["status"] = "failed"; pod["error"] = str(ex)[-300:]
         print("episode %d: Spotify upload FAILED: %s" % (day, str(ex)[-300:]), file=sys.stderr)
         return "Spotify upload FAILED (%s)" % str(ex)[-120:]
@@ -553,13 +643,41 @@ def run_spotify(day, task_id, plan_path, title, test, pod):
     return "Spotify episode %s%s" % ("published" if status == "published" else "uploaded and processing", (" " + link) if link else "")
 
 
+MONETISE_RECHECK_HOURS = 6
+
+
+def monetise_long_video(day, entry):
+    """The long episode's "Watch page ads" switched On in Studio (Ericamae, 13 Sep 2026: 2054, 2055, 2056 and 2195
+    went out Off). Shorts are on at channel level. The first switch asks for YouTube's content rating, which is
+    Kevin's declaration, so the video is recorded as 'needs-rating' and listed in the morning report instead."""
+    posts = [p for k, p in (entry.get("posts") or {}).items() if k.startswith("youtube|") and p.get("clip") == "full" and p.get("id") and p.get("route") == "api"]
+    if not posts: return False
+    p = posts[0]
+    if p.get("monetisation") == "On": return False
+    last = p.get("monetisation_checked")
+    if last:
+        try:
+            if dt.datetime.now(dt.timezone.utc) - dt.datetime.fromisoformat(last.replace("Z", "+00:00")) < dt.timedelta(hours=MONETISE_RECHECK_HOURS): return False
+        except ValueError: pass
+    import youtube_studio
+    res = youtube_studio.monetise(p["id"])
+    p["monetisation"] = res.get("status") or "unknown"; p["monetisation_checked"] = now_utc()
+    if res.get("error"): p["monetisation_error"] = res["error"][-200:]
+    print("episode %s: YouTube monetisation %s" % (day, p["monetisation"]))
+    return True
+
+
 def share_to_facebook_profile(day, entry, state):
     """Kevin's own profile gets the PAGE's post, shared (Kevin, 10 Sep 2026: "it should just be shared from the
     Facebook page to the Facebook profile"), once that page post is live. The page post URL is read off the page
     itself, because GoHighLevel never returns one. Signed out, or the post not up yet: recorded, retried hourly."""
     import facebook_share
     fb = entry.setdefault("facebook_share", {})
-    if fb.get("status") in ("shared", "reviewed"): return False
+    if fb.get("status") in ("shared", "reviewed", "unconfirmed"): return False
+    if fb.get("status") == "sharing":
+        # a run died while pressing Share: check the profile before ever sharing again
+        fb["status"] = "shared" if fb.get("post_url") and facebook_share.verify_shared(fb["post_url"]) else "unconfirmed"
+        return True
     page = [p for k, p in (entry.get("posts") or {}).items() if p.get("platform") == "facebook" and p.get("clip") == "summary"]
     if not page: return False
     post = page[0]
@@ -585,10 +703,11 @@ def share_to_facebook_profile(day, entry, state):
     plan_path, text = facebook_share.write_plan(int(day), url, copy, entry.get("youtube_link", ""), test, os.path.dirname(STATE))
     shot = os.path.join(os.path.dirname(STATE), "facebook_share_%s.png" % day)
     task = (approval.load_state().get(str(day)) or {}).get("task", "")
-    fb.update({"plan": plan_path, "text": text})
+    fb.update({"plan": plan_path, "text": text, "status": "sharing", "started": now_utc()})
+    save_state(state)                                  # on disk BEFORE Share is pressed, so a dead run never shares twice
     try:
         facebook_share.run_plan(plan_path, task, test, shot)
-    except SystemExit as ex:
+    except Exception as ex:
         fb["status"] = "failed"; fb["error"] = str(ex)[-300:]
         print("episode %s: Facebook profile share FAILED: %s" % (day, str(ex)[-200:]), file=sys.stderr)
         return True
@@ -649,6 +768,7 @@ def run(dry_run=False, limit=3):
     acct_map = account_map(accounts()); yt_ok = "youtube" in acct_map
     ledger = watch.load_ledger()
     done = 0; per_stage = {1: 0, 2: 0}
+    save = (lambda: None) if dry_run else (lambda: save_state(state))
     gaps = watch.gap_days()   # Kevin's catch-up days (8 Sep 2026): they fill old holes, so they never wait for, or move, the cursor
     held = [d for d in days if d > cursor(state) + 1 and d not in gaps]
     if held: print("publish: held for order (behind day %d): %s" % (cursor(state) + 1, ", ".join(str(d) for d in held)))
@@ -658,6 +778,7 @@ def run(dry_run=False, limit=3):
         full = recs["Long Form Video"]
         if not full or full["fields"].get("Record Status") not in PUBLISHABLE:
             continue
+        test = mode() == "test"
         stage = stage_for(entry, yt_ok)
         if stage == "youtube" and not may_go_to_youtube(day, gaps, state, ledger, days):
             continue
@@ -666,20 +787,22 @@ def run(dry_run=False, limit=3):
         if stage == "wait-youtube-link":
             print("episode %d: YouTube post scheduled, waiting for it to publish before the socials go out" % day); continue
         if stage == "done":
+            if not dry_run: finish_extras(day, entry, recs, test, save)     # a blog or Spotify that failed last hour
             continue
         if done >= limit: break
         st_no = 1 if stage == "youtube" else 2
-        n = schedule_stage(day, entry, recs, acct_map, st_no, dry_run, index=per_stage[st_no])
+        n = schedule_stage(day, entry, recs, acct_map, st_no, dry_run, index=per_stage[st_no], save=save)
         if n: per_stage[st_no] += 1
-        if n and st_no == 1 and not dry_run and moves_cursor(day, gaps): state[CURSOR_KEY] = day
+        if n and st_no == 1 and not dry_run and moves_cursor(day, gaps): state[CURSOR_KEY] = day; save()
         done += 1 if n else 0
-        if not dry_run: save_state(state)
         # Same day, not the day after (Kevin, 10 Sep 2026). The direct upload hands back the YouTube link at
         # once, so the socials, the blog, the podcast and Spotify go out this afternoon instead of tomorrow.
         if st_no == 1 and n and stage_for(entry, yt_ok) == "socials":
-            if schedule_stage(day, entry, recs, acct_map, 2, dry_run, index=per_stage[2]):
+            if schedule_stage(day, entry, recs, acct_map, 2, dry_run, index=per_stage[2], save=save):
                 per_stage[2] += 1
-                if not dry_run: save_state(state)
+        if stage_for(entry, yt_ok) == "done" and not dry_run:
+            finish_extras(day, entry, recs, test, save)
+        save()
 
 
 YTDLP = os.path.expanduser("~/Library/Python/3.9/bin/yt-dlp")
@@ -715,7 +838,14 @@ def sync():
     state = load_state(); _, loc, _ = _cfg()
     for day, entry in state.items():
         if not str(day).isdigit() or not isinstance(entry, dict): continue   # _cursor, _skipped_days, held_posts live beside the episodes (9 Sep 2026: the first live cursor crashed sync)
-        if share_to_facebook_profile(day, entry, state): save_state(state)
+        try:
+            if monetise_long_video(day, entry): save_state(state)
+        except Exception as ex:
+            print("episode %s: monetisation check skipped this run (%s)" % (day, str(ex)[-160:]), file=sys.stderr)
+        try:
+            if share_to_facebook_profile(day, entry, state): save_state(state)
+        except Exception as ex:           # a page read timed out on 11 Sep 2026 and ended the whole hourly run
+            print("episode %s: Facebook profile share skipped this run (%s)" % (day, str(ex)[-160:]), file=sys.stderr)
         pod = entry.get("podcast") or {}
         if pod.get("status") == "processing" and pod.get("title"):
             # the public link arrives once Spotify has processed the video (a few minutes after Publish)
@@ -821,6 +951,16 @@ def report():
     published = [d for d, e in state.items() if e.get("posts") and all(p.get("status") == "published" for p in e["posts"].values())]
     print("content publishing: %d approved episode%s not yet scheduled, %d posts scheduled, %d failed, %d episodes fully published" % (
         len(waiting), "" if len(waiting) == 1 else "s", scheduled, failed, len(published)))
+    waiting = []
+    for d, e in state.items():
+        if not str(d).isdigit() or not isinstance(e, dict): continue
+        for k, p in (e.get("posts") or {}).items():
+            if k.startswith("youtube|") and p.get("clip") == "full" and p.get("monetisation") not in (None, "On"):
+                waiting.append("%s (%s)" % (d, p["monetisation"]))
+    unconfirmed = ["%s %s %s" % (d, p.get("platform"), p.get("clip")) for d, e in state.items() if str(d).isdigit() and isinstance(e, dict)
+                   for p in (e.get("posts") or {}).values() if p.get("status") in ("creating", "unconfirmed")]
+    print("content monetisation: %s" % ("every long video On" if not waiting else "NOT On yet for " + ", ".join(sorted(waiting))))
+    print("content posts to check once: %s" % ("none" if not unconfirmed else ", ".join(unconfirmed)))
 
 
 def youtube_link():
@@ -831,6 +971,91 @@ def youtube_link():
                                  headers={"Authorization": "Bearer " + key, "Version": "2021-07-28", "User-Agent": UA})
     try: r = urllib.request.build_opener(NoRedirect).open(req); print(r.headers.get("Location"))
     except urllib.error.HTTPError as e: print(e.headers.get("Location") or e.read().decode()[:300])
+
+
+def _selftest_once_only():
+    import contextlib
+    with contextlib.redirect_stdout(sys.stderr):      # the test's own posting lines must not land in the JSON the suite reads
+        return _selftest_once_only_body()
+
+
+def _selftest_once_only_body():
+    """A run killed half way through posting must never post a channel twice (Kevin, 13 Sep 2026). Runs the real
+    schedule_stage and finish_extras against fakes: the first run is killed after two posts, the second run must
+    create only the channels that were never started, the blog exactly once, and Spotify exactly once."""
+    import copy as _copy, tempfile as _tf, types as _types
+    g = globals(); saved = {k: g[k] for k in ("_cfg", "episode_files", "media_for", "mode", "youtube_direct_ready", "create_post", "approval", "watch", "run_spotify")}
+    tmp = _tf.mkdtemp()
+    def fake_files(day):
+        out = {}
+        for k, name in CLIP_FILES.items():
+            path = os.path.join(tmp, name % day); open(path, "w").write("x"); out[k] = path
+        return out
+    class Killed(BaseException): pass          # what a SIGKILL or a lost Mac looks like to Python: nothing catches it
+    calls = {"post": 0, "blog": 0, "spotify": 0}; kill_after = {"n": 2}
+    def fake_create(body, brand="Runpreneur"):
+        if kill_after["n"] is not None and calls["post"] >= kill_after["n"]: raise Killed()
+        calls["post"] += 1; return "p%d" % calls["post"]
+    state = {}
+    disk = {"state": None}
+    def save(): disk["state"] = _copy.deepcopy(state)
+    try:
+        g.update({"_cfg": lambda brand="Runpreneur": ("k", "loc", "user"), "episode_files": fake_files,
+                  "media_for": lambda day, entry, kinds: {k: "https://cdn/%s" % k for k in kinds},
+                  "mode": lambda: "live", "youtube_direct_ready": lambda: False, "create_post": fake_create,
+                  "approval": _types.SimpleNamespace(append_note=lambda rec, line: line, load_state=lambda: {}),
+                  "watch": _types.SimpleNamespace(_airtable=lambda *a, **k: {}, API="x"),
+                  "run_spotify": lambda day, tid, plan, title, test, pod: (calls.__setitem__("spotify", calls["spotify"] + 1), pod.update(status="published"), "Spotify published")[2]})
+        accts = {"facebook": [{"id": "fb", "name": "Runpreneur"}], "linkedin": [{"id": "lp", "name": "Runpreneur"}, {"id": "lk", "name": "Kevin Brittain"}],
+                 "threads": [{"id": "th", "name": "runpreneur"}]}
+        recs = {"Long Form Video": {"id": "recF", "fields": {"YouTube Copy": "Title: T\nDescription: D", "Blog Copy": "b", "Podcast Copy": "Title: P"}},
+                "Short Form Video": {"id": "recS", "fields": {"Facebook Reels Copy": "fb", "LinkedIn Copy": "li", "Threads Copy": "th"}},
+                "Learnings From My Diary": {"id": "recL", "fields": {"Facebook Post Copy": "fb2", "LinkedIn Copy": "li2", "Threads Copy": "th2"}}}
+        entry = state.setdefault("9", {"youtube_link": "https://youtu.be/x"})
+        try:
+            schedule_stage(9, entry, recs, accts, 2, index=0, save=save)
+            raise AssertionError("the first run should have been killed")
+        except Killed:
+            pass
+        after_kill = disk["state"]["9"]["posts"]
+        made_first = calls["post"]
+        assert made_first == 2 and sum(1 for p in after_kill.values() if p.get("id")) == 2, after_kill
+        creating = [k for k, p in after_kill.items() if p.get("status") == "creating"]
+        assert len(creating) == 1, "the post in flight when the run died is on disk as creating: %s" % after_kill
+        # second run, from what was on disk, with a working platform
+        state.clear(); state.update(_copy.deepcopy(disk["state"])); entry = state["9"]; kill_after["n"] = None
+        n = schedule_stage(9, entry, recs, accts, 2, index=0, save=save)
+        total_channels = 2 * 4          # summary + lfmd on 4 accounts
+        assert calls["post"] == total_channels - 1, "every channel posted once, the half-made one never again: %d posts" % calls["post"]
+        assert entry["posts"][creating[0]]["status"] == "unconfirmed", "the half-made post is reported, not repeated"
+        n2 = schedule_stage(9, entry, recs, accts, 2, index=0, save=save)
+        assert n2 == 0 and calls["post"] == total_channels - 1, "a third run posts nothing"
+        # extras: blog and Spotify once each, even when the run is repeated
+        import blog as _blog
+        bsaved = _blog.publish_blog
+        def fake_blog(day, full, e, thumb, link, test):
+            calls["blog"] += 1; e["blog"] = {"id": "", "url": "https://runpreneur.org.uk/blog/b/t-day-9", "status": "PUBLISHED"}; return "", e["blog"]["url"]
+        _blog.publish_blog = fake_blog
+        try:
+            import spotify as _sp
+            wsaved = _sp.write_plan; _sp.write_plan = lambda *a, **k: ("/tmp/plan.json", "Episode 9 - P")
+            try:
+                for _ in range(3): finish_extras(9, entry, recs, False, save)
+            finally:
+                _sp.write_plan = wsaved
+        finally:
+            _blog.publish_blog = bsaved
+        assert calls["blog"] == 1 and calls["spotify"] == 1, "blog and Spotify once each across three runs: %s" % calls
+        # a run killed while the blog was being published leaves 'creating': the next run does not publish again
+        e2 = {"youtube_link": "https://youtu.be/x", "blog": {"status": "creating"}, "podcast": {"status": "published"}}
+        _blog.publish_blog = fake_blog
+        try: finish_extras(9, e2, recs, False, lambda: None)
+        finally: _blog.publish_blog = bsaved
+        assert calls["blog"] == 1, "a blog left creating by a killed run is never published a second time"
+        assert definitely_not_created(SystemExit("GHL POST /x -> 422: bad")) and not definitely_not_created(SystemExit("GHL POST /x -> 502: gateway")) and not definitely_not_created(TimeoutError())
+    finally:
+        g.update(saved)
+    return 1
 
 
 def selftest():
@@ -889,6 +1114,8 @@ def selftest():
     import inspect as _i
     assert "share_to_facebook_profile(day, entry, state)" in _i.getsource(sync) and "signin-needed" in _i.getsource(share_to_facebook_profile), "the profile share runs from sync, on the page post, and waits for sign-in"
     fsrc = _i.getsource(share_to_facebook_profile); assert "find_page_post" in fsrc and "verify_shared" in fsrc, "it shares the page post and checks the profile afterwards"
+    assert fsrc.index('"status": "sharing"') < fsrc.index("run_plan(") and fsrc.index("save_state(state)") < fsrc.index("run_plan("), "the share is on disk before Share is pressed"
+    assert "except Exception as ex:           # a page read timed out" in _i.getsource(sync), "a failing share never ends the run"
     rsrc = _i.getsource(run); assert 'stage_for(entry, yt_ok) == "socials"' in rsrc and rsrc.count("schedule_stage(") == 2, "both stages run the same day"
     t0 = dt.datetime(2026, 9, 10, 9, 0, tzinfo=LONDON)
     assert when_for("youtube", "full", 0, now=t0) == "2026-09-10T08:15:00Z", "the 06:00 slot has passed: 15 minutes from now, same morning"
@@ -939,7 +1166,11 @@ def selftest():
     tp = build_text_post(od_accts[1], "hello", "2026-09-07T07:00:00Z", "u1", "https://cdn/c.png")
     assert tp["media"] == [{"url": "https://cdn/c.png", "type": "image/png"}] and tp["type"] == "post" and tp["scheduleDate"] == "2026-09-07T07:00:00Z"
     fbp = build_text_post(od_accts[4], "hello", "x", "u1", status="draft"); assert fbp["facebookPostDetails"] == {"type": "post"} and "media" not in fbp and "scheduleDate" not in fbp
-    print(json.dumps({"checks": 46, "failed": []}))
+    _selftest_once_only()
+    import inspect as _i5; ss = _i5.getsource(sync); assert ss.index("monetise_long_video(day, entry)") < ss.index("share_to_facebook_profile(day, entry, state)"), "monetisation is checked every sync"
+    ms = _i5.getsource(monetise_long_video); assert "MONETISE_RECHECK_HOURS" in ms and "needs-rating" in ms, "a video waiting for the rating is re-checked, not hammered"
+    rp = _i5.getsource(report); assert "content monetisation:" in rp and "content posts to check once:" in rp, "the morning report shows both"
+    print(json.dumps({"checks": 47, "failed": []}))
 
 
 if __name__ == "__main__":

@@ -1857,7 +1857,12 @@ describe('disk precondition', () => {
     //
     // Pinned to the exact figure so a future change is a deliberate edit here
     // with a reason, not a silent drift in either direction.
-    expect(disk[0].diskGB).toBe(30);
+    //
+    // 15 GB, Kevin's call on 13 Sep 2026: the render was refused every night from
+    // 11 Sep with 16-17 GB free against 30, so no episode was made for three days.
+    // The per-clip check in watch.py (twice the clip plus 5 GB) still refuses a pull
+    // that will not fit, so the floor only has to cover a render of a clip already on disk.
+    expect(disk[0].diskGB).toBe(15);
   });
 });
 

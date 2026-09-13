@@ -69,9 +69,11 @@ describe('content-engine publish (GHL)', () => {
   it('publishes the blog article through the GHL Blog API at stage 2 (draft in test mode) and passes its selftest', () => {
     const src = readFileSync(PUBLISH, 'utf8');
     expect(src).toContain('pid, url = blog.publish_blog(day, full, entry, media.get("thumb"), entry["youtube_link"], test)');
-    expect(src).toContain('fields["Blog Link"] = url');
+    expect(src).toContain('{"fields": {"Blog Link": url}}');   // the blog moved to finish_extras, once only (13 Sep 2026)
     const out = JSON.parse(execFileSync('python3', [path.join(DIR, 'blog.py'), 'selftest'], { encoding: 'utf8', cwd: DIR }));
     const fb = JSON.parse(execFileSync('python3', [path.join(DIR, 'facebook_share.py'), 'selftest'], { encoding: 'utf8', cwd: DIR }));
+    const ys = JSON.parse(execFileSync('python3', [path.join(DIR, 'youtube_studio.py'), 'selftest'], { encoding: 'utf8', cwd: DIR }));
+    expect(ys.failed).toEqual([]);   // long-video monetisation: stops at YouTube's content rating, never submits it (13 Sep 2026)
     expect(fb.failed).toEqual([]);
     const sp = JSON.parse(execFileSync('python3', [path.join(DIR, 'spotify.py'), 'selftest'], { encoding: 'utf8', cwd: DIR }));
     expect(sp.failed).toEqual([]);
