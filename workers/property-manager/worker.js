@@ -8,6 +8,9 @@
 //
 // Endpoints (all JSON; browser origin must be on the allow-list):
 //   POST /login        { passcode }            → { token, exp, who }
+//   POST /login-airtable { pat }               → { token, exp, who }  Kevin inside the OD app:
+//                      the Worker asks Airtable who owns the key and signs in only
+//                      when the owner is PM_KEVIN_AIRTABLE_ID. The key is never stored.
 //   GET  /data         Bearer token            → computed dashboard (cached 10 min; ?refresh=1 bypasses)
 //   GET  /tasks        Bearer token            → Roy-scope open tasks (never cached)
 //   POST /task/:id     Bearer token { status?, note?, due?, reopen? } → { ok, task }
@@ -20,9 +23,10 @@
 //   PM_PASSCODE         - Roy's passcode
 //   PM_PASSCODE_KEVIN   - Kevin's passcode for the same page (notes sign as him)
 //   PM_SESSION_SECRET   - HMAC key for session tokens
+//   PM_KEVIN_AIRTABLE_ID - Kevin's Airtable user id (usr…), the only owner /login-airtable accepts
 // Bindings: LOGIN_LIMIT (ratelimit, optional) — 5 attempts per minute per IP.
 
-import { computeAll, shapeTasks, isRoyScope, isTaskOpen, appendNote, buildNameMap, statusForDue, dateKey } from './compute.mjs';
+import { computeAll, shapeTasks, isRoyScope, isTaskOpen, appendNote, buildNameMap, statusForDue, dateKey, txWindowStart } from './compute.mjs';
 import { BASE, TABLES, F, NAMES, REAL_ESTATE_NAME, ROY_STATUS_ALLOW } from './fields.mjs';
 
 const VERSION = '1.0';
@@ -35,9 +39,9 @@ const ALLOWED_ORIGINS = ['https://app.operationsdirector.co.uk', 'https://chaich
 const DEV_ORIGIN = /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/;
 
 const READ_FIELDS = {
-  tenancies: [F.tenPayStatus, F.tenRent, F.tenDueDay, F.tenPayFreq, F.tenSurname, F.tenUnitRef, F.tenProperty, F.tenStatus, F.tenEndDate, F.tenLinkedTenant, F.tenUnit, F.tenNextDueDate, F.tenDaysOverdue],
+  tenancies: [F.tenPayStatus, F.tenRent, F.tenDueDay, F.tenPayFreq, F.tenSurname, F.tenUnitRef, F.tenProperty, F.tenStatus, F.tenEndDate, F.tenLinkedTenant, F.tenUnit, F.tenNextDueDate, F.tenDaysOverdue, F.tenStartDate],
   rentalUnits: [F.unitStatus, F.unitPropName, F.unitName, F.unitType],
-  tenants: [F.tenantPayType],
+  tenants: [F.tenantPayType, F.tenantName, F.tenantPhone, F.tenantEmail, F.tenantStatus],
   costs: [F.costName, F.costExpected, F.costPayStatus, F.costInactive, F.costBusiness, F.costSubCategory, F.costCategory],
   transactions: [F.txDate, F.txReportAmount, F.txSubCategory, F.txProperty, F.txTenancy, F.txUnit, F.txName, F.txVendor],
   subCategories: [F.subCatName],
@@ -125,7 +129,9 @@ async function fetchAll(env, table, fields, filterByFormula) {
   } while (offset);
   return out;
 }
-const TX_FILTER = `AND(ARRAYJOIN({${NAMES.txBusiness}})='${REAL_ESTATE_NAME}', IS_AFTER({${NAMES.txDate}}, DATEADD(TODAY(), -13, 'month')))`;
+// Starts the day before the oldest whole month the 12-month average needs, so
+// the window is stated exactly rather than inferred from "13 months ago".
+const txFilter = (today) => `AND(ARRAYJOIN({${NAMES.txBusiness}})='${REAL_ESTATE_NAME}', IS_AFTER({${NAMES.txDate}}, DATETIME_PARSE('${txWindowStart(today)}', 'YYYY-MM-DD')))`;
 const OPEN_TASK_FILTER = `AND({${NAMES.taskStatus}}!='Completed',{${NAMES.taskStatus}}!='Cancelled')`;
 
 async function loadData(env) {
@@ -138,7 +144,7 @@ async function loadData(env) {
     fetchAll(env, TABLES.categories, READ_FIELDS.categories),
     fetchAll(env, TABLES.properties, READ_FIELDS.properties),
   ]);
-  const transactions = await fetchAll(env, TABLES.transactions, READ_FIELDS.transactions, TX_FILTER);
+  const transactions = await fetchAll(env, TABLES.transactions, READ_FIELDS.transactions, txFilter(londonNow()));
   return { tenancies, rentalUnits, tenants, costs, subCategories, categories, properties, transactions };
 }
 async function loadTasks(env) {
@@ -152,11 +158,7 @@ async function loadTasks(env) {
 
 // ── Handlers ──
 async function handleLogin(request, env, origin) {
-  if (env.LOGIN_LIMIT) {
-    const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
-    const { success } = await env.LOGIN_LIMIT.limit({ key: ip });
-    if (!success) return err('Too many attempts. Wait a minute and try again.', 429, origin);
-  }
+  if (await rateLimited(request, env)) return err('Too many attempts. Wait a minute and try again.', 429, origin);
   let body;
   try { body = await request.json(); } catch { return err('Bad request', 400, origin); }
   const pass = String(body && body.passcode || '');
@@ -168,6 +170,41 @@ async function handleLogin(request, env, origin) {
   const exp = Math.floor(Date.now() / 1000) + TOKEN_TTL_S;
   const token = await signToken({ who, exp }, env.PM_SESSION_SECRET);
   return json({ ok: true, token, exp, who }, 200, origin);
+}
+
+async function rateLimited(request, env) {
+  if (!env.LOGIN_LIMIT) return false;
+  const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
+  const { success } = await env.LOGIN_LIMIT.limit({ key: ip });
+  return !success;
+}
+
+// Kevin inside the OD app already holds an Airtable key. Airtable says whose
+// key it is; only Kevin's user id is accepted. A key for any other account,
+// a revoked key, or an Airtable outage all fall back to the passcode screen.
+async function handleLoginAirtable(request, env, origin) {
+  if (await rateLimited(request, env)) return err('Too many attempts. Wait a minute and try again.', 429, origin);
+  let body;
+  try { body = await request.json(); } catch { return err('Bad request', 400, origin); }
+  const pat = String(body && body.pat || '').trim();
+  if (!pat || !env.PM_SESSION_SECRET || !env.PM_KEVIN_AIRTABLE_ID) return err('Sign in needed', 401, origin);
+  let owner = '';
+  try {
+    const res = await fetch('https://api.airtable.com/v0/meta/whoami', { headers: { Authorization: `Bearer ${pat}` } });
+    if (res.ok) owner = String((await res.json()).id || '');
+  } catch { owner = ''; }
+  if (!owner || !timingSafeEqual(owner, env.PM_KEVIN_AIRTABLE_ID)) return err('That key does not belong to an allowed account.', 401, origin);
+  // Owning a key is not enough: a narrow-scope key of Kevin's with no access to
+  // this base must not open a session with write access to tasks (review, 13 Sep 2026).
+  let reachesBase = false;
+  try {
+    const probe = await fetch(`https://api.airtable.com/v0/${BASE}/${TABLES.tasks}?maxRecords=1&fields%5B%5D=${F.taskName}`, { headers: { Authorization: `Bearer ${pat}` } });
+    reachesBase = probe.ok;
+  } catch { reachesBase = false; }
+  if (!reachesBase) return err('That key cannot read the property base.', 401, origin);
+  const exp = Math.floor(Date.now() / 1000) + TOKEN_TTL_S;
+  const token = await signToken({ who: 'Kevin Brittain', exp }, env.PM_SESSION_SECRET);
+  return json({ ok: true, token, exp, who: 'Kevin Brittain' }, 200, origin);
 }
 
 async function requireAuth(request, env) {
@@ -280,6 +317,7 @@ export default {
     try {
       if (path === '/health' && request.method === 'GET') return json({ ok: true, version: VERSION }, 200, origin);
       if (path === '/login' && request.method === 'POST') return await handleLogin(request, env, origin);
+      if (path === '/login-airtable' && request.method === 'POST') return await handleLoginAirtable(request, env, origin);
 
       const session = await requireAuth(request, env);
       if (!session) return err('Sign in needed', 401, origin);

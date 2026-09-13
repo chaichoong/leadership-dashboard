@@ -41,6 +41,14 @@ export function monthKeys(n, today) {
   return out;
 }
 export function lastMonthKey(today) { return monthKeys(2, today)[0]; }
+// The last N WHOLE months, oldest first (never the current part-month).
+export function completeMonthKeys(n, today) { return monthKeys(n + 1, today).slice(0, n); }
+// Transactions must reach back to the first day of the oldest whole month the
+// 12-month average needs. Returns the day BEFORE it, for IS_AFTER.
+export function txWindowStart(today) {
+  const first = new Date(today.getFullYear(), today.getMonth() - 12, 1);
+  return dateKey(addDays(first, -1));
+}
 
 // ── Tenancy status (mirrors js/shared.js) ──
 const statusName = (v) => selName(v).trim().toLowerCase();
@@ -324,6 +332,42 @@ export function pnlByProperty(transactions, ctx, keysList, today) {
   return { keys: keysList, rows: list, total };
 }
 export const PNL_WINDOWS = ['this', 'last', '3', '6', '12'];
+
+// Rolling average monthly profit per property over the last 3, 6 and 12 WHOLE
+// months (Kevin, 13 Sep 2026). A month with no transactions counts as £0, so
+// the divisor is always N: an average that skipped empty months would flatter
+// a property that earned nothing for a quarter.
+export const AVG_WINDOWS = [3, 6, 12];
+export function pnlAverages(transactions, ctx, today) {
+  const keys12 = completeMonthKeys(12, today);
+  const monthly = {}; // property → { 'YYYY-MM': profit }
+  const total = {};
+  for (const tx of transactions) {
+    const mk = String(f(tx, F.txDate) || '').slice(0, 7);
+    if (!keys12.includes(mk)) continue;
+    const subId = linkIds(f(tx, F.txSubCategory))[0];
+    const section = ctx.subSection[ctx.subNames[subId] || ''];
+    if (!section) continue;
+    // Report Amount is signed (income +, costs −), so a transaction's
+    // contribution to profit is its amount whichever section it sits in.
+    const contrib = num(f(tx, F.txReportAmount));
+    const p = txPropertyName(tx, ctx) || 'Unallocated';
+    const m = (monthly[p] = monthly[p] || {});
+    m[mk] = (m[mk] || 0) + contrib;
+    total[mk] = (total[mk] || 0) + contrib;
+  }
+  const avg = (byMonth) => {
+    const out = {};
+    for (const n of AVG_WINDOWS) {
+      const ks = keys12.slice(-n);
+      out[`avg${n}`] = round2(ks.reduce((s, k) => s + (byMonth[k] || 0), 0) / n);
+    }
+    return out;
+  };
+  const byProperty = {};
+  for (const p of Object.keys(monthly)) byProperty[p] = avg(monthly[p]);
+  return { months: keys12, byProperty, total: avg(total) };
+}
 export function pnlWindowKeys(win, today) {
   if (win === 'this') return monthKeys(1, today);
   if (win === 'last') return [lastMonthKey(today)];
@@ -380,6 +424,45 @@ export function appendNote(existing, text, who, now) {
   return prev ? `${prev}\n${line}` : line;
 }
 
+// ── Tenants: live tenancies with the tenant's contact details ──
+// One row per live tenancy; a tenancy linked to more than one tenant lists
+// every one of them. Former tenants and ended tenancies never appear.
+export function tenantList(tenancies, tenants, payments, today) {
+  const byId = {};
+  for (const t of tenants || []) byId[t.id] = t;
+  const isFormer = (p) => selName(f(p, F.tenantStatus)).trim().toLowerCase() === 'former';
+  const rows = [];
+  for (const t of tenancies) {
+    if (!isTenancyActive(t) || !isTenantStatusActive(t, today)) continue;
+    const ids = linkIds(f(t, F.tenLinkedTenant));
+    // A tenant who has moved out of a shared tenancy is no longer a contact.
+    const current = ids.map(id => byId[id]).filter(p => p && !isFormer(p));
+    const people = current.map(p => ({
+      name: firstText(f(p, F.tenantName)),
+      phone: firstText(f(p, F.tenantPhone)),
+      email: firstText(f(p, F.tenantEmail)),
+      payType: selName(f(p, F.tenantPayType)),
+    }));
+    const hist = payments[t.id] || [];
+    rows.push({
+      tenancyId: t.id,
+      people: people.length ? people : [{ name: firstText(f(t, F.tenSurname)) || 'Unknown', phone: '', email: '', payType: '' }],
+      unit: firstText(f(t, F.tenUnitRef)),
+      property: firstText(f(t, F.tenProperty)),
+      rent: num(f(t, F.tenRent)),
+      dueDay: num(f(t, F.tenDueDay)) || null,
+      frequency: selName(f(t, F.tenPayFreq)) || 'Monthly',
+      start: String(f(t, F.tenStartDate) || '').slice(0, 10),
+      status: selName(f(t, F.tenPayStatus)),
+      isUC: current.some(p => selName(f(p, F.tenantPayType)).toLowerCase().includes('universal credit')),
+      lastPaid: hist[0] || null,
+    });
+  }
+  // Blank property last: a tenancy with no unit link is a data gap, not the first thing to read.
+  rows.sort((a, b) => (!a.property) - (!b.property) || a.property.localeCompare(b.property) || a.unit.localeCompare(b.unit));
+  return rows;
+}
+
 // ── Assemble ──
 // `today` is London wall-clock (drives every window); `nowIso` is the real
 // instant the figures were computed, for the page's freshness stamp.
@@ -406,6 +489,8 @@ export function computeAll(data, today, nowIso) {
       leaves: round2(ten.expectedRent - costs.total),
     },
     rentDue: rentDue(data.tenancies, data.tenants, payments, today),
+    pnlAverages: pnlAverages(data.transactions, ctx, today),
+    tenantList: tenantList(data.tenancies, data.tenants, payments, today),
     pnl,
     health: {
       txCount: data.transactions.length,
