@@ -249,8 +249,10 @@ def expected_firings(cron, window_hours, ref=None, settle_minutes=SETTLE_MINUTES
     return n
 
 
-def slot_attendance(ran, schedule, window_hours, ref=None):
-    """{slot: {cron, expected, ran, shortfall}} for every approved slot with a cron."""
+def slot_attendance(ran, schedule, window_hours, ref=None, finished=None):
+    """{slot: {cron, expected, ran, died, worked, causes, shortfall}} for every
+    approved slot with a cron. `finished` is {job: [exit codes]} in window order;
+    a run with no finished event yet is still in progress, not dead."""
     out = {}
     for name in sorted(APPROVED_SLOTS):
         cfg = (schedule or {}).get(name) or {}
@@ -263,9 +265,73 @@ def slot_attendance(ran, schedule, window_hours, ref=None):
         except Exception:
             continue          # an unreadable cron is the register's problem, not a missed run
         got = len(ran.get(name, []))
-        out[name] = {"cron": cron, "expected": exp, "ran": got,
-                     "shortfall": max(0, exp - got)}
+        exits = (finished or {}).get(name, [])
+        died = min(got, sum(1 for e in exits if e != 0))
+        worked = got - died
+        out[name] = {"cron": cron, "expected": exp, "ran": got, "died": died,
+                     "worked": worked,
+                     "causes": death_causes(name, exits) if died else {},
+                     "shortfall": max(0, exp - worked)}
     return out
+
+
+# ─── A SLOT THAT TOOK THE QUEUE IS NOT A SLOT THAT RAN ───────────────
+#
+# Finding 20260913-daily-ops-526. From 12 Sep 2026 the Claude usage cap was hit,
+# and every slot run printed "You've hit your limit" and exited 1 within seconds.
+# Each one still wrote `acquired`, so attendance read "task-manager 3 of 3" for a
+# day in which the Task Manager did nothing at all. A run now counts as WORKED
+# only when its `finished` event carries exit 0. A died run is named with its
+# cause, read from the slot's own runs.log, and the usage cap is its own cause so
+# the report says the allowance ran out rather than that the job broke.
+SLOT_LOG_DIR = os.environ.get(
+    "SLOT_RUNS_LOG_DIR", os.path.join(HOME, "knowledge-os/logs"))
+USAGE_CAP_MARKERS = ("You've hit your limit", "You\u2019ve hit your limit")
+CAUSE_LABELS = {"usage-cap": "the AI allowance ran out"}
+
+
+def run_log_blocks(job):
+    """The text of each finished run in <job>/runs.log, oldest first, split on
+    the wrapper's `===== done rc=N` line. None when the log cannot be read."""
+    path = os.path.join(SLOT_LOG_DIR, job, "runs.log")
+    try:
+        with open(path, errors="replace") as f:
+            text = f.read()
+    except OSError:
+        return None
+    blocks, cur = [], []
+    for line in text.splitlines():
+        cur.append(line)
+        if line.startswith("===== done rc="):
+            blocks.append("\n".join(cur))
+            cur = []
+    return blocks
+
+
+def death_causes(job, exits):
+    """{cause: count} for the non-zero exits in `exits` (window order). The last
+    len(exits) done-blocks of runs.log are the same runs, in the same order."""
+    causes = {}
+    failed = [i for i, e in enumerate(exits) if e != 0]
+    if not failed:
+        return causes
+    blocks = run_log_blocks(job)
+    tail = blocks[-len(exits):] if blocks and len(blocks) >= len(exits) else None
+    for i in failed:
+        block = tail[i] if tail else ""
+        if any(m in block for m in USAGE_CAP_MARKERS):
+            cause = "usage-cap"
+        elif tail is None:
+            cause = "exit %s (runs.log unreadable)" % exits[i]
+        else:
+            cause = "exit %s" % exits[i]
+        causes[cause] = causes.get(cause, 0) + 1
+    return causes
+
+
+def describe_causes(causes):
+    return ", ".join("%s x%d" % (CAUSE_LABELS.get(c, c), n)
+                     for c, n in sorted(causes.items()))
 
 
 def read_lane_results(path, window_hours, ref=None):
@@ -426,10 +492,16 @@ def check(window_hours=DEFAULT_WINDOW_HOURS):
                              "an empty window means the log stopped, not that the "
                              "Mac was quiet. Cannot verify, so treat as broken."}
 
-    ran = {}
+    ran, finished = {}, {}
     for rec in rows:
         if rec.get("state") in RAN_STATES:
             ran.setdefault(rec.get("job"), []).append(rec.get("ts"))
+        elif rec.get("state") == "finished":
+            try:
+                code = int(rec.get("exit", 0))
+            except (TypeError, ValueError):
+                code = 1          # an exit we cannot read is not a success
+            finished.setdefault(rec.get("job"), []).append(code)
 
     ran_routines = sorted(n for n in ran if n in routines)
     extras = sorted(n for n in ran_routines
@@ -441,7 +513,7 @@ def check(window_hours=DEFAULT_WINDOW_HOURS):
             schedule_cfg = json.load(f)
     except (OSError, ValueError):
         schedule_cfg = {}
-    attendance = slot_attendance(ran, schedule_cfg, window_hours)
+    attendance = slot_attendance(ran, schedule_cfg, window_hours, finished=finished)
     shortfalls = {n: v for n, v in attendance.items() if v["shortfall"]}
     # A slot that fired is not a slot that worked (finding 477).
     lanes = lane_health(window_hours)
@@ -490,7 +562,7 @@ def check(window_hours=DEFAULT_WINDOW_HOURS):
             "%d approved slot(s) ran fewer times than their schedule implies in "
             "the last %dh: %s. Nothing is stacking, but those runs did not happen."
             % (len(shortfalls), window_hours,
-               ", ".join("%s %d of %d" % (n, v["ran"], v["expected"])
+               ", ".join(_shortfall_text(n, v)
                          for n, v in sorted(shortfalls.items()))))
     result["reason"] = (
         "only %s and its approved slots ran in the last %dh (%d queue events "
@@ -498,6 +570,22 @@ def check(window_hours=DEFAULT_WINDOW_HOURS):
         % (THE_ROUTINE, window_hours, len(rows),
            ", ".join(slots_that_ran) if slots_that_ran else "none"))
     return 0, result
+
+
+def _attendance_text(v):
+    """'ran 3 of 3, 3 died: the AI allowance ran out x3' — never 'ran' alone
+    when a run exited non-zero."""
+    text = "ran %d of %d expected runs" % (v["ran"], v["expected"])
+    if v.get("died"):
+        text += ", %d died: %s" % (v["died"], describe_causes(v.get("causes", {})))
+    return text
+
+
+def _shortfall_text(name, v):
+    if v.get("died"):
+        return "%s worked %d of %d (%s)" % (
+            name, v.get("worked", 0), v["expected"], _attendance_text(v))
+    return "%s %d of %d" % (name, v["ran"], v["expected"])
 
 
 def main():
@@ -512,7 +600,7 @@ def main():
         att = result.get("slot_attendance", {})
         missed = ("%d approved slot(s) ran fewer times than their schedule implies: %s"
                   % (len(result["slot_shortfalls"]),
-                     ", ".join("%s %d of %d" % (n, att[n]["ran"], att[n]["expected"])
+                     ", ".join(_shortfall_text(n, att[n])
                                for n in result["slot_shortfalls"])))
     if a.json:
         print(json.dumps(result, indent=2))
@@ -521,7 +609,7 @@ def main():
         print("    %d routines known, %d other job(s) also used the queue"
               % (result["routines_known"], len(result["non_routine_jobs_that_ran"])))
         for name, v in sorted(result.get("slot_attendance", {}).items()):
-            print("    slot %s: %d of %d expected runs" % (name, v["ran"], v["expected"]))
+            print("    slot %s: %s" % (name, _attendance_text(v)))
         # Exit 0 still means "nothing is stacking". A slot that did not run is a
         # DIFFERENT problem, so it is said in its own words rather than folded
         # into the stacking verdict (5 Sep 2026).
