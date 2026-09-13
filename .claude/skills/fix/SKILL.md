@@ -81,6 +81,8 @@ Include the Fork line only when the fix genuinely has two valid approaches (patc
 
 For ambiguous problems or amendments that change behaviour, present the BILD prompt and ask: "Should I fix this as described, or adjust?"
 
+**Either way, the moment the fix is agreed (Kevin's yes, or the confirmed root cause on the fast path), the first line of the reply is the paste-ready `/goal` line**: what "fixed" looks like, each check with how it is proved (`npm run test:sync` exits 0, the deploy poll prints the new pageVer, a screenshot of the live page is posted), the file scope as the constraint, and `or stop after 12 turns`. Rules and an example: `~/.claude/skills/goal-line/SKILL.md`. Kevin pastes it and Claude Code's built-in evaluator holds the session open until the proof is on screen. Skip it only for a one-turn cosmetic tweak. Never put the close-out or any Kevin decision inside it.
+
 ---
 
 ## Phase 2: DIAGNOSE

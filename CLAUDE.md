@@ -37,6 +37,8 @@ Two commands cover all work. Kevin talks conversationally after either one. Clau
 
 Both skills run start-to-finish. Kevin approves the plan once, then receives a working, deployed result. No manual skill-chaining needed.
 
+- **`/goal`** (Claude Code built-in, adopted 13 Sep 2026): the finish-line check. After Kevin's yes at either gate, the reply's first line is a paste-ready `/goal` line built from the "Verified by" block (end state, each check with how it is proved, the "Not touching" constraint, `or stop after N turns`). Kevin pastes it; a second model then reads the conversation after every turn and only lets Claude stop once the proof is on screen. Only Kevin can set it, so Claude hands him the line rather than claiming done. Rules and the example: `~/.claude/skills/goal-line/SKILL.md`. Never put the close-out or a Kevin decision inside a goal.
+
 ## Forbidden Patterns
 
 These patterns cause production bugs. Never introduce them:
