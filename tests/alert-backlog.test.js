@@ -64,10 +64,13 @@ describe('what the sweep may and may not do', () => {
     // Assert the GUARD, not a mention of it. `if False and tier_match(...)`
     // leaves the substring intact while disabling the check, and the first
     // version of this test passed against exactly that.
-    expect(fn).toMatch(/^\s*if tier_match\(TIER1_PATTERNS, t\["name"\], t\["description"\], t\["notes"\]\):$/m);
+    // 14 Sep 2026: the guard is alert_veto (tier 1, creditor, money), fed the
+    // live tier-1 match over name, description AND notes.
+    expect(fn).toMatch(/veto = alert_veto\(\{\*\*t, "tier1": bool\(tier_match\(TIER1_PATTERNS, t\["name"\], t\["description"\], t\["notes"\]\)\),/);
+    expect(fn).toMatch(/^\s*if veto:$/m);
     expect(fn).toMatch(/left with Kevin on purpose/);
     // And the guard must SKIP, not merely note it.
-    const guard = fn.slice(fn.indexOf('if tier_match(TIER1_PATTERNS'));
+    const guard = fn.slice(fn.indexOf('if veto:'));
     expect(guard.slice(0, 400)).toMatch(/continue/);
   });
 
