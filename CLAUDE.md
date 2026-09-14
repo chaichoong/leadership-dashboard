@@ -37,7 +37,7 @@ Two commands cover all work. Kevin talks conversationally after either one. Clau
 
 Both skills run start-to-finish. Kevin approves the plan once, then receives a working, deployed result. No manual skill-chaining needed.
 
-- **`/goal`** (Claude Code built-in, adopted 13 Sep 2026): the finish-line check. After Kevin's yes at either gate, the reply's first line is a paste-ready `/goal` line built from the "Verified by" block (end state, each check with how it is proved, the "Not touching" constraint, `or stop after N turns`). Kevin pastes it; a second model then reads the conversation after every turn and only lets Claude stop once the proof is on screen. Only Kevin can set it, so Claude hands him the line rather than claiming done. Rules and the example: `~/.claude/skills/goal-line/SKILL.md`. Never put the close-out or a Kevin decision inside a goal.
+- **GOAL and GOAL CHECK** (13 Sep 2026; both ends enforced 14 Sep 2026): every `/fix`, `/build-feature` and `/build-prompt` run states a GOAL block at the gate (one end state, numbered checks each naming its proof) and ends with a GOAL CHECK (every check PASS with proof or FAIL with why, then `Goal met? Yes/No`). Both ends run from hooks in `~/.claude/settings.json`, not from these skill files: the 13 Sep version lived only in the skill text and never fired, because the main checkout was not refreshed after the merge and three /fix runs loaded the old copy. **After merging any change to a repo skill, refresh the main checkout (`git fetch origin && git reset --keep origin/main`) and grep the file on disk; the skills load from there, not from GitHub.** A paste-ready line for Claude Code's built-in `/goal` is optional for long runs. Rules: `~/.claude/skills/goal-line/SKILL.md`.
 
 ## Forbidden Patterns
 

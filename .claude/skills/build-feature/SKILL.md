@@ -219,7 +219,16 @@ Verified by: [the checks that prove it works]
 
 ## Assumptions  (omit if none)
 - ASSUMPTION: [anything you could not verify]
+
+GOAL
+[One sentence: the end state]
+Checks
+1. [check] - proved by [a test exit code / the deploy poll printing the new pageVer / a page read or screenshot of the live page / an Airtable record read back by id]
+2. [check] - proved by [...]
+Not touching: [the same list as above]
 ```
+
+The GOAL block is built from D and "Verified by". Each check is a numbered line of its own that names its proof. Never "works" or "looks right". Never put the close-out or a Kevin decision inside it. An optional last line may be a paste-ready `/goal ... or stop after 20 turns` for a long run. Format and rules: `~/.claude/skills/goal-line/SKILL.md`. A hook prints this rule when `/build-feature` is typed, and a Stop hook refuses "done" until the GOAL CHECK in Phase 10d answers every check.
 
 Three rules for the Steps block:
 
@@ -229,7 +238,7 @@ Three rules for the Steps block:
 
 Ask once: "Should I build this as-is, or adjust anything?"
 
-The read-only rule lifts on Kevin's yes. **The first line of the reply after his yes is the paste-ready `/goal` line**, built from "Verified by": the end state, each check with how it is proved (a test exit code, the deploy poll printing the new pageVer, a screenshot posted), the "Not touching" constraint, and `or stop after 20 turns`. Rules and an example: `~/.claude/skills/goal-line/SKILL.md`. Kevin pastes it and Claude Code's built-in evaluator holds the session open until the proof is on screen. Never put the close-out or any Kevin decision inside it.
+The read-only rule lifts on Kevin's yes. **The first thing in the reply after his yes is the GOAL block, re-posted** (amended if his answer changed it), so the goal the build is checked against sits on screen at the start of the work.
 
 The brief and the steps become the instruction set for the rest of this workflow. If reality contradicts a step once you start building, say so in one line and carry on. Do not silently build something else.
 
@@ -599,7 +608,15 @@ Audit score: XX/100
 Test result: [PASS/FAIL]
 SOP: [created/updated] at [path]
 Live at: [URL if applicable]
+
+GOAL CHECK
+[The end state from the GOAL, repeated]
+1. [check] - PASS [proof visible in this conversation]
+2. [check] - FAIL [why]
+Goal met? Yes | No
 ```
+
+The GOAL CHECK is compulsory. It answers every numbered check from the GOAL block posted at the gate. Run any check you have not run yet so its output is on screen first. `Goal met? Yes` only when every check is PASS. An honest FAIL goes out with `Goal met? No` and becomes an Outstanding item in the close-out. It sits above any CLOSE-OUT block.
 
 Include a screenshot if the feature is visual.
 

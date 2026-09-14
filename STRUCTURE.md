@@ -44,7 +44,7 @@ Single source of truth for file locations across the Operations Director Platfor
 4. **Memory** (`~/.claude/projects/-Users-kevinbrittain-Projects-leadership-dashboard/memory/`) — durable facts, preferences, project state. Indexed by `MEMORY.md`.
 5. **Skills** — three tiers, by design:
    - Project skills: `.claude/skills/` in this repo (workflow pipeline)
-   - Personal skills: `~/.claude/skills/` (`build-prompt`, `challenge`, `adhd` + `i-have-adhd` always-on pair, `close-out` and `goal-line` always-on pairs (each a SKILL.md plus an `always-on.sh` run by a SessionStart hook in `~/.claude/settings.json`; `goal-line`, 13 Sep 2026, hands Kevin the paste-ready line for Claude Code's built-in `/goal` finish-line check), and others)
+   - Personal skills: `~/.claude/skills/` (`build-prompt`, `challenge`, `adhd` + `i-have-adhd` always-on pair, `close-out` and `goal-line` always-on pairs (each a SKILL.md plus an `always-on.sh` run by a SessionStart hook in `~/.claude/settings.json`; `goal-line`, 13 Sep 2026, enforced at both ends 14 Sep 2026, also carries `goal-start.sh` (UserPromptExpansion hook on `/fix`, `/build-feature`, `/build-prompt`: prints the GOAL rule, logs to `logs/expansion.jsonl`) and `goal-check.py` (Stop hook: refuses a finished message with no complete GOAL CHECK; `selftest`)), and others)
    - Cowork plugin skills: managed by the Claude desktop app (Airtable automations, document tools)
 
 Do not move skills between tiers without reason: project skills travel with the repo, personal skills apply everywhere, plugin skills are managed by the app.
