@@ -81,7 +81,18 @@ Include the Fork line only when the fix genuinely has two valid approaches (patc
 
 For ambiguous problems or amendments that change behaviour, present the BILD prompt and ask: "Should I fix this as described, or adjust?"
 
-**Either way, the moment the fix is agreed (Kevin's yes, or the confirmed root cause on the fast path), the first line of the reply is the paste-ready `/goal` line**: what "fixed" looks like, each check with how it is proved (`npm run test:sync` exits 0, the deploy poll prints the new pageVer, a screenshot of the live page is posted), the file scope as the constraint, and `or stop after 12 turns`. Rules and an example: `~/.claude/skills/goal-line/SKILL.md`. Kevin pastes it and Claude Code's built-in evaluator holds the session open until the proof is on screen. Skip it only for a one-turn cosmetic tweak. Never put the close-out or any Kevin decision inside it.
+**Either way, state the GOAL.** Put a GOAL block in the gate message with the BILD prompt, and re-post it as the first thing after Kevin's yes. On the fast path, post it with the confirmed root cause.
+
+```
+GOAL
+[One sentence: what "fixed" looks like]
+Checks
+1. [check] - proved by [npm run test:sync exits 0 / the deploy poll prints the new pageVer / a page read of the live page]
+2. [check] - proved by [...]
+Not touching: [file scope]
+```
+
+Each check is a numbered line of its own that names its proof. Never "works" or "looks right". Never put the close-out or a Kevin decision inside it. An optional last line may be a paste-ready `/goal ... or stop after 12 turns` for a long run. Format and rules: `~/.claude/skills/goal-line/SKILL.md`. A hook prints this rule when `/fix` is typed, and a Stop hook refuses "done" until the GOAL CHECK in Phase 5d answers every check.
 
 ---
 
@@ -228,7 +239,15 @@ Files changed: [list]
 Verified: [what was tested in browser]
 Test result: [PASS/FAIL or SKIPPED with reason]
 Live at: [URL]
+
+GOAL CHECK
+[The end state from the GOAL, repeated]
+1. [check] - PASS [proof visible in this conversation]
+2. [check] - FAIL [why]
+Goal met? Yes | No
 ```
+
+The GOAL CHECK is compulsory. It answers every numbered check from the GOAL block. Run any check you have not run yet so its output is on screen first. `Goal met? Yes` only when every check is PASS. An honest FAIL goes out with `Goal met? No` and becomes an Outstanding item in the close-out. It sits above any CLOSE-OUT block.
 
 Include a screenshot if the fix is visual.
 
