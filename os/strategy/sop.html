@@ -168,6 +168,14 @@ h3{font-size:1.05rem;color:var(--text-primary);margin:1rem 0 0.5rem}
     </table>
     <div class="info-box warn"><span class="ib-icon">&#x26A0;&#xFE0F;</span><div>The full list of field IDs is the single source of truth: <code>js/config.js</code> &rarr; <code>OBJSTRAT</code> constant. Always read the IDs from there &mdash; Airtable field <em>names</em> occasionally change, IDs do not.</div></div>
   </div>
+  <div class="card">
+    <div class="card-header">&#x270D;&#xFE0F; What writes to Airtable outside Save</div>
+    <ul>
+      <li><strong>Main Method link slots.</strong> Each of the 10 method steps has a picker that links it to a record in the <code>Main Methods</code> table. The Systemisation page reads the <em>links</em>, not the step text, so a step with text but no link is invisible there and the row warns you.</li>
+      <li><strong>+ Create from text</strong> (per step) and <strong>Create the missing Main Method records from my step text</strong> (all steps) create new <code>Main Methods</code> records straight away and link them to the plan. On a saved plan this writes <strong>before</strong> you press Save; on an unsaved plan the record is created and the link waits for Save.</li>
+      <li><strong>Saving renames linked Projects.</strong> When a Quarterly Project already has a linked Project record, editing its name here and saving renames that Project record in Projects OS too.</li>
+    </ul>
+  </div>
 </div>
 
 <div class="section" id="wizard">
@@ -216,6 +224,17 @@ h3{font-size:1.05rem;color:var(--text-primary);margin:1rem 0 0.5rem}
     </ol>
     <div class="info-box info"><span class="ib-icon">&#x1F4DC;</span><div>Because every quarter is its own record, you can always scroll back through the history by switching the Quarter/Year dropdowns. Use this to see what you planned vs. what you shipped.</div></div>
   </div>
+  <div class="card">
+    <div class="card-header">&#x1F512; Closing a quarter</div>
+    <p>At the end of a quarter, load that quarter&rsquo;s plan and click <strong>Close the quarter</strong>. Save any changes first; the button refuses while the form has unsaved edits, and it needs at least one project already pushed and linked.</p>
+    <ol class="steps">
+      <li>The page reads each linked project and its open tasks, and looks for next quarter&rsquo;s projects for the same business.</li>
+      <li>A preview opens. Nothing is written until you click <strong>Approve</strong>. For each project you set the true outcome, check the KPI at close and edit the closing note. Progress at close and the closed-on date (the quarter&rsquo;s end) are fixed.</li>
+      <li><strong>Freeze first.</strong> On approve, each project&rsquo;s snapshot (status, KPI at close, progress at close, closed on, closing note) is written, and the note is also added as a permanent comment on the record.</li>
+      <li><strong>Carry second.</strong> Only after the snapshot is written, each open task is ADDED to the next-quarter project you chose (by default the same project slot). Its link to the closing quarter stays. Choose <strong>Park</strong> to leave a task in the old quarter only.</li>
+    </ol>
+    <div class="info-box warn"><span class="ib-icon">&#x26A0;&#xFE0F;</span><div>A closed snapshot is never rewritten. Running Close the quarter again on a project that is already closed only offers to carry any open tasks left behind; the frozen figures stay as they were.</div></div>
+  </div>
 </div>
 
 <div class="section" id="project-hook">
@@ -223,17 +242,15 @@ h3{font-size:1.05rem;color:var(--text-primary);margin:1rem 0 0.5rem}
   <div class="card">
     <p>After saving the quarter, the wizard offers to push the three Quarterly Projects into the <strong>Projects table</strong> as proper project records, and each monthly stepping stone becomes a linked <strong>Task</strong> due at the end of its month.</p>
     <table class="grid">
-      <thead><tr><th>Projects field</th><th>Auto-filled</th><th>Asked by wizard</th></tr></thead>
+      <thead><tr><th>Projects field</th><th>Filled from</th></tr></thead>
       <tbody>
-        <tr><td>Project Name</td><td>From <code>Quarterly Project N</code></td><td>&mdash;</td></tr>
-        <tr><td>Business</td><td>From selected business</td><td>&mdash;</td></tr>
-        <tr><td>Start Date / End Date</td><td>Quarter bounds</td><td>&mdash;</td></tr>
-        <tr><td>Project Status</td><td>Active</td><td>&mdash;</td></tr>
-        <tr><td>Deliverable</td><td>&mdash;</td><td>Expanded from the QP text</td></tr>
-        <tr><td>Definition of Done</td><td>&mdash;</td><td>Derived from the 3 stepping stones, confirmed</td></tr>
-        <tr><td>Project Owner</td><td>&mdash;</td><td>Which team member?</td></tr>
-        <tr><td>Department</td><td>&mdash;</td><td>Which department?</td></tr>
-        <tr><td>Project Collaborators</td><td>&mdash;</td><td>Who else is on it?</td></tr>
+        <tr><td>Project Name</td><td>The <code>Quarterly Project N</code> text</td></tr>
+        <tr><td>Business</td><td>The selected business</td></tr>
+        <tr><td>Start Date / End Date</td><td>The quarter&rsquo;s first and last day</td></tr>
+        <tr><td>Project Status</td><td>Worked out from the dates and KPI by the shared project-health rule (a plan pushed before its quarter starts reads Not Started)</td></tr>
+        <tr><td>Definition of Done</td><td>The project&rsquo;s Definition of Done box, or the QP text when that is blank</td></tr>
+        <tr><td>KPI Name / KPI Unit / KPI Target / KPI Tracking</td><td>The project&rsquo;s KPI box, when filled</td></tr>
+        <tr><td>Project Owner</td><td>The owner set in the project&rsquo;s KPI box, when filled (tasks go to Kevin when it is blank)</td></tr>
       </tbody>
     </table>
     <div class="info-box tip"><span class="ib-icon">&#x1F517;</span><div>Stepping stones become real Task records linked to the Project &mdash; no double bookkeeping. When a Task is marked complete, the matching stone on the Leadership Dashboard flips to green automatically.</div></div>
@@ -260,6 +277,7 @@ h3{font-size:1.05rem;color:var(--text-primary);margin:1rem 0 0.5rem}
   <h2 class="section-title">&#x1F4DC; 8. Changelog</h2>
   <div class="card">
     <ul>
+      <li><strong>14 Sep 2026</strong> &mdash; Added Closing a quarter, the Main Method link and create buttons, and the project rename on save. Rewrote the push table from the code: no wizard questions, no Department or Collaborators fields.</li>
       <li><strong>1.0 &middot; April 2026</strong> &mdash; Initial release. Strategy Plan page with AI Wizard critique loop. Objective Plan page and Projects/Tasks auto-create to follow in v1.1.</li>
     </ul>
   </div>
