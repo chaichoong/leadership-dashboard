@@ -381,6 +381,7 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
         <button class="page-tab active" id="ptab-dashboard" role="tab" aria-selected="true" onclick="switchAgentsView('dashboard')">Dashboard</button>
         <button class="page-tab" id="ptab-approvals" role="tab" aria-selected="false" onclick="switchAgentsView('approvals')">Approvals <span class="page-tab-badge" id="approvalsTabBadge" style="display:none">0</span></button>
         <button class="page-tab" id="ptab-checks" role="tab" aria-selected="false" onclick="switchAgentsView('checks')">Check these <span class="page-tab-badge" id="checksTabBadge" style="display:none">0</span></button>
+        <button class="page-tab" id="ptab-estate" role="tab" aria-selected="false" onclick="switchAgentsView('estate')">Estate status <span class="page-tab-badge" id="estateTabBadge" style="display:none">0</span></button>
     </div>
 
     <!-- Dashboard = the CEO brief plus one scorecard per agent (Kevin's
@@ -438,6 +439,37 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
                 <span class="zone-sub">What should have moved and has not. Absence, not successes.</span>
             </div>
             <div id="checksBody"><div class="zone-loading"><div class="sop-spinner"></div><span>Working out what has not moved…</span></div></div>
+        </div>
+    </div>
+
+    <!-- Estate status (Kevin's audit, 14 Sep 2026): which jobs ran, which
+         stopped and why; what the Content Engine published and where; which
+         tasks are not moving. Read live from the Estate Status table, which
+         scripts/estate-status.py refreshes every ten minutes. -->
+    <div class="page-view" id="view-estate">
+        <div class="zone" id="zoneEstateJobs">
+            <div class="zone-header">
+                <span class="zone-title">Scheduled jobs</span>
+                <span class="zone-count" id="estateJobsCount">0</span>
+                <span class="zone-sub" id="estateJobsSub">Every job on the Mac: last run, whether it worked, why not, and when it is next due.</span>
+            </div>
+            <div id="estateJobsBody"><div class="zone-loading"><div class="sop-spinner"></div><span>Reading the estate status…</span></div></div>
+        </div>
+        <div class="zone" id="zoneEstateStalled" style="margin-top:16px">
+            <div class="zone-header">
+                <span class="zone-title">Tasks not moving</span>
+                <span class="zone-count" id="estateStalledCount">0</span>
+                <span class="zone-sub">The same list daily-ops prints each morning: past a hard deadline, nothing drafted, or waiting on you.</span>
+            </div>
+            <div id="estateStalledBody"><div class="zone-loading"><div class="sop-spinner"></div><span>Reading…</span></div></div>
+        </div>
+        <div class="zone" id="zoneEstateContent" style="margin-top:16px">
+            <div class="zone-header">
+                <span class="zone-title">Published by the Content Engine</span>
+                <span class="zone-count" id="estateContentCount">0</span>
+                <span class="zone-sub">Every episode the engine has touched in the last 21 days, with a link for each channel it is live on.</span>
+            </div>
+            <div id="estateContentBody"><div class="zone-loading"><div class="sop-spinner"></div><span>Reading the content table…</span></div></div>
         </div>
     </div>
 </div>
@@ -670,11 +702,11 @@ function stageNaAllowed(def, human){ return !!def.naAllowed[human ? 'human' : 'a
 // State
 // ═══════════════════════════════════════════════════════════════════════
 let PAT = '';
-const AGENT_VIEWS = ['dashboard','approvals','checks'];
+const AGENT_VIEWS = ['dashboard','approvals','checks','estate'];
 // The CEO Brief lived as its own tab for a day (25 Aug 2026); it now sits on
 // the Dashboard. Old links, the shell's #ceo-brief forwarder and muscle
 // memory still say 'ceo-brief' — map them home rather than 404 the view.
-const AGENT_VIEW_ALIASES = { 'ceo-brief': 'dashboard' };
+const AGENT_VIEW_ALIASES = { 'ceo-brief': 'dashboard', 'status': 'estate', 'jobs': 'estate' };
 let _agentsView = 'dashboard';  // which page tab is showing
 let allApprovals = [];          // loop-raised tasks at Status Approval
 let _approvalsState = 'idle';   // idle | loading | ready | 'error: <message>'
@@ -782,6 +814,7 @@ function switchAgentsView(view){
     if(view==='dashboard' && !_briefRows.length) loadRecordingBrief();
     if(view==='approvals' && _approvalsState==='ready') renderApprovals();
     if(view==='checks') loadChecksAndRender();
+    if(view==='estate') loadEstateStatus();
     window.scrollTo(0,0);
 }
 window.switchAgentsView = switchAgentsView;
@@ -5519,6 +5552,185 @@ async function fillAgentPendingCounts(agentIds){
 }
 
 // ═══════════════════════════════════════════════════════════════════════
+// Estate status (Kevin's audit, 14 Sep 2026)
+// ───────────────────────────────────────────────────────────────────────
+// From 13:00 Friday 11 Sep to 19:00 Sunday 13 Sep nothing ran (the Claude
+// allowance had run out) and no surface said so: the job digest failed to
+// post, and this page's Automations strip is a static On/Off list. This tab
+// reads the Estate Status table, which scripts/estate-status.py refreshes
+// every ten minutes from the job logs. Field ids mirror the script's ES
+// block; tests/estate-status.test.js fails if they drift.
+const ESTATE_TBL = 'tblZVrdzivyBueZVf';
+const ES = {
+    key:        'fldLO6xJqkokvVR4g',
+    kind:       'fldfjQOn76VpgKEfZ',
+    label:      'fldlnvvTh8l5UIih4',
+    schedule:   'fldZGa0UD76lVLww7',
+    status:     'fldhOUiva3bqPNk1c',
+    lastRun:    'flduxV3TYwp9wQX9O',
+    lastWorked: 'fldMIx3kWMM23vDBN',
+    detail:     'fldLRFP2nJttDVQOa',
+    nextDue:    'fldr5E1TQyDhZ8a79',
+    runs24h:    'fldn0sWvRqDBwbvsM',
+    fails24h:   'fldk3Qz02krXZt1w3',
+    payload:    'fldiqs9lvyLimoR7i',
+    updated:    'fld3q8WN5XqrER92Z',
+};
+const ESTATE_STALE_MIN = 30;   // the writer runs every 10 minutes; three misses is "stopped"
+const ESTATE_STATUS_ORDER = { Failed:0, Blocked:1, Running:2, Skipped:3, Worked:4, Idle:5 };
+const ESTATE_STATUS_STYLE = {
+    Failed:  ['var(--danger-bg)','var(--danger)'],
+    Blocked: ['var(--warning-bg)','var(--warning)'],
+    Running: ['var(--info-bg)','var(--info)'],
+    Skipped: ['var(--warning-bg)','var(--warning)'],
+    Worked:  ['var(--success-bg)','var(--success)'],
+    Idle:    ['var(--bg-subtle)','var(--text-muted)'],
+};
+let _estateRows = [], _estateContent = [], _estateState = 'idle';
+
+function estateAgo(iso){
+    if(!iso) return 'never';
+    const ms = Date.now() - new Date(iso).getTime();
+    if(isNaN(ms)) return '?';
+    const m = Math.round(ms/60000);
+    if(m < 1) return 'just now';
+    if(m < 60) return m + ' min ago';
+    const h = Math.round(m/60);
+    if(h < 48) return h + ' h ago';
+    return Math.round(h/24) + ' days ago';
+}
+function estateIn(iso){
+    if(!iso) return '–';
+    const ms = new Date(iso).getTime() - Date.now();
+    if(isNaN(ms)) return '?';
+    const m = Math.round(ms/60000);
+    if(m <= 0) return 'now';
+    if(m < 60) return 'in ' + m + ' min';
+    const h = Math.round(m/60);
+    if(h < 48) return 'in ' + h + ' h';
+    return 'in ' + Math.round(h/24) + ' days';
+}
+function estatePill(status){
+    const st = ESTATE_STATUS_STYLE[status] || ESTATE_STATUS_STYLE.Idle;
+    return `<span class="agent-pill" style="background:${st[0]};color:${st[1]}">${esc(status||'?')}</span>`;
+}
+
+async function loadEstateStatus(){
+    const jobs = document.getElementById('estateJobsBody'); if(!jobs) return;
+    _estateState = 'loading';
+    try {
+        _estateRows = await atFetch(ESTATE_TBL, Object.values(ES));
+        _estateState = 'ready';
+    } catch(e){
+        _estateState = 'error: ' + (e.message||e);
+        jobs.innerHTML = `<div class="zone-error">Could not read the Estate Status table (${esc(e.message||e)}). This list is NOT empty — it could not be read.</div>`;
+        const sb = document.getElementById('estateStalledBody');
+        if(sb) sb.innerHTML = `<div class="zone-error">Could not read the not-moving list either (same table). This list is NOT empty — it could not be read.</div>`;
+    }
+    renderEstateStatus();
+    if(_agentsView === 'estate') loadEstateContent();
+}
+function renderEstateStatus(){
+    if(_estateState !== 'ready') return;
+    const gf = (r,k) => (r.fields||{})[ES[k]];
+    const jobs = _estateRows.filter(r => gf(r,'kind') === 'job')
+        .sort((a,b) => (ESTATE_STATUS_ORDER[gf(a,'status')] ?? 9) - (ESTATE_STATUS_ORDER[gf(b,'status')] ?? 9)
+                    || String(gf(a,'label')||gf(a,'key')).localeCompare(String(gf(b,'label')||gf(b,'key'))));
+    const body = document.getElementById('estateJobsBody'), count = document.getElementById('estateJobsCount'),
+          sub = document.getElementById('estateJobsSub'), badge = document.getElementById('estateTabBadge');
+    const newest = _estateRows.map(r => gf(r,'updated')).filter(Boolean).sort().pop();
+    const ageMin = newest ? Math.round((Date.now() - new Date(newest).getTime())/60000) : null;
+    const attention = jobs.filter(r => ['Failed','Blocked'].includes(gf(r,'status'))).length;
+    if(count) count.textContent = jobs.length;
+    if(badge){ badge.textContent = attention; badge.style.display = attention ? '' : 'none'; }
+    if(!jobs.length){
+        body.innerHTML = '<div class="zone-error">No job rows yet. The status writer (estate-status, every 10 minutes) has not written its first board.</div>';
+        renderEstateStalled(gf);
+        return;
+    }
+    // THE MIRROR'S OWN GUARD: rows that stop updating look exactly like an
+    // estate where nothing is wrong. Say so, loudly, before the table.
+    let stale = '';
+    if(ageMin === null || ageMin > ESTATE_STALE_MIN){
+        stale = `<div class="zone-error" style="margin-bottom:10px">The status writer itself has stopped: these rows were last updated ${esc(newest ? estateAgo(newest) : 'never')}. Everything below may be out of date. The job is estate-status (every 10 minutes).</div>`;
+    }
+    if(sub) sub.textContent = `${attention ? attention + ' need attention · ' : 'All working · '}updated ${estateAgo(newest)}.`;
+    const rows = jobs.map(r => {
+        const status = gf(r,'status'), fails = Number(gf(r,'fails24h')||0), runs = Number(gf(r,'runs24h')||0);
+        return `<tr>
+            <td style="white-space:nowrap;font-weight:var(--fw-medium)">${esc(gf(r,'label')||gf(r,'key'))}<div style="font-weight:var(--fw-regular);font-size:var(--fs-xs);color:var(--text-muted)">${esc(gf(r,'key'))} · ${esc(gf(r,'schedule')||'')}</div></td>
+            <td style="white-space:nowrap">${estatePill(status)}</td>
+            <td style="white-space:nowrap;color:var(--text-secondary)" title="${esc(gf(r,'lastRun')||'')}">${esc(estateAgo(gf(r,'lastRun')))}</td>
+            <td style="color:var(--text-secondary);line-height:1.5;word-break:break-word">${esc(gf(r,'detail')||'')}</td>
+            <td style="white-space:nowrap;color:var(--text-secondary)" title="${esc(gf(r,'nextDue')||'')}">${esc(estateIn(gf(r,'nextDue')))}</td>
+            <td style="white-space:nowrap;text-align:right;color:${fails ? 'var(--danger)' : 'var(--text-secondary)'}">${runs}${fails ? ' / ' + fails + ' failed' : ''}</td>
+        </tr>`;
+    }).join('');
+    body.innerHTML = stale + `<div style="overflow-x:auto"><table class="wf-grid"><thead><tr>
+        <th style="width:230px">Job</th><th style="width:90px">Result</th><th style="width:100px">Last run</th><th>Why</th><th style="width:100px">Next due</th><th style="width:110px;text-align:right">Runs 24h</th>
+    </tr></thead><tbody>${rows}</tbody></table></div>`;
+
+    renderEstateStalled(gf);
+}
+function renderEstateStalled(gf){
+    // The not-moving list, written by the same job from scripts/loop-health.py.
+    const sbody = document.getElementById('estateStalledBody'), scount = document.getElementById('estateStalledCount');
+    if(!sbody) return;
+    const rep = _estateRows.find(r => gf(r,'key') === 'loop-health');
+    if(!rep){ sbody.innerHTML = '<div class="zone-error">No not-moving report yet. The writer adds it on its first full run.</div>'; return; }
+    let payload = {};
+    try { payload = JSON.parse(gf(rep,'payload')||'{}'); } catch(e){ payload = {}; }
+    const stalled = Array.isArray(payload.stalled) ? payload.stalled : [];
+    if(scount) scount.textContent = stalled.length;
+    if(gf(rep,'status') !== 'Worked'){
+        sbody.innerHTML = `<div class="zone-error">${esc(gf(rep,'detail')||'The not-moving check failed.')}</div>`;
+        return;
+    }
+    if(!stalled.length){ sbody.innerHTML = `<div style="color:var(--text-secondary);font-size:var(--fs-sm)">Nothing is stuck. ${esc(gf(rep,'detail')||'')}</div>`; return; }
+    sbody.innerHTML = `<div style="color:var(--text-muted);font-size:var(--fs-xs);margin-bottom:6px">${esc(gf(rep,'detail')||'')} Checked ${esc(estateAgo(gf(rep,'lastRun')))}.</div>` +
+        stalled.map((s,i) => `<div style="display:flex;gap:10px;padding:6px 0;border-bottom:1px solid var(--border-subtle);font-size:var(--fs-sm)">
+            <div style="flex:0 0 22px;color:var(--text-muted)">${i+1}.</div>
+            <div style="flex:1;min-width:0"><div style="font-weight:var(--fw-medium)">${esc(s.name||'')}</div><div style="color:var(--text-secondary);font-size:var(--fs-xs)">${esc(s.why||'')}</div></div>
+        </div>`).join('');
+}
+
+// What the Content Engine published, per channel, from the Content Machine
+// Runpreneur table it writes to (scripts/content-engine/publish.py LINK_FIELDS).
+const ESTATE_CONTENT_CHANNELS = [
+    ['YouTube',   ['YouTube Full Link','Link of Youtube Video','YouTube Link']],
+    ['Shorts',    ['Link of Youtube Shorts']],
+    ['Facebook',  ['Link of Facebook Reels','Link of Facebook Page Post','Facebook Post Link']],
+    ['Instagram', ['Link of Instagram Reels','Link of Instagram Post','Instagram Post Link']],
+    ['LinkedIn',  ['Link of Linkedin Post','LinkedIn Link']],
+    ['TikTok',    ['Link of Tiktok Video','TikTok Link']],
+    ['Threads',   ['Link of Threads Post','Threads Link']],
+    ['Podcast',   ['Link of Podcast','Podcast Link']],
+    ['Blog',      ['Blog Link','Link of Blog']],
+];
+async function loadEstateContent(){
+    const body = document.getElementById('estateContentBody'), count = document.getElementById('estateContentCount'); if(!body) return;
+    try {
+        const formula = `AND({Responsible}="Content Engine (AI)", {Content Type}="Long Form Video", IS_AFTER(CREATED_TIME(), DATEADD(TODAY(), -21, 'days')))`;
+        _estateContent = await atFetchByName(CM_TBL, { filterByFormula: formula, pageSize: '100' });
+    } catch(e){
+        body.innerHTML = `<div class="zone-error">Could not read the content table (${esc(e.message||e)}). This list is NOT empty — it could not be read.</div>`;
+        return;
+    }
+    const rows = _estateContent.slice().sort((a,b) => String(b.fields['Content Name']||'').localeCompare(String(a.fields['Content Name']||''), undefined, {numeric:true}));
+    if(count) count.textContent = rows.length;
+    if(!rows.length){ body.innerHTML = '<div style="color:var(--text-secondary);font-size:var(--fs-sm)">No engine episodes in the last 21 days.</div>'; return; }
+    const link = (f, names) => { for(const n of names){ if(f[n]) return f[n]; } return ''; };
+    body.innerHTML = `<div style="overflow-x:auto"><table class="wf-grid"><thead><tr>
+        <th style="width:190px">Episode</th><th style="width:170px">Stage</th>${ESTATE_CONTENT_CHANNELS.map(c=>`<th style="width:78px;text-align:center">${esc(c[0])}</th>`).join('')}<th style="width:110px">Published</th>
+    </tr></thead><tbody>${rows.map(r => {
+        const f = r.fields||{};
+        const cells = ESTATE_CONTENT_CHANNELS.map(c => { const u = link(f, c[1]); return `<td style="text-align:center">${u ? `<a href="${esc(u)}" target="_blank" rel="noopener" title="${esc(u)}" style="color:var(--success);font-weight:var(--fw-semibold)">live</a>` : '<span style="color:var(--text-muted)">–</span>'}</td>`; }).join('');
+        const pub = [f['Date Published (YT)'] ? 'YT ' + esc(f['Date Published (YT)']) : '', f['Date Published (Other)'] ? 'socials ' + esc(f['Date Published (Other)']) : ''].filter(Boolean).join('<br>');
+        return `<tr><td style="white-space:nowrap;font-weight:var(--fw-medium)">${esc(f['Content Name']||'')}</td><td style="color:var(--text-secondary);font-size:var(--fs-xs)">${esc(f['Record Status']||'')}</td>${cells}<td style="color:var(--text-secondary);font-size:var(--fs-xs)">${pub || '<span style="color:var(--text-muted)">not yet</span>'}</td></tr>`;
+    }).join('')}</tbody></table></div>`;
+}
+
+// ═══════════════════════════════════════════════════════════════════════
 // Sync bar + health checks — same conventions as the other iframe pages
 // (registerSyncBar / markTabSynced in js/sync-bar.js; the bar broadcasts its
 // rollup up to the shell, which colours the sidebar dot for 'agents').
@@ -5528,6 +5740,18 @@ function registerAgentsSyncBar(){
     registerSyncBar('agents', {
         refreshFn: () => refreshAll(),
         checks: [
+            {
+                name: 'Estate status fresh', kind: 'automation', run: () => {
+                    // The status writer runs every 10 minutes. Rows older than
+                    // 30 minutes mean the mirror has stopped, whatever it shows.
+                    if(String(_estateState).indexOf('error') === 0) return { status:'fail', detail:String(_estateState).slice(7) };
+                    if(_estateState !== 'ready') return { status:'warn', detail:'Estate status not loaded yet' };
+                    const newest = _estateRows.map(r => (r.fields||{})[ES.updated]).filter(Boolean).sort().pop();
+                    const ageMin = newest ? Math.round((Date.now() - new Date(newest).getTime())/60000) : null;
+                    if(ageMin === null || ageMin > ESTATE_STALE_MIN) return { status:'fail', detail:`Estate status rows last updated ${newest ? estateAgo(newest) : 'never'} — the estate-status job has stopped` };
+                    return { status:'pass', detail:`Updated ${estateAgo(newest)}` };
+                }
+            },
             {
                 name: 'Approvals queue read', kind: 'sync', run: () => {
                     if(String(_approvalsState).indexOf('error') === 0) return { status:'fail', detail:String(_approvalsState).slice(7) };
@@ -5773,6 +5997,9 @@ async function loadEverything(){
         loadWorkflowData(),
         loadCeoBriefs(),
         (async ()=>{ _agentsRegisterState='idle'; await loadAgentsRegister(true); })(),
+        // Read once on load so the sync bar (and the sidebar dot) can say the
+        // status writer has stopped without Kevin opening the tab first.
+        loadEstateStatus(),
     ]);
 }
 
