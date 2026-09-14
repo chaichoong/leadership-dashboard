@@ -794,6 +794,26 @@ SYSTEM_ALERT_PATTERNS = [
 ]
 
 
+# Pounds, euros and any decimal sum. A bare dollar amount ("$50") is left out
+# on purpose: USD sums are rare here and a missed one only falls back to the
+# tier-1 and creditor vetoes. "$9.98" is caught by the decimal branch.
+ALERT_MONEY_RE = re.compile(r"(?:£|\bGBP\b|\bEUR\b|€)\s*[0-9]|[0-9]+\.[0-9]{2}\b|\+\s*VAT\b", re.I)
+
+
+def alert_veto(t):
+    """Why a task that LOOKS like a machine alert must still be worked, or ''.
+    The lane exists for Apps Script, Cloudflare and Airtable failure mails. A
+    task that touches money, a creditor or the private matter is never one of
+    those, whatever words its notes picked up along the way."""
+    if t.get("tier1"):
+        return "tier 1"
+    if t.get("creditor"):
+        return "creditor lane"
+    if ALERT_MONEY_RE.search(str(t.get("name") or "") + " " + str(t.get("description") or "")[:600]):
+        return "names a sum of money"
+    return ""
+
+
 def system_alert_match(sender, *texts):
     """Why this is a machine telling us something broke, or ""."""
     addr = str(sender or "").lower()
@@ -1160,6 +1180,63 @@ def ledger_append(task_id, event):
                              "event": event}) + "\n")
 
 
+IDLE_HOURS = 24
+PARKED_NOTE_RE = re.compile(r"^\s*(?:PARKED|BLOCKED)\b", re.I)
+
+
+def ledger_last_events():
+    """task id -> (event, ts) for the newest ledger line per task."""
+    state = {}
+    try:
+        with open(INTENT_LEDGER) as fh:
+            for line in fh:
+                try:
+                    rec = json.loads(line)
+                except ValueError:
+                    continue
+                if not isinstance(rec, dict):
+                    continue
+                state[rec.get("task")] = (rec.get("event"), rec.get("ts") or "")
+    except FileNotFoundError:
+        pass
+    return state
+
+
+def idle_handback(t, last, now=None):
+    """Why an APPROVED hand-back is resting rather than waiting on an agent, or ''.
+
+    `last` is the newest ledger (event, ts) for the task. Two events rest it:
+    "done" written by `complete --keep-open` (the approved action happened and
+    the task stays open by Kevin's own words) and "parked" written by `annotate`
+    when the agent's note opens PARKED or BLOCKED (a sign-in only Kevin can do).
+    Rest lasts IDLE_HOURS from that event, and ends early the moment Kevin's
+    verdict moves: an Approved At newer than the event means he approved again,
+    so the task is worked. A plain "done" on a task still Approved with no
+    keep-open mark in its Notes is NOT rested — that is an incomplete close and
+    the run must look at it."""
+    if not last or t.get("outcome") not in APPROVED:
+        return ""
+    event, ts = last
+    if event not in ("done", "parked") or not ts:
+        return ""
+    if event == "done" and CARRIED_OUT_MARK not in str(t.get("notes") or ""):
+        return ""
+    approved_at = str(t.get("approvedAt") or "")
+    if approved_at and approved_at > ts:
+        return ""
+    try:
+        when = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+    except ValueError:
+        return ""
+    now = now or datetime.now(timezone.utc)
+    if now - when >= timedelta(hours=IDLE_HOURS):
+        return ""
+    left = int((timedelta(hours=IDLE_HOURS) - (now - when)).total_seconds() // 3600)
+    what = ("carried out and kept open" if event == "done"
+            else "parked on a sign-in only Kevin can do")
+    return "%s at %s; rests %dh more, or until Kevin's verdict changes" % (what, ts[:16], left)
+
+
 def open_intents():
     """Task IDs with a carry-out intent never followed by a done marker —
     i.e. the action may already have happened without the task completing."""
@@ -1171,6 +1248,8 @@ def open_intents():
                     rec = json.loads(line)
                 except ValueError:
                     continue
+                if not isinstance(rec, dict) or rec.get("event") == "parked":
+                    continue   # a PARKED note (14 Sep 2026) says nothing about whether the action ran
                 state[rec.get("task")] = rec.get("event")
     except FileNotFoundError:
         pass
@@ -1945,6 +2024,7 @@ def task_view(rec):
         "priority": sel(f.get(AF["priority"])),
         "urgencyScore": f.get(AF["urgencyScore"]) or 0,
         "outcome": sel(f.get(AF["approvalOutcome"])),
+        "approvedAt": f.get(AF["approvedAt"], ""),
         # Expanded here so a REDO gets the spoken instruction, not a bare URL.
         # No Loom link means no network call — this is a regex miss on almost
         # every task.
@@ -2074,8 +2154,18 @@ def build_queue(args=None):
         # question for Kevin. Checked AFTER tier 1 and tier 2 on purpose: those
         # classifications are about what the work TOUCHES and must win, and a
         # monitoring alert never trips them anyway.
-        hit_alert = system_alert_match(
-            t.get("inboundSender"), t["name"], t["description"], t["notes"])
+        # THE SENDER AND THE NAME ONLY (14 Sep 2026). Until today this read
+        # the Description and the Notes too. Notes carry every agent's run
+        # log, and those logs say "Gmail quota" and "Apps Script" whenever a
+        # scan hit a limit — so eleven real matters (the CST Law letter before
+        # action, Cheffins' £1,096.80, Hayden Watson's £50+VAT, two compliance
+        # renewals, a domain renewal, an EICR quote) were parked here for up to
+        # 19 days and no agent ever saw them. A monitoring alert names itself
+        # in its subject line and comes from a machine address; that is enough.
+        # Money, a creditor marker or the tier-1 banner is never an alert.
+        hit_alert = system_alert_match(t.get("inboundSender"), t["name"])
+        if hit_alert and alert_veto(t):
+            hit_alert = ""
         if hit_alert and t["outcome"] not in APPROVED:
             system_alerts.append({**t, "alertSource": hit_alert})
             continue
@@ -2167,6 +2257,28 @@ def build_queue(args=None):
     # NOTE this ordering is the REPORTING order and the reserve order. It is no
     # longer what decides the worklist: see select_worklist, which holds slots
     # back for new work so hand-backs cannot starve it.
+    # A hand-back that was CARRIED OUT and kept open, or PARKED on a sign-in
+    # only Kevin can do, is not waiting on an agent. Until 14 Sep 2026 it sat
+    # in approved_hb regardless, so the 30-minute poll woke a full Claude run
+    # for the same five tasks 48 times a day: two EICR quote chases were
+    # "carried out" every half hour (one task's Notes reached 46,000
+    # characters) and three login-gated tasks were re-parked every half hour.
+    # That poll used more of the weekly allowance than the Content Engine and
+    # triage together, and the allowance ran out at Friday lunchtime. An idle
+    # hand-back is looked at once a day, is listed (never hidden) under
+    # idleHandbacks with its reason, and wakes at once if Kevin's verdict
+    # changes (a new Approved At or a Changes requested).
+    ledger = ledger_last_events()
+    idle_hb = []
+    for t in list(approved_hb):
+        why = idle_handback(t, ledger.get(t["id"]))
+        if why:
+            t["idleReason"] = why
+            idle_hb.append(t)
+    if idle_hb:
+        idle_ids = {t["id"] for t in idle_hb}
+        approved_hb = [t for t in approved_hb if t["id"] not in idle_ids]
+
     combined = approved_hb + changes_hb + new_work + deferred_hb
     intents = open_intents()
     for t in combined:
@@ -2230,6 +2342,9 @@ def build_queue(args=None):
         # Named, counted, and left open on the board. Never dropped: an alert
         # that vanishes is worse than one that clogs the gate.
         "systemAlerts": system_alerts,
+        # Approved hand-backs resting until tomorrow: carried out and kept open,
+        # or parked on a sign-in. Listed with the reason, never dropped.
+        "idleHandbacks": idle_hb,
         # Property work for Roy. Diverted and NAMED, never dropped — and not
         # acted on here: cmd_queue is a read. `handover-property` does the
         # writing, so one command owns the change.
@@ -2248,6 +2363,7 @@ def build_queue(args=None):
             "openTasksRead": len(open_tasks),
             "agentLinkedOpen": len(agent_linked),
             "approvedHandbacks": len(approved_hb),
+            "idleHandbacks": len(idle_hb),
             "changesRequested": len(changes_hb),
             # Redos Kevin asked to delay. Demoted behind new work rather than
             # dropped, and counted here so one sitting for weeks stays visible.
@@ -2540,16 +2656,20 @@ def cmd_clear_alerts(args):
     moved, skipped = [], []
     for rec in live:
         t = task_view(rec)
-        hit = system_alert_match(t.get("inboundSender"), t["name"],
-                                 t["description"], t["notes"])
+        # Sender and NAME only, with the money/creditor/tier-1 veto — the
+        # same rule as build_queue (14 Sep 2026). This sweep WRITES three
+        # times a day; reading Notes here would re-park at the gate the very
+        # tasks the queue fix released.
+        hit = system_alert_match(t.get("inboundSender"), t["name"])
         if not hit:
             continue
-        # Tier 1 never moves silently, whatever it looks like. A monitoring
-        # address is not a reason to skip the gate that protects the legal
-        # matter.
-        if tier_match(TIER1_PATTERNS, t["name"], t["description"], t["notes"]):
+        # Tier 1, a creditor matter or a sum of money never moves, whatever it
+        # looks like. Named in the output so the sweep still says what it left.
+        veto = alert_veto({**t, "tier1": bool(tier_match(TIER1_PATTERNS, t["name"], t["description"], t["notes"])),
+                           "creditor": creditor_match(t["name"], t["description"], t["notes"])})
+        if veto:
             skipped.append({"task": t["id"], "name": t["name"],
-                            "why": "tier 1 — left with Kevin on purpose"})
+                            "why": "%s — left with Kevin on purpose" % veto})
             continue
         entry = {"task": t["id"], "name": t["name"], "matched": hit}
         if args.dry_run:
@@ -2746,10 +2866,16 @@ def cmd_submit(args):
     # — a task the queue did not classify (no sender recorded, an unfamiliar
     # monitoring address) that an agent has now read and written up as a
     # breakage. Neither side can see what the other sees, so both stay.
-    alert_hit = system_alert_match(
-        tf_probe.get(AF["inboundSender"], ""),
-        tf_probe.get(AF["name"], ""), tf_probe.get(AF["description"], "") or "",
-        tf_probe.get(AF["notes"], "") or "")
+    # Sender and NAME only, same veto as build_queue (14 Sep 2026): an agent's
+    # own run log in Notes ("Gmail quota") must not turn its submission into a
+    # refused "machine alert".
+    _pn, _pd, _pnotes = (tf_probe.get(AF["name"], "") or "", tf_probe.get(AF["description"], "") or "",
+                         tf_probe.get(AF["notes"], "") or "")
+    alert_hit = system_alert_match(tf_probe.get(AF["inboundSender"], ""), _pn)
+    if alert_hit and alert_veto({"name": _pn, "description": _pd,
+                                 "tier1": bool(tier_match(TIER1_PATTERNS, _pn, _pd, _pnotes)),
+                                 "creditor": creditor_match(_pn, _pd, _pnotes)}):
+        alert_hit = ""
     # A CLOSE PROPOSAL is the one submission that is ABOUT the task rather
     # than about the breakage: the Task Manager folding a duplicate alert
     # thread into its keeper, or closing a dead one. Refusing it left
@@ -3062,7 +3188,14 @@ def cmd_annotate(args):
     patch_task(args.task, {
         AF["notes"]: (existing + "\n\n" + note).strip(),
     })
-    print(json.dumps({"annotated": args.task, "chars": len(note)}))
+    # A note that opens PARKED or BLOCKED is the agent saying the approved
+    # action needs a sign-in only Kevin can do. Recording it in the ledger lets
+    # the queue rest the task for a day (idle_handback) instead of waking a run
+    # every half hour to write the same note again.
+    parked = bool(PARKED_NOTE_RE.match(args.note or ""))
+    if parked:
+        ledger_append(args.task, "parked")
+    print(json.dumps({"annotated": args.task, "chars": len(note), "parked": parked}))
 
 
 # ─── THE LEARNING LOOP ────────────────────────────────────────────────
