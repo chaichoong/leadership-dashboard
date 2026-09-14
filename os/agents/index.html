@@ -467,7 +467,7 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
             <div class="zone-header">
                 <span class="zone-title">Published by the Content Engine</span>
                 <span class="zone-count" id="estateContentCount">0</span>
-                <span class="zone-sub">Every episode the engine has touched in the last 21 days, with a link for each channel it is live on.</span>
+                <span class="zone-sub">Every episode the engine has worked on in the last five weeks, with a link for each channel it is live on.</span>
             </div>
             <div id="estateContentBody"><div class="zone-loading"><div class="sop-spinner"></div><span>Reading the content table…</span></div></div>
         </div>
@@ -5710,7 +5710,9 @@ const ESTATE_CONTENT_CHANNELS = [
 async function loadEstateContent(){
     const body = document.getElementById('estateContentBody'), count = document.getElementById('estateContentCount'); if(!body) return;
     try {
-        const formula = `AND({Responsible}="Content Engine (AI)", {Content Type}="Long Form Video", IS_AFTER(CREATED_TIME(), DATEADD(TODAY(), -21, 'days')))`;
+        // "New Upload" is the scan noticing a clip exists (171 of them on 14 Sep 2026); the engine has
+        // touched an episode once it moves past that, so only those rows are the published story.
+        const formula = `AND({Responsible}="Content Engine (AI)", {Content Type}="Long Form Video", {Record Status}!="New Upload", IS_AFTER(CREATED_TIME(), DATEADD(TODAY(), -35, 'days')))`;
         _estateContent = await atFetchByName(CM_TBL, { filterByFormula: formula, pageSize: '100' });
     } catch(e){
         body.innerHTML = `<div class="zone-error">Could not read the content table (${esc(e.message||e)}). This list is NOT empty — it could not be read.</div>`;
@@ -5718,7 +5720,7 @@ async function loadEstateContent(){
     }
     const rows = _estateContent.slice().sort((a,b) => String(b.fields['Content Name']||'').localeCompare(String(a.fields['Content Name']||''), undefined, {numeric:true}));
     if(count) count.textContent = rows.length;
-    if(!rows.length){ body.innerHTML = '<div style="color:var(--text-secondary);font-size:var(--fs-sm)">No engine episodes in the last 21 days.</div>'; return; }
+    if(!rows.length){ body.innerHTML = '<div style="color:var(--text-secondary);font-size:var(--fs-sm)">No engine episodes worked on in the last five weeks.</div>'; return; }
     const link = (f, names) => { for(const n of names){ if(f[n]) return f[n]; } return ''; };
     body.innerHTML = `<div style="overflow-x:auto"><table class="wf-grid"><thead><tr>
         <th style="width:190px">Episode</th><th style="width:170px">Stage</th>${ESTATE_CONTENT_CHANNELS.map(c=>`<th style="width:78px;text-align:center">${esc(c[0])}</th>`).join('')}<th style="width:110px">Published</th>
