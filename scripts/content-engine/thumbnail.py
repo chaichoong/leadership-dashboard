@@ -19,6 +19,14 @@ import numpy as np
 import cv2
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+
+
+def _allowance():
+    """scripts/allowance.py (one level up): the Claude allowance guard, 14 Sep 2026."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("allowance", os.path.join(os.path.dirname(HERE), "allowance.py"))
+    mod = importlib.util.module_from_spec(spec); spec.loader.exec_module(mod)
+    return mod
 sys.path.insert(0, HERE)
 import cm_thumb_assets as A   # noqa: E402
 
@@ -288,7 +296,7 @@ def titles_from_transcript(transcript):
     system = KEVIN_CONTEXT + ("\n\n" + lessons if lessons else "")
     env = dict(os.environ)
     if os.path.exists(TOKEN_FILE): env["CLAUDE_CODE_OAUTH_TOKEN"] = open(TOKEN_FILE).read().strip()
-    r = subprocess.run([CLAUDE, "-p", TITLE_PROMPT % transcript[:2000], "--system-prompt", system, "--model", "sonnet",
+    r = _allowance().run_guarded("content-engine", [CLAUDE, "-p", TITLE_PROMPT % transcript[:2000], "--system-prompt", system, "--model", "sonnet",
                         "--output-format", "json", "--tools", "", "--max-turns", "1"], capture_output=True, text=True, env=env, timeout=300)
     if r.returncode != 0: raise SystemExit("claude failed: " + r.stderr[-300:])
     out = json.loads(r.stdout).get("result", "")

@@ -37,6 +37,14 @@ describe('allowance.py', () => {
     expect(read('scripts/handback-poll-run.sh')).toMatch(/beat skip "the Claude allowance is out; paused"/);
   });
 
+  it("the Content Engine's two Claude-calling steps go through run_guarded", () => {
+    for (const f of ['scripts/content-engine/platform_copy.py', 'scripts/content-engine/thumbnail.py']) {
+      const src = read(f);
+      expect(src, `${f} uses the guard`).toMatch(/_allowance\(\)\.run_guarded\("content-engine"/);
+      expect(src, `${f} has no bare claude call left`).not.toMatch(/subprocess\.run\(\[CLAUDE/);
+    }
+  });
+
   it('the Estate status board carries the allowance as its own row and runs the replay', () => {
     const src = read('scripts/estate-status.py');
     expect(src).toMatch(/def allowance_row\(now\)/);

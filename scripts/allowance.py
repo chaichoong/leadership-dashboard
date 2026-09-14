@@ -246,6 +246,25 @@ def cmd_replay(dry_run=False, now=None, starter=kickstart, jobs=None):
     return {"replayed": results, "reason": "reset passed at %s" % iso(until)}
 
 
+def run_guarded(job, cmd, **kw):
+    """subprocess.run for a headless `claude -p` inside a Python step (the Content
+    Engine's copy and thumbnail steps): refuse to start while the allowance is
+    out (SystemExit with the plain reason, so the step is skipped and the run
+    log says why), and mark the pause from the call's own output afterwards.
+    Output is captured so the limit line can be read; callers that need it get
+    it back on the returned CompletedProcess as before."""
+    out, rc = cmd_check(job)
+    if rc == 3:
+        raise SystemExit("PAUSED: " + out["reason"])
+    kw.setdefault("capture_output", True); kw.setdefault("text", True)
+    r = subprocess.run(cmd, **kw)
+    try:
+        cmd_mark(job, None, text=(r.stdout or "") + "\n" + (r.stderr or ""))
+    except Exception:  # noqa: BLE001 — the guard must never turn a good render into a failure
+        pass
+    return r
+
+
 def cmd_status(now=None):
     now = now or datetime.now(timezone.utc)
     st = load_state()
@@ -318,6 +337,18 @@ def selftest():
     res = cmd_mark("task-manager", None, now=now, text="You've hit your limit\nthe counter resets 9pm every day")
     ok(res["paused_until"] == iso(now + timedelta(hours=1)), "a reset on another line is never used: %r" % res)
     save_state({})
+    # 4d. run_guarded: a Python step's claude call is refused while paused, and marks the pause from its output
+    save_state({})
+    r = run_guarded("content-engine", [sys.executable, "-c", "print(\"You've hit your limit \u00b7 resets 7pm (Europe/London)\")"])
+    ok(r.returncode == 0 and load_state().get("paused_until"), "run_guarded marks from stdout: %r" % load_state())
+    try:
+        run_guarded("content-engine", [sys.executable, "-c", "print('never runs')"])
+        ok(False, "run_guarded must refuse while paused")
+    except SystemExit as exc:
+        ok(str(exc).startswith("PAUSED:"), "refusal names the pause: %r" % str(exc))
+    save_state({})
+    r = run_guarded("content-engine", [sys.executable, "-c", "print('LINE1: HELLO')"])
+    ok(r.stdout.strip() == "LINE1: HELLO" and not load_state().get("paused_until"), "clean output passes through unmarked")
     # 5. the poll and the board never queue a replay of themselves
     cmd_mark("handback-poll", None, now=now, text="You've hit your limit · resets 7pm (Europe/London)")
     ok(all(m["job"] != "handback-poll" for m in load_state().get("missed", [])), "handback-poll is never replayed")

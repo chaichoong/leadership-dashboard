@@ -26,6 +26,14 @@ Usage:
 import argparse, sys, datetime as dt, json, os, re, subprocess, sys, urllib.parse
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+
+
+def _allowance():
+    """scripts/allowance.py (one level up): the Claude allowance guard, 14 Sep 2026."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("allowance", os.path.join(os.path.dirname(HERE), "allowance.py"))
+    mod = importlib.util.module_from_spec(spec); spec.loader.exec_module(mod)
+    return mod
 sys.path.insert(0, HERE)
 import watch        # noqa: E402
 import cm_prompts   # noqa: E402
@@ -213,7 +221,7 @@ def ask_claude(system, user, timeout=600, thinking=None, no_mcp=False):
     if os.path.exists(TOKEN_FILE): env["CLAUDE_CODE_OAUTH_TOKEN"] = open(TOKEN_FILE).read().strip()
     cmd = [CLAUDE, "-p", user, "--system-prompt", system, "--model", MODEL, "--output-format", "json", "--tools", "", "--max-turns", "1"]
     if no_mcp: cmd += ["--strict-mcp-config", "--mcp-config", '{"mcpServers":{}}']   # a headless writer needs no connectors; skipping them saves the init wait
-    r = subprocess.run(cmd, capture_output=True, text=True, env=env, timeout=timeout)
+    r = _allowance().run_guarded("content-engine", cmd, capture_output=True, text=True, env=env, timeout=timeout)   # skipped while the allowance is out; marks the pause from its output
     if r.returncode != 0: raise SystemExit("claude failed: " + r.stderr[-400:])
     d = json.loads(r.stdout)
     return (d.get("result") or "").strip(), d.get("usage", {}), d.get("total_cost_usd")
