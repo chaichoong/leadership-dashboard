@@ -95,7 +95,6 @@ BLOCKED_MARKERS = (
      "It ran too long and was stopped."),
 )
 RESET_RE = re.compile(r"resets\s+([^\n(·]+?)(?:\s*\(|\s*$|\s+[A-Z])")
-RUNNING_GRACE_MIN = 5      # an acquired job with no finish yet is Running
 
 
 # ─── reads ────────────────────────────────────────────────────────────
@@ -199,6 +198,10 @@ def own_log_tail(job, logs_dir=LOGS, limit=4000):
 
 def classify(job, cfg, finishes, events, now, logs_dir=LOGS):
     """One job's row fields (by ES key name), from its finishes and queue events."""
+    ev = [e for e in events if e.get("job") == job]
+    ev.sort(key=lambda e: str(e.get("ts") or ""))
+    if cfg.get("mode") == "cooperative":
+        return cooperative_row(job, cfg, ev, now)
     mine = [r for r in finishes if r.get("job") == job]
     mine.sort(key=lambda r: str(r.get("ts") or ""))
     last = mine[-1] if mine else None
@@ -215,16 +218,12 @@ def classify(job, cfg, finishes, events, now, logs_dir=LOGS):
     # read as later than its finish (05:25:05Z) and every sub-second job sat
     # on the board as Running for eight hours (review, 14 Sep 2026). Compare on
     # whole seconds, and let a closing event end an open start.
-    ev = [e for e in events if e.get("job") == job]
-    ev.sort(key=lambda e: str(e.get("ts") or ""))
     def newer(e):
         ets = parse_ts(e.get("ts"))
         return not last_ts or (ets is not None and ets.replace(microsecond=0) > last_ts.replace(microsecond=0))
     after = [e for e in ev if newer(e)]
 
     status, detail = "Idle", ""
-    if cfg.get("mode") == "cooperative":
-        return cooperative_row(job, cfg, ev, now)
     if last:
         if last.get("ok"):
             status, detail = "Worked", "Ran at its slot and finished cleanly."
@@ -239,27 +238,34 @@ def classify(job, cfg, finishes, events, now, logs_dir=LOGS):
                 detail = "%s. Last thing it said: %s" % (
                     str(last.get("reason") or "it failed").rstrip("."), plain_tail(last.get("tail")) or "(nothing)")
     open_start = None
+    ceiling = timedelta(minutes=float(cfg.get("maxRuntimeMinutes") or _default_ceiling_min()) + 30)
     for e in after:
         st = e.get("state")
         if st in ("acquired", "ran-unlocked"):
             open_start = parse_ts(e.get("ts"))
-            if open_start and (now - open_start) < timedelta(hours=8):
+            if open_start:
                 status, detail = "Running", "Started at %s and has not finished yet." % open_start.astimezone(LONDON).strftime("%H:%M")
         elif st in ("finished", "released", "release-noop", "lease-lost", "max-runtime", "lock-broken"):
             # The queue closed the run. If the wrapper never wrote its own line
             # (the child and its wrapper were killed together), this event IS
             # the result; a death that shows as "Running" hides the death.
-            if open_start is not None:
-                open_start = None
-                code = e.get("exit")
-                if st == "finished" and code not in (None, 0):
-                    reason = str(e.get("reason") or "")
-                    words = blocked_reason(reason) or ("The queue stopped it: %s." % reason if reason else "It ended with exit code %s and left no report." % code)
-                    status, detail = ("Blocked" if blocked_reason(reason) else "Failed"), words
-                elif st in ("lease-lost", "max-runtime", "lock-broken"):
-                    status, detail = "Blocked", blocked_reason(str(e.get("reason") or st)) or "The queue stopped it (%s)." % st
-                else:
-                    status, detail = ("Worked", "Ran at its slot and finished cleanly.") if status == "Running" else (status, detail)
+            if open_start is None:
+                continue
+            open_start = None
+            code = e.get("exit")
+            reason = str(e.get("reason") or "")
+            outcome = str(e.get("outcome") or "")
+            if st == "finished" and code not in (None, 0):
+                words = blocked_reason(reason) or ("The queue stopped it: %s." % reason if reason else "It ended with exit code %s and left no report." % code)
+                status, detail = ("Blocked" if blocked_reason(reason) else "Failed"), words
+            elif st in ("lease-lost", "max-runtime", "lock-broken"):
+                status, detail = "Blocked", blocked_reason(reason or st) or "The queue stopped it (%s)." % st
+            elif st == "released" and outcome and outcome != "completed":
+                # released with outcome failed / signalled / unfinished and no
+                # finished line: the one death `finished` cannot record.
+                status, detail = "Failed", blocked_reason(reason) or "The run ended without a report (%s%s)." % (outcome, (": " + reason) if reason else "")
+            elif status == "Running":
+                status, detail = "Worked", "Ran at its slot and finished cleanly."
         elif st in ("deferred-not-ready", "deferred-stale-precondition", "skipped-stale", "queue-timeout"):
             status = "Skipped"
             detail = {
@@ -268,6 +274,11 @@ def classify(job, cfg, finishes, events, now, logs_dir=LOGS):
                 "skipped-stale": "Its slot was missed by more than the allowed lateness, so the run was skipped, not run late.",
                 "queue-timeout": "It waited behind other jobs for the queue lock until it gave up.",
             }[st] + (" (%s)" % e.get("reason") if e.get("reason") else "")
+    if open_start is not None and (now - open_start) > ceiling:
+        # Past its own ceiling with no closing event: the queue's watchdog would
+        # have written max-runtime long before, so the queue process itself died.
+        status = "Failed"
+        detail = "Started at %s and never finished; nothing closed the run and no report was written." % open_start.astimezone(LONDON).strftime("%d %b %H:%M")
     if not last and not after:
         detail = "No run recorded in the last week."
 
@@ -281,35 +292,67 @@ def classify(job, cfg, finishes, events, now, logs_dir=LOGS):
     }
 
 
+COOP_GRACE_MIN = 60   # daily-ops-guard alarms 60 minutes after the slot; the board agrees with it
+END_NOTE_RE = re.compile(r"^(?:end|finished|complete|done)\b|\b(?:finished|complete|completed)\b", re.I)
+
+
+def last_due(cron, now, back_days=3):
+    """The most recent London-time firing of a five-field cron at or before now, or None."""
+    jq = _job_queue()
+    if not cron or not jq:
+        return None
+    t = now.astimezone(LONDON).replace(second=0, microsecond=0)
+    stop = t - timedelta(days=back_days)
+    while t > stop:
+        if jq.cron_matches(cron, t):
+            return t.astimezone(timezone.utc)
+        t -= timedelta(minutes=1)
+    return None
+
+
 def cooperative_row(job, cfg, ev, now):
     """A cooperative job (daily-ops) runs inside a Claude session and leaves no
-    wrapper line, only 'mark' events: one at its start, one with note 'end'.
-    Reviewed 14 Sep 2026: without this it read Idle with a blank reason on the
-    morning it had run for 42 minutes."""
+    wrapper line, only 'mark' events: a bare one at its start and one whose note
+    opens end / finished / complete when it is done. Judged against its own
+    slot, not a rolling day (review, 14 Sep 2026): before the slot plus the
+    guard's grace the last completed run stands; after it, no start is Failed."""
     marks = [e for e in ev if e.get("state") == "mark"]
-    day = now - timedelta(hours=24)
-    recent = [e for e in marks if (parse_ts(e.get("ts")) or day) > day]
-    is_end = lambda e: str(e.get("note") or "").startswith("end")
-    starts = [e for e in recent if not is_end(e)]
-    ends = [e for e in recent if is_end(e)]
-    last_mark = parse_ts(marks[-1].get("ts")) if marks else None
-    if ends:
-        t = parse_ts(ends[-1].get("ts"))
+    is_end = lambda e: bool(END_NOTE_RE.search(str(e.get("note") or "")))
+    is_start = lambda e: not str(e.get("note") or "").strip()
+    starts = [e for e in marks if is_start(e)]
+    ends = [e for e in marks if is_end(e)]
+    due = last_due(cfg.get("cron", ""), now)
+    grace_over = bool(due) and now >= due + timedelta(minutes=COOP_GRACE_MIN)
+    since_due = lambda e: due is None or (parse_ts(e.get("ts")) or due) >= due
+    start_today = [e for e in starts if since_due(e)]
+    end_today = [e for e in ends if since_due(e)]
+    last_end = parse_ts(ends[-1].get("ts")) if ends else None
+    ceiling = timedelta(minutes=float(cfg.get("maxRuntimeMinutes") or _default_ceiling_min()) + 30)
+    if end_today:
+        t = parse_ts(end_today[-1].get("ts"))
         status, detail = "Worked", "Ran through its Claude session and finished at %s." % t.astimezone(LONDON).strftime("%H:%M")
-    elif starts:
-        t = parse_ts(starts[-1].get("ts"))
-        if (now - t) < timedelta(hours=8):
+    elif start_today:
+        t = parse_ts(start_today[-1].get("ts"))
+        if (now - t) <= ceiling:
             status, detail = "Running", "Started at %s and has not written its end mark yet." % t.astimezone(LONDON).strftime("%H:%M")
         else:
             status, detail = "Failed", "Started at %s and never wrote its end mark." % t.astimezone(LONDON).strftime("%H:%M")
+    elif not grace_over and last_end:
+        status, detail = "Worked", "Last ran %s; next slot %s." % (
+            last_end.astimezone(LONDON).strftime("%a %H:%M"), due.astimezone(LONDON).strftime("%H:%M") if due else "unknown")
+    elif not grace_over and not last_end:
+        status, detail = "Idle", "No run recorded in the last week; its slot today has not passed yet."
     else:
-        status, detail = "Failed", "No start mark in the last 24 hours. It runs through a Claude session at its slot; nothing has swept, dispatched or reported."
-    worked = [e for e in marks if is_end(e)]
+        status, detail = "Failed", "Due at %s and no start mark %d minutes later. It runs through a Claude session; nothing has swept, dispatched or reported." % (
+            due.astimezone(LONDON).strftime("%H:%M"), int((now - due).total_seconds() // 60))
+    day = now - timedelta(hours=24)
+    starts24 = [e for e in starts if (parse_ts(e.get("ts")) or day) > day]
+    last_mark = parse_ts(marks[-1].get("ts")) if marks else None
     return {
         "key": job, "kind": "job", "schedule": cfg.get("cron", ""), "status": status, "detail": detail,
         "lastRun": last_mark.strftime("%Y-%m-%dT%H:%M:%S.000Z") if last_mark else None,
-        "lastWorked": parse_ts(worked[-1].get("ts")).strftime("%Y-%m-%dT%H:%M:%S.000Z") if worked else None,
-        "runs24h": len(starts), "fails24h": 0 if ends or not starts else 1,
+        "lastWorked": last_end.strftime("%Y-%m-%dT%H:%M:%S.000Z") if last_end else None,
+        "runs24h": len(starts24), "fails24h": 1 if status == "Failed" else 0,
         "nextDue": next_due(cfg.get("cron", ""), now, runs_on_days=cfg.get("runsOnDays")),
     }
 
@@ -338,6 +381,11 @@ def next_due(cron, now, horizon_days=8, runs_on_days=None):
 
 
 _JQ = None
+
+
+def _default_ceiling_min():
+    jq = _job_queue()
+    return float(getattr(jq, "DEFAULT_MAX_RUNTIME_MIN", 480) or 480)
 
 
 def _job_queue():
@@ -488,8 +536,9 @@ def selftest():
     ok(next_due("0 11 * * *", now, runs_on_days=[7]) == "2026-09-20T10:00:00.000Z", "Sundays-only job is next due on Sunday 20 Sep: %r" % next_due("0 11 * * *", now, runs_on_days=[7]))
     r_late = classify("daily-ops", {"cron": "0 7 * * *", "mode": "cooperative"}, [],
                       [{"ts": "2026-09-13T18:00:00.000Z", "job": "daily-ops", "state": "mark", "note": ""},
-                       {"ts": "2026-09-13T18:21:46.493Z", "job": "daily-ops", "state": "mark", "note": "end: late run 19:06-19:20, usage cap until 19:00"}], now)
-    ok(r_late["status"] == "Worked", "an end mark with a note still ends the run: %r" % r_late["status"])
+                       {"ts": "2026-09-13T18:21:46.493Z", "job": "daily-ops", "state": "mark", "note": "end: late run 19:06-19:20, usage cap until 19:00"}],
+                      datetime(2026, 9, 14, 5, 0, tzinfo=timezone.utc))   # 06:00 London, before today's slot
+    ok(r_late["status"] == "Worked" and "19:21" in r_late["detail"], "an end mark with a note still ends the run: %r" % r_late)
     ok(r["runs24h"] == 1 and r["fails24h"] == 1, "24h counts")
     # 1b. the wrapper keeps 600 chars of the RUNNER's output; the allowance line is in the slot's runs.log
     import tempfile
@@ -523,13 +572,43 @@ def selftest():
                  [{"ts": "2026-09-13T16:00:08.100Z", "job": "task-manager", "state": "acquired"},
                   {"ts": "2026-09-13T16:20:08.100Z", "job": "task-manager", "state": "finished", "exit": 70, "reason": "LOST LOCK: lock is held by prospecting"}], now)
     ok(r["status"] == "Blocked" and "Another job took the queue lock" in r["detail"], "queue death shows: %r" % r)
-    # 2d. a cooperative job reads its marks
-    r = classify("daily-ops", {"cron": "0 7 * * *", "mode": "cooperative"}, [],
+    # 2d. a cooperative job reads its marks, judged against its 07:00 slot (now = 08:30 London)
+    coop = {"cron": "0 7 * * *", "mode": "cooperative"}
+    r = classify("daily-ops", coop, [],
                  [{"ts": "2026-09-14T06:06:35.714Z", "job": "daily-ops", "state": "mark", "note": ""},
                   {"ts": "2026-09-14T06:48:27.733Z", "job": "daily-ops", "state": "mark", "note": "end"}], now)
     ok(r["status"] == "Worked" and "07:48" in r["detail"], "cooperative worked: %r" % r)
-    r = classify("daily-ops", {"cron": "0 7 * * *", "mode": "cooperative"}, [], [], now)
-    ok(r["status"] == "Failed" and "No start mark" in r["detail"], "cooperative silent -> Failed: %r" % r)
+    r = classify("daily-ops", coop, [], [], now)
+    ok(r["status"] == "Failed" and "Due at 07:00" in r["detail"], "cooperative silent past grace -> Failed: %r" % r)
+    yesterday = [{"ts": "2026-09-13T06:06:00.000Z", "job": "daily-ops", "state": "mark", "note": ""},
+                 {"ts": "2026-09-13T06:48:00.000Z", "job": "daily-ops", "state": "mark", "note": "end"}]
+    early = datetime(2026, 9, 14, 5, 0, tzinfo=timezone.utc)   # 06:00 London, not yet due
+    r = classify("daily-ops", coop, [], yesterday, early)
+    ok(r["status"] == "Worked" and "07:48" in r["detail"], "not yet due -> yesterday's completed slot stands: %r" % r)
+    # a run that predates the last due slot, inside the grace, still stands and names the slot
+    r = classify("daily-ops", coop, [], yesterday, datetime(2026, 9, 14, 6, 20, tzinfo=timezone.utc))   # 07:20 London
+    ok(r["status"] == "Worked" and "next slot 07:00" in r["detail"], "inside grace names the slot: %r" % r["detail"])
+    r = classify("daily-ops", coop, [], yesterday, datetime(2026, 9, 14, 6, 50, tzinfo=timezone.utc))   # 07:50, inside grace
+    ok(r["status"] == "Worked", "inside the 60-minute grace it is not Failed: %r" % r["status"])
+    r = classify("daily-ops", coop, [], yesterday + [{"ts": "2026-09-14T06:05:00.000Z", "job": "daily-ops", "state": "mark", "note": "phase 1, run"}], now)
+    ok(r["runs24h"] == 0 and r["status"] == "Failed", "a mid-run note is not a start: %r" % r)
+    # 2e. released without a finished line: the outcome is the result
+    r = classify("handback-poll", {"cron": "*/30 * * * *"}, fin,
+                 [{"ts": "2026-09-14T07:00:05.000Z", "job": "handback-poll", "state": "acquired"},
+                  {"ts": "2026-09-14T07:20:05.000Z", "job": "handback-poll", "state": "released", "outcome": "unfinished", "reason": "child exit unknown"}], now)
+    ok(r["status"] == "Failed" and "without a report" in r["detail"], "released unfinished -> Failed: %r" % r)
+    r = classify("handback-poll", {"cron": "*/30 * * * *"}, fin,
+                 [{"ts": "2026-09-14T07:00:05.000Z", "job": "handback-poll", "state": "acquired"},
+                  {"ts": "2026-09-14T07:05:05.000Z", "job": "handback-poll", "state": "released", "outcome": "completed"}], now)
+    ok(r["status"] == "Worked", "released completed -> Worked: %r" % r["status"])
+    # 2f. a start that nothing ever closes, past its ceiling, is a death not a run
+    # (ceiling = maxRuntimeMinutes + 30 min margin; the start must be newer than the last finish at 06:38:58Z)
+    r = classify("handback-poll", {"cron": "*/30 * * * *", "maxRuntimeMinutes": 10}, fin,
+                 [{"ts": "2026-09-14T06:45:05.000Z", "job": "handback-poll", "state": "acquired"}], now)   # 45 min open, ceiling 40
+    ok(r["status"] == "Failed" and "never finished" in r["detail"], "open start past ceiling -> Failed: %r" % r)
+    r = classify("handback-poll", {"cron": "*/30 * * * *", "maxRuntimeMinutes": 10}, fin,
+                 [{"ts": "2026-09-14T07:10:05.000Z", "job": "handback-poll", "state": "acquired"}], now)   # 20 min open
+    ok(r["status"] == "Running", "open start inside ceiling -> Running: %r" % r["status"])
     # 3. a plain failure names what it said, without paths or record ids
     r = classify("x", {"cron": "0 7 * * *"}, [{"ts": "2026-09-14T06:00:00Z", "job": "x", "ok": False, "exit": 1,
                                              "reason": "exit code 1", "tail": "wrote /Users/kevinbrittain/a.log then rec1234567890ABCD broke"}], [], now)

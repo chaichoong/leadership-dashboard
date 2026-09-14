@@ -5745,7 +5745,7 @@ function registerAgentsSyncBar(){
                     // The status writer runs every 10 minutes. Rows older than
                     // 30 minutes mean the mirror has stopped, whatever it shows.
                     if(String(_estateState).indexOf('error') === 0) return { status:'fail', detail:String(_estateState).slice(7) };
-                    if(_estateState !== 'ready') return { status:'warn', detail:'Estate status tab not opened yet' };
+                    if(_estateState !== 'ready') return { status:'warn', detail:'Estate status not loaded yet' };
                     const newest = _estateRows.map(r => (r.fields||{})[ES.updated]).filter(Boolean).sort().pop();
                     const ageMin = newest ? Math.round((Date.now() - new Date(newest).getTime())/60000) : null;
                     if(ageMin === null || ageMin > ESTATE_STALE_MIN) return { status:'fail', detail:`Estate status rows last updated ${newest ? estateAgo(newest) : 'never'} — the estate-status job has stopped` };
