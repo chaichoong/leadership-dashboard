@@ -88,9 +88,11 @@ describe('movement maths never trusts a re-stamped field', () => {
 });
 
 describe("the Go Signal is the agent's own 9/1/5 slot job (Kevin, 25 Aug 2026)", () => {
-    it('job-schedule carries task-manager at 09:00, 13:00 and 17:00, wrapped', () => {
+    it('job-schedule carries task-manager at 09:20, 13:20 and 17:20, wrapped', () => {
+        // :20, not :00, since 14 Sep 2026: at 09:00 it queued behind inbox
+        // triage, the hand-back poll and the knowledge sorter on one lock.
         expect(sched['task-manager']).toBeDefined();
-        expect(sched['task-manager'].cron).toBe('0 9,13,17 * * *');
+        expect(sched['task-manager'].cron).toBe('20 9,13,17 * * *');
         expect(sched['task-manager'].mode).toBe('wrapped');
     });
 
