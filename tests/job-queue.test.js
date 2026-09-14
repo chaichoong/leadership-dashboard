@@ -1809,7 +1809,8 @@ describe('lock-exempt read-only checks', () => {
     // table nothing else writes; it touches neither the repo nor the queue, and
     // a status mirror that waits behind a four-hour render defeats its purpose.
     // job-digest (14 Sep 2026) reads the logs and posts a digest; it reports ON the queue, so it must never wait behind it.
-    expect(exempt.sort()).toEqual(['data-invariants', 'drift-scan', 'drive-auth', 'estate-drift', 'estate-status', 'job-digest']);
+    // handback-poll (14 Sep 2026): Airtable and the gate only; its own inflight check stops a double carry-out.
+    expect(exempt.sort()).toEqual(['data-invariants', 'drift-scan', 'drive-auth', 'estate-drift', 'estate-status', 'handback-poll', 'job-digest']);
     // content-engine must never be exempt: it renders and writes.
     expect(real['content-engine'].lockExempt).toBeUndefined();
   });
