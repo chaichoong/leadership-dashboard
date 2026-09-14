@@ -583,7 +583,7 @@ def finish_extras(day, entry, recs, test, save):
             if os.path.exists(upload):
                 plan_path, ptitle = spotify.write_plan(day, upload, ff.get("Podcast Copy"), entry["youtube_link"], test, os.path.dirname(STATE), thumb=files.get("thumb", ""))
                 pod.update({"plan": plan_path, "title": ptitle, "status": "uploading", "started": now_utc()}); save()
-                done.append(run_spotify(day, full["id"], plan_path, ptitle, test, pod)); save()
+                done.append(run_spotify(day, card_task(day, full), plan_path, ptitle, test, pod)); save()
         except Exception as ex:
             pod.update({"status": "failed", "error": str(ex)[-200:]}); save()
             print("episode %d: Spotify step failed (%s); retried next run" % (day, str(ex)[-160:]), file=sys.stderr)
@@ -617,6 +617,19 @@ def youtube_direct(day, clip, title, text, when, test):
     link = "https://youtu.be/" + vid
     return {"id": vid, "platform": "youtube", "route": "api", "account": "Runpreneur", "clip": clip, "scheduled": None if test else when,
             "status": "published" if test else "scheduled", "link": link, "mode": mode(), "file": os.path.basename(path), "captions": bool(srt)}
+
+
+def card_task(day, full):
+    """The APPROVAL CARD's task id for this episode, which is what the browser lane checks before it presses
+    Publish. Until 14 Sep 2026 this passed the Content Machine record id instead, so agent-dispatch read no
+    Approval Outcome on it and every automatic Spotify publish was refused ("task ... is not approved"):
+    2054 went out by hand, 2195, 2194 and 2196 all failed the same way while their cards sat Approved."""
+    e = approval.load_state().get(str(day)) or {}
+    tid = e.get("task")
+    if not tid:
+        print("episode %d: no approval card on record, so Spotify cannot prove Kevin's yes; using the episode record and expecting a refusal" % day, file=sys.stderr)
+        return full["id"]
+    return tid
 
 
 def run_spotify(day, task_id, plan_path, title, test, pod):
@@ -1119,6 +1132,7 @@ def selftest():
     assert "YouTube Link" in LINK_FIELDS[("youtube", "full")] and "TikTok Link" in LINK_FIELDS[("tiktok", "summary")] and "Facebook Post Link" in LINK_FIELDS[("facebook", "summary")]
     assert "LinkedIn Link" in LINK_FIELDS[("linkedin", "summary")] and "Threads Link" in LINK_FIELDS[("threads", "summary")], "the fields Ericamae's pages read"
     assert CLIP_FILES["podcast"] == "Ep%d_Podcast.mp3"
+    import inspect as _i3; src3 = _i3.getsource(finish_extras); assert 'run_spotify(day, card_task(day, full)' in src3, "Spotify is gated on the approval CARD, never the episode record (14 Sep 2026)"
     import inspect as _i2; src2 = _i2.getsource(schedule_stage); assert "youtube_direct_ready()" in src2 and src2.index("youtube_direct_ready()") < src2.index("create_post(body)"), "the API route is tried before GoHighLevel"
     ys = _i2.getsource(youtube_direct); assert 'files[clip]' in ys and '"_srt"' in ys and 'privacy="unlisted" if test else "private"' in ys and "publish_at=None if test else when" in ys
     ss = _i2.getsource(sync); assert 'p.get("route") == "api"' in ss and 'p["status"] = "published"' in ss, "API uploads flip to published on their slot without asking GoHighLevel"
