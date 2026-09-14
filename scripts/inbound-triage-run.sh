@@ -236,6 +236,18 @@ fi
 #
 # Do not remove step 0 to shorten the prompt. tests/triage-learns.test.js
 # fails if this path stops being named here.
+# THE ALLOWANCE GUARD (Kevin, 14 Sep 2026): while scripts/allowance.py says the
+# Claude allowance is out, this slot does not start. It is recorded as missed
+# and re-run once at the reset by `allowance.py replay`. Exit 0: a paused tick
+# is not a broken job; the Estate status board shows the pause as its own row.
+if ! __PAUSE=$(/usr/bin/python3 "$REPO/scripts/allowance.py" check --job "inbound-triage"); then
+  echo "PAUSED: $__PAUSE" >> "$LOG"
+  echo "===== done rc=0 (PAUSED: the Claude allowance is out; queued to re-run at reset) $(date) =====" >> "$LOG"
+  echo "inbound-triage slot skipped: the Claude allowance is out (see $LOG)"
+  __POSTRUN_DONE=1
+  exit 0
+fi
+
 "$CLAUDE" -p "You are the Inbound Comms Triage agent's scheduled run. THIS RUN IS THE $SLOT_LABEL SLOT — that is the wall clock at run start, read for you. Head your report with exactly '$SLOT_LABEL slot' and never substitute a slot you worked out yourself.
 0. FIRST read /Users/kevinbrittain/.claude/agents/inbound-comms-triage.md — that file is your standing instructions, including the '## Lessons from Kevin' section, which is where every rule he has asked you to remember lives. Apply every lesson in it to the decisions you make below. If a lesson conflicts with a skill step, say so in your report rather than guessing which wins.
 EMAIL LANE STATUS FOR THIS SLOT: $EMAIL_LANE_NOTE
@@ -250,6 +262,7 @@ Rules for the whole run: this is real mail — when unsure between outcomes choo
 # call that waits on a terminal read has no terminal here and waits for ever. The
 # queue's maxRuntimeMinutes ceiling is the backstop if anything else hangs.
 RC=$?
+/usr/bin/python3 "$REPO/scripts/allowance.py" mark --job "inbound-triage" --log "$LOG" --since-line "$__START_LINE" >/dev/null 2>&1 || true
 
 # THE OUTCOME, NOT THE FORECAST (finding 20260907-daily-ops-487). If the email
 # lane was recorded ok before the agent started but no scan reached the end of

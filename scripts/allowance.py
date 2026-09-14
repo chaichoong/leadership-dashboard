@@ -108,6 +108,8 @@ def parse_reset(text, now):
         hour += 12
     if ampm == "am" and hour == 12:
         hour = 0
+    if not (0 <= hour <= 23 and 0 <= minute <= 59):
+        return None   # "resets 30 min", "resets 25 Sep": not a clock time; the caller pauses an hour
     local_now = now.astimezone(tz)
     if m.group("mon") and m.group("day"):
         mon = MONTHS.get(m.group("mon").lower())
@@ -129,27 +131,34 @@ def find_limit(text, now):
     if not text or not LIMIT_RE.search(text):
         return False, None
     # the reset phrase sits on the same line as the limit phrase; read that line first
+    # The reset is read from the SAME line as the limit phrase, never from the
+    # rest of the log: an agent quoting "the counter resets 5 times" must not
+    # set the pause. No reset on the line means the one-hour pause.
     for line in text.splitlines():
         if LIMIT_RE.search(line):
-            r = parse_reset(line, now)
+            try:
+                r = parse_reset(line, now)
+            except ValueError:
+                r = None
             if r:
                 return True, r
-    return True, parse_reset(text, now)
+    return True, None
 
 
 def log_tail(path, since_line=0, limit_bytes=200000):
+    """Only THIS run's lines: everything after since_line (the line count the
+    runner took before it started), capped at limit_bytes from the end. The
+    first version applied the line offset only while the whole file fitted the
+    cap, so a 200KB runs.log re-marked the pause from last week's limit lines
+    on every clean run (review, 14 Sep 2026)."""
     try:
         with open(path, "rb") as fh:
-            fh.seek(0, 2)
-            size = fh.tell()
-            fh.seek(max(0, size - limit_bytes))
-            text = fh.read().decode("utf-8", "replace")
+            raw = fh.read()
     except OSError:
         return ""
-    if since_line and size <= limit_bytes:
-        lines = text.splitlines()
-        text = "\n".join(lines[since_line:])
-    return text
+    lines = raw.split(b"\n")
+    text = b"\n".join(lines[since_line:]) if since_line else raw
+    return text[-limit_bytes:].decode("utf-8", "replace")
 
 
 def live_jobs():
@@ -291,6 +300,24 @@ def selftest():
     ok("paused_until" not in st and st["last_outage"]["replayed"][0]["job"] == "task-manager", "cleared and remembered: %r" % st)
     out, rc = cmd_check("task-manager", now=datetime(2026, 9, 13, 18, 6, tzinfo=timezone.utc))
     ok(rc == 0, "not paused after replay")
+    # 4b. REVIEW 14 Sep 2026: only this run's lines are read, whatever the file size
+    import tempfile as _tf
+    big = os.path.join(_tf.mkdtemp(), "runs.log")
+    with open(big, "w") as fh:
+        fh.write("You've hit your limit · resets 7pm (Europe/London)\n" * 5000)   # 250KB of last week's lines
+        fh.write("===== run =====\nworked fine\n===== done rc=0 =====\n")
+    save_state({})
+    res = cmd_mark("task-manager", big, since_line=5000, now=now)
+    ok(not res["marked"], "old limit lines above since_line do not re-mark: %r" % res)
+    res = cmd_mark("task-manager", big, since_line=0, now=now)
+    ok(res["marked"], "and the same lines inside the window do mark")
+    save_state({})
+    # 4c. a limit line with a non-time after "resets" pauses one hour instead of crashing
+    res = cmd_mark("task-manager", None, now=now, text="You've hit your limit · resets 30 min")
+    ok(res["marked"] and res["paused_until"] == iso(now + timedelta(hours=1)), "unparseable reset -> one hour: %r" % res)
+    res = cmd_mark("task-manager", None, now=now, text="You've hit your limit\nthe counter resets 9pm every day")
+    ok(res["paused_until"] == iso(now + timedelta(hours=1)), "a reset on another line is never used: %r" % res)
+    save_state({})
     # 5. the poll and the board never queue a replay of themselves
     cmd_mark("handback-poll", None, now=now, text="You've hit your limit · resets 7pm (Europe/London)")
     ok(all(m["job"] != "handback-poll" for m in load_state().get("missed", [])), "handback-poll is never replayed")

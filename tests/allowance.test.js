@@ -22,7 +22,8 @@ describe('allowance.py', () => {
   });
 
   it('every Claude runner checks before the call and marks after it', () => {
-    for (const f of ['scripts/agent-slot-run.sh', 'scripts/handback-poll-run.sh']) {
+    // the two slots the weekend outage lost most of have their OWN runners (review, 14 Sep 2026)
+    for (const f of ['scripts/agent-slot-run.sh', 'scripts/handback-poll-run.sh', 'scripts/task-manager-run.sh', 'scripts/inbound-triage-run.sh']) {
       const src = read(f);
       const check = src.indexOf('allowance.py" check --job');
       const claude = src.indexOf('"$CLAUDE" -p');

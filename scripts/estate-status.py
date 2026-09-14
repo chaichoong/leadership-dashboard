@@ -196,6 +196,12 @@ def own_log_tail(job, logs_dir=LOGS, limit=4000):
     return "\n".join(out)
 
 
+def paused_skip(log_text):
+    """True when the newest done line in a slot log is the allowance pause."""
+    lines = [l for l in (log_text or "").splitlines() if l.startswith("===== done rc=")]
+    return bool(lines) and "(PAUSED:" in lines[-1]
+
+
 def classify(job, cfg, finishes, events, now, logs_dir=LOGS):
     """One job's row fields (by ES key name), from its finishes and queue events."""
     ev = [e for e in events if e.get("job") == job]
@@ -225,7 +231,10 @@ def classify(job, cfg, finishes, events, now, logs_dir=LOGS):
 
     status, detail = "Idle", ""
     if last:
-        if last.get("ok"):
+        if last.get("ok") and paused_skip(own_log_tail(job, logs_dir)):
+            # the runner skipped the Claude call because the allowance was out (allowance.py): exit 0, but nothing ran
+            status, detail = "Skipped", "Its slot came while the Claude allowance was out, so it did not start; it is queued to re-run at reset."
+        elif last.get("ok"):
             status, detail = "Worked", "Ran at its slot and finished cleanly."
         else:
             why = blocked_reason((last.get("reason") or "") + " " + (last.get("tail") or ""))
@@ -595,6 +604,13 @@ def selftest():
     r = classify("task-manager", {"cron": "0 9,13,17 * * *"},
                  [{"ts": "2026-09-13T12:00:46Z", "job": "task-manager", "ok": False, "exit": 1, "reason": "exit code 1", "tail": "VERIFY FAIL"}], [], now, logs_dir=tempfile.mkdtemp())
     ok(r["status"] == "Failed", "no log, no allowance line -> Failed")
+    # 1c. a slot the runner skipped while the allowance was out is Skipped, not Worked (exit 0 notwithstanding)
+    tmp2 = tempfile.mkdtemp(); os.makedirs(os.path.join(tmp2, "prospecting"))
+    with open(os.path.join(tmp2, "prospecting", "runs.log"), "w") as fh:
+        fh.write("===== prospecting slot run =====\nPAUSED: {...}\n===== done rc=0 (PAUSED: the Claude allowance is out; queued to re-run at reset) Mon =====\n")
+    r = classify("prospecting", {"cron": "15 9 * * *"},
+                 [{"ts": "2026-09-14T07:15:10Z", "job": "prospecting", "ok": True, "exit": 0, "reason": "", "tail": "prospecting slot skipped: the Claude allowance is out"}], [], now, logs_dir=tmp2)
+    ok(r["status"] == "Skipped" and "allowance was out" in r["detail"], "paused skip -> Skipped: %r" % r)
     # 2. a clean run is Worked, and a later 'acquired' with no finish is Running
     fin = [{"ts": "2026-09-14T06:38:58Z", "job": "handback-poll", "ok": True, "exit": 0, "reason": "", "tail": "run OK"}]
     r = classify("handback-poll", {"cron": "*/30 * * * *"}, fin, [], now)
