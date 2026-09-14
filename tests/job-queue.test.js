@@ -1805,7 +1805,10 @@ describe('lock-exempt read-only checks', () => {
   it('the real schedule exempts only checks that write nothing shared', () => {
     const real = JSON.parse(readFileSync(resolve(__dirname, '../scripts/job-schedule.json'), 'utf8'));
     const exempt = Object.keys(real).filter((k) => real[k] && real[k].lockExempt);
-    expect(exempt.sort()).toEqual(['data-invariants', 'drift-scan', 'drive-auth', 'estate-drift']);
+    // estate-status (14 Sep 2026) reads the job logs and writes ONE Airtable
+    // table nothing else writes; it touches neither the repo nor the queue, and
+    // a status mirror that waits behind a four-hour render defeats its purpose.
+    expect(exempt.sort()).toEqual(['data-invariants', 'drift-scan', 'drive-auth', 'estate-drift', 'estate-status']);
     // content-engine must never be exempt: it renders and writes.
     expect(real['content-engine'].lockExempt).toBeUndefined();
   });

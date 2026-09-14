@@ -520,5 +520,17 @@
   ],
   "note": "Kevin, 7 Sep 2026: 'I felt that he [the CEO] is outdated.' Scans the CEO, the eleven heads, the five workers, the /ceo and /huddle skills, the CEO slot instructions, the five brain files the CEO loads first and the 09:00 brief worker for wording a dated ruling retired, and fails if a Decisions/ file newer than ~/.claude/agents/ESTATE.md's As at stamp touches the estate. Red means a prompt is lying about how the estate works. Fewer than 20 readable surfaces exits 2, never 0. LOCK-EXEMPT (9 Sep 2026, finding 20260909-daily-ops-exceptions-502): read-only — it makes no git commit, no Airtable write and no file write outside its own snapshot/report, so it never queues. On 9 Sep content-engine held the lock 02:16 to past 07:13 and the whole morning check block was starved ten deep. Under two minutes of machine time between them, lost to four hours of ffmpeg.",
   "lockExempt": true
+ },
+ "estate-status": {
+  "cron": "*/10 * * * *",
+  "maxLateMinutes": 8,
+  "mode": "wrapped",
+  "lockExempt": true,
+  "needs": [
+   "network"
+  ],
+  "retryWhenDeferred": false,
+  "retryWhenDeferredNote": "fires every ten minutes, so a missed tick is replaced by the next one; a retry would only double-write the same rows",
+  "note": "Kevin's audit, 14 Sep 2026: 'I have no clue what is published and when, or when agents are not working and when they are.' scripts/estate-status.py mirrors job-status.jsonl, queue-events.jsonl and job-schedule.json into the Estate Status table (one row per live job: last run, worked or not, why in plain words, next due, 24h counts) plus the loop-health not-moving list, and the Estate status tab on the AI Agents page reads it live. LOCK-EXEMPT: it reads the logs and writes Airtable only, never the repo or the queue, so it never waits behind a four-hour render. The page shows 'the status writer itself has stopped' when its rows are older than 30 minutes, so this job cannot fail silently."
  }
 }

@@ -212,11 +212,12 @@ def compute(tasks, agent_ids, now=None):
     return {"needsYou": needs_you, "done": done, "stalled": stalled}
 
 
-def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--json", action="store_true")
-    args = ap.parse_args()
-
+def report():
+    """The whole read-and-compute pass, with its controls, as one dict.
+    Shared with scripts/estate-status.py (14 Sep 2026), which writes the
+    stalled list onto the Estate Status table for the AI Agents page. Raises
+    on a broken read or a failed control; never returns an all-clear from a
+    query that found nothing."""
     try:
         team = fetch(TEAM, ["Name", "Is AI Agent"])
         # Open tasks, plus completions inside the Done window. Reading the whole
@@ -233,8 +234,7 @@ def main():
                       formula=('OR({Status}!="Completed",'
                                "IS_AFTER({Completion Date},DATEADD(TODAY(),-8,'days')))"))
     except (urllib.error.HTTPError, urllib.error.URLError, OSError) as exc:
-        print(f"ERROR: could not read Airtable — {exc}", file=sys.stderr)
-        sys.exit(1)
+        raise RuntimeError(f"could not read Airtable — {exc}")
 
     agent_ids = {r["id"] for r in team if (r.get("fields") or {}).get("Is AI Agent")}
 
@@ -274,22 +274,33 @@ def main():
         controls["AI agent records"] = 0
     failed = [k for k, v in controls.items() if not v]
     if failed:
-        for k, v in controls.items():
-            print(f"  control: {k} = {v}", file=sys.stderr)
-        print(f"ERROR: control failed — {', '.join(failed)} is zero. Refusing to report "
-              "an all-clear from a query that found nothing.", file=sys.stderr)
-        sys.exit(1)
+        detail = ", ".join(f"{k} = {v}" for k, v in controls.items())
+        raise RuntimeError(f"control failed — {', '.join(failed)} is zero. Refusing to report "
+                           f"an all-clear from a query that found nothing. ({detail})")
     linked = controls["open tasks linked to an AI agent"]
 
     res = compute(tasks, agent_ids)
     res["control"] = {"agents": len(agent_ids), "agentLinkedTasks": linked,
                       "tasksRead": len(tasks)}
+    return res
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--json", action="store_true")
+    args = ap.parse_args()
+    try:
+        res = report()
+    except RuntimeError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        sys.exit(1)
+    tasks_read = res["control"]["tasksRead"]; linked = res["control"]["agentLinkedTasks"]
 
     if args.json:
         print(json.dumps(res, indent=2))
         return
 
-    print(f"Approval loop — {len(tasks)} tasks read, {linked} agent-linked")
+    print(f"Approval loop — {tasks_read} tasks read, {linked} agent-linked")
     print(f"  Needs Kevin : {len(res['needsYou'])}")
     print(f"  Done (7d)   : {len(res['done'])}")
     print(f"  NOT MOVING  : {len(res['stalled'])}")
