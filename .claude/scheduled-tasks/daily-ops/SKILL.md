@@ -32,7 +32,7 @@ half no arrivals list can show: **saying when one did not run.**
 | Slot | launchd label | When | Ruled in |
 |---|---|---|---|
 | Inbox Triage | `com.kevinbrittain.inbound-triage` | 09:00 / 13:00 / 17:00 | Kevin, 24 Aug 2026 |
-| Task Board Manager board pass | `com.kevinbrittain.task-manager` | 09:00 / 13:00 / 17:00 | Kevin, 25 Aug 2026 |
+| Task Board Manager board pass | `com.kevinbrittain.task-manager` | 09:20 / 13:20 / 17:20 (moved off :00 on 14 Sep 2026) | Kevin, 25 Aug 2026 |
 | CEO huddle + memory sweep | `com.kevinbrittain.ceo-agent` | 06:45 | Kevin, 26 Aug 2026 |
 | Prospecting | `com.kevinbrittain.prospecting` | 09:15 | Kevin, 26 Aug 2026 |
 | Production sweep (full walk) | `com.kevinbrittain.prod-sweep-weekly` | Sundays 11:00 | Kevin, 26 Aug 2026 |
@@ -51,7 +51,7 @@ board pass and nowhere else.
 
 ## Your reporting window is the LAST 24 HOURS
 
-You run at 07:00. The role-agent slots run at 09:00, 13:00 and 17:00. So the day you report on is **yesterday 07:00 to today 07:00** — yesterday's three slot rounds, plus this morning's scripts and the CEO huddle. Nothing is lost; it is shifted. Say "in the last day", never "today", so the window is honest.
+You run at 07:00. The role-agent slots run at 09:00, 13:00 and 17:00 (triage) and 09:20, 13:20 and 17:20 (the board pass). So the day you report on is **yesterday 07:00 to today 07:00** — yesterday's three slot rounds, plus this morning's scripts and the CEO huddle. Nothing is lost; it is shifted. Say "in the last day", never "today", so the window is honest.
 
 STUCK and NEEDS YOU are live reads of the board, so they are current regardless.
 

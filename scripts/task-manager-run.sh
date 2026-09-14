@@ -1,6 +1,6 @@
 #!/bin/bash
 # Task Manager agent — its own Go Signal (Kevin's ruling, 25 Aug 2026):
-# 09:00, 13:00 and 17:00 local daily, launchd com.kevinbrittain.task-manager,
+# 09:20, 13:20 and 17:20 local daily (moved off :00 on 14 Sep 2026), launchd com.kevinbrittain.task-manager,
 # wrapped by job-queue.py run. The job name "task-manager" is deliberately
 # NOT the name of any skill folder (the skill folder is task-manager-board),
 # so check-routines.py sees a registered shell job rather than a second
@@ -100,11 +100,24 @@ trap 'exit 129' HUP
 trap 'exit 130' INT
 cd "$REPO" || { echo "ERROR: repo not found at $REPO" >&2; exit 1; }
 
+# THE ALLOWANCE GUARD (Kevin, 14 Sep 2026): while scripts/allowance.py says the
+# Claude allowance is out, this slot does not start. It is recorded as missed
+# and re-run once at the reset by `allowance.py replay`. Exit 0: a paused tick
+# is not a broken job; the Estate status board shows the pause as its own row.
+if ! __PAUSE=$(/usr/bin/python3 "$REPO/scripts/allowance.py" check --job "task-manager"); then
+  echo "PAUSED: $__PAUSE" >> "$LOG"
+  echo "===== done rc=0 (PAUSED: the Claude allowance is out; queued to re-run at reset) $(date) =====" >> "$LOG"
+  echo "task-manager slot skipped: the Claude allowance is out (see $LOG)"
+  __POSTRUN_DONE=1
+  exit 0
+fi
+
 "$CLAUDE" -p "You are the Task Manager agent's scheduled run. THIS RUN IS THE $SLOT_LABEL SLOT — that is the wall clock at run start, read for you. Head your report with exactly '$SLOT_LABEL slot' and never substitute a slot you worked out yourself. Do this skill in full: $SKILL
 Rules for the whole run: your working directory for every file you write is $SCRATCH (absolute path) — helper scripts, proposal texts, briefings, JSON, everything; the repo is PUBLIC and the after-run sweep quarantines anything you leave in it. Record IDs come ONLY from board.json, gate.json or dispatch-queue.json — copy them programmatically, never retype one (a retyped id with one wrong letter escalated nothing on 2 Sep 2026 and read as a permissions error). The BOARD PASS ALWAYS COMPLETES FIRST — never start doing work before every stuck task has its move decided. Every task write goes through scripts/agent-dispatch.py or scripts/task-manager.py — never a raw Airtable write to a task. Never route work to Mica or Ericamae (Kevin's ruling, 25 Aug 2026). Never send, reply, pay, or delete anything yourself. Working and temp files go ONLY under $SCRATCH — NEVER under the repo, and never in monitoring/ (public repository; task content includes tenant, creditor and legal detail; counts-only reports in monitoring/ are fine). A broken read is reported loudly, never treated as a quiet board. Do not take the queue lock (this run already holds it). Do not edit, commit, or push code; file anything needing a code change via scripts/findings.py. Complete the closing steps in full (score, publish, verify). End with at most twenty lines of counts only — never task content or record IDs." \
   --permission-mode acceptEdits \
   --allowedTools "${AGENT_ALLOWED_TOOLS[@]}" >> "$LOG" 2>&1
 RC=$?
+/usr/bin/python3 "$REPO/scripts/allowance.py" mark --job "task-manager" --log "$LOG" --since-line "$__START_LINE" >/dev/null 2>&1 || true
 
 # The verify verdict is a FILE, not a sentence (finding
 # 20260902-task-manager-17-435). `claude -p` prints only the agent's closing

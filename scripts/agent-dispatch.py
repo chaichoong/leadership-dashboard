@@ -424,7 +424,7 @@ def auto_route_steal(t, tm, role_roster):
     return None
 
 # Task Manager context (build session 25 Aug 2026; identities live in
-# ROLE_AGENTS above): it is the board foreman — its own 09:00/13:00/17:00
+# ROLE_AGENTS above): it is the board foreman — its own 09:20/13:20/17:20
 # slot job decides WHAT moves and drives THIS script's per-task commands, so
 # there is exactly one writing muscle. Its approved hand-backs (close
 # proposals, passes to Roy) are carried out by the normal dispatch runs like

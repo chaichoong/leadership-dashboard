@@ -5655,6 +5655,13 @@ function renderEstateStatus(){
         stale = `<div class="zone-error" style="margin-bottom:10px">The status writer itself has stopped: these rows were last updated ${esc(newest ? estateAgo(newest) : 'never')}. Everything below may be out of date. The job is estate-status (every 10 minutes).</div>`;
     }
     if(sub) sub.textContent = `${attention ? attention + ' need attention · ' : 'All working · '}updated ${estateAgo(newest)}.`;
+    // The Claude allowance (scripts/allowance.py): a pause is the one thing that
+    // stops EVERY agent at once, so it is said once, above the table.
+    const allowance = _estateRows.find(r => gf(r,'key') === 'allowance');
+    if(allowance){
+        const paused = gf(allowance,'status') === 'Blocked';
+        stale += `<div class="${paused ? 'zone-error' : ''}" style="margin-bottom:10px;${paused ? '' : 'font-size:var(--fs-xs);color:var(--text-muted)'}">${paused ? '<strong>Agents paused.</strong> ' : ''}${esc(gf(allowance,'detail')||'')}</div>`;
+    }
     const rows = jobs.map(r => {
         const status = gf(r,'status'), fails = Number(gf(r,'fails24h')||0), runs = Number(gf(r,'runs24h')||0);
         return `<tr>
@@ -5726,7 +5733,10 @@ async function loadEstateContent(){
         <th style="width:190px">Episode</th><th style="width:170px">Stage</th>${ESTATE_CONTENT_CHANNELS.map(c=>`<th style="width:78px;text-align:center">${esc(c[0])}</th>`).join('')}<th style="width:110px">Published</th>
     </tr></thead><tbody>${rows.map(r => {
         const f = r.fields||{};
-        const cells = ESTATE_CONTENT_CHANNELS.map(c => { const u = link(f, c[1]); return `<td style="text-align:center">${u ? `<a href="${esc(u)}" target="_blank" rel="noopener" title="${esc(u)}" style="color:var(--success);font-weight:var(--fw-semibold)">live</a>` : '<span style="color:var(--text-muted)">–</span>'}</td>`; }).join('');
+        // GoHighLevel gives no public link for a social post, so a Published record with an empty link
+        // field means "posted, no link to show" rather than "not posted" (14 Sep 2026).
+        const published = (f['Record Status']||'') === 'Published';
+        const cells = ESTATE_CONTENT_CHANNELS.map(c => { const u = link(f, c[1]); return `<td style="text-align:center">${u ? `<a href="${esc(u)}" target="_blank" rel="noopener" title="${esc(u)}" style="color:var(--success);font-weight:var(--fw-semibold)">live</a>` : (published && !['YouTube','Shorts','Podcast','Blog'].includes(c[0]) ? '<span style="color:var(--text-secondary)" title="Posted through GoHighLevel, which gives no public link">posted</span>' : '<span style="color:var(--text-muted)">–</span>')}</td>`; }).join('');
         const pub = [f['Date Published (YT)'] ? 'YT ' + esc(f['Date Published (YT)']) : '', f['Date Published (Other)'] ? 'socials ' + esc(f['Date Published (Other)']) : ''].filter(Boolean).join('<br>');
         return `<tr><td style="white-space:nowrap;font-weight:var(--fw-medium)">${esc(f['Content Name']||'')}</td><td style="color:var(--text-secondary);font-size:var(--fs-xs)">${esc(f['Record Status']||'')}</td>${cells}<td style="color:var(--text-secondary);font-size:var(--fs-xs)">${pub || '<span style="color:var(--text-muted)">not yet</span>'}</td></tr>`;
     }).join('')}</tbody></table></div>`;

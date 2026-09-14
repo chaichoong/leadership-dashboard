@@ -196,6 +196,12 @@ def own_log_tail(job, logs_dir=LOGS, limit=4000):
     return "\n".join(out)
 
 
+def paused_skip(log_text):
+    """True when the newest done line in a slot log is the allowance pause."""
+    lines = [l for l in (log_text or "").splitlines() if l.startswith("===== done rc=")]
+    return bool(lines) and "(PAUSED:" in lines[-1]
+
+
 def classify(job, cfg, finishes, events, now, logs_dir=LOGS):
     """One job's row fields (by ES key name), from its finishes and queue events."""
     ev = [e for e in events if e.get("job") == job]
@@ -225,7 +231,10 @@ def classify(job, cfg, finishes, events, now, logs_dir=LOGS):
 
     status, detail = "Idle", ""
     if last:
-        if last.get("ok"):
+        if last.get("ok") and paused_skip(own_log_tail(job, logs_dir)):
+            # the runner skipped the Claude call because the allowance was out (allowance.py): exit 0, but nothing ran
+            status, detail = "Skipped", "Its slot came while the Claude allowance was out, so it did not start; it is queued to re-run at reset."
+        elif last.get("ok"):
             status, detail = "Worked", "Ran at its slot and finished cleanly."
         else:
             why = blocked_reason((last.get("reason") or "") + " " + (last.get("tail") or ""))
@@ -399,6 +408,47 @@ def _job_queue():
     return _JQ
 
 
+def allowance_row(now):
+    """The Claude allowance as one report row: Blocked while paused (with the
+    reset time and the runs queued to re-run), Worked otherwise. Also the
+    moment the missed runs are re-started: replay() is called here because
+    this job is the ten-minute heartbeat the estate already has."""
+    spec = importlib.util.spec_from_file_location("allowance", os.path.join(HERE, "allowance.py"))
+    al = importlib.util.module_from_spec(spec)
+    try:
+        spec.loader.exec_module(al)
+        replayed = al.cmd_replay(now=now)
+        st = al.cmd_status(now=now)
+    except Exception as exc:  # noqa: BLE001 — the row must say why, whatever broke
+        return {"key": "allowance", "kind": "report", "label": "Claude allowance", "status": "Failed",
+                "detail": "The allowance guard could not run: %s" % str(exc)[:300], "lastRun": now.strftime("%Y-%m-%dT%H:%M:%S.000Z")}
+    row = {"key": "allowance", "kind": "report", "label": "Claude allowance", "lastRun": now.strftime("%Y-%m-%dT%H:%M:%S.000Z"),
+           "payload": json.dumps({"missed": st.get("missed") or [], "lastOutage": st.get("last_outage"), "replayed": replayed.get("replayed")})}
+    if st.get("paused"):
+        until = parse_ts(st.get("paused_until"))
+        jobs = sorted({m.get("job") for m in (st.get("missed") or []) if m.get("job")})
+        row.update({"status": "Blocked", "nextDue": st.get("paused_until"),
+                    "detail": "The Claude allowance ran out (seen %s). It comes back at %s London. Agent runs are paused until then; %d job%s will re-run once at reset%s." % (
+                        (parse_ts(st.get("seen_at")) or now).astimezone(LONDON).strftime("%a %H:%M"),
+                        until.astimezone(LONDON).strftime("%a %H:%M") if until else "?", len(jobs), "" if len(jobs) == 1 else "s",
+                        (": " + ", ".join(jobs)) if jobs else "")})
+    else:
+        last = st.get("last_outage") or {}
+        if replayed.get("replayed"):
+            row.update({"status": "Worked", "detail": "Allowance back. Re-started %d missed job%s just now: %s." % (
+                len(replayed["replayed"]), "" if len(replayed["replayed"]) == 1 else "s",
+                ", ".join("%s (%s)" % (r["job"], r["result"]) for r in replayed["replayed"]))})
+        elif last:
+            row.update({"status": "Worked", "detail": "Allowance available. Last outage ended %s London; %d run%s re-started then." % (
+                (parse_ts(last.get("paused_until")) or now).astimezone(LONDON).strftime("%a %d %b %H:%M"),
+                len(last.get("replayed") or []), "" if len(last.get("replayed") or []) == 1 else "s")})
+        else:
+            row.update({"status": "Worked", "detail": "Allowance available. No outage recorded since the guard was built (14 Sep 2026)."})
+    if row["status"] == "Worked":
+        row["lastWorked"] = row["lastRun"]
+    return row
+
+
 def loop_health_row(now):
     """The loop-health report as one row; a failed control is a Failed row, never a blank."""
     try:
@@ -474,7 +524,7 @@ def upsert(rows, now, dry_run=False):
         (updates if rid else creates).append({"id": rid, "fields": f} if rid else {"fields": f})
     if dry_run:
         return {"create": len(creates), "update": len(updates)}
-    gone = [k for k in have if k and k not in {r["key"] for r in rows} and k != "loop-health"]
+    gone = [k for k in have if k and k not in {r["key"] for r in rows} and k not in ("loop-health", "allowance")]
     for k in gone:
         updates.append({"id": have[k], "fields": {ES["status"]: "Idle", ES["nextDue"]: None,
                         ES["detail"]: "No longer scheduled: this job has left job-schedule.json (retired or renamed).",
@@ -502,6 +552,7 @@ def build_rows(now, with_loop_health=True):
         row = classify(job, cfg, finishes, events, now)
         row["label"] = labels.get(job, job)
         rows.append(row)
+    rows.append(allowance_row(now))
     if with_loop_health:
         rows.append(loop_health_row(now))
     return rows
@@ -553,6 +604,13 @@ def selftest():
     r = classify("task-manager", {"cron": "0 9,13,17 * * *"},
                  [{"ts": "2026-09-13T12:00:46Z", "job": "task-manager", "ok": False, "exit": 1, "reason": "exit code 1", "tail": "VERIFY FAIL"}], [], now, logs_dir=tempfile.mkdtemp())
     ok(r["status"] == "Failed", "no log, no allowance line -> Failed")
+    # 1c. a slot the runner skipped while the allowance was out is Skipped, not Worked (exit 0 notwithstanding)
+    tmp2 = tempfile.mkdtemp(); os.makedirs(os.path.join(tmp2, "prospecting"))
+    with open(os.path.join(tmp2, "prospecting", "runs.log"), "w") as fh:
+        fh.write("===== prospecting slot run =====\nPAUSED: {...}\n===== done rc=0 (PAUSED: the Claude allowance is out; queued to re-run at reset) Mon =====\n")
+    r = classify("prospecting", {"cron": "15 9 * * *"},
+                 [{"ts": "2026-09-14T07:15:10Z", "job": "prospecting", "ok": True, "exit": 0, "reason": "", "tail": "prospecting slot skipped: the Claude allowance is out"}], [], now, logs_dir=tmp2)
+    ok(r["status"] == "Skipped" and "allowance was out" in r["detail"], "paused skip -> Skipped: %r" % r)
     # 2. a clean run is Worked, and a later 'acquired' with no finish is Running
     fin = [{"ts": "2026-09-14T06:38:58Z", "job": "handback-poll", "ok": True, "exit": 0, "reason": "", "tail": "run OK"}]
     r = classify("handback-poll", {"cron": "*/30 * * * *"}, fin, [], now)
