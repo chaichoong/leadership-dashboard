@@ -39,6 +39,7 @@ STATUS_DONE = "Optimisation and Design Done"
 # The 8 second branded intro Ericamae inserted by hand (SOP: "Intro + Subtitle"). Same rule as her app:
 # after Kevin's sign-off line, else before "welcome back", else at the very start.
 INTRO_CLIP = os.path.join(EDITED_ROOT, "Vlog Intro", "runprenuer-intro_clip.mp4")
+INTRO_LOCAL = os.path.join(os.path.dirname(watch.LEDGER), "intro_clip.mp4")   # one API copy; the mount lied twice (10 Sep 2026). PR #399 deleted this line and left four uses: every long render died with NameError on 13-14 Sep 2026
 INTRO_SIGNOFF_RE = re.compile(r"keep on (?:watching|listening)|hope you find (?:it|this) useful|stay with me|let'?s go\b", re.I)
 WELCOME_RES = [re.compile(r"welcome back to (?:consecutive )?day", re.I), re.compile(r"consecutive day", re.I)]   # in the app's order
 INTRO_SEARCH_FRACTION = 0.35    # the sign-off lives in the cold open; a "let's go" at 80% is not it
