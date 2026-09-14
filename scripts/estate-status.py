@@ -399,6 +399,47 @@ def _job_queue():
     return _JQ
 
 
+def allowance_row(now):
+    """The Claude allowance as one report row: Blocked while paused (with the
+    reset time and the runs queued to re-run), Worked otherwise. Also the
+    moment the missed runs are re-started: replay() is called here because
+    this job is the ten-minute heartbeat the estate already has."""
+    spec = importlib.util.spec_from_file_location("allowance", os.path.join(HERE, "allowance.py"))
+    al = importlib.util.module_from_spec(spec)
+    try:
+        spec.loader.exec_module(al)
+        replayed = al.cmd_replay(now=now)
+        st = al.cmd_status(now=now)
+    except Exception as exc:  # noqa: BLE001 — the row must say why, whatever broke
+        return {"key": "allowance", "kind": "report", "label": "Claude allowance", "status": "Failed",
+                "detail": "The allowance guard could not run: %s" % str(exc)[:300], "lastRun": now.strftime("%Y-%m-%dT%H:%M:%S.000Z")}
+    row = {"key": "allowance", "kind": "report", "label": "Claude allowance", "lastRun": now.strftime("%Y-%m-%dT%H:%M:%S.000Z"),
+           "payload": json.dumps({"missed": st.get("missed") or [], "lastOutage": st.get("last_outage"), "replayed": replayed.get("replayed")})}
+    if st.get("paused"):
+        until = parse_ts(st.get("paused_until"))
+        jobs = sorted({m.get("job") for m in (st.get("missed") or []) if m.get("job")})
+        row.update({"status": "Blocked", "nextDue": st.get("paused_until"),
+                    "detail": "The Claude allowance ran out (seen %s). It comes back at %s London. Agent runs are paused until then; %d job%s will re-run once at reset%s." % (
+                        (parse_ts(st.get("seen_at")) or now).astimezone(LONDON).strftime("%a %H:%M"),
+                        until.astimezone(LONDON).strftime("%a %H:%M") if until else "?", len(jobs), "" if len(jobs) == 1 else "s",
+                        (": " + ", ".join(jobs)) if jobs else "")})
+    else:
+        last = st.get("last_outage") or {}
+        if replayed.get("replayed"):
+            row.update({"status": "Worked", "detail": "Allowance back. Re-started %d missed job%s just now: %s." % (
+                len(replayed["replayed"]), "" if len(replayed["replayed"]) == 1 else "s",
+                ", ".join("%s (%s)" % (r["job"], r["result"]) for r in replayed["replayed"]))})
+        elif last:
+            row.update({"status": "Worked", "detail": "Allowance available. Last outage ended %s London; %d run%s re-started then." % (
+                (parse_ts(last.get("paused_until")) or now).astimezone(LONDON).strftime("%a %d %b %H:%M"),
+                len(last.get("replayed") or []), "" if len(last.get("replayed") or []) == 1 else "s")})
+        else:
+            row.update({"status": "Worked", "detail": "Allowance available. No outage recorded since the guard was built (14 Sep 2026)."})
+    if row["status"] == "Worked":
+        row["lastWorked"] = row["lastRun"]
+    return row
+
+
 def loop_health_row(now):
     """The loop-health report as one row; a failed control is a Failed row, never a blank."""
     try:
@@ -474,7 +515,7 @@ def upsert(rows, now, dry_run=False):
         (updates if rid else creates).append({"id": rid, "fields": f} if rid else {"fields": f})
     if dry_run:
         return {"create": len(creates), "update": len(updates)}
-    gone = [k for k in have if k and k not in {r["key"] for r in rows} and k != "loop-health"]
+    gone = [k for k in have if k and k not in {r["key"] for r in rows} and k not in ("loop-health", "allowance")]
     for k in gone:
         updates.append({"id": have[k], "fields": {ES["status"]: "Idle", ES["nextDue"]: None,
                         ES["detail"]: "No longer scheduled: this job has left job-schedule.json (retired or renamed).",
@@ -502,6 +543,7 @@ def build_rows(now, with_loop_health=True):
         row = classify(job, cfg, finishes, events, now)
         row["label"] = labels.get(job, job)
         rows.append(row)
+    rows.append(allowance_row(now))
     if with_loop_health:
         rows.append(loop_health_row(now))
     return rows

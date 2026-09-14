@@ -95,6 +95,16 @@ if [ "$GRC" -eq 3 ]; then
   exit 0
 fi
 
+# --- the allowance guard (Kevin, 14 Sep 2026) -------------------------------
+# While the Claude allowance is out (scripts/allowance.py, set by the run that
+# hit the limit), waking an agent only burns the start-up cost and dies. A
+# paused tick beats and exits 0; the hand-backs stay queued for the reset.
+if ! __PAUSE=$(/usr/bin/python3 "$REPO/scripts/allowance.py" check --job handback-poll); then
+  beat skip "the Claude allowance is out; paused" "$TOTAL" no
+  echo "handback-poll: skip — the Claude allowance is out ($__PAUSE)"
+  exit 0
+fi
+
 # --- expensive half: wake the agents that owe Kevin an action ---------------
 if [ -f "/Users/kevinbrittain/.config/od/claude_oauth_token" ]; then
   export CLAUDE_CODE_OAUTH_TOKEN="$(cat /Users/kevinbrittain/.config/od/claude_oauth_token)"
@@ -158,6 +168,7 @@ if [ "$RC" -ge 128 ]; then
   echo "handback-poll: the run was stopped after ${HANDBACK_MAX_MINUTES} minutes (signal $((RC - 128))). Unworked hand-backs stay queued for the next tick." >&2
 fi
 
+/usr/bin/python3 "$REPO/scripts/allowance.py" mark --job handback-poll --log "$LOG" --since-line "$__START_LINE" >/dev/null 2>&1 || true
 __TAIL=$(tail -n +$((__START_LINE + 1)) "$LOG" 2>/dev/null)
 __BAD=$(printf '%s\n' "$__TAIL" | grep -E '"error"|HTTP Error 401|401 Unauthorized|Unauthorized|OAuth access token has expired|BROKEN' || true)
 echo "===== done rc=$RC $(date) =====" >> "$LOG"

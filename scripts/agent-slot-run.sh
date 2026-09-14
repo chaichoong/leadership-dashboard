@@ -92,6 +92,21 @@ trap 'exit 129' HUP
 trap 'exit 130' INT
 cd "$REPO" || { echo "ERROR: repo not found at $REPO" >&2; exit 1; }
 
+# THE ALLOWANCE GUARD (Kevin, 14 Sep 2026). From Fri 11 Sep 13:00 to Sun 13 Sep
+# 19:00 the Claude allowance was out; every slot started, printed "You've hit
+# your limit" and died, and nothing re-ran the lost slots at the reset. While
+# scripts/allowance.py says the estate is paused this run does not start; the
+# slot is recorded as missed and re-run once at reset by `allowance.py replay`
+# (called every ten minutes by estate-status). Exit 0: a paused tick is not a
+# broken job, and the Estate status board shows the pause as its own row.
+if ! __PAUSE=$(/usr/bin/python3 "$REPO/scripts/allowance.py" check --job "$JOB"); then
+  echo "PAUSED: $__PAUSE" >> "$LOG"
+  echo "===== done rc=0 (PAUSED: the Claude allowance is out; queued to re-run at reset) $(date) =====" >> "$LOG"
+  echo "$JOB slot skipped: the Claude allowance is out (see $LOG)"
+  __POSTRUN_DONE=1
+  exit 0
+fi
+
 "$CLAUDE" -p "You are the $JOB slot run. Do this skill in full: $SKILL
 
 Rules for the whole run:
@@ -117,6 +132,8 @@ End with at most fifteen lines: what you did, what you found, what you could not
   --permission-mode acceptEdits \
   --allowedTools "${AGENT_ALLOWED_TOOLS[@]}" >> "$LOG" 2>&1
 RC=$?
+# A run that died on the allowance pauses the estate until the reset it names.
+/usr/bin/python3 "$REPO/scripts/allowance.py" mark --job "$JOB" --log "$LOG" --since-line "$__START_LINE" >/dev/null 2>&1 || true
 
 # Shared epilogue (finding 20260827-phase-2-381): privacy sweep, done line,
 # and exit-code semantics live in ONE place now — scripts/slot-postrun.sh.

@@ -644,6 +644,7 @@ def run_spotify(day, task_id, plan_path, title, test, pod):
 
 
 MONETISE_RECHECK_HOURS = 6
+GHL_SLOT_GRACE_MIN = 60   # a GHL post still 'scheduled' this long after its slot, with no failure, went out
 
 
 def monetise_long_video(day, entry):
@@ -884,6 +885,14 @@ def sync():
                 # 'scheduled' (no error either). Twenty minutes past the slot, the channel itself is the source of truth.
                 found = youtube_link_from_channel(int(day), p.get("scheduled"))
                 if found: st, link = "published", found; p["status"] = st; p["note"] = "link read from the channel listing; GHL never updated its post"; print("episode %s: YouTube live as %s (GHL post still says scheduled)" % (day, found))
+            if st == "scheduled" and not link and p.get("scheduled") and dt.datetime.now(dt.timezone.utc) >= \
+                    dt.datetime.fromisoformat(p["scheduled"].replace("Z", "+00:00")) + dt.timedelta(minutes=GHL_SLOT_GRACE_MIN):
+                # 14 Sep 2026: GoHighLevel never flips a social post from 'scheduled' (no previewLink, no publishedAt,
+                # no error) — 51 posts from 9-11 Sep still read 'scheduled' three days on while the posts were live.
+                # An hour past its slot with no failure recorded, the post went out; the record and the Estate status
+                # board otherwise show a dash for a live post for ever. No public link is available from GHL for it.
+                st = "published"; p["status"] = st; p.setdefault("published_at", p["scheduled"]); changed = True
+                p["note"] = "slot passed with no failure; GoHighLevel never updated its post status, no link available"
             if st == "published" and link:
                 p["link"] = link; p.setdefault("published_at", dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")); changed = True
                 if p["platform"] == "youtube" and not entry.get("youtube_link"): entry["youtube_link"] = link

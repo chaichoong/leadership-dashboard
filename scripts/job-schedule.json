@@ -215,8 +215,8 @@
   "retryWhenDeferred": true
  },
  "knowledge-os-sort": {
-  "note": "Drive-gated. maxLateMinutes raised 480 -> 600 on 29 Aug 2026 (findings 394/397) for the same reason as the three brain jobs: a morning mount flap must not cost the day. 09:00 + 600 reaches 19:00, still the same working day.",
-  "cron": "0 9 * * *",
+  "note": "Drive-gated. maxLateMinutes raised 480 -> 600 on 29 Aug 2026 (findings 394/397) for the same reason as the three brain jobs: a morning mount flap must not cost the day. 09:00 + 600 reaches 19:00, still the same working day. Moved from 09:00 to 08:50 on 14 Sep 2026 (Kevin) to clear the 09:00 lock clash.",
+  "cron": "50 8 * * *",
   "maxLateMinutes": 600,
   "mode": "wrapped",
   "needs": [
@@ -307,7 +307,8 @@
   "maxLateMinutes": 240,
   "mode": "wrapped",
   "queued": false,
-  "note": "reports on the queue, so it must never wait behind it"
+  "note": "reports on the queue, so it must never wait behind it. Wrapped through job-queue.py run + run-job.sh from 14 Sep 2026 (it ran bare before, so the Estate status board could not see it); lock-exempt because it reads the logs and posts a message, never touching the repo or the queue.",
+  "lockExempt": true
  },
  "daily-ops": {
   "cron": "0 7 * * *",
@@ -425,10 +426,10 @@
   "leaseMinutes": 25
  },
  "task-manager": {
-  "cron": "0 9,13,17 * * *",
+  "cron": "20 9,13,17 * * *",
   "maxLateMinutes": 150,
   "mode": "wrapped",
-  "note": "the Task Manager agent's own Go Signal (Kevin, 25 Aug 2026): board pass at the same three slots as inbound-triage. NOT a daily-ops phase by explicit ruling (same pattern as inbound-triage); a headless claude run, so the generous lateness keeps a wake-delayed slot worth running. The queue lock stops it running at the same time as the triage slot job; order within the hour is whichever launchd starts first, and the board pass tolerates either order (dispatch's in-flight tasks are subtracted in code).",
+  "note": "the Task Manager agent's own Go Signal (Kevin, 25 Aug 2026): board pass at the same three slots as inbound-triage. NOT a daily-ops phase by explicit ruling (same pattern as inbound-triage); a headless claude run, so the generous lateness keeps a wake-delayed slot worth running. The queue lock stops it running at the same time as the triage slot job; order within the hour is whichever launchd starts first, and the board pass tolerates either order (dispatch's in-flight tasks are subtracted in code). Moved from :00 to :20 on 14 Sep 2026 (Kevin): inbound-triage, the hand-back poll and knowledge-os-sort all fired at 09:00 behind one lock and the poll waited over twenty minutes.",
   "needs": [
    "network"
   ],
