@@ -30,6 +30,8 @@ const ESTATE_SCRIPTS = [
   'scripts/handback-poll.py',
   'scripts/create-agent-task.py',
   'scripts/job-queue.py',
+  'scripts/estate-status.py',
+  'scripts/loop-health.py',
 ];
 
 describe('estate scripts read no name they never bind', () => {

@@ -95,7 +95,6 @@ BLOCKED_MARKERS = (
      "It ran too long and was stopped."),
 )
 RESET_RE = re.compile(r"resets\s+([^\n(·]+?)(?:\s*\(|\s*$|\s+[A-Z])")
-STALE_HOURS = 168          # no run recorded in a week reads as Idle
 RUNNING_GRACE_MIN = 5      # an acquired job with no finish yet is Running
 
 
@@ -211,11 +210,21 @@ def classify(job, cfg, finishes, events, now, logs_dir=LOGS):
     last_worked = parse_ts(worked[-1].get("ts")) if worked else None
 
     # Queue events newer than the last finish say what the job is doing NOW.
+    # The wrapper stamps job-status at SECOND resolution and the queue log at
+    # millisecond resolution, so a run's own 'acquired' event (05:25:05.317Z)
+    # read as later than its finish (05:25:05Z) and every sub-second job sat
+    # on the board as Running for eight hours (review, 14 Sep 2026). Compare on
+    # whole seconds, and let a closing event end an open start.
     ev = [e for e in events if e.get("job") == job]
     ev.sort(key=lambda e: str(e.get("ts") or ""))
-    after = [e for e in ev if not last_ts or (parse_ts(e.get("ts")) or now) > last_ts]
+    def newer(e):
+        ets = parse_ts(e.get("ts"))
+        return not last_ts or (ets is not None and ets.replace(microsecond=0) > last_ts.replace(microsecond=0))
+    after = [e for e in ev if newer(e)]
 
     status, detail = "Idle", ""
+    if cfg.get("mode") == "cooperative":
+        return cooperative_row(job, cfg, ev, now)
     if last:
         if last.get("ok"):
             status, detail = "Worked", "Ran at its slot and finished cleanly."
@@ -229,12 +238,28 @@ def classify(job, cfg, finishes, events, now, logs_dir=LOGS):
                 status = "Failed"
                 detail = "%s. Last thing it said: %s" % (
                     str(last.get("reason") or "it failed").rstrip("."), plain_tail(last.get("tail")) or "(nothing)")
+    open_start = None
     for e in after:
         st = e.get("state")
         if st in ("acquired", "ran-unlocked"):
-            ets = parse_ts(e.get("ts"))
-            if ets and (now - ets) < timedelta(hours=8):
-                status, detail = "Running", "Started at %s and has not finished yet." % ets.astimezone(LONDON).strftime("%H:%M")
+            open_start = parse_ts(e.get("ts"))
+            if open_start and (now - open_start) < timedelta(hours=8):
+                status, detail = "Running", "Started at %s and has not finished yet." % open_start.astimezone(LONDON).strftime("%H:%M")
+        elif st in ("finished", "released", "release-noop", "lease-lost", "max-runtime", "lock-broken"):
+            # The queue closed the run. If the wrapper never wrote its own line
+            # (the child and its wrapper were killed together), this event IS
+            # the result; a death that shows as "Running" hides the death.
+            if open_start is not None:
+                open_start = None
+                code = e.get("exit")
+                if st == "finished" and code not in (None, 0):
+                    reason = str(e.get("reason") or "")
+                    words = blocked_reason(reason) or ("The queue stopped it: %s." % reason if reason else "It ended with exit code %s and left no report." % code)
+                    status, detail = ("Blocked" if blocked_reason(reason) else "Failed"), words
+                elif st in ("lease-lost", "max-runtime", "lock-broken"):
+                    status, detail = "Blocked", blocked_reason(str(e.get("reason") or st)) or "The queue stopped it (%s)." % st
+                else:
+                    status, detail = ("Worked", "Ran at its slot and finished cleanly.") if status == "Running" else (status, detail)
         elif st in ("deferred-not-ready", "deferred-stale-precondition", "skipped-stale", "queue-timeout"):
             status = "Skipped"
             detail = {
@@ -245,8 +270,6 @@ def classify(job, cfg, finishes, events, now, logs_dir=LOGS):
             }[st] + (" (%s)" % e.get("reason") if e.get("reason") else "")
     if not last and not after:
         detail = "No run recorded in the last week."
-    elif last_ts and (now - last_ts) > timedelta(hours=STALE_HOURS) and status in ("Worked", "Failed"):
-        detail += " No run recorded for over a week."
 
     return {
         "key": job, "kind": "job", "schedule": cfg.get("cron", ""),
@@ -254,20 +277,60 @@ def classify(job, cfg, finishes, events, now, logs_dir=LOGS):
         "lastRun": last_ts.strftime("%Y-%m-%dT%H:%M:%S.000Z") if last_ts else None,
         "lastWorked": last_worked.strftime("%Y-%m-%dT%H:%M:%S.000Z") if last_worked else None,
         "runs24h": len(runs24), "fails24h": len(fails24),
-        "nextDue": next_due(cfg.get("cron", ""), now),
+        "nextDue": next_due(cfg.get("cron", ""), now, runs_on_days=cfg.get("runsOnDays")),
     }
 
 
-def next_due(cron, now, horizon_days=8):
-    """Next London-time firing of a five-field cron, ISO UTC, or None."""
+def cooperative_row(job, cfg, ev, now):
+    """A cooperative job (daily-ops) runs inside a Claude session and leaves no
+    wrapper line, only 'mark' events: one at its start, one with note 'end'.
+    Reviewed 14 Sep 2026: without this it read Idle with a blank reason on the
+    morning it had run for 42 minutes."""
+    marks = [e for e in ev if e.get("state") == "mark"]
+    day = now - timedelta(hours=24)
+    recent = [e for e in marks if (parse_ts(e.get("ts")) or day) > day]
+    is_end = lambda e: str(e.get("note") or "").startswith("end")
+    starts = [e for e in recent if not is_end(e)]
+    ends = [e for e in recent if is_end(e)]
+    last_mark = parse_ts(marks[-1].get("ts")) if marks else None
+    if ends:
+        t = parse_ts(ends[-1].get("ts"))
+        status, detail = "Worked", "Ran through its Claude session and finished at %s." % t.astimezone(LONDON).strftime("%H:%M")
+    elif starts:
+        t = parse_ts(starts[-1].get("ts"))
+        if (now - t) < timedelta(hours=8):
+            status, detail = "Running", "Started at %s and has not written its end mark yet." % t.astimezone(LONDON).strftime("%H:%M")
+        else:
+            status, detail = "Failed", "Started at %s and never wrote its end mark." % t.astimezone(LONDON).strftime("%H:%M")
+    else:
+        status, detail = "Failed", "No start mark in the last 24 hours. It runs through a Claude session at its slot; nothing has swept, dispatched or reported."
+    worked = [e for e in marks if is_end(e)]
+    return {
+        "key": job, "kind": "job", "schedule": cfg.get("cron", ""), "status": status, "detail": detail,
+        "lastRun": last_mark.strftime("%Y-%m-%dT%H:%M:%S.000Z") if last_mark else None,
+        "lastWorked": parse_ts(worked[-1].get("ts")).strftime("%Y-%m-%dT%H:%M:%S.000Z") if worked else None,
+        "runs24h": len(starts), "fails24h": 0 if ends or not starts else 1,
+        "nextDue": next_due(cfg.get("cron", ""), now, runs_on_days=cfg.get("runsOnDays")),
+    }
+
+
+def next_due(cron, now, horizon_days=8, runs_on_days=None):
+    """Next London-time firing of a five-field cron, ISO UTC, or None.
+    runs_on_days is job-schedule.json's ISO weekday list (Mon=1..Sun=7): a job
+    whose cron is daily on purpose but which only works on Sundays is next due
+    on Sunday, not tomorrow."""
     if not cron:
         return None
     jq = _job_queue()
     if not jq:
         return None
+    days = {int(d) for d in (runs_on_days or [])}
     t = now.astimezone(LONDON).replace(second=0, microsecond=0) + timedelta(minutes=1)
     end = t + timedelta(days=horizon_days)
     while t < end:
+        if days and t.isoweekday() not in days:
+            t = (t + timedelta(days=1)).replace(hour=0, minute=0)
+            continue
         if jq.cron_matches(cron, t):
             return t.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z")
         t += timedelta(minutes=1)
@@ -290,15 +353,15 @@ def _job_queue():
 
 def loop_health_row(now):
     """The loop-health report as one row; a failed control is a Failed row, never a blank."""
-    spec = importlib.util.spec_from_file_location("loop_health", os.path.join(HERE, "loop-health.py"))
-    lh = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(lh)
     try:
+        spec = importlib.util.spec_from_file_location("loop_health", os.path.join(HERE, "loop-health.py"))
+        lh = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(lh)
         res = lh.report()
     except Exception as exc:  # noqa: BLE001 — the row must say WHY, whatever went wrong
         return {"key": "loop-health", "kind": "report", "label": "Tasks not moving", "status": "Failed",
-                "detail": "The not-moving check could not run: %s" % str(exc)[:300], "payload": "",
-                "lastRun": now.strftime("%Y-%m-%dT%H:%M:%S.000Z")}
+                "detail": "The not-moving check could not run: %s" % str(exc)[:300],
+                "lastRun": now.strftime("%Y-%m-%dT%H:%M:%S.000Z")}   # payload and lastWorked left as they were
     stalled = res.get("stalled") or []
     slim = [{"name": s.get("name", "")[:90], "why": s.get("why", "")[:160], "days": s.get("days"), "rule": s.get("rule")}
             for s in stalled][:40]
@@ -346,7 +409,8 @@ def to_fields(row, now):
         if row.get(k) is not None:
             f[ES[k]] = row[k]
     for k in ("lastRun", "lastWorked", "nextDue"):
-        f[ES[k]] = row.get(k)
+        if k in row:
+            f[ES[k]] = row.get(k)
     for k in ("runs24h", "fails24h"):
         if k in row:
             f[ES[k]] = int(row[k])
@@ -362,6 +426,11 @@ def upsert(rows, now, dry_run=False):
         (updates if rid else creates).append({"id": rid, "fields": f} if rid else {"fields": f})
     if dry_run:
         return {"create": len(creates), "update": len(updates)}
+    gone = [k for k in have if k and k not in {r["key"] for r in rows} and k != "loop-health"]
+    for k in gone:
+        updates.append({"id": have[k], "fields": {ES["status"]: "Idle", ES["nextDue"]: None,
+                        ES["detail"]: "No longer scheduled: this job has left job-schedule.json (retired or renamed).",
+                        ES["updated"]: now.strftime("%Y-%m-%dT%H:%M:%S.000Z")}})
     for i in range(0, len(updates), 10):
         _request("PATCH", TABLE, {"records": updates[i:i + 10], "typecast": True})
     for i in range(0, len(creates), 10):
@@ -416,6 +485,11 @@ def selftest():
     ok(r["status"] == "Blocked" and "allowance ran out" in r["detail"] and "7pm" in r["detail"], "allowance -> Blocked: %r" % r)
     ok(r["nextDue"] == "2026-09-14T08:00:00.000Z", "next due 09:00 London = 08:00Z: %r" % r["nextDue"])
     ok(next_due("0 22 * * *", now) == "2026-09-14T21:00:00.000Z", "22:00 London in BST = 21:00Z")
+    ok(next_due("0 11 * * *", now, runs_on_days=[7]) == "2026-09-20T10:00:00.000Z", "Sundays-only job is next due on Sunday 20 Sep: %r" % next_due("0 11 * * *", now, runs_on_days=[7]))
+    r_late = classify("daily-ops", {"cron": "0 7 * * *", "mode": "cooperative"}, [],
+                      [{"ts": "2026-09-13T18:00:00.000Z", "job": "daily-ops", "state": "mark", "note": ""},
+                       {"ts": "2026-09-13T18:21:46.493Z", "job": "daily-ops", "state": "mark", "note": "end: late run 19:06-19:20, usage cap until 19:00"}], now)
+    ok(r_late["status"] == "Worked", "an end mark with a note still ends the run: %r" % r_late["status"])
     ok(r["runs24h"] == 1 and r["fails24h"] == 1, "24h counts")
     # 1b. the wrapper keeps 600 chars of the RUNNER's output; the allowance line is in the slot's runs.log
     import tempfile
@@ -437,6 +511,25 @@ def selftest():
     r = classify("handback-poll", {"cron": "*/30 * * * *"}, fin,
                  [{"ts": "2026-09-14T07:30:05.121Z", "job": "handback-poll", "state": "acquired"}], now)
     ok(r["status"] == "Running", "acquired after finish -> Running: %r" % r["status"])
+    # 2b. REVIEW 14 Sep 2026: a sub-second run's own 'acquired' (millis) is not "after" its finish (seconds)
+    r = classify("estate-drift", {"cron": "25 6 * * *"},
+                 [{"ts": "2026-09-14T05:25:05Z", "job": "estate-drift", "ok": True, "exit": 0, "reason": "", "tail": "ok"}],
+                 [{"ts": "2026-09-14T05:25:05.317Z", "job": "estate-drift", "state": "ran-unlocked"},
+                  {"ts": "2026-09-14T05:25:05.504Z", "job": "estate-drift", "state": "finished", "exit": 0}], now)
+    ok(r["status"] == "Worked", "same-second start is not Running: %r" % r["status"])
+    # 2c. the queue killed the run and the wrapper never wrote a line: the death shows
+    r = classify("task-manager", {"cron": "0 9,13,17 * * *"},
+                 [{"ts": "2026-09-13T12:00:46Z", "job": "task-manager", "ok": True, "exit": 0, "reason": "", "tail": "ok"}],
+                 [{"ts": "2026-09-13T16:00:08.100Z", "job": "task-manager", "state": "acquired"},
+                  {"ts": "2026-09-13T16:20:08.100Z", "job": "task-manager", "state": "finished", "exit": 70, "reason": "LOST LOCK: lock is held by prospecting"}], now)
+    ok(r["status"] == "Blocked" and "Another job took the queue lock" in r["detail"], "queue death shows: %r" % r)
+    # 2d. a cooperative job reads its marks
+    r = classify("daily-ops", {"cron": "0 7 * * *", "mode": "cooperative"}, [],
+                 [{"ts": "2026-09-14T06:06:35.714Z", "job": "daily-ops", "state": "mark", "note": ""},
+                  {"ts": "2026-09-14T06:48:27.733Z", "job": "daily-ops", "state": "mark", "note": "end"}], now)
+    ok(r["status"] == "Worked" and "07:48" in r["detail"], "cooperative worked: %r" % r)
+    r = classify("daily-ops", {"cron": "0 7 * * *", "mode": "cooperative"}, [], [], now)
+    ok(r["status"] == "Failed" and "No start mark" in r["detail"], "cooperative silent -> Failed: %r" % r)
     # 3. a plain failure names what it said, without paths or record ids
     r = classify("x", {"cron": "0 7 * * *"}, [{"ts": "2026-09-14T06:00:00Z", "job": "x", "ok": False, "exit": 1,
                                              "reason": "exit code 1", "tail": "wrote /Users/kevinbrittain/a.log then rec1234567890ABCD broke"}], [], now)

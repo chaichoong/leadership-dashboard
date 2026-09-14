@@ -5624,10 +5624,11 @@ async function loadEstateStatus(){
     } catch(e){
         _estateState = 'error: ' + (e.message||e);
         jobs.innerHTML = `<div class="zone-error">Could not read the Estate Status table (${esc(e.message||e)}). This list is NOT empty — it could not be read.</div>`;
-        document.getElementById('estateStalledBody').innerHTML = '';
+        const sb = document.getElementById('estateStalledBody');
+        if(sb) sb.innerHTML = `<div class="zone-error">Could not read the not-moving list either (same table). This list is NOT empty — it could not be read.</div>`;
     }
     renderEstateStatus();
-    loadEstateContent();
+    if(_agentsView === 'estate') loadEstateContent();
 }
 function renderEstateStatus(){
     if(_estateState !== 'ready') return;
@@ -5644,6 +5645,7 @@ function renderEstateStatus(){
     if(badge){ badge.textContent = attention; badge.style.display = attention ? '' : 'none'; }
     if(!jobs.length){
         body.innerHTML = '<div class="zone-error">No job rows yet. The status writer (estate-status, every 10 minutes) has not written its first board.</div>';
+        renderEstateStalled(gf);
         return;
     }
     // THE MIRROR'S OWN GUARD: rows that stop updating look exactly like an
@@ -5668,8 +5670,12 @@ function renderEstateStatus(){
         <th style="width:230px">Job</th><th style="width:90px">Result</th><th style="width:100px">Last run</th><th>Why</th><th style="width:100px">Next due</th><th style="width:110px;text-align:right">Runs 24h</th>
     </tr></thead><tbody>${rows}</tbody></table></div>`;
 
+    renderEstateStalled(gf);
+}
+function renderEstateStalled(gf){
     // The not-moving list, written by the same job from scripts/loop-health.py.
     const sbody = document.getElementById('estateStalledBody'), scount = document.getElementById('estateStalledCount');
+    if(!sbody) return;
     const rep = _estateRows.find(r => gf(r,'key') === 'loop-health');
     if(!rep){ sbody.innerHTML = '<div class="zone-error">No not-moving report yet. The writer adds it on its first full run.</div>'; return; }
     let payload = {};
@@ -5719,7 +5725,7 @@ async function loadEstateContent(){
     </tr></thead><tbody>${rows.map(r => {
         const f = r.fields||{};
         const cells = ESTATE_CONTENT_CHANNELS.map(c => { const u = link(f, c[1]); return `<td style="text-align:center">${u ? `<a href="${esc(u)}" target="_blank" rel="noopener" title="${esc(u)}" style="color:var(--success);font-weight:var(--fw-semibold)">live</a>` : '<span style="color:var(--text-muted)">–</span>'}</td>`; }).join('');
-        const pub = [f['Date Published (YT)'] ? 'YT ' + f['Date Published (YT)'] : '', f['Date Published (Other)'] ? 'socials ' + f['Date Published (Other)'] : ''].filter(Boolean).join('<br>');
+        const pub = [f['Date Published (YT)'] ? 'YT ' + esc(f['Date Published (YT)']) : '', f['Date Published (Other)'] ? 'socials ' + esc(f['Date Published (Other)']) : ''].filter(Boolean).join('<br>');
         return `<tr><td style="white-space:nowrap;font-weight:var(--fw-medium)">${esc(f['Content Name']||'')}</td><td style="color:var(--text-secondary);font-size:var(--fs-xs)">${esc(f['Record Status']||'')}</td>${cells}<td style="color:var(--text-secondary);font-size:var(--fs-xs)">${pub || '<span style="color:var(--text-muted)">not yet</span>'}</td></tr>`;
     }).join('')}</tbody></table></div>`;
 }
@@ -5991,6 +5997,9 @@ async function loadEverything(){
         loadWorkflowData(),
         loadCeoBriefs(),
         (async ()=>{ _agentsRegisterState='idle'; await loadAgentsRegister(true); })(),
+        // Read once on load so the sync bar (and the sidebar dot) can say the
+        // status writer has stopped without Kevin opening the tab first.
+        loadEstateStatus(),
     ]);
 }
 
