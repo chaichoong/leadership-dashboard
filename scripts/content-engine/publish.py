@@ -586,10 +586,14 @@ def finish_extras(day, entry, recs, test, save):
                 if tried_before and not test:
                     # an earlier attempt left its plan (2056 crashed mid-run on 11 Sep 2026 and its state was rebuilt
                     # without the podcast): look at Spotify before uploading, so a retry never publishes a second copy
-                    seen, _ = spotify.verify_published(ptitle, tries=1)
+                    seen, why = spotify.verify_published(ptitle, tries=1)
                     if seen in ("published", "processing"):
                         pod.update({"plan": plan_path, "title": ptitle, "status": seen, "note": "found on Spotify before a retry"}); save()
                         print("episode %d: already on Spotify (%s); not uploaded again" % (day, seen)); return done
+                    if "not readable" in str(why):
+                        # an unreadable list (signed out, blank page) is not proof of absence: wait for the next hour
+                        pod.update({"status": "failed", "error": "retry held: the Spotify episodes list could not be read"}); save()
+                        print("episode %d: Spotify list unreadable, podcast retry held until next run" % day, file=sys.stderr); return done
                 pod.update({"plan": plan_path, "title": ptitle, "status": "uploading", "started": now_utc()}); save()
                 done.append(run_spotify(day, card_task(day, full), plan_path, ptitle, test, pod)); save()
         except Exception as ex:
