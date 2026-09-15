@@ -88,8 +88,8 @@ def build(now=None, state=None, approvals=None, ledger=None, sync_state=None, pl
         out = sorted((episode_row(k, e) for k, e in episodes.items() if out_at(e) and london_day(out_at(e)) == d), key=lambda r: r["day"])
         history.append({"date": d.isoformat(), "episodes": out})
     clean = 0
-    for h in history[1:]:                                    # yesterday backwards: days in a row with an episode out
-        if not h["episodes"]: break
+    for h in history[1:]:                                    # yesterday backwards: days in a row with an in-order episode out
+        if not any(e["day"] not in gaps for e in h["episodes"]): break     # a gap day filling an old hole is not the run moving on
         clean += 1
 
     # what is booked and not out yet
@@ -104,7 +104,10 @@ def build(now=None, state=None, approvals=None, ledger=None, sync_state=None, pl
 
     approved = sorted(int(d) for d, a in approvals.items() if a.get("verdict") == "approved")
     waiting_cards = sorted(int(d) for d, a in approvals.items() if a.get("task") and not a.get("verdict"))
-    next_up = [d for d in approved if d not in gaps and not (episodes.get(str(d)) or {}).get("youtube_link") and d > cursor]
+    import copy
+    nxt, why_held = publish.next_publishable(copy.deepcopy(state), ledger, set(approved) - set(gaps))   # the publisher's own order rule
+    next_up = [nxt] if nxt else []
+    held = [d for d in approved if d not in gaps and d > cursor and d != nxt and not (episodes.get(str(d)) or {}).get("youtube_link")]
     blocked = {d: "; ".join(a["qa_blocked"].get("failures") or [])[:200] for d, a in approvals.items() if isinstance(a, dict) and a.get("qa_blocked")}
 
     # the render pipeline
@@ -131,7 +134,7 @@ def build(now=None, state=None, approvals=None, ledger=None, sync_state=None, pl
         "asOf": now.strftime("%Y-%m-%dT%H:%M:%SZ"), "today": today.isoformat(), "mode": publish.mode(),
         "streakDay": streak_today, "lastInOrder": cursor, "daysBehind": streak_today - cursor,
         "history": history, "cleanDaysInRow": clean, "gapDaysPaused": watch.gaps_paused(),
-        "scheduled": scheduled[:40], "nextInOrder": next_up[:5], "waitingForKevin": waiting_cards, "qaBlocked": blocked,
+        "scheduled": scheduled[:40], "nextInOrder": next_up, "heldBehind": held, "heldWhy": "" if nxt else why_held, "waitingForKevin": waiting_cards, "qaBlocked": blocked,
         "tonight": tonight, "failedRenders": failed, "retryTonight": retrying, "renderedNoCard": no_card, "incomplete": incomplete,
         "strava": {"lastPush": strava_at, "day": sync_state.get("day"), "lastRunKm": (sync_state.get("last_activity") or {}).get("km"),
                    "renamed": bool(lp.get("renamed"))},
@@ -167,6 +170,8 @@ def headline(r):
     yt_today = [s for s in r["scheduled"] if s["channel"] == "YouTube full episode" and s["when"][:10] == r["today"]]
     if yt_today: nxt = "Today: " + ", ".join("Episode %d on YouTube %s" % (s["day"], fmt_when(s["when"])) for s in yt_today)
     elif r["nextInOrder"]: nxt = "Today: Episode %d goes out once the publisher picks it up" % r["nextInOrder"][0]
+    elif r.get("heldBehind"): nxt = "Today: nothing can go out; Episode %s wait%s behind an earlier day that is not approved" % (
+        ", ".join(str(d) for d in r["heldBehind"]), "s" if len(r["heldBehind"]) == 1 else "")
     else: nxt = "Today: nothing approved to publish"
     cards = len(r["waitingForKevin"])
     ask = ("%d episode card%s wait%s for you" % (cards, "" if cards == 1 else "s", "s" if cards == 1 else "")) if cards else "No episode cards wait for you"
@@ -217,9 +222,19 @@ def selftest():
     r2 = build(now, state, {}, {}, {}, plan=[])
     assert r2["headline"].startswith("Content: NOTHING went out yesterday."), "absence is said, never left blank"
     assert r2["cleanDaysInRow"] == 0 and all(not h["episodes"] for h in r2["history"])
+    # 2058 is recorded and not approved, so approved 2059 is held behind it: never promised for today (review, 15 Sep 2026)
+    held_state = {"_cursor": 2057}
+    rh = build(now, held_state, {"2058": {"task": "t"}, "2059": {"verdict": "approved", "task": "t2"}}, {"x": {"episode": 2058}, "y": {"episode": 2059}}, {}, plan=[])
+    assert rh["nextInOrder"] == [] and rh["heldBehind"] == [2059] and "2058" in rh["heldWhy"], rh
+    assert "Episode 2059 waits behind an earlier day" in rh["headline"], rh["headline"]
+    # a gap day filling an old hole does not count as the run moving on
+    gap_only = {"1799": {"youtube_link": "l", "posts": {"youtube|full|y": yt("l", "2026-09-15T05:00:00Z")}}}
+    import watch as _w; real = _w.gap_days; _w.gap_days = lambda path=None: {1799}
+    try: assert build(now, gap_only, {}, {}, {}, plan=[])["cleanDaysInRow"] == 0
+    finally: _w.gap_days = real
     f = write(r, dry_run=True)
     assert f[ES["key"]] == KEY and f[ES["kind"]] == "report" and json.loads(f[ES["payload"]])["headline"] == r["headline"]
-    print(json.dumps({"checks": 12, "failed": []}))
+    print(json.dumps({"checks": 16, "failed": []}))
 
 
 if __name__ == "__main__":

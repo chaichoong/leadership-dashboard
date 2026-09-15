@@ -763,8 +763,13 @@ export function contentLine(row, now = new Date()) {
     if (!detail) return `\n_No content publishing report has been written yet._ ${PUBLISHING_URL}\n`;
     const updated = f.Updated ? new Date(f.Updated) : null;
     const ageH = updated && !isNaN(updated) ? (now - updated) / 3600000 : Infinity;
+    const londonDate = (d) => d.toLocaleDateString('en-CA', { timeZone: 'Europe/London' });
     const stale = ageH > CONTENT_STALE_HOURS
-        ? ` _(written ${Number.isFinite(ageH) ? Math.floor(ageH) + ' hours ago' : 'at an unknown time'}: the content publisher has stopped writing it)_` : '';
+        ? ` _(written ${Number.isFinite(ageH) ? Math.floor(ageH) + ' hours ago' : 'at an unknown time'}: the content publisher has stopped writing it)_`
+        : (updated && londonDate(updated) !== londonDate(now))
+            // this morning's 07:15 update did not run: the row's "yesterday" is the day before (review, 15 Sep 2026)
+            ? ` _(this line was written ${updated.toLocaleString('en-GB', { timeZone: 'Europe/London', weekday: 'short', hour: '2-digit', minute: '2-digit' })}; this morning's update has not run, so "yesterday" means the day before)_`
+            : '';
     return `\n${esc(detail)}${stale}\nEvery day and what is booked next: ${PUBLISHING_URL}\n`;
 }
 async function readContentRow(env, log) {
@@ -835,10 +840,19 @@ async function postKevinDigest(env, log) {
     }
 
     const content = contentLine(await readContentRow(env, log));
+    // Claim the day BEFORE posting (review, 15 Sep 2026). The marker used to be written after the post, so a KV write
+    // that threw (the account-wide free write limit has starved Workers before) left no marker and the next minute
+    // posted again, all hour. A post that fails releases the claim so the next minute retries.
+    const claim = async () => {
+        try { await env.STATE.put(kvKey, 'sending', { expirationTtl: 172800 }); return true; }
+        catch (e) { log.push(`digest SKIPPED: could not write the send-once marker (${e && e.message ? e.message : e}) — will not post without it`); return false; }
+    };
+    const release = async () => { try { await env.STATE.delete(kvKey); } catch (e) { log.push(`digest: could not clear the send-once marker after a failed post (${e && e.message ? e.message : e})`); } };
 
     if (mine.length) {
         const channel = await openDm(env, KEVIN_SLACK_ID);
         if (!channel) { log.push('digest DM open failed'); return -1; }
+        if (!(await claim())) return -1;
         const capped = recs.length >= DIGEST_MAX;
         const res = await slack(env, SLACK.post, {
             method: 'POST',
@@ -848,7 +862,7 @@ async function postKevinDigest(env, log) {
                 blocks: [{ type: 'section', text: { type: 'mrkdwn', text: buildDigestText(mine.length, mine.map(t => esc(truncate(t.name, 120))), DASHBOARD_QUEUE_URL, capped, signInsWaiting(mine), handled, content) } }],
             }),
         });
-        if (!res.ok) { log.push(`digest post failed: ${res.error}`); return -1; }
+        if (!res.ok) { log.push(`digest post failed: ${res.error}`); await release(); return -1; }
         log.push(`digest sent: ${mine.length}${capped ? '+' : ''} pending`);
     } else {
         // CONTROL. A broken value comparison returns 200 OK and zero rows,
@@ -860,14 +874,16 @@ async function postKevinDigest(env, log) {
         // No approvals, but the content line still goes (15 Sep 2026): a missed publishing day must reach him.
         const channel = await openDm(env, KEVIN_SLACK_ID);
         if (!channel) { log.push('digest DM open failed'); return -1; }
+        if (!(await claim())) return -1;
         const res = await slack(env, SLACK.post, {
             method: 'POST',
             body: JSON.stringify({ channel, text: 'No approvals waiting; content report', blocks: [{ type: 'section', text: { type: 'mrkdwn', text: buildContentOnlyText(content) } }] }),
         });
-        if (!res.ok) { log.push(`digest post failed: ${res.error}`); return -1; }
+        if (!res.ok) { log.push(`digest post failed: ${res.error}`); await release(); return -1; }
         log.push('digest: nothing pending (control passed), content line sent');
     }
-    await env.STATE.put(kvKey, mine.length ? 'sent' : 'content-only', { expirationTtl: 172800 });
+    try { await env.STATE.put(kvKey, mine.length ? 'sent' : 'content-only', { expirationTtl: 172800 }); }
+    catch (e) { log.push(`digest: posted; final marker not written (${e && e.message ? e.message : e}), the 'sending' claim still holds the day`); }
     return mine.length;
 }
 

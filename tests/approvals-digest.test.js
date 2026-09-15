@@ -90,6 +90,18 @@ describe('the 08:00 digest', () => {
         expect(contentLine(null, now)).toMatch(/No content publishing report has been written yet/);
         expect(contentLine(undefined, now)).toMatch(/could not be read this morning/);
         expect(contentLine({ fields: { Detail: '<b>&', Updated: '2026-09-16T06:00:00.000Z' } }, now)).toContain('&lt;b&gt;&amp;');
+        // written 20:15 London the evening before, and the 07:15 run did not happen: said, not passed off as today's
+        const old = contentLine({ fields: { Detail: 'Content: Episode 2057 out', Updated: '2026-09-15T19:15:00.000Z' } }, now);
+        expect(old).toMatch(/this morning's update has not run/);
+        expect(contentLine({ fields: { Detail: 'x', Updated: '2026-09-16T06:15:00.000Z' } }, now)).not.toMatch(/has not run/);
+    });
+    it('claims the day before posting and releases the claim when the post fails', () => {
+        const fn = SRC.match(/async function postKevinDigest\(env[\s\S]*?\n\}/)[0];
+        const firstPost = fn.indexOf('slack(env, SLACK.post');
+        expect(fn.indexOf('await claim()')).toBeGreaterThan(-1);
+        expect(fn.indexOf('await claim()')).toBeLessThan(firstPost);
+        expect(fn.lastIndexOf('await claim()')).toBeLessThan(fn.lastIndexOf('slack(env, SLACK.post'));
+        expect((fn.match(/await release\(\); return -1;/g) || []).length).toBe(2);
         expect(CONTENT_REPORT_KEY).toBe('content-publishing');
     });
     it('fails CLOSED when the KV binding is missing', () => {
