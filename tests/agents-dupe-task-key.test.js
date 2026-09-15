@@ -34,8 +34,12 @@ function loadDupeTaskKey() {
   if (!st) throw new Error('DUPE_STREET_TYPES not found in os/agents/index.html');
   const pt = SRC.match(/function placeTokens\([\s\S]*?\n\}/);
   if (!pt) throw new Error('placeTokens not found in os/agents/index.html');
+  // Since 15 Sep 2026 weekday and month words never count as distinctive
+  // (Kevin's ruling), so the key needs DUPE_DATE_WORDS too.
+  const dw = SRC.match(/const DUPE_DATE_WORDS = \[[\s\S]*?\];/);
+  if (!dw) throw new Error('DUPE_DATE_WORDS not found in os/agents/index.html');
   // eslint-disable-next-line no-new-func
-  return new Function(`${v[0]}\n${st[0]}\n${pt[0]}\n${m[0]}; return dupeTaskKey;`)();
+  return new Function(`${v[0]}\n${dw[0]}\n${st[0]}\n${pt[0]}\n${m[0]}; return dupeTaskKey;`)();
 }
 
 describe('dupeTaskKey — one subject, one key', () => {
@@ -80,6 +84,9 @@ describe('dupe_task_key (Python) matches dupeTaskKey (JS)', () => {
     'MAINTENANCE: boiler service, 12 High St', 'Council Tax 23242388 payment arrangement',
     'Fixed cost review: find savings (weekly)', 'Email  with   extra    spaces',
     'MiXeD CaSe TiTlE', '£1,742.60 refund from EDF', '2026-08-25 court hearing',
+    'CONTENT (OD): Fri 11 Sep, The offer: Five signs your business runs on you',
+    'CONTENT (OD): Mon 14 Sep, The mistake: Most owners write a job advert when admin piles up',
+    'Friday 11 September rent statement', 'CONTENT (OD): Fri 11 Sep', 'May Day bank holiday cover',
   ];
 
   it('every corpus entry keys identically in both languages', () => {
@@ -159,6 +166,63 @@ describe('dupeTaskKey — the live clog it was rewritten for', () => {
     // incident equally. Two unrelated failures must not collide on it.
     expect(key('INBOUND: Google Apps Script Payroll Export failing, investigate and fix'))
       .not.toBe(key('INBOUND: Google Apps Script Invoices Dashboard failing, investigate and fix'));
+  });
+});
+
+
+// ── A DATE SAYS WHEN, NOT WHICH (Kevin's ruling, 15 Sep 2026) ───────────────
+//
+// The key keeps the first two distinctive words. Content Engine cards are
+// titled "CONTENT (OD): Fri 11 Sep, The offer: ...", so every card on one
+// weekday keyed to `fri sep`: measured read-only on 15 Sep 2026, 19 of the 22
+// Approval cards paired on the weekday and month alone, and would have folded
+// into one had they passed the create gate with no sender. Back-tested:
+// removing DUPE_DATE_WORDS from the filter fails the first case below.
+describe('dupeTaskKey — weekday and month words never count', () => {
+  const key = loadDupeTaskKey();
+  // Verbatim off the live Approval queue of 15 Sep 2026.
+  const FRI_OFFER = 'CONTENT (OD): Fri 11 Sep, The offer: Five signs your business runs on you';
+  const FRI_NEWS = 'CONTENT (OD): Fri 11 Sep, Newsletter: The map: how AI agents take 90% of your daily work';
+  const FRI_OFFER_NEXT = 'CONTENT (OD): Fri 18 Sep, The offer: Five signs your business runs on you';
+
+  it('two Content Engine cards on one weekday key apart', () => {
+    expect(key(FRI_OFFER)).not.toBe(key(FRI_NEWS));
+    expect(key(FRI_OFFER)).not.toMatch(/\b(fri|sep)\b/);
+  });
+
+  it('a date in any spelling is not a key slot', () => {
+    expect(key('Monday 7 September rent statement')).toBe(key('Friday 11 October rent statement'));
+    expect(key('Chase EDF Tues 8 Sept')).toBe(key('Chase EDF Thurs 10 Oct'));
+    expect(key('May Day bank holiday cover')).not.toContain('may');
+  });
+
+  it('a date-only name still keys by its words rather than to empty', () => {
+    // The fallback keeps the full word list so a nameless key cannot collide
+    // everything; two different dates stay two keys.
+    expect(key('CONTENT (OD): Fri 11 Sep')).not.toBe('');
+    expect(key('Fri 11 Sep')).not.toBe(key('Mon 14 Sep'));
+  });
+
+  it('the same subject a week apart still groups by the verdict, on its words', () => {
+    const py = JSON.parse(execFileSync('python3', ['-c', `
+import importlib.util, json, sys
+spec = importlib.util.spec_from_file_location("c", ${JSON.stringify(SCRIPT)})
+c = importlib.util.module_from_spec(spec); spec.loader.exec_module(c)
+print(json.dumps([c.dupe_verdict(sys.argv[1], sys.argv[2], "group"),
+                  c.dupe_verdict(sys.argv[3], sys.argv[2], "group"),
+                  c.dupe_verdict("CONTENT (OD): Fri 11 Sep, Newsletter",
+                                 "CONTENT (OD): Fri 11 Sep, The offer", "group")]))
+`, FRI_OFFER, FRI_OFFER_NEXT, FRI_NEWS], { encoding: 'utf8' }));
+    const [same, different, dateOnly] = py;
+    expect(same.match, 'same offer post on two Fridays is one matter').toBe(true);
+    expect(same.why).toContain('signs');
+    expect(same.why).not.toMatch(/\b(fri|sep)\b/);
+    // CONTROL: the shared weekday and month alone never make a match.
+    expect(different.match, 'a shared Friday in September is not a shared subject').toBe(false);
+    // BACK-TEST (the reviewer's find): the long pair above was already refused
+    // on the ratio before this change. This short pair shares ONLY the date,
+    // and with DUPE_DATE_WORDS emptied it matched on "both about fri, sep".
+    expect(dateOnly.match, 'a date is never a subject').toBe(false);
   });
 });
 
@@ -316,6 +380,10 @@ ${code}`, arg], { encoding: 'utf8' }));
     expect(words(pySrc, 'DUPE_STREET_TYPES')).toEqual(words(jsSrc, 'DUPE_STREET_TYPES'));
     expect(words(pySrc, 'DUPE_MAINTENANCE_LANE_WORDS').length).toBeGreaterThan(1);
     expect(words(pySrc, 'DUPE_MAINTENANCE_LANE_WORDS')).toEqual(words(jsSrc, 'DUPE_MAINTENANCE_LANE_WORDS'));
+    expect(words(pySrc, 'DUPE_DATE_WORDS').length).toBeGreaterThan(30);
+    expect(words(pySrc, 'DUPE_DATE_WORDS')).toEqual(words(jsSrc, 'DUPE_DATE_WORDS'));
+    expect(words(pySrc, 'DUPE_GENERIC').length).toBeGreaterThan(10);
+    expect(words(pySrc, 'DUPE_GENERIC')).toEqual(words(jsSrc, 'DUPE_GENERIC'));
   });
 
   // Matching constants are necessary, not sufficient: the lane derivation is
@@ -330,6 +398,7 @@ ${code}`, arg], { encoding: 'utf8' }));
     };
     const jsVerdict = new Function([
       grab(/const DUPE_GENERIC = \[[\s\S]*?\];/, 'DUPE_GENERIC'),
+      grab(/const DUPE_DATE_WORDS = \[[\s\S]*?\];/, 'DUPE_DATE_WORDS'),
       grab(/const DUPE_ACTION_WORDS = \[[\s\S]*?\];/, 'DUPE_ACTION_WORDS'),
       grab(/const DUPE_STREET_TYPES = \[[\s\S]*?\];/, 'DUPE_STREET_TYPES'),
       grab(/const DUPE_MIN_SHARED = [\d.]+;/, 'DUPE_MIN_SHARED'),
@@ -363,6 +432,11 @@ ${code}`, arg], { encoding: 'utf8' }));
       // A repeated distinctive word counts once in the ratio (Python set).
       'INBOUND: boiler boiler boiler service quote',
       'INBOUND: boiler service quote from Gasco',
+      // Weekday and month words never count (Kevin, 15 Sep 2026); both
+      // languages must drop them from the verdict's word set alike.
+      'CONTENT (OD): Fri 11 Sep, The offer: Five signs your business runs on you',
+      'CONTENT (OD): Fri 18 Sep, The offer: Five signs your business runs on you',
+      'CONTENT (OD): Fri 11 Sep, Newsletter: The map: how AI agents take 90% of your daily work',
       '',
     ];
     const pairs = [];
