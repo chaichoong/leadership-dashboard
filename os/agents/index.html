@@ -5912,7 +5912,8 @@ function renderEstateStatus(){
                     || String(gf(a,'label')||gf(a,'key')).localeCompare(String(gf(b,'label')||gf(b,'key'))));
     const body = document.getElementById('estateJobsBody'), count = document.getElementById('estateJobsCount'),
           sub = document.getElementById('estateJobsSub'), badge = document.getElementById('estateTabBadge');
-    const newest = _estateRows.map(r => gf(r,'updated')).filter(Boolean).sort().pop();
+    // job rows only: the content-publishing report row is written hourly by another job and would mask a stopped writer (15 Sep 2026)
+    const newest = _estateRows.filter(r => gf(r,'kind') === 'job').map(r => gf(r,'updated')).filter(Boolean).sort().pop();
     const ageMin = newest ? Math.round((Date.now() - new Date(newest).getTime())/60000) : null;
     const attention = jobs.filter(r => ['Failed','Blocked'].includes(gf(r,'status'))).length;
     if(count) count.textContent = jobs.length;
@@ -6044,7 +6045,7 @@ function registerAgentsSyncBar(){
                     // 30 minutes mean the mirror has stopped, whatever it shows.
                     if(String(_estateState).indexOf('error') === 0) return { status:'fail', detail:String(_estateState).slice(7) };
                     if(_estateState !== 'ready') return { status:'warn', detail:'Estate status not loaded yet' };
-                    const newest = _estateRows.map(r => (r.fields||{})[ES.updated]).filter(Boolean).sort().pop();
+                    const newest = _estateRows.filter(r => gf(r,'kind') === 'job').map(r => (r.fields||{})[ES.updated]).filter(Boolean).sort().pop();
                     const ageMin = newest ? Math.round((Date.now() - new Date(newest).getTime())/60000) : null;
                     if(ageMin === null || ageMin > ESTATE_STALE_MIN) return { status:'fail', detail:`Estate status rows last updated ${newest ? estateAgo(newest) : 'never'} — the estate-status job has stopped` };
                     return { status:'pass', detail:`Updated ${estateAgo(newest)}` };

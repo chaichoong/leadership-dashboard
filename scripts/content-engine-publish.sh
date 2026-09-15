@@ -69,3 +69,5 @@ python3 scripts/content-engine/publish.py run --limit 3 || exit 1
 python3 scripts/content-engine/approval.py report
 python3 scripts/content-engine/publish.py report
 python3 scripts/content-engine/runpreneur_sync.py report
+# The publishing report (Kevin, 15 Sep 2026): one Airtable row read by the Publishing page and the 08:00 DM.
+python3 scripts/content-engine/content_report.py write || echo "content report: not written this run (see above)"

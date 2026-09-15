@@ -747,7 +747,45 @@ export function handledLine(handled) {
     if (!handled) return '';
     return `\n*${handled} thing${handled === 1 ? '' : 's'} handled without you* since yesterday's message (closed duplicates, already-handled closes, diary entries, Roy handovers). Check or reverse them here: ${DASHBOARD_CHECKS_URL}\n`;
 }
-export function buildDigestText(count, names, dashUrl, capped, signIns = [], handled = 0) {
+// The Content Engine's publishing report (Kevin, 15 Sep 2026: "I need some kind of reporting protocol so I can see
+// what's been published each day and what's scheduled"). scripts/content-engine/content_report.py writes ONE row in the
+// Estate Status table; its Detail is the headline. The DM carries that one line every morning, even with no approvals,
+// because "nothing went out yesterday" is exactly the news a quiet morning would hide. The full picture is the
+// Publishing page. A row that cannot be read, or has not been written for a day, is said in words, never skipped.
+export const CONTENT_REPORT_KEY = 'content-publishing';
+const ESTATE_STATUS_TBL = 'tblZVrdzivyBueZVf';
+const PUBLISHING_URL = 'https://app.operationsdirector.co.uk/#publishing';
+const CONTENT_STALE_HOURS = 26;
+export function contentLine(row, now = new Date()) {
+    if (row === undefined) return `\n_The content publishing report could not be read this morning._ ${PUBLISHING_URL}\n`;
+    const f = (row && row.fields) || {};
+    const detail = String(f.Detail || '').trim();
+    if (!detail) return `\n_No content publishing report has been written yet._ ${PUBLISHING_URL}\n`;
+    const updated = f.Updated ? new Date(f.Updated) : null;
+    const ageH = updated && !isNaN(updated) ? (now - updated) / 3600000 : Infinity;
+    const londonDate = (d) => d.toLocaleDateString('en-CA', { timeZone: 'Europe/London' });
+    const stale = ageH > CONTENT_STALE_HOURS
+        ? ` _(written ${Number.isFinite(ageH) ? Math.floor(ageH) + ' hours ago' : 'at an unknown time'}: the content publisher has stopped writing it)_`
+        : (updated && londonDate(updated) !== londonDate(now))
+            // this morning's 07:15 update did not run: the row's "yesterday" is the day before (review, 15 Sep 2026)
+            ? ` _(this line was written ${updated.toLocaleString('en-GB', { timeZone: 'Europe/London', weekday: 'short', hour: '2-digit', minute: '2-digit' })}; this morning's update has not run, so "yesterday" means the day before)_`
+            : '';
+    return `\n${esc(detail)}${stale}\nEvery day and what is booked next: ${PUBLISHING_URL}\n`;
+}
+async function readContentRow(env, log) {
+    try {
+        const q = `/${ESTATE_STATUS_TBL}?pageSize=1&filterByFormula=${encodeURIComponent(`{Key}='${CONTENT_REPORT_KEY}'`)}`;
+        const data = await airtable(env, 'GET', q);
+        return (data.records || [])[0] || null;
+    } catch (e) {
+        log.push(`digest: content report read FAILED (${e && e.message ? e.message : e})`);
+        return undefined;
+    }
+}
+export function buildContentOnlyText(content) {
+    return truncate(`*No approvals wait for you today.*\n${content}\n_This is the only approvals message you get today._`, 2900);
+}
+export function buildDigestText(count, names, dashUrl, capped, signIns = [], handled = 0, content = '') {
     const shown = `${count}${capped ? '+' : ''}`;
     const top = names.slice(0, 3).map(n => `• ${n}`).join('\n');
     const more = count > 3 ? `\n…and ${capped ? 'more' : `${count - 3} more`}.` : '';
@@ -758,7 +796,7 @@ export function buildDigestText(count, names, dashUrl, capped, signIns = [], han
           + `.\nOpen the queue and press *Sign in to all*: sites open one after another, sign in, Cmd+Q, and the robots finish the work within minutes.\n`
         : '';
     return truncate(`*${shown} item${count === 1 && !capped ? '' : 's'} waiting for your approval.*\n`
-        + `${top}${more}\n${signInBlock}${handledLine(handled)}\n`
+        + `${top}${more}\n${signInBlock}${handledLine(handled)}${content}\n`
         + `Decide them here: ${dashUrl}\n`
         + `_This is the only approvals message you get today. Nothing has been sent or actioned._`, 2900);
 }
@@ -801,19 +839,31 @@ async function postKevinDigest(env, log) {
         handled = 0;
     }
 
+    const content = contentLine(await readContentRow(env, log));
+    // Claim the day BEFORE posting (review, 15 Sep 2026). The marker used to be written after the post, so a KV write
+    // that threw (the account-wide free write limit has starved Workers before) left no marker and the next minute
+    // posted again, all hour. A post that fails releases the claim so the next minute retries.
+    const claim = async () => {
+        try { await env.STATE.put(kvKey, 'sending', { expirationTtl: 172800 }); return true; }
+        catch (e) { log.push(`digest SKIPPED: could not write the send-once marker (${e && e.message ? e.message : e}) — will not post without it`); return false; }
+    };
+    const release = async () => { try { await env.STATE.delete(kvKey); } catch (e) { log.push(`digest: could not clear the send-once marker after a failed post (${e && e.message ? e.message : e})`); } };
+
     if (mine.length) {
         const channel = await openDm(env, KEVIN_SLACK_ID);
         if (!channel) { log.push('digest DM open failed'); return -1; }
+        if (!(await claim())) return -1;
         const capped = recs.length >= DIGEST_MAX;
-        const res = await slack(env, SLACK.post, {
+        let res;
+        try { res = await slack(env, SLACK.post, {
             method: 'POST',
             body: JSON.stringify({
                 channel,
                 text: `${mine.length}${capped ? '+' : ''} approvals waiting`,
-                blocks: [{ type: 'section', text: { type: 'mrkdwn', text: buildDigestText(mine.length, mine.map(t => esc(truncate(t.name, 120))), DASHBOARD_QUEUE_URL, capped, signInsWaiting(mine), handled) } }],
+                blocks: [{ type: 'section', text: { type: 'mrkdwn', text: buildDigestText(mine.length, mine.map(t => esc(truncate(t.name, 120))), DASHBOARD_QUEUE_URL, capped, signInsWaiting(mine), handled, content) } }],
             }),
-        });
-        if (!res.ok) { log.push(`digest post failed: ${res.error}`); return -1; }
+        }); } catch (e) { res = { ok: false, error: `threw: ${e && e.message ? e.message : e}` }; }   // a thrown post releases the claim too
+        if (!res.ok) { log.push(`digest post failed: ${res.error}`); await release(); return -1; }
         log.push(`digest sent: ${mine.length}${capped ? '+' : ''} pending`);
     } else {
         // CONTROL. A broken value comparison returns 200 OK and zero rows,
@@ -822,9 +872,20 @@ async function postKevinDigest(env, log) {
         // all before trusting the zero.
         const control = await queryTasks(env, `LEN({Sent For Approval By}&'')>0`, 1);
         if (!control.length) { log.push('digest CONTROL FAILED: no task anywhere has Sent For Approval By — the read is broken, not the queue empty'); return -1; }
-        log.push('digest: nothing pending (control passed), staying quiet');
+        // No approvals, but the content line still goes (15 Sep 2026): a missed publishing day must reach him.
+        const channel = await openDm(env, KEVIN_SLACK_ID);
+        if (!channel) { log.push('digest DM open failed'); return -1; }
+        if (!(await claim())) return -1;
+        let res;
+        try { res = await slack(env, SLACK.post, {
+            method: 'POST',
+            body: JSON.stringify({ channel, text: 'No approvals waiting; content report', blocks: [{ type: 'section', text: { type: 'mrkdwn', text: buildContentOnlyText(content) } }] }),
+        }); } catch (e) { res = { ok: false, error: `threw: ${e && e.message ? e.message : e}` }; }
+        if (!res.ok) { log.push(`digest post failed: ${res.error}`); await release(); return -1; }
+        log.push('digest: nothing pending (control passed), content line sent');
     }
-    await env.STATE.put(kvKey, mine.length ? 'sent' : 'quiet-zero', { expirationTtl: 172800 });
+    try { await env.STATE.put(kvKey, mine.length ? 'sent' : 'content-only', { expirationTtl: 172800 }); }
+    catch (e) { log.push(`digest: posted; final marker not written (${e && e.message ? e.message : e}), the 'sending' claim still holds the day`); }
     return mine.length;
 }
 

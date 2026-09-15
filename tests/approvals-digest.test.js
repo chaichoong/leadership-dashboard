@@ -11,7 +11,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { londonParts, buildDigestText, handledLine, HANDLED_FORMULA } from '../scripts/slack-automation/approvals.js';
+import { londonParts, buildDigestText, handledLine, HANDLED_FORMULA, contentLine, buildContentOnlyText, CONTENT_REPORT_KEY } from '../scripts/slack-automation/approvals.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const SRC = readFileSync(join(ROOT, 'scripts/slack-automation/approvals.js'), 'utf8');
@@ -69,7 +69,41 @@ describe('the 08:00 digest', () => {
         expect(SRC).toMatch(/apv-digest-\$\{date\}/);
         // The marker write sits OUTSIDE the "anything pending" branch, so a
         // task arriving at 08:40 waits for tomorrow rather than pinging him.
-        expect(SRC).toMatch(/env\.STATE\.put\(kvKey, mine\.length \? 'sent' : 'quiet-zero'/);
+        expect(SRC).toMatch(/env\.STATE\.put\(kvKey, mine\.length \? 'sent' : 'content-only'/);
+    });
+    // Kevin, 15 Sep 2026: the publishing report reaches him every morning, approvals or not.
+    it('carries the content publishing line, and a quiet approvals morning still sends it', () => {
+        const now = new Date('2026-09-16T07:00:00Z');
+        const row = { fields: { Detail: 'Content: NOTHING went out yesterday. Today: nothing approved to publish. No episode cards wait for you.', Updated: '2026-09-16T06:15:00.000Z' } };
+        const line = contentLine(row, now);
+        expect(line).toContain('NOTHING went out yesterday');
+        expect(line).toContain('#publishing');
+        expect(buildDigestText(2, ['A', 'B'], 'u', false, [], 0, line)).toContain('NOTHING went out yesterday');
+        expect(buildContentOnlyText(line)).toMatch(/^\*No approvals wait for you today\.\*/);
+        const fn = SRC.match(/async function postKevinDigest\(env[\s\S]*?\n\}/)[0];
+        expect(fn).toMatch(/buildContentOnlyText\(content\)/);
+        expect(fn).not.toMatch(/staying quiet/);
+    });
+    it('says so when the report is stale, missing or unreadable, never skips it', () => {
+        const now = new Date('2026-09-16T07:00:00Z');
+        expect(contentLine({ fields: { Detail: 'x', Updated: '2026-09-14T06:00:00.000Z' } }, now)).toMatch(/49 hours ago: the content publisher has stopped/);
+        expect(contentLine(null, now)).toMatch(/No content publishing report has been written yet/);
+        expect(contentLine(undefined, now)).toMatch(/could not be read this morning/);
+        expect(contentLine({ fields: { Detail: '<b>&', Updated: '2026-09-16T06:00:00.000Z' } }, now)).toContain('&lt;b&gt;&amp;');
+        // written 20:15 London the evening before, and the 07:15 run did not happen: said, not passed off as today's
+        const old = contentLine({ fields: { Detail: 'Content: Episode 2057 out', Updated: '2026-09-15T19:15:00.000Z' } }, now);
+        expect(old).toMatch(/this morning's update has not run/);
+        expect(contentLine({ fields: { Detail: 'x', Updated: '2026-09-16T06:15:00.000Z' } }, now)).not.toMatch(/has not run/);
+    });
+    it('claims the day before posting and releases the claim when the post fails', () => {
+        const fn = SRC.match(/async function postKevinDigest\(env[\s\S]*?\n\}/)[0];
+        const firstPost = fn.indexOf('slack(env, SLACK.post');
+        expect(fn.indexOf('await claim()')).toBeGreaterThan(-1);
+        expect(fn.indexOf('await claim()')).toBeLessThan(firstPost);
+        expect(fn.lastIndexOf('await claim()')).toBeLessThan(fn.lastIndexOf('slack(env, SLACK.post'));
+        expect((fn.match(/await release\(\); return -1;/g) || []).length).toBe(2);
+        expect((fn.match(/catch \(e\) \{ res = \{ ok: false/g) || []).length, 'a post that throws must release the claim, or no digest goes out that day').toBe(2);
+        expect(CONTENT_REPORT_KEY).toBe('content-publishing');
     });
     it('fails CLOSED when the KV binding is missing', () => {
         // Falling through without send-once memory means a DM every minute

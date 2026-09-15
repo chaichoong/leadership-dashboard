@@ -87,6 +87,8 @@ RETIRED = [
      "over £100 is a card; recurring is always Kevin's"),
     (r"£50/£250 thresholds", "2026-09-07",
      "the £25/£100 thresholds"),
+    (r"Silent at zero", "2026-09-15",
+     "the 08:00 DM goes every morning; with no cards it carries the content publishing line alone"),
     (r"Fifteen at 24 Aug 2026", "2026-09-07",
      "never state a register count in a prompt; the register is read live"),
     (r"Wickman's Integrator running Gary Keller", "2026-07-29",

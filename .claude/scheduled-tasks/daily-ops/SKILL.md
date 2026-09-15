@@ -61,7 +61,7 @@ Kevin set the first version of this on 21 Aug 2026 after nine automated message 
 
 **On a normal day, at most three messages, all morning:**
 
-1. The 08:00 approvals digest (`approvals.js` in the contractor-bot worker). ONE DM: how many items wait for his decision, the top names, a link to the dashboard queue. Silent when nothing is waiting.
+1. The 08:00 approvals digest (`approvals.js` in the contractor-bot worker). ONE DM: how many items wait for his decision, the top names, a link to the dashboard queue, and one content publishing line (what went out yesterday, what is booked today). Sent every morning since 15 Sep 2026: with nothing waiting it carries the content line alone, because a day with nothing published is news.
 2. The 09:00 CEO brief (`money-daily-worker.js`). Owns "what to do today".
 3. Task movement DMs (assigned / completed / comment) via the slack-notify worker and the Airtable task automations. These are working messages between people, not reports.
 
