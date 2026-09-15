@@ -148,7 +148,7 @@ const { chromium } = require('%(pw)s');
   const page = ctx.pages()[0] || await ctx.newPage();
   await page.goto('https://www.facebook.com/me', { waitUntil: 'domcontentloaded' });
   await page.waitForTimeout(9000);
-  for (let i = 0; i < 3; i++) { await page.mouse.wheel(0, 2000); await page.waitForTimeout(2000); }
+  for (let i = 0; i < 8; i++) { await page.mouse.wheel(0, 2500); await page.waitForTimeout(1500); }   // a share from days ago sits well down the timeline
   const id = %(id)s;
   // 15 Sep 2026: a shared reel sits on the profile with the reel id in its markup but in NO link address, so the
   // link-only check read every share since 13 Sep as missing (2194 was there, count 1, links none). The page's
