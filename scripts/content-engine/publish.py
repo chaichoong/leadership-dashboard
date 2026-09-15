@@ -584,6 +584,7 @@ def finish_extras(day, entry, recs, test, save):
             import spotify
             files = episode_files(day)
             upload = files["podcast"] if spotify.PODCAST_FORMAT == "audio" and os.path.exists(files["podcast"]) else files["full"]
+            if not os.path.exists(upload): upload = full_from_drive(day) or upload
             if os.path.exists(upload):
                 tried_before = os.path.exists(os.path.join(os.path.dirname(STATE), "spotify_plan_%d.json" % day))
                 plan_path, ptitle = spotify.write_plan(day, upload, ff.get("Podcast Copy"), entry["youtube_link"], test, os.path.dirname(STATE), thumb=files.get("thumb", ""))
@@ -612,6 +613,23 @@ def finish_extras(day, entry, recs, test, save):
         except (Exception, SystemExit) as ex:
             print("episode %d: could not check Spotify after a stopped upload (%s)" % (day, str(ex)[-120:]), file=sys.stderr)
     return done
+
+
+def full_from_drive(day, work=None):
+    """The full episode fetched from Drive by the API when the mounted folder does not show it (1841, 15 Sep 2026:
+    the render uploaded it on 10 Sep, the mount listed Ericamae's files only, so the podcast never went out).
+    Returns the local path, or None when the ledger holds no Drive link for the day."""
+    import drive_api
+    link = next((v["outputs"]["full"] for v in watch.load_ledger().values()
+                 if v.get("episode") == day and v.get("role") == "episode" and (v.get("outputs") or {}).get("full")), None)
+    m = re.search(r"/d/([\w-]+)", link or "")
+    if not m: return None
+    dest = os.path.join(work or watch.WORK, CLIP_FILES["full"] % day)
+    if not os.path.exists(dest):
+        os.makedirs(os.path.dirname(dest), exist_ok=True)
+        drive_api.download(m.group(1), dest)
+        print("episode %d: full episode fetched from Drive for the podcast (%.0f MB)" % (day, os.path.getsize(dest) / 1e6))
+    return dest
 
 
 def youtube_direct_ready():
@@ -724,7 +742,7 @@ def share_to_facebook_profile(day, entry, state):
         return True
     recs = bundle(int(day))
     copy = ((recs.get("Short Form Video") or {}).get("fields", {}).get("Facebook Reels Copy") or "").strip()
-    url = fb.get("post_url") or facebook_share.find_page_post(copy)
+    url = fb.get("post_url") or facebook_share.find_page_post(copy, day=int(day))
     if not url:
         fb["status"] = "page-post-not-found"
         print("episode %s: the page post is not on the Facebook page yet; looking again next run" % day)
@@ -879,6 +897,7 @@ def run(dry_run=False, limit=3):
 
 YTDLP = os.path.expanduser("~/Library/Python/3.9/bin/yt-dlp")
 CHANNEL_URL = "https://www.youtube.com/@runpreneur/videos"
+SHORTS_URL = "https://www.youtube.com/@runpreneur/shorts"
 YT_GRACE_MINUTES = 20
 
 
@@ -888,15 +907,17 @@ def title_is_episode(title, day):
     return bool(re.search(r"\b(?:Episode|Ep\.?)\s?%d\b" % day, t, re.I) or re.search(r"\bDay\s?%s\b" % "{:,}".format(day), t, re.I) or re.search(r"\bDay\s?%d\b" % day, t, re.I))
 
 
-def youtube_link_from_channel(day, scheduled_iso, now=None, listing=None):
-    """https://youtu.be/<id> for the day's video on the channel, once the slot is YT_GRACE_MINUTES past; else None."""
+def youtube_link_from_channel(day, scheduled_iso, now=None, listing=None, url=CHANNEL_URL):
+    """https://youtu.be/<id> for the day's video on the channel, once the slot is YT_GRACE_MINUTES past; else None.
+    `url` is the Shorts tab for a Short (15 Sep 2026: 2054's Short read 'scheduled' in GoHighLevel for six days
+    while it was live as WUTZvEoLDbQ, because only the full episode was ever looked up on the channel)."""
     now = now or dt.datetime.now(dt.timezone.utc)
     try: due = dt.datetime.strptime(scheduled_iso, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=dt.timezone.utc)
     except (TypeError, ValueError): return None
     if now < due + dt.timedelta(minutes=YT_GRACE_MINUTES): return None
     if listing is None:
         try:
-            r = subprocess.run([YTDLP, "--flat-playlist", "-j", "--no-warnings", "--playlist-end", "6", CHANNEL_URL], capture_output=True, text=True, timeout=120)
+            r = subprocess.run([YTDLP, "--flat-playlist", "-j", "--no-warnings", "--playlist-end", "12", url], capture_output=True, text=True, timeout=120)
             listing = [json.loads(l) for l in r.stdout.splitlines() if l.strip()]
         except Exception as ex:
             print("youtube: channel listing failed (%s)" % str(ex)[:80], file=sys.stderr); return None
@@ -950,10 +971,11 @@ def sync():
             st = post.get("status"); link = post.get("previewLink") or ""
             if st != p.get("status"): p["status"] = st; changed = True
             if st == "failed": p["error"] = str(post.get("error"))[:200]; print("episode %s: %s post FAILED: %s" % (day, p["platform"], p["error"]))
-            if st == "scheduled" and p["platform"] == "youtube" and p["clip"] == "full" and not link:
+            if st == "scheduled" and p["platform"] == "youtube" and p["clip"] in ("full", "lfmd") and not link:
                 # 9 Sep 2026: episode 2054 was live on YouTube at 15:24 and GoHighLevel never flipped its own post from
                 # 'scheduled' (no error either). Twenty minutes past the slot, the channel itself is the source of truth.
-                found = youtube_link_from_channel(int(day), p.get("scheduled"))
+                # The Short is looked up on the Shorts tab (15 Sep 2026).
+                found = youtube_link_from_channel(int(day), p.get("scheduled"), url=SHORTS_URL if p["clip"] == "lfmd" else CHANNEL_URL)
                 if found: st, link = "published", found; p["status"] = st; p["note"] = "link read from the channel listing; GHL never updated its post"; print("episode %s: YouTube live as %s (GHL post still says scheduled)" % (day, found))
             if st == "scheduled" and not link and p["platform"] != "youtube" and p.get("scheduled") and dt.datetime.now(dt.timezone.utc) >= \
                     dt.datetime.fromisoformat(p["scheduled"].replace("Z", "+00:00")) + dt.timedelta(minutes=GHL_SLOT_GRACE_MIN):
@@ -1213,15 +1235,16 @@ def selftest():
     fsrc = inspect.getsource(finish_extras)
     assert fsrc.index("spotify.verify_published(ptitle") < fsrc.index("run_spotify(day"), "a retried podcast looks at Spotify before it uploads"
     # 15 Sep 2026: a media upload that raises SystemExit must not end the hourly run (1841's mp3 did, hourly)
-    real_media, real_files = globals()["media_for"], globals()["episode_files"]
+    real_media, real_files, real_drive = globals()["media_for"], globals()["episode_files"], globals()["full_from_drive"]
     def boom(day, entry, kinds): raise SystemExit("media upload failed for Ep1841_Podcast.mp3: ")
     globals()["media_for"] = boom; globals()["episode_files"] = lambda day: {k: "/nonexistent/%s" % k for k in ("full", "podcast", "thumb")}
+    globals()["full_from_drive"] = lambda day, work=None: None      # never the network in a selftest
     try:
         ent = {"youtube_link": "https://youtu.be/x", "blog": {"url": "https://runpreneur.org.uk/blog/b/y"}}
         out = finish_extras(1841, ent, {"Long Form Video": {"id": "recX", "fields": {}}}, True, lambda: None)
         assert out == [] and "media upload failed" in ent["podcast"]["audio_error"], ent
     finally:
-        globals()["media_for"], globals()["episode_files"] = real_media, real_files
+        globals()["media_for"], globals()["episode_files"], globals()["full_from_drive"] = real_media, real_files, real_drive
     src = inspect.getsource(sync); assert "import platform_copy" not in src, "sync must use the module-level pc: an import inside the function made pc a local and crashed every sync (10 Sep 2026, 07:15)"
     assert 'if not str(day).isdigit() or not isinstance(entry, dict): continue' in src, "sync skips the cursor and the held posts"
     assert may_go_to_youtube(2054, gaps, st, led, {1799, 2054}) and st[CURSOR_KEY] == 2053, "a gap day in the approved set does not disturb the order"

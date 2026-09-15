@@ -178,6 +178,20 @@ def headline(r):
     return "Content: %s. %s. %s." % (out, nxt, ask)
 
 
+UNPAUSE_AFTER_DAYS = 7
+
+
+def lift_gap_pause(report, path=None, remove=os.remove, say=print):
+    """Kevin, 15 Sep 2026: the gap days come back once seven days in a row have an in-order episode out. The
+    report already counts those days, so the job that writes it lifts the pause and says so. Returns True when lifted."""
+    path = path or watch.GAP_PAUSE_FILE
+    if report.get("cleanDaysInRow", 0) < UNPAUSE_AFTER_DAYS or not os.path.exists(path): return False
+    remove(path)
+    report["gapDaysPaused"] = False; report["gapDaysUnpaused"] = report["asOf"]
+    say("content report: %d days in a row with an episode out; gap days are back in the night plan" % report["cleanDaysInRow"])
+    return True
+
+
 def write(report, dry_run=False):
     now = report["asOf"].replace("Z", ".000Z")
     status = "Worked"
@@ -232,9 +246,15 @@ def selftest():
     import watch as _w; real = _w.gap_days; _w.gap_days = lambda path=None: {1799}
     try: assert build(now, gap_only, {}, {}, {}, plan=[])["cleanDaysInRow"] == 0
     finally: _w.gap_days = real
+    import tempfile
+    pf = os.path.join(tempfile.gettempdir(), "od-gap-pause-%d" % os.getpid()); open(pf, "w").write("x")
+    quiet = lambda *a: None
+    assert not lift_gap_pause({"cleanDaysInRow": 6, "asOf": "t"}, pf, say=quiet) and os.path.exists(pf), "six days in a row keeps the pause"
+    assert lift_gap_pause({"cleanDaysInRow": 7, "asOf": "t"}, pf, say=quiet) and not os.path.exists(pf), "seven days lifts it"
+    assert not lift_gap_pause({"cleanDaysInRow": 9, "asOf": "t"}, pf, say=quiet), "already lifted: nothing to do"
     f = write(r, dry_run=True)
     assert f[ES["key"]] == KEY and f[ES["kind"]] == "report" and json.loads(f[ES["payload"]])["headline"] == r["headline"]
-    print(json.dumps({"checks": 16, "failed": []}))
+    print(json.dumps({"checks": 19, "failed": []}))
 
 
 if __name__ == "__main__":
@@ -243,5 +263,5 @@ if __name__ == "__main__":
     if a.mode == "selftest": selftest()
     elif a.mode == "build": print(json.dumps(build(), indent=1))
     elif a.mode == "write":
-        rep = build(); write(rep); print("content report: " + rep["headline"])
+        rep = build(); lift_gap_pause(rep); write(rep); print("content report: " + rep["headline"])
     else: raise SystemExit("usage: content_report.py build | write | selftest")

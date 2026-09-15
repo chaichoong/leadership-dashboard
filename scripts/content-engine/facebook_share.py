@@ -126,14 +126,17 @@ const { chromium } = require('%(pw)s');
 PW = "/Users/kevinbrittain/Projects/leadership-dashboard/node_modules/playwright"
 
 
-def find_page_post(copy, url=None):
-    """The page post carrying this episode's caption. Returns its URL, or None."""
-    key = match_key(copy)
-    if not key: return None
-    js = FIND_JS % {"pw": PW, "profile": PROFILE, "list_url": json.dumps(url or POSTS_URL), "key": json.dumps(key)}
-    try: r = _browser(js)
-    except SystemExit as ex: print("facebook: page read failed (%s)" % str(ex)[:160], file=sys.stderr); return None
-    return r.get("url") if r.get("found") else None
+def find_page_post(copy, url=None, day=None):
+    """The page post carrying this episode's caption. Returns its URL, or None. The caption is tried first; when
+    it is not found and the day is known, "Day NNNN" is tried (15 Sep 2026: 2056's reel read "Team motivation.
+    Day 2056 of running every day." while the record's Facebook copy began "Day 2056. I'm still catching...")."""
+    keys = [k for k in (match_key(copy), ("Day %d" % day) if day else "") if k]
+    for key in keys:
+        js = FIND_JS % {"pw": PW, "profile": PROFILE, "list_url": json.dumps(url or POSTS_URL), "key": json.dumps(key)}
+        try: r = _browser(js)
+        except SystemExit as ex: print("facebook: page read failed (%s)" % str(ex)[:160], file=sys.stderr); return None
+        if r.get("found"): return r.get("url")
+    return None
 
 
 SHARED_JS = """
@@ -147,7 +150,10 @@ const { chromium } = require('%(pw)s');
   await page.waitForTimeout(9000);
   for (let i = 0; i < 3; i++) { await page.mouse.wheel(0, 2000); await page.waitForTimeout(2000); }
   const id = %(id)s;
-  const found = await page.evaluate((id) => Array.from(document.querySelectorAll('a')).some(a => (a.href || '').includes(id)), id);
+  // 15 Sep 2026: a shared reel sits on the profile with the reel id in its markup but in NO link address, so the
+  // link-only check read every share since 13 Sep as missing (2194 was there, count 1, links none). The page's
+  // markup is the proof.
+  const found = await page.evaluate((id) => document.documentElement.outerHTML.includes(id), id);
   console.log(JSON.stringify({ shared: found, url: page.url() }));
   await ctx.close(); process.exit(0);
 })().catch(e => { console.log(JSON.stringify({ shared: false, error: e.message.slice(0, 200) })); process.exit(0); });
