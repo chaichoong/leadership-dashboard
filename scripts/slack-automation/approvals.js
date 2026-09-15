@@ -854,14 +854,15 @@ async function postKevinDigest(env, log) {
         if (!channel) { log.push('digest DM open failed'); return -1; }
         if (!(await claim())) return -1;
         const capped = recs.length >= DIGEST_MAX;
-        const res = await slack(env, SLACK.post, {
+        let res;
+        try { res = await slack(env, SLACK.post, {
             method: 'POST',
             body: JSON.stringify({
                 channel,
                 text: `${mine.length}${capped ? '+' : ''} approvals waiting`,
                 blocks: [{ type: 'section', text: { type: 'mrkdwn', text: buildDigestText(mine.length, mine.map(t => esc(truncate(t.name, 120))), DASHBOARD_QUEUE_URL, capped, signInsWaiting(mine), handled, content) } }],
             }),
-        });
+        }); } catch (e) { res = { ok: false, error: `threw: ${e && e.message ? e.message : e}` }; }   // a thrown post releases the claim too
         if (!res.ok) { log.push(`digest post failed: ${res.error}`); await release(); return -1; }
         log.push(`digest sent: ${mine.length}${capped ? '+' : ''} pending`);
     } else {
@@ -875,10 +876,11 @@ async function postKevinDigest(env, log) {
         const channel = await openDm(env, KEVIN_SLACK_ID);
         if (!channel) { log.push('digest DM open failed'); return -1; }
         if (!(await claim())) return -1;
-        const res = await slack(env, SLACK.post, {
+        let res;
+        try { res = await slack(env, SLACK.post, {
             method: 'POST',
             body: JSON.stringify({ channel, text: 'No approvals waiting; content report', blocks: [{ type: 'section', text: { type: 'mrkdwn', text: buildContentOnlyText(content) } }] }),
-        });
+        }); } catch (e) { res = { ok: false, error: `threw: ${e && e.message ? e.message : e}` }; }
         if (!res.ok) { log.push(`digest post failed: ${res.error}`); await release(); return -1; }
         log.push('digest: nothing pending (control passed), content line sent');
     }

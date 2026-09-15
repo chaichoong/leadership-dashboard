@@ -102,6 +102,7 @@ describe('the 08:00 digest', () => {
         expect(fn.indexOf('await claim()')).toBeLessThan(firstPost);
         expect(fn.lastIndexOf('await claim()')).toBeLessThan(fn.lastIndexOf('slack(env, SLACK.post'));
         expect((fn.match(/await release\(\); return -1;/g) || []).length).toBe(2);
+        expect((fn.match(/catch \(e\) \{ res = \{ ok: false/g) || []).length, 'a post that throws must release the claim, or no digest goes out that day').toBe(2);
         expect(CONTENT_REPORT_KEY).toBe('content-publishing');
     });
     it('fails CLOSED when the KV binding is missing', () => {
