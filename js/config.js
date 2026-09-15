@@ -48,7 +48,7 @@
         // AI Agents (Leadership) — ADMIN ONLY, like KPI Library. Approvals,
         // checks and the workforce register in one place (Kevin's ruling,
         // 24 Aug 2026; moved out of the Systemisation page).
-        { id: 'agents', name: 'AI Agents', icon: '🤖', pageVer: '1.95', sopFile: 'sop-ai-agents.html', sopVer: '1.42', standalone: 'os/agents/index.html', adminOnly: true },
+        { id: 'agents', name: 'AI Agents', icon: '🤖', pageVer: '1.96', sopFile: 'sop-ai-agents.html', sopVer: '1.42', standalone: 'os/agents/index.html', adminOnly: true },
         { id: 'fintable',  name: 'Accounts',                       icon: '🏦', pageVer: '1.19', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#fintable' },
         { id: 'systemisation', name: 'Systemisation',              icon: '⚙️', pageVer: '1.19', sopFile: 'guides/systemisation.html',    sopVer: '1.11', standalone: 'os/systemisation/index.html' },
         { id: 'os-team',    name: 'Team Members',                  icon: '👥', pageVer: '1.31', sopFile: '',                            sopVer: '1.1', standalone: 'os/team/index.html' },
@@ -58,7 +58,7 @@
         // guides/crm.html still describes the page without it, so sopVer stays at 1.0 and
         // this now reads as the version gap it always was.
         { id: 'crm',        name: 'CRM',                           icon: '👥', pageVer: '1.2', sopFile: 'guides/crm.html',             sopVer: '1.0', standalone: 'crm-supabase.html' },
-        { id: 'publishing', name: 'Publishing',                     icon: '📅', pageVer: '1.0', sopFile: '',                            sopVer: '1.0', standalone: 'publishing.html' },
+        { id: 'publishing', name: 'Publishing',                     icon: '📅', pageVer: '1.1', sopFile: '',                            sopVer: '1.0', standalone: 'publishing.html' },
         { id: 'content-machine', name: 'Content Machine',           icon: '🎬', pageVer: '1.0', sopFile: '',                            sopVer: '1.0', standalone: 'https://chaichoong.github.io/content-machine/' },
         { id: 'prospecting', name: 'Prospecting',                   icon: '🧲', pageVer: '1.20', sopFile: 'sop-prospecting.html',        sopVer: '1.5', standalone: 'index.html#prospecting' },
         { id: 'sitemap',    name: 'Site Map & Guides',             icon: '🔗', pageVer: '1.24', sopFile: 'sop-sitemap.html',            sopVer: '1.19', standalone: 'index.html#sitemap' },
