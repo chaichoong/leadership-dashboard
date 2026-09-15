@@ -266,11 +266,16 @@ def slot_attendance(ran, schedule, window_hours, ref=None, finished=None):
             continue          # an unreadable cron is the register's problem, not a missed run
         got = len(ran.get(name, []))
         exits = (finished or {}).get(name, [])
-        died = min(got, sum(1 for e in exits if e != 0))
+        crashed = sum(1 for e in exits if e != 0)
+        paused = paused_runs(name, exits)
+        died = min(got, crashed + paused)
         worked = got - died
+        causes = death_causes(name, exits) if crashed else {}
+        if paused:
+            causes["allowance-paused"] = paused
         out[name] = {"cron": cron, "expected": exp, "ran": got, "died": died,
                      "worked": worked,
-                     "causes": death_causes(name, exits) if died else {},
+                     "causes": causes if died else {},
                      "shortfall": max(0, exp - worked)}
     return out
 
@@ -287,7 +292,14 @@ def slot_attendance(ran, schedule, window_hours, ref=None, finished=None):
 SLOT_LOG_DIR = os.environ.get(
     "SLOT_RUNS_LOG_DIR", os.path.join(HOME, "knowledge-os/logs"))
 USAGE_CAP_MARKERS = ("You've hit your limit", "You\u2019ve hit your limit")
-CAUSE_LABELS = {"usage-cap": "the AI allowance ran out"}
+# Since PR #405 (14 Sep 2026) a slot runner that finds the allowance already out
+# writes `===== done rc=0 (PAUSED: ...)` and exits 0 without starting Claude.
+# Exit 0 is not work (finding 20260914-fix-session-529): estate-status.py reads
+# that block as Skipped, and attendance must agree or it says "ran 3 of 3" on a
+# day nothing ran.
+PAUSED_MARKER = "(PAUSED:"
+CAUSE_LABELS = {"usage-cap": "the AI allowance ran out",
+                "allowance-paused": "paused, the AI allowance was out"}
 
 
 def run_log_blocks(job):
@@ -315,8 +327,7 @@ def death_causes(job, exits):
     failed = [i for i, e in enumerate(exits) if e != 0]
     if not failed:
         return causes
-    blocks = run_log_blocks(job)
-    tail = blocks[-len(exits):] if blocks and len(blocks) >= len(exits) else None
+    tail = _run_tail(job, exits)
     for i in failed:
         block = tail[i] if tail else ""
         if any(m in block for m in USAGE_CAP_MARKERS):
@@ -327,6 +338,31 @@ def death_causes(job, exits):
             cause = "exit %s" % exits[i]
         causes[cause] = causes.get(cause, 0) + 1
     return causes
+
+
+def _run_tail(job, exits):
+    """The last len(exits) done-blocks of runs.log, aligned with `exits`, or None."""
+    if not exits:
+        return None
+    blocks = run_log_blocks(job)
+    return blocks[-len(exits):] if blocks and len(blocks) >= len(exits) else None
+
+
+def paused_runs(job, exits):
+    """How many exit-0 runs in `exits` were the allowance pause, read from the
+    done line of the matching runs.log block. 0 when the log cannot be aligned:
+    a clean exit is only re-graded on evidence, never on a guess."""
+    tail = _run_tail(job, exits)
+    if not tail:
+        return 0
+    n = 0
+    for i, e in enumerate(exits):
+        if e != 0:
+            continue
+        done = [l for l in tail[i].splitlines() if l.startswith("===== done rc=")]
+        if done and PAUSED_MARKER in done[-1]:
+            n += 1
+    return n
 
 
 def describe_causes(causes):

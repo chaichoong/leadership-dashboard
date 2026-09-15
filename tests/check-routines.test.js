@@ -525,6 +525,33 @@ describe('a slot that died is not a slot that ran', () => {
     expect(res.missed_slot_runs).toMatch(/2 died: the AI allowance ran out x2/);
   });
 
+  // Finding 20260914-fix-session-529: since PR #405 a runner that finds the
+  // allowance out writes `done rc=0 (PAUSED: ...)` and exits 0 without Claude.
+  const PAUSED = '===== task-manager run [15:00 slot] =====\nPAUSED: allowance out\n===== done rc=0 (PAUSED: the Claude allowance is out; queued to re-run at reset) Mon =====';
+
+  it('BACK-TEST: an allowance-paused exit 0 is not a slot that worked', () => {
+    slotSchedule();
+    runsLog(['old history', OK, PAUSED, PAUSED]);
+    writeEvents(runs([0, 0, 0]));
+    const { res } = guard();
+    const v = res.slot_attendance['task-manager'];
+    expect(v.ran).toBe(3);
+    expect(v.died).toBe(2);
+    expect(v.worked).toBe(1);
+    expect(v.causes).toEqual({ 'allowance-paused': 2 });
+    expect(res.slot_shortfalls).toContain('task-manager');
+  });
+
+  it('a paused run and a cap death are both named, and a plain clean run is untouched', () => {
+    slotSchedule();
+    runsLog([PAUSED, CAP, OK]);
+    writeEvents(runs([0, 1, 0]));
+    const v = guard().res.slot_attendance['task-manager'];
+    expect(v.died).toBe(2);
+    expect(v.worked).toBe(1);
+    expect(v.causes).toEqual({ 'allowance-paused': 1, 'usage-cap': 1 });
+  });
+
   it('names a non-cap death by its exit code, not as the allowance', () => {
     slotSchedule();
     runsLog([BROKE]);

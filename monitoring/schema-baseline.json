@@ -10266,6 +10266,63 @@
   },
   "name": "AI Brain Today"
  },
+ "tblZVrdzivyBueZVf": {
+  "fields": {
+   "fld3q8WN5XqrER92Z": {
+    "name": "Updated",
+    "type": "dateTime"
+   },
+   "fldLO6xJqkokvVR4g": {
+    "name": "Key",
+    "type": "singleLineText"
+   },
+   "fldLRFP2nJttDVQOa": {
+    "name": "Detail",
+    "type": "multilineText"
+   },
+   "fldMIx3kWMM23vDBN": {
+    "name": "Last Worked",
+    "type": "dateTime"
+   },
+   "fldZGa0UD76lVLww7": {
+    "name": "Schedule",
+    "type": "singleLineText"
+   },
+   "fldfjQOn76VpgKEfZ": {
+    "name": "Kind",
+    "type": "singleSelect"
+   },
+   "fldhOUiva3bqPNk1c": {
+    "name": "Status",
+    "type": "singleSelect"
+   },
+   "fldiqs9lvyLimoR7i": {
+    "name": "Payload",
+    "type": "multilineText"
+   },
+   "fldk3Qz02krXZt1w3": {
+    "name": "Fails 24h",
+    "type": "number"
+   },
+   "fldlnvvTh8l5UIih4": {
+    "name": "Label",
+    "type": "singleLineText"
+   },
+   "fldn0sWvRqDBwbvsM": {
+    "name": "Runs 24h",
+    "type": "number"
+   },
+   "fldr5E1TQyDhZ8a79": {
+    "name": "Next Due",
+    "type": "dateTime"
+   },
+   "flduxV3TYwp9wQX9O": {
+    "name": "Last Run",
+    "type": "dateTime"
+   }
+  },
+  "name": "Estate Status"
+ },
  "tblZYsa0u1M17N7ZE": {
   "fields": {
    "fld52DDH3BhY0vCra": {
