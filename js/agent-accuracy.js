@@ -286,7 +286,9 @@
         var spend = /^\s*SPEND:\s*£?\s*([\d,]+(?:\.\d+)?)/im.exec(out);
         if (spend && parseFloat(spend[1].replace(/,/g, '')) > DECISION_MONEY.inform) return 'spend over the rule';
         if (/^SIGN-IN:/i.test(nm) || /^\s*SIGN-IN NEEDED:/im.test(out)) return 'information only';
-        if (/^CLOSE PROPOSAL:\s*duplicate of\s+rec[A-Za-z0-9]{14}\b/i.test(out)) return 'close: duplicate';
+        // Mirrors CLOSE_DUPLICATE_RE in scripts/agent-dispatch.py (widened 15 Sep
+        // 2026: any "duplicate" line naming a record id, not only "duplicate of").
+        if (/^CLOSE PROPOSAL:\s*duplicate\b[^\n]*?rec[A-Za-z0-9]{14}\b/i.test(out)) return 'close: duplicate';
         if (/^CLOSE PROPOSAL:\s*(?:already (?:handled|done|dealt with)|done already|handled)\b[^\n]*?\brec[A-Za-z0-9]{14}\b/i.test(out)) return 'close: already handled';
         if (up.indexOf('CLOSE PROPOSAL:') === 0) return 'close: judgement';
         if (up.indexOf('PASS TO ROY:') === 0) return 'pass to Roy';

@@ -191,25 +191,37 @@ out of your list — the board subtracted dispatch's tasks in code):
 7. **Two or more OPEN tasks on one email thread** (the board's `duplicates`
    list — one open task per thread and lane is the invariant, Kevin's ruling
    25 Aug 2026): each group names its `keeper` (the oldest task), its
-   `closable` twins, and its `untouchable` twins. `annotate` the keeper with
-   anything unique from each closable twin (one line per twin), then
-   `close`-propose each id in `closable` with output
+   `closable` twins, its `untouchable` twins and its `folds`. `annotate` the
+   keeper with anything unique from each closable twin (one line per twin),
+   then `close`-propose each id in `closable` with output
    "CLOSE PROPOSAL: duplicate of <keeper id> — folded into it" (Level A from
-   7 Sep 2026: `submit` verifies the keeper is older, open and a different
-   task, then closes the twin ITSELF with no card; a keeper that fails the
-   check makes it a card as before, and the stderr line says why). The gate
+   7 Sep 2026: `submit` verifies the keeper is a different task and not
+   Cancelled (open, for a tier-1 twin or a NEWER keeper), then closes the
+   twin ITSELF with no card; a keeper that fails the check
+   makes it a card as before, and the stderr line says why). Since 15 Sep
+   2026 `submit` also carries the twin's Agent Output onto the keeper's
+   Notes before the close, accepts a NEWER keeper when the fold check reads
+   the two names as one matter, and reads the twin's name and description
+   for the tier-1 check, never its Notes. The gate
    accepts a CLOSE PROPOSAL on a system-alert thread (an Apps Script or
    Cloudflare failure mail) — folding a duplicate alert is hygiene, not
    "investigate the script", and was wrongly refused for three slots on
    1-2 Sep 2026. Never close
    the keeper; one proposal per task even when a folded task appears in two
-   groups. `untouchable` twins sit at Status Approval — report them, never
-   touch them HERE (their Agent Output is waiting on Kevin; the step 2b
-   cleanse is the one deliberate route that may propose on a lane item,
-   under its own limits); a group whose
-   closable list is empty is report-only this slot. The board already keeps
-   the other edges safe in code: Roy maintenance tasks never group with
-   reply tasks, and parked or dispatch-in-flight tasks are never grouped.
+   groups. An Approval twin appears in `closable` ONLY when the board's fold
+   check (same lane, a shared reference or enough shared non-address words)
+   read it as one matter with the keeper — its reason is in `folds`, quote
+   it on the proposal — and the carry-out puts its waiting Agent Output on
+   the keeper's Notes, so Kevin sees ONE card holding everything (15 Sep
+   2026: two cards for one Sefton thread had both sat in his queue).
+   `untouchable` twins are the Approval twins the fold check refused, plus
+   the keeper itself when it is at Approval — report them, never touch them
+   HERE (their Agent Output is waiting on Kevin; the step 2b cleanse is the
+   one deliberate route that may propose on a lane item, under its own
+   limits); a group whose closable list is empty is report-only this slot.
+   The board already keeps the other edges safe in code: Roy maintenance
+   tasks never group with reply tasks, and parked or dispatch-in-flight tasks
+   are never grouped.
 8. **Done in reality, duplicate, or dead** (overtaken by events, refers to
    something closed, 300+ days still with no deadline) → `close`: submit as
    yourself, output "CLOSE PROPOSAL: <done already | dead — reason>", type

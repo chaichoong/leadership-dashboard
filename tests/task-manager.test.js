@@ -261,10 +261,27 @@ describe('one open task per thread and lane (Kevin, 25 Aug 2026)', () => {
         expect(script).toMatch(/buckets\["stuck"\] \+ buckets\["moving"\] \+ buckets\["waitingOnKevin"\]/);
     });
 
-    it('the skill closes twins through the gate and never touches the keeper or Approval twins', () => {
+    it('the skill closes twins through the gate and never touches the keeper or refused Approval twins', () => {
         expect(skill).toMatch(/duplicate of <keeper id>/);
         expect(skill).toMatch(/Never close\s+the keeper/);
         expect(skill).toContain('untouchable');
+    });
+
+    // Kevin, 15 Sep 2026: two cards for one thread both sat in his queue
+    // because an Approval twin was untouchable on principle. An Approval twin
+    // now folds when the board's fold check (create-agent-task.py's
+    // dupe_verdict, fold mode) reads it as one matter with the keeper; the
+    // carry-out puts its Agent Output on the keeper's Notes first.
+    it('an Approval twin folds only on the fold verdict, with its reason, and the skill quotes it', () => {
+        expect(script).toMatch(/_load_gate\(\)\.dupe_verdict\(a, b, mode="fold"\)/);
+        expect(script).toMatch(/"folds": folds/);
+        expect(skill).toMatch(/its reason is in `folds`/);
+        expect(skill).toMatch(/carry-out puts its waiting Agent Output on\s+the keeper's Notes/);
+        expect(skill).toMatch(/never its Notes/);
+    });
+    it('the live copy the runner reads matches the repo mirror', () => {
+        const live = runner.match(/SKILL="([^"]+)"/)[1];
+        if (existsSync(live)) expect(readFileSync(live, 'utf8')).toBe(skill);
     });
 });
 

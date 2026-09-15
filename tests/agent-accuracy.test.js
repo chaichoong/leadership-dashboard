@@ -275,6 +275,9 @@ const { decisionCategory, categoryCandidates, AUTONOMY_LEVELS, DECISION_MONEY, H
 describe('decisionCategory — the shapes the dispatcher acts on', () => {
   it('reads the five Level A shapes', () => {
     expect(decisionCategory('CLOSE PROPOSAL: duplicate of recKEEPER00000001 — folded', 'Admin', 'INBOUND: x')).toBe('close: duplicate');
+    // Widened 15 Sep 2026 in step with CLOSE_DUPLICATE_RE: any duplicate line naming a record id.
+    expect(decisionCategory('CLOSE PROPOSAL: duplicate — a newer version of the same reply (recKEEPER00000001, submitted 7 Sep)', 'Admin', 'INBOUND: x')).toBe('close: duplicate');
+    expect(decisionCategory('CLOSE PROPOSAL: duplicate of the Sefton task', 'Admin', 'INBOUND: x')).toBe('close: judgement');
     expect(decisionCategory('CLOSE PROPOSAL: already handled — see recDONE0000000001', 'Admin', 'x')).toBe('close: already handled');
     expect(decisionCategory('Findings.\n\n**Carrying this out will involve:** Nothing. Information only.', 'Analysis', 'x')).toBe('information only');
     expect(decisionCategory('CALENDAR:\nTITLE: Dentist', 'Admin', 'x')).toBe('calendar entry');

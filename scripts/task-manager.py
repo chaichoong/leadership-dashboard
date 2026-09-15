@@ -284,19 +284,29 @@ def thread_keys(url_field):
     return keys
 
 
-def duplicate_groups(views):
+def duplicate_groups(views, verdict=None):
     """Open tasks sharing one thread AND one lane:
-    [{thread, lane, keeper, closable, untouchable, names}].
+    [{thread, lane, keeper, closable, untouchable, folds, names}].
 
     - keeper: the oldest task overall — the one everything folds into.
-    - closable: every other task NOT at Status Approval (safe to
-      close-propose).
-    - untouchable: twins at Status Approval — a close proposal would
-      overwrite the Agent Output already waiting on Kevin; report only.
+    - closable: every other task NOT at Status Approval, PLUS an Approval
+      twin the fold check reads as one matter with the keeper (Kevin, 15 Sep
+      2026: two cards for one thread both stayed in his queue because an
+      Approval twin was untouchable on principle). `submit` carries the
+      twin's Agent Output onto the keeper's Notes before it closes, so
+      Kevin sees ONE card holding everything.
+    - untouchable: Approval twins the fold check refuses, and the keeper
+      itself when it sits at Approval — report only, never propose on.
+    - folds: [{id, why}] the reason each Approval twin was allowed to fold,
+      for the skill to quote on the proposal.
+    The fold check is create-agent-task.py's dupe_verdict in "fold" mode
+    (same name lane first, then a shared reference or enough shared
+    non-address words); `verdict` is injectable for the selftest only.
     A reply task and a Roy maintenance task on the same thread are
     legitimately TWO tasks, so the lane is part of the key. A folded task can
     appear in more than one group. Callers pass only actionable views
     (never parked or dispatch-in-flight)."""
+    verdict = verdict or (lambda a, b: _load_gate().dupe_verdict(a, b, mode="fold"))
     by = {}
     for v in views:
         lane = ("maintenance"
@@ -310,13 +320,25 @@ def duplicate_groups(views):
         if len(vs) > 1:
             vs = sorted(vs, key=lambda v: v.get("createdTime") or "")
             keeper = vs[0]
+            closable, untouchable, folds = [], [], []
+            if keeper.get("status") == "Approval":
+                untouchable.append(keeper["id"])
+            for v in vs[1:]:
+                if v.get("status") != "Approval":
+                    closable.append(v["id"])
+                    continue
+                vd = verdict(v.get("name", ""), keeper.get("name", "")) or {}
+                if vd.get("match"):
+                    closable.append(v["id"])
+                    folds.append({"id": v["id"], "why": vd.get("why", "")})
+                else:
+                    untouchable.append(v["id"])
             out.append({
                 "thread": k, "lane": lane,
                 "keeper": keeper["id"],
-                "closable": [v["id"] for v in vs[1:]
-                             if v.get("status") != "Approval"],
-                "untouchable": [v["id"] for v in vs
-                                if v.get("status") == "Approval"],
+                "closable": closable,
+                "untouchable": untouchable,
+                "folds": folds,
                 "names": [v["name"] for v in vs],
             })
     return sorted(out, key=lambda g: (g["thread"], g["lane"]))
@@ -968,7 +990,30 @@ def cmd_selftest():
         {"id": "a2", "name": "X again", "inboundUrl": "https://mail.google.com/mail/u/0/#all/TH4", "createdTime": "2026-08-03T10:00:00.000Z", "status": "Approval"},
     ])
     assert gs[0]["closable"] == [] and len(gs[0]["untouchable"]) == 2, gs
+    assert gs[0]["folds"] == [], gs
     assert sum(len(g["closable"]) for g in gs) == 0
+    # an Approval twin FOLDS when the fold check reads it as one matter with
+    # the keeper (15 Sep 2026): same lane, enough shared non-address words.
+    # The keeper at Approval stays untouchable; the twin becomes closable
+    # with its reason quoted. The real dupe_verdict runs here, not a stub.
+    gs = duplicate_groups([
+        {"id": "k1", "name": "INBOUND: pay Sefton landlord licence fee 150 GBP for 23 Viola Street Bootle",
+         "inboundUrl": "https://mail.google.com/mail/u/0/#all/TH5", "createdTime": "2026-08-01T10:00:00.000Z", "status": "Approval"},
+        {"id": "k2", "name": "INBOUND: Sefton Council HMO licence fee invoice - 23 Viola St",
+         "inboundUrl": "https://mail.google.com/mail/u/0/#all/TH5", "createdTime": "2026-08-03T10:00:00.000Z", "status": "Approval"},
+    ])
+    assert gs[0]["keeper"] == "k1" and gs[0]["closable"] == ["k2"], gs
+    assert gs[0]["untouchable"] == ["k1"] and gs[0]["folds"][0]["id"] == "k2", gs
+    assert "licence" in gs[0]["folds"][0]["why"], gs
+    # ... and stays untouchable when the names share only an address: a
+    # garden complaint and a rent chase at one house are two matters.
+    gs = duplicate_groups([
+        {"id": "u1", "name": "INBOUND: rent arrears chase 23 Viola Street Bootle",
+         "inboundUrl": "https://mail.google.com/mail/u/0/#all/TH6", "createdTime": "2026-08-01T10:00:00.000Z", "status": "Today"},
+        {"id": "u2", "name": "INBOUND: garden fence complaint 23 Viola Street Bootle",
+         "inboundUrl": "https://mail.google.com/mail/u/0/#all/TH6", "createdTime": "2026-08-03T10:00:00.000Z", "status": "Approval"},
+    ])
+    assert gs[0]["closable"] == [] and gs[0]["untouchable"] == ["u2"] and gs[0]["folds"] == [], gs
     with tempfile.TemporaryDirectory() as td:
         os.environ["TASK_MANAGER_DIR"] = td
         digest_append({"task": "recT", "move": "leave", "reason": "moving"})
