@@ -722,7 +722,16 @@ def share_to_facebook_profile(day, entry, state):
     itself, because GoHighLevel never returns one. Signed out, or the post not up yet: recorded, retried hourly."""
     import facebook_share
     fb = entry.setdefault("facebook_share", {})
-    if fb.get("status") in ("shared", "reviewed", "unconfirmed"): return False
+    if fb.get("status") in ("shared", "reviewed"): return False
+    if fb.get("status") == "unconfirmed" and fb.get("post_url"):
+        # 15 Sep 2026: 'unconfirmed' was final, so a share the checker missed stayed missing for ever. Look again;
+        # a share that is truly absent is pressed once more, and only once.
+        if facebook_share.verify_shared(fb["post_url"]):
+            fb["status"] = "shared"; print("episode %s: the profile share is there after all" % day); return True
+        if fb.get("reshared_at"):
+            fb["status"] = "failed"; fb["error"] = "shared twice by the robot and still not on the profile"; return True
+        fb["status"] = "page-post-not-found"; fb["reshared_at"] = now_utc()      # falls through to one more share below
+        print("episode %s: the profile share is not on the profile; sharing once more" % day, file=sys.stderr)
     if fb.get("status") == "sharing":
         # a run died while pressing Share: check the profile before ever sharing again
         fb["status"] = "shared" if fb.get("post_url") and facebook_share.verify_shared(fb["post_url"]) else "unconfirmed"
@@ -1232,6 +1241,8 @@ def selftest():
     assert section_status({"posts": {"facebook|summary|f": {"platform": "facebook", "clip": "summary", "status": "scheduled"}}})["Teaser clips"] == "pending"
     assert section_status({})["Learnings clips"] == "missing", "no Learnings post at all is missing, not done (1841)"
     assert "extras_done(entry)" in rsrc and "STATUS_PUBLISHED" in rsrc, "a Published record with its podcast missing still gets the retry"
+    ssrc = inspect.getsource(share_to_facebook_profile)
+    assert '"unconfirmed" and fb.get("post_url")' in ssrc and 'reshared_at' in ssrc, "an unconfirmed share is re-checked and re-pressed once, never final"
     fsrc = inspect.getsource(finish_extras)
     assert fsrc.index("spotify.verify_published(ptitle") < fsrc.index("run_spotify(day"), "a retried podcast looks at Spotify before it uploads"
     # 15 Sep 2026: a media upload that raises SystemExit must not end the hourly run (1841's mp3 did, hourly)
