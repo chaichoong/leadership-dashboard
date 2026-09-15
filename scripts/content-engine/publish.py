@@ -624,10 +624,11 @@ def full_from_drive(day, work=None):
                  if v.get("episode") == day and v.get("role") == "episode" and (v.get("outputs") or {}).get("full")), None)
     m = re.search(r"/d/([\w-]+)", link or "")
     if not m: return None
-    dest = os.path.join(work or watch.WORK, CLIP_FILES["full"] % day)
+    dest = os.path.join(work or watch.WORK, "Episode_%d_Full_Episode_drive.mp4" % day)   # its own name: a redo render writes the plain one
     if not os.path.exists(dest):
         os.makedirs(os.path.dirname(dest), exist_ok=True)
-        drive_api.download(m.group(1), dest)
+        drive_api.download(m.group(1), dest + ".part")            # resumes a stopped copy; only a whole file gets the real name
+        os.replace(dest + ".part", dest)
         print("episode %d: full episode fetched from Drive for the podcast (%.0f MB)" % (day, os.path.getsize(dest) / 1e6))
     return dest
 
@@ -722,7 +723,7 @@ def share_to_facebook_profile(day, entry, state):
     itself, because GoHighLevel never returns one. Signed out, or the post not up yet: recorded, retried hourly."""
     import facebook_share
     fb = entry.setdefault("facebook_share", {})
-    if fb.get("status") in ("shared", "reviewed"): return False
+    if fb.get("status") in ("shared", "reviewed", "failed"): return False      # failed is final: pressed twice, never a third time (review, 15 Sep 2026)
     if fb.get("status") == "unconfirmed" and fb.get("post_url"):
         # 15 Sep 2026: 'unconfirmed' was final, so a share the checker missed stayed missing for ever. Look again;
         # a share that is truly absent is pressed once more, and only once.
@@ -1242,7 +1243,9 @@ def selftest():
     assert section_status({})["Learnings clips"] == "missing", "no Learnings post at all is missing, not done (1841)"
     assert "extras_done(entry)" in rsrc and "STATUS_PUBLISHED" in rsrc, "a Published record with its podcast missing still gets the retry"
     ssrc = inspect.getsource(share_to_facebook_profile)
-    assert '"unconfirmed" and fb.get("post_url")' in ssrc and 'reshared_at' in ssrc, "an unconfirmed share is re-checked and re-pressed once, never final"
+    assert '"unconfirmed" and fb.get("post_url")' in ssrc and 'reshared_at' in ssrc, "an unconfirmed share is re-checked and re-pressed once"
+    assert '("shared", "reviewed", "failed"): return False' in ssrc, "a failed share is final, or it is pressed every other hour"
+    assert 'dest + ".part"' in inspect.getsource(full_from_drive), "a stopped Drive copy must never be uploaded as the episode"
     fsrc = inspect.getsource(finish_extras)
     assert fsrc.index("spotify.verify_published(ptitle") < fsrc.index("run_spotify(day"), "a retried podcast looks at Spotify before it uploads"
     # 15 Sep 2026: a media upload that raises SystemExit must not end the hourly run (1841's mp3 did, hourly)

@@ -88,8 +88,9 @@ def build(now=None, state=None, approvals=None, ledger=None, sync_state=None, pl
         out = sorted((episode_row(k, e) for k, e in episodes.items() if out_at(e) and london_day(out_at(e)) == d), key=lambda r: r["day"])
         history.append({"date": d.isoformat(), "episodes": out})
     clean = 0
-    for h in history[1:]:                                    # yesterday backwards: days in a row with an in-order episode out
-        if not any(e["day"] not in gaps for e in h["episodes"]): break     # a gap day filling an old hole is not the run moving on
+    for i in range(1, 31):                                   # yesterday backwards, beyond the seven-day table (review, 15 Sep 2026: the table capped it at 6)
+        d = today - dt.timedelta(days=i)
+        if not any(out_at(e) and london_day(out_at(e)) == d and int(k) not in gaps for k, e in episodes.items()): break   # a gap day filling an old hole is not the run moving on
         clean += 1
 
     # what is booked and not out yet
@@ -252,6 +253,8 @@ def selftest():
     assert not lift_gap_pause({"cleanDaysInRow": 6, "asOf": "t"}, pf, say=quiet) and os.path.exists(pf), "six days in a row keeps the pause"
     assert lift_gap_pause({"cleanDaysInRow": 7, "asOf": "t"}, pf, say=quiet) and not os.path.exists(pf), "seven days lifts it"
     assert not lift_gap_pause({"cleanDaysInRow": 9, "asOf": "t"}, pf, say=quiet), "already lifted: nothing to do"
+    ten = {str(2060 + i): {"youtube_link": "l", "posts": {"youtube|full|y": yt("l", "2026-09-%02dT05:00:00Z" % (6 + i))}} for i in range(10)}   # 6-15 Sep, out every day
+    assert build(now, ten, {}, {}, {}, plan=[])["cleanDaysInRow"] == 10, "the count runs past the seven-day table"
     f = write(r, dry_run=True)
     assert f[ES["key"]] == KEY and f[ES["kind"]] == "report" and json.loads(f[ES["payload"]])["headline"] == r["headline"]
     print(json.dumps({"checks": 19, "failed": []}))
