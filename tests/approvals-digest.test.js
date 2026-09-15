@@ -126,14 +126,16 @@ describe('the digest names the sign-ins waiting', () => {
         { agentOutput: 'SIGN-IN NEEDED: Pingen (https://app.pingen.com/)\n' },
         { agentOutput: 'Prepared letter.\nsign-in needed: companies house webfiling' },
         { agentOutput: 'A normal draft with no sign-in line.' },
+        // The unverified aside a submit appends when the session walk could not run (15 Sep 2026).
+        { agentOutput: 'SIGN-IN NEEDED: Pingen (https://app.pingen.com/) — (unverified: profile busy)\n\n**Carrying this out will involve:** nothing yet.' },
     ];
     it('groups by site, most waiting first, case-insensitively', () => {
-        expect(signInsWaiting(tasks)).toEqual([{ site: 'Companies House WebFiling', n: 2 }, { site: 'Pingen', n: 1 }]);
+        expect(signInsWaiting(tasks)).toEqual([{ site: 'Companies House WebFiling', n: 2 }, { site: 'Pingen', n: 2 }]);
     });
     it('says how many of the items are sign-ins and names the sites', () => {
         const text = buildDigestText(4, ['a', 'b', 'c', 'd'], 'https://x', false, signInsWaiting(tasks));
-        expect(text).toMatch(/3 of them just need you signed in/);
-        expect(text).toMatch(/Companies House WebFiling \(2\), Pingen \(1\)/);
+        expect(text).toMatch(/4 of them just need you signed in/);
+        expect(text).toMatch(/Companies House WebFiling \(2\), Pingen \(2\)/);
         expect(text).toMatch(/Sign in to all/);
     });
     it('says nothing about sign-ins when none are waiting', () => {

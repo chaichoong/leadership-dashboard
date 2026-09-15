@@ -29,7 +29,7 @@ instead of reading as a quiet queue:
 
 1. The queue JSON is missing or unparseable.
 2. Its `counts` object is missing or empty — the queue read itself died.
-3. Any of the three hand-back count keys is ABSENT. This is the sharpest one:
+3. Any of the four hand-back count keys is ABSENT. This is the sharpest one:
    `counts.get("approvedHandbacks", 0)` returns 0 for a renamed key exactly as
    it does for an empty queue, so the poller would sleep for ever and nothing
    would error. The keys must be PRESENT, not merely falsy.
@@ -46,10 +46,17 @@ import os
 import sys
 import time
 
-# The three queue keys that mean "Kevin has decided and an agent owes him an
+# The four queue keys that mean "Kevin has decided and an agent owes him an
 # action". Named here rather than inlined so the drift test can assert that
 # agent-dispatch.py still emits every one of them.
-HANDBACK_KEYS = ("approvedHandbacks", "changesRequested", "deferredRedos")
+#
+# signinReopened (15 Sep 2026): a task Kevin signed the robot in for. signin-done
+# sets it to Today with the approval fields cleared, so it carried NONE of the
+# other three keys; when the pickup run died on the allowance limit on 11 Sep
+# the three tasks it held sat untouched for four days while this poll ticked
+# every half hour and reported "no hand-backs waiting". A sign-in is a decision
+# Kevin made with his hands, and it owes him the action like any other.
+HANDBACK_KEYS = ("approvedHandbacks", "changesRequested", "deferredRedos", "signinReopened")
 
 # Keys that must exist for the counts object to be a real queue read at all.
 # Mirrors cmd_verify's own blind-run check in agent-dispatch.py.

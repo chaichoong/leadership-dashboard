@@ -84,8 +84,10 @@ out['captured'] = captured
 print('---JSON---')
 print(json.dumps(out))
 `;
+  // SIGNIN_SKIP_WALK: a SIGN-IN NEEDED line makes submit walk the site's door
+  // (15 Sep 2026); these tests never open the robot browser.
   const raw = execFileSync('python3', ['-c', script, JSON.stringify({ type, output, tier1, approverEmail, inboundSender })],
-    { encoding: 'utf8' });
+    { encoding: 'utf8', env: { ...process.env, SIGNIN_SKIP_WALK: '1' } });
   return JSON.parse(raw.split('---JSON---')[1]);
 }
 

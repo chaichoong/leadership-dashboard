@@ -58,7 +58,10 @@ RESET_RE = re.compile(
 MONTHS = {m: i for i, m in enumerate(["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"], 1)}
 # Jobs that never need a replay: one runs every half hour anyway, the other is
 # the board that calls replay in the first place.
-NO_REPLAY = {"handback-poll", "estate-status", "retry-deferred", "mac-guard"}
+# signin-pickup has no launchd plist to kick (the Robot sign-in app starts it)
+# and needs none: a paused pickup leaves its tasks flagged signinReopened, which
+# the 30-minute poll works after the reset (15 Sep 2026).
+NO_REPLAY = {"handback-poll", "estate-status", "retry-deferred", "mac-guard", "signin-pickup"}
 
 
 def load_state():
