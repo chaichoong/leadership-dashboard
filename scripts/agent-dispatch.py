@@ -1641,8 +1641,12 @@ SPEND_LINE_RE = re.compile(
 # "Handled without you" lane and the 08:00 message both key on it.
 HANDLED_MARK = "HANDLED WITHOUT YOU"
 
+# Widened 15 Sep 2026: "CLOSE PROPOSAL: duplicate — a newer version of the
+# same reply (recXXX, submitted 7 Sep)" is the same claim as "duplicate of
+# recXXX" and used to fall through to close: judgement (a card). The keeper is
+# the first record id on the line; every verification below still runs on it.
 CLOSE_DUPLICATE_RE = re.compile(
-    r"^\s*CLOSE PROPOSAL:\s*duplicate of\s+(rec[A-Za-z0-9]{14})\b", re.I)
+    r"^\s*CLOSE PROPOSAL:\s*duplicate\b[^\n]*?(rec[A-Za-z0-9]{14})\b", re.I)
 CLOSE_HANDLED_RE = re.compile(
     r"^\s*CLOSE PROPOSAL:\s*(?:already (?:handled|done|dealt with)|done already|handled)\b"
     r"[^\n]*?\b(rec[A-Za-z0-9]{14})\b", re.I)
@@ -1674,13 +1678,54 @@ def money_level(amount, recurring=False):
     return "card"
 
 
-def decision_level(output, task_type, task_rec, fetch=None):
+# The fold check shared with the creation gate and the Task Manager board:
+# create-agent-task.py's dupe_verdict in "fold" mode (same lane first, then a
+# shared reference or enough shared non-address words). Imported, never
+# copied, so the three callers can never drift apart.
+_CAT_MOD = None
+
+
+def dupe_fold_verdict(name_a, name_b):
+    """{match, why, shared} — may these two task names fold into one?"""
+    global _CAT_MOD
+    if _CAT_MOD is None:
+        import importlib.util
+        p = os.path.join(os.path.dirname(os.path.abspath(__file__)), "create-agent-task.py")
+        spec = importlib.util.spec_from_file_location("od_catask", p)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        _CAT_MOD = mod
+    return _CAT_MOD.dupe_verdict(name_a, name_b, mode="fold")
+
+
+CLOSED_KEEPER_STATUSES = ("Completed", "Cancelled")
+
+
+def decision_level(output, task_type, task_rec, fetch=None, agent_banner=None):
     """Which level this submission sits at, with the evidence VERIFIED.
 
     Returns a dict: level (A/B/C), category, carry ('close' | 'calendar' |
     'roy' | ''), evidence (what was checked, for the Notes stamp), why (for
     a card), money ('log' | 'inform' | 'card' | 'kevin'), amount, recurring.
-    `fetch` is injectable so the tests never touch Airtable.
+    A duplicate fold also returns keeper (the record id verified) and
+    tierChecked=True, which tells submit this category ran its own tier check.
+    `fetch` is injectable so the tests never touch Airtable. `agent_banner`
+    is whether the AGENT wrote the tier-1 banner: submit prepends the same
+    banner itself whenever the Notes match a tier-1 pattern, so on the
+    submit path the banner on `output` is not evidence; submit passes what
+    it saw before the prepend. None (any other caller) reads the output.
+
+    THE TIER CHECK FOR A CLOSE READS THE NAME AND DESCRIPTION, NEVER THE
+    NOTES (Kevin, 15 Sep 2026). The Notes hold every agent's run log, and a
+    log that once said "tier 1" or "restraint order" made every later
+    duplicate close on that task a Level C card: rec5cIuxkG3CfSijF (a Pingen
+    credits twin, correct wording, keeper older and open) reached Kevin for
+    exactly that. Same fault class as the 14 Sep alert-lane bug. A tier-1
+    signal on the twin ITSELF (its name, its description, or the banner the
+    agent wrote) still allows the fold, but only when the keeper is open —
+    the keeper is then the card Kevin sees — and the carry-out puts the
+    twin's Agent Output on the keeper's Notes first, so nothing on the
+    folded card is lost. Anything else tier-1 stays Level C.
     """
     fetch = fetch or get_task
     out = (output or "").strip()
@@ -1697,15 +1742,35 @@ def decision_level(output, task_type, task_rec, fetch=None):
     def card(category, why):
         return {**base, "level": AUTONOMY_APPROVE, "category": category, "why": why}
 
-    def act(category, carry, evidence):
+    def act(category, carry, evidence, **extra):
         return {**base, "level": AUTONOMY_ACT, "category": category,
-                "carry": carry, "evidence": evidence}
+                "carry": carry, "evidence": evidence, **extra}
 
-    # The private matter never moves at Level A, whatever the shape.
-    hit = tier_match(TIER1_PATTERNS, name, desc, notes)
-    if TIER1_BANNER in out or hit:
-        return {**base, "level": AUTONOMY_KEVIN, "category": "tier-1 matter",
-                "why": f"tier-1 matter ({hit or 'banner'}): Kevin only"}
+    def kevin_only(why):
+        return {**base, "level": AUTONOMY_KEVIN, "category": "tier-1 matter", "why": why}
+
+    # submit prepends the banner before this runs, so the close shapes are
+    # matched on the body underneath it, and whether the banner is the
+    # agent's own word comes from submit, not from the text.
+    banner = TIER1_BANNER in out
+    if agent_banner is not None:
+        banner = bool(agent_banner)
+    body = out
+    if body.startswith(TIER1_BANNER):
+        body = body[len(TIER1_BANNER):].strip()
+    dup = CLOSE_DUPLICATE_RE.match(body)
+    handled = CLOSE_HANDLED_RE.match(body)
+
+    # The private matter never moves at Level A, whatever the shape — except
+    # the two verifiable closes, whose tier check is the twin's own name,
+    # description or banner (see the docstring), never its Notes.
+    if dup or handled:
+        tier_signal = tier_match(TIER1_PATTERNS, name, desc) or ("banner" if banner else "")
+    else:
+        hit = tier_match(TIER1_PATTERNS, name, desc, notes)
+        if hit or TIER1_BANNER in out:
+            return kevin_only(f"tier-1 matter ({hit or 'banner'}): Kevin only")
+        tier_signal = ""
     if money == "kevin":
         return card("spend", f"SPEND £{amount:,.2f} recurring: a recurring "
                              "commitment is always Kevin's, whatever the amount")
@@ -1713,9 +1778,8 @@ def decision_level(output, task_type, task_rec, fetch=None):
         return card("spend", f"SPEND £{amount:,.2f} is over the money rule "
                              f"(£{DECISION_MONEY['inform']}): a card with the figure")
 
-    m = CLOSE_DUPLICATE_RE.match(out)
-    if m:
-        keeper_id = m.group(1)
+    if dup:
+        keeper_id = dup.group(1)
         if keeper_id == task_id:
             return card("close: duplicate", "the keeper cited is this very task")
         try:
@@ -1729,20 +1793,45 @@ def decision_level(output, task_type, task_rec, fetch=None):
         kstatus = sel(kf.get(AF["status"])) or "?"
         if kstatus == "Cancelled":
             return card("close: duplicate", f"keeper {keeper_id} is Cancelled")
+        keeper_open = kstatus not in CLOSED_KEEPER_STATUSES
         this_created = task_rec.get("createdTime") or ""
         keeper_created = keeper.get("createdTime") or ""
+        kname_full = str(kf.get(AF["name"]) or "")
+        kname = kname_full[:60]
+        kept = "kept the older task"
         if this_created and keeper_created and keeper_created > this_created:
-            return card("close: duplicate",
-                        f"keeper {keeper_id} is NEWER than this task; the older "
-                        "task keeps and the newer one folds")
-        kname = str(kf.get(AF["name"]) or "")[:60]
-        return act("close: duplicate", "close",
-                   f"folded into keeper {keeper_id} \"{kname}\" ({kstatus}, "
-                   f"created {keeper_created[:10] or '?'})")
+            # Either creation order folds when BOTH are open and the fold
+            # check reads the two names as one matter (Kevin, 15 Sep 2026:
+            # rec2nZRQ1Y4ZXj9mA, the newer twin was the better draft). The
+            # fold check is the guard: without it a newer keeper was a card.
+            if not keeper_open:
+                return card("close: duplicate",
+                            f"keeper {keeper_id} is NEWER than this task and {kstatus}; "
+                            "only an open newer task may keep")
+            verdict = dupe_fold_verdict(name, kname_full)
+            if not verdict.get("match"):
+                return card("close: duplicate",
+                            f"keeper {keeper_id} is NEWER than this task and the fold "
+                            "check does not read the two names as one matter (same "
+                            "lane, a shared reference or enough shared non-address "
+                            "words); the older task keeps and the newer one folds")
+            kept = f"kept the NEWER task ({verdict.get('why') or 'fold check matched'})"
+        evidence = (f"folded into keeper {keeper_id} \"{kname}\" ({kstatus}, "
+                    f"created {keeper_created[:10] or '?'}); {kept}")
+        if tier_signal:
+            if not keeper_open:
+                return kevin_only(f"tier-1 matter ({tier_signal}) and the keeper "
+                                  f"{keeper_id} is {kstatus}, so no card would carry "
+                                  "this twin's output: Kevin only")
+            evidence += (f"; tier-1 twin ({tier_signal}): its Agent Output is carried "
+                         "onto the keeper's Notes, the open task Kevin will see")
+        return act("close: duplicate", "close", evidence,
+                   keeper=keeper_id, tierChecked=True)
 
-    m = CLOSE_HANDLED_RE.match(out)
-    if m:
-        cited = m.group(1)
+    if handled:
+        if tier_signal:
+            return kevin_only(f"tier-1 matter ({tier_signal}): Kevin only")
+        cited = handled.group(1)
         if cited == task_id:
             return card("close: already handled", "the task cited is this very task")
         try:
@@ -1759,9 +1848,10 @@ def decision_level(output, task_type, task_rec, fetch=None):
                         f"cited task {cited} is {dstatus}, not Completed")
         dname = str(df.get(AF["name"]) or "")[:60]
         return act("close: already handled", "close",
-                   f"already handled by Completed task {cited} \"{dname}\"")
+                   f"already handled by Completed task {cited} \"{dname}\"",
+                   tierChecked=True)
 
-    if out.upper().startswith("CLOSE PROPOSAL:"):
+    if body.upper().startswith("CLOSE PROPOSAL:"):
         return card("close: judgement",
                     "no verifiable evidence cited: a duplicate names its keeper "
                     "(CLOSE PROPOSAL: duplicate of recXXX), an already-handled close "
@@ -1783,6 +1873,37 @@ def decision_level(output, task_type, task_rec, fetch=None):
                    "a diary entry, no attendees; calendar-write.py refuses a past time")
 
     return card("other", "a card by default")
+
+
+# How much of a folded twin's Agent Output rides onto the keeper. The fold
+# overwrites the twin's own Agent Output with the close proposal, so this
+# copy is the only one left of a draft Kevin never saw. Notes cap at 90,000.
+FOLD_CARRY_MAX = 20000
+
+
+def carry_output_to_keeper(twin_id, twin_fields, keeper_id, stamp):
+    """Put the twin's stored Agent Output (or, failing that, its description)
+    on the keeper's Notes BEFORE the twin closes. Returns the block written.
+    A failure here raises, so the twin stays open with no marker: nothing is
+    folded until its unique lines are safe on the keeper."""
+    stored = str(twin_fields.get(AF["agentOutput"]) or "").strip()
+    desc = str(twin_fields.get(AF["description"]) or "").strip()
+    twin_name = str(twin_fields.get(AF["name"]) or "")[:80]
+    carried = stored or desc
+    label = "Its Agent Output" if stored else ("Its description" if desc else "It had no output")
+    if len(carried) > FOLD_CARRY_MAX:
+        carried = carried[:FOLD_CARRY_MAX] + "\n[… cut at %d characters]" % FOLD_CARRY_MAX
+    block = (f"[{stamp} — agent-dispatch] FOLDED {twin_id} \"{twin_name}\" into this task "
+             f"at Level A. {label}, carried here so nothing on the folded card is lost:"
+             + ("\n" + carried if carried else ""))
+    keeper = get_task(keeper_id)
+    existing = str((keeper.get("fields", {}) or {}).get(AF["notes"]) or "").rstrip()
+    if f"FOLDED {twin_id} " in existing:
+        # A retry after the twin's own close failed: the block is already
+        # there, and a second copy would only pad the keeper's Notes.
+        return ""
+    patch_task(keeper_id, {AF["notes"]: (existing + "\n\n" + block).strip()[-90000:]})
+    return block
 
 
 def handle_without_kevin(args, output, task_rec, level, attached):
@@ -1814,6 +1935,13 @@ def handle_without_kevin(args, output, task_rec, level, attached):
     carry = level["carry"]
     status = None
     if carry == "close":
+        keeper_id = level.get("keeper")
+        if keeper_id:
+            # The twin's unique lines go onto the keeper FIRST; the close
+            # below overwrites the twin's Agent Output with the proposal.
+            carry_output_to_keeper(args.task, tf, keeper_id, stamp)
+            fields[AF["notes"]] = (existing + "\n\n" + note + " Its Agent Output was "
+                                   f"carried onto keeper {keeper_id}'s Notes.").strip()[-90000:]
         fields.update({AF["status"]: "Completed", AF["completion"]: now_iso(),
                        AF["assignee"]: None})
         patch_task(args.task, fields)
@@ -2759,6 +2887,10 @@ def cmd_submit(args):
     if not output:
         # An empty Agent Output makes the Slack post say "nothing to judge".
         sys.exit("ERROR: refusing to submit an empty Agent Output")
+    # Read before EITHER prepend: --tier1 is set by the dispatch queue from a
+    # Notes match too, so only a banner the agent wrote into its own file
+    # counts as the agent's word for decision_level's close categories.
+    agent_banner = TIER1_BANNER in output
     if args.tier1 and TIER1_BANNER not in output:
         output = TIER1_BANNER + "\n\n" + output
 
@@ -3078,8 +3210,11 @@ def cmd_submit(args):
     # ─── LEVEL A: the agent acts (Kevin's ruling, 7 Sep 2026) ────────────
     # Decided from the output's shape with the evidence verified; a tier-1
     # matter (banner or pattern, checked above) never takes this branch.
-    level = decision_level(output, args.type, trec)
-    if level["level"] == AUTONOMY_ACT and not is_tier1:
+    level = decision_level(output, args.type, trec, agent_banner=agent_banner)
+    # tierChecked: the two verifiable closes ran their own tier check inside
+    # decision_level (name, description, banner — never the Notes, which hold
+    # every agent's run log), so is_tier1 from the Notes must not re-veto them.
+    if level["level"] == AUTONOMY_ACT and (not is_tier1 or level.get("tierChecked")):
         return handle_without_kevin(args, output, trec, level, to_attach)
     if level["level"] == AUTONOMY_APPROVE and level["category"] not in ("other",):
         # Say WHY a shaped output still became a card, so a Task Manager that

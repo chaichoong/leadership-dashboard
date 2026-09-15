@@ -35,15 +35,22 @@ DB = {
   'recCANCEL00000001': {'id':'recCANCEL00000001','createdTime':'2026-09-01T10:00:00.000Z','fields':{AF['name']:'cancelled','fldx4qCw17UfrKpaN':'Cancelled'}},
   'recDONE0000000001': {'id':'recDONE0000000001','createdTime':'2026-09-01T10:00:00.000Z','fields':{AF['name']:'Reply sent to Sefton','fldx4qCw17UfrKpaN':'Completed'}},
   'recOPEN0000000001': {'id':'recOPEN0000000001','createdTime':'2026-09-01T10:00:00.000Z','fields':{AF['name']:'still open','fldx4qCw17UfrKpaN':'Today'}},
+  # 15 Sep 2026 shapes. A NEWER keeper whose name reads as one matter with
+  # the twin's under the fold check, one that does not (cross-lane), one that
+  # is newer but already Completed, and an OLDER keeper that is Completed.
+  'recNEWERSAME00001': {'id':'recNEWERSAME00001','createdTime':'2026-09-07T02:10:00.000Z','fields':{AF['name']:'CORRESPONDENCE: Reply to AC1 Electrical - EICR bedroom count - 6 Chedburgh Place','fldx4qCw17UfrKpaN':'Approval'}},
+  'recNEWERLANE00001': {'id':'recNEWERLANE00001','createdTime':'2026-09-07T02:10:00.000Z','fields':{AF['name']:'MAINTENANCE: SMS from 447538631747 - maintenance reply','fldx4qCw17UfrKpaN':'Today'}},
+  'recNEWERDONE00001': {'id':'recNEWERDONE00001','createdTime':'2026-09-07T02:10:00.000Z','fields':{AF['name']:'CORRESPONDENCE: Reply to AC1 Electrical - EICR bedroom count - 6 Chedburgh Place','fldx4qCw17UfrKpaN':'Completed'}},
+  'recOLDERDONE00001': {'id':'recOLDERDONE00001','createdTime':'2026-09-01T10:00:00.000Z','fields':{AF['name']:'INBOUND: Pingen letters on hold','fldx4qCw17UfrKpaN':'Completed'}},
 }
 def fetch(i):
     if i not in DB: raise RuntimeError('404 NOT_FOUND')
     return DB[i]
 def rec(name, notes=''):
     return {'id':'recTHIS0000000001','createdTime':'2026-09-03T10:00:00.000Z','fields':{AF['name']:name,AF['description']:'',AF['notes']:notes}}
-def lvl(out, tt, name, notes=''):
-    d = ad.decision_level(out, tt, rec(name, notes), fetch=fetch)
-    return {k: d.get(k) for k in ('level','category','carry','money')} | {'text': d.get('evidence') or d.get('why')}
+def lvl(out, tt, name, notes='', agent_banner=None):
+    d = ad.decision_level(out, tt, rec(name, notes), fetch=fetch, agent_banner=agent_banner)
+    return {k: d.get(k) for k in ('level','category','carry','money','keeper','tierChecked')} | {'text': d.get('evidence') or d.get('why')}
 ${code}
 `;
   return JSON.parse(execFileSync('/usr/bin/python3', ['-c', script], { encoding: 'utf8' }));
@@ -55,14 +62,172 @@ describe('the three levels never collide with the private matter', () => {
     expect(SRC).toMatch(/AUTONOMY_APPROVE = "B"/);
     expect(SRC).toMatch(/AUTONOMY_KEVIN = "C"/);
   });
-  it('a tier-1 matter is Level C whatever the shape, even a verified duplicate fold', () => {
-    const d = py(`print(json.dumps(lvl('CLOSE PROPOSAL: duplicate of recKEEPER00000001', 'Admin', 'INBOUND: bailiff notice of enforcement')))`);
+  it('a tier-1 matter is Level C whatever the shape, outside the two verifiable closes', () => {
+    const d = py(`print(json.dumps(lvl('PASS TO ROY: forward it', 'Admin', 'INBOUND: bailiff notice of enforcement')))`);
     expect(d.level).toBe('C');
     expect(d.category).toBe('tier-1 matter');
+    const n = py(`print(json.dumps(lvl('PASS TO ROY: boiler', 'Admin', 'MAINTENANCE: boiler repair 6 Chedburgh Place', 'run log: this task once touched the restraint order')))`);
+    expect(n.level).toBe('C');
   });
-  it('the banner alone makes it Level C', () => {
-    const d = py(`print(json.dumps(lvl(ad.TIER1_BANNER + '\\n\\nCLOSE PROPOSAL: duplicate of recKEEPER00000001', 'Admin', 'plain name')))`);
+  it('the banner alone makes a non-close Level C', () => {
+    const d = py(`print(json.dumps(lvl(ad.TIER1_BANNER + '\\n\\nPASS TO ROY: boiler', 'Admin', 'MAINTENANCE: boiler')))`);
     expect(d.level).toBe('C');
+  });
+});
+
+// Kevin, 15 Sep 2026: a duplicate close is decided on the twin's own name,
+// description and banner. Its Notes hold every agent's run log, and one
+// stale "tier 1" there sent rec5cIuxkG3CfSijF (correct wording, keeper older
+// and open) to his queue. Same fault class as the 14 Sep alert-lane bug.
+describe('the tier check for a close never reads the Notes', () => {
+  it('rec5cIuxkG3CfSijF shape: a tier word only in the Notes still folds at Level A', () => {
+    const d = py(`print(json.dumps(lvl('CLOSE PROPOSAL: duplicate of recKEEPER00000001', 'Admin', 'INBOUND (follow-up): Pingen PDF action required', '[08 Sep 2026 11:30 — agent-dispatch] HANDLED WITHOUT YOU ... tier 1 ... restraint order')))`);
+    expect(d.level).toBe('A');
+    expect(d.carry).toBe('close');
+    expect(d.keeper).toBe('recKEEPER00000001');
+    expect(d.tierChecked).toBe(true);
+    expect(d.text).not.toMatch(/tier-1/);
+  });
+  it('an already-handled close with a tier word only in the Notes acts too', () => {
+    const d = py(`print(json.dumps(lvl('CLOSE PROPOSAL: already handled — see recDONE0000000001', 'Admin', 'x', 'notes mention a solicitor')))`);
+    expect(d.level).toBe('A');
+    expect(d.tierChecked).toBe(true);
+  });
+  it('a tier-1 word in the NAME still folds when the keeper is open, and says the output is carried', () => {
+    const d = py(`print(json.dumps(lvl('CLOSE PROPOSAL: duplicate of recKEEPER00000001', 'Admin', 'INBOUND: bailiff notice of enforcement')))`);
+    expect(d.level).toBe('A');
+    expect(d.text).toMatch(/tier-1 twin \(notice of enforcement\): its Agent Output is carried onto the keeper's Notes, the open task Kevin will see/);
+  });
+  it('the banner on the twin counts the same way: open keeper folds, the twin\'s output carried', () => {
+    const d = py(`print(json.dumps(lvl(ad.TIER1_BANNER + '\\n\\nCLOSE PROPOSAL: duplicate of recKEEPER00000001', 'Admin', 'plain name')))`);
+    expect(d.level).toBe('A');
+    expect(d.text).toMatch(/tier-1 twin \(banner\)/);
+  });
+  it('THE SUBMIT PATH: a banner submit itself prepended from the Notes is not a tier signal', () => {
+    // cmd_submit prepends TIER1_BANNER whenever the Notes match, then calls
+    // decision_level with agent_banner=False. The Completed older keeper is
+    // the case that separates the two: an agent-written banner makes it C.
+    const notesOnly = py(`print(json.dumps(lvl(ad.TIER1_BANNER + '\\n\\nCLOSE PROPOSAL: duplicate of recOLDERDONE00001', 'Admin', 'INBOUND (follow-up): Pingen PDF action required', 'run log says tier 1', agent_banner=False)))`);
+    expect(notesOnly.level).toBe('A');
+    expect(notesOnly.text).not.toMatch(/tier-1/);
+    const agentWrote = py(`print(json.dumps(lvl(ad.TIER1_BANNER + '\\n\\nCLOSE PROPOSAL: duplicate of recOLDERDONE00001', 'Admin', 'plain name', '', agent_banner=True)))`);
+    expect(agentWrote.level).toBe('C');
+    const handled = py(`print(json.dumps(lvl(ad.TIER1_BANNER + '\\n\\nCLOSE PROPOSAL: already handled — see recDONE0000000001', 'Admin', 'x', 'notes mention a solicitor', agent_banner=False)))`);
+    expect(handled.level).toBe('A');
+  });
+  it('cmd_submit reads the agent\'s banner BEFORE its own prepend and hands it to decision_level', () => {
+    // Both prepends come AFTER the read: the --tier1 one (the dispatch queue
+    // sets that flag from a Notes match too) and the Notes-match one.
+    const sub = SRC.slice(SRC.indexOf('def cmd_submit(args):'));
+    const i = sub.indexOf('agent_banner = TIER1_BANNER in output');
+    const j1 = sub.indexOf('if args.tier1 and TIER1_BANNER not in output:');
+    const j2 = sub.indexOf('if is_tier1 and TIER1_BANNER not in output:');
+    const k = sub.indexOf('level = decision_level(output, args.type, trec, agent_banner=agent_banner)');
+    expect(i).toBeGreaterThan(0);
+    expect(j1).toBeGreaterThan(i);
+    expect(j2).toBeGreaterThan(j1);
+    expect(k).toBeGreaterThan(j2);
+  });
+  it('a tier-1 twin whose keeper is Completed stays Level C: no card would carry its output', () => {
+    const d = py(`print(json.dumps(lvl('CLOSE PROPOSAL: duplicate of recOLDERDONE00001', 'Admin', 'INBOUND: bailiff notice of enforcement')))`);
+    expect(d.level).toBe('C');
+    expect(d.text).toMatch(/keeper recOLDERDONE00001 is Completed/);
+  });
+  it('a tier-1 twin on an already-handled close stays Level C', () => {
+    const d = py(`print(json.dumps(lvl('CLOSE PROPOSAL: already handled — see recDONE0000000001', 'Admin', 'INBOUND: statutory demand')))`);
+    expect(d.level).toBe('C');
+  });
+  it('a non-tier twin still folds into a Completed older keeper, as before', () => {
+    const d = py(`print(json.dumps(lvl('CLOSE PROPOSAL: duplicate of recOLDERDONE00001', 'Admin', 'INBOUND: Pingen letters')))`);
+    expect(d.level).toBe('A');
+  });
+});
+
+describe('either creation order folds when both are open and the fold check agrees (15 Sep 2026)', () => {
+  it('rec2nZRQ1Y4ZXj9mA shape: a NEWER open keeper whose name is the same matter is Level A, and the evidence says which was kept', () => {
+    const d = py(`print(json.dumps(lvl('CLOSE PROPOSAL: duplicate of recNEWERSAME00001', 'Admin', 'CORRESPONDENCE: EICR quote follow-up - AC1 Electrical Services - 6 Chedburgh Place')))`);
+    expect(d.level).toBe('A');
+    expect(d.text).toMatch(/kept the NEWER task \(both about ac1, eicr, electrical/);
+  });
+  it('an older keeper records that the older task was kept', () => {
+    const d = py(`print(json.dumps(lvl('CLOSE PROPOSAL: duplicate of recKEEPER00000001', 'Admin', 'INBOUND: pay Sefton licence')))`);
+    expect(d.text).toMatch(/kept the older task/);
+  });
+  it('a NEWER keeper across lanes is still a card: folding may not cross lanes', () => {
+    const d = py(`print(json.dumps(lvl('CLOSE PROPOSAL: duplicate of recNEWERLANE00001', 'Admin', 'INBOUND: SMS reply from +447538631747')))`);
+    expect(d.level).toBe('B');
+    expect(d.text).toMatch(/NEWER than this task and the fold check does not read/);
+  });
+  it('a NEWER keeper that is not open is a card', () => {
+    const d = py(`print(json.dumps(lvl('CLOSE PROPOSAL: duplicate of recNEWERDONE00001', 'Admin', 'CORRESPONDENCE: EICR quote follow-up - AC1 Electrical Services - 6 Chedburgh Place')))`);
+    expect(d.level).toBe('B');
+    expect(d.text).toMatch(/NEWER than this task and Completed/);
+  });
+});
+
+describe('the widened duplicate wording (15 Sep 2026)', () => {
+  it('"CLOSE PROPOSAL: duplicate — ... (recXXX, submitted 7 Sep)" names its keeper and is verified like any other', () => {
+    const d = py(`print(json.dumps(lvl('CLOSE PROPOSAL: duplicate — Property Admin submitted a more recent version of the same reply (recKEEPER00000001, submitted 7 Sep 2026 at 02:10) covering the same step.', 'Admin', 'INBOUND: pay Sefton licence')))`);
+    expect(d.level).toBe('A');
+    expect(d.keeper).toBe('recKEEPER00000001');
+  });
+  it('the keeper is the FIRST record id on the line, and a bad one still makes a card', () => {
+    const d = py(`print(json.dumps(lvl('CLOSE PROPOSAL: duplicate: recMISSING0000001 covers this (see also recKEEPER00000001)', 'Admin', 'x')))`);
+    expect(d.level).toBe('B');
+    expect(d.text).toMatch(/keeper recMISSING0000001 could not be read/);
+  });
+  it('a duplicate line with no record id at all is still judgement', () => {
+    const d = py(`print(json.dumps(lvl('CLOSE PROPOSAL: duplicate of the Sefton task, closing', 'Admin', 'x')))`);
+    expect(d.category).toBe('close: judgement');
+  });
+  it('the page classifier reads the same widened wording', () => {
+    const acc = readFileSync(resolve(ROOT, 'js/agent-accuracy.js'), 'utf8');
+    expect(acc).toContain('/^CLOSE PROPOSAL:\\s*duplicate\\b[^\\n]*?rec[A-Za-z0-9]{14}\\b/i');
+  });
+});
+
+describe('the fold carries the twin\'s Agent Output onto the keeper BEFORE closing it', () => {
+  it('carry_output_to_keeper appends the stored output to the keeper Notes, and the twin closes after', () => {
+    const d = py(`
+calls = []
+ad.get_task = lambda i: {'id': i, 'fields': {AF['notes']: 'existing keeper notes'}}
+ad.patch_task = lambda i, f: calls.append((i, f))
+twin = {AF['name']: 'INBOUND: twin', AF['agentOutput']: 'TO: a@b.com\\nthe draft Kevin never saw', AF['description']: 'desc'}
+block = ad.carry_output_to_keeper('recTWIN0000000001', twin, 'recKEEPER00000001', '15 Sep 2026 10:00')
+print(json.dumps({'calls': [[i, f[AF['notes']]] for i, f in calls], 'block': block}))`);
+    expect(d.calls).toHaveLength(1);
+    expect(d.calls[0][0]).toBe('recKEEPER00000001');
+    expect(d.calls[0][1]).toMatch(/^existing keeper notes\n\n\[15 Sep 2026 10:00 — agent-dispatch\] FOLDED recTWIN0000000001 "INBOUND: twin" into this task at Level A\. Its Agent Output, carried/);
+    expect(d.calls[0][1]).toContain('the draft Kevin never saw');
+  });
+  it('a retry does not write a second FOLDED block onto the keeper', () => {
+    const d = py(`
+calls = []
+ad.get_task = lambda i: {'id': i, 'fields': {AF['notes']: '[s — agent-dispatch] FOLDED recTWIN0000000001 "t" into this task at Level A. Its Agent Output, carried here so nothing on the folded card is lost:\\nold'}}
+ad.patch_task = lambda i, f: calls.append(i)
+r = ad.carry_output_to_keeper('recTWIN0000000001', {AF['name']: 't', AF['agentOutput']: 'again'}, 'recK', 's')
+print(json.dumps([r, calls]))`);
+    expect(d).toEqual(['', []]);
+  });
+  it('falls back to the description when the twin has no stored output, and cuts a huge one', () => {
+    const d = py(`
+calls = []
+ad.get_task = lambda i: {'id': i, 'fields': {}}
+ad.patch_task = lambda i, f: calls.append(f[AF['notes']])
+ad.carry_output_to_keeper('recTWIN0000000001', {AF['name']: 't', AF['description']: 'only a description'}, 'recK', 's')
+ad.carry_output_to_keeper('recTWIN0000000001', {AF['name']: 't', AF['agentOutput']: 'x' * 30000}, 'recK', 's')
+print(json.dumps([calls[0], len(calls[1]), '[… cut at' in calls[1]]))`);
+    expect(d[0]).toMatch(/Its description, carried here[\s\S]*only a description$/);
+    expect(d[1]).toBeLessThan(21000);
+    expect(d[2]).toBe(true);
+  });
+  it('in the close carry-out the keeper write comes before the twin\'s close, and the twin\'s marker says so', () => {
+    const close = SRC.slice(SRC.indexOf('    if carry == "close":'), SRC.indexOf('    elif carry == "roy":'));
+    const i = close.indexOf('carry_output_to_keeper(args.task, tf, keeper_id, stamp)');
+    const j = close.indexOf('patch_task(args.task, fields)');
+    expect(i).toBeGreaterThan(0);
+    expect(j).toBeGreaterThan(i);
+    expect(close).toMatch(/carried onto keeper \{keeper_id\}'s Notes/);
   });
 });
 
@@ -177,10 +342,10 @@ describe('calendar entries and everything else', () => {
 });
 
 describe('submit wires the level in, and the carry-out leaves its marker', () => {
-  it('cmd_submit consults decision_level after the informational branch and only when not tier 1', () => {
+  it('cmd_submit consults decision_level after the informational branch; tier 1 vetoes Level A unless the close ran its own tier check', () => {
     const i = SRC.indexOf('files_itself = informational_only(output, args.type');
-    const j = SRC.indexOf('level = decision_level(output, args.type, trec)');
-    const k = SRC.indexOf('if level["level"] == AUTONOMY_ACT and not is_tier1:');
+    const j = SRC.indexOf('level = decision_level(output, args.type, trec, agent_banner=agent_banner)');
+    const k = SRC.indexOf('if level["level"] == AUTONOMY_ACT and (not is_tier1 or level.get("tierChecked")):');
     expect(i).toBeGreaterThan(0);
     expect(j).toBeGreaterThan(i);
     expect(k).toBeGreaterThan(j);
