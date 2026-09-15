@@ -21,7 +21,7 @@
     const PAGE_REGISTRY = [
         { id: 'overview',    name: 'Leadership Dashboard',           icon: '📊', pageVer: '2.102', sopFile: 'sop.html',                   sopVer: '2.94', standalone: 'index.html#overview' },
         { id: 'os-strategy', name: 'Objective & Strategy',           icon: '🎯', pageVer: '1.54', sopFile: 'os/strategy/sop.html',       sopVer: '1.1', standalone: 'os/strategy/index.html' },
-        { id: 'tasks',       name: 'Tasks & Projects',   icon: '✅', pageVer: '1.169', sopFile: 'os/tasks/sop.html',             sopVer: '1.4', standalone: 'os/tasks/index.html' },
+        { id: 'tasks',       name: 'Tasks & Projects',   icon: '✅', pageVer: '1.170', sopFile: 'os/tasks/sop.html',             sopVer: '1.4', standalone: 'os/tasks/index.html' },
         { id: 'cfv',        name: 'CFVs',                          icon: '🚨', pageVer: '1.40', sopFile: 'sop-cfvs.html',               sopVer: '1.34', standalone: 'index.html#cfv' },
         { id: 'money',      name: 'Money Confidence',              icon: '🧭', pageVer: '1.1', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#money' },
         { id: 'wealth',     name: 'Wealth',                        icon: '📈', pageVer: '1.19', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#wealth' },
@@ -48,7 +48,7 @@
         // AI Agents (Leadership) — ADMIN ONLY, like KPI Library. Approvals,
         // checks and the workforce register in one place (Kevin's ruling,
         // 24 Aug 2026; moved out of the Systemisation page).
-        { id: 'agents', name: 'AI Agents', icon: '🤖', pageVer: '1.89', sopFile: 'sop-ai-agents.html', sopVer: '1.42', standalone: 'os/agents/index.html', adminOnly: true },
+        { id: 'agents', name: 'AI Agents', icon: '🤖', pageVer: '1.90', sopFile: 'sop-ai-agents.html', sopVer: '1.42', standalone: 'os/agents/index.html', adminOnly: true },
         { id: 'fintable',  name: 'Accounts',                       icon: '🏦', pageVer: '1.19', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#fintable' },
         { id: 'systemisation', name: 'Systemisation',              icon: '⚙️', pageVer: '1.19', sopFile: 'guides/systemisation.html',    sopVer: '1.11', standalone: 'os/systemisation/index.html' },
         { id: 'os-team',    name: 'Team Members',                  icon: '👥', pageVer: '1.31', sopFile: '',                            sopVer: '1.1', standalone: 'os/team/index.html' },
