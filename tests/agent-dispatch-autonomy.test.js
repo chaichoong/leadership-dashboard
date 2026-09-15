@@ -42,14 +42,19 @@ DB = {
   'recNEWERLANE00001': {'id':'recNEWERLANE00001','createdTime':'2026-09-07T02:10:00.000Z','fields':{AF['name']:'MAINTENANCE: SMS from 447538631747 - maintenance reply','fldx4qCw17UfrKpaN':'Today'}},
   'recNEWERDONE00001': {'id':'recNEWERDONE00001','createdTime':'2026-09-07T02:10:00.000Z','fields':{AF['name']:'CORRESPONDENCE: Reply to AC1 Electrical - EICR bedroom count - 6 Chedburgh Place','fldx4qCw17UfrKpaN':'Completed'}},
   'recOLDERDONE00001': {'id':'recOLDERDONE00001','createdTime':'2026-09-01T10:00:00.000Z','fields':{AF['name']:'INBOUND: Pingen letters on hold','fldx4qCw17UfrKpaN':'Completed'}},
+  # Unprefixed repair keepers: Roy holds one, the other carries the
+  # Maintenance Ticket tick. By name alone both read as reply tasks.
+  'recROYJOB00000001': {'id':'recROYJOB00000001','createdTime':'2026-09-01T10:00:00.000Z','fields':{AF['name']:'Provision of a valid EICR','fldx4qCw17UfrKpaN':'Today',AF['teamMember']:['reclbdjfVev3bqNHS']}},
+  'recTICKED00000001': {'id':'recTICKED00000001','createdTime':'2026-09-01T10:00:00.000Z','fields':{AF['name']:'INBOUND: Inspection Report - 25 Abercorn Court','fldx4qCw17UfrKpaN':'Today',AF['maintenanceTicket']:True}},
+  'recPLAIN000000001': {'id':'recPLAIN000000001','createdTime':'2026-09-01T10:00:00.000Z','fields':{AF['name']:'Provision of a valid EICR','fldx4qCw17UfrKpaN':'Today'}},
 }
 def fetch(i):
     if i not in DB: raise RuntimeError('404 NOT_FOUND')
     return DB[i]
-def rec(name, notes=''):
-    return {'id':'recTHIS0000000001','createdTime':'2026-09-03T10:00:00.000Z','fields':{AF['name']:name,AF['description']:'',AF['notes']:notes}}
-def lvl(out, tt, name, notes='', agent_banner=None):
-    d = ad.decision_level(out, tt, rec(name, notes), fetch=fetch, agent_banner=agent_banner)
+def rec(name, notes='', extra=None):
+    return {'id':'recTHIS0000000001','createdTime':'2026-09-03T10:00:00.000Z','fields':{AF['name']:name,AF['description']:'',AF['notes']:notes, **(extra or {})}}
+def lvl(out, tt, name, notes='', agent_banner=None, extra=None):
+    d = ad.decision_level(out, tt, rec(name, notes, extra), fetch=fetch, agent_banner=agent_banner)
     return {k: d.get(k) for k in ('level','category','carry','money','keeper','tierChecked')} | {'text': d.get('evidence') or d.get('why')}
 ${code}
 `;
@@ -154,9 +159,40 @@ describe('either creation order folds when both are open and the fold check agre
     expect(d.text).toMatch(/kept the older task/);
   });
   it('a NEWER keeper across lanes is still a card: folding may not cross lanes', () => {
+    // Since Kevin's ruling of 15 Sep 2026 the lane is read off both RECORDS
+    // ahead of the age check, so the refusal names the lanes, not the age.
     const d = py(`print(json.dumps(lvl('CLOSE PROPOSAL: duplicate of recNEWERLANE00001', 'Admin', 'INBOUND: SMS reply from +447538631747')))`);
     expect(d.level).toBe('B');
-    expect(d.text).toMatch(/NEWER than this task and the fold check does not read/);
+    expect(d.text).toMatch(/this is a reply task and keeper recNEWERLANE00001 is a maintenance task/);
+  });
+  // The lane is reply-vs-maintenance ONLY (Kevin, 15 Sep 2026): agent
+  // prefixes are not lanes, and the record's Maintenance Ticket tick or Roy
+  // as holder says repair whatever the name says. Every ticked ticket on the
+  // live board that day was unprefixed or INBOUND:, so a name-only lane read
+  // them all as reply tasks and let an agent task absorb Roy's job.
+  it('a repair twin never closes as a duplicate of a reply keeper, whichever is older, read off the record', () => {
+    const roy = py(`print(json.dumps(lvl('CLOSE PROPOSAL: duplicate of recKEEPER00000001', 'Admin', 'Sefton licence fee', '', extra={AF['teamMember']:['reclbdjfVev3bqNHS']})))`);
+    expect(roy.level).toBe('B');
+    expect(roy.text).toMatch(/this is a maintenance task and keeper recKEEPER00000001 is a reply task/);
+    const ticked = py(`print(json.dumps(lvl('CLOSE PROPOSAL: duplicate of recKEEPER00000001', 'Admin', 'INBOUND: Sefton licence fee', '', extra={AF['maintenanceTicket']:True})))`);
+    expect(ticked.level).toBe('B');
+    expect(ticked.text).toMatch(/this is a maintenance task/);
+  });
+  it('a reply twin never closes into an unprefixed repair keeper (Roy-held or ticked)', () => {
+    for (const k of ['recROYJOB00000001', 'recTICKED00000001']) {
+      const d = py(`print(json.dumps(lvl('CLOSE PROPOSAL: duplicate of ${k}', 'Admin', 'COMPLIANCE: Provision of a valid EICR - 18 Siddows Avenue Clitheroe')))`);
+      expect(d.level, k).toBe('B');
+      expect(d.text).toMatch(new RegExp(`this is a reply task and keeper ${k} is a maintenance task`));
+    }
+    // CONTROL: the same words into an unprefixed, unticked, un-Roy keeper fold.
+    const d = py(`print(json.dumps(lvl('CLOSE PROPOSAL: duplicate of recPLAIN000000001', 'Admin', 'COMPLIANCE: Provision of a valid EICR - 18 Siddows Avenue Clitheroe')))`);
+    expect(d.level).toBe('A');
+    expect(d.keeper).toBe('recPLAIN000000001');
+  });
+  it('two reply tasks under different agent prefixes are one lane and fold (COMPLIANCE into CORRESPONDENCE)', () => {
+    const d = py(`print(json.dumps(lvl('CLOSE PROPOSAL: duplicate of recNEWERSAME00001', 'Admin', 'COMPLIANCE: EICR quote follow-up - AC1 Electrical Services - 6 Chedburgh Place')))`);
+    expect(d.level).toBe('A');
+    expect(d.text).toMatch(/kept the NEWER task/);
   });
   it('a NEWER keeper that is not open is a card', () => {
     const d = py(`print(json.dumps(lvl('CLOSE PROPOSAL: duplicate of recNEWERDONE00001', 'Admin', 'CORRESPONDENCE: EICR quote follow-up - AC1 Electrical Services - 6 Chedburgh Place')))`);

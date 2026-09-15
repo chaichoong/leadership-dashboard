@@ -3849,6 +3849,11 @@ const DUPE_STREET_TYPES = ['street','st','road','rd','avenue','ave','lane','clos
   'park','row','view','rise','mews'];
 const DUPE_MIN_SHARED = 2;   // one shared word is a coincidence ("emails")
 const DUPE_MIN_RATIO = 0.5;  // of the SHORTER task's distinctive words
+// THE LANE MEANS REPLY-VS-MAINTENANCE, NOTHING ELSE (Kevin, 15 Sep 2026). The
+// raw prefix ("INBOUND (follow-up):", "COMPLIANCE:", "CORRESPONDENCE:") says
+// which agent wrote the task up, not what kind of obligation it is; only a
+// repair ticket folding into a reply task, or the reverse, loses real work.
+const DUPE_MAINTENANCE_LANE_WORDS = ['maintenance','repair','repairs'];
 
 /** Tokens naming WHERE: the street type, the name before it, the town after.
  *  `23 Viola Street Bootle` -> viola, street, bootle. */
@@ -3863,20 +3868,41 @@ function placeTokens(words){
     return out;
 }
 
+/** True for a plain four-digit year (1900-2099). Deliberately narrow: five
+ *  digits or more is a reference whatever it reads like. Mirrors
+ *  _is_calendar_year in scripts/create-agent-task.py. */
+function isCalendarYear(digits){
+    return digits.length === 4 && Number(digits) >= 1900 && Number(digits) <= 2099;
+}
+
+/** {lane, strong, words, places}: what identifies this matter. `lane` is
+ *  'maintenance' or 'reply', never the raw prefix: the prefix is split off so
+ *  it cannot eat a subject word, but the only lane difference that may block
+ *  a fold is repair-vs-reply. */
 function dupeSignals(name){
-    let raw = String(name||''), lane = '';
+    let raw = String(name||''), lane = 'reply';
     const m = raw.match(/^([A-Za-z][A-Za-z ]*(?:\([^)]*\))?)\s*:\s*/);
-    if(m){ lane = m[1].toLowerCase().replace(/[^a-z0-9]+/g,' ').trim(); raw = raw.slice(m[0].length); }
+    if(m){
+        const prefix = m[1].toLowerCase().replace(/[^a-z0-9]+/g,' ').trim();
+        raw = raw.slice(m[0].length);
+        if(prefix.split(' ').some(function(w){ return DUPE_MAINTENANCE_LANE_WORDS.indexOf(w) !== -1; })) lane = 'maintenance';
+    }
     const strong = [];
     // A UK number in any shape these tasks carry: +447538631747, 447538631747,
     // 07538631747. The last nine digits are the same in all three.
-    (raw.match(/(?:\+?44|0)?\d{9,12}/g) || []).forEach(function(d){
+    (raw.match(/\b(?:\+?44|0)?\d{9,12}\b/g) || []).forEach(function(d){
         const k = 'tel:' + d.slice(-9);
         if(strong.indexOf(k) === -1) strong.push(k);
     });
     (raw.match(/\b\d{4,}\b/g) || []).forEach(function(d){
         // A phone number already claimed must not also count as a reference.
         if(strong.indexOf('tel:' + d.slice(-9)) !== -1) return;
+        // A YEAR IS NOT A REFERENCE NUMBER (1 Sep 2026: an HMRC compliance
+        // task folded into a Fylde council tax demand on a shared "2026").
+        // The gate had this guard since then; the page did not, and the
+        // cross-language corpus test in tests/agents-dupe-task-key.test.js
+        // found the drift on 15 Sep 2026. Years leave the STRONG set only.
+        if(isCalendarYear(d)) return;
         const k = 'num:' + d;
         if(strong.indexOf(k) === -1) strong.push(k);
     });
@@ -3885,7 +3911,10 @@ function dupeSignals(name){
             return w && !/^\d+$/.test(w) && !/^(?=(?:[^\d]*\d){3,})[a-z\d]+$/.test(w)
                 && DUPE_GENERIC.indexOf(w) === -1 && DUPE_ACTION_WORDS.indexOf(w) === -1;
         });
-    return { lane: lane, strong: strong, words: words, places: placeTokens(words) };
+    // Python keeps a SET of words (the ratio's denominator); a repeated word
+    // must count once here too or the two languages disagree on the ratio.
+    const uniq = words.filter(function(w,i){ return words.indexOf(w) === i; });
+    return { lane: lane, strong: strong, words: uniq, places: placeTokens(words) };
 }
 
 /** {match, why} — is this the same matter, and how would Kevin check?
@@ -3894,7 +3923,9 @@ function dupeVerdict(nameA, nameB, mode){
     const a = dupeSignals(nameA), b = dupeSignals(nameB);
     // In fold mode the lane check comes FIRST, ahead of even a shared phone
     // number: folding is destructive, and a maintenance job absorbed into a
-    // reply task is a real obligation lost. Grouping only shows.
+    // reply task is a real obligation lost. Grouping only shows. The lane is
+    // reply-vs-maintenance only (Kevin, 15 Sep 2026): two reply tasks under
+    // different agent prefixes are one lane and fold when the rest agrees.
     if(mode === 'fold' && a.lane !== b.lane) return { match:false, why:'' };
     const both = a.strong.filter(function(x){ return b.strong.indexOf(x) !== -1; }).sort();
     if(both.length){

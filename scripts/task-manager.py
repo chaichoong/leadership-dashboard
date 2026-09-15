@@ -352,8 +352,9 @@ def duplicate_groups(views, verdict=None):
     - folds: [{id, why}] the reason each Approval twin was allowed to fold,
       for the skill to quote on the proposal.
     The fold check is create-agent-task.py's dupe_verdict in "fold" mode
-    (same name lane first, then a shared reference or enough shared
-    non-address words); `verdict` is injectable for the selftest only.
+    (same fold lane first, reply vs maintenance only since Kevin's ruling of
+    15 Sep 2026, then a shared reference or enough shared non-address
+    words); `verdict` is injectable for the selftest only.
     A reply task and a Roy maintenance task on the same thread are
     legitimately TWO tasks, so the lane is part of the key. A folded task can
     appear in more than one group. Callers pass only actionable views
@@ -361,9 +362,11 @@ def duplicate_groups(views, verdict=None):
     verdict = verdict or (lambda a, b: _load_gate().dupe_verdict(a, b, mode="fold"))
     by = {}
     for v in views:
+        # One lane read for every fold caller (the gate's fold_lane): the
+        # Maintenance Ticket tick, Roy as holder, or a repair-style prefix.
         lane = ("maintenance"
-                if (v.get("name", "").startswith("MAINTENANCE:")
-                    or ROY_REC in (v.get("teamMember") or []))
+                if _load_gate().fold_lane(v.get("name", ""), v.get("teamMember"),
+                                          v.get("maintenanceTicket")) == "maintenance"
                 else "reply")
         for k in thread_keys(v.get("inboundUrl")):
             by.setdefault((k, lane), []).append(v)

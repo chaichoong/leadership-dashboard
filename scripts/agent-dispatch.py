@@ -159,6 +159,7 @@ AF = {
     "priority":          "fldS21RwmwOqt71LI",
     "urgencyScore":      "fldfA3gatzKbwCfUv",
     "teamMember":        "flduCtmQGpOA4eWaj",
+    "maintenanceTicket": "fldSEUvVA98as1HW6",   # checkbox: a repair, whatever the name
     "sentForApprovalBy": "fld30Yw8SWYVp049g",
     "approver":          "fldLLAG5HQPEFEfE5",
     "approvalOutcome":   "fldrHBSr6qoUfaKuZ",
@@ -1716,14 +1717,14 @@ def money_level(amount, recurring=False):
 
 
 # The fold check shared with the creation gate and the Task Manager board:
-# create-agent-task.py's dupe_verdict in "fold" mode (same lane first, then a
+# create-agent-task.py's dupe_verdict in "fold" mode (same fold lane first,
+# reply vs maintenance only since Kevin's ruling of 15 Sep 2026, then a
 # shared reference or enough shared non-address words). Imported, never
 # copied, so the three callers can never drift apart.
 _CAT_MOD = None
 
 
-def dupe_fold_verdict(name_a, name_b):
-    """{match, why, shared} — may these two task names fold into one?"""
+def _gate():
     global _CAT_MOD
     if _CAT_MOD is None:
         import importlib.util
@@ -1732,7 +1733,20 @@ def dupe_fold_verdict(name_a, name_b):
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
         _CAT_MOD = mod
-    return _CAT_MOD.dupe_verdict(name_a, name_b, mode="fold")
+    return _CAT_MOD
+
+
+def dupe_fold_verdict(name_a, name_b):
+    """{match, why, shared}: may these two task names fold into one?"""
+    return _gate().dupe_verdict(name_a, name_b, mode="fold")
+
+
+def dupe_fold_lane(fields):
+    """'maintenance' | 'reply' for a task record: the gate's fold_lane over
+    the name, the Team Member links and the Maintenance Ticket tick."""
+    return _gate().fold_lane(str(fields.get(AF["name"]) or ""),
+                             links(fields.get(AF["teamMember"])),
+                             bool(fields.get(AF["maintenanceTicket"])))
 
 
 CLOSED_KEEPER_STATUSES = ("Completed", "Cancelled")
@@ -1835,6 +1849,16 @@ def decision_level(output, task_type, task_rec, fetch=None, agent_banner=None):
         keeper_created = keeper.get("createdTime") or ""
         kname_full = str(kf.get(AF["name"]) or "")
         kname = kname_full[:60]
+        # A REPAIR TICKET AND A REPLY TASK ARE TWO OBLIGATIONS (28 Aug 2026,
+        # restated 15 Sep 2026), whichever is older. Read off both RECORDS
+        # (tick, Roy, then the name), because an unprefixed ticket reads as
+        # a reply task by name alone.
+        this_lane, keeper_lane = dupe_fold_lane(tf), dupe_fold_lane(kf)
+        if this_lane != keeper_lane:
+            return card("close: duplicate",
+                        f"this is a {this_lane} task and keeper {keeper_id} is a "
+                        f"{keeper_lane} task: a repair ticket and a reply task are two "
+                        "obligations, never one, so folding may not cross that lane")
         kept = "kept the older task"
         if this_created and keeper_created and keeper_created > this_created:
             # Either creation order folds when BOTH are open and the fold
@@ -1850,8 +1874,9 @@ def decision_level(output, task_type, task_rec, fetch=None, agent_banner=None):
                 return card("close: duplicate",
                             f"keeper {keeper_id} is NEWER than this task and the fold "
                             "check does not read the two names as one matter (same "
-                            "lane, a shared reference or enough shared non-address "
-                            "words); the older task keeps and the newer one folds")
+                            "lane, reply vs maintenance, then a shared reference or "
+                            "enough shared non-address words); the older task keeps "
+                            "and the newer one folds")
             kept = f"kept the NEWER task ({verdict.get('why') or 'fold check matched'})"
         evidence = (f"folded into keeper {keeper_id} \"{kname}\" ({kstatus}, "
                     f"created {keeper_created[:10] or '?'}); {kept}")

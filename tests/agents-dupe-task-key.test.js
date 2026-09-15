@@ -175,11 +175,11 @@ describe('dupeTaskKey — the live clog it was rewritten for', () => {
 // the two MUST agree — a pair folded at creation but shown separately in the
 // queue, or the reverse, is worse than either behaviour alone.
 describe('dupe_verdict — same matter, different words', () => {
-  const py = (code) => JSON.parse(execFileSync('python3', ['-c', `
+  const py = (code, arg = '') => JSON.parse(execFileSync('python3', ['-c', `
 import importlib.util, json, sys
 spec = importlib.util.spec_from_file_location("c", ${JSON.stringify(SCRIPT)})
 c = importlib.util.module_from_spec(spec); spec.loader.exec_module(c)
-${code}`], { encoding: 'utf8' }));
+${code}`, arg], { encoding: 'utf8' }));
 
   const verdict = (a, b, mode = 'group') => py(
     `print(json.dumps(c.dupe_verdict(${JSON.stringify(a)}, ${JSON.stringify(b)}, ${JSON.stringify(mode)})))`);
@@ -229,6 +229,46 @@ ${code}`], { encoding: 'utf8' }));
     expect(verdict(a, b, 'fold').match).toBe(false);
   });
 
+  // Kevin's ruling, 15 Sep 2026: for FOLDING the lane test means only
+  // reply-vs-maintenance. Until then the fold lane was the raw name prefix,
+  // so two reply tasks written up by different agents refused to fold and
+  // both stayed in his queue. The two live shapes, verbatim off the board:
+  // rec2nZRQ1Y4ZXj9mA (COMPLIANCE) against its keeper recODSge5r6SZ3IqQ
+  // (CORRESPONDENCE), and the "INBOUND (follow-up):" / "INBOUND:" pairs.
+  // Back-tested: restoring `lane = prefix` fails the first two expectations.
+  it('two reply tasks under different agent prefixes are ONE lane and fold', () => {
+    const chedburgh = verdict(
+      'COMPLIANCE: EICR quote follow-up - AC1 Electrical Services - 6 Chedburgh Place',
+      'CORRESPONDENCE: Reply to AC1 Electrical - EICR bedroom count - 6 Chedburgh Place', 'fold');
+    expect(chedburgh.match, 'COMPLIANCE vs CORRESPONDENCE is not a lane difference').toBe(true);
+    expect(chedburgh.why).toContain('eicr');
+    const oldham = verdict(
+      'INBOUND: 1406 Oldham Road electrical safety cert outstanding - Hannah Lea chasing',
+      'INBOUND (follow-up): 1406 Oldham Road EICR cert - send to Manchester Council', 'fold');
+    expect(oldham.match, 'INBOUND (follow-up) vs INBOUND is not a lane difference').toBe(true);
+    expect(oldham.why).toBe('same reference 1406');
+    expect(verdict('INBOUND: SMS reply from +447538631747',
+                   'INBOUND (follow-up): SMS from 447538631747 - chase', 'fold').match).toBe(true);
+  });
+
+  it('a repair ticket still never folds into a reply task, whichever prefix spells it', () => {
+    // The 28 Aug lesson stands: a maintenance job absorbed into a reply task
+    // is a real obligation lost. REPAIR: and MAINTENANCE: are the same lane
+    // as each other and a different lane from every reply prefix.
+    const reply = 'INBOUND: SMS reply from +447538631747';
+    for (const repair of ['REPAIR: SMS from 447538631747 - leaking tap',
+                          'MAINTENANCE: SMS from 447538631747 - leaking tap']) {
+      expect(verdict(reply, repair, 'fold').match, repair).toBe(false);
+      expect(verdict(reply, repair, 'group').match, `${repair} still SHOWS together`).toBe(true);
+    }
+    expect(verdict('COMPLIANCE: EICR quote follow-up - AC1 Electrical - 6 Chedburgh Place',
+                   'REPAIR: EICR remedial works - AC1 Electrical - 6 Chedburgh Place', 'fold').match)
+      .toBe(false);
+    // CONTROL: two repair tickets on one thread are one lane and DO fold.
+    expect(verdict('REPAIR: SMS from 447538631747 - leaking tap',
+                   'MAINTENANCE: SMS reply from +447538631747', 'fold').match).toBe(true);
+  });
+
   // 20260901-inbound-comms-triage-427. On 1 Sep 2026 an HMRC compliance-check
   // task was folded into a Fylde council tax demand and lost, because the
   // 4-digit reference rule read the YEAR "2026" as a shared reference number
@@ -274,5 +314,72 @@ ${code}`], { encoding: 'utf8' }));
     expect(words(pySrc, 'DUPE_ACTION_WORDS')).toEqual(words(jsSrc, 'DUPE_ACTION_WORDS'));
     expect(words(pySrc, 'DUPE_STREET_TYPES').length).toBeGreaterThan(10);
     expect(words(pySrc, 'DUPE_STREET_TYPES')).toEqual(words(jsSrc, 'DUPE_STREET_TYPES'));
+    expect(words(pySrc, 'DUPE_MAINTENANCE_LANE_WORDS').length).toBeGreaterThan(1);
+    expect(words(pySrc, 'DUPE_MAINTENANCE_LANE_WORDS')).toEqual(words(jsSrc, 'DUPE_MAINTENANCE_LANE_WORDS'));
+  });
+
+  // Matching constants are necessary, not sufficient: the lane derivation is
+  // logic, and the 15 Sep 2026 change touched it in both languages. Run the
+  // page's OWN dupeVerdict (extracted, never copied) and the gate's
+  // dupe_verdict over one corpus in both modes and demand identical calls.
+  it('the page and the creation gate return the SAME verdict on one corpus, both modes', () => {
+    const grab = (re, label) => {
+      const m = SRC.match(re);
+      if (!m) throw new Error(`${label} not found in os/agents/index.html`);
+      return m[0];
+    };
+    const jsVerdict = new Function([
+      grab(/const DUPE_GENERIC = \[[\s\S]*?\];/, 'DUPE_GENERIC'),
+      grab(/const DUPE_ACTION_WORDS = \[[\s\S]*?\];/, 'DUPE_ACTION_WORDS'),
+      grab(/const DUPE_STREET_TYPES = \[[\s\S]*?\];/, 'DUPE_STREET_TYPES'),
+      grab(/const DUPE_MIN_SHARED = [\d.]+;/, 'DUPE_MIN_SHARED'),
+      grab(/const DUPE_MIN_RATIO = [\d.]+;/, 'DUPE_MIN_RATIO'),
+      grab(/const DUPE_MAINTENANCE_LANE_WORDS = \[[\s\S]*?\];/, 'DUPE_MAINTENANCE_LANE_WORDS'),
+      grab(/function placeTokens\([\s\S]*?\n\}/, 'placeTokens'),
+      grab(/function isCalendarYear\([\s\S]*?\n\}/, 'isCalendarYear'),
+      grab(/function dupeSignals\([\s\S]*?\n\}/, 'dupeSignals'),
+      grab(/function dupeVerdict\([\s\S]*?\n\}/, 'dupeVerdict'),
+      'return dupeVerdict;',
+    ].join('\n'))();
+    const CORPUS = [
+      'INBOUND: SMS reply from +447538631747',
+      'INBOUND (follow-up): SMS from 447538631747 - chase',
+      'MAINTENANCE: SMS from 447538631747 - maintenance reply',
+      'REPAIR: SMS from 447538631747 - leaking tap',
+      'COMPLIANCE: EICR quote follow-up - AC1 Electrical Services - 6 Chedburgh Place',
+      'CORRESPONDENCE: Reply to AC1 Electrical - EICR bedroom count - 6 Chedburgh Place',
+      'INBOUND: 1406 Oldham Road electrical safety cert outstanding - Hannah Lea chasing',
+      'INBOUND (follow-up): 1406 Oldham Road EICR cert - send to Manchester Council',
+      'INBOUND: Sefton Council HMO licence fee 150 unpaid 23 Viola St Bootle urgent',
+      'INBOUND: action overdue licensing tasks 23 Viola Street Bootle - EICR and Gas',
+      'INBOUND: HMRC compliance check 2026 self assessment',
+      'INBOUND: Fylde Council Tax 2026 demand',
+      'Clear and tidy garden',
+      // A letters+digits reference must not read as a phone number: without
+      // the word boundary the page matched "223661148" inside a1252236611488
+      // (found 15 Sep 2026 by this test's reviewer; Python always had \b).
+      'INBOUND: Reply to British Gas a1252236611488',
+      'INBOUND: Chase EDF a1252236611488',
+      // A repeated distinctive word counts once in the ratio (Python set).
+      'INBOUND: boiler boiler boiler service quote',
+      'INBOUND: boiler service quote from Gasco',
+      '',
+    ];
+    const pairs = [];
+    for (let i = 0; i < CORPUS.length; i++) for (let j = i + 1; j < CORPUS.length; j++) pairs.push([CORPUS[i], CORPUS[j]]);
+    const pyAll = py(`
+pairs = json.loads(sys.argv[1])
+print(json.dumps([[c.dupe_verdict(a, b, m)["match"], c.dupe_verdict(a, b, m)["why"]]
+                  for a, b in pairs for m in ("group", "fold")]))`, JSON.stringify(pairs));
+    const jsAll = pairs.flatMap(([a, b]) => ['group', 'fold'].map((m) => {
+      const v = jsVerdict(a, b, m);
+      return [v.match, v.why];
+    }));
+    // CONTROL: the corpus must exercise both outcomes in fold mode, or an
+    // implementation that always refuses would agree with itself.
+    const foldMatches = jsAll.filter((_, i) => i % 2 === 1 && jsAll[i][0]).length;
+    expect(foldMatches).toBeGreaterThan(3);
+    expect(foldMatches).toBeLessThan(pairs.length);
+    expect(pyAll).toEqual(jsAll);
   });
 });
