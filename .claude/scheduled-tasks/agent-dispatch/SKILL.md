@@ -76,7 +76,7 @@ STEPS
 
    For every tier-1 item, whether the script matched it or you did: work it as normal, submit it with the extra `--tier1` flag, tell its agent in the prompt that this touches a live legal and financial matter so it must stick to verifiable facts and take no position on the legal question, and list it in the report's tier1Flags. If an agent DISCOVERS the connection while working (today's keyword filter cannot see inside a linked record), that counts the same: submit with --tier1 and flag it.
 
-   Two things are still never worked by an agent. A task whose only useful action is a payment, credential, signature or phone call (park it, per step 4). And a task where preparing the work would itself mean acting for Kevin in the legal matter, for example drafting a response to his solicitor or to an enforcement agent. Escalate that second kind off the agents with `python3 scripts/agent-dispatch.py escalate TASKID`, backfill the slot from reserve, and say so in your closing log.
+   Two things are still never worked by an agent. A task whose only useful action is a payment, credential, signature or phone call (park it, per step 4). And a task where preparing the work would itself mean acting for Kevin in the legal matter, for example drafting a response to his solicitor or to an enforcement agent. Escalate that second kind with `python3 scripts/agent-dispatch.py escalate TASKID --reason "<the one thing Kevin must decide>"` (since 15 Sep 2026 that puts a DECIDE: card in his gate, sent by the Task Manager; the agent link is kept), backfill the slot from reserve, and say so in your closing log.
 
 3. ROUTING — two lanes since 24 Aug 2026:
 

@@ -461,14 +461,16 @@ def loop_health_row(now):
                 "detail": "The not-moving check could not run: %s" % str(exc)[:300],
                 "lastRun": now.strftime("%Y-%m-%dT%H:%M:%S.000Z")}   # payload and lastWorked left as they were
     stalled = res.get("stalled") or []
-    slim = [{"name": s.get("name", "")[:90], "why": s.get("why", "")[:160], "days": s.get("days"), "rule": s.get("rule")}
+    slim = [{"name": s.get("name", "")[:90], "why": s.get("why", "")[:160], "days": s.get("days"),
+             "rule": s.get("rule"), "lane": s.get("lane")}
             for s in stalled][:40]
+    lanes = res.get("lanes") or {}
     return {"key": "loop-health", "kind": "report", "label": "Tasks not moving", "status": "Worked",
             "detail": "%d not moving, %d need Kevin, %d done in the last 7 days (%d tasks read)." % (
                 len(stalled), len(res.get("needsYou") or []), len(res.get("done") or []),
                 (res.get("control") or {}).get("tasksRead", 0)),
             "payload": json.dumps({"stalled": slim, "needsYou": len(res.get("needsYou") or []),
-                                   "done7d": len(res.get("done") or [])}),
+                                   "done7d": len(res.get("done") or []), "lanes": lanes}),
             "lastRun": now.strftime("%Y-%m-%dT%H:%M:%S.000Z"), "lastWorked": now.strftime("%Y-%m-%dT%H:%M:%S.000Z")}
 
 

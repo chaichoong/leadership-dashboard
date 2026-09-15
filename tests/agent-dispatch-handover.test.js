@@ -81,7 +81,47 @@ print('@@@' + json.dumps({"linked": linked}))
   return JSON.parse(out.slice(out.indexOf('@@@') + 3)).linked;
 }
 
+// 15 Sep 2026. Handing a task to someone who ALREADY holds it re-linked them,
+// appended another note and re-emailed the work. The Task Manager counted
+// Roy-held tickets as stuck every slot, so rec72wof6bUtaEKqJ and
+// rec4kMUqLpQ0NlHAC each collected 34 handovers and nine more tickets 28-31.
+function handoverAlreadyHeld(to, rec) {
+  const script = `
+import importlib.util, json, io, contextlib
+spec = importlib.util.spec_from_file_location('ad', ${JSON.stringify(DISPATCH)})
+m = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(m)
+captured = {}
+m.get_task = lambda tid: {"id": tid, "fields": {m.AF["teamMember"]: [{"id": ${JSON.stringify(rec)}}],
+                                                 m.AF["notes"]: "[10 Aug 2026 — agent-dispatch] Handed over to Roy Lavin"}}
+def fake_patch(tid, fields):
+    captured['fields'] = fields
+    return {}
+m.patch_task = fake_patch
+import subprocess
+sent = []
+m.subprocess.run = lambda *a, **k: sent.append(a) or type('R', (), {'returncode': 0})()
+class A: pass
+a = A(); a.task = 'recTEST'; a.to = ${JSON.stringify(to)}; a.reason = 'again'
+buf = io.StringIO()
+with contextlib.redirect_stdout(buf):
+    m.cmd_handover(a)
+print('@@@' + json.dumps({'captured': captured, 'emails': len(sent),
+                          'printed': json.loads(buf.getvalue().strip().splitlines()[-1])}))
+`;
+  const out = execFileSync('python3', ['-c', script], { encoding: 'utf8' });
+  return JSON.parse(out.slice(out.indexOf('@@@') + 3));
+}
+
 describe('agent-dispatch handover', () => {
+  it('is idempotent: a task the person already holds is reported, with nothing written and nothing sent', () => {
+    const r = handoverAlreadyHeld('roy.lavin1978@gmail.com', 'reclbdjfVev3bqNHS');
+    expect(r.captured, 'a second handover PATCHed the task again').toEqual({});
+    expect(r.emails, 'Roy was emailed the same work again').toBe(0);
+    expect(r.printed.alreadyHeld).toBe(true);
+    expect(r.printed.name).toBe('Roy Lavin');
+  });
+
   it('points Team Member and Assignee at the named human', () => {
     const r = handover({ to: 'micaa.work@gmail.com', reason: 'Kevin approved reassignment' });
     expect(r.refused, r.error).toBe(false);

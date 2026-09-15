@@ -343,8 +343,10 @@ OTHER non-zero exit means the gate could not run (broken read); nothing was crea
 that thread unhandled for Step 6 and report it, exactly like a failed dedupe
 query.
 
-The fields JSON, keyed by field ID, with the gate adding `"typecast": true`
-itself:
+The fields JSON, keyed by field ID. The gate sends it with typecast OFF (15
+Sep 2026): record ids for links, existing option names for selects, and a
+Status outside Today / Upcoming / Approval is corrected to Today with a Notes
+line (an unknown value is refused, never minted as a new option):
 
 - `fldgFjGBw6bTKJFCD` Task Name: "INBOUND: <concise action from the email>".
   Under 100 chars. No em dashes anywhere in name or description.

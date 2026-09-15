@@ -100,6 +100,16 @@ trap 'exit 129' HUP
 trap 'exit 130' INT
 cd "$REPO" || { echo "ERROR: repo not found at $REPO" >&2; exit 1; }
 
+# THE DISPATCH WINDOW FLIP (15 Sep 2026): Upcoming tasks whose due date has
+# arrived become Today here, in code, before the board is read. Nothing
+# deployed in Airtable flips them, so 95 of 129 Upcoming tasks sat invisible
+# to dispatch and to this board on 15 Sep 2026. Deterministic, idempotent,
+# one field, typecast off, ids and dates only in the log — the script owns
+# the write with a control (never a raw Airtable write to a task from here),
+# and it runs BEFORE the allowance guard because it needs no Claude.
+/usr/bin/python3 "$REPO/scripts/task-hygiene-sweep.py" flip-due >> "$LOG" 2>&1 \
+  || echo "WARNING: flip-due failed (rc=$?) — Upcoming tasks now due may be missing from this slot's board" >> "$LOG"
+
 # THE ALLOWANCE GUARD (Kevin, 14 Sep 2026): while scripts/allowance.py says the
 # Claude allowance is out, this slot does not start. It is recorded as missed
 # and re-run once at the reset by `allowance.py replay`. Exit 0: a paused tick

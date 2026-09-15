@@ -205,6 +205,43 @@ TASK_TYPES = ("Drafting", "Research", "Analysis", "Build",
 APPROVED = ("Approved as-is", "Approved with minor edits")
 OPEN_STATUSES = ("Today", "Overdue")
 
+# THE DISPATCH WINDOW (15 Sep 2026). Nothing deployed in Airtable ever flips
+# an Upcoming task to Today when its due date arrives ("When Due Date is
+# updated, adjust the Status" exists and is undeployed), so an Upcoming task
+# whose date has passed sat outside every read that keys on Today/Overdue:
+# 95 of the 129 Upcoming tasks on 15 Sep 2026 were due and invisible to
+# dispatch, to loop-health and to the Task Manager's stuck list at once. The
+# window is therefore Today, Overdue, OR Upcoming with a due date on or
+# before today — decided on the DATE FIELD (IS_SAME/IS_BEFORE), never a bare
+# string compare, which Airtable answers with zero rows and no error.
+# scripts/task-hygiene-sweep.py flip-due moves those tasks to Today each
+# slot; this clause is the belt for the run between a date arriving and the
+# flip. in_dispatch_window() is the same rule for a record already read.
+# Airtable's TODAY() in a filter is UTC, so for one hour of a BST night a
+# task due tomorrow London-time is outside this clause and inside the
+# Python mirror; the slots run 07:00-17:20, and flip-due is the belt.
+# A blank date is never due, and a Some Day task is parked, not late.
+DUE_UPCOMING_CLAUSE = ("AND({Status}='Upcoming',{Due Date},NOT({Some Day}),"
+                       "OR(IS_SAME({Due Date},TODAY(),'day'),IS_BEFORE({Due Date},TODAY())))")
+QUEUE_FORMULA = "OR({Status}='Today',{Status}='Overdue'," + DUE_UPCOMING_CLAUSE + ")"
+
+
+def in_dispatch_window(status, due_date, today=None, some_day=False):
+    """Is a task with this stored Status and Due Date one the queue works?
+    Mirrors QUEUE_FORMULA for a record already in hand (guarded by
+    tests/agent-dispatch-escalate.test.js)."""
+    if status in OPEN_STATUSES:
+        return True
+    due = str(due_date or "")[:10]
+    return (status == "Upcoming" and bool(due) and not some_day
+            and due <= (today or today_london()))
+
+
+def is_decide_card(agent_output):
+    """A decision card (cmd_escalate): Agent Output opens with DECIDE:. Kevin's
+    answer to one is for the Task Manager's board, never a carry-out."""
+    return str(agent_output or "").lstrip().upper().startswith("DECIDE:")
+
 # How many pieces of work one run may take on.
 #
 # A CEILING, NOT A TARGET. If eight tasks are eligible, eight run. A high cap
@@ -2190,8 +2227,7 @@ def build_queue(args=None):
     with the SAME code the run reads. Two classifiers would be two answers to
     "is this Roy's", and the one that writes must be the one Kevin saw.
     """
-    formula = "OR({Status}='Today',{Status}='Overdue')"
-    open_tasks = [task_view(r) for r in query_tasks(formula)]
+    open_tasks = [task_view(r) for r in query_tasks(QUEUE_FORMULA)]
 
     # The register roster is context for the CEO's routing judgement. A blip
     # here must not silently starve role agents run after run, so the error
@@ -2232,6 +2268,7 @@ def build_queue(args=None):
     system_alerts = []
     roy_lane = []
     approved_hb, changes_hb, new_work, routing = [], [], [], []
+    decided = []
     creditor_ok = bool(role_roster.get(CREDITOR_REC_ID, {}).get("dispatchable"))
     creditor_count = 0
     # The property lane needs BOTH the register lever and a readable book:
@@ -2336,6 +2373,14 @@ def build_queue(args=None):
         # agentId (Sent For Approval By, falling back to Team Member) decides
         # hand-backs: the drawer's decide path sets both, but an approved task
         # missing Sent For Approval By must still be carried out, not lost.
+        # A DECIDED CARD (15 Sep 2026). Kevin's answer to a DECIDE: card is a
+        # ruling on what should happen, not an approval of a draft. Carrying
+        # it out as a hand-back would spawn an agent to "execute" a question;
+        # the Task Manager's board reads its `decided` bucket and makes the
+        # move Kevin named (its verdict is in the task's Approval Feedback).
+        if t["outcome"] and is_decide_card(t["agentOutput"]):
+            decided.append(t)
+            continue
         if t["outcome"] in APPROVED and t["agentId"]:
             approved_hb.append(t)
         elif t["outcome"] == "Changes requested":
@@ -2487,6 +2532,7 @@ def build_queue(args=None):
         # acted on here: cmd_queue is a read. `handover-property` does the
         # writing, so one command owns the change.
         "royLane": roy_lane,
+        "decided": decided,            # answered DECIDE: cards; the Task Manager's move, never a carry-out
         "unmappedAgent": unmapped,
         "unclassified": unclassified,  # states the buckets cannot place — eyes, not silence
         "agents": ALL_AGENTS,          # the roster the CEO routes against
@@ -2518,6 +2564,7 @@ def build_queue(args=None):
             "tier2Parked": len(skipped_tier2),
             "systemAlerts": len(system_alerts),
             "royLane": len(roy_lane),
+            "decided": len(decided),
             # Creditor-lane keyword matches across the whole agent-linked
             # read, hand-backs included (routing floor, not judgement). Zero
             # with the register row Built/Live and creditor mail known to be
@@ -2569,6 +2616,31 @@ def require_role_agent_live(rec_id, verb):
                  "register controls this; route to a strategic agent instead")
 
 
+DECIDED_NOTE_MARK = "Decision carried out"
+
+
+def decision_carry_out_fields(tf, stamp):
+    """The fields that close an ANSWERED decision card when the foreman makes
+    the move Kevin named (route or handover). Without this the card kept its
+    outcome and its DECIDE: line, so build_queue filed it as `decided` on
+    every run, the board routed it again every slot, and after seven days
+    it was escalated again with the same question (review finding, 15 Sep
+    2026). Returns {} when the task is not an answered card."""
+    if not (is_decide_card(tf.get(AF["agentOutput"])) and sel(tf.get(AF["approvalOutcome"]))):
+        return {}
+    outcome = sel(tf.get(AF["approvalOutcome"]))
+    feedback = str(tf.get(AF["approvalFeedback"]) or "").strip()
+    verdict = outcome + (f" — {feedback}" if feedback else "")
+    prior = str(tf.get(AF["agentOutput"]) or "").strip()
+    return {
+        AF["approvalOutcome"]: None,
+        AF["approvedAt"]: None,
+        AF["sentForApprovalBy"]: [],
+        AF["agentOutput"]: (f"DECIDED (Kevin, {stamp}): {verdict}\n\n" + prior)[:95000],
+        "_note": f"[{stamp} — agent-dispatch] {DECIDED_NOTE_MARK}: {verdict}",
+    }
+
+
 def cmd_route(args):
     if args.to not in ALL_AGENTS:
         sys.exit(f"ERROR: {args.to} is not a dispatchable AI agent record "
@@ -2576,9 +2648,19 @@ def cmd_route(args):
     if args.to == CEO_REC_ID:
         sys.exit("ERROR: routing back to the CEO is not a route")
     require_role_agent_live(args.to, "route")
-    patch_task(args.task, {AF["teamMember"]: [args.to]})
+    fields = {AF["teamMember"]: [args.to]}
+    tf = (get_task(args.task).get("fields", {}) or {})
+    stamp = datetime.now(LONDON).strftime("%d %b %Y")
+    decided = decision_carry_out_fields(tf, stamp)
+    if decided:
+        note = decided.pop("_note")
+        existing = str(tf.get(AF["notes"]) or "").rstrip()
+        decided[AF["notes"]] = (existing + "\n\n" + note).strip()[-90000:]
+        fields.update(decided)
+    patch_task(args.task, fields)
     print(json.dumps({"routed": args.task, "to": args.to,
-                      "agent": ALL_AGENTS[args.to]["name"]}))
+                      "agent": ALL_AGENTS[args.to]["name"],
+                      "decisionCarriedOut": bool(decided)}))
 
 
 REASSIGN_MARK = "REASSIGNED TO CEO"
@@ -2652,15 +2734,74 @@ def cmd_reassign(args):
                       "reason": args.reason, "priorBounces": bounces}))
 
 
+# An escalation is a DECISION CARD (Kevin, 15 Sep 2026). Until then `escalate`
+# re-linked the task to Kevin and touched nothing else: no Approval status, no
+# Sent For Approval By, so the gate formula (os/agents/index.html), the Slack
+# digest and the agent-linked dispatch filter all dropped it at once. Nothing
+# showed it anywhere, the Task Manager found it "stuck" again next slot and
+# escalated it again: recZMDlT4l2lcwMhB was escalated seven times and
+# rec4cpT9R5Ld538C2 ran 33 times. The card is what Kevin actually sees, so the
+# escalation IS a card: Status Approval, sent by the Task Manager's own Team
+# Members row, with one ask line. Team Member is left alone — the escalation
+# is a question about the work, not a change of who holds it.
+DECIDE_PREFIX = "DECIDE:"
+DECIDE_LINE_RE = re.compile(r"^\s*DECIDE:\s*\S", re.I | re.M)
+
+
+def escalate_ask(reason):
+    """One ask line, starting DECIDE:, from the escalate reason. The reason's
+    first non-blank line is the ask; an existing DECIDE: prefix is kept, never
+    doubled; an empty reason still yields a line Kevin can answer."""
+    first = next((ln.strip() for ln in str(reason or "").splitlines() if ln.strip()), "")
+    if not first:
+        first = "what should happen with this task? The agents cannot take it further."
+    if first.upper().startswith(DECIDE_PREFIX):
+        first = first[len(DECIDE_PREFIX):].strip()
+    return f"{DECIDE_PREFIX} {first}"
+
+
 def cmd_escalate(args):
-    # The tier-1 exit. A keyword skip only lasts one run: the task stays linked
-    # to an agent and comes back round every time. This moves it off the agents
-    # for good, without touching Status, due date or anything Kevin decides.
+    """Submit the task to Kevin's gate as a decision card. Idempotent: a task
+    already at Approval carrying a DECIDE: ask is reported, not rewritten."""
+    t = get_task(args.task)
+    tf = t.get("fields", {}) or {}
+    status = sel(tf.get(AF["status"]))
+    prior_output = str(tf.get(AF["agentOutput"]) or "")
+    if status == "Approval" and is_decide_card(prior_output):
+        print(json.dumps({"alreadyEscalated": args.task, "status": status,
+                          "ask": prior_output.strip().splitlines()[0][:200]}))
+        return
+    ask = escalate_ask(getattr(args, "reason", ""))
+    stamp = datetime.now(LONDON).strftime("%d %b %Y")
+    # The holder at escalation is recorded on the stamp: the gate's approve
+    # path re-links the task to the sender (the Task Manager), so the board
+    # needs it to restore the prior holder when Kevin's answer names nobody.
+    holder = ",".join(links(tf.get(AF["teamMember"]))) or "none"
+    note = (f"[{stamp} — agent-dispatch] Escalated to Kevin as a decision card "
+            f"(holder {holder}): {ask}")
+    existing = str(tf.get(AF["notes"]) or "").rstrip()
+    output = ask
+    if prior_output.strip():
+        # The earlier draft stays under the ask: Kevin decides with it in view.
+        output = ask + "\n\nEarlier output:\n" + prior_output.strip()
     patch_task(args.task, {
-        AF["teamMember"]: [KEVIN_REC_ID],
-        AF["assignee"]: {"email": KEVIN_AIRTABLE_EMAIL},
+        AF["status"]: "Approval",
+        # The Task Manager's Team Members row — read live from Team Members
+        # tblco0p2OnlLQVAX7 on 15 Sep 2026 ("AI Task Board Manager"), and the
+        # same id ROLE_AGENTS carries. The gate needs a sender or it hides the
+        # row (APV_QUEUE_FORMULA requires Sent For Approval By).
+        AF["sentForApprovalBy"]: [TASKMGR_REC_ID],
+        # No Assignee write: the card is the surface, blank Assignee means an
+        # agent owns it, and setting it fires the assignment Slack DM.
+        AF["agentOutput"]: output[:95000],
+        # A standing verdict from an earlier round would read as already
+        # decided; the card is a fresh question.
+        AF["approvalOutcome"]: None,
+        AF["approvedAt"]: None,
+        AF["notes"]: (existing + "\n\n" + note).strip()[-90000:],
     })
-    print(json.dumps({"escalated": args.task, "to": "Kevin Brittain"}))
+    print(json.dumps({"escalated": args.task, "to": "Kevin Brittain", "card": True,
+                      "ask": ask, "sentForApprovalBy": TASKMGR_REC_ID}))
 
 
 def cmd_handover(args):
@@ -2694,6 +2835,27 @@ def cmd_handover(args):
     # maintenance never trips these patterns — prose rules in a skill are not
     # a gate, this is.
     tf = t.get("fields", {})
+    # IDEMPOTENT (15 Sep 2026). Handing a task to someone who already holds it
+    # re-linked them, appended another note and emailed them the work again.
+    # The Task Manager counted Roy-held tickets as stuck every slot, so
+    # rec72wof6bUtaEKqJ and rec4kMUqLpQ0NlHAC each collected 34 handovers and
+    # nine more tickets 28 to 31. Already held means nothing to write and
+    # nothing to send; the caller is told so and can record the move as a
+    # chase instead.
+    if who["rec"] in links(tf.get(AF["teamMember"])):
+        # The half-taken shape (20260823-agent-dispatch-324): held by the
+        # person but Sent For Approval By still names an agent, so the task
+        # is still in the agent-linked population. Clear ONLY that, no note,
+        # no email — the person already has the work.
+        lingering = links(tf.get(AF["sentForApprovalBy"]))
+        if lingering:
+            patch_task(args.task, {AF["sentForApprovalBy"]: [],
+                                   AF["approvalOutcome"]: None,
+                                   AF["approvedAt"]: None})
+        print(json.dumps({"alreadyHeld": True, "task": args.task,
+                          "to": args.to, "name": who["name"],
+                          "clearedAgentLink": bool(lingering)}))
+        return
     if who["rec"] != KEVIN_REC_ID:
         outcome = tf.get(AF["approvalOutcome"], "")
         texts = [tf.get(AF["name"], ""), tf.get(AF["description"], ""),
@@ -2709,7 +2871,13 @@ def cmd_handover(args):
     existing = tf.get(AF["notes"], "") or ""
     note = (f"[{stamp} — agent-dispatch] Handed over to {who['name']} "
             f"({args.to}): {reason}")
+    # An answered decision card handed on IS the decision being carried out:
+    # close the card too, or it is filed as `decided` on every later run.
+    decided = decision_carry_out_fields(tf, stamp)
+    if decided:
+        note = decided.pop("_note") + "\n\n" + note
     patch_task(args.task, {
+        **decided,
         # The agent link goes. Leaving it would keep the task in the queue's
         # agent-linked population and it would be worked again tomorrow.
         AF["teamMember"]: [who["rec"]],
@@ -4962,7 +5130,7 @@ def cmd_verify(args):
             # minute of the Slack post, which legitimately moves the task on.
             # The broken states are: still open with no outcome (the submit
             # never landed) or an empty Agent Output (nothing to judge).
-            if live["status"] in OPEN_STATUSES and not live["outcome"]:
+            if in_dispatch_window(live["status"], live["dueDate"]) and not live["outcome"]:
                 problems.append(f"{a['task']} claimed {kind} but the submit "
                                 f"never landed (Status '{live['status']}', "
                                 "no outcome)")
@@ -5456,10 +5624,11 @@ def ensure_weekly_review():
     by the engine every Monday (Kevin's ruling, 25 Aug 2026).
 
     Raised HERE, in code, London time — never via the Airtable Recurring
-    field: nothing deployed flips a future-dated Upcoming task into the
-    Today/Overdue window the queue reads ("When Due Date is updated, adjust
-    the Status" exists but is undeployed), and an API completion would not
-    roll the cadence forward. The engine runs several times daily, so the
+    field: nothing deployed in Airtable flips a future-dated Upcoming task
+    into the Today/Overdue window ("When Due Date is updated, adjust the
+    Status" exists but is undeployed; since 15 Sep 2026 QUEUE_FORMULA and
+    the slot runner's flip-due cover that gap in code), and an API
+    completion would not roll the cadence forward. The engine runs several times daily, so the
     Monday 07:00 run creates it and the 09:00 slot works it."""
     now = datetime.now(LONDON)
     if now.weekday() != 0:      # Monday only, decided in code, London time
@@ -6716,8 +6885,12 @@ def main():
     r.add_argument("task")
     r.add_argument("--to", required=True)
 
-    e = sub.add_parser("escalate")
+    e = sub.add_parser("escalate",
+                       help="put a decision card in Kevin's gate (Status Approval, "
+                            "sent by the Task Manager, one DECIDE: ask line)")
     e.add_argument("task")
+    e.add_argument("--reason", default="",
+                   help="the one thing Kevin must decide; becomes the DECIDE: line")
 
     h = sub.add_parser("handover",
                        help="hand an approved task to a named human team member")

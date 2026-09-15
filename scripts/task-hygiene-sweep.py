@@ -37,6 +37,7 @@ EXEMPTIONS (assumed 2026-07-30, Kevin can overturn)
   Maintenance Ticket  owner comes from the Contractor field; exempt from the project rule
 
 Usage:
+  python3 scripts/task-hygiene-sweep.py flip-due [--dry-run]
   python3 scripts/task-hygiene-sweep.py audit [--out FILE]
   python3 scripts/task-hygiene-sweep.py apply --decisions FILE [--tier auto|all] [--dry-run]
   python3 scripts/task-hygiene-sweep.py undo --applied FILE [--dry-run]
@@ -932,6 +933,46 @@ def cmd_apply(args):
     return 0
 
 
+# THE DISPATCH WINDOW FLIP (15 Sep 2026). Nothing deployed in Airtable moves an
+# Upcoming task to Today when its due date arrives ("When Due Date is updated,
+# adjust the Status" exists and is undeployed), and dispatch, loop-health and
+# the Task Manager's board all key on the STORED status. On 15 Sep 2026, 95 of
+# 129 Upcoming tasks were due and on no surface. This is the same clause as
+# QUEUE_FORMULA in scripts/agent-dispatch.py, decided on the date field (never
+# a bare string compare), run from scripts/task-manager-run.sh before every
+# slot. Idempotent: a task already at Today never matches. Status is the ONLY
+# field written, with typecast off, so a renamed option 422s rather than
+# minting a new one.
+DUE_UPCOMING_FORMULA = ("AND({Status}='Upcoming',{Due Date},NOT({Some Day}),"
+                        "OR(IS_SAME({Due Date},TODAY(),'day'),IS_BEFORE({Due Date},TODAY())))")
+
+
+def cmd_flip_due(args):
+    token = pat()
+    # CONTROL: a formula typo returns zero rows and reads as "nothing due"
+    # forever. Upcoming is the board's biggest population (129 on 15 Sep
+    # 2026); if the plain status read finds none, the read is broken.
+    probe = api("GET", f"{BASE_ID}/{TASKS}", token,
+                params={"maxRecords": 1, "pageSize": 1, "fields[]": [fname("status")],
+                        "filterByFormula": "{Status}='Upcoming'"})
+    if not probe.get("records"):
+        print("FLIP-DUE CONTROL FAILED: zero Upcoming tasks read — the Status field "
+              "or its options have drifted; nothing flipped", file=sys.stderr)
+        return 1
+    due = fetch_all(token, TASKS, fields=[fname("status"), fname("dueDate")],
+                    formula=DUE_UPCOMING_FORMULA)
+    verb = "would flip" if args.dry_run else "flipped"
+    for rec in due:
+        # ids and dates only: this log line reaches runs.log, never a task name
+        print(f"FLIP-DUE {rec['id']} Upcoming->Today (due {get(rec, 'dueDate')}) {verb}")
+        if not args.dry_run:
+            api("PATCH", f"{BASE_ID}/{TASKS}/{rec['id']}", token,
+                payload={"fields": {fname("status"): "Today"}, "typecast": False})
+    print(f"FLIP-DUE {verb} {len(due)} Upcoming task(s) whose due date has arrived"
+          + (" (dry run, nothing written)" if args.dry_run else ""))
+    return 0
+
+
 def cmd_undo(args):
     token = pat()
     with open(args.applied) as fh:
@@ -971,6 +1012,10 @@ def main():
     p_apply.add_argument("--tier", choices=["auto", "all"], default="auto")
     p_apply.add_argument("--dry-run", action="store_true")
     p_apply.set_defaults(func=cmd_apply)
+
+    p_flip = sub.add_parser("flip-due", help="Upcoming tasks whose due date has arrived become Today")
+    p_flip.add_argument("--dry-run", action="store_true")
+    p_flip.set_defaults(func=cmd_flip_due)
 
     p_undo = sub.add_parser("undo", help="restore every value a run changed")
     p_undo.add_argument("--applied", required=True)

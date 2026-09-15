@@ -31,6 +31,7 @@ Commands:
 import argparse
 import json
 import os
+import re
 import sys
 import time
 import urllib.error
@@ -67,6 +68,19 @@ STUCK_DAYS = 7
 # Statuses that make a task part of the live board. Blank-status legacy rows
 # and Completed are out; Some Day (checkbox) is parked, not stuck.
 OPEN_STATUSES = ("Today", "Upcoming", "Overdue", "Approval")
+
+# Stamps agent-dispatch.py writes into Notes, read back here so a move the
+# foreman already made is not made again next slot (15 Sep 2026). Before this
+# an escalation re-linked Kevin and nothing else, so the task read as stuck
+# every slot and was escalated again (recZMDlT4l2lcwMhB: seven times); a
+# handover to Roy re-linked him and re-emailed the work every slot
+# (rec72wof6bUtaEKqJ, rec4kMUqLpQ0NlHAC: 34 handovers each).
+NOTE_STAMP_RE = re.compile(r"^\[(\d{1,2} \w{3} \d{4}) — [^\]]+\]\s*(.*)$", re.M)
+ESCALATE_NOTE_MARK = "Escalated to Kevin"
+DECIDED_NOTE_MARK = "Decision carried out"
+HOLDER_RE = re.compile(r"\(holder ([^)]*)\)")
+ROY_TOUCH_MARKS = ("Handed over to Roy Lavin", "Chase to Roy:")
+ROY_CHASE_DAYS = 7
 
 DECISION_GROUPS = [
     ("finish",   "Finished in-house (through the approval gate)"),
@@ -194,9 +208,29 @@ def last_movement(f, activity_ids, now=None):
     return best, src
 
 
+def newest_note_stamp(notes, *marks):
+    """The newest dated Notes line carrying any of `marks`, as an aware
+    datetime (London-stamped day read as UTC midnight — a day's precision is
+    all a 7-day rule needs), or None."""
+    best = None
+    lowered = [mark.lower() for mark in marks]
+    for m in NOTE_STAMP_RE.finditer(str(notes or "")):
+        text = m.group(2).lower()
+        if not any(mark in text for mark in lowered):
+            continue
+        try:
+            dt = datetime.strptime(m.group(1), "%d %b %Y").replace(tzinfo=timezone.utc)
+        except ValueError:
+            continue
+        if best is None or dt > best:
+            best = dt
+    return best
+
+
 def classify(f, activity_ids, now=None):
-    """One task's bucket: parked | waitingOnKevin | stuck | moving.
-    Returns (bucket, source, moved_dt) so the caller never recomputes."""
+    """One task's bucket: parked | waitingOnKevin | escalated | withRoy |
+    stuck | moving. Returns (bucket, source, moved_dt) so the caller never
+    recomputes."""
     now = now or datetime.now(timezone.utc)
     moved, src = last_movement(f, activity_ids, now)
     if f.get("Some Day"):
@@ -205,9 +239,27 @@ def classify(f, activity_ids, now=None):
     # legacy rows parked at Status Approval since before the loop existed
     # (22 of them found 4 Aug 2026, 80+ by late Aug) are stuck work wearing
     # an Approval badge, and counting them as "with Kevin" hides them forever.
+    # Checked FIRST: a live card is Kevin's whoever holds the task (a Roy-held
+    # decision card is still his decision, not a chase).
     if (f.get("Status") == "Approval" and not f.get("Approval Outcome")
             and f.get("Sent For Approval By")):
         return "waitingOnKevin", src, moved
+    # Roy holds it: never stuck, whatever the stamps say. His lane's only move
+    # is a weekly chase (cmd_board says when one is due); re-handing it over
+    # was the 34-handovers bug.
+    if ROY_REC in (f.get("Team Member") or []):
+        return "withRoy", src, moved
+    # Escalated inside the window. With an outcome it is DECIDED: Kevin has
+    # answered the card and the foreman makes the move he named. Without one
+    # the card is still his; escalating again would be the seven-times bug.
+    esc = newest_note_stamp(f.get("Notes"), ESCALATE_NOTE_MARK)
+    done = newest_note_stamp(f.get("Notes"), DECIDED_NOTE_MARK)
+    # A carried-out decision (route/handover after Kevin's answer) closes the
+    # card; the task is ordinary work again from that stamp on.
+    if esc and (now - esc) < timedelta(days=STUCK_DAYS) and not (done and done >= esc):
+        if f.get("Approval Outcome"):
+            return "decided", "escalateNote", esc
+        return "escalated", "escalateNote", esc
     if moved is None:
         # No stamp at all should be impossible (Created Time is automatic);
         # treat as stuck so it surfaces rather than hides.
@@ -414,6 +466,14 @@ def task_view(rec, activity_ids, dispatch_ids, now):
     # to touch — set-subtract in code, never by eyeballing two JSON files.
     if bucket == "stuck" and rec["id"] in dispatch_ids:
         bucket = "inFlight"
+    roy_touch = chase_due = None
+    if bucket == "withRoy":
+        # The weekly chase clock: the newest handover or chase note, with
+        # Created Time as the floor. One chase per ROY_CHASE_DAYS, never more.
+        roy_touch = (newest_note_stamp(f.get("Notes"), *ROY_TOUCH_MARKS)
+                     or parse_iso(f.get("Created Time")))
+        chase_due = (roy_touch is None
+                     or (now - roy_touch) >= timedelta(days=ROY_CHASE_DAYS))
     view = {
         "id": rec["id"],
         "name": f.get("Task Name", ""),
@@ -435,6 +495,20 @@ def task_view(rec, activity_ids, dispatch_ids, now):
         "hoursWaiting": hours_waiting(f, now),
         "movementSource": src,
     }
+    if bucket == "withRoy":
+        view["royLastTouch"] = roy_touch.isoformat() if roy_touch else None
+        view["chaseDue"] = bool(chase_due)
+    if bucket == "decided":
+        # Kevin's answer, verbatim: the move is whatever he said.
+        view["approvalOutcome"] = f.get("Approval Outcome")
+        view["approvalFeedback"] = f.get("Approval Feedback") or ""
+        view["ask"] = (str(f.get("Agent Output") or "").strip().splitlines() or [""])[0]
+        # Who held it when it was escalated: the gate's approve path re-links
+        # the task to the sender, so the board restores this holder unless
+        # Kevin named another.
+        holders = HOLDER_RE.findall(str(f.get("Notes") or ""))
+        view["priorHolder"] = [h for h in (holders[-1] if holders else "").split(",")
+                               if h and h != "none"]
     return bucket, is_kevin, view
 
 
@@ -519,6 +593,10 @@ TASK_FIELDS = [
     "Approval Slack TS", "Approval Outcome", "Team Member", "Assignee",
     "Sent For Approval By", "Some Day", "Maintenance Ticket", "Task Type",
     "Hard Deadline", "Inbound Note URL Link", "Priority",
+    # Notes carries the dispatch stamps (escalate, handover, chase) the
+    # classifier reads so a move is never repeated; Approval Feedback and
+    # Agent Output carry Kevin's answer to a DECIDE: card (15 Sep 2026).
+    "Notes", "Approval Feedback", "Agent Output",
 ]
 # Field-name drift control: each of these appears on at least one record of
 # any real board. If one vanishes from the WHOLE read, the name has drifted
@@ -588,7 +666,7 @@ def cmd_board(dispatch_queue_path=None):
                   "detection disabled this slot" % e, file=sys.stderr)
 
     buckets = {"stuck": [], "waitingOnKevin": [], "parked": [], "moving": [],
-               "inFlight": []}
+               "inFlight": [], "withRoy": [], "escalated": [], "decided": []}
     by_status, kevin_count = {}, 0
     for r in recs:
         status = r["fields"].get("Status", "?")
@@ -619,6 +697,10 @@ def cmd_board(dispatch_queue_path=None):
             "parked": len(buckets["parked"]),
             "moving": len(buckets["moving"]),
             "inFlight": len(buckets["inFlight"]),
+            "withRoy": len(buckets["withRoy"]),
+            "royChaseDue": sum(1 for v in buckets["withRoy"] if v.get("chaseDue")),
+            "escalated": len(buckets["escalated"]),
+            "decided": len(buckets["decided"]),
             "duplicateGroups": len(dupes),
             "duplicateExtras": sum(len(g["closable"]) for g in dupes),
         },
@@ -626,6 +708,13 @@ def cmd_board(dispatch_queue_path=None):
         "duplicates": dupes,
         "waitingOnKevin": buckets["waitingOnKevin"],
         "inFlight": [v["id"] for v in buckets["inFlight"]],
+        # Roy's lane: listed in full so the chase is decided off `chaseDue`,
+        # never off a re-read; escalated: ids only (the card is with Kevin).
+        "withRoy": buckets["withRoy"],
+        "escalated": [v["id"] for v in buckets["escalated"]],
+        # Answered DECIDE: cards, each with Kevin's verdict and feedback: the
+        # foreman's move this slot is the one he named.
+        "decided": buckets["decided"],
         "parked": [v["id"] for v in buckets["parked"]],
     }
     print(json.dumps(out, indent=1))
@@ -811,7 +900,8 @@ def cmd_verify(report_path):
         formula = "OR(%s)" % ",".join(
             "RECORD_ID()='%s'" % a["task"] for a in checkable)
         for rec in query_all(TASKS_TABLE, formula,
-                             ["Team Member", "Status", "Sent For Approval By"],
+                             ["Team Member", "Status", "Sent For Approval By",
+                              "Agent Output"],
                              "verify read"):
             live[rec["id"]] = rec.get("fields", {})
     checked = 0
@@ -825,8 +915,16 @@ def cmd_verify(report_path):
         checked += 1
         if move == "roy" and ROY_REC not in team:
             problems.append("claimed pass-to-Roy on %s but Roy is not on it" % a["task"])
-        elif move == "escalate" and KEVIN_REC not in team:
-            problems.append("claimed escalate on %s but Kevin is not on it" % a["task"])
+        elif move == "escalate":
+            # An escalation is a decision card (15 Sep 2026): Approval, sent
+            # by the Task Manager, with a DECIDE: ask. Kevin may already have
+            # answered it, which legitimately moves the status on.
+            if TASKMGR_TEAM_REC not in (f.get("Sent For Approval By") or []):
+                problems.append("claimed escalate on %s but Sent For Approval By is "
+                                "not the Task Manager (no card reached Kevin)" % a["task"])
+            elif "DECIDE:" not in str(f.get("Agent Output") or ""):
+                problems.append("claimed escalate on %s but Agent Output carries no "
+                                "DECIDE: ask" % a["task"])
         elif move in ("route", "chase") and a.get("to") not in team:
             problems.append("claimed %s of %s to %s but the link is absent"
                             % (move, a["task"], a.get("to")))
@@ -949,6 +1047,47 @@ def cmd_selftest():
     # some day parks
     b, _, _ = classify({"_id": "recP", "Created Time": old, "Some Day": True}, set(), now)
     assert b == "parked", b
+    # Roy holds it → withRoy, never stuck, however old the stamps (the
+    # 34-handovers bug); chaseDue only once a week from the last touch
+    roy_old = {"_id": "recR1", "Created Time": old, "Team Member": [ROY_REC],
+               "Notes": "[10 Aug 2026 — agent-dispatch] Handed over to Roy Lavin (roy): leak"}
+    b, _, _ = classify(roy_old, set(), now)
+    assert b == "withRoy", b
+    bucket, _, view = task_view({"id": "recR1", "fields": roy_old}, set(), set(), now)
+    assert bucket == "withRoy" and view["chaseDue"] is True, view
+    roy_fresh = dict(roy_old, _id="recR2",
+                     Notes=roy_old["Notes"] + "\n\n[23 Aug 2026 — agent] chase to roy: any news on the leak?")
+    bucket, _, view = task_view({"id": "recR2", "fields": roy_fresh}, set(), set(), now)
+    assert bucket == "withRoy" and view["chaseDue"] is False, view
+    assert view["royLastTouch"].startswith("2026-08-23"), view
+    # escalated inside the window → its own bucket, not stuck (the seven-times bug)
+    esc = {"_id": "recE1", "Created Time": old, "Status": "Today",
+           "Notes": "[20 Aug 2026 — agent-dispatch] Escalated to Kevin as a decision card: DECIDE: sell or keep?"}
+    b, src, _ = classify(esc, set(), now)
+    assert b == "escalated" and src == "escalateNote", (b, src)
+    # …but a live card at Approval is Kevin's queue, and an old escalation is stuck again
+    esc_card = dict(esc, _id="recE2", Status="Approval", **{"Sent For Approval By": ["rec1hYELb4zS8pjjO"]})
+    assert classify(esc_card, set(), now)[0] == "waitingOnKevin"
+    esc_old = dict(esc, _id="recE3", Notes=esc["Notes"].replace("20 Aug", "01 Aug"))
+    assert classify(esc_old, set(), now)[0] == "stuck"
+    # Kevin answered the card → decided, carrying his words for the foreman
+    esc_done = dict(esc, _id="recE4", **{"Approval Outcome": "Approved as-is",
+                                        "Approval Feedback": "Sell it.",
+                                        "Agent Output": "DECIDE: sell or keep?",
+                                        "Notes": esc["Notes"].replace("decision card:", "decision card (holder recAgentX):")})
+    bucket, _, view = task_view({"id": "recE4", "fields": esc_done}, set(), set(), now)
+    assert bucket == "decided" and view["approvalFeedback"] == "Sell it.", (bucket, view)
+    assert view["ask"] == "DECIDE: sell or keep?" and view["priorHolder"] == ["recAgentX"], view
+    # once the decision is carried out (a newer stamp), the card is closed:
+    # the task is ordinary work again, not decided and not escalated
+    carried = dict(esc_done, _id="recE5", **{"Approval Outcome": None,
+                   "Notes": esc_done["Notes"] + "\n\n[22 Aug 2026 — agent-dispatch] Decision carried out: Approved as-is — Sell it."})
+    assert classify(carried, set(), now)[0] == "stuck", classify(carried, set(), now)
+    # a Roy-held LIVE card is Kevin's decision, not a chase
+    roy_card = dict(roy_old, _id="recR3", Status="Approval",
+                    **{"Sent For Approval By": ["rec1hYELb4zS8pjjO"]})
+    assert classify(roy_card, set(), now)[0] == "waitingOnKevin"
+    assert newest_note_stamp("no stamps here", ESCALATE_NOTE_MARK) is None
     assert metric_text(3, 210, 12) == "3 stuck (target 0); 210 open; 12 with Kevin"
     # route is a first-class move in the digest taxonomy
     assert "route" in [k for k, _ in DECISION_GROUPS]

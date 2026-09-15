@@ -28,11 +28,13 @@ Exit:   0 always on a successful read — this reports, it does not gate.
 import argparse
 import json
 import os
+import re
 import sys
 import urllib.error
 import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 
 BASE_ID = "appnqjDpqDniH3IRl"
 TASKS = "tblqB8b22hKBL4PF1"
@@ -52,13 +54,69 @@ STALL_DUE_STATUSES = ("Today", "Overdue")
 
 CLOSED = ("Completed", "Cancelled")
 
+# Every status any surface reads (15 Sep 2026). A task stored outside this
+# set is on NO surface: not the queue, not the gate, not Kevin's board.
+BOARD_STATUSES = ("Today", "Upcoming", "Overdue", "Approval", "Completed", "Cancelled")
+
+# The lanes a stalled row is named with, so the Estate tab says WHY it is
+# not moving rather than only that it is not (15 Sep 2026):
+#   withKevin     a live card in his gate
+#   deferred      knocked back to a date that has not arrived
+#   signInNeeded  the agent stopped on a SIGN-IN NEEDED line only Kevin can clear
+#   withRoy       Roy Lavin holds it (his lane, chased weekly)
+#   invisible     on no surface: a non-board status, or Approval with no sender
+#   withAgent     an agent holds it inside the dispatch window
+LANES = ("withKevin", "deferred", "signInNeeded", "withRoy", "invisible", "withAgent")
+SIGNIN_RE = re.compile(r"^\s*SIGN-IN NEEDED:\s*\S", re.I | re.M)
+ROY_NAME = "Roy Lavin"
+
+
+def in_dispatch_window(status, due_date, today, some_day=False):
+    """The queue's window, for a record in hand: Today, Overdue, or Upcoming
+    whose due date has arrived (never a Some Day task). Mirrors QUEUE_FORMULA
+    in agent-dispatch.py and _inDispatchWindow in os/tasks/index.html
+    (tests/loop-health.test.js runs both sides over the same fixtures).
+    `today` is the London date; Airtable's own TODAY() is UTC."""
+    if status in STALL_DUE_STATUSES:
+        return True
+    due = str(due_date or "")[:10]
+    return status == "Upcoming" and bool(due) and not some_day and due <= today
+
+
+def invisible_reason(f):
+    """Why no surface can show this open task, or '' when one can. Mirrors
+    _invisibleReason in os/tasks/index.html."""
+    status = f.get("Status") or ""
+    if status not in BOARD_STATUSES:
+        return (f"Status '{status}' is not a board status: no queue, gate or board reads it"
+                if status else "No Status at all: no queue, gate or board reads it")
+    if status == "Approval" and not (f.get("Sent For Approval By") or []):
+        return "At Approval with no sender, so the gate cannot show it"
+    return ""
+
+
+def lane_for(f, roy_ids, today):
+    """Which lane a stalled task sits in — see LANES."""
+    status = f.get("Status") or ""
+    if invisible_reason(f):
+        return "invisible"
+    if status == "Approval":
+        deferred = str(f.get("Deferred Until") or "")[:10]
+        return "deferred" if deferred and deferred > today else "withKevin"
+    if any(x in roy_ids for x in (f.get("Team Member") or [])):
+        return "withRoy"
+    if SIGNIN_RE.search(str(f.get("Agent Output") or "")):
+        return "signInNeeded"
+    return "withAgent"
+
 KEVIN_AIRTABLE_EMAIL = "kevin@runpreneur.org.uk"
 
 # Same order as the tab: by how much it needs someone, not raw age. The draft
 # rule carries no day count, so sorting the whole list by age would sink every
 # "an agent has drafted nothing" item below every dated one — and that is the
 # rule that catches work never being started at all.
-RULE_ORDER = {"deadline": 0, "amend": 1, "draft": 2, "decide": 3}
+RULE_ORDER = {"invisible": 0, "deadline": 1, "amend": 2, "draft": 3, "decide": 4}
+LONDON = ZoneInfo("Europe/London")
 
 # The UC verification lane routinely holds open tasks past their date (its
 # dates are enforced by the dedicated UC watchdog, not this report). On the
@@ -121,8 +179,9 @@ def days_until(value, now):
     return (d - now.date()).days
 
 
-def compute(tasks, agent_ids, now=None):
+def compute(tasks, agent_ids, now=None, roy_ids=()):
     now = now or datetime.now(timezone.utc)
+    today = now.astimezone(LONDON).date().isoformat()
     needs_you, done, stalled = [], [], []
 
     for r in tasks:
@@ -147,6 +206,16 @@ def compute(tasks, agent_ids, now=None):
                 done.append({"id": r["id"], "name": name, "completedAt": completion})
 
         if not is_open:
+            continue
+
+        # -1. On NO surface (15 Sep 2026). A status outside the set every
+        #    reader keys on, or an Approval row with no sender: the queue,
+        #    the gate and the board all skip it, so nothing else here would
+        #    ever fire for it. The lane is the reason.
+        hidden = invisible_reason(f)
+        if hidden:
+            stalled.append({"id": r["id"], "name": name, "rule": "invisible",
+                            "days": 0, "why": hidden})
             continue
 
         # 0. A hard deadline — a real-world date lifted from the letter itself
@@ -181,7 +250,8 @@ def compute(tasks, agent_ids, now=None):
         # 2. An agent owns it, it is DUE, and it has produced nothing. No day
         #    count: these are usually old tasks routed to an agent recently, so
         #    "has had this 499 days" would measure the wrong thing and be false.
-        if owned and not f.get("Agent Output") and status in STALL_DUE_STATUSES:
+        if (owned and not f.get("Agent Output")
+                and in_dispatch_window(status, f.get("Due Date"), today, bool(f.get("Some Day")))):
             h = hours_since(f.get("Created Time"), now)
             if h is not None and h > STALL_DRAFT_HOURS:
                 stalled.append({"id": r["id"], "name": name, "rule": "draft", "days": 0,
@@ -209,6 +279,9 @@ def compute(tasks, agent_ids, now=None):
 
     done.sort(key=lambda d: d["completedAt"], reverse=True)
     stalled.sort(key=lambda s: (RULE_ORDER.get(s["rule"], 9), -s["days"]))
+    by_id = {r["id"]: (r.get("fields") or {}) for r in tasks}
+    for s in stalled:
+        s["lane"] = lane_for(by_id.get(s["id"], {}), set(roy_ids), today)
     return {"needsYou": needs_you, "done": done, "stalled": stalled}
 
 
@@ -230,13 +303,16 @@ def report():
         tasks = fetch(TASKS, ["Task Name", "Status", "Team Member", "Approval Outcome",
                               "Approved At", "Agent Output", "Completion Date",
                               "Created Time", "Approval Slack TS", "Assignee",
-                              "Due Date", "Hard Deadline"],
+                              "Due Date", "Hard Deadline", "Sent For Approval By",
+                              "Deferred Until", "Some Day"],
                       formula=('OR({Status}!="Completed",'
                                "IS_AFTER({Completion Date},DATEADD(TODAY(),-8,'days')))"))
     except (urllib.error.HTTPError, urllib.error.URLError, OSError) as exc:
         raise RuntimeError(f"could not read Airtable — {exc}")
 
     agent_ids = {r["id"] for r in team if (r.get("fields") or {}).get("Is AI Agent")}
+    # Roy's row by name, from the same Team Members read — never a typed id.
+    roy_ids = {r["id"] for r in team if (r.get("fields") or {}).get("Name") == ROY_NAME}
 
     # CONTROLS. Every rule here fires on the ABSENCE of something, so a field
     # that silently stops being populated turns this report into a permanent
@@ -272,6 +348,9 @@ def report():
     }
     if not agent_ids:
         controls["AI agent records"] = 0
+    # The withRoy lane keys on his row by name; a renamed row would silently
+    # turn every Roy-held task into withAgent, so it is a control.
+    controls["Roy Lavin's Team Members row"] = len(roy_ids)
     failed = [k for k, v in controls.items() if not v]
     if failed:
         detail = ", ".join(f"{k} = {v}" for k, v in controls.items())
@@ -279,9 +358,10 @@ def report():
                            f"an all-clear from a query that found nothing. ({detail})")
     linked = controls["open tasks linked to an AI agent"]
 
-    res = compute(tasks, agent_ids)
+    res = compute(tasks, agent_ids, roy_ids=roy_ids)
     res["control"] = {"agents": len(agent_ids), "agentLinkedTasks": linked,
-                      "tasksRead": len(tasks)}
+                      "tasksRead": len(tasks), "royRows": len(roy_ids)}
+    res["lanes"] = {lane: sum(1 for s in res["stalled"] if s["lane"] == lane) for lane in LANES}
     return res
 
 
@@ -303,9 +383,10 @@ def main():
     print(f"Approval loop — {tasks_read} tasks read, {linked} agent-linked")
     print(f"  Needs Kevin : {len(res['needsYou'])}")
     print(f"  Done (7d)   : {len(res['done'])}")
-    print(f"  NOT MOVING  : {len(res['stalled'])}")
+    print(f"  NOT MOVING  : {len(res['stalled'])}  "
+          + ", ".join(f"{k} {v}" for k, v in res["lanes"].items() if v))
     for s in res["stalled"]:
-        print(f"    - {s['name'][:64]}\n        {s['why']}")
+        print(f"    - [{s['lane']}] {s['name'][:64]}\n        {s['why']}")
 
 
 if __name__ == "__main__":
