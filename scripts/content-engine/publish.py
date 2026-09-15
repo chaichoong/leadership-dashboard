@@ -572,7 +572,11 @@ def finish_extras(day, entry, recs, test, save):
     try:
         media = media_for(day, entry, ["podcast"])
         if media.get("podcast"): entry.setdefault("podcast", {})["audio_url"] = media["podcast"]; save()
-    except Exception as ex:
+    except (Exception, SystemExit) as ex:
+        # upload_media raises SystemExit, which `except Exception` never catches: on 15 Sep 2026 1841's mp3 upload
+        # killed the whole hourly run before 2057 could be reached. The mp3 is not what Spotify gets (PODCAST_FORMAT
+        # is video), so a failed upload is noted on the entry and the run carries on.
+        entry.setdefault("podcast", {})["audio_error"] = "%s (%s)" % (str(ex)[-160:], now_utc()); save()
         print("episode %d: podcast audio not uploaded (%s)" % (day, str(ex)[-120:]), file=sys.stderr)
     pod = entry.setdefault("podcast", {})
     if pod.get("status") in (None, "", "failed"):
@@ -596,7 +600,7 @@ def finish_extras(day, entry, recs, test, save):
                         print("episode %d: Spotify list unreadable, podcast retry held until next run" % day, file=sys.stderr); return done
                 pod.update({"plan": plan_path, "title": ptitle, "status": "uploading", "started": now_utc()}); save()
                 done.append(run_spotify(day, card_task(day, full), plan_path, ptitle, test, pod)); save()
-        except Exception as ex:
+        except (Exception, SystemExit) as ex:
             pod.update({"status": "failed", "error": str(ex)[-200:]}); save()
             print("episode %d: Spotify step failed (%s); retried next run" % (day, str(ex)[-160:]), file=sys.stderr)
     elif pod.get("status") == "uploading":
@@ -605,7 +609,7 @@ def finish_extras(day, entry, recs, test, save):
             import spotify
             status, _ = spotify.verify_published(pod.get("title") or "", tries=1)
             pod["status"] = status if status in ("published", "processing") else "failed"; save()
-        except Exception as ex:
+        except (Exception, SystemExit) as ex:
             print("episode %d: could not check Spotify after a stopped upload (%s)" % (day, str(ex)[-120:]), file=sys.stderr)
     return done
 
@@ -1208,6 +1212,16 @@ def selftest():
     assert "extras_done(entry)" in rsrc and "STATUS_PUBLISHED" in rsrc, "a Published record with its podcast missing still gets the retry"
     fsrc = inspect.getsource(finish_extras)
     assert fsrc.index("spotify.verify_published(ptitle") < fsrc.index("run_spotify(day"), "a retried podcast looks at Spotify before it uploads"
+    # 15 Sep 2026: a media upload that raises SystemExit must not end the hourly run (1841's mp3 did, hourly)
+    real_media, real_files = globals()["media_for"], globals()["episode_files"]
+    def boom(day, entry, kinds): raise SystemExit("media upload failed for Ep1841_Podcast.mp3: ")
+    globals()["media_for"] = boom; globals()["episode_files"] = lambda day: {k: "/nonexistent/%s" % k for k in ("full", "podcast", "thumb")}
+    try:
+        ent = {"youtube_link": "https://youtu.be/x", "blog": {"url": "https://runpreneur.org.uk/blog/b/y"}}
+        out = finish_extras(1841, ent, {"Long Form Video": {"id": "recX", "fields": {}}}, True, lambda: None)
+        assert out == [] and "media upload failed" in ent["podcast"]["audio_error"], ent
+    finally:
+        globals()["media_for"], globals()["episode_files"] = real_media, real_files
     src = inspect.getsource(sync); assert "import platform_copy" not in src, "sync must use the module-level pc: an import inside the function made pc a local and crashed every sync (10 Sep 2026, 07:15)"
     assert 'if not str(day).isdigit() or not isinstance(entry, dict): continue' in src, "sync skips the cursor and the held posts"
     assert may_go_to_youtube(2054, gaps, st, led, {1799, 2054}) and st[CURSOR_KEY] == 2053, "a gap day in the approved set does not disturb the order"
