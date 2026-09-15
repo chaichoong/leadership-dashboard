@@ -3706,6 +3706,18 @@ function computeCheckLanes(){
 const DUPE_GENERIC = [
     'a', 'an', 'and', 'are', 'as', 'at', 'be', 'been', 'by', 'for', 'from', 'in', 'is', 'it', 'its', 'of', 'on', 'or', 're', 'that', 'the', 'this', 'to', 'was', 'were', 'with', 'action', 'again', 'asap', 'check', 'consider', 'deal', 'fix', 'handle', 'investigate', 'look', 'needs', 'please', 'repeatedly', 'resolve', 'review', 'sort', 'urgent', 'broken', 'error', 'errors', 'exceed', 'exceeded', 'exceeding', 'fail', 'failed', 'failing', 'failure', 'failures', 'issue', 'issues', 'problem', 'problems', 'api', 'app', 'apps', 'google', 'script', 'scripts', 'service', 'services', 'ref', 'reference', 'usage'
 ];
+// Words that say WHEN, never WHICH (Kevin's ruling, 15 Sep 2026). The key
+// keeps the first two distinctive words, so "CONTENT (OD): Fri 11 Sep, The
+// offer: ..." keyed to `fri sep` and every card on the same weekday collided
+// (19 of the 22 Approval cards on 15 Sep 2026). Full and short forms. Shared
+// verbatim with DUPE_DATE_WORDS in scripts/create-agent-task.py; drift-tested.
+const DUPE_DATE_WORDS = [
+    'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday',
+    'mon', 'tue', 'tues', 'wed', 'weds', 'thu', 'thur', 'thurs', 'fri', 'sat', 'sun',
+    'january', 'february', 'march', 'april', 'may', 'june', 'july', 'august',
+    'september', 'october', 'november', 'december',
+    'jan', 'feb', 'mar', 'apr', 'jun', 'jul', 'aug', 'sep', 'sept', 'oct', 'nov', 'dec'
+];
 
 // ─── SAME MATTER, TWICE (27-28 Aug 2026) ─────────────────────────────
 //
@@ -3808,7 +3820,9 @@ function dupeTaskKey(name){
         .filter(function(w){
             return w && !/^\d+$/.test(w) && !/^(?=(?:[^\d]*\d){3,})[a-z\d]+$/.test(w);
         });
-    var distinctive = words.filter(function(w){ return DUPE_GENERIC.indexOf(w) === -1; });
+    var distinctive = words.filter(function(w){
+        return DUPE_GENERIC.indexOf(w) === -1 && DUPE_DATE_WORDS.indexOf(w) === -1;
+    });
     // AN ADDRESS SAYS WHERE, NOT WHICH (28 Aug 2026). Two slots is not many,
     // and when the address leads the title it takes both: "18 Siddows Avenue —
     // garden complaint" and "18 Siddows Avenue — rent arrears" both keyed to
@@ -3909,7 +3923,8 @@ function dupeSignals(name){
     const words = raw.toLowerCase().replace(/[^a-z0-9\s]/g,' ').split(/\s+/)
         .filter(function(w){
             return w && !/^\d+$/.test(w) && !/^(?=(?:[^\d]*\d){3,})[a-z\d]+$/.test(w)
-                && DUPE_GENERIC.indexOf(w) === -1 && DUPE_ACTION_WORDS.indexOf(w) === -1;
+                && DUPE_GENERIC.indexOf(w) === -1 && DUPE_ACTION_WORDS.indexOf(w) === -1
+                && DUPE_DATE_WORDS.indexOf(w) === -1;
         });
     // Python keeps a SET of words (the ratio's denominator); a repeated word
     // must count once here too or the two languages disagree on the ratio.

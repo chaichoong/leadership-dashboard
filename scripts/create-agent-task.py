@@ -607,6 +607,21 @@ DUPE_GENERIC = {
     "usage",
 }
 
+# Words that say WHEN, never WHICH (Kevin's ruling, 15 Sep 2026). The key
+# keeps the first two distinctive words, so a card titled "CONTENT (OD): Fri
+# 11 Sep, The offer: ..." keyed to `fri sep` and every card on the same
+# weekday collided: 19 of the 22 Approval cards on 15 Sep 2026 paired on the
+# weekday and month alone. Full and short forms, because the Content Engine
+# writes "Fri 11 Sep" and a scan writes "Friday 11 September". Shared verbatim
+# with DUPE_DATE_WORDS in os/agents/index.html; drift-tested.
+DUPE_DATE_WORDS = {
+    "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday",
+    "mon", "tue", "tues", "wed", "weds", "thu", "thur", "thurs", "fri", "sat", "sun",
+    "january", "february", "march", "april", "may", "june", "july", "august",
+    "september", "october", "november", "december",
+    "jan", "feb", "mar", "apr", "jun", "jul", "aug", "sep", "sept", "oct", "nov", "dec",
+}
+
 
 def dupe_task_key(name):
     """THE INCIDENT ANCHOR. Line-for-line port of dupeTaskKey in
@@ -641,7 +656,8 @@ def dupe_task_key(name):
         and not re.fullmatch(r"\d+", w)
         and not re.fullmatch(r"(?=(?:[^\d]*\d){3,})[a-z\d]+", w)
     ]
-    distinctive = [w for w in words if w not in DUPE_GENERIC]
+    distinctive = [w for w in words
+                   if w not in DUPE_GENERIC and w not in DUPE_DATE_WORDS]
     # AN ADDRESS SAYS WHERE, NOT WHICH (28 Aug 2026). Two slots is not many,
     # and when the address leads the title it takes both: "18 Siddows Avenue —
     # garden complaint" and "18 Siddows Avenue — rent arrears" both keyed to
@@ -820,6 +836,7 @@ def dupe_signals(name):
         and not re.fullmatch(r"(?=(?:[^\d]*\d){3,})[a-z\d]+", w)
         and w not in DUPE_GENERIC
         and w not in DUPE_ACTION_WORDS
+        and w not in DUPE_DATE_WORDS
     ]
     # Kept as an ordered list too: a place is recognised by adjacency, and a
     # set has thrown that away.
@@ -1287,6 +1304,31 @@ def selftest():
     check("brand digits kept", "v12" in k("Renew v12 licence"))
     check("pure digits dropped", "4471902" not in k("Pay ref 4471902"))
     check("empty name empty key", k("") == "" and k("#12345") == "")
+    # Weekday and month words never count toward the key (Kevin, 15 Sep 2026).
+    # Two Content Engine cards on the same weekday are two matters; two cards
+    # a week apart with the same subject are still one matter by the verdict.
+    fri = "CONTENT (OD): Fri 11 Sep, The offer: Five signs your business runs on you"
+    fri2 = "CONTENT (OD): Fri 11 Sep, Newsletter: The map: how AI agents take 90% of your daily work"
+    check("two cards on one weekday key apart", k(fri) != k(fri2))
+    check("a weekday or month word is never a key slot",
+          not ({"fri", "sep"} & set(k(fri).split("|")[-1].split()))
+          and k("Monday 7 September rent statement") == k("Friday 11 October rent statement"))
+    check("a date-only name still keys by its words, not to empty",
+          k("CONTENT (OD): Fri 11 Sep") != "" and k("Fri 11 Sep") != k("Mon 14 Sep"))
+    v = dupe_verdict("CONTENT (OD): Fri 11 Sep, The offer: Five signs your business runs on you",
+                     "CONTENT (OD): Fri 18 Sep, The offer: Five signs your business runs on you",
+                     mode="group")
+    check("same subject a week apart still groups on its words",
+          v["match"] and "fri" not in v["why"] and "sep" not in v["why"] and "signs" in v["why"])
+    check("a shared weekday and month is not a shared subject",
+          not dupe_verdict("CONTENT (OD): Fri 11 Sep, Newsletter: Six steps to turn your SOP into an agent",
+                           "CONTENT (OD): Fri 18 Sep, The offer: Five signs your business runs on you",
+                           mode="group")["match"])
+    # Back-test (the reviewer's find): with DUPE_DATE_WORDS emptied this pair
+    # matched on "both about fri, sep", the date being the ONLY words shared.
+    check("two short cards sharing only a weekday and month never match",
+          not dupe_verdict("CONTENT (OD): Fri 11 Sep, Newsletter",
+                           "CONTENT (OD): Fri 11 Sep, The offer", mode="group")["match"])
 
     def row(rid, name, status="Today", sender="", created="2026-08-01T00:00:00.000Z",
             team=None, ticket=False):
