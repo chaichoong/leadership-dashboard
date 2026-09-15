@@ -5907,6 +5907,18 @@ function renderEstateStatus(){
 
     renderEstateStalled(gf);
 }
+// Why a stalled task is not moving, from loop-health's `lane` (15 Sep 2026): a
+// list that only says "not moving" cannot be acted on.
+const ESTATE_LANE_LABEL = {
+    withKevin: 'With Kevin', deferred: 'Deferred', signInNeeded: 'Sign-in needed',
+    withRoy: 'With Roy', invisible: 'Invisible to every surface', withAgent: 'With an agent',
+};
+function estateLaneChip(lane){
+    const label = ESTATE_LANE_LABEL[lane] || lane || '';
+    if(!label) return '';
+    const danger = lane === 'invisible';
+    return `<span style="display:inline-block;margin-left:6px;padding:1px 6px;border-radius:var(--radius-full);font-size:var(--fs-xs);font-weight:var(--fw-medium);background:${danger ? 'var(--danger-bg)' : 'var(--bg-subtle)'};color:${danger ? 'var(--danger)' : 'var(--text-secondary)'}">${esc(label)}</span>`;
+}
 function renderEstateStalled(gf){
     // The not-moving list, written by the same job from scripts/loop-health.py.
     const sbody = document.getElementById('estateStalledBody'), scount = document.getElementById('estateStalledCount');
@@ -5925,7 +5937,7 @@ function renderEstateStalled(gf){
     sbody.innerHTML = `<div style="color:var(--text-muted);font-size:var(--fs-xs);margin-bottom:6px">${esc(gf(rep,'detail')||'')} Checked ${esc(estateAgo(gf(rep,'lastRun')))}.</div>` +
         stalled.map((s,i) => `<div style="display:flex;gap:10px;padding:6px 0;border-bottom:1px solid var(--border-subtle);font-size:var(--fs-sm)">
             <div style="flex:0 0 22px;color:var(--text-muted)">${i+1}.</div>
-            <div style="flex:1;min-width:0"><div style="font-weight:var(--fw-medium)">${esc(s.name||'')}</div><div style="color:var(--text-secondary);font-size:var(--fs-xs)">${esc(s.why||'')}</div></div>
+            <div style="flex:1;min-width:0"><div style="font-weight:var(--fw-medium)">${esc(s.name||'')}${estateLaneChip(s.lane)}</div><div style="color:var(--text-secondary);font-size:var(--fs-xs)">${esc(s.why||'')}</div></div>
         </div>`).join('');
 }
 

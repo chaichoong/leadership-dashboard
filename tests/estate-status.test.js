@@ -59,6 +59,15 @@ describe('the Estate status tab', () => {
     expect(read('scripts/estate-status.py')).toMatch(/TABLE = "tblZVrdzivyBueZVf"/);
   });
 
+  it('names WHY each not-moving row is stalled, from the lane the writer carries (15 Sep 2026)', () => {
+    // The writer copies loop-health's lane into the payload; the tab renders it.
+    expect(read('scripts/estate-status.py')).toMatch(/"lane": s\.get\("lane"\)/);
+    expect(page).toMatch(/estateLaneChip\(s\.lane\)/);
+    for (const lane of ['withKevin', 'deferred', 'signInNeeded', 'withRoy', 'invisible', 'withAgent']) {
+      expect(page, `lane ${lane} has a label`).toMatch(new RegExp(`${lane}:\\s*'[^']+'`));
+    }
+  });
+
   it('is a page tab Kevin can open, deep-linkable as #tab=estate (and #tab=status)', () => {
     expect(page).toMatch(/id="ptab-estate"[^>]*onclick="switchAgentsView\('estate'\)"/);
     expect(page).toMatch(/<div class="page-view" id="view-estate">/);

@@ -70,9 +70,50 @@ F = {
     "inboundSender": "fldzf4xlbrQuktx0i",
     "inboundUrl":   "fldXf1p0vtHqOZcKl",
     "notes":        "fldR7apBzSp3oxFxz",
+    # Same id as AF["sentForApprovalBy"] in agent-dispatch.py; the gate hides
+    # an Approval row without it.
+    "sentForApprovalBy": "fld30Yw8SWYVp049g",
 }
 
 PRIORITY_RANK = {"Low": 0, "Medium": 1, "High": 2, "Urgent": 3}
+
+# THE STATUSES A NEW TASK MAY CARRY (15 Sep 2026). Every surface reads Status:
+# dispatch and loop-health key on Today/Overdue (plus due Upcoming), the gate
+# on Approval, Kevin's board on the same three. The create used to POST
+# whatever Status the agent passed with typecast on, so "Open" and
+# "2026-09-10" became NEW select options silently and the tasks carrying them
+# were on no surface at all (recOkNN9Ww0gGLUYT, recDlEl2CwfONU9VL,
+# recHk3VZZ9d8utk7w, recaCaQJvw17iDhKm). Anything outside this set — or no
+# Status at all — becomes Today, with a Notes line saying what was passed, and
+# the create is sent with typecast OFF so a select field can never grow an
+# option from a typo again. Overdue is derived by the board, never set on
+# create. Guarded by the selftest and the open-task-status-is-a-board-status
+# invariant in scripts/check-data-invariants.py.
+NEW_TASK_STATUSES = ("Today", "Upcoming", "Approval")
+STATUS_FIX_MARK = "— create-agent-task] Status "
+
+
+def normalise_status(fields, stamp):
+    """Force a board status onto a new task's fields, in place. Returns the
+    note line written when the passed value was replaced, else None."""
+    raw = _sel_name(fields.get(F["status"]))
+    # Approval is a board status ONLY with a sender: the gate formula requires
+    # Sent For Approval By, so an Approval row without one is exactly the
+    # invisible card the approval-row-carries-its-sender invariant hunts.
+    has_sender = bool([x for x in (fields.get(F["sentForApprovalBy"]) or []) if x])
+    if raw in NEW_TASK_STATUSES and (raw != "Approval" or has_sender):
+        fields[F["status"]] = raw
+        return None
+    passed = f"{raw!r}" if raw else "nothing"
+    why = ("Approval with no Sent For Approval By is on no surface"
+           if raw == "Approval" else
+           f"not a board status (allowed: {', '.join(NEW_TASK_STATUSES)})")
+    line = (f"[{stamp} {STATUS_FIX_MARK}{passed} was passed on create; {why}, so "
+            "this task was set to Today rather than left invisible.")
+    fields[F["status"]] = "Today"
+    existing = str(fields.get(F["notes"]) or "").rstrip()
+    fields[F["notes"]] = (existing + "\n\n" + line).strip()
+    return line
 
 # Personal-mailbox providers: a shared domain proves nothing about identity,
 # so only an EXACT address match folds. A private (corporate) domain match
@@ -933,7 +974,13 @@ def build_update(existing_fields, incoming_fields, today_iso):
 
     existing_status = _sel_name(existing_fields.get(F["status"]))
     if existing_status != "Approval":
-        patch[F["status"]] = _sel_name(incoming_fields.get(F["status"])) or "Today"
+        # Same allowed set as a create: the fold path PATCHes with typecast
+        # on, so an unvalidated value here would mint the phantom option the
+        # create path now refuses.
+        wanted = _sel_name(incoming_fields.get(F["status"]))
+        has_sender = bool([x for x in (incoming_fields.get(F["sentForApprovalBy"]) or []) if x])
+        patch[F["status"]] = (wanted if wanted in NEW_TASK_STATUSES
+                              and (wanted != "Approval" or has_sender) else "Today")
 
     ex_due = str(existing_fields.get(F["due"]) or "")[:10]
     in_due = str(incoming_fields.get(F["due"]) or "")[:10]
@@ -1033,6 +1080,10 @@ def cmd_create(fields, force=False, dry_run=False):
             fields[F["due"]] = corrected[0]
             print("DUE DATE CORRECTED: %s" % corrected[1], file=sys.stderr)
 
+    fixed = normalise_status(fields, date.today().strftime("%d %b %Y"))
+    if fixed:
+        print("STATUS CORRECTED: %s" % fixed, file=sys.stderr)
+
     verdict = {"action": "create", "key": dupe_task_key(fields.get(F["name"], ""))}
     if not force:
         # Refuse BEFORE the board read: an auto-reply is not a matter, so the
@@ -1070,13 +1121,33 @@ def cmd_create(fields, force=False, dry_run=False):
         return 0
 
     if not dry_run:
-        created = _request("POST", f"/{TASKS}", {"typecast": True, "fields": fields})
+        # typecast OFF, deliberately: with it on, a select value nobody has
+        # ever seen becomes a new option instead of an error, and the task it
+        # rides on is on no surface. Link fields take record ids and select
+        # fields take existing option names; a miss is a loud 422 here, never
+        # a quiet new option.
+        try:
+            created = _request("POST", f"/{TASKS}", {"typecast": False, "fields": fields})
+        except RuntimeError as exc:
+            if "422" not in str(exc):
+                raise
+            # A 422 with typecast off is a value Airtable will not take as-is
+            # (a collaborator passed by email is the known case). Status is
+            # already validated above, so the retry can no longer mint a
+            # Status option; it is logged so a caller passing a bad select
+            # value is seen rather than silently coerced.
+            print("TYPECAST FALLBACK: the create was refused with typecast off "
+                  f"({str(exc)[:200]}); retrying with typecast on, Status already "
+                  "validated", file=sys.stderr)
+            created = _request("POST", f"/{TASKS}", {"typecast": True, "fields": fields})
         task_id = created.get("id", "")
         write_track_record(task_id, fields)
     else:
         task_id = "(dry run)"
     out = {"action": "created", "taskId": task_id, "key": verdict.get("key", ""),
-           "dryRun": dry_run}
+           "dryRun": dry_run, "status": fields.get(F["status"])}
+    if fixed:
+        out["statusCorrected"] = fixed
     if verdict.get("note"):
         out["note"] = verdict["note"]
     print(json.dumps(out))
@@ -1426,6 +1497,59 @@ def selftest():
     apply_letter_deadline(f5, scan)
     check("a parsed deadline survives the correction path",
           hard_deadline_correction(f5, T) is None and f5[F["due"]] == "2026-09-29")
+
+    # Status on create (15 Sep 2026): only a board status leaves this script.
+    for passed, want in (("Open", "Today"), ("2026-09-10", "Today"), (None, "Today"),
+                         ("Completed", "Today"), ("Overdue", "Today"),
+                         ("Today", "Today"), ("Upcoming", "Upcoming"), ("Approval", "Today")):
+        f6 = {F["name"]: "X", F["notes"]: "kept"}
+        if passed is not None:
+            f6[F["status"]] = passed
+        line = normalise_status(f6, "15 Sep 2026")
+        corrected = want == "Today" and passed != "Today"
+        check(f"status {passed!r} -> {want}", f6[F["status"]] == want)
+        check(f"status {passed!r} note line only when corrected",
+              (line is not None) == corrected and
+              (STATUS_FIX_MARK in f6[F["notes"]]) == corrected and
+              f6[F["notes"]].startswith("kept"))
+    f8 = {F["name"]: "X", F["status"]: "Approval", F["sentForApprovalBy"]: ["recAgent"]}
+    check("Approval WITH a sender is a real card and stays",
+          normalise_status(f8, "15 Sep 2026") is None and f8[F["status"]] == "Approval")
+    f7 = {F["name"]: "X", F["status"]: {"name": "Open"}}
+    check("a select object is read like a name",
+          normalise_status(f7, "15 Sep 2026") and f7[F["status"]] == "Today"
+          and "'Open'" in f7[F["notes"]])
+    # The fold path validates the same way (it PATCHes with typecast on).
+    patch = build_update({F["desc"]: "a", F["status"]: {"name": "Today"}},
+                         {F["desc"]: "b", F["status"]: "Open"}, "2026-09-15")
+    check("fold path never writes a non-board status", patch[F["status"]] == "Today")
+    patch = build_update({F["desc"]: "a", F["status"]: {"name": "Today"}},
+                         {F["desc"]: "b", F["status"]: "Approval"}, "2026-09-15")
+    check("fold path never writes a sender-less Approval", patch[F["status"]] == "Today")
+    # And the create itself goes out with typecast OFF, carrying the corrected
+    # status: the whole point, so it is asserted on the request that leaves.
+    sent = []
+    g = globals()
+    saved = (g["_request"], g["load_scan_cache"], g["write_track_record"])
+    try:
+        g["_request"] = lambda m, p, body=None: (sent.append((m, p, body)) or {"id": "recNEW"})
+        g["load_scan_cache"] = lambda: {}
+        g["write_track_record"] = lambda tid, fields: None
+        import io, contextlib
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(io.StringIO()):
+            rc = cmd_create({F["name"]: "INBOUND: selftest", F["status"]: "Open",
+                             F["due"]: "2026-09-20"}, force=True)
+        posted = [b for m, p, b in sent if m == "POST"]
+        check("create POSTs once with typecast off",
+              rc == 0 and len(posted) == 1 and posted[0]["typecast"] is False)
+        check("create POSTs the corrected status, never the passed one",
+              posted and posted[0]["fields"][F["status"]] == "Today"
+              and STATUS_FIX_MARK in posted[0]["fields"][F["notes"]])
+        check("the caller is told the status was corrected",
+              json.loads(buf.getvalue().strip().splitlines()[-1]).get("statusCorrected"))
+    finally:
+        g["_request"], g["load_scan_cache"], g["write_track_record"] = saved
 
     failed = [label for label, ok in checks if not ok]
     print(json.dumps({"checks": len(checks), "failed": failed}))

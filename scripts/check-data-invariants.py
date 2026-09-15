@@ -122,6 +122,59 @@ INVARIANTS = [
         "fields": ["Task Name", "Status", "Approval Outcome", "Processed by AI Agent"],
     },
     {
+        # EVERY SURFACE READS STATUS. Dispatch and loop-health key on
+        # Today/Overdue (plus due Upcoming), the gate on Approval, Kevin's
+        # board on the same three. The agent-task create used to POST whatever
+        # Status it was handed with typecast on, so "Open" and "2026-09-10"
+        # became new select options silently and the tasks carrying them were
+        # on no surface at all — a creditor debt notice and two council-tax
+        # enforcement replies among them. Nothing errored: a select field with
+        # thirteen options looks exactly like one with eleven. Back-tested
+        # read-only on 15 Sep 2026: 21 open tasks outside the set (12 'To do',
+        # 4 'Open', 2 blank, 'This week', 'This month', 'Current'). A blank
+        # Status is a violation too: it is on no board either.
+        "name": "open-task-status-is-a-board-status",
+        "table": TASKS,
+        "incident": "Sep 2026 — create-agent-task.py minted Status options 'Open' and '2026-09-10' via typecast; four live matters were invisible to dispatch, the gate and the board",
+        "asserts": "not Completed/Cancelled => Status is Today, Upcoming, Overdue or Approval",
+        "violation": (
+            "AND({Status}!='Completed',{Status}!='Cancelled',{Status}!='Today',"
+            "{Status}!='Upcoming',{Status}!='Overdue',{Status}!='Approval')"
+        ),
+        # No field_probe: Today is never legitimately empty, so an empty
+        # control here is a broken read and must fail, not skip.
+        "control": "{Status}='Today'",
+        "control_means": "tasks at Status Today (the population every surface reads)",
+        "fields": ["Task Name", "Status", "Due Date"],
+    },
+    {
+        # THE GATE DROPS A CARD WITH NO SENDER. APV_QUEUE_FORMULA on the AI
+        # Agents page, the Slack digest and the Task Manager's gate lane all
+        # require Sent For Approval By, so a task parked at Approval without
+        # one is waiting on Kevin from nowhere he can see it, and nothing says
+        # so. reck9rYvAt5n2vAtf sat that way from 26 Aug 2026 (a prospecting
+        # deliverability finding). One day's grace: a submit writes both
+        # fields in one PATCH, so a row still bare after a day is a real gap,
+        # not a write in flight. Anchored on when Status last CHANGED, not on
+        # creation — a task created weeks ago and moved to Approval this
+        # morning is not late yet. LAST_MODIFIED_TIME({Status}) is BLANK for a
+        # row whose Status was set once at creation and never edited, so that
+        # shape falls back to the creation time or it would never fire.
+        "name": "approval-row-carries-its-sender",
+        "table": TASKS,
+        "incident": "26 Aug – 15 Sep 2026 — reck9rYvAt5n2vAtf at Approval with Sent For Approval By blank: hidden from the gate, the digest and the Task Manager for three weeks",
+        "asserts": "Status = Approval for more than a day => Sent For Approval By is set",
+        "violation": (
+            "AND({Status}='Approval', LEN(ARRAYJOIN({Sent For Approval By})&'')=0, "
+            "IS_BEFORE(IF(LAST_MODIFIED_TIME({Status}), LAST_MODIFIED_TIME({Status}), CREATED_TIME()), "
+            "DATEADD(NOW(),-1,'days')))"
+        ),
+        # No field_probe: Approval is never legitimately empty (Kevin's queue).
+        "control": "{Status}='Approval'",
+        "control_means": "tasks currently at Approval (the population the gate must show)",
+        "fields": ["Task Name", "Status", "Team Member"],
+    },
+    {
         # An approval that cannot be handed back to anyone dead-ends: Kevin says
         # yes and nothing carries the action out. Cheap to catch, invisible
         # otherwise, because the task simply sits there looking fine.

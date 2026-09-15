@@ -9332,6 +9332,25 @@ const STALL_DECIDE_DAYS = 5;    // sat waiting on a human this long
 // future-dated. A list that long is noise, and noise is what stops it being read.
 const STALL_DUE_STATUSES = ['Today','Overdue'];
 const STALL_DEADLINE_DAYS = 3;  // a hard deadline this close (or past) with the task open
+// The dispatcher's window ALSO takes a stored-Upcoming task whose due date has
+// arrived (15 Sep 2026: 95 of 129 Upcoming tasks were due and on no surface,
+// because nothing deployed flips them to Today). Mirrors QUEUE_FORMULA in
+// scripts/agent-dispatch.py and in_dispatch_window in scripts/loop-health.py.
+function _inDispatchWindow(t){
+  if(STALL_DUE_STATUSES.includes(t.storedStatus))return true;
+  const due=String(t.dueDate||'').slice(0,10);
+  return t.storedStatus==='Upcoming'&&!!due&&!t.someDay&&due<=todayStr();
+}
+// Every status any surface reads. A task stored outside this set, or at
+// Approval with no sender, is on NO surface at all (15 Sep 2026). Mirrors
+// BOARD_STATUSES / invisible_reason in scripts/loop-health.py.
+const BOARD_STATUSES = ['Today','Upcoming','Overdue','Approval','Completed','Cancelled'];
+function _invisibleReason(t){
+  const s=t.storedStatus||'';
+  if(!BOARD_STATUSES.includes(s))return s?`Status '${s}' is not a board status: no queue, gate or board reads it`:'No Status at all: no queue, gate or board reads it';
+  if(s==='Approval'&&!(t.raisedByIds||[]).length)return 'At Approval with no sender, so the gate cannot show it';
+  return '';
+}
 // The UC verification lane routinely holds open tasks past their date (its
 // dates are enforced by the dedicated UC watchdog, not this report) — 24 of
 // 30 hits on the day the deadline rule was written. Excluded by name prefix,
@@ -9409,6 +9428,10 @@ function computeApprovalLoop(tasks){
   const stalled=[];
   all.forEach(t=>{
     if(!_isOpen(t))return;
+    // -1. On NO surface: nothing below would ever fire for it. Mirrors the
+    //    same rule in scripts/loop-health.py.
+    const hidden=_invisibleReason(t);
+    if(hidden){stalled.push({t,days:0,why:hidden,rule:'invisible'});return;}
     // 0. A hard deadline — a real-world date lifted from the letter itself —
     //    inside the warning window or already past, with the task still open.
     //    Fires whatever the status, INCLUDING Approval: a deadline does not
@@ -9445,7 +9468,7 @@ function computeApprovalLoop(tasks){
     //    STORED value. Using the derived one flagged 63 tasks the dispatcher was
     //    never going to pick up, which is the false-positive flood this rule was
     //    narrowed to avoid in the first place.
-    if(_isAgentOwned(t)&&!t.agentOutput&&STALL_DUE_STATUSES.includes(t.storedStatus)){
+    if(_isAgentOwned(t)&&!t.agentOutput&&_inDispatchWindow(t)){
       // `created` is the real createdTime. NOT `createdDate` — that field is
       // "Due Date for Interface", a due date, and anchoring a staleness rule to
       // a re-stampable due date is the exact bug rule 3 below exists to avoid.
@@ -9472,7 +9495,7 @@ function computeApprovalLoop(tasks){
   // carries no day count (see rule 2), so sorting the whole list by age would
   // sink every "an agent has drafted nothing" item below every dated one — and
   // that rule is the one that catches work never being started at all.
-  const RULE_ORDER={deadline:0,amend:1,draft:2,decide:3};
+  const RULE_ORDER={invisible:0,deadline:1,amend:2,draft:3,decide:4};
   stalled.sort((a,b)=>(RULE_ORDER[a.rule]-RULE_ORDER[b.rule])||((b.days||0)-(a.days||0)));
   return {needsYou,done,stalled};
 }

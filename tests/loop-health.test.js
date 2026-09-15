@@ -91,7 +91,8 @@ function toParsed(rec, derive) {
     created: f['Created Time'] || '',
     completion: f['Completion Date'] || '',
     teamMemberIds: f['Team Member'] || [],
-    raisedByIds: [],
+    raisedByIds: f['Sent For Approval By'] || [],
+    someDay: !!f['Some Day'],
     approvalOutcome: f['Approval Outcome'] || '',
     approvedAt: f['Approved At'] || '',
     agentOutput: f['Agent Output'] || '',
@@ -155,10 +156,16 @@ describe('approval-loop stall rules', () => {
                'Created Time': '2026-08-10T09:00:00Z' }),
         task({ 'Task Name': 'Overdue undrafted', Status: 'Overdue', 'Team Member': [AGENT],
                'Created Time': '2026-08-01T09:00:00Z' }),
-        task({ 'Task Name': 'Waiting', Status: 'Approval', 'Team Member': [AGENT],
+        task({ 'Task Name': 'Waiting', Status: 'Approval', 'Team Member': [AGENT], 'Sent For Approval By': [AGENT],
                'Approval Slack TS': epoch('2026-08-08T09:00:00Z') }),
-        task({ 'Task Name': 'Fresh approval', Status: 'Approval', 'Team Member': [AGENT],
+        task({ 'Task Name': 'Fresh approval', Status: 'Approval', 'Team Member': [AGENT], 'Sent For Approval By': [AGENT],
                'Approval Slack TS': epoch('2026-08-13T09:00:00Z') }),
+        task({ 'Task Name': 'Minted', Status: 'Open', 'Team Member': [AGENT],
+               'Created Time': '2026-08-01T09:00:00Z' }),
+        task({ 'Task Name': 'Sender-less card', Status: 'Approval', 'Team Member': [AGENT],
+               'Approval Slack TS': epoch('2026-08-01T09:00:00Z') }),
+        task({ 'Task Name': 'Parked but dated', Status: 'Upcoming', 'Team Member': [AGENT],
+               'Due Date': '2026-08-01', 'Some Day': true, 'Created Time': '2024-01-01T09:00:00Z' }),
         task({ 'Task Name': 'Drafted', Status: 'Today', 'Team Member': [AGENT],
                'Created Time': '2026-08-01T09:00:00Z', 'Agent Output': 'draft' }),
         task({ 'Task Name': 'Human', Status: 'Today', 'Team Member': ['recHUMAN'],
@@ -170,24 +177,39 @@ describe('approval-loop stall rules', () => {
       expect(rules(js.stalled)).toEqual(rules(py.stalled));
       expect(ids(js.needsYou)).toEqual(ids(py.needsYou));
       expect(ids(js.done)).toEqual(ids(py.done));
+      // The rule this change exists for: a task on no surface is stalled
+      // FIRST, whatever else is true of it, and a parked task is not due.
+      const byName = Object.fromEntries(py.stalled.map(s => [s.name, s.rule]));
+      expect(byName['Minted']).toBe('invisible');
+      expect(byName['Sender-less card']).toBe('invisible');
+      expect(byName['Parked but dated']).toBeUndefined();
+      expect(py.stalled[0].rule).toBe('invisible');
+      expect(js.stalled[0].rule).toBe('invisible');
     });
 
-    it('agrees that a stored-Upcoming task due today is NOT stalled', () => {
-      // The 126-vs-65 divergence. The derived status of this task is "Today"
-      // because its due date is today, but Airtable stores Upcoming and the
-      // dispatcher filters on the stored value, so it is not late.
-      const records = [task({
+    it('agrees that a stored-Upcoming task due today IS in the window, and one due tomorrow is not', () => {
+      // 15 Sep 2026: the dispatcher's window now takes a stored-Upcoming task
+      // whose due date has arrived (QUEUE_FORMULA in agent-dispatch.py), so
+      // the draft rule follows it. Before this, 95 of 129 Upcoming tasks were
+      // due and on no surface. A future-dated one is still scheduled, not
+      // late — the 126-vs-65 flood must not come back.
+      const due = runBoth([task({
         'Task Name': 'Due today but stored Upcoming', Status: 'Upcoming',
         'Due Date': '2026-08-14', 'Team Member': [AGENT], 'Created Time': '2024-01-01T09:00:00Z',
-      })];
-      const { js, py } = runBoth(records);
-      expect(js.stalled).toHaveLength(0);
-      expect(py.stalled).toHaveLength(0);
+      })]);
+      expect(due.js.stalled.map(s => s.rule)).toEqual(['draft']);
+      expect(due.py.stalled.map(s => s.rule)).toEqual(['draft']);
+      const future = runBoth([task({
+        'Task Name': 'Due tomorrow, stored Upcoming', Status: 'Upcoming',
+        'Due Date': '2026-08-15', 'Team Member': [AGENT], 'Created Time': '2024-01-01T09:00:00Z',
+      })]);
+      expect(future.js.stalled).toHaveLength(0);
+      expect(future.py.stalled).toHaveLength(0);
     });
 
     it('agrees in the same ORDER, so "the worst three" means the same thing', () => {
       const records = [
-        task({ 'Task Name': 'Decide', Status: 'Approval', 'Team Member': [AGENT],
+        task({ 'Task Name': 'Decide', Status: 'Approval', 'Team Member': [AGENT], 'Sent For Approval By': [AGENT],
                'Approval Slack TS': epoch('2026-08-01T09:00:00Z') }),
         task({ 'Task Name': 'Draft', Status: 'Overdue', 'Team Member': [AGENT],
                'Created Time': '2026-08-01T09:00:00Z' }),
@@ -207,7 +229,7 @@ describe('approval-loop stall rules', () => {
     it('flags a hard deadline near or past whatever the status, and leaves the UC lane to its watchdog', () => {
       // Past deadline sitting at Approval: the date does not pause while the
       // draft waits on a decision — this is the 24 Aug council-tax failure.
-      const past = runBoth([task({ 'Task Name': 'Council reply', Status: 'Approval', 'Team Member': [AGENT],
+      const past = runBoth([task({ 'Task Name': 'Council reply', Status: 'Approval', 'Team Member': [AGENT], 'Sent For Approval By': [AGENT],
         'Due Date': '2026-08-12', 'Hard Deadline': true,
         'Approval Slack TS': epoch('2026-08-13T09:00:00Z') })]);
       expect(past.js.stalled.map(s => s.rule)).toEqual(['deadline']);
@@ -249,6 +271,13 @@ describe('approval-loop stall rules', () => {
       expect(jsNum('STALL_DEADLINE_DAYS')).toBe(pyNum('STALL_DEADLINE_DAYS'));
     });
 
+    it('agrees on which statuses are a surface at all', () => {
+      const jsList = (loopSrc.match(/BOARD_STATUSES\s*=\s*\[([^\]]*)\]/)[1].match(/'([^']+)'/g) || []).map(x => x.slice(1, -1)).sort();
+      const pyList = (py.match(/^BOARD_STATUSES\s*=\s*\(([^)]*)\)/m)[1].match(/"([^"]+)"/g) || []).map(x => x.slice(1, -1)).sort();
+      expect(jsList).toEqual(pyList);
+      expect(jsList).toEqual(['Approval', 'Cancelled', 'Completed', 'Overdue', 'Today', 'Upcoming']);
+    });
+
     it('excludes the same UC lane on both sides', () => {
       const jsPrefix = loopSrc.match(/DEADLINE_EXCLUDE_PREFIX\s*=\s*'([^']+)'/)[1];
       const pyPrefix = py.match(/DEADLINE_EXCLUDE_PREFIX\s*=\s*"([^"]+)"/)[1];
@@ -282,7 +311,7 @@ describe('approval-loop stall rules', () => {
     it('a knocked-back approval is not waiting on him, until the day it is', () => {
       const js = makeJs(NOW_MS);
       const parsed = (deferredUntil) => [toParsed(
-        task({ 'Task Name': 'File the confirmation statement', Status: 'Approval',
+        task({ 'Task Name': 'File the confirmation statement', Status: 'Approval', 'Sent For Approval By': [AGENT],
                'Team Member': [AGENT], 'Deferred Until': deferredUntil }), js.derive)];
 
       // Parked for another week: off his list.
@@ -302,7 +331,7 @@ describe('approval-loop stall rules', () => {
       expect(stale.py.stalled[0].why).toContain('3 days');
 
       // Status back to Approval means the agent resubmitted — the loop working.
-      const back = runBoth([task({ 'Task Name': 'A', Status: 'Approval', 'Team Member': [AGENT],
+      const back = runBoth([task({ 'Task Name': 'A', Status: 'Approval', 'Team Member': [AGENT], 'Sent For Approval By': [AGENT],
         'Approval Outcome': 'Changes requested', 'Approved At': '2026-08-01T09:00:00Z' })]);
       expect(back.js.stalled.filter(s => s.rule === 'amend')).toHaveLength(0);
       expect(back.py.stalled.filter(s => s.rule === 'amend')).toHaveLength(0);
@@ -317,8 +346,43 @@ describe('approval-loop stall rules', () => {
       expect(py.stalled[0].why).not.toMatch(/\d+\s*days/);
     });
 
+    // 15 Sep 2026: the Estate tab names WHY a row is not moving. A list that
+    // only says "not moving" cannot be acted on, and "invisible" is the lane
+    // that matters most: a task on no surface at all.
+    it('names each stalled row with a lane, and calls a task on no surface invisible', () => {
+      const lanes = (records, royIds = []) => {
+        const script = `
+import json, sys, importlib.util
+from datetime import datetime
+spec = importlib.util.spec_from_file_location("lh", ${JSON.stringify(PY)})
+mod = importlib.util.module_from_spec(spec); spec.loader.exec_module(mod)
+a = json.loads(sys.argv[1])
+now = datetime.fromisoformat(a["now"].replace("Z", "+00:00"))
+res = mod.compute(a["tasks"], set(a["agentIds"]), now=now, roy_ids=set(a["royIds"]))
+print(json.dumps({s["name"]: s["lane"] for s in res["stalled"]}))
+`;
+        return JSON.parse(execFileSync('python3', ['-c', script,
+          JSON.stringify({ tasks: records, agentIds: [AGENT], royIds, now: NOW_ISO })], { encoding: 'utf8' }));
+      };
+      const deadline = { 'Due Date': '2026-08-10', 'Hard Deadline': true };
+      const out = lanes([
+        task({ 'Task Name': 'card', Status: 'Approval', 'Team Member': [AGENT], 'Sent For Approval By': [AGENT], ...deadline }),
+        task({ 'Task Name': 'parked', Status: 'Approval', 'Team Member': [AGENT], 'Sent For Approval By': [AGENT], 'Deferred Until': '2026-08-30', ...deadline }),
+        task({ 'Task Name': 'no sender', Status: 'Approval', 'Team Member': [AGENT], ...deadline }),
+        task({ 'Task Name': 'minted status', Status: 'Open', 'Team Member': [AGENT], ...deadline }),
+        task({ 'Task Name': 'roy', Status: 'Today', 'Team Member': ['recROY'], ...deadline }),
+        task({ 'Task Name': 'roy card', Status: 'Approval', 'Team Member': ['recROY'], 'Sent For Approval By': [AGENT], ...deadline }),
+        task({ 'Task Name': 'login', Status: 'Today', 'Team Member': [AGENT], 'Agent Output': 'SIGN-IN NEEDED: pingen.com (https://pingen.com/login)', ...deadline }),
+        task({ 'Task Name': 'agent', Status: 'Overdue', 'Team Member': [AGENT], 'Created Time': '2026-08-01T09:00:00Z' }),
+      ], ['recROY']);
+      expect(out).toEqual({
+        card: 'withKevin', parked: 'deferred', 'no sender': 'invisible', 'minted status': 'invisible',
+        roy: 'withRoy', 'roy card': 'withKevin', login: 'signInNeeded', agent: 'withAgent',
+      });
+    });
+
     it('anchors the decide rule to the Slack post, not the re-stamped due date', () => {
-      const out = runBoth([task({ 'Task Name': 'Re-stamped', Status: 'Approval',
+      const out = runBoth([task({ 'Task Name': 'Re-stamped', Status: 'Approval', 'Sent For Approval By': [AGENT],
         'Team Member': [AGENT], 'Due Date': '2026-08-14',
         'Approval Slack TS': epoch('2026-08-04T09:00:00Z') })]);
       expect(out.js.stalled[0].why).toContain('10 days');

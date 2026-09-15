@@ -70,8 +70,20 @@ overlap is subtracted IN CODE, never by eyeballing two JSON files:
 The board read fails loudly on a broken read — never continue past a failure.
 It gives you `stuck` (no honest movement stamp in 7 days, already excluding
 dispatch's in-flight tasks), `inFlight` (dispatch's this slot — not yours),
-`waitingOnKevin` (genuine loop-raised approvals), `parked` (Some Day) and
-counts. Dispatch's queue JSON also gives you every routable agent's Team
+`waitingOnKevin` (genuine loop-raised approvals), `withRoy` (Roy Lavin holds
+it — never stuck; its ONLY move is a chase, and only when its `chaseDue` is
+true, one per seven days), `escalated` (a decision card went to Kevin inside
+seven days — not yours to touch), `decided` (Kevin has ANSWERED a decision
+card: each view carries `ask`, `approvalOutcome` and `approvalFeedback`; your
+move this slot is whatever he said — route, roy, close, leave — recorded as
+that move; a Rejected card means close it. Two rules: an approval with EMPTY
+`approvalFeedback` gives you no move, so `leave` and `annotate` "Kevin
+approved with no instruction; ask again" rather than inventing one; and the
+gate's approve re-linked the task to you, so if his answer names nobody, put
+it back on `priorHolder` with `route` (an agent) or `handover` (Roy) — that
+route/handover also closes the card in code), `parked` (Some Day) and counts. Upcoming
+tasks whose due date has arrived were already flipped to Today by the runner
+(`task-hygiene-sweep.py flip-due`) before this read. Dispatch's queue JSON also gives you every routable agent's Team
 Members rec id and live status (its rosters). If `queue` exits non-zero
 because ITS population read looks broken, report it, run `board` without
 `--dispatch-queue`, and carry on — your read is independent.
@@ -179,7 +191,10 @@ out of your list — the board subtracted dispatch's tasks in code):
    own home); otherwise it is a card and Kevin's yes = you hand it over next
    slot.
 4. **Kevin-only** (a decision, signature, credential, payment authorisation) →
-   `escalate` + `annotate` with ONE clear ask ("Decide X between A and B").
+   `escalate --reason "<ONE clear ask>"` ("Decide X between A and B"). Since
+   15 Sep 2026 that IS a decision card in his gate (Status Approval, sent by
+   you, Agent Output `DECIDE: <ask>`); a task already carrying one prints
+   `alreadyEscalated` and is left alone.
 5. **A domain agent owns it** (inbound reply → Inbox Response; anything
    a live role agent's goal covers, per the roster) → `route` to that agent.
    Waiting-on-someone-external tasks are a route too: route to the domain agent
@@ -352,8 +367,14 @@ exit codes):
 
 - route: `python3 scripts/agent-dispatch.py route TASKID --to RECID`
 - roy:   `python3 scripts/agent-dispatch.py handover TASKID --to roy.lavin1978@gmail.com --reason "<why>"`
-- escalate: `python3 scripts/agent-dispatch.py escalate TASKID` then
-  `annotate TASKID --note "<the one clear ask>"`
+  (a task Roy already holds prints `alreadyHeld` and writes nothing — record
+  nothing for it; it lives in `withRoy`)
+- chase (Roy, `withRoy` views with `chaseDue` true ONLY):
+  `python3 scripts/agent-dispatch.py annotate TASKID --note "Chase to Roy: <what is outstanding>"`
+  recorded as `chase` with `"to"` = Roy's rec id. Never more than one per
+  task per seven days — `chaseDue` is the clock, not your judgement.
+- escalate: `python3 scripts/agent-dispatch.py escalate TASKID --reason "<the one clear ask>"`
+  (the reason becomes the card's `DECIDE:` line; no separate annotate)
 - close / pass-to-Roy / in-house finish:
   `python3 scripts/agent-dispatch.py submit TASKID --agent rec1hYELb4zS8pjjO --type Admin --output-file <path>`
   (output ends with the mandatory closing line
