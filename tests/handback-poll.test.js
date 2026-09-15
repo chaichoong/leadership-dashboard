@@ -23,7 +23,7 @@ const RUNNER = resolve(ROOT, 'scripts/handback-poll-run.sh');
 
 const BASE_COUNTS = {
   openTasksRead: 87, agentLinkedOpen: 56, worklist: 56,
-  approvedHandbacks: 0, changesRequested: 0, deferredRedos: 0,
+  approvedHandbacks: 0, changesRequested: 0, deferredRedos: 0, signinReopened: 0,
   newWork: 0, tier2Parked: 0, routingNeeded: 0, unclassified: 0,
 };
 
@@ -55,6 +55,14 @@ describe('hand-back gate — when to wake an agent', () => {
     expect(r.code).toBe(0);
     expect(r.decision).toBe('work');
     expect(r.total).toBe(5);
+  });
+
+  it('counts a task a sign-in reopened as work — the 11 Sep pickup died and nothing woke for its three tasks', () => {
+    const d = tmp();
+    const r = gate(queueFile(d, { signinReopened: 3 }), join(d, 'nologs'));
+    expect(r.code).toBe(0);
+    expect(r.decision).toBe('work');
+    expect(r.total).toBe(3);
   });
 
   it('counts deferred redos as work — a redo Kevin delayed still owes him one', () => {

@@ -2216,6 +2216,12 @@ def build_queue(args=None):
                     or any(i in ALL_AGENTS for i in t["sentForApprovalByIds"])]
     handback_population = query_tasks("LEN({Approval Outcome}&'')>0",
                                       max_records=1, minimal=True)
+    # Tasks Kevin signed the robot in for (signin-done's SIGNED IN stamp is the
+    # newest thing in their Notes). Marked before the lanes so every copy
+    # carries the flag; counted below from the WORKLIST only, so a reopened
+    # task a lane diverts (alert, Roy, unmapped) cannot wake the poll for
+    # work the poll would then not find (review, 15 Sep 2026).
+    mark_signin_reopened(agent_linked)
     if not agent_linked and not handback_population:
         print("ERROR: control failed — zero tasks linked to any AI agent and "
               "zero tasks with an approval outcome. The read is broken, not "
@@ -2418,6 +2424,7 @@ def build_queue(args=None):
         # the agent VERIFY (sent items, records) before executing anything.
         t["priorIntent"] = t["kind"] == "carry_out" and t["id"] in intents
     worklist = select_worklist(approved_hb + changes_hb, new_work, deferred_hb)
+    signin_reopened = [t["id"] for t in worklist if t.get("signinReopened")]
     # If the dispatcher's judgement pass removes a worklist item (a tier-1
     # smell the keywords missed), it backfills from here — never beyond the cap.
     chosen = {t["id"] for t in worklist}
@@ -2473,6 +2480,9 @@ def build_queue(args=None):
         # Approved hand-backs resting until tomorrow: carried out and kept open,
         # or parked on a sign-in. Listed with the reason, never dropped.
         "idleHandbacks": idle_hb,
+        # Tasks a sign-in just reopened (ids): the pickup run and the 30-minute
+        # poll work these first, whichever lane classified them.
+        "signinReopened": signin_reopened,
         # Property work for Roy. Diverted and NAMED, never dropped — and not
         # acted on here: cmd_queue is a read. `handover-property` does the
         # writing, so one command owns the change.
@@ -2496,6 +2506,9 @@ def build_queue(args=None):
             # Redos Kevin asked to delay. Demoted behind new work rather than
             # dropped, and counted here so one sitting for weeks stays visible.
             "deferredRedos": len(deferred_hb),
+            # Reopened by a sign-in and not yet worked: a hand-back the poll
+            # must wake for (15 Sep 2026; before this the poll never saw them).
+            "signinReopened": len(signin_reopened),
             "newWork": len(new_work),
             # A tier-2 park removes a task from every other bucket via
             # `continue`, so newWork read 0 while an agent-linked, no-outcome,
@@ -2929,7 +2942,17 @@ def cmd_submit(args):
     # Namecheap"; Namecheap is not on the robot's list, the app had nothing to
     # open, and the card promised "the robot finishes this within minutes" for
     # work no robot could do. Refused here, with what to write instead.
-    problem = signin_line_problem(output)
+    line_sites = load_login_sites() if parse_signin_line(output) else {}
+    problem = signin_line_problem(output, line_sites)
+    if problem:
+        sys.exit(f"ERROR: refusing to submit {args.task} — {problem}")
+    # THE SESSION CHECK (15 Sep 2026): the line is only accepted when the robot
+    # really is signed out. recmtmvJTP1MRXLZE wrote SIGN-IN NEEDED: Facebook on
+    # 14 Sep while the browser ledger showed the Facebook session live every
+    # hour, so Kevin was asked to open a window for a site that needed none.
+    # The walk is code (agent-browser.js session); a walk that cannot run
+    # marks the line unverified instead of refusing it, so the app can tell.
+    problem, output = signin_verify_line(output, line_sites)
     if problem:
         sys.exit(f"ERROR: refusing to submit {args.task} — {problem}")
 
@@ -4205,6 +4228,18 @@ SIGNIN_URL_RE = re.compile(r"https?://[^\s)>\]]+", re.I)
 SIGNIN_DONE_MARK = "SIGNED IN:"
 KEEPALIVE_MARK = "KEEPALIVE CHECK:"
 SIGNIN_PICKUP_DIR = os.environ.get("SIGNIN_PICKUP_DIR") or os.path.expanduser("~/knowledge-os/logs/signin-pickup")
+# A submit checks the session before it accepts a SIGN-IN NEEDED line (15 Sep
+# 2026). When the check itself cannot run (robot profile busy, walk timed out)
+# the line is kept and marked, as a dash aside so the parsers that split the
+# site off at " — " (this file, the queue page) still read the site, and the
+# digest's own parser strips it (scripts/slack-automation/approvals.js):
+#   SIGN-IN NEEDED: Pingen (https://app.pingen.com/) — (unverified: profile busy)
+SIGNIN_UNVERIFIED_MARK = "(unverified"
+SIGNIN_UNVERIFIED_RE = re.compile(r"\s*(?:[—–-]\s*)?\(unverified(?::[^)]*)?\)\s*$", re.I)
+SIGNIN_WALK_TIMEOUT = 180                # seconds: the walk's own worst case is ~125 s (door 48 s, two clicks 56 s each, One Login settle 20 s)
+SIGNIN_LEDGER_FRESH_MINUTES = 30         # a verdict newer than this is reused, not re-walked
+BROWSER_LEDGER = (os.environ.get("AGENT_BROWSER_LEDGER")
+                  or os.path.expanduser("~/knowledge-os/logs/agent-browser/runs.jsonl"))
 
 
 def parse_signin_line(text):
@@ -4221,6 +4256,8 @@ def parse_signin_line(text):
     if not m:
         return None
     rest = m.group("rest").strip()
+    verified = not SIGNIN_UNVERIFIED_RE.search(rest)
+    rest = SIGNIN_UNVERIFIED_RE.sub("", rest).strip()
     u = SIGNIN_URL_RE.search(rest)
     url = u.group(0).rstrip(".,;:") if u else ""
     site = rest[:u.start()] if u else rest
@@ -4231,7 +4268,7 @@ def parse_signin_line(text):
         # A label like "Pingen (letters)" survives because it is matched on
         # the part before the bracket too.
         site = re.sub(r"\s*\((?!https?://)[^)]*\)\s*$", "", site).strip() or site
-    return {"site": site, "url": url}
+    return {"site": site, "url": url, "verified": verified}
 
 
 def signin_domain(host):
@@ -4243,22 +4280,197 @@ def signin_domain(host):
     return ".".join(parts[-2:]) if len(parts) >= 2 else ".".join(parts)
 
 
-def load_login_sites():
-    """The allowlist as agent-browser.js sees it (builtins + sites.json),
-    read through the script itself so the two never drift."""
-    import subprocess, glob, shutil
-    # launchd and AppleScript's `do shell script` have no nvm on PATH; the
-    # runners export AGENT_NODE_BIN (agent-tools.sh), and the nvm glob is the
-    # same second resort that file uses.
+def node_bin():
+    """launchd and AppleScript's `do shell script` have no nvm on PATH; the
+    runners export AGENT_NODE_BIN (agent-tools.sh), and the nvm glob is the
+    same second resort that file uses."""
+    import glob, shutil
     node = (os.environ.get("AGENT_NODE_BIN") or shutil.which("node")
             or (sorted(glob.glob(os.path.expanduser("~/.nvm/versions/node/*/bin/node"))) or [None])[-1])
     if not node:
         raise RuntimeError("node not found: no AGENT_NODE_BIN, not on PATH, no nvm install")
-    r = subprocess.run([node, os.path.join(os.path.dirname(os.path.abspath(__file__)), "agent-browser.js"), "sites"],
-                       capture_output=True, text=True)
+    return node
+
+
+AGENT_BROWSER = os.path.join(os.path.dirname(os.path.abspath(__file__)), "agent-browser.js")
+
+
+def load_login_sites():
+    """The allowlist as agent-browser.js sees it (builtins + sites.json),
+    read through the script itself so the two never drift."""
+    r = subprocess.run([node_bin(), AGENT_BROWSER, "sites"], capture_output=True, text=True)
     if r.returncode != 0:
         raise RuntimeError("agent-browser.js sites failed: " + (r.stderr or "")[:200])
     return json.loads(r.stdout)
+
+
+def ledger_session_verdict(host, max_age_minutes=SIGNIN_LEDGER_FRESH_MINUTES, path=None, now=None):
+    """The newest `session` verdict agent-browser.js logged for HOST, if it is
+    under max_age_minutes old; else None. The ledger is append-only, one JSON
+    line per browser command ({"at", "cmd": "session", "site", "signedIn",
+    "url"}), so the last matching line is the newest."""
+    newest = None
+    try:
+        with open(path or BROWSER_LEDGER) as fh:
+            for line in fh:
+                try:
+                    rec = json.loads(line)
+                except ValueError:
+                    continue
+                if (isinstance(rec, dict) and rec.get("cmd") == "session" and rec.get("site") == host
+                        and (rec.get("profile") or "default") == "default"):
+                    newest = rec
+    except OSError:
+        return None
+    if not newest or not newest.get("at"):
+        return None
+    try:
+        at = datetime.fromisoformat(str(newest["at"]).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    now = now or datetime.now(timezone.utc)
+    if now - at > timedelta(minutes=max_age_minutes):
+        return None
+    return {"signedIn": bool(newest.get("signedIn")), "url": str(newest.get("url") or ""),
+            "at": str(newest["at"]), "source": "ledger"}
+
+
+def session_walk(host, timeout=SIGNIN_WALK_TIMEOUT):
+    """Walk HOST's sign-in door now (`agent-browser.js session --site HOST`).
+    {"signedIn", "url", "at", "source": "walk"}, or {"error": why} when the
+    walk could not run — never a guess."""
+    try:
+        node = node_bin()
+    except RuntimeError as exc:
+        return {"error": str(exc)}
+    try:
+        r = subprocess.run([node, AGENT_BROWSER, "session", "--site", host],
+                           capture_output=True, text=True, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        return {"error": f"session walk timed out after {timeout}s (robot profile busy, or the site is slow)"}
+    if r.returncode != 0:
+        return {"error": (r.stderr or r.stdout or "session walk failed").strip()[-300:]}
+    try:
+        d = json.loads(r.stdout)
+    except ValueError:
+        return {"error": "session walk printed no JSON"}
+    return {"signedIn": bool(d.get("signedIn")), "url": str(d.get("url") or ""),
+            "at": now_iso(), "source": "walk"}
+
+
+def session_check(host, use_ledger=False, max_age_minutes=SIGNIN_LEDGER_FRESH_MINUTES):
+    """Is the robot signed in to HOST? A ledger verdict under max_age_minutes
+    old is reused when use_ledger is set (the keep-alive and the pickup run
+    walk every site anyway; walking again would fight them for the one robot
+    profile); otherwise the door is walked now. SIGNIN_SKIP_WALK=1 (tests,
+    and any read that must never open a browser) returns {"skipped": True}."""
+    if os.environ.get("SIGNIN_SKIP_WALK"):
+        return {"skipped": True}
+    if use_ledger:
+        v = ledger_session_verdict(host, max_age_minutes)
+        if v:
+            return v
+    return session_walk(host)
+
+
+def mark_signin_unverified(output, why=""):
+    """Append the unverified aside to the SIGN-IN NEEDED line (first one)."""
+    why = re.sub(r"\s+", " ", re.sub(r"[()\n]+", " ", str(why or ""))).strip()[:80]
+    tail = " — (unverified" + (": " + why if why else "") + ")"
+    m = SIGNIN_LINE_RE.search(output)
+    if not m:
+        return output
+    # Inserted at the end of the site text, so the line break after it (and
+    # the blank line before the closing line) is untouched.
+    return output[:m.end("rest")] + tail + output[m.end("rest"):]
+
+
+def signin_verify_line(output, sites=None, check=None):
+    """(problem, output) for the SIGN-IN NEEDED line's live session state.
+
+    problem is set when the site IS signed in — the agent wrote the line
+    without looking, and the submit is refused with what to do instead.
+    When the walk cannot run the line is kept and marked unverified (the
+    app checks again before it opens a window). A line already marked, a
+    line with no site the robot can open (signin_line_problem owns that
+    refusal), or a walk skipped by SIGNIN_SKIP_WALK passes untouched."""
+    m = parse_signin_line(output)
+    if not m or not m["verified"]:
+        return "", output
+    sites = sites if sites is not None else load_login_sites()
+    host = signin_site_for(m["site"], m["url"], sites)
+    if not host or not sites.get(host, {}).get("login"):
+        return "", output
+    v = (check or session_check)(host)
+    if v.get("skipped"):
+        return "", output
+    if v.get("error"):
+        print(f"NOTE: sign-in line for {host} kept unverified — {v['error'][:160]}", file=sys.stderr)
+        return "", mark_signin_unverified(output, v["error"])
+    if not v.get("signedIn"):
+        return "", output
+    label = sites[host].get("label") or host
+    landed = v.get("url") or "the site"
+    return (f"its SIGN-IN NEEDED line names {m['site']!r}, but the robot IS signed in to "
+            f"{label} (the session walk landed on {landed} at {str(v.get('at') or '')[:16]}).\n"
+            "       Kevin is only asked for a sign-in the robot needs. Carry on with the work in "
+            "this run:\n"
+            f"         node scripts/agent-browser.js read/prepare on {host} (screenshots attached), "
+            "then submit the finished work.\n"
+            "       Write SIGN-IN NEEDED only when\n"
+            f"         node scripts/agent-browser.js session --site {host}\n"
+            "       prints signedIn false. Never judge a sign-in page by eye: the WebFiling "
+            "door always shows one."), output
+
+
+def signin_reopened_reason(t, now=None):
+    """Why an open task is a hand-back Kevin's sign-in just created, or ''.
+
+    signin-done sets the task to Today and appends the SIGNED IN stamp; the
+    agent's next submit or annotate writes a newer stamp. So a task whose
+    NEWEST Notes stamp is still SIGNED IN, with no approval outcome and Status
+    Today/Overdue, has not been touched since the sign-in. On 11 Sep 2026 the
+    pickup run died in eight seconds on the allowance limit and the three
+    tasks it held sat in exactly this state for four days: the 30-minute poll
+    counted only approved/changes/deferred hand-backs, so it never woke for
+    them. A stamp older than IDLE_HOURS drops out (the session has lapsed by
+    then; the daily slots take the task as ordinary new work), so a run that
+    never touches one cannot wake the poll every half hour for ever."""
+    if t.get("outcome") or t.get("status") not in ("Today", "Overdue"):
+        return ""
+    last = None
+    for m in NOTE_STAMP_RE.finditer(str(t.get("notes") or "")):
+        last = m
+    if not last or not last.group("text").lstrip().startswith(SIGNIN_DONE_MARK):
+        return ""
+    try:
+        when = datetime.strptime(last.group("day") + " " + (last.group("time") or "00:00"),
+                                 "%d %b %Y %H:%M").replace(tzinfo=LONDON)
+    except ValueError:
+        return ""
+    now = now or datetime.now(timezone.utc)
+    if now - when >= timedelta(hours=IDLE_HOURS):
+        return ""
+    # Anchored on our own wording, so a label that itself holds a dotted
+    # bracket can never be taken for the host.
+    site = re.search(r"\(([a-z0-9.-]+\.[a-z]{2,})\)\. The session is live now", last.group("text"))
+    return (f"Kevin signed the robot in at {last.group('day')} {last.group('time') or ''}".rstrip()
+            + (f" to {site.group(1)}" if site else "")
+            + "; nothing has touched the task since — carry on from the SIGNED IN note"
+            + (f" (session --site {site.group(1)} first)" if site else ""))
+
+
+def mark_signin_reopened(tasks, now=None):
+    """Flag every task a sign-in reopened (t["signinReopened"] = why) and
+    return their ids in order. Pure apart from the flag."""
+    ids = []
+    for t in tasks:
+        why = signin_reopened_reason(t, now)
+        if why:
+            t["signinReopened"] = why
+            if t["id"] not in ids:
+                ids.append(t["id"])
+    return ids
 
 
 def signin_line_problem(output, sites=None):
@@ -4357,14 +4569,55 @@ def signin_waiting(sites=None):
                                     "loginUrl": entry.get("loginUrl") or m["url"] or "",
                                     "shortSession": bool(entry.get("shortSession")), "tasks": []})
         g["tasks"].append({"id": rec["id"], "name": f.get(AF["name"], ""),
-                           "agent": ALL_AGENTS.get((links(f.get(AF["teamMember"])) or [None])[0], {}).get("agent", "")})
+                           "agent": ALL_AGENTS.get((links(f.get(AF["teamMember"])) or [None])[0], {}).get("agent", ""),
+                           # False when the submit could not walk the door
+                           # (profile busy): the app checks before it opens.
+                           "verified": m["verified"]})
     # Short-session sites first (a GOV.UK session lasts an hour, so it is signed
     # into last-but-worked first), then the site with the most waiting.
     return sorted(groups.values(), key=lambda g: (not g["shortSession"], -len(g["tasks"]), g["label"]))
 
 
 def cmd_signin_waiting(args):
-    print(json.dumps({"sites": signin_waiting(), "at": now_iso()}, indent=2))
+    """The sites with a task waiting on a sign-in, CHECKED: a site the robot is
+    already signed into is handed straight back (the signin-done logic) and
+    reported under alreadyLive, so the Robot sign-in app never opens a window
+    for it (15 Sep 2026: Kevin was opening Facebook and Pingen windows for
+    sessions the ledger showed live every hour). One walk per distinct site,
+    reusing a ledger verdict under 30 minutes old; a walk that cannot run
+    leaves the site listed with sessionCheck.state "unverified", never hidden.
+    --no-walk (or SIGNIN_SKIP_WALK=1) is the plain listing, for callers that
+    only need to know what is waiting (the keep-alive, tests). --dry-run walks
+    and reports but hands nothing back (proof without a write). --site HOST
+    checks that one site only (the app's per-site link); the rest are listed
+    unchecked."""
+    sites = load_login_sites()
+    walk = not getattr(args, "no_walk", False) and not os.environ.get("SIGNIN_SKIP_WALK")
+    dry = bool(getattr(args, "dry_run", False))
+    only = (getattr(args, "site", "") or "").strip().lower()
+    waiting, already_live = [], []
+    groups = signin_waiting(sites)
+    for g in groups:
+        if not walk or g["host"] == "unknown" or not g["loginUrl"] or (only and g["host"] != only):
+            waiting.append(g)
+            continue
+        v = session_check(g["host"], use_ledger=not g["shortSession"])
+        if v.get("skipped"):
+            waiting.append(g)
+            continue
+        if v.get("error"):
+            g["sessionCheck"] = {"state": "unverified", "why": v["error"][:200]}
+            waiting.append(g)
+            continue
+        if not v.get("signedIn"):
+            g["sessionCheck"] = {"state": "signed-out", "source": v["source"], "at": v["at"], "landedOn": v["url"][:160]}
+            waiting.append(g)
+            continue
+        done = {"handedBack": []} if dry else signin_done(g["host"], sites, groups)
+        already_live.append({"host": g["host"], "label": g["label"], "source": v["source"], "at": v["at"],
+                             "landedOn": v["url"][:160], "handedBack": done["handedBack"],
+                             "wouldHandBack": [t["id"] for t in g["tasks"]] if dry else None})
+    print(json.dumps({"sites": waiting, "alreadyLive": already_live, "dryRun": dry, "at": now_iso()}, indent=2))
     return 0
 
 
@@ -4381,9 +4634,18 @@ def cmd_signin_done(args):
     host = signin_site_for("", "https://" + args.site + "/", sites) or signin_site_for(args.site, "", sites)
     if not host:
         sys.exit(f"ERROR: {args.site!r} is not a login site on the allowlist")
+    print(json.dumps(signin_done(host, sites), indent=2))
+
+
+def signin_done(host, sites, groups=None):
+    """The session on HOST is live (Kevin signed in, or the check found it
+    so): hand every task waiting on it back to its robot and leave the ids in
+    pending.jsonl for the pickup run. Returns the summary cmd_signin_done
+    prints; cmd_signin_waiting calls it for a site that needed no window,
+    passing the groups it already read."""
     stamp = datetime.now(LONDON).strftime("%d %b %Y %H:%M")
     handed = []
-    for g in signin_waiting(sites):
+    for g in (groups if groups is not None else signin_waiting(sites)):
         if g["host"] != host:
             continue
         for t in g["tasks"]:
@@ -4408,7 +4670,7 @@ def cmd_signin_done(args):
                 handed.append({"task": t["id"], "agent": t["agent"], "name": t["name"][:80], "closed": True})
                 continue
             note = (f"[{stamp} — Robot sign-in] {SIGNIN_DONE_MARK} Kevin signed in to "
-                    f"{g['label']}. The session is live now: carry on from where you stopped "
+                    f"{g['label']} ({host}). The session is live now: carry on from where you stopped "
                     f"and submit the finished work. Do not write SIGN-IN NEEDED again unless "
                     f"the site is signed out when you look.")
             patch_task(t["id"], {
@@ -4424,16 +4686,22 @@ def cmd_signin_done(args):
                 AF["notes"]: (str(f.get(AF["notes"]) or "").rstrip() + "\n\n" + note).strip()[-90000:],
             })
             handed.append({"task": t["id"], "agent": t["agent"], "name": t["name"][:80]})
-    # The pickup run reads this file (and takes it over by rename) once Kevin
-    # has quit the last window, so one run works every site he signed into.
+    # The pickup run copies this file once Kevin has quit the last window (and
+    # trims the lines it worked after a clean run), so one run works every
+    # site he signed into.
     reopened = [h["task"] for h in handed if not h.get("closed")]
     if reopened:
+        import fcntl
         os.makedirs(SIGNIN_PICKUP_DIR, exist_ok=True)
+        # Locked: the pickup run trims this file (read, filter, replace) under
+        # the same lock, so a line landing mid-trim is never dropped.
         with open(os.path.join(SIGNIN_PICKUP_DIR, "pending.jsonl"), "a") as fh:
+            fcntl.flock(fh, fcntl.LOCK_EX)
             fh.write(json.dumps({"at": now_iso(), "host": host, "label": sites[host].get("label"),
                                  "tasks": reopened}) + "\n")
-    print(json.dumps({"site": host, "label": sites[host].get("label"), "handedBack": handed}, indent=2))
-    return 0
+            fh.flush()
+            fcntl.flock(fh, fcntl.LOCK_UN)
+    return {"site": host, "label": sites[host].get("label"), "handedBack": handed}
 
 
 def cmd_complete(args):
@@ -6573,8 +6841,15 @@ def main():
     lg.add_argument("--lane", choices=PLAN_LANES)
 
     sw = sub.add_parser("signin-waiting",
-                        help="tasks blocked on a site sign-in, grouped by site "
-                             "(the morning list and the queue page strip)")
+                        help="tasks blocked on a site sign-in, grouped by site, each site's "
+                             "session checked first; a site already signed in is handed "
+                             "back on the spot and listed under alreadyLive")
+    sw.add_argument("--no-walk", action="store_true",
+                    help="list only: never open the robot browser (the keep-alive, tests)")
+    sw.add_argument("--dry-run", action="store_true",
+                    help="walk and report, but hand nothing back")
+    sw.add_argument("--site", default="",
+                    help="check this allowlist host only; list the rest unchecked")
     sd = sub.add_parser("signin-done",
                         help="Kevin quit the sign-in window: hand every task "
                              "waiting on that site straight back to its robot")

@@ -720,10 +720,13 @@ export function londonParts(now = new Date()) {
 // The digest lists those sites so his one sitting is planned before he opens
 // the queue, where each card carries the button that opens the sign-in app.
 const SIGNIN_LINE_RE = /^\s*SIGN-IN NEEDED:\s*(.+?)\s*(?:\((https?:\/\/[^\s)]+)\))?\s*$/im;
+// A submit that could not check the session appends " — (unverified: why)"
+// (agent-dispatch.py, 15 Sep 2026); stripped here so the site still groups.
+const SIGNIN_UNVERIFIED_RE = /\s*(?:[—–-]\s*)?\(unverified(?::[^)]*)?\)\s*$/im;
 export function signInsWaiting(tasks) {
     const bySite = {};
     for (const t of tasks) {
-        const m = SIGNIN_LINE_RE.exec(String(t.agentOutput || ''));
+        const m = SIGNIN_LINE_RE.exec(String(t.agentOutput || '').replace(SIGNIN_UNVERIFIED_RE, ''));
         if (!m) continue;
         const site = m[1].trim();
         bySite[site.toLowerCase()] = bySite[site.toLowerCase()] || { site, n: 0 };

@@ -6,12 +6,19 @@ Most of the sites the robot works in keep a login alive for weeks IF the site
 is visited; an unused session quietly expires, and the first the estate hears
 of it is a robot writing SIGN-IN NEEDED in the middle of a job. Once a day this
 visits every login site that can hold a session (the allowlist entries with a
-loginUrl and no shortSession flag), which refreshes the cookie, and reads the
-landing state through agent-browser.js:
+loginUrl and no shortSession flag), which refreshes the cookie, and asks
+agent-browser.js `session` whether the robot is signed in:
 
-    signed in   — the login URL redirected away and no password box is shown
-    signed out  — the page asks for a password (or stayed on a sign-in page)
-    unknown     — the page did not load; NOT treated as signed out
+    signed in   — the session walk landed on a page of the site itself
+    signed out  — a password box, One Login's pages, or still at the door
+    unknown     — the walk could not run; NOT treated as signed out
+
+The verdict is the browser lane's own (sessionVerdict, after the site's
+sessionWalk clicks), the same one the pickup run and the submit gate read.
+Until 15 Sep 2026 this file judged a `read` of the login URL by its path and
+text, and any /login path read as signed out: Spotify for Creators, whose door
+shows "Continue with Spotify" whether or not the cookie is live, raised a
+sign-in task every morning with a cookie good to 2027.
 
 A signed-out site becomes ONE task in Kevin's queue in the standard form
 ("SIGN-IN NEEDED: <site> (<url>)"), parked until the morning message, owned
@@ -26,7 +33,6 @@ State:  ~/knowledge-os/logs/session-keepalive/status.json (latest verdict per si
 import glob
 import json
 import os
-import re
 import shutil
 import subprocess
 import sys
@@ -48,8 +54,6 @@ F = {                                   # Tasks field ids (drift-tested in agent
     "agentOutput": "fldzswp8fx6PqpLQ5", "taskType": "fldZ2moDV2041Sobc", "notes": "fldR7apBzSp3oxFxz",
     "deferredUntil": "fldJ9IHS1yxwYzYSN", "description": "fldRGhBQViKZKtkQ6",
 }
-SIGNIN_PATH_RE = re.compile(r"/(?:log-?in|sign-?in|signin|login|auth|sso|session)\b|[?&](?:redirect|return|next)=", re.I)
-SIGNIN_TEXT_RE = re.compile(r"\b(?:forgot(?:ten)? (?:your )?password|log ?in to your account|sign in to (?:your|continue)|enter your password)\b", re.I)
 
 
 def now_london():
@@ -76,28 +80,19 @@ def keepalive_sites(sites):
 
 
 def session_state(result):
-    """'signed-in' | 'signed-out' | 'unknown' from an agent-browser `read` result.
+    """'signed-in' | 'signed-out' | 'unknown' from an agent-browser `session` result.
 
-    Pure, so the selftest can pin it. A password box is decisive. Otherwise a
-    page that stayed on a sign-in URL, or whose text reads like a login form,
-    is signed out. A page that moved on and asks for nothing is signed in.
+    Pure, so the selftest can pin it. The verdict is the browser lane's
+    (`signedIn`, decided in code by sessionVerdict after the site's walk);
+    this file no longer judges a page. No verdict is unknown, never signed out.
     """
-    if not result or result.get("error"):
+    if not result or result.get("error") or "signedIn" not in result:
         return "unknown"
-    if int(result.get("passwordFields") or 0) > 0:
-        return "signed-out"
-    url = str(result.get("url") or "")
-    text = str(result.get("text") or "")
-    if not url and not text:
-        return "unknown"
-    if SIGNIN_PATH_RE.search(url) or SIGNIN_TEXT_RE.search(text[:4000]):
-        return "signed-out"
-    return "signed-in"
+    return "signed-in" if result.get("signedIn") else "signed-out"
 
 
 def read_site(host, entry):
-    cmd = [node_bin(), os.path.join(REPO, "scripts", "agent-browser.js"), "read",
-           "--url", entry["loginUrl"], "--wait", "6000"]
+    cmd = [node_bin(), os.path.join(REPO, "scripts", "agent-browser.js"), "session", "--site", host]
     try:
         r = subprocess.run(cmd, capture_output=True, text=True, timeout=180)
     except subprocess.TimeoutExpired:
@@ -112,7 +107,9 @@ def read_site(host, entry):
 
 def already_waiting(host):
     """Is there an open SIGN-IN NEEDED task for this site already?"""
-    r = subprocess.run([sys.executable, os.path.join(REPO, "scripts", "agent-dispatch.py"), "signin-waiting"],
+    # --no-walk: this run has just walked the site itself; a second walk would
+    # fight it for the one robot profile, and the listing is all it needs.
+    r = subprocess.run([sys.executable, os.path.join(REPO, "scripts", "agent-dispatch.py"), "signin-waiting", "--no-walk"],
                        capture_output=True, text=True)
     if r.returncode != 0:
         raise RuntimeError("signin-waiting failed: " + (r.stderr or "")[:200])
@@ -205,12 +202,15 @@ def cmd_run(dry_run=False):
 
 def selftest():
     cases = [
-        ({"url": "https://app.pingen.com/letters", "passwordFields": 0, "text": "Letters  Sent  Drafts"}, "signed-in"),
-        ({"url": "https://app.pingen.com/login", "passwordFields": 1, "text": "Email Password"}, "signed-out"),
-        ({"url": "https://dashboard.stripe.com/login?redirect=%2F", "passwordFields": 0, "text": "Sign in to your account"}, "signed-out"),
-        ({"url": "https://www.linkedin.com/feed/", "passwordFields": 0, "text": "Home My Network"}, "signed-in"),
-        ({"url": "https://studio.youtube.com/channel/UC1", "passwordFields": 0, "text": "Channel dashboard"}, "signed-in"),
+        # The real `session` results of 15 Sep 2026: Spotify's door after its
+        # walk (signed in), EDF's password form (signed out), a walk that
+        # could not run, and a result with no verdict at all.
+        ({"site": "creators.spotify.com", "signedIn": True, "url": "https://creators.spotify.com/home/show/6hL5", "passwordFields": 0,
+          "walked": [{"label": "Continue with Spotify", "found": True}]}, "signed-in"),
+        ({"site": "www.edfenergy.com", "signedIn": False, "url": "https://www.edfenergy.com/myaccount/login", "passwordFields": 1}, "signed-out"),
+        ({"site": "app.pingen.com", "signedIn": True, "url": "https://app.pingen.com/organisation/x/dashboard", "passwordFields": 0}, "signed-in"),
         ({"error": "timeout"}, "unknown"),
+        ({"url": "https://app.pingen.com/login", "passwordFields": 0, "text": "Log in"}, "unknown"),
         ({}, "unknown"),
     ]
     bad = [(c, want, session_state(c)) for c, want in cases if session_state(c) != want]
@@ -232,7 +232,7 @@ def selftest():
         for b in bad:
             print("FAIL", b, file=sys.stderr)
         return 1
-    print(f"selftest OK ({len(cases) + 3} checks)")
+    print(f"selftest OK ({len(cases) + 4} checks)")
     return 0
 
 

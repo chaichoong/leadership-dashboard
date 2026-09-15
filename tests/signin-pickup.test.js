@@ -21,7 +21,10 @@ ${body}
   // signin-done appends to pending.jsonl; a test must never write the live one
   // (three fixture lines reached the real file on 8 Sep 2026 and were queued
   // for a robot as tasks "rec1").
-  const env = { ...process.env, SIGNIN_PICKUP_DIR: mkdtempSync(join(tmpdir(), 'od-signin-pending-')) };
+  // SIGNIN_SKIP_WALK: a submit with a SIGN-IN NEEDED line walks the site's door
+  // (15 Sep 2026); a test never opens the robot browser. The refusal path
+  // mocks m.session_check instead.
+  const env = { ...process.env, SIGNIN_PICKUP_DIR: mkdtempSync(join(tmpdir(), 'od-signin-pending-')), SIGNIN_SKIP_WALK: '1' };
   return JSON.parse(execFileSync('python3', ['-c', script, JSON.stringify(arg || {})], { encoding: 'utf8', env }).split('---JSON---')[1]);
 }
 const SITES = {
@@ -70,12 +73,12 @@ lines = [
 ]
 print('---JSON---'); print(json.dumps([m.parse_signin_line(l) for l in lines]))`);
     expect(out).toEqual([
-      { site: 'pingen.com', url: 'https://www.pingen.com/en/login' },
-      { site: 'Namecheap', url: 'https://www.namecheap.com/myaccount/login/' },
-      { site: 'Companies House WebFiling', url: 'https://ewf.companieshouse.gov.uk/seclogin?tc=1' },
-      { site: 'GOV.UK One Login', url: '' },
-      { site: 'Pingen (letters)', url: 'https://app.pingen.com/' },
-      { site: 'HMRC', url: 'https://www.tax.service.gov.uk/gg/sign-in' },
+      { site: 'pingen.com', url: 'https://www.pingen.com/en/login', verified: true },
+      { site: 'Namecheap', url: 'https://www.namecheap.com/myaccount/login/', verified: true },
+      { site: 'Companies House WebFiling', url: 'https://ewf.companieshouse.gov.uk/seclogin?tc=1', verified: true },
+      { site: 'GOV.UK One Login', url: '', verified: true },
+      { site: 'Pingen (letters)', url: 'https://app.pingen.com/', verified: true },
+      { site: 'HMRC', url: 'https://www.tax.service.gov.uk/gg/sign-in', verified: true },
       null,
     ]);
   });
@@ -138,7 +141,8 @@ print('---JSON---'); print(json.dumps({'patched': sorted(patched), 'status': f.g
     expect(out.status).toBe('Today');
     expect(out.team).toEqual(['recJ8J8idWE8d97tH']);
     expect(out.outcome).toBeNull();
-    expect(out.note).toMatch(/SIGNED IN: Kevin signed in to Companies House WebFiling/);
+    // the host rides in the note, so the agent that carries on knows what to pass to `session --site`
+    expect(out.note).toMatch(/SIGNED IN: Kevin signed in to Companies House WebFiling \(via One Login\) \(ewf\.companieshouse\.gov\.uk\)\./);
     expect(out.note).toMatch(/^earlier/);
   });
   it('signin-done leaves the handed-back ids in pending.jsonl for the one pickup run after the last window (8 Sep 2026)', () => {
@@ -248,10 +252,12 @@ describe('the Robot sign-in app and its link', () => {
     expect(build).toMatch(/CFBundleURLSchemes:0 string robotsignin/);
     expect(build).toMatch(/lsregister/);
   });
-  it('the pickup run works only the handed-back task ids (from pending.jsonl, taken over by rename) and is registered on-demand', () => {
+  it('the pickup run works only the handed-back task ids (from pending.jsonl, copied, trimmed after a clean run) and is registered on-demand', () => {
     const run = readFileSync(join(ROOT, 'scripts', 'signin-pickup-run.sh'), 'utf8');
     expect(run).toMatch(/PENDING=.*pending\.jsonl/);
-    expect(run).toMatch(/mv "\$PENDING" "\$RUNDIR\/pending\.jsonl"/);
+    // A COPY (15 Sep 2026): the rename lost three hand-backs when the run died.
+    expect(run).toMatch(/shutil\.copyfile\(sys\.argv\[1\], sys\.argv\[2\]\)/);   // under the append lock
+    expect(run).not.toMatch(/mv "\$PENDING"/);
     expect(run).toMatch(/WORK ONLY THESE TASK IDS/);
     expect(run).toMatch(/short-session sites/i);
     // Nothing pending is a clean exit, not a failure.
@@ -337,6 +343,359 @@ print('---JSON---'); print(json.dumps({'status': f.get(m.AF['status']), 'complet
     expect(out).toMatch(/selftest OK/);
     const browser = readFileSync(join(ROOT, 'scripts', 'agent-browser.js'), 'utf8');
     expect(browser).toMatch(/passwordFields/);
-    expect((browser.match(/shortSession: true/g) || []).length).toBe(5);
+    // GOV.UK x3, HMRC, gov.uk, and GoCardless (90-minute cookie, 15 Sep 2026).
+    expect((browser.match(/shortSession: true/g) || []).length).toBe(6);
+    const b = require(join(ROOT, 'scripts', 'agent-browser.js'));
+    const sites = b.loadSites();
+    expect(sites['manage.gocardless.com'].shortSession).toBe(true);
+    // Spotify's door shows "Continue with Spotify" whether or not the cookie is
+    // live; the walk is what tells them apart (proven 15 Sep 2026).
+    expect(sites['creators.spotify.com'].sessionWalk).toEqual(['Continue with Spotify']);
+    expect(sites['creators.spotify.com'].loginUrl).toBe('https://creators.spotify.com/pod/login');
+  });
+  it('the keep-alive reads the session verdict, not a path heuristic, and lists without walking', () => {
+    const ka = readFileSync(join(ROOT, 'scripts', 'session-keepalive.py'), 'utf8');
+    expect(ka).toMatch(/"session", "--site", host/);
+    expect(ka).not.toMatch(/SIGNIN_PATH_RE/);
+    expect(ka).toMatch(/"signin-waiting", "--no-walk"/);
+  });
+});
+
+// 15 Sep 2026. Three faults in one loop: agents wrote SIGN-IN NEEDED without
+// looking (recmtmvJTP1MRXLZE asked for Facebook on 14 Sep while the ledger
+// showed the session live every hour), the app opened a window for every site
+// a task named, and a pickup that died on the allowance limit (11 Sep, eight
+// seconds) lost its three tasks because the poll only counted approved,
+// changes-requested and deferred hand-backs.
+describe('a sign-in is asked once, and only when the site is really signed out', () => {
+  const report = 'TRACK RECORD: none found (searched tasks + Gmail for email hmrc@example.com)\n\n' + 'Verified from the register. '.repeat(12) + '\n';
+  const CARRY = '\n\n**Carrying this out will involve:** Nothing until you sign in; then the robot posts the letter.';
+  function submitWith(check) {
+    return py(`
+m.load_login_sites = lambda: json.loads(sys.argv[1])
+${check}
+captured = {}
+m.patch_task = lambda t, f: captured.setdefault('fields', f)
+m.get_task = lambda t: {'id': t, 'fields': dict(captured.get('fields', {}))}
+m.supersede_attachments = lambda *a, **k: None
+import tempfile, os
+fh = tempfile.NamedTemporaryFile('w', suffix='.md', delete=False)
+fh.write(${JSON.stringify(report)} + 'SIGN-IN NEEDED: Pingen (https://app.pingen.com/)' + ${JSON.stringify(CARRY)})
+fh.close()
+agent = sorted(m.AGENTS)[0]
+try:
+    m.cmd_submit(types.SimpleNamespace(task='recT1', agent=agent, type='Research', output_file=fh.name, tier1=False))
+    refused = False
+except SystemExit as e:
+    refused = str(e)
+os.unlink(fh.name)
+f = captured.get('fields', {})
+print('---JSON---'); print(json.dumps({'refused': refused, 'output': f.get(m.AF['agentOutput'], ''), 'status': f.get(m.AF['status'])}))`, SITES);
+  }
+  it('submit REFUSES the line when the session walk finds the site signed in, and says what to do instead', () => {
+    const out = submitWith(`m.session_check = lambda host, **k: {'signedIn': True, 'url': 'https://app.pingen.com/organisation/x/dashboard', 'at': '2026-09-15T09:23:03.000Z', 'source': 'walk'}`);
+    expect(out.refused).toMatch(/but the robot IS signed in to Pingen \(letters\)/);
+    expect(out.refused).toMatch(/landed on https:\/\/app\.pingen\.com\/organisation\/x\/dashboard/);
+    expect(out.refused).toMatch(/session --site app\.pingen\.com/);
+    expect(out.status).toBeNull();   // nothing was patched
+  });
+  it('submit keeps the line when the walk says signed out', () => {
+    const out = submitWith(`m.session_check = lambda host, **k: {'signedIn': False, 'url': 'https://app.pingen.com/login', 'at': 'x', 'source': 'walk'}`);
+    expect(out.refused).toBe(false);
+    expect(out.status).toBe('Approval');
+    expect(out.output).toMatch(/SIGN-IN NEEDED: Pingen \(https:\/\/app\.pingen\.com\/\)\n/);
+    expect(out.output).not.toMatch(/unverified/);
+  });
+  it('submit keeps the line but marks it (unverified) when the walk itself cannot run, and the mark parses away', () => {
+    const out = submitWith(`m.session_check = lambda host, **k: {'error': 'session walk timed out after 90s (robot profile busy)'}`);
+    expect(out.refused).toBe(false);
+    expect(out.output).toMatch(/^SIGN-IN NEEDED: Pingen \(https:\/\/app\.pingen\.com\/\) — \(unverified: session walk timed out after 90s robot profile busy\)$/m);
+    // the blank line before the closing line survives the mark (review, 15 Sep 2026)
+    expect(out.output).toMatch(/robot profile busy\)\n\n\*\*Carrying this out/);
+    const parsed = py(`
+print('---JSON---'); print(json.dumps([
+  m.parse_signin_line('SIGN-IN NEEDED: Pingen (https://app.pingen.com/) — (unverified: profile busy)'),
+  m.parse_signin_line('SIGN-IN NEEDED: GOV.UK One Login (one-hour window) — (unverified)'),
+  m.parse_signin_line('SIGN-IN NEEDED: HMRC (https://www.tax.service.gov.uk/gg/sign-in) (unverified)'),
+]))`);
+    expect(parsed).toEqual([
+      { site: 'Pingen', url: 'https://app.pingen.com/', verified: false },
+      { site: 'GOV.UK One Login', url: '', verified: false },
+      { site: 'HMRC', url: 'https://www.tax.service.gov.uk/gg/sign-in', verified: false },
+    ]);
+  });
+  it('SIGNIN_SKIP_WALK leaves the line untouched (the seam every other test relies on)', () => {
+    const out = submitWith(``);
+    expect(out.refused).toBe(false);
+    expect(out.output).not.toMatch(/unverified/);
+  });
+  it('the ledger verdict is reused only while fresh, and only the newest line for that site counts', () => {
+    const { writeFileSync: wf, mkdtempSync: md } = require('node:fs');
+    const dir = md(join(tmpdir(), 'od-ledger-'));
+    const ledger = join(dir, 'runs.jsonl');
+    wf(ledger, [
+      '{"at":"2026-09-15T07:33:25.750Z","cmd":"session","site":"www.facebook.com","url":"https://www.facebook.com/login","signedIn":false,"profile":"default"}',
+      '{"at":"2026-09-15T09:23:03.599Z","cmd":"session","site":"www.facebook.com","url":"https://www.facebook.com/home.php","signedIn":true,"profile":"default"}',
+      '{"at":"2026-09-15T09:25:00.000Z","cmd":"read","url":"https://www.facebook.com/x","profile":"default"}',
+      '{"at":"2026-09-15T09:30:00.000Z","cmd":"session","site":"www.facebook.com","url":"https://www.facebook.com/login","signedIn":false,"profile":"spotify"}',
+      'not json',
+    ].join('\n') + '\n');
+    const out = py(`
+from datetime import datetime, timezone
+L = ${JSON.stringify(ledger)}
+print('---JSON---'); print(json.dumps([
+  m.ledger_session_verdict('www.facebook.com', 30, L, datetime(2026, 9, 15, 9, 40, tzinfo=timezone.utc)),
+  m.ledger_session_verdict('www.facebook.com', 30, L, datetime(2026, 9, 15, 10, 0, tzinfo=timezone.utc)),
+  m.ledger_session_verdict('app.pingen.com', 30, L, datetime(2026, 9, 15, 9, 40, tzinfo=timezone.utc)),
+  m.ledger_session_verdict('www.facebook.com', 30, L + '.missing', datetime(2026, 9, 15, 9, 40, tzinfo=timezone.utc)),
+]))`);
+    // the default profile's verdict, not the later one from another profile
+    expect(out[0]).toEqual({ signedIn: true, url: 'https://www.facebook.com/home.php', at: '2026-09-15T09:23:03.599Z', source: 'ledger' });
+    expect(out.slice(1)).toEqual([null, null, null]);
+  });
+  it('signin-waiting hands a site already signed in straight back (alreadyLive) and lists the rest with its check', () => {
+    const out = py(`
+sites = json.loads(sys.argv[1])
+recs = [
+  {'id': 'rec1', 'fields': {m.AF['name']: 'CS01', m.AF['agentOutput']: 'SIGN-IN NEEDED: Companies House WebFiling (https://ewf.companieshouse.gov.uk/seclogin?tc=1)', m.AF['teamMember']: ['recJ8J8idWE8d97tH']}},
+  {'id': 'rec3', 'fields': {m.AF['name']: 'HMRC letter', m.AF['agentOutput']: 'SIGN-IN NEEDED: Pingen (https://app.pingen.com/) — (unverified: busy)', m.AF['teamMember']: ['recjh6mmaF8KJW8t3']}},
+  {'id': 'rec4', 'fields': {m.AF['name']: 'Xero thing', m.AF['agentOutput']: 'SIGN-IN NEEDED: Xero (https://go.xero.com/)', m.AF['teamMember']: ['recjh6mmaF8KJW8t3']}},
+]
+m.query_tasks = lambda formula, **kw: recs
+m.get_task = lambda tid: next(r for r in recs if r['id'] == tid)
+m.load_login_sites = lambda: sites
+patched = {}
+m.patch_task = lambda tid, fields: patched.__setitem__(tid, fields)
+walked = []
+def check(host, use_ledger=False, **k):
+    walked.append((host, use_ledger))
+    return {'signedIn': host == 'app.pingen.com', 'url': 'https://' + host + '/x', 'at': 't', 'source': 'walk'}
+m.session_check = check
+import io, contextlib, os
+os.environ.pop('SIGNIN_SKIP_WALK', None)
+buf = io.StringIO()
+with contextlib.redirect_stdout(buf):
+    m.cmd_signin_waiting(types.SimpleNamespace(no_walk=False, dry_run=False))
+d = json.loads(buf.getvalue())
+print('---JSON---'); print(json.dumps({'walked': walked, 'waiting': [(g['host'], g.get('sessionCheck', {}).get('state'), [t['verified'] for t in g['tasks']]) for g in d['sites']],
+  'live': [(g['host'], [h['task'] for h in g['handedBack']]) for g in d['alreadyLive']], 'patched': sorted(patched), 'status': patched.get('rec3', {}).get(m.AF['status'])}))`, SITES);
+    // One walk per real site, none for the stranger; the WebFiling entry has no shortSession here so the ledger is allowed.
+    expect(out.walked).toEqual([['ewf.companieshouse.gov.uk', true], ['app.pingen.com', true]]);
+    expect(out.waiting).toEqual([['ewf.companieshouse.gov.uk', 'signed-out', [true]], ['unknown', null, [true]]]);
+    expect(out.live).toEqual([['app.pingen.com', ['rec3']]]);
+    expect(out.patched).toEqual(['rec3']);
+    expect(out.status).toBe('Today');
+  });
+  it('signin-waiting --site checks that one host only and lists the rest unchecked (the per-site link)', () => {
+    const out = py(`
+sites = json.loads(sys.argv[1])
+recs = [
+  {'id': 'rec1', 'fields': {m.AF['name']: 'CS01', m.AF['agentOutput']: 'SIGN-IN NEEDED: Companies House WebFiling (https://ewf.companieshouse.gov.uk/seclogin?tc=1)', m.AF['teamMember']: ['recJ8J8idWE8d97tH']}},
+  {'id': 'rec3', 'fields': {m.AF['name']: 'HMRC letter', m.AF['agentOutput']: 'SIGN-IN NEEDED: Pingen (https://app.pingen.com/)', m.AF['teamMember']: ['recjh6mmaF8KJW8t3']}},
+]
+m.query_tasks = lambda formula, **kw: recs
+m.get_task = lambda tid: next(r for r in recs if r['id'] == tid)
+m.load_login_sites = lambda: sites
+patched = []
+m.patch_task = lambda tid, fields: patched.append(tid)
+walked = []
+m.session_check = lambda host, **k: (walked.append(host), {'signedIn': True, 'url': 'u', 'at': 't', 'source': 'walk'})[1]
+import io, contextlib, os
+os.environ.pop('SIGNIN_SKIP_WALK', None)
+buf = io.StringIO()
+with contextlib.redirect_stdout(buf):
+    m.cmd_signin_waiting(types.SimpleNamespace(no_walk=False, dry_run=False, site='app.pingen.com'))
+d = json.loads(buf.getvalue())
+print('---JSON---'); print(json.dumps({'walked': walked, 'patched': patched, 'sites': [(g['host'], 'sessionCheck' in g) for g in d['sites']], 'live': [g['host'] for g in d['alreadyLive']]}))`, SITES);
+    expect(out.walked).toEqual(['app.pingen.com']);
+    expect(out.patched).toEqual(['rec3']);
+    expect(out.sites).toEqual([['ewf.companieshouse.gov.uk', false]]);
+    expect(out.live).toEqual(['app.pingen.com']);
+  });
+  it('signin-waiting --no-walk and --dry-run never hand anything back', () => {
+    const out = py(`
+sites = json.loads(sys.argv[1])
+recs = [{'id': 'rec3', 'fields': {m.AF['name']: 'HMRC letter', m.AF['agentOutput']: 'SIGN-IN NEEDED: Pingen (https://app.pingen.com/)', m.AF['teamMember']: ['recjh6mmaF8KJW8t3']}}]
+m.query_tasks = lambda formula, **kw: recs
+m.get_task = lambda tid: recs[0]
+m.load_login_sites = lambda: sites
+patched = []
+m.patch_task = lambda tid, fields: patched.append(tid)
+walked = []
+m.session_check = lambda host, **k: (walked.append(host), {'signedIn': True, 'url': 'u', 'at': 't', 'source': 'walk'})[1]
+import io, contextlib, os
+os.environ.pop('SIGNIN_SKIP_WALK', None)
+res = []
+for ns in (types.SimpleNamespace(no_walk=True, dry_run=False), types.SimpleNamespace(no_walk=False, dry_run=True)):
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        m.cmd_signin_waiting(ns)
+    d = json.loads(buf.getvalue())
+    res.append({'sites': [g['host'] for g in d['sites']], 'live': [(g['host'], g['handedBack'], g['wouldHandBack']) for g in d['alreadyLive']], 'dry': d['dryRun']})
+print('---JSON---'); print(json.dumps({'res': res, 'walked': walked, 'patched': patched}))`, SITES);
+    expect(out.res[0]).toEqual({ sites: ['app.pingen.com'], live: [], dry: false });
+    expect(out.res[1]).toEqual({ sites: [], live: [['app.pingen.com', [], ['rec3']]], dry: true });
+    expect(out.walked).toEqual(['app.pingen.com']);
+    expect(out.patched).toEqual([]);
+  });
+});
+
+describe('a task a sign-in reopened is a hand-back the poll must wake for (11 Sep 2026)', () => {
+  const NOTE = '[15 Sep 2026 08:30 — Robot sign-in] SIGNED IN: Kevin signed in to Pingen (letters). The session is live now: carry on.';
+  it('flags Status Today, no outcome, SIGNED IN as the newest stamp, under 24h old; nothing else', () => {
+    const out = py(`
+from datetime import datetime, timezone
+NOW = datetime(2026, 9, 15, 9, 0, tzinfo=timezone.utc)   # 10:00 London
+def t(**kw):
+    base = {'id': 'r', 'status': 'Today', 'outcome': '', 'notes': 'earlier\\n\\n' + ${JSON.stringify(NOTE)}}
+    base.update(kw); return base
+cases = {
+  'fresh': t(),
+  'overdue': t(status='Overdue'),
+  'submitted since': t(notes=t()['notes'] + '\\n[15 Sep 2026 08:45 — agent-dispatch] SUBMITTED (round 2) as Admin with no new file'),
+  'annotated since': t(notes=t()['notes'] + '\\n[15 Sep 2026 08:50 — agent] PARKED: still signed out'),
+  'at approval': t(status='Approval'),
+  'approved': t(outcome='Approved as-is'),
+  'stale (yesterday)': t(notes='[14 Sep 2026 08:30 — Robot sign-in] SIGNED IN: Kevin signed in to Pingen.'),
+  'no stamp': t(notes='plain notes'),
+}
+print('---JSON---'); print(json.dumps({k: bool(m.signin_reopened_reason(v, NOW)) for k, v in cases.items()}))`);
+    expect(out).toEqual({ fresh: true, overdue: true, 'submitted since': false, 'annotated since': false, 'at approval': false, approved: false, 'stale (yesterday)': false, 'no stamp': false });
+    const why = py(`
+from datetime import datetime, timezone
+NOW = datetime(2026, 9, 15, 9, 0, tzinfo=timezone.utc)
+print('---JSON---'); print(json.dumps(m.signin_reopened_reason({'status': 'Today', 'outcome': '', 'notes': '[15 Sep 2026 08:30 — Robot sign-in] SIGNED IN: Kevin signed in to Pingen (letters) (app.pingen.com). The session is live now: carry on from where you stopped.'}, NOW)))`);
+    // the host rides in the reason, so the poll's agent knows what to pass to `session --site`
+    expect(why).toMatch(/to app\.pingen\.com; nothing has touched the task since .* \(session --site app\.pingen\.com first\)$/);
+  });
+  it('mark_signin_reopened flags the task dicts and returns the ids once each', () => {
+    const out = py(`
+from datetime import datetime, timezone
+NOW = datetime(2026, 9, 15, 9, 0, tzinfo=timezone.utc)
+a = {'id': 'a', 'status': 'Today', 'outcome': '', 'notes': ${JSON.stringify(NOTE)}}
+b = {'id': 'b', 'status': 'Today', 'outcome': '', 'notes': 'nothing'}
+ids = m.mark_signin_reopened([a, b, a], NOW)
+print('---JSON---'); print(json.dumps({'ids': ids, 'a': bool(a.get('signinReopened')), 'b': 'signinReopened' in b}))`);
+    expect(out).toEqual({ ids: ['a'], a: true, b: false });
+  });
+  it('the queue emits the list and the count, and the poll and the runners read them', () => {
+    const src = readFileSync(join(ROOT, 'scripts', 'agent-dispatch.py'), 'utf8');
+    const fn = src.slice(src.indexOf('def build_queue('), src.indexOf('def cmd_queue('));
+    expect(fn).toMatch(/^    mark_signin_reopened\(agent_linked\)$/m);
+    // counted from the WORKLIST only: a reopened task a lane diverts must not wake the poll for nothing (review, 15 Sep 2026)
+    expect(fn).toMatch(/signin_reopened = \[t\["id"\] for t in worklist if t\.get\("signinReopened"\)\]/);
+    expect(fn).toMatch(/"signinReopened": signin_reopened,/);
+    expect(fn).toMatch(/"signinReopened": len\(signin_reopened\),/);
+    // marked BEFORE the lanes copy the dicts
+    expect(fn.indexOf('mark_signin_reopened(agent_linked)')).toBeLessThan(fn.indexOf('for t in agent_linked:'));
+    const poll = readFileSync(join(ROOT, 'scripts', 'handback-poll.py'), 'utf8');
+    expect(poll).toMatch(/HANDBACK_KEYS = \("approvedHandbacks", "changesRequested", "deferredRedos", "signinReopened"\)/);
+    const runner = readFileSync(join(ROOT, 'scripts', 'handback-poll-run.sh'), 'utf8');
+    expect(runner).toMatch(/every item carrying signinReopened/);
+    const pickup = readFileSync(join(ROOT, 'scripts', 'signin-pickup-run.sh'), 'utf8');
+    expect(pickup).toMatch(/if "signinReopened" not in q: sys.exit\(2\)/);
+  });
+});
+
+// The pickup runner itself, run with stubs: a fake repo whose scripts/ answer
+// as the real ones would, a fake claude that writes report.json and exits as
+// told, and a pending.jsonl that must survive everything but a clean run.
+describe('the pickup run never loses a hand-back (11 Sep 2026)', () => {
+  const { mkdtempSync: md, mkdirSync, writeFileSync: wf, existsSync, readFileSync: rf, chmodSync, cpSync } = require('node:fs');
+  const { spawnSync } = require('node:child_process');
+  const RUN = join(ROOT, 'scripts', 'signin-pickup-run.sh');
+  const LINE = JSON.stringify({ at: '2026-09-11T09:22:00Z', host: 'app.pingen.com', label: 'Pingen (letters)', tasks: ['recA', 'recB'] });
+  function stage({ rc = 0, paused = false, reopened = ['recA', 'recB'], midRun = '', noKey = false, pendingText = LINE + '\n' } = {}) {
+    const d = md(join(tmpdir(), 'od-pickup-'));
+    const repo = join(d, 'repo', 'scripts'); mkdirSync(repo, { recursive: true });
+    cpSync(join(ROOT, 'scripts', 'agent-tools.sh'), join(repo, 'agent-tools.sh'));
+    wf(join(repo, 'agent-dispatch.py'), noKey ? `import json\nprint(json.dumps({"counts": {"worklist": 1}}))\n`
+      : `import json, sys\nprint(json.dumps({"signinReopened": ${JSON.stringify(reopened)}, "counts": {"worklist": 1}}))\n`);
+    wf(join(repo, 'allowance.py'), `import sys, os\nopen(os.environ["STAGE"] + "/allowance-calls", "a").write(" ".join(sys.argv[1:]) + "\\n")\nif sys.argv[1] == "check" and os.environ.get("PAUSED") == "1":\n    print("paused"); sys.exit(3)\nprint("{}")\n`);
+    const claude = join(d, 'claude');
+    wf(claude, `#!/bin/bash\necho called >> "$STAGE/claude-calls"\nR=$(printf '%s\\n' "$@" | grep -o 'RUNDIR is [^ ]*' | head -1 | cut -d' ' -f3)\necho '{"actions":[]}' > "$R/report.json"\n${midRun ? `echo '${midRun}' >> "$STAGE/pending/pending.jsonl"\n` : ''}exit ${rc}\n`);
+    chmodSync(claude, 0o755);
+    mkdirSync(join(d, 'pending')); wf(join(d, 'pending', 'pending.jsonl'), pendingText);
+    mkdirSync(join(d, 'logs')); mkdirSync(join(d, 'runs')); wf(join(d, 'token'), 'tok');
+    const env = { ...process.env, STAGE: d, PAUSED: paused ? '1' : '0', SIGNIN_PICKUP_REPO: join(d, 'repo'), SIGNIN_PICKUP_DIR: join(d, 'pending'),
+      SIGNIN_PICKUP_LOG_DIR: join(d, 'logs'), SIGNIN_PICKUP_RUNS: join(d, 'runs'), SIGNIN_PICKUP_CLAUDE: claude, SIGNIN_PICKUP_TOKEN: join(d, 'token') };
+    const r = spawnSync('bash', [RUN], { env, encoding: 'utf8' });
+    const pending = existsSync(join(d, 'pending', 'pending.jsonl')) ? rf(join(d, 'pending', 'pending.jsonl'), 'utf8') : null;
+    const log = existsSync(join(d, 'logs', 'runs.log')) ? rf(join(d, 'logs', 'runs.log'), 'utf8') : '';
+    const calls = existsSync(join(d, 'claude-calls')) ? rf(join(d, 'claude-calls'), 'utf8').trim().split('\n').length : 0;
+    const allowance = existsSync(join(d, 'allowance-calls')) ? rf(join(d, 'allowance-calls'), 'utf8') : '';
+    return { status: r.status, stdout: r.stdout, stderr: r.stderr, pending, log, calls, allowance };
+  }
+  it('a clean run (rc=0) works the ids and removes its lines from pending.jsonl', () => {
+    const r = stage({ rc: 0 });
+    expect(r.status).toBe(0);
+    expect(r.calls).toBe(1);
+    expect(r.stdout).toMatch(/signin-pickup OK — worked: recA recB/);
+    // trimmed IN PLACE to empty (never unlinked: a signin-done waiting on the lock holds this inode)
+    expect(r.pending).toBe('');
+    expect(r.allowance).toMatch(/check --job signin-pickup/);
+    expect(r.allowance).toMatch(/mark --job signin-pickup/);
+  });
+  it('a failed run (rc=1, the 11 Sep shape) keeps pending.jsonl, writes one FAILED line and exits 1 for job-queue to record', () => {
+    const r = stage({ rc: 1 });
+    expect(r.status).toBe(1);
+    expect(r.pending).toBe(LINE + '\n');
+    expect(r.log).toMatch(/===== signin-pickup FAILED .*rc=1.*pending\.jsonl kept; the 30-minute poll works the reopened tasks =====/);
+    expect(r.stderr).toMatch(/signin-pickup FAILED/);
+  });
+  it('while the allowance is out the claude call is skipped, pending.jsonl is kept and the exit is clean', () => {
+    const r = stage({ paused: true });
+    expect(r.status).toBe(0);
+    expect(r.calls).toBe(0);
+    expect(r.pending).toBe(LINE + '\n');
+    expect(r.stdout).toMatch(/the Claude allowance is out/);
+    expect(r.log).toMatch(/SKIPPED: the Claude allowance is out/);
+  });
+  it('a hand-back landing mid-run survives the trim, and ids the poll has already worked are not re-worked', () => {
+    const later = JSON.stringify({ at: 'later', host: 'www.facebook.com', label: 'Facebook', tasks: ['recC'] });
+    const r = stage({ rc: 0, midRun: later, reopened: ['recA'] });
+    expect(r.status).toBe(0);
+    expect(r.stdout).toMatch(/worked: recA$/m);
+    expect(r.pending).toBe(later + '\n');
+  });
+  it('a queue.json without the signinReopened key is a broken read: fail, keep pending, no claude call (review, 15 Sep 2026)', () => {
+    const r = stage({ noKey: true });
+    expect(r.status).toBe(1);
+    expect(r.calls).toBe(0);
+    expect(r.pending).toBe(LINE + '\n');
+    expect(r.log).toMatch(/FAILED .*carries no signinReopened key/);
+  });
+  it('nothing still waiting (all worked since) trims the file without a claude call', () => {
+    const r = stage({ reopened: [] });
+    expect(r.status).toBe(0);
+    expect(r.calls).toBe(0);
+    expect(r.pending).toBe('');
+    expect(r.stdout).toMatch(/none of the handed-back tasks still waits/);
+  });
+  it('a half-written line in pending.jsonl fails the run and trims nothing (review, 15 Sep 2026)', () => {
+    const r = stage({ pendingText: LINE + '\n{"at":"x","host":"app.pin' });
+    expect(r.status).toBe(1);
+    expect(r.calls).toBe(0);
+    expect(r.pending).toBe(LINE + '\n{"at":"x","host":"app.pin');
+    expect(r.log).toMatch(/FAILED .*pending\.jsonl is unreadable/);
+  });
+});
+
+describe('the Robot sign-in app opens a window only for a site that is really signed out (15 Sep 2026)', () => {
+  const src = readFileSync(join(ROOT, 'scripts', 'robot-signin.applescript'), 'utf8');
+  it('asks signin-waiting once per chain, reads alreadyLive from its answer, and starts the pickup for those tasks too', () => {
+    expect(src).toMatch(/on refreshWaiting\(onlyHost\)/);
+    expect(src).toMatch(/signin-waiting" & siteArg & " > " & quoted form of waitingFile/);
+    // the per-site link checks that site only, and a failed check is a notification, not an error dialog
+    expect(src).toMatch(/refreshWaiting\(wantHost\)/);
+    expect(src).toMatch(/Could not check the sites/);
+    expect((src.match(/agent-dispatch\.py signin-waiting/g) || []).length).toBe(1);
+    expect(src).toMatch(/d\.alreadyLive/);
+    expect(src).toMatch(/on runChain\(theLines, liveHanded\)/);
+    expect(src).toMatch(/set handed to liveHanded/);
+    expect(src).toMatch(/liveHosts\(\) contains wantHost/);
+    // The old promise was false: nothing polled a reopened task. It is true now, and worded so.
+    expect(src).not.toMatch(/30-minute poller will pick/);
+    expect(src).toMatch(/counts a sign-in as a hand-back/);
   });
 });

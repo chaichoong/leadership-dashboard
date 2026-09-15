@@ -28,6 +28,7 @@ const ESTATE_SCRIPTS = [
   'scripts/content-engine/approval.py',
   'scripts/agent-dispatch.py',
   'scripts/handback-poll.py',
+  'scripts/session-keepalive.py',
   'scripts/create-agent-task.py',
   'scripts/job-queue.py',
   'scripts/estate-status.py',

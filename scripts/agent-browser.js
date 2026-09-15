@@ -148,7 +148,13 @@ const BUILTIN_SITES = {
                                   loginUrl: 'https://app.pingen.com/' },
   'dashboard.stripe.com':       { label: 'Stripe',             login: true,
                                   loginUrl: 'https://dashboard.stripe.com/login' },
-  'manage.gocardless.com':      { label: 'GoCardless',         login: true,
+  // GoCardless signs its auth cookie out after 90 minutes of its own accord,
+  // so a session Kevin opens in the morning is gone before any job uses it:
+  // the daily keep-alive read it signed out six mornings in twelve days (3-15
+  // Sep 2026) and raised a task each time for a sign-in that could never be
+  // kept. shortSession: the keep-alive leaves it alone; a job that needs it
+  // asks for the sign-in when it needs it, and the pickup works it at once.
+  'manage.gocardless.com':      { label: 'GoCardless',         login: true, shortSession: true,
                                   loginUrl: 'https://manage.gocardless.com/sign-in' },
   'studio.youtube.com':         { label: 'YouTube Studio',     login: true,
                                   loginUrl: 'https://studio.youtube.com/' },
@@ -184,6 +190,17 @@ const BUILTIN_SITES = {
   // through `commit`, which refuses without an approved task.
   'loom.com':                   { label: 'Loom (video archive)', login: true,
                                   loginUrl: 'https://www.loom.com/looms/videos' },
+  // Spotify for Creators (the Runpreneur podcast). Its door, /pod/login, is
+  // a page with one button, "Continue with Spotify", and it shows that page
+  // whether or not the Spotify cookie is live — so a read of the door said
+  // "signed out" every morning (the cookie runs to 2027) and the keep-alive
+  // raised a task for it daily. With the walk the click lands on
+  // creators.spotify.com/home/show/… when the session is live, proven 15 Sep
+  // 2026 in the robot profile. sites.json carries the label and note; the
+  // walk lives here so the two never drift apart.
+  'creators.spotify.com':       { label: 'Spotify for Creators', login: true,
+                                  loginUrl: 'https://creators.spotify.com/pod/login',
+                                  sessionWalk: ['Continue with Spotify'] },
 };
 
 function loadSites() {
