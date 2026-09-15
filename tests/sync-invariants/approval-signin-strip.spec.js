@@ -66,7 +66,7 @@ test.describe('sign-ins waiting are a tap, not a decision', () => {
     await loadAgentsPage(page);
     await page.click('#ptab-approvals');
     await expect(page.locator('[data-apv-signin]')).toHaveCount(3);
-    await expect(page.locator('.apv-group-count', { hasText: /session|sign/i })).toHaveCount(0);
+    await expect(page.locator('.apv-group')).toHaveCount(0);   // groups were removed 15 Sep 2026; they must not come back
     for (const id of ['recLapse0', 'recLapse1', 'recLapse2']) {
       await expect(page.locator(`[data-apv-card="${id}"]`)).toBeVisible();
     }

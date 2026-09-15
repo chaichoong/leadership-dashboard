@@ -145,36 +145,6 @@ test.describe('and does not group things that merely look alike', () => {
   });
 });
 
-test.describe('the queue shows the evidence on the group', () => {
-  test('every cluster states why, and a single task never claims one', async ({ page }) => {
-    const rows = [
-      'INBOUND: SMS reply from +447538631747',
-      'MAINTENANCE: SMS from 447538631747 - maintenance reply',
-      'INBOUND: respond to Burnley Recovery re Liability Order 22 Newton St',
-    ];
-    const f = defaultFixtures();
-    f.approvals = rows.map((name, i) => ({
-      id: `recDUP${String(i).padStart(9, '0')}`, createdTime: '2026-08-27T08:00:00.000Z',
-      fields: {
-        [TF.name]: name, [TF.status]: { name: 'Approval' },
-        [TF.teamMember]: [AGENT_A], [TF.sentForApprovalBy]: [AGENT_A],
-        [TF.agentOutput]: 'Prepared work.', [TF.taskType]: { name: 'Analysis' },
-        [TF.dueDate]: londonTodayISO(), [TF.lmt]: '2026-08-27T08:00:00.000Z',
-      },
-    }));
-    await mockAgentsPage(page, f);
-    await loadAgentsPage(page);
-    await page.click('#ptab-approvals');
-
-    await expect(page.locator('.apv-group')).toHaveCount(1);
-    await expect(page.locator('.apv-group-why')).toHaveCount(1);
-    await expect(page.locator('.apv-group-why')).toContainText('same phone 538631747');
-    // The Burnley task is a genuine one-off and must stay a bare card.
-    await expect(page.locator('.apv-card', { hasText: 'Burnley' })
-      .locator('xpath=ancestor::div[contains(@class,"apv-group")]')).toHaveCount(0);
-  });
-});
-
 test.describe('the Duplicates lane sees what the queue sees', () => {
   // Two blind spots, both fixed 28 Aug 2026. It keyed on dupeTaskKey alone, so
   // it reported CLEAN while seven real pairs sat in the gate. And it bucketed

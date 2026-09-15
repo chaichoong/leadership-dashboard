@@ -3,7 +3,8 @@
 // state, open panels snapping shut, Approve below the fold on a laptop, and a
 // wait dressed up as a decision. These guard the shape that replaced it: two
 // buttons, everything else one tap away, the decision saved in place with an
-// Undo, nothing else on the page rebuilt, and alike items approvable as one.
+// Undo, nothing else on the page rebuilt. (The alike-items strip was removed
+// on 15 Sep 2026: Kevin ticks the cards he wants decided together instead.)
 const { test, expect } = require('@playwright/test');
 const { TF, defaultFixtures, mockAgentsPage, loadAgentsPage } = require('./agents-page.helpers');
 
@@ -105,30 +106,6 @@ test.describe('a decision is saved in place; nothing else moves', () => {
   });
 });
 
-test.describe('alike items approve as one, after the list has been read', () => {
-  test('the strip lists every promise line and approves them all in order', async ({ page }) => {
-    const patches = await mockAgentsPage(page, withAlike());
-    await loadAgentsPage(page);
-    await openApprovals(page);
-    const strip = page.locator('[data-apv-batch-group]');
-    await expect(strip).toHaveCount(1);
-    await expect(strip).toContainText('3 alike: Inbound Comms Response · Correspondence to example.co.uk');
-    await expect(strip.locator('.apv-batch-list div')).toHaveCount(3);
-    await expect(strip.locator('.apv-batch-list')).toContainText('sending this email to founder0@example.co.uk');
-    await strip.locator('[data-apv-batch-approve]').click();
-    await expect.poll(() => patches.filter(p => /^recAlike/.test(p.id)).length).toBe(3);
-    for (const p of patches.filter(p => /^recAlike/.test(p.id))) expect(p.fields[TF.approvalOutcome]).toBe('Approved as-is');
-    // Tier-1 and sign-in cards never batch: the other cards are untouched.
-    expect(patches.filter(p => !/^recAlike/.test(p.id))).toHaveLength(0);
-  });
-  test('no strip when nothing is alike', async ({ page }) => {
-    await mockAgentsPage(page);
-    await loadAgentsPage(page);
-    await openApprovals(page);
-    await expect(page.locator('[data-apv-batch-group]')).toHaveCount(0);
-  });
-});
-
 test.describe('the Slack link works every time', () => {
   test('a second #tab=approvals while the page is open switches to the queue', async ({ page }) => {
     await mockAgentsPage(page);
@@ -141,8 +118,8 @@ test.describe('the Slack link works every time', () => {
   });
 });
 
-// THE COVERAGE CHECK and three quotes per job (Kevin, 7 Sep 2026).
-test.describe('quote emails batch by property and show the coverage that passed', () => {
+// THE COVERAGE CHECK (Kevin, 7 Sep 2026).
+test.describe('quote emails show the coverage that passed', () => {
   function withQuotes() {
     const fx = defaultFixtures();
     const now = new Date().toISOString();
@@ -155,15 +132,6 @@ test.describe('quote emails batch by property and show the coverage that passed'
     } }));
     return fx;
   }
-  test('three requests to three tradespeople about one property are one strip', async ({ page }) => {
-    await mockAgentsPage(page, withQuotes());
-    await loadAgentsPage(page);
-    await openApprovals(page);
-    const strip = page.locator('[data-apv-batch-group]', { hasText: '6 Chedburgh Place' });
-    await expect(strip).toHaveCount(1);
-    await expect(strip).toContainText('3 alike: Creditor Management · Correspondence for 6 Chedburgh Place');
-    await expect(strip.locator('.apv-batch-list div')).toHaveCount(3);
-  });
   test('the card says which districts the tradesperson covers', async ({ page }) => {
     await mockAgentsPage(page, withQuotes());
     await loadAgentsPage(page);
