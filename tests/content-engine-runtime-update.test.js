@@ -147,5 +147,7 @@ describe('the hourly publisher updates itself the same way', () => {
   it('renames Strava runs every hour, not only in the nightly render job', () => {
     expect(pub).toMatch(/runpreneur_sync\.py run --then-map/);
     expect(pub.indexOf('runpreneur_sync.py run')).toBeGreaterThan(pub.indexOf('# --- end runtime-update-block ---'));
+    // before any step that can `exit 1` (review, 15 Sep 2026)
+    expect(pub.indexOf('runpreneur_sync.py run')).toBeLessThan(pub.indexOf('|| exit 1', pub.indexOf('# --- end runtime-update-block ---')));
   });
 });

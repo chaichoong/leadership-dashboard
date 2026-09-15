@@ -233,7 +233,10 @@ def requeue_failed(ledger, now=None):
         if e.get("status") != "failed" or e.get("requeued"): continue
         e.update({"status": "new", "requeued": now, "last_error": e.pop("error", "")}); e.pop("local", None); back.append(k)
         for k2, v in ledger.items():
-            if k2 != k and v.get("date") == e.get("date") and (v.get("size") or 0) < (e.get("size") or 0) and v.get("status") == "rendered":
+            # the same EPISODE, not merely the same date: 4 Jun 2026 holds 2194 and 2195, so a date match would
+            # re-render 2194's published teaser when a 2195 clip failed (review, 15 Sep 2026)
+            if k2 != k and v.get("date") == e.get("date") and v.get("episode") == e.get("episode") \
+                    and (v.get("size") or 0) < (e.get("size") or 0) and v.get("status") == "rendered":
                 v.update({"status": "new", "requeued": now, "requeue_reason": "re-rendered after %s so it carries the episode title" % k})
                 v.pop("local", None); back.append(k2)
     return back
@@ -557,8 +560,9 @@ def _selftest_jam_and_retry():
     assert pulled_in_queue(led) == 0 < MAX_PULLED, "the two parked teasers do not count against the pull limit (it read 2 and refused)"
     led["2059 Full.insv"]["status"] = "pulled"
     assert pulled_in_queue(led) == 1 and not waits_for_bigger("2060 summary.insv", {**led, "2060 Full.insv": {**led["2060 Full.insv"], "status": "rendered"}})
-    led = {"2057 Full.insv": {"date": "2026-01-17", "size": 5.9 * gb, "status": "failed", "error": "name 'INTRO_LOCAL' is not defined", "local": "/w/2057 Full.insv"},
-           "2057 Summary.insv": {"date": "2026-01-17", "size": 0.46 * gb, "status": "rendered", "local": "/w/2057 Summary.insv"},
+    led = {"2057 Full.insv": {"date": "2026-01-17", "episode": 2057, "size": 5.9 * gb, "status": "failed", "error": "name 'INTRO_LOCAL' is not defined", "local": "/w/2057 Full.insv"},
+           "2057 Summary.insv": {"date": "2026-01-17", "episode": 2057, "size": 0.46 * gb, "status": "rendered", "local": "/w/2057 Summary.insv"},
+           "VID_2194_teaser": {"date": "2026-01-17", "episode": 2194, "size": 0.3 * gb, "status": "rendered"},
            "2056 Summary.insv": {"date": "2026-01-16", "size": 0.4 * gb, "status": "rendered"},
            "2055 Full.insv": {"date": "2026-01-15", "size": 3 * gb, "status": "failed", "requeued": "2026-09-14T22:00:00"}}
     back = requeue_failed(led, now="2026-09-15T22:00:00")
@@ -566,6 +570,7 @@ def _selftest_jam_and_retry():
     assert led["2057 Full.insv"]["status"] == "new" and led["2057 Full.insv"]["last_error"].startswith("name") and "local" not in led["2057 Full.insv"]
     assert led["2057 Summary.insv"]["status"] == "new", "the teaser re-renders after its long clip so it carries the episode title"
     assert led["2056 Summary.insv"]["status"] == "rendered", "another day's clips are untouched"
+    assert led["VID_2194_teaser"]["status"] == "rendered", "another episode recorded the same date is untouched (4 Jun 2026 holds 2194 and 2195)"
     assert led["2055 Full.insv"]["status"] == "failed", "a second failure stays failed (one retry only)"
     assert requeue_failed(led) == [], "nothing is put back twice"
 

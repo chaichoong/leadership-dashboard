@@ -581,7 +581,15 @@ def finish_extras(day, entry, recs, test, save):
             files = episode_files(day)
             upload = files["podcast"] if spotify.PODCAST_FORMAT == "audio" and os.path.exists(files["podcast"]) else files["full"]
             if os.path.exists(upload):
+                tried_before = os.path.exists(os.path.join(os.path.dirname(STATE), "spotify_plan_%d.json" % day))
                 plan_path, ptitle = spotify.write_plan(day, upload, ff.get("Podcast Copy"), entry["youtube_link"], test, os.path.dirname(STATE), thumb=files.get("thumb", ""))
+                if tried_before and not test:
+                    # an earlier attempt left its plan (2056 crashed mid-run on 11 Sep 2026 and its state was rebuilt
+                    # without the podcast): look at Spotify before uploading, so a retry never publishes a second copy
+                    seen, _ = spotify.verify_published(ptitle, tries=1)
+                    if seen in ("published", "processing"):
+                        pod.update({"plan": plan_path, "title": ptitle, "status": seen, "note": "found on Spotify before a retry"}); save()
+                        print("episode %d: already on Spotify (%s); not uploaded again" % (day, seen)); return done
                 pod.update({"plan": plan_path, "title": ptitle, "status": "uploading", "started": now_utc()}); save()
                 done.append(run_spotify(day, card_task(day, full), plan_path, ptitle, test, pod)); save()
         except Exception as ex:
@@ -1194,6 +1202,8 @@ def selftest():
     assert section_status({"posts": {"facebook|summary|f": {"platform": "facebook", "clip": "summary", "status": "scheduled"}}})["Teaser clips"] == "pending"
     assert section_status({})["Learnings clips"] == "missing", "no Learnings post at all is missing, not done (1841)"
     assert "extras_done(entry)" in rsrc and "STATUS_PUBLISHED" in rsrc, "a Published record with its podcast missing still gets the retry"
+    fsrc = inspect.getsource(finish_extras)
+    assert fsrc.index("spotify.verify_published(ptitle") < fsrc.index("run_spotify(day"), "a retried podcast looks at Spotify before it uploads"
     src = inspect.getsource(sync); assert "import platform_copy" not in src, "sync must use the module-level pc: an import inside the function made pc a local and crashed every sync (10 Sep 2026, 07:15)"
     assert 'if not str(day).isdigit() or not isinstance(entry, dict): continue' in src, "sync skips the cursor and the held posts"
     assert may_go_to_youtube(2054, gaps, st, led, {1799, 2054}) and st[CURSOR_KEY] == 2053, "a gap day in the approved set does not disturb the order"

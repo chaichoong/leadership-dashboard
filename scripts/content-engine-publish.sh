@@ -58,13 +58,14 @@ else
   echo "RUNTIME CHECKOUT IS NOT ON main ($(git -C "$REPO" branch --show-current 2>/dev/null)) — running whatever is here, unupdated" >&2
 fi
 # --- end runtime-update-block ---
-python3 scripts/content-engine/approval.py sync || exit 1
-python3 scripts/content-engine/publish.py sync || exit 1
-python3 scripts/content-engine/publish.py run --limit 3 || exit 1
 # Strava and the How far I've run numbers, every hour (15 Sep 2026). They lived only in the nightly render job, so the
 # four nights the disk rule skipped it (9-12 Sep) renamed no run until the 13th. A run is renamed within the hour of
 # reaching Strava; the map is redrawn only when a new run was folded, so main gets one map commit a day, not fourteen.
+# It runs FIRST: the publishing steps below stop the run on a failure, and that must never cost a rename.
 python3 scripts/content-engine/runpreneur_sync.py run --then-map || echo "runpreneur sync: skipped this run (see above)"
+python3 scripts/content-engine/approval.py sync || exit 1
+python3 scripts/content-engine/publish.py sync || exit 1
+python3 scripts/content-engine/publish.py run --limit 3 || exit 1
 python3 scripts/content-engine/approval.py report
 python3 scripts/content-engine/publish.py report
 python3 scripts/content-engine/runpreneur_sync.py report
