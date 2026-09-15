@@ -148,12 +148,15 @@ const { chromium } = require('%(pw)s');
   const page = ctx.pages()[0] || await ctx.newPage();
   await page.goto('https://www.facebook.com/me', { waitUntil: 'domcontentloaded' });
   await page.waitForTimeout(9000);
-  for (let i = 0; i < 8; i++) { await page.mouse.wheel(0, 2500); await page.waitForTimeout(1500); }   // a share from days ago sits well down the timeline
   const id = %(id)s;
   // 15 Sep 2026: a shared reel sits on the profile with the reel id in its markup but in NO link address, so the
-  // link-only check read every share since 13 Sep as missing (2194 was there, count 1, links none). The page's
-  // markup is the proof.
-  const found = await page.evaluate((id) => document.documentElement.outerHTML.includes(id), id);
+  // link-only check read every share since 13 Sep as missing. And the timeline unloads posts that scroll past, so
+  // the markup is checked after EVERY scroll: checked once at the bottom, all five live shares read as absent.
+  let found = false;
+  for (let i = 0; i < 8 && !found; i++) {
+    found = await page.evaluate((id) => document.documentElement.outerHTML.includes(id), id);
+    if (!found) { await page.mouse.wheel(0, 2500); await page.waitForTimeout(1500); }
+  }
   console.log(JSON.stringify({ shared: found, url: page.url() }));
   await ctx.close(); process.exit(0);
 })().catch(e => { console.log(JSON.stringify({ shared: false, error: e.message.slice(0, 200) })); process.exit(0); });
@@ -193,6 +196,7 @@ def run_plan(plan_path, task_id, test, shot):
 
 
 def selftest():
+    assert SHARED_JS.index("outerHTML.includes(id)") < SHARED_JS.index("page.mouse.wheel"), "the profile is checked before and between scrolls, never only at the bottom"
     copy = "Stress coping mechanisms are personal. Mine runs on three things.\n\nMore detail here.\n\n#a #b"
     assert match_key(copy) == "Stress coping mechanisms are personal. Mine"
     t = share_text(copy, "https://youtu.be/x")
