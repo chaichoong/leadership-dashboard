@@ -73,7 +73,14 @@ F = {
     # Same id as AF["sentForApprovalBy"] in agent-dispatch.py; the gate hides
     # an Approval row without it.
     "sentForApprovalBy": "fld30Yw8SWYVp049g",
+    # Checkbox: Maintenance Ticket (js/config.js `maintenance`). A ticked task
+    # is a repair, whatever its name says; the fold lane reads it first.
+    "maintenance":  "fldSEUvVA98as1HW6",
 }
+
+# Roy Lavin's Team Members row (same id as ROY_REC in task-manager.py and
+# ROY_TEAM_MEMBER in inbound-triage.py). A task Roy holds is a repair job.
+ROY_TEAM_MEMBER = "reclbdjfVev3bqNHS"
 
 PRIORITY_RANK = {"Low": 0, "Medium": 1, "High": 2, "Urgent": 3}
 
@@ -686,6 +693,22 @@ def dupe_task_key(name):
 #   fold  — destructive, one task absorbs another. Same lane required.
 #   group — display only, in the approvals queue. Lane ignored, because a
 #           thread appearing in two lanes is exactly the duplication he sees.
+#
+# THE LANE MEANS REPLY-VS-MAINTENANCE, NOTHING ELSE (Kevin, 15 Sep 2026).
+# Until then the fold lane was the raw name prefix, so "INBOUND (follow-up):"
+# vs "INBOUND:" and "COMPLIANCE:" vs "CORRESPONDENCE:" read as different lanes
+# and refused to fold: rec2nZRQ1Y4ZXj9mA (a COMPLIANCE twin of the
+# CORRESPONDENCE keeper recODSge5r6SZ3IqQ, same contractor, same EICR, same
+# house) sat in his queue as two cards. Those prefixes say which agent wrote
+# the task up, not what kind of obligation it is. The 28 Aug lesson stands:
+# a maintenance job absorbed into a reply task is a real obligation lost, so
+# there are exactly two fold lanes: `maintenance` (a REPAIR: / MAINTENANCE:
+# style prefix, the Maintenance Ticket tick, or Roy as the holder) and
+# `reply` (everything else).
+
+# Prefix words that put a task in the maintenance lane. Mirrored verbatim by
+# DUPE_MAINTENANCE_LANE_WORDS in os/agents/index.html; drift-tested.
+DUPE_MAINTENANCE_LANE_WORDS = {"maintenance", "repair", "repairs"}
 
 # Words that say what to DO about a matter rather than WHICH matter it is.
 # "pay Sefton" and "Sefton Council" are one thing; the verb is not identity.
@@ -754,17 +777,23 @@ def _is_calendar_year(digits):
 
 
 def dupe_signals(name):
-    """(lane, strong_ids, distinctive_words) — what identifies this matter.
+    """(lane, strong_ids, distinctive_words, place_words): what identifies
+    this matter. `lane` is "maintenance" or "reply", never the raw prefix:
+    the prefix is split off so it cannot eat a subject word, but the only
+    lane difference that may block a fold is repair-vs-reply (Kevin, 15 Sep
+    2026).
 
     Mirrored verbatim by dupeSignals in os/agents/index.html; drift-tested in
     tests/agents-dupe-task-key.test.js.
     """
     raw = str(name or "")
-    lane = ""
+    lane = "reply"
     m = re.match(r"^([A-Za-z][A-Za-z ]*(?:\([^)]*\))?)\s*:\s*", raw)
     if m:
-        lane = re.sub(r"[^a-z0-9]+", " ", m.group(1).lower()).strip()
+        prefix = re.sub(r"[^a-z0-9]+", " ", m.group(1).lower()).strip()
         raw = raw[m.end():]
+        if any(w in DUPE_MAINTENANCE_LANE_WORDS for w in prefix.split()):
+            lane = "maintenance"
     strong = set()
     for digits in DUPE_PHONE_RE.findall(raw):
         strong.add("tel:" + digits[-9:])
@@ -797,6 +826,22 @@ def dupe_signals(name):
     return lane, strong, set(words), _place_tokens(words)
 
 
+def fold_lane(name, team=None, maintenance_ticket=False):
+    """"maintenance" | "reply" for a task RECORD, for the fold callers that
+    hold one (the creation gate, the Task Manager board, the dispatch close).
+
+    The name lane alone is not enough: on the live board of 15 Sep 2026 all
+    24 ticked Maintenance Tickets were unprefixed ("Clear and tidy garden",
+    "Provision of a valid EICR") or "INBOUND:", so a name-only lane read every
+    one of them as a reply task and let an agent-written COMPLIANCE task
+    absorb Roy's job. The tick and Roy's Team Members row say repair whatever
+    the name says; the name lane (dupe_signals) covers the rest.
+    """
+    if maintenance_ticket or ROY_TEAM_MEMBER in (team or []):
+        return "maintenance"
+    return dupe_signals(name)[0]
+
+
 def dupe_verdict(name_a, name_b, mode="group"):
     """Are these the same matter? Returns {match, why, shared}.
 
@@ -813,7 +858,10 @@ def dupe_verdict(name_a, name_b, mode="group"):
     # "SMS reply from +447538631747" and "SMS from 447538631747 - maintenance
     # reply" ARE one thread, and Kevin should SEE them together; that does not
     # mean one may quietly eat the other. Grouping shows, folding destroys, and
-    # only the second needs to be careful.
+    # only the second needs to be careful. The lane is reply-vs-maintenance
+    # only (Kevin, 15 Sep 2026): two reply tasks under different agent prefixes
+    # ("INBOUND (follow-up):" / "INBOUND:", "COMPLIANCE:" / "CORRESPONDENCE:")
+    # are the same lane and fold when the rest of the verdict agrees.
     if mode == "fold" and lane_a != lane_b:
         return {"match": False, "why": "", "shared": []}
 
@@ -889,12 +937,20 @@ def decide(incoming_fields, open_rows):
     incoming_sender = incoming_fields.get(F["inboundSender"], "")
 
     incoming_name = incoming_fields.get(F["name"], "")
+    incoming_lane = fold_lane(incoming_name, incoming_fields.get(F["team"]),
+                              bool(incoming_fields.get(F["maintenance"])))
     matches, why_matched = [], {}
     for row in open_rows:
         f = row.get("fields", {})
         if _sel_name(f.get(F["status"])) in CLOSED_STATUSES:
             continue
         other = f.get(F["name"], "")
+        # A REPAIR TICKET AND A REPLY TASK ARE TWO OBLIGATIONS (28 Aug 2026,
+        # restated 15 Sep 2026). Read off the RECORD, ahead of both passes:
+        # the exact key cannot see the Maintenance Ticket tick or Roy, and an
+        # unprefixed ticket keys and words like any other task.
+        if fold_lane(other, f.get(F["team"]), bool(f.get(F["maintenance"]))) != incoming_lane:
+            continue
         # TWO PASSES, and a match is either. The key is the fast exact bucket
         # and keeps every catch it already had; the verdict is the second pass
         # over what it missed — seven real pairs on the live queue of 28 Aug
@@ -1038,7 +1094,7 @@ def fetch_open_tasks():
         params = [("pageSize", "100"), ("returnFieldsByFieldId", "true"),
                   ("filterByFormula", "AND({Status}!='Completed', {Status}!='Cancelled')")]
         for fid in (F["name"], F["status"], F["due"], F["priority"],
-                    F["team"], F["inboundSender"]):
+                    F["team"], F["inboundSender"], F["maintenance"]):
             params.append(("fields[]", fid))
         if offset:
             params.append(("offset", offset))
@@ -1232,9 +1288,14 @@ def selftest():
     check("pure digits dropped", "4471902" not in k("Pay ref 4471902"))
     check("empty name empty key", k("") == "" and k("#12345") == "")
 
-    def row(rid, name, status="Today", sender="", created="2026-08-01T00:00:00.000Z"):
-        return {"id": rid, "createdTime": created, "fields": {
-            F["name"]: name, F["status"]: {"name": status}, F["inboundSender"]: sender}}
+    def row(rid, name, status="Today", sender="", created="2026-08-01T00:00:00.000Z",
+            team=None, ticket=False):
+        fields = {F["name"]: name, F["status"]: {"name": status}, F["inboundSender"]: sender}
+        if team:
+            fields[F["team"]] = team
+        if ticket:
+            fields[F["maintenance"]] = True
+        return {"id": rid, "createdTime": created, "fields": fields}
 
     incoming = {F["name"]: "INBOUND: Outstanding invoices",
                 F["inboundSender"]: "billing@acmecollections.co.uk",
@@ -1281,6 +1342,52 @@ def selftest():
     check("a task at Approval keeps its status and soft due",
           F["status"] not in p2 and F["due"] not in p2)
     check("priority never downgrades", F["priority"] not in p2)
+
+    # The fold lane means reply-vs-maintenance only (Kevin, 15 Sep 2026).
+    # The two live shapes that refused to fold on their raw prefixes:
+    # rec2nZRQ1Y4ZXj9mA (COMPLIANCE) against keeper recODSge5r6SZ3IqQ
+    # (CORRESPONDENCE), and the "INBOUND (follow-up):" / "INBOUND:" pairs.
+    fold = lambda a, b: dupe_verdict(a, b, mode="fold")["match"]
+    check("COMPLIANCE vs CORRESPONDENCE is one lane and folds",
+          fold("COMPLIANCE: EICR quote follow-up - AC1 Electrical Services - 6 Chedburgh Place",
+               "CORRESPONDENCE: Reply to AC1 Electrical - EICR bedroom count - 6 Chedburgh Place"))
+    check("INBOUND (follow-up) vs INBOUND is one lane and folds",
+          fold("INBOUND: 1406 Oldham Road electrical safety cert outstanding - Hannah Lea chasing",
+               "INBOUND (follow-up): 1406 Oldham Road EICR cert - send to Manchester Council"))
+    check("a repair ticket never folds into a reply task (28 Aug lesson stands)",
+          not fold("INBOUND: SMS reply from +447538631747", "REPAIR: SMS from 447538631747 - leaking tap")
+          and not fold("INBOUND: SMS reply from +447538631747",
+                       "MAINTENANCE: SMS from 447538631747 - maintenance reply"))
+    check("two repair tickets are one lane (control for the lane test)",
+          fold("REPAIR: SMS from 447538631747 - leaking tap", "MAINTENANCE: SMS reply from +447538631747"))
+    check("grouping still crosses the repair lane",
+          dupe_verdict("INBOUND: SMS reply from +447538631747",
+                       "REPAIR: SMS from 447538631747 - leaking tap", mode="group")["match"])
+    check("the fold lane is never the raw prefix",
+          dupe_signals("COMPLIANCE: x")[0] == "reply" and dupe_signals("no prefix")[0] == "reply"
+          and dupe_signals("REPAIR: x")[0] == "maintenance")
+    # The RECORD says repair when the name does not: on the live board every
+    # ticked Maintenance Ticket is unprefixed or "INBOUND:". Found by the
+    # reviewer of the 15 Sep 2026 change, live shape recrKDP4gTq7OpCtt.
+    roy_job = row("recRoy", "Provision of a valid EICR", team=[ROY_TEAM_MEMBER])
+    ticked = row("recTick", "INBOUND: Inspection Report - 25 Abercorn Court", ticket=True)
+    plain = row("recPlain", "Provision of a valid EICR")
+    agent_task = {F["name"]: "COMPLIANCE: Provision of a valid EICR - 18 Siddows Avenue Clitheroe"}
+    check("fold_lane reads the tick and Roy ahead of the name",
+          fold_lane("Clear and tidy garden", [ROY_TEAM_MEMBER]) == "maintenance"
+          and fold_lane("INBOUND: x", None, True) == "maintenance"
+          and fold_lane("Clear and tidy garden") == "reply")
+    check("an agent task never folds into Roy's unprefixed job",
+          decide(agent_task, [roy_job])["action"] == "create")
+    check("a reply task never folds into a ticked INBOUND ticket, even on the exact key",
+          decide({F["name"]: "INBOUND: Inspection Report - 25 Abercorn Court"}, [ticked])["action"] == "create")
+    check("a ticked incoming never folds into a reply task",
+          decide({F["name"]: "Provision of a valid EICR", F["maintenance"]: True}, [plain])["action"] == "create")
+    check("two repair records fold (control: the lane read is not a blanket refusal)",
+          decide({F["name"]: "Provision of a valid EICR", F["maintenance"]: True},
+                 [roy_job])["action"] == "update")
+    check("the same words with no tick and no Roy still fold (control)",
+          decide(agent_task, [plain])["action"] == "update")
 
     check("bracketed sender folds with its bare form",
           senders_agree("Alice Smith <billing@acme.com>", "billing@acme.com"))

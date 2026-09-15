@@ -134,7 +134,7 @@ test.describe('and does not group things that merely look alike', () => {
       .toBe(false);
   });
 
-  test('FOLDING never crosses a lane, even on a shared phone number', async ({ page }) => {
+  test('FOLDING never crosses the repair lane, even on a shared phone number', async ({ page }) => {
     // Grouping shows; folding destroys. A maintenance job absorbed into a
     // reply task is a real obligation lost, so the destructive path keeps the
     // lane rule the display path drops.
@@ -142,6 +142,27 @@ test.describe('and does not group things that merely look alike', () => {
                   'MAINTENANCE: SMS from 447538631747 - maintenance reply'];
     expect((await verdict(page, ...pair, 'group')).match).toBe(true);
     expect((await verdict(page, ...pair, 'fold')).match).toBe(false);
+    expect((await verdict(page, 'INBOUND: SMS reply from +447538631747',
+      'REPAIR: SMS from 447538631747 - leaking tap', 'fold')).match).toBe(false);
+  });
+
+  test('but the lane means reply-vs-maintenance ONLY: agent prefixes are not lanes', async ({ page }) => {
+    // Kevin's ruling, 15 Sep 2026. Until then the fold lane was the raw name
+    // prefix, so rec2nZRQ1Y4ZXj9mA (COMPLIANCE) refused to fold into its
+    // keeper recODSge5r6SZ3IqQ (CORRESPONDENCE) and both sat in his queue,
+    // and every "INBOUND (follow-up):" twin of an "INBOUND:" task did the
+    // same. Those prefixes say which agent wrote the task up, not what kind
+    // of obligation it is.
+    const chedburgh = await verdict(page,
+      'COMPLIANCE: EICR quote follow-up - AC1 Electrical Services - 6 Chedburgh Place',
+      'CORRESPONDENCE: Reply to AC1 Electrical - EICR bedroom count - 6 Chedburgh Place', 'fold');
+    expect(chedburgh.match).toBe(true);
+    expect(chedburgh.why).toContain('eicr');
+    const oldham = await verdict(page,
+      'INBOUND: 1406 Oldham Road electrical safety cert outstanding - Hannah Lea chasing',
+      'INBOUND (follow-up): 1406 Oldham Road EICR cert - send to Manchester Council', 'fold');
+    expect(oldham.match).toBe(true);
+    expect(oldham.why).toBe('same reference 1406');
   });
 });
 
