@@ -141,8 +141,20 @@ def verify_published(title, tries=3, wait=20, sleep=time.sleep):
         if text:
             last = list_status(text, title)
             if last[0] == "published": return last
+            if last[0] == "missing" and list_incomplete(text):
+                last = ("missing", "the episodes list was not readable in full: more episodes than the page shows")
         if n < tries - 1: sleep(wait)
     return last
+
+
+LIST_PAGE_ROWS = 20
+
+
+def list_incomplete(text):
+    """The episodes page may not show every episode: a 'load more' control, or a page's worth of rows, means a title
+    that is not in the text may still exist. A retry that trusts an incomplete list uploads a second copy
+    (review, 15 Sep 2026), so verify_published reports the list as not readable in full instead of 'missing'."""
+    return bool(re.search(r"\b(load|show) more( episodes)?\b", text, re.I))   # a row count was a stall in waiting (review, 15 Sep 2026)
 
 
 def list_status(text, title):
@@ -180,6 +192,9 @@ def public_link(title):
 
 
 def selftest():
+    rows = " ".join("Episode %d - Title %d Published 9/1/26 Video 04:00" % (2000 + i, i) for i in range(25))
+    assert not list_incomplete(rows) and list_incomplete("Episode 2054 x Load more") and not list_incomplete("see more of this description"), "only a load-more control means the list goes on"
+    assert list_status("Episode 2054 - T Published", "Episode 2054 - T")[0] == "published" and list_status("nothing", "Episode 2054")[0] == "missing"
     t, d = podcast_parts("Title: Day 2195 running off-road\nDescription: Six years in.\n\nMore.\nHashtags: #a #b", 2195)
     assert t == "Day 2195 running off-road" and d.startswith("Six years in.") and "#a #b" in d and "Title:" not in d, (t, d)
     assert podcast_parts("", 7)[0] == "Diary of a Runpreneur, Day 7"

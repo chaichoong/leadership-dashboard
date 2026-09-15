@@ -88,8 +88,9 @@ def build(now=None, state=None, approvals=None, ledger=None, sync_state=None, pl
         out = sorted((episode_row(k, e) for k, e in episodes.items() if out_at(e) and london_day(out_at(e)) == d), key=lambda r: r["day"])
         history.append({"date": d.isoformat(), "episodes": out})
     clean = 0
-    for h in history[1:]:                                    # yesterday backwards: days in a row with an in-order episode out
-        if not any(e["day"] not in gaps for e in h["episodes"]): break     # a gap day filling an old hole is not the run moving on
+    for i in range(1, 31):                                   # yesterday backwards, beyond the seven-day table (review, 15 Sep 2026: the table capped it at 6)
+        d = today - dt.timedelta(days=i)
+        if not any(out_at(e) and london_day(out_at(e)) == d and int(k) not in gaps for k, e in episodes.items()): break   # a gap day filling an old hole is not the run moving on
         clean += 1
 
     # what is booked and not out yet
@@ -178,6 +179,20 @@ def headline(r):
     return "Content: %s. %s. %s." % (out, nxt, ask)
 
 
+UNPAUSE_AFTER_DAYS = 7
+
+
+def lift_gap_pause(report, path=None, remove=os.remove, say=print):
+    """Kevin, 15 Sep 2026: the gap days come back once seven days in a row have an in-order episode out. The
+    report already counts those days, so the job that writes it lifts the pause and says so. Returns True when lifted."""
+    path = path or watch.GAP_PAUSE_FILE
+    if report.get("cleanDaysInRow", 0) < UNPAUSE_AFTER_DAYS or not os.path.exists(path): return False
+    remove(path)
+    report["gapDaysPaused"] = False; report["gapDaysUnpaused"] = report["asOf"]
+    say("content report: %d days in a row with an episode out; gap days are back in the night plan" % report["cleanDaysInRow"])
+    return True
+
+
 def write(report, dry_run=False):
     now = report["asOf"].replace("Z", ".000Z")
     status = "Worked"
@@ -232,9 +247,17 @@ def selftest():
     import watch as _w; real = _w.gap_days; _w.gap_days = lambda path=None: {1799}
     try: assert build(now, gap_only, {}, {}, {}, plan=[])["cleanDaysInRow"] == 0
     finally: _w.gap_days = real
+    import tempfile
+    pf = os.path.join(tempfile.gettempdir(), "od-gap-pause-%d" % os.getpid()); open(pf, "w").write("x")
+    quiet = lambda *a: None
+    assert not lift_gap_pause({"cleanDaysInRow": 6, "asOf": "t"}, pf, say=quiet) and os.path.exists(pf), "six days in a row keeps the pause"
+    assert lift_gap_pause({"cleanDaysInRow": 7, "asOf": "t"}, pf, say=quiet) and not os.path.exists(pf), "seven days lifts it"
+    assert not lift_gap_pause({"cleanDaysInRow": 9, "asOf": "t"}, pf, say=quiet), "already lifted: nothing to do"
+    ten = {str(2060 + i): {"youtube_link": "l", "posts": {"youtube|full|y": yt("l", "2026-09-%02dT05:00:00Z" % (6 + i))}} for i in range(10)}   # 6-15 Sep, out every day
+    assert build(now, ten, {}, {}, {}, plan=[])["cleanDaysInRow"] == 10, "the count runs past the seven-day table"
     f = write(r, dry_run=True)
     assert f[ES["key"]] == KEY and f[ES["kind"]] == "report" and json.loads(f[ES["payload"]])["headline"] == r["headline"]
-    print(json.dumps({"checks": 16, "failed": []}))
+    print(json.dumps({"checks": 19, "failed": []}))
 
 
 if __name__ == "__main__":
@@ -243,5 +266,5 @@ if __name__ == "__main__":
     if a.mode == "selftest": selftest()
     elif a.mode == "build": print(json.dumps(build(), indent=1))
     elif a.mode == "write":
-        rep = build(); write(rep); print("content report: " + rep["headline"])
+        rep = build(); lift_gap_pause(rep); write(rep); print("content report: " + rep["headline"])
     else: raise SystemExit("usage: content_report.py build | write | selftest")
