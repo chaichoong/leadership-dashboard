@@ -757,9 +757,7 @@ def teaser_waits(key, ledger):
     """A short clip renders AFTER the day's long one so its banner can carry the episode title (1841's teaser
     said 'Diary of a Runpreneur', Kevin 10 Sep 2026). It waits while a bigger clip of the same day is still
     new, pulled or rendering; a day with no bigger clip, or one whose long clip failed, renders at once."""
-    e = ledger[key]
-    bigger = [v for k2, v in ledger.items() if k2 != key and v.get("date") == e.get("date") and (v.get("size") or 0) > (e.get("size") or 0)]
-    return any(v.get("status") in ("new", "pulled", "rendering") for v in bigger)
+    return watch.waits_for_bigger(key, ledger)
 
 
 def episode_title_for(day, ledger):

@@ -58,6 +58,13 @@ def caption(day, raised, km):
             % (fmt_num(day), fmt_num(DAYS_TARGET), fmt_num(raised), fmt_num(km, 2)))
 
 
+def strava_name(text):
+    """The whole caption on one line, the team's own title (Strava, 3 Sep 2026: "Day #2,286/5,000 #runpreneurchallenge
+    Total raised so far £76,840/£1,000,000 Total distance so far 17,510.61km/40,075km"). From 4 Sep to 15 Sep 2026
+    the title kept only the first line, so the totals vanished from the feed and sat in the description."""
+    return " ".join(l.strip() for l in text.splitlines() if l.strip())
+
+
 def progress(km):
     return "%.2f%%" % min(100.0, km / GOAL_KM * 100)
 
@@ -205,21 +212,23 @@ def run(dry_run=False, rename=True):
         state, changed = fold(state, act)
         if changed: new.append(act)
     if not new:
-        print("no new run since day %s; site values unchanged (raised £%s)" % (state.get("day") or state["seeded_from_site"].get("days"), fmt_num(raised))); save_state(state); return
+        print("no new run since day %s; site values unchanged (raised £%s)" % (state.get("day") or state["seeded_from_site"].get("days"), fmt_num(raised))); save_state(state); return 0
     vals = values(state, raised)
     if dry_run:
-        print("DRY RUN", json.dumps({"new_runs": [{"id": a["id"], "km": round(a["distance"] / 1000, 2), "day": run_day(a)} for a in new], "values": vals, "stripe_gross": gross, "charges": n}, indent=1)); return
+        print("DRY RUN", json.dumps({"new_runs": [{"id": a["id"], "km": round(a["distance"] / 1000, 2), "day": run_day(a)} for a in new], "values": vals, "stripe_gross": gross, "charges": n,
+                                     "strava_names": [strava_name(caption(run_day(a), raised, state["total_km"])) for a in new]}, indent=1)); return 0
     pushed = push_values(vals)
     if rename:
         km_so_far = state["total_km"] - sum(a["distance"] / 1000.0 for a in new)
         for act in new:                        # each run gets its own day and the total AS OF that run
             km_so_far = round(km_so_far + act["distance"] / 1000.0, 2)
             text = caption(run_day(act), raised, km_so_far)
-            strava("PUT", "/activities/%s" % act["id"], {"name": text.split("\n")[0], "description": text})
+            strava("PUT", "/activities/%s" % act["id"], {"name": strava_name(text), "description": text})
     state["last_push"] = {"at": dt.datetime.now().isoformat(timespec="seconds"), "values": vals, "renamed": rename, "stripe_charges": n, "runs": [str(a["id"]) for a in new]}
     save_state(state)
     print("day %s: %d new run(s) folded (%s km); site now %s; raised £%s (Stripe %d charges); Strava runs %s" % (
         state["day"], len(new), ", ".join("%.2f" % (a["distance"] / 1000) for a in new), {k: v[1] for k, v in pushed.items()}, fmt_num(raised), n, "renamed" if rename else "left"))
+    return len(new)
 
 
 def report():
@@ -232,6 +241,8 @@ def report():
 def selftest():
     assert streak_day(dt.date(2020, 6, 1)) == 1 and streak_day(dt.date(2026, 9, 3)) == 2286
     assert caption(2286, 76842, 17503.21) == "Day #2,286/5,000 #runpreneurchallenge\nTotal raised so far £76,842/£1,000,000\nTotal distance so far 17,503.21km/40,075km"
+    assert strava_name(caption(2286, 76840, 17510.61)) == "Day #2,286/5,000 #runpreneurchallenge Total raised so far £76,840/£1,000,000 Total distance so far 17,510.61km/40,075km", "the team's one-line title"
+    import inspect; assert 'strava_name(text)' in inspect.getsource(run), "the rename writes the whole caption into the title, not its first line"
     assert progress(17496.06) == "43.66%" and progress(50000) == "100.00%"
     st = {"total_km": 17496.06, "folded": [], "seeded_from_site": {"days": "2284", "raised": 76840.0, "stripe_gross": 6842.0}}
     st, old = fold(st, {"id": 0, "distance": 7150, "start_date_local": "2026-09-01T19:20:00Z"}); assert not old, "a run the site already counted is never re-added"
@@ -243,13 +254,18 @@ def selftest():
     seeded = {"seeded_from_site": {"raised": 76840.0, "stripe_gross": 6842.0}}
     assert raised_now(seeded, 6842.0) == 76840.0, "first run changes nothing"
     assert raised_now(seeded, 6892.0) == 76890.0, "later runs add only what Stripe took since"
-    print(json.dumps({"checks": 11, "failed": []}))
+    print(json.dumps({"checks": 13, "failed": []}))
 
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser(); ap.add_argument("mode"); ap.add_argument("--dry-run", action="store_true"); ap.add_argument("--no-rename", action="store_true")
+    ap.add_argument("--then-map", action="store_true", help="run: redraw the How far I've run map when a new run was folded (hourly job)")
     a = ap.parse_args()
     if a.mode == "selftest": selftest()
-    elif a.mode == "run": run(dry_run=a.dry_run, rename=not a.no_rename)
+    elif a.mode == "run":
+        folded = run(dry_run=a.dry_run, rename=not a.no_rename)
+        if folded and a.then_map and not a.dry_run:
+            import runpreneur_map
+            runpreneur_map.run()
     elif a.mode == "report": report()
     else: raise SystemExit("usage: runpreneur_sync.py run [--dry-run] [--no-rename] | report | selftest")

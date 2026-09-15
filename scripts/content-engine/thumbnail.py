@@ -3,7 +3,8 @@
 
 Layout, palette and geometry are a port of the app's thDraw() (measured from the team's template
 1707): orange field with a darker diagonal band on the left, an angular photo panel of Kevin on the
-right, a navy slash top-left and a navy wedge bottom-right, two white accent lines, the icon card,
+right, a navy slash top-left and a navy wedge bottom-right (the template's two white accent lines are
+dropped: Kevin read them as a glitch, 15 Sep 2026), the icon card,
 the Runpreneur logo, LINE 1 in large white Impact with a navy outline, LINE 2 in a navy box, and the
 red WATCH NOW pill. Icons are the app's own Lucide paths (cm_thumb_assets.py), picked by the app's
 keyword rules from LINE 1. Title lines come from Claude with the app's own prompt, LINE1/LINE2.
@@ -251,12 +252,8 @@ def compose(photo_path, out_png, line1, line2, icon=None, day=None):
     poly(img, [(slashL(0), 0), (slashR(0), 0), (slashR(SLASH_END_Y), SLASH_END_Y), (slashL(SLASH_END_Y), SLASH_END_Y)], NAVY)
     poly(img, [(photoRightAt(0), 0), (TW, 0), (TW, TH), (photoRightAt(TH), TH)], ORANGE_MAIN)
     poly(img, [(987, TH * 0.74), (1090, TH * 0.74), (1041, TH), (925, TH)], NAVY)
-    # white accent lines
-    y_a, y_b = TH * 0.10, TH * 0.55
-    cv2.line(img, (int(slashL(y_a) - 40), int(y_a)), (int(slashL(y_b) - 40), int(y_b)), (255, 255, 255), 3, cv2.LINE_AA)
-    wedge_slope = (925 - 987) / (TH - TH * 0.74)
-    wx = lambda y: 987 + wedge_slope * (y - TH * 0.74)
-    cv2.line(img, (int(wx(TH * 0.74 - 10) + 8), int(TH * 0.74 - 10)), (int(wx(TH * 0.30) + 8), int(TH * 0.30)), (255, 255, 255), 3, cv2.LINE_AA)
+    # No white accent lines (Kevin, 15 Sep 2026): the template's two thin diagonals read as a glitch, and the one
+    # beside the wedge ran across his body in the photo.
     draw_icon(img, icon or pick_icon(line1), 127, 55, 245)          # where the team's thumbnails put it
     # logo
     logo = cv2.imdecode(np.frombuffer(base64.b64decode(A.LOGO_PNG_B64), np.uint8), cv2.IMREAD_UNCHANGED)
@@ -327,7 +324,9 @@ def selftest():
     title_band = got[340:425, 80:640]; assert (title_band.min(axis=2) > 240).sum() > 2000, "LINE 1 missing (white ink)"
     box_band = got[440:500, 70:400]; assert ((box_band == np.array(NAVY, np.uint8)).all(axis=2)).sum() > 3000, "LINE 2 navy box missing"
     assert (got[100:600, 800:1000, 2] > 200).sum() > 5000, "photo not placed in the panel"
-    print(json.dumps({"checks": 13, "failed": []}))
+    white = lambda band: int((band.min(axis=2) > 240).sum())
+    assert white(got[80:330, 580:670]) == 0 and white(got[230:510, 960:1030]) == 0, "no white diagonal lines (Kevin, 15 Sep 2026: they read as a glitch)"
+    print(json.dumps({"checks": 14, "failed": []}))
 
 
 if __name__ == "__main__":

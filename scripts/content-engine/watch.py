@@ -77,6 +77,16 @@ def gap_days(path=None):
     except OSError: return set()
 
 
+GAP_PAUSE_FILE = os.path.expanduser("~/.config/od/content_engine_gap_days_paused")
+
+
+def gaps_paused(path=None):
+    """Kevin, 15 Sep 2026: "consistency first". While this file exists the night plan renders continuity days
+    only; the gap list still lets those days through the scan and the publisher, it just gets no render slot.
+    Delete the file to give gap days their slots back (after seven days in a row with an episode out)."""
+    return os.path.exists(path or GAP_PAUSE_FILE)
+
+
 PULL_HEADROOM = 5 * 1024 ** 3
 
 
@@ -97,7 +107,8 @@ def plan(ledger, slots, gaps=None, free=None, start=None):
     the second two are the two oldest ones that are missing". Slot 1 is the oldest waiting day from the takeover
     day on; every other slot is the oldest gap day whose clips all fit on the disk. When the gap list is used up
     (or nothing fits), the slot goes to the next continuity day instead. Returns (days, notes)."""
-    gaps = gap_days() if gaps is None else gaps
+    paused = gaps is None and gaps_paused()
+    if gaps is None: gaps = set() if paused else gap_days()
     free = shutil.disk_usage(WORK if os.path.isdir(WORK) else os.path.expanduser("~")).free if free is None else free
     start = start_day() if start is None else start
     waiting = sorted({v["day"] for v in ledger.values() if v.get("status") == "new"})
@@ -112,7 +123,7 @@ def plan(ledger, slots, gaps=None, free=None, start=None):
     for slot in range(slots):
         if slot == 0 and cont: days.append(cont.pop(0)); notes.append("slot 1: day %d continues the run" % days[-1]); continue
         if gap_ok: days.append(gap_ok.pop(0)); notes.append("slot %d: gap day %d (oldest missing)" % (slot + 1, days[-1])); continue
-        if cont: days.append(cont.pop(0)); notes.append("slot %d: day %d (no gap day fits, so the run moves on)" % (slot + 1, days[-1])); continue
+        if cont: days.append(cont.pop(0)); notes.append("slot %d: day %d %s" % (slot + 1, days[-1], "continues the run (gap days paused)" if paused else "(no gap day fits, so the run moves on)")); continue
         break
     return days, notes
 
@@ -189,11 +200,46 @@ def record_fields(day, clip_names, file_id, clip_date):
 
 
 def choose_next(ledger, day=None):
-    """Oldest day first, then the SMALLEST clip of that day: the talk-to-camera clip is the short
-    one (0.2-0.6 GB, 25-70 s) and the 4 GB ones are long run footage, so the episodes flow sooner."""
-    cands = [(v["date"], v.get("size", 0), v["seq"], k) for k, v in ledger.items()
+    """Oldest day first, then the BIGGEST clip of that day. The short teaser renders after the long clip so its
+    banner carries the episode title (render.teaser_waits, 10 Sep 2026), so pulling the teaser first only parks
+    it. Smallest-first jammed the night of 14 Sep 2026: the 2059 and 2060 teasers sat pulled, each waiting for its
+    long clip, and the two-copy pull limit refused to fetch either long clip, so eighteen attempts rendered nothing."""
+    cands = [(v["date"], -(v.get("size") or 0), v["seq"], k) for k, v in ledger.items()
              if v.get("status") == "new" and (day is None or v.get("day") == day)]
     return sorted(cands)[0][3] if cands else None
+
+
+def waits_for_bigger(key, ledger):
+    """A pulled clip is parked while a bigger clip of the same date is still new, pulled or rendering: the long clip
+    renders first. A parked clip is not in the render queue, so the pull limit never counts it."""
+    e = ledger[key]
+    bigger = [v for k2, v in ledger.items() if k2 != key and v.get("date") == e.get("date") and (v.get("size") or 0) > (e.get("size") or 0)]
+    return any(v.get("status") in ("new", "pulled", "rendering") for v in bigger)
+
+
+def pulled_in_queue(ledger):
+    """Local copies the render will take next: pulled and not parked behind their day's long clip."""
+    return sum(1 for k, v in ledger.items() if v.get("status") == "pulled" and not waits_for_bigger(k, ledger))
+
+
+def requeue_failed(ledger, now=None):
+    """A failed render gets ONE more try, the next night, with the day's smaller clips that rendered without it
+    (their banner title comes from the long clip). 13-14 Sep 2026: a NameError killed the 2057 and 2058 long clips,
+    the bug was fixed the next day, and both days sat 'failed' for ever because nothing looks at a failed clip.
+    A second failure stays failed and is named in the morning report. Returns the keys put back."""
+    now = now or dt.datetime.now().isoformat(timespec="seconds")
+    back = []
+    for k, e in ledger.items():
+        if e.get("status") != "failed" or e.get("requeued"): continue
+        e.update({"status": "new", "requeued": now, "last_error": e.pop("error", "")}); e.pop("local", None); back.append(k)
+        for k2, v in ledger.items():
+            # the same EPISODE, not merely the same date: 4 Jun 2026 holds 2194 and 2195, so a date match would
+            # re-render 2194's published teaser when a 2195 clip failed (review, 15 Sep 2026)
+            if k2 != k and v.get("date") == e.get("date") and v.get("episode") == e.get("episode") \
+                    and (v.get("size") or 0) < (e.get("size") or 0) and v.get("status") == "rendered":
+                v.update({"status": "new", "requeued": now, "requeue_reason": "re-rendered after %s so it carries the episode title" % k})
+                v.pop("local", None); back.append(k2)
+    return back
 
 
 # ---------- IO ----------
@@ -284,7 +330,9 @@ def scan(create=False, batch=None, since=None):
     ledger = load_ledger()
     stale = repair_stale_pulls(ledger)
     for k in stale: print("scan: %s was stuck 'pulling' from a dead run; reset" % k)
-    if stale: save_ledger(ledger)
+    back = requeue_failed(ledger)
+    for k in back: print("scan: %s put back in the queue for one more try (failed last time)" % k)
+    if stale or back: save_ledger(ledger)
     clips = list_clips(batch, since)
     if not clips:
         raise SystemExit("scan: no clips found under %s (batch=%s since=%s) - is Drive mounted?" % (RAW_ROOT, batch, since))
@@ -391,7 +439,7 @@ def repair_stale_pulls(ledger, work=WORK):
 
 def pull(ledger, key, work=WORK):
     e = ledger[key]
-    waiting = sum(1 for v in ledger.values() if v.get("status") == "pulled")
+    waiting = pulled_in_queue(ledger)
     if waiting >= MAX_PULLED:
         print("pull: %d clips already pulled and not yet rendered - not pulling more" % waiting); return None
     os.makedirs(work, exist_ok=True)
@@ -499,8 +547,37 @@ def _selftest_airtable_retry():
     assert out == {"ok": True} and calls["n"] == 3 and naps == [AIRTABLE_RETRY_SECONDS, AIRTABLE_RETRY_SECONDS], "two DNS failures, then the answer"
 
 
+def _selftest_jam_and_retry():
+    """The 14 Sep 2026 night, reproduced: two teasers pulled and parked, both long clips new, 2057/2058 failed."""
+    import tempfile
+    gb = 1024 ** 3
+    led = {"2059 Summary.insv": {"day": 2059, "date": "2026-01-19", "seq": 2, "size": 0.4 * gb, "status": "pulled"},
+           "2060 summary.insv": {"day": 2060, "date": "2026-01-20", "seq": 2, "size": 0.5 * gb, "status": "pulled"},
+           "2059 Full.insv": {"day": 2059, "date": "2026-01-19", "seq": 1, "size": 6.4 * gb, "status": "new"},
+           "2060 Full.insv": {"day": 2060, "date": "2026-01-20", "seq": 1, "size": 5.0 * gb, "status": "new"}}
+    assert waits_for_bigger("2059 Summary.insv", led) and not waits_for_bigger("2059 Full.insv", led)
+    assert choose_next(led, day=2059) == "2059 Full.insv", "the long clip is the next pull, never the teaser"
+    assert pulled_in_queue(led) == 0 < MAX_PULLED, "the two parked teasers do not count against the pull limit (it read 2 and refused)"
+    led["2059 Full.insv"]["status"] = "pulled"
+    assert pulled_in_queue(led) == 1 and not waits_for_bigger("2060 summary.insv", {**led, "2060 Full.insv": {**led["2060 Full.insv"], "status": "rendered"}})
+    led = {"2057 Full.insv": {"date": "2026-01-17", "episode": 2057, "size": 5.9 * gb, "status": "failed", "error": "name 'INTRO_LOCAL' is not defined", "local": "/w/2057 Full.insv"},
+           "2057 Summary.insv": {"date": "2026-01-17", "episode": 2057, "size": 0.46 * gb, "status": "rendered", "local": "/w/2057 Summary.insv"},
+           "VID_2194_teaser": {"date": "2026-01-17", "episode": 2194, "size": 0.3 * gb, "status": "rendered"},
+           "2056 Summary.insv": {"date": "2026-01-16", "size": 0.4 * gb, "status": "rendered"},
+           "2055 Full.insv": {"date": "2026-01-15", "size": 3 * gb, "status": "failed", "requeued": "2026-09-14T22:00:00"}}
+    back = requeue_failed(led, now="2026-09-15T22:00:00")
+    assert sorted(back) == ["2057 Full.insv", "2057 Summary.insv"], back
+    assert led["2057 Full.insv"]["status"] == "new" and led["2057 Full.insv"]["last_error"].startswith("name") and "local" not in led["2057 Full.insv"]
+    assert led["2057 Summary.insv"]["status"] == "new", "the teaser re-renders after its long clip so it carries the episode title"
+    assert led["2056 Summary.insv"]["status"] == "rendered", "another day's clips are untouched"
+    assert led["VID_2194_teaser"]["status"] == "rendered", "another episode recorded the same date is untouched (4 Jun 2026 holds 2194 and 2195)"
+    assert led["2055 Full.insv"]["status"] == "failed", "a second failure stays failed (one retry only)"
+    assert requeue_failed(led) == [], "nothing is put back twice"
+
+
 def selftest():
     _selftest_airtable_retry()
+    _selftest_jam_and_retry()
     assert parse_clip("2053 Full.insv") == (dt.date(2026, 1, 13), "001000", 1) and parse_clip("2053 summary.insv")[0] == dt.date(2026, 1, 13)
     assert parse_clip("2071 Full Part 2.insv") == (dt.date(2026, 1, 31), "002000", 2) and parse_clip("2071 Full - Part 1.insv")[2] == 1
     globals()["START_DAY_FILE"] = "/nonexistent/od-start-day"; assert since_for_start_day() == DEFAULT_SINCE
@@ -536,7 +613,7 @@ def selftest():
     assert f["Category"] == "Runpreneur" and f["Content Type"] == "Long Form Video"
     led = {"b": {"date": "2026-07-04", "seq": 2, "size": 400, "status": "new"}, "a": {"date": "2026-06-08", "seq": 9, "status": "pulled"},
            "c": {"date": "2026-07-04", "seq": 1, "size": 4000, "status": "new"}}
-    assert choose_next(led) == "b", "oldest date then smallest clip"
+    assert choose_next(led) == "c", "oldest date then the biggest clip (the long clip renders before its teaser)"
     assert choose_next({"x": {"date": "2026-01-01", "seq": 1, "status": "pulled"}}) is None
     _selftest_gap_order()
     gb = 1024 ** 3
@@ -568,7 +645,9 @@ def _selftest_gap_order():
     days, _ = plan(led, 3, gaps=set(), free=100 * gb, start=2054)
     assert days == [2054, 2055, 2056], "no gap list: three continuity days"
     assert 2053 not in plan(led, 9, gaps=gaps, free=100 * gb, start=2054)[0], "nothing older than the takeover day is a continuity day"
-    assert choose_next(led, day=2054) == "a" and choose_next(led, day=1808) == "g2" and choose_next(led, day=1900) is None
+    assert choose_next(led, day=2054) == "b" and choose_next(led, day=1808) == "g2" and choose_next(led, day=1900) is None
+    pf = os.path.join(tempfile.gettempdir(), "od-gap-pause-%d" % os.getpid())
+    assert not gaps_paused(pf); open(pf, "w").write("Kevin 15 Sep 2026\n"); assert gaps_paused(pf); os.remove(pf)
     assert not day_fits(led, 1799, 33 * gb) and day_fits(led, 1841, 33 * gb) and not day_fits(led, 1900, 100 * gb)
     tf = os.path.join(tempfile.gettempdir(), "od-gaps-%d" % os.getpid()); open(tf, "w").write("1799\n1808 1841\n")
     assert gap_days(tf) == gaps; os.remove(tf); assert gap_days("/nonexistent/od-gaps") == set()

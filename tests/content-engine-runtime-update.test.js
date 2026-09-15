@@ -127,3 +127,27 @@ describe('the content-engine runtime checkout updates itself, loudly', () => {
     expect(block()).toMatch(/executing STALE code[\s\S]*status --porcelain/);
   });
 });
+
+// 15 Sep 2026: the HOURLY publisher kept the old dirty-tree veto after the nightly job lost it, so every daytime fix
+// waited for the 22:00 run (14 commits behind at 15:50). Both jobs run from the same worktree; they update the same way.
+describe('the hourly publisher updates itself the same way', () => {
+  const PUBLISHER = resolve(__dirname, '../scripts/content-engine-publish.sh');
+  const pub = readFileSync(PUBLISHER, 'utf8');
+  const slice = (s) => s.slice(s.indexOf('# --- runtime-update-block'), s.indexOf('# --- end runtime-update-block ---'));
+
+  it('carries the nightly block verbatim', () => {
+    expect(slice(pub).length).toBeGreaterThan(100);
+    expect(slice(pub)).toBe(block());
+  });
+
+  it('has no dirty-tree veto of its own', () => {
+    expect(pub).not.toMatch(/-z "\$\(git -C "\$REPO" status --porcelain/);
+  });
+
+  it('renames Strava runs every hour, not only in the nightly render job', () => {
+    expect(pub).toMatch(/runpreneur_sync\.py run --then-map/);
+    expect(pub.indexOf('runpreneur_sync.py run')).toBeGreaterThan(pub.indexOf('# --- end runtime-update-block ---'));
+    // before any step that can `exit 1` (review, 15 Sep 2026)
+    expect(pub.indexOf('runpreneur_sync.py run')).toBeLessThan(pub.indexOf('|| exit 1', pub.indexOf('# --- end runtime-update-block ---')));
+  });
+});
