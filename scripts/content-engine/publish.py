@@ -758,6 +758,10 @@ def next_publishable(state, ledger, approved):
     later = max((v.get("episode") or 0 for v in ledger.values()), default=0)
     while True:
         nxt = c + 1
+        if (state.get(str(nxt)) or {}).get("youtube_link"):
+            # already live (2194-2196 went out early on 10 and 14 Sep 2026): the order steps over it, or the day after
+            # it would wait for a YouTube upload that never happens again
+            state[CURSOR_KEY] = nxt; c = nxt; continue
         if nxt in approved: return nxt, "in order"
         if not day_was_recorded(nxt, ledger) and later > nxt:
             state.setdefault("_skipped_days", []).append(nxt); state[CURSOR_KEY] = nxt; c = nxt
@@ -777,6 +781,35 @@ def moves_cursor(day, gaps):
     return day not in gaps
 
 
+def ahead_of_order(day, gaps, state):
+    """Every stage after YouTube waits for the order too (15 Sep 2026). 2194 and 2196 were held for order, but their
+    YouTube posts had been booked before the order rule existed; GoHighLevel published them on its own, and the
+    socials, blog and podcast followed because only the YouTube stage checked the cursor."""
+    return day not in gaps and day > cursor(state)
+
+
+def section_status(entry):
+    """The seven sections of one episode (Kevin, 15 Sep 2026: "I don't want any of the sections missed"), each
+    'done', 'pending' (booked, not out yet) or 'missing'. A share nobody has confirmed on the profile is not done."""
+    posts = (entry.get("posts") or {}).values()
+    def clips(platform_yt, clip):
+        mine = [p for p in posts if (p.get("platform") == "youtube") == platform_yt and p.get("clip") == clip]
+        if not mine: return "missing"
+        return "done" if all(p.get("status") == "published" for p in mine) else "pending"
+    pod = (entry.get("podcast") or {}).get("status")
+    fb = (entry.get("facebook_share") or {}).get("status")
+    return {"YouTube episode": clips(True, "full"), "YouTube Short": clips(True, "lfmd"),
+            "Teaser clips": clips(False, "summary"), "Learnings clips": clips(False, "lfmd"),
+            "Blog": "done" if (entry.get("blog") or {}).get("url") else ("pending" if (entry.get("blog") or {}).get("status") in ("creating", "unconfirmed") else "missing"),
+            "Podcast": "done" if pod == "published" else ("pending" if pod in ("processing", "uploading") else "missing"),
+            "Facebook share": "done" if fb == "shared" else ("pending" if fb in ("sharing", "unconfirmed", "page-post-not-found", "signin-needed") else "missing")}
+
+
+def extras_done(entry):
+    s = section_status(entry)
+    return s["Blog"] == "done" and s["Podcast"] == "done"
+
+
 def run(dry_run=False, limit=3):
     state = load_state(); days = approved_days()
     if not days: print("publish: no approved episodes"); return
@@ -791,12 +824,20 @@ def run(dry_run=False, limit=3):
         entry = state.setdefault(str(day), {})
         recs = bundle(day)
         full = recs["Long Form Video"]
-        if not full or full["fields"].get("Record Status") not in PUBLISHABLE:
-            continue
+        if not full: continue
         test = mode() == "test"
         stage = stage_for(entry, yt_ok)
+        if full["fields"].get("Record Status") not in PUBLISHABLE:
+            # 15 Sep 2026: 2056 and 1841 were marked Published while their podcast had been refused, and this line
+            # skipped Published records before the retry, so the podcast never went out. Only the extras run here.
+            if full["fields"].get("Record Status") == STATUS_PUBLISHED and stage == "done" and not extras_done(entry) \
+                    and not ahead_of_order(day, gaps, state) and not dry_run:
+                finish_extras(day, entry, recs, test, save); save()
+            continue
         if stage == "youtube" and not may_go_to_youtube(day, gaps, state, ledger, days):
             continue
+        if stage != "youtube" and ahead_of_order(day, gaps, state):
+            continue                                   # named once in the 'held for order' line above
         if stage == "wait-youtube-account":
             print("episode %d: approved, waiting for a YouTube account in GoHighLevel (Kevin's click: publish.py youtube-link)" % day); continue
         if stage == "wait-youtube-link":
@@ -913,18 +954,21 @@ def sync():
                 for f in LINK_FIELDS.get((p["platform"], p["clip"]), ()):
                     links.setdefault(f, link)                      # first account wins (the Runpreneur page before the profile)
                     clip_links.setdefault(p["clip"], {}).setdefault(f, link)
-        if links or (changed and all(p.get("status") == "published" for p in posts.values())):
+        complete = all(p.get("status") == "published" for p in posts.values()) and any(not k.startswith("youtube|") for k in posts) \
+            and extras_done(entry)                         # the blog and podcast count too: 2056's record said Published with no podcast
+        if links or (complete and not entry.get("record_published")):
             full = pc.find_by_name(pc.record_name(int(day), "Long Form Video"))
             fields = dict(links)
             if entry.get("youtube_link") and not full["fields"].get("Date Published (YT)"): fields["Date Published (YT)"] = dt.date.today().isoformat()
-            if all(p.get("status") == "published" for p in posts.values()) and len([k for k in posts if not k.startswith("youtube|")]):
+            if complete and full["fields"].get("Record Status") != STATUS_PUBLISHED:
                 fields["Record Status"] = STATUS_PUBLISHED; fields["Date Published (Other)"] = dt.date.today().isoformat()
-            watch._airtable("PATCH", watch.API + "/" + full["id"], {"fields": fields})
+            if complete: entry["record_published"] = dt.date.today().isoformat(); changed = True
+            if fields: watch._airtable("PATCH", watch.API + "/" + full["id"], {"fields": fields})
             for clip, cl in clip_links.items():
                 if clip == "full": continue
                 rec = pc.find_by_name(pc.record_name(int(day), CLIP_RECORD[clip]))
                 if rec: watch._airtable("PATCH", watch.API + "/" + rec["id"], {"fields": {k: v for k, v in cl.items() if not k.startswith("Link of")}})
-            print("episode %s: %s" % (day, ", ".join(sorted(fields))))
+            if fields: print("episode %s: %s" % (day, ", ".join(sorted(fields))))
         if changed: save_state(state)
 
 
@@ -972,9 +1016,12 @@ def report():
     waiting = [d for d in days if not state.get(str(d), {}).get("posts")]
     scheduled = sum(1 for e in state.values() for p in e.get("posts", {}).values() if p.get("status") == "scheduled")
     failed = sum(1 for e in state.values() for p in e.get("posts", {}).values() if p.get("status") == "failed")
-    published = [d for d, e in state.items() if e.get("posts") and all(p.get("status") == "published" for p in e["posts"].values())]
-    print("content publishing: %d approved episode%s not yet scheduled, %d posts scheduled, %d failed, %d episodes fully published" % (
-        len(waiting), "" if len(waiting) == 1 else "s", scheduled, failed, len(published)))
+    sections = {d: section_status(e) for d, e in state.items() if e.get("posts")}
+    complete = [d for d, s in sections.items() if all(v == "done" for v in s.values())]
+    print("content publishing: %d approved episode%s not yet scheduled, %d posts scheduled, %d failed, %d of %d episodes complete (all seven sections)" % (
+        len(waiting), "" if len(waiting) == 1 else "s", scheduled, failed, len(complete), len(sections)))
+    gaps = ["%s: %s" % (d, ", ".join("%s %s" % (k, v) for k, v in s.items() if v != "done")) for d, s in sorted(sections.items(), key=lambda x: int(x[0])) if d not in complete]
+    print("content sections not done: %s" % ("none" if not gaps else "; ".join(gaps)))
     waiting = []
     for d, e in state.items():
         if not str(d).isdigit() or not isinstance(e, dict): continue
@@ -1124,7 +1171,30 @@ def selftest():
     # Kevin's catch-up days (8 Sep 2026): a gap day publishes when approved and never moves the cursor; the continuity day still waits its turn
     led = {"a": {"episode": 2054}, "b": {"episode": 2055}, "g": {"episode": 1799}}; gaps = {1799, 1808, 1841}
     st = {CURSOR_KEY: 2053}; assert may_go_to_youtube(1799, gaps, st, led, {1799, 2055}) and not may_go_to_youtube(2055, gaps, st, led, {1799, 2055})
-    import inspect; src = inspect.getsource(sync); assert "import platform_copy" not in src, "sync must use the module-level pc: an import inside the function made pc a local and crashed every sync (10 Sep 2026, 07:15)"
+    # 15 Sep 2026: 2194/2196 were held for order but their socials went out, because only the YouTube stage checked it
+    so = {CURSOR_KEY: 2056, "2194": {"youtube_link": "https://youtu.be/x"}}
+    assert ahead_of_order(2194, gaps, so) and not ahead_of_order(2056, gaps, so) and not ahead_of_order(2055, gaps, so) and not ahead_of_order(1841, gaps, so)
+    import inspect; rsrc = inspect.getsource(run)
+    assert 'if stage != "youtube" and ahead_of_order(day, gaps, state)' in rsrc, "the socials, blog and podcast wait for the order too"
+    assert rsrc.index("ahead_of_order(day, gaps, state)") < rsrc.index("schedule_stage("), "the order check comes before anything is booked"
+    # a day already live is stepped over, or the next day waits for a YouTube upload that never happens again
+    sl = {CURSOR_KEY: 2193, "2194": {"youtube_link": "https://youtu.be/a"}, "2195": {"youtube_link": "https://youtu.be/b"}}
+    led2 = {k: {"episode": d} for k, d in (("a", 2193), ("b", 2194), ("c", 2195), ("e", 2196), ("d", 2197))}
+    assert next_publishable(sl, led2, {2194, 2195, 2197}) == (None, "day 2196 is not approved yet, so 2197 wait behind it") and sl[CURSOR_KEY] == 2195
+    # the seven sections: 2056 on 15 Sep 2026 had every post out, no podcast and no confirmed share
+    e2056 = {"posts": {"youtube|full|y": {"platform": "youtube", "clip": "full", "status": "published"},
+                       "youtube|lfmd|y": {"platform": "youtube", "clip": "lfmd", "status": "published"},
+                       "facebook|summary|f": {"platform": "facebook", "clip": "summary", "status": "published"},
+                       "facebook|lfmd|f": {"platform": "facebook", "clip": "lfmd", "status": "published"}},
+             "blog": {"url": "https://runpreneur.org.uk/blog/b/x"}, "facebook_share": {"status": "page-post-not-found"}}
+    s = section_status(e2056)
+    assert s == {"YouTube episode": "done", "YouTube Short": "done", "Teaser clips": "done", "Learnings clips": "done", "Blog": "done",
+                 "Podcast": "missing", "Facebook share": "pending"}, s
+    assert not extras_done(e2056) and extras_done({**e2056, "podcast": {"status": "published"}})
+    assert section_status({"posts": {"facebook|summary|f": {"platform": "facebook", "clip": "summary", "status": "scheduled"}}})["Teaser clips"] == "pending"
+    assert section_status({})["Learnings clips"] == "missing", "no Learnings post at all is missing, not done (1841)"
+    assert "extras_done(entry)" in rsrc and "STATUS_PUBLISHED" in rsrc, "a Published record with its podcast missing still gets the retry"
+    src = inspect.getsource(sync); assert "import platform_copy" not in src, "sync must use the module-level pc: an import inside the function made pc a local and crashed every sync (10 Sep 2026, 07:15)"
     assert 'if not str(day).isdigit() or not isinstance(entry, dict): continue' in src, "sync skips the cursor and the held posts"
     assert may_go_to_youtube(2054, gaps, st, led, {1799, 2054}) and st[CURSOR_KEY] == 2053, "a gap day in the approved set does not disturb the order"
     assert not moves_cursor(1799, gaps) and moves_cursor(2054, gaps)
