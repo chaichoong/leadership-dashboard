@@ -61,7 +61,8 @@ test.describe('AI Agents page tabs', () => {
     await expect(page.locator('.apv-card').nth(1)).toContainText('Reply to tenant email');
     await expect(page.locator('.apv-card').nth(1)).toContainText('Urgent');
     await expect(page.locator('.apv-card').nth(2)).toContainText('Payment plan proposal');
-    await expect(page.locator('.apv-group-head')).toHaveCount(0);
+    // Incident groups were removed on 15 Sep 2026 (Kevin ticks cards instead).
+    await expect(page.locator('.apv-group')).toHaveCount(0);
 
     // Chips carry counts; clicking one narrows the list.
     await expect(page.locator('.apv-filter', { hasText: 'All (3)' })).toHaveCount(1);

@@ -365,7 +365,11 @@ describe('the queue asserts the filter held, client-side', () => {
 });
 
 describe('the write itself', () => {
-  const fn = agentsPage.slice(agentsPage.indexOf('async function applyApprovalDefer'),
+  // Since 15 Sep 2026 the write lives in apvDeferWrite, shared by the card and
+  // the bulk bar; applyApprovalDefer is the card's wrapper around it. The
+  // slice covers both, so a verdict or a status change sneaking into either
+  // half still fails here.
+  const fn = agentsPage.slice(agentsPage.indexOf('async function apvDeferWrite'),
                               agentsPage.indexOf('async function agUndefer'));
 
   it('never writes an approval outcome — this is the absence of a verdict', () => {

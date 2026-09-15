@@ -121,20 +121,26 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 .apv-body{font-size:var(--fs-xs);color:var(--text-secondary);white-space:pre-wrap;word-break:break-word;max-height:340px;overflow:auto;border:1px solid var(--border-subtle);border-radius:var(--radius-md);padding:10px 12px;background:var(--bg-surface-2);margin-top:6px}
 .apv-note{width:100%;border:1px solid var(--border-default);background:var(--bg-surface);border-radius:var(--radius-md);padding:8px 10px;font-size:var(--fs-sm);color:var(--text-primary);font-family:inherit;resize:vertical;min-height:44px;margin:8px 0}
 .apv-note:focus{outline:none;border-color:var(--accent)}
-.apv-group{border:1px solid var(--warning-border);border-radius:var(--radius-lg);
-    background:var(--warning-bg);padding:0 0 2px;margin-bottom:var(--space-4)}
-.apv-group-head{display:flex;flex-wrap:wrap;gap:var(--space-3);align-items:center;
-    justify-content:space-between;padding:10px 14px}
-.apv-group-count{font-size:var(--fs-sm);font-weight:var(--fw-bold);color:var(--warning)}
-.apv-group-sub{font-size:var(--fs-xs);color:var(--text-secondary);margin-left:8px}
-/* The evidence. Kevin asked for "a little bit better confirmation" that two
-   tasks really are one thing, so the reason is on the header, not in a log. */
-.apv-group-why{display:block;font-size:var(--fs-xs);color:var(--text-secondary);
-    margin-top:2px;font-family:var(--font-family-base)}
-.apv-group-why::before{content:'\2713\00a0';color:var(--warning);font-weight:var(--fw-bold)}
-.apv-group-actions{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
-.apv-group-label{font-size:var(--fs-xs);color:var(--text-secondary);font-weight:var(--fw-semibold)}
-.apv-group .apv-card{margin:0 10px 10px}
+/* Tick to decide several at once (Kevin, 15 Sep 2026). The tick lives in
+   the meta row so the ask line stays the first thing read. */
+.apv-pick{display:inline-flex;align-items:center;cursor:pointer;margin-right:2px}
+.apv-pick input{margin:0;width:16px;height:16px;accent-color:var(--accent);cursor:pointer}
+.apv-card.apv-selected{border-left-color:var(--accent);background:var(--bg-surface-2)}
+.apv-select-row{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px;font-size:var(--fs-xs);color:var(--text-muted)}
+/* The bulk bar: sticky under the top bar, shown only while something is
+   ticked, one set of verdicts for every ticked card. */
+.apv-bulk{display:none;position:sticky;top:0;z-index:40;border:1px solid var(--accent);background:var(--accent-soft);border-radius:var(--radius-md);padding:10px 14px;margin-bottom:12px;box-shadow:var(--shadow-md)}
+.apv-bulk.on{display:block}
+.apv-bulk-row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.apv-bulk-count{font-size:var(--fs-sm);font-weight:var(--fw-bold);color:var(--accent);white-space:nowrap}
+.apv-bulk-sep{flex:0 0 1px;height:22px;background:var(--border-default);margin:0 4px}
+.apv-bulk-status{font-size:var(--fs-xs);color:var(--text-secondary);margin-left:auto}
+.apv-bulk-panel{display:none;margin-top:8px;padding-top:8px;border-top:1px dashed var(--border-default)}
+.apv-bulk-panel.open{display:block}
+.apv-bulk .apv-reasons,.apv-bulk .apv-defer{border-top:none;padding-top:0;margin-top:0}
+.apv-bulk .apv-note{margin:0 0 8px;background:var(--bg-surface)}
+.apv-bulk-why{flex-basis:100%;margin-top:6px;padding:6px 10px;border:1px solid var(--border-default);border-radius:var(--radius-md);font-family:inherit;font-size:var(--fs-xs);background:var(--bg-surface);color:var(--text-primary)}
+.apv-bulk-why:focus{outline:none;border-color:var(--accent)}
 .apv-signin-strip{border:1px solid var(--border-default);border-left:4px solid var(--accent);border-radius:var(--radius-md);background:var(--accent-soft);padding:12px 16px;margin-bottom:12px;font-size:var(--fs-sm)}
 .apv-signin{display:flex;gap:10px;align-items:center;flex-wrap:wrap;justify-content:space-between;border:1px solid var(--border-default);border-radius:var(--radius-md);background:var(--accent-soft);padding:8px 12px;margin:6px 0 8px;font-size:var(--fs-sm)}
 .apv-signin-site{display:inline-block;border:1px solid var(--border-default);border-radius:var(--radius-full);padding:3px 10px;background:var(--bg-surface);color:var(--text-primary);text-decoration:none;font-size:var(--fs-xs)}
@@ -195,11 +201,6 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 .apv-card.apv-done.apv-gone{opacity:0;max-height:0!important;margin-bottom:0;padding-top:0;padding-bottom:0;border-width:0}
 .apv-kind{font-size:var(--fs-xs);color:var(--text-secondary)}
 .apv-kind a{color:var(--accent);cursor:pointer;margin-left:6px}
-.apv-batch{border:1px solid var(--accent);background:var(--accent-soft);border-radius:var(--radius-md);padding:10px 14px;margin-bottom:12px}
-.apv-batch-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-size:var(--fs-sm);font-weight:var(--fw-semibold)}
-.apv-batch-list{font-size:var(--fs-xs);color:var(--text-secondary);margin-top:6px;line-height:1.6}
-.apv-batch-list div{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.apv-group-decided{font-size:var(--fs-xs);color:var(--text-muted);margin-left:8px}
 @media (max-width:600px){.apv-card{padding:10px 12px}.apv-actions .btn{flex:1 1 auto}}
 .apv-type{background:var(--bg-surface);border:1px solid var(--border-default);color:var(--text-primary);padding:4px 8px;border-radius:var(--radius-sm);font-size:var(--fs-xs);font-family:inherit}
 .apv-attach{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:6px;border-radius:var(--radius-md);padding:2px}
@@ -988,6 +989,7 @@ async function loadApprovals(){
             return !ap || !ap.email || ap.email === APPROVER_EMAIL;
         });
         _apvReason = {};
+        _apvSelected.clear();
         _apvLastQueueLoad = Date.now();
         allApprovals = mine.map(r=>({
             id: r.id,
@@ -1467,8 +1469,8 @@ function renderApprovals(){
     chips.sort((a,b)=>b.rows.length-a.rows.length || a.label.localeCompare(b.label));
     if(_apvAgentFilter && !byKey[_apvAgentFilter]) _apvAgentFilter = '';
 
-    const inTier = t => !_apvTier1Only || t.tier1;
-    const inAgent = t => !_apvAgentFilter || (t.raiserId||'none') === _apvAgentFilter;
+    const inTier = apvInTier;
+    const inAgent = apvInAgent;
     const tier1Count = allApprovals.filter(t=>t.tier1 && inAgent(t)).length;
     const anyFilter = _apvAgentFilter || _apvTier1Only;
 
@@ -1482,17 +1484,27 @@ function renderApprovals(){
         ${anyFilter ? `<button class="apv-filter apv-filter-clear" onclick="clearApvFilters()">&times; Clear filters</button>` : ''}
     </div>`;
 
-    const shown = allApprovals.filter(t=>inAgent(t) && inTier(t));
-    html += apvBatchStripHtml(shown);
+    const shown = apvVisibleRows();
+    // A tick on a card the filters have hidden would be acted on unseen, so
+    // the selection is only ever the cards on screen.
+    Array.from(_apvSelected).forEach(id=>{ if(!shown.some(t=>t.id===id)) _apvSelected.delete(id); });
+    const bulkDraft = apvBulkSnapshot();
     // Two filters can now AND down to nothing (an agent with no tier-1 work),
     // which one filter never could. Say so, with the way out.
     html += shown.length
-        ? apvGroupedHtml(shown)
+        ? apvBulkBarHtml(shown) + shown.map(apvCardHtml).join('')
         : `<div class="empty-state"><p>No approvals match these filters.</p>
            <button class="btn btn-sm" onclick="clearApvFilters()">Clear filters</button></div>`;
     body.innerHTML = html;
     restoreApprovalDrafts();
+    apvBulkRestore(bulkDraft);
 }
+
+// The two filters, shared by the renderer and "Select all shown" so the two
+// can never disagree about what is on screen.
+function apvInTier(t){ return !_apvTier1Only || t.tier1; }
+function apvInAgent(t){ return !_apvAgentFilter || (t.raiserId||'none') === _apvAgentFilter; }
+function apvVisibleRows(){ return allApprovals.filter(t=>apvInAgent(t) && apvInTier(t)); }
 
 function setApvAgentFilter(key){
     _apvAgentFilter = key;
@@ -1527,224 +1539,341 @@ const APV_ALERT_RE = /apps script|cloudflare (kv|worker)|airtable automation|gma
 // what a classifier thinks should have.
 const APV_ROY_NOTE_RE = /Handed over to Roy Lavin/i;
 
-// ─── ONE INCIDENT, ONE DECISION (27 Aug 2026) ────────────────────────
+// ─── TICK, THEN DECIDE (Kevin, 15 Sep 2026) ──────────────────────────
 //
-// 13 of the 60 tasks waiting that day were the SAME four or five incidents
-// written up in fresh words each time: three "Invoices Dashboard Apps Script"
-// tasks, four "Meetings Intake", two "Cloudflare KV", three "Airtable
-// automation". Kevin read and decided each one separately.
+// Two mechanisms used to decide FOR Kevin which cards belonged together: the
+// incident groups (dupeTaskKey and dupeVerdict over the task names, 27-28
+// Aug) and the "alike" batch strip (same agent, same kind, same recipient
+// domain, 7 Sep). He asked for both to go. A grouping he did not choose is
+// one more thing to check before he can trust the verdict, and a wrong one
+// folds two matters into one click.
 //
-// dupeTaskKey already groups them correctly — verified against those exact 13
-// live task names, which collapse to the right 5. Until now it was only used
-// to FLAG duplicates on the Check these tab; here it does something useful
-// with the same answer.
+// Now he ticks the cards himself. Every bulk verdict loops the ticked cards
+// ONE AT A TIME through the SAME single-card write path
+// (applyApprovalDecision for a verdict, apvDeferWrite for a knock-back), so
+// a bulk approve is N single approves: the same stale guard, the same
+// fields, the same comment, the same Saved strip with its Undo on every
+// card. Nothing new can go wrong in the write.
 //
-// A group of one renders exactly as before, so nothing changes for the 46
-// genuine one-off decisions. Only a real cluster gets a header, and the header
-// is where the whole group can be closed in one verdict.
-function apvGroupTasks(rows){
-    // TWO PASSES, and a match is either (28 Aug 2026). The exact key is the
-    // fast bucket and keeps every catch it had; dupeVerdict is the second pass
-    // over what it missed — seven real pairs on the live queue that morning,
-    // which is what Kevin was seeing twice.
-    //
-    // Union-find, because duplication is transitive: if A matches B on a phone
-    // number and B matches C on wording, all three are one matter. Grouping
-    // them pairwise would leave C on its own.
-    const parent = {}, reason = {};
-    const find = (x)=>{ while(parent[x] !== x){ parent[x] = parent[parent[x]]; x = parent[x]; } return x; };
-    rows.forEach(t=>{ parent[t.id] = t.id; });
-    // A sign-in wait is not a decision, so it never joins a group: on 8 Sep
-    // 2026 six "SIGN-IN: <site> session lapsed" cards (six different sites)
-    // folded into "6 tasks, one thing" with a Reject-all strip, because the
-    // key saw "sign, session, lapsed" and treated the site name as noise.
-    const isWait = {};
-    rows.forEach(t=>{ isWait[t.id] = !!apvSignInNeeded(t.agentOutput); });
-    for(let i = 0; i < rows.length; i++){
-        for(let j = i + 1; j < rows.length; j++){
-            const a = rows[i], b = rows[j];
-            if(isWait[a.id] || isWait[b.id]) continue;
-            // Fall back to the id so two NAMELESS tasks can never collide — an
-            // empty key would merge unrelated work into one verdict.
-            const ka = dupeTaskKey(a.name || '') || ('id:' + a.id);
-            const kb = dupeTaskKey(b.name || '') || ('id:' + b.id);
-            let why = '';
-            if(ka === kb) why = 'same subject';
-            else {
-                const v = dupeVerdict(a.name || '', b.name || '', 'group');
-                if(v.match) why = v.why;
-            }
-            if(!why) continue;
-            const ra = find(a.id), rb = find(b.id);
-            if(ra !== rb) parent[ra] = rb;
-            // Keep the FIRST reason found for the merged set: it is the one
-            // that put these two together, and a later pair's wording would
-            // describe a different edge of the same cluster.
-            const root = find(a.id);
-            if(!reason[root]) reason[root] = why;
-        }
-    }
-    const byRoot = {}, groups = [];
-    rows.forEach(t=>{
-        const r = find(t.id);
-        if(!byRoot[r]){ byRoot[r] = { key: r, rows: [], why: '' }; groups.push(byRoot[r]); }
-        byRoot[r].rows.push(t);
+// dupeTaskKey and dupeVerdict stay in this file: the Check these tab still
+// uses them to FLAG duplicates, and tests/agents-dupe-task-key.test.js reads
+// them from source.
+const _apvSelected = new Set();
+let _apvBulkPanel = '';
+let _apvBulkReason = '';
+let _apvBulkBusy = false;
+
+// A sign-in wait is not a decision, so it cannot be ticked.
+function apvSelectable(t){ return !apvSignInNeeded(t.agentOutput); }
+
+// Queue order, so the loop decides in the order Kevin read the cards.
+function apvBulkIds(){
+    return allApprovals.filter(t=>_apvSelected.has(t.id) && apvSelectable(t)).map(t=>t.id);
+}
+
+function apvPick(taskId, on){
+    if(on) _apvSelected.add(taskId); else _apvSelected.delete(taskId);
+    const card = document.querySelector(`[data-apv-card="${taskId}"]`);
+    if(card) card.classList.toggle('apv-selected', !!on);
+    apvBulkSync();
+}
+window.apvPick = apvPick;
+
+function apvSelectAllShown(){
+    apvVisibleRows().filter(apvSelectable).forEach(t=>_apvSelected.add(t.id));
+    apvBulkSyncCards();
+    apvBulkSync();
+}
+window.apvSelectAllShown = apvSelectAllShown;
+
+function apvClearSelection(){
+    _apvSelected.clear();
+    apvBulkSyncCards();
+    apvBulkSync();
+}
+window.apvClearSelection = apvClearSelection;
+
+// The cards' ticks and highlight, from the set. Never the other way round.
+function apvBulkSyncCards(){
+    document.querySelectorAll('#approvalsBody .apv-card').forEach(card=>{
+        const on = _apvSelected.has(card.getAttribute('data-apv-card'));
+        card.classList.toggle('apv-selected', on);
+        const box = card.querySelector('[data-apv-pick]');
+        if(box) box.checked = on;
     });
-    groups.forEach(g=>{ g.why = reason[g.key] || ''; });
-    return groups;
 }
 
-// BATCH APPROVAL (Kevin, 7 Sep 2026). On 20 Aug he decided 21 alike items in
-// six minutes; the queue then made him tap each one. "Alike" is strict: same
-// agent, same kind of work, and for email the same recipient domain. Tier-1
-// matters and sign-in waits never batch. He sees every promise line in the
-// list before he approves, so nothing unread is approved: the list IS the
-// reading, one screen instead of N.
-function apvLikeKey(t){
-    if(t.tier1 || apvSignInNeeded(t.agentOutput)) return '';
-    if(!t.raiserId || !t.taskType) return '';
-    let where = '';
-    // Three quotes for one job are three emails to three tradespeople about ONE
-    // property (Kevin, 7 Sep 2026): they batch by the property in the task name
-    // ("COMPLIANCE: GSC quote request - CJ Plumbing - 6 Chedburgh Place"), so
-    // he reads three lines and taps once. Every other email batches by the
-    // recipient's domain.
-    const prop = apvPropertyKey(t.name);
-    if(t.taskType === 'Correspondence' && prop){
-        where = 'property:' + prop;
-    } else if(t.taskType === 'Correspondence'){
-        const e = apvEmailFrom(t.agentOutput);
-        const m = e && /@([^\s>]+)/.exec(String(e.to||''));
-        if(!m) return '';
-        where = m[1].toLowerCase();
-    } else {
-        const k = dupeTaskKey(t.name||'');
-        where = k ? k.split('|')[0] : '';
-    }
-    return `${t.raiserId}|${t.taskType}|${where}`;
+// The bar's count and visibility, in place. Hidden when nothing is ticked.
+// It sticks just under the top bar, whose height depends on how the
+// buttons wrapped, so the offset is measured rather than assumed.
+function apvBulkSync(){
+    const bar = document.getElementById('apvBulk');
+    if(!bar) return;
+    const n = apvBulkIds().length;
+    bar.classList.toggle('on', n > 0);
+    bar.querySelectorAll('[data-apv-bulk-n]').forEach(el=>{ el.textContent = String(n); });
+    const top = document.querySelector('.topbar');
+    bar.style.top = (top ? Math.round(top.getBoundingClientRect().height) : 0) + 'px';
 }
-function apvPropertyKey(name){
-    const n = String(name||'');
-    if(!/^\s*(COMPLIANCE|CORRESPONDENCE|MAINTENANCE)\s*:/i.test(n)) return '';
-    const parts = n.split(/\s+[-–—]\s+/);
-    if(parts.length < 2) return '';
-    return parts[parts.length-1].toLowerCase().replace(/[^a-z0-9]+/g,' ').trim();
-}
-function apvBatches(rows){
-    const by = {};
-    rows.forEach(t=>{ const k = apvLikeKey(t); if(k) (by[k] = by[k] || []).push(t); });
-    return Object.values(by).filter(g=>g.length >= 2).sort((a,b)=>b.length-a.length);
-}
-function apvBatchStripHtml(rows){
-    const batches = apvBatches(rows);
-    if(!batches.length) return '<span data-apv-batch style="display:none"></span>';
-    return `<div data-apv-batch>${batches.map(g=>{
-        const t0 = g[0];
-        const ids = JSON.stringify(g.map(t=>t.id)).replace(/"/g,'&quot;');
-        const e = t0.taskType === 'Correspondence' ? apvEmailFrom(t0.agentOutput) : null;
-        const propKey = apvPropertyKey(t0.name);
-        const where = propKey ? ` for ${esc(String(t0.name).split(/\s+[-–—]\s+/).pop())}` : (e ? ` to ${esc((/@([^\s>]+)/.exec(String(e.to||''))||[])[1]||'')}` : '');
-        return `<div class="apv-batch" data-apv-batch-group>
-            <div class="apv-batch-head"><span>${g.length} alike: ${esc(teamName(t0.raiserId)||'agent')} &middot; ${esc(t0.taskType)}${where}</span>
-                <button class="btn btn-success btn-sm" data-apv-batch-approve onclick="agApproveBatch(${ids})">Approve all ${g.length} as-is</button>
-                <span style="font-size:var(--fs-xs);color:var(--text-muted)">Read the ${g.length} lines below first. Anything you would not approve, decide on its own card.</span></div>
-            <div class="apv-batch-list">${g.map(t=>`<div>&bull; ${esc(apvAskLine(t).askLine)}</div>`).join('')}</div>
-        </div>`;
-    }).join('')}</div>`;
-}
-async function agApproveBatch(taskIds){
-    const strip = document.querySelector('[data-apv-batch]');
-    let done = 0, failed = 0;
-    for(let i = 0; i < taskIds.length; i++){
-        const btn = strip ? strip.querySelector('[data-apv-batch-approve]') : null;
-        if(btn){ btn.disabled = true; btn.textContent = `Saving ${i+1} of ${taskIds.length}…`; }
-        try { await applyApprovalDecision(taskIds[i], 'Approved as-is', false); done++; }
-        catch(e){ failed++; console.error('batch approve failed for ' + taskIds[i], e); }
-    }
-    if(failed) toast(`Approved ${done}. ${failed} could not be saved and are still in the queue.`);
-}
-window.agApproveBatch = agApproveBatch;
 
-function apvGroupedHtml(rows){
-    return apvGroupTasks(rows).map(g=>{
-        if(g.rows.length < 2) return apvCardHtml(g.rows[0]);
-        const ids = JSON.stringify(g.rows.map(r=>r.id)).replace(/"/g, '&quot;');
-        const agents = Array.from(new Set(g.rows.map(r=>teamName(r.raiserId)).filter(Boolean)));
-        return `<div class="apv-group" data-apv-group="${esc(g.key)}">
-            <div class="apv-group-head">
-                <div>
-                    <span class="apv-group-count">${g.rows.length} tasks, one thing</span>
-                    ${g.why ? `<span class="apv-group-why" title="Why these are grouped. Check it before you close them all — if it looks wrong, decide them one at a time instead.">${esc(g.why)}</span>` : ''}
-                    <span class="apv-group-sub">${esc(agents.join(', ') || 'no agent recorded')}</span>
-                </div>
-                <div class="apv-group-actions">
-                    <span class="apv-group-label">Reject all ${g.rows.length} because&hellip;</span>
-                    ${APV_REASONS.filter(r=>!r.countsAgainstDraft).map(r=>
-                        `<button class="apv-reason" data-apv-btn
-                           onclick="agRejectGroup(${ids},'${esc(r.key)}')"
-                          >${esc(r.chip)}</button>`).join('')}
-                </div>
+// Typed words survive a filter click: the body is rebuilt, the draft is not.
+function apvBulkSnapshot(){
+    const v = id => { const el = document.getElementById(id); return el ? el.value : ''; };
+    const box = document.getElementById('apvBulkRemember');
+    const slot = document.getElementById('apvBulkRejectNote');
+    return {
+        edits: v('apvBulkNote-edits'), changes: v('apvBulkNote-changes'), reasons: v('apvBulkNote-reasons'),
+        why: v('apvBulkDeferWhy'), date: v('apvBulkDeferDate'),
+        remember: box ? box.checked : true,
+        rejectNoteOpen: !!(slot && slot.style.display !== 'none'),
+    };
+}
+function apvBulkRestore(d){
+    if(!d) return;
+    const set = (id, val) => { const el = document.getElementById(id); if(el && val) el.value = val; };
+    set('apvBulkNote-edits', d.edits); set('apvBulkNote-changes', d.changes); set('apvBulkNote-reasons', d.reasons);
+    set('apvBulkDeferWhy', d.why); set('apvBulkDeferDate', d.date);
+    const box = document.getElementById('apvBulkRemember');
+    if(box && d.remember === false) box.checked = false;
+    const slot = document.getElementById('apvBulkRejectNote');
+    if(slot && d.rejectNoteOpen) slot.style.display = '';
+    apvBulkSync();
+}
+
+function apvBulkBarHtml(shown){
+    const n = apvBulkIds().length;
+    const pickable = shown.filter(apvSelectable).length;
+    const panel = which => `apv-bulk-panel${_apvBulkPanel===which?' open':''}`;
+    return `<div class="apv-select-row">
+        <button class="apv-filter" data-apv-select-all onclick="apvSelectAllShown()"${pickable?'':' disabled'}>Select all shown (${pickable})</button>
+        <span>Tick cards to decide several at once. Every ticked card is saved one at a time, exactly as a single decision.</span>
+    </div>
+    <div class="apv-bulk${n?' on':''}" id="apvBulk" data-apv-bulk>
+        <div class="apv-bulk-row">
+            <span class="apv-bulk-count"><span data-apv-bulk-n>${n}</span> selected</span>
+            <button class="apv-filter" data-apv-bulk-btn onclick="apvSelectAllShown()">Select all shown</button>
+            <button class="apv-filter" data-apv-bulk-btn onclick="apvClearSelection()">Clear</button>
+            <span class="apv-bulk-sep"></span>
+            <button class="btn btn-success btn-sm" data-apv-bulk-btn data-apv-bulk-approve onclick="agBulkDecide('Approved as-is')" title="Approved as they are. Each agent carries its own out.">Approve <span data-apv-bulk-n>${n}</span></button>
+            <button class="btn btn-sm" data-apv-bulk-btn data-apv-bulk-open="edits" onclick="apvBulkPanel('edits')" title="Approved, but you tidied them first. Say the edit once; every agent applies exactly that.">Approve with minor edits</button>
+            <button class="btn btn-sm" data-apv-bulk-btn data-apv-bulk-open="changes" onclick="apvBulkPanel('changes')" title="All go back to their agents to redo. Needs a note.">Request changes</button>
+            <button class="btn btn-danger btn-sm" data-apv-bulk-btn data-apv-bulk-open="reasons" onclick="apvBulkPanel('reasons')" title="Opens the reasons. One tap on a reason closes every ticked card.">No</button>
+            <button class="apv-defer-btn" data-apv-bulk-btn data-apv-bulk-open="defer" onclick="apvBulkPanel('defer')" title="Not a decision. They all leave the queue until the date, then come back.">Knock back</button>
+            <span class="apv-bulk-status" data-apv-bulk-status></span>
+        </div>
+        <div class="${panel('edits')}" id="apvBulkPanel-edits">
+            <textarea class="apv-note" id="apvBulkNote-edits" placeholder="The edit you made, in a sentence. Optional. Every ticked agent applies exactly that."></textarea>
+            <button class="btn btn-sm" data-apv-bulk-btn data-apv-bulk-edits onclick="agBulkDecide('Approved with minor edits')">Approve <span data-apv-bulk-n>${n}</span> with this edit</button>
+        </div>
+        <div class="${panel('changes')}" id="apvBulkPanel-changes">
+            <textarea class="apv-note" id="apvBulkNote-changes" placeholder="What needs changing. Required: every ticked agent must answer every point you make."></textarea>
+            <button class="btn btn-sm" data-apv-bulk-btn data-apv-bulk-changes onclick="agBulkDecide('Changes requested')">Send <span data-apv-bulk-n>${n}</span> back</button>
+        </div>
+        <div class="${panel('reasons')}" id="apvBulkPanel-reasons">
+            <div class="apv-reasons open" role="group" aria-label="Why are you rejecting these?">
+                <span class="apv-reasons-label">No to all <span data-apv-bulk-n>${n}</span>, because&hellip;</span>
+                ${APV_REASONS.map(r=>`<button class="apv-reason${r.countsAgainstDraft?' apv-reason-quality':''}"
+                     data-apv-bulk-btn onclick="agBulkReject('${esc(r.key)}')"
+                     title="${r.countsAgainstDraft
+                         ? 'The only reason that counts against the agents&apos; draft quality. Say what is wrong.'
+                         : 'One tap closes every ticked card. They should not have reached you; it does not count against the agents that wrote them.'}"
+                    >${esc(r.chip)}</button>`).join('')}
+                <button class="apv-reason apv-reason-quality" data-apv-bulk-btn onclick="agBulkReject('${esc(APV_UNCLASSIFIED)}')" title="None of the seven fits. Say why in your own words; every ticked agent reads exactly that.">Something else</button>
+                <label class="apv-remember" title="On by default, and remembered ONCE: one tick teaches one rule, not one rule per card.">
+                    <input type="checkbox" id="apvBulkRemember" checked style="margin:0"> Remember this
+                </label>
+                <span class="apv-reject-note" id="apvBulkRejectNote" style="display:none;flex-basis:100%;margin-top:6px">
+                    <textarea class="apv-note" id="apvBulkNote-reasons" placeholder="Say what is wrong, in a sentence. Every ticked agent reads exactly this."></textarea>
+                    <button class="btn btn-danger btn-sm" data-apv-bulk-btn data-apv-bulk-reject onclick="agBulkReject()">Reject <span data-apv-bulk-n>${n}</span></button>
+                </span>
             </div>
-            ${g.rows.map(apvCardHtml).join('')}
-        </div>`;
-    }).join('');
+        </div>
+        <div class="${panel('defer')}" id="apvBulkPanel-defer">
+            <div class="apv-defer" role="group" aria-label="Knock these back to a date">
+                <span class="apv-defer-label">Not yet &mdash; bring all <span data-apv-bulk-n>${n}</span> back in&hellip;</span>
+                ${APV_DEFER_OPTIONS.map(o=>`<button class="apv-defer-btn" data-apv-bulk-btn
+                     onclick="agBulkDefer(${o.days})"
+                     title="Returns on ${esc(apvDeferDateLabel(apvDatePlus(o.days)))}">${esc(o.label)}</button>`).join('')}
+                <span class="apv-defer-on">
+                    <label for="apvBulkDeferDate">or on</label>
+                    <input type="date" id="apvBulkDeferDate" min="${esc(apvDatePlus(1))}"
+                           onkeydown="if(event.key==='Enter'){event.preventDefault();agBulkDeferOnDate()}">
+                    <button class="apv-defer-btn" data-apv-bulk-btn onclick="agBulkDeferOnDate()">Go</button>
+                </span>
+                <input type="text" id="apvBulkDeferWhy" class="apv-bulk-why" placeholder="What are you waiting for? Optional, kept on every card.">
+            </div>
+        </div>
+    </div>`;
 }
 
-// One verdict for the whole group. Deliberately REJECT-ONLY, and only on the
-// relevance reasons: approving several different pieces of prepared work on one
-// click would be approving text Kevin has not read, which is the single thing
-// the gate exists to prevent. "The work is wrong" is excluded too — that one is
-// a judgement on a specific draft and cannot be made in bulk.
-function agRejectGroup(taskIds, reasonKey){
-    const r = APV_REASON_BY_KEY[reasonKey];
-    if(!r || r.countsAgainstDraft || !taskIds || !taskIds.length) return;
-    const n = taskIds.length;
-    const idsAttr = JSON.stringify(taskIds).replace(/"/g, '&quot;');
-    showModal(`Reject all ${n}?`,
-        `<p style="font-size:var(--fs-sm);color:var(--text-secondary);line-height:1.6">
-           These ${n} tasks are the same thing written up ${n} different ways. This closes all of them.
-           Nothing goes out, and it does <strong>not</strong> count against any agent &mdash; the work was fine,
-           the tasks should not have reached you.<br><br>
-           <strong>Because:</strong> ${esc(r.chip)}<br>
-           <strong>Reason:</strong> ${esc(r.note)}</p>
-         <label style="display:flex;gap:8px;align-items:flex-start;margin-top:12px;background:var(--accent-soft);border-radius:var(--radius-md);padding:10px 12px;cursor:pointer">
-           <input type="checkbox" id="apvGroupRemember" checked style="margin:3px 0 0">
-           <span style="font-size:var(--fs-sm);color:var(--text-primary);line-height:1.5">Remember this reason, so these stop reaching you.</span>
-         </label>`,
-        `<button class="btn" onclick="closeModal()">Cancel</button>
-         <button class="btn btn-danger" onclick="agConfirmRejectGroup(${idsAttr},'${esc(reasonKey)}')">Reject all ${n}</button>`);
+// One panel open at a time under the bar, same as the card's own toggles.
+function apvBulkPanel(which, forceOpen){
+    _apvBulkPanel = (!forceOpen && _apvBulkPanel === which) ? '' : which;
+    document.querySelectorAll('#apvBulk .apv-bulk-panel').forEach(p=>{
+        p.classList.toggle('open', p.id === 'apvBulkPanel-' + _apvBulkPanel);
+    });
+    if(_apvBulkPanel === 'edits' || _apvBulkPanel === 'changes'){
+        const el = document.getElementById('apvBulkNote-' + _apvBulkPanel);
+        if(el) el.focus();
+    }
 }
-window.agRejectGroup = agRejectGroup;
+window.apvBulkPanel = apvBulkPanel;
 
-async function agConfirmRejectGroup(taskIds, reasonKey){
-    const box = document.getElementById('apvGroupRemember');
-    const remember = !!(box && box.checked);
-    closeModal();
-    const r = APV_REASON_BY_KEY[reasonKey];
-    let done = 0, failed = 0;
-    // One at a time, not Promise.all: a half-failed batch must leave a truthful
-    // queue, and each write carries its own stale-check against the live task.
-    for(let i = 0; i < taskIds.length; i++){
-        const id = taskIds[i];
-        _apvReason[id] = reasonKey;
-        const noteEl = document.getElementById('apvNote-' + id);
-        if(noteEl && !noteEl.value.trim() && r && r.note) noteEl.value = r.note;
+function apvBulkLock(on){
+    _apvBulkBusy = on;
+    document.querySelectorAll('#apvBulk [data-apv-bulk-btn]').forEach(b=>{ b.disabled = on; });
+    document.querySelectorAll('#approvalsBody [data-apv-pick], [data-apv-select-all]').forEach(b=>{ b.disabled = on; });
+    if(!on) apvBulkStatus('');
+}
+function apvBulkStatus(text){
+    const el = document.querySelector('#apvBulk [data-apv-bulk-status]');
+    if(el) el.textContent = text;
+}
+
+// A verdict for every ticked card, one at a time, through the single-card
+// path. opts.reasonKey / opts.remember come from the bar's reason chips;
+// opts.note is what Kevin typed in the bar; opts.defaultNote is a chip's
+// sentence, which fills an EMPTY card note and never overwrites his words.
+async function agBulkDecide(outcome, opts){
+    opts = opts || {};
+    if(_apvBulkBusy) return;
+    if(APPROVAL_OUTCOMES.indexOf(outcome)===-1) return;
+    const ids = apvBulkIds();
+    if(!ids.length) return;
+    let note = opts.note;
+    if(note === undefined){
+        const src = outcome==='Changes requested' ? 'changes' : outcome==='Approved with minor edits' ? 'edits' : '';
+        const el = src ? document.getElementById('apvBulkNote-'+src) : null;
+        note = (el && el.value || '').trim();
+    }
+    if(outcome==='Changes requested' && !note){
+        apvBulkPanel('changes', true);
+        toast('Say what needs changing first. Every ticked agent reads it.');
+        return;
+    }
+    const total = ids.length;
+    let done = 0, elsewhere = 0, failed = 0, remembered = false;
+    for(let i = 0; i < total; i++){
+        const id = ids[i];
+        // Re-asserted every pass: the stale guard inside the single path
+        // reloads and rebuilds the list, which would otherwise drop the ticks
+        // and the bar while writes are still running.
+        apvBulkResume(ids.slice(i));
+        apvBulkStatus(`Saving ${i+1} of ${total}\u2026`);
+        // The same inputs a single card reads: the chip in _apvReason and the
+        // words in the card's own note box. Set them, then take the one path.
+        if(outcome === 'Rejected'){
+            if(opts.reasonKey && opts.reasonKey !== APV_UNCLASSIFIED) _apvReason[id] = opts.reasonKey;
+            else delete _apvReason[id];
+        }
+        const noteEl = document.getElementById('apvNote-'+id);
+        if(noteEl){
+            if(note) noteEl.value = note;
+            else if(!noteEl.value.trim() && opts.defaultNote) noteEl.value = opts.defaultNote;
+        }
+        let result = 'failed';
         try {
-            // Remember on the FIRST only. One tick teaches one rule; writing
-            // the same line into an agent file five times is not five lessons.
-            await applyApprovalDecision(id, 'Rejected', remember && i === 0);
-            done++;
+            // Remember on the FIRST write that saves, and only that one. One
+            // tick teaches one rule; writing the same line into an agent file
+            // five times is not five lessons.
+            result = await applyApprovalDecision(id, outcome, !!opts.remember && !remembered);
         } catch(e){
+            console.error('bulk ' + outcome + ' failed for ' + id, e);
+        }
+        if(result === 'saved'){ done++; if(opts.remember) remembered = true; }
+        else if(result === 'elsewhere') elsewhere++;
+        else if(result === 'auth'){ apvBulkLock(false); return; }   // the auth bar is up; every further write would fail the same way
+        else failed++;
+    }
+    apvBulkLock(false);
+    _apvSelected.clear();
+    _apvBulkReason = '';
+    apvBulkSyncCards();
+    apvBulkSync();
+    const verb = outcome==='Rejected' ? 'Closed' : outcome==='Changes requested' ? 'Sent back' : 'Approved';
+    const parts = [elsewhere || failed ? `${verb} ${done} of ${total}.` : `${verb} all ${done}.`];
+    if(elsewhere) parts.push(`${elsewhere} already decided elsewhere, so not touched.`);
+    if(failed) parts.push(`${failed} could not be saved and are still in the queue.`);
+    toast(parts.join(' '));
+    apvScrollToFirstCard();
+}
+
+// Put the remaining ticks and the locked bar back after anything rebuilt the
+// list mid-loop. Only ids still in the queue are re-ticked.
+function apvBulkResume(ids){
+    ids.forEach(id=>{ if(allApprovals.some(t=>t.id===id)) _apvSelected.add(id); });
+    apvBulkSyncCards();
+    apvBulkSync();
+    apvBulkLock(true);
+}
+window.agBulkDecide = agBulkDecide;
+
+// The bar's reason chips: same rules as a card's. Six chips close on one tap;
+// "The work is wrong" and "Something else" need his words first.
+function agBulkReject(reasonKey){
+    if(reasonKey !== undefined) _apvBulkReason = reasonKey;
+    const key = _apvBulkReason;
+    const r = APV_REASON_BY_KEY[key] || (key === APV_UNCLASSIFIED
+        ? { key: APV_UNCLASSIFIED, chip: 'Something else', note: '', countsAgainstDraft: false } : null);
+    if(!r) return;
+    const noteEl = document.getElementById('apvBulkNote-reasons');
+    const words = (noteEl && noteEl.value || '').trim();
+    const needsWords = r.countsAgainstDraft || r.key === APV_UNCLASSIFIED;
+    if(needsWords && !words){
+        const slot = document.getElementById('apvBulkRejectNote');
+        if(slot){ slot.style.display = ''; if(noteEl) noteEl.focus(); }
+        return;
+    }
+    const box = document.getElementById('apvBulkRemember');
+    agBulkDecide('Rejected', { reasonKey: key, note: words, defaultNote: r.note, remember: !!(box && box.checked) });
+}
+window.agBulkReject = agBulkReject;
+
+function agBulkDefer(days){ apvBulkDeferTo(apvDatePlus(days)); }
+window.agBulkDefer = agBulkDefer;
+
+function agBulkDeferOnDate(){
+    const el = document.getElementById('apvBulkDeferDate');
+    const until = (el && el.value || '').trim();
+    if(!/^\d{4}-\d{2}-\d{2}$/.test(until)){ toast('Pick a date first.'); return; }
+    if(until <= todayStr()){
+        toast('Pick a date after today \u2014 anything earlier leaves them in the queue.');
+        return;
+    }
+    apvBulkDeferTo(until);
+}
+window.agBulkDeferOnDate = agBulkDeferOnDate;
+
+// Knock every ticked card back to one date, one write at a time, then reload
+// the queue ONCE: the single-card path reloads after its one write, and
+// reloading inside the loop would rebuild the cards under it.
+async function apvBulkDeferTo(until){
+    if(_apvBulkBusy) return;
+    const ids = apvBulkIds();
+    if(!ids.length) return;
+    const whyEl = document.getElementById('apvBulkDeferWhy');
+    const why = (whyEl && whyEl.value || '').trim();
+    const total = ids.length;
+    let done = 0, elsewhere = 0, failed = 0;
+    for(let i = 0; i < total; i++){
+        apvBulkResume(ids.slice(i));
+        apvBulkStatus(`Knocking back ${i+1} of ${total}\u2026`);
+        try {
+            if(await apvDeferWrite(ids[i], until, why)) done++; else elsewhere++;
+        } catch(e){
+            if(e.message==='auth'){ apvBulkLock(false); return; }
             failed++;
-            console.error('group reject failed for ' + id, e);
+            console.error('bulk defer failed for ' + ids[i], e);
         }
     }
-    toast(failed
-        ? `Closed ${done}. ${failed} could not be closed and are still in the queue.`
-        : `Closed all ${done}.`);
-    await loadApprovals(); renderApprovals(); renderRegister();
+    apvBulkLock(false);
+    _apvSelected.clear();
+    await refreshApprovalZone(true);
+    const parts = [`Knocked back ${done} to ${apvDeferDateLabel(until)}.`];
+    if(elsewhere) parts.push(`${elsewhere} already decided elsewhere.`);
+    if(failed) parts.push(`${failed} could not be knocked back and are still in the queue.`);
+    toast(parts.join(' '));
 }
-window.agConfirmRejectGroup = agConfirmRejectGroup;
 
 // THE PAGE KEEPS UP WITH THE SIGN-IN CHAIN (Kevin, 8 Sep 2026). He signed in
 // to seven sites, every task was handed back within seconds, and the queue
@@ -2108,7 +2237,7 @@ function apvCardHtml(t){
     const signIn = askBits.signIn;
     const askLine = askBits.askLine;
     const kindText = t.taskType ? esc(t.taskType) : '<span style="color:var(--danger)">not set</span>';
-    return `<div class="apv-card" data-apv-card="${t.id}">
+    return `<div class="apv-card${_apvSelected.has(t.id)?' apv-selected':''}" data-apv-card="${t.id}">
         ${tier1 ? `<div class="apv-tier1">TIER 1. This touches your private legal and financial matter. An AI agent prepared it. Nothing has been sent, filed, paid or changed anywhere. Read it before you approve.</div>` : ''}
         ${(()=>{
             const r = apvReceipt(t.notes);
@@ -2128,6 +2257,7 @@ function apvCardHtml(t){
             </div>`;
         })()}
         <div class="apv-meta">
+            ${signIn ? '' : `<label class="apv-pick" title="Tick to decide this together with other cards"><input type="checkbox" data-apv-pick${_apvSelected.has(t.id)?' checked':''} onchange="apvPick('${t.id}', this.checked)" aria-label="Select this card"></label>`}
             ${t.priority==='Urgent' ? '<span class="apv-chip" style="background:var(--danger-bg);color:var(--danger)">Urgent</span>' : ''}
             <span class="apv-chip">${esc(agent)}</span>
             ${t.taskType ? `<span class="apv-chip">${esc(t.taskType)}</span>` : ''}
@@ -2264,7 +2394,7 @@ const _apvOpen = { work: new Set(), panel: new Set(), reasons: new Set(), trail:
 // open the note and a Reject button in place, never a dialog in the middle of
 // the screen. A wrong tap has a five-second Undo.
 function apvReasonChips(taskId){
-    return `<div class="apv-reasons" id="apvReasons-${taskId}" role="group" aria-label="Why are you rejecting this?">
+    return `<div class="apv-reasons${_apvOpen.reasons.has(taskId)?' open':''}" id="apvReasons-${taskId}" role="group" aria-label="Why are you rejecting this?">
         <span class="apv-reasons-label">No, because&hellip;</span>
         ${APV_REASONS.map(r=>`<button class="apv-reason${r.countsAgainstDraft?' apv-reason-quality':''}"
              data-apv-btn onclick="agRejectWithReason('${taskId}','${esc(r.key)}')"
@@ -2350,13 +2480,18 @@ window.agRejectNow = agRejectNow;
 
 // The card's two toggles: "No" opens the reasons, "More" opens everything
 // else. Nothing on the card moves except the panel that opens.
+// Which ones are open is RECORDED (15 Sep 2026): a knock-back or bring-back
+// rebuilds the list, and until now every open More panel snapped shut.
 function apvToggle(taskId, which){
     const el = document.getElementById((which === 'reasons' ? 'apvReasons-' : 'apvPanel-') + taskId);
     if(!el) return;
-    el.classList.toggle('open');
-    if(which === 'reasons' && el.classList.contains('open')){
+    const open = el.classList.toggle('open');
+    const set = which === 'reasons' ? _apvOpen.reasons : _apvOpen.panel;
+    if(open) set.add(taskId); else set.delete(taskId);
+    if(which === 'reasons' && open){
         const other = document.getElementById('apvPanel-'+taskId);
         if(other) other.classList.remove('open');
+        _apvOpen.panel.delete(taskId);
     }
 }
 window.apvToggle = apvToggle;
@@ -2480,9 +2615,14 @@ function agConfirmReject(taskId){
 window.agConfirmReject = agConfirmReject;
 
 
+// Returns what happened, for the bulk loop's tally: 'saved', 'elsewhere' (the
+// stale guard refused it and the queue was reloaded), 'failed' (the card
+// shows Not saved with Try again) or 'auth' (the token was refused; the auth
+// bar is showing and nothing more should be tried). Single-card callers
+// ignore it.
 async function applyApprovalDecision(taskId, outcome, remember){
     const t = allApprovals.find(x=>x.id===taskId);
-    if(!t) return;
+    if(!t) return 'elsewhere';
     const noteEl = document.getElementById('apvNote-'+taskId);
     const note = (noteEl && noteEl.value || '').trim();
     const typeEl = document.getElementById('apvType-'+taskId);
@@ -2503,12 +2643,12 @@ async function applyApprovalDecision(taskId, outcome, remember){
         if(liveStatus !== 'Approval'){
             toast('Already decided elsewhere (Slack or the Tasks drawer). Reloading the queue.');
             await loadApprovals(); renderApprovals(); renderRegister();
-            return;
+            return 'elsewhere';
         }
         if(liveLmt !== String(t.lmt||'')){
             toast('Not applying that. This task changed after it was shown here, so reload and read it again first.');
             await loadApprovals(); renderApprovals(); renderRegister();
-            return;
+            return 'elsewhere';
         }
 
         // Files go up BEFORE the decision is written: if Airtable refuses
@@ -2620,8 +2760,9 @@ async function applyApprovalDecision(taskId, outcome, remember){
         postApprovalBadge();
         loadChecksAndRender(); // approvals feed the >24h check — keep it honest
         renderRegister();      // the scorecards' "Waiting on you" counts read allApprovals
+        return 'saved';
     } catch(e){
-        if(e.message==='auth') return;
+        if(e.message==='auth'){ btns.forEach(b=>{ b.disabled = false; }); return 'auth'; }
         console.error('approval decision failed', e);
         // A failed write STAYS ON THE CARD until it works (finding 10). No
         // vanishing toast, no card that looks untouched.
@@ -2629,6 +2770,7 @@ async function applyApprovalDecision(taskId, outcome, remember){
             ? 'File not attached, so nothing was decided. ' + (e && e.message || e)
             : 'Not saved. ' + (e && e.message || e), outcome, remember);
         btns.forEach(b=>{ b.disabled = false; });
+        return 'failed';
     }
 }
 window.applyApprovalDecision = applyApprovalDecision;
@@ -2661,6 +2803,35 @@ function apvShowSaved(taskId, t, text, undoPayload){
     apvStateStrip(taskId, 'saved', `Saved. ${text}`, `<button class="apv-undo" type="button" data-apv-undo onclick="apvUndo('${taskId}')">Undo</button>`);
     const timer = setTimeout(()=>apvFoldAway(taskId), APV_UNDO_MS);
     _apvUndo[taskId] = { t, payload: undoPayload, timer };
+    apvScrollToFirstCard();
+}
+
+// THE VIEW RETURNS TO THE FIRST CARD (Kevin, 15 Sep 2026). After a decision
+// the page stayed wherever the scroll happened to be: the decided card
+// shrank to a strip, the list shifted, and the next card to read was off the
+// screen above or below. Now the first card still in the list is put at the
+// top, under the sticky top bar (and the bulk bar when it is showing). A
+// decided card still in its five-second Undo window counts as first, so the
+// Undo stays in view when it was the top card.
+// If Kevin scrolls during the five-second Undo window, the fold that follows
+// leaves him where he went rather than dragging him back to the top.
+let _apvAutoScrollUntil = 0, _apvUserScrolled = false;
+window.addEventListener('scroll', ()=>{ if(Date.now() > _apvAutoScrollUntil) _apvUserScrolled = true; }, { passive: true });
+function apvScrollToFirstCard(){
+    const body = document.getElementById('approvalsBody');
+    const card = body ? body.querySelector('.apv-card:not(.apv-gone)') : null;
+    // offsetParent is null while the approvals view is display:none: a fold
+    // timer firing after Kevin switched tab must not move the tab he is on.
+    if(!card || card.offsetParent === null) return;
+    _apvAutoScrollUntil = Date.now() + 300;
+    _apvUserScrolled = false;
+    let offset = 0;
+    const top = document.querySelector('.topbar');
+    if(top) offset += top.getBoundingClientRect().height;
+    const bulk = document.getElementById('apvBulk');
+    if(bulk && bulk.classList.contains('on')) offset += bulk.getBoundingClientRect().height + 12;
+    const y = card.getBoundingClientRect().top + window.pageYOffset - offset;
+    window.scrollTo({ top: Math.max(0, Math.round(y)) });
 }
 function apvShowFailed(taskId, text, outcome, remember){
     const card = document.querySelector(`[data-apv-card="${taskId}"]`);
@@ -2672,6 +2843,9 @@ function apvFoldAway(taskId){
     const card = document.querySelector(`[data-apv-card="${taskId}"]`);
     if(!card) return;
     card.style.maxHeight = card.offsetHeight + 'px';
+    // The shrink can make the browser clamp the scroll position; that is the
+    // page moving, not Kevin, so it must not count as him scrolling away.
+    if(!_apvUserScrolled) _apvAutoScrollUntil = Date.now() + 400;
     requestAnimationFrame(()=>{ card.classList.add('apv-gone'); });
     setTimeout(()=>{
         if(card.parentNode) card.parentNode.removeChild(card);
@@ -2680,7 +2854,7 @@ function apvFoldAway(taskId){
         // Only when the visible list is empty does the page rebuild: a filter
         // whose agent has nothing left resets to All, and an empty queue says so.
         if(!left && !Object.keys(_apvUndo).length) renderApprovals();
-        else apvSyncCountsInPlace(null);
+        else { apvSyncCountsInPlace(null); if(!_apvUserScrolled) apvScrollToFirstCard(); }
     }, 320);
 }
 // Five seconds to take it back: the same fields the decision wrote, put back.
@@ -2721,22 +2895,12 @@ function apvSyncCountsInPlace(decidedId){
     updateApprovalsTabBadge();
     const all = document.querySelector('.apv-filter');
     if(all && /^All \(/.test(all.textContent)) all.textContent = `All (${allApprovals.length})`;
-    document.querySelectorAll('.apv-group').forEach(g=>{
-        const total = g.querySelectorAll('.apv-card').length;
-        const left = Array.from(g.querySelectorAll('.apv-card')).filter(c=>!c.classList.contains('apv-done')).length;
-        const head = g.querySelector('.apv-group-count');
-        if(head && left < total){
-            const when = new Date().toLocaleTimeString('en-GB', { hour:'2-digit', minute:'2-digit' });
-            head.innerHTML = `${left} of ${total} in this incident left<span class="apv-group-decided">you decided ${total-left} at ${when}</span>`;
-        }
-    });
+    apvBulkSync();
     if(!allApprovals.length){
         const body = document.getElementById('approvalsBody');
         const left = body ? body.querySelectorAll('.apv-card:not(.apv-done)').length : 0;
         if(body && !left && !Object.keys(_apvUndo).length) renderApprovals();
     }
-    const strip = document.querySelector('[data-apv-batch]');
-    if(strip) strip.outerHTML = apvBatchStripHtml(allApprovals);
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -2844,9 +3008,36 @@ function agConfirmDefer(taskId, until){
 }
 window.agConfirmDefer = agConfirmDefer;
 
-// The write. Same stale guard as a decision: a card shows what was true when
-// it rendered, and deferring something that has since been decided elsewhere
-// would resurrect it into the queue a week later.
+// The write, shared by the card and the bulk bar. Same stale guard as a
+// decision: a card shows what was true when it rendered, and deferring
+// something that has since been decided elsewhere would resurrect it into the
+// queue a week later. Returns false, with nothing written, in that case.
+async function apvDeferWrite(taskId, until, why){
+    const live = await atFetchOne(TASKS_TBL, taskId);
+    if(selName(gf(live,TF.status)) !== 'Approval') return false;
+    const nowIso = new Date().toISOString();
+    const payload = {};
+    payload[TF.deferredUntil] = until;
+    // The Slack fields are deliberately NOT touched here. The worker's
+    // reconcile phase picks the deferral up within the minute, replies in
+    // the existing thread with the return date, and clears the timestamp
+    // itself — which is what makes the fresh card appear on the day. Two
+    // writers on one pair of fields is how a thread ends up orphaned with
+    // no explanation in it. If that phase ever breaks, the sweep logs
+    // "reconcile FAILED" rather than losing the task quietly.
+    // The note to his future self. Tagged so the deferred lane can read it
+    // back; appended, never overwritten, so a second knock-back keeps the
+    // first reason.
+    const stamp = '['+nowIso.replace('T',' ').slice(0,16)+'] '+APV_DEFER_TAG+until+(why?': '+why:'');
+    const prior = String(gf(live,TF.feedbackHistory) || '');
+    payload[TF.feedbackHistory] = (prior.replace(/\s+$/,'') + '\n\n' + stamp).trim();
+    await atUpdate(TASKS_TBL, taskId, payload);
+    await postTaskComment(taskId,
+        'Knocked back by Kevin until ' + until + '.' + (why ? ' Waiting on: ' + why : '')
+        + ' Not approved, not rejected — it returns to the approval queue on that date.');
+    return true;
+}
+
 async function applyApprovalDefer(taskId, until, why){
     const t = allApprovals.find(x=>x.id===taskId);
     if(!t) return;
@@ -2854,34 +3045,10 @@ async function applyApprovalDefer(taskId, until, why){
     const btns = card ? Array.from(card.querySelectorAll('[data-apv-btn]')) : [];
     btns.forEach(b=>{ b.disabled = true; });
     try {
-        const live = await atFetchOne(TASKS_TBL, taskId);
-        if(selName(gf(live,TF.status)) !== 'Approval'){
-            toast('Already decided elsewhere (Slack or the Tasks drawer). Reloading the queue.');
-            await refreshApprovalZone();
-            return;
-        }
-        const nowIso = new Date().toISOString();
-        const payload = {};
-        payload[TF.deferredUntil] = until;
-        // The Slack fields are deliberately NOT touched here. The worker's
-        // reconcile phase picks the deferral up within the minute, replies in
-        // the existing thread with the return date, and clears the timestamp
-        // itself — which is what makes the fresh card appear on the day. Two
-        // writers on one pair of fields is how a thread ends up orphaned with
-        // no explanation in it. If that phase ever breaks, the sweep logs
-        // "reconcile FAILED" rather than losing the task quietly.
-        // The note to his future self. Tagged so the deferred lane can read it
-        // back; appended, never overwritten, so a second knock-back keeps the
-        // first reason.
-        const stamp = '['+nowIso.replace('T',' ').slice(0,16)+'] '+APV_DEFER_TAG+until+(why?': '+why:'');
-        const prior = String(gf(live,TF.feedbackHistory) || '');
-        payload[TF.feedbackHistory] = (prior.replace(/\s+$/,'') + '\n\n' + stamp).trim();
-        await atUpdate(TASKS_TBL, taskId, payload);
-        await postTaskComment(taskId,
-            'Knocked back by Kevin until ' + until + '.' + (why ? ' Waiting on: ' + why : '')
-            + ' Not approved, not rejected — it returns to the approval queue on that date.');
-        await refreshApprovalZone();
-        toast('Knocked back to ' + apvDeferDateLabel(until) + '.');
+        const ok = await apvDeferWrite(taskId, until, why);
+        if(!ok) toast('Already decided elsewhere (Slack or the Tasks drawer). Reloading the queue.');
+        await refreshApprovalZone(true);
+        if(ok) toast('Knocked back to ' + apvDeferDateLabel(until) + '.');
     } catch(e){
         if(e.message==='auth') return;
         console.error('defer failed', e);
@@ -2899,7 +3066,7 @@ async function agUndefer(taskId){
     try {
         await atUpdate(TASKS_TBL, taskId, { [TF.deferredUntil]: null });
         await postTaskComment(taskId, 'Brought back to the approval queue by Kevin, ahead of ' + t.until + '.');
-        await refreshApprovalZone();
+        await refreshApprovalZone(true);
         toast('Back in your queue.');
     } catch(e){
         if(e.message==='auth') return;
@@ -2911,9 +3078,12 @@ window.agUndefer = agUndefer;
 // Both halves of the queue move together. Reloading only one leaves the badge
 // counting a task the list no longer shows, which is the drift the shell's
 // badge test exists to prevent.
-async function refreshApprovalZone(){
+// `toFirst` is set when a decision or knock-back caused the reload, so the
+// rebuilt list opens on its first card rather than wherever the scroll was.
+async function refreshApprovalZone(toFirst){
     await Promise.all([loadApprovals(), loadDeferred()]);
     renderApprovals();
+    if(toFirst) apvScrollToFirstCard();
     postApprovalBadge();
     loadChecksAndRender();
     renderRegister();
@@ -3485,9 +3655,10 @@ function computeCheckLanes(){
         // same issue written up twice.
         //
         // 1. It keyed on dupeTaskKey ALONE, so it reported clean while seven
-        //    real pairs sat in the gate. Now it runs the same two passes the
-        //    approvals queue does, through the same apvGroupTasks — one
-        //    grouping, so this lane and that queue can never disagree.
+        //    real pairs sat in the gate. Now it runs both passes through
+        //    apvGroupTasks (exact key, then dupeVerdict). Since 15 Sep 2026
+        //    this lane is the only place those groups are shown: the queue
+        //    flags nothing and Kevin ticks what he wants decided together.
         // 2. It bucketed by OWNER, which made a cross-agent duplicate
         //    invisible BY DESIGN. Two agents doing the same job is worse than
         //    one agent doing it twice, not better, so the owner is now
@@ -3535,6 +3706,63 @@ function computeCheckLanes(){
 const DUPE_GENERIC = [
     'a', 'an', 'and', 'are', 'as', 'at', 'be', 'been', 'by', 'for', 'from', 'in', 'is', 'it', 'its', 'of', 'on', 'or', 're', 'that', 'the', 'this', 'to', 'was', 'were', 'with', 'action', 'again', 'asap', 'check', 'consider', 'deal', 'fix', 'handle', 'investigate', 'look', 'needs', 'please', 'repeatedly', 'resolve', 'review', 'sort', 'urgent', 'broken', 'error', 'errors', 'exceed', 'exceeded', 'exceeding', 'fail', 'failed', 'failing', 'failure', 'failures', 'issue', 'issues', 'problem', 'problems', 'api', 'app', 'apps', 'google', 'script', 'scripts', 'service', 'services', 'ref', 'reference', 'usage'
 ];
+
+// ─── SAME MATTER, TWICE (27-28 Aug 2026) ─────────────────────────────
+//
+// Groups tasks that are one matter written up more than once. Two passes,
+// and a match is either: the exact dupeTaskKey is the fast bucket, and
+// dupeVerdict is the second pass over what it missed (seven real pairs on the
+// live queue on 28 Aug 2026). Union-find, because duplication is transitive:
+// if A matches B on a phone number and B matches C on wording, all three are
+// one matter.
+//
+// Since 15 Sep 2026 the approvals queue no longer renders these as groups
+// (Kevin ticks the cards he wants decided together instead). This is now
+// used ONLY by the Duplicates lane on the Check these tab, which FLAGS the
+// pairs and leaves the deciding to him.
+function apvGroupTasks(rows){
+    const parent = {}, reason = {};
+    const find = (x)=>{ while(parent[x] !== x){ parent[x] = parent[parent[x]]; x = parent[x]; } return x; };
+    rows.forEach(t=>{ parent[t.id] = t.id; });
+    // A sign-in wait is not a matter, so it never joins a group: on 8 Sep
+    // 2026 six "SIGN-IN: <site> session lapsed" cards (six different sites)
+    // read as one thing because the key saw "sign, session, lapsed" and
+    // treated the site name as noise.
+    const isWait = {};
+    rows.forEach(t=>{ isWait[t.id] = !!apvSignInNeeded(t.agentOutput); });
+    for(let i = 0; i < rows.length; i++){
+        for(let j = i + 1; j < rows.length; j++){
+            const a = rows[i], b = rows[j];
+            if(isWait[a.id] || isWait[b.id]) continue;
+            // Fall back to the id so two NAMELESS tasks can never collide — an
+            // empty key would merge unrelated work into one group.
+            const ka = dupeTaskKey(a.name || '') || ('id:' + a.id);
+            const kb = dupeTaskKey(b.name || '') || ('id:' + b.id);
+            let why = '';
+            if(ka === kb) why = 'same subject';
+            else {
+                const v = dupeVerdict(a.name || '', b.name || '', 'group');
+                if(v.match) why = v.why;
+            }
+            if(!why) continue;
+            const ra = find(a.id), rb = find(b.id);
+            if(ra !== rb) parent[ra] = rb;
+            // Keep the FIRST reason found for the merged set: it is the one
+            // that put these two together, and a later pair's wording would
+            // describe a different edge of the same cluster.
+            const root = find(a.id);
+            if(!reason[root]) reason[root] = why;
+        }
+    }
+    const byRoot = {}, groups = [];
+    rows.forEach(t=>{
+        const r = find(t.id);
+        if(!byRoot[r]){ byRoot[r] = { key: r, rows: [], why: '' }; groups.push(byRoot[r]); }
+        byRoot[r].rows.push(t);
+    });
+    groups.forEach(g=>{ g.why = reason[g.key] || ''; });
+    return groups;
+}
 
 function dupeTaskKey(name){
     // THE INCIDENT ANCHOR (rewritten 27 Aug 2026).
