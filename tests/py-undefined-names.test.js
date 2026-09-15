@@ -26,6 +26,8 @@ const ESTATE_SCRIPTS = [
   'scripts/content-engine/publish.py',
   'scripts/content-engine/watch.py',
   'scripts/content-engine/approval.py',
+  'scripts/content-engine/content_report.py',
+  'scripts/content-engine/runpreneur_sync.py',
   'scripts/agent-dispatch.py',
   'scripts/handback-poll.py',
   'scripts/session-keepalive.py',

@@ -74,6 +74,10 @@ ES = {
     "updated":    "fld3q8WN5XqrER92Z",
 }
 STATUSES = ("Worked", "Failed", "Blocked", "Skipped", "Idle", "Running")
+# Rows this writer must never mark "No longer scheduled". content-publishing is written by
+# scripts/content-engine/content_report.py (Kevin's publishing report, 15 Sep 2026); without it here the
+# 10-minute refresh would overwrite the report's headline with an Idle line.
+REPORT_ROWS_OWNED_ELSEWHERE = ("loop-health", "allowance", "content-publishing")
 
 # Why a run did not work, in Kevin's words. Matched against the wrapper's
 # reason and the last 600 characters the job printed. Order matters: the first
@@ -526,7 +530,7 @@ def upsert(rows, now, dry_run=False):
         (updates if rid else creates).append({"id": rid, "fields": f} if rid else {"fields": f})
     if dry_run:
         return {"create": len(creates), "update": len(updates)}
-    gone = [k for k in have if k and k not in {r["key"] for r in rows} and k not in ("loop-health", "allowance")]
+    gone = [k for k in have if k and k not in {r["key"] for r in rows} and k not in REPORT_ROWS_OWNED_ELSEWHERE]
     for k in gone:
         updates.append({"id": have[k], "fields": {ES["status"]: "Idle", ES["nextDue"]: None,
                         ES["detail"]: "No longer scheduled: this job has left job-schedule.json (retired or renamed).",

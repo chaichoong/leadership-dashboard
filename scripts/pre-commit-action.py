@@ -31,6 +31,7 @@ FILE_TO_PAGE = {
     'follow-up.html':       'comms',
     'compliance.html':      'compliance',
     'growth-plan.html':     'growth-plan',
+    'publishing.html':      'publishing',
     'js/growth-plan-model.js': 'growth-plan',
     'os/tasks/index.html':  'tasks',
     # Agent accuracy scoring is shared by the Task OS (AI Agents tab) and the

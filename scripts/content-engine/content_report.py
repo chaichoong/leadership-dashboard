@@ -1,0 +1,232 @@
+#!/usr/bin/env python3
+"""Content Engine: the daily publishing report (Kevin, 15 Sep 2026).
+
+"Most importantly, I need some kind of reporting protocol so I can see what's been published each day and what's
+scheduled to be published." One report, built from what the engine actually did (publishing.json, approvals.json,
+the ledger, the Strava sync state), written as ONE row in Airtable. Two places read that row:
+
+  - the Publishing page (publishing.html, Marketing in the app's sidebar): the full picture;
+  - the 08:00 approvals DM (scripts/slack-automation/approvals.js): the one-line headline.
+
+The row lives in the Estate Status table (key `content-publishing`, kind `report`), the same way loop-health does.
+The Estate status tab lists `job` rows only, so this row never shows there, and estate-status.py leaves it alone.
+
+A report that only lists arrivals cannot show a missed day, so every day of the last seven is listed, and a day with
+nothing out says so in words.
+
+Usage:
+  content_report.py build            # print the report JSON (read-only)
+  content_report.py write            # build and upsert the Airtable row
+  content_report.py selftest
+Runs at the end of the hourly publisher and the nightly render job.
+"""
+import argparse, datetime as dt, json, os, sys, urllib.parse, urllib.request
+from zoneinfo import ZoneInfo
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
+import watch, approval, publish, runpreneur_sync  # noqa: E402
+
+LONDON = ZoneInfo("Europe/London")
+BASE = "appnqjDpqDniH3IRl"
+TABLE = "tblZVrdzivyBueZVf"          # Estate Status
+KEY = "content-publishing"
+# Field ids mirrored from scripts/estate-status.py (ES); tests/content-report.test.js fails if they drift.
+ES = {"key": "fldLO6xJqkokvVR4g", "kind": "fldfjQOn76VpgKEfZ", "label": "fldlnvvTh8l5UIih4", "status": "fldhOUiva3bqPNk1c",
+      "lastRun": "flduxV3TYwp9wQX9O", "lastWorked": "fldMIx3kWMM23vDBN", "detail": "fldLRFP2nJttDVQOa",
+      "payload": "fldiqs9lvyLimoR7i", "updated": "fld3q8WN5XqrER92Z"}
+SECTIONS = ("YouTube episode", "YouTube Short", "Teaser clips", "Learnings clips", "Blog", "Podcast", "Facebook share")
+HISTORY_DAYS = 7
+
+
+def parse_utc(s):
+    try: return dt.datetime.strptime(s, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=dt.timezone.utc)
+    except (TypeError, ValueError): return None
+
+
+def youtube_post(entry):
+    for k, p in (entry.get("posts") or {}).items():
+        if k.startswith("youtube|") and p.get("clip") == "full": return p
+    return None
+
+
+def out_at(entry):
+    """When the episode went public on YouTube, or None if it has not."""
+    p = youtube_post(entry)
+    if not p or p.get("status") != "published": return None
+    return parse_utc(p.get("published_at") or p.get("scheduled"))
+
+
+def london_day(t):
+    return t.astimezone(LONDON).date()
+
+
+def episode_row(day, entry):
+    s = publish.section_status(entry)
+    p = youtube_post(entry) or {}
+    return {"day": int(day), "youtube": p.get("link") or entry.get("youtube_link") or "", "blog": (entry.get("blog") or {}).get("url", ""),
+            "podcast": (entry.get("podcast") or {}).get("link", ""), "sections": s,
+            "done": sum(1 for v in s.values() if v == "done"), "missing": [k for k, v in s.items() if v == "missing"],
+            "pending": [k for k, v in s.items() if v == "pending"]}
+
+
+def build(now=None, state=None, approvals=None, ledger=None, sync_state=None, plan=None):
+    now = now or dt.datetime.now(dt.timezone.utc)
+    state = publish.load_state() if state is None else state
+    approvals = approval.load_state() if approvals is None else approvals
+    ledger = watch.load_ledger() if ledger is None else ledger
+    sync_state = (runpreneur_sync.load_state() or {}) if sync_state is None else sync_state
+    today = london_day(now)
+    episodes = {d: e for d, e in state.items() if str(d).isdigit() and isinstance(e, dict)}
+    gaps = watch.gap_days()
+    cursor = publish.cursor(state)
+
+    # every one of the last seven days, newest first, including the empty ones
+    history = []
+    for i in range(HISTORY_DAYS):
+        d = today - dt.timedelta(days=i)
+        out = sorted((episode_row(k, e) for k, e in episodes.items() if out_at(e) and london_day(out_at(e)) == d), key=lambda r: r["day"])
+        history.append({"date": d.isoformat(), "episodes": out})
+    clean = 0
+    for h in history[1:]:                                    # yesterday backwards: days in a row with an episode out
+        if not h["episodes"]: break
+        clean += 1
+
+    # what is booked and not out yet
+    scheduled = []
+    for k, e in episodes.items():
+        for key, p in (e.get("posts") or {}).items():
+            when = parse_utc(p.get("scheduled"))
+            if p.get("status") == "scheduled" and when and when >= now - dt.timedelta(hours=2):
+                scheduled.append({"day": int(k), "channel": publish.CHANNEL_NAMES.get((p.get("platform"), p.get("clip")), p.get("platform", "")),
+                                  "when": p["scheduled"]})
+    scheduled.sort(key=lambda r: (r["when"], r["day"]))
+
+    approved = sorted(int(d) for d, a in approvals.items() if a.get("verdict") == "approved")
+    waiting_cards = sorted(int(d) for d, a in approvals.items() if a.get("task") and not a.get("verdict"))
+    next_up = [d for d in approved if d not in gaps and not (episodes.get(str(d)) or {}).get("youtube_link") and d > cursor]
+    blocked = {d: "; ".join(a["qa_blocked"].get("failures") or [])[:200] for d, a in approvals.items() if isinstance(a, dict) and a.get("qa_blocked")}
+
+    # the render pipeline
+    failed = sorted({v.get("day") for v in ledger.values() if v.get("status") == "failed" and v.get("day") and v.get("requeued")})
+    retrying = sorted({v.get("day") for v in ledger.values() if v.get("status") == "failed" and v.get("day") and not v.get("requeued")})
+    rendered_days = {v.get("episode") for v in ledger.values() if v.get("status") == "rendered" and v.get("role") == "episode" and v.get("episode")}   # the long clip, not a teaser
+    carded = {int(d) for d in approvals}
+    no_card = sorted(d for d in rendered_days if d not in carded and d > cursor and d not in gaps)
+    try:
+        # plan the night the way the night will: its scan puts a failed clip back first (watch.requeue_failed)
+        tonight = plan if plan is not None else watch.plan(requeued_copy(ledger), nightly_slots())[0]
+    except Exception as ex:                                  # a plan that cannot be read is said, never shown as empty
+        tonight = None; print("report: tonight's plan could not be read (%s)" % ex, file=sys.stderr)
+
+    recent = sorted((episode_row(k, e) for k, e in episodes.items() if out_at(e) and (today - london_day(out_at(e))).days < 14),
+                    key=lambda r: -r["day"])
+    incomplete = [{"day": r["day"], "missing": r["missing"], "pending": r["pending"]} for r in recent if r["missing"] or r["pending"]]
+
+    streak_today = watch.streak_day(today)
+    lp = sync_state.get("last_push") or {}
+    try: strava_at = dt.datetime.fromisoformat(lp["at"]).replace(tzinfo=LONDON).astimezone(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")   # the sync stamps London wall-clock time
+    except (KeyError, TypeError, ValueError): strava_at = ""
+    report = {
+        "asOf": now.strftime("%Y-%m-%dT%H:%M:%SZ"), "today": today.isoformat(), "mode": publish.mode(),
+        "streakDay": streak_today, "lastInOrder": cursor, "daysBehind": streak_today - cursor,
+        "history": history, "cleanDaysInRow": clean, "gapDaysPaused": watch.gaps_paused(),
+        "scheduled": scheduled[:40], "nextInOrder": next_up[:5], "waitingForKevin": waiting_cards, "qaBlocked": blocked,
+        "tonight": tonight, "failedRenders": failed, "retryTonight": retrying, "renderedNoCard": no_card, "incomplete": incomplete,
+        "strava": {"lastPush": strava_at, "day": sync_state.get("day"), "lastRunKm": (sync_state.get("last_activity") or {}).get("km"),
+                   "renamed": bool(lp.get("renamed"))},
+    }
+    report["headline"] = headline(report)
+    return report
+
+
+def requeued_copy(ledger):
+    import copy
+    led = copy.deepcopy(ledger); watch.requeue_failed(led)
+    return led
+
+
+def nightly_slots():
+    try: return int(open(os.path.expanduser("~/.config/od/content_engine_episodes_per_night")).read().strip())
+    except (OSError, ValueError): return 1
+
+
+def fmt_when(iso):
+    t = parse_utc(iso)
+    return t.astimezone(LONDON).strftime("%H:%M") if t else "?"
+
+
+def headline(r):
+    """One line for the 08:00 DM. It names yesterday even when nothing went out: absence is the news."""
+    y = r["history"][1] if len(r["history"]) > 1 else {"episodes": []}
+    if y["episodes"]:
+        out = "; ".join("Episode %d out, %d of 7 sections%s" % (e["day"], e["done"], (" (missing: " + ", ".join(e["missing"]) + ")") if e["missing"] else "")
+                        for e in y["episodes"])
+    else:
+        out = "NOTHING went out yesterday"
+    yt_today = [s for s in r["scheduled"] if s["channel"] == "YouTube full episode" and s["when"][:10] == r["today"]]
+    if yt_today: nxt = "Today: " + ", ".join("Episode %d on YouTube %s" % (s["day"], fmt_when(s["when"])) for s in yt_today)
+    elif r["nextInOrder"]: nxt = "Today: Episode %d goes out once the publisher picks it up" % r["nextInOrder"][0]
+    else: nxt = "Today: nothing approved to publish"
+    cards = len(r["waitingForKevin"])
+    ask = ("%d episode card%s wait%s for you" % (cards, "" if cards == 1 else "s", "s" if cards == 1 else "")) if cards else "No episode cards wait for you"
+    return "Content: %s. %s. %s." % (out, nxt, ask)
+
+
+def write(report, dry_run=False):
+    now = report["asOf"].replace("Z", ".000Z")
+    status = "Worked"
+    fields = {ES["key"]: KEY, ES["kind"]: "report", ES["label"]: "Content publishing", ES["status"]: status,
+              ES["detail"]: report["headline"][:900], ES["payload"]: json.dumps(report, separators=(",", ":")),
+              ES["lastRun"]: now, ES["lastWorked"]: now, ES["updated"]: now}
+    if dry_run: return fields
+    pat = open(os.path.expanduser("~/.config/od/airtable_pat")).read().strip()
+    def call(method, path, body=None):
+        req = urllib.request.Request("https://api.airtable.com/v0/%s/%s" % (BASE, path), method=method,
+                                     data=json.dumps(body).encode() if body is not None else None,
+                                     headers={"Authorization": "Bearer " + pat, "Content-Type": "application/json"})
+        with urllib.request.urlopen(req, timeout=60) as resp: return json.loads(resp.read().decode())
+    q = urllib.parse.urlencode({"returnFieldsByFieldId": "true", "filterByFormula": '{Key}="%s"' % KEY, "pageSize": "10"})
+    have = call("GET", TABLE + "?" + q).get("records", [])
+    if have: call("PATCH", TABLE, {"records": [{"id": have[0]["id"], "fields": fields}], "typecast": True})
+    else: call("POST", TABLE, {"records": [{"fields": fields}], "typecast": True})
+    return fields
+
+
+def selftest():
+    now = dt.datetime(2026, 9, 16, 7, 0, tzinfo=dt.timezone.utc)          # 08:00 London, Wednesday 16 Sep
+    yt = lambda link, at: {"platform": "youtube", "clip": "full", "status": "published", "link": link, "published_at": at, "scheduled": at}
+    pub = lambda plat, clip: {"platform": plat, "clip": clip, "status": "published"}
+    state = {"_cursor": 2057,
+             "2057": {"youtube_link": "https://youtu.be/a", "posts": {"youtube|full|y": yt("https://youtu.be/a", "2026-09-15T05:00:00Z"),
+                      "youtube|lfmd|y": pub("youtube", "lfmd"), "facebook|summary|f": pub("facebook", "summary"), "facebook|lfmd|f": pub("facebook", "lfmd")},
+                      "blog": {"url": "https://runpreneur.org.uk/blog/b/x"}, "podcast": {"status": "published"}, "facebook_share": {"status": "shared"}},
+             "2058": {"posts": {"youtube|full|y": {"platform": "youtube", "clip": "full", "status": "scheduled", "scheduled": "2026-09-16T05:00:00Z"}}}}
+    approvals = {"2057": {"verdict": "approved", "task": "t1"}, "2058": {"verdict": "approved", "task": "t2"}, "2059": {"task": "t3"}}
+    ledger = {"a": {"status": "rendered", "episode": 2059, "role": "teaser"}, "b": {"status": "failed", "day": 2060, "requeued": "x"},
+              "c": {"status": "failed", "day": 2061}, "d": {"status": "rendered", "episode": 2062, "role": "episode"}}
+    r = build(now, state, approvals, ledger, {"day": 2298, "last_push": {"at": "2026-09-15T19:15:00"}}, plan=[2060, 2061])
+    assert [h["date"] for h in r["history"]][:2] == ["2026-09-16", "2026-09-15"] and len(r["history"]) == 7, "seven days, empty ones included"
+    assert r["history"][1]["episodes"][0]["day"] == 2057 and r["history"][1]["episodes"][0]["done"] == 7
+    assert r["cleanDaysInRow"] == 1 and r["waitingForKevin"] == [2059] and r["failedRenders"] == [2060] and r["retryTonight"] == [2061]
+    assert r["renderedNoCard"] == [2062], "a rendered teaser alone is not an episode waiting for its card"
+    led = {"f": {"status": "failed", "day": 2057, "date": "2026-01-17", "episode": 2057, "size": 5, "error": "x"}}
+    assert requeued_copy(led)["f"]["status"] == "new" and led["f"]["status"] == "failed", "tonight's plan counts the retry without touching the real ledger"
+    assert r["headline"] == "Content: Episode 2057 out, 7 of 7 sections. Today: Episode 2058 on YouTube 06:00. 1 episode card waits for you.", r["headline"]
+    del state["2057"]
+    r2 = build(now, state, {}, {}, {}, plan=[])
+    assert r2["headline"].startswith("Content: NOTHING went out yesterday."), "absence is said, never left blank"
+    assert r2["cleanDaysInRow"] == 0 and all(not h["episodes"] for h in r2["history"])
+    f = write(r, dry_run=True)
+    assert f[ES["key"]] == KEY and f[ES["kind"]] == "report" and json.loads(f[ES["payload"]])["headline"] == r["headline"]
+    print(json.dumps({"checks": 12, "failed": []}))
+
+
+if __name__ == "__main__":
+    ap = argparse.ArgumentParser(); ap.add_argument("mode")
+    a = ap.parse_args()
+    if a.mode == "selftest": selftest()
+    elif a.mode == "build": print(json.dumps(build(), indent=1))
+    elif a.mode == "write":
+        rep = build(); write(rep); print("content report: " + rep["headline"])
+    else: raise SystemExit("usage: content_report.py build | write | selftest")

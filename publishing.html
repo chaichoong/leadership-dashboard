@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="en-GB">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Publishing | Operations Director</title>
+<link rel="stylesheet" href="css/tokens.css?v=1">
+<link rel="stylesheet" href="css/sync-bar.css?v=3">
+<style>
+    body { margin: 0; background: var(--bg-app); color: var(--text-primary); }
+    .wrap { max-width: 1100px; margin: 0 auto; padding: var(--space-6) var(--space-5) var(--space-10); }
+    h1 { font-size: var(--fs-2xl); font-weight: var(--fw-semibold); margin: 0 0 var(--space-1); }
+    .sub { color: var(--text-secondary); font-size: var(--fs-sm); margin-bottom: var(--space-5); }
+    .card { background: var(--bg-surface); border: 1px solid var(--border-default); border-radius: var(--radius-lg); padding: var(--space-5); margin-bottom: var(--space-4); box-shadow: var(--shadow-sm); }
+    .card h2 { font-size: var(--fs-md); font-weight: var(--fw-semibold); margin: 0 0 var(--space-3); display: flex; align-items: center; gap: var(--space-2); }
+    .headline { font-size: var(--fs-lg); line-height: 1.45; word-break: break-word; }
+    .bar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); margin-top: var(--space-3); font-size: var(--fs-sm); color: var(--text-secondary); }
+    button { font: inherit; font-size: var(--fs-sm); background: var(--accent); color: var(--bg-surface); border: 0; border-radius: var(--radius-md); padding: var(--space-2) var(--space-4); cursor: pointer; }
+    button:hover { background: var(--accent-hover); }
+    .stale { background: var(--warning-bg); color: var(--warning); border-radius: var(--radius-md); padding: var(--space-2) var(--space-3); }
+    .err { background: var(--danger-bg); color: var(--danger); border-radius: var(--radius-md); padding: var(--space-3); }
+    .muted { color: var(--text-muted); }
+    table { width: 100%; border-collapse: collapse; font-size: var(--fs-sm); }
+    th { text-align: left; background: var(--bg-subtle); color: var(--text-secondary); font-weight: var(--fw-medium); padding: var(--space-2) var(--space-3); white-space: nowrap; }
+    td { padding: var(--space-2) var(--space-3); border-top: 1px solid var(--border-subtle); vertical-align: top; }
+    tr.none td { background: var(--warning-bg); }
+    .scroll { overflow-x: auto; }
+    .chips { display: flex; flex-wrap: wrap; gap: 4px; }
+    .chip { font-size: var(--fs-xs); border-radius: var(--radius-full); padding: 2px 8px; white-space: nowrap; }
+    .done { background: var(--success-bg); color: var(--success); }
+    .pending { background: var(--info-bg); color: var(--info); }
+    .missing { background: var(--danger-bg); color: var(--danger); }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: var(--space-4); }
+    .stat { font-size: var(--fs-2xl); font-weight: var(--fw-semibold); }
+    .stat-row { display: flex; flex-wrap: wrap; gap: var(--space-6); }
+    .stat-row div span { display: block; color: var(--text-secondary); font-size: var(--fs-xs); }
+    ul.plain { list-style: none; margin: 0; padding: 0; }
+    ul.plain li { padding: var(--space-2) 0; border-top: 1px solid var(--border-subtle); font-size: var(--fs-sm); }
+    ul.plain li:first-child { border-top: 0; }
+    a { color: var(--accent); }
+    .auth { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; }
+    .auth input { font: inherit; padding: var(--space-2); border: 1px solid var(--border-default); border-radius: var(--radius-md); min-width: 0; flex: 1 1 220px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+    <h1>Publishing</h1>
+    <div class="sub">What the Content Engine published each day and what is booked next. Built from what the engine actually did, refreshed every hour from 07:15 to 20:15 and after the nightly render.</div>
+
+    <div id="auth" class="card" hidden>
+        <h2>Connect</h2>
+        <div class="auth"><input type="password" id="patInput" placeholder="Airtable key" onkeydown="if(event.key==='Enter')saveAuth()"><button onclick="saveAuth()">Connect</button></div>
+    </div>
+
+    <div id="main" hidden>
+        <div data-sync-bar="publishing"></div>
+        <div class="card">
+            <div id="headline" class="headline muted">Loading...</div>
+            <div class="bar"><span id="updated"></span></div>
+        </div>
+        <div id="error"></div>
+        <div id="body"></div>
+    </div>
+</div>
+
+<script src="js/sync-bar.js?v=6"></script>
+<script>
+const BASE_ID = 'appnqjDpqDniH3IRl';
+const ESTATE_TBL = 'tblZVrdzivyBueZVf';
+const REPORT_KEY = 'content-publishing';
+const STALE_MIN = 90;          // the hourly publisher writes it; 90 minutes without a write means it has stopped
+const QUEUE_URL = 'os/agents/index.html#tab=approvals';
+const SECTIONS = ['YouTube episode', 'YouTube Short', 'Teaser clips', 'Learnings clips', 'Blog', 'Podcast', 'Facebook share'];
+let PAT = '';
+let _report = null, _row = null, _readState = 'idle';   // idle | ready | 'error: <message>'
+
+function esc(s) { return s === null || s === undefined ? '' : String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
+function safeUrl(u) { return /^https:\/\//.test(String(u || '')) ? u : ''; }
+function link(u, label) { const s = safeUrl(u); return s ? `<a href="${esc(s)}" target="_blank" rel="noopener">${esc(label)}</a>` : ''; }
+function london(iso, opts) { const d = new Date(iso); return isNaN(d) ? '' : d.toLocaleString('en-GB', Object.assign({ timeZone: 'Europe/London' }, opts)); }
+function dayLabel(dateStr, today) {
+    if (dateStr === today) return 'Today';
+    const d = new Date(dateStr + 'T12:00:00Z'), t = new Date(today + 'T12:00:00Z');
+    if (Math.round((t - d) / 86400000) === 1) return 'Yesterday';
+    return d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC' });
+}
+function ago(iso) { const m = Math.round((Date.now() - new Date(iso).getTime()) / 60000); return m < 1 ? 'just now' : m < 60 ? `${m} min ago` : `${Math.floor(m / 60)} h ${m % 60} min ago`; }
+
+function saveAuth() {
+    const v = document.getElementById('patInput').value.trim();
+    if (!v) return;
+    try { localStorage.setItem('_dlr_pat', v); } catch (e) { console.warn('publishing: key not remembered in this browser', e); }
+    PAT = v; start();
+}
+
+async function readReport() {
+    const params = new URLSearchParams({ filterByFormula: `{Key}="${REPORT_KEY}"`, pageSize: '10' });
+    const res = await fetch(`https://api.airtable.com/v0/${BASE_ID}/${ESTATE_TBL}?${params}`, { headers: { Authorization: `Bearer ${PAT}` } });
+    if (res.status === 401 || res.status === 403) { const e = new Error('auth'); e.auth = true; throw e; }
+    if (!res.ok) throw new Error(`Airtable answered ${res.status}`);
+    const data = await res.json();
+    if (!Array.isArray(data.records)) throw new Error('Airtable gave no records list');
+    return data.records[0] || null;
+}
+
+function sectionChips(sections) {
+    return `<div class="chips">${SECTIONS.map(k => { const v = (sections || {})[k] || 'missing'; return `<span class="chip ${esc(v)}" title="${esc(k)}: ${esc(v)}">${esc(k)}</span>`; }).join('')}</div>`;
+}
+
+function render(rec) {
+    const f = rec.fields || {};
+    let r;
+    try { r = JSON.parse(f.Payload || ''); } catch (e) { throw new Error('the report row holds no readable report'); }
+    _report = r;
+    document.getElementById('headline').textContent = r.headline || '';
+    document.getElementById('headline').classList.remove('muted');
+    const updated = f.Updated || r.asOf;
+    const staleMin = updated ? Math.round((Date.now() - new Date(updated).getTime()) / 60000) : null;
+    document.getElementById('updated').innerHTML = staleMin !== null && staleMin > STALE_MIN
+        ? `<span class="stale">Last updated ${esc(ago(updated))}. The publisher has stopped writing this report, so everything below may be out of date.</span>`
+        : `Updated ${esc(ago(updated))}`;
+
+    const hist = (r.history || []).map(h => {
+        if (!h.episodes.length) return `<tr class="none"><td style="white-space:nowrap">${esc(dayLabel(h.date, r.today))}</td><td colspan="3"><strong>Nothing went out</strong></td></tr>`;
+        return h.episodes.map((e, i) => `<tr><td style="white-space:nowrap">${i ? '' : esc(dayLabel(h.date, r.today))}</td>
+            <td style="white-space:nowrap"><strong>Episode ${esc(e.day)}</strong><br><span class="muted">${esc(e.done)} of 7 sections</span></td>
+            <td>${sectionChips(e.sections)}</td>
+            <td style="white-space:nowrap">${[link(e.youtube, 'YouTube'), link(e.blog, 'Blog'), link(e.podcast, 'Spotify')].filter(Boolean).join(' · ') || '<span class="muted">no links</span>'}</td></tr>`).join('');
+    }).join('');
+
+    const sched = (r.scheduled || []).length
+        ? `<ul class="plain">${r.scheduled.map(s => `<li><strong>${esc(london(s.when, { weekday: 'short', hour: '2-digit', minute: '2-digit' }))}</strong> · Episode ${esc(s.day)} · ${esc(s.channel)}</li>`).join('')}</ul>`
+        : '<div class="muted">Nothing booked.</div>';
+    const nextUp = (r.nextInOrder || []).length ? `Approved and next in order: Episode ${r.nextInOrder.map(esc).join(', ')}.` : 'No approved episode is waiting to go out.';
+    const tonight = r.tonight === null || r.tonight === undefined ? '<span class="stale">Tonight\'s render plan could not be read.</span>'
+        : r.tonight.length ? `Tonight's render: Episode ${r.tonight.map(esc).join(' and ')}.` : 'Tonight\'s render: nothing waiting.';
+
+    const needs = [];
+    const cards = r.waitingForKevin || [];
+    needs.push(cards.length ? `<li><strong>${cards.length} episode card${cards.length === 1 ? '' : 's'}</strong> to approve (Episode ${cards.map(esc).join(', ')}). <a href="${QUEUE_URL}" target="_top">Open the queue</a></li>` : '<li>No episode cards wait for you.</li>');
+    Object.entries(r.qaBlocked || {}).forEach(([d, why]) => needs.push(`<li><span class="chip missing">Blocked</span> Episode ${esc(d)} failed its output check: ${esc(why)}</li>`));
+    (r.failedRenders || []).forEach(d => needs.push(`<li><span class="chip missing">Render failed twice</span> Episode ${esc(d)} needs a look.</li>`));
+    (r.retryTonight || []).forEach(d => needs.push(`<li><span class="chip pending">Render failed once</span> Episode ${esc(d)} gets one more try tonight. Nothing for you to do.</li>`));
+    (r.renderedNoCard || []).forEach(d => needs.push(`<li><span class="chip pending">No card yet</span> Episode ${esc(d)} is rendered and waits for its copy and card.</li>`));
+
+    const incomplete = (r.incomplete || []).length
+        ? `<ul class="plain">${r.incomplete.map(i => `<li><strong>Episode ${esc(i.day)}</strong>: ${i.missing.length ? `<span class="chip missing">missing</span> ${i.missing.map(esc).join(', ')}` : ''} ${i.pending.length ? `<span class="chip pending">not confirmed yet</span> ${i.pending.map(esc).join(', ')}` : ''}</li>`).join('')}</ul>`
+        : '<div class="muted">Every episode from the last fortnight has all seven sections.</div>';
+
+    const st = r.strava || {};
+    document.getElementById('body').innerHTML = `
+        <div class="card"><div class="stat-row">
+            <div><div class="stat">${esc(r.cleanDaysInRow)}</div><span>days in a row with an episode out</span></div>
+            <div><div class="stat">${esc(r.lastInOrder)}</div><span>last episode out in order</span></div>
+            <div><div class="stat">${esc(r.daysBehind)}</div><span>days behind today's run (day ${esc(r.streakDay)})</span></div>
+        </div>${r.gapDaysPaused ? '<div class="bar">Missing older days (the gap list) are paused until seven days in a row go out.</div>' : ''}${r.mode !== 'live' ? `<div class="bar"><span class="stale">Mode: ${esc(r.mode)}. Nothing reaches the public.</span></div>` : ''}</div>
+        <div class="card"><h2>Last 7 days</h2><div class="scroll"><table><thead><tr><th>Day</th><th>Episode</th><th>Sections</th><th>Links</th></tr></thead><tbody>${hist}</tbody></table></div></div>
+        <div class="grid">
+            <div class="card"><h2>Coming up</h2>${sched}<div class="bar">${nextUp}</div><div class="bar">${tonight}</div></div>
+            <div class="card"><h2>Needs you</h2><ul class="plain">${needs.join('')}</ul></div>
+        </div>
+        <div class="card"><h2>Sections still missing</h2>${incomplete}</div>
+        <div class="card"><h2>Strava and the website numbers</h2><div style="font-size:var(--fs-sm)">${st.lastPush ? `Last update ${esc(london(st.lastPush, { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }))}, run day ${esc(st.day)}: ${st.lastRunKm ? esc(st.lastRunKm) + ' km, ' : ''}${st.renamed ? 'renamed on Strava' : '<span class="stale">not renamed</span>'}` : '<span class="stale">No Strava update recorded.</span>'}</div></div>`;
+}
+
+async function load() {
+    document.getElementById('error').innerHTML = '';
+    if (typeof markTabRefreshing === 'function') markTabRefreshing('publishing');
+    try {
+        const rec = await readReport();
+        _row = rec; _readState = 'ready';
+        if (typeof markTabSynced === 'function') markTabSynced('publishing');
+        if (!rec) {
+            document.getElementById('headline').textContent = 'No report yet. The hourly publisher writes it on its next run.';
+            document.getElementById('body').innerHTML = '';
+            return;
+        }
+        render(rec);
+    } catch (e) {
+        if (e.auth) { try { localStorage.removeItem('_dlr_pat'); } catch (x) { console.warn('publishing: could not clear the key', x); } showAuth(); return; }
+        _readState = 'error: ' + (e.message || e);
+        if (typeof markTabSynced === 'function') markTabSynced('publishing');
+        console.error('publishing: report read failed', e);
+        document.getElementById('error').innerHTML = `<div class="card err">Could not read the publishing report (${esc(e.message || e)}). This page is NOT empty, it could not be read. Press Refresh in the bar above to try again.</div>`;
+    }
+}
+
+function registerChecks() {
+    if (typeof registerSyncBar !== 'function') return;
+    registerSyncBar('publishing', {
+        refreshFn: () => load(),
+        checks: [
+            { name: 'Report row read', kind: 'sync', run: () => String(_readState).indexOf('error') === 0 ? { status: 'fail', detail: String(_readState).slice(7) }
+                : _readState !== 'ready' ? { status: 'warn', detail: 'Not loaded yet' } : _row ? { status: 'pass', detail: 'The content-publishing row is in the Estate Status table' } : { status: 'fail', detail: 'No content-publishing row: the publisher has never written the report' } },
+            { name: 'Report fresh', kind: 'automation', run: () => { const u = _row && (_row.fields || {}).Updated; if (!u) return { status: 'warn', detail: 'No update time on the row' };
+                const m = Math.round((Date.now() - new Date(u).getTime()) / 60000); return m > STALE_MIN ? { status: 'fail', detail: `Last written ${ago(u)}; the hourly publisher writes it` } : { status: 'pass', detail: `Written ${ago(u)}` }; } },
+            { name: 'Something went out yesterday', kind: 'automation', run: () => { const h = (_report && _report.history) || []; if (h.length < 2) return { status: 'warn', detail: 'No history in the report' };
+                return h[1].episodes.length ? { status: 'pass', detail: h[1].episodes.map(e => `Episode ${e.day}`).join(', ') } : { status: 'fail', detail: 'Nothing was published yesterday' }; } },
+        ],
+    });
+}
+
+function showAuth() { document.getElementById('auth').hidden = false; document.getElementById('main').hidden = true; }
+function start() { document.getElementById('auth').hidden = true; document.getElementById('main').hidden = false; load(); }
+
+(function init() {
+    try { PAT = localStorage.getItem('_dlr_pat') || ''; } catch (e) { console.warn('publishing: storage unavailable', e); }
+    registerChecks();
+    if (PAT) start(); else showAuth();
+})();
+</script>
+</body>
+</html>

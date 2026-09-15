@@ -114,7 +114,7 @@
                 </div>
             </div>
 
-            <div class="sidebar-section" data-section="marketing" data-tabs="content-machine,prospecting">
+            <div class="sidebar-section" data-section="marketing" data-tabs="content-machine,publishing,prospecting">
                 <div class="sidebar-section-header" role="button" tabindex="0" aria-expanded="true" onclick="toggleSidebarSection('marketing')" onkeydown="if(event.key==='Enter'||event.key===' ')toggleSidebarSection('marketing')">
                     <span class="sidebar-section-chevron">&#x25BE;</span>
                     <span class="sidebar-section-name">Marketing</span>
@@ -122,6 +122,8 @@
                 </div>
                 <div class="sidebar-section-body">
                     <div class="sidebar-item" role="menuitem" tabindex="0" onclick="switchTab('content-machine')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();switchTab('content-machine')}"><span class="sidebar-icon">&#x1F3AC;</span><span class="sidebar-label">Content Machine</span><span class="sidebar-health-dot unknown" data-sidebar-health="content-machine" title="No checks run yet"></span></div>
+                    <!-- Publishing (Marketing, 15 Sep 2026): what the Content Engine published each day and what is booked next. Standalone at publishing.html, fed by scripts/content-engine/content_report.py. -->
+                    <div class="sidebar-item" role="menuitem" tabindex="0" onclick="switchTab('publishing')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();switchTab('publishing')}"><span class="sidebar-icon">&#x1F4C5;</span><span class="sidebar-label">Publishing</span><span class="sidebar-health-dot unknown" data-sidebar-health="publishing" title="No checks run yet"></span></div>
                     <div class="sidebar-item" role="menuitem" tabindex="0" onclick="switchTab('prospecting')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();switchTab('prospecting')}"><span class="sidebar-icon">&#x1F9F2;</span><span class="sidebar-label">Prospecting</span><span class="sidebar-health-dot unknown" data-sidebar-health="prospecting" title="No checks run yet"></span><span id="prospectingBadge" style="display:none;margin-left:6px;min-width:20px;height:20px;border-radius:10px;font-size:11px;font-weight:700;color:var(--accent-on);text-align:center;line-height:20px;padding:0 6px"></span></div>
                 </div>
             </div>
@@ -716,6 +718,10 @@
         </div>
 
         <!-- Marketing: Content Machine (standalone app at chaichoong.github.io/content-machine). Since the dashboard moved to app.operationsdirector.co.uk (8 Sep 2026) the two are DIFFERENT origins, so the Content Machine keeps its own localStorage: its keys are entered inside that iframe, not inherited from the shell. -->
+        <!-- Tab: Publishing (Marketing; standalone at publishing.html, same PAT as the shell) -->
+        <div class="tab-panel" id="tab-publishing">
+            <iframe class="tab-panel-iframe" id="publishingFrame" src="" data-src="publishing.html" loading="lazy" title="Publishing" style="border:none"></iframe>
+        </div>
         <div class="tab-panel" id="tab-content-machine">
             <iframe class="tab-panel-iframe" id="contentMachineFrame" src="" data-src="https://chaichoong.github.io/content-machine/" loading="lazy" allowfullscreen style="border:none"></iframe>
         </div>

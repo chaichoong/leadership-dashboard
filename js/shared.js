@@ -36,7 +36,7 @@
         // Launch Plan, etc.) — a dashboard reload blows through the loading
         // overlay and drops any in-flight wizard/form state.
         const activeTab = (window.location.hash || '#overview').slice(1);
-        const iframeTabs = ['os-strategy', 'tasks', 'comms', 'operations', 'systemisation', 'agents', 'os-team', 'ai-brain', 'growth-plan'];
+        const iframeTabs = ['os-strategy', 'tasks', 'comms', 'operations', 'systemisation', 'agents', 'os-team', 'ai-brain', 'growth-plan', 'publishing'];
         if (iframeTabs.includes(activeTab)) {
             refreshPending = true;
             scheduleIdleRefresh();
@@ -851,6 +851,8 @@ if (tabId === 'comms') lazyLoadFrame('commsFrame', 'follow-up');
         // Content Machine (Marketing) lazy-load — standalone app loaded via iframe,
         // cache-busted so its Pages deploys are picked up without a hard refresh.
         if (tabId === 'content-machine') lazyLoadFrame('contentMachineFrame', 'content');
+        // Publishing (Marketing) — the Content Engine's daily publishing report, same PAT as the shell.
+        if (tabId === 'publishing') lazyLoadFrame('publishingFrame', 'publishing');
         // AI Brain (Operations) lazy-load — standalone module page via iframe,
         // cache-busted so Pages deploys are picked up without a hard refresh.
         if (tabId === 'ai-brain') lazyLoadFrame('aiBrainFrame', 'ai-brain');
