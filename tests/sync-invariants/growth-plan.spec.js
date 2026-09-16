@@ -597,6 +597,36 @@ test.describe('Growth Plan page', () => {
     expect(writes.filter(x => x.tableId === TBL.properties)).toHaveLength(0);
   });
 
+  test('how a one-unit property is let today is set on the page and saved to its rental unit', async ({ page }) => {
+    const writes = await openPage(page, fixtures());
+    const open = await openSelf(page, '13 Far Street');
+    await expect(open.locator('.pill', { hasText: 'Now:' })).toHaveText('Now: Single let');
+    await open.locator('select[data-prop-field="lettingStrategy"]').selectOption('Serviced accommodation');
+    await expect(page.locator('#toast')).toContainText('Let today as Serviced accommodation');
+    const w = writes.filter(x => x.tableId === TBL.units).pop();
+    expect(w.records[0].id).toBe('recU4');
+    expect(w.records[0].fields[UX.lettingStrategy]).toBe('Serviced accommodation');
+    await expect(page.locator('#selfList .pack.open .pill', { hasText: 'Now:' })).toHaveText('Now: Serviced accommodation');
+    // 18 Test Park has three units, so how it is let is worked out, not typed
+    await openSelf(page, '18 Test Park');
+    await expect(page.locator('#selfList .pack.open select[data-prop-field="lettingStrategy"]')).toHaveCount(0);
+  });
+
+  test('a move on an apartment links to its block property and to the flat', async ({ page }) => {
+    const fx = withBlock(fixtures(), 'Property Portfolio');
+    const apt2 = fx[TBL.units].find(r => r.id === 'recApt2');
+    apt2.fields[U.status] = 'Void'; apt2.fields[U.tenants] = [];
+    fx[TBL.tenancies] = fx[TBL.tenancies].filter(r => r.id !== 'recC6');
+    const writes = await openPage(page, fx);
+    const open = await openSelf(page, 'Duckworth Building, Apartment 2');
+    await open.locator('button[data-act="adopt"]').first().click();
+    await expect(page.locator('#toast')).toContainText('Adopted: Duckworth Building, Apartment 2');
+    const w = writes.filter(x => x.tableId === TBL.plan).pop();
+    expect(w.records[0].fields[PLAN.key]).toBe('void:recApt2');
+    expect(w.records[0].fields['fldYjvuoYHNlumtHd']).toEqual(['recBlock']);   // Growth Plan → Property
+    expect(w.records[0].fields['flddfpEZqcrxBIlf2']).toEqual(['recApt2']);    // Growth Plan → Rental Unit
+  });
+
   test('Freeze saves an apartment\'s starting figures on its rental unit', async ({ page }) => {
     const writes = await openPage(page, withBlock(fixtures(), 'Intus Lettings'));
     await page.locator('button[data-act="freeze-started"]').click();

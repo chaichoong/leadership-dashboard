@@ -392,7 +392,7 @@
             return { rooms, source: `${rooms} rooms already let here (a flat-let counts as two)`, confirmed: false };
         }
         const beds = Math.max(1, num(prop.beds));
-        return { rooms: beds, source: `${beds} bedrooms on the property record`, confirmed: false };
+        return { rooms: beds, source: `${beds} bedrooms on ${prop.unitRecord ? "this apartment's rental unit" : 'the property record'}`, confirmed: false };
     }
 
     function marketRentFor(prop, rates, settings) {
@@ -1017,6 +1017,9 @@
                 selfManaged, movingToSelfManage: !!prop.movingToSelfManage,
                 // An apartment shown on its own row: its plan and frozen start save to its Rental Units record.
                 unitRecord: !!prop.unitRecord, parentId: prop.parentId || null, parentName: prop.parentName || '',
+                // One rental unit (a whole-house let, or an apartment): how it is let today can be set on the page.
+                soleUnitId: pUnits.length === 1 ? pUnits[0].id : null,
+                lettingStated: pUnits.length === 1 ? normaliseStrategy(pUnits[0].lettingStrategy) : '',
                 baselineRent: prop.baselineRent == null ? null : num(prop.baselineRent),
                 baselineCt: prop.baselineCt == null ? null : num(prop.baselineCt),
                 baselineDate: prop.baselineDate || '',
@@ -1091,13 +1094,16 @@
         const liveKeys = new Set(levers.map(l => l.key));
         const tenantProp = {}, unitProp = {};
         units.forEach(u => { unitProp[u.id] = u.propertyId; (u.tenantIds || []).forEach(id => { tenantProp[id] = u.propertyId; }); });
+        // A row keyed to a block that is now split sits on its lowest-numbered apartment, so it can still be dropped.
+        const blockProp = {};
+        units.filter(u => u.blockId).sort((a, b) => num(a.number) - num(b.number)).forEach(u => { if (!blockProp[u.blockId]) blockProp[u.blockId] = u.propertyId; });
         const propIds = new Set(properties.map(v => v.id));
         const stranded = (data.planRows || [])
             .filter(r => r.key && !liveKeys.has(r.key) && (r.status === 'Adopted' || r.status === 'In progress'))
             .map(r => {
                 const ref = String(r.key).split(':').slice(1).join(':');
                 return { id: r.id, key: r.key, status: r.status, title: r.title || r.key, taskIds: r.taskIds || [],
-                    propertyId: propIds.has(ref) ? ref : (tenantProp[ref] || unitProp[ref] || null) };
+                    propertyId: propIds.has(ref) ? ref : (tenantProp[ref] || unitProp[ref] || blockProp[ref] || null) };
             });
         properties.forEach(v => { v.strandedRows = stranded.filter(r => r.propertyId === v.id); });
         totals.strandedRows = stranded;

@@ -670,6 +670,17 @@ describe('Duckworth Building: one row per apartment (16 Sep 2026)', () => {
         expect(miss.unitRecord).toBe(true);
         expect(miss.rent).toBe(687);
     });
+    it('an open move keyed to the block before the split sits on the first apartment, so it can be dropped', () => {
+        const f = duckworth(); f.planRows = [{ id: 'r1', key: 'rooms:blk', status: 'Adopted', title: 'Old block move', taskIds: [] }];
+        const p = M.buildPlan(f, S, TODAY);
+        expect(p.properties.find(v => v.id === 'apt1').strandedRows.map(r => r.id)).toEqual(['r1']);
+    });
+    it('an apartment names its own rental unit as where its rooms and letting come from', () => {
+        const v = M.buildPlan(duckworth(), S, TODAY).properties[2];
+        expect(v.roomInfo.source).toBe("2 bedrooms on this apartment's rental unit");
+        expect(v.soleUnitId).toBe('apt3');
+        expect(v.lettingStated).toBe('Single let');
+    });
     it('a block that also holds a unit that is not a flat keeps a row for that unit', () => {
         const f = duckworth();
         f.units.push({ id: 'shop', propertyId: 'blk', number: 10, type: 'Whole Property', status: 'Occupied', tenantIds: [] });

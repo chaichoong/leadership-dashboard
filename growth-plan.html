@@ -1001,6 +1001,7 @@ BEFORE THE FIRST ONE IS SIGNED (all in writing)
     // An apartment carries only its own band here; the rest is set once on the block.
     const apt = v.unitRecord;
     return `<div class="pack-block"><h4>How this ${apt ? 'apartment' : 'property'} is set up</h4><div class="prop-fields">
+      ${v.soleUnitId ? `<label>Let today as<select class="sm" data-prop-field="lettingStrategy" data-prop="${esc(v.id)}">${[''].concat(M.STRATEGY_LIST).map(o => `<option value="${esc(o)}" ${o === v.lettingStated ? 'selected' : ''}>${esc(o || 'Worked out from the unit')}</option>`).join('')}</select></label>` : ''}
       ${apt ? '' : `<label>Lettable rooms<input class="sm" type="number" min="1" max="12" data-prop-field="lettableRooms" data-prop="${esc(v.id)}" value="${v.lettable == null ? '' : esc(v.lettable)}" placeholder="${esc(v.roomInfo.rooms)}"></label>
       <div class="calcfield"><span>Extra tenants (UC HMO)</span><b data-extra-tenants="${esc(v.id)}">${v.extraTenantsApplies ? v.extraTenants : '—'}</b><span class="small muted">${v.extraTenantsApplies ? `${esc(v.roomInfo.rooms)} lettable room${v.roomInfo.rooms === 1 ? '' : 's'} − ${v.tenantCount} tenant${v.tenantCount === 1 ? '' : 's'}` : esc(v.extraTenantsWhy)}</span></div>`}
       ${f('Council tax band', 'ctBand', ['', 'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'], v.ctBand)}
@@ -1112,9 +1113,14 @@ BEFORE THE FIRST ONE IS SIGNED (all in writing)
   function leverByKey(key) { return state.plan.levers.find(l => l.key === key); }
   function planRowFields(l, status) {
     const f = { [GP.plan.title]: l.title, [GP.plan.key]: l.key, [GP.plan.lever]: l.lever, [GP.plan.monthly]: Number(l.monthly), [GP.plan.oneOff]: Number(l.oneOff || 0), [GP.plan.effort]: l.effort, [GP.plan.status]: status, [GP.plan.evidence]: l.evidence.join('\n'), [GP.plan.notes]: (l.needs || []).join('\n') };
-    if (l.propertyId) f[GP.plan.property] = [l.propertyId];
+    // An apartment's move links to its block (the Property link points at Properties) and to the flat itself.
+    const row = l.propertyId ? (state.plan.properties || []).find(x => x.id === l.propertyId) : null;
+    const apt = row && row.unitRecord;
+    const propertyId = apt ? row.parentId : l.propertyId;
+    const unitId = l.unitId || (apt ? row.id : null);
+    if (propertyId) f[GP.plan.property] = [propertyId];
     if (l.tenantId) f[GP.plan.tenant] = [l.tenantId];
-    if (l.unitId) f[GP.plan.unit] = [l.unitId];
+    if (unitId) f[GP.plan.unit] = [unitId];
     return f;
   }
   async function upsertPlanRow(l, status, extra = {}) {
@@ -1246,6 +1252,8 @@ BEFORE THE FIRST ONE IS SIGNED (all in writing)
     // An apartment shown on its own row (Duckworth Building, 16 Sep 2026) keeps its plan and
     // council tax band on its Rental Units record. The self-manage tick belongs to the block.
     const row = (state.plan.properties || []).find(x => x.id === propId);
+    // How it is let today belongs to the one rental unit behind the row.
+    if (field === 'lettingStrategy') return row && row.soleUnitId ? saveUnitField(row.soleUnitId, field, value) : undefined;
     if (row && row.unitRecord) {
       if (field === 'movingToSelfManage') propId = row.parentId;
       else return saveUnitField(propId, field, value);
@@ -1262,13 +1270,13 @@ BEFORE THE FIRST ONE IS SIGNED (all in writing)
     });
   }
   async function saveUnitField(unitId, field, value) {
-    const map = { strategy: [GP.unit.strategy, 'growthStrategy'], ctBand: [GP.unit.ctBand, 'ctBand'] }[field];
+    const map = { strategy: [GP.unit.strategy, 'growthStrategy'], ctBand: [GP.unit.ctBand, 'ctBand'], lettingStrategy: [GP.unit.lettingStrategy, 'lettingStrategy'] }[field];
     if (!map) return;
     await withBusy('unit:' + unitId + field, async () => {
       const v = value || null;
       await airtableWrite('PATCH', TABLES.rentalUnits, { records: [{ id: unitId, fields: { [map[0]]: v } }], typecast: true });
       const u = state.data.units.find(x => x.id === unitId); if (u) u[map[1]] = v || '';
-      toast('Saved to the apartment');
+      toast(field === 'lettingStrategy' ? (v ? `Let today as ${v}` : 'Let today as: worked out from the unit type') : 'Saved to the apartment');
     });
   }
   async function saveSetting(key, value) {
