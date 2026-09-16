@@ -153,14 +153,17 @@ describe('buildPlan levers', () => {
         const p = M.buildPlan(f, S, TODAY);
         expect(p.levers.find(x => x.lever === 'CRF top-up')).toBeUndefined();
     });
-    it('a block is priced flat by flat: two over-35s in a 2-bed, one in a 1-bed', () => {
+    it('a block\'s potential is priced apartment by apartment: two over-35s in a 2-bed, one in a 1-bed', () => {
         const f = fixture();
         f.properties.push({ id: 'p5', name: 'Duckworth Building', type: 'Block', agent: 'Intus Lettings', postcode: 'FY8 1SQ' });
-        f.units.push({ id: 'f1', propertyId: 'p5', number: 1, type: 'Flat', status: 'Occupied', rent: 500, beds: 2, tenantIds: [] });
-        f.units.push({ id: 'f2', propertyId: 'p5', number: 2, type: 'Flat', status: 'Occupied', rent: 600, beds: 1, tenantIds: [] });
-        const l = M.buildPlan(f, S, TODAY).levers.find(x => x.key === 'agent:p5');
-        expect(l.monthly).toBe(Math.round((2 * 398.88 + 398.88 - 1100) * 100) / 100); // 96.64
-        expect(l.evidence[1]).toMatch(/1 two-bed flats × 2 × £398.88 \+ 1 one-bed flats × £398.88/);
+        f.units.push({ id: 'f1', propertyId: 'p5', number: 1, type: 'Flat', status: 'Occupied', beds: 2, tenantIds: [] });
+        f.units.push({ id: 'f2', propertyId: 'p5', number: 2, type: 'Flat', status: 'Occupied', beds: 1, tenantIds: [] });
+        f.tenancies.push({ id: 'cf1', tenantIds: [], unitId: 'f1', rent: 500 }, { id: 'cf2', tenantIds: [], unitId: 'f2', rent: 600 });
+        const p = M.buildPlan(f, S, TODAY);
+        expect(p.levers.find(x => x.key === 'agent:p5')).toBeUndefined();   // the block is no longer one row
+        expect(p.levers.find(x => x.key === 'agent:f1').monthly).toBe(Math.round((2 * 398.88 - 500) * 100) / 100); // 297.76
+        expect(p.levers.find(x => x.key === 'agent:f1').evidence[1]).toMatch(/joint tenancy of two × £398.88/);
+        expect(p.levers.find(x => x.key === 'agent:f2').monthly).toBe(Math.round((398.88 - 600) * 100) / 100);     // no gain on a 1-bed at £600
     });
     // Renamed 16 Sep 2026: plain "HMO" now means the professional houses Roc Immo runs.
     it('every older stored strategy name reads as the new UC name', () => {
@@ -198,6 +201,7 @@ describe('buildPlan levers', () => {
         f.units.push({ id: 'u10', propertyId: 'p4', number: 1, type: 'Whole Property', status: 'Occupied', rent: 1800, tenantIds: [] });
         f.properties.push({ id: 'p6', name: '30 Burnbank Gardens', agent: 'Mears', postcode: 'ML3 9HD', beds: 1 });
         f.units.push({ id: 'u11', propertyId: 'p6', number: 1, type: 'Whole Property', status: 'Occupied', rent: 540, tenantIds: [] });
+        f.tenancies.push({ id: 'c9', tenantIds: [], unitId: 'u9', rent: 1750 }, { id: 'c10', tenantIds: [], unitId: 'u10', rent: 1800 }, { id: 'c11', tenantIds: [], unitId: 'u11', rent: 540 });
         const p = M.buildPlan(f, S, TODAY);
         expect(p.levers.find(x => x.key === 'agent:p3').monthly).toBe(2737.6);   // 5 × 897.52 − 1750
         expect(p.levers.find(x => x.key === 'agent:p4').monthly).toBe(-1002.24); // 2 × 398.88 − 1800
@@ -595,19 +599,124 @@ describe('self-managed versus agent-run', () => {
 });
 
 describe('a block of flats', () => {
-    it('is priced flat by flat, and the room strategies are marked as not applying', () => {
+    it('a block with no flat units recorded is still priced as one block', () => {
         const f = fixture();
-        f.properties = [{ id: 'b1', name: 'Duckworth Building', type: 'Block', beds: 9, agent: 'Intus Lettings', postcode: 'FY8 1SQ' }];
-        f.units = [1, 2, 3].map(n => ({ id: 'bu' + n, propertyId: 'b1', number: n, type: 'Flat', status: 'Occupied', rent: 500, tenantIds: [] }));
-        f.tenants = []; f.tenancies = []; f.costs = [];
+        f.properties = [{ id: 'b1', name: 'Duckworth Building', type: 'Block', beds: 3, agent: 'Intus Lettings', postcode: 'FY8 1SQ' }];
+        f.units = []; f.tenants = []; f.tenancies = []; f.costs = [];
         const v = M.buildPlan(f, S, TODAY).properties[0];
         expect(v.current).toBe('Block of flats');
-        expect(v.strategyBy['Single let'].units).toBe(3);
-        expect(v.strategyBy['Single let'].gross).toBe(646 * 3); // the researched FY8 flat rent
-        ['UC joint tenancy', 'UC HMO', 'Serviced accommodation'].forEach(k => {
-            expect(v.strategyBy[k].na).toBe(true);
-            expect(v.strategyBy[k].net).toBe(0);
-        });
+        expect(v.strategyBy['Single let'].gross).toBe(646 * 3); // the researched FY8 flat rent, per flat
+        ['UC joint tenancy', 'UC HMO', 'Serviced accommodation'].forEach(k => expect(v.strategyBy[k].na).toBe(true));
+    });
+});
+
+// Kevin, 16 Sep 2026: "Duckworth Building is 9 separate apartments ... Apartments 1 and 2 are
+// service accommodation, and apartments 3 to 9 are all single lets." Split in the growth plan only.
+function duckworth() {
+    const flats = [[1, 2, 500, 'Serviced accommodation'], [2, 2, 500, 'Serviced accommodation'], [3, 2, 651, 'Single let'], [5, 1, 687, 'Single let']];
+    return {
+        properties: [{ id: 'blk', name: 'Duckworth Building', type: 'Block', beds: 9, agent: 'Intus Lettings', postcode: 'FY8 1SQ', ctPayer: 'Unknown', baselineRent: 2338, baselineCt: 0 }],
+        units: flats.map(([n, beds, , how]) => ({ id: 'apt' + n, propertyId: 'blk', number: n, type: 'Flat', status: 'Occupied', beds, rent: 9999, tenantIds: ['ta' + n],
+            lettingStrategy: how, ctBand: n === 5 ? '' : 'A', baselineRent: n === 5 ? null : 1, baselineCt: n === 5 ? null : 2, baselineDate: n === 5 ? '' : '2026-09-16' })),
+        tenants: flats.map(([n]) => ({ id: 'ta' + n, name: n <= 2 ? 'Staycay Management' : 'Tenant ' + n, status: 'Active', payType: 'Working' })),
+        tenancies: flats.map(([n, , rent]) => ({ id: 'tc' + n, tenantIds: ['ta' + n], unitId: 'apt' + n, rent })),
+        costs: [], planRows: [],
+    };
+}
+describe('Duckworth Building: one row per apartment (16 Sep 2026)', () => {
+    it('the block becomes one row per flat, named by apartment, with its own rent', () => {
+        const p = M.buildPlan(duckworth(), S, TODAY);
+        expect(p.properties.map(v => v.name)).toEqual(['Duckworth Building, Apartment 1', 'Duckworth Building, Apartment 2', 'Duckworth Building, Apartment 3', 'Duckworth Building, Apartment 5']);
+        expect(p.properties.find(v => v.id === 'blk')).toBeUndefined();
+        expect(p.properties.map(v => v.rentNow)).toEqual([500, 500, 651, 687]);
+        expect(p.totals.grid.now.rent).toBe(2338);
+        const a1 = p.properties[0];
+        expect(a1.unitRecord).toBe(true);
+        expect(a1.parentId).toBe('blk');
+        expect(a1.selfManaged).toBe(false);   // Intus runs the block, so every flat is agent-run
+    });
+    it('apartments 1 and 2 read serviced accommodation, 3 onwards single let', () => {
+        const p = M.buildPlan(duckworth(), S, TODAY);
+        expect(p.properties.map(v => v.current)).toEqual(['Serviced accommodation', 'Serviced accommodation', 'Single let', 'Single let']);
+    });
+    it('serviced accommodation council tax is ours even though an agent runs it; a single let is not', () => {
+        const p = M.buildPlan(duckworth(), S, TODAY);
+        const bandA = Math.round(2509.35 * 6 / 9 / 12 * 100) / 100;   // St Annes band A £1,672.90 a year
+        expect(bandA).toBe(139.41);
+        expect(p.properties[0].ctNow).toBe(139.41);
+        expect(p.properties[0].ctNowWhy).toMatch(/Serviced accommodation/);
+        expect(p.properties[2].ctNow).toBe(0);
+        expect(p.totals.grid.now.ct).toBe(278.82);
+    });
+    it('each flat is priced by its bedrooms: a 2-bed single let at £750, a 1-bed at £646, no room lets', () => {
+        const p = M.buildPlan(duckworth(), S, TODAY);
+        const a3 = p.properties[2], a5 = p.properties[3];
+        expect(a3.strategyBy['Single let'].gross).toBe(750);
+        expect(a5.strategyBy['Single let'].gross).toBe(646);
+        expect(a3.strategyBy['UC HMO'].na).toBe(true);
+        expect(a3.strategyBy['UC joint tenancy'].na).toBeFalsy();   // a 2-bed flat takes two tenants
+        expect(a5.strategyBy['UC joint tenancy'].na).toBe(true);    // a 1-bed flat does not
+        expect(a5.bestRent).toBe(687);                              // already above the 1-bed market rent
+    });
+    it('each flat keeps its own frozen start and band, read from its rental unit', () => {
+        const p = M.buildPlan(duckworth(), S, TODAY);
+        expect(p.properties[0].baselineRent).toBe(1);
+        expect(p.properties[0].baselineCt).toBe(2);
+        expect(p.properties[3].baselineRent).toBeNull();
+        // A flat with no band borrows the band the other flats in the council carry, and says so.
+        expect(p.properties[3].ct.borrowed).toBe(true);
+        expect(p.properties[3].ct.band).toBe('A');
+        const miss = p.totals.toFreeze.find(x => x.id === 'apt5');
+        expect(miss.unitRecord).toBe(true);
+        expect(miss.rent).toBe(687);
+    });
+    it('a block that also holds a unit that is not a flat keeps a row for that unit', () => {
+        const f = duckworth();
+        f.units.push({ id: 'shop', propertyId: 'blk', number: 10, type: 'Whole Property', status: 'Occupied', tenantIds: [] });
+        f.tenancies.push({ id: 'tcs', tenantIds: [], unitId: 'shop', rent: 300 });
+        const p = M.buildPlan(f, S, TODAY);
+        expect(p.properties.find(v => v.id === 'blk').rentNow).toBe(300);
+        expect(p.totals.grid.now.rent).toBe(2638);
+    });
+});
+
+describe('rent now reads live tenancies, never the unit rollup (16 Sep 2026)', () => {
+    // 22 Newton Street: the unit's Expected Rent said £1,800, the live Staycay tenancy £500 and
+    // a tenancy that had ended £1,300. Only the live one is rent coming in.
+    const newton = () => ({
+        properties: [{ id: 'nw', name: '22 Newton Street', type: 'Single Let', beds: 3, agent: 'Property Portfolio', postcode: 'BB12 0LG', ctBand: 'B', ctPayer: 'Unknown', strategy: 'Serviced accommodation' }],
+        units: [{ id: 'nu', propertyId: 'nw', number: 1, type: 'Whole Property', status: 'Occupied', rent: 1800, tenantIds: ['sc'], lettingStrategy: 'Serviced accommodation' }],
+        tenants: [{ id: 'sc', name: 'Staycay Management', status: 'Active', payType: 'Working' }],
+        tenancies: [{ id: 'live', tenantIds: ['sc'], unitId: 'nu', rent: 500, status: 'Live' }, { id: 'old', tenantIds: ['sc'], unitId: 'nu', rent: 1300, status: 'Ended' }],
+        costs: [], planRows: [],
+    });
+    it('22 Newton Street reads £500 rent now, not the £1,800 rollup', () => {
+        const v = M.buildPlan(newton(), S, TODAY).properties[0];
+        expect(v.rentNow).toBe(500);
+        expect(v.recordRent).toBe(500);
+    });
+    it('a unit with no live tenancy brings in nothing, whatever its rollup says', () => {
+        const f = newton(); f.tenancies = [];
+        expect(M.buildPlan(f, S, TODAY).properties[0].rentNow).toBe(0);
+    });
+    it('reads as serviced accommodation, with the Burnley band B council tax ours', () => {
+        const v = M.buildPlan(newton(), S, TODAY).properties[0];
+        expect(v.current).toBe('Serviced accommodation');
+        expect(v.ctNow).toBe(165.24);   // 2,549.42 × 7/9 ÷ 12
+        expect(v.planRent).toBe(500);
+        expect(v.planCt).toBe(165.24);
+        expect(v.planWhy).toMatch(/Stays serviced accommodation/);
+        expect(v.progress).toBe('No change needed');
+    });
+    it('without a letting strategy recorded it would still read as a single let', () => {
+        const f = newton(); delete f.units[0].lettingStrategy;
+        const v = M.buildPlan(f, S, TODAY).properties[0];
+        expect(v.current).toBe('Single let');
+        expect(v.ctNow).toBe(0);
+    });
+    it('units that disagree on their letting strategy fall back to the unit types', () => {
+        const f = fixture(); f.units[0].lettingStrategy = 'Serviced accommodation'; f.units[1].lettingStrategy = 'Single let';
+        expect(M.buildPlan(f, S, TODAY).properties[0].current).toBe('UC HMO');
     });
 });
 
@@ -915,6 +1024,7 @@ describe('places and status read true', () => {
     it('an empty room is not rent now, and is priced once in the plan', () => {
         const f = fixture(); f.properties[0].strategy = 'HMO'; f.properties[0].lettableRooms = 4;
         f.units.push({ id: 'u4', propertyId: 'p1', number: 4, type: 'Room', status: 'Void', rent: 400, tenantIds: [] });
+        f.tenancies.push({ id: 'c4', tenantIds: [], unitId: 'u4', rent: 400 });   // a tenancy still Live on a unit already marked Void
         const v = M.buildPlan(f, S, TODAY).properties[0];
         expect(v.voidRent).toBe(400);
         expect(v.rentNow).toBe(1947.32);                              // the empty room's £400 placeholder is not rent coming in

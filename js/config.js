@@ -33,7 +33,7 @@
         { id: 'transactions', name: 'Transactions',                icon: '🔍', pageVer: '1.1', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#transactions' },
         { id: 'coa',        name: 'Chart of Accounts',             icon: '📒', pageVer: '1.3', sopFile: 'sop-coa.html',                sopVer: '1.1', standalone: 'index.html#coa' },
         { id: 'comms',      name: 'Inbound Comms',                 icon: '📨', pageVer: '2.82', sopFile: 'inbound-comms-sop.html',      sopVer: '2.60', standalone: 'follow-up.html' },
-        { id: 'growth-plan', name: 'Growth Plan',                    icon: '📈', pageVer: '1.32', sopFile: 'sop-growth-plan.html',        sopVer: '1.5', standalone: 'growth-plan.html' },
+        { id: 'growth-plan', name: 'Growth Plan',                    icon: '📈', pageVer: '1.33', sopFile: 'sop-growth-plan.html',        sopVer: '1.5', standalone: 'growth-plan.html' },
         { id: 'compliance', name: 'Property Compliance',            icon: '✅', pageVer: '1.16', sopFile: 'sop-compliance.html',         sopVer: '1.14', standalone: 'compliance.html' },
         // Property Manager (Operations) — Roy Lavin's single page. Standalone at
         // property-manager/ behind its own passcode; the property-manager Worker
@@ -139,7 +139,13 @@
             movingToSelfManage: 'flddfP8ClsH4JeN2o', // Moving To Self-Manage: an agent-run property being taken back joins our list (16 Sep 2026)
             // Growth Baseline Rent / Council Tax / Date: frozen ONCE at the start of the plan (16 Sep 2026) so "where we started" never moves. The page is forecast only; the dashboard owns actual cash.
         },
-        unit: { name: 'fldr8sliyu8h2jw9t', beds: 'fldGMguNbV7GvzsHs', tenants: 'fldQO09UAFRf07V7q', type: 'fldsItq0vU3sHv7n9', number: 'fld3nPlpdXSExxDuq', property: 'fldUJNRGgzgyAwwjt', status: 'fldBvqysXBm9rIm0E', incomeType: 'fldPrhfntWO9aHl58', rent: 'fldQZEjNzhU4UDUW9' },
+        // No rent here: the Expected Rent rollup adds ENDED tenancies (22 Newton Street read £1,800 against a
+        // live £500), so rent now comes from the live tenancies (16 Sep 2026). The last six fields were added
+        // 16 Sep 2026: how the unit is let today, and, for a flat the growth plan shows on its own row
+        // (Duckworth Building), its plan, council tax band and frozen start.
+        unit: { name: 'fldr8sliyu8h2jw9t', beds: 'fldGMguNbV7GvzsHs', tenants: 'fldQO09UAFRf07V7q', type: 'fldsItq0vU3sHv7n9', number: 'fld3nPlpdXSExxDuq', property: 'fldUJNRGgzgyAwwjt', status: 'fldBvqysXBm9rIm0E', incomeType: 'fldPrhfntWO9aHl58',
+                lettingStrategy: 'fldcv02tac2Df3JlO', strategy: 'fldMg7hbVvHXXTQet', ctBand: 'fldciMGjBs3h6QAH3',
+                baselineRent: 'fldeKsD7Hlsd2chUZ', baselineCt: 'fldh6EFTz8epLPKmU', baselineDate: 'fldRULhlR505Peqlh' },
         tenant: { name: 'fldxBKW7QnujSDWqA', status: 'fldAXzP9SGIHiAhrv', dob: 'fldv7FKsqXYswyCFE', payType: 'fldZbrk8Xw5Dcwxhi', notes: 'fldfwxEf7I3XQDVtR', capExemption: 'fldOOi3d1P4vDedm6', /* added 9 Sep 2026 */
                   phone: 'fldraHUkWfqo4olLF', email: 'fldybEduFY3DWWTfT', ni: 'fld1rHf1qZ60qK95l', /* National Insurance Number, added 9 Sep 2026 */
                   dueDay: 'fldWjCUbAOQmTKfFP', // Due Date of the Month (rent)

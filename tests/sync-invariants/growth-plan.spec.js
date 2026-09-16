@@ -9,6 +9,8 @@ const U = { tenants: 'fldQO09UAFRf07V7q', type: 'fldsItq0vU3sHv7n9', number: 'fl
 const T = { over35: 'flddQ2HnQEf4HBeRn', meetingDate: 'fldTz5BU7jxA2mc1B', ucPayDay: 'fldjTG9xdCLpbwOwC', ni: 'fld1rHf1qZ60qK95l', phone: 'fldraHUkWfqo4olLF', email: 'fldybEduFY3DWWTfT', name: 'fldxBKW7QnujSDWqA', status: 'fldAXzP9SGIHiAhrv', dob: 'fldv7FKsqXYswyCFE', payType: 'fldZbrk8Xw5Dcwxhi', notes: 'fldfwxEf7I3XQDVtR', capExemption: 'fldOOi3d1P4vDedm6' };
 const TT = { correctAgreement: 'fldCqe5vCXSPDbGev', proofOfAddress: 'fldfTl5QcGxfIzQ8W', authoritySigned: 'fldHPe9YQ6GmlrKBt', rentUplift: 'fld4cGcQbuV2xh2rQ' };
 const PX = { movingToSelfManage: 'flddfP8ClsH4JeN2o', baselineRent: 'fldfTtL7On1C2OmRU', baselineCt: 'fldFyN175n3TngNtt' };
+// Rental Units fields added 16 Sep 2026: how a unit is let today, and a block flat's own plan, band and start.
+const UX = { beds: 'fldGMguNbV7GvzsHs', lettingStrategy: 'fldcv02tac2Df3JlO', strategy: 'fldMg7hbVvHXXTQet', ctBand: 'fldciMGjBs3h6QAH3', baselineRent: 'fldeKsD7Hlsd2chUZ', baselineCt: 'fldh6EFTz8epLPKmU', baselineDate: 'fldRULhlR505Peqlh' };
 const C = { tenants: 'fld1i5bDoHL3B6rUf', unit: 'fld7cjLLEHKAx49OK', rent: 'fldDMyfZLFMeONPq8', actual: 'fldzrqp2fHRaBBnnc' };
 const K = { name: 'fldS6FYfpkhu6tJG0', expected: 'fld9JibXkMpTeMcxw', payStatus: 'fldXZNI96v8HgjuSh', property: 'fld7nikJBPz3BoZJG', frequency: 'fldvozTHvs5VH3lNi' };
 const S = { key: 'fldiyJqkTQ9i2p2Wc', value: 'fldye89gwAzXWDphp', label: 'fldqN8fc8vk8qBeom', note: 'fldRtEN92vZUZKjBU' };
@@ -45,6 +47,25 @@ function fixtures() {
     [TBL.settings]: ['lha_room:524.90', 'lha_1bed:897.52', 'utilities_per_tenant:75', 'council_tax_default:145', 'room_prep_cost:1500', 'void_weeks_new_room:4', 'siddows_market_rent:850', 'collins_margin_per_property:250', 'ct_credit_share:100', 'benefit_cap_single:1229.42', 'benefit_cap_family:1835', 'uc_standard_single_25:424.90'].map((kv, i) => { const [k, v] = kv.split(':'); return { id: 'recS' + i, fields: { [S.key]: k, [S.value]: Number(v), [S.label]: k, [S.note]: 'test' } }; }),
     [TBL.tasks]: [],
   };
+}
+
+// Duckworth Building in miniature (Kevin, 16 Sep 2026): one block, a serviced-accommodation
+// 2-bed and a single-let 1-bed, each with its own live tenancy and band.
+function withBlock(fx, agent) {
+  fx[TBL.properties].push({ id: 'recBlock', fields: { [P.name]: ['Duckworth Building'], [P.type]: 'Block', [P.beds]: 2, [P.agent]: agent, [P.postcode]: 'FY8 1SQ', [P.active]: [true] } });
+  fx[TBL.units].push(
+    { id: 'recApt1', fields: { [U.property]: ['recBlock'], [U.number]: 1, [U.type]: 'Flat', [U.status]: 'Occupied', [U.tenants]: ['recT5'], [UX.beds]: 2, [UX.lettingStrategy]: 'Serviced accommodation', [UX.ctBand]: 'A' } },
+    { id: 'recApt2', fields: { [U.property]: ['recBlock'], [U.number]: 2, [U.type]: 'Flat', [U.status]: 'Occupied', [U.tenants]: ['recT6'], [UX.beds]: 1, [UX.lettingStrategy]: 'Single let', [UX.ctBand]: 'A' } },
+  );
+  fx[TBL.tenants].push(
+    { id: 'recT5', fields: { [T.name]: 'Staycay Management', [T.status]: 'Active', [T.payType]: 'Working' } },
+    { id: 'recT6', fields: { [T.name]: 'Flat Tenant', [T.status]: 'Active', [T.payType]: 'Working' } },
+  );
+  fx[TBL.tenancies].push(
+    { id: 'recC5', fields: { [C.tenants]: ['recT5'], [C.unit]: ['recApt1'], [C.rent]: 500 } },
+    { id: 'recC6', fields: { [C.tenants]: ['recT6'], [C.unit]: ['recApt2'], [C.rent]: 687 } },
+  );
+  return fx;
 }
 
 async function openPage(page, fx) {
@@ -534,6 +555,61 @@ test.describe('Growth Plan page', () => {
     await expect(now).toContainText('Empty, so the council tax is ours');
     await expect(now.locator('td').last()).toHaveText(/^−£137\.00$/);
     await expect(page.locator('#gp-self')).not.toContainText('£-');
+  });
+
+  // 16 Sep 2026: 22 Newton Street read £1,800 because the unit rollup adds ended tenancies.
+  test('rent now reads the live tenancies, never the unit rollup', async ({ page }) => {
+    const fx = fixtures();
+    fx[TBL.units][3].fields[U.rent] = 1800;   // 13 Far Street: the rollup still carries a tenancy that ended
+    await openPage(page, fx);
+    await expect(page.locator('#kpis table.grid tbody tr').first().locator('td').nth(1)).toHaveText('£2,204');
+    await expect(selfPack(page, '13 Far Street').locator('.pill', { hasText: ' rent' })).toHaveText('£257 rent');
+  });
+
+  test('a block of flats shows one row per apartment, each with its own letting and council tax', async ({ page }) => {
+    const writes = await openPage(page, withBlock(fixtures(), 'Intus Lettings'));
+    const list = page.locator('#agentList');
+    await expect(page.locator('#agentCount')).toHaveText('3 properties');
+    const a1 = list.locator('.pack', { hasText: 'Duckworth Building, Apartment 1' });
+    const a2 = list.locator('.pack', { hasText: 'Duckworth Building, Apartment 2' });
+    await expect(a1).toContainText('Now: Serviced accommodation');
+    await expect(a1.locator('.pill', { hasText: ' rent' })).toHaveText('£500 rent · −£139 council tax');   // St Annes band A: ours, though an agent runs it
+    await expect(a2).toContainText('Now: Single let');
+    await expect(a2.locator('.pill', { hasText: ' rent' })).toHaveText('£687 rent');
+    // Ticking self-manage on one apartment takes back the whole block.
+    await a1.locator('.pack-head').click();
+    await page.locator('#agentList .pack.open input[data-prop-field="movingToSelfManage"]').click();
+    await expect(page.locator('#toast')).toContainText('Moved to the properties we run ourselves');
+    expect(writes.filter(x => x.tableId === TBL.properties).pop().records[0].id).toBe('recBlock');
+    await expect(page.locator('#selfList')).toContainText('Duckworth Building, Apartment 2');
+  });
+
+  test('an apartment\'s plan saves to its own rental unit, and a flat is never let by the room', async ({ page }) => {
+    const writes = await openPage(page, withBlock(fixtures(), 'Property Portfolio'));
+    const open = await openSelf(page, 'Duckworth Building, Apartment 2');
+    await expect(open.locator('.fourtbl tr', { hasText: 'UC HMO' })).toContainText('Does not apply to a flat');
+    await expect(open.locator('.fourtbl tr', { hasText: 'UC joint tenancy' })).toContainText('Does not apply to a one-bedroom flat');
+    await open.locator('.pick select[data-prop-field="strategy"]').selectOption('Single let');
+    await expect(page.locator('#toast')).toContainText('Saved to the apartment');
+    const w = writes.filter(x => x.tableId === TBL.units).pop();
+    expect(w.records[0].id).toBe('recApt2');
+    expect(w.records[0].fields[UX.strategy]).toBe('Single let');
+    expect(writes.filter(x => x.tableId === TBL.properties)).toHaveLength(0);
+  });
+
+  test('Freeze saves an apartment\'s starting figures on its rental unit', async ({ page }) => {
+    const writes = await openPage(page, withBlock(fixtures(), 'Intus Lettings'));
+    await page.locator('button[data-act="freeze-started"]').click();
+    await expect(page.locator('#toast')).toContainText('Froze where we started for 5 properties');
+    const units = writes.filter(x => x.tableId === TBL.units).flatMap(x => x.records);
+    const byId = Object.fromEntries(units.map(r => [r.id, r.fields]));
+    expect(Object.keys(byId).sort()).toEqual(['recApt1', 'recApt2']);
+    expect(byId.recApt1[UX.baselineRent]).toBe(500);
+    expect(byId.recApt1[UX.baselineCt]).toBe(139.41);
+    expect(byId.recApt2[UX.baselineCt]).toBe(0);
+    const props = writes.filter(x => x.tableId === TBL.properties).flatMap(x => x.records.map(r => r.id));
+    expect(props).not.toContain('recApt1');
+    expect(props).not.toContain('recBlock');
   });
 
   test('shows the empty state and no crash when nothing loads', async ({ page }) => {
