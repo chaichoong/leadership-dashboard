@@ -193,6 +193,10 @@
   .cs span { display: block; font-size: var(--fs-xs); color: var(--text-secondary); margin-top: 2px; }
   .cs.good b { color: var(--success); } .cs.warn b { color: var(--warning); }
   .pack-fig b.gold { color: var(--accent-gold); } .pack-fig b.flat { color: var(--text-muted); }
+  .pack-fig { display: flex; gap: var(--space-5); align-items: flex-start; }
+  .figcol { display: flex; flex-direction: column; align-items: flex-end; min-width: 110px; }
+  .figlbl { font-size: var(--fs-xs); text-transform: uppercase; letter-spacing: .04em; color: var(--text-muted); }
+  @media (max-width: 700px) { .pack-fig { gap: var(--space-3); } .figcol { min-width: 0; } }
   .strattbl td { vertical-align: top; }
   .strattbl tr.chosen { background: var(--accent-soft); }
   .strattbl tr.chosen td { border-bottom-color: var(--accent); }
@@ -228,6 +232,8 @@
   .gnote { font-size: var(--fs-xs); color: var(--text-muted); font-weight: var(--fw-regular); margin-top: 2px; }
   .unk { color: var(--warning); font-weight: var(--fw-bold); margin-left: 2px; cursor: help; }
   .gunk { margin-top: var(--space-2); color: var(--warning); }
+  .calcfield { display: flex; flex-direction: column; gap: 2px; font-size: var(--fs-xs); color: var(--text-secondary); min-width: 0; }
+  .calcfield b { font-size: var(--fs-md); color: var(--text-primary); font-variant-numeric: tabular-nums; padding: 2px 0; }
   .stranded { margin-top: var(--space-3); padding-top: var(--space-2); border-top: 1px dashed var(--border-default); }
   .gsum { display: flex; gap: var(--space-5); flex-wrap: wrap; margin-top: var(--space-3); color: var(--text-secondary); }
   .ticks { display: flex; flex-wrap: wrap; gap: 4px 14px; margin: 6px 0; padding: 6px 8px; border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); background: var(--bg-surface); }
@@ -455,7 +461,7 @@
     <details class="more"><summary>Set up every property (strategy, rooms, meters, council tax, who the tasks go to)</summary>
       <div class="more-body">
         <p class="hint">Every property in the portfolio. Lettable rooms is what drives the HMO figure, and the council tax band is what drives the HMO and short-let costs.</p>
-        <div class="tbl-wrap"><table id="setupTable"><thead><tr><th>Property</th><th>Plan</th><th class="num">Extra</th><th class="num">Rooms</th><th>PAYG</th><th>Council tax payer</th><th>Tasks to</th></tr></thead><tbody id="setupBody"></tbody></table></div>
+        <div class="tbl-wrap"><table id="setupTable"><thead><tr><th>Property</th><th>Plan</th><th class="num">Extra tenants (UC HMO)</th><th class="num">Rooms</th><th>PAYG</th><th>Council tax payer</th><th>Tasks to</th></tr></thead><tbody id="setupBody"></tbody></table></div>
       </div>
     </details>
 
@@ -473,7 +479,7 @@
 <script src="js/ai-models.js?v=1"></script>
 <script src="js/config.js?v=64"></script>
 <script src="js/sync-bar.js?v=6"></script>
-<script src="js/growth-plan-model.js?v=6"></script>
+<script src="js/growth-plan-model.js?v=8"></script>
 <script>
 (function () {
   'use strict';
@@ -573,7 +579,7 @@
         id: r.id, name: first(r.fields[P.name]) || r.fields[P.fullName] || r.id, type: sel(r.fields[P.type]), beds: r.fields[P.beds], agent: r.fields[P.agent] || '',
         postcode: r.fields[P.postcode] || '', area: r.fields[P.area] || '', ctNote: r.fields[P.ctNote] || '',
         lettableRooms: r.fields[P.lettableRooms] == null ? null : r.fields[P.lettableRooms], payg: sel(r.fields[P.payg]) || 'Unknown', ctPayer: sel(r.fields[P.ctPayer]) || 'Unknown',
-        strategy: sel(r.fields[P.strategy]) || '', plannedExtra: r.fields[P.plannedExtra] == null ? null : r.fields[P.plannedExtra],
+        strategy: sel(r.fields[P.strategy]) || '',
         owner: sel(r.fields[P.owner]) || '', ctBand: sel(r.fields[P.ctBand]) || '', ctAnnual: r.fields[P.ctAnnual] || 0,
         baselineRent: r.fields[P.baselineRent] == null ? null : r.fields[P.baselineRent], baselineDate: r.fields[P.baselineDate] || '',
         baselineCt: r.fields[P.baselineCt] == null ? null : r.fields[P.baselineCt], movingToSelfManage: !!r.fields[P.movingToSelfManage],
@@ -762,7 +768,7 @@ BEFORE THE FIRST ONE IS SIGNED (all in writing)
     const sel = (id, field, opts, val, label) => `<select class="sm" data-prop-field="${field}" data-prop="${esc(id)}" aria-label="${esc(label)}">${opts.map(o => `<option value="${esc(o)}" ${o === val ? 'selected' : ''}>${esc(o || 'Not set')}</option>`).join('')}</select>`;
     $('setupBody').innerHTML = rows.map(v => `<tr><td class="wrap">${esc(v.name)}<div class="small muted">${esc(v.selfManaged ? (v.area || 'we run this') : (v.agent || 'agent-run'))}</div></td>
       <td>${v.selfManaged ? sel(v.id, 'strategy', [''].concat(M.PLAN_CHOICES), v.target, `Plan for ${v.name}`) : ''}${!v.selfManaged || v.movingToSelfManage ? `<label class="chk small"><input type="checkbox" data-prop-field="movingToSelfManage" data-prop="${esc(v.id)}" ${v.movingToSelfManage ? 'checked' : ''}> Moving to self-manage</label>` : ''}</td>
-      <td class="num"><input class="sm" type="number" min="0" max="6" data-prop-field="plannedExtra" data-prop="${esc(v.id)}" value="${v.plannedExtra ? esc(v.plannedExtra) : ''}" placeholder="0" aria-label="Extra tenants at ${esc(v.name)}"></td>
+      <td class="num" title="${esc(v.extraTenantsApplies ? `${v.roomInfo.rooms} lettable rooms less ${v.tenantCount} tenants` : v.extraTenantsWhy)}">${v.extraTenantsApplies ? v.extraTenants : '<span class="muted">—</span>'}</td>
       <td class="num"><input class="sm" type="number" min="1" max="12" data-prop-field="lettableRooms" data-prop="${esc(v.id)}" value="${v.lettable == null ? '' : esc(v.lettable)}" placeholder="${esc(v.roomInfo.rooms)}" aria-label="Lettable rooms at ${esc(v.name)}"></td>
       <td>${sel(v.id, 'payg', ['Unknown', 'Yes', 'No'], v.payg, `PAYG meters at ${v.name}`)}</td>
       <td>${sel(v.id, 'ctBand', ['', 'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'], v.ctBand, `Council tax band at ${v.name}`)} ${sel(v.id, 'ctPayer', ['Unknown', 'Owner', 'Tenants'], v.ctPayer, `Council tax payer at ${v.name}`)}<div class="small muted">${v.ct.confirmed ? gbp(v.ct.monthly, 2) + ' a month' : 'not confirmed'}</div></td>
@@ -795,9 +801,15 @@ BEFORE THE FIRST ONE IS SIGNED (all in writing)
   function propRow(v) {
     const open = state.ui.openPack === v.id;
     const up = v.upliftChosen;
-    const fig = v.chosen
-      ? `<b class="${up > 0 ? '' : 'flat'}">${up > 0 ? '+' + gbp(up, 2) : up < 0 ? '−' + gbp(-up, 2) : 'no change'}</b><span class="muted small">${esc(v.chosen)}</span>`
-      : `<b class="gold">+${gbp(Math.max(0, v.upliftBest), 2)}</b><span class="muted small">ceiling: ${esc(v.bestWhy)}</span>`;
+    // Both figures on every row: what the plan picked adds, and the most the property could add.
+    // Showing only one hid the ceiling the moment a plan was picked.
+    const signed = n => n > 0 ? '+' + gbp(n, 2) : n < 0 ? '−' + gbp(-n, 2) : 'no change';
+    const planFig = !v.selfManaged ? { txt: '—', cls: 'flat', sub: 'agent-run' }
+      : !v.chosen ? { txt: '—', cls: 'flat', sub: 'no plan picked' }
+      : { txt: signed(up), cls: up > 0 ? '' : 'flat', sub: v.leaveAsIs ? 'Leave as is' : v.chosen };
+    const ceil = Math.max(0, v.upliftBest);
+    const fig = `<div class="figcol"><span class="figlbl">Our plan</span><b class="${planFig.cls}">${planFig.txt}</b><span class="muted small">${esc(planFig.sub)}</span></div>
+      <div class="figcol"><span class="figlbl">Ceiling</span><b class="${ceil > 0 ? 'gold' : 'flat'}">${ceil > 0 ? '+' + gbp(ceil, 2) : 'no change'}</b><span class="muted small">${esc(v.bestWhy)}</span></div>`;
     const head = `<div class="pack-head" role="button" tabindex="0" data-pack="${esc(v.id)}" aria-expanded="${open}">
       <div class="pack-n"><span><b>${esc(v.name)}</b>${v.area ? ` <span class="muted small">${esc(v.area)}</span>` : ''}
         <div class="pack-meta">
@@ -968,7 +980,7 @@ BEFORE THE FIRST ONE IS SIGNED (all in writing)
     const ctLine = `${esc(v.ct.source)}${v.ct.confirmed ? '' : ' — type the band below and we will work the cost out'}`;
     return `<div class="pack-block"><h4>How this property is set up</h4><div class="prop-fields">
       <label>Lettable rooms<input class="sm" type="number" min="1" max="12" data-prop-field="lettableRooms" data-prop="${esc(v.id)}" value="${v.lettable == null ? '' : esc(v.lettable)}" placeholder="${esc(v.roomInfo.rooms)}"></label>
-      <label>Extra tenants (HMO)<input class="sm" type="number" min="0" max="6" data-prop-field="plannedExtra" data-prop="${esc(v.id)}" value="${v.plannedExtra ? esc(v.plannedExtra) : ''}" placeholder="0"></label>
+      <div class="calcfield"><span>Extra tenants (UC HMO)</span><b data-extra-tenants="${esc(v.id)}">${v.extraTenantsApplies ? v.extraTenants : '—'}</b><span class="small muted">${v.extraTenantsApplies ? `${esc(v.roomInfo.rooms)} lettable room${v.roomInfo.rooms === 1 ? '' : 's'} − ${v.tenantCount} tenant${v.tenantCount === 1 ? '' : 's'}` : esc(v.extraTenantsWhy)}</span></div>
       ${f('Council tax band', 'ctBand', ['', 'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'], v.ctBand)}
       ${f('PAYG meters', 'payg', ['Unknown', 'Yes', 'No'], v.payg)}
       ${f('Council tax payer', 'ctPayer', ['Unknown', 'Owner', 'Tenants'], v.ctPayer)}
@@ -1203,8 +1215,8 @@ BEFORE THE FIRST ONE IS SIGNED (all in writing)
     });
   }
   async function savePropField(propId, field, value) {
-    const map = { lettableRooms: GP.prop.lettableRooms, payg: GP.prop.payg, ctPayer: GP.prop.ctPayer, strategy: GP.prop.strategy, plannedExtra: GP.prop.plannedExtra, owner: GP.prop.owner, ctBand: GP.prop.ctBand, movingToSelfManage: GP.prop.movingToSelfManage };
-    const numeric = field === 'lettableRooms' || field === 'plannedExtra';
+    const map = { lettableRooms: GP.prop.lettableRooms, payg: GP.prop.payg, ctPayer: GP.prop.ctPayer, strategy: GP.prop.strategy, owner: GP.prop.owner, ctBand: GP.prop.ctBand, movingToSelfManage: GP.prop.movingToSelfManage };
+    const numeric = field === 'lettableRooms';
     const flag = field === 'movingToSelfManage';
     await withBusy('prop:' + propId + field, async () => {
       const v = flag ? !!value : numeric ? (value === '' ? null : Number(value)) : (value || null);

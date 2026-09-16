@@ -542,7 +542,7 @@
                 id: prop.id, name: prop.name, type: prop.type, postcode: prop.postcode || '', area: prop.area || '',
                 brma: rates ? rates.brma : null, brmaNote: BRMA_UNCERTAIN[ow] || '', local, mgmt, ours, agent: prop.agent || '',
                 rentNow: round2(propRent), ctLive: round2(ctLive), ctMonthly: round2(ctMonthly), ownerPaysCt, ctPayer: prop.ctPayer || 'Unknown',
-                payg: prop.payg || 'Unknown', beds: num(prop.beds), lettable, lettableEff, roomsInUse, strategy: normaliseStrategy(prop.strategy), plannedExtra: num(prop.plannedExtra), owner: prop.owner || '', ctBand: prop.ctBand || '', ctAnnual: num(prop.ctAnnual), ctBandMonthly,
+                payg: prop.payg || 'Unknown', beds: num(prop.beds), lettable, lettableEff, roomsInUse, strategy: normaliseStrategy(prop.strategy), owner: prop.owner || '', ctBand: prop.ctBand || '', ctAnnual: num(prop.ctAnnual), ctBandMonthly,
                 rates, units: [], tenants: [], levers: [], flags: [],
             };
             if (!rates && prop.postcode) view.flags.push('No LHA table for this postcode');
@@ -637,6 +637,12 @@
                 view.units.push(uView);
             });
 
+            // EXTRA TENANTS (Kevin, 16 Sep 2026): worked out, never typed in. It is the lettable
+            // rooms less the tenants living there, so correcting the lettable rooms corrects it.
+            // The old typed-in "Planned Extra Tenants" disagreed with the rooms (5 Dalham Place:
+            // 5 rooms, 4 tenants, typed 2) and is no longer read.
+            const roomInfo = rentableRoomsFor(prop, pUnits);
+            const extraTenants = Math.max(0, roomInfo.rooms - view.tenants.length);
             if (ours && rates) {
                 // Kevin's strategy per house (Properties → Growth Strategy, 9 Sep 2026) decides
                 // which of the two house levers applies. Joint tenancy: council tax to the
@@ -648,7 +654,7 @@
                 const releasable = view.tenants.filter(t => t.unitType === 'Flat-Let' && t.uc && t.age != null && t.age >= 35);
                 const spare = Math.max(0, lettableEff - roomsInUse);
                 const computedLets = releasable.length + spare;
-                const newLets = strategy === 'UC HMO' ? num(prop.plannedExtra) : (strategy ? 0 : computedLets);
+                const newLets = strategy === 'UC HMO' ? extraTenants : (strategy ? 0 : computedLets);
                 const occupants = view.tenants.length;
                 if (newLets > 0) {
                     const capNew = capPosition('Unknown', rates.b1, settings);
@@ -770,7 +776,6 @@
             }
             // ── The four strategies, priced for this property ──────────────
             const ctInfo = councilTaxFor(prop, ctLive, bandByCouncil[councilFor(prop.postcode)] || '');
-            const roomInfo = rentableRoomsFor(prop, pUnits);
             const market = marketRentFor(prop, rates, settings);
             const strategies = priceStrategies(prop, pUnits, rates, settings, ctInfo, roomInfo, market);
             // Review fix, 16 Sep 2026: the units cannot tell a joint tenancy from two room lets
@@ -798,7 +803,13 @@
             // the tenancy record to the new rate the uplift is not counted twice.
             const upliftsDone = round2(view.tenants.filter(t => t.rentUplift === 'Done').reduce((n, t) => n + num(t.upliftGap), 0));
             const upliftsToDo = round2(view.tenants.filter(t => t.rentUplift !== 'Done' && t.rentUplift !== 'Not needed').reduce((n, t) => n + num(t.upliftGap), 0));
-            const rentNowForecast = round2(propRent + upliftsDone);
+            // Review fix, 16 Sep 2026: an empty unit still carries the Expected Rent of the tenancy
+            // that ended, a placeholder nobody pays. Counting it as rent now held 18 Siddows Avenue
+            // (empty) at £499.70, so picking Single let showed +£175.30 instead of +£675, and a
+            // placeholder above market would have been planned as if collected.
+            const voidRent = round2(pUnits.filter(u => u.status === 'Void').reduce((n, u) => n + num(u.rent), 0));
+            const occupiedRent = round2(propRent - voidRent);
+            const rentNowForecast = round2(occupiedRent + upliftsDone);
 
             // COUNCIL TAX NOW (Kevin, 16 Sep 2026). On a property we run, it is OURS unless the
             // property is a single let today, or a joint tenancy where EVERY tenant has the
@@ -832,19 +843,41 @@
             let planCtUnknown = ctNowUnknown;
             if (holdFlat) { planWhy = 'Leave as is: rent and council tax held exactly where they are'; }
             else if (chosen && chosenRow) {
-                const newLets = num(prop.plannedExtra) > 0 ? num(prop.plannedExtra) : Math.max(0, roomInfo.rooms - roomsInUse);
+                const newLets = extraTenants;
                 if (chosen === 'UC HMO' && current === 'UC HMO') {
                     newPlaces = newLets;
-                    planRent = round2(rentNowForecast + upliftsToDo + newLets * b1);
+                    // An empty unit's record rent is a placeholder already inside rent now. Every empty
+                    // room is priced at the 1-bed rate below, so the placeholder comes out first or the
+                    // same room would be counted twice.
+                    planRent = round2(rentNowForecast + upliftsToDo + newLets * b1);   // empty rooms are in newLets, not in rent now
                     planCt = ctInfo.monthly == null ? ctNow : round2(ctInfo.monthly);
                     planCtUnknown = ctInfo.monthly == null;
-                    planWhy = `Same tenants plus ${newLets} new room${newLets === 1 ? '' : 's'} at £${money(b1)}, and the uplifts still to do; we keep the council tax`;
+                    planWhy = `${roomInfo.rooms} lettable room${roomInfo.rooms === 1 ? '' : 's'} less ${tenantCount} tenant${tenantCount === 1 ? '' : 's'} = ${newLets} more tenant${newLets === 1 ? '' : 's'} at £${money(b1)}, plus the uplifts still to do; we keep the council tax`;
                 } else if (chosen === 'UC joint tenancy' && tenantCount > 0 && tenantCount <= 2) {
                     newPlaces = Math.max(0, 2 - occupiedUnits);
                     planRent = round2(rentNowForecast + upliftsToDo);
                     planCt = 0;
                     planCtUnknown = false;
                     planWhy = 'Same tenants on one joint agreement: their rents stay, and the council tax moves to them';
+                } else if (chosen === 'Single let' && current === 'Single let') {
+                    // Kevin, 16 Sep 2026: picking Single let on 15 Marloes Court (£237 now, £950 market)
+                    // showed "no change", because a same-strategy plan only added uplifts. A single let's
+                    // uplift IS the market rent. The higher of the two, so a rent already above market
+                    // (22 Newton Street, £1,800 against £752) is never planned downwards.
+                    newPlaces = 0;
+                    const ownerPays = prop.ctPayer === 'Owner';
+                    planRent = round2(Math.max(rentNowForecast, market.rent));
+                    planCt = ownerPays ? round2(ctAmount) : 0;
+                    planCtUnknown = ownerPays && ctInfo.monthly == null;
+                    const whoPays = ownerPays
+                        ? (ctInfo.monthly == null ? 'we pay the council tax, amount not known' : `we pay the council tax (£${money(ctAmount)} a month)`)
+                        : 'the tenant pays the council tax';
+                    const nowWords = rentNowForecast > 0 ? `against £${money(rentNowForecast)} now` : 'and it is empty now';
+                    planWhy = !(market.rent > 0)
+                        ? `No open-market rent is known for this property, so it is held at £${money(rentNowForecast)}; ${whoPays}`
+                        : market.rent > rentNowForecast
+                            ? `Let at the open-market rent of £${money(market.rent)} (${market.source}), ${nowWords}; ${whoPays}`
+                            : `Already at or above the open-market rent (£${money(market.rent)}), so held at £${money(rentNowForecast)}; ${whoPays}`;
                 } else if (chosen === current) {
                     newPlaces = 0;
                     planRent = round2(rentNowForecast + upliftsToDo);
@@ -874,13 +907,16 @@
                 chosenRow, ct: ctInfo, roomInfo, market,
                 unitsNow: occupiedUnits, unitsPlanned, unitsExtra: Math.max(0, unitsPlanned - occupiedUnits),
                 voids, tenantCount,
-                recordRent: round2(propRent),
+                recordRent: occupiedRent, voidRent,
                 rentNow: rentNowForecast, upliftsDone, upliftsToDo,
                 ctNow, ctLiableNow, ctNowWhy, jtDocumented,
                 planRent: round2(planRent), planCt: round2(planCt), planWhy,
                 bestRent: round2(bestOpt.rent), bestCt: round2(bestOpt.ct), bestWhy: bestOpt.name,
                 ctNowUnknown, planCtUnknown, bestCtUnknown: !!bestOpt.ctUnknown,
-                ctBeforeTicks, ctBeforeTicksUnknown, statedJoint,
+                ctBeforeTicks, ctBeforeTicksUnknown, statedJoint, extraTenants,
+                // Extra tenants only moves the plan for a UC HMO that is not being held as it is.
+                extraTenantsApplies: !holdFlat && (chosen === 'UC HMO' || (!chosen && current === 'UC HMO')),
+                extraTenantsWhy: holdFlat ? 'Leave as is holds it' : (chosen && chosen !== 'UC HMO') ? `only counts for a UC HMO, and the plan is ${chosen}` : (!chosen && current !== 'UC HMO') ? 'only counts for a UC HMO' : '',
                 leftNow: round2(rentNowForecast - ctNow),
                 leftPlan: round2(planRent - planCt),
                 leftBest: round2(bestOpt.rent - bestOpt.ct),
