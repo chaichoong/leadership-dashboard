@@ -1099,11 +1099,15 @@
             const jtConversion = v.chosen === 'UC joint tenancy' && v.tenantCount > 0 && v.tenantCount <= 2;
             const strategySettled = v.leaveAsIs || v.chosen === v.current || (jtConversion && v.jtDocumented);
             const didWork = v.upliftsDone > 0 || v.jtDocumented;
+            // Kevin, 16 Sep 2026: "No change needed" while the plan still adds money was wrong
+            // (15 Marloes Court £237 planned to £950; 55 Elmdon Place with two tenants to add).
+            // Settled means the plan adds nothing more to what is left for us.
+            const planStillAdds = num(v.upliftChosen) > 0.5;
             v.upliftsOpenCount = upliftsOpen;
             if (!v.selfManaged) v.progress = 'Agent-run';
             else if (!v.chosen) v.progress = 'Not decided';
             else if (v.leaveAsIs) v.progress = 'No change needed';
-            else if (strategySettled && !upliftsOpen) v.progress = didWork ? 'Realised' : 'No change needed';
+            else if (strategySettled && !upliftsOpen && !planStillAdds) v.progress = didWork ? 'Realised' : 'No change needed';
             else if (running.length) v.progress = 'In progress';
             else v.progress = 'To do';
         });
