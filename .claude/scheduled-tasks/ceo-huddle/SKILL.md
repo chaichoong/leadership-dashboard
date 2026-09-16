@@ -124,10 +124,22 @@ STEPS
      Flag: any agent whose Learning Log gained an "auto-tightened" line since
      yesterday, and any Live/Built agent whose Metric Score is empty or clearly
      off its Score Metric target.
-   - Stuck approvals: Tasks where `{Status}='Approval'` AND Sent For Approval By
-     is set AND created more than 24 hours ago. CONTROL: run the same query
-     without the age clause; if THAT is zero but dispatch reported submissions
-     yesterday, the query broke — say so rather than reporting "no queue".
+   - Stuck approvals: **read this from the script, never from a query you write
+     here.** `python3 /Users/kevinbrittain/Projects/leadership-dashboard/scripts/agent-accuracy-report.py --json`
+     returns `waiting_for_kevin` and `stuck_over_hours` (sent for approval and
+     still undecided 24 hours later), both taken from the same population, so
+     they cannot disagree with each other or with step 3b.
+     **Do not hand-roll a curl for this number.** On 2 Sep 2026 this slot did,
+     got 0 from the curl and 77 from the script, and reported both without
+     being able to say which was true (finding `20260902-ceo-agent-432`). An
+     improvised Airtable query is the silent-zero trap by default: a date
+     compared without `DATESTR()`, or `FIND("recXXX", ARRAYJOIN({Link}))`
+     against a link field, each return `200 OK` with an empty list, which reads
+     as "nothing is stuck".
+     CONTROL, and it is built into the output: `stuck_over_hours` is a subset of
+     `waiting_for_kevin`, so report the pair. Stuck 0 out of a queue of 40 is an
+     answer; stuck 0 out of a queue of 0 on a day dispatch reported submissions
+     means the read broke — say that, never "no queue".
    - Board and workers: anything a dept head or worker flagged as blocked in
      step 1.
    Anything stuck or slipping becomes a digest flag (step 3) in plain English —

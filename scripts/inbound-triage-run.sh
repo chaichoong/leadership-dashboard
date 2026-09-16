@@ -277,9 +277,20 @@ __verify_slot "$RC"
 # on stderr), and never quarantines the drift scanner's schema snapshots,
 # which false-positived here on 25 Aug 2026 (they carry "Inbound Message
 # Content" as a field NAME in the table structure, not as message content).
+#
+# The ninth argument is the TOLERATED list (finding 20260915-daily-ops-exceptions-531).
+# The scan's Gmail back-off writes `{"error": "GMAIL RATE METRIC STILL FULL after
+# 585s of waiting ... The watermark is NOT advanced, so no mail is lost — the next
+# slot picks up from here."`. That is the handler working: the watermark stays put
+# and the following slot re-reads the same mail. The bare `"error"` marker matched
+# it and failed the 14 Sep 13:00 slot, which had completed. The `"error"` marker
+# itself stays — it is what catches `API Error: {"type":"error",...}` from a
+# headless claude that then exits 0 — and a genuinely unfinished scan is still
+# caught by __verify_slot above, which supersedes rc on its own evidence.
 "$REPO/scripts/slot-postrun.sh" "inbound-triage" "$RC" "$LOG" "$__START_LINE" "$__MARKER" "$SCRATCH" \
   '"body" *:|"Inbound Message Content" *:' \
-  '"error"|HTTP Error 401|401 Unauthorized|Unauthorized|OAuth access token has expired|BROKEN|Full Disk Access'
+  '"error"|HTTP Error 401|401 Unauthorized|Unauthorized|OAuth access token has expired|BROKEN|Full Disk Access' \
+  'GMAIL RATE METRIC STILL FULL'
 __FINAL=$?
 __POSTRUN_DONE=1
 exit "$__FINAL"

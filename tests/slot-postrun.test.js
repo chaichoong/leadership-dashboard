@@ -37,10 +37,11 @@ function sh(cmd, args, opts = {}) {
   return r;
 }
 
-function runPostrun({ job = 'test-job', rc = 0, startLine = 1, leak = LEAK_ERE, bad = BAD_ERE } = {}) {
-  return sh('bash', [SCRIPT, job, String(rc), log, String(startLine), marker, scratch, leak, bad], {
-    env: { ...process.env, SLOT_POSTRUN_REPO: repo },
-  });
+function runPostrun({ job = 'test-job', rc = 0, startLine = 1, leak = LEAK_ERE, bad = BAD_ERE,
+                      tolerated = null } = {}) {
+  const args = [SCRIPT, job, String(rc), log, String(startLine), marker, scratch, leak, bad];
+  if (tolerated !== null) args.push(tolerated);
+  return sh('bash', args, { env: { ...process.env, SLOT_POSTRUN_REPO: repo } });
 }
 
 // A monitoring file only enters the sweep if it is NEWER than the run-start
@@ -266,5 +267,81 @@ describe('repo-WIDE sweep (2 Sep 2026, finding 435: helper scripts and a briefin
     expect(existsSync(code)).toBe(true);
     expect(existsSync(inScratch)).toBe(true);
     expect(existsSync(tracked)).toBe(true);
+  });
+});
+
+// ─── FINDING 20260915-daily-ops-exceptions-531 ───────────────────────
+//
+// inbound-triage's 13:00 slot on 14 Sep 2026 was recorded FAILED (exit 1)
+// although it completed. The wrapper's marker list carries a bare `"error"`
+// pattern, and the scan's own Gmail back-off writes a line that contains it:
+//
+//   {"error": "GMAIL RATE METRIC STILL FULL after 585s of waiting (Gmail
+//    short-window rate metric; it refills in about a minute). The watermark is
+//    NOT advanced, so no mail is lost — the next slot picks up from here. ..."}
+//
+// That line is the handler working. The fix is a SUBTRACTION, not a deletion:
+// `"error"` still catches `API Error: {"type":"error",...}` from a headless
+// claude that then exits 0, and the wrapper names the survivable line instead.
+//
+// Back-tested: drop the ninth argument from inbound-triage-run.sh and the
+// first test here goes red with exit 1, which is exactly what job-status
+// recorded on 14 Sep.
+describe('a tolerated line is not a failure marker (finding 531)', () => {
+  const TRIAGE_BAD =
+    '"error"|HTTP Error 401|401 Unauthorized|Unauthorized|OAuth access token has expired|BROKEN|Full Disk Access';
+  const TRIAGE_TOLERATED = 'GMAIL RATE METRIC STILL FULL';
+  const RATE_LINE =
+    '{"error": "GMAIL RATE METRIC STILL FULL after 585s of waiting (Gmail short-window rate metric;'
+    + ' it refills in about a minute). The watermark is NOT advanced, so no mail is lost'
+    + ' \u2014 the next slot picks up from here."}';
+
+  it('THE 14 SEP BUG: the Gmail rate-metric retry line no longer fails the slot', () => {
+    writeFileSync(log, '===== inbound-triage run =====\n' + RATE_LINE + '\nWatermark advanced\n');
+    const r = runPostrun({ job: 'inbound-triage', rc: 0, bad: TRIAGE_BAD, tolerated: TRIAGE_TOLERATED });
+    expect(r.status).toBe(0);
+    expect(r.stdout).toContain('inbound-triage run OK');
+    expect(r.stderr).not.toContain('FAILED');
+  });
+
+  it('without the tolerated list it still fails — proving the marker really did match', () => {
+    writeFileSync(log, '===== inbound-triage run =====\n' + RATE_LINE + '\n');
+    const r = runPostrun({ job: 'inbound-triage', rc: 0, bad: TRIAGE_BAD });
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain('FAILED');
+  });
+
+  it('a REAL error JSON is still caught, tolerated list and all', () => {
+    // The whole point of not deleting the bare "error" pattern. A headless
+    // claude prints this and then exits 0.
+    writeFileSync(
+      log,
+      '===== inbound-triage run =====\n'
+        + RATE_LINE + '\n'
+        + 'API Error: {"type":"error","error":{"type":"overloaded_error","message":"Overloaded"}}\n'
+    );
+    const r = runPostrun({ job: 'inbound-triage', rc: 0, bad: TRIAGE_BAD, tolerated: TRIAGE_TOLERATED });
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain('FAILED');
+    expect(r.stderr).toContain('overloaded_error');
+  });
+
+  it('a non-zero rc still fails even when every marker line is tolerated', () => {
+    writeFileSync(log, '===== inbound-triage run =====\n' + RATE_LINE + '\n');
+    const r = runPostrun({ job: 'inbound-triage', rc: 2, bad: TRIAGE_BAD, tolerated: TRIAGE_TOLERATED });
+    expect(r.status).toBe(2);
+    expect(r.stderr).toContain('FAILED (rc=2)');
+  });
+
+  it('omitting the argument entirely keeps the old behaviour for the other two wrappers', () => {
+    writeFileSync(log, '===== test-job run =====\nBROKEN: skill file missing\n');
+    const r = runPostrun({ rc: 0 });
+    expect(r.status).toBe(1);
+  });
+
+  it('inbound-triage-run.sh actually passes the tolerated pattern', () => {
+    // A fix in the shared script that no wrapper opts into changes nothing.
+    const wrapper = readFileSync(resolve(ROOT, 'scripts/inbound-triage-run.sh'), 'utf8');
+    expect(wrapper).toContain("'GMAIL RATE METRIC STILL FULL'");
   });
 });

@@ -25,9 +25,23 @@
 #   - Git-tracked files are never quarantined (as before): moving one re-arms
 #     the failure for the next slot after a git restore.
 #
+#   - A line matching <tolerated_ere> is NOT a failure marker even when it also
+#     matches <bad_ere>. Added 16 Sep 2026, finding 20260915-daily-ops-exceptions-531:
+#     the bare `"error"` pattern in the inbound-triage marker list matched the
+#     triage scan's own tolerated retry line — `{"error": "GMAIL RATE METRIC
+#     STILL FULL after 585s ... The watermark is NOT advanced, so no mail is
+#     lost"` — and marked the 14 Sep 13:00 slot FAILED (exit 1) although it
+#     completed. Dropping the bare `"error"` pattern instead would have blinded
+#     the check that catches a headless claude printing `API Error:
+#     {"type":"error",...}` and then exiting 0, which is why it is a subtraction
+#     and not a deletion. Nothing is blinded by tolerating a line that names
+#     itself as survivable: the real outcome is decided independently by each
+#     wrapper's own verify step (__verify_slot), which supersedes rc when the
+#     work genuinely did not finish.
+#
 # Usage:
 #   slot-postrun.sh <job> <rc> <log> <start_line> <marker> <scratch> \
-#                   <leak_ere> <bad_ere>
+#                   <leak_ere> <bad_ere> [tolerated_ere]
 # SLOT_POSTRUN_REPO overrides the repo root (used by tests/slot-postrun.test.js).
 set -u
 JOB="${1:?job}"
@@ -38,6 +52,8 @@ MARKER="${5:?marker}"
 SCRATCH="${6:?scratch}"
 LEAK_ERE="${7:?leak_ere}"
 BAD_ERE="${8:?bad_ere}"
+# Optional. Empty means "tolerate nothing", which is the old behaviour exactly.
+TOLERATED_ERE="${9:-}"
 REPO="${SLOT_POSTRUN_REPO:-/Users/kevinbrittain/Projects/leadership-dashboard}"
 
 # Privacy sweep: quarantine content-bearing files THIS RUN left in
@@ -122,6 +138,12 @@ rm -f "$MARKER"
 
 TAIL_TEXT=$(tail -n +$((START_LINE + 1)) "$LOG" 2>/dev/null)
 BAD=$(printf '%s\n' "$TAIL_TEXT" | grep -E "$BAD_ERE" || true)
+# Subtract the lines the caller has declared survivable. Done AFTER the match,
+# never by weakening BAD_ERE, so the pattern that catches a real error JSON
+# stays exactly as strict as it was.
+if [ -n "$TOLERATED_ERE" ] && [ -n "$BAD" ]; then
+  BAD=$(printf '%s\n' "$BAD" | grep -Ev "$TOLERATED_ERE" || true)
+fi
 echo "===== done rc=$RC $(date) =====" >> "$LOG"
 
 if [ -n "$LEAKED" ]; then
