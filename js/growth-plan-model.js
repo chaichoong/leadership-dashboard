@@ -817,7 +817,11 @@
             // the bills on. On an agent-run property we only know what the bank shows we pay.
             const jtDocumented = chosen === 'UC joint tenancy' && tenantCount > 0 && view.tenants.every(t => t.correctAgreement);
             const singleLetTenantPays = current === 'Single let' && prop.ctPayer !== 'Owner';
-            const ctLiableNow = selfManaged ? !(singleLetTenantPays || jtDocumented) : ctLive > 0;
+            // Kevin, 16 Sep 2026: a property with nobody in it is OURS for council tax until a
+            // tenant moves in, whatever it is let as. 18 Siddows Avenue read £0 as a "single let"
+            // while empty; its renovation exemption is ending, so the liability is shown as ours.
+            const emptyNow = pUnits.length > 0 && occupiedUnits === 0;
+            const ctLiableNow = selfManaged ? (emptyNow || !(singleLetTenantPays || jtDocumented)) : ctLive > 0;
             const ctAmount = ctInfo.monthly == null ? 0 : ctInfo.monthly;
             const ctNow = ctLiableNow ? round2(ctAmount) : 0;
             // Review fix, 16 Sep 2026: an unknown council tax still has to be ADDED UP as something,
@@ -827,11 +831,12 @@
             // What we were liable for BEFORE any joint tenancy paperwork was ticked: the starting
             // point. Reading ctNow instead would erase a saving ticked before the freeze, the same
             // way reading the forecast rent would erase an uplift.
-            const liableBeforeTicks = selfManaged ? !singleLetTenantPays : ctLive > 0;
+            const liableBeforeTicks = selfManaged ? (emptyNow || !singleLetTenantPays) : ctLive > 0;
             const ctBeforeTicks = liableBeforeTicks ? round2(ctAmount) : 0;
             const ctBeforeTicksUnknown = liableBeforeTicks && ctInfo.monthly == null;
             const ctNowWhy = !selfManaged
                 ? (ctLive > 0 ? `We pay £${money(ctLive)} a month on this agent-run property (bank-fed cost row)` : 'The agent or tenant carries it: nothing in the bank feed')
+                : emptyNow ? 'Empty, so the council tax is ours until a tenant moves in'
                 : jtDocumented ? 'Every tenant has signed the joint agreement, so the council tax is theirs'
                 : singleLetTenantPays ? 'A single let: the tenant pays the council tax'
                 : chosen === 'UC joint tenancy' ? `Ours until every tenant's correct tenancy agreement is ticked (${view.tenants.filter(t => t.correctAgreement).length} of ${tenantCount} so far)`
@@ -913,7 +918,7 @@
                 planRent: round2(planRent), planCt: round2(planCt), planWhy,
                 bestRent: round2(bestOpt.rent), bestCt: round2(bestOpt.ct), bestWhy: bestOpt.name,
                 ctNowUnknown, planCtUnknown, bestCtUnknown: !!bestOpt.ctUnknown,
-                ctBeforeTicks, ctBeforeTicksUnknown, statedJoint, extraTenants,
+                ctBeforeTicks, ctBeforeTicksUnknown, statedJoint, extraTenants, emptyNow,
                 // Extra tenants only moves the plan for a UC HMO that is not being held as it is.
                 extraTenantsApplies: !holdFlat && (chosen === 'UC HMO' || (!chosen && current === 'UC HMO')),
                 extraTenantsWhy: holdFlat ? 'Leave as is holds it' : (chosen && chosen !== 'UC HMO') ? `only counts for a UC HMO, and the plan is ${chosen}` : (!chosen && current !== 'UC HMO') ? 'only counts for a UC HMO' : '',

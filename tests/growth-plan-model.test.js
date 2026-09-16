@@ -1083,11 +1083,13 @@ describe('review fixes: empty properties, extra tenants, and the single-let expl
         f.tenants = []; f.tenancies = [];
         return f;
     };
-    it('18 Siddows Avenue, empty: nothing coming in now, so a single let at £675 adds £675', () => {
+    it('18 Siddows Avenue, empty: nothing coming in now, so a single let at £675 adds £675 of rent', () => {
         const v = M.buildPlan(empty(499.70), S, TODAY).properties[0];
         expect(v.rentNow).toBe(0);
         expect(v.planRent).toBe(675);
-        expect(v.upliftChosen).toBe(675);
+        // Left for us rises by the rent AND the council tax we stop owing once it is let:
+        // 675 − (0 − 154.51). The empty-property council tax rule landed after this test.
+        expect(v.upliftChosen).toBe(829.51);
         expect(v.planWhy).toMatch(/it is empty now/);
     });
     it('an old placeholder above market is never planned as if collected', () => {
@@ -1125,5 +1127,45 @@ describe('review fixes: empty properties, extra tenants, and the single-let expl
         expect(M.buildPlan(jt, S, TODAY).properties[0]).toMatchObject({ extraTenantsApplies: false, extraTenantsWhy: 'only counts for a UC HMO, and the plan is UC joint tenancy' });
         const sl = singleLet();
         expect(M.buildPlan(sl, S, TODAY).properties[0]).toMatchObject({ extraTenantsApplies: false, extraTenantsWhy: 'only counts for a UC HMO' });
+    });
+});
+
+describe('an empty property (Kevin, 16 Sep 2026)', () => {
+    const empty = (over = {}) => {
+        const f = singleLet(Object.assign({ name: '18 Siddows Avenue', postcode: 'BB7 2NX', beds: 3, ctBand: 'B', ctAnnual: 0, strategy: 'Leave as is' }, over));
+        f.units[0].status = 'Void'; f.units[0].rent = 499.70; f.units[0].tenantIds = [];
+        f.tenants = []; f.tenancies = [];
+        return f;
+    };
+    it('owes its council tax to us until a tenant moves in, even as a single let', () => {
+        const v = M.buildPlan(empty(), S, TODAY).properties[0];
+        expect(v.current).toBe('Single let');
+        expect(v.emptyNow).toBe(true);
+        expect(v.ctNow).toBe(154.51);   // Ribble Valley band B: 2,383.79 × 7/9 ÷ 12
+        expect(v.ctNowWhy).toMatch(/Empty, so the council tax is ours until a tenant moves in/);
+        expect(v.ctBeforeTicks).toBe(154.51);
+    });
+    it('Leave as is holds that liability in the plan', () => {
+        const v = M.buildPlan(empty(), S, TODAY).properties[0];
+        expect(v.planCt).toBe(154.51);
+    });
+    it('once let as a single let, the plan hands the council tax to the tenant', () => {
+        const v = M.buildPlan(empty({ strategy: 'Single let' }), S, TODAY).properties[0];
+        expect(v.ctNow).toBe(154.51);
+        expect(v.planCt).toBe(0);
+        expect(v.planRent).toBe(675);
+    });
+    it('the moment a tenant is in, it is theirs again', () => {
+        const f = empty(); f.units[0].status = 'Occupied'; f.units[0].tenantIds = ['st'];
+        f.tenants = [{ id: 'st', name: 'New Tenant', status: 'Active', payType: 'Working' }];
+        f.tenancies = [{ id: 'sc', tenantIds: ['st'], unitId: 'su', rent: 675 }];
+        const v = M.buildPlan(f, S, TODAY).properties[0];
+        expect(v.emptyNow).toBe(false);
+        expect(v.ctNow).toBe(0);
+    });
+    it('one empty room in a house of tenants does not make the whole house empty', () => {
+        const f = fixture();
+        f.units.push({ id: 'u4', propertyId: 'p1', number: 4, type: 'Room', status: 'Void', rent: 400, tenantIds: [] });
+        expect(M.buildPlan(f, S, TODAY).properties[0].emptyNow).toBe(false);
     });
 });
