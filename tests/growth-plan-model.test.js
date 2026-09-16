@@ -170,8 +170,8 @@ describe('buildPlan levers', () => {
         expect(M.normaliseStrategy('Hold')).toBe('Leave as is');
         expect(M.normaliseStrategy('UC HMO')).toBe('UC HMO');
     });
-    it('HMO strategy with no planned extra tenants produces no rooms lever', () => {
-        const f = fixture(); f.properties[0].strategy = 'HMO'; f.properties[0].plannedExtra = 0;
+    it('HMO strategy with no room for another tenant produces no rooms lever', () => {
+        const f = fixture(); f.properties[0].strategy = 'HMO'; f.properties[0].lettableRooms = 3;   // 3 rooms, 3 tenants
         expect(M.buildPlan(f, S, TODAY).levers.find(x => x.key === 'rooms:p1')).toBeUndefined();
     });
     it('a joint tenancy house with no live cost is priced from its council tax band', () => {
@@ -182,7 +182,7 @@ describe('buildPlan levers', () => {
         expect(ct.evidence[0]).toMatch(/Band B: £1900.86 a year = £158.41 a month/);
     });
     it('tasks for a house go to its Growth Plan Owner, else paper to Kevin and works to Roy', () => {
-        const f = fixture(); f.properties[0].strategy = 'HMO'; f.properties[0].plannedExtra = 1;
+        const f = fixture(); f.properties[0].strategy = 'HMO'; f.properties[0].lettableRooms = 4;
         let p = M.buildPlan(f, S, TODAY);
         expect(p.levers.find(x => x.key === 'uplift:t1').owner).toBe('Kevin');
         expect(p.levers.find(x => x.key === 'rooms:p1').owner).toBe('Roy');
@@ -213,7 +213,7 @@ describe('buildPlan levers', () => {
         expect(l.title).toMatch(/re-let/);
     });
     it('a property pack carries everything for one visit: prep, tenants, works, afterwards', () => {
-        const f = fixture(); f.properties[0].strategy = 'HMO'; f.properties[0].plannedExtra = 1;
+        const f = fixture(); f.properties[0].strategy = 'HMO'; f.properties[0].lettableRooms = 4;
         const p = M.buildPlan(f, S, TODAY);
         expect(p.packs).toHaveLength(1);
         const pk = p.packs[0];
@@ -233,7 +233,7 @@ describe('buildPlan levers', () => {
         expect(pk.after.join(' ')).toMatch(/Diarise the CRF renewal/);
     });
     it('a tenant giving up a room is in the pack, with the rent-does-not-change line', () => {
-        const f = fixture(); f.properties[0].strategy = 'HMO'; f.properties[0].plannedExtra = 1;
+        const f = fixture(); f.properties[0].strategy = 'HMO'; f.properties[0].lettableRooms = 4;
         const p = M.buildPlan(f, S, TODAY);   // Paul Flat (52) holds a two-room flat-let
         const pk = p.packs[0];
         const paul = pk.tenants.find(t => t.name === 'Paul Flat');
@@ -274,7 +274,7 @@ describe('buildPlan levers', () => {
         expect(pk.monthly).toBe(Math.round((pk.levers.filter(l => l.status !== 'Done').reduce((n, l) => n + l.monthly, 0)) * 100) / 100);
     });
     it('the to-do list carries every counted lever with its owner, in stage order', () => {
-        const f = fixture(); f.properties[0].strategy = 'HMO'; f.properties[0].plannedExtra = 1;
+        const f = fixture(); f.properties[0].strategy = 'HMO'; f.properties[0].lettableRooms = 4;
         const p = M.buildPlan(f, S, TODAY);
         expect(p.todo.length).toBeGreaterThan(1);
         expect(p.todo[0].owner).toBe('Kevin');
@@ -295,8 +295,8 @@ describe('buildPlan levers', () => {
         expect(l.needs[0]).toMatch(/Set Growth Strategy/);
         expect(l.oneOff).toBe(1500);
     });
-    it('Add tenants strategy counts the planned number of new lets as now', () => {
-        const f = fixture(); f.properties[0].strategy = 'HMO'; f.properties[0].plannedExtra = 2;
+    it('UC HMO counts lettable rooms less tenants as new lets, now', () => {
+        const f = fixture(); f.properties[0].strategy = 'HMO'; f.properties[0].lettableRooms = 5;   // 5 rooms, 3 tenants
         const l = M.buildPlan(f, S, TODAY).levers.find(x => x.key === 'rooms:p1');
         expect(l.count).toBe(2);
         expect(l.counted).toBe('now');
@@ -311,11 +311,11 @@ describe('buildPlan levers', () => {
         expect(p.levers.find(x => x.key === 'uplift:t1')).toBeTruthy();
     });
     it('utilities only come off a new let when Kevin has taken the bills on (PAYG = No)', () => {
-        const f = fixture(); f.properties[0].strategy = 'HMO'; f.properties[0].plannedExtra = 1; f.properties[0].payg = 'No';
+        const f = fixture(); f.properties[0].strategy = 'HMO'; f.properties[0].lettableRooms = 4; f.properties[0].payg = 'No';
         expect(M.buildPlan(f, S, TODAY).levers.find(x => x.key === 'rooms:p1').monthly).toBe(897.52 - 75);
     });
     it('adds council tax to a new let when the house is not already owner-liable', () => {
-        const f = fixture(); f.costs = []; f.properties[0].ctNote = ''; f.properties[0].strategy = 'HMO'; f.properties[0].plannedExtra = 1;
+        const f = fixture(); f.costs = []; f.properties[0].ctNote = ''; f.properties[0].strategy = 'HMO'; f.properties[0].lettableRooms = 4;
         expect(M.buildPlan(f, S, TODAY).levers.find(x => x.key === 'rooms:p1').monthly).toBe(897.52 - 145);
     });
     it('with no strategy, a two-tenant house shows the joint tenancy as a candidate, either/or with the room let', () => {
@@ -346,7 +346,7 @@ describe('buildPlan levers', () => {
     });
     it('Add tenants strategy drops the joint tenancy lever', () => {
         const f = fixture(); f.units.pop(); f.tenants.pop(); f.tenancies.pop();
-        f.properties[0].strategy = 'HMO'; f.properties[0].plannedExtra = 1;
+        f.properties[0].strategy = 'HMO'; f.properties[0].lettableRooms = 4;
         const p = M.buildPlan(f, S, TODAY);
         expect(p.levers.find(x => x.key === 'ct:p1')).toBeUndefined();
         expect(p.levers.find(x => x.key === 'rooms:p1').counted).toBe('now');
@@ -389,7 +389,7 @@ describe('buildPlan levers', () => {
         expect(p.properties[0].tenants[0].note).toMatch(/CRF Housing Payment/);
     });
     it('the CRF total adds up the shortfall behind every counted lever', () => {
-        const f = fixture(); f.properties[0].strategy = 'HMO'; f.properties[0].plannedExtra = 1;
+        const f = fixture(); f.properties[0].strategy = 'HMO'; f.properties[0].lettableRooms = 4;
         const p = M.buildPlan(f, S, TODAY);
         expect(p.totals.crfShortfall).toBe(93 + 93); // Adam's uplift and one new let
         expect(p.totals.crfCount).toBe(2);
@@ -414,7 +414,7 @@ describe('buildPlan levers', () => {
         expect(M.monthlyFromFrequency(135, 'Monthly')).toBe(135);
     });
     it('remote levers split into works and voids', () => {
-        const f = fixture(); f.properties[0].postcode = 'M40 1EZ'; f.properties[0].strategy = 'HMO'; f.properties[0].plannedExtra = 1;
+        const f = fixture(); f.properties[0].postcode = 'M40 1EZ'; f.properties[0].strategy = 'HMO'; f.properties[0].lettableRooms = 4;
         f.units.push({ id: 'u5', propertyId: 'p1', number: 5, type: 'Whole Property', status: 'Void', rent: 0, tenantIds: [] });
         const p = M.buildPlan(f, S, TODAY);
         expect(p.totals.remoteVoids).toBeGreaterThan(0);
@@ -443,7 +443,7 @@ describe('buildPlan levers', () => {
         expect(p.totals.remote).toBe(0);
     });
     it('remote houses are priced but kept out of the local totals', () => {
-        const f = fixture(); f.properties[0].postcode = 'M40 1EZ'; f.properties[0].strategy = 'HMO'; f.properties[0].plannedExtra = 1;
+        const f = fixture(); f.properties[0].postcode = 'M40 1EZ'; f.properties[0].strategy = 'HMO'; f.properties[0].lettableRooms = 4;
         const p = M.buildPlan(f, S, TODAY);
         const l = p.levers.find(x => x.key === 'rooms:p1');
         expect(l.counted).toBe('remote');
@@ -468,7 +468,7 @@ describe('buildPlan levers', () => {
         const f = fixture();
         f.tenants[0].dob = '1996-01-01'; f.tenancies[0].rent = 520;   // under 35: room rate, £4.90 short
         f.tenants[2].dob = '1997-01-01'; f.tenancies[2].rent = 521;
-        f.properties[0].strategy = 'HMO'; f.properties[0].plannedExtra = 1;
+        f.properties[0].strategy = 'HMO'; f.properties[0].lettableRooms = 4;
         const p = M.buildPlan(f, S, TODAY);
         expect(p.levers.find(x => x.key === 'refresh:small')).toBeUndefined();
         expect(p.levers.filter(x => x.lever === 'Rate refresh').map(x => x.monthly).sort()).toEqual([3.9, 4.9]);
@@ -769,7 +769,7 @@ describe('the rent uplift tick', () => {
     });
     // Presetting everyone except the four as "Not needed" must never add a penny.
     it('Not needed adds nothing to now OR the plan, and raises no uplift move', () => {
-        const f = fixture(); f.properties[0].strategy = 'HMO'; f.properties[0].lettableRooms = 4;
+        const f = fixture(); f.properties[0].strategy = 'HMO'; f.properties[0].lettableRooms = 3;   // no room for another tenant
         tenant(f, 't1').rentUplift = 'Not needed';
         const p = M.buildPlan(f, S, TODAY);
         const v = p.properties[0];
@@ -789,7 +789,7 @@ describe('the rent uplift tick', () => {
     });
     it('To do sits in the plan column, not in now', () => {
         const f = fixture(); f.properties[0].strategy = 'HMO';
-        f.properties[0].lettableRooms = 4;   // no spare room, so only the uplift moves the plan
+        f.properties[0].lettableRooms = 3;   // no room for another tenant, so only the uplift moves the plan
         const v = M.buildPlan(f, S, TODAY).properties[0];
         expect(v.rentNow).toBe(1947.32);
         expect(v.upliftsToDo).toBe(372.62);
@@ -888,21 +888,39 @@ describe('the plan picker', () => {
 });
 
 describe('places and status read true', () => {
-    // 13 Chedburgh Place said "1 more place to fill" beside "plus 0 new rooms": the UC HMO
-    // strategy counts ROOMS (a flat-let is two) and was compared with LETS (a flat-let is one).
-    it('a flat-let never invents a spare place when the plan adds no rooms', () => {
+    // Kevin, 16 Sep 2026: extra tenants is the lettable rooms less the tenants living there,
+    // worked out, never typed. A flat-let tenant's second room is a lettable room.
+    it('extra tenants is lettable rooms less tenants, and planned places follow it', () => {
         const f = fixture(); f.properties[0].strategy = 'HMO'; f.properties[0].lettableRooms = 4;
         const v = M.buildPlan(f, S, TODAY).properties[0];
-        expect(v.roomInfo.rooms).toBe(4);      // room, flat-let (2), room
-        expect(v.unitsNow).toBe(3);            // three lets
-        expect(v.unitsExtra).toBe(0);
-        expect(v.planWhy).toMatch(/plus 0 new rooms/);
-    });
-    it('a spare lettable room is one place to fill', () => {
-        const f = fixture(); f.properties[0].strategy = 'HMO'; f.properties[0].lettableRooms = 5;
-        const v = M.buildPlan(f, S, TODAY).properties[0];
+        expect(v.tenantCount).toBe(3);
+        expect(v.extraTenants).toBe(1);
         expect(v.unitsExtra).toBe(1);
-        expect(v.unitsPlanned).toBe(4);
+        expect(v.planWhy).toMatch(/4 lettable rooms less 3 tenants = 1 more tenant/);
+    });
+    it('correcting the lettable rooms corrects the extra tenants, and a typed number is ignored', () => {
+        const f = fixture(); f.properties[0].strategy = 'HMO';
+        f.properties[0].plannedExtra = 2;   // the old typed field, which disagreed with the rooms
+        f.properties[0].lettableRooms = 4;
+        expect(M.buildPlan(f, S, TODAY).properties[0].extraTenants).toBe(1);
+        f.properties[0].lettableRooms = 3;
+        const v = M.buildPlan(f, S, TODAY).properties[0];
+        expect(v.extraTenants).toBe(0);
+        expect(v.planRent).toBe(Math.round((v.rentNow + v.upliftsToDo) * 100) / 100);   // the uplift still to do, and no new tenant
+    });
+    it('never goes below nothing when there are more tenants than rooms recorded', () => {
+        const f = fixture(); f.properties[0].strategy = 'HMO'; f.properties[0].lettableRooms = 2;
+        expect(M.buildPlan(f, S, TODAY).properties[0].extraTenants).toBe(0);
+    });
+    it('an empty room is not rent now, and is priced once in the plan', () => {
+        const f = fixture(); f.properties[0].strategy = 'HMO'; f.properties[0].lettableRooms = 4;
+        f.units.push({ id: 'u4', propertyId: 'p1', number: 4, type: 'Room', status: 'Void', rent: 400, tenantIds: [] });
+        const v = M.buildPlan(f, S, TODAY).properties[0];
+        expect(v.voidRent).toBe(400);
+        expect(v.rentNow).toBe(1947.32);                              // the empty room's £400 placeholder is not rent coming in
+        expect(v.recordRent).toBe(1947.32);
+        expect(v.extraTenants).toBe(1);
+        expect(v.planRent).toBe(Math.round((1947.32 + 372.62 + 897.52) * 100) / 100);   // the empty room at the 1-bed rate, once
     });
     it('an agent-run property reads Agent-run, never Not decided', () => {
         const f = fixture(); f.properties[0].agent = 'Roc Immo';
@@ -1012,5 +1030,100 @@ describe('review fix 5: where we started', () => {
         expect(byId.p1).toMatchObject({ rent: 1947.32, ct: 135, date: TODAY });
         expect(byId.sl2).toBeUndefined();
         expect(byId.sl3).toMatchObject({ rent: null, ct: 0, date: null });
+    });
+});
+
+describe('a single let is planned at the open-market rent (Kevin, 16 Sep 2026)', () => {
+    const marloes = (over = {}) => {
+        const f = singleLet(Object.assign({ name: '15 Marloes Court', postcode: 'SA5 7JW', beds: 3, ctBand: 'A', ctAnnual: 1492.19, agent: 'Simon Collins', strategy: 'Single let' }, over));
+        f.units[0].rent = 237; f.tenancies[0].rent = 237;
+        return f;
+    };
+    it('15 Marloes Court: £237 now, £950 market, so the plan adds £713', () => {
+        const v = M.buildPlan(marloes(), S, TODAY).properties[0];
+        expect(v.current).toBe('Single let');
+        expect(v.chosen).toBe('Single let');
+        expect(v.planRent).toBe(950);
+        expect(v.planCt).toBe(0);
+        expect(v.upliftChosen).toBe(713);
+        expect(v.planWhy).toMatch(/open-market rent of £950.00/);
+        expect(v.progress).toBe('No change needed');   // nothing to tick yet; the figure is the point
+    });
+    it('a rent already above market is held, never planned downwards', () => {
+        const f = marloes({ name: '22 Newton Street', postcode: 'BB12 0LG' });
+        f.units[0].rent = 1800; f.tenancies[0].rent = 1800;
+        const v = M.buildPlan(f, S, TODAY).properties[0];
+        expect(v.planRent).toBe(1800);
+        expect(v.upliftChosen).toBe(0);
+        expect(v.planWhy).toMatch(/Already at or above/);
+    });
+    it('a single let where we took the bills on keeps the council tax in the plan', () => {
+        const v = M.buildPlan(marloes({ ctPayer: 'Owner' }), S, TODAY).properties[0];
+        expect(v.planCt).toBe(124.35);
+        expect(v.upliftChosen).toBe(713);   // we already pay it now, so the change is still the rent
+    });
+    it('Leave as is still holds a single let flat', () => {
+        const v = M.buildPlan(marloes({ strategy: 'Leave as is' }), S, TODAY).properties[0];
+        expect(v.planRent).toBe(237);
+        expect(v.upliftChosen).toBe(0);
+    });
+    it('an HMO re-let as a single let is priced at market, not held at its room rents', () => {
+        const f = fixture(); f.properties[0].strategy = 'Single let';
+        f.properties[0].name = '13 Chedburgh Place';
+        const v = M.buildPlan(f, S, TODAY).properties[0];
+        expect(v.current).toBe('UC HMO');
+        expect(v.planRent).toBe(1247);   // the Haverhill 3-bed market rent, below the £1,947.32 now
+    });
+});
+
+describe('review fixes: empty properties, extra tenants, and the single-let explanation', () => {
+    const empty = (placeholder, over = {}) => {
+        const f = singleLet(Object.assign({ name: '18 Siddows Avenue', postcode: 'BB7 2NX', beds: 3, ctBand: 'B', ctAnnual: 0, strategy: 'Single let' }, over));
+        f.units[0].status = 'Void'; f.units[0].rent = placeholder; f.units[0].tenantIds = [];
+        f.tenants = []; f.tenancies = [];
+        return f;
+    };
+    it('18 Siddows Avenue, empty: nothing coming in now, so a single let at £675 adds £675', () => {
+        const v = M.buildPlan(empty(499.70), S, TODAY).properties[0];
+        expect(v.rentNow).toBe(0);
+        expect(v.planRent).toBe(675);
+        expect(v.upliftChosen).toBe(675);
+        expect(v.planWhy).toMatch(/it is empty now/);
+    });
+    it('an old placeholder above market is never planned as if collected', () => {
+        const v = M.buildPlan(empty(900), S, TODAY).properties[0];
+        expect(v.planRent).toBe(675);
+    });
+    it('the starting figure an empty property freezes with is what comes in, not the placeholder', () => {
+        const p = M.buildPlan(empty(499.70), S, TODAY);
+        expect(p.totals.toFreeze[0].rent).toBe(0);
+        expect(p.totals.grid.started.rent).toBe(0);
+    });
+    it('the explanation says we pay the council tax when we do', () => {
+        const f = singleLet({ name: '15 Marloes Court', postcode: 'SA5 7JW', ctBand: 'A', ctAnnual: 1492.19, ctPayer: 'Owner', strategy: 'Single let' });
+        f.units[0].rent = 237; f.tenancies[0].rent = 237;
+        const v = M.buildPlan(f, S, TODAY).properties[0];
+        expect(v.planWhy).toMatch(/we pay the council tax \(£124.35 a month\)/);
+        expect(v.planWhy).not.toMatch(/tenant pays/);
+    });
+    it('a missing market rent is named, not reported as "at or above £0.00"', () => {
+        const f = singleLet({ name: 'Nowhere House', postcode: 'ZZ99 9ZZ', strategy: 'Single let' });
+        const v = M.buildPlan(f, S, TODAY).properties[0];
+        expect(v.market.rent).toBe(0);
+        expect(v.planRent).toBe(1000);
+        expect(v.planWhy).toMatch(/No open-market rent is known/);
+        expect(v.planWhy).not.toMatch(/£0\.00/);
+    });
+    it('extra tenants only counts where the plan is a UC HMO', () => {
+        const hmo = fixture(); hmo.properties[0].strategy = 'HMO';
+        expect(M.buildPlan(hmo, S, TODAY).properties[0].extraTenantsApplies).toBe(true);
+        const noPlan = fixture();
+        expect(M.buildPlan(noPlan, S, TODAY).properties[0].extraTenantsApplies).toBe(true);   // a UC HMO today, nothing picked
+        const held = fixture(); held.properties[0].strategy = 'Leave as is';
+        expect(M.buildPlan(held, S, TODAY).properties[0]).toMatchObject({ extraTenantsApplies: false, extraTenantsWhy: 'Leave as is holds it' });
+        const jt = twoFlatLets();
+        expect(M.buildPlan(jt, S, TODAY).properties[0]).toMatchObject({ extraTenantsApplies: false, extraTenantsWhy: 'only counts for a UC HMO, and the plan is UC joint tenancy' });
+        const sl = singleLet();
+        expect(M.buildPlan(sl, S, TODAY).properties[0]).toMatchObject({ extraTenantsApplies: false, extraTenantsWhy: 'only counts for a UC HMO' });
     });
 });

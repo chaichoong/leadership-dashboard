@@ -473,6 +473,56 @@ test.describe('Growth Plan page', () => {
     await expect(open.locator('tr', { hasText: 'room rate to 1-bed rate' }).first()).toBeVisible();
   });
 
+  test('every row shows our plan and the ceiling side by side', async ({ page }) => {
+    const fx = fixtures();
+    fx[TBL.properties][2].fields[P.strategy] = 'Single let';   // 13 Far Street: a single let at £257
+    await openPage(page, fx);
+    const far = page.locator('#selfList .pack', { hasText: '13 Far Street' });
+    const figs = far.locator('.pack-fig .figcol');
+    await expect(figs).toHaveCount(2);
+    await expect(figs.nth(0).locator('.figlbl')).toHaveText('Our plan');
+    await expect(figs.nth(1).locator('.figlbl')).toHaveText('Ceiling');
+    // 13 Far Street has no researched market rent, so the plan uses the 2-bed housing allowance
+    // estimate (£473.72), which is above its £257: picking Single let must show that rise
+    await expect(figs.nth(0).locator('b')).not.toHaveText('no change');
+    await expect(figs.nth(0)).toContainText('Single let');
+    // a property with no plan still shows its ceiling beside a clear "no plan picked"
+    const park = page.locator('#selfList .pack', { hasText: '18 Test Park' });
+    await expect(park.locator('.pack-fig .figcol')).toHaveCount(2);
+    const agent = page.locator('#agentList .pack', { hasText: '9 Agent Road' });
+    await expect(agent.locator('.pack-fig .figcol').nth(0)).toContainText('agent-run');
+    await expect(agent.locator('.pack-fig .figcol').nth(1).locator('.figlbl')).toHaveText('Ceiling');
+  });
+
+  test('extra tenants is worked out from lettable rooms, and has no box to type in', async ({ page }) => {
+    const writes = await openPage(page, fixtures());   // the fixture still carries a typed Planned Extra Tenants of 1
+    const open = await openSelf(page, '18 Test Park');
+    await expect(open.locator('input[data-prop-field="plannedExtra"]')).toHaveCount(0);
+    const extra = () => page.locator('#selfList .pack.open [data-extra-tenants="recProp1"]');
+    await expect(extra()).toHaveText('1');                                   // 4 rooms (a flat-let is two) − 3 tenants
+    await expect(page.locator('#selfList .pack.open .calcfield')).toContainText('4 lettable rooms − 3 tenants');
+    const rooms = open.locator('input[data-prop-field="lettableRooms"]');
+    await rooms.fill('6');
+    await rooms.dispatchEvent('change');
+    await expect(page.locator('#toast')).toContainText('Saved');
+    expect(writes.filter(x => x.tableId === TBL.properties).pop().records[0].fields[P.lettableRooms]).toBe(6);
+    await expect(extra()).toHaveText('3');                                   // 6 rooms − 3 tenants
+    await expect(page.locator('#selfList .pack.open .calcfield')).toContainText('6 lettable rooms − 3 tenants');
+    expect(writes.some(w => w.records.some(r => P.plannedExtra in (r.fields || {})))).toBe(false);   // nothing writes the old field
+  });
+
+  test('extra tenants shows a number only where it counts, and says why elsewhere', async ({ page }) => {
+    const fx = fixtures();
+    fx[TBL.properties][2].fields[P.strategy] = 'Single let';   // 13 Far Street
+    await openPage(page, fx);
+    let open = await openSelf(page, '13 Far Street');
+    await expect(open.locator('[data-extra-tenants="recProp2"]')).toHaveText('—');
+    await expect(open.locator('.calcfield')).toContainText('only counts for a UC HMO, and the plan is Single let');
+    await page.locator('#selfList .pack.open .pack-head').click();   // close it
+    open = await openSelf(page, '18 Test Park');
+    await expect(open.locator('[data-extra-tenants="recProp1"]')).toHaveText('1');
+  });
+
   test('shows the empty state and no crash when nothing loads', async ({ page }) => {
     const fx = fixtures(); Object.keys(fx).forEach(k => { fx[k] = []; });
     await page.addInitScript(pat => { localStorage.setItem('airtable_pat', pat); }, MOCK_PAT);
