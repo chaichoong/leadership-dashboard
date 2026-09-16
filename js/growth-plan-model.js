@@ -718,6 +718,9 @@
             // 5 rooms, 4 tenants, typed 2) and is no longer read.
             const roomInfo = rentableRoomsFor(prop, pUnits);
             const extraTenants = Math.max(0, roomInfo.rooms - view.tenants.length);
+            // A joint tenancy move already started on this house (see the interim move below).
+            const interimRow = (() => { const r = planByKey[`ct:${prop.id}`]; return r && ['Adopted', 'In progress', 'Done'].includes(r.status) ? r : null; })();
+            let interimJtDone = false;
             if (ours && rates) {
                 // Kevin's strategy per house (Properties → Growth Strategy, 9 Sep 2026) decides
                 // which of the two house levers applies. Joint tenancy: council tax to the
@@ -783,6 +786,23 @@
                         needs: ['Joint tenancy agreement from ast_joint_template.md', 'Council Tax Reduction claim for the tenants at the same meeting, backdated to the tenancy start', 'Tell the council the liability has changed'],
                         firstStep: `Prepare the joint tenancy agreement for ${prop.name}, then book the tenant meeting`,
                     }, planByKey));
+                } else if (strategy === 'UC HMO' && occupants === 2 && extraTenants > 0 && interimRow) {
+                    // Kevin, 16 Sep 2026 (14 Wentworth Terrace): a house planned as a UC HMO still signs its
+                    // two tenants onto a joint tenancy first, to take the council tax off us to date. It comes
+                    // back to us when the third tenant moves in, so the move adds nothing to the plan. Only a
+                    // move already started is kept, so no other two-tenant house grows a new candidate.
+                    const names = view.tenants.map(t => t.name).join(' and ');
+                    levers.push(lever({
+                        key: `ct:${prop.id}`, lever: 'Council tax', propertyId: prop.id, property: prop.name, interim: true,
+                        title: `${prop.name}: joint tenancy for ${names}, clears the council tax to date`,
+                        monthly: 0, monthlyIfExempt: 0, oneOff: 0, effort: 'Paper', counted: 'now',
+                        evidence: [`A step before the third tenant: while ${names} are the only tenants, the joint tenancy takes the council tax off us`,
+                            'It comes back to us when the third tenant moves in, so it adds nothing to the plan',
+                            'One agreement of 6+ months for the whole house makes the tenants liable (SI 2023/1175)'],
+                        needs: ['Joint tenancy agreement from ast_joint_template.md', 'Tell the council the liability has changed, backdated to the tenancy start'],
+                        firstStep: `Sign ${names} onto one joint tenancy for ${prop.name}, then tell the council`,
+                    }, planByKey));
+                    interimJtDone = interimRow.status === 'Done';
                 } else if (ownerPaysCt && occupants >= 3) {
                     view.flags.push(`Council tax stays with the owner while ${occupants} tenants are let by the room`);
                 }
@@ -890,7 +910,9 @@
             // property is a single let today, or a joint tenancy where EVERY tenant has the
             // correct agreement ticked. An explicit "Owner" payer on a single let means we took
             // the bills on. On an agent-run property we only know what the bank shows we pay.
-            const jtDocumented = chosen === 'UC joint tenancy' && tenantCount > 0 && view.tenants.every(t => t.correctAgreement);
+            // The interim joint tenancy on a UC HMO house counts once its move is marked Done: the
+            // council tax is the tenants' until the third tenant moves in (Kevin, 16 Sep 2026).
+            const jtDocumented = (chosen === 'UC joint tenancy' && tenantCount > 0 && view.tenants.every(t => t.correctAgreement)) || interimJtDone;
             const singleLetTenantPays = current === 'Single let' && prop.ctPayer !== 'Owner';
             // Kevin, 16 Sep 2026: a property with nobody in it is OURS for council tax until a
             // tenant moves in, whatever it is let as. 18 Siddows Avenue read £0 as a "single let"
@@ -917,6 +939,7 @@
                 : !selfManaged
                 ? (ctLive > 0 ? `We pay £${money(ctLive)} a month on this agent-run property (bank-fed cost row)` : 'The agent or tenant carries it: nothing in the bank feed')
                 : emptyNow ? 'Empty, so the council tax is ours until a tenant moves in'
+                : interimJtDone ? 'The joint tenancy is signed, so the council tax is theirs until the third tenant moves in'
                 : jtDocumented ? 'Every tenant has signed the joint agreement, so the council tax is theirs'
                 : singleLetTenantPays ? 'A single let: the tenant pays the council tax'
                 : chosen === 'UC joint tenancy' ? `Ours until every tenant's correct tenancy agreement is ticked (${view.tenants.filter(t => t.correctAgreement).length} of ${tenantCount} so far)`
