@@ -53,6 +53,27 @@ function seedRepo(ids) {
     ids.map((i) => `const X = '${i}';`).join('\n'));
 }
 
+// Since 16 Sep 2026 (finding 20260814-drift-monitor-127) the map also records
+// the TYPE each mapped field is expected to be, and the scan REFUSES rather
+// than reporting zero mismatches off an untyped map. Fixtures type themselves
+// from the schema they were built with, so "no drift" fixtures stay no-drift.
+function typesFrom(sch) {
+  const out = {};
+  for (const t of Object.values(sch)) {
+    for (const [fid, f] of Object.entries(t.fields)) out[fid] = f.type;
+  }
+  return out;
+}
+
+function refMapFor(sch, extraFields = {}) {
+  const ids = idsFrom(sch);
+  return {
+    fields: { ...Object.fromEntries(ids.map((i) => [i, 'x'])), ...extraFields },
+    tables: {},
+    fieldTypes: typesFrom(sch),
+  };
+}
+
 function idsFrom(sch) {
   const out = [];
   for (const [tid, t] of Object.entries(sch)) {
@@ -103,8 +124,7 @@ describe('controls — a scan that cannot see must not report clean', () => {
     // and reads as "no rogue references, all clean".
     const s = schema(60);
     const ids = idsFrom(s);
-    writeFileSync(join(box, 'reference-map.json'),
-      JSON.stringify({ fields: Object.fromEntries(ids.map((i) => [i, 'x'])), tables: {} }));
+    writeFileSync(join(box, 'reference-map.json'), JSON.stringify(refMapFor(s)));
     mkdirSync(join(repo, 'js'), { recursive: true });
     writeFileSync(join(repo, 'js', 'empty.js'), '// no ids here at all\n');
     const r = scan(['--schema-file', writeSchema('s.json', s)]);
@@ -122,8 +142,7 @@ describe('controls — a scan that cannot see must not report clean', () => {
 describe('the diff itself', () => {
   function ready(s) {
     const ids = idsFrom(s);
-    writeFileSync(join(box, 'reference-map.json'),
-      JSON.stringify({ fields: Object.fromEntries(ids.map((i) => [i, 'x'])), tables: {} }));
+    writeFileSync(join(box, 'reference-map.json'), JSON.stringify(refMapFor(s)));
     seedRepo(ids);
   }
 
@@ -250,10 +269,8 @@ describe('the diff itself', () => {
   it('flags a mapped field that no longer exists upstream as DEAD', () => {
     const s = schema(60);
     const ids = idsFrom(s);
-    writeFileSync(join(box, 'reference-map.json'), JSON.stringify({
-      fields: { ...Object.fromEntries(ids.map((i) => [i, 'x'])), fldDEADDEADDEAD1: 'gone' },
-      tables: {},
-    }));
+    writeFileSync(join(box, 'reference-map.json'),
+      JSON.stringify(refMapFor(s, { fldDEADDEADDEAD1: 'gone' })));
     seedRepo(ids);
     writeFileSync(join(box, 'schema-2020-01-01.json'), JSON.stringify(s));
     const r = scan(['--schema-file', writeSchema('s.json', s)]);
@@ -363,5 +380,110 @@ describe('it is wired into the day', () => {
     // state, so a passing scan tomorrow means something.
     const ref = JSON.parse(require('node:fs').readFileSync(join(MONITORING, 'reference-map.json'), 'utf8'));
     expect(Object.keys(ref.fields || {}).length).toBeGreaterThan(100);
+  });
+
+  it('the real reference map records an expected TYPE for what it maps', () => {
+    // Finding 20260814-drift-monitor-127: it did not, so TYPE_MISMATCH
+    // reported 0 every day for a month and read as clean. Regenerate with
+    // scripts/build-reference-map.py.
+    const ref = JSON.parse(require('node:fs').readFileSync(join(MONITORING, 'reference-map.json'), 'utf8'));
+    const types = ref.fieldTypes || {};
+    expect(Object.keys(types).length).toBeGreaterThan(100);
+    // Types, not placeholders.
+    expect(new Set(Object.values(types)).size).toBeGreaterThan(5);
+    expect(Object.values(types).every((t) => typeof t === 'string' && t.length > 0)).toBe(true);
+  });
+});
+
+// ─── FINDING 20260814-drift-monitor-127 ──────────────────────────────
+//
+// CHECK 2 of drift-monitor/SKILL.md has asked for TYPE_MISMATCH since the scan
+// was written — "field exists but type changed, e.g. singleLineText -> number".
+// It could never fire: reference-map.json stored a field's JS constant name and
+// nothing else, so there was no expected type to compare against. The check
+// reported 0 every day and read as clean, which is the same shape as the UC
+// search that matched 0 of 91 records for four months.
+//
+// This is NOT the snapshot diff. retyped_fields compares yesterday's snapshot
+// with today's, so it sees a retype only when the job ran on both sides of it;
+// a retype during a gap, or before the baseline, is invisible to it for ever.
+// This compares what the CODE expects against what is LIVE, so it is true
+// whenever it runs.
+describe('TYPE_MISMATCH: what the code expects vs what is live (finding 127)', () => {
+  function retype(sch, fid, type) {
+    const copy = JSON.parse(JSON.stringify(sch));
+    for (const t of Object.values(copy)) {
+      if (t.fields[fid]) t.fields[fid].type = type;
+    }
+    return copy;
+  }
+
+  it('BACK-TEST: a field retyped upstream is reported and turns the verdict to DRIFT', () => {
+    const s = schema(60);
+    const target = 'fld' + '0'.repeat(13) + '7';
+    const live = retype(s, target, 'number');
+    // The map still says what the code was written against.
+    writeFileSync(join(box, 'reference-map.json'), JSON.stringify(refMapFor(s)));
+    seedRepo(idsFrom(s));
+    writeFileSync(join(box, 'schema-2020-01-01.json'), JSON.stringify(live));
+    const r = scan(['--schema-file', writeSchema('live.json', live)]);
+    expect(r.code).toBe(1);
+    expect(r.json.verdict).toBe('DRIFT');
+    expect(r.json.type_mismatches).toEqual([
+      `${target}: expected singleLineText, live number`,
+    ]);
+  });
+
+  it('reports 0-of-N, never 0-of-nothing: the count is stated with the result', () => {
+    const s = schema(60);
+    writeFileSync(join(box, 'reference-map.json'), JSON.stringify(refMapFor(s)));
+    seedRepo(idsFrom(s));
+    writeFileSync(join(box, 'schema-2020-01-01.json'), JSON.stringify(s));
+    const r = scan(['--schema-file', writeSchema('s.json', s)]);
+    expect(r.json.type_mismatches).toEqual([]);
+    expect(r.json.type_checked).toBe(60);
+  });
+
+  it('THE CONTROL: an untyped map REFUSES rather than reporting zero mismatches', () => {
+    // This is the state production was in for a month. Before the fix the scan
+    // exited 0 and said CLEAN.
+    const s = schema(60);
+    const ids = idsFrom(s);
+    writeFileSync(join(box, 'reference-map.json'),
+      JSON.stringify({ fields: Object.fromEntries(ids.map((i) => [i, 'x'])), tables: {} }));
+    seedRepo(ids);
+    const r = scan(['--schema-file', writeSchema('s.json', s)]);
+    expect(r.code).toBe(2);
+    expect(r.err).toMatch(/records a type for only 0 of 60/);
+    expect(r.err).toMatch(/CANNOT VERIFY/);
+  });
+
+  it('a HALF-typed map refuses too — a floor, not a presence check', () => {
+    const s = schema(60);
+    const ids = idsFrom(s);
+    const full = typesFrom(s);
+    const half = Object.fromEntries(Object.entries(full).slice(0, 20));
+    writeFileSync(join(box, 'reference-map.json'), JSON.stringify({
+      fields: Object.fromEntries(ids.map((i) => [i, 'x'])), tables: {}, fieldTypes: half,
+    }));
+    seedRepo(ids);
+    const r = scan(['--schema-file', writeSchema('s.json', s)]);
+    expect(r.code).toBe(2);
+    expect(r.err).toMatch(/records a type for only 20 of 60/);
+  });
+
+  it('a DEAD mapped id does not drag the coverage floor down', () => {
+    // It has no live type to compare, and dead_mapped_ids already owns it.
+    // Counting it would make the scan refuse for a reason it already reports.
+    const s = schema(60);
+    writeFileSync(join(box, 'reference-map.json'),
+      JSON.stringify(refMapFor(s, { fldDEADDEADDEAD1: 'gone' })));
+    seedRepo(idsFrom(s));
+    writeFileSync(join(box, 'schema-2020-01-01.json'), JSON.stringify(s));
+    const r = scan(['--schema-file', writeSchema('s.json', s)]);
+    expect(r.code).toBe(1);
+    expect(r.err).not.toMatch(/CANNOT VERIFY/);
+    expect(r.json.dead_mapped_ids).toContain('fldDEADDEADDEAD1');
+    expect(r.json.type_checked).toBe(60);
   });
 });

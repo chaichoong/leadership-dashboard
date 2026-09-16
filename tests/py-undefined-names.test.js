@@ -35,6 +35,9 @@ const ESTATE_SCRIPTS = [
   'scripts/job-queue.py',
   'scripts/estate-status.py',
   'scripts/loop-health.py',
+  'scripts/drift-scan.py',
+  'scripts/build-reference-map.py',
+  'scripts/agent-accuracy-report.py',
 ];
 
 describe('estate scripts read no name they never bind', () => {

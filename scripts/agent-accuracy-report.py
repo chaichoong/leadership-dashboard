@@ -36,6 +36,9 @@ TEAM = "tblco0p2OnlLQVAX7"
 MIN_SAMPLE = 20
 MIN_RATE = 0.9
 RECENT_N = 10
+# "Stuck" for the huddle's workforce check: sent for approval and still
+# undecided a day later. One number, one reader (finding 20260902-ceo-agent-432).
+STUCK_HOURS = 24
 # Kevin's ruling, 28 Aug 2026. The day the first agent ever cleared this bar,
 # all 26 of its decisions had happened in THREE days. Volume is not consistency:
 # a busy Tuesday manufactures a sample in an afternoon, and elapsed time is the
@@ -101,6 +104,35 @@ def query(token, table, formula=None, fields=None):
         offset = body.get("offset")
         if not offset:
             return records
+
+
+def stuck_over(waiting, hours):
+    """The subset of `waiting` sent for approval and undecided for `hours`.
+
+    Age is read from Airtable's own `createdTime` on each record rather than
+    from a filterByFormula date comparison. A bare `{Created}` comparison in a
+    formula returns zero rows even when the records exist (CLAUDE.md, Airtable
+    Conventions), and a zero that means "the query broke" is indistinguishable
+    from a zero that means "nothing is stuck" — which is exactly how the 2 Sep
+    CEO slot ended up reporting 0 and 77 for the same queue.
+    """
+    cutoff = (datetime.datetime.now(datetime.timezone.utc)
+              - datetime.timedelta(hours=hours))
+    out = []
+    for r in waiting:
+        if not r.get("fields", {}).get("Sent For Approval By"):
+            continue
+        raw = (r.get("createdTime") or "").replace("Z", "+00:00")
+        try:
+            created = datetime.datetime.fromisoformat(raw)
+        except ValueError:
+            # No readable stamp is NOT evidence of freshness. Count it, so an
+            # unreadable record shows up rather than quietly shrinking the number.
+            out.append(r)
+            continue
+        if created <= cutoff:
+            out.append(r)
+    return out
 
 
 def first_link(value):
@@ -205,7 +237,7 @@ def main():
     waiting = query(token, TASKS,
                     "AND({Status} = 'Approval', "
                     "NOT(IS_AFTER({Deferred Until}, TODAY())))",
-                    ["Task Name"])
+                    ["Task Name", "Sent For Approval By"])
     team = query(token, TEAM, None, ["Name"])
     names = {r["id"]: r["fields"].get("Name", r["id"]) for r in team}
 
@@ -233,8 +265,26 @@ def main():
         for r in rows if r["ready"]
     ]
 
+    # ONE READER FOR THIS NUMBER (16 Sep 2026, finding 20260902-ceo-agent-432).
+    # The 2 Sep 06:45 CEO slot could not reconcile its own approval queue: a
+    # hand-rolled curl said 0 while this script said 77, and the run reported
+    # both. The huddle's "stuck approvals" line was the only part of the queue
+    # this script did not already answer, so the agent improvised a query — and
+    # an improvised Airtable query is the silent-zero trap by default (a date
+    # compared without DATESTR, or FIND(recXXX, ARRAYJOIN({Link})) against a
+    # link field, both return 200 OK and an empty list).
+    #
+    # Age comes from the record's own `createdTime`, which Airtable returns on
+    # every record, so there is no date formula to get wrong. The subset is
+    # taken from the SAME population as waiting_for_kevin, so the two can never
+    # disagree, and both are printed together: a zero stuck against a non-zero
+    # queue is a real answer, a zero stuck against a zero queue is the case
+    # that needs explaining rather than reporting.
+    stuck = stuck_over(waiting, STUCK_HOURS)
     payload = {
         "waiting_for_kevin": len(waiting),
+        "stuck_hours": STUCK_HOURS,
+        "stuck_over_hours": len(stuck),
         "decisions_recorded": len(decisions),
         "rows": rows,
         "recommendations": recommendations,
@@ -247,6 +297,11 @@ def main():
     print("Agent accuracy — per agent, per task type")
     print("=" * 60)
     print(f"Waiting for Kevin right now : {len(waiting)}")
+    # Always printed, including the zeros. The control the huddle used to be
+    # told to run by hand is this pairing: stuck can only be zero-of-N, never
+    # zero-of-nothing-we-failed-to-read.
+    print(f"Of those, stuck over {STUCK_HOURS}h     : {len(stuck)} "
+          f"(sent for approval, undecided since)")
     print(f"Decisions recorded          : {len(decisions)}")
     # Why the number may not have moved yet. A score you cannot explain is a
     # score nobody acts on, and this one changed shape on 27 Aug 2026: every

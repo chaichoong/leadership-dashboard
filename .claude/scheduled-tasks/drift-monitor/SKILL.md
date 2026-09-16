@@ -87,9 +87,20 @@ The file `monitoring/reference-map.json` contains all Airtable IDs referenced in
 - `records`: 9 record IDs (rec...) mapped to their JS constant name
 - `selectChoices`: 11 select choice IDs (sel...) mapped to their JS constant name
 
+- `fieldTypes`: the TYPE each mapped field is expected to be, added 16 Sep 2026
+
 For each field ID in reference-map.json, verify it exists in today's schema snapshot with the expected type. Report:
 - **DEAD**: field ID exists in code but NOT in Airtable (deleted upstream)
-- **TYPE_MISMATCH**: field exists but type changed (e.g., singleLineText -> number)
+- **TYPE_MISMATCH**: field exists but type changed (e.g., singleLineText -> number).
+  `scripts/drift-scan.py` does this, in `type_mismatches`, and states `type_checked`
+  beside it so a zero is always zero-of-N. Until 16 Sep 2026 it could not fire at all:
+  the map stored a constant name and no type, so there was nothing to compare and the
+  check read clean every day for a month (finding `20260814-drift-monitor-127`). The
+  scan now REFUSES (exit 2, CANNOT VERIFY) if fewer than 90% of the live fields it maps
+  carry a recorded type, so the untyped state can never read as clean again.
+  When a type change is DELIBERATE, re-record the new expectation with
+  `python3 scripts/build-reference-map.py` and commit the map in the same change as the
+  code that now expects it. `--check` reports staleness without writing.
 - **ORPHAN**: field exists in Airtable but is no longer referenced in any js/ file (grep all js/*.js for the field ID)
 
 Also scan for hardcoded Airtable IDs (`fld`/`tbl`/`rec`/`sel`) that are NOT in config.js — these
@@ -279,6 +290,8 @@ Write the full report to `monitoring/drift-{date}.md` with this structure:
 - If CHECK 4 fails because no browser is available, that's fine — note it and continue.
 - Always WRITE the drift report and schema snapshot to `monitoring/`, even if no issues found.
 - Update monitoring/reference-map.json if new fields were added to config.js since last run.
+  `python3 scripts/build-reference-map.py` refreshes the `fieldTypes` block from the live
+  base; run it whenever the map's id lists change, or the type check loses coverage.
 
 ## Leave the record, do not commit it
 

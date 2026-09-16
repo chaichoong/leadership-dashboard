@@ -298,10 +298,20 @@ describe('check-routines grades the lane, not the run marker', () => {
 describe('a broken email lane makes the slot exit non-zero (finding 451)', () => {
   const POSTRUN = resolve(__dirname, '../scripts/slot-postrun.sh');
 
-  // The exact pattern inbound-triage-run.sh hands slot-postrun.sh.
-  const BAD_ERE = readFileSync(resolve(__dirname, '../scripts/inbound-triage-run.sh'), 'utf8')
-    .split('\n').filter((l) => l.includes('OAuth access token has expired')).pop()
+  // The exact patterns inbound-triage-run.sh hands slot-postrun.sh. The
+  // trailing-backslash strip matters: on 16 Sep 2026 a ninth argument was added
+  // (the TOLERATED list, finding 20260915-daily-ops-exceptions-531), which put a
+  // line continuation on the end of the marker line. Without the strip this
+  // helper fed grep a pattern ending in `\` — grep errored, nothing matched, and
+  // this test reported "the epilogue does not treat a broken lane as a failure"
+  // when the only broken thing was the extraction.
+  const WRAPPER = readFileSync(resolve(__dirname, '../scripts/inbound-triage-run.sh'), 'utf8');
+  const quoted = (needle) => WRAPPER.split('\n')
+    .filter((l) => l.includes(needle)).pop()
+    .replace(/\\\s*$/, '')
     .replace(/^\s*'|'\s*$/g, '');
+  const BAD_ERE = quoted('OAuth access token has expired');
+  const TOLERATED_ERE = quoted('GMAIL RATE METRIC STILL FULL');
 
   function postrun(tail, rc = 0) {
     const d = box('postrun-' + Math.random().toString(36).slice(2));
@@ -315,7 +325,7 @@ describe('a broken email lane makes the slot exit non-zero (finding 451)', () =>
     writeFileSync(marker, '');
     try {
       execFileSync('bash', [POSTRUN, 'inbound-triage', String(rc), log, '1',
-        marker, scratch, '"body" *:', BAD_ERE],
+        marker, scratch, '"body" *:', BAD_ERE, TOLERATED_ERE],
       { encoding: 'utf8', env: { ...process.env, SLOT_POSTRUN_REPO: d } });
       return 0;
     } catch (e) {
@@ -327,6 +337,14 @@ describe('a broken email lane makes the slot exit non-zero (finding 451)', () =>
     // The literal line inbound-triage-run.sh writes when the probe says broken.
     expect(postrun('EMAIL LANE BROKEN (quota) — skill 1 skipped this slot\n'))
       .not.toBe(0);
+  });
+
+  it('the extracted patterns are usable regexes, not shell fragments', () => {
+    // The guard for the bug this helper hit: a pattern that ends in a line
+    // continuation makes grep error out and every match silently disappear.
+    expect(BAD_ERE.endsWith('\\')).toBe(false);
+    expect(TOLERATED_ERE).toBe('GMAIL RATE METRIC STILL FULL');
+    expect(BAD_ERE).toContain('"error"');
   });
 
   it('CONTROL: a clean tail still exits 0, so this is not a blanket failure', () => {

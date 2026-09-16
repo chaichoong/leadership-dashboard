@@ -2559,6 +2559,10 @@
     "name": "Revenue Previous Week (Lookup)",
     "type": "singleLineText"
    },
+   "fldfTtL7On1C2OmRU": {
+    "name": "Growth Baseline Rent",
+    "type": "number"
+   },
    "fldfWEvfLhaQ7Koa9": {
     "name": "Net Profit Margin YTD",
     "type": "percent"
@@ -2674,6 +2678,10 @@
    "fldnFGWHKzsYZ39ZD": {
     "name": "\ud83d\udcb8 Mortgage Payment [Linked to Costs]",
     "type": "singleLineText"
+   },
+   "fldp0bTV5uUIQkHh6": {
+    "name": "Growth Baseline Date",
+    "type": "date"
    },
    "fldpM6c1zm29JxdLb": {
     "name": "Purchase Date",

@@ -56,6 +56,10 @@ REPO = os.environ.get("OD_REPO", os.path.dirname(
 # mapped fields, ~340 repo IDs on 26 Aug 2026) so ordinary growth or pruning
 # never trips them, and a broken read always does.
 MIN_TABLES = 50
+# A reference map that records a type for fewer than this share of the fields
+# it maps AND the base still has cannot verify types, so the scan refuses
+# rather than reporting zero mismatches (finding 20260814-drift-monitor-127).
+TYPE_COVERAGE_FLOOR = 0.9
 MIN_REPO_IDS = 100
 
 SCAN_EXTS = (".js", ".mjs", ".html", ".py")
@@ -317,6 +321,47 @@ def main(argv=None):
     live = known_ids(schema)
     dead_mapped = sorted(i for i in mapped if i not in live)
 
+    # ─── TYPE_MISMATCH (16 Sep 2026, finding 20260814-drift-monitor-127) ──
+    #
+    # CHECK 2 in drift-monitor/SKILL.md has asked for this since the scan was
+    # written: "field exists but type changed (e.g. singleLineText -> number)".
+    # It could never fire, because reference-map.json stored a field's CONSTANT
+    # NAME and nothing else. There was no expected type to compare against, so
+    # the check reported 0 every day for a month and read as clean.
+    #
+    # The snapshot diff (retyped_fields) is not the same check and does not
+    # cover this. It compares yesterday's snapshot with today's, so it sees a
+    # retype only if the scan ran on both sides of it. A retype that happens
+    # while the job is down, or before the baseline, is invisible to it for
+    # ever — and a retype is the change class that blanked 8,667 transactions
+    # in Jul 2026. This compares what the CODE expects against what is LIVE, so
+    # it is true whenever it runs, no matter what ran yesterday.
+    #
+    # CONTROL, and it is the whole reason this finding existed: a map with no
+    # types resolves nothing and passes for ever. Coverage is measured only
+    # over fields that are BOTH mapped and live — a dead id has no live type to
+    # compare and is already reported by dead_mapped — so the floor cannot be
+    # dragged down by something the other check already owns.
+    live_types = {}
+    for t in schema.values():
+        for fid, f in t["fields"].items():
+            live_types[fid] = f.get("type")
+    typed = ref.get("fieldTypes") or {}
+    checkable = sorted(i for i in mapped if i in live_types)
+    covered = [i for i in checkable if i in typed]
+    if checkable and len(covered) < TYPE_COVERAGE_FLOOR * len(checkable):
+        code, res = fail(
+            "the reference map records a type for only %d of %d live mapped "
+            "fields (floor %d%%)" % (len(covered), len(checkable),
+                                     int(TYPE_COVERAGE_FLOOR * 100)),
+            "TYPE_MISMATCH cannot fire without an expected type, and reporting "
+            "0 mismatches off an untyped map is how this check read clean for "
+            "a month. Regenerate with scripts/build-reference-map.py.")
+        return emit(code, res, a)
+    type_mismatches = sorted(
+        "%s: expected %s, live %s" % (i, typed[i], live_types[i])
+        for i in covered if typed[i] != live_types[i])
+
     # CONTROL 3 — the silent zero. A regex typo finds nothing and reads clean.
     repo_ids = scan_repo()
     if len(repo_ids) < MIN_REPO_IDS:
@@ -341,6 +386,10 @@ def main(argv=None):
         "schema_changes": changes,
         "mapped_ids": len(mapped),
         "dead_mapped_ids": dead_mapped,
+        # Stated as a count, not just a list, so "0 mismatches" is always
+        # 0-of-N and never 0-of-nothing-we-could-read.
+        "type_checked": len(covered),
+        "type_mismatches": type_mismatches,
         "repo_ids_scanned": len(repo_ids),
         "unresolvable_repo_ids": {i: sorted(repo_ids[i]) for i in unresolved},
         "snapshot": os.path.relpath(snap_path, REPO),
@@ -386,7 +435,8 @@ def main(argv=None):
             if m and (m.group(0)[1:-1] in mapped or m.group(0)[1:-1] in repo_ids):
                 known_new.append(line)
 
-    drifted = bool(dead_mapped) or bool(unresolved) or bool(breaking)
+    drifted = (bool(dead_mapped) or bool(unresolved) or bool(breaking)
+               or bool(type_mismatches))
     res["breaking_changes"] = sorted(breaking)
     res["additions_already_referenced"] = known_new
     res["verdict"] = ("DRIFT" if drifted
