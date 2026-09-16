@@ -266,6 +266,18 @@
         '22 Newton Street':   { rent: 752, source: '3-bed terrace, Burnley BB12 average asking rent' },
         '23 Viola Street':    { rent: 850, source: '3-bed terrace, Bootle L20 listings £800 to £1,100' },
         'Duckworth Building': { rent: 646, source: '1-bed flat, Lytham St Annes FY8 average asking rent (per flat)' },
+        // The rest of the portfolio, researched 16 Sep 2026 so no self-managed property
+        // is left pricing its single-let column off the housing allowance.
+        '13 Chedburgh Place':  { rent: 1247, source: '3-bed terrace, Haverhill CB9 average asking rent' },
+        '5 Dalham Place':      { rent: 1247, source: '3-bed terrace, Haverhill CB9 average asking rent' },
+        '55 Elmdon Place':     { rent: 1247, source: '3-bed terrace, Haverhill CB9 average asking rent' },
+        '14 Wentworth Terrace':{ rent: 1050, source: '2-bed terrace, Haverhill CB9; listings £995 to £1,150, area average £982 across all 2-beds' },
+        '6 Chedburgh Place':   { rent: 1050, source: '2-bed terrace, Haverhill CB9; listings £995 to £1,150, area average £982 across all 2-beds' },
+        '4 Abington Place':    { rent: 1400, source: '4-bed, Haverhill CB9 average asking rent (range £1,300 to £1,700)' },
+        '34 Connaught Road':   { rent: 1400, source: '4-bed, Haverhill CB9 average asking rent (range £1,300 to £1,700)' },
+        '18 Northfield Park':  { rent: 950,  source: '2-bed, Soham CB7; 2-bed flat £850, 3-bed cottage £1,050' },
+        '1406 Oldham Road':    { rent: 1150, source: '3-bed terrace, Newton Heath M40; listings £1,100 to £1,295' },
+        '282 Stanley Park Avenue South': { rent: 875, source: '3-bed terrace, Anfield L4; listings £800 to £945' },
     };
 
     // What has to be signed, collected and submitted for each strategy (Kevin, 16 Sep 2026).
