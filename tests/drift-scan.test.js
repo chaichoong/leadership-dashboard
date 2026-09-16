@@ -364,7 +364,10 @@ describe('the scan only looks where production code lives', () => {
     const out = JSON.parse(r.stdout);
     expect(Object.keys(out.unresolvable_repo_ids || {})).toEqual([]);
     expect(out.repo_ids_scanned).toBeGreaterThan(100);
-  });
+    // A real run: it fetches the live Airtable schema and walks the whole repo. Since the
+    // type check landed (16 Sep 2026, #423) it takes 8 to 17 seconds on this Mac under load,
+    // so vitest's 5-second default failed it on time alone while the result was clean.
+  }, 60_000);
 });
 
 describe('it is wired into the day', () => {
