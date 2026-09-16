@@ -474,3 +474,231 @@ describe('buildPlan levers', () => {
         expect(pk.monthly).toBeCloseTo(p.totals.paper + p.totals.works, 2);
     });
 });
+
+// ════════════════════════════════════════════════════════════════════════
+// The four-strategy rebuild (Kevin, 16 Sep 2026)
+// ════════════════════════════════════════════════════════════════════════
+describe('the four strategies', () => {
+    it('prices all four on every property, with council tax only on HMO and short lets', () => {
+        const p = M.buildPlan(fixture(), S, TODAY);
+        const v = p.properties[0];
+        expect(v.strategies.map(x => x.name)).toEqual(['Single let', 'Joint tenancy', 'HMO', 'Serviced accommodation']);
+        const by = v.strategyBy;
+        expect(by['Single let'].councilTax).toBe(0);
+        expect(by['Joint tenancy'].councilTax).toBe(0);
+        expect(by['HMO'].councilTax).toBe(135);            // the live bank-fed cost row
+        expect(by['Serviced accommodation'].councilTax).toBe(135);
+    });
+    it('joint tenancy is the 1-bed rate times two, and two places to let', () => {
+        const p = M.buildPlan(fixture(), S, TODAY);
+        const jt = p.properties[0].strategyBy['Joint tenancy'];
+        expect(jt.gross).toBe(M.weeklyToMonthly(M.LHA_WEEKLY.Cambridge.b1) * 2);
+        expect(jt.units).toBe(2);
+        expect(jt.net).toBe(jt.gross); // the tenants carry the council tax
+    });
+    it('HMO is rentable rooms times the 1-bed rate, less the council tax we then pay', () => {
+        const f = fixture(); f.properties[0].lettableRooms = 5;
+        const p = M.buildPlan(f, S, TODAY);
+        const hmo = p.properties[0].strategyBy['HMO'];
+        const b1 = M.weeklyToMonthly(M.LHA_WEEKLY.Cambridge.b1);
+        expect(hmo.units).toBe(5);
+        expect(hmo.gross).toBe(Math.round(5 * b1 * 100) / 100);
+        expect(hmo.net).toBe(Math.round((5 * b1 - 135) * 100) / 100);
+    });
+    it('serviced accommodation is £500 net, less council tax, and one place', () => {
+        const p = M.buildPlan(fixture(), S, TODAY);
+        const sa = p.properties[0].strategyBy['Serviced accommodation'];
+        expect(sa.gross).toBe(500);
+        expect(sa.units).toBe(1);
+        expect(sa.net).toBe(365);
+    });
+    it('a settings row moves the short-let budget without a code change', () => {
+        const p = M.buildPlan(fixture(), { sa_monthly: 800 }, TODAY);
+        expect(p.properties[0].strategyBy['Serviced accommodation'].gross).toBe(800);
+    });
+});
+
+describe('council tax', () => {
+    const noCost = () => { const f = fixture(); f.costs = []; return f; };
+    it('a live bank-fed cost row beats the band', () => {
+        const f = fixture(); f.properties[0].ctBand = 'B'; f.properties[0].ctAnnual = 1900.86;
+        const v = M.buildPlan(f, S, TODAY).properties[0];
+        expect(v.ct.monthly).toBe(135);
+        expect(v.ct.confirmed).toBe(true);
+        expect(v.ct.source).toMatch(/what you pay today/);
+    });
+    it('the band on the record is used when nothing is paid today', () => {
+        const f = noCost(); f.properties[0].ctAnnual = 1900.86; f.properties[0].ctBand = 'B';
+        expect(M.buildPlan(f, S, TODAY).properties[0].ct.monthly).toBe(158.41);
+    });
+    it('a band with no annual figure is priced from the council band-D table', () => {
+        const f = noCost(); f.properties[0].ctBand = 'A'; // CB9 = West Suffolk, band D £2,443.96
+        const v = M.buildPlan(f, S, TODAY).properties[0];
+        expect(v.ct.council).toBe('West Suffolk');
+        expect(v.ct.monthly).toBe(135.78); // 2443.96 × 6/9 ÷ 12
+        expect(v.ct.confirmed).toBe(true);
+    });
+    it('every band is a fixed fraction of band D, so one known band gives them all', () => {
+        const d = M.COUNCIL_BAND_D['Sefton'].d;
+        Object.keys(M.BAND_NINTHS).forEach(b => {
+            const f = noCost();
+            f.properties[0].postcode = 'L20 7DR'; f.properties[0].ctBand = b;
+            const v = M.buildPlan(f, S, TODAY).properties[0];
+            expect(v.ct.monthly).toBe(Math.round(Math.round(d * M.BAND_NINTHS[b] / 9 * 100) / 100 / 12 * 100) / 100);
+        });
+    });
+    it('an unknown band in a KNOWN council borrows the band its neighbours are on, and says so', () => {
+        const f = noCost();
+        f.properties[0].ctBand = '';
+        f.properties.push({ id: 'p9', name: 'Neighbour', agent: 'Property Portfolio', postcode: 'CB9 0AL', ctBand: 'B' });
+        const v = M.buildPlan(f, S, TODAY).properties[0];
+        expect(v.ct.borrowed).toBe(true);
+        expect(v.ct.band).toBe('B');
+        expect(v.ct.monthly).toBe(158.41);
+        expect(v.ct.source).toMatch(/every other West Suffolk property we own/);
+    });
+    // The bug this guards: a missing council tax figure read as £0, which makes an HMO
+    // look more profitable than it is. Unknown must be null and say so on the page.
+    it('an unknown council gives NULL, never £0, and the HMO figure says it is before council tax', () => {
+        const f = noCost();
+        f.properties[0].postcode = 'ZZ99 9ZZ'; f.properties[0].ctBand = '';
+        const v = M.buildPlan(f, S, TODAY).properties[0];
+        expect(v.ct.monthly).toBeNull();
+        expect(v.ct.confirmed).toBe(false);
+        expect(v.strategyBy['HMO'].councilTax).toBeNull();
+        expect(v.strategyBy['HMO'].ctNote).toMatch(/BEFORE council tax/);
+        expect(v.strategyBy['HMO'].assumed).toBe(true);
+    });
+});
+
+describe('self-managed versus agent-run', () => {
+    it('Simon Collins is ours, a letting agent is not, and a tenant pay type never decides it', () => {
+        const f = fixture();
+        f.properties.push({ id: 'c1', name: 'Collins house', agent: 'Simon Collins', postcode: 'BB5 5PT' });
+        f.properties.push({ id: 'a1', name: 'Agent house', agent: 'Roc Immo', postcode: 'CB9 0AH' });
+        f.properties.push({ id: 'n1', name: 'No agent named', agent: '', postcode: 'CB9 0AJ' });
+        const p = M.buildPlan(f, S, TODAY);
+        const names = p.selfManaged.map(v => v.name);
+        expect(names).toContain('Collins house');
+        expect(names).toContain('No agent named');
+        expect(p.agentManaged.map(v => v.name)).toEqual(['Agent house']);
+        expect(p.selfManaged.length + p.agentManaged.length).toBe(p.properties.length);
+    });
+    it('the split reads the property, not a tenant collected by an agent', () => {
+        const f = fixture();
+        f.tenants[0].payType = 'Agent-Managed';   // 22 Newton Street and 23 Viola Street look like this
+        expect(M.buildPlan(f, S, TODAY).selfManaged.map(v => v.id)).toContain('p1');
+    });
+});
+
+describe('a block of flats', () => {
+    it('is priced flat by flat, and the room strategies are marked as not applying', () => {
+        const f = fixture();
+        f.properties = [{ id: 'b1', name: 'Duckworth Building', type: 'Block', beds: 9, agent: 'Intus Lettings', postcode: 'FY8 1SQ' }];
+        f.units = [1, 2, 3].map(n => ({ id: 'bu' + n, propertyId: 'b1', number: n, type: 'Flat', status: 'Occupied', rent: 500, tenantIds: [] }));
+        f.tenants = []; f.tenancies = []; f.costs = [];
+        const v = M.buildPlan(f, S, TODAY).properties[0];
+        expect(v.current).toBe('Block of flats');
+        expect(v.strategyBy['Single let'].units).toBe(3);
+        expect(v.strategyBy['Single let'].gross).toBe(646 * 3); // the researched FY8 flat rent
+        ['Joint tenancy', 'HMO', 'Serviced accommodation'].forEach(k => {
+            expect(v.strategyBy[k].na).toBe(true);
+            expect(v.strategyBy[k].net).toBe(0);
+        });
+    });
+});
+
+describe('progress and what has actually landed', () => {
+    const withPlan = rows => { const f = fixture(); f.properties[0].strategy = 'HMO'; f.properties[0].plannedExtra = 1; f.planRows = rows; return f; };
+    it('a property with no plan picked reads Not decided, whatever its moves say', () => {
+        const f = fixture();
+        f.planRows = [{ id: 'r1', key: 'uplift:t1', status: 'Adopted', taskIds: [] }];
+        expect(M.buildPlan(f, S, TODAY).properties[0].progress).toBe('Not decided');
+    });
+    it('an adopted move reads In progress once a plan is picked', () => {
+        const p = M.buildPlan(withPlan([{ id: 'r1', key: 'uplift:t1', status: 'Adopted', taskIds: [] }]), S, TODAY);
+        expect(p.properties[0].progress).toBe('In progress');
+    });
+    it('every move done and none running reads Realised', () => {
+        const p = M.buildPlan(withPlan([
+            { id: 'r1', key: 'uplift:t1', status: 'Done', taskIds: [] },
+            { id: 'r2', key: 'rooms:p1', status: 'Done', taskIds: [] },
+        ]), S, TODAY);
+        expect(p.properties[0].progress).toBe('Realised');
+    });
+    // The point of two figures: a move ticked off that never reached the UC journal
+    // leaves the rent where it was, so measured stays £0 while forecast claims a win.
+    it('reports forecast and measured separately, and the gap between them', () => {
+        const f = withPlan([{ id: 'r1', key: 'uplift:t1', status: 'Done', taskIds: [] }]);
+        f.properties[0].baselineRent = 1947.32;  // what the house made the day it was marked done
+        f.properties[0].baselineDate = '2026-08-01';
+        const p = M.buildPlan(f, S, TODAY);
+        const v = p.properties[0];
+        expect(v.forecastRealised).toBe(372.62);
+        expect(v.measuredRealised).toBe(0);       // rent has not actually moved
+        expect(p.totals.forecastRealised).toBe(372.62);
+        expect(p.totals.measuredRealised).toBe(0);
+        expect(p.totals.realisedGap).toBe(372.62);
+    });
+    it('a rent that really did move shows up as measured', () => {
+        const f = withPlan([{ id: 'r1', key: 'uplift:t1', status: 'Done', taskIds: [] }]);
+        f.properties[0].baselineRent = 1500;
+        const p = M.buildPlan(f, S, TODAY);
+        expect(p.properties[0].measuredRealised).toBe(447.32); // 1947.32 now, 1500 then
+        expect(p.totals.measuredCount).toBe(1);
+    });
+    it('no starting figure means measured is null, never a fabricated zero-gap win', () => {
+        const p = M.buildPlan(withPlan([{ id: 'r1', key: 'uplift:t1', status: 'Done', taskIds: [] }]), S, TODAY);
+        expect(p.properties[0].measuredRealised).toBeNull();
+        expect(p.totals.measuredCount).toBe(0);
+    });
+    // The collision that shipped and was caught by the existing suite: the count of
+    // empty units overwrote the MONEY bucket for void lets and take-backs.
+    it('the count of empty places never overwrites the void-and-take-back money bucket', () => {
+        const f = fixture();
+        f.properties.push({ id: 'p2', name: '13 John Street', agent: 'Simon Collins', postcode: 'BB5 5PT' });
+        const t = M.buildPlan(f, S, TODAY).totals;
+        expect(t.voids).toBe(250);           // money
+        expect(t.voidUnits).toBe(0);         // count
+        expect(t.actionable).toBe(t.paper + t.works + t.voids + t.remote);
+    });
+});
+
+describe('rooms, market rent and the checklist', () => {
+    it('lettable rooms beats the rooms in use, and both beat the bedroom count', () => {
+        const f = fixture(); f.properties[0].lettableRooms = 6;
+        expect(M.buildPlan(f, S, TODAY).properties[0].roomInfo).toMatchObject({ rooms: 6, confirmed: true });
+        const g = fixture(); // two rooms plus a flat-let (which is two rooms) = 4
+        expect(M.buildPlan(g, S, TODAY).properties[0].roomInfo.rooms).toBe(4);
+    });
+    it('a researched market rent is used and a guessed one is flagged', () => {
+        const f = fixture(); f.properties[0].name = '23 Viola Street';
+        const v = M.buildPlan(f, S, TODAY).properties[0];
+        expect(v.market.rent).toBe(850);
+        expect(v.market.researched).toBe(true);
+        const g = M.buildPlan(fixture(), S, TODAY).properties[0];
+        expect(g.market.researched).toBe(false);
+        expect(g.market.source).toMatch(/Estimate only/);
+        expect(g.strategyBy['Single let'].assumed).toBe(true);
+    });
+    it('a settings row overrides a researched market rent', () => {
+        const f = fixture(); f.properties[0].name = '23 Viola Street';
+        expect(M.buildPlan(f, { market_rent_23_viola_street: 925 }, TODAY).properties[0].market.rent).toBe(925);
+    });
+    it('each strategy carries the paperwork it needs, and single lets need none', () => {
+        expect(M.CHECKLIST['Joint tenancy'].property[0]).toMatch(/Joint tenancy agreement/);
+        expect(M.CHECKLIST['Joint tenancy'].tenant).toEqual(['Letter of authority, so we can set up their council tax reduction', 'Proof of address']);
+        expect(M.CHECKLIST['HMO'].tenant[0]).toMatch(/Individual tenancy agreement/);
+        expect(M.CHECKLIST['HMO'].tenant).toHaveLength(3);
+        expect(M.CHECKLIST['Single let'].property).toEqual([]);
+        expect(M.CHECKLIST['Single let'].tenant).toEqual([]);
+        expect(M.CHECKLIST['Serviced accommodation'].note).toMatch(/Nothing for us to sign/);
+    });
+    it('"Leave as is" means the plan equals whatever the property is today', () => {
+        const f = fixture(); f.properties[0].strategy = 'Leave as is';
+        const v = M.buildPlan(f, S, TODAY).properties[0];
+        expect(v.current).toBe('HMO');
+        expect(v.chosen).toBe('HMO');
+        expect(v.progress).toBe('No change needed');
+    });
+});

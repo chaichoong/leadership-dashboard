@@ -205,6 +205,256 @@
         return ROOMS_PER_UNIT[unit.type] || 1;
     }
 
+
+    // ════════════════════════════════════════════════════════════════
+    // STRATEGY COMPARISON (Kevin's rebuild, 16 Sep 2026)
+    //
+    // Every property is priced under all four strategies so the choice is
+    // visible rather than argued. The rules are Kevin's, verbatim:
+    //   • Single let      one household in the whole property. Tenants pay the
+    //                     council tax. Income = open-market rent.
+    //   • Joint tenancy   two over-35 UC tenants on ONE agreement. Tenants pay
+    //                     the council tax. Income = 1-bed LHA × 2.
+    //   • HMO             one over-35 UC tenant per room. THE OWNER pays the
+    //                     council tax (SI 2023/1175). Income = rooms × 1-bed LHA.
+    //   • Serviced accom. short lets. The owner pays the council tax.
+    //                     Income = £500 a month, net to us (Kevin, 16 Sep 2026).
+    // ════════════════════════════════════════════════════════════════
+    const STRATEGY_LIST = ['Single let', 'Joint tenancy', 'HMO', 'Serviced accommodation'];
+
+    // Council tax is set in ninths of the band D charge, fixed by statute
+    // (Local Government Finance Act 1992 s.5). One known band gives every band.
+    // Wales uses the same ninths as England and adds band I (Swansea).
+    const BAND_NINTHS = { A: 6, B: 7, C: 8, D: 9, E: 11, F: 13, G: 15, H: 18, I: 21 };
+
+    // Band D annual charge, 2026-27. "derived" means computed from a band already
+    // on a property record using the statutory ninths, which is arithmetic, not a guess.
+    const COUNCIL_BAND_D = {
+        'West Suffolk':        { d: 2443.96, source: 'derived from band B £1,900.86 on the Haverhill property records' },
+        'East Cambridgeshire': { d: 2485.18, source: 'derived from band B £1,932.92 on 18 Northfield Park' },
+        'Manchester':          { d: 2312.04, source: 'derived from band A £1,541.36 on 1406 Oldham Road' },
+        'Sefton':              { d: 2564.73, source: 'sefton.gov.uk bands and charges, read 16 Sep 2026' },
+        'Liverpool':           { d: 2673.59, source: 'liverpool.gov.uk "how much is my council tax", read 16 Sep 2026' },
+        'Ribble Valley':       { d: 2383.79, source: 'ribblevalley.gov.uk charges by parish (Clitheroe), read 16 Sep 2026' },
+        'Burnley':             { d: 2549.42, source: 'Burnley 2026-27 band table, read 16 Sep 2026 (band B £1,982.88 is exactly 7/9 of it, which checks out)' },
+        'Kingston upon Hull':  { d: 2295.05, source: 'derived from the Hull band A total of £1,530.03 for 2026-27, council, social care, police, fire and combined authority' },
+        'Hyndburn':            { d: 2465.99, source: 'derived from the Hyndburn band A total of £1,643.99 for 2026-27' },
+        'Swansea':             { d: 2238.29, source: 'Swansea 2026-27 band D; band A £1,492.19 checks out at 6/9' },
+        'Westmorland and Furness': { d: 2474.81, source: 'westmorlandandfurness.gov.uk charges by parish, Barrow Town 2026-27, all precepts' },
+        'Durham':              { d: 2832.42, source: 'Horden parish band D 2025-26 including the parish precept (durham.gov.uk guide). The 2026-27 parish figure is not published yet, so this is last year: the real bill is a little higher, never lower' },
+    };
+    // Outward code → billing authority. A code that is absent is NOT guessed: the
+    // property shows "council tax rate not confirmed" and its HMO and serviced
+    // accommodation figures are marked assumed.
+    const COUNCIL_BY_OUTWARD = {
+        CB9: 'West Suffolk', CB7: 'East Cambridgeshire', M40: 'Manchester',
+        L20: 'Sefton', L4: 'Liverpool', BB7: 'Ribble Valley',
+        BB12: 'Burnley', HU3: 'Kingston upon Hull', BB5: 'Hyndburn', SA5: 'Swansea',
+        LA13: 'Westmorland and Furness', SR8: 'Durham',
+    };
+
+    // Open-market single-let rent, researched 16 Sep 2026 for the properties Kevin
+    // named. Everything else falls back to the LHA rate for its bedroom count, which
+    // is marked as an estimate on the page. A settings row overrides either.
+    const MARKET_RENT = {
+        '11 Aigburth Avenue': { rent: 625, source: '2-bed terrace, HU3 outcode average, September 2026 listings' },
+        '13 John Street':     { rent: 657, source: '2-bed terrace, BB5 average asking rent, September 2026' },
+        '15 Marloes Court':   { rent: 950, source: '3-bed, Fforestfach SA5 listings £925 to £975, August 2026' },
+        '16 Eleventh Street': { rent: 550, source: '2-bed, Peterlee SR8; Eleventh Street £500, Seventh Street £525, area median £623' },
+        '82 Devon Street':    { rent: 730, source: '2-bed terrace, Barrow-in-Furness LA13 average asking rent' },
+        '18 Siddows Avenue':  { rent: 675, source: '3-bed terrace, Clitheroe BB7 average asking rent' },
+        '22 Newton Street':   { rent: 752, source: '3-bed terrace, Burnley BB12 average asking rent' },
+        '23 Viola Street':    { rent: 850, source: '3-bed terrace, Bootle L20 listings £800 to £1,100' },
+        'Duckworth Building': { rent: 646, source: '1-bed flat, Lytham St Annes FY8 average asking rent (per flat)' },
+    };
+
+    // What has to be signed, collected and submitted for each strategy (Kevin, 16 Sep 2026).
+    const CHECKLIST = {
+        'Single let': {
+            note: 'The tenancy agreement is already in place and the tenant pays the council tax. Usually nothing to do.',
+            property: [], tenant: [], ifShort: [],
+        },
+        'Joint tenancy': {
+            note: 'One agreement covering the whole house, both names on it. That is what moves the council tax to them.',
+            property: ['Joint tenancy agreement, one agreement with both names on it'],
+            tenant: ['Letter of authority, so we can set up their council tax reduction', 'Proof of address'],
+            ifShort: ['Discretionary housing application, where their rent is short'],
+        },
+        'HMO': {
+            note: 'One agreement per tenant. We keep the council tax. Every tenant aged 35 or over goes on the 1-bed rate.',
+            property: [],
+            tenant: ['Individual tenancy agreement at the 1-bed rate', 'Letter of authority', 'Proof of address'],
+            ifShort: ['Discretionary housing application, where their rent is short'],
+        },
+        'Serviced accommodation': {
+            note: 'Run by an agent on short lets. Nothing for us to sign with a tenant.',
+            property: [], tenant: [], ifShort: [],
+        },
+    };
+
+    // Explanation lines are read by a person, so they get thousands separators.
+    const money = n => Number(n || 0).toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+    function councilFor(postcode) { return COUNCIL_BY_OUTWARD[outward(postcode)] || null; }
+
+    // Kevin, 16 Sep 2026: a property is ours unless a live letting agent runs it.
+    // "Property Portfolio" is our own landlord name, and Simon Collins stopped
+    // counting as an agent, so his houses come back into our list.
+    function isSelfManaged(prop) {
+        const agent = String((prop && prop.agent) || '').trim();
+        if (!agent) return true;
+        if (/property portfolio/i.test(agent)) return true;
+        if (/collins/i.test(agent)) return true;
+        return false;
+    }
+
+    // The band each council's properties are on, taken from the ones that carry a band.
+    // Used to fill a blank band on a property in a council we already know, and always
+    // reported as borrowed on the page.
+    function bandsByCouncil(properties) {
+        const tally = {};
+        (properties || []).forEach(p => {
+            const c = councilFor(p.postcode); const b = String(p.ctBand || '').trim().toUpperCase();
+            if (!c || !b || !BAND_NINTHS[b]) return;
+            (tally[c] = tally[c] || {})[b] = (tally[c][b] || 0) + 1;
+        });
+        const out = {};
+        Object.keys(tally).forEach(c => { out[c] = Object.keys(tally[c]).sort((a, b) => tally[c][b] - tally[c][a])[0]; });
+        return out;
+    }
+
+    // The council tax we would pay on this property, a month. A live cost row that the
+    // bank feed reconciles always wins; then the band on the record; then the band-D
+    // table for its council. Anything not read from a record is flagged, never hidden.
+    function councilTaxFor(prop, liveMonthly, bandFallback) {
+        const band = String(prop.ctBand || '').trim().toUpperCase();
+        const council = councilFor(prop.postcode);
+        if (liveMonthly > 0) return { monthly: round2(liveMonthly), band, council, confirmed: true, source: `£${money(round2(liveMonthly))} a month is what you pay today (live cost row, bank-fed)` };
+        if (num(prop.ctAnnual) > 0) return { monthly: round2(num(prop.ctAnnual) / 12), band, council, confirmed: true, source: `Band ${band || '?'}, £${money(num(prop.ctAnnual))} a year on the property record` };
+        const table = council && COUNCIL_BAND_D[council];
+        if (band && table) {
+            const annual = round2(table.d * BAND_NINTHS[band] / 9);
+            return { monthly: round2(annual / 12), band, council, confirmed: true, source: `Band ${band} in ${council}: £${money(annual)} a year (${table.source})` };
+        }
+        // Council known, band not. Every other property we own in that council carries
+        // the same band, so use it and SAY it is borrowed. Stating the assumption is the
+        // point: a silent £0 would make an HMO look more profitable than it is.
+        if (!band && table && bandFallback) {
+            const annual = round2(table.d * BAND_NINTHS[bandFallback] / 9);
+            return { monthly: round2(annual / 12), band: bandFallback, council, confirmed: false, borrowed: true,
+                source: `No band on this property. Using band ${bandFallback}, which every other ${council} property we own is on: £${money(annual)} a year. Set the real band to fix this.` };
+        }
+        // Nothing to go on. monthly is null, NOT zero: the page shows "not known" and
+        // prices the HMO and short-let figures before council tax rather than pretending
+        // there is none (CLAUDE.md: an inferred value presented as fact is worse than "I don't know").
+        return { monthly: null, band, council, confirmed: false,
+            source: band ? `Band ${band}, but the council tax rate for ${council || 'this area'} has not been looked up yet` : `No council tax band on this property${council ? '' : ', and no council matched to its postcode'} yet` };
+    }
+
+    // Rooms we could let individually. The Lettable Rooms field is the answer where
+    // Kevin has set it; otherwise the rooms already let (a flat-let is two rooms);
+    // otherwise the bedroom count. Which one was used is always stated.
+    function rentableRoomsFor(prop, pUnits) {
+        if (prop.lettableRooms != null && prop.lettableRooms !== '') return { rooms: num(prop.lettableRooms), source: 'Lettable Rooms on the property record', confirmed: true };
+        const let_ = pUnits.filter(u => u.type === 'Room' || u.type === 'Flat-Let');
+        if (let_.length) {
+            const rooms = let_.reduce((n, u) => n + (ROOMS_PER_UNIT[u.type] || 1), 0);
+            return { rooms, source: `${rooms} rooms already let here (a flat-let counts as two)`, confirmed: false };
+        }
+        const beds = Math.max(1, num(prop.beds));
+        return { rooms: beds, source: `${beds} bedrooms on the property record`, confirmed: false };
+    }
+
+    function marketRentFor(prop, rates, settings) {
+        const slug = 'market_rent_' + String(prop.name || '').toLowerCase().replace(/[^a-z0-9]+/g, '_');
+        const override = settings && settings[slug];
+        if (override !== undefined && override !== null && override !== '') return { rent: num(override), source: 'Typed into the assumptions on this page', researched: true };
+        const known = MARKET_RENT[prop.name];
+        if (known) return { rent: known.rent, source: known.source, researched: true };
+        if (rates) {
+            const beds = Math.max(1, Math.min(4, num(prop.beds) || 1));
+            const rate = rates['b' + beds] || rates.b1;
+            return { rent: round2(rate), source: `Estimate only: the ${rates.brma} ${beds}-bed housing allowance. Type the real market rent in the assumptions.`, researched: false };
+        }
+        return { rent: 0, source: 'No market rent and no housing allowance for this postcode', researched: false };
+    }
+
+    // What the property IS today, read from its units. Not what we want it to be.
+    function currentStrategyOf(prop, pUnits) {
+        if (prop.type === 'Block') return 'Block of flats';
+        const roomUnits = pUnits.filter(u => u.type === 'Room' || u.type === 'Flat-Let');
+        const whole = pUnits.filter(u => u.type === 'Whole Property');
+        if (roomUnits.length >= 2) return 'HMO';
+        if (whole.length >= 2) return 'HMO';
+        if (roomUnits.length === 1 && whole.length === 0) return 'HMO';
+        return 'Single let';
+    }
+
+    // The four strategies, priced. Every one carries how it was worked out.
+    function priceStrategies(prop, pUnits, rates, settings, ctInfo, roomInfo, market) {
+        const s = (k, d) => setting(settings, k, d);
+        const b1 = rates ? rates.b1 : 0;
+        const saRent = s('sa_monthly', 500);
+        const out = [];
+
+        out.push({
+            name: 'Single let', units: 1, gross: round2(market.rent), councilTax: 0, net: round2(market.rent),
+            how: `Open-market rent for the whole property: £${money(market.rent)} a month`,
+            ctNote: 'The tenant pays the council tax, not us', assumed: !market.researched,
+            why: market.source,
+        });
+
+        out.push({
+            name: 'Joint tenancy', units: 2, gross: round2(b1 * 2), councilTax: 0, net: round2(b1 * 2),
+            how: rates ? `Two tenants aged 35+ on one agreement: 2 × £${money(b1)} (the ${rates.brma} 1-bed rate)` : 'No housing allowance rate for this postcode',
+            ctNote: 'One agreement for the whole house moves the council tax to the tenants', assumed: !rates,
+            why: rates ? `${rates.brma} 1-bed rate £${money(b1)} a month, from the weekly LHA × 52 ÷ 12` : '',
+        });
+
+        const ctKnown = ctInfo.monthly != null;
+        const ctCost = ctKnown ? round2(ctInfo.monthly) : null;
+        const ctLine = ctKnown
+            ? `We pay the council tax: £${money(ctCost)} a month${ctInfo.borrowed ? ' (band borrowed from our other properties in this council)' : ''}`
+            : 'We pay the council tax. The amount is not known yet, so this figure is BEFORE council tax.';
+
+        const hmoGross = round2(roomInfo.rooms * b1);
+        out.push({
+            name: 'HMO', units: roomInfo.rooms, gross: hmoGross, councilTax: ctCost, net: round2(hmoGross - (ctCost || 0)),
+            how: rates ? `${roomInfo.rooms} rooms × £${money(b1)} (the ${rates.brma} 1-bed rate) = £${money(hmoGross)}` : 'No housing allowance rate for this postcode',
+            ctNote: ctLine, assumed: !rates || !roomInfo.confirmed || !ctKnown || !!ctInfo.borrowed,
+            why: [roomInfo.source, ctInfo.source].join('. '),
+        });
+
+        out.push({
+            name: 'Serviced accommodation', units: 1, gross: round2(saRent), councilTax: ctCost, net: round2(saRent - (ctCost || 0)),
+            how: `Short lets, budgeted at £${money(saRent)} a month net to us`,
+            ctNote: ctLine, assumed: !ctKnown || !!ctInfo.borrowed,
+            why: `£${money(saRent)} a month is the budget Kevin set. ${ctInfo.source}`,
+        });
+
+        // A block of flats is not a house. Letting it room by room or on one joint
+        // tenancy is not a thing you can do to a block, so those two are marked
+        // not applicable rather than priced at a number nobody could ever collect.
+        if (prop.type === 'Block') {
+            const flats = pUnits.filter(u => u.type === 'Flat');
+            const n = flats.length || Math.max(1, num(prop.beds));
+            const single = out[0];
+            single.units = n;
+            single.gross = round2(market.rent * n);
+            single.net = single.gross;
+            single.how = `${n} flats × £${money(market.rent)} a month`;
+            out.forEach(x => {
+                if (x.name === 'Joint tenancy' || x.name === 'HMO' || x.name === 'Serviced accommodation') {
+                    x.na = true; x.gross = 0; x.net = 0; x.units = 0; x.councilTax = null;
+                    x.how = 'Does not apply to a block of flats';
+                    x.ctNote = ''; x.why = 'A block is let flat by flat, so this strategy is not an option here.';
+                }
+            });
+        }
+
+        return out;
+    }
+
     // ── The plan ────────────────────────────────────────────────────────
     function buildPlan(data, settings, today) {
         const s = (k, d) => setting(settings, k, d);
@@ -230,6 +480,7 @@
         const capSingle = benefitCap({ single: true, age: 35, housing: 0 }, settings);
         const safeSingle = round2(capSingle.cap - capSingle.standard); // £804.52 on 2026-27 figures
 
+        const bandByCouncil = bandsByCouncil(data.properties);
         const levers = [];
         const properties = [];
         const unknownAge = [];
@@ -480,6 +731,43 @@
                     firstStep: 'None: potential only',
                 }, planByKey));
             }
+            // ── The four strategies, priced for this property ──────────────
+            const ctInfo = councilTaxFor(prop, ctLive, bandByCouncil[councilFor(prop.postcode)] || '');
+            const roomInfo = rentableRoomsFor(prop, pUnits);
+            const market = marketRentFor(prop, rates, settings);
+            const strategies = priceStrategies(prop, pUnits, rates, settings, ctInfo, roomInfo, market);
+            const current = currentStrategyOf(prop, pUnits);
+            // Kevin's Growth Strategy field is the TARGET. "Leave as is" means the
+            // property stays on whatever it is today, so the target equals the current.
+            const rawTarget = normaliseStrategy(prop.strategy);
+            const chosen = rawTarget === 'Leave as is' ? current : (rawTarget || '');
+            const byName = {}; strategies.forEach(x => { byName[x.name] = x; });
+            const best = strategies.slice().sort((a, b) => b.net - a.net)[0];
+            const chosenRow = byName[chosen] || null;
+            const voids = pUnits.filter(u => u.status === 'Void').length;
+            const occupiedUnits = pUnits.filter(u => u.status !== 'Void').length;
+            const tenantCount = view.tenants.length;
+            // Units the chosen strategy needs, against the units that exist. The extra
+            // ones are NOT written to Airtable: a unit is created when a tenant signs.
+            const unitsPlanned = chosenRow ? chosenRow.units : occupiedUnits;
+            Object.assign(view, {
+                strategies, strategyBy: byName, current, chosen, target: rawTarget, best,
+                chosenRow, ct: ctInfo, roomInfo, market,
+                unitsNow: occupiedUnits, unitsPlanned, unitsExtra: Math.max(0, unitsPlanned - occupiedUnits),
+                voids, tenantCount,
+                netNow: round2(propRent),
+                netPlanned: chosenRow ? chosenRow.net : null,
+                upliftChosen: chosenRow ? round2(chosenRow.net - propRent) : null,
+                upliftBest: round2(best.net - propRent),
+                checklist: CHECKLIST[chosen] || null,
+                // Kevin, 16 Sep 2026: the split is read from the PROPERTY's own Agent/Landlord
+                // field, never from a tenant's pay type. 22 Newton Street and 23 Viola Street each
+                // carry one agent-collected tenancy, but the houses are ours and belong in our list.
+                // Simon Collins is no longer classed as an agent, so his five houses are ours too.
+                selfManaged: isSelfManaged(prop),
+                baselineRent: prop.baselineRent == null ? null : num(prop.baselineRent),
+                baselineDate: prop.baselineDate || '',
+            });
             properties.push(view);
         });
 
@@ -519,10 +807,53 @@
         totals.actionable = round2(totals.paper + totals.works + totals.voids + totals.remote);
         totals.potentialIncrease = round2(totals.actionable + totals.agentHeld); // ages to confirm are already inside the paper trail
         totals.maximum = round2(totals.potentialIncrease + totals.check);
+
+        // ── Progress: to do, in progress, realised (Kevin, 16 Sep 2026) ──────
+        // Realised is reported TWICE on purpose. The forecast is what the plan said a
+        // finished move was worth; the measured figure is the rent that actually
+        // arrived, read off the property against the snapshot taken the day its first
+        // move was marked done. A move that was ticked off but never reached the
+        // Universal Credit journal shows a gap, which is the whole point of showing both.
+        properties.forEach(v => {
+            const mine = levers.filter(l => l.propertyId === v.id);
+            const done = mine.filter(l => l.status === 'Done');
+            const running = mine.filter(l => l.status === 'Adopted' || l.status === 'In progress');
+            v.forecastRealised = round2(done.reduce((n, l) => n + num(l.monthly), 0));
+            v.measuredRealised = v.baselineRent == null ? null : round2(v.rentNow - v.baselineRent);
+            v.doneCount = done.length;
+            v.runningCount = running.length;
+            if (!v.chosen) v.progress = 'Not decided';
+            else if (done.length && !running.length) v.progress = 'Realised';
+            else if (running.length) v.progress = 'In progress';
+            else if (v.chosen !== v.current) v.progress = 'To do';
+            else v.progress = 'No change needed';
+        });
+        const selfManaged = properties.filter(v => v.selfManaged);
+        const agentManaged = properties.filter(v => !v.selfManaged);
+        const withBaseline = properties.filter(v => v.measuredRealised != null);
+        totals.forecastRealised = round2(properties.reduce((n, v) => n + num(v.forecastRealised), 0));
+        totals.measuredRealised = round2(withBaseline.reduce((n, v) => n + num(v.measuredRealised), 0));
+        totals.measuredCount = withBaseline.length;
+        totals.realisedGap = round2(totals.forecastRealised - totals.measuredRealised);
+        totals.toDo = round2(properties.filter(v => v.progress === 'To do').reduce((n, v) => n + Math.max(0, num(v.upliftChosen)), 0));
+        totals.inProgress = round2(properties.filter(v => v.progress === 'In progress').reduce((n, v) => n + Math.max(0, num(v.upliftChosen)), 0));
+        totals.notDecided = properties.filter(v => v.progress === 'Not decided').length;
+        totals.selfRentNow = round2(selfManaged.reduce((n, v) => n + num(v.rentNow), 0));
+        totals.agentRentNow = round2(agentManaged.reduce((n, v) => n + num(v.rentNow), 0));
+        // Chosen uplift only counts a property Kevin has actually picked a strategy for.
+        totals.chosenUplift = round2(properties.filter(v => v.upliftChosen != null && v.chosen).reduce((n, v) => n + Math.max(0, v.upliftChosen), 0));
+        totals.bestUplift = round2(properties.reduce((n, v) => n + Math.max(0, num(v.upliftBest)), 0));
+        totals.unitsNow = properties.reduce((n, v) => n + num(v.unitsNow), 0);
+        totals.unitsPlanned = properties.reduce((n, v) => n + num(v.unitsPlanned), 0);
+        totals.unitsExtra = properties.reduce((n, v) => n + num(v.unitsExtra), 0);
+        // NOT totals.voids: that name is already the MONEY bucket for void lets and
+        // take-backs further up, and overwriting it silently zeroed the actionable figure.
+        totals.voidUnits = properties.reduce((n, v) => n + num(v.voids), 0);
+        totals.tenants = properties.reduce((n, v) => n + num(v.tenantCount), 0);
         const next = levers.find(l => l.counted === 'now' && active(l) && l.status !== 'In progress') || levers.find(l => l.counted === 'now' && active(l)) || null;
         const todo = levers.filter(l => (l.counted === 'now' || l.counted === 'remote') && active(l)).map(l => ({ key: l.key, stage: l.stage, text: l.firstStep, owner: l.owner, property: l.property, monthly: l.monthly, status: l.status }));
         const packs = buildPacks(properties, levers, active);
-        return { today: T, levers, properties, unknownAge, totals, next, todo, packs, safeSingle, capSingle, lhaStale: lhaStale(T), stageNames: STAGE_NAMES, stageOf: l => STAGE[l.lever] || 5 };
+        return { today: T, levers, properties, selfManaged, agentManaged, unknownAge, totals, next, todo, packs, safeSingle, capSingle, lhaStale: lhaStale(T), stageNames: STAGE_NAMES, stageOf: l => STAGE[l.lever] || 5 };
     }
 
     // ── Property work packs ─────────────────────────────────────────────
@@ -634,5 +965,6 @@
         return (l.effort === 'Works' || l.effort === 'Light') ? 'Roy' : 'Kevin';
     }
 
-    return { LHA_WEEKLY, LHA_2026_27, LHA_VALID_TO, weeklyToMonthly, normaliseStrategy, taskOwnerFor, buildPacks, BRMA_BY_OUTWARD, BRMA_UNCERTAIN, STAGE, STAGE_NAMES, EFFORT_WEIGHT, monthlyFromFrequency, ageOn, outward, brmaFor, isLocal, ratesFor, lhaStale, benefitCap, exemptionInput, capPosition, isUc, isHb, managementOf, buildPlan };
+    return { money, STRATEGY_LIST, CHECKLIST, COUNCIL_BAND_D, COUNCIL_BY_OUTWARD, MARKET_RENT, BAND_NINTHS, councilFor, isSelfManaged, bandsByCouncil, councilTaxFor, rentableRoomsFor, marketRentFor, currentStrategyOf, priceStrategies,
+        LHA_WEEKLY, LHA_2026_27, LHA_VALID_TO, weeklyToMonthly, normaliseStrategy, taskOwnerFor, buildPacks, BRMA_BY_OUTWARD, BRMA_UNCERTAIN, STAGE, STAGE_NAMES, EFFORT_WEIGHT, monthlyFromFrequency, ageOn, outward, brmaFor, isLocal, ratesFor, lhaStale, benefitCap, exemptionInput, capPosition, isUc, isHb, managementOf, buildPlan };
 });
