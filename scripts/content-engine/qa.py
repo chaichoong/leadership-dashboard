@@ -11,22 +11,46 @@ not a promise.
   qa.py check --day N      # print the checks for one rendered day
   qa.py selftest
 """
-import argparse, json, os, re, subprocess, sys
+import argparse, json, os, re, subprocess, sys, time
 HERE = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, HERE)
 import watch  # noqa: E402
 
 HORIZON_MAX_DEG = 8.0        # the horizon lock must be within this of gravity by 10 s and stay there (2056 opened at 26-51 deg)
 JINGLE_MIN_S = 5.5           # the jingle is 7.0 s after its trim; the full must be at least this much longer than the podcast
 GENERIC_TITLE = "DIARY OF A|RUNPRENEUR"
+WAIT_CHECK = "files readable"      # the one check whose failure means "try again", never "this episode is bad"
 MIN_CUES_PER_MINUTE = 4
 
 
-def seconds(path):
-    try:
-        return float(subprocess.run([os.path.expanduser("~/tools/bin/ffprobe"), "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", path],
-                                    capture_output=True, text=True, timeout=60).stdout.strip() or 0)
-    except Exception:
-        return 0.0
+UNREADABLE_TRIES, UNREADABLE_WAIT = 5, 15
+FRESH_MINUTES = 30        # a file written this recently and not readable is the mount catching up, not a bad render
+
+
+def fresh(path, minutes=FRESH_MINUTES):
+    try: return (time.time() - os.path.getmtime(path)) < minutes * 60
+    except OSError: return False
+
+
+def seconds(path, tries=None, wait=None, sleep=time.sleep):
+    """Length in seconds. 0.0 when the file is not there at all, None when it is there and cannot be read yet.
+
+    15 Sep 2026: the render uploads its outputs to Drive by API and the MOUNT lags behind, so at 22:24 ffprobe
+    read 0 s on a 591 MB file that measured 465 s the next morning. A zero read on a file with bytes is the
+    mount catching up, never a zero-length episode, so it is retried and then reported as unknown. The gate
+    holds the card and tries again; it never fails an episode on a read it could not make."""
+    tries = UNREADABLE_TRIES if tries is None else tries
+    wait = UNREADABLE_WAIT if wait is None else wait
+    if not fresh(path): tries = 1          # an old file that will not read is not waiting on Drive; do not stall the gate
+    for n in range(max(1, tries)):
+        try:
+            out = subprocess.run([os.path.expanduser("~/tools/bin/ffprobe"), "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", path],
+                                 capture_output=True, text=True, timeout=60).stdout.strip()
+            if out and float(out) > 0: return float(out)
+        except Exception:
+            pass
+        if not (os.path.exists(path) and os.path.getsize(path) > 0): return 0.0
+        if n < tries - 1: sleep(wait)
+    return None
 
 
 def cue_count(srt_path):
@@ -58,6 +82,18 @@ def checks(day, ledger=None, files=None):
         add("episode rendered", False, True, "no long clip rendered for this day"); return out
     full, full_yt, pod = files.get("full", ""), files.get("full_yt", ""), files.get("podcast", "")
     d_full, d_yt, d_pod = seconds(full), seconds(full_yt), seconds(pod)
+    d_l0, d_ly0 = seconds(files.get("lfmd", "")), seconds(files.get("lfmd_yt", ""))
+    pairs = (("full episode", d_full, full), ("clean YouTube full", d_yt, full_yt), ("podcast", d_pod, pod),
+             ("Learnings clip", d_l0, files.get("lfmd", "")), ("clean Learnings clip", d_ly0, files.get("lfmd_yt", "")))
+    stale = [n for n, d, p in pairs if d is None and not fresh(p)]
+    if stale:
+        # written long ago and still unreadable: that is a broken file, and it IS a refusal
+        add("files readable", False, True, "%s: on disk but unreadable (corrupt render)" % ", ".join(stale)); return out
+    unreadable = [n for n, d, p in pairs if d is None]
+    if unreadable:
+        # NOT a failure: the files are on Drive and this Mac cannot read them yet. The card is held, not refused.
+        add(WAIT_CHECK, False, "wait", "%s: written to Drive, not readable from this Mac yet (the mount lags an upload). The card is raised as soon as they read." % ", ".join(unreadable))
+        return out
     add("full episode file", d_full > 30, True, "%.0f s" % d_full)
     add("clean YouTube full", d_yt > 30 and abs(d_yt - d_full) < 1.5, True, "%.0f s vs %.0f s" % (d_yt, d_full))
     add("jingle in the full episode", d_full - d_pod >= JINGLE_MIN_S if d_pod else False, True, "full is %.1f s longer than the podcast (jingle 7.0 s)" % (d_full - d_pod))
@@ -66,7 +102,7 @@ def checks(day, ledger=None, files=None):
     add("caption file for YouTube", cues >= MIN_CUES_PER_MINUTE * max(d_full, 60) / 60, True, "%d cues" % cues)
     said = diary_phrase_in(files.get("transcript", ""))
     window = ep.get("lfmd_window")
-    d_l, d_ly = seconds(files.get("lfmd", "")), seconds(files.get("lfmd_yt", ""))
+    d_l, d_ly = d_l0, d_ly0
     if said or window:
         add("Learnings clip (captions)", d_l > 15, True, "%.0f s; diary phrase %s in the transcript" % (d_l, "found" if said else "not found"))
         add("Learnings clip (clean, for Shorts)", d_ly > 15 and abs(d_ly - d_l) < 1.5, True, "%.0f s" % d_ly)
@@ -93,11 +129,16 @@ def checks(day, ledger=None, files=None):
 
 
 def gate(day, ledger=None, files=None):
-    """(ok, failures, passed): ok is False when any hard check fails."""
+    """(ok, failures, passed): ok is False when any hard check fails, or when the files cannot be read yet."""
     res = checks(day, ledger, files)
     failures = [(n, d) for n, ok, hard, d in res if hard and not ok]
     passed = [(n, d) for n, ok, hard, d in res if ok]
     return (not failures), failures, passed
+
+
+def is_wait(failures):
+    """True when the only thing stopping the card is a read this Mac could not make yet."""
+    return bool(failures) and all(n == WAIT_CHECK for n, _ in failures)
 
 
 def card_lines(passed, failures=()):
@@ -107,7 +148,41 @@ def card_lines(passed, failures=()):
     return lines
 
 
+def _selftest_unreadable():
+    """15 Sep 2026, reproduced: the file is on Drive, this Mac cannot read it yet, and the gate used to call that
+    a zero-length episode and refuse the card for a whole day."""
+    import tempfile
+    tmp = tempfile.mkdtemp()
+    junk = os.path.join(tmp, "Episode_9999_Full_Episode.mp4")
+    open(junk, "wb").write(b"\x00" * 200000)           # bytes on disk, nothing ffprobe can read: exactly the mount's lag
+    naps = []
+    assert seconds(junk, tries=3, wait=7, sleep=naps.append) is None, "an unreadable file with bytes is unknown, never 0 s"
+    assert naps == [7, 7], "it waits and tries again before giving up"
+    old = os.path.join(tmp, "old.mp4"); open(old, "wb").write(b"\x00" * 1000)
+    os.utime(old, (time.time() - 7200, time.time() - 7200))
+    naps2 = []
+    assert seconds(old, tries=3, wait=7, sleep=naps2.append) is None and naps2 == [], "an old unreadable file is not waited on"
+    assert seconds(os.path.join(tmp, "not-there.mp4"), tries=2, sleep=naps.append) == 0.0, "a file that is not there is 0 s"
+    files = {"full": junk, "full_yt": junk, "podcast": junk, "lfmd": "", "lfmd_yt": "", "summary": "",
+             "full_srt": "", "lfmd_srt": "", "thumb": "", "transcript": ""}
+    globals()["UNREADABLE_TRIES"] = 1
+    try:
+        res = checks(2057, {"c": {"episode": 2057, "role": "episode"}}, files)
+        ok, failures, passed = gate(2057, {"c": {"episode": 2057, "role": "episode"}}, files)
+    finally:
+        globals()["UNREADABLE_TRIES"] = 5
+    assert [r[0] for r in res] == [WAIT_CHECK] and not ok, res
+    os.utime(junk, (time.time() - 7200, time.time() - 7200))
+    res_old = checks(2057, {"c": {"episode": 2057, "role": "episode"}}, files)
+    assert res_old[0][0] == "files readable" and res_old[0][2] is True, "a file unreadable hours after the render is a real refusal"
+    os.utime(junk, None)
+    assert is_wait(failures) and "not readable from this Mac yet" in failures[0][1], failures
+    assert not is_wait([("full episode file", "0 s")]), "a real fault is still a refusal"
+    import shutil as _sh; _sh.rmtree(tmp)
+
+
 def selftest():
+    _selftest_unreadable()
     import tempfile, shutil
     tmp = tempfile.mkdtemp(); ff = os.path.expanduser("~/tools/bin/ffmpeg")
     def mk(name, sec, video=True):

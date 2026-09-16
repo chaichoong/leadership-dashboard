@@ -211,11 +211,17 @@ def output_gate(day, ledger, state):
     import qa
     ok, failures, passed = qa.gate(day, ledger)
     if not ok:
-        state.setdefault(str(day), {})["qa_blocked"] = {"at": dt.datetime.now().isoformat(timespec="seconds"), "failures": ["%s: %s" % f for f in failures]}
+        waiting = qa.is_wait(failures)
+        entry = state.setdefault(str(day), {})
+        entry.pop("qa_blocked", None); entry.pop("qa_waiting", None)
+        entry["qa_waiting" if waiting else "qa_blocked"] = {"at": dt.datetime.now().isoformat(timespec="seconds"), "failures": ["%s: %s" % f for f in failures]}
         save_state(state)
-        print("episode %d: card BLOCKED by the output gate: %s" % (day, "; ".join("%s (%s)" % f for f in failures)))
+        # A wait is not an alarm: the hourly publisher runs this step again and the card goes up within the hour
+        # (15 Sep 2026: 2057 and 2058 rendered fine and waited a whole day for the next night's run).
+        print("episode %d: card %s: %s" % (day, "waiting for the files to be readable" if waiting else "BLOCKED by the output gate",
+                                           "; ".join("%s (%s)" % f for f in failures)))
         return None
-    state.get(str(day), {}).pop("qa_blocked", None)
+    state.get(str(day), {}).pop("qa_blocked", None); state.get(str(day), {}).pop("qa_waiting", None)
     return qa.card_lines(passed)
 
 
@@ -313,6 +319,10 @@ def report():
     waiting = [d for d, e in state.items() if e.get("task") and not e.get("verdict")]
     approved = [d for d, e in state.items() if e.get("verdict") == "approved"]
     blocked = {d: e["qa_blocked"] for d, e in state.items() if isinstance(e, dict) and e.get("qa_blocked")}
+    holding = {d: e["qa_waiting"] for d, e in state.items() if isinstance(e, dict) and e.get("qa_waiting")}
+    if holding:
+        print("content output gate: %d episode%s waiting for the files to be readable (not a fault; the next hourly run raises the card): %s" % (
+            len(holding), "" if len(holding) == 1 else "s", ", ".join(sorted(holding))))
     print("content approvals: %d card%s waiting for Kevin%s; %d approved and waiting for the publishing step" % (
         len(waiting), "" if len(waiting) == 1 else "s", (" (episodes " + ", ".join(sorted(waiting)) + ")") if waiting else "", len(approved)))
     if blocked:
@@ -322,7 +332,35 @@ def report():
         print("content output gate: nothing blocked")
 
 
+def _selftest_gate_wait():
+    """A wait is recorded as qa_waiting and never as qa_blocked (15 Sep 2026)."""
+    import types, sys as _s, io, contextlib
+    fake = types.ModuleType("qa")
+    fake.WAIT_CHECK = "files readable"
+    fake.is_wait = lambda f: bool(f) and all(n == fake.WAIT_CHECK for n, _ in f)
+    fake.card_lines = lambda passed, failures=(): ["ok"]
+    real = _s.modules.get("qa")
+    state = {}
+    try:
+        fake.gate = lambda day, ledger=None, files=None: (False, [(fake.WAIT_CHECK, "not readable from this Mac yet")], [])
+        _s.modules["qa"] = fake
+        saved = globals()["save_state"]; globals()["save_state"] = lambda st: None
+        quiet = contextlib.redirect_stdout(io.StringIO())   # the gate's own lines must not land in the selftest's JSON
+        with quiet: assert output_gate(2057, {}, state) is None
+        assert "qa_waiting" in state["2057"] and "qa_blocked" not in state["2057"], state
+        fake.gate = lambda day, ledger=None, files=None: (False, [("full episode file", "0 s")], [])
+        with contextlib.redirect_stdout(io.StringIO()): assert output_gate(2058, {}, state) is None
+        assert "qa_blocked" in state["2058"] and "qa_waiting" not in state["2058"], state
+        fake.gate = lambda day, ledger=None, files=None: (True, [], [("full episode file", "465 s")])
+        with contextlib.redirect_stdout(io.StringIO()): assert output_gate(2057, {}, state) == ["ok"] and not state["2057"].get("qa_waiting"), state
+    finally:
+        globals()["save_state"] = saved
+        if real is not None: _s.modules["qa"] = real
+        else: _s.modules.pop("qa", None)
+
+
 def selftest():
+    _selftest_gate_wait()
     full = {"id": "recF", "fields": {"Record Status": STATUS_READY, "Video Edited URL": "https://drive/full", "Thumbnail URL": "https://drive/thumb",
                                      "Reframed Video URL": "https://drive/lfmd", "Summary Video URL": "https://drive/sum",
                                      "YouTube Copy": "yt words", "Blog Copy": "blog words", "Notes": "copy written; review: Threads copy 512 chars"}}

@@ -64,6 +64,9 @@ fi
 # It runs FIRST: the publishing steps below stop the run on a failure, and that must never cost a rename.
 python3 scripts/content-engine/runpreneur_sync.py run --then-map || echo "runpreneur sync: skipped this run (see above)"
 python3 scripts/content-engine/approval.py sync || exit 1
+# A card held by the output gate (files on Drive that this Mac could not read yet) goes up within the HOUR, not at
+# the next night's run: 2057 and 2058 rendered fine on 15 Sep 2026 and sat cardless all day, so nothing published.
+python3 scripts/content-engine/approval.py run --pending --limit 2 || echo "approval run: skipped this run (see above)"
 python3 scripts/content-engine/publish.py sync || exit 1
 python3 scripts/content-engine/publish.py run --limit 3 || exit 1
 python3 scripts/content-engine/approval.py report
