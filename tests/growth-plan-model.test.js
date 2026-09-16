@@ -743,13 +743,13 @@ describe('progress is forecast, and a tick moves money from could to now', () =>
         expect(p.properties[0].progress).toBe('In progress');
     });
     it('every uplift ticked done on a settled strategy reads Realised, with no bank figure involved', () => {
-        const f = withPlan('HMO');
+        const f = withPlan('HMO'); f.properties[0].lettableRooms = 3;   // no room left to fill
         f.tenants[0].rentUplift = 'Done';
         f.tenants.slice(1).forEach(t => { t.rentUplift = 'Not needed'; });
         expect(M.buildPlan(f, S, TODAY).properties[0].progress).toBe('Realised');
     });
     it('nothing to chase and nothing done reads No change needed, not Realised', () => {
-        const f = withPlan('HMO');
+        const f = withPlan('HMO'); f.properties[0].lettableRooms = 3;   // no room left to fill
         f.tenants.forEach(t => { t.rentUplift = 'Not needed'; });
         expect(M.buildPlan(f, S, TODAY).properties[0].progress).toBe('No change needed');
     });
@@ -1168,7 +1168,7 @@ describe('a single let is planned at the open-market rent (Kevin, 16 Sep 2026)',
         expect(v.planCt).toBe(0);
         expect(v.upliftChosen).toBe(713);
         expect(v.planWhy).toMatch(/open-market rent of £950.00/);
-        expect(v.progress).toBe('No change needed');   // nothing to tick yet; the figure is the point
+        expect(v.progress).toBe('To do');   // Kevin, 16 Sep 2026: money still to come is never "No change needed"
     });
     it('a rent already above market is held, never planned downwards', () => {
         const f = marloes({ name: '22 Newton Street', postcode: 'BB12 0LG' });
@@ -1329,5 +1329,24 @@ describe('a joint tenancy before the third tenant on a UC HMO house', () => {
         const p = M.buildPlan(f, S, TODAY);
         expect(p.levers.find(x => x.key === 'ct:p1')).toBeUndefined();
         expect(p.totals.strandedRows.map(r => r.key)).toEqual(['ct:p1']);
+    });
+});
+
+// Kevin, 16 Sep 2026: "No change needed" only when the plan adds nothing.
+describe('the status label follows the money still to come', () => {
+    const hmo = rooms => { const f = fixture(); f.properties[0].strategy = 'UC HMO'; f.properties[0].lettableRooms = rooms; f.tenants.forEach(t => { t.rentUplift = 'Not needed'; }); return f; };
+    it('a UC HMO with a room still to fill reads To do, not No change needed', () => {
+        const v = M.buildPlan(hmo(4), S, TODAY).properties[0];
+        expect(v.upliftChosen).toBeGreaterThan(0);
+        expect(v.progress).toBe('To do');
+    });
+    it('once its move is started it reads In progress', () => {
+        const f = hmo(4); f.planRows = [{ id: 'r1', key: 'rooms:p1', status: 'Adopted', taskIds: [] }];
+        expect(M.buildPlan(f, S, TODAY).properties[0].progress).toBe('In progress');
+    });
+    it('with every room let and nothing to chase it reads No change needed', () => {
+        const v = M.buildPlan(hmo(3), S, TODAY).properties[0];
+        expect(v.upliftChosen).toBe(0);
+        expect(v.progress).toBe('No change needed');
     });
 });
