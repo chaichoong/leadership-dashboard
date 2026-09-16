@@ -702,3 +702,25 @@ describe('rooms, market rent and the checklist', () => {
         expect(v.progress).toBe('No change needed');
     });
 });
+
+// Every self-managed property carries a researched open-market rent (16 Sep 2026).
+// The guard is the COUNT, not a list of names: adding a property without researching
+// its rent should turn this red rather than slipping through as an "estimate" pill.
+describe('market rents are researched, not estimated', () => {
+    it('covers every property we run ourselves', () => {
+        const names = Object.keys(M.MARKET_RENT);
+        ['13 Chedburgh Place', '5 Dalham Place', '55 Elmdon Place', '14 Wentworth Terrace',
+         '6 Chedburgh Place', '4 Abington Place', '34 Connaught Road', '18 Northfield Park',
+         '1406 Oldham Road', '282 Stanley Park Avenue South', '18 Siddows Avenue',
+         '22 Newton Street', '23 Viola Street', '11 Aigburth Avenue', '13 John Street',
+         '15 Marloes Court', '16 Eleventh Street', '82 Devon Street'].forEach(n => {
+            expect(names, `${n} has no researched market rent`).toContain(n);
+        });
+    });
+    it('every entry carries a figure and where it came from', () => {
+        Object.entries(M.MARKET_RENT).forEach(([name, r]) => {
+            expect(r.rent, name).toBeGreaterThan(0);
+            expect(String(r.source).trim().length, name).toBeGreaterThan(20);   // a real sentence, not a placeholder
+        });
+    });
+});
