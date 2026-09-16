@@ -1290,3 +1290,44 @@ describe('an empty property (Kevin, 16 Sep 2026)', () => {
         expect(M.buildPlan(f, S, TODAY).properties[0].emptyNow).toBe(false);
     });
 });
+
+// Kevin, 16 Sep 2026 (14 Wentworth Terrace): "We'll still be doing the joint tenancy for Stacey and
+// Kinga to get the historical council tax liability removed from us, but at the point at which we
+// move a third tenant into that property, the council tax will come back to us."
+describe('a joint tenancy before the third tenant on a UC HMO house', () => {
+    const twoTenantHmo = (status) => {
+        const f = fixture(); f.units.pop(); f.tenants.pop(); f.tenancies.pop();
+        f.properties[0].strategy = 'UC HMO'; f.properties[0].lettableRooms = 3;
+        f.planRows = status ? [{ id: 'r1', key: 'ct:p1', status, title: 'joint tenancy', taskIds: [] }] : [];
+        return f;
+    };
+    it('a started joint tenancy move stays live, adds nothing to the plan, and is not stranded', () => {
+        const p = M.buildPlan(twoTenantHmo('Adopted'), S, TODAY);
+        const l = p.levers.find(x => x.key === 'ct:p1');
+        expect(l.status).toBe('Adopted');
+        expect(l.monthly).toBe(0);
+        expect(l.evidence[1]).toMatch(/comes back to us when the third tenant moves in/);
+        expect(p.totals.strandedRows).toHaveLength(0);
+        const v = p.properties[0];
+        expect(v.ctNow).toBe(135);          // still ours until the move is done
+        expect(v.planCt).toBe(135);         // and ours again once the third tenant is in
+    });
+    it('marked Done, the council tax is the tenants\' now, and still ours in the plan', () => {
+        const v = M.buildPlan(twoTenantHmo('Done'), S, TODAY).properties[0];
+        expect(v.ctNow).toBe(0);
+        expect(v.ctNowWhy).toMatch(/until the third tenant moves in/);
+        expect(v.planCt).toBe(135);
+        expect(v.planRent).toBeGreaterThan(v.rentNow);   // the third tenant's rent
+    });
+    it('no started move, no new candidate: other two-tenant UC HMO houses are unchanged', () => {
+        const p = M.buildPlan(twoTenantHmo(null), S, TODAY);
+        expect(p.levers.find(x => x.key === 'ct:p1')).toBeUndefined();
+        expect(p.properties[0].ctNow).toBe(135);
+    });
+    it('a house with no room for a third tenant is not an interim joint tenancy', () => {
+        const f = twoTenantHmo('Adopted'); f.properties[0].lettableRooms = 2;
+        const p = M.buildPlan(f, S, TODAY);
+        expect(p.levers.find(x => x.key === 'ct:p1')).toBeUndefined();
+        expect(p.totals.strandedRows.map(r => r.key)).toEqual(['ct:p1']);
+    });
+});
