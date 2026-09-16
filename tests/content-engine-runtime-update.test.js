@@ -151,3 +151,13 @@ describe('the hourly publisher updates itself the same way', () => {
     expect(pub.indexOf('runpreneur_sync.py run')).toBeLessThan(pub.indexOf('|| exit 1', pub.indexOf('# --- end runtime-update-block ---')));
   });
 });
+
+// 15 Sep 2026: 2057 and 2058 rendered, the output gate could not read their files on the Drive mount 90 seconds
+// after upload, and the cards waited for the NEXT NIGHT. Nothing published all day. The hourly job raises cards too.
+describe('the hourly publisher raises a held card', () => {
+  const pub = readFileSync(resolve(__dirname, '../scripts/content-engine-publish.sh'), 'utf8');
+  it('runs the approval step before publishing', () => {
+    expect(pub).toMatch(/approval\.py run --pending --limit \d+ \|\| echo/);
+    expect(pub.indexOf('approval.py run')).toBeLessThan(pub.indexOf('publish.py run'));
+  });
+});
