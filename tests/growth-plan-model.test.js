@@ -838,7 +838,7 @@ describe('the grid', () => {
         f.properties[0].baselineRent = 1500; f.properties[0].baselineCt = 99;
         const p = M.buildPlan(f, S, TODAY);
         expect(p.totals.startedFrozen).toBe(true);
-        expect(p.totals.grid.started).toEqual({ rent: 1500, ct: 99, left: 1401 });
+        expect(p.totals.grid.started).toMatchObject({ rent: 1500, ct: 99, left: 1401 });
     });
     it('a joint tenancy of the same two tenants keeps their rents and drops the council tax in the plan', () => {
         const v = M.buildPlan(twoFlatLets(), S, TODAY).properties[0];
@@ -909,5 +909,108 @@ describe('places and status read true', () => {
         const p = M.buildPlan(f, S, TODAY);
         expect(p.properties[0].progress).toBe('Agent-run');
         expect(p.totals.notDecided).toBe(0);
+    });
+});
+
+// ════════════════════════════════════════════════════════════════════════
+// Review fixes, 16 Sep 2026
+// ════════════════════════════════════════════════════════════════════════
+describe('review fix 1: a property that is ours gets the self-managed moves', () => {
+    it('a Roc Immo house ticked Moving to self-manage generates its rent uplift', () => {
+        const f = fixture(); f.properties[0].agent = 'Roc Immo';
+        expect(M.buildPlan(f, S, TODAY).levers.find(l => l.key === 'uplift:t1')).toBeUndefined();
+        f.properties[0].movingToSelfManage = true;
+        const p = M.buildPlan(f, S, TODAY);
+        expect(p.levers.find(l => l.key === 'uplift:t1').monthly).toBe(372.62);
+        expect(p.properties[0].upliftsToDo).toBe(372.62);
+        expect(p.levers.find(l => l.lever === 'Agent-held')).toBeUndefined();   // no longer priced as agent potential
+    });
+    it('a house of ours with one agent-collected tenant still gets its moves', () => {
+        const f = fixture(); f.tenants[1].payType = 'Agent-Managed';   // the 22 Newton / 23 Viola shape
+        const p = M.buildPlan(f, S, TODAY);
+        expect(p.properties[0].ours).toBe(true);
+        expect(p.levers.find(l => l.key === 'uplift:t1')).toBeTruthy();
+    });
+    it('a Collins house keeps its take-back', () => {
+        const f = fixture(); f.properties[0].agent = 'Simon Collins';
+        expect(M.buildPlan(f, S, TODAY).levers.find(l => l.lever === 'Take-back')).toBeTruthy();
+    });
+});
+
+describe('review fix 2: unknown council tax is flagged, never passed off as nothing', () => {
+    const noCouncil = () => { const f = fixture(); f.costs = []; f.properties[0].postcode = 'CO12 3DB'; f.properties[0].ctBand = ''; f.properties[0].strategy = 'HMO'; return f; };
+    it('now, plan and best all carry the flag, and the grid names the property', () => {
+        const p = M.buildPlan(noCouncil(), S, TODAY);
+        const v = p.properties[0];
+        expect(v.ct.monthly).toBeNull();
+        expect(v.ctNowUnknown).toBe(true);
+        expect(v.planCtUnknown).toBe(true);
+        expect(p.totals.grid.now.ctUnknown).toEqual(['18 Test Park']);
+        expect(p.totals.grid.plan.ctUnknown).toEqual(['18 Test Park']);
+    });
+    it('a known council tax raises no flag', () => {
+        const p = M.buildPlan(fixture(), S, TODAY);
+        ['started', 'now', 'plan', 'best'].forEach(k => expect(p.totals.grid[k].ctUnknown).toEqual([]));
+    });
+    it('a single let owes no council tax, so an unknown rate is no gap there', () => {
+        const f = singleLet({ postcode: 'CO12 3DB', ctBand: '', ctAnnual: 0 });
+        const v = M.buildPlan(f, S, TODAY).properties[0];
+        expect(v.ctNowUnknown).toBe(false);
+    });
+});
+
+describe('review fix 3: Leave as is on a joint tenancy already in place', () => {
+    const stated = () => { const f = twoFlatLets(); f.properties[0].strategy = 'Leave as is'; f.properties[0].ctPayer = 'Tenants'; return f; };
+    it('with every agreement ticked, the council tax is theirs', () => {
+        const f = stated(); f.tenants.forEach(t => { t.correctAgreement = true; });
+        const v = M.buildPlan(f, S, TODAY).properties[0];
+        expect(v.current).toBe('UC joint tenancy');
+        expect(v.chosen).toBe('UC joint tenancy');
+        expect(v.ctNow).toBe(0);
+        expect(v.progress).toBe('No change needed');
+    });
+    it('with the paperwork missing, Kevin\'s rule still charges us', () => {
+        const v = M.buildPlan(stated(), S, TODAY).properties[0];
+        expect(v.ctNow).toBe(158.41);
+        expect(v.ctNowWhy).toMatch(/0 of 2/);
+    });
+    it('Tenants as payer on a house of three is not read as a joint tenancy', () => {
+        const f = fixture(); f.properties[0].ctPayer = 'Tenants';
+        expect(M.buildPlan(f, S, TODAY).properties[0].current).toBe('UC HMO');
+    });
+});
+
+describe('review fix 4: a move with nothing behind it can be closed', () => {
+    it('an Adopted row for a tenant set to Not needed is pinned to its property', () => {
+        const f = fixture();
+        f.tenants[0].rentUplift = 'Not needed';
+        f.planRows = [{ id: 'r1', key: 'uplift:t1', title: 'Adam Older: room rate to 1-bed rate', status: 'Adopted', taskIds: ['recTask'] },
+                      { id: 'r2', key: 'rooms:p1', title: 'old room let', status: 'Dropped', taskIds: [] }];
+        const p = M.buildPlan(f, S, TODAY);
+        expect(p.properties[0].strandedRows).toEqual([{ id: 'r1', key: 'uplift:t1', status: 'Adopted', title: 'Adam Older: room rate to 1-bed rate', taskIds: ['recTask'], propertyId: 'p1' }]);
+        expect(p.totals.strandedRows).toHaveLength(1);   // the Dropped row is history, not a problem
+    });
+    it('a row whose lever still exists is not stranded', () => {
+        const f = fixture(); f.planRows = [{ id: 'r1', key: 'uplift:t1', status: 'Adopted', taskIds: [] }];
+        expect(M.buildPlan(f, S, TODAY).totals.strandedRows).toEqual([]);
+    });
+});
+
+describe('review fix 5: where we started', () => {
+    it('unfrozen, its council tax is what we paid before any paperwork tick', () => {
+        const f = twoFlatLets(); f.tenants.forEach(t => { t.correctAgreement = true; });
+        const p = M.buildPlan(f, S, TODAY);
+        expect(p.totals.grid.now.ct).toBe(0);
+        expect(p.totals.grid.started.ct).toBe(158.41);   // the saving shows as progress
+    });
+    it('the freeze list holds only what is missing, and never what is saved', () => {
+        const f = fixture();
+        f.properties.push(Object.assign({}, singleLet().properties[0], { id: 'sl2', baselineRent: 900, baselineCt: 0, baselineDate: '2026-09-10' }));
+        f.properties.push(Object.assign({}, singleLet().properties[0], { id: 'sl3', baselineRent: 800, baselineDate: '2026-09-10' }));
+        const p = M.buildPlan(f, S, TODAY);
+        const byId = Object.fromEntries(p.totals.toFreeze.map(x => [x.id, x]));
+        expect(byId.p1).toMatchObject({ rent: 1947.32, ct: 135, date: TODAY });
+        expect(byId.sl2).toBeUndefined();
+        expect(byId.sl3).toMatchObject({ rent: null, ct: 0, date: null });
     });
 });

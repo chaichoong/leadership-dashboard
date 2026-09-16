@@ -240,7 +240,9 @@ test.describe('Growth Plan page', () => {
     await expect(open.locator('.fourtbl')).toHaveCount(0);
     await expect(open.locator('.ticks')).toHaveCount(0);
     await expect(open.locator('select[data-prop-field="strategy"]')).toHaveCount(0);
-    await open.locator('input[data-prop-field="movingToSelfManage"]').check();
+    // click, not check(): ticking moves the property into the other list and redraws it, so the
+    // checkbox Playwright clicked is detached before it could confirm it reads ticked.
+    await open.locator('input[data-prop-field="movingToSelfManage"]').click();
     await expect(page.locator('#toast')).toContainText('Moved to the properties we run ourselves');
     const w = writes.filter(x => x.tableId === TBL.properties).pop();
     expect(w.records[0]).toMatchObject({ id: 'recAgent', fields: { [PX.movingToSelfManage]: true } });
@@ -305,6 +307,8 @@ test.describe('Growth Plan page', () => {
     expect(tf['fldgFjGBw6bTKJFCD']).toMatch(/^Growth plan: Adam Older/);
     expect(tf['fldLu1Y4GzyWcDoxr']).toEqual(['recoGcXRXCniyJsTz']);
     await expect(page.locator('#selfList .pack.open tr', { hasText: 'room rate to 1-bed rate' })).toContainText('In progress');
+    // the status pill carries its colour class: the regex once matched a literal backslash, so it never did
+    await expect(page.locator('#selfList .pack.open tr', { hasText: 'room rate to 1-bed rate' }).locator('.pill.st-in-progress')).toHaveCount(1);
   });
 
   test('a works move goes to Roy unless the house says otherwise', async ({ page }) => {
@@ -341,8 +345,8 @@ test.describe('Growth Plan page', () => {
     await expect(page.locator('#calcOut')).not.toBeVisible();
     await more.filter({ hasText: 'plain English' }).locator('summary').click();
     await expect(page.locator('#glossaryBody')).toBeVisible();
-    await expect(page.locator('#glossaryBody')).toContainText('Short for House in Multiple Occupation');
-    await expect(page.locator('#glossaryBody')).toContainText('Money the rent records actually show');
+    await expect(page.locator('#glossaryBody')).toContainText('short for House in Multiple Occupation');
+    await expect(page.locator('#glossaryBody')).toContainText('the leadership dashboard is where you see it arrive');
   });
 
   test('the benefit cap calculator still works inside Further information', async ({ page }) => {
@@ -406,6 +410,67 @@ test.describe('Growth Plan page', () => {
     expect(w.records[0].id).toBe('recT1');
     expect(w.records[0].fields[T.ni]).toBe('QQ123456C');
     expect(w.records[0].fields[T.capExemption]).toBe('PIP or DLA');
+  });
+
+  test('review fix 2: unknown council tax is marked on the grid and named', async ({ page }) => {
+    const fx = fixtures();
+    fx[TBL.costs] = [];
+    fx[TBL.properties][0].fields[P.postcode] = 'CO12 3DB';   // Tendring: no council tax rate on file
+    delete fx[TBL.properties][0].fields[P.ctBand];
+    await openPage(page, fx);
+    await expect(page.locator('#ctUnknownNote')).toContainText('Council tax is not known on 1 property');
+    await expect(page.locator('#ctUnknownNote')).toContainText('18 Test Park');
+    await expect(page.locator('#kpis table.grid .unk').first()).toBeVisible();
+    const open = await openSelf(page, '18 Test Park');
+    await expect(open.locator('.nowtbl')).toContainText('not known');
+    await expect(open.locator('.nowtbl')).toContainText('before council tax');
+    await page.locator('[data-kpi="best"]').click();
+    await expect(page.locator('#kpiDetail tr', { hasText: '18 Test Park' })).toContainText('not known');
+  });
+
+  test('review fix 4: a move left open with nothing behind it can be dropped', async ({ page }) => {
+    const fx = fixtures();
+    fx[TBL.tenants][0].fields[TT.rentUplift] = 'Not needed';
+    fx[TBL.plan].push({ id: 'recStranded', fields: { [PLAN.key]: 'uplift:recT1', [PLAN.status]: 'Adopted', [PLAN.title]: 'Adam Older: room rate to 1-bed rate' } });
+    const writes = await openPage(page, fx);
+    const open = await openSelf(page, '18 Test Park');
+    const stranded = open.locator('.stranded');
+    await expect(stranded).toContainText('No longer on the plan, but still open');
+    await expect(stranded).toContainText('Adam Older: room rate to 1-bed rate');
+    await stranded.locator('button[data-act="drop-row"]').click();
+    await expect(page.locator('#toast')).toContainText('Dropped: Adam Older');
+    const w = writes.filter(x => x.tableId === TBL.plan).pop();
+    expect(w.records[0]).toEqual({ id: 'recStranded', fields: { [PLAN.status]: 'Dropped' } });
+    await expect(page.locator('#selfList .pack.open .stranded')).toHaveCount(0);
+  });
+
+  test('review fix 5: Freeze writes only the starting figures still missing', async ({ page }) => {
+    const fx = fixtures();
+    fx[TBL.properties][2].fields[PX.baselineRent] = 777;   // 13 Far Street already has a starting rent
+    fx[TBL.properties][2].fields['fldp0bTV5uUIQkHh6'] = '2026-09-01';
+    const writes = await openPage(page, fx);
+    await expect(page.locator('#kpis')).toContainText('not frozen for 3 properties');
+    await page.locator('button[data-act="freeze-started"]').click();
+    await expect(page.locator('#toast')).toContainText('Froze where we started for 3 properties');
+    const recs = writes.filter(x => x.tableId === TBL.properties).flatMap(x => x.records);
+    const byId = Object.fromEntries(recs.map(r => [r.id, r.fields]));
+    expect(byId.recProp1[PX.baselineRent]).toBe(1947.32);
+    expect(byId.recProp1[PX.baselineCt]).toBe(135);
+    expect(PX.baselineRent in byId.recProp2).toBe(false);          // the saved rent is never overwritten
+    expect('fldp0bTV5uUIQkHh6' in byId.recProp2).toBe(false);      // nor its date
+    expect(byId.recProp2[PX.baselineCt]).toBe(0);                  // a single let: no council tax to us
+    await expect(page.locator('#kpis')).not.toContainText('not frozen');
+    await expect(page.locator('button[data-act="freeze-started"]')).toHaveCount(0);
+  });
+
+  test('review fix 1: a promoted property\'s tenants reach the meeting form', async ({ page }) => {
+    const fx = fixtures();
+    fx[TBL.properties][0].fields[P.agent] = 'Roc Immo';
+    fx[TBL.properties][0].fields[PX.movingToSelfManage] = true;
+    await openPage(page, fx);
+    await expect(page.locator('#formTenant option', { hasText: 'Adam Older' })).toHaveCount(1);
+    const open = await openSelf(page, '18 Test Park');
+    await expect(open.locator('tr', { hasText: 'room rate to 1-bed rate' }).first()).toBeVisible();
   });
 
   test('shows the empty state and no crash when nothing loads', async ({ page }) => {

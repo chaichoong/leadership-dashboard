@@ -226,6 +226,9 @@
   .gcol .chev { color: var(--text-muted); display: inline-block; transition: transform .15s; }
   .gcol.on .chev { transform: rotate(90deg); color: var(--accent); }
   .gnote { font-size: var(--fs-xs); color: var(--text-muted); font-weight: var(--fw-regular); margin-top: 2px; }
+  .unk { color: var(--warning); font-weight: var(--fw-bold); margin-left: 2px; cursor: help; }
+  .gunk { margin-top: var(--space-2); color: var(--warning); }
+  .stranded { margin-top: var(--space-3); padding-top: var(--space-2); border-top: 1px dashed var(--border-default); }
   .gsum { display: flex; gap: var(--space-5); flex-wrap: wrap; margin-top: var(--space-3); color: var(--text-secondary); }
   .ticks { display: flex; flex-wrap: wrap; gap: 4px 14px; margin: 6px 0; padding: 6px 8px; border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); background: var(--bg-surface); }
   label.tick { font-size: var(--fs-sm); display: inline-flex; gap: 6px; align-items: center; color: var(--text-primary); cursor: pointer; }
@@ -583,7 +586,7 @@
         documents: (r.fields[T.documents] || []).map(a => ({ id: a.id, filename: a.filename, url: a.url, size: a.size })) })),
       tenancies: raw.tenancies.map(r => ({ id: r.id, tenantIds: link(r.fields[C.tenants]), unitId: link(r.fields[C.unit])[0], rent: r.fields[C.rent], actual: r.fields[C.actual] })),
       costs: raw.costs.filter(r => link(r.fields[K.property]).length).map(r => ({ propertyId: link(r.fields[K.property])[0], shared: link(r.fields[K.property]).length > 1, name: r.fields[K.name] || '', monthly: M.monthlyFromFrequency(r.fields[K.expected], sel(r.fields[K.frequency])) })),
-      planRows: raw.planRows.map(r => ({ id: r.id, key: r.fields[GP.plan.key] || '', status: sel(r.fields[GP.plan.status]) || 'Candidate', taskIds: link(r.fields[GP.plan.tasks]) })),
+      planRows: raw.planRows.map(r => ({ id: r.id, key: r.fields[GP.plan.key] || '', title: r.fields[GP.plan.title] || '', status: sel(r.fields[GP.plan.status]) || 'Candidate', taskIds: link(r.fields[GP.plan.tasks]) })),
     };
   }
   function recompute() { state.plan = M.buildPlan(state.data, state.settings, todayISO()); window._growthPlan = state; }
@@ -596,7 +599,7 @@
   function renderMeetingForm() {
     const sel = $('formTenant');
     const tenants = [];
-    state.plan.properties.filter(v => v.mgmt === 'kevin').forEach(v => v.tenants.forEach(t => tenants.push({ id: t.id, label: `${t.name} (${v.name})` })));
+    state.plan.properties.filter(v => v.selfManaged).forEach(v => v.tenants.forEach(t => tenants.push({ id: t.id, label: `${t.name} (${v.name})` })));
     tenants.sort((a, b) => a.label.localeCompare(b.label));
     sel.innerHTML = '<option value="">Choose a tenant…</option>' + tenants.map(t => `<option value="${esc(t.id)}" ${t.id === state.ui.formTenant ? 'selected' : ''}>${esc(t.label)}</option>`).join('');
     const form = $('meetingForm');
@@ -641,7 +644,9 @@
   function renderHeadline() {
     const t = state.plan.totals, g = t.grid, open = state.ui.openKpi;
     const head = GRID_COLS.map(c => `<th class="num"><button type="button" class="gcol ${open === c.key ? 'on' : ''}" data-kpi="${c.key}" aria-expanded="${open === c.key}">${esc(c.label)} <span class="chev" aria-hidden="true">▸</span></button><div class="gnote">${esc(c.note)}</div></th>`).join('');
-    const row = (label, k, cls) => `<tr class="${cls || ''}"><th scope="row">${esc(label)}</th>${GRID_COLS.map(c => `<td class="num">${k === 'ct' && g[c.key][k] ? '−' : ''}${gbp(g[c.key][k])}</td>`).join('')}</tr>`;
+    const flag = (c, k) => (k !== 'rent' && (g[c.key].ctUnknown || []).length) ? `<span class="unk" title="Council tax not known on ${esc(g[c.key].ctUnknown.join(', '))}">*</span>` : '';
+    const row = (label, k, cls) => `<tr class="${cls || ''}"><th scope="row">${esc(label)}</th>${GRID_COLS.map(c => `<td class="num">${k === 'ct' && g[c.key][k] ? '−' : ''}${gbp(g[c.key][k])}${flag(c, k)}</td>`).join('')}</tr>`;
+    const unknownAll = Array.from(new Set(GRID_COLS.flatMap(c => g[c.key].ctUnknown || [])));
     $('kpis').innerHTML = `<div class="tbl-wrap"><table class="grid" aria-label="Rent and council tax, from where we started to the ceiling">
       <thead><tr><th></th>${head}</tr></thead>
       <tbody>${row('Rent a month', 'rent')}${row('Council tax we pay', 'ct', 'ctrow')}${row('Left for us', 'left', 'leftrow')}</tbody>
@@ -650,8 +655,9 @@
       <span>Since we started: <b class="${g.now.left - g.started.left >= 0 ? 'good-t' : 'neg'}">${g.now.left - g.started.left >= 0 ? '+' : '−'}${gbp(Math.abs(g.now.left - g.started.left))}</b> a month</span>
       <span>Still to come from the plan: <b>+${gbp(Math.max(0, g.plan.left - g.now.left))}</b></span>
       <span>Room left to the ceiling: <b class="muted">+${gbp(Math.max(0, g.best.left - g.now.left))}</b></span>
-      ${t.startedFrozen ? '' : '<span class="note">Where we started is not frozen yet, so it reads the rent on the record today.</span>'}
-    </div>`;
+      ${t.startedFrozen ? '' : `<span class="note">Where we started is not frozen for ${t.toFreeze.length} propert${t.toFreeze.length === 1 ? 'y' : 'ies'}, so it reads today's record for ${t.toFreeze.length === 1 ? 'it' : 'them'}.</span> <button class="btn btn-sm" data-act="freeze-started" ${state.busy.has('freeze') ? 'disabled' : ''}>Freeze where we started</button>`}
+    </div>
+    ${unknownAll.length ? `<div class="gunk small" id="ctUnknownNote"><b>*</b> Council tax is not known on ${unknownAll.length} propert${unknownAll.length === 1 ? 'y' : 'ies'}, so it is counted as £0 wherever it is marked: ${esc(unknownAll.join(', '))}. Set the council tax band on ${unknownAll.length === 1 ? 'it' : 'each one'} to fix this.</div>` : ''}`;
     renderKpiDetail();
   }
 
@@ -660,10 +666,10 @@
     const p = state.plan, g = p.totals.grid;
     const col = GRID_COLS.find(c => c.key === key); if (!col) return null;
     const pick = {
-      started: v => ({ rent: v.baselineRent == null ? v.recordRent : v.baselineRent, ct: v.baselineCt == null ? v.ctNow : v.baselineCt, why: v.baselineDate ? `frozen ${v.baselineDate}` : 'rent on the record' }),
-      now: v => ({ rent: v.rentNow, ct: v.ctNow, why: v.ctNowWhy }),
-      plan: v => ({ rent: v.planRent, ct: v.planCt, why: v.planWhy }),
-      best: v => ({ rent: v.bestRent, ct: v.bestCt, why: v.bestWhy }),
+      started: v => ({ rent: v.baselineRent == null ? v.recordRent : v.baselineRent, ct: v.baselineCt == null ? v.ctBeforeTicks : v.baselineCt, unknown: v.baselineCt == null && v.ctBeforeTicksUnknown, why: v.baselineDate ? `frozen ${v.baselineDate}` : 'not frozen: the record today, before any tick' }),
+      now: v => ({ rent: v.rentNow, ct: v.ctNow, unknown: v.ctNowUnknown, why: v.ctNowWhy }),
+      plan: v => ({ rent: v.planRent, ct: v.planCt, unknown: v.planCtUnknown, why: v.planWhy }),
+      best: v => ({ rent: v.bestRent, ct: v.bestCt, unknown: v.bestCtUnknown, why: v.bestWhy }),
     }[key];
     const rows = p.properties.map(v => Object.assign({ name: v.name + (v.selfManaged ? '' : ' (' + (v.agent || 'agent') + ')') }, pick(v)))
       .sort((a, b) => (b.rent - b.ct) - (a.rent - a.ct));
@@ -673,7 +679,7 @@
     const box = $('kpiDetail'); const d = state.ui.openKpi ? kpiRows(state.ui.openKpi) : null;
     if (!d) { box.hidden = true; box.innerHTML = ''; return; }
     box.hidden = false;
-    box.innerHTML = `<h3>${esc(d.title)}, property by property<span>${gbp(d.total.left, 2)} left</span></h3><div class="tbl-wrap"><table><thead><tr><th>Property</th><th class="num">Rent</th><th class="num">Council tax</th><th class="num">Left</th></tr></thead><tbody>${d.rows.length ? d.rows.map(r => `<tr><td class="wrap">${esc(r.name)}<div class="small muted">${esc(r.why || '')}</div></td><td class="num">${gbp(r.rent, 2)}</td><td class="num ${r.ct ? 'neg' : 'muted'}">${r.ct ? '−' + gbp(r.ct, 2) : '£0'}</td><td class="num"><b>${gbp(r.rent - r.ct, 2)}</b></td></tr>`).join('') : '<tr><td class="empty" colspan="4">No properties</td></tr>'}</tbody></table></div>`;
+    box.innerHTML = `<h3>${esc(d.title)}, property by property<span>${gbp(d.total.left, 2)} left</span></h3><div class="tbl-wrap"><table><thead><tr><th>Property</th><th class="num">Rent</th><th class="num">Council tax</th><th class="num">Left</th></tr></thead><tbody>${d.rows.length ? d.rows.map(r => `<tr><td class="wrap">${esc(r.name)}<div class="small muted">${esc(r.why || '')}</div></td><td class="num">${gbp(r.rent, 2)}</td><td class="num ${r.ct ? 'neg' : 'muted'}">${r.unknown ? '<span class="note">not known</span>' : r.ct ? '−' + gbp(r.ct, 2) : '£0'}</td><td class="num"><b>${gbp(r.rent - r.ct, 2)}</b></td></tr>`).join('') : '<tr><td class="empty" colspan="4">No properties</td></tr>'}</tbody></table></div>`;
   }
 
   function renderCountStrip() {
@@ -686,37 +692,6 @@
       cell(t.voidUnits, t.voidUnits === 1 ? 'empty place' : 'empty places', t.voidUnits ? 'warn' : '') +
       cell(t.tenants, 'tenants living there now') +
       cell(t.notDecided, 'still need a plan picked', t.notDecided ? 'warn' : '');
-  }
-
-  // What each card is made of.
-  function kpiRows(key) {
-    const p = state.plan, t = p.totals;
-    const props = p.properties.slice();
-    const named = v => v.name + (v.selfManaged ? '' : ' (' + (v.agent || 'agent') + ')');
-    switch (key) {
-      case 'rentNow': return { title: 'Rent now, property by property', total: t.rentNow,
-        rows: props.filter(v => v.rentNow).sort((a, b) => b.rentNow - a.rentNow).map(v => ({ name: named(v), amount: v.rentNow, extra: v.current })) };
-      case 'rentPlan': return { title: 'Rent once the plan you picked is done', total: t.rentNow + t.chosenUplift,
-        rows: props.filter(v => v.chosen).sort((a, b) => (b.netPlanned || 0) - (a.netPlanned || 0)).map(v => ({ name: named(v), amount: v.netPlanned == null ? v.rentNow : v.netPlanned, extra: v.chosen })) };
-      case 'uplift': return { title: 'Extra a month, after council tax, from the plans picked', total: t.chosenUplift,
-        rows: props.filter(v => v.chosen && v.upliftChosen > 0).sort((a, b) => b.upliftChosen - a.upliftChosen).map(v => ({ name: named(v), amount: v.upliftChosen, extra: `${v.current} → ${v.chosen}` })) };
-      case 'todo': return { title: 'Plans picked but not started', total: t.toDo,
-        rows: props.filter(v => v.progress === 'To do').map(v => ({ name: named(v), amount: Math.max(0, v.upliftChosen || 0), extra: `${v.current} → ${v.chosen}` })) };
-      case 'inprog': return { title: 'Work under way', total: t.inProgress,
-        rows: props.filter(v => v.progress === 'In progress').map(v => ({ name: named(v), amount: Math.max(0, v.upliftChosen || 0), extra: `${v.runningCount} move${v.runningCount === 1 ? '' : 's'} running` })) };
-      case 'realised': return { title: 'Landed: what the rent actually shows against what the plan expected', total: t.measuredRealised,
-        rows: props.filter(v => v.measuredRealised != null || v.forecastRealised > 0).map(v => ({
-          name: named(v), amount: v.measuredRealised == null ? 0 : v.measuredRealised,
-          extra: v.measuredRealised == null ? 'no starting figure saved yet' : `expected ${gbp(v.forecastRealised, 2)}`,
-          sub: v.baselineDate ? `Measured against ${gbp(v.baselineRent, 2)} a month on ${v.baselineDate}` : 'The starting figure is saved the first time a move here is marked done' })) };
-      default: return null;
-    }
-  }
-  function renderKpiDetail() {
-    const box = $('kpiDetail'); const d = state.ui.openKpi ? kpiRows(state.ui.openKpi) : null;
-    if (!d) { box.hidden = true; box.innerHTML = ''; return; }
-    box.hidden = false;
-    box.innerHTML = `<h3>${esc(d.title)}<span>${gbp(d.total, 2)}</span></h3><div class="tbl-wrap"><table><tbody>${d.rows.length ? d.rows.map(r => `<tr><td class="wrap">${esc(r.name)}${r.sub ? `<div class="small muted">${esc(r.sub)}</div>` : ''}</td><td class="muted">${esc(r.extra || '')}</td><td class="num ${r.amount < 0 ? 'neg' : ''}">${r.amount < 0 ? '−' : ''}${gbp(Math.abs(r.amount), 2)}</td></tr>`).join('') : '<tr><td class="empty">Nothing in this group yet</td></tr>'}</tbody></table></div>`;
   }
 
   const STATUSES = ['All', 'Not decided', 'To do', 'In progress', 'Realised', 'No change needed'];
@@ -850,15 +825,15 @@ BEFORE THE FIRST ONE IS SIGNED (all in writing)
   // Where this property is now, and where the plan and the ceiling take it. Same
   // four columns as the headline, for one property.
   function nowBlock(v) {
-    const cell = (rent, ct) => `<td class="num">${gbp(rent, 2)}</td><td class="num ${ct ? 'neg' : 'muted'}">${ct ? '−' + gbp(ct, 2) : '£0'}</td><td class="num"><b>${gbp(rent - ct, 2)}</b></td>`;
+    const cell = (rent, ct, unknown) => `<td class="num">${gbp(rent, 2)}</td><td class="num ${ct ? 'neg' : 'muted'}">${unknown ? '<span class="note">not known</span>' : ct ? '−' + gbp(ct, 2) : '£0'}</td><td class="num"><b>${gbp(rent - ct, 2)}</b>${unknown ? '<div class="small note">before council tax</div>' : ''}</td>`;
     const startedRent = v.baselineRent == null ? v.recordRent : v.baselineRent;
-    const startedCt = v.baselineCt == null ? v.ctNow : v.baselineCt;
+    const startedCt = v.baselineCt == null ? v.ctBeforeTicks : v.baselineCt;
     return `<div class="pack-block"><h4>This property, start to ceiling</h4>
       <div class="tbl-wrap"><table class="strattbl nowtbl"><thead><tr><th></th><th class="num">Rent</th><th class="num">Council tax</th><th class="num">Left for us</th></tr></thead><tbody>
         <tr><td>Where we started</td>${cell(startedRent, startedCt)}</tr>
-        <tr class="chosen"><td>Where we are now<div class="small muted">${esc(v.ctNowWhy)}</div>${v.upliftsDone ? `<div class="small good-t">Includes ${gbp(v.upliftsDone, 2)} of rent uplifts ticked done</div>` : ''}</td>${cell(v.rentNow, v.ctNow)}</tr>
-        <tr><td>If the plan is done<div class="small muted">${esc(v.planWhy)}</div></td>${cell(v.planRent, v.planCt)}</tr>
-        <tr><td>Best possible<div class="small muted">${esc(v.bestWhy)}</div></td>${cell(v.bestRent, v.bestCt)}</tr>
+        <tr class="chosen"><td>Where we are now<div class="small muted">${esc(v.ctNowWhy)}</div>${v.upliftsDone ? `<div class="small good-t">Includes ${gbp(v.upliftsDone, 2)} of rent uplifts ticked done</div>` : ''}</td>${cell(v.rentNow, v.ctNow, v.ctNowUnknown)}</tr>
+        <tr><td>If the plan is done<div class="small muted">${esc(v.planWhy)}</div></td>${cell(v.planRent, v.planCt, v.planCtUnknown)}</tr>
+        <tr><td>Best possible<div class="small muted">${esc(v.bestWhy)}</div></td>${cell(v.bestRent, v.bestCt, v.bestCtUnknown)}</tr>
       </tbody></table></div></div>`;
   }
 
@@ -866,7 +841,7 @@ BEFORE THE FIRST ONE IS SIGNED (all in writing)
   // the box moves it into our list, where every tool for our own properties applies.
   function agentBlock(v) {
     return `<div class="pack-block"><h4>Run by ${esc(v.agent || 'an agent')}</h4>
-      <p class="small muted">Nothing to do here while an agent runs it. The ceiling for this property is ${gbp(v.bestRent - v.bestCt, 2)} a month left for us (${esc(v.bestWhy)}), against ${gbp(v.rentNow - v.ctNow, 2)} now.</p>
+      <p class="small muted">Nothing to do here while an agent runs it. The ceiling for this property is ${gbp(v.bestRent - v.bestCt, 2)} a month left for us (${esc(v.bestWhy)}${v.bestCtUnknown ? ', before council tax, which is not known here' : ''}), against ${gbp(v.rentNow - v.ctNow, 2)} now.</p>
       <label class="chk selfmanage"><input type="checkbox" data-prop-field="movingToSelfManage" data-prop="${esc(v.id)}" ${v.movingToSelfManage ? 'checked' : ''}> Moving to self-manage</label>
       <p class="small muted">Tick this when we take it back. It moves up into the properties we run ourselves.</p></div>`;
   }
@@ -976,13 +951,15 @@ BEFORE THE FIRST ONE IS SIGNED (all in writing)
   function leversBlock(v) {
     const all = state.plan.levers.filter(l => l.propertyId === v.id);
     const shown = all.filter(l => state.ui.showDone || (l.status !== 'Done' && l.status !== 'Dropped'));
-    if (!shown.length) return '';
+    const stranded = v.strandedRows || [];
+    if (!shown.length && !stranded.length) return '';
     const busy = k => state.busy.has(k) ? 'disabled' : '';
     return `<div class="pack-block"><h4>The moves that get us there</h4><div class="tbl-wrap"><table><tbody>${shown.map(l => `<tr class="${l.status === 'Done' || l.status === 'Dropped' ? 'dim' : ''}">
       <td class="wrap">${esc(l.title)}<div class="small muted">${esc(l.evidence[0] || '')}</div>${l.needs && l.needs.length ? `<div class="small note">${esc(l.needs.join(' · '))}</div>` : ''}</td>
-      <td><span class="pill ${esc(l.effort.toLowerCase())}">${esc(l.effort)}</span> <span class="pill st-${esc(l.status.toLowerCase().replace(/\\s+/g, '-'))}">${esc(l.status)}</span></td>
+      <td><span class="pill ${esc(l.effort.toLowerCase())}">${esc(l.effort)}</span> <span class="pill st-${esc(l.status.toLowerCase().replace(/\s+/g, '-'))}">${esc(l.status)}</span></td>
       <td class="num">${l.monthly ? '+' + gbp(l.monthly, 2) : '—'}${l.capShortfall ? `<div class="small muted">CRF ${gbp(l.capShortfall, 2)}</div>` : ''}</td>
       <td><div class="row-actions">${l.status === 'Candidate' ? `<button class="btn btn-sm" data-act="adopt" data-key="${esc(l.key)}" ${busy(l.key)}>Start it</button>` : ''}${(l.status !== 'Done' && l.status !== 'Dropped') ? `<button class="btn btn-sm btn-primary" data-act="task" data-key="${esc(l.key)}" ${busy(l.key)}>Task</button>` : ''}${(l.status === 'Adopted' || l.status === 'In progress') ? `<button class="btn btn-sm" data-act="done" data-key="${esc(l.key)}" ${busy(l.key)}>Done</button>` : ''}${(l.status !== 'Done' && l.status !== 'Dropped') ? `<button class="btn btn-sm btn-ghost" data-act="drop" data-key="${esc(l.key)}" ${busy(l.key)}>Drop</button>` : `<button class="btn btn-sm btn-ghost" data-act="reopen" data-key="${esc(l.key)}" ${busy(l.key)}>Reopen</button>`}</div></td></tr>`).join('')}</tbody></table></div>
+      ${stranded.length ? `<div class="stranded"><h5 class="small muted">No longer on the plan, but still open</h5><p class="small muted">These moves were started, then stopped applying (a tenant set to nothing to chase, a record updated, a tenant gone). Drop each one so it stops counting as open.${stranded.some(r => r.taskIds.length) ? ' Any task raised for it stays open: close that on the task board.' : ''}</p><ul class="plain">${stranded.map(r => `<li>${esc(r.title)} <span class="pill st-${esc(r.status.toLowerCase().replace(/\s+/g, '-'))}">${esc(r.status)}</span>${r.taskIds.length ? ` <span class="small muted">${r.taskIds.length} task${r.taskIds.length === 1 ? '' : 's'} linked</span>` : ''} <button class="btn btn-sm btn-ghost" data-act="drop-row" data-row="${esc(r.id)}" ${state.busy.has('row:' + r.id) ? 'disabled' : ''}>Drop</button></li>`).join('')}</ul></div>` : ''}
       <label class="chk" style="margin-top:8px"><input type="checkbox" id="showDone" ${state.ui.showDone ? 'checked' : ''}> Show the ones already done or dropped</label></div>`;
   }
 
@@ -1132,6 +1109,43 @@ BEFORE THE FIRST ONE IS SIGNED (all in writing)
       toast(`${status}: ${l.title}`);
     });
   }
+  // Close a Growth Plan row whose lever no longer exists (review fix, 16 Sep 2026). It only
+  // changes the row's status: any task raised for it is left for the task board to close.
+  async function dropStrandedRow(rowId) {
+    const row = state.data.planRows.find(r => r.id === rowId); if (!row) return;
+    await withBusy('row:' + rowId, async () => {
+      await airtableWrite('PATCH', TABLES.growthPlan, { records: [{ id: rowId, fields: { [GP.plan.status]: 'Dropped' } }], typecast: true });
+      row.status = 'Dropped';
+      toast(`Dropped: ${row.title || row.key}`);
+    });
+  }
+
+  // Freeze "where we started" for every property still missing it (review fix, 16 Sep 2026).
+  // Writes only the missing figures, ten records a request, and never overwrites a saved one.
+  async function freezeStarted() {
+    const todo = (state.plan.totals.toFreeze || []);
+    if (!todo.length) { toast('Where we started is already frozen for every property'); return; }
+    await withBusy('freeze', async () => {
+      for (let i = 0; i < todo.length; i += 10) {
+        const records = todo.slice(i, i + 10).map(x => {
+          const fields = {};
+          if (x.rent != null) fields[GP.prop.baselineRent] = Number(x.rent);
+          if (x.ct != null) fields[GP.prop.baselineCt] = Number(x.ct);
+          if (x.date) fields[GP.prop.baselineDate] = x.date;
+          return { id: x.id, fields };
+        });
+        await airtableWrite('PATCH', TABLES.properties, { records });
+        records.forEach(r => {
+          const p = state.data.properties.find(x => x.id === r.id); if (!p) return;
+          if (GP.prop.baselineRent in r.fields) p.baselineRent = r.fields[GP.prop.baselineRent];
+          if (GP.prop.baselineCt in r.fields) p.baselineCt = r.fields[GP.prop.baselineCt];
+          if (GP.prop.baselineDate in r.fields) p.baselineDate = r.fields[GP.prop.baselineDate];
+        });
+      }
+      toast(`Froze where we started for ${todo.length} propert${todo.length === 1 ? 'y' : 'ies'}`);
+    });
+  }
+
   // A tenant tick (Kevin, 16 Sep 2026). The three document ticks are checkboxes on the
   // tenant. The rent uplift tick is a select: ticking makes it Done, unticking makes it To do,
   // and the tenant's uplift move in the Growth Plan table follows it so the two never disagree.
@@ -1220,6 +1234,8 @@ BEFORE THE FIRST ONE IS SIGNED (all in writing)
       if (act === 'task') return createTask(key);
       if (act === 'save-dob') return saveDob(b.dataset.tenant, b);
       if (act === 'confirm-35') return confirm35(b.dataset.tenant);
+      if (act === 'drop-row') return dropStrandedRow(b.dataset.row);
+      if (act === 'freeze-started') return freezeStarted();
       if (act === 'open-form') { state.ui.formTenant = b.dataset.tenant; renderMeetingForm(); renderDocs(); $('gp-form').scrollIntoView({ behavior: 'smooth', block: 'start' }); return; }
     }
     const ph = e.target.closest('.pack-head');
@@ -1258,10 +1274,10 @@ BEFORE THE FIRST ONE IS SIGNED (all in writing)
         { name: 'LHA table in date', kind: 'automation', run: () => M.lhaStale(todayISO()) ? { status: 'warn', detail: `LHA figures are for 2026-27 (to ${M.LHA_VALID_TO}); update js/growth-plan-model.js and the settings rows` } : { status: 'pass', detail: `2026-27 rates, valid to ${M.LHA_VALID_TO}` } },
         { name: 'Every property has a postcode', kind: 'sync', run: () => { const p = (g().plan || {}).properties || []; const miss = p.filter(v => !v.postcode); return miss.length ? { status: 'warn', detail: `${miss.length} without a postcode: ${miss.map(v => v.name).join(', ')} — no LHA rate can be applied` } : { status: 'pass', detail: `All ${p.length} properties carry a postcode` }; } },
         { name: 'Ages known for UC room tenants', kind: 'sync', run: () => { const u = (g().plan || {}).unknownAge || []; return u.length ? { status: 'warn', detail: `${u.length} UC room tenant${u.length > 1 ? 's' : ''} with no date of birth: ${u.map(x => x.tenant).join(', ')}` } : { status: 'pass', detail: 'Every UC room tenant has a date of birth' }; } },
-        { name: 'Benefit cap positions recorded', kind: 'sync', run: () => { const p = (g().plan || {}).properties || []; let uc = 0, known = 0; p.forEach(v => v.tenants.forEach(t => { if (t.uc && v.mgmt === 'kevin') { uc++; if (t.capExemption !== 'Unknown') known++; } })); return known < uc ? { status: 'warn', detail: `${known} of ${uc} UC tenants have a recorded cap position; the rest are shown as CRF Housing Payment claims` } : { status: 'pass', detail: `${uc} UC tenants, all with a recorded cap position` }; } },
-        { name: 'Strategy set on every house you manage', kind: 'sync', run: () => { const p = ((g().plan || {}).properties || []).filter(v => v.mgmt === 'kevin'); const miss = p.filter(v => !v.strategy); return miss.length ? { status: 'warn', detail: `${miss.length} without a strategy: ${miss.map(v => v.name).join(', ')}` } : { status: 'pass', detail: `All ${p.length} houses carry a strategy (joint tenancy, HMO or leave as is)` }; } },
+        { name: 'Benefit cap positions recorded', kind: 'sync', run: () => { const p = (g().plan || {}).properties || []; let uc = 0, known = 0; p.forEach(v => v.tenants.forEach(t => { if (t.uc && v.selfManaged) { uc++; if (t.capExemption !== 'Unknown') known++; } })); return known < uc ? { status: 'warn', detail: `${known} of ${uc} UC tenants have a recorded cap position; the rest are shown as CRF Housing Payment claims` } : { status: 'pass', detail: `${uc} UC tenants, all with a recorded cap position` }; } },
+        { name: 'Strategy set on every house you manage', kind: 'sync', run: () => { const p = ((g().plan || {}).properties || []).filter(v => v.selfManaged); const miss = p.filter(v => !v.strategy); return miss.length ? { status: 'warn', detail: `${miss.length} without a strategy: ${miss.map(v => v.name).join(', ')}` } : { status: 'pass', detail: `All ${p.length} houses carry a strategy (joint tenancy, HMO or leave as is)` }; } },
         { name: 'Council tax band on every joint tenancy house', kind: 'sync', run: () => { const p = ((g().plan || {}).properties || []).filter(v => v.selfManaged && v.chosen === 'UC joint tenancy'); const miss = p.filter(v => !v.ctBandMonthly && !v.ctLive); return miss.length ? { status: 'warn', detail: `${miss.length} joint tenancy house${miss.length > 1 ? 's' : ''} with no band or live cost: ${miss.map(v => v.name).join(', ')}` } : { status: 'pass', detail: `${p.length} joint tenancy houses priced from a band or a live cost` }; } },
-        { name: 'Plan rows match a live lever', kind: 'automation', run: () => { const rows = (g().data || {}).planRows || []; const keys = new Set(((g().plan || {}).levers || []).map(l => l.key)); const orphans = rows.filter(r => !keys.has(r.key)); return orphans.length ? { status: 'warn', detail: `${orphans.length} Growth Plan row${orphans.length > 1 ? 's' : ''} no longer match a lever (tenant moved or data changed): ${orphans.map(r => r.key).join(', ')}` } : { status: 'pass', detail: `${rows.length} Growth Plan rows, all matched to a live lever` }; } },
+        { name: 'No open move is stranded', kind: 'automation', run: () => { const st = (((g().plan || {}).totals || {}).strandedRows) || []; return st.length ? { status: 'warn', detail: `${st.length} Growth Plan move${st.length > 1 ? 's are' : ' is'} still open with nothing behind ${st.length > 1 ? 'them' : 'it'}; drop ${st.length > 1 ? 'them' : 'it'} on the property: ${st.map(r => r.title).join(', ')}` } : { status: 'pass', detail: 'Every open Growth Plan move matches a live lever' }; } },
         { name: 'Totals reconcile', kind: 'automation', run: () => { const t = (g().plan || {}).totals || {}; const sum = Math.round((t.paper + t.works + t.voids + t.remote) * 100) / 100; return Math.abs(sum - t.actionable) < 0.01 ? { status: 'pass', detail: `Actionable £${t.actionable} = paper + works + voids + away` } : { status: 'fail', detail: `Actionable £${t.actionable} does not equal the buckets (£${sum})` }; } },
         { name: 'Every property is priced four ways', kind: 'automation', run: () => { const p = (g().plan || {}).properties || []; const bad = p.filter(v => !v.strategies || v.strategies.length !== 4); return bad.length ? { status: 'fail', detail: `${bad.length} property without all four strategies: ${bad.map(v => v.name).join(', ')}` } : { status: 'pass', detail: `All ${p.length} properties priced as a single let, joint tenancy, HMO and short let` }; } },
         { name: 'Council tax confirmed where we would pay it', kind: 'sync', run: () => { const p = ((g().plan || {}).properties || []).filter(v => v.selfManaged); const miss = p.filter(v => !v.ct.confirmed); return miss.length ? { status: 'warn', detail: `${miss.length} of ${p.length} self-managed properties have no confirmed council tax: ${miss.map(v => v.name).join(', ')}. Their HMO and short-let figures are shown before council tax` } : { status: 'pass', detail: `All ${p.length} self-managed properties carry a council tax figure` }; } },
