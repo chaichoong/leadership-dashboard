@@ -485,7 +485,9 @@
   'use strict';
   const M = window.GrowthPlanModel;
   const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-  const gbp = (n, dp = 0) => '£' + Number(n || 0).toLocaleString('en-GB', { minimumFractionDigits: dp, maximumFractionDigits: dp });
+  // The minus goes before the pound sign: an empty property owing council tax leaves a
+  // negative figure, which printed as "£-154.51" (18 Siddows Avenue, 16 Sep 2026).
+  const gbp = (n, dp = 0) => { const v = Number(n || 0); return (v < 0 ? '−' : '') + '£' + Math.abs(v).toLocaleString('en-GB', { minimumFractionDigits: dp, maximumFractionDigits: dp }); };
   const todayISO = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
   const $ = id => document.getElementById(id);
 

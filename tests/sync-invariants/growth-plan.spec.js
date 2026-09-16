@@ -523,6 +523,19 @@ test.describe('Growth Plan page', () => {
     await expect(open.locator('[data-extra-tenants="recProp1"]')).toHaveText('1');
   });
 
+  test('a negative figure prints its minus before the pound sign', async ({ page }) => {
+    const fx = fixtures();
+    // 13 Far Street, empty: nothing coming in, band A council tax owed, so "left for us" is negative
+    fx[TBL.units].find(u => u.id === 'recU4').fields[U.status] = 'Void';
+    fx[TBL.units].find(u => u.id === 'recU4').fields[U.tenants] = [];
+    await openPage(page, fx);
+    const open = await openSelf(page, '13 Far Street');
+    const now = open.locator('.nowtbl tr', { hasText: 'Where we are now' });
+    await expect(now).toContainText('Empty, so the council tax is ours');
+    await expect(now.locator('td').last()).toHaveText(/^−£137\.00$/);
+    await expect(page.locator('#gp-self')).not.toContainText('£-');
+  });
+
   test('shows the empty state and no crash when nothing loads', async ({ page }) => {
     const fx = fixtures(); Object.keys(fx).forEach(k => { fx[k] = []; });
     await page.addInitScript(pat => { localStorage.setItem('airtable_pat', pat); }, MOCK_PAT);
