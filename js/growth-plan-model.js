@@ -79,7 +79,9 @@
             default: return a;
         }
     }
-    const STRATEGY_ALIASES = { 'Add tenants': 'HMO', 'Hold': 'Leave as is' };
+    // Kevin, 16 Sep 2026: plain "HMO" now means the professional houses Roc Immo runs,
+    // so our own strategies carry "UC". Every older stored value still reads.
+    const STRATEGY_ALIASES = { 'HMO': 'UC HMO', 'Joint tenancy': 'UC joint tenancy', 'Add tenants': 'UC HMO', 'Hold': 'Leave as is' };
     function normaliseStrategy(v) { const t = String(v || '').trim(); return STRATEGY_ALIASES[t] || t; }
     function num(v, d = 0) { const n = Number(v); return Number.isFinite(n) ? n : d; }
     function round2(v) { return Math.round(v * 100) / 100; }
@@ -220,7 +222,9 @@
     //   • Serviced accom. short lets. The owner pays the council tax.
     //                     Income = £500 a month, net to us (Kevin, 16 Sep 2026).
     // ════════════════════════════════════════════════════════════════
-    const STRATEGY_LIST = ['Single let', 'Joint tenancy', 'HMO', 'Serviced accommodation'];
+    const STRATEGY_LIST = ['Single let', 'UC joint tenancy', 'UC HMO', 'Serviced accommodation'];
+    // What Kevin can pick for a property: the four, or hold it where it is.
+    const PLAN_CHOICES = STRATEGY_LIST.concat(['Leave as is']);
 
     // Council tax is set in ninths of the band D charge, fixed by statute
     // (Local Government Finance Act 1992 s.5). One known band gives every band.
@@ -286,13 +290,13 @@
             note: 'The tenancy agreement is already in place and the tenant pays the council tax. Usually nothing to do.',
             property: [], tenant: [], ifShort: [],
         },
-        'Joint tenancy': {
-            note: 'One agreement covering the whole house, both names on it. That is what moves the council tax to them.',
+        'UC joint tenancy': {
+            note: 'One agreement covering the whole house, both names on it. The council tax only moves to them once every tenant has signed it.',
             property: ['Joint tenancy agreement, one agreement with both names on it'],
             tenant: ['Letter of authority, so we can set up their council tax reduction', 'Proof of address'],
             ifShort: ['Discretionary housing application, where their rent is short'],
         },
-        'HMO': {
+        'UC HMO': {
             note: 'One agreement per tenant. We keep the council tax. Every tenant aged 35 or over goes on the 1-bed rate.',
             property: [],
             tenant: ['Individual tenancy agreement at the 1-bed rate', 'Letter of authority', 'Proof of address'],
@@ -304,6 +308,14 @@
         },
     };
 
+    // The four ticks every tenant carries (Kevin, 16 Sep 2026). Each is a field on Tenants.
+    const TENANT_DOCS = [
+        { key: 'correctAgreement', label: 'Correct tenancy agreement' },
+        { key: 'proofOfAddress',   label: 'Proof of address' },
+        { key: 'authoritySigned',  label: 'Letter of authority' },
+        { key: 'rentUplift',       label: 'Rent uplift' },
+    ];
+
     // Explanation lines are read by a person, so they get thousands separators.
     const money = n => Number(n || 0).toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
@@ -313,6 +325,7 @@
     // "Property Portfolio" is our own landlord name, and Simon Collins stopped
     // counting as an agent, so his houses come back into our list.
     function isSelfManaged(prop) {
+        if (prop && prop.movingToSelfManage) return true;   // being taken back: treat it as ours
         const agent = String((prop && prop.agent) || '').trim();
         if (!agent) return true;
         if (/property portfolio/i.test(agent)) return true;
@@ -396,10 +409,9 @@
         if (prop.type === 'Block') return 'Block of flats';
         const roomUnits = pUnits.filter(u => u.type === 'Room' || u.type === 'Flat-Let');
         const whole = pUnits.filter(u => u.type === 'Whole Property');
-        if (roomUnits.length >= 2) return 'HMO';
-        if (whole.length >= 2) return 'HMO';
-        if (roomUnits.length === 1 && whole.length === 0) return 'HMO';
-        return 'Single let';
+        const shared = roomUnits.length >= 2 || whole.length >= 2 || (roomUnits.length === 1 && whole.length === 0);
+        if (!shared) return 'Single let';
+        return isSelfManaged(prop) ? 'UC HMO' : 'HMO';   // an agent's room let is a professional HMO
     }
 
     // The four strategies, priced. Every one carries how it was worked out.
@@ -417,9 +429,9 @@
         });
 
         out.push({
-            name: 'Joint tenancy', units: 2, gross: round2(b1 * 2), councilTax: 0, net: round2(b1 * 2),
+            name: 'UC joint tenancy', units: 2, gross: round2(b1 * 2), councilTax: 0, net: round2(b1 * 2),
             how: rates ? `Two tenants aged 35+ on one agreement: 2 × £${money(b1)} (the ${rates.brma} 1-bed rate)` : 'No housing allowance rate for this postcode',
-            ctNote: 'One agreement for the whole house moves the council tax to the tenants', assumed: !rates,
+            ctNote: 'The tenants pay the council tax, but only once EVERY tenant has signed the one joint agreement. Until then it stays with us.', assumed: !rates,
             why: rates ? `${rates.brma} 1-bed rate £${money(b1)} a month, from the weekly LHA × 52 ÷ 12` : '',
         });
 
@@ -431,7 +443,7 @@
 
         const hmoGross = round2(roomInfo.rooms * b1);
         out.push({
-            name: 'HMO', units: roomInfo.rooms, gross: hmoGross, councilTax: ctCost, net: round2(hmoGross - (ctCost || 0)),
+            name: 'UC HMO', units: roomInfo.rooms, gross: hmoGross, councilTax: ctCost, net: round2(hmoGross - (ctCost || 0)),
             how: rates ? `${roomInfo.rooms} rooms × £${money(b1)} (the ${rates.brma} 1-bed rate) = £${money(hmoGross)}` : 'No housing allowance rate for this postcode',
             ctNote: ctLine, assumed: !rates || !roomInfo.confirmed || !ctKnown || !!ctInfo.borrowed,
             why: [roomInfo.source, ctInfo.source].join('. '),
@@ -456,7 +468,7 @@
             single.net = single.gross;
             single.how = `${n} flats × £${money(market.rent)} a month`;
             out.forEach(x => {
-                if (x.name === 'Joint tenancy' || x.name === 'HMO' || x.name === 'Serviced accommodation') {
+                if (x.name === 'UC joint tenancy' || x.name === 'UC HMO' || x.name === 'Serviced accommodation') {
                     x.na = true; x.gross = 0; x.net = 0; x.units = 0; x.councilTax = null;
                     x.how = 'Does not apply to a block of flats';
                     x.ctNote = ''; x.why = 'A block is let flat by flat, so this strategy is not an option here.';
@@ -540,7 +552,10 @@
                     const rent = rentFor(t.id, u, num(u.rent) / Math.max(1, uTenants.length));
                     const uc = isUc(t, u), hb = isHb(t, u);
                     const tv = { id: t.id, name: t.name, dob: t.dob || '', age, payType: t.payType || '', uc, hb, rent: round2(rent), capExemption: t.capExemption || 'Unknown', unitId: u.id, unitType: u.type, rateNow: null, target: null, note: '',
-                        over35Confirmed: !!t.over35Confirmed, ni: t.ni || '', phone: t.phone || '', email: t.email || '', idSeen: t.idSeen || '', ucStatementSeen: !!t.ucStatementSeen };
+                        over35Confirmed: !!t.over35Confirmed, ni: t.ni || '', phone: t.phone || '', email: t.email || '', idSeen: t.idSeen || '', ucStatementSeen: !!t.ucStatementSeen,
+                        // The four ticks (Kevin, 16 Sep 2026). Rent Uplift blank reads as To do.
+                        correctAgreement: !!t.correctAgreement, proofOfAddress: !!t.proofOfAddress, authoritySigned: !!t.authoritySigned,
+                        rentUplift: t.rentUplift || 'To do', upliftGap: 0 };
                     const wholeShared = u.type !== 'Whole Property' || occupied.filter(x => x.type === 'Whole Property').length >= 2;
                     if (mgmt === 'kevin' && rates && (uc || hb) && !wholeShared) {
                         // One household renting the whole house: the LHA rate depends on who lives
@@ -566,7 +581,9 @@
                             tv.capKnown = cap.known;
                             const leverName = (roomUnit && entitled1Bed) ? 'Rent uplift' : 'Rate refresh';
                             const gap = round2(rate - rent);
-                            if (gap > 0.5) {
+                            const notNeeded = tv.rentUplift === 'Not needed';
+                            if (gap > 0.5 && !notNeeded) tv.upliftGap = gap;
+                            if (gap > 0.5 && !notNeeded) {
                                 const crfNeed = cap.exempt ? [] : [`${cap.known ? 'Benefit cap bites' : 'Benefit cap likely bites'}: apply for a CRF Housing Payment of £${cap.shortfall.toFixed(2)} a month paid to the landlord, or record the exemption`];
                                 levers.push(lever({
                                     key: `${leverName === 'Rent uplift' ? 'uplift' : 'refresh'}:${t.id}`, lever: leverName, propertyId: prop.id, property: prop.name,
@@ -584,11 +601,12 @@
                                     ],
                                     needs: crfNeed,
                                     firstStep: `Meet ${t.name}: sign the rent change to £${rate.toFixed(2)}, report it in the UC journal${cap.exempt ? '' : ', submit the CRF Housing Payment form'}`,
+                                    ...(tv.rentUplift === 'Done' ? { status: 'Done' } : {}),
                                 }, planByKey));
                             }
                             const tc = tenancyFor(t.id, u);
                             const received = tc && tc.actual != null ? num(tc.actual) / Math.max(1, (tc.tenantIds || []).length) : null;
-                            if (gap <= 0.5 && received != null && received > 0 && rent - received > 10) {
+                            if (gap <= 0.5 && !notNeeded && received != null && received > 0 && rent - received > 10) {
                                 const short = round2(rent - received);
                                 tv.received = round2(received);
                                 levers.push(lever({
@@ -624,7 +642,7 @@
                 const releasable = view.tenants.filter(t => t.unitType === 'Flat-Let' && t.uc && t.age != null && t.age >= 35);
                 const spare = Math.max(0, lettableEff - roomsInUse);
                 const computedLets = releasable.length + spare;
-                const newLets = strategy === 'HMO' ? num(prop.plannedExtra) : (strategy ? 0 : computedLets);
+                const newLets = strategy === 'UC HMO' ? num(prop.plannedExtra) : (strategy ? 0 : computedLets);
                 const occupants = view.tenants.length;
                 if (newLets > 0) {
                     const capNew = capPosition('Unknown', rates.b1, settings);
@@ -633,7 +651,7 @@
                     const gross = newLets * rates.b1;
                     const net = round2(gross - newLets * utilities - ctExtra);
                     const evidence = [
-                        strategy === 'HMO' ? `Kevin's strategy: HMO, add ${newLets} tenant${newLets > 1 ? 's' : ''} here` : `Rooms in use ${roomsInUse} of ${lettableEff} lettable${lettable == null ? ' (lettable rooms not set — using rooms in use)' : ''}`,
+                        strategy === 'UC HMO' ? `Kevin's strategy: UC HMO, add ${newLets} tenant${newLets > 1 ? 's' : ''} here` : `Rooms in use ${roomsInUse} of ${lettableEff} lettable${lettable == null ? ' (lettable rooms not set — using rooms in use)' : ''}`,
                         releasable.length ? `${releasable.map(t => `${t.name} (${t.age})`).join(', ')} hold a two-room flat-let each and keep the 1-bed rate in one room` : 'No flat-let to shrink',
                         `New let at £${rates.b1.toFixed(2)} (1-bed rate); a capped tenant is £${capNew.shortfall.toFixed(2)} short, covered by a CRF Housing Payment or by choosing an exempt tenant`,
                         utilities ? `Utilities £${utilities} per new tenant (you have taken the bills on)` : 'Bills stay with the tenants (PAYG)',
@@ -641,7 +659,7 @@
                     ];
                     const needs = [];
                     if (!strategy) needs.push('Set Growth Strategy on this house (Add tenants / Joint tenancy / Hold)');
-                    if (strategy === 'HMO' && lettable != null && lettableEff < roomsInUse + newLets - releasable.length) needs.push(`Lettable rooms (${lettableEff}) do not fit ${occupants + newLets} tenants`);
+                    if (strategy === 'UC HMO' && lettable != null && lettableEff < roomsInUse + newLets - releasable.length) needs.push(`Lettable rooms (${lettableEff}) do not fit ${occupants + newLets} tenants`);
                     if (occupants + newLets >= 5) needs.push(`${occupants + newLets} occupants: mandatory HMO licence (5+ people)`);
                     levers.push(lever({
                         key: `rooms:${prop.id}`, lever: releasable.length ? 'Room release' : 'New room let', propertyId: prop.id, property: prop.name,
@@ -654,7 +672,7 @@
                     }, planByKey));
                 }
                 // Stage 2: council tax. Two tenants on one joint agreement makes them liable.
-                if (occupants === 2 && view.tenants.every(t => t.uc || t.hb) && prop.ctPayer !== 'Tenants' && strategy !== 'HMO' && strategy !== 'Leave as is') {
+                if (occupants === 2 && view.tenants.every(t => t.uc || t.hb) && prop.ctPayer !== 'Tenants' && strategy !== 'UC HMO' && strategy !== 'Leave as is') {
                     // Only council tax Kevin pays TODAY counts as a saving (a live Costs row, which the bank
                     // feed reconciles). Where nothing is paid, the joint tenancy is protection: it stops the
                     // owner being billed for a house let by the room, and the row shows £0.
@@ -669,9 +687,9 @@
                         key: `ct:${prop.id}`, lever: 'Council tax', propertyId: prop.id, property: prop.name,
                         title: `${prop.name}: joint tenancy for ${view.tenants.map(t => t.name).join(' and ')}, council tax moves to them`,
                         monthly: saving, monthlyIfExempt: saving, oneOff: 0, effort: 'Paper',
-                        counted: strategy === 'Joint tenancy' ? 'now' : 'check', alternative: !strategy && newLets > 0,
+                        counted: strategy === 'UC joint tenancy' ? 'now' : 'check', alternative: !strategy && newLets > 0,
                         evidence: [ctLive ? `Council tax paid by you today: £${ctLive.toFixed(2)} a month (live cost, bank-fed)` : (ctBandMonthly ? `Band ${prop.ctBand || '?'}: £${num(prop.ctAnnual).toFixed(2)} a year = £${ctBandMonthly.toFixed(2)} a month. Nothing paid today (bank feed Jun 2025 to Sep 2026) but the owner is liable for a room-by-room let until the joint tenancy and a backdated Council Tax Reduction are in place, so it counts` : 'No council tax figure on this house: set Council Tax Band and Council Tax Annual on the property'),
-                            strategy === 'Joint tenancy' ? "Kevin's strategy: joint tenancy, no extra tenant here" : 'No strategy set: shown as a candidate',
+                            strategy === 'UC joint tenancy' ? "Kevin's strategy: joint tenancy, no extra tenant here" : 'No strategy set: shown as a candidate',
                             'One agreement of 6+ months for the whole house makes the tenants liable (SI 2023/1175)',
                             'Each joint renter keeps their own 1-bed LHA up to their share, so rent is unchanged',
                             `Tenants claim Council Tax Reduction on the Anglia Revenues online form (up to 100% for a working-age household on UC and not working), which the signed authority lets Roy or Kevin submit`],
@@ -749,35 +767,103 @@
             const market = marketRentFor(prop, rates, settings);
             const strategies = priceStrategies(prop, pUnits, rates, settings, ctInfo, roomInfo, market);
             const current = currentStrategyOf(prop, pUnits);
-            // Kevin's Growth Strategy field is the TARGET. "Leave as is" means the
-            // property stays on whatever it is today, so the target equals the current.
+            const selfManaged = isSelfManaged(prop);
+            // Kevin's Growth Strategy field is the TARGET. "Leave as is" holds the property
+            // exactly where it is, income included, so it is never priced off the LHA table.
             const rawTarget = normaliseStrategy(prop.strategy);
-            const chosen = rawTarget === 'Leave as is' ? current : (rawTarget || '');
+            const holdFlat = rawTarget === 'Leave as is';
+            const chosen = holdFlat ? current : (selfManaged ? (rawTarget || '') : '');
             const byName = {}; strategies.forEach(x => { byName[x.name] = x; });
-            const best = strategies.slice().sort((a, b) => b.net - a.net)[0];
             const chosenRow = byName[chosen] || null;
             const voids = pUnits.filter(u => u.status === 'Void').length;
             const occupiedUnits = pUnits.filter(u => u.status !== 'Void').length;
             const tenantCount = view.tenants.length;
-            // Units the chosen strategy needs, against the units that exist. The extra
-            // ones are NOT written to Airtable: a unit is created when a tenant signs.
-            const unitsPlanned = chosenRow ? chosenRow.units : occupiedUnits;
+            const b1 = rates ? rates.b1 : 0;
+
+            // RENT NOW is a forecast (Kevin, 16 Sep 2026): the rent on the record, plus every
+            // uplift ticked Done. The higher of the two is taken per tenant, so once Roy updates
+            // the tenancy record to the new rate the uplift is not counted twice.
+            const upliftsDone = round2(view.tenants.filter(t => t.rentUplift === 'Done').reduce((n, t) => n + num(t.upliftGap), 0));
+            const upliftsToDo = round2(view.tenants.filter(t => t.rentUplift !== 'Done' && t.rentUplift !== 'Not needed').reduce((n, t) => n + num(t.upliftGap), 0));
+            const rentNowForecast = round2(propRent + upliftsDone);
+
+            // COUNCIL TAX NOW (Kevin, 16 Sep 2026). On a property we run, it is OURS unless the
+            // property is a single let today, or a joint tenancy where EVERY tenant has the
+            // correct agreement ticked. An explicit "Owner" payer on a single let means we took
+            // the bills on. On an agent-run property we only know what the bank shows we pay.
+            const jtDocumented = chosen === 'UC joint tenancy' && tenantCount > 0 && view.tenants.every(t => t.correctAgreement);
+            const singleLetTenantPays = current === 'Single let' && prop.ctPayer !== 'Owner';
+            const ctLiableNow = selfManaged ? !(singleLetTenantPays || jtDocumented) : ctLive > 0;
+            const ctAmount = ctInfo.monthly == null ? 0 : ctInfo.monthly;
+            const ctNow = ctLiableNow ? round2(ctAmount) : 0;
+            const ctNowWhy = !selfManaged
+                ? (ctLive > 0 ? `We pay £${money(ctLive)} a month on this agent-run property (bank-fed cost row)` : 'The agent or tenant carries it: nothing in the bank feed')
+                : jtDocumented ? 'Every tenant has signed the joint agreement, so the council tax is theirs'
+                : singleLetTenantPays ? 'A single let: the tenant pays the council tax'
+                : chosen === 'UC joint tenancy' ? `Ours until every tenant's correct tenancy agreement is ticked (${view.tenants.filter(t => t.correctAgreement).length} of ${tenantCount} so far)`
+                : 'Let by the room, so the council tax is ours';
+
+            // PLAN DONE: where this property lands once the plan picked for it is finished.
+            let planRent = rentNowForecast, planCt = ctNow, planWhy = 'No plan picked: held where it is';
+            let newPlaces = null;   // extra lets the plan adds; null means "use the strategy's own count"
+            if (holdFlat) { planWhy = 'Leave as is: rent and council tax held exactly where they are'; }
+            else if (chosen && chosenRow) {
+                const newLets = num(prop.plannedExtra) > 0 ? num(prop.plannedExtra) : Math.max(0, roomInfo.rooms - roomsInUse);
+                if (chosen === 'UC HMO' && current === 'UC HMO') {
+                    newPlaces = newLets;
+                    planRent = round2(rentNowForecast + upliftsToDo + newLets * b1);
+                    planCt = ctInfo.monthly == null ? ctNow : round2(ctInfo.monthly);
+                    planWhy = `Same tenants plus ${newLets} new room${newLets === 1 ? '' : 's'} at £${money(b1)}, and the uplifts still to do; we keep the council tax`;
+                } else if (chosen === 'UC joint tenancy' && tenantCount > 0 && tenantCount <= 2) {
+                    newPlaces = Math.max(0, 2 - occupiedUnits);
+                    planRent = round2(rentNowForecast + upliftsToDo);
+                    planCt = 0;
+                    planWhy = 'Same tenants on one joint agreement: their rents stay, and the council tax moves to them';
+                } else if (chosen === current) {
+                    newPlaces = 0;
+                    planRent = round2(rentNowForecast + upliftsToDo);
+                    planCt = chosenRow.councilTax == null ? ctNow : round2(chosenRow.councilTax);
+                    planWhy = 'Same strategy, with the uplifts still to do';
+                } else {
+                    planRent = round2(chosenRow.gross);
+                    planCt = chosenRow.councilTax == null ? 0 : round2(chosenRow.councilTax);
+                    planWhy = `Re-let as a ${chosen}: ${chosenRow.how}`;
+                }
+            }
+
+            // BEST POSSIBLE: the ceiling. Whichever leaves the most, out of where it is now, the
+            // plan picked, and each of the four strategies. Never below where it already is.
+            const options = [{ name: 'Where it is now', rent: rentNowForecast, ct: ctNow },
+                { name: 'The plan picked', rent: planRent, ct: planCt }]
+                .concat(strategies.filter(x => !x.na).map(x => ({ name: x.name, rent: x.gross, ct: x.councilTax == null ? 0 : x.councilTax })));
+            const bestOpt = options.slice().sort((a, b) => (b.rent - b.ct) - (a.rent - a.ct))[0];
+            const best = strategies.filter(x => !x.na).slice().sort((a, b) => b.net - a.net)[0] || strategies[0];
+
+            const unitsPlanned = holdFlat || !chosenRow ? occupiedUnits
+                : newPlaces != null ? occupiedUnits + newPlaces : chosenRow.units;
             Object.assign(view, {
-                strategies, strategyBy: byName, current, chosen, target: rawTarget, best,
+                strategies, strategyBy: byName, current, chosen, target: rawTarget, best, leaveAsIs: holdFlat,
                 chosenRow, ct: ctInfo, roomInfo, market,
                 unitsNow: occupiedUnits, unitsPlanned, unitsExtra: Math.max(0, unitsPlanned - occupiedUnits),
                 voids, tenantCount,
-                netNow: round2(propRent),
-                netPlanned: chosenRow ? chosenRow.net : null,
-                upliftChosen: chosenRow ? round2(chosenRow.net - propRent) : null,
-                upliftBest: round2(best.net - propRent),
-                checklist: CHECKLIST[chosen] || null,
-                // Kevin, 16 Sep 2026: the split is read from the PROPERTY's own Agent/Landlord
-                // field, never from a tenant's pay type. 22 Newton Street and 23 Viola Street each
-                // carry one agent-collected tenancy, but the houses are ours and belong in our list.
-                // Simon Collins is no longer classed as an agent, so his five houses are ours too.
-                selfManaged: isSelfManaged(prop),
+                recordRent: round2(propRent),
+                rentNow: rentNowForecast, upliftsDone, upliftsToDo,
+                ctNow, ctLiableNow, ctNowWhy, jtDocumented,
+                planRent: round2(planRent), planCt: round2(planCt), planWhy,
+                bestRent: round2(bestOpt.rent), bestCt: round2(bestOpt.ct), bestWhy: bestOpt.name,
+                leftNow: round2(rentNowForecast - ctNow),
+                leftPlan: round2(planRent - planCt),
+                leftBest: round2(bestOpt.rent - bestOpt.ct),
+                netPlanned: round2(planRent - planCt),
+                upliftChosen: chosen ? round2((planRent - planCt) - (rentNowForecast - ctNow)) : null,
+                upliftBest: round2((bestOpt.rent - bestOpt.ct) - (rentNowForecast - ctNow)),
+                checklist: selfManaged ? (CHECKLIST[chosen] || null) : null,
+                // Kevin, 16 Sep 2026: the split reads the PROPERTY, never a tenant's pay type.
+                // Simon Collins is not an agent, and a ticked "Moving to self-manage" promotes
+                // an agent-run property into our list with everything that comes with it.
+                selfManaged, movingToSelfManage: !!prop.movingToSelfManage,
                 baselineRent: prop.baselineRent == null ? null : num(prop.baselineRent),
+                baselineCt: prop.baselineCt == null ? null : num(prop.baselineCt),
                 baselineDate: prop.baselineDate || '',
             });
             properties.push(view);
@@ -820,41 +906,53 @@
         totals.potentialIncrease = round2(totals.actionable + totals.agentHeld); // ages to confirm are already inside the paper trail
         totals.maximum = round2(totals.potentialIncrease + totals.check);
 
-        // ── Progress: to do, in progress, realised (Kevin, 16 Sep 2026) ──────
-        // Realised is reported TWICE on purpose. The forecast is what the plan said a
-        // finished move was worth; the measured figure is the rent that actually
-        // arrived, read off the property against the snapshot taken the day its first
-        // move was marked done. A move that was ticked off but never reached the
-        // Universal Credit journal shows a gap, which is the whole point of showing both.
+        // ── Progress (Kevin, 16 Sep 2026) ────────────────────────────────────
+        // Forecast only. The leadership dashboard owns the actual cash; this page answers
+        // "have we done everything needed to get the money coming in?". A tick moves money
+        // from "could" to "now". Done is Realised, even though the money lags behind.
         properties.forEach(v => {
             const mine = levers.filter(l => l.propertyId === v.id);
-            const done = mine.filter(l => l.status === 'Done');
             const running = mine.filter(l => l.status === 'Adopted' || l.status === 'In progress');
-            v.forecastRealised = round2(done.reduce((n, l) => n + num(l.monthly), 0));
-            v.measuredRealised = v.baselineRent == null ? null : round2(v.rentNow - v.baselineRent);
-            v.doneCount = done.length;
             v.runningCount = running.length;
-            if (!v.chosen) v.progress = 'Not decided';
-            else if (done.length && !running.length) v.progress = 'Realised';
+            const upliftsOpen = v.tenants.filter(t => t.rentUplift !== 'Done' && t.rentUplift !== 'Not needed' && t.upliftGap > 0).length;
+            const jtConversion = v.chosen === 'UC joint tenancy' && v.tenantCount > 0 && v.tenantCount <= 2;
+            const strategySettled = v.leaveAsIs || v.chosen === v.current || (jtConversion && v.jtDocumented);
+            const didWork = v.upliftsDone > 0 || v.jtDocumented;
+            v.upliftsOpenCount = upliftsOpen;
+            if (!v.selfManaged) v.progress = 'Agent-run';
+            else if (!v.chosen) v.progress = 'Not decided';
+            else if (v.leaveAsIs) v.progress = 'No change needed';
+            else if (strategySettled && !upliftsOpen) v.progress = didWork ? 'Realised' : 'No change needed';
             else if (running.length) v.progress = 'In progress';
-            else if (v.chosen !== v.current) v.progress = 'To do';
-            else v.progress = 'No change needed';
+            else v.progress = 'To do';
         });
         const selfManaged = properties.filter(v => v.selfManaged);
         const agentManaged = properties.filter(v => !v.selfManaged);
-        const withBaseline = properties.filter(v => v.measuredRealised != null);
-        totals.forecastRealised = round2(properties.reduce((n, v) => n + num(v.forecastRealised), 0));
-        totals.measuredRealised = round2(withBaseline.reduce((n, v) => n + num(v.measuredRealised), 0));
-        totals.measuredCount = withBaseline.length;
-        totals.realisedGap = round2(totals.forecastRealised - totals.measuredRealised);
-        totals.toDo = round2(properties.filter(v => v.progress === 'To do').reduce((n, v) => n + Math.max(0, num(v.upliftChosen)), 0));
-        totals.inProgress = round2(properties.filter(v => v.progress === 'In progress').reduce((n, v) => n + Math.max(0, num(v.upliftChosen)), 0));
-        totals.notDecided = properties.filter(v => v.progress === 'Not decided').length;
-        totals.selfRentNow = round2(selfManaged.reduce((n, v) => n + num(v.rentNow), 0));
-        totals.agentRentNow = round2(agentManaged.reduce((n, v) => n + num(v.rentNow), 0));
-        // Chosen uplift only counts a property Kevin has actually picked a strategy for.
-        totals.chosenUplift = round2(properties.filter(v => v.upliftChosen != null && v.chosen).reduce((n, v) => n + Math.max(0, v.upliftChosen), 0));
-        totals.bestUplift = round2(properties.reduce((n, v) => n + Math.max(0, num(v.upliftBest)), 0));
+
+        // The grid: rent, council tax and what is left, in four columns.
+        const column = pick => {
+            const rent = round2(properties.reduce((n, v) => n + num(pick(v).rent), 0));
+            const ct = round2(properties.reduce((n, v) => n + num(pick(v).ct), 0));
+            return { rent, ct, left: round2(rent - ct) };
+        };
+        // Where we started is frozen once. Until a property has its snapshot it reads as
+        // today, and the grid says so rather than inventing a starting point.
+        totals.startedFrozen = properties.length > 0 && properties.every(v => v.baselineRent != null && v.baselineCt != null);
+        totals.grid = {
+            // Unfrozen, "started" is the rent on the RECORD, which is the rent before any uplift
+            // ticked Done here. Reading the forecast instead would make every uplift already done
+            // vanish from the journey, since started and now would match.
+            started: column(v => ({ rent: v.baselineRent == null ? v.recordRent : v.baselineRent, ct: v.baselineCt == null ? v.ctNow : v.baselineCt })),
+            now: column(v => ({ rent: v.rentNow, ct: v.ctNow })),
+            plan: column(v => ({ rent: v.planRent, ct: v.planCt })),
+            best: column(v => ({ rent: v.bestRent, ct: v.bestCt })),
+        };
+        totals.rentNow = totals.grid.now.rent;
+        totals.upliftsDone = round2(properties.reduce((n, v) => n + num(v.upliftsDone), 0));
+        totals.upliftsToDo = round2(properties.reduce((n, v) => n + num(v.upliftsToDo), 0));
+        totals.notDecided = selfManaged.filter(v => v.progress === 'Not decided').length;
+        totals.chosenUplift = round2(totals.grid.plan.left - totals.grid.now.left);
+        totals.bestUplift = round2(totals.grid.best.left - totals.grid.now.left);
         totals.unitsNow = properties.reduce((n, v) => n + num(v.unitsNow), 0);
         totals.unitsPlanned = properties.reduce((n, v) => n + num(v.unitsPlanned), 0);
         totals.unitsExtra = properties.reduce((n, v) => n + num(v.unitsExtra), 0);
@@ -881,7 +979,7 @@
             const decide = levers.filter(l => l.propertyId === v.id && active(l) && (l.counted === 'check' || l.counted === 'alternative'))
                 .map(l => ({ key: l.key, lever: l.lever, stage: l.stage, title: l.title, monthly: l.monthly, counted: l.counted, needs: l.needs, evidence: l.evidence }));
             if (!all.length && !decide.length) return;
-            const joint = v.strategy === 'Joint tenancy' && own.some(l => l.lever === 'Council tax');
+            const joint = v.strategy === 'UC joint tenancy' && own.some(l => l.lever === 'Council tax');
             const roomLever = own.find(l => l.lever === 'Room release' || l.lever === 'New room let');
             const takeBack = own.find(l => l.lever === 'Take-back');
             const voidLet = own.find(l => l.lever === 'Void let');
@@ -977,6 +1075,6 @@
         return (l.effort === 'Works' || l.effort === 'Light') ? 'Roy' : 'Kevin';
     }
 
-    return { money, STRATEGY_LIST, CHECKLIST, COUNCIL_BAND_D, COUNCIL_BY_OUTWARD, MARKET_RENT, BAND_NINTHS, councilFor, isSelfManaged, bandsByCouncil, councilTaxFor, rentableRoomsFor, marketRentFor, currentStrategyOf, priceStrategies,
+    return { money, STRATEGY_LIST, PLAN_CHOICES, TENANT_DOCS, STRATEGY_ALIASES, CHECKLIST, COUNCIL_BAND_D, COUNCIL_BY_OUTWARD, MARKET_RENT, BAND_NINTHS, councilFor, isSelfManaged, bandsByCouncil, councilTaxFor, rentableRoomsFor, marketRentFor, currentStrategyOf, priceStrategies,
         LHA_WEEKLY, LHA_2026_27, LHA_VALID_TO, weeklyToMonthly, normaliseStrategy, taskOwnerFor, buildPacks, BRMA_BY_OUTWARD, BRMA_UNCERTAIN, STAGE, STAGE_NAMES, EFFORT_WEIGHT, monthlyFromFrequency, ageOn, outward, brmaFor, isLocal, ratesFor, lhaStale, benefitCap, exemptionInput, capPosition, isUc, isHb, managementOf, buildPlan };
 });

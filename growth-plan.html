@@ -211,6 +211,27 @@
   .more-body { padding: var(--space-4); background: var(--bg-surface); border-radius: 0 0 var(--radius-md) var(--radius-md); }
   .pack-head { grid-template-columns: 1fr auto 20px; }
   @media (max-width: 900px) { .countstrip { grid-template-columns: repeat(2, 1fr); } .strattbl { font-size: var(--fs-xs); } }
+  /* Grid headline + tenant ticks (16 Sep 2026) */
+  table.grid { font-size: var(--fs-md); }
+  table.grid th, table.grid td { padding: 10px 14px; }
+  table.grid thead th { background: var(--bg-surface-2); text-transform: none; letter-spacing: 0; vertical-align: bottom; white-space: normal; }
+  table.grid tbody th { text-align: left; font-weight: var(--fw-medium); color: var(--text-secondary); background: transparent; text-transform: none; letter-spacing: 0; font-size: var(--fs-sm); white-space: nowrap; }
+  table.grid td.num { font-variant-numeric: tabular-nums; font-weight: var(--fw-medium); }
+  table.grid tr.ctrow td { color: var(--danger); }
+  table.grid tr.leftrow td, table.grid tr.leftrow th { font-weight: var(--fw-bold); font-size: var(--fs-lg); color: var(--text-primary); border-top: 2px solid var(--border-default); }
+  table.grid tr.leftrow th { font-size: var(--fs-sm); }
+  .gcol { border: 0; background: none; font: inherit; font-weight: var(--fw-semibold); color: var(--text-primary); cursor: pointer; padding: 0; text-align: right; }
+  .gcol:hover, .gcol.on { color: var(--accent); }
+  .gcol:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .gcol .chev { color: var(--text-muted); display: inline-block; transition: transform .15s; }
+  .gcol.on .chev { transform: rotate(90deg); color: var(--accent); }
+  .gnote { font-size: var(--fs-xs); color: var(--text-muted); font-weight: var(--fw-regular); margin-top: 2px; }
+  .gsum { display: flex; gap: var(--space-5); flex-wrap: wrap; margin-top: var(--space-3); color: var(--text-secondary); }
+  .ticks { display: flex; flex-wrap: wrap; gap: 4px 14px; margin: 6px 0; padding: 6px 8px; border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); background: var(--bg-surface); }
+  label.tick { font-size: var(--fs-sm); display: inline-flex; gap: 6px; align-items: center; color: var(--text-primary); cursor: pointer; }
+  label.tick input { accent-color: var(--accent); }
+  label.selfmanage { font-size: var(--fs-md); font-weight: var(--fw-semibold); color: var(--text-primary); margin: var(--space-2) 0; }
+  @media (max-width: 900px) { table.grid { font-size: var(--fs-sm); } table.grid th, table.grid td { padding: 6px 8px; } .gsum { gap: var(--space-2); flex-direction: column; } }
   @media print { .gp-actions, .row-actions, .filters, [data-sync-bar], .btn, input, select, #gp-settings, #gp-calc { display: none !important; } section.card { break-inside: avoid; border: 0; } }
 </style>
 </head>
@@ -241,8 +262,8 @@
 
   <section class="card" id="gp-where" aria-live="polite">
     <h2>Where we are</h2>
-    <p class="hint">What the portfolio brings in now, what the plan adds, and what has actually landed. Click any card to see the properties behind it.</p>
-    <div class="kpis level" id="kpis"></div>
+    <p class="hint">Read left to right: where we started, where we are now, where the plan takes us, and the ceiling. These are forecast figures; the leadership dashboard shows the cash that has actually arrived. Click a column heading to see it property by property.</p>
+    <div id="kpis"></div>
     <div class="detail" id="kpiDetail" hidden></div>
     <div id="countStrip" class="countstrip"></div>
   </section>
@@ -321,14 +342,15 @@
             <li>The tenant pays the council tax, not us.</li>
             <li>One rental unit.</li>
           </ul></div>
-          <div class="strat"><h4>Joint tenancy</h4><ul>
+          <div class="strat"><h4>UC joint tenancy</h4><ul>
             <li>Two people aged 35 or over, both on Universal Credit, sign ONE agreement for the whole house.</li>
             <li>Income is the 1-bedroom housing allowance for the area, times two.</li>
-            <li>One agreement for the whole house means the tenants pay the council tax, not us.</li>
+            <li>The tenants pay the council tax, but only once EVERY tenant has signed the joint agreement. Until then it stays with us.</li>
             <li>Two rental units.</li>
           </ul></div>
-          <div class="strat"><h4>HMO</h4><ul>
+          <div class="strat"><h4>UC HMO</h4><ul>
             <li>Each room is let on its own to one person aged 35 or over on Universal Credit.</li>
+            <li>Not the same as a professional HMO, which is what Roc Immo runs for us.</li>
             <li>Income is the number of lettable rooms times the 1-bedroom housing allowance.</li>
             <li>Letting by the room makes us the one who pays the council tax.</li>
             <li>One rental unit per room, usually three to six.</li>
@@ -446,9 +468,9 @@
 <div id="toast" role="status" aria-live="polite"></div>
 
 <script src="js/ai-models.js?v=1"></script>
-<script src="js/config.js?v=63"></script>
+<script src="js/config.js?v=64"></script>
 <script src="js/sync-bar.js?v=6"></script>
-<script src="js/growth-plan-model.js?v=5"></script>
+<script src="js/growth-plan-model.js?v=6"></script>
 <script>
 (function () {
   'use strict';
@@ -551,11 +573,13 @@
         strategy: sel(r.fields[P.strategy]) || '', plannedExtra: r.fields[P.plannedExtra] == null ? null : r.fields[P.plannedExtra],
         owner: sel(r.fields[P.owner]) || '', ctBand: sel(r.fields[P.ctBand]) || '', ctAnnual: r.fields[P.ctAnnual] || 0,
         baselineRent: r.fields[P.baselineRent] == null ? null : r.fields[P.baselineRent], baselineDate: r.fields[P.baselineDate] || '',
+        baselineCt: r.fields[P.baselineCt] == null ? null : r.fields[P.baselineCt], movingToSelfManage: !!r.fields[P.movingToSelfManage],
       })),
       units: raw.units.map(r => ({ id: r.id, propertyId: link(r.fields[U.property])[0], number: r.fields[U.number], type: sel(r.fields[U.type]), status: sel(r.fields[U.status]), rent: r.fields[U.rent], beds: r.fields[U.beds], incomeType: sel(r.fields[U.incomeType]), tenantIds: link(r.fields[U.tenants]) })),
       tenants: raw.tenants.map(r => ({ id: r.id, name: r.fields[T.name] || '', status: sel(r.fields[T.status]), dob: r.fields[T.dob] || '', payType: sel(r.fields[T.payType]), capExemption: sel(r.fields[T.capExemption]) || 'Unknown', notes: r.fields[T.notes] || '', phone: r.fields[T.phone] || '', email: r.fields[T.email] || '', ni: r.fields[T.ni] || '',
         over35Confirmed: !!r.fields[T.over35], dueDay: sel(r.fields[T.dueDay]) || '', meetingDate: r.fields[T.meetingDate] || '', ucPayDay: r.fields[T.ucPayDay] || '', household: sel(r.fields[T.household]) || '', otherAdults: r.fields[T.otherAdults] || '',
-        idSeen: sel(r.fields[T.idSeen]) || '', ucStatementSeen: !!r.fields[T.ucStatementSeen], weeklyIncome: r.fields[T.weeklyIncome] || '', weeklySpending: r.fields[T.weeklySpending] || '', bankStatements: !!r.fields[T.bankStatements], authoritySigned: !!r.fields[T.authoritySigned], ctAccount: r.fields[T.ctAccount] || '', meetingNotes: r.fields[T.meetingNotes] || '',
+        idSeen: sel(r.fields[T.idSeen]) || '', ucStatementSeen: !!r.fields[T.ucStatementSeen],
+        correctAgreement: !!r.fields[T.correctAgreement], proofOfAddress: !!r.fields[T.proofOfAddress], rentUplift: sel(r.fields[T.rentUplift]) || '', weeklyIncome: r.fields[T.weeklyIncome] || '', weeklySpending: r.fields[T.weeklySpending] || '', bankStatements: !!r.fields[T.bankStatements], authoritySigned: !!r.fields[T.authoritySigned], ctAccount: r.fields[T.ctAccount] || '', meetingNotes: r.fields[T.meetingNotes] || '',
         documents: (r.fields[T.documents] || []).map(a => ({ id: a.id, filename: a.filename, url: a.url, size: a.size })) })),
       tenancies: raw.tenancies.map(r => ({ id: r.id, tenantIds: link(r.fields[C.tenants]), unitId: link(r.fields[C.unit])[0], rent: r.fields[C.rent], actual: r.fields[C.actual] })),
       costs: raw.costs.filter(r => link(r.fields[K.property]).length).map(r => ({ propertyId: link(r.fields[K.property])[0], shared: link(r.fields[K.property]).length > 1, name: r.fields[K.name] || '', monthly: M.monthlyFromFrequency(r.fields[K.expected], sel(r.fields[K.frequency])) })),
@@ -605,22 +629,51 @@
     $('meetingSave').disabled = false;
   }
 
-  // Six cards, in the order Kevin reads them: what we get now, what the plan makes
-  // it, the gap between those two, and then how far along we are.
+  // The grid (Kevin, 16 Sep 2026): rent, council tax and what is left, read left to right
+  // from where we started, to now, to the plan done, to the ceiling. Forecast only: the
+  // leadership dashboard owns the actual cash. A tick moves money from "could" to "now".
+  const GRID_COLS = [
+    { key: 'started', label: 'Where we started', note: 'frozen at the start of the plan' },
+    { key: 'now', label: 'Where we are now', note: 'with every tick done so far' },
+    { key: 'plan', label: 'If the plan is done', note: 'the plans you have picked' },
+    { key: 'best', label: 'Best possible', note: 'the ceiling, every property at its best' },
+  ];
   function renderHeadline() {
-    const t = state.plan.totals;
-    const open = state.ui.openKpi;
-    const kpi = (key, l, v, d, cls = '') => `<div class="kpi clickable ${cls} ${open === key ? 'expanded' : ''}" role="button" tabindex="0" aria-expanded="${open === key}" data-kpi="${key}"><div class="l"><span>${esc(l)}</span><span class="chev" aria-hidden="true">▸</span></div><div class="v">${v}</div><div class="d">${esc(d)}</div></div>`;
-    const gap = t.realisedGap;
-    $('kpis').innerHTML = [
-      kpi('rentNow', 'Rent now', gbp(t.rentNow), 'every tenancy we have, added up'),
-      kpi('rentPlan', 'Rent if we do the plan', gbp(t.rentNow + t.chosenUplift), 'the plan you have picked, property by property'),
-      kpi('uplift', 'Extra a month', '+' + gbp(t.chosenUplift), 'after council tax, from the plans picked so far', 'good'),
-      kpi('todo', 'Still to start', '+' + gbp(t.toDo), 'plans picked but not begun', 'gold'),
-      kpi('inprog', 'Under way', '+' + gbp(t.inProgress), 'work started, money not in yet', 'gold'),
-      kpi('realised', 'Landed', gbp(t.measuredRealised), `${gbp(t.forecastRealised)} expected · ${gap > 0 ? gbp(gap) + ' short' : gap < 0 ? gbp(-gap) + ' ahead' : 'exactly on'}`, gap > 0.5 ? '' : 'good'),
-    ].join('');
+    const t = state.plan.totals, g = t.grid, open = state.ui.openKpi;
+    const head = GRID_COLS.map(c => `<th class="num"><button type="button" class="gcol ${open === c.key ? 'on' : ''}" data-kpi="${c.key}" aria-expanded="${open === c.key}">${esc(c.label)} <span class="chev" aria-hidden="true">▸</span></button><div class="gnote">${esc(c.note)}</div></th>`).join('');
+    const row = (label, k, cls) => `<tr class="${cls || ''}"><th scope="row">${esc(label)}</th>${GRID_COLS.map(c => `<td class="num">${k === 'ct' && g[c.key][k] ? '−' : ''}${gbp(g[c.key][k])}</td>`).join('')}</tr>`;
+    $('kpis').innerHTML = `<div class="tbl-wrap"><table class="grid" aria-label="Rent and council tax, from where we started to the ceiling">
+      <thead><tr><th></th>${head}</tr></thead>
+      <tbody>${row('Rent a month', 'rent')}${row('Council tax we pay', 'ct', 'ctrow')}${row('Left for us', 'left', 'leftrow')}</tbody>
+    </table></div>
+    <div class="gsum small">
+      <span>Since we started: <b class="${g.now.left - g.started.left >= 0 ? 'good-t' : 'neg'}">${g.now.left - g.started.left >= 0 ? '+' : '−'}${gbp(Math.abs(g.now.left - g.started.left))}</b> a month</span>
+      <span>Still to come from the plan: <b>+${gbp(Math.max(0, g.plan.left - g.now.left))}</b></span>
+      <span>Room left to the ceiling: <b class="muted">+${gbp(Math.max(0, g.best.left - g.now.left))}</b></span>
+      ${t.startedFrozen ? '' : '<span class="note">Where we started is not frozen yet, so it reads the rent on the record today.</span>'}
+    </div>`;
     renderKpiDetail();
+  }
+
+  // Click a column for the properties behind it.
+  function kpiRows(key) {
+    const p = state.plan, g = p.totals.grid;
+    const col = GRID_COLS.find(c => c.key === key); if (!col) return null;
+    const pick = {
+      started: v => ({ rent: v.baselineRent == null ? v.recordRent : v.baselineRent, ct: v.baselineCt == null ? v.ctNow : v.baselineCt, why: v.baselineDate ? `frozen ${v.baselineDate}` : 'rent on the record' }),
+      now: v => ({ rent: v.rentNow, ct: v.ctNow, why: v.ctNowWhy }),
+      plan: v => ({ rent: v.planRent, ct: v.planCt, why: v.planWhy }),
+      best: v => ({ rent: v.bestRent, ct: v.bestCt, why: v.bestWhy }),
+    }[key];
+    const rows = p.properties.map(v => Object.assign({ name: v.name + (v.selfManaged ? '' : ' (' + (v.agent || 'agent') + ')') }, pick(v)))
+      .sort((a, b) => (b.rent - b.ct) - (a.rent - a.ct));
+    return { title: col.label, rows, total: g[key] };
+  }
+  function renderKpiDetail() {
+    const box = $('kpiDetail'); const d = state.ui.openKpi ? kpiRows(state.ui.openKpi) : null;
+    if (!d) { box.hidden = true; box.innerHTML = ''; return; }
+    box.hidden = false;
+    box.innerHTML = `<h3>${esc(d.title)}, property by property<span>${gbp(d.total.left, 2)} left</span></h3><div class="tbl-wrap"><table><thead><tr><th>Property</th><th class="num">Rent</th><th class="num">Council tax</th><th class="num">Left</th></tr></thead><tbody>${d.rows.length ? d.rows.map(r => `<tr><td class="wrap">${esc(r.name)}<div class="small muted">${esc(r.why || '')}</div></td><td class="num">${gbp(r.rent, 2)}</td><td class="num ${r.ct ? 'neg' : 'muted'}">${r.ct ? '−' + gbp(r.ct, 2) : '£0'}</td><td class="num"><b>${gbp(r.rent - r.ct, 2)}</b></td></tr>`).join('') : '<tr><td class="empty" colspan="4">No properties</td></tr>'}</tbody></table></div>`;
   }
 
   function renderCountStrip() {
@@ -733,7 +786,7 @@ BEFORE THE FIRST ONE IS SIGNED (all in writing)
     const rows = (state.plan.properties || []).slice().sort((a, b) => (a.selfManaged ? 0 : 1) - (b.selfManaged ? 0 : 1) || a.name.localeCompare(b.name));
     const sel = (id, field, opts, val, label) => `<select class="sm" data-prop-field="${field}" data-prop="${esc(id)}" aria-label="${esc(label)}">${opts.map(o => `<option value="${esc(o)}" ${o === val ? 'selected' : ''}>${esc(o || 'Not set')}</option>`).join('')}</select>`;
     $('setupBody').innerHTML = rows.map(v => `<tr><td class="wrap">${esc(v.name)}<div class="small muted">${esc(v.selfManaged ? (v.area || 'we run this') : (v.agent || 'agent-run'))}</div></td>
-      <td>${sel(v.id, 'strategy', ['', 'Joint tenancy', 'HMO', 'Leave as is'], v.target, `Plan for ${v.name}`)}</td>
+      <td>${v.selfManaged ? sel(v.id, 'strategy', [''].concat(M.PLAN_CHOICES), v.target, `Plan for ${v.name}`) : ''}${!v.selfManaged || v.movingToSelfManage ? `<label class="chk small"><input type="checkbox" data-prop-field="movingToSelfManage" data-prop="${esc(v.id)}" ${v.movingToSelfManage ? 'checked' : ''}> Moving to self-manage</label>` : ''}</td>
       <td class="num"><input class="sm" type="number" min="0" max="6" data-prop-field="plannedExtra" data-prop="${esc(v.id)}" value="${v.plannedExtra ? esc(v.plannedExtra) : ''}" placeholder="0" aria-label="Extra tenants at ${esc(v.name)}"></td>
       <td class="num"><input class="sm" type="number" min="1" max="12" data-prop-field="lettableRooms" data-prop="${esc(v.id)}" value="${v.lettable == null ? '' : esc(v.lettable)}" placeholder="${esc(v.roomInfo.rooms)}" aria-label="Lettable rooms at ${esc(v.name)}"></td>
       <td>${sel(v.id, 'payg', ['Unknown', 'Yes', 'No'], v.payg, `PAYG meters at ${v.name}`)}</td>
@@ -745,7 +798,7 @@ BEFORE THE FIRST ONE IS SIGNED (all in writing)
   // One row per property: what it does now, the best it could do, and the plan
   // picked. Open a row for the four strategies side by side, who lives there,
   // and the paperwork that strategy needs.
-  const PROGRESS_CLASS = { 'Realised': 'st-done', 'In progress': 'st-in-progress', 'To do': 'check', 'Not decided': 'check', 'No change needed': '' };
+  const PROGRESS_CLASS = { 'Realised': 'st-done', 'In progress': 'st-in-progress', 'To do': 'check', 'Not decided': 'check', 'No change needed': '', 'Agent-run': '' };
 
   function renderProperties() {
     const self = state.plan.selfManaged, agent = state.plan.agentManaged;
@@ -769,13 +822,13 @@ BEFORE THE FIRST ONE IS SIGNED (all in writing)
     const up = v.upliftChosen;
     const fig = v.chosen
       ? `<b class="${up > 0 ? '' : 'flat'}">${up > 0 ? '+' + gbp(up, 2) : up < 0 ? '−' + gbp(-up, 2) : 'no change'}</b><span class="muted small">${esc(v.chosen)}</span>`
-      : `<b class="gold">+${gbp(v.upliftBest, 2)}</b><span class="muted small">best: ${esc(v.best.name)}</span>`;
+      : `<b class="gold">+${gbp(Math.max(0, v.upliftBest), 2)}</b><span class="muted small">ceiling: ${esc(v.bestWhy)}</span>`;
     const head = `<div class="pack-head" role="button" tabindex="0" data-pack="${esc(v.id)}" aria-expanded="${open}">
       <div class="pack-n"><span><b>${esc(v.name)}</b>${v.area ? ` <span class="muted small">${esc(v.area)}</span>` : ''}
         <div class="pack-meta">
           <span class="pill">Now: ${esc(v.current)}</span>
           <span class="pill ${PROGRESS_CLASS[v.progress] || ''}">${esc(v.progress)}</span>
-          <span class="pill">${gbp(v.rentNow, 0)} a month</span>
+          <span class="pill">${gbp(v.rentNow, 0)} rent${v.ctNow ? ' · −' + gbp(v.ctNow, 0) + ' council tax' : ''}</span>
           ${v.voids ? `<span class="pill check">${v.voids} empty</span>` : ''}
           ${v.tenantCount ? `<span class="pill">${v.tenantCount} tenant${v.tenantCount === 1 ? '' : 's'}</span>` : ''}
           ${!v.selfManaged && v.agent ? `<span class="pill">${esc(v.agent)}</span>` : ''}
@@ -783,13 +836,39 @@ BEFORE THE FIRST ONE IS SIGNED (all in writing)
       <div class="pack-fig">${fig}</div>
       <span class="chev" aria-hidden="true">▸</span></div>`;
     if (!open) return `<div class="pack">${head}</div>`;
+    if (!v.selfManaged) return `<div class="pack open">${head}<div class="pack-body">${agentBlock(v)}</div></div>`;
     return `<div class="pack open">${head}<div class="pack-body">
+      ${nowBlock(v)}
       ${strategyTable(v)}
       ${unitsBlock(v)}
       ${checklistBlock(v)}
       ${leversBlock(v)}
       ${setupBlock(v)}
     </div></div>`;
+  }
+
+  // Where this property is now, and where the plan and the ceiling take it. Same
+  // four columns as the headline, for one property.
+  function nowBlock(v) {
+    const cell = (rent, ct) => `<td class="num">${gbp(rent, 2)}</td><td class="num ${ct ? 'neg' : 'muted'}">${ct ? '−' + gbp(ct, 2) : '£0'}</td><td class="num"><b>${gbp(rent - ct, 2)}</b></td>`;
+    const startedRent = v.baselineRent == null ? v.recordRent : v.baselineRent;
+    const startedCt = v.baselineCt == null ? v.ctNow : v.baselineCt;
+    return `<div class="pack-block"><h4>This property, start to ceiling</h4>
+      <div class="tbl-wrap"><table class="strattbl nowtbl"><thead><tr><th></th><th class="num">Rent</th><th class="num">Council tax</th><th class="num">Left for us</th></tr></thead><tbody>
+        <tr><td>Where we started</td>${cell(startedRent, startedCt)}</tr>
+        <tr class="chosen"><td>Where we are now<div class="small muted">${esc(v.ctNowWhy)}</div>${v.upliftsDone ? `<div class="small good-t">Includes ${gbp(v.upliftsDone, 2)} of rent uplifts ticked done</div>` : ''}</td>${cell(v.rentNow, v.ctNow)}</tr>
+        <tr><td>If the plan is done<div class="small muted">${esc(v.planWhy)}</div></td>${cell(v.planRent, v.planCt)}</tr>
+        <tr><td>Best possible<div class="small muted">${esc(v.bestWhy)}</div></td>${cell(v.bestRent, v.bestCt)}</tr>
+      </tbody></table></div></div>`;
+  }
+
+  // An agent runs it, so there is nothing to sign or tick (Kevin, 16 Sep 2026). Ticking
+  // the box moves it into our list, where every tool for our own properties applies.
+  function agentBlock(v) {
+    return `<div class="pack-block"><h4>Run by ${esc(v.agent || 'an agent')}</h4>
+      <p class="small muted">Nothing to do here while an agent runs it. The ceiling for this property is ${gbp(v.bestRent - v.bestCt, 2)} a month left for us (${esc(v.bestWhy)}), against ${gbp(v.rentNow - v.ctNow, 2)} now.</p>
+      <label class="chk selfmanage"><input type="checkbox" data-prop-field="movingToSelfManage" data-prop="${esc(v.id)}" ${v.movingToSelfManage ? 'checked' : ''}> Moving to self-manage</label>
+      <p class="small muted">Tick this when we take it back. It moves up into the properties we run ourselves.</p></div>`;
   }
 
   // The four strategies, side by side, with council tax on its own line so the
@@ -804,16 +883,16 @@ BEFORE THE FIRST ONE IS SIGNED (all in writing)
         <td class="num">${s.units}</td>
         <td class="num">${gbp(s.gross, 2)}</td>
         <td class="num ${s.councilTax ? 'neg' : 'muted'}">${s.councilTax ? '−' + gbp(s.councilTax, 2) : '£0'}</td>
-        <td class="num"><b>${gbp(s.net, 2)}</b><div class="small ${s.net - v.rentNow > 0 ? 'good-t' : 'muted'}">${s.net - v.rentNow > 0 ? '+' + gbp(s.net - v.rentNow, 2) : gbp(s.net - v.rentNow, 2)}</div></td>
+        <td class="num"><b>${s.na ? '—' : gbp(s.net, 2)}</b>${s.na ? '' : `<div class="small ${s.net - v.leftNow > 0 ? 'good-t' : 'muted'}">${s.net - v.leftNow > 0 ? '+' : s.net - v.leftNow < 0 ? '−' : ''}${gbp(Math.abs(s.net - v.leftNow), 2)} on now</div>`}</td>
       </tr>`;
     }).join('');
     return `<div class="pack-block"><h4>The four ways we could let it</h4>
-      <div class="tbl-wrap"><table class="strattbl"><thead><tr><th>Strategy</th><th class="num">Places</th><th class="num">Rent in</th><th class="num">Council tax</th><th class="num">Left for us</th></tr></thead><tbody>${rows}</tbody></table></div>
+      <div class="tbl-wrap"><table class="strattbl fourtbl"><thead><tr><th>Strategy</th><th class="num">Places</th><th class="num">Rent in</th><th class="num">Council tax</th><th class="num">Left for us</th></tr></thead><tbody>${rows}</tbody></table></div>
       <div class="pick"><label>Pick the plan for this property
         <select class="sm" data-prop-field="strategy" data-prop="${esc(v.id)}">
-          ${['', 'Joint tenancy', 'HMO', 'Leave as is'].map(o => `<option value="${o}" ${o === v.target ? 'selected' : ''}>${o || 'Not decided yet'}</option>`).join('')}
+          ${[''].concat(M.PLAN_CHOICES).map(o => `<option value="${esc(o)}" ${o === v.target ? 'selected' : ''}>${esc(o || 'Not decided yet')}</option>`).join('')}
         </select></label>
-        <span class="small muted">Rent now is ${gbp(v.rentNow, 2)} a month. "Leave as is" keeps it on ${esc(v.current)}.</span></div>
+        <span class="small muted">"Leave as is" holds it exactly where it is today: ${esc(v.current)}, ${gbp(v.rentNow, 2)} rent, ${v.ctNow ? gbp(v.ctNow, 2) + ' council tax' : 'no council tax to us'}.</span></div>
     </div>`;
   }
 
@@ -838,6 +917,7 @@ BEFORE THE FIRST ONE IS SIGNED (all in writing)
         return `<li>${esc(t.name)} <span class="muted small">${t.age != null ? 'age ' + t.age : (t.over35Confirmed ? '35 or over' : 'age not known')}${t.rent ? ' · ' + gbp(t.rent, 2) : ''}${t.uc ? ' · Universal Credit' : ''}</span>
         ${t.note ? `<div class="small note">${esc(t.note)}</div>` : ''}
         ${ageUnknown ? `<div class="pt-fix"><span class="inl">Date of birth: <input class="sm" type="date" data-dob="${esc(t.id)}" aria-label="Date of birth for ${esc(t.name)}"><button class="btn btn-sm" data-act="save-dob" data-tenant="${esc(t.id)}">Save</button></span> <span class="muted">or</span> <button class="btn btn-sm" data-act="confirm-35" data-tenant="${esc(t.id)}">Confirm 35 or over</button></div>` : ''}
+        ${tenantTicks(v, t)}
         ${miss.length ? `<div class="small muted">Still to collect: ${esc(miss.join(', '))}</div>` : '<div class="small muted">All their details are on file</div>'}
         <div class="row-actions"><button class="btn btn-sm" data-act="open-form" data-tenant="${esc(t.id)}">Open the meeting form</button></div></li>`;
     }).join('');
@@ -854,6 +934,25 @@ BEFORE THE FIRST ONE IS SIGNED (all in writing)
         </ul></div>
         <div><h5 class="small muted">Tenants living there</h5><ul class="plain">${tenants || '<li class="muted">Nobody recorded here</li>'}</ul></div>
       </div></div>`;
+  }
+
+  // The four ticks per tenant (Kevin, 16 Sep 2026). Each writes to the tenant's record.
+  // Rent uplift is three states underneath a tick: "Not needed" and "Done" both show
+  // ticked, but only Done adds money, so presetting a tenant as nothing-to-chase can
+  // never inflate the forecast. Unticking either one reopens it as To do.
+  function tenantTicks(v, t) {
+    const box = (field, checked, label, extra) => `<label class="tick"><input type="checkbox" data-tenant-tick="${field}" data-tenant="${esc(t.id)}" ${checked ? 'checked' : ''}> ${esc(label)}${extra || ''}</label>`;
+    const up = t.rentUplift || 'To do';
+    const upNote = up === 'Not needed' ? ' <span class="muted">(nothing to chase)</span>'
+      : up === 'Done' ? (t.upliftGap ? ` <span class="good-t">(+${gbp(t.upliftGap, 2)} in now)</span>` : ' <span class="muted">(done)</span>')
+      : t.upliftGap ? ` <span class="note">(+${gbp(t.upliftGap, 2)} to do)</span>` : '';
+    const jt = v.chosen === 'UC joint tenancy';
+    return `<div class="ticks" role="group" aria-label="Checklist for ${esc(t.name)}">
+      ${box('correctAgreement', t.correctAgreement, 'Correct tenancy agreement', jt && !t.correctAgreement ? ' <span class="note">(council tax stays ours until every tenant is ticked)</span>' : '')}
+      ${box('proofOfAddress', t.proofOfAddress, 'Proof of address')}
+      ${box('authoritySigned', t.authoritySigned, 'Letter of authority')}
+      ${box('rentUplift', up !== 'To do', 'Rent uplift', upNote)}
+    </div>`;
   }
 
   // What has to be signed for the plan picked. Single lets and short lets need
@@ -898,6 +997,7 @@ BEFORE THE FIRST ONE IS SIGNED (all in writing)
       ${f('Council tax payer', 'ctPayer', ['Unknown', 'Owner', 'Tenants'], v.ctPayer)}
       ${f('Tasks go to', 'owner', ['', 'Roy', 'Kevin'], v.owner)}
       </div>
+      ${v.movingToSelfManage ? `<label class="chk small" style="margin-top:8px"><input type="checkbox" data-prop-field="movingToSelfManage" data-prop="${esc(v.id)}" checked> Moving to self-manage (untick to send it back to the agent-run list)</label>` : ''}
       <div class="small muted" style="margin-top:6px">Council tax: ${ctLine}</div>
       <div class="small muted">Rooms: ${esc(v.roomInfo.source)}</div>
       <div class="small muted">Single-let rent: ${esc(v.market.source)}</div>
@@ -907,8 +1007,12 @@ BEFORE THE FIRST ONE IS SIGNED (all in writing)
 
   const GLOSSARY = [
     ['Single let', 'One person or one family rents the whole property on one agreement.'],
-    ['Joint tenancy', 'Two people sign ONE agreement for the whole house. Because it is one agreement for the whole house, the council tax becomes theirs, not ours.'],
-    ['HMO', 'A house where rooms are let separately. Short for House in Multiple Occupation. We pay the council tax on these.'],
+    ['UC joint tenancy', 'Two people on Universal Credit sign ONE agreement for the whole house. Once every tenant has signed it, the council tax becomes theirs, not ours.'],
+    ['UC HMO', 'Our own house where each room is let to one person on Universal Credit. HMO is short for House in Multiple Occupation. We pay the council tax.'],
+    ['HMO (professional)', 'A house of rooms run by a specialist operator, like the ones Roc Immo runs for us. Not one of our own strategies.'],
+    ['Where we started', 'What the portfolio brought in when the plan began. Frozen, so progress shows against it.'],
+    ['Ceiling', 'The most each property could leave us if it moved to its best strategy. Useful to see, not a target: some of it would bring big management headaches.'],
+    ['Correct tenancy agreement', 'The right agreement for the strategy: one joint agreement for a UC joint tenancy, an individual agreement at the 1-bed rate for a UC HMO.'],
     ['Serviced accommodation', 'Short stays instead of a tenancy, like a holiday let. Run by an operator who takes a cut.'],
     ['Universal Credit', 'The benefit that pays most of our tenants. Part of it is for housing and can be paid straight to us.'],
     ['Housing allowance (LHA)', 'The most Universal Credit will pay towards rent in an area. It is set by the government each April and published by the bedroom count.'],
@@ -920,7 +1024,7 @@ BEFORE THE FIRST ONE IS SIGNED (all in writing)
     ['Proof of address', 'A document showing where someone lives. The council forms ask for it.'],
     ['Void', 'An empty place that is not bringing in any rent.'],
     ['Rental unit', 'One lettable space. A whole house is one unit. A house let by the room is one unit per room.'],
-    ['Landed', 'Money the rent records actually show, not money the plan expected.'],
+    ['Realised', 'The work is done: the agreement is signed or the rent change is made. The money usually follows a month or so later, and the leadership dashboard is where you see it arrive.'],
   ];
   function renderGlossary() {
     $('glossaryBody').innerHTML = GLOSSARY.map(([k, d]) => `<tr><td style="white-space:nowrap"><b>${esc(k)}</b></td><td class="wrap">${esc(d)}</td></tr>`).join('');
@@ -1025,22 +1129,27 @@ BEFORE THE FIRST ONE IS SIGNED (all in writing)
     const l = leverByKey(key); if (!l) return;
     await withBusy(key, async () => {
       await upsertPlanRow(l, status);
-      if (status === 'Done') await snapshotBaseline(l.propertyId);
       toast(`${status}: ${l.title}`);
     });
   }
-  // The first time a move on a property is marked done, save what that property was
-  // bringing in that day. Everything after is measured against it, so a rent rise that
-  // was ticked off but never reached the Universal Credit journal shows as £0 landed
-  // rather than as a win. Written once per property and never overwritten.
-  async function snapshotBaseline(propertyId) {
-    if (!propertyId) return;
-    const p = state.data.properties.find(x => x.id === propertyId);
-    const v = state.plan.properties.find(x => x.id === propertyId);
-    if (!p || !v || p.baselineRent != null) return;
-    const rent = Number(v.rentNow) || 0;
-    await airtableWrite('PATCH', TABLES.properties, { records: [{ id: propertyId, fields: { [GP.prop.baselineRent]: rent, [GP.prop.baselineDate]: todayISO() } }] });
-    p.baselineRent = rent; p.baselineDate = todayISO();
+  // A tenant tick (Kevin, 16 Sep 2026). The three document ticks are checkboxes on the
+  // tenant. The rent uplift tick is a select: ticking makes it Done, unticking makes it To do,
+  // and the tenant's uplift move in the Growth Plan table follows it so the two never disagree.
+  async function saveTenantTick(tenantId, field, checked) {
+    const T = GP.tenant;
+    const fieldId = { correctAgreement: T.correctAgreement, proofOfAddress: T.proofOfAddress, authoritySigned: T.authoritySigned, rentUplift: T.rentUplift }[field];
+    if (!fieldId) return;
+    const value = field === 'rentUplift' ? (checked ? 'Done' : 'To do') : !!checked;
+    await withBusy('tick:' + tenantId + field, async () => {
+      await airtableWrite('PATCH', TABLES.tenants, { records: [{ id: tenantId, fields: { [fieldId]: value } }], typecast: true });
+      const t = state.data.tenants.find(x => x.id === tenantId); if (t) t[field] = value;
+      if (field === 'rentUplift') {
+        const l = state.plan.levers.find(x => x.tenantId === tenantId && (x.lever === 'Rent uplift' || x.lever === 'Rate refresh'));
+        if (l) await upsertPlanRow(l, checked ? 'Done' : 'Adopted');
+      }
+      const label = { correctAgreement: 'Correct tenancy agreement', proofOfAddress: 'Proof of address', authoritySigned: 'Letter of authority', rentUplift: 'Rent uplift' }[field];
+      toast(`${label} ${field === 'rentUplift' ? (checked ? 'done' : 'reopened') : (checked ? 'ticked' : 'unticked')}${t ? ' for ' + t.name : ''}`);
+    });
   }
   async function createTask(key) {
     const l = leverByKey(key); if (!l) return;
@@ -1080,13 +1189,15 @@ BEFORE THE FIRST ONE IS SIGNED (all in writing)
     });
   }
   async function savePropField(propId, field, value) {
-    const map = { lettableRooms: GP.prop.lettableRooms, payg: GP.prop.payg, ctPayer: GP.prop.ctPayer, strategy: GP.prop.strategy, plannedExtra: GP.prop.plannedExtra, owner: GP.prop.owner, ctBand: GP.prop.ctBand };
+    const map = { lettableRooms: GP.prop.lettableRooms, payg: GP.prop.payg, ctPayer: GP.prop.ctPayer, strategy: GP.prop.strategy, plannedExtra: GP.prop.plannedExtra, owner: GP.prop.owner, ctBand: GP.prop.ctBand, movingToSelfManage: GP.prop.movingToSelfManage };
     const numeric = field === 'lettableRooms' || field === 'plannedExtra';
+    const flag = field === 'movingToSelfManage';
     await withBusy('prop:' + propId + field, async () => {
-      const v = numeric ? (value === '' ? null : Number(value)) : (value || null);
-      await airtableWrite('PATCH', TABLES.properties, { records: [{ id: propId, fields: { [map[field]]: v } }] });
-      const p = state.data.properties.find(x => x.id === propId); if (p) p[field] = numeric ? v : (v || '');
-      toast('Saved');
+      const v = flag ? !!value : numeric ? (value === '' ? null : Number(value)) : (value || null);
+      // typecast: picking "UC HMO" or "Single let" creates the choice if Airtable lacks it.
+      await airtableWrite('PATCH', TABLES.properties, { records: [{ id: propId, fields: { [map[field]]: v } }], typecast: true });
+      const p = state.data.properties.find(x => x.id === propId); if (p) p[field] = flag || numeric ? v : (v || '');
+      toast(flag ? (v ? 'Moved to the properties we run ourselves' : 'Back with the agent-run properties') : 'Saved');
     });
   }
   async function saveSetting(key, value) {
@@ -1114,18 +1225,17 @@ BEFORE THE FIRST ONE IS SIGNED (all in writing)
     const ph = e.target.closest('.pack-head');
     if (ph && !e.target.closest('button')) { state.ui.openPack = state.ui.openPack === ph.dataset.pack ? null : ph.dataset.pack; renderProperties(); const nh = document.querySelector(`.pack-head[data-pack="${ph.dataset.pack}"]`); if (nh) nh.focus(); return; }
     const st = e.target.closest('#statusSeg button'); if (st) { state.ui.status = st.dataset.status; renderStatusSeg(); renderProperties(); return; }
-    const card = e.target.closest('.kpi[data-kpi]'); if (card) { state.ui.openKpi = state.ui.openKpi === card.dataset.kpi ? null : card.dataset.kpi; renderHeadline(); }
+    const card = e.target.closest('[data-kpi]'); if (card) { state.ui.openKpi = state.ui.openKpi === card.dataset.kpi ? null : card.dataset.kpi; renderHeadline(); const c = document.querySelector(`[data-kpi="${card.dataset.kpi}"]`); if (c) c.focus(); }
   });
   document.addEventListener('keydown', e => {
     if (e.key !== 'Enter' && e.key !== ' ') return;
-    const card = e.target.closest && e.target.closest('.kpi[data-kpi]');
-    if (card) { e.preventDefault(); state.ui.openKpi = state.ui.openKpi === card.dataset.kpi ? null : card.dataset.kpi; renderHeadline(); const c = document.querySelector(`.kpi[data-kpi="${card.dataset.kpi}"]`); if (c) c.focus(); return; }
     const ph = e.target.closest && e.target.closest('.pack-head');
     if (ph) { e.preventDefault(); state.ui.openPack = state.ui.openPack === ph.dataset.pack ? null : ph.dataset.pack; renderProperties(); const nh = document.querySelector(`.pack-head[data-pack="${ph.dataset.pack}"]`); if (nh) nh.focus(); }
   });
   document.addEventListener('change', e => {
     const t = e.target;
-    if (t.matches('[data-prop-field]')) return savePropField(t.dataset.prop, t.dataset.propField, t.value);
+    if (t.matches('[data-prop-field]')) return savePropField(t.dataset.prop, t.dataset.propField, t.type === 'checkbox' ? t.checked : t.value);
+    if (t.matches('[data-tenant-tick]')) return saveTenantTick(t.dataset.tenant, t.dataset.tenantTick, t.checked);
     if (t.matches('input[data-setting]')) return saveSetting(t.dataset.setting, t.value);
     
     if (t.id === 'showDone') { state.ui.showDone = t.checked; renderProperties(); return; }
@@ -1150,13 +1260,15 @@ BEFORE THE FIRST ONE IS SIGNED (all in writing)
         { name: 'Ages known for UC room tenants', kind: 'sync', run: () => { const u = (g().plan || {}).unknownAge || []; return u.length ? { status: 'warn', detail: `${u.length} UC room tenant${u.length > 1 ? 's' : ''} with no date of birth: ${u.map(x => x.tenant).join(', ')}` } : { status: 'pass', detail: 'Every UC room tenant has a date of birth' }; } },
         { name: 'Benefit cap positions recorded', kind: 'sync', run: () => { const p = (g().plan || {}).properties || []; let uc = 0, known = 0; p.forEach(v => v.tenants.forEach(t => { if (t.uc && v.mgmt === 'kevin') { uc++; if (t.capExemption !== 'Unknown') known++; } })); return known < uc ? { status: 'warn', detail: `${known} of ${uc} UC tenants have a recorded cap position; the rest are shown as CRF Housing Payment claims` } : { status: 'pass', detail: `${uc} UC tenants, all with a recorded cap position` }; } },
         { name: 'Strategy set on every house you manage', kind: 'sync', run: () => { const p = ((g().plan || {}).properties || []).filter(v => v.mgmt === 'kevin'); const miss = p.filter(v => !v.strategy); return miss.length ? { status: 'warn', detail: `${miss.length} without a strategy: ${miss.map(v => v.name).join(', ')}` } : { status: 'pass', detail: `All ${p.length} houses carry a strategy (joint tenancy, HMO or leave as is)` }; } },
-        { name: 'Council tax band on every joint tenancy house', kind: 'sync', run: () => { const p = ((g().plan || {}).properties || []).filter(v => v.mgmt === 'kevin' && v.strategy === 'Joint tenancy'); const miss = p.filter(v => !v.ctBandMonthly && !v.ctLive); return miss.length ? { status: 'warn', detail: `${miss.length} joint tenancy house${miss.length > 1 ? 's' : ''} with no band or live cost: ${miss.map(v => v.name).join(', ')}` } : { status: 'pass', detail: `${p.length} joint tenancy houses priced from a band or a live cost` }; } },
+        { name: 'Council tax band on every joint tenancy house', kind: 'sync', run: () => { const p = ((g().plan || {}).properties || []).filter(v => v.selfManaged && v.chosen === 'UC joint tenancy'); const miss = p.filter(v => !v.ctBandMonthly && !v.ctLive); return miss.length ? { status: 'warn', detail: `${miss.length} joint tenancy house${miss.length > 1 ? 's' : ''} with no band or live cost: ${miss.map(v => v.name).join(', ')}` } : { status: 'pass', detail: `${p.length} joint tenancy houses priced from a band or a live cost` }; } },
         { name: 'Plan rows match a live lever', kind: 'automation', run: () => { const rows = (g().data || {}).planRows || []; const keys = new Set(((g().plan || {}).levers || []).map(l => l.key)); const orphans = rows.filter(r => !keys.has(r.key)); return orphans.length ? { status: 'warn', detail: `${orphans.length} Growth Plan row${orphans.length > 1 ? 's' : ''} no longer match a lever (tenant moved or data changed): ${orphans.map(r => r.key).join(', ')}` } : { status: 'pass', detail: `${rows.length} Growth Plan rows, all matched to a live lever` }; } },
         { name: 'Totals reconcile', kind: 'automation', run: () => { const t = (g().plan || {}).totals || {}; const sum = Math.round((t.paper + t.works + t.voids + t.remote) * 100) / 100; return Math.abs(sum - t.actionable) < 0.01 ? { status: 'pass', detail: `Actionable £${t.actionable} = paper + works + voids + away` } : { status: 'fail', detail: `Actionable £${t.actionable} does not equal the buckets (£${sum})` }; } },
         { name: 'Every property is priced four ways', kind: 'automation', run: () => { const p = (g().plan || {}).properties || []; const bad = p.filter(v => !v.strategies || v.strategies.length !== 4); return bad.length ? { status: 'fail', detail: `${bad.length} property without all four strategies: ${bad.map(v => v.name).join(', ')}` } : { status: 'pass', detail: `All ${p.length} properties priced as a single let, joint tenancy, HMO and short let` }; } },
         { name: 'Council tax confirmed where we would pay it', kind: 'sync', run: () => { const p = ((g().plan || {}).properties || []).filter(v => v.selfManaged); const miss = p.filter(v => !v.ct.confirmed); return miss.length ? { status: 'warn', detail: `${miss.length} of ${p.length} self-managed properties have no confirmed council tax: ${miss.map(v => v.name).join(', ')}. Their HMO and short-let figures are shown before council tax` } : { status: 'pass', detail: `All ${p.length} self-managed properties carry a council tax figure` }; } },
         { name: 'Single-let rent researched, not estimated', kind: 'sync', run: () => { const p = ((g().plan || {}).properties || []).filter(v => v.selfManaged); const est = p.filter(v => !v.market.researched); return est.length ? { status: 'warn', detail: `${est.length} of ${p.length} still use the housing allowance as a stand-in for the market rent: ${est.map(v => v.name).join(', ')}` } : { status: 'pass', detail: `All ${p.length} self-managed properties carry a researched market rent` }; } },
-        { name: 'Landed figures are measured, not assumed', kind: 'automation', run: () => { const p = ((g().plan || {}).properties || []).filter(v => v.doneCount > 0); const noBase = p.filter(v => v.baselineRent == null); return noBase.length ? { status: 'warn', detail: `${noBase.length} property with finished moves has no starting figure saved, so its landed total reads £0: ${noBase.map(v => v.name).join(', ')}` } : { status: 'pass', detail: p.length ? `${p.length} property with finished moves, each measured against a saved starting figure` : 'No moves finished yet, so nothing to measure' }; } },
+        { name: 'Where we started is frozen', kind: 'sync', run: () => { const t = (g().plan || {}).totals || {}; const p = (g().plan || {}).properties || []; const miss = p.filter(v => v.baselineRent == null || v.baselineCt == null); return miss.length ? { status: 'warn', detail: `${miss.length} of ${p.length} properties have no frozen starting figure, so "where we started" reads today's record for them: ${miss.map(v => v.name).join(', ')}` } : { status: 'pass', detail: `All ${p.length} properties carry a frozen starting rent and council tax` }; } },
+        { name: 'Grid adds up', kind: 'automation', run: () => { const g2 = (((g().plan || {}).totals || {}).grid) || {}; const bad = ['started', 'now', 'plan', 'best'].filter(k => !g2[k] || Math.abs(g2[k].rent - g2[k].ct - g2[k].left) > 0.01); return bad.length ? { status: 'fail', detail: `Left for us does not equal rent less council tax in: ${bad.join(', ')}` } : { status: 'pass', detail: `Every column: left for us = rent − council tax` }; } },
+        { name: 'Rent uplift set on every tenant we run', kind: 'sync', run: () => { const p = ((g().plan || {}).properties || []).filter(v => v.selfManaged); const blank = []; p.forEach(v => v.tenants.forEach(t => { const raw = ((g().data || {}).tenants || []).find(x => x.id === t.id); if (raw && !raw.rentUplift) blank.push(t.name); })); return blank.length ? { status: 'warn', detail: `${blank.length} tenant${blank.length > 1 ? 's' : ''} with no Rent Uplift set, read as To do: ${blank.join(', ')}` } : { status: 'pass', detail: 'Every tenant in a property we run has Rent Uplift set' }; } },
         { name: 'Self-managed and agent-run split', kind: 'sync', run: () => { const pl = g().plan || {}; const s = (pl.selfManaged || []).length, a = (pl.agentManaged || []).length; if (!s) return { status: 'fail', detail: 'No self-managed properties: the split has broken' }; return { status: 'pass', detail: `${s} run by us (Collins houses included), ${a} run by an agent` }; } },
       ],
     });

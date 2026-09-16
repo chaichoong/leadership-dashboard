@@ -37,6 +37,16 @@ const { execFileSync } = require('child_process');
 // putting the Cambridge number on a Manchester agreement would be a false rent.
 const MODEL = require(path.join(__dirname, '..', 'js', 'growth-plan-model.js'));
 
+// Growth Strategy was renamed on 16 Sep 2026: our own strategies carry "UC", because plain
+// "HMO" now means the professional houses Roc Immo runs. Older stored values still read.
+// Kept in step with STRATEGY_ALIASES in js/growth-plan-model.js by
+// tests/tenancy-pack-strategy.test.js, which fails if the two drift apart.
+const STRATEGY_ALIASES = { 'HMO': 'UC HMO', 'Joint tenancy': 'UC joint tenancy', 'Add tenants': 'UC HMO', 'Hold': 'Leave as is' };
+function strategyOf(p) {
+  const raw = String((p && p.fields && p.fields['Growth Strategy']) || '').trim();
+  return STRATEGY_ALIASES[raw] || raw;
+}
+
 // WHO NEEDS WHAT (Kevin, 10 Sep 2026, reviewing the first full list)
 //
 // PROOF OF RESIDENCY is a derived rule, not a list: Universal Credit only asks
@@ -158,9 +168,9 @@ async function main(argv) {
   }
   const targets = props.filter((p) => {
     const n = p.fields['Property Name (Short)'];
-    const strat = p.fields['Growth Strategy'];
+    const strat = strategyOf(p);
     if (wanted) return n === wanted;
-    return strat === 'Joint tenancy' || strat === 'HMO';
+    return strat === 'UC joint tenancy' || strat === 'UC HMO';
   });
   if (!targets.length) die('no property matched');
 
@@ -169,7 +179,7 @@ async function main(argv) {
     const name = p.fields['Property Name (Short)'];
     const address = p.fields.Property || name;
     const { council, team } = councilFor(p.fields['🏙️ Area'], p.fields['📮 Postcode']);
-    const strategy = p.fields['Growth Strategy'];
+    const strategy = strategyOf(p);
     const rates = MODEL.ratesFor(p.fields['📮 Postcode'], {});
     if (!rates) { console.log(`   no LHA rate for ${p.fields['📮 Postcode'] || 'a missing postcode'}: skipped`); continue; }
     const oneBed = rates.b1;
@@ -187,7 +197,7 @@ async function main(argv) {
       // Nobody is in Airtable yet, so the pack comes from the flags plus the
       // property's own strategy and LHA rate.
       console.log(`\n== ${name} (${strategy || 'no strategy'}) — new tenant ${newName}, ${council}`);
-      if (strategy === 'Joint tenancy') {
+      if (strategy === 'UC joint tenancy') {
         die('this property is on a joint tenancy: a new tenant needs the joint agreement, ' +
             'which names both people. Run --property "' + name + '" once both are known.');
       }
@@ -230,7 +240,7 @@ async function main(argv) {
     console.log(`\n== ${name} (${strategy || 'no strategy'}) — ${people.length} live tenant(s), ${council}`);
     if (!people.length) { console.log('   no live tenancy: skipped'); continue; }
 
-    if (strategy === 'Joint tenancy') {
+    if (strategy === 'UC joint tenancy') {
       if (people.length !== 2) { console.log(`   joint tenancy needs exactly 2 tenants, found ${people.length}: skipped`); continue; }
       const [a, b] = people;
       // The household of two began when the SECOND tenant moved in.
@@ -280,9 +290,9 @@ async function main(argv) {
         || (age != null ? age >= 35 : !!f['Aged 35 or Over (confirmed)']);
       const uc = f['Rent Payment Type'] === 'Universal Credit';
       // Decide the agreement FIRST, because the proof of residency depends on it.
-      const raisesAst = strategy !== 'Joint tenancy' && uc && over35
+      const raisesAst = strategy !== 'UC joint tenancy' && uc && over35
         && person.rent > 0 && person.rent < oneBed - 0.5;
-      const signsNewTenancy = raisesAst || strategy === 'Joint tenancy';
+      const signsNewTenancy = raisesAst || strategy === 'UC joint tenancy';
       // Proof of residency: Universal Credit asks for a proof of address and these
       // tenants have no utility bill in their name, so Agile Lets confirms it.
       // Only where the tenancy is new or changed (Kevin, 10 Sep 2026): a tenant
@@ -299,7 +309,7 @@ async function main(argv) {
             'Property line 1': addrLines[0] || '', 'Property line 2': addrLines[1] || '',
             'Property line 3': addrLines[2] || '', 'Property line 4': addrLines[3] || '',
             Date: longDate(TODAY),
-            'Tenancy start': longDate(strategy === 'Joint tenancy' ? people[people.length - 1].start : person.start),
+            'Tenancy start': longDate(strategy === 'UC joint tenancy' ? people[people.length - 1].start : person.start),
           }),
         }, dry));
       }

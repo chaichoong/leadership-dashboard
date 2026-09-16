@@ -162,10 +162,13 @@ describe('buildPlan levers', () => {
         expect(l.monthly).toBe(Math.round((2 * 398.88 + 398.88 - 1100) * 100) / 100); // 96.64
         expect(l.evidence[1]).toMatch(/1 two-bed flats × 2 × £398.88 \+ 1 one-bed flats × £398.88/);
     });
-    it('old strategy names still read (Add tenants = HMO, Hold = Leave as is)', () => {
-        expect(M.normaliseStrategy('Add tenants')).toBe('HMO');
+    // Renamed 16 Sep 2026: plain "HMO" now means the professional houses Roc Immo runs.
+    it('every older stored strategy name reads as the new UC name', () => {
+        expect(M.normaliseStrategy('HMO')).toBe('UC HMO');
+        expect(M.normaliseStrategy('Joint tenancy')).toBe('UC joint tenancy');
+        expect(M.normaliseStrategy('Add tenants')).toBe('UC HMO');
         expect(M.normaliseStrategy('Hold')).toBe('Leave as is');
-        expect(M.normaliseStrategy('Joint tenancy')).toBe('Joint tenancy');
+        expect(M.normaliseStrategy('UC HMO')).toBe('UC HMO');
     });
     it('HMO strategy with no planned extra tenants produces no rooms lever', () => {
         const f = fixture(); f.properties[0].strategy = 'HMO'; f.properties[0].plannedExtra = 0;
@@ -482,16 +485,16 @@ describe('the four strategies', () => {
     it('prices all four on every property, with council tax only on HMO and short lets', () => {
         const p = M.buildPlan(fixture(), S, TODAY);
         const v = p.properties[0];
-        expect(v.strategies.map(x => x.name)).toEqual(['Single let', 'Joint tenancy', 'HMO', 'Serviced accommodation']);
+        expect(v.strategies.map(x => x.name)).toEqual(['Single let', 'UC joint tenancy', 'UC HMO', 'Serviced accommodation']);
         const by = v.strategyBy;
         expect(by['Single let'].councilTax).toBe(0);
-        expect(by['Joint tenancy'].councilTax).toBe(0);
-        expect(by['HMO'].councilTax).toBe(135);            // the live bank-fed cost row
+        expect(by['UC joint tenancy'].councilTax).toBe(0);
+        expect(by['UC HMO'].councilTax).toBe(135);            // the live bank-fed cost row
         expect(by['Serviced accommodation'].councilTax).toBe(135);
     });
     it('joint tenancy is the 1-bed rate times two, and two places to let', () => {
         const p = M.buildPlan(fixture(), S, TODAY);
-        const jt = p.properties[0].strategyBy['Joint tenancy'];
+        const jt = p.properties[0].strategyBy['UC joint tenancy'];
         expect(jt.gross).toBe(M.weeklyToMonthly(M.LHA_WEEKLY.Cambridge.b1) * 2);
         expect(jt.units).toBe(2);
         expect(jt.net).toBe(jt.gross); // the tenants carry the council tax
@@ -499,7 +502,7 @@ describe('the four strategies', () => {
     it('HMO is rentable rooms times the 1-bed rate, less the council tax we then pay', () => {
         const f = fixture(); f.properties[0].lettableRooms = 5;
         const p = M.buildPlan(f, S, TODAY);
-        const hmo = p.properties[0].strategyBy['HMO'];
+        const hmo = p.properties[0].strategyBy['UC HMO'];
         const b1 = M.weeklyToMonthly(M.LHA_WEEKLY.Cambridge.b1);
         expect(hmo.units).toBe(5);
         expect(hmo.gross).toBe(Math.round(5 * b1 * 100) / 100);
@@ -565,9 +568,9 @@ describe('council tax', () => {
         const v = M.buildPlan(f, S, TODAY).properties[0];
         expect(v.ct.monthly).toBeNull();
         expect(v.ct.confirmed).toBe(false);
-        expect(v.strategyBy['HMO'].councilTax).toBeNull();
-        expect(v.strategyBy['HMO'].ctNote).toMatch(/BEFORE council tax/);
-        expect(v.strategyBy['HMO'].assumed).toBe(true);
+        expect(v.strategyBy['UC HMO'].councilTax).toBeNull();
+        expect(v.strategyBy['UC HMO'].ctNote).toMatch(/BEFORE council tax/);
+        expect(v.strategyBy['UC HMO'].assumed).toBe(true);
     });
 });
 
@@ -601,66 +604,34 @@ describe('a block of flats', () => {
         expect(v.current).toBe('Block of flats');
         expect(v.strategyBy['Single let'].units).toBe(3);
         expect(v.strategyBy['Single let'].gross).toBe(646 * 3); // the researched FY8 flat rent
-        ['Joint tenancy', 'HMO', 'Serviced accommodation'].forEach(k => {
+        ['UC joint tenancy', 'UC HMO', 'Serviced accommodation'].forEach(k => {
             expect(v.strategyBy[k].na).toBe(true);
             expect(v.strategyBy[k].net).toBe(0);
         });
     });
 });
 
-describe('progress and what has actually landed', () => {
-    const withPlan = rows => { const f = fixture(); f.properties[0].strategy = 'HMO'; f.properties[0].plannedExtra = 1; f.planRows = rows; return f; };
+describe('progress is forecast, and a tick moves money from could to now', () => {
+    const withPlan = (strategy, rows) => { const f = fixture(); f.properties[0].strategy = strategy; f.planRows = rows || []; return f; };
     it('a property with no plan picked reads Not decided, whatever its moves say', () => {
         const f = fixture();
         f.planRows = [{ id: 'r1', key: 'uplift:t1', status: 'Adopted', taskIds: [] }];
         expect(M.buildPlan(f, S, TODAY).properties[0].progress).toBe('Not decided');
     });
-    it('an adopted move reads In progress once a plan is picked', () => {
-        const p = M.buildPlan(withPlan([{ id: 'r1', key: 'uplift:t1', status: 'Adopted', taskIds: [] }]), S, TODAY);
+    it('an uplift still to do with a move adopted reads In progress', () => {
+        const p = M.buildPlan(withPlan('HMO', [{ id: 'r1', key: 'uplift:t1', status: 'Adopted', taskIds: [] }]), S, TODAY);
         expect(p.properties[0].progress).toBe('In progress');
     });
-    it('every move done and none running reads Realised', () => {
-        const p = M.buildPlan(withPlan([
-            { id: 'r1', key: 'uplift:t1', status: 'Done', taskIds: [] },
-            { id: 'r2', key: 'rooms:p1', status: 'Done', taskIds: [] },
-        ]), S, TODAY);
-        expect(p.properties[0].progress).toBe('Realised');
+    it('every uplift ticked done on a settled strategy reads Realised, with no bank figure involved', () => {
+        const f = withPlan('HMO');
+        f.tenants[0].rentUplift = 'Done';
+        f.tenants.slice(1).forEach(t => { t.rentUplift = 'Not needed'; });
+        expect(M.buildPlan(f, S, TODAY).properties[0].progress).toBe('Realised');
     });
-    // The point of two figures: a move ticked off that never reached the UC journal
-    // leaves the rent where it was, so measured stays £0 while forecast claims a win.
-    it('reports forecast and measured separately, and the gap between them', () => {
-        const f = withPlan([{ id: 'r1', key: 'uplift:t1', status: 'Done', taskIds: [] }]);
-        f.properties[0].baselineRent = 1947.32;  // what the house made the day it was marked done
-        f.properties[0].baselineDate = '2026-08-01';
-        const p = M.buildPlan(f, S, TODAY);
-        const v = p.properties[0];
-        expect(v.forecastRealised).toBe(372.62);
-        expect(v.measuredRealised).toBe(0);       // rent has not actually moved
-        expect(p.totals.forecastRealised).toBe(372.62);
-        expect(p.totals.measuredRealised).toBe(0);
-        expect(p.totals.realisedGap).toBe(372.62);
-    });
-    it('a rent that really did move shows up as measured', () => {
-        const f = withPlan([{ id: 'r1', key: 'uplift:t1', status: 'Done', taskIds: [] }]);
-        f.properties[0].baselineRent = 1500;
-        const p = M.buildPlan(f, S, TODAY);
-        expect(p.properties[0].measuredRealised).toBe(447.32); // 1947.32 now, 1500 then
-        expect(p.totals.measuredCount).toBe(1);
-    });
-    it('no starting figure means measured is null, never a fabricated zero-gap win', () => {
-        const p = M.buildPlan(withPlan([{ id: 'r1', key: 'uplift:t1', status: 'Done', taskIds: [] }]), S, TODAY);
-        expect(p.properties[0].measuredRealised).toBeNull();
-        expect(p.totals.measuredCount).toBe(0);
-    });
-    // The collision that shipped and was caught by the existing suite: the count of
-    // empty units overwrote the MONEY bucket for void lets and take-backs.
-    it('the count of empty places never overwrites the void-and-take-back money bucket', () => {
-        const f = fixture();
-        f.properties.push({ id: 'p2', name: '13 John Street', agent: 'Simon Collins', postcode: 'BB5 5PT' });
-        const t = M.buildPlan(f, S, TODAY).totals;
-        expect(t.voids).toBe(250);           // money
-        expect(t.voidUnits).toBe(0);         // count
-        expect(t.actionable).toBe(t.paper + t.works + t.voids + t.remote);
+    it('nothing to chase and nothing done reads No change needed, not Realised', () => {
+        const f = withPlan('HMO');
+        f.tenants.forEach(t => { t.rentUplift = 'Not needed'; });
+        expect(M.buildPlan(f, S, TODAY).properties[0].progress).toBe('No change needed');
     });
 });
 
@@ -686,19 +657,19 @@ describe('rooms, market rent and the checklist', () => {
         expect(M.buildPlan(f, { market_rent_23_viola_street: 925 }, TODAY).properties[0].market.rent).toBe(925);
     });
     it('each strategy carries the paperwork it needs, and single lets need none', () => {
-        expect(M.CHECKLIST['Joint tenancy'].property[0]).toMatch(/Joint tenancy agreement/);
-        expect(M.CHECKLIST['Joint tenancy'].tenant).toEqual(['Letter of authority, so we can set up their council tax reduction', 'Proof of address']);
-        expect(M.CHECKLIST['HMO'].tenant[0]).toMatch(/Individual tenancy agreement/);
-        expect(M.CHECKLIST['HMO'].tenant).toHaveLength(3);
+        expect(M.CHECKLIST['UC joint tenancy'].property[0]).toMatch(/Joint tenancy agreement/);
+        expect(M.CHECKLIST['UC joint tenancy'].tenant).toEqual(['Letter of authority, so we can set up their council tax reduction', 'Proof of address']);
+        expect(M.CHECKLIST['UC HMO'].tenant[0]).toMatch(/Individual tenancy agreement/);
+        expect(M.CHECKLIST['UC HMO'].tenant).toHaveLength(3);
         expect(M.CHECKLIST['Single let'].property).toEqual([]);
         expect(M.CHECKLIST['Single let'].tenant).toEqual([]);
         expect(M.CHECKLIST['Serviced accommodation'].note).toMatch(/Nothing for us to sign/);
     });
-    it('"Leave as is" means the plan equals whatever the property is today', () => {
+    it('"Leave as is" holds the property on whatever it is today', () => {
         const f = fixture(); f.properties[0].strategy = 'Leave as is';
         const v = M.buildPlan(f, S, TODAY).properties[0];
-        expect(v.current).toBe('HMO');
-        expect(v.chosen).toBe('HMO');
+        expect(v.current).toBe('UC HMO');
+        expect(v.chosen).toBe('UC HMO');
         expect(v.progress).toBe('No change needed');
     });
 });
@@ -722,5 +693,221 @@ describe('market rents are researched, not estimated', () => {
             expect(r.rent, name).toBeGreaterThan(0);
             expect(String(r.source).trim().length, name).toBeGreaterThan(20);   // a real sentence, not a placeholder
         });
+    });
+});
+
+// ════════════════════════════════════════════════════════════════════════
+// Kevin's second pass, 16 Sep 2026: council tax follows the letting and the
+// paperwork, a tick moves money into "now", and the grid reads left to right.
+// ════════════════════════════════════════════════════════════════════════
+const singleLet = (over = {}) => ({
+    properties: [Object.assign({ id: 'sl', name: 'Single House', type: 'Single Let', beds: 3, agent: 'Property Portfolio', postcode: 'CB9 0AJ', ctBand: 'B', ctAnnual: 1900.86 }, over)],
+    units: [{ id: 'su', propertyId: 'sl', number: 1, type: 'Whole Property', status: 'Occupied', rent: 1000, incomeType: 'Working', tenantIds: ['st'] }],
+    tenants: [{ id: 'st', name: 'One Household', status: 'Active', payType: 'Working' }],
+    tenancies: [{ id: 'sc', tenantIds: ['st'], unitId: 'su', rent: 1000 }], costs: [], planRows: [],
+});
+// Two tenants in two flat-lets: the shape of the houses Kevin is moving to a joint tenancy.
+const twoFlatLets = () => ({
+    properties: [{ id: 'jt', name: 'Pair House', type: 'Single Let', beds: 2, agent: 'Property Portfolio', postcode: 'CB9 0AJ', ctBand: 'B', ctAnnual: 1900.86, strategy: 'Joint tenancy' }],
+    units: [1, 2].map(n => ({ id: 'ju' + n, propertyId: 'jt', number: n, type: 'Flat-Let', status: 'Occupied', rent: 897.52, incomeType: 'Universal Credit', tenantIds: ['jt' + n] })),
+    tenants: [1, 2].map(n => ({ id: 'jt' + n, name: 'Joint ' + n, status: 'Active', dob: '1970-01-01', payType: 'Universal Credit', capExemption: 'LCWRA', rentUplift: 'Not needed' })),
+    tenancies: [1, 2].map(n => ({ id: 'jc' + n, tenantIds: ['jt' + n], unitId: 'ju' + n, rent: 897.52 })), costs: [], planRows: [],
+});
+
+describe('council tax now follows the letting and the paperwork', () => {
+    it('a house let by the room is ours', () => {
+        const v = M.buildPlan(fixture(), S, TODAY).properties[0];
+        expect(v.current).toBe('UC HMO');
+        expect(v.ctLiableNow).toBe(true);
+        expect(v.ctNow).toBe(135);
+    });
+    it('a single let is the tenant\'s', () => {
+        const v = M.buildPlan(singleLet(), S, TODAY).properties[0];
+        expect(v.ctLiableNow).toBe(false);
+        expect(v.ctNow).toBe(0);
+    });
+    it('a single let where we took the bills on is ours', () => {
+        const v = M.buildPlan(singleLet({ ctPayer: 'Owner' }), S, TODAY).properties[0];
+        expect(v.ctNow).toBe(158.41);
+    });
+    // The rule Kevin set: picking a joint tenancy is not enough, the paperwork has to be in.
+    it('a joint tenancy is ours until EVERY tenant has the correct agreement ticked', () => {
+        const f = twoFlatLets();
+        expect(M.buildPlan(f, S, TODAY).properties[0].ctNow).toBe(158.41);
+        f.tenants[0].correctAgreement = true;
+        const half = M.buildPlan(f, S, TODAY).properties[0];
+        expect(half.ctNow).toBe(158.41);
+        expect(half.ctNowWhy).toMatch(/1 of 2/);
+        f.tenants[1].correctAgreement = true;
+        const done = M.buildPlan(f, S, TODAY).properties[0];
+        expect(done.jtDocumented).toBe(true);
+        expect(done.ctNow).toBe(0);
+    });
+    it('the ticks do nothing to council tax unless the plan is a joint tenancy', () => {
+        const f = twoFlatLets(); f.properties[0].strategy = 'HMO';
+        f.tenants.forEach(t => { t.correctAgreement = true; });
+        expect(M.buildPlan(f, S, TODAY).properties[0].ctNow).toBe(158.41);
+    });
+    it('on an agent-run property it is only what the bank shows we pay', () => {
+        const f = singleLet({ agent: 'Mears', ctBand: 'B' });
+        expect(M.buildPlan(f, S, TODAY).properties[0].ctNow).toBe(0);
+        f.costs = [{ propertyId: 'sl', name: 'Stirling Park - CT', monthly: 195 }];
+        const v = M.buildPlan(f, S, TODAY).properties[0];
+        expect(v.ctNow).toBe(195);
+        expect(v.ctNowWhy).toMatch(/bank-fed/);
+    });
+});
+
+describe('the rent uplift tick', () => {
+    const tenant = (f, id) => f.tenants.find(t => t.id === id);
+    it('Done moves the uplift into rent now', () => {
+        const f = fixture(); tenant(f, 't1').rentUplift = 'Done';
+        const v = M.buildPlan(f, S, TODAY).properties[0];
+        expect(v.recordRent).toBe(1947.32);
+        expect(v.upliftsDone).toBe(372.62);
+        expect(v.rentNow).toBe(2319.94);
+    });
+    // Presetting everyone except the four as "Not needed" must never add a penny.
+    it('Not needed adds nothing to now OR the plan, and raises no uplift move', () => {
+        const f = fixture(); f.properties[0].strategy = 'HMO'; f.properties[0].lettableRooms = 4;
+        tenant(f, 't1').rentUplift = 'Not needed';
+        const p = M.buildPlan(f, S, TODAY);
+        const v = p.properties[0];
+        expect(v.rentNow).toBe(1947.32);
+        expect(v.upliftsDone).toBe(0);
+        expect(v.upliftsToDo).toBe(0);
+        expect(v.planRent).toBe(1947.32);   // the preset must never inflate "if the plan is done"
+        expect(p.levers.find(l => l.key === 'uplift:t1')).toBeUndefined();
+    });
+    it('is not counted twice once the tenancy record is updated to the new rent', () => {
+        const f = fixture(); tenant(f, 't1').rentUplift = 'Done';
+        f.units[0].rent = 897.52; f.tenancies[0].rent = 897.52;   // Roy updates the record
+        const v = M.buildPlan(f, S, TODAY).properties[0];
+        expect(v.recordRent).toBe(2319.94);
+        expect(v.upliftsDone).toBe(0);
+        expect(v.rentNow).toBe(2319.94);
+    });
+    it('To do sits in the plan column, not in now', () => {
+        const f = fixture(); f.properties[0].strategy = 'HMO';
+        f.properties[0].lettableRooms = 4;   // no spare room, so only the uplift moves the plan
+        const v = M.buildPlan(f, S, TODAY).properties[0];
+        expect(v.rentNow).toBe(1947.32);
+        expect(v.upliftsToDo).toBe(372.62);
+        expect(v.planRent).toBe(2319.94);
+    });
+    it('Done shows its move as Done without a second click', () => {
+        const f = fixture(); tenant(f, 't1').rentUplift = 'Done';
+        expect(M.buildPlan(f, S, TODAY).levers.find(l => l.key === 'uplift:t1').status).toBe('Done');
+    });
+});
+
+describe('"Leave as is" holds the income flat', () => {
+    // The 55 Elmdon Place shape: two tenants at the 1-bed rate, band B. Before this fix
+    // it reported +£1,636.63 while the status read "No change needed".
+    it('gives an uplift of exactly nothing', () => {
+        const f = {
+            properties: [{ id: 'e', name: '55 Elmdon Place', type: 'HMO', beds: 3, agent: 'Property Portfolio', postcode: 'CB9 0AH', ctBand: 'B', ctAnnual: 1900.86, lettableRooms: 4, strategy: 'Leave as is' }],
+            units: [1, 2].map(n => ({ id: 'u' + n, propertyId: 'e', number: n, type: 'Whole Property', status: 'Occupied', rent: 897.52, incomeType: 'Universal Credit', tenantIds: ['t' + n] })),
+            tenants: [1, 2].map(n => ({ id: 't' + n, name: 'T' + n, status: 'Active', dob: '1980-01-01', payType: 'Universal Credit', capExemption: 'LCWRA' })),
+            tenancies: [1, 2].map(n => ({ id: 'c' + n, tenantIds: ['t' + n], unitId: 'u' + n, rent: 897.52 })), costs: [], planRows: [],
+        };
+        const v = M.buildPlan(f, S, TODAY).properties[0];
+        expect(v.upliftChosen).toBe(0);
+        expect(v.planRent).toBe(v.rentNow);
+        expect(v.planCt).toBe(v.ctNow);
+    });
+});
+
+describe('the grid', () => {
+    it('every column reads left for us = rent less council tax', () => {
+        const g = M.buildPlan(fixture(), S, TODAY).totals.grid;
+        ['started', 'now', 'plan', 'best'].forEach(k => {
+            expect(g[k].left).toBe(Math.round((g[k].rent - g[k].ct) * 100) / 100);
+        });
+    });
+    // Reading the forecast would make an uplift already done vanish: started would equal now.
+    it('unfrozen, started is the rent on the record, so a done uplift still shows as progress', () => {
+        const f = fixture(); f.tenants[0].rentUplift = 'Done';
+        const p = M.buildPlan(f, S, TODAY);
+        expect(p.totals.startedFrozen).toBe(false);
+        expect(p.totals.grid.started.rent).toBe(1947.32);
+        expect(p.totals.grid.now.rent).toBe(2319.94);
+    });
+    it('frozen, started never moves again', () => {
+        const f = fixture();
+        f.properties[0].baselineRent = 1500; f.properties[0].baselineCt = 99;
+        const p = M.buildPlan(f, S, TODAY);
+        expect(p.totals.startedFrozen).toBe(true);
+        expect(p.totals.grid.started).toEqual({ rent: 1500, ct: 99, left: 1401 });
+    });
+    it('a joint tenancy of the same two tenants keeps their rents and drops the council tax in the plan', () => {
+        const v = M.buildPlan(twoFlatLets(), S, TODAY).properties[0];
+        expect(v.planRent).toBe(v.rentNow);
+        expect(v.planCt).toBe(0);
+        expect(v.planWhy).toMatch(/rents stay/);
+    });
+    it('the ceiling is never below where a property already is', () => {
+        const f = singleLet(); f.units[0].rent = 5000; f.tenancies[0].rent = 5000;
+        const v = M.buildPlan(f, S, TODAY).properties[0];
+        expect(v.leftBest).toBeGreaterThanOrEqual(v.leftNow);
+        expect(v.bestWhy).toBe('Where it is now');
+    });
+});
+
+describe('agent-run properties', () => {
+    it('an agent\'s room let is a professional HMO, ours is a UC HMO', () => {
+        const f = fixture(); f.properties[0].agent = 'Roc Immo';
+        expect(M.buildPlan(f, S, TODAY).properties[0].current).toBe('HMO');
+        expect(M.buildPlan(fixture(), S, TODAY).properties[0].current).toBe('UC HMO');
+    });
+    it('get no plan and no checklist while an agent runs them', () => {
+        const f = fixture(); f.properties[0].agent = 'Roc Immo'; f.properties[0].strategy = 'HMO';
+        const v = M.buildPlan(f, S, TODAY).properties[0];
+        expect(v.selfManaged).toBe(false);
+        expect(v.chosen).toBe('');
+        expect(v.checklist).toBeNull();
+    });
+    it('Moving to self-manage brings one into our list with everything ours get', () => {
+        const f = fixture(); f.properties[0].agent = 'Roc Immo'; f.properties[0].movingToSelfManage = true; f.properties[0].strategy = 'HMO';
+        const p = M.buildPlan(f, S, TODAY);
+        expect(p.selfManaged.map(v => v.id)).toContain('p1');
+        expect(p.agentManaged).toHaveLength(0);
+        expect(p.properties[0].current).toBe('UC HMO');
+        expect(p.properties[0].chosen).toBe('UC HMO');
+        expect(p.properties[0].checklist).not.toBeNull();
+    });
+});
+
+describe('the plan picker', () => {
+    it('offers all four strategies and Leave as is', () => {
+        expect(M.PLAN_CHOICES).toEqual(['Single let', 'UC joint tenancy', 'UC HMO', 'Serviced accommodation', 'Leave as is']);
+    });
+    it('every tenant carries the four ticks Kevin asked for', () => {
+        expect(M.TENANT_DOCS.map(d => d.label)).toEqual(['Correct tenancy agreement', 'Proof of address', 'Letter of authority', 'Rent uplift']);
+    });
+});
+
+describe('places and status read true', () => {
+    // 13 Chedburgh Place said "1 more place to fill" beside "plus 0 new rooms": the UC HMO
+    // strategy counts ROOMS (a flat-let is two) and was compared with LETS (a flat-let is one).
+    it('a flat-let never invents a spare place when the plan adds no rooms', () => {
+        const f = fixture(); f.properties[0].strategy = 'HMO'; f.properties[0].lettableRooms = 4;
+        const v = M.buildPlan(f, S, TODAY).properties[0];
+        expect(v.roomInfo.rooms).toBe(4);      // room, flat-let (2), room
+        expect(v.unitsNow).toBe(3);            // three lets
+        expect(v.unitsExtra).toBe(0);
+        expect(v.planWhy).toMatch(/plus 0 new rooms/);
+    });
+    it('a spare lettable room is one place to fill', () => {
+        const f = fixture(); f.properties[0].strategy = 'HMO'; f.properties[0].lettableRooms = 5;
+        const v = M.buildPlan(f, S, TODAY).properties[0];
+        expect(v.unitsExtra).toBe(1);
+        expect(v.unitsPlanned).toBe(4);
+    });
+    it('an agent-run property reads Agent-run, never Not decided', () => {
+        const f = fixture(); f.properties[0].agent = 'Roc Immo';
+        const p = M.buildPlan(f, S, TODAY);
+        expect(p.properties[0].progress).toBe('Agent-run');
+        expect(p.totals.notDecided).toBe(0);
     });
 });
