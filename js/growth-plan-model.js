@@ -246,6 +246,7 @@
         'Swansea':             { d: 2238.29, source: 'Swansea 2026-27 band D; band A £1,492.19 checks out at 6/9' },
         'Westmorland and Furness': { d: 2474.81, source: 'westmorlandandfurness.gov.uk charges by parish, Barrow Town 2026-27, all precepts' },
         'Durham':              { d: 2832.42, source: 'Horden parish band D 2025-26 including the parish precept (durham.gov.uk guide). The 2026-27 parish figure is not published yet, so this is last year: the real bill is a little higher, never lower' },
+        'Fylde':               { d: 2509.35, source: 'fylde.gov.uk council tax bands 2026/27, St Annes (band A £1,672.90), read 16 Sep 2026. Lytham and Ansdell carry slightly different parish charges' },
     };
     // Outward code → billing authority. A code that is absent is NOT guessed: the
     // property shows "council tax rate not confirmed" and its HMO and serviced
@@ -254,7 +255,7 @@
         CB9: 'West Suffolk', CB7: 'East Cambridgeshire', M40: 'Manchester',
         L20: 'Sefton', L4: 'Liverpool', BB7: 'Ribble Valley',
         BB12: 'Burnley', HU3: 'Kingston upon Hull', BB5: 'Hyndburn', SA5: 'Swansea',
-        LA13: 'Westmorland and Furness', SR8: 'Durham',
+        LA13: 'Westmorland and Furness', SR8: 'Durham', FY8: 'Fylde',
     };
 
     // Open-market single-let rent, researched 16 Sep 2026 for the properties Kevin
@@ -269,7 +270,11 @@
         '18 Siddows Avenue':  { rent: 675, source: '3-bed terrace, Clitheroe BB7 average asking rent' },
         '22 Newton Street':   { rent: 752, source: '3-bed terrace, Burnley BB12 average asking rent' },
         '23 Viola Street':    { rent: 850, source: '3-bed terrace, Bootle L20 listings £800 to £1,100' },
-        'Duckworth Building': { rent: 646, source: '1-bed flat, Lytham St Annes FY8 average asking rent (per flat)' },
+        // Priced flat by flat (16 Sep 2026): the growth plan shows each apartment as its own row.
+        'Duckworth Building': { rent: 646, source: '1-bed flat, Lytham St Annes FY8 average asking rent (per flat)', byBeds: {
+            1: { rent: 646, source: '1-bed flat, Lytham St Annes FY8 average asking rent' },
+            2: { rent: 750, source: '2-bed flat, St Annes FY8: Rightmove listed 17 on 16 Sep 2026, the everyday ones £625 to £1,000 (seafront and retirement flats at £1,200 to £2,000 left out); £750 taken, towards the bottom, for a town-centre conversion' },
+        } },
         // The rest of the portfolio, researched 16 Sep 2026 so no self-managed property
         // is left pricing its single-let column off the housing allowance.
         '13 Chedburgh Place':  { rent: 1247, source: '3-bed terrace, Haverhill CB9 average asking rent' },
@@ -387,14 +392,17 @@
             return { rooms, source: `${rooms} rooms already let here (a flat-let counts as two)`, confirmed: false };
         }
         const beds = Math.max(1, num(prop.beds));
-        return { rooms: beds, source: `${beds} bedrooms on the property record`, confirmed: false };
+        return { rooms: beds, source: `${beds} bedrooms on ${prop.unitRecord ? "this apartment's rental unit" : 'the property record'}`, confirmed: false };
     }
 
     function marketRentFor(prop, rates, settings) {
         const slug = 'market_rent_' + String(prop.name || '').toLowerCase().replace(/[^a-z0-9]+/g, '_');
         const override = settings && settings[slug];
         if (override !== undefined && override !== null && override !== '') return { rent: num(override), source: 'Typed into the assumptions on this page', researched: true };
-        const known = MARKET_RENT[prop.name];
+        // An apartment shown on its own row is priced by its bedrooms, off its block's research.
+        const known = MARKET_RENT[prop.name] || (prop.parentName ? MARKET_RENT[prop.parentName] : null);
+        const byBeds = known && known.byBeds && known.byBeds[Math.max(1, num(prop.beds) || 1)];
+        if (byBeds) return { rent: byBeds.rent, source: byBeds.source, researched: true };
         if (known) return { rent: known.rent, source: known.source, researched: true };
         if (rates) {
             const beds = Math.max(1, Math.min(4, num(prop.beds) || 1));
@@ -406,6 +414,11 @@
 
     // What the property IS today, read from its units. Not what we want it to be.
     function currentStrategyOf(prop, pUnits) {
+        // Rental Units → Letting Strategy, where every unit carries the same one (16 Sep 2026).
+        // A serviced let looks exactly like a single let from its unit type, so 22 Newton
+        // Street read "Single let" until this was recorded.
+        const stated = Array.from(new Set(pUnits.map(u => normaliseStrategy(u.lettingStrategy))));
+        if (pUnits.length && stated.length === 1 && STRATEGY_LIST.includes(stated[0])) return stated[0];
         if (prop.type === 'Block') return 'Block of flats';
         const roomUnits = pUnits.filter(u => u.type === 'Room' || u.type === 'Flat-Let');
         const whole = pUnits.filter(u => u.type === 'Whole Property');
@@ -456,6 +469,19 @@
             why: `£${money(saRent)} a month is the budget Kevin set. ${ctInfo.source}`,
         });
 
+        // A flat on its own row (an apartment in a block) is let whole, so a room-by-room
+        // let never applies, and a joint tenancy needs a bedroom each for its two tenants.
+        if (prop.type === 'Flat') {
+            const beds = Math.max(1, num(prop.beds) || 1);
+            out.forEach(x => {
+                const hmo = x.name === 'UC HMO';
+                if (!hmo && !(x.name === 'UC joint tenancy' && beds < 2)) return;
+                x.na = true; x.gross = 0; x.net = 0; x.units = 0; x.councilTax = null; x.ctNote = '';
+                x.how = hmo ? 'Does not apply to a flat' : 'Does not apply to a one-bedroom flat';
+                x.why = hmo ? 'A flat is let whole, never room by room.' : 'A joint tenancy needs a bedroom each for its two tenants.';
+            });
+        }
+
         // A block of flats is not a house. Letting it room by room or on one joint
         // tenancy is not a thing you can do to a block, so those two are marked
         // not applicable rather than priced at a number nobody could ever collect.
@@ -479,11 +505,60 @@
         return out;
     }
 
+    // Kevin, 16 Sep 2026: Duckworth Building is nine apartments, each let on its own terms
+    // (1 and 2 serviced accommodation, 3 to 9 single lets). Airtable keeps it as one property
+    // with nine rental units, which is right for the accounts, so the growth plan splits a
+    // block into one row per flat here and nowhere else. Each apartment's plan, council tax
+    // band and frozen start live on its Rental Units record; the agent, postcode, bills and
+    // the self-manage tick come from the block. A cost row on the block itself cannot be
+    // shared out between flats, so it is not read for them.
+    function splitBlocks(properties, units) {
+        const unitsByProp = {};
+        (units || []).forEach(u => { (unitsByProp[u.propertyId] = unitsByProp[u.propertyId] || []).push(u); });
+        const outProps = [], moved = {};
+        (properties || []).forEach(p => {
+            const all = unitsByProp[p.id] || [];
+            const flats = p.type === 'Block' ? all.filter(u => u.type === 'Flat') : [];
+            if (flats.length < all.length || !flats.length) outProps.push(p);   // anything that is not a flat stays on the block
+            flats.slice().sort((a, b) => num(a.number) - num(b.number)).forEach(u => {
+                moved[u.id] = p.id;
+                outProps.push({
+                    id: u.id, name: `${p.name}, Apartment ${u.number}`, parentId: p.id, parentName: p.name, unitRecord: true,
+                    type: 'Flat', beds: u.beds, agent: p.agent, postcode: p.postcode, area: p.area, ctNote: '',
+                    lettableRooms: null, payg: p.payg, ctPayer: p.ctPayer, owner: p.owner,
+                    strategy: u.growthStrategy || '', ctBand: u.ctBand || '', ctAnnual: 0,
+                    baselineRent: u.baselineRent == null ? null : u.baselineRent,
+                    baselineCt: u.baselineCt == null ? null : u.baselineCt,
+                    baselineDate: u.baselineDate || '', movingToSelfManage: !!p.movingToSelfManage,
+                });
+            });
+        });
+        const outUnits = (units || []).map(u => moved[u.id] ? Object.assign({}, u, { propertyId: u.id, blockId: moved[u.id] }) : u);
+        return { properties: outProps, units: outUnits };
+    }
+
+    // Kevin, 16 Sep 2026: rent now is what the LIVE tenancies say, per unit. The unit's
+    // Expected Rent rollup adds ended tenancies too: 22 Newton Street read £1,800 (the live
+    // £500 serviced let plus a £1,300 tenancy that had ended), and nine other units carried
+    // £5,894.74 a month that nobody pays. A tenancy with a status other than Live is ignored.
+    function liveRentByUnit(tenancies) {
+        const out = {};
+        (tenancies || []).forEach(tc => {
+            if (!tc.unitId || (tc.status && tc.status !== 'Live')) return;
+            out[tc.unitId] = round2((out[tc.unitId] || 0) + num(tc.rent));
+        });
+        return out;
+    }
+
     // ── The plan ────────────────────────────────────────────────────────
     function buildPlan(data, settings, today) {
         const s = (k, d) => setting(settings, k, d);
         const T = today || new Date().toISOString().slice(0, 10);
-        const units = data.units || [];
+        const split = splitBlocks(data.properties, data.units);
+        const units = split.units;
+        const allProperties = split.properties;
+        const liveRent = liveRentByUnit(data.tenancies);
+        const unitRent = u => liveRent[u.id] || 0;
         const unitsByProp = {};
         units.forEach(u => { (unitsByProp[u.propertyId] = unitsByProp[u.propertyId] || []).push(u); });
         const tenantById = {}; (data.tenants || []).forEach(t => { tenantById[t.id] = t; });
@@ -504,13 +579,13 @@
         const capSingle = benefitCap({ single: true, age: 35, housing: 0 }, settings);
         const safeSingle = round2(capSingle.cap - capSingle.standard); // £804.52 on 2026-27 figures
 
-        const bandByCouncil = bandsByCouncil(data.properties);
+        const bandByCouncil = bandsByCouncil(allProperties);
         const levers = [];
         const properties = [];
         const unknownAge = [];
         let rentNow = 0;
 
-        (data.properties || []).forEach(prop => {
+        allProperties.forEach(prop => {
             const pUnits = (unitsByProp[prop.id] || []).slice().sort((a, b) => num(a.number) - num(b.number));
             const occupied = pUnits.filter(u => u.status === 'Occupied' || (u.tenantIds || []).length);
             const pTenants = [];
@@ -525,7 +600,7 @@
             const rates = ratesFor(prop.postcode, settings);
             const local = isLocal(prop.postcode);
             const ow = outward(prop.postcode);
-            const propRent = pUnits.reduce((sum, u) => sum + num(u.rent), 0);
+            const propRent = pUnits.reduce((sum, u) => sum + unitRent(u), 0);
             rentNow += propRent;
             const ctLive = ctByProp[prop.id] || 0;
             const ctNoteAmount = (() => { const m = String(prop.ctNote || '').match(/£?\s*([\d,]+(?:\.\d+)?)/); return m ? num(m[1].replace(/,/g, '')) : 0; })();
@@ -551,11 +626,11 @@
             // Per tenant view + stage 1 levers
             occupied.forEach(u => {
                 const uTenants = (u.tenantIds || []).map(id => tenantById[id]).filter(t => t && t.status !== 'Former');
-                const uView = { id: u.id, number: u.number, type: u.type, status: u.status, rent: round2(num(u.rent)), incomeType: u.incomeType || '', tenants: [] };
+                const uView = { id: u.id, number: u.number, type: u.type, status: u.status, rent: round2(unitRent(u)), incomeType: u.incomeType || '', lettingStrategy: normaliseStrategy(u.lettingStrategy), tenants: [] };
                 uTenants.forEach(t => {
                     const age = ageOn(t.dob, T);
                     const over35Known = age != null ? age >= 35 : !!t.over35Confirmed; // Kevin/Roy can confirm 35+ without a date of birth
-                    const rent = rentFor(t.id, u, num(u.rent) / Math.max(1, uTenants.length));
+                    const rent = rentFor(t.id, u, unitRent(u) / Math.max(1, uTenants.length));
                     const uc = isUc(t, u), hb = isHb(t, u);
                     const tv = { id: t.id, name: t.name, dob: t.dob || '', age, payType: t.payType || '', uc, hb, rent: round2(rent), capExemption: t.capExemption || 'Unknown', unitId: u.id, unitType: u.type, rateNow: null, target: null, note: '',
                         over35Confirmed: !!t.over35Confirmed, ni: t.ni || '', phone: t.phone || '', email: t.email || '', idSeen: t.idSeen || '', ucStatementSeen: !!t.ucStatementSeen,
@@ -733,7 +808,7 @@
                     key: `takeback:${prop.id}`, lever: 'Take-back', propertyId: prop.id, property: prop.name,
                     title: `${prop.name}: take back from the Collins head lease`,
                     monthly: margin, monthlyIfExempt: margin, oneOff: 0, effort: 'Legal', counted: 'now',
-                    evidence: [`Rent received now £${propRent.toFixed(2)} (unit rollup)`, `Margin on take-back £${margin} a month (Kevin, 9 Sep 2026)`],
+                    evidence: [`Rent received now £${propRent.toFixed(2)} (live tenancies)`, `Margin on take-back £${margin} a month (Kevin, 9 Sep 2026)`],
                     needs: ['Q4 only, after the legal question set comes back (ruling 31 Jul 2026)', 'Say nothing to Collins or the sub-tenants until then'],
                     firstStep: 'Check the legal question set on approaching sub-tenants has an answer',
                 }, planByKey));
@@ -807,7 +882,7 @@
             // that ended, a placeholder nobody pays. Counting it as rent now held 18 Siddows Avenue
             // (empty) at £499.70, so picking Single let showed +£175.30 instead of +£675, and a
             // placeholder above market would have been planned as if collected.
-            const voidRent = round2(pUnits.filter(u => u.status === 'Void').reduce((n, u) => n + num(u.rent), 0));
+            const voidRent = round2(pUnits.filter(u => u.status === 'Void').reduce((n, u) => n + unitRent(u), 0));
             const occupiedRent = round2(propRent - voidRent);
             const rentNowForecast = round2(occupiedRent + upliftsDone);
 
@@ -821,7 +896,11 @@
             // tenant moves in, whatever it is let as. 18 Siddows Avenue read £0 as a "single let"
             // while empty; its renovation exemption is ending, so the liability is shown as ours.
             const emptyNow = pUnits.length > 0 && occupiedUnits === 0;
-            const ctLiableNow = selfManaged ? (emptyNow || !(singleLetTenantPays || jtDocumented)) : ctLive > 0;
+            // Kevin, 16 Sep 2026: serviced accommodation puts the council tax on us, whoever runs
+            // it. The bank feed shows nothing paid on 22 Newton Street or Duckworth apartments 1
+            // and 2, so it is counted from the band: the safer, lower "left for us".
+            const saNow = current === 'Serviced accommodation';
+            const ctLiableNow = saNow || (selfManaged ? (emptyNow || !(singleLetTenantPays || jtDocumented)) : ctLive > 0);
             const ctAmount = ctInfo.monthly == null ? 0 : ctInfo.monthly;
             const ctNow = ctLiableNow ? round2(ctAmount) : 0;
             // Review fix, 16 Sep 2026: an unknown council tax still has to be ADDED UP as something,
@@ -831,10 +910,11 @@
             // What we were liable for BEFORE any joint tenancy paperwork was ticked: the starting
             // point. Reading ctNow instead would erase a saving ticked before the freeze, the same
             // way reading the forecast rent would erase an uplift.
-            const liableBeforeTicks = selfManaged ? (emptyNow || !singleLetTenantPays) : ctLive > 0;
+            const liableBeforeTicks = saNow || (selfManaged ? (emptyNow || !singleLetTenantPays) : ctLive > 0);
             const ctBeforeTicks = liableBeforeTicks ? round2(ctAmount) : 0;
             const ctBeforeTicksUnknown = liableBeforeTicks && ctInfo.monthly == null;
-            const ctNowWhy = !selfManaged
+            const ctNowWhy = saNow ? 'Serviced accommodation, so the council tax is ours'
+                : !selfManaged
                 ? (ctLive > 0 ? `We pay £${money(ctLive)} a month on this agent-run property (bank-fed cost row)` : 'The agent or tenant carries it: nothing in the bank feed')
                 : emptyNow ? 'Empty, so the council tax is ours until a tenant moves in'
                 : jtDocumented ? 'Every tenant has signed the joint agreement, so the council tax is theirs'
@@ -888,7 +968,9 @@
                     planRent = round2(rentNowForecast + upliftsToDo);
                     planCt = chosenRow.councilTax == null ? ctNow : round2(chosenRow.councilTax);
                     planCtUnknown = chosenRow.councilTax == null;
-                    planWhy = 'Same strategy, with the uplifts still to do';
+                    planWhy = chosen === 'Serviced accommodation'
+                        ? `Stays serviced accommodation at £${money(planRent)} a month; we pay the council tax`
+                        : 'Same strategy, with the uplifts still to do';
                 } else {
                     planRent = round2(chosenRow.gross);
                     planCt = chosenRow.councilTax == null ? 0 : round2(chosenRow.councilTax);
@@ -933,6 +1015,11 @@
                 // Simon Collins is not an agent, and a ticked "Moving to self-manage" promotes
                 // an agent-run property into our list with everything that comes with it.
                 selfManaged, movingToSelfManage: !!prop.movingToSelfManage,
+                // An apartment shown on its own row: its plan and frozen start save to its Rental Units record.
+                unitRecord: !!prop.unitRecord, parentId: prop.parentId || null, parentName: prop.parentName || '',
+                // One rental unit (a whole-house let, or an apartment): how it is let today can be set on the page.
+                soleUnitId: pUnits.length === 1 ? pUnits[0].id : null,
+                lettingStated: pUnits.length === 1 ? normaliseStrategy(pUnits[0].lettingStrategy) : '',
                 baselineRent: prop.baselineRent == null ? null : num(prop.baselineRent),
                 baselineCt: prop.baselineCt == null ? null : num(prop.baselineCt),
                 baselineDate: prop.baselineDate || '',
@@ -1007,13 +1094,16 @@
         const liveKeys = new Set(levers.map(l => l.key));
         const tenantProp = {}, unitProp = {};
         units.forEach(u => { unitProp[u.id] = u.propertyId; (u.tenantIds || []).forEach(id => { tenantProp[id] = u.propertyId; }); });
+        // A row keyed to a block that is now split sits on its lowest-numbered apartment, so it can still be dropped.
+        const blockProp = {};
+        units.filter(u => u.blockId).sort((a, b) => num(a.number) - num(b.number)).forEach(u => { if (!blockProp[u.blockId]) blockProp[u.blockId] = u.propertyId; });
         const propIds = new Set(properties.map(v => v.id));
         const stranded = (data.planRows || [])
             .filter(r => r.key && !liveKeys.has(r.key) && (r.status === 'Adopted' || r.status === 'In progress'))
             .map(r => {
                 const ref = String(r.key).split(':').slice(1).join(':');
                 return { id: r.id, key: r.key, status: r.status, title: r.title || r.key, taskIds: r.taskIds || [],
-                    propertyId: propIds.has(ref) ? ref : (tenantProp[ref] || unitProp[ref] || null) };
+                    propertyId: propIds.has(ref) ? ref : (tenantProp[ref] || unitProp[ref] || blockProp[ref] || null) };
             });
         properties.forEach(v => { v.strandedRows = stranded.filter(r => r.propertyId === v.id); });
         totals.strandedRows = stranded;
@@ -1030,7 +1120,7 @@
         totals.startedFrozen = properties.length > 0 && properties.every(v => v.baselineRent != null && v.baselineCt != null);
         // Only the MISSING figures, so freezing never overwrites a starting point already saved.
         totals.toFreeze = properties.filter(v => v.baselineRent == null || v.baselineCt == null).map(v => ({
-            id: v.id, name: v.name,
+            id: v.id, name: v.name, unitRecord: v.unitRecord,
             rent: v.baselineRent == null ? v.recordRent : null,
             ct: v.baselineCt == null ? v.ctBeforeTicks : null,
             date: v.baselineDate ? null : T,
@@ -1172,6 +1262,6 @@
         return (l.effort === 'Works' || l.effort === 'Light') ? 'Roy' : 'Kevin';
     }
 
-    return { money, STRATEGY_LIST, PLAN_CHOICES, TENANT_DOCS, STRATEGY_ALIASES, CHECKLIST, COUNCIL_BAND_D, COUNCIL_BY_OUTWARD, MARKET_RENT, BAND_NINTHS, councilFor, isSelfManaged, bandsByCouncil, councilTaxFor, rentableRoomsFor, marketRentFor, currentStrategyOf, priceStrategies,
+    return { money, splitBlocks, liveRentByUnit, STRATEGY_LIST, PLAN_CHOICES, TENANT_DOCS, STRATEGY_ALIASES, CHECKLIST, COUNCIL_BAND_D, COUNCIL_BY_OUTWARD, MARKET_RENT, BAND_NINTHS, councilFor, isSelfManaged, bandsByCouncil, councilTaxFor, rentableRoomsFor, marketRentFor, currentStrategyOf, priceStrategies,
         LHA_WEEKLY, LHA_2026_27, LHA_VALID_TO, weeklyToMonthly, normaliseStrategy, taskOwnerFor, buildPacks, BRMA_BY_OUTWARD, BRMA_UNCERTAIN, STAGE, STAGE_NAMES, EFFORT_WEIGHT, monthlyFromFrequency, ageOn, outward, brmaFor, isLocal, ratesFor, lhaStale, benefitCap, exemptionInput, capPosition, isUc, isHb, managementOf, buildPlan };
 });
