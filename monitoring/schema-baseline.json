@@ -2131,6 +2131,10 @@
     "name": "Planned Extra Tenants",
     "type": "number"
    },
+   "fldFyN175n3TngNtt": {
+    "name": "Growth Baseline Council Tax",
+    "type": "number"
+   },
    "fldGTnPSMfq5JA0bv": {
     "name": "\ud83d\udcb8 Annual Profit (PP)",
     "type": "currency"
@@ -2513,6 +2517,10 @@
    },
    "flddayDb0932Mk8uA": {
     "name": "Include in Net Worth",
+    "type": "checkbox"
+   },
+   "flddfP8ClsH4JeN2o": {
+    "name": "Moving To Self-Manage",
     "type": "checkbox"
    },
    "fldeHExcis7twf62Y": {
@@ -6825,6 +6833,10 @@
     "name": "\ud83d\udcb8 Cost Price Monthly Rent Received (per unit)",
     "type": "multipleLookupValues"
    },
+   "fldMg7hbVvHXXTQet": {
+    "name": "Growth Strategy",
+    "type": "singleSelect"
+   },
    "fldMzIAYsFV5ybcHG": {
     "name": "Rental Units Occupied",
     "type": "formula"
@@ -6868,6 +6880,10 @@
    "fldRBsOhhKWnBE7at": {
     "name": "Actual Rent from Transaction",
     "type": "currency"
+   },
+   "fldRULhlR505Peqlh": {
+    "name": "Growth Baseline Date",
+    "type": "date"
    },
    "fldTUII6aXfO83lvj": {
     "name": "\ud83d\udcc5 Term (months)",
@@ -6945,6 +6961,14 @@
     "name": "Tenancy End Date",
     "type": "date"
    },
+   "fldciMGjBs3h6QAH3": {
+    "name": "Council Tax Band",
+    "type": "singleSelect"
+   },
+   "fldcv02tac2Df3JlO": {
+    "name": "Letting Strategy",
+    "type": "singleSelect"
+   },
    "flddUPRaVfWT59vnW": {
     "name": "Occupancy Status",
     "type": "formula"
@@ -6956,6 +6980,10 @@
    "fldeC1K7tObJm6eA6": {
     "name": "Payment Status Tenancies",
     "type": "multipleLookupValues"
+   },
+   "fldeKsD7Hlsd2chUZ": {
+    "name": "Growth Baseline Rent",
+    "type": "number"
    },
    "fldexB2vu2CQuHyo0": {
     "name": "Transactions 3",
@@ -6988,6 +7016,10 @@
    "fldgizw7XJdFkzz9q": {
     "name": "Task Created",
     "type": "singleLineText"
+   },
+   "fldh6EFTz8epLPKmU": {
+    "name": "Growth Baseline Council Tax",
+    "type": "number"
    },
    "fldhs1ZMTNB23ASl5": {
     "name": "Occupancy Rate (%)",
@@ -10013,6 +10045,10 @@
     "name": "National Insurance Number",
     "type": "singleLineText"
    },
+   "fld4cGcQbuV2xh2rQ": {
+    "name": "Rent Uplift",
+    "type": "singleSelect"
+   },
    "fld9IbA3CNxa2KBBE": {
     "name": "Meeting Notes",
     "type": "multilineText"
@@ -10020,6 +10056,10 @@
    "fldAXzP9SGIHiAhrv": {
     "name": "Tenant Status",
     "type": "singleSelect"
+   },
+   "fldCqe5vCXSPDbGev": {
+    "name": "Correct Tenancy Agreement",
+    "type": "checkbox"
    },
    "fldDpB8jBzBghWZYK": {
     "name": "Account Statement - Customers",
@@ -10084,6 +10124,10 @@
    "fldeLsZYqbKS77S2V": {
     "name": "Current Unit",
     "type": "multipleRecordLinks"
+   },
+   "fldfTl5QcGxfIzQ8W": {
+    "name": "Proof of Address",
+    "type": "checkbox"
    },
    "fldfrhDLmb443AmfF": {
     "name": "UC Statement Seen",

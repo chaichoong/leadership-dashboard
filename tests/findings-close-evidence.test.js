@@ -79,7 +79,14 @@ describe('findings.py close — evidence gate', () => {
     const id = seed(f);
     // HEAD of this worktree: a real commit, not yet on origin/main.
     const branchOnly = execFileSync('git', ['-C', ROOT, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
-    if (branchOnly === LANDED_SHA) return; // nothing committed here yet; nothing to prove
+    // Finding 20260916-queue-fixer-536: a fresh worktree has no commits of its own,
+    // and once origin/main moves on its HEAD is an ANCESTOR of origin/main without
+    // being equal to it. Skip on the property the test needs, not on a fixed SHA.
+    let landed = true;
+    try {
+      execFileSync('git', ['-C', ROOT, 'merge-base', '--is-ancestor', branchOnly, 'origin/main'], { stdio: 'ignore' });
+    } catch { landed = false; }
+    if (landed) return; // nothing committed here that is not already on origin/main
     const r = run(['close', id, '--outcome', 'fixed', '--evidence', branchOnly], f);
     expect(r.code).not.toBe(0);
     expect(r.out).toMatch(/not an ancestor of origin\/main/);
