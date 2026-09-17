@@ -412,16 +412,17 @@ async function gatherTasks(pat) {
 // the huddle's judgement: the huddle does not run when the Mac sleeps, and the same tasks must
 // give the same list. Any status counts, Approval included, because on 17 Sep all 13 banking
 // items sat in the queue as DECIDE cards. "Bank" alone is not enough ("Birmingham Midshires
-// (Bank of Scotland)" is a mortgage letter) and "sign" must not match "SIGN-IN", "sign in" or
-// "sign up" (a session, not a signature). SO counts in capitals only, and never in an all-caps
-// subject ("WHY IS THIS TAKING SO LONG"). Money owed TO Kevin (a chase, arrears, a missed rent
-// payment) is the agents' lane, not a payment he makes.
+// (Bank of Scotland)" is a mortgage letter). "sign" is the verb only: never "SIGN-IN", "sign in",
+// "sign into" or "sign up" (a session), "signs" (a noun) or "signed" (already done), and never
+// the product "Adobe Sign". SO is a standing order only in capitals and only when an amount,
+// a dash or "for" follows ("Update SO amount", "UPDATE SO - 5 DALHAM"), so "TAKING SO LONG"
+// never counts. A chase is money owed TO Kevin, the agents' lane; arrears Kevin PAYS still count.
 const KEVIN_TEAM_MEMBER = 'recHEt2VPYothaqTd';
 
 function selectOnlyYou(tasks, today) {
-    const isOnlyYou = name => !/\b(chase|chasing|arrears|owed|missed|refund)\b/i.test(name) && (
-        /standing order|direct debit|\bbank (details|account|transfer|change)|\bbanking\b|\bpay\b|\bpayments?\b|\bsignatures?\b|\b(counter)?sign(s|ed|ing)?\b(?![\s-]*(in|up|out)\b)/i.test(name)
-        || (/\bSO\b/.test(name) && name !== name.toUpperCase()));
+    const isOnlyYou = name => !/\b(chase|chasing)\b|\brent payments?\b|adobe sign/i.test(name) && (
+        /standing order|direct debit|\bbank (details|account|transfer|change)|\bbanking\b|\bpay\b|\bpayments?\b|\bsignatures?\b|\b(counter)?sign(ing)?\b(?![\s-]*(in|into|up|out)\b)/i.test(name)
+        || /\bSO\b(?=\s*(?:[-–£]|amount\b|for\b))/.test(name));
     const due = (tasks || [])
         .filter(x => (x.holders || []).includes(KEVIN_TEAM_MEMBER))
         .filter(x => x.due && x.due <= today && !(x.deferred && x.deferred > today))

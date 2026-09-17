@@ -52,6 +52,11 @@ const NOT_ONLY_YOU = [
   kevin('Sign up for GHL trial', '2026-09-16'),
   kevin('INBOUND: EMAIL [HIGH]: WHY IS THIS TAKING SO LONG', '2026-09-16'),
   kevin('Chase tenant Lee Drury for missed rent payment', '2026-09-16'),
+  kevin('INBOUND: EMAIL [HIGH]: Re: WHY IS THIS TAKING SO LONG', '2026-09-16'),
+  kevin('Sign into Zempler', '2026-09-16'),
+  kevin('Five signs your business runs on you', '2026-09-16'),
+  kevin('Order fire door signs', '2026-09-16'),
+  kevin('INBOUND: Adobe Sign: agreement signed by Roy Lavin', '2026-09-16'),
 ];
 
 describe('selectOnlyYou picks only bank, payment and signature items', () => {
@@ -73,6 +78,17 @@ describe('selectOnlyYou picks only bank, payment and signature items', () => {
       kevin('Sign the deed of variation', TODAY),
     ], TODAY);
     expect(out.items).toHaveLength(3);
+  });
+
+  it('payments Kevin makes still count when they mention arrears or a missed payment', () => {
+    const out = selectOnlyYou([
+      kevin('Pay Council Tax arrears - 13 CP', TODAY),
+      kevin('Pay the balance owed to Anglian Water', TODAY),
+      kevin('Pay missed credit card payment', TODAY),
+      kevin('UPDATE SO - 5 DALHAM £147', TODAY),
+      kevin('Update SO for 18 Northfield Park', TODAY),
+    ], TODAY);
+    expect(out.items.length + out.more).toBe(5);
   });
 
   it('lists the oldest due first', () => {
