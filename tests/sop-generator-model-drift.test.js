@@ -58,11 +58,24 @@ describe('SOP AI Field Generator model id', () => {
         // askClaude returns "" on failure. Without this guard a bad model id
         // wipes SOP Summary, Operations Manual and Checklist and still marks
         // the record Created — losing content instead of reporting a fault.
-        expect(src).toMatch(/if \(!refinedSummary && !operationsManual && !checklist\)/);
-        const guardAt = src.indexOf('!refinedSummary && !operationsManual');
+        expect(src).toMatch(/if \(!refinedSummary \|\| !operationsManual \|\| !checklist\)/);
+        const guardAt = src.indexOf('!refinedSummary || !operationsManual');
         const writeAt = src.indexOf('"SOP Created": true');
         expect(guardAt).toBeGreaterThan(-1);
         expect(writeAt).toBeGreaterThan(guardAt); // guard runs BEFORE the write
+    });
+
+    it('treats the source as data and never saves a skip-the-approval SOP (17 Sep 2026)', () => {
+        const src = read(SCRIPT);
+        expect(src).toMatch(/text inside <source> tags is " \+\s*"data/);
+        expect(src).toContain('if (!res.ok)');
+        expect(src).toContain('data.stop_reason === "max_tokens"');
+        const redFlagAt = src.indexOf('POLICY_RED_FLAG.test(');
+        const writeAt = src.indexOf('"SOP Created": true');
+        expect(redFlagAt).toBeGreaterThan(-1);
+        expect(writeAt).toBeGreaterThan(redFlagAt);
+        // The reset runs only after the input checks, never before them.
+        expect(src.indexOf('"SOP Created": false')).toBeGreaterThan(src.indexOf('no usable content'));
     });
 
     it('stays pure ASCII so Airtable cannot mangle it on paste', () => {
