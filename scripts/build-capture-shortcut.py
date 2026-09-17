@@ -24,9 +24,13 @@ import sys
 import uuid
 
 LIST_NAME = "Captures"
+# The second shortcut (Kevin, 17 Sep 2026): "Call Log" writes to its own private
+# Reminders list, so a note about a phone call never mixes with things to action.
+# apple_reminders_bridge.py appends it to ~/knowledge-os/call-log.jsonl nightly.
+#   python3 scripts/build-capture-shortcut.py "Call Log.shortcut" --list "Call Log"
 
 
-def build():
+def build(list_name=LIST_NAME):
     new = lambda: str(uuid.uuid4()).upper()
     group, text_id, dictate_id, end_if, find_id, append_id = (new() for _ in range(6))
     shortcut_input = {"Value": {"Type": "ExtensionInput"}, "WFSerializationType": "WFTextTokenAttachment"}
@@ -51,7 +55,7 @@ def build():
             "WFCalendarItemTitle": {"Value": {"attachmentsByRange": {"{0, 1}": {"OutputName": "If Result", "OutputUUID": end_if, "Type": "ActionOutput"}},
                                               "string": "￼"},
                                     "WFSerializationType": "WFTextTokenString"},
-            "WFCalendarItemCalendar": LIST_NAME}},
+            "WFCalendarItemCalendar": list_name}},
     ]
     return {
         "WFWorkflowClientVersion": "2607.0.3",
@@ -67,7 +71,13 @@ def build():
 
 
 if __name__ == "__main__":
-    out = sys.argv[1] if len(sys.argv) > 1 else "Capture.shortcut"
+    args = sys.argv[1:]
+    list_name = LIST_NAME
+    if "--list" in args:
+        i = args.index("--list")
+        list_name = args[i + 1]
+        args = args[:i] + args[i + 2:]
+    out = args[0] if args else "Capture.shortcut"
     with open(out, "wb") as fh:
-        plistlib.dump(build(), fh)
+        plistlib.dump(build(list_name), fh)
     print("wrote", out)
