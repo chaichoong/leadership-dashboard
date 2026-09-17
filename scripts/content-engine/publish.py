@@ -752,6 +752,9 @@ MONETISE_RECHECK_HOURS = 6
 GHL_SLOT_GRACE_MIN = 60   # a GHL post still 'scheduled' this long after its slot, with no failure, went out
 
 
+MONETISED = ("On", "Sharing")     # Sharing: ads run, revenue split with a copyright claimant; nothing more to switch
+
+
 def monetise_long_video(day, entry):
     """EVERY YouTube upload of the episode switched to earn: the long episode's "Watch page ads" and the Short's
     "Shorts Feed ads" (Kevin, 17 Sep 2026: "all of my YouTube videos, full length and Shorts, monetised ... as standard
@@ -762,7 +765,7 @@ def monetise_long_video(day, entry):
              if k.startswith("youtube|") and p.get("clip") in ("full", "lfmd") and p.get("id") and p.get("route") == "api" and p.get("status") == "published"]
     changed = False
     for p in posts:
-        if p.get("monetisation") == "On": continue       # "Checking" (YouTube reviewing the rating) is re-read until it says On
+        if p.get("monetisation") in MONETISED: continue  # "Checking" (YouTube reviewing the rating) is re-read until it says On
         last = p.get("monetisation_checked")
         if last:
             try:
@@ -1236,7 +1239,7 @@ def report():
         if not str(d).isdigit() or not isinstance(e, dict): continue
         for k, p in (e.get("posts") or {}).items():
             if k.startswith("youtube|") and p.get("clip") in ("full", "lfmd") and p.get("status") == "published" and p.get("route") == "api" \
-                    and p.get("monetisation") != "On":
+                    and p.get("monetisation") not in MONETISED:
                 waiting.append("%s %s (%s)" % (d, "Short" if p["clip"] == "lfmd" else "episode", p.get("monetisation") or "not checked yet"))
     unconfirmed = ["%s %s %s" % (d, p.get("platform"), p.get("clip")) for d, e in state.items() if str(d).isdigit() and isinstance(e, dict)
                    for p in (e.get("posts") or {}).values() if p.get("status") in ("creating", "unconfirmed")]
