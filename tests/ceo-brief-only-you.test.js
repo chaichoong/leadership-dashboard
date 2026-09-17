@@ -45,6 +45,13 @@ const NOT_ONLY_YOU = [
   kevin('SIGN-IN: EDF Energy session lapsed', '2026-09-16'),
   kevin('Debt recovery decision session — Monies Owed ledger (~£13k, 13 items)', '2026-09-04'),
   kevin('6. The offer is signable and payable', '2026-09-01'),
+  // Review findings, 17 Sep 2026: a session is not a signature, an all-caps subject is not a
+  // standing order, and money owed to Kevin is not a payment he makes.
+  kevin('SIGN IN NEEDED: HMRC session lapsed', '2026-09-16'),
+  kevin('Open your Property Manager dashboard and sign in', '2026-09-16'),
+  kevin('Sign up for GHL trial', '2026-09-16'),
+  kevin('INBOUND: EMAIL [HIGH]: WHY IS THIS TAKING SO LONG', '2026-09-16'),
+  kevin('Chase tenant Lee Drury for missed rent payment', '2026-09-16'),
 ];
 
 describe('selectOnlyYou picks only bank, payment and signature items', () => {
@@ -57,6 +64,15 @@ describe('selectOnlyYou picks only bank, payment and signature items', () => {
 
   it('every non-banking task Kevin holds is left out', () => {
     expect(selectOnlyYou(NOT_ONLY_YOU, TODAY)).toEqual({ items: [], more: 0 });
+  });
+
+  it('a real signature counts in any tense', () => {
+    const out = selectOnlyYou([
+      kevin('Countersign the AST', TODAY),
+      kevin('Signing the lease renewal', TODAY),
+      kevin('Sign the deed of variation', TODAY),
+    ], TODAY);
+    expect(out.items).toHaveLength(3);
   });
 
   it('lists the oldest due first', () => {

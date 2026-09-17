@@ -412,13 +412,16 @@ async function gatherTasks(pat) {
 // the huddle's judgement: the huddle does not run when the Mac sleeps, and the same tasks must
 // give the same list. Any status counts, Approval included, because on 17 Sep all 13 banking
 // items sat in the queue as DECIDE cards. "Bank" alone is not enough ("Birmingham Midshires
-// (Bank of Scotland)" is a mortgage letter) and "sign" must not match "SIGN-IN" (a session
-// lapse, not a signature). SO is matched in capitals only, so the word "so" never counts.
+// (Bank of Scotland)" is a mortgage letter) and "sign" must not match "SIGN-IN", "sign in" or
+// "sign up" (a session, not a signature). SO counts in capitals only, and never in an all-caps
+// subject ("WHY IS THIS TAKING SO LONG"). Money owed TO Kevin (a chase, arrears, a missed rent
+// payment) is the agents' lane, not a payment he makes.
 const KEVIN_TEAM_MEMBER = 'recHEt2VPYothaqTd';
 
 function selectOnlyYou(tasks, today) {
-    const isOnlyYou = name => /standing order|direct debit|\bbank (details|account|transfer|change)|\bbanking\b|\bpay\b|\bpayments?\b|\bsignatures?\b|\bsign\b(?!-in)/i.test(name)
-        || /\bSO\b/.test(name);
+    const isOnlyYou = name => !/\b(chase|chasing|arrears|owed|missed|refund)\b/i.test(name) && (
+        /standing order|direct debit|\bbank (details|account|transfer|change)|\bbanking\b|\bpay\b|\bpayments?\b|\bsignatures?\b|\b(counter)?sign(s|ed|ing)?\b(?![\s-]*(in|up|out)\b)/i.test(name)
+        || (/\bSO\b/.test(name) && name !== name.toUpperCase()));
     const due = (tasks || [])
         .filter(x => (x.holders || []).includes(KEVIN_TEAM_MEMBER))
         .filter(x => x.due && x.due <= today && !(x.deferred && x.deferred > today))
