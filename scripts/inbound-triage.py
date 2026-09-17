@@ -99,6 +99,7 @@ WORKER_URL = "https://drive-upload.kevinbrittain.workers.dev"
 # first live run, 24 Aug 2026: kevinbrittain@gmail.com is a DIFFERENT mailbox
 # (273 property-address labels, no taxonomy) and is out of triage scope.
 TRIAGE_ACCOUNT = "kevin@runpreneur.org.uk"
+SEARCH_ACCOUNTS = {TRIAGE_ACCOUNT, "info@agilelets.co.uk"}
 
 TRIAGE_KEY_FILE = Path.home() / ".config/od/gmail_triage_key"
 AIRTABLE_PAT_FILE = Path.home() / ".config/od/airtable_pat"
@@ -506,7 +507,7 @@ def worker_labels():
     return worker_post("/gmail/labels", {}).get("labels", [])
 
 
-def worker_list(q=None, label_ids=None, max_pages=MAX_PAGES):
+def worker_list(q=None, label_ids=None, max_pages=MAX_PAGES, account=None):
     """Follow nextPageToken up to max_pages. Returns (messages, truncated).
     truncated=True means Gmail had MORE matches than we fetched — the caller
     must not treat the listing as complete."""
@@ -519,6 +520,8 @@ def worker_list(q=None, label_ids=None, max_pages=MAX_PAGES):
             payload["labelIds"] = label_ids
         if token:
             payload["pageToken"] = token
+        if account:
+            payload["account"] = account
         data = worker_post("/gmail/list", payload)
         messages.extend(data.get("messages", []))
         token = data.get("nextPageToken")
@@ -2201,14 +2204,19 @@ def cmd_health():
     return 0
 
 
-def cmd_search(q, limit):
+def cmd_search(q, limit, account=None):
     """Read-only Gmail search for the role agents (Property Administration
     build, 2 Sep 2026): the search-first rule needs a route into the mailbox
     that is NOT a hand-rolled curl carrying the triage key. Same worker, same
     read-and-label credential, one page, never a modify."""
     if not q or not q.strip():
         fail("search needs --q <gmail query>")
-    msgs, truncated = worker_list(q=q.strip(), max_pages=1)
+    # --account info@agilelets.co.uk searches that mailbox's full history and Sent
+    # folder (connected by Kevin's consent, 17 Sep 2026). Only mailboxes Kevin has
+    # connected at the worker can be read; anything else returns the worker's 409.
+    if account and account not in SEARCH_ACCOUNTS:
+        fail("search --account must be one of: " + ", ".join(sorted(SEARCH_ACCOUNTS)))
+    msgs, truncated = worker_list(q=q.strip(), max_pages=1, account=account)
     keep = ("id", "threadId", "internalDate", "from", "subject", "snippet",
             "date", "labelIds")
     rows = []
@@ -2274,7 +2282,7 @@ def main(argv):
     elif cmd == "matters":
         return cmd_matters()
     elif cmd == "search":
-        cmd_search(opt("--q"), int(opt("--limit", "20")))
+        cmd_search(opt("--q"), int(opt("--limit", "20")), opt("--account"))
     elif cmd == "health":
         return cmd_health()
     elif cmd == "slot-record":
