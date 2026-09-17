@@ -46,6 +46,19 @@ print('---JSON---'); print(json.dumps([
 ]))`, SITES);
     expect(out).toEqual(['app.pingen.com', 'ewf.companieshouse.gov.uk', 'ewf.companieshouse.gov.uk', null, 'app.pingen.com']);
   });
+  it('a Gmail link never lands on another Google sign-in by sharing google.com (17 Sep 2026)', () => {
+    const out = py(`
+sites = json.loads(sys.argv[1])
+sites['aistudio.google.com'] = {'label': 'Google AI Studio', 'login': True}
+line = 'SIGN-IN NEEDED: Bromcom Parent App / Cottenham Village College portal (check the email at https://mail.google.com/mail/u/0/#search/from%3A12573%40bromcomcloud.com+after%3A2026/09/13)'
+p = m.parse_signin_line(line)
+print('---JSON---'); print(json.dumps([
+  m.signin_site_for(p['site'], p['url'], sites),
+  m.signin_site_for('Google AI Studio', 'https://aistudio.google.com/app', sites),
+  m.signin_site_for('pingen.com', 'https://www.pingen.com/en/login', sites),
+]))`, SITES);
+    expect(out).toEqual([null, 'aistudio.google.com', 'app.pingen.com']);
+  });
   it('by label, a site the robot can sign into wins over a same-named entry it cannot (8 Sep 2026)', () => {
     const out = py(`
 sites = {'companieshouse.gov.uk': {'label': 'Companies House', 'login': False}}

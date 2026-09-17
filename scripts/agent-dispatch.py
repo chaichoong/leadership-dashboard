@@ -4851,6 +4851,10 @@ def parse_signin_line(text):
     return {"site": site, "url": url, "verified": verified}
 
 
+SIGNIN_SHARED_DOMAINS = {"google.com", "google.co.uk", "microsoft.com", "live.com", "office.com",
+                         "apple.com", "amazon.com", "amazon.co.uk", "facebook.com", "meta.com"}
+
+
 def signin_domain(host):
     """The registrable domain of a host: app.pingen.com -> pingen.com,
     www.topcashback.co.uk -> topcashback.co.uk."""
@@ -5109,7 +5113,11 @@ def signin_site_for(line_site, line_url, sites):
     # Same registrable domain: "www.pingen.com/en/login" is Pingen even though
     # the robot's entry is app.pingen.com. Only a site that can be signed into
     # counts here; a login: false entry (gov.uk) must not swallow a stranger.
-    if host:
+    # Never on a shared platform domain: one google.com hosts Gmail, Drive and
+    # AI Studio as separate sign-ins. On 17 Sep 2026 a Bromcom school portal
+    # line pointing at a Gmail search was filed under "Google AI Studio", with
+    # three unrelated tasks folded in after it.
+    if host and signin_domain(host) not in SIGNIN_SHARED_DOMAINS:
         dom = signin_domain(host)
         for h, v in sites.items():
             if v.get("login") and signin_domain(h) == dom:
