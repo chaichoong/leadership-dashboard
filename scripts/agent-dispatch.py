@@ -2319,6 +2319,8 @@ def build_queue(args=None):
             compliance_book_error = str(e)[:200]
             property_ok = False
     property_count = 0
+    held_under = []
+    open_leads = open_lead_ids({held_lead_id(t) for t in agent_linked if held_lead_id(t)})
 
     for t in agent_linked:
         # Tier 1 no longer drops out of the worklist. It is MARKED and worked,
@@ -2425,6 +2427,9 @@ def build_queue(args=None):
             approved_hb.append(t)
         elif t["outcome"] == "Changes requested":
             changes_hb.append(t)
+        elif not t["outcome"] and held_lead_id(t) in open_leads:
+            held_under.append({**t, "groupLead": held_lead_id(t)})
+            continue
         elif not t["outcome"]:
             tm = t["teamMemberIds"][0] if t["teamMemberIds"] else ""
             if tm == CEO_REC_ID:
@@ -2509,6 +2514,9 @@ def build_queue(args=None):
         # the agent VERIFY (sent items, records) before executing anything.
         t["priorIntent"] = t["kind"] == "carry_out" and t["id"] in intents
     worklist = select_worklist(approved_hb + changes_hb, new_work, deferred_hb)
+    worklist, grouped_now = group_property_work(
+        worklist, compliance_book, datetime.now(LONDON).date())
+    held_under += grouped_now
     signin_reopened = [t["id"] for t in worklist if t.get("signinReopened")]
     # If the dispatcher's judgement pass removes a worklist item (a tier-1
     # smell the keywords missed), it backfills from here — never beyond the cap.
@@ -2573,6 +2581,9 @@ def build_queue(args=None):
         # acted on here: cmd_queue is a read. `handover-property` does the
         # writing, so one command owns the change.
         "royLane": roy_lane,
+        # Property siblings held under a lead: grouped this run, or submitted
+        # under a lead that is still open. Listed with groupLead, never dropped.
+        "heldUnderLead": held_under,
         "decided": decided,            # answered DECIDE: cards; the Task Manager's move, never a carry-out
         "unmappedAgent": unmapped,
         "unclassified": unclassified,  # states the buckets cannot place — eyes, not silence
@@ -2606,6 +2617,8 @@ def build_queue(args=None):
             "tier2Parked": len(skipped_tier2),
             "systemAlerts": len(system_alerts),
             "royLane": len(roy_lane),
+            "heldUnderLead": len(held_under),
+            "propertyGroups": len([t for t in worklist if t.get("siblings")]),
             "decided": len(decided),
             # Creditor-lane keyword matches across the whole agent-linked
             # read, hand-backs included (routing floor, not judgement). Zero
@@ -3096,6 +3109,190 @@ def cmd_attach(args):
     stamps = [superseded_stamp(n) for n in dropped] + [attached_stamp(n, purpose) for n in names]
     patch_task(args.task, {AF["notes"]: append_notes(notes, *stamps)})
     print(json.dumps({"task": args.task, "attached": names, "superseded": dropped}))
+
+
+# ─── ONE JOB PER CERTIFICATE TYPE AND DISTRICT (Kevin, 17 Sep 2026) ────
+#
+# The unit of work was one Airtable task at every layer, so three EICR
+# renewals in Haverhill (13 and 6 Chedburgh Place, 5 Dalham Place, all CB9)
+# became three agent runs, three sets of quote emails to the same electricians
+# and three cards. Kevin's ruling in the tranche 3 interview: one piece of
+# property work is a certificate type plus a postcode district, for everything
+# due inside 60 days. Grouping happens here, at dispatch time; every
+# certificate keeps its own task, so nothing is merged and nothing is closed on
+# a guess. The earliest-due task LEADS and carries the sibling list; the rest
+# are HELD, listed and counted, never dropped. `submit LEAD --siblings` stamps
+# each sibling "HELD UNDER recLEAD", and a held task waits while that lead is
+# open, then rejoins the board to be closed against its own certificate.
+PROPERTY_GROUP_DAYS = 60
+HELD_UNDER_RE = re.compile(r"HELD UNDER (rec[A-Za-z0-9]{14})")
+CERT_TYPE_PATTERNS = (
+    ("EICR", re.compile(r"\bEICR\b|electrical installation", re.I)),
+    ("GSC", re.compile(r"\bGSC\b|gas safe|\bCP12\b", re.I)),
+    ("EPC", re.compile(r"\bEPC\b|energy performance", re.I)),
+    ("EMERGENCY LIGHTING", re.compile(r"emergency lighting", re.I)),
+    ("FIRE", re.compile(r"fire (?:alarm|safety|risk)", re.I)),
+    ("LICENCE", re.compile(r"\bHMO\b|licen[cs]e", re.I)),
+    ("INSURANCE", re.compile(r"insurance", re.I)),
+)
+
+
+def certificate_type(name):
+    """The one certificate a task name is about, or "" when none or several."""
+    hits = [label for label, rx in CERT_TYPE_PATTERNS if rx.search(str(name or ""))]
+    return hits[0] if len(hits) == 1 else ""
+
+
+def task_district(t, book):
+    """Postcode district of the property a task is about, or "" if unclear.
+
+    The property named in the task name wins (via the compliance book), because
+    a description can quote a contractor's own postcode first. Two properties in
+    different districts in one name is ambiguous, so nothing is grouped.
+    """
+    name = str(t.get("name") or "")
+    found = set()
+    for page in book or []:
+        short = str(page.get("short") or "").strip()
+        if short and re.search(r"(?<![0-9A-Za-z])" + re.escape(short), name, re.I):
+            district = postcode_district(page.get("postcode") or page.get("name"))
+            if district:
+                found.add(district)
+    if len(found) == 1:
+        return found.pop()
+    if found:
+        return ""
+    return postcode_district(name) or postcode_district(t.get("description"))
+
+
+def property_group_key(t, book, today):
+    """"EICR CB9" for groupable property work, "" for everything else."""
+    if t.get("kind") != "new" or t.get("tier1") or t.get("creditor"):
+        return ""
+    if not str(t.get("name") or "").startswith(COMPLIANCE_TASK_PREFIX):
+        return ""
+    holders = [t.get("agentId"), t.get("autoTarget")] + list(t.get("teamMemberIds") or [])
+    if PROPERTY_REC_ID not in holders:
+        return ""
+    try:
+        due = datetime.strptime(str(t.get("dueDate") or "")[:10], "%Y-%m-%d").date()
+    except ValueError:
+        return ""
+    if due > today + timedelta(days=PROPERTY_GROUP_DAYS):
+        return ""
+    ctype, district = certificate_type(t.get("name")), task_district(t, book)
+    return f"{ctype} {district}" if ctype and district else ""
+
+
+def group_property_work(worklist, book, today):
+    """(worklist, held): one lead per certificate type and district, siblings named on it."""
+    groups = {}
+    for t in worklist:
+        key = property_group_key(t, book, today)
+        if key:
+            groups.setdefault(key, []).append(t)
+    held_ids = set()
+    for key, members in groups.items():
+        if len(members) < 2:
+            continue
+        members.sort(key=lambda m: (str(m.get("dueDate") or ""), m["id"]))
+        lead, rest = members[0], members[1:]
+        lead["groupKey"] = key
+        lead["siblings"] = [{"id": m["id"], "name": m["name"], "dueDate": m.get("dueDate")}
+                            for m in rest]
+        for m in rest:
+            m["groupKey"], m["groupLead"] = key, lead["id"]
+            held_ids.add(m["id"])
+    return ([t for t in worklist if t["id"] not in held_ids],
+            [t for t in worklist if t["id"] in held_ids])
+
+
+def held_lead_id(t):
+    """The lead a task was submitted under (the newest stamp), or ""."""
+    ids = HELD_UNDER_RE.findall(str(t.get("notes") or ""))
+    return ids[-1] if ids and ids[-1] != t.get("id") else ""
+
+
+def open_lead_ids(lead_ids, fetch=None):
+    """The subset of lead ids still open. The queue's own read cannot answer
+    this: QUEUE_FORMULA leaves out Approval, which is exactly where a submitted
+    lead sits. A failed read returns every id, so siblings stay held and
+    listed rather than being dispatched a second time."""
+    if not lead_ids:
+        return set()
+    fetch = fetch or query_tasks
+    formula = "OR(" + ",".join(f"RECORD_ID()='{i}'" for i in sorted(lead_ids)) + ")"
+    try:
+        rows = [task_view(r) for r in fetch(formula)]
+    except Exception as exc:                              # noqa: BLE001
+        print(f"WARNING: lead status read failed, holding siblings: {str(exc)[:120]}",
+              file=sys.stderr)
+        return set(lead_ids)
+    return {r["id"] for r in rows if r.get("status") not in ("Completed", "Cancelled")}
+
+
+def sibling_problem(lead, sib, book, coverage_text=""):
+    """Why `sib` may not be submitted under `lead`, or "" when it may."""
+    if sib.get("id") == lead.get("id"):
+        return f"{sib.get('id')} is the lead itself"
+    if not sib.get("name"):
+        return f"{sib.get('id')} could not be read"
+    if sib.get("status") in ("Completed", "Cancelled"):
+        return f"{sib['id']} is already {sib['status']}"
+    if not str(sib["name"]).startswith(COMPLIANCE_TASK_PREFIX):
+        return f"{sib['id']} is not a COMPLIANCE task"
+    lead_key = (certificate_type(lead.get("name")), task_district(lead, book))
+    sib_key = (certificate_type(sib.get("name")), task_district(sib, book))
+    if not all(lead_key) or lead_key != sib_key:
+        def say(k):
+            return " ".join(k) if all(k) else "no readable type and district"
+        return f"{sib['id']} is {say(sib_key)}, the lead is {say(lead_key)}"
+    if coverage_text:
+        covered = {postcode_district(a) for a in coverage_parse(coverage_text)[0]}
+        if task_district(sib, book) not in covered:
+            return (f"{sib['id']} is in {task_district(sib, book)}, which no PROPERTY "
+                    "line in the coverage file declares")
+    return ""
+
+
+def cmd_submit_group(args):
+    """`submit`, with --siblings: a property group submitted once on its lead."""
+    siblings = [i.strip() for i in (getattr(args, "siblings", None) or "").split(",") if i.strip()]
+    if not siblings:
+        return cmd_submit(args)
+    lead = task_view(get_task(args.task))
+    book = compliance_book_pages()
+    coverage_text = ""
+    if getattr(args, "coverage", None):
+        with open(args.coverage) as fh:
+            coverage_text = fh.read()
+    # Every sibling is checked BEFORE anything is written: a refused sibling
+    # stops the whole submit, lead included.
+    sib_views = [task_view(get_task(i)) for i in siblings]
+    problems = [p for p in (sibling_problem(lead, v, book, coverage_text) for v in sib_views) if p]
+    if problems:
+        sys.exit(f"ERROR: refusing to submit {args.task} with siblings: " + "; ".join(problems))
+    key = f"{certificate_type(lead['name'])} {task_district(lead, book)}"
+    # The card names every task it covers, on the line above the carry-out
+    # line (which must stay last), so no shape the level check reads moves.
+    with open(args.output_file) as fh:
+        lines = fh.read().rstrip().split("\n")
+    covers = (f"COVERS {len(siblings) + 1} TASKS ({key}): {lead['name']}; "
+              + "; ".join(v["name"] for v in sib_views))
+    grouped_file = args.output_file + ".group"
+    with open(grouped_file, "w") as fh:
+        fh.write("\n".join(lines[:-1] + [covers, lines[-1]]) + "\n")
+    args.output_file = grouped_file
+    rc = cmd_submit(args)
+    stamp = datetime.now(LONDON).strftime("%d %b %Y %H:%M")
+    for v in sib_views:
+        existing = str(v.get("notes") or "").rstrip()
+        note = (f"[{stamp} - agent-dispatch] HELD UNDER {args.task} ({key}): worked in one job "
+                "and submitted once with the lead. This task waits while the lead is open, "
+                "then is closed against its own certificate.")
+        patch_task(v["id"], {AF["notes"]: (existing + "\n\n" + note).strip()[-90000:]})
+    print(json.dumps({"siblingsHeld": siblings, "lead": args.task, "group": key}))
+    return rc
 
 
 def cmd_submit(args):
@@ -6946,6 +7143,10 @@ def main():
     s.add_argument("--agent", required=True)
     s.add_argument("--type", required=True)
     s.add_argument("--output-file", required=True)
+    s.add_argument("--siblings", metavar="recA,recB",
+                   help="property work only: the sibling ids the queue grouped under this "
+                        "lead (same certificate type and postcode district); refused "
+                        "before any write if one does not belong (17 Sep 2026)")
     s.add_argument("--coverage", metavar="PATH",
                    help="quote emails on property tasks: PROPERTY: and CONTRACTOR: ... "
                         "covers ... (source: url) lines; refused without it (7 Sep 2026)")
@@ -7109,7 +7310,7 @@ def main():
     # calling sys.exit() — but `reconcile` and `lessons` report by RETURNING, so
     # discarding the result here would make both checks ornamental.
     return {"queue": cmd_queue, "route": cmd_route, "escalate": cmd_escalate,
-            "handover": cmd_handover, "submit": cmd_submit,
+            "handover": cmd_handover, "submit": cmd_submit_group,
             "annotate": cmd_annotate, "intent": cmd_intent,
             "complete": cmd_complete, "verify": cmd_verify,
             "score": cmd_score, "reconcile": cmd_reconcile,
