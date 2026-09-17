@@ -17,7 +17,7 @@ Usage:
   render.py one CLIP.insv --day N [--out DIR] # render a clip by hand (no Airtable, no Drive)
   render.py selftest
 """
-import argparse, datetime as dt, json, os, re, shutil, subprocess, sys, time, urllib.parse
+import argparse, datetime as dt, json, os, re, shutil, subprocess, sys, tempfile, time, urllib.parse
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -741,14 +741,44 @@ def redo_lfmd(day):
     watch.save_ledger(ledger)
     print("episode %d: Learnings clip rebuilt -> %s (record %s)" % (day, "ok" if links.get("lfmd") else "NO DRIVE ID YET", rid))
     import approval
-    if (approval.load_state().get(str(day)) or {}).get("verdict") == "approved":
-        # Kevin already approved and asked for the clip to be reinstated before publishing (2060, 17 Sep 2026): the card
-        # is not sent back to his queue for a second approval
+    card = approval.load_state().get(str(day)) or {}
+    resubmitted = False
+    if card.get("verdict") == "approved":
+        # Kevin already approved and asked for the clip to be reinstated before publishing: not sent back for a second yes
         print("episode %d: card already approved; not resubmitted" % day)
+        resubmitted = True
+    elif card.get("verdict") == "changes":
+        # 2060 (17 Sep 2026): Kevin sent the card back with "There are no learnings from my diary on this, which need to be
+        # added." A sent-back card needs one receipt line per point. When every point is about the missing Learnings
+        # clip, the rebuild answers them; anything else is left for a person, never answered with a stock line.
+        receipt = lfmd_receipt(card.get("feedback", ""), window)
+        if receipt:
+            with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False) as fh:
+                fh.write(receipt); rpath = fh.name
+            try: approval.refresh_card(day, receipt=rpath); resubmitted = True
+            finally: os.remove(rpath)
+        else:
+            print("episode %d: Kevin's feedback asks for more than the Learnings clip; the card is left for a person to resubmit" % day, file=sys.stderr)
     else:
-        approval.refresh_card(day)
-    if links.get("lfmd") and links.get("lfmd_yt"): release_hold(day)
+        approval.refresh_card(day); resubmitted = True
+    if links.get("lfmd") and links.get("lfmd_yt") and resubmitted: release_hold(day)
     return paths["lfmd"]
+
+
+def feedback_points(feedback):
+    """Kevin's feedback split into points exactly as agent-dispatch's submit gate splits it."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("agent_dispatch", os.path.join(os.path.dirname(HERE), "agent-dispatch.py"))
+    mod = importlib.util.module_from_spec(spec); spec.loader.exec_module(mod)
+    return mod.feedback_points(feedback)
+
+
+def lfmd_receipt(feedback, window, points=None):
+    """One '- <his point> -> <what changed>' line per point, or '' unless every point is about the Learnings clip."""
+    pts = points if points is not None else feedback_points(feedback)
+    if not pts or not all(re.search(r"learn|diary|dairy|lfmd", p, re.I) for p in pts): return ""
+    fmt = lambda s: "%d:%02d" % (int(s) // 60, int(s) % 60)
+    return "\n".join("- %s → the Learnings from my diary clip is rebuilt from %s to %s and goes to the socials and the YouTube Short with this episode" % (p.strip(), fmt(window[0]), fmt(window[1])) for p in pts) + "\n"
 
 
 REDO_LFMD_FILE = os.path.expanduser("~/.config/od/content_engine_redo_lfmd")
@@ -897,6 +927,10 @@ def selftest():
     assert lfmd_window([(0, 5, "the learnings from my"), (5, 9, "diary today"), (40, 50, "stay positive")]) == (0, 50), "a phrase split over two chunks"
     assert lfmd_window([(0, 5, "I changed my diet today"), (40, 50, "stay positive")]) is None, "a diet on its own is not the section"
     assert DIARY_NEAR_MISS_RE.search("so the learning I took from the dire today") and not DIARY_NEAR_MISS_RE.search("the diary of a Runpreneur")
+    r = lfmd_receipt("", (295.52, 403.35), points=["There are no learnings from my diary on this, which need to be added."])
+    assert r.startswith("- There are no learnings from my diary on this") and "4:55 to 6:43" in r and r.count("\n") == 1, r
+    assert lfmd_receipt("", (1, 30), points=["No learnings clip", "The title is wrong"]) == "", "a point about something else is never answered by the rebuild"
+    import inspect as _ins; rs = _ins.getsource(redo_lfmd); assert "receipt=rpath" in rs and "and resubmitted: release_hold(day)" in rs
     assert lfmd_window([(0, 5, "So I think the learning story for today is"), (30, 40, "see you tomorrow")]) == (0, 40), "1841 (2025): he says 'the learning story for today'"
     assert lfmd_window([(0, 5, "So consecutive day, 2056th of the diary of a Ron Prenner, and today's"), (30, 40, "see you tomorrow")]) is None, "the show's name is not a Learnings section (2056 teaser)"
     assert lfmd_window([(0, 5, "welcome back to consecutive day 2195 of the diary of a Runpreneur"), (30, 40, "stay positive")]) is None
