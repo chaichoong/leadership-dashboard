@@ -76,6 +76,10 @@ from agent_email_format import (  # noqa: E402
     parse_output as parse_email_output,
     validate_submission as validate_email_submission,
     validate_submission_any as validate_any_submission,
+    PERSONAL_SENDER,
+    REDIRECT_BODY,
+    RULE_STAMP,
+    rule_send_problem,
 )
 # The CALENDAR contract lives in one place too, shared with
 # scripts/calendar-write.py — same one-parser rule, same reason.
@@ -1707,6 +1711,56 @@ def certificate_booking_cap(name, output):
     return CERT_SPEND_CAPS.get(certificate_type(name), 0)
 
 
+# ─── THE THREE NARROW LEVEL A SHAPES OF 17 SEP 2026 ─────────────────────
+# Kevin's tranche 3 rulings, approved at the build gate the same day. Each is
+# verified here; anything off-shape stays a card exactly as before.
+REDIRECT_RE = re.compile(r"^\s*REDIRECT TO INFO@", re.I)
+REDIRECT_LANE_RE = re.compile(r"\btenan(?:t|cy)\b|\blandlord\b|letting agent|\bagile lets\b", re.I)
+TASK_PREFIX_STRIP_RE = re.compile(
+    r"^\s*(?:(?:INBOUND|POST|CORRESPONDENCE|MAINTENANCE|COMPLIANCE)(?:\s*\([^)]*\))?\s*:\s*)+", re.I)
+PLAN_INSTALMENT_RE = re.compile(r"^\s*CLOSE PROPOSAL:\s*plan instalment\b", re.I)
+INSTALMENT_WORDS_RE = re.compile(
+    r"direct debit|collected|instal+ment|payment (?:received|taken|collected)", re.I)
+INSTALMENT_WARNING_RE = re.compile(
+    r"miss|fail|arrear|default|increase|court|bailiff|final notice|overdue|"
+    r"returned|bounced|cancel|reject|unpaid|enforcement", re.I)
+
+
+def redirect_email(tf):
+    """The fixed redirect email for an inbound task, or None without a sender address."""
+    sender = re.search(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+", str(tf.get(AF["inboundSender"]) or ""))
+    if not sender:
+        return None
+    subject = TASK_PREFIX_STRIP_RE.sub("", str(tf.get(AF["name"]) or "")).strip()[:120]
+    return (f"TO: {sender.group(0)}\nFROM: {PERSONAL_SENDER}\nSUBJECT: Re: {subject}\n---\n"
+            f"{REDIRECT_BODY}")
+
+
+def plan_instalment_evidence(name, desc, plans):
+    """(why, plan): a Plan agreed page matching this creditor and collected amount, or (why, None)."""
+    text = f"{name} {desc}"
+    if INSTALMENT_WARNING_RE.search(text):
+        return "a warning word is in the task, so it is not a routine instalment", None
+    if not INSTALMENT_WORDS_RE.search(text):
+        return "the task does not say a payment was collected", None
+    amounts = set()
+    for a in re.findall(r"(?:£|GBP\s?)\s*([0-9][0-9,]*(?:\.[0-9]{1,2})?)", text, re.I):
+        try:
+            amounts.add(round(float(a.replace(",", "")), 2))
+        except ValueError:
+            continue
+    for p in plans or []:
+        creditor = str(p.get("creditor") or "").strip()
+        if not creditor or creditor.lower() not in text.lower():
+            continue
+        if p.get("status") != "Plan agreed" or p.get("monthlyAmount") in (None, ""):
+            continue
+        if round(float(p["monthlyAmount"]), 2) in amounts:
+            return (f"record book: {creditor} is Plan agreed at £{float(p['monthlyAmount']):,.2f}, "
+                    "the amount collected"), p
+    return "no Plan agreed page matches this creditor and amount", None
+
+
 def spend_declared(output):
     """(amount, recurring) from a SPEND: line, or (None, False) when absent."""
     m = SPEND_LINE_RE.search(output or "")
@@ -1768,7 +1822,8 @@ def dupe_fold_lane(fields):
 CLOSED_KEEPER_STATUSES = ("Completed", "Cancelled")
 
 
-def decision_level(output, task_type, task_rec, fetch=None, agent_banner=None):
+def decision_level(output, task_type, task_rec, fetch=None, agent_banner=None,
+                   plans_fetch=None):
     """Which level this submission sits at, with the evidence VERIFIED.
 
     Returns a dict: level (A/B/C), category, carry ('close' | 'calendar' |
@@ -1834,11 +1889,12 @@ def decision_level(output, task_type, task_rec, fetch=None, agent_banner=None):
         body = body[len(TIER1_BANNER):].strip()
     dup = CLOSE_DUPLICATE_RE.match(body)
     handled = CLOSE_HANDLED_RE.match(body)
+    instalment = PLAN_INSTALMENT_RE.match(body)
 
     # The private matter never moves at Level A, whatever the shape — except
     # the two verifiable closes, whose tier check is the twin's own name,
     # description or banner (see the docstring), never its Notes.
-    if dup or handled:
+    if dup or handled or instalment:
         tier_signal = tier_match(TIER1_PATTERNS, name, desc) or ("banner" if banner else "")
     else:
         hit = tier_match(TIER1_PATTERNS, name, desc, notes)
@@ -1936,11 +1992,58 @@ def decision_level(output, task_type, task_rec, fetch=None, agent_banner=None):
                    f"already handled by Completed task {cited} \"{dname}\"",
                    tierChecked=True)
 
+    if instalment:
+        try:
+            plans = (plans_fetch or fetch_plans)()
+        except Exception as exc:                          # noqa: BLE001
+            return card("close: plan instalment",
+                        f"the record book could not be read ({str(exc)[:80]})")
+        why, plan = plan_instalment_evidence(name, desc, plans)
+        if not plan:
+            return card("close: plan instalment", why)
+        return act("close: plan instalment", "close", why, tierChecked=True)
+
     if body.upper().startswith("CLOSE PROPOSAL:"):
         return card("close: judgement",
                     "no verifiable evidence cited: a duplicate names its keeper "
                     "(CLOSE PROPOSAL: duplicate of recXXX), an already-handled close "
                     "names the Completed task (CLOSE PROPOSAL: already handled — see recXXX)")
+
+    if REDIRECT_RE.match(body):
+        if tier_signal or tier_match(TIER1_PATTERNS, name, desc, notes):
+            return card("redirect reply", "tier 1 is never redirected")
+        if not tf.get(AF["inboundTask"]):
+            return card("redirect reply", "only an inbound task is redirected")
+        if not (property_match(name, desc, notes) or roy_match(name, desc, notes)
+                or REDIRECT_LANE_RE.search(name)):
+            return card("redirect reply", "the task is not property mail")
+        email = redirect_email(tf)
+        if not email:
+            return card("redirect reply", "the task has no inbound sender address")
+        problem = rule_send_problem("redirect", parse_email_output(email),
+                                    {"name": name, "notes": notes,
+                                     "inboundSender": tf.get(AF["inboundSender"]),
+                                     "taskType": "Correspondence"}, require_stamp=False)
+        if problem:
+            return card("redirect reply", problem)
+        return act("redirect reply", "send-rule",
+                   "property mail at Kevin's Gmail, fixed redirect to info@agilelets.co.uk "
+                   "(Kevin, 17 Sep 2026)", rule="redirect", email=email)
+
+    if (task_type == "Correspondence" and str(name).startswith(COMPLIANCE_TASK_PREFIX)
+            and certificate_type(name) in CERT_SPEND_CAPS):
+        try:
+            mail = parse_email_output(out)
+        except EmailFormatError:
+            mail = None
+        if mail and "quote" in (mail.get("subject") or "").lower():
+            problem = rule_send_problem("quote-request", mail,
+                                        {"name": name, "notes": notes,
+                                         "taskType": "Correspondence"}, require_stamp=False)
+            if not problem:
+                return act("quote request", "send-rule",
+                           f"{certificate_type(name)} quote request, coverage checked, from "
+                           "info@ signed Roy Lavin (Kevin, 17 Sep 2026)", rule="quote-request")
 
     if PASS_TO_ROY_RE.match(out):
         why = roy_match(name, desc, notes)
@@ -2070,6 +2173,46 @@ def handle_without_kevin(args, output, task_rec, level, attached):
             return 0
         patch_task(args.task, {AF["status"]: "Completed", AF["completion"]: now_iso()})
         status = "Completed"
+    elif carry == "send-rule":
+        # A sent email cannot be reversed: the named exception to Level A's
+        # 24-hour reverse (Kevin, 17 Sep 2026). send-email.py re-checks the
+        # stored task against the same rule and refuses anything else, in which
+        # case the task falls back to a card, exactly like a failed diary write.
+        rule = level["rule"]
+        if level.get("email"):
+            fields[AF["agentOutput"]] = level["email"]
+        fields[AF["taskType"]] = "Correspondence"
+        fields[AF["notes"]] = (fields[AF["notes"]] + f" {RULE_STAMP}: {rule}.")[-90000:]
+        patch_task(args.task, fields)
+        proc = subprocess.run(
+            [sys.executable, os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                          "send-email.py"),
+             "send", args.task, "--rule", rule],
+            capture_output=True, text=True)
+        if proc.returncode != 0:
+            err = (proc.stderr or proc.stdout or "").strip()[-300:]
+            patch_task(args.task, {
+                AF["status"]: "Approval",
+                AF["sentForApprovalBy"]: [args.agent],
+                AF["assignee"]: {"email": KEVIN_AIRTABLE_EMAIL},
+                AF["dueDate"]: today_london(),
+                AF["notes"]: (fields[AF["notes"]] + "\n\n"
+                              f"[{stamp} — agent-dispatch] The rule send was REFUSED, so this "
+                              f"went to the queue instead: {err}").strip()[-90000:],
+            })
+            print(json.dumps({"submitted": args.task, "handled": False,
+                              "fellBackToCard": True, "level": AUTONOMY_APPROVE,
+                              "error": err}))
+            return 0
+        if rule == "quote-request":
+            # The renewal is not done when the quotes are asked for: it rests
+            # a week (the letting-agent chase window) and flips back to Today.
+            due = (datetime.now(LONDON).date() + timedelta(days=7)).isoformat()
+            patch_task(args.task, {AF["status"]: "Upcoming", AF["dueDate"]: due})
+            status = "Upcoming"
+        else:
+            patch_task(args.task, {AF["status"]: "Completed", AF["completion"]: now_iso()})
+            status = "Completed"
     else:
         sys.exit(f"ERROR: Level A category {level['category']!r} has no carry-out")
 
