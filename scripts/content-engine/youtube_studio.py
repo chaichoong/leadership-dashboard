@@ -52,7 +52,8 @@ const HEADING_RE = new RegExp('^(' + HEADINGS.map((h) => h.replace(/[.*+?^${}()|
     for (const h of hs) {
       const i = t.indexOf(h);
       if (i < 0) continue;
-      const m = t.slice(i, i + 220).match(/\b(On|Off|Checking)\b/); return m ? m[1] : 'unknown';
+      // "Sharing" = ads run and the revenue is shared with a copyright claimant (17 Sep 2026: KDWp5jtQllY, concert footage)
+      const m = t.slice(i, i + 220).match(/\b(On|Off|Checking|Sharing)\b/); return m ? m[1] : 'unknown';
     }
     return 'unknown';
   }, HEADINGS);
@@ -155,7 +156,7 @@ def selftest():
     assert "open();" in JS and "out.after = await read();" in JS, "the switch is read back from a fresh page"
     assert "#radio-on" in JS and "#save-button" in JS, "the On radio and the dialog's Done button are the proven controls (13 Sep 2026)"
     assert "runBeforeUnload: false" in JS and "watchdog" in JS, "a dirty form can never hang the close"
-    assert "On|Off|Checking" in JS, "after the rating YouTube shows Checking before On (13 Sep 2026)"
+    assert "On|Off|Checking|Sharing" in JS, "after the rating YouTube shows Checking before On (13 Sep 2026); a claimed video reads Sharing (17 Sep 2026)"
     assert "Shorts Feed ads" in HEADINGS and "HEADING_RE" in JS and "for (const h of hs)" in JS, "a Short's earn page is read too (17 Sep 2026)"
     assert "lit.locator('#checkbox')" in JS and "did not tick" in JS, "the tick is proved before Submit"
     assert "if (!CERTIFY || missing.length)" in JS, "the rating is answered only for an approved card, and only when YouTube asks exactly the listed questions"
