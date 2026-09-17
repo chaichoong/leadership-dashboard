@@ -20,3 +20,9 @@ id = "a5dcc305bef5492b9db73017fee6ff22"
 #   GHL_API_KEY        - GoHighLevel Private Integration Token
 #   GHL_LOCATION_ID    - GoHighLevel location ID (dgsHwbYbp6xrhRGZr9ik)
 #   FROM_EMAIL         - Sending address (sms@operationsdirector.co.uk)
+
+# The email-reply relay reads info@'s Sent folder through the drive-upload Gmail
+# worker. Worker-to-Worker calls on workers.dev fail (error 1042), so bind it.
+[[services]]
+binding = "GMAIL_WORKER"
+service = "drive-upload"

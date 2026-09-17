@@ -156,7 +156,11 @@ async function relayEmailReplies(env) {
   for (const account of accounts) {
     let listed;
     try {
-      const resp = await fetch(`${env.GMAIL_WORKER_URL || GMAIL_WORKER}/gmail/list`, {
+      // A Worker cannot fetch another Worker on the same workers.dev address
+      // (Cloudflare error 1042), so the call goes through the service binding
+      // when present (wrangler.toml [[services]] GMAIL_WORKER -> drive-upload).
+      const gmailFetch = env.GMAIL_WORKER ? (u, i) => env.GMAIL_WORKER.fetch(u, i) : fetch;
+      const resp = await gmailFetch(`${env.GMAIL_WORKER_URL || GMAIL_WORKER}/gmail/list`, {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${env.GMAIL_TRIAGE_KEY}`,
