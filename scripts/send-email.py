@@ -88,6 +88,7 @@ from agent_email_format import (  # noqa: E402
     parse_output as parse_email_output,
     BUSINESS_SENDER,
     BUSINESS_BRAND_RE,
+    rule_send_problem,
 )
 
 BASE_ID = "appnqjDpqDniH3IRl"
@@ -105,6 +106,8 @@ AF = {
     # itself rather than a link he cannot follow.
     "description":     "fldRGhBQViKZKtkQ6",
     "notes":           "fldR7apBzSp3oxFxz",
+    # Read only by a rule send (17 Sep 2026): a redirect goes to this address alone.
+    "inboundSender":   "fldzf4xlbrQuktx0i",
 }
 
 APPROVED = ("Approved as-is", "Approved with minor edits")
@@ -276,9 +279,27 @@ def parse_output(output, task_id):
                  "See the format in this script's docstring.")
 
 
-def load_approved(task_id, require_approval=True):
+def load_approved(task_id, require_approval=True, rule=None):
     rec = get_task(task_id)
     f = rec.get("fields", {})
+    if rule:
+        # THE RULE SEND (Kevin, 17 Sep 2026). Not approved by Kevin, so the
+        # email must pass the rule itself, re-checked HERE from the stored task
+        # and its Notes stamps, never from what the caller claims.
+        output = f.get(AF["agentOutput"], "") or ""
+        if not output.strip():
+            sys.exit(f"ERROR: task {task_id} has an empty Agent Output")
+        parsed = parse_output(output, task_id)
+        problem = rule_send_problem(rule, parsed, {
+            "name": f.get(AF["name"], ""), "notes": f.get(AF["notes"], ""),
+            "inboundSender": f.get(AF["inboundSender"], ""),
+            "taskType": sel(f.get(AF["taskType"]))})
+        if problem:
+            sys.exit(f"REFUSED: task {task_id} does not qualify for the {rule!r} rule: "
+                     f"{problem}. It needs Kevin's approval.")
+        parsed.update({"taskName": f.get(AF["name"], "(Untitled)"),
+                       "outcome": f"rule:{rule}"})
+        return parsed
     name = f.get(AF["name"], "(Untitled)")
     outcome = sel(f.get(AF["approvalOutcome"]))
     status = sel(f.get(AF["status"]))
@@ -411,7 +432,8 @@ def cmd_send(args):
     # A dry run sends nothing, so requiring approval for it buys no safety and
     # costs the ability to prove the payload before the real send. The real
     # send below is still gated.
-    mail = load_approved(args.task, require_approval=not args.dry_run)
+    rule = getattr(args, "rule", None)
+    mail = load_approved(args.task, require_approval=not args.dry_run, rule=rule)
     sender_problem = business_identity_mismatch(
         mail["subject"], mail["body"], mail["from"])
 
@@ -614,6 +636,42 @@ def cmd_selftest(args):
     cases.append(("keeps £ in subject", good["subject"] == "Hi £100"))
     cases.append(("body extracted", good["body"] == "Body line."))
     refuses("refuses missing ---", "TO: a@b.com\nSUBJECT: x\nbody")
+    # Rule sends (17 Sep 2026): each condition that must keep an email on a card.
+    from agent_email_format import REDIRECT_BODY, RULE_STAMP
+    red_task = {"inboundSender": "Jane Cole <jane@example.com>",
+                "notes": RULE_STAMP + ": redirect", "taskType": "Correspondence"}
+    red = {"to": ["jane@example.com"], "cc": [], "from": "kevinbrittain@gmail.com",
+           "subject": "Re: tap", "body": REDIRECT_BODY, "attach": None}
+    cases.append(("rule: redirect qualifies", rule_send_problem("redirect", red, red_task) == ""))
+    cases.append(("rule: redirect needs the submit stamp",
+                  rule_send_problem("redirect", red, {**red_task, "notes": ""}) != ""))
+    cases.append(("rule: redirect only to the inbound sender",
+                  rule_send_problem("redirect", {**red, "to": ["other@example.com"]}, red_task) != ""))
+    cases.append(("rule: redirect body is fixed",
+                  rule_send_problem("redirect", {**red, "body": REDIRECT_BODY + " Also pay us."}, red_task) != ""))
+    cases.append(("rule: redirect never from info@",
+                  rule_send_problem("redirect", {**red, "from": "info@agilelets.co.uk"}, red_task) != ""))
+    q_task = {"name": "COMPLIANCE: EICR renewal due 2026-10-14 - 5 Dalham Place",
+              "notes": "COVERAGE CHECKED: CB9\n" + RULE_STAMP + ": quote-request",
+              "taskType": "Correspondence"}
+    q = {"to": ["jobs@spark.example"], "cc": [], "from": "info@agilelets.co.uk",
+         "subject": "EICR quote request - 5 Dalham Place, CB9 0AL",
+         "body": "Hello,\n\nCould you quote for an EICR at 5 Dalham Place?\n\nKind regards,\nRoy Lavin\nAgile Lets",
+         "attach": None}
+    cases.append(("rule: quote request qualifies", rule_send_problem("quote-request", q, q_task) == ""))
+    cases.append(("rule: quote needs the coverage check",
+                  rule_send_problem("quote-request", q, {**q_task, "notes": RULE_STAMP + ": quote-request"}) != ""))
+    cases.append(("rule: quote never with an attachment",
+                  rule_send_problem("quote-request", {**q, "attach": "/tmp/x.pdf"}, q_task) != ""))
+    cases.append(("rule: quote to at most three",
+                  rule_send_problem("quote-request", {**q, "to": ["a@x.com", "b@x.com", "c@x.com", "d@x.com"]}, q_task) != ""))
+    cases.append(("rule: quote commits to nothing",
+                  rule_send_problem("quote-request", {**q, "body": q["body"] + "\nPlease book it in."}, q_task) != ""))
+    cases.append(("rule: quote signed Roy Lavin",
+                  rule_send_problem("quote-request", {**q, "body": "Could you quote?\nKevin"}, q_task) != ""))
+    cases.append(("rule: quote never to our own address",
+                  rule_send_problem("quote-request", {**q, "to": ["kevin@runpreneur.org.uk"]}, q_task) != ""))
+    cases.append(("rule: unknown rule refused", rule_send_problem("anything", q, q_task) != ""))
     refuses("refuses BCC", "TO: a@b.com\nBCC: x@y.com\nSUBJECT: x\n---\nb")
     refuses("refuses bad address", "TO: not-an-email\nSUBJECT: x\n---\nb")
     refuses("refuses no TO", "SUBJECT: x\n---\nb")
@@ -750,6 +808,9 @@ def main():
 
     s = sub.add_parser("send", help="send an approved Correspondence task")
     s.add_argument("task")
+    s.add_argument("--rule", choices=("redirect", "quote-request"),
+                   help="send with no card under Kevin's 17 Sep 2026 rule; the task "
+                        "is re-checked here and refused unless it qualifies")
     s.add_argument("--dry-run", action="store_true",
                    help="parse, validate and report, but do not send")
     s.set_defaults(func=cmd_send)

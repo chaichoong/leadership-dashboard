@@ -259,6 +259,87 @@ RUNPRENEUR_SENDER = "kevin@runpreneur.org.uk"
 # info@agilelets.co.uk, which is a Send As alias within his Gmail account.
 PROPERTY_SENDER = "info@agilelets.co.uk"
 
+
+# ─── RULE SENDS: the only emails that go out with no card (Kevin, 17 Sep 2026) ──
+#
+# Kevin's tranche 3 rulings made two email shapes card-free: a redirect reply
+# telling property senders to use info@agilelets.co.uk, and a quote request to
+# tradespeople for a statutory certificate. An agent sending without Kevin's tap
+# is the one thing the send gate existed to stop, so the exception is exactly
+# these two shapes, checked by ONE function that submit (to decide Level A) and
+# send-email.py (to re-check at send time, from the stored task) both call.
+# A sent email cannot be reversed in 24 hours like other Level A actions; that
+# is the named exception recorded in GUARDRAILS.md and Decisions/ on 17 Sep 2026.
+RULE_STAMP = "AUTO-SEND BY RULE"
+# Kept identical to COVERAGE_MARK in agent-dispatch.py (tests/level-a-rule-sends.test.js).
+RULE_COVERAGE_MARK = "COVERAGE CHECKED"
+# Written in code, never by a model: nothing new is said to anyone.
+REDIRECT_BODY = ("Thank you for your email.\n\n"
+                 "Please send anything about the property, repairs, compliance or the "
+                 "tenancy to info@agilelets.co.uk, where the team will pick it up.\n\n"
+                 "Kind regards,\nKevin Brittain")
+RULE_OWN_ADDRESSES = {PERSONAL_SENDER, PROPERTY_SENDER, "kevin@runpreneur.org.uk",
+                      "kevin@operationsdirector.co.uk", "roy.lavin1978@gmail.com"}
+RULE_NO_COMMIT_RE = re.compile(
+    r"\b(we accept|agree to pay|go ahead|please book|confirm (?:the )?booking|"
+    r"deposit|bank details|pay (?:you|the invoice))\b", re.I)
+RULE_ADDR_RE = re.compile(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+")
+
+
+def rule_send_problem(rule, mail, task, require_stamp=True):
+    """Why this email may NOT go out under `rule` with no card, or "" when it may.
+
+    `mail` is a parse_output() dict; `task` carries name, notes, inboundSender
+    and taskType. Every failing condition keeps the email on a card.
+    """
+    notes = str(task.get("notes") or "")
+    if require_stamp and f"{RULE_STAMP}: {rule}" not in notes:
+        return "the task carries no rule stamp from submit"
+    if str(task.get("taskType") or "Correspondence") != "Correspondence":
+        return "only a Correspondence task is sent by rule"
+    if mail.get("attach"):
+        return "an attachment is never sent by rule"
+    if mail.get("cc"):
+        return "CC is never sent by rule"
+    to = [a.strip().lower() for a in (mail.get("to") or [])]
+    sender = (mail.get("from") or "").strip().lower()
+    body = mail.get("body") or ""
+    if rule == "redirect":
+        inbound = RULE_ADDR_RE.search(str(task.get("inboundSender") or ""))
+        if not inbound:
+            return "the task has no inbound sender address"
+        if to != [inbound.group(0).lower()]:
+            return "a redirect goes only to the task's own inbound sender"
+        if to[0] in RULE_OWN_ADDRESSES:
+            return "one of our own addresses is never redirected"
+        if sender != PERSONAL_SENDER:
+            return "a redirect goes from kevinbrittain@gmail.com"
+        if body.strip() != REDIRECT_BODY:
+            return "the redirect body is not the fixed text"
+        return ""
+    if rule == "quote-request":
+        if not str(task.get("name") or "").startswith("COMPLIANCE:"):
+            return "a quote request belongs to a COMPLIANCE task"
+        if sender != PROPERTY_SENDER:
+            return "a quote request goes from info@agilelets.co.uk"
+        if "roy lavin" not in body.lower():
+            return "a quote request is signed Roy Lavin"
+        if "quote" not in (mail.get("subject") or "").lower():
+            return "the subject does not say quote"
+        if not 1 <= len(to) <= 3:
+            return "a quote request goes to one to three tradespeople"
+        if any(a in RULE_OWN_ADDRESSES for a in to):
+            return "one of our own addresses is a recipient"
+        if RULE_COVERAGE_MARK not in notes:
+            return "the coverage check has not passed on this task"
+        if re.search(r"^\s*SPEND:", body, re.M):
+            return "a quote request commits no money"
+        hit = RULE_NO_COMMIT_RE.search(body)
+        if hit:
+            return "a quote request commits to nothing (%r)" % hit.group(0)
+        return ""
+    return "unknown rule %r" % rule
+
 # Kevin's ruling, 27 Aug 2026, in his own words on task recV3nCmp3ivQeXTN:
 # "Send from kevinbrittain@gmail.com. Never send from kevin@runpreneur.org.uk
 # unless it's to do with Runpreneur. Revert to sending from
