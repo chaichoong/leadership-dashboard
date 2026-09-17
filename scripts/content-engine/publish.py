@@ -377,6 +377,13 @@ def fit_for_upload(path, limit=MEDIA_MAX_BYTES):
     return out
 
 
+def is_png(path):
+    try:
+        with open(path, "rb") as fh: return fh.read(8) == b"\x89PNG\r\n\x1a\n"
+    except OSError:
+        return False
+
+
 def media_for(day, entry, kinds):
     files = episode_files(day); media = entry.setdefault("media", {})
     for k in kinds:
@@ -385,6 +392,10 @@ def media_for(day, entry, kinds):
         if not os.path.exists(local):
             if k in ("thumb", "podcast"): continue
             raise SystemExit("episode %d: %s is not in the edited folder (%s)" % (day, k, files[k]))
+        if k == "thumb" and not is_png(local):
+            # 16 Sep 2026: the Drive folder handed back its sign-in page for 2057's and 2058's thumbnails; it was uploaded
+            # and became the blog's header image. A thumbnail is uploaded only when the bytes are really a PNG.
+            print("episode %d: thumbnail at %s is not a PNG; not uploaded" % (day, local), file=sys.stderr); continue
         src = fit_for_upload(local)
         media[k] = upload_media(src)
         if src != local and os.path.exists(src): os.remove(src)
@@ -589,9 +600,13 @@ def finish_extras(day, entry, recs, test, save):
             upload = fetch_readable(day, "podcast") if spotify.PODCAST_FORMAT == "audio" else fetch_readable(day, "full")
             if not os.path.exists(upload): upload = full_from_drive(day) or upload
             thumb_local = fetch_readable(day, "thumb")
+            if os.path.exists(upload) and not is_png(thumb_local):
+                # every episode on Spotify carries its thumbnail (Kevin, 17 Sep 2026): no PNG, no upload; tried next run
+                print("episode %d: podcast held, the thumbnail is not a readable PNG yet" % day, file=sys.stderr)
+                return done
             if os.path.exists(upload):
                 tried_before = os.path.exists(os.path.join(os.path.dirname(STATE), "spotify_plan_%d.json" % day))
-                plan_path, ptitle = spotify.write_plan(day, upload, ff.get("Podcast Copy"), entry["youtube_link"], test, os.path.dirname(STATE), thumb=thumb_local if os.path.exists(thumb_local) else "")
+                plan_path, ptitle = spotify.write_plan(day, upload, ff.get("Podcast Copy"), entry["youtube_link"], test, os.path.dirname(STATE), thumb=thumb_local)
                 if tried_before and not test:
                     # an earlier attempt left its plan (2056 crashed mid-run on 11 Sep 2026 and its state was rebuilt
                     # without the podcast): look at Spotify before uploading, so a retry never publishes a second copy
@@ -1288,7 +1303,7 @@ def _selftest_once_only_body():
     schedule_stage and finish_extras against fakes: the first run is killed after two posts, the second run must
     create only the channels that were never started, the blog exactly once, and Spotify exactly once."""
     import copy as _copy, tempfile as _tf, types as _types
-    g = globals(); saved = {k: g[k] for k in ("_cfg", "episode_files", "media_for", "mode", "youtube_direct_ready", "create_post", "approval", "watch", "run_spotify", "output_link")}
+    g = globals(); saved = {k: g[k] for k in ("_cfg", "episode_files", "media_for", "mode", "youtube_direct_ready", "create_post", "approval", "watch", "run_spotify", "output_link", "is_png")}
     tmp = _tf.mkdtemp()
     def fake_files(day):
         out = {}
@@ -1306,6 +1321,7 @@ def _selftest_once_only_body():
     try:
         g.update({"_cfg": lambda brand="Runpreneur": ("k", "loc", "user"), "episode_files": fake_files,
                   "output_link": lambda day, kind, ledger=None: None,       # never the real ledger or Drive in a selftest
+                  "is_png": lambda path: True,                               # the fake thumbnail stands in for a real PNG
                   "media_for": lambda day, entry, kinds: {k: "https://cdn/%s" % k for k in kinds},
                   "mode": lambda: "live", "youtube_direct_ready": lambda: False, "create_post": fake_create,
                   "approval": _types.SimpleNamespace(append_note=lambda rec, line: line, load_state=lambda: {}),
@@ -1475,15 +1491,22 @@ def selftest():
     assert fsrc.index("spotify.verify_published(ptitle") < fsrc.index("run_spotify(day"), "a retried podcast looks at Spotify before it uploads"
     # 15 Sep 2026: a media upload that raises SystemExit must not end the hourly run (1841's mp3 did, hourly)
     real_media, real_files, real_drive = globals()["media_for"], globals()["episode_files"], globals()["full_from_drive"]
+    real_fetch, real_run_spotify = globals()["fetch_readable"], globals()["run_spotify"]
     def boom(day, entry, kinds): raise SystemExit("media upload failed for Ep1841_Podcast.mp3: ")
+    def no_browser(*a, **k): raise AssertionError("a selftest reached the Spotify browser lane")
     globals()["media_for"] = boom; globals()["episode_files"] = lambda day: {k: "/nonexistent/%s" % k for k in ("full", "podcast", "thumb")}
     globals()["full_from_drive"] = lambda day, work=None: None      # never the network in a selftest
+    # 15-17 Sep 2026: this test reached the real Drive API, the attachments folder and the Spotify browser lane, and
+    # left two empty "Day 1841" drafts on Spotify. Every outside call is faked here.
+    globals()["fetch_readable"] = lambda day, kind, ledger=None, download=None: "/nonexistent/%s" % kind
+    globals()["run_spotify"] = no_browser
     try:
         ent = {"youtube_link": "https://youtu.be/x", "blog": {"url": "https://runpreneur.org.uk/blog/b/y"}}
         out = finish_extras(1841, ent, {"Long Form Video": {"id": "recX", "fields": {}}}, True, lambda: None)
         assert out == [] and "media upload failed" in ent["podcast"]["audio_error"], ent
     finally:
         globals()["media_for"], globals()["episode_files"], globals()["full_from_drive"] = real_media, real_files, real_drive
+        globals()["fetch_readable"], globals()["run_spotify"] = real_fetch, real_run_spotify
     src = inspect.getsource(sync); assert "import platform_copy" not in src, "sync must use the module-level pc: an import inside the function made pc a local and crashed every sync (10 Sep 2026, 07:15)"
     assert 'if not str(day).isdigit() or not isinstance(entry, dict): continue' in src, "sync skips the cursor and the held posts"
     assert may_go_to_youtube(2054, gaps, st, led, {1799, 2054}) and st[CURSOR_KEY] == 2053, "a gap day in the approved set does not disturb the order"

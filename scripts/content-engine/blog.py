@@ -50,15 +50,66 @@ def slug_for(title, day):
     return s
 
 
+WORDS_PER_MINUTE = 200     # GHL's own figure: the team's 1,031-word article reads readTimeInMinutes 5.155
+
+
+def reading_stats(html):
+    """(words, minutes) for an article's HTML. The site prints "N min read" beside the date only when these are set;
+    every article the engine made until 17 Sep 2026 sent 0 and showed none (Kevin: he likes the reading time)."""
+    import html as _h
+    text = _h.unescape(re.sub(r"<[^>]+>", " ", html or ""))
+    words = len(re.findall(r"[A-Za-z0-9\u00C0-\u024F'’-]+", text))
+    return words, round(words / WORDS_PER_MINUTE, 3)
+
+
 def build_post(loc, day, blog_copy, description, thumb_url, youtube_link, status, when=None):
     title, html, first = blog_parts(blog_copy, day)
     if youtube_link:
         html += '\n<p>Watch the full episode: <a href="%s">%s</a></p>' % (youtube_link, youtube_link)
     desc = (description or first or title).strip()[:300]
+    words, minutes = reading_stats(html)
     return {"title": title, "locationId": loc, "blogId": BLOG_ID, "imageUrl": thumb_url or "", "imageAltText": title,
             "description": desc, "rawHTML": html, "status": status, "categories": CATEGORY_IDS, "tags": TAGS,
-            "author": AUTHOR_ID, "urlSlug": slug_for(title, day),
+            "author": AUTHOR_ID, "urlSlug": slug_for(title, day), "wordCount": words, "readTimeInMinutes": minutes,
             "publishedAt": (when or dt.datetime.now(dt.timezone.utc)).strftime("%Y-%m-%dT%H:%M:%S.000Z")}
+
+
+EDITABLE = ("title", "locationId", "blogId", "imageUrl", "imageAltText", "description", "rawHTML", "status", "categories",
+            "tags", "author", "urlSlug", "publishedAt")
+
+
+def repair_post(post_id, image_url=None, dry_run=False):
+    """An existing article brought up to standard: its reading time (and, when given, a new header image), written back
+    with every other field as it is, then read back as proof. Returns (before, after) for the fields it touched."""
+    import publish
+    _, loc, _ = publish._cfg()
+    def get():
+        r = publish.ghl("GET", "/blogs/posts/%s?locationId=%s" % (post_id, loc))
+        p = r.get("data") or r.get("blogPost") or r
+        return p.get("blogPost", p) if isinstance(p, dict) else p
+    post = get()
+    body = {k: post[k] for k in EDITABLE if k in post}
+    body["locationId"] = loc
+    body["wordCount"], body["readTimeInMinutes"] = reading_stats(post.get("rawHTML", ""))
+    if image_url: body["imageUrl"] = image_url
+    before = {k: post.get(k) for k in ("wordCount", "readTimeInMinutes", "imageUrl")}
+    if dry_run: return before, {k: body.get(k) for k in before}
+    publish.ghl("PUT", "/blogs/posts/%s" % post_id, body)
+    back = get()
+    return before, {k: back.get(k) for k in before}
+
+
+def our_posts():
+    """{url slug: post id} for every article on the blog (paged), to find the engine's articles by their address."""
+    import publish
+    _, loc, _ = publish._cfg()
+    out, offset = {}, 0
+    while True:
+        r = publish.ghl("GET", "/blogs/posts/all?locationId=%s&blogId=%s&limit=50&offset=%d" % (loc, BLOG_ID, offset))
+        posts = r.get("blogs") or r.get("data") or r.get("posts") or []
+        for p in posts: out[p.get("urlSlug")] = p.get("_id")
+        if len(posts) < 50: return out
+        offset += 50
 
 
 def publish_blog(day, full, entry, thumb_url, youtube_link, test):
@@ -102,9 +153,15 @@ def selftest():
     assert 'href="https://youtu.be/x"' in b["rawHTML"] and b["imageUrl"] == "https://cdn/t.png" and b["description"] == "A short description."
     assert "<script" not in build_post("l", 1, "SEO Title: x\n\n<script>alert(1)</script>", "", "", "", "DRAFT")["rawHTML"], "copy is escaped"
     assert b["publishedAt"].endswith("Z")
-    print(json.dumps({"checks": 9, "failed": []}))
+    w, m = reading_stats("<p>" + " ".join(["word"] * 1031) + "</p><h2>Two &amp; more</h2>")
+    assert (w, m) == (1033, 5.165), (w, m)
+    assert b["wordCount"] > 0 and b["readTimeInMinutes"] == round(b["wordCount"] / 200, 3), "every new article carries its reading time (17 Sep 2026)"
+    print(json.dumps({"checks": 11, "failed": []}))
 
 
 if __name__ == "__main__":
     if sys.argv[1:] == ["selftest"]: selftest()
-    else: raise SystemExit("usage: blog.py selftest (publishing runs from publish.py stage 2)")
+    elif sys.argv[1:2] == ["repair"] and len(sys.argv) >= 3:
+        before, after = repair_post(sys.argv[2], image_url=(sys.argv[3] if len(sys.argv) > 3 else None), dry_run="--dry-run" in sys.argv)
+        print(json.dumps({"post": sys.argv[2], "before": before, "after": after}))
+    else: raise SystemExit("usage: blog.py selftest | repair POST_ID [IMAGE_URL] [--dry-run]  (publishing runs from publish.py stage 2)")
