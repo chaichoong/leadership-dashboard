@@ -35,6 +35,19 @@ describe('parseEmailReply', () => {
     });
   });
 
+  it('reads the SMS_BRIDGE_ID marker a real Gmail reply quotes (Kevin, live test 17 Sep 2026)', async () => {
+    const { parseEmailReply } = await import(WORKER_PATH);
+    const real = {
+      id: 'real1',
+      headers: { subject: 'Re: [SMS] Kevin Brittain: Test' },
+      body: 'Test reply\n\nKind regards,\n\nAgile Lets Team\n\n\nOn Thu, 17 Sept 2026 at 15:56, SMS from Kevin Brittain <\nsms@operationsdirector.co.uk> wrote:\n\n> SMS from Kevin Brittain\n> Test\n> Use Inbound Comms to reply as SMS to Kevin Brittain.\n> SMS_BRIDGE_ID:UrNw34NAriAEdl0ActzV\n>\n',
+    };
+    expect(parseEmailReply(real)).toEqual({
+      conversationId: 'UrNw34NAriAEdl0ActzV',
+      text: 'Test reply\n\nKind regards,\n\nAgile Lets Team',
+    });
+  });
+
   it('ignores forwards, mail without a conversation, and replies it cannot separate from the quote', async () => {
     const { parseEmailReply } = await import(WORKER_PATH);
     expect(parseEmailReply({ ...REPLY, headers: { subject: 'Fwd: [SMS] Jane Cole: tap' } })).toBeNull();
@@ -81,7 +94,7 @@ describe('the relay sends each reply once, from the Sent folder only', () => {
     expect(sends()[0].body).toMatchObject({ type: 'SMS', contactId: 'contact9', conversationId: 'conv123abc',
       message: 'Roy will come round tomorrow at 10.\n\nKind regards,\nRoy Lavin' });
     const list = calls.find((c) => c.url.endsWith('/gmail/list'));
-    expect(list.body.q).toMatch(/^in:sent /);
+    expect(list.body.q).toBe('in:sent newer_than:1d subject:SMS');
     expect(list.body.account).toBe('info@agilelets.co.uk');
     await run();
     expect(sends()).toHaveLength(1);
