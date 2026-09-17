@@ -119,7 +119,9 @@ export default {
 // one write per reply, never per tick: the account-wide free KV budget).
 const REPLY_CHECK_EVERY_MIN = 5;
 const GMAIL_WORKER = 'https://drive-upload.kevinbrittain.workers.dev';
-const CONVERSATION_RE = /GHL Conversation:\s*([A-Za-z0-9_-]{6,})/;
+// The plain text carries 'GHL Conversation: <id>'; the HTML a person replies to carries
+// 'SMS_BRIDGE_ID:<id>' (found by Kevin's live test, 17 Sep 2026). Either identifies it.
+const CONVERSATION_RE = /(?:GHL Conversation:|SMS_BRIDGE_ID:)\s*([A-Za-z0-9_-]{6,})/;
 const QUOTE_START_RE = /^(On .+wrote:|-{2,}\s*Original Message|From: .+|>)/m;
 const SMS_MAX_CHARS = 1000;
 
@@ -161,7 +163,7 @@ async function relayEmailReplies(env) {
           'Content-Type': 'application/json',
           'User-Agent': 'od-sms-email-bridge/1.0',
         },
-        body: JSON.stringify({ q: 'in:sent newer_than:1d "GHL Conversation"', maxResults: 10, account }),
+        body: JSON.stringify({ q: 'in:sent newer_than:1d subject:SMS', maxResults: 10, account }),
       });
       if (!resp.ok) { console.error('reply relay: gmail list', account, resp.status); continue; }
       listed = await resp.json();
