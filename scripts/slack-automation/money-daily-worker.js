@@ -353,11 +353,12 @@ async function gatherHuddle(pat) {
 async function gatherTasks(pat) {
     const rows = await airtableFetch(pat, TBL_TASKS, {
         filterByFormula: `AND({Task Name}!='',NOT({Status}='Completed'),NOT({Status}='Cancelled'))`,
-        'fields[]': ['Task Name', 'Assignee', 'Due Date', 'Status', 'Priority', 'Task Type', 'Deferred Until'],
+        'fields[]': ['Task Name', 'Assignee', 'Due Date', 'Status', 'Priority', 'Task Type', 'Deferred Until', 'Team Member'],
     }, true);
     const today = todayLondonISO();
     const t = rows.map(r => ({
         name: String(r.fields['Task Name'] || '').slice(0, 90),
+        holders: Array.isArray(r.fields['Team Member']) ? r.fields['Team Member'] : [],
         who: (r.fields['Assignee'] && r.fields['Assignee'].name) || 'unassigned',
         due: (r.fields['Due Date'] || '').slice(0, 10),
         status: String(r.fields['Status'] || ''),
@@ -401,7 +402,45 @@ async function gatherTasks(pat) {
         // The same list as written, for quoting back at Kevin when the brief's
         // step turns out to be work already waiting on his tick.
         approvalDisplayNames: waiting.map(x => x.name),
+        onlyYou: selectOnlyYou(t, today),
     };
+}
+
+// "Only you today" (Kevin, 17 Sep 2026: Decisions "Kevin stops using a task list; only-you
+// items go in the CEO brief"). He no longer opens a task list, so the few things no agent can
+// do (a bank change, a payment, a signature) reach him here, due items only. A fixed rule, not
+// the huddle's judgement: the huddle does not run when the Mac sleeps, and the same tasks must
+// give the same list. Any status counts, Approval included, because on 17 Sep all 13 banking
+// items sat in the queue as DECIDE cards. "Bank" alone is not enough ("Birmingham Midshires
+// (Bank of Scotland)" is a mortgage letter). "sign" is the verb only: never "SIGN-IN", "sign in",
+// "sign into" or "sign up" (a session), "signs" (a noun) or "signed" (already done), and never
+// the product "Adobe Sign". SO is a standing order only in capitals and only when an amount,
+// a dash or "for" follows ("Update SO amount", "UPDATE SO - 5 DALHAM"), so "TAKING SO LONG"
+// never counts. A chase is money owed TO Kevin, the agents' lane; arrears Kevin PAYS still count.
+const KEVIN_TEAM_MEMBER = 'recHEt2VPYothaqTd';
+
+function selectOnlyYou(tasks, today) {
+    const isOnlyYou = name => !/\b(chase|chasing)\b|\brent payments?\b|\bUC payment|adobe sign|email signature|\bsign\b[^.]{0,40}\binto\b/i.test(name) && (
+        /standing order|direct debit|docusign|\bbank (details|account|transfer|change)|\bbanking\b|\bpay\b|\bpayments?\b|\bsignatures?\b|\b(counter)?sign(ing)?\b(?![\s-]*(in|into|up|out)\b)/i.test(name)
+        || /\bSO\b(?=\s*(?:[-–£]|amount\b|for\b))/.test(name));
+    const due = (tasks || [])
+        .filter(x => (x.holders || []).includes(KEVIN_TEAM_MEMBER))
+        .filter(x => x.due && x.due <= today && !(x.deferred && x.deferred > today))
+        .filter(x => isOnlyYou(x.name))
+        .sort((a, b) => a.due.localeCompare(b.due) || a.name.localeCompare(b.name));
+    return { items: due.slice(0, 3).map(x => ({ name: x.name, due: x.due })), more: Math.max(0, due.length - 3) };
+}
+
+// The Slack text for the section, or '' when nothing is due (the section is then left out).
+function onlyYouText(onlyYou, today) {
+    if (!onlyYou || !onlyYou.items || !onlyYou.items.length) return '';
+    const esc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    // Fixed month names: ICU builds disagree on "Sep" vs "Sept", so no locale formatting.
+    const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    const when = d => d === today ? 'due today' : `due ${Number(d.slice(8, 10))} ${MONTHS[Number(d.slice(5, 7)) - 1]}`;
+    const lines = onlyYou.items.map(x => `• ${esc(x.name)} (${when(x.due)})`);
+    if (onlyYou.more) lines.push(`+${onlyYou.more} more due`);
+    return `*ONLY YOU TODAY*\n${lines.join('\n')}`;
 }
 
 // Today's calendar from a private ICS feed (no OAuth needed). Optional: when the
@@ -762,9 +801,13 @@ function buildBriefBlocks(m, brief) {
     const blocks = [
         { type: 'header', text: { type: 'plain_text', text: `☀️ ${brief.headline || 'Your day, decided.'}`, emoji: true } },
         { type: 'section', text: { type: 'mrkdwn', text: `*THE ONE THING*\n${brief.one_thing}\n\n*Start here (10 min):* ${brief.first_step}` } },
+    ];
+    const onlyYou = onlyYouText(brief.only_you, todayLondonISO());
+    if (onlyYou) blocks.push({ type: 'section', text: { type: 'mrkdwn', text: onlyYou } });
+    blocks.push(
         { type: 'section', text: { type: 'mrkdwn', text: `*Why this wins today:* ${brief.why || ''}` } },
         { type: 'section', text: { type: 'mrkdwn', text: `${LIGHT_EMOJI[m.light]} *Safe to act today: ${fmt(m.safeToActToday)}* (${LIGHT_LABEL[m.light]})` } },
-    ];
+    );
     if (brief.ignore.length) {
         blocks.push({ type: 'section', text: { type: 'mrkdwn', text: `*Ignore today:* ${brief.ignore.join(' · ')}` } });
     }
@@ -803,6 +846,7 @@ async function sendDailyDM(env) {
         // version by design, and until 21 Aug 2026 nothing recorded what the
         // departments had actually said, so an override could not be audited.
         brief.huddle = huddle ? { one_thing: huddle.oneThing, first_step: huddle.firstStep, flags: huddle.flags } : null;
+        brief.only_you = tasks.onlyYou;
         const fallbackText = `ONE thing: ${brief.one_thing} | Safe to act: ${fmt(m.safeToActToday)} (${LIGHT_LABEL[m.light]})`;
         await slackPost(token, userId, fallbackText, buildBriefBlocks(m, brief));
         try { await storeBrief(pat, brief, m, tasks, huddle); }
@@ -974,6 +1018,7 @@ export default {
                 const [tasks, calendar] = await Promise.all([gatherTasks(env.AIRTABLE_PAT), gatherCalendar(env)]);
                 const huddle = await gatherHuddle(env.AIRTABLE_PAT);
                 const brief = await callCeo(env, buildCeoPrompt(m, tasks, calendar, env, huddle), huddle, tasks);
+                brief.only_you = tasks.onlyYou;
                 return Response.json({ ok: true, brief, money: { safeToActToday: m.safeToActToday, light: m.light }, taskCounts: tasks.counts, calendarConnected: calendar.connected });
             }
             const m = await loadAndCompute(env.AIRTABLE_PAT);
