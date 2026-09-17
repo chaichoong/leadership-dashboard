@@ -358,7 +358,7 @@ Run this as one subagent with the prompt: "Read the results of this morning's th
 
 **3. Drive auth** — `scripts/drive-auth-check.py` already ran at 06:50. BROKEN is one of the few things allowed to DM Kevin directly.
 
-**4. The slots' own reports.** Read what the last 24 hours of slot runs left in `~/knowledge-os/logs/<job>/runs.log` and in `monitoring/`. You are looking for one thing: **a slot that should have run and did not**, or one that ran and failed. An arrivals list cannot restore trust; absence is the signal.
+**4. The slots' own reports.** Read what the last 24 hours of slot runs left in `~/knowledge-os/logs/<job>/runs.log` and in `monitoring/`. You are looking for three things: **a slot that should have run and did not**, one that ran and failed, and **one that exited 0 but did nothing while work waited** (17 Sep 2026: for inbound-triage, a run that read zero messages or created zero tasks while its own scan report or the Gmail label-12 count shows new mail is BROKEN; if you cannot read what was waiting, that slot is NOT CHECKED, never green). An arrivals list cannot restore trust; absence is the signal.
 
 ## Phase 3 — Calendar work (only when due)
 
