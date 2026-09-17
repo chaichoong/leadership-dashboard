@@ -533,6 +533,55 @@ def auto_reply_refusal(fields, cache):
     return None
 
 
+# NEVER A CARD (Kevin, 17 Sep 2026, tranche 3 interview). Two classes are
+# decided by text a machine can read, so they are refused here, at the gate
+# every create passes, rather than left to each agent's judgement:
+#   * a company that no longer trades (Two Chefs, Cafe @ Highgate, Social
+#     Housing Holdings). Anything legal about them (the Official Receiver, a
+#     court claim, a liquidator, a solicitor) is still created: a legal matter
+#     is never refused on a name match, whichever company it concerns.
+#   * a payment or payout failure under £25 (a £1.42 GoCardless payout).
+#     Anything mentioning rent, arrears or a tenant is created: a failed rent
+#     collection is the rent process, whatever the amount.
+# Kevin's evidence: of 37 reasoned inbox rejections from 27 Aug to 17 Sep,
+# four were Stripe or Revolut notices for dissolved companies and one a £1.42
+# payout. Cold sales and account notices need judgement and stay in
+# Knowledge/inbox-decision-protocol.md.
+DISSOLVED_COMPANY_RE = re.compile(
+    r"\btwo chefs\b|\bcafe\s*@?\s*highgate\b|\bcafehighgate\b|\bsocial housing holdings\b", re.I)
+LEGAL_MATTER_RE = re.compile(
+    r"official receiver|liquidator|insolvency service|\bcourt\b|\bclaim\b|solicitor|\blegal\b|"
+    r"winding.up|disqualif|\bhmcts\b|tribunal|judg(?:e)?ment|bailiff|enforcement", re.I)
+PAYMENT_WORD_RE = re.compile(
+    r"\b(?:payment|payout|transfer|direct debit|collection)s?\b", re.I)
+FAILED_WORD_RE = re.compile(r"\bfail(?:ed|s|ure)?\b", re.I)
+RENT_WORD_RE = re.compile(r"\brent\b|arrears|tenan", re.I)
+AMOUNT_RE = re.compile(r"(?:£|GBP\s?|\$|USD\s?|EUR\s?|€)\s*([0-9][0-9,]*(?:\.[0-9]{1,2})?)"
+                       r"|\b([0-9][0-9,]*\.[0-9]{2})\b", re.I)
+SMALL_FAILURE_LIMIT = 25
+
+
+def never_a_card_refusal(fields):
+    """Why Kevin ruled this create never becomes a card, or None."""
+    text = "%s %s" % (fields.get(F["name"], ""), str(fields.get(F["desc"], ""))[:2000])
+    company = DISSOLVED_COMPANY_RE.search(text)
+    if company and not LEGAL_MATTER_RE.search(text):
+        return ("about %s, a company that no longer trades, with nothing legal in it "
+                "(Kevin, 17 Sep 2026)" % company.group(0))
+    if (PAYMENT_WORD_RE.search(text) and FAILED_WORD_RE.search(text)
+            and not RENT_WORD_RE.search(text)):
+        amounts = []
+        for cur, bare in AMOUNT_RE.findall(text):
+            try:
+                amounts.append(float((cur or bare).replace(",", "")))
+            except ValueError:
+                continue
+        if amounts and max(amounts) < SMALL_FAILURE_LIMIT:
+            return ("a payment failure under GBP %d (%.2f) (Kevin, 17 Sep 2026)"
+                    % (SMALL_FAILURE_LIMIT, max(amounts)))
+    return None
+
+
 # Words that describe ANY incident and so cannot identify one. Shared
 # verbatim with DUPE_GENERIC in os/agents/index.html.
 DUPE_GENERIC = {
@@ -1162,7 +1211,7 @@ def cmd_create(fields, force=False, dry_run=False):
         # Refuse BEFORE the board read: an auto-reply is not a matter, so the
         # duplicate question never arises. --force is the human override and
         # is logged by the caller's own reason.
-        why = auto_reply_refusal(fields, cache)
+        why = auto_reply_refusal(fields, cache) or never_a_card_refusal(fields)
         if why:
             print(json.dumps({"action": "refused", "reason": why,
                               "key": verdict["key"], "dryRun": dry_run}))
@@ -1537,6 +1586,25 @@ def selftest():
     unknown = dict(fylde_task, **{F["inboundUrl"]: "https://mail.google.com/mail/u/0/#inbox/deadbeef00"})
     check("an unscanned thread is not assumed to be an auto-reply", auto_reply_refusal(unknown, cache) is None)
     check("a normal task name passes", auto_reply_refusal({F["name"]: "INBOUND: reply to Swinton"}, cache) is None)
+    # Never a card (Kevin, 17 Sep 2026): real task names off the rejection log.
+    nac = lambda name, desc="": never_a_card_refusal({F["name"]: name, F["desc"]: desc})
+    check("a Stripe notice for liquidated Two Chefs is refused",
+          nac("INBOUND: Stripe action required - verify Two Chefs Cambridge business") is not None)
+    check("a Revolut notice for Social Housing Holdings is refused",
+          nac("INBOUND: Revolut failed transfer 13764.44 - Social Housing Holdings (liquidation)") is not None)
+    check("the Official Receiver writing about Social Housing Holdings is created",
+          nac("INBOUND: POST: Official Receiver - Social Housing Holdings Ltd") is None)
+    check("a court claim naming the cafe is created",
+          nac("Cafe @ Highgate - HM Courts and Tribunals Service Civil Claims") is None)
+    check("a GBP 1.42 payout failure is refused",
+          nac("INBOUND: GoCardless payout of 1.42 failed, resend or investigate") is not None)
+    check("a failed rent collection is created whatever the amount",
+          nac("INBOUND: GoCardless Lee Drury payment failed rent arrears", "Amount 1.42") is None)
+    check("a GBP 250 payment failure is created",
+          nac("INBOUND: Barclaycard payment of £250.00 failed") is None)
+    check("a failure with no amount is created",
+          nac("INBOUND: NatWest payment failed - check account") is None)
+    check("an ordinary task passes", nac("INBOUND: Sefton Council licence fee £150") is None)
 
     # ── Hard deadline vs receipt date (finding …-447) ───────────────────
     # The two live tasks that exposed it, verbatim off the board on 4 Sep 2026.

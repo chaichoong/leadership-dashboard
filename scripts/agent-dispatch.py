@@ -1690,6 +1690,22 @@ CLOSE_HANDLED_RE = re.compile(
     r"[^\n]*?\b(rec[A-Za-z0-9]{14})\b", re.I)
 PASS_TO_ROY_RE = re.compile(r"^\s*PASS TO ROY:", re.I)
 
+# No-card caps per statutory certificate booked through Roy (Kevin's tranche 3
+# interview, 17 Sep 2026). A named exception to the £100 money rule for these
+# four certificates only; the brain file Knowledge/property-compliance-
+# requirements.md carries the ruling. certificate_type() reads the one type a
+# task name is about (defined with the dispatch-time grouping).
+CERT_SPEND_CAPS = {"GSC": 100, "EPC": 100, "EICR": 200, "FIRE": 200}
+
+
+def certificate_booking_cap(name, output):
+    """The no-card cap for a PASS TO ROY certificate booking, or 0."""
+    if not PASS_TO_ROY_RE.match(output or ""):
+        return 0
+    if not str(name or "").startswith(COMPLIANCE_TASK_PREFIX):
+        return 0
+    return CERT_SPEND_CAPS.get(certificate_type(name), 0)
+
 
 def spend_declared(output):
     """(amount, recurring) from a SPEND: line, or (None, False) when absent."""
@@ -1787,8 +1803,15 @@ def decision_level(output, task_type, task_rec, fetch=None, agent_banner=None):
     notes = tf.get(AF["notes"], "") or ""
     amount, recurring = spend_declared(out)
     money = money_level(amount, recurring)
+    # A statutory certificate booked through Roy has its own no-card cap
+    # (Kevin, 17 Sep 2026): gas safety and EPC £100, EICR and fire safety
+    # £200. One-off only: recurring stays Kevin's at any amount.
+    cert_cap = certificate_booking_cap(name, out)
+    if money == "card" and cert_cap and amount is not None and amount <= cert_cap:
+        money = "inform"
     base = {"category": "other", "carry": "", "evidence": "", "money": money,
-            "amount": amount, "recurring": recurring, "why": ""}
+            "amount": amount, "recurring": recurring, "why": "",
+            "certificateCap": cert_cap or None}
 
     def card(category, why):
         return {**base, "level": AUTONOMY_APPROVE, "category": category, "why": why}
@@ -1921,6 +1944,13 @@ def decision_level(output, task_type, task_rec, fetch=None, agent_banner=None):
 
     if PASS_TO_ROY_RE.match(out):
         why = roy_match(name, desc, notes)
+        if not why and cert_cap:
+            # roy_match knows repairs and EICR but not gas safety, EPC or fire
+            # certificates; Kevin's 17 Sep ruling puts all four bookings with
+            # Roy. The same veto still applies to the whole text.
+            everything = " ".join(str(t or "") for t in (name, desc, notes))
+            if not (ROY_EXCLUDE_RE.search(everything) or ROY_HOME_RE.search(everything)):
+                why = f"statutory {certificate_type(name)} booking (Kevin, 17 Sep 2026)"
         if not why:
             return card("pass to Roy",
                         "the task NAME does not match the property lane, or a veto "
@@ -6711,6 +6741,80 @@ def ensure_renewal_tasks():
                       "renewalTasksCreated": created}))
 
 
+# ONE WEEKLY CHASE FOR ROY'S STALE REPAIRS (Kevin, 17 Sep 2026). The Property
+# Administration file has promised since 2 Sep to follow up any repair task of
+# Roy's with no movement in 7 days, but nothing ever raised that follow-up: it
+# happened only if a run happened to look (found by the 17 Sep handoff map).
+# One task a week, listing every stale repair, so Roy gets one chase and Kevin's
+# queue never gets one card per repair. Linked records are matched through the
+# record-id LOOKUP, never ARRAYJOIN of the link itself (CLAUDE.md).
+ROY_REC_ID = HUMANS["roy.lavin1978@gmail.com"]["rec"]
+ROY_STALE_DAYS = 7
+ROY_FOLLOWUP_STATE = os.path.join(STATE_DIR, "roy-followups.json")
+ROY_FOLLOWUP_NAME = "MAINTENANCE: weekly follow-up with Roy on repairs unmoved for 7 days"
+ROY_OPEN_FORMULA = ("AND(FIND('" + ROY_REC_ID + "', ARRAYJOIN({Record ID (Used for Automation) "
+                    "(from Team Members)})), {Status}!='Completed', {Status}!='Cancelled')")
+
+
+def stale_roy_repairs(rows):
+    """Repairs among Roy's open tasks: a Maintenance Ticket tick or a MAINTENANCE: name."""
+    out = []
+    for r in rows:
+        f = r.get("fields", {}) or {}
+        name = str(f.get(AF["name"]) or "")
+        if f.get(AF["maintenanceTicket"]) or name.upper().startswith("MAINTENANCE:"):
+            if name != ROY_FOLLOWUP_NAME:
+                out.append({"id": r.get("id", ""), "name": name[:90]})
+    return out
+
+
+def roy_followup_week(now):
+    year, week, _ = now.isocalendar()
+    return f"{year}-W{week:02d}"
+
+
+def ensure_roy_followups(dry_run=False, fetch=None, now=None, state_path=None):
+    """Raise at most one follow-up task a week for Roy's stale repairs."""
+    fetch = fetch or query_tasks
+    now = now or datetime.now(LONDON)
+    state_path = state_path or ROY_FOLLOWUP_STATE
+    week = roy_followup_week(now)
+    state = load_score_state(state_path)
+    if state.get("week") == week and not dry_run:
+        return {"week": week, "created": False, "reason": "already raised this week"}
+    if property_agent_paused() and not dry_run:
+        return {"week": week, "created": False, "reason": "property agent paused"}
+    open_rows = fetch(ROY_OPEN_FORMULA)
+    if not open_rows:
+        # CONTROL: Roy has held dozens of open tasks since 25 Aug 2026. Zero
+        # means the lookup broke, not that every repair is done.
+        print("ERROR: roy-followups control failed: zero open tasks read for Roy; "
+              "the lookup field or formula is broken", file=sys.stderr)
+        return {"week": week, "created": False, "reason": "control failed", "controlFailed": True}
+    stale = stale_roy_repairs(fetch(
+        ROY_OPEN_FORMULA[:-1] + f", IS_BEFORE(LAST_MODIFIED_TIME(), "
+        f"DATEADD(NOW(), -{ROY_STALE_DAYS}, 'days')))"))
+    result = {"week": week, "royOpen": len(open_rows), "stale": stale, "created": False}
+    if not stale or dry_run:
+        return result
+    desc = ("PROPERTY FOLLOW-UP (raised automatically, once a week). These repair tasks "
+            f"held by Roy have not moved in {ROY_STALE_DAYS} days. Send Roy ONE chase "
+            "covering all of them (his standing approval covers maintenance), ask for "
+            "the booking date or the reason each is stuck, and note his answer on each "
+            "task. Nothing here is a card for Kevin unless money or law is involved.\n"
+            + "\n".join(f"- {t['id']}: {t['name']}" for t in stale))
+    raise_engine_task(ROY_FOLLOWUP_NAME, PROPERTY_REC_ID, "20 min", desc[:95000],
+                      priority="Medium")
+    save_state(state_path, {"week": week, "raisedAt": now_iso(), "stale": len(stale)})
+    result["created"] = True
+    print(json.dumps({"agent": "property", "royFollowup": result}))
+    return result
+
+
+def cmd_roy_followups(args):
+    print(json.dumps(ensure_roy_followups(dry_run=args.dry_run), indent=2))
+
+
 def is_quarter_first_monday(now):
     """First Monday of January, April, July or October — the first week of
     each calendar quarter, London time."""
@@ -6989,6 +7093,7 @@ SCORE_STEPS = (
     ("chase", ensure_chase_tasks),
     ("property", property_score),
     ("renewals", ensure_renewal_tasks),
+    ("roy-followups", ensure_roy_followups),
     ("quarterly-review", ensure_quarterly_review),
 )
 SCORE_SELFTESTS = (response_score_selftest, creditor_score_selftest,
@@ -7137,6 +7242,10 @@ def main():
     h.add_argument("--to", required=True,
                    help="team email; one of " + ", ".join(sorted(HUMANS)))
     h.add_argument("--reason", default="")
+
+    rf = sub.add_parser("roy-followups",
+                        help="one weekly follow-up task for Roy's repairs unmoved for 7 days")
+    rf.add_argument("--dry-run", action="store_true", help="list the stale repairs, create nothing")
 
     s = sub.add_parser("submit")
     s.add_argument("task")
@@ -7310,7 +7419,7 @@ def main():
     # calling sys.exit() — but `reconcile` and `lessons` report by RETURNING, so
     # discarding the result here would make both checks ornamental.
     return {"queue": cmd_queue, "route": cmd_route, "escalate": cmd_escalate,
-            "handover": cmd_handover, "submit": cmd_submit_group,
+            "handover": cmd_handover, "submit": cmd_submit_group, "roy-followups": cmd_roy_followups,
             "annotate": cmd_annotate, "intent": cmd_intent,
             "complete": cmd_complete, "verify": cmd_verify,
             "score": cmd_score, "reconcile": cmd_reconcile,
