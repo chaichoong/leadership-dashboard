@@ -319,7 +319,12 @@ def title_from_transcript(text):
 # learn*/lesson* + a joining word + my/the + any word starting dia/die/dai (diary, diaries, diet, dairy).
 # "Learnings from my diary" as whisper hears it: learnings/lessons/latest/learning ... from/in/for my diary (2056, 10 Sep 2026: "the latest in my diary")
 LFMD_START_RE = re.compile(r"(?:\w+\s+)?(?:from|for|of|through|in|to)\s+(?:my|the)\s+d(?:ia|ie|ai)\w*\b(?!\s+of\s+(?:a|an|the)\b)"
-                           r"|(?:learn\w*|lesson\w*)(?:\s+\w+){0,2}\s+(?:for|of)\s+(?:today|the day)", re.I)
+                           r"|(?:learn\w*|lesson\w*)(?:\s+\w+){0,2}\s+(?:for|of)\s+(?:today|the day)"
+                           # 2060 (17 Sep 2026): he said "the learning from my diary today", whisper wrote "the learning from a diet today"
+                           r"|learn\w*\s+(?:from|for)\s+(?:a|my|the|our)\s+d(?:ia|ie|ai)\w*", re.I)
+# A near miss: "learn..." followed within four words by something that sounds like diary. When no section is found but
+# this is, the output gate refuses the card (qa.py), so a mis-heard Learnings line can never ship silently.
+DIARY_NEAR_MISS_RE = re.compile(r"\blearn\w*\W+(?:\w+\W+){0,4}(?:d(?:ia|ie|ai)\w*|dairy|dire)\b(?!\s+of\s+(?:a|an|the|our)\b)", re.I)
 # The \b(?!\s+of a) keeps the show's own name out: "day 2056 of the diary of a Runpreneur" turned 2056's teaser into
 # an episode render on 10 Sep 2026 (Kevin's review, 13 Sep 2026).
 SIGNOFF_RE = re.compile(r"thank you as always|stay positive|see you (?:again )?tomorrow", re.I)
@@ -348,7 +353,12 @@ def watch_ts(s):
 def lfmd_window(segments, min_len=20.0, max_len=180.0):
     """(start, end) of the 'Learnings from my diary' section: from the sentence that names it (the
     LAST such mention, since he may trail it earlier) to the sign-off that follows, or None."""
-    starts = [i for i, (_, _, t) in enumerate(segments) if LFMD_START_RE.search(t)]
+    # Each segment is read together with the next, and the phrase must START in this one: the caption files split
+    # speech into five-word chunks, and "the learning from | a diet today" was missed that way (2060, 17 Sep 2026).
+    starts = []
+    for i, (_, _, t) in enumerate(segments):
+        m = LFMD_START_RE.search(t + (" " + segments[i + 1][2] if i + 1 < len(segments) else ""))
+        if m and m.start() < len(t): starts.append(i)
     if not starts: return None
     i = starts[-1]
     start = segments[i][0]
@@ -721,14 +731,55 @@ def redo_lfmd(day):
     masters = render_masters(clip, workdir, only="9:16")
     title = title_from_transcript(text)
     paths = build_outputs(masters, srt, day, title, workdir, lfmd=window, role="lfmd-only")
-    folder, links = publish_to_drive({"lfmd": paths["lfmd"]}, day, os.path.join(workdir, "transcript.txt"))
+    # all three: the captioned clip for the socials, the clean clip and its captions for the YouTube Short. Until 17 Sep
+    # 2026 only the first was uploaded, so 1841's rebuilt Learnings stayed blocked at "clean Short 0 s".
+    folder, links = publish_to_drive({k: paths[k] for k in ("lfmd", "lfmd_yt", "lfmd_srt") if paths.get(k)}, day, os.path.join(workdir, "transcript.txt"))
     rid, how = find_or_create_record(day, e.get("drive_id"), key, dt.date.fromisoformat(e["date"]))
     if links.get("lfmd"): watch._airtable("PATCH", watch.API + "/" + rid, {"fields": {"Reframed Video URL": links["lfmd"]}})
     e["lfmd_window"] = window; e["lfmd_redone"] = dt.datetime.now().isoformat(timespec="seconds"); e["status"] = "rendered"; e["local"] = clip
+    e.setdefault("outputs", {}).update({k: v for k, v in links.items() if v})      # the publisher fetches by these links
     watch.save_ledger(ledger)
     print("episode %d: Learnings clip rebuilt -> %s (record %s)" % (day, "ok" if links.get("lfmd") else "NO DRIVE ID YET", rid))
-    import approval; approval.refresh_card(day)
+    import approval
+    if (approval.load_state().get(str(day)) or {}).get("verdict") == "approved":
+        # Kevin already approved and asked for the clip to be reinstated before publishing (2060, 17 Sep 2026): the card
+        # is not sent back to his queue for a second approval
+        print("episode %d: card already approved; not resubmitted" % day)
+    else:
+        approval.refresh_card(day)
+    if links.get("lfmd") and links.get("lfmd_yt"): release_hold(day)
     return paths["lfmd"]
+
+
+REDO_LFMD_FILE = os.path.expanduser("~/.config/od/content_engine_redo_lfmd")
+HOLD_FILE = os.path.expanduser("~/.config/od/content_engine_hold_days")
+
+
+def _drop_day(path, day):
+    try: lines = open(path).read().splitlines()
+    except OSError: return False
+    keep = [l for l in lines if not re.match(r"\s*%d\b" % day, l)]
+    if len(keep) == len(lines): return False
+    tmp = path + ".tmp"; open(tmp, "w").write("\n".join(keep) + ("\n" if keep else "")); os.replace(tmp, path)
+    return True
+
+
+def release_hold(day):
+    """The Learnings clip exists: the day may publish, and its rebuild request is done."""
+    if _drop_day(HOLD_FILE, day): print("episode %d: hold released (Learnings clip in place)" % day)
+    _drop_day(REDO_LFMD_FILE, day)
+
+
+def redo_requested(path=None):
+    """Nightly: rebuild the Learnings clip for every day listed in content_engine_redo_lfmd (one day per line, reason
+    after it). A failure stays listed for the next night and is printed; a success clears the day and its hold."""
+    path = path or REDO_LFMD_FILE
+    try: days = [int(m.group(1)) for m in (re.match(r"\s*(\d{3,4})\b", l) for l in open(path)) if m]
+    except OSError: days = []
+    if not days: print("redo: no Learnings rebuilds requested"); return
+    for day in days:
+        try: redo_lfmd(day)
+        except (Exception, SystemExit) as ex: print("redo: episode %d Learnings rebuild FAILED, kept for the next night (%s)" % (day, str(ex)[-200:]), file=sys.stderr)
 
 
 def redo_full(day, keep=False):
@@ -842,6 +893,10 @@ def selftest():
     assert lfmd_window([(0, 5, "the learnings from my diary today"), (30, 40, "thank you as always")]) == (0, 40)
     assert lfmd_window([(0, 5, "I wrote it in my dairy today"), (30, 40, "see you tomorrow")]) == (0, 40), "the mis-spelt diary still counts"
     assert lfmd_window([(0, 5, "a diary of a Runpreneur"), (30, 40, "see you tomorrow")]) is None, "the show's name is not the section"
+    assert lfmd_window([(0, 5, "So I suppose the learning from"), (5, 9, "a diet today is that problems"), (60, 70, "see you tomorrow")]) == (0, 70), "2060: mis-heard and split across two caption chunks"
+    assert lfmd_window([(0, 5, "the learnings from my"), (5, 9, "diary today"), (40, 50, "stay positive")]) == (0, 50), "a phrase split over two chunks"
+    assert lfmd_window([(0, 5, "I changed my diet today"), (40, 50, "stay positive")]) is None, "a diet on its own is not the section"
+    assert DIARY_NEAR_MISS_RE.search("so the learning I took from the dire today") and not DIARY_NEAR_MISS_RE.search("the diary of a Runpreneur")
     assert lfmd_window([(0, 5, "So I think the learning story for today is"), (30, 40, "see you tomorrow")]) == (0, 40), "1841 (2025): he says 'the learning story for today'"
     assert lfmd_window([(0, 5, "So consecutive day, 2056th of the diary of a Ron Prenner, and today's"), (30, 40, "see you tomorrow")]) is None, "the show's name is not a Learnings section (2056 teaser)"
     assert lfmd_window([(0, 5, "welcome back to consecutive day 2195 of the diary of a Runpreneur"), (30, 40, "stay positive")]) is None
@@ -917,6 +972,7 @@ if __name__ == "__main__":
     if a.mode == "selftest": selftest()
     elif a.mode == "run": run(a.limit, a.keep)
     elif a.mode == "redo" and a.only == "lfmd": redo_lfmd(a.day)
+    elif a.mode == "redo-requested": redo_requested()
     elif a.mode == "redo": redo_full(a.day, keep=a.keep if hasattr(a, "keep") else False)
     elif a.mode == "one": one(a.clip, a.day, a.out)
     else: raise SystemExit("unknown mode")

@@ -130,6 +130,9 @@ for day in $DAYS; do
     python3 scripts/content-engine/render.py run --limit 1 || exit 1
   done
 done
+# Learnings clips Kevin asked to be rebuilt (content_engine_redo_lfmd, one day per line). A success releases the
+# day's publishing hold; a failure stays listed for the next night (2060, 17 Sep 2026).
+python3 scripts/content-engine/render.py redo-requested || echo "redo: Learnings rebuilds skipped this run (see above)"
 python3 scripts/content-engine/platform_copy.py run --pending --limit 2 || exit 1
 python3 scripts/content-engine/approval.py sync || exit 1
 # 5b. Performance read (Kevin, 8 Sep 2026: once a month, last 30 days, three recommendations that become lessons).
