@@ -2200,6 +2200,12 @@ def tier_match(patterns, *texts):
     return ""
 
 
+def own_go_signal(agent_id):
+    """True for a role agent that runs on its own schedule (`dispatch: False`): its approved and sent-back cards are
+    handled by its own job, never carried out by a dispatched run."""
+    return bool(agent_id) and agent_id in ROLE_AGENTS and not ROLE_AGENTS[agent_id].get("dispatch", True)
+
+
 def task_view(rec):
     f = rec.get("fields", {})
     agent_id = links(f.get(AF["sentForApprovalBy"]))[:1] or links(f.get(AF["teamMember"]))[:1]
@@ -2294,6 +2300,7 @@ def build_queue(args=None):
     roy_lane = []
     approved_hb, changes_hb, new_work, routing = [], [], [], []
     decided = []
+    own_signal = []
     creditor_ok = bool(role_roster.get(CREDITOR_REC_ID, {}).get("dispatchable"))
     creditor_count = 0
     # The property lane needs BOTH the register lever and a readable book:
@@ -2405,6 +2412,14 @@ def build_queue(args=None):
         # move Kevin named (its verdict is in the task's Approval Feedback).
         if t["outcome"] and is_decide_card(t["agentOutput"]):
             decided.append(t)
+            continue
+        # AN AGENT ON ITS OWN GO SIGNAL CARRIES OUT ITS OWN CARDS (16 Sep 2026). The Content Engine raises a card per
+        # episode and its hourly job publishes what Kevin approves. On 16 Sep the hand-back poll also took both
+        # approved episode cards as carry-outs: a headless Claude run drove publish.py by hand, its command time
+        # limit killed each YouTube upload part way, the next attempt adopted the half-uploaded videos with no publish
+        # time, and 2058's Short was left stuck processing on the channel. Listed under ownGoSignal, never hidden.
+        if t["outcome"] and own_go_signal(t["agentId"]):
+            own_signal.append(t)
             continue
         if t["outcome"] in APPROVED and t["agentId"]:
             approved_hb.append(t)
@@ -2550,6 +2565,7 @@ def build_queue(args=None):
         # Approved hand-backs resting until tomorrow: carried out and kept open,
         # or parked on a sign-in. Listed with the reason, never dropped.
         "idleHandbacks": idle_hb,
+        "ownGoSignal": own_signal,
         # Tasks a sign-in just reopened (ids): the pickup run and the 30-minute
         # poll work these first, whichever lane classified them.
         "signinReopened": signin_reopened,
@@ -2573,6 +2589,7 @@ def build_queue(args=None):
             "agentLinkedOpen": len(agent_linked),
             "approvedHandbacks": len(approved_hb),
             "idleHandbacks": len(idle_hb),
+            "ownGoSignal": len(own_signal),
             "changesRequested": len(changes_hb),
             # Redos Kevin asked to delay. Demoted behind new work rather than
             # dropped, and counted here so one sitting for weeks stays visible.

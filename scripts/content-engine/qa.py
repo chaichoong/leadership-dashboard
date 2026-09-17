@@ -74,7 +74,15 @@ def checks(day, ledger=None, files=None):
     """[(name, ok, hard, detail)] for one day. `files` = publish.episode_files(day) (+ 'transcript'); hard = blocks the card."""
     import publish
     ledger = ledger if ledger is not None else watch.load_ledger()
-    files = files or dict(publish.episode_files(day), transcript=os.path.join(os.path.dirname(publish.episode_files(day)["full"]), "Ep%d_transcript.txt" % day))
+    if not files:
+        # 17 Sep 2026: the scheduled job read "0 s" for 2059 and 2060 through the Drive folder at 01:25 and 08:16, while
+        # the same files measured 575 s from a session at 08:25. The measured files come through publish.fetch_readable
+        # (the Drive API copy when the folder does not read), which the publisher then uses as they are.
+        base = publish.episode_files(day)
+        files = dict(base, transcript=os.path.join(os.path.dirname(base["full"]), "Ep%d_transcript.txt" % day))
+        for k in ("full", "full_yt", "podcast", "lfmd", "lfmd_yt", "full_srt", "lfmd_srt", "thumb", "summary"):
+            try: files[k] = publish.fetch_readable(day, k, ledger)
+            except (Exception, SystemExit) as ex: print("qa: %s for day %d not fetched (%s)" % (k, day, str(ex)[-100:]), file=sys.stderr)
     ep, te = ledger_entries(day, ledger)
     out = []
     def add(name, ok, hard, detail): out.append((name, bool(ok), hard, detail))

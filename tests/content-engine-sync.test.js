@@ -52,7 +52,7 @@ describe('content-engine spotify plan', () => {
     expect(livePlan.mode).toBe('live');
     expect(livePlan.steps.some((s) => s.do === 'submit')).toBe(true);
     expect(src).toContain('PODCAST_FORMAT = "video"');
-    expect(readFileSync(path.join(DIR, 'publish.py'), 'utf8')).toContain('upload = files["podcast"] if spotify.PODCAST_FORMAT == "audio"');
+    expect(readFileSync(path.join(DIR, 'publish.py'), 'utf8')).toContain('upload = fetch_readable(day, "podcast") if spotify.PODCAST_FORMAT == "audio"');
     expect(readFileSync(path.join(DIR, 'publish.py'), 'utf8')).toContain('spotify.write_plan(day, upload');
   });
 });
