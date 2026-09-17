@@ -100,8 +100,91 @@ export default {
   /* ------------------------------------------------------------------ */
   async scheduled(event, env, ctx) {
     ctx.waitUntil(pollGhlMessages(env));
+    // Every 5th minute: relay email replies to forwarded texts back as SMS.
+    if (isReplyCheckMinute(event && event.scheduledTime)) {
+      ctx.waitUntil(relayEmailReplies(env));
+    }
   },
 };
+
+/* ------------------------------------------------------------------ */
+/*  Email replies to forwarded texts go back as SMS (Kevin, 17 Sep 2026) */
+/* ------------------------------------------------------------------ */
+
+// Tenant texts are emailed to info@agilelets.co.uk. Kevin wants them answerable
+// from there: a reply to the forwarded email goes back to the tenant as an SMS.
+// SAFETY: only mail in a Google-authenticated SENT folder can trigger a text
+// (read through the drive-upload Gmail worker with the triage key), so a spoofed
+// inbound email can never make this send. Each reply is sent once (KV marker,
+// one write per reply, never per tick: the account-wide free KV budget).
+const REPLY_CHECK_EVERY_MIN = 5;
+const GMAIL_WORKER = 'https://drive-upload.kevinbrittain.workers.dev';
+const CONVERSATION_RE = /GHL Conversation:\s*([A-Za-z0-9_-]{6,})/;
+const QUOTE_START_RE = /^(On .+wrote:|-{2,}\s*Original Message|From: .+|>)/m;
+const SMS_MAX_CHARS = 1000;
+
+export function isReplyCheckMinute(scheduledTime) {
+  const d = new Date(scheduledTime || Date.now());
+  return d.getUTCMinutes() % REPLY_CHECK_EVERY_MIN === 0;
+}
+
+/** The reply text and conversation id from a sent message, or null. */
+export function parseEmailReply(message) {
+  const subject = ((message && message.headers && message.headers.subject) || '').trim();
+  if (!/^re:/i.test(subject)) return null;              // replies only, never forwards
+  const body = (message && message.body) || '';
+  const conv = body.match(CONVERSATION_RE);
+  if (!conv) return null;
+  const cut = body.search(QUOTE_START_RE);
+  let text = (cut >= 0 ? body.slice(0, cut) : '').trim();
+  // Gmail wraps a long "On <date>, <name> <address> wrote:" line, so the part
+  // before the ">" quote can end with a dangling "On ..." line. Drop it.
+  text = text.replace(/(^|\n+)On [^\n]*(?:\n[^\n]*){0,2}?wrote:\s*$/, '').trim();
+  text = text.replace(/\n+On [^\n]*$/, '').trim();
+  if (/^On [^\n]*$/.test(text)) text = '';
+  if (!text || cut < 0) return null;                    // no quote marker: cannot tell reply from quote
+  return { conversationId: conv[1], text: text.slice(0, SMS_MAX_CHARS) };
+}
+
+async function relayEmailReplies(env) {
+  if (!env.GMAIL_TRIAGE_KEY) return { skipped: 'GMAIL_TRIAGE_KEY not set' };
+  const accounts = (env.SMS_REPLY_ACCOUNTS || 'info@agilelets.co.uk')
+    .split(',').map((a) => a.trim()).filter(Boolean);
+  const sent = [];
+  for (const account of accounts) {
+    let listed;
+    try {
+      const resp = await fetch(`${env.GMAIL_WORKER_URL || GMAIL_WORKER}/gmail/list`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${env.GMAIL_TRIAGE_KEY}`,
+          'Content-Type': 'application/json',
+          'User-Agent': 'od-sms-email-bridge/1.0',
+        },
+        body: JSON.stringify({ q: 'in:sent newer_than:1d "GHL Conversation"', maxResults: 10, account }),
+      });
+      if (!resp.ok) { console.error('reply relay: gmail list', account, resp.status); continue; }
+      listed = await resp.json();
+    } catch (err) {
+      console.error('reply relay: gmail list failed', account, err.message);
+      continue;
+    }
+    for (const msg of listed.messages || []) {
+      const reply = parseEmailReply(msg);
+      if (!reply) continue;
+      const marker = `replied:${msg.id}`;
+      if (await env.SMS_STATE.get(marker)) continue;
+      const result = await sendGhlSms(env, reply.conversationId, reply.text);
+      if (result.ok) {
+        await env.SMS_STATE.put(marker, new Date().toISOString(), { expirationTtl: 7 * 24 * 3600 });
+        sent.push(msg.id);
+      } else {
+        console.error('reply relay: SMS send failed', msg.id, result.error);
+      }
+    }
+  }
+  return { sent };
+}
 
 
 /* ------------------------------------------------------------------ */
@@ -385,59 +468,9 @@ async function handleSmsReply(request, env) {
     return json({ error: 'Missing conversationId or message' }, 400);
   }
 
-  try {
-    // GHL requires contactId to send messages. Look it up from the conversation.
-    let contactId = payload.contactId;
-    if (!contactId) {
-      const convResp = await fetch(
-        `https://services.leadconnectorhq.com/conversations/${conversationId}`,
-        {
-          headers: {
-            Authorization: `Bearer ${providedKey}`,
-            Version: '2021-07-28',
-          },
-        }
-      );
-      if (convResp.ok) {
-        const convData = await convResp.json();
-        contactId = (convData.conversation || convData).contactId;
-      }
-    }
-
-    if (!contactId) {
-      return json({ error: 'Could not resolve contactId for this conversation' }, 400);
-    }
-
-    const resp = await fetch(
-      `https://services.leadconnectorhq.com/conversations/messages`,
-      {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${providedKey}`,
-          'Content-Type': 'application/json',
-          Version: '2021-07-28',
-        },
-        body: JSON.stringify({
-          type: 'SMS',
-          contactId,
-          conversationId,
-          message,
-        }),
-      }
-    );
-
-    if (!resp.ok) {
-      const errBody = await resp.text();
-      console.error('GHL send SMS failed:', resp.status, errBody);
-      return json({ error: 'GHL SMS send failed', detail: errBody }, resp.status);
-    }
-
-    const result = await resp.json();
-    return json({ status: 'sent', messageId: result.messageId || result.id });
-  } catch (err) {
-    console.error('GHL reply error:', err.message);
-    return json({ error: 'SMS reply failed', detail: err.message }, 502);
-  }
+  const result = await sendGhlSms(env, conversationId, message, payload.contactId);
+  if (!result.ok) return json({ error: result.error, detail: result.detail }, result.status || 502);
+  return json({ status: 'sent', messageId: result.messageId });
 }
 
 
@@ -653,4 +686,41 @@ function json(data, status = 200) {
       ...corsHeaders(),
     },
   });
+}
+
+
+/** Send one SMS into a GHL conversation. Shared by /ghl-reply and the email relay. */
+async function sendGhlSms(env, conversationId, message, contactId) {
+  const key = env.GHL_API_KEY;
+  if (!key) return { ok: false, status: 401, error: 'No GHL API key available' };
+  try {
+    if (!contactId) {
+      const convResp = await fetch(
+        `https://services.leadconnectorhq.com/conversations/${conversationId}`,
+        { headers: { Authorization: `Bearer ${key}`, Version: '2021-07-28' } }
+      );
+      if (convResp.ok) {
+        const convData = await convResp.json();
+        contactId = (convData.conversation || convData).contactId;
+      }
+    }
+    if (!contactId) {
+      return { ok: false, status: 400, error: 'Could not resolve contactId for this conversation' };
+    }
+    const resp = await fetch('https://services.leadconnectorhq.com/conversations/messages', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json', Version: '2021-07-28' },
+      body: JSON.stringify({ type: 'SMS', contactId, conversationId, message }),
+    });
+    if (!resp.ok) {
+      const errBody = await resp.text();
+      console.error('GHL send SMS failed:', resp.status, errBody);
+      return { ok: false, status: resp.status, error: 'GHL SMS send failed', detail: errBody };
+    }
+    const result = await resp.json();
+    return { ok: true, messageId: result.messageId || result.id };
+  } catch (err) {
+    console.error('GHL reply error:', err.message);
+    return { ok: false, status: 502, error: 'SMS reply failed', detail: err.message };
+  }
 }
