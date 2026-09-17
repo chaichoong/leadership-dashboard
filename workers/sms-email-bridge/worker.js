@@ -318,17 +318,25 @@ async function pollGhlMessages(env) {
         const conversationId = conv.id;
         const timestamp = msg.dateAdded;
 
-        await forwardSmsAsEmail(env, {
-          contactName,
-          phone,
-          body,
-          conversationId,
-          contactId: conv.contactId || '',
-          timestamp,
-          tag,
-        });
-
-        forwarded++;
+        // ONE BAD MESSAGE MUST NOT STALL THE CHECKPOINT (17 Sep 2026). A Resend 422
+        // on one message threw out of the whole poll before lastMessageTimestamp was
+        // saved, so every later message was forwarded again EVERY MINUTE (Kevin's
+        // test text reached info@ once a minute). A failed message is logged and
+        // passed over; the checkpoint still moves.
+        try {
+          await forwardSmsAsEmail(env, {
+            contactName,
+            phone,
+            body,
+            conversationId,
+            contactId: conv.contactId || '',
+            timestamp,
+            tag,
+          });
+          forwarded++;
+        } catch (err) {
+          console.error('Forward failed, skipped so the checkpoint moves:', conversationId, err.message);
+        }
 
         if (msgTs > highestTimestamp) {
           highestTimestamp = msgTs;
@@ -401,7 +409,8 @@ async function forwardSmsAsEmail(env, sms) {
     ? sms.body.substring(0, 57) + '...'
     : sms.body;
 
-  const subject = `[${tag}] ${contactName}: ${messagePreview}`;
+  // Resend refuses a line break in a subject (422), which stalled the poll: flatten it.
+  const subject = `[${tag}] ${contactName}: ${messagePreview}`.replace(/[\r\n]+/g, ' ');
   const fromEmail = env.FROM_EMAIL || 'sms@operationsdirector.co.uk';
   const fromName = `${tag} from ${contactName}`;
 
