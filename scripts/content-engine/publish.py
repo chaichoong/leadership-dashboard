@@ -584,6 +584,12 @@ def finish_extras(day, entry, recs, test, save):
     elif b.get("status") == "failed":
         entry["blog"] = {}; save()                    # a refused article is tried again next hour
     try:
+        import blog
+        if blog.ensure_reading_time(entry): print("episode %d: blog reading time set (%s min)" % (day, entry["blog"]["read_time"]))
+        save()
+    except (Exception, SystemExit) as ex:
+        print("episode %d: blog reading time not set yet (%s); tried next run" % (day, str(ex)[-120:]), file=sys.stderr)
+    try:
         media = media_for(day, entry, ["podcast"])
         if media.get("podcast"): entry.setdefault("podcast", {})["audio_url"] = media["podcast"]; save()
     except (Exception, SystemExit) as ex:

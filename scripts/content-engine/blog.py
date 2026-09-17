@@ -99,6 +99,42 @@ def repair_post(post_id, image_url=None, dry_run=False):
     return before, {k: back.get(k) for k in before}
 
 
+def post_id_for_slug(slug, fetch=None, get_post=None):
+    """The post id of a PUBLISHED article, read from its public page: GHL's create call returns no id and its list call
+    returns nothing for this blog (17 Sep 2026). Each 24-hex id on the page is checked against the API by its address."""
+    import urllib.request, publish
+    if fetch is None:
+        def fetch(url):
+            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (Macintosh) Chrome/128 Safari/537.36"})
+            with urllib.request.urlopen(req, timeout=60) as r: return r.read().decode("utf8", "ignore")
+    if get_post is None:
+        _, loc, _ = publish._cfg()
+        def get_post(pid):
+            r = publish.ghl("GET", "/blogs/posts/%s?locationId=%s" % (pid, loc)); p = r.get("data") or r.get("blogPost") or r
+            return p.get("blogPost", p) if isinstance(p, dict) else {}
+    html = fetch(SITE + slug)
+    for pid in sorted(set(re.findall(r"(?<![0-9a-f])([0-9a-f]{24})(?![0-9a-f])", html)))[:40]:
+        try: post = get_post(pid)
+        except (Exception, SystemExit): continue
+        if isinstance(post, dict) and post.get("urlSlug") == slug: return pid
+    return ""
+
+
+def ensure_reading_time(entry):
+    """The article's reading time set once it is live (GHL ignores wordCount/readTimeInMinutes on create: 2059 read 0).
+    Returns True when it was set this call."""
+    b = entry.get("blog") or {}
+    if not b.get("url") or b.get("read_time") or b.get("status") != "PUBLISHED" or int(b.get("read_time_tries") or 0) >= 6: return False
+    b["read_time_tries"] = int(b.get("read_time_tries") or 0) + 1
+    slug = b["url"].rstrip("/").split("/b/")[-1]
+    pid = b.get("id") or post_id_for_slug(slug)
+    if not pid: return False
+    b["id"] = pid
+    _, after = repair_post(pid)
+    if after.get("readTimeInMinutes"): b["read_time"] = after["readTimeInMinutes"]; return True
+    return False
+
+
 def our_posts():
     """{url slug: post id} for every article on the blog (paged), to find the engine's articles by their address."""
     import publish
@@ -156,7 +192,13 @@ def selftest():
     w, m = reading_stats("<p>" + " ".join(["word"] * 1031) + "</p><h2>Two &amp; more</h2>")
     assert (w, m) == (1033, 5.165), (w, m)
     assert b["wordCount"] > 0 and b["readTimeInMinutes"] == round(b["wordCount"] / 200, 3), "every new article carries its reading time (17 Sep 2026)"
-    print(json.dumps({"checks": 11, "failed": []}))
+    page = '<a href="/x">x</a> "6aabce096cdfcbf6a18289af":{"wordCount":376} 0123456789abcdef01234567 6aabce096cdfcbf6a18289afff'
+    posts = {"6aabce096cdfcbf6a18289af": {"urlSlug": "portion-control-day-2059"}, "0123456789abcdef01234567": {"urlSlug": "other"}}
+    assert post_id_for_slug("portion-control-day-2059", fetch=lambda u: page, get_post=lambda pid: posts.get(pid, {})) == "6aabce096cdfcbf6a18289af"
+    assert post_id_for_slug("missing", fetch=lambda u: page, get_post=lambda pid: posts.get(pid, {})) == ""
+    assert ensure_reading_time({"blog": {"url": SITE + "x", "status": "DRAFT"}}) is False, "a draft is not on the public site: left alone"
+    assert ensure_reading_time({"blog": {"url": SITE + "x", "status": "PUBLISHED", "read_time": 4.4}}) is False, "set once"
+    print(json.dumps({"checks": 15, "failed": []}))
 
 
 if __name__ == "__main__":
