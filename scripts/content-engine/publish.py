@@ -889,6 +889,23 @@ def moves_cursor(day, gaps):
     return day not in gaps
 
 
+HOLD_FILE = os.path.expanduser("~/.config/od/content_engine_hold_days")
+
+
+def held_days(path=None):
+    """Approved days that must not publish yet, one day number per line with an optional reason after it (Kevin, 17 Sep
+    2026: 2060 approved but its Learnings clip was missed; "reinstate that prior to publishing"). A held day holds the
+    order behind it too. The Learnings rebuild removes the day when the clip exists."""
+    out = {}
+    try:
+        for line in open(path or HOLD_FILE):
+            m = re.match(r"\s*(\d{3,4})\b\s*(.*)", line)
+            if m: out[int(m.group(1))] = m.group(2).strip()
+    except OSError:
+        pass
+    return out
+
+
 def ahead_of_order(day, gaps, state):
     """Every stage after YouTube waits for the order too (15 Sep 2026). 2194 and 2196 were held for order, but their
     YouTube posts had been booked before the order rule existed; GoHighLevel published them on its own, and the
@@ -920,7 +937,10 @@ def extras_done(entry):
 
 def run(dry_run=False, limit=3):
     state = load_state(); days = approved_days()
-    if not days: print("publish: no approved episodes"); return
+    hold = held_days()
+    for d in sorted(set(days) & set(hold)): print("publish: episode %d HELD, not published (%s)" % (d, hold[d] or "see content_engine_hold_days"))
+    days = [d for d in days if d not in hold]
+    if not days: print("publish: no approved episodes to publish"); return
     acct_map = account_map(accounts()); yt_ok = "youtube" in acct_map
     ledger = watch.load_ledger()
     done = 0; per_stage = {1: 0, 2: 0}
@@ -1447,6 +1467,10 @@ def selftest():
     _shu.rmtree(tmpc)
     ys2 = inspect.getsource(youtube_direct)
     assert "thumbnail=None, srt=None" in ys2 and ys2.index("youtube_api.upload(") < ys2.index("set_thumbnail(") < ys2.index("add_captions("), "the video is recorded even when the thumbnail or captions call fails"
+    import tempfile as _tf
+    hf = os.path.join(_tf.mkdtemp(), "hold"); open(hf, "w").write("2060 Learnings clip missed; rebuild before publishing\n# note\n2061\n")
+    assert held_days(hf) == {2060: "Learnings clip missed; rebuild before publishing", 2061: ""} and held_days(hf + "x") == {}
+    assert "days = [d for d in days if d not in hold]" in inspect.getsource(run), "a held day never publishes"
     fsrc = inspect.getsource(finish_extras)
     assert fsrc.index("spotify.verify_published(ptitle") < fsrc.index("run_spotify(day"), "a retried podcast looks at Spotify before it uploads"
     # 15 Sep 2026: a media upload that raises SystemExit must not end the hourly run (1841's mp3 did, hourly)
