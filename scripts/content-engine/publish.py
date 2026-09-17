@@ -643,11 +643,12 @@ def output_link(day, kind, ledger=None):
 
 
 def fetch_readable(day, kind, ledger=None, download=None):
-    """A path to this episode's `kind` output that READS: the Drive folder copy when it reads, otherwise a local copy
-    fetched once by the Drive API from the link the render recorded. 16-17 Sep 2026: the podcast copy, the thumbnail
-    and the output gate all read the Drive folder minutes after upload and failed; the files were fine."""
+    """A local path to this episode's `kind` output. When the render recorded a Drive link, the file is fetched ONCE by
+    the Drive API and that copy is used: the Drive FOLDER is never read by a scheduled job for these files. 16-17 Sep
+    2026: the podcast copy, the thumbnail and the output gate all failed through the folder, and a quick read test is
+    not enough (2057's full read its first 64 KB and then failed to copy, hourly, all day). Episodes rendered before
+    the render recorded links still use the folder."""
     path = episode_files(day)[kind]
-    if readable(path): return path
     m = re.search(r"/d/([\w-]+)", output_link(day, kind, ledger) or "")
     if not m: return path
     dest = os.path.join(PUBLISH_CACHE, str(day), os.path.basename(path))
@@ -1259,7 +1260,7 @@ def _selftest_once_only_body():
     schedule_stage and finish_extras against fakes: the first run is killed after two posts, the second run must
     create only the channels that were never started, the blog exactly once, and Spotify exactly once."""
     import copy as _copy, tempfile as _tf, types as _types
-    g = globals(); saved = {k: g[k] for k in ("_cfg", "episode_files", "media_for", "mode", "youtube_direct_ready", "create_post", "approval", "watch", "run_spotify")}
+    g = globals(); saved = {k: g[k] for k in ("_cfg", "episode_files", "media_for", "mode", "youtube_direct_ready", "create_post", "approval", "watch", "run_spotify", "output_link")}
     tmp = _tf.mkdtemp()
     def fake_files(day):
         out = {}
@@ -1276,6 +1277,7 @@ def _selftest_once_only_body():
     def save(): disk["state"] = _copy.deepcopy(state)
     try:
         g.update({"_cfg": lambda brand="Runpreneur": ("k", "loc", "user"), "episode_files": fake_files,
+                  "output_link": lambda day, kind, ledger=None: None,       # never the real ledger or Drive in a selftest
                   "media_for": lambda day, entry, kinds: {k: "https://cdn/%s" % k for k in kinds},
                   "mode": lambda: "live", "youtube_direct_ready": lambda: False, "create_post": fake_create,
                   "approval": _types.SimpleNamespace(append_note=lambda rec, line: line, load_state=lambda: {}),
@@ -1417,7 +1419,7 @@ def selftest():
     try:
         fetched = []
         led = {"e": {"episode": 2058, "role": "episode", "outputs": {"full": "https://drive.google.com/file/d/1AbC_x-9/view"}}}
-        assert fetch_readable(2058, "thumb", led, download=lambda fid, dest: fetched.append(fid)) == good and fetched == [], "a file that reads is used as it is"
+        assert fetch_readable(2058, "thumb", led, download=lambda fid, dest: fetched.append(fid)) == good and fetched == [], "no Drive link for this kind: the folder path"
         def dl(fid, dest): fetched.append(fid); open(dest, "wb").write(b"x" * 10)
         import io as _io, contextlib as _cl
         with _cl.redirect_stdout(_io.StringIO()): got = fetch_readable(2058, "full", led, download=dl)   # its log line must not reach the selftest JSON
