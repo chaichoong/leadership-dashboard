@@ -59,6 +59,20 @@ print('---JSON---'); print(json.dumps([
 ]))`, SITES);
     expect(out).toEqual([null, 'aistudio.google.com', 'app.pingen.com']);
   });
+  it('a Gmail sign-in line is refused with the command that reads the mailbox (17 Sep 2026)', () => {
+    const out = py(`
+sites = json.loads(sys.argv[1])
+live = 'The agent cannot read the email content without Gmail access.\\n\\nSIGN-IN NEEDED: Gmail (https://mail.google.com/mail/u/0/#all/1a0a4390289d7805)'
+print('---JSON---'); print(json.dumps([
+  m.signin_line_problem(live, sites)[:400],
+  m.signin_line_problem('SIGN-IN NEEDED: mail.google.com', sites)[:60],
+  m.signin_line_problem('SIGN-IN NEEDED: Pingen (letters) (https://app.pingen.com/)', sites),
+]))`, SITES);
+    expect(out[0]).toContain('never a sign-in Kevin is asked for');
+    expect(out[0]).toContain('inbound-triage.py search');
+    expect(out[1]).toContain('names Gmail');
+    expect(out[2], 'a real robot site must still pass').toBe('');
+  });
   it('by label, a site the robot can sign into wins over a same-named entry it cannot (8 Sep 2026)', () => {
     const out = py(`
 sites = {'companieshouse.gov.uk': {'label': 'Companies House', 'login': False}}
