@@ -16,7 +16,10 @@ PROFILE = "default"                         # the robot browser profile signed i
 PW = "/Users/kevinbrittain/Projects/leadership-dashboard/node_modules/playwright"
 UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36"
 EARN_URL = "https://studio.youtube.com/video/%s/monetization/ads"
-HEADING = "Watch page ads and YouTube Premium"
+# A long video's earn page says "Watch page ads and YouTube Premium"; a Short's says "Shorts Feed ads" (read in Studio
+# 17 Sep 2026 on 90YWPsupMXk: "Ways to earn | Shorts Feed ads | ... | On"). Both are read the same way.
+HEADINGS = ["Watch page ads and YouTube Premium", "Shorts Feed ads"]
+HEADING = HEADINGS[0]
 # YouTube's content rating, word for word as the form listed it on 13 Sep 2026. Kevin's ruling the same day:
 # approving the episode's card confirms the video contains none of these, so the robot answers "None of the above".
 RATING_CATEGORIES = ["Inappropriate language", "Adult content", "Violence", "Shocking content", "Harmful acts and unreliable claims",
@@ -26,7 +29,8 @@ RATING_CATEGORIES = ["Inappropriate language", "Adult content", "Violence", "Sho
 JS = r"""
 const path = require('path'), os = require('os');
 const { chromium } = require(%(pw)s);
-const VID = %(vid)s, ACT = %(act)s, HEADING = %(heading)s, CERTIFY = %(certify)s;
+const VID = %(vid)s, ACT = %(act)s, HEADINGS = %(headings)s, CERTIFY = %(certify)s;
+const HEADING_RE = new RegExp('^(' + HEADINGS.map((h) => h.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|') + ')$');
 (async () => {
   const dir = path.join(os.homedir(), '.config', 'od', 'agent-browser', %(profile)s);
   // Studio shows "unsupported browser" to headless Chrome's own agent string (10 Sep 2026), so a normal one is set.
@@ -41,13 +45,17 @@ const VID = %(vid)s, ACT = %(act)s, HEADING = %(heading)s, CERTIFY = %(certify)s
     await page.waitForTimeout(10000);
     const skip = page.getByText('SKIP TO YOUTUBE STUDIO', { exact: true }).first();
     if (await skip.count()) { await skip.click(); await page.waitForTimeout(8000); }
-    await page.getByText(HEADING, { exact: true }).first().waitFor({ timeout: 60000 });
+    await page.getByText(HEADING_RE).first().waitFor({ timeout: 60000 });
   };
-  const read = async () => page.evaluate((h) => {
-    const t = document.body.innerText.replace(/\s+/g, ' '); const i = t.indexOf(h);
-    if (i < 0) return 'unknown';
-    const m = t.slice(i, i + 220).match(/\b(On|Off|Checking)\b/); return m ? m[1] : 'unknown';
-  }, HEADING);
+  const read = async () => page.evaluate((hs) => {
+    const t = document.body.innerText.replace(/\s+/g, ' ');
+    for (const h of hs) {
+      const i = t.indexOf(h);
+      if (i < 0) continue;
+      const m = t.slice(i, i + 220).match(/\b(On|Off|Checking)\b/); return m ? m[1] : 'unknown';
+    }
+    return 'unknown';
+  }, HEADINGS);
   try {
     await open();
     out.before = await read();
@@ -113,7 +121,7 @@ def _node():
 def _run(video_id, act, shot=None, certify=False):
     if not re.fullmatch(r"[A-Za-z0-9_-]{11}", video_id or ""): raise SystemExit("not a YouTube video id: %r" % video_id)
     shot = shot or os.path.join(tempfile.gettempdir(), "yt_earn_%s.png" % video_id)
-    js = JS % {"pw": json.dumps(PW), "vid": json.dumps(video_id), "act": json.dumps(act), "heading": json.dumps(HEADING),
+    js = JS % {"pw": json.dumps(PW), "vid": json.dumps(video_id), "act": json.dumps(act), "headings": json.dumps(HEADINGS),
                "profile": json.dumps(PROFILE), "ua": json.dumps(UA), "url": json.dumps(EARN_URL % video_id), "shot": json.dumps(shot),
                "certify": "true" if certify else "false", "categories": json.dumps(RATING_CATEGORIES)}
     with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False) as fh:
@@ -148,11 +156,12 @@ def selftest():
     assert "#radio-on" in JS and "#save-button" in JS, "the On radio and the dialog's Done button are the proven controls (13 Sep 2026)"
     assert "runBeforeUnload: false" in JS and "watchdog" in JS, "a dirty form can never hang the close"
     assert "On|Off|Checking" in JS, "after the rating YouTube shows Checking before On (13 Sep 2026)"
+    assert "Shorts Feed ads" in HEADINGS and "HEADING_RE" in JS and "for (const h of hs)" in JS, "a Short's earn page is read too (17 Sep 2026)"
     assert "lit.locator('#checkbox')" in JS and "did not tick" in JS, "the tick is proved before Submit"
     assert "if (!CERTIFY || missing.length)" in JS, "the rating is answered only for an approved card, and only when YouTube asks exactly the listed questions"
     assert len(RATING_CATEGORIES) == 11 and "Controversial issues" in RATING_CATEGORIES
     assert os.path.basename(_node()) == "node", "a node binary is found even under launchd's bare PATH"
-    print(json.dumps({"checks": 9, "failed": []}))
+    print(json.dumps({"checks": 10, "failed": []}))
 
 
 if __name__ == "__main__":

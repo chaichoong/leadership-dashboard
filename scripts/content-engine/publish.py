@@ -753,25 +753,29 @@ GHL_SLOT_GRACE_MIN = 60   # a GHL post still 'scheduled' this long after its slo
 
 
 def monetise_long_video(day, entry):
-    """The long episode's "Watch page ads" switched On in Studio (Ericamae, 13 Sep 2026: 2054, 2055, 2056 and 2195
-    went out Off). Shorts are on at channel level. The first switch asks for YouTube's content rating, which is
-    Kevin's declaration, so the video is recorded as 'needs-rating' and listed in the morning report instead."""
-    posts = [p for k, p in (entry.get("posts") or {}).items() if k.startswith("youtube|") and p.get("clip") == "full" and p.get("id") and p.get("route") == "api"]
-    if not posts: return False
-    p = posts[0]
-    if p.get("monetisation") == "On": return False      # "Checking" (YouTube reviewing the rating) is re-read until it says On
-    last = p.get("monetisation_checked")
-    if last:
-        try:
-            if dt.datetime.now(dt.timezone.utc) - dt.datetime.fromisoformat(last.replace("Z", "+00:00")) < dt.timedelta(hours=MONETISE_RECHECK_HOURS): return False
-        except ValueError: pass
-    import youtube_studio
-    approved = (approval.load_state().get(str(day)) or {}).get("verdict") == "approved"
-    res = youtube_studio.monetise(p["id"], certify_none=approved)     # approving the card is Kevin's content rating (13 Sep 2026)
-    p["monetisation"] = res.get("status") or "unknown"; p["monetisation_checked"] = now_utc()
-    if res.get("error"): p["monetisation_error"] = res["error"][-200:]
-    print("episode %s: YouTube monetisation %s" % (day, p["monetisation"]))
-    return True
+    """EVERY YouTube upload of the episode switched to earn: the long episode's "Watch page ads" and the Short's
+    "Shorts Feed ads" (Kevin, 17 Sep 2026: "all of my YouTube videos, full length and Shorts, monetised ... as standard
+    for everything we publish on YouTube"; the channel's earnings go to the fundraising). Long episodes went out Off
+    before 13 Sep (Ericamae). The first switch asks for YouTube's content rating, which is Kevin's declaration: answered
+    only for an approved card, otherwise recorded as 'needs-rating' and listed in the morning report."""
+    posts = [p for k, p in (entry.get("posts") or {}).items()
+             if k.startswith("youtube|") and p.get("clip") in ("full", "lfmd") and p.get("id") and p.get("route") == "api" and p.get("status") == "published"]
+    changed = False
+    for p in posts:
+        if p.get("monetisation") == "On": continue       # "Checking" (YouTube reviewing the rating) is re-read until it says On
+        last = p.get("monetisation_checked")
+        if last:
+            try:
+                if dt.datetime.now(dt.timezone.utc) - dt.datetime.fromisoformat(last.replace("Z", "+00:00")) < dt.timedelta(hours=MONETISE_RECHECK_HOURS): continue
+            except ValueError: pass
+        import youtube_studio
+        approved = (approval.load_state().get(str(day)) or {}).get("verdict") == "approved"
+        res = youtube_studio.monetise(p["id"], certify_none=approved)     # approving the card is Kevin's content rating (13 Sep 2026)
+        p["monetisation"] = res.get("status") or "unknown"; p["monetisation_checked"] = now_utc(); changed = True
+        if res.get("error"): p["monetisation_error"] = res["error"][-200:]
+        else: p.pop("monetisation_error", None)
+        print("episode %s: YouTube %s monetisation %s" % (day, "Short" if p["clip"] == "lfmd" else "episode", p["monetisation"]))
+    return changed
 
 
 def share_to_facebook_profile(day, entry, state):
@@ -1231,11 +1235,12 @@ def report():
     for d, e in state.items():
         if not str(d).isdigit() or not isinstance(e, dict): continue
         for k, p in (e.get("posts") or {}).items():
-            if k.startswith("youtube|") and p.get("clip") == "full" and p.get("monetisation") not in (None, "On"):
-                waiting.append("%s (%s)" % (d, p["monetisation"]))
+            if k.startswith("youtube|") and p.get("clip") in ("full", "lfmd") and p.get("status") == "published" and p.get("route") == "api" \
+                    and p.get("monetisation") != "On":
+                waiting.append("%s %s (%s)" % (d, "Short" if p["clip"] == "lfmd" else "episode", p.get("monetisation") or "not checked yet"))
     unconfirmed = ["%s %s %s" % (d, p.get("platform"), p.get("clip")) for d, e in state.items() if str(d).isdigit() and isinstance(e, dict)
                    for p in (e.get("posts") or {}).values() if p.get("status") in ("creating", "unconfirmed")]
-    print("content monetisation: %s" % ("every long video On" if not waiting else "NOT On yet for " + ", ".join(sorted(waiting))))
+    print("content monetisation: %s" % ("every YouTube episode and Short On" if not waiting else "NOT On yet for " + ", ".join(sorted(waiting))))
     print("content posts to check once: %s" % ("none" if not unconfirmed else ", ".join(unconfirmed)))
 
 
