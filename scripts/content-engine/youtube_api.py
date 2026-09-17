@@ -16,7 +16,7 @@ Engine"), consented ONCE by Kevin as the channel owner. Files, all 0600, never i
   youtube_api.py whoami         # live: the channel the token can upload to
   youtube_api.py selftest
 """
-import base64, hashlib, http.server, json, os, secrets, subprocess, sys, time, urllib.error, urllib.parse, urllib.request
+import base64, hashlib, http.server, json, os, re, secrets, subprocess, sys, time, urllib.error, urllib.parse, urllib.request
 
 CLIENT_FILE = os.path.expanduser("~/.config/od/youtube_oauth_client.json")
 TOKEN_FILE = os.path.expanduser("~/.config/od/youtube_token.json")
@@ -157,6 +157,33 @@ def set_language(video_id, language=LANGUAGE):
     sn = v["snippet"]; sn["defaultLanguage"] = language; sn["defaultAudioLanguage"] = language
     keep = {k: sn[k] for k in ("title", "description", "tags", "categoryId", "defaultLanguage", "defaultAudioLanguage") if k in sn}
     return request("PUT", API + "/videos?part=snippet", {"id": video_id, "snippet": keep})
+
+
+def set_thumbnail(video_id, png_path):
+    return request("POST", UPLOAD + "/thumbnails/set?videoId=" + video_id, raw=open(png_path, "rb").read(), headers={"Content-Type": "image/png"})
+
+
+def video_states(video_ids):
+    """{id: {"privacy", "upload", "processing", "published", "seconds"}} for up to 50 videos, straight from YouTube.
+    The channel is the proof of what went out (16 Sep 2026: our records said 'scheduled' for videos public a day)."""
+    out = {}
+    ids = [v for v in video_ids if v]
+    for i in range(0, len(ids), 50):
+        d = request("GET", API + "/videos?part=status,processingDetails,snippet,contentDetails&id=" + ",".join(ids[i:i + 50]))
+        for v in d.get("items", []):
+            dur = (v.get("contentDetails") or {}).get("duration", "")
+            m = re.match(r"P(?:\d+D)?T?(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?", dur or "")
+            secs = (int(m.group(1) or 0) * 3600 + int(m.group(2) or 0) * 60 + int(m.group(3) or 0)) if m else 0
+            out[v["id"]] = {"privacy": v["status"].get("privacyStatus"), "upload": v["status"].get("uploadStatus"),
+                            "processing": (v.get("processingDetails") or {}).get("processingStatus"),
+                            "published": v["snippet"].get("publishedAt", ""), "seconds": secs}
+    return out
+
+
+def set_privacy(video_id, privacy):
+    v = request("GET", API + "/videos?part=status&id=" + video_id)["items"][0]
+    st = v["status"]; st["privacyStatus"] = privacy; st.pop("publishAt", None)
+    return request("PUT", API + "/videos?part=status", {"id": video_id, "status": st})
 
 
 def recent_uploads(limit=15):

@@ -381,12 +381,13 @@ def media_for(day, entry, kinds):
     files = episode_files(day); media = entry.setdefault("media", {})
     for k in kinds:
         if media.get(k): continue
-        if not os.path.exists(files[k]):
+        local = fetch_readable(day, k)
+        if not os.path.exists(local):
             if k in ("thumb", "podcast"): continue
             raise SystemExit("episode %d: %s is not in the edited folder (%s)" % (day, k, files[k]))
-        src = fit_for_upload(files[k])
+        src = fit_for_upload(local)
         media[k] = upload_media(src)
-        if src != files[k] and os.path.exists(src): os.remove(src)
+        if src != local and os.path.exists(src): os.remove(src)
         print("episode %d: uploaded %s" % (day, k))
     return media
 
@@ -583,11 +584,12 @@ def finish_extras(day, entry, recs, test, save):
         try:
             import spotify
             files = episode_files(day)
-            upload = files["podcast"] if spotify.PODCAST_FORMAT == "audio" and os.path.exists(files["podcast"]) else files["full"]
+            upload = fetch_readable(day, "podcast") if spotify.PODCAST_FORMAT == "audio" else fetch_readable(day, "full")
             if not os.path.exists(upload): upload = full_from_drive(day) or upload
+            thumb_local = fetch_readable(day, "thumb")
             if os.path.exists(upload):
                 tried_before = os.path.exists(os.path.join(os.path.dirname(STATE), "spotify_plan_%d.json" % day))
-                plan_path, ptitle = spotify.write_plan(day, upload, ff.get("Podcast Copy"), entry["youtube_link"], test, os.path.dirname(STATE), thumb=files.get("thumb", ""))
+                plan_path, ptitle = spotify.write_plan(day, upload, ff.get("Podcast Copy"), entry["youtube_link"], test, os.path.dirname(STATE), thumb=thumb_local if os.path.exists(thumb_local) else "")
                 if tried_before and not test:
                     # an earlier attempt left its plan (2056 crashed mid-run on 11 Sep 2026 and its state was rebuilt
                     # without the podcast): look at Spotify before uploading, so a retry never publishes a second copy
@@ -613,6 +615,48 @@ def finish_extras(day, entry, recs, test, save):
         except (Exception, SystemExit) as ex:
             print("episode %d: could not check Spotify after a stopped upload (%s)" % (day, str(ex)[-120:]), file=sys.stderr)
     return done
+
+
+PUBLISH_CACHE = os.path.expanduser("~/knowledge-os/logs/content-engine/publish-cache")
+
+
+def readable(path, timeout=30):
+    """The file really reads here, not merely listed. The Drive mount lists an upload minutes to hours before it can
+    deliver the bytes, and a launchd job can be refused the folder outright (finding 20260911-daily-ops-phase-2-523)."""
+    if not path or not os.path.exists(path) or os.path.getsize(path) == 0: return False
+    try:
+        r = subprocess.run(["head", "-c", "65536", path], capture_output=True, timeout=timeout)
+        return r.returncode == 0 and len(r.stdout) > 0
+    except (subprocess.TimeoutExpired, OSError):
+        return False
+
+
+def output_link(day, kind, ledger=None):
+    ledger = ledger if ledger is not None else watch.load_ledger()
+    role = "teaser" if kind == "summary" else "episode"
+    for v in ledger.values():
+        if v.get("episode") == day and v.get("role") == role and (v.get("outputs") or {}).get(kind):
+            return v["outputs"][kind]
+    return None
+
+
+def fetch_readable(day, kind, ledger=None, download=None):
+    """A path to this episode's `kind` output that READS: the Drive folder copy when it reads, otherwise a local copy
+    fetched once by the Drive API from the link the render recorded. 16-17 Sep 2026: the podcast copy, the thumbnail
+    and the output gate all read the Drive folder minutes after upload and failed; the files were fine."""
+    path = episode_files(day)[kind]
+    if readable(path): return path
+    m = re.search(r"/d/([\w-]+)", output_link(day, kind, ledger) or "")
+    if not m: return path
+    dest = os.path.join(PUBLISH_CACHE, str(day), os.path.basename(path))
+    if not (os.path.exists(dest) and os.path.getsize(dest) > 0):
+        os.makedirs(os.path.dirname(dest), exist_ok=True)
+        if download is None:
+            import drive_api; download = drive_api.download
+        download(m.group(1), dest + ".part")
+        os.replace(dest + ".part", dest)                  # only a whole file gets the real name
+        print("episode %d: %s fetched from Drive (%.0f MB)" % (day, kind, os.path.getsize(dest) / 1e6))
+    return dest
 
 
 def full_from_drive(day, work=None):
@@ -643,15 +687,25 @@ def youtube_direct(day, clip, title, text, when, test):
     """Upload the clean render (no burnt-in captions) with its caption file and the thumbnail. Live: private now,
     public at the slot (YouTube's own scheduler). Test: unlisted at once. Returns the post record for the state."""
     import youtube_api
-    files = episode_files(day)
-    path = files.get(clip + "_yt") if os.path.exists(files.get(clip + "_yt", "")) else files[clip]
-    srt = files.get(clip + "_srt") if os.path.exists(files.get(clip + "_srt", "")) else None
-    thumb = files.get("thumb") if os.path.exists(files.get("thumb", "")) else None
+    path = fetch_readable(day, clip + "_yt")
+    if not os.path.exists(path): path = fetch_readable(day, clip)
+    srt = fetch_readable(day, clip + "_srt"); srt = srt if os.path.exists(srt) else None
+    thumb = fetch_readable(day, "thumb") if clip == "full" else None
+    thumb = thumb if thumb and os.path.exists(thumb) else None
     vid = youtube_api.upload(path, title or ("Diary of a Runpreneur, Day %d" % day), text, privacy="unlisted" if test else "private",
-                             publish_at=None if test else when, thumbnail=thumb, srt=srt)
+                             publish_at=None if test else when, thumbnail=None, srt=None)
     link = "https://youtu.be/" + vid
-    return {"id": vid, "platform": "youtube", "route": "api", "account": "Runpreneur", "clip": clip, "scheduled": None if test else when,
-            "status": "published" if test else "scheduled", "link": link, "mode": mode(), "file": os.path.basename(path), "captions": bool(srt)}
+    # After the video exists, a failed thumbnail or caption call must never lose it (it used to raise out of upload()
+    # with the video on the channel and no id recorded). Each is recorded, and sync retries a missing thumbnail.
+    extras = {"thumb": False, "captions": False}
+    if thumb:
+        try: youtube_api.set_thumbnail(vid, thumb); extras["thumb"] = True
+        except Exception as ex: extras["thumb_error"] = str(ex)[-200:]; print("episode %d: thumbnail not set on %s (%s); retried by sync" % (day, vid, str(ex)[-120:]), file=sys.stderr)
+    if srt:
+        try: youtube_api.add_captions(vid, srt); extras["captions"] = True
+        except Exception as ex: extras["captions_error"] = str(ex)[-200:]; print("episode %d: captions not added on %s (%s)" % (day, vid, str(ex)[-120:]), file=sys.stderr)
+    return dict({"id": vid, "platform": "youtube", "route": "api", "account": "Runpreneur", "clip": clip, "scheduled": None if test else when,
+                 "status": "published" if test else "scheduled", "link": link, "mode": mode(), "file": os.path.basename(path)}, **extras)
 
 
 def card_task(day, full):
@@ -886,6 +940,12 @@ def run(dry_run=False, limit=3):
             print("episode %d: approved, waiting for a YouTube account in GoHighLevel (Kevin's click: publish.py youtube-link)" % day); continue
         if stage == "wait-youtube-link":
             print("episode %d: YouTube post scheduled, waiting for it to publish before the socials go out" % day); continue
+        redo = [b for b in entry.get("broken_uploads", []) if not b.get("replaced")]
+        if redo and not dry_run and entry.get("youtube_link") and not ahead_of_order(day, gaps, state):
+            for st_no in sorted({1 if b["clip"] == "full" else 2 for b in redo}):
+                schedule_stage(day, entry, recs, acct_map, st_no, dry_run, index=0, save=save)
+            for b in redo: b["replaced"] = now_utc()
+            save()
         if stage == "done":
             if not dry_run: finish_extras(day, entry, recs, test, save)     # a blog or Spotify that failed last hour
             continue
@@ -936,9 +996,45 @@ def youtube_link_from_channel(day, scheduled_iso, now=None, listing=None, url=CH
     return None
 
 
+BROKEN_UPLOAD_MINUTES = 90
+THUMB_TRIES = 6
+
+
+def minutes_since(iso, now=None):
+    try: t = dt.datetime.strptime((iso or "")[:19], "%Y-%m-%dT%H:%M:%S").replace(tzinfo=dt.timezone.utc)
+    except ValueError: return None
+    return ((now or dt.datetime.now(dt.timezone.utc)) - t).total_seconds() / 60
+
+
+def youtube_verdict(p, s, now=None):
+    """What YouTube itself says about one of our API posts: 'published', 'broken', or None (leave it).
+    A video public and processed is out, whatever our record says (16 Sep 2026: 2057 and 2058 were public for a day
+    while the records said 'scheduled', because an interrupted upload was adopted with no publish time). A video still
+    'uploaded' with no length 90 minutes after its upload began never finished arriving (2058's Short)."""
+    if not s: return None
+    if s.get("privacy") == "public" and s.get("upload") == "processed": return "published"
+    age = minutes_since(p.get("started") or p.get("adopted"), now)
+    if s.get("upload") == "uploaded" and not s.get("seconds") and age is not None and age >= BROKEN_UPLOAD_MINUTES: return "broken"
+    return None
+
+
+def youtube_truth(state):
+    """One call for every API post that is not yet confirmed, or published without our thumbnail."""
+    ids = [p.get("id") for d, e in state.items() if str(d).isdigit() and isinstance(e, dict)
+           for p in (e.get("posts") or {}).values()
+           if p.get("route") == "api" and p.get("id") and (p.get("status") != "published" or (p.get("clip") == "full" and not p.get("thumb")))]
+    if not ids: return {}
+    try:
+        import youtube_api
+        return youtube_api.video_states(ids)
+    except (Exception, SystemExit) as ex:
+        print("youtube: could not read the channel to confirm uploads (%s)" % str(ex)[-120:], file=sys.stderr); return {}
+
+
 def sync():
     """GHL post statuses -> links on the record; the YouTube link unlocks stage 2; all published -> Published."""
     state = load_state(); _, loc, _ = _cfg()
+    yt = youtube_truth(state)
     for day, entry in state.items():
         if not str(day).isdigit() or not isinstance(entry, dict): continue   # _cursor, _skipped_days, held_posts live beside the episodes (9 Sep 2026: the first live cursor crashed sync)
         try:
@@ -964,14 +1060,44 @@ def sync():
                 except Exception as ex: print("episode %s: could not note the Spotify link (%s)" % (day, str(ex)[:120]))
         posts = entry.get("posts", {})
         if not posts: continue
-        changed = False; links = {}; clip_links = {}
+        changed = False; links = {}; clip_links = {}; drop = []
         for key, p in posts.items():
+            if p.get("route") == "api" and p.get("clip") == "full" and p.get("status") == "published" and not p.get("thumb") \
+                    and (yt.get(p.get("id")) or {}).get("upload") == "processed" and int(p.get("thumb_tries") or 0) < THUMB_TRIES:
+                # our thumbnail on every long video (Kevin, 17 Sep 2026: "the thumbnails haven't come through")
+                p["thumb_tries"] = int(p.get("thumb_tries") or 0) + 1; changed = True
+                try:
+                    import youtube_api
+                    png = fetch_readable(int(day), "thumb")
+                    if os.path.exists(png):
+                        youtube_api.set_thumbnail(p["id"], png); p["thumb"] = True
+                        print("episode %s: thumbnail set on %s" % (day, p["id"]))
+                except (Exception, SystemExit) as ex:
+                    p["thumb_error"] = str(ex)[-200:]
+                    print("episode %s: thumbnail not set on %s (%s)" % (day, p["id"], str(ex)[-120:]), file=sys.stderr)
             if p.get("status") in ("published", "draft"): continue     # a draft (test mode) never moves on its own
             if p.get("route") == "api":                                # uploaded straight to YouTube: the slot passing is the publish
                 if p.get("scheduled") and dt.datetime.now(dt.timezone.utc) >= dt.datetime.fromisoformat(p["scheduled"].replace("Z", "+00:00")):
                     p["status"] = "published"; p.setdefault("published_at", p["scheduled"]); changed = True
                     for f in LINK_FIELDS.get(("youtube", p["clip"]), ()): links.setdefault(f, p["link"])
                     if p["clip"] == "full" and not entry.get("youtube_link"): entry["youtube_link"] = p["link"]
+                elif not p.get("scheduled"):
+                    verdict = youtube_verdict(p, yt.get(p.get("id")))
+                    if verdict == "published":
+                        s = yt[p["id"]]
+                        p["status"] = "published"; p["published_at"] = s.get("published") or now_utc(); p["confirmed"] = "on the channel"; changed = True
+                        for f in LINK_FIELDS.get(("youtube", p["clip"]), ()): links.setdefault(f, p["link"])
+                        if p["clip"] == "full" and not entry.get("youtube_link"): entry["youtube_link"] = p["link"]
+                        print("episode %s: YouTube %s confirmed live on the channel (%s)" % (day, p["clip"], p["link"]))
+                    elif verdict == "broken":
+                        # never deleted by the engine: made private (reversible) and replaced by a fresh upload
+                        try:
+                            import youtube_api; youtube_api.set_privacy(p["id"], "private"); hidden = True
+                        except (Exception, SystemExit) as ex:
+                            hidden = False; print("episode %s: could not hide the broken upload %s (%s)" % (day, p["id"], str(ex)[-120:]), file=sys.stderr)
+                        entry.setdefault("broken_uploads", []).append({"clip": p["clip"], "id": p["id"], "found": now_utc(), "hidden": hidden})
+                        drop.append(key); changed = True
+                        print("episode %s: YouTube %s %s never finished uploading; hidden (private) and queued for a fresh upload" % (day, p["clip"], p["id"]))
                 continue
             try:
                 g = ghl("GET", "/social-media-posting/%s/posts/%s" % (loc, p["id"]))
@@ -1017,6 +1143,7 @@ def sync():
                 rec = pc.find_by_name(pc.record_name(int(day), CLIP_RECORD[clip]))
                 if rec: watch._airtable("PATCH", watch.API + "/" + rec["id"], {"fields": {k: v for k, v in cl.items() if not k.startswith("Link of")}})
             if fields: print("episode %s: %s" % (day, ", ".join(sorted(fields))))
+        for key in drop: posts.pop(key, None)
         if changed: save_state(state)
 
 
@@ -1246,6 +1373,32 @@ def selftest():
     assert '"unconfirmed" and fb.get("post_url")' in ssrc and 'reshared_at' in ssrc, "an unconfirmed share is re-checked and re-pressed once"
     assert '("shared", "reviewed", "failed"): return False' in ssrc, "a failed share is final, or it is pressed every other hour"
     assert 'dest + ".part"' in inspect.getsource(full_from_drive), "a stopped Drive copy must never be uploaded as the episode"
+    # 16-17 Sep 2026: what YouTube says decides, not the record an interrupted upload left behind
+    now = dt.datetime(2026, 9, 17, 8, 0, tzinfo=dt.timezone.utc)
+    adopted = {"started": "2026-09-16T14:14:28Z", "adopted": "2026-09-16T15:39:55Z"}
+    assert youtube_verdict(adopted, {"privacy": "public", "upload": "processed", "seconds": 266}, now) == "published", "public and processed is out (2058 full)"
+    assert youtube_verdict(adopted, {"privacy": "public", "upload": "uploaded", "processing": "processing", "seconds": 0}, now) == "broken", "never finished arriving (2058 Short)"
+    assert youtube_verdict({"started": "2026-09-17T07:30:00Z"}, {"privacy": "private", "upload": "uploaded", "seconds": 0}, now) is None, "still uploading: leave it"
+    assert youtube_verdict(adopted, None, now) is None and youtube_verdict(adopted, {"privacy": "private", "upload": "processed", "seconds": 60}, now) is None
+    import tempfile, shutil as _shu
+    tdir = tempfile.mkdtemp(); real_files, real_cache = globals()["episode_files"], globals()["PUBLISH_CACHE"]
+    good = os.path.join(tdir, "Episode_2058_Thumbnail.png"); open(good, "wb").write(b"PNG" * 100)
+    globals()["episode_files"] = lambda d: {"thumb": good, "full": os.path.join(tdir, "absent_full.mp4")}
+    globals()["PUBLISH_CACHE"] = os.path.join(tdir, "cache")
+    try:
+        fetched = []
+        led = {"e": {"episode": 2058, "role": "episode", "outputs": {"full": "https://drive.google.com/file/d/1AbC_x-9/view"}}}
+        assert fetch_readable(2058, "thumb", led, download=lambda fid, dest: fetched.append(fid)) == good and fetched == [], "a file that reads is used as it is"
+        def dl(fid, dest): fetched.append(fid); open(dest, "wb").write(b"x" * 10)
+        import io as _io, contextlib as _cl
+        with _cl.redirect_stdout(_io.StringIO()): got = fetch_readable(2058, "full", led, download=dl)   # its log line must not reach the selftest JSON
+        assert fetched == ["1AbC_x-9"] and got.startswith(globals()["PUBLISH_CACHE"]) and os.path.getsize(got) == 10, (fetched, got)
+        assert fetch_readable(2058, "full", led, download=dl) == got and fetched == ["1AbC_x-9"], "fetched once, then the local copy"
+        assert fetch_readable(2058, "full", {}, download=dl).endswith("absent_full.mp4"), "no Drive link: the caller's own check decides"
+    finally:
+        globals()["episode_files"], globals()["PUBLISH_CACHE"] = real_files, real_cache; _shu.rmtree(tdir)
+    ys2 = inspect.getsource(youtube_direct)
+    assert "thumbnail=None, srt=None" in ys2 and ys2.index("youtube_api.upload(") < ys2.index("set_thumbnail(") < ys2.index("add_captions("), "the video is recorded even when the thumbnail or captions call fails"
     fsrc = inspect.getsource(finish_extras)
     assert fsrc.index("spotify.verify_published(ptitle") < fsrc.index("run_spotify(day"), "a retried podcast looks at Spotify before it uploads"
     # 15 Sep 2026: a media upload that raises SystemExit must not end the hourly run (1841's mp3 did, hourly)
@@ -1269,14 +1422,14 @@ def selftest():
     assert CLIP_FILES["podcast"] == "Ep%d_Podcast.mp3"
     import inspect as _i3; src3 = _i3.getsource(finish_extras); assert 'run_spotify(day, card_task(day, full)' in src3, "Spotify is gated on the approval CARD, never the episode record (14 Sep 2026)"
     import inspect as _i2; src2 = _i2.getsource(schedule_stage); assert "youtube_direct_ready()" in src2 and src2.index("youtube_direct_ready()") < src2.index("create_post(body)"), "the API route is tried before GoHighLevel"
-    ys = _i2.getsource(youtube_direct); assert 'files[clip]' in ys and '"_srt"' in ys and 'privacy="unlisted" if test else "private"' in ys and "publish_at=None if test else when" in ys
+    ys = _i2.getsource(youtube_direct); assert 'fetch_readable(day, clip)' in ys and '"_srt"' in ys and 'privacy="unlisted" if test else "private"' in ys and "publish_at=None if test else when" in ys
     ss = _i2.getsource(sync); assert 'p.get("route") == "api"' in ss and 'p["status"] = "published"' in ss, "API uploads flip to published on their slot without asking GoHighLevel"
     import inspect as _i
     assert "share_to_facebook_profile(day, entry, state)" in _i.getsource(sync) and "signin-needed" in _i.getsource(share_to_facebook_profile), "the profile share runs from sync, on the page post, and waits for sign-in"
     fsrc = _i.getsource(share_to_facebook_profile); assert "find_page_post" in fsrc and "verify_shared" in fsrc, "it shares the page post and checks the profile afterwards"
     assert fsrc.index('"status": "sharing"') < fsrc.index("run_plan(") and fsrc.index("save_state(state)") < fsrc.index("run_plan("), "the share is on disk before Share is pressed"
     assert "except Exception as ex:           # a page read timed out" in _i.getsource(sync), "a failing share never ends the run"
-    rsrc = _i.getsource(run); assert 'stage_for(entry, yt_ok) == "socials"' in rsrc and rsrc.count("schedule_stage(") == 2, "both stages run the same day"
+    rsrc = _i.getsource(run); assert 'stage_for(entry, yt_ok) == "socials"' in rsrc and rsrc.count("schedule_stage(") == 3 and "broken_uploads" in rsrc, "both stages run the same day, and a broken upload is replaced once"
     t0 = dt.datetime(2026, 9, 10, 9, 0, tzinfo=LONDON)
     assert when_for("youtube", "full", 0, now=t0) == "2026-09-10T08:15:00Z", "the 06:00 slot has passed: 15 minutes from now, same morning"
     assert when_for("linkedin", "summary", 0, now=t0) == "2026-09-10T11:00:00Z", "socials keep their afternoon slot"
