@@ -420,8 +420,8 @@ async function gatherTasks(pat) {
 const KEVIN_TEAM_MEMBER = 'recHEt2VPYothaqTd';
 
 function selectOnlyYou(tasks, today) {
-    const isOnlyYou = name => !/\b(chase|chasing)\b|\brent payments?\b|adobe sign/i.test(name) && (
-        /standing order|direct debit|\bbank (details|account|transfer|change)|\bbanking\b|\bpay\b|\bpayments?\b|\bsignatures?\b|\b(counter)?sign(ing)?\b(?![\s-]*(in|into|up|out)\b)/i.test(name)
+    const isOnlyYou = name => !/\b(chase|chasing)\b|\brent payments?\b|\bUC payment|adobe sign|email signature|\bsign\b[^.]{0,40}\binto\b/i.test(name) && (
+        /standing order|direct debit|docusign|\bbank (details|account|transfer|change)|\bbanking\b|\bpay\b|\bpayments?\b|\bsignatures?\b|\b(counter)?sign(ing)?\b(?![\s-]*(in|into|up|out)\b)/i.test(name)
         || /\bSO\b(?=\s*(?:[-–£]|amount\b|for\b))/.test(name));
     const due = (tasks || [])
         .filter(x => (x.holders || []).includes(KEVIN_TEAM_MEMBER))

@@ -57,6 +57,9 @@ const NOT_ONLY_YOU = [
   kevin('Five signs your business runs on you', '2026-09-16'),
   kevin('Order fire door signs', '2026-09-16'),
   kevin('INBOUND: Adobe Sign: agreement signed by Roy Lavin', '2026-09-16'),
+  kevin('Email signature for Kevin Brittain', '2026-09-16'),
+  kevin('Sign the robot browser into Facebook', '2026-09-16'),
+  kevin('UC payment status (Paul Murcutt)', '2026-09-16'),
 ];
 
 describe('selectOnlyYou picks only bank, payment and signature items', () => {
@@ -76,8 +79,9 @@ describe('selectOnlyYou picks only bank, payment and signature items', () => {
       kevin('Countersign the AST', TODAY),
       kevin('Signing the lease renewal', TODAY),
       kevin('Sign the deed of variation', TODAY),
+      kevin('Kent Reliance-Complete with Docusign', TODAY),
     ], TODAY);
-    expect(out.items).toHaveLength(3);
+    expect(out.items.length + out.more).toBe(4);
   });
 
   it('payments Kevin makes still count when they mention arrears or a missed payment', () => {
