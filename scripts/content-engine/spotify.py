@@ -94,8 +94,20 @@ def build_plan(video_path, title, description, youtube_link, test, thumb=""):
 
 
 def with_day(title, day):
-    """Ericamae's episodes read 'Episode 2053 - ...'; a Podcast Copy title without the day gets the same prefix."""
-    return title if re.search(r"\b%d\b" % day, title) else ("Episode %d - %s" % (day, title))[:200]
+    """Every title reads 'Episode N - <title>', the shape of Ericamae's last episodes (2050-2053) and ours from 2054.
+    Until 17 Sep 2026 a title that already named the day kept whatever shape the model wrote, so 2057 read
+    'Will to Win - Day 2057: Teachable Skill or Innate Trait?' and 2058 '... Compassion | Day 2058' (Kevin: "the titles
+    in the podcast don't follow suit"). Any 'Episode/Ep/Day N' (with or without the thousands comma) at the start, the
+    end, between separators or in brackets is taken out, then the prefix is added once."""
+    num = r"(?:%d|%s)" % (day, "{:,}".format(day))
+    tag = r"(?:episode|ep\.?|day)\s*%s(?:\s+of\s+(?:my|a|the)\s+[\w ]{0,30}?(?:streak|runpreneur|run))?" % num
+    t = (title or "").strip()
+    t = re.sub(r"\s*[(\[]\s*%s\s*[)\]]" % tag, "", t, flags=re.I)                          # "(Day 2195)"
+    t = re.sub(r"^\s*%s\s*[-:|\u2013\u2014,]*\s*" % tag, "", t, flags=re.I)                 # "Day 2057: ..."
+    t = re.sub(r"\s*[-:|\u2013\u2014,]*\s*(?:on\s+)?%s\s*$" % tag, "", t, flags=re.I)       # "... | Day 2058"
+    t = re.sub(r"\s*[-|\u2013\u2014]\s*%s\s*[-:|\u2013\u2014]\s*" % tag, ": ", t, flags=re.I)  # "Will to Win - Day 2057: ..."
+    t = t.strip(" -:|,\u2013\u2014") or "Diary of a Runpreneur"
+    return ("Episode %d - %s" % (day, t))[:200]
 
 
 def run_plan(plan_path, task_id, test, shot):
@@ -198,7 +210,13 @@ def selftest():
     t, d = podcast_parts("Title: Day 2195 running off-road\nDescription: Six years in.\n\nMore.\nHashtags: #a #b", 2195)
     assert t == "Day 2195 running off-road" and d.startswith("Six years in.") and "#a #b" in d and "Title:" not in d, (t, d)
     assert podcast_parts("", 7)[0] == "Diary of a Runpreneur, Day 7"
-    assert with_day("Coping With Stress", 2054) == "Episode 2054 - Coping With Stress" and with_day(t, 2195) == t
+    assert with_day("Coping With Stress", 2054) == "Episode 2054 - Coping With Stress"
+    assert with_day(t, 2195) == "Episode 2195 - running off-road", with_day(t, 2195)
+    assert with_day("Will to Win - Day 2057: Teachable Skill or Innate Trait?", 2057) == "Episode 2057 - Will to Win: Teachable Skill or Innate Trait?"
+    assert with_day("Bitterness After Relationship Breakdown: Reframing Resentment as Compassion | Day 2058", 2058) == "Episode 2058 - Bitterness After Relationship Breakdown: Reframing Resentment as Compassion"
+    assert with_day("Off-Road Running at Pace (Day 2,195)", 2195) == "Episode 2195 - Off-Road Running at Pace"
+    assert with_day("Episode 2054 - Coping With Stress", 2054) == "Episode 2054 - Coping With Stress", "an already correct title is left alone"
+    assert with_day("Why 20 minutes matters", 2059) == "Episode 2059 - Why 20 minutes matters", "other numbers are not the day"
     p = build_plan("/x/Episode_2195_Full_Episode.mp4", "T", "D", "https://youtu.be/x", True)
     assert p["steps"][2] == {"do": "upload", "selector": "#uploadAreaInput", "file": "/x/Episode_2195_Full_Episode.mp4"}
     assert p["mode"] == "test" and "youtu.be/x" in p["steps"][5]["value"] and not any(s["do"] == "submit" for s in p["steps"])
