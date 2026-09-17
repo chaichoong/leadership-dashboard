@@ -180,9 +180,14 @@ def video_states(video_ids):
     return out
 
 
+WRITABLE_STATUS = ("privacyStatus", "embeddable", "license", "publicStatsViewable", "selfDeclaredMadeForKids")
+
+
 def set_privacy(video_id, privacy):
+    """Only the writable status fields go back (uploadStatus, madeForKids and the rest are read-only)."""
     v = request("GET", API + "/videos?part=status&id=" + video_id)["items"][0]
-    st = v["status"]; st["privacyStatus"] = privacy; st.pop("publishAt", None)
+    st = {k: v["status"][k] for k in WRITABLE_STATUS if k in v["status"]}
+    st["privacyStatus"] = privacy
     return request("PUT", API + "/videos?part=status", {"id": video_id, "status": st})
 
 

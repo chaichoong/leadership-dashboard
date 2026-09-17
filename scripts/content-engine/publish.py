@@ -534,7 +534,9 @@ def adopt_youtube(entry, key, have):
     return True, so the retry never uploads a second copy."""
     try:
         import youtube_api
-        vid = youtube_api.find_upload(have.get("title") or "")
+        broken = {b.get("id") for b in entry.get("broken_uploads", [])}
+        ups = [u for u in youtube_api.recent_uploads() if u["id"] not in broken]   # never re-adopt a video already judged broken
+        vid = youtube_api.find_upload(have.get("title") or "", ups)
     except Exception as ex:
         print("youtube: could not read the channel to check for a half-finished upload (%s)" % str(ex)[-120:], file=sys.stderr)
         return False
@@ -940,11 +942,15 @@ def run(dry_run=False, limit=3):
             print("episode %d: approved, waiting for a YouTube account in GoHighLevel (Kevin's click: publish.py youtube-link)" % day); continue
         if stage == "wait-youtube-link":
             print("episode %d: YouTube post scheduled, waiting for it to publish before the socials go out" % day); continue
-        redo = [b for b in entry.get("broken_uploads", []) if not b.get("replaced")]
+        redo = [b for b in entry.get("broken_uploads", []) if not b.get("replaced") and int(b.get("attempts") or 0) < REPLACE_ATTEMPTS]
         if redo and not dry_run and entry.get("youtube_link") and not ahead_of_order(day, gaps, state):
             for st_no in sorted({1 if b["clip"] == "full" else 2 for b in redo}):
                 schedule_stage(day, entry, recs, acct_map, st_no, dry_run, index=0, save=save)
-            for b in redo: b["replaced"] = now_utc()
+            for b in redo:
+                b["attempts"] = int(b.get("attempts") or 0) + 1
+                new = [q for k, q in (entry.get("posts") or {}).items() if k.startswith("youtube|") and q.get("clip") == b["clip"] and q.get("id") and q["id"] != b["id"]]
+                if new: b["replaced"] = now_utc(); b["by"] = new[0]["id"]
+                else: print("episode %d: replacement YouTube %s not on the channel yet (attempt %d of %d)" % (day, b["clip"], b["attempts"], REPLACE_ATTEMPTS), file=sys.stderr)
             save()
         if stage == "done":
             if not dry_run: finish_extras(day, entry, recs, test, save)     # a blog or Spotify that failed last hour
@@ -997,6 +1003,8 @@ def youtube_link_from_channel(day, scheduled_iso, now=None, listing=None, url=CH
 
 
 BROKEN_UPLOAD_MINUTES = 90
+REPLACE_ATTEMPTS = 3
+CACHE_KEEP_DAYS = 3
 THUMB_TRIES = 6
 
 
@@ -1022,7 +1030,8 @@ def youtube_truth(state):
     """One call for every API post that is not yet confirmed, or published without our thumbnail."""
     ids = [p.get("id") for d, e in state.items() if str(d).isdigit() and isinstance(e, dict)
            for p in (e.get("posts") or {}).values()
-           if p.get("route") == "api" and p.get("id") and (p.get("status") != "published" or (p.get("clip") == "full" and not p.get("thumb")))]
+           if p.get("route") == "api" and p.get("id") and (p.get("status") != "published" or
+               (p.get("clip") == "full" and (p.get("thumb") is False or (p.get("adopted") and "thumb" not in p))))]
     if not ids: return {}
     try:
         import youtube_api
@@ -1031,10 +1040,27 @@ def youtube_truth(state):
         print("youtube: could not read the channel to confirm uploads (%s)" % str(ex)[-120:], file=sys.stderr); return {}
 
 
+def prune_publish_cache(state, now=None, root=None):
+    """A day's local copies go once all seven sections are out, or CACHE_KEEP_DAYS after its YouTube episode went out."""
+    import shutil
+    root = root or PUBLISH_CACHE
+    if not os.path.isdir(root): return []
+    gone = []
+    for d in os.listdir(root):
+        e = state.get(d)
+        if not isinstance(e, dict): continue
+        yt_full = next((p for k, p in (e.get("posts") or {}).items() if k.startswith("youtube|") and p.get("clip") == "full"), {})
+        age = minutes_since(yt_full.get("published_at"), now)
+        if all(v == "done" for v in section_status(e).values()) or (age is not None and age > CACHE_KEEP_DAYS * 1440):
+            shutil.rmtree(os.path.join(root, d), ignore_errors=True); gone.append(d)
+    return gone
+
+
 def sync():
     """GHL post statuses -> links on the record; the YouTube link unlocks stage 2; all published -> Published."""
     state = load_state(); _, loc, _ = _cfg()
     yt = youtube_truth(state)
+    for d in prune_publish_cache(state): print("episode %s: local publish copies removed" % d)
     for day, entry in state.items():
         if not str(day).isdigit() or not isinstance(entry, dict): continue   # _cursor, _skipped_days, held_posts live beside the episodes (9 Sep 2026: the first live cursor crashed sync)
         try:
@@ -1062,7 +1088,8 @@ def sync():
         if not posts: continue
         changed = False; links = {}; clip_links = {}; drop = []
         for key, p in posts.items():
-            if p.get("route") == "api" and p.get("clip") == "full" and p.get("status") == "published" and not p.get("thumb") \
+            if p.get("route") == "api" and p.get("clip") == "full" and p.get("status") == "published" \
+                    and (p.get("thumb") is False or (p.get("adopted") and "thumb" not in p)) \
                     and (yt.get(p.get("id")) or {}).get("upload") == "processed" and int(p.get("thumb_tries") or 0) < THUMB_TRIES:
                 # our thumbnail on every long video (Kevin, 17 Sep 2026: "the thumbnails haven't come through")
                 p["thumb_tries"] = int(p.get("thumb_tries") or 0) + 1; changed = True
@@ -1094,10 +1121,12 @@ def sync():
                         try:
                             import youtube_api; youtube_api.set_privacy(p["id"], "private"); hidden = True
                         except (Exception, SystemExit) as ex:
-                            hidden = False; print("episode %s: could not hide the broken upload %s (%s)" % (day, p["id"], str(ex)[-120:]), file=sys.stderr)
-                        entry.setdefault("broken_uploads", []).append({"clip": p["clip"], "id": p["id"], "found": now_utc(), "hidden": hidden})
-                        drop.append(key); changed = True
-                        print("episode %s: YouTube %s %s never finished uploading; hidden (private) and queued for a fresh upload" % (day, p["clip"], p["id"]))
+                            hidden = False; p["hide_error"] = str(ex)[-200:]; changed = True
+                            print("episode %s: could not hide the broken upload %s (%s); tried again next run, NOT replaced while it is public" % (day, p["id"], str(ex)[-120:]), file=sys.stderr)
+                        if hidden:
+                            entry.setdefault("broken_uploads", []).append({"clip": p["clip"], "id": p["id"], "found": now_utc(), "hidden": True})
+                            drop.append(key); changed = True
+                            print("episode %s: YouTube %s %s never finished uploading; hidden (private) and queued for a fresh upload" % (day, p["clip"], p["id"]))
                 continue
             try:
                 g = ghl("GET", "/social-media-posting/%s/posts/%s" % (loc, p["id"]))
@@ -1397,6 +1426,15 @@ def selftest():
         assert fetch_readable(2058, "full", {}, download=dl).endswith("absent_full.mp4"), "no Drive link: the caller's own check decides"
     finally:
         globals()["episode_files"], globals()["PUBLISH_CACHE"] = real_files, real_cache; _shu.rmtree(tdir)
+    asrc = inspect.getsource(adopt_youtube); assert "broken_uploads" in asrc, "a video judged broken is never adopted again"
+    rs = inspect.getsource(run); assert "REPLACE_ATTEMPTS" in rs and 'b["replaced"] = now_utc(); b["by"]' in rs, "replaced only when a new video exists, at most three tries"
+    ss = inspect.getsource(sync); assert "if hidden:" in ss, "a broken video is replaced only after it is hidden"
+    assert '(p.get("thumb") is False or (p.get("adopted") and "thumb" not in p))' in ss, "old videos keep their thumbnails"
+    tmpc = tempfile.mkdtemp(); os.makedirs(os.path.join(tmpc, "2057")); os.makedirs(os.path.join(tmpc, "2059"))
+    st_c = {"2057": {"posts": {"youtube|full|y": {"clip": "full", "status": "published", "published_at": "2026-09-10T05:00:00Z"}}},
+            "2059": {"posts": {"youtube|full|y": {"clip": "full", "status": "scheduled"}}}}
+    assert prune_publish_cache(st_c, now=dt.datetime(2026, 9, 17, 8, 0, tzinfo=dt.timezone.utc), root=tmpc) == ["2057"] and os.path.isdir(os.path.join(tmpc, "2059")), "old published days go, unpublished stay"
+    _shu.rmtree(tmpc)
     ys2 = inspect.getsource(youtube_direct)
     assert "thumbnail=None, srt=None" in ys2 and ys2.index("youtube_api.upload(") < ys2.index("set_thumbnail(") < ys2.index("add_captions("), "the video is recorded even when the thumbnail or captions call fails"
     fsrc = inspect.getsource(finish_extras)
