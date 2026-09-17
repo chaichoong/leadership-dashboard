@@ -985,6 +985,15 @@ def run(dry_run=False, limit=3):
             print("episode %d: approved, waiting for a YouTube account in GoHighLevel (Kevin's click: publish.py youtube-link)" % day); continue
         if stage == "wait-youtube-link":
             print("episode %d: YouTube post scheduled, waiting for it to publish before the socials go out" % day); continue
+        # A Learnings clip that exists but was never posted (1841 and 2060's rebuilds, 17 Sep 2026: an episode already
+        # out was "done", so a clip rebuilt afterwards never reached the socials or the YouTube Short). Stage 2 creates
+        # only the posts that are missing; tried at most REPLACE_ATTEMPTS times, and said each time it cannot.
+        s_now = section_status(entry)
+        if not dry_run and stage == "done" and entry.get("youtube_link") and output_link(day, "lfmd", ledger) and not ahead_of_order(day, gaps, state) \
+                and "missing" in (s_now["Learnings clips"], s_now["YouTube Short"]) and int(entry.get("fill_attempts") or 0) < REPLACE_ATTEMPTS:
+            entry["fill_attempts"] = int(entry.get("fill_attempts") or 0) + 1; save()
+            n_fill = schedule_stage(day, entry, recs, acct_map, 2, dry_run, index=0, save=save)
+            print("episode %d: missing Learnings posts scheduled (%d), attempt %d" % (day, n_fill or 0, entry["fill_attempts"]))
         redo = [b for b in entry.get("broken_uploads", []) if not b.get("replaced") and int(b.get("attempts") or 0) < REPLACE_ATTEMPTS]
         if redo and not dry_run and entry.get("youtube_link") and not ahead_of_order(day, gaps, state):
             for st_no in sorted({1 if b["clip"] == "full" else 2 for b in redo}):
@@ -1473,6 +1482,7 @@ def selftest():
     finally:
         globals()["episode_files"], globals()["PUBLISH_CACHE"] = real_files, real_cache; _shu.rmtree(tdir)
     asrc = inspect.getsource(adopt_youtube); assert "broken_uploads" in asrc, "a video judged broken is never adopted again"
+    assert 'output_link(day, "lfmd", ledger)' in inspect.getsource(run) and "fill_attempts" in inspect.getsource(run), "a rebuilt Learnings clip reaches the socials and the Short once it exists"
     rs = inspect.getsource(run); assert "REPLACE_ATTEMPTS" in rs and 'b["replaced"] = now_utc(); b["by"]' in rs, "replaced only when a new video exists, at most three tries"
     ss = inspect.getsource(sync); assert "if hidden:" in ss, "a broken video is replaced only after it is hidden"
     assert '(p.get("thumb") is False or (p.get("adopted") and "thumb" not in p))' in ss, "old videos keep their thumbnails"
@@ -1524,7 +1534,7 @@ def selftest():
     fsrc = _i.getsource(share_to_facebook_profile); assert "find_page_post" in fsrc and "verify_shared" in fsrc, "it shares the page post and checks the profile afterwards"
     assert fsrc.index('"status": "sharing"') < fsrc.index("run_plan(") and fsrc.index("save_state(state)") < fsrc.index("run_plan("), "the share is on disk before Share is pressed"
     assert "except Exception as ex:           # a page read timed out" in _i.getsource(sync), "a failing share never ends the run"
-    rsrc = _i.getsource(run); assert 'stage_for(entry, yt_ok) == "socials"' in rsrc and rsrc.count("schedule_stage(") == 3 and "broken_uploads" in rsrc, "both stages run the same day, and a broken upload is replaced once"
+    rsrc = _i.getsource(run); assert 'stage_for(entry, yt_ok) == "socials"' in rsrc and rsrc.count("schedule_stage(") == 4 and "broken_uploads" in rsrc, "both stages run the same day, and a broken upload is replaced once"
     t0 = dt.datetime(2026, 9, 10, 9, 0, tzinfo=LONDON)
     assert when_for("youtube", "full", 0, now=t0) == "2026-09-10T08:15:00Z", "the 06:00 slot has passed: 15 minutes from now, same morning"
     assert when_for("linkedin", "summary", 0, now=t0) == "2026-09-10T11:00:00Z", "socials keep their afternoon slot"
