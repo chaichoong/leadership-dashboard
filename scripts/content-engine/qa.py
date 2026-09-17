@@ -111,7 +111,20 @@ def checks(day, ledger=None, files=None):
     said = diary_phrase_in(files.get("transcript", ""))
     window = ep.get("lfmd_window")
     d_l, d_ly = d_l0, d_ly0
-    if said or window:
+    near_miss = None
+    if not (said or window):
+        # 2060 (17 Sep 2026): the Learnings line was mis-heard, no clip was cut, and the card went up saying "no diary
+        # phrase spoken (by design)". A near miss now REFUSES the card, so a Learnings section is never lost silently.
+        try:
+            import render
+            cap_text = " ".join(t for _, _, t in render.srt_segments(open(files.get("full_srt", "")).read()))
+            m = render.DIARY_NEAR_MISS_RE.search(cap_text)
+            if m: near_miss = cap_text[max(0, m.start() - 30):m.end() + 30]
+        except Exception:
+            pass
+    if near_miss:
+        add("Learnings section", False, True, "no clip was cut, but the captions say '...%s...': that sounds like the diary section. Rebuild it (render.py redo --day %d --only lfmd) before this card goes up" % (near_miss.strip(), day))
+    elif said or window:
         add("Learnings clip (captions)", d_l > 15, True, "%.0f s; diary phrase %s in the transcript" % (d_l, "found" if said else "not found"))
         add("Learnings clip (clean, for Shorts)", d_ly > 15 and abs(d_ly - d_l) < 1.5, True, "%.0f s" % d_ly)
         add("Learnings caption file", cue_count(files.get("lfmd_srt", "")) >= 3, True, "%d cues" % cue_count(files.get("lfmd_srt", "")))
@@ -216,13 +229,19 @@ def selftest():
     ok, fails, _ = gate(9, led3, f3); assert not ok and any("Learnings clip" in n for n, _ in fails), fails
     # no phrase, no clip: fine, soft note only
     open(files["transcript"], "w").write("no such section today"); ok, fails, passed = gate(9, led3, f3); assert ok and any("by design" in d for n, d in passed)
+    # 2060 (17 Sep 2026): a mis-heard Learnings line in the captions, no clip cut -> the card is REFUSED, never "by design"
+    miss_srt = os.path.join(tmp, "miss.srt")
+    open(miss_srt, "w").write("1\n00:00:01,000 --> 00:00:02,000\nSo I suppose the learning from\n\n2\n00:00:02,000 --> 00:00:03,000\na diet today is that problems\n\n"
+                              + "".join("%d\n00:00:%02d,000 --> 00:00:%02d,500\nword\n\n" % (i, i, i) for i in range(3, 9)))
+    ok, fails, _ = gate(9, led3, dict(f3, full_srt=miss_srt))
+    assert not ok and any(n == "Learnings section" and "sounds like the diary section" in d for n, d in fails), fails
     # leaning horizon and a generic teaser title
     led4 = {"a full.insv": dict(led["a full.insv"], horizon={"1": 40.0, "10": 22.0}), "a sum.insv": {"episode": 9, "role": "teaser", "title": GENERIC_TITLE}}
     ok, fails, _ = gate(9, led4, files); assert not ok and {n for n, _ in fails} >= {"horizon level", "teaser title"}, fails
     # old render without a horizon report: soft, does not block
     led5 = {"a full.insv": dict(led["a full.insv"], horizon=None)}; ok, fails, passed = gate(9, led5, files); assert ok, fails
     assert card_lines([("a", "b")], [("c", "d")])[1:] == ["- a: b", "- FAILED c: d"]
-    shutil.rmtree(tmp); print(json.dumps({"checks": 9, "failed": []}))
+    shutil.rmtree(tmp); print(json.dumps({"checks": 10, "failed": []}))
 
 
 if __name__ == "__main__":

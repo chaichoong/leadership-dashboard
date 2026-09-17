@@ -122,7 +122,9 @@ def build_card(day, full, lfmd=None, short=None, headline="", pans_lines=None, p
     proof_block = "\n".join(proof_lines) if proof_lines else ""
     rating_block = ("YouTube content rating: approving this card also tells YouTube the episode contains none of: " + ", ".join(RATING_CATEGORIES).lower()
                     + ". That answer cannot be changed afterwards, so send the card back if any of these is in the episode.")     # the output gate's checks (qa.py, 10 Sep 2026): proof, not a promise
-    out = "\n\n".join([ask, "Watch before you approve:\n" + "\n".join(watch_lines)] + ([pans_block] if pans_block else []) + ["Where it goes if you approve:\n" + "\n".join(where),
+    no_lfmd = [] if f.get("Reframed Video URL") else [
+        "CHECK BEFORE YOU APPROVE: this episode has NO Learnings from my diary clip (no diary section was found in the transcript). If you said it, send the card back."]
+    out = "\n\n".join([ask] + no_lfmd + ["Watch before you approve:\n" + "\n".join(watch_lines)] + ([pans_block] if pans_block else []) + ["Where it goes if you approve:\n" + "\n".join(where),
                        "The copy, as written (where it shows [ADD YOUTUBE LINK], the engine writes the YouTube link there once the video is up; "
                        "a post still carrying a placeholder is refused, never published):\n\n" + "\n\n".join(copy), checks] + ([proof_block] if proof_block else []) + [rating_block, closing])
     desc = ("Approve Episode %d for publishing. The Content Engine rendered the three videos, wrote the platform copy "
