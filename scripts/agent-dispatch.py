@@ -4851,6 +4851,8 @@ def parse_signin_line(text):
     return {"site": site, "url": url, "verified": verified}
 
 
+GMAIL_SIGNIN_RE = re.compile(r"\bg[- ]?mail\b|mail\.google\.com|\bgoogle mail\b", re.I)
+
 SIGNIN_SHARED_DOMAINS = {"google.com", "google.co.uk", "microsoft.com", "live.com", "office.com",
                          "apple.com", "amazon.com", "amazon.co.uk", "facebook.com", "meta.com"}
 
@@ -5062,6 +5064,16 @@ def signin_line_problem(output, sites=None):
     m = parse_signin_line(output)
     if not m:
         return ""
+    # Gmail is never a sign-in for Kevin (17 Sep 2026). The agents read the
+    # mailbox headlessly through the triage worker, so "SIGN-IN NEEDED: Gmail"
+    # parks work that was never blocked: three tasks sat waiting on it (a lead
+    # reply, a council tax summary, a repair quote) while the same messages
+    # were one search away.
+    if GMAIL_SIGNIN_RE.search(m["site"] or "") or GMAIL_SIGNIN_RE.search(m["url"] or ""):
+        return ("its SIGN-IN NEEDED line names Gmail, which is never a sign-in Kevin is asked for.\n"
+                "       You can read the mailbox yourself: python3 scripts/inbound-triage.py search "
+                "--q '<gmail query>' [--account info@agilelets.co.uk]. Read the message, then write "
+                "the decision with what it actually says.")
     sites = sites if sites is not None else load_login_sites()
     host = signin_site_for(m["site"], m["url"], sites)
     entry = sites.get(host or "", {})
