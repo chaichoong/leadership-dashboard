@@ -28,6 +28,7 @@ import collections
 import datetime
 import json
 import os
+import re
 import subprocess
 import sys
 import urllib.error
@@ -425,6 +426,44 @@ def weekly_review(decisions, names, job_rows, now):
             "shared_pool_minutes": None if minutes is None else round(minutes[3])}
 
 
+# THE THREE-SCENARIO TEST IS RECORDED, NOT REMEMBERED (Kevin, 17 Sep 2026).
+# GUARDRAILS has required it since 25 Aug, but no register row recorded one and
+# nothing checked. The register's Scenario Test field holds one dated line per
+# scenario; the weekly review names every Live or Built agent without all three
+# passing, so a gap is read out rather than forgotten.
+REGISTER = "tbl9msVjyQWslLOIZ"
+SCENARIO_LABELS = ("EXPECTED", "EDGE", "FAILURE")
+
+
+def scenario_state(text):
+    """'pass' when all three scenarios are on record and passed, else 'fail' or 'missing'."""
+    found = {}
+    for line in str(text or "").splitlines():
+        head = line.strip().split(" ", 1)[0].upper()
+        if head in SCENARIO_LABELS and head not in found:
+            found[head] = line.strip().upper()
+    if len(found) < len(SCENARIO_LABELS):
+        return "missing"
+    if any(re.search(r"\bFAIL\b", line) for line in found.values()):
+        return "fail"
+    return "pass" if all(re.search(r"\bPASS\b", line) for line in found.values()) else "missing"
+
+
+def scenario_gaps(register_rows):
+    """(missing names, failing names) among Live or Built register rows."""
+    missing, failing = [], []
+    for r in register_rows:
+        f = r.get("fields", {})
+        if select_name(f.get("Status")) not in ("Live", "Built"):
+            continue
+        state = scenario_state(f.get("Scenario Test"))
+        if state == "missing":
+            missing.append(f.get("Name", r.get("id", "")))
+        elif state == "fail":
+            failing.append(f.get("Name", r.get("id", "")))
+    return sorted(missing), sorted(failing)
+
+
 def read_job_rows(path=JOB_STATUS):
     """Every readable line of the job log, or None when the log cannot be read.
 
@@ -606,6 +645,20 @@ def selftest():
     check("Monday in London", is_monday_london(datetime.datetime(2026, 9, 20, 23, 30, tzinfo=datetime.timezone.utc)))
     check("Thursday is not Monday", not is_monday_london(now))
 
+    # The three-scenario record: all three PASS, one FAIL, or anything missing.
+    ok3 = ("EXPECTED (17 Sep 2026): a -> b. PASS\nEDGE (17 Sep 2026): c -> d. PASS\n"
+           "FAILURE (17 Sep 2026): e -> f. PASS\nMethod: read-only run")
+    fail3 = ok3.replace("EDGE (17 Sep 2026): c -> d. PASS", "EDGE (17 Sep 2026): c -> d. FAIL: no rule")
+    check("scenario all pass", scenario_state(ok3) == "pass")
+    check("scenario one fail", scenario_state(fail3) == "fail")
+    check("scenario missing line", scenario_state("EXPECTED (17 Sep 2026): a -> b. PASS") == "missing")
+    check("scenario blank", scenario_state("") == "missing")
+    reg = [{"fields": {"Name": "A", "Status": "Live", "Scenario Test": ok3}},
+           {"fields": {"Name": "B", "Status": "Built", "Scenario Test": fail3}},
+           {"fields": {"Name": "C", "Status": "Live"}},
+           {"fields": {"Name": "D", "Status": "Retired"}}]
+    check("scenario gaps by status", scenario_gaps(reg) == (["C"], ["B"]))
+
     failed = [label for label, ok in checks if not ok]
     print(json.dumps({"ok": not failed, "checks": len(checks), "failed": failed}))
     return 0 if not failed else 1
@@ -656,10 +709,17 @@ def main():
     if "--weekly" in sys.argv:
         now = datetime.datetime.now(datetime.timezone.utc)
         review = weekly_review(decisions, names, read_job_rows(), now)
+        missing, failing = scenario_gaps(query(token, REGISTER, None,
+                                               ["Name", "Status", "Scenario Test"]))
+        review["scenario_test_missing"], review["scenario_test_failing"] = missing, failing
         if "--json" in sys.argv:
             print(json.dumps(review, indent=2))
         else:
             print_weekly(review)
+            print(f"Three-scenario test: {len(failing)} Live or Built agent(s) with a FAIL on record"
+                  + (f" ({', '.join(failing)})" if failing else "")
+                  + f"; {len(missing)} with no complete test"
+                  + (f" ({', '.join(missing)})" if missing else "") + ".")
         if "--card" in sys.argv:
             card = trust_card(review["crossings"], now)
             if card is None:
