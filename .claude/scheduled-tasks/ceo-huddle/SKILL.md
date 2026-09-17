@@ -153,6 +153,8 @@ STEPS
    - **Waiting for Kevin.** If anything is sitting in Status `Approval`, that is agent work that has been PREPARED and not sent. Nothing goes out until he says yes, so a queue that is building up is a real blocker, not a nicety. If the count is 3 or more, that is worth one Board Flag.
    - **Recommendations.** If an agent has cleared the bar (20 decisions of that task type, 90%+, no rejections in the last 10) the script prints a recommendation line. Put it in Board Flags VERBATIM, and never reword it into an announcement. It is a recommendation to Kevin and nothing has changed. Kevin decides whether an agent runs that task type without the gate. Nothing ever auto-promotes: the owner moves the gears, accuracy only advises.
 
+   - **Weekly trust review (17 Sep 2026).** Also run `python3 /Users/kevinbrittain/Projects/leadership-dashboard/scripts/agent-accuracy-report.py --weekly --card` every day. The script decides the day itself: it makes at most ONE card, only on a Monday in London, only when an agent's verdict crossed to UP or DOWN since last week, and through the create gate. On any other day it prints what it would send. Put its last line (the card, "no card", or the would-send name) in Board Flags VERBATIM. Never create a trust card yourself and never reword a verdict: UP and DOWN are recommendations, Kevin makes every move.
+
    If the script errors, say so in one line and carry on. It is a report, not a gate.
 
 4. Write it to Airtable. Table CEO Briefs tblIxbzDSOCI5hqJn. Use FIELD IDS, not names, because a rename would silently drop the write:

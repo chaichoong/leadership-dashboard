@@ -62,10 +62,16 @@
     // say which kind", which counts exactly as a blank always did (an unknown,
     // never a pass) while being visible as a choice rather than a gap.
     var UNCLASSIFIED_REASON = 'Something else';
+    // The label on the 63 rejections decided with no reason at all (Kevin,
+    // 17 Sep 2026: label them, invent nothing). An unknown exactly as a blank
+    // was. Kept identical to NO_REASON_LABEL in scripts/agent-accuracy-report.py
+    // (tests/agent-trust-review.test.js).
+    var NO_REASON_LABEL = 'No reason recorded';
 
     function isUnclassifiedRejection(item) {
         return item.outcome === 'Rejected'
-            && (!item.reason || item.reason === UNCLASSIFIED_REASON);
+            && (!item.reason || item.reason === UNCLASSIFIED_REASON
+                || item.reason === NO_REASON_LABEL);
     }
 
     function isRelevanceFailure(item) {
@@ -349,6 +355,7 @@
         RELEVANCE_REASONS: RELEVANCE_REASONS,
         QUALITY_REASON: QUALITY_REASON,
         UNCLASSIFIED_REASON: UNCLASSIFIED_REASON,
+        NO_REASON_LABEL: NO_REASON_LABEL,
         isRelevanceFailure: isRelevanceFailure,
         isUnclassifiedRejection: isUnclassifiedRejection,
         relevanceScore: relevanceScore,
