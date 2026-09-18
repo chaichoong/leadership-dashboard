@@ -512,6 +512,26 @@ print('OK=' + str(r['ok']))
         }
     });
 
+    it('install-slot-jobs.sh recreates this job, hourly, matching the live plist (driven)', () => {
+        // It was first installed by hand, so the install script did not know
+        // about it: a rebuild of the LaunchAgents would silently leave it out
+        // and nothing would say so. This RUNS the script's dry-run and reads
+        // the plist it would write.
+        const out = execFileSync('bash', [resolve(root, 'scripts/install-slot-jobs.sh'), '--dry-run'],
+            { encoding: 'utf8' });
+        const block = out.slice(out.indexOf('com.kevinbrittain.utilita-balance</string>'));
+        const mine = block.slice(0, block.indexOf('</plist>'));
+        // Minute with NO Hour is how launchd expresses "every hour at :05".
+        expect(mine).toMatch(/<dict><key>Minute<\/key><integer>5<\/integer><\/dict>/);
+        expect(mine.match(/<key>StartCalendarInterval<\/key>[\s\S]*?<\/array>/)[0])
+            .not.toMatch(/<key>Hour<\/key>/);
+        expect(mine).toMatch(/utilita-balance-run\.sh/);
+        // An hour-based job must still get BOTH keys, or this change broke them.
+        const other = out.slice(out.indexOf('com.kevinbrittain.drift-scan</string>'));
+        expect(other.match(/<key>StartCalendarInterval<\/key>[\s\S]*?<\/array>/)[0])
+            .toMatch(/<key>Hour<\/key><integer>6<\/integer><key>Minute<\/key>/);
+    });
+
     it('the hourly job is lock-exempt, or a long render lets the session lapse', () => {
         const sched = JSON.parse(readFileSync(resolve(root, 'scripts/job-schedule.json'), 'utf8'));
         expect(sched['utilita-balance'].lockExempt).toBe(true);
