@@ -52,3 +52,9 @@ close-*.txt
 rec[A-Za-z0-9]*-revised.md
 rec[A-Za-z0-9]*-letter-*
 rec[A-Za-z0-9]*-merged.pdf
+
+# HMRC compliance check CFS-2427425 working files (18 Sep 2026).
+# THIS REPO IS PUBLIC. These hold Amex statements, card transactions, UTRs,
+# tax return figures and a director's loan balance. They must never be committed.
+monitoring/hmrc-cfs-2427425-*
+monitoring/hmrc-amex-*/
