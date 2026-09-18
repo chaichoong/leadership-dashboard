@@ -350,12 +350,14 @@ def airtable_delete(table, ids, what):
 # ══════════════════════════════════════════════════════════════════════════
 
 def run_window(asof=None):
-    """(start, end) of the payment-run week, both timezone-aware London times.
+    """(start, end) of the CURRENTLY OPEN payment-run week, London time.
 
     The end is the NEXT cutoff at or after `asof`: on a Friday before 21:00 the
     week still ends tonight, and the moment it passes 21:00 a new week opens.
     Kept as a pure function because the boundary is exactly the sort of thing
-    that is wrong by a day for a month before anyone notices."""
+    that is wrong by a day for a month before anyone notices.
+
+    This is for DISPLAY ONLY. Do not scan Gmail with it — see scan_range()."""
     now = (asof or datetime.now(LONDON)).astimezone(LONDON)
     days_ahead = (CUTOFF_WEEKDAY - now.weekday()) % 7
     end = (now + timedelta(days=days_ahead)).replace(
@@ -365,12 +367,56 @@ def run_window(asof=None):
     return end - timedelta(days=7), end
 
 
+def scan_range(asof=None, back_days=1):
+    """(start, end) of the mail to READ. Deliberately NOT run_window().
+
+    The job is scheduled for Friday 21:00, which is the cutoff itself. Asked for
+    the "current" week at that instant, run_window() correctly answers with the
+    week that is just STARTING — seven days of mail that has not arrived yet. The
+    first live run did exactly that on 18 Sep 2026: "scanned 18 Sep 21:00 ->
+    25 Sep 21:00, 2 emails listed, 0 new payables", finished rc=0, and wrote a
+    tidy report. Nothing errored. Any invoice that had arrived during the week it
+    was supposed to be reading would simply never have appeared.
+
+    So the scan does not ask which week it is. It reads the last seven days plus
+    an overlap, ending NOW, which covers the week that just closed however late
+    or early the job fires, and survives the Mac having been asleep. Re-reading
+    mail is free: every write upserts on Gmail Message ID."""
+    end = (asof or datetime.now(LONDON)).astimezone(LONDON)
+    return end - timedelta(days=7 + max(0, back_days)), end
+
+
+def week_buckets(asof=None):
+    """The two boundaries that split the list into three sections.
+
+    Kevin's ruling, 18 Sep 2026, made the moment the cutoff passed while he
+    still had the week's invoices unpaid: what he was about to pay dropped
+    straight from "This week" into "Still owed" alongside February's debts. A
+    single boundary cannot hold "the list I am paying tonight" and "the old
+    stuff I keep meaning to deal with" apart, so there are two.
+
+      thisWeekStart  the cutoff just passed — mail since then
+      lastWeekStart  the cutoff before that — the week he is actually paying
+      anything older  Still owed
+    """
+    this_start, _end = run_window(asof)
+    return this_start, this_start - timedelta(days=7)
+
+
 def cmd_window(args):
-    start, end = run_window(parse_asof(args.asof))
+    asof = parse_asof(args.asof)
+    start, end = run_window(asof)
+    this_start, last_start = week_buckets(asof)
+    scan_start, scan_end = scan_range(asof, args.back_days)
     print(json.dumps({
         "start": start.isoformat(),
         "end": end.isoformat(),
         "label": "Week to %s" % end.strftime("%a %-d %b %Y, %-I%p").replace("PM", "pm").replace("AM", "am"),
+        "buckets": {
+            "thisWeekStart": this_start.isoformat(),
+            "lastWeekStart": last_start.isoformat(),
+        },
+        "scanRange": {"start": scan_start.isoformat(), "end": scan_end.isoformat()},
     }, indent=2))
 
 
@@ -655,8 +701,10 @@ def list_account(account, query):
 
 
 def cmd_scan(args):
-    start, end = run_window(parse_asof(args.asof))
-    query = gmail_query(start, end, args.back_days)
+    # The mail to read, NOT the display week. See scan_range() for why those are
+    # two different questions and what it cost to learn that.
+    start, end = scan_range(parse_asof(args.asof), args.back_days)
+    query = gmail_query(start, end, 0)
     budget = args.max_attachments
     accounts_out, kept_total, seen_total = [], 0, 0
 
@@ -1136,14 +1184,34 @@ def append_note(record, line):
 # report
 # ══════════════════════════════════════════════════════════════════════════
 
+def bucket_rows(open_rows, this_start, last_start):
+    """Split into (this week, last week, still owed).
+
+    Email Date is a DATE, so a boundary DAY cannot be split by the 21:00 cutoff.
+    An invoice dated the day the cutoff fell counts as the NEWER bucket, which
+    keeps it higher up the list rather than ageing it out early — the wrong
+    direction here is the one that hides something Kevin still has to pay."""
+    this_iso = this_start.date().isoformat()
+    last_iso = last_start.date().isoformat()
+    this_week, last_week, still_owed = [], [], []
+    for rec in open_rows:
+        day = (rec["fields"].get("Email Date") or "")[:10]
+        if day >= this_iso:
+            this_week.append(rec)
+        elif day >= last_iso:
+            last_week.append(rec)
+        else:
+            still_owed.append(rec)
+    return this_week, last_week, still_owed
+
+
 def cmd_report(args):
-    start, end = run_window(parse_asof(args.asof))
+    asof = parse_asof(args.asof)
+    _start, end = run_window(asof)
+    this_start, last_start = week_buckets(asof)
     records = airtable_list(T_INVOICES, what="Dashboard Invoices")
     open_rows = [r for r in records if status_of(r) == "Unpaid"]
-    window_start = start.date().isoformat()
-    this_week = [r for r in open_rows
-                 if (r["fields"].get("Email Date") or "")[:10] >= window_start]
-    still_owed = [r for r in open_rows if r not in this_week]
+    this_week, last_week, still_owed = bucket_rows(open_rows, this_start, last_start)
 
     def block(title, rows):
         total = sum(float(r["fields"].get("Amount") or 0) for r in rows)
@@ -1158,8 +1226,10 @@ def cmd_report(args):
                 str(f.get("Description"))[:36], flag))
 
     print("PAYMENT RUN — week to %s" % end.strftime("%a %-d %b %Y, 9pm"))
-    block("THIS WEEK", this_week)
-    block("STILL OWED (carried forward)", still_owed)
+    block("THIS WEEK (since %s)" % this_start.strftime("%a %-d %b, 9pm"), this_week)
+    block("LAST WEEK (%s to %s) — this is tonight's payment run"
+          % (last_start.strftime("%-d %b"), this_start.strftime("%-d %b")), last_week)
+    block("STILL OWED (older, carried forward)", still_owed)
     stamps = [r["fields"].get("Run Date") for r in records if r["fields"].get("Run Date")]
     print("\nLast run stamp on any row: %s" % (max(stamps) if stamps else "NONE"))
 
@@ -1190,6 +1260,52 @@ def cmd_selftest(_args):
     _s4, e4 = run_window(datetime(2026, 10, 28, 9, 0, tzinfo=LONDON))
     check("cutoff stays 21:00 local after the clocks change",
           e4.strftime("%Y-%m-%d %H:%M %Z"), "2026-10-30 21:00 GMT")
+
+    # THE 18 SEP 2026 BUG. The job is scheduled for 21:00, the cutoff itself.
+    # Asked which week it is at that instant, run_window() answers with the one
+    # just STARTING — and the first live run duly scanned seven days of mail
+    # that had not arrived yet, found nothing, and exited 0. The scan range must
+    # look BACKWARDS from now, whatever the clock says.
+    for at in ("2026-09-18T20:59:00", "2026-09-18T21:00:00",
+               "2026-09-18T21:00:30", "2026-09-18T21:05:00",
+               "2026-09-18T23:30:00"):
+        s, e = scan_range(datetime.fromisoformat(at).replace(tzinfo=LONDON), back_days=1)
+        check("scan at %s ends now, not in the future" % at, e.isoformat()[:16], at[:16])
+        check("scan at %s reaches back past the closed week" % at,
+              s < datetime(2026, 9, 11, 21, tzinfo=LONDON), True)
+    # And it must never read the future.
+    s, e = scan_range(datetime(2026, 9, 18, 21, 0, tzinfo=LONDON))
+    check("the scan never reads forward of now", e <= datetime(2026, 9, 18, 21, 0, tzinfo=LONDON), True)
+
+    # Three buckets. At 21:05 Friday, the week Kevin is paying is LAST week.
+    friday_evening = datetime(2026, 9, 18, 21, 5, tzinfo=LONDON)
+    this_start, last_start = week_buckets(friday_evening)
+    check("this week starts at tonight's cutoff", this_start.isoformat(), "2026-09-18T21:00:00+01:00")
+    check("last week starts a week before that", last_start.isoformat(), "2026-09-11T21:00:00+01:00")
+    rows = [
+        {"id": "new", "fields": {"Email Date": "2026-09-19"}},   # after the cutoff
+        {"id": "pay", "fields": {"Email Date": "2026-09-16"}},   # the week just closed
+        {"id": "old", "fields": {"Email Date": "2026-02-03"}},   # February
+        {"id": "edge", "fields": {"Email Date": "2026-09-11"}},  # the boundary DAY
+    ]
+    a, b, c = bucket_rows(rows, this_start, last_start)
+    check("mail after the cutoff is This week", [r["id"] for r in a], ["new"])
+    check("the week just closed is Last week — NOT Still owed",
+          sorted(r["id"] for r in b), ["edge", "pay"])
+    check("February is Still owed", [r["id"] for r in c], ["old"])
+    # Before the cutoff on the same Friday nothing has rolled yet: the week
+    # Kevin is about to pay is still This week, and Last week (4-11 Sep) is
+    # empty because no row falls there. Six minutes later everything shifts
+    # down one — which is precisely what he saw and asked to be fixed.
+    t2, l2 = week_buckets(datetime(2026, 9, 18, 20, 59, tzinfo=LONDON))
+    check("before 9pm This week still starts at the PREVIOUS cutoff",
+          t2.isoformat(), "2026-09-11T21:00:00+01:00")
+    a2, b2, c2 = bucket_rows(rows, t2, l2)
+    check("before 9pm the week being paid is still This week",
+          sorted(r["id"] for r in a2), ["edge", "new", "pay"])
+    check("and Last week is empty, not holding this week's work", b2, [])
+    check("February is Still owed either side of the cutoff",
+          [r["id"] for r in c2], ["old"])
 
     # Money.
     check("finds a formatted amount", find_amounts("Total due £1,234.56 today"), [1234.56])
@@ -1363,7 +1479,10 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     sub = parser.add_subparsers(dest="cmd", required=True)
 
-    p = sub.add_parser("window"); p.add_argument("--asof"); p.set_defaults(fn=cmd_window)
+    p = sub.add_parser("window")
+    p.add_argument("--asof")
+    p.add_argument("--back-days", type=int, default=1)
+    p.set_defaults(fn=cmd_window)
 
     p = sub.add_parser("scan")
     p.add_argument("--asof")

@@ -226,18 +226,21 @@
         const today = new Date();
         today.setHours(0,0,0,0);
         const sourceData = airtableInvoices.filter(inv => inv.status !== 'Paid');
-        let knownTotal = 0, unknownCount = 0, overdueCount = 0, weekTotal = 0, weekCount = 0;
-        const windowStartISO = paymentRunWindow().start.toISOString().slice(0, 10);
+        let knownTotal = 0, unknownCount = 0, overdueCount = 0, dueNowTotal = 0, dueNowCount = 0;
+        // The headline is what Kevin pays on the night: this week AND last week.
+        // Pinning it to the open week alone made the number collapse to zero the
+        // moment the 9pm cutoff passed, while the invoices were still unpaid.
+        const lastWeekISO = localISODate(paymentRunBuckets().lastWeekStart);
         sourceData.forEach(inv => {
             if (inv.amount !== null) knownTotal += inv.amount; else unknownCount++;
             if (new Date(inv.dueDate || inv.emailDate) < today) overdueCount++;
-            if ((inv.emailDate || '') >= windowStartISO) { weekCount++; weekTotal += (inv.amount || 0); }
+            if ((inv.emailDate || '') >= lastWeekISO) { dueNowCount++; dueNowTotal += (inv.amount || 0); }
         });
         summaryCards.innerHTML = `
             <div class="kpi-card">
-                <div class="kpi-card-label">To Pay This Week</div>
-                <div class="kpi-card-value">${fmt(weekTotal)}</div>
-                <div class="kpi-card-sub">${weekCount} ${weekCount === 1 ? 'invoice' : 'invoices'} since last Friday 9pm</div>
+                <div class="kpi-card-label">To Pay Now</div>
+                <div class="kpi-card-value">${fmt(dueNowTotal)}</div>
+                <div class="kpi-card-sub">${dueNowCount} ${dueNowCount === 1 ? 'invoice' : 'invoices'} from this week and last</div>
             </div>
             <div class="kpi-card">
                 <div class="kpi-card-label">Total Outstanding</div>
@@ -274,6 +277,26 @@
         return { start, end };
     }
 
+    // The two boundaries that split the list into three sections. Kevin's
+    // ruling, 18 Sep 2026: the cutoff passed while he still had the week's
+    // invoices unpaid, and what he was about to pay dropped straight from "This
+    // week" into "Still owed" next to February's debts. One boundary cannot
+    // hold "the list I am paying tonight" and "the old stuff" apart.
+    // Mirrors week_buckets() in scripts/payment-run.py.
+    function paymentRunBuckets(now) {
+        const thisWeekStart = paymentRunWindow(now).start;
+        const lastWeekStart = new Date(thisWeekStart);
+        lastWeekStart.setDate(thisWeekStart.getDate() - 7);
+        return { thisWeekStart, lastWeekStart };
+    }
+
+    // Local YYYY-MM-DD. NOT toISOString(), which converts to UTC first and so
+    // returns the previous day for any London time before 01:00 in BST —
+    // silently shifting every section boundary by a day for part of the year.
+    function localISODate(d) {
+        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    }
+
     // The newest Run Date across every row. This is the "did the feed actually
     // run" signal: the old pipeline sat dead for 70 days because nothing
     // anywhere measured when it last worked.
@@ -293,7 +316,9 @@
         const today = new Date();
         today.setHours(0,0,0,0);
         const runWindow = paymentRunWindow();
-        const windowStartISO = runWindow.start.toISOString().slice(0, 10);
+        const buckets = paymentRunBuckets();
+        const thisWeekISO = localISODate(buckets.thisWeekStart);
+        const lastWeekISO = localISODate(buckets.lastWeekStart);
         // Capture "last seen" BEFORE marking as seen, so NEW badges still show this render
         const lastSeenBeforeRender = new Date(getLastSeenInvoiceTime());
 
@@ -475,15 +500,21 @@
             </tr>${bankWarnRow}${matchRow}`;
         };
 
-        // ── Two sections: this week's run, then what is still owed ──────────
-        // Kevin's question at the gate was whether rebuilding the tab would
-        // lose the historic payables. It does not: everything older that is
-        // genuinely still owed carries forward here, week after week, until a
-        // transaction matches it. Old CREDITOR debt is a different thing and
-        // lives in the creditor agent's lane on Status = Historic, off this list.
-        const inWindow = inv => (inv.emailDate || '') >= windowStartISO;
-        const thisWeek = sorted.filter(inWindow);
-        const stillOwed = sorted.filter(inv => !inWindow(inv));
+        // ── Three sections ──────────────────────────────────────────────────
+        // Kevin, 18 Sep 2026, six minutes after the cutoff passed with the
+        // week's invoices still unpaid: what he was about to pay had dropped
+        // out of "This week" and into "Still owed" next to February's debts.
+        // One boundary cannot separate "the list I am paying tonight" from
+        // "the old stuff I keep meaning to deal with", so there are two.
+        //
+        // Email Date is a DATE, so the boundary DAY cannot be split by the
+        // 21:00 cutoff. A row dated that day counts as the NEWER section —
+        // higher up the list rather than aged out early, which is the safer
+        // direction to be wrong in. Mirrors bucket_rows() in payment-run.py.
+        const dayOf = inv => (inv.emailDate || '');
+        const thisWeek = sorted.filter(inv => dayOf(inv) >= thisWeekISO);
+        const lastWeek = sorted.filter(inv => dayOf(inv) < thisWeekISO && dayOf(inv) >= lastWeekISO);
+        const stillOwed = sorted.filter(inv => dayOf(inv) < lastWeekISO);
 
         const sectionHeader = (title, rows, sub) => {
             const total = rows.reduce((sum, r) => sum + (Number(r.amount) || 0), 0);
@@ -502,14 +533,22 @@
                 : `<tr><td colspan="10" class="od-empty-state">Nothing to pay — all clear</td></tr>`;
         } else {
             let counter = 0;
-            bodyHtml += sectionHeader('This week', thisWeek, 'arrived since last Friday 9pm');
-            bodyHtml += thisWeek.length
-                ? thisWeek.map(inv => renderRow(inv, counter++)).join('')
-                : `<tr><td colspan="10" class="od-empty-state">Nothing new came in this week</td></tr>`;
-            bodyHtml += sectionHeader('Still owed', stillOwed, 'carried forward until a payment matches');
-            bodyHtml += stillOwed.length
-                ? stillOwed.map(inv => renderRow(inv, counter++)).join('')
-                : `<tr><td colspan="10" class="od-empty-state">Nothing carried forward</td></tr>`;
+            const section = (title, rows, sub, emptyText) => {
+                bodyHtml += sectionHeader(title, rows, sub);
+                bodyHtml += rows.length
+                    ? rows.map(inv => renderRow(inv, counter++)).join('')
+                    : `<tr><td colspan="10" class="od-empty-state">${escHtml(emptyText)}</td></tr>`;
+            };
+            const dayLabel = d => d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+            section('This week', thisWeek,
+                `arrived since ${dayLabel(buckets.thisWeekStart)}, 9pm`,
+                'Nothing new since the last cutoff');
+            section('Last week', lastWeek,
+                `${dayLabel(buckets.lastWeekStart)} to ${dayLabel(buckets.thisWeekStart)} — this is the run to pay`,
+                'Nothing from last week outstanding');
+            section('Still owed', stillOwed,
+                'older, carried forward until a payment matches',
+                'Nothing carried forward');
         }
         tbody.innerHTML = bodyHtml;
 
@@ -570,7 +609,7 @@
                     {
                         name: 'Payment details present on this week\'s list', kind: 'sync', run: () => {
                             const w = paymentRunWindow();
-                            const startISO = w.start.toISOString().slice(0, 10);
+                            const startISO = localISODate(w.start);
                             const week = (airtableInvoices || []).filter(i => i.status !== 'Paid' && (i.emailDate || '') >= startISO);
                             if (!week.length) return { status: 'pass', detail: 'Nothing new came in this week' };
                             const noAmount = week.filter(i => i.amount === null || i.amount === undefined);

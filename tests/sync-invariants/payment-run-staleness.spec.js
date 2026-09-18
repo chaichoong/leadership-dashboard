@@ -153,7 +153,36 @@ test.describe('Payment Run list', () => {
     expect(result.detail).toContain('Acme Roofing');
   });
 
-  test('splits the list into this week and still owed', async ({ page }) => {
+  test('splits the list into three sections, with last week its own', async ({ page }) => {
+    // Kevin, 18 Sep 2026, just past the 9pm cutoff with the week's invoices
+    // still unpaid: what he was about to pay had dropped out of "This week" and
+    // into "Still owed" beside February's debts. A row from 2-8 days ago must
+    // land in "Last week" — the run he is actually paying.
+    await openPaymentRun(page, [
+      invoice('recNew', { emailDate: daysAgo(0), amount: 90, payee: 'Arrived Since Cutoff Ltd' }),
+      invoice('recLast', { emailDate: daysAgo(4), amount: 300, payee: 'Paying Tonight Ltd' }),
+      invoice('recOld', { emailDate: daysAgo(120), amount: 2450, payee: 'Esme McKenzie' }),
+    ]);
+    const headers = await page.$$eval('#invoiceTableBody tr.inv-section-header',
+      (rows) => rows.map((r) => r.textContent.trim().split('\n')[0].trim()));
+    expect(headers).toEqual(['This week', 'Last week', 'Still owed']);
+    const order = await page.$$eval('#invoiceTableBody tr', (rows) =>
+      rows.map((r) => (r.classList.contains('inv-section-header')
+        ? r.textContent.trim().split('\n')[0].trim()
+        : (r.querySelector('input[data-field]') || {}).value || '')).filter(Boolean));
+    // The one he pays tonight sits under Last week, above Still owed.
+    const lastIdx = order.indexOf('Last week');
+    const stillIdx = order.indexOf('Still owed');
+    const payIdx = order.indexOf('Paying Tonight Ltd');
+    expect(payIdx).toBeGreaterThan(lastIdx);
+    expect(payIdx).toBeLessThan(stillIdx);
+    // And the one that arrived after the cutoff is above it, in This week.
+    expect(order.indexOf('Arrived Since Cutoff Ltd')).toBeLessThan(lastIdx);
+    // February is below Still owed, where it belongs.
+    expect(order.indexOf('Esme McKenzie')).toBeGreaterThan(stillIdx);
+  });
+
+  test('carries the older payables forward under Still owed', async ({ page }) => {
     await openPaymentRun(page, [
       invoice('recNew', { emailDate: daysAgo(1), amount: 90 }),
       invoice('recOld', { emailDate: daysAgo(120), amount: 2450, payee: 'Esme McKenzie' }),
