@@ -318,13 +318,21 @@ def title_from_transcript(text):
 # "you need to have a little bit of flexibility... pretty much every day I do the learnings from my diary").
 # learn*/lesson* + a joining word + my/the + any word starting dia/die/dai (diary, diaries, diet, dairy).
 # "Learnings from my diary" as whisper hears it: learnings/lessons/latest/learning ... from/in/for my diary (2056, 10 Sep 2026: "the latest in my diary")
+# "diary" is the word the whole Learnings section hangs off, and whisper.cpp base.en keeps mis-hearing it. The
+# mis-hearings are only ever accepted in the TIGHT context (learn... + from/for + a/my/the/our + the word), never in
+# the loose first alternative, because "dive" and "diet" are ordinary words he uses: this very episode says "when you
+# dive deeper into it". Measured 18 Sep 2026 over all 295 stored transcripts: adding "iv" gains exactly 10 matches
+# and every one is a real Learnings line ("learnings from my dive", "learning from a diver"). Zero false positives.
 LFMD_START_RE = re.compile(r"(?:\w+\s+)?(?:from|for|of|through|in|to)\s+(?:my|the)\s+d(?:ia|ie|ai)\w*\b(?!\s+of\s+(?:a|an|the)\b)"
                            r"|(?:learn\w*|lesson\w*)(?:\s+\w+){0,2}\s+(?:for|of)\s+(?:today|the day)"
                            # 2060 (17 Sep 2026): he said "the learning from my diary today", whisper wrote "the learning from a diet today"
-                           r"|learn\w*\s+(?:from|for)\s+(?:a|my|the|our)\s+d(?:ia|ie|ai)\w*", re.I)
+                           # 2062 (18 Sep 2026): "the learning for my diary is there" -> "the learning for my dive is there". The section
+                           # was skipped, and because the near-miss guard below did not cover it either, the card reached Kevin with no
+                           # Learnings clip and no warning. The same mis-hearing had already cost 1964, 2032, 2033, 2042 and 2043.
+                           r"|learn\w*\s+(?:from|for)\s+(?:a|my|the|our)\s+d(?:ia|ie|ai|iv)\w*", re.I)
 # A near miss: "learn..." followed within four words by something that sounds like diary. When no section is found but
 # this is, the output gate refuses the card (qa.py), so a mis-heard Learnings line can never ship silently.
-DIARY_NEAR_MISS_RE = re.compile(r"\blearn\w*\W+(?:\w+\W+){0,4}(?:d(?:ia|ie|ai)\w*|dairy|dire)\b(?!\s+of\s+(?:a|an|the|our)\b)", re.I)
+DIARY_NEAR_MISS_RE = re.compile(r"\blearn\w*\W+(?:\w+\W+){0,4}(?:d(?:ia|ie|ai|iv)\w*|dairy|dire)\b(?!\s+of\s+(?:a|an|the|our)\b)", re.I)
 # The \b(?!\s+of a) keeps the show's own name out: "day 2056 of the diary of a Runpreneur" turned 2056's teaser into
 # an episode render on 10 Sep 2026 (Kevin's review, 13 Sep 2026).
 SIGNOFF_RE = re.compile(r"thank you as always|stay positive|see you (?:again )?tomorrow", re.I)
@@ -927,6 +935,17 @@ def selftest():
     assert lfmd_window([(0, 5, "the learnings from my"), (5, 9, "diary today"), (40, 50, "stay positive")]) == (0, 50), "a phrase split over two chunks"
     assert lfmd_window([(0, 5, "I changed my diet today"), (40, 50, "stay positive")]) is None, "a diet on its own is not the section"
     assert DIARY_NEAR_MISS_RE.search("so the learning I took from the dire today") and not DIARY_NEAR_MISS_RE.search("the diary of a Runpreneur")
+    # 2062 (18 Sep 2026): "the learning for my diary is there" -> "my dive". The section was skipped AND the near-miss
+    # guard missed it too, so the card reached Kevin with no Learnings clip and nothing flagged. He sent it back.
+    assert lfmd_window([(0, 5, "intro"), (390, 396, "ultimately the learning for my dive is there"), (500, 510, "see you tomorrow")]) == (390.0, 510.0), "2062: whisper heard dive"
+    assert lfmd_window([(0, 5, "the learnings from my dive today"), (30, 40, "stay positive")]) == (0, 40), "1964/2032/2033's wording"
+    assert lfmd_window([(0, 5, "learning from a diver today"), (30, 40, "stay positive")]) == (0, 40), "2042's wording"
+    assert DIARY_NEAR_MISS_RE.search("the learning for my dive is there"), "a mis-heard diary must still reach the output gate"
+    # "dive" on its own is an ordinary word (2062 also says "when you dive deeper into it"): only the tight context counts
+    assert lfmd_window([(0, 5, "when you dive deeper into it"), (40, 50, "stay positive")]) is None, "a dive on its own is not the section"
+    assert lfmd_window([(0, 5, "I want to dive into the numbers"), (40, 50, "stay positive")]) is None
+    assert not DIARY_NEAR_MISS_RE.search("we learn a lot when we all go and dive deeper into the numbers together"), "too far from learn to be the section"
+
     r = lfmd_receipt("", (295.52, 403.35), points=["There are no learnings from my diary on this, which need to be added."])
     assert r.startswith("- There are no learnings from my diary on this") and "4:55 to 6:43" in r and r.count("\n") == 1, r
     assert lfmd_receipt("", (1, 30), points=["No learnings clip", "The title is wrong"]) == "", "a point about something else is never answered by the rebuild"
@@ -994,7 +1013,7 @@ def selftest():
             except RuntimeError as exc: assert "test" in str(exc), str(exc)
         good = os.path.join(td, "ok.srt"); open(good, "w").write(srt)
         assert check_captions(good, "test") == 2
-    print(json.dumps({"checks": 40, "failed": []}))
+    print(json.dumps({"checks": 47, "failed": []}))
 
 
 if __name__ == "__main__":
