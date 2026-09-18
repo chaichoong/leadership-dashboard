@@ -45,7 +45,7 @@
  * USAGE
  *   node scripts/agent-browser.js login   --url URL [--profile NAME]
  *   node scripts/agent-browser.js session --site HOST [--shot PATH]   is the robot signed in there? (walks the door)
- *   node scripts/agent-browser.js read    --url URL [--shot OUT.png] [--wait MS] [--wait-for SELECTOR]
+ *   node scripts/agent-browser.js read    --url URL [--shot OUT.png] [--wait MS] [--wait-for SELECTOR] [--max-text N]
  *   node scripts/agent-browser.js loom-search --query "..." [--limit 20]
  *   node scripts/agent-browser.js prepare --plan PLAN.json --shot OUT.png
  *   node scripts/agent-browser.js commit  --plan PLAN.json --task recXXX --shot OUT.png
@@ -477,6 +477,47 @@ async function shoot(page, out) {
   return out;
 }
 
+// Some sites disable `eval` (American Express monkeypatches it to throw, found
+// 18 Sep 2026). That takes out page.evaluate AND every Playwright locator
+// helper, because they all ride on the same injected UtilityScript. Both
+// `session` and `read` died on it with "eval is disabled", so the robot could
+// hold a live AmEx session and still not read a word of it, which defeats the
+// point of holding the session at all.
+//
+// page.content() goes through CDP and is untouched, so fall back to the HTML.
+// The fallback is deliberately narrow: it triggers ONLY on an eval/CSP refusal
+// and rethrows anything else, because a silent fallback would turn a real page
+// error into plausible-looking text.
+const EVAL_BLOCKED = /eval is disabled|unsafe-eval|Content Security Policy|EvalError/i;
+
+async function domText(page, limit) {
+  try {
+    return await page.evaluate(n => document.body.innerText.slice(0, n), limit);
+  } catch (err) {
+    if (!EVAL_BLOCKED.test(String(err && err.message))) throw err;
+    const html = await page.content();
+    return html
+      .replace(/<(script|style|noscript|svg|head)[\s\S]*?<\/\1>/gi, ' ')
+      .replace(/<[^>]+>/g, ' ')
+      .replace(/&nbsp;/gi, ' ').replace(/&amp;/gi, '&')
+      .replace(/&lt;/gi, '<').replace(/&gt;/gi, '>').replace(/&#39;|&apos;/gi, "'")
+      .replace(/&quot;/gi, '"').replace(/&pound;/gi, '£')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .slice(0, limit);
+  }
+}
+
+async function passwordFieldCount(page) {
+  try {
+    return await page.evaluate(() => document.querySelectorAll('input[type=password]').length);
+  } catch (err) {
+    if (!EVAL_BLOCKED.test(String(err && err.message))) throw err;
+    const html = await page.content();
+    return (html.match(/<input[^>]*type\s*=\s*["']?password\b/gi) || []).length;
+  }
+}
+
 // A submit is only DONE when the page proves it. On 28 Aug 2026 four Adobe
 // e-sign sends logged every step executed:true, ending with a click on "Send" —
 // and all four agreements sat in Adobe as DRAFTS for four days. Nobody was
@@ -757,8 +798,8 @@ async function main() {
         await page.waitForTimeout(2000);
       }
       const url = page.url();
-      const passwordFields = await page.evaluate(() => document.querySelectorAll('input[type=password]').length);
-      const text = await page.evaluate(() => document.body.innerText.slice(0, 600));
+      const passwordFields = await passwordFieldCount(page);
+      const text = await domText(page, 600);
       const verdict = sessionVerdict(url, passwordFields);
       const png = await shoot(page, shot);
       return { site, signedIn: verdict.signedIn, url, title: await page.title(), passwordFields, walked: clicked, text, screenshot: png };
@@ -781,12 +822,16 @@ async function main() {
       if (waitMs) await page.waitForTimeout(Math.min(waitMs, 60000));
       const waitFor = arg(rest, 'wait-for');
       if (waitFor) await page.waitForSelector(waitFor, { timeout: 60000 }).catch(() => {});
-      const text = await page.evaluate(() => document.body.innerText.slice(0, 20000));
+      // Amazon's department menu alone is ~19k characters, so a fixed 20k cap
+      // returned nothing but navigation and no order data at all (18 Sep 2026).
+      // --max-text lets a caller ask for more when the page is that heavy.
+      const maxText = Math.min(Number(arg(rest, 'max-text', '20000')) || 20000, 400000);
+      const text = await domText(page, maxText);
       const png = await shoot(page, shot);
       // Where the page ENDED UP and whether it is asking for a password: the
       // two facts the session keep-alive needs to tell "signed in" from "the
       // login page came back" (4 Sep 2026).
-      const passwordFields = await page.evaluate(() => document.querySelectorAll('input[type=password]').length);
+      const passwordFields = await passwordFieldCount(page);
       return { title: await page.title(), url: page.url(), passwordFields, text, screenshot: png };
     });
     ledger({ cmd: 'read', url, profile, screenshot: res.screenshot });
