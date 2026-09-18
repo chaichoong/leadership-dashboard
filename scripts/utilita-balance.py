@@ -155,14 +155,24 @@ def load_config():
 # regex does not match), the parser reported "£1350.60 — 5 days left" on an
 # EMPTY meter, raised no alarm and exited 0. That is the outage this watcher
 # exists to prevent, wearing the face of a healthy reading.
-CARD_END_MARKERS = ("other charges", "top-up number", "usage", "past 7 days",
-                    "my utilita", "meter readings")
+CARD_END_MARKERS = ("other charges", "electricity top-up number",
+                    "gas top-up number", "top-up number", "usage",
+                    "past 7 days", "past 30 days", "my utilita",
+                    "meter readings", "utilita extra")
 
-# A pay-as-you-go electric meter does not hold four figures of credit. Anything
-# above this is a parse that has wandered into another number, so it is refused
-# rather than reported. £1350.60 and £957.92 are the real OTHER CHARGES values
-# on these two accounts, so the ceiling has to sit below them.
-BALANCE_CEILING_GBP = 500
+# The balance sits DIRECTLY under the heading, after the REFRESH button: index 1
+# of the card on both real pages. A generous window is how a stray amount wins:
+# with six lines, "Balance / REFRESH / 50p / Top up / £20 / 5 days left"
+# reported the top-up button's £20 as the balance, because "50p" does not match
+# the money regex and so raised no ambiguity. Three lines is the whole card
+# header. Refusing is recoverable; a wrong number is not.
+BALANCE_WINDOW = 3
+
+# A pay-as-you-go meter rarely holds this much. Over it, the figure is still
+# REPORTED, with a "check this" note and attention raised — never refused.
+# Refusing meant a genuine £620 balance was never shown and the job logged
+# itself failed hourly until the meter dropped below the line.
+BALANCE_IMPLAUSIBLE_GBP = 300
 
 
 def parse_energy(text):
@@ -177,11 +187,21 @@ def parse_energy(text):
     lines = [l.strip() for l in (text or "").split("\n")]
     lines = [l for l in lines if l]
     out = {"balance": None, "balanceGbp": None, "daysLeft": None,
-           "daysLeftRecognised": None, "topUpNumber": None, "refused": None}
+           "daysLeftRecognised": None, "topUpNumber": None, "refused": None,
+           "implausible": False}
 
     # A leading minus means the meter is in debt on emergency credit. It must
     # parse (and alarm), never fall through to the next money line on the page.
-    money = re.compile(r"^(-?)£\s?(-?)([\d,]+(?:\.\d{1,2})?)$")
+    # U+2212 MINUS SIGN and U+2013 EN DASH are included because a real page
+    # rendering "−£5.20" with a typographic minus fell through the old regex to
+    # the NEXT money line and reported £20.00 of credit on a meter in debt.
+    #
+    # Thousands are GROUPED, not "any commas anywhere": the old [\d,]+ read
+    # "£2,50" as £250.00, a hundred times high, with no flag. A decimal comma
+    # is unlikely on a UK page, which is exactly why it would never have been
+    # noticed.
+    money = re.compile(r"^([-\u2212\u2013]?)£\s?([-\u2212\u2013]?)"
+                       r"(\d{1,3}(?:,\d{3})*|\d+)(?:\.(\d{1,2}))?$")
 
     heads = [i for i, l in enumerate(lines) if l.lower() == "balance"]
     if not heads:
@@ -197,27 +217,49 @@ def parse_energy(text):
     start = heads[0]
 
     # Walk forward only to the end of the balance card.
+    #
+    # The marker test is an EXACT line match, not a substring. "usage" as a
+    # substring ended the card on the line "See your usage", which sat above
+    # "Off supply" — so a meter that was off supply reported £12.40 with no
+    # days line and no alarm at all, because the alarm reads the days line.
     card = []
     for l in lines[start + 1:]:
-        if any(m in l.lower() for m in CARD_END_MARKERS):
+        if l.lower().strip(" :·|") in CARD_END_MARKERS:
             break
         card.append(l)
 
-    for l in card:
-        m = money.match(l)
-        if m:
-            negative = bool(m.group(1) or m.group(2))
-            value = float(m.group(3).replace(",", ""))
-            if value > BALANCE_CEILING_GBP:
-                out["refused"] = (f"the balance line read {l}, which is too high for a "
-                                  f"pay-as-you-go meter; not reporting a figure")
-                return out
-            out["balanceGbp"] = -value if negative else value
-            out["balance"] = ("-£" + f"{value:,.2f}") if negative else ("£" + f"{value:,.2f}")
-            break
-    if out["balance"] is None:
+    # AMBIGUITY IS REFUSED, and the figure must sit next to its heading.
+    #
+    # The balance used to be "the first money-shaped line anywhere in the card",
+    # with no position anchor, so any format the regex missed fell through to the
+    # next money line. Measured: "Balance / REFRESH / 50p / Top up / £20 /
+    # 5 days left" reported £20.00, and a card with a typographic minus reported
+    # the top-up button's £20.00 as credit. Two money lines in one card means
+    # the page is not the shape this parser understands, and guessing which is
+    # the balance is precisely the guess that puts guests in the dark.
+    monies = [(i, l) for i, l in enumerate(card[:BALANCE_WINDOW]) if money.match(l)]
+    if not monies:
         out["refused"] = "the balance had not loaded on the page"
         return out
+    if len(monies) > 1:
+        out["refused"] = ("the balance card shows " + str(len(monies))
+                          + " amounts (" + ", ".join(l for _, l in monies)
+                          + "); cannot tell which is the balance")
+        return out
+
+    m = money.match(monies[0][1])
+    negative = bool(m.group(1) or m.group(2))
+    pence = m.group(4) or "00"
+    value = float(m.group(3).replace(",", "") + "." + pence.ljust(2, "0"))
+    out["balanceGbp"] = -value if negative else value
+    out["balance"] = ("-£" if negative else "£") + f"{value:,.2f}"
+    # Implausible is FLAGGED, never refused. A hard refusal above £500 meant a
+    # genuine £620 balance was never reported and the job logged itself failed
+    # every hour until the meter dropped — the same "reports itself broken"
+    # pattern the exit-code fix removed. The structural guards above are what
+    # make OTHER CHARGES unreachable; this is only a sanity note.
+    if value > BALANCE_IMPLAUSIBLE_GBP:
+        out["implausible"] = True
 
     for l in card:
         if any(re.match(p, l, re.I) for p in DAYS_PATTERNS):
@@ -418,6 +460,15 @@ def build_message(rows, low_gbp, when=None):
             # with no control reads as a pass for ever.
             last4 = r.get("meterLast4")
             meter = ("  _(meter …" + last4 + ")_") if last4 else "  _(meter not shown)_"
+            # The days line is the SECOND alarm channel, so its absence needs a
+            # control too. Without one it could switch itself off invisibly: a
+            # page that lost the line reported the balance alone and nothing
+            # said the urgency signal was missing.
+            if not r["daysLeft"]:
+                days, attention = "  _(days left not shown)_", True
+            if r.get("implausible"):
+                days += "  ⚠️ _unusually high for a meter, check this_"
+                attention = True
             body.append("*" + r["label"] + "*: " + r["balance"] + days + flag + meter)
         else:
             attention = True
@@ -432,7 +483,13 @@ def build_message(rows, low_gbp, when=None):
 
 def send_slack(text, recipients):
     if not os.path.exists(RELAY_KEY_PATH):
-        return False, f"no relay key at {RELAY_KEY_PATH}"
+        # A DICT, like every other return here. This branch returned a 2-tuple
+        # and every caller indexes the result by name, so a rotated or renamed
+        # key file did not produce the designed message — it produced
+        # "TypeError: tuple indices must be integers" and no message at all.
+        # Introduced by the round-1 refactor, found by the round-2 review.
+        return {"anyDelivered": False, "delivered": [], "failed": [],
+                "detail": f"no relay key at {RELAY_KEY_PATH}"}
     with open(RELAY_KEY_PATH) as fh:
         key = fh.read().strip()
     import urllib.error
@@ -472,7 +529,13 @@ def send_slack(text, recipients):
         return {"anyDelivered": False, "detail": f"relay unreachable: {e}"}
 
     if not isinstance(body, dict) or not isinstance(body.get("sent"), list):
-        return {"anyDelivered": False, "detail": f"relay {code or 200}: unreadable reply"}
+        # Carry the worker's OWN error text through. Throwing it away meant a
+        # recipient typo, an oversize message or a missing key all logged the
+        # same "unreadable reply" hourly, with the real reason discarded at the
+        # one moment somebody needed it.
+        why = (body or {}).get("error") if isinstance(body, dict) else None
+        return {"anyDelivered": False, "delivered": [], "failed": [],
+                "detail": f"relay {code or 200}: {why or 'unreadable reply'}"}
     delivered = [s.get("email") for s in body["sent"] if s.get("ok")]
     failed = [{"email": s.get("email"), "error": s.get("error")}
               for s in body["sent"] if not s.get("ok")]
@@ -516,19 +579,45 @@ def read_sent_mark():
         return {}
 
 
-def write_sent_mark(kind, alarmed=False):
+def write_sent_mark(kind, alarmed_labels=(), lost_labels=()):
     os.makedirs(STATE_DIR, exist_ok=True)
     tmp = SENT_MARK + ".tmp"
     with open(tmp, "w") as fh:
         json.dump({"date": datetime.now().strftime("%Y-%m-%d"), "kind": kind,
-                   "alarmed": bool(alarmed),
+                   # Per FLAT. A single boolean gave the whole portfolio one
+                   # alarm a day, so the second flat to empty stayed silent.
+                   "alarmedLabels": sorted(set(alarmed_labels)),
+                   "lostLabels": sorted(set(lost_labels)),
                    "at": datetime.now().isoformat(timespec="seconds")}, fh)
     # Rename, never truncate-then-write: the job-queue lock learned that the
     # hard way on 2 Sep 2026, when a reader caught the file mid-rewrite.
     os.replace(tmp, SENT_MARK)
 
 
-def send_decision(already, complete, hour, alarm=False, alarmed=False, force=False):
+def alarming_labels(rows, low_gbp):
+    """Which flats need topping up right now, by label.
+
+    Per FLAT, not one boolean for the portfolio. The single `alarmed` flag meant
+    Apartment 1 emptying at 10:00 used up the day's only alarm, and Apartment 2
+    going off supply at 15:00 said nothing until 07:05 the next morning. Two
+    flats, one alarm slot.
+    """
+    return sorted(r["label"] for r in rows if row_alarm(r, low_gbp))
+
+
+def lost_sight_labels(rows):
+    """Flats that were unreadable this tick.
+
+    row_alarm returns False for a row that could not be read, so an unreadable
+    meter cannot alarm at all. Once the morning message had gone, a session that
+    lapsed at 08:00 hid a meter emptying at 14:00 for twenty-three hours while
+    the job logged "worked" every hour.
+    """
+    return sorted(r["label"] for r in rows if not r["ok"])
+
+
+def send_decision(already, complete, hour, alarm=False, alarmed=False, force=False,
+                  new_alarms=(), lost_sight=()):
     """Send or hold, and why. Pure, so the hourly cadence is testable.
 
     `already` is what was sent TODAY: None, "degraded" or "full".
@@ -552,6 +641,13 @@ def send_decision(already, complete, hour, alarm=False, alarmed=False, force=Fal
         return "send", "forced"
     if hour < EARLIEST_HOUR:
         return "hold", f"before {EARLIEST_HOUR}:00; reading only, nobody acts on a meter at this hour"
+    # A flat that has not alarmed today gets its own message, whatever else has
+    # already been sent. `new_alarms` is the caller's per-flat list; `alarm` and
+    # `alarmed` remain for the simple two-argument case and the tests.
+    if new_alarms:
+        return "send", "these flats need topping up and have not been reported today: " + ", ".join(new_alarms)
+    if lost_sight:
+        return "send", "lost sight of " + ", ".join(lost_sight) + "; a meter cannot be watched through a dead session"
     if alarm and not alarmed:
         return "send", "a meter needs topping up today"
     if already == "full":
@@ -608,24 +704,40 @@ def cmd_run(argv):
     today = datetime.now().strftime("%Y-%m-%d")
     fresh = mark.get("date") == today
     already = mark.get("kind") if fresh else None
-    alarmed = bool(mark.get("alarmed")) if fresh else False
+    alarmed_before = set(mark.get("alarmedLabels") or []) if fresh else set()
+    lost_before = set(mark.get("lostLabels") or []) if fresh else set()
     force = "--force" in argv
 
+    alarming = alarming_labels(rows, low)
+    lost = lost_sight_labels(rows)
+    # Only flats not already reported today. Reporting the same flat hourly is
+    # how a channel gets muted, which is the other half of the same failure.
+    new_alarms = [l for l in alarming if l not in alarmed_before]
+    # A flat we have lost sight of counts only once the day already had a full
+    # message, otherwise the ordinary degraded path covers it.
+    new_lost = [l for l in lost if l not in lost_before] if already == "full" else []
+
     verdict, why = send_decision(already, complete, datetime.now().hour,
-                                 alarm=alarm, alarmed=alarmed, force=force)
+                                 force=force, new_alarms=new_alarms,
+                                 lost_sight=new_lost)
     if verdict == "hold":
         print("\n[" + why + "]")
-        return 0
+        # A held tick that is nonetheless carrying a fault exits non-zero so
+        # estate-status shows it. It used to return 0 unconditionally, so a
+        # lapsed session read as "worked" every hour for a day.
+        return 1 if attention else 0
 
+    print("\n[sending: " + why + "]")
     result = send_slack(text, cfg["recipients"])
     print("\nslack:", "delivered" if result["anyDelivered"] else "FAILED",
           json.dumps(result)[:400])
 
-    if result["anyDelivered"]:
-        # Marked on a FORCED send too: without this a manual --force at 07:05
-        # left the mark unwritten and the 08:05 tick sent a duplicate.
+    if result["anyDelivered"] and not force:
+        # NOT on --force: a manual test send at 06:00 used to write the mark and
+        # silence the real morning message.
         write_sent_mark("full" if complete else "degraded",
-                        alarmed=alarmed or alarm)
+                        alarmed_labels=alarmed_before | set(alarming),
+                        lost_labels=lost_before | set(lost))
 
     # A LOW BALANCE IS THE JOB WORKING, NOT A FAILURE.
     # job-queue.py maps a non-zero child exit to outcome "failed", which
@@ -728,8 +840,48 @@ def selftest():
     placeholder = parse_energy("Balance\nREFRESH\n£--\nOTHER CHARGES\n£1350.60\n")
     chk("£-- placeholder -> no figure", None, placeholder["balanceGbp"])
 
-    ceiling = parse_energy("Balance\nREFRESH\n£1350.60\n5 days left\n")
-    chk("a four-figure balance is refused", None, ceiling["balanceGbp"])
+    # An implausible figure is REPORTED with a flag, never refused: refusing
+    # meant a genuine £620 was never shown and the job logged itself failed
+    # hourly. The structural guards are what make OTHER CHARGES unreachable.
+    high = parse_energy("Balance\nREFRESH\n£1350.60\n5 days left\n")
+    chk("an implausible figure is still reported", 1350.60, high["balanceGbp"])
+    chk("an implausible figure is flagged", True, high["implausible"])
+    real = parse_energy("Balance\nREFRESH\n£620.00\nMore than a week left\n")
+    chk("a genuine £620 is reported", 620.00, real["balanceGbp"])
+    chk("a genuine £620 is not refused", None, real["refused"])
+    normal = parse_energy("Balance\nREFRESH\n£20.26\n5 days left\n")
+    chk("a normal balance is not flagged", False, normal["implausible"])
+
+    # ── the money regex ───────────────────────────────────────────────────
+    chk("a decimal comma is not thousands", None,
+        parse_energy("Balance\nREFRESH\n£2,50\n1 day left\n")["balanceGbp"])
+    chk("grouped thousands still parse", 1234.50,
+        parse_energy("Balance\nREFRESH\n£1,234.50\n1 day left\n")["balanceGbp"])
+    chk("a typographic minus parses as debt", -5.20,
+        parse_energy("Balance\nREFRESH\n\u2212£5.20\nOff supply\n")["balanceGbp"])
+    chk("pounds with no pence parse", 20.00,
+        parse_energy("Balance\nREFRESH\n£20\n5 days left\n")["balanceGbp"])
+
+    # ── ambiguity is refused, never guessed ──────────────────────────────
+    two = parse_energy("Balance\nREFRESH\n50p\nTop up\n£20\n5 days left\n")
+    chk("50p then £20 is not silently £20", None, two["balanceGbp"])
+    two_amounts = parse_energy("Balance\nREFRESH\n£5.00\n£20.00\n5 days left\n")
+    chk("two amounts in one card refuse", None, two_amounts["balanceGbp"])
+    if "cannot tell which" not in (two_amounts["refused"] or ""):
+        bad.append(("two amounts say why", "cannot tell which", two_amounts["refused"]))
+    far = parse_energy("Balance\nREFRESH\na\nb\nc\nd\ne\nf\n£20.00\n")
+    chk("a figure far below the heading is not the balance", None, far["balanceGbp"])
+
+    # ── the days line survives a card-end SUBSTRING ──────────────────────
+    # "usage" as a substring ended the card on "See your usage", which sat
+    # above "Off supply", so an off-supply meter raised no alarm at all.
+    seen = parse_energy("Balance\nREFRESH\n£12.40\nSee your usage\nOff supply\n"
+                        "Electricity Top-up Number\n9826003801209677811\n")
+    chk("days line survives a substring marker", "Off supply", seen["daysLeft"])
+    chk("and it alarms", True, row_alarm(
+        {"ok": True, "balanceGbp": 12.40, "daysLeft": seen["daysLeft"]}, 10))
+    chk("an exact marker still ends the card", None,
+        parse_energy("Balance\nREFRESH\nUsage\n£1350.60\n")["balanceGbp"])
 
     nav = parse_energy("Balance\nMy energy\nBalance\nREFRESH\n£20.26\n5 days left\n")
     chk("two balance cards -> refused", None, nav["balanceGbp"])
@@ -830,6 +982,39 @@ def selftest():
         [row(bal="£34.37", gbp=34.37, days="More than a week left")], 10)
     if "top up today" in finemsg or fine_alarm or fine_att:
         bad.append(("healthy balance flagged anyway", "clean", finemsg[:60]))
+
+    # ── per-flat alarms, and losing sight of a meter ──────────────────────
+    two_rows = [row(label="Apartment 1", bal="£0.50", gbp=0.50, days="Less than a day left"),
+                row(label="Apartment 2", bal="£34.30", gbp=34.30, days="More than a week left")]
+    chk("only the empty flat alarms", ["Apartment 1"], alarming_labels(two_rows, 10))
+    chk("a healthy pair alarms for nobody", [], alarming_labels(
+        [row(label="Apartment 1", bal="£20", gbp=20.0, days="5 days left"),
+         row(label="Apartment 2", bal="£34.30", gbp=34.30, days="More than a week left")], 10))
+
+    # The bug: one boolean gave the whole portfolio ONE alarm a day, so the
+    # second flat to empty said nothing until the next morning.
+    chk("a flat not yet reported today still sends", "send",
+        send_decision("full", True, 15, new_alarms=["Apartment 2"])[0])
+    chk("a flat already reported today does not re-send", "hold",
+        send_decision("full", True, 15, new_alarms=[])[0])
+    chk("an alarm still waits for the morning", "hold",
+        send_decision(None, True, 3, new_alarms=["Apartment 1"])[0])
+
+    chk("losing sight of a flat is reported", "send",
+        send_decision("full", False, 14, lost_sight=["Apartment 1"])[0])
+    chk("lost_sight_labels finds the unreadable flat", ["Apartment 1"],
+        lost_sight_labels([row(label="Apartment 1", ok=False, problem="SIGN-IN NEEDED"),
+                           row(label="Apartment 2", bal="£34.30", gbp=34.30, days="5 days left")]))
+
+    # ── the message says when a control is missing ────────────────────────
+    nodays, nodays_att, _ = build_message(
+        [row(bal="£12.40", gbp=12.40, days=None)], 10)
+    if "days left not shown" not in nodays or not nodays_att:
+        bad.append(("a missing days line says so", "days left not shown", nodays[:90]))
+    highmsg, high_att, _ = build_message(
+        [dict(row(bal="£1,350.60", gbp=1350.60, days="5 days left"), implausible=True)], 10)
+    if "check this" not in highmsg or not high_att:
+        bad.append(("an implausible figure is flagged in the message", "check this", highmsg[:90]))
 
     # ── the portfolio count has a control ────────────────────────────────
     try:
