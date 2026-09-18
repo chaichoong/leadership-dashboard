@@ -61,8 +61,11 @@
 //                        Messages matching a Gmail search q and/or exact
 //                        labelIds (preferred for label lookups — no query
 //                        syntax to silently mis-parse), each with headers,
-//                        snippet, labelIds, internalDate and a plain-text body
-//                        excerpt. Read-only. Max 25 per call (each message is
+//                        snippet, labelIds, internalDate, a plain-text body
+//                        excerpt, and `attachments` (non-inline only:
+//                        attachmentId, filename, mimeType, size — the bytes
+//                        come from /gmail/attachment, never from here).
+//                        Read-only. Max 25 per call (each message is
 //                        its own Gmail fetch and the worker has a
 //                        50-subrequest budget); `nextPageToken` is returned
 //                        when more remain — callers MUST treat its presence
@@ -76,6 +79,14 @@
 //                        numbered-prefix naming this system already uses.
 //                        SPAM and TRASH are refused: this endpoint can label
 //                        and archive, never send, delete, or mark spam. Max 40 ids.
+//   POST /gmail/attachment — { messageId, attachmentId, account? } → the
+//                        attachment's base64url bytes and size. Added 18 Sep
+//                        2026 for the weekly Payment Run: an invoice is very
+//                        often a PDF with an empty covering email, so a scan
+//                        that cannot open attachments cannot read the amount,
+//                        the reference or the bank details. Read-only, one
+//                        attachment per call — the caller picks which are
+//                        worth the bytes.
 
 // Kevin's ruling, 6 Aug 2026: emails go from this account unless the task
 // specifies another connected sender.
@@ -355,7 +366,8 @@ export default {
         // bearer gate as /send-email but a deliberately DIFFERENT key, so the
         // triage credential cannot send. Requires the gmail.modify scope.
         // ------------------------------------------------------------------
-        if (url.pathname === '/gmail/labels' || url.pathname === '/gmail/list' || url.pathname === '/gmail/modify') {
+        if (url.pathname === '/gmail/labels' || url.pathname === '/gmail/list'
+            || url.pathname === '/gmail/modify' || url.pathname === '/gmail/attachment') {
             // A separate key from /send-email on purpose: the triage runtime's
             // credential must not be able to send mail. Fails closed when unset.
             const auth = request.headers.get('Authorization') || '';
@@ -373,6 +385,7 @@ export default {
                 const accessToken = await getGmailAccessToken(env, refreshToken);
                 if (url.pathname === '/gmail/labels') return jsonResponse(await gmailLabels(accessToken));
                 if (url.pathname === '/gmail/list') return jsonResponse(await gmailList(accessToken, body));
+                if (url.pathname === '/gmail/attachment') return jsonResponse(await gmailAttachment(accessToken, body));
                 return jsonResponse(await gmailModify(accessToken, body));
             } catch (e) {
                 // Google answers 403 insufficientPermissions when the stored
@@ -622,6 +635,7 @@ async function gmailList(token, { q, labelIds, maxResults, pageToken }) {
             snippet: msg.snippet || '',
             headers,
             body: extractPlainText(msg.payload).slice(0, 4000),
+            attachments: extractAttachments(msg.payload),
         });
     }
     return { messages: out, resultSizeEstimate, nextPageToken: nextPageToken || null };
@@ -672,6 +686,53 @@ function b64urlDecodeUtf8(data) {
     const bytes = new Uint8Array(bin.length);
     for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
     return new TextDecoder().decode(bytes);
+}
+
+// Every real (non-inline) attachment on a message, as {attachmentId, filename,
+// mimeType, size}. The Payment Run scan needs this because an invoice is very
+// often a PDF with an empty covering email — the amount, the reference and the
+// bank details live only in the attachment (Kevin, 18 Sep 2026).
+//
+// A part counts when it has BOTH a filename and an attachmentId. Inline images
+// (a signature logo, a tracking pixel) carry an attachmentId too, so parts whose
+// Content-Disposition is `inline` are skipped: without that filter a typical
+// email footer contributes three "attachments" and the scan spends its
+// attachment budget fetching logos.
+function extractAttachments(payload) {
+    const out = [];
+    if (!payload) return out;
+    const queue = [payload];
+    while (queue.length) {
+        const p = queue.shift();
+        if (p.parts) queue.push(...p.parts);
+        if (!p.filename || !p.body?.attachmentId) continue;
+        const disposition = (p.headers || [])
+            .find(h => h.name.toLowerCase() === 'content-disposition')?.value || '';
+        if (/^\s*inline/i.test(disposition)) continue;
+        out.push({
+            attachmentId: p.body.attachmentId,
+            filename: p.filename,
+            mimeType: p.mimeType || 'application/octet-stream',
+            size: Number(p.body.size) || 0,
+        });
+    }
+    return out;
+}
+
+// One attachment's bytes, base64url exactly as Gmail returns them. Read-only,
+// and deliberately its own endpoint rather than riding along with /gmail/list:
+// a list call already spends one Gmail fetch per message inside a 50-subrequest
+// worker budget, and attachments are large. The caller decides which ones are
+// worth the bytes.
+async function gmailAttachment(token, { messageId, attachmentId }) {
+    if (!messageId || !attachmentId) throw new Error('messageId and attachmentId are required');
+    const res = await fetch(
+        `https://gmail.googleapis.com/gmail/v1/users/me/messages/${encodeURIComponent(messageId)}/attachments/${encodeURIComponent(attachmentId)}`,
+        { headers: { Authorization: `Bearer ${token}` } },
+    );
+    if (!res.ok) throw new Error('Gmail attachment fetch failed: ' + await res.text());
+    const { data, size } = await res.json();
+    return { messageId, attachmentId, size: Number(size) || 0, data: data || '' };
 }
 
 function extractPlainText(payload) {

@@ -101,6 +101,12 @@
                     matchRejected: !!f[INV.matchRejected],
                     // Business is a linked-record field — Airtable returns an array of record IDs
                     businessIds:   Array.isArray(f[INV.business]) ? f[INV.business] : [],
+                    // Payment Run fields, written by the Friday scan.
+                    payToDetails:  f[INV.payToDetails] || '',
+                    runDate:       f[INV.runDate] || null,
+                    bankChanged:   !!f[INV.bankChanged],
+                    source:        typeof f[INV.source] === 'object' ? (f[INV.source]?.name || '') : (f[INV.source] || ''),
+                    notes:         f[INV.notes] || '',
                 };
             });
             invoiceRefreshedAt = new Date();
@@ -124,7 +130,7 @@
             // instead of leaving the table blank.
             const tbody = document.getElementById('invoiceTableBody');
             if (tbody && airtableInvoices.length === 0) {
-                tbody.innerHTML = `<tr><td colspan="9" class="od-empty-state" style="color:var(--danger)">Could not load invoices — ${escHtml(e.message || 'unknown error')}. <a href="#" onclick="event.preventDefault(); fetchInvoicesFromAirtable()" style="color:var(--info);text-decoration:underline">Try again</a></td></tr>`;
+                tbody.innerHTML = `<tr><td colspan="10" class="od-empty-state" style="color:var(--danger)">Could not load invoices — ${escHtml(e.message || 'unknown error')}. <a href="#" onclick="event.preventDefault(); fetchInvoicesFromAirtable()" style="color:var(--info);text-decoration:underline">Try again</a></td></tr>`;
             }
         }
     }
@@ -147,17 +153,17 @@
         }
     }
 
+    // The list is no longer built from the Gmail "3: to pay" label, so the old
+    // "Dashboard N | Gmail N" comparison is gone. It would now read ⚠️ Mismatch
+    // for ever — that label holds zero messages because Kevin stopped applying
+    // it, which is what killed the old feed in the first place. Whether the
+    // feed is alive is answered by the Run Date staleness check, not by
+    // counting a label nobody maintains.
     function updateSyncHealthIndicator() {
         const el = document.getElementById('invSyncHealth');
         if (!el) return;
         const unpaidCount = airtableInvoices.filter(inv => inv.status === 'Unpaid').length;
-        if (lastGmailCount === null) {
-            el.innerHTML = `<span style="color:var(--text-secondary)">Dashboard: <strong>${unpaidCount}</strong> unpaid</span>`;
-        } else if (unpaidCount === lastGmailCount) {
-            el.innerHTML = `<span style="color:var(--success)">Dashboard: <strong>${unpaidCount}</strong> | Gmail: <strong>${lastGmailCount}</strong> ✓ In sync</span>`;
-        } else {
-            el.innerHTML = `<span style="color:var(--warning)">Dashboard: <strong>${unpaidCount}</strong> | Gmail: <strong>${lastGmailCount}</strong> ⚠️ Mismatch</span>`;
-        }
+        el.innerHTML = `<span style="color:var(--text-secondary)"><strong>${unpaidCount}</strong> to pay</span>`;
     }
 
     // Trigger Gmail → Airtable sync via Apps Script (fire-and-forget)
@@ -249,9 +255,43 @@
         `;
     }
 
+    // The payment-run week: last Friday 21:00 → this Friday 21:00, London.
+    // Mirrors run_window() in scripts/payment-run.py; the two are pinned
+    // together by tests/payment-run-window.test.js, because a tab that draws a
+    // different week from the scan that filled it is worse than no week at all.
+    function paymentRunWindow(now) {
+        const CUTOFF_DAY = 5;   // Friday, JS getDay() where Sunday = 0
+        const CUTOFF_HOUR = 21;
+        const ref = now ? new Date(now) : new Date();
+        const end = new Date(ref);
+        end.setDate(ref.getDate() + ((CUTOFF_DAY - ref.getDay() + 7) % 7));
+        end.setHours(CUTOFF_HOUR, 0, 0, 0);
+        if (end <= ref) end.setDate(end.getDate() + 7);
+        const start = new Date(end);
+        start.setDate(end.getDate() - 7);
+        return { start, end };
+    }
+
+    // The newest Run Date across every row. This is the "did the feed actually
+    // run" signal: the old pipeline sat dead for 70 days because nothing
+    // anywhere measured when it last worked.
+    function lastPaymentRunDate() {
+        const stamps = airtableInvoices.map(i => i.runDate).filter(Boolean).sort();
+        return stamps.length ? stamps[stamps.length - 1] : null;
+    }
+
+    function daysSinceLastRun(now) {
+        const last = lastPaymentRunDate();
+        if (!last) return null;
+        const ref = now ? new Date(now) : new Date();
+        return Math.floor((ref - new Date(last + 'T00:00:00')) / 86400000);
+    }
+
     function renderInvoiceTab() {
         const today = new Date();
         today.setHours(0,0,0,0);
+        const runWindow = paymentRunWindow();
+        const windowStartISO = runWindow.start.toISOString().slice(0, 10);
         // Capture "last seen" BEFORE marking as seen, so NEW badges still show this render
         const lastSeenBeforeRender = new Date(getLastSeenInvoiceTime());
 
@@ -267,7 +307,20 @@
             const statusLabel = airtableInvoices.length > 0
                 ? '<span style="color:var(--success);font-weight:600">Airtable</span>'
                 : '<span style="color:var(--warning);font-weight:600">Loading…</span>';
-            refreshSpan.innerHTML = `Source: <strong style="color:var(--text-secondary)">Airtable → Gmail</strong> &nbsp;·&nbsp; ${statusLabel} &nbsp;·&nbsp; Last refreshed: <strong style="color:var(--text-secondary)">${refreshTime}</strong> &nbsp;·&nbsp; <a href="#" onclick="event.preventDefault(); triggerGmailInvoiceSync(); this.textContent='Syncing…'; setTimeout(()=>this.textContent='Refresh from Gmail',4000)" style="color:var(--info);font-size:11px;text-decoration:underline">Refresh from Gmail</a> &nbsp;·&nbsp; <a href="#" onclick="event.preventDefault(); triggerGmailInvoiceReconcile(); this.textContent='Reconciling…'; setTimeout(()=>this.textContent='Reconcile with Gmail',4000)" style="color:var(--tone-plum);font-size:11px;text-decoration:underline" title="Realign dashboard against Gmail '3: to pay' label">Reconcile with Gmail</a> &nbsp;·&nbsp; <span id="invSyncHealth" style="font-size:11px"></span>`;
+            const weekLabel = runWindow.end.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+            const lastRun = lastPaymentRunDate();
+            const age = daysSinceLastRun();
+            // The staleness line is the whole point of the rebuild, so it is
+            // stated on the page and not only in the sync bar.
+            let runLabel;
+            if (!lastRun) {
+                runLabel = '<strong style="color:var(--danger)">never</strong>';
+            } else if (age !== null && age > PAYMENT_RUN_STALE_DAYS) {
+                runLabel = `<strong style="color:var(--danger)">${escHtml(fmtInvDate(lastRun))} — ${age} days ago, the weekly scan has stopped</strong>`;
+            } else {
+                runLabel = `<strong style="color:var(--success)">${escHtml(fmtInvDate(lastRun))}</strong>`;
+            }
+            refreshSpan.innerHTML = `Week to <strong style="color:var(--text-secondary)">Fri ${escHtml(weekLabel)}, 9pm</strong> &nbsp;·&nbsp; ${statusLabel} &nbsp;·&nbsp; Last scan: ${runLabel} &nbsp;·&nbsp; Screen refreshed: <strong style="color:var(--text-secondary)">${refreshTime}</strong> &nbsp;·&nbsp; <span id="invSyncHealth" style="font-size:11px"></span>`;
         }
         updateSyncHealthIndicator();
 
@@ -301,7 +354,7 @@
         const tbody = document.getElementById('invoiceTableBody');
         if (!tbody) return;
 
-        tbody.innerHTML = sorted.map((inv, idx) => {
+        const renderRow = (inv, idx) => {
             const effDate = new Date(inv.dueDate || inv.emailDate);
             const isOverdue = effDate < today;
             const daysDiff = Math.round((effDate - today) / 86400000);
@@ -372,7 +425,7 @@
             let matchRow = '';
             if (match && !inv.matchRejected) {
                 matchRow = `<tr class="inv-match-suggestion" id="inv-match-${idx}">
-                    <td colspan="9" style="padding:6px 12px;background:var(--info-bg);border-left:3px solid var(--info)">
+                    <td colspan="10" style="padding:6px 12px;background:var(--info-bg);border-left:3px solid var(--info)">
                         <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
                             <span style="font-size:11px;font-weight:700;color:var(--info)">🤖 AI Match Found:</span>
                             <span style="font-size:12px;color:var(--text-primary)">${escHtml(match.txDate)} · ${escHtml(match.txLabel)} · <strong>${fmt(Math.abs(match.txAmount))}</strong></span>
@@ -389,25 +442,74 @@
             // Gmail URL is resolved inside the click wrapper, never inlined.
             const actionHtml = `<button class="inv-mark-paid-btn" onclick="event.stopPropagation(); markInvoicePaidClick('${inv.recordId}',this)" title="Mark as paid — updates Airtable + moves Gmail label">Mark Paid</button>`;
 
+            // The bank details Kevin actually types into his banking app. Shown
+            // in full rather than behind a click: the whole brief was "one place
+            // where I can see the information I need to make the payment".
+            const payTo = (inv.payToDetails || '').trim();
+            const payToHtml = payTo
+                ? `<div style="font-family:monospace;font-size:11px;color:var(--text-secondary);white-space:pre-line;word-break:break-word">${escHtml(payTo)}</div>`
+                : '<span style="font-size:11px;color:var(--text-muted)">— not read —</span>';
+
+            // A changed sort code is how supplier payment-redirection fraud
+            // gets paid, so it interrupts rather than sits in a column.
+            const bankWarnRow = inv.bankChanged
+                ? `<tr><td colspan="10" style="padding:6px 12px;background:var(--danger-bg);border-left:3px solid var(--danger)">
+                    <strong style="font-size:12px;color:var(--danger)">⚠ Bank details are different from the last time this payee was paid.</strong>
+                    <span style="font-size:12px;color:var(--text-primary)">Check with them by phone before paying.</span>
+                   </td></tr>`
+                : '';
+
             return `<tr data-record-id="${inv.recordId}"${isSelected ? ' class="inv-row-selected"' : ''}>
                 <td style="text-align:center;width:32px">${checkboxHtml}</td>
                 <td style="text-align:center;color:var(--text-muted);font-size:11px;font-weight:600">${idx + 1}</td>
                 <td style="white-space:nowrap;min-width:120px">${dateCell}${gmailLinkHtml}<br>${badge}</td>
                 <td style="max-width:180px">${payeeHtml}</td>
-                <td style="max-width:280px">${descHtml}</td>
+                <td style="max-width:260px">${descHtml}</td>
                 <td style="white-space:nowrap;max-width:130px">${refHtml}</td>
+                <td style="max-width:190px">${payToHtml}</td>
                 <td style="white-space:nowrap;max-width:120px">${amountHtml}</td>
                 <td style="white-space:nowrap;max-width:140px">${businessHtml}</td>
                 <td style="width:110px;text-align:center">${actionHtml}</td>
-            </tr>${matchRow}`;
-        }).join('');
+            </tr>${bankWarnRow}${matchRow}`;
+        };
 
-        // Empty state — never leave a blank table
+        // ── Two sections: this week's run, then what is still owed ──────────
+        // Kevin's question at the gate was whether rebuilding the tab would
+        // lose the historic payables. It does not: everything older that is
+        // genuinely still owed carries forward here, week after week, until a
+        // transaction matches it. Old CREDITOR debt is a different thing and
+        // lives in the creditor agent's lane on Status = Historic, off this list.
+        const inWindow = inv => (inv.emailDate || '') >= windowStartISO;
+        const thisWeek = sorted.filter(inWindow);
+        const stillOwed = sorted.filter(inv => !inWindow(inv));
+
+        const sectionHeader = (title, rows, sub) => {
+            const total = rows.reduce((sum, r) => sum + (Number(r.amount) || 0), 0);
+            const missing = rows.filter(r => r.amount === null || r.amount === undefined).length;
+            return `<tr class="inv-section-header"><td colspan="10" style="background:var(--bg-subtle);padding:10px 12px;border-top:2px solid var(--border-default)">
+                <strong style="font-size:13px;color:var(--text-primary)">${escHtml(title)}</strong>
+                <span style="font-size:12px;color:var(--text-secondary);margin-left:10px">${rows.length} ${rows.length === 1 ? 'item' : 'items'} · <strong>${fmt(total)}</strong>${missing ? ` · ${missing} with no amount read` : ''}</span>
+                <span style="font-size:11px;color:var(--text-muted);margin-left:10px">${escHtml(sub)}</span>
+            </td></tr>`;
+        };
+
+        let bodyHtml = '';
         if (sorted.length === 0) {
-            tbody.innerHTML = filterText
-                ? `<tr><td colspan="9" class="od-empty-state">No unpaid invoices match "${escHtml(filterText)}" — clear the search to see all</td></tr>`
-                : `<tr><td colspan="9" class="od-empty-state">No unpaid invoices — all clear</td></tr>`;
+            bodyHtml = filterText
+                ? `<tr><td colspan="10" class="od-empty-state">Nothing matches "${escHtml(filterText)}" — clear the search to see all</td></tr>`
+                : `<tr><td colspan="10" class="od-empty-state">Nothing to pay — all clear</td></tr>`;
+        } else {
+            let counter = 0;
+            bodyHtml += sectionHeader('This week', thisWeek, 'arrived since last Friday 9pm');
+            bodyHtml += thisWeek.length
+                ? thisWeek.map(inv => renderRow(inv, counter++)).join('')
+                : `<tr><td colspan="10" class="od-empty-state">Nothing new came in this week</td></tr>`;
+            bodyHtml += sectionHeader('Still owed', stillOwed, 'carried forward until a payment matches');
+            bodyHtml += stillOwed.length
+                ? stillOwed.map(inv => renderRow(inv, counter++)).join('')
+                : `<tr><td colspan="10" class="od-empty-state">Nothing carried forward</td></tr>`;
         }
+        tbody.innerHTML = bodyHtml;
 
         // ── Wire up cell input save (delegate via tbody) ──
         // Save fires on `change` for selects/numbers and on `blur` for text inputs.
@@ -432,16 +534,58 @@
             registerSyncBar('invoices', {
                 // Re-fetch from Airtable (and trigger Gmail sync) — fetchInvoicesFromAirtable's
                 // success path calls renderInvoiceTab which re-runs markTabSynced.
-                refreshFn: async () => {
-                    if (typeof triggerGmailInvoiceSync === 'function') triggerGmailInvoiceSync();
-                    await fetchInvoicesFromAirtable();
-                },
+                // Re-read Airtable only. Refresh does NOT go to Gmail any more:
+                // the weekly scan is a scheduled job (Friday 21:00), not
+                // something a browser button can start, and pretending
+                // otherwise was how the old tab looked healthy while its feed
+                // was dead.
+                refreshFn: async () => { await fetchInvoicesFromAirtable(); },
                 checks: [
+                    {
+                        // THE check this tab exists for. The old feed stopped on
+                        // 10 Jul 2026 and nobody found out for 70 days, because
+                        // every check asked "is the data well formed" and none
+                        // asked "did the feed actually run". A dead pipeline and
+                        // a quiet week look identical unless something measures
+                        // the clock.
+                        name: 'Weekly payment run is current', kind: 'automation', run: () => {
+                            const last = lastPaymentRunDate();
+                            if (!last) return { status: 'fail', detail: 'No row carries a Run Date — the weekly scan has never completed. Check the payment-run job.' };
+                            const age = daysSinceLastRun();
+                            if (age > PAYMENT_RUN_STALE_DAYS) {
+                                return { status: 'fail', detail: `Last scan ${last} — ${age} days ago. The Friday job has stopped; this list is out of date and payables are being missed.` };
+                            }
+                            return { status: 'pass', detail: `Last scan ${last}, ${age} day${age === 1 ? '' : 's'} ago (a run is due every Friday 9pm)` };
+                        }
+                    },
                     {
                         name: 'Invoices fetched from Airtable', kind: 'sync', run: () => {
                             const n = (airtableInvoices || []).length;
                             if (n === 0) return { status: 'warn', detail: 'No invoices loaded yet — Airtable fetch may be in flight' };
                             return { status: 'pass', detail: `${n} unpaid invoice records loaded (fetch filters Status = Unpaid)` };
+                        }
+                    },
+                    {
+                        name: 'Payment details present on this week\'s list', kind: 'sync', run: () => {
+                            const w = paymentRunWindow();
+                            const startISO = w.start.toISOString().slice(0, 10);
+                            const week = (airtableInvoices || []).filter(i => i.status !== 'Paid' && (i.emailDate || '') >= startISO);
+                            if (!week.length) return { status: 'pass', detail: 'Nothing new came in this week' };
+                            const noAmount = week.filter(i => i.amount === null || i.amount === undefined);
+                            const noDetails = week.filter(i => !(i.payToDetails || '').trim());
+                            if (noAmount.length || noDetails.length) {
+                                return { status: 'warn', detail: `${week.length} to pay this week · ${noAmount.length} with no amount read · ${noDetails.length} with no bank details read` };
+                            }
+                            return { status: 'pass', detail: `All ${week.length} payable${week.length === 1 ? '' : 's'} carry an amount and bank details` };
+                        }
+                    },
+                    {
+                        name: 'No payee has changed bank details', kind: 'automation', run: () => {
+                            const flagged = (airtableInvoices || []).filter(i => i.status !== 'Paid' && i.bankChanged);
+                            if (flagged.length) {
+                                return { status: 'fail', detail: `${flagged.map(f => f.payee).join(', ')} — bank details differ from the last payment. Confirm by phone before paying.` };
+                            }
+                            return { status: 'pass', detail: 'Every payee on the list matches the details they were last paid on' };
                         }
                     },
                     {
@@ -472,18 +616,28 @@
                         }
                     },
                     {
-                        name: 'Gmail sync script reachable', kind: 'automation', run: () => {
-                            if (!GMAIL_SCRIPT_URL) return { status: 'warn', detail: 'GMAIL_SCRIPT_URL not configured in config.js' };
-                            return { status: 'pass', detail: 'Apps Script web app URL configured · last fetch fires every dashboard load' };
+                        // The old feed wrote a second row for the same email:
+                        // 50 of 144 message ids were duplicated, so every
+                        // invoice sat on the list twice. The weekly scan now
+                        // upserts on Gmail Message ID, and this proves it.
+                        name: 'No invoice appears twice', kind: 'sync', run: () => {
+                            const seen = new Map();
+                            for (const inv of (airtableInvoices || [])) {
+                                if (!inv.id) continue;
+                                seen.set(inv.id, (seen.get(inv.id) || 0) + 1);
+                            }
+                            const dupes = [...seen.values()].filter(n => n > 1).length;
+                            if (dupes) return { status: 'fail', detail: `${dupes} Gmail message${dupes === 1 ? '' : 's'} appear on more than one row — the upsert key is not holding` };
+                            return { status: 'pass', detail: `${seen.size} rows, ${seen.size} distinct Gmail messages — no duplicates` };
                         }
                     },
                     {
-                        name: 'AP Variable "new invoices" badge wired', kind: 'automation', run: () => {
+                        name: 'Payment Run "new invoices" badge wired', kind: 'automation', run: () => {
                             // Test the actual outcome: the badge element exists on the
-                            // AP Variable subtab and updateInvoicesSidebarBadge() found it.
+                            // Payment Run subtab and updateInvoicesSidebarBadge() found it.
                             const updated = typeof updateInvoicesSidebarBadge === 'function' && updateInvoicesSidebarBadge();
                             const badge = document.querySelector('.accounts-subtab[data-tab="invoices"] .invoices-nav-badge');
-                            if (!updated || !badge) return { status: 'fail', detail: 'Badge element not found on the AP Variable subtab button' };
+                            if (!updated || !badge) return { status: 'fail', detail: 'Badge element not found on the Payment Run subtab button' };
                             return { status: 'pass', detail: badge.textContent ? `Badge showing "${badge.textContent}"` : 'Badge present — no unpaid invoices to flag' };
                         }
                     },
