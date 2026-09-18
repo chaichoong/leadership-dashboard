@@ -28,11 +28,30 @@ Three rules follow, and they are the whole point of this run:
 3. **Read the attachment.** The commonest real invoice in this inbox is a PDF
    with an empty covering email.
 
-## The window
+## The window, and the two different questions about it
 
-Last Friday 21:00 → this Friday 21:00, Europe/London. `payment-run.py window`
-prints it. Kevin moved the cutoff from 16:00 to 21:00 on 18 Sep 2026 because
-invoices often arrive late in the day.
+Kevin's cutoff is Friday 21:00 Europe/London (moved from 16:00 on 18 Sep 2026 —
+invoices often arrive late in the day). `payment-run.py window` prints the lot.
+
+**Never confuse these two.** They are deliberately separate, and conflating them
+broke the very first live run:
+
+* **What to READ** — `scan_range`: the last seven days plus a day of overlap,
+  ending NOW. This job fires AT 21:00, the cutoff itself, so asking "which week
+  is it" at that instant answers with the week just STARTING. On 18 Sep 2026 the
+  first run did exactly that — it scanned seven days of mail that had not
+  arrived, reported "0 new payables", and exited 0 with a tidy report. The scan
+  always looks backwards from now. Re-reading mail is free; every write upserts
+  on Gmail Message ID.
+* **How to SHOW it** — three sections, split by two boundaries:
+  * **This week** — since the cutoff that just passed
+  * **Last week** — the week that just closed. **This is the run Kevin pays.**
+  * **Still owed** — older, carried forward until a payment matches it
+
+Kevin asked for that middle section on 18 Sep 2026, six minutes after the cutoff
+passed with the week's invoices still unpaid: one boundary had dropped what he
+was about to pay straight into "Still owed" beside February's debts. Lead your
+report with **Last week**, because that is what he is paying tonight.
 
 ## Steps
 
