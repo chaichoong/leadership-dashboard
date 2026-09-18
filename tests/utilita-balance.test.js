@@ -128,8 +128,11 @@ ub = importlib.util.module_from_spec(spec); spec.loader.exec_module(ub)
 shapes = {
  'UNPAINTED': 'My energy\\nBalance\\nREFRESH\\n5 days left\\nElectricity Top-up Number\\n9826003801209677811\\nOTHER CHARGES\\n£1350.60\\n',
  'PLACEHOLDER': 'Balance\\nREFRESH\\n£--\\nOTHER CHARGES\\n£1350.60\\n',
- 'CEILING': 'Balance\\nREFRESH\\n£1350.60\\n5 days left\\n',
  'TWOCARDS': 'Balance\\nMy energy\\nBalance\\nREFRESH\\n£20.26\\n5 days left\\n',
+ 'FARDOWN': 'Balance\\nREFRESH\\na\\nb\\nc\\nd\\n£1350.60\\n',
+ 'TWOAMOUNTS': 'Balance\\nREFRESH\\n£5.00\\n£1350.60\\n5 days left\\n',
+ 'DECIMALCOMMA': 'Balance\\nREFRESH\\n£2,50\\n1 day left\\n',
+ 'STRAYAMOUNT': 'Balance\\nREFRESH\\n50p\\nTop up\\n£20\\n5 days left\\n',
 }
 for k, v in shapes.items():
     r = ub.parse_energy(v)
@@ -138,10 +141,13 @@ d = ub.parse_energy('Balance\\nREFRESH\\n-£5.20\\n\\nOff supply\\nElectricity T
 print('DEBT=' + str(d['balanceGbp']) + '|' + str(d['daysLeft']))
 `;
         const out = execFileSync('python3', ['-c', py], { encoding: 'utf8' });
-        for (const k of ['UNPAINTED', 'PLACEHOLDER', 'CEILING', 'TWOCARDS']) {
+        for (const k of ['UNPAINTED', 'PLACEHOLDER', 'TWOCARDS', 'FARDOWN',
+                         'TWOAMOUNTS', 'DECIMALCOMMA', 'STRAYAMOUNT']) {
             expect(out).toMatch(new RegExp(`${k}=None\\|refused=True`));
         }
-        expect(out).not.toMatch(/1350\.6/);
+        expect(out).not.toMatch(/=1350\.6/);           // never REPORTED as the balance
+        expect(out).not.toMatch(/=250\.0/);             // "£2,50" is not £250
+        expect(out).not.toMatch(/=20\.0\|/);            // the top-up button is not the balance
         expect(out).toMatch(/DEBT=-5\.2\|Off supply/);  // debt parses, never falls through
     });
 
@@ -215,28 +221,127 @@ print('BOTH=' + str(len(ub.expected_accounts({'accounts': [{'label':'a'},{'label
         expect(out).toMatch(/BOTH=2/);
     });
 
-    it('a low balance is a success, not a job failure', () => {
-        // job-queue.py maps a non-zero exit to "failed", estate-status.py
-        // renders a Failed row and the digest lists it. Exiting 1 on a low
-        // balance meant the watcher reported itself broken on exactly the
-        // mornings a meter was low, which is how a red light stops being read.
-        const src = readFileSync(script, 'utf8');
-        const run = src.slice(src.indexOf('def cmd_run'), src.indexOf('def cmd_read'));
-        expect(run).toMatch(/if not result\["anyDelivered"\]:\s*\n\s*return 1/);
-        expect(run).not.toMatch(/return 0 if \(sent and not attention\)/);
+    it('send_slack returns the SAME shape on every branch, including a missing key', () => {
+        // The round-1 refactor left one branch returning a 2-tuple while every
+        // caller indexes the result by name, so a rotated or renamed key file
+        // produced "TypeError: tuple indices must be integers" and no message.
+        // The day-simulation test stubs send_slack, so only this drives the real
+        // one. Back-tested: restoring the tuple fails here.
+        const py = `
+import importlib.util
+spec = importlib.util.spec_from_file_location('ub', ${JSON.stringify(script)})
+ub = importlib.util.module_from_spec(spec); spec.loader.exec_module(ub)
+ub.RELAY_KEY_PATH = '/nonexistent/slack_relay_key'
+r = ub.send_slack('hi', ['kevin@runpreneur.org.uk'])
+print('TYPE=' + type(r).__name__)
+try:
+    # Exactly what cmd_run does with it.
+    print('DELIVERED=' + str(r['anyDelivered']))
+    print('FAILEDKEY=' + str(bool(r.get('failed') is not None)))
+    print('CALLER=OK')
+except TypeError as e:
+    print('CALLER=CRASH ' + str(e))
+`;
+        const out = execFileSync('python3', ['-c', py], { encoding: 'utf8' });
+        expect(out).toMatch(/TYPE=dict/);
+        // And the worker's own reason survives rather than becoming
+        // "unreadable reply", which is all a recipient typo used to log.
+        const relaySrc = readFileSync(script, 'utf8');
+        const send = relaySrc.slice(relaySrc.indexOf('def send_slack'),
+                                    relaySrc.indexOf('def log_readings'));
+        expect(send).toMatch(/\.get\("error"\)/);
+        expect(out).toMatch(/DELIVERED=False/);
+        expect(out).toMatch(/CALLER=OK/);
+        expect(out).not.toMatch(/CRASH/);
     });
 
-    it('a partly failed delivery still marks the day, so it cannot re-send hourly', () => {
-        // The worker answers 502 when ANY recipient fails. Treating that as a
-        // total failure left the mark unwritten, so a permanent failure on
-        // Roy's DM would have re-sent to Kevin 24 times a day for ever.
-        const src = readFileSync(script, 'utf8');
-        const send = src.slice(src.indexOf('def send_slack'), src.indexOf('def log_readings'));
-        expect(send).toMatch(/anyDelivered/);
-        expect(send).toMatch(/body\["sent"\]/);
-        const run = src.slice(src.indexOf('def cmd_run'), src.indexOf('def cmd_read'));
-        expect(run).toMatch(/if result\["anyDelivered"\]:\s*\n(\s*#[^\n]*\n)*\s*write_sent_mark/);
+    it('cmd_run across a simulated day: exit codes, the daily mark, per-flat alarms', () => {
+        // The two tests this replaces read cmd_run's SOURCE, and both would have
+        // stayed green with their bug reinstated. Nothing executed cmd_run at
+        // all, so the wiring of expected_accounts, the mark and send_decision
+        // into the job was unproven. This drives the real function with stubbed
+        // reads and sends against a temporary state directory.
+        const py = `
+import importlib.util, json, os, tempfile, datetime
+spec = importlib.util.spec_from_file_location('ub', ${JSON.stringify(script)})
+ub = importlib.util.module_from_spec(spec); spec.loader.exec_module(ub)
+
+d = tempfile.mkdtemp()
+ub.STATE_DIR = d
+ub.SENT_MARK = os.path.join(d, 'sent.json')
+ub.LEDGER = os.path.join(d, 'readings.jsonl')
+cfgp = os.path.join(d, 'cfg.json')
+json.dump({'accounts': [{'label': 'Apartment 1', 'profile': 'p1'},
+                        {'label': 'Apartment 2', 'profile': 'p2'}],
+           'expectedAccounts': 2, 'lowBalanceGbp': 10,
+           'recipients': ['kevin@runpreneur.org.uk']}, open(cfgp, 'w'))
+ub.CONFIG = cfgp
+
+SENT = []
+ub.send_slack = lambda text, rec: (SENT.append(text) or
+    {'anyDelivered': True, 'delivered': rec, 'failed': [], 'refused': []})
+
+STATE = {}
+ub.read_account = lambda acct, node=None: dict(
+    STATE[acct['label']], label=acct['label'], profile=acct['profile'])
+
+def ok(bal, days):
+    return {'ok': True, 'balance': '\u00a3%.2f' % bal, 'balanceGbp': bal,
+            'daysLeft': days, 'daysLeftRecognised': True, 'meterLast4': '7811',
+            'problem': None, 'signedIn': True, 'implausible': False}
+def down():
+    return {'ok': False, 'balance': None, 'balanceGbp': None, 'daysLeft': None,
+            'daysLeftRecognised': None, 'meterLast4': None,
+            'problem': 'SIGN-IN NEEDED', 'signedIn': False, 'implausible': False}
+
+class Clock(datetime.datetime):
+    H = 7
+    @classmethod
+    def now(cls, tz=None):
+        return datetime.datetime(2026, 9, 21, cls.H, 5, 0)
+ub.datetime = Clock
+
+def tick(hour, a1, a2, label):
+    Clock.H = hour
+    STATE['Apartment 1'], STATE['Apartment 2'] = a1, a2
+    before = len(SENT)
+    code = ub.cmd_run([])
+    print(label + '=' + ('SENT' if len(SENT) > before else 'quiet') + ',exit' + str(code))
+
+healthy1, healthy2 = ok(20.0, '5 days left'), ok(34.0, 'More than a week left')
+tick(6,  healthy1, healthy2, 'EARLY')
+tick(7,  healthy1, healthy2, 'MORNING')
+tick(8,  healthy1, healthy2, 'AGAIN')
+tick(10, ok(0.5, 'Less than a day left'), healthy2, 'ALARM1')
+tick(11, ok(0.5, 'Less than a day left'), healthy2, 'NOREPEAT')
+tick(15, ok(0.5, 'Less than a day left'), ok(5.0, 'Off supply'), 'ALARM2')
+tick(17, healthy1, down(), 'LOSTSIGHT')
+tick(18, healthy1, down(), 'LOSTAGAIN')
+
+mark = json.load(open(ub.SENT_MARK))
+print('MARKED=' + ','.join(mark['alarmedLabels']))
+print('LOST=' + ','.join(mark['lostLabels']))
+
+json.dump({'accounts': [], 'expectedAccounts': 2, 'recipients': []}, open(cfgp, 'w'))
+try:
+    ub.cmd_run([]); print('TRIMMED=ACCEPTED')
+except SystemExit:
+    print('TRIMMED=REFUSED')
+`;
+        const out = execFileSync('python3', ['-c', py], { encoding: 'utf8' });
+        expect(out).toMatch(/EARLY=quiet,exit0/);        // never a dawn message
+        expect(out).toMatch(/MORNING=SENT,exit0/);       // a healthy send is a SUCCESS, not a failure
+        expect(out).toMatch(/AGAIN=quiet,exit0/);
+        expect(out).toMatch(/ALARM1=SENT,exit0/);        // a low balance is the job working
+        expect(out).toMatch(/NOREPEAT=quiet,exit0/);     // and it does not nag hourly
+        expect(out).toMatch(/ALARM2=SENT,exit0/);        // the SECOND flat is not silenced
+        expect(out).toMatch(/LOSTSIGHT=SENT,exit1/);     // a dead session is a fault, and reported
+        expect(out).toMatch(/LOSTAGAIN=quiet,exit1/);    // held, yet still failing
+        expect(out).toMatch(/MARKED=Apartment 1,Apartment 2/);
+        expect(out).toMatch(/LOST=Apartment 2/);
+        expect(out).toMatch(/TRIMMED=REFUSED/);
     });
+
 
     it('a browser timeout kills the process GROUP, or Chromium holds the profile for ever', () => {
         // subprocess kills node only; the headless Chromium it launched survives
@@ -248,16 +353,40 @@ print('BOTH=' + str(len(ub.expected_accounts({'accounts': [{'label':'a'},{'label
         // And the timeout must exceed agent-browser.js's own 10-minute wait for
         // the profile lock, or contention guarantees a false "did not load".
         expect(src).toMatch(/READ_TIMEOUT_S = 11 \* 60/);
+        // The old assertion was an alternation ending in a bare /waitForProfile/,
+        // which always matched: raising agent-browser's own lock wait to 20
+        // minutes would have made READ_TIMEOUT_S too short again and stayed green.
+        // Read the real number out of agent-browser.js and compare.
         const browser = readFileSync(resolve(root, 'scripts/agent-browser.js'), 'utf8');
-        expect(browser).toMatch(/waitForProfile\(dir, 10 \* 60 \* 1000|waitForProfile/);
+        const m = browser.match(/waitForProfile\(dir,\s*(\d+)\s*\*\s*60\s*\*\s*1000/);
+        expect(m, 'agent-browser.js must still declare its profile wait in minutes').toBeTruthy();
+        const waitMinutes = Number(m[1]);
+        const ours = Number(readFileSync(script, 'utf8')
+            .match(/READ_TIMEOUT_S = (\d+) \* 60/)[1]);
+        expect(ours).toBeGreaterThan(waitMinutes);
     });
 
-    it('the message never carries a filesystem path to Roy', () => {
-        const src = readFileSync(script, 'utf8');
-        const read = src.slice(src.indexOf('def read_account'), src.indexOf('def row_alarm'));
-        // stderr goes to the job log, never into row["problem"].
-        expect(read).toMatch(/file=sys\.stderr/);
-        expect(read).not.toMatch(/row\["problem"\][^\n]*stderr/);
+    it('a browser failure reports no filesystem path to Roy (driven)', () => {
+        // The grep version hunted the literal "stderr", so
+        // row["problem"] = f"...: {err}" would leak the profile path and pass.
+        // This runs read_account against a fake node that fails loudly.
+        const py = `
+import importlib.util, os, stat, tempfile
+spec = importlib.util.spec_from_file_location('ub', ${JSON.stringify(script)})
+ub = importlib.util.module_from_spec(spec); spec.loader.exec_module(ub)
+d = tempfile.mkdtemp()
+fake = os.path.join(d, 'node')
+open(fake, 'w').write('#!/bin/bash\\necho "/Users/kevinbrittain/.config/od/agent-browser/utilita-apt1 exploded" >&2\\nexit 1\\n')
+os.chmod(fake, os.stat(fake).st_mode | stat.S_IEXEC)
+r = ub.read_account({'label': 'Apartment 1', 'profile': 'utilita-apt1'}, node=fake)
+print('PROBLEM=' + str(r['problem']))
+print('OK=' + str(r['ok']))
+`;
+        const out = execFileSync('python3', ['-c', py], { encoding: 'utf8' });
+        expect(out).toMatch(/OK=False/);
+        expect(out).toMatch(/PROBLEM=could not open the page/);
+        expect(out).not.toMatch(/\/Users\//);          // no path reaches the message
+        expect(out).not.toMatch(/agent-browser/);
     });
 
     it('the runner tests for the SCRIPT, not the scripts directory', () => {
@@ -270,11 +399,49 @@ print('BOTH=' + str(len(ub.expected_accounts({'accounts': [{'label':'a'},{'label
         expect(sh).not.toMatch(/\[ -d "\$REPO\/scripts" \]/);
     });
 
-    it('the relay caps text length and de-duplicates recipients', () => {
-        const worker = readFileSync(resolve(root, 'workers/apple-inbound/worker.js'), 'utf8');
-        expect(worker).toMatch(/RELAY_MAX_TEXT/);
-        expect(worker).toMatch(/RELAY_MAX_RECIPIENTS/);
-        expect(worker).toMatch(/seen\.has\(e\)/);
+    it('the relay handler itself enforces its caps and allowlist (driven, not grepped)', async () => {
+        // The grep version of this test stayed green with BOTH caps wrapped in
+        // `if (false && ...)`, because nothing executed the handler. This calls it.
+        const { handleSlackRelay } = await import(
+            new URL('../workers/apple-inbound/worker.js', import.meta.url).href);
+        const posted = [];
+        const realFetch = globalThis.fetch;
+        globalThis.fetch = async (url, opts) => {
+            posted.push({ url: String(url), body: opts && opts.body });
+            if (String(url).includes('users.lookupByEmail')) {
+                return new Response(JSON.stringify({ ok: true, user: { id: 'U1' } }));
+            }
+            return new Response(JSON.stringify({ ok: true, ts: '1.2' }));
+        };
+        const env = { SLACK_RELAY_KEY: 'k', SLACK_BOT_TOKEN: 'xoxb-test' };
+        const call = (body, key = 'k') => handleSlackRelay(new Request(
+            'https://w/slack-relay',
+            { method: 'POST', headers: { 'X-Relay-Key': key, 'Content-Type': 'application/json' },
+              body: JSON.stringify(body) }), env);
+        try {
+            const kevin = 'kevin@runpreneur.org.uk';
+            expect((await call({ recipients: [kevin], text: 'x' }, 'wrong')).status).toBe(401);
+            expect((await call({ recipients: [kevin], text: 'x'.repeat(4001) })).status).toBe(413);
+            expect((await call({ recipients: [kevin], text: 'x'.repeat(4000) })).status).toBe(200);
+            expect((await call({ recipients: Array(5).fill(kevin), text: 'x' })).status).toBe(400);
+            expect((await call({ recipients: ['stranger@example.com'], text: 'x' })).status).toBe(400);
+
+            // Duplicates collapse to ONE DM, and the cap is applied AFTER
+            // de-duplication so four copies of one address is one message.
+            posted.length = 0;
+            const dup = await call({ recipients: [kevin, kevin.toUpperCase(), kevin], text: 'x' });
+            expect(dup.status).toBe(200);
+            expect(posted.filter(p => p.url.includes('chat.postMessage')).length).toBe(1);
+
+            // A stranger alongside an allowed recipient is refused, not delivered.
+            posted.length = 0;
+            const mixed = await call({ recipients: [kevin, 'stranger@example.com'], text: 'x' });
+            const outMixed = await mixed.json();
+            expect(outMixed.refused).toEqual(['stranger@example.com']);
+            expect(posted.filter(p => p.url.includes('chat.postMessage')).length).toBe(1);
+        } finally {
+            globalThis.fetch = realFetch;
+        }
     });
 
     it('the hourly job is lock-exempt, or a long render lets the session lapse', () => {
@@ -304,12 +471,19 @@ print('BOTH=' + str(len(ub.expected_accounts({'accounts': [{'label':'a'},{'label
         expect(src).toMatch(/"read",\s*$|"read",/m);
     });
 
-    it('Utilita is kept out of session-keepalive, which would test the wrong profile', () => {
-        // session-keepalive.py never passes --profile, so it checks `default`.
-        // Utilita's sessions live on utilita-apt1 / utilita-apt2, so a loginUrl on
-        // the allowlist entry would raise a false SIGN-IN NEEDED task every morning.
+    it('Utilita is kept out of session-keepalive by having no loginUrl', () => {
+        // The old test never mentioned Utilita at all. The real mechanism is
+        // that my.utilita.co.uk has NO loginUrl, which keepalive_sites requires
+        // (scripts/session-keepalive.py:79) — and session-keepalive never passes
+        // --profile, so it would test the empty `default` profile and mint a
+        // false SIGN-IN NEEDED task every morning.
+        const { loadSites } = require_(resolve(root, 'scripts/agent-browser.js'));
+        const entry = loadSites()['my.utilita.co.uk'];
+        expect(entry, 'my.utilita.co.uk must be on the allowlist for `read`').toBeTruthy();
+        expect(entry.login).toBe(true);
+        expect(entry.loginUrl, 'a loginUrl here enrols Utilita in the daily keepalive on the WRONG profile').toBeFalsy();
         const keepalive = readFileSync(resolve(root, 'scripts/session-keepalive.py'), 'utf8');
-        expect(keepalive).toMatch(/loginUrl/);
+        expect(keepalive).toMatch(/v\.get\("loginUrl"\)|entry\.get\("loginUrl"\)|get\("loginUrl"\)/);
         expect(keepalive).not.toMatch(/--profile/);
     });
 });

@@ -643,7 +643,10 @@ const RELAY_MAX_RECIPIENTS = 4;
 // for one of two people is the failure mode that matters here: Roy is the one
 // who tops the meters up, and a message only Kevin received looks like a
 // working watcher right up to the outage.
-async function handleSlackRelay(request, env) {
+// Exported so tests can DRIVE it rather than grep its source. The round-2
+// review proved the grep-based test stayed green with both caps wrapped in
+// `if (false && ...)`: nothing executed the handler at all.
+export async function handleSlackRelay(request, env) {
   const key = request.headers.get('X-Relay-Key') || '';
   if (!env.SLACK_RELAY_KEY || key !== env.SLACK_RELAY_KEY) {
     return json({ error: 'Unauthorized' }, 401);
