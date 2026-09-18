@@ -226,21 +226,23 @@
         const today = new Date();
         today.setHours(0,0,0,0);
         const sourceData = airtableInvoices.filter(inv => inv.status !== 'Paid');
-        let knownTotal = 0, unknownCount = 0, overdueCount = 0;
+        let knownTotal = 0, unknownCount = 0, overdueCount = 0, weekTotal = 0, weekCount = 0;
+        const windowStartISO = paymentRunWindow().start.toISOString().slice(0, 10);
         sourceData.forEach(inv => {
             if (inv.amount !== null) knownTotal += inv.amount; else unknownCount++;
             if (new Date(inv.dueDate || inv.emailDate) < today) overdueCount++;
+            if ((inv.emailDate || '') >= windowStartISO) { weekCount++; weekTotal += (inv.amount || 0); }
         });
         summaryCards.innerHTML = `
             <div class="kpi-card">
-                <div class="kpi-card-label">Unpaid Invoices</div>
-                <div class="kpi-card-value">${sourceData.length}</div>
-                <div class="kpi-card-sub">Synced from Gmail "3. to pay"</div>
+                <div class="kpi-card-label">To Pay This Week</div>
+                <div class="kpi-card-value">${fmt(weekTotal)}</div>
+                <div class="kpi-card-sub">${weekCount} ${weekCount === 1 ? 'invoice' : 'invoices'} since last Friday 9pm</div>
             </div>
             <div class="kpi-card">
-                <div class="kpi-card-label">Known Amount Due</div>
+                <div class="kpi-card-label">Total Outstanding</div>
                 <div class="kpi-card-value text-red">${fmt(knownTotal)}</div>
-                <div class="kpi-card-sub">${sourceData.length - unknownCount} of ${sourceData.length} invoices with amounts</div>
+                <div class="kpi-card-sub">${sourceData.length} open, ${sourceData.length - unknownCount} with an amount read</div>
             </div>
             <div class="kpi-card">
                 <div class="kpi-card-label">Amount Unknown</div>
