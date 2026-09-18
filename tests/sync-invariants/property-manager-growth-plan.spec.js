@@ -38,14 +38,14 @@ function growthPayload() {
 }
 
 // Mocks the Worker and refuses any call to Airtable, which is the point: Roy holds no key.
-async function openRoysGrowthPlan(page, { onWrite } = {}) {
+async function openRoysGrowthPlan(page, { onWrite, payload } = {}) {
   const airtableCalls = [];
   await stubExternalHosts(page);
   await page.addInitScript(() => { localStorage.setItem('pm_token', 'roy-session-token'); localStorage.setItem('pm_who', 'Roy Lavin'); });
   await page.route('**/api.airtable.com/**', route => { airtableCalls.push(route.request().url()); route.fulfill({ status: 500, body: '{}' }); });
   await page.route(PM + '/**', async route => {
     const req = route.request(); const path = new URL(req.url()).pathname;
-    if (path === '/growth-plan' && req.method() === 'GET') return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(growthPayload()) });
+    if (path === '/growth-plan' && req.method() === 'GET') return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(payload ? payload(growthPayload()) : growthPayload()) });
     if (path.startsWith('/growth-plan/')) {
       if (onWrite) onWrite({ path, body: req.postDataJSON() });
       return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true, records: [{ id: 'recNew1', fields: {} }] }) });
@@ -106,13 +106,44 @@ test.describe('Roy\'s Growth Plan tab', () => {
     await expect(open.locator('input[data-prop-field]')).toHaveCount(0);
     await expect(open).toContainText('Kevin sets these');
     await expect(page.locator('button[data-act="freeze-started"]')).toHaveCount(0);
-    await expect(page.locator('#gp-form')).toBeHidden();
-    await expect(page.locator('button[data-act="open-form"]')).toHaveCount(0);
+    await expect(page.locator('#gp-form')).toBeVisible();     // the data capture form is his (18 Sep 2026)
+    await expect(page.locator('#docsBox')).toBeHidden();      // uploading a scan is not, yet
     await expect(page.locator('details.more', { hasText: 'Set up every property' })).toBeHidden();
     await expect(page.locator('details.more', { hasText: 'Every assumption behind the figures' })).toBeHidden();
     // Not merely hidden: the set-up controls are not in Roy's page at all.
     await expect(page.locator('select[data-prop-field]')).toHaveCount(0);
     await expect(page.locator('#setupBody tr')).toHaveCount(0);
+  });
+
+  test('he can fill in the tenant data capture form, and it saves through the Worker', async ({ page }) => {
+    const writes = [];
+    await openRoysGrowthPlan(page, { onWrite: w => writes.push(w) });
+    await page.locator('#selfList .pack', { hasText: '18 Test Park' }).locator('.pack-head').click();
+    await page.locator('#selfList .pack.open button[data-act="open-form"]').first().click();
+    await expect(page.locator('#meetingForm')).toBeVisible();
+    await page.locator('#meetingForm input[name="ni"]').fill('AB123456A');
+    await page.locator('#meetingForm input[name="idSeen"], #meetingForm select[name="idSeen"]').first().selectOption({ index: 1 }).catch(() => {});
+    await page.locator('#meetingSave').click();
+    await expect(page.locator('#toast')).toContainText('Meeting saved');
+    const w = writes.filter(x => x.path === '/growth-plan/tenant').pop();
+    expect(w).toBeTruthy();
+    expect(w.body.tenantId).toMatch(/^recT/);
+    expect(w.body.fields['fld1rHf1qZ60qK95l']).toBe('AB123456A');   // National Insurance
+  });
+
+  test('a date of birth can be fixed from his tab, and it saves through the Worker', async ({ page }) => {
+    const writes = [];
+    // Paul Flat with no date of birth: the tenant the plan cannot price until it is known.
+    await openRoysGrowthPlan(page, { onWrite: w => writes.push(w), payload: p => { delete p.tenants[1].fields[T.dob]; return p; } });
+    await page.locator('#selfList .pack', { hasText: '18 Test Park' }).locator('.pack-head').click();
+    const open = page.locator('#selfList .pack.open');
+    await open.locator('input[data-dob="recT2"]').fill('1980-06-01');
+    await open.locator('button[data-act="save-dob"][data-tenant="recT2"]').click();
+    await expect(page.locator('#toast')).toContainText('Date of birth saved');
+    const w = writes.filter(x => x.path === '/growth-plan/tenant').pop();
+    expect(w.body.tenantId).toBe('recT2');
+    expect(w.body.fields['fldv7FKsqXYswyCFE']).toBe('1980-06-01');           // Date of Birth
+    expect(w.body.fields['fldfwxEf7I3XQDVtR']).toMatch(/Growth Plan page/);  // the dated line on Notes
   });
 
   test('Kevin\'s own page is untouched: the key flow, the picker and the set-up all stay', async ({ page }) => {

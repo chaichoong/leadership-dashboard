@@ -218,10 +218,11 @@ describe('the growth plan routes', () => {
     expect(r.status).toBe(200);
     const body = await r.json();
     expect(Object.keys(body).sort()).toEqual(['costs', 'generatedAt', 'ok', 'planRows', 'props', 'settingRows', 'tenancies', 'tenants', 'units', 'who'].sort());
-    // Roy's read leaves out the tenant fields only the meeting form shows.
+    // Roy fills the meeting form now, so he reads its fields; attachments are the one
+    // tenant field his page does not carry (uploads need their own route).
     const asked = fetchedFields('tblX4elTuu01gwBYh');
-    for (const id of [GP.tenant.weeklyIncome, GP.tenant.weeklySpending, GP.tenant.bankStatements, GP.tenant.ctAccount, GP.tenant.meetingNotes, GP.tenant.documents]) expect(asked).not.toContain(id);
-    for (const id of [GP.tenant.name, GP.tenant.dob, GP.tenant.correctAgreement, GP.tenant.rentUplift]) expect(asked).toContain(id);
+    expect(asked).not.toContain(GP.tenant.documents);
+    for (const id of [GP.tenant.name, GP.tenant.dob, GP.tenant.correctAgreement, GP.tenant.rentUplift, GP.tenant.weeklyIncome, GP.tenant.meetingNotes]) expect(asked).toContain(id);
     for (const k of ['props', 'units', 'tenants', 'tenancies', 'costs', 'planRows', 'settingRows']) expect(body[k]).toHaveLength(1);
   });
 
@@ -272,6 +273,18 @@ describe('the growth plan routes', () => {
     expect(wrote.records[0].fields[F.taskBusiness]).toEqual([REC.bizRealEstate]);
     expect(F.taskCompletion in wrote.records[0].fields).toBe(false);
     expect((await post('/growth-plan/task', { fields: { [F.taskStatus]: 'Upcoming' } }, token)).status).toBe(400);
+  });
+
+  it('saves the tenant data capture form, and only the fields on it', async () => {
+    const token = await auth();
+    let wrote = null;
+    airtable['tblX4elTuu01gwBYh'] = (u, init) => { wrote = JSON.parse(init.body); return { records: [{ id: 'recT1', fields: {} }] }; };
+    const form = { [GP.tenant.dob]: '1980-06-01', [GP.tenant.ni]: 'AB123456A', [GP.tenant.idSeen]: 'Passport', [GP.tenant.ucStatementSeen]: true, [GP.tenant.weeklyIncome]: 210, [GP.tenant.meetingNotes]: 'Met at the house' };
+    const r = await post('/growth-plan/tenant', { tenantId: 'recT1', fields: { ...form, [GP.tenant.status]: 'Former', [GP.prop.strategy]: 'UC HMO' } }, token);
+    expect(r.status).toBe(200);
+    expect(wrote.records).toEqual([{ id: 'recT1', fields: form }]);   // status and strategy never reach Airtable
+    expect((await post('/growth-plan/tenant', { tenantId: 'recT1', fields: { [GP.tenant.status]: 'Former' } }, token)).status).toBe(400);
+    expect((await post('/growth-plan/tenant', { tenantId: 'nope', fields: form }, token)).status).toBe(400);
   });
 
   it('gives Roy no route at all to a property, a unit or a frozen start', async () => {
