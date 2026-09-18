@@ -440,6 +440,23 @@ print('OK=' + str(r['ok']))
         expect(out).not.toMatch(/agent-browser/);
     });
 
+    it('the runner prefers the MAINTAINED checkout, not the runtime worktree', () => {
+        // The runtime worktree is fast-forwarded only before the content-engine
+        // jobs, and its own jobs leave tracked files modified there: on 18 Sep
+        // 2026 a modified runpreneur-map/data/progress.json blocked its
+        // fast-forward, so it sat two commits behind while holding a readable
+        // copy of this script. A stale copy that EXISTS is worse than none,
+        // because the existence test passes and yesterday's code runs.
+        // The main checkout has refresh-main-checkout.py keeping it current.
+        const sh = readFileSync(resolve(root, 'scripts/utilita-balance-run.sh'), 'utf8');
+        const first = sh.indexOf('REPO="/Users/kevinbrittain/Projects/leadership-dashboard"');
+        const fallback = sh.indexOf('content-engine-runtime');
+        expect(first).toBeGreaterThan(-1);
+        expect(fallback).toBeGreaterThan(first);   // runtime worktree is the FALLBACK
+        expect(readFileSync(resolve(root, 'scripts/refresh-main-checkout.py'), 'utf8'))
+            .toMatch(/origin\/main/);             // and the preferred one has a refresher
+    });
+
     it('the runner tests for the SCRIPT, not the scripts directory', () => {
         // scripts/ exists in the runtime worktree whatever commit it sits on,
         // so testing the directory passes on any day that worktree has not been

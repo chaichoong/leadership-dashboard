@@ -16,17 +16,29 @@
 # Claude tokens at all — it is a page read and a Slack post.
 set -uo pipefail
 
-REPO="/Users/kevinbrittain/Projects/leadership-dashboard/.claude/worktrees/content-engine-runtime"
-# The runtime worktree holds `main` and is fast-forwarded before the nightly
-# jobs, so a scheduled job reads shipped code rather than whatever branch a
-# session left the main checkout on.
+# THE MAIN CHECKOUT FIRST, and this order matters (fixed 18 Sep 2026).
 #
-# The fallback tests for THIS SCRIPT, not for scripts/. Testing the directory
-# was wrong and would have failed silently: scripts/ exists in that worktree
-# whatever commit it sits on, so on any day the worktree had not been
-# fast-forwarded past this feature the test would pass and python would then
-# die on a missing file. The fallback exists precisely for that day.
-[ -f "$REPO/scripts/utilita-balance.py" ] || REPO="/Users/kevinbrittain/Projects/leadership-dashboard"
+# It was the other way round, on the reasoning that the runtime worktree holds
+# `main` while the main checkout sits on whatever branch a session left behind.
+# That is wrong twice over:
+#
+#   1. The main checkout is the MAINTAINED one. scripts/refresh-main-checkout.py
+#      exists to bring it to origin/main before daily-ops, written for exactly
+#      this bug: "a merged fix never reached the routine that is meant to prove
+#      it" (finding 20260914-daily-ops-528). Every other launchd job in the
+#      estate points here too.
+#   2. The runtime worktree cannot be relied on to be current. It is
+#      fast-forwarded before the content-engine jobs, and its OWN jobs leave
+#      tracked files modified there — on 18 Sep 2026 a modified
+#      runpreneur-map/data/progress.json blocked the fast-forward, so that
+#      worktree sat two commits behind while holding a perfectly readable copy
+#      of this script. A stale copy that exists is worse than none, because the
+#      existence test passes and the old code runs.
+#
+# So: prefer the checkout with a refresh story, fall back to the other, and
+# test for THIS SCRIPT rather than for scripts/ (which exists at any commit).
+REPO="/Users/kevinbrittain/Projects/leadership-dashboard"
+[ -f "$REPO/scripts/utilita-balance.py" ] || REPO="/Users/kevinbrittain/Projects/leadership-dashboard/.claude/worktrees/content-engine-runtime"
 
 TARGET="$REPO/scripts/utilita-balance.py"
 if [ ! -f "$TARGET" ]; then
