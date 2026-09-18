@@ -345,3 +345,45 @@ describe('a tolerated line is not a failure marker (finding 531)', () => {
     expect(wrapper).toContain("'GMAIL RATE METRIC STILL FULL'");
   });
 });
+
+// ---------------------------------------------------------------------------
+// A slot that cannot reach its only source is not a pass.
+//
+// Finding 20260918-daily-ops-phase2-excepti-544: the prospecting slot on 17 Sep
+// reported "Chrome sourcing: SKIPPED. The claude-in-chrome tools are not loaded
+// in this session slot", found 0, synced 0, used 0 keywords — and exited 0, so
+// nothing alarmed while 89 prospects sat at Ready for Review. The failure
+// markers are read from agent-slot-run.sh's own source, never copied here, so
+// deleting them there fails this test.
+describe('slot failure markers: an unavailable lane fails the run (finding 544)', () => {
+  const runnerSrc = readFileSync(resolve(ROOT, 'scripts/agent-slot-run.sh'), 'utf8');
+  const realBad = (runnerSrc.match(/^\s*'(HTTP Error 401\|[^']*)'\s*$/m) || [])[1];
+
+  it('agent-slot-run.sh still passes a failure-marker pattern to the epilogue', () => {
+    expect(realBad).toBeTruthy();
+  });
+
+  it('fails an rc=0 run whose log carries LANE UNAVAILABLE', () => {
+    writeFileSync(log, 'start\nLANE UNAVAILABLE: claude-in-chrome - tools not loaded\nfound 0, synced 0\n');
+    const r = runPostrun({ rc: 0, bad: realBad });
+    expect(r.status).toBe(1);
+    expect(r.stderr).toMatch(/LANE UNAVAILABLE/);
+  });
+
+  it('fails an rc=0 run carrying the exact 17 Sep prospecting wording', () => {
+    writeFileSync(log, 'start\nChrome sourcing: SKIPPED. The claude-in-chrome tools are not loaded in this session slot\n');
+    const r = runPostrun({ rc: 0, bad: realBad });
+    expect(r.status).toBe(1);
+  });
+
+  it('still passes an ordinary clean slot run', () => {
+    writeFileSync(log, 'start\nfound 12, deduped 3, synced 9\n');
+    const r = runPostrun({ rc: 0, bad: realBad });
+    expect(r.status).toBe(0);
+  });
+
+  it('the prospecting skill tells the slot to print the marker', () => {
+    const skill = readFileSync(resolve(ROOT, '.claude/scheduled-tasks/prospecting/SKILL.md'), 'utf8');
+    expect(skill).toMatch(/LANE UNAVAILABLE: claude-in-chrome/);
+  });
+});

@@ -829,6 +829,26 @@ def log_skipped_run(job, code, reason):
         pass
 
 
+class WaiterSignalled(Exception):
+    """The acquire() waiter was told to stop before it got the lock.
+
+    Finding 20260915-daily-ops-exceptions-532: on 14 Sep 2026 the task-manager
+    09:00 slot queued at 08:00:03Z behind knowledge-os-sort, and while it waited
+    its launchd plist was rewritten (09:00 -> 09:20 stagger, PR #405). The reload
+    killed the waiter. There was no `acquired`, no `queue-timeout`, no SKIPPED
+    line in runs.log and no job-status row: the `finally:` block unlinked the
+    ticket and the process died silently, so the slot simply vanished. Only
+    check-routines noticed it was missing, a day later.
+
+    A waiter that is stopped says so, in the same two places every other refusal
+    writes to: a queue event and a SKIPPED line in the job's runs.log.
+    """
+
+    def __init__(self, signum):
+        super().__init__("waiter stopped by signal %s" % signum)
+        self.signum = signum
+
+
 def acquire(job, mode="cooperative", lease_minutes=DEFAULT_LEASE_MIN,
             timeout_minutes=DEFAULT_TIMEOUT_MIN, check_stale=True, quiet=False,
             ready_wait_minutes=None):
@@ -891,6 +911,24 @@ def acquire(job, mode="cooperative", lease_minutes=DEFAULT_LEASE_MIN,
     started = now()
     deadline = started + timeout_minutes * 60
     announced = False
+
+    # Trap the catchable stops while we wait. TERM is what a launchctl reload
+    # sends; HUP is what a closing terminal sends. SIGKILL is untrappable by
+    # anything, here as everywhere. Handlers are restored before returning, so
+    # run()'s own passthrough handlers are untouched once the lock is ours.
+    _prev = {}
+    def _waiter_stop(signum, _frame):
+        raise WaiterSignalled(signum)
+    for _sig in (getattr(signal, "SIGTERM", None), getattr(signal, "SIGHUP", None)):
+        if _sig is None:
+            continue
+        try:
+            _prev[_sig] = signal.signal(_sig, _waiter_stop)
+        except (ValueError, OSError):
+            # Not the main thread, or the platform will not take it. The waiter
+            # still works; it just cannot report its own death.
+            pass
+
     try:
         while True:
             break_stale_lock()
@@ -969,7 +1007,25 @@ def acquire(job, mode="cooperative", lease_minutes=DEFAULT_LEASE_MIN,
                                     % (timeout_minutes, blocker))
 
             time.sleep(POLL_SECONDS)
+    except WaiterSignalled as stop:
+        try:
+            name = signal.Signals(stop.signum).name
+        except (ValueError, AttributeError):
+            name = "signal %s" % stop.signum
+        waited = round(now() - started, 1)
+        reason = ("waiter stopped by %s after %ss in the queue (a plist reload or "
+                  "a kill, not a timeout)" % (name, waited))
+        event(job, "waiter-stopped", signal=name, waited_seconds=waited)
+        log_skipped_run(job, EX_SKIPPED, reason)
+        if not quiet:
+            print("SKIPPED %s: %s" % (job, reason))
+        return note_refusal(job, EX_SKIPPED, reason)
     finally:
+        for _sig, _handler in _prev.items():
+            try:
+                signal.signal(_sig, _handler)
+            except (ValueError, OSError):
+                pass
         try:
             os.unlink(ticket_path)
         except OSError:

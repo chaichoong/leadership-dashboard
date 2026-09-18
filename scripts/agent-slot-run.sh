@@ -125,6 +125,14 @@ Rules for the whole run:
   reports in monitoring/ are fine.
 - A broken read is reported loudly, never treated as an empty result. If a
   query returns zero, say whether zero is the truth or the query is broken.
+- If a lane your work DEPENDS ON is unavailable — a tool that never loaded, a
+  sign-in you do not have, a source you cannot reach — print a line of its own:
+      LANE UNAVAILABLE: <lane> - <why>
+  and say what you could not do. The wrapper fails the run on that line. A slot
+  that cannot reach its only source is NOT a pass: finding
+  20260918-daily-ops-phase2-excepti-544, where the prospecting slot reported
+  'Chrome sourcing: SKIPPED ... tools are not loaded', found 0, synced 0, and
+  still exited 0, so nothing alarmed while 89 prospects waited.
 - Report honestly what you actually did. Halting early is reported as halting,
   never as clean.
 $EXTRA
@@ -142,7 +150,7 @@ RC=$?
 # (schema-YYYY-MM-DD.json), which false-positived on 25 and 26 Aug 2026.
 "$REPO/scripts/slot-postrun.sh" "$JOB slot" "$RC" "$LOG" "$__START_LINE" "$__MARKER" "$SCRATCH" \
   '"description" *:|"Inbound Message Content" *:|CREDITOR MATTER' \
-  'HTTP Error 401|401 Unauthorized|Unauthorized|OAuth access token has expired|BROKEN|VERIFY FAIL'
+  'HTTP Error 401|401 Unauthorized|Unauthorized|OAuth access token has expired|BROKEN|VERIFY FAIL|LANE UNAVAILABLE|tools are not loaded'
 __FINAL=$?
 __POSTRUN_DONE=1
 exit "$__FINAL"

@@ -2015,3 +2015,48 @@ print(json.dumps(m.break_stale_lock()))
     expect(JSON.parse(readFileSync(holderFile(), 'utf8')).job).toBe('long-render');
   });
 });
+
+// ---------------------------------------------------------------------------
+// A stopped waiter is not a vanished run.
+//
+// Finding 20260915-daily-ops-exceptions-532: on 14 Sep 2026 the task-manager
+// 09:00 slot queued at 08:00:03Z behind knowledge-os-sort and was still waiting
+// when its launchd plist was rewritten (09:00 -> 09:20 stagger, PR #405). The
+// reload killed the waiter mid-wait. There was no `acquired` event, no
+// `queue-timeout`, no SKIPPED line in runs.log and no job-status row — the
+// `finally:` block unlinked the ticket and the process died silently, so the
+// whole slot disappeared with no record anywhere. check-routines noticed the
+// gap a day later; nothing else did.
+describe('a waiter stopped mid-queue records itself (finding 20260915-daily-ops-exceptions-532)', () => {
+  it('writes a queue event and a SKIPPED line when the waiter is SIGTERMed', async () => {
+    const fakeHome = mkdtempSync(join(ROOT, 'home-'));
+    // Hold the lock so the second job can only queue.
+    expect(run(['acquire', 'forgiving-job', '--lease', '30']).code).toBe(0);
+
+    const { spawn } = await import('node:child_process');
+    const waiter = spawn('python3', [QUEUE, 'acquire', 'every-minute', '--timeout', '30'],
+      { env: { ...env(), HOME: fakeHome } });
+    const exited = new Promise((res) => waiter.on('exit', (code) => res(code)));
+
+    // Wait until it has actually joined the queue, then stop it the way a
+    // launchctl reload does.
+    const deadline = Date.now() + 20000;
+    while (Date.now() < deadline && !events().some((e) => e.state === 'queued' && e.job === 'every-minute')) {
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    expect(events().some((e) => e.state === 'queued' && e.job === 'every-minute')).toBe(true);
+    waiter.kill('SIGTERM');
+    await exited;
+
+    const stopped = events().filter((e) => e.state === 'waiter-stopped' && e.job === 'every-minute');
+    expect(stopped.length).toBe(1);
+    expect(stopped[0].signal).toBe('SIGTERM');
+
+    const runsLog = join(fakeHome, 'knowledge-os/logs/every-minute/runs.log');
+    expect(existsSync(runsLog)).toBe(true);
+    expect(readFileSync(runsLog, 'utf8')).toMatch(/SKIPPED.*waiter stopped by SIGTERM/);
+
+    // And the ticket is still cleaned up, as it always was.
+    expect(readdirSync(join(stateDir, 'tickets')).length).toBe(0);
+  });
+});

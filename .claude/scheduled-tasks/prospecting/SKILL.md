@@ -37,6 +37,25 @@ until tomorrow.
 - **The PECR entity gate is not optional.** 23 of the emailed prospects are not
   Limited Companies. Companies House gate first, email second.
 
+## Chrome sourcing is the ONLY source — say so when it is missing (18 Sep 2026)
+
+LinkedIn sourcing runs through `claude-in-chrome`. When those tools are not
+loaded in the slot there is no other lane, so the run has found nothing and
+must not look like a quiet zero. Print, as a line of its own:
+
+```
+LANE UNAVAILABLE: claude-in-chrome - Chrome sourcing tools not loaded in this slot
+```
+
+The wrapper fails the run on that line. Finding
+20260918-daily-ops-phase2-excepti-544: on 17 Sep the slot said 'Chrome
+sourcing: SKIPPED', found 0, synced 0, used 0 keywords and exited 0, so the
+job read as green while 89 prospects sat at Ready for Review. A zero reported
+with its control is fine; a zero reported as success is not.
+
+Follow-up work that needs no Chrome (dedupe, Companies House gate, GHL sync of
+already-Approved prospects) still runs — report it, and still print the line.
+
 ## The rules that do not move
 
 - Read-only with respect to code. Findings, never commits.
