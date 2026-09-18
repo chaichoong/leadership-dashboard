@@ -31,6 +31,7 @@ TASKS="$HOME/.claude/scheduled-tasks"
 MODE="${1:---dry-run}"
 
 # name|hour:minute[,hour:minute...]|command...
+#   or name|*:minute|command...   for an HOURLY job (every hour at that minute)
 # The hours match scripts/job-schedule.json. Any day-of-week decision lives in
 # the SKILL file, never here: `1-5` means Mon-Fri to a human and Sun-Thu to
 # Cloudflare, and that ambiguity cost this platform every Friday for a week.
@@ -43,6 +44,13 @@ JOBS=(
   # uc-check RETIRED 1 Sep 2026 by Kevin, Slack cleanup: whole UC process stopped.
   "prospecting|9:15|/bin/bash $SLOT prospecting $TASKS/prospecting/SKILL.md"
   "prod-sweep-weekly|11:00|/bin/bash $SLOT prod-sweep-weekly $TASKS/prod-sweep-weekly/SKILL.md"
+  # Hourly, and hourly on purpose: Utilita's login is a rolling ONE HOUR that
+  # only a visit renews, so the read is what holds the session open.
+  # utilita-balance.py sends at most one message a day plus one alarm per flat,
+  # so the other runs are pure keepalive. Recorded here because it was first
+  # installed by hand, and a job that exists only as a plist silently fails to
+  # come back the day these are rebuilt.
+  "utilita-balance|*:05|/bin/bash $REPO/scripts/utilita-balance-run.sh"
 )
 
 plist_for() {
@@ -51,8 +59,15 @@ plist_for() {
   local intervals=""
   local IFS=,
   for t in $times; do
-    intervals="$intervals		<dict><key>Hour</key><integer>${t%%:*}</integer><key>Minute</key><integer>$((10#${t##*:}))</integer></dict>
+    if [ "${t%%:*}" = "*" ]; then
+      # No Hour key means EVERY hour at that minute. launchd treats an omitted
+      # field as a wildcard, which is how an hourly job is expressed here.
+      intervals="$intervals		<dict><key>Minute</key><integer>$((10#${t##*:}))</integer></dict>
 "
+    else
+      intervals="$intervals		<dict><key>Hour</key><integer>${t%%:*}</integer><key>Minute</key><integer>$((10#${t##*:}))</integer></dict>
+"
+    fi
   done
   unset IFS
   local args=""
