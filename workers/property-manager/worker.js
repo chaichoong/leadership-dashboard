@@ -27,7 +27,7 @@
 // Bindings: LOGIN_LIMIT (ratelimit, optional) — 5 attempts per minute per IP.
 
 import { computeAll, shapeTasks, isRoyScope, isTaskOpen, appendNote, buildNameMap, statusForDue, dateKey, txWindowStart } from './compute.mjs';
-import { BASE, TABLES, F, NAMES, REC, REAL_ESTATE_NAME, ROY_STATUS_ALLOW, GP, GP_TABLES, GP_TICKS, GP_UPLIFT_VALUES, GP_ROW_STATUS, GP_ROW_FIELDS, GP_TASK_FIELDS, GP_LIVE_TENANCIES, GP_COST_FILTER, GP_PM_TENANT_OMIT } from './fields.mjs';
+import { BASE, TABLES, F, NAMES, REC, REAL_ESTATE_NAME, ROY_STATUS_ALLOW, GP, GP_TABLES, GP_TICKS, GP_UPLIFT_VALUES, GP_ROW_STATUS, GP_ROW_FIELDS, GP_TASK_FIELDS, GP_LIVE_TENANCIES, GP_COST_FILTER, GP_PM_TENANT_OMIT, GP_TENANT_FORM_FIELDS } from './fields.mjs';
 
 const VERSION = '1.0';
 const TOKEN_TTL_S = 12 * 60 * 60;
@@ -341,6 +341,16 @@ async function handleGrowthPlanWrite(request, env, origin, what, who) {
     console.log(JSON.stringify({ event: 'growth-tick', tenantId: id, field: body.field, who }));
     return json({ ok: true, records: [{ id, fields: { [fieldId]: value } }] }, 200, origin);
   }
+  if (what === 'tenant') {
+    const id = String(body.tenantId || '');
+    if (!/^rec[A-Za-z0-9]+$/.test(id)) return err('That is not a tenant', 400, origin);
+    const fields = {};
+    for (const [k, v] of Object.entries(body.fields || {})) if (GP_TENANT_FORM_FIELDS.includes(k)) fields[k] = v;
+    if (!Object.keys(fields).length) return err('Nothing on that form belongs to Roy', 400, origin);
+    await airtableRequest(env, TABLES.tenants, { method: 'PATCH', body: JSON.stringify({ records: [{ id, fields }], typecast: true }) });
+    console.log(JSON.stringify({ event: 'growth-tenant-form', tenantId: id, fields: Object.keys(fields).length, who }));
+    return json({ ok: true, records: [{ id, fields }] }, 200, origin);
+  }
   if (what === 'row') {
     const fields = {};
     for (const [k, v] of Object.entries(body.fields || {})) if (GP_ROW_FIELDS.includes(k)) fields[k] = v;
@@ -388,7 +398,7 @@ export default {
       if (path === '/data' && request.method === 'GET') return await handleData(request, env, ctx, origin);
       if (path === '/tasks' && request.method === 'GET') return json({ ok: true, who: session.who, tasks: await loadTasks(env) }, 200, origin);
       if (path === '/growth-plan' && request.method === 'GET') return json({ ok: true, who: session.who, generatedAt: new Date().toISOString(), ...(await loadGrowthPlan(env)) }, 200, origin);
-      const g = path.match(/^\/growth-plan\/(tick|row|task)$/);
+      const g = path.match(/^\/growth-plan\/(tick|tenant|row|task)$/);
       if (g && request.method === 'POST') return await handleGrowthPlanWrite(request, env, origin, g[1], session.who);
       const m = path.match(/^\/task\/(rec[A-Za-z0-9]+)$/);
       if (m && request.method === 'POST') return await handleTaskWrite(request, env, origin, m[1], session.who);

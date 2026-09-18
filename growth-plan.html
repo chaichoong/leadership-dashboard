@@ -310,7 +310,7 @@
     <div id="agentList"></div>
   </section>
 
-  <section class="card kevinonly" id="gp-form">
+  <section class="card" id="gp-form">
     <h2>Tenant meeting form</h2>
     <p class="hint">Fill this in with the tenant. Save writes every field to their record in Airtable, so the rent change and the council forms can be done from one place. Bank account numbers are not stored here.</p>
     <div class="filters"><label class="chk">Tenant <select class="sm" id="formTenant" style="max-width:320px"><option value="">Choose a tenant…</option></select></label></div>
@@ -344,7 +344,7 @@
       </fieldset>
       <div class="row-actions"><button type="submit" class="btn btn-primary" id="meetingSave">Save to the tenant's record</button><span class="small muted" id="meetingStatus"></span></div>
     </form>
-    <div id="docsBox" hidden>
+    <div id="docsBox" class="kevinonly" hidden>
       <h4 class="small muted" style="margin-top:var(--space-4)">Scanned documents on this tenant's record</h4>
       <p class="hint">Photo ID, bank statements, UC statement screen grabs, signed pages. Up to 3.7MB each.</p>
       <div class="row-actions">
@@ -606,6 +606,9 @@
       if (Object.keys(fields).length === 1 && ['correctAgreement', 'proofOfAddress', 'authoritySigned', 'rentUplift'].includes(name)) {
         return pmApi('/growth-plan/tick', { method: 'POST', body: JSON.stringify({ tenantId: recs[0].id, field: name, value }) });
       }
+    }
+    if (tableId === TABLES.tenants && method === 'PATCH' && recs.length === 1) {
+      return pmApi('/growth-plan/tenant', { method: 'POST', body: JSON.stringify({ tenantId: recs[0].id, fields: recs[0].fields || {} }) });
     }
     if (tableId === TABLES.growthPlan) {
       return pmApi('/growth-plan/row', { method: 'POST', body: JSON.stringify({ id: recs[0] && recs[0].id, fields: (recs[0] && recs[0].fields) || {} }) });
@@ -1031,9 +1034,9 @@ BEFORE THE FIRST ONE IS SIGNED (all in writing)
         const miss = missingFor(t);
         return `<li>${esc(t.name)} <span class="muted small">${t.age != null ? 'age ' + t.age : (t.over35Confirmed ? '35 or over' : 'age not known')}${t.rent ? ' · ' + gbp(t.rent, 2) : ''}${t.uc ? ' · Universal Credit' : ''}</span>
         ${t.note ? `<div class="small note">${esc(t.note)}</div>` : ''}
-        ${ageUnknown && !PM ? `<div class="pt-fix"><span class="inl">Date of birth: <input class="sm" type="date" data-dob="${esc(t.id)}" aria-label="Date of birth for ${esc(t.name)}"><button class="btn btn-sm" data-act="save-dob" data-tenant="${esc(t.id)}">Save</button></span> <span class="muted">or</span> <button class="btn btn-sm" data-act="confirm-35" data-tenant="${esc(t.id)}">Confirm 35 or over</button></div>` : ''}
+        ${ageUnknown ? `<div class="pt-fix"><span class="inl">Date of birth: <input class="sm" type="date" data-dob="${esc(t.id)}" aria-label="Date of birth for ${esc(t.name)}"><button class="btn btn-sm" data-act="save-dob" data-tenant="${esc(t.id)}">Save</button></span> <span class="muted">or</span> <button class="btn btn-sm" data-act="confirm-35" data-tenant="${esc(t.id)}">Confirm 35 or over</button></div>` : ''}
         ${miss.length ? `<div class="small muted">Still to collect: ${esc(miss.join(', '))}</div>` : '<div class="small muted">All their details are on file</div>'}
-        ${PM ? '' : `<div class="row-actions"><button class="btn btn-sm" data-act="open-form" data-tenant="${esc(t.id)}">Tenant data capture form</button></div>`}</li>`;
+        <div class="row-actions"><button class="btn btn-sm" data-act="open-form" data-tenant="${esc(t.id)}">Tenant data capture form</button></div></li>`;
     }).join('');
     const extra = v.unitsExtra > 0
       ? `<li class="note">${v.unitsExtra} more place${v.unitsExtra === 1 ? '' : 's'} to fill once the work is done. ${v.unitsExtra === 1 ? 'It is' : 'They are'} not in the database yet: we add ${v.unitsExtra === 1 ? 'it' : 'them'} the day a tenant signs.</li>`

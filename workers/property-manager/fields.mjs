@@ -188,9 +188,19 @@ export const GP_TICKS = {
   rentUplift:       GP.tenant.rentUplift,
 };
 export const GP_UPLIFT_VALUES = ['To do', 'Done', 'Not needed'];
-// The tenant fields Roy's tab never shows (they belong to the meeting form, which is
-// Kevin's). Left out of his read so they never reach his browser at all.
-export const GP_PM_TENANT_OMIT = [GP.tenant.weeklyIncome, GP.tenant.weeklySpending, GP.tenant.bankStatements, GP.tenant.ctAccount, GP.tenant.meetingNotes, GP.tenant.documents];
+// Attachments are the one tenant field Roy's tab does not carry: uploading a file needs
+// its own route through the Worker, so scans stay with Kevin for now (18 Sep 2026).
+export const GP_PM_TENANT_OMIT = [GP.tenant.documents];
+
+// The tenant data capture form (Kevin, 18 Sep 2026): Roy fills in what he collects at the
+// meeting, field by field. Anything not on this list never reaches Airtable from his page.
+export const GP_TENANT_FORM_FIELDS = [
+  GP.tenant.dob, GP.tenant.ni, GP.tenant.phone, GP.tenant.email, GP.tenant.idSeen, GP.tenant.over35,
+  GP.tenant.ucPayDay, GP.tenant.dueDay, GP.tenant.household, GP.tenant.capExemption, GP.tenant.ucStatementSeen,
+  GP.tenant.otherAdults, GP.tenant.ctAccount, GP.tenant.weeklyIncome, GP.tenant.weeklySpending,
+  GP.tenant.bankStatements, GP.tenant.authoritySigned, GP.tenant.meetingDate, GP.tenant.meetingNotes,
+  GP.tenant.notes,   // the dated line the page stamps when a date of birth is entered
+];
 export const GP_ROW_STATUS = ['Candidate', 'Adopted', 'In progress', 'Done', 'Dropped'];
 export const GP_ROW_FIELDS = Object.values(GP.plan);
 export const GP_TASK_FIELDS = [F.taskName, F.taskStatus, F.taskDescription, F.taskDueDate, F.taskPriority, F.taskAssignee, F.taskTeamMember];
