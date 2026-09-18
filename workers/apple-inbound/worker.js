@@ -109,6 +109,21 @@ export default {
         return json({ error: 'Test failed', detail: String(err), stack: err.stack }, 500);
       }
     }
+    // Slack relay for scheduled jobs on Kevin's Mac (18 Sep 2026).
+    //
+    // WHY IT LIVES HERE: nothing on that Mac could send a Slack message. Every
+    // Slack path in the estate is a Worker holding SLACK_BOT_TOKEN, and a local
+    // cron has no route to one. This worker already holds that token and is
+    // already the bridge for Kevin's phone, so a relay belongs here rather than
+    // in a new deployable needing its own copy of the token.
+    //
+    // It carries its OWN key, checked before the bearer gate below, so a job can
+    // post without holding the token that can create tasks. And RELAY_ALLOWLIST
+    // is the real guard: a leaked key can only ever DM these two people, never
+    // the workspace. Widening it is a code change and a deploy, on purpose.
+    if (request.method === 'POST' && url.pathname === '/slack-relay') {
+      return await handleSlackRelay(request, env);
+    }
     if (request.method !== 'POST') {
       return json({ error: 'Method not allowed' }, 405);
     }
@@ -607,6 +622,60 @@ async function lookupSlackUser(env, email) {
   if (!res.ok) return null;
   const data = await res.json();
   return data.ok ? data.user.id : null;
+}
+
+// Who the relay may ever DM. NOT a parameter: the point of an allowlist is that
+// the caller cannot widen it, so a leaked relay key cannot reach the workspace.
+const RELAY_ALLOWLIST = ['kevin@runpreneur.org.uk', 'roy.lavin1978@gmail.com'];
+
+// Relay for scheduled jobs on Kevin's Mac. See the route comment in fetch().
+//
+// Reports per recipient rather than one overall "ok". A DM that silently failed
+// for one of two people is the failure mode that matters here: Roy is the one
+// who tops the meters up, and a message only Kevin received looks like a
+// working watcher right up to the outage.
+async function handleSlackRelay(request, env) {
+  const key = request.headers.get('X-Relay-Key') || '';
+  if (!env.SLACK_RELAY_KEY || key !== env.SLACK_RELAY_KEY) {
+    return json({ error: 'Unauthorized' }, 401);
+  }
+  let body;
+  try {
+    body = await request.json();
+  } catch {
+    return json({ error: 'Body must be JSON' }, 400);
+  }
+  const text = String(body.text || '').trim();
+  if (!text) return json({ error: 'text is required' }, 400);
+
+  const asked = Array.isArray(body.recipients) ? body.recipients : [];
+  const allowed = asked.filter(e => RELAY_ALLOWLIST.includes(String(e).toLowerCase()));
+  const refused = asked.filter(e => !RELAY_ALLOWLIST.includes(String(e).toLowerCase()));
+  if (!allowed.length) {
+    return json({ error: 'No allowlisted recipients', refused }, 400);
+  }
+
+  const sent = [];
+  for (const email of allowed) {
+    try {
+      const slackId = await lookupSlackUser(env, email);
+      if (!slackId) { sent.push({ email, ok: false, error: 'no Slack user for that email' }); continue; }
+      const res = await fetch(SLACK_POST_URL, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${env.SLACK_BOT_TOKEN}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ channel: slackId, text, mrkdwn: true }),
+      });
+      const data = await res.json();
+      sent.push({ email, ok: !!data.ok, ts: data.ts || null, error: data.ok ? null : data.error });
+    } catch (err) {
+      sent.push({ email, ok: false, error: String(err) });
+    }
+  }
+  const allOk = sent.every(s => s.ok);
+  return json({ ok: allOk, sent, refused }, allOk ? 200 : 502);
 }
 
 // ─── R2 / Utilities ─────────────────────────────────────────────────
