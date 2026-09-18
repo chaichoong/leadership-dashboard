@@ -628,6 +628,15 @@ async function lookupSlackUser(env, email) {
 // the caller cannot widen it, so a leaked relay key cannot reach the workspace.
 const RELAY_ALLOWLIST = ['kevin@runpreneur.org.uk', 'roy.lavin1978@gmail.com'];
 
+// The allowlist bounds WHO, not WHAT. `text` is arbitrary and arrives as the OD
+// bot, which Roy trusts, so a leaked relay key is a phishing channel into the
+// head of the property business ("Kevin says pay this account") long before it
+// is a nuisance. These caps do not fix that — only the key staying secret does
+// — but they stop one authenticated request becoming a thousand DMs, and stop
+// a wall of text arriving as a trusted message.
+const RELAY_MAX_TEXT = 4000;
+const RELAY_MAX_RECIPIENTS = 4;
+
 // Relay for scheduled jobs on Kevin's Mac. See the route comment in fetch().
 //
 // Reports per recipient rather than one overall "ok". A DM that silently failed
@@ -647,10 +656,24 @@ async function handleSlackRelay(request, env) {
   }
   const text = String(body.text || '').trim();
   if (!text) return json({ error: 'text is required' }, 400);
+  if (text.length > RELAY_MAX_TEXT) {
+    return json({ error: `text is longer than ${RELAY_MAX_TEXT} characters` }, 413);
+  }
 
   const asked = Array.isArray(body.recipients) ? body.recipients : [];
-  const allowed = asked.filter(e => RELAY_ALLOWLIST.includes(String(e).toLowerCase()));
-  const refused = asked.filter(e => !RELAY_ALLOWLIST.includes(String(e).toLowerCase()));
+  if (asked.length > RELAY_MAX_RECIPIENTS) {
+    return json({ error: `at most ${RELAY_MAX_RECIPIENTS} recipients per call` }, 400);
+  }
+  // De-duplicated: the allowlist stops a caller reaching a stranger, but the
+  // same allowlisted address repeated 1,000 times was still 1,000 DMs.
+  const seen = new Set();
+  const norm = asked.map(e => String(e).toLowerCase()).filter(e => {
+    if (seen.has(e)) return false;
+    seen.add(e);
+    return true;
+  });
+  const allowed = norm.filter(e => RELAY_ALLOWLIST.includes(e));
+  const refused = norm.filter(e => !RELAY_ALLOWLIST.includes(e));
   if (!allowed.length) {
     return json({ error: 'No allowlisted recipients', refused }, 400);
   }

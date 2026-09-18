@@ -544,6 +544,7 @@
   ],
   "retryWhenDeferred": false,
   "retryWhenDeferredNote": "Hourly. A deferred tick is picked up by the next one within the hour, so a retry would only duplicate the read. The daily message is gated by send_decision, not by any single tick.",
-  "note": "Hourly on purpose: Utilita's login is a rolling ONE HOUR that every visit restarts, so the read is what holds the session open. utilita-balance.py sends at most one Slack message a day (send_decision), so the other runs are pure keepalive. maxLateMinutes is under an hour so a skipped tick is picked up by the next one rather than piling up."
+  "note": "Hourly on purpose: Utilita's login is a rolling ONE HOUR that every visit restarts, so the read is what holds the session open. utilita-balance.py sends at most one Slack message a day plus one alarm (send_decision), so the other runs are pure keepalive. LOCK-EXEMPT for the same reason as estate-status: it reads a web page and posts to Slack, never the repo, Airtable or the queue, and queueing it behind a four-hour content render would let the session lapse and turn every morning into SIGN-IN NEEDED.",
+  "lockExempt": true
  }
 }

@@ -1810,7 +1810,13 @@ describe('lock-exempt read-only checks', () => {
     // a status mirror that waits behind a four-hour render defeats its purpose.
     // job-digest (14 Sep 2026) reads the logs and posts a digest; it reports ON the queue, so it must never wait behind it.
     // handback-poll (14 Sep 2026): Airtable and the gate only; its own inflight check stops a double carry-out.
-    expect(exempt.sort()).toEqual(['data-invariants', 'drift-scan', 'drive-auth', 'estate-drift', 'estate-status', 'handback-poll', 'job-digest']);
+    // utilita-balance (18 Sep 2026) reads two web pages and posts one Slack
+    // message; it writes only its own log and daily mark, which nothing else
+    // reads. It MUST be exempt because Utilita's login is a rolling hour that
+    // only a visit renews: one night behind a four-hour render and the session
+    // lapses, so every morning becomes SIGN-IN NEEDED and the watcher is worse
+    // than useless.
+    expect(exempt.sort()).toEqual(['data-invariants', 'drift-scan', 'drive-auth', 'estate-drift', 'estate-status', 'handback-poll', 'job-digest', 'utilita-balance']);
     // content-engine must never be exempt: it renders and writes.
     expect(real['content-engine'].lockExempt).toBeUndefined();
   });
