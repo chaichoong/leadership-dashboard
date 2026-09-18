@@ -759,7 +759,7 @@
         // Also highlight old tab buttons (if visible)
         document.querySelectorAll('.tab-btn').forEach(b => {
             if ((tabId === 'overview' && b.textContent.includes('Leadership')) ||
-                (tabId === 'invoices' && b.textContent.includes('Accounts Payable')) ||
+                (tabId === 'invoices' && b.textContent.includes('Payment Run')) ||
                 (tabId === 'cfv' && b.textContent.includes('Cash Flow Voids'))) {
                 b.classList.add('active');
             }

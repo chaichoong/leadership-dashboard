@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Accounts Payable Variable &mdash; Standard Operating Procedure</title>
+<title>Payment Run &mdash; Standard Operating Procedure</title>
 <link rel="stylesheet" href="css/tokens.css?v=1">
 <style>
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -102,7 +102,7 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
 <div class="header">
   <div class="header-inner">
     <a href="index.html#sitemap" class="header-back">&#x2190; Back to Site Map</a>
-    <h1>&#x1F9FE; Accounts Payable Variable</h1>
+    <h1>&#x1F9FE; Payment Run</h1>
     <div class="subtitle">Standard Operating Procedure &mdash; Invoice ingestion, AI matching, approval workflow, and payment tracking</div>
     <div class="version">Version 2.19 &bull; 14 Aug 2026 &bull; Owner: Kevin Brittain</div>
   </div>
@@ -175,32 +175,35 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
   <div class="section" id="overview">
     <h2 class="section-title"><span class="icon">&#128202;</span> 1. Overview &amp; Purpose</h2>
     <div class="card">
-      <p>The Accounts Payable Variable is the single place to see, manage, and pay all outstanding supplier invoices. It sits inside the Leadership Dashboard and connects three systems: <strong>Gmail</strong> (where invoices arrive), <strong>Airtable</strong> (the source of truth for all invoice data), and the <strong>Airtable Transactions table</strong> (bank transactions used for AI-assisted payment matching).</p>
-      <p>The main goals of the module are:</p>
+      <p>The Payment Run is the one place Kevin looks before he pays suppliers on a Friday evening. It answers four questions and nothing else: <strong>what needs paying, to whom, how much, and what reference to use</strong>.</p>
+      <p>Every Friday at 9pm a scheduled job reads both of Kevin's mailboxes, finds the emails asking for money, opens the PDF invoices, checks each one against the bank transactions, and writes the result here. Kevin does not label anything, forward anything, or trigger anything.</p>
       <ul>
-        <li>Give a live view of every invoice that still needs paying, sourced from Gmail label <strong>"3. to pay"</strong></li>
-        <li>Allow inline editing of missing fields (amount, payee, description, reference) that save directly to Airtable</li>
-        <li>Surface AI-generated match suggestions when a bank transaction matches an invoice &mdash; allowing one-click reconciliation</li>
-        <li>Mark invoices as paid in one click, which simultaneously updates Airtable, moves the Gmail label, and links the matched bank transaction</li>
+        <li><strong>This week</strong> &mdash; everything that arrived since last Friday 9pm.</li>
+        <li><strong>Still owed</strong> &mdash; anything from an earlier week that has still not been paid. It carries forward automatically until a bank payment matches it.</li>
+        <li>Old creditor debt (Utilita, Anglian Water, HMRC, council tax arrears) is <strong>not</strong> on this list. It is marked <code>Historic</code> and handled by the Creditor Management agent under the standing creditor script.</li>
       </ul>
+      <div class="info-box warning">
+        <span class="ib-icon">&#9888;&#65039;</span>
+        <span><strong>Why this was rebuilt (18 Sep 2026).</strong> The old version depended on Kevin hand-labelling invoice emails <code>3: to pay</code>. He stopped, so the feed stopped: the label held <strong>zero</strong> messages and the newest row sat at <strong>10 July 2026 for seventy days</strong>. No error was ever raised, because a sync with nothing to do looks exactly like a sync that is broken. It also wrote every invoice twice (50 of 144 Gmail messages were duplicated) and never opened an attachment, so 14 of 49 payables had no amount at all.</span>
+      </div>
       <div class="info-box info">
         <span class="ib-icon">&#8505;&#65039;</span>
-        <span><strong>Airtable is the source of truth.</strong> Nothing is stored in browser localStorage for invoice data. All edits, match decisions, and payment records are written directly to Airtable and persist across browsers and devices. The only localStorage key used is <code>lastSeenInvoiceTime</code>, which controls the "NEW" badge on the AP Variable subtab &mdash; this is purely cosmetic.</span>
+        <span><strong>The staleness check is the safeguard.</strong> Every row carries a <code>Run Date</code>. If the newest one is more than 8 days old, the sync bar turns red and the page says the weekly scan has stopped. That is the check the old tab did not have, and its absence is why nobody noticed for seventy days.</span>
       </div>
     </div>
 
     <div class="card">
       <div class="card-header">End-to-End Data Flow</div>
       <div class="flow">
-        <div class="flow-step primary"><span class="flow-icon">&#128231;</span>Gmail<span class="flow-sub">"3. to pay" label</span></div>
+        <div class="flow-step primary"><span class="flow-icon">&#128231;</span>Two mailboxes<span class="flow-sub">kevin@ + info@agilelets</span></div>
         <div class="flow-arrow">&#10132;</div>
-        <div class="flow-step warning"><span class="flow-icon">&#9881;</span>Apps Script<span class="flow-sub">15-min sync</span></div>
+        <div class="flow-step warning"><span class="flow-icon">&#9881;</span>Friday 9pm scan<span class="flow-sub">reads PDFs too</span></div>
+        <div class="flow-arrow">&#10132;</div>
+        <div class="flow-step purple"><span class="flow-icon">&#129302;</span>Already paid?<span class="flow-sub">checked vs bank</span></div>
         <div class="flow-arrow">&#10132;</div>
         <div class="flow-step"><span class="flow-icon">&#128451;</span>Airtable<span class="flow-sub">Source of truth</span></div>
         <div class="flow-arrow">&#10132;</div>
-        <div class="flow-step success"><span class="flow-icon">&#128203;</span>Dashboard<span class="flow-sub">View, edit &amp; pay</span></div>
-        <div class="flow-arrow">&#10132;</div>
-        <div class="flow-step purple"><span class="flow-icon">&#129302;</span>AI Matching<span class="flow-sub">Bank transaction link</span></div>
+        <div class="flow-step success"><span class="flow-icon">&#128203;</span>Payment Run<span class="flow-sub">pay the list</span></div>
       </div>
     </div>
   </div>
@@ -546,61 +549,27 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
     </div>
   </div>
 
-  <!-- 6. Reconcile with Gmail -->
+  <!-- 6. The weekly Friday run -->
   <div class="section" id="reconcile">
-    <h2 class="section-title"><span class="icon">&#128260;</span> 6. Reconcile with Gmail</h2>
+    <h2 class="section-title"><span class="icon">&#128260;</span> 6. The weekly Friday run</h2>
 
     <div class="card">
-      <p>"Reconcile with Gmail" treats the <strong>Gmail label as the truth</strong> and rewrites Airtable to agree with it. That is the whole idea, and it is also why it needs care: if the Gmail label is wrong, reconcile makes Airtable wrong to match.</p>
+      <p>The list is built by a scheduled job, not by anything on this page. It runs <strong>every Friday at 9pm</strong> (<code>com.kevinbrittain.payment-run</code>), and Kevin does nothing to start it.</p>
+      <p>What it does, in order:</p>
+      <ol>
+        <li><strong>Reads both mailboxes</strong> &mdash; <code>kevin@runpreneur.org.uk</code> and <code>info@agilelets.co.uk</code>. The second one carries the property supplier invoices (Sam Eason, P&amp;P Property Maintenance, Serco) and the old feed never looked at it at all.</li>
+        <li><strong>Narrows to candidates.</strong> An unfiltered week is 400+ emails; the scan cuts that to about 80 and drops nothing that carries a money signal. A message is only ever dropped for having <em>no</em> amount, <em>no</em> payment wording and <em>no</em> document attached &mdash; never for looking like marketing.</li>
+        <li><strong>Opens the PDFs.</strong> The commonest real invoice here is a PDF with an empty covering email, so the amount, the reference and the bank details only exist inside the attachment.</li>
+        <li><strong>Checks it is not already paid.</strong> Every open row is compared with the bank transactions. A match needs the amount to the penny, a payment dated on or after the invoice, <em>and</em> the payee name to appear in the bank memo. Amount and date alone are not enough to hide a bill.</li>
+        <li><strong>Writes the result,</strong> keyed on the Gmail message id, so re-running never creates a second row.</li>
+      </ol>
       <div class="info-box warn">
         <span class="ib-icon">&#9888;&#65039;</span>
-        <span><strong>It moves invoices in BOTH directions, and it can touch every invoice in one click.</strong> An invoice you marked Paid goes back to <strong>Unpaid</strong> with its Paid Date wiped if its email is still in "3: to pay". An invoice sitting as Unpaid is set to <strong>Paid</strong>, with today's date as the Paid Date, if its email is no longer in that label. Nothing asks you to confirm each record. There is no undo button.</span>
-      </div>
-      <p>Before you click it, a confirm box lists what is about to happen. Click Cancel if you are not sure. When the run finishes an alert shows five numbers: how many "3: to pay" emails were read, how many invoices were checked in Airtable, how many were marked Paid, how many were restored to Unpaid, and how many were skipped (Estimates and the like). The table then reloads from Airtable.</p>
-    </div>
-
-    <div class="card">
-      <div class="card-header">Exactly what it writes</div>
-      <table class="label-table">
-        <thead><tr><th>Email in "3: to pay"?</th><th>Status in Airtable</th><th>What reconcile does</th></tr></thead>
-        <tbody>
-          <tr><td>Yes</td><td>Anything other than Unpaid, including Paid</td><td>Sets Status to <strong>Unpaid</strong> and clears the Paid Date. The invoice reappears in the table.</td></tr>
-          <tr><td>No</td><td>Unpaid</td><td>Sets Status to <strong>Paid</strong> and sets the Paid Date to today. The invoice drops out of the table.</td></tr>
-          <tr><td>Either</td><td>Estimate</td><td>Skipped and left alone.</td></tr>
-          <tr><td>Either</td><td>Any record with no Gmail Thread ID</td><td>Skipped and left alone.</td></tr>
-          <tr><td>Yes</td><td>Already Unpaid</td><td>Nothing. It is already correct.</td></tr>
-          <tr><td>No</td><td>Already Paid</td><td>Nothing. It is already correct.</td></tr>
-        </tbody>
-      </table>
-      <div class="info-box info">
-        <span class="ib-icon">&#8505;&#65039;</span>
-        <span>Reconcile never writes to the Matched Transaction field and never moves a Gmail label. It only changes the invoice Status and the Paid Date. A payment you approved from an AI match keeps its transaction link even if reconcile pushes it back to Unpaid.</span>
-      </div>
-    </div>
-
-    <div class="card">
-      <div class="card-header">When to use it, and when not to</div>
-      <div class="grid-2">
-        <div style="background:var(--bg-surface-2);border-radius:var(--radius-lg);padding:1rem;border-left:4px solid var(--success)">
-          <strong>Use Reconcile when</strong>
-          <ul style="font-size:0.85rem;color:var(--text-secondary);margin-top:0.4rem">
-            <li>The sync health text has said <strong>Mismatch</strong> for a while and "Refresh from Gmail" has not cleared it.</li>
-            <li>You paid several invoices straight from Gmail, moved the emails to "4: paid" yourself, and the dashboard still lists them.</li>
-            <li>An invoice was marked Paid by mistake and you have already put its email back in "3: to pay".</li>
-          </ul>
-        </div>
-        <div style="background:var(--bg-surface-2);border-radius:var(--radius-lg);padding:1rem;border-left:4px solid var(--danger)">
-          <strong>Do NOT use Reconcile when</strong>
-          <ul style="font-size:0.85rem;color:var(--text-secondary);margin-top:0.4rem">
-            <li>You only want new invoices pulled in. Use "Refresh from Gmail" instead.</li>
-            <li>You have just clicked Mark Paid. Give the Gmail label move about 5 seconds first, or reconcile may read the old label and pull the invoice back to Unpaid.</li>
-            <li>Your Gmail labels are known to be untidy. Sort the labels first, because reconcile copies whatever they say.</li>
-          </ul>
-        </div>
+        <span><strong>Bank details that have changed are flagged in red.</strong> Supplier payment-redirection fraud looks exactly like an ordinary invoice. If a payee has been paid before on a different sort code, the row says so and asks Kevin to confirm by phone before paying. Never pay through that warning.</span>
       </div>
       <div class="info-box info">
         <span class="ib-icon">&#8505;&#65039;</span>
-        <span><strong>How many emails it reads.</strong> Reconcile reads <strong>every</strong> email in the "3: to pay" label, asking Gmail for them 100 at a time until it has them all. There is one ceiling: <strong>10,000</strong> emails. If the label ever holds more than that, reconcile stops and writes nothing, and you get an error saying it refused to run from a part-read label. That is deliberate. A half-read label would mark every email it missed as Paid, and a wrong Paid Date is far harder to spot than a run that failed. It is still worth checking the "emails read" number in the result against what Gmail shows on the label.</span>
+        <span><strong>The Refresh button re-reads Airtable only.</strong> It does not go to Gmail. The scan is a weekly job, and a button that pretended to run it is exactly how the old tab looked healthy while its feed was dead.</span>
       </div>
     </div>
   </div>
@@ -807,12 +776,16 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
           <tr><td><code>INV.hasAttachment</code></td><td><code>fldt8sjSwrfzcfwwJ</code></td><td>Has Attachment?</td><td>Checkbox &mdash; set by Apps Script if email had attachment</td></tr>
           <tr><td><code>INV.hasPdf</code></td><td><code>fldSJg8aLjPlD75rz</code></td><td>Has PDF?</td><td>Checkbox &mdash; set by Apps Script if attachment was a PDF</td></tr>
           <tr><td><code>INV.gmailUrl</code></td><td><code>fldeFqA4TVNzDEMCh</code></td><td>Gmail URL</td><td>URL &mdash; direct link to open email; falls back to thread-based URL</td></tr>
-          <tr><td><code>INV.status</code></td><td><code>fldJ5InUPlY4t7MgP</code></td><td>Status</td><td>Single select &mdash; "Unpaid" or "Paid"; filtered on fetch</td></tr>
+          <tr><td><code>INV.status</code></td><td><code>fldJ5InUPlY4t7MgP</code></td><td>Status</td><td>Single select &mdash; Unpaid, Paid, Estimate, or Historic (old creditor debt, off this list and in the creditor agent's lane); the tab fetches Unpaid only</td></tr>
           <tr><td><code>INV.paidDate</code></td><td><code>fld9GqL9RlLWPAymx</code></td><td>Paid Date</td><td>Date &mdash; set to today (YYYY-MM-DD) when marked paid</td></tr>
           <tr><td><code>INV.matchRejected</code></td><td><code>fldSn94PRMyScVZA7</code></td><td>Match Rejected</td><td>Checkbox &mdash; true = suppress AI suggestion for this invoice</td></tr>
           <tr><td><code>INV.isEstimate</code></td><td><code>fld4DNJoLG76I4xvz</code></td><td>Is Estimate?</td><td>Checkbox &mdash; shows "Estimate" badge instead of date-based badge</td></tr>
           <tr><td><code>INV.notes</code></td><td><code>fldV2xsw9en67ts0o</code></td><td>Notes</td><td>Long text &mdash; free-form notes (not currently displayed in dashboard)</td></tr>
           <tr><td><code>INV.matchedTx</code></td><td><code>fldpHf5vYCIgj3Scz</code></td><td>Matched Transaction</td><td>Linked record &mdash; link to the matching Transactions record; set on approve</td></tr>
+          <tr><td><code>INV.payToDetails</code></td><td><code>fldLUPVZHAEbsNJb1</code></td><td>Pay To Details</td><td>Long text &mdash; sort code, account number and account name, read off the invoice or its PDF by the Friday scan. Shown in the <strong>Pay to</strong> column</td></tr>
+          <tr><td><code>INV.runDate</code></td><td><code>fldwtlpZOL9oa7OZo</code></td><td>Run Date</td><td>Date &mdash; the Friday run that last confirmed this row. The NEWEST value across the table is the liveness signal: older than 8 days and the sync bar goes red</td></tr>
+          <tr><td><code>INV.bankChanged</code></td><td><code>fldom7XtxiN9ojCKi</code></td><td>Bank Details Changed</td><td>Checkbox &mdash; set when a payee's details differ from the last payment. Confirm by phone before paying</td></tr>
+          <tr><td><code>INV.source</code></td><td><code>fldQeBwA2nnepf9wv</code></td><td>Source</td><td>Single select &mdash; Email (weekly scan), Creditor Agent (approved MARK FOR PAYMENT), Legacy Sync (retired Apps Script feed)</td></tr>
         </tbody>
       </table>
     </div>
@@ -945,6 +918,13 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
           <tr><th>Version</th><th>Date</th><th>Changes</th></tr>
         </thead>
         <tbody>
+          <tr>
+            <td><strong>3.00</strong></td>
+            <td>18 Sep 2026</td>
+            <td>
+              <strong>Rebuilt as the Payment Run.</strong> The old feed depended on Kevin hand-labelling emails <code>3: to pay</code>; he stopped, the label emptied, and the list sat seventy days stale with every health check passing. Now a scheduled job (Friday 9pm) finds the invoices itself across <strong>both</strong> mailboxes, reads PDF attachments for the amount, reference and bank details, and excludes anything the bank says is already paid. Added: <strong>This week</strong> and <strong>Still owed</strong> sections; a <strong>Pay to</strong> column carrying the sort code and account number; a <strong>Bank Details Changed</strong> warning for payment-redirection fraud; a <strong>staleness check</strong> that turns the bar red when no run has completed for 8 days; a no-duplicates check. Removed: the Gmail-label count comparison (it would read Mismatch for ever) and section 6's "Reconcile with Gmail", which reconciled against an empty label. Data cleanse the same day: 50 duplicate rows deleted, 4 rows marked paid against real bank payments, 37 old creditor matters moved to <code>Historic</code> for the Creditor Management agent, and 9 genuine supplier invoices kept on the list.
+            </td>
+          </tr>
           <tr>
             <td><strong>2.19</strong></td>
             <td>14 Aug 2026</td>

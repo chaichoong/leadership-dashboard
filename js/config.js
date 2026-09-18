@@ -28,7 +28,7 @@
         { id: 'income',     name: 'Accounts Receivable Fixed',     icon: '💷', pageVer: '1.5', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#income' },
         { id: 'ar-variable', name: 'Accounts Receivable Variable', icon: '📤', pageVer: '1.4', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#ar-variable' },
         { id: 'costs',      name: 'Accounts Payable Fixed',        icon: '📋', pageVer: '1.11', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#costs' },
-        { id: 'invoices',   name: 'Accounts Payable Variable',     icon: '🧾', pageVer: '2.23', sopFile: 'sop-invoices.html',           sopVer: '2.19', standalone: 'index.html#invoices' },
+        { id: 'invoices',   name: 'Payment Run',                   icon: '🧾', pageVer: '3.1', sopFile: 'sop-invoices.html',           sopVer: '3.00', standalone: 'index.html#invoices' },
         { id: 'pnl',        name: 'Profit & Loss',                 icon: '💰', pageVer: '2.32', sopFile: 'sop-pnl.html',               sopVer: '2.26', standalone: 'index.html#pnl' },
         { id: 'transactions', name: 'Transactions',                icon: '🔍', pageVer: '1.1', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#transactions' },
         { id: 'coa',        name: 'Chart of Accounts',             icon: '📒', pageVer: '1.3', sopFile: 'sop-coa.html',                sopVer: '1.1', standalone: 'index.html#coa' },
@@ -483,7 +483,23 @@
         notes:         'fldV2xsw9en67ts0o',
         matchedTx:     'fldpHf5vYCIgj3Scz',
         business:      'fldzGhwp6rxwEFoxu',  // Linked → Businesses (multipleRecordLinks)
+        // ── Payment Run fields (18 Sep 2026) ────────────────────────────────
+        // Written by scripts/payment-run.py on the Friday 21:00 run. The tab
+        // reads them; nothing in the browser writes them.
+        payToDetails:  'fldLUPVZHAEbsNJb1',  // Bank details read off the invoice or its PDF
+        runDate:       'fldwtlpZOL9oa7OZo',  // The Friday run that last confirmed this row.
+                                             // MAX(Run Date) is the staleness check: the old
+                                             // feed sat dead for 70 days because nothing
+                                             // measured when it last worked.
+        bankChanged:   'fldom7XtxiN9ojCKi',  // This payee was paid before on DIFFERENT details
+        source:        'fldQeBwA2nnepf9wv',  // Email | Creditor Agent | Legacy Sync
     };
+
+    // How many days without a successful payment run before the tab calls it
+    // broken. The run is weekly, so eight days is one missed Friday plus a day
+    // of slack — long enough not to cry wolf, short enough that Kevin finds out
+    // within a week rather than after seventy days.
+    const PAYMENT_RUN_STALE_DAYS = 8;
 
     // ── Net Worth field IDs (Airtable: Specific Net Worth Statement by Month / tblvtDXCBJCHu9hnK) ──
     // One row per asset/liability item per month. Used by the Wealth tab.
