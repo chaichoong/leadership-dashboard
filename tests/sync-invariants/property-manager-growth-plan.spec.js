@@ -110,6 +110,9 @@ test.describe('Roy\'s Growth Plan tab', () => {
     await expect(page.locator('button[data-act="open-form"]')).toHaveCount(0);
     await expect(page.locator('details.more', { hasText: 'Set up every property' })).toBeHidden();
     await expect(page.locator('details.more', { hasText: 'Every assumption behind the figures' })).toBeHidden();
+    // Not merely hidden: the set-up controls are not in Roy's page at all.
+    await expect(page.locator('select[data-prop-field]')).toHaveCount(0);
+    await expect(page.locator('#setupBody tr')).toHaveCount(0);
   });
 
   test('Kevin\'s own page is untouched: the key flow, the picker and the set-up all stay', async ({ page }) => {

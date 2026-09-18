@@ -864,6 +864,9 @@ BEFORE THE FIRST ONE IS SIGNED (all in writing)
   ];
   const FLOW = ['Enquiry arrives (any channel) and is logged as a task', 'Screen in writing: 35 or over, on UC, single, household size; ask for the latest UC statement', 'Cap check on this page: exempt (LCWRA, carer, PIP, earnings) or CRF Housing Payment needed', 'Roy shows the room; ID and references collected', 'Tenant meeting: rent at the 1-bed rate, UC journal change, managed payment request, CRF form if capped', 'Move in: PAYG meters in the tenant\'s name, keys, Airtable updated (DOB, NI, phone, email)'];
   function renderSetupAll() {
+    // The bulk set-up table is Kevin's; Roy's tab hides the section, so it is not built
+    // at all there rather than hidden with its controls still in the page (18 Sep 2026).
+    if (PM) { $('setupBody').innerHTML = ''; return; }
     const rows = (state.plan.properties || []).slice().sort((a, b) => (a.selfManaged ? 0 : 1) - (b.selfManaged ? 0 : 1) || a.name.localeCompare(b.name));
     const sel = (id, field, opts, val, label) => `<select class="sm" data-prop-field="${field}" data-prop="${esc(id)}" aria-label="${esc(label)}">${opts.map(o => `<option value="${esc(o)}" ${o === val ? 'selected' : ''}>${esc(o || 'Not set')}</option>`).join('')}</select>`;
     // An apartment row carries only what belongs to the flat (its plan and council tax band).
