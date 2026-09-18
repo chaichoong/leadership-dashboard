@@ -142,8 +142,14 @@ const BUILTIN_SITES = {
   // (37 of 233 outputs, 14 days to 4 Sep 2026). Reading is unlocked; the
   // credential and payment guards above still refuse every password and card
   // field in code. `loginUrl` is what the Robot sign-in app opens for him.
-  // Banks and credit files (Starling, AmEx, HL, Equifax) are deliberately NOT
-  // here: holding a bank session in the robot profile is his call to make.
+  // Banks and credit files (Starling, HL, Equifax) are deliberately NOT here:
+  // holding a bank session in the robot profile is his call to make.
+  // AmEx was on that excluded list until 18 Sep 2026, when Kevin made the call
+  // and asked for it, along with Amazon and Airbnb, so that the HMRC compliance
+  // check (CFS-2427425) could be worked without tying up his own browser. The
+  // credential and payment guards above are unchanged: `fill` still refuses
+  // every password and card field in code, so the robot reads statements and
+  // order history and can never pay, transfer or change a card.
   'app.pingen.com':             { label: 'Pingen (letters)',   login: true,
                                   loginUrl: 'https://app.pingen.com/' },
   'dashboard.stripe.com':       { label: 'Stripe',             login: true,
@@ -164,6 +170,25 @@ const BUILTIN_SITES = {
   // sign-in lives under the main site.
   'www.edfenergy.com':          { label: 'EDF Energy',         login: true,
                                   loginUrl: 'https://www.edfenergy.com/myaccount/login' },
+  // Added 18 Sep 2026 on Kevin's instruction, for the HMRC compliance check.
+  // AmEx statements older than two years are PDF-only, so the robot downloads
+  // them rather than reading a CSV. The card account is in Ciara's name and
+  // Kevin is a cardholder; reading is all that is unlocked.
+  'global.americanexpress.com': { label: 'American Express',    login: true,
+                                  loginUrl: 'https://www.americanexpress.com/en-gb/account/login' },
+  'www.americanexpress.com':    { label: 'American Express (login)', login: true,
+                                  loginUrl: 'https://www.americanexpress.com/en-gb/account/login' },
+  // Amazon order history, to match card charges to what was actually bought.
+  // The account is SHARED (orders dispatch to Kevin, Sarah Ashurst and Paul
+  // Brittain), so an order is only Kevin's when its total matches one of his
+  // card charges. Never assume every order on the account is his.
+  'www.amazon.co.uk':           { label: 'Amazon (order history)', login: true,
+                                  loginUrl: 'https://www.amazon.co.uk/gp/css/order-history' },
+  // Airbnb trip history, to tell a business stay from a personal one.
+  'www.airbnb.co.uk':           { label: 'Airbnb',             login: true,
+                                  loginUrl: 'https://www.airbnb.co.uk/login' },
+  'www.airbnb.com':             { label: 'Airbnb (.com)',      login: true,
+                                  loginUrl: 'https://www.airbnb.com/login' },
   // Adobe Acrobat Sign (28 Aug 2026). Two different jobs on two different
   // hosts, and only one of them needs Kevin's account:
   //   acrobat.adobe.com    — SENDING a document out for signature. Needs the
