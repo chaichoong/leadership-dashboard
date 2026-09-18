@@ -81,10 +81,27 @@ def _subs_filter(srt, aspect):
     return "subtitles=%s:fontsdir=%s:force_style='%s'" % (srt, FONT_DIR, CAPTION_STYLE[aspect])
 
 
+def _textfile(textdir, name, value):
+    """Every drawtext string this module draws comes from a FILE, never from an inline text=' '.
+
+    18 Sep 2026: day 2061's title was "YOUR TEAM IS COASTING HERE'S WHY". ffmpeg's filter parser has no
+    working escape for an apostrophe inside a quoted option value. `\\'` does not parse and takes the WHOLE
+    filterchain down with it (the force_style quotes further along break too, which is why the error points
+    at the captions and not at the title); `'\\''` parses and then draws nothing at all, which is worse
+    because it fails silently. The render died, the day produced only a teaser, and the publishing queue
+    stalled behind it in date order. A file carries the text verbatim, so no title can ever break a render.
+    Named off the output file so two clips rendered into one workdir never share a text file."""
+    os.makedirs(textdir, exist_ok=True)
+    path = os.path.join(textdir, "drawtext_%s.txt" % name)
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write(value)
+    return "textfile='%s'" % path
+
+
 PILL_ROW_Y, BANNER_H, BANNER_H_SUB, SUB_ROW_Y = 170, 250, 300, 248   # rows: titles (25, 95), DAY pill (170), subtitle (248)
 
 
-def _banner_filter(line1, line2, day, full_width=False, y=BANNER_Y, sub=""):
+def _banner_filter(line1, line2, day, textdir, full_width=False, y=BANNER_Y, sub=""):
     """Orange two-line banner with the dark DAY pill, 'Learnings from my Diary' style. `sub` adds a
     smaller third line saying what the episode is about (Kevin, 4 Sep 2026)."""
     # Layout (Kevin, 9 Sep 2026: "the day number overlapping the title... no overlaying"): the two title lines,
@@ -94,13 +111,13 @@ def _banner_filter(line1, line2, day, full_width=False, y=BANNER_Y, sub=""):
     fs = 54 if max(len(line1), len(line2)) <= 15 else 46
     pill_w = 300; pill_x = tx; pill_y = y + PILL_ROW_Y
     h = BANNER_H_SUB if sub else BANNER_H
-    sub_line = ["drawtext=fontfile='%s':text='%s':fontsize=30:fontcolor=white:x=%d:y=%d" % (FONT_BOLD, _esc(sub[:44].upper()), tx, y + SUB_ROW_Y)] if sub else []
+    sub_line = ["drawtext=fontfile='%s':%s:fontsize=30:fontcolor=white:x=%d:y=%d" % (FONT_BOLD, _textfile(textdir, "sub", sub[:44].upper()), tx, y + SUB_ROW_Y)] if sub else []
     return ",".join([
         "drawbox=x=%d:y=%d:w=%d:h=%d:color=%s@1:t=fill" % (x0, y, w, h, ORANGE_HEX),
-        "drawtext=fontfile='%s':text='%s':fontsize=%d:fontcolor=white:x=%d:y=%d" % (FONT_BLACK, line1, fs, tx, y + 25),
-        "drawtext=fontfile='%s':text='%s':fontsize=%d:fontcolor=white:x=%d:y=%d" % (FONT_BLACK, line2, fs, tx, y + 95),
+        "drawtext=fontfile='%s':%s:fontsize=%d:fontcolor=white:x=%d:y=%d" % (FONT_BLACK, _textfile(textdir, "line1", line1), fs, tx, y + 25),
+        "drawtext=fontfile='%s':%s:fontsize=%d:fontcolor=white:x=%d:y=%d" % (FONT_BLACK, _textfile(textdir, "line2", line2), fs, tx, y + 95),
         "drawbox=x=%d:y=%d:w=%d:h=58:color=%s@1:t=fill" % (pill_x, pill_y, pill_w, PILL_HEX),
-        "drawtext=fontfile='%s':text='DAY %s':fontsize=40:fontcolor=white:x=%d:y=%d" % (FONT_BOLD, day, pill_x + 30, pill_y + 9),
+        "drawtext=fontfile='%s':%s:fontsize=40:fontcolor=white:x=%d:y=%d" % (FONT_BOLD, _textfile(textdir, "day", "DAY %s" % day), pill_x + 30, pill_y + 9),
     ] + sub_line)
 
 
@@ -122,19 +139,23 @@ def build_full(inp, srt, out):
 def build_lfmd(inp, srt, out, day, subtitle="", captions=True):
     """captions=False is the YouTube Short (Kevin, 9 Sep 2026): banner only, our caption file rides alongside
     and YouTube's own captions stay switchable, so viewers never see two sets at once."""
-    vf = _banner_filter("LEARNINGS FROM", "MY DIARY", day, sub=subtitle)
+    vf = _banner_filter("LEARNINGS FROM", "MY DIARY", day, _textdir(out), sub=subtitle)
     if captions: vf += "," + _subs_filter(srt, "9:16")
     return _run(inp, vf, out, "10M")
 
 
 def build_summary(inp, srt, out, day, title):
     l1, _, l2 = title.partition("|")
-    vf = _banner_filter(_esc(l1.strip().upper()), _esc(l2.strip().upper()), day) + "," + _subs_filter(srt, "9:16")
+    vf = _banner_filter(l1.strip().upper(), l2.strip().upper(), day, _textdir(out)) + "," + _subs_filter(srt, "9:16")
     return _run(inp, vf, out, "10M")
 
 
-def _esc(s):
-    return s.replace("\\", "\\\\").replace(":", "\\:").replace("'", "\\'")
+def _textdir(out):
+    """Where a clip's drawtext text files go: beside the output, i.e. inside the render workdir that
+    render.py deletes when the clip is done. Each file is named off the output so the Learnings clip and
+    the clean YouTube Short, which share a workdir, never overwrite each other's title."""
+    d = os.path.dirname(os.path.abspath(out))
+    return os.path.join(d, "drawtext_" + os.path.splitext(os.path.basename(out))[0])
 
 
 def selftest():
@@ -151,16 +172,40 @@ def selftest():
     assert "[BLANK" not in out and "Runpreneur" in out and out.count("-->") == 2, out
     assert "00:00:02,000 --> 00:00:04,000" in out
     assert "MarginV=28" in CAPTION_STYLE["16:9"] and "MarginV=34" in CAPTION_STYLE["9:16"]
-    assert "DAY 2225" in _banner_filter("A", "B", "2225")
+    import tempfile as _tf
+    _td = _tf.mkdtemp(prefix="od-overlays-")
+    _banner_filter("A", "B", "2225", _td)
+    assert open(os.path.join(_td, "drawtext_day.txt")).read() == "DAY 2225"
     # the DAY pill sits below both title lines, never beside line 2 (2054's "STRESS BETTER" ran under it, Kevin 9 Sep 2026)
     import re as _re
-    f = _banner_filter("COPE WITH", "STRESS BETTER", "2054", sub="what it is about")
+    f = _banner_filter("COPE WITH", "STRESS BETTER", "2054", _td, sub="what it is about")
     ys = [int(m) for m in _re.findall(r"drawtext=[^,]*?:y=(\d+)", f)]
     pill_y = int(_re.search(r"drawbox=x=\d+:y=(\d+):w=300", f).group(1))
     assert ys[0] < ys[1] < pill_y < ys[3] and pill_y >= ys[1] + 60, (ys, pill_y)
     import inspect as _i
     src = _i.getsource(build_lfmd); assert "if captions:" in src and "_subs_filter" in src, "the YouTube Short renders without burnt-in captions"
+    _selftest_apostrophe(_td)
+    import shutil as _sh; _sh.rmtree(_td, ignore_errors=True)
     print("overlays selftest ok")
+
+
+def _selftest_apostrophe(td):
+    """18 Sep 2026, day 2061: the title "YOUR TEAM IS COASTING HERE'S WHY" broke the render, the day
+    produced only a teaser and the publishing queue stalled behind it in date order. No title may ever do
+    that again, so this draws a real frame with an apostrophe, a colon and a comma in it and checks the
+    pixels: a filter that merely PARSES is not enough, because the '\\'' form parsed and drew a blank.
+    Back-tested by putting text='...' back in _banner_filter, which fails this on the ffmpeg exit code."""
+    nasty = "HERE'S WHY: IT'S FINE, REALLY"
+    vf = _banner_filter(nasty, "MY DIARY", "2061", td, sub=nasty)
+    assert "text='" not in vf, "no drawtext string may be inlined; every one comes from a file"
+    assert open(os.path.join(td, "drawtext_line1.txt")).read() == nasty, "the file holds the title verbatim"
+    out = os.path.join(td, "apostrophe.png")
+    r = subprocess.run([FFMPEG, "-hide_banner", "-v", "error", "-y", "-f", "lavfi",
+                        "-i", "color=c=black:s=1080x720:d=0.1", "-vf", vf, "-frames:v", "1", out],
+                       capture_output=True, text=True)
+    assert r.returncode == 0, "ffmpeg refused the filter: " + (r.stderr or "")[:300]
+    # the banner is drawn, so the frame cannot still be the black we started from
+    assert os.path.getsize(out) > 2000, "the filter parsed but drew nothing (the silent half of the 2061 bug)"
 
 
 if __name__ == "__main__":

@@ -50,6 +50,21 @@ describe('content-engine: overlays.py (captions + banners)', () => {
     expect(src).toMatch(/BANNER_Y = 190/);
   });
 
+  // 18 Sep 2026: day 2061's title was "YOUR TEAM IS COASTING HERE'S WHY". An apostrophe has no working
+  // escape inside an ffmpeg quoted option value, so the whole filterchain failed to parse, the long clip
+  // never rendered, the day went out as a teaser only and 2194/2195/2196 sat held behind it in date order.
+  // The error pointed at the CAPTIONS, not the title, because the broken quote ran on into force_style.
+  it('never inlines a drawtext string, so a title with an apostrophe cannot break a render (day 2061)', () => {
+    const src = readFileSync(OVERLAYS, 'utf8');
+    const banner = src.slice(src.indexOf('def _banner_filter'), src.indexOf('def _run('));
+    // every drawn string comes from a file; not one may go back to text='...'
+    expect(banner).not.toMatch(/text='/);
+    expect(banner.match(/_textfile\(textdir,/g) || []).toHaveLength(4);   // line1, line2, DAY pill, subtitle
+    expect(src).toContain('def _textfile(textdir, name, value)');
+    // and the escape helper that could not do the job is gone, not merely unused
+    expect(src).not.toContain('def _esc(');
+  });
+
   it('applies captions to every format, including LFMD (Kevin, 2 Sep 2026)', () => {
     const src = readFileSync(OVERLAYS, 'utf8');
     const lfmd = src.slice(src.indexOf('def build_lfmd'), src.indexOf('def build_summary'));
