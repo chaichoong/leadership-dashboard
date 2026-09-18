@@ -79,6 +79,8 @@
   .tabs button { border: 0; background: transparent; padding: 10px 16px; font: inherit; font-size: var(--fs-md); font-weight: var(--fw-medium); color: var(--text-secondary); cursor: pointer; border-bottom: 3px solid transparent; margin-bottom: -1px; }
   .tabs button[aria-selected="true"] { color: var(--accent); border-bottom-color: var(--accent); font-weight: var(--fw-semibold); }
   .tabs button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+  /* The Growth Plan tab is Kevin's page in a frame: it scrolls on its own. */
+  .growthframe { width: 100%; height: calc(100vh - 210px); min-height: 520px; border: 1px solid var(--border-default); border-radius: var(--radius-lg); background: var(--bg-surface); }
   .search { width: 100%; max-width: 360px; padding: 8px 12px; border: 1px solid var(--border-default); border-radius: var(--radius-md); font: inherit; font-size: var(--fs-sm); background: var(--bg-surface); color: var(--text-primary); }
   .search:focus-visible { outline: 2px solid var(--accent); }
   .contact { display: flex; flex-direction: column; gap: 2px; }
@@ -153,6 +155,7 @@
   <div class="tabs" role="tablist" aria-label="Views">
     <button type="button" role="tab" id="tabDash" data-view="dashboard" aria-selected="true" aria-controls="content" tabindex="0">Dashboard</button>
     <button type="button" role="tab" id="tabTenants" data-view="tenants" aria-selected="false" aria-controls="content" tabindex="-1">Tenants</button>
+    <button type="button" role="tab" id="tabGrowth" data-view="growth" aria-selected="false" aria-controls="content" tabindex="-1">Growth Plan</button>
   </div>
   <div id="loadErr" class="err" hidden role="alert"></div>
   <div id="content" role="tabpanel" aria-labelledby="tabDash"><div class="loading">Loading the property figures…</div></div>
@@ -224,7 +227,8 @@
 
   let token = '', who = '', data = null, tasks = [], pnlWin = 'last', taskFilter = 'all', openTask = null, loading = false;
   let view = 'dashboard';
-  try { if (localStorage.getItem('pm_view') === 'tenants') view = 'tenants'; } catch (e) { view = 'dashboard'; }
+  const VIEWS = ['dashboard', 'tenants', 'growth'];
+  try { const saved = localStorage.getItem('pm_view'); if (VIEWS.includes(saved)) view = saved; } catch (e) { view = 'dashboard'; }
   const expanded = {}; // section → card key currently open
   let openHistory = null; // tenancy id with history shown
   try { token = localStorage.getItem(TOKEN_KEY) || ''; who = localStorage.getItem(WHO_KEY) || ''; } catch (e) { token = ''; }
@@ -341,10 +345,20 @@
 
   // ── Render ──
   function render() {
+    document.querySelectorAll('.tabs [data-view]').forEach(b => { const on = b.dataset.view === view; b.setAttribute('aria-selected', String(on)); b.tabIndex = on ? 0 : -1; });
+    $('content').setAttribute('aria-labelledby', view === 'growth' ? 'tabGrowth' : view === 'tenants' ? 'tabTenants' : 'tabDash');
+    // Growth Plan is Kevin's own page in a frame (?via=pm), reading and writing through
+    // this Worker on Roy's session. Same page, same maths, same Airtable: it cannot drift
+    // from what Kevin sees. It carries no dashboard figures, so it opens before /data
+    // has landed and is built once, not on every tab switch.
+    if (view === 'growth') {
+      if (!$('growthFrame')) {
+        $('content').innerHTML = `<iframe id="growthFrame" class="growthframe" title="Real Estate Growth Plan" src="../growth-plan.html?via=pm"></iframe>`;
+      }
+      return;
+    }
     if (!data) return;
     $('whoLine').textContent = `${who ? who + ' · ' : ''}Real Estate · property figures only · updated ${new Date(data.generatedAt).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}`;
-    document.querySelectorAll('.tabs [data-view]').forEach(b => { const on = b.dataset.view === view; b.setAttribute('aria-selected', String(on)); b.tabIndex = on ? 0 : -1; });
-    $('content').setAttribute('aria-labelledby', view === 'tenants' ? 'tabTenants' : 'tabDash');
     if (view === 'tenants') {
       const focused = !!document.activeElement && document.activeElement.id === 'tenantSearch';
       $('content').innerHTML = renderTenantsView(); wireTenantSearch(focused); return;
@@ -363,12 +377,15 @@
     view = v;
     try { localStorage.setItem('pm_view', view); } catch (e) { /* storage blocked */ }
     render();
-    if (focus) $(v === 'tenants' ? 'tabTenants' : 'tabDash').focus();
+    if (focus) $(v === 'growth' ? 'tabGrowth' : v === 'tenants' ? 'tabTenants' : 'tabDash').focus();
   }
   document.querySelectorAll('.tabs [data-view]').forEach(b => {
     b.addEventListener('click', () => showView(b.dataset.view));
     b.addEventListener('keydown', (ev) => {
-      if (ev.key === 'ArrowRight' || ev.key === 'ArrowLeft') { ev.preventDefault(); showView(view === 'tenants' ? 'dashboard' : 'tenants', true); }
+      if (ev.key !== 'ArrowRight' && ev.key !== 'ArrowLeft') return;
+      ev.preventDefault();
+      const i = VIEWS.indexOf(view), step = ev.key === 'ArrowRight' ? 1 : -1;
+      showView(VIEWS[(i + step + VIEWS.length) % VIEWS.length], true);
     });
   });
 

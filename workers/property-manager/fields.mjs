@@ -88,6 +88,7 @@ export const F = {
   taskProperties:  'fldZKFvEpJ6NZeFKz', // Properties (link)
   taskContractor:  'fldgmzcr3jHALsdYD', // Contractor (singleSelect)
   taskCompletion:  'fldFOi1SwEKuJRmdN', // Completion Date (stamped by app code)
+  taskBusiness:    'fldLu1Y4GzyWcDoxr', // Business (link) — forced to Real Estate on a growth plan task
 };
 
 // Field NAMES, used only inside filterByFormula (which cannot take IDs).
@@ -130,6 +131,69 @@ export const PNL_SECTIONS = [
     'Charity', 'Mortgage Interest', 'Loan Interest', 'Bank Transaction Fees', 'Tax',
   ] },
 ];
+
+// ── Growth Plan (Kevin, 18 Sep 2026) ────────────────────────────────────────
+// Roy's Growth Plan tab runs the SAME page as Kevin's, so the Worker reads the same
+// seven tables with the same field IDs. These mirror GP in js/config.js; the drift
+// guard in tests/property-manager-compute.test.js fails the moment one differs.
+export const GP_TABLES = {
+  growthPlan:         'tblHqr2kyiL15a8LN',
+  growthPlanSettings: 'tbl6hJaGOijdcvRdw',
+};
+
+export const GP = {
+  plan: {
+    title: 'fldbjOfQOnUnpFmkZ', key: 'fldhurLB2tXHqXOdg', lever: 'fldcpnAHgAxQeHAgT',
+    property: 'fldYjvuoYHNlumtHd', tenant: 'flduU9L39LqachtLZ', unit: 'flddfpEZqcrxBIlf2',
+    monthly: 'fld4Vc3jGATM4d9C4', oneOff: 'fld8wc4N6yYMMy9Bd', effort: 'fldfew0jSmQiB52z8',
+    status: 'fldDKDIgcekYZSFp7', evidence: 'fld7DrrXzaTS4Jy6D', notes: 'fldUmCxbSfb4clrjp',
+    tasks: 'fldJKJ9XiXSfLT5Vq', adoptedOn: 'fldF6bWNVgMAaaXBc', doneOn: 'fldaNRU9sf1IopbHQ',
+  },
+  settings: { key: 'fldiyJqkTQ9i2p2Wc', value: 'fldye89gwAzXWDphp', label: 'fldqN8fc8vk8qBeom', note: 'fldRtEN92vZUZKjBU' },
+  prop: {
+    name: 'fldqMbR329TNY974G', fullName: 'fldy2t735TV5e1DIL', type: 'fldOySSrZBYkOLLTX', beds: 'fldeXUMcC6O4AcvRG',
+    agent: 'fldEUrWVhSp3NY8Hh', ctNote: 'fldt7zY1TPihahH6H', area: 'fldYLRz2GgVojKaq9', postcode: 'fld6ebSQgD7eRsobd',
+    units: 'fldLoWcv40Ag5sHRF', active: 'fldBUeSJQZZSnFrFW', lettableRooms: 'fldzV9YbHhNUUxwmA', payg: 'fldkBSgcELtpGZhjV',
+    ctPayer: 'fldwWcSfkdtSbVhdj', strategy: 'fldivZ9UbAACwv7Yh', plannedExtra: 'fldFd4scZaJsXQ0n7', owner: 'flduloaYTsuvMxvF7',
+    ctBand: 'fldNzUqbTNzTeNJqN', ctAnnual: 'fldZsLDNeEvghtFDJ', baselineRent: 'fldfTtL7On1C2OmRU', baselineDate: 'fldp0bTV5uUIQkHh6',
+    baselineCt: 'fldFyN175n3TngNtt', movingToSelfManage: 'flddfP8ClsH4JeN2o',
+  },
+  unit: {
+    name: 'fldr8sliyu8h2jw9t', beds: 'fldGMguNbV7GvzsHs', tenants: 'fldQO09UAFRf07V7q', type: 'fldsItq0vU3sHv7n9',
+    number: 'fld3nPlpdXSExxDuq', property: 'fldUJNRGgzgyAwwjt', status: 'fldBvqysXBm9rIm0E', incomeType: 'fldPrhfntWO9aHl58',
+    lettingStrategy: 'fldcv02tac2Df3JlO', strategy: 'fldMg7hbVvHXXTQet', ctBand: 'fldciMGjBs3h6QAH3',
+    baselineRent: 'fldeKsD7Hlsd2chUZ', baselineCt: 'fldh6EFTz8epLPKmU', baselineDate: 'fldRULhlR505Peqlh',
+  },
+  tenant: {
+    name: 'fldxBKW7QnujSDWqA', status: 'fldAXzP9SGIHiAhrv', dob: 'fldv7FKsqXYswyCFE', payType: 'fldZbrk8Xw5Dcwxhi',
+    notes: 'fldfwxEf7I3XQDVtR', capExemption: 'fldOOi3d1P4vDedm6', phone: 'fldraHUkWfqo4olLF', email: 'fldybEduFY3DWWTfT',
+    ni: 'fld1rHf1qZ60qK95l', dueDay: 'fldWjCUbAOQmTKfFP', over35: 'flddQ2HnQEf4HBeRn', meetingDate: 'fldTz5BU7jxA2mc1B',
+    ucPayDay: 'fldjTG9xdCLpbwOwC', household: 'fldjrOSBkhWeFJvVU', otherAdults: 'fldeKCUmwpmWv7pad', idSeen: 'fldbLxdhEqeuUZI4U',
+    ucStatementSeen: 'fldfrhDLmb443AmfF', weeklyIncome: 'fldbiAag5eoEW23e0', weeklySpending: 'fldlZr8tUocCYzGPT',
+    bankStatements: 'fldZeN4OxwDstqZhy', authoritySigned: 'fldHPe9YQ6GmlrKBt', ctAccount: 'fldlquVIzyesTrI1d',
+    meetingNotes: 'fld9IbA3CNxa2KBBE', correctAgreement: 'fldCqe5vCXSPDbGev', proofOfAddress: 'fldfTl5QcGxfIzQ8W',
+    rentUplift: 'fld4cGcQbuV2xh2rQ', documents: 'flduPLQdNRKBmsSmr',
+  },
+  tenancy: { tenants: 'fld1i5bDoHL3B6rUf', unit: 'fld7cjLLEHKAx49OK', rent: 'fldDMyfZLFMeONPq8', actual: 'fldzrqp2fHRaBBnnc', status: 'fldlh5JAeYW2Ei2e6', endDate: 'fldwHhhKAq4f1nY9e' },
+  cost: { name: 'fldS6FYfpkhu6tJG0', expected: 'fld9JibXkMpTeMcxw', payStatus: 'fldXZNI96v8HgjuSh', property: 'fld7nikJBPz3BoZJG', frequency: 'fldvozTHvs5VH3lNi' },
+};
+
+// What Roy may change from the Growth Plan tab (Kevin's ruling, 18 Sep 2026): work the
+// checklist. The four tenant ticks, a move's own Growth Plan row, and a task raised from a
+// move. Never a property, a rental unit, a strategy, a band or a frozen starting figure.
+export const GP_TICKS = {
+  correctAgreement: GP.tenant.correctAgreement,
+  proofOfAddress:   GP.tenant.proofOfAddress,
+  authoritySigned:  GP.tenant.authoritySigned,
+  rentUplift:       GP.tenant.rentUplift,
+};
+export const GP_UPLIFT_VALUES = ['To do', 'Done', 'Not needed'];
+export const GP_ROW_STATUS = ['Candidate', 'Adopted', 'In progress', 'Done', 'Dropped'];
+export const GP_ROW_FIELDS = Object.values(GP.plan);
+export const GP_TASK_FIELDS = [F.taskName, F.taskStatus, F.taskDescription, F.taskDueDate, F.taskPriority, F.taskAssignee, F.taskTeamMember];
+// The same filters growth-plan.html uses, so Roy's tab reads the same rows Kevin's does.
+export const GP_LIVE_TENANCIES = "{Tenancy Status}='Live'";
+export const GP_COST_FILTER = "AND(OR({Payment Status}='In Payment',{Payment Status}='Overdue'),OR(FIND('ouncil',{Cost Name}),FIND(' CT',{Cost Name})),NOT(FIND('Bin',{Cost Name})),NOT(FIND('Debt',{Cost Name})),NOT(FIND('Enforcement',{Cost Name})))";
 
 // Statuses Roy may set from his page. Mirrors STATUS_OPTIONS in os/tasks
 // minus Approval (an agent gate, not his) and Overdue (derived from the date).

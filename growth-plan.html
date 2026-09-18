@@ -251,6 +251,7 @@
   label.tick input { accent-color: var(--accent); }
   label.selfmanage { font-size: var(--fs-md); font-weight: var(--fw-semibold); color: var(--text-primary); margin: var(--space-2) 0; }
   @media (max-width: 900px) { table.grid { font-size: var(--fs-sm); } table.grid th, table.grid td { padding: 6px 8px; } .gsum { gap: var(--space-2); flex-direction: column; } }
+  body.pm .kevinonly { display: none !important; }
   @media print { .gp-actions, .row-actions, .filters, [data-sync-bar], .btn, input, select, #gp-settings, #gp-calc { display: none !important; } section.card { break-inside: avoid; border: 0; } }
 </style>
 </head>
@@ -309,7 +310,7 @@
     <div id="agentList"></div>
   </section>
 
-  <section class="card" id="gp-form">
+  <section class="card kevinonly" id="gp-form">
     <h2>Tenant meeting form</h2>
     <p class="hint">Fill this in with the tenant. Save writes every field to their record in Airtable, so the rent change and the council forms can be done from one place. Bank account numbers are not stored here.</p>
     <div class="filters"><label class="chk">Tenant <select class="sm" id="formTenant" style="max-width:320px"><option value="">Choose a tenant…</option></select></label></div>
@@ -482,14 +483,14 @@
       </div>
     </details>
 
-    <details class="more"><summary>Set up every property (strategy, rooms, meters, council tax, who the tasks go to)</summary>
+    <details class="more kevinonly"><summary>Set up every property (strategy, rooms, meters, council tax, who the tasks go to)</summary>
       <div class="more-body">
         <p class="hint">Every property in the portfolio. Lettable rooms is what drives the HMO figure, and the council tax band is what drives the HMO and short-let costs.</p>
         <div class="tbl-wrap"><table id="setupTable"><thead><tr><th>Property</th><th>Plan</th><th class="num">Extra tenants (UC HMO)</th><th class="num">Rooms</th><th>PAYG</th><th>Council tax payer</th><th>Tasks to</th></tr></thead><tbody id="setupBody"></tbody></table></div>
       </div>
     </details>
 
-    <details class="more"><summary>Every assumption behind the figures</summary>
+    <details class="more kevinonly"><summary>Every assumption behind the figures</summary>
       <div class="more-body">
         <p class="hint">Every number the plan uses that is not read from a live record. Edit here; saved to Airtable so the same numbers show on every device. Rates change each April.</p>
         <div class="settings-grid" id="settings"></div>
@@ -516,12 +517,32 @@
   const $ = id => document.getElementById(id);
 
   let PAT = '';
+  // Kevin, 18 Sep 2026: Roy opens this same page inside his Property Manager dashboard
+  // (?via=pm). There he never holds an Airtable key: reads and writes go through the
+  // Worker, which allows him the checklist and nothing else. One page, one set of maths,
+  // so his figures cannot drift from Kevin's.
+  const PM = new URLSearchParams(location.search).get('via') === 'pm';
+  const PM_API = 'https://pm.operationsdirector.co.uk';
+  const pmToken = () => { try { return localStorage.getItem('pm_token') || ''; } catch (e) { return ''; } };
   const state = { raw: null, data: null, settings: {}, settingRows: {}, plan: null, ui: { status: 'All', sort: 'plan', openPack: null, openKpi: null, formTenant: '' }, busy: new Set() };
 
   // ── Auth (shared key with compliance.html and the Inbound Comms tracker) ──
   function showAuth(err) {
     $('authScreen').style.display = 'flex'; $('loadingOverlay').style.display = 'none'; $('dashboard').style.display = 'none';
     $('authError').style.display = err ? 'block' : 'none';
+  }
+  // Roy's page has no key to ask for: if his dashboard session has gone, he signs in there.
+  function showPmSignIn() {
+    $('loadingOverlay').style.display = 'none'; $('dashboard').style.display = 'block';
+    $('errorBox').style.display = 'block';
+    $('errorBox').textContent = 'Your dashboard session has ended. Close this tab, sign in again on the dashboard, and open Growth Plan.';
+  }
+  async function pmApi(path, opts = {}) {
+    const res = await fetch(PM_API + path, { ...opts, headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + pmToken(), ...(opts.headers || {}) } });
+    let body = null; try { body = await res.json(); } catch (e) { body = null; }
+    if (res.status === 401) { showPmSignIn(); throw new Error('Auth failed'); }
+    if (!res.ok) throw new Error((body && body.error) || `Request failed (${res.status})`);
+    return body;
   }
   function authenticate() {
     const v = $('patInput').value.trim(); if (!v) return;
@@ -544,7 +565,16 @@
     if (!resp.ok) { let msg = ''; try { msg = (await resp.json()).error?.message || ''; } catch (e) { /* body unreadable: status is enough */ } throw new Error(`Airtable ${resp.status}${msg ? ': ' + msg : ''}`); }
     return resp.json();
   }
+  // In Roy's tab the seven reads are one Worker call; each table is served from it, in the
+  // same raw shape Airtable returns, so normalise() and the model run unchanged.
+  const PM_TABLE_KEY = { [TABLES.properties]: 'props', [TABLES.rentalUnits]: 'units', [TABLES.tenants]: 'tenants', [TABLES.tenancies]: 'tenancies', [TABLES.costs]: 'costs', [TABLES.growthPlan]: 'planRows', [TABLES.growthPlanSettings]: 'settingRows' };
+  async function pmRead(tableId) {
+    if (!state.pmPromise) state.pmPromise = pmApi('/growth-plan');
+    const all = await state.pmPromise;
+    return all[PM_TABLE_KEY[tableId]] || [];
+  }
   async function airtableFetch(tableId, params = {}) {
+    if (PM) return pmRead(tableId);
     const records = []; let offset = null;
     do {
       const url = new URL(`https://api.airtable.com/v0/${BASE_ID}/${tableId}`);
@@ -558,14 +588,37 @@
   }
   // Write responses come back keyed by field NAME unless asked otherwise; everything here reads by ID.
   function airtableWrite(method, tableId, body) {
+    if (PM) return pmWrite(method, tableId, body);
     return apiFetch(`https://api.airtable.com/v0/${BASE_ID}/${tableId}`, { method, headers: { Authorization: `Bearer ${PAT}`, 'Content-Type': 'application/json' }, body: JSON.stringify(Object.assign({ returnFieldsByFieldId: true }, body)) });
   }
   const link = v => Array.isArray(v) ? v.map(x => typeof x === 'string' ? x : (x && x.id) || x) : [];
   const sel = v => (v && typeof v === 'object') ? (v.name || '') : (v || '');
   const first = v => Array.isArray(v) ? v[0] : v;
 
+  // What Roy may change (Kevin, 18 Sep 2026): the tenant ticks, a move's own row, and a
+  // task. The Worker refuses anything else; the page never offers it either.
+  async function pmWrite(method, tableId, body) {
+    const recs = (body && body.records) || [];
+    if (tableId === TABLES.tenants && method === 'PATCH' && recs.length === 1) {
+      const fields = recs[0].fields || {};
+      const [fieldId, value] = Object.entries(fields)[0] || [];
+      const name = Object.keys(GP.tenant).find(k => GP.tenant[k] === fieldId);
+      if (Object.keys(fields).length === 1 && ['correctAgreement', 'proofOfAddress', 'authoritySigned', 'rentUplift'].includes(name)) {
+        return pmApi('/growth-plan/tick', { method: 'POST', body: JSON.stringify({ tenantId: recs[0].id, field: name, value }) });
+      }
+    }
+    if (tableId === TABLES.growthPlan) {
+      return pmApi('/growth-plan/row', { method: 'POST', body: JSON.stringify({ id: recs[0] && recs[0].id, fields: (recs[0] && recs[0].fields) || {} }) });
+    }
+    if (tableId === TABLES.tasks && method === 'POST') {
+      return pmApi('/growth-plan/task', { method: 'POST', body: JSON.stringify({ fields: (recs[0] && recs[0].fields) || {} }) });
+    }
+    throw new Error('That change is Kevin\'s to make. Tell him what needs changing.');
+  }
+
   async function loadData() {
     $('errorBox').style.display = 'none';
+    state.pmPromise = null;   // Refresh re-reads from the Worker
     if (typeof markTabRefreshing === 'function') markTabRefreshing('growth-plan');
     $('loadingText').textContent = 'Loading the portfolio…';
     const slow = setTimeout(() => { $('loadingText').textContent = 'Still loading: seven tables, one moment…'; }, 3000);
@@ -699,7 +752,7 @@
       <span>Since we started: <b class="${g.now.left - g.started.left >= 0 ? 'good-t' : 'neg'}">${g.now.left - g.started.left >= 0 ? '+' : '−'}${gbp(Math.abs(g.now.left - g.started.left))}</b> a month</span>
       <span>Still to come from the plan: <b>+${gbp(Math.max(0, g.plan.left - g.now.left))}</b></span>
       <span>Room left to the ceiling: <b class="muted">+${gbp(Math.max(0, g.best.left - g.now.left))}</b></span>
-      ${t.startedFrozen ? '' : `<span class="note">Where we started is not frozen for ${t.toFreeze.length} propert${t.toFreeze.length === 1 ? 'y' : 'ies'}, so it reads today's record for ${t.toFreeze.length === 1 ? 'it' : 'them'}.</span> <button class="btn btn-sm" data-act="freeze-started" ${state.busy.has('freeze') ? 'disabled' : ''}>Freeze where we started</button>`}
+      ${t.startedFrozen || PM ? '' : `<span class="note">Where we started is not frozen for ${t.toFreeze.length} propert${t.toFreeze.length === 1 ? 'y' : 'ies'}, so it reads today's record for ${t.toFreeze.length === 1 ? 'it' : 'them'}.</span> <button class="btn btn-sm" data-act="freeze-started" ${state.busy.has('freeze') ? 'disabled' : ''}>Freeze where we started</button>`}
     </div>
     ${unknownAll.length ? `<div class="gunk small" id="ctUnknownNote"><b>*</b> Council tax is not known on ${unknownAll.length} propert${unknownAll.length === 1 ? 'y' : 'ies'}, so it is counted as £0 wherever it is marked: ${esc(unknownAll.join(', '))}. Set the council tax band on ${unknownAll.length === 1 ? 'it' : 'each one'} to fix this.</div>` : ''}`;
     renderKpiDetail();
@@ -947,11 +1000,11 @@ BEFORE THE FIRST ONE IS SIGNED (all in writing)
     }).join('');
     return `<div class="pack-block"><h4>The four ways we could let it</h4>
       <div class="tbl-wrap"><table class="strattbl fourtbl"><thead><tr><th>Strategy</th><th class="num">Places</th><th class="num">Rent in</th><th class="num">Council tax</th><th class="num">Left for us</th></tr></thead><tbody>${rows}</tbody></table></div>
-      <div class="pick"><label>Pick the plan for this property
+      ${PM ? `<div class="pick"><span class="small muted">The plan for this property is <b>${esc(v.chosen || 'not decided yet')}</b>. Kevin picks it.</span></div>` : `<div class="pick"><label>Pick the plan for this property
         <select class="sm" data-prop-field="strategy" data-prop="${esc(v.id)}">
           ${[''].concat(M.PLAN_CHOICES).map(o => `<option value="${esc(o)}" ${o === v.target ? 'selected' : ''}>${esc(o || 'Not decided yet')}</option>`).join('')}
         </select></label>
-        <span class="small muted">"Leave as is" holds it exactly where it is today: ${esc(v.current)}, ${gbp(v.rentNow, 2)} rent, ${v.ctNow ? gbp(v.ctNow, 2) + ' council tax' : 'no council tax to us'}.</span></div>
+        <span class="small muted">"Leave as is" holds it exactly where it is today: ${esc(v.current)}, ${gbp(v.rentNow, 2)} rent, ${v.ctNow ? gbp(v.ctNow, 2) + ' council tax' : 'no council tax to us'}.</span></div>`}
     </div>`;
   }
 
@@ -975,9 +1028,9 @@ BEFORE THE FIRST ONE IS SIGNED (all in writing)
         const miss = missingFor(t);
         return `<li>${esc(t.name)} <span class="muted small">${t.age != null ? 'age ' + t.age : (t.over35Confirmed ? '35 or over' : 'age not known')}${t.rent ? ' · ' + gbp(t.rent, 2) : ''}${t.uc ? ' · Universal Credit' : ''}</span>
         ${t.note ? `<div class="small note">${esc(t.note)}</div>` : ''}
-        ${ageUnknown ? `<div class="pt-fix"><span class="inl">Date of birth: <input class="sm" type="date" data-dob="${esc(t.id)}" aria-label="Date of birth for ${esc(t.name)}"><button class="btn btn-sm" data-act="save-dob" data-tenant="${esc(t.id)}">Save</button></span> <span class="muted">or</span> <button class="btn btn-sm" data-act="confirm-35" data-tenant="${esc(t.id)}">Confirm 35 or over</button></div>` : ''}
+        ${ageUnknown && !PM ? `<div class="pt-fix"><span class="inl">Date of birth: <input class="sm" type="date" data-dob="${esc(t.id)}" aria-label="Date of birth for ${esc(t.name)}"><button class="btn btn-sm" data-act="save-dob" data-tenant="${esc(t.id)}">Save</button></span> <span class="muted">or</span> <button class="btn btn-sm" data-act="confirm-35" data-tenant="${esc(t.id)}">Confirm 35 or over</button></div>` : ''}
         ${miss.length ? `<div class="small muted">Still to collect: ${esc(miss.join(', '))}</div>` : '<div class="small muted">All their details are on file</div>'}
-        <div class="row-actions"><button class="btn btn-sm" data-act="open-form" data-tenant="${esc(t.id)}">Tenant data capture form</button></div></li>`;
+        ${PM ? '' : `<div class="row-actions"><button class="btn btn-sm" data-act="open-form" data-tenant="${esc(t.id)}">Tenant data capture form</button></div>`}</li>`;
     }).join('');
     const extra = v.unitsExtra > 0
       ? `<li class="note">${v.unitsExtra} more place${v.unitsExtra === 1 ? '' : 's'} to fill once the work is done. ${v.unitsExtra === 1 ? 'It is' : 'They are'} not in the database yet: we add ${v.unitsExtra === 1 ? 'it' : 'them'} the day a tenant signs.</li>`
@@ -1020,6 +1073,21 @@ BEFORE THE FIRST ONE IS SIGNED (all in writing)
   }
 
   function setupBlock(v) {
+    // Roy sees how a property is set up; changing it is Kevin's (Kevin, 18 Sep 2026).
+    if (PM) {
+      const line = (label, val) => `<div class="calcfield"><span>${esc(label)}</span><b>${esc(val == null || val === '' ? 'Not set' : String(val))}</b></div>`;
+      return `<div class="pack-block"><h4>How this ${v.unitRecord ? 'apartment' : 'property'} is set up</h4><div class="prop-fields">
+        ${v.soleUnitId ? line('Let today as', v.lettingStated || 'Worked out from the unit') : ''}
+        ${v.unitRecord ? '' : line('Lettable rooms', v.lettable == null ? v.roomInfo.rooms + ' (worked out)' : v.lettable)}
+        ${line('Council tax band', v.ctBand)}
+        ${v.unitRecord ? '' : line('PAYG meters', v.payg)}
+        ${v.unitRecord ? '' : line('Council tax payer', v.ctPayer)}
+      </div>
+      <div class="small muted" style="margin-top:6px">Council tax: ${esc(v.ct.source)}</div>
+      <div class="small muted">Rooms: ${esc(v.roomInfo.source)}</div>
+      <div class="small muted">Single-let rent: ${esc(v.market.source)}</div>
+      <div class="small note" style="margin-top:6px">Kevin sets these. Tell him if one looks wrong.</div></div>`;
+    }
     const f = (label, field, opts, val) => `<label>${esc(label)}<select class="sm" data-prop-field="${field}" data-prop="${esc(v.id)}">${opts.map(o => `<option value="${esc(o)}" ${o === val ? 'selected' : ''}>${esc(o || 'Not set')}</option>`).join('')}</select></label>`;
     const ctLine = `${esc(v.ct.source)}${v.ct.confirmed ? '' : ' — type the band below and we will work the cost out'}`;
     // An apartment carries only its own band here; the rest is set once on the block.
@@ -1389,6 +1457,11 @@ BEFORE THE FIRST ONE IS SIGNED (all in writing)
 
   // ── Boot ──
   (function init() {
+    if (PM) {
+      document.body.classList.add('pm');
+      if (!pmToken()) return showPmSignIn();
+      return void loadData();
+    }
     const saved = localStorage.getItem('airtable_pat') || sessionStorage.getItem('_dlr_pat');
     if (saved) { PAT = saved; sessionStorage.setItem('_dlr_pat', saved); loadData(); }
     else showAuth(false);

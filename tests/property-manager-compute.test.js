@@ -3,7 +3,7 @@ import { readFileSync } from 'fs';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import * as C from '../workers/property-manager/compute.mjs';
-import { F, REC, TABLES, PNL_SECTIONS, MAINT_TARGET_GBP, WAGES_TARGET_GBP, ROY_EMAIL } from '../workers/property-manager/fields.mjs';
+import { F, REC, TABLES, PNL_SECTIONS, MAINT_TARGET_GBP, WAGES_TARGET_GBP, ROY_EMAIL, GP, GP_TABLES, GP_TICKS, GP_ROW_FIELDS, GP_COST_FILTER, GP_LIVE_TENANCIES } from '../workers/property-manager/fields.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const configSrc = readFileSync(resolve(ROOT, 'js/config.js'), 'utf8');
@@ -25,6 +25,21 @@ describe('field IDs mirror the browser single source', () => {
     for (const id of Object.values(TABLES)) expect(configSrc).toContain(id);
     for (const [k, id] of Object.entries(REC)) if (k !== 'roy' && k !== 'bizRealEstate') expect(configSrc).toContain(id);
     expect(configSrc).toContain(ROY_EMAIL);
+  });
+  // The growth plan copy matters twice over: Roy's tab runs the SAME page, so a drifted ID
+  // there would show him different figures from Kevin's without erroring anywhere.
+  it('every growth plan field ID, table and filter matches growth-plan.html and config.js', () => {
+    const planSrc = readFileSync(resolve(ROOT, 'growth-plan.html'), 'utf8');
+    const missing = [];
+    for (const [group, map] of Object.entries(GP)) for (const [k, id] of Object.entries(map)) if (!configSrc.includes(id)) missing.push(`${group}.${k}`);
+    expect(missing).toEqual([]);
+    for (const id of Object.values(GP_TABLES)) expect(configSrc).toContain(id);
+    // The two filters are the page's own, word for word, or Roy reads a different set of rows.
+    expect(planSrc).toContain(GP_LIVE_TENANCIES);
+    expect(planSrc).toContain(GP_COST_FILTER);
+    // The ticks Roy may write are exactly the four the page shows.
+    expect(Object.keys(GP_TICKS).sort()).toEqual(['authoritySigned', 'correctAgreement', 'proofOfAddress', 'rentUplift']);
+    expect(GP_ROW_FIELDS).toEqual(Object.values(GP.plan));
   });
   it('budgets and the P&L allow-list match the browser copies', () => {
     expect(configSrc).toMatch(new RegExp(`MAINT_TARGET_GBP = ${MAINT_TARGET_GBP};`));

@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import worker, { londonNow } from '../workers/property-manager/worker.js';
-import { F, REC, ROY_EMAIL } from '../workers/property-manager/fields.mjs';
+import { F, REC, ROY_EMAIL, GP, GP_TABLES } from '../workers/property-manager/fields.mjs';
 
 // The handler end to end with Airtable stubbed: the scope guard, the status
 // allow-list, the closed-task refusal, and what leaves the Worker in /data.
@@ -186,5 +186,76 @@ describe('londonNow', () => {
     expect([d.getMonth() + 1, d.getDate(), d.getHours(), d.getMinutes()]).toEqual([7, 2, 0, 30]);
     const w = londonNow(new Date('2026-01-15T23:30:00Z')); // GMT
     expect([w.getDate(), w.getHours()]).toEqual([15, 23]);
+  });
+});
+
+// ── Growth Plan for Roy (Kevin, 18 Sep 2026) ────────────────────────────────
+// His tab runs Kevin's own page through this Worker. It may read the seven tables and
+// write three things: a tenant tick, a move's row, a task. Nothing else has a route.
+describe('the growth plan routes', () => {
+  const auth = async (pass = 'roy-pass') => (await login(pass))[1].token;
+  const post = (path, body, token) => call(req(path, { method: 'POST', body: JSON.stringify(body), headers: { Authorization: 'Bearer ' + token } }));
+
+  it('needs a session, and hands back the seven tables the page reads', async () => {
+    expect((await call(req('/growth-plan'))).status).toBe(401);
+    const token = await auth();
+    for (const t of ['tbl6f0OkAmTC2jbuG', 'tblM3mZCR5kiEdWMj', 'tblX4elTuu01gwBYh', 'tblN51a88qTDB6iMH', 'tblx5kvhzNEI5TFlS', GP_TABLES.growthPlan, GP_TABLES.growthPlanSettings]) {
+      airtable[t] = { records: [{ id: 'rec' + t.slice(3, 8), fields: {} }] };
+    }
+    const r = await call(req('/growth-plan', { headers: { Authorization: 'Bearer ' + token } }));
+    expect(r.status).toBe(200);
+    const body = await r.json();
+    expect(Object.keys(body).sort()).toEqual(['costs', 'generatedAt', 'ok', 'planRows', 'props', 'settingRows', 'tenancies', 'tenants', 'units', 'who'].sort());
+    for (const k of ['props', 'units', 'tenants', 'tenancies', 'costs', 'planRows', 'settingRows']) expect(body[k]).toHaveLength(1);
+  });
+
+  it('writes the four checklist ticks and refuses every other tenant field', async () => {
+    const token = await auth();
+    let wrote = null;
+    airtable['tblX4elTuu01gwBYh/recT1'] = (u, init) => { wrote = JSON.parse(init.body); return { id: 'recT1', fields: {} }; };
+    expect((await post('/growth-plan/tick', { tenantId: 'recT1', field: 'proofOfAddress', value: true }, token)).status).toBe(200);
+    expect(wrote.fields).toEqual({ [GP.tenant.proofOfAddress]: true });
+    wrote = null;
+    expect((await post('/growth-plan/tick', { tenantId: 'recT1', field: 'dob', value: '1980-01-01' }, token)).status).toBe(400);
+    // A tenant field that takes the same SHAPE as a tick is the one that would slip through
+    // a guard that only checked the value: the allow-list is what refuses it.
+    expect((await post('/growth-plan/tick', { tenantId: 'recT1', field: 'ucStatementSeen', value: true }, token)).status).toBe(400);
+    expect((await post('/growth-plan/tick', { tenantId: 'recT1', field: 'bankStatements', value: true }, token)).status).toBe(400);
+    expect((await post('/growth-plan/tick', { tenantId: 'recT1', field: 'capExemption', value: 'LCWRA' }, token)).status).toBe(400);
+    expect((await post('/growth-plan/tick', { tenantId: 'recT1', field: 'rentUplift', value: 'Whatever' }, token)).status).toBe(400);
+    expect((await post('/growth-plan/tick', { tenantId: 'not-a-record', field: 'proofOfAddress', value: true }, token)).status).toBe(400);
+    expect(wrote).toBeNull();
+    expect((await post('/growth-plan/tick', { tenantId: 'recT1', field: 'rentUplift', value: 'Done' }, token)).status).toBe(200);
+    expect(wrote.fields).toEqual({ [GP.tenant.rentUplift]: 'Done' });
+  });
+
+  it('saves a move with an allowed status, and drops any field that is not the move\'s own', async () => {
+    const token = await auth();
+    let wrote = null;
+    airtable[GP_TABLES.growthPlan] = (u, init) => { wrote = JSON.parse(init.body); return { records: [{ id: 'recNew', fields: {} }] }; };
+    const r = await post('/growth-plan/row', { fields: { [GP.plan.key]: 'rooms:recP1', [GP.plan.status]: 'Adopted', [GP.prop.strategy]: 'UC HMO', [GP.prop.baselineRent]: 1 } }, token);
+    expect(r.status).toBe(200);
+    expect(Object.keys(wrote.records[0].fields)).toEqual([GP.plan.key, GP.plan.status]);   // the property fields never reach Airtable
+    expect((await post('/growth-plan/row', { fields: { [GP.plan.status]: 'Deleted' } }, token)).status).toBe(400);
+    expect((await post('/growth-plan/row', { fields: { [GP.prop.strategy]: 'Single let' } }, token)).status).toBe(400);
+  });
+
+  it('raises a task, always against Real Estate, and never with fields outside the list', async () => {
+    const token = await auth();
+    let wrote = null;
+    airtable['tblqB8b22hKBL4PF1'] = (u, init) => { wrote = JSON.parse(init.body); return { records: [{ id: 'recTask1', fields: {} }] }; };
+    const r = await post('/growth-plan/task', { fields: { [F.taskName]: 'Growth plan: let the void', [F.taskStatus]: 'Upcoming', [F.taskBusiness]: ['recSOMETHINGELSE'], [F.taskCompletion]: '2026-09-18' } }, token);
+    expect(r.status).toBe(200);
+    expect(wrote.records[0].fields[F.taskName]).toBe('Growth plan: let the void');
+    expect(wrote.records[0].fields[F.taskBusiness]).toEqual([REC.bizRealEstate]);
+    expect(F.taskCompletion in wrote.records[0].fields).toBe(false);
+    expect((await post('/growth-plan/task', { fields: { [F.taskStatus]: 'Upcoming' } }, token)).status).toBe(400);
+  });
+
+  it('gives Roy no route at all to a property, a unit or a frozen start', async () => {
+    const token = await auth();
+    for (const path of ['/growth-plan/property', '/growth-plan/unit', '/growth-plan/baseline', '/growth-plan/setting']) {
+      expect((await post(path, { fields: {} }, token)).status).toBe(404);
+    }
   });
 });

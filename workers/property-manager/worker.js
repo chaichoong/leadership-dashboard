@@ -27,7 +27,7 @@
 // Bindings: LOGIN_LIMIT (ratelimit, optional) — 5 attempts per minute per IP.
 
 import { computeAll, shapeTasks, isRoyScope, isTaskOpen, appendNote, buildNameMap, statusForDue, dateKey, txWindowStart } from './compute.mjs';
-import { BASE, TABLES, F, NAMES, REAL_ESTATE_NAME, ROY_STATUS_ALLOW } from './fields.mjs';
+import { BASE, TABLES, F, NAMES, REC, REAL_ESTATE_NAME, ROY_STATUS_ALLOW, GP, GP_TABLES, GP_TICKS, GP_UPLIFT_VALUES, GP_ROW_STATUS, GP_ROW_FIELDS, GP_TASK_FIELDS, GP_LIVE_TENANCIES, GP_COST_FILTER } from './fields.mjs';
 
 const VERSION = '1.0';
 const TOKEN_TTL_S = 12 * 60 * 60;
@@ -306,6 +306,66 @@ async function handleTaskWrite(request, env, origin, taskId, who) {
   return json({ ok: true, task: { id: taskId, status: status || stored, due: hasDue ? due : String(task.fields[F.taskDueDate] || '').slice(0, 10), notes: fields[F.taskNotes] != null ? fields[F.taskNotes] : String(task.fields[F.taskNotes] || '') } }, 200, origin);
 }
 
+// ── Growth Plan (Kevin, 18 Sep 2026) ────────────────────────────────────────
+// Roy's Growth Plan tab runs the SAME page as Kevin's. This hands back the same seven
+// table reads, raw and by field ID, so the page normalises and prices them with
+// js/growth-plan-model.js exactly as it does for Kevin: one page, one set of maths, one
+// Airtable. Never cached: a tick has to show the moment it is made.
+async function loadGrowthPlan(env) {
+  const [props, units, tenants, tenancies, costs, planRows, settingRows] = await Promise.all([
+    fetchAll(env, TABLES.properties, Object.values(GP.prop)),
+    fetchAll(env, TABLES.rentalUnits, Object.values(GP.unit)),
+    fetchAll(env, TABLES.tenants, Object.values(GP.tenant)),
+    fetchAll(env, TABLES.tenancies, Object.values(GP.tenancy), GP_LIVE_TENANCIES),
+    fetchAll(env, TABLES.costs, Object.values(GP.cost), GP_COST_FILTER),
+    fetchAll(env, GP_TABLES.growthPlan, Object.values(GP.plan)),
+    fetchAll(env, GP_TABLES.growthPlanSettings, Object.values(GP.settings)),
+  ]);
+  return { props, units, tenants, tenancies, costs, planRows, settingRows };
+}
+
+// Every growth plan write passes through here. The rule is Kevin's (18 Sep 2026): Roy works
+// the checklist. A property, a rental unit, a strategy, a council tax band and a frozen
+// starting figure have no route at all, so there is nothing to get past.
+async function handleGrowthPlanWrite(request, env, origin, what, who) {
+  const body = await request.json().catch(() => ({}));
+  if (what === 'tick') {
+    const fieldId = GP_TICKS[String(body.field || '')];
+    const id = String(body.tenantId || '');
+    if (!fieldId || !/^rec[A-Za-z0-9]+$/.test(id)) return err('That is not a checklist tick', 400, origin);
+    const value = body.field === 'rentUplift'
+      ? (GP_UPLIFT_VALUES.includes(body.value) ? body.value : null)
+      : (typeof body.value === 'boolean' ? body.value : null);
+    if (value === null) return err('That tick value is not allowed', 400, origin);
+    await airtableRequest(env, `${TABLES.tenants}/${id}`, { method: 'PATCH', body: JSON.stringify({ fields: { [fieldId]: value }, typecast: true }) });
+    console.log(JSON.stringify({ event: 'growth-tick', tenantId: id, field: body.field, who }));
+    return json({ ok: true, records: [{ id, fields: { [fieldId]: value } }] }, 200, origin);
+  }
+  if (what === 'row') {
+    const fields = {};
+    for (const [k, v] of Object.entries(body.fields || {})) if (GP_ROW_FIELDS.includes(k)) fields[k] = v;
+    const status = fields[GP.plan.status];
+    if (status != null && !GP_ROW_STATUS.includes(status)) return err('That move status is not allowed', 400, origin);
+    if (!Object.keys(fields).length) return err('Nothing to save on that move', 400, origin);
+    const id = String(body.id || '');
+    const res = id
+      ? await airtableRequest(env, `${GP_TABLES.growthPlan}/${id}`, { method: 'PATCH', body: JSON.stringify({ records: [{ id, fields }], typecast: true }) })
+      : await airtableRequest(env, GP_TABLES.growthPlan, { method: 'POST', body: JSON.stringify({ records: [{ fields }], typecast: true }) });
+    console.log(JSON.stringify({ event: 'growth-row', id: id || 'new', status, who }));
+    return json({ ok: true, records: res.records || [res] }, 200, origin);
+  }
+  if (what === 'task') {
+    const fields = {};
+    for (const [k, v] of Object.entries(body.fields || {})) if (GP_TASK_FIELDS.includes(k)) fields[k] = v;
+    if (!fields[F.taskName]) return err('A task needs a name', 400, origin);
+    fields[F.taskBusiness] = [REC.bizRealEstate];   // property work only, whatever was asked for
+    const res = await airtableRequest(env, TABLES.tasks, { method: 'POST', body: JSON.stringify({ records: [{ fields }], typecast: true }) });
+    console.log(JSON.stringify({ event: 'growth-task', name: String(fields[F.taskName]).slice(0, 80), who }));
+    return json({ ok: true, records: res.records }, 200, origin);
+  }
+  return err('Not found', 404, origin);
+}
+
 export default {
   async fetch(request, env, ctx) {
     const origin = request.headers.get('Origin') || '';
@@ -324,6 +384,9 @@ export default {
 
       if (path === '/data' && request.method === 'GET') return await handleData(request, env, ctx, origin);
       if (path === '/tasks' && request.method === 'GET') return json({ ok: true, who: session.who, tasks: await loadTasks(env) }, 200, origin);
+      if (path === '/growth-plan' && request.method === 'GET') return json({ ok: true, who: session.who, generatedAt: new Date().toISOString(), ...(await loadGrowthPlan(env)) }, 200, origin);
+      const g = path.match(/^\/growth-plan\/(tick|row|task)$/);
+      if (g && request.method === 'POST') return await handleGrowthPlanWrite(request, env, origin, g[1], session.who);
       const m = path.match(/^\/task\/(rec[A-Za-z0-9]+)$/);
       if (m && request.method === 'POST') return await handleTaskWrite(request, env, origin, m[1], session.who);
       return err('Not found', 404, origin);
