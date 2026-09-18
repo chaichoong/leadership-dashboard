@@ -360,8 +360,8 @@ test.describe('Growth Plan page', () => {
   test('every reference section is behind a toggle and closed on arrival', async ({ page }) => {
     await openPage(page, fixtures());
     const more = page.locator('#gp-more details.more');
-    await expect(more).toHaveCount(8);
-    for (let i = 0; i < 8; i++) await expect(more.nth(i)).not.toHaveAttribute('open', '');
+    await expect(more).toHaveCount(9);   // the ninth is the paperwork each way of letting needs
+    for (let i = 0; i < 9; i++) await expect(more.nth(i)).not.toHaveAttribute('open', '');
     await expect(page.locator('#glossaryBody')).not.toBeVisible();
     await expect(page.locator('#calcOut')).not.toBeVisible();
     await more.filter({ hasText: 'plain English' }).locator('summary').click();
@@ -697,6 +697,30 @@ test.describe('Growth Plan page', () => {
     await expect(open).not.toContainText('Tasks go to');
     await expect(open.locator('.cl')).toHaveCount(1);          // one checklist, on the card
     await expect(open).toContainText('Tenant data capture form');
+  });
+
+  // Kevin, 18 Sep 2026: finished work is not work in hand, and the paperwork detail moves
+  // to Further information rather than disappearing.
+  test('a property whose work is finished sits with the quiet ones', async ({ page }) => {
+    const fx = fixtures();
+    fx[TBL.tenants][0].fields[TT.rentUplift] = 'Done';
+    fx[TBL.tenants].slice(1).forEach(t => { t.fields[TT.rentUplift] = 'Not needed'; });
+    fx[TBL.properties][0].fields[P.lettableRooms] = 3;      // no room left to fill
+    await openPage(page, fx);
+    await expect(page.locator('#quietList .pack', { hasText: '18 Test Park' })).toContainText('Realised');
+    await expect(page.locator('#selfList')).not.toContainText('18 Test Park');
+    await expect(page.locator('#statusSeg button', { hasText: 'Realised' })).toHaveCount(0);
+  });
+
+  test('the paperwork each way of letting needs is in Further information', async ({ page }) => {
+    await openPage(page, fixtures());
+    const panel = page.locator('details.more', { hasText: 'What each way of letting needs signing' });
+    await expect(panel).not.toHaveAttribute('open', '');
+    await panel.locator('summary').click();
+    await expect(panel.locator('.strat h4')).toHaveText(['Single let', 'UC joint tenancy', 'UC HMO', 'Serviced accommodation']);
+    await expect(panel).toContainText('Joint tenancy agreement, one agreement with both names on it');
+    await expect(panel).toContainText('Individual tenancy agreement at the 1-bed rate');
+    await expect(panel).toContainText('Nothing to sign');      // a single let needs none
   });
 
   test('shows the empty state and no crash when nothing loads', async ({ page }) => {

@@ -299,7 +299,7 @@
 
   <section class="card" id="gp-quiet">
     <h2>Nothing to do right now <span class="pill" id="quietCount"></span></h2>
-    <p class="hint">We run these, and the plan we picked adds nothing more today: they are either already where we want them or held as they are. They sit here so they do not clog up the list above.</p>
+    <p class="hint">We run these, and the plan we picked adds nothing more today: the work is finished, they are already where we want them, or they are held as they are. They sit here so they do not clog up the list above.</p>
     <div id="quietList"></div>
   </section>
 
@@ -388,6 +388,13 @@
             <li>One rental unit.</li>
           </ul></div>
         </div>
+      </div>
+    </details>
+
+    <details class="more"><summary>What each way of letting needs signing</summary>
+      <div class="more-body">
+        <p class="hint">The paperwork behind the ticks on each property. The ticks on a card are the short version: this is what each one actually means.</p>
+        <div class="strategies" id="paperworkList"></div>
       </div>
     </details>
 
@@ -619,7 +626,7 @@
   function recompute() { state.plan = M.buildPlan(state.data, state.settings, todayISO()); window._growthPlan = state; }
 
   // ── Render ──
-  function renderAll() { renderHeadline(); renderCountStrip(); renderStatusSeg(); renderProperties(); renderSetupAll(); renderCalc(); renderCt(); renderMeetingForm(); renderMarketing(); renderSettings(); renderGlossary(); }
+  function renderAll() { renderHeadline(); renderCountStrip(); renderStatusSeg(); renderProperties(); renderSetupAll(); renderCalc(); renderCt(); renderMeetingForm(); renderMarketing(); renderSettings(); renderGlossary(); renderPaperwork(); }
 
   // ── Tenant meeting form ──
   const FORM_FIELDS = ['dob', 'ni', 'phone', 'email', 'idSeen', 'over35', 'ucPayDay', 'dueDay', 'household', 'capExemption', 'ucStatementSeen', 'otherAdults', 'ctAccount', 'weeklyIncome', 'weeklySpending', 'bankStatements', 'authoritySigned', 'meetingDate', 'meetingNotes'];
@@ -738,7 +745,7 @@
 
   // "No change needed" properties have their own section now (Kevin, 18 Sep 2026), so the
   // filter covers only the work: what needs a plan picked, what is waiting, what is running.
-  const STATUSES = ['All', 'Not decided', 'To do', 'In progress', 'Realised'];
+  const STATUSES = ['All', 'Not decided', 'To do', 'In progress'];
   const SORTS = [{ key: 'plan', label: 'Biggest gain from our plan' }, { key: 'ceiling', label: 'Biggest ceiling' }];
   function renderStatusSeg() {
     const have = new Set(working().map(v => v.progress));
@@ -826,7 +833,7 @@ BEFORE THE FIRST ONE IS SIGNED (all in writing)
 
   // Kevin, 18 Sep 2026: the ones we are working on come first, the ones with nothing to do
   // sit in their own section underneath, and the agent-run ones stay last.
-  const quiet = v => v.progress === 'No change needed' || v.leaveAsIs;
+  const quiet = v => v.progress === 'No change needed' || v.progress === 'Realised' || v.leaveAsIs;
   function working() { return state.plan.selfManaged.filter(v => !quiet(v)); }
   function renderProperties() {
     const work = working(), rest = state.plan.selfManaged.filter(quiet), agent = state.plan.agentManaged;
@@ -1055,6 +1062,15 @@ BEFORE THE FIRST ONE IS SIGNED (all in writing)
     ['Rental unit', 'One lettable space. A whole house is one unit. A house let by the room is one unit per room.'],
     ['Realised', 'The work is done: the agreement is signed or the rent change is made. The money usually follows a month or so later, and the leadership dashboard is where you see it arrive.'],
   ];
+  // The paperwork list reads the model's own checklist, so the page and the maths agree.
+  function renderPaperwork() {
+    $('paperworkList').innerHTML = M.STRATEGY_LIST.map(name => {
+      const c = M.CHECKLIST[name]; if (!c) return '';
+      const list = (title, items) => items.length ? `<h5 class="small muted">${esc(title)}</h5><ul>${items.map(x => `<li>${esc(x)}</li>`).join('')}</ul>` : '';
+      const parts = list('For the property', c.property) + list('For each tenant', c.tenant) + list('Only if their rent falls short', c.ifShort);
+      return `<div class="strat"><h4>${esc(name)}</h4><p class="small muted">${esc(c.note)}</p>${parts || '<p class="small muted">Nothing to sign.</p>'}</div>`;
+    }).join('');
+  }
   function renderGlossary() {
     $('glossaryBody').innerHTML = GLOSSARY.map(([k, d]) => `<tr><td style="white-space:nowrap"><b>${esc(k)}</b></td><td class="wrap">${esc(d)}</td></tr>`).join('');
   }
