@@ -420,24 +420,52 @@ def read_account(acct, node=None):
 # and the balance alone does not say so.
 ALARM_DAYS = re.compile(r"no credit|off supply|less than a day|^0 days?\b", re.I)
 
+# "5 days left" -> 5. Utilita calculates this itself from recent consumption, so
+# it tightens on its own when a flat fills up with guests, which a pounds figure
+# cannot do. £20 lasts about five days at roughly £4/day, so a £10 floor gave
+# barely two and a half days' notice: too tight for serviced accommodation,
+# where a Friday warning means an outage over a paid weekend.
+DAYS_NUMBER = re.compile(r"^(\d+)\s+days?\s+left$", re.I)
+# Fewer than this many days left and somebody needs to act today.
+ALARM_DAYS_LEFT = 3
 
-def row_alarm(row, low_gbp):
+
+def days_left_number(text):
+    """The number of days in a days-left line, or None if it does not give one.
+
+    None is the honest answer for "More than a week left" and for any wording
+    Utilita invents later; the pounds floor and the ALARM_DAYS words cover those,
+    and daysLeftRecognised already flags an unfamiliar phrase in the message.
+    """
+    m = DAYS_NUMBER.match(str(text or "").strip())
+    return int(m.group(1)) if m else None
+
+
+def row_alarm(row, low_gbp, alarm_days=ALARM_DAYS_LEFT):
     """Does this flat need somebody to act TODAY? Pure, so it is testable.
 
-    Three independent triggers, any one of which is enough:
-      * the balance is below the floor
-      * the balance is NEGATIVE (the meter is on emergency credit)
+    DAYS FIRST, pounds as a backstop. Four independent triggers, any one enough:
+      * the days-left line gives a number at or under alarm_days
       * the days-left line says no credit, off supply, or less than a day
+      * the balance is NEGATIVE (the meter is on emergency credit)
+      * the balance is below the pounds floor
+
+    Days lead because Utilita recomputes them from actual consumption, so the
+    warning tightens by itself when guests arrive. Pounds stay as the backstop
+    for a page that renders no days line at all.
     """
     if not row.get("ok"):
         return False
-    bal = row.get("balanceGbp")
-    if bal is not None and (bal < low_gbp or bal < 0):
+    days = days_left_number(row.get("daysLeft"))
+    if days is not None and days <= alarm_days:
         return True
-    return bool(ALARM_DAYS.search(str(row.get("daysLeft") or "")))
+    if ALARM_DAYS.search(str(row.get("daysLeft") or "")):
+        return True
+    bal = row.get("balanceGbp")
+    return bool(bal is not None and (bal < low_gbp or bal < 0))
 
 
-def build_message(rows, low_gbp, when=None):
+def build_message(rows, low_gbp, when=None, alarm_days=ALARM_DAYS_LEFT):
     """Returns (text, attention, alarm).
 
     `attention` means something is technically wrong and the job should report a
@@ -453,7 +481,7 @@ def build_message(rows, low_gbp, when=None):
             if r.get("daysLeftRecognised") is False:
                 days += "  _(new wording from Utilita)_"
             flag = ""
-            if row_alarm(r, low_gbp):
+            if row_alarm(r, low_gbp, alarm_days):
                 flag, alarm = "  ⚠️ *top up today*", True
             # The meter this figure came from, so a silently missing identity
             # check is visible rather than inert. CLAUDE.md's rule: an invariant
@@ -594,7 +622,7 @@ def write_sent_mark(kind, alarmed_labels=(), lost_labels=()):
     os.replace(tmp, SENT_MARK)
 
 
-def alarming_labels(rows, low_gbp):
+def alarming_labels(rows, low_gbp, alarm_days=ALARM_DAYS_LEFT):
     """Which flats need topping up right now, by label.
 
     Per FLAT, not one boolean for the portfolio. The single `alarmed` flag meant
@@ -602,7 +630,7 @@ def alarming_labels(rows, low_gbp):
     going off supply at 15:00 said nothing until 07:05 the next morning. Two
     flats, one alarm slot.
     """
-    return sorted(r["label"] for r in rows if row_alarm(r, low_gbp))
+    return sorted(r["label"] for r in rows if row_alarm(r, low_gbp, alarm_days))
 
 
 def lost_sight_labels(rows):
@@ -690,9 +718,10 @@ def cmd_run(argv):
     cfg = load_config()
     accounts = expected_accounts(cfg)
     low = cfg.get("lowBalanceGbp", 10)
+    alarm_days = cfg.get("alarmDaysLeft", ALARM_DAYS_LEFT)
     rows = [read_account(a) for a in accounts]
     log_readings(rows)
-    text, attention, alarm = build_message(rows, low)
+    text, attention, alarm = build_message(rows, low, alarm_days=alarm_days)
     print(text)
 
     if "--dry-run" in argv:
@@ -708,7 +737,7 @@ def cmd_run(argv):
     lost_before = set(mark.get("lostLabels") or []) if fresh else set()
     force = "--force" in argv
 
-    alarming = alarming_labels(rows, low)
+    alarming = alarming_labels(rows, low, alarm_days)
     lost = lost_sight_labels(rows)
     # Only flats not already reported today. Reporting the same flat hourly is
     # how a channel gets muted, which is the other half of the same failure.
@@ -759,7 +788,9 @@ def cmd_read():
     cfg = load_config()
     rows = [read_account(a) for a in expected_accounts(cfg)]
     print(json.dumps(rows, indent=1))
-    text, attention, alarm = build_message(rows, cfg.get("lowBalanceGbp", 10))
+    text, attention, alarm = build_message(
+        rows, cfg.get("lowBalanceGbp", 10),
+        alarm_days=cfg.get("alarmDaysLeft", ALARM_DAYS_LEFT))
     print("\n--- message ---\n" + text)
     print(f"\n[attention={attention} alarm={alarm}]")
     return 1 if attention else 0
@@ -909,6 +940,39 @@ def selftest():
     spaced = parse_energy("Balance\nREFRESH\n£8.00\n2 days left\n"
                           "Electricity Top-up Number\n9826 0038 0120 9677 811\n")
     chk("spaced meter number still read", "9826003801209677811", spaced["topUpNumber"])
+
+    # ── DAYS LEFT is the primary trigger (Kevin, 18 Sep 2026) ─────────────
+    # £20 lasts about five days, so the old £10 floor gave barely two and a
+    # half days' notice. Too tight for a flat with paying guests in it.
+    chk("5 days does not warn", False, row_alarm(row(bal="£20.12", gbp=20.12, days="5 days left"), 10))
+    chk("4 days does not warn", False, row_alarm(row(bal="£16.00", gbp=16.00, days="4 days left"), 10))
+    chk("3 days warns", True, row_alarm(row(bal="£12.00", gbp=12.00, days="3 days left"), 10))
+    chk("2 days warns", True, row_alarm(row(bal="£8.00", gbp=8.00, days="2 days left"), 10))
+    chk("1 day warns", True, row_alarm(row(bal="£4.00", gbp=4.00, days="1 day left"), 10))
+    chk("0 days warns", True, row_alarm(row(bal="£0.20", gbp=0.20, days="0 days left"), 10))
+    chk("more than a week never warns", False,
+        row_alarm(row(bal="£34.30", gbp=34.30, days="More than a week left"), 10))
+    # A healthy POUNDS figure no longer hides a short number of days: this is
+    # the case the pounds-only rule got wrong.
+    chk("£25 with 3 days still warns", True,
+        row_alarm(row(bal="£25.00", gbp=25.00, days="3 days left"), 10))
+
+    chk("days parsed from the line", 5, days_left_number("5 days left"))
+    chk("a single day parses", 1, days_left_number("1 day left"))
+    chk("a worded line gives no number", None, days_left_number("More than a week left"))
+    chk("a missing line gives no number", None, days_left_number(None))
+
+    # The pounds floor still stands alone when the page shows no days line.
+    chk("the pounds floor alone still warns", True,
+        row_alarm(row(bal="£4.10", gbp=4.10, days=None), 10))
+    chk("and a healthy balance with no days line does not", False,
+        row_alarm(row(bal="£34.30", gbp=34.30, days=None), 10))
+
+    # The threshold is a parameter, not a constant buried in the rule.
+    chk("a tighter threshold is respected", False,
+        row_alarm(row(bal="£12.00", gbp=12.00, days="3 days left"), 10, alarm_days=2))
+    chk("a looser threshold is respected", True,
+        row_alarm(row(bal="£20.00", gbp=20.00, days="5 days left"), 10, alarm_days=5))
 
     # ── the alarm reads the days line, not only the number ────────────────
     chk("off supply alarms", True, row_alarm(row(bal="£1350.60", gbp=1350.60, days="Off supply"), 10))

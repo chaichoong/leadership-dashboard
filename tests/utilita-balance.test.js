@@ -151,6 +151,57 @@ print('DEBT=' + str(d['balanceGbp']) + '|' + str(d['daysLeft']))
         expect(out).toMatch(/DEBT=-5\.2\|Off supply/);  // debt parses, never falls through
     });
 
+    it('days left is the primary trigger, with pounds as the backstop (driven)', () => {
+        // Kevin, 18 Sep 2026: £20 lasts about five days, so a £10 pounds floor
+        // gave barely two and a half days' notice — too tight for a flat with
+        // paying guests. Utilita recomputes days from real consumption, so the
+        // warning now tightens by itself when a flat fills up.
+        const py = `
+import importlib.util
+spec = importlib.util.spec_from_file_location('ub', ${JSON.stringify(script)})
+ub = importlib.util.module_from_spec(spec); spec.loader.exec_module(ub)
+def r(gbp, days):
+    return {'ok': True, 'balanceGbp': gbp, 'daysLeft': days}
+print('FIVE=' + str(ub.row_alarm(r(20.12, '5 days left'), 10)))
+print('FOUR=' + str(ub.row_alarm(r(16.00, '4 days left'), 10)))
+print('THREE=' + str(ub.row_alarm(r(12.00, '3 days left'), 10)))
+print('ONE=' + str(ub.row_alarm(r(4.00, '1 day left'), 10)))
+print('WEEK=' + str(ub.row_alarm(r(34.30, 'More than a week left'), 10)))
+# The case the pounds-only rule got wrong: healthy pounds, few days.
+print('RICHBUTSHORT=' + str(ub.row_alarm(r(25.00, '3 days left'), 10)))
+# The floor still stands alone when the page shows no days line.
+print('NODAYSLOW=' + str(ub.row_alarm(r(4.10, None), 10)))
+print('NODAYSFINE=' + str(ub.row_alarm(r(34.30, None), 10)))
+# Configurable, not a buried constant.
+print('TIGHTER=' + str(ub.row_alarm(r(12.00, '3 days left'), 10, alarm_days=2)))
+print('LOOSER=' + str(ub.row_alarm(r(20.00, '5 days left'), 10, alarm_days=5)))
+print('THRESHOLD=' + str(ub.ALARM_DAYS_LEFT))
+`;
+        const out = execFileSync('python3', ['-c', py], { encoding: 'utf8' });
+        expect(out).toMatch(/FIVE=False/);
+        expect(out).toMatch(/FOUR=False/);
+        expect(out).toMatch(/THREE=True/);
+        expect(out).toMatch(/ONE=True/);
+        expect(out).toMatch(/WEEK=False/);
+        expect(out).toMatch(/RICHBUTSHORT=True/);   // the pounds-only rule missed this
+        expect(out).toMatch(/NODAYSLOW=True/);
+        expect(out).toMatch(/NODAYSFINE=False/);
+        expect(out).toMatch(/TIGHTER=False/);
+        expect(out).toMatch(/LOOSER=True/);
+        expect(out).toMatch(/THRESHOLD=3/);
+    });
+
+    it('the configured threshold reaches the live run, not just the default', () => {
+        // A threshold nobody can change is a constant pretending to be config.
+        const src = readFileSync(script, 'utf8');
+        const run = src.slice(src.indexOf('def cmd_run'), src.indexOf('def cmd_read'));
+        expect(run).toMatch(/cfg\.get\("alarmDaysLeft"/);
+        expect(run).toMatch(/alarm_days=alarm_days|alarming_labels\(rows, low, alarm_days\)/);
+        const live = JSON.parse(readFileSync(
+            resolve(process.env.HOME, '.config/od/utilita_accounts.json'), 'utf8'));
+        expect(live.alarmDaysLeft, 'the live config must set it explicitly').toBe(3);
+    });
+
     it('the days-left line alarms on its own, whatever the balance says', () => {
         // "£12.40 — Less than a day left" and "Off supply" both raised NO flag
         // before this, because the flag read only the number against the floor.
