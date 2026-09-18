@@ -27,7 +27,7 @@
 // Bindings: LOGIN_LIMIT (ratelimit, optional) — 5 attempts per minute per IP.
 
 import { computeAll, shapeTasks, isRoyScope, isTaskOpen, appendNote, buildNameMap, statusForDue, dateKey, txWindowStart } from './compute.mjs';
-import { BASE, TABLES, F, NAMES, REC, REAL_ESTATE_NAME, ROY_STATUS_ALLOW, GP, GP_TABLES, GP_TICKS, GP_UPLIFT_VALUES, GP_ROW_STATUS, GP_ROW_FIELDS, GP_TASK_FIELDS, GP_LIVE_TENANCIES, GP_COST_FILTER } from './fields.mjs';
+import { BASE, TABLES, F, NAMES, REC, REAL_ESTATE_NAME, ROY_STATUS_ALLOW, GP, GP_TABLES, GP_TICKS, GP_UPLIFT_VALUES, GP_ROW_STATUS, GP_ROW_FIELDS, GP_TASK_FIELDS, GP_LIVE_TENANCIES, GP_COST_FILTER, GP_PM_TENANT_OMIT } from './fields.mjs';
 
 const VERSION = '1.0';
 const TOKEN_TTL_S = 12 * 60 * 60;
@@ -315,7 +315,7 @@ async function loadGrowthPlan(env) {
   const [props, units, tenants, tenancies, costs, planRows, settingRows] = await Promise.all([
     fetchAll(env, TABLES.properties, Object.values(GP.prop)),
     fetchAll(env, TABLES.rentalUnits, Object.values(GP.unit)),
-    fetchAll(env, TABLES.tenants, Object.values(GP.tenant)),
+    fetchAll(env, TABLES.tenants, Object.values(GP.tenant).filter(id => !GP_PM_TENANT_OMIT.includes(id))),
     fetchAll(env, TABLES.tenancies, Object.values(GP.tenancy), GP_LIVE_TENANCIES),
     fetchAll(env, TABLES.costs, Object.values(GP.cost), GP_COST_FILTER),
     fetchAll(env, GP_TABLES.growthPlan, Object.values(GP.plan)),
@@ -347,10 +347,13 @@ async function handleGrowthPlanWrite(request, env, origin, what, who) {
     const status = fields[GP.plan.status];
     if (status != null && !GP_ROW_STATUS.includes(status)) return err('That move status is not allowed', 400, origin);
     if (!Object.keys(fields).length) return err('Nothing to save on that move', 400, origin);
+    // Both go to the COLLECTION: a single-record URL takes {fields}, not {records:[…]},
+    // and the page needs records[0] back either way.
     const id = String(body.id || '');
-    const res = id
-      ? await airtableRequest(env, `${GP_TABLES.growthPlan}/${id}`, { method: 'PATCH', body: JSON.stringify({ records: [{ id, fields }], typecast: true }) })
-      : await airtableRequest(env, GP_TABLES.growthPlan, { method: 'POST', body: JSON.stringify({ records: [{ fields }], typecast: true }) });
+    const res = await airtableRequest(env, GP_TABLES.growthPlan, {
+      method: id ? 'PATCH' : 'POST',
+      body: JSON.stringify({ records: [id ? { id, fields } : { fields }], typecast: true, returnFieldsByFieldId: true }),
+    });
     console.log(JSON.stringify({ event: 'growth-row', id: id || 'new', status, who }));
     return json({ ok: true, records: res.records || [res] }, 200, origin);
   }

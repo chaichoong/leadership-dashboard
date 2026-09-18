@@ -194,6 +194,18 @@ describe('londonNow', () => {
 // write three things: a tenant tick, a move's row, a task. Nothing else has a route.
 describe('the growth plan routes', () => {
   const auth = async (pass = 'roy-pass') => (await login(pass))[1].token;
+  let asked = {};
+  const fetchedFields = (table) => asked[table] || [];
+  beforeEach(() => {
+    asked = {};
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = (url, init) => {
+      const u = new URL(url);
+      const table = u.pathname.replace(/^\/v0\/[^/]+\//, '').split('?')[0];
+      if (u.searchParams.getAll('fields[]').length) asked[table] = (asked[table] || []).concat(u.searchParams.getAll('fields[]'));
+      return realFetch(url, init);
+    };
+  });
   const post = (path, body, token) => call(req(path, { method: 'POST', body: JSON.stringify(body), headers: { Authorization: 'Bearer ' + token } }));
 
   it('needs a session, and hands back the seven tables the page reads', async () => {
@@ -206,6 +218,10 @@ describe('the growth plan routes', () => {
     expect(r.status).toBe(200);
     const body = await r.json();
     expect(Object.keys(body).sort()).toEqual(['costs', 'generatedAt', 'ok', 'planRows', 'props', 'settingRows', 'tenancies', 'tenants', 'units', 'who'].sort());
+    // Roy's read leaves out the tenant fields only the meeting form shows.
+    const asked = fetchedFields('tblX4elTuu01gwBYh');
+    for (const id of [GP.tenant.weeklyIncome, GP.tenant.weeklySpending, GP.tenant.bankStatements, GP.tenant.ctAccount, GP.tenant.meetingNotes, GP.tenant.documents]) expect(asked).not.toContain(id);
+    for (const id of [GP.tenant.name, GP.tenant.dob, GP.tenant.correctAgreement, GP.tenant.rentUplift]) expect(asked).toContain(id);
     for (const k of ['props', 'units', 'tenants', 'tenancies', 'costs', 'planRows', 'settingRows']) expect(body[k]).toHaveLength(1);
   });
 
@@ -236,6 +252,12 @@ describe('the growth plan routes', () => {
     const r = await post('/growth-plan/row', { fields: { [GP.plan.key]: 'rooms:recP1', [GP.plan.status]: 'Adopted', [GP.prop.strategy]: 'UC HMO', [GP.prop.baselineRent]: 1 } }, token);
     expect(r.status).toBe(200);
     expect(Object.keys(wrote.records[0].fields)).toEqual([GP.plan.key, GP.plan.status]);   // the property fields never reach Airtable
+    // Marking a started move done is an UPDATE: it must reach the collection with an id,
+    // or every status change after the first one fails.
+    wrote = null;
+    const upd = await post('/growth-plan/row', { id: 'recRow1', fields: { [GP.plan.status]: 'Done' } }, token);
+    expect(upd.status).toBe(200);
+    expect(wrote.records).toEqual([{ id: 'recRow1', fields: { [GP.plan.status]: 'Done' } }]);
     expect((await post('/growth-plan/row', { fields: { [GP.plan.status]: 'Deleted' } }, token)).status).toBe(400);
     expect((await post('/growth-plan/row', { fields: { [GP.prop.strategy]: 'Single let' } }, token)).status).toBe(400);
   });
