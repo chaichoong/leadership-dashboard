@@ -234,8 +234,18 @@
   .gunk { margin-top: var(--space-2); color: var(--warning); }
   .calcfield { display: flex; flex-direction: column; gap: 2px; font-size: var(--fs-xs); color: var(--text-secondary); min-width: 0; }
   .calcfield b { font-size: var(--fs-md); color: var(--text-primary); font-variant-numeric: tabular-nums; padding: 2px 0; }
-  .stranded { margin-top: var(--space-3); padding-top: var(--space-2); border-top: 1px dashed var(--border-default); }
   .gsum { display: flex; gap: var(--space-5); flex-wrap: wrap; margin-top: var(--space-3); color: var(--text-secondary); }
+  /* The checklist on every card (Kevin, 18 Sep 2026) */
+  .cl { border-top: 1px solid var(--border-subtle); padding: var(--space-2) var(--space-4) var(--space-3); }
+  .cl-head { display: flex; justify-content: space-between; align-items: baseline; gap: var(--space-3); margin-bottom: 4px; }
+  .cl-list { list-style: none; margin: 0; padding: 0; }
+  .cl-item { display: flex; justify-content: space-between; align-items: flex-start; gap: var(--space-3); padding: 4px 0; border-bottom: 1px solid var(--border-subtle); }
+  .cl-item:last-child { border-bottom: 0; }
+  .cl-item.done { color: var(--text-muted); }
+  .cl-item.done .cl-txt b { font-weight: var(--fw-regular); }
+  .cl-item.stale .cl-txt { color: var(--text-secondary); }
+  .cl-txt { flex: 1; min-width: 0; word-break: break-word; }
+  @media (max-width: 700px) { .cl-item { flex-direction: column; } }
   .ticks { display: flex; flex-wrap: wrap; gap: 4px 14px; margin: 6px 0; padding: 6px 8px; border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); background: var(--bg-surface); }
   label.tick { font-size: var(--fs-sm); display: inline-flex; gap: 6px; align-items: center; color: var(--text-primary); cursor: pointer; }
   label.tick input { accent-color: var(--accent); }
@@ -278,12 +288,19 @@
   </section>
 
   <section class="card" id="gp-self">
-    <h2>Properties we run ourselves <span class="pill" id="selfCount"></span></h2>
-    <p class="hint">Every property with the four ways we could let it, priced. Click one to see the strategies side by side, who lives there and what has to be signed.</p>
+    <h2>What we are working on <span class="pill" id="selfCount"></span></h2>
+    <p class="hint">Each card lists what has to be done there: a tick for each thing every tenant needs, and a line for each room to fill or place to let. Tick it when it is done. Click the card for the figures, the four ways we could let it and who lives there.</p>
     <div class="filters">
       <div class="seg" role="group" aria-label="Status filter" id="statusSeg"></div>
+      <div class="seg" role="group" aria-label="Sort by" id="sortSeg"></div>
     </div>
     <div id="selfList"></div>
+  </section>
+
+  <section class="card" id="gp-quiet">
+    <h2>Nothing to do right now <span class="pill" id="quietCount"></span></h2>
+    <p class="hint">We run these, and the plan we picked adds nothing more today: they are either already where we want them or held as they are. They sit here so they do not clog up the list above.</p>
+    <div id="quietList"></div>
   </section>
 
   <section class="card" id="gp-agent">
@@ -479,7 +496,7 @@
 <script src="js/ai-models.js?v=1"></script>
 <script src="js/config.js?v=65"></script>
 <script src="js/sync-bar.js?v=6"></script>
-<script src="js/growth-plan-model.js?v=12"></script>
+<script src="js/growth-plan-model.js?v=13"></script>
 <script>
 (function () {
   'use strict';
@@ -492,7 +509,7 @@
   const $ = id => document.getElementById(id);
 
   let PAT = '';
-  const state = { raw: null, data: null, settings: {}, settingRows: {}, plan: null, ui: { status: 'All', showDone: false, openPack: null, openKpi: null, formTenant: '' }, busy: new Set() };
+  const state = { raw: null, data: null, settings: {}, settingRows: {}, plan: null, ui: { status: 'All', sort: 'plan', openPack: null, openKpi: null, formTenant: '' }, busy: new Set() };
 
   // ── Auth (shared key with compliance.html and the Inbound Comms tracker) ──
   function showAuth(err) {
@@ -649,13 +666,23 @@
     { key: 'started', label: 'Where we started', note: 'frozen at the start of the plan' },
     { key: 'now', label: 'Where we are now', note: 'with every tick done so far' },
     { key: 'plan', label: 'If the plan is done', note: 'the plans you have picked' },
+    // Kevin, 18 Sep 2026: the gain on its own, so the money the plan adds is a figure
+    // on the page rather than a sum to do in your head.
+    { key: 'gain', label: 'Gain when the plan is done', note: 'the plan less where we are now', signed: true },
     { key: 'best', label: 'Best possible', note: 'the ceiling, every property at its best' },
   ];
   function renderHeadline() {
     const t = state.plan.totals, g = t.grid, open = state.ui.openKpi;
     const head = GRID_COLS.map(c => `<th class="num"><button type="button" class="gcol ${open === c.key ? 'on' : ''}" data-kpi="${c.key}" aria-expanded="${open === c.key}">${esc(c.label)} <span class="chev" aria-hidden="true">▸</span></button><div class="gnote">${esc(c.note)}</div></th>`).join('');
     const flag = (c, k) => (k !== 'rent' && (g[c.key].ctUnknown || []).length) ? `<span class="unk" title="Council tax not known on ${esc(g[c.key].ctUnknown.join(', '))}">*</span>` : '';
-    const row = (label, k, cls) => `<tr class="${cls || ''}"><th scope="row">${esc(label)}</th>${GRID_COLS.map(c => `<td class="num">${k === 'ct' && g[c.key][k] ? '−' : ''}${gbp(g[c.key][k])}${flag(c, k)}</td>`).join('')}</tr>`;
+    // The gain column is a CHANGE, so it carries its own sign: +£8,353 more left for us,
+    // −£600 less council tax. Every other column shows council tax as money going out.
+    const cell = (c, k) => {
+      const n = g[c.key][k];
+      if (!c.signed) return `${k === 'ct' && n ? '−' : ''}${gbp(n)}`;
+      return `<span class="${n > 0 ? (k === 'ct' ? 'neg' : 'good-t') : n < 0 ? (k === 'ct' ? 'good-t' : 'neg') : 'muted'}">${n > 0 ? '+' : ''}${gbp(n)}</span>`;
+    };
+    const row = (label, k, cls) => `<tr class="${cls || ''}"><th scope="row">${esc(label)}</th>${GRID_COLS.map(c => `<td class="num">${cell(c, k)}${flag(c, k)}</td>`).join('')}</tr>`;
     const unknownAll = Array.from(new Set(GRID_COLS.flatMap(c => g[c.key].ctUnknown || [])));
     $('kpis').innerHTML = `<div class="tbl-wrap"><table class="grid" aria-label="Rent and council tax, from where we started to the ceiling">
       <thead><tr><th></th>${head}</tr></thead>
@@ -679,6 +706,7 @@
       started: v => ({ rent: v.baselineRent == null ? v.recordRent : v.baselineRent, ct: v.baselineCt == null ? v.ctBeforeTicks : v.baselineCt, unknown: v.baselineCt == null && v.ctBeforeTicksUnknown, why: v.baselineDate ? `frozen ${v.baselineDate}` : 'not frozen: the record today, before any tick' }),
       now: v => ({ rent: v.rentNow, ct: v.ctNow, unknown: v.ctNowUnknown, why: v.ctNowWhy }),
       plan: v => ({ rent: v.planRent, ct: v.planCt, unknown: v.planCtUnknown, why: v.planWhy }),
+      gain: v => ({ rent: v.planRent - v.rentNow, ct: v.planCt - v.ctNow, unknown: v.planCtUnknown || v.ctNowUnknown, why: v.planWhy, signed: true }),
       best: v => ({ rent: v.bestRent, ct: v.bestCt, unknown: v.bestCtUnknown, why: v.bestWhy }),
     }[key];
     const rows = p.properties.map(v => Object.assign({ name: v.name + (v.selfManaged ? '' : ' (' + (v.agent || 'agent') + ')') }, pick(v)))
@@ -689,7 +717,11 @@
     const box = $('kpiDetail'); const d = state.ui.openKpi ? kpiRows(state.ui.openKpi) : null;
     if (!d) { box.hidden = true; box.innerHTML = ''; return; }
     box.hidden = false;
-    box.innerHTML = `<h3>${esc(d.title)}, property by property<span>${gbp(d.total.left, 2)} left</span></h3><div class="tbl-wrap"><table><thead><tr><th>Property</th><th class="num">Rent</th><th class="num">Council tax</th><th class="num">Left</th></tr></thead><tbody>${d.rows.length ? d.rows.map(r => `<tr><td class="wrap">${esc(r.name)}<div class="small muted">${esc(r.why || '')}</div></td><td class="num">${gbp(r.rent, 2)}</td><td class="num ${r.ct ? 'neg' : 'muted'}">${r.unknown ? '<span class="note">not known</span>' : r.ct ? '−' + gbp(r.ct, 2) : '£0'}</td><td class="num"><b>${gbp(r.rent - r.ct, 2)}</b></td></tr>`).join('') : '<tr><td class="empty" colspan="4">No properties</td></tr>'}</tbody></table></div>`;
+    const sgn = n => (n > 0 ? '+' : '') + gbp(n, 2);
+    const money3 = r => r.signed
+      ? `<td class="num">${sgn(r.rent)}</td><td class="num ${r.ct > 0 ? 'neg' : r.ct < 0 ? 'good-t' : 'muted'}">${sgn(r.ct)}</td><td class="num"><b>${sgn(r.rent - r.ct)}</b></td>`
+      : `<td class="num">${gbp(r.rent, 2)}</td><td class="num ${r.ct ? 'neg' : 'muted'}">${r.unknown ? '<span class="note">not known</span>' : r.ct ? '−' + gbp(r.ct, 2) : '£0'}</td><td class="num"><b>${gbp(r.rent - r.ct, 2)}</b></td>`;
+    box.innerHTML = `<h3>${esc(d.title)}, property by property<span>${d.rows.some(r => r.signed) ? sgn(d.total.left) : gbp(d.total.left, 2) + ' left'}</span></h3><div class="tbl-wrap"><table><thead><tr><th>Property</th><th class="num">Rent</th><th class="num">Council tax</th><th class="num">Left</th></tr></thead><tbody>${d.rows.length ? d.rows.map(r => `<tr><td class="wrap">${esc(r.name)}<div class="small muted">${esc(r.why || '')}</div></td>${money3(r)}</tr>`).join('') : '<tr><td class="empty" colspan="4">No properties</td></tr>'}</tbody></table></div>`;
   }
 
   function renderCountStrip() {
@@ -704,11 +736,15 @@
       cell(t.notDecided, 'still need a plan picked', t.notDecided ? 'warn' : '');
   }
 
-  const STATUSES = ['All', 'Not decided', 'To do', 'In progress', 'Realised', 'No change needed'];
+  // "No change needed" properties have their own section now (Kevin, 18 Sep 2026), so the
+  // filter covers only the work: what needs a plan picked, what is waiting, what is running.
+  const STATUSES = ['All', 'Not decided', 'To do', 'In progress', 'Realised'];
+  const SORTS = [{ key: 'plan', label: 'Biggest gain from our plan' }, { key: 'ceiling', label: 'Biggest ceiling' }];
   function renderStatusSeg() {
-    const have = new Set(state.plan.selfManaged.map(v => v.progress));
+    const have = new Set(working().map(v => v.progress));
     $('statusSeg').innerHTML = STATUSES.filter(s => s === 'All' || have.has(s))
       .map(s => `<button type="button" data-status="${esc(s)}" aria-pressed="${state.ui.status === s}">${esc(s)}</button>`).join('');
+    $('sortSeg').innerHTML = SORTS.map(o => `<button type="button" data-sort="${esc(o.key)}" aria-pressed="${state.ui.sort === o.key}">${esc(o.label)}</button>`).join('');
   }
 
   function renderCalc() {
@@ -788,30 +824,38 @@ BEFORE THE FIRST ONE IS SIGNED (all in writing)
   // and the paperwork that strategy needs.
   const PROGRESS_CLASS = { 'Realised': 'st-done', 'In progress': 'st-in-progress', 'To do': 'check', 'Not decided': 'check', 'No change needed': '', 'Agent-run': '' };
 
+  // Kevin, 18 Sep 2026: the ones we are working on come first, the ones with nothing to do
+  // sit in their own section underneath, and the agent-run ones stay last.
+  const quiet = v => v.progress === 'No change needed' || v.leaveAsIs;
+  function working() { return state.plan.selfManaged.filter(v => !quiet(v)); }
   function renderProperties() {
-    const self = state.plan.selfManaged, agent = state.plan.agentManaged;
-    $('selfCount').textContent = `${self.length} properties`;
+    const work = working(), rest = state.plan.selfManaged.filter(quiet), agent = state.plan.agentManaged;
+    const open = work.reduce((n, v) => n + v.checklist.open, 0);   // what the cards below actually list
+    $('selfCount').textContent = `${work.length} properties · ${open} thing${open === 1 ? '' : 's'} to do`;
+    $('quietCount').textContent = `${rest.length} propert${rest.length === 1 ? 'y' : 'ies'}`;
     $('agentCount').textContent = `${agent.length} properties`;
-    const shown = state.ui.status === 'All' ? self : self.filter(v => v.progress === state.ui.status);
+    const shown = state.ui.status === 'All' ? work : work.filter(v => v.progress === state.ui.status);
     $('selfList').innerHTML = shown.length ? sortProps(shown).map(propRow).join('')
       : '<div class="empty">No property is at that stage right now.</div>';
+    $('quietList').innerHTML = rest.length ? sortProps(rest).map(propRow).join('')
+      : '<div class="empty">Every property we run has something to do.</div>';
     $('agentList').innerHTML = agent.length ? sortProps(agent).map(propRow).join('')
       : '<div class="empty">No agent-run properties.</div>';
   }
-  // Biggest win first, but anything without a plan picked floats to the top: that
-  // is the only thing on this page that needs Kevin rather than Roy. The apartments of
-  // one block stay together, in number order, where the block's best flat would sit.
+  // Biggest first, on whichever column Kevin picked: the gain from our plan, or the
+  // ceiling (Kevin, 18 Sep 2026). The apartments of one block stay together, in number
+  // order, where the block's best flat would sit.
   function sortProps(list) {
     const group = v => v.parentId || v.id;
+    const figure = v => state.ui.sort === 'ceiling' ? (v.upliftBest || 0) : (v.upliftChosen || 0);
     const rep = {};
     list.forEach(v => {
-      const r = rep[group(v)] || (rep[group(v)] = { un: 1, best: -Infinity });
-      if (!v.chosen) r.un = 0;
-      r.best = Math.max(r.best, v.upliftBest || 0);
+      const r = rep[group(v)] || (rep[group(v)] = { top: -Infinity });
+      r.top = Math.max(r.top, figure(v));
     });
     return list.slice().sort((a, b) => {
       const ra = rep[group(a)], rb = rep[group(b)];
-      return ra.un - rb.un || rb.best - ra.best || group(a).localeCompare(group(b))
+      return rb.top - ra.top || group(a).localeCompare(group(b))
         || a.name.localeCompare(b.name, 'en-GB', { numeric: true });
     });
   }
@@ -840,14 +884,15 @@ BEFORE THE FIRST ONE IS SIGNED (all in writing)
         </div></span></div>
       <div class="pack-fig">${fig}</div>
       <span class="chev" aria-hidden="true">▸</span></div>`;
-    if (!open) return `<div class="pack">${head}</div>`;
+    // Kevin, 18 Sep 2026: the checklist is on the card itself, open or closed. Everything
+    // else (the figures, the four ways, who lives there, the set-up) is behind the expander.
+    const list = v.selfManaged ? checklistBlock(v) : '';
+    if (!open) return `<div class="pack">${head}${list}</div>`;
     if (!v.selfManaged) return `<div class="pack open">${head}<div class="pack-body">${agentBlock(v)}</div></div>`;
-    return `<div class="pack open">${head}<div class="pack-body">
+    return `<div class="pack open">${head}${list}<div class="pack-body">
       ${nowBlock(v)}
       ${strategyTable(v)}
       ${unitsBlock(v)}
-      ${checklistBlock(v)}
-      ${leversBlock(v)}
       ${setupBlock(v)}
     </div></div>`;
   }
@@ -924,9 +969,8 @@ BEFORE THE FIRST ONE IS SIGNED (all in writing)
         return `<li>${esc(t.name)} <span class="muted small">${t.age != null ? 'age ' + t.age : (t.over35Confirmed ? '35 or over' : 'age not known')}${t.rent ? ' · ' + gbp(t.rent, 2) : ''}${t.uc ? ' · Universal Credit' : ''}</span>
         ${t.note ? `<div class="small note">${esc(t.note)}</div>` : ''}
         ${ageUnknown ? `<div class="pt-fix"><span class="inl">Date of birth: <input class="sm" type="date" data-dob="${esc(t.id)}" aria-label="Date of birth for ${esc(t.name)}"><button class="btn btn-sm" data-act="save-dob" data-tenant="${esc(t.id)}">Save</button></span> <span class="muted">or</span> <button class="btn btn-sm" data-act="confirm-35" data-tenant="${esc(t.id)}">Confirm 35 or over</button></div>` : ''}
-        ${tenantTicks(v, t)}
         ${miss.length ? `<div class="small muted">Still to collect: ${esc(miss.join(', '))}</div>` : '<div class="small muted">All their details are on file</div>'}
-        <div class="row-actions"><button class="btn btn-sm" data-act="open-form" data-tenant="${esc(t.id)}">Open the meeting form</button></div></li>`;
+        <div class="row-actions"><button class="btn btn-sm" data-act="open-form" data-tenant="${esc(t.id)}">Tenant data capture form</button></div></li>`;
     }).join('');
     const extra = v.unitsExtra > 0
       ? `<li class="note">${v.unitsExtra} more place${v.unitsExtra === 1 ? '' : 's'} to fill once the work is done. ${v.unitsExtra === 1 ? 'It is' : 'They are'} not in the database yet: we add ${v.unitsExtra === 1 ? 'it' : 'them'} the day a tenant signs.</li>`
@@ -943,56 +987,29 @@ BEFORE THE FIRST ONE IS SIGNED (all in writing)
       </div></div>`;
   }
 
-  // The four ticks per tenant (Kevin, 16 Sep 2026). Each writes to the tenant's record.
-  // Rent uplift is three states underneath a tick: "Not needed" and "Done" both show
-  // ticked, but only Done adds money, so presetting a tenant as nothing-to-chase can
-  // never inflate the forecast. Unticking either one reopens it as To do.
-  function tenantTicks(v, t) {
-    const box = (field, checked, label, extra) => `<label class="tick"><input type="checkbox" data-tenant-tick="${field}" data-tenant="${esc(t.id)}" ${checked ? 'checked' : ''}> ${esc(label)}${extra || ''}</label>`;
-    const up = t.rentUplift || 'To do';
-    const upNote = up === 'Not needed' ? ' <span class="muted">(nothing to chase)</span>'
-      : up === 'Done' ? (t.upliftGap ? ` <span class="good-t">(+${gbp(t.upliftGap, 2)} in now)</span>` : ' <span class="muted">(done)</span>')
-      : t.upliftGap ? ` <span class="note">(+${gbp(t.upliftGap, 2)} to do)</span>` : '';
-    const jt = v.chosen === 'UC joint tenancy';
-    return `<div class="ticks" role="group" aria-label="Checklist for ${esc(t.name)}">
-      ${box('correctAgreement', t.correctAgreement, 'Correct tenancy agreement', jt && !t.correctAgreement ? ' <span class="note">(council tax stays ours until every tenant is ticked)</span>' : '')}
-      ${box('proofOfAddress', t.proofOfAddress, 'Proof of address')}
-      ${box('authoritySigned', t.authoritySigned, 'Letter of authority')}
-      ${box('rentUplift', up !== 'To do', 'Rent uplift', upNote)}
-    </div>`;
-  }
-
-  // What has to be signed for the plan picked. Single lets and short lets need
-  // nothing, and the page says so rather than showing an empty list.
+  // The checklist (Kevin, 18 Sep 2026). Everything that has to happen at this property,
+  // ticked and not, on the card whether it is open or closed: each tenant's four ticks, a
+  // line for each room to fill or place to let, and each move that gets us there. A tick
+  // writes to the tenant's record; a move keeps the buttons that raise a task, close it,
+  // or drop it once it no longer applies.
   function checklistBlock(v) {
-    const c = v.checklist;
-    if (!v.chosen) return `<div class="pack-block"><h4>What we would have to do</h4><p class="small note">Pick a plan above and the paperwork list appears here.</p></div>`;
-    if (!c) return '';
-    const names = v.tenants.map(t => t.name);
-    const perTenant = c.tenant.length && names.length
-      ? names.map(n => `<li><b>${esc(n)}</b><ul class="plain">${c.tenant.map(x => `<li>${esc(x)}</li>`).join('')}</ul></li>`).join('')
-      : (c.tenant.length ? `<li class="muted">For each tenant once they are in: ${c.tenant.map(esc).join(', ')}</li>` : '');
-    const parts = [];
-    if (c.property.length) parts.push(`<h5 class="small muted">For the property</h5><ul class="plain">${c.property.map(x => `<li>${esc(x)}</li>`).join('')}</ul>`);
-    if (perTenant) parts.push(`<h5 class="small muted">For each tenant</h5><ul class="plain">${perTenant}</ul>`);
-    if (c.ifShort.length) parts.push(`<h5 class="small muted">Only if their rent falls short</h5><ul class="plain">${c.ifShort.map(x => `<li>${esc(x)}</li>`).join('')}</ul>`);
-    return `<div class="pack-block"><h4>What we have to do for ${esc(v.chosen)}</h4>
-      <p class="small muted">${esc(c.note)}</p>${parts.join('') || '<p class="small muted">Nothing to sign.</p>'}</div>`;
-  }
-
-  function leversBlock(v) {
-    const all = state.plan.levers.filter(l => l.propertyId === v.id);
-    const shown = all.filter(l => state.ui.showDone || (l.status !== 'Done' && l.status !== 'Dropped'));
-    const stranded = v.strandedRows || [];
-    if (!shown.length && !stranded.length) return '';
+    const c = v.checklist || { items: [], done: 0, total: 0 };
+    const live = c.items.filter(i => !i.dropped);
     const busy = k => state.busy.has(k) ? 'disabled' : '';
-    return `<div class="pack-block"><h4>The moves that get us there</h4><div class="tbl-wrap"><table><tbody>${shown.map(l => `<tr class="${l.status === 'Done' || l.status === 'Dropped' ? 'dim' : ''}">
-      <td class="wrap">${esc(l.title)}<div class="small muted">${esc(l.evidence[0] || '')}</div>${l.needs && l.needs.length ? `<div class="small note">${esc(l.needs.join(' · '))}</div>` : ''}</td>
-      <td><span class="pill ${esc(l.effort.toLowerCase())}">${esc(l.effort)}</span> <span class="pill st-${esc(l.status.toLowerCase().replace(/\s+/g, '-'))}">${esc(l.status)}</span></td>
-      <td class="num">${l.monthly ? '+' + gbp(l.monthly, 2) : '—'}${l.capShortfall ? `<div class="small muted">CRF ${gbp(l.capShortfall, 2)}</div>` : ''}</td>
-      <td><div class="row-actions">${l.status === 'Candidate' ? `<button class="btn btn-sm" data-act="adopt" data-key="${esc(l.key)}" ${busy(l.key)}>Start it</button>` : ''}${(l.status !== 'Done' && l.status !== 'Dropped') ? `<button class="btn btn-sm btn-primary" data-act="task" data-key="${esc(l.key)}" ${busy(l.key)}>Task</button>` : ''}${(l.status === 'Adopted' || l.status === 'In progress') ? `<button class="btn btn-sm" data-act="done" data-key="${esc(l.key)}" ${busy(l.key)}>Done</button>` : ''}${(l.status !== 'Done' && l.status !== 'Dropped') ? `<button class="btn btn-sm btn-ghost" data-act="drop" data-key="${esc(l.key)}" ${busy(l.key)}>Drop</button>` : `<button class="btn btn-sm btn-ghost" data-act="reopen" data-key="${esc(l.key)}" ${busy(l.key)}>Reopen</button>`}</div></td></tr>`).join('')}</tbody></table></div>
-      ${stranded.length ? `<div class="stranded"><h5 class="small muted">No longer on the plan, but still open</h5><p class="small muted">These moves were started, then stopped applying (a tenant set to nothing to chase, a record updated, a tenant gone). Drop each one so it stops counting as open.${stranded.some(r => r.taskIds.length) ? ' Any task raised for it stays open: close that on the task board.' : ''}</p><ul class="plain">${stranded.map(r => `<li>${esc(r.title)} <span class="pill st-${esc(r.status.toLowerCase().replace(/\s+/g, '-'))}">${esc(r.status)}</span>${r.taskIds.length ? ` <span class="small muted">${r.taskIds.length} task${r.taskIds.length === 1 ? '' : 's'} linked</span>` : ''} <button class="btn btn-sm btn-ghost" data-act="drop-row" data-row="${esc(r.id)}" ${state.busy.has('row:' + r.id) ? 'disabled' : ''}>Drop</button></li>`).join('')}</ul></div>` : ''}
-      <label class="chk" style="margin-top:8px"><input type="checkbox" id="showDone" ${state.ui.showDone ? 'checked' : ''}> Show the ones already done or dropped</label></div>`;
+    const tick = i => `<li class="cl-item ${i.done ? 'done' : ''}"><label class="tick"><input type="checkbox" data-tenant-tick="${esc(i.field)}" data-tenant="${esc(i.tenantId)}" ${i.done ? 'checked' : ''}> ${esc(i.text)}</label>${i.note ? ` <span class="small ${i.done ? 'muted' : 'note'}">${esc(i.note)}</span>` : ''}</li>`;
+    const stale = i => `<li class="cl-item stale"><span class="cl-txt">${esc(i.text)}<div class="small note">Started, but it no longer applies. Drop it so it stops counting as open.${i.taskIds.length ? ` Its task stays open on the task board.` : ''}</div></span>
+      <span class="row-actions"><button class="btn btn-sm btn-ghost" data-act="drop-row" data-row="${esc(i.rowId)}" ${state.busy.has('row:' + i.rowId) ? 'disabled' : ''}>Drop</button></span></li>`;
+    const move = i => `<li class="cl-item ${i.done ? 'done' : ''}"><span class="cl-txt"><b>${esc(i.text)}</b>${i.monthly ? ` <span class="small good-t">+${gbp(i.monthly, 2)} a month</span>` : ''}
+      <div class="small muted">${esc(i.firstStep || i.detail)}</div>${i.needs.length ? `<div class="small note">${esc(i.needs.join(' · '))}</div>` : ''}</span>
+      <span class="row-actions"><span class="pill st-${esc(String(i.status).toLowerCase().replace(/\s+/g, '-'))}">${esc(i.status)}</span>
+        ${i.status === 'Candidate' ? `<button class="btn btn-sm" data-act="adopt" data-key="${esc(i.key)}" ${busy(i.key)}>Start it</button>` : ''}
+        ${!i.done ? `<button class="btn btn-sm btn-primary" data-act="task" data-key="${esc(i.key)}" ${busy(i.key)}>Task</button>` : ''}
+        ${!i.done ? `<button class="btn btn-sm" data-act="done" data-key="${esc(i.key)}" ${busy(i.key)}>Done</button>` : `<button class="btn btn-sm btn-ghost" data-act="reopen" data-key="${esc(i.key)}" ${busy(i.key)}>Reopen</button>`}
+        ${!i.done ? `<button class="btn btn-sm btn-ghost" data-act="drop" data-key="${esc(i.key)}" ${busy(i.key)}>Drop</button>` : ''}</span></li>`;
+    const body = live.length
+      ? `<ul class="cl-list">${live.map(i => i.kind === 'tick' ? tick(i) : i.kind === 'stranded' ? stale(i) : move(i)).join('')}</ul>`
+      : `<p class="small muted">Nothing to do here: no tenant paperwork outstanding and no rooms to fill.</p>`;
+    return `<div class="cl"><div class="cl-head"><b>What needs doing</b><span class="small ${c.open ? 'note' : 'muted'}">${c.done} of ${c.total} done</span></div>${body}</div>`;
   }
 
   function setupBlock(v) {
@@ -1007,7 +1024,6 @@ BEFORE THE FIRST ONE IS SIGNED (all in writing)
       ${f('Council tax band', 'ctBand', ['', 'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'], v.ctBand)}
       ${apt ? '' : f('PAYG meters', 'payg', ['Unknown', 'Yes', 'No'], v.payg)}
       ${apt ? '' : f('Council tax payer', 'ctPayer', ['Unknown', 'Owner', 'Tenants'], v.ctPayer)}
-      ${apt ? '' : f('Tasks go to', 'owner', ['', 'Roy', 'Kevin'], v.owner)}
       </div>
       ${apt ? `<div class="small muted" style="margin-top:6px">Let today as ${esc(v.current)}. Rooms, meters, who pays the council tax and who gets the tasks are set once on ${esc(v.parentName)}.</div>` : ''}
       ${v.movingToSelfManage ? `<label class="chk small" style="margin-top:8px"><input type="checkbox" data-prop-field="movingToSelfManage" data-prop="${esc(v.id)}" checked> Moving to self-manage (untick to send it back to the agent-run list)</label>` : ''}
@@ -1306,6 +1322,7 @@ BEFORE THE FIRST ONE IS SIGNED (all in writing)
     const ph = e.target.closest('.pack-head');
     if (ph && !e.target.closest('button')) { state.ui.openPack = state.ui.openPack === ph.dataset.pack ? null : ph.dataset.pack; renderProperties(); const nh = document.querySelector(`.pack-head[data-pack="${ph.dataset.pack}"]`); if (nh) nh.focus(); return; }
     const st = e.target.closest('#statusSeg button'); if (st) { state.ui.status = st.dataset.status; renderStatusSeg(); renderProperties(); return; }
+    const so = e.target.closest('#sortSeg button'); if (so) { state.ui.sort = so.dataset.sort; renderStatusSeg(); renderProperties(); return; }
     const card = e.target.closest('[data-kpi]'); if (card) { state.ui.openKpi = state.ui.openKpi === card.dataset.kpi ? null : card.dataset.kpi; renderHeadline(); const c = document.querySelector(`[data-kpi="${card.dataset.kpi}"]`); if (c) c.focus(); }
   });
   document.addEventListener('keydown', e => {
@@ -1319,7 +1336,6 @@ BEFORE THE FIRST ONE IS SIGNED (all in writing)
     if (t.matches('[data-tenant-tick]')) return saveTenantTick(t.dataset.tenant, t.dataset.tenantTick, t.checked);
     if (t.matches('input[data-setting]')) return saveSetting(t.dataset.setting, t.value);
     
-    if (t.id === 'showDone') { state.ui.showDone = t.checked; renderProperties(); return; }
     if (t.closest('#calcForm')) renderCalc();
   });
   document.addEventListener('input', e => { if (e.target.closest('#calcForm')) renderCalc(); });

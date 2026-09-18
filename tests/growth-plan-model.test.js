@@ -985,7 +985,7 @@ describe('agent-run properties', () => {
         const v = M.buildPlan(f, S, TODAY).properties[0];
         expect(v.selfManaged).toBe(false);
         expect(v.chosen).toBe('');
-        expect(v.checklist).toBeNull();
+        expect(v.paperwork).toBeNull();
     });
     it('Moving to self-manage brings one into our list with everything ours get', () => {
         const f = fixture(); f.properties[0].agent = 'Roc Immo'; f.properties[0].movingToSelfManage = true; f.properties[0].strategy = 'HMO';
@@ -994,7 +994,7 @@ describe('agent-run properties', () => {
         expect(p.agentManaged).toHaveLength(0);
         expect(p.properties[0].current).toBe('UC HMO');
         expect(p.properties[0].chosen).toBe('UC HMO');
-        expect(p.properties[0].checklist).not.toBeNull();
+        expect(p.properties[0].paperwork).not.toBeNull();
     });
 });
 
@@ -1348,5 +1348,83 @@ describe('the status label follows the money still to come', () => {
         const v = M.buildPlan(hmo(3), S, TODAY).properties[0];
         expect(v.upliftChosen).toBe(0);
         expect(v.progress).toBe('No change needed');
+    });
+});
+
+// Kevin, 18 Sep 2026: "The checklist should be visible in the unexpanded card, and all the
+// rest of the data is available when you expand."
+describe('the checklist: what has to be done at each property', () => {
+    it('lists every tenant tick and every move, and never lists a rent uplift twice', () => {
+        const f = fixture(); f.properties[0].strategy = 'UC HMO'; f.properties[0].lettableRooms = 4;
+        const v = M.buildPlan(f, S, TODAY).properties[0];
+        const ticks = v.checklist.items.filter(i => i.kind === 'tick');
+        expect(ticks).toHaveLength(12);                     // three tenants, four ticks each
+        expect(ticks[0].text).toBe('Adam Older: correct tenancy agreement');
+        expect(ticks[3].text).toBe('Adam Older: rent uplift');
+        expect(ticks[3].note).toBe('£372.62 a month');      // the gap to the 1-bed rate
+        const moves = v.checklist.items.filter(i => i.kind === 'move');
+        expect(moves.map(m => m.text)).toEqual(['1 more room let to over-35 UC tenants']);
+        expect(v.checklist.items.some(i => /room rate to 1-bed rate/.test(i.text))).toBe(false);
+        expect(v.checklist.total).toBe(13);
+        expect(v.checklist.done).toBe(0);
+    });
+    it('counts a tick as done, and Not needed counts as done too', () => {
+        const f = fixture();
+        f.tenants[0].correctAgreement = true; f.tenants[0].rentUplift = 'Not needed';
+        const v = M.buildPlan(f, S, TODAY).properties[0];
+        expect(v.checklist.done).toBe(2);
+        expect(v.checklist.open).toBe(v.checklist.total - 2);
+        expect(v.checklist.items.find(i => i.text === 'Adam Older: rent uplift').note).toBe('nothing to chase');
+    });
+    it('carries the move status, so the buttons on the line know what to offer', () => {
+        const f = fixture(); f.properties[0].strategy = 'UC HMO'; f.properties[0].lettableRooms = 4;
+        f.planRows = [{ id: 'r1', key: 'rooms:p1', status: 'Adopted', taskIds: ['tsk1'] }];
+        const item = M.buildPlan(f, S, TODAY).properties[0].checklist.items.find(i => i.kind === 'move');
+        expect(item.status).toBe('Adopted');
+        expect(item.done).toBe(false);
+        expect(item.taskIds).toEqual(['tsk1']);
+        expect(item.monthly).toBeGreaterThan(0);
+    });
+    it('a move that no longer applies is on the list as stale, so it can be dropped', () => {
+        const f = fixture(); f.tenants[0].rentUplift = 'Not needed';
+        f.planRows = [{ id: 'r1', key: 'uplift:t1', status: 'Adopted', title: 'Adam Older: room rate', taskIds: [] }];
+        const v = M.buildPlan(f, S, TODAY).properties[0];
+        const stale = v.checklist.items.filter(i => i.kind === 'stranded');
+        expect(stale.map(i => i.rowId)).toEqual(['r1']);
+    });
+    it('a dropped move is off the count, and an agent-held potential is never on the list', () => {
+        const f = fixture(); f.properties[0].strategy = 'Leave as is';
+        const v = M.buildPlan(f, S, TODAY).properties[0];
+        expect(v.checklist.items.some(i => /take back and let|re-let/.test(i.text))).toBe(false);
+        expect(v.checklist.total).toBe(v.checklist.items.filter(i => !i.dropped).length);
+    });
+    it('the portfolio counts what is open across the properties we run', () => {
+        const p = M.buildPlan(fixture(), S, TODAY);
+        expect(p.totals.checklistOpen).toBe(p.selfManaged.reduce((n, v) => n + v.checklist.open, 0));
+        expect(p.totals.checklistOpen).toBeGreaterThan(0);
+    });
+    it('an agent-run property carries no checklist and counts nothing', () => {
+        const f = fixture(); f.properties[0].agent = 'Roc Immo';
+        const p = M.buildPlan(f, S, TODAY);
+        expect(p.agentManaged[0].checklist.items).toEqual([]);
+        expect(p.totals.checklistOpen).toBe(0);
+    });
+});
+
+describe('the grid shows the gain from the plan on its own (Kevin, 18 Sep 2026)', () => {
+    it('gain is the plan less where we are now, rent, council tax and what is left', () => {
+        const g = M.buildPlan(fixture(), S, TODAY).totals.grid;
+        expect(g.gain.rent).toBe(Math.round((g.plan.rent - g.now.rent) * 100) / 100);
+        expect(g.gain.ct).toBe(Math.round((g.plan.ct - g.now.ct) * 100) / 100);
+        expect(g.gain.left).toBe(Math.round((g.plan.left - g.now.left) * 100) / 100);
+        expect(g.gain.signed).toBe(true);
+    });
+    it('a plan that takes council tax off us reads as a fall in council tax', () => {
+        const f = fixture(); f.units.pop(); f.tenants.pop(); f.tenancies.pop();
+        f.properties[0].strategy = 'UC joint tenancy'; f.tenants.forEach(t => { t.correctAgreement = false; });
+        const g = M.buildPlan(f, S, TODAY).totals.grid;
+        expect(g.now.ct).toBe(135);
+        expect(g.plan.ct).toBe(0);
+        expect(g.gain.ct).toBe(-135);
     });
 });

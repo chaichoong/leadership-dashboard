@@ -99,10 +99,11 @@ test.describe('Growth Plan page', () => {
   test('leads with the grid, and splits our properties from the agent-run ones', async ({ page }) => {
     await openPage(page, fixtures());
     const grid = page.locator('#kpis table.grid');
-    await expect(grid.locator('thead [data-kpi]')).toHaveCount(4);
+    await expect(grid.locator('thead [data-kpi]')).toHaveCount(5);
     await expect(grid.locator('thead')).toContainText('Where we started');
     await expect(grid.locator('thead')).toContainText('Where we are now');
     await expect(grid.locator('thead')).toContainText('If the plan is done');
+    await expect(grid.locator('thead')).toContainText('Gain when the plan is done');
     await expect(grid.locator('thead')).toContainText('Best possible');
     await expect(grid.locator('tbody tr')).toHaveCount(3);
     await expect(grid.locator('tbody')).toContainText('Rent a month');
@@ -112,7 +113,7 @@ test.describe('Growth Plan page', () => {
     await expect(grid.locator('tbody tr').first().locator('td').nth(1)).toHaveText('£2,204');
     // Council tax now: £135 on the room-let house we run; the single lets and the agent house carry none
     await expect(grid.locator('tbody tr').nth(1).locator('td').nth(1)).toHaveText('−£135');
-    await expect(page.locator('#selfCount')).toHaveText('2 properties');
+    await expect(page.locator('#selfCount')).toContainText('2 properties');
     await expect(page.locator('#agentCount')).toHaveText('1 properties');
     await expect(page.locator('#selfList')).toContainText('13 Far Street');   // Simon Collins is ours
     await expect(page.locator('#agentList')).toContainText('9 Agent Road');
@@ -143,24 +144,25 @@ test.describe('Growth Plan page', () => {
     const picker = open.locator('select[data-prop-field="strategy"]');
     await expect(picker.locator('option')).toHaveText(['Not decided yet', 'Single let', 'UC joint tenancy', 'UC HMO', 'Serviced accommodation', 'Leave as is']);
     await expect(picker).toHaveValue('UC HMO');   // stored as the old "HMO", read through the alias
-    await expect(open).toContainText('What we have to do for UC HMO');
     await picker.selectOption('Single let');
     await expect(page.locator('#toast')).toContainText('Saved');
     const w = writes.filter(x => x.tableId === TBL.properties).pop();
     expect(w.records[0].fields[P.strategy]).toBe('Single let');
-    await expect(page.locator('#selfList .pack.open')).toContainText('What we have to do for Single let');
     await page.locator('#selfList .pack.open select[data-prop-field="strategy"]').selectOption('Serviced accommodation');
-    await expect(page.locator('#selfList .pack.open')).toContainText('What we have to do for Serviced accommodation');
-    await expect(page.locator('#selfList .pack.open')).toContainText('Nothing for us to sign');
+    await expect(page.locator('#selfList .pack.open select[data-prop-field="strategy"]')).toHaveValue('Serviced accommodation');
   });
 
-  test('a single let needs no paperwork, and the page says so rather than showing an empty list', async ({ page }) => {
+  test('the checklist sits on the closed card and counts what is done', async ({ page }) => {
     const fx = fixtures();
-    fx[TBL.properties][2].fields[P.strategy] = 'Leave as is';   // 13 Far Street is a single let today
+    [TT.correctAgreement, TT.proofOfAddress, TT.authoritySigned].forEach(f => { fx[TBL.tenants][3].fields[f] = true; });
+    fx[TBL.tenants][3].fields[TT.rentUplift] = 'Not needed';    // Simon Collins: all four ticked
     await openPage(page, fx);
-    const open = await openSelf(page, '13 Far Street');
-    await expect(open).toContainText('What we have to do for Single let');
-    await expect(open).toContainText('Usually nothing to do');
+    const card = page.locator('#selfList .pack', { hasText: '13 Far Street' });
+    await expect(card.locator('.cl-head')).toContainText('What needs doing');
+    await expect(card.locator('.cl-head')).toContainText('4 of 5 done');   // the take-back is the fifth
+    await expect(card.locator('.cl-item')).toHaveCount(5);
+    await expect(card.locator('.cl-item.done')).toHaveCount(4);
+    await expect(card.locator('.cl-item', { hasText: 'take back from the Collins head lease' })).toHaveCount(1);
   });
 
   test('places to let count the plan, and the extra ones say they are not in the database yet', async ({ page }) => {
@@ -175,14 +177,14 @@ test.describe('Growth Plan page', () => {
     await expect(reopened).toContainText('not in the database yet: we add');
   });
 
-  test('a property with no plan picked is flagged Not decided and sorts to the top', async ({ page }) => {
+  test('a property with no plan picked is flagged Not decided, and the filter finds it', async ({ page }) => {
     const fx = fixtures();
     delete fx[TBL.properties][0].fields[P.strategy];
     await openPage(page, fx);
-    await expect(page.locator('#selfList .pack').first()).toContainText('Not decided');
+    await expect(page.locator('#selfList .pack', { hasText: '18 Test Park' })).toContainText('Not decided');
     await expect(page.locator('#countStrip')).toContainText('still need a plan picked');
-    const open = await openSelf(page, '18 Test Park');
-    await expect(open).toContainText('Pick a plan above and the paperwork list appears here');
+    await page.locator('#statusSeg button', { hasText: 'Not decided' }).click();
+    await expect(page.locator('#selfList .pack')).toHaveCount(2);   // 18 Test Park and 13 Far Street
   });
 
   test('the status filter narrows our list', async ({ page }) => {
@@ -196,13 +198,13 @@ test.describe('Growth Plan page', () => {
   test('each tenant has four ticks, and each writes its own field', async ({ page }) => {
     const writes = await openPage(page, fixtures());
     const open = await openSelf(page, '18 Test Park');
-    const adam = open.locator('li', { hasText: 'Adam Older' }).first();
-    await expect(adam.locator('label.tick')).toHaveText(['Correct tenancy agreement', 'Proof of address', 'Letter of authority', /Rent uplift/]);
-    await adam.locator('input[data-tenant-tick="proofOfAddress"]').check();
+    await expect(open.locator('.cl-item label.tick', { hasText: 'Adam Older' })).toHaveText([
+      'Adam Older: correct tenancy agreement', 'Adam Older: proof of address', 'Adam Older: letter of authority', 'Adam Older: rent uplift']);
+    await open.locator('input[data-tenant-tick="proofOfAddress"][data-tenant="recT1"]').check();
     await expect(page.locator('#toast')).toContainText('Proof of address ticked for Adam Older');
     let w = writes.filter(x => x.tableId === TBL.tenants).pop();
     expect(w.records[0]).toEqual({ id: 'recT1', fields: { [TT.proofOfAddress]: true } });
-    await page.locator('#selfList .pack.open li', { hasText: 'Adam Older' }).first().locator('input[data-tenant-tick="authoritySigned"]').check();
+    await page.locator('#selfList .pack.open input[data-tenant-tick="authoritySigned"][data-tenant="recT1"]').check();
     w = writes.filter(x => x.tableId === TBL.tenants).pop();
     expect(w.records[0].fields[TT.authoritySigned]).toBe(true);
   });
@@ -212,7 +214,7 @@ test.describe('Growth Plan page', () => {
     const nowRent = () => page.locator('#kpis table.grid tbody tr').first().locator('td').nth(1);
     await expect(nowRent()).toHaveText('£2,204');
     const open = await openSelf(page, '18 Test Park');
-    await open.locator('li', { hasText: 'Adam Older' }).first().locator('input[data-tenant-tick="rentUplift"]').check();
+    await open.locator('input[data-tenant-tick="rentUplift"][data-tenant="recT1"]').check();
     await expect(page.locator('#toast')).toContainText('Rent uplift done for Adam Older');
     const tenantWrite = writes.find(x => x.tableId === TBL.tenants);
     expect(tenantWrite.records[0]).toEqual({ id: 'recT1', fields: { [TT.rentUplift]: 'Done' } });
@@ -228,10 +230,10 @@ test.describe('Growth Plan page', () => {
     await openPage(page, fx);
     await expect(page.locator('#kpis table.grid tbody tr').first().locator('td').nth(1)).toHaveText('£2,204');
     const open = await openSelf(page, '18 Test Park');
-    const adam = open.locator('li', { hasText: 'Adam Older' }).first();
+    const adam = open.locator('.cl-item', { hasText: 'Adam Older: rent uplift' });
     await expect(adam.locator('input[data-tenant-tick="rentUplift"]')).toBeChecked();
     await expect(adam).toContainText('nothing to chase');
-    await expect(open.locator('tr', { hasText: 'room rate to 1-bed rate' })).toHaveCount(0);
+    await expect(open.locator('.cl-item', { hasText: 'room rate to 1-bed rate' })).toHaveCount(0);
   });
 
   test('a joint tenancy keeps council tax on us until every tenant has the correct agreement', async ({ page }) => {
@@ -243,7 +245,7 @@ test.describe('Growth Plan page', () => {
     const open = await openSelf(page, '18 Test Park');
     await expect(open.locator('.nowtbl')).toContainText('0 of 3 so far');
     for (const name of ['Adam Older', 'Paul Flat', 'Gary Unknown']) {
-      await page.locator('#selfList .pack.open li', { hasText: name }).first().locator('input[data-tenant-tick="correctAgreement"]').check();
+      await page.locator(`#selfList .pack.open .cl-item input[data-tenant-tick="correctAgreement"][data-tenant="${{ 'Adam Older': 'recT1', 'Paul Flat': 'recT2', 'Gary Unknown': 'recT3' }[name]}"]`).check();
       await expect(page.locator('#toast')).toContainText('Correct tenancy agreement ticked for ' + name);
       if (name !== 'Gary Unknown') await expect(ctNow()).toHaveText('−£135');   // not yet: every tenant
     }
@@ -259,7 +261,7 @@ test.describe('Growth Plan page', () => {
     const open = page.locator('#agentList .pack.open');
     await expect(open.locator('input[data-prop-field="movingToSelfManage"]')).toHaveCount(1);
     await expect(open.locator('.fourtbl')).toHaveCount(0);
-    await expect(open.locator('.ticks')).toHaveCount(0);
+    await expect(page.locator('#agentList .cl')).toHaveCount(0);
     await expect(open.locator('select[data-prop-field="strategy"]')).toHaveCount(0);
     // click, not check(): ticking moves the property into the other list and redraws it, so the
     // checkbox Playwright clicked is detached before it could confirm it reads ticked.
@@ -267,7 +269,7 @@ test.describe('Growth Plan page', () => {
     await expect(page.locator('#toast')).toContainText('Moved to the properties we run ourselves');
     const w = writes.filter(x => x.tableId === TBL.properties).pop();
     expect(w.records[0]).toMatchObject({ id: 'recAgent', fields: { [PX.movingToSelfManage]: true } });
-    await expect(page.locator('#selfCount')).toHaveText('3 properties');
+    await expect(page.locator('#selfCount')).toContainText('3 properties');
     await expect(page.locator('#agentList')).not.toContainText('9 Agent Road');
     await expect(page.locator('#selfList')).toContainText('9 Agent Road');
   });
@@ -292,7 +294,7 @@ test.describe('Growth Plan page', () => {
     const w = writes.find(x => x.tableId === TBL.tenants);
     expect(w.records[0].fields[T.dob]).toBe('1980-06-01');
     expect(w.records[0].fields[T.notes]).toMatch(/Growth Plan page/);
-    await expect(page.locator('#selfList .pack.open')).toContainText('Gary Unknown: room rate to 1-bed rate (age 46)');
+    await expect(page.locator('#selfList .pack.open .cl-item', { hasText: 'Gary Unknown: rent uplift' })).toContainText('£372.62 a month');
     await expect(page.locator('#selfList .pack.open input[data-dob="recT3"]')).toHaveCount(0);
   });
 
@@ -311,36 +313,34 @@ test.describe('Growth Plan page', () => {
     await open.locator('button[data-act="confirm-35"][data-tenant="recT3"]').click();
     await expect(page.locator('#toast')).toContainText('recorded as 35 or over');
     expect(writes.find(x => x.tableId === TBL.tenants).records[0].fields[T.over35]).toBe(true);
-    await expect(page.locator('#selfList .pack.open')).toContainText('Gary Unknown: room rate to 1-bed rate (35+ confirmed)');
+    await expect(page.locator('#selfList .pack.open .cl-item', { hasText: 'Gary Unknown: rent uplift' })).toContainText('£372.62 a month');
   });
 
   test('adopting a move creates a Growth Plan row and a task links to it', async ({ page }) => {
     const writes = await openPage(page, fixtures());
     const open = await openSelf(page, '18 Test Park');
-    await open.locator('tr', { hasText: 'room rate to 1-bed rate' }).locator('button[data-act="adopt"]').click();
+    await open.locator('.cl-item', { hasText: 'more room' }).locator('button[data-act="adopt"]').click();
     await expect(page.locator('#toast')).toContainText('Adopted');
     const planWrite = writes.find(x => x.tableId === TBL.plan);
-    expect(planWrite.records[0].fields[PLAN.key]).toBe('uplift:recT1');
+    expect(planWrite.records[0].fields[PLAN.key]).toBe('rooms:recProp1');
     expect(planWrite.records[0].fields[PLAN.status]).toBe('Adopted');
-    await page.locator('#selfList .pack.open tr', { hasText: 'room rate to 1-bed rate' }).locator('button[data-act="task"]').click();
-    await expect(page.locator('#toast')).toContainText('Task created for Kevin Brittain');
+    await page.locator('#selfList .pack.open .cl-item', { hasText: 'more room' }).locator('button[data-act="task"]').click();
+    await expect(page.locator('#toast')).toContainText('Task created for Roy Lavin');
     const tf = writes.find(x => x.tableId === TBL.tasks).records[0].fields;
-    expect(tf['fldgFjGBw6bTKJFCD']).toMatch(/^Growth plan: Adam Older/);
+    expect(tf['fldgFjGBw6bTKJFCD']).toMatch(/^Growth plan: 18 Test Park/);
     expect(tf['fldLu1Y4GzyWcDoxr']).toEqual(['recoGcXRXCniyJsTz']);
-    await expect(page.locator('#selfList .pack.open tr', { hasText: 'room rate to 1-bed rate' })).toContainText('In progress');
+    await expect(page.locator('#selfList .pack.open .cl-item', { hasText: 'more room' })).toContainText('In progress');
     // the status pill carries its colour class: the regex once matched a literal backslash, so it never did
-    await expect(page.locator('#selfList .pack.open tr', { hasText: 'room rate to 1-bed rate' }).locator('.pill.st-in-progress')).toHaveCount(1);
+    await expect(page.locator('#selfList .pack.open .cl-item', { hasText: 'more room' }).locator('.pill.st-in-progress')).toHaveCount(1);
   });
 
-  test('a works move goes to Roy unless the house says otherwise', async ({ page }) => {
+  test('a works move goes to Roy, and the set-up no longer asks who tasks go to', async ({ page }) => {
     const writes = await openPage(page, fixtures());
     const open = await openSelf(page, '18 Test Park');
-    await open.locator('tr', { hasText: 'more room' }).locator('button[data-act="task"]').click();
+    await open.locator('.cl-item', { hasText: 'more room' }).locator('button[data-act="task"]').click();
     await expect(page.locator('#toast')).toContainText('Task created for Roy Lavin');
     expect(writes.find(x => x.tableId === TBL.tasks).records[0].fields['flduCtmQGpOA4eWaj']).toEqual(['reclbdjfVev3bqNHS']);
-    await page.locator('#selfList .pack.open select[data-prop-field="owner"]').selectOption('Kevin');
-    await expect(page.locator('#toast')).toContainText('Saved');
-    expect(writes.filter(x => x.tableId === TBL.properties).pop().records[0].fields[P.owner]).toBe('Kevin');
+    await expect(page.locator('#selfList .pack.open select[data-prop-field="owner"]')).toHaveCount(0);
   });
 
   test('setting a council tax band re-prices the HMO and short-let figures', async ({ page }) => {
@@ -393,14 +393,16 @@ test.describe('Growth Plan page', () => {
     await expect(panel).toHaveAttribute('open', '');    // the panel survives the re-render
   });
 
-  test('a done move stays hidden until asked for', async ({ page }) => {
+  test('a move already done stays on the checklist, marked done', async ({ page }) => {
     const fx = fixtures();
-    fx[TBL.plan].push({ id: 'recPlanDone', fields: { [PLAN.key]: 'uplift:recT1', [PLAN.status]: 'Done', [PLAN.title]: 'old' } });
+    fx[TBL.plan].push({ id: 'recPlanDone', fields: { [PLAN.key]: 'rooms:recProp1', [PLAN.status]: 'Done', [PLAN.title]: 'old' } });
     await openPage(page, fx);
-    const open = await openSelf(page, '18 Test Park');
-    await expect(open.locator('tr', { hasText: 'Adam Older' })).toHaveCount(0);
-    await open.locator('#showDone').check();
-    await expect(page.locator('#selfList .pack.open tr', { hasText: 'Adam Older' })).toContainText('Done');
+    const card = page.locator('#selfList .pack', { hasText: '18 Test Park' });
+    const item = card.locator('.cl-item', { hasText: 'more room' });
+    await expect(item).toHaveClass(/done/);
+    await expect(item).toContainText('Done');
+    await expect(item.locator('button[data-act="reopen"]')).toHaveCount(1);
+    await expect(item.locator('button[data-act="task"]')).toHaveCount(0);
   });
 
   test('a grid column opens to show the properties behind it', async ({ page }) => {
@@ -455,14 +457,14 @@ test.describe('Growth Plan page', () => {
     fx[TBL.plan].push({ id: 'recStranded', fields: { [PLAN.key]: 'uplift:recT1', [PLAN.status]: 'Adopted', [PLAN.title]: 'Adam Older: room rate to 1-bed rate' } });
     const writes = await openPage(page, fx);
     const open = await openSelf(page, '18 Test Park');
-    const stranded = open.locator('.stranded');
-    await expect(stranded).toContainText('No longer on the plan, but still open');
+    const stranded = open.locator('.cl-item.stale');
     await expect(stranded).toContainText('Adam Older: room rate to 1-bed rate');
+    await expect(stranded).toContainText('it no longer applies');
     await stranded.locator('button[data-act="drop-row"]').click();
     await expect(page.locator('#toast')).toContainText('Dropped: Adam Older');
     const w = writes.filter(x => x.tableId === TBL.plan).pop();
     expect(w.records[0]).toEqual({ id: 'recStranded', fields: { [PLAN.status]: 'Dropped' } });
-    await expect(page.locator('#selfList .pack.open .stranded')).toHaveCount(0);
+    await expect(page.locator('#selfList .pack.open .cl-item.stale')).toHaveCount(0);
   });
 
   test('review fix 5: Freeze writes only the starting figures still missing', async ({ page }) => {
@@ -491,7 +493,7 @@ test.describe('Growth Plan page', () => {
     await openPage(page, fx);
     await expect(page.locator('#formTenant option', { hasText: 'Adam Older' })).toHaveCount(1);
     const open = await openSelf(page, '18 Test Park');
-    await expect(open.locator('tr', { hasText: 'room rate to 1-bed rate' }).first()).toBeVisible();
+    await expect(open.locator('.cl-item', { hasText: 'Adam Older: rent uplift' })).toContainText('£372.62 a month');
   });
 
   test('every row shows our plan and the ceiling side by side', async ({ page }) => {
@@ -640,6 +642,61 @@ test.describe('Growth Plan page', () => {
     const props = writes.filter(x => x.tableId === TBL.properties).flatMap(x => x.records.map(r => r.id));
     expect(props).not.toContain('recApt1');
     expect(props).not.toContain('recBlock');
+  });
+
+  // Kevin, 18 Sep 2026: sort by the column he is working from, and keep the quiet ones apart.
+  test('the sort control orders by our plan gain or by the ceiling', async ({ page }) => {
+    const fx = fixtures();
+    // 18 Test Park has the biggest ceiling but a joint tenancy would LOSE money; 13 Far Street
+    // gains from its plan. So the two sorts must put them in opposite orders.
+    fx[TBL.properties][0].fields[P.strategy] = 'UC joint tenancy';
+    fx[TBL.properties][2].fields[P.strategy] = 'UC HMO';
+    await openPage(page, fx);
+    await expect(page.locator('#sortSeg button')).toHaveText(['Biggest gain from our plan', 'Biggest ceiling']);
+    await expect(page.locator('#sortSeg button', { hasText: 'Biggest gain from our plan' })).toHaveAttribute('aria-pressed', 'true');
+    const order = async () => (await page.locator('#selfList .pack .pack-n b').allTextContents());
+    expect(await order()).toEqual(['13 Far Street', '18 Test Park']);
+    await page.locator('#sortSeg button', { hasText: 'Biggest ceiling' }).click();
+    expect(await order()).toEqual(['18 Test Park', '13 Far Street']);
+    await expect(page.locator('#sortSeg button', { hasText: 'Biggest ceiling' })).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  test('properties with nothing to do sit in their own section', async ({ page }) => {
+    const fx = fixtures();
+    fx[TBL.properties][2].fields[P.strategy] = 'Leave as is';   // 13 Far Street: held as it is
+    await openPage(page, fx);
+    await expect(page.locator('#gp-quiet h2')).toContainText('Nothing to do right now');
+    await expect(page.locator('#quietList')).toContainText('13 Far Street');
+    await expect(page.locator('#selfList')).not.toContainText('13 Far Street');
+    await expect(page.locator('#quietCount')).toHaveText('1 property');
+    // The count over the working list counts only the cards in it: 18 Test Park's twelve
+    // ticks, its rooms move and Paul Flat's shortfall claim, never 13 Far Street's
+    // outstanding ticks down in the quiet section.
+    await expect(page.locator('#selfCount')).toHaveText('1 properties · 14 things to do');
+    await expect(page.locator('#selfList .cl-item')).toHaveCount(14);
+  });
+
+  test('the grid shows the gain when the plan is done, signed', async ({ page }) => {
+    await openPage(page, fixtures());
+    const rows = page.locator('#kpis table.grid tbody tr');
+    const cellText = async (row, col) => (await rows.nth(row).locator('td').nth(col).innerText()).trim();
+    const money = t => Number(t.replace(/[£+,]/g, '').replace('−', '-'));
+    const now = money(await cellText(2, 1)), plan = money(await cellText(2, 2)), gain = money(await cellText(2, 3));
+    expect(Math.round(gain * 100) / 100).toBe(Math.round((plan - now) * 100) / 100);
+    expect(await cellText(2, 3)).toMatch(/^\+£/);
+    await page.locator('[data-kpi="gain"]').click();
+    await expect(page.locator('#kpiDetail')).toContainText('Gain when the plan is done, property by property');
+  });
+
+  test('the expansion carries the figures and the set-up, not a second list of moves', async ({ page }) => {
+    await openPage(page, fixtures());
+    const open = await openSelf(page, '18 Test Park');
+    await expect(open.locator('.pack-block h4')).toHaveText([
+      'This property, start to ceiling', 'The four ways we could let it', 'Places to let, and who is in them', 'How this property is set up']);
+    await expect(open).not.toContainText('The moves that get us there');
+    await expect(open).not.toContainText('Tasks go to');
+    await expect(open.locator('.cl')).toHaveCount(1);          // one checklist, on the card
+    await expect(open).toContainText('Tenant data capture form');
   });
 
   test('shows the empty state and no crash when nothing loads', async ({ page }) => {

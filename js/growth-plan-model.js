@@ -1033,7 +1033,9 @@
                 netPlanned: round2(planRent - planCt),
                 upliftChosen: chosen ? round2((planRent - planCt) - (rentNowForecast - ctNow)) : null,
                 upliftBest: round2((bestOpt.rent - bestOpt.ct) - (rentNowForecast - ctNow)),
-                checklist: selfManaged ? (CHECKLIST[chosen] || null) : null,
+                // The paperwork a strategy needs, kept for the glossary and the packs; the
+                // checklist Kevin works from is built below (checklistFor).
+                paperwork: selfManaged ? (CHECKLIST[chosen] || null) : null,
                 // Kevin, 16 Sep 2026: the split reads the PROPERTY, never a tenant's pay type.
                 // Simon Collins is not an agent, and a ticked "Moving to self-manage" promotes
                 // an agent-run property into our list with everything that comes with it.
@@ -1134,6 +1136,10 @@
             });
         properties.forEach(v => { v.strandedRows = stranded.filter(r => r.propertyId === v.id); });
         totals.strandedRows = stranded;
+        // Only the properties we run have a checklist: an agent-run card shows none.
+        const noWork = { items: [], done: 0, open: 0, total: 0 };
+        properties.forEach(v => { v.checklist = v.selfManaged ? checklistFor(v, levers) : noWork; });
+        totals.checklistOpen = properties.reduce((n, v) => n + v.checklist.open, 0);
 
         // The grid: rent, council tax and what is left, in four columns.
         const column = pick => {
@@ -1161,6 +1167,16 @@
             plan: column(v => ({ rent: v.planRent, ct: v.planCt, ctUnknown: v.planCtUnknown })),
             best: column(v => ({ rent: v.bestRent, ct: v.bestCt, ctUnknown: v.bestCtUnknown })),
         };
+        // Kevin, 18 Sep 2026: the gain on its own, so the money the plan adds is a figure
+        // on the page rather than a subtraction to do in your head. Council tax is the
+        // CHANGE in what we pay: below zero means the plan takes council tax off us.
+        totals.grid.gain = {
+            rent: round2(totals.grid.plan.rent - totals.grid.now.rent),
+            ct: round2(totals.grid.plan.ct - totals.grid.now.ct),
+            left: round2(totals.grid.plan.left - totals.grid.now.left),
+            ctUnknown: Array.from(new Set(totals.grid.plan.ctUnknown.concat(totals.grid.now.ctUnknown))),
+            signed: true,
+        };
         totals.rentNow = totals.grid.now.rent;
         totals.upliftsDone = round2(properties.reduce((n, v) => n + num(v.upliftsDone), 0));
         totals.upliftsToDo = round2(properties.reduce((n, v) => n + num(v.upliftsToDo), 0));
@@ -1178,6 +1194,41 @@
         const todo = levers.filter(l => (l.counted === 'now' || l.counted === 'remote') && active(l)).map(l => ({ key: l.key, stage: l.stage, text: l.firstStep, owner: l.owner, property: l.property, monthly: l.monthly, status: l.status }));
         const packs = buildPacks(properties, levers, active);
         return { today: T, levers, properties, selfManaged, agentManaged, unknownAge, totals, next, todo, packs, safeSingle, capSingle, lhaStale: lhaStale(T), stageNames: STAGE_NAMES, stageOf: l => STAGE[l.lever] || 5 };
+    }
+
+    // ── The checklist (Kevin, 18 Sep 2026) ──────────────────────────────
+    // One list per property of what actually has to be done, shown on the card before
+    // it is opened: every move that gets us there (a spare room to fill, an empty place
+    // to let, the council tax), then each tenant's four ticks. A move a tick already
+    // covers (the rent uplift) is not listed twice. Moves keep their own status, so the
+    // buttons that raise a task or close a move live on the checklist line.
+    function checklistFor(v, levers) {
+        const items = [];
+        const coveredByTick = l => !!l.tenantId && (l.lever === 'Rent uplift' || l.lever === 'Rate refresh');
+        levers.filter(l => l.propertyId === v.id && l.counted !== 'agent' && !coveredByTick(l)).forEach(l => {
+            items.push({
+                kind: 'move', key: l.key, text: String(l.title).replace(v.name + ': ', ''),
+                detail: (l.evidence || [])[0] || '', needs: l.needs || [], firstStep: l.firstStep || '',
+                status: l.status, done: l.status === 'Done', dropped: l.status === 'Dropped',
+                monthly: num(l.monthly), effort: l.effort, taskIds: l.taskIds || [],
+            });
+        });
+        v.tenants.forEach(t => TENANT_DOCS.forEach(d => {
+            const uplift = d.key === 'rentUplift';
+            const state = t.rentUplift || 'To do';
+            items.push({
+                kind: 'tick', field: d.key, tenantId: t.id, tenant: t.name,
+                text: `${t.name}: ${d.label.charAt(0).toLowerCase()}${d.label.slice(1)}`,
+                done: uplift ? state !== 'To do' : !!t[d.key],
+                note: !uplift ? '' : state === 'Not needed' ? 'nothing to chase'
+                    : num(t.upliftGap) > 0 ? `£${money(t.upliftGap)} a month` : '',
+            });
+        }));
+        (v.strandedRows || []).forEach(r => items.push({
+            kind: 'stranded', rowId: r.id, text: r.title, status: r.status, taskIds: r.taskIds || [], done: false,
+        }));
+        const live = items.filter(i => !i.dropped);
+        return { items, done: live.filter(i => i.done).length, open: live.filter(i => !i.done).length, total: live.length };
     }
 
     // ── Property work packs ─────────────────────────────────────────────
