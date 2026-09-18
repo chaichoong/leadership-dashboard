@@ -20,6 +20,18 @@ REPO="/Users/kevinbrittain/Projects/leadership-dashboard/.claude/worktrees/conte
 # The runtime worktree holds `main` and is fast-forwarded before the nightly
 # jobs, so a scheduled job reads shipped code rather than whatever branch a
 # session left the main checkout on.
-[ -d "$REPO/scripts" ] || REPO="/Users/kevinbrittain/Projects/leadership-dashboard"
+#
+# The fallback tests for THIS SCRIPT, not for scripts/. Testing the directory
+# was wrong and would have failed silently: scripts/ exists in that worktree
+# whatever commit it sits on, so on any day the worktree had not been
+# fast-forwarded past this feature the test would pass and python would then
+# die on a missing file. The fallback exists precisely for that day.
+[ -f "$REPO/scripts/utilita-balance.py" ] || REPO="/Users/kevinbrittain/Projects/leadership-dashboard"
 
-exec /usr/bin/python3 "$REPO/scripts/utilita-balance.py" run "$@"
+TARGET="$REPO/scripts/utilita-balance.py"
+if [ ! -f "$TARGET" ]; then
+  echo "utilita-balance: no utilita-balance.py in either checkout" >&2
+  exit 1
+fi
+
+exec /usr/bin/python3 "$TARGET" run "$@"

@@ -260,6 +260,16 @@ print('BOTH=' + str(len(ub.expected_accounts({'accounts': [{'label':'a'},{'label
         expect(read).not.toMatch(/row\["problem"\][^\n]*stderr/);
     });
 
+    it('the runner tests for the SCRIPT, not the scripts directory', () => {
+        // scripts/ exists in the runtime worktree whatever commit it sits on,
+        // so testing the directory passes on any day that worktree has not been
+        // fast-forwarded past this feature, and python then dies on a missing
+        // file. The fallback exists precisely for that day.
+        const sh = readFileSync(resolve(root, 'scripts/utilita-balance-run.sh'), 'utf8');
+        expect(sh).toMatch(/\[ -f "\$REPO\/scripts\/utilita-balance\.py" \]/);
+        expect(sh).not.toMatch(/\[ -d "\$REPO\/scripts" \]/);
+    });
+
     it('the relay caps text length and de-duplicates recipients', () => {
         const worker = readFileSync(resolve(root, 'workers/apple-inbound/worker.js'), 'utf8');
         expect(worker).toMatch(/RELAY_MAX_TEXT/);
