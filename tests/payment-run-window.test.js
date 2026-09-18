@@ -17,20 +17,25 @@ const PY = join(ROOT, 'scripts', 'payment-run.py');
 
 // Pull the real function out of js/invoices.js and evaluate it. Copying it
 // would defeat the point: the test must break when the SHIPPED code changes.
-function loadJsWindow() {
-  const src = readFileSync(join(ROOT, 'js', 'invoices.js'), 'utf8');
-  const start = src.indexOf('function paymentRunWindow(');
-  expect(start, 'paymentRunWindow() not found in js/invoices.js').toBeGreaterThan(-1);
-  // Walk braces from the function's opening brace to its matching close.
+function extractFn(src, name) {
+  const start = src.indexOf(`function ${name}(`);
+  expect(start, `${name}() not found in js/invoices.js`).toBeGreaterThan(-1);
   const open = src.indexOf('{', start);
   let depth = 0, end = -1;
   for (let i = open; i < src.length; i++) {
     if (src[i] === '{') depth++;
     else if (src[i] === '}' && --depth === 0) { end = i + 1; break; }
   }
-  expect(end, 'could not find the end of paymentRunWindow()').toBeGreaterThan(open);
+  expect(end, `could not find the end of ${name}()`).toBeGreaterThan(open);
+  return src.slice(start, end);
+}
+
+function loadJsWindow() {
+  const src = readFileSync(join(ROOT, 'js', 'invoices.js'), 'utf8');
+  const body = ['paymentRunWindow', 'paymentRunBuckets', 'localISODate']
+    .map((n) => extractFn(src, n)).join('\n');
   // eslint-disable-next-line no-new-func
-  return new Function(`${src.slice(start, end)}; return paymentRunWindow;`)();
+  return new Function(`${body}; return { paymentRunWindow, paymentRunBuckets, localISODate };`)();
 }
 
 function pyWindow(asof) {
@@ -38,7 +43,7 @@ function pyWindow(asof) {
   return JSON.parse(out);
 }
 
-const paymentRunWindow = loadJsWindow();
+const { paymentRunWindow, paymentRunBuckets, localISODate } = loadJsWindow();
 
 describe('payment run window', () => {
   it('ends at Friday 21:00, not 16:00 — Kevin moved the cutoff on 18 Sep 2026', () => {
@@ -97,5 +102,80 @@ describe('the payment-run script is self-consistent', () => {
     // corroboration, the quota classification — are covered there, offline.
     const out = execFileSync('python3', [PY, 'selftest'], { encoding: 'utf8' });
     expect(out).toContain('all checks pass');
+  });
+});
+
+describe('three sections', () => {
+  // Kevin, 18 Sep 2026, six minutes past the cutoff with the week's invoices
+  // still unpaid: what he was about to pay had dropped out of "This week" and
+  // landed in "Still owed" beside February's debts. Two boundaries, not one.
+  const FRIDAY_9PM_PLUS = new Date('2026-09-18T21:05:00+01:00');
+
+  it('after the cutoff, the week being paid is Last week', () => {
+    const { thisWeekStart, lastWeekStart } = paymentRunBuckets(FRIDAY_9PM_PLUS);
+    expect(thisWeekStart.toISOString()).toBe(new Date('2026-09-18T21:00:00+01:00').toISOString());
+    expect(lastWeekStart.toISOString()).toBe(new Date('2026-09-11T21:00:00+01:00').toISOString());
+  });
+
+  it('the £90 invoice from 16 Sep lands in Last week, NOT Still owed', () => {
+    // The exact regression Kevin reported, with the real invoice date.
+    const { thisWeekStart, lastWeekStart } = paymentRunBuckets(FRIDAY_9PM_PLUS);
+    const day = '2026-09-16';
+    expect(day >= localISODate(thisWeekStart)).toBe(false);   // not This week
+    expect(day >= localISODate(lastWeekStart)).toBe(true);    // IS Last week
+  });
+
+  it('February stays in Still owed', () => {
+    const { lastWeekStart } = paymentRunBuckets(FRIDAY_9PM_PLUS);
+    expect('2026-02-03' >= localISODate(lastWeekStart)).toBe(false);
+  });
+
+  it('the tab and the script agree on BOTH boundaries — both read from source', () => {
+    for (const asof of ['2026-09-18T20:59:00+01:00',
+                        '2026-09-18T21:05:00+01:00',
+                        '2026-09-21T09:00:00+01:00',
+                        '2026-10-28T09:00:00+00:00']) {
+      const py = pyWindow(asof);
+      const js = paymentRunBuckets(new Date(asof));
+      expect(new Date(py.buckets.thisWeekStart).toISOString(), `thisWeekStart for ${asof}`)
+        .toBe(js.thisWeekStart.toISOString());
+      expect(new Date(py.buckets.lastWeekStart).toISOString(), `lastWeekStart for ${asof}`)
+        .toBe(js.lastWeekStart.toISOString());
+    }
+  });
+
+  it('localISODate does not slip a day via UTC', () => {
+    // toISOString() converts to UTC first, so a London time in the small hours
+    // of BST returns the PREVIOUS day and shifts every section boundary.
+    expect(localISODate(new Date('2026-07-01T00:30:00+01:00'))).toBe('2026-07-01');
+    expect(new Date('2026-07-01T00:30:00+01:00').toISOString().slice(0, 10)).toBe('2026-06-30');
+  });
+});
+
+describe('the scan reads backwards from now, never forwards', () => {
+  // THE 18 Sep 2026 bug. The job is scheduled for 21:00 — the cutoff itself —
+  // so asking "which week is it" at that instant answers with the one just
+  // STARTING. The first live run scanned seven days of mail that had not
+  // arrived, reported "0 new payables", and exited 0.
+  it.each(['2026-09-18T20:59:00+01:00',
+           '2026-09-18T21:00:00+01:00',
+           '2026-09-18T21:05:00+01:00',
+           '2026-09-19T02:00:00+01:00'])
+    ('firing at %s still covers the week that just closed', (asof) => {
+      const py = pyWindow(asof);
+      const start = new Date(py.scanRange.start);
+      const end = new Date(py.scanRange.end);
+      expect(end.getTime()).toBe(new Date(asof).getTime());       // ends now
+      expect(start.getTime()).toBeLessThan(new Date('2026-09-11T21:00:00+01:00').getTime());
+    });
+
+  it('the scan range is never the empty week ahead', () => {
+    const py = pyWindow('2026-09-18T21:00:00+01:00');
+    expect(new Date(py.scanRange.start).getTime())
+      .toBeLessThan(new Date(py.window ?? py.start ?? '2026-09-18T21:00:00+01:00').getTime());
+    // and the display week that instant IS the one ahead, which is exactly why
+    // the two must not share a definition
+    expect(new Date(py.start).toISOString())
+      .toBe(new Date('2026-09-18T21:00:00+01:00').toISOString());
   });
 });
