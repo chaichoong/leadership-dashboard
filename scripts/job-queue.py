@@ -850,11 +850,36 @@ class WaiterSignalled(Exception):
 
 
 def acquire(job, mode="cooperative", lease_minutes=DEFAULT_LEASE_MIN,
-            timeout_minutes=DEFAULT_TIMEOUT_MIN, check_stale=True, quiet=False,
+            timeout_minutes=None, check_stale=True, quiet=False,
             ready_wait_minutes=None):
     ensure_dirs()
     schedule = load_schedule()
     cfg = schedule.get(job) or {}
+
+    # HOW LONG THIS JOB WAITS, NOT HOW LONG A JOB WAITS
+    # (finding 20260919-daily-ops-phase2-excepti-548)
+    #
+    # DEFAULT_TIMEOUT_MIN is 120, which is longer than almost every holder and
+    # shorter than one: content-engine renders video and held the lock for 265,
+    # 343 and 253 minutes on 16, 17 and 18 Sep 2026. The five nightly brain and
+    # knowledge jobs fire between 22:40 and 00:00, straight into that hold, and
+    # between them they need well under fifteen minutes of machine time. They
+    # gave up at exactly 120 minutes twenty times across 15-19 Sep, so
+    # compound-brain, feed-brain, publish-brain, apple-notes-bridge and
+    # audiobook-backfill did not complete for four nights.
+    #
+    # A global number cannot be right for both: raising it for everyone makes a
+    # genuinely stuck queue take two extra hours to show. So the wait is a
+    # per-job setting, `queueTimeoutMinutes` in job-schedule.json, and the ones
+    # that sit behind the render get one longer than the render.
+    #
+    # An explicit --timeout still wins: this only fills in when the caller did
+    # not say.
+    if timeout_minutes is None:
+        try:
+            timeout_minutes = float(cfg.get("queueTimeoutMinutes"))
+        except (TypeError, ValueError):
+            timeout_minutes = DEFAULT_TIMEOUT_MIN
 
     if check_stale:
         stale, late, reason = staleness(job, schedule)
@@ -1001,9 +1026,9 @@ def acquire(job, mode="cooperative", lease_minutes=DEFAULT_LEASE_MIN,
                 blocker = "%s (holding %s min)" % (holder.get("job", "?"), held_min) \
                     if held_min is not None else holder.get("job", "?")
                 if not quiet:
-                    print("BUSY %s: gave up after %s min behind %s" %
+                    print("BUSY %s: gave up after %g min behind %s" %
                           (job, timeout_minutes, blocker))
-                return note_refusal(job, EX_BUSY, "gave up after %s min behind %s"
+                return note_refusal(job, EX_BUSY, "gave up after %g min behind %s"
                                     % (timeout_minutes, blocker))
 
             time.sleep(POLL_SECONDS)
@@ -1204,7 +1229,7 @@ def heartbeat(job, lease_minutes=DEFAULT_LEASE_MIN):
     return EX_OK
 
 
-def run(job, cmd, lease_minutes, timeout_minutes, check_stale,
+def run(job, cmd, lease_minutes, timeout_minutes=None, check_stale=True,
         ready_wait_minutes=None):
     """Wrapped mode: take the lock, run the command, always release.
 
@@ -1558,8 +1583,10 @@ def main(argv=None):
         sp.add_argument("job")
         sp.add_argument("--lease", type=float, default=DEFAULT_LEASE_MIN,
                         help="minutes before the lock frees itself")
-        sp.add_argument("--timeout", type=float, default=DEFAULT_TIMEOUT_MIN,
-                        help="minutes to wait for the queue before giving up")
+        sp.add_argument("--timeout", type=float, default=None,
+                        help="minutes to wait for the queue before giving up "
+                             "(default: this job's queueTimeoutMinutes in "
+                             "job-schedule.json, else %d)" % DEFAULT_TIMEOUT_MIN)
         sp.add_argument("--no-stale-check", action="store_true")
         sp.add_argument("--ready-wait", type=float, default=None,
                         help="minutes to wait for network/Drive before deferring")

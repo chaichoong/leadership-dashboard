@@ -88,8 +88,11 @@ beforeEach(() => {
   mkdirSync(routineDir, { recursive: true });
   // Default: every slot the guard allowlists is registered, so existing tests
   // exercise the stacking logic rather than the registration control.
+  // payment-run added 19 Sep 2026 (finding 20260919-daily-ops-551). Every name
+  // in cr.APPROVED_SLOTS must be here, or the guard's registration control fires
+  // (exit 2, "cannot verify") before any test reaches the behaviour it is about.
   writeSchedule(['inbound-triage', 'task-manager', 'ceo-agent', 'prospecting',
-                 'uc-check', 'prod-sweep-weekly']);
+                 'uc-check', 'prod-sweep-weekly', 'payment-run']);
 });
 
 // 4 Sep 2026 (finding 20260905-exceptions-464): four role-agent slot runs never
@@ -106,6 +109,9 @@ describe('slot attendance', () => {
       'ceo-agent': { cron: '45 6 * * *', mode: 'wrapped' },
       prospecting: { cron: '15 9 * * *', mode: 'wrapped' },
       'prod-sweep-weekly': { cron: '0 11 * * *', mode: 'wrapped' },
+      // A daily cron in the fixture on purpose: the live one is Friday-only, and
+      // a weekday-dependent expectation would pass or fail by the day of the week.
+      'payment-run': { cron: '0 21 * * *', mode: 'wrapped' },
     }, null, 2));
     writeEvents([{ job: 'daily-ops', state: 'mark' }, { job: 'inbound-triage' }]);
     const { code, res } = guard();
@@ -124,9 +130,13 @@ describe('slot attendance', () => {
       'ceo-agent': { cron: '45 6 * * *', mode: 'wrapped' },
       prospecting: { cron: '15 9 * * *', mode: 'wrapped' },
       'prod-sweep-weekly': { cron: '0 11 * * *', mode: 'wrapped' },
+      // A daily cron in the fixture on purpose: the live one is Friday-only, and
+      // a weekday-dependent expectation would pass or fail by the day of the week.
+      'payment-run': { cron: '0 21 * * *', mode: 'wrapped' },
     }, null, 2));
     const rows = [{ job: 'daily-ops', state: 'mark' }];
-    for (const n of ['inbound-triage', 'task-manager', 'ceo-agent', 'prospecting', 'prod-sweep-weekly']) {
+    for (const n of ['inbound-triage', 'task-manager', 'ceo-agent', 'prospecting',
+                     'prod-sweep-weekly', 'payment-run']) {
       for (let i = 0; i < 4; i += 1) rows.push({ job: n, ts: hoursAgo(3 + i) });
     }
     writeEvents(rows);
@@ -457,7 +467,8 @@ describe('lock-exempt checks still count as having run', () => {
   beforeEach(() => writeRoutines(['daily-ops']));
 
   it('treats ran-unlocked as evidence the job got going', () => {
-    writeSchedule(['inbound-triage', 'task-manager', 'ceo-agent', 'prospecting', 'prod-sweep-weekly']);
+    writeSchedule(['inbound-triage', 'task-manager', 'ceo-agent', 'prospecting',
+                   'prod-sweep-weekly', 'payment-run']);
     writeEvents([
       { job: 'daily-ops', state: 'mark' },
       { job: 'drift-scan', state: 'ran-unlocked' },
@@ -483,6 +494,7 @@ describe('a slot that died is not a slot that ran', () => {
       'ceo-agent': { cron: '45 6 * * *', mode: 'wrapped', enabled: false },
       prospecting: { cron: '15 9 * * *', mode: 'wrapped', enabled: false },
       'prod-sweep-weekly': { cron: '0 11 * * *', mode: 'wrapped', enabled: false },
+      'payment-run': { cron: '0 21 * * *', mode: 'wrapped', enabled: false },
     }, null, 2));
   }
 

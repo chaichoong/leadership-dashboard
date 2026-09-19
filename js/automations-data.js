@@ -94,6 +94,8 @@ var AUTOMATIONS = {
           what: 'Runs the Brain Feeder agent, which has its own register row above. Listed here so every scheduled job is accounted for.' },
         { key: 'compound-brain', agent: true, name: 'Brain Compounder', when: '11:00pm daily', status: 'on',
           what: 'Runs the Brain Compounder agent, which has its own register row above. Listed here so every scheduled job is accounted for.' },
+        { key: 'payment-run', agent: true, name: 'Payment Run', when: 'Fridays 9:00pm', status: 'on',
+          what: 'Finds every payment request across Kevin\u2019s two mailboxes, reads the PDF invoices, checks nothing has already been paid, and leaves one list in Accounts > Payment Run. It prepares only \u2014 it never pays, sends or agrees anything.' },
     ],
 
     // Scheduled outside job-schedule.json, so the coverage test does not see it.

@@ -237,6 +237,8 @@
   "enabled": false
  },
  "apple-notes-bridge": {
+  "queueTimeoutMinutes": 360,
+  "queueTimeoutNote": "360 minutes, not the default 120 (finding 20260919-daily-ops-phase2-excepti-548). This job fires straight into content-engine's nightly render, which held the queue for 265, 343 and 253 minutes on 16, 17 and 18 Sep 2026. At 120 it gave up every night without running \u2014 twenty queue-timeouts across these five jobs on 15-19 Sep \u2014 while needing under fifteen minutes of machine time itself. 360 clears the worst observed hold with headroom. The proper fix is 502's: take the ffmpeg render out of the global lock so content-engine only holds it for its Airtable and Drive writes.",
   "cron": "40 22 * * *",
   "maxLateMinutes": 300,
   "mode": "wrapped",
@@ -246,6 +248,8 @@
   "retryWhenDeferred": true
  },
  "feed-brain": {
+  "queueTimeoutMinutes": 360,
+  "queueTimeoutNote": "360 minutes, not the default 120 (finding 20260919-daily-ops-phase2-excepti-548). This job fires straight into content-engine's nightly render, which held the queue for 265, 343 and 253 minutes on 16, 17 and 18 Sep 2026. At 120 it gave up every night without running \u2014 twenty queue-timeouts across these five jobs on 15-19 Sep \u2014 while needing under fifteen minutes of machine time itself. 360 clears the worst observed hold with headroom. The proper fix is 502's: take the ffmpeg render out of the global lock so content-engine only holds it for its Airtable and Drive writes.",
   "note": "Drive-gated. maxLateMinutes raised 29 Aug 2026 (findings 394/397): a morning Drive-mount flap used to cost the whole day. feed/compound/publish fire at 22:45-23:20, so 720 min expired at ~11:00 — on 28 Aug the mount cleared at 10:06 and they were marked MISSED at 11:06 anyway. 960 carries them to mid-afternoon, which is still worth doing; beyond that they would collide with the next night's run, so the window stops there rather than becoming never-skipped.",
   "cron": "45 22 * * *",
   "maxLateMinutes": 960,
@@ -259,6 +263,8 @@
   "retryWhenDeferred": true
  },
  "compound-brain": {
+  "queueTimeoutMinutes": 360,
+  "queueTimeoutNote": "360 minutes, not the default 120 (finding 20260919-daily-ops-phase2-excepti-548). This job fires straight into content-engine's nightly render, which held the queue for 265, 343 and 253 minutes on 16, 17 and 18 Sep 2026. At 120 it gave up every night without running \u2014 twenty queue-timeouts across these five jobs on 15-19 Sep \u2014 while needing under fifteen minutes of machine time itself. 360 clears the worst observed hold with headroom. The proper fix is 502's: take the ffmpeg render out of the global lock so content-engine only holds it for its Airtable and Drive writes.",
   "note": "Drive-gated. maxLateMinutes raised 29 Aug 2026 (findings 394/397): a morning Drive-mount flap used to cost the whole day. feed/compound/publish fire at 22:45-23:20, so 720 min expired at ~11:00 — on 28 Aug the mount cleared at 10:06 and they were marked MISSED at 11:06 anyway. 960 carries them to mid-afternoon, which is still worth doing; beyond that they would collide with the next night's run, so the window stops there rather than becoming never-skipped.",
   "cron": "0 23 * * *",
   "maxLateMinutes": 960,
@@ -272,6 +278,8 @@
   "retryWhenDeferred": true
  },
  "publish-brain": {
+  "queueTimeoutMinutes": 360,
+  "queueTimeoutNote": "360 minutes, not the default 120 (finding 20260919-daily-ops-phase2-excepti-548). This job fires straight into content-engine's nightly render, which held the queue for 265, 343 and 253 minutes on 16, 17 and 18 Sep 2026. At 120 it gave up every night without running \u2014 twenty queue-timeouts across these five jobs on 15-19 Sep \u2014 while needing under fifteen minutes of machine time itself. 360 clears the worst observed hold with headroom. The proper fix is 502's: take the ffmpeg render out of the global lock so content-engine only holds it for its Airtable and Drive writes.",
   "note": "Drive-gated. maxLateMinutes raised 29 Aug 2026 (findings 394/397): a morning Drive-mount flap used to cost the whole day. feed/compound/publish fire at 22:45-23:20, so 720 min expired at ~11:00 — on 28 Aug the mount cleared at 10:06 and they were marked MISSED at 11:06 anyway. 960 carries them to mid-afternoon, which is still worth doing; beyond that they would collide with the next night's run, so the window stops there rather than becoming never-skipped.",
   "cron": "20 23 * * *",
   "maxLateMinutes": 960,
@@ -285,6 +293,8 @@
   "retryWhenDeferred": true
  },
  "audiobook-backfill": {
+  "queueTimeoutMinutes": 360,
+  "queueTimeoutNote": "360 minutes, not the default 120 (finding 20260919-daily-ops-phase2-excepti-548). This job fires straight into content-engine's nightly render, which held the queue for 265, 343 and 253 minutes on 16, 17 and 18 Sep 2026. At 120 it gave up every night without running \u2014 twenty queue-timeouts across these five jobs on 15-19 Sep \u2014 while needing under fifteen minutes of machine time itself. 360 clears the worst observed hold with headroom. The proper fix is 502's: take the ffmpeg render out of the global lock so content-engine only holds it for its Airtable and Drive writes.",
   "cron": "0 0 * * *",
   "maxLateMinutes": 300,
   "maxRuntimeMinutes": 600,
@@ -303,6 +313,8 @@
   "note": "reaps preview servers and test browsers that outlived their session. Must run even while a routine holds the queue, since a stuck routine is exactly when strays pile up"
  },
  "job-digest": {
+  "completedWhen": "ran",
+  "completedWhenNote": "job-digest EXITS 1 BY DESIGN whenever the morning message contains anything needing attention \u2014 that is how run-job.sh records a real problem rather than a clean sweep \u2014 and it runs outside the queue, so it never writes a `released` event either. Graded on attendance. Found 19 Sep 2026 by the reachability control added with finding 20260919-daily-ops-phase2-excepti-549, which caught it before it produced its own false outage line; daily-ops and data-invariants had to be read on Kevin's screen first.",
   "cron": "0 11 * * *",
   "maxLateMinutes": 240,
   "mode": "wrapped",
@@ -311,6 +323,8 @@
   "lockExempt": true
  },
  "daily-ops": {
+  "completedWhen": "end-mark",
+  "completedWhenNote": "daily-ops deliberately never takes the queue lock \u2014 holding it for two hours would block every short shell job behind it \u2014 so it writes `mark` events and never `released`. The default completion test therefore could NEVER go green for it, and the digest of 19 Sep 2026 led with ':no_entry: daily-ops \u2014 no completed run in 21 scheduled days' on a job that had run every morning (finding 20260919-daily-ops-phase2-excepti-549). Graded on its own end mark instead.",
   "cron": "0 7 * * *",
   "maxLateMinutes": 1440,
   "mode": "cooperative",
@@ -392,6 +406,8 @@
   ]
  },
  "data-invariants": {
+  "completedWhen": "ran",
+  "completedWhenNote": "data-invariants EXITS 1 BY DESIGN when it finds a violation, which is the whole point of it, so run-job.sh records ok:false every morning it works properly. The default test read that as 'did not run' and reported a 13-day outage (finding 20260919-daily-ops-phase2-excepti-549). It is graded on attendance; the violation itself already has its own ':x: data-invariants \u2014 exit code 1' line, so counting it twice was double counting.",
   "cron": "40 6 * * *",
   "maxLateMinutes": 180,
   "mode": "wrapped",
@@ -546,5 +562,15 @@
   "retryWhenDeferredNote": "Hourly. A deferred tick is picked up by the next one within the hour, so a retry would only duplicate the read. The daily message is gated by send_decision, not by any single tick.",
   "note": "Hourly on purpose: Utilita's login is a rolling ONE HOUR that every visit restarts, so the read is what holds the session open. utilita-balance.py sends at most one Slack message a day plus one alarm (send_decision), so the other runs are pure keepalive. LOCK-EXEMPT for the same reason as estate-status: it reads a web page and posts to Slack, never the repo, Airtable or the queue, and queueing it behind a four-hour content render would let the session lapse and turn every morning into SIGN-IN NEEDED.",
   "lockExempt": true
+ },
+ "payment-run": {
+  "cron": "0 21 * * 5",
+  "maxLateMinutes": 600,
+  "mode": "wrapped",
+  "needs": [
+   "network"
+  ],
+  "retryWhenDeferred": true,
+  "note": "Kevin's weekly Friday payment run (PRs #483/#484, 18 Sep 2026). launchd com.kevinbrittain.payment-run fires StartCalendarInterval Weekday 5, Hour 21, LOCAL time, and launchd counts Sunday as 0 \u2014 so weekday 5 is Friday, which is the same day standard five-field cron means by 5. This entry mirrors that one firing so slot attendance can grade it; it fires nothing itself. Registered 19 Sep 2026 (finding 20260919-daily-ops-551): the job was in neither list, so check-routines.py saw a SKILL.md routine running beside daily-ops and reported ROUTINE STACKING every weekend, and the digest would never have noticed it stop. Lateness is generous because the list is still worth having on Saturday morning; it prepares only and pays nothing."
  }
 }

@@ -31,10 +31,17 @@ TASKS="$HOME/.claude/scheduled-tasks"
 MODE="${1:---dry-run}"
 
 # name|hour:minute[,hour:minute...]|command...
-#   or name|*:minute|command...   for an HOURLY job (every hour at that minute)
-# The hours match scripts/job-schedule.json. Any day-of-week decision lives in
-# the SKILL file, never here: `1-5` means Mon-Fri to a human and Sun-Thu to
-# Cloudflare, and that ambiguity cost this platform every Friday for a week.
+#   or name|*:minute|command...     for an HOURLY job (every hour at that minute)
+#   or name|Fri 21:00|command...    for a job that runs on ONE named weekday
+# The hours match scripts/job-schedule.json.
+#
+# A RANGE of weekdays still never appears here. `1-5` means Mon-Fri to a human
+# and Sun-Thu to Cloudflare, and that ambiguity cost this platform every Friday
+# for a week — anything shaped like a range belongs in the SKILL file, decided in
+# London time. ONE named day is different: it is written as a name, not a number,
+# and mapped once below, so there is nothing to misread. Added 19 Sep 2026 with
+# payment-run (finding 20260919-daily-ops-551), which had been installed by hand
+# and so would have vanished the day these were rebuilt.
 JOBS=(
   "drift-scan|6:20|/usr/bin/python3 $REPO/scripts/drift-scan.py"
   "estate-drift|6:25|/usr/bin/python3 $REPO/scripts/agent-estate-drift.py"
@@ -51,21 +58,44 @@ JOBS=(
   # installed by hand, and a job that exists only as a plist silently fails to
   # come back the day these are rebuilt.
   "utilita-balance|*:05|/bin/bash $REPO/scripts/utilita-balance-run.sh"
+  # Kevin's weekly payment list. Friday 21:00 LOCAL, moved from 16:00 on
+  # 18 Sep 2026 because things often come in late on a Friday. It prepares
+  # only: it never pays, sends or agrees anything.
+  "payment-run|Fri 21:00|/bin/bash $SLOT payment-run $TASKS/payment-run/SKILL.md"
 )
+
+# launchd's own numbering: Sunday = 0. Mapped here once so no caller ever writes
+# the number, and so this file never carries a weekday RANGE. A `case`, not an
+# associative array: macOS ships bash 3.2, where `declare -A` is silently not an
+# associative array and `[Sun]=0` is read as arithmetic, which under `set -u`
+# fails with "Sun: unbound variable".
+weekday_number() {
+  case "$1" in
+    Sun) echo 0 ;; Mon) echo 1 ;; Tue) echo 2 ;; Wed) echo 3 ;;
+    Thu) echo 4 ;; Fri) echo 5 ;; Sat) echo 6 ;;
+    *) echo "unknown weekday '$1'" >&2; exit 2 ;;
+  esac
+}
 
 plist_for() {
   local name="$1" times="$2"; shift 2
   local cmd=("$@")
-  local intervals=""
+  local intervals="" daykey=""
+  # "Fri 21:00" -> Weekday 5 on every interval below.
+  if [[ "$times" == *" "* ]]; then
+    local day="${times%% *}"
+    times="${times#* }"
+    daykey="<key>Weekday</key><integer>$(weekday_number "$day")</integer>"
+  fi
   local IFS=,
   for t in $times; do
     if [ "${t%%:*}" = "*" ]; then
       # No Hour key means EVERY hour at that minute. launchd treats an omitted
       # field as a wildcard, which is how an hourly job is expressed here.
-      intervals="$intervals		<dict><key>Minute</key><integer>$((10#${t##*:}))</integer></dict>
+      intervals="$intervals		<dict>$daykey<key>Minute</key><integer>$((10#${t##*:}))</integer></dict>
 "
     else
-      intervals="$intervals		<dict><key>Hour</key><integer>${t%%:*}</integer><key>Minute</key><integer>$((10#${t##*:}))</integer></dict>
+      intervals="$intervals		<dict>$daykey<key>Hour</key><integer>${t%%:*}</integer><key>Minute</key><integer>$((10#${t##*:}))</integer></dict>
 "
     fi
   done
