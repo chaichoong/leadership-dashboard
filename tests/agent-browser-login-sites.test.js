@@ -20,8 +20,26 @@ describe('login sites on the allowlist', () => {
       const family = host.split('.').slice(-2).join('.');
       expect(u.hostname.endsWith(family)).toBe(true);
     });
+  // Kevin PERMITTED American Express on 18 Sep 2026, so both of its hosts are
+  // named here rather than deleted from the pattern: the guard still has to say out
+  // loud which bank or credit site is allowed and who allowed it. A site that
+  // is simply dropped from the list below reads identically to one nobody ever
+  // considered, and that is the state this test exists to prevent. Anything not
+  // on PERMITTED still fails.
+  const PERMITTED = new Set([                                  // Kevin, 18 Sep 2026
+    'global.americanexpress.com',
+    'www.americanexpress.com',
+  ]);
   it('no bank or credit file is held in the robot profile without Kevin deciding so', () => {
-    for (const h of Object.keys(sites)) expect(h).not.toMatch(/starling|americanexpress|hl\.co\.uk|equifax/);
+    for (const h of Object.keys(sites)) {
+      if (PERMITTED.has(h)) continue;
+      expect(h).not.toMatch(/starling|americanexpress|hl\.co\.uk|equifax/);
+    }
+  });
+  it('every permitted bank or credit site is actually in the profile', () => {
+    // A permission left behind after the site is removed would silently widen
+    // the guard for the next site that matches the pattern.
+    for (const h of PERMITTED) expect(Object.keys(sites)).toContain(h);
   });
 });
 
