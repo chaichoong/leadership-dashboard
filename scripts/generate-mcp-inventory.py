@@ -492,6 +492,27 @@ def git(*args, **kw):
                           capture_output=True, text=True, check=True, **kw).stdout.strip()
 
 
+class BaselineUnavailable(Exception):
+    """origin/main could not be read, so there is nothing to compare against.
+
+    Finding 20260919-daily-ops-phase2-excepti-550. On 19 Sep 2026 the nightly
+    run died at this line with a bare CalledProcessError traceback: `git fetch`
+    failed once and took the whole job with it, inventory and all. A network
+    blip, or the index.lock contention a shared checkout produces, must not do
+    that.
+
+    It also must not be swallowed. `published_tools()` returning None already
+    MEANS something specific — "origin/main has no list yet, this is the first
+    run" — and that answer makes `changed` true and publishes the whole file.
+    Reusing None for "I could not look" would turn a five-second network blip
+    into a full-file PR against a baseline nobody read. So the two answers stay
+    apart, and this one is raised.
+    """
+
+
+FETCH_RETRY_SECONDS = 20
+
+
 def published_tools():
     """The tool set in origin/main's copy — what the PAGE is actually showing.
 
@@ -499,8 +520,22 @@ def published_tools():
     ahead of the page (a previous run wrote it) or behind it (someone merged
     from elsewhere). The question worth asking is "has the estate moved since
     what the page shows", so the answer comes from origin/main.
+
+    Returns None when origin/main genuinely has no list yet (first run), and
+    raises BaselineUnavailable when the fetch itself could not be done.
     """
-    git("fetch", "--quiet", "origin", "main")
+    try:
+        git("fetch", "--quiet", "origin", "main")
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
+        # One retry, because the thing that causes this is transient by nature:
+        # a Mac that has just woken, or another session holding .git/index.lock.
+        time.sleep(FETCH_RETRY_SECONDS)
+        try:
+            git("fetch", "--quiet", "origin", "main")
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc2:
+            why = (getattr(exc2, "stderr", "") or getattr(exc, "stderr", "")
+                   or str(exc2) or str(exc))
+            raise BaselineUnavailable(str(why).strip() or "git fetch failed twice")
     try:
         body = git("show", f"origin/main:{TARGET_REL}")
     except subprocess.CalledProcessError:
@@ -693,7 +728,18 @@ def main(argv=None):
     # the page is actually showing — rather than a local file that may be ahead
     # of it or behind it.
     if publishing:
-        before = published_tools()
+        try:
+            before = published_tools()
+        except BaselineUnavailable as exc:
+            # Say which half could not be done, and do NOT fall through to a
+            # publish: without a baseline every tool reads as new and the PR
+            # would rewrite the whole file against nothing.
+            c = data["counts"]
+            print(f"Built the inventory: {c['total']} tools "
+                  f"({c['verified']} verified, {c['declared']} declared)")
+            print(f"FAIL: baseline unavailable, comparison skipped — could not "
+                  f"read origin/main: {exc}", file=sys.stderr)
+            return 1
         target = CANDIDATE
     else:
         before = previous_tools(out)

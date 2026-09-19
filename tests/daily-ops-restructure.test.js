@@ -39,17 +39,25 @@ print(json.dumps(m.APPROVED_SLOTS))
   return JSON.parse(execFileSync('python3', ['-c', src], { encoding: 'utf8' }));
 }
 
-/** The installer's own table, parsed from the shell array it declares. */
+/** The installer's own table, parsed from the shell array it declares.
+ *  A spec is `name|times|command`, where times is `9:15`, `*:05`, or — for a
+ *  job that runs on one named weekday — `Fri 21:00`. Returns
+ *  {name: {times, day}} with day null for the daily and hourly ones. */
 function installerJobs() {
   const sh = read('scripts/install-slot-jobs.sh');
   const block = sh.split('JOBS=(')[1].split(')')[0];
   const out = {};
   for (const line of block.split('\n')) {
-    const m = line.match(/"([a-z0-9-]+)\|([0-9:,]+)\|/);
-    if (m) out[m[1]] = m[2];
+    const m = line.match(/"([a-z0-9-]+)\|(?:(Sun|Mon|Tue|Wed|Thu|Fri|Sat) )?([0-9*:,]+)\|/);
+    if (m) out[m[1]] = { times: m[3], day: m[2] || null };
   }
   return out;
 }
+
+// Standard five-field cron, Sunday = 0 — the same numbering launchd uses, which
+// is why the installer maps a NAME to a number in one place and no caller ever
+// writes the number itself.
+const CRON_DOW = { Sun: '0', Mon: '1', Tue: '2', Wed: '3', Thu: '4', Fri: '5', Sat: '6' };
 
 describe('the installer and the register cannot drift apart', () => {
   it('installs a job for every new script and slot, at the registered hour', () => {
@@ -57,12 +65,16 @@ describe('the installer and the register cannot drift apart', () => {
     // nobody expects. The register is the source of truth; the installer must
     // match it.
     const sched = schedule();
-    for (const [name, times] of Object.entries(installerJobs())) {
+    for (const [name, { times, day }] of Object.entries(installerJobs())) {
       expect(sched[name], `${name} missing from job-schedule.json`).toBeTruthy();
-      const [min, hour] = sched[name].cron.split(' ');
+      const [min, hour, , , dow] = sched[name].cron.split(' ');
       const first = times.split(',')[0];
       expect(`${Number(first.split(':')[0])}:${Number(first.split(':')[1])}`)
         .toBe(`${Number(hour)}:${Number(min)}`);
+      // The weekday has to agree too, or the register says one day and launchd
+      // fires on another — with nothing to notice, because both look plausible.
+      expect(dow, `${name}: installer day and register day disagree`)
+        .toBe(day ? CRON_DOW[day] : '*');
     }
   });
 
@@ -70,7 +82,9 @@ describe('the installer and the register cannot drift apart', () => {
     const installed = installerJobs();
     for (const slot of Object.keys(approvedSlots())) {
       // inbound-triage and task-manager predate this installer and have their
-      // own plists already; the four new ones must be here.
+      // own plists already; everything else must be here. payment-run was a
+      // hand-written plist until 19 Sep 2026 and so was one rebuild away from
+      // disappearing with nothing raised (finding 20260919-daily-ops-551).
       if (['inbound-triage', 'task-manager'].includes(slot)) continue;
       expect(installed[slot], `${slot} is allowlisted but not installed`).toBeTruthy();
     }
@@ -92,8 +106,16 @@ describe('the installer and the register cannot drift apart', () => {
     // as Sun-Thu to Cloudflare. The CEO brief lost every Friday for a week to
     // exactly this. The day decision belongs in the skill, in London time.
     const sched = schedule();
-    for (const name of Object.keys(installerJobs())) {
+    const installed = installerJobs();
+    for (const name of Object.keys(installed)) {
       const dow = sched[name].cron.trim().split(/\s+/)[4];
+      if (installed[name].day) {
+        // ONE named day is allowed, and only when the installer names it too —
+        // it is written as a name in one place and mapped to a number in one
+        // place, so there is nothing to misread. A RANGE never is.
+        expect(dow, `${name}: a single weekday, never a range`).toMatch(/^[0-6]$/);
+        continue;
+      }
       expect(dow, `${name} has a day-of-week in its cron`).toBe('*');
     }
   });

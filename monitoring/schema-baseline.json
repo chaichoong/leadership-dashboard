@@ -14508,6 +14508,14 @@
     "name": "Reference",
     "type": "singleLineText"
    },
+   "fldLUPVZHAEbsNJb1": {
+    "name": "Pay To Details",
+    "type": "multilineText"
+   },
+   "fldQeBwA2nnepf9wv": {
+    "name": "Source",
+    "type": "singleSelect"
+   },
    "fldSJg8aLjPlD75rz": {
     "name": "Has PDF",
     "type": "checkbox"
@@ -14536,6 +14544,10 @@
     "name": "Gmail Message ID",
     "type": "singleLineText"
    },
+   "fldom7XtxiN9ojCKi": {
+    "name": "Bank Details Changed",
+    "type": "checkbox"
+   },
    "fldpHf5vYCIgj3Scz": {
     "name": "Matched Transaction",
     "type": "multipleRecordLinks"
@@ -14547,6 +14559,10 @@
    "fldt8sjSwrfzcfwwJ": {
     "name": "Has Attachment",
     "type": "checkbox"
+   },
+   "fldwtlpZOL9oa7OZo": {
+    "name": "Run Date",
+    "type": "date"
    },
    "fldzGhwp6rxwEFoxu": {
     "name": "Business",
