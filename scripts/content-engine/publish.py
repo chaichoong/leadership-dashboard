@@ -904,7 +904,10 @@ def share_to_facebook_profile(day, entry, state, clip="summary"):
         return True
     recs = bundle(int(day))
     copy = ((recs.get(spec["record"]) or {}).get("fields", {}).get(spec["field"]) or "").strip()
-    url = fb.get("post_url") or facebook_share.find_page_post(copy, day=int(day))
+    # a catch-up looks further down the reels list: 2054, 2055, 2056 and 2195 sat beyond a week of
+    # two-posts-a-day and read "not on the page yet" every run (20 Sep 2026)
+    depth = facebook_share.SCAN_POSTS_CATCHUP if is_catchup(post) else facebook_share.SCAN_POSTS
+    url = fb.get("post_url") or facebook_share.find_page_post(copy, day=int(day), scan=depth)
     if not url:
         fb["status"] = "page-post-not-found"
         print("episode %s: the %s page post is not on the Facebook page yet; looking again next run" % (day, clip))
@@ -1650,6 +1653,7 @@ def selftest():
     ssrc3 = _i.getsource(share_to_facebook_profile)
     assert 'fb["status"] = "queued"' in ssrc3 and ssrc3.index("is_catchup(post)") < ssrc3.index("run_plan"), "the pace is checked before Share is ever pressed"
     assert "queued" in _i.getsource(section_status), "a queued share reads pending, not missing"
+    assert "SCAN_POSTS_CATCHUP if is_catchup(post)" in ssrc3, "a catch-up searches further back than today's post does"
 
     fsrc = _i.getsource(share_to_facebook_profile); assert "find_page_post" in fsrc and "verify_shared" in fsrc, "it shares the page post and checks the profile afterwards"
     assert fsrc.index('"status": "sharing"') < fsrc.index("run_plan(") and fsrc.index("save_state(state)") < fsrc.index("run_plan("), "the share is on disk before Share is pressed"

@@ -172,6 +172,17 @@ describe('both Facebook page posts reach Kevin profile', () => {
     expect(PUBLISH).toMatch(/facebook_share_%s%s\.png/);
   });
 
+  it('reaches further down the reels list when catching up', () => {
+    // 20 Sep 2026: 2054, 2055, 2056 and 2195 sat beyond a week of two-posts-a-day and read
+    // "not on the page yet" on every run. With the deeper search both 2054 and 2195 were found
+    // (reel/1097929646220806 and reel/966974129752837). Only a catch-up pays the cost.
+    const fb = read(`${CE}/facebook_share.py`);
+    expect(fb).toMatch(/SCAN_POSTS_CATCHUP = 44/);
+    // and it scrolls until the list actually holds what it means to search
+    expect(fb).toMatch(/if \(all\.length >= %\(scan\)s\) break;/);
+    expect(PUBLISH).toMatch(/SCAN_POSTS_CATCHUP if is_catchup\(post\) else facebook_share\.SCAN_POSTS/);
+  });
+
   it('passes the facebook_share selftest', () => {
     expect(JSON.parse(py(['facebook_share.py', 'selftest'])).failed).toEqual([]);
   });
