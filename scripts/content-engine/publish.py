@@ -35,6 +35,7 @@ sys.path.insert(0, HERE)
 import watch  # noqa: E402
 import platform_copy as pc  # noqa: E402
 import approval  # noqa: E402
+import youtube_ads  # noqa: E402
 
 LONDON = ZoneInfo("Europe/London")
 GHL = "https://services.leadconnectorhq.com"
@@ -774,6 +775,14 @@ GHL_SLOT_GRACE_MIN = 60   # a GHL post still 'scheduled' this long after its slo
 
 
 MONETISED = ("On", "Sharing")     # Sharing: ads run, revenue split with a copyright claimant; nothing more to switch
+MIDROLL_SETTLED = ("on", "not-eligible")   # not-eligible is an answer: under 8 minutes YouTube allows no mid-roll
+NO_VIDEO_ID = "no-video-id"
+
+
+def _recheck_due(stamp):
+    if not stamp: return True
+    try: return dt.datetime.now(dt.timezone.utc) - dt.datetime.fromisoformat(stamp.replace("Z", "+00:00")) >= dt.timedelta(hours=MONETISE_RECHECK_HOURS)
+    except ValueError: return True
 
 
 def monetise_long_video(day, entry):
@@ -781,48 +790,106 @@ def monetise_long_video(day, entry):
     "Shorts Feed ads" (Kevin, 17 Sep 2026: "all of my YouTube videos, full length and Shorts, monetised ... as standard
     for everything we publish on YouTube"; the channel's earnings go to the fundraising). Long episodes went out Off
     before 13 Sep (Ericamae). The first switch asks for YouTube's content rating, which is Kevin's declaration: answered
-    only for an approved card, otherwise recorded as 'needs-rating' and listed in the morning report."""
+    only for an approved card, otherwise recorded as 'needs-rating' and listed in the morning report.
+
+    Then the ad in the MIDDLE. Kevin, 20 Sep 2026: the master switch read On everywhere and the channel still earned
+    almost nothing on the episodes, because mid-roll ads were off on 817 of the 888 videos over 8 minutes. The master
+    switch alone buys a pre-roll; mid-roll is the bulk of long-form revenue, so it is set here as part of publishing,
+    never as a thing to remember afterwards.
+
+    The post is matched by its VIDEO ID, not by its upload route. The old `route == "api"` filter silently stepped
+    over every GoHighLevel upload, so 2054's episode, 2054's Short and 2195's episode were never checked once."""
     posts = [p for k, p in (entry.get("posts") or {}).items()
-             if k.startswith("youtube|") and p.get("clip") in ("full", "lfmd") and p.get("id") and p.get("route") == "api" and p.get("status") == "published"]
+             if k.startswith("youtube|") and p.get("clip") in ("full", "lfmd") and p.get("status") == "published"]
     changed = False
     for p in posts:
-        if p.get("monetisation") in MONETISED: continue  # "Checking" (YouTube reviewing the rating) is re-read until it says On
-        last = p.get("monetisation_checked")
-        if last:
-            try:
-                if dt.datetime.now(dt.timezone.utc) - dt.datetime.fromisoformat(last.replace("Z", "+00:00")) < dt.timedelta(hours=MONETISE_RECHECK_HOURS): continue
-            except ValueError: pass
-        import youtube_studio
-        approved = (approval.load_state().get(str(day)) or {}).get("verdict") == "approved"
-        res = youtube_studio.monetise(p["id"], certify_none=approved)     # approving the card is Kevin's content rating (13 Sep 2026)
-        p["monetisation"] = res.get("status") or "unknown"; p["monetisation_checked"] = now_utc(); changed = True
-        if res.get("error"): p["monetisation_error"] = res["error"][-200:]
-        else: p.pop("monetisation_error", None)
-        print("episode %s: YouTube %s monetisation %s" % (day, "Short" if p["clip"] == "lfmd" else "episode", p["monetisation"]))
+        what = "Short" if p.get("clip") == "lfmd" else "episode"
+        vid = youtube_ads.video_id(entry, p)
+        if not vid:
+            # never skipped in silence: it shows in the morning report until the link appears or Kevin looks
+            if p.get("monetisation") != NO_VIDEO_ID:
+                p["monetisation"] = NO_VIDEO_ID; p["monetisation_checked"] = now_utc(); changed = True
+                print("episode %s: YouTube %s has no video id to check (uploaded through GoHighLevel, no link recorded)" % (day, what), file=sys.stderr)
+            continue
+        if p.get("monetisation") not in MONETISED and _recheck_due(p.get("monetisation_checked")):
+            import youtube_studio           # "Checking" (YouTube reviewing the rating) is re-read until it says On
+            approved = (approval.load_state().get(str(day)) or {}).get("verdict") == "approved"
+            res = youtube_studio.monetise(vid, certify_none=approved)   # approving the card is Kevin's content rating (13 Sep 2026)
+            p["monetisation"] = res.get("status") or "unknown"; p["monetisation_checked"] = now_utc(); changed = True
+            if res.get("error"): p["monetisation_error"] = res["error"][-200:]
+            else: p.pop("monetisation_error", None)
+            print("episode %s: YouTube %s monetisation %s" % (day, what, p["monetisation"]))
+        # mid-roll only once the master switch is On: the checkbox does nothing on a video that is not earning
+        if p.get("clip") == "full" and p.get("monetisation") in MONETISED \
+                and p.get("midroll") not in MIDROLL_SETTLED and _recheck_due(p.get("midroll_checked")):
+            res = youtube_ads.midroll([vid])
+            p["midroll"] = res.get(vid) or "failed"; p["midroll_checked"] = now_utc(); changed = True
+            print("episode %s: YouTube episode mid-roll ads %s" % (day, p["midroll"]))
     return changed
 
 
-def share_to_facebook_profile(day, entry, state):
+# The Runpreneur page gets TWO posts per episode and Kevin's profile was only ever given one of them
+# (Kevin, 20 Sep 2026: "you haven't been sharing the posts from the Runpreneur Facebook page to my personal
+# profile"). Nothing was wrong with the finder: share_to_facebook_profile simply only ever looked at the
+# summary clip. Both posts publish as reels on the page (GoHighLevel sends the Learnings clip as a "post",
+# but Facebook renders a vertical video as a reel, checked on the live page 20 Sep 2026), so both are found
+# on the same /reels list. Each share keeps its own state, and the summary keeps the original key so the
+# twelve shares already on record are not re-pressed.
+FB_SHARES = {
+    "summary": {"key": "facebook_share", "record": "Short Form Video", "field": "Facebook Reels Copy"},
+    "lfmd": {"key": "facebook_share_lfmd", "record": "Learnings From My Diary", "field": "Facebook Post Copy"},
+}
+# Catching up is PACED. When the second share was switched on, twelve past episodes were missing their
+# Learnings share; pressing all twelve in one hourly run would put twelve posts on Kevin's personal
+# profile in a few minutes, which reads as a dump and costs reach on the new ones (his call, 20 Sep 2026).
+# Today's episode is never held. Anything older than a day and a half waits its turn.
+FB_CATCHUP_PER_DAY = 2
+FB_CATCHUP_AFTER_HOURS = 36
+
+
+def shares_pressed_today(state, now=None):
+    """How many shares the robot has already pressed today, across every episode and both clips."""
+    today = (now or dt.datetime.now(dt.timezone.utc)).astimezone(LONDON).date()
+    n = 0
+    for e in state.values():
+        if not isinstance(e, dict): continue
+        for spec in FB_SHARES.values():
+            at = (e.get(spec["key"]) or {}).get("shared_at")
+            if not at: continue
+            try:
+                if dt.datetime.fromisoformat(at.replace("Z", "+00:00")).astimezone(LONDON).date() == today: n += 1
+            except ValueError: pass
+    return n
+
+
+def is_catchup(post, now=None):
+    """A page post old enough that sharing it is catching up, not publishing today's episode."""
+    mins = minutes_since(post.get("published_at") or post.get("scheduled"), now or dt.datetime.now(dt.timezone.utc))
+    return mins is not None and mins > FB_CATCHUP_AFTER_HOURS * 60
+
+
+def share_to_facebook_profile(day, entry, state, clip="summary"):
     """Kevin's own profile gets the PAGE's post, shared (Kevin, 10 Sep 2026: "it should just be shared from the
     Facebook page to the Facebook profile"), once that page post is live. The page post URL is read off the page
     itself, because GoHighLevel never returns one. Signed out, or the post not up yet: recorded, retried hourly."""
     import facebook_share
-    fb = entry.setdefault("facebook_share", {})
+    spec = FB_SHARES[clip]
+    fb = entry.setdefault(spec["key"], {})
     if fb.get("status") in ("shared", "reviewed", "failed"): return False      # failed is final: pressed twice, never a third time (review, 15 Sep 2026)
     if fb.get("status") == "unconfirmed" and fb.get("post_url"):
         # 15 Sep 2026: 'unconfirmed' was final, so a share the checker missed stayed missing for ever. Look again;
         # a share that is truly absent is pressed once more, and only once.
         if facebook_share.verify_shared(fb["post_url"]):
-            fb["status"] = "shared"; print("episode %s: the profile share is there after all" % day); return True
+            fb["status"] = "shared"; print("episode %s: the %s profile share is there after all" % (day, clip)); return True
         if fb.get("reshared_at"):
             fb["status"] = "failed"; fb["error"] = "shared twice by the robot and still not on the profile"; return True
         fb["status"] = "page-post-not-found"; fb["reshared_at"] = now_utc()      # falls through to one more share below
-        print("episode %s: the profile share is not on the profile; sharing once more" % day, file=sys.stderr)
+        print("episode %s: the %s profile share is not on the profile; sharing once more" % (day, clip), file=sys.stderr)
     if fb.get("status") == "sharing":
         # a run died while pressing Share: check the profile before ever sharing again
         fb["status"] = "shared" if fb.get("post_url") and facebook_share.verify_shared(fb["post_url"]) else "unconfirmed"
         return True
-    page = [p for k, p in (entry.get("posts") or {}).items() if p.get("platform") == "facebook" and p.get("clip") == "summary"]
+    page = [p for k, p in (entry.get("posts") or {}).items() if p.get("platform") == "facebook" and p.get("clip") == clip]
     if not page: return False
     post = page[0]
     if post.get("status") not in ("published", "scheduled"): return False
@@ -836,16 +903,23 @@ def share_to_facebook_profile(day, entry, state):
         print("episode %s: Facebook profile share waits: SIGN-IN NEEDED www.facebook.com (Robot sign-in app)" % day, file=sys.stderr)
         return True
     recs = bundle(int(day))
-    copy = ((recs.get("Short Form Video") or {}).get("fields", {}).get("Facebook Reels Copy") or "").strip()
-    url = fb.get("post_url") or facebook_share.find_page_post(copy, day=int(day))
+    copy = ((recs.get(spec["record"]) or {}).get("fields", {}).get(spec["field"]) or "").strip()
+    # a catch-up looks further down the reels list: 2054, 2055, 2056 and 2195 sat beyond a week of
+    # two-posts-a-day and read "not on the page yet" every run (20 Sep 2026)
+    depth = facebook_share.SCAN_POSTS_CATCHUP if is_catchup(post) else facebook_share.SCAN_POSTS
+    url = fb.get("post_url") or facebook_share.find_page_post(copy, day=int(day), scan=depth)
     if not url:
         fb["status"] = "page-post-not-found"
-        print("episode %s: the page post is not on the Facebook page yet; looking again next run" % day)
+        print("episode %s: the %s page post is not on the Facebook page yet; looking again next run" % (day, clip))
         return True
     fb["post_url"] = url
+    if is_catchup(post) and shares_pressed_today(state) >= FB_CATCHUP_PER_DAY:
+        fb["status"] = "queued"          # listed as pending, never hidden; it goes out tomorrow
+        print("episode %s: the %s share waits its turn (%d already shared today)" % (day, clip, FB_CATCHUP_PER_DAY))
+        return True
     test = mode() == "test"
-    plan_path, text = facebook_share.write_plan(int(day), url, copy, entry.get("youtube_link", ""), test, os.path.dirname(STATE))
-    shot = os.path.join(os.path.dirname(STATE), "facebook_share_%s.png" % day)
+    plan_path, text = facebook_share.write_plan(int(day), url, copy, entry.get("youtube_link", ""), test, os.path.dirname(STATE), clip=clip)
+    shot = os.path.join(os.path.dirname(STATE), "facebook_share_%s%s.png" % (day, "" if clip == "summary" else "_" + clip))
     task = (approval.load_state().get(str(day)) or {}).get("task", "")
     fb.update({"plan": plan_path, "text": text, "status": "sharing", "started": now_utc()})
     save_state(state)                                  # on disk BEFORE Share is pressed, so a dead run never shares twice
@@ -853,15 +927,15 @@ def share_to_facebook_profile(day, entry, state):
         facebook_share.run_plan(plan_path, task, test, shot)
     except Exception as ex:
         fb["status"] = "failed"; fb["error"] = str(ex)[-300:]
-        print("episode %s: Facebook profile share FAILED: %s" % (day, str(ex)[-200:]), file=sys.stderr)
+        print("episode %s: Facebook %s profile share FAILED: %s" % (day, clip, str(ex)[-200:]), file=sys.stderr)
         return True
     fb.update({"status": "reviewed" if test else "shared", "shot": shot,
                "shared_at": dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")})
     if not test and not facebook_share.verify_shared(url):
         fb["status"] = "unconfirmed"
-        print("episode %s: pressed Share but the post is not on the profile yet" % day, file=sys.stderr)
+        print("episode %s: pressed Share on the %s post but it is not on the profile yet" % (day, clip), file=sys.stderr)
     else:
-        print("episode %s: the page post is shared to Kevin's profile (%s)" % (day, url))
+        print("episode %s: the %s page post is shared to Kevin's profile (%s)" % (day, clip, url))
     return True
 
 
@@ -943,12 +1017,16 @@ def section_status(entry):
         if not mine: return "missing"
         return "done" if all(p.get("status") == "published" for p in mine) else "pending"
     pod = (entry.get("podcast") or {}).get("status")
-    fb = (entry.get("facebook_share") or {}).get("status")
+    # BOTH page posts, not just the summary (Kevin, 20 Sep 2026). The section is only done when every
+    # share is on the profile; the worst of the two decides it, so a missing Learnings share still shows.
+    shares = [(entry.get(s["key"]) or {}).get("status") for s in FB_SHARES.values()]
+    fb = "done" if all(s == "shared" for s in shares) else \
+         ("pending" if any(s in ("sharing", "unconfirmed", "page-post-not-found", "signin-needed", "queued") for s in shares) else "missing")
     return {"YouTube episode": clips(True, "full"), "YouTube Short": clips(True, "lfmd"),
             "Teaser clips": clips(False, "summary"), "Learnings clips": clips(False, "lfmd"),
             "Blog": "done" if (entry.get("blog") or {}).get("url") else ("pending" if (entry.get("blog") or {}).get("status") in ("creating", "unconfirmed") else "missing"),
             "Podcast": "done" if pod == "published" else ("pending" if pod in ("processing", "uploading") else "missing"),
-            "Facebook share": "done" if fb == "shared" else ("pending" if fb in ("sharing", "unconfirmed", "page-post-not-found", "signin-needed") else "missing")}
+            "Facebook share": fb}
 
 
 def extras_done(entry):
@@ -1125,10 +1203,11 @@ def sync():
             if monetise_long_video(day, entry): save_state(state)
         except Exception as ex:
             print("episode %s: monetisation check skipped this run (%s)" % (day, str(ex)[-160:]), file=sys.stderr)
-        try:
-            if share_to_facebook_profile(day, entry, state): save_state(state)
-        except Exception as ex:           # a page read timed out on 11 Sep 2026 and ended the whole hourly run
-            print("episode %s: Facebook profile share skipped this run (%s)" % (day, str(ex)[-160:]), file=sys.stderr)
+        for clip in FB_SHARES:            # both page posts reach Kevin's profile, not just the summary (20 Sep 2026)
+            try:
+                if share_to_facebook_profile(day, entry, state, clip=clip): save_state(state)
+            except Exception as ex:       # a page read timed out on 11 Sep 2026 and ended the whole hourly run
+                print("episode %s: Facebook %s profile share skipped this run (%s)" % (day, clip, str(ex)[-160:]), file=sys.stderr)
         pod = entry.get("podcast") or {}
         if pod.get("status") == "processing" and pod.get("title"):
             # the public link arrives once Spotify has processed the video (a few minutes after Publish)
@@ -1284,13 +1363,18 @@ def report():
         len(waiting), "" if len(waiting) == 1 else "s", scheduled, failed, len(complete), len(sections)))
     gaps = ["%s: %s" % (d, ", ".join("%s %s" % (k, v) for k, v in s.items() if v != "done")) for d, s in sorted(sections.items(), key=lambda x: int(x[0])) if d not in complete]
     print("content sections not done: %s" % ("none" if not gaps else "; ".join(gaps)))
+    # No route filter here either: the old one hid every GoHighLevel upload from this line as well, so the
+    # report read "every YouTube episode and Short On" while three of them had never been looked at (20 Sep 2026).
     waiting = []
     for d, e in state.items():
         if not str(d).isdigit() or not isinstance(e, dict): continue
         for k, p in (e.get("posts") or {}).items():
-            if k.startswith("youtube|") and p.get("clip") in ("full", "lfmd") and p.get("status") == "published" and p.get("route") == "api" \
-                    and p.get("monetisation") not in MONETISED:
-                waiting.append("%s %s (%s)" % (d, "Short" if p["clip"] == "lfmd" else "episode", p.get("monetisation") or "not checked yet"))
+            if not (k.startswith("youtube|") and p.get("clip") in ("full", "lfmd") and p.get("status") == "published"): continue
+            what = "Short" if p["clip"] == "lfmd" else "episode"
+            if p.get("monetisation") not in MONETISED:
+                waiting.append("%s %s (%s)" % (d, what, p.get("monetisation") or "not checked yet"))
+            elif p["clip"] == "full" and p.get("midroll") not in MIDROLL_SETTLED:
+                waiting.append("%s episode mid-roll (%s)" % (d, p.get("midroll") or "not checked yet"))
     unconfirmed = ["%s %s %s" % (d, p.get("platform"), p.get("clip")) for d, e in state.items() if str(d).isdigit() and isinstance(e, dict)
                    for p in (e.get("posts") or {}).values() if p.get("status") in ("creating", "unconfirmed")]
     print("content monetisation: %s" % ("every YouTube episode and Short On" if not waiting else "NOT On yet for " + ", ".join(sorted(waiting))))
@@ -1547,10 +1631,33 @@ def selftest():
     ys = _i2.getsource(youtube_direct); assert 'fetch_readable(day, clip)' in ys and '"_srt"' in ys and 'privacy="unlisted" if test else "private"' in ys and "publish_at=None if test else when" in ys
     ss = _i2.getsource(sync); assert 'p.get("route") == "api"' in ss and 'p["status"] = "published"' in ss, "API uploads flip to published on their slot without asking GoHighLevel"
     import inspect as _i
-    assert "share_to_facebook_profile(day, entry, state)" in _i.getsource(sync) and "signin-needed" in _i.getsource(share_to_facebook_profile), "the profile share runs from sync, on the page post, and waits for sign-in"
+    assert "share_to_facebook_profile(day, entry, state, clip=clip)" in _i.getsource(sync) and "signin-needed" in _i.getsource(share_to_facebook_profile), "the profile share runs from sync, on the page post, and waits for sign-in"
+    # Kevin, 20 Sep 2026: the page publishes two posts a day and only the summary ever reached his profile
+    assert set(FB_SHARES) == {"summary", "lfmd"} and FB_SHARES["summary"]["key"] == "facebook_share", "both page posts are shared, and the summary keeps the original state key"
+    assert FB_SHARES["lfmd"]["key"] != FB_SHARES["summary"]["key"] and FB_SHARES["lfmd"]["field"] == "Facebook Post Copy", "the Learnings post has its own state and its own copy field"
+    # both posts publish as reels on the page, so both are found on the same list (checked live 20 Sep 2026:
+    # the page timeline exposes no post links at all, while /reels carries both a day)
+    assert not any("timeline" in v for v in FB_SHARES.values()), "there is one list, and it is the reels list"
+    assert set(FB_SHARES["lfmd"]) == set(FB_SHARES["summary"]) == {"key", "record", "field"}
+    assert "for clip in FB_SHARES" in _i.getsource(sync), "sync shares every configured page post, not just the first"
+    # catching up is paced: twelve missing Learnings shares must not land on Kevin's profile at once
+    now_t = dt.datetime(2026, 9, 20, 12, 0, tzinfo=dt.timezone.utc)
+    fresh = {"scheduled": "2026-09-20T09:00:00Z"}
+    old_post = {"scheduled": "2026-09-11T09:00:00Z"}
+    assert not is_catchup(fresh, now_t) and is_catchup(old_post, now_t), "today's episode is never held; last week's is"
+    assert not is_catchup({}, now_t), "a post with no time is treated as today's, never silently deferred"
+    st = {"2060": {"facebook_share": {"shared_at": "2026-09-20T08:00:00Z"}, "facebook_share_lfmd": {"shared_at": "2026-09-20T08:30:00Z"}},
+          "2059": {"facebook_share": {"shared_at": "2026-09-19T08:00:00Z"}}, "_cursor": 2061}
+    assert shares_pressed_today(st, now_t) == 2 and FB_CATCHUP_PER_DAY == 2, "both clips count toward the day's pace"
+    assert shares_pressed_today({"2059": {"facebook_share": {"shared_at": "rubbish"}}}, now_t) == 0, "an unreadable stamp never blocks the pace"
+    ssrc3 = _i.getsource(share_to_facebook_profile)
+    assert 'fb["status"] = "queued"' in ssrc3 and ssrc3.index("is_catchup(post)") < ssrc3.index("run_plan"), "the pace is checked before Share is ever pressed"
+    assert "queued" in _i.getsource(section_status), "a queued share reads pending, not missing"
+    assert "SCAN_POSTS_CATCHUP if is_catchup(post)" in ssrc3, "a catch-up searches further back than today's post does"
+
     fsrc = _i.getsource(share_to_facebook_profile); assert "find_page_post" in fsrc and "verify_shared" in fsrc, "it shares the page post and checks the profile afterwards"
     assert fsrc.index('"status": "sharing"') < fsrc.index("run_plan(") and fsrc.index("save_state(state)") < fsrc.index("run_plan("), "the share is on disk before Share is pressed"
-    assert "except Exception as ex:           # a page read timed out" in _i.getsource(sync), "a failing share never ends the run"
+    assert re.search(r"except Exception as ex:\s+# a page read timed out", _i.getsource(sync)), "a failing share never ends the run"
     rsrc = _i.getsource(run); assert 'stage_for(entry, yt_ok) == "socials"' in rsrc and rsrc.count("schedule_stage(") == 4 and "broken_uploads" in rsrc, "both stages run the same day, and a broken upload is replaced once"
     t0 = dt.datetime(2026, 9, 10, 9, 0, tzinfo=LONDON)
     assert when_for("youtube", "full", 0, now=t0) == "2026-09-10T08:15:00Z", "the 06:00 slot has passed: 15 minutes from now, same morning"
@@ -1602,8 +1709,17 @@ def selftest():
     assert tp["media"] == [{"url": "https://cdn/c.png", "type": "image/png"}] and tp["type"] == "post" and tp["scheduleDate"] == "2026-09-07T07:00:00Z"
     fbp = build_text_post(od_accts[4], "hello", "x", "u1", status="draft"); assert fbp["facebookPostDetails"] == {"type": "post"} and "media" not in fbp and "scheduleDate" not in fbp
     _selftest_once_only()
-    import inspect as _i5; ss = _i5.getsource(sync); assert ss.index("monetise_long_video(day, entry)") < ss.index("share_to_facebook_profile(day, entry, state)"), "monetisation is checked every sync"
-    ms = _i5.getsource(monetise_long_video); assert "MONETISE_RECHECK_HOURS" in ms and "needs-rating" in ms, "a video waiting for the rating is re-checked, not hammered"
+    import inspect as _i5; ss = _i5.getsource(sync); assert ss.index("monetise_long_video(day, entry)") < ss.index("share_to_facebook_profile(day, entry, state, clip=clip)"), "monetisation is checked every sync"
+    msrc = _i5.getsource(monetise_long_video)
+    # the old filter stepped over every GoHighLevel upload in silence: 2054 episode + Short and 2195 episode (20 Sep 2026)
+    assert 'p.get("route") == "api"' not in msrc, "posts are matched by video id, never by upload route"
+    assert "youtube_ads.video_id(entry, p)" in msrc and "NO_VIDEO_ID" in msrc, "an unresolvable upload is reported, never skipped"
+    assert "youtube_ads.midroll" in msrc and "MIDROLL_SETTLED" in msrc, "mid-roll ads are set as part of publishing"
+    rsrc2 = _i5.getsource(report)
+    assert 'p.get("route") == "api"' not in rsrc2 and "mid-roll" in rsrc2, "the morning report shows every upload, and the mid-roll backlog"
+    ms = _i5.getsource(monetise_long_video) + _i5.getsource(_recheck_due)
+    assert "MONETISE_RECHECK_HOURS" in ms and "needs-rating" in ms, "a video waiting for the rating is re-checked, not hammered"
+    assert _recheck_due(None) and not _recheck_due(now_utc()) and _recheck_due("rubbish"), "a missing or unreadable stamp re-checks rather than blocking for ever"
     assert 'certify_none=approved' in ms and '.get("verdict") == "approved"' in ms, "the rating is answered only for an approved card"
     rp = _i5.getsource(report); assert "content monetisation:" in rp and "content posts to check once:" in rp, "the morning report shows both"
     print(json.dumps({"checks": 47, "failed": []}))

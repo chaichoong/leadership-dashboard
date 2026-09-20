@@ -28,6 +28,14 @@ SHARE_BOX = "[role='dialog'] [contenteditable='true'], [role='dialog'] [role='te
 SHARE_NOW = "[role='dialog'] [aria-label='Share now'], [role='dialog'] div[role='button']:has-text('Share now')"
 SHARE_MAX = 400
 MATCH_WORDS = 6                           # words of the caption that identify our post
+# How far back down the reels list to look. The page publishes TWO posts a day (the Summary and the
+# Learnings clip), and from 20 Sep 2026 both are shared to Kevin's profile, so a six-post window only
+# reached three days back and would miss a share the moment a run was skipped. Fourteen covers a week.
+SCAN_POSTS = 14
+# Catching up reaches further back. The page posts twice a day, so fourteen is about a week: episodes
+# 2054, 2055, 2056 and 2195 were beyond it on 20 Sep 2026 and read as "not on the page yet" for ever.
+# Only a catch-up pays the cost (each candidate post is opened and read), so today's search stays short.
+SCAN_POSTS_CATCHUP = 44
 
 
 def share_text(copy, youtube_link):
@@ -106,11 +114,19 @@ const { chromium } = require('%(pw)s');
   const key = %(key)s.toLowerCase();
   await page.goto(%(list_url)s, { waitUntil: 'domcontentloaded' });
   await page.waitForTimeout(8000);
-  await page.mouse.wheel(0, 2000); await page.waitForTimeout(2500);
-  const urls = await page.evaluate(() => Array.from(document.querySelectorAll('a[href*="/reel/"], a[href*="/posts/"], a[href*="/videos/"]'))
+  // Keep scrolling until the list holds as many posts as we mean to search. One fixed scroll loaded
+  // about a dozen, so asking for more than that silently searched whatever had happened to render.
+  const collect = () => page.evaluate(() => Array.from(document.querySelectorAll('a[href*="/reel/"], a[href*="/posts/"], a[href*="/videos/"]'))
     .map(a => a.href.split('?')[0].replace(/\\/$/, ''))
     .filter(h => /\\/(reel|posts|videos)\\/\\d+/.test(h))
-    .filter((v, i, arr) => arr.indexOf(v) === i).slice(0, 6));
+    .filter((v, i, arr) => arr.indexOf(v) === i));
+  let all = [];
+  for (let i = 0; i < 12; i++) {
+    await page.mouse.wheel(0, 2200); await page.waitForTimeout(2200);
+    all = await collect();
+    if (all.length >= %(scan)s) break;
+  }
+  const urls = all.slice(0, %(scan)s);
   let hit = null;
   for (const u of urls) {
     await page.goto(u, { waitUntil: 'domcontentloaded' });
@@ -126,13 +142,13 @@ const { chromium } = require('%(pw)s');
 PW = "/Users/kevinbrittain/Projects/leadership-dashboard/node_modules/playwright"
 
 
-def find_page_post(copy, url=None, day=None):
+def find_page_post(copy, url=None, day=None, scan=None):
     """The page post carrying this episode's caption. Returns its URL, or None. The caption is tried first; when
     it is not found and the day is known, "Day NNNN" is tried (15 Sep 2026: 2056's reel read "Team motivation.
     Day 2056 of running every day." while the record's Facebook copy began "Day 2056. I'm still catching...")."""
     keys = [k for k in (match_key(copy), ("Day %d" % day) if day else "") if k]
     for key in keys:
-        js = FIND_JS % {"pw": PW, "profile": PROFILE, "list_url": json.dumps(url or POSTS_URL), "key": json.dumps(key)}
+        js = FIND_JS % {"pw": PW, "profile": PROFILE, "list_url": json.dumps(url or POSTS_URL), "key": json.dumps(key), "scan": int(scan or SCAN_POSTS)}
         try: r = _browser(js)
         except SystemExit as ex: print("facebook: page read failed (%s)" % str(ex)[:160], file=sys.stderr); return None
         if r.get("found"): return r.get("url")
@@ -177,10 +193,12 @@ def verify_shared(post_url):
     except SystemExit: return False
 
 
-def write_plan(day, post_url, copy, youtube_link, test, out_dir):
+def write_plan(day, post_url, copy, youtube_link, test, out_dir, clip="summary"):
+    """`clip` keeps the two shares of one episode apart on disk. The page publishes two posts a day and both
+    are shared to Kevin's profile from 20 Sep 2026; one plan file per episode would have one overwrite the other."""
     text = share_text(copy, youtube_link)
     os.makedirs(out_dir, exist_ok=True)
-    path = os.path.join(out_dir, "facebook_share_%d.json" % day)
+    path = os.path.join(out_dir, "facebook_share_%d%s.json" % (day, "" if clip == "summary" else "_" + clip))
     with open(path, "w") as fh: json.dump(build_plan(post_url, text, test), fh, indent=1)
     return path, text
 
@@ -211,6 +229,10 @@ def selftest():
     assert post_id("https://www.facebook.com/reel/2551081102055515") == "2551081102055515" and post_id("https://x/") == ""
     assert PAGE_ID in PAGE_URL and POSTS_URL.endswith("/reels") and "aria-label='Share now'" in SHARE_NOW
     assert "for (const u of urls)" in FIND_JS and "txt.includes(key)" in FIND_JS, "each recent post is opened and matched on its caption"
+    js14 = FIND_JS % {"pw": "", "profile": "", "list_url": '""', "key": '""', "scan": SCAN_POSTS}
+    assert SCAN_POSTS >= 14 and "slice(0, 14)" in js14, "a week of two-posts-a-day is in reach"
+    assert SCAN_POSTS_CATCHUP >= 44 and "slice(0, 44)" in (FIND_JS % {"pw": "", "profile": "", "list_url": '""', "key": '""', "scan": SCAN_POSTS_CATCHUP}), "a catch-up reaches three weeks back"
+    assert "all.length >= 14" in js14 and "for (let i = 0; i < 12; i++)" in js14, "it scrolls until the list holds what it means to search"
     print(json.dumps({"checks": 9, "failed": []}))
 
 
