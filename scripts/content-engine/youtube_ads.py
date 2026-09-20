@@ -31,6 +31,12 @@ def video_id(entry, post):
     Before 20 Sep 2026 the monetisation loop filtered on `route == "api"` and so stepped straight over every
     GHL upload without a word: 2054's episode and Short and 2195's episode were never once checked.
     The episode's own `youtube_link` carries the real id for the long video, so use it."""
+    # An id written on the post by hand, for the one case nothing can derive: a Short uploaded through
+    # GoHighLevel, whose only record of the YouTube video is GHL's own post id (episode 2054, 20 Sep 2026,
+    # matched on the channel as WUTZvEoLDbQ). `id` is left alone because the GHL status sync matches on it.
+    fixed = (post or {}).get("youtube_video_id") or ""
+    if re.fullmatch(r"[A-Za-z0-9_-]{11}", fixed):
+        return fixed
     vid = (post or {}).get("id") or ""
     if re.fullmatch(r"[A-Za-z0-9_-]{11}", vid):
         return vid
@@ -92,6 +98,8 @@ def selftest():
     # the real episode 2054, which the old route == "api" filter skipped in silence
     assert video_id(ent, ghl_full) == "AT0l-Ri5ZJ0", "a GoHighLevel upload is resolved through the episode link"
     assert video_id(ent, ghl_short) is None, "a GHL Short has no link to resolve, so it is reported, never assumed"
+    assert video_id(ent, dict(ghl_short, youtube_video_id="WUTZvEoLDbQ")) == "WUTZvEoLDbQ", "an id written on the post by hand wins"
+    assert video_id(ent, dict(api, youtube_video_id="nonsense")) == "yGOws0WofyU", "a bad hand-written id is ignored, not trusted"
     assert video_id({}, ghl_full) is None and video_id({"youtube_link": "not a link"}, ghl_full) is None
     assert video_id(ent, {"id": "", "clip": "full"}) == "AT0l-Ri5ZJ0"
     assert video_id({"youtube_link": "https://www.youtube.com/watch?v=bSzyDyON4uc"}, ghl_full) == "bSzyDyON4uc"
@@ -101,7 +109,7 @@ def selftest():
     assert "attestationResponseData" in src or "attestation" in src, "the write reuses the page's minted attestation"
     assert "MIDROLL_MIN_SECONDS = 480" in src and MIDROLL_MIN_SECONDS == 480, "mid-roll needs 8 minutes"
     assert os.path.basename(_node()) == "node", "a node binary is found even under launchd's bare PATH"
-    print(json.dumps({"checks": 11, "failed": []}))
+    print(json.dumps({"checks": 13, "failed": []}))
 
 
 if __name__ == "__main__":
