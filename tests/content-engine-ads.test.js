@@ -101,8 +101,10 @@ describe('the bulk backfill re-mints often enough, and says what each round did'
   it('reports what each retry round converted, rather than leaving it to be inferred', () => {
     // the same run reported 34 still legacy and NONE of them had ever had a UI save, so the retry
     // rounds had not reached them and the result gave no way to tell
-    expect(ADS_JS).toMatch(/rounds\.push\(\{ round, tried: before, converted: before - todo\.length, left: todo\.length \}\)/);
+    expect(ADS_JS).toMatch(/rounds\.push\(\{ round, tried: before, converted: before - todo\.length, left: todo\.length,/);
     expect(ADS_JS).toMatch(/return \{ done, errors, rounds, stillLegacy: todo \}/);
+    // and an id the read-back never returned is counted as unknown, not as a refusal to convert
+    expect(ADS_JS).toMatch(/unread: unread\.length, unreadSample: unread\.slice\(0, 5\)/);
   });
 });
 

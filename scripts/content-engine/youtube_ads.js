@@ -200,33 +200,42 @@ async function mintLegacy(page, videoId) {
 
 // The 923 pre-2024 videos on legacy ad settings: display banners only, no video ads at all. Two
 // replayed writes each, then read back on hasSkippableVideoAds, which is what the conversion buys.
-async function legacy(page, ids, dry) {
+const ROUNDS = 3;
+
+// `ops` exists so the retry can be driven without a browser. It has to be: on 20 Sep 2026 the
+// 923-video backfill reported 34 still legacy and not one of them had ever been minted, so the retry
+// rounds had not reached them — and with no way to exercise the loop, that could only be guessed at.
+async function legacy(page, ids, dry, ops) {
+  const doMint = (ops && ops.mint) || mintLegacy;
+  const doReplay = (ops && ops.replay) || replay;
+  const doRead = (ops && ops.read) || readBack;
   const done = {}, errors = {}, rounds = [];
   let todo = ids.slice();
   if (dry) return { dry: true, would: todo.length, sample: todo.slice(0, 5) };
-  for (let round = 1; round <= 3 && todo.length; round++) {
+  for (let round = 1; round <= ROUNDS && todo.length; round++) {
     let upd = null, since = 0;
     for (const id of todo) {
       if (!upd || since >= REMINT_AFTER) {
-        try { upd = await mintLegacy(page, id); since = 0; done[id] = 'ui-save'; continue; }
+        try { upd = await doMint(page, id); since = 0; done[id] = 'ui-save'; continue; }
         catch (e) {
           if (e.notLegacy) { done[id] = 'already-modern'; upd = null; continue; }
           errors[id] = 'mint: ' + e.message.slice(0, 160); upd = null; continue;
         }
       }
       try {
-        await replay(page, upd, id, LEGACY_FORMATS);
-        await replay(page, upd, id, MIDROLL);      // refused by YouTube under 8 minutes; harmless
+        await doReplay(page, upd, id, LEGACY_FORMATS);
+        await doReplay(page, upd, id, MIDROLL);    // refused by YouTube under 8 minutes; harmless
         done[id] = 'replay'; since++;
       } catch (e) { errors[id] = 'replay: ' + e.message.slice(0, 160); }
     }
-    const back = await readBack(page, todo);
+    const back = await doRead(page, todo);
     const before = todo.length;
+    // An id the read did not return is UNKNOWN, not converted. It stays in `todo`, and it is counted
+    // and named, because a short read otherwise looks exactly like a batch that would not convert.
+    const unread = todo.filter((id) => back[id] === undefined);
     todo = todo.filter((id) => !videoAdsOn(back[id]));
-    // Say what each round actually achieved. On 20 Sep 2026 the first backfill reported 34 still legacy
-    // and NONE of them had ever had a UI save, so the retry rounds had not reached them and there was no
-    // way to tell from the result. Re-running the same command converted all 34.
-    rounds.push({ round, tried: before, converted: before - todo.length, left: todo.length });
+    rounds.push({ round, tried: before, converted: before - todo.length, left: todo.length,
+                  unread: unread.length, unreadSample: unread.slice(0, 5) });
     if (!todo.length) break;
   }
   return { done, errors, rounds, stillLegacy: todo };
@@ -271,6 +280,11 @@ async function fix(page, ids, dry) {
 }
 
 /* ---------- main ---------- */
+
+module.exports = { legacy, midrollOn, videoAdsOn, MIDROLL, LEGACY_FORMATS, REMINT_AFTER, ROUNDS };
+
+// Only run the CLI when this file IS the command. Required as a module (by its test), it stays inert.
+if (require.main !== module) return;
 
 (async () => {
   const a = args();
