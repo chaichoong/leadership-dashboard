@@ -153,24 +153,107 @@ def _local_day(rec):
     return datetime.fromtimestamp(t).date()
 
 
-def good_days(job, all_events, all_statuses):
+# ─── A COMPLETION TEST A JOB CAN NEVER PASS IS NOT A CHECK ───────────
+#
+# Finding 20260919-daily-ops-phase2-excepti-549. The digest of 19 Sep 2026 led
+# with two red lines that were both false, and buried the one real four-night
+# outage under them:
+#
+#   :no_entry: daily-ops      — no completed run in 21 scheduled days
+#   :no_entry: data-invariants — no completed run in 13 scheduled days
+#
+# Neither job had stopped. They simply do not write the event the test looks
+# for. daily-ops deliberately never takes the lock (holding it for two hours
+# would block every short shell job behind it), so it writes `mark` events and
+# never `released`. data-invariants EXITS 1 BY DESIGN when it finds a violation
+# — that is the whole point of it — so run-job.sh records ok:false every single
+# morning it does its job properly.
+#
+# So the default rule is right for most jobs and impossible for these two, and
+# an alarm that can never go green is indistinguishable, to the person reading
+# it, from a real outage. `completedWhen` in job-schedule.json names the rule:
+#
+#   (absent)    released with outcome completed, or a job-status line with ok
+#   "end-mark"  a `mark` event whose note begins "end" — the end mark the job
+#               writes for itself when its last phase finishes
+#   "ran"       it ran at all: any lifecycle event or status line. For a job
+#               whose non-zero exit MEANS "ran and found something", the exit
+#               code answers a different question and is reported separately —
+#               the `:x: data-invariants — exit code 1` line already carries it,
+#               so counting it here as well was pure double counting.
+#
+# The control that stops this coming back is in tests/job-queue.test.js:
+# `completion_rule_reachable()` below states, for each rule, which event shapes
+# can satisfy it, and the test fails if any enabled scheduled job's rule cannot
+# be satisfied by the events that job actually wrote. A check nobody can pass
+# now fails the digest's own suite instead of Kevin's morning.
+COMPLETION_RULES = ("released", "end-mark", "ran")
+DAILY_OPS_END_NOTE_PREFIX = "end"
+
+
+def completion_rule(cfg):
+    """The rule named for this job, falling back to the default. An unknown
+    value falls back too, and the selftest names it — a typo must not quietly
+    turn the check off."""
+    rule = (cfg or {}).get("completedWhen")
+    return rule if rule in COMPLETION_RULES else "released"
+
+
+def completion_rule_reachable(rule, events, statuses):
+    """Can this rule EVER be satisfied by these log lines? The control.
+
+    Returns True/False. Used by the digest's selftest, not by the digest: the
+    question it answers is "is this check capable of going green", which is a
+    different question from "did the job work today".
+    """
+    if rule == "end-mark":
+        return any(e.get("state") == "mark"
+                   and (e.get("note") or "").startswith(DAILY_OPS_END_NOTE_PREFIX)
+                   for e in events)
+    if rule == "ran":
+        return bool(events) or bool(statuses)
+    return (any(e.get("state") == "released"
+                and e.get("outcome", "completed") == "completed" for e in events)
+            or any(s.get("ok") for s in statuses))
+
+
+def good_days(job, all_events, all_statuses, rule="released"):
     """Local days on which this job actually finished its work.
 
     Taking the lock is NOT finishing the work. `released` now carries an outcome;
     a line without one predates the change and is read as completed, so old history
     stays honest rather than retroactively alarming.
+
+    `rule` comes from completion_rule() — see the block above.
     """
     days = set()
     for rec in all_events:
-        if rec.get("job") != job or rec.get("state") != "released":
+        if rec.get("job") != job:
             continue
-        if rec.get("outcome", "completed") != "completed":
-            continue
+        state = rec.get("state")
+        if rule == "end-mark":
+            if state != "mark":
+                continue
+            if not (rec.get("note") or "").startswith(DAILY_OPS_END_NOTE_PREFIX):
+                continue
+        elif rule == "ran":
+            # Anything but the two states that mean it never got going.
+            if state in ("queued", "queue-timeout", "skipped-stale"):
+                continue
+        else:
+            if state != "released":
+                continue
+            if rec.get("outcome", "completed") != "completed":
+                continue
         d = _local_day(rec)
         if d:
             days.add(d)
     for rec in all_statuses:
-        if rec.get("job") != job or not rec.get("ok"):
+        if rec.get("job") != job:
+            continue
+        # "ran" grades on attendance, never on the exit code: for these jobs a
+        # non-zero exit is the finding, not a failure to run.
+        if rule != "ran" and not rec.get("ok"):
             continue
         d = _local_day(rec)
         if d:
@@ -232,6 +315,40 @@ def consecutive_misses(cfg, done, now_dt, floor=None):
     return misses
 
 
+# A queue-timeout on ONE night is a busy machine. The SAME job timing out on
+# consecutive scheduled nights is a job that has stopped, and until 19 Sep 2026
+# both read as the same patient :hourglass: line. Five of them sat under two
+# false red lines for four nights (finding 549) and nothing said "this is now
+# the fourth night".
+TIMEOUT_ESCALATE_RUNS = 2
+
+
+def timeout_streak(job, cfg, all_events, now_dt):
+    """Consecutive scheduled days, counting back from yesterday, on which this
+    job gave up waiting for the queue. 0 when it is not a run."""
+    cron = cfg.get("cron")
+    if not cron:
+        return 0
+    days = set()
+    for rec in all_events:
+        if rec.get("job") != job or rec.get("state") != "queue-timeout":
+            continue
+        d = _local_day(rec)
+        if d:
+            days.add(d)
+    if not days:
+        return 0
+    streak = 0
+    for back in range(1, MISS_LOOKBACK_DAYS + 1):
+        day = now_dt - timedelta(days=back)
+        if not jq.day_matches(cron, day):
+            continue
+        if day.date() not in days:
+            break
+        streak += 1
+    return streak
+
+
 def expected_in_window(schedule, now_dt):
     """Jobs whose cron should have fired in the last WINDOW_HOURS."""
     start = now_dt - timedelta(hours=WINDOW_HOURS)
@@ -280,7 +397,7 @@ def build(now_dt=None):
             continue
         misses = consecutive_misses(
             cfg,
-            good_days(job, all_events, all_statuses),
+            good_days(job, all_events, all_statuses, rule=completion_rule(cfg)),
             now_dt,
             floor=first_seen(job, all_events, all_statuses),
         )
@@ -288,6 +405,7 @@ def build(now_dt=None):
             stalled.append((job, misses))
     stalled.sort(key=lambda x: -x[1])
 
+    cfg_for = {j: c for j, c in schedule.items() if isinstance(c, dict)}
     for job, due in expected_in_window(schedule, now_dt):
         states = [e["state"] for e in by_job.get(job, [])]
         st = last_status.get(job)
@@ -326,7 +444,9 @@ def build(now_dt=None):
             skipped.append((job, ev.get("reason", "too late")))
         elif "queue-timeout" in states and "acquired" not in states:
             ev = [e for e in by_job[job] if e["state"] == "queue-timeout"][-1]
-            timed_out.append((job, ev.get("behind") or "another job"))
+            timed_out.append((job, ev.get("behind") or "another job",
+                              timeout_streak(job, cfg_for.get(job) or {},
+                                             all_events, now_dt)))
         elif "acquired" in states:
             if st and not st.get("ok", True):
                 failed.append((job, st.get("reason", "reported a failure")))
@@ -440,9 +560,17 @@ def build(now_dt=None):
     for job in never:
         alarm = True
         lines.append(":grey_question: *%s* — was due, no run recorded." % job)
-    for job, behind in timed_out:
+    for job, behind, streak in timed_out:
         alarm = True
-        lines.append(":hourglass: *%s* — gave up waiting behind %s." % (job, behind))
+        if streak + 1 >= TIMEOUT_ESCALATE_RUNS:
+            lines.append(":no_entry: *%s* — gave up waiting behind %s for the "
+                         "%d%s scheduled run running. It is not being delayed, "
+                         "it is not running at all."
+                         % (job, behind, streak + 1,
+                            {1: "st", 2: "nd", 3: "rd"}.get(
+                                (streak + 1) if (streak + 1) < 20 else 0, "th")))
+        else:
+            lines.append(":hourglass: *%s* — gave up waiting behind %s." % (job, behind))
     # One line for every skip, not one line per skip. The per-job version read
     # "skipped, due 2026-08-19 22:40, 1380 min late, limit 300" ten times over and
     # Kevin called it gobbledygook (21 Aug 2026). The detail is still in

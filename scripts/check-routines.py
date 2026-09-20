@@ -112,6 +112,13 @@ APPROVED_SLOTS = {
     # slot is switched off, so an allowlist entry for it would wave through a
     # job that must no longer run. Its register row is "UC Verification", Paused.
     "prod-sweep-weekly": "Full browser walk, Sundays 07:30 (Kevin, 26 Aug 2026)",
+    # payment-run added 19 Sep 2026 (finding 20260919-daily-ops-551). It is a
+    # real approved weekly job — Kevin's Friday payment list, PRs #483/#484,
+    # launchd com.kevinbrittain.payment-run, Friday 21:00 local — but it has a
+    # SKILL.md folder, so without this line it read as an unapproved routine
+    # firing beside daily-ops and the guard shouted ROUTINE STACKING every
+    # weekend. An alarm that is wrong every weekend is an alarm nobody reads.
+    "payment-run": "Weekly payment list, Fridays 21:00 (Kevin, 18 Sep 2026)",
 }
 
 # Where the slots must also be registered. An allowlist entry for a job nobody

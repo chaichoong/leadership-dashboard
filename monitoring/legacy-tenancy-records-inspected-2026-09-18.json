@@ -1,0 +1,314 @@
+{
+  "deleted_on": null,
+  "base": "appnqjDpqDniH3IRl",
+  "table": "tblCGmeUTyx1N7LNe (Tenancies (Accounts Statement) Legacy) - NOT tblN51a88qTDB6iMH",
+  "reason": "Inspected during the [name redacted] tenancy end. Records display transactions belonging to other tenancies. Nothing reads this table.",
+  "records": {
+    "recH07EhTMqCh5fvn": {
+      "id": "recH07EhTMqCh5fvn",
+      "createdTime": "2025-05-05T19:09:36.000Z",
+      "fields": {
+        "Year": [
+          "2025",
+          "2025",
+          "2025",
+          "2025",
+          "2025",
+          "2025"
+        ],
+        "Due Day of Month": "6",
+        "Payment Status (Auto)": "CFV",
+        "Rent Difference": -772.89,
+        "Net (GBP)": 772.89,
+        "Amount Out (GBP)": 0,
+        "Month": [
+          "April",
+          "May",
+          "June",
+          "July",
+          "August",
+          "September"
+        ],
+        "Category": "AR \u2013 Fixed",
+        "Account Due Date": "2025-10-06T00:00:00.000Z",
+        "Expected Date": "2026-10-06T00:00:00.000Z",
+        "Forecast Key": "AR-Fixed-recH07EhTMqCh5fvn",
+        "Rent Due Status": "Overdue",
+        "Tenant Surname": "Peters",
+        "Deposit Held": 0,
+        "Include in Forecast? (Auto)": 1,
+        "Next Rent Due Date (Static)": "2025-10-06",
+        "Last Modified Time": "2025-09-23T11:42:50.000Z",
+        "Tenant(s)": [
+          "recaaaWH4sGfCwhPw"
+        ],
+        "Tenancy Start Date": "2020-04-20",
+        "Payment Frequency": "Monthly",
+        "Year (12)": "2025",
+        "Rental Unit": [
+          "recQjOIURgjxtTiWR"
+        ],
+        "Tenants copy": [
+          "rechUUnV8S06fo5NR"
+        ],
+        "Initial Rent Due Date": "2025-06-06",
+        "Tenancy Status": "Live",
+        "Days Overdue (3+ Check)": "CFV",
+        "Next Rent Due Date (Auto)": "2025-10-06",
+        "Transactions copy": "\"BANK GIRO CREDIT REF MARKPETERS, 000000003136258148\", \"BANK GIRO CREDIT REF MARKPETERS, 000000003081427444\", \"BANK GIRO CREDIT REF MARKPETERS, 000000003025515727\"",
+        "Unit Reference": [
+          "Unit 1 \u2013 25 Abercorn Court"
+        ],
+        "Number of Days Overdue": 347,
+        "Rental Unit Metrics": [
+          "rec6qK9vQsDLUJhJ7"
+        ],
+        "Month*": "October",
+        "Match Status": "Underpaid",
+        "Property Name (Short)": [
+          "25 Abercorn Court"
+        ],
+        "Tenancy Reference": "PETERS \u2013 UNIT 1 \u2013 25 ABERCORN COURT",
+        "Actual Rent": 0,
+        "Amount In (GBP)": 772.89,
+        "Days Until Due": -347,
+        "Expected Rent": 772.89,
+        "Documents": [
+          {
+            "id": "attekbPEHbipukZUV",
+            "url": "https://v5.airtableusercontent.com/v3/u/57/57/1789725600000/9bnl67sOusn_wGbtmGL76g/zUAF_RvesIPWWJSET3XZmXgRvuTXzguyO4sAsWZydBlf9TCEVgzhW5zunCP0dChXZTkjOR6pkLst959VpNgnJ94vOcOkKjoN_EUhyYwMKMeA63VaM2hIEoXy2fm8faCUNE14fK192fRLKd16Rbhw-EBCS0eLo--e9oRzS28x_E1LH8xFJTXHDWKnSpVLANt0/q1S2onpJt3o3L-sW_nFTlBB7yGfgLV5aK3MiYjkUEMk",
+            "filename": "[name redacted]- 25 Abercorn Court.pdf",
+            "size": 174428,
+            "type": "application/pdf",
+            "thumbnails": {
+              "small": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1789725600000/5tcPhl_L1zlAYNOGdDOtFg/sc_GTQC1TdxyB9J121koNGXG2r4dW6Z754hLwLhY87rsaBVJ82EX3OXfj31OMvpL8dGDji8Vy212Vs-zTn6lGlet2LE1zFpFwz9q7rQXOhpnq0_5YL_e-y0p7UqNzN7tLhACoZEf7FlL02RZs19-bA/yIDFh3p6-KXAR3CHiz5Kuyixwk-vrmiOpFuRKJC0b8c",
+                "width": 25,
+                "height": 35
+              },
+              "large": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1789725600000/v6sPBQJaMTpkOh22e41ItQ/T_mfU2YABpG74Sswb6P1IqZkIGdltlJdnGpKbvDkgaC_CfU5BgmSQSKHdj8NAhoDbt50NB63aZ1rTIhAJwbrLdNaedaPNJoRFmzz5IzXophxESWmdF2dQi6MPeeuL6bNjzaRfSfRWTBQlJHSyTBIRg/cfxuk_CodbTGDYYcjSTMZ8AiW8Qr31CbFuVqBEF_S3M",
+                "width": 512,
+                "height": 725
+              }
+            }
+          }
+        ],
+        "Transactions": [
+          "recGZXQ1MRy9akheb",
+          "recIp4fWQSAN9a9W5",
+          "recGRymFHFnU3vpiV",
+          "recxK1jWJ0vGptctY",
+          "recPk0LyEUAU35E03",
+          "rec89ZgXeAy42yFhB"
+        ]
+      }
+    },
+    "reczH3DGPJ9GiQNte": {
+      "id": "reczH3DGPJ9GiQNte",
+      "createdTime": "2025-05-05T19:07:10.000Z",
+      "fields": {
+        "Year": [
+          "2025",
+          "2025",
+          "2025",
+          "2025",
+          "2025",
+          "2025"
+        ],
+        "Due Day of Month": "15",
+        "Payment Status (Auto)": "CFV",
+        "Rent Difference": -772.89,
+        "Net (GBP)": 772.89,
+        "Amount Out (GBP)": 0,
+        "Month": [
+          "May",
+          "April",
+          "June",
+          "July",
+          "August",
+          "September"
+        ],
+        "Category": "AR \u2013 Fixed",
+        "Account Due Date": "2025-10-15T00:00:00.000Z",
+        "Expected Date": "2026-10-15T00:00:00.000Z",
+        "Forecast Key": "AR-Fixed-reczH3DGPJ9GiQNte",
+        "Rent Due Status": "Overdue",
+        "Tenant Surname": "Radford",
+        "Deposit Held": 0,
+        "Account Statement - Customers": [
+          "reco0EHnQ1eVHUSD3"
+        ],
+        "Include in Forecast? (Auto)": 1,
+        "Next Rent Due Date (Static)": "2025-10-15",
+        "Last Modified Time": "2025-09-23T11:42:50.000Z",
+        "Tenant(s)": [
+          "recbdmmXfvZRiFaaX"
+        ],
+        "Tenancy Start Date": "2022-07-29",
+        "Payment Frequency": "Monthly",
+        "Year (12)": "2025",
+        "Rental Unit": [
+          "recQjOIURgjxtTiWR"
+        ],
+        "Tenants copy": [
+          "reciX6NbjVjIVxY8i"
+        ],
+        "Initial Rent Due Date": "2025-06-15",
+        "Tenancy Status": "Live",
+        "Days Overdue (3+ Check)": "CFV",
+        "Next Rent Due Date (Auto)": "2025-10-15",
+        "Transactions copy": "\"BANK GIRO CREDIT REF RADFORD, 000000003148394780\", \"BANK GIRO CREDIT REF RADFORD, 000000003096811634\", \"BANK GIRO CREDIT REF RADFORD, 000000003044626394\"",
+        "Unit Reference": [
+          "Unit 1 \u2013 25 Abercorn Court"
+        ],
+        "Number of Days Overdue": 338,
+        "Rental Unit Metrics": [
+          "rec6qK9vQsDLUJhJ7"
+        ],
+        "Month*": "October",
+        "Match Status": "Underpaid",
+        "Property Name (Short)": [
+          "25 Abercorn Court"
+        ],
+        "Tenancy Reference": "RADFORD \u2013 UNIT 1 \u2013 25 ABERCORN COURT",
+        "Actual Rent": 0,
+        "Amount In (GBP)": 772.89,
+        "Days Until Due": -338,
+        "Expected Rent": 772.89,
+        "Documents": [
+          {
+            "id": "att6FHAbTlm9FQphX",
+            "url": "https://v5.airtableusercontent.com/v3/u/57/57/1789725600000/2RFWZBSR18X28F4IRRAIrQ/KsobHwJgfRDYdS0B49XLsSa25COuMSnZ6U0tYyqh413tA10MFS3ul0RNLdTnjbuUejvE9l8GQRrWxwSG7eyLg4KFDBIqt-dWtxsSD36YKpkltcKFvKp141JCsE96NkiwFCkUvjjGxHIJfY2EV0-2mIaQS4Nf_ycZ-m4ZbZsraFozQGssgWobCtpM30AYNEa-/bV3W7EiO6UENzgFxQ1RI9rBcWIdYnCBQRSBhSGH1cxY",
+            "filename": "Kevin Davy Radford- 25 Abercorn Court.pdf",
+            "size": 576793,
+            "type": "application/pdf",
+            "thumbnails": {
+              "small": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1789725600000/y2tnXncZKojZdyyHBigkgQ/XuKc0BfjIzY166RcXbfGUGRlGGyiC7PPuj_4RyW9DLYyvCI9jKo87jacRCWRA-ovfHVwEwxu5KuvfjL4csEIP0Fh8g4STACxe05Xw6ouWP840mjF0j6c-D8ncRJR2pUWKHpHqYzYY-DPIbzPv63zng/pOx50Mymw6JHJp1OD3D7ENK6-uSPVZZa__qVFPBAu6Q",
+                "width": 25,
+                "height": 35
+              },
+              "large": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1789725600000/LyDXgX2rbC2avYqLmIQc4w/OKmsrA3c09OdBHqDCS4WxBhOgpa8x5kjetY4kp4Q5pDPW3eQ_Pk0GcqQ-crUhgiTlqwAD6PbAmIZX01KFm7cEc3m_soKTNFT952sbtfd4jj4hxhJU7gi5oY8wj3DDUMcwGw-xRQ-oB7NUk10bwdTYw/tnmKIIRDMwg9XkPJ-kUZx3yOxN4qyB3dZAjUaQS7O3g",
+                "width": 512,
+                "height": 724
+              }
+            }
+          }
+        ],
+        "Transactions": [
+          "recityodb1iPZfTzA",
+          "rechsv8uZJL9bLhnH",
+          "recXXPcsH6def7vgf",
+          "reca08Petpvl8G4ip",
+          "recKIv982nt1dRC6m",
+          "recoA3oz2uv0wmua6"
+        ]
+      }
+    },
+    "recOHpAs0L8FKM59i": {
+      "id": "recOHpAs0L8FKM59i",
+      "createdTime": "2025-05-05T19:07:23.000Z",
+      "fields": {
+        "Year": [
+          "2025",
+          "2025",
+          "2025",
+          "2025",
+          "2025",
+          "2025"
+        ],
+        "Due Day of Month": "12",
+        "Payment Status (Auto)": "CFV",
+        "Rent Difference": -1200,
+        "Net (GBP)": 1200,
+        "Amount Out (GBP)": 0,
+        "Month": [
+          "May",
+          "April",
+          "June",
+          "July",
+          "August",
+          "September"
+        ],
+        "Category": "AR \u2013 Fixed",
+        "Account Due Date": "2025-10-12T00:00:00.000Z",
+        "Expected Date": "2026-10-12T00:00:00.000Z",
+        "Forecast Key": "AR-Fixed-recOHpAs0L8FKM59i",
+        "Rent Due Status": "Overdue",
+        "Tenant Surname": "Cheffins",
+        "Account Statement - Customers": [
+          "recZxuejJkfYw0B4G"
+        ],
+        "Include in Forecast? (Auto)": 1,
+        "Next Rent Due Date (Static)": "2025-10-12",
+        "Last Modified Time": "2025-09-23T11:42:50.000Z",
+        "Tenant(s)": [
+          "rec27DbGDJrC0QrlQ"
+        ],
+        "Tenancy Start Date": "2025-04-07",
+        "Payment Frequency": "Monthly",
+        "Year (12)": "2025",
+        "Rental Unit": [
+          "recQjOIURgjxtTiWR"
+        ],
+        "Tenants copy": [
+          "rec9RnCUH9LtDIfjb"
+        ],
+        "Initial Rent Due Date": "2025-06-12",
+        "Tenancy Status": "Live",
+        "Days Overdue (3+ Check)": "CFV",
+        "Next Rent Due Date (Auto)": "2025-10-12",
+        "Transactions copy": "\"BANK GIRO CREDIT REF CHEFF ELY CLIENT, .\", \"BANK GIRO CREDIT REF CHEFF ELY CLIENT, .\", \"BANK GIRO CREDIT REF CHEFF ELY CLIENT, .\"",
+        "Unit Reference": [
+          "Unit 1 \u2013 25 Abercorn Court"
+        ],
+        "Number of Days Overdue": 341,
+        "Rental Unit Metrics": [
+          "rec6qK9vQsDLUJhJ7"
+        ],
+        "Month*": "October",
+        "Match Status": "Underpaid",
+        "Property Name (Short)": [
+          "25 Abercorn Court"
+        ],
+        "Tenancy Reference": "CHEFFINS \u2013 UNIT 1 \u2013 25 ABERCORN COURT",
+        "Actual Rent": 0,
+        "Amount In (GBP)": 1200,
+        "Days Until Due": -341,
+        "Expected Rent": 1200,
+        "Documents": [
+          {
+            "id": "attqvPB6r2EYzIIFr",
+            "url": "https://v5.airtableusercontent.com/v3/u/57/57/1789725600000/ossPhcd2-_rDjpBqkPU9Hw/Rki2ayaytDH2lkijhdBNIG72GUe6Hl5rzykC1xuaRO6fxv_JUCrbgZL8bktu9rewe9Ai5GFh8AXsL20IsAypMyCCZH0CWJ_NH5tvCees2y86yDiHUjy1dhiFLFCQpNiOMLUNLtXunNqt6FhwWTO0vsL7hUjCi-MmnRXrklUkjd9fPF5BW0Se1Ndbx9oGdjxi/FhPFPx9fxhv6SALdA0BuCH9ARp3mvGbCyjEVn88fp5A",
+            "filename": "CHEFFINS- 25 Abercorn Court.pdf",
+            "size": 11266604,
+            "type": "application/pdf",
+            "thumbnails": {
+              "small": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1789725600000/ZkAI4GZpIrXi_CBh4iVOCw/PphOfJ6GpxSYVS4zPYbwEzQOx3Uk0787KF35rqdzH4Bzz83XGafly-tZJpKW8U-mXE1DebVpUUk6Fz-nBhKGQEX4Q4Ajm4zkb8FFMaKO9aYrCXdSXPfYQTEHggrcz2skJ_g4zPqXYN0ywCV_3s4qAg/6mlfvO3lwuVwe27e-1wiGq7MOH3hhoYfrEiG1DvuYJo",
+                "width": 28,
+                "height": 36
+              },
+              "large": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1789725600000/Tzh_iSzVc71yFtmu7nGL9Q/1Nc2nFxa61W35sf5dP2fkS_omhHcp3A9lLAiQ6uhdlvz_UhjQhkJ_VxEfA-fP_fmPEZA8oiqME0u8gKI3NBbpiGPPZ8iA8fAg4NKh3_U_rsXOUHkVGknhuR8zmkGi0wJ0ufO0xXgNyYaksCaTuv5Hg/8wOk2Hauss1kNut3tpXKFA4qMx8-PQO4G0WGdxLPtvg",
+                "width": 512,
+                "height": 663
+              }
+            }
+          }
+        ],
+        "Transactions": [
+          "reczZNbM0bEdeFyey",
+          "recpaYkMwHZKlNKFR",
+          "recKYtaozDmDSNzpc",
+          "recN5Vu1gzKbZwnOI",
+          "recv4LtpCGLwSZvMt",
+          "recs1pCodi6muHeVX"
+        ]
+      }
+    }
+  },
+  "outcome": "NOT deleted. Kevin ruled 18 Sep 2026: leave the legacy table alone."
+}
