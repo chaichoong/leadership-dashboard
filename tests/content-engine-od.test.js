@@ -25,6 +25,31 @@ describe('content-engine OD lane', () => {
   it('od_compose selftest: the vendored Epic Infographics method, the OD design language, the preflight checker runs', () => selftest('od_compose.py', 18), 180000);
   it('publish selftest including the brand guard (cross-brand refused by name)', () => selftest('publish.py', 32));
 
+  // A selftest that reaches the network is not a selftest, it is a flaky gate. publish.py's
+  // stubbed blog left the article PUBLISHED with no read_time, which is exactly the state that
+  // sent the REAL blog.ensure_reading_time to GHL over the wire; finish_extras swallowed the
+  // 404 so it passed anyway, spending ~3.5s on live HTTP and failing the fixer gate whenever
+  // the network or GHL misbehaved (finding 20260919-queue-fixer-555).
+  // Blocked is a BaseException on purpose: an ordinary Exception is caught by the very
+  // `except Exception` that hid this for weeks. Back-tested — restoring the live call makes
+  // this exit 1.
+  it('the publish selftest makes no network call at all', () => {
+    const guard = [
+      'import socket, sys, runpy',
+      'class Blocked(BaseException): pass',
+      'def _no(*a, **k): raise Blocked("a selftest must not touch the network")',
+      'socket.socket.connect = _no',
+      'socket.socket.connect_ex = _no',
+      'socket.create_connection = _no',
+      'socket.getaddrinfo = _no',
+      'sys.argv = ["publish.py", "selftest"]',
+      'runpy.run_path("publish.py", run_name="__main__")',
+    ].join('\n');
+    const out = execFileSync('python3', ['-c', guard], { encoding: 'utf8', cwd: DIR, stdio: ['ignore', 'pipe', 'pipe'] });
+    const last = out.trim().split('\n').pop();
+    expect(JSON.parse(last).failed).toEqual([]);
+  });
+
   it('the prompt copies the playbook exactly: locked pricing and the five hot-buttons in the customers\' words', () => {
     const playbook = readFileSync(path.join(ROOT, 'docs', 'content-engine-playbook.md'), 'utf8');
     const prompts = readFileSync(path.join(DIR, 'od_prompts.py'), 'utf8');
