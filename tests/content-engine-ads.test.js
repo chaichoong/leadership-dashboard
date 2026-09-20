@@ -90,6 +90,22 @@ describe('youtube_ads', () => {
   });
 });
 
+describe('the bulk backfill re-mints often enough, and says what each round did', () => {
+  it('trusts one attestation for well under the ~100 replays that were still landing', () => {
+    // 20 Sep 2026, 923-video legacy backfill with REMINT_AFTER=120: the failures were three CONTIGUOUS
+    // runs (positions 457-476, 592-602, 796-799), each at the tail of a mint window. A use budget going
+    // stale, not a TTL — and nothing errors when it does, the write still answers 200.
+    expect(ADS_JS).toMatch(/const REMINT_AFTER = 75;/);
+  });
+
+  it('reports what each retry round converted, rather than leaving it to be inferred', () => {
+    // the same run reported 34 still legacy and NONE of them had ever had a UI save, so the retry
+    // rounds had not reached them and the result gave no way to tell
+    expect(ADS_JS).toMatch(/rounds\.push\(\{ round, tried: before, converted: before - todo\.length, left: todo\.length \}\)/);
+    expect(ADS_JS).toMatch(/return \{ done, errors, rounds, stillLegacy: todo \}/);
+  });
+});
+
 describe('the publisher sets mid-roll and matches posts by video id', () => {
   const monetise = PUBLISH.match(/def monetise_long_video[\s\S]*?\n(?=def )/)[0];
   const report = PUBLISH.match(/\n    # No route filter here either[\s\S]*?content posts to check once/)[0];

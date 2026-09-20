@@ -31,7 +31,12 @@ const EARN_URL = (id) => `https://studio.youtube.com/video/${id}/monetization/ad
 const MIDROLL_LABEL = 'Show mid-roll ads during my video';
 // Mid-roll needs 8 minutes of video; YouTube hides the checkbox below that (read in Studio 20 Sep 2026).
 const MIDROLL_MIN_SECONDS = 480;
-const REMINT_AFTER = 120;        // a fresh attestation well inside its 6-hour TTL
+// How many replays one minted attestation is trusted for. Measured 20 Sep 2026 on the 923-video legacy
+// backfill: with 120, the videos that failed were three CONTIGUOUS runs (positions 457-476, 592-602,
+// 796-799) each sitting at the tail of a mint window, which is a use budget going stale, not a TTL.
+// Nothing errors when it does — the write still answers 200. 75 keeps a wide margin under the ~100
+// replays that were still landing.
+const REMINT_AFTER = 75;
 // Two hours. A full-channel backfill is ~900 videos at two writes each plus a paged read-back per
 // round; one hour was not enough headroom for a retry round (20 Sep 2026).
 const WATCHDOG_MS = 7200000;
@@ -196,7 +201,7 @@ async function mintLegacy(page, videoId) {
 // The 923 pre-2024 videos on legacy ad settings: display banners only, no video ads at all. Two
 // replayed writes each, then read back on hasSkippableVideoAds, which is what the conversion buys.
 async function legacy(page, ids, dry) {
-  const done = {}, errors = {};
+  const done = {}, errors = {}, rounds = [];
   let todo = ids.slice();
   if (dry) return { dry: true, would: todo.length, sample: todo.slice(0, 5) };
   for (let round = 1; round <= 3 && todo.length; round++) {
@@ -216,10 +221,15 @@ async function legacy(page, ids, dry) {
       } catch (e) { errors[id] = 'replay: ' + e.message.slice(0, 160); }
     }
     const back = await readBack(page, todo);
+    const before = todo.length;
     todo = todo.filter((id) => !videoAdsOn(back[id]));
+    // Say what each round actually achieved. On 20 Sep 2026 the first backfill reported 34 still legacy
+    // and NONE of them had ever had a UI save, so the retry rounds had not reached them and there was no
+    // way to tell from the result. Re-running the same command converted all 34.
+    rounds.push({ round, tried: before, converted: before - todo.length, left: todo.length });
     if (!todo.length) break;
   }
-  return { done, errors, stillLegacy: todo };
+  return { done, errors, rounds, stillLegacy: todo };
 }
 
 // The ad settings Studio itself reports for these ids. This is the only proof any write took:
