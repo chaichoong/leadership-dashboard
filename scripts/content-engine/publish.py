@@ -1369,6 +1369,17 @@ def _selftest_once_only_body():
         # extras: blog and Spotify once each, even when the run is repeated
         import blog as _blog
         bsaved = _blog.publish_blog
+        # ensure_reading_time is stubbed too, and it is not decoration. The fake blog
+        # marks the article PUBLISHED with a url and no read_time, which is exactly the
+        # state that sends the REAL ensure_reading_time to GHL: post_id_for_slug pages
+        # /blogs/posts/all over the network with the selftest's fake key. It failed
+        # with a 404 and finish_extras swallowed it, so the selftest passed while
+        # spending ~5s on three live HTTP calls — and failed the whole fixer gate
+        # whenever the network or GHL misbehaved (finding 20260919-queue-fixer-555).
+        # A selftest makes no network calls. Returning False is the honest stand-in:
+        # the real call returns False whenever the reading time is not set yet.
+        rtsaved = _blog.ensure_reading_time
+        _blog.ensure_reading_time = lambda entry: False
         def fake_blog(day, full, e, thumb, link, test):
             calls["blog"] += 1; e["blog"] = {"id": "", "url": "https://runpreneur.org.uk/blog/b/t-day-9", "status": "PUBLISHED"}; return "", e["blog"]["url"]
         _blog.publish_blog = fake_blog
@@ -1386,7 +1397,7 @@ def _selftest_once_only_body():
         e2 = {"youtube_link": "https://youtu.be/x", "blog": {"status": "creating"}, "podcast": {"status": "published"}}
         _blog.publish_blog = fake_blog
         try: finish_extras(9, e2, recs, False, lambda: None)
-        finally: _blog.publish_blog = bsaved
+        finally: _blog.publish_blog = bsaved; _blog.ensure_reading_time = rtsaved
         assert calls["blog"] == 1, "a blog left creating by a killed run is never published a second time"
         assert definitely_not_created(SystemExit("GHL POST /x -> 422: bad")) and not definitely_not_created(SystemExit("GHL POST /x -> 502: gateway")) and not definitely_not_created(TimeoutError())
     finally:

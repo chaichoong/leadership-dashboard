@@ -39,4 +39,32 @@ task-sweep-pending-*.json
 # Unredacted companion to the nightly report: names people, suppliers and exact
 # sums so Kevin can act. Local only — the tracked .md report stays redacted.
 task-sweep-detail-*.md
+#
+# Agent working files (finding 20260916-queue-fixer-537). Every dispatch slot drops
+# a folder holding one .md per task — the inbound email body, the contact, the draft
+# reply — plus its queue and report json. Nothing here is a report; the tracked
+# agent-dispatch-{date}.md is. They were merely UNTRACKED before, which is not a
+# boundary: 121 of them were sitting in the public checkout on 20 Sep 2026, one
+# `git add -A` away from being published, and collect-routine-reports.py had to
+# print a REFUSED line for each one every single day.
+#
+# `dispatch-[0-9]*/` and not `dispatch-*/` on purpose: monitoring/dispatch-runs/ is
+# TRACKED, and a pattern matching a tracked path makes the never-commit guard red
+# on day one, which is how a rule gets deleted instead of obeyed.
+dispatch-[0-9]*/
+dispatch-report-*.json
+# Scratch reads an agent left behind: a raw Airtable dump, a queue snapshot, a
+# stderr capture, a single task's card. Named by hand, so matched by hand.
+*_tmp.json
+*-tmp.json
+*_raw.json
+*-err-*.txt
+cleanse-rec*.txt
+# A bare Airtable record id is never a report; it is one task's working copy.
+rec[A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9].md
+# monitoring/ holds reports, never code or screenshots. An agent's throwaway script
+# carries the query it ran, which carries the names and figures it ran it on.
+*.py
+*.png
+*.pdf
 # never-commit:end
