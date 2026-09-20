@@ -19,8 +19,8 @@ different brand profile. It is steps 20 to 26 below and is listed only so the ru
 Both run behind `job-queue.py`, so they never overlap another job. Both fast-forward the runtime
 checkout to the latest merged code before they start, and both say so in the log.
 
-> Note, 20 Sep 2026: the nightly script's own header comment says 02:00. The launchd trigger actually
-> fires at **22:00**. The comment is stale; the clock is right.
+> The nightly script's own header said 02:00 for months while the launchd trigger fired at **22:00**.
+> Corrected in the script on 20 Sep 2026, along with the two other places it repeated the wrong time.
 
 ---
 

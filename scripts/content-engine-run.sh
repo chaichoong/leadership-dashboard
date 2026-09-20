@@ -1,6 +1,7 @@
 #!/bin/bash
 # Content Engine, Runpreneur 360 lane, nightly Go Signal (R1 folder watch + the pull for R2).
-# launchd com.kevinbrittain.content-engine at 02:00, wrapped by job-queue.py run so it never
+# launchd com.kevinbrittain.content-engine at 22:00 (checked against the plist, 20 Sep 2026; this
+# comment said 02:00 for months), wrapped by job-queue.py run so it never
 # overlaps another job. No Claude in this step: it is deterministic (Chen's assignment matrix),
 # so it is listed in js/automations-data.js, not on the AI Agents register.
 #
@@ -101,7 +102,7 @@ fi
 # -----------------------------------------------------------------------------
 # A render saturates every core for hours: on 4 Sep two of them ran together from
 # 11:35 and the Mac went to load 47 with 0.2 GB free while Kevin was working. The
-# 02:00 slot is not the problem. The problem is every path that can start a run
+# 22:00 slot is not the problem. The problem is every path that can start a run
 # LATE: retry-deferred re-fires an opted-in job hourly inside maxLateMinutes, and
 # a session can launch this script by hand (one did, at 10:30, straight past the
 # queue). Capping the lateness window alone would fix only the first path, so the
@@ -111,7 +112,7 @@ fi
 HOUR=$(date +%-H)
 if [ "${CE_ALLOW_DAYTIME:-0}" != "1" ] && [ "$HOUR" -ge 7 ] && [ "$HOUR" -lt 22 ]; then
   echo "SKIPPED: working hours ($(date +%H:%M)). Renders run 22:00-07:00 only."
-  echo "         Next scheduled slot 02:00. Override with CE_ALLOW_DAYTIME=1."
+  echo "         Next scheduled slot 22:00. Override with CE_ALLOW_DAYTIME=1."
   exit 0
 fi
 python3 scripts/content-engine/watch.py scan --create || exit 1
